@@ -11,8 +11,8 @@
 using namespace std::literals;
 
 int main() {
-  std::cout << org::ttldtor::enableVirtualTerminal(true) << std::endl;
-  std::cout << org::ttldtor::enableVirtualTerminal(true) << std::endl;
+  std::cout << org::ttldtor::VirtualTerminal::enable() << std::endl;
+  std::cout << org::ttldtor::VirtualTerminal::enable() << std::endl;
   auto esc = "\x1b";
   auto clearFormat = "\x1b[0m";
   auto eraseFromCursorToBegin = "\x1b[1J";
