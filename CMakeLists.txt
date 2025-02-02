@@ -1,4 +1,4 @@
-# Copyright (c) 2024 ttldtor.
+# Copyright (c) 2025 ttldtor.
 # SPDX-License-Identifier: BSL-1.0
 
 cmake_minimum_required(VERSION 3.21)
