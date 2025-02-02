@@ -5,7 +5,9 @@
 
 #include <cmath>
 #include <concepts>
+#include <cstdint>
 #include <optional>
+#include <string>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -167,5 +169,127 @@ struct VirtualTerminal {
   }
 #endif
 };
+
+namespace portals {
+constexpr auto ESC = "\x1b";
+
+enum class Color : int {
+  RESET = 0,
+  BLACK = 30,
+  RED = 31,
+  GREEN = 32,
+  YELLOW = 33,
+  BLUE = 34,
+  MAGENTA = 35,
+  CYAN = 36,
+  WHITE = 37,
+  DEFAULT = 39,
+  BRIGHT_BLACK = 90,
+  BRIGHT_RED = 91,
+  BRIGHT_GREEN = 92,
+  BRIGHT_YELLOW = 93,
+  BRIGHT_BLUE = 94,
+  BRIGHT_MAGENTA = 95,
+  BRIGHT_CYAN = 96,
+  BRIGHT_WHITE = 90,
+};
+
+enum class BgColor : int {
+  RESET = 0,
+  BLACK = 40,
+  RED = 41,
+  GREEN = 42,
+  YELLOW = 43,
+  BLUE = 44,
+  MAGENTA = 45,
+  CYAN = 46,
+  WHITE = 47,
+  DEFAULT = 49,
+  BRIGHT_BLACK = 100,
+  BRIGHT_RED = 101,
+  BRIGHT_GREEN = 102,
+  BRIGHT_YELLOW = 103,
+  BRIGHT_BLUE = 104,
+  BRIGHT_MAGENTA = 105,
+  BRIGHT_CYAN = 106,
+  BRIGHT_WHITE = 107,
+};
+
+inline static std::string saveCursorPos() {
+  return std::string{} + ESC + "[s";
+}
+
+inline static std::string restoreCursorPos() {
+  return std::string{} + ESC + "[u";
+}
+
+inline static std::string hideCursor() {
+  return std::string{} + ESC + "[?25l";
+}
+
+inline static std::string showCursor() {
+  return std::string{} + ESC + "[?25h";
+}
+
+inline static std::string moveToColumn(std::size_t column) {
+  return std::string{} + ESC + "[" + std::to_string(column) + "G";
+}
+
+inline static std::string moveToLineBegin() {
+  return moveToColumn(0);
+}
+
+inline static std::string moveTo(std::size_t line, std::size_t column) {
+  return std::string{} + ESC + "[" + std::to_string(line) + ";" + std::to_string(column) + "H";
+}
+
+inline static std::string writeTo(std::size_t line, std::size_t column, const std::string& text) {
+  return moveTo(line, column) + text;
+}
+
+inline static std::string setColor(Color color) {
+  return std::string{} + ESC + "[1;" + std::to_string(static_cast<int>(color)) + "m";
+}
+
+inline static std::string setBgColor(BgColor bgColor) {
+  return std::string{} + ESC + "[1;" + std::to_string(static_cast<int>(bgColor)) + "m";
+}
+
+inline static std::string setColor(Color color, BgColor bgColor) {
+  return std::string{} + ESC + "[1;" + std::to_string(static_cast<int>(color)) + ";" +
+         std::to_string(static_cast<int>(bgColor)) + "m";
+}
+
+inline static std::string setColor(std::uint8_t colorIndex) {
+  return std::string{} + ESC + "[38;5;" + std::to_string(colorIndex) + "m";
+}
+
+inline static std::string setBgColor(std::uint8_t bgColorIndex) {
+  return std::string{} + ESC + "[48;5;" + std::to_string(bgColorIndex) + "m";
+}
+
+inline static std::string setColor(std::uint8_t colorIndex, std::uint8_t bgColorIndex) {
+  return setColor(colorIndex) + setBgColor(bgColorIndex);
+}
+
+inline static std::string setColor(std::uint8_t r, std::uint8_t g, std::uint8_t b) {
+  return std::string{} + ESC + "[38;2;" + std::to_string(r) + ";" + std::to_string(g) + ";" + std::to_string(b) + "m";
+}
+
+inline static std::string setBgColor(std::uint8_t r, std::uint8_t g, std::uint8_t b) {
+  return std::string{} + ESC + "[48;2;" + std::to_string(r) + ";" + std::to_string(g) + ";" + std::to_string(b) + "m";
+}
+
+inline static std::string setColor(std::tuple<std::uint8_t, std::uint8_t, std::uint8_t> colorRgb,
+                                   std::tuple<std::uint8_t, std::uint8_t, std::uint8_t> bgColorRgb) {
+  return setColor(std::get<0>(colorRgb), std::get<1>(colorRgb), std::get<2>(colorRgb)) +
+         setBgColor(std::get<0>(bgColorRgb), std::get<1>(bgColorRgb), std::get<2>(bgColorRgb));
+}
+
+inline static std::string resetFormat() {
+  return std::string{} + ESC + "[0m";
+}
+
+}  // namespace portals
 
 }  // namespace org::ttldtor
