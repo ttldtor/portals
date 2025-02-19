@@ -19,22 +19,17 @@
 namespace org::ttldtor {
 
 namespace detail {
-template <typename...>
-struct MaxImpl;
+template <typename T, typename U>
+using Gt = std::conditional_t<sizeof(T) >= sizeof(U), T, U>;
 
-template <typename T>
-struct MaxImpl<T> {
+template <typename T, typename...>
+struct MaxImpl {
   using Type = T;
 };
 
-template <typename T, typename U>
-struct MaxImpl<T, U> {
-  using Type = std::conditional_t<sizeof(T) >= sizeof(U), T, U>;
-};
-
-template <typename T, typename U, typename V, typename... Ws>
-struct MaxImpl<T, U, V, Ws...> {
-  using Type = typename MaxImpl<T, typename MaxImpl<U, typename MaxImpl<V, Ws...>::Type>::Type>::Type;
+template <typename T, typename U, typename... Ts>
+struct MaxImpl<T, U, Ts...> {
+  using Type = typename MaxImpl<Gt<T, U>, Ts...>::Type;
 };
 }  // namespace detail
 
@@ -88,6 +83,7 @@ static constexpr T resetBits(T sourceBits, T bitMaskToReset) {
 }
 
 template <std::integral SB, std::integral M>
+// ReSharper disable once CppDFAConstantParameter
 static constexpr SB resetBits(SB sourceBits, M bitMaskToReset) {
   using MaxType = Max<SB, M>;
 

@@ -33,20 +33,20 @@ int main() {
 
   std::atomic<bool> stop{};
   std::thread t{[width, &stop, &ioMutex] {
-    auto minId = 233;
-    auto maxId = 255;
-
     for (int i = 0; i < 1000000; i++) {
       {
-        std::lock_guard<std::mutex> lock(ioMutex);
+        std::lock_guard lock(ioMutex);
 
         for (int j = 0; j < width; j++) {
+          constexpr auto maxId = 255;
+          constexpr auto minId = 233;
+
           if (stop) {
             return;
           }
 
-          auto id = static_cast<std::uint8_t>(
-            std::floor(minId + (maxId - minId) * (std::sin(((i + j) / (width / 2.0)) * 3.14) + 1.0) / 2.0));
+          const auto id = static_cast<std::uint8_t>(
+            std::floor(minId + (maxId - minId) * (std::sin((i + j) / (width / 2.0) * 3.14) + 1.0) / 2.0));
 
           std::cout << std::format("{}#", otp::setColor(id));
         }
@@ -65,7 +65,7 @@ int main() {
       }
 
       {
-        std::lock_guard<std::mutex> lock(ioMutex);
+        std::lock_guard lock(ioMutex);
 
         if (i % 2 == 0) {
           std::cout << otp::saveCursorPos() + otp::writeTo(13, 5, otp::setColor(otp::Color::BLUE) + " RED ") +
