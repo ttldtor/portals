@@ -101,8 +101,8 @@ static constexpr SB resetBits(SB sourceBits, M bitMaskToReset) {
 // Windows-specific structure for terminal management.
 struct VirtualTerminal {
 #ifdef WIN32
-  inline static bool enable() {
-    auto handle = GetStdHandle(STD_OUTPUT_HANDLE);
+  static bool enable() {
+    const auto handle = GetStdHandle(STD_OUTPUT_HANDLE);
 
     // Check the validity of the handle.
     if (handle == nullptr || handle == INVALID_HANDLE_VALUE) {
@@ -115,9 +115,7 @@ struct VirtualTerminal {
       return false;
     }
 
-    auto isEnabled = bit_ops::bitsAreSet(mode, ENABLE_VIRTUAL_TERMINAL_PROCESSING);
-
-    if (isEnabled) {
+    if (bit_ops::bitsAreSet(mode, ENABLE_VIRTUAL_TERMINAL_PROCESSING)) {
       return true;  // The mode is already set.
     }
 
@@ -128,8 +126,8 @@ struct VirtualTerminal {
     return true;
   }
 
-  inline static bool disable() {
-    auto handle = GetStdHandle(STD_OUTPUT_HANDLE);
+  static bool disable() {
+    const auto handle = GetStdHandle(STD_OUTPUT_HANDLE);
 
     // Check the validity of the handle.
     if (handle == nullptr || handle == INVALID_HANDLE_VALUE) {
@@ -142,9 +140,7 @@ struct VirtualTerminal {
       return false;
     }
 
-    auto isEnabled = bit_ops::bitsAreSet(mode, ENABLE_VIRTUAL_TERMINAL_PROCESSING);
-
-    if (!isEnabled) {
+    if (const auto isEnabled = bit_ops::bitsAreSet(mode, ENABLE_VIRTUAL_TERMINAL_PROCESSING); !isEnabled) {
       return true;  // The mode is already set.
     }
 
@@ -167,7 +163,8 @@ struct VirtualTerminal {
 };
 
 namespace portals {
-constexpr auto ESC = "\x1b";
+static constexpr const char* ESC = "\x1b";
+static constexpr const char* SAVE_CURSOR_POS = "[s";
 
 enum class Color : int {
   RESET = 0,
@@ -211,78 +208,78 @@ enum class BgColor : int {
   BRIGHT_WHITE = 107,
 };
 
-inline static std::string saveCursorPos() {
-  return std::string{} + ESC + "[s";
+static std::string saveCursorPos() {
+  return std::string(ESC) + SAVE_CURSOR_POS;
 }
 
-inline static std::string restoreCursorPos() {
+static std::string restoreCursorPos() {
   return std::string{} + ESC + "[u";
 }
 
-inline static std::string hideCursor() {
+static std::string hideCursor() {
   return std::string{} + ESC + "[?25l";
 }
 
-inline static std::string showCursor() {
+static std::string showCursor() {
   return std::string{} + ESC + "[?25h";
 }
 
-inline static std::string moveToColumn(std::size_t column) {
+static std::string moveToColumn(std::size_t column) {
   return std::string{} + ESC + "[" + std::to_string(column) + "G";
 }
 
-inline static std::string moveToLineBegin() {
+static std::string moveToLineBegin() {
   return moveToColumn(0);
 }
 
-inline static std::string moveTo(std::size_t line, std::size_t column) {
+static std::string moveTo(std::size_t line, std::size_t column) {
   return std::string{} + ESC + "[" + std::to_string(line) + ";" + std::to_string(column) + "H";
 }
 
-inline static std::string writeTo(std::size_t line, std::size_t column, const std::string& text) {
+static std::string writeTo(std::size_t line, std::size_t column, const std::string& text) {
   return moveTo(line, column) + text;
 }
 
-inline static std::string setColor(Color color) {
+static std::string setColor(Color color) {
   return std::string{} + ESC + "[1;" + std::to_string(static_cast<int>(color)) + "m";
 }
 
-inline static std::string setBgColor(BgColor bgColor) {
+static std::string setBgColor(BgColor bgColor) {
   return std::string{} + ESC + "[1;" + std::to_string(static_cast<int>(bgColor)) + "m";
 }
 
-inline static std::string setColor(Color color, BgColor bgColor) {
+static std::string setColor(Color color, BgColor bgColor) {
   return std::string{} + ESC + "[1;" + std::to_string(static_cast<int>(color)) + ";" +
          std::to_string(static_cast<int>(bgColor)) + "m";
 }
 
-inline static std::string setColor(std::uint8_t colorIndex) {
+static std::string setColor(std::uint8_t colorIndex) {
   return std::string{} + ESC + "[38;5;" + std::to_string(colorIndex) + "m";
 }
 
-inline static std::string setBgColor(std::uint8_t bgColorIndex) {
+static std::string setBgColor(std::uint8_t bgColorIndex) {
   return std::string{} + ESC + "[48;5;" + std::to_string(bgColorIndex) + "m";
 }
 
-inline static std::string setColor(std::uint8_t colorIndex, std::uint8_t bgColorIndex) {
+static std::string setColor(std::uint8_t colorIndex, std::uint8_t bgColorIndex) {
   return setColor(colorIndex) + setBgColor(bgColorIndex);
 }
 
-inline static std::string setColor(std::uint8_t r, std::uint8_t g, std::uint8_t b) {
+static std::string setColor(std::uint8_t r, std::uint8_t g, std::uint8_t b) {
   return std::string{} + ESC + "[38;2;" + std::to_string(r) + ";" + std::to_string(g) + ";" + std::to_string(b) + "m";
 }
 
-inline static std::string setBgColor(std::uint8_t r, std::uint8_t g, std::uint8_t b) {
+static std::string setBgColor(std::uint8_t r, std::uint8_t g, std::uint8_t b) {
   return std::string{} + ESC + "[48;2;" + std::to_string(r) + ";" + std::to_string(g) + ";" + std::to_string(b) + "m";
 }
 
-inline static std::string setColor(std::tuple<std::uint8_t, std::uint8_t, std::uint8_t> colorRgb,
-                                   std::tuple<std::uint8_t, std::uint8_t, std::uint8_t> bgColorRgb) {
+static std::string setColor(const std::tuple<std::uint8_t, std::uint8_t, std::uint8_t>& colorRgb,
+                            const std::tuple<std::uint8_t, std::uint8_t, std::uint8_t>& bgColorRgb) {
   return setColor(std::get<0>(colorRgb), std::get<1>(colorRgb), std::get<2>(colorRgb)) +
          setBgColor(std::get<0>(bgColorRgb), std::get<1>(bgColorRgb), std::get<2>(bgColorRgb));
 }
 
-inline static std::string resetFormat() {
+static std::string resetFormat() {
   return std::string{} + ESC + "[0m";
 }
 

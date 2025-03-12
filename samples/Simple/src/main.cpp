@@ -6,9 +6,10 @@
 #include <cstdint>
 #include <format>
 #include <iostream>
-#include <portals.hpp>
-#include <thread>
 #include <mutex>
+#include <portals.hpp>
+#include <print>
+#include <thread>
 
 using namespace std::literals;
 
@@ -16,18 +17,18 @@ namespace ot = org::ttldtor;
 namespace otp = org::ttldtor::portals;
 
 int main() {
-  std::cout << ot::VirtualTerminal::enable() << std::endl;
-  std::cout << ot::VirtualTerminal::enable() << std::endl;
+  std::println("{}", ot::VirtualTerminal::enable());
+  std::println("{}", ot::VirtualTerminal::enable());
 
   for (std::uint16_t i = 0; i < 256; i++) {
-    std::cout << std::format("{}{} ", otp::setColor(i), i);
+    std::print("{}{} ", otp::setColor(i), i);
   }
 
-  std::cout << otp::resetFormat() << std::endl;
+  std::println("{}", otp::resetFormat());
 
-  auto width = 50;
+  constexpr auto width = 50;
 
-  std::cout << otp::hideCursor();
+  std::print("{}", otp::hideCursor());
 
   std::mutex ioMutex{};
 
@@ -37,7 +38,7 @@ int main() {
       {
         std::lock_guard lock(ioMutex);
 
-        for (int j = 0; j < width; j++) {
+        for (auto j = 0; j < width; j++) {
           constexpr auto maxId = 255;
           constexpr auto minId = 233;
 
@@ -48,17 +49,17 @@ int main() {
           const auto id = static_cast<std::uint8_t>(
             std::floor(minId + (maxId - minId) * (std::sin((i + j) / (width / 2.0) * 3.14) + 1.0) / 2.0));
 
-          std::cout << std::format("{}#", otp::setColor(id));
+          std::print("{}#", otp::setColor(id));
         }
 
-        std::cout << otp::moveToLineBegin() << otp::resetFormat();
+        std::print("{}{}", otp::moveToLineBegin(), otp::resetFormat());
       }
 
       std::this_thread::sleep_for(50ms);
     }
   }};
 
-  std::thread blink{[&stop, &ioMutex]{
+  std::thread blink{[&stop, &ioMutex] {
     for (int i = 0; i < 1000000; i++) {
       if (stop) {
         return;
@@ -68,11 +69,14 @@ int main() {
         std::lock_guard lock(ioMutex);
 
         if (i % 2 == 0) {
-          std::cout << otp::saveCursorPos() + otp::writeTo(13, 5, otp::setColor(otp::Color::BLUE) + " RED ") +
-                         otp::writeTo(14, 10, otp::resetFormat() + "     ") + otp::restoreCursorPos();
+          std::print("{}{}{}{}", otp::saveCursorPos(),
+                     otp::writeTo(13, 5, std::format("{}{:^5s}", otp::setColor(otp::Color::BLUE), "RED")),
+                     otp::writeTo(14, 10, std::format("{}{:5s}", otp::resetFormat(), "")), otp::restoreCursorPos());
         } else {
-          std::cout << otp::saveCursorPos() + otp::writeTo(13, 5, otp::resetFormat() + "     ") +
-                         otp::writeTo(14, 10, otp::setColor(otp::Color::RED) + " BLUE") + otp::restoreCursorPos();
+          std::print("{}{}{}{}", otp::saveCursorPos(),
+                     otp::writeTo(13, 5, std::format("{}{:5s}", otp::resetFormat(), "")),
+                     otp::writeTo(14, 10, std::format("{}{:^5s}", otp::setColor(otp::Color::RED), "BLUE")),
+                     otp::restoreCursorPos());
         }
       }
 
@@ -81,9 +85,9 @@ int main() {
   }};
 
   std::cin.ignore();
-  std::cout << otp::resetFormat();
+  std::print("{}", otp::resetFormat());
   stop = true;
-  std::cout << otp::showCursor();
+  std::print("{}", otp::showCursor());
 
   t.join();
   blink.join();
