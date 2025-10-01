@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <bits/bits.hpp>
+
 #include <cmath>
 #include <concepts>
 #include <cstdint>
@@ -17,86 +19,6 @@
 #endif
 
 namespace org::ttldtor {
-
-namespace detail {
-template <typename T, typename U>
-using Gt = std::conditional_t<sizeof(T) >= sizeof(U), T, U>;
-
-template <typename T, typename...>
-struct MaxImpl {
-  using Type = T;
-};
-
-template <typename T, typename U, typename... Ts>
-struct MaxImpl<T, U, Ts...> {
-  using Type = typename MaxImpl<Gt<T, U>, Ts...>::Type;
-};
-}  // namespace detail
-
-/**
- * Returns max type by size (first is better)
- */
-template <typename... Ts>
-using Max = typename detail::MaxImpl<Ts...>::Type;
-
-namespace bit_ops {
-
-template <std::unsigned_integral T>
-static constexpr T bitsAreSet(T sourceBits, T bitMaskToCheck) {
-  return (sourceBits & bitMaskToCheck) != 0;
-}
-
-template <std::integral SB, std::integral M>
-static constexpr SB bitsAreSet(SB sourceBits, M bitMaskToCheck) {
-  using MaxType = Max<SB, M>;
-
-  if constexpr (std::is_signed_v<SB> || std::is_signed_v<M>) {
-    using U = std::make_unsigned_t<MaxType>;
-
-    return static_cast<SB>(bitsAreSet(static_cast<U>(sourceBits), static_cast<U>(bitMaskToCheck)));
-  } else {
-    return static_cast<SB>(bitsAreSet(static_cast<MaxType>(sourceBits), static_cast<MaxType>(bitMaskToCheck)));
-  }
-}
-
-template <std::unsigned_integral T>
-static constexpr T setBits(T sourceBits, T bitMaskToSet) {
-  return sourceBits | bitMaskToSet;
-}
-
-template <std::integral SB, std::integral M>
-static constexpr SB setBits(SB sourceBits, M bitMaskToSet) {
-  using MaxType = Max<SB, M>;
-
-  if constexpr (std::is_signed_v<SB> || std::is_signed_v<M>) {
-    using U = std::make_unsigned_t<MaxType>;
-
-    return static_cast<SB>(setBits(static_cast<U>(sourceBits), static_cast<U>(bitMaskToSet)));
-  } else {
-    return static_cast<SB>(setBits(static_cast<MaxType>(sourceBits), static_cast<MaxType>(bitMaskToSet)));
-  }
-}
-
-template <std::unsigned_integral T>
-static constexpr T resetBits(T sourceBits, T bitMaskToReset) {
-  return sourceBits & ~bitMaskToReset;
-}
-
-template <std::integral SB, std::integral M>
-// ReSharper disable once CppDFAConstantParameter
-static constexpr SB resetBits(SB sourceBits, M bitMaskToReset) {
-  using MaxType = Max<SB, M>;
-
-  if constexpr (std::is_signed_v<SB> || std::is_signed_v<M>) {
-    using U = std::make_unsigned_t<MaxType>;
-
-    return static_cast<SB>(resetBits(static_cast<U>(sourceBits), static_cast<U>(bitMaskToReset)));
-  } else {
-    return static_cast<SB>(resetBits(static_cast<MaxType>(sourceBits), static_cast<MaxType>(bitMaskToReset)));
-  }
-}
-
-}  // namespace bit_ops
 
 // Windows-specific structure for terminal management.
 struct VirtualTerminal {
@@ -115,11 +37,11 @@ struct VirtualTerminal {
       return false;
     }
 
-    if (bit_ops::bitsAreSet(mode, ENABLE_VIRTUAL_TERMINAL_PROCESSING)) {
+    if (bits::bitsAreSet(mode, ENABLE_VIRTUAL_TERMINAL_PROCESSING)) {
       return true;  // The mode is already set.
     }
 
-    if (!SetConsoleMode(handle, bit_ops::setBits(mode, ENABLE_VIRTUAL_TERMINAL_PROCESSING))) {
+    if (!SetConsoleMode(handle, bits::setBits(mode, ENABLE_VIRTUAL_TERMINAL_PROCESSING))) {
       return false;
     }
 
@@ -140,11 +62,11 @@ struct VirtualTerminal {
       return false;
     }
 
-    if (const auto isEnabled = bit_ops::bitsAreSet(mode, ENABLE_VIRTUAL_TERMINAL_PROCESSING); !isEnabled) {
+    if (const auto isEnabled = bits::bitsAreSet(mode, ENABLE_VIRTUAL_TERMINAL_PROCESSING); !isEnabled) {
       return true;  // The mode is already set.
     }
 
-    if (!SetConsoleMode(handle, bit_ops::resetBits(mode, ENABLE_VIRTUAL_TERMINAL_PROCESSING))) {
+    if (!SetConsoleMode(handle, bits::resetBits(mode, ENABLE_VIRTUAL_TERMINAL_PROCESSING))) {
       return false;
     }
 

@@ -26,9 +26,18 @@ if (NOT DEFINED ORG_TTLDTOR_PORTALS_IS_ROOT_PROJECT)
     endif ()
 endif ()
 
+include(FetchContent)
+FetchContent_Declare(
+        bits
+        GIT_REPOSITORY https://github.com/ttldtor/bits.git
+        GIT_TAG v1.0.0
+)
+FetchContent_MakeAvailable(bits)
+
 option(ORG_TTLDTOR_PORTALS_BUILD_SAMPLES "Build samples" ${ORG_TTLDTOR_PORTALS_IS_ROOT_PROJECT})
 
 add_library(${PROJECT_NAME} src/portals.cpp include/portals.hpp)
+target_link_libraries(${PROJECT_NAME} PUBLIC bits::bits)
 add_library(portals::portals ALIAS ${PROJECT_NAME})
 target_include_directories(${PROJECT_NAME} PUBLIC include)
 
