@@ -4,14 +4,10 @@
 #pragma once
 
 #include <bits/bits.hpp>
-
 #include <cmath>
-#include <concepts>
 #include <cstdint>
-#include <optional>
 #include <string>
 #include <tuple>
-#include <type_traits>
 #include <utility>
 
 #ifdef WIN32
