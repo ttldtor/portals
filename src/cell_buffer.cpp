@@ -104,7 +104,7 @@ std::expected<CellBuffer, CellBufferError> CellBuffer::from(CellSize size, Width
     }
 
     result.glyphs_ = std::make_unique<GlyphRecord[]>(limits.max_glyphs);
-    result.bytes_ = std::make_unique<char[]>(limits.max_glyph_bytes);
+    result.bytes_ = std::make_unique_for_overwrite<char[]>(limits.max_glyph_bytes);
     result.styles_ = std::make_unique<CellStyle[]>(limits.max_styles);
     result.clear();
 

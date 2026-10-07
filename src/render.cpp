@@ -84,6 +84,10 @@ std::expected<void, CellBufferError> paint_text(CellBuffer &buffer, const TextCo
   const auto graphemes = command.text.graphemes();
 
   for (std::size_t i = 0; i < graphemes.size(); ++i) {
+    if (x >= clip.right()) {
+      break;
+    }
+
     const auto end = x + graphemes[i].cells;
 
     if (x >= clip.origin().x && end <= clip.right()) {
