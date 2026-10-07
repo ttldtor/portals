@@ -2,12 +2,12 @@
 
 Portals is the starting point of a C++23 terminal UI library. This bootstrap
 contains a static core library, release metadata, a standalone consumer and a
-headless tests. Checked cell geometry is available; widget/UI functionality is not implemented yet.
+headless tests. Checked cell geometry and UTF-8 grapheme measurements are available; widget/UI functionality is not implemented yet.
 
 ## Build and test
 
 Requirements: CMake 3.24+, Ninja and a compiler/standard library supporting C++23, including `<expected>` (MSVC or GCC).
-There are no third-party runtime or test dependencies and no automatic downloads.
+The private vendored utf8proc dependency supplies Unicode 18.0.0 data; no automatic downloads or system Unicode library are required. A C99 compiler is needed alongside C++23.
 
 On Windows, use an **x64 Developer PowerShell for Visual Studio** with the C++
 desktop workload installed and CMake/Ninja on PATH:
@@ -86,10 +86,14 @@ Reference: [CMake presets](https://cmake.org/cmake/help/latest/manual/cmake-pres
 
 Cell geometry: [units, clipping and numeric bounds](docs/geometry.md).
 
+UTF-8 text: [graphemes, width policy, cursor and clipping](docs/text.md).
+
 API design sketches: [five scenarios](docs/api-design.md). The independent
 [header/module/shared-library spike](experiments/module-spike/README.md) tests
 compilation mechanics; UI sketches are design-only.
 
 ## License
 
-Boost Software License 1.0; see [LICENSE.txt](LICENSE.txt).
+Portals code: Boost Software License 1.0; see [LICENSE.txt](LICENSE.txt).
+Private utf8proc code and Unicode data notices: [dependency provenance](vendor/utf8proc/README.md).
+Unicode test data retain their [full license](tests/fixtures/unicode/Unicode-LICENSE.txt).
