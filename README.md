@@ -2,11 +2,11 @@
 
 Portals is the starting point of a C++23 terminal UI library. This bootstrap
 contains a static core library, release metadata, a standalone consumer and a
-headless smoke test. UI functionality is not implemented yet.
+headless tests. Checked cell geometry is available; widget/UI functionality is not implemented yet.
 
 ## Build and test
 
-Requirements: CMake 3.24+, Ninja and a compiler with C++23 mode (MSVC or GCC).
+Requirements: CMake 3.24+, Ninja and a compiler/standard library supporting C++23, including `<expected>` (MSVC or GCC).
 There are no third-party runtime or test dependencies and no automatic downloads.
 
 On Windows, use an **x64 Developer PowerShell for Visual Studio** with the C++
@@ -71,7 +71,7 @@ cmake --build build/docs --target portals_docs
 ```
 
 Open `build/docs/docs/html/index.html`. Public declarations include Doxygen
-contracts. The compiled core currently implements only release metadata;
+contracts. The compiled core implements release metadata and checked cell geometry;
 the example consumes that contract and the smoke executable checks it through
 the same public header and linked target. The test uses an explicit nonzero
 failure exit code, so checks remain active with `NDEBUG`.
@@ -83,6 +83,8 @@ adjustments belong in `CMakeUserPresets.json`; no IDE settings are supplied.
 Reference: [CMake presets](https://cmake.org/cmake/help/latest/manual/cmake-presets.7.html),
 [CMake compile features](https://cmake.org/cmake/help/latest/manual/cmake-compile-features.7.html),
 [Doxygen integration](https://cmake.org/cmake/help/latest/module/FindDoxygen.html).
+
+Cell geometry: [units, clipping and numeric bounds](docs/geometry.md).
 
 API design sketches: [five scenarios](docs/api-design.md). The independent
 [header/module/shared-library spike](experiments/module-spike/README.md) tests

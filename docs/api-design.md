@@ -2,8 +2,7 @@
 
 Status: design-only, 2026-10-07. The five sketches below select a C++23 API
 direction for review. These names and signatures are **not implemented**,
-installed headers, executable examples, or a compatibility promise. The current
-core still exposes only version metadata. The separate
+installed headers, executable examples, or a compatibility promise. The implemented API is documented in the public headers. The separate
 [module spike](../experiments/module-spike/README.md) tests language/linkage
 mechanics with a toy library; its tests cannot prove these UI contracts.
 
