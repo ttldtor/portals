@@ -43,8 +43,11 @@ struct WidthPolicy {
   EmojiWidth emoji{EmojiWidth::two};
   /** @brief Caller-owned terminal capability revision, included in equality. */
   std::uint64_t revision{};
-  /** @brief Compare the full cache-key policy. */
-  bool operator==(const WidthPolicy &) const noexcept = default;
+  /** @brief Compare the full cache-key policy.
+   * @param other Value whose corresponding fields are compared.
+   * @return True when every compared field is equal; false otherwise.
+   */
+  bool operator==(const WidthPolicy &other) const noexcept = default;
 };
 
 /** @brief Owning limits checked without silently truncating input or clusters. */
@@ -86,8 +89,11 @@ struct TextError {
    * Input-limit and invalid-policy errors use zero.
    */
   std::size_t byte_offset{};
-  /** @brief Compare category and byte offset. */
-  bool operator==(const TextError &) const noexcept = default;
+  /** @brief Compare category and byte offset.
+   * @param other Value whose corresponding fields are compared.
+   * @return True when every compared field is equal; false otherwise.
+   */
+  bool operator==(const TextError &other) const noexcept = default;
 };
 
 /** @brief How a cell renderer must display a complete logical cluster. */
@@ -135,13 +141,26 @@ struct TextClip {
  */
 class GraphemeText {
 public:
-  /** @brief Copy bytes and metadata into independent storage; may allocate. */
-  GraphemeText(const GraphemeText &) = default;
-  /** @brief Replace storage with an independent copy; invalidates borrowed views. */
+  /** @brief Copy bytes and metadata into independent storage; may allocate.
+   * @param other Validated text whose bytes, metadata and policy are copied.
+   * @throws std::bad_alloc If independent storage or debug bookkeeping cannot be allocated.
+   */
+  GraphemeText(const GraphemeText &other) = default;
+  /** @brief Replace storage with an independent copy; invalidates borrowed views.
+   * @param other Source value; self-assignment is supported.
+   * @return This object after successful replacement.
+   * @throws std::bad_alloc If copying fails; this object retains its previous value.
+   */
   GraphemeText &operator=(const GraphemeText &other);
-  /** @brief Transfer storage and empty the source; may allocate debug bookkeeping before changing the source. */
+  /** @brief Transfer storage and empty the source; may allocate debug bookkeeping before changing the source.
+   * @param other Source whose storage is transferred and whose size becomes zero on success.
+   * @throws std::bad_alloc If preliminary bookkeeping allocation fails; other remains unchanged.
+   */
   GraphemeText(GraphemeText &&other);
-  /** @brief Transfer storage; invalidates both objects' views and empties a distinct source. Self-move is a no-op. */
+  /** @brief Transfer storage; invalidates both objects' views and empties a distinct source. Self-move is a no-op.
+   * @param other Source whose storage is transferred; a distinct source becomes empty.
+   * @return This object, with the source policy and measurements; self-move preserves its value.
+   */
   GraphemeText &operator=(GraphemeText &&other) noexcept;
 
   /**
@@ -154,13 +173,21 @@ public:
    */
   [[nodiscard]] static std::expected<GraphemeText, TextError> from(std::string_view bytes, WidthPolicy policy = {},
                                                                    TextLimits limits = {});
-  /** @brief Borrow original bytes until this object's assignment/move/destruction. */
+  /** @brief Borrow original bytes until this object's assignment/move/destruction.
+   * @return A read-only view of the original validated UTF-8, including unsupported logical clusters.
+   */
   [[nodiscard]] std::string_view bytes() const noexcept;
-  /** @brief Borrow metadata until this object's assignment/move/destruction. */
+  /** @brief Borrow metadata until this object's assignment/move/destruction.
+   * @return Ordered cluster metadata indexing bytes(); empty for an empty or moved-from value.
+   */
   [[nodiscard]] std::span<const Grapheme> graphemes() const noexcept;
-  /** @brief Return cached int32_t-compatible total cells; no allocation or errors. */
+  /** @brief Return cached int32_t-compatible total cells; no allocation or errors.
+   * @return The sum of cluster display widths in terminal cells.
+   */
   [[nodiscard]] std::int32_t measure() const noexcept;
-  /** @brief Return the owning captured cache-key policy; no errors. */
+  /** @brief Return the owning captured cache-key policy; no errors.
+   * @return An independent copy of the policy used for these measurements.
+   */
   [[nodiscard]] WidthPolicy policy() const noexcept;
   /**
    * @brief Advance a byte-boundary cursor by one cluster; end stays at end.

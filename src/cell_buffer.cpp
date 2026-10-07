@@ -150,6 +150,8 @@ std::expected<CellView, CellBufferError> CellBuffer::at(CellPoint position) cons
   return CellView{cell, {bytes_.get() + glyph.offset, glyph.bytes}, styles_[cell.style.value]};
 }
 
+// Replacing either half removes the complete old glyph, even if its other half lies
+// outside the new write. A continuation must never survive without its matching lead.
 void CellBuffer::clear_glyph(std::size_t cell_index) noexcept {
   const auto old = cells_[cell_index];
 
@@ -218,6 +220,8 @@ std::expected<void, CellBufferError> CellBuffer::put(CellPoint position, const G
     return std::unexpected(CellBufferError::style_limit);
   }
 
+  // All coordinate, policy and pool-capacity checks precede this commit point.
+  // From here onward every operation uses preallocated storage and cannot fail.
   if (glyph_id == glyph_count_) {
     std::copy(glyph_bytes.begin(), glyph_bytes.end(), bytes_.get() + byte_count_);
     glyphs_[glyph_id] = {byte_count_, glyph_bytes.size(), grapheme.cells};

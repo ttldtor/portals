@@ -110,6 +110,8 @@ struct SchedulerState {
     // The dispatcher may retain removed until its active invocation returns.
   }
   void close_scope(std::uint64_t id) {
+    // Disable the entire scope before releasing any user storage. A destructor may reenter
+    // publication while individual registrations are being reclaimed, but cannot revive delivery.
     {
       std::lock_guard lock(mutex);
 
@@ -137,6 +139,8 @@ struct SchedulerState {
     }
   }
   void reclaim() {
+    // Detach all owners under the mutex, then destroy them on UI after unlock. Snapshot
+    // deleters and callback captures can reenter without observing half-cleared queue bookkeeping.
     std::vector<std::shared_ptr<SchedulerRegistration>> removed;
     std::vector<SchedulerPublication> old_data;
     std::vector<SchedulerPublication> old_control;
@@ -208,6 +212,8 @@ std::expected<PublishResult, SchedulerError> scheduler_publish(const std::shared
     });
   }
 
+  // Replacement preserves this sender's FIFO position, including when the queue is full;
+  // only its latency origin changes to the newly accepted snapshot.
   if (pending != queue.values.end()) {
     pending->value.swap(value);
     pending->queued_at = state->now();
@@ -436,6 +442,8 @@ std::expected<SchedulerDispatch, SchedulerError> Scheduler::dispatch() {
       }
     }
   };
+  // Selecting a strong registration under the mutex is callback admission. Invocation and
+  // owner release happen outside it, so self-disconnect/stop cannot destroy active captures.
   auto drain = [&](detail::SchedulerQueue &queue, std::size_t budget, std::size_t &count) {
     for (std::size_t step = 0; step < budget; ++step) {
       detail::SchedulerPublication publication;
@@ -471,6 +479,9 @@ std::expected<SchedulerDispatch, SchedulerError> Scheduler::dispatch() {
   };
   drain(state_->control, state_->options.control_budget, result.control);
 
+  // The registration vector preserves insertion order. Strict deadline comparison therefore
+  // selects the earliest timer and breaks equal-deadline ties by registration order. Removing
+  // it before invocation makes the timer one-shot even when its callback reenters registration.
   for (std::size_t step = 0; step < state_->options.timer_budget; ++step) {
     std::shared_ptr<detail::SchedulerRegistration> registration;
     {
@@ -549,6 +560,8 @@ std::expected<SchedulerWake, SchedulerError> Scheduler::wait_for(std::chrono::mi
     if (native_now >= deadline) {
       return SchedulerWake::timeout;
     }
+    // The injected clock determines readiness; the native steady clock bounds real waiting.
+    // Recheck both after wakeups, including spurious wakes and explicit fake-clock advances.
     auto until = deadline;
 
     if (next) {

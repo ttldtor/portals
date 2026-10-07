@@ -40,6 +40,8 @@ private:
   std::string *bytes_;
 };
 
+// Intern IDs belong to different buffers and cannot establish semantic equality.
+// Compare resolved glyph/style values and the continuation role instead.
 bool equal_cell(const CellView &left, const CellView &right) noexcept {
   return left.glyph == right.glyph && left.style == right.style && left.cell.columns == right.cell.columns &&
          (left.cell.kind == CellKind::continuation) == (right.cell.kind == CellKind::continuation);
@@ -109,6 +111,8 @@ void encode(Encoding &out, const CellBuffer *previous, const CellBuffer &next) {
     begin();
   }
 
+  // A changed row is emitted completely, with wrapping disabled, so overwriting a
+  // wide glyph also clears its previous footprint without splitting grapheme bytes.
   for (std::int32_t y = 0; y < next.size().height; ++y) {
     if (!full && equal_row(*previous, next, y)) {
       continue;

@@ -19,11 +19,15 @@ using InputTime = std::uint64_t;
 
 /** @brief Observed modifiers, also usable by a native input adapter. */
 struct InputModifiers {
-  bool shift{};                                            ///< Shift modifier.
-  bool alt{};                                              ///< Alt modifier (legacy ESC prefix is ambiguous).
-  bool control{};                                          ///< Control modifier.
-  bool super{};                                            ///< Super modifier; never inferred by this VT profile.
-  bool operator==(const InputModifiers &) const = default; ///< Value equality.
+  bool shift{};   ///< Shift modifier.
+  bool alt{};     ///< Alt modifier (legacy ESC prefix is ambiguous).
+  bool control{}; ///< Control modifier.
+  bool super{};   ///< Super modifier; never inferred by this VT profile.
+  /** @brief Compare the complete event value.
+   * @param other Event or metadata value to compare, without interpreting its payload.
+   * @return True when every stored field is equal; false otherwise.
+   */
+  bool operator==(const InputModifiers &other) const = default;
 };
 
 /** @brief Semantic key identities; character uses KeyEvent::scalar. */
@@ -65,18 +69,26 @@ enum class KeyAction {
 
 /** @brief Owning key value without an inferred physical keyboard scan code. */
 struct KeyEvent {
-  InputKey key{};                                    ///< Semantic identity.
-  char32_t scalar{};                                 ///< Character for control combinations, otherwise zero.
-  InputModifiers modifiers{};                        ///< Observed modifiers.
-  KeyAction action{};                                ///< Observed action; VT does not infer held state.
-  bool operator==(const KeyEvent &) const = default; ///< Value equality.
+  InputKey key{};             ///< Semantic identity.
+  char32_t scalar{};          ///< Character for control combinations, otherwise zero.
+  InputModifiers modifiers{}; ///< Observed modifiers.
+  KeyAction action{};         ///< Observed action; VT does not infer held state.
+  /** @brief Compare the complete event value.
+   * @param other Event or metadata value to compare, without interpreting its payload.
+   * @return True when every stored field is equal; false otherwise.
+   */
+  bool operator==(const KeyEvent &other) const = default;
 };
 
 /** @brief One Unicode scalar, not a grapheme cluster; Alt may be present. */
 struct TextInputEvent {
-  char32_t scalar{};                                       ///< Valid Unicode scalar, without normalization.
-  InputModifiers modifiers{};                              ///< Observed modifiers.
-  bool operator==(const TextInputEvent &) const = default; ///< Value equality.
+  char32_t scalar{};          ///< Valid Unicode scalar, without normalization.
+  InputModifiers modifiers{}; ///< Observed modifiers.
+  /** @brief Compare the complete event value.
+   * @param other Event or metadata value to compare, without interpreting its payload.
+   * @return True when every stored field is equal; false otherwise.
+   */
+  bool operator==(const TextInputEvent &other) const = default;
 };
 
 /** @brief SGR button identity; no_button is used for unbuttoned motion. */
@@ -100,20 +112,28 @@ enum class MouseAction {
 
 /** @brief Checked zero-based cell coordinates; no viewport clipping is performed. */
 struct MouseInputEvent {
-  std::int32_t column{};                                    ///< Zero-based column.
-  std::int32_t row{};                                       ///< Zero-based row.
-  MouseButton button{};                                     ///< Button or wheel direction.
-  MouseAction action{};                                     ///< Observed action.
-  InputModifiers modifiers{};                               ///< Observed modifiers.
-  bool operator==(const MouseInputEvent &) const = default; ///< Value equality.
+  std::int32_t column{};      ///< Zero-based column.
+  std::int32_t row{};         ///< Zero-based row.
+  MouseButton button{};       ///< Button or wheel direction.
+  MouseAction action{};       ///< Observed action.
+  InputModifiers modifiers{}; ///< Observed modifiers.
+  /** @brief Compare the complete event value.
+   * @param other Event or metadata value to compare, without interpreting its payload.
+   * @return True when every stored field is equal; false otherwise.
+   */
+  bool operator==(const MouseInputEvent &other) const = default;
 };
 
 /** @brief Owning raw paste bytes, possibly invalid UTF-8 or containing controls.
  * Never forward these bytes to a terminal writer or interpret them as commands.
  */
 struct PasteInputEvent {
-  std::string bytes;                                        ///< Complete bounded payload, excluding delimiters.
-  bool operator==(const PasteInputEvent &) const = default; ///< Value equality.
+  std::string bytes; ///< Complete bounded payload, excluding delimiters.
+  /** @brief Compare the complete event value.
+   * @param other Event or metadata value to compare, without interpreting its payload.
+   * @return True when every stored field is equal; false otherwise.
+   */
+  bool operator==(const PasteInputEvent &other) const = default;
 };
 
 /** @brief Supported syntactic reply kinds, not proof of terminal identity. */
@@ -131,11 +151,15 @@ struct InputProbeWindow {
 };
 /** @brief Syntactically matching reply within an explicitly expected window. */
 struct InputProbeCandidate {
-  InputProbeKind kind{};                                        ///< Reply grammar.
-  std::uint64_t generation{};                                   ///< Caller-supplied generation.
-  std::array<std::uint32_t, 16> values{};                       ///< DA parameters, or one-based CPR row/column.
-  std::size_t count{};                                          ///< Number of valid parameters.
-  bool operator==(const InputProbeCandidate &) const = default; ///< Value equality.
+  InputProbeKind kind{};                  ///< Reply grammar.
+  std::uint64_t generation{};             ///< Caller-supplied generation.
+  std::array<std::uint32_t, 16> values{}; ///< DA parameters, or one-based CPR row/column.
+  std::size_t count{};                    ///< Number of valid parameters.
+  /** @brief Compare the complete event value.
+   * @param other Event or metadata value to compare, without interpreting its payload.
+   * @return True when every stored field is equal; false otherwise.
+   */
+  bool operator==(const InputProbeCandidate &other) const = default;
 };
 
 /** @brief Recoverable decode issues; timeout may also leave the decoder failed. */
@@ -154,10 +178,14 @@ enum class InputIssueKind {
  * Subsequent discard bytes are accounted by InputStep::consumed, not another issue.
  */
 struct InputIssue {
-  InputIssueKind kind{};                               ///< Rejection reason.
-  std::uint64_t begin{};                               ///< Inclusive session byte offset.
-  std::uint64_t end{};                                 ///< Exclusive offset at issue emission.
-  bool operator==(const InputIssue &) const = default; ///< Value equality.
+  InputIssueKind kind{}; ///< Rejection reason.
+  std::uint64_t begin{}; ///< Inclusive session byte offset.
+  std::uint64_t end{};   ///< Exclusive offset at issue emission.
+  /** @brief Compare the complete event value.
+   * @param other Event or metadata value to compare, without interpreting its payload.
+   * @return True when every stored field is equal; false otherwise.
+   */
+  bool operator==(const InputIssue &other) const = default;
 };
 
 /** @brief Independent owning result, usable beyond decoder reset/destruction. */
@@ -217,12 +245,22 @@ struct InputOptions {
  */
 class InputDecoder {
 public:
-  /** @brief Validate options and create an empty decoder. No allocations or I/O. */
+  /** @brief Validate options and create an empty decoder. No allocations or I/O.
+   * @param options Work, storage and timeout bounds for the lifetime of this stream.
+   * @return An empty decoder, or invalid_options when a bound is outside its documented range.
+   */
   [[nodiscard]] static std::expected<InputDecoder, InputError> create(InputOptions options = {});
-  InputDecoder(const InputDecoder &) = delete;                 ///< Stateful streams cannot be copied.
-  InputDecoder &operator=(const InputDecoder &) = delete;      ///< Stateful streams cannot be copied.
-  InputDecoder(InputDecoder &&) noexcept = default;            ///< Moved-from object must be reset before use.
-  InputDecoder &operator=(InputDecoder &&) noexcept = default; ///< Reset moved-from object before reuse.
+  InputDecoder(const InputDecoder &) = delete;            ///< Stateful streams cannot be copied.
+  InputDecoder &operator=(const InputDecoder &) = delete; ///< Stateful streams cannot be copied.
+  /** @brief Moved-from object must be reset before use.
+   * @param other Stream state and buffered bytes to transfer; reset it before reuse.
+   */
+  InputDecoder(InputDecoder &&other) noexcept = default;
+  /** @brief Reset moved-from object before reuse.
+   * @param other Stream state that replaces the current, unfinished stream.
+   * @return This decoder after memberwise state transfer; reset a moved-from source before reuse.
+   */
+  InputDecoder &operator=(InputDecoder &&other) noexcept = default;
 
   /**
    * @brief Pull at most one event, accepting at most work_bytes from a borrowed view.
@@ -237,15 +275,20 @@ public:
   /** @brief End the stream, flushing at most one pending event per call.
    * Repeat until finished/failed. next() then returns closed; reset starts a new session.
    * Monotonic time and allocation/error contracts match next(). No input is consumed.
+   * @param now Monotonic timestamp, not earlier than the last accepted call.
+   * @return At most one final event and its stop reason, or a call error with no input consumed.
    */
   [[nodiscard]] std::expected<InputStep, InputError> finish(InputTime now);
   /** @brief Return the next decode deadline, or none in ground/closed/failed state.
    * Pending events must be drained before waiting. No allocation or mutation.
+   * @return Next absolute decoder timeout, or nullopt when waiting on time cannot advance decoding.
    */
   [[nodiscard]] std::optional<InputTime> deadline() const noexcept;
   /** @brief Replace expected replies; valid only in ground with no pending event.
    * Returns invalid_window if deadline <= opens_at or not at a sequence boundary.
    * Does not change time, own a query, send bytes, or authenticate future candidates.
+   * @param window Expected single-use reply kinds, correlation generation and half-open time interval.
+   * @return Success, or invalid_window when the interval or current stream boundary is invalid.
    */
   [[nodiscard]] std::expected<void, InputError> expect_replies(InputProbeWindow window) noexcept;
   /** @brief Drop pending input/window/time/offset and recover at an explicit new session boundary.

@@ -124,6 +124,8 @@ struct TerminalSession::Impl {
     (void)restore();
   }
 
+  // The worker borrows Impl and its immutable batch until its thread handle signals.
+  // The owner cannot release bytes, restore modes or destroy Impl before joining it.
   static DWORD WINAPI write_batch(void *context) noexcept {
     auto &self = *static_cast<Impl *>(context);
     const auto remaining = self.output_bytes.size() - self.output_offset;
@@ -570,6 +572,8 @@ TerminalWrite TerminalSession::flush(TerminalDeadline deadline, std::stop_token 
     const bool stopped = stop.stop_requested();
 
     if (stopped || std::chrono::steady_clock::now() >= deadline) {
+      // Once native I/O has been issued, cancellation does not reveal how many bytes
+      // reached the console. Keep the batch alive and prohibit replay until close joins.
       if (state.writer) {
         CancelSynchronousIo(state.writer);
         state.uncertain = true;
@@ -599,6 +603,8 @@ TerminalWrite TerminalSession::flush(TerminalDeadline deadline, std::stop_token 
 
       return fail(system_error());
     }
+    // WAIT_OBJECT_0 is the completion boundary for the worker's written/error fields.
+    // Read them only after that wait and retire the handle before another batch begins.
     CloseHandle(state.writer);
     state.writer = nullptr;
 

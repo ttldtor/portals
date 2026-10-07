@@ -8,38 +8,42 @@
 namespace portals {
 /** @brief Frontend-independent commands; text and paste remain distinct data events. */
 enum class Action {
-  activate,
-  cancel,
-  move_left,
-  move_right,
-  move_up,
-  move_down,
-  move_home,
-  move_end,
-  erase_backward,
-  erase_forward
+  activate,       ///< Activate the target's primary command.
+  cancel,         ///< Cancel the current interaction.
+  move_left,      ///< Move left according to the receiving widget.
+  move_right,     ///< Move right according to the receiving widget.
+  move_up,        ///< Move up according to the receiving widget.
+  move_down,      ///< Move down according to the receiving widget.
+  move_home,      ///< Move to the beginning according to the receiving widget.
+  move_end,       ///< Move to the end according to the receiving widget.
+  erase_backward, ///< Erase before the current position.
+  erase_forward   ///< Erase after the current position.
 };
 
 /** @brief Owning semantic command, usable without terminal input. */
 struct ActionEvent {
-  Action action{};                                      ///< Command identity.
-  InputModifiers modifiers{};                           ///< Selection and other modifier intent.
-  bool operator==(const ActionEvent &) const = default; ///< Value equality.
+  Action action{};            ///< Command identity.
+  InputModifiers modifiers{}; ///< Selection and other modifier intent.
+  /** @brief Value equality.
+   * @param other Command and modifier value to compare.
+   * @return True when all compared fields are equal.
+   */
+  bool operator==(const ActionEvent &other) const = default;
 };
 
 /** @brief Synchronous input value; callback borrows it only until return. */
 using RoutedEvent = std::variant<ActionEvent, KeyEvent, TextInputEvent, PasteInputEvent, MouseInputEvent>;
 /** @brief Explicit bubbling decision; ignored continues toward the original root. */
 enum class EventReply {
-  ignored,
-  handled
+  ignored, ///< Continue bubbling along the original ancestry.
+  handled  ///< Stop bubbling; this registration consumed the event.
 };
 
 /** @brief Distinguish a miss/ineligible target from an eligible unhandled event. */
 enum class DispatchStatus {
-  no_target,
-  unhandled,
-  handled
+  no_target, ///< No eligible destination was selected.
+  unhandled, ///< An eligible destination existed but no handler consumed the event.
+  handled    ///< A handler or built-in focus traversal consumed the event.
 };
 
 /** @brief Owning routing outcome; empty identities mean no eligible target/handler. */
@@ -64,13 +68,24 @@ struct ActionCancellation;
  */
 class ActionBinding {
 public:
-  ActionBinding() = default;                                ///< Empty disconnected token.
-  ~ActionBinding();                                         ///< Disconnect without invoking user code.
-  ActionBinding(ActionBinding &&other) noexcept;            ///< Transfer disconnect responsibility.
-  ActionBinding &operator=(ActionBinding &&other) noexcept; ///< Disconnect old registration, then transfer.
+  /** @brief Empty disconnected token. */
+  ActionBinding() = default;
+  /** @brief Disconnect without invoking user code. */
+  ~ActionBinding();
+  /** @brief Transfer disconnect responsibility.
+   * @param other Token to empty and transfer into this token; valid on any thread.
+   */
+  ActionBinding(ActionBinding &&other) noexcept;
+  /** @brief Disconnect old registration, then transfer.
+   * @param other Token to empty and transfer after disconnecting this registration; self-assignment is a no-op.
+   * @return This token after the transfer.
+   */
+  ActionBinding &operator=(ActionBinding &&other) noexcept;
   ActionBinding(const ActionBinding &) = delete;
   ActionBinding &operator=(const ActionBinding &) = delete;
-  void disconnect() noexcept; ///< Idempotent; active calls retain their captures until return.
+  /** @brief Idempotent; active calls retain their captures until return. */
+  void disconnect() noexcept;
+
 private:
   friend class EventRouter;
   explicit ActionBinding(std::weak_ptr<detail::ActionCancellation> registration);
@@ -87,10 +102,15 @@ private:
  */
 class EventRouter {
 public:
-  /** @brief Validate the tree's owner thread and create a bounded router. */
+  /** @brief Validate the tree's owner thread and create a bounded router.
+   * @param tree Borrowed live tree whose UI thread owns this router; it must outlive the router.
+   * @param options Positive maximum number of live registrations.
+   * @return New router, the tree's root-access error, invalid_argument for zero capacity, or no_memory.
+   */
   static std::expected<std::unique_ptr<EventRouter>, TreeError> create(WidgetTree &tree,
                                                                        EventRouterOptions options = {});
-  ~EventRouter(); ///< Disconnect and reclaim all captures on UI; tree must still exist.
+  /** @brief Disconnect and reclaim all captures on UI; tree must still exist. */
+  ~EventRouter();
   EventRouter(const EventRouter &) = delete;
   EventRouter &operator=(const EventRouter &) = delete;
 
@@ -99,6 +119,14 @@ public:
    * retaining the widget and callback captures even if either is removed during the call.
    * Duplicate registration is invalid_argument; full registry is node_limit. Removed or
    * disconnected records are reclaimed before accepting a new registration.
+   * @tparam T Widget or a publicly derived extension type represented by node.
+   * @tparam Callback Copy-constructible callable invocable as an lvalue with T& and const RoutedEvent&,
+   * returning exactly EventReply.
+   * @param node Live target; hidden or disabled nodes can register but cannot receive input until eligible.
+   * @param callback Owned handler; borrowed widget/event references must not escape the invocation.
+   * @param focusable Whether this registration participates in keyboard focus and traversal.
+   * @return Disconnect token; tree validation errors, would_block during dispatch/frame/collection,
+   * invalid_argument for a duplicate, node_limit for capacity, no_memory, or callback_failed.
    */
   template <class T, class Callback>
   std::expected<ActionBinding, TreeError> bind(Node<T> node, Callback &&callback, bool focusable = true) {
@@ -136,24 +164,44 @@ public:
 
   /** @brief Recover focus if needed; empty Node means no eligible focusable registration.
    * Recovery chooses the most recently focused eligible node, then the first preorder node.
+   * @return Eligible focused node (possibly recovered), an empty observer if none exists,
+   * or tree/router validation errors or no_memory. Recovery requests paint when focus changes.
    */
   std::expected<Node<Widget>, TreeError> focused();
-  /** @brief Focus a live eligible registered node, or return invalid_argument; requests paint. */
+  /** @brief Focus a live eligible registered node, or return invalid_argument; requests paint.
+   * @param node Live, eligible node with a focusable registration.
+   * @return Success, invalid_argument for an ineligible/unregistered/nonfocusable node,
+   * tree/router validation errors, or no_memory.
+   */
   std::expected<void, TreeError> set_focus(Node<Widget> node);
-  /** @brief Traverse eligible registrations in tree preorder with wrap; reverse implements Shift+Tab. */
+  /** @brief Traverse eligible registrations in tree preorder with wrap; reverse implements Shift+Tab.
+   * @param reverse Traverse backward when true, forward otherwise; wrap at either end.
+   * @return Newly focused node, empty if no eligible registration exists, or tree/router errors or no_memory.
+   */
   std::expected<Node<Widget>, TreeError> traverse(bool reverse = false);
-  /** @brief Deepest hit in reverse sibling order; only fresh, clipped geometry participates.
-   * Returns an empty Node for a miss. Nonregistered nodes may be targets and bubble to ancestors.
+  /** @brief Hit target in paint order; descendants and later sibling subtrees take precedence.
+   * Only fresh, clipped geometry participates. Returns an empty Node for a miss.
+   * Nonregistered nodes may be targets and bubble to ancestors.
+   * @param point Surface cell coordinate tested against arranged rectangles and ancestor clips.
+   * @return Last hit in preorder (later siblings cover earlier ones), empty on a miss,
+   * or tree/router validation errors or no_memory.
    */
   std::expected<Node<Widget>, TreeError> hit_test(CellPoint point);
   /** @brief Deliver decoded input synchronously; replies/issues are ignored.
    * Unmodified Tab/Shift+Tab traverse. Enter/Escape/arrows/Home/End/Backspace/Delete map to actions;
    * release and other keys remain KeyEvent. Text (including space), paste and mouse retain type.
    * Left press focuses the nearest focusable target ancestor before bubbling the mouse event.
+   * @param event Decoded input borrowed for this call; handlers must not retain references.
+   * @return Initial target, consuming handler and delivery status; no_target for a miss/ignored decoder event,
+   * tree/router errors, would_block for nested delivery, no_memory, or callback_failed.
    */
   std::expected<DispatchResult, TreeError> dispatch(const InputEvent &event);
   /** @brief Invoke the same handler path with a semantic command; target need not be focusable.
    * Foreign/stale targets return their tree error. Ineligible targets return DispatchStatus::no_target.
+   * @param target Explicit live destination; focus is unchanged.
+   * @param action Owning semantic command and modifier intent to bubble along the original ancestry.
+   * @return Initial target, consuming handler and delivery status; tree/router errors,
+   * would_block for nested delivery, no_memory, or callback_failed.
    */
   std::expected<DispatchResult, TreeError> invoke(Node<Widget> target, ActionEvent action);
 

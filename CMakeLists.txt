@@ -229,6 +229,8 @@ if(PORTALS_BUILD_DOCS)
   set(DOXYGEN_GENERATE_LATEX NO)
   set(DOXYGEN_HAVE_DOT NO)
   set(DOXYGEN_WARN_AS_ERROR YES)
+  set(DOXYGEN_WARN_NO_PARAMDOC YES)
+  set(DOXYGEN_WARN_IF_INCOMPLETE_DOC YES)
   set(DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/docs")
 
   doxygen_add_docs(portals_docs include README.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/scheduler.md docs/widget-tree.md docs/layout.md docs/grid.md docs/property.md docs/focus.md docs/model.md docs/input.md docs/terminal.md docs/terminal-probe.md

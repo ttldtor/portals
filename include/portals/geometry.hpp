@@ -27,8 +27,11 @@ struct CellPoint {
   /** @brief Vertical coordinate in terminal rows. */
   std::int32_t y{};
 
-  /** @brief Compare both coordinates; no errors or invalidation. */
-  bool operator==(const CellPoint &) const noexcept = default;
+  /** @brief Compare both coordinates; no errors or invalidation.
+   * @param other Value whose corresponding fields are compared.
+   * @return True when every compared field is equal; false otherwise.
+   */
+  bool operator==(const CellPoint &other) const noexcept = default;
 };
 
 /**
@@ -44,11 +47,16 @@ struct CellSize {
   /** @brief Available number of rows, possibly negative before normalization. */
   std::int32_t height{};
 
-  /** @brief Return an owning nonnegative extent; no errors or invalidation. */
+  /** @brief Return an owning nonnegative extent; no errors or invalidation.
+   * @return A copy with each negative extent replaced by zero.
+   */
   [[nodiscard]] CellSize normalized() const noexcept;
 
-  /** @brief Compare stored components; no normalization, errors or invalidation. */
-  bool operator==(const CellSize &) const noexcept = default;
+  /** @brief Compare stored components; no normalization, errors or invalidation.
+   * @param other Value whose corresponding fields are compared.
+   * @return True when every compared field is equal; false otherwise.
+   */
+  bool operator==(const CellSize &other) const noexcept = default;
 };
 
 /**
@@ -84,20 +92,36 @@ public:
    */
   [[nodiscard]] static std::expected<CellRect, GeometryError> from(CellPoint origin, CellSize available) noexcept;
 
-  /** @brief Return the cell origin by value; no errors. */
+  /** @brief Return the cell origin by value; no errors.
+   * @return The inclusive top-left cell coordinate, copied by value.
+   */
   [[nodiscard]] CellPoint origin() const noexcept;
-  /** @brief Return the normalized cell extents by value; no errors. */
+  /** @brief Return the normalized cell extents by value; no errors.
+   * @return Nonnegative width in columns and height in rows.
+   */
   [[nodiscard]] CellSize size() const noexcept;
-  /** @brief Return the representable exclusive horizontal end; no errors. */
+  /** @brief Return the representable exclusive horizontal end; no errors.
+   * @return The exclusive x coordinate, including for empty rectangles.
+   */
   [[nodiscard]] std::int32_t right() const noexcept;
-  /** @brief Return the representable exclusive vertical end; no errors. */
+  /** @brief Return the representable exclusive vertical end; no errors.
+   * @return The exclusive y coordinate, including for empty rectangles.
+   */
   [[nodiscard]] std::int32_t bottom() const noexcept;
-  /** @brief Whether either extent is zero; no errors. */
+  /** @brief Whether either extent is zero; no errors.
+   * @return True when width or height is zero.
+   */
   [[nodiscard]] bool empty() const noexcept;
 
-  /** @brief Test half-open point membership; an empty rectangle contains no point. */
+  /** @brief Test half-open point membership; an empty rectangle contains no point.
+   * @param point Cell coordinate tested against the half-open bounds.
+   * @return True only when both coordinates lie inside a nonempty rectangle.
+   */
   [[nodiscard]] bool contains(CellPoint point) const noexcept;
-  /** @brief Test cell-set inclusion; every empty rectangle is a subset of every rectangle. */
+  /** @brief Test cell-set inclusion; every empty rectangle is a subset of every rectangle.
+   * @param rect Rectangle whose covered cell set is tested.
+   * @return True for an empty rect or when all its covered cells lie inside this rectangle.
+   */
   [[nodiscard]] bool contains(CellRect rect) const noexcept;
 
   /**
@@ -119,8 +143,11 @@ public:
    */
   [[nodiscard]] std::expected<CellRect, GeometryError> translated(CellPoint offset) const noexcept;
 
-  /** @brief Compare origin and extents, including the position of empty rectangles. */
-  bool operator==(const CellRect &) const noexcept = default;
+  /** @brief Compare origin and extents, including the position of empty rectangles.
+   * @param other Value whose corresponding fields are compared.
+   * @return True when every compared field is equal; false otherwise.
+   */
+  bool operator==(const CellRect &other) const noexcept = default;
 
 private:
   CellRect(CellPoint origin, CellSize size) noexcept;

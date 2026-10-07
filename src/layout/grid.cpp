@@ -106,6 +106,8 @@ void absorb(std::span<MeasuredChild> tracks, Wide demand, std::int32_t gap) {
       }
     }
 
+    // A capped track must not consume a remainder cell it could not accept. Restart
+    // the equal-share calculation over remaining headroom before distributing extras.
     if (saturated) {
       continue;
     }
@@ -173,6 +175,8 @@ std::expected<std::vector<MeasuredChild>, TreeError> tracks(const GridOptions &o
   return std::expected<std::vector<MeasuredChild>, TreeError>(std::in_place, result);
 }
 
+// Reuse one-dimensional allocation for each axis. Rows use the same x/width solver
+// as columns; cell_rect translates its results back to two-dimensional geometry.
 Row axis_layout(std::int32_t gap) {
   LinearOptions options;
 

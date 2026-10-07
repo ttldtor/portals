@@ -82,8 +82,11 @@ struct RenderError {
   RenderErrorKind kind{};
   /** @brief Underlying error, meaningful only when kind is buffer_error. */
   CellBufferError buffer_error{};
-  /** @brief Compare both owning error fields. */
-  bool operator==(const RenderError &) const noexcept = default;
+  /** @brief Compare both owning error fields.
+   * @param other Value whose corresponding fields are compared.
+   * @return True when every compared field is equal; false otherwise.
+   */
+  bool operator==(const RenderError &other) const noexcept = default;
 };
 
 /**

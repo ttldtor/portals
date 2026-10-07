@@ -149,6 +149,8 @@ std::expected<std::vector<Node<Widget>>, TreeError> EventRouter::focus_order() {
       result.push_back(node);
     }
 
+    // Reverse-push onto the LIFO stack visits siblings in insertion order. Skipping an
+    // ineligible ancestor prunes the whole subtree without consulting arranged geometry.
     pending.insert(pending.end(), snapshot->children.rbegin(), snapshot->children.rend());
   }
 
@@ -211,6 +213,8 @@ std::expected<Node<Widget>, TreeError> EventRouter::focused() {
 
     Node<Widget> next;
 
+    // Recover from still-eligible focus history before choosing a never-focused preorder node.
+    // Hiding a subtree need not erase its history, so restoring it can make that entry useful again.
     for (auto it = state_->history.rbegin(); it != state_->history.rend(); ++it) {
       if (std::find(order->begin(), order->end(), *it) != order->end()) {
         next = *it;
@@ -331,6 +335,8 @@ std::expected<Node<Widget>, TreeError> EventRouter::hit_test(CellPoint point) {
         continue;
       }
 
+      // Retaining the last preorder hit gives descendants precedence over their ancestors
+      // and later sibling subtrees precedence over earlier ones, matching painting order.
       hit = node;
       pending.insert(pending.end(), snapshot->children.rbegin(), snapshot->children.rend());
     }
