@@ -27,6 +27,37 @@ void require(bool condition, const char *message) {
   }
 }
 
+void eventDescriptions() {
+  portals::probe::RunResult result;
+  INPUT_RECORD record{};
+
+  record.EventType = KEY_EVENT;
+  record.Event.KeyEvent.bKeyDown = TRUE;
+  record.Event.KeyEvent.uChar.UnicodeChar = static_cast<WCHAR>(0xffff);
+  record.Event.KeyEvent.wRepeatCount = 3;
+  portals::probe::recordEvent(result, record);
+  require(result.event_summary == " type=1 key_down=1 utf16=65535 repeat=3", "numeric key event description");
+
+  record.Event.KeyEvent.bKeyDown = FALSE;
+  record.Event.KeyEvent.uChar.UnicodeChar = 0;
+  record.Event.KeyEvent.wRepeatCount = 0;
+  portals::probe::recordEvent(result, record);
+  require(result.event_summary == " type=1 key_down=1 utf16=65535 repeat=3 type=1 key_down=0 utf16=0 repeat=0",
+          "key-up description remains numeric");
+
+  result.event_summary.assign(portals::probe::EVENT_SUMMARY_LIMIT - 4, 'x');
+  portals::probe::recordEvent(result, record);
+  require(result.event_summary.size() == portals::probe::EVENT_SUMMARY_LIMIT && result.event_summary.ends_with(" typ"),
+          "event summary truncates at the remaining byte limit");
+  portals::probe::recordEvent(result, record);
+  require(result.event_summary.size() == portals::probe::EVENT_SUMMARY_LIMIT && result.non_byte_events == 4,
+          "full summary still counts events without appending");
+
+  SetLastError(ERROR_ACCESS_DENIED);
+  require(portals::probe::error("fixture") == "fixture: Win32 error 5",
+          "native error code is sampled before formatting");
+}
+
 struct Handle {
   HANDLE value = nullptr;
 
@@ -294,6 +325,8 @@ int wmain(int argc, wchar_t **argv) {
     if (argc == 2 && std::wstring_view(argv[1]) == L"--child") {
       return child();
     }
+
+    eventDescriptions();
 
     Session session;
 

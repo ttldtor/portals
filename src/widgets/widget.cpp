@@ -391,7 +391,7 @@ std::expected<NodeId, TreeError> WidgetTree::attach(NodeId parent, std::unique_p
   }
 
   auto &record = **state_->find(parent);
-  auto slot = std::find_if(state_->slots.begin(), state_->slots.end(), [](const State::Slot &entry) {
+  auto slot = std::ranges::find_if(state_->slots, [](const State::Slot &entry) {
     return !entry.record && entry.generation != 0;
   });
 
@@ -545,7 +545,7 @@ void WidgetTree::reclaim() noexcept {
 
   do {
     sweep(sweep, state_->root);
-    pending = std::any_of(state_->slots.begin(), state_->slots.end(), [](const State::Slot &slot) {
+    pending = std::ranges::any_of(state_->slots, [](const State::Slot &slot) {
       return slot.record && !slot.record->live;
     });
   } while (pending);

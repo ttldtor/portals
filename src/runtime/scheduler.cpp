@@ -76,7 +76,7 @@ struct SchedulerState {
   }
 
   auto find(std::uint64_t id) {
-    return std::find_if(registrations.begin(), registrations.end(), [id](const auto &entry) {
+    return std::ranges::find_if(registrations, [id](const auto &entry) {
       return entry->id == id;
     });
   }
@@ -95,7 +95,7 @@ struct SchedulerState {
 
       {
         std::lock_guard lock(mutex);
-        auto found = std::find_if(queue.values.begin(), queue.values.end(), [id](const auto &entry) {
+        auto found = std::ranges::find_if(queue.values, [id](const auto &entry) {
           return entry.id == id;
         });
 
@@ -152,7 +152,7 @@ struct SchedulerState {
 
       {
         std::lock_guard lock(mutex);
-        auto found = std::find_if(registrations.begin(), registrations.end(), [id](const auto &entry) {
+        auto found = std::ranges::find_if(registrations, [id](const auto &entry) {
           return entry->scope == id;
         });
 
@@ -249,7 +249,7 @@ std::expected<PublishResult, SchedulerError> schedulerPublish(const std::shared_
   auto pending = queue.values.end();
 
   if (registration.overflow == SchedulerOverflow::REPLACE_LATEST) {
-    pending = std::find_if(queue.values.begin(), queue.values.end(), [id](const auto &entry) {
+    pending = std::ranges::find_if(queue.values, [id](const auto &entry) {
       return entry.id == id;
     });
   }

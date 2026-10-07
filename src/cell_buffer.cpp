@@ -227,7 +227,7 @@ std::expected<void, CellBufferError> CellBuffer::put(CellPoint position, const G
   // All coordinate, policy and pool-capacity checks precede this commit point.
   // From here onward every operation uses preallocated storage and cannot fail.
   if (glyph_id == glyph_count_) {
-    std::copy(glyph_bytes.begin(), glyph_bytes.end(), bytes_.get() + byte_count_);
+    std::ranges::copy(glyph_bytes, bytes_.get() + byte_count_);
     glyphs_[glyph_id] = {byte_count_, glyph_bytes.size(), grapheme.cells};
     byte_count_ += glyph_bytes.size();
     ++glyph_count_;

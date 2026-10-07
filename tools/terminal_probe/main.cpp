@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <exception>
+#include <format>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -97,10 +98,10 @@ void environment() {
     const char *value = std::getenv(name.data());
     const std::string_view raw = value == nullptr ? std::string_view{} : std::string_view(value);
 
-    field("env." + std::string(name), value == nullptr ? "unset" : raw.substr(0, ENVIRONMENT_LIMIT));
+    field(std::format("env.{}", name), value == nullptr ? "unset" : raw.substr(0, ENVIRONMENT_LIMIT));
 
     if (raw.size() > ENVIRONMENT_LIMIT) {
-      field("env." + std::string(name) + ".truncated", "true");
+      field(std::format("env.{}.truncated", name), "true");
     }
   }
 

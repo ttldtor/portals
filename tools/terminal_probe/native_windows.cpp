@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <format>
 
 namespace portals::probe {
 namespace {
@@ -16,7 +17,9 @@ constexpr DWORD EVENT_CHUNK_SIZE = 32;
 constexpr std::size_t EVENT_SUMMARY_LIMIT = 1024;
 
 std::string error(std::string_view operation) {
-  return std::string(operation) + ": Win32 error " + std::to_string(GetLastError());
+  const DWORD code = GetLastError();
+
+  return std::format("{}: Win32 error {}", operation, code);
 }
 
 std::string transport(HANDLE handle, bool console) {
@@ -100,12 +103,12 @@ void recordEvent(RunResult &result, const INPUT_RECORD &record) {
     return;
   }
 
-  std::string description = " type=" + std::to_string(record.EventType);
+  std::string description = std::format(" type={}", record.EventType);
 
   if (record.EventType == KEY_EVENT) {
-    description += " key_down=" + std::to_string(record.Event.KeyEvent.bKeyDown != FALSE) +
-                   " utf16=" + std::to_string(static_cast<unsigned>(record.Event.KeyEvent.uChar.UnicodeChar)) +
-                   " repeat=" + std::to_string(record.Event.KeyEvent.wRepeatCount);
+    description +=
+      std::format(" key_down={} utf16={} repeat={}", static_cast<int>(record.Event.KeyEvent.bKeyDown != FALSE),
+                  static_cast<unsigned>(record.Event.KeyEvent.uChar.UnicodeChar), record.Event.KeyEvent.wRepeatCount);
   }
 
   result.event_summary += description.substr(0, EVENT_SUMMARY_LIMIT - result.event_summary.size());
@@ -243,9 +246,8 @@ NativeFacts inspectNative() {
   version.dwOSVersionInfoSize = sizeof(version);
 
   if (version_function != nullptr && version_function(&version) == 0) {
-    facts.fields.emplace_back("os.version", std::to_string(version.dwMajorVersion) + "." +
-                                              std::to_string(version.dwMinorVersion) + "." +
-                                              std::to_string(version.dwBuildNumber) + " (RtlGetVersion)");
+    facts.fields.emplace_back("os.version", std::format("{}.{}.{} (RtlGetVersion)", version.dwMajorVersion,
+                                                        version.dwMinorVersion, version.dwBuildNumber));
   } else {
     facts.fields.emplace_back("os.version", "unknown (RtlGetVersion unavailable)");
   }
@@ -254,7 +256,7 @@ NativeFacts inspectNative() {
 
   GetNativeSystemInfo(&system);
   facts.fields.emplace_back("os.architecture",
-                            std::to_string(system.wProcessorArchitecture) + " (Win32 architecture enum)");
+                            std::format("{} (Win32 architecture enum)", system.wProcessorArchitecture));
 
   const auto input = GetStdHandle(STD_INPUT_HANDLE);
   const auto output = GetStdHandle(STD_OUTPUT_HANDLE);

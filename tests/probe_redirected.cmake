@@ -41,6 +41,16 @@ if(NOT result STREQUAL "0" OR NOT raw_escape EQUAL -1 OR escaped_hint EQUAL -1)
   message(FATAL_ERROR "Untrusted environment values were not escaped: ${result} ${error}")
 endif()
 
+string(REPEAT "x" 1025 oversized_hint)
+string(REPEAT "x" 1024 bounded_hint)
+execute_process(COMMAND "${CMAKE_COMMAND}" -E env "TERM_PROGRAM=${oversized_hint}" "${PROBE}" --headless
+  RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error TIMEOUT 3)
+string(FIND "${output}" "env.TERM_PROGRAM=\"${bounded_hint}\"" bounded_field)
+string(FIND "${output}" "env.TERM_PROGRAM.truncated=\"true\"" truncated_field)
+if(NOT result STREQUAL "0" OR bounded_field EQUAL -1 OR truncated_field EQUAL -1)
+  message(FATAL_ERROR "Oversized environment value did not preserve its bounded field and truncation marker")
+endif()
+
 execute_process(COMMAND "${PROBE}" --help RESULT_VARIABLE result OUTPUT_VARIABLE output TIMEOUT 3)
 if(NOT result STREQUAL "0" OR NOT output MATCHES "Usage: portals_terminal_probe")
   message(FATAL_ERROR "Probe help failed")
