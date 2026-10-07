@@ -16,7 +16,7 @@ set_target_properties(portals_utf8proc PROPERTIES C_STANDARD 99 C_STANDARD_REQUI
 target_compile_definitions(portals_utf8proc PRIVATE UTF8PROC_STATIC)
 target_include_directories(portals_utf8proc PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/utf8proc")
 
-add_library(portals_core STATIC src/version.cpp src/geometry.cpp src/text.cpp)
+add_library(portals_core STATIC src/version.cpp src/geometry.cpp src/text.cpp src/input.cpp)
 target_link_libraries(portals_core PRIVATE portals_utf8proc)
 target_include_directories(portals_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/utf8proc")
 target_compile_definitions(portals_core PRIVATE UTF8PROC_STATIC)
@@ -78,6 +78,11 @@ if(PORTALS_BUILD_TESTS)
   target_link_libraries(portals_text PRIVATE portals::core)
   portals_enable_warnings(portals_text)
   add_test(NAME portals.text COMMAND portals_text "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/unicode/GraphemeBreakTest-18.0.0.txt")
+  add_executable(portals_input tests/input.cpp)
+  target_link_libraries(portals_input PRIVATE portals::core)
+  portals_enable_warnings(portals_input)
+  add_test(NAME portals.input COMMAND portals_input)
+  set_tests_properties(portals.input PROPERTIES TIMEOUT 20)
   add_test(NAME portals.unicode-provenance COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/vendor/utf8proc/verify.cmake")
   set_tests_properties(portals.smoke portals.geometry portals.text portals.unicode-provenance PROPERTIES TIMEOUT 10)
 
@@ -114,7 +119,7 @@ if(PORTALS_BUILD_DOCS)
   set(DOXYGEN_HAVE_DOT NO)
   set(DOXYGEN_WARN_AS_ERROR YES)
   set(DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/docs")
-  doxygen_add_docs(portals_docs include README.md docs/geometry.md docs/text.md docs/terminal-probe.md
+  doxygen_add_docs(portals_docs include README.md docs/geometry.md docs/text.md docs/input.md docs/terminal-probe.md
     docs/api-design.md experiments/module-spike/README.md
     vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"

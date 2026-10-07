@@ -106,6 +106,8 @@ Cell geometry: [units, clipping and numeric bounds](docs/geometry.md).
 
 UTF-8 text: [graphemes, width policy, cursor and clipping](docs/text.md).
 
+VT input: [bounded streaming decoder, events, timing and recovery](docs/input.md).
+
 API design sketches: [five scenarios](docs/api-design.md). The independent
 [header/module/shared-library spike](experiments/module-spike/README.md) tests
 compilation mechanics; UI sketches are design-only.
