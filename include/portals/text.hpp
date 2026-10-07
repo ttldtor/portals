@@ -139,8 +139,8 @@ public:
   GraphemeText(const GraphemeText &) = default;
   /** @brief Replace storage with an independent copy; invalidates borrowed views. */
   GraphemeText &operator=(const GraphemeText &other);
-  /** @brief Transfer storage and reset the distinct source to empty; invalidates source views. */
-  GraphemeText(GraphemeText &&other) noexcept;
+  /** @brief Transfer storage and empty the source; may allocate debug bookkeeping before changing the source. */
+  GraphemeText(GraphemeText &&other);
   /** @brief Transfer storage; invalidates both objects' views and empties a distinct source. Self-move is a no-op. */
   GraphemeText &operator=(GraphemeText &&other) noexcept;
 
@@ -186,8 +186,9 @@ public:
 
 private:
   GraphemeText() = default;
-  std::string bytes_;
-  std::vector<Grapheme> graphemes_;
+  // Count constructors let MSVC Debug iterator-proxy allocation failures propagate.
+  std::string bytes_ = std::string(0, '\0');
+  std::vector<Grapheme> graphemes_ = std::vector<Grapheme>(0);
   WidthPolicy policy_;
   std::int32_t cells_{};
 };

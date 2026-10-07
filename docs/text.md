@@ -23,7 +23,10 @@ the resulting object until its destruction, assignment or move; copied values
 own independent storage. A distinct moved-from value is empty; self-move assignment leaves the value unchanged. Concurrent reads are
 safe; mutations/destruction require caller synchronization. Construction and
 copy may throw `std::bad_alloc` or `std::length_error`; semantic/resource errors
-use `std::expected` and never return partial text. Cursor and clipping operations
+use `std::expected` and never return partial text. Move construction may allocate
+debug iterator bookkeeping before transferring storage; failure leaves the source
+unchanged. Move assignment allocates nothing and remains `noexcept`.
+Cursor and clipping operations
 allocate nothing, perform no I/O and throw no exceptions. Cursor movement uses
 binary search; clipping scans the fitting prefix. Cursor offsets must be whole
 grapheme boundaries, including zero/end; invalid offsets return `not_boundary`.
