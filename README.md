@@ -2,7 +2,7 @@
 
 Portals is the starting point of a C++23 terminal UI library. This bootstrap
 contains a static core library, release metadata, a standalone consumer and a
-headless tests. Checked cell geometry and UTF-8 grapheme measurements are available; widget/UI functionality is not implemented yet.
+headless tests. Checked cell geometry, UTF-8 grapheme measurements and a bounded cell framebuffer are available; widget/UI functionality is not implemented yet.
 
 ## Build and test
 
@@ -71,7 +71,7 @@ cmake --build build/docs --target portals_docs
 ```
 
 Open `build/docs/docs/html/index.html`. Public declarations include Doxygen
-contracts. The compiled core implements release metadata and checked cell geometry;
+contracts. The compiled core implements release metadata, checked cell geometry, grapheme text and a cell framebuffer;
 the example consumes that contract and the smoke executable checks it through
 the same public header and linked target. The test uses an explicit nonzero
 failure exit code, so checks remain active with `NDEBUG`.
@@ -87,6 +87,8 @@ Reference: [CMake presets](https://cmake.org/cmake/help/latest/manual/cmake-pres
 Cell geometry: [units, clipping and numeric bounds](docs/geometry.md).
 
 UTF-8 text: [graphemes, width policy, cursor and clipping](docs/text.md).
+
+Cell framebuffer: [ownership, wide glyphs, limits and measured memory](docs/cell-buffer.md).
 
 API design sketches: [five scenarios](docs/api-design.md). The independent
 [header/module/shared-library spike](experiments/module-spike/README.md) tests
