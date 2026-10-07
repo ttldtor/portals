@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="690" viewBox="0 0 1000 690" role="img" aria-label="From an action to committed output">
+<title>From an action to committed output</title>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="#365b78"/></marker></defs>
+<style>text{font-family:Arial,sans-serif;fill:#183247} .title{font-size:25px;font-weight:bold} .label{font-size:17px;font-weight:bold} .detail{font-size:14px} .edge{fill:none;stroke:#365b78;stroke-width:2;marker-end:url(#arrow)}</style>
+<rect width="1000" height="690" fill="#f7f9fc"/>
+<text x="36" y="42" class="title">From an action to committed output</text>
+<rect x="20" y="75" width="160" height="76" rx="9" fill="#fff" stroke="#b4c7d8" stroke-width="2"/>
+<text x="100.0" y="104" text-anchor="middle" class="label">EventRouter</text>
+<text x="100.0" y="125" text-anchor="middle" class="detail">UI owner</text>
+<path d="M100,151 L100,620" stroke="#b4c7d8" stroke-dasharray="5 5"/>
+<rect x="220" y="75" width="160" height="76" rx="9" fill="#fff" stroke="#b4c7d8" stroke-width="2"/>
+<text x="300.0" y="104" text-anchor="middle" class="label">Application</text>
+<text x="300.0" y="125" text-anchor="middle" class="detail">UI owner</text>
+<path d="M300,151 L300,620" stroke="#b4c7d8" stroke-dasharray="5 5"/>
+<rect x="420" y="75" width="160" height="76" rx="9" fill="#fff" stroke="#b4c7d8" stroke-width="2"/>
+<text x="500.0" y="104" text-anchor="middle" class="label">Property</text>
+<text x="500.0" y="125" text-anchor="middle" class="detail">UI owner</text>
+<path d="M500,151 L500,620" stroke="#b4c7d8" stroke-dasharray="5 5"/>
+<rect x="620" y="75" width="160" height="76" rx="9" fill="#fff" stroke="#b4c7d8" stroke-width="2"/>
+<text x="700.0" y="104" text-anchor="middle" class="label">Frame builder</text>
+<text x="700.0" y="125" text-anchor="middle" class="detail">UI owner</text>
+<path d="M700,151 L700,620" stroke="#b4c7d8" stroke-dasharray="5 5"/>
+<rect x="820" y="75" width="160" height="76" rx="9" fill="#fff" stroke="#b4c7d8" stroke-width="2"/>
+<text x="900.0" y="104" text-anchor="middle" class="label">FrameWriter</text>
+<text x="900.0" y="125" text-anchor="middle" class="detail">UI owner</text>
+<path d="M900,151 L900,620" stroke="#b4c7d8" stroke-dasharray="5 5"/>
+<path class="edge" d="M100,195 L300,195"/>
+<text x="200.0" y="183" text-anchor="middle" class="detail">checked delivery</text>
+<path class="edge" d="M300,250 L500,250"/>
+<text x="400.0" y="238" text-anchor="middle" class="detail">set(value)</text>
+<path class="edge" d="M500,305 L700,305"/>
+<text x="600.0" y="293" text-anchor="middle" class="detail">invalidate if changed</text>
+<path class="edge" d="M500,355 L300,355" stroke-dasharray="7 5"/>
+<text x="400.0" y="343" text-anchor="middle" class="detail">update receipt</text>
+<path class="edge" d="M300,425 L700,425"/>
+<text x="500.0" y="413" text-anchor="middle" class="detail">prepare + frame</text>
+<path class="edge" d="M700,515 L900,515"/>
+<text x="800.0" y="503" text-anchor="middle" class="detail">owning CellBuffer</text>
+<path class="edge" d="M900,580 L300,580" stroke-dasharray="7 5"/>
+<text x="600.0" y="568" text-anchor="middle" class="detail">pending / complete / error</text>
+<text x="705" y="457" text-anchor="middle" class="detail">Render borrowed commands</text>
+<text x="705" y="478" text-anchor="middle" class="detail">before leaving tree.frame</text>
+<rect x="36" y="630" width="928" height="42" rx="6" fill="#e8f1f7"/>
+<text x="500" y="656" text-anchor="middle" class="detail">Equal property value: no invalidation. Handler return alone does not prove a change.</text>
+</svg>

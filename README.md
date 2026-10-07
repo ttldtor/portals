@@ -1,15 +1,17 @@
 # Portals
 
-Portals is the starting point of a C++23 terminal UI library. This bootstrap
-contains a static core library, release metadata, a standalone consumer and
-headless tests. Checked cell geometry, UTF-8 grapheme measurements, VT input
+Portals is a C++23 terminal UI library under development. It contains a static
+core library, a standalone consumer, a control gallery and headless tests.
+Checked cell geometry, UTF-8 grapheme measurements, VT input
 decoding, Windows/POSIX terminal sessions, a bounded cell framebuffer, a full-frame
 reference renderer, bounded row diff, transactional frame writer and a
 [UI scheduler with scoped cancellation](docs/scheduler.md) and a
 [retained widget tree](docs/widget-tree.md) with [typed properties](docs/property.md)
 and [Row/Column layouts and size policies](docs/layout.md), [Grid and Overlay](docs/grid.md),
 and [immutable list/table model ranges](docs/model.md) are available.
-Built-in controls are not implemented yet.
+[Label, Button and CheckBox](docs/controls.md), a [virtual list](docs/virtual-list.md)
+and a [virtual table](docs/virtual-table.md) are implemented. See the
+[architecture](docs/architecture.md) for component boundaries and remaining work.
 
 ## Build and test
 
@@ -139,6 +141,8 @@ compilation mechanics; UI sketches are design-only.
 Virtual list: [preparation, ownership and fixed-row navigation](docs/virtual-list.md).
 
 Virtual table: [typed columns, shared snapshots and bounded preparation](docs/virtual-table.md).
+
+Architecture: [components, event processing, ownership and customization](docs/architecture.md).
 
 ## License
 
