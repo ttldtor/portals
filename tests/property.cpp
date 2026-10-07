@@ -593,6 +593,121 @@ void allocationFailures() {
   check(eventually_observed, "observe succeeds after finite allocations");
 }
 
+void stringAllocationFailures() {
+  constexpr std::ptrdiff_t MAX_BUDGET = 160;
+  auto scheduler = take(Scheduler::create());
+  auto tree = take(WidgetTree::create(*scheduler));
+  const auto root = take(tree->root());
+  const std::string initial(80, 'a');
+  const std::string candidate(80, 'b');
+
+  for (const bool creating : {true, false}) {
+    bool succeeded{};
+    bool observedFailure{};
+
+    for (std::ptrdiff_t budget = 0; budget < MAX_BUDGET; ++budget) {
+      auto property = take(Property<std::string>::create(*tree, root, initial, Invalidation::PAINT));
+      std::expected<std::unique_ptr<Property<std::string>>, TreeError> created;
+      std::expected<PropertyUpdate<std::string>, TreeError> changed;
+      bool argumentFailed{};
+      int notifications{};
+      auto observer = take(property->observe(root, [&](Widget &, auto) {
+        ++notifications;
+      }));
+
+      take(tree->consumeFrameRequest());
+      allocation_test::remaining = budget;
+
+      try {
+        if (creating) {
+          created = Property<std::string>::create(*tree, root, candidate, Invalidation::PAINT);
+        } else {
+          changed = property->set(candidate);
+        }
+      } catch (const std::bad_alloc &) {
+        argumentFailed = true;
+      }
+
+      allocation_test::remaining = -1;
+
+      check(!argumentFailed, "const-reference string operations contain allocation failures inside their boundary");
+
+      if (!argumentFailed && (creating ? bool(created) : bool(changed))) {
+        succeeded = true;
+
+        if (creating) {
+          check(take((*created)->snapshot())->value == candidate, "factory owns complete string snapshot");
+        } else {
+          const auto current = take(property->snapshot());
+
+          check(current == changed->snapshot && current->value == candidate && current->revision == 1,
+                "string update receipt is the committed snapshot");
+          take(scheduler->dispatch());
+          check(notifications == 1, "successful string update notifies once");
+        }
+
+        break;
+      }
+
+      observedFailure = true;
+      check(argumentFailed || (creating ? created.error() : changed.error()) == TreeError::NO_MEMORY,
+            "string argument allocation throws and internal allocation returns NO_MEMORY");
+      check(take(property->snapshot())->value == initial && take(property->snapshot())->revision == 0,
+            "failed string construction preserves previous value and revision");
+      check(take(tree->consumeFrameRequest()) == Invalidation::NONE, "failed string construction does not invalidate");
+      take(scheduler->dispatch());
+      check(notifications == 0, "failed string construction does not enqueue notifications");
+    }
+
+    check(succeeded && observedFailure, "string create/set sweep observes failure and eventual success");
+  }
+}
+
+struct MoveOnlyValue {
+  int value{};
+
+  explicit MoveOnlyValue(int initial) : value(initial) {
+  }
+
+  MoveOnlyValue(const MoveOnlyValue &) = delete;
+  MoveOnlyValue(MoveOnlyValue &&) = default;
+  MoveOnlyValue &operator=(MoveOnlyValue &&) = default;
+  bool operator==(const MoveOnlyValue &) const = default;
+};
+
+void moveOnlySnapshots() {
+  auto scheduler = take(Scheduler::create());
+  auto tree = take(WidgetTree::create(*scheduler));
+  const auto root = take(tree->root());
+  auto property = take(Property<MoveOnlyValue>::create(*tree, root, MoveOnlyValue{1}, Invalidation::PAINT));
+  const auto previous = take(property->snapshot());
+  const auto changed = take(property->set(MoveOnlyValue{2}));
+
+  check(previous->value.value == 1 && changed.snapshot->value.value == 2 && changed.snapshot->revision == 1,
+        "move-only values retain generic snapshot support and immutable previous owners");
+}
+
+void moveOnlyContainerSnapshots() {
+  auto scheduler = take(Scheduler::create());
+  auto tree = take(WidgetTree::create(*scheduler));
+  const auto root = take(tree->root());
+  std::vector<std::unique_ptr<int>> initial(0);
+
+  initial.push_back(std::make_unique<int>(1));
+
+  auto property =
+    take(Property<std::vector<std::unique_ptr<int>>>::create(*tree, root, std::move(initial), Invalidation::PAINT));
+  const auto previous = take(property->snapshot());
+  std::vector<std::unique_ptr<int>> candidate(0);
+
+  candidate.push_back(std::make_unique<int>(2));
+
+  const auto changed = take(property->set(std::move(candidate)));
+
+  check(*previous->value[0] == 1 && *changed.snapshot->value[0] == 2,
+        "container with a false-positive copy trait still uses its valid move path");
+}
+
 struct SourceWidget : Widget {
   bool &destroyed;
   std::unique_ptr<Property<int>> property;
@@ -670,6 +785,9 @@ int main() {
   destructorReentry();
   registrationDestructorReentry();
   allocationFailures();
+  stringAllocationFailures();
+  moveOnlySnapshots();
+  moveOnlyContainerSnapshots();
   currentTargetDestruction();
   boundedReentry();
 

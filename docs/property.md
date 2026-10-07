@@ -43,7 +43,7 @@ invalidation and commits its snapshot before attempting notifications.
 
 An `unexpected(TreeError)` means the operation made no library-controlled change
 to the value, revision, queue or invalidation. Allocation failure is `NO_MEMORY`;
-exceptions from value comparison/move are `CALLBACK_FAILED`; exhausted revision
+exceptions from value comparison/copy/move are `CALLBACK_FAILED`; exhausted revision
 space is `IDENTITY_EXHAUSTED`. Construction of caller arguments is outside this
 boundary, as are application side effects in user code. Removed targets reject
 `set` with `STALE_NODE`; retained snapshots still work. Mutations inside a tree
@@ -68,6 +68,30 @@ must use the current snapshot through its own application policy. Do not use thi
 API as a lossless domain-event stream. No notification is promised to all observers
 when the bounded scheduler queue is full.
 
+## Construction and allocation boundaries
+
+Both `create` and `set` provide ordinary `const T&` and `T&&` overloads. The
+const-reference overload copies directly into the immutable snapshot inside the
+exception boundary. The rvalue overload forwards directly into that snapshot,
+with no intermediate owning `T`. Copying is required only when the caller selects
+the const-reference overload; genuinely move-only values and containers such as
+`vector<unique_ptr<int>>` remain supported by the rvalue path. Copy traits are not
+used to guess which operation is valid.
+
+For recoverable allocation errors with `std::string`, pass an existing lvalue.
+MSVC's Debug STL may allocate iterator bookkeeping even inside a `noexcept` move
+constructor. Such an allocation failure terminates inside the type and cannot
+be caught by Property; the const-reference path uses the throwing copy constructor
+and reports `NO_MEMORY`. The same limitation applies to any user type that
+terminates internally. Construction of an argument before API entry is also
+outside the error boundary. Debug iterators and assertions remain enabled.
+
+An rvalue is compared before being moved. If snapshot construction succeeds but
+later tree invalidation fails, the property is unchanged while the caller's
+candidate can already be moved-from. Publication order, immutable revisions,
+old-value retention and notification receipts are identical for both overloads.
+Code taking the address of `create` or `set` must now select its desired overload
+explicitly; ordinary call syntax stays unchanged.
 ## Reentry and cancellation
 
 Callbacks run through the real Scheduler between frames. If observer A handles
@@ -93,7 +117,7 @@ after temporary callback destructors; source destruction during this step report
 `CLOSED`. The endpoint limit reports `NODE_LIMIT`; the scheduler's own registration
 or queue capacity is reported through its existing errors.
 
-Value construction/move/comparison and callback construction/move must not reenter
+Value construction/copy/move/comparison and callback construction/move must not reenter
 UI operations. Destructors must not throw or call members of an object currently
 being destroyed. An old value is retained until all publication attempts finish;
 its destructor may then reenter a live source. The returned receipt still identifies
