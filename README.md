@@ -124,6 +124,8 @@ Frame output: [diff, transaction ownership and recovery](docs/diff.md).
 
 VT input: [bounded streaming decoder, events, timing and recovery](docs/input.md).
 
+Headless testing: [fake clock, independent snapshots and versioned trace/replay](docs/testing.md).
+
 API design sketches: [five scenarios](docs/api-design.md). The independent
 [header/module/shared-library spike](experiments/module-spike/README.md) tests
 compilation mechanics; UI sketches are design-only.

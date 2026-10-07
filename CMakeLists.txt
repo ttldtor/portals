@@ -109,6 +109,12 @@ if(PORTALS_BUILD_TESTS)
   add_test(NAME portals.unicode-provenance COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/vendor/utf8proc/verify.cmake")
   set_tests_properties(portals.smoke portals.geometry portals.text portals.cell-buffer portals.render portals.unicode-provenance PROPERTIES TIMEOUT 10)
 
+  add_executable(portals_replay tests/replay.cpp tests/support/test_terminal.cpp)
+  target_link_libraries(portals_replay PRIVATE portals::core)
+  portals_enable_warnings(portals_replay)
+  add_test(NAME portals.replay COMMAND portals_replay "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/traces")
+  set_tests_properties(portals.replay PROPERTIES TIMEOUT 15)
+
   add_executable(portals_input tests/input.cpp)
   target_link_libraries(portals_input PRIVATE portals::core)
   portals_enable_warnings(portals_input)
@@ -180,7 +186,7 @@ if(PORTALS_BUILD_DOCS)
   set(DOXYGEN_WARN_AS_ERROR YES)
   set(DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/docs")
 
-  doxygen_add_docs(portals_docs include README.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/input.md docs/terminal.md docs/terminal-probe.md
+  doxygen_add_docs(portals_docs include README.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/input.md docs/terminal.md docs/terminal-probe.md
 
 
 

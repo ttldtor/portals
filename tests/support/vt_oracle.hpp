@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -18,19 +19,71 @@ namespace test_support {
 // ASCII and combining acute); this is deliberately not a general VT product.
 class VtOracle {
 public:
+  /** @brief Owning semantic cell; continuation repeats the lead glyph/style. */
   struct Pixel {
-    std::string glyph{" "};
-    portals::CellStyle style;
-    int width{1};
-    bool tail{};
+    std::string glyph{" "};                         ///< Complete fixture grapheme bytes.
+    portals::CellStyle style;                       ///< Independent style value.
+    int width{1};                                   ///< One/two for leads, zero for continuation.
+    bool tail{};                                    ///< Continuation of the preceding wide lead.
+    bool operator==(const Pixel &) const = default; ///< Value equality.
   };
-  VtOracle(int width, int height) : width_(width), height_(height), cells_(static_cast<std::size_t>(width * height)) {
+  /** @brief Half-open horizontal range of one complete grapheme. */
+  struct Span {
+    int row{};                                     ///< Row containing the grapheme.
+    int begin{};                                   ///< Inclusive lead column.
+    int end{};                                     ///< Exclusive column after the grapheme.
+    bool operator==(const Span &) const = default; ///< Value equality.
+  };
+  /** @brief Owning semantic screen checkpoint, independent of subsequent mutations. */
+  struct Snapshot {
+    portals::CellSize size;                            ///< Viewport dimensions.
+    std::vector<Pixel> cells;                          ///< Row-major cell values.
+    std::vector<Span> spans;                           ///< One range per lead, in row-major order.
+    portals::CellPoint cursor;                         ///< Cursor in cell coordinates.
+    portals::CellStyle cursor_style;                   ///< Style applied by subsequent text.
+    bool autowrap{};                                   ///< Whether right-edge output enables wrapping.
+    bool wrap_pending{};                               ///< Whether the next spacing glyph wraps.
+    bool operator==(const Snapshot &) const = default; ///< Value equality.
+  };
+  static constexpr std::size_t max_cells = 16384;     ///< Includes existing large native writer fixtures.
+  static constexpr std::size_t max_dimension = 4096;  ///< Bound each coordinate independently.
+  static constexpr std::size_t max_glyph_bytes = 256; ///< Bound combining sequences.
+  static constexpr std::size_t max_csi_bytes = 64;    ///< Bound incomplete parameter storage.
+  /** @brief Validate dimensions and product before allocating; return the cell count. */
+  static std::size_t validate_size(int width, int height) {
+    if (width < 0 || height < 0 || static_cast<std::size_t>(width) > max_dimension ||
+        static_cast<std::size_t>(height) > max_dimension ||
+        (height != 0 && static_cast<std::size_t>(width) > max_cells / static_cast<std::size_t>(height))) {
+      throw std::runtime_error("oracle: viewport limit exceeded");
+    }
+
+    return static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+  }
+  /** @brief Capture cells, spans, style and cursor, without encoder helpers. */
+  Snapshot snapshot() const {
+    Snapshot result{{width_, height_}, cells_, {}, {x_, y_}, style_, wrap_, wrap_pending_};
+    for (int y = 0; y < height_; ++y) {
+      for (int x = 0; x < width_; ++x) {
+        const auto &pixel = cells_[index(x, y)];
+        if (!pixel.tail) {
+          result.spans.push_back({y, x, x + pixel.width});
+        }
+      }
+    }
+
+    return result;
+  }
+  VtOracle(int width, int height) : width_(width), height_(height), cells_(validate_size(width, height)) {
   }
   void resize(int width, int height) {
-    std::vector<Pixel> resized(static_cast<std::size_t>(width * height));
+    std::vector<Pixel> resized(validate_size(width, height));
     for (int y = 0; y < std::min(height_, height); ++y) {
       for (int x = 0; x < std::min(width_, width); ++x) {
-        resized[static_cast<std::size_t>(y * width + x)] = cells_[index(x, y)];
+        const auto &pixel = cells_[index(x, y)];
+        if (!pixel.tail && x + pixel.width > width) {
+          continue;
+        }
+        resized[static_cast<std::size_t>(y * width + x)] = pixel;
       }
     }
     width_ = width;
@@ -67,6 +120,9 @@ public:
           csi_.clear();
           state_ = State::ground;
         } else {
+          if (csi_.size() == max_csi_bytes) {
+            throw std::runtime_error("oracle: CSI limit exceeded");
+          }
           csi_.push_back(static_cast<char>(ch));
         }
         continue;
@@ -87,6 +143,9 @@ public:
         unicode_.push_back(static_cast<char>(ch));
         --needed_;
         if (needed_ == 0) {
+          if (scalar_ < minimum_scalar_ || scalar_ > 0x10ffff || (scalar_ >= 0xd800 && scalar_ <= 0xdfff)) {
+            throw std::runtime_error("oracle: invalid UTF-8 scalar");
+          }
           put(scalar_, unicode_);
         }
         continue;
@@ -102,12 +161,15 @@ public:
         if ((ch & 0xe0) == 0xc0) {
           needed_ = 1;
           scalar_ = ch & 0x1f;
+          minimum_scalar_ = 0x80;
         } else if ((ch & 0xf0) == 0xe0) {
           needed_ = 2;
           scalar_ = ch & 0x0f;
+          minimum_scalar_ = 0x800;
         } else if ((ch & 0xf8) == 0xf0) {
           needed_ = 3;
           scalar_ = ch & 0x07;
+          minimum_scalar_ = 0x10000;
         } else {
           throw std::runtime_error("oracle: invalid UTF-8 lead");
         }
@@ -149,6 +211,10 @@ private:
     csi
   };
   std::size_t index(int x, int y) const {
+    if (x < 0 || y < 0 || x >= width_ || y >= height_) {
+      throw std::runtime_error("oracle: cell coordinate outside viewport");
+    }
+
     return static_cast<std::size_t>(y * width_ + x);
   }
   void clear_glyph(int x, int y) {
@@ -168,11 +234,18 @@ private:
         throw std::runtime_error("oracle: unattached accent");
       }
       auto &lead = cells_[static_cast<std::size_t>(last_lead_)];
+      if (bytes.size() > max_glyph_bytes - lead.glyph.size()) {
+        throw std::runtime_error("oracle: glyph byte limit exceeded");
+      }
       lead.glyph += bytes;
       if (lead.width == 2) {
         cells_[static_cast<std::size_t>(last_lead_) + 1].glyph = lead.glyph;
       }
       return;
+    }
+    if (!((scalar >= 0x20 && scalar <= 0x7e) || (scalar >= 0x4e00 && scalar <= 0x9fff) ||
+          (scalar >= 0x1f300 && scalar <= 0x1faff))) {
+      throw std::runtime_error("oracle: scalar outside fixture alphabet");
     }
     const int columns = ((scalar >= 0x4e00 && scalar <= 0x9fff) || (scalar >= 0x1f300 && scalar <= 0x1faff)) ? 2 : 1;
     if (width_ == 0 || height_ == 0) {
@@ -217,20 +290,28 @@ private:
         values.push_back(number);
         number = 0;
       } else if (csi_[i] >= '0' && csi_[i] <= '9') {
-        number = number * 10 + csi_[i] - '0';
+        const auto digit = csi_[i] - '0';
+        if (number > (std::numeric_limits<int>::max() - digit) / 10) {
+          throw std::runtime_error("oracle: CSI numeric overflow");
+        }
+        number = number * 10 + digit;
       } else {
         throw std::runtime_error("oracle: invalid CSI parameter");
       }
     }
     values.push_back(number);
-    if (final == 'H') {
+    if (final == 'H' && !private_mode && values.size() <= 2) {
       y_ = std::max(1, values[0]) - 1;
       x_ = values.size() > 1 ? std::max(1, values[1]) - 1 : 0;
+      if ((height_ > 0 && y_ >= height_) || (width_ > 0 && x_ >= width_) || (height_ == 0 && y_ != 0) ||
+          (width_ == 0 && x_ != 0)) {
+        throw std::runtime_error("oracle: cursor outside viewport");
+      }
       wrap_pending_ = false;
       last_lead_ = -1;
-    } else if (final == 'J' && values[0] == 2) {
+    } else if (final == 'J' && !private_mode && values.size() == 1 && values[0] == 2) {
       std::fill(cells_.begin(), cells_.end(), Pixel{" ", style_, 1, false});
-    } else if (final == 'm') {
+    } else if (final == 'm' && !private_mode) {
       for (std::size_t i = 0; i < values.size(); ++i) {
         const auto code = values[i];
         if (code == 0) {
@@ -242,6 +323,9 @@ private:
         } else if (code == 4) {
           style_.underline = true;
         } else if ((code == 38 || code == 48) && i + 4 < values.size() && values[i + 1] == 2) {
+          if (values[i + 2] > 255 || values[i + 3] > 255 || values[i + 4] > 255) {
+            throw std::runtime_error("oracle: RGB component outside range");
+          }
           const portals::RgbColor rgb{static_cast<std::uint8_t>(values[i + 2]),
                                       static_cast<std::uint8_t>(values[i + 3]),
                                       static_cast<std::uint8_t>(values[i + 4])};
@@ -255,10 +339,11 @@ private:
           throw std::runtime_error("oracle: unsupported SGR");
         }
       }
-    } else if ((final == 'l' || final == 'h') && private_mode && values[0] == 7) {
+    } else if ((final == 'l' || final == 'h') && private_mode && values.size() == 1 && values[0] == 7) {
       wrap_ = final == 'h';
       wrap_pending_ = false;
-    } else if (final == 'l' && ((private_mode && values[0] == 6) || (!private_mode && values[0] == 4))) {
+    } else if (final == 'l' && values.size() == 1 &&
+               ((private_mode && values[0] == 6) || (!private_mode && values[0] == 4))) {
       // Full viewport and replace mode are the oracle's fixed baseline.
     } else if (final == 'r' && csi_.empty()) {
       x_ = 0;
@@ -275,6 +360,7 @@ private:
   std::string csi_;
   std::string unicode_;
   std::uint32_t scalar_{};
+  std::uint32_t minimum_scalar_{};
   int needed_{};
   int x_{};
   int y_{};
