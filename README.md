@@ -7,8 +7,8 @@ decoding, Windows/POSIX terminal sessions, a bounded cell framebuffer, a full-fr
 reference renderer, bounded row diff, transactional frame writer and a
 [UI scheduler with scoped cancellation](docs/scheduler.md) and a
 [retained widget tree](docs/widget-tree.md) with [typed properties](docs/property.md)
-and [Row/Column layouts and size policies](docs/layout.md), as well as
-[immutable list/table model ranges](docs/model.md), are available.
+and [Row/Column layouts and size policies](docs/layout.md), [Grid and Overlay](docs/grid.md),
+and [immutable list/table model ranges](docs/model.md) are available.
 Built-in controls are not implemented yet.
 
 ## Build and test
