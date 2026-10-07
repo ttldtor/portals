@@ -25,7 +25,7 @@ def main():
         if not source.is_relative_to(root):
             continue
         relative = source.relative_to(root)
-        if relative.parts[0] in {"src", "tests", "tools", "examples", "experiments"}:
+        if relative.parts[0] in {"src", "tests", "tools", "examples", "experiments", "fuzz"}:
             files.add(source)
     if not files:
         parser.error("The compilation database contains no project C++ sources")

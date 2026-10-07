@@ -148,3 +148,10 @@ See the primary [clang-tidy naming documentation](https://clang.llvm.org/extra/c
 References: [CTest](https://cmake.org/cmake/help/latest/manual/ctest.1.html),
 [C++ steady clock](https://eel.is/c++draft/time.clock.steady),
 [C++ integer parsing](https://eel.is/c++draft/charconv.from.chars).
+
+## Optional coverage-guided fuzzing
+
+The opt-in Clang targets instrument the input decoder and Unicode implementation
+with libFuzzer, ASan and UBSan. See [bounded fuzzing](../fuzz/README.md) for
+build commands, seed corpora, checks, reproduction and limits. Ordinary builds
+leave PORTALS_BUILD_FUZZERS disabled.

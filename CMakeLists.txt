@@ -7,6 +7,7 @@ endif()
 
 option(PORTALS_BUILD_TESTS "Build Portals headless tests" ${PROJECT_IS_TOP_LEVEL})
 option(PORTALS_BUILD_EXAMPLES "Build Portals example consumer" ${PROJECT_IS_TOP_LEVEL})
+option(PORTALS_BUILD_FUZZERS "Build opt-in Clang libFuzzer targets with sanitizers" OFF)
 option(PORTALS_BUILD_DOCS "Build Portals API documentation with Doxygen" OFF)
 option(PORTALS_BUILD_TOOLS "Build the standalone terminal diagnostic probe" ${PROJECT_IS_TOP_LEVEL})
 
@@ -251,7 +252,7 @@ if(PORTALS_BUILD_DOCS)
   set(DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/docs")
 
   doxygen_add_docs(portals_docs include README.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/scheduler.md docs/widget-tree.md docs/layout.md docs/grid.md docs/property.md docs/focus.md docs/model.md docs/input.md docs/terminal.md docs/terminal-probe.md docs/controls.md docs/virtual-list.md
-    docs/api-design.md experiments/module-spike/README.md
+    docs/api-design.md experiments/module-spike/README.md fuzz/README.md
     vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Generate Portals API documentation"
@@ -268,4 +269,8 @@ if(WIN32 AND PORTALS_BUILD_TESTS)
   set_tests_properties(portals.test-processes PROPERTIES TIMEOUT 40)
   include(cmake/TestProcesses.cmake)
   portals_configure_test_processes("${CMAKE_CURRENT_SOURCE_DIR}")
+endif()
+
+if(PORTALS_BUILD_FUZZERS)
+  add_subdirectory(fuzz)
 endif()

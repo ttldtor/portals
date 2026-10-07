@@ -1,6 +1,6 @@
 Checks: '-*,readability-identifier-naming'
 WarningsAsErrors: 'readability-identifier-naming'
-HeaderFilterRegex: '(^|[/\\])(include[/\\]portals|src|tests|tools|examples|experiments)[/\\]'
+HeaderFilterRegex: '(^|[/\\])(include[/\\]portals|src|tests|tools|examples|experiments|fuzz)[/\\]'
 SystemHeaders: false
 CheckOptions:
   readability-identifier-naming.FunctionCase: camelBack
