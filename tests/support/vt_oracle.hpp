@@ -1,0 +1,287 @@
+// Copyright (c) 2026 ttldtor.
+// SPDX-License-Identifier: BSL-1.0
+#pragma once
+
+#include <portals/cell_buffer.hpp>
+
+#include <algorithm>
+#include <cstdint>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace test_support {
+// Independent small VT machine for the encoder's supported grammar. It does not
+// call encode_diff, the full renderer, a grapheme decoder, or encoding helpers.
+// Unicode width rules here cover only the explicit fixture alphabet (CJK, emoji,
+// ASCII and combining acute); this is deliberately not a general VT product.
+class VtOracle {
+public:
+  struct Pixel {
+    std::string glyph{" "};
+    portals::CellStyle style;
+    int width{1};
+    bool tail{};
+  };
+  VtOracle(int width, int height) : width_(width), height_(height), cells_(static_cast<std::size_t>(width * height)) {
+  }
+  void resize(int width, int height) {
+    std::vector<Pixel> resized(static_cast<std::size_t>(width * height));
+    for (int y = 0; y < std::min(height_, height); ++y) {
+      for (int x = 0; x < std::min(width_, width); ++x) {
+        resized[static_cast<std::size_t>(y * width + x)] = cells_[index(x, y)];
+      }
+    }
+    width_ = width;
+    height_ = height;
+    cells_ = std::move(resized);
+    x_ = 0;
+    y_ = 0;
+    wrap_pending_ = false;
+    last_lead_ = -1;
+  }
+  void feed(std::string_view bytes) {
+    for (const auto byte : bytes) {
+      const auto ch = static_cast<unsigned char>(byte);
+
+      if (ch == 0x18) {
+        state_ = State::ground;
+        csi_.clear();
+        unicode_.clear();
+        needed_ = 0;
+        continue;
+      }
+
+      if (state_ == State::escape) {
+        if (ch != '[') {
+          throw std::runtime_error("oracle: unsupported escape");
+        }
+        state_ = State::csi;
+        continue;
+      }
+
+      if (state_ == State::csi) {
+        if (ch >= 0x40 && ch <= 0x7e) {
+          control(static_cast<char>(ch));
+          csi_.clear();
+          state_ = State::ground;
+        } else {
+          csi_.push_back(static_cast<char>(ch));
+        }
+        continue;
+      }
+
+      if (ch == 0x1b) {
+        needed_ = 0;
+        unicode_.clear();
+        state_ = State::escape;
+        continue;
+      }
+
+      if (needed_ != 0) {
+        if ((ch & 0xc0) != 0x80) {
+          throw std::runtime_error("oracle: broken UTF-8");
+        }
+        scalar_ = (scalar_ << 6) | (ch & 0x3f);
+        unicode_.push_back(static_cast<char>(ch));
+        --needed_;
+        if (needed_ == 0) {
+          put(scalar_, unicode_);
+        }
+        continue;
+      }
+
+      if (ch < 0x80) {
+        if (ch < 0x20) {
+          throw std::runtime_error("oracle: unsupported control");
+        }
+        put(ch, std::string(1, static_cast<char>(ch)));
+      } else {
+        unicode_.assign(1, static_cast<char>(ch));
+        if ((ch & 0xe0) == 0xc0) {
+          needed_ = 1;
+          scalar_ = ch & 0x1f;
+        } else if ((ch & 0xf0) == 0xe0) {
+          needed_ = 2;
+          scalar_ = ch & 0x0f;
+        } else if ((ch & 0xf8) == 0xf0) {
+          needed_ = 3;
+          scalar_ = ch & 0x07;
+        } else {
+          throw std::runtime_error("oracle: invalid UTF-8 lead");
+        }
+      }
+    }
+  }
+  bool equals(const portals::CellBuffer &frame) const {
+    if (frame.size() != portals::CellSize{width_, height_}) {
+      return false;
+    }
+    for (int y = 0; y < height_; ++y) {
+      for (int x = 0; x < width_; ++x) {
+        const auto actual = frame.at({x, y});
+        const auto &pixel = cells_[index(x, y)];
+        if (!actual || pixel.glyph != actual->glyph || pixel.style != actual->style ||
+            pixel.width != actual->cell.columns ||
+            pixel.tail != (actual->cell.kind == portals::CellKind::continuation)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+  bool neutral() const {
+    return x_ == 0 && y_ == 0 && wrap_ && !wrap_pending_ && style_ == portals::CellStyle{} && state_ == State::ground &&
+           needed_ == 0;
+  }
+  int scrolls() const {
+    return scrolls_;
+  }
+  const Pixel &at(int x, int y) const {
+    return cells_[index(x, y)];
+  }
+
+private:
+  enum class State {
+    ground,
+    escape,
+    csi
+  };
+  std::size_t index(int x, int y) const {
+    return static_cast<std::size_t>(y * width_ + x);
+  }
+  void clear_glyph(int x, int y) {
+    auto i = index(x, y);
+    if (cells_[i].tail) {
+      --i;
+    }
+    const bool wide = cells_[i].width == 2;
+    cells_[i] = {};
+    if (wide) {
+      cells_[i + 1] = {};
+    }
+  }
+  void put(std::uint32_t scalar, const std::string &bytes) {
+    if (scalar == 0x301) {
+      if (last_lead_ < 0) {
+        throw std::runtime_error("oracle: unattached accent");
+      }
+      auto &lead = cells_[static_cast<std::size_t>(last_lead_)];
+      lead.glyph += bytes;
+      if (lead.width == 2) {
+        cells_[static_cast<std::size_t>(last_lead_) + 1].glyph = lead.glyph;
+      }
+      return;
+    }
+    const int columns = ((scalar >= 0x4e00 && scalar <= 0x9fff) || (scalar >= 0x1f300 && scalar <= 0x1faff)) ? 2 : 1;
+    if (width_ == 0 || height_ == 0) {
+      throw std::runtime_error("oracle: write to empty viewport");
+    }
+    if (wrap_pending_ && wrap_) {
+      x_ = 0;
+      ++y_;
+      wrap_pending_ = false;
+      if (y_ == height_) {
+        ++scrolls_;
+        y_ = height_ - 1;
+        std::rotate(cells_.begin(), cells_.begin() + width_, cells_.end());
+        std::fill(cells_.end() - width_, cells_.end(), Pixel{});
+      }
+    }
+    if (x_ + columns > width_) {
+      throw std::runtime_error("oracle: split wide glyph");
+    }
+    clear_glyph(x_, y_);
+    if (columns == 2) {
+      clear_glyph(x_ + 1, y_);
+    }
+    const auto i = index(x_, y_);
+    cells_[i] = {bytes, style_, columns, false};
+    if (columns == 2) {
+      cells_[i + 1] = {bytes, style_, 0, true};
+    }
+    last_lead_ = static_cast<int>(i);
+    x_ += columns;
+    if (x_ >= width_) {
+      x_ = width_ - 1;
+      wrap_pending_ = wrap_;
+    }
+  }
+  void control(char final) {
+    const bool private_mode = !csi_.empty() && csi_[0] == '?';
+    std::vector<int> values;
+    int number = 0;
+    for (std::size_t i = private_mode ? 1 : 0; i < csi_.size(); ++i) {
+      if (csi_[i] == ';') {
+        values.push_back(number);
+        number = 0;
+      } else if (csi_[i] >= '0' && csi_[i] <= '9') {
+        number = number * 10 + csi_[i] - '0';
+      } else {
+        throw std::runtime_error("oracle: invalid CSI parameter");
+      }
+    }
+    values.push_back(number);
+    if (final == 'H') {
+      y_ = std::max(1, values[0]) - 1;
+      x_ = values.size() > 1 ? std::max(1, values[1]) - 1 : 0;
+      wrap_pending_ = false;
+      last_lead_ = -1;
+    } else if (final == 'J' && values[0] == 2) {
+      std::fill(cells_.begin(), cells_.end(), Pixel{" ", style_, 1, false});
+    } else if (final == 'm') {
+      for (std::size_t i = 0; i < values.size(); ++i) {
+        const auto code = values[i];
+        if (code == 0) {
+          style_ = {};
+        } else if (code == 1) {
+          style_.bold = true;
+        } else if (code == 3) {
+          style_.italic = true;
+        } else if (code == 4) {
+          style_.underline = true;
+        } else if ((code == 38 || code == 48) && i + 4 < values.size() && values[i + 1] == 2) {
+          const portals::RgbColor rgb{static_cast<std::uint8_t>(values[i + 2]),
+                                      static_cast<std::uint8_t>(values[i + 3]),
+                                      static_cast<std::uint8_t>(values[i + 4])};
+          if (code == 38) {
+            style_.foreground = rgb;
+          } else {
+            style_.background = rgb;
+          }
+          i += 4;
+        } else {
+          throw std::runtime_error("oracle: unsupported SGR");
+        }
+      }
+    } else if ((final == 'l' || final == 'h') && private_mode && values[0] == 7) {
+      wrap_ = final == 'h';
+      wrap_pending_ = false;
+    } else if (final == 'l' && ((private_mode && values[0] == 6) || (!private_mode && values[0] == 4))) {
+      // Full viewport and replace mode are the oracle's fixed baseline.
+    } else if (final == 'r' && csi_.empty()) {
+      x_ = 0;
+      y_ = 0;
+      wrap_pending_ = false;
+    } else {
+      throw std::runtime_error("oracle: unsupported CSI");
+    }
+  }
+  int width_;
+  int height_;
+  std::vector<Pixel> cells_;
+  State state_{};
+  std::string csi_;
+  std::string unicode_;
+  std::uint32_t scalar_{};
+  int needed_{};
+  int x_{};
+  int y_{};
+  int last_lead_{-1};
+  int scrolls_{};
+  bool wrap_{true};
+  bool wrap_pending_{};
+  portals::CellStyle style_;
+};
+} // namespace test_support

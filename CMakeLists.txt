@@ -16,7 +16,7 @@ set_target_properties(portals_utf8proc PROPERTIES C_STANDARD 99 C_STANDARD_REQUI
 target_compile_definitions(portals_utf8proc PRIVATE UTF8PROC_STATIC)
 target_include_directories(portals_utf8proc PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/utf8proc")
 
-add_library(portals_core STATIC src/version.cpp src/geometry.cpp src/text.cpp src/input.cpp src/cell_buffer.cpp src/render.cpp)
+add_library(portals_core STATIC src/version.cpp src/geometry.cpp src/text.cpp src/input.cpp src/cell_buffer.cpp src/render.cpp src/render/diff.cpp src/terminal/writer.cpp)
 if(UNIX)
   find_package(Threads REQUIRED)
   target_sources(portals_core PRIVATE src/terminal/posix.cpp src/terminal/posix_io.cpp)
@@ -90,6 +90,16 @@ if(PORTALS_BUILD_TESTS)
   target_link_libraries(portals_cell_buffer PRIVATE portals::core)
   portals_enable_warnings(portals_cell_buffer)
   add_test(NAME portals.cell-buffer COMMAND portals_cell_buffer)
+  add_executable(portals_writer tests/writer.cpp)
+  target_link_libraries(portals_writer PRIVATE portals::core)
+  portals_enable_warnings(portals_writer)
+  add_test(NAME portals.writer COMMAND portals_writer)
+  set_tests_properties(portals.writer PROPERTIES TIMEOUT 15)
+  add_executable(portals_diff tests/diff.cpp)
+  target_link_libraries(portals_diff PRIVATE portals::core)
+  portals_enable_warnings(portals_diff)
+  add_test(NAME portals.diff COMMAND portals_diff)
+  set_tests_properties(portals.diff PROPERTIES TIMEOUT 10)
   add_executable(portals_render tests/render.cpp)
   target_link_libraries(portals_render PRIVATE portals::core)
   portals_enable_warnings(portals_render)
@@ -163,7 +173,7 @@ if(PORTALS_BUILD_DOCS)
   set(DOXYGEN_WARN_AS_ERROR YES)
   set(DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/docs")
 
-  doxygen_add_docs(portals_docs include README.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/input.md docs/terminal.md docs/terminal-probe.md
+  doxygen_add_docs(portals_docs include README.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/input.md docs/terminal.md docs/terminal-probe.md
 
 
 
