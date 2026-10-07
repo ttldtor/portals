@@ -214,10 +214,7 @@ std::expected<std::size_t, TextError> GraphemeText::nextCursor(std::size_t byte_
     return byte_offset;
   }
 
-  const auto found =
-    std::lower_bound(graphemes_.begin(), graphemes_.end(), byte_offset, [](const Grapheme &g, std::size_t byte) {
-      return g.byte_begin < byte;
-    });
+  const auto found = std::ranges::lower_bound(graphemes_, byte_offset, {}, &Grapheme::byte_begin);
 
   if (found == graphemes_.end() || found->byte_begin != byte_offset) {
     return std::unexpected(TextError{TextErrorKind::NOT_BOUNDARY, byte_offset});
@@ -231,10 +228,7 @@ std::expected<std::size_t, TextError> GraphemeText::previousCursor(std::size_t b
     return 0;
   }
 
-  const auto found =
-    std::lower_bound(graphemes_.begin(), graphemes_.end(), byte_offset, [](const Grapheme &g, std::size_t byte) {
-      return g.byte_end < byte;
-    });
+  const auto found = std::ranges::lower_bound(graphemes_, byte_offset, {}, &Grapheme::byte_end);
 
   if (found == graphemes_.end() || found->byte_end != byte_offset) {
     return std::unexpected(TextError{TextErrorKind::NOT_BOUNDARY, byte_offset});

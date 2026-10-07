@@ -412,7 +412,7 @@ public:
    * @return That consumer's independent result owner, or STALE_NODE if absent from this table.
    */
   std::expected<ModelRange<T>, TreeError> range(ModelRangeId id) const {
-    auto entry = std::find_if(data_->entries.begin(), data_->entries.end(), [id](const auto &value) {
+    auto entry = std::ranges::find_if(data_->entries, [id](const auto &value) {
       return value.id == id;
     });
 
@@ -677,7 +677,7 @@ public:
     try {
       auto lease =
         std::make_shared<detail::ModelLease>(state->lifetime, work_owner ? std::move(work_owner) : current->snapshot);
-      auto &updated = *std::find_if((*next)->entries.begin(), (*next)->entries.end(), [this](auto &value) {
+      auto &updated = *std::ranges::find_if((*next)->entries, [this](auto &value) {
         return value.id == id_;
       });
 
@@ -732,7 +732,7 @@ private:
   }
 
   auto find(const detail::ModelFrameData<T> &data) const {
-    return std::find_if(data.entries.begin(), data.entries.end(), [this](const auto &value) {
+    return std::ranges::find_if(data.entries, [this](const auto &value) {
       return value.id == id_;
     });
   }
@@ -752,7 +752,7 @@ private:
     // Retire identity before a temporary strong lease can release reentrant user storage.
     state->retired.push_back(id);
 
-    auto entry = std::find_if(state->current->entries.begin(), state->current->entries.end(), [id](const auto &value) {
+    auto entry = std::ranges::find_if(state->current->entries, [id](const auto &value) {
       return value.id == id;
     });
 
@@ -821,7 +821,7 @@ public:
           }
 
           auto previous = state->current;
-          auto entry = std::find_if(previous->entries.begin(), previous->entries.end(), [&](const auto &item) {
+          auto entry = std::ranges::find_if(previous->entries, [&](const auto &item) {
             return item.id == value->id;
           });
 
@@ -1001,7 +1001,7 @@ public:
 
 private:
   static bool retired(const detail::ModelState<T> &state, ModelRangeId id) {
-    return std::find(state.retired.begin(), state.retired.end(), id) != state.retired.end();
+    return std::ranges::contains(state.retired, id);
   }
 
   Model(std::shared_ptr<detail::ModelState<T>> state, SchedulerConnection<detail::ModelCompletion<T>> completion,
