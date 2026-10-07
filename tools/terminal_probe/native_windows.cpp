@@ -46,9 +46,8 @@ public:
       return false;
     }
 
-    const DWORD input =
-      (input_mode_ | ENABLE_EXTENDED_FLAGS) & ~(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT | ENABLE_PROCESSED_INPUT |
-                                                ENABLE_QUICK_EDIT_MODE | ENABLE_VIRTUAL_TERMINAL_INPUT);
+    const DWORD input = (input_mode_ | ENABLE_EXTENDED_FLAGS | ENABLE_VIRTUAL_TERMINAL_INPUT) &
+                        ~(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT | ENABLE_PROCESSED_INPUT | ENABLE_QUICK_EDIT_MODE);
 
     if (!SetConsoleMode(input_, input)) {
       return false;

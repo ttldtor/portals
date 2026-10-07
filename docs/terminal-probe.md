@@ -75,7 +75,9 @@ at the end. There is one steady-clock deadline covering mode setup, query output
 and response collection; incoming bytes do not extend it. Readiness waits use only
 the remaining time. POSIX reads/writes are nonblocking during the query window.
 
-Windows uses counted `ReadConsoleInputW` records after a readiness wait, rather
+Windows enables `ENABLE_VIRTUAL_TERMINAL_INPUT` during the query window so ConPTY
+preserves incoming CPR bytes instead of translating them into function-key records.
+It uses counted `ReadConsoleInputW` records after a readiness wait, rather
 than a blocking byte read on a console signaled by mouse/resize events. ASCII
 key-down characters enter the byte collector. Other records, including UTF-16
 non-ASCII characters, key releases, mouse and resize events, are counted separately
@@ -109,8 +111,8 @@ is available when consuming any input is undesirable.
 Temporary modes are scoped and restored on ordinary success, timeout, input
 limits, native errors and C++ exception unwinding. Failed explicit restoration
 is reported as an error and the guard retries on destruction. Windows disables
-line/echo/processed input, quick edit and VT input for native record reads, and
-enables processed/VT output. POSIX disables canonical/echo/signal interpretation
+line/echo/processed input and quick edit, and enables VT input plus processed/VT
+output. POSIX disables canonical/echo/signal interpretation
 and selected input translations, uses `VMIN=VTIME=0`, and restores descriptor
 flags. No input flush is performed. POSIX SIGINT/SIGTERM/SIGHUP handlers cause the
 query loop to exit and restore modes. Forceful process termination, SIGKILL,
@@ -122,7 +124,13 @@ report escaping. A captured-stdout subprocess fixture verifies redirected/defaul
 `--no-query`, `--headless`, help and invalid timeout invocations complete without
 raw query bytes or input reads. A synthetic POSIX PTY fixture runs the real native
 path and checks termios/descriptor restoration after replies, a missing-response
-deadline, the byte cap and SIGTERM. These tests do not establish real terminal behavior.
+deadline, the byte cap and SIGTERM. A headless Windows ConPTY fixture checks that
+a host-injected CPR survives the real native mode guard and counted record collector,
+and that modes/code pages return to their exact initial values. A queue marker
+synchronizes injection before collection; system ConPTY may answer queries itself,
+so the injected CPR deliberately differs from its local cursor position. The test
+includes the private native implementation to exercise its guard without a product
+test hook. These tests do not establish real terminal behavior.
 
 For an interactive qualification, run the native Windows build in a real Windows
 Terminal, and the Linux build in a real Linux terminal emulator. Record executable

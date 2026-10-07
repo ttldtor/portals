@@ -71,6 +71,17 @@ if(PORTALS_BUILD_TESTS)
   add_test(NAME portals.probe.query COMMAND portals_probe_query_tests)
   set_tests_properties(portals.probe.query PROPERTIES TIMEOUT 10)
 
+  if(WIN32)
+    add_executable(portals_probe_windows_tests tests/probe_windows.cpp
+      tools/terminal_probe/query.cpp)
+    target_include_directories(portals_probe_windows_tests PRIVATE tools/terminal_probe)
+    target_compile_features(portals_probe_windows_tests PRIVATE cxx_std_23)
+    set_target_properties(portals_probe_windows_tests PROPERTIES CXX_EXTENSIONS OFF)
+    portals_enable_warnings(portals_probe_windows_tests)
+    add_test(NAME portals.probe.windows-fixture COMMAND portals_probe_windows_tests)
+    set_tests_properties(portals.probe.windows-fixture PROPERTIES TIMEOUT 10)
+  endif()
+
   if(PORTALS_BUILD_TOOLS)
     add_test(NAME portals.probe.redirected
       COMMAND ${CMAKE_COMMAND} -DPROBE=$<TARGET_FILE:portals_terminal_probe>
