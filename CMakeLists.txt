@@ -156,3 +156,15 @@ if(PORTALS_BUILD_DOCS)
     COMMENT "Generate Portals API documentation"
   )
 endif()
+
+if(WIN32 AND PORTALS_BUILD_TESTS)
+  add_executable(portals_no_dialogs tests/no_dialogs.cpp)
+  target_compile_features(portals_no_dialogs PRIVATE cxx_std_23)
+  portals_enable_warnings(portals_no_dialogs)
+  add_test(NAME portals.test-processes
+    COMMAND ${CMAKE_COMMAND} -DPROBE=$<TARGET_FILE:portals_no_dialogs>
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/no_dialogs.cmake)
+  set_tests_properties(portals.test-processes PROPERTIES TIMEOUT 40)
+  include(cmake/TestProcesses.cmake)
+  portals_configure_test_processes("${CMAKE_CURRENT_SOURCE_DIR}")
+endif()
