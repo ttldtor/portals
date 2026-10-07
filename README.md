@@ -138,6 +138,8 @@ compilation mechanics; UI sketches are design-only.
 
 Virtual list: [preparation, ownership and fixed-row navigation](docs/virtual-list.md).
 
+Virtual table: [typed columns, shared snapshots and bounded preparation](docs/virtual-table.md).
+
 ## License
 
 Portals code: Boost Software License 1.0; see [LICENSE.txt](LICENSE.txt).
