@@ -1,11 +1,11 @@
 # Terminal session
 
-`<portals/terminal.hpp>` provides a move-only POSIX terminal session. Windows
-currently returns `TerminalErrorKind::unsupported`; the separate diagnostic probe
-does not implement this API. Linux PTY and pipe fixtures exercise the POSIX backend.
+`<portals/terminal.hpp>` provides a move-only Windows/POSIX terminal session.
+Native Windows ConPTY and Linux PTY/pipe fixtures exercise the actual backends.
+The separate diagnostic probe does not implement this API.
 Other POSIX targets have not been qualified.
 
-## Ownership and modes
+## POSIX ownership and modes
 
 Call `TerminalSession::open({input_fd, output_fd}, options)` from the terminal
 owner. Both descriptors must refer to TTYs. The session duplicates them with
@@ -38,12 +38,12 @@ the original native code plus the first rollback error in `restoration_code`.
 Disconnected terminals may no longer permit restoration. Abrupt process death,
 external descriptor mutation and signal termination do not run a promised cleanup.
 
-## Input, deadlines and resize
+## POSIX input, deadlines and resize
 
 `read(deadline, stop)` returns one owning `TerminalRead`. On POSIX, `bytes` contains
 at most `max_input_bytes` raw bytes and `events` is empty. Feed these bytes to the
 separate `InputDecoder`; the decoder does not own terminal I/O. `events` provides
-the bounded semantic-event result boundary for a future native console backend.
+the bounded semantic-event result on Windows (see below).
 Returned bytes, events and cell sizes survive subsequent calls, moves and close.
 
 The deadline is an absolute `steady_clock` time point. Read/write retries after
@@ -61,7 +61,7 @@ The session neither installs nor replaces `SIGWINCH` handling. The kernel's
 [window-size interface](https://man7.org/linux/man-pages/man2/TIOCGWINSZ.2const.html)
 is the source of geometry.
 
-## Output and renderer state
+## POSIX output and renderer state
 
 `submit(std::string)` accepts one batch of at most `max_output_bytes` (1 MiB by
 default); another submission is rejected while bytes remain pending. The session
@@ -101,3 +101,99 @@ deterministic short writes, EINTR and elapsed time. Linux link wrappers inject
 termios acquisition/restoration failures without adding public injection APIs.
 The child has a ten-second watchdog and CTest adds a fifteen-second outer timeout;
 no product UI or user terminal is opened or modified.
+
+## Windows native console contract
+
+Pass borrowed input/output `HANDLE` values converted to `std::intptr_t`. Both
+must pass `GetConsoleMode`; redirected input or output pipes are rejected before
+mode mutation or waits. The session duplicates the handles without inheritance.
+The originals remain open. Exclusive access includes all aliases, console modes,
+and the console-wide output code page. No console handler is installed.
+
+The backend saves both modes and the output code page before mutation. Input
+sets `ENABLE_EXTENDED_FLAGS`, `ENABLE_WINDOW_INPUT`, `ENABLE_MOUSE_INPUT`, and
+`ENABLE_VIRTUAL_TERMINAL_INPUT`; it clears processed, line, echo, and Quick Edit
+modes. Ctrl+C is input, not a process signal. Output enables processed VT output
+and uses CP_UTF8; the input code page is unchanged because input uses Unicode
+records. Rollback, close, and exception unwinding attempt all changed state
+independently. Explicit close reports the first native error (`GetLastError`).
+
+`ReadConsoleInputW` consumes only an observed available record under exclusive
+ownership. `WaitForSingleObject` waits at most `wait_cadence`; ignored records and
+repeat expansion also have a work budget. A progress result may therefore contain
+no events: the caller should yield to other work before reading again. Size uses
+`srWindow` (viewport), sampled while reading, including after non-text records;
+resize does not require a text key and may coalesce. Mouse positions subtract the
+viewport origin. Console queries themselves depend on a responsive console host.
+
+Windows returns **events only**, never a second byte channel. Unicode key-down
+records are converted from UTF-16 to UTF-8 and passed through the existing
+`InputDecoder`. This preserves VT arrows, Alt sequences, and bracketed paste
+controls as paste payload. Configure decoder bounds/deadlines through
+`TerminalOptions::windows_input`; no second escape parser exists. This layer does
+not enable bracketed-paste terminal reporting. Invalid surrogate units become
+U+FFFD; a high surrogate is retained until its following character. Repeat counts
+are expanded incrementally within the event budget; paired surrogate records use
+the low-surrogate record's repeat count. KEYUP is ignored because VT synthetic
+records do not reliably preserve physical key transitions. Zero-character native
+navigation/F1–F12 records report press/repeat; modifier-only/unknown keys are
+ignored. Ctrl+Space and Ctrl+2 NUL records map through the decoder's Ctrl+@
+representation. Native modifiers augment decoded modifiers; printable Right Alt
+with Left Ctrl is treated as AltGr text rather than a command chord.
+
+Native mouse records support left, middle, right, move, and wheel directions.
+Multiple button changes emit one event each, in left/middle/right order, using
+fixed storage for at most three transitions. Other buttons are ignored; a
+Windows double-click flag adds no separate click-count event. Wheel reports emit
+one direction event, as the public event type has no magnitude. Completed
+semantic events retain source order; an atomic paste appears only at its end
+delimiter, so native mouse events occurring during that paste can appear before
+the completed paste. Resize is a separate coalesced state observation.
+
+Windows may normalize records before the adapter sees them. In the tested ConPTY,
+`WriteConsoleInputW` under VT mode translated VK_UP to ESC-[A, collapsed a supplied
+repeat count, and represented Ctrl+Space as Ctrl+Shift+2/NUL. The adapter cannot
+recover metadata the OS has removed. Native record tests temporarily disable VT
+only during injection, restoring it before the session reads; separate host-pipe
+UTF-8/Ctrl+C/resize tests keep the actual VT path throughout.
+
+## Windows output cancellation and shutdown
+
+A session owns one bounded byte batch and at most one writer thread. `submit`
+performs no I/O. `flush` starts a synchronous `WriteFile` on that worker and waits
+on its thread handle in bounded intervals. Only successful positive completed
+writes advance the confirmed offset. On deadline/stop after issuing a write,
+`CancelSynchronousIo` is requested and flush returns immediately with its status
+plus `error.kind == output_uncertain`. The buffer and worker remain owned even
+when cancellation has not completed. The renderer must invalidate its belief
+immediately; zero confirmed bytes does not mean zero terminal side effects.
+
+An uncertain session rejects every later submit/flush until close; it never
+replays a possibly partially interpreted VT suffix. A deadline/stop checked
+before any write was issued does not poison the session. Native write failures
+also make the session uncertain; the first failure retains its native error.
+`pending_bytes()` then counts unconfirmed owned bytes, not a retryable suffix.
+
+`close` requests cancellation repeatedly to cover the race before entry into
+`WriteFile`, waits for actual thread completion, closes the thread handle, and
+then restores all saved state. No worker is detached and no caller storage is
+borrowed. **Close and destruction require eventual console-host progress.** In
+the finite paused-host fixture, flush returns around its 500 ms deadline, while
+mode restoration waits until the host resumes output drain around 1500 ms.
+These observations qualify that scenario; they are not hard real-time deadlines.
+An indefinitely stalled external host/driver cannot be given a finite teardown
+guarantee by these Windows APIs. Keep the ConPTY host's output drain alive during
+shutdown; a library cannot repair a host that never services its pipes.
+
+See Microsoft's [console modes](https://learn.microsoft.com/en-us/windows/console/setconsolemode),
+[low-level input](https://learn.microsoft.com/en-us/windows/console/low-level-console-input-functions),
+[WriteFile](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-writefile),
+[CancelSynchronousIo](https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-cancelsynchronousio),
+and [ConPTY shutdown guidance](https://learn.microsoft.com/en-us/windows/console/creating-a-pseudoconsole-session).
+
+`portals.terminal.windows` creates only its own headless ConPTY children in a
+kill-on-close job. A separate pipe reports assertions, while a bounded polling
+drain consumes output. It checks actual public-session input, output, stop,
+deadline, finite pause/resume, restoration, and child completion. Its watchdog
+terminates only its own child; CTest provides an outer timeout. These fixtures do
+not qualify an interactive Windows Terminal keyboard/mouse session by themselves.
