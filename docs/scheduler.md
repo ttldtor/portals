@@ -4,8 +4,8 @@
 `dispatch()` between frames. It does not run a background executor, write to the
 terminal, mutate widgets, or request frames. Callback code applies changes and
 chooses the resulting invalidation. Layout and paint must not call `dispatch` or
-`wait_for`. Reentrant dispatch and waiting inside a callback return
-`reentrant_dispatch`.
+`waitFor`. Reentrant dispatch and waiting inside a callback return
+`REENTRANT_DISPATCH`.
 
 ## Queues, budgets and backpressure
 
@@ -27,18 +27,18 @@ arbitrary application code. Late arrivals are eligible in the current dispatch
 if its budget remains, otherwise in the next one.
 
 Keyboard, resize and ordinary quit commands use the control lane. Both lanes
-return `would_block` at capacity; the caller must retry after draining or report
-backpressure rather than silently discarding an event. `request_stop()` is an
+return `WOULD_BLOCK` at capacity; the caller must retry after draining or report
+backpressure rather than silently discarding an event. `requestStop()` is an
 independent flag and wakeup, consumes no queue entry, and works even when both
 queues are full. It prevents new publications immediately; the UI finishes any
 invocation already selected for dispatch, then stops starting queued callbacks.
 
-The default overflow policy is `reject`. Data connections can explicitly select
-`replace_latest`: at most one pending snapshot for that sender is retained,
+The default overflow policy is `REJECT`. Data connections can explicitly select
+`REPLACE_LATEST`: at most one pending snapshot for that sender is retained,
 replacement keeps its FIFO position, and other senders are unaffected. This
 policy is not allowed for control. Full queues can still replace an existing
 value for the same sender. A sender without a pending value receives
-`would_block`. Replacement is suitable for a complete display snapshot **after**
+`WOULD_BLOCK`. Replacement is suitable for a complete display snapshot **after**
 lossless domain aggregation. Raw ticks, incremental changes and unresolved
 provider errors must not be silently removed; include status in the complete
 snapshot or use rejection/backpressure.
@@ -56,12 +56,12 @@ UI resources. Callback captures, by contrast, are released on the UI.
 ```cpp
 auto runtime = Scheduler::create();
 if (!runtime) { return; } // Report the creation error in the application.
-auto scope = (*runtime)->make_scope();
+auto scope = (*runtime)->makeScope();
 if (!scope) { return; } // Report the scope error in the application.
 auto connection = (*runtime)->connect<QuoteSnapshot>(
   *scope, [model](std::shared_ptr<const QuoteSnapshot> snapshot) {
     model->apply(std::move(snapshot));
-  }, SchedulerLane::data, SchedulerOverflow::replace_latest);
+  }, SchedulerLane::DATA, SchedulerOverflow::REPLACE_LATEST);
 // Check connection before giving connection->publisher to a worker.
 ```
 
@@ -79,16 +79,16 @@ mutex.
 
 UI-owned scopes and subscriptions must be released before the scheduler. Their
 destruction/move assignment on another thread violates affinity and terminates;
-explicit `close`/`disconnect` instead return `wrong_thread` without mutation.
+explicit `close`/`disconnect` instead return `WRONG_THREAD` without mutation.
 Disconnect/close are idempotent, and scopes and their subscription tokens can be
 released in either order. Identities are never reused and exhaustion is reported.
 
 Publishers can outlive the scheduler: they retain closed channel state, not
-callback captures, and late publications return `closed`. `request_stop` is a
+callback captures, and late publications return `CLOSED`. `requestStop` is a
 request, not proof of worker completion. The application owns worker stop/join
 and provider storage lifetime; it joins workers outside layout/paint. UI
 `stop`, the next `dispatch` after a worker stop request, or scheduler destruction
-reclaims callbacks. `wait_for` only observes stop. Destroy the scheduler on its
+reclaims callbacks. `waitFor` only observes stop. Destroy the scheduler on its
 owner, outside callbacks. It never synchronously joins foreign work.
 
 ## Timers, clocks and waiting
@@ -108,7 +108,7 @@ publishers never access it. Deterministic tests advance fake time without
 sleeping and call `dispatch`. Advancing a fake clock in another thread requires
 synchronization and `Publisher::wake()` to notify an existing wait.
 
-`wait_for` is a UI-only finite condition-variable wait, ending on queued work,
+`waitFor` is a UI-only finite condition-variable wait, ending on queued work,
 a due timer, an explicit wake, stop, or the real timeout. The maximum real wait
 is independent of injected clock progress. Wake is a coalesced one-shot signal,
 so a notification immediately before waiting is not lost. An application that
@@ -118,11 +118,11 @@ API does not add an OS-wide terminal wait multiplexer.
 ## Errors and measurements
 
 Creation rejects zero/impossible capacities and translates allocation failure
-to `no_memory`. Registration translates allocation failure while taking
+to `NO_MEMORY`. Registration translates allocation failure while taking
 callback ownership; allocation in caller argument expressions is outside the
 factory boundary. Other exceptions from user-defined callback copy/move
 constructors propagate without installing a registration. Registration capacity
-returns `would_block`; foreign scope and thread errors are explicit.
+returns `WOULD_BLOCK`; foreign scope and thread errors are explicit.
 
 An exception thrown by a dispatched callback disables that subscription and
 discards its remaining queue entries. Dispatch catches the exception, increments

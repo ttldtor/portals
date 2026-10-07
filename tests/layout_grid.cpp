@@ -76,8 +76,10 @@ void operator delete[](void *p, const std::nothrow_t &) noexcept {
 }
 
 using namespace portals;
+
 namespace {
 int failures{};
+
 void check(bool condition, const char *message) {
   if (!condition) {
     std::cerr << message << '\n';
@@ -100,18 +102,21 @@ CellRect rect(int x, int y, int width, int height) {
 }
 
 AxisSize fixed(int value) {
-  return {value, value, value, SizeMode::fixed};
+  return {value, value, value, SizeMode::FIXED};
 }
 
 struct Leaf : SizedWidget {
   CellSize desired;
+
   explicit Leaf(CellSize size, SizePolicy policy = {}) : SizedWidget(policy), desired(size) {
   }
+
   std::expected<CellSize, TreeError> measure(CellSize) override {
     return desired;
   }
 };
-void nested_identity_and_spans() {
+
+void nestedIdentityAndSpans() {
   auto scheduler = take(Scheduler::create());
   auto tree = take(WidgetTree::create(*scheduler));
   auto root = take(tree->root());
@@ -133,13 +138,13 @@ void nested_identity_and_spans() {
 
   inner_options.columns = {fixed(5)};
   inner_options.rows = {fixed(2)};
-  inner_options.cells = {{nested.id(), 0, 0, 1, 1, LayoutAlign::center, LayoutAlign::end}};
-  take(set_grid_options(*tree, outer, outer_options));
-  take(set_grid_options(*tree, inner, inner_options));
+  inner_options.cells = {{nested.id(), 0, 0, 1, 1, LayoutAlign::CENTER, LayoutAlign::END}};
+  take(setGridOptions(*tree, outer, outer_options));
+  take(setGridOptions(*tree, inner, inner_options));
 
   auto draw = [&] {
     take(tree->frame([&] {
-      take(layout_tree(*tree, root, rect(0, 0, 9, 5), rect(0, 0, 9, 5)));
+      take(layoutTree(*tree, root, rect(0, 0, 9, 5), rect(0, 0, 9, 5)));
     }));
   };
 
@@ -147,22 +152,22 @@ void nested_identity_and_spans() {
   check(take(tree->inspect(inner)).geometry.local == rect(4, 0, 5, 2), "nested grid uses explicit cell");
   check(take(tree->inspect(spanning)).geometry.local == rect(0, 2, 9, 3), "span includes internal gap");
   check(take(tree->inspect(nested)).geometry.surface == rect(6, 1, 1, 1), "nested alignment translates once");
-  take(tree->set_visible(first, false));
+  take(tree->setVisible(first, false));
 
   draw();
   check(take(tree->inspect(inner)).geometry.local == rect(4, 0, 5, 2), "hiding sibling preserves identity placement");
   outer_options.cells.back().column_span = 3;
 
-  auto rejected = set_grid_options(*tree, outer, outer_options);
+  auto rejected = setGridOptions(*tree, outer, outer_options);
 
-  check(!rejected && rejected.error() == TreeError::invalid_argument, "out-of-range span rejected");
+  check(!rejected && rejected.error() == TreeError::INVALID_ARGUMENT, "out-of-range span rejected");
   outer_options.cells.back().column_span = 0;
-  rejected = set_grid_options(*tree, outer, outer_options);
+  rejected = setGridOptions(*tree, outer, outer_options);
 
-  check(!rejected && rejected.error() == TreeError::invalid_argument, "zero span rejected");
+  check(!rejected && rejected.error() == TreeError::INVALID_ARGUMENT, "zero span rejected");
 }
 
-void tracks_bounds_and_errors() {
+void tracksBoundsAndErrors() {
   const NodeId a{1, 1, 1}, b{1, 2, 1}, c{1, 3, 1};
   GridOptions options;
 
@@ -175,24 +180,24 @@ void tracks_bounds_and_errors() {
 
   Grid grid(options);
 
-  check(take(grid.measure_children(children)) == CellSize{9, 2}, "span grows intrinsic tracks beyond singles");
+  check(take(grid.measureChildren(children)) == CellSize{9, 2}, "span grows intrinsic tracks beyond singles");
 
-  auto placed = take(grid.arrange_children(children, {9, 2}));
+  auto placed = take(grid.arrangeChildren(children, {9, 2}));
 
   check(placed[0] == rect(0, 0, 5, 2) && placed[1] == rect(6, 0, 3, 2), "span deficit remainder follows track order");
 
   options.columns[0].maximum = 2;
-  placed = take(Grid(options).arrange_children(children, {9, 2}));
+  placed = take(Grid(options).arrangeChildren(children, {9, 2}));
   check(placed[0].size().width == 2 && placed[1] == rect(3, 0, 6, 2), "span demand redistributes around track cap");
 
-  options.columns = {{2, 7, 9, SizeMode::automatic}, {3, 7, 9, SizeMode::flex}};
-  placed = take(Grid(options).arrange_children(children, {4, 2}));
+  options.columns = {{2, 7, 9, SizeMode::AUTOMATIC}, {3, 7, 9, SizeMode::FLEX}};
+  placed = take(Grid(options).arrangeChildren(children, {4, 2}));
   check(placed[0].size().width == 2 && placed[1] == rect(3, 0, 3, 2), "shortage preserves track minima and gaps");
 
   for (int width = 0; width <= 17; ++width) {
     options.column_gap = 0;
-    options.columns = {{0, 0, 4, SizeMode::flex}, {0, 0, 9, SizeMode::flex}};
-    placed = take(Grid(options).arrange_children(children, {width, 2}));
+    options.columns = {{0, 0, 4, SizeMode::FLEX}, {0, 0, 9, SizeMode::FLEX}};
+    placed = take(Grid(options).arrangeChildren(children, {width, 2}));
     check(placed[0].size().width + placed[1].size().width == std::min(width, 13),
           "flex fills width until track maxima");
     check(placed[1].origin().x == placed[0].size().width, "all property cases have contiguous tracks");
@@ -201,42 +206,42 @@ void tracks_bounds_and_errors() {
   options.columns = {fixed(2), fixed(3)};
   options.column_gap = std::numeric_limits<std::int32_t>::max();
 
-  auto failure = Grid(options).measure_children(children);
+  auto failure = Grid(options).measureChildren(children);
 
-  check(!failure && failure.error() == TreeError::invalid_geometry, "track/gap arithmetic checked");
+  check(!failure && failure.error() == TreeError::INVALID_GEOMETRY, "track/gap arithmetic checked");
 
-  auto bad_rects = Grid(options).arrange_children(children, {4, 2});
+  auto bad_rects = Grid(options).arrangeChildren(children, {4, 2});
 
-  check(!bad_rects && bad_rects.error() == TreeError::invalid_geometry, "arrange endpoint overflow checked");
+  check(!bad_rects && bad_rects.error() == TreeError::INVALID_GEOMETRY, "arrange endpoint overflow checked");
 
   options.column_gap = 0;
   options.max_tracks_per_axis = 1;
-  failure = Grid(options).measure_children(children);
+  failure = Grid(options).measureChildren(children);
 
-  check(!failure && failure.error() == TreeError::node_limit, "configured track budget enforced");
+  check(!failure && failure.error() == TreeError::NODE_LIMIT, "configured track budget enforced");
   options.max_tracks_per_axis = 2;
   options.max_placements = 2;
-  failure = Grid(options).measure_children(children);
+  failure = Grid(options).measureChildren(children);
 
-  check(!failure && failure.error() == TreeError::node_limit, "placement budget includes all entries");
+  check(!failure && failure.error() == TreeError::NODE_LIMIT, "placement budget includes all entries");
   options.max_placements = 3;
   options.cells[2].node = a;
-  failure = Grid(options).measure_children(children);
+  failure = Grid(options).measureChildren(children);
 
-  check(!failure && failure.error() == TreeError::invalid_argument, "duplicate identity rejected");
+  check(!failure && failure.error() == TreeError::INVALID_ARGUMENT, "duplicate identity rejected");
   options.cells[2].node = c;
   options.cells[2].row = std::numeric_limits<std::size_t>::max();
-  failure = Grid(options).measure_children(children);
+  failure = Grid(options).measureChildren(children);
 
-  check(!failure && failure.error() == TreeError::invalid_argument, "index overflow rejected before addition");
+  check(!failure && failure.error() == TreeError::INVALID_ARGUMENT, "index overflow rejected before addition");
   options.cells[2].row = 0;
   options.cells[2].row_span = std::numeric_limits<std::size_t>::max();
-  failure = Grid(options).measure_children(children);
+  failure = Grid(options).measureChildren(children);
 
-  check(!failure && failure.error() == TreeError::invalid_argument, "span overflow rejected before addition");
+  check(!failure && failure.error() == TreeError::INVALID_ARGUMENT, "span overflow rejected before addition");
 }
 
-void alignment_and_overlay() {
+void alignmentAndOverlay() {
   const NodeId id{1, 1, 1};
 
   const std::array children{MeasuredChild{{2, 1}, {}, id}};
@@ -244,53 +249,56 @@ void alignment_and_overlay() {
 
   options.columns = {fixed(7)};
   options.rows = {fixed(4)};
-  options.cells = {{id, 0, 0, 1, 1, LayoutAlign::center, LayoutAlign::center}};
-  check(take(Grid(options).arrange_children(children, {7, 4}))[0] == rect(2, 1, 2, 1),
+  options.cells = {{id, 0, 0, 1, 1, LayoutAlign::CENTER, LayoutAlign::CENTER}};
+  check(take(Grid(options).arrangeChildren(children, {7, 4}))[0] == rect(2, 1, 2, 1),
         "odd center remainder after child on both axes");
 
-  OverlayOptions overlay_options{{1, 1, 1, 1}, LayoutAlign::end, LayoutAlign::center};
+  OverlayOptions overlay_options{{1, 1, 1, 1}, LayoutAlign::END, LayoutAlign::CENTER};
   Overlay overlay(overlay_options);
 
-  check(take(overlay.measure_children(children)) == CellSize{4, 3}, "overlay desired size includes padding");
-  check(take(overlay.arrange_children(children, {9, 6}))[0] == rect(6, 2, 2, 1), "overlay aligns inside padding");
+  check(take(overlay.measureChildren(children)) == CellSize{4, 3}, "overlay desired size includes padding");
+  check(take(overlay.arrangeChildren(children, {9, 6}))[0] == rect(6, 2, 2, 1), "overlay aligns inside padding");
 
   auto constrained = children;
 
-  constrained[0].policy.width = {4, 5, 6, SizeMode::fixed};
-  constrained[0].policy.height = {2, 3, 3, SizeMode::automatic};
-  check(take(Overlay{}.arrange_children(constrained, {2, 1}))[0] == rect(0, 0, 5, 2),
+  constrained[0].policy.width = {4, 5, 6, SizeMode::FIXED};
+  constrained[0].policy.height = {2, 3, 3, SizeMode::AUTOMATIC};
+  check(take(Overlay{}.arrangeChildren(constrained, {2, 1}))[0] == rect(0, 0, 5, 2),
         "child fixed/minimum survive slot shortage");
-  check(take(Overlay{}.arrange_children(constrained, {12, 9}))[0] == rect(0, 0, 5, 3),
+  check(take(Overlay{}.arrangeChildren(constrained, {12, 9}))[0] == rect(0, 0, 5, 3),
         "stretch observes fixed and maximum");
 
   overlay_options.padding.left = std::numeric_limits<std::int32_t>::max();
 
-  auto failure = Overlay(overlay_options).measure_children(children);
+  auto failure = Overlay(overlay_options).measureChildren(children);
 
-  check(!failure && failure.error() == TreeError::invalid_geometry, "padding overflow checked");
+  check(!failure && failure.error() == TreeError::INVALID_GEOMETRY, "padding overflow checked");
   overlay_options.padding.left = -1;
-  failure = Overlay(overlay_options).child_available({3, 3});
+  failure = Overlay(overlay_options).childAvailable({3, 3});
 
-  check(!failure && failure.error() == TreeError::invalid_argument, "negative overlay padding rejected");
+  check(!failure && failure.error() == TreeError::INVALID_ARGUMENT, "negative overlay padding rejected");
   constrained[0].policy.height.minimum = -1;
 
-  auto invalid = Overlay{}.arrange_children(constrained, {3, 3});
+  auto invalid = Overlay{}.arrangeChildren(constrained, {3, 3});
 
-  check(!invalid && invalid.error() == TreeError::invalid_argument, "invalid child bounds rejected");
+  check(!invalid && invalid.error() == TreeError::INVALID_ARGUMENT, "invalid child bounds rejected");
 }
 
 struct PaintLeaf : Leaf {
   GraphemeText text;
   CellSize allocated{};
   int presses{};
+
   PaintLeaf(std::string_view value, SizePolicy policy = {})
       : Leaf({static_cast<int>(value.size()), 1}, policy), text(take(GraphemeText::from(value))) {
   }
+
   std::expected<void, TreeError> arrange(CellRect local) override {
     allocated = local.size();
 
     return {};
   }
+
   std::expected<void, TreeError> paint(PaintContext &context) override {
     const auto clip = rect(0, 0, allocated.width, allocated.height);
 
@@ -306,11 +314,14 @@ struct PaintLeaf : Leaf {
     return {};
   }
 };
+
 struct Sink : PaintContext {
   NodeGeometry geometry;
   std::vector<RenderCommand> &commands;
+
   Sink(NodeGeometry value, std::vector<RenderCommand> &output) : geometry(value), commands(output) {
   }
+
   std::expected<void, TreeError> submit(std::span<const RenderCommand> input) override {
     for (const auto &command : input) {
       const auto &text = std::get<TextCommand>(command);
@@ -323,7 +334,8 @@ struct Sink : PaintContext {
     return {};
   }
 };
-void paint_tree(WidgetTree &tree, Node<Widget> node, std::vector<RenderCommand> &commands) {
+
+void paintTree(WidgetTree &tree, Node<Widget> node, std::vector<RenderCommand> &commands) {
   auto snapshot = take(tree.inspect(node));
 
   if (!snapshot.visible || !snapshot.geometry.valid) {
@@ -335,11 +347,11 @@ void paint_tree(WidgetTree &tree, Node<Widget> node, std::vector<RenderCommand> 
   take(tree.paint(node, sink));
 
   for (auto child : snapshot.children) {
-    paint_tree(tree, child, commands);
+    paintTree(tree, child, commands);
   }
 }
 
-void rendered_clipping_and_hit_order() {
+void renderedClippingAndHitOrder() {
   auto scheduler = take(Scheduler::create());
   auto tree = take(WidgetTree::create(*scheduler));
   auto root = take(tree->root());
@@ -361,16 +373,16 @@ void rendered_clipping_and_hit_order() {
   auto front = take(tree->emplace<PaintLeaf>(overlay, "CC", front_policy));
 
   options.cells = {{overlay.id(), 0, 1}, {base.id(), 0, 0, 1, 2}};
-  take(set_grid_options(*tree, grid, options));
+  take(setGridOptions(*tree, grid, options));
 
   auto binding = take(router->bind(front, [](PaintLeaf &leaf, const RoutedEvent &event) {
     if (std::holds_alternative<MouseInputEvent>(event)) {
       ++leaf.presses;
 
-      return EventReply::handled;
+      return EventReply::HANDLED;
     }
 
-    return EventReply::ignored;
+    return EventReply::IGNORED;
   }));
   test_support::FakeClock clock;
   test_support::TestTerminal terminal(clock, {6, 3});
@@ -381,20 +393,20 @@ void rendered_clipping_and_hit_order() {
     const auto viewport = take(CellRect::from({}, size));
 
     terminal.resize(size);
-    take(tree->invalidate(root, Invalidation::layout));
+    take(tree->invalidate(root, Invalidation::LAYOUT));
     take(tree->frame([&] {
-      take(layout_tree(*tree, root, viewport, viewport));
+      take(layoutTree(*tree, root, viewport, viewport));
 
       std::vector<RenderCommand> commands;
 
-      paint_tree(*tree, root, commands);
-      buffer.emplace(take(render_full_frame(size, commands)));
+      paintTree(*tree, root, commands);
+      buffer.emplace(take(renderFullFrame(size, commands)));
     }));
     take(writer.submit(std::move(*buffer)));
 
     auto output = writer.flush(TerminalDeadline::max());
 
-    check(output.status == TerminalStatus::progress && !output.error && !writer.pending(),
+    check(output.status == TerminalStatus::PROGRESS && !output.error && !writer.pending(),
           "actual writer completes clipped frame");
   };
   auto expect = [&](std::span<const std::string_view> rows) {
@@ -419,7 +431,7 @@ void rendered_clipping_and_hit_order() {
           continue;
         }
 
-        check(take(router->hit_test({x, y})) == expected, "terminal glyph hits same arranged node");
+        check(take(router->hitTest({x, y})) == expected, "terminal glyph hits same arranged node");
       }
 
       check(actual == rows[static_cast<std::size_t>(y)], "independent terminal snapshot equals literal rows");
@@ -433,7 +445,7 @@ void rendered_clipping_and_hit_order() {
   expect(narrow);
   check(take(tree->inspect(lower)).geometry.surface == rect(4, 1, 4, 2), "minimum tracks overflow narrow grid");
   check(take(tree->inspect(lower)).geometry.clip == rect(4, 1, 2, 2), "ancestor clip shared by paint and input");
-  check(take(router->hit_test({6, 1})) == Node<Widget>{}, "half-open viewport edge is never an input target");
+  check(take(router->hitTest({6, 1})) == Node<Widget>{}, "half-open viewport edge is never an input target");
 
   auto events = terminal.input("\x1b[<0;5;2M");
 
@@ -444,11 +456,11 @@ void rendered_clipping_and_hit_order() {
   }));
 
   take(tree->frame([&] {
-    auto rejected = set_overlay_options(*tree, overlay, {});
+    auto rejected = setOverlayOptions(*tree, overlay, {});
 
-    check(!rejected && rejected.error() == TreeError::would_block, "overlay settings cannot change during a frame");
+    check(!rejected && rejected.error() == TreeError::WOULD_BLOCK, "overlay settings cannot change during a frame");
   }));
-  take(set_overlay_options(*tree, overlay, {}));
+  take(setOverlayOptions(*tree, overlay, {}));
   check(!take(tree->inspect(front)).geometry.valid, "overlay setter invalidates arranged descendants");
 
   draw({8, 3});
@@ -456,7 +468,7 @@ void rendered_clipping_and_hit_order() {
   const std::array<std::string_view, 3> wide{"        ", " AAACCBB", " AAACCBB"};
 
   expect(wide);
-  take(tree->set_visible(front, false));
+  take(tree->setVisible(front, false));
 
   draw({8, 3});
 
@@ -469,19 +481,22 @@ struct GuardedGrid : Grid {
   WidgetTree &tree;
   Node<Widget> root;
   mutable bool guarded{};
+
   GuardedGrid(WidgetTree &owner, Node<Widget> node) : tree(owner), root(node) {
   }
-  std::expected<CellSize, TreeError> measure_children(std::span<const MeasuredChild> children) const override {
-    const auto mutation = tree.set_enabled(root, false);
-    const auto reentry = layout_tree(tree, root, {}, {});
+
+  std::expected<CellSize, TreeError> measureChildren(std::span<const MeasuredChild> children) const override {
+    const auto mutation = tree.setEnabled(root, false);
+    const auto reentry = layoutTree(tree, root, {}, {});
 
     guarded =
-      !mutation && mutation.error() == TreeError::would_block && !reentry && reentry.error() == TreeError::would_block;
+      !mutation && mutation.error() == TreeError::WOULD_BLOCK && !reentry && reentry.error() == TreeError::WOULD_BLOCK;
 
-    return Grid::measure_children(children);
+    return Grid::measureChildren(children);
   }
 };
-void stale_placements_and_pure_measure() {
+
+void stalePlacementsAndPureMeasure() {
   auto scheduler = take(Scheduler::create());
   auto tree = take(WidgetTree::create(*scheduler));
   auto root = take(tree->root());
@@ -490,13 +505,13 @@ void stale_placements_and_pure_measure() {
   GridOptions options;
 
   options.cells = {{original.id()}};
-  take(set_grid_options(*tree, grid, options));
+  take(setGridOptions(*tree, grid, options));
 
   auto run = [&] {
     std::expected<void, TreeError> result;
 
     take(tree->frame([&] {
-      result = layout_tree(*tree, root, rect(0, 0, 5, 3), rect(0, 0, 5, 3));
+      result = layoutTree(*tree, root, rect(0, 0, 5, 3), rect(0, 0, 5, 3));
     }));
 
     return result;
@@ -512,31 +527,31 @@ void stale_placements_and_pure_measure() {
   auto replacement = take(tree->emplace<Leaf>(grid, CellSize{2, 1}));
   auto failed = run();
 
-  check(!failed && failed.error() == TreeError::invalid_argument, "stale placement never assigns replacement identity");
+  check(!failed && failed.error() == TreeError::INVALID_ARGUMENT, "stale placement never assigns replacement identity");
   check(!take(tree->inspect(replacement)).geometry.valid, "failed pass exposes no replacement geometry");
   options.cells.push_back({replacement.id()});
-  take(set_grid_options(*tree, grid, options));
+  take(setGridOptions(*tree, grid, options));
 
   take(run());
   options.cells[0].column_span = 2;
 
-  auto invalid = set_grid_options(*tree, grid, options);
+  auto invalid = setGridOptions(*tree, grid, options);
 
-  check(!invalid && invalid.error() == TreeError::invalid_argument, "stale entry structural span still validated");
+  check(!invalid && invalid.error() == TreeError::INVALID_ARGUMENT, "stale entry structural span still validated");
   check(take(tree->inspect(replacement)).geometry.valid, "invalid setter preserves preceding configuration/geometry");
 }
 
-void vertical_span_and_weighted_tracks() {
+void verticalSpanAndWeightedTracks() {
   GridOptions options;
 
-  options.columns = {{0, 0, 20, SizeMode::flex, 1}, {0, 0, 20, SizeMode::flex, 2}};
+  options.columns = {{0, 0, 20, SizeMode::FLEX, 1}, {0, 0, 20, SizeMode::FLEX, 2}};
   options.rows = {fixed(2), fixed(3)};
   options.row_gap = 1;
   options.cells = {{{1, 1, 1}, 0, 0, 2, 1}, {{1, 2, 1}, 0, 1, 2, 1}};
 
   const std::array children{MeasuredChild{{1, 1}, {}, {1, 1, 1}}, MeasuredChild{{1, 1}, {}, {1, 2, 1}}};
 
-  auto placed = take(Grid(options).arrange_children(children, {10, 6}));
+  auto placed = take(Grid(options).arrangeChildren(children, {10, 6}));
 
   check(placed[0] == rect(0, 0, 4, 6) && placed[1] == rect(4, 0, 6, 6),
         "weighted columns and vertical spans share deterministic geometry");
@@ -545,15 +560,15 @@ void vertical_span_and_weighted_tracks() {
   options.row_gap = 0;
   options.cells[0].row_span = 128;
   options.cells[0].column_span = 128;
-  check(take(Grid(options).measure_children(children)) == CellSize{128, 128},
+  check(take(Grid(options).measureChildren(children)) == CellSize{128, 128},
         "sparse full-grid span uses only axis tracks");
 }
 
-void capped_span_remainders() {
-  constexpr std::array expected_sizes{std::array{1, 2, 2}, std::array{2, 1, 2}, std::array{2, 2, 1}};
+void cappedSpanRemainders() {
+  constexpr std::array EXPECTED_SIZES{std::array{1, 2, 2}, std::array{2, 1, 2}, std::array{2, 2, 1}};
 
   for (bool vertical : {false, true}) {
-    for (std::size_t capped = 0; capped < expected_sizes.size(); ++capped) {
+    for (std::size_t capped = 0; capped < EXPECTED_SIZES.size(); ++capped) {
       GridOptions options;
       std::vector<AxisSize> axis(3);
       std::array<MeasuredChild, 4> children{};
@@ -572,13 +587,13 @@ void capped_span_remainders() {
       options.cells.push_back({children[3].node, 0, 0, vertical ? 3u : 1u, vertical ? 1u : 3u});
 
       const Grid grid(options);
-      const auto placed = take(grid.arrange_children(children, children[3].desired));
+      const auto placed = take(grid.arrangeChildren(children, children[3].desired));
       int origin{};
 
-      check(take(grid.measure_children(children)) == children[3].desired, "capped span retains total demand");
+      check(take(grid.measureChildren(children)) == children[3].desired, "capped span retains total demand");
 
       for (std::size_t i = 0; i < 3; ++i) {
-        const auto extent = expected_sizes[capped][i];
+        const auto extent = EXPECTED_SIZES[capped][i];
         const auto expected = vertical ? rect(0, origin, 1, extent) : rect(origin, 0, extent, 1);
 
         check(placed[i] == expected, "capped track cannot consume an unassigned remainder cell");
@@ -587,22 +602,22 @@ void capped_span_remainders() {
 
       children[3].desired = vertical ? CellSize{1, 2} : CellSize{2, 1};
 
-      const auto small = take(grid.arrange_children(children, children[3].desired));
-      constexpr std::array small_sizes{1, 1, 0};
+      const auto small = take(grid.arrangeChildren(children, children[3].desired));
+      constexpr std::array SMALL_SIZES{1, 1, 0};
 
       origin = 0;
 
       for (std::size_t i = 0; i < 3; ++i) {
-        const auto expected = vertical ? rect(0, origin, 1, small_sizes[i]) : rect(origin, 0, small_sizes[i], 1);
+        const auto expected = vertical ? rect(0, origin, 1, SMALL_SIZES[i]) : rect(origin, 0, SMALL_SIZES[i], 1);
 
         check(small[i] == expected, "zero quotient leaves remainder in stable track order");
-        origin += small_sizes[i];
+        origin += SMALL_SIZES[i];
       }
     }
   }
 }
 
-void allocation_failures() {
+void allocationFailures() {
   const NodeId id{1, 1, 1};
   GridOptions options;
 
@@ -626,7 +641,7 @@ void allocation_failures() {
       if (result) {
         complete = true;
       } else {
-        check(result.error() == TreeError::no_memory, "allocation failure reports no_memory");
+        check(result.error() == TreeError::NO_MEMORY, "allocation failure reports no_memory");
         ++rejected;
       }
     }
@@ -635,15 +650,15 @@ void allocation_failures() {
   };
 
   sweep([&] {
-    return grid.measure_children(children);
+    return grid.measureChildren(children);
   });
 
   sweep([&] {
-    return grid.arrange_children(children, {8, 3});
+    return grid.arrangeChildren(children, {8, 3});
   });
 
   sweep([&] {
-    return overlay.arrange_children(children, {8, 3});
+    return overlay.arrangeChildren(children, {8, 3});
   });
 
   auto scheduler = take(Scheduler::create());
@@ -655,31 +670,32 @@ void allocation_failures() {
   replacement.column_gap = 2;
   allocation_test::remaining = 0;
 
-  auto rejected = set_grid_options(*tree, node, replacement);
+  auto rejected = setGridOptions(*tree, node, replacement);
 
   allocation_test::remaining = -1;
-  check(!rejected && rejected.error() == TreeError::no_memory, "setter allocation failure is observable");
+  check(!rejected && rejected.error() == TreeError::NO_MEMORY, "setter allocation failure is observable");
   take(tree->read(node, [](const Grid &value) {
     check(value.options().column_gap == 0, "failed setter preserves old options");
   }));
 
   sweep([&] {
-    return set_grid_options(*tree, node, replacement);
+    return setGridOptions(*tree, node, replacement);
   });
   take(tree->read(node, [](const Grid &value) {
     check(value.options().column_gap == 2, "atomic configuration replacement survives failpoints");
   }));
 }
 } // namespace
+
 int main() {
-  nested_identity_and_spans();
-  tracks_bounds_and_errors();
-  alignment_and_overlay();
-  rendered_clipping_and_hit_order();
-  stale_placements_and_pure_measure();
-  vertical_span_and_weighted_tracks();
-  capped_span_remainders();
-  allocation_failures();
+  nestedIdentityAndSpans();
+  tracksBoundsAndErrors();
+  alignmentAndOverlay();
+  renderedClippingAndHitOrder();
+  stalePlacementsAndPureMeasure();
+  verticalSpanAndWeightedTracks();
+  cappedSpanRemainders();
+  allocationFailures();
 
   return failures ? EXIT_FAILURE : EXIT_SUCCESS;
 }

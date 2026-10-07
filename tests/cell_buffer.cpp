@@ -65,11 +65,11 @@ std::string utf8(std::u8string_view text) {
   return {reinterpret_cast<const char *>(text.data()), text.size()};
 }
 
-CellBufferLimits small_limits() {
+CellBufferLimits smallLimits() {
   return {32, 16, 256, 64, 1024, 16};
 }
 
-CellBuffer make_buffer(CellSize size, CellBufferLimits limits = small_limits(), WidthPolicy policy = {}) {
+CellBuffer makeBuffer(CellSize size, CellBufferLimits limits = smallLimits(), WidthPolicy policy = {}) {
   auto buffer = CellBuffer::from(size, policy, limits);
 
   if (!buffer) {
@@ -80,7 +80,7 @@ CellBuffer make_buffer(CellSize size, CellBufferLimits limits = small_limits(), 
   return std::move(*buffer);
 }
 
-GraphemeText make_text(std::string_view bytes, WidthPolicy policy = {}) {
+GraphemeText makeText(std::string_view bytes, WidthPolicy policy = {}) {
   auto text = GraphemeText::from(bytes, policy);
 
   if (!text) {
@@ -104,6 +104,7 @@ std::vector<SnapshotCell> snapshot(const CellBuffer &buffer) {
   for (std::int32_t y = 0; y < buffer.size().height; ++y) {
     for (std::int32_t x = 0; x < buffer.size().width; ++x) {
       const auto view = buffer.at({x, y});
+
       check(view.has_value(), "all cell coordinates resolve");
 
       if (view) {
@@ -119,6 +120,7 @@ void invariant(const CellBuffer &buffer) {
   const auto count = static_cast<std::size_t>(buffer.size().width) * static_cast<std::size_t>(buffer.size().height);
   const auto memory = buffer.memory();
   const auto limits = buffer.limits();
+
   check(buffer.cells().size() == count, "normalized dimensions match row-major storage");
   check(memory.glyph_count <= limits.max_glyphs && memory.glyph_bytes <= limits.max_glyph_bytes &&
           memory.style_count <= limits.max_styles,
@@ -135,19 +137,21 @@ void invariant(const CellBuffer &buffer) {
       const auto &cell = view->cell;
       const auto offset =
         static_cast<std::size_t>(y) * static_cast<std::size_t>(buffer.size().width) + static_cast<std::size_t>(x);
+
       check(cell == buffer.cells()[offset], "span and coordinate lookup agree");
       check(cell.glyph.value < memory.glyph_count && cell.style.value < memory.style_count,
             "every live ID resolves within its local pool");
       check(!view->glyph.empty(), "every cell resolves nonempty display bytes");
 
-      if (cell.kind == CellKind::blank) {
+      if (cell.kind == CellKind::BLANK) {
         check(cell == Cell{} && view->glyph == " " && view->style == CellStyle{}, "blank resolves default values");
-      } else if (cell.kind == CellKind::continuation) {
+      } else if (cell.kind == CellKind::CONTINUATION) {
         check(x > 0 && cell.columns == 0, "continuation never starts a row");
 
         if (x > 0) {
           const auto lead = buffer.at({x - 1, y});
-          check(lead->cell.kind == CellKind::lead && lead->cell.columns == 2 && lead->cell.glyph == cell.glyph &&
+
+          check(lead->cell.kind == CellKind::LEAD && lead->cell.columns == 2 && lead->cell.glyph == cell.glyph &&
                   lead->cell.style == cell.style && lead->glyph == view->glyph && lead->style == view->style,
                 "continuation always matches the immediately preceding wide lead");
         }
@@ -159,7 +163,8 @@ void invariant(const CellBuffer &buffer) {
 
           if (x + 1 < buffer.size().width) {
             const auto continuation = buffer.at({x + 1, y});
-            check(continuation->cell.kind == CellKind::continuation && continuation->cell.glyph == cell.glyph &&
+
+            check(continuation->cell.kind == CellKind::CONTINUATION && continuation->cell.glyph == cell.glyph &&
                     continuation->cell.style == cell.style,
                   "wide lead has its matching continuation");
           }
@@ -169,47 +174,54 @@ void invariant(const CellBuffer &buffer) {
   }
 }
 
-void overwrite_and_lifetime() {
-  auto buffer = make_buffer({6, 2});
-  auto wide = make_text(utf8(u8"界"));
-  const auto narrow = make_text("x");
+void overwriteAndLifetime() {
+  auto buffer = makeBuffer({6, 2});
+  auto wide = makeText(utf8(u8"界"));
+  const auto narrow = makeText("x");
   CellStyle colored;
+
   colored.foreground = RgbColor{10, 20, 30};
   colored.background = RgbColor{40, 50, 60};
   colored.bold = true;
   check(buffer.put({0, 0}, wide, 0, colored).has_value(), "wide write succeeds");
+
   const auto lead = buffer.at({0, 0});
+
   check(lead->glyph == utf8(u8"界") && lead->style == colored && lead->cell.columns == 2,
         "wide semantic bytes and style are stored");
   check(buffer.put({1, 0}, narrow, 0).has_value(), "write over second half succeeds");
-  check(buffer.at({0, 0})->glyph == " " && buffer.at({0, 0})->cell.kind == CellKind::blank &&
+  check(buffer.at({0, 0})->glyph == " " && buffer.at({0, 0})->cell.kind == CellKind::BLANK &&
           buffer.at({1, 0})->glyph == "x",
         "overwriting continuation clears the entire older glyph");
   check(buffer.put({0, 0}, wide, 0, colored) && buffer.put({2, 0}, wide, 0, colored) && buffer.put({1, 0}, wide, 0),
         "wide write can intersect two older wide clusters");
   check(buffer.at({0, 0})->glyph == " " && buffer.at({3, 0})->glyph == " " && buffer.at({1, 0})->cell.columns == 2 &&
-          buffer.at({2, 0})->cell.kind == CellKind::continuation,
+          buffer.at({2, 0})->cell.kind == CellKind::CONTINUATION,
         "both complete intersected clusters are cleared");
   check(buffer.put({1, 0}, narrow, 0).has_value() && buffer.at({2, 0})->glyph == " ",
         "overwriting wide lead clears its continuation");
 
   {
-    const auto temporary = make_text(utf8(u8"e\u0301👩‍💻"));
+    const auto temporary = makeText(utf8(u8"e\u0301👩‍💻"));
+
     check(buffer.put({0, 1}, temporary, 0, colored) && buffer.put({1, 1}, temporary, 1, colored),
           "write by grapheme index from multicluster source");
   }
 
-  wide = make_text("replaced");
+  wide = makeText("replaced");
   check(buffer.at({0, 1})->glyph == utf8(u8"e\u0301") && buffer.at({1, 1})->glyph == utf8(u8"👩‍💻") &&
           buffer.at({2, 1})->style == colored,
         "buffer owns bytes and styles after text destruction/replacement");
-  const auto controls = make_text("\x1b\t\r\n");
+
+  const auto controls = makeText("\x1b\t\r\n");
+
   check(buffer.put({5, 1}, controls, 2).has_value() && buffer.at({5, 1})->glyph == "?" &&
           buffer.at({5, 1})->cell.columns == 1,
         "unsupported whole logical cluster becomes a safe one-cell placeholder");
   invariant(buffer);
 
   const auto allocation = buffer.memory();
+
   buffer.clear();
   invariant(buffer);
   check(buffer.memory().glyph_count == 1 && buffer.memory().glyph_bytes == 1 && buffer.memory().style_count == 1 &&
@@ -226,11 +238,13 @@ void overwrite_and_lifetime() {
   invariant(buffer);
 }
 
-void failures_are_atomic() {
-  const auto narrow = make_text("a");
-  const auto wide = make_text(utf8(u8"界"));
-  auto buffer = make_buffer({3, 2});
+void failuresAreAtomic() {
+  const auto narrow = makeText("a");
+  const auto wide = makeText(utf8(u8"界"));
+  auto buffer = makeBuffer({3, 2});
+
   check(buffer.put({1, 0}, wide, 0).has_value(), "seed wide glyph at edge");
+
   const auto before = snapshot(buffer);
   const auto memory = buffer.memory();
   const auto borrowed = buffer.at({1, 0})->glyph;
@@ -242,44 +256,52 @@ void failures_are_atomic() {
     invariant(buffer);
   };
 
-  reject(buffer.put({2, 0}, wide, 0), CellBufferError::wide_at_edge);
-  reject(buffer.put({-1, 0}, narrow, 0), CellBufferError::out_of_bounds);
-  reject(buffer.put({3, 0}, narrow, 0), CellBufferError::out_of_bounds);
-  reject(buffer.put({0, 2}, narrow, 0), CellBufferError::out_of_bounds);
-  reject(buffer.put({0, -1}, narrow, 0), CellBufferError::out_of_bounds);
-  reject(buffer.put({0, 0}, narrow, 1), CellBufferError::invalid_grapheme);
-  reject(buffer.put({0, 0}, make_text(""), 0), CellBufferError::invalid_grapheme);
+  reject(buffer.put({2, 0}, wide, 0), CellBufferError::WIDE_AT_EDGE);
+  reject(buffer.put({-1, 0}, narrow, 0), CellBufferError::OUT_OF_BOUNDS);
+  reject(buffer.put({3, 0}, narrow, 0), CellBufferError::OUT_OF_BOUNDS);
+  reject(buffer.put({0, 2}, narrow, 0), CellBufferError::OUT_OF_BOUNDS);
+  reject(buffer.put({0, -1}, narrow, 0), CellBufferError::OUT_OF_BOUNDS);
+  reject(buffer.put({0, 0}, narrow, 1), CellBufferError::INVALID_GRAPHEME);
+  reject(buffer.put({0, 0}, makeText(""), 0), CellBufferError::INVALID_GRAPHEME);
+
   WidthPolicy changed;
+
   changed.revision = 1;
-  reject(buffer.put({0, 0}, make_text("a", changed), 0), CellBufferError::policy_mismatch);
+  reject(buffer.put({0, 0}, makeText("a", changed), 0), CellBufferError::POLICY_MISMATCH);
   changed = {};
-  changed.emoji = EmojiWidth::one;
-  reject(buffer.put({0, 0}, make_text("a", changed), 0), CellBufferError::policy_mismatch);
-  reject(buffer.resize({33, 2}), CellBufferError::column_limit);
-  reject(buffer.resize({3, 17}), CellBufferError::row_limit);
-  reject(buffer.resize({32, 16}), CellBufferError::cell_limit);
+  changed.emoji = EmojiWidth::ONE;
+  reject(buffer.put({0, 0}, makeText("a", changed), 0), CellBufferError::POLICY_MISMATCH);
+  reject(buffer.resize({33, 2}), CellBufferError::COLUMN_LIMIT);
+  reject(buffer.resize({3, 17}), CellBufferError::ROW_LIMIT);
+  reject(buffer.resize({32, 16}), CellBufferError::CELL_LIMIT);
   check(!buffer.at({-1, 0}) && !buffer.at({0, 2}), "invalid coordinate lookup returns error");
 
   for (int allocation_index = 0; allocation_index < 4; ++allocation_index) {
     const auto old_live_arrays = live_arrays;
+
     array_failure_countdown = allocation_index;
-    reject(buffer.resize({4, 3}), CellBufferError::allocation_failure);
+    reject(buffer.resize({4, 3}), CellBufferError::ALLOCATION_FAILURE);
     check(live_arrays == old_live_arrays && array_failure_countdown == -1,
           "partial resize allocations are released on each possible allocation failure");
   }
 }
 
-void pool_limits() {
-  const auto a = make_text("a");
-  const auto b = make_text("b");
-  auto limits = small_limits();
+void poolLimits() {
+  const auto a = makeText("a");
+  const auto b = makeText("b");
+  auto limits = smallLimits();
+
   limits.max_glyphs = 2;
-  auto glyphs = make_buffer({2, 1}, limits);
+
+  auto glyphs = makeBuffer({2, 1}, limits);
+
   check(glyphs.put({0, 0}, a, 0).has_value(), "new glyph fits last record");
+
   const auto glyph_snapshot = snapshot(glyphs);
   const auto glyph_memory = glyphs.memory();
   const auto glyph_error = glyphs.put({0, 0}, b, 0);
-  check(!glyph_error && glyph_error.error() == CellBufferError::glyph_limit && snapshot(glyphs) == glyph_snapshot &&
+
+  check(!glyph_error && glyph_error.error() == CellBufferError::GLYPH_LIMIT && snapshot(glyphs) == glyph_snapshot &&
           glyphs.memory() == glyph_memory,
         "full glyph pool refuses new glyph without changing state");
 
@@ -293,31 +315,41 @@ void pool_limits() {
   check(glyphs.put({0, 0}, b, 0).has_value(), "clear reclaims all old glyph slots");
   invariant(glyphs);
 
-  limits = small_limits();
+  limits = smallLimits();
   limits.max_glyph_bytes = 3;
-  auto bytes = make_buffer({2, 1}, limits);
+
+  auto bytes = makeBuffer({2, 1}, limits);
+
   check(bytes.put({0, 0}, a, 0).has_value(), "first byte fits");
+
   const auto byte_snapshot = snapshot(bytes);
   const auto byte_memory = bytes.memory();
-  const auto too_long = bytes.put({0, 0}, make_text(utf8(u8"e\u0301")), 0);
-  check(!too_long && too_long.error() == CellBufferError::glyph_byte_limit && snapshot(bytes) == byte_snapshot &&
+  const auto too_long = bytes.put({0, 0}, makeText(utf8(u8"e\u0301")), 0);
+
+  check(!too_long && too_long.error() == CellBufferError::GLYPH_BYTE_LIMIT && snapshot(bytes) == byte_snapshot &&
           bytes.memory() == byte_memory,
         "whole multibyte glyph is rejected atomically by byte cap");
   check(bytes.put({1, 0}, b, 0).has_value() && bytes.memory().glyph_bytes == 3, "exact byte cap succeeds");
   invariant(bytes);
 
-  limits = small_limits();
+  limits = smallLimits();
   limits.max_styles = 2;
-  auto styles = make_buffer({2, 1}, limits);
+
+  auto styles = makeBuffer({2, 1}, limits);
   CellStyle first;
+
   first.italic = true;
+
   CellStyle second;
+
   second.underline = true;
   check(styles.put({0, 0}, a, 0, first).has_value(), "style fits last slot");
+
   const auto style_snapshot = snapshot(styles);
   const auto style_memory = styles.memory();
   const auto too_many_styles = styles.put({1, 0}, b, 0, second);
-  check(!too_many_styles && too_many_styles.error() == CellBufferError::style_limit &&
+
+  check(!too_many_styles && too_many_styles.error() == CellBufferError::STYLE_LIMIT &&
           snapshot(styles) == style_snapshot && styles.memory() == style_memory,
         "style rejection also prevents installation of a new glyph");
   check(styles.put({1, 0}, b, 0, first).has_value() && styles.memory().style_count == 2,
@@ -325,8 +357,8 @@ void pool_limits() {
   invariant(styles);
 }
 
-void configuration_and_moves() {
-  auto limits = small_limits();
+void configurationAndMoves() {
+  auto limits = smallLimits();
 
   for (int option = 0; option < 10; ++option) {
     auto invalid = limits;
@@ -334,74 +366,98 @@ void configuration_and_moves() {
     switch (option) {
     case 0:
       invalid.max_glyphs = 0;
+
       break;
     case 1:
       invalid.max_glyph_bytes = 0;
+
       break;
     case 2:
       invalid.max_styles = 0;
+
       break;
     case 3:
       invalid.max_rows = std::numeric_limits<std::size_t>::max();
+
       break;
     case 4:
       invalid.max_cells = std::numeric_limits<std::size_t>::max();
+
       break;
     case 5:
       invalid.max_glyphs = std::numeric_limits<std::size_t>::max();
+
       break;
     case 6:
       invalid.max_glyph_bytes = std::numeric_limits<std::size_t>::max();
+
       break;
     case 7:
       invalid.max_columns = std::numeric_limits<std::size_t>::max();
+
       break;
     case 8:
       invalid.max_styles = std::numeric_limits<std::size_t>::max();
+
       break;
     case 9:
       invalid.max_cells = static_cast<std::size_t>(std::numeric_limits<std::ptrdiff_t>::max()) / sizeof(Cell);
       invalid.max_glyph_bytes = static_cast<std::size_t>(std::numeric_limits<std::ptrdiff_t>::max());
+
       break;
     }
 
     const auto result = CellBuffer::from({0, 0}, {}, invalid);
-    check(!result && result.error() == CellBufferError::invalid_limits, "invalid caps refused before allocation");
+
+    check(!result && result.error() == CellBufferError::INVALID_LIMITS, "invalid caps refused before allocation");
   }
 
   WidthPolicy invalid_policy;
+
   invalid_policy.emoji = static_cast<EmojiWidth>(3);
+
   const auto invalid = CellBuffer::from({0, 0}, invalid_policy, limits);
-  check(!invalid && invalid.error() == CellBufferError::invalid_policy, "invalid width policy refused");
+
+  check(!invalid && invalid.error() == CellBufferError::INVALID_POLICY, "invalid width policy refused");
   invalid_policy = {};
   invalid_policy.ambiguous = static_cast<AmbiguousWidth>(7);
+
   const auto invalid_ambiguous = CellBuffer::from({0, 0}, invalid_policy, limits);
-  check(!invalid_ambiguous && invalid_ambiguous.error() == CellBufferError::invalid_policy,
+
+  check(!invalid_ambiguous && invalid_ambiguous.error() == CellBufferError::INVALID_POLICY,
         "invalid ambiguous policy refused");
   limits.max_columns = 0;
   limits.max_rows = 0;
   limits.max_cells = 0;
-  auto empty = make_buffer({-7, -9}, limits);
+
+  auto empty = makeBuffer({-7, -9}, limits);
+
   invariant(empty);
   check(empty.size() == CellSize{} && empty.memory().glyph_count == 1, "zero cell caps permit empty valid buffer");
 
   WidthPolicy custom_policy;
-  custom_policy.ambiguous = AmbiguousWidth::wide;
-  custom_policy.emoji = EmojiWidth::one;
+
+  custom_policy.ambiguous = AmbiguousWidth::WIDE;
+  custom_policy.emoji = EmojiWidth::ONE;
   custom_policy.revision = 77;
-  auto custom = make_buffer({3, 1}, small_limits(), custom_policy);
-  const auto ambiguous = make_text(utf8(u8"·"), custom_policy);
-  const auto emoji = make_text(utf8(u8"😀"), custom_policy);
+
+  auto custom = makeBuffer({3, 1}, smallLimits(), custom_policy);
+  const auto ambiguous = makeText(utf8(u8"·"), custom_policy);
+  const auto emoji = makeText(utf8(u8"😀"), custom_policy);
+
   check(custom.policy() == custom_policy && custom.put({0, 0}, ambiguous, 0) && custom.put({2, 0}, emoji, 0) &&
           custom.at({0, 0})->cell.columns == 2 && custom.at({2, 0})->cell.columns == 1,
         "nondefault complete width policy is retained and applied to cells");
   invariant(custom);
 
-  auto original = make_buffer({3, 1});
-  check(original.put({1, 0}, make_text(utf8(u8"界")), 0).has_value(), "move fixture wide glyph");
+  auto original = makeBuffer({3, 1});
+
+  check(original.put({1, 0}, makeText(utf8(u8"界")), 0).has_value(), "move fixture wide glyph");
+
   const auto original_snapshot = snapshot(original);
   const auto original_memory = original.memory();
   auto moved = std::move(original);
+
   check(snapshot(moved) == original_snapshot && moved.memory() == original_memory, "move transfers coherent ownership");
   check(original.size() == CellSize{} && original.cells().empty() && original.memory().glyph_count == 0 &&
           original.memory().total_bytes == sizeof(CellBuffer),
@@ -410,7 +466,9 @@ void configuration_and_moves() {
   invariant(original);
   check(original.resize({1, 1}).has_value(), "moved-from buffer is reusable by resize");
   invariant(original);
+
   auto &self = moved;
+
   moved = std::move(self);
   check(snapshot(moved) == original_snapshot, "self-move preserves buffer");
   original = std::move(moved);
@@ -422,15 +480,15 @@ void configuration_and_moves() {
 struct OracleCell {
   std::string glyph{" "};
   CellStyle style{};
-  CellKind kind{CellKind::blank};
+  CellKind kind{CellKind::BLANK};
   std::uint8_t columns{1};
 };
 
-void bounded_property() {
-  const std::vector<GraphemeText> texts = {
-    make_text("a"),  make_text("b"), make_text(utf8(u8"e\u0301")), make_text(utf8(u8"界")), make_text(utf8(u8"😀")),
-    make_text("\t"), make_text(" ")};
-  auto buffer = make_buffer({8, 3});
+void boundedProperty() {
+  const std::vector<GraphemeText> texts = {makeText("a"),          makeText("b"),          makeText(utf8(u8"e\u0301")),
+                                           makeText(utf8(u8"界")), makeText(utf8(u8"😀")), makeText("\t"),
+                                           makeText(" ")};
+  auto buffer = makeBuffer({8, 3});
   std::vector<OracleCell> oracle(24);
   std::uint32_t random = 0x12345678;
   auto next = [&]() {
@@ -442,6 +500,7 @@ void bounded_property() {
   for (int iteration = 0; iteration < 12000; ++iteration) {
     if (iteration % 137 == 0) {
       const CellSize size{static_cast<std::int32_t>(next() % 9), static_cast<std::int32_t>(next() % 4)};
+
       check(buffer.resize(size).has_value(), "bounded property resize succeeds");
       oracle.assign(static_cast<std::size_t>(size.width) * static_cast<std::size_t>(size.height), {});
     } else if (iteration % 53 == 0) {
@@ -452,14 +511,17 @@ void bounded_property() {
       const auto width = text.graphemes()[0].cells;
       const CellPoint position{static_cast<std::int32_t>(next() % 11) - 1, static_cast<std::int32_t>(next() % 6) - 1};
       CellStyle style;
+
       style.bold = next() % 2 == 0;
       style.underline = next() % 3 == 0;
+
       const bool in_bounds =
         position.x >= 0 && position.y >= 0 && position.x < buffer.size().width && position.y < buffer.size().height;
       const bool fits = in_bounds && position.x + width <= buffer.size().width;
       const auto before = snapshot(buffer);
       const auto memory = buffer.memory();
       const auto result = buffer.put(position, text, 0, style);
+
       check(result.has_value() == fits, "property write acceptance matches independent bounds");
 
       if (!fits) {
@@ -472,7 +534,7 @@ void bounded_property() {
 
         // Remove old clusters by their full footprint, rather than following production IDs.
         for (std::size_t i = row; i < row + static_cast<std::size_t>(buffer.size().width); ++i) {
-          if (old[i].kind == CellKind::continuation) {
+          if (old[i].kind == CellKind::CONTINUATION) {
             continue;
           }
 
@@ -486,17 +548,20 @@ void bounded_property() {
         }
 
         const auto bytes =
-          text.graphemes()[0].display == TextDisplay::unsupported ? std::string("?") : std::string(text.bytes());
-        oracle[start] = {bytes, style, CellKind::lead, width};
+          text.graphemes()[0].display == TextDisplay::UNSUPPORTED ? std::string("?") : std::string(text.bytes());
+
+        oracle[start] = {bytes, style, CellKind::LEAD, width};
 
         if (width == 2) {
-          oracle[start + 1] = {bytes, style, CellKind::continuation, 0};
+          oracle[start + 1] = {bytes, style, CellKind::CONTINUATION, 0};
         }
       }
     }
 
     invariant(buffer);
+
     const auto actual = snapshot(buffer);
+
     check(actual.size() == oracle.size(), "oracle and buffer extents agree");
 
     for (std::size_t i = 0; i < actual.size() && i < oracle.size(); ++i) {
@@ -511,11 +576,11 @@ void bounded_property() {
 } // namespace
 
 int main() {
-  overwrite_and_lifetime();
-  failures_are_atomic();
-  pool_limits();
-  configuration_and_moves();
-  bounded_property();
+  overwriteAndLifetime();
+  failuresAreAtomic();
+  poolLimits();
+  configurationAndMoves();
+  boundedProperty();
   check(live_arrays == 0, "all owned arrays are released at test completion");
 
   if (failures != 0) {
@@ -524,8 +589,9 @@ int main() {
     return 1;
   }
 
-  const auto buffer = make_buffer({3, 2});
+  const auto buffer = makeBuffer({3, 2});
   const auto memory = buffer.memory();
+
   std::cout << "Measured payload: object=" << memory.object_bytes << " cells=" << memory.cell_storage_bytes
             << " glyph_records=" << memory.glyph_record_storage_bytes
             << " glyph_capacity=" << memory.glyph_byte_storage_bytes << " styles=" << memory.style_storage_bytes

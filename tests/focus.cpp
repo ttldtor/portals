@@ -100,6 +100,7 @@ struct Fixture {
   std::unique_ptr<WidgetTree> tree = take(WidgetTree::create(*scheduler));
   Node<Widget> root = take(tree->root());
   std::unique_ptr<EventRouter> router;
+
   explicit Fixture(EventRouterOptions options = {}) : router(take(EventRouter::create(*tree, options))) {
   }
 
@@ -111,7 +112,7 @@ struct Fixture {
     return take(router->bind(
       node,
       [](Widget &, const RoutedEvent &) {
-        return EventReply::ignored;
+        return EventReply::IGNORED;
       },
       focusable));
   }
@@ -133,7 +134,7 @@ struct Fixture {
   }
 };
 
-void activation_and_input() {
+void activationAndInput() {
   Fixture f;
   auto child = f.child(f.root);
   int calls{};
@@ -141,17 +142,17 @@ void activation_and_input() {
   auto binding = take(f.router->bind(child, [&](Widget &, const RoutedEvent &event) {
     seen.push_back(event);
 
-    if (const auto *action = std::get_if<ActionEvent>(&event); action && action->action == Action::activate) {
+    if (const auto *action = std::get_if<ActionEvent>(&event); action && action->action == Action::ACTIVATE) {
       ++calls;
     }
 
-    return EventReply::handled;
+    return EventReply::HANDLED;
   }));
 
   auto keyboard = f.input("\r");
-  auto programmatic = take(f.router->invoke(child, {Action::activate}));
+  auto programmatic = take(f.router->invoke(child, {Action::ACTIVATE}));
 
-  check(calls == 2 && keyboard.status == DispatchStatus::handled && programmatic.status == DispatchStatus::handled,
+  check(calls == 2 && keyboard.status == DispatchStatus::HANDLED && programmatic.status == DispatchStatus::HANDLED,
         "keyboard and programmatic activation share a handler exactly once");
   check(keyboard.target == child.id() && keyboard.handler == child.id(), "result preserves identities");
   check(std::get<ActionEvent>(seen[0]) == std::get<ActionEvent>(seen[1]), "both routes carry the same action");
@@ -164,17 +165,17 @@ void activation_and_input() {
 
   const auto shifted = std::get<ActionEvent>(seen.back());
 
-  check(shifted.action == Action::move_left && shifted.modifiers.shift, "editing action preserves modifiers");
+  check(shifted.action == Action::MOVE_LEFT && shifted.modifiers.shift, "editing action preserves modifiers");
 
   const auto count = seen.size();
 
-  check(take(f.router->dispatch(InputIssue{})).status == DispatchStatus::no_target && seen.size() == count,
+  check(take(f.router->dispatch(InputIssue{})).status == DispatchStatus::NO_TARGET && seen.size() == count,
         "decoder issues do not become widget events");
-  take(f.router->dispatch(KeyEvent{InputKey::enter, 0, {}, KeyAction::release}));
+  take(f.router->dispatch(KeyEvent{InputKey::ENTER, 0, {}, KeyAction::RELEASE}));
   check(std::holds_alternative<KeyEvent>(seen.back()) && calls == 2, "key release does not activate");
 }
 
-void traversal_and_return() {
+void traversalAndReturn() {
   Fixture f;
   auto first = f.child(f.root);
   auto group = f.child(f.root);
@@ -191,26 +192,26 @@ void traversal_and_return() {
   check(f.input("\t").target == first.id(), "Tab wraps");
   check(f.input("\x1b[Z").target == last.id(), "Shift+Tab wraps backwards");
 
-  check(f.tree->set_enabled(group, false).has_value(), "disable ancestor");
+  check(f.tree->setEnabled(group, false).has_value(), "disable ancestor");
   check(f.input("\x1b[Z").target == first.id(), "disabled ancestor excludes descendant");
 
-  check(f.tree->set_visible(first, false).has_value(), "hide focused node");
+  check(f.tree->setVisible(first, false).has_value(), "hide focused node");
   check(take(f.router->focused()) == last, "hidden focus returns to most recent eligible node");
 
-  check(f.tree->set_enabled(group, true).has_value(), "reenable ancestor");
-  check(f.router->set_focus(nested).has_value(), "explicit focus succeeds without geometry");
+  check(f.tree->setEnabled(group, true).has_value(), "reenable ancestor");
+  check(f.router->setFocus(nested).has_value(), "explicit focus succeeds without geometry");
   check(f.tree->remove(group).has_value(), "remove focused subtree");
   check(take(f.router->focused()) == last, "removed focus returns to previous live node");
 
-  check(f.tree->set_visible(last, false).has_value(), "hide final focusable node");
+  check(f.tree->setVisible(last, false).has_value(), "hide final focusable node");
   check(take(f.router->focused()).id().session == 0, "no eligible focus has empty identity");
-  check(f.input("\r").status == DispatchStatus::no_target, "keyboard miss is explicit");
+  check(f.input("\r").status == DispatchStatus::NO_TARGET, "keyboard miss is explicit");
 
-  check(f.tree->set_visible(first, true).has_value(), "show first again");
+  check(f.tree->setVisible(first, true).has_value(), "show first again");
   check(take(f.router->focused()) == first, "recovery chooses remaining live node");
 }
 
-void mouse_geometry() {
+void mouseGeometry() {
   Fixture f;
   auto under = f.child(f.root);
   auto over = f.child(f.root);
@@ -222,16 +223,16 @@ void mouse_geometry() {
       ++mouse_calls;
     }
 
-    return EventReply::handled;
+    return EventReply::HANDLED;
   }));
 
   f.arrange(f.root, 0, 0, 20, 8);
   f.arrange(under, 0, 0, 10, 4);
   f.arrange(over, 2, 1, 4, 2);
   f.arrange(label, 1, 0, 10, 1);
-  check(take(f.router->hit_test({3, 1})) == label, "deepest later sibling wins");
-  check(take(f.router->hit_test({6, 1})) == under, "ancestor clip and half-open edge exclude label");
-  check(take(f.router->hit_test({20, 0})).id().session == 0, "viewport right edge misses");
+  check(take(f.router->hitTest({3, 1})) == label, "deepest later sibling wins");
+  check(take(f.router->hitTest({6, 1})) == under, "ancestor clip and half-open edge exclude label");
+  check(take(f.router->hitTest({20, 0})).id().session == 0, "viewport right edge misses");
 
   auto mouse = f.input("\x1b[<0;4;2M");
 
@@ -239,12 +240,12 @@ void mouse_geometry() {
         "real SGR input hits child and bubbles once");
   check(take(f.router->focused()) == over, "left press focuses nearest registered ancestor");
 
-  check(f.tree->set_enabled(over, false).has_value(), "disable overlay");
-  check(take(f.router->hit_test({3, 1})) == under, "disabled ancestor removes subtree from hit testing");
+  check(f.tree->setEnabled(over, false).has_value(), "disable overlay");
+  check(take(f.router->hitTest({3, 1})) == under, "disabled ancestor removes subtree from hit testing");
 
-  check(f.tree->set_enabled(over, true).has_value(), "reenable overlay");
-  check(f.tree->invalidate(over, Invalidation::layout).has_value(), "invalidate geometry");
-  check(f.input("\x1b[<0;4;2M").status == DispatchStatus::no_target, "stale geometry cannot route mouse");
+  check(f.tree->setEnabled(over, true).has_value(), "reenable overlay");
+  check(f.tree->invalidate(over, Invalidation::LAYOUT).has_value(), "invalidate geometry");
+  check(f.input("\x1b[<0;4;2M").status == DispatchStatus::NO_TARGET, "stale geometry cannot route mouse");
   check(f.input("\r").handler == over.id(), "stale geometry preserves keyboard focus");
 }
 
@@ -260,7 +261,7 @@ struct LifetimeWidget : Widget {
   }
 };
 
-void bubbling_and_lifetime() {
+void bubblingAndLifetime() {
   Fixture f;
   int destroyed{};
   auto parent = take(f.tree->emplace<LifetimeWidget>(f.root, destroyed));
@@ -271,7 +272,7 @@ void bubbling_and_lifetime() {
     [&](Widget &, const RoutedEvent &) {
       order.push_back(3);
 
-      return EventReply::handled;
+      return EventReply::HANDLED;
     },
     false));
   auto parent_binding = take(f.router->bind(
@@ -279,7 +280,7 @@ void bubbling_and_lifetime() {
     [&](LifetimeWidget &, const RoutedEvent &) {
       order.push_back(2);
 
-      return EventReply::ignored;
+      return EventReply::IGNORED;
     },
     false));
   auto capture = std::make_shared<int>(7);
@@ -294,17 +295,17 @@ void bubbling_and_lifetime() {
     check(widget.value == 42 && destroyed == 0 && *retained == 7 && !weak_capture.expired(),
           "current widget and captures survive ancestor removal and self-disconnect");
 
-    return EventReply::ignored;
+    return EventReply::IGNORED;
   }));
 
   capture.reset();
 
-  auto result = take(f.router->invoke(child, {Action::activate}));
+  auto result = take(f.router->invoke(child, {Action::ACTIVATE}));
 
   check(order == std::vector<int>({1, 3}), "removed ancestor skipped but original live root receives bubble");
   check(result.target == child.id() && result.handler == f.root.id(), "removed target still identifiable in result");
   check(destroyed == 2 && weak_capture.expired(), "widget and captures reclaimed after active handler");
-  check(error(f.router->invoke(child, {Action::activate}), TreeError::stale_node), "removed node never invoked again");
+  check(error(f.router->invoke(child, {Action::ACTIVATE}), TreeError::STALE_NODE), "removed node never invoked again");
 
   auto live = f.child(f.root);
   auto throwing = take(f.router->bind(live, [](Widget &, const RoutedEvent &) -> EventReply {
@@ -312,17 +313,17 @@ void bubbling_and_lifetime() {
   }));
 
   order.clear();
-  check(error(f.router->invoke(live, {Action::activate}), TreeError::callback_failed) && order.empty(),
+  check(error(f.router->invoke(live, {Action::ACTIVATE}), TreeError::CALLBACK_FAILED) && order.empty(),
         "handler exception stops bubbling");
   throwing.disconnect();
 
   auto replacement = f.bind(live);
 
-  check(take(f.router->invoke(live, {Action::activate})).handler == f.root.id(),
+  check(take(f.router->invoke(live, {Action::ACTIVATE})).handler == f.root.id(),
         "router remains usable after exception");
 }
 
-void self_removal_and_disconnect() {
+void selfRemovalAndDisconnect() {
   Fixture f;
   auto parent = f.child(f.root);
   auto child = f.child(parent);
@@ -332,30 +333,30 @@ void self_removal_and_disconnect() {
     [&](Widget &, const RoutedEvent &) {
       ++parent_calls;
 
-      return EventReply::handled;
+      return EventReply::HANDLED;
     },
     false));
   auto child_binding = take(f.router->bind(child, [&](Widget &, const RoutedEvent &) {
     check(f.tree->remove(child).has_value(), "handler removes itself");
 
-    return EventReply::ignored;
+    return EventReply::IGNORED;
   }));
 
-  check(take(f.router->invoke(child, {Action::activate})).handler == parent.id() && parent_calls == 1,
+  check(take(f.router->invoke(child, {Action::ACTIVATE})).handler == parent.id() && parent_calls == 1,
         "self-removal continues to surviving parent");
 
   auto other = f.child(parent);
   auto other_binding = take(f.router->bind(other, [&](Widget &, const RoutedEvent &) {
     parent_binding.disconnect();
 
-    return EventReply::ignored;
+    return EventReply::IGNORED;
   }));
 
-  check(take(f.router->invoke(other, {Action::activate})).status == DispatchStatus::unhandled && parent_calls == 1,
+  check(take(f.router->invoke(other, {Action::ACTIVATE})).status == DispatchStatus::UNHANDLED && parent_calls == 1,
         "disconnect excludes future ancestor callback in current bubble");
 }
 
-void boundaries_and_capacity() {
+void boundariesAndCapacity() {
   Fixture f({2});
   Fixture foreign;
   auto first = f.child(f.root);
@@ -365,45 +366,49 @@ void boundaries_and_capacity() {
   auto handler = [&](Widget &, const RoutedEvent &) {
     ++calls;
 
-    return EventReply::handled;
+    return EventReply::HANDLED;
   };
   auto first_binding = take(f.router->bind(first, handler));
   auto second_binding = f.bind(second);
 
-  check(error(f.router->bind(first, handler), TreeError::invalid_argument), "duplicate registration rejected");
-  check(error(f.router->bind(third, handler), TreeError::node_limit), "registration bound enforced");
-  check(error(f.router->invoke(foreign.root, {Action::activate}), TreeError::wrong_session), "foreign invoke rejected");
-  check(error(f.router->bind(foreign.root, handler), TreeError::wrong_session), "foreign bind rejected");
+  check(error(f.router->bind(first, handler), TreeError::INVALID_ARGUMENT), "duplicate registration rejected");
+  check(error(f.router->bind(third, handler), TreeError::NODE_LIMIT), "registration bound enforced");
+  check(error(f.router->invoke(foreign.root, {Action::ACTIVATE}), TreeError::WRONG_SESSION), "foreign invoke rejected");
+  check(error(f.router->bind(foreign.root, handler), TreeError::WRONG_SESSION), "foreign bind rejected");
 
-  check(f.tree->set_enabled(first, false).has_value(), "disable invocation target");
-  check(take(f.router->invoke(first, {Action::activate})).status == DispatchStatus::no_target && calls == 0,
+  check(f.tree->setEnabled(first, false).has_value(), "disable invocation target");
+  check(take(f.router->invoke(first, {Action::ACTIVATE})).status == DispatchStatus::NO_TARGET && calls == 0,
         "disabled programmatic target is explicit and not called");
 
-  check(f.tree->set_enabled(first, true).has_value(), "reenable invocation target");
+  check(f.tree->setEnabled(first, true).has_value(), "reenable invocation target");
+
   std::thread worker([&] {
-    check(error(f.router->invoke(first, {Action::activate}), TreeError::wrong_thread),
+    check(error(f.router->invoke(first, {Action::ACTIVATE}), TreeError::WRONG_THREAD),
           "foreign-thread invoke rejected");
-    check(error(f.router->dispatch(KeyEvent{InputKey::enter}), TreeError::wrong_thread),
+    check(error(f.router->dispatch(KeyEvent{InputKey::ENTER}), TreeError::WRONG_THREAD),
           "foreign-thread input rejected");
-    check(error(f.router->bind(third, handler), TreeError::wrong_thread), "foreign-thread bind rejected");
-    check(error(f.router->focused(), TreeError::wrong_thread), "foreign-thread focus rejected");
+    check(error(f.router->bind(third, handler), TreeError::WRONG_THREAD), "foreign-thread bind rejected");
+    check(error(f.router->focused(), TreeError::WRONG_THREAD), "foreign-thread focus rejected");
     second_binding.disconnect();
   });
+
   worker.join();
   check(calls == 0, "rejected operations never call user handler");
+
   auto third_binding = take(f.router->bind(third, handler));
 
   check(f.tree->remove(third).has_value(), "remove registered node");
+
   auto fourth = f.child(f.root);
   auto fourth_binding = take(f.router->bind(fourth, handler));
 
   check(fourth.id() != third.id(), "slot reuse keeps generation identity");
-  check(error(f.router->invoke(third, {Action::activate}), TreeError::stale_node),
+  check(error(f.router->invoke(third, {Action::ACTIVATE}), TreeError::STALE_NODE),
         "slot reuse cannot reroute stale ID");
   check(f.tree
           ->frame([&] {
-            check(error(f.router->set_focus(first), TreeError::would_block), "frame cannot mutate focus");
-            check(error(f.router->invoke(first, {Action::activate}), TreeError::would_block),
+            check(error(f.router->setFocus(first), TreeError::WOULD_BLOCK), "frame cannot mutate focus");
+            check(error(f.router->invoke(first, {Action::ACTIVATE}), TreeError::WOULD_BLOCK),
                   "frame cannot invoke actions");
           })
           .has_value(),
@@ -413,14 +418,14 @@ void boundaries_and_capacity() {
 
   auto nested_binding = take(f.router->bind(first, [&](Widget &, const RoutedEvent &) {
     ++calls;
-    check(error(f.router->invoke(first, {Action::activate}), TreeError::would_block), "nested invoke is finite");
-    check(error(f.router->dispatch(KeyEvent{InputKey::enter}), TreeError::would_block), "nested dispatch is finite");
-    check(error(f.router->bind(second, handler), TreeError::would_block), "nested registration rejected explicitly");
+    check(error(f.router->invoke(first, {Action::ACTIVATE}), TreeError::WOULD_BLOCK), "nested invoke is finite");
+    check(error(f.router->dispatch(KeyEvent{InputKey::ENTER}), TreeError::WOULD_BLOCK), "nested dispatch is finite");
+    check(error(f.router->bind(second, handler), TreeError::WOULD_BLOCK), "nested registration rejected explicitly");
 
-    return EventReply::handled;
+    return EventReply::HANDLED;
   }));
 
-  check(take(f.router->invoke(first, {Action::activate})).status == DispatchStatus::handled && calls == 1,
+  check(take(f.router->invoke(first, {Action::ACTIVATE})).status == DispatchStatus::HANDLED && calls == 1,
         "outer delivery continues after rejected reentrancy");
   f.router.reset();
   nested_binding.disconnect();
@@ -439,7 +444,7 @@ struct OnRelease {
   }
 };
 
-void capture_reclamation() {
+void captureReclamation() {
   Fixture f;
   auto child = f.child(f.root);
   auto *router = f.router.get();
@@ -447,12 +452,12 @@ void capture_reclamation() {
   int released{};
   auto capture = std::make_shared<OnRelease>([&] {
     check(std::this_thread::get_id() == owner, "worker cancellation reclaims captures on UI");
-    check(error(router->focused(), TreeError::would_block), "capture destructor cannot reenter registry collection");
+    check(error(router->focused(), TreeError::WOULD_BLOCK), "capture destructor cannot reenter registry collection");
     check(error(router->bind(child,
                              [](Widget &, const RoutedEvent &) {
-                               return EventReply::ignored;
+                               return EventReply::IGNORED;
                              }),
-                TreeError::would_block),
+                TreeError::WOULD_BLOCK),
           "capture destructor cannot mutate registry during collection");
     ++released;
   });
@@ -466,21 +471,21 @@ void capture_reclamation() {
     worker.join();
     check(released == 0 && retained != nullptr, "already admitted callback survives concurrent disconnect");
 
-    return EventReply::handled;
+    return EventReply::HANDLED;
   }));
 
   capture.reset();
-  check(take(router->invoke(child, {Action::activate})).status == DispatchStatus::handled,
+  check(take(router->invoke(child, {Action::ACTIVATE})).status == DispatchStatus::HANDLED,
         "admitted callback finishes");
   check(take(router->focused()).id().session == 0 && released == 1, "next UI operation reclaims disconnected captures");
 
   auto closing_capture = std::make_shared<OnRelease>([&] {
     check(std::this_thread::get_id() == owner, "router shutdown reclaims on UI");
-    check(error(router->focused(), TreeError::closed), "capture destructor sees closed router during shutdown");
+    check(error(router->focused(), TreeError::CLOSED), "capture destructor sees closed router during shutdown");
     ++released;
   });
   auto closing_binding = take(router->bind(child, [retained = closing_capture](Widget &, const RoutedEvent &) {
-    return retained ? EventReply::handled : EventReply::ignored;
+    return retained ? EventReply::HANDLED : EventReply::IGNORED;
   }));
 
   closing_capture.reset();
@@ -489,7 +494,7 @@ void capture_reclamation() {
   check(released == 2, "shutdown releases all callback captures exactly once");
 }
 
-void allocation_failures() {
+void allocationFailures() {
   Fixture f;
   auto child = f.child(f.root);
   auto binding = f.bind(child);
@@ -501,51 +506,62 @@ void allocation_failures() {
 
   for (std::ptrdiff_t allowance = 0; allowance < 40; ++allowance) {
     allocation_test::remaining = allowance;
+
     auto created = EventRouter::create(*f.tree);
+
     allocation_test::remaining = -1;
 
     if (!created) {
       ++create_errors;
-      check(created.error() == TreeError::no_memory, "create translates allocation failure");
+      check(created.error() == TreeError::NO_MEMORY, "create translates allocation failure");
     }
 
     allocation_test::remaining = allowance;
+
     auto focused = f.router->focused();
+
     allocation_test::remaining = -1;
 
     if (!focused) {
       ++focus_errors;
-      check(focused.error() == TreeError::no_memory, "focus translates allocation failure");
+      check(focused.error() == TreeError::NO_MEMORY, "focus translates allocation failure");
     }
 
     allocation_test::remaining = allowance;
-    auto routed = f.router->invoke(child, {Action::activate});
+
+    auto routed = f.router->invoke(child, {Action::ACTIVATE});
+
     allocation_test::remaining = -1;
 
     if (!routed) {
       ++route_errors;
-      check(routed.error() == TreeError::no_memory, "routing translates allocation failure");
+      check(routed.error() == TreeError::NO_MEMORY, "routing translates allocation failure");
     }
 
     allocation_test::remaining = allowance;
-    auto hit = f.router->hit_test({1, 0});
+
+    auto hit = f.router->hitTest({1, 0});
+
     allocation_test::remaining = -1;
 
     if (!hit) {
       ++hit_errors;
-      check(hit.error() == TreeError::no_memory, "hit test translates allocation failure");
+      check(hit.error() == TreeError::NO_MEMORY, "hit test translates allocation failure");
     }
 
     auto other = f.child(f.root);
+
     allocation_test::remaining = allowance;
+
     auto registered = f.router->bind(other, [](Widget &, const RoutedEvent &) {
-      return EventReply::ignored;
+      return EventReply::IGNORED;
     });
+
     allocation_test::remaining = -1;
 
     if (!registered) {
       ++bind_errors;
-      check(registered.error() == TreeError::no_memory, "binding translates allocation failure");
+      check(registered.error() == TreeError::NO_MEMORY, "binding translates allocation failure");
     }
 
     check(f.tree->remove(other).has_value(), "allocation sweep removes own node");
@@ -553,7 +569,7 @@ void allocation_failures() {
 
   check(create_errors > 0 && focus_errors > 0 && route_errors > 0 && hit_errors > 0 && bind_errors > 0,
         "failure injection reaches every allocating router operation");
-  check(take(f.router->invoke(child, {Action::activate})).status == DispatchStatus::unhandled,
+  check(take(f.router->invoke(child, {Action::ACTIVATE})).status == DispatchStatus::UNHANDLED,
         "router remains usable after allocation failures");
 }
 
@@ -572,11 +588,11 @@ struct CopyReentry {
   }
 
   EventReply operator()(Widget &, const RoutedEvent &) const {
-    return EventReply::ignored;
+    return EventReply::IGNORED;
   }
 };
 
-void registration_materialization() {
+void registrationMaterialization() {
   Fixture f({1});
   auto first = f.child(f.root);
   auto second = f.child(f.root);
@@ -586,7 +602,7 @@ void registration_materialization() {
     nested = f.bind(first);
   });
 
-  check(error(f.router->bind(first, duplicate), TreeError::invalid_argument),
+  check(error(f.router->bind(first, duplicate), TreeError::INVALID_ARGUMENT),
         "callback copy cannot bypass duplicate registration validation");
   nested.disconnect();
   entered = false;
@@ -595,7 +611,7 @@ void registration_materialization() {
     nested = f.bind(second);
   });
 
-  check(error(f.router->bind(first, capacity), TreeError::node_limit),
+  check(error(f.router->bind(first, capacity), TreeError::NODE_LIMIT),
         "callback copy cannot exceed registration capacity");
   nested.disconnect();
   entered = false;
@@ -604,7 +620,7 @@ void registration_materialization() {
     check(f.tree->remove(first).has_value(), "copy removes its prospective target");
   });
 
-  check(error(f.router->bind(first, removal), TreeError::stale_node), "callback copy cannot register a removed target");
+  check(error(f.router->bind(first, removal), TreeError::STALE_NODE), "callback copy cannot register a removed target");
 
   auto victim = f.child(f.root);
   auto garbage = std::make_shared<OnRelease>([&] {
@@ -612,30 +628,30 @@ void registration_materialization() {
   });
 
   nested = take(f.router->bind(second, [retained = garbage](Widget &, const RoutedEvent &) {
-    return retained ? EventReply::handled : EventReply::ignored;
+    return retained ? EventReply::HANDLED : EventReply::IGNORED;
   }));
 
   garbage.reset();
   nested.disconnect();
   check(error(f.router->bind(victim,
                              [](Widget &, const RoutedEvent &) {
-                               return EventReply::ignored;
+                               return EventReply::IGNORED;
                              }),
-              TreeError::stale_node),
+              TreeError::STALE_NODE),
         "collection side effects cannot register a removed target");
 }
 } // namespace
 
 int main() {
-  activation_and_input();
-  traversal_and_return();
-  mouse_geometry();
-  bubbling_and_lifetime();
-  self_removal_and_disconnect();
-  boundaries_and_capacity();
-  capture_reclamation();
-  allocation_failures();
-  registration_materialization();
+  activationAndInput();
+  traversalAndReturn();
+  mouseGeometry();
+  bubblingAndLifetime();
+  selfRemovalAndDisconnect();
+  boundariesAndCapacity();
+  captureReclamation();
+  allocationFailures();
+  registrationMaterialization();
 
   return failures == 0 ? 0 : 1;
 }

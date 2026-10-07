@@ -13,13 +13,13 @@
 #include <vector>
 
 namespace {
-constexpr DWORD child_timeout_ms = 5000;
-constexpr DWORD cleanup_timeout_ms = 2000;
-constexpr DWORD watchdog_exit = 3;
-constexpr std::string_view da_reply = "\x1b[?1;2c";
-constexpr std::string_view cpr_reply = "\x1b[1;1R";
-constexpr std::string_view ready_marker = "host-cpr-ready";
-constexpr char reply_barrier = '~';
+constexpr DWORD CHILD_TIMEOUT_MS = 5000;
+constexpr DWORD CLEANUP_TIMEOUT_MS = 2000;
+constexpr DWORD WATCHDOG_EXIT = 3;
+constexpr std::string_view DA_REPLY = "\x1b[?1;2c";
+constexpr std::string_view CPR_REPLY = "\x1b[1;1R";
+constexpr std::string_view READY_MARKER = "host-cpr-ready";
+constexpr char REPLY_BARRIER = '~';
 
 void require(bool condition, const char *message) {
   if (!condition) {
@@ -46,6 +46,7 @@ struct Handle {
 int child() {
   Handle input;
   Handle output;
+
   input.reset(CreateFileW(L"CONIN$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
                           OPEN_EXISTING, 0, nullptr));
   output.reset(CreateFileW(L"CONOUT$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
@@ -54,8 +55,10 @@ int child() {
             SetStdHandle(STD_ERROR_HANDLE, output.value),
           "install child console handles");
   require(!IsWindowVisible(GetConsoleWindow()), "headless ConPTY child");
+
   DWORD input_mode = 0;
   DWORD output_mode = 0;
+
   require(GetConsoleMode(input.value, &input_mode) && GetConsoleMode(output.value, &output_mode),
           "initial console modes");
   // Start without VT input, as a normal console consumer may leave it disabled.
@@ -63,52 +66,67 @@ int child() {
                 ENABLE_QUICK_EDIT_MODE) &
                ~ENABLE_VIRTUAL_TERMINAL_INPUT;
   require(SetConsoleMode(input.value, input_mode), "baseline input mode");
+
   const UINT input_page = GetConsoleCP();
   const UINT output_page = GetConsoleOutputCP();
-  require(portals::probe::inspect_native().query_eligible, "native inspection eligibility");
+
+  require(portals::probe::inspectNative().query_eligible, "native inspection eligibility");
   require(SetConsoleCursorPosition(output.value, {19, 9}) != FALSE, "distinct system CPR position");
+
   portals::probe::ModeGuard query_modes(input.value, output.value);
+
   require(query_modes.acquire(), "acquire actual native query modes");
+
   DWORD written = 0;
-  require(WriteFile(output.value, ready_marker.data(), static_cast<DWORD>(ready_marker.size()), &written, nullptr) &&
-            written == ready_marker.size(),
+
+  require(WriteFile(output.value, READY_MARKER.data(), static_cast<DWORD>(READY_MARKER.size()), &written, nullptr) &&
+            written == READY_MARKER.size(),
           "announce host-input barrier");
+
   const auto barrier_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
   bool reply_queued = false;
 
   while (!reply_queued && std::chrono::steady_clock::now() < barrier_deadline) {
     require(WaitForSingleObject(input.value, 1000) == WAIT_OBJECT_0, "host reply readiness");
+
     INPUT_RECORD records[64];
     DWORD count = 0;
+
     require(PeekConsoleInputW(input.value, records, 64, &count) != FALSE, "peek host reply barrier");
 
     for (DWORD index = 0; index < count; ++index) {
       reply_queued |= records[index].EventType == KEY_EVENT && records[index].Event.KeyEvent.bKeyDown &&
-                      records[index].Event.KeyEvent.uChar.UnicodeChar == reply_barrier;
+                      records[index].Event.KeyEvent.uChar.UnicodeChar == REPLY_BARRIER;
     }
   }
 
   require(reply_queued, "entire host reply passed through ConPTY input parsing");
+
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
   portals::probe::QueryCollector collector(deadline, 1024);
-  const auto result = portals::probe::run_native_queries(collector, deadline, 1024);
+  const auto result = portals::probe::runNativeQueries(collector, deadline, 1024);
+
   collector.finish();
   require(query_modes.restore(), "restore outer query modes");
+
   DWORD restored_input = 0;
   DWORD restored_output = 0;
+
   require(GetConsoleMode(input.value, &restored_input) && GetConsoleMode(output.value, &restored_output) &&
             restored_input == input_mode && restored_output == output_mode && GetConsoleCP() == input_page &&
             GetConsoleOutputCP() == output_page,
           "exact mode/code-page restoration");
+
   const std::string report =
-    "stop=" + result.stop + " da=" + portals::probe::escape_bytes(collector.device_attributes().value_or("missing")) +
-    " cpr=" + portals::probe::escape_bytes(collector.cursor_position().value_or("missing")) +
+    "stop=" + result.stop + " da=" + portals::probe::escapeBytes(collector.deviceAttributes().value_or("missing")) +
+    " cpr=" + portals::probe::escapeBytes(collector.cursorPosition().value_or("missing")) +
     " non_byte_events=" + std::to_string(result.non_byte_events) + " records=" + result.event_summary + " restored=1\n";
+
   require(WriteFile(output.value, report.data(), static_cast<DWORD>(report.size()), &written, nullptr) != FALSE,
           "child diagnostic report");
   require(result.error.empty(), "native query error");
-  require(collector.device_attributes().has_value(), "DA response collected through native records");
-  require(collector.cursor_position() == cpr_reply, "CPR response preserved through native records");
+  require(collector.deviceAttributes().has_value(), "DA response collected through native records");
+  require(collector.cursorPosition() == CPR_REPLY, "CPR response preserved through native records");
   require(result.stop == "replies", "both replies complete the query window");
 
   return 0;
@@ -131,9 +149,9 @@ struct Session {
 
   void close() {
     if (process.value && WaitForSingleObject(process.value, 0) == WAIT_TIMEOUT) {
-      TerminateProcess(process.value, watchdog_exit);
-      TerminateJobObject(job.value, watchdog_exit);
-      WaitForSingleObject(process.value, cleanup_timeout_ms);
+      TerminateProcess(process.value, WATCHDOG_EXIT);
+      TerminateJobObject(job.value, WATCHDOG_EXIT);
+      WaitForSingleObject(process.value, CLEANUP_TIMEOUT_MS);
     }
 
     if (console) {
@@ -173,13 +191,14 @@ struct Session {
         }
 
         DWORD count = 0;
+
         require(ReadFile(output_read.value, buffer, std::min(available, static_cast<DWORD>(sizeof(buffer))), &count,
                          nullptr) != FALSE,
                 "drain child output");
         transcript.append(buffer, count);
 
-        if (!da_sent && transcript.find(ready_marker) != std::string::npos) {
-          respond(std::string(da_reply) + std::string(cpr_reply) + reply_barrier);
+        if (!da_sent && transcript.find(READY_MARKER) != std::string::npos) {
+          respond(std::string(DA_REPLY) + std::string(CPR_REPLY) + REPLY_BARRIER);
           da_sent = true;
           cpr_sent = true;
         }
@@ -191,6 +210,7 @@ struct Session {
 
   void respond(std::string_view reply) {
     DWORD written = 0;
+
     require(WriteFile(input_write.value, reply.data(), static_cast<DWORD>(reply.size()), &written, nullptr) &&
               written == reply.size(),
             "host query reply");
@@ -200,6 +220,7 @@ struct Session {
 void launch(Session &session) {
   HANDLE read = nullptr;
   HANDLE write = nullptr;
+
   require(CreatePipe(&read, &write, nullptr, 4096), "ConPTY input pipe");
   session.input_read.reset(read);
   session.input_write.reset(write);
@@ -214,16 +235,23 @@ void launch(Session &session) {
   });
   session.job.reset(CreateJobObjectW(nullptr, nullptr));
   require(session.job.value != nullptr, "child job");
+
   JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+
   limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
   require(SetInformationJobObject(session.job.value, JobObjectExtendedLimitInformation, &limits, sizeof(limits)) !=
             FALSE,
           "child job kill-on-close");
+
   SIZE_T bytes = 0;
+
   InitializeProcThreadAttributeList(nullptr, 1, 0, &bytes);
+
   std::vector<unsigned char> storage(bytes);
   const auto attributes = reinterpret_cast<PPROC_THREAD_ATTRIBUTE_LIST>(storage.data());
+
   require(InitializeProcThreadAttributeList(attributes, 1, 0, &bytes) != FALSE, "child attributes");
+
   struct AttributeCleanup {
     PPROC_THREAD_ATTRIBUTE_LIST value;
 
@@ -231,17 +259,24 @@ void launch(Session &session) {
       DeleteProcThreadAttributeList(value);
     }
   } cleanup{attributes};
+
   require(UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, session.console,
                                     sizeof(session.console), nullptr, nullptr) != FALSE,
           "child pseudoconsole attribute");
+
   wchar_t path[32768];
   const DWORD length = GetModuleFileNameW(nullptr, path, 32768);
+
   require(length != 0 && length < 32768, "self executable path");
+
   std::wstring command = L"\"" + std::wstring(path, length) + L"\" --child";
   STARTUPINFOEXW startup{};
+
   startup.StartupInfo.cb = sizeof(startup);
   startup.lpAttributeList = attributes;
+
   PROCESS_INFORMATION process{};
+
   require(CreateProcessW(path, command.data(), nullptr, nullptr, FALSE, EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED,
                          nullptr, nullptr, &startup.StartupInfo, &process) != FALSE,
           "ConPTY child process");
@@ -261,13 +296,16 @@ int wmain(int argc, wchar_t **argv) {
     }
 
     Session session;
+
     launch(session);
-    const DWORD waited = WaitForSingleObject(session.process.value, child_timeout_ms);
+
+    const DWORD waited = WaitForSingleObject(session.process.value, CHILD_TIMEOUT_MS);
     DWORD child_exit = STILL_ACTIVE;
+
     require(GetExitCodeProcess(session.process.value, &child_exit) != FALSE, "child exit code");
     session.close();
     std::cout << "child_exit=" << child_exit << " da_sent=" << session.da_sent << " cpr_sent=" << session.cpr_sent
-              << " output=" << portals::probe::escape_bytes(session.transcript) << '\n';
+              << " output=" << portals::probe::escapeBytes(session.transcript) << '\n';
     require(waited == WAIT_OBJECT_0, "child wall-clock watchdog");
     require(session.reader_error.empty(), session.reader_error.c_str());
     require(session.da_sent && session.cpr_sent, "host injected DA/CPR at the native mode barrier");

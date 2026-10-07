@@ -164,7 +164,7 @@ performs no I/O. `flush` starts a synchronous `WriteFile` on that worker and wai
 on its thread handle in bounded intervals. Only successful positive completed
 writes advance the confirmed offset. On deadline/stop after issuing a write,
 `CancelSynchronousIo` is requested and flush returns immediately with its status
-plus `error.kind == output_uncertain`. The buffer and worker remain owned even
+plus `error.kind == OUTPUT_UNCERTAIN`. The buffer and worker remain owned even
 when cancellation has not completed. The renderer must invalidate its belief
 immediately; zero confirmed bytes does not mean zero terminal side effects.
 
@@ -172,7 +172,7 @@ An uncertain session rejects every later submit/flush until close; it never
 replays a possibly partially interpreted VT suffix. A deadline/stop checked
 before any write was issued does not poison the session. Native write failures
 also make the session uncertain; the first failure retains its native error.
-`pending_bytes()` then counts unconfirmed owned bytes, not a retryable suffix.
+`pendingBytes()` then counts unconfirmed owned bytes, not a retryable suffix.
 
 `close` requests cancellation repeatedly to cover the race before entry into
 `WriteFile`, waits for actual thread completion, closes the thread handle, and

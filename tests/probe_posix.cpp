@@ -15,7 +15,7 @@
 namespace {
 using Clock = std::chrono::steady_clock;
 using namespace std::chrono_literals;
-constexpr std::string_view queries = "\x1b[0c\x1b[6n";
+constexpr std::string_view QUERIES = "\x1b[0c\x1b[6n";
 
 class ChildGuard {
 public:
@@ -57,7 +57,7 @@ private:
   int value_;
 };
 
-bool same_modes(const termios &left, const termios &right) {
+bool sameModes(const termios &left, const termios &right) {
   if (left.c_iflag != right.c_iflag || left.c_oflag != right.c_oflag || left.c_cflag != right.c_cflag ||
       left.c_lflag != right.c_lflag || cfgetispeed(&left) != cfgetispeed(&right) ||
       cfgetospeed(&left) != cfgetospeed(&right)) {
@@ -105,7 +105,9 @@ bool scenario(const char *executable, std::string_view name, std::string_view re
 
     close(master.get());
     close(slave.get());
+
     const char *limit = name == "byte limit" ? "8" : "128";
+
     execl(executable, executable, "--timeout-ms", "80", "--max-bytes", limit, static_cast<char *>(nullptr));
     _exit(121);
   }
@@ -135,7 +137,7 @@ bool scenario(const char *executable, std::string_view name, std::string_view re
       }
     }
 
-    if (!responded && output.starts_with(queries)) {
+    if (!responded && output.starts_with(QUERIES)) {
       responded = true;
 
       if (signal_child) {
@@ -164,7 +166,7 @@ bool scenario(const char *executable, std::string_view name, std::string_view re
 
   termios after{};
   const bool restored =
-    tcgetattr(slave.get(), &after) == 0 && same_modes(before, after) && fcntl(slave.get(), F_GETFL) == flags_before;
+    tcgetattr(slave.get(), &after) == 0 && sameModes(before, after) && fcntl(slave.get(), F_GETFL) == flags_before;
   const int expected_exit = signal_child ? 1 : 0;
   const bool pass = exited && WIFEXITED(status) && WEXITSTATUS(status) == expected_exit && responded && restored &&
                     output.find(expected) != std::string::npos;
@@ -185,6 +187,7 @@ int main(int argc, char **argv) {
   }
 
   bool passed = scenario(argv[1], "matching replies", "typed\x1b[?62;1;6c\x1b[12;34R", "input.unmatched=\"typed\"");
+
   passed &= scenario(argv[1], "deadline", "", "query.stop=\"deadline\"");
   passed &= scenario(argv[1], "byte limit", "abcdefghij", "input.bytes_consumed=\"8\"");
   passed &= scenario(argv[1], "signal", "", "query.stop=\"I/O error\"", true);

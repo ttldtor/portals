@@ -69,7 +69,7 @@ intern pool caps must be positive even for a zero-cell extent. Rows/columns can
 have zero caps to allow only an empty extent. Limits themselves are checked
 against coordinate/ID representations, `PTRDIFF_MAX` allocation products and
 `size_t` accounting overflow before allocation. A malformed configuration gives
-`invalid_limits`; invalid policy, extent, index, coordinate, right-edge and pool
+`INVALID_LIMITS`; invalid policy, extent, index, coordinate, right-edge and pool
 failures each have an explicit error category.
 
 Creation allocates fixed-capacity glyph records, UTF-8 byte and style arrays;
@@ -83,7 +83,7 @@ hit still works when a pool is full; a new entry returns a resource error.
 `resize()` creates an independent blank replacement with the same policy/caps;
 it preserves the whole previous buffer on a limit or allocation failure. A
 successful resize discards previous contents and IDs, including when the size
-stays the same. Allocation failures return `allocation_failure`. During resize,
+stays the same. Allocation failures return `ALLOCATION_FAILURE`. During resize,
 both old and replacement arrays can coexist; this transient peak is bounded by
 the two extents and pool caps, but is larger than current `memory()`.
 

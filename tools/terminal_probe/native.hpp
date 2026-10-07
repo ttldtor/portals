@@ -31,10 +31,10 @@ struct RunResult {
 };
 
 /// Reads native OS/terminal facts without changing modes; single calling owner.
-NativeFacts inspect_native();
+NativeFacts inspectNative();
 /// Owns query output/input and temporary modes on the calling thread.
 /// All normal/error paths restore modes. The collector and result own input;
 /// this standalone tool does not replay unmatched input to the parent shell.
-RunResult run_native_queries(QueryCollector &collector, QueryCollector::Time deadline, std::size_t event_limit);
+RunResult runNativeQueries(QueryCollector &collector, QueryCollector::Time deadline, std::size_t event_limit);
 
 } // namespace portals::probe

@@ -11,9 +11,9 @@
 
 namespace portals::probe {
 namespace {
-constexpr std::string_view requests = "\x1b[0c\x1b[6n";
-constexpr DWORD event_chunk_size = 32;
-constexpr std::size_t event_summary_limit = 1024;
+constexpr std::string_view REQUESTS = "\x1b[0c\x1b[6n";
+constexpr DWORD EVENT_CHUNK_SIZE = 32;
+constexpr std::size_t EVENT_SUMMARY_LIMIT = 1024;
 
 std::string error(std::string_view operation) {
   return std::string(operation) + ": Win32 error " + std::to_string(GetLastError());
@@ -93,10 +93,10 @@ private:
   bool output_changed_ = false;
 };
 
-void record_event(RunResult &result, const INPUT_RECORD &record) {
+void recordEvent(RunResult &result, const INPUT_RECORD &record) {
   ++result.non_byte_events;
 
-  if (result.event_summary.size() >= event_summary_limit) {
+  if (result.event_summary.size() >= EVENT_SUMMARY_LIMIT) {
     return;
   }
 
@@ -108,7 +108,7 @@ void record_event(RunResult &result, const INPUT_RECORD &record) {
                    " repeat=" + std::to_string(record.Event.KeyEvent.wRepeatCount);
   }
 
-  result.event_summary += description.substr(0, event_summary_limit - result.event_summary.size());
+  result.event_summary += description.substr(0, EVENT_SUMMARY_LIMIT - result.event_summary.size());
 }
 
 RunResult collect(HANDLE input, HANDLE output, QueryCollector &collector, QueryCollector::Time deadline,
@@ -123,8 +123,8 @@ RunResult collect(HANDLE input, HANDLE output, QueryCollector &collector, QueryC
 
   DWORD written = 0;
 
-  if (!WriteFile(output, requests.data(), static_cast<DWORD>(requests.size()), &written, nullptr) ||
-      written != requests.size()) {
+  if (!WriteFile(output, REQUESTS.data(), static_cast<DWORD>(REQUESTS.size()), &written, nullptr) ||
+      written != REQUESTS.size()) {
     result.stop = "I/O error";
     result.error = error("write query");
 
@@ -175,8 +175,8 @@ RunResult collect(HANDLE input, HANDLE output, QueryCollector &collector, QueryC
 
     // Only this standalone owner reads the console. Read at most available
     // records, rather than a blocking byte read after a non-text event signals.
-    INPUT_RECORD records[event_chunk_size];
-    const DWORD capacity = std::min({available, event_chunk_size, static_cast<DWORD>(event_limit - events_consumed)});
+    INPUT_RECORD records[EVENT_CHUNK_SIZE];
+    const DWORD capacity = std::min({available, EVENT_CHUNK_SIZE, static_cast<DWORD>(event_limit - events_consumed)});
     DWORD count = 0;
 
     if (!ReadConsoleInputW(input, records, capacity, &count)) {
@@ -193,7 +193,7 @@ RunResult collect(HANDLE input, HANDLE output, QueryCollector &collector, QueryC
 
       if (record.EventType != KEY_EVENT || record.Event.KeyEvent.bKeyDown == FALSE ||
           record.Event.KeyEvent.uChar.UnicodeChar == 0 || record.Event.KeyEvent.uChar.UnicodeChar > 0x7f) {
-        record_event(result, record);
+        recordEvent(result, record);
 
         continue;
       }
@@ -208,15 +208,16 @@ RunResult collect(HANDLE input, HANDLE output, QueryCollector &collector, QueryC
 
       if (repeats < record.Event.KeyEvent.wRepeatCount) {
         auto remainder = record;
+
         remainder.Event.KeyEvent.wRepeatCount = static_cast<WORD>(record.Event.KeyEvent.wRepeatCount - repeats);
-        record_event(result, remainder);
+        recordEvent(result, remainder);
       }
     }
   }
 
   if (collector.limited()) {
     result.stop = "byte limit";
-  } else if (collector.device_attributes() && collector.cursor_position()) {
+  } else if (collector.deviceAttributes() && collector.cursorPosition()) {
     result.stop = "replies";
   } else if (events_consumed == event_limit) {
     result.stop = "native input event limit";
@@ -228,14 +229,17 @@ RunResult collect(HANDLE input, HANDLE output, QueryCollector &collector, QueryC
 }
 } // namespace
 
-NativeFacts inspect_native() {
+NativeFacts inspectNative() {
   NativeFacts facts;
+
   facts.fields.emplace_back("os.name", "Windows");
+
   using VersionFunction = LONG(WINAPI *)(OSVERSIONINFOW *);
   const auto module = GetModuleHandleW(L"ntdll.dll");
   const auto version_function =
     module == nullptr ? nullptr : reinterpret_cast<VersionFunction>(GetProcAddress(module, "RtlGetVersion"));
   OSVERSIONINFOW version{};
+
   version.dwOSVersionInfoSize = sizeof(version);
 
   if (version_function != nullptr && version_function(&version) == 0) {
@@ -247,15 +251,18 @@ NativeFacts inspect_native() {
   }
 
   SYSTEM_INFO system{};
+
   GetNativeSystemInfo(&system);
   facts.fields.emplace_back("os.architecture",
                             std::to_string(system.wProcessorArchitecture) + " (Win32 architecture enum)");
+
   const auto input = GetStdHandle(STD_INPUT_HANDLE);
   const auto output = GetStdHandle(STD_OUTPUT_HANDLE);
   DWORD input_mode = 0;
   DWORD output_mode = 0;
   const bool input_console = GetConsoleMode(input, &input_mode) != FALSE;
   const bool output_console = GetConsoleMode(output, &output_mode) != FALSE;
+
   facts.query_eligible = input_console && output_console;
   facts.fields.emplace_back("transport.stdin", transport(input, input_console));
   facts.fields.emplace_back("transport.stdout", transport(output, output_console));
@@ -264,6 +271,7 @@ NativeFacts inspect_native() {
   facts.fields.emplace_back("mode.stdout", output_console ? std::to_string(output_mode) : "unknown");
   facts.fields.emplace_back("mode.stdin.code_page", input_console ? std::to_string(GetConsoleCP()) : "unknown");
   facts.fields.emplace_back("mode.stdout.code_page", output_console ? std::to_string(GetConsoleOutputCP()) : "unknown");
+
   CONSOLE_SCREEN_BUFFER_INFO size{};
 
   if (output_console && GetConsoleScreenBufferInfo(output, &size)) {
@@ -279,7 +287,7 @@ NativeFacts inspect_native() {
   return facts;
 }
 
-RunResult run_native_queries(QueryCollector &collector, QueryCollector::Time deadline, std::size_t event_limit) {
+RunResult runNativeQueries(QueryCollector &collector, QueryCollector::Time deadline, std::size_t event_limit) {
   const auto input = GetStdHandle(STD_INPUT_HANDLE);
   const auto output = GetStdHandle(STD_OUTPUT_HANDLE);
   DWORD input_mode = 0;

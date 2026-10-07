@@ -7,11 +7,11 @@
 
 namespace portals::grid_detail {
 using Wide = std::int64_t;
-inline constexpr Wide cell_limit = std::numeric_limits<std::int32_t>::max();
+inline constexpr Wide CELL_LIMIT = std::numeric_limits<std::int32_t>::max();
 
 inline bool valid(LayoutAlign align) {
-  return align == LayoutAlign::start || align == LayoutAlign::center || align == LayoutAlign::end ||
-         align == LayoutAlign::stretch;
+  return align == LayoutAlign::START || align == LayoutAlign::CENTER || align == LayoutAlign::END ||
+         align == LayoutAlign::STRETCH;
 }
 
 inline bool valid(LayoutPadding padding) {
@@ -19,9 +19,9 @@ inline bool valid(LayoutPadding padding) {
 }
 
 inline bool valid(AxisSize policy) {
-  return policy.minimum >= 0 && policy.maximum >= policy.minimum && policy.preferred >= intrinsic_extent &&
+  return policy.minimum >= 0 && policy.maximum >= policy.minimum && policy.preferred >= INTRINSIC_EXTENT &&
          policy.weight > 0 &&
-         (policy.mode == SizeMode::automatic || policy.mode == SizeMode::fixed || policy.mode == SizeMode::flex);
+         (policy.mode == SizeMode::AUTOMATIC || policy.mode == SizeMode::FIXED || policy.mode == SizeMode::FLEX);
 }
 
 inline bool valid(const MeasuredChild &child) {
@@ -30,13 +30,13 @@ inline bool valid(const MeasuredChild &child) {
 }
 
 inline Wide requested(AxisSize policy, std::int32_t intrinsic) {
-  return std::clamp<Wide>(policy.preferred == intrinsic_extent ? intrinsic : policy.preferred, policy.minimum,
+  return std::clamp<Wide>(policy.preferred == INTRINSIC_EXTENT ? intrinsic : policy.preferred, policy.minimum,
                           policy.maximum);
 }
 
 inline std::expected<CellSize, TreeError> size(Wide width, Wide height) {
-  if (width < 0 || height < 0 || width > cell_limit || height > cell_limit) {
-    return std::unexpected(TreeError::invalid_geometry);
+  if (width < 0 || height < 0 || width > CELL_LIMIT || height > CELL_LIMIT) {
+    return std::unexpected(TreeError::INVALID_GEOMETRY);
   }
 
   return CellSize{static_cast<std::int32_t>(width), static_cast<std::int32_t>(height)};
@@ -44,7 +44,7 @@ inline std::expected<CellSize, TreeError> size(Wide width, Wide height) {
 
 inline std::expected<CellSize, TreeError> inset(CellSize available, LayoutPadding padding) {
   if (!valid(padding)) {
-    return std::unexpected(TreeError::invalid_argument);
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
   available = available.normalized();
@@ -60,29 +60,29 @@ inline std::expected<CellSize, TreeError> padded(CellSize content, LayoutPadding
 inline Wide extent(AxisSize policy, std::int32_t intrinsic, std::int32_t available, LayoutAlign align) {
   const auto wanted = requested(policy, intrinsic);
 
-  if (policy.mode == SizeMode::fixed) {
+  if (policy.mode == SizeMode::FIXED) {
     return wanted;
   }
 
   return std::clamp<Wide>(
-    (align == LayoutAlign::stretch || policy.mode == SizeMode::flex) ? available : std::min<Wide>(wanted, available),
+    (align == LayoutAlign::STRETCH || policy.mode == SizeMode::FLEX) ? available : std::min<Wide>(wanted, available),
     policy.minimum, policy.maximum);
 }
 
 inline Wide offset(Wide space, Wide child, LayoutAlign align) {
   const auto spare = std::max<Wide>(0, space - child);
 
-  if (align == LayoutAlign::center) {
+  if (align == LayoutAlign::CENTER) {
     return spare / 2;
   }
 
-  return align == LayoutAlign::end ? spare : 0;
+  return align == LayoutAlign::END ? spare : 0;
 }
 
 inline std::expected<CellRect, TreeError> place(const MeasuredChild &child, CellRect slot, LayoutAlign horizontal,
                                                 LayoutAlign vertical) {
   if (!valid(child) || !valid(horizontal) || !valid(vertical)) {
-    return std::unexpected(TreeError::invalid_argument);
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
   const auto width = extent(child.policy.width, child.desired.width, slot.size().width, horizontal);
@@ -92,13 +92,13 @@ inline std::expected<CellRect, TreeError> place(const MeasuredChild &child, Cell
   const auto dimensions = size(width, height);
 
   if (!origin || !dimensions) {
-    return std::unexpected(TreeError::invalid_geometry);
+    return std::unexpected(TreeError::INVALID_GEOMETRY);
   }
 
   auto result = CellRect::from({origin->width, origin->height}, *dimensions);
 
   if (!result) {
-    return std::unexpected(TreeError::invalid_geometry);
+    return std::unexpected(TreeError::INVALID_GEOMETRY);
   }
 
   return *result;

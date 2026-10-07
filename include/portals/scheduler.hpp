@@ -16,37 +16,38 @@ namespace portals {
 using SchedulerTime = std::uint64_t;
 /** @brief Observable operation failures; no callback is started on rejection. */
 enum class SchedulerError {
-  invalid_argument,   ///< Invalid option, null snapshot or unsupported lane/overflow combination.
-  wrong_thread,       ///< Operation requires the creating UI thread.
-  wrong_scheduler,    ///< The supplied scope belongs to another scheduler.
-  closed,             ///< Scheduler, scope, registration or endpoint is closed.
-  would_block,        ///< A bounded queue or registration budget has no available slot.
-  no_memory,          ///< Allocation failed inside the operation boundary.
-  reentrant_dispatch, ///< Dispatch or blocking wait was called from active dispatch.
-  identity_exhausted, ///< The monotonic identity counter cannot issue another ID.
-  callback_failed     ///< A user callback threw; dispatch disconnects its registration.
+  INVALID_ARGUMENT,   ///< Invalid option, null snapshot or unsupported lane/overflow combination.
+  WRONG_THREAD,       ///< Operation requires the creating UI thread.
+  WRONG_SCHEDULER,    ///< The supplied scope belongs to another scheduler.
+  CLOSED,             ///< Scheduler, scope, registration or endpoint is closed.
+  WOULD_BLOCK,        ///< A bounded queue or registration budget has no available slot.
+  NO_MEMORY,          ///< Allocation failed inside the operation boundary.
+  REENTRANT_DISPATCH, ///< Dispatch or blocking wait was called from active dispatch.
+  IDENTITY_EXHAUSTED, ///< The monotonic identity counter cannot issue another ID.
+  CALLBACK_FAILED     ///< A user callback threw; dispatch disconnects its registration.
 };
 /** @brief Independent finite queues; control is serviced before data each cycle. */
 enum class SchedulerLane {
-  data,   ///< Ordinary immutable data publications.
-  control ///< Control input serviced before timers and data.
+  DATA,   ///< Ordinary immutable data publications.
+  CONTROL ///< Control input serviced before timers and data.
 };
 /** @brief Replace only this sender's pending display snapshot; never raw domain events. */
 enum class SchedulerOverflow {
-  reject,        ///< Reject publication when the lane has no free queue slot.
-  replace_latest ///< Replace only this sender's pending data snapshot, preserving its FIFO position.
+  REJECT,        ///< Reject publication when the lane has no free queue slot.
+  REPLACE_LATEST ///< Replace only this sender's pending data snapshot, preserving its FIFO position.
 };
 /** @brief Whether a publication appended a value or replaced its sender's pending value. */
 enum class PublishResult {
-  queued,  ///< A new queue entry was accepted.
-  replaced ///< This sender's existing pending snapshot was replaced.
+  QUEUED,  ///< A new queue entry was accepted.
+  REPLACED ///< This sender's existing pending snapshot was replaced.
 };
 /** @brief A finite wait ended by work, explicit wake, stop or timeout. */
 enum class SchedulerWake {
-  ready,   ///< Work, a due timer or an explicit wake is available.
-  stopped, ///< Stop was requested; no further publications are accepted.
-  timeout  ///< The bounded real-time wait expired.
+  READY,   ///< Work, a due timer or an explicit wake is available.
+  STOPPED, ///< Stop was requested; no further publications are accepted.
+  TIMEOUT  ///< The bounded real-time wait expired.
 };
+
 /** @brief Borrowed clock service, invoked under the scheduler mutex on UI or producer threads.
  * read must be thread-safe, nonblocking and non-reentrant. Context must outlive Scheduler;
  * stopped publishers never read it. Null read selects the steady clock.
@@ -57,6 +58,7 @@ struct SchedulerClock {
   Reader read{};   ///< Monotonic millisecond reader.
   void *context{}; ///< Borrowed reader context.
 };
+
 /** @brief Finite resource limits and maximum work per dispatch; all fields must be positive. */
 struct SchedulerOptions {
   std::size_t data_capacity{256};         ///< Maximum queued data owners.
@@ -66,6 +68,7 @@ struct SchedulerOptions {
   std::size_t timer_budget{32};           ///< Maximum due one-shot timers per cycle.
   std::size_t subscription_capacity{256}; ///< Maximum live subscriptions and timers together.
 };
+
 /** @brief Queue counters saturate at UINT64_MAX; latency is measured in clock milliseconds. */
 struct SchedulerQueueMetrics {
   std::size_t pending{};         ///< Current occupancy.
@@ -79,6 +82,7 @@ struct SchedulerQueueMetrics {
   SchedulerTime max_latency{};   ///< Maximum observed queue delay.
   SchedulerTime total_latency{}; ///< Saturating sum of delivered queue delays.
 };
+
 /** @brief Thread-safe, copied metrics; no retained samples or unbounded history. */
 struct SchedulerMetrics {
   SchedulerQueueMetrics data;        ///< Data queue evidence.
@@ -87,6 +91,7 @@ struct SchedulerMetrics {
   std::uint64_t callback_failures{}; ///< Exceptions caught at dispatch.
   std::uint64_t cycles{};            ///< Complete or stop-interrupted dispatch calls.
 };
+
 /** @brief One bounded dispatch result; stop can interrupt the cycle after the current callback. */
 struct SchedulerDispatch {
   std::size_t control{};           ///< Control callbacks started.
@@ -95,14 +100,17 @@ struct SchedulerDispatch {
   std::size_t callback_failures{}; ///< Exceptions reported to the error sink.
   bool stopped{};                  ///< Stop was requested; resources were reclaimed on UI.
 };
+
 namespace detail {
 struct SchedulerState;
-std::expected<PublishResult, SchedulerError> scheduler_publish(const std::shared_ptr<SchedulerState> &, std::uint64_t,
-                                                               std::shared_ptr<const void>);
-void scheduler_wake(const std::shared_ptr<SchedulerState> &) noexcept;
-void scheduler_request_stop(const std::shared_ptr<SchedulerState> &) noexcept;
+std::expected<PublishResult, SchedulerError> schedulerPublish(const std::shared_ptr<SchedulerState> &, std::uint64_t,
+                                                              std::shared_ptr<const void>);
+void schedulerWake(const std::shared_ptr<SchedulerState> &) noexcept;
+void schedulerRequestStop(const std::shared_ptr<SchedulerState> &) noexcept;
 } // namespace detail
+
 class Scheduler;
+
 /** @brief UI-owned move-only cancellation token. Release before Scheduler.
  * Disconnect is immediate logically; an executing callback owns its captures until return.
  * Destruction/move assignment on a foreign thread terminates (affinity contract violation).
@@ -124,8 +132,8 @@ public:
   Subscription &operator=(Subscription &&other) noexcept;
   Subscription(const Subscription &) = delete;
   Subscription &operator=(const Subscription &) = delete;
-  /** @brief UI-only, idempotent; wrong_thread leaves unchanged.
-   * @return Success for an already empty/disconnected token; wrong_thread leaves a live token unchanged.
+  /** @brief UI-only, idempotent; WRONG_THREAD leaves unchanged.
+   * @return Success for an already empty/disconnected token; WRONG_THREAD leaves a live token unchanged.
    */
   std::expected<void, SchedulerError> disconnect();
 
@@ -135,6 +143,7 @@ private:
   std::shared_ptr<detail::SchedulerState> state_;
   std::uint64_t id_{};
 };
+
 /** @brief UI-owned scope disconnecting all its subscriptions and timers, in any token order.
  * Owned callback captures survive self-close until the active dispatch returns. Arbitrary
  * reference captures remain the caller's responsibility. Release before Scheduler.
@@ -157,7 +166,7 @@ public:
   UiScope(const UiScope &) = delete;
   UiScope &operator=(const UiScope &) = delete;
   /** @brief UI-only, idempotent; no worker join.
-   * @return Success after logical closure, including an empty scope; wrong_thread leaves a live scope unchanged.
+   * @return Success after logical closure, including an empty scope; WRONG_THREAD leaves a live scope unchanged.
    */
   std::expected<void, SchedulerError> close();
 
@@ -167,6 +176,7 @@ private:
   std::shared_ptr<detail::SchedulerState> state_;
   std::uint64_t id_{};
 };
+
 /** @brief Copyable, worker-safe endpoint. It owns the closed channel state, never UI captures.
  * May outlive Scheduler: publish then returns closed. T must own its transitively immutable
  * data; mutable aliases must not modify it. Its deleter may run on UI or any producer thread.
@@ -177,31 +187,37 @@ template <class T> class Publisher {
 public:
   /** @brief Empty closed endpoint. */
   Publisher() = default;
-  /** @brief Transfer a strong immutable owner; null is invalid_argument, full is would_block.
+
+  /** @brief Transfer a strong immutable owner; null is INVALID_ARGUMENT, full is WOULD_BLOCK.
    * No allocation occurs here. Failure changes no queue; the caller retains any other owner.
    * @param value Non-null immutable snapshot owner transferred into the bounded queue.
-   * @return queued or replaced on acceptance; closed for an unavailable endpoint, invalid_argument for null,
-   * or would_block when no queue position can be used.
+   * @return queued or replaced on acceptance; closed for an unavailable endpoint, INVALID_ARGUMENT for null,
+   * or WOULD_BLOCK when no queue position can be used.
    */
   std::expected<PublishResult, SchedulerError> publish(std::shared_ptr<const T> value) const {
-    return detail::scheduler_publish(state_, id_, std::move(value));
+    return detail::schedulerPublish(state_, id_, std::move(value));
   }
+
   /** @brief Wake a waiter without queueing work. */
   void wake() const noexcept {
-    detail::scheduler_wake(state_);
+    detail::schedulerWake(state_);
   }
+
   /** @brief Close all publications; UI reclaims callbacks. */
-  void request_stop() const noexcept {
-    detail::scheduler_request_stop(state_);
+  void requestStop() const noexcept {
+    detail::schedulerRequestStop(state_);
   }
 
 private:
   friend class Scheduler;
+
   Publisher(std::shared_ptr<detail::SchedulerState> state, std::uint64_t id) : state_(std::move(state)), id_(id) {
   }
+
   std::shared_ptr<detail::SchedulerState> state_;
   std::uint64_t id_{};
 };
+
 /** @brief UI owns the subscription; workers receive copies of only the publisher.
  * @tparam T Transitively immutable snapshot type shared by the publisher and its callback.
  */
@@ -209,6 +225,7 @@ template <class T> struct SchedulerConnection {
   Subscription subscription; ///< Scoped callback owner.
   Publisher<T> publisher;    ///< Worker-safe publication endpoint.
 };
+
 /** @brief One UI executor; call dispatch only between frames, never during layout/paint.
  * create captures its calling thread. Callbacks run there without the queue lock. No method
  * mutates a widget or requests a frame: downstream callbacks own invalidation. Destruction
@@ -225,7 +242,7 @@ public:
    * @param clock Borrowed monotonic clock; a null reader selects steady_clock.
    * @param sink Optional nonthrowing callback-failure sink, invoked on the creating UI thread.
    * @param sink_context Borrowed sink state that must outlive this scheduler.
-   * @return New UI-owned scheduler, invalid_argument for invalid/unrepresentable limits, or no_memory.
+   * @return New UI-owned scheduler, INVALID_ARGUMENT for invalid/unrepresentable limits, or NO_MEMORY.
    */
   static std::expected<std::unique_ptr<Scheduler>, SchedulerError> create(SchedulerOptions options = {},
                                                                           SchedulerClock clock = {},
@@ -236,13 +253,14 @@ public:
   Scheduler(const Scheduler &) = delete;
   Scheduler &operator=(const Scheduler &) = delete;
   /** @brief UI-only; closed/identity exhaustion are explicit.
-   * @return New UI-owned scope, or wrong_thread, closed, or identity_exhausted.
+   * @return New UI-owned scope, or WRONG_THREAD, closed, or IDENTITY_EXHAUSTED.
    */
-  std::expected<UiScope, SchedulerError> make_scope();
+  std::expected<UiScope, SchedulerError> makeScope();
+
   /** @brief UI-only typed registration; copies/moves and owns callback, translating bad_alloc.
    * Callback receives an independent snapshot owner. Foreign/closed scope, invalid enum,
    * registration capacity or allocation failure rejects the operation without registration.
-   * replace_latest is data-only and keeps at most one pending value per sender.
+   * REPLACE_LATEST is data-only and keeps at most one pending value per sender.
    * @tparam T Transitively immutable payload type; final ownership may be released on UI or a producer.
    * @tparam Callback Copy-constructible callable storable in std::function and invocable as an lvalue
    * with std::shared_ptr<const T>; its return value is ignored.
@@ -250,14 +268,14 @@ public:
    * @param callback Callable copied/moved into UI-owned registration storage.
    * @param lane Queue whose capacity and dispatch budget apply.
    * @param overflow Reject on capacity or replace this sender's pending data snapshot.
-   * @return Subscription and publisher, or wrong_thread, wrong_scheduler, closed, invalid_argument,
-   * would_block, identity_exhausted, or no_memory.
+   * @return Subscription and publisher, or WRONG_THREAD, WRONG_SCHEDULER, closed, INVALID_ARGUMENT,
+   * WOULD_BLOCK, IDENTITY_EXHAUSTED, or NO_MEMORY.
    * @note Exceptions other than std::bad_alloc propagate when materializing the callback.
    */
   template <class T, class Callback>
   std::expected<SchedulerConnection<T>, SchedulerError>
-  connect(const UiScope &scope, Callback &&callback, SchedulerLane lane = SchedulerLane::data,
-          SchedulerOverflow overflow = SchedulerOverflow::reject) {
+  connect(const UiScope &scope, Callback &&callback, SchedulerLane lane = SchedulerLane::DATA,
+          SchedulerOverflow overflow = SchedulerOverflow::REJECT) {
     try {
       auto id = add(
         scope,
@@ -272,9 +290,10 @@ public:
 
       return SchedulerConnection<T>{Subscription(state_, *id), Publisher<T>(state_, *id)};
     } catch (const std::bad_alloc &) {
-      return std::unexpected(SchedulerError::no_memory);
+      return std::unexpected(SchedulerError::NO_MEMORY);
     }
   }
+
   /** @brief Register a cancellable one-shot timer at an absolute clock millisecond.
    * Due timers run in deadline/registration order, within timer_budget; no catch-up loss.
    * @tparam Callback Copy-constructible callable storable in std::function and invocable as an lvalue
@@ -282,8 +301,8 @@ public:
    * @param scope Live scope belonging to this scheduler; closing it cancels the timer.
    * @param deadline Absolute millisecond deadline in the configured monotonic clock.
    * @param callback Callable copied/moved into UI-owned registration storage.
-   * @return Cancellation token, or wrong_thread, wrong_scheduler, closed, would_block,
-   * identity_exhausted, or no_memory.
+   * @return Cancellation token, or WRONG_THREAD, WRONG_SCHEDULER, closed, WOULD_BLOCK,
+   * IDENTITY_EXHAUSTED, or NO_MEMORY.
    * @note Exceptions other than std::bad_alloc propagate when materializing the callback.
    */
   template <class Callback>
@@ -294,7 +313,7 @@ public:
         [function = std::forward<Callback>(callback)](std::shared_ptr<const void>) mutable {
           std::invoke(function);
         },
-        SchedulerLane::data, SchedulerOverflow::reject, true, deadline);
+        SchedulerLane::DATA, SchedulerOverflow::REJECT, true, deadline);
 
       if (!id) {
         return std::unexpected(id.error());
@@ -302,25 +321,26 @@ public:
 
       return Subscription(state_, *id);
     } catch (const std::bad_alloc &) {
-      return std::unexpected(SchedulerError::no_memory);
+      return std::unexpected(SchedulerError::NO_MEMORY);
     }
   }
+
   /** @brief UI-only; nested dispatch rejected, callback exceptions contained.
    * @return Counts for this control/timer/data cycle, including caught callback failures and stop;
-   * wrong_thread or reentrant_dispatch rejects before any callback starts.
+   * WRONG_THREAD or REENTRANT_DISPATCH rejects before any callback starts.
    */
   std::expected<SchedulerDispatch, SchedulerError> dispatch();
   /** @brief UI-only bounded blocking wait; negative timeout invalid, dispatch reentry rejected.
    * Real timeout is independent of injected time. Advance fake time then wake explicitly.
    * @param timeout Nonnegative maximum real elapsed wait; zero only checks readiness.
    * @return ready for queued/due work or explicit wake, stopped after stop, timeout after the wait,
-   * or wrong_thread, reentrant_dispatch, or invalid_argument on rejection.
+   * or WRONG_THREAD, REENTRANT_DISPATCH, or INVALID_ARGUMENT on rejection.
    */
-  std::expected<SchedulerWake, SchedulerError> wait_for(std::chrono::milliseconds timeout);
+  std::expected<SchedulerWake, SchedulerError> waitFor(std::chrono::milliseconds timeout);
   /** @brief Worker-safe while this object lives; sender variant can outlive it. */
-  void request_stop() noexcept;
+  void requestStop() noexcept;
   /** @brief UI-only close and reclamation, including self-stop.
-   * @return Success after closure and UI reclamation, including repeated stop; wrong_thread otherwise.
+   * @return Success after closure and UI reclamation, including repeated stop; WRONG_THREAD otherwise.
    */
   std::expected<void, SchedulerError> stop();
   /** @brief Thread-safe copy, usable after stop.

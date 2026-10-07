@@ -9,7 +9,7 @@ in text remain data and render as the text subsystem's placeholders.
 ```cpp
 const auto run = tree.emplace<portals::Button>(parent, std::move(caption));
 // Check each expected result in application code.
-auto action = portals::bind_button(router, *run, [&] { start_job(); });
+auto action = portals::bindButton(router, *run, [&] { start_job(); });
 ```
 
 The tree exclusively owns each widget. `Node` observes it. The application owns
@@ -22,7 +22,7 @@ paint. `GraphemeText::from` reports text errors before widget construction.
 
 ## Input and focus
 
-A button invokes its callback for each unmodified `Action::activate`, including
+A button invokes its callback for each unmodified `Action::ACTIVATE`, including
 Enter mapped by `EventRouter`, unmodified `TextInputEvent` with scalar `U' '`, or
 left mouse **press**. A release does not activate again. Motion, paste, other text
 and modified gestures are ignored. Native key repeats mapped to separate activate
@@ -32,7 +32,7 @@ There is no persistent pressed/hover state or pointer capture at this stage.
 Hidden or disabled subtrees are excluded by the real router. Callbacks may remove
 the current widget or its ancestor and may destroy their token. Existing router
 and tree borrows keep the admitted callback and widget alive until return.
-Exceptions become `callback_failed`; completed user effects are not rolled back.
+Exceptions become `CALLBACK_FAILED`; completed user effects are not rolled back.
 
 `EventRouter` remains the sole focus owner. Before a frame, recover focus once and
 copy that presentation snapshot into every control, including labels:
@@ -41,11 +41,11 @@ copy that presentation snapshot into every control, including labels:
 auto focused = router.focused();
 // Check focused, then check every sync result.
 for (auto control : controls) {
-  portals::sync_control(tree, control, *focused);
+  portals::syncControl(tree, control, *focused);
 }
 ```
 
-`sync_control` also reads eligibility through all ancestors, so a disabled parent
+`syncControl` also reads eligibility through all ancestors, so a disabled parent
 changes label and child appearance. The cached flags only choose paint style;
 they never authorize input or redirect focus. Call this after input/model changes
 and before consuming the frame request. Never call `router.focused()` from paint
@@ -53,7 +53,7 @@ or inside `tree.frame`: recovery mutates UI state.
 
 ## Checkbox binding policy
 
-`bind_checkbox(tree, router, node, shared_model, callback)` returns an owning
+`bindCheckbox(tree, router, node, sharedModel, callback)` returns an owning
 `CheckBoxBinding`. The shared model is a `Property<bool>`; its invalidation target
 and the receiving checkbox must belong to the same tree. The binding owns one
 ordinary property subscription and one router registration, and holds the model
@@ -92,7 +92,7 @@ Decorations are rebuilt under the text's complete width policy when text changes
 
 Controls submit **local** commands. The frame owner translates origins/areas and
 clips by `NodeGeometry::surface`, intersects with `NodeGeometry::clip`, and calls
-`render_full_frame` before leaving `tree.frame`. The example's `SurfaceSink` shows
+`renderFullFrame` before leaving `tree.frame`. The example's `SurfaceSink` shows
 that adapter for both text and fills. Borrowed commands/text must not escape the
 frame; the resulting owning `CellBuffer` may be submitted to `FrameWriter` after it.
 

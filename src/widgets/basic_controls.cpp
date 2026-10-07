@@ -9,7 +9,7 @@ namespace portals {
 namespace {
 bool activates(const RoutedEvent &event) {
   if (const auto *action = std::get_if<ActionEvent>(&event)) {
-    return action->action == Action::activate && action->modifiers == InputModifiers{};
+    return action->action == Action::ACTIVATE && action->modifiers == InputModifiers{};
   }
 
   if (const auto *text = std::get_if<TextInputEvent>(&event)) {
@@ -17,12 +17,13 @@ bool activates(const RoutedEvent &event) {
   }
 
   if (const auto *mouse = std::get_if<MouseInputEvent>(&event)) {
-    return mouse->button == MouseButton::left && mouse->action == MouseAction::press &&
+    return mouse->button == MouseButton::LEFT && mouse->action == MouseAction::PRESS &&
            mouse->modifiers == InputModifiers{};
   }
 
   return false;
 }
+
 GraphemeText decoration(std::string_view text, WidthPolicy policy) {
   return GraphemeText::from(text, policy).value();
 }
@@ -34,35 +35,41 @@ Control::Control(GraphemeText text, std::string_view prefix, std::string_view su
       checked_prefix_(decoration(prefix == "[ ] " ? "[x] " : prefix, text_.policy())),
       suffix_(decoration(suffix, text_.policy())), style_(style) {
 }
+
 Label::Label(GraphemeText text, ControlStyle style, SizePolicy policy)
     : Control(std::move(text), "", "", style, policy) {
 }
+
 Button::Button(GraphemeText text, ControlStyle style, SizePolicy policy)
     : Control(std::move(text), "[ ", " ]", style, policy) {
 }
+
 CheckBox::CheckBox(GraphemeText text, ControlStyle style, SizePolicy policy)
     : Control(std::move(text), "[ ] ", "", style, policy) {
 }
+
 std::expected<CellSize, TreeError> Control::measure(CellSize) {
   const auto extra = prefix_.measure() + suffix_.measure();
 
   if (text_.measure() > std::numeric_limits<std::int32_t>::max() - extra) {
-    return std::unexpected(TreeError::invalid_geometry);
+    return std::unexpected(TreeError::INVALID_GEOMETRY);
   }
 
   return CellSize{text_.measure() + extra, 1};
 }
+
 std::expected<void, TreeError> Control::arrange(CellRect local) {
   auto bounds = CellRect::from({}, local.size());
 
   if (!bounds) {
-    return std::unexpected(TreeError::invalid_geometry);
+    return std::unexpected(TreeError::INVALID_GEOMETRY);
   }
 
   bounds_ = *bounds;
 
   return {};
 }
+
 std::expected<void, TreeError> Control::paint(PaintContext &context) {
   const auto width = measure({});
 
@@ -81,28 +88,36 @@ std::expected<void, TreeError> Control::paint(PaintContext &context) {
 
   return context.submit(commands);
 }
+
 const GraphemeText &Control::text() const {
   return text_;
 }
+
 bool Control::focused() const {
   return focused_;
 }
+
 bool Control::enabled() const {
   return enabled_;
 }
-void Control::show_checked(bool checked) {
+
+void Control::showChecked(bool checked) {
   checked_ = checked;
 }
-bool Control::shown_checked() const {
+
+bool Control::shownChecked() const {
   return checked_;
 }
+
 bool CheckBox::checked() const {
-  return shown_checked();
+  return shownChecked();
 }
+
 void CheckBox::display(bool value) {
-  show_checked(value);
+  showChecked(value);
 }
-std::expected<void, TreeError> set_control_text(WidgetTree &tree, Node<Control> node, GraphemeText text) {
+
+std::expected<void, TreeError> setControlText(WidgetTree &tree, Node<Control> node, GraphemeText text) {
   std::expected<void, TreeError> result;
   auto edited = tree.edit(node, [&](Control &control) {
     if (control.text_.bytes() == text.bytes() && control.text_.policy() == text.policy()) {
@@ -116,7 +131,7 @@ std::expected<void, TreeError> set_control_text(WidgetTree &tree, Node<Control> 
       auto checked = decoration(control.checked_prefix_.bytes(), text.policy());
       auto suffix = decoration(control.suffix_.bytes(), text.policy());
 
-      result = tree.invalidate(node, Invalidation::layout);
+      result = tree.invalidate(node, Invalidation::LAYOUT);
 
       if (!result) {
         return;
@@ -127,20 +142,21 @@ std::expected<void, TreeError> set_control_text(WidgetTree &tree, Node<Control> 
       control.checked_prefix_ = std::move(checked);
       control.suffix_ = std::move(suffix);
     } catch (const std::bad_alloc &) {
-      result = std::unexpected(TreeError::no_memory);
+      result = std::unexpected(TreeError::NO_MEMORY);
     }
   });
 
   return edited ? result : edited;
 }
-std::expected<void, TreeError> set_control_style(WidgetTree &tree, Node<Control> node, ControlStyle style) {
+
+std::expected<void, TreeError> setControlStyle(WidgetTree &tree, Node<Control> node, ControlStyle style) {
   std::expected<void, TreeError> result;
   auto edited = tree.edit(node, [&](Control &control) {
     if (control.style_ == style) {
       return;
     }
 
-    result = tree.invalidate(node, Invalidation::paint);
+    result = tree.invalidate(node, Invalidation::PAINT);
 
     if (result) {
       control.style_ = style;
@@ -149,8 +165,9 @@ std::expected<void, TreeError> set_control_style(WidgetTree &tree, Node<Control>
 
   return edited ? result : edited;
 }
-std::expected<void, TreeError> sync_control(WidgetTree &tree, Node<Control> node, Node<Widget> focused) {
-  auto eligible = tree.input_eligible(node);
+
+std::expected<void, TreeError> syncControl(WidgetTree &tree, Node<Control> node, Node<Widget> focused) {
+  auto eligible = tree.inputEligible(node);
 
   if (!eligible) {
     return std::unexpected(eligible.error());
@@ -163,7 +180,7 @@ std::expected<void, TreeError> sync_control(WidgetTree &tree, Node<Control> node
       return;
     }
 
-    result = tree.invalidate(node, Invalidation::paint);
+    result = tree.invalidate(node, Invalidation::PAINT);
 
     if (result) {
       control.focused_ = has_focus;
@@ -173,22 +190,24 @@ std::expected<void, TreeError> sync_control(WidgetTree &tree, Node<Control> node
 
   return edited ? result : edited;
 }
-std::expected<ActionBinding, TreeError> bind_button(EventRouter &router, Node<Button> node,
-                                                    std::function<void()> action) {
+
+std::expected<ActionBinding, TreeError> bindButton(EventRouter &router, Node<Button> node,
+                                                   std::function<void()> action) {
   if (!action) {
-    return std::unexpected(TreeError::invalid_argument);
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
   return router.bind(node, [action = std::move(action)](Button &, const RoutedEvent &event) {
     if (!activates(event)) {
-      return EventReply::ignored;
+      return EventReply::IGNORED;
     }
 
     action();
 
-    return EventReply::handled;
+    return EventReply::HANDLED;
   });
 }
+
 struct CheckBoxBinding::State {
   WidgetTree &tree;
   Node<CheckBox> node;
@@ -201,7 +220,7 @@ struct CheckBoxBinding::State {
         return;
       }
 
-      result = tree.invalidate(node, Invalidation::paint);
+      result = tree.invalidate(node, Invalidation::PAINT);
 
       if (result) {
         control.display(value);
@@ -210,6 +229,7 @@ struct CheckBoxBinding::State {
 
     return edited ? result : edited;
   }
+
   std::expected<void, TreeError> sync() {
     auto snapshot = model->snapshot();
 
@@ -220,11 +240,14 @@ struct CheckBoxBinding::State {
     return apply((*snapshot)->value);
   }
 };
+
 CheckBoxBinding::CheckBoxBinding(std::shared_ptr<State> state, ActionBinding action, Subscription subscription)
     : state_(std::move(state)), action_(std::move(action)), subscription_(std::move(subscription)) {
 }
+
 CheckBoxBinding::~CheckBoxBinding() = default;
 CheckBoxBinding::CheckBoxBinding(CheckBoxBinding &&) noexcept = default;
+
 CheckBoxBinding &CheckBoxBinding::operator=(CheckBoxBinding &&other) noexcept {
   if (this == &other) {
     return *this;
@@ -242,18 +265,20 @@ CheckBoxBinding &CheckBoxBinding::operator=(CheckBoxBinding &&other) noexcept {
 
   return *this;
 }
+
 std::expected<void, TreeError> CheckBoxBinding::sync() {
   if (!state_) {
-    return std::unexpected(TreeError::invalid_argument);
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
   return state_->sync();
 }
-std::expected<CheckBoxBinding, TreeError> bind_checkbox(WidgetTree &tree, EventRouter &router, Node<CheckBox> node,
-                                                        std::shared_ptr<Property<bool>> model,
-                                                        std::function<void(CheckBoxResult)> changed) {
+
+std::expected<CheckBoxBinding, TreeError> bindCheckbox(WidgetTree &tree, EventRouter &router, Node<CheckBox> node,
+                                                       std::shared_ptr<Property<bool>> model,
+                                                       std::function<void(CheckBoxResult)> changed) {
   if (!model || !changed) {
-    return std::unexpected(TreeError::invalid_argument);
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
   try {
@@ -274,7 +299,7 @@ std::expected<CheckBoxBinding, TreeError> bind_checkbox(WidgetTree &tree, EventR
 
     auto action = router.bind(node, [state, changed = std::move(changed)](CheckBox &, const RoutedEvent &event) {
       if (!activates(event)) {
-        return EventReply::ignored;
+        return EventReply::IGNORED;
       }
 
       // Read the authoritative value once and perform one toggle. Retain this exact set
@@ -287,7 +312,7 @@ std::expected<CheckBoxBinding, TreeError> bind_checkbox(WidgetTree &tree, EventR
 
         // A property observer capture can remove the target while set prunes observers.
         // Removal ends presentation, but must not conceal a successful model commit.
-        if (!synced && synced.error() != TreeError::stale_node && synced.error() != TreeError::closed) {
+        if (!synced && synced.error() != TreeError::STALE_NODE && synced.error() != TreeError::CLOSED) {
           throw synced.error();
         }
       }
@@ -295,7 +320,7 @@ std::expected<CheckBoxBinding, TreeError> bind_checkbox(WidgetTree &tree, EventR
       // A callback exception cannot undo the model commit or replace its receipt.
       changed(std::move(result));
 
-      return EventReply::handled;
+      return EventReply::HANDLED;
     });
 
     if (!action) {
@@ -310,7 +335,7 @@ std::expected<CheckBoxBinding, TreeError> bind_checkbox(WidgetTree &tree, EventR
 
     return CheckBoxBinding(std::move(state), std::move(*action), std::move(*subscription));
   } catch (const std::bad_alloc &) {
-    return std::unexpected(TreeError::no_memory);
+    return std::unexpected(TreeError::NO_MEMORY);
   }
 }
 } // namespace portals

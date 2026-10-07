@@ -11,7 +11,7 @@ Create a separate `ModelConsumer<T>` for every view. Pass it by move to the
 list together with an owning, copyable formatter:
 
 ```cpp
-auto consumer = model.open_range();
+auto consumer = model.openRange();
 if (!consumer) {
   return std::unexpected(consumer.error());
 }
@@ -36,12 +36,12 @@ tree/model. Captures are owned by the list and destroyed on UI.
 
 Between frames, the application applies Scheduler publications, obtains **one
 model pin**, and passes that same `ModelFrame<T>` to every view of the model.
-`prepare_virtual_list(tree, list, pin, viewport)` takes the **final local size
+`prepareVirtualList(tree, list, pin, viewport)` takes the **final local size
 of that view**, in integer cells. Determine it from application/layout
 constraints; repeat preparation after resize before painting. This preparation
 phase precedes the `tree.frame` that performs layout, paint and rendering.
-A mismatch between arranged and prepared sizes returns `invalid_geometry`;
-unprepared or changed scroll/options state returns `would_block` from paint.
+A mismatch between arranged and prepared sizes returns `INVALID_GEOMETRY`;
+unprepared or changed scroll/options state returns `WOULD_BLOCK` from paint.
 Never render a partial command collection after any paint failure.
 
 The view retains its pin and `ModelRange<T>`, and owns every formatted string.
@@ -67,36 +67,36 @@ ready/error result belongs to that consumer. Otherwise it performs one bounded
 in-memory `frame.read`; this cannot initiate I/O. The whole requested interval
 must be ready: this version does not spatially merge a partially ready overscan.
 Pending rows show `...`, error rows show `!`, clipped as whole graphemes.
-`range_state()` exposes the readiness independently of those placeholders.
+`rangeState()` exposes the readiness independently of those placeholders.
 The provider's detailed error remains available through the model's range API.
 
 A new pending range produces `optional<ModelRequest<T>>` **once**, as a dispatch
 receipt. The application starts its own work using that token; repeated preparation
 of the same pending request does not return another receipt. A worker calls
-`token.complete(snapshot)` and checks its result. Queue backpressure (`would_block`)
+`token.complete(snapshot)` and checks its result. Queue backpressure (`WOULD_BLOCK`)
 permits retrying the same completion token. If the application cannot start work,
 it cancels and releases its receipt; preparation can then issue a fresh one.
 A provider error is stable until a new publication or explicit
-`retry_virtual_list(tree, list)` followed by preparation. No automatic retry loop
-is installed. Check `Model::last_error()` when applying Scheduler publications:
+`retryVirtualList(tree, list)` followed by preparation. No automatic retry loop
+is installed. Check `Model::lastError()` when applying Scheduler publications:
 queue acceptance alone does not prove application to the model.
 
 Scrolling supersedes the previous request; the existing model consumer checks
 request generation and data revision when completions arrive. Cancelling the
 token does not join a worker or free its work reservation while other owners
-remain. If the model's in-flight budget is full, preparation returns `would_block`;
+remain. If the model's in-flight budget is full, preparation returns `WOULD_BLOCK`;
 release completed/cancelled application tokens and retry. The configured model
 range limit also applies to viewport plus overscan; oversized ranges fail with
-`invalid_argument`, without silently reducing the requested viewport.
+`INVALID_ARGUMENT`, without silently reducing the requested viewport.
 
 ## Selection, input and visibility
 
 Selection is `optional<RowId>`, not a row position. Insertion, reordering,
 publication and scrolling do not replace it. Removed IDs remain selected until
-the application clears/changes them. `set_virtual_list_selection` accepts an
+the application clears/changes them. `setVirtualListSelection` accepts an
 offscreen nonzero ID without loading or searching the model.
 
-Keep the `ActionBinding` returned by `bind_virtual_list` alive. Up/Down move
+Keep the `ActionBinding` returned by `bindVirtualList` alive. Up/Down move
 within the logical model; Home/End reach its boundaries. With no selection in
 the visible range, Up/Down start at the first visible row. Finding an already
 selected row examines only visible delegates. A navigation intent is a separate
@@ -123,9 +123,9 @@ views still paint, but the router prevents their input.
 All view mutation uses the tree's UI owner and occurs outside a frame. Wrong
 thread, stale/foreign node, closed tree, and frame mutation errors propagate.
 Nonpositive row height, negative preparation dimensions, invalid IDs/policies,
-and range overflow return `invalid_argument`. Allocation failures return
-`no_memory`; other formatter exceptions return `callback_failed`. A foreign
-model pin returns `stale_node` for the consumer even if publication revisions
+and range overflow return `INVALID_ARGUMENT`. Allocation failures return
+`NO_MEMORY`; other formatter exceptions return `CALLBACK_FAILED`. A foreign
+model pin returns `STALE_NODE` for the consumer even if publication revisions
 coincidentally match. A failed sink may already have accepted earlier row
 commands; the caller discards that scene.
 
@@ -136,7 +136,7 @@ Application-driven model publication already invalidates its model context.
 Row text and placeholders use the complete configured width policy, and the
 renderer preserves whole wide graphemes even in a one-cell viewport.
 
-The semantic tests use `layout_tree`, the reference renderer, `FrameWriter` and
+The semantic tests use `layoutTree`, the reference renderer, `FrameWriter` and
 an independent `TestTerminal`. At 100 and 1,000,000 logical rows, a three-row
 viewport with two rows of overscan on each side performs one seven-row read and
 three formatter calls, with no child widgets. These counters prove bounded work,

@@ -13,6 +13,7 @@ ColumnLimit: 120
 ContinuationIndentWidth: 2
 IndentPPDirectives: AfterHash
 IndentWidth: 2
+SeparateDefinitionBlocks: Always
 IndentAccessModifiers: false
 AccessModifierOffset: -2
 TabWidth: 2

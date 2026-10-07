@@ -13,8 +13,8 @@ Embedded NUL remains part of the input.
 auto text = portals::GraphemeText::from("e\xcc\x81");
 if (text) {
   auto columns = text->measure(); // 1
-  auto cursor = text->next_cursor(0); // byte offset 3
-  auto prefix = text->clip_prefix(1); // complete cluster
+  auto cursor = text->nextCursor(0); // byte offset 3
+  auto prefix = text->clipPrefix(1); // complete cluster
 }
 ```
 
@@ -29,7 +29,7 @@ unchanged. Move assignment allocates nothing and remains `noexcept`.
 Cursor and clipping operations
 allocate nothing, perform no I/O and throw no exceptions. Cursor movement uses
 binary search; clipping scans the fitting prefix. Cursor offsets must be whole
-grapheme boundaries, including zero/end; invalid offsets return `not_boundary`.
+grapheme boundaries, including zero/end; invalid offsets return `NOT_BOUNDARY`.
 Movement at the corresponding endpoint is idempotent. Negative clip budgets
 normalize to zero; a two-cell cluster that cannot fit ends the prefix. These
 operations do not write terminal cells; renderer continuation/overwrite rules

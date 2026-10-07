@@ -25,12 +25,12 @@ Create the model on the UI owner with a real `WidgetTree` and a context node.
 The tree must outlive the source. A root or long-lived application context lets
 the model outlive disposable views. Removing the context closes both Scheduler
 endpoints; destroying the source also closes them. A copied publisher can outlive
-source, tree and Scheduler, and then reports `closed`.
+source, tree and Scheduler, and then reports `CLOSED`.
 
 Before each `WidgetTree::frame`, call `model.pin()` once and pass that same
 `ModelFrame<T>` to every view of this model. It retains the base provider snapshot
 and one immutable table of consumer results. Its `revision()` is the UI frame
-revision, including range requests/readiness; `data_revision()` identifies domain
+revision, including range requests/readiness; `dataRevision()` identifies domain
 data. Different models do not acquire an implicit global transaction. Dispatch
 Scheduler only between frames. Source mutations/request creation during a tree
 frame are rejected; a worker can enqueue concurrently without changing the pin.
@@ -47,7 +47,7 @@ must itself run on the UI owner.
 
 ## Asynchronous ranges
 
-`model.open_range()` returns a move-only UI-owned `ModelConsumer<T>`. Each consumer
+`model.openRange()` returns a move-only UI-owned `ModelConsumer<T>`. Each consumer
 has a never-reused `ModelRangeId`, even when two consumers request identical or
 overlapping rows. `consumer.request(rows, work_owner)` returns a copyable worker
 `ModelRequest<T>` and commits pending readiness for that consumer. The library
@@ -70,8 +70,8 @@ current generation without allocation and retires its slot; retained immutable
 tables may keep the old result until slot reuse or source destruction. Their
 revision and data remain unchanged. Applications no longer use a retired handle
 for new rendering. An older pin may still read it. Source destruction makes all
-live tokens report `stop_requested`; context destruction instead closes delivery,
-so a completion may first discover it through `closed`.
+live tokens report `stopRequested`; context destruction instead closes delivery,
+so a completion may first discover it through `CLOSED`.
 
 `model.publisher().publish(snapshot)` enqueues a full provider replacement.
 Only strictly newer data revisions apply. A new revision clears consumer results
@@ -93,16 +93,16 @@ table. The synthetic regression compares allocation counts/bytes for 100 and
 1,000,000 logical rows and verifies zero row copies over ten publications.
 
 - Out-of-bounds/oversized ranges and malformed provider results return
-  `TreeError::invalid_argument` (completion uses `SchedulerError::invalid_argument`).
-- Consumer capacity returns `node_limit`; work/mailbox capacity returns
-  `would_block`. Failed requests leave prior state unchanged.
+  `TreeError::INVALID_ARGUMENT` (completion uses `SchedulerError::INVALID_ARGUMENT`).
+- Consumer capacity returns `NODE_LIMIT`; work/mailbox capacity returns
+  `WOULD_BLOCK`. Failed requests leave prior state unchanged.
 - A work reservation survives cancellation, queued completion and destruction of
   the UI consumer until the last worker/queued token releases it. Provider storage
   is destroyed before freeing the reservation, including destructor reentry.
 - Completion accepts at most one successful submission per generation. A full
-  mailbox permits retry; a duplicate or cancelled token returns `closed`.
+  mailbox permits retry; a duplicate or cancelled token returns `CLOSED`.
 - Queue acceptance is not an application receipt. An allocation failure while
-  applying on UI leaves the old table intact and is recorded by `last_error()`.
+  applying on UI leaves the old table intact and is recorded by `lastError()`.
   It is a sticky diagnostic. Start a new request to retry the intended range.
 - UI operations check thread affinity. Consumer/source destruction on a foreign
   thread terminates. Provider reads and transferred immutable owners may be used

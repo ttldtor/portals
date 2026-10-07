@@ -6,5 +6,5 @@
 #include "values.hpp"
 
 int main() {
-  return check_values();
+  return checkValues();
 }

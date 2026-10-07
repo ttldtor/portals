@@ -14,6 +14,7 @@
 
 namespace portals {
 class WidgetTree;
+
 /** @brief UI-owned extension object. Hooks borrow their arguments for one call.
  * Models are separate explicit owners chosen by the application. Hooks must not block,
  * perform terminal I/O, or retain contexts. Measure/arrange/paint cannot mutate the tree.
@@ -42,6 +43,7 @@ public:
    */
   virtual std::expected<void, TreeError> paint(PaintContext &context);
 };
+
 /** @brief Copyable typed observer; never owns or exposes an unchecked widget pointer.
  * @tparam T Widget or a publicly derived extension type; the handle records identity without owning T.
  */
@@ -49,6 +51,7 @@ template <class T = Widget> class Node {
 public:
   /** @brief Empty observer; checked access fails. */
   Node() = default;
+
   /** @brief Safe observing upcast; downcasts are unavailable.
    * @tparam U Publicly derived from T, permitting a safe observing upcast.
    * @param other Observer whose identity is copied; the source remains valid.
@@ -57,12 +60,14 @@ public:
     requires std::derived_from<U, T>
   Node(Node<U> other) : id_(other.id()) {
   }
+
   /** @brief Copy the stable diagnostic identity.
    * @return Copied session/slot/generation identity; it does not establish liveness.
    */
   NodeId id() const noexcept {
     return id_;
   }
+
   /** @brief Compare identity.
    * @param other Typed observer to compare.
    * @return True when all compared fields are equal.
@@ -71,11 +76,13 @@ public:
 
 private:
   friend class WidgetTree;
+
   explicit Node(NodeId id) : id_(id) {
   }
 
   NodeId id_{};
 };
+
 /** @brief Owning snapshot of a live node; handles remain checked after subsequent mutations. */
 struct NodeSnapshot {
   Node<Widget> parent; ///< Empty only for the root.
@@ -85,12 +92,13 @@ struct NodeSnapshot {
   bool visible{true};    ///< Hidden subtrees do not participate in layout, paint or input.
   bool enabled{true};    ///< Disabled subtrees retain layout/paint but do not receive input.
 };
+
 /** @brief Exclusive parent/child ownership on Scheduler's UI thread.
  * Scheduler must outlive this object. Destruction on another thread or inside a tree
  * callback terminates; request close instead. All operations check affinity first.
  * Logical removal is immediate and allocation-free, reclamation waits for the outermost
- * borrow. References cannot escape edit/with_scope/frame callbacks. Library allocations
- * become no_memory; callback exceptions become callback_failed without undoing user effects.
+ * borrow. References cannot escape edit/withScope/frame callbacks. Library allocations
+ * become NO_MEMORY; callback exceptions become CALLBACK_FAILED without undoing user effects.
  */
 class WidgetTree {
 public:
@@ -101,7 +109,7 @@ public:
    * @param options Positive registry and depth bounds; max_depth must not exceed 256.
    * @param sink Optional nonthrowing UI failure sink; recursive reports are suppressed.
    * @param context Borrowed sink context that must outlive the tree.
-   * @return Tree with a mounted root, or invalid_argument, no_memory, identity_exhausted,
+   * @return Tree with a mounted root, or INVALID_ARGUMENT, NO_MEMORY, IDENTITY_EXHAUSTED,
    * or the translated scheduler scope-creation error.
    */
   static std::expected<std::unique_ptr<WidgetTree>, TreeError>
@@ -111,22 +119,22 @@ public:
   WidgetTree(const WidgetTree &) = delete;
   WidgetTree &operator=(const WidgetTree &) = delete;
   /** @brief Checked observing root; stale after root removal.
-   * @return Observing root handle, or wrong_thread, closed, or stale_node if the root was removed.
+   * @return Observing root handle, or WRONG_THREAD, closed, or STALE_NODE if the root was removed.
    */
   std::expected<Node<Widget>, TreeError> root() const;
   /** @brief Copy live structure; may allocate.
    * @param node Checked identity whose live structure is copied.
-   * @return Owning snapshot of children, parent, flags and geometry; tree validation errors or no_memory on failure.
+   * @return Owning snapshot of children, parent, flags and geometry; tree validation errors or NO_MEMORY on failure.
    */
   std::expected<NodeSnapshot, TreeError> inspect(Node<Widget> node) const;
   /** @brief Invalidate subtree/scopes now, reclaim at safe point.
    * @param node Root of the subtree to invalidate and eventually destroy.
-   * @return Success after logical removal and layout invalidation; tree validation errors, or would_block during a
+   * @return Success after logical removal and layout invalidation; tree validation errors, or WOULD_BLOCK during a
    * frame.
    */
   std::expected<void, TreeError> remove(Node<Widget> node);
   /** @brief Idempotent coordinated shutdown, including during edit.
-   * @return Success once the tree is logically closed; wrong_thread or would_block during a frame otherwise.
+   * @return Success once the tree is logically closed; WRONG_THREAD or WOULD_BLOCK during a frame otherwise.
    */
   std::expected<void, TreeError> close();
 
@@ -137,11 +145,12 @@ public:
    * @tparam Callback Callable accepting const T& and returning void.
    * @param node Live widget to borrow without permitting tree mutation through this reference.
    * @param callback Synchronous reader; must not retain the widget reference.
-   * @return Success after callback return, tree validation errors before invocation, or callback_failed on an
+   * @return Success after callback return, tree validation errors before invocation, or CALLBACK_FAILED on an
    * exception.
    */
   template <class T, class Callback> std::expected<void, TreeError> read(Node<T> node, Callback &&callback) {
     static_assert(std::is_void_v<std::invoke_result_t<Callback, const T &>>);
+
     auto value = access(node.id(), false);
 
     if (!value) {
@@ -155,27 +164,27 @@ public:
 
       return {};
     } catch (...) {
-      report(node.id(), TreeError::callback_failed);
+      report(node.id(), TreeError::CALLBACK_FAILED);
 
-      return std::unexpected(TreeError::callback_failed);
+      return std::unexpected(TreeError::CALLBACK_FAILED);
     }
   }
 
   /** @brief Construct and exclusively attach a new child; constructors run only after validation.
    * No attach/reparent exists, so cycles cannot be formed. Structural insertion during lifecycle
-   * or frame callbacks returns would_block. A committed mount exception is reported to the sink;
+   * or frame callbacks returns WOULD_BLOCK. A committed mount exception is reported to the sink;
    * insertion still succeeds. Mount can remove itself, so a successful handle can already be stale.
    * @tparam T Publicly derived Widget constructible from the forwarded Args.
    * @tparam Args Argument types accepted by T's constructor; perfect-forwarded without library copies.
    * @param parent Live parent whose ownership will contain the new child.
    * @param args Constructor arguments forwarded only after insertion checks.
-   * @return Observing child handle; tree validation/capacity/depth/identity failures, would_block at forbidden
-   * boundaries, no_memory for allocation, or callback_failed for a constructor exception.
+   * @return Observing child handle; tree validation/capacity/depth/identity failures, WOULD_BLOCK at forbidden
+   * boundaries, NO_MEMORY for allocation, or CALLBACK_FAILED for a constructor exception.
    */
   template <class T, class... Args>
     requires std::derived_from<T, Widget>
   std::expected<Node<T>, TreeError> emplace(Node<Widget> parent, Args &&...args) {
-    auto allowed = can_insert(parent.id());
+    auto allowed = canInsert(parent.id());
 
     if (!allowed) {
       return std::unexpected(allowed.error());
@@ -193,11 +202,11 @@ public:
 
       return Node<T>(*id);
     } catch (const std::bad_alloc &) {
-      return std::unexpected(TreeError::no_memory);
+      return std::unexpected(TreeError::NO_MEMORY);
     } catch (...) {
-      report(parent.id(), TreeError::callback_failed);
+      report(parent.id(), TreeError::CALLBACK_FAILED);
 
-      return std::unexpected(TreeError::callback_failed);
+      return std::unexpected(TreeError::CALLBACK_FAILED);
     }
   }
 
@@ -207,10 +216,11 @@ public:
    * @tparam Callback Callable accepting T& and returning void.
    * @param node Live widget to borrow for the duration of the callback.
    * @param callback Synchronous editor; must not retain references and must request its own invalidation.
-   * @return Success, tree validation errors, would_block during a frame, or callback_failed on an exception.
+   * @return Success, tree validation errors, WOULD_BLOCK during a frame, or CALLBACK_FAILED on an exception.
    */
   template <class T, class Callback> std::expected<void, TreeError> edit(Node<T> node, Callback &&callback) {
     static_assert(std::is_void_v<std::invoke_result_t<Callback, T &>>);
+
     auto value = access(node.id(), true);
 
     if (!value) {
@@ -224,9 +234,9 @@ public:
 
       return {};
     } catch (...) {
-      report(node.id(), TreeError::callback_failed);
+      report(node.id(), TreeError::CALLBACK_FAILED);
 
-      return std::unexpected(TreeError::callback_failed);
+      return std::unexpected(TreeError::CALLBACK_FAILED);
     }
   }
 
@@ -236,9 +246,9 @@ public:
    * @tparam Callback Callable accepting const UiScope&; its return value is ignored.
    * @param node Live node whose scope is borrowed outside a frame.
    * @param callback Synchronous registration code; must not retain the scope reference.
-   * @return Success, tree validation errors, would_block during a frame, or callback_failed on an exception.
+   * @return Success, tree validation errors, WOULD_BLOCK during a frame, or CALLBACK_FAILED on an exception.
    */
-  template <class Callback> std::expected<void, TreeError> with_scope(Node<Widget> node, Callback &&callback) {
+  template <class Callback> std::expected<void, TreeError> withScope(Node<Widget> node, Callback &&callback) {
     auto value = access(node.id(), true);
 
     if (!value) {
@@ -252,9 +262,9 @@ public:
 
       return {};
     } catch (...) {
-      report(node.id(), TreeError::callback_failed);
+      report(node.id(), TreeError::CALLBACK_FAILED);
 
-      return std::unexpected(TreeError::callback_failed);
+      return std::unexpected(TreeError::CALLBACK_FAILED);
     }
   }
 
@@ -269,14 +279,14 @@ public:
    * @param callback Callable copied/moved into the scheduler; widget references must not escape.
    * @param lane Scheduler queue whose capacity and budget apply.
    * @param overflow Queue rejection or sender-local pending data replacement policy.
-   * @return Scoped subscription and worker-safe publisher; tree validation errors, would_block during a frame,
-   * translated scheduler registration errors, or no_memory.
+   * @return Scoped subscription and worker-safe publisher; tree validation errors, WOULD_BLOCK during a frame,
+   * translated scheduler registration errors, or NO_MEMORY.
    * @note Non-allocation exceptions from callback construction/move propagate.
    */
   template <class Value, class T, class Callback>
   std::expected<SchedulerConnection<Value>, TreeError> connect(Node<T> node, Callback &&callback,
-                                                               SchedulerLane lane = SchedulerLane::data,
-                                                               SchedulerOverflow overflow = SchedulerOverflow::reject) {
+                                                               SchedulerLane lane = SchedulerLane::DATA,
+                                                               SchedulerOverflow overflow = SchedulerOverflow::REJECT) {
     auto value = access(node.id(), true);
 
     if (!value) {
@@ -293,19 +303,19 @@ public:
             std::invoke(function, widget, std::move(item));
           });
 
-          if (!status && status.error() == TreeError::callback_failed) {
-            throw TreeError::callback_failed;
+          if (!status && status.error() == TreeError::CALLBACK_FAILED) {
+            throw TreeError::CALLBACK_FAILED;
           }
         },
         lane, overflow);
 
       if (!result) {
-        return std::unexpected(from_scheduler(result.error()));
+        return std::unexpected(fromScheduler(result.error()));
       }
 
       return std::move(*result);
     } catch (const std::bad_alloc &) {
-      return std::unexpected(TreeError::no_memory);
+      return std::unexpected(TreeError::NO_MEMORY);
     }
   }
 
@@ -315,8 +325,8 @@ public:
    * @param node Live receiver whose scope cancels the timer on removal.
    * @param deadline Absolute millisecond deadline in the scheduler clock.
    * @param callback Callable copied/moved into the scheduler; widget references must not escape.
-   * @return Scoped timer token; tree validation errors, would_block during a frame, translated scheduler
-   * registration errors, or no_memory.
+   * @return Scoped timer token; tree validation errors, WOULD_BLOCK during a frame, translated scheduler
+   * registration errors, or NO_MEMORY.
    * @note Non-allocation exceptions from callback construction/move propagate.
    */
   template <class T, class Callback>
@@ -336,58 +346,58 @@ public:
             std::invoke(function, widget);
           });
 
-          if (!status && status.error() == TreeError::callback_failed) {
-            throw TreeError::callback_failed;
+          if (!status && status.error() == TreeError::CALLBACK_FAILED) {
+            throw TreeError::CALLBACK_FAILED;
           }
         });
 
       if (!result) {
-        return std::unexpected(from_scheduler(result.error()));
+        return std::unexpected(fromScheduler(result.error()));
       }
 
       return std::move(*result);
     } catch (const std::bad_alloc &) {
-      return std::unexpected(TreeError::no_memory);
+      return std::unexpected(TreeError::NO_MEMORY);
     }
   }
 
   /** @brief No-op if equal; otherwise layout.
    * @param node Live node whose flag is changed.
    * @param visible Whether this node and its subtree participate in layout, paint and input.
-   * @return Success, including equal-value no-op, or tree validation errors including would_block during a frame.
+   * @return Success, including equal-value no-op, or tree validation errors including WOULD_BLOCK during a frame.
    *
    * @note Affinity, lifetime and frame checks also apply when the requested flag already matches.
    */
-  std::expected<void, TreeError> set_visible(Node<Widget> node, bool visible);
+  std::expected<void, TreeError> setVisible(Node<Widget> node, bool visible);
   /** @brief No-op if equal; otherwise paint.
    * @param node Live node whose flag is changed.
    * @param enabled Whether this node and its subtree can receive input; layout/paint remain available.
-   * @return Success, including equal-value no-op, or tree validation errors including would_block during a frame.
+   * @return Success, including equal-value no-op, or tree validation errors including WOULD_BLOCK during a frame.
    *
    * @note Affinity, lifetime and frame checks also apply when the requested flag already matches.
    */
-  std::expected<void, TreeError> set_enabled(Node<Widget> node, bool enabled);
+  std::expected<void, TreeError> setEnabled(Node<Widget> node, bool enabled);
   /** @brief Live/visible/enabled ancestors; hit-test also needs valid geometry.
    * @param node Live node whose ancestry is checked.
    * @return True when the node and all ancestors are visible and enabled, false otherwise;
    * tree validation errors for an invalid observer. Geometry is not consulted.
    */
-  std::expected<bool, TreeError> input_eligible(Node<Widget> node) const;
+  std::expected<bool, TreeError> inputEligible(Node<Widget> node) const;
   /** @brief Coalesce one frame request.
    * @param node Live node authorizing invalidation of the tree.
    * @param kind Work to coalesce; layout invalidates all arranged geometry and includes paint.
-   * @return Success, tree validation errors, would_block during a frame, or invalid_argument for an unknown kind.
+   * @return Success, tree validation errors, WOULD_BLOCK during a frame, or INVALID_ARGUMENT for an unknown kind.
    */
   std::expected<void, TreeError> invalidate(Node<Widget> node, Invalidation kind);
   /** @brief Clear pending flags before processing the frame.
-   * @return Previously pending invalidation, cleared to none; wrong_thread, closed, or would_block during a frame.
+   * @return Previously pending invalidation, cleared to none; WRONG_THREAD, closed, or WOULD_BLOCK during a frame.
    */
-  std::expected<Invalidation, TreeError> consume_frame_request();
+  std::expected<Invalidation, TreeError> consumeFrameRequest();
   /** @brief Guarded extension call.
    * @param node Live widget to measure; hidden ancestry returns an empty size without invoking its hook.
    * @param available Cell constraints normalized before calling the extension.
-   * @return Normalized desired size; tree validation errors, would_block for nested extension calls,
-   * callback_failed for thrown exceptions, or the hook's error.
+   * @return Normalized desired size; tree validation errors, WOULD_BLOCK for nested extension calls,
+   * CALLBACK_FAILED for thrown exceptions, or the hook's error.
    */
   std::expected<CellSize, TreeError> measure(Node<Widget> node, CellSize available);
   /** @brief Arrange local geometry against the arranged parent and root viewport; invalidate on failure.
@@ -395,28 +405,30 @@ public:
    * @param node Live widget whose geometry is replaced.
    * @param local Parent-relative rectangle; for the root it is already in surface coordinates.
    * @param viewport Root clipping rectangle; descendants inherit their parent's clip instead.
-   * @return Success (including hidden nodes), tree validation errors, would_block for a nested hook,
-   * invalid_geometry for an unarranged parent/translation overflow, callback_failed, or the hook's error.
+   * @return Success (including hidden nodes), tree validation errors, WOULD_BLOCK for a nested hook,
+   * INVALID_GEOMETRY for an unarranged parent/translation overflow, CALLBACK_FAILED, or the hook's error.
    */
   std::expected<void, TreeError> arrange(Node<Widget> node, CellRect local, CellRect viewport);
   /** @brief Requires an active frame borrow.
    * @param node Live, arranged widget to paint; hidden ancestry skips the hook.
    * @param context Sink borrowed for this hook and the enclosing frame only.
-   * @return Success, tree validation errors, would_block outside a frame or inside another hook,
-   * invalid_geometry, callback_failed, or the hook's error.
+   * @return Success, tree validation errors, WOULD_BLOCK outside a frame or inside another hook,
+   * INVALID_GEOMETRY, CALLBACK_FAILED, or the hook's error.
    */
   std::expected<void, TreeError> paint(Node<Widget> node, PaintContext &context);
+
   /** @brief Keep widget/text storage alive through traversal AND rendering of borrowed commands.
-   * Run layout/paint and render_full_frame before returning. Tree/domain edit is rejected;
+   * Run layout/paint and renderFullFrame before returning. Tree/domain edit is rejected;
    * inspect, measure, arrange and paint remain available. Callback must return void.
    * @tparam Callback Callable without arguments returning void.
    * @param callback Synchronous traversal and rendering operation; frame borrows must not escape.
-   * @return Success, wrong_thread, closed, would_block for nesting/active borrows/reclamation,
-   * or callback_failed for an exception; previously performed user effects are not rolled back.
+   * @return Success, WRONG_THREAD, closed, WOULD_BLOCK for nesting/active borrows/reclamation,
+   * or CALLBACK_FAILED for an exception; previously performed user effects are not rolled back.
    */
   template <class Callback> std::expected<void, TreeError> frame(Callback &&callback) {
     static_assert(std::is_void_v<std::invoke_result_t<Callback>>);
-    auto allowed = begin_frame();
+
+    auto allowed = beginFrame();
 
     if (!allowed) {
       return allowed;
@@ -429,28 +441,30 @@ public:
 
       return {};
     } catch (...) {
-      report({}, TreeError::callback_failed);
+      report({}, TreeError::CALLBACK_FAILED);
 
-      return std::unexpected(TreeError::callback_failed);
+      return std::unexpected(TreeError::CALLBACK_FAILED);
     }
   }
 
 private:
   struct State;
+
   struct Borrow {
     explicit Borrow(WidgetTree &tree, bool frame = false);
     ~Borrow();
     WidgetTree &tree;
     bool frame;
   };
+
   explicit WidgetTree(std::unique_ptr<State> state);
   std::expected<Widget *, TreeError> access(NodeId id, bool mutation) const;
-  std::expected<void, TreeError> can_insert(NodeId parent) const;
+  std::expected<void, TreeError> canInsert(NodeId parent) const;
   std::expected<NodeId, TreeError> attach(NodeId parent, std::unique_ptr<Widget> widget);
-  std::expected<void, TreeError> begin_frame() const;
+  std::expected<void, TreeError> beginFrame() const;
   const UiScope &scope(NodeId id) const;
   Scheduler &scheduler() const;
-  static TreeError from_scheduler(SchedulerError error);
+  static TreeError fromScheduler(SchedulerError error);
   void report(NodeId id, TreeError error) noexcept;
   void reclaim() noexcept;
   std::unique_ptr<State> state_;

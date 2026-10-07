@@ -17,7 +17,7 @@ std::expected<std::unique_ptr<EventRouter>, TreeError> EventRouter::create(Widge
   }
 
   if (options.max_registrations == 0) {
-    return std::unexpected(TreeError::invalid_argument);
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
   try {
@@ -25,7 +25,7 @@ std::expected<std::unique_ptr<EventRouter>, TreeError> EventRouter::create(Widge
 
     return std::unique_ptr<EventRouter>(new EventRouter(std::move(state)));
   } catch (const std::bad_alloc &) {
-    return std::unexpected(TreeError::no_memory);
+    return std::unexpected(TreeError::NO_MEMORY);
   }
 }
 
@@ -44,15 +44,15 @@ WidgetTree &EventRouter::tree() {
 
 std::expected<void, TreeError> EventRouter::check() const {
   if (state_->owner != std::this_thread::get_id()) {
-    return std::unexpected(TreeError::wrong_thread);
+    return std::unexpected(TreeError::WRONG_THREAD);
   }
 
   if (state_->closing) {
-    return std::unexpected(TreeError::closed);
+    return std::unexpected(TreeError::CLOSED);
   }
 
   if (state_->collecting) {
-    return std::unexpected(TreeError::would_block);
+    return std::unexpected(TreeError::WOULD_BLOCK);
   }
 
   auto root = state_->tree.root();
@@ -83,9 +83,9 @@ std::expected<void, TreeError> EventRouter::collect() {
   }
 
   for (auto &entry : state_->registrations) {
-    auto live = tree().input_eligible(entry->node);
+    auto live = tree().inputEligible(entry->node);
 
-    if (!live && live.error() != TreeError::stale_node) {
+    if (!live && live.error() != TreeError::STALE_NODE) {
       return std::unexpected(live.error());
     }
 
@@ -118,7 +118,7 @@ std::expected<void, TreeError> EventRouter::collect() {
   return {};
 }
 
-std::expected<std::vector<Node<Widget>>, TreeError> EventRouter::focus_order() {
+std::expected<std::vector<Node<Widget>>, TreeError> EventRouter::focusOrder() {
   std::vector<Node<Widget>> result(0);
   std::vector<Node<Widget>> pending(0);
   auto root = tree().root();
@@ -158,7 +158,7 @@ std::expected<std::vector<Node<Widget>>, TreeError> EventRouter::focus_order() {
   return std::expected<std::vector<Node<Widget>>, TreeError>(std::in_place, result);
 }
 
-std::expected<void, TreeError> EventRouter::change_focus(Node<Widget> node) {
+std::expected<void, TreeError> EventRouter::changeFocus(Node<Widget> node) {
   if (node == state_->focus) {
     return {};
   }
@@ -179,15 +179,15 @@ std::expected<void, TreeError> EventRouter::change_focus(Node<Widget> node) {
   state_->focus = node;
 
   if (previous.id().session != 0) {
-    auto status = tree().invalidate(previous, Invalidation::paint);
+    auto status = tree().invalidate(previous, Invalidation::PAINT);
 
-    if (!status && status.error() != TreeError::stale_node) {
+    if (!status && status.error() != TreeError::STALE_NODE) {
       return status;
     }
   }
 
   if (node.id().session != 0) {
-    return tree().invalidate(node, Invalidation::paint);
+    return tree().invalidate(node, Invalidation::PAINT);
   }
 
   return {};
@@ -201,7 +201,7 @@ std::expected<Node<Widget>, TreeError> EventRouter::focused() {
   }
 
   try {
-    auto order = focus_order();
+    auto order = focusOrder();
 
     if (!order) {
       return std::unexpected(order.error());
@@ -227,7 +227,7 @@ std::expected<Node<Widget>, TreeError> EventRouter::focused() {
       next = order->front();
     }
 
-    auto changed = change_focus(next);
+    auto changed = changeFocus(next);
 
     if (!changed) {
       return std::unexpected(changed.error());
@@ -235,18 +235,18 @@ std::expected<Node<Widget>, TreeError> EventRouter::focused() {
 
     return next;
   } catch (const std::bad_alloc &) {
-    return std::unexpected(TreeError::no_memory);
+    return std::unexpected(TreeError::NO_MEMORY);
   }
 }
 
-std::expected<void, TreeError> EventRouter::set_focus(Node<Widget> node) {
+std::expected<void, TreeError> EventRouter::setFocus(Node<Widget> node) {
   auto allowed = collect();
 
   if (!allowed) {
     return allowed;
   }
 
-  auto eligible = tree().input_eligible(node);
+  auto eligible = tree().inputEligible(node);
 
   if (!eligible) {
     return std::unexpected(eligible.error());
@@ -255,13 +255,13 @@ std::expected<void, TreeError> EventRouter::set_focus(Node<Widget> node) {
   auto entry = registration(node);
 
   if (!*eligible || !entry || !entry->focusable) {
-    return std::unexpected(TreeError::invalid_argument);
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
   try {
-    return change_focus(node);
+    return changeFocus(node);
   } catch (const std::bad_alloc &) {
-    return std::unexpected(TreeError::no_memory);
+    return std::unexpected(TreeError::NO_MEMORY);
   }
 }
 
@@ -273,7 +273,7 @@ std::expected<Node<Widget>, TreeError> EventRouter::traverse(bool reverse) {
   }
 
   try {
-    auto order = focus_order();
+    auto order = focusOrder();
 
     if (!order) {
       return std::unexpected(order.error());
@@ -294,7 +294,7 @@ std::expected<Node<Widget>, TreeError> EventRouter::traverse(bool reverse) {
       }
     }
 
-    auto changed = change_focus(next);
+    auto changed = changeFocus(next);
 
     if (!changed) {
       return std::unexpected(changed.error());
@@ -302,11 +302,11 @@ std::expected<Node<Widget>, TreeError> EventRouter::traverse(bool reverse) {
 
     return next;
   } catch (const std::bad_alloc &) {
-    return std::unexpected(TreeError::no_memory);
+    return std::unexpected(TreeError::NO_MEMORY);
   }
 }
 
-std::expected<Node<Widget>, TreeError> EventRouter::hit_test(CellPoint point) {
+std::expected<Node<Widget>, TreeError> EventRouter::hitTest(CellPoint point) {
   auto allowed = check();
 
   if (!allowed) {
@@ -343,7 +343,7 @@ std::expected<Node<Widget>, TreeError> EventRouter::hit_test(CellPoint point) {
 
     return hit;
   } catch (const std::bad_alloc &) {
-    return std::unexpected(TreeError::no_memory);
+    return std::unexpected(TreeError::NO_MEMORY);
   }
 }
 } // namespace portals

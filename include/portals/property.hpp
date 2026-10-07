@@ -18,10 +18,12 @@ template <class T> struct PropertyChange {
   T value;                  ///< Value captured at this revision, independent of the source lifetime.
   std::uint64_t revision{}; ///< Monotonic revision within this property, never wrapped.
 };
+
 /** @brief Finite observer endpoint storage, independent of Scheduler queue capacity. */
 struct PropertyOptions {
   std::size_t max_observers{64}; ///< Maximum live or executing observers; must be positive.
 };
+
 /** @brief A successful set result; notification rejection does not undo the committed value.
  * Counts describe publication attempts, not callback execution. Accepted events can still
  * be cancelled by source destruction, Subscription disconnect, node removal or scheduler stop.
@@ -36,6 +38,7 @@ template <class T> struct PropertyUpdate {
   std::size_t cancelled{};                            ///< Endpoints found closed during publication.
   std::optional<SchedulerError> notification_error{}; ///< First publication failure, including closed.
 };
+
 /** @brief UI-owned typed value with node-scoped observers and explicit partial delivery.
  * WidgetTree and its Scheduler are borrowed and must outlive this object. All operations
  * and destruction use the UI thread. Retained snapshots may outlive every UI owner.
@@ -53,18 +56,18 @@ template <std::equality_comparable T> class Property {
 public:
   /** @brief Create a source bound to one checked invalidation target; no initial notification.
    * The target must belong to tree and be live outside a frame. Invalid kind/zero capacity
-   * is invalid_argument; allocation failure is no_memory. T exceptions are callback_failed.
+   * is INVALID_ARGUMENT; allocation failure is NO_MEMORY. T exceptions are CALLBACK_FAILED.
    * Argument construction before this call lies outside this error boundary.
    * @param tree Borrowed UI-owned tree and scheduler, both required to outlive the property.
    * @param target Live node in tree invalidated by each changed set.
    * @param initial Value moved into immutable revision zero.
    * @param kind Invalidation to request on change; none explicitly requests no work.
    * @param options Positive observer endpoint limit.
-   * @return New property, tree validation/frame errors, invalid_argument, no_memory, or callback_failed.
+   * @return New property, tree validation/frame errors, INVALID_ARGUMENT, NO_MEMORY, or CALLBACK_FAILED.
    */
   static std::expected<std::unique_ptr<Property>, TreeError> create(WidgetTree &tree, Node<Widget> target, T initial,
                                                                     Invalidation kind, PropertyOptions options = {}) {
-    auto allowed = tree.with_scope(target, [](const UiScope &) {
+    auto allowed = tree.withScope(target, [](const UiScope &) {
     });
 
     if (!allowed) {
@@ -72,15 +75,15 @@ public:
     }
 
     if (!options.max_observers ||
-        (kind != Invalidation::none && kind != Invalidation::paint && kind != Invalidation::layout)) {
-      return std::unexpected(TreeError::invalid_argument);
+        (kind != Invalidation::NONE && kind != Invalidation::PAINT && kind != Invalidation::LAYOUT)) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
     }
 
     try {
       auto state = std::make_shared<State>(tree, target, kind);
 
       if (options.max_observers > state->observers.max_size()) {
-        return std::unexpected(TreeError::invalid_argument);
+        return std::unexpected(TreeError::INVALID_ARGUMENT);
       }
 
       state->observers.reserve(options.max_observers);
@@ -89,9 +92,9 @@ public:
 
       return std::unique_ptr<Property>(new Property(std::move(state)));
     } catch (const std::bad_alloc &) {
-      return std::unexpected(TreeError::no_memory);
+      return std::unexpected(TreeError::NO_MEMORY);
     } catch (...) {
-      return std::unexpected(TreeError::callback_failed);
+      return std::unexpected(TreeError::CALLBACK_FAILED);
     }
   }
 
@@ -107,17 +110,18 @@ public:
 
     state_->alive = false;
   }
+
   Property(const Property &) = delete;
   Property &operator=(const Property &) = delete;
 
   /** @brief Obtain an independent immutable owner, even after the target node was removed.
-   * Access on another thread returns wrong_thread. Transfer requires T to support destruction
+   * Access on another thread returns WRONG_THREAD. Transfer requires T to support destruction
    * on the thread releasing the last owner; UI reentry from T destruction requires a live UI context.
-   * @return Owning immutable value/revision pair, or wrong_thread without accessing the value.
+   * @return Owning immutable value/revision pair, or WRONG_THREAD without accessing the value.
    */
   std::expected<std::shared_ptr<const PropertyChange<T>>, TreeError> snapshot() const {
     if (state_->owner != std::this_thread::get_id()) {
-      return std::unexpected(TreeError::wrong_thread);
+      return std::unexpected(TreeError::WRONG_THREAD);
     }
 
     return state_->current;
@@ -128,7 +132,7 @@ public:
    * changed receipt may contain rejected/cancelled notifications. Never retry set as a way
    * to deliver the missing events: equal set is a no-op. Consumers can read snapshot to resync.
    * Tree affinity/session/lifetime/frame failures propagate; revision overflow is
-   * identity_exhausted. Allocation or T comparison/move failures occur before commit.
+   * IDENTITY_EXHAUSTED. Allocation or T comparison/move failures occur before commit.
    * @param value Candidate value compared to the current snapshot and moved into storage only if changed.
    * @return Receipt for this operation's immutable revision and per-observer queue acceptance, including
    * partial failure; an unexpected TreeError means no library-controlled commit occurred.
@@ -137,10 +141,10 @@ public:
     auto state = state_;
 
     if (state->owner != std::this_thread::get_id()) {
-      return std::unexpected(TreeError::wrong_thread);
+      return std::unexpected(TreeError::WRONG_THREAD);
     }
 
-    auto allowed = state->tree.with_scope(state->target, [](const UiScope &) {
+    auto allowed = state->tree.withScope(state->target, [](const UiScope &) {
     });
 
     if (!allowed) {
@@ -158,14 +162,14 @@ public:
       }
 
       if (previous->revision == std::numeric_limits<std::uint64_t>::max()) {
-        return std::unexpected(TreeError::identity_exhausted);
+        return std::unexpected(TreeError::IDENTITY_EXHAUSTED);
       }
 
       next = std::make_shared<const PropertyChange<T>>(std::move(value), previous->revision + 1);
     } catch (const std::bad_alloc &) {
-      return std::unexpected(TreeError::no_memory);
+      return std::unexpected(TreeError::NO_MEMORY);
     } catch (...) {
-      return std::unexpected(TreeError::callback_failed);
+      return std::unexpected(TreeError::CALLBACK_FAILED);
     }
 
     auto invalidated = state->tree.invalidate(state->target, state->kind);
@@ -191,7 +195,7 @@ public:
           result.notification_error = published.error();
         }
 
-        if (published.error() == SchedulerError::closed) {
+        if (published.error() == SchedulerError::CLOSED) {
           ++result.cancelled;
         } else {
           ++result.rejected;
@@ -210,26 +214,26 @@ public:
    * defers widget destruction. Source destruction suppresses later callbacks independently.
    * Registration does not send the initial value or invalidate the receiving node; the source
    * target is invalidated by set. Additional receiver changes request their own invalidation.
-   * Expired endpoint records are reclaimed before the finite limit is checked (node_limit).
+   * Expired endpoint records are reclaimed before the finite limit is checked (NODE_LIMIT).
    * Reentrant destruction during registration rechecks capacity and source lifetime (closed).
-   * Tree/Scheduler errors propagate; callback construction exceptions become callback_failed.
+   * Tree/Scheduler errors propagate; callback construction exceptions become CALLBACK_FAILED.
    * @tparam W Widget or a publicly derived extension type represented by receiver.
    * @tparam Callback Copy-constructible callable accepting W& and std::shared_ptr<const PropertyChange<T>>
    * as an lvalue; its return value is ignored.
    * @param receiver Live receiving node in the property's tree; removal cancels its scoped callback.
    * @param callback Owned callable; widget references must not escape, but the snapshot owner may be retained.
-   * @return Subscription token with no initial delivery; tree/scheduler errors, node_limit, closed,
-   * no_memory, or callback_failed on registration failure.
+   * @return Subscription token with no initial delivery; tree/scheduler errors, NODE_LIMIT, closed,
+   * NO_MEMORY, or CALLBACK_FAILED on registration failure.
    */
   template <class W, class Callback>
   std::expected<Subscription, TreeError> observe(Node<W> receiver, Callback &&callback) {
     auto state = state_;
 
     if (state->owner != std::this_thread::get_id()) {
-      return std::unexpected(TreeError::wrong_thread);
+      return std::unexpected(TreeError::WRONG_THREAD);
     }
 
-    auto allowed = state->tree.with_scope(receiver, [](const UiScope &) {
+    auto allowed = state->tree.withScope(receiver, [](const UiScope &) {
     });
 
     if (!allowed) {
@@ -239,7 +243,7 @@ public:
     state->prune();
 
     if (state->observers.size() >= state->limit) {
-      return std::unexpected(TreeError::node_limit);
+      return std::unexpected(TreeError::NODE_LIMIT);
     }
 
     try {
@@ -260,31 +264,33 @@ public:
 
       // Moved-from callback destructors can reenter while connect materializes its captures.
       if (!state->alive) {
-        return std::unexpected(TreeError::closed);
+        return std::unexpected(TreeError::CLOSED);
       }
 
       state->prune();
 
       if (state->observers.size() >= state->limit) {
-        return std::unexpected(TreeError::node_limit);
+        return std::unexpected(TreeError::NODE_LIMIT);
       }
 
       state->observers.push_back(Observer{std::move(connection->publisher), lifetime});
 
       return std::move(connection->subscription);
     } catch (const std::bad_alloc &) {
-      return std::unexpected(TreeError::no_memory);
+      return std::unexpected(TreeError::NO_MEMORY);
     } catch (...) {
-      return std::unexpected(TreeError::callback_failed);
+      return std::unexpected(TreeError::CALLBACK_FAILED);
     }
   }
 
 private:
   struct Lifetime {};
+
   struct Observer {
     Publisher<PropertyChange<T>> publisher;
     std::weak_ptr<Lifetime> lifetime;
   };
+
   struct State {
     State(WidgetTree &value, Node<Widget> node, Invalidation invalidation)
         : tree(value), target(node), kind(invalidation) {
@@ -305,6 +311,7 @@ private:
     std::shared_ptr<const PropertyChange<T>> current;
     std::vector<Observer> observers = std::vector<Observer>(0);
   };
+
   explicit Property(std::shared_ptr<State> state) : state_(std::move(state)) {
   }
 

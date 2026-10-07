@@ -16,7 +16,7 @@ namespace portals {
 /**
  * @brief One horizontal text run; controls display placeholders, never line breaks.
  *
- * text is borrowed until render_full_frame returns. Other fields own their values.
+ * text is borrowed until renderFullFrame returns. Other fields own their values.
  * Keep the referenced text alive and unchanged while rendering. Commands have no
  * thread affinity; sharing them requires synchronization with text mutation.
  */
@@ -63,17 +63,17 @@ struct RenderLimits {
 /** @brief Observable full-frame failure; no partial buffer is returned. */
 enum class RenderErrorKind {
   /** @brief The command count exceeds its cap. */
-  command_limit,
+  COMMAND_LIMIT,
   /** @brief Summed original text bytes exceed their cap. */
-  text_byte_limit,
+  TEXT_BYTE_LIMIT,
   /** @brief Visited graphemes plus clipped fill cells exceed their cap. */
-  work_limit,
+  WORK_LIMIT,
   /** @brief A text run's complete captured width policy differs from the frame policy. */
-  policy_mismatch,
+  POLICY_MISMATCH,
   /** @brief Buffer creation or placement failed; RenderError::buffer_error describes it. */
-  buffer_error,
+  BUFFER_ERROR,
   /** @brief Temporary renderer storage could not be allocated or represented. */
-  allocation_failure
+  ALLOCATION_FAILURE
 };
 
 /** @brief Owning renderer error, independent of the scene lifetime. */
@@ -108,9 +108,8 @@ struct RenderError {
  * wide continuation clears its lead as well, possibly outside the new clip, to
  * preserve complete clusters. Fill has the same atomic old-cluster cleanup rule.
  */
-[[nodiscard]] std::expected<CellBuffer, RenderError> render_full_frame(CellSize size,
-                                                                       std::span<const RenderCommand> commands,
-                                                                       WidthPolicy policy = {},
-                                                                       RenderLimits limits = {});
+[[nodiscard]] std::expected<CellBuffer, RenderError> renderFullFrame(CellSize size,
+                                                                     std::span<const RenderCommand> commands,
+                                                                     WidthPolicy policy = {}, RenderLimits limits = {});
 
 } // namespace portals

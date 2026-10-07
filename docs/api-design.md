@@ -24,11 +24,11 @@ such as `clicked()`/`actions()` only form observing source descriptors;
 `emplace<T>(owned configuration)` returns `Result<Node<T>>`; copied/moved
 configuration is owned by the node. `Result<T>` denotes a proposed
 `std::expected<T, Error>` policy for fallible operations, with errors such as
-`wrong_thread`, `stale_node`, `invalid_argument`, `no_memory`, `would_block`,
-`closed`, `provider_failed` and `capability_unavailable`. Exact payloads remain
+`WRONG_THREAD`, `STALE_NODE`, `INVALID_ARGUMENT`, `NO_MEMORY`, `WOULD_BLOCK`,
+`CLOSED`, `provider_failed` and `capability_unavailable`. Exact payloads remain
 open. Successful mutation commits wholly; an error leaves state unchanged.
 Domain validation is a separate typed result, suitable for inline presentation.
-Allocating factories/mutations translate allocation failure into `no_memory`.
+Allocating factories/mutations translate allocation failure into `NO_MEMORY`.
 Unexpected exceptions escaping an application callback are caught at dispatch,
 reported through the application error sink, and stop that callback/subscription;
 the runtime does not promise rollback of arbitrary application side effects.
@@ -76,7 +76,7 @@ auto form = TRY(app.root().emplace<Column>(ColumnOptions{}));
 auto name = TRY(form.emplace<LineEdit>(LineEditOptions{.text = ""}));
 auto hint = TRY(form.emplace<Label>(LabelOptions{.text = "Enter your name"}));
 auto submit = TRY(form.emplace<Button>(ButtonOptions{.text = "Save"}));
-auto scope = TRY(app.ui().make_scope());
+auto scope = TRY(app.ui().makeScope());
 
 auto clicked = TRY(app.ui().connect(scope, submit.clicked(), [&, name, hint] {
   auto text = TRY(app.ui().read_text_copy(name));
@@ -125,7 +125,7 @@ frame. Removal/reordering affects positions, not surviving row identities;
 selection resolves missing IDs explicitly. Multiple models need an application
 transaction policy; there is no implicit global atomic snapshot.
 
-Snapshot state is `ready`, `pending` or `error`. Pending/error retains the last
+Snapshot state is `READY`, `PENDING` or `error`. Pending/error retains the last
 ready revision (if any) with a visible status; otherwise a placeholder appears.
 Error payloads are owned; painting status performs no fetch. Apply rejects a
 foreign model/session or obsolete revision without mutation. Model data changes
@@ -139,8 +139,8 @@ revision in both views, out-of-order publication, and independent view removal.
 ```cpp
 auto channel = TRY(SnapshotMailbox<QuoteSnapshot>::create(
   MailboxOptions{.capacity = config.snapshot_capacity,
-                 .overflow = Overflow::replace_latest}));
-auto scope = TRY(app.ui().make_scope());
+                 .overflow = Overflow::REPLACE_LATEST}));
+auto scope = TRY(app.ui().makeScope());
 auto applied = TRY(app.ui().connect(scope, channel.receiver(),
   [&, model](OwnedPublication<QuoteSnapshot> publication) {
     return app.ui().apply_if_current(model, publication);
@@ -156,9 +156,9 @@ UI thread. Sender/receiver are owning channel endpoints; publication transfers
 a strong snapshot owner, request generation and monotonic revision, with no
 borrowed worker memory. The mailbox has a configured finite capacity; replacing
 a queued display snapshot is allowed **after** lossless OHLC/volume aggregation.
-The feed's raw tick queue has a separate finite capacity and `would_block`
+The feed's raw tick queue has a separate finite capacity and `WOULD_BLOCK`
 policy: pause input if supported, otherwise stop with a visible gap/provider
-error. It must not silently discard raw ticks. `closed`/feed failure are explicit
+error. It must not silently discard raw ticks. `CLOSED`/feed failure are explicit
 owned status publications; status is part of the latest snapshot envelope, so a
 later display replacement cannot erase an unresolved feed failure.
 
@@ -219,11 +219,11 @@ auto scope = TRY(app.ui().make_node_scope(canvas));
 auto input = TRY(app.ui().connect(scope, canvas.actions(),
   [&, game, canvas](const Action& action) {
     TRY(game->apply(action));
-    return app.ui().invalidate(canvas, Invalidation::paint);
+    return app.ui().invalidate(canvas, Invalidation::PAINT);
   }));
 auto timer = TRY(app.clock().every(scope, config.step_period, [&, game, canvas] {
   TRY(game->advance_fixed_step());
-  return app.ui().invalidate(canvas, Invalidation::paint);
+  return app.ui().invalidate(canvas, Invalidation::PAINT);
 }));
 ```
 
@@ -240,7 +240,7 @@ accepted state updates. The scheduler bounds catch-up by
 the simulation and reports an observable overload result rather than silently
 dropping updates. Input requires negotiated capability: use semantic discrete
 actions by default; held-key/release behavior is enabled only if available.
-Timer registration can fail (`invalid_argument`, `no_memory`, unavailable clock);
+Timer registration can fail (`INVALID_ARGUMENT`, `NO_MEMORY`, unavailable clock);
 draw/transform/capability failure uses the same clipped error path as widgets.
 
 Canvas borrows its draw context only during paint, uses logical game coordinates

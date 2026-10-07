@@ -8,11 +8,11 @@
 
 namespace portals {
 namespace {
-bool fits_coordinate(std::int64_t value) noexcept {
+bool fitsCoordinate(std::int64_t value) noexcept {
   return value >= std::numeric_limits<std::int32_t>::min() && value <= std::numeric_limits<std::int32_t>::max();
 }
 
-std::int32_t overlap_extent(std::int32_t begin, std::int32_t end) noexcept {
+std::int32_t overlapExtent(std::int32_t begin, std::int32_t end) noexcept {
   if (end <= begin) {
     return 0;
   }
@@ -30,8 +30,8 @@ std::expected<CellPoint, GeometryError> translated(CellPoint point, CellPoint of
   const auto x = std::int64_t{point.x} + offset.x;
   const auto y = std::int64_t{point.y} + offset.y;
 
-  if (!fits_coordinate(x) || !fits_coordinate(y)) {
-    return std::unexpected{GeometryError::coordinate_overflow};
+  if (!fitsCoordinate(x) || !fitsCoordinate(y)) {
+    return std::unexpected{GeometryError::COORDINATE_OVERFLOW};
   }
 
   return CellPoint{static_cast<std::int32_t>(x), static_cast<std::int32_t>(y)};
@@ -45,8 +45,8 @@ std::expected<CellRect, GeometryError> CellRect::from(CellPoint origin, CellSize
   const auto right = std::int64_t{origin.x} + size.width;
   const auto bottom = std::int64_t{origin.y} + size.height;
 
-  if (!fits_coordinate(right) || !fits_coordinate(bottom)) {
-    return std::unexpected{GeometryError::coordinate_overflow};
+  if (!fitsCoordinate(right) || !fitsCoordinate(bottom)) {
+    return std::unexpected{GeometryError::COORDINATE_OVERFLOW};
   }
 
   return CellRect{origin, size};
@@ -87,8 +87,8 @@ bool CellRect::contains(CellRect rect) const noexcept {
 
 CellRect CellRect::intersection(CellRect clip) const noexcept {
   const CellPoint origin{std::max(origin_.x, clip.origin_.x), std::max(origin_.y, clip.origin_.y)};
-  const CellSize size{overlap_extent(origin.x, std::min(right(), clip.right())),
-                      overlap_extent(origin.y, std::min(bottom(), clip.bottom()))};
+  const CellSize size{overlapExtent(origin.x, std::min(right(), clip.right())),
+                      overlapExtent(origin.y, std::min(bottom(), clip.bottom()))};
 
   return CellRect{origin, size};
 }

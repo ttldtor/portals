@@ -12,8 +12,8 @@
 namespace portals {
 /** @brief Bounded encoding failure; input buffers are unchanged. */
 enum class DiffError {
-  output_limit,      ///< The complete transaction cannot fit the configured byte cap.
-  allocation_failure ///< Output allocation failed.
+  OUTPUT_LIMIT,      ///< The complete transaction cannot fit the configured byte cap.
+  ALLOCATION_FAILURE ///< Output allocation failed.
 };
 /** @brief Encode changed complete rows into one owning VT transaction.
  * @param previous Borrowed last completed frame, or null for a complete repaint.
@@ -31,8 +31,8 @@ enum class DiffError {
  * incomplete CSI/UTF-8 on supported terminals after the old transport is quiescent.
  * Recovery covers only prefixes emitted by this encoder, never arbitrary OSC/DCS.
  */
-[[nodiscard]] std::expected<std::string, DiffError> encode_diff(const CellBuffer *previous, const CellBuffer &next,
-                                                                std::size_t max_bytes = 1024 * 1024);
+[[nodiscard]] std::expected<std::string, DiffError> encodeDiff(const CellBuffer *previous, const CellBuffer &next,
+                                                               std::size_t max_bytes = 1024 * 1024);
 
 /** @brief Exclusive transport boundary, borrowed by FrameWriter for its lifetime.
  * Implementations own submitted bytes, perform no I/O in submit, and preserve the
@@ -56,6 +56,7 @@ public:
    */
   [[nodiscard]] virtual TerminalWrite flush(TerminalDeadline deadline, std::stop_token stop) = 0;
 };
+
 /** @brief Non-owning adapter; session must outlive adapter and writer.
  * The writer exclusively controls session output until it is destroyed. Session
  * read/size remain available to the same executor. Close is always owner-managed.
@@ -81,6 +82,7 @@ public:
 private:
   TerminalSession &session_;
 };
+
 /** @brief Owning writer resource caps. At most two capped frames coexist. */
 struct FrameWriterLimits {
   std::size_t max_output_bytes{1024 * 1024};             ///< Complete VT transaction cap.
@@ -88,12 +90,13 @@ struct FrameWriterLimits {
 };
 /** @brief Submission failure; the supplied frame remains owned by the caller. */
 enum class FrameError {
-  pending,           ///< Complete or abandon the owning session before submitting another frame.
-  poisoned,          ///< Unknown output state; close/reestablish terminal before creating a new writer.
-  frame_limit,       ///< Frame allocation accounting exceeds the configured cap.
-  output_limit,      ///< Encoded transaction exceeds the configured cap.
-  allocation_failure ///< Encoding allocation failed.
+  PENDING,           ///< Complete or abandon the owning session before submitting another frame.
+  POISONED,          ///< Unknown output state; close/reestablish terminal before creating a new writer.
+  FRAME_LIMIT,       ///< Frame allocation accounting exceeds the configured cap.
+  OUTPUT_LIMIT,      ///< Encoded transaction exceeds the configured cap.
+  ALLOCATION_FAILURE ///< Encoding allocation failed.
 };
+
 /** @brief Bounded owner of last committed and pending frames; never performs I/O in submit.
  * One executor owns every call and destruction; external synchronization is needed
  * for transfer. The output reference must outlive this non-movable writer. No
@@ -121,7 +124,7 @@ public:
    * invalidate caller views through move; rejection retains them. Allocation errors
    * are returned. Submission invalidates any previously borrowed committed-frame view.
    * @param frame Desired owning frame, consumed only after successful validation and encoding.
-   * @return Success when accepted, or pending, poisoned, frame_limit, output_limit or allocation_failure.
+   * @return Success when accepted, or pending, poisoned, FRAME_LIMIT, OUTPUT_LIMIT or ALLOCATION_FAILURE.
    */
   [[nodiscard]] std::expected<void, FrameError> submit(CellBuffer &&frame);
   /** @brief Perform transport I/O; commit only after complete, consistent progress.
@@ -139,7 +142,7 @@ public:
    * Expires on successful submit, completing/error flush, or writer destruction.
    * @return Borrowed last completed frame, or null when no valid committed belief exists.
    */
-  [[nodiscard]] const CellBuffer *committed_frame() const noexcept;
+  [[nodiscard]] const CellBuffer *committedFrame() const noexcept;
   /** @brief Whether a transaction still requires completion; no allocation/errors.
    * @return True while a desired frame still has an incomplete transaction.
    */

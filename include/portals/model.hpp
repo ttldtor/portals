@@ -23,6 +23,7 @@ struct RowId {
    */
   bool operator==(const RowId &other) const noexcept = default;
 };
+
 /** @brief Provider-assigned column identity; typed row accessors define column values. */
 struct ColumnId {
   std::uint64_t value{};      ///< Nonzero identity within one model.
@@ -33,6 +34,7 @@ struct ColumnId {
    */
   bool operator==(const ColumnId &other) const noexcept = default;
 };
+
 /** @brief Half-open logical row interval; arithmetic is checked before provider access. */
 struct RowRange {
   std::uint64_t first{}; ///< First logical row.
@@ -45,10 +47,11 @@ struct RowRange {
 };
 /** @brief Observable asynchronous range readiness. */
 enum class RangeState {
-  pending, ///< Data is not ready; reading must not block or start work.
-  ready,   ///< Exactly the requested immutable rows are available.
-  error    ///< Provider failure is represented by snapshot-owned text and no rows.
+  PENDING, ///< Data is not ready; reading must not block or start work.
+  READY,   ///< Exactly the requested immutable rows are available.
+  FAILED   ///< Provider failure is represented by snapshot-owned text and no rows.
 };
+
 /** @brief A typed domain row and its stable identity; a table uses a typed record as T.
  * @tparam T Domain row value type; snapshot-owned reachable data must remain immutable and support destruction
  * on the final owner's thread. Library range/frame/request operations do not copy T values.
@@ -57,15 +60,17 @@ template <class T> struct ModelRow {
   RowId id; ///< Stable provider identity, never the row index.
   T value;  ///< Typed value; all reachable data must be immutable while published.
 };
+
 /** @brief Provider result borrowing from its immutable snapshot.
  * @tparam T Domain row value type; snapshot-owned reachable data must remain immutable and support destruction
  * on the final owner's thread. Library range/frame/request operations do not copy T values.
  */
 template <class T> struct ModelRows {
-  RangeState state{RangeState::pending}; ///< Pending never blocks or initiates I/O.
+  RangeState state{RangeState::PENDING}; ///< Pending never blocks or initiates I/O.
   std::span<const ModelRow<T>> rows;     ///< Exactly the requested count when ready; otherwise empty.
   std::string_view error;                ///< Snapshot-owned description when error; otherwise empty.
 };
+
 /** @brief Immutable list/table provider storage, independent of view/source lifetime.
  * Implement read as bounded in-memory access, without I/O, waiting or domain mutation.
  * Every ready range of one data revision must agree, including overlapping ranges from
@@ -83,20 +88,24 @@ public:
    */
   ModelSnapshot(std::uint64_t revision, std::uint64_t rows) : revision_(revision), rows_(rows) {
   }
+
   /** @brief Reclaim storage after all ranges, frames and workers release it. */
   virtual ~ModelSnapshot() = default;
+
   /** @brief Provider data revision; strictly increasing on replacement.
    * @return Immutable provider data revision supplied at construction.
    */
   std::uint64_t revision() const noexcept {
     return revision_;
   }
+
   /** @brief Logical count, without materializing rows.
    * @return Logical number of rows supplied at construction; no rows are loaded.
    */
-  std::uint64_t row_count() const noexcept {
+  std::uint64_t rowCount() const noexcept {
     return rows_;
   }
+
   /** @brief Borrow a checked interval; may return pending/error.
    * @param range Interval already validated by ModelRange::read; direct callers must validate bounds.
    * @return Borrowed rows/error text owned by this snapshot: ready has exactly range.count rows and no error;
@@ -108,6 +117,7 @@ private:
   const std::uint64_t revision_;
   const std::uint64_t rows_;
 };
+
 /** @brief Stable identity of a scoped range consumer, distinct even for equal row intervals. */
 struct ModelRangeId {
   std::uint64_t session{}; ///< Process-unique model session.
@@ -118,12 +128,14 @@ struct ModelRangeId {
    */
   bool operator==(const ModelRangeId &other) const noexcept = default;
 };
+
 /** @brief Finite per-model storage and work budgets; all fields must be positive. */
 struct ModelOptions {
   std::size_t max_range_rows{4096}; ///< Largest single read/request.
   std::size_t max_consumers{32};    ///< Live scoped range slots, regardless of readiness.
   std::size_t max_in_flight{64};    ///< Request owners, including cancelled and queued work not yet released.
 };
+
 /** @brief Independent owner for borrowed rows and provider error text.
  * @tparam T Domain row value type; snapshot-owned reachable data must remain immutable and support destruction
  * on the final owner's thread. Library range/frame/request operations do not copy T values.
@@ -141,6 +153,7 @@ public:
    * @param other Owner whose storage is transferred; do not read moved-from borrowed data.
    */
   ModelRange(ModelRange &&other) noexcept = default;
+
   /** @brief Replace all fields before releasing old storage, whose destructor may reenter.
    * @param other Replacement owner passed by value; old storage is released after all fields are replaced.
    * @return This owner; do not use the reference if reentrant destruction of old storage destroyed this object.
@@ -159,66 +172,72 @@ public:
   RangeState state() const noexcept {
     return data_.state;
   }
+
   /** @brief Borrow until this owner is released.
    * @return Borrowed ready row span, empty for pending/error; retain this range or its snapshot owner.
    */
   std::span<const ModelRow<T>> rows() const noexcept {
     return data_.rows;
   }
+
   /** @brief Borrow error text for this owner's lifetime.
    * @return Borrowed provider error text, empty outside error state; retain the owning snapshot.
    */
   std::string_view error() const noexcept {
     return data_.error;
   }
+
   /** @brief Logical interval of this result.
    * @return Logical interval whose provider result is retained by this owner.
    */
   RowRange range() const noexcept {
     return range_;
   }
+
   /** @brief Provider revision.
    * @return Provider revision, or zero for an empty range owner.
    */
-  std::uint64_t data_revision() const noexcept {
+  std::uint64_t dataRevision() const noexcept {
     return owner_ ? owner_->revision() : 0;
   }
+
   /** @brief Read only memory and retain its snapshot. Bounds/provider contract failures are explicit.
-   * Allocation exceptions become no_memory, other provider exceptions callback_failed.
+   * Allocation exceptions become NO_MEMORY, other provider exceptions CALLBACK_FAILED.
    * @param owner Non-null immutable provider snapshot retained by the returned range.
    * @param range Half-open interval to validate and read synchronously.
    * @param max_rows Maximum accepted count; zero allows only empty ranges.
-   * @return Independent range owner; invalid_argument for bounds or malformed result shape,
-   * no_memory for allocation exceptions, or callback_failed for other provider exceptions.
+   * @return Independent range owner; INVALID_ARGUMENT for bounds or malformed result shape,
+   * NO_MEMORY for allocation exceptions, or CALLBACK_FAILED for other provider exceptions.
    */
   static std::expected<ModelRange, TreeError> read(std::shared_ptr<const ModelSnapshot<T>> owner, RowRange range,
                                                    std::size_t max_rows) {
-    if (!owner || range.count > max_rows || range.first > owner->row_count() ||
-        range.count > owner->row_count() - range.first) {
-      return std::unexpected(TreeError::invalid_argument);
+    if (!owner || range.count > max_rows || range.first > owner->rowCount() ||
+        range.count > owner->rowCount() - range.first) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
     }
 
     try {
       auto rows = owner->read(range);
 
-      if ((rows.state == RangeState::ready && (rows.rows.size() != range.count || !rows.error.empty())) ||
-          (rows.state != RangeState::ready && !rows.rows.empty()) ||
-          (rows.state == RangeState::pending && !rows.error.empty()) ||
-          (rows.state != RangeState::ready && rows.state != RangeState::pending && rows.state != RangeState::error)) {
-        return std::unexpected(TreeError::invalid_argument);
+      if ((rows.state == RangeState::READY && (rows.rows.size() != range.count || !rows.error.empty())) ||
+          (rows.state != RangeState::READY && !rows.rows.empty()) ||
+          (rows.state == RangeState::PENDING && !rows.error.empty()) ||
+          (rows.state != RangeState::READY && rows.state != RangeState::PENDING && rows.state != RangeState::FAILED)) {
+        return std::unexpected(TreeError::INVALID_ARGUMENT);
       }
 
       return ModelRange(std::move(owner), range, rows);
     } catch (const std::bad_alloc &) {
-      return std::unexpected(TreeError::no_memory);
+      return std::unexpected(TreeError::NO_MEMORY);
     } catch (...) {
-      return std::unexpected(TreeError::callback_failed);
+      return std::unexpected(TreeError::CALLBACK_FAILED);
     }
   }
 
 private:
   template <class> friend class ModelConsumer;
   template <class> friend class Model;
+
   ModelRange(std::shared_ptr<const ModelSnapshot<T>> owner, RowRange range, ModelRows<T> data)
       : owner_(std::move(owner)), range_(range), data_(data) {
   }
@@ -227,13 +246,16 @@ private:
   RowRange range_;
   ModelRows<T> data_;
 };
+
 /// @cond INTERNAL
 namespace detail {
-std::expected<std::uint64_t, TreeError> model_session();
+std::expected<std::uint64_t, TreeError> modelSession();
+
 struct ModelLifetime {
   std::atomic<bool> alive{true};
   std::atomic<std::size_t> outstanding{};
 };
+
 struct ModelLease {
   ModelLease(std::shared_ptr<ModelLifetime> life, std::shared_ptr<const void> storage)
       : lifetime(std::move(life)), storage(std::move(storage)) {
@@ -251,12 +273,14 @@ struct ModelLease {
   std::atomic<bool> cancelled{};
   std::atomic<bool> submitted{};
 };
+
 template <class T> struct ModelEntry {
   ModelRangeId id;
   std::uint64_t generation{};
   ModelRange<T> result;
   std::weak_ptr<ModelLease> work;
 };
+
 template <class T> struct ModelFrameData {
   explicit ModelFrameData(std::shared_ptr<const ModelSnapshot<T>> initial) : snapshot(std::move(initial)) {
   }
@@ -265,32 +289,34 @@ template <class T> struct ModelFrameData {
   std::vector<ModelEntry<T>> entries = std::vector<ModelEntry<T>>(0);
   std::uint64_t revision{};
 };
+
 template <class T> struct ModelCompletion {
   ModelRangeId id;
   std::uint64_t generation{};
   std::shared_ptr<ModelLease> lease;
   ModelRange<T> result;
 };
+
 template <class T> struct ModelState {
   ModelState(WidgetTree &value, Node<Widget> node) : tree(value), target(node) {
   }
 
   std::expected<void, TreeError> allowed() const {
     if (owner != std::this_thread::get_id()) {
-      return std::unexpected(TreeError::wrong_thread);
+      return std::unexpected(TreeError::WRONG_THREAD);
     }
 
     if (!lifetime->alive.load()) {
-      return std::unexpected(TreeError::closed);
+      return std::unexpected(TreeError::CLOSED);
     }
 
-    return tree.with_scope(target, [](const UiScope &) {
+    return tree.withScope(target, [](const UiScope &) {
     });
   }
 
   std::expected<std::shared_ptr<ModelFrameData<T>>, TreeError> next() const {
     if (current->revision == std::numeric_limits<std::uint64_t>::max()) {
-      return std::unexpected(TreeError::identity_exhausted);
+      return std::unexpected(TreeError::IDENTITY_EXHAUSTED);
     }
 
     try {
@@ -300,12 +326,12 @@ template <class T> struct ModelState {
 
       return result;
     } catch (const std::bad_alloc &) {
-      return std::unexpected(TreeError::no_memory);
+      return std::unexpected(TreeError::NO_MEMORY);
     }
   }
 
   std::expected<void, TreeError> commit(std::shared_ptr<ModelFrameData<T>> next) {
-    auto invalidated = tree.invalidate(target, Invalidation::layout);
+    auto invalidated = tree.invalidate(target, Invalidation::LAYOUT);
 
     if (!invalidated) {
       return std::unexpected(invalidated.error());
@@ -330,6 +356,7 @@ template <class T> struct ModelState {
   std::optional<TreeError> application_error;
 };
 } // namespace detail
+
 /// @endcond
 /** @brief One immutable model revision retained by the frame owner for all its views.
  * Obtain once before WidgetTree::frame, pass the same value to every view, and retain it
@@ -347,6 +374,7 @@ public:
    * @param other Owner whose storage is transferred; do not read moved-from borrowed data.
    */
   ModelFrame(ModelFrame &&other) noexcept = default;
+
   /** @brief Replace all fields before releasing old storage, whose destructor may reenter.
    * @param other Replacement owner passed by value; old storage is released after all fields are replaced.
    * @return This owner; do not use the reference if reentrant destruction of old storage destroyed this object.
@@ -364,21 +392,24 @@ public:
   std::uint64_t revision() const noexcept {
     return data_->revision;
   }
+
   /** @brief Provider data revision.
    * @return Provider data revision retained by this frame.
    */
-  std::uint64_t data_revision() const noexcept {
+  std::uint64_t dataRevision() const noexcept {
     return data_->snapshot->revision();
   }
+
   /** @brief Logical rows.
    * @return Logical row count of the pinned base snapshot.
    */
-  std::uint64_t row_count() const noexcept {
-    return data_->snapshot->row_count();
+  std::uint64_t rowCount() const noexcept {
+    return data_->snapshot->rowCount();
   }
-  /** @brief Read a consumer's exact result; stale/foreign consumer returns stale_node. No spatial merge.
+
+  /** @brief Read a consumer's exact result; stale/foreign consumer returns STALE_NODE. No spatial merge.
    * @param id Consumer identity looked up in this immutable table; older pins can retain retired consumers.
-   * @return That consumer's independent result owner, or stale_node if absent from this table.
+   * @return That consumer's independent result owner, or STALE_NODE if absent from this table.
    */
   std::expected<ModelRange<T>, TreeError> range(ModelRangeId id) const {
     auto entry = std::find_if(data_->entries.begin(), data_->entries.end(), [id](const auto &value) {
@@ -386,7 +417,7 @@ public:
     });
 
     if (entry == data_->entries.end()) {
-      return std::unexpected(TreeError::stale_node);
+      return std::unexpected(TreeError::STALE_NODE);
     }
 
     return entry->result;
@@ -394,7 +425,7 @@ public:
 
   /** @brief Direct bounded read from the base snapshot, without asynchronous requests or overlays.
    * @param range Interval read from the pinned base snapshot under this model's row limit.
-   * @return Independent range owner, invalid_argument for bounds/result shape, no_memory, or callback_failed.
+   * @return Independent range owner, INVALID_ARGUMENT for bounds/result shape, NO_MEMORY, or CALLBACK_FAILED.
    */
   std::expected<ModelRange<T>, TreeError> read(RowRange range) const {
     return ModelRange<T>::read(data_->snapshot, range, max_rows_);
@@ -402,6 +433,7 @@ public:
 
 private:
   template <class> friend class Model;
+
   ModelFrame(std::shared_ptr<const detail::ModelFrameData<T>> data, std::size_t max_rows)
       : data_(std::move(data)), max_rows_(max_rows) {
   }
@@ -409,6 +441,7 @@ private:
   std::shared_ptr<const detail::ModelFrameData<T>> data_;
   std::size_t max_rows_;
 };
+
 /** @brief Copyable worker token; retains work storage and one reservation until its last owner dies.
  * Cancellation is a stop request, never a join. Worker code must finish/release its own
  * owners. Completion queues an owning result; no view callback runs on the worker.
@@ -428,6 +461,7 @@ public:
    * @param other Owner whose storage is transferred; do not read moved-from borrowed data.
    */
   ModelRequest(ModelRequest &&other) noexcept = default;
+
   /** @brief Replace all fields before releasing old storage, whose destructor may reenter.
    * @param other Replacement owner passed by value; old storage is released after all fields are replaced.
    * @return This owner; do not use the reference if reentrant destruction of old storage destroyed this object.
@@ -450,56 +484,60 @@ public:
   RowRange range() const noexcept {
     return range_;
   }
+
   /** @brief Required provider revision.
    * @return Required provider revision for completion; zero for a default token.
    */
-  std::uint64_t data_revision() const noexcept {
+  std::uint64_t dataRevision() const noexcept {
     return revision_;
   }
+
   /** @brief Worker-safe cooperative stop query.
    * @return True for an empty token, cancelled generation or destroyed source; context removal is
    * discovered by completion publication and need not make this query true.
    */
-  bool stop_requested() const noexcept {
+  bool stopRequested() const noexcept {
     return !lease_ || lease_->cancelled.load() || !lease_->lifetime->alive.load();
   }
+
   /** @brief Cancel only this generation; does not release its work budget. */
   void cancel() const noexcept {
     if (lease_) {
       lease_->cancelled.store(true);
     }
   }
+
   /** @brief Queue ready/error storage from the requested data revision; pending is invalid.
-   * Exactly one successful submission per generation. Full mailbox returns would_block
+   * Exactly one successful submission per generation. Full mailbox returns WOULD_BLOCK
    * and permits retry; closed means cancellation/source closure/already submitted.
    * Snapshot metadata must match the original revision and logical row count.
    * @param snapshot Non-null immutable ready/error provider result with the requested revision and row count.
    * @return Queue acceptance (not UI application); closed for cancellation/duplicate/unavailable endpoint,
-   * would_block for a full queue, invalid_argument for metadata/result shape, no_memory, or callback_failed.
+   * WOULD_BLOCK for a full queue, INVALID_ARGUMENT for metadata/result shape, NO_MEMORY, or CALLBACK_FAILED.
    */
   std::expected<PublishResult, SchedulerError> complete(std::shared_ptr<const ModelSnapshot<T>> snapshot) const {
     auto request = *this;
 
-    if (request.stop_requested()) {
-      return std::unexpected(SchedulerError::closed);
+    if (request.stopRequested()) {
+      return std::unexpected(SchedulerError::CLOSED);
     }
 
-    if (!snapshot || snapshot->revision() != request.revision_ || snapshot->row_count() != request.row_count_) {
-      return std::unexpected(SchedulerError::invalid_argument);
+    if (!snapshot || snapshot->revision() != request.revision_ || snapshot->rowCount() != request.row_count_) {
+      return std::unexpected(SchedulerError::INVALID_ARGUMENT);
     }
 
     auto result = ModelRange<T>::read(std::move(snapshot), request.range_, request.range_.count);
 
-    if (!result || result->state() == RangeState::pending) {
-      if (!result && result.error() == TreeError::no_memory) {
-        return std::unexpected(SchedulerError::no_memory);
+    if (!result || result->state() == RangeState::PENDING) {
+      if (!result && result.error() == TreeError::NO_MEMORY) {
+        return std::unexpected(SchedulerError::NO_MEMORY);
       }
 
-      if (!result && result.error() == TreeError::callback_failed) {
-        return std::unexpected(SchedulerError::callback_failed);
+      if (!result && result.error() == TreeError::CALLBACK_FAILED) {
+        return std::unexpected(SchedulerError::CALLBACK_FAILED);
       }
 
-      return std::unexpected(SchedulerError::invalid_argument);
+      return std::unexpected(SchedulerError::INVALID_ARGUMENT);
     }
 
     // Admission is shared by all token copies. A failed enqueue releases the claim so the same
@@ -507,7 +545,7 @@ public:
     bool expected = false;
 
     if (!request.lease_->submitted.compare_exchange_strong(expected, true)) {
-      return std::unexpected(SchedulerError::closed);
+      return std::unexpected(SchedulerError::CLOSED);
     }
 
     try {
@@ -523,7 +561,7 @@ public:
     } catch (const std::bad_alloc &) {
       request.lease_->submitted.store(false);
 
-      return std::unexpected(SchedulerError::no_memory);
+      return std::unexpected(SchedulerError::NO_MEMORY);
     }
   }
 
@@ -537,6 +575,7 @@ private:
   std::shared_ptr<detail::ModelLease> lease_;
   Publisher<detail::ModelCompletion<T>> publisher_;
 };
+
 /** @brief Move-only UI-owned range slot. Equal/overlapping consumers are independent.
  * Close/destruction retires only this consumer; outstanding worker reservations survive.
  * Model and tree may close first. Destruction/move assignment on another thread terminates.
@@ -547,10 +586,12 @@ template <class T> class ModelConsumer {
 public:
   /** @brief Empty consumer. */
   ModelConsumer() = default;
+
   /** @brief Logically retire without waiting for workers. */
   ~ModelConsumer() {
     retire();
   }
+
   /** @brief Transfer on UI.
    * @param other UI-owned consumer to empty and transfer; a live consumer requires its owner thread.
    */
@@ -559,6 +600,7 @@ public:
       std::terminate();
     }
   }
+
   /** @brief Transfer on UI; retire old ownership only after the full replacement is complete.
    * @param other Replacement consumer moved into this call; old ownership retires after all fields are replaced.
    * @return This consumer; do not use the reference if reentrant old-storage destruction destroyed this object.
@@ -573,27 +615,30 @@ public:
 
     return *this;
   }
+
   ModelConsumer(const ModelConsumer &) = delete;
+
   /** @brief Stable handle for ModelFrame::range.
    * @return Stable session/consumer identity, or zero identity for an empty/moved-from consumer.
    */
   ModelRangeId id() const noexcept {
     return id_;
   }
+
   /** @brief UI-only request or replace this slot's work; never starts a worker or reads provider data.
    * Caller schedules the returned owning token. A null work owner retains the base snapshot.
-   * Oversized/out-of-bounds ranges are invalid_argument; live work budget is would_block.
+   * Oversized/out-of-bounds ranges are INVALID_ARGUMENT; live work budget is WOULD_BLOCK.
    * All rejected requests leave this consumer unchanged. Mutations during frame are rejected.
    * @param range Bounded interval in the current base snapshot's logical row count.
    * @param work_owner Optional immutable provider work/storage owner; null retains the base snapshot.
    * @return Worker token after committing pending readiness and layout invalidation; closed, tree/frame errors,
-   * invalid_argument, would_block at the work limit, identity_exhausted, or no_memory without commit.
+   * INVALID_ARGUMENT, WOULD_BLOCK at the work limit, IDENTITY_EXHAUSTED, or NO_MEMORY without commit.
    */
   std::expected<ModelRequest<T>, TreeError> request(RowRange range, std::shared_ptr<const void> work_owner = {}) {
     auto state = state_;
 
     if (!state || id_.value == 0) {
-      return std::unexpected(TreeError::closed);
+      return std::unexpected(TreeError::CLOSED);
     }
 
     auto allowed = state->allowed();
@@ -606,20 +651,20 @@ public:
     auto entry = find(*current);
 
     if (entry == current->entries.end()) {
-      return std::unexpected(TreeError::closed);
+      return std::unexpected(TreeError::CLOSED);
     }
 
-    if (range.count > state->options.max_range_rows || range.first > current->snapshot->row_count() ||
-        range.count > current->snapshot->row_count() - range.first) {
-      return std::unexpected(TreeError::invalid_argument);
+    if (range.count > state->options.max_range_rows || range.first > current->snapshot->rowCount() ||
+        range.count > current->snapshot->rowCount() - range.first) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
     }
 
     if (state->lifetime->outstanding.load() >= state->options.max_in_flight) {
-      return std::unexpected(TreeError::would_block);
+      return std::unexpected(TreeError::WOULD_BLOCK);
     }
 
     if (entry->generation == std::numeric_limits<std::uint64_t>::max()) {
-      return std::unexpected(TreeError::identity_exhausted);
+      return std::unexpected(TreeError::IDENTITY_EXHAUSTED);
     }
 
     // Prepare a complete replacement table before changing this consumer or cancelling its old work.
@@ -645,7 +690,7 @@ public:
       result.id_ = id_;
       result.generation_ = updated.generation;
       result.revision_ = current->snapshot->revision();
-      result.row_count_ = current->snapshot->row_count();
+      result.row_count_ = current->snapshot->rowCount();
       result.range_ = range;
       result.lease_ = std::move(lease);
       result.publisher_ = state->publisher;
@@ -662,17 +707,17 @@ public:
 
       return result;
     } catch (const std::bad_alloc &) {
-      return std::unexpected(TreeError::no_memory);
+      return std::unexpected(TreeError::NO_MEMORY);
     }
   }
 
   /** @brief Retire this consumer on UI. Idempotent; no allocation, cancellation never joins.
    * Retained tables keep their old result; slot reuse removes the retired entry.
-   * @return Success after retirement, including repeated close; wrong_thread leaves ownership unchanged.
+   * @return Success after retirement, including repeated close; WRONG_THREAD leaves ownership unchanged.
    */
   std::expected<void, TreeError> close() {
     if (state_ && state_->owner != std::this_thread::get_id()) {
-      return std::unexpected(TreeError::wrong_thread);
+      return std::unexpected(TreeError::WRONG_THREAD);
     }
 
     retire();
@@ -682,6 +727,7 @@ public:
 
 private:
   template <class> friend class Model;
+
   ModelConsumer(std::shared_ptr<detail::ModelState<T>> state, ModelRangeId id) : state_(std::move(state)), id_(id) {
   }
 
@@ -720,6 +766,7 @@ private:
   std::shared_ptr<detail::ModelState<T>> state_;
   ModelRangeId id_;
 };
+
 /** @brief UI-owned source connecting immutable providers and scoped ranges to a real WidgetTree.
  * The tree must outlive the source; use a long-lived context when views are disposable.
  * Publisher and request tokens may outlive source/tree/scheduler. Read one pin per model
@@ -734,24 +781,24 @@ public:
    * @param context Live node whose scope owns the endpoints and whose layout is invalidated on publication.
    * @param initial Non-null immutable provider snapshot retained as the initial base revision.
    * @param options Positive independent row, consumer and in-flight-work limits.
-   * @return New source; invalid_argument for null/invalid limits, tree/scheduler errors, identity_exhausted,
-   * or no_memory on failure without a source.
+   * @return New source; INVALID_ARGUMENT for null/invalid limits, tree/scheduler errors, IDENTITY_EXHAUSTED,
+   * or NO_MEMORY on failure without a source.
    */
   static std::expected<std::unique_ptr<Model>, TreeError> create(WidgetTree &tree, Node<Widget> context,
                                                                  std::shared_ptr<const ModelSnapshot<T>> initial,
                                                                  ModelOptions options = {}) {
     if (!initial || options.max_range_rows == 0 || options.max_consumers == 0 || options.max_in_flight == 0) {
-      return std::unexpected(TreeError::invalid_argument);
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
     }
 
-    auto allowed = tree.with_scope(context, [](const UiScope &) {
+    auto allowed = tree.withScope(context, [](const UiScope &) {
     });
 
     if (!allowed) {
       return std::unexpected(allowed.error());
     }
 
-    auto session = detail::model_session();
+    auto session = detail::modelSession();
 
     if (!session) {
       return std::unexpected(session.error());
@@ -781,7 +828,7 @@ public:
           // Identity, generation and provider revision are independent stale-result barriers:
           // closing a consumer, replacing its request, or publishing new data invalidates different work.
           if (entry == previous->entries.end() || entry->generation != value->generation ||
-              value->result.data_revision() != previous->snapshot->revision() || retired(*state, value->id)) {
+              value->result.dataRevision() != previous->snapshot->revision() || retired(*state, value->id)) {
             return;
           }
 
@@ -855,9 +902,9 @@ public:
 
       return std::unique_ptr<Model>(new Model(std::move(state), std::move(*completed), std::move(*snapshots)));
     } catch (const std::length_error &) {
-      return std::unexpected(TreeError::invalid_argument);
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
     } catch (const std::bad_alloc &) {
-      return std::unexpected(TreeError::no_memory);
+      return std::unexpected(TreeError::NO_MEMORY);
     }
   }
 
@@ -869,29 +916,32 @@ public:
 
     state_->lifetime->alive.store(false);
   }
+
   Model(const Model &) = delete;
   Model &operator=(const Model &) = delete;
+
   /** @brief Copy worker-safe full snapshot endpoint on UI.
    * @return Copied endpoint for strictly newer immutable provider snapshots; acceptance does not imply application.
    */
   Publisher<ModelSnapshot<T>> publisher() const {
     return snapshots_.publisher;
   }
+
   /** @brief Capture one immutable frame owner on UI; never reads provider ranges or copies rows.
-   * @return Immutable base snapshot/consumer table owner, or wrong_thread. Existing pins survive later publications.
+   * @return Immutable base snapshot/consumer table owner, or WRONG_THREAD. Existing pins survive later publications.
    */
   std::expected<ModelFrame<T>, TreeError> pin() const {
     if (state_->owner != std::this_thread::get_id()) {
-      return std::unexpected(TreeError::wrong_thread);
+      return std::unexpected(TreeError::WRONG_THREAD);
     }
 
     return ModelFrame<T>(state_->current, state_->options.max_range_rows);
   }
 
-  /** @brief Register one independent consumer; node_limit reports its finite capacity.
-   * @return Independent UI-owned consumer; tree/frame errors, closed, node_limit, identity_exhausted, or no_memory.
+  /** @brief Register one independent consumer; NODE_LIMIT reports its finite capacity.
+   * @return Independent UI-owned consumer; tree/frame errors, closed, NODE_LIMIT, IDENTITY_EXHAUSTED, or NO_MEMORY.
    */
-  std::expected<ModelConsumer<T>, TreeError> open_range() {
+  std::expected<ModelConsumer<T>, TreeError> openRange() {
     auto state = state_;
     auto allowed = state->allowed();
 
@@ -900,11 +950,11 @@ public:
     }
 
     if (state->current->entries.size() - state->retired.size() >= state->options.max_consumers) {
-      return std::unexpected(TreeError::node_limit);
+      return std::unexpected(TreeError::NODE_LIMIT);
     }
 
     if (state->identity == std::numeric_limits<std::uint64_t>::max()) {
-      return std::unexpected(TreeError::identity_exhausted);
+      return std::unexpected(TreeError::IDENTITY_EXHAUSTED);
     }
 
     auto previous = state->current;
@@ -934,16 +984,16 @@ public:
 
       return ModelConsumer<T>(std::move(state), id);
     } catch (const std::bad_alloc &) {
-      return std::unexpected(TreeError::no_memory);
+      return std::unexpected(TreeError::NO_MEMORY);
     }
   }
 
   /** @brief Last UI application failure; queue acceptance alone is not proof of application.
-   * @return Sticky UI application error, an empty optional before any such failure, or wrong_thread.
+   * @return Sticky UI application error, an empty optional before any such failure, or WRONG_THREAD.
    */
-  std::expected<std::optional<TreeError>, TreeError> last_error() const {
+  std::expected<std::optional<TreeError>, TreeError> lastError() const {
     if (state_->owner != std::this_thread::get_id()) {
-      return std::unexpected(TreeError::wrong_thread);
+      return std::unexpected(TreeError::WRONG_THREAD);
     }
 
     return state_->application_error;
