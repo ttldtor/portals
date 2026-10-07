@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="650" viewBox="0 0 1000 650" role="img" aria-label="Ownership, borrows and retained snapshots">
+<title>Ownership, borrows and retained snapshots</title>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="#365b78"/></marker></defs>
+<style>text{font-family:Arial,sans-serif;fill:#183247} .title{font-size:25px;font-weight:bold} .label{font-size:17px;font-weight:bold} .detail{font-size:14px} .edge{fill:none;stroke:#365b78;stroke-width:2;marker-end:url(#arrow)}</style>
+<rect width="1000" height="650" fill="#f7f9fc"/>
+<text x="36" y="42" class="title">Ownership, borrows and retained snapshots</text>
+<text x="40" y="73" text-anchor="start" class="detail">Application controls destruction order on the UI thread.</text>
+<rect x="40" y="110" width="240" height="76" rx="9" fill="#fff" stroke="#b4c7d8" stroke-width="2"/>
+<text x="160.0" y="139" text-anchor="middle" class="label">Scheduler</text>
+<text x="160.0" y="160" text-anchor="middle" class="detail">Outlives tree and UI tokens</text>
+<rect x="380" y="110" width="240" height="76" rx="9" fill="#fff" stroke="#b4c7d8" stroke-width="2"/>
+<text x="500.0" y="139" text-anchor="middle" class="label">WidgetTree</text>
+<text x="500.0" y="160" text-anchor="middle" class="detail">Owns registry and widgets</text>
+<rect x="720" y="110" width="240" height="76" rx="9" fill="#fff" stroke="#b4c7d8" stroke-width="2"/>
+<text x="840.0" y="139" text-anchor="middle" class="label">Node&lt;T&gt;</text>
+<text x="840.0" y="160" text-anchor="middle" class="detail">Observing identity only</text>
+<path class="edge" d="M380,148 L280,148" stroke-dasharray="7 5"/>
+<text x="330" y="134" text-anchor="middle" class="detail">borrows</text>
+<rect x="40" y="290" width="240" height="76" rx="9" fill="#fff" stroke="#b4c7d8" stroke-width="2"/>
+<text x="160.0" y="319" text-anchor="middle" class="label">Property / router</text>
+<text x="160.0" y="340" text-anchor="middle" class="detail">Borrow the live UI tree</text>
+<rect x="380" y="290" width="240" height="76" rx="9" fill="#fff" stroke="#b4c7d8" stroke-width="2"/>
+<text x="500.0" y="319" text-anchor="middle" class="label">Widget + node UiScope</text>
+<text x="500.0" y="340" text-anchor="middle" class="detail">Removed logically first</text>
+<rect x="720" y="290" width="240" height="76" rx="9" fill="#fff" stroke="#b4c7d8" stroke-width="2"/>
+<text x="840.0" y="319" text-anchor="middle" class="label">Active callback</text>
+<text x="840.0" y="340" text-anchor="middle" class="detail">Borrow ends on return</text>
+<path class="edge" d="M500,186 L500,290"/>
+<text x="515" y="243" text-anchor="start" class="detail">owns</text>
+<path class="edge" d="M840,186 L590,287" stroke-dasharray="7 5"/>
+<text x="815" y="265" text-anchor="middle" class="detail">observes</text>
+<path class="edge" d="M720,328 L620,328" stroke-dasharray="7 5"/>
+<text x="670" y="315" text-anchor="middle" class="detail">borrows</text>
+<path class="edge" d="M280,308 L412,190" stroke-dasharray="7 5"/>
+<text x="302" y="220" text-anchor="middle" class="detail">borrows</text>
+<rect x="40" y="495" width="240" height="76" rx="9" fill="#fff" stroke="#b4c7d8" stroke-width="2"/>
+<text x="160.0" y="524" text-anchor="middle" class="label">Application model</text>
+<text x="160.0" y="545" text-anchor="middle" class="detail">Independent UI owner</text>
+<rect x="380" y="495" width="240" height="76" rx="9" fill="#fff" stroke="#b4c7d8" stroke-width="2"/>
+<text x="500.0" y="524" text-anchor="middle" class="label">Immutable snapshot</text>
+<text x="500.0" y="545" text-anchor="middle" class="detail">Shared owning references</text>
+<rect x="720" y="495" width="240" height="76" rx="9" fill="#fff" stroke="#b4c7d8" stroke-width="2"/>
+<text x="840.0" y="524" text-anchor="middle" class="label">ModelFrame / range / view</text>
+<text x="840.0" y="545" text-anchor="middle" class="detail">Retain a coherent revision</text>
+<path class="edge" d="M280,533 L380,533"/>
+<text x="330" y="519" text-anchor="middle" class="detail">shares</text>
+<path class="edge" d="M720,533 L620,533"/>
+<text x="670" y="519" text-anchor="middle" class="detail">shares</text>
+<text x="40" y="615" text-anchor="start" class="detail">Solid arrows: ownership. Dashed arrows: checked borrow or observing handle.</text>
+</svg>
