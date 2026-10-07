@@ -145,3 +145,5 @@ Private utf8proc code and Unicode data notices: [dependency provenance](vendor/u
 Unicode test data retain their [full license](tests/fixtures/unicode/Unicode-LICENSE.txt).
 
 Basic controls and the finite, runnable gallery are described in [controls](docs/controls.md).
+
+Unicode draft editing, selection, bounded paste and an injected clipboard boundary are documented in [LineEdit](docs/line-edit.md).
