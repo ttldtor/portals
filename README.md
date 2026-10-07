@@ -3,7 +3,7 @@
 Portals is the starting point of a C++23 terminal UI library. This bootstrap
 contains a static core library, release metadata, a standalone consumer and a
 headless tests. Checked cell geometry, UTF-8 grapheme measurements, VT input decoding
-and a POSIX terminal session are available; widget/UI functionality is not implemented yet.
+and Windows/POSIX terminal sessions are available; widget/UI functionality is not implemented yet.
 
 ## Build and test
 
@@ -49,7 +49,7 @@ only to these processes; it does not change Windows or Visual Studio settings.
 
 ## Terminal diagnostic probe
 
-The library's move-only `TerminalSession` owns POSIX terminal modes and bounded
+The library's move-only `TerminalSession` owns Windows/POSIX terminal modes and bounded
 input/output, reports resize on its owner, and restores modes on close or stack
 unwinding. See [the terminal session contract](docs/terminal.md) for ownership,
 deadlines, errors and platform limitations.
