@@ -141,3 +141,5 @@ compilation mechanics; UI sketches are design-only.
 Portals code: Boost Software License 1.0; see [LICENSE.txt](LICENSE.txt).
 Private utf8proc code and Unicode data notices: [dependency provenance](vendor/utf8proc/README.md).
 Unicode test data retain their [full license](tests/fixtures/unicode/Unicode-LICENSE.txt).
+
+Basic controls and the finite, runnable gallery are described in [controls](docs/controls.md).
