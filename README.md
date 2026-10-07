@@ -6,7 +6,8 @@ headless tests. Checked cell geometry, UTF-8 grapheme measurements, VT input
 decoding, Windows/POSIX terminal sessions, a bounded cell framebuffer, a full-frame
 reference renderer, bounded row diff, transactional frame writer and a
 [UI scheduler with scoped cancellation](docs/scheduler.md) and a
-[retained widget tree](docs/widget-tree.md) with [typed properties](docs/property.md) are available. Layout solvers and built-in controls are not implemented yet.
+[retained widget tree](docs/widget-tree.md) with [typed properties](docs/property.md) and
+[immutable list/table model ranges](docs/model.md) are available. Layout solvers and built-in controls are not implemented yet.
 
 ## Build and test
 

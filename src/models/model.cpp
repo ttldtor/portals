@@ -1,0 +1,20 @@
+// Copyright (c) 2026 ttldtor.
+// SPDX-License-Identifier: BSL-1.0
+#include <portals/model.hpp>
+
+namespace portals::detail {
+std::expected<std::uint64_t, TreeError> model_session() {
+  static std::atomic<std::uint64_t> sequence{};
+  auto current = sequence.load();
+
+  for (;;) {
+    if (current == std::numeric_limits<std::uint64_t>::max()) {
+      return std::unexpected(TreeError::identity_exhausted);
+    }
+
+    if (sequence.compare_exchange_weak(current, current + 1)) {
+      return current + 1;
+    }
+  }
+}
+} // namespace portals::detail
