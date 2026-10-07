@@ -4,12 +4,74 @@
 #include <portals/text.hpp>
 
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <new>
 #include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
+
+namespace allocation_test {
+thread_local std::ptrdiff_t remaining{-1};
+} // namespace allocation_test
+
+void *operator new(std::size_t size) {
+  if (allocation_test::remaining == 0) {
+    throw std::bad_alloc();
+  }
+
+  if (allocation_test::remaining > 0) {
+    --allocation_test::remaining;
+  }
+
+  if (void *value = std::malloc(size ? size : 1)) {
+    return value;
+  }
+
+  throw std::bad_alloc();
+}
+
+void operator delete(void *value) noexcept {
+  std::free(value);
+}
+
+void operator delete(void *value, std::size_t) noexcept {
+  std::free(value);
+}
+
+void *operator new[](std::size_t size) {
+  return ::operator new(size);
+}
+
+void operator delete[](void *value) noexcept {
+  ::operator delete(value);
+}
+
+void operator delete[](void *value, std::size_t) noexcept {
+  ::operator delete(value);
+}
+
+void *operator new(std::size_t size, const std::nothrow_t &) noexcept {
+  try {
+    return ::operator new(size);
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+void operator delete(void *value, const std::nothrow_t &) noexcept {
+  ::operator delete(value);
+}
+
+void *operator new[](std::size_t size, const std::nothrow_t &tag) noexcept {
+  return ::operator new(size, tag);
+}
+
+void operator delete[](void *value, const std::nothrow_t &) noexcept {
+  ::operator delete(value);
+}
 
 namespace {
 int failures = 0;
@@ -247,11 +309,89 @@ void official_corpus(const char *path) {
   check(cases == expected_unicode18_cases, "full official pinned corpus, no filtering");
   std::cout << "Unicode 18 corpus: " << cases << " cases\n";
 }
+void allocation_failures() {
+  using portals::GraphemeText;
+  const std::string bytes = "A sufficiently long text with multiple graphemes";
+  const auto reference = GraphemeText::from(bytes);
+  constexpr std::ptrdiff_t probe_limit = 64;
+  bool constructed{};
+  bool moved{};
+  bool copied{};
+
+  for (std::ptrdiff_t budget = 0; budget < probe_limit; ++budget) {
+    allocation_test::remaining = budget;
+
+    try {
+      const auto result = GraphemeText::from(bytes);
+
+      allocation_test::remaining = -1;
+      check(result && result->bytes() == bytes, "construction succeeds without a partial value");
+      constructed = true;
+
+      break;
+    } catch (const std::bad_alloc &) {
+      allocation_test::remaining = -1;
+    }
+  }
+
+  for (std::ptrdiff_t budget = 0; budget < probe_limit; ++budget) {
+    auto source = *reference;
+
+    allocation_test::remaining = budget;
+
+    try {
+      GraphemeText result(std::move(source));
+
+      allocation_test::remaining = -1;
+      check(result.bytes() == bytes && result.measure() == reference->measure(), "move retains bytes and metadata");
+      check(source.bytes().empty() && source.graphemes().empty() && source.measure() == 0,
+            "successful move empties the source");
+      moved = true;
+
+      break;
+    } catch (const std::bad_alloc &) {
+      allocation_test::remaining = -1;
+      check(source.bytes() == bytes && source.measure() == reference->measure(),
+            "failed move construction preserves the source");
+    }
+  }
+
+  for (std::ptrdiff_t budget = 0; budget < probe_limit; ++budget) {
+    auto destination = *GraphemeText::from("old");
+
+    allocation_test::remaining = budget;
+
+    try {
+      destination = *reference;
+
+      allocation_test::remaining = -1;
+      check(destination.bytes() == bytes && destination.measure() == reference->measure(),
+            "copy assignment replaces all text metadata");
+      copied = true;
+
+      break;
+    } catch (const std::bad_alloc &) {
+      allocation_test::remaining = -1;
+      check(destination.bytes() == "old" && destination.measure() == 3, "failed copy leaves destination unchanged");
+    }
+  }
+
+  check(constructed && moved && copied, "all text operations succeed after bounded allocation probes");
+
+  auto source = *reference;
+  auto destination = *GraphemeText::from("old");
+
+  allocation_test::remaining = 0;
+  destination = std::move(source);
+  allocation_test::remaining = -1;
+  check(destination.bytes() == bytes && source.bytes().empty(), "move assignment allocates nothing");
+}
 } // namespace
 
 int main(int argc, char **argv) {
   fixtures();
   errors();
+  allocation_failures();
   check(argc == 2, "fixture path argument");
 
   if (argc == 2) {

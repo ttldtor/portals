@@ -86,7 +86,7 @@ GraphemeText &GraphemeText::operator=(const GraphemeText &other) {
   return *this;
 }
 
-GraphemeText::GraphemeText(GraphemeText &&other) noexcept {
+GraphemeText::GraphemeText(GraphemeText &&other) {
   *this = std::move(other);
 }
 
