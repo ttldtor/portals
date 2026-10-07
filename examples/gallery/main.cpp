@@ -43,7 +43,7 @@ int main(int argc, char **argv) {
     gallery::take(writer.submit(std::move(buffer)));
 
     const auto written = writer.flush(std::chrono::steady_clock::now() + std::chrono::seconds(2));
-    const bool complete = written.status == portals::TerminalStatus::progress && !written.error && !writer.pending();
+    const bool complete = written.status == portals::TerminalStatus::PROGRESS && !written.error && !writer.pending();
 
     gallery::take(terminal.close());
 

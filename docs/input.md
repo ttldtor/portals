@@ -9,7 +9,7 @@ mode; a future terminal session owner must do that separately.
 ## Pulling events
 
 `InputDecoder::create(options)` validates settings and returns an owning decoder
-or `InputError::invalid_options`. One executor owns its mutable state; different
+or `InputError::INVALID_OPTIONS`. One executor owns its mutable state; different
 instances can run concurrently. Do not call one instance concurrently. A moved
 source must be reset before reuse. Returned events own their values and survive
 decoder reset, move and destruction.
@@ -18,15 +18,15 @@ decoder reset, move and destruction.
 an exact consumed prefix. The caller advances by `consumed`, handles the event,
 and resubmits the suffix with its original arrival timestamp. A result can have
 an event and consume zero bytes: timeout, pending issue, double ESC and malformed
-UTF-8 recovery need this. `need_input` means the supplied view is exhausted;
-`work_limit` means another pull is required even if no event was produced.
+UTF-8 recovery need this. `NEED_INPUT` means the supplied view is exhausted;
+`WORK_LIMIT` means another pull is required even if no event was produced.
 There is no growing output queue. The caller must bound any queue it creates.
 
-Empty `next` calls advance time. Drain events before waiting; after `need_input`,
+Empty `next` calls advance time. Drain events before waiting; after `NEED_INPUT`,
 wait for bytes or `deadline()`. `finish(now)` starts EOF and drains at most one
 event per call. Repeat until `finished` or `failed`; a `finished` result may still
 carry the last event. Further `finish` calls are empty and idempotent, while
-`next` returns `closed`. No input is accepted after EOF. `reset()` abandons the
+`next` returns `CLOSED`. No input is accepted after EOF. `reset()` abandons the
 old session, frees retained paste and clears the clock, byte offsets and probe
 window, retaining options. It is a caller-declared boundary, not a safe way to
 continue an unclosed paste's untrusted suffix.
@@ -109,7 +109,7 @@ and ESC+character/Alt+character cannot be distinguished from their encodings.
 
 ## Probe candidates
 
-`expect_replies` installs an explicit inclusive-start/exclusive-deadline window,
+`expectReplies` installs an explicit inclusive-start/exclusive-deadline window,
 generation and one allowed response of each selected kind. It is valid only at
 ground with no pending event. The parser sends no queries. Primary DA is
 `CSI ?p[;p...]c`; CPR is `CSI row;column R` with positive fields. Both use checked

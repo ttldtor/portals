@@ -11,11 +11,11 @@
 
 namespace portals {
 namespace {
-constexpr utf8proc_int32_t text_selector = 0xfe0e;
-constexpr utf8proc_int32_t emoji_selector = 0xfe0f;
-constexpr utf8proc_int32_t zero_width_joiner = 0x200d;
-constexpr utf8proc_int32_t keycap_mark = 0x20e3;
-constexpr unsigned unsupported_scalar_width = 3;
+constexpr utf8proc_int32_t TEXT_SELECTOR = 0xfe0e;
+constexpr utf8proc_int32_t EMOJI_SELECTOR = 0xfe0f;
+constexpr utf8proc_int32_t ZERO_WIDTH_JOINER = 0x200d;
+constexpr utf8proc_int32_t KEYCAP_MARK = 0x20e3;
+constexpr unsigned UNSUPPORTED_SCALAR_WIDTH = 3;
 
 // Grapheme boundaries come from utf8proc; terminal display support is a separate policy.
 // Preserve unsupported clusters as logical text and replace only their displayed footprint.
@@ -37,34 +37,34 @@ struct ClusterWidth {
     const bool pictograph = property->boundclass == UTF8PROC_BOUNDCLASS_EXTENDED_PICTOGRAPHIC;
     const bool tag = cp >= 0xe0020 && cp <= 0xe007f;
     const bool modifier = cp >= 0x1f3fb && cp <= 0x1f3ff;
-    const bool format_in_emoji = cp == zero_width_joiner || tag;
+    const bool format_in_emoji = cp == ZERO_WIDTH_JOINER || tag;
 
     unsafe = unsafe || property->category == UTF8PROC_CATEGORY_CC || property->category == UTF8PROC_CATEGORY_CN ||
              property->category == UTF8PROC_CATEGORY_ZL || property->category == UTF8PROC_CATEGORY_ZP ||
              (property->category == UTF8PROC_CATEGORY_CF && !format_in_emoji);
     pictographic = pictographic || pictograph;
     wide_pictographic = wide_pictographic || (pictograph && width == 2);
-    emoji_sequence = emoji_sequence || cp == emoji_selector || cp == zero_width_joiner || tag || modifier;
-    text_style = text_style || cp == text_selector;
+    emoji_sequence = emoji_sequence || cp == EMOJI_SELECTOR || cp == ZERO_WIDTH_JOINER || tag || modifier;
+    text_style = text_style || cp == TEXT_SELECTOR;
     regional_indicators += property->boundclass == UTF8PROC_BOUNDCLASS_REGIONAL_INDICATOR ? 1u : 0u;
 
     if (first) {
       keycap_base = (cp >= '0' && cp <= '9') || cp == '#' || cp == '*';
     }
 
-    if (!first && cp != emoji_selector && cp != keycap_mark) {
+    if (!first && cp != EMOJI_SELECTOR && cp != KEYCAP_MARK) {
       keycap_base = false;
     }
 
-    keycap = keycap || (keycap_base && cp == keycap_mark);
+    keycap = keycap || (keycap_base && cp == KEYCAP_MARK);
     emoji_format = emoji_format || format_in_emoji;
 
-    if (width == 1 && policy.ambiguous == AmbiguousWidth::wide && utf8proc_charwidth_ambiguous(cp)) {
+    if (width == 1 && policy.ambiguous == AmbiguousWidth::WIDE && utf8proc_charwidth_ambiguous(cp)) {
       width = 2;
     }
 
     // Saturation suffices: ordinary clusters wider than two cells are unsupported.
-    scalar_cells = std::min(unsupported_scalar_width, scalar_cells + static_cast<unsigned>(std::max(0, width)));
+    scalar_cells = std::min(UNSUPPORTED_SCALAR_WIDTH, scalar_cells + static_cast<unsigned>(std::max(0, width)));
   }
 
   Grapheme finish(std::size_t begin, std::size_t end, WidthPolicy policy) const noexcept {
@@ -74,7 +74,7 @@ struct ClusterWidth {
     const bool unsupported = unsafe || (emoji_format && !emoji) || cells == 0 || cells > 2;
 
     return {begin, end, static_cast<std::uint8_t>(unsupported ? 1 : cells),
-            unsupported ? TextDisplay::unsupported : TextDisplay::printable};
+            unsupported ? TextDisplay::UNSUPPORTED : TextDisplay::PRINTABLE};
   }
 };
 } // namespace
@@ -82,6 +82,7 @@ struct ClusterWidth {
 GraphemeText &GraphemeText::operator=(const GraphemeText &other) {
   if (this != &other) {
     GraphemeText copy(other);
+
     *this = std::move(copy);
   }
 
@@ -109,17 +110,19 @@ GraphemeText &GraphemeText::operator=(GraphemeText &&other) noexcept {
 
 std::expected<GraphemeText, TextError> GraphemeText::from(std::string_view bytes, WidthPolicy policy,
                                                           TextLimits limits) {
-  if ((policy.ambiguous != AmbiguousWidth::narrow && policy.ambiguous != AmbiguousWidth::wide) ||
-      (policy.emoji != EmojiWidth::one && policy.emoji != EmojiWidth::two)) {
-    return std::unexpected(TextError{TextErrorKind::invalid_policy, 0});
+  if ((policy.ambiguous != AmbiguousWidth::NARROW && policy.ambiguous != AmbiguousWidth::WIDE) ||
+      (policy.emoji != EmojiWidth::ONE && policy.emoji != EmojiWidth::TWO)) {
+    return std::unexpected(TextError{TextErrorKind::INVALID_POLICY, 0});
   }
 
   if (bytes.size() > limits.max_input_bytes || bytes.size() > static_cast<std::size_t>(PTRDIFF_MAX)) {
-    return std::unexpected(TextError{TextErrorKind::input_limit, 0});
+    return std::unexpected(TextError{TextErrorKind::INPUT_LIMIT, 0});
   }
 
   GraphemeText result;
+
   result.policy_ = policy;
+
   const auto max_cells = std::min(limits.max_cells, static_cast<std::size_t>(INT32_MAX));
   std::size_t begin = 0;
   std::size_t offset = 0;
@@ -131,13 +134,13 @@ std::expected<GraphemeText, TextError> GraphemeText::from(std::string_view bytes
   // is validated, so a later decoding or limit error never exposes a partial text value.
   const auto append = [&](std::size_t end) -> std::expected<void, TextError> {
     if (result.graphemes_.size() >= limits.max_graphemes) {
-      return std::unexpected(TextError{TextErrorKind::grapheme_limit, begin});
+      return std::unexpected(TextError{TextErrorKind::GRAPHEME_LIMIT, begin});
     }
 
     const auto grapheme = cluster.finish(begin, end, policy);
 
     if (grapheme.cells > max_cells - static_cast<std::size_t>(result.cells_)) {
-      return std::unexpected(TextError{TextErrorKind::cell_limit, begin});
+      return std::unexpected(TextError{TextErrorKind::CELL_LIMIT, begin});
     }
 
     result.graphemes_.push_back(grapheme);
@@ -152,7 +155,7 @@ std::expected<GraphemeText, TextError> GraphemeText::from(std::string_view bytes
                                          static_cast<utf8proc_ssize_t>(bytes.size() - offset), &cp);
 
     if (length < 0) {
-      return std::unexpected(TextError{TextErrorKind::invalid_utf8, offset});
+      return std::unexpected(TextError{TextErrorKind::INVALID_UTF8, offset});
     }
 
     if (offset != 0 && utf8proc_grapheme_break_stateful(previous, cp, &state)) {
@@ -169,7 +172,7 @@ std::expected<GraphemeText, TextError> GraphemeText::from(std::string_view bytes
     const auto next = offset + static_cast<std::size_t>(length);
 
     if (next - begin > limits.max_cluster_bytes) {
-      return std::unexpected(TextError{TextErrorKind::cluster_limit, begin});
+      return std::unexpected(TextError{TextErrorKind::CLUSTER_LIMIT, begin});
     }
 
     cluster.add(cp, policy, offset == begin);
@@ -206,7 +209,7 @@ WidthPolicy GraphemeText::policy() const noexcept {
   return policy_;
 }
 
-std::expected<std::size_t, TextError> GraphemeText::next_cursor(std::size_t byte_offset) const noexcept {
+std::expected<std::size_t, TextError> GraphemeText::nextCursor(std::size_t byte_offset) const noexcept {
   if (byte_offset == bytes_.size()) {
     return byte_offset;
   }
@@ -217,13 +220,13 @@ std::expected<std::size_t, TextError> GraphemeText::next_cursor(std::size_t byte
     });
 
   if (found == graphemes_.end() || found->byte_begin != byte_offset) {
-    return std::unexpected(TextError{TextErrorKind::not_boundary, byte_offset});
+    return std::unexpected(TextError{TextErrorKind::NOT_BOUNDARY, byte_offset});
   }
 
   return found->byte_end;
 }
 
-std::expected<std::size_t, TextError> GraphemeText::previous_cursor(std::size_t byte_offset) const noexcept {
+std::expected<std::size_t, TextError> GraphemeText::previousCursor(std::size_t byte_offset) const noexcept {
   if (byte_offset == 0) {
     return 0;
   }
@@ -234,14 +237,15 @@ std::expected<std::size_t, TextError> GraphemeText::previous_cursor(std::size_t 
     });
 
   if (found == graphemes_.end() || found->byte_end != byte_offset) {
-    return std::unexpected(TextError{TextErrorKind::not_boundary, byte_offset});
+    return std::unexpected(TextError{TextErrorKind::NOT_BOUNDARY, byte_offset});
   }
 
   return found->byte_begin;
 }
 
-TextClip GraphemeText::clip_prefix(std::int32_t max_cells) const noexcept {
+TextClip GraphemeText::clipPrefix(std::int32_t max_cells) const noexcept {
   TextClip result;
+
   max_cells = std::max(0, max_cells);
 
   for (const auto &grapheme : graphemes_) {

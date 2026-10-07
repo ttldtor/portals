@@ -16,18 +16,18 @@ TerminalDeadline now() {
   return std::chrono::steady_clock::now();
 }
 
-TerminalError system_error(int code) {
-  return {TerminalErrorKind::system, code, 0};
+TerminalError systemError(int code) {
+  return {TerminalErrorKind::SYSTEM, code, 0};
 }
 } // namespace
 
-const PosixIo &native_posix_io() noexcept {
-  static const PosixIo io{::poll, ::read, write_without_sigpipe, now};
+const PosixIo &nativePosixIo() noexcept {
+  static const PosixIo IO{::poll, ::read, writeWithoutSigpipe, now};
 
-  return io;
+  return IO;
 }
 
-int poll_timeout(TerminalDeadline deadline, std::chrono::milliseconds cadence, TerminalDeadline current) noexcept {
+int pollTimeout(TerminalDeadline deadline, std::chrono::milliseconds cadence, TerminalDeadline current) noexcept {
   if (deadline <= current) {
     return 0;
   }
@@ -41,12 +41,14 @@ int poll_timeout(TerminalDeadline deadline, std::chrono::milliseconds cadence, T
   return whole + (whole < INT_MAX && static_cast<long double>(whole) < bounded ? 1 : 0);
 }
 
-ssize_t write_without_sigpipe(int descriptor, const void *bytes, std::size_t count) noexcept {
+ssize_t writeWithoutSigpipe(int descriptor, const void *bytes, std::size_t count) noexcept {
   sigset_t blocked{};
   sigset_t previous{};
   sigset_t pending{};
+
   sigemptyset(&blocked);
   sigaddset(&blocked, SIGPIPE);
+
   const int mask_error = pthread_sigmask(SIG_BLOCK, &blocked, &previous);
 
   if (mask_error != 0) {
@@ -57,6 +59,7 @@ ssize_t write_without_sigpipe(int descriptor, const void *bytes, std::size_t cou
 
   if (sigpending(&pending) != 0) {
     const int error = errno;
+
     pthread_sigmask(SIG_SETMASK, &previous, nullptr);
     errno = error;
 
@@ -80,14 +83,15 @@ ssize_t write_without_sigpipe(int descriptor, const void *bytes, std::size_t cou
   return written;
 }
 
-TerminalRead read_posix(int descriptor, std::size_t limit, TerminalDeadline deadline, std::stop_token stop,
-                        const PosixIo &io) {
+TerminalRead readPosix(int descriptor, std::size_t limit, TerminalDeadline deadline, std::stop_token stop,
+                       const PosixIo &io) {
   TerminalRead result;
+
   result.bytes.resize(limit);
 
   for (;;) {
     if (stop.stop_requested() || io.now() >= deadline) {
-      result.status = stop.stop_requested() ? TerminalStatus::stopped : TerminalStatus::deadline;
+      result.status = stop.stop_requested() ? TerminalStatus::STOPPED : TerminalStatus::DEADLINE;
       result.bytes.clear();
 
       return result;
@@ -97,7 +101,7 @@ TerminalRead read_posix(int descriptor, std::size_t limit, TerminalDeadline dead
 
     if (count >= 0) {
       result.bytes.resize(static_cast<std::size_t>(count));
-      result.status = count == 0 ? TerminalStatus::eof : TerminalStatus::progress;
+      result.status = count == 0 ? TerminalStatus::END_OF_INPUT : TerminalStatus::PROGRESS;
 
       return result;
     }
@@ -107,22 +111,23 @@ TerminalRead read_posix(int descriptor, std::size_t limit, TerminalDeadline dead
     }
 
     const int error = errno;
+
     result.bytes.clear();
-    result.status = TerminalStatus::error;
-    result.error = system_error(error);
+    result.status = TerminalStatus::FAILED;
+    result.error = systemError(error);
 
     return result;
   }
 }
 
-TerminalWrite flush_posix(int descriptor, const std::string &bytes, std::size_t &offset, TerminalDeadline deadline,
-                          std::stop_token stop, std::chrono::milliseconds cadence, const PosixIo &io) {
+TerminalWrite flushPosix(int descriptor, const std::string &bytes, std::size_t &offset, TerminalDeadline deadline,
+                         std::stop_token stop, std::chrono::milliseconds cadence, const PosixIo &io) {
   TerminalWrite result;
   const auto initial = offset;
 
   while (offset < bytes.size()) {
     if (stop.stop_requested() || io.now() >= deadline) {
-      result.status = stop.stop_requested() ? TerminalStatus::stopped : TerminalStatus::deadline;
+      result.status = stop.stop_requested() ? TerminalStatus::STOPPED : TerminalStatus::DEADLINE;
 
       break;
     }
@@ -142,25 +147,25 @@ TerminalWrite flush_posix(int descriptor, const std::string &bytes, std::size_t 
     }
 
     if (error != EAGAIN && error != EWOULDBLOCK) {
-      result.status = TerminalStatus::error;
-      result.error = system_error(error);
+      result.status = TerminalStatus::FAILED;
+      result.error = systemError(error);
 
       break;
     }
 
     pollfd descriptor_state{descriptor, POLLOUT, 0};
-    const int waited = io.poll(&descriptor_state, 1, poll_timeout(deadline, cadence, io.now()));
+    const int waited = io.poll(&descriptor_state, 1, pollTimeout(deadline, cadence, io.now()));
 
     if (waited < 0 && errno != EINTR) {
-      result.status = TerminalStatus::error;
-      result.error = system_error(errno);
+      result.status = TerminalStatus::FAILED;
+      result.error = systemError(errno);
 
       break;
     }
 
     if (waited > 0 && (descriptor_state.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
-      result.status = TerminalStatus::error;
-      result.error = system_error((descriptor_state.revents & POLLNVAL) != 0 ? EBADF : EPIPE);
+      result.status = TerminalStatus::FAILED;
+      result.error = systemError((descriptor_state.revents & POLLNVAL) != 0 ? EBADF : EPIPE);
 
       break;
     }

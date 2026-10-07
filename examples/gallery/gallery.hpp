@@ -9,6 +9,7 @@
 /** @brief Finite control-gallery fixture shared by the example and semantic replay tests. */
 namespace gallery {
 using namespace portals;
+
 /** @brief Unwrap an owning expected result or stop this finite example with an exception.
  * @tparam T Success type accepted by std::expected: void, or a movable value returned by ownership transfer.
  * @tparam E Error type accepted by std::expected; the helper does not inspect or format its value.
@@ -27,6 +28,7 @@ template <class T, class E> T take(std::expected<T, E> result) {
     return std::move(*result);
   }
 }
+
 /** @brief Create owning gallery text with the default width policy.
  * @param value Borrowed UTF-8 input; the returned text owns its decoded content.
  * @return Validated text using the default WidthPolicy.
@@ -36,12 +38,14 @@ template <class T, class E> T take(std::expected<T, E> result) {
 inline GraphemeText text(std::string_view value) {
   return take(GraphemeText::from(value));
 }
+
 // Translate local control commands into the same surface geometry used by hit-testing.
 // The destination vector borrows widget text and is consumed by the renderer inside tree.frame.
 class SurfaceSink : public PaintContext {
 public:
   SurfaceSink(NodeGeometry geometry, std::vector<RenderCommand> &commands) : geometry_(geometry), commands_(commands) {
   }
+
   std::expected<void, TreeError> submit(std::span<const RenderCommand> commands) override {
     for (const auto &command : commands) {
       auto status = std::visit(
@@ -50,14 +54,14 @@ public:
           auto clip = value.clip.translated(geometry_.surface.origin());
 
           if (!clip) {
-            return std::unexpected(TreeError::invalid_geometry);
+            return std::unexpected(TreeError::INVALID_GEOMETRY);
           }
 
           if constexpr (std::same_as<std::decay_t<decltype(value)>, TextCommand>) {
             auto origin = translated(value.origin, geometry_.surface.origin());
 
             if (!origin) {
-              return std::unexpected(TreeError::invalid_geometry);
+              return std::unexpected(TreeError::INVALID_GEOMETRY);
             }
 
             commands_.emplace_back(
@@ -66,7 +70,7 @@ public:
             auto area = value.area.translated(geometry_.surface.origin());
 
             if (!area) {
-              return std::unexpected(TreeError::invalid_geometry);
+              return std::unexpected(TreeError::INVALID_GEOMETRY);
             }
 
             commands_.emplace_back(FillCommand{*area, clip->intersection(geometry_.clip), value.style, value.z});
@@ -88,6 +92,7 @@ private:
   NodeGeometry geometry_;
   std::vector<RenderCommand> &commands_;
 };
+
 struct Scene {
   std::unique_ptr<Scheduler> scheduler = take(Scheduler::create());
   std::unique_ptr<WidgetTree> tree = take(WidgetTree::create(*scheduler));
@@ -105,30 +110,31 @@ struct Scene {
   Node<Label> status = take(tree->emplace<Label>(column, text("Initial focus: Run")));
   std::vector<Node<Control>> controls{
     title, label, button, checkbox, disabled_label, disabled_button, disabled_checkbox, status};
-  std::shared_ptr<Property<bool>> model = take(Property<bool>::create(*tree, root, false, Invalidation::paint));
+  std::shared_ptr<Property<bool>> model = take(Property<bool>::create(*tree, root, false, Invalidation::PAINT));
   int calls{};
   int changes{};
   int disabled_calls{};
-  ActionBinding button_binding = take(bind_button(*router, button, [&] {
+  ActionBinding button_binding = take(bindButton(*router, button, [&] {
     ++calls;
   }));
-  ActionBinding disabled_binding = take(bind_button(*router, disabled_button, [&] {
+  ActionBinding disabled_binding = take(bindButton(*router, disabled_button, [&] {
     ++disabled_calls;
   }));
-  CheckBoxBinding check_binding = take(bind_checkbox(*tree, *router, checkbox, model, [&](CheckBoxResult result) {
+  CheckBoxBinding check_binding = take(bindCheckbox(*tree, *router, checkbox, model, [&](CheckBoxResult result) {
     take(std::move(result));
     ++changes;
   }));
   CheckBoxBinding disabled_check_binding =
-    take(bind_checkbox(*tree, *router, disabled_checkbox, model, [&](CheckBoxResult result) {
+    take(bindCheckbox(*tree, *router, disabled_checkbox, model, [&](CheckBoxResult result) {
       take(std::move(result));
       ++disabled_calls;
     }));
   InputDecoder decoder = take(InputDecoder::create());
 
   Scene() {
-    take(tree->set_enabled(disabled_group, false));
+    take(tree->setEnabled(disabled_group, false));
   }
+
   DispatchResult input(std::string_view bytes) {
     DispatchResult result;
 
@@ -148,6 +154,7 @@ struct Scene {
 
     return result;
   }
+
   CellBuffer render(CellSize size = {30, 9}) {
     // Apply model and focus presentation before entering the immutable render frame.
     take(check_binding.sync());
@@ -156,14 +163,14 @@ struct Scene {
     const auto focused = take(router->focused());
 
     for (const auto control : controls) {
-      take(sync_control(*tree, control, focused));
+      take(syncControl(*tree, control, focused));
     }
 
     const auto viewport = take(CellRect::from({}, size));
     std::optional<CellBuffer> buffer;
 
     take(tree->frame([&] {
-      take(layout_tree(*tree, root, viewport, viewport));
+      take(layoutTree(*tree, root, viewport, viewport));
 
       std::vector<RenderCommand> commands;
 
@@ -180,18 +187,19 @@ struct Scene {
       }
 
       // Finish consuming every borrowed command while the frame still retains the widgets.
-      buffer.emplace(take(render_full_frame(size, commands)));
+      buffer.emplace(take(renderFullFrame(size, commands)));
     }));
 
     return std::move(*buffer);
   }
+
   void stage(std::string_view name) {
     if (name == "initial") {
       return;
     }
 
     input("\r\t ");
-    take(set_control_text(*tree, status, text("Keyboard: Run + Alerts")));
+    take(setControlText(*tree, status, text("Keyboard: Run + Alerts")));
 
     if (name == "keyboard") {
       return;
@@ -200,14 +208,14 @@ struct Scene {
     auto keyboard_frame = render();
 
     input("\x1b[<0;2;3M\x1b[<0;2;3m");
-    take(set_control_text(*tree, status, text("Mouse: Run pressed once")));
+    take(setControlText(*tree, status, text("Mouse: Run pressed once")));
 
     if (name == "mouse") {
       return;
     }
 
-    take(tree->set_enabled(button, false));
-    take(set_control_text(*tree, status, text("Run disabled; focus: Alerts")));
+    take(tree->setEnabled(button, false));
+    take(setControlText(*tree, status, text("Run disabled; focus: Alerts")));
   }
 };
 } // namespace gallery

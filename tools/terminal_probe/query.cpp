@@ -6,7 +6,7 @@
 
 namespace portals::probe {
 namespace {
-constexpr std::size_t sequence_limit = 64;
+constexpr std::size_t SEQUENCE_LIMIT = 64;
 
 bool parameters(std::string_view text, bool cursor) {
   std::size_t count = 0;
@@ -91,7 +91,7 @@ void QueryCollector::feed(std::string_view bytes, Time now) {
       }
 
       pending_.clear();
-    } else if (pending_.size() == 2 || !parameter || pending_.size() >= sequence_limit) {
+    } else if (pending_.size() == 2 || !parameter || pending_.size() >= SEQUENCE_LIMIT) {
       unmatched_ += pending_;
       pending_.clear();
     }
@@ -113,11 +113,11 @@ bool QueryCollector::active(Time now) const {
   return !finished_ && now < deadline_ && received_ < byte_limit_ && !(da_ && cpr_);
 }
 
-const std::optional<std::string> &QueryCollector::device_attributes() const {
+const std::optional<std::string> &QueryCollector::deviceAttributes() const {
   return da_;
 }
 
-const std::optional<std::string> &QueryCollector::cursor_position() const {
+const std::optional<std::string> &QueryCollector::cursorPosition() const {
   return cpr_;
 }
 
@@ -133,8 +133,8 @@ bool QueryCollector::limited() const {
   return limited_;
 }
 
-std::string escape_bytes(std::string_view bytes) {
-  constexpr std::string_view hex = "0123456789abcdef";
+std::string escapeBytes(std::string_view bytes) {
+  constexpr std::string_view HEX = "0123456789abcdef";
   std::string result = "\"";
 
   for (const unsigned char byte : bytes) {
@@ -145,8 +145,8 @@ std::string escape_bytes(std::string_view bytes) {
       result += static_cast<char>(byte);
     } else {
       result += "\\x";
-      result += hex[byte >> 4];
-      result += hex[byte & 0x0f];
+      result += HEX[byte >> 4];
+      result += HEX[byte & 0x0f];
     }
   }
 

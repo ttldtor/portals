@@ -75,11 +75,11 @@ struct StyleId {
 /** @brief A cell's role in a complete display grapheme. */
 enum class CellKind {
   /** @brief Default-style ASCII space, occupying one cell. */
-  blank,
+  BLANK,
   /** @brief First cell of a written one- or two-cell grapheme. */
-  lead,
+  LEAD,
   /** @brief Second cell of the immediately preceding two-cell lead. */
-  continuation
+  CONTINUATION
 };
 
 /** @brief Owning metadata; IDs may only be interpreted within the source buffer. */
@@ -89,7 +89,7 @@ struct Cell {
   /** @brief Interned style, shared by both halves of a wide glyph. */
   StyleId style;
   /** @brief Blank, lead or continuation role. */
-  CellKind kind{CellKind::blank};
+  CellKind kind{CellKind::BLANK};
   /** @brief Display width: one for blank/narrow, two for wide lead, zero for continuation. */
   std::uint8_t columns{1};
   /** @brief Compare metadata, including local IDs.
@@ -133,31 +133,31 @@ struct CellBufferLimits {
 /** @brief Observable, owning buffer failure; no partial write or resize is returned. */
 enum class CellBufferError {
   /** @brief Invalid caps, ID representation or allocation-size arithmetic. */
-  invalid_limits,
+  INVALID_LIMITS,
   /** @brief An unrecognized width policy value. */
-  invalid_policy,
+  INVALID_POLICY,
   /** @brief Normalized columns exceed the cap. */
-  column_limit,
+  COLUMN_LIMIT,
   /** @brief Normalized rows exceed the cap. */
-  row_limit,
+  ROW_LIMIT,
   /** @brief Checked cell product exceeds the cap or representation. */
-  cell_limit,
+  CELL_LIMIT,
   /** @brief A position lies outside the buffer. */
-  out_of_bounds,
+  OUT_OF_BOUNDS,
   /** @brief A grapheme index lies outside the validated text. */
-  invalid_grapheme,
+  INVALID_GRAPHEME,
   /** @brief The text's complete captured width policy differs from this buffer. */
-  policy_mismatch,
+  POLICY_MISMATCH,
   /** @brief The whole wide glyph cannot fit at the right edge. */
-  wide_at_edge,
+  WIDE_AT_EDGE,
   /** @brief The glyph record pool is full. */
-  glyph_limit,
+  GLYPH_LIMIT,
   /** @brief The glyph byte pool cannot hold the new complete glyph. */
-  glyph_byte_limit,
+  GLYPH_BYTE_LIMIT,
   /** @brief The style pool is full. */
-  style_limit,
+  STYLE_LIMIT,
   /** @brief Storage allocation failed; the original buffer remains unchanged. */
-  allocation_failure
+  ALLOCATION_FAILURE
 };
 
 /** @brief Measured C++ storage accounting, excluding allocator overhead and process RSS. */
@@ -245,7 +245,7 @@ public:
   /**
    * @brief Resolve by coordinate; no API accepts arbitrary glyph/style IDs.
    * @param position Owning coordinate, borrowed storage is never retained.
-   * @return Borrowed display bytes and copied metadata/style, or out_of_bounds.
+   * @return Borrowed display bytes and copied metadata/style, or OUT_OF_BOUNDS.
    * @note No allocation; view expires on successful mutation/move/destruction.
    */
   [[nodiscard]] std::expected<CellView, CellBufferError> at(CellPoint position) const noexcept;
@@ -286,7 +286,7 @@ private:
   void swap(CellBuffer &other) noexcept;
   [[nodiscard]] bool contains(CellPoint position) const noexcept;
   [[nodiscard]] std::size_t index(CellPoint position) const noexcept;
-  void clear_glyph(std::size_t cell_index) noexcept;
+  void clearGlyph(std::size_t cell_index) noexcept;
 
   CellSize size_{};
   WidthPolicy policy_{};

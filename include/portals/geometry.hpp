@@ -11,7 +11,7 @@ namespace portals {
 /** @brief Failure of a checked cell-coordinate operation. */
 enum class GeometryError {
   /** @brief An origin or exclusive end would be outside the int32_t range. */
-  coordinate_overflow
+  COORDINATE_OVERFLOW
 };
 
 /**
@@ -63,7 +63,7 @@ struct CellSize {
  * @brief Translate a cell point by an explicit columns/rows offset.
  * @param point Value to translate, copied without borrowing storage.
  * @param offset Signed cell displacement, copied without borrowing storage.
- * @return An independent point, or GeometryError::coordinate_overflow.
+ * @return An independent point, or GeometryError::COORDINATE_OVERFLOW.
  * @note Any thread; no allocation, exceptions, mutation or invalidation.
  */
 [[nodiscard]] std::expected<CellPoint, GeometryError> translated(CellPoint point, CellPoint offset) noexcept;
@@ -87,7 +87,7 @@ public:
    * @brief Create a rectangle after normalizing negative available extents to zero.
    * @param origin Signed cell origin, copied without borrowing storage.
    * @param available Signed available cell extents, copied and normalized.
-   * @return An independent rectangle, or coordinate_overflow if an end cannot fit.
+   * @return An independent rectangle, or COORDINATE_OVERFLOW if an end cannot fit.
    * @note No exceptions or invalidation; an empty axis still has a checked origin.
    */
   [[nodiscard]] static std::expected<CellRect, GeometryError> from(CellPoint origin, CellSize available) noexcept;
@@ -138,7 +138,7 @@ public:
   /**
    * @brief Return an owning translated rectangle, preserving its extents.
    * @param offset Signed cell displacement, copied without borrowing storage.
-   * @return An independent rectangle or coordinate_overflow for an origin or end.
+   * @return An independent rectangle or COORDINATE_OVERFLOW for an origin or end.
    * @note No exceptions, mutation or invalidation, including on failure.
    */
   [[nodiscard]] std::expected<CellRect, GeometryError> translated(CellPoint offset) const noexcept;

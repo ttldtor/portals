@@ -6,28 +6,28 @@
 
 namespace portals {
 namespace {
-std::optional<Action> key_action(InputKey key) {
+std::optional<Action> keyAction(InputKey key) {
   switch (key) {
-  case InputKey::enter:
-    return Action::activate;
-  case InputKey::escape:
-    return Action::cancel;
-  case InputKey::left:
-    return Action::move_left;
-  case InputKey::right:
-    return Action::move_right;
-  case InputKey::up:
-    return Action::move_up;
-  case InputKey::down:
-    return Action::move_down;
-  case InputKey::home:
-    return Action::move_home;
-  case InputKey::end:
-    return Action::move_end;
-  case InputKey::backspace:
-    return Action::erase_backward;
-  case InputKey::delete_key:
-    return Action::erase_forward;
+  case InputKey::ENTER:
+    return Action::ACTIVATE;
+  case InputKey::ESCAPE:
+    return Action::CANCEL;
+  case InputKey::LEFT:
+    return Action::MOVE_LEFT;
+  case InputKey::RIGHT:
+    return Action::MOVE_RIGHT;
+  case InputKey::UP:
+    return Action::MOVE_UP;
+  case InputKey::DOWN:
+    return Action::MOVE_DOWN;
+  case InputKey::HOME:
+    return Action::MOVE_HOME;
+  case InputKey::END:
+    return Action::MOVE_END;
+  case InputKey::BACKSPACE:
+    return Action::ERASE_BACKWARD;
+  case InputKey::DELETE_KEY:
+    return Action::ERASE_FORWARD;
   default:
     return std::nullopt;
   }
@@ -74,7 +74,7 @@ void ActionBinding::disconnect() noexcept {
   registration_.reset();
 }
 
-std::expected<void, TreeError> EventRouter::can_bind(Node<Widget> node) {
+std::expected<void, TreeError> EventRouter::canBind(Node<Widget> node) {
   auto allowed = check();
 
   if (!allowed) {
@@ -82,10 +82,10 @@ std::expected<void, TreeError> EventRouter::can_bind(Node<Widget> node) {
   }
 
   if (state_->dispatching) {
-    return std::unexpected(TreeError::would_block);
+    return std::unexpected(TreeError::WOULD_BLOCK);
   }
 
-  auto live = tree().input_eligible(node);
+  auto live = tree().inputEligible(node);
 
   if (!live) {
     return std::unexpected(live.error());
@@ -98,18 +98,18 @@ std::expected<void, TreeError> EventRouter::can_bind(Node<Widget> node) {
   }
 
   // Collecting captures can mutate the tree through their destructors.
-  live = tree().input_eligible(node);
+  live = tree().inputEligible(node);
 
   if (!live) {
     return std::unexpected(live.error());
   }
 
   if (registration(node)) {
-    return std::unexpected(TreeError::invalid_argument);
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
   if (state_->registrations.size() >= state_->options.max_registrations) {
-    return std::unexpected(TreeError::node_limit);
+    return std::unexpected(TreeError::NODE_LIMIT);
   }
 
   return {};
@@ -119,13 +119,14 @@ std::expected<ActionBinding, TreeError>
 EventRouter::add(Node<Widget> node, std::function<std::expected<EventReply, TreeError>(const RoutedEvent &)> callback,
                  bool focusable) {
   auto entry = std::make_shared<detail::ActionRegistration>();
+
   entry->cancellation = std::make_shared<detail::ActionCancellation>();
   entry->node = node;
   entry->focusable = focusable;
   entry->callback = std::move(callback);
 
   // Callback construction/move may reenter, remove the target, or fill the registry.
-  auto allowed = can_bind(node);
+  auto allowed = canBind(node);
 
   if (!allowed) {
     return std::unexpected(allowed.error());
@@ -143,7 +144,7 @@ std::expected<DispatchResult, TreeError> EventRouter::route(Node<Widget> target,
     return result;
   }
 
-  auto eligible = tree().input_eligible(target);
+  auto eligible = tree().inputEligible(target);
 
   if (!eligible) {
     return std::unexpected(eligible.error());
@@ -154,7 +155,7 @@ std::expected<DispatchResult, TreeError> EventRouter::route(Node<Widget> target,
   }
 
   result.target = target.id();
-  result.status = DispatchStatus::unhandled;
+  result.status = DispatchStatus::UNHANDLED;
 
   std::vector<Node<Widget>> path(0);
   auto current = target;
@@ -175,10 +176,10 @@ std::expected<DispatchResult, TreeError> EventRouter::route(Node<Widget> target,
   // removal/hiding/disabling suppresses that node while surviving original ancestors can run.
   // The local registration owner keeps captures alive through self-disconnect and collection.
   for (auto node : path) {
-    auto live = tree().input_eligible(node);
+    auto live = tree().inputEligible(node);
 
     if (!live) {
-      if (live.error() == TreeError::stale_node || live.error() == TreeError::closed) {
+      if (live.error() == TreeError::STALE_NODE || live.error() == TreeError::CLOSED) {
         continue;
       }
 
@@ -201,9 +202,9 @@ std::expected<DispatchResult, TreeError> EventRouter::route(Node<Widget> target,
       return std::unexpected(reply.error());
     }
 
-    if (*reply == EventReply::handled) {
+    if (*reply == EventReply::HANDLED) {
       result.handler = node.id();
-      result.status = DispatchStatus::handled;
+      result.status = DispatchStatus::HANDLED;
 
       break;
     }
@@ -220,7 +221,7 @@ std::expected<DispatchResult, TreeError> EventRouter::invoke(Node<Widget> target
   }
 
   if (state_->dispatching) {
-    return std::unexpected(TreeError::would_block);
+    return std::unexpected(TreeError::WOULD_BLOCK);
   }
 
   DeliveryGuard guard(state_->dispatching);
@@ -228,7 +229,7 @@ std::expected<DispatchResult, TreeError> EventRouter::invoke(Node<Widget> target
   try {
     return route(target, RoutedEvent(action));
   } catch (const std::bad_alloc &) {
-    return std::unexpected(TreeError::no_memory);
+    return std::unexpected(TreeError::NO_MEMORY);
   }
 }
 
@@ -240,14 +241,14 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
   }
 
   if (state_->dispatching) {
-    return std::unexpected(TreeError::would_block);
+    return std::unexpected(TreeError::WOULD_BLOCK);
   }
 
   DeliveryGuard guard(state_->dispatching);
 
   try {
     if (const auto *key = std::get_if<KeyEvent>(&event)) {
-      if (key->key == InputKey::tab && key->action != KeyAction::release && !key->modifiers.alt &&
+      if (key->key == InputKey::TAB && key->action != KeyAction::RELEASE && !key->modifiers.alt &&
           !key->modifiers.control && !key->modifiers.super) {
         auto next = traverse(key->modifiers.shift);
 
@@ -256,7 +257,7 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
         }
 
         return DispatchResult{
-          next->id(), {}, next->id().session == 0 ? DispatchStatus::no_target : DispatchStatus::handled};
+          next->id(), {}, next->id().session == 0 ? DispatchStatus::NO_TARGET : DispatchStatus::HANDLED};
       }
 
       auto target = focused();
@@ -265,9 +266,9 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
         return std::unexpected(target.error());
       }
 
-      auto action = key_action(key->key);
+      auto action = keyAction(key->key);
 
-      if (action && key->action != KeyAction::release) {
+      if (action && key->action != KeyAction::RELEASE) {
         return route(*target, ActionEvent{*action, key->modifiers});
       }
 
@@ -277,20 +278,20 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
     // Mouse targeting uses geometry independently of focus. A left press updates focus on
     // the nearest focusable ancestor, but bubbles the original mouse event from the actual hit.
     if (const auto *mouse = std::get_if<MouseInputEvent>(&event)) {
-      auto target = hit_test({mouse->column, mouse->row});
+      auto target = hitTest({mouse->column, mouse->row});
 
       if (!target) {
         return std::unexpected(target.error());
       }
 
-      if (mouse->button == MouseButton::left && mouse->action == MouseAction::press) {
+      if (mouse->button == MouseButton::LEFT && mouse->action == MouseAction::PRESS) {
         auto candidate = *target;
 
         while (candidate.id().session != 0) {
           auto entry = registration(candidate);
 
           if (entry && entry->focusable) {
-            auto changed = change_focus(candidate);
+            auto changed = changeFocus(candidate);
 
             if (!changed) {
               return std::unexpected(changed.error());
@@ -334,7 +335,7 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
 
     return DispatchResult{};
   } catch (const std::bad_alloc &) {
-    return std::unexpected(TreeError::no_memory);
+    return std::unexpected(TreeError::NO_MEMORY);
   }
 }
 } // namespace portals

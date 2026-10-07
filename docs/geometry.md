@@ -25,7 +25,7 @@ regardless of its position. Intersection is commutative and idempotent, includin
 degenerate rectangles.
 
 Creation and translation return `std::expected<T, GeometryError>` with
-`coordinate_overflow` if an origin or exclusive end would leave the `int32_t`
+`COORDINATE_OVERFLOW` if an origin or exclusive end would leave the `int32_t`
 range. This local error type handles the one recoverable geometry failure; it
 does not commit the rest of the library to an error policy. Expected fits the
 nonthrowing, allocation-free layout boundary and keeps failure observable.

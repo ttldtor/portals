@@ -5,10 +5,10 @@
 #include <array>
 
 namespace portals::detail {
-std::expected<ListWindow, TreeError> list_window(std::uint64_t count, std::uint64_t first, CellSize viewport,
-                                                 VirtualListOptions options) {
+std::expected<ListWindow, TreeError> listWindow(std::uint64_t count, std::uint64_t first, CellSize viewport,
+                                                VirtualListOptions options) {
   if (options.row_height <= 0 || viewport.width < 0 || viewport.height < 0) {
-    return std::unexpected(TreeError::invalid_argument);
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
   first = count == 0 ? 0 : std::min(first, count - 1);
@@ -26,19 +26,19 @@ std::expected<ListWindow, TreeError> list_window(std::uint64_t count, std::uint6
   const auto total = before + visible;
 
   if (total > std::numeric_limits<std::size_t>::max() || after > std::numeric_limits<std::size_t>::max() - total) {
-    return std::unexpected(TreeError::invalid_argument);
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
   return ListWindow{{first, static_cast<std::size_t>(visible)},
                     {first - before, static_cast<std::size_t>(total + after)}};
 }
 
-std::expected<void, TreeError> paint_list(PaintContext &context, CellSize viewport, VirtualListOptions options,
-                                          std::span<const ListRow> rows, std::optional<RowId> selected) {
+std::expected<void, TreeError> paintList(PaintContext &context, CellSize viewport, VirtualListOptions options,
+                                         std::span<const ListRow> rows, std::optional<RowId> selected) {
   auto bounds = CellRect::from({}, viewport);
 
   if (!bounds) {
-    return std::unexpected(TreeError::invalid_geometry);
+    return std::unexpected(TreeError::INVALID_GEOMETRY);
   }
 
   // Text starts on the first cell row. Clip the final partial row before surface/ancestor clipping by the sink.
@@ -49,7 +49,7 @@ std::expected<void, TreeError> paint_list(PaintContext &context, CellSize viewpo
     auto area = CellRect::from({0, static_cast<std::int32_t>(y)}, {viewport.width, static_cast<std::int32_t>(height)});
 
     if (!area) {
-      return std::unexpected(TreeError::invalid_geometry);
+      return std::unexpected(TreeError::INVALID_GEOMETRY);
     }
 
     const auto style = selected && rows[i].id == selected ? options.selected : options.normal;
@@ -65,7 +65,7 @@ std::expected<void, TreeError> paint_list(PaintContext &context, CellSize viewpo
   return {};
 }
 
-std::expected<bool, TreeError> list_shown(WidgetTree &tree, Node<Widget> node) {
+std::expected<bool, TreeError> listShown(WidgetTree &tree, Node<Widget> node) {
   while (node.id().generation != 0) {
     auto state = tree.inspect(node);
 

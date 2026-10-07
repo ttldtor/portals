@@ -6,6 +6,27 @@ permissions:
   contents: read
 
 jobs:
+  naming:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install naming checker toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-20 clang-tidy-20 g++-14 ninja-build
+      - name: Configure compilation database
+        run: >-
+          cmake -S . -B build/naming -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_C_COMPILER=clang-20
+          -DCMAKE_CXX_COMPILER=clang++-20
+          -DCMAKE_CXX_FLAGS=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/14
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          -DPORTALS_BUILD_TESTS=ON
+          -DPORTALS_BUILD_EXAMPLES=ON
+      - name: Check project names
+        run: python3 tools/check_naming.py build/naming --clang-tidy clang-tidy-20
+
   smoke:
     strategy:
       fail-fast: false

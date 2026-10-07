@@ -10,6 +10,7 @@ bool valid(OverlayOptions options) {
          grid_detail::valid(options.vertical);
 }
 } // namespace
+
 Overlay::Overlay(OverlayOptions options, SizePolicy policy) : SizedWidget(policy), options_(options) {
 }
 
@@ -17,24 +18,24 @@ OverlayOptions Overlay::options() const {
   return options_;
 }
 
-std::expected<CellSize, TreeError> Overlay::child_available(CellSize available) const {
+std::expected<CellSize, TreeError> Overlay::childAvailable(CellSize available) const {
   if (!valid(options_)) {
-    return std::unexpected(TreeError::invalid_argument);
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
   return grid_detail::inset(available, options_.padding);
 }
 
-std::expected<CellSize, TreeError> Overlay::measure_children(std::span<const MeasuredChild> children) const {
+std::expected<CellSize, TreeError> Overlay::measureChildren(std::span<const MeasuredChild> children) const {
   if (!valid(options_)) {
-    return std::unexpected(TreeError::invalid_argument);
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
   grid_detail::Wide width{}, height{};
 
   for (const auto &child : children) {
     if (!grid_detail::valid(child)) {
-      return std::unexpected(TreeError::invalid_argument);
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
     }
 
     width = std::max(width, grid_detail::requested(child.policy.width, child.desired.width));
@@ -45,9 +46,9 @@ std::expected<CellSize, TreeError> Overlay::measure_children(std::span<const Mea
                            height + options_.padding.top + options_.padding.bottom);
 }
 
-std::expected<std::vector<CellRect>, TreeError> Overlay::arrange_children(std::span<const MeasuredChild> children,
-                                                                          CellSize available) const {
-  auto content = child_available(available);
+std::expected<std::vector<CellRect>, TreeError> Overlay::arrangeChildren(std::span<const MeasuredChild> children,
+                                                                         CellSize available) const {
+  auto content = childAvailable(available);
 
   if (!content) {
     return std::unexpected(content.error());
@@ -56,14 +57,14 @@ std::expected<std::vector<CellRect>, TreeError> Overlay::arrange_children(std::s
   auto slot = CellRect::from({options_.padding.left, options_.padding.top}, *content);
 
   if (!slot) {
-    return std::unexpected(TreeError::invalid_geometry);
+    return std::unexpected(TreeError::INVALID_GEOMETRY);
   }
 
   try {
     std::vector<CellRect> result(0);
 
     if (children.size() > result.max_size()) {
-      return std::unexpected(TreeError::invalid_geometry);
+      return std::unexpected(TreeError::INVALID_GEOMETRY);
     }
 
     result.reserve(children.size());
@@ -80,13 +81,13 @@ std::expected<std::vector<CellRect>, TreeError> Overlay::arrange_children(std::s
 
     return std::expected<std::vector<CellRect>, TreeError>(std::in_place, result);
   } catch (const std::bad_alloc &) {
-    return std::unexpected(TreeError::no_memory);
+    return std::unexpected(TreeError::NO_MEMORY);
   }
 }
 
-std::expected<void, TreeError> set_overlay_options(WidgetTree &tree, Node<Overlay> node, OverlayOptions options) {
+std::expected<void, TreeError> setOverlayOptions(WidgetTree &tree, Node<Overlay> node, OverlayOptions options) {
   if (!valid(options)) {
-    return std::unexpected(TreeError::invalid_argument);
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
   auto result = tree.edit(node, [&](Overlay &widget) {
@@ -97,6 +98,6 @@ std::expected<void, TreeError> set_overlay_options(WidgetTree &tree, Node<Overla
     return result;
   }
 
-  return tree.invalidate(node, Invalidation::layout);
+  return tree.invalidate(node, Invalidation::LAYOUT);
 }
 } // namespace portals

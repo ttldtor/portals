@@ -11,7 +11,7 @@
 #endif
 
 namespace {
-constexpr DWORD failure_exit = 3;
+constexpr DWORD FAILURE_EXIT = 3;
 
 void diagnostic(const char *message) noexcept {
   DWORD length = 0;
@@ -21,13 +21,14 @@ void diagnostic(const char *message) noexcept {
   }
 
   DWORD written = 0;
+
   WriteFile(GetStdHandle(STD_ERROR_HANDLE), message, length, &written, nullptr);
 }
 
-[[noreturn]] void fail_process() noexcept {
-  TerminateProcess(GetCurrentProcess(), failure_exit);
+[[noreturn]] void failProcess() noexcept {
+  TerminateProcess(GetCurrentProcess(), FAILURE_EXIT);
   // TerminateProcess on the current process does not return on success.
-  std::_Exit(failure_exit);
+  std::_Exit(FAILURE_EXIT);
 }
 
 LONG WINAPI unhandled(EXCEPTION_POINTERS *) noexcept {
@@ -44,22 +45,23 @@ int __cdecl report(int type, char *message, int *) {
 
   diagnostic("Portals test: fatal CRT report.\n");
   diagnostic(message);
-  fail_process();
+  failProcess();
 }
 
-int __cdecl report_wide(int type, wchar_t *message, int *) {
+int __cdecl reportWide(int type, wchar_t *message, int *) {
   if (type != _CRT_ASSERT && type != _CRT_ERROR) {
     return FALSE;
   }
 
   diagnostic("Portals test: fatal wide CRT report.\n");
+
   char text[4096]{};
 
   if (WideCharToMultiByte(CP_UTF8, 0, message, -1, text, sizeof(text), nullptr, nullptr) > 0) {
     diagnostic(text);
   }
 
-  fail_process();
+  failProcess();
 }
 #endif
 
@@ -71,21 +73,22 @@ struct TestProcessSetup {
     _set_error_mode(_OUT_TO_STDERR);
     _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
 #  ifdef _DEBUG
-    constexpr int report_types[]{_CRT_WARN, _CRT_ERROR, _CRT_ASSERT};
-    for (int type : report_types) {
+    constexpr int REPORT_TYPES[]{_CRT_WARN, _CRT_ERROR, _CRT_ASSERT};
+
+    for (int type : REPORT_TYPES) {
       _CrtSetReportMode(type, _CRTDBG_MODE_FILE);
       _CrtSetReportFile(type, _CRTDBG_FILE_STDERR);
     }
 
     if (_CrtSetReportHook2(_CRT_RPTHOOK_INSTALL, report) < 0 ||
-        _CrtSetReportHookW2(_CRT_RPTHOOK_INSTALL, report_wide) < 0) {
+        _CrtSetReportHookW2(_CRT_RPTHOOK_INSTALL, reportWide) < 0) {
       diagnostic("Portals test: cannot install noninteractive CRT reporting.\n");
-      fail_process();
+      failProcess();
     }
 #  endif
 #endif
   }
 };
 
-const TestProcessSetup process_setup;
+const TestProcessSetup PROCESS_SETUP;
 } // namespace

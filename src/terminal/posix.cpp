@@ -16,12 +16,12 @@
 
 namespace portals {
 namespace {
-TerminalError system_error(int code = errno) {
-  return {TerminalErrorKind::system, code, 0};
+TerminalError systemError(int code = errno) {
+  return {TerminalErrorKind::SYSTEM, code, 0};
 }
 
-TerminalError closed_error() {
-  return {TerminalErrorKind::closed, 0, 0};
+TerminalError closedError() {
+  return {TerminalErrorKind::CLOSED, 0, 0};
 }
 
 struct DescriptorState {
@@ -59,7 +59,7 @@ std::expected<CellSize, TerminalError> dimensions(int descriptor) noexcept {
   winsize size{};
 
   if (ioctl(descriptor, TIOCGWINSZ, &size) < 0) {
-    return std::unexpected(system_error());
+    return std::unexpected(systemError());
   }
 
   return CellSize{size.ws_col, size.ws_row};
@@ -90,7 +90,7 @@ bool configure(DescriptorState &state, termios modes) {
   return fcntl(state.descriptor, F_SETFL, state.flags | O_NONBLOCK) == 0;
 }
 
-bool valid_options(NativeTerminalHandles handles, TerminalOptions options) {
+bool validOptions(NativeTerminalHandles handles, TerminalOptions options) {
   return handles.input >= 0 && handles.input <= INT_MAX && handles.output >= 0 && handles.output <= INT_MAX &&
          options.max_input_bytes > 0 && options.max_input_events > 0 && options.max_output_bytes > 0 &&
          options.max_input_bytes <= static_cast<std::size_t>(SSIZE_MAX) &&
@@ -121,27 +121,31 @@ struct TerminalSession::Impl {
 
 TerminalSession::TerminalSession(std::unique_ptr<Impl> impl) noexcept : impl_(std::move(impl)) {
 }
+
 TerminalSession::TerminalSession(TerminalSession &&) noexcept = default;
 TerminalSession &TerminalSession::operator=(TerminalSession &&) noexcept = default;
 TerminalSession::~TerminalSession() noexcept = default;
 
 std::expected<TerminalSession, TerminalError> TerminalSession::open(NativeTerminalHandles handles,
                                                                     TerminalOptions options) {
-  if (!valid_options(handles, options)) {
-    return std::unexpected(TerminalError{TerminalErrorKind::invalid_options, 0, 0});
+  if (!validOptions(handles, options)) {
+    return std::unexpected(TerminalError{TerminalErrorKind::INVALID_OPTIONS, 0, 0});
   }
 
   const auto input = static_cast<int>(handles.input);
   const auto output = static_cast<int>(handles.output);
 
   if (isatty(input) != 1 || isatty(output) != 1) {
-    return std::unexpected(TerminalError{TerminalErrorKind::unsupported, errno, 0});
+    return std::unexpected(TerminalError{TerminalErrorKind::UNSUPPORTED, errno, 0});
   }
 
   auto impl = std::make_unique<Impl>();
+
   impl->options = options;
+
   const auto fail = [&impl]() -> std::expected<TerminalSession, TerminalError> {
-    auto error = system_error();
+    auto error = systemError();
+
     error.restoration_code = impl->restore();
 
     return std::unexpected(error);
@@ -153,6 +157,7 @@ std::expected<TerminalSession, TerminalError> TerminalSession::open(NativeTermin
   }
 
   auto raw = impl->input.modes;
+
   raw.c_iflag &= static_cast<tcflag_t>(~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON));
   raw.c_oflag &= static_cast<tcflag_t>(~OPOST);
   raw.c_lflag &= static_cast<tcflag_t>(~(ECHO | ECHONL | ICANON | ISIG | IEXTEN));
@@ -162,6 +167,7 @@ std::expected<TerminalSession, TerminalError> TerminalSession::open(NativeTermin
   raw.c_cc[VTIME] = 0;
 
   auto output_modes = impl->output.modes;
+
   output_modes.c_oflag &= static_cast<tcflag_t>(~OPOST);
 
   // Configure output first; a shared terminal must end in the full input raw mode.
@@ -185,7 +191,7 @@ std::expected<TerminalSession, TerminalError> TerminalSession::open(NativeTermin
 
 std::expected<CellSize, TerminalError> TerminalSession::size() const noexcept {
   if (!impl_) {
-    return std::unexpected(closed_error());
+    return std::unexpected(closedError());
   }
 
   return dimensions(impl_->output.descriptor);
@@ -193,14 +199,14 @@ std::expected<CellSize, TerminalError> TerminalSession::size() const noexcept {
 
 TerminalRead TerminalSession::read(TerminalDeadline deadline, std::stop_token stop) {
   if (!impl_) {
-    return {TerminalStatus::error, {}, {}, {}, closed_error()};
+    return {TerminalStatus::FAILED, {}, {}, {}, closedError()};
   }
 
-  const auto &io = detail::native_posix_io();
+  const auto &io = detail::nativePosixIo();
 
   for (;;) {
     if (stop.stop_requested() || io.now() >= deadline) {
-      return {stop.stop_requested() ? TerminalStatus::stopped : TerminalStatus::deadline, {}, {}, {}, {}};
+      return {stop.stop_requested() ? TerminalStatus::STOPPED : TerminalStatus::DEADLINE, {}, {}, {}, {}};
     }
 
     auto current_size = size();
@@ -212,27 +218,27 @@ TerminalRead TerminalSession::read(TerminalDeadline deadline, std::stop_token st
       const int ready = io.poll(&hung_up, 1, 0);
 
       if (ready > 0 && (hung_up.revents & POLLHUP) != 0) {
-        return detail::read_posix(impl_->input.descriptor, impl_->options.max_input_bytes, deadline, stop, io);
+        return detail::readPosix(impl_->input.descriptor, impl_->options.max_input_bytes, deadline, stop, io);
       }
 
-      return {TerminalStatus::error, {}, {}, {}, current_size.error()};
+      return {TerminalStatus::FAILED, {}, {}, {}, current_size.error()};
     }
 
     if (*current_size != impl_->last_size) {
       impl_->last_size = *current_size;
 
-      return {TerminalStatus::progress, {}, {}, *current_size, {}};
+      return {TerminalStatus::PROGRESS, {}, {}, *current_size, {}};
     }
 
     pollfd descriptor{impl_->input.descriptor, POLLIN, 0};
-    const int waited = io.poll(&descriptor, 1, detail::poll_timeout(deadline, impl_->options.wait_cadence, io.now()));
+    const int waited = io.poll(&descriptor, 1, detail::pollTimeout(deadline, impl_->options.wait_cadence, io.now()));
 
     if (waited < 0) {
       if (errno == EINTR) {
         continue;
       }
 
-      return {TerminalStatus::error, {}, {}, {}, system_error()};
+      return {TerminalStatus::FAILED, {}, {}, {}, systemError()};
     }
 
     if (waited == 0) {
@@ -240,11 +246,11 @@ TerminalRead TerminalSession::read(TerminalDeadline deadline, std::stop_token st
     }
 
     if ((descriptor.revents & POLLNVAL) != 0) {
-      return {TerminalStatus::error, {}, {}, {}, system_error(EBADF)};
+      return {TerminalStatus::FAILED, {}, {}, {}, systemError(EBADF)};
     }
 
     // POLLIN and POLLHUP may coexist: deliver buffered bytes before EOF.
-    auto result = detail::read_posix(impl_->input.descriptor, impl_->options.max_input_bytes, deadline, stop, io);
+    auto result = detail::readPosix(impl_->input.descriptor, impl_->options.max_input_bytes, deadline, stop, io);
 
     if (result.error && (result.error->native_code == EAGAIN || result.error->native_code == EWOULDBLOCK)) {
       continue;
@@ -256,19 +262,20 @@ TerminalRead TerminalSession::read(TerminalDeadline deadline, std::stop_token st
 
 std::expected<void, TerminalError> TerminalSession::submit(std::string bytes) {
   if (!impl_) {
-    return std::unexpected(closed_error());
+    return std::unexpected(closedError());
   }
 
-  if (pending_bytes() != 0) {
-    return std::unexpected(TerminalError{TerminalErrorKind::output_pending, 0, 0});
+  if (pendingBytes() != 0) {
+    return std::unexpected(TerminalError{TerminalErrorKind::OUTPUT_PENDING, 0, 0});
   }
 
   if (bytes.size() > impl_->options.max_output_bytes) {
-    return std::unexpected(TerminalError{TerminalErrorKind::output_limit, 0, 0});
+    return std::unexpected(TerminalError{TerminalErrorKind::OUTPUT_LIMIT, 0, 0});
   }
 
   // Do not retain an arbitrarily large reserved capacity from the caller.
   std::string compact(bytes.data(), bytes.size());
+
   impl_->pending.swap(compact);
   impl_->offset = 0;
 
@@ -277,11 +284,11 @@ std::expected<void, TerminalError> TerminalSession::submit(std::string bytes) {
 
 TerminalWrite TerminalSession::flush(TerminalDeadline deadline, std::stop_token stop) {
   if (!impl_) {
-    return {TerminalStatus::error, 0, 0, closed_error()};
+    return {TerminalStatus::FAILED, 0, 0, closedError()};
   }
 
-  auto result = detail::flush_posix(impl_->output.descriptor, impl_->pending, impl_->offset, deadline, stop,
-                                    impl_->options.wait_cadence, detail::native_posix_io());
+  auto result = detail::flushPosix(impl_->output.descriptor, impl_->pending, impl_->offset, deadline, stop,
+                                   impl_->options.wait_cadence, detail::nativePosixIo());
 
   if (result.pending == 0) {
     impl_->pending.clear();
@@ -291,7 +298,7 @@ TerminalWrite TerminalSession::flush(TerminalDeadline deadline, std::stop_token 
   return result;
 }
 
-std::size_t TerminalSession::pending_bytes() const noexcept {
+std::size_t TerminalSession::pendingBytes() const noexcept {
   return impl_ ? impl_->pending.size() - impl_->offset : 0;
 }
 
@@ -301,10 +308,11 @@ std::expected<void, TerminalError> TerminalSession::close() noexcept {
   }
 
   const int error = impl_->restore();
+
   impl_.reset();
 
   if (error != 0) {
-    return std::unexpected(system_error(error));
+    return std::unexpected(systemError(error));
   }
 
   return {};

@@ -16,17 +16,17 @@ namespace portals {
 /** @brief Terminal policy for printable East Asian Ambiguous scalars. */
 enum class AmbiguousWidth {
   /** @brief Use one cell. */
-  narrow,
+  NARROW,
   /** @brief Use two cells. */
-  wide
+  WIDE
 };
 
 /** @brief Terminal policy for recognized emoji clusters, including single emoji. */
 enum class EmojiWidth {
   /** @brief Use one cell. */
-  one = 1,
+  ONE = 1,
   /** @brief Use two cells. */
-  two = 2
+  TWO = 2
 };
 
 /**
@@ -38,9 +38,9 @@ enum class EmojiWidth {
  */
 struct WidthPolicy {
   /** @brief Width of printable Ambiguous scalars. */
-  AmbiguousWidth ambiguous{AmbiguousWidth::narrow};
+  AmbiguousWidth ambiguous{AmbiguousWidth::NARROW};
   /** @brief Width of recognized emoji clusters. */
-  EmojiWidth emoji{EmojiWidth::two};
+  EmojiWidth emoji{EmojiWidth::TWO};
   /** @brief Caller-owned terminal capability revision, included in equality. */
   std::uint64_t revision{};
   /** @brief Compare the full cache-key policy.
@@ -65,19 +65,19 @@ struct TextLimits {
 /** @brief Observable text construction/cursor failure. */
 enum class TextErrorKind {
   /** @brief Invalid UTF-8, including overlong, surrogate or truncated input. */
-  invalid_utf8,
+  INVALID_UTF8,
   /** @brief Input length exceeds its configured/representation limit. */
-  input_limit,
+  INPUT_LIMIT,
   /** @brief One whole cluster exceeds its byte limit. */
-  cluster_limit,
+  CLUSTER_LIMIT,
   /** @brief The number of clusters exceeds its limit. */
-  grapheme_limit,
+  GRAPHEME_LIMIT,
   /** @brief Cell accumulation exceeds its configured/int32_t limit. */
-  cell_limit,
+  CELL_LIMIT,
   /** @brief A width policy enum value is not recognized. */
-  invalid_policy,
+  INVALID_POLICY,
   /** @brief A cursor offset is outside the text or inside a cluster. */
-  not_boundary
+  NOT_BOUNDARY
 };
 
 /** @brief Owning error value, independent of the failed input's lifetime. */
@@ -99,9 +99,9 @@ struct TextError {
 /** @brief How a cell renderer must display a complete logical cluster. */
 enum class TextDisplay {
   /** @brief Original cluster bytes may be displayed under the selected policy. */
-  printable,
+  PRINTABLE,
   /** @brief Display ASCII '?' in one cell; never emit the original bytes. */
-  unsupported
+  UNSUPPORTED
 };
 
 /** @brief Owning metadata for a half-open UTF-8 byte range. */
@@ -192,24 +192,24 @@ public:
   /**
    * @brief Advance a byte-boundary cursor by one cluster; end stays at end.
    * @param byte_offset Valid boundary including zero and byte length.
-   * @return Next boundary or not_boundary with the supplied offset.
+   * @return Next boundary or NOT_BOUNDARY with the supplied offset.
    * @note Any thread; no mutation, allocation, exceptions or invalidation.
    */
-  [[nodiscard]] std::expected<std::size_t, TextError> next_cursor(std::size_t byte_offset) const noexcept;
+  [[nodiscard]] std::expected<std::size_t, TextError> nextCursor(std::size_t byte_offset) const noexcept;
   /**
    * @brief Retreat a byte-boundary cursor by one cluster; zero stays at zero.
    * @param byte_offset Valid boundary including zero and byte length.
-   * @return Previous boundary or not_boundary with the supplied offset.
+   * @return Previous boundary or NOT_BOUNDARY with the supplied offset.
    * @note Any thread; no mutation, allocation, exceptions or invalidation.
    */
-  [[nodiscard]] std::expected<std::size_t, TextError> previous_cursor(std::size_t byte_offset) const noexcept;
+  [[nodiscard]] std::expected<std::size_t, TextError> previousCursor(std::size_t byte_offset) const noexcept;
   /**
    * @brief Return the maximal prefix fitting a cell budget, stopping before a wide cluster that cannot fit.
    * @param max_cells Available cells; negative values normalize to zero.
    * @return Independent metadata at a whole-cluster boundary, with no partial glyph.
    * @note Any thread; no mutation, allocation, exceptions or invalidation.
    */
-  [[nodiscard]] TextClip clip_prefix(std::int32_t max_cells) const noexcept;
+  [[nodiscard]] TextClip clipPrefix(std::int32_t max_cells) const noexcept;
 
 private:
   GraphemeText() = default;

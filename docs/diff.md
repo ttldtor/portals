@@ -1,7 +1,7 @@
 # Diff encoding and frame output
 
 `<portals/diff.hpp>` separates pure framebuffer comparison from terminal I/O.
-`encode_diff(previous, next, max_bytes)` returns one owning bounded VT byte string.
+`encodeDiff(previous, next, max_bytes)` returns one owning bounded VT byte string.
 `FrameWriter::submit` takes a move-only desired frame only after successful
 encoding. It makes no transport calls, so it can run after paint; `flush` performs
 I/O separately on the terminal owner. The full-frame renderer remains independent.
@@ -36,7 +36,7 @@ transport bytes are owning values; caller views expire after an accepted move.
 The encoder borrows only for the duration of the call. No view survives mutation.
 
 A second submission while pending is rejected without consuming its argument.
-There is no queued backlog or silent frame coalescing. `committed_frame()` borrows
+There is no queued backlog or silent frame coalescing. `committedFrame()` borrows
 the last fully transmitted frame. During partial output it is historical, **not**
 a description of the physical screen. `pending()` distinguishes this state.
 After complete, consistent transport progress, the pending frame becomes the

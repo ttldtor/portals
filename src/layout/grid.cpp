@@ -15,23 +15,23 @@ std::expected<void, TreeError> validate(const GridOptions &options) {
   if (options.columns.empty() || options.rows.empty() || options.max_tracks_per_axis == 0 ||
       options.max_placements == 0 || options.column_gap < 0 || options.row_gap < 0 ||
       !grid_detail::valid(options.padding)) {
-    return std::unexpected(TreeError::invalid_argument);
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
   if (options.columns.size() > options.max_tracks_per_axis || options.rows.size() > options.max_tracks_per_axis ||
       options.cells.size() > options.max_placements) {
-    return std::unexpected(TreeError::node_limit);
+    return std::unexpected(TreeError::NODE_LIMIT);
   }
 
-  if (options.columns.size() > static_cast<std::size_t>(grid_detail::cell_limit) ||
-      options.rows.size() > static_cast<std::size_t>(grid_detail::cell_limit)) {
-    return std::unexpected(TreeError::invalid_geometry);
+  if (options.columns.size() > static_cast<std::size_t>(grid_detail::CELL_LIMIT) ||
+      options.rows.size() > static_cast<std::size_t>(grid_detail::CELL_LIMIT)) {
+    return std::unexpected(TreeError::INVALID_GEOMETRY);
   }
 
   for (const auto &axis : {std::span(options.columns), std::span(options.rows)}) {
     for (auto track : axis) {
       if (!grid_detail::valid(track)) {
-        return std::unexpected(TreeError::invalid_argument);
+        return std::unexpected(TreeError::INVALID_ARGUMENT);
       }
     }
   }
@@ -42,12 +42,12 @@ std::expected<void, TreeError> validate(const GridOptions &options) {
     if (cell.node.session == 0 || cell.node.generation == 0 || !within(cell.row, cell.row_span, options.rows.size()) ||
         !within(cell.column, cell.column_span, options.columns.size()) || !grid_detail::valid(cell.horizontal) ||
         !grid_detail::valid(cell.vertical)) {
-      return std::unexpected(TreeError::invalid_argument);
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
     }
 
     for (std::size_t j = 0; j < i; ++j) {
       if (cell.node == options.cells[j].node) {
-        return std::unexpected(TreeError::invalid_argument);
+        return std::unexpected(TreeError::INVALID_ARGUMENT);
       }
     }
   }
@@ -77,7 +77,7 @@ void absorb(std::span<MeasuredChild> tracks, Wide demand, std::int32_t gap) {
     Wide eligible{};
 
     for (const auto &track : tracks) {
-      if (track.policy.width.mode != SizeMode::fixed && track.policy.width.preferred == intrinsic_extent &&
+      if (track.policy.width.mode != SizeMode::FIXED && track.policy.width.preferred == INTRINSIC_EXTENT &&
           track.desired.width < track.policy.width.maximum) {
         ++eligible;
       }
@@ -92,7 +92,7 @@ void absorb(std::span<MeasuredChild> tracks, Wide demand, std::int32_t gap) {
 
     // Saturate capped tracks before assigning remainder cells to the remaining tracks.
     for (auto &track : tracks) {
-      if (track.policy.width.mode == SizeMode::fixed || track.policy.width.preferred != intrinsic_extent ||
+      if (track.policy.width.mode == SizeMode::FIXED || track.policy.width.preferred != INTRINSIC_EXTENT ||
           track.desired.width == track.policy.width.maximum) {
         continue;
       }
@@ -115,7 +115,7 @@ void absorb(std::span<MeasuredChild> tracks, Wide demand, std::int32_t gap) {
     Wide remainder = deficit % eligible;
 
     for (auto &track : tracks) {
-      if (track.policy.width.mode == SizeMode::fixed || track.policy.width.preferred != intrinsic_extent ||
+      if (track.policy.width.mode == SizeMode::FIXED || track.policy.width.preferred != INTRINSIC_EXTENT ||
           track.desired.width == track.policy.width.maximum) {
         continue;
       }
@@ -136,7 +136,7 @@ std::expected<std::vector<MeasuredChild>, TreeError> tracks(const GridOptions &o
   std::vector<MeasuredChild> result(0);
 
   if (policies.size() > result.max_size()) {
-    return std::unexpected(TreeError::invalid_geometry);
+    return std::unexpected(TreeError::INVALID_GEOMETRY);
   }
 
   result.reserve(policies.size());
@@ -155,7 +155,7 @@ std::expected<std::vector<MeasuredChild>, TreeError> tracks(const GridOptions &o
       const auto *cell = placement(options, child.node);
 
       if (!cell || !grid_detail::valid(child)) {
-        return std::unexpected(TreeError::invalid_argument);
+        return std::unexpected(TreeError::INVALID_ARGUMENT);
       }
 
       const auto first = horizontal ? cell->column : cell->row;
@@ -176,8 +176,8 @@ std::expected<std::vector<MeasuredChild>, TreeError> tracks(const GridOptions &o
 }
 
 // Reuse one-dimensional allocation for each axis. Rows use the same x/width solver
-// as columns; cell_rect translates its results back to two-dimensional geometry.
-Row axis_layout(std::int32_t gap) {
+// as columns; cellRect translates its results back to two-dimensional geometry.
+Row axisLayout(std::int32_t gap) {
   LinearOptions options;
 
   options.gap = gap;
@@ -185,8 +185,8 @@ Row axis_layout(std::int32_t gap) {
   return Row(options);
 }
 
-std::expected<CellRect, TreeError> cell_rect(const GridCell &cell, std::span<const CellRect> columns,
-                                             std::span<const CellRect> rows, LayoutPadding padding) {
+std::expected<CellRect, TreeError> cellRect(const GridCell &cell, std::span<const CellRect> columns,
+                                            std::span<const CellRect> rows, LayoutPadding padding) {
   const auto &left = columns[cell.column];
   const auto &right = columns[cell.column + cell.column_span - 1];
   const auto &top = rows[cell.row];
@@ -196,13 +196,13 @@ std::expected<CellRect, TreeError> cell_rect(const GridCell &cell, std::span<con
   auto origin = grid_detail::size(Wide{left.origin().x} + padding.left, Wide{top.origin().x} + padding.top);
 
   if (!dimensions || !origin) {
-    return std::unexpected(TreeError::invalid_geometry);
+    return std::unexpected(TreeError::INVALID_GEOMETRY);
   }
 
   auto result = CellRect::from({origin->width, origin->height}, *dimensions);
 
   if (!result) {
-    return std::unexpected(TreeError::invalid_geometry);
+    return std::unexpected(TreeError::INVALID_GEOMETRY);
   }
 
   return *result;
@@ -216,7 +216,7 @@ GridOptions Grid::options() const {
   return options_;
 }
 
-std::expected<CellSize, TreeError> Grid::child_available(CellSize available) const {
+std::expected<CellSize, TreeError> Grid::childAvailable(CellSize available) const {
   auto checked = validate(options_);
 
   if (!checked) {
@@ -226,7 +226,7 @@ std::expected<CellSize, TreeError> Grid::child_available(CellSize available) con
   return grid_detail::inset(available, options_.padding);
 }
 
-std::expected<CellSize, TreeError> Grid::measure_children(std::span<const MeasuredChild> children) const {
+std::expected<CellSize, TreeError> Grid::measureChildren(std::span<const MeasuredChild> children) const {
   auto checked = validate(options_);
 
   if (!checked) {
@@ -234,7 +234,7 @@ std::expected<CellSize, TreeError> Grid::measure_children(std::span<const Measur
   }
 
   if (children.size() > options_.max_placements) {
-    return std::unexpected(TreeError::node_limit);
+    return std::unexpected(TreeError::NODE_LIMIT);
   }
 
   try {
@@ -245,8 +245,8 @@ std::expected<CellSize, TreeError> Grid::measure_children(std::span<const Measur
       return std::unexpected(columns ? rows.error() : columns.error());
     }
 
-    auto width = axis_layout(options_.column_gap).measure_children(*columns);
-    auto height = axis_layout(options_.row_gap).measure_children(*rows);
+    auto width = axisLayout(options_.column_gap).measureChildren(*columns);
+    auto height = axisLayout(options_.row_gap).measureChildren(*rows);
 
     if (!width || !height) {
       return std::unexpected(width ? height.error() : width.error());
@@ -254,20 +254,20 @@ std::expected<CellSize, TreeError> Grid::measure_children(std::span<const Measur
 
     return grid_detail::padded({width->width, height->width}, options_.padding);
   } catch (const std::bad_alloc &) {
-    return std::unexpected(TreeError::no_memory);
+    return std::unexpected(TreeError::NO_MEMORY);
   }
 }
 
-std::expected<std::vector<CellRect>, TreeError> Grid::arrange_children(std::span<const MeasuredChild> children,
-                                                                       CellSize available) const {
-  auto content = child_available(available);
+std::expected<std::vector<CellRect>, TreeError> Grid::arrangeChildren(std::span<const MeasuredChild> children,
+                                                                      CellSize available) const {
+  auto content = childAvailable(available);
 
   if (!content) {
     return std::unexpected(content.error());
   }
 
   if (children.size() > options_.max_placements) {
-    return std::unexpected(TreeError::node_limit);
+    return std::unexpected(TreeError::NODE_LIMIT);
   }
 
   try {
@@ -278,8 +278,8 @@ std::expected<std::vector<CellRect>, TreeError> Grid::arrange_children(std::span
       return std::unexpected(columns ? rows.error() : columns.error());
     }
 
-    auto horizontal = axis_layout(options_.column_gap).arrange_children(*columns, {content->width, 0});
-    auto vertical = axis_layout(options_.row_gap).arrange_children(*rows, {content->height, 0});
+    auto horizontal = axisLayout(options_.column_gap).arrangeChildren(*columns, {content->width, 0});
+    auto vertical = axisLayout(options_.row_gap).arrangeChildren(*rows, {content->height, 0});
 
     if (!horizontal || !vertical) {
       return std::unexpected(horizontal ? vertical.error() : horizontal.error());
@@ -288,14 +288,14 @@ std::expected<std::vector<CellRect>, TreeError> Grid::arrange_children(std::span
     std::vector<CellRect> result(0);
 
     if (children.size() > result.max_size()) {
-      return std::unexpected(TreeError::invalid_geometry);
+      return std::unexpected(TreeError::INVALID_GEOMETRY);
     }
 
     result.reserve(children.size());
 
     for (const auto &child : children) {
       const auto &cell = *placement(options_, child.node);
-      auto slot = cell_rect(cell, *horizontal, *vertical, options_.padding);
+      auto slot = cellRect(cell, *horizontal, *vertical, options_.padding);
 
       if (!slot) {
         return std::unexpected(slot.error());
@@ -312,11 +312,11 @@ std::expected<std::vector<CellRect>, TreeError> Grid::arrange_children(std::span
 
     return std::expected<std::vector<CellRect>, TreeError>(std::in_place, result);
   } catch (const std::bad_alloc &) {
-    return std::unexpected(TreeError::no_memory);
+    return std::unexpected(TreeError::NO_MEMORY);
   }
 }
 
-std::expected<void, TreeError> set_grid_options(WidgetTree &tree, Node<Grid> node, const GridOptions &options) {
+std::expected<void, TreeError> setGridOptions(WidgetTree &tree, Node<Grid> node, const GridOptions &options) {
   auto checked = validate(options);
 
   if (!checked) {
@@ -340,9 +340,9 @@ std::expected<void, TreeError> set_grid_options(WidgetTree &tree, Node<Grid> nod
       return result;
     }
 
-    return tree.invalidate(node, Invalidation::layout);
+    return tree.invalidate(node, Invalidation::LAYOUT);
   } catch (const std::bad_alloc &) {
-    return std::unexpected(TreeError::no_memory);
+    return std::unexpected(TreeError::NO_MEMORY);
   }
 }
 } // namespace portals

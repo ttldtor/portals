@@ -32,39 +32,39 @@ struct InputModifiers {
 
 /** @brief Semantic key identities; character uses KeyEvent::scalar. */
 enum class InputKey {
-  character,
-  escape,
-  enter,
-  tab,
-  backspace,
-  up,
-  down,
-  right,
-  left,
-  home,
-  end,
-  insert,
-  delete_key,
-  page_up,
-  page_down,
-  f1,
-  f2,
-  f3,
-  f4,
-  f5,
-  f6,
-  f7,
-  f8,
-  f9,
-  f10,
-  f11,
-  f12
+  CHARACTER,
+  ESCAPE,
+  ENTER,
+  TAB,
+  BACKSPACE,
+  UP,
+  DOWN,
+  RIGHT,
+  LEFT,
+  HOME,
+  END,
+  INSERT,
+  DELETE_KEY,
+  PAGE_UP,
+  PAGE_DOWN,
+  F1,
+  F2,
+  F3,
+  F4,
+  F5,
+  F6,
+  F7,
+  F8,
+  F9,
+  F10,
+  F11,
+  F12
 };
 /** @brief Native adapters may report repeat/release; VT emits press only. */
 enum class KeyAction {
-  press,
-  repeat,
-  release
+  PRESS,
+  REPEAT,
+  RELEASE
 };
 
 /** @brief Owning key value without an inferred physical keyboard scan code. */
@@ -91,23 +91,23 @@ struct TextInputEvent {
   bool operator==(const TextInputEvent &other) const = default;
 };
 
-/** @brief SGR button identity; no_button is used for unbuttoned motion. */
+/** @brief SGR button identity; NO_BUTTON is used for unbuttoned motion. */
 enum class MouseButton {
-  left,
-  middle,
-  right,
-  no_button,
-  wheel_up,
-  wheel_down,
-  wheel_left,
-  wheel_right
+  LEFT,
+  MIDDLE,
+  RIGHT,
+  NO_BUTTON,
+  WHEEL_UP,
+  WHEEL_DOWN,
+  WHEEL_LEFT,
+  WHEEL_RIGHT
 };
 /** @brief Motion and wheel are separate from button transitions. */
 enum class MouseAction {
-  press,
-  release,
-  move,
-  scroll
+  PRESS,
+  RELEASE,
+  MOVE,
+  SCROLL
 };
 
 /** @brief Checked zero-based cell coordinates; no viewport clipping is performed. */
@@ -138,9 +138,10 @@ struct PasteInputEvent {
 
 /** @brief Supported syntactic reply kinds, not proof of terminal identity. */
 enum class InputProbeKind {
-  primary_device_attributes,
-  cursor_position
+  PRIMARY_DEVICE_ATTRIBUTES,
+  CURSOR_POSITION
 };
+
 /** @brief A single-use expected reply window, captured at sequence start. */
 struct InputProbeWindow {
   bool device_attributes{};   ///< Allow one primary DA candidate.
@@ -149,6 +150,7 @@ struct InputProbeWindow {
   InputTime opens_at{};       ///< Inclusive start.
   InputTime deadline{};       ///< Exclusive end.
 };
+
 /** @brief Syntactically matching reply within an explicitly expected window. */
 struct InputProbeCandidate {
   InputProbeKind kind{};                  ///< Reply grammar.
@@ -164,16 +166,17 @@ struct InputProbeCandidate {
 
 /** @brief Recoverable decode issues; timeout may also leave the decoder failed. */
 enum class InputIssueKind {
-  invalid_utf8,
-  truncated,
-  unknown_sequence,
-  invalid_sequence,
-  sequence_limit,
-  parameter_limit,
-  numeric_overflow,
-  paste_limit,
-  timeout
+  INVALID_UTF8,
+  TRUNCATED,
+  UNKNOWN_SEQUENCE,
+  INVALID_SEQUENCE,
+  SEQUENCE_LIMIT,
+  PARAMETER_LIMIT,
+  NUMERIC_OVERFLOW,
+  PASTE_LIMIT,
+  TIMEOUT
 };
+
 /** @brief Byte offsets describe the consumed rejected prefix, without raw ANSI diagnostics.
  * Subsequent discard bytes are accounted by InputStep::consumed, not another issue.
  */
@@ -194,21 +197,22 @@ using InputEvent =
 
 /** @brief Construction and call errors, separate from events caused by input bytes. */
 enum class InputError {
-  invalid_options,
-  backward_time,
-  closed,
-  failed,
-  offset_overflow,
-  invalid_window
+  INVALID_OPTIONS,
+  BACKWARD_TIME,
+  CLOSED,
+  FAILED,
+  OFFSET_OVERFLOW,
+  INVALID_WINDOW
 };
 /** @brief Why a pull stopped; event is delivered before calling again. */
 enum class InputStatus {
-  event,
-  need_input,
-  work_limit,
-  finished,
-  failed
+  EVENT,
+  NEED_INPUT,
+  WORK_LIMIT,
+  FINISHED,
+  FAILED
 };
+
 /** @brief One bounded pull result; no hidden output queue. */
 struct InputStep {
   std::size_t consumed{};          ///< Prefix of this call's bytes accepted exactly once.
@@ -247,7 +251,7 @@ class InputDecoder {
 public:
   /** @brief Validate options and create an empty decoder. No allocations or I/O.
    * @param options Work, storage and timeout bounds for the lifetime of this stream.
-   * @return An empty decoder, or invalid_options when a bound is outside its documented range.
+   * @return An empty decoder, or INVALID_OPTIONS when a bound is outside its documented range.
    */
   [[nodiscard]] static std::expected<InputDecoder, InputError> create(InputOptions options = {});
   InputDecoder(const InputDecoder &) = delete;            ///< Stateful streams cannot be copied.
@@ -268,7 +272,7 @@ public:
    * @param now Monotonic arrival timestamp; equal values are allowed.
    * @return Consumed count/event/stop reason, or call error before consuming input.
    * @note Empty input advances time and drains pending events. Repeat with an empty
-   * view until need_input/failed to drain. Errors do not consume bytes. No invalidation
+   * view until NEED_INPUT/failed to drain. Errors do not consume bytes. No invalidation
    * of earlier events. Allocation exceptions require reset (discard session suffix).
    */
   [[nodiscard]] std::expected<InputStep, InputError> next(std::string_view bytes, InputTime now);
@@ -285,12 +289,12 @@ public:
    */
   [[nodiscard]] std::optional<InputTime> deadline() const noexcept;
   /** @brief Replace expected replies; valid only in ground with no pending event.
-   * Returns invalid_window if deadline <= opens_at or not at a sequence boundary.
+   * Returns INVALID_WINDOW if deadline <= opens_at or not at a sequence boundary.
    * Does not change time, own a query, send bytes, or authenticate future candidates.
    * @param window Expected single-use reply kinds, correlation generation and half-open time interval.
-   * @return Success, or invalid_window when the interval or current stream boundary is invalid.
+   * @return Success, or INVALID_WINDOW when the interval or current stream boundary is invalid.
    */
-  [[nodiscard]] std::expected<void, InputError> expect_replies(InputProbeWindow window) noexcept;
+  [[nodiscard]] std::expected<void, InputError> expectReplies(InputProbeWindow window) noexcept;
   /** @brief Drop pending input/window/time/offset and recover at an explicit new session boundary.
    * Options remain. Frees retained paste; does not invalidate already returned events.
    */
@@ -298,19 +302,21 @@ public:
 
 private:
   enum class State {
-    ground,
-    escape,
-    utf8,
-    csi,
-    ss3,
-    discard_csi,
-    string,
-    paste,
-    discard_paste,
-    failed
+    GROUND,
+    ESCAPE,
+    UTF8,
+    CSI,
+    SS3,
+    DISCARD_CSI,
+    STRING,
+    PASTE,
+    DISCARD_PASTE,
+    FAILED
   };
+
   explicit InputDecoder(InputOptions options) : options_(options) {
   }
+
   std::expected<InputStep, InputError> pull(std::string_view bytes, InputTime now, bool ending);
   std::optional<InputEvent> byte(unsigned char value, bool &consume, InputTime now);
   std::optional<InputEvent> ground(unsigned char value, bool alt, InputTime now);
@@ -320,10 +326,10 @@ private:
   std::optional<InputEvent> expire(InputTime now);
   InputIssue issue(InputIssueKind kind) const noexcept;
   void begin(State state, InputTime now, InputTime duration) noexcept;
-  void clear_sequence() noexcept;
+  void clearSequence() noexcept;
 
   InputOptions options_;
-  State state_{State::ground};
+  State state_{State::GROUND};
   std::optional<InputTime> last_time_;
   InputTime deadline_{};
   InputTime sequence_started_{};

@@ -76,12 +76,14 @@ namespace {
 using namespace portals;
 using gallery::take;
 int failures{};
+
 void check(bool condition, const char *message) {
   if (!condition) {
     std::cerr << message << '\n';
     ++failures;
   }
 }
+
 std::string row(const test_support::VtOracle::Snapshot &snapshot, int y) {
   std::string result;
 
@@ -99,7 +101,8 @@ std::string row(const test_support::VtOracle::Snapshot &snapshot, int y) {
 
   return result;
 }
-void gallery_replay() {
+
+void galleryReplay() {
   gallery::Scene scene;
   test_support::FakeClock clock;
   test_support::TestTerminal terminal(clock, {30, 9});
@@ -127,18 +130,19 @@ void gallery_replay() {
   check(take(scene.tree->measure(scene.label, {})).width == 13, "label measures Unicode cells rather than bytes");
 
   scene.input("\r");
-  take(scene.router->dispatch(KeyEvent{InputKey::enter, 0, {}, KeyAction::release}));
+  take(scene.router->dispatch(KeyEvent{InputKey::ENTER, 0, {}, KeyAction::RELEASE}));
   scene.input(" ");
   scene.input("\x1b[<0;2;3M\x1b[<0;2;3m");
   check(scene.calls == 3, "Enter, Space and mouse press each activate once; releases do not");
-  take(scene.router->invoke(scene.button, {Action::activate}));
+  take(scene.router->invoke(scene.button, {Action::ACTIVATE}));
   check(scene.calls == 4, "semantic activation shares the same handler");
   scene.input("\x1b[200~ \x1b[201~");
   take(scene.router->dispatch(TextInputEvent{U' ', {.alt = true}}));
-  take(scene.router->dispatch(MouseInputEvent{1, 2, MouseButton::left, MouseAction::move, {}}));
+  take(scene.router->dispatch(MouseInputEvent{1, 2, MouseButton::LEFT, MouseAction::MOVE, {}}));
   check(scene.calls == 4, "paste, modified Space and mouse motion never activate");
 
   scene.input("\t ");
+
   auto keyboard = draw();
 
   check(scene.changes == 1 && take(scene.model->snapshot())->value, "keyboard toggles authoritative property once");
@@ -147,102 +151,111 @@ void gallery_replay() {
   check(scene.disabled_calls == 0, "model synchronization is not a business action");
 
   scene.input("\x1b[<0;2;3M\x1b[<0;2;3m");
+
   auto mouse = draw();
 
   check(scene.calls == 5 && mouse.cells.at(60).style.bold, "mouse focuses and activates the painted button once");
-  check(take(scene.router->hit_test({1, 2})) == scene.button, "paint and hit geometry coincide");
+  check(take(scene.router->hitTest({1, 2})) == scene.button, "paint and hit geometry coincide");
   scene.input("\x1b[<0;2;4M\x1b[<0;2;4m");
+
   auto mouse_check = draw();
 
   check(scene.changes == 2 && !take(scene.model->snapshot())->value && row(mouse_check, 3) == "[ ] Alerts",
         "mouse checkbox press toggles once and release does not toggle again");
   scene.input("\x1b[<0;2;6M");
-  take(scene.router->invoke(scene.disabled_checkbox, {Action::activate}));
+  take(scene.router->invoke(scene.disabled_checkbox, {Action::ACTIVATE}));
   check(scene.disabled_calls == 0, "router excludes disabled group for mouse and semantic actions");
-  take(scene.router->set_focus(scene.button));
-  take(scene.tree->set_enabled(scene.button, false));
+  take(scene.router->setFocus(scene.button));
+  take(scene.tree->setEnabled(scene.button, false));
+
   auto disabled = draw();
 
   check(disabled.cells.at(60).style.italic && disabled.cells.at(90).style.bold,
         "disabled button and recovered focus snapshot");
-  take(scene.router->invoke(scene.button, {Action::activate}));
+  take(scene.router->invoke(scene.button, {Action::ACTIVATE}));
   check(scene.calls == 5, "disabled button rejects explicit activation");
-  take(scene.tree->set_visible(scene.checkbox, false));
+  take(scene.tree->setVisible(scene.checkbox, false));
+
   auto hidden = draw();
 
   check(row(hidden, 3) == "Disabled label", "hidden checkbox leaves real layout and paint");
-  take(scene.router->invoke(scene.checkbox, {Action::activate}));
+  take(scene.router->invoke(scene.checkbox, {Action::ACTIVATE}));
   check(scene.changes == 2, "hidden checkbox receives no action");
   check(take(scene.router->focused()).id().session == 0, "no eligible focus remains");
 }
-void width_policy_change() {
+
+void widthPolicyChange() {
   auto scheduler = take(Scheduler::create());
   auto tree = take(WidgetTree::create(*scheduler));
   const auto root = take(tree->root());
   const auto node = take(tree->emplace<Button>(root, gallery::text("Narrow")));
   WidthPolicy policy;
 
-  policy.ambiguous = AmbiguousWidth::wide;
+  policy.ambiguous = AmbiguousWidth::WIDE;
   policy.revision = 7;
-  take(set_control_text(*tree, node, take(GraphemeText::from("\xc2\xa1", policy))));
+  take(setControlText(*tree, node, take(GraphemeText::from("\xc2\xa1", policy))));
 
   const auto viewport = take(CellRect::from({}, {6, 1}));
   std::optional<CellBuffer> buffer;
 
   take(tree->frame([&] {
-    take(layout_tree(*tree, root, viewport, viewport));
+    take(layoutTree(*tree, root, viewport, viewport));
 
     std::vector<RenderCommand> commands;
     gallery::SurfaceSink sink(take(tree->inspect(node)).geometry, commands);
 
     take(tree->paint(node, sink));
-    buffer.emplace(take(render_full_frame({6, 1}, commands, policy)));
+    buffer.emplace(take(renderFullFrame({6, 1}, commands, policy)));
   }));
 
   check(take(tree->measure(node, {})).width == 6, "changed width policy measures text plus decorations in cells");
-  check(take(buffer->at({2, 0})).glyph == "\xc2\xa1" && take(buffer->at({3, 0})).cell.kind == CellKind::continuation &&
+  check(take(buffer->at({2, 0})).glyph == "\xc2\xa1" && take(buffer->at({3, 0})).cell.kind == CellKind::CONTINUATION &&
           take(buffer->at({5, 0})).glyph == "]",
         "all decorations use changed text policy and wide cluster remains whole");
 }
-void text_and_invalidation() {
+
+void textAndInvalidation() {
   gallery::Scene scene;
   std::string owned = "owned";
 
-  take(set_control_text(*scene.tree, scene.label, gallery::text(owned)));
+  take(setControlText(*scene.tree, scene.label, gallery::text(owned)));
   owned.assign("changed externally");
   take(scene.tree->read(scene.label, [](const Label &label) {
     check(label.text().bytes() == "owned", "control owns its text");
   }));
-  take(scene.tree->consume_frame_request());
-  take(set_control_text(*scene.tree, scene.label, gallery::text("owned")));
-  check(take(scene.tree->consume_frame_request()) == Invalidation::none, "equal text is no-op");
-  take(set_control_text(*scene.tree, scene.label, gallery::text("new")));
-  check(take(scene.tree->consume_frame_request()) == Invalidation::layout, "new text invalidates layout");
+  take(scene.tree->consumeFrameRequest());
+  take(setControlText(*scene.tree, scene.label, gallery::text("owned")));
+  check(take(scene.tree->consumeFrameRequest()) == Invalidation::NONE, "equal text is no-op");
+  take(setControlText(*scene.tree, scene.label, gallery::text("new")));
+  check(take(scene.tree->consumeFrameRequest()) == Invalidation::LAYOUT, "new text invalidates layout");
 
   ControlStyle style;
 
   style.normal.bold = true;
-  take(set_control_style(*scene.tree, scene.label, style));
-  check(take(scene.tree->consume_frame_request()) == Invalidation::paint, "style invalidates only paint");
-  take(set_control_style(*scene.tree, scene.label, style));
-  check(take(scene.tree->consume_frame_request()) == Invalidation::none, "equal style is no-op");
+  take(setControlStyle(*scene.tree, scene.label, style));
+  check(take(scene.tree->consumeFrameRequest()) == Invalidation::PAINT, "style invalidates only paint");
+  take(setControlStyle(*scene.tree, scene.label, style));
+  check(take(scene.tree->consumeFrameRequest()) == Invalidation::NONE, "equal style is no-op");
   take(scene.tree->frame([&] {
-    auto synced = sync_control(*scene.tree, scene.label, {});
+    auto synced = syncControl(*scene.tree, scene.label, {});
     auto model = scene.check_binding.sync();
-    auto text = set_control_text(*scene.tree, scene.label, gallery::text("blocked"));
+    auto text = setControlText(*scene.tree, scene.label, gallery::text("blocked"));
 
-    check(!synced && synced.error() == TreeError::would_block && !model && model.error() == TreeError::would_block &&
-            !text && text.error() == TreeError::would_block,
+    check(!synced && synced.error() == TreeError::WOULD_BLOCK && !model && model.error() == TreeError::WOULD_BLOCK &&
+            !text && text.error() == TreeError::WOULD_BLOCK,
           "all control mutations reject active frame");
   }));
-  take(set_control_text(*scene.tree, scene.label, gallery::text("\x1b[31m")));
+  take(setControlText(*scene.tree, scene.label, gallery::text("\x1b[31m")));
+
   auto rendered = scene.render();
 
   check(take(rendered.at({0, 1})).glyph == "?", "ESC remains rendered placeholder, never raw VT");
+
   auto narrow = scene.render({1, 9});
 
   check(take(narrow.at({0, 2})).glyph == "[", "narrow viewport clips control geometry safely");
 }
+
 struct Fixture {
   std::unique_ptr<Scheduler> scheduler;
   std::unique_ptr<WidgetTree> tree;
@@ -260,8 +273,9 @@ struct Fixture {
     root = take(tree->root());
     router = take(EventRouter::create(*tree));
     node = take(tree->emplace<CheckBox>(root, gallery::text("Flag")));
-    model = take(Property<bool>::create(*tree, root, false, Invalidation::paint));
+    model = take(Property<bool>::create(*tree, root, false, Invalidation::PAINT));
   }
+
   bool checked() {
     bool value{};
 
@@ -272,23 +286,25 @@ struct Fixture {
     return value;
   }
 };
-void binding_and_overflow() {
+
+void bindingAndOverflow() {
   Fixture f(1);
   int calls{};
   std::optional<CheckBoxResult> receipt;
-  auto binding = take(bind_checkbox(*f.tree, *f.router, f.node, f.model, [&](CheckBoxResult result) {
+  auto binding = take(bindCheckbox(*f.tree, *f.router, f.node, f.model, [&](CheckBoxResult result) {
     ++calls;
     receipt = std::move(result);
   }));
 
-  take(f.tree->consume_frame_request());
+  take(f.tree->consumeFrameRequest());
   take(binding.sync());
-  check(take(f.tree->consume_frame_request()) == Invalidation::none, "equal checkbox sync is no-op");
+  check(take(f.tree->consumeFrameRequest()) == Invalidation::NONE, "equal checkbox sync is no-op");
   take(f.model->set(true));
+
   auto full = take(f.model->set(false));
 
   check(full.rejected == 1 && !f.checked(), "full queue commits external value despite notification loss");
-  take(f.router->invoke(f.node, {Action::activate}));
+  take(f.router->invoke(f.node, {Action::ACTIVATE}));
   check(calls == 1 && receipt && *receipt && (*receipt)->rejected == 1 && (*receipt)->snapshot->value && f.checked(),
         "user toggle commits latest value and reports full queue without ambiguous presentation");
   take(f.model->set(false));
@@ -305,27 +321,33 @@ void binding_and_overflow() {
   std::thread worker([&] {
     auto result = binding.sync();
 
-    wrong_thread = !result && result.error() == TreeError::wrong_thread;
+    wrong_thread = !result && result.error() == TreeError::WRONG_THREAD;
   });
 
   worker.join();
   check(wrong_thread, "binding sync respects UI affinity");
 }
+
 struct WatchedButton : Button {
   bool &destroyed;
+
   explicit WatchedButton(bool &flag) : Button(gallery::text("Delete")), destroyed(flag) {
   }
+
   ~WatchedButton() override {
     destroyed = true;
   }
 };
+
 struct OnDestroy {
   std::function<void()> action;
+
   ~OnDestroy() {
     action();
   }
 };
-void callback_lifetimes() {
+
+void callbackLifetimes() {
   Fixture f;
   const auto parent = take(f.tree->emplace<Widget>(f.root));
   bool destroyed{};
@@ -336,34 +358,35 @@ void callback_lifetimes() {
 
   captured->action = [&] {
     ++released;
-    take(f.tree->invalidate(f.root, Invalidation::paint));
+    take(f.tree->invalidate(f.root, Invalidation::PAINT));
   };
-  token = take(bind_button(*f.router, button, [&, captured] {
+  token = take(bindButton(*f.router, button, [&, captured] {
     token.disconnect();
     take(f.tree->remove(parent));
     check(!destroyed && released == 0, "router borrow retains removed widget and disconnected callback captures");
   }));
   captured.reset();
-  take(f.router->invoke(button, {Action::activate}));
+  take(f.router->invoke(button, {Action::ACTIVATE}));
   take(f.router->focused());
   check(destroyed && released == 1, "UI capture destructor reenters after callback and subtree is reclaimed");
 
   std::optional<CheckBoxBinding> binding;
   int calls{};
-  binding.emplace(take(bind_checkbox(*f.tree, *f.router, f.node, f.model, [&](CheckBoxResult result) {
+
+  binding.emplace(take(bindCheckbox(*f.tree, *f.router, f.node, f.model, [&](CheckBoxResult result) {
     ++calls;
     check(take(std::move(result)).snapshot->value, "toggle committed before destructive callback");
     binding.reset();
     take(f.tree->remove(f.node));
     check(take(f.model->snapshot())->value, "committed model survives token and checkbox destruction");
   })));
-  take(f.router->invoke(f.node, {Action::activate}));
+  take(f.router->invoke(f.node, {Action::ACTIVATE}));
   take(f.scheduler->dispatch());
   check(calls == 1, "deleted checkbox binding admits no later observer or action");
 
   const auto replacement = take(f.tree->emplace<CheckBox>(f.root, gallery::text("Owner")));
   std::weak_ptr<Property<bool>> weak = f.model;
-  auto owner = take(bind_checkbox(*f.tree, *f.router, replacement, f.model, [](CheckBoxResult result) {
+  auto owner = take(bindCheckbox(*f.tree, *f.router, replacement, f.model, [](CheckBoxResult result) {
     take(std::move(result));
   }));
 
@@ -371,26 +394,31 @@ void callback_lifetimes() {
   check(!weak.expired(), "binding explicitly owns shared model");
   take(owner.sync());
 }
-void allocation_failures() {
+
+void allocationFailures() {
   Fixture f;
-  constexpr std::ptrdiff_t probe_limit = 40;
+  constexpr std::ptrdiff_t PROBE_LIMIT = 40;
 
   for (int kind = 0; kind != 3; ++kind) {
     bool created{};
 
-    for (std::ptrdiff_t budget = 0; budget < probe_limit; ++budget) {
+    for (std::ptrdiff_t budget = 0; budget < PROBE_LIMIT; ++budget) {
       auto text = gallery::text("Allocated text");
       std::expected<Node<Control>, TreeError> result;
+
       allocation_test::remaining = budget;
 
       if (kind == 0) {
         auto node = f.tree->emplace<Label>(f.root, std::move(text));
+
         result = node ? std::expected<Node<Control>, TreeError>(*node) : std::unexpected(node.error());
       } else if (kind == 1) {
         auto node = f.tree->emplace<Button>(f.root, std::move(text));
+
         result = node ? std::expected<Node<Control>, TreeError>(*node) : std::unexpected(node.error());
       } else {
         auto node = f.tree->emplace<CheckBox>(f.root, std::move(text));
+
         result = node ? std::expected<Node<Control>, TreeError>(*node) : std::unexpected(node.error());
       }
 
@@ -403,7 +431,7 @@ void allocation_failures() {
         break;
       }
 
-      check(result.error() == TreeError::no_memory, "control construction allocation failure is explicit");
+      check(result.error() == TreeError::NO_MEMORY, "control construction allocation failure is explicit");
     }
 
     check(created, "control construction eventually succeeds under finite allocation budget");
@@ -411,17 +439,17 @@ void allocation_failures() {
 
   bool changed{};
 
-  for (std::ptrdiff_t budget = 0; budget < probe_limit; ++budget) {
+  for (std::ptrdiff_t budget = 0; budget < PROBE_LIMIT; ++budget) {
     auto replacement = gallery::text("Replacement");
 
-    take(f.tree->consume_frame_request());
+    take(f.tree->consumeFrameRequest());
     allocation_test::remaining = budget;
 
     std::expected<void, TreeError> result;
     bool argument_failed{};
 
     try {
-      result = set_control_text(*f.tree, f.node, std::move(replacement));
+      result = setControlText(*f.tree, f.node, std::move(replacement));
     } catch (const std::bad_alloc &) {
       argument_failed = true;
     }
@@ -434,9 +462,9 @@ void allocation_failures() {
       break;
     }
 
-    check(argument_failed || result.error() == TreeError::no_memory,
+    check(argument_failed || result.error() == TreeError::NO_MEMORY,
           "argument allocation throws; internal text replacement allocation returns no_memory");
-    check(take(f.tree->consume_frame_request()) == Invalidation::none,
+    check(take(f.tree->consumeFrameRequest()) == Invalidation::NONE,
           "failed text replacement leaves invalidation unchanged");
     take(f.tree->read(f.node, [](const CheckBox &control) {
       check(control.text().bytes() == "Flag", "failed text replacement retains original owning text");
@@ -445,7 +473,8 @@ void allocation_failures() {
 
   check(changed, "text replacement eventually succeeds under finite allocation budget");
 }
-void binding_replacement_and_capture_reentry() {
+
+void bindingReplacementAndCaptureReentry() {
   Fixture f;
   const auto second = take(f.tree->emplace<CheckBox>(f.root, gallery::text("Second")));
   std::optional<CheckBoxBinding> binding;
@@ -455,14 +484,14 @@ void binding_replacement_and_capture_reentry() {
   release->action = [&] {
     ++released;
     binding.reset();
-    take(f.tree->invalidate(f.root, Invalidation::paint));
+    take(f.tree->invalidate(f.root, Invalidation::PAINT));
   };
-  binding.emplace(take(bind_checkbox(*f.tree, *f.router, f.node, f.model, [release](CheckBoxResult result) {
+  binding.emplace(take(bindCheckbox(*f.tree, *f.router, f.node, f.model, [release](CheckBoxResult result) {
     take(std::move(result));
   })));
   release.reset();
 
-  auto replacement = take(bind_checkbox(*f.tree, *f.router, second, f.model, [&](CheckBoxResult result) {
+  auto replacement = take(bindCheckbox(*f.tree, *f.router, second, f.model, [&](CheckBoxResult result) {
     take(std::move(result));
     ++new_calls;
   }));
@@ -470,7 +499,7 @@ void binding_replacement_and_capture_reentry() {
   *binding = std::move(replacement);
   take(f.router->focused());
   check(!binding && released == 1, "old callback capture may destroy the replacement binding during UI reclamation");
-  take(f.router->invoke(second, {Action::activate}));
+  take(f.router->invoke(second, {Action::ACTIVATE}));
   take(f.scheduler->dispatch());
   check(new_calls == 0, "reentry disconnected replacement action and subscription");
 
@@ -480,32 +509,34 @@ void binding_replacement_and_capture_reentry() {
   take(f.router->focused());
   check(weak.expired(), "disconnected bindings release their model after router reclamation");
 }
-void precommit_failure() {
+
+void precommitFailure() {
   Fixture f;
   const auto source = take(f.tree->emplace<Widget>(f.root));
   auto model =
-    std::shared_ptr<Property<bool>>(take(Property<bool>::create(*f.tree, source, false, Invalidation::paint)));
+    std::shared_ptr<Property<bool>>(take(Property<bool>::create(*f.tree, source, false, Invalidation::PAINT)));
   int failures_seen{};
-  auto binding = take(bind_checkbox(*f.tree, *f.router, f.node, model, [&](CheckBoxResult result) {
-    check(!result && result.error() == TreeError::stale_node, "precommit error is explicit");
+  auto binding = take(bindCheckbox(*f.tree, *f.router, f.node, model, [&](CheckBoxResult result) {
+    check(!result && result.error() == TreeError::STALE_NODE, "precommit error is explicit");
     ++failures_seen;
   }));
 
   take(f.tree->remove(source));
-  take(f.router->invoke(f.node, {Action::activate}));
+  take(f.router->invoke(f.node, {Action::ACTIVATE}));
   check(failures_seen == 1 && !f.checked() && !take(model->snapshot())->value,
         "failed set leaves model and checkbox unchanged");
 }
 } // namespace
+
 int main() {
-  gallery_replay();
-  text_and_invalidation();
-  width_policy_change();
-  binding_and_overflow();
-  callback_lifetimes();
-  precommit_failure();
-  allocation_failures();
-  binding_replacement_and_capture_reentry();
+  galleryReplay();
+  textAndInvalidation();
+  widthPolicyChange();
+  bindingAndOverflow();
+  callbackLifetimes();
+  precommitFailure();
+  allocationFailures();
+  bindingReplacementAndCaptureReentry();
 
   return failures ? 1 : 0;
 }

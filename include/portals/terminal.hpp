@@ -38,14 +38,14 @@ struct TerminalOptions {
 
 /** @brief Terminal failure classification; native_code provides platform detail. */
 enum class TerminalErrorKind {
-  invalid_options, ///< An option or handle is outside its supported range.
-  unsupported,     ///< Handles are not terminals, or no backend is implemented.
-  system,          ///< A native system operation failed.
-  closed,          ///< Session was closed or moved from.
-  output_pending,  ///< The previous output batch is not complete.
-  output_limit,    ///< The new batch exceeds max_output_bytes.
-  input_decode,    ///< Windows input decoder failed; close and reopen the session.
-  output_uncertain ///< Windows output was cancelled/failed; close before further submission.
+  INVALID_OPTIONS, ///< An option or handle is outside its supported range.
+  UNSUPPORTED,     ///< Handles are not terminals, or no backend is implemented.
+  SYSTEM,          ///< A native system operation failed.
+  CLOSED,          ///< Session was closed or moved from.
+  OUTPUT_PENDING,  ///< The previous output batch is not complete.
+  OUTPUT_LIMIT,    ///< The new batch exceeds max_output_bytes.
+  INPUT_DECODE,    ///< Windows input decoder failed; close and reopen the session.
+  OUTPUT_UNCERTAIN ///< Windows output was cancelled/failed; close before further submission.
 };
 
 /** @brief Owning error value, independent of session lifetime. */
@@ -57,16 +57,16 @@ struct TerminalError {
 
 /** @brief Why an input or output operation returned. */
 enum class TerminalStatus {
-  progress, ///< Input/resize available, or the entire pending output batch completed.
-  deadline, ///< Absolute deadline reached; inspect error for Windows output uncertainty.
-  stopped,  ///< Stop requested; inspect error for Windows output uncertainty.
-  eof,      ///< Input ended after previously readable bytes were delivered.
-  error     ///< Inspect the accompanying error; no hidden output retry occurs.
+  PROGRESS,     ///< Input/resize available, or the entire pending output batch completed.
+  DEADLINE,     ///< Absolute deadline reached; inspect error for Windows output uncertainty.
+  STOPPED,      ///< Stop requested; inspect error for Windows output uncertainty.
+  END_OF_INPUT, ///< Input ended after previously readable bytes were delivered.
+  FAILED        ///< Inspect the accompanying error; no hidden output retry occurs.
 };
 
 /** @brief Bounded owning transport result; earlier results are never invalidated. */
 struct TerminalRead {
-  TerminalStatus status{TerminalStatus::progress}; ///< Completion reason.
+  TerminalStatus status{TerminalStatus::PROGRESS}; ///< Completion reason.
   std::string bytes;                               ///< POSIX raw bytes; decode with InputDecoder.
   std::vector<InputEvent> events;                  ///< Native semantic events; empty on POSIX.
   std::optional<CellSize> resized;                 ///< Newly observed dimensions, if changed.
@@ -75,10 +75,10 @@ struct TerminalRead {
 
 /** @brief Owning output progress for this flush call, not a rendered-frame commit. */
 struct TerminalWrite {
-  TerminalStatus status{TerminalStatus::progress}; ///< Completion reason.
+  TerminalStatus status{TerminalStatus::PROGRESS}; ///< Completion reason.
   std::size_t completed{};                         ///< Bytes successfully written in this call only.
   std::size_t pending{};              ///< Unconfirmed bytes still owned; Windows cancellation forbids replay.
-  std::optional<TerminalError> error; ///< Native error, or output_uncertain with Windows deadline/stopped.
+  std::optional<TerminalError> error; ///< Native error, or OUTPUT_UNCERTAIN with Windows deadline/stopped.
 };
 
 /**
@@ -139,14 +139,14 @@ public:
   /** @brief Transfer one bounded owned byte batch; reject while output is pending.
    * No I/O. Empty batch is allowed. Rejection leaves session state unchanged.
    * @param bytes Complete byte batch, moved into session storage only on acceptance.
-   * @return Success, or closed/output_pending/output_limit/output_uncertain without replacing pending output.
+   * @return Success, or closed/OUTPUT_PENDING/OUTPUT_LIMIT/OUTPUT_UNCERTAIN without replacing pending output.
    */
   [[nodiscard]] std::expected<void, TerminalError> submit(std::string bytes);
   /** @brief Write until batch completion, deadline, stop or error; retain unconfirmed bytes.
    * Only successful native writes count as completed. Deadline/stop are checked
    * between nonblocking syscalls on POSIX, preserving its retryable suffix.
    * Windows uses one owning worker. Cancelling an issued write returns deadline or
-   * stopped with error=output_uncertain; bytes remain owned, but cannot be retried.
+   * stopped with error=OUTPUT_UNCERTAIN; bytes remain owned, but cannot be retried.
    * Further submit/flush fail until close. A pre-expired/pre-stopped call that has
    * issued no write preserves retryability and has no uncertainty error.
    * Successful writes do not prove terminal interpretation or rendered-frame state.
@@ -158,7 +158,7 @@ public:
   /** @brief Number of pending owned bytes; zero for a closed/moved-from session.
    * @return Bytes whose successful transmission has not been confirmed; uncertain bytes must not be replayed.
    */
-  [[nodiscard]] std::size_t pending_bytes() const noexcept;
+  [[nodiscard]] std::size_t pendingBytes() const noexcept;
   /** @brief Discard pending bytes and restore all changed modes/flags independently.
    * Always closes owned duplicate descriptors, even on restoration error. Returns
    * first native restoration/close error. Idempotent; destructor cannot report errors.

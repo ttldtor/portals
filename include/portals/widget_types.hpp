@@ -24,25 +24,26 @@ struct NodeId {
 };
 /** @brief Checked tree failures; rejected operations never start the requested callback. */
 enum class TreeError {
-  invalid_argument,   ///< An option, enum value or operation argument is invalid.
-  wrong_thread,       ///< Operation requires the tree's UI thread.
-  wrong_session,      ///< An identity or scope belongs to another tree/scheduler.
-  stale_node,         ///< The observed node or model consumer is absent or retired.
-  closed,             ///< The owning tree or source is closed.
-  would_block,        ///< The current frame/reentry boundary or finite queue/work budget rejects this operation.
-  no_memory,          ///< Allocation failed inside the operation boundary.
-  identity_exhausted, ///< A session, generation or revision cannot advance without reuse.
-  node_limit,         ///< The configured live node, observer or consumer limit was reached.
-  depth_limit,        ///< Inserting the child would exceed the configured tree depth.
-  callback_failed,    ///< A user extension or callback threw.
-  invalid_geometry    ///< Required arranged geometry is absent or translation overflowed.
+  INVALID_ARGUMENT,   ///< An option, enum value or operation argument is invalid.
+  WRONG_THREAD,       ///< Operation requires the tree's UI thread.
+  WRONG_SESSION,      ///< An identity or scope belongs to another tree/scheduler.
+  STALE_NODE,         ///< The observed node or model consumer is absent or retired.
+  CLOSED,             ///< The owning tree or source is closed.
+  WOULD_BLOCK,        ///< The current frame/reentry boundary or finite queue/work budget rejects this operation.
+  NO_MEMORY,          ///< Allocation failed inside the operation boundary.
+  IDENTITY_EXHAUSTED, ///< A session, generation or revision cannot advance without reuse.
+  NODE_LIMIT,         ///< The configured live node, observer or consumer limit was reached.
+  DEPTH_LIMIT,        ///< Inserting the child would exceed the configured tree depth.
+  CALLBACK_FAILED,    ///< A user extension or callback threw.
+  INVALID_GEOMETRY    ///< Required arranged geometry is absent or translation overflowed.
 };
 /** @brief Accumulated work; layout always includes painting. */
 enum class Invalidation {
-  none,  ///< No new work requested.
-  paint, ///< Painting is required; arranged geometry remains usable.
-  layout ///< Layout and painting are required; old arranged geometry becomes invalid.
+  NONE,  ///< No new work requested.
+  PAINT, ///< Painting is required; arranged geometry remains usable.
+  LAYOUT ///< Layout and painting are required; old arranged geometry becomes invalid.
 };
+
 /** @brief Owning arranged geometry; invalid geometry must never be used for hit-testing. */
 struct NodeGeometry {
   CellRect local;   ///< Parent-relative rectangle.
@@ -50,11 +51,13 @@ struct NodeGeometry {
   CellRect clip;    ///< Surface intersection with every ancestor and viewport.
   bool valid{};     ///< False before arrangement or after layout invalidation/failure.
 };
+
 /** @brief Finite storage and recursive traversal limits, including the root node. */
 struct WidgetTreeOptions {
   std::size_t max_nodes{4096}; ///< Live and not-yet-reclaimed nodes share this budget.
   std::size_t max_depth{128};  ///< Root depth is one; values above 256 are rejected.
 };
+
 /** @brief Borrowed synchronous command sink supplied by the frame owner.
  * submit must consume commands immediately or retain their text only until the enclosing
  * WidgetTree::frame callback returns. The frame owner must render before leaving that

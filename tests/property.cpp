@@ -74,6 +74,7 @@ void operator delete[](void *p, const std::nothrow_t &) noexcept {
 namespace {
 using namespace portals;
 int failures{};
+
 void check(bool condition, const char *message) {
   if (!condition) {
     std::cerr << message << '\n';
@@ -93,52 +94,58 @@ template <class T, class E> T take(std::expected<T, E> value) {
 struct Counters {
   int measure{}, arrange{}, paint{};
 };
+
 struct Probe : Widget {
   Counters &counts;
+
   explicit Probe(Counters &value) : counts(value) {
   }
+
   std::expected<CellSize, TreeError> measure(CellSize available) override {
     ++counts.measure;
 
     return available;
   }
+
   std::expected<void, TreeError> arrange(CellRect) override {
     ++counts.arrange;
 
     return {};
   }
+
   std::expected<void, TreeError> paint(PaintContext &) override {
     ++counts.paint;
 
     return {};
   }
 };
+
 struct Sink : PaintContext {
   std::expected<void, TreeError> submit(std::span<const RenderCommand>) override {
     return {};
   }
 };
 
-void invalidation_and_snapshots() {
+void invalidationAndSnapshots() {
   auto scheduler = take(Scheduler::create());
   auto tree = take(WidgetTree::create(*scheduler));
   auto root = take(tree->root());
   Counters counts;
   auto node = take(tree->emplace<Probe>(root, counts));
-  auto color = take(Property<int>::create(*tree, node, 1, Invalidation::paint));
-  auto padding = take(Property<int>::create(*tree, node, 0, Invalidation::layout));
+  auto color = take(Property<int>::create(*tree, node, 1, Invalidation::PAINT));
+  auto padding = take(Property<int>::create(*tree, node, 0, Invalidation::LAYOUT));
   std::vector<std::uint64_t> revisions;
   auto connection = take(color->observe(node, [&](Probe &, auto event) {
     revisions.push_back(event->revision);
   }));
   Sink sink;
   auto frame = [&] {
-    auto dirty = take(tree->consume_frame_request());
+    auto dirty = take(tree->consumeFrameRequest());
 
     check(
       tree
         ->frame([&] {
-          if (dirty == Invalidation::layout) {
+          if (dirty == Invalidation::LAYOUT) {
             take(tree->measure(node, {8, 3}));
             check(tree->arrange(root, take(CellRect::from({}, {8, 3})), take(CellRect::from({}, {8, 3}))).has_value(),
                   "arrange root");
@@ -146,7 +153,7 @@ void invalidation_and_snapshots() {
                   "arrange child");
           }
 
-          if (dirty != Invalidation::none) {
+          if (dirty != Invalidation::NONE) {
             check(tree->paint(node, sink).has_value(), "paint");
           }
         })
@@ -157,12 +164,12 @@ void invalidation_and_snapshots() {
   frame();
   check(counts.measure == 1 && counts.arrange == 1 && counts.paint == 1, "initial frame");
 
-  take(tree->consume_frame_request());
+  take(tree->consumeFrameRequest());
 
   auto equal = take(color->set(1));
 
   check(!equal.changed && equal.snapshot->revision == 0, "equal no revision");
-  check(take(tree->consume_frame_request()) == Invalidation::none, "equal no frame");
+  check(take(tree->consumeFrameRequest()) == Invalidation::NONE, "equal no frame");
   check(scheduler->metrics().data.accepted == 0, "equal no publish");
 
   auto retained = take(color->snapshot());
@@ -184,18 +191,18 @@ void invalidation_and_snapshots() {
           ->frame([&] {
             auto denied = color->set(9);
 
-            check(!denied && denied.error() == TreeError::would_block, "set forbidden during frame");
+            check(!denied && denied.error() == TreeError::WOULD_BLOCK, "set forbidden during frame");
           })
           .has_value(),
         "frame mutation guard");
   check(take(color->snapshot())->value == 2, "frame rejection retains value");
 }
 
-void reentrant_order() {
+void reentrantOrder() {
   auto scheduler = take(Scheduler::create());
   auto tree = take(WidgetTree::create(*scheduler));
   auto node = take(tree->root());
-  auto property = take(Property<int>::create(*tree, node, 0, Invalidation::paint));
+  auto property = take(Property<int>::create(*tree, node, 0, Invalidation::PAINT));
 
   std::vector<int> seen;
   int depth{}, maximum{};
@@ -228,7 +235,7 @@ void backpressure() {
   auto scheduler = take(Scheduler::create(options));
   auto tree = take(WidgetTree::create(*scheduler));
   auto node = take(tree->root());
-  auto property = take(Property<int>::create(*tree, node, 0, Invalidation::paint));
+  auto property = take(Property<int>::create(*tree, node, 0, Invalidation::PAINT));
 
   std::vector<int> seen;
   auto first = take(property->observe(node, [&](Widget &, auto event) {
@@ -238,19 +245,19 @@ void backpressure() {
     seen.push_back(10 + event->value);
   }));
 
-  take(tree->consume_frame_request());
+  take(tree->consumeFrameRequest());
 
   auto partial = take(property->set(1));
 
   check(partial.changed && partial.accepted == 1 && partial.rejected == 1, "explicit partial commit");
-  check(partial.notification_error == SchedulerError::would_block, "partial reason");
-  check(take(tree->consume_frame_request()) == Invalidation::paint, "partial commit still invalidates");
+  check(partial.notification_error == SchedulerError::WOULD_BLOCK, "partial reason");
+  check(take(tree->consumeFrameRequest()) == Invalidation::PAINT, "partial commit still invalidates");
 
   auto full = take(property->set(2));
 
   check(full.changed && full.accepted == 0 && full.rejected == 2, "full queue still commits");
   check(take(property->snapshot())->value == 2, "full queue current snapshot");
-  check(take(tree->consume_frame_request()) == Invalidation::paint, "full queue still invalidates");
+  check(take(tree->consumeFrameRequest()) == Invalidation::PAINT, "full queue still invalidates");
 
   auto equal = take(property->set(2));
 
@@ -265,7 +272,7 @@ void cancellation() {
   auto scheduler = take(Scheduler::create());
   auto tree = take(WidgetTree::create(*scheduler));
   auto root = take(tree->root());
-  auto property = take(Property<int>::create(*tree, root, 0, Invalidation::paint, {1}));
+  auto property = take(Property<int>::create(*tree, root, 0, Invalidation::PAINT, {1}));
   int calls{};
   Subscription self;
 
@@ -275,18 +282,18 @@ void cancellation() {
 
     auto update = take(property->set(2));
 
-    check(update.cancelled == 1 && update.notification_error == SchedulerError::closed, "closed endpoint receipt");
+    check(update.cancelled == 1 && update.notification_error == SchedulerError::CLOSED, "closed endpoint receipt");
 
     auto replacement = property->observe(root, [](Widget &, auto) {
     });
 
-    check(!replacement && replacement.error() == TreeError::node_limit, "executing observer retains its slot");
+    check(!replacement && replacement.error() == TreeError::NODE_LIMIT, "executing observer retains its slot");
   }));
 
   auto limited = property->observe(root, [](Widget &, auto) {
   });
 
-  check(!limited && limited.error() == TreeError::node_limit, "finite observer capacity");
+  check(!limited && limited.error() == TreeError::NODE_LIMIT, "finite observer capacity");
 
   take(property->set(1));
   take(scheduler->dispatch());
@@ -302,7 +309,7 @@ void cancellation() {
   take(scheduler->dispatch());
   check(calls == 1, "source destruction cancels queued callbacks");
 
-  property = take(Property<int>::create(*tree, root, 0, Invalidation::paint));
+  property = take(Property<int>::create(*tree, root, 0, Invalidation::PAINT));
 
   auto first = take(property->observe(root, [&](Widget &, auto) {
     property.reset();
@@ -317,14 +324,14 @@ void cancellation() {
   check(calls == 2, "source destroy during dispatch cancels remaining observers");
 }
 
-void node_lifetime() {
+void nodeLifetime() {
   auto scheduler = take(Scheduler::create());
   auto tree = take(WidgetTree::create(*scheduler));
   auto root = take(tree->root());
   auto parent = take(tree->emplace<Widget>(root));
   auto child = take(tree->emplace<Widget>(parent));
 
-  auto property = take(Property<int>::create(*tree, root, 0, Invalidation::paint));
+  auto property = take(Property<int>::create(*tree, root, 0, Invalidation::PAINT));
   int calls{};
   auto first = take(property->observe(child, [&](Widget &, auto) {
     ++calls;
@@ -339,13 +346,13 @@ void node_lifetime() {
   check(calls == 1, "removed subtree receives no late callbacks");
 
   auto target = take(tree->emplace<Widget>(root));
-  auto target_property = take(Property<int>::create(*tree, target, 5, Invalidation::paint));
+  auto target_property = take(Property<int>::create(*tree, target, 5, Invalidation::PAINT));
 
   check(tree->remove(target).has_value(), "remove property target");
 
   auto denied = target_property->set(6);
 
-  check(!denied && denied.error() == TreeError::stale_node, "stale target rejects before commit");
+  check(!denied && denied.error() == TreeError::STALE_NODE, "stale target rejects before commit");
   check(take(target_property->snapshot())->value == 5, "stale target preserves value");
 
   auto closed = take(property->observe(root, [&](Widget &, auto) {
@@ -359,21 +366,21 @@ void node_lifetime() {
   check(calls == 1, "no callbacks after scope close");
 }
 
-void affinity_and_session() {
+void affinityAndSession() {
   auto scheduler = take(Scheduler::create());
   auto tree = take(WidgetTree::create(*scheduler));
   auto other = take(WidgetTree::create(*scheduler));
   auto root = take(tree->root());
   auto foreign = take(other->root());
-  auto invalid = Property<int>::create(*tree, foreign, 0, Invalidation::paint);
+  auto invalid = Property<int>::create(*tree, foreign, 0, Invalidation::PAINT);
 
-  check(!invalid && invalid.error() == TreeError::wrong_session, "foreign source target");
+  check(!invalid && invalid.error() == TreeError::WRONG_SESSION, "foreign source target");
 
-  auto property = take(Property<int>::create(*tree, root, 0, Invalidation::paint));
+  auto property = take(Property<int>::create(*tree, root, 0, Invalidation::PAINT));
   auto observer = property->observe(foreign, [](Widget &, auto) {
   });
 
-  check(!observer && observer.error() == TreeError::wrong_session, "foreign receiver");
+  check(!observer && observer.error() == TreeError::WRONG_SESSION, "foreign receiver");
 
   bool rejected{};
   std::thread worker([&] {
@@ -382,8 +389,8 @@ void affinity_and_session() {
     auto observe = property->observe(root, [](Widget &, auto) {
     });
 
-    rejected = !set && set.error() == TreeError::wrong_thread && !snapshot &&
-               snapshot.error() == TreeError::wrong_thread && !observe && observe.error() == TreeError::wrong_thread;
+    rejected = !set && set.error() == TreeError::WRONG_THREAD && !snapshot &&
+               snapshot.error() == TreeError::WRONG_THREAD && !observe && observe.error() == TreeError::WRONG_THREAD;
   });
 
   worker.join();
@@ -399,6 +406,7 @@ struct Reenter {
     }
   }
 };
+
 struct Payload {
   int value{};
   std::shared_ptr<Reenter> release;
@@ -408,7 +416,7 @@ struct Payload {
   }
 };
 
-void destructor_reentry() {
+void destructorReentry() {
   auto scheduler = take(Scheduler::create());
   auto tree = take(WidgetTree::create(*scheduler));
   auto root = take(tree->root());
@@ -418,7 +426,7 @@ void destructor_reentry() {
   release->action = [&] {
     take(property->set(Payload{2, {}}));
   };
-  property = take(Property<Payload>::create(*tree, root, Payload{0, release}, Invalidation::paint));
+  property = take(Property<Payload>::create(*tree, root, Payload{0, release}, Invalidation::PAINT));
   release.reset();
 
   std::vector<int> seen;
@@ -483,11 +491,11 @@ struct ReentrantObserver {
   }
 };
 
-void registration_destructor_reentry() {
+void registrationDestructorReentry() {
   auto scheduler = take(Scheduler::create());
   auto tree = take(WidgetTree::create(*scheduler));
   auto node = take(tree->root());
-  auto property = take(Property<int>::create(*tree, node, 0, Invalidation::paint, {1}));
+  auto property = take(Property<int>::create(*tree, node, 0, Invalidation::PAINT, {1}));
   auto state = std::make_shared<RegistrationReentry>();
   Subscription inner;
   int calls{};
@@ -504,15 +512,15 @@ void registration_destructor_reentry() {
   });
 
   check(state->fired, "moved-from observer destructor reenters during registration");
-  check(!outer && outer.error() == TreeError::node_limit, "reentrant registration retains the observer limit");
-  check(!third && third.error() == TreeError::node_limit, "observer limit remains effective after reentry");
+  check(!outer && outer.error() == TreeError::NODE_LIMIT, "reentrant registration retains the observer limit");
+  check(!third && third.error() == TreeError::NODE_LIMIT, "observer limit remains effective after reentry");
 
   auto update = take(property->set(1));
 
   take(scheduler->dispatch());
   check(update.accepted == 1 && calls == 1, "only the admitted nested observer receives publication");
 
-  auto closing = take(Property<int>::create(*tree, node, 0, Invalidation::paint));
+  auto closing = take(Property<int>::create(*tree, node, 0, Invalidation::PAINT));
   auto close_state = std::make_shared<RegistrationReentry>();
 
   close_state->on_destroy = [&] {
@@ -523,20 +531,20 @@ void registration_destructor_reentry() {
   auto closed = closing->observe(node, std::move(closing_callback));
 
   check(close_state->fired && !closing, "observer temporary can destroy the source");
-  check(!closed && closed.error() == TreeError::closed, "source closure during registration is observable");
+  check(!closed && closed.error() == TreeError::CLOSED, "source closure during registration is observable");
 }
 
-void allocation_failures() {
+void allocationFailures() {
   auto scheduler = take(Scheduler::create());
   auto tree = take(WidgetTree::create(*scheduler));
   auto root = take(tree->root());
   bool eventually_created{};
-  constexpr std::ptrdiff_t allocation_probe_limit = 20;
+  constexpr std::ptrdiff_t ALLOCATION_PROBE_LIMIT = 20;
 
-  for (std::ptrdiff_t budget = 0; budget < allocation_probe_limit; ++budget) {
+  for (std::ptrdiff_t budget = 0; budget < ALLOCATION_PROBE_LIMIT; ++budget) {
     allocation_test::remaining = budget;
 
-    auto created = Property<int>::create(*tree, root, 0, Invalidation::paint);
+    auto created = Property<int>::create(*tree, root, 0, Invalidation::PAINT);
 
     allocation_test::remaining = -1;
 
@@ -546,26 +554,26 @@ void allocation_failures() {
       break;
     }
 
-    check(created.error() == TreeError::no_memory, "factory allocation failure is observable");
+    check(created.error() == TreeError::NO_MEMORY, "factory allocation failure is observable");
   }
 
   check(eventually_created, "factory succeeds after finite allocations");
 
-  auto property = take(Property<int>::create(*tree, root, 0, Invalidation::paint, {1}));
+  auto property = take(Property<int>::create(*tree, root, 0, Invalidation::PAINT, {1}));
 
-  take(tree->consume_frame_request());
+  take(tree->consumeFrameRequest());
   allocation_test::remaining = 0;
 
   auto denied = property->set(1);
 
   allocation_test::remaining = -1;
-  check(!denied && denied.error() == TreeError::no_memory, "set allocation failure");
+  check(!denied && denied.error() == TreeError::NO_MEMORY, "set allocation failure");
   check(take(property->snapshot())->revision == 0, "allocation failure leaves revision");
-  check(take(tree->consume_frame_request()) == Invalidation::none, "allocation failure leaves frame");
+  check(take(tree->consumeFrameRequest()) == Invalidation::NONE, "allocation failure leaves frame");
 
   bool eventually_observed{};
 
-  for (std::ptrdiff_t budget = 0; budget < allocation_probe_limit; ++budget) {
+  for (std::ptrdiff_t budget = 0; budget < ALLOCATION_PROBE_LIMIT; ++budget) {
     allocation_test::remaining = budget;
 
     auto registered = property->observe(root, [](Widget &, auto) {
@@ -579,7 +587,7 @@ void allocation_failures() {
       break;
     }
 
-    check(registered.error() == TreeError::no_memory, "observe allocation failure without capacity leak");
+    check(registered.error() == TreeError::NO_MEMORY, "observe allocation failure without capacity leak");
   }
 
   check(eventually_observed, "observe succeeds after finite allocations");
@@ -591,12 +599,13 @@ struct SourceWidget : Widget {
 
   explicit SourceWidget(bool &flag) : destroyed(flag) {
   }
+
   ~SourceWidget() override {
     destroyed = true;
   }
 };
 
-void current_target_destruction() {
+void currentTargetDestruction() {
   auto scheduler = take(Scheduler::create());
   auto tree = take(WidgetTree::create(*scheduler));
   auto root = take(tree->root());
@@ -608,7 +617,7 @@ void current_target_destruction() {
   check(tree
           ->edit(node,
                  [&](SourceWidget &widget) {
-                   widget.property = take(Property<int>::create(*tree, node, 0, Invalidation::paint));
+                   widget.property = take(Property<int>::create(*tree, node, 0, Invalidation::PAINT));
                    first = take(widget.property->observe(node, [&](SourceWidget &, auto event) {
                      ++calls;
                      check(tree->remove(node).has_value(), "remove current target");
@@ -626,7 +635,7 @@ void current_target_destruction() {
   check(destroyed && calls == 1, "node-owned source reclaimed after callback without late invocation");
 }
 
-void bounded_reentry() {
+void boundedReentry() {
   SchedulerOptions options;
 
   options.data_budget = 3;
@@ -634,7 +643,7 @@ void bounded_reentry() {
   auto scheduler = take(Scheduler::create(options));
   auto tree = take(WidgetTree::create(*scheduler));
   auto node = take(tree->root());
-  auto property = take(Property<int>::create(*tree, node, 0, Invalidation::paint));
+  auto property = take(Property<int>::create(*tree, node, 0, Invalidation::PAINT));
   int calls{};
   auto token = take(property->observe(node, [&](Widget &, auto event) {
     ++calls;
@@ -652,17 +661,17 @@ void bounded_reentry() {
 } // namespace
 
 int main() {
-  invalidation_and_snapshots();
-  reentrant_order();
+  invalidationAndSnapshots();
+  reentrantOrder();
   backpressure();
   cancellation();
-  node_lifetime();
-  affinity_and_session();
-  destructor_reentry();
-  registration_destructor_reentry();
-  allocation_failures();
-  current_target_destruction();
-  bounded_reentry();
+  nodeLifetime();
+  affinityAndSession();
+  destructorReentry();
+  registrationDestructorReentry();
+  allocationFailures();
+  currentTargetDestruction();
+  boundedReentry();
 
   return failures ? 1 : 0;
 }

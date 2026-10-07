@@ -16,8 +16,8 @@
 
 namespace portals::probe {
 namespace {
-constexpr std::string_view requests = "\x1b[0c\x1b[6n";
-constexpr std::size_t read_chunk_size = 128;
+constexpr std::string_view REQUESTS = "\x1b[0c\x1b[6n";
+constexpr std::size_t READ_CHUNK_SIZE = 128;
 volatile std::sig_atomic_t interrupted = 0;
 
 void interrupt(int signal) {
@@ -32,11 +32,13 @@ class SignalGuard {
 public:
   bool acquire() {
     interrupted = 0;
+
     struct sigaction handler{};
+
     handler.sa_handler = interrupt;
     sigemptyset(&handler.sa_mask);
 
-    for (; acquired_ < signals_count; ++acquired_) {
+    for (; acquired_ < SIGNALS_COUNT; ++acquired_) {
       if (sigaction(signals_[acquired_], &handler, &original_[acquired_]) != 0) {
         return false;
       }
@@ -53,9 +55,9 @@ public:
   }
 
 private:
-  static constexpr int signals_count = 3;
-  int signals_[signals_count] = {SIGINT, SIGTERM, SIGHUP};
-  struct sigaction original_[signals_count]{};
+  static constexpr int SIGNALS_COUNT = 3;
+  int signals_[SIGNALS_COUNT] = {SIGINT, SIGTERM, SIGHUP};
+  struct sigaction original_[SIGNALS_COUNT]{};
   int acquired_ = 0;
 };
 
@@ -74,6 +76,7 @@ public:
     }
 
     auto mode = original_;
+
     mode.c_lflag &= static_cast<tcflag_t>(~(ICANON | ECHO | ECHONL | ISIG | IEXTEN));
     mode.c_iflag &= static_cast<tcflag_t>(~(ICRNL | INLCR | IGNCR | IXON));
     mode.c_cc[VMIN] = 0;
@@ -134,7 +137,7 @@ private:
   bool output_changed_ = false;
 };
 
-int wait_ready(int descriptor, short events, QueryCollector::Time deadline) {
+int waitReady(int descriptor, short events, QueryCollector::Time deadline) {
   while (interrupted == 0) {
     const auto remaining = deadline - std::chrono::steady_clock::now();
 
@@ -167,8 +170,8 @@ int wait_ready(int descriptor, short events, QueryCollector::Time deadline) {
 RunResult collect(QueryCollector &collector, QueryCollector::Time deadline, std::size_t byte_limit) {
   std::size_t written = 0;
 
-  while (written < requests.size()) {
-    const int ready = wait_ready(STDOUT_FILENO, POLLOUT, deadline);
+  while (written < REQUESTS.size()) {
+    const int ready = waitReady(STDOUT_FILENO, POLLOUT, deadline);
 
     if (ready == 0) {
       return {"deadline during query write", "", 0, ""};
@@ -182,7 +185,7 @@ RunResult collect(QueryCollector &collector, QueryCollector::Time deadline, std:
       return {"deadline during query write", "", 0, ""};
     }
 
-    const auto count = write(STDOUT_FILENO, requests.data() + written, requests.size() - written);
+    const auto count = write(STDOUT_FILENO, REQUESTS.data() + written, REQUESTS.size() - written);
 
     if (count < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
       continue;
@@ -196,7 +199,7 @@ RunResult collect(QueryCollector &collector, QueryCollector::Time deadline, std:
   }
 
   while (collector.active(std::chrono::steady_clock::now())) {
-    const int ready = wait_ready(STDIN_FILENO, POLLIN, deadline);
+    const int ready = waitReady(STDIN_FILENO, POLLIN, deadline);
 
     if (ready == 0) {
       break;
@@ -212,7 +215,7 @@ RunResult collect(QueryCollector &collector, QueryCollector::Time deadline, std:
       break;
     }
 
-    char bytes[read_chunk_size];
+    char bytes[READ_CHUNK_SIZE];
     const auto capacity = std::min(sizeof(bytes), byte_limit - collector.received());
     const auto count = read(STDIN_FILENO, bytes, capacity);
 
@@ -231,14 +234,14 @@ RunResult collect(QueryCollector &collector, QueryCollector::Time deadline, std:
     collector.feed(std::string_view(bytes, static_cast<std::size_t>(count)), received_at);
   }
 
-  return {collector.limited()                                            ? "byte limit"
-          : collector.device_attributes() && collector.cursor_position() ? "replies"
-                                                                         : "deadline",
+  return {collector.limited()                                          ? "byte limit"
+          : collector.deviceAttributes() && collector.cursorPosition() ? "replies"
+                                                                       : "deadline",
           "", 0, ""};
 }
 } // namespace
 
-NativeFacts inspect_native() {
+NativeFacts inspectNative() {
   NativeFacts facts;
   utsname system{};
 
@@ -253,12 +256,16 @@ NativeFacts inspect_native() {
 
   const bool input_tty = isatty(STDIN_FILENO) == 1;
   const bool output_tty = isatty(STDOUT_FILENO) == 1;
+
   facts.query_eligible = input_tty && output_tty;
   facts.fields.emplace_back("transport.stdin", input_tty ? "POSIX tty" : "redirected/non-tty");
   facts.fields.emplace_back("transport.stdout", output_tty ? "POSIX tty" : "redirected/non-tty");
   facts.fields.emplace_back("transport.underlying", "unknown (tty API does not prove local/PTY/SSH/multiplexer)");
+
   const char *input_name = input_tty ? ttyname(STDIN_FILENO) : nullptr;
+
   facts.fields.emplace_back("transport.tty_name", input_name == nullptr ? "unknown" : input_name);
+
   winsize size{};
 
   if (output_tty && ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_col != 0 && size.ws_row != 0) {
@@ -285,7 +292,7 @@ NativeFacts inspect_native() {
   return facts;
 }
 
-RunResult run_native_queries(QueryCollector &collector, QueryCollector::Time deadline, std::size_t byte_limit) {
+RunResult runNativeQueries(QueryCollector &collector, QueryCollector::Time deadline, std::size_t byte_limit) {
   if (isatty(STDIN_FILENO) != 1 || isatty(STDOUT_FILENO) != 1) {
     return {"skipped: redirected handles", "", 0, ""};
   }

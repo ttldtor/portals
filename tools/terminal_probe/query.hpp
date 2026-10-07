@@ -24,9 +24,9 @@ public:
   /// Returns false at the deadline, on completion, or when the byte limit is hit.
   bool active(Time now) const;
   /// Observed primary DA reply; matching is syntactic and not authentication.
-  const std::optional<std::string> &device_attributes() const;
+  const std::optional<std::string> &deviceAttributes() const;
   /// Observed CPR reply; keyboard input may have an identical encoding.
-  const std::optional<std::string> &cursor_position() const;
+  const std::optional<std::string> &cursorPosition() const;
   /// Unmatched captured input, with no claim that it is all user-generated.
   const std::string &unmatched() const;
   /// Number of bytes consumed from the input stream.
@@ -47,6 +47,6 @@ private:
 };
 
 /// Produces printable ASCII with quoted strings and hex escapes for unsafe bytes.
-std::string escape_bytes(std::string_view bytes);
+std::string escapeBytes(std::string_view bytes);
 
 } // namespace portals::probe

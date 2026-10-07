@@ -31,7 +31,7 @@ limit may be configured up to 256 to bound recursive teardown stack usage. Live
 and logically removed but borrowed nodes share the storage budget. There is no
 unbounded deferred command queue. Ordinary edits may insert a child immediately;
 lifecycle hooks, reclamation and frame callbacks reject insertion with
-`would_block`. This implementation does not provide the deferred insertion queue
+`WOULD_BLOCK`. This implementation does not provide the deferred insertion queue
 illustrated by the earlier design-only sketches.
 
 ## Removal and callbacks
@@ -58,7 +58,7 @@ reference for the entire invocation. The returned subscription has the existing
 Scheduler ownership rules; the node scope provides an additional cancellation
 boundary. Scheduler retains an executing callback's captures, while the tree
 retains widget storage. A throwing callback reaches both the tree error sink and
-Scheduler's disconnect boundary. `with_scope` supports other Scheduler
+Scheduler's disconnect boundary. `withScope` supports other Scheduler
 registrations; any callback borrowing a widget must wrap its complete invocation
 in checked `edit`. Arbitrary raw reference captures are the application's burden.
 
@@ -72,7 +72,7 @@ Error sinks are borrowed, nonthrowing callbacks; nested reports are suppressed.
 
 Hidden subtrees participate in neither layout, painting nor input. Disabled
 subtrees keep layout and paint but do not receive input. Equal visible/enabled
-setters do nothing. `input_eligible` checks live/visible/enabled ancestors;
+setters do nothing. `inputEligible` checks live/visible/enabled ancestors;
 keyboard eligibility does not depend on pending layout. Hit-testing must also
 require `geometry.valid` and use the half-open surface clip.
 
@@ -83,7 +83,7 @@ Changing parent placement invalidates descendant placement. Failed arrangement
 or translation leaves geometry explicitly invalid, never an old valid hit target.
 Layout invalidation conservatively invalidates placement throughout this bounded
 tree. Paint invalidation preserves it. Layout includes painting; requests coalesce
-into one `Invalidation` value consumed by `consume_frame_request` before work.
+into one `Invalidation` value consumed by `consumeFrameRequest` before work.
 
 The layout owner uses an external traversal: inspect ordered children and `read`
 the custom const layout interface, then call guarded `measure`/`arrange` hooks.
@@ -96,7 +96,7 @@ Wrap the entire traversal **and render consumption** in `tree.frame(callback)`.
 `paint` requires this outer boundary. Mutation and close are rejected inside the
 frame. `PaintContext::submit` borrows render commands; a sink may consume them
 immediately or record them only until that frame callback ends. In particular,
-`TextCommand` borrows `GraphemeText`: call `render_full_frame` before leaving the
+`TextCommand` borrows `GraphemeText`: call `renderFullFrame` before leaving the
 frame and clear recorded commands there. Never render retained borrowed commands
 after the frame. The tree does not introduce a second renderer, focus system,
 property bus, or paint command owner. Hooks perform no blocking I/O or terminal

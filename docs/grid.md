@@ -1,7 +1,7 @@
 # Grid and Overlay
 
 `<portals/grid.hpp>` adds sparse `Grid` and `Overlay` containers to the existing
-`Layout` / `SizedWidget` contracts. Run `layout_tree` inside the same tree frame
+`Layout` / `SizedWidget` contracts. Run `layoutTree` inside the same tree frame
 that paints and renders. These classes perform no tree traversal, I/O, model
 mutation, or hit testing. Input spans are borrowed only during each method call.
 
@@ -20,7 +20,7 @@ Overlap is allowed; later siblings paint above earlier siblings when the frame
 owner paints in tree order, matching EventRouter's reverse-sibling hit testing.
 There is no dense rows-times-columns allocation or automatic track creation.
 `max_tracks_per_axis` and `max_placements` are positive configurable work budgets
-(default 4096 each); exceeding them returns `node_limit`. Inactive placements
+(default 4096 each); exceeding them returns `NODE_LIMIT`. Inactive placements
 count toward the budget. Track counts must fit the cell representation.
 
 Each track starts at its preferred size (or zero for intrinsic), clamped to
@@ -57,16 +57,16 @@ Explicit command z values remain the frame owner's responsibility.
 ## Mutation and errors
 
 Constructors own their configuration. Invalid constructor settings are reported
-by layout methods. Use `set_grid_options` and `set_overlay_options` on the UI
+by layout methods. Use `setGridOptions` and `setOverlayOptions` on the UI
 owner between frames; successful changes invalidate layout and paint. The grid
 setter prepares a full copy before replacement, so failed validation/allocation
 preserves the old settings. A visible child without a placement is an error at
 layout time; future/hidden identities may already have stored placements.
 `options()` returns an owning copy on UI and can throw `bad_alloc` for Grid.
 
-Malformed policies, alignments, identities and spans return `invalid_argument`.
-Coordinate/extent overflow returns `invalid_geometry`, work budget overflow
-returns `node_limit`, and layout allocation failure returns `no_memory`.
+Malformed policies, alignments, identities and spans return `INVALID_ARGUMENT`.
+Coordinate/extent overflow returns `INVALID_GEOMETRY`, work budget overflow
+returns `NODE_LIMIT`, and layout allocation failure returns `NO_MEMORY`.
 Tree operations additionally preserve their owner-thread and lifetime errors.
 No callback retains the child spans or attempts tree/model mutation.
 

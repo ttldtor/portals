@@ -10,31 +10,31 @@
 
 namespace portals {
 namespace {
-bool valid_policy(WidthPolicy policy) noexcept {
-  return (policy.ambiguous == AmbiguousWidth::narrow || policy.ambiguous == AmbiguousWidth::wide) &&
-         (policy.emoji == EmojiWidth::one || policy.emoji == EmojiWidth::two);
+bool validPolicy(WidthPolicy policy) noexcept {
+  return (policy.ambiguous == AmbiguousWidth::NARROW || policy.ambiguous == AmbiguousWidth::WIDE) &&
+         (policy.emoji == EmojiWidth::ONE || policy.emoji == EmojiWidth::TWO);
 }
 
-std::expected<std::size_t, CellBufferError> checked_cells(CellSize size, CellBufferLimits limits) noexcept {
+std::expected<std::size_t, CellBufferError> checkedCells(CellSize size, CellBufferLimits limits) noexcept {
   const auto columns = static_cast<std::size_t>(size.width);
   const auto rows = static_cast<std::size_t>(size.height);
 
   if (columns > limits.max_columns) {
-    return std::unexpected(CellBufferError::column_limit);
+    return std::unexpected(CellBufferError::COLUMN_LIMIT);
   }
 
   if (rows > limits.max_rows) {
-    return std::unexpected(CellBufferError::row_limit);
+    return std::unexpected(CellBufferError::ROW_LIMIT);
   }
 
   if (rows != 0 && columns > limits.max_cells / rows) {
-    return std::unexpected(CellBufferError::cell_limit);
+    return std::unexpected(CellBufferError::CELL_LIMIT);
   }
 
   return rows * columns;
 }
 
-bool add_allocation(std::size_t &total, std::size_t count, std::size_t element_bytes) noexcept {
+bool addAllocation(std::size_t &total, std::size_t count, std::size_t element_bytes) noexcept {
   const auto allocation_limit = static_cast<std::size_t>(std::numeric_limits<std::ptrdiff_t>::max());
 
   if (count > allocation_limit / element_bytes) {
@@ -60,6 +60,7 @@ CellBuffer::CellBuffer(CellBuffer &&other) noexcept {
 CellBuffer &CellBuffer::operator=(CellBuffer &&other) noexcept {
   if (this != &other) {
     CellBuffer replacement(std::move(other));
+
     swap(replacement);
   }
 
@@ -74,19 +75,20 @@ std::expected<CellBuffer, CellBufferError> CellBuffer::from(CellSize size, Width
 
   if (limits.max_columns > coordinate_limit || limits.max_rows > coordinate_limit || limits.max_glyphs == 0 ||
       limits.max_glyphs > id_count_limit || limits.max_glyph_bytes == 0 || limits.max_styles == 0 ||
-      limits.max_styles > id_count_limit || !add_allocation(maximum_bytes, limits.max_cells, sizeof(Cell)) ||
-      !add_allocation(maximum_bytes, limits.max_glyphs, sizeof(GlyphRecord)) ||
-      !add_allocation(maximum_bytes, limits.max_glyph_bytes, sizeof(char)) ||
-      !add_allocation(maximum_bytes, limits.max_styles, sizeof(CellStyle))) {
-    return std::unexpected(CellBufferError::invalid_limits);
+      limits.max_styles > id_count_limit || !addAllocation(maximum_bytes, limits.max_cells, sizeof(Cell)) ||
+      !addAllocation(maximum_bytes, limits.max_glyphs, sizeof(GlyphRecord)) ||
+      !addAllocation(maximum_bytes, limits.max_glyph_bytes, sizeof(char)) ||
+      !addAllocation(maximum_bytes, limits.max_styles, sizeof(CellStyle))) {
+    return std::unexpected(CellBufferError::INVALID_LIMITS);
   }
 
-  if (!valid_policy(policy)) {
-    return std::unexpected(CellBufferError::invalid_policy);
+  if (!validPolicy(policy)) {
+    return std::unexpected(CellBufferError::INVALID_POLICY);
   }
 
   size = size.normalized();
-  const auto cell_count = checked_cells(size, limits);
+
+  const auto cell_count = checkedCells(size, limits);
 
   if (!cell_count) {
     return std::unexpected(cell_count.error());
@@ -94,6 +96,7 @@ std::expected<CellBuffer, CellBufferError> CellBuffer::from(CellSize size, Width
 
   try {
     CellBuffer result;
+
     result.size_ = size;
     result.policy_ = policy;
     result.limits_ = limits;
@@ -106,11 +109,12 @@ std::expected<CellBuffer, CellBufferError> CellBuffer::from(CellSize size, Width
     result.glyphs_ = std::make_unique<GlyphRecord[]>(limits.max_glyphs);
     result.bytes_ = std::make_unique_for_overwrite<char[]>(limits.max_glyph_bytes);
     result.styles_ = std::make_unique<CellStyle[]>(limits.max_styles);
+
     result.clear();
 
     return result;
   } catch (const std::bad_alloc &) {
-    return std::unexpected(CellBufferError::allocation_failure);
+    return std::unexpected(CellBufferError::ALLOCATION_FAILURE);
   }
 }
 
@@ -141,7 +145,7 @@ std::size_t CellBuffer::index(CellPoint position) const noexcept {
 
 std::expected<CellView, CellBufferError> CellBuffer::at(CellPoint position) const noexcept {
   if (!contains(position)) {
-    return std::unexpected(CellBufferError::out_of_bounds);
+    return std::unexpected(CellBufferError::OUT_OF_BOUNDS);
   }
 
   const auto cell = cells_[index(position)];
@@ -152,10 +156,10 @@ std::expected<CellView, CellBufferError> CellBuffer::at(CellPoint position) cons
 
 // Replacing either half removes the complete old glyph, even if its other half lies
 // outside the new write. A continuation must never survive without its matching lead.
-void CellBuffer::clear_glyph(std::size_t cell_index) noexcept {
+void CellBuffer::clearGlyph(std::size_t cell_index) noexcept {
   const auto old = cells_[cell_index];
 
-  if (old.kind == CellKind::continuation) {
+  if (old.kind == CellKind::CONTINUATION) {
     cells_[cell_index - 1] = {};
   } else if (old.columns == 2) {
     cells_[cell_index + 1] = {};
@@ -167,24 +171,24 @@ void CellBuffer::clear_glyph(std::size_t cell_index) noexcept {
 std::expected<void, CellBufferError> CellBuffer::put(CellPoint position, const GraphemeText &text,
                                                      std::size_t grapheme_index, CellStyle style) noexcept {
   if (!contains(position)) {
-    return std::unexpected(CellBufferError::out_of_bounds);
+    return std::unexpected(CellBufferError::OUT_OF_BOUNDS);
   }
 
   if (grapheme_index >= text.graphemes().size()) {
-    return std::unexpected(CellBufferError::invalid_grapheme);
+    return std::unexpected(CellBufferError::INVALID_GRAPHEME);
   }
 
   if (text.policy() != policy_) {
-    return std::unexpected(CellBufferError::policy_mismatch);
+    return std::unexpected(CellBufferError::POLICY_MISMATCH);
   }
 
   const auto &grapheme = text.graphemes()[grapheme_index];
 
   if (grapheme.cells == 2 && position.x == size_.width - 1) {
-    return std::unexpected(CellBufferError::wide_at_edge);
+    return std::unexpected(CellBufferError::WIDE_AT_EDGE);
   }
 
-  const auto glyph_bytes = grapheme.display == TextDisplay::unsupported
+  const auto glyph_bytes = grapheme.display == TextDisplay::UNSUPPORTED
                              ? std::string_view("?")
                              : text.bytes().substr(grapheme.byte_begin, grapheme.byte_end - grapheme.byte_begin);
   std::size_t glyph_id = 0;
@@ -208,16 +212,16 @@ std::expected<void, CellBufferError> CellBuffer::put(CellPoint position, const G
 
   if (glyph_id == glyph_count_) {
     if (glyph_count_ == limits_.max_glyphs) {
-      return std::unexpected(CellBufferError::glyph_limit);
+      return std::unexpected(CellBufferError::GLYPH_LIMIT);
     }
 
     if (glyph_bytes.size() > limits_.max_glyph_bytes - byte_count_) {
-      return std::unexpected(CellBufferError::glyph_byte_limit);
+      return std::unexpected(CellBufferError::GLYPH_BYTE_LIMIT);
     }
   }
 
   if (style_id == style_count_ && style_count_ == limits_.max_styles) {
-    return std::unexpected(CellBufferError::style_limit);
+    return std::unexpected(CellBufferError::STYLE_LIMIT);
   }
 
   // All coordinate, policy and pool-capacity checks precede this commit point.
@@ -235,18 +239,20 @@ std::expected<void, CellBufferError> CellBuffer::put(CellPoint position, const G
   }
 
   const auto destination = index(position);
-  clear_glyph(destination);
+
+  clearGlyph(destination);
 
   if (grapheme.cells == 2) {
-    clear_glyph(destination + 1);
+    clearGlyph(destination + 1);
   }
 
   const GlyphId glyph{static_cast<std::uint32_t>(glyph_id)};
   const StyleId interned_style{static_cast<std::uint32_t>(style_id)};
-  cells_[destination] = {glyph, interned_style, CellKind::lead, grapheme.cells};
+
+  cells_[destination] = {glyph, interned_style, CellKind::LEAD, grapheme.cells};
 
   if (grapheme.cells == 2) {
-    cells_[destination + 1] = {glyph, interned_style, CellKind::continuation, 0};
+    cells_[destination + 1] = {glyph, interned_style, CellKind::CONTINUATION, 0};
   }
 
   return {};

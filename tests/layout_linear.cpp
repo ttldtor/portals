@@ -75,8 +75,10 @@ void operator delete[](void *p, const std::nothrow_t &) noexcept {
 }
 
 using namespace portals;
+
 namespace {
 int failures{};
+
 void check(bool ok, const char *message) {
   if (!ok) {
     std::cerr << message << '\n';
@@ -97,6 +99,7 @@ template <class T, class E> T take(std::expected<T, E> result) {
 struct Measuring : SizedWidget {
   CellSize desired;
   int calls{};
+
   Measuring(CellSize size, SizePolicy policy = {}) : SizedWidget(policy), desired(size) {
   }
 
@@ -106,14 +109,15 @@ struct Measuring : SizedWidget {
     return desired;
   }
 };
-void odd_flex() {
+
+void oddFlex() {
   auto scheduler = take(Scheduler::create());
   auto tree = take(WidgetTree::create(*scheduler));
   auto root = take(tree->root());
   auto row = take(tree->emplace<Row>(root));
   SizePolicy flex;
 
-  flex.width.mode = SizeMode::flex;
+  flex.width.mode = SizeMode::FLEX;
 
   auto first = take(tree->emplace<Measuring>(row, CellSize{0, 1}, flex));
   auto second = take(tree->emplace<Measuring>(row, CellSize{0, 1}, flex));
@@ -123,7 +127,7 @@ void odd_flex() {
   take(tree->frame([&] {
     take(tree->arrange(root, viewport, viewport));
 
-    result = layout_tree(*tree, row, viewport, viewport);
+    result = layoutTree(*tree, row, viewport, viewport);
   }));
   check(result.has_value(), "layout succeeds");
   check(take(tree->inspect(first)).geometry.local.size().width == 6, "first gets odd remainder");
@@ -139,18 +143,19 @@ struct Fixture {
   std::expected<void, TreeError> run(CellSize size) {
     auto viewport = take(CellRect::from({}, size));
 
-    take(tree->invalidate(root, Invalidation::layout));
+    take(tree->invalidate(root, Invalidation::LAYOUT));
 
     std::expected<void, TreeError> result;
 
     take(tree->frame([&] {
-      result = layout_tree(*tree, root, viewport, viewport);
+      result = layoutTree(*tree, root, viewport, viewport);
     }));
 
     return result;
   }
 };
-SizePolicy width_policy(SizeMode mode, int minimum, int preferred, int maximum) {
+
+SizePolicy widthPolicy(SizeMode mode, int minimum, int preferred, int maximum) {
   SizePolicy result;
 
   result.width = {minimum, preferred, maximum, mode, 1};
@@ -158,7 +163,7 @@ SizePolicy width_policy(SizeMode mode, int minimum, int preferred, int maximum) 
   return result;
 }
 
-void capped_and_mixed() {
+void cappedAndMixed() {
   Fixture f;
   LinearOptions options;
 
@@ -166,26 +171,26 @@ void capped_and_mixed() {
   options.padding = {1, 1, 1, 1};
 
   auto row = take(f.tree->emplace<Row>(f.root, options));
-  auto fixed = take(f.tree->emplace<Measuring>(row, CellSize{9, 1}, width_policy(SizeMode::fixed, 0, 3, 10)));
+  auto fixed = take(f.tree->emplace<Measuring>(row, CellSize{9, 1}, widthPolicy(SizeMode::FIXED, 0, 3, 10)));
   auto automatic = take(f.tree->emplace<Measuring>(row, CellSize{2, 1}));
-  auto flex1 = take(f.tree->emplace<Measuring>(row, CellSize{0, 1}, width_policy(SizeMode::flex, 1, 1, 2)));
-  auto flex2 = take(f.tree->emplace<Measuring>(row, CellSize{0, 1}, width_policy(SizeMode::flex, 1, 1, 20)));
+  auto flex1 = take(f.tree->emplace<Measuring>(row, CellSize{0, 1}, widthPolicy(SizeMode::FLEX, 1, 1, 2)));
+  auto flex2 = take(f.tree->emplace<Measuring>(row, CellSize{0, 1}, widthPolicy(SizeMode::FLEX, 1, 1, 20)));
 
   take(f.run({20, 5}));
   check(take(f.tree->inspect(fixed)).geometry.local == take(CellRect::from({1, 1}, {3, 3})), "fixed and padding");
   check(take(f.tree->inspect(automatic)).geometry.local.size().width == 2, "auto uses actual intrinsic measure");
   check(take(f.tree->inspect(flex1)).geometry.local.size().width == 2, "first flex capped");
   check(take(f.tree->inspect(flex2)).geometry.local.size().width == 8, "cap remainder redistributes");
-  take(set_size_policy(*f.tree, flex2, width_policy(SizeMode::flex, 1, 1, 3)));
+  take(setSizePolicy(*f.tree, flex2, widthPolicy(SizeMode::FLEX, 1, 1, 3)));
   check(!take(f.tree->inspect(fixed)).geometry.valid, "policy mutation invalidates geometry");
   take(f.run({20, 5}));
   check(take(f.tree->inspect(flex2)).geometry.local.size().width == 3, "all maxima permit unused cells");
-  take(f.tree->set_enabled(row, false));
+  take(f.tree->setEnabled(row, false));
   take(f.run({20, 5}));
   check(take(f.tree->inspect(flex1)).geometry.local.size().width == 2, "disabled keeps layout");
 }
 
-void underflow_and_center() {
+void underflowAndCenter() {
   Fixture f;
   LinearOptions options;
 
@@ -193,10 +198,10 @@ void underflow_and_center() {
 
   auto row = take(f.tree->emplace<Row>(f.root, options));
   auto first =
-    take(f.tree->emplace<Measuring>(row, CellSize{8, 2}, width_policy(SizeMode::automatic, 4, intrinsic_extent, 9)));
+    take(f.tree->emplace<Measuring>(row, CellSize{8, 2}, widthPolicy(SizeMode::AUTOMATIC, 4, INTRINSIC_EXTENT, 9)));
 
   auto second =
-    take(f.tree->emplace<Measuring>(row, CellSize{8, 2}, width_policy(SizeMode::automatic, 4, intrinsic_extent, 9)));
+    take(f.tree->emplace<Measuring>(row, CellSize{8, 2}, widthPolicy(SizeMode::AUTOMATIC, 4, INTRINSIC_EXTENT, 9)));
 
   take(f.run({5, 2}));
 
@@ -205,11 +210,11 @@ void underflow_and_center() {
 
   check(a.local.size().width == 4 && b.local.size().width == 4, "underflow preserves minima");
   check(b.local.origin().x == 5 && b.clip.empty(), "overflow clipped at ancestor");
-  take(f.tree->set_visible(second, false));
-  options.main_align = LayoutAlign::center;
-  options.cross_align = LayoutAlign::center;
-  take(set_linear_options(*f.tree, row, options));
-  take(set_size_policy(*f.tree, first, width_policy(SizeMode::fixed, 0, 2, 9)));
+  take(f.tree->setVisible(second, false));
+  options.main_align = LayoutAlign::CENTER;
+  options.cross_align = LayoutAlign::CENTER;
+  take(setLinearOptions(*f.tree, row, options));
+  take(setSizePolicy(*f.tree, first, widthPolicy(SizeMode::FIXED, 0, 2, 9)));
 
   for (int width : {8, 9}) {
     take(f.run({width, 5}));
@@ -232,12 +237,12 @@ void underflow_and_center() {
   }));
 }
 
-void nesting_and_snapshots() {
+void nestingAndSnapshots() {
   Fixture f;
   auto column = take(f.tree->emplace<Column>(f.root));
   SizePolicy tall;
 
-  tall.height.mode = SizeMode::flex;
+  tall.height.mode = SizeMode::FLEX;
 
   auto row = take(f.tree->emplace<Row>(column, LinearOptions{}, tall));
   auto label = take(f.tree->emplace<Measuring>(row, CellSize{3, 1}));
@@ -258,20 +263,22 @@ struct Recursive : SizedWidget {
   WidgetTree &tree;
   Node<Widget> root;
   bool guarded{};
+
   Recursive(WidgetTree &owner, Node<Widget> node) : tree(owner), root(node) {
   }
 
   std::expected<CellSize, TreeError> measure(CellSize) override {
-    auto nested = layout_tree(tree, root, {}, {});
-    auto mutation = tree.set_enabled(root, false);
+    auto nested = layoutTree(tree, root, {}, {});
+    auto mutation = tree.setEnabled(root, false);
 
     guarded =
-      !nested && nested.error() == TreeError::would_block && !mutation && mutation.error() == TreeError::would_block;
+      !nested && nested.error() == TreeError::WOULD_BLOCK && !mutation && mutation.error() == TreeError::WOULD_BLOCK;
 
     return CellSize{1, 1};
   }
 };
-void errors_and_guard() {
+
+void errorsAndGuard() {
   Fixture f;
   auto row = take(f.tree->emplace<Row>(f.root));
   auto recursive = take(f.tree->emplace<Recursive>(row, *f.tree, f.root));
@@ -280,20 +287,22 @@ void errors_and_guard() {
   take(f.tree->read(recursive, [&](const Recursive &widget) {
     check(widget.guarded, "reentry and hook mutation rejected");
   }));
-  auto bad = width_policy(SizeMode::fixed, 0, std::numeric_limits<int>::max(), std::numeric_limits<int>::max());
+
+  auto bad = widthPolicy(SizeMode::FIXED, 0, std::numeric_limits<int>::max(), std::numeric_limits<int>::max());
   auto huge = take(f.tree->emplace<Measuring>(row, CellSize{1, 1}, bad));
   auto failure = f.run({4, 2});
 
-  check(!failure && failure.error() == TreeError::invalid_geometry, "aggregate geometry overflow explicit");
+  check(!failure && failure.error() == TreeError::INVALID_GEOMETRY, "aggregate geometry overflow explicit");
   check(!take(f.tree->inspect(recursive)).geometry.valid && !take(f.tree->inspect(huge)).geometry.valid,
         "failed invalidated pass cannot expose stale rectangles");
   bad.width.minimum = -1;
-  auto rejected = set_size_policy(*f.tree, huge, bad);
 
-  check(!rejected && rejected.error() == TreeError::invalid_argument, "invalid policy rejected");
+  auto rejected = setSizePolicy(*f.tree, huge, bad);
+
+  check(!rejected && rejected.error() == TreeError::INVALID_ARGUMENT, "invalid policy rejected");
 }
 
-void geometry_properties() {
+void geometryProperties() {
   Row row;
 
   for (int count = 1; count <= 6; ++count) {
@@ -302,11 +311,11 @@ void geometry_properties() {
       int cap_sum{};
 
       for (int i = 0; i < count; ++i) {
-        children[static_cast<std::size_t>(i)].policy = width_policy(SizeMode::flex, 0, 0, i + 2);
+        children[static_cast<std::size_t>(i)].policy = widthPolicy(SizeMode::FLEX, 0, 0, i + 2);
         cap_sum += i + 2;
       }
 
-      auto rects = take(row.arrange_children(children, {available, 3}));
+      auto rects = take(row.arrangeChildren(children, {available, 3}));
       int sum{};
 
       for (int i = 0; i < count; ++i) {
@@ -322,45 +331,47 @@ void geometry_properties() {
   }
 }
 
-void weighted_and_checked_translation() {
+void weightedAndCheckedTranslation() {
   Row row;
   std::vector<MeasuredChild> children(2);
 
-  children[0].policy = width_policy(SizeMode::flex, 0, 0, 20);
-  children[1].policy = width_policy(SizeMode::flex, 0, 0, 20);
+  children[0].policy = widthPolicy(SizeMode::FLEX, 0, 0, 20);
+  children[1].policy = widthPolicy(SizeMode::FLEX, 0, 0, 20);
   children[1].policy.width.weight = 2;
 
-  auto rects = take(row.arrange_children(children, {10, 2}));
+  auto rects = take(row.arrangeChildren(children, {10, 2}));
 
   check(rects[0].size().width == 4 && rects[1].size().width == 6, "weighted quotient with stable remainder");
 
   Fixture f;
   auto container = take(f.tree->emplace<Row>(f.root));
-  auto child = take(f.tree->emplace<Measuring>(container, CellSize{6, 1}, width_policy(SizeMode::fixed, 0, 6, 6)));
+  auto child = take(f.tree->emplace<Measuring>(container, CellSize{6, 1}, widthPolicy(SizeMode::FIXED, 0, 6, 6)));
   auto viewport = take(CellRect::from({std::numeric_limits<std::int32_t>::max() - 5, 0}, {5, 1}));
   std::expected<void, TreeError> result;
 
-  take(f.tree->invalidate(f.root, Invalidation::layout));
+  take(f.tree->invalidate(f.root, Invalidation::LAYOUT));
   take(f.tree->frame([&] {
-    result = layout_tree(*f.tree, f.root, viewport, viewport);
+    result = layoutTree(*f.tree, f.root, viewport, viewport);
   }));
-  check(!result && result.error() == TreeError::invalid_geometry, "surface translation overflow checked");
+  check(!result && result.error() == TreeError::INVALID_GEOMETRY, "surface translation overflow checked");
   check(!take(f.tree->inspect(child)).geometry.valid, "failed child has invalid geometry");
 }
 
 struct IdentityRow : Row {
   mutable std::vector<NodeId> ids;
-  std::expected<CellSize, TreeError> measure_children(std::span<const MeasuredChild> children) const override {
+
+  std::expected<CellSize, TreeError> measureChildren(std::span<const MeasuredChild> children) const override {
     ids.clear();
 
     for (const auto &child : children) {
       ids.push_back(child.node);
     }
 
-    return Row::measure_children(children);
+    return Row::measureChildren(children);
   }
 };
-void identities_with_hidden_siblings() {
+
+void identitiesWithHiddenSiblings() {
   Fixture f;
   auto row = take(f.tree->emplace<IdentityRow>(f.root));
   auto first = take(f.tree->emplace<Measuring>(row, CellSize{1, 1}));
@@ -371,14 +382,14 @@ void identities_with_hidden_siblings() {
   take(f.tree->read(row, [&](const IdentityRow &widget) {
     check(widget.ids == std::vector<NodeId>{first.id(), middle.id(), last.id()}, "all stable IDs reach pure solver");
   }));
-  take(f.tree->set_visible(middle, false));
+  take(f.tree->setVisible(middle, false));
   take(f.run({10, 3}));
   take(f.tree->read(row, [&](const IdentityRow &widget) {
     check(widget.ids == std::vector<NodeId>{first.id(), last.id()}, "hidden sibling does not rebind remaining child");
   }));
 }
 
-void allocation_failures() {
+void allocationFailures() {
   Fixture f;
   auto row = take(f.tree->emplace<Row>(f.root));
 
@@ -389,20 +400,20 @@ void allocation_failures() {
   int observed{};
 
   for (std::ptrdiff_t budget = 0; budget < 256 && !completed; ++budget) {
-    take(f.tree->invalidate(f.root, Invalidation::layout));
+    take(f.tree->invalidate(f.root, Invalidation::LAYOUT));
 
     std::expected<void, TreeError> result;
 
     take(f.tree->frame([&] {
       allocation_test::remaining = budget;
-      result = layout_tree(*f.tree, f.root, viewport, viewport);
+      result = layoutTree(*f.tree, f.root, viewport, viewport);
       allocation_test::remaining = -1;
     }));
 
     if (result) {
       completed = true;
     } else {
-      check(result.error() == TreeError::no_memory, "allocation error remains observable");
+      check(result.error() == TreeError::NO_MEMORY, "allocation error remains observable");
       ++observed;
     }
   }
@@ -410,16 +421,17 @@ void allocation_failures() {
   check(completed && observed > 0, "real allocation failpoints eventually succeed");
 }
 } // namespace
+
 int main() {
-  odd_flex();
-  capped_and_mixed();
-  underflow_and_center();
-  nesting_and_snapshots();
-  errors_and_guard();
-  geometry_properties();
-  weighted_and_checked_translation();
-  identities_with_hidden_siblings();
-  allocation_failures();
+  oddFlex();
+  cappedAndMixed();
+  underflowAndCenter();
+  nestingAndSnapshots();
+  errorsAndGuard();
+  geometryProperties();
+  weightedAndCheckedTranslation();
+  identitiesWithHiddenSiblings();
+  allocationFailures();
 
   return failures ? EXIT_FAILURE : EXIT_SUCCESS;
 }

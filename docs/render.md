@@ -1,6 +1,6 @@
 # Full-frame reference renderer
 
-`<portals/render.hpp>` provides `render_full_frame`: a synchronous scene-to-cells
+`<portals/render.hpp>` provides `renderFullFrame`: a synchronous scene-to-cells
 oracle. Every call starts with a fresh blank `CellBuffer`. It has no dependency on
 diff, damage tracking, a terminal writer, widgets or a style engine, so later
 optimized output can be checked against its semantic result.
@@ -32,7 +32,7 @@ if (!text || !clip) {
 
 const std::array<portals::RenderCommand, 1> scene{
     portals::TextCommand{{1, 0}, *text, *clip}};
-auto frame = portals::render_full_frame({20, 2}, scene);
+auto frame = portals::renderFullFrame({20, 2}, scene);
 if (!frame) {
   // Handle the owning RenderError before presenting output.
   return;
@@ -81,7 +81,7 @@ or a partial result. Zero scene caps accept only inputs with zero counted cost.
 Scene preflight checks sums/products before allocation or overflowing arithmetic.
 The buffer's extent/pool/width-policy failures are returned as `buffer_error` with
 the underlying `CellBufferError`. Renderer temporary storage failure becomes
-`allocation_failure`. No failure changes a previous frame, because no previous
+`ALLOCATION_FAILURE`. No failure changes a previous frame, because no previous
 frame is supplied. There is no output encoding or terminal I/O here.
 
 ## Verification

@@ -9,7 +9,7 @@ own their data and remain valid after subsequent calls or terminal destruction.
 Invalid test operations throw `std::runtime_error`; allocation errors propagate.
 Discard the terminal/writer pair after an injected output failure or oracle error.
 
-`FakeClock::advance_to()` changes monotonic milliseconds without dispatching
+`FakeClock::advanceTo()` changes monotonic milliseconds without dispatching
 anything. Call `TestTerminal::tick()` to deliver input timeouts explicitly, or
 `input()` to deliver bytes at the current time. The next scheduler can reuse this
 clock without acquiring a scheduler from this helper. `finish()` explicitly ends
@@ -18,7 +18,7 @@ backward time and values that cannot be represented by `TerminalDeadline`.
 
 `submit()` takes ownership without changing the screen. `flush()` honors a
 pre-requested stop or expired fake deadline without consuming output. An injected
-`fail_after(n)` accepts at most `n` pending bytes and then reports an error, even
+`failAfter(n)` accepts at most `n` pending bytes and then reports an error, even
 when that prefix ends inside CSI or UTF-8. This models a failed transport, not a
 safe retry. The remaining suffix is retained and further output is rejected.
 `FrameWriter` tests verify that this failure poisons the writer and invalidates its
@@ -43,7 +43,7 @@ Equal timestamps preserve record order. LF and CRLF input are accepted; recordin
 emits LF. Blank records, unknown operations, extra fields, malformed hex, numeric
 overflow and unsupported/missing versions are errors. Parse diagnostics identify
 the offending line; aggregate resource failures identify the limit.
-`parse_trace()` owns the decoded records; `record_trace()` creates canonical text.
+`parseTrace()` owns the decoded records; `recordTrace()` creates canonical text.
 The caller owns file I/O and must bound reads before passing a string to the
 parser (the fixture reader demonstrates this). This is a local testing format,
 not a network protocol or a general serializer.
@@ -114,6 +114,36 @@ Use the corresponding Linux preset on Linux. Windows test targets include
 `tests/support/no_dialogs.cpp`; configure and rebuild before running changed test
 binaries. Tests terminate themselves without terminal windows or dialog dismissal.
 Doxygen includes this page when `PORTALS_BUILD_DOCS=ON`.
+
+## C++ naming check
+
+Project functions and methods use `lowCamelCase`; enumerators and named
+`constexpr`, class, global and static constants use `BIG_SNAKE_CASE`.
+Ordinary local `const` values and parameters retain their existing variable style.
+Standard-library operations, external overrides and externally required linker
+entry points retain their contract names. Any necessary declaration suppression
+must explain that contract locally.
+
+The repository `.clang-tidy` checks these rules. Configure a compilation database
+with tests, tools and examples enabled, then run the Python 3.9+ checker:
+
+```powershell
+cmake --preset windows-msvc-debug
+python tools/check_naming.py build/windows-msvc-debug --clang-tidy clang-tidy
+```
+
+On Linux, use `linux-gcc-debug` and `build/linux-gcc-debug`. Use a clang-tidy version
+that can parse the selected C++23 standard library; Clang 20 is checked with the
+Linux configuration. Run each platform's database to cover conditional native
+code. The script checks project translation units and their project headers,
+excludes vendored sources, returns a nonzero status on errors, and never applies
+fixes. It can also check a separately configured module experiment database.
+The Linux CI naming job uses Clang/clang-tidy 20 and GCC 14's standard library;
+it installs the toolchain from Ubuntu 24.04's updated package repositories.
+Dependent template references and inactive preprocessor branches still require
+the normal build/test matrix; a naming pass alone is not a compilation guarantee.
+
+See the primary [clang-tidy naming documentation](https://clang.llvm.org/extra/clang-tidy/checks/readability/identifier-naming.html).
 
 References: [CTest](https://cmake.org/cmake/help/latest/manual/ctest.1.html),
 [C++ steady clock](https://eel.is/c++draft/time.clock.steady),

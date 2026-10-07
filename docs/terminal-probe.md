@@ -29,7 +29,7 @@ queries. It never opens `/dev/tty` or `CONIN$` to bypass redirection.
 
 Options accept positive decimal integers: `--timeout-ms` is 1..10000 (default
 250), and `--max-bytes` is 1..65536 (default 4096). `--width-policy narrow|wide`
-selects the **advisory** ambiguous-width policy (`narrow` by default). This probe
+selects the **advisory** ambiguous-width policy (`NARROW` by default). This probe
 does not measure glyph widths or choose a Unicode version; its report explicitly
 labels those facts unknown. A real library width profile belongs to later work.
 

@@ -10,11 +10,11 @@ bus, transaction across properties, or lossless multicast.
 Create a property with `Property<T>::create(tree, target, initial, invalidation,
 options)`. The tree and its scheduler are borrowed and must outlive the property.
 The target is a checked `Node<Widget>` in that tree. It identifies where a change
-requests paint or layout; `Invalidation::layout` also includes paint.
+requests paint or layout; `Invalidation::LAYOUT` also includes paint.
 `PropertyOptions::max_observers` bounds the endpoint list (64 by default).
 
 All property operations and destruction belong to the tree's UI thread. A foreign
-thread receives `TreeError::wrong_thread`; wrong-thread destruction terminates,
+thread receives `TreeError::WRONG_THREAD`; wrong-thread destruction terminates,
 matching the tree and subscription ownership rules. Use a separate Scheduler
 publisher to transfer worker values to UI code before calling `set`.
 
@@ -42,16 +42,16 @@ request a frame, nor queue notifications. A changed value requests the configure
 invalidation and commits its snapshot before attempting notifications.
 
 An `unexpected(TreeError)` means the operation made no library-controlled change
-to the value, revision, queue or invalidation. Allocation failure is `no_memory`;
-exceptions from value comparison/move are `callback_failed`; exhausted revision
-space is `identity_exhausted`. Construction of caller arguments is outside this
+to the value, revision, queue or invalidation. Allocation failure is `NO_MEMORY`;
+exceptions from value comparison/move are `CALLBACK_FAILED`; exhausted revision
+space is `IDENTITY_EXHAUSTED`. Construction of caller arguments is outside this
 boundary, as are application side effects in user code. Removed targets reject
-`set` with `stale_node`; retained snapshots still work. Mutations inside a tree
-frame are rejected with `would_block`.
+`set` with `STALE_NODE`; retained snapshots still work. Mutations inside a tree
+frame are rejected with `WOULD_BLOCK`.
 
 A successful `PropertyUpdate<T>` has an owning `snapshot`, `changed`, and delivery
 counts `accepted`, `rejected`, `cancelled`, plus the first `notification_error`.
-Publication uses the data lane and `SchedulerOverflow::reject`, in registration
+Publication uses the data lane and `SchedulerOverflow::REJECT`, in registration
 order. The scheduler accepts one receiver at a time: a full queue can accept the
 first observer and reject the next. The update remains committed and its frame
 request remains pending, including when every notification is rejected. The
@@ -90,7 +90,7 @@ second callback registry. Expired records are pruned on changed `set` and `obser
 An executing observer still occupies its slot until its callback captures are
 released, including after a cancelled publication. Registration rechecks the limit
 after temporary callback destructors; source destruction during this step reports
-`closed`. The endpoint limit reports `node_limit`; the scheduler's own registration
+`CLOSED`. The endpoint limit reports `NODE_LIMIT`; the scheduler's own registration
 or queue capacity is reported through its existing errors.
 
 Value construction/move/comparison and callback construction/move must not reenter

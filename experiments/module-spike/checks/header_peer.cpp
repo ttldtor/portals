@@ -4,6 +4,6 @@
 #include <toy/api.hpp>
 
 // Check type and symbol identity across a separate header-only TU.
-bool header_peer(toy::Value value, toy::Value (*operation)(toy::Value) noexcept) {
+bool headerPeer(toy::Value value, toy::Value (*operation)(toy::Value) noexcept) {
   return operation == &toy::bump && toy::bump(value).number == 42;
 }

@@ -4,19 +4,35 @@
 
 #include <charconv>
 #include <iterator>
+#include <limits>
 #include <new>
 #include <stdexcept>
 
 namespace portals {
 namespace {
+constexpr std::size_t MAX_DECIMAL_DIGITS = std::numeric_limits<std::uint32_t>::digits10 + 1;
+
+// Each sequence is emitted as a unit so sizing and output use identical bytes.
+constexpr std::string_view CANCEL_SEQUENCE = "\x18";
+constexpr std::string_view FRAME_BASELINE = "\x1b[0m\x1b[?6l\x1b[r\x1b[4l\x1b[?7l";
+constexpr std::string_view CLEAR_SCREEN = "\x1b[2J";
+constexpr std::string_view FRAME_FINISH = "\x1b[0m\x1b[1;1H\x1b[?7h";
+constexpr std::string_view SGR_RESET_PREFIX = "\x1b[0";
+constexpr std::string_view SGR_BOLD = ";1";
+constexpr std::string_view SGR_ITALIC = ";3";
+constexpr std::string_view SGR_UNDERLINE = ";4";
+constexpr std::string_view SGR_RGB_FOREGROUND = ";38;2;";
+constexpr std::string_view SGR_RGB_BACKGROUND = ";48;2;";
+
 // Count before allocating: oversized frames never build an oversized temporary.
 class Encoding {
 public:
   explicit Encoding(std::size_t limit, std::string *bytes = nullptr) : limit_(limit), bytes_(bytes) {
   }
+
   void append(std::string_view value) {
     if (value.size() > limit_ - size_) {
-      throw DiffError::output_limit;
+      throw DiffError::OUTPUT_LIMIT;
     }
 
     size_ += value.size();
@@ -25,11 +41,15 @@ public:
       bytes_->append(value);
     }
   }
+
   void number(std::uint32_t value) {
-    char digits[10];
+    char digits[MAX_DECIMAL_DIGITS];
+
     const auto result = std::to_chars(std::begin(digits), std::end(digits), value);
+
     append({digits, static_cast<std::size_t>(result.ptr - digits)});
   }
+
   std::size_t size() const noexcept {
     return size_;
   }
@@ -37,19 +57,20 @@ public:
 private:
   std::size_t limit_;
   std::size_t size_{};
+
   std::string *bytes_;
 };
 
 // Intern IDs belong to different buffers and cannot establish semantic equality.
 // Compare resolved glyph/style values and the continuation role instead.
-bool equal_cell(const CellView &left, const CellView &right) noexcept {
+bool equalCell(const CellView &left, const CellView &right) noexcept {
   return left.glyph == right.glyph && left.style == right.style && left.cell.columns == right.cell.columns &&
-         (left.cell.kind == CellKind::continuation) == (right.cell.kind == CellKind::continuation);
+         (left.cell.kind == CellKind::CONTINUATION) == (right.cell.kind == CellKind::CONTINUATION);
 }
 
-bool equal_row(const CellBuffer &previous, const CellBuffer &next, std::int32_t y) noexcept {
+bool equalRow(const CellBuffer &previous, const CellBuffer &next, std::int32_t y) noexcept {
   for (std::int32_t x = 0; x < next.size().width; ++x) {
-    if (!equal_cell(*previous.at({x, y}), *next.at({x, y}))) {
+    if (!equalCell(*previous.at({x, y}), *next.at({x, y}))) {
       return false;
     }
   }
@@ -67,22 +88,26 @@ void color(Encoding &out, const RgbColor &rgb, std::string_view selector) {
 }
 
 void style(Encoding &out, const CellStyle &value) {
-  out.append("\x1b[0");
+  out.append(SGR_RESET_PREFIX);
 
   if (value.bold) {
-    out.append(";1");
+    out.append(SGR_BOLD);
   }
+
   if (value.italic) {
-    out.append(";3");
+    out.append(SGR_ITALIC);
   }
+
   if (value.underline) {
-    out.append(";4");
+    out.append(SGR_UNDERLINE);
   }
+
   if (value.foreground) {
-    color(out, *value.foreground, ";38;2;");
+    color(out, *value.foreground, SGR_RGB_FOREGROUND);
   }
+
   if (value.background) {
-    color(out, *value.background, ";48;2;");
+    color(out, *value.background, SGR_RGB_BACKGROUND);
   }
 
   out.append("m");
@@ -95,15 +120,15 @@ void encode(Encoding &out, const CellBuffer *previous, const CellBuffer &next) {
 
   // A full transaction establishes a parser boundary for our CSI/UTF-8 grammar.
   if (full) {
-    out.append("\x18");
+    out.append(CANCEL_SEQUENCE);
   }
 
   const auto begin = [&] {
-    out.append("\x1b[0m\x1b[?6l\x1b[r\x1b[4l\x1b[?7l");
+    out.append(FRAME_BASELINE);
     started = true;
 
     if (full) {
-      out.append("\x1b[2J");
+      out.append(CLEAR_SCREEN);
     }
   };
 
@@ -114,7 +139,7 @@ void encode(Encoding &out, const CellBuffer *previous, const CellBuffer &next) {
   // A changed row is emitted completely, with wrapping disabled, so overwriting a
   // wide glyph also clears its previous footprint without splitting grapheme bytes.
   for (std::int32_t y = 0; y < next.size().height; ++y) {
-    if (!full && equal_row(*previous, next, y)) {
+    if (!full && equalRow(*previous, next, y)) {
       continue;
     }
 
@@ -129,7 +154,7 @@ void encode(Encoding &out, const CellBuffer *previous, const CellBuffer &next) {
     for (std::int32_t x = 0; x < next.size().width; ++x) {
       const auto cell = *next.at({x, y});
 
-      if (cell.cell.kind == CellKind::continuation) {
+      if (cell.cell.kind == CellKind::CONTINUATION) {
         continue;
       }
 
@@ -143,30 +168,35 @@ void encode(Encoding &out, const CellBuffer *previous, const CellBuffer &next) {
   }
 
   if (started) {
-    out.append("\x1b[0m\x1b[1;1H\x1b[?7h");
+    out.append(FRAME_FINISH);
   }
 }
 } // namespace
 
-std::expected<std::string, DiffError> encode_diff(const CellBuffer *previous, const CellBuffer &next,
-                                                  std::size_t max_bytes) {
+std::expected<std::string, DiffError> encodeDiff(const CellBuffer *previous, const CellBuffer &next,
+                                                 std::size_t max_bytes) {
   try {
     Encoding measure(max_bytes);
+
     encode(measure, previous, next);
+
     // MSVC Debug allocates a proxy even for empty strings. The pointer constructor
     // can propagate that failure; the default constructor is noexcept.
     std::string bytes("");
+
     bytes.reserve(measure.size());
+
     Encoding output(max_bytes, &bytes);
+
     encode(output, previous, next);
 
     return bytes;
   } catch (DiffError error) {
     return std::unexpected(error);
   } catch (const std::bad_alloc &) {
-    return std::unexpected(DiffError::allocation_failure);
+    return std::unexpected(DiffError::ALLOCATION_FAILURE);
   } catch (const std::length_error &) {
-    return std::unexpected(DiffError::allocation_failure);
+    return std::unexpected(DiffError::ALLOCATION_FAILURE);
   }
 }
 } // namespace portals

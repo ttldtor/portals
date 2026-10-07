@@ -8,13 +8,13 @@
 namespace portals {
 namespace {
 using Wide = std::int64_t;
-constexpr Wide cell_limit = std::numeric_limits<std::int32_t>::max();
+constexpr Wide CELL_LIMIT = std::numeric_limits<std::int32_t>::max();
 thread_local bool layout_active{};
 
 bool valid(AxisSize policy) {
-  return policy.minimum >= 0 && policy.maximum >= policy.minimum && policy.preferred >= intrinsic_extent &&
+  return policy.minimum >= 0 && policy.maximum >= policy.minimum && policy.preferred >= INTRINSIC_EXTENT &&
          policy.weight > 0 &&
-         (policy.mode == SizeMode::automatic || policy.mode == SizeMode::fixed || policy.mode == SizeMode::flex);
+         (policy.mode == SizeMode::AUTOMATIC || policy.mode == SizeMode::FIXED || policy.mode == SizeMode::FLEX);
 }
 
 bool valid(SizePolicy policy) {
@@ -23,25 +23,25 @@ bool valid(SizePolicy policy) {
 
 bool valid(LinearOptions options) {
   auto alignment = [](LayoutAlign value) {
-    return value == LayoutAlign::start || value == LayoutAlign::center || value == LayoutAlign::end ||
-           value == LayoutAlign::stretch;
+    return value == LayoutAlign::START || value == LayoutAlign::CENTER || value == LayoutAlign::END ||
+           value == LayoutAlign::STRETCH;
   };
 
   return options.gap >= 0 && options.padding.left >= 0 && options.padding.top >= 0 && options.padding.right >= 0 &&
          options.padding.bottom >= 0 && alignment(options.main_align) && alignment(options.cross_align) &&
-         options.overflow == LayoutOverflow::clip;
+         options.overflow == LayoutOverflow::CLIP;
 }
 
 std::expected<std::int32_t, TreeError> cells(Wide value) {
-  if (value < 0 || value > cell_limit) {
-    return std::unexpected(TreeError::invalid_geometry);
+  if (value < 0 || value > CELL_LIMIT) {
+    return std::unexpected(TreeError::INVALID_GEOMETRY);
   }
 
   return static_cast<std::int32_t>(value);
 }
 
 Wide requested(AxisSize policy, std::int32_t intrinsic) {
-  auto preferred = policy.preferred == intrinsic_extent ? intrinsic : policy.preferred;
+  auto preferred = policy.preferred == INTRINSIC_EXTENT ? intrinsic : policy.preferred;
 
   return std::clamp<Wide>(preferred, policy.minimum, policy.maximum);
 }
@@ -49,33 +49,33 @@ Wide requested(AxisSize policy, std::int32_t intrinsic) {
 Wide aligned(Wide spare, LayoutAlign align) {
   spare = std::max<Wide>(0, spare);
 
-  if (align == LayoutAlign::center) {
+  if (align == LayoutAlign::CENTER) {
     return spare / 2;
   }
 
-  return align == LayoutAlign::end ? spare : 0;
+  return align == LayoutAlign::END ? spare : 0;
 }
 
-AxisSize main_policy(const MeasuredChild &child, bool horizontal) {
+AxisSize mainPolicy(const MeasuredChild &child, bool horizontal) {
   return horizontal ? child.policy.width : child.policy.height;
 }
 
-AxisSize cross_policy(const MeasuredChild &child, bool horizontal) {
+AxisSize crossPolicy(const MeasuredChild &child, bool horizontal) {
   return horizontal ? child.policy.height : child.policy.width;
 }
 
-Wide main_desired(const MeasuredChild &child, bool horizontal) {
-  return requested(main_policy(child, horizontal), horizontal ? child.desired.width : child.desired.height);
+Wide mainDesired(const MeasuredChild &child, bool horizontal) {
+  return requested(mainPolicy(child, horizontal), horizontal ? child.desired.width : child.desired.height);
 }
 
-Wide cross_desired(const MeasuredChild &child, bool horizontal) {
-  return requested(cross_policy(child, horizontal), horizontal ? child.desired.height : child.desired.width);
+Wide crossDesired(const MeasuredChild &child, bool horizontal) {
+  return requested(crossPolicy(child, horizontal), horizontal ? child.desired.height : child.desired.width);
 }
 
-std::expected<void, TreeError> validate_children(std::span<const MeasuredChild> children) {
+std::expected<void, TreeError> validateChildren(std::span<const MeasuredChild> children) {
   for (const auto &child : children) {
     if (!valid(child.policy) || child.desired.width < 0 || child.desired.height < 0) {
-      return std::unexpected(TreeError::invalid_argument);
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
     }
   }
 
@@ -84,14 +84,14 @@ std::expected<void, TreeError> validate_children(std::span<const MeasuredChild> 
 
 // Recompute eligible weights after caps are reached. Integer remainders go to
 // children in stable order; another round redistributes capacity rejected by caps.
-void grow_flex(std::span<const MeasuredChild> children, bool horizontal, std::vector<Wide> &sizes, Wide spare) {
+void growFlex(std::span<const MeasuredChild> children, bool horizontal, std::vector<Wide> &sizes, Wide spare) {
   while (spare > 0) {
     Wide weights{};
 
     for (std::size_t i = 0; i < children.size(); ++i) {
-      auto policy = main_policy(children[i], horizontal);
+      auto policy = mainPolicy(children[i], horizontal);
 
-      if (policy.mode == SizeMode::flex && sizes[i] < policy.maximum) {
+      if (policy.mode == SizeMode::FLEX && sizes[i] < policy.maximum) {
         weights += policy.weight;
       }
     }
@@ -104,9 +104,9 @@ void grow_flex(std::span<const MeasuredChild> children, bool horizontal, std::ve
     Wide assigned{};
 
     for (std::size_t i = 0; i < children.size(); ++i) {
-      auto policy = main_policy(children[i], horizontal);
+      auto policy = mainPolicy(children[i], horizontal);
 
-      if (policy.mode == SizeMode::flex && sizes[i] < policy.maximum) {
+      if (policy.mode == SizeMode::FLEX && sizes[i] < policy.maximum) {
         auto share = std::min<Wide>(policy.maximum - sizes[i], round_budget * policy.weight / weights);
 
         sizes[i] += share;
@@ -118,9 +118,9 @@ void grow_flex(std::span<const MeasuredChild> children, bool horizontal, std::ve
 
     // At most one remainder cell per eligible child in this round; caps force another round.
     for (std::size_t i = 0; i < children.size() && spare > 0; ++i) {
-      auto policy = main_policy(children[i], horizontal);
+      auto policy = mainPolicy(children[i], horizontal);
 
-      if (policy.mode == SizeMode::flex && sizes[i] < policy.maximum) {
+      if (policy.mode == SizeMode::FLEX && sizes[i] < policy.maximum) {
         ++sizes[i];
         --spare;
       }
@@ -140,6 +140,7 @@ struct Entry {
 
   Entry(const Entry &) = default;
 };
+
 // Measurement builds owning entries first; arrangement then uses that stable index
 // graph. No widget pointer or borrowed child span survives an individual tree callback.
 class Traversal {
@@ -159,15 +160,16 @@ public:
     std::expected<void, TreeError> status;
 
     entries_.emplace_back(node);
+
     entries_[index].measured.node = node.id();
 
     auto read = tree_.read(node, [&](const Widget &widget) {
       if (auto item = dynamic_cast<const LayoutItem *>(&widget)) {
-        entries_[index].measured.policy = item->size_policy();
+        entries_[index].measured.policy = item->sizePolicy();
       }
 
       if (auto layout = dynamic_cast<const Layout *>(&widget)) {
-        auto result = layout->child_available(available);
+        auto result = layout->childAvailable(available);
 
         if (result) {
           child_bounds = *result;
@@ -182,7 +184,7 @@ public:
     }
 
     if (!valid(entries_[index].measured.policy)) {
-      return std::unexpected(TreeError::invalid_argument);
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
     }
 
     for (auto child : snapshot->children) {
@@ -211,12 +213,12 @@ public:
       return std::unexpected(intrinsic.error());
     }
 
-    auto children = child_inputs(index);
+    auto children = childInputs(index);
 
     entries_[index].measured.desired = *intrinsic;
     read = tree_.read(node, [&](const Widget &widget) {
       if (auto layout = dynamic_cast<const Layout *>(&widget)) {
-        auto result = layout->measure_children(children);
+        auto result = layout->measureChildren(children);
 
         if (result) {
           entries_[index].measured.desired = result->normalized();
@@ -224,7 +226,7 @@ public:
           status = std::unexpected(result.error());
         }
       } else if (children.size() > 1) {
-        status = std::unexpected(TreeError::invalid_argument);
+        status = std::unexpected(TreeError::INVALID_ARGUMENT);
       } else if (children.size() == 1) {
         entries_[index].measured.desired = children.front().desired;
       }
@@ -244,11 +246,11 @@ public:
       return result;
     }
 
-    auto children = child_inputs(index);
+    auto children = childInputs(index);
     std::expected<std::vector<CellRect>, TreeError> placements(std::in_place, 0);
     auto read = tree_.read(entries_[index].node, [&](const Widget &widget) {
       if (auto layout = dynamic_cast<const Layout *>(&widget)) {
-        placements = layout->arrange_children(children, local.size());
+        placements = layout->arrangeChildren(children, local.size());
       } else if (!children.empty()) {
         auto rect = CellRect::from({}, local.size());
 
@@ -256,10 +258,10 @@ public:
           try {
             placements->push_back(*rect);
           } catch (const std::bad_alloc &) {
-            placements = std::unexpected(TreeError::no_memory);
+            placements = std::unexpected(TreeError::NO_MEMORY);
           }
         } else {
-          placements = std::unexpected(TreeError::invalid_geometry);
+          placements = std::unexpected(TreeError::INVALID_GEOMETRY);
         }
       }
     });
@@ -269,7 +271,7 @@ public:
     }
 
     if (placements->size() != entries_[index].children.size()) {
-      return std::unexpected(TreeError::invalid_argument);
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
     }
 
     for (std::size_t i = 0; i < placements->size(); ++i) {
@@ -284,8 +286,9 @@ public:
   }
 
 private:
-  std::vector<MeasuredChild> child_inputs(std::size_t index) const {
+  std::vector<MeasuredChild> childInputs(std::size_t index) const {
     std::vector<MeasuredChild> result(0);
+
     result.reserve(entries_[index].children.size());
 
     for (auto child : entries_[index].children) {
@@ -304,7 +307,7 @@ private:
 SizedWidget::SizedWidget(SizePolicy policy) : policy_(policy) {
 }
 
-SizePolicy SizedWidget::size_policy() const {
+SizePolicy SizedWidget::sizePolicy() const {
   return policy_;
 }
 
@@ -322,9 +325,9 @@ LinearOptions LinearLayout::options() const {
   return options_;
 }
 
-std::expected<CellSize, TreeError> LinearLayout::child_available(CellSize available) const {
+std::expected<CellSize, TreeError> LinearLayout::childAvailable(CellSize available) const {
   if (!valid(options_)) {
-    return std::unexpected(TreeError::invalid_argument);
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
   auto size = available.normalized();
@@ -332,27 +335,27 @@ std::expected<CellSize, TreeError> LinearLayout::child_available(CellSize availa
   auto height = cells(std::max<Wide>(0, Wide{size.height} - options_.padding.top - options_.padding.bottom));
 
   if (!width || !height) {
-    return std::unexpected(TreeError::invalid_geometry);
+    return std::unexpected(TreeError::INVALID_GEOMETRY);
   }
 
   return CellSize{*width, *height};
 }
 
-std::expected<CellSize, TreeError> LinearLayout::measure_children(std::span<const MeasuredChild> children) const {
-  auto checked = validate_children(children);
+std::expected<CellSize, TreeError> LinearLayout::measureChildren(std::span<const MeasuredChild> children) const {
+  auto checked = validateChildren(children);
 
   if (!valid(options_) || !checked) {
-    return std::unexpected(TreeError::invalid_argument);
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
   Wide main{}, cross{};
 
   for (const auto &child : children) {
-    main += main_desired(child, horizontal_);
-    cross = std::max(cross, cross_desired(child, horizontal_));
+    main += mainDesired(child, horizontal_);
+    cross = std::max(cross, crossDesired(child, horizontal_));
 
-    if (main > cell_limit) {
-      return std::unexpected(TreeError::invalid_geometry);
+    if (main > CELL_LIMIT) {
+      return std::unexpected(TreeError::INVALID_GEOMETRY);
     }
   }
 
@@ -364,16 +367,16 @@ std::expected<CellSize, TreeError> LinearLayout::measure_children(std::span<cons
   auto height = cells((horizontal_ ? cross : main) + options_.padding.top + Wide{options_.padding.bottom});
 
   if (!width || !height) {
-    return std::unexpected(TreeError::invalid_geometry);
+    return std::unexpected(TreeError::INVALID_GEOMETRY);
   }
 
   return CellSize{*width, *height};
 }
 
-std::expected<std::vector<CellRect>, TreeError> LinearLayout::arrange_children(std::span<const MeasuredChild> children,
-                                                                               CellSize available) const {
-  auto checked = validate_children(children);
-  auto content = child_available(available);
+std::expected<std::vector<CellRect>, TreeError> LinearLayout::arrangeChildren(std::span<const MeasuredChild> children,
+                                                                              CellSize available) const {
+  auto checked = validateChildren(children);
+  auto content = childAvailable(available);
 
   if (!checked || !content) {
     return std::unexpected(checked ? content.error() : checked.error());
@@ -389,7 +392,7 @@ std::expected<std::vector<CellRect>, TreeError> LinearLayout::arrange_children(s
     sizes.reserve(children.size());
 
     for (const auto &child : children) {
-      sizes.push_back(main_desired(child, horizontal_));
+      sizes.push_back(mainDesired(child, horizontal_));
       total += sizes.back();
     }
 
@@ -397,9 +400,9 @@ std::expected<std::vector<CellRect>, TreeError> LinearLayout::arrange_children(s
 
     // Later auto/flex children yield preferred space first; fixed and minimum survive.
     for (std::size_t i = children.size(); i > 0 && deficit > 0; --i) {
-      auto policy = main_policy(children[i - 1], horizontal_);
+      auto policy = mainPolicy(children[i - 1], horizontal_);
 
-      if (policy.mode != SizeMode::fixed) {
+      if (policy.mode != SizeMode::FIXED) {
         auto reduction = std::min(deficit, sizes[i - 1] - policy.minimum);
 
         sizes[i - 1] -= reduction;
@@ -408,7 +411,7 @@ std::expected<std::vector<CellRect>, TreeError> LinearLayout::arrange_children(s
     }
 
     total = std::accumulate(sizes.begin(), sizes.end(), gaps);
-    grow_flex(children, horizontal_, sizes, std::max<Wide>(0, main_space - total));
+    growFlex(children, horizontal_, sizes, std::max<Wide>(0, main_space - total));
     total = std::accumulate(sizes.begin(), sizes.end(), gaps);
 
     Wide cursor =
@@ -418,11 +421,11 @@ std::expected<std::vector<CellRect>, TreeError> LinearLayout::arrange_children(s
     result.reserve(children.size());
 
     for (std::size_t i = 0; i < children.size(); ++i) {
-      auto policy = cross_policy(children[i], horizontal_);
-      Wide cross = cross_desired(children[i], horizontal_);
+      auto policy = crossPolicy(children[i], horizontal_);
+      Wide cross = crossDesired(children[i], horizontal_);
 
-      if (policy.mode != SizeMode::fixed) {
-        cross = std::clamp<Wide>((options_.cross_align == LayoutAlign::stretch || policy.mode == SizeMode::flex)
+      if (policy.mode != SizeMode::FIXED) {
+        cross = std::clamp<Wide>((options_.cross_align == LayoutAlign::STRETCH || policy.mode == SizeMode::FLEX)
                                    ? cross_space
                                    : std::min(cross, cross_space),
                                  policy.minimum, policy.maximum);
@@ -435,14 +438,14 @@ std::expected<std::vector<CellRect>, TreeError> LinearLayout::arrange_children(s
       auto cross_extent = cells(cross);
 
       if (!start || !cross_start || !extent || !cross_extent) {
-        return std::unexpected(TreeError::invalid_geometry);
+        return std::unexpected(TreeError::INVALID_GEOMETRY);
       }
 
       auto rect = horizontal_ ? CellRect::from({*start, *cross_start}, {*extent, *cross_extent})
                               : CellRect::from({*cross_start, *start}, {*cross_extent, *extent});
 
       if (!rect) {
-        return std::unexpected(TreeError::invalid_geometry);
+        return std::unexpected(TreeError::INVALID_GEOMETRY);
       }
 
       result.push_back(*rect);
@@ -452,13 +455,13 @@ std::expected<std::vector<CellRect>, TreeError> LinearLayout::arrange_children(s
     // Construct the expected directly from a copy; its elided return avoids noexcept vector moves.
     return std::expected<std::vector<CellRect>, TreeError>(std::in_place, result);
   } catch (const std::bad_alloc &) {
-    return std::unexpected(TreeError::no_memory);
+    return std::unexpected(TreeError::NO_MEMORY);
   }
 }
 
-std::expected<void, TreeError> set_size_policy(WidgetTree &tree, Node<SizedWidget> node, SizePolicy policy) {
+std::expected<void, TreeError> setSizePolicy(WidgetTree &tree, Node<SizedWidget> node, SizePolicy policy) {
   if (!valid(policy)) {
-    return std::unexpected(TreeError::invalid_argument);
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
   auto result = tree.edit(node, [&](SizedWidget &widget) {
@@ -469,12 +472,12 @@ std::expected<void, TreeError> set_size_policy(WidgetTree &tree, Node<SizedWidge
     return result;
   }
 
-  return tree.invalidate(node, Invalidation::layout);
+  return tree.invalidate(node, Invalidation::LAYOUT);
 }
 
-std::expected<void, TreeError> set_linear_options(WidgetTree &tree, Node<LinearLayout> node, LinearOptions options) {
+std::expected<void, TreeError> setLinearOptions(WidgetTree &tree, Node<LinearLayout> node, LinearOptions options) {
   if (!valid(options)) {
-    return std::unexpected(TreeError::invalid_argument);
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
   auto result = tree.edit(node, [&](LinearLayout &widget) {
@@ -485,18 +488,19 @@ std::expected<void, TreeError> set_linear_options(WidgetTree &tree, Node<LinearL
     return result;
   }
 
-  return tree.invalidate(node, Invalidation::layout);
+  return tree.invalidate(node, Invalidation::LAYOUT);
 }
 
-std::expected<void, TreeError> layout_tree(WidgetTree &tree, Node<Widget> node, CellRect local, CellRect viewport) {
+std::expected<void, TreeError> layoutTree(WidgetTree &tree, Node<Widget> node, CellRect local, CellRect viewport) {
   if (layout_active) {
-    return std::unexpected(TreeError::would_block);
+    return std::unexpected(TreeError::WOULD_BLOCK);
   }
 
   struct Guard {
     Guard() {
       layout_active = true;
     }
+
     ~Guard() {
       layout_active = false;
     }
@@ -533,7 +537,7 @@ std::expected<void, TreeError> layout_tree(WidgetTree &tree, Node<Widget> node, 
 
     return traversal.arrange(*measured, local, viewport);
   } catch (const std::bad_alloc &) {
-    return std::unexpected(TreeError::no_memory);
+    return std::unexpected(TreeError::NO_MEMORY);
   }
 }
 } // namespace portals

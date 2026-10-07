@@ -6,7 +6,7 @@
 #include "standard.hpp"
 
 // Include this after the selected header/import boundary. No toy header here.
-inline int check_values() {
+inline int checkValues() {
   const std::array values{4, -7, 12};
   const auto original = toy::Value{41};
   const auto copy = toy::identity(original);

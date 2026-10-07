@@ -18,12 +18,12 @@ struct PosixIo {
   TerminalDeadline (*now)();
 };
 
-const PosixIo &native_posix_io() noexcept;
-int poll_timeout(TerminalDeadline deadline, std::chrono::milliseconds cadence, TerminalDeadline now) noexcept;
-ssize_t write_without_sigpipe(int descriptor, const void *bytes, std::size_t count) noexcept;
-TerminalRead read_posix(int descriptor, std::size_t limit, TerminalDeadline deadline, std::stop_token stop,
-                        const PosixIo &io);
-TerminalWrite flush_posix(int descriptor, const std::string &bytes, std::size_t &offset, TerminalDeadline deadline,
-                          std::stop_token stop, std::chrono::milliseconds cadence, const PosixIo &io);
+const PosixIo &nativePosixIo() noexcept;
+int pollTimeout(TerminalDeadline deadline, std::chrono::milliseconds cadence, TerminalDeadline now) noexcept;
+ssize_t writeWithoutSigpipe(int descriptor, const void *bytes, std::size_t count) noexcept;
+TerminalRead readPosix(int descriptor, std::size_t limit, TerminalDeadline deadline, std::stop_token stop,
+                       const PosixIo &io);
+TerminalWrite flushPosix(int descriptor, const std::string &bytes, std::size_t &offset, TerminalDeadline deadline,
+                         std::stop_token stop, std::chrono::milliseconds cadence, const PosixIo &io);
 
 } // namespace portals::detail

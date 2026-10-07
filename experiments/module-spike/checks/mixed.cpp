@@ -9,12 +9,12 @@ import toy;
 
 #include "values.hpp"
 
-bool header_peer(toy::Value value, toy::Value (*operation)(toy::Value) noexcept);
+bool headerPeer(toy::Value value, toy::Value (*operation)(toy::Value) noexcept);
 
 int main() {
-  if (!header_peer({41}, &toy::bump)) {
+  if (!headerPeer({41}, &toy::bump)) {
     return 4;
   }
 
-  return check_values();
+  return checkValues();
 }

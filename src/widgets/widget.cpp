@@ -9,9 +9,11 @@
 
 namespace portals {
 namespace {
-constexpr std::size_t maximum_tree_depth = 256;
+constexpr std::size_t MAXIMUM_TREE_DEPTH = 256;
+
 std::atomic<std::uint64_t> next_session{1};
-std::uint64_t issue_session() noexcept {
+
+std::uint64_t issueSession() noexcept {
   auto value = next_session.load(std::memory_order_relaxed);
 
   while (value != std::numeric_limits<std::uint64_t>::max()) {
@@ -23,18 +25,19 @@ std::uint64_t issue_session() noexcept {
   return 0;
 }
 
-constexpr std::uint64_t next_generation(std::uint64_t value) noexcept {
+constexpr std::uint64_t nextGeneration(std::uint64_t value) noexcept {
   return value == std::numeric_limits<std::uint64_t>::max() ? 0 : value + 1;
 }
 
-static_assert(next_generation(std::numeric_limits<std::uint64_t>::max()) == 0);
-static_assert(next_generation(std::numeric_limits<std::uint64_t>::max() - 1) ==
+static_assert(nextGeneration(std::numeric_limits<std::uint64_t>::max()) == 0);
+static_assert(nextGeneration(std::numeric_limits<std::uint64_t>::max() - 1) ==
               std::numeric_limits<std::uint64_t>::max());
 } // namespace
 
 struct WidgetTree::State {
   struct Record {
     NodeId id;
+
     Record *parent{};
     // The count constructor permits allocation failures from debug iterator proxies.
     std::vector<std::unique_ptr<Record>> children = std::vector<std::unique_ptr<Record>>(0);
@@ -42,18 +45,25 @@ struct WidgetTree::State {
     UiScope scope;
     NodeGeometry geometry;
     std::size_t depth{};
+
     bool live{true};
     bool visible{true};
     bool enabled{true};
   };
+
   struct Slot {
     Record *record{};
+
     std::uint64_t generation{1};
   };
+
   Scheduler &scheduler;
+
   WidgetTreeOptions options;
   ErrorSink sink;
+
   void *context;
+
   const std::thread::id owner{std::this_thread::get_id()};
   std::uint64_t session{};
   std::vector<Slot> slots;
@@ -62,12 +72,14 @@ struct WidgetTree::State {
   std::size_t borrows{};
   std::size_t frames{};
   std::size_t lifecycle{};
+
   bool extension{};
   bool reclaiming{};
   bool removal_pending{};
   bool closed{};
   bool reporting{};
-  Invalidation dirty{Invalidation::layout};
+
+  Invalidation dirty{Invalidation::LAYOUT};
 
   State(Scheduler &value, WidgetTreeOptions limits, ErrorSink error_sink, void *error_context)
       : scheduler(value), options(limits), sink(error_sink), context(error_context), slots(limits.max_nodes) {
@@ -75,11 +87,11 @@ struct WidgetTree::State {
 
   std::expected<void, TreeError> check() const {
     if (std::this_thread::get_id() != owner) {
-      return std::unexpected(TreeError::wrong_thread);
+      return std::unexpected(TreeError::WRONG_THREAD);
     }
 
     if (closed) {
-      return std::unexpected(TreeError::closed);
+      return std::unexpected(TreeError::CLOSED);
     }
 
     return {};
@@ -91,63 +103,63 @@ struct WidgetTree::State {
     }
 
     if (id.session == 0) {
-      return std::unexpected(TreeError::stale_node);
+      return std::unexpected(TreeError::STALE_NODE);
     }
 
     if (id.session != session) {
-      return std::unexpected(TreeError::wrong_session);
+      return std::unexpected(TreeError::WRONG_SESSION);
     }
 
     if (id.slot >= slots.size()) {
-      return std::unexpected(TreeError::stale_node);
+      return std::unexpected(TreeError::STALE_NODE);
     }
 
     const auto &slot = slots[id.slot];
 
     if (!slot.record || !slot.record->live || slot.generation != id.generation) {
-      return std::unexpected(TreeError::stale_node);
+      return std::unexpected(TreeError::STALE_NODE);
     }
 
     return slot.record;
   }
 
-  static void invalidate_geometry(Record &record) noexcept {
+  static void invalidateGeometry(Record &record) noexcept {
     record.geometry.valid = false;
 
     for (auto &child : record.children) {
       if (child) {
-        invalidate_geometry(*child);
+        invalidateGeometry(*child);
       }
     }
   }
 
   void invalidate(Invalidation kind) noexcept {
-    if (kind == Invalidation::layout) {
+    if (kind == Invalidation::LAYOUT) {
       dirty = kind;
 
       if (root) {
-        invalidate_geometry(*root);
+        invalidateGeometry(*root);
       }
-    } else if (kind == Invalidation::paint && dirty == Invalidation::none) {
+    } else if (kind == Invalidation::PAINT && dirty == Invalidation::NONE) {
       dirty = kind;
     }
   }
 
-  static void mark_dead(Record &record) noexcept {
+  static void markDead(Record &record) noexcept {
     record.live = false;
     record.geometry.valid = false;
 
     for (auto &child : record.children) {
       if (child) {
-        mark_dead(*child);
+        markDead(*child);
       }
     }
   }
 
-  static void close_scopes(Record &record) {
+  static void closeScopes(Record &record) {
     for (auto &child : record.children) {
       if (child) {
-        close_scopes(*child);
+        closeScopes(*child);
       }
     }
 
@@ -206,65 +218,71 @@ WidgetTree::Borrow::~Borrow() {
   }
 }
 
-TreeError WidgetTree::from_scheduler(SchedulerError error) {
+TreeError WidgetTree::fromScheduler(SchedulerError error) {
   switch (error) {
-  case SchedulerError::invalid_argument:
-    return TreeError::invalid_argument;
-  case SchedulerError::wrong_thread:
-    return TreeError::wrong_thread;
-  case SchedulerError::wrong_scheduler:
-    return TreeError::wrong_session;
-  case SchedulerError::closed:
-    return TreeError::closed;
-  case SchedulerError::would_block:
-  case SchedulerError::reentrant_dispatch:
-    return TreeError::would_block;
-  case SchedulerError::no_memory:
-    return TreeError::no_memory;
-  case SchedulerError::identity_exhausted:
-    return TreeError::identity_exhausted;
-  case SchedulerError::callback_failed:
-    return TreeError::callback_failed;
+  case SchedulerError::INVALID_ARGUMENT:
+    return TreeError::INVALID_ARGUMENT;
+  case SchedulerError::WRONG_THREAD:
+    return TreeError::WRONG_THREAD;
+  case SchedulerError::WRONG_SCHEDULER:
+    return TreeError::WRONG_SESSION;
+  case SchedulerError::CLOSED:
+    return TreeError::CLOSED;
+  case SchedulerError::WOULD_BLOCK:
+  case SchedulerError::REENTRANT_DISPATCH:
+    return TreeError::WOULD_BLOCK;
+  case SchedulerError::NO_MEMORY:
+    return TreeError::NO_MEMORY;
+  case SchedulerError::IDENTITY_EXHAUSTED:
+    return TreeError::IDENTITY_EXHAUSTED;
+  case SchedulerError::CALLBACK_FAILED:
+    return TreeError::CALLBACK_FAILED;
   }
 
-  return TreeError::invalid_argument;
+  return TreeError::INVALID_ARGUMENT;
 }
 
 std::expected<std::unique_ptr<WidgetTree>, TreeError>
 WidgetTree::create(Scheduler &scheduler, WidgetTreeOptions options, ErrorSink sink, void *context) {
-  auto scope = scheduler.make_scope();
+  auto scope = scheduler.makeScope();
 
   if (!scope) {
-    return std::unexpected(from_scheduler(scope.error()));
+    return std::unexpected(fromScheduler(scope.error()));
   }
 
-  if (options.max_nodes == 0 || options.max_depth == 0 || options.max_depth > maximum_tree_depth ||
+  if (options.max_nodes == 0 || options.max_depth == 0 || options.max_depth > MAXIMUM_TREE_DEPTH ||
       options.max_nodes > static_cast<std::size_t>(std::numeric_limits<std::ptrdiff_t>::max()) / sizeof(State::Slot)) {
-    return std::unexpected(TreeError::invalid_argument);
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
   try {
     auto state = std::make_unique<State>(scheduler, options, sink, context);
-    state->session = issue_session();
+
+    state->session = issueSession();
 
     if (!state->session) {
-      return std::unexpected(TreeError::identity_exhausted);
+      return std::unexpected(TreeError::IDENTITY_EXHAUSTED);
     }
 
     state->root = std::make_unique<State::Record>();
+
     auto &root = *state->root;
+
     root.widget = std::make_unique<Widget>();
     root.scope = std::move(*scope);
     root.id = {state->session, 0, 1};
     root.depth = 1;
+
     state->slots[0].record = &root;
     state->count = 1;
+
     auto tree = std::unique_ptr<WidgetTree>(new WidgetTree(std::move(state)));
+
     root.widget->mount();
 
     return tree;
   } catch (const std::bad_alloc &) {
-    return std::unexpected(TreeError::no_memory);
+    return std::unexpected(TreeError::NO_MEMORY);
   }
 }
 
@@ -292,7 +310,7 @@ std::expected<Widget *, TreeError> WidgetTree::access(NodeId id, bool mutation) 
   }
 
   if (mutation && state_->frames) {
-    return std::unexpected(TreeError::would_block);
+    return std::unexpected(TreeError::WOULD_BLOCK);
   }
 
   return (*value)->widget.get();
@@ -304,7 +322,7 @@ std::expected<Node<Widget>, TreeError> WidgetTree::root() const {
   }
 
   if (!state_->root || !state_->root->live) {
-    return std::unexpected(TreeError::stale_node);
+    return std::unexpected(TreeError::STALE_NODE);
   }
 
   return Node<Widget>(state_->root->id);
@@ -341,11 +359,11 @@ std::expected<NodeSnapshot, TreeError> WidgetTree::inspect(Node<Widget> node) co
     // The copy may throw inside this boundary; the expected prvalue is elided.
     return std::expected<NodeSnapshot, TreeError>(std::in_place, result);
   } catch (const std::bad_alloc &) {
-    return std::unexpected(TreeError::no_memory);
+    return std::unexpected(TreeError::NO_MEMORY);
   }
 }
 
-std::expected<void, TreeError> WidgetTree::can_insert(NodeId parent) const {
+std::expected<void, TreeError> WidgetTree::canInsert(NodeId parent) const {
   auto record = state_->find(parent);
 
   if (!record) {
@@ -353,22 +371,22 @@ std::expected<void, TreeError> WidgetTree::can_insert(NodeId parent) const {
   }
 
   if (state_->frames || state_->lifecycle || state_->reclaiming) {
-    return std::unexpected(TreeError::would_block);
+    return std::unexpected(TreeError::WOULD_BLOCK);
   }
 
   if (state_->count >= state_->options.max_nodes) {
-    return std::unexpected(TreeError::node_limit);
+    return std::unexpected(TreeError::NODE_LIMIT);
   }
 
   if ((*record)->depth >= state_->options.max_depth) {
-    return std::unexpected(TreeError::depth_limit);
+    return std::unexpected(TreeError::DEPTH_LIMIT);
   }
 
   return {};
 }
 
 std::expected<NodeId, TreeError> WidgetTree::attach(NodeId parent, std::unique_ptr<Widget> widget) {
-  if (auto allowed = can_insert(parent); !allowed) {
+  if (auto allowed = canInsert(parent); !allowed) {
     return std::unexpected(allowed.error());
   }
 
@@ -378,16 +396,17 @@ std::expected<NodeId, TreeError> WidgetTree::attach(NodeId parent, std::unique_p
   });
 
   if (slot == state_->slots.end()) {
-    return std::unexpected(TreeError::identity_exhausted);
+    return std::unexpected(TreeError::IDENTITY_EXHAUSTED);
   }
 
-  auto node_scope = scheduler().make_scope();
+  auto node_scope = scheduler().makeScope();
 
   if (!node_scope) {
-    return std::unexpected(from_scheduler(node_scope.error()));
+    return std::unexpected(fromScheduler(node_scope.error()));
   }
 
   auto child = std::make_unique<State::Record>();
+
   child->id = {state_->session, static_cast<std::size_t>(slot - state_->slots.begin()), slot->generation};
   child->parent = &record;
   child->depth = record.depth + 1;
@@ -402,13 +421,13 @@ std::expected<NodeId, TreeError> WidgetTree::attach(NodeId parent, std::unique_p
   record.children.push_back(std::move(child));
   slot->record = pointer;
   ++state_->count;
-  state_->invalidate(Invalidation::layout);
+  state_->invalidate(Invalidation::LAYOUT);
   ++state_->lifecycle;
 
   try {
     pointer->widget->mount();
   } catch (...) {
-    report(id, TreeError::callback_failed);
+    report(id, TreeError::CALLBACK_FAILED);
   }
 
   --state_->lifecycle;
@@ -424,24 +443,24 @@ std::expected<void, TreeError> WidgetTree::remove(Node<Widget> node) {
   }
 
   if (state_->frames) {
-    return std::unexpected(TreeError::would_block);
+    return std::unexpected(TreeError::WOULD_BLOCK);
   }
 
   Borrow guard(*this);
 
   // Revoke every descendant identity before closing scopes: releasing callback captures can
   // reenter the tree, but must never obtain a fresh borrow into the logically removed subtree.
-  State::mark_dead(**record);
+  State::markDead(**record);
   state_->removal_pending = true;
-  state_->invalidate(Invalidation::layout);
-  State::close_scopes(**record);
+  state_->invalidate(Invalidation::LAYOUT);
+  State::closeScopes(**record);
 
   return {};
 }
 
 std::expected<void, TreeError> WidgetTree::close() {
   if (std::this_thread::get_id() != state_->owner) {
-    return std::unexpected(TreeError::wrong_thread);
+    return std::unexpected(TreeError::WRONG_THREAD);
   }
 
   if (state_->closed) {
@@ -449,7 +468,7 @@ std::expected<void, TreeError> WidgetTree::close() {
   }
 
   if (state_->frames) {
-    return std::unexpected(TreeError::would_block);
+    return std::unexpected(TreeError::WOULD_BLOCK);
   }
 
   Borrow guard(*this);
@@ -458,8 +477,8 @@ std::expected<void, TreeError> WidgetTree::close() {
   state_->removal_pending = true;
 
   if (state_->root) {
-    State::mark_dead(*state_->root);
-    State::close_scopes(*state_->root);
+    State::markDead(*state_->root);
+    State::closeScopes(*state_->root);
   }
 
   return {};
@@ -507,7 +526,7 @@ void WidgetTree::reclaim() noexcept {
       try {
         node->widget->unmount();
       } catch (...) {
-        report(id, TreeError::callback_failed);
+        report(id, TreeError::CALLBACK_FAILED);
       }
 
       --state_->lifecycle;
@@ -516,9 +535,10 @@ void WidgetTree::reclaim() noexcept {
     // Unpublish the address before running the widget destructor. Advance the generation only
     // after destruction; zero permanently retires an exhausted slot rather than reviving old IDs.
     auto &slot = state_->slots[id.slot];
+
     slot.record = nullptr;
     node.reset();
-    slot.generation = next_generation(slot.generation);
+    slot.generation = nextGeneration(slot.generation);
     --state_->count;
   };
   bool pending;
@@ -542,7 +562,7 @@ Scheduler &WidgetTree::scheduler() const {
   return state_->scheduler;
 }
 
-std::expected<void, TreeError> WidgetTree::set_visible(Node<Widget> node, bool visible) {
+std::expected<void, TreeError> WidgetTree::setVisible(Node<Widget> node, bool visible) {
   auto checked = access(node.id(), true);
 
   if (!checked) {
@@ -553,13 +573,13 @@ std::expected<void, TreeError> WidgetTree::set_visible(Node<Widget> node, bool v
 
   if (record.visible != visible) {
     record.visible = visible;
-    state_->invalidate(Invalidation::layout);
+    state_->invalidate(Invalidation::LAYOUT);
   }
 
   return {};
 }
 
-std::expected<void, TreeError> WidgetTree::set_enabled(Node<Widget> node, bool enabled) {
+std::expected<void, TreeError> WidgetTree::setEnabled(Node<Widget> node, bool enabled) {
   auto checked = access(node.id(), true);
 
   if (!checked) {
@@ -570,13 +590,13 @@ std::expected<void, TreeError> WidgetTree::set_enabled(Node<Widget> node, bool e
 
   if (record.enabled != enabled) {
     record.enabled = enabled;
-    state_->invalidate(Invalidation::paint);
+    state_->invalidate(Invalidation::PAINT);
   }
 
   return {};
 }
 
-std::expected<bool, TreeError> WidgetTree::input_eligible(Node<Widget> node) const {
+std::expected<bool, TreeError> WidgetTree::inputEligible(Node<Widget> node) const {
   auto record = state_->find(node.id());
 
   if (!record) {
@@ -593,8 +613,8 @@ std::expected<void, TreeError> WidgetTree::invalidate(Node<Widget> node, Invalid
     return std::unexpected(checked.error());
   }
 
-  if (kind != Invalidation::none && kind != Invalidation::paint && kind != Invalidation::layout) {
-    return std::unexpected(TreeError::invalid_argument);
+  if (kind != Invalidation::NONE && kind != Invalidation::PAINT && kind != Invalidation::LAYOUT) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
   state_->invalidate(kind);
@@ -602,25 +622,25 @@ std::expected<void, TreeError> WidgetTree::invalidate(Node<Widget> node, Invalid
   return {};
 }
 
-std::expected<Invalidation, TreeError> WidgetTree::consume_frame_request() {
+std::expected<Invalidation, TreeError> WidgetTree::consumeFrameRequest() {
   if (auto checked = state_->check(); !checked) {
     return std::unexpected(checked.error());
   }
 
   if (state_->frames) {
-    return std::unexpected(TreeError::would_block);
+    return std::unexpected(TreeError::WOULD_BLOCK);
   }
 
-  return std::exchange(state_->dirty, Invalidation::none);
+  return std::exchange(state_->dirty, Invalidation::NONE);
 }
 
-std::expected<void, TreeError> WidgetTree::begin_frame() const {
+std::expected<void, TreeError> WidgetTree::beginFrame() const {
   if (auto checked = state_->check(); !checked) {
     return checked;
   }
 
   if (state_->borrows || state_->reclaiming) {
-    return std::unexpected(TreeError::would_block);
+    return std::unexpected(TreeError::WOULD_BLOCK);
   }
 
   return {};
@@ -634,7 +654,7 @@ std::expected<CellSize, TreeError> WidgetTree::measure(Node<Widget> node, CellSi
   }
 
   if (state_->extension) {
-    return std::unexpected(TreeError::would_block);
+    return std::unexpected(TreeError::WOULD_BLOCK);
   }
 
   if (!State::shown(**record, false)) {
@@ -644,12 +664,13 @@ std::expected<CellSize, TreeError> WidgetTree::measure(Node<Widget> node, CellSi
   Borrow guard(*this, true);
 
   state_->extension = true;
+
   std::expected<CellSize, TreeError> result;
 
   try {
     result = (*record)->widget->measure(available.normalized());
   } catch (...) {
-    result = std::unexpected(TreeError::callback_failed);
+    result = std::unexpected(TreeError::CALLBACK_FAILED);
   }
 
   state_->extension = false;
@@ -671,14 +692,14 @@ std::expected<void, TreeError> WidgetTree::arrange(Node<Widget> node, CellRect l
   }
 
   if (state_->extension) {
-    return std::unexpected(TreeError::would_block);
+    return std::unexpected(TreeError::WOULD_BLOCK);
   }
 
   auto &value = **record;
 
   // A parent rearrangement invalidates descendant surface coordinates too. Publish fresh
   // geometry only after the hook succeeds; failures leave hit-testing unable to use stale cells.
-  State::invalidate_geometry(value);
+  State::invalidateGeometry(value);
 
   if (!State::shown(value, false)) {
     return {};
@@ -689,13 +710,13 @@ std::expected<void, TreeError> WidgetTree::arrange(Node<Widget> node, CellRect l
 
   if (value.parent) {
     if (!value.parent->geometry.valid) {
-      return std::unexpected(TreeError::invalid_geometry);
+      return std::unexpected(TreeError::INVALID_GEOMETRY);
     }
 
     auto translated = local.translated(value.parent->geometry.surface.origin());
 
     if (!translated) {
-      return std::unexpected(TreeError::invalid_geometry);
+      return std::unexpected(TreeError::INVALID_GEOMETRY);
     }
 
     surface = *translated;
@@ -705,12 +726,13 @@ std::expected<void, TreeError> WidgetTree::arrange(Node<Widget> node, CellRect l
   Borrow guard(*this, true);
 
   state_->extension = true;
+
   std::expected<void, TreeError> result;
 
   try {
     result = value.widget->arrange(local);
   } catch (...) {
-    result = std::unexpected(TreeError::callback_failed);
+    result = std::unexpected(TreeError::CALLBACK_FAILED);
   }
 
   state_->extension = false;
@@ -722,7 +744,7 @@ std::expected<void, TreeError> WidgetTree::arrange(Node<Widget> node, CellRect l
   }
 
   value.geometry = {local, surface, surface.intersection(clip), true};
-  state_->invalidate(Invalidation::paint);
+  state_->invalidate(Invalidation::PAINT);
 
   return {};
 }
@@ -735,7 +757,7 @@ std::expected<void, TreeError> WidgetTree::paint(Node<Widget> node, PaintContext
   }
 
   if (!state_->frames || state_->extension) {
-    return std::unexpected(TreeError::would_block);
+    return std::unexpected(TreeError::WOULD_BLOCK);
   }
 
   if (!State::shown(**record, false)) {
@@ -743,18 +765,19 @@ std::expected<void, TreeError> WidgetTree::paint(Node<Widget> node, PaintContext
   }
 
   if (!(*record)->geometry.valid) {
-    return std::unexpected(TreeError::invalid_geometry);
+    return std::unexpected(TreeError::INVALID_GEOMETRY);
   }
 
   Borrow guard(*this, true);
 
   state_->extension = true;
+
   std::expected<void, TreeError> result;
 
   try {
     result = (*record)->widget->paint(context);
   } catch (...) {
-    result = std::unexpected(TreeError::callback_failed);
+    result = std::unexpected(TreeError::CALLBACK_FAILED);
   }
 
   state_->extension = false;
