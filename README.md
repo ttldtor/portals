@@ -41,6 +41,12 @@ ctest --test-dir build/release --output-on-failure --no-tests=error
 build and OFF when embedded with `add_subdirectory`. Set either to OFF with
 `-DPORTALS_BUILD_TESTS=OFF` / `-DPORTALS_BUILD_EXAMPLES=OFF`. Compiler warnings
 are private to Portals targets; C++23 is a public target requirement.
+Windows builds with tests enabled configure their executables to report fatal
+CRT assertions and native exceptions without interactive debug dialogs. Failures
+still return a nonzero exit code and diagnostics go to stderr for CTest to capture.
+`portals.test-processes` checks standard assertions, abort, native exceptions, and
+narrow/wide Debug CRT reports in separate processes. This configuration applies
+only to these processes; it does not change Windows or Visual Studio settings.
 
 ## Terminal diagnostic probe
 
