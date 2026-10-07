@@ -1,0 +1,89 @@
+# Portals
+
+Portals is the starting point of a C++23 terminal UI library. This bootstrap
+contains a static core library, release metadata, a standalone consumer and a
+headless smoke test. UI functionality is not implemented yet.
+
+## Build and test
+
+Requirements: CMake 3.24+, Ninja and a compiler with C++23 mode (MSVC or GCC).
+There are no third-party runtime or test dependencies and no automatic downloads.
+
+On Windows, use an **x64 Developer PowerShell for Visual Studio** with the C++
+desktop workload installed and CMake/Ninja on PATH:
+
+```powershell
+cmake --preset windows-msvc-debug
+cmake --build --preset windows-msvc-debug
+ctest --preset windows-msvc-debug
+```
+
+On Linux, with GCC, CMake and Ninja installed:
+
+```sh
+cmake --preset linux-gcc-debug
+cmake --build --preset linux-gcc-debug
+ctest --preset linux-gcc-debug
+```
+
+Builds live under `build/<preset>`. The presets select Debug; Release can be
+checked separately, for example in the same Windows developer shell:
+
+```powershell
+cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build/release
+ctest --test-dir build/release --output-on-failure --no-tests=error
+```
+
+`PORTALS_BUILD_TESTS` and `PORTALS_BUILD_EXAMPLES` default to ON for a top-level
+build and OFF when embedded with `add_subdirectory`. Set either to OFF with
+`-DPORTALS_BUILD_TESTS=OFF` / `-DPORTALS_BUILD_EXAMPLES=OFF`. Compiler warnings
+are private to Portals targets; C++23 is a public target requirement.
+
+## Consume the library
+
+Use `add_subdirectory(path/to/portals)` and link your target to `portals::core`.
+The target supplies its public include path and language standard.
+Installation and `find_package(Portals)` support are not available yet.
+
+The example is also a separate CMake project:
+
+```powershell
+cmake -S examples/consumer -B build/consumer -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/consumer
+./build/consumer/portals_consumer
+```
+
+Expected output: `Portals 0.1.0`. The same commands work in a Linux shell.
+The consumer includes only `<portals/version.hpp>` and links the core target.
+`portals::version()` returns the linked library's version by value, without
+allocation, I/O, errors or exceptions. Calls may run on any thread concurrently;
+returned values have independent lifetime and cannot be invalidated. The version
+does not promise API or ABI compatibility.
+
+## API reference and IDEs
+
+Doxygen is optional and needed only when enabling documentation:
+
+```powershell
+cmake -S . -B build/docs -G Ninja -DPORTALS_BUILD_DOCS=ON
+cmake --build build/docs --target portals_docs
+```
+
+Open `build/docs/docs/html/index.html`. Public declarations include Doxygen
+contracts. The compiled core currently implements only release metadata;
+the example consumes that contract and the smoke executable checks it through
+the same public header and linked target. The test uses an explicit nonzero
+failure exit code, so checks remain active with `NDEBUG`.
+
+In CLion, open the root CMake project and select the corresponding preset and
+an installed toolchain. The Windows preset requires an MSVC environment. Local
+adjustments belong in `CMakeUserPresets.json`; no IDE settings are supplied.
+
+Reference: [CMake presets](https://cmake.org/cmake/help/latest/manual/cmake-presets.7.html),
+[CMake compile features](https://cmake.org/cmake/help/latest/manual/cmake-compile-features.7.html),
+[Doxygen integration](https://cmake.org/cmake/help/latest/module/FindDoxygen.html).
+
+## License
+
+Boost Software License 1.0; see [LICENSE.txt](LICENSE.txt).
