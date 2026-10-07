@@ -2,9 +2,9 @@
 
 Portals is the starting point of a C++23 terminal UI library. This bootstrap
 contains a static core library, release metadata, a standalone consumer and
-headless tests. Checked cell geometry, UTF-8 grapheme measurements, a bounded
-cell framebuffer and a full-frame reference renderer are available; widget/UI
-functionality is not implemented yet.
+headless tests. Checked cell geometry, UTF-8 grapheme measurements, VT input
+decoding, a POSIX terminal session, a bounded cell framebuffer and a full-frame
+reference renderer are available; widget/UI functionality is not implemented yet.
 
 ## Build and test
 
@@ -41,6 +41,29 @@ ctest --test-dir build/release --output-on-failure --no-tests=error
 build and OFF when embedded with `add_subdirectory`. Set either to OFF with
 `-DPORTALS_BUILD_TESTS=OFF` / `-DPORTALS_BUILD_EXAMPLES=OFF`. Compiler warnings
 are private to Portals targets; C++23 is a public target requirement.
+
+## Terminal diagnostic probe
+
+The library's move-only `TerminalSession` owns POSIX terminal modes and bounded
+input/output, reports resize on its owner, and restores modes on close or stack
+unwinding. See [the terminal session contract](docs/terminal.md) for ownership,
+deadlines, errors and platform limitations.
+
+Top-level builds include `portals_terminal_probe`. It reports native OS and
+terminal facts, environment hints, modes, dimensions and bounded DA/CPR query
+observations. To inspect without queries or mode changes:
+
+```powershell
+./build/windows-msvc-debug/portals_terminal_probe --no-query
+```
+
+In a terminal with stdin and stdout attached, use
+`portals_terminal_probe --timeout-ms 250 --max-bytes 4096`.
+Redirected handles automatically skip queries. `--headless` aliases `--no-query`;
+`--help` lists all options. Set `PORTALS_BUILD_TOOLS=OFF` to omit the executable.
+See [the probe contract and limitations](docs/terminal-probe.md) before interpreting
+reply candidates or running interactive checks. No terminal identity or Unicode
+width policy is authenticated by this diagnostic tool.
 
 ## Consume the library
 
@@ -90,9 +113,10 @@ Cell geometry: [units, clipping and numeric bounds](docs/geometry.md).
 
 UTF-8 text: [graphemes, width policy, cursor and clipping](docs/text.md).
 
-Cell framebuffer: [ownership, wide glyphs, limits and measured memory](docs/cell-buffer.md).
-
-Reference rendering: [scene ordering, clipping, ownership and work limits](docs/render.md).
+contains a static core library, release metadata, a standalone consumer and
+headless tests. Checked cell geometry, UTF-8 grapheme measurements, VT input
+decoding, a POSIX terminal session, a bounded cell framebuffer and a full-frame
+reference renderer are available; widget/UI functionality is not implemented yet.
 
 API design sketches: [five scenarios](docs/api-design.md). The independent
 [header/module/shared-library spike](experiments/module-spike/README.md) tests
