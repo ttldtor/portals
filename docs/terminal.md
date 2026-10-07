@@ -127,6 +127,7 @@ resize does not require a text key and may coalesce. Mouse positions subtract th
 viewport origin. Console queries themselves depend on a responsive console host.
 
 Windows returns **events only**, never a second byte channel. Unicode key-down
+records and nonzero Unicode characters carried by `VK_MENU` (Alt) release
 records are converted from UTF-16 to UTF-8 and passed through the existing
 `InputDecoder`. This preserves VT arrows, Alt sequences, and bracketed paste
 controls as paste payload. Configure decoder bounds/deadlines through
@@ -134,8 +135,11 @@ controls as paste payload. Configure decoder bounds/deadlines through
 not enable bracketed-paste terminal reporting. Invalid surrogate units become
 U+FFFD; a high surrogate is retained until its following character. Repeat counts
 are expanded incrementally within the event budget; paired surrogate records use
-the low-surrogate record's repeat count. KEYUP is ignored because VT synthetic
-records do not reliably preserve physical key transitions. Zero-character native
+the low-surrogate record's repeat count. Other KEYUP records are ignored because
+VT synthetic records do not reliably preserve physical key transitions. The
+Alt-release exception preserves text entered through Alt+numpad and ConPTY,
+including combining marks and surrogate pairs; it does not expose an Alt action.
+Zero-character native
 navigation/F1–F12 records report press/repeat; modifier-only/unknown keys are
 ignored. Ctrl+Space and Ctrl+2 NUL records map through the decoder's Ctrl+@
 representation. Native modifiers augment decoded modifiers; printable Right Alt
@@ -155,7 +159,8 @@ Windows may normalize records before the adapter sees them. In the tested ConPTY
 repeat count, and represented Ctrl+Space as Ctrl+Shift+2/NUL. The adapter cannot
 recover metadata the OS has removed. Native record tests temporarily disable VT
 only during injection, restoring it before the session reads; separate host-pipe
-UTF-8/Ctrl+C/resize tests keep the actual VT path throughout.
+UTF-8/Ctrl+C/resize tests keep the actual VT path throughout and verify combining
+marks and ZWJ emoji without a duplicate text event from ordinary key releases.
 
 ## Windows output cancellation and shutdown
 

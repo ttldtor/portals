@@ -38,6 +38,12 @@ InputModifiers modifiers(DWORD flags) {
           (flags & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) != 0, false};
 }
 
+bool carriesInput(const KEY_EVENT_RECORD &record) {
+  // ConPTY and Alt+numpad deliver otherwise unmappable Unicode on Alt release.
+  // Other releases echo prior key-down text and must not produce a second event.
+  return record.bKeyDown || (record.wVirtualKeyCode == VK_MENU && record.uChar.UnicodeChar != 0);
+}
+
 std::optional<InputKey> specialKey(WORD key) {
   switch (key) {
   case VK_UP:
@@ -236,9 +242,7 @@ struct TerminalSession::Impl {
   }
 
   void keyRecord(KEY_EVENT_RECORD record, std::vector<InputEvent> &events) {
-    // VT's synthetic release records cannot be paired reliably; ignore all releases.
-
-    if (!record.bKeyDown) {
+    if (!carriesInput(record)) {
       return;
     }
 
@@ -565,7 +569,7 @@ TerminalRead TerminalSession::read(TerminalDeadline deadline, std::stop_token st
       continue;
     }
 
-    if (record.EventType == KEY_EVENT && record.Event.KeyEvent.bKeyDown && record.Event.KeyEvent.wRepeatCount) {
+    if (record.EventType == KEY_EVENT && carriesInput(record.Event.KeyEvent) && record.Event.KeyEvent.wRepeatCount) {
       state.repeated = record.Event.KeyEvent;
       state.repeat_index = 0;
       state.repeated_scalar.clear();

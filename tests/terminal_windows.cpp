@@ -282,6 +282,30 @@ DWORD inputCase(HANDLE resultPipe) {
   }
 
   require(std::get<TextInputEvent>(modified[4]).modifiers == InputModifiers{}, "AltGr character is text");
+
+  // ConPTY uses Alt-release records for text without a keyboard mapping.
+  // Ordinary key releases must still be ignored to avoid duplicate text.
+  std::vector<INPUT_RECORD> altText;
+
+  for (const wchar_t character : std::wstring_view(L"\u0301\U0001f469\u200d\U0001f4bb")) {
+    auto record = key(character, FALSE);
+
+    record.Event.KeyEvent.wVirtualKeyCode = VK_MENU;
+    altText.push_back(record);
+  }
+
+  native.inject(altText);
+
+  const auto composed = collect(session, 4);
+  constexpr std::u32string_view EXPECTED_ALT_TEXT = U"\u0301\U0001f469\u200d\U0001f4bb";
+
+  for (std::size_t index = 0; index < EXPECTED_ALT_TEXT.size(); ++index) {
+    const auto &text = std::get<TextInputEvent>(composed[index]);
+
+    require(text.scalar == EXPECTED_ALT_TEXT[index] && text.modifiers == InputModifiers{},
+            "Alt-release Unicode text preserves combining marks and surrogate pairs");
+  }
+
   mouse.Event.MouseEvent.dwButtonState = RIGHTMOST_BUTTON_PRESSED;
   native.inject({mouse});
 
@@ -372,10 +396,13 @@ DWORD inputCase(HANDLE resultPipe) {
           "input stop precedes deadline");
   report(resultPipe, INPUT_READY);
 
-  bool unicode = false, control = false, resized = false;
+  constexpr std::u32string_view EXPECTED_HOST_TEXT = U"\u0416e\u0301\U0001f469\u200d\U0001f4bb\u754c";
+  std::u32string hostText;
+  bool control = false, resized = false;
   const auto hostDeadline = std::chrono::steady_clock::now() + 3s;
 
-  while ((!unicode || !control || !resized) && std::chrono::steady_clock::now() < hostDeadline) {
+  while ((hostText.size() < EXPECTED_HOST_TEXT.size() || !control || !resized) &&
+         std::chrono::steady_clock::now() < hostDeadline) {
     auto batch = session.read(hostDeadline);
 
     require(batch.status != TerminalStatus::FAILED, "host input read");
@@ -383,7 +410,7 @@ DWORD inputCase(HANDLE resultPipe) {
 
     for (const auto &event : batch.events) {
       if (const auto *text = std::get_if<TextInputEvent>(&event)) {
-        unicode |= text->scalar == U'\u0416';
+        hostText += text->scalar;
       }
 
       if (const auto *pressed = std::get_if<KeyEvent>(&event)) {
@@ -392,7 +419,7 @@ DWORD inputCase(HANDLE resultPipe) {
     }
   }
 
-  require(unicode && control && resized, "actual ConPTY UTF8/CtrlC/viewport resize");
+  require(hostText == EXPECTED_HOST_TEXT && control && resized, "actual ConPTY Unicode/CtrlC/viewport resize");
   require(session.submit("native VT output\r\n").has_value(), "submit output");
 
   const auto preStopped = session.flush(std::chrono::steady_clock::now() + 1s, stopped.get_token());
@@ -1081,10 +1108,14 @@ bool hostCase(const wchar_t *kind) {
       }
 
       if (message.stage == INPUT_READY) {
-        const char unicodeAndCtrlC[] = "\xd0\x96\x03";
+        constexpr std::string_view UNICODE_AND_CTRL_C =
+          "\xd0\x96"
+          "e\xcc\x81\xf0\x9f\x91\xa9\xe2\x80\x8d\xf0\x9f\x92\xbb\xe7\x95\x8c\x03";
         DWORD written = 0;
 
-        require(WriteFile(session.inputWrite.value, unicodeAndCtrlC, 3, &written, nullptr) && written == 3,
+        require(WriteFile(session.inputWrite.value, UNICODE_AND_CTRL_C.data(),
+                          static_cast<DWORD>(UNICODE_AND_CTRL_C.size()), &written, nullptr) &&
+                  written == UNICODE_AND_CTRL_C.size(),
                 "host VT input write");
         require(SUCCEEDED(ResizePseudoConsole(session.console, {91, 37})), "ResizePseudoConsole");
       }
