@@ -4,8 +4,9 @@ Portals is the starting point of a C++23 terminal UI library. This bootstrap
 contains a static core library, release metadata, a standalone consumer and
 headless tests. Checked cell geometry, UTF-8 grapheme measurements, VT input
 decoding, Windows/POSIX terminal sessions, a bounded cell framebuffer, a full-frame
-reference renderer, bounded row diff and transactional frame writer are available.
-Widget/UI functionality is not implemented yet.
+reference renderer, bounded row diff, transactional frame writer and a
+[UI scheduler with scoped cancellation](docs/scheduler.md) are available.
+Widgets are not implemented yet.
 
 ## Build and test
 
