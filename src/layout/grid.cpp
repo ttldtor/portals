@@ -56,7 +56,7 @@ std::expected<void, TreeError> validate(const GridOptions &options) {
 }
 
 const GridCell *placement(const GridOptions &options, NodeId node) {
-  const auto found = std::find_if(options.cells.begin(), options.cells.end(), [&](const GridCell &cell) {
+  const auto found = std::ranges::find_if(options.cells, [&](const GridCell &cell) {
     return cell.node == node;
   });
 

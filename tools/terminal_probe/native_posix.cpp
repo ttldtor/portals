@@ -8,6 +8,7 @@
 #include <csignal>
 #include <cstring>
 #include <fcntl.h>
+#include <format>
 #include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/utsname.h>
@@ -25,7 +26,10 @@ void interrupt(int signal) {
 }
 
 std::string error(std::string_view operation) {
-  return std::string(operation) + ": " + std::strerror(errno);
+  const int code = errno;
+  const char *description = std::strerror(code);
+
+  return std::format("{}: {}", operation, description);
 }
 
 class SignalGuard {
@@ -247,7 +251,7 @@ NativeFacts inspectNative() {
 
   if (uname(&system) == 0) {
     facts.fields.emplace_back("os.name", system.sysname);
-    facts.fields.emplace_back("os.version", std::string(system.release) + " " + system.version);
+    facts.fields.emplace_back("os.version", std::format("{} {}", system.release, system.version));
     facts.fields.emplace_back("os.architecture", system.machine);
   } else {
     facts.fields.emplace_back("os.name", "POSIX (uname unavailable)");

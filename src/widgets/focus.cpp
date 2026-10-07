@@ -165,7 +165,7 @@ std::expected<void, TreeError> EventRouter::changeFocus(Node<Widget> node) {
 
   // Allocate history before publishing the new focus.
   if (node.id().session != 0) {
-    auto found = std::find(state_->history.begin(), state_->history.end(), node);
+    auto found = std::ranges::find(state_->history, node);
 
     if (found != state_->history.end()) {
       state_->history.erase(found);
@@ -207,7 +207,7 @@ std::expected<Node<Widget>, TreeError> EventRouter::focused() {
       return std::unexpected(order.error());
     }
 
-    if (std::find(order->begin(), order->end(), state_->focus) != order->end()) {
+    if (std::ranges::contains(*order, state_->focus)) {
       return state_->focus;
     }
 
@@ -216,7 +216,7 @@ std::expected<Node<Widget>, TreeError> EventRouter::focused() {
     // Recover from still-eligible focus history before choosing a never-focused preorder node.
     // Hiding a subtree need not erase its history, so restoring it can make that entry useful again.
     for (auto it = state_->history.rbegin(); it != state_->history.rend(); ++it) {
-      if (std::find(order->begin(), order->end(), *it) != order->end()) {
+      if (std::ranges::contains(*order, *it)) {
         next = *it;
 
         break;
@@ -282,7 +282,7 @@ std::expected<Node<Widget>, TreeError> EventRouter::traverse(bool reverse) {
     Node<Widget> next;
 
     if (!order->empty()) {
-      auto position = std::find(order->begin(), order->end(), state_->focus);
+      auto position = std::ranges::find(*order, state_->focus);
 
       if (position == order->end()) {
         next = reverse ? order->back() : order->front();

@@ -151,7 +151,7 @@ std::expected<CellBuffer, RenderError> renderFullFrame(CellSize size, std::span<
     std::iota(order.begin(), order.end(), std::size_t{0});
     // Stable ordering makes equal-z overlap follow the original command order.
     // Only indices move; commands and borrowed text keep their original lifetime.
-    std::stable_sort(order.begin(), order.end(), [commands](std::size_t left, std::size_t right) {
+    std::ranges::stable_sort(order, [commands](std::size_t left, std::size_t right) {
       return zOrder(commands[left]) < zOrder(commands[right]);
     });
 
