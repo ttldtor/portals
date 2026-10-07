@@ -75,6 +75,11 @@ endif()
 
 if(PORTALS_BUILD_TESTS)
   enable_testing()
+  add_executable(portals_property tests/property.cpp)
+  target_link_libraries(portals_property PRIVATE portals::core)
+  portals_enable_warnings(portals_property)
+  add_test(NAME portals.property COMMAND portals_property)
+  set_tests_properties(portals.property PROPERTIES TIMEOUT 15)
   add_executable(portals_widget_tree tests/widget_tree.cpp)
   target_link_libraries(portals_widget_tree PRIVATE portals::core)
   portals_enable_warnings(portals_widget_tree)
@@ -196,7 +201,7 @@ if(PORTALS_BUILD_DOCS)
   set(DOXYGEN_WARN_AS_ERROR YES)
   set(DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/docs")
 
-  doxygen_add_docs(portals_docs include README.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/scheduler.md docs/widget-tree.md docs/input.md docs/terminal.md docs/terminal-probe.md
+  doxygen_add_docs(portals_docs include README.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/scheduler.md docs/widget-tree.md docs/property.md docs/input.md docs/terminal.md docs/terminal-probe.md
 
 
 
