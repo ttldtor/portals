@@ -52,6 +52,32 @@ void operator delete[](void *memory) noexcept {
 void operator delete[](void *memory, std::size_t) noexcept {
   ::operator delete[](memory);
 }
+
+// Route nothrow temporary buffers through the same replacement allocation pair.
+void *operator new(std::size_t bytes, const std::nothrow_t &) noexcept {
+  try {
+    return ::operator new(bytes);
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+void *operator new[](std::size_t bytes, const std::nothrow_t &) noexcept {
+  try {
+    return ::operator new[](bytes);
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+void operator delete(void *memory, const std::nothrow_t &) noexcept {
+  ::operator delete(memory);
+}
+
+void operator delete[](void *memory, const std::nothrow_t &) noexcept {
+  ::operator delete[](memory);
+}
+
 namespace {
 using namespace portals;
 int failures = 0;
