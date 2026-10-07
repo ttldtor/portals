@@ -136,6 +136,8 @@ API design sketches: [five scenarios](docs/api-design.md). The independent
 [header/module/shared-library spike](experiments/module-spike/README.md) tests
 compilation mechanics; UI sketches are design-only.
 
+Virtual list: [preparation, ownership and fixed-row navigation](docs/virtual-list.md).
+
 ## License
 
 Portals code: Boost Software License 1.0; see [LICENSE.txt](LICENSE.txt).
