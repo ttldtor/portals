@@ -103,9 +103,26 @@ historical belief; every error split tests poison and a new full CAN transaction
 on the same interpreter state, without resetting the simulated parser.
 
 The POSIX test uses a real PTY with pressure, stop, drain/resume, exact byte replay,
-mode restoration and hangup errors. A PTY plus an interpreter is still distinct
-from a real emulator. Native Win32 integration and real emulator qualification
-must be recorded separately; the abstract transport tests do not establish them.
+mode restoration and hangup errors. The native Windows ConPTY fixture also drives
+the public `FrameWriter` / `TerminalFrameOutput` / `TerminalSession` chain. Its
+240-by-160-cell frame cases cap each transaction at 2 MiB and each framebuffer at
+1 MiB, and allow at most sixteen alternating frames to establish pressure. A large
+first frame alone is insufficient evidence: ConPTY can accept the viewport before
+its renderer blocks on the paused host pipe.
+
+The fixture checks stop/expiry before native I/O, successful commit after drain
+resumes, unchanged-frame silence, and uncertain deadline/stop after native I/O.
+Uncertainty must discard an already committed belief and reject retries. Only
+after close/join and exact native mode/code-page restoration does a new session
+and writer perform the full CAN repaint. Native console cell samples check ASCII,
+BMP text, CJK lead/tail at the lower-right, cleared stale cells and the final cursor.
+The existing host watchdog, hidden console and owned drain/process cleanup cover
+these cases too. Samples are complementary to the full headless semantic oracle;
+they do not establish exact RGB or supplementary-glyph identity via `CHAR_INFO`.
+
+A PTY plus an interpreter and an OS ConPTY console are distinct from actual
+frontend emulators. Real-emulator qualification must be recorded separately; the
+abstract transport tests do not establish it.
 
 Primary references: [VT control functions (XTerm)](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html),
 [Windows virtual terminal sequences](https://learn.microsoft.com/en-us/windows/console/console-virtual-terminal-sequences),

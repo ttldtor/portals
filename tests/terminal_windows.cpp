@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 
-#include <portals/terminal.hpp>
+#include <portals/diff.hpp>
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -21,6 +21,13 @@ constexpr DWORD writerObserveMs = 500;
 constexpr DWORD maximumDrainPauseMs = 1500;
 constexpr DWORD pressureBytes = 1024 * 1024;
 constexpr DWORD watchdogExit = 75;
+constexpr COORD frameViewport{240, 160};
+constexpr std::size_t frameOutputLimit = 2 * 1024 * 1024;
+constexpr std::size_t frameMinimumPressureBytes = 1024 * 1024;
+constexpr portals::CellBufferLimits frameBufferLimits{240, 160, 38400, 16, 64, 8};
+constexpr portals::FrameWriterLimits frameWriterLimits{frameOutputLimit, 1024 * 1024};
+constexpr std::size_t maximumPressureFrames = 16;
+constexpr DWORD minimumFrameWaitMs = 500;
 
 struct Handle {
   HANDLE value = nullptr;
@@ -60,7 +67,11 @@ enum Stage : DWORD {
   consoleClassification,
   resizeReady = 10,
   idleResizeReady = 12,
-  pipeClassification
+  pipeClassification,
+  frameCommitted,
+  framePoisoned,
+  frameJoined,
+  frameRecovered
 };
 enum Flag : DWORD {
   blocked = 1,
@@ -405,6 +416,221 @@ DWORD pressureCase(HANDLE resultPipe, const wchar_t *kind) {
 
   return 0;
 }
+
+bool isFrameCase(const wchar_t *kind) {
+  return wcscmp(kind, L"frame-resume") == 0 || wcscmp(kind, L"frame-cancel") == 0 || wcscmp(kind, L"frame-stop") == 0;
+}
+
+CellBuffer makeFrame(bool recovery, bool alternate = false) {
+  auto frame = CellBuffer::from({frameViewport.X, frameViewport.Y}, {}, frameBufferLimits);
+  require(frame.has_value(), "bounded native frame allocation");
+  const auto ascii = GraphemeText::from(alternate ? "B" : "A");
+  const CellStyle first{{RgbColor{255, 127, 64}}, {RgbColor{5, 41, 90}}, true, true, true};
+  const CellStyle second{{RgbColor{3, 127, 9}}, {RgbColor{84, 193, 211}}, false, true, true};
+  require(ascii.has_value(), "native frame text");
+
+  if (!recovery) {
+    for (int y = 0; y < frameViewport.Y; ++y) {
+      for (int x = 0; x < frameViewport.X; ++x) {
+        require(frame->put({x, y}, *ascii, 0, x % 2 ? first : second).has_value(), "native pressure cell");
+      }
+    }
+  } else {
+    const auto mark = GraphemeText::from("R");
+    const auto omega = GraphemeText::from("\xce\xa9");
+    const auto wide = GraphemeText::from("\xe4\xb8\xad");
+    require(mark && omega && wide, "native recovery text");
+    require(frame->put({0, 0}, *mark, 0, first).has_value() && frame->put({1, 0}, *omega, 0).has_value() &&
+              frame->put({2, 0}, *wide, 0).has_value() &&
+              frame->put({frameViewport.X - 2, frameViewport.Y - 1}, *wide, 0, second).has_value(),
+            "native recovery cells");
+  }
+
+  return std::move(*frame);
+}
+
+CHAR_INFO nativeCell(HANDLE output, SHORT x, SHORT y) {
+  CHAR_INFO cell{};
+  SMALL_RECT area{x, y, x, y};
+  require(ReadConsoleOutputW(output, &cell, {1, 1}, {0, 0}, &area), "native frame cell observation");
+  require(area.Left == x && area.Right == x && area.Top == y && area.Bottom == y, "native cell inside viewport");
+
+  return cell;
+}
+
+void checkNativeFrame(HANDLE output, bool recovery, bool alternate = false) {
+  CONSOLE_SCREEN_BUFFER_INFO info{};
+  require(GetConsoleScreenBufferInfo(output, &info), "native frame cursor observation");
+  require(info.dwCursorPosition.X == 0 && info.dwCursorPosition.Y == 0 && info.srWindow.Left == 0 &&
+            info.srWindow.Top == 0,
+          "completed frame cursor at home");
+
+  if (!recovery) {
+    const wchar_t expected = alternate ? L'B' : L'A';
+    require(nativeCell(output, 0, 0).Char.UnicodeChar == expected &&
+              nativeCell(output, frameViewport.X - 1, frameViewport.Y - 1).Char.UnicodeChar == expected,
+            "native full frame reaches lower-right without scroll");
+  } else {
+    const auto lowerLead = nativeCell(output, frameViewport.X - 2, frameViewport.Y - 1);
+    const auto lowerTail = nativeCell(output, frameViewport.X - 1, frameViewport.Y - 1);
+    require(nativeCell(output, 0, 0).Char.UnicodeChar == L'R' &&
+              nativeCell(output, 1, 0).Char.UnicodeChar == L'\x03a9' &&
+              nativeCell(output, 2, 0).Char.UnicodeChar == L'\x4e2d' && lowerLead.Char.UnicodeChar == L'\x4e2d' &&
+              (lowerLead.Attributes & COMMON_LVB_LEADING_BYTE) && (lowerTail.Attributes & COMMON_LVB_TRAILING_BYTE),
+            "native recovered BMP and complete CJK width at lower-right");
+    require(nativeCell(output, frameViewport.X - 1, 0).Char.UnicodeChar == L' ' &&
+              nativeCell(output, frameViewport.X / 2, frameViewport.Y / 2).Char.UnicodeChar == L' ',
+            "native recovery removes stale pressure cells");
+  }
+}
+
+DWORD frameCase(HANDLE resultPipe, const wchar_t *kind) {
+  NativeConsole native;
+  require(!IsWindowVisible(GetConsoleWindow()), "headless native frame console");
+  TerminalOptions options;
+  options.max_output_bytes = frameOutputLimit;
+  auto session = TerminalSession::open(native.handles(), options);
+  require(session.has_value() && session->size() == CellSize{frameViewport.X, frameViewport.Y},
+          "native frame viewport matches buffer");
+  TerminalFrameOutput output(*session);
+  FrameWriter writer(output, frameWriterLimits);
+  auto desired = makeFrame(false);
+  const auto encoded = encode_diff(nullptr, desired, frameOutputLimit);
+  require(encoded && encoded->size() >= frameMinimumPressureBytes, "native frame creates bounded pressure batch");
+  auto expectedBytes = encoded->size();
+  require(writer.submit(std::move(desired)).has_value() && session->pending_bytes() == 0 && writer.pending() &&
+            !writer.committed_frame(),
+          "frame submission does no native I/O or belief commit");
+  std::stop_source preStopped;
+  preStopped.request_stop();
+  const auto stoppedBeforeIo = writer.flush(std::chrono::steady_clock::now() + 1s, preStopped.get_token());
+  require(stoppedBeforeIo.status == TerminalStatus::stopped && !stoppedBeforeIo.error &&
+            stoppedBeforeIo.completed == 0 && stoppedBeforeIo.pending == expectedBytes && writer.pending() &&
+            !writer.poisoned() && !writer.committed_frame(),
+          "frame stop before I/O preserves retryable batch and unknown belief");
+  const auto expiredBeforeIo = writer.flush(std::chrono::steady_clock::now() - 1ms);
+  require(expiredBeforeIo.status == TerminalStatus::deadline && !expiredBeforeIo.error &&
+            expiredBeforeIo.pending == expectedBytes && !writer.poisoned(),
+          "frame deadline before I/O preserves retryable batch");
+  auto blockedFrame = makeFrame(true);
+  const auto rejectedPending = writer.submit(std::move(blockedFrame));
+  require(!rejectedPending && rejectedPending.error() == FrameError::pending &&
+            blockedFrame.size() == CellSize{frameViewport.X, frameViewport.Y},
+          "native pending frame cannot be replaced");
+
+  const bool resume = wcscmp(kind, L"frame-resume") == 0;
+  const bool stop = wcscmp(kind, L"frame-stop") == 0;
+  std::stop_source source;
+  std::jthread stopper;
+  const ULONGLONG start = GetTickCount64();
+  report(resultPipe, pressureReady, 0, hiddenWindow, 0, expectedBytes);
+
+  if (stop) {
+    stopper = std::jthread([&source] {
+      Sleep(writerObserveMs);
+      source.request_stop();
+    });
+  }
+
+  // ConPTY can accept one complete viewport before its renderer blocks on the
+  // host pipe. Bound the warmup series and require actual pending uncertainty,
+  // rather than treating a large encoded byte count as proof of backpressure.
+  const auto writeDeadline = std::chrono::steady_clock::now() + (resume || stop ? 4s : 500ms);
+  TerminalWrite written;
+  DWORD elapsed = 0;
+  DWORD flushWaitMs = 0;
+  bool alternate = false;
+  std::size_t completedFrames = 0;
+
+  for (std::size_t attempt = 0; attempt < maximumPressureFrames; ++attempt) {
+    const ULONGLONG flushStarted = GetTickCount64();
+    written = writer.flush(writeDeadline, source.get_token());
+    flushWaitMs = static_cast<DWORD>(GetTickCount64() - flushStarted);
+    elapsed = static_cast<DWORD>(GetTickCount64() - start);
+    char completion[128]{};
+    std::snprintf(completion, sizeof(completion),
+                  "status=%d pending=%llu poisoned=%d committed=%d attempt=%llu flush_ms=%lu",
+                  static_cast<int>(written.status), static_cast<unsigned long long>(written.pending), writer.poisoned(),
+                  writer.committed_frame() != nullptr, static_cast<unsigned long long>(attempt + 1), flushWaitMs);
+    report(resultPipe, writerComplete, written.error ? static_cast<DWORD>(written.error->native_code) : 0, 0, elapsed,
+           written.completed, completion);
+
+    if (written.status != TerminalStatus::progress) {
+      break;
+    }
+
+    ++completedFrames;
+    require(written.completed == expectedBytes && written.pending == 0 && writer.committed_frame(),
+            "native warmup frame commits complete bytes only");
+
+    if (resume && flushWaitMs >= minimumFrameWaitMs) {
+      break;
+    }
+
+    require(attempt + 1 < maximumPressureFrames, "native fixture must establish bounded pressure");
+    alternate = !alternate;
+    auto next = makeFrame(false, alternate);
+    const auto nextEncoded = encode_diff(writer.committed_frame(), next, frameOutputLimit);
+    require(nextEncoded && nextEncoded->size() >= frameMinimumPressureBytes, "native alternating pressure delta");
+    expectedBytes = nextEncoded->size();
+    require(writer.submit(std::move(next)).has_value(), "native pressure series keeps only one pending frame");
+  }
+
+  if (resume) {
+    require(written.status == TerminalStatus::progress && !written.error && written.completed == expectedBytes &&
+              written.pending == 0 && flushWaitMs >= minimumFrameWaitMs && !writer.pending() && !writer.poisoned() &&
+              writer.committed_frame(),
+            "native pressure resume commits only completed frame");
+    checkNativeFrame(native.output.value, false, alternate);
+    report(resultPipe, frameCommitted, 0, blocked, elapsed, written.completed);
+    require(writer.submit(makeFrame(false, alternate)).has_value() && !writer.pending() &&
+              session->pending_bytes() == 0,
+            "unchanged native frame creates no terminal batch");
+    require(writer.flush(std::chrono::steady_clock::now() + 1s).completed == 0,
+            "unchanged native frame writes no bytes");
+  } else {
+    require(written.status == TerminalStatus::error && written.error &&
+              written.error->kind == TerminalErrorKind::output_uncertain && written.pending > 0 && elapsed < 1200 &&
+              writer.poisoned() && !writer.pending() && !writer.committed_frame() && completedFrames > 0,
+            "native pressure cancellation poisons frame belief before host resume");
+    const auto rejectedPoisoned = writer.submit(std::move(blockedFrame));
+    require(!rejectedPoisoned && rejectedPoisoned.error() == FrameError::poisoned,
+            "native uncertain writer rejects later frames");
+    const auto pendingNative = session->pending_bytes();
+    const auto refusedRetry = writer.flush(std::chrono::steady_clock::now() + 100ms);
+    require(refusedRetry.status == TerminalStatus::error && refusedRetry.error &&
+              refusedRetry.error->kind == TerminalErrorKind::closed && session->pending_bytes() == pendingNative,
+            "poisoned writer rejects retry without forwarding to uncertain session");
+    report(resultPipe, framePoisoned, 0, blocked, elapsed, written.completed);
+  }
+
+  require(session->close().has_value(), "frame transport close joins old writer before recovery");
+  native.checkRestored();
+  report(resultPipe, frameJoined, 0, blocked | restored, static_cast<DWORD>(GetTickCount64() - start));
+
+  if (!resume) {
+    auto freshSession = TerminalSession::open(native.handles(), options);
+    require(freshSession.has_value(), "frame recovery opens fresh session after join");
+    TerminalFrameOutput freshOutput(*freshSession);
+    FrameWriter recovered(freshOutput, frameWriterLimits);
+    require(recovered.submit(makeFrame(true)).has_value() && !recovered.committed_frame(),
+            "new writer begins full CAN recovery without inherited belief");
+    const auto completed = recovered.flush(std::chrono::steady_clock::now() + 4s);
+    require(completed.status == TerminalStatus::progress && !completed.error && completed.completed > 0 &&
+              completed.pending == 0 && recovered.committed_frame() && !recovered.pending(),
+            "fresh native full repaint completes and commits");
+    checkNativeFrame(native.output.value, true);
+    require(freshSession->close().has_value(), "recovered frame closes normally");
+    native.checkRestored();
+    report(resultPipe, frameRecovered, 0, restored, static_cast<DWORD>(GetTickCount64() - start), completed.completed);
+  }
+
+  report(resultPipe, pressureDone, 0, blocked | restored, static_cast<DWORD>(GetTickCount64() - start),
+         written.completed);
+
+  return 0;
+}
+
 int nativeSmoke(const wchar_t *reportPath) {
   Handle outputReport(
     CreateFileW(reportPath, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
@@ -526,8 +752,8 @@ void launch(Session &session, const wchar_t *kind) {
   session.resultRead.reset(read);
   session.resultWrite.reset(write);
   require(SetHandleInformation(read, HANDLE_FLAG_INHERIT, 0), "result inheritance");
-  const HRESULT created =
-    CreatePseudoConsole({80, 25}, session.inputRead.value, session.outputWrite.value, 0, &session.console);
+  const HRESULT created = CreatePseudoConsole(isFrameCase(kind) ? frameViewport : COORD{80, 25},
+                                              session.inputRead.value, session.outputWrite.value, 0, &session.console);
   require(SUCCEEDED(created), "CreatePseudoConsole");
   session.enabled.store(wcscmp(kind, L"input") == 0);
   session.reader = std::thread(drain, session.outputRead.value, std::ref(session.enabled), std::ref(session.stop),
@@ -631,7 +857,8 @@ bool hostCase(const wchar_t *kind) {
       idleResizeStarted = 0;
     }
     if (pressureStarted != 0) {
-      const DWORD pause = wcscmp(kind, L"resume") == 0 ? 700 : maximumDrainPauseMs;
+      const DWORD pause =
+        wcscmp(kind, L"resume") == 0 || wcscmp(kind, L"frame-resume") == 0 ? 700 : maximumDrainPauseMs;
 
       if (GetTickCount64() - pressureStarted >= pause) {
         session.enabled.store(true);
@@ -671,6 +898,10 @@ int wmain(int argc, wchar_t **argv) {
         return 0;
       }
 
+      if (isFrameCase(argv[2])) {
+        return frameCase(result, argv[2]);
+      }
+
       return wcscmp(argv[2], L"input") == 0 ? inputCase(result) : pressureCase(result, argv[2]);
     } catch (const std::exception &error) {
       report(result, childFailure, GetLastError(), 0, 0, 0, error.what());
@@ -696,9 +927,13 @@ int wmain(int argc, wchar_t **argv) {
     const bool cancel = hostCase(L"cancel");
     const bool resume = hostCase(L"resume");
     const bool stopped = hostCase(L"stop");
-    std::printf("summary input=%d cancel=%d resume=%d\n", input, cancel, resume);
+    const bool frameResume = hostCase(L"frame-resume");
+    const bool frameCancel = hostCase(L"frame-cancel");
+    const bool frameStop = hostCase(L"frame-stop");
+    std::printf("summary input=%d cancel=%d resume=%d stopped=%d frame_resume=%d frame_cancel=%d frame_stop=%d\n",
+                input, cancel, resume, stopped, frameResume, frameCancel, frameStop);
 
-    return input && cancel && resume && stopped ? 0 : 1;
+    return input && cancel && resume && stopped && frameResume && frameCancel && frameStop ? 0 : 1;
   } catch (const std::exception &error) {
     std::fprintf(stderr, "host failure: %s\n", error.what());
 
