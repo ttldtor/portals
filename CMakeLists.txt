@@ -8,6 +8,7 @@ endif()
 option(PORTALS_BUILD_TESTS "Build Portals headless tests" ${PROJECT_IS_TOP_LEVEL})
 option(PORTALS_BUILD_EXAMPLES "Build Portals example consumer" ${PROJECT_IS_TOP_LEVEL})
 option(PORTALS_BUILD_DOCS "Build Portals API documentation with Doxygen" OFF)
+option(PORTALS_BUILD_TOOLS "Build the standalone terminal diagnostic probe" ${PROJECT_IS_TOP_LEVEL})
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/vendor/utf8proc/verify.cmake")
 add_library(portals_utf8proc STATIC vendor/utf8proc/utf8proc.c)
@@ -39,6 +40,25 @@ endfunction()
 
 portals_enable_warnings(portals_core)
 
+if(PORTALS_BUILD_TOOLS)
+  add_executable(portals_terminal_probe tools/terminal_probe/main.cpp tools/terminal_probe/query.cpp)
+  if(WIN32)
+    target_sources(portals_terminal_probe PRIVATE tools/terminal_probe/native_windows.cpp)
+  elseif(UNIX)
+    target_sources(portals_terminal_probe PRIVATE tools/terminal_probe/native_posix.cpp)
+  else()
+    message(FATAL_ERROR "The terminal probe requires Windows or a POSIX platform; disable PORTALS_BUILD_TOOLS")
+  endif()
+  target_compile_features(portals_terminal_probe PRIVATE cxx_std_23)
+  set_target_properties(portals_terminal_probe PROPERTIES CXX_EXTENSIONS OFF)
+  if(MSVC)
+    # The single-threaded diagnostic only reads getenv results; keep this CRT
+    # portability choice private to the tool rather than changing core warnings.
+    target_compile_definitions(portals_terminal_probe PRIVATE _CRT_SECURE_NO_WARNINGS)
+  endif()
+  portals_enable_warnings(portals_terminal_probe)
+endif()
+
 if(PORTALS_BUILD_EXAMPLES)
   add_subdirectory(examples/consumer)
   portals_enable_warnings(portals_consumer)
@@ -60,6 +80,31 @@ if(PORTALS_BUILD_TESTS)
   add_test(NAME portals.text COMMAND portals_text "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/unicode/GraphemeBreakTest-18.0.0.txt")
   add_test(NAME portals.unicode-provenance COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/vendor/utf8proc/verify.cmake")
   set_tests_properties(portals.smoke portals.geometry portals.text portals.unicode-provenance PROPERTIES TIMEOUT 10)
+
+  add_executable(portals_probe_query_tests tests/probe_query.cpp tools/terminal_probe/query.cpp)
+  target_include_directories(portals_probe_query_tests PRIVATE tools/terminal_probe)
+  target_compile_features(portals_probe_query_tests PRIVATE cxx_std_23)
+  set_target_properties(portals_probe_query_tests PROPERTIES CXX_EXTENSIONS OFF)
+  portals_enable_warnings(portals_probe_query_tests)
+  add_test(NAME portals.probe.query COMMAND portals_probe_query_tests)
+  set_tests_properties(portals.probe.query PROPERTIES TIMEOUT 10)
+
+  if(PORTALS_BUILD_TOOLS)
+    add_test(NAME portals.probe.redirected
+      COMMAND ${CMAKE_COMMAND} -DPROBE=$<TARGET_FILE:portals_terminal_probe>
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/probe_redirected.cmake)
+    set_tests_properties(portals.probe.redirected PROPERTIES TIMEOUT 10)
+
+    if(UNIX)
+      add_executable(portals_probe_posix_tests tests/probe_posix.cpp)
+      target_compile_features(portals_probe_posix_tests PRIVATE cxx_std_23)
+      set_target_properties(portals_probe_posix_tests PROPERTIES CXX_EXTENSIONS OFF)
+      portals_enable_warnings(portals_probe_posix_tests)
+      add_test(NAME portals.probe.posix-fixture
+        COMMAND portals_probe_posix_tests $<TARGET_FILE:portals_terminal_probe>)
+      set_tests_properties(portals.probe.posix-fixture PROPERTIES TIMEOUT 15)
+    endif()
+  endif()
 endif()
 
 if(PORTALS_BUILD_DOCS)
@@ -69,7 +114,7 @@ if(PORTALS_BUILD_DOCS)
   set(DOXYGEN_HAVE_DOT NO)
   set(DOXYGEN_WARN_AS_ERROR YES)
   set(DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/docs")
-  doxygen_add_docs(portals_docs include README.md docs/geometry.md docs/text.md
+  doxygen_add_docs(portals_docs include README.md docs/geometry.md docs/text.md docs/terminal-probe.md
     docs/api-design.md experiments/module-spike/README.md
     vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"

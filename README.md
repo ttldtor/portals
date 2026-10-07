@@ -40,6 +40,24 @@ build and OFF when embedded with `add_subdirectory`. Set either to OFF with
 `-DPORTALS_BUILD_TESTS=OFF` / `-DPORTALS_BUILD_EXAMPLES=OFF`. Compiler warnings
 are private to Portals targets; C++23 is a public target requirement.
 
+## Terminal diagnostic probe
+
+Top-level builds include `portals_terminal_probe`. It reports native OS and
+terminal facts, environment hints, modes, dimensions and bounded DA/CPR query
+observations. To inspect without queries or mode changes:
+
+```powershell
+./build/windows-msvc-debug/portals_terminal_probe --no-query
+```
+
+In a terminal with stdin and stdout attached, use
+`portals_terminal_probe --timeout-ms 250 --max-bytes 4096`.
+Redirected handles automatically skip queries. `--headless` aliases `--no-query`;
+`--help` lists all options. Set `PORTALS_BUILD_TOOLS=OFF` to omit the executable.
+See [the probe contract and limitations](docs/terminal-probe.md) before interpreting
+reply candidates or running interactive checks. No terminal identity or Unicode
+width policy is authenticated by this diagnostic tool.
+
 ## Consume the library
 
 Use `add_subdirectory(path/to/portals)` and link your target to `portals::core`.
