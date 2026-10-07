@@ -199,6 +199,8 @@ WidgetTree::Borrow::~Borrow() {
     --tree.state_->frames;
   }
 
+  // Removal revokes identities immediately, but nested callbacks can still hold references.
+  // The final borrow is the only safe point at which unmount/destruction may reclaim storage.
   if (--tree.state_->borrows == 0) {
     tree.reclaim();
   }
@@ -427,6 +429,8 @@ std::expected<void, TreeError> WidgetTree::remove(Node<Widget> node) {
 
   Borrow guard(*this);
 
+  // Revoke every descendant identity before closing scopes: releasing callback captures can
+  // reenter the tree, but must never obtain a fresh borrow into the logically removed subtree.
   State::mark_dead(**record);
   state_->removal_pending = true;
   state_->invalidate(Invalidation::layout);
@@ -509,6 +513,8 @@ void WidgetTree::reclaim() noexcept {
       --state_->lifecycle;
     }
 
+    // Unpublish the address before running the widget destructor. Advance the generation only
+    // after destruction; zero permanently retires an exhausted slot rather than reviving old IDs.
     auto &slot = state_->slots[id.slot];
     slot.record = nullptr;
     node.reset();
@@ -670,6 +676,8 @@ std::expected<void, TreeError> WidgetTree::arrange(Node<Widget> node, CellRect l
 
   auto &value = **record;
 
+  // A parent rearrangement invalidates descendant surface coordinates too. Publish fresh
+  // geometry only after the hook succeeds; failures leave hit-testing unable to use stale cells.
   State::invalidate_geometry(value);
 
   if (!State::shown(value, false)) {

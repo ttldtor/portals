@@ -26,6 +26,8 @@ CellRect fill_area(const FillCommand &command, CellRect surface) noexcept {
   return command.area.intersection(command.clip).intersection(surface);
 }
 
+// Validate the entire scene before allocation or painting. Offscreen text still
+// participates in policy/byte/work limits; clipping is not a way around resource caps.
 std::expected<void, RenderError> preflight(std::span<const RenderCommand> commands, CellRect surface,
                                            WidthPolicy policy, const RenderLimits &limits) noexcept {
   if (commands.size() > limits.max_commands) {
@@ -90,6 +92,8 @@ std::expected<void, CellBufferError> paint_text(CellBuffer &buffer, const TextCo
 
     const auto end = x + graphemes[i].cells;
 
+    // Clip whole grapheme footprints. Emitting just a wide lead or continuation would
+    // disagree with CellBuffer ownership and with the terminal's cursor advancement.
     if (x >= clip.origin().x && end <= clip.right()) {
       const auto written = buffer.put({static_cast<std::int32_t>(x), command.origin.y}, command.text, i, command.style);
 
@@ -144,6 +148,8 @@ std::expected<CellBuffer, RenderError> render_full_frame(CellSize size, std::spa
   try {
     std::vector<std::size_t> order(commands.size());
     std::iota(order.begin(), order.end(), std::size_t{0});
+    // Stable ordering makes equal-z overlap follow the original command order.
+    // Only indices move; commands and borrowed text keep their original lifetime.
     std::stable_sort(order.begin(), order.end(), [commands](std::size_t left, std::size_t right) {
       return z_order(commands[left]) < z_order(commands[right]);
     });

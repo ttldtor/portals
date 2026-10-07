@@ -17,6 +17,8 @@ constexpr utf8proc_int32_t zero_width_joiner = 0x200d;
 constexpr utf8proc_int32_t keycap_mark = 0x20e3;
 constexpr unsigned unsupported_scalar_width = 3;
 
+// Grapheme boundaries come from utf8proc; terminal display support is a separate policy.
+// Preserve unsupported clusters as logical text and replace only their displayed footprint.
 struct ClusterWidth {
   unsigned scalar_cells{};
   unsigned regional_indicators{};
@@ -86,6 +88,8 @@ GraphemeText &GraphemeText::operator=(const GraphemeText &other) {
   return *this;
 }
 
+// Member initialization may allocate MSVC iterator proxies. Do not touch the source
+// until both empty containers exist; the following assignment itself allocates nothing.
 GraphemeText::GraphemeText(GraphemeText &&other) {
   *this = std::move(other);
 }
@@ -123,6 +127,8 @@ std::expected<GraphemeText, TextError> GraphemeText::from(std::string_view bytes
   utf8proc_int32_t state = 0;
   ClusterWidth cluster;
 
+  // Commit metadata only for a complete cluster. The result stays local until all input
+  // is validated, so a later decoding or limit error never exposes a partial text value.
   const auto append = [&](std::size_t end) -> std::expected<void, TextError> {
     if (result.graphemes_.size() >= limits.max_graphemes) {
       return std::unexpected(TextError{TextErrorKind::grapheme_limit, begin});

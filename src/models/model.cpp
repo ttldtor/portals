@@ -7,6 +7,8 @@ std::expected<std::uint64_t, TreeError> model_session() {
   static std::atomic<std::uint64_t> sequence{};
   auto current = sequence.load();
 
+  // Reserve a process-wide session without wrapping: old consumer IDs may survive their
+  // source through pinned frames. CAS refreshes current after contention, including spurious failure.
   for (;;) {
     if (current == std::numeric_limits<std::uint64_t>::max()) {
       return std::unexpected(TreeError::identity_exhausted);

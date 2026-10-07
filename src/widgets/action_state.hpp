@@ -7,6 +7,8 @@
 #include <thread>
 
 namespace portals::detail {
+// Worker-side tokens share only this admission flag. They never own callback captures,
+// whose potentially reentrant destructors belong to UI collection or active delivery.
 struct ActionCancellation {
   std::atomic<bool> connected{true};
 };
@@ -28,6 +30,8 @@ struct EventRouter::State {
     std::vector<std::shared_ptr<detail::ActionRegistration>>(0);
   std::vector<Node<Widget>> history = std::vector<Node<Widget>>(0);
   Node<Widget> focus;
+  // These UI-only guards reject nested delivery and mutations during capture reclamation;
+  // callback disconnect uses the independent atomic flag and remains available on any thread.
   bool dispatching{};
   bool collecting{};
   bool closing{};

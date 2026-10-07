@@ -82,6 +82,8 @@ std::expected<void, TreeError> validate_children(std::span<const MeasuredChild> 
   return {};
 }
 
+// Recompute eligible weights after caps are reached. Integer remainders go to
+// children in stable order; another round redistributes capacity rejected by caps.
 void grow_flex(std::span<const MeasuredChild> children, bool horizontal, std::vector<Wide> &sizes, Wide spare) {
   while (spare > 0) {
     Wide weights{};
@@ -138,6 +140,8 @@ struct Entry {
 
   Entry(const Entry &) = default;
 };
+// Measurement builds owning entries first; arrangement then uses that stable index
+// graph. No widget pointer or borrowed child span survives an individual tree callback.
 class Traversal {
 public:
   explicit Traversal(WidgetTree &tree) : tree_(tree) {

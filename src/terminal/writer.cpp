@@ -29,6 +29,8 @@ std::expected<void, FrameError> FrameWriter::submit(CellBuffer &&frame) {
     return std::unexpected(FrameError::frame_limit);
   }
 
+  // Encode before consuming the caller's frame. Rejection must preserve both its
+  // storage and the last committed belief, and submit must never touch the transport.
   auto encoded = encode_diff(committed_frame(), frame, limits_.max_output_bytes);
 
   if (!encoded) {
@@ -73,6 +75,8 @@ TerminalWrite FrameWriter::flush(TerminalDeadline deadline, std::stop_token stop
   }
 
   try {
+    // Submit once, then retry only the transport-owned suffix after a known stop/deadline.
+    // Re-submitting the original batch would duplicate bytes already accepted.
     if (!submitted_) {
       auto accepted = output_.submit(std::move(bytes_));
 
@@ -96,6 +100,8 @@ TerminalWrite FrameWriter::flush(TerminalDeadline deadline, std::stop_token stop
       return result;
     }
 
+    // Transport accounting is a trust boundary: inconsistent progress is just as
+    // unsafe as an explicit error. Never infer a displayed frame from accepted bytes.
     if (result.completed > remaining_ || result.pending != remaining_ - result.completed ||
         result.status == TerminalStatus::eof || (result.status == TerminalStatus::progress && result.pending != 0)) {
       return failure({TerminalErrorKind::system});
@@ -103,6 +109,8 @@ TerminalWrite FrameWriter::flush(TerminalDeadline deadline, std::stop_token stop
 
     remaining_ = result.pending;
 
+    // Only complete, consistent output promotes the desired frame to our historical
+    // terminal belief. Partial writes retain the previous committed frame.
     if (result.status == TerminalStatus::progress && remaining_ == 0) {
       committed_ = std::move(pending_);
       pending_.reset();

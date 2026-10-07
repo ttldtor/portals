@@ -13,31 +13,35 @@
 namespace portals {
 /** @brief Owning identity, independent of addresses; zero is never a live identity. */
 struct NodeId {
-  std::uint64_t session{};                                  ///< Process-unique tree session.
-  std::size_t slot{};                                       ///< Registry position, not sibling order.
-  std::uint64_t generation{};                               ///< Reuse generation; exhausted slots retire.
-  bool operator==(const NodeId &) const noexcept = default; ///< Compare identity.
+  std::uint64_t session{};    ///< Process-unique tree session.
+  std::size_t slot{};         ///< Registry position, not sibling order.
+  std::uint64_t generation{}; ///< Reuse generation; exhausted slots retire.
+  /** @brief Compare identity.
+   * @param other Tree identity to compare.
+   * @return True when all compared fields are equal.
+   */
+  bool operator==(const NodeId &other) const noexcept = default;
 };
 /** @brief Checked tree failures; rejected operations never start the requested callback. */
 enum class TreeError {
-  invalid_argument,
-  wrong_thread,
-  wrong_session,
-  stale_node,
-  closed,
-  would_block,
-  no_memory,
-  identity_exhausted,
-  node_limit,
-  depth_limit,
-  callback_failed,
-  invalid_geometry
+  invalid_argument,   ///< An option, enum value or operation argument is invalid.
+  wrong_thread,       ///< Operation requires the tree's UI thread.
+  wrong_session,      ///< An identity or scope belongs to another tree/scheduler.
+  stale_node,         ///< The observed node or model consumer is absent or retired.
+  closed,             ///< The owning tree or source is closed.
+  would_block,        ///< The current frame/reentry boundary or finite queue/work budget rejects this operation.
+  no_memory,          ///< Allocation failed inside the operation boundary.
+  identity_exhausted, ///< A session, generation or revision cannot advance without reuse.
+  node_limit,         ///< The configured live node, observer or consumer limit was reached.
+  depth_limit,        ///< Inserting the child would exceed the configured tree depth.
+  callback_failed,    ///< A user extension or callback threw.
+  invalid_geometry    ///< Required arranged geometry is absent or translation overflowed.
 };
 /** @brief Accumulated work; layout always includes painting. */
 enum class Invalidation {
-  none,
-  paint,
-  layout
+  none,  ///< No new work requested.
+  paint, ///< Painting is required; arranged geometry remains usable.
+  layout ///< Layout and painting are required; old arranged geometry becomes invalid.
 };
 /** @brief Owning arranged geometry; invalid geometry must never be used for hit-testing. */
 struct NodeGeometry {
@@ -58,7 +62,12 @@ struct WidgetTreeOptions {
  */
 class PaintContext {
 public:
-  virtual ~PaintContext() = default; ///< Destroy the caller-owned sink.
-  virtual std::expected<void, TreeError> submit(std::span<const RenderCommand> commands) = 0; ///< Borrow commands.
+  /** @brief Destroy the caller-owned sink. */
+  virtual ~PaintContext() = default;
+  /** @brief Borrow commands.
+   * @param commands Commands and text borrowed until the enclosing frame callback returns; consume before then.
+   * @return Success when accepted by the concrete sink, or its TreeError on failure.
+   */
+  virtual std::expected<void, TreeError> submit(std::span<const RenderCommand> commands) = 0;
 };
 } // namespace portals

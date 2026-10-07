@@ -12,6 +12,7 @@
 namespace portals {
 /** @brief Immutable owning value/revision pair; revision zero is the initial value.
  * T must own its data transitively; mutable aliases must not change published snapshots.
+ * @tparam T Value owning its data transitively; published reachable storage must remain immutable.
  */
 template <class T> struct PropertyChange {
   T value;                  ///< Value captured at this revision, independent of the source lifetime.
@@ -25,6 +26,7 @@ struct PropertyOptions {
  * Counts describe publication attempts, not callback execution. Accepted events can still
  * be cancelled by source destruction, Subscription disconnect, node removal or scheduler stop.
  * Equal set is a no-op and never retries notifications rejected by an earlier set.
+ * @tparam T The property value type; its immutable snapshot owns all transitively reachable data.
  */
 template <class T> struct PropertyUpdate {
   std::shared_ptr<const PropertyChange<T>> snapshot;  ///< Owning snapshot of this operation's revision.
@@ -44,6 +46,8 @@ template <class T> struct PropertyUpdate {
  * T construction/move/comparison and callback construction/move must not reenter UI APIs.
  * T destruction may reenter after replacement: the old value is retained until all publication
  * attempts finish. Destructors must not throw or call members of an object being destroyed.
+ * @tparam T Equality-comparable value constructible from T&&, owning its data transitively. Published
+ * aliases must remain immutable; construction/move/comparison must not reenter UI APIs and destruction must not throw.
  */
 template <std::equality_comparable T> class Property {
 public:
@@ -51,6 +55,12 @@ public:
    * The target must belong to tree and be live outside a frame. Invalid kind/zero capacity
    * is invalid_argument; allocation failure is no_memory. T exceptions are callback_failed.
    * Argument construction before this call lies outside this error boundary.
+   * @param tree Borrowed UI-owned tree and scheduler, both required to outlive the property.
+   * @param target Live node in tree invalidated by each changed set.
+   * @param initial Value moved into immutable revision zero.
+   * @param kind Invalidation to request on change; none explicitly requests no work.
+   * @param options Positive observer endpoint limit.
+   * @return New property, tree validation/frame errors, invalid_argument, no_memory, or callback_failed.
    */
   static std::expected<std::unique_ptr<Property>, TreeError> create(WidgetTree &tree, Node<Widget> target, T initial,
                                                                     Invalidation kind, PropertyOptions options = {}) {
@@ -103,6 +113,7 @@ public:
   /** @brief Obtain an independent immutable owner, even after the target node was removed.
    * Access on another thread returns wrong_thread. Transfer requires T to support destruction
    * on the thread releasing the last owner; UI reentry from T destruction requires a live UI context.
+   * @return Owning immutable value/revision pair, or wrong_thread without accessing the value.
    */
   std::expected<std::shared_ptr<const PropertyChange<T>>, TreeError> snapshot() const {
     if (state_->owner != std::this_thread::get_id()) {
@@ -118,6 +129,9 @@ public:
    * to deliver the missing events: equal set is a no-op. Consumers can read snapshot to resync.
    * Tree affinity/session/lifetime/frame failures propagate; revision overflow is
    * identity_exhausted. Allocation or T comparison/move failures occur before commit.
+   * @param value Candidate value compared to the current snapshot and moved into storage only if changed.
+   * @return Receipt for this operation's immutable revision and per-observer queue acceptance, including
+   * partial failure; an unexpected TreeError means no library-controlled commit occurred.
    */
   std::expected<PropertyUpdate<T>, TreeError> set(T value) {
     auto state = state_;
@@ -133,6 +147,8 @@ public:
       return std::unexpected(allowed.error());
     }
 
+    // Retain the old value through every publication: its final destructor may reenter set.
+    // The receipt below must continue to identify this operation even if that reentry commits again.
     auto previous = state->current;
     std::shared_ptr<const PropertyChange<T>> next;
 
@@ -158,6 +174,8 @@ public:
       return std::unexpected(invalidated.error());
     }
 
+    // Invalidation is the last fallible precommit step. Once current changes, bounded queue
+    // rejection is part of the receipt, never a reason to roll back the visible value.
     state->current = next;
     state->prune();
 
@@ -195,6 +213,13 @@ public:
    * Expired endpoint records are reclaimed before the finite limit is checked (node_limit).
    * Reentrant destruction during registration rechecks capacity and source lifetime (closed).
    * Tree/Scheduler errors propagate; callback construction exceptions become callback_failed.
+   * @tparam W Widget or a publicly derived extension type represented by receiver.
+   * @tparam Callback Copy-constructible callable accepting W& and std::shared_ptr<const PropertyChange<T>>
+   * as an lvalue; its return value is ignored.
+   * @param receiver Live receiving node in the property's tree; removal cancels its scoped callback.
+   * @param callback Owned callable; widget references must not escape, but the snapshot owner may be retained.
+   * @return Subscription token with no initial delivery; tree/scheduler errors, node_limit, closed,
+   * no_memory, or callback_failed on registration failure.
    */
   template <class W, class Callback>
   std::expected<Subscription, TreeError> observe(Node<W> receiver, Callback &&callback) {

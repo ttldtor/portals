@@ -44,9 +44,16 @@ enum class DiffError {
 class FrameOutput {
 public:
   virtual ~FrameOutput() = default; ///< Destroy the adapter, without an implicit flush.
-  /** @brief Take an owning batch, or reject without output; allocation may throw. */
+  /** @brief Take an owning batch, or reject without output; allocation may throw.
+   * @param bytes Complete encoded transaction, transferred to the transport on success.
+   * @return Success when the batch is retained, or a transport rejection before output.
+   */
   [[nodiscard]] virtual std::expected<void, TerminalError> submit(std::string bytes) = 0;
-  /** @brief Flush the owned suffix; report bytes for this call and total pending. */
+  /** @brief Flush the owned suffix; report bytes for this call and total pending.
+   * @param deadline Absolute monotonic deadline for this call.
+   * @param stop Cooperative cancellation request; implementations preserve retryable suffixes when effects are known.
+   * @return This call's completed byte count, remaining suffix, status and any uncertain-output error.
+   */
   [[nodiscard]] virtual TerminalWrite flush(TerminalDeadline deadline, std::stop_token stop) = 0;
 };
 /** @brief Non-owning adapter; session must outlive adapter and writer.
@@ -55,9 +62,22 @@ public:
  */
 class TerminalFrameOutput final : public FrameOutput {
 public:
-  explicit TerminalFrameOutput(TerminalSession &session) noexcept;                     ///< Borrow a stable session.
-  [[nodiscard]] std::expected<void, TerminalError> submit(std::string bytes) override; ///< Forward ownership.
-  [[nodiscard]] TerminalWrite flush(TerminalDeadline deadline, std::stop_token stop) override; ///< Forward I/O.
+  /** @brief Borrow a stable session.
+   * @param session Open session that outlives this adapter and its FrameWriter.
+   */
+  explicit TerminalFrameOutput(TerminalSession &session) noexcept;
+  /** @brief Forward ownership.
+   * @param bytes Encoded bytes transferred to TerminalSession::submit.
+   * @return The session's submission result; no terminal I/O is performed.
+   */
+  [[nodiscard]] std::expected<void, TerminalError> submit(std::string bytes) override;
+  /** @brief Forward I/O.
+   * @param deadline Absolute deadline forwarded to TerminalSession::flush.
+   * @param stop Cancellation request forwarded unchanged.
+   * @return Exact session progress and error information for this call.
+   */
+  [[nodiscard]] TerminalWrite flush(TerminalDeadline deadline, std::stop_token stop) override;
+
 private:
   TerminalSession &session_;
 };
@@ -89,29 +109,44 @@ enum class FrameError {
  */
 class FrameWriter {
 public:
-  explicit FrameWriter(FrameOutput &output, FrameWriterLimits limits = {}) noexcept; ///< Borrow exclusive output.
+  /** @brief Borrow exclusive output.
+   * @param output Transport that outlives the writer and receives no competing submissions.
+   * @param limits Per-transaction output and per-frame storage caps; submit reports any excess.
+   */
+  explicit FrameWriter(FrameOutput &output, FrameWriterLimits limits = {}) noexcept;
   FrameWriter(const FrameWriter &) = delete;            ///< Exclusive output cannot be shared by copying.
   FrameWriter &operator=(const FrameWriter &) = delete; ///< Exclusive output cannot be reassigned.
   /** @brief Encode and take frame only on success; reject busy/poisoned/limits without I/O.
    * Semantically unchanged frames commit immediately without output. Accepted frames
    * invalidate caller views through move; rejection retains them. Allocation errors
    * are returned. Submission invalidates any previously borrowed committed-frame view.
+   * @param frame Desired owning frame, consumed only after successful validation and encoding.
+   * @return Success when accepted, or pending, poisoned, frame_limit, output_limit or allocation_failure.
    */
   [[nodiscard]] std::expected<void, FrameError> submit(CellBuffer &&frame);
   /** @brief Perform transport I/O; commit only after complete, consistent progress.
    * Must run outside paint/measure/layout. Stop/deadline without errors retain the frame.
    * An accompanying error normalizes the result status to error and preserves its details.
    * Transport exceptions poison state then propagate; no automatic retry occurs.
+   * @param deadline Absolute monotonic deadline passed to the transport.
+   * @param stop Cooperative stop request for this call.
+   * @return Completed and pending bytes with the final status; errors mean the committed belief is invalid.
+   * @note Exceptions from the output adapter propagate only after the writer is poisoned.
    */
   [[nodiscard]] TerminalWrite flush(TerminalDeadline deadline, std::stop_token stop = {});
   /** @brief Borrow last fully transmitted frame; null initially/after error.
    * This is historical during partial output, not the current physical screen.
    * Expires on successful submit, completing/error flush, or writer destruction.
+   * @return Borrowed last completed frame, or null when no valid committed belief exists.
    */
   [[nodiscard]] const CellBuffer *committed_frame() const noexcept;
-  /** @brief Whether a transaction still requires completion; no allocation/errors. */
+  /** @brief Whether a transaction still requires completion; no allocation/errors.
+   * @return True while a desired frame still has an incomplete transaction.
+   */
   [[nodiscard]] bool pending() const noexcept;
-  /** @brief Whether unknown side effects permanently prohibit further output. */
+  /** @brief Whether unknown side effects permanently prohibit further output.
+   * @return True after an uncertain or inconsistent transport result; this state cannot be reset.
+   */
   [[nodiscard]] bool poisoned() const noexcept;
 
 private:

@@ -100,13 +100,24 @@ public:
    * Windows enables VT input/output and UTF-8 output, preserving the input code page.
    * On failure, independently restore everything
    * already changed; restoration_code reports rollback failure. Allocation can throw.
+   * @param handles Borrowed native input/output handles to duplicate; both must identify supported terminals.
+   * @param options Positive storage/work caps and polling cadence, copied into the session.
+   * @return Exclusive session ownership, or an error including any failed rollback in restoration_code.
+   * @throws std::bad_alloc If session or bounded working storage cannot be allocated.
    */
   [[nodiscard]] static std::expected<TerminalSession, TerminalError> open(NativeTerminalHandles handles,
                                                                           TerminalOptions options = {});
   TerminalSession(const TerminalSession &) = delete;            ///< Exclusive state cannot be copied.
   TerminalSession &operator=(const TerminalSession &) = delete; ///< Exclusive state cannot be copied.
-  TerminalSession(TerminalSession &&) noexcept;                 ///< Transfer ownership; source becomes closed.
-  TerminalSession &operator=(TerminalSession &&) noexcept;      ///< Best-effort close old state, then transfer.
+  /** @brief Transfer ownership; source becomes closed.
+   * @param other Session whose owned descriptors and mode-restoration responsibility are transferred.
+   */
+  TerminalSession(TerminalSession &&other) noexcept;
+  /** @brief Best-effort close old state, then transfer.
+   * @param other Session to consume; assignment first releases this session's previous native state.
+   * @return This session; a distinct source becomes closed. Restoration errors during assignment cannot be reported.
+   */
+  TerminalSession &operator=(TerminalSession &&other) noexcept;
   ~TerminalSession() noexcept; ///< Best-effort restoration and descriptor cleanup; never flushes.
 
   /** @brief Read one bounded owning batch, changed size, deadline, stop, EOF or error.
@@ -115,12 +126,20 @@ public:
    * Windows returns events only, using windows_input for VT/paste decoding. An empty
    * progress batch yields after the native record work budget. Paste is emitted at
    * its end delimiter; interleaved native events may precede that completed event.
+   * @param deadline Absolute steady-clock deadline bounding this read operation.
+   * @param stop Cooperative cancellation request, checked before the deadline.
+   * @return An owning input/resize batch, or deadline, stopped, eof or an explicit terminal error.
+   * @throws std::bad_alloc If owning batch storage cannot be allocated.
    */
   [[nodiscard]] TerminalRead read(TerminalDeadline deadline, std::stop_token stop = {});
-  /** @brief Query current columns/rows; returns closed/system error without mutation. */
+  /** @brief Query current columns/rows; returns closed/system error without mutation.
+   * @return Current viewport columns/rows, or closed, unsupported or system failure as applicable.
+   */
   [[nodiscard]] std::expected<CellSize, TerminalError> size() const noexcept;
   /** @brief Transfer one bounded owned byte batch; reject while output is pending.
    * No I/O. Empty batch is allowed. Rejection leaves session state unchanged.
+   * @param bytes Complete byte batch, moved into session storage only on acceptance.
+   * @return Success, or closed/output_pending/output_limit/output_uncertain without replacing pending output.
    */
   [[nodiscard]] std::expected<void, TerminalError> submit(std::string bytes);
   /** @brief Write until batch completion, deadline, stop or error; retain unconfirmed bytes.
@@ -131,9 +150,14 @@ public:
    * Further submit/flush fail until close. A pre-expired/pre-stopped call that has
    * issued no write preserves retryability and has no uncertainty error.
    * Successful writes do not prove terminal interpretation or rendered-frame state.
+   * @param deadline Absolute steady-clock deadline for completing the current byte batch.
+   * @param stop Cooperative cancellation; cancellation of issued Windows I/O can make progress uncertain.
+   * @return Bytes completed in this call, remaining owned bytes, completion status and optional error.
    */
   [[nodiscard]] TerminalWrite flush(TerminalDeadline deadline, std::stop_token stop = {});
-  /** @brief Number of pending owned bytes; zero for a closed/moved-from session. */
+  /** @brief Number of pending owned bytes; zero for a closed/moved-from session.
+   * @return Bytes whose successful transmission has not been confirmed; uncertain bytes must not be replayed.
+   */
   [[nodiscard]] std::size_t pending_bytes() const noexcept;
   /** @brief Discard pending bytes and restore all changed modes/flags independently.
    * Always closes owned duplicate descriptors, even on restoration error. Returns
@@ -143,6 +167,7 @@ public:
    * can wait for a paused host to resume output drain. No hard deadline is promised
    * for close/destruction or arbitrary stalled drivers/hosts; nothing is detached.
    * Incomplete/failed output leaves renderer belief uncertain, owned by the caller.
+   * @return Success, including repeated close, or the first native restoration/cleanup error.
    */
   [[nodiscard]] std::expected<void, TerminalError> close() noexcept;
 

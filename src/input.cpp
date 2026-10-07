@@ -292,6 +292,8 @@ std::optional<InputEvent> InputDecoder::control(unsigned char value, InputTime n
   return {};
 }
 
+// Parse the bounded numeric grammar before interpreting the final byte. A syntactic
+// reply is only a candidate inside the caller-owned window, never terminal authentication.
 std::optional<InputEvent> InputDecoder::sequence(InputTime now) {
   const bool ss3 = state_ == State::ss3;
   const char final = sequence_[length_ - 1];
@@ -445,6 +447,8 @@ std::optional<InputEvent> InputDecoder::paste(unsigned char value) {
     return {};
   }
 
+  // A failed terminator prefix is literal paste data. Keep a new leading ESC as the
+  // next candidate instead of interpreting any payload byte as an ordinary key.
   const auto held = marker_;
   marker_ = value == escape_byte ? 1 : 0;
   const auto extra = held + (marker_ == 0 ? 1 : 0);
@@ -469,6 +473,8 @@ std::optional<InputEvent> InputDecoder::paste(unsigned char value) {
   return {};
 }
 
+// consume=false emits an event for the preceding prefix while leaving this byte for
+// the next pull. The caller rolls back its offset, preserving chunk-independent decoding.
 std::optional<InputEvent> InputDecoder::byte(unsigned char value, bool &consume, InputTime now) {
   switch (state_) {
   case State::ground:
@@ -573,6 +579,8 @@ std::expected<InputStep, InputError> InputDecoder::pull(std::string_view bytes, 
   ending_ = ending_ || ending;
   InputStep result;
 
+  // Deliver already-determined events and expire old prefixes before accepting bytes
+  // with this timestamp. Waiting or chunking must not turn a timed-out ESC into Alt.
   if (pending_) {
     result.event = std::move(pending_);
     pending_.reset();

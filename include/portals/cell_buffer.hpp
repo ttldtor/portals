@@ -24,8 +24,11 @@ struct RgbColor {
   std::uint8_t green{};
   /** @brief Blue component. */
   std::uint8_t blue{};
-  /** @brief Compare all components. */
-  bool operator==(const RgbColor &) const noexcept = default;
+  /** @brief Compare all components.
+   * @param other Value whose corresponding fields are compared.
+   * @return True when every compared field is equal; false otherwise.
+   */
+  bool operator==(const RgbColor &other) const noexcept = default;
 };
 
 /** @brief Small owning paint value, independent of themes and text metrics. */
@@ -40,24 +43,33 @@ struct CellStyle {
   bool italic{};
   /** @brief Request underlined rendering. */
   bool underline{};
-  /** @brief Compare the complete value. */
-  bool operator==(const CellStyle &) const noexcept = default;
+  /** @brief Compare the complete value.
+   * @param other Value whose corresponding fields are compared.
+   * @return True when every compared field is equal; false otherwise.
+   */
+  bool operator==(const CellStyle &other) const noexcept = default;
 };
 
 /** @brief Output-only glyph index scoped to one buffer between clear/resize/move. */
 struct GlyphId {
   /** @brief Local index; zero identifies the blank glyph. Never external authority. */
   std::uint32_t value{};
-  /** @brief Compare local indices; equality across buffers has no semantic meaning. */
-  bool operator==(const GlyphId &) const noexcept = default;
+  /** @brief Compare local indices; equality across buffers has no semantic meaning.
+   * @param other Value whose corresponding fields are compared.
+   * @return True when every compared field is equal; false otherwise.
+   */
+  bool operator==(const GlyphId &other) const noexcept = default;
 };
 
 /** @brief Output-only style index scoped to one buffer between clear/resize/move. */
 struct StyleId {
   /** @brief Local index; zero identifies the default style. */
   std::uint32_t value{};
-  /** @brief Compare local indices; equality across buffers has no semantic meaning. */
-  bool operator==(const StyleId &) const noexcept = default;
+  /** @brief Compare local indices; equality across buffers has no semantic meaning.
+   * @param other Value whose corresponding fields are compared.
+   * @return True when every compared field is equal; false otherwise.
+   */
+  bool operator==(const StyleId &other) const noexcept = default;
 };
 
 /** @brief A cell's role in a complete display grapheme. */
@@ -80,8 +92,11 @@ struct Cell {
   CellKind kind{CellKind::blank};
   /** @brief Display width: one for blank/narrow, two for wide lead, zero for continuation. */
   std::uint8_t columns{1};
-  /** @brief Compare metadata, including local IDs. */
-  bool operator==(const Cell &) const noexcept = default;
+  /** @brief Compare metadata, including local IDs.
+   * @param other Value whose corresponding fields are compared.
+   * @return True when every compared field is equal; false otherwise.
+   */
+  bool operator==(const Cell &other) const noexcept = default;
 };
 
 /** @brief A synchronous borrowed display glyph plus owning metadata and style. */
@@ -108,8 +123,11 @@ struct CellBufferLimits {
   std::size_t max_glyph_bytes{1024 * 1024};
   /** @brief Maximum interned styles, including the default style. Must be positive. */
   std::size_t max_styles{4096};
-  /** @brief Compare all resource caps. */
-  bool operator==(const CellBufferLimits &) const noexcept = default;
+  /** @brief Compare all resource caps.
+   * @param other Value whose corresponding fields are compared.
+   * @return True when every compared field is equal; false otherwise.
+   */
+  bool operator==(const CellBufferLimits &other) const noexcept = default;
 };
 
 /** @brief Observable, owning buffer failure; no partial write or resize is returned. */
@@ -162,8 +180,11 @@ struct CellBufferMemory {
   std::size_t glyph_bytes{};
   /** @brief Current interned style count, including the default when storage exists. */
   std::size_t style_count{};
-  /** @brief Compare accounting and counts. */
-  bool operator==(const CellBufferMemory &) const noexcept = default;
+  /** @brief Compare accounting and counts.
+   * @param other Value whose corresponding fields are compared.
+   * @return True when every compared field is equal; false otherwise.
+   */
+  bool operator==(const CellBufferMemory &other) const noexcept = default;
 };
 
 /**
@@ -181,9 +202,14 @@ struct CellBufferMemory {
  */
 class CellBuffer {
 public:
-  /** @brief Transfer storage and leave a distinct source empty; no allocation or errors. */
+  /** @brief Transfer storage and leave a distinct source empty; no allocation or errors.
+   * @param other Sole storage owner to consume; it becomes empty with default policy and limits.
+   */
   CellBuffer(CellBuffer &&other) noexcept;
-  /** @brief Transfer storage, invalidate both objects' views and empty a distinct source. */
+  /** @brief Transfer storage, invalidate both objects' views and empty a distinct source.
+   * @param other Storage owner to consume; self-move preserves the buffer.
+   * @return This buffer after replacement; a distinct source has empty storage.
+   */
   CellBuffer &operator=(CellBuffer &&other) noexcept;
   /** @brief Buffers have one owner; copying is disabled. */
   CellBuffer(const CellBuffer &) = delete;
@@ -200,13 +226,21 @@ public:
    */
   [[nodiscard]] static std::expected<CellBuffer, CellBufferError> from(CellSize size, WidthPolicy policy = {},
                                                                        CellBufferLimits limits = {});
-  /** @brief Return owning normalized extents; no errors or allocation. */
+  /** @brief Return owning normalized extents; no errors or allocation.
+   * @return The current nonnegative width and height in terminal cells.
+   */
   [[nodiscard]] CellSize size() const noexcept;
-  /** @brief Return the owning captured width policy; no errors or allocation. */
+  /** @brief Return the owning captured width policy; no errors or allocation.
+   * @return An independent copy of the policy accepted by put().
+   */
   [[nodiscard]] WidthPolicy policy() const noexcept;
-  /** @brief Return the owning resource caps; no errors or allocation. */
+  /** @brief Return the owning resource caps; no errors or allocation.
+   * @return An independent copy of the caps used by creation and resize.
+   */
   [[nodiscard]] CellBufferLimits limits() const noexcept;
-  /** @brief Borrow row-major metadata until successful mutation/move/destruction; no errors. */
+  /** @brief Borrow row-major metadata until successful mutation/move/destruction; no errors.
+   * @return Borrowed row-major cell records; interpret IDs only through this buffer.
+   */
   [[nodiscard]] std::span<const Cell> cells() const noexcept;
   /**
    * @brief Resolve by coordinate; no API accepts arbitrary glyph/style IDs.
@@ -236,7 +270,9 @@ public:
    * @note New and old storage coexist during allocation; transient peak can exceed memory().
    */
   [[nodiscard]] std::expected<void, CellBufferError> resize(CellSize size);
-  /** @brief Return measured owned storage/counts, excluding allocator overhead; no errors/allocation. */
+  /** @brief Return measured owned storage/counts, excluding allocator overhead; no errors/allocation.
+   * @return Current owned capacities and used counts; neither peak allocation nor process memory.
+   */
   [[nodiscard]] CellBufferMemory memory() const noexcept;
 
 private:

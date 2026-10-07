@@ -35,14 +35,36 @@ struct GridOptions {
  */
 class Grid : public SizedWidget, public Layout {
 public:
-  explicit Grid(const GridOptions &options = {}, SizePolicy policy = {}); ///< Own settings and size policies.
-  GridOptions options() const; ///< Owning UI-thread copy; allocation may throw bad_alloc.
-  std::expected<CellSize, TreeError> child_available(CellSize available) const override; ///< Checked inset bounds.
-  std::expected<CellSize, TreeError>
-  measure_children(std::span<const MeasuredChild> children) const override; ///< Aggregate tracks.
-  std::expected<std::vector<CellRect>, TreeError>
-  arrange_children(std::span<const MeasuredChild> children,
-                   CellSize available) const override; ///< Child-order local rectangles.
+  /** @brief Own settings and size policies.
+   * @param options Tracks, sparse placements and limits copied into independent storage.
+   * @param policy Size policy of this grid in its parent.
+   * @throws std::bad_alloc If copying the configuration cannot allocate storage.
+   */
+  explicit Grid(const GridOptions &options = {}, SizePolicy policy = {});
+  /** @brief Owning UI-thread copy; allocation may throw bad_alloc.
+   * @return An independent copy of the complete sparse configuration.
+   * @throws std::bad_alloc If the owning copy cannot be allocated.
+   */
+  GridOptions options() const;
+  /** @brief Checked inset bounds.
+   * @param available Container extent offered by its parent, in cells.
+   * @return Normalized inner extent after padding, or invalid settings/coordinate overflow.
+   */
+  std::expected<CellSize, TreeError> child_available(CellSize available) const override;
+  /** @brief Aggregate tracks.
+   * @param children Visible child measurements and policies, borrowed only for this calculation.
+   * @return Aggregate intrinsic extent including gaps/padding, or a validation, geometry or allocation error.
+   */
+  std::expected<CellSize, TreeError> measure_children(std::span<const MeasuredChild> children) const override;
+  /** @brief Child-order local rectangles.
+   * @param children Visible child measurements, policies and identities in sibling order.
+   * @param available Container-local extent in terminal cells.
+   * @return Owning rectangles in child order, or invalid_argument, node_limit, invalid_geometry or no_memory as
+   * applicable.
+   */
+  std::expected<std::vector<CellRect>, TreeError> arrange_children(std::span<const MeasuredChild> children,
+                                                                   CellSize available) const override;
+
 private:
   friend std::expected<void, TreeError> set_grid_options(WidgetTree &, Node<Grid>, const GridOptions &);
   GridOptions options_;
@@ -60,14 +82,34 @@ struct OverlayOptions {
  */
 class Overlay : public SizedWidget, public Layout {
 public:
-  explicit Overlay(OverlayOptions options = {}, SizePolicy policy = {}); ///< Own settings and size policies.
-  OverlayOptions options() const;                                        ///< Owning UI-thread copy.
-  std::expected<CellSize, TreeError> child_available(CellSize available) const override; ///< Checked inset bounds.
-  std::expected<CellSize, TreeError>
-  measure_children(std::span<const MeasuredChild> children) const override; ///< Maximum child extent on each axis.
-  std::expected<std::vector<CellRect>, TreeError>
-  arrange_children(std::span<const MeasuredChild> children,
-                   CellSize available) const override; ///< Child-order local rectangles.
+  /** @brief Own settings and size policies.
+   * @param options Owning padding and alignment applied independently to every child.
+   * @param policy Size policy of this overlay in its parent.
+   */
+  explicit Overlay(OverlayOptions options = {}, SizePolicy policy = {});
+  /** @brief Owning UI-thread copy.
+   * @return A value copy of the current padding and alignment.
+   */
+  OverlayOptions options() const;
+  /** @brief Checked inset bounds.
+   * @param available Container extent offered by its parent, in cells.
+   * @return Normalized inner extent after padding, or invalid settings/coordinate overflow.
+   */
+  std::expected<CellSize, TreeError> child_available(CellSize available) const override;
+  /** @brief Maximum child extent on each axis.
+   * @param children Visible child measurements and policies, borrowed only for this calculation.
+   * @return Aggregate intrinsic extent including gaps/padding, or a validation, geometry or allocation error.
+   */
+  std::expected<CellSize, TreeError> measure_children(std::span<const MeasuredChild> children) const override;
+  /** @brief Child-order local rectangles.
+   * @param children Visible child measurements, policies and identities in sibling order.
+   * @param available Container-local extent in terminal cells.
+   * @return Owning rectangles in child order, or invalid_argument, node_limit, invalid_geometry or no_memory as
+   * applicable.
+   */
+  std::expected<std::vector<CellRect>, TreeError> arrange_children(std::span<const MeasuredChild> children,
+                                                                   CellSize available) const override;
+
 private:
   friend std::expected<void, TreeError> set_overlay_options(WidgetTree &, Node<Overlay>, OverlayOptions);
   OverlayOptions options_;
@@ -75,8 +117,17 @@ private:
 /** @brief Validate and atomically copy settings on the UI owner between frames, then invalidate layout.
  * Tree errors propagate; invalid configuration leaves the previous settings unchanged.
  * Input is borrowed only for this call. Allocation failure returns no_memory.
+ * @param tree Owning tree, borrowed for the UI-only update.
+ * @param node Checked observer of the grid being updated.
+ * @param options Complete replacement configuration; borrowed only while making an independent copy.
+ * @return Success after replacement and layout invalidation, or a validation/access/allocation error.
  */
 std::expected<void, TreeError> set_grid_options(WidgetTree &tree, Node<Grid> node, const GridOptions &options);
-/** @brief Validate and replace settings on the UI owner between frames, then invalidate layout. */
+/** @brief Validate and replace settings on the UI owner between frames, then invalidate layout.
+ * @param tree Owning tree, borrowed for the UI-only update.
+ * @param node Checked observer of the overlay being updated.
+ * @param options Replacement padding and alignment, copied by value.
+ * @return Success after replacement and layout invalidation, or a validation/access error with old settings retained.
+ */
 std::expected<void, TreeError> set_overlay_options(WidgetTree &tree, Node<Overlay> node, OverlayOptions options);
 } // namespace portals

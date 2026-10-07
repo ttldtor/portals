@@ -171,7 +171,9 @@ std::expected<DispatchResult, TreeError> EventRouter::route(Node<Widget> target,
     current = snapshot->parent;
   }
 
-  // Snapshot the ancestry, but validate lifetime and eligibility before every admission.
+  // Snapshot the ancestry before any handler can mutate it. Revalidate each admission so
+  // removal/hiding/disabling suppresses that node while surviving original ancestors can run.
+  // The local registration owner keeps captures alive through self-disconnect and collection.
   for (auto node : path) {
     auto live = tree().input_eligible(node);
 
@@ -272,6 +274,8 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
       return route(*target, *key);
     }
 
+    // Mouse targeting uses geometry independently of focus. A left press updates focus on
+    // the nearest focusable ancestor, but bubbles the original mouse event from the actual hit.
     if (const auto *mouse = std::get_if<MouseInputEvent>(&event)) {
       auto target = hit_test({mouse->column, mouse->row});
 
