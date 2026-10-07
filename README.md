@@ -84,6 +84,10 @@ Reference: [CMake presets](https://cmake.org/cmake/help/latest/manual/cmake-pres
 [CMake compile features](https://cmake.org/cmake/help/latest/manual/cmake-compile-features.7.html),
 [Doxygen integration](https://cmake.org/cmake/help/latest/module/FindDoxygen.html).
 
+API design sketches: [five scenarios](docs/api-design.md). The independent
+[header/module/shared-library spike](experiments/module-spike/README.md) tests
+compilation mechanics; UI sketches are design-only.
+
 ## License
 
 Boost Software License 1.0; see [LICENSE.txt](LICENSE.txt).
