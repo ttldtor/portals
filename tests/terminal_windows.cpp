@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -28,6 +29,8 @@ constexpr portals::CellBufferLimits frameBufferLimits{240, 160, 38400, 16, 64, 8
 constexpr portals::FrameWriterLimits frameWriterLimits{frameOutputLimit, 1024 * 1024};
 constexpr std::size_t maximumPressureFrames = 16;
 constexpr DWORD minimumFrameWaitMs = 500;
+constexpr DWORD slowFramePreparationMs = 1000;
+constexpr DWORD pressureObservePollMs = 1;
 
 struct Handle {
   HANDLE value = nullptr;
@@ -71,7 +74,8 @@ enum Stage : DWORD {
   frameCommitted,
   framePoisoned,
   frameJoined,
-  frameRecovered
+  frameRecovered,
+  framePressureObserved
 };
 enum Flag : DWORD {
   blocked = 1,
@@ -522,6 +526,41 @@ DWORD frameCase(HANDLE resultPipe, const wchar_t *kind) {
   const bool stop = wcscmp(kind, L"frame-stop") == 0;
   std::stop_source source;
   std::jthread stopper;
+  std::atomic<ULONGLONG> activeFlushStarted{0};
+  std::atomic<bool> observerReady{false};
+  std::atomic<bool> resumePressureObserved{false};
+  std::exception_ptr observerError;
+  std::jthread pressureObserver;
+
+  if (resume) {
+    // Start the observer before ConPTY pressure can delay new thread startup.
+    pressureObserver = std::jthread([&](std::stop_token observerStop) {
+      observerReady.store(true);
+
+      try {
+        while (!observerStop.stop_requested()) {
+          const auto flushStarted = activeFlushStarted.load();
+
+          if (flushStarted != 0 && GetTickCount64() - flushStarted >= minimumFrameWaitMs &&
+              activeFlushStarted.load() == flushStarted) {
+            resumePressureObserved.store(true);
+            report(resultPipe, framePressureObserved, 0, blocked, static_cast<DWORD>(GetTickCount64() - flushStarted));
+
+            return;
+          }
+
+          Sleep(pressureObservePollMs);
+        }
+      } catch (...) {
+        observerError = std::current_exception();
+      }
+    });
+
+    while (!observerReady.load()) {
+      Sleep(pressureObservePollMs);
+    }
+  }
+
   const ULONGLONG start = GetTickCount64();
   report(resultPipe, pressureReady, 0, hiddenWindow, 0, expectedBytes);
 
@@ -535,7 +574,10 @@ DWORD frameCase(HANDLE resultPipe, const wchar_t *kind) {
   // ConPTY can accept one complete viewport before its renderer blocks on the
   // host pipe. Bound the warmup series and require actual pending uncertainty,
   // rather than treating a large encoded byte count as proof of backpressure.
-  const auto writeDeadline = std::chrono::steady_clock::now() + (resume || stop ? 4s : 500ms);
+  const auto writeBudget = resume || stop ? 4s : 500ms;
+  // Only the injected preparation delay extends the original bounded series budget.
+  const auto preparationBudget = resume ? std::chrono::milliseconds(slowFramePreparationMs) : 0ms;
+  const auto writeDeadline = std::chrono::steady_clock::now() + writeBudget + preparationBudget;
   TerminalWrite written;
   DWORD elapsed = 0;
   DWORD flushWaitMs = 0;
@@ -543,8 +585,19 @@ DWORD frameCase(HANDLE resultPipe, const wchar_t *kind) {
   std::size_t completedFrames = 0;
 
   for (std::size_t attempt = 0; attempt < maximumPressureFrames; ++attempt) {
+    if (resume && attempt == 1) {
+      // Model preparation longer than the old 700 ms host timer before the second flush.
+      Sleep(slowFramePreparationMs);
+    }
+
     const ULONGLONG flushStarted = GetTickCount64();
+
+    if (resume) {
+      activeFlushStarted.store(flushStarted);
+    }
+
     written = writer.flush(writeDeadline, source.get_token());
+    activeFlushStarted.store(0);
     flushWaitMs = static_cast<DWORD>(GetTickCount64() - flushStarted);
     elapsed = static_cast<DWORD>(GetTickCount64() - start);
     char completion[128]{};
@@ -563,7 +616,7 @@ DWORD frameCase(HANDLE resultPipe, const wchar_t *kind) {
     require(written.completed == expectedBytes && written.pending == 0 && writer.committed_frame(),
             "native warmup frame commits complete bytes only");
 
-    if (resume && flushWaitMs >= minimumFrameWaitMs) {
+    if (resume && resumePressureObserved.load() && flushWaitMs >= minimumFrameWaitMs) {
       break;
     }
 
@@ -576,10 +629,19 @@ DWORD frameCase(HANDLE resultPipe, const wchar_t *kind) {
     require(writer.submit(std::move(next)).has_value(), "native pressure series keeps only one pending frame");
   }
 
+  if (pressureObserver.joinable()) {
+    pressureObserver.request_stop();
+    pressureObserver.join();
+  }
+
+  if (observerError) {
+    std::rethrow_exception(observerError);
+  }
+
   if (resume) {
-    require(written.status == TerminalStatus::progress && !written.error && written.completed == expectedBytes &&
-              written.pending == 0 && flushWaitMs >= minimumFrameWaitMs && !writer.pending() && !writer.poisoned() &&
-              writer.committed_frame(),
+    require(resumePressureObserved.load() && written.status == TerminalStatus::progress && !written.error &&
+              written.completed == expectedBytes && written.pending == 0 && flushWaitMs >= minimumFrameWaitMs &&
+              !writer.pending() && !writer.poisoned() && writer.committed_frame(),
             "native pressure resume commits only completed frame");
     checkNativeFrame(native.output.value, false, alternate);
     report(resultPipe, frameCommitted, 0, blocked, elapsed, written.completed);
@@ -806,11 +868,13 @@ void launch(Session &session, const wchar_t *kind) {
 bool hostCase(const wchar_t *kind) {
   Session session;
   launch(session, kind);
+  const bool frameResume = wcscmp(kind, L"frame-resume") == 0;
   const ULONGLONG deadline = GetTickCount64() + (wcscmp(kind, L"hang") == 0 ? 500 : childDeadlineMs);
   ULONGLONG pressureStarted = 0;
   ULONGLONG idleResizeStarted = 0;
   bool finalSeen = false;
   bool pressureBlocked = false;
+  bool framePressureSeen = false;
   DWORD childExit = STILL_ACTIVE;
 
   while (GetTickCount64() < deadline) {
@@ -842,8 +906,16 @@ bool hostCase(const wchar_t *kind) {
         require(SUCCEEDED(ResizePseudoConsole(session.console, {91, 37})), "ResizePseudoConsole");
       }
 
-      if (message.stage == pressureReady) {
+      if (message.stage == pressureReady && !frameResume) {
         pressureStarted = GetTickCount64();
+      }
+
+      if (message.stage == framePressureObserved) {
+        require(frameResume && message.elapsedMs >= minimumFrameWaitMs && (message.flags & blocked) != 0 &&
+                  !session.enabled.load(),
+                "host observes incomplete frame before resuming");
+        framePressureSeen = true;
+        session.enabled.store(true);
       }
 
       if (message.stage == inputDone || message.stage == pressureDone) {
@@ -857,8 +929,7 @@ bool hostCase(const wchar_t *kind) {
       idleResizeStarted = 0;
     }
     if (pressureStarted != 0) {
-      const DWORD pause =
-        wcscmp(kind, L"resume") == 0 || wcscmp(kind, L"frame-resume") == 0 ? 700 : maximumDrainPauseMs;
+      const DWORD pause = wcscmp(kind, L"resume") == 0 ? 700 : maximumDrainPauseMs;
 
       if (GetTickCount64() - pressureStarted >= pause) {
         session.enabled.store(true);
@@ -880,7 +951,7 @@ bool hostCase(const wchar_t *kind) {
   std::printf("case=%ls child_exit=%lu final_seen=%d pressure_blocked=%d drained=%llu\n", kind, childExit, finalSeen,
               pressureBlocked, static_cast<unsigned long long>(session.drained.load()));
 
-  return childExit == 0 && finalSeen;
+  return childExit == 0 && finalSeen && (!frameResume || framePressureSeen);
 }
 } // namespace
 
