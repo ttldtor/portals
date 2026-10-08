@@ -116,7 +116,8 @@ StyleSheet themeFromTokens(ThemeTokens tokens) {
   stateRule(StyleState::DISABLED, tokens.muted, tokens.background, false);
   stateRule(StyleState::SELECTED, tokens.foreground, tokens.selection, true);
   stateRule(StyleState::HEADER, tokens.heading, tokens.background, true);
-  stateRule(StyleState::CARET, tokens.background, tokens.accent, false);
+  // Reverse the focused field palette so the caret remains visible over any glyph.
+  stateRule(StyleState::CARET, tokens.accent, tokens.background, false);
 
   return sheet;
 }

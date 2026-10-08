@@ -110,7 +110,7 @@ ComputedStyle resolveStyle(const StyleSheet &sheet, const StyleTarget &target, C
 struct ThemeTokens {
   RgbColor foreground; ///< Normal foreground.
   RgbColor background; ///< Normal background.
-  RgbColor accent;     ///< Focus/caret background.
+  RgbColor accent;     ///< Focus background and contrasting caret foreground.
   RgbColor muted;      ///< Disabled foreground.
   RgbColor selection;  ///< Selected-row/range background.
   RgbColor heading;    ///< Heading foreground.

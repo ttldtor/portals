@@ -76,6 +76,8 @@ and their returned payload is checked again. Internal allocation failures report
 API call can throw. The software caret uses `LineEditOptions::cursor`, selection
 uses its own style, and a one-cell viewport displays a blank caret when the
 current wide glyph cannot fit. Scrolling never leaves half a glyph visible.
+The built-in themes reverse the focused field colors for the caret, keeping it
+visible over text and at the end of the draft in true-color and ANSI16 output.
 
 Undo/redo, mouse selection, IME composition, native clipboard implementations and
 multiple conflict modes are outside this MVP component.

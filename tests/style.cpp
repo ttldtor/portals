@@ -376,6 +376,47 @@ struct Page : ModelSnapshot<int> {
   }
 };
 
+void focusedEditorCaretIsVisible() {
+  for (const auto &theme : {modernTheme(), turboTheme()}) {
+    Fixture fixture;
+    auto editor = take(fixture.tree->emplace<LineEdit>(fixture.root));
+    auto router = take(EventRouter::create(*fixture.tree));
+    std::shared_ptr<Property<std::string>> model =
+      take(Property<std::string>::create(*fixture.tree, fixture.root, "Portals", Invalidation::PAINT));
+    auto binding = take(bindLineEdit(*fixture.tree, *router, editor, model, [](LineEditResult) {
+    }));
+
+    take(fixture.styles.bind(editor, {.type = "Control"}));
+    take(fixture.styles.replace(theme));
+    take(router->setFocus(editor));
+    take(binding.sync(take(router->focused())));
+    take(router->dispatch(KeyEvent{InputKey::LEFT, 0, {}, KeyAction::PRESS}));
+    take(router->dispatch(KeyEvent{InputKey::LEFT, 0, {}, KeyAction::PRESS}));
+
+    // Exercise the reported 'l' position and the blank insertion cell after the draft.
+    for (const auto position : {5, 7}) {
+      if (position == 7) {
+        take(router->dispatch(KeyEvent{InputKey::END, 0, {}, KeyAction::PRESS}));
+      }
+
+      auto buffer = paint(fixture, editor, {16, 1});
+
+      for (const auto mode : {ColorMode::TRUE_COLOR, ColorMode::ANSI16}) {
+        test_support::VtOracle terminal(16, 1);
+
+        terminal.feed(take(encodeDiff(nullptr, buffer, 4096, mode)));
+
+        const auto snapshot = terminal.snapshot();
+        const auto &caret = snapshot.cells[position].style;
+        const auto &field = snapshot.cells[4].style;
+
+        check(caret.background != field.background && caret.foreground != caret.background,
+              "focused editor caret contrasts with field and text in both built-in themes and color modes");
+      }
+    }
+  }
+}
+
 void viewsAndEditor() {
   Fixture fixture;
   auto model = take(Model<int>::create(*fixture.tree, fixture.root, std::make_shared<Page>()));
@@ -557,6 +598,7 @@ int main(int argc, char **argv) {
   customAtomicity();
   paintUsesSnapshot();
   viewsAndEditor();
+  focusedEditorCaretIsVisible();
   ansiOutput();
   allocationRollback();
 

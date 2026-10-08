@@ -4,4 +4,4 @@
 :disabled { foreground: #aaaaaa; background: #0000aa; bold: false; }
 :selected { foreground: #ffff55; background: #aa0000; bold: true; }
 :header { foreground: #ffffff; background: #0000aa; bold: true; }
-:caret { foreground: #0000aa; background: #00aaaa; bold: false; }
+:caret { foreground: #00aaaa; background: #0000aa; bold: false; }
