@@ -96,7 +96,9 @@ public:
         passed = key(static_cast<KeySym>(character), character == 'N' ? ShiftMask : 0) && passed;
       }
 
-      passed = key(XK_Return) && passed;
+      // F8 is mapped only in this fixture's xterm to a UTF-8 input suffix.
+      // No desktop keyboard map or clipboard is changed for Unicode input.
+      passed = key(XK_F8) && key(XK_Return) && passed;
     } else if (stage == 2) {
       passed = key(XK_Tab) && key(XK_Tab) && key(XK_Down) && key(XK_Return);
     } else if (stage == 3) {

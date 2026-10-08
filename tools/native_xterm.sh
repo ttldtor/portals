@@ -11,7 +11,11 @@ logdir=$(realpath "$logdir")
 title="portals-native-$(date +%s)-$$"
 sha256sum "$xterm" "$supervisor" "$1" > "$logdir/hashes.txt"
 printf 'title=%s\nDISPLAY=%s\nTERM=%s\nexpected_child_exit=%s\n' "$title" "${DISPLAY-}" "${TERM-}" "$expected" > "$logdir/launch.log"
-"$xterm" -iconic -geometry 120x40 -title "$title" -xrm 'XTerm*allowSendEvents:true' \
+# Each string action emits one byte: space, CJK, combining acute, and emoji.
+# The translation belongs to this child instance, not the X server keymap.
+unicode_translation='XTerm*VT100.translations: #override <Key>F8: string(0x20) string(0xe7) string(0x95) string(0x8c) string(0x20) string(0x65) string(0xcc) string(0x81) string(0x20) string(0xf0) string(0x9f) string(0x99) string(0x82)'
+"$xterm" -iconic -u8 -geometry 120x40 -title "$title" -xrm 'XTerm*allowSendEvents:true' \
+  -xrm "$unicode_translation" \
   -e "$supervisor" --log "$logdir/supervisor.log" --title "$title" --deadline-ms "$deadline" \
   --quit-ms "$quit" --expected-exit "$expected" --drive "$drive" -- "$@" \
   > "$logdir/xterm.stdout" 2> "$logdir/xterm.stderr" &
