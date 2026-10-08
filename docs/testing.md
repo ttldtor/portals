@@ -155,3 +155,55 @@ The opt-in Clang targets instrument the input decoder and Unicode implementation
 with libFuzzer, ASan and UBSan. See [bounded fuzzing](../fuzz/README.md) for
 build commands, seed corpora, checks, reproduction and limits. Ordinary builds
 leave PORTALS_BUILD_FUZZERS disabled.
+
+## Optional native xterm fixture
+
+`tools/native_xterm.sh` runs `portals_terminal_cleanup` in an actual xterm and
+records child exit, exact termios/file-flag restoration, viewport changes, driver
+stages, and owned-process cleanup. Native launchers are opt-in; ordinary CTest
+never opens a terminal emulator.
+
+A `none` driver uses the caller's display (including WSLg) for finite native
+baseline programs and handled-error probes. It needs xterm but no XTest support.
+A `dashboard` driver additionally needs system Xvfb, xauth, xkbcomp (used by Xvfb),
+and the X11/XTest development libraries at configure time. CMake enables this
+fixture's input driver only when both `X11::X11` and `X11::Xtst` are available;
+these are test dependencies, not dependencies of the Portals core. Without them,
+the supervisor still builds and `none` remains usable; `dashboard` fails before
+starting the application or sending input.
+
+```sh
+sh tools/native_xterm.sh /usr/bin/xterm build/linux-gcc-debug/portals_terminal_cleanup \
+  /tmp/portals-native-dashboard 12000 0 dashboard 5000 \
+  build/linux-gcc-debug/examples/dashboard/portals_dashboard --rate 0 --duration-ms 10000 \
+  --trace /tmp/portals-native-dashboard.trace
+```
+
+The log directory must not exist. The dashboard launcher creates its own free
+nonzero Xvfb display with a private MIT-MAGIC-COOKIE-1 authority file, disables TCP
+listeners, and waits for that server's readiness. It ignores inherited isolation
+markers and replaces them with the created display and window title. The driver
+requires exact matching markers, a nonzero local display, private authority, the
+owned xterm window title and the XTest extension before mapping, focusing or
+sending input. It never drives display `:0` or the caller's desktop. Unicode F8
+translation belongs only to this xterm instance; no desktop keymap or clipboard
+is modified. `PORTALS_XVFB` may name an alternative Xvfb executable, and
+`PORTALS_XVFB_WORKDIR` its required working directory for a local test installation;
+both default to normal system behavior.
+
+XTest provides server-side keyboard, pointer motion and button press/release.
+The fixture does not enable `allowSendEvents` or relax `allowMouseOps`: xterm's
+`allowSendEvents` disables `allowXXXOps` and would suppress mouse reporting even
+when the application correctly enables modes 1000/1006. A green driver stage
+proves request submission; confirm actual mouse delivery in the dashboard trace
+(two `event=input ... input=mouse` records) and inspect the exported selection,
+Unicode note, theme and resize data for the complete acceptance gate.
+
+The launcher stops only its own terminal/server and supervised child PIDs,
+removes only its private authority/readiness files, and records cleanup. A child
+watchdog, forced terminal termination, failed driver stage or remaining process
+fails the run; cleanup does not convert a deadline into a pass.
+
+Primary references: [XTest](https://xorg.freedesktop.org/archive/X11R7.6/doc/libXtst/xtestlib.html),
+[xterm security resources](https://invisible-island.net/xterm/manpage/xterm.html),
+[CMake FindX11](https://cmake.org/cmake/help/latest/module/FindX11.html).
