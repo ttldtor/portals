@@ -47,7 +47,13 @@ struct ChartRange {
 /** @brief Retained chart rendering mode. */
 enum class ChartMode {
   LINE,   ///< Join consecutive finite closes, leaving gaps disconnected.
-  CANDLES ///< Draw high-low wick and open-close body in each column.
+  CANDLES ///< Draw high-low wick and open-close body in each occupied column.
+};
+
+/** @brief Candle brushes; Unicode falls back to ASCII when the width policy requires wide symbols. */
+enum class ChartGlyphSet {
+  ASCII,      ///< Portable vertical bar and hash brushes.
+  BOX_DRAWING ///< Thin wick, filled block body and horizontal doji, each exactly one cell.
 };
 
 /** @brief Owning chart settings, validated during preparation. */
@@ -59,7 +65,9 @@ struct ChartOptions {
   CellStyle line{RgbColor{80, 180, 240}, {}, false, false, false};   ///< Line and isolated point style.
   CellStyle rising{RgbColor{60, 200, 120}, {}, false, false, false}; ///< Close >= open candle style.
   CellStyle falling{RgbColor{230, 90, 90}, {}, false, false, false}; ///< Close < open candle style.
-  WidthPolicy width_policy; ///< Captured text policy; frame renderer must use the same policy.
+  WidthPolicy width_policy;                      ///< Captured text policy; frame renderer must use the same policy.
+  ChartGlyphSet glyph_set{ChartGlyphSet::ASCII}; ///< Candle appearance; ASCII preserves the portable default.
+  std::int32_t candle_gap{};                     ///< Nonnegative empty columns between candles; ignored in LINE mode.
 };
 
 /// @cond INTERNAL
@@ -68,9 +76,10 @@ struct ChartGlyphs {
   GraphemeText line;
   GraphemeText wick;
   GraphemeText body;
+  GraphemeText doji;
 };
 
-std::expected<ChartGlyphs, TreeError> chartGlyphs(WidthPolicy policy);
+std::expected<ChartGlyphs, TreeError> chartGlyphs(WidthPolicy policy, ChartGlyphSet symbols = ChartGlyphSet::ASCII);
 bool validOhlc(const Ohlc &value) noexcept;
 bool validChartOptions(ChartOptions options) noexcept;
 std::expected<void, TreeError> paintChart(PaintContext &context, CellSize viewport, ChartOptions options,
@@ -165,7 +174,30 @@ public:
       return std::unexpected(TreeError::INVALID_GEOMETRY);
     }
 
-    return detail::paintChart(context, arranged_, options_, prepared_->samples, prepared_->glyphs);
+    auto options = options_;
+
+    if (const auto &style = computedStyle()) {
+      options.background = style->normal;
+    }
+
+    // Every text cell replaces its complete style. Inherit the plot background
+    // for brushes without an explicit fill, otherwise terminal defaults leak through.
+    for (auto *brush : {&options.line, &options.rising, &options.falling}) {
+      if (!brush->background) {
+        brush->background = options.background.background;
+      }
+    }
+
+    return detail::paintChart(context, arranged_, options, prepared_->samples, prepared_->glyphs);
+  }
+
+  /** @return Manual plot appearance beneath stylesheet declarations; series colors remain independent. */
+  ComputedStyle styleDefaults() const override {
+    ComputedStyle result;
+
+    result.normal = options_.background;
+
+    return result;
   }
 
 private:
@@ -218,9 +250,11 @@ private:
 
     first = std::min(first, frame.rowCount());
 
-    const RowRange interval{first, viewport.height == 0 ? 0
-                                                        : static_cast<std::size_t>(std::min<std::uint64_t>(
-                                                            viewport.width, frame.rowCount() - first))};
+    const auto stride = options_.mode == ChartMode::CANDLES ? std::int64_t{options_.candle_gap} + 1 : 1;
+    const auto columns = (std::int64_t{viewport.width} + stride - 1) / stride;
+    const RowRange interval{
+      first,
+      viewport.height == 0 ? 0 : static_cast<std::size_t>(std::min<std::uint64_t>(columns, frame.rowCount() - first))};
 
     try {
       if (interval.count == 0) {
@@ -233,7 +267,7 @@ private:
         return std::unexpected(range.error());
       }
 
-      auto glyphs = detail::chartGlyphs(options_.width_policy);
+      auto glyphs = detail::chartGlyphs(options_.width_policy, options_.glyph_set);
 
       if (!glyphs) {
         return std::unexpected(glyphs.error());

@@ -16,7 +16,8 @@ namespace test_support {
 // Independent small VT machine for the encoder's supported grammar. It does not
 // call encodeDiff, the full renderer, a grapheme decoder, or encoding helpers.
 // Unicode width rules here cover only the explicit fixture alphabet (CJK, emoji,
-// ASCII and combining acute); this is deliberately not a general VT product.
+// ASCII, combining acute and the three narrow chart brushes); this is deliberately
+// not a general VT product.
 class VtOracle {
 public:
   /** @brief Owning semantic cell; continuation repeats the lead glyph/style. */
@@ -289,8 +290,8 @@ private:
       return;
     }
 
-    if (!((scalar >= 0x20 && scalar <= 0x7e) || (scalar >= 0x4e00 && scalar <= 0x9fff) ||
-          (scalar >= 0x1f300 && scalar <= 0x1faff))) {
+    if (!((scalar >= 0x20 && scalar <= 0x7e) || scalar == 0x2501 || scalar == 0x2502 || scalar == 0x2588 ||
+          (scalar >= 0x4e00 && scalar <= 0x9fff) || (scalar >= 0x1f300 && scalar <= 0x1faff))) {
       throw std::runtime_error("oracle: scalar outside fixture alphabet");
     }
 

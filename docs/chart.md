@@ -33,11 +33,28 @@ tree/model, block, or perform I/O. Getter reads use `tree.read`; all view mutati
 preparation and destruction belong to the UI owner.
 
 `prepareChart(..., viewport, first)` shows consecutive domain buckets beginning
-at `first`, one bucket per column. It reads at most `viewport.width` rows and
+at `first`, one bucket per column by default. In candle mode, `candle_gap` adds
+nonnegative empty columns between buckets. The visible count is rounded up from
+`viewport.width / (candle_gap + 1)`; consecutive domain records are retained,
+never skipped. Line mode ignores candle spacing. It reads at most `viewport.width` rows and
 never scans the full model. Empty/zero-height windows read no rows. A provider
 that has finer-grained history must aggregate to the desired domain resolution
 before publication; the chart does not silently skip domain records. The Model's
 range budget remains authoritative: an oversized requested viewport is an error.
+
+`ChartOptions::glyph_set` selects portable `ASCII` candles (`|` / `#`) or
+`BOX_DRAWING` candles with thin wicks, filled block bodies and horizontal doji. Unicode
+brushes fall back to ASCII under an ambiguous-wide width policy so every brush
+still occupies exactly one cell. The dashboard selects Unicode by default and
+ASCII with `--ascii`, with one empty column between candles in both modes;
+the library preserves its portable, densely packed ASCII default.
+
+A chart bound to `StyleEngine` uses the resolved normal style for its plot
+background. Line and candle brushes inherit that background unless their own
+`CellStyle::background` is explicit. Their foreground colors remain independent,
+preserving rising/falling meaning across theme changes. Without a theme, the
+same inheritance uses `ChartOptions::background`. Theme replacement repaints
+the prepared chart without rereading the model.
 
 Pending reads return one `ModelRequest<T>` for caller dispatch. Complete it with
 an immutable same-revision provider result, dispatch the scheduler, pin again,
@@ -122,9 +139,11 @@ segment: logical clipping retains crossings before cell conversion. Candles
 clip their high-low wick and open-close body separately. An entirely offscreen
 segment/candle emits no data cells. Empty data only clears the background.
 
-The line brush is `*`, candle wick `|`, and body `#`; a doji has a one-cell body.
+The line brush is `*`; the default ASCII candle wick is `|` and its body is `#`.
+The `BOX_DRAWING` set uses a horizontal doji whenever open and close map to the
+same screen row, including values made indistinguishable by rounding or clipping.
 `ChartOptions` selects mode, explicit/automatic scale, background, line, rising
-and falling styles, and width policy. Both candle directions work without color
+and falling styles, width policy, and candle glyph set. Both candle directions work without color
 through body/wick geometry; provide styles suited to the target terminal. A
 resized chart must be prepared with its final local viewport before painting;
 a mismatch returns `INVALID_GEOMETRY`.

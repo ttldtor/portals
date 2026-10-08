@@ -6,6 +6,7 @@
 #include <limits>
 #include <portals/canvas.hpp>
 #include <portals/chart.hpp>
+#include <portals/style.hpp>
 #include <portals/virtual_table.hpp>
 #include <set>
 
@@ -247,6 +248,150 @@ void charts() {
           std::set<std::pair<int, int>>{{0, 0}, {0, 1}, {0, 2}, {0, 3}, {0, 4}, {1, 0}, {1, 1}, {1, 2}, {1, 3}},
         "candles render exact high-low columns");
   check(page->reads == 2, "chart reads only visible domain rows");
+}
+
+void themedChartBackground() {
+  Fixture f;
+  auto page = std::make_shared<Page>(1, std::vector<ModelRow<Ohlc>>{{{1, 1}, {1, 4, 0, 3}}});
+  auto model = take(Model<Ohlc>::create(*f.tree, f.root, page));
+  ChartOptions options;
+
+  options.mode = ChartMode::CANDLES;
+  options.background.background = RgbColor{12, 13, 14};
+
+  auto chart = take(f.tree->emplace<Chart<Ohlc>>(
+    f.root, take(model->openRange()),
+    [](const Ohlc &value) {
+      return std::optional{value};
+    },
+    options));
+  StyleEngine styles(*f.tree);
+
+  take(styles.bind(chart, {.type = "Chart"}));
+  take(prepareChart(*f.tree, chart, take(model->pin()), {5, 5}));
+
+  auto verify = [&](RgbColor expected) {
+    const auto frame = draw(f, chart, {5, 5});
+
+    for (int y = 0; y < 5; ++y) {
+      for (int x = 0; x < 5; ++x) {
+        check(take(frame.at({x, y})).style.background == expected,
+              "chart blank cells, wick and body share the current themed background");
+      }
+    }
+
+    check(take(frame.at({0, 2})).style.foreground == options.rising.foreground,
+          "theme preserves semantic rising candle color");
+  };
+
+  verify({12, 13, 14});
+  take(styles.replace(modernTheme()));
+  verify(resolveStyle(modernTheme(), {.type = "Chart"}).normal.background.value());
+  take(styles.replace(turboTheme()));
+  verify(resolveStyle(turboTheme(), {.type = "Chart"}).normal.background.value());
+  check(page->reads == 1, "theme replacement repaints without reading the provider again");
+
+  options.rising.background = RgbColor{80, 20, 40};
+
+  auto custom = take(f.tree->emplace<Chart<Ohlc>>(
+    f.root, take(model->openRange()),
+    [](const Ohlc &value) {
+      return std::optional{value};
+    },
+    options));
+
+  take(styles.bind(custom, {.type = "Chart"}));
+  take(prepareChart(*f.tree, custom, take(model->pin()), {5, 5}));
+
+  const auto customFrame = draw(f, custom, {5, 5});
+
+  check(take(customFrame.at({0, 2})).style.background == options.rising.background,
+        "an explicit series background overrides the plot background");
+}
+
+void readableCandleGlyphs() {
+  const auto unicode = take(detail::chartGlyphs({}, ChartGlyphSet::BOX_DRAWING));
+
+  check(unicode.wick.bytes() == "\xe2\x94\x82" && unicode.body.bytes() == "\xe2\x96\x88" &&
+          unicode.doji.bytes() == "\xe2\x94\x81",
+        "Unicode candles use thin wicks, solid bodies and horizontal doji");
+
+  const auto ascii = take(detail::chartGlyphs({}, ChartGlyphSet::ASCII));
+  const auto wide = take(detail::chartGlyphs({.ambiguous = AmbiguousWidth::WIDE}, ChartGlyphSet::BOX_DRAWING));
+
+  check(ascii.wick.bytes() == "|" && ascii.body.bytes() == "#", "ASCII candles retain portable brushes");
+  check(wide.wick.bytes() == "|" && wide.body.bytes() == "#", "wide Unicode brushes fall back to one-cell ASCII");
+
+  Fixture f;
+  auto page = std::make_shared<Page>(
+    1, std::vector<ModelRow<Ohlc>>{
+         {{1, 1}, {1, 4, 0, 3}}, {{2, 1}, {3, 4, 0, 1}}, {{3, 1}, {2, 4, 0, 2}}, {{4, 1}, {100, 100, 100, 100}}});
+  auto model = take(Model<Ohlc>::create(*f.tree, f.root, page));
+  ChartOptions options;
+
+  options.mode = ChartMode::CANDLES;
+  options.glyph_set = ChartGlyphSet::BOX_DRAWING;
+  options.candle_gap = 1;
+
+  auto chart = take(f.tree->emplace<Chart<Ohlc>>(
+    f.root, take(model->openRange()),
+    [](const Ohlc &value) {
+      return std::optional{value};
+    },
+    options));
+
+  take(prepareChart(*f.tree, chart, take(model->pin()), {5, 5}));
+
+  const auto frame = draw(f, chart, {5, 5});
+
+  check(take(frame.at({0, 0})).glyph == unicode.wick.bytes() && take(frame.at({0, 2})).glyph == unicode.body.bytes() &&
+          take(frame.at({4, 2})).glyph == unicode.doji.bytes(),
+        "Unicode brushes reach retained candle painting, including doji");
+  check(take(frame.at({2, 2})).style.foreground == options.falling.foreground,
+        "falling candles retain their independent color");
+  check(take(frame.at({1, 2})).glyph == " " && take(frame.at({3, 2})).glyph == " " && page->reads == 3,
+        "candle gaps stay blank and reduce the visible consecutive domain range");
+}
+
+void candleSpacingBounds() {
+  Fixture f;
+  auto page = std::make_shared<Page>(
+    1, std::vector<ModelRow<Ohlc>>{{{1, 1}, {1, 4, 0, 3}}, {{2, 1}, {3, 4, 0, 1}}, {{3, 1}, {2, 4, 0, 2}}});
+  auto model = take(Model<Ohlc>::create(*f.tree, f.root, page));
+
+  auto create = [&](std::int32_t gap, ChartMode mode = ChartMode::CANDLES) {
+    ChartOptions options;
+
+    options.mode = mode;
+    options.candle_gap = gap;
+
+    return take(f.tree->emplace<Chart<Ohlc>>(
+      f.root, take(model->openRange()),
+      [](const Ohlc &value) {
+        return std::optional{value};
+      },
+      options));
+  };
+
+  const auto invalid = create(-1);
+  const auto rejected = prepareChart(*f.tree, invalid, take(model->pin()), {3, 5});
+
+  check(!rejected && rejected.error() == TreeError::INVALID_ARGUMENT && page->reads == 0,
+        "negative candle spacing is rejected before provider access");
+
+  const auto widest = create(std::numeric_limits<std::int32_t>::max());
+
+  take(prepareChart(*f.tree, widest, take(model->pin()), {std::numeric_limits<std::int32_t>::max(), 1}));
+  check(page->reads == 1, "maximum viewport and gap compute one visible candle without overflow");
+  take(prepareChart(*f.tree, widest, take(model->pin()), {0, 5}));
+  check(page->reads == 1, "zero-width chart does not read a domain bucket");
+
+  const auto line = create(std::numeric_limits<std::int32_t>::max(), ChartMode::LINE);
+
+  take(prepareChart(*f.tree, line, take(model->pin()), {3, 5}));
+  take(f.tree->read(line, [&](const auto &view) {
+    check(view.visibleRange() == RowRange{0, 3}, "line mode ignores candle spacing");
+  }));
 }
 } // namespace
 
@@ -658,6 +803,9 @@ int main() {
   canvasOracle();
   bucket();
   charts();
+  themedChartBackground();
+  readableCandleGlyphs();
+  candleSpacingBounds();
   edgeCasesAndOwnership();
   samePinAndFrameCap();
   pendingAndReentry();

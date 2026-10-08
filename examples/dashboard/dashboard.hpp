@@ -171,7 +171,12 @@ public:
       take(tree.emplace<VirtualTable<Quote>>(grid_, take(model_->openRange()), std::span(columns), tableOptions));
 
     ChartOptions chartOptions;
+
     chartOptions.mode = ChartMode::CANDLES;
+    chartOptions.width_policy = app.widthPolicy();
+    chartOptions.glyph_set = options.ascii ? ChartGlyphSet::ASCII : ChartGlyphSet::BOX_DRAWING;
+    chartOptions.candle_gap = 1;
+
     chart_ = take(tree.emplace<Chart<Quote>>(
       grid_, take(model_->openRange()),
       [](const Quote &quote) -> std::optional<Ohlc> {
