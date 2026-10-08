@@ -89,3 +89,69 @@ References: [CMake importing/exporting](https://cmake.org/cmake/help/latest/guid
 [GNUInstallDirs](https://cmake.org/cmake/help/latest/module/GNUInstallDirs.html),
 [package configuration helpers](https://cmake.org/cmake/help/latest/module/CMakePackageConfigHelpers.html),
 [MSVC runtime selection](https://cmake.org/cmake/help/latest/prop_tgt/MSVC_RUNTIME_LIBRARY.html).
+
+## Runnable Release bundles
+
+The packaging pipeline builds one committed Git revision in a fresh source
+archive. Working-tree edits and ignored/private files are excluded. It builds
+the four examples, complete Doxygen HTML and the static SDK from that same
+Release build, then tests a freshly unpacked archive before publishing it.
+It never removes or reuses a staging directory and never overwrites an archive.
+Choose new absolute paths; the staging path must be outside the source checkout.
+
+From an x64 MSVC developer PowerShell, with Git, CMake 3.24+, Ninja and Doxygen
+on PATH:
+
+    ./tools/package/bundle.ps1 -WorkDir "C:/temp/portals bundle run-001" -OutputArchive "C:/artifacts/portals-mvp-windows-x64-release.zip"
+
+Use -Revision to select a committed revision, -Parallel to set build parallelism,
+and -PythonExecutable with a known Python 3 interpreter to enable the existing
+HTML local-link/anchor checker. Without Python that optional gate is recorded as
+not_run. Windows bundle builds explicitly select MultiThreaded (/MT) by default;
+this changes neither the project's general CRT default nor another build tree.
+-Runtime MultiThreadedDLL selects /MD deliberately and is recorded in the
+manifest. dumpbin /DEPENDENTS inspects each actual example; a dynamic CRT import
+is rejected when /MT was requested. System Windows DLLs are not redistributed.
+
+On Linux, run the same pipeline directly:
+
+    cmake "-DSOURCE_DIR=/absolute/portals" "-DWORK_DIR=/tmp/portals-bundle-run-001" "-DOUTPUT_ARCHIVE=/absolute/artifacts/portals-mvp-linux-x64-release.tar.gz" "-DCXX_COMPILER=/usr/bin/g++" -P tools/package/bundle.cmake
+
+The Linux archive records ldd output for each executable and the host's ldd/libc
+version. It supplies no universal-distribution binary compatibility promise.
+The pipeline supports native x64 Windows/MSVC and Linux toolchains, using
+single-config Ninja by default; no cross compilation is performed.
+
+Each archive contains bin, themes, data, docs/html, install, example source,
+an independent installed-package consumer, launchers, GETTING-STARTED.md,
+license notices, verification scripts and manifest.json. Themes and replay
+fixtures are useful source/reference inputs; the example binaries compile their
+defaults in and need no current-directory data files. The complete HTML tree is
+copied, including local resources and linked notices.
+
+The manifest records the source commit/archive checksum, OS/compiler/runtime
+tuple, executable imports and SHA256 of every payload file. manifest.json is
+excluded from its own inventory; the separately reported archive SHA256 covers
+the full archive. Checksums detect accidental corruption, not authenticity.
+The relocated consumer receives the manifest's runtime selection and uses only
+the installed prefix, with package registries disabled.
+
+To check an existing trusted archive from a new path:
+
+    cmake "-DARCHIVE=<absolute archive path>" "-DTEST_WORK_DIR=<new absolute temporary path>" "-DCXX_COMPILER=<compatible compiler>" -P tests/bundle_smoke.cmake
+
+The test unpacks into a path with spaces/Unicode, checks inventory and hashes,
+runs dashboard/gallery/custom-widget/replay with finite --check arguments from
+a foreign working directory, relocates the SDK again and builds/runs the external
+consumer. Its evidence directories are retained. This proves the finite bundle
+scenario; interactive terminal acceptance and the full MVP gates are separate.
+The script can also verify a moved extracted bundle using BUNDLE_DIR and the
+copied verify/bundle_smoke.cmake. VERIFY_ONLY=ON checks hashes without building.
+
+With tests enabled, portals.bundle-scripts covers payload corruption, unlisted
+files, manifest path traversal and refusal to modify existing staging/output
+paths. It runs without a C++ build or terminal.
+
+References: [CMake archive commands](https://cmake.org/cmake/help/latest/manual/cmake.1.html#command-line-tool),
+[MSVC runtime selection](https://cmake.org/cmake/help/latest/prop_tgt/MSVC_RUNTIME_LIBRARY.html),
+[dumpbin DEPENDENTS](https://learn.microsoft.com/en-us/cpp/build/reference/dependents?view=msvc-170).

@@ -134,6 +134,10 @@ if(PORTALS_BUILD_TESTS)
   add_test(NAME portals.style COMMAND portals_style "${CMAKE_CURRENT_SOURCE_DIR}/themes")
   set_tests_properties(portals.style PROPERTIES TIMEOUT 15)
   enable_testing()
+  add_test(NAME portals.bundle-scripts COMMAND "${CMAKE_COMMAND}"
+    "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}" "-DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/bundle_script_test.cmake")
+  set_tests_properties(portals.bundle-scripts PROPERTIES TIMEOUT 30 LABELS "package")
   set(portals_package_test_command "${CMAKE_COMMAND}"
     "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}" "-DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
     "-DCONFIG=$<CONFIG>" "-DGENERATOR=${CMAKE_GENERATOR}"
@@ -180,6 +184,23 @@ if(PORTALS_BUILD_TESTS)
   set_tests_properties(portals.layout-grid PROPERTIES TIMEOUT 15)
 
   if(PORTALS_BUILD_EXAMPLES)
+    set(portals_launcher_test_command "${CMAKE_COMMAND}"
+      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}" "-DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+      "-DPROGRAM=$<TARGET_FILE:portals_gallery>")
+    if(WIN32)
+      find_program(PORTALS_POWERSHELL_EXECUTABLE NAMES pwsh powershell)
+      if(PORTALS_POWERSHELL_EXECUTABLE)
+        list(APPEND portals_launcher_test_command "-DPOWERSHELL_EXECUTABLE=${PORTALS_POWERSHELL_EXECUTABLE}")
+      else()
+        set(portals_launcher_test_command "")
+        message(STATUS "Bundle launcher test unavailable: PowerShell was not found")
+      endif()
+    endif()
+    if(portals_launcher_test_command)
+      add_test(NAME portals.bundle-launcher COMMAND ${portals_launcher_test_command}
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/bundle_launcher.cmake")
+      set_tests_properties(portals.bundle-launcher PROPERTIES TIMEOUT 40 LABELS "package")
+    endif()
     add_test(NAME portals.gallery-replay COMMAND portals_gallery --check)
     add_test(NAME portals.dashboard-check COMMAND portals_dashboard --check --ansi16 --ascii)
     add_test(NAME portals.dashboard-replay COMMAND portals_replay_example --check --delay-ms 250)
