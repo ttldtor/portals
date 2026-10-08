@@ -539,7 +539,9 @@ void Application::requestStop() noexcept {
 std::expected<std::unique_ptr<Application>, ApplicationError> Application::create(ApplicationOptions options,
                                                                                   SchedulerClock clock) {
   if (!options.framesPerSecond || options.framesPerSecond > 1000 || !options.inputBudget ||
-      options.inputSlice.count() <= 0 || options.outputSlice.count() <= 0) {
+      options.inputSlice.count() <= 0 || options.outputSlice.count() <= 0 ||
+      (options.nativeScreen != NativeScreenMode::MAIN_SCREEN &&
+       options.nativeScreen != NativeScreenMode::ALTERNATE_SCREEN)) {
     return std::unexpected(ApplicationError{ApplicationPhase::CREATE, ApplicationFailure::INVALID_OPTIONS, {}});
   }
 
@@ -581,7 +583,7 @@ std::expected<ApplicationStats, ApplicationError> Application::run(ApplicationSc
     NativeTerminalHandles handles{0, 1};
 #endif
     auto opened = openNativeApplicationTerminal(handles, state_->options.terminal, state_->options.outputSlice,
-                                                state_->options.nativeMouseReporting);
+                                                state_->options.nativeMouseReporting, state_->options.nativeScreen);
 
     if (!opened) {
       state_->ran = true;

@@ -1,6 +1,9 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 
+#include "../examples/gallery/form.hpp"
+#include <algorithm>
+#include <portals/application.hpp>
 #include <portals/diff.hpp>
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -79,7 +82,10 @@ enum Stage : DWORD {
   FRAME_POISONED,
   FRAME_JOINED,
   FRAME_RECOVERED,
-  FRAME_PRESSURE_OBSERVED
+  FRAME_PRESSURE_OBSERVED,
+  SCREEN_RESIZE_READY,
+  SCREEN_RESET_READY,
+  SCREEN_MODES_RESTORED
 };
 
 enum Flag : DWORD {
@@ -90,7 +96,8 @@ enum Flag : DWORD {
   HOST_CTRL_C = 16,
   VIEWPORT_RESIZED = 32,
   HOST_RESIZE_RECORD = 64,
-  RESTORED = 128
+  RESTORED = 128,
+  SCREEN_RESTORED = 256
 };
 
 struct Message {
@@ -983,6 +990,287 @@ struct Session {
   }
 };
 
+struct ConsoleScreen {
+  COORD viewport{};
+  COORD cursor{};
+  WORD attributes{};
+  std::vector<CHAR_INFO> cells;
+};
+
+ConsoleScreen snapshotScreen(HANDLE output) {
+  CONSOLE_SCREEN_BUFFER_INFO info{};
+
+  require(GetConsoleScreenBufferInfo(output, &info), "snapshot active caller buffer");
+
+  ConsoleScreen result{{static_cast<SHORT>(info.srWindow.Right - info.srWindow.Left + 1),
+                        static_cast<SHORT>(info.srWindow.Bottom - info.srWindow.Top + 1)},
+                       info.dwCursorPosition,
+                       info.wAttributes,
+                       {}};
+
+  result.cells.resize(static_cast<std::size_t>(result.viewport.X) * result.viewport.Y);
+
+  SMALL_RECT rectangle = info.srWindow;
+
+  require(ReadConsoleOutputW(output, result.cells.data(), result.viewport, {0, 0}, &rectangle),
+          "snapshot active caller cells");
+
+  return result;
+}
+
+void waitViewport(HANDLE output, COORD size) {
+  const auto deadline = GetTickCount64() + 2000;
+
+  do {
+    CONSOLE_SCREEN_BUFFER_INFO info{};
+
+    require(GetConsoleScreenBufferInfo(output, &info), "resized viewport query");
+
+    if (info.srWindow.Right - info.srWindow.Left + 1 == size.X &&
+        info.srWindow.Bottom - info.srWindow.Top + 1 == size.Y) {
+      return;
+    }
+
+    Sleep(1);
+  } while (GetTickCount64() < deadline);
+
+  require(false, "host ResizePseudoConsole must reach the child");
+}
+
+int screenResizeCase(HANDLE resultPipe, const wchar_t *kind) {
+  NativeConsole native;
+  constexpr COORD initial{80, 25};
+  constexpr COORD position{77, 23};
+  constexpr WORD attributes = FOREGROUND_BLUE | FOREGROUND_INTENSITY | BACKGROUND_GREEN;
+  const COORD target = wcscmp(kind, L"screen-resize-smaller") == 0 ? COORD{40, 12} : COORD{100, 35};
+  std::vector<CHAR_INFO> original(initial.X * initial.Y);
+
+  for (std::size_t index = 0; index < original.size(); ++index) {
+    original[index].Char.UnicodeChar = static_cast<wchar_t>(L'A' + index % 26);
+    original[index].Attributes = attributes;
+  }
+
+  auto seed = [&] {
+    SMALL_RECT rectangle{0, 0, initial.X - 1, initial.Y - 1};
+
+    require(WriteConsoleOutputW(native.output.value, original.data(), initial, {0, 0}, &rectangle),
+            "seed resize caller screen");
+    require(SetConsoleCursorPosition(native.output.value, position), "seed cursor outside smaller viewport");
+    require(SetConsoleTextAttribute(native.output.value, attributes), "seed resize caller rendition");
+  };
+  auto directWrite = [&](std::string_view bytes) {
+    DWORD amount = 0;
+
+    require(WriteFile(native.output.value, bytes.data(), static_cast<DWORD>(bytes.size()), &amount, nullptr) &&
+              amount == bytes.size(),
+            "control VT1049 write");
+  };
+
+  constexpr std::string_view FRAME = "\x1b[2J\x1b[1;1H\x1b[31;42mAlerts\r\nRun\r\nQuit\x1b[1;1H";
+
+  // Establish the expected reflow/crop/cursor result from the actual host's plain VT1049 lifecycle.
+  seed();
+  require(SetConsoleMode(native.output.value,
+                         native.outputMode | ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING),
+          "enable control VT output");
+  directWrite("\x1b[?1049h");
+  directWrite(FRAME);
+  report(resultPipe, SCREEN_RESIZE_READY);
+  waitViewport(native.output.value, target);
+  directWrite("\x1b[?1049l");
+
+  const auto expected = snapshotScreen(native.output.value);
+
+  require(SetConsoleMode(native.output.value, native.outputMode), "restore control output mode");
+  report(resultPipe, SCREEN_RESET_READY);
+  waitViewport(native.output.value, initial);
+  seed();
+
+  auto terminal = openNativeApplicationTerminal(native.handles(), {}, 2s, false);
+
+  require(terminal.has_value(), "managed resized screen opens");
+  require((*terminal)->submit(std::string(FRAME)).has_value(), "managed resize frame submits");
+
+  const auto frame = (*terminal)->flush(std::chrono::steady_clock::now() + 2s, {});
+
+  require(!frame.error && frame.pending == 0, "managed resize frame flushes");
+  report(resultPipe, SCREEN_RESIZE_READY);
+  waitViewport(native.output.value, target);
+  require((*terminal)->close().has_value(), "managed resize screen closes without stale cursor error");
+  native.checkRestored();
+  report(resultPipe, SCREEN_MODES_RESTORED, 0, RESTORED, 0, 0, "OS modes/codepages restored");
+
+  const auto actual = snapshotScreen(native.output.value);
+
+  require(actual.viewport.X == target.X && actual.viewport.Y == target.Y, "exit preserves user's new viewport");
+  require(actual.viewport.X == expected.viewport.X && actual.viewport.Y == expected.viewport.Y &&
+            actual.cursor.X == expected.cursor.X && actual.cursor.Y == expected.cursor.Y &&
+            actual.attributes == expected.attributes && actual.cells.size() == expected.cells.size() &&
+            std::equal(actual.cells.begin(), actual.cells.end(), expected.cells.begin(),
+                       [](const CHAR_INFO &a, const CHAR_INFO &b) {
+                         return a.Char.UnicodeChar == b.Char.UnicodeChar && a.Attributes == b.Attributes;
+                       }),
+          "managed resize exit matches host primary-buffer restoration without TUI residue");
+  require(actual.cursor.X >= 0 && actual.cursor.X < target.X && actual.cursor.Y >= 0 && actual.cursor.Y < target.Y,
+          "restored cursor remains inside current viewport");
+  report(resultPipe, PRESSURE_DONE, 0, RESTORED | SCREEN_RESTORED, 0, actual.cells.size(),
+         "resized primary matches host; new geometry preserved");
+
+  return 0;
+}
+
+int screenRestoreCase(HANDLE resultPipe, const wchar_t *kind) {
+  NativeConsole native;
+
+  require(SetStdHandle(STD_INPUT_HANDLE, native.input.value) && SetStdHandle(STD_OUTPUT_HANDLE, native.output.value),
+          "bind application standard handles to its own hidden ConPTY");
+
+  CONSOLE_SCREEN_BUFFER_INFO before{};
+
+  require(GetConsoleScreenBufferInfo(native.output.value, &before), "screen snapshot");
+
+  constexpr COORD extent{80, 25};
+  constexpr COORD position{7, 9};
+  constexpr WORD attributes = FOREGROUND_BLUE | FOREGROUND_INTENSITY | BACKGROUND_GREEN;
+  std::vector<CHAR_INFO> original(extent.X * extent.Y);
+
+  for (std::size_t index = 0; index < original.size(); ++index) {
+    original[index].Char.UnicodeChar = static_cast<wchar_t>(L'A' + index % 26);
+    original[index].Attributes = attributes;
+  }
+
+  SMALL_RECT rectangle{0, 0, extent.X - 1, extent.Y - 1};
+
+  require(WriteConsoleOutputW(native.output.value, original.data(), extent, {0, 0}, &rectangle), "seed caller screen");
+  require(SetConsoleCursorPosition(native.output.value, position), "seed caller cursor");
+  require(SetConsoleTextAttribute(native.output.value, attributes), "seed caller rendition");
+
+  CONSOLE_CURSOR_INFO cursorBefore{};
+
+  require(GetConsoleCursorInfo(native.output.value, &cursorBefore), "caller cursor visibility");
+
+  const bool mainScreen = wcscmp(kind, L"screen-main") == 0;
+  const bool uncertain = wcscmp(kind, L"screen-uncertain") == 0;
+  const bool application = wcscmp(kind, L"screen-application") == 0 || wcscmp(kind, L"screen-failure") == 0;
+
+  if (application) {
+    struct Observation {
+      std::atomic<bool> flushed{};
+      bool fail{};
+    } observation;
+
+    observation.fail = wcscmp(kind, L"screen-failure") == 0;
+
+    ApplicationOptions options;
+
+    options.nativeMouseReporting = false;
+    options.observer = {[](void *context, ApplicationPhase phase, std::chrono::nanoseconds) {
+                          auto &observed = *static_cast<Observation *>(context);
+
+                          if (phase == ApplicationPhase::FLUSH) {
+                            observed.flushed.store(true);
+
+                            if (observed.fail) {
+                              throw std::runtime_error("failure after gallery frame flush");
+                            }
+                          }
+                        },
+                        &observation};
+
+    auto created = Application::create(options);
+
+    require(created.has_value(), "gallery application creates");
+
+    auto &app = **created;
+    gallery::Form form(app);
+    std::jthread stopper([&](std::stop_token stop) {
+      while (!stop.stop_requested() && !observation.flushed.load()) {
+        Sleep(1);
+      }
+
+      if (observation.flushed.load()) {
+        app.requestStop();
+      }
+    });
+
+    const auto ran = app.run(form);
+
+    require(observation.flushed.load(), "actual gallery frame reached console");
+    require(observation.fail ? !ran && ran.error().phase == ApplicationPhase::FLUSH : ran.has_value(),
+            "native Application run preserves normal/error outcome");
+  } else {
+    TerminalOptions terminalOptions;
+
+    terminalOptions.max_output_bytes = PRESSURE_BYTES + 2;
+
+    auto terminal =
+      openNativeApplicationTerminal(native.handles(), terminalOptions, 2s, false,
+                                    mainScreen ? NativeScreenMode::MAIN_SCREEN : NativeScreenMode::ALTERNATE_SCREEN);
+
+    require(terminal.has_value(), "native application opens");
+    require((*terminal)->submit("\x1b[2J\x1b[1;1H\x1b[31;42mAlerts\r\nRun\r\nQuit\x1b[1;1H\x1b[?25l").has_value(),
+            "paint gallery-like frame");
+
+    const auto written = (*terminal)->flush(std::chrono::steady_clock::now() + 2s, {});
+
+    require(!written.error && written.pending == 0, "gallery frame flush");
+
+    if (uncertain) {
+      report(resultPipe, PRESSURE_READY);
+      require((*terminal)->submit(std::string(PRESSURE_BYTES, '!') + "\x1b[").has_value(), "uncertain gallery frame");
+
+      const auto cancelled = (*terminal)->flush(std::chrono::steady_clock::now() + 100ms, {});
+
+      require(cancelled.error && cancelled.error->kind == TerminalErrorKind::OUTPUT_UNCERTAIN,
+              "issued Windows frame cancellation is uncertain");
+    }
+
+    const auto closed = (*terminal)->close();
+
+    require(uncertain ? !closed && closed.error().kind == TerminalErrorKind::OUTPUT_UNCERTAIN : closed.has_value(),
+            "screen close preserves uncertain-write failure");
+    require((*terminal)->close().has_value(), "application screen closes twice");
+  }
+  native.checkRestored();
+  report(resultPipe, SCREEN_MODES_RESTORED, 0, RESTORED, 0, 0, "OS modes/codepages restored");
+
+  std::vector<CHAR_INFO> restored(original.size());
+
+  rectangle = {0, 0, extent.X - 1, extent.Y - 1};
+  require(ReadConsoleOutputW(native.output.value, restored.data(), extent, {0, 0}, &rectangle),
+          "read caller screen after close");
+  const bool sameCells =
+    std::equal(original.begin(), original.end(), restored.begin(), [](const CHAR_INFO &a, const CHAR_INFO &b) {
+      return a.Char.UnicodeChar == b.Char.UnicodeChar && a.Attributes == b.Attributes;
+    });
+
+  require(mainScreen ? !sameCells : sameCells,
+          "application close must restore caller screen instead of leaving gallery cells");
+
+  if (mainScreen) {
+    report(resultPipe, PRESSURE_DONE, 0, RESTORED, 0, original.size(), "MAIN explicitly retains painted caller screen");
+
+    return 0;
+  }
+
+  CONSOLE_SCREEN_BUFFER_INFO after{};
+
+  require(GetConsoleScreenBufferInfo(native.output.value, &after), "caller cursor after close");
+  require(after.dwCursorPosition.X == position.X && after.dwCursorPosition.Y == position.Y,
+          "application close must restore caller cursor");
+  require(after.wAttributes == attributes, "application close must restore caller rendition");
+
+  CONSOLE_CURSOR_INFO cursorAfter{};
+
+  require(GetConsoleCursorInfo(native.output.value, &cursorAfter) && cursorAfter.bVisible == cursorBefore.bVisible &&
+            cursorAfter.dwSize == cursorBefore.dwSize,
+          "application close must restore caller cursor visibility");
+  report(resultPipe, PRESSURE_DONE, 0, RESTORED | SCREEN_RESTORED, 0, original.size(),
+         "caller screen/cursor/rendition restored");
+
+  return 0;
+}
+
 void launch(Session &session, const wchar_t *kind) {
   HANDLE read = nullptr;
   HANDLE write = nullptr;
@@ -1005,7 +1293,8 @@ void launch(Session &session, const wchar_t *kind) {
                                               session.inputRead.value, session.outputWrite.value, 0, &session.console);
 
   require(SUCCEEDED(created), "CreatePseudoConsole");
-  session.enabled.store(wcscmp(kind, L"input") == 0);
+  session.enabled.store(wcscmp(kind, L"input") == 0 ||
+                        (wcsncmp(kind, L"screen-", 7) == 0 && wcscmp(kind, L"screen-uncertain") != 0));
   session.reader = std::thread(drain, session.outputRead.value, std::ref(session.enabled), std::ref(session.stop),
                                std::ref(session.drained));
   session.job.reset(CreateJobObjectW(nullptr, nullptr));
@@ -1099,6 +1388,17 @@ bool hostCase(const wchar_t *kind) {
                   message.detail);
       std::fflush(stdout);
 
+      if (message.stage == SCREEN_RESIZE_READY) {
+        const COORD size = wcscmp(kind, L"screen-resize-smaller") == 0 ? COORD{40, 12} : COORD{100, 35};
+
+        require(SUCCEEDED(ResizePseudoConsole(session.console, size)), "host screen lifecycle resize");
+      }
+
+      if (message.stage == SCREEN_RESET_READY) {
+        require(SUCCEEDED(ResizePseudoConsole(session.console, {80, 25})),
+                "reset control viewport before managed resize");
+      }
+
       if (message.stage == RESIZE_READY) {
         require(SUCCEEDED(ResizePseudoConsole(session.console, {95, 31})), "resize without text input");
       }
@@ -1191,6 +1491,14 @@ int wmain(int argc, wchar_t **argv) {
         return 0;
       }
 
+      if (wcsncmp(argv[2], L"screen-resize-", 14) == 0) {
+        return screenResizeCase(result, argv[2]);
+      }
+
+      if (wcsncmp(argv[2], L"screen-", 7) == 0) {
+        return screenRestoreCase(result, argv[2]);
+      }
+
       if (isFrameCase(argv[2])) {
         return frameCase(result, argv[2]);
       }
@@ -1204,6 +1512,19 @@ int wmain(int argc, wchar_t **argv) {
   }
 
   try {
+    if (argc == 2 && wcscmp(argv[1], L"--screen-restore") == 0) {
+      const bool restored = hostCase(L"screen-restore");
+      const bool main = hostCase(L"screen-main");
+      const bool application = hostCase(L"screen-application");
+      const bool failure = hostCase(L"screen-failure");
+      const bool uncertain = hostCase(L"screen-uncertain");
+
+      const bool smaller = hostCase(L"screen-resize-smaller");
+      const bool larger = hostCase(L"screen-resize-larger");
+
+      return restored && main && application && failure && uncertain && smaller && larger ? 0 : 1;
+    }
+
     if (argc == 2 && wcscmp(argv[1], L"--child-watchdog") == 0) {
       return hostCase(L"hang") ? 0 : WATCHDOG_EXIT;
     }
@@ -1217,6 +1538,9 @@ int wmain(int argc, wchar_t **argv) {
       return 0;
     }
 
+    const bool screen = hostCase(L"screen-restore") && hostCase(L"screen-main") && hostCase(L"screen-application") &&
+                        hostCase(L"screen-failure") && hostCase(L"screen-uncertain") &&
+                        hostCase(L"screen-resize-smaller") && hostCase(L"screen-resize-larger");
     const bool input = hostCase(L"input");
     const bool cancel = hostCase(L"cancel");
     const bool resume = hostCase(L"resume");
@@ -1228,7 +1552,7 @@ int wmain(int argc, wchar_t **argv) {
     std::printf("summary input=%d cancel=%d resume=%d stopped=%d frame_resume=%d frame_cancel=%d frame_stop=%d\n",
                 input, cancel, resume, stopped, frameResume, frameCancel, frameStop);
 
-    return input && cancel && resume && stopped && frameResume && frameCancel && frameStop ? 0 : 1;
+    return screen && input && cancel && resume && stopped && frameResume && frameCancel && frameStop ? 0 : 1;
   } catch (const std::exception &error) {
     std::fprintf(stderr, "host failure: %s\n", error.what());
 

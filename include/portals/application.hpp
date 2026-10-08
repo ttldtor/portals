@@ -60,10 +60,18 @@ struct ApplicationObserver {
   void *context{};     ///< Borrowed synchronous callback state.
 };
 
+/** @brief Screen ownership for the native application transport. */
+enum class NativeScreenMode {
+  MAIN_SCREEN,     ///< Paint the caller's screen directly; its contents and cursor are not restored.
+  ALTERNATE_SCREEN ///< Own an alternate screen and return to the caller's main screen on close.
+};
+
 /** @brief Finite runner and component policies; one owner services all I/O. */
 struct ApplicationOptions {
-  SchedulerOptions scheduler{};                ///< Bounded existing scheduler queues and optional diagnostics.
-  TerminalOptions terminal{};                  ///< Native terminal batch and wait limits.
+  SchedulerOptions scheduler{}; ///< Bounded existing scheduler queues and optional diagnostics.
+  TerminalOptions terminal{};   ///< Native terminal batch and wait limits.
+  NativeScreenMode nativeScreen{
+    NativeScreenMode::ALTERNATE_SCREEN};       ///< Preserve the caller's main screen in native run.
   bool nativeMouseReporting{true};             ///< Manage POSIX mouse reporting in the native run overload.
   InputOptions input{};                        ///< POSIX streaming decoder limits.
   FrameWriterLimits writer{};                  ///< Output encoding and owned-frame limits.
@@ -99,14 +107,15 @@ public:
   virtual TerminalRead read(TerminalDeadline deadline, std::stop_token stop) = 0;
   /** @return Current nonnegative viewport, or an original terminal error. */
   virtual std::expected<CellSize, TerminalError> size() const = 0;
-  /** @brief Discard pending output and restore modes; idempotent, never throws.
+  /** @brief Restore owned native screen/modes and close; custom transports define their policy. Idempotent, never
+   * throws.
    * @return Success or original restoration/cleanup error. No hard native close deadline is promised.
    */
   virtual std::expected<void, TerminalError> close() noexcept = 0;
 };
 
 /**
- * @brief Open an exclusive native transport with optional application-level mouse reporting.
+ * @brief Open an exclusive native transport with managed screen and optional mouse reporting.
  *
  * POSIX setup queries coordinate encodings and saves xterm tracking modes before enabling SGR button reports. Windows
  * uses native mouse records and sends no mouse setup bytes.
@@ -115,24 +124,32 @@ public:
  * no replay adapter. Replies are matched by mode/status, not authenticated. The adapter requires the steady-clock epoch
  * and exclusive terminal I/O.
  *
- * Close uses a fresh bounded deadline to drain retryable POSIX output and restore mouse modes, then always closes the
+ * Close uses a fresh bounded deadline to drain retryable output and restore managed screen/mouse state, then closes the
  * OS session. Its noexcept destructor performs best effort.
  *
- * XTSAVE overwrites the emulator's one-level tracking cache; nested mode owners and competing mode changes are
- * unsupported. Setup/cleanup bypass frame byte statistics.
+ * XTSAVE overwrites one-level tracking/visibility caches; confirmed DECSC capture overwrites saved cursor state.
+ * Nested screen owners, previously saved caches and competing mode changes are unsupported. Setup/cleanup bypass frame
+ * byte statistics.
  *
  * @param handles Borrowed native input/output handles, duplicated by TerminalSession.
  * @param options Positive resource limits, including retained non-query startup input bytes.
  * @param modeTimeout Positive startup and separate shutdown I/O budget, in milliseconds.
- * @param mouseReporting Enable managed POSIX mouse modes; false skips all mouse setup I/O.
+ * @param mouseReporting Enable managed POSIX mouse modes; false skips only mouse setup I/O.
+ * @param screen ALTERNATE_SCREEN preserves the caller's main screen/cursor/rendition; MAIN_SCREEN paints it directly.
+ * Alternate screen ownership starts on the main screen and is not nestable. POSIX saved cursor-visibility storage
+ * and DEC cursor-save state are borrowed exclusively; their previous saved caches are not preserved. Window resize
+ * keeps the new geometry; the host reflows/crops primary content and adjusts the saved cursor. Startup/cleanup require
+ * compatible VT1049 support. Cleanup cancels and joins any uncertain Windows write before sending its final restoration
+ * batch, then restores OS modes even if that output fails. Broken/stalled hosts and abrupt process death can prevent
+ * screen restoration.
  * @return Owning adapter, or setup error with cleanup failure in restoration_code. Unsupported/missing queries, input
  * pressure, and incomplete restoration remain explicit errors.
- * @throws std::bad_alloc If allocation fails; acquired native/mouse state is cleaned up.
+ * @throws std::bad_alloc If allocation fails; acquired native/screen/mouse state receives best-effort cleanup.
  */
 [[nodiscard]] std::expected<std::unique_ptr<ApplicationTerminal>, TerminalError>
 openNativeApplicationTerminal(NativeTerminalHandles handles, TerminalOptions options = {},
                               std::chrono::milliseconds modeTimeout = std::chrono::milliseconds{2000},
-                              bool mouseReporting = true);
+                              bool mouseReporting = true, NativeScreenMode screen = NativeScreenMode::ALTERNATE_SCREEN);
 
 class Application;
 
