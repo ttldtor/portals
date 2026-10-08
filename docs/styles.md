@@ -33,6 +33,36 @@ files and hot reload are application responsibilities; the library does neither.
 `themes/modern.pss` and `themes/turbo.pss` exactly match `modernTheme()` and
 `turboTheme()`. `themeFromTokens(ThemeTokens)` customizes the same typed palette.
 
+## Built-in palettes
+
+Alongside Modern and Turbo, `nordTheme()`, `gruvboxTheme()`, `tokyoNightTheme()`,
+and `catppuccinLatteTheme()` return ordinary typed stylesheets. Catppuccin Latte
+has a light background; the other three have dark backgrounds. Install any of
+them with `StyleEngine::replace` or `ManagedScene::theme` between frames.
+All factories may allocate and throw before installation starts.
+
+These four palettes adapt RGB values from Textual's
+[pinned theme definitions](https://github.com/Textualize/textual/blob/06dbeef4bb70fb718236aa418ed658ef4667a126/src/textual/theme.py).
+The mapping deliberately fits the existing six `ThemeTokens`:
+
+| Portals token | Textual source field | Presentation role |
+| --- | --- | --- |
+| `foreground` | `foreground` | Normal and selected text |
+| `background` | `background` | Normal fill; focused text; caret fill |
+| `accent` | `primary` | Focused fill and caret text |
+| `muted` | `secondary` | Disabled text |
+| `selection` | `panel` | Selected row or editor range fill |
+| `heading` | `accent` | Header text |
+
+Focus, selection, and headers request bold; disabled content and the caret do
+not. The caret reverses the focused field colors. Palettes change presentation
+only: they add no layout metrics, input behavior, or runtime dependency.
+
+This is a palette adaptation, not a reproduction of Textual's complete theme
+system. Textual's derived colors, alpha selection colors, surfaces, and
+widget-specific variables are not imported. The source commit and complete MIT
+notice are retained in [vendor/textual](../vendor/textual/README.md).
+
 ## Grammar and cascade
 
 ```css
@@ -114,7 +144,7 @@ the configurable engine `maxBindings` bound retained source/registry work.
 ## ASCII and sixteen colors
 
 Built-in button/checkbox decorations and table/editor scaffolding use ASCII,
-so both themes need no icon font. Application text still follows the existing
+so all built-in themes need no icon font. Application text still follows the existing
 Unicode width policy; styling does not transliterate user data.
 
 ```cpp
@@ -129,6 +159,10 @@ writes real SGR 30–37/90–97 foreground and 40–47/100–107 background code
 It does not emit RGB SGR in this mode. Physical colors may differ when the user
 customizes the terminal palette. Text and bold/italic/underline requests remain
 unchanged; terminal support determines how attributes look.
+Nearby colors can quantize to the same entry, so selection or disabled colors
+may lose distinctions available in true color. Bold selection and header
+requests remain, and the focused editor caret uses contrasting encoded colors
+in all six built-in palettes.
 
 The writer keeps its color mode for its entire lifetime, including partial
 output and subsequent diffs. Direct `encodeDiff(previous, next, cap, mode)`
@@ -139,7 +173,8 @@ probe, implicit negotiation or extra renderer.
 
 The headless `portals.style` test checks parser diagnostics, compound cascade,
 typed/PSS parity, failed staging, coherent revisions, real control/table/editor
-paint, metric invalidation, unchanged actions, and partial ANSI16 writer output.
+paint, metric invalidation, unchanged actions, all four adapted palette state
+variants, caret contrast in all six themes, and partial ANSI16 writer output.
 Native visual appearance remains a separate platform check.
 
 ### Allocation boundaries and value transfers

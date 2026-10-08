@@ -132,6 +132,18 @@ StyleSheet modernTheme();
 /** @return Typed Turbo-like theme, equivalent to themes/turbo.pss; may allocate. */
 StyleSheet turboTheme();
 
+/** @return Typed Nord palette adapted from Textual through ThemeTokens; may allocate. */
+StyleSheet nordTheme();
+
+/** @return Typed Gruvbox palette adapted from Textual through ThemeTokens; may allocate. */
+StyleSheet gruvboxTheme();
+
+/** @return Typed Tokyo Night palette adapted from Textual through ThemeTokens; may allocate. */
+StyleSheet tokyoNightTheme();
+
+/** @return Typed light Catppuccin Latte palette adapted from Textual through ThemeTokens; may allocate. */
+StyleSheet catppuccinLatteTheme();
+
 /** @brief UI-owned style transaction coordinator; tree must outlive this nonmovable object.
  * Bindings own metadata and only observe Node handles. Stale bindings are pruned on the next
  * successful operation. Destruction leaves already computed widget values intact. One engine

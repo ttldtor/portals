@@ -501,8 +501,69 @@ struct Page : ModelSnapshot<int> {
   }
 };
 
+void adaptedPaletteVariants() {
+  struct PaletteCase {
+    const char *name;
+    StyleSheet (*create)();
+    ThemeTokens colors;
+  };
+
+  // Pinned Textual RGB values are independent expectations for the public factories.
+  const std::array palettes{PaletteCase{"Nord",
+                                        nordTheme,
+                                        {{0xD8, 0xDE, 0xE9},
+                                         {0x2E, 0x34, 0x40},
+                                         {0x88, 0xC0, 0xD0},
+                                         {0x81, 0xA1, 0xC1},
+                                         {0x43, 0x4C, 0x5E},
+                                         {0xB4, 0x8E, 0xAD}}},
+                            PaletteCase{"Gruvbox",
+                                        gruvboxTheme,
+                                        {{0xFB, 0xF1, 0xC7},
+                                         {0x28, 0x28, 0x28},
+                                         {0x85, 0xA5, 0x98},
+                                         {0xA8, 0x9A, 0x85},
+                                         {0x50, 0x49, 0x45},
+                                         {0xFA, 0xBD, 0x2F}}},
+                            PaletteCase{"Tokyo Night",
+                                        tokyoNightTheme,
+                                        {{0xA9, 0xB1, 0xD6},
+                                         {0x1A, 0x1B, 0x26},
+                                         {0xBB, 0x9A, 0xF7},
+                                         {0x7A, 0xA2, 0xF7},
+                                         {0x41, 0x48, 0x68},
+                                         {0xFF, 0x9E, 0x64}}},
+                            PaletteCase{"Catppuccin Latte",
+                                        catppuccinLatteTheme,
+                                        {{0x4C, 0x4F, 0x69},
+                                         {0xEF, 0xF1, 0xF5},
+                                         {0x88, 0x39, 0xEF},
+                                         {0xDC, 0x8A, 0x78},
+                                         {0xCC, 0xD0, 0xDA},
+                                         {0xFE, 0x64, 0x0B}}}};
+
+  for (const auto &palette : palettes) {
+    const auto failuresBefore = failures;
+    const auto &colors = palette.colors;
+    const auto style = resolveStyle(palette.create(), {.type = "Table"});
+
+    check(style.normal == CellStyle{colors.foreground, colors.background}, "palette normal colors match source");
+    check(style.focused == CellStyle{colors.background, colors.accent, true}, "palette focus reverses primary colors");
+    check(style.disabled == CellStyle{colors.muted, colors.background}, "palette disabled uses secondary color");
+    check(style.selected == CellStyle{colors.foreground, colors.selection, true}, "palette selection uses panel color");
+    check(style.header == CellStyle{colors.heading, colors.background, true}, "palette header uses source accent");
+    check(style.caret == CellStyle{colors.accent, colors.background}, "palette caret reverses focused field");
+    check(style.minWidth == 0, "palette replacement does not introduce a layout metric");
+
+    if (failures != failuresBefore) {
+      std::cerr << "Palette: " << palette.name << '\n';
+    }
+  }
+}
+
 void focusedEditorCaretIsVisible() {
-  for (const auto &theme : {modernTheme(), turboTheme()}) {
+  for (const auto &theme :
+       {modernTheme(), turboTheme(), nordTheme(), gruvboxTheme(), tokyoNightTheme(), catppuccinLatteTheme()}) {
     Fixture fixture;
     auto editor = take(fixture.tree->emplace<LineEdit>(fixture.root));
     auto router = take(EventRouter::create(*fixture.tree));
@@ -536,7 +597,7 @@ void focusedEditorCaretIsVisible() {
         const auto &field = snapshot.cells[4].style;
 
         check(caret.background != field.background && caret.foreground != caret.background,
-              "focused editor caret contrasts with field and text in both built-in themes and color modes");
+              "focused editor caret contrasts with field and text in every built-in theme and color mode");
       }
     }
   }
@@ -725,6 +786,7 @@ int main(int argc, char **argv) {
   batchBudgetAndAllocation();
   paintUsesSnapshot();
   viewsAndEditor();
+  adaptedPaletteVariants();
   focusedEditorCaretIsVisible();
   ansiOutput();
   allocationRollback();

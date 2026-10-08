@@ -1193,10 +1193,12 @@ int screenRestoreCase(HANDLE resultPipe, const wchar_t *kind) {
       }
     });
 
-    const auto ran = app.run(form);
+    const auto ran = form.run();
 
     require(observation.flushed.load(), "actual gallery frame reached console");
-    require(observation.fail ? !ran && ran.error().phase == ApplicationPhase::FLUSH : ran.has_value(),
+    require(observation.fail
+              ? !ran && ran.error().application && ran.error().application->phase == ApplicationPhase::FLUSH
+              : ran.has_value(),
             "native Application run preserves normal/error outcome");
   } else {
     TerminalOptions terminalOptions;

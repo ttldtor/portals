@@ -2,93 +2,78 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 #include "common.hpp"
-#include <portals/line_edit.hpp>
-#include <portals/style.hpp>
+#include "options.hpp"
+#include <portals/ui.hpp>
 
 namespace gallery {
-// Lifetime is visible: Application owns UI services; this scene owns their bindings and models.
-class Form : public portals::ApplicationScene {
+// Application outlives the form; the scene owns its nodes, state and callbacks.
+class Form {
 public:
-  explicit Form(portals::Application &app) : app_(app), styles_(app.tree()) {
+  explicit Form(portals::Application &app, std::size_t theme = 0)
+      : app_(app), theme_(theme), scene_(example::take(portals::ManagedScene::create(app))) {
     using namespace portals;
     using example::take;
-    using example::text;
-    auto &tree = app.tree();
-    const auto column = take(tree.emplace<Column>(app.root()));
-    title_ = take(tree.emplace<Label>(column, text("Portals gallery | F2 theme | F10 quit")));
-    label_ = take(tree.emplace<Label>(column, text("Name (Enter commits; Tab changes focus):")));
-    editor_ = take(tree.emplace<LineEdit>(column));
-    check_ = take(tree.emplace<CheckBox>(column, text("Alerts")));
-    button_ = take(tree.emplace<Button>(column, text("Run (no model change)")));
-    quit_ = take(tree.emplace<Button>(column, text("Quit")));
-    name_ = take(Property<std::string>::create(tree, column, "Portals", Invalidation::PAINT));
-    enabled_ = take(Property<bool>::create(tree, column, false, Invalidation::PAINT));
-    editBinding_ = take(bindLineEdit(tree, app.router(), editor_, name_, [](LineEditResult) {
-    }));
-    checkBinding_ = take(bindCheckbox(tree, app.router(), check_, enabled_, [](CheckBoxResult result) {
-      take(std::move(result));
-    }));
-    buttonBinding_ = take(bindButton(app.router(), button_, [&] {
-      ++calls;
-    }));
-    quitBinding_ = take(bindButton(app.router(), quit_, [&] {
-      app_.requestStop();
-    }));
-    take(app.router().setFocus(editor_));
 
-    for (auto node : {Node<Widget>(title_), Node<Widget>(label_), Node<Widget>(editor_), Node<Widget>(check_),
-                      Node<Widget>(button_), Node<Widget>(quit_)}) {
-      take(styles_.bind(node, {.type = "Control"}));
-    }
+    const auto name = take(scene_->state<std::string>("Portals"));
+    const auto alerts = take(scene_->state<bool>(false));
+    ui::NodeRef<LineEdit> editor;
 
-    take(styles_.replace(modernTheme()));
+    take(ui::mount(*scene_, ui::column(ui::label("Portals gallery | F2 theme | F10 quit"),
+                                       ui::label("Name (Enter commits; Tab changes focus):"),
+                                       ui::lineEdit(name).reference(editor), ui::checkbox("Alerts", alerts),
+                                       ui::button("Run (no model change)",
+                                                  [&]() -> std::expected<void, TreeError> {
+                                                    ++calls;
+
+                                                    return {};
+                                                  }),
+                                       ui::button("Quit", [&]() -> std::expected<void, TreeError> {
+                                         app_.requestStop();
+
+                                         return {};
+                                       }))));
+
+    take(app.router().setFocus(editor.node()));
+    take(scene_->theme(example::THEME_PRESETS.at(theme_).make()));
+    take(scene_->onInput([&](const InputEvent &event) -> std::expected<bool, ManagedError> {
+      if (example::quitKey(event)) {
+        app_.requestStop();
+
+        return true;
+      }
+
+      const auto *key = std::get_if<KeyEvent>(&event);
+
+      if (key && key->action != KeyAction::RELEASE && key->key == InputKey::F2) {
+        const auto next = (theme_ + 1) % example::THEME_PRESETS.size();
+        auto changed = scene_->theme(example::THEME_PRESETS[next].make());
+
+        if (!changed) {
+          return std::unexpected(changed.error());
+        }
+
+        theme_ = next;
+
+        return true;
+      }
+
+      return false;
+    }));
   }
 
-  std::expected<void, portals::TreeError> prepare(portals::Application &app, portals::CellSize) override {
-    const auto focused = example::take(app.router().focused());
-    example::take(editBinding_->sync(focused));
-    example::take(checkBinding_->sync());
-
-    for (auto node : {portals::Node<portals::Control>(title_), portals::Node<portals::Control>(label_),
-                      portals::Node<portals::Control>(check_), portals::Node<portals::Control>(button_),
-                      portals::Node<portals::Control>(quit_)}) {
-      example::take(portals::syncControl(app.tree(), node, focused));
-    }
-
-    return {};
+  std::expected<portals::ApplicationStats, portals::ManagedError> run() {
+    return scene_->run();
   }
 
-  std::expected<bool, portals::TreeError> input(portals::Application &app, const portals::InputEvent &event) override {
-    if (example::quitKey(event)) {
-      app.requestStop();
-
-      return true;
-    }
-
-    if (const auto *key = std::get_if<portals::KeyEvent>(&event); key && key->key == portals::InputKey::F2) {
-      turbo_ = !turbo_;
-      example::take(styles_.replace(turbo_ ? portals::turboTheme() : portals::modernTheme()));
-
-      return true;
-    }
-
-    return false;
+  std::expected<portals::ApplicationStats, portals::ManagedError> run(portals::ApplicationTerminal &terminal) {
+    return scene_->run(terminal);
   }
 
-  int calls{};
+  int calls{}; ///< Observable business action count; Run deliberately changes no model.
 
 private:
   portals::Application &app_;
-  portals::StyleEngine styles_;
-  portals::Node<portals::Label> title_, label_;
-  portals::Node<portals::LineEdit> editor_;
-  portals::Node<portals::CheckBox> check_;
-  portals::Node<portals::Button> button_, quit_;
-  std::shared_ptr<portals::Property<std::string>> name_;
-  std::shared_ptr<portals::Property<bool>> enabled_;
-  std::optional<portals::LineEditBinding> editBinding_;
-  std::optional<portals::CheckBoxBinding> checkBinding_;
-  portals::ActionBinding buttonBinding_, quitBinding_;
-  bool turbo_{};
+  std::size_t theme_{};
+  std::unique_ptr<portals::ManagedScene> scene_;
 };
 } // namespace gallery

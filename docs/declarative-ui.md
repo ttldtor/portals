@@ -116,5 +116,10 @@ version. Custom event and presentation logic remain explicit C++.
 
 This stage does not implement reconciliation, dynamic tree replacement,
 virtual-view lifecycle, a new CSS cascade or SQLite integration. Descriptions
-assemble a tree once. Large-form runtime and compilation performance require
-separate measurement; shorter construction code is not a speed claim.
+assemble a tree once. The [performance experiment](managed-performance.md)
+compares retained lifecycle costs at several sizes; it does not measure
+compilation performance. Shorter construction code is not a speed claim.
+
+The interactive [gallery and custom-widget examples](examples.md) now use these
+descriptions. The gallery preserves its former terminal output under the original
+themes; additional palettes use the same style engine.

@@ -131,6 +131,44 @@ StyleSheet turboTheme() {
   return themeFromTokens({{255, 255, 85}, {0, 0, 170}, {0, 170, 170}, {170, 170, 170}, {170, 0, 0}, {255, 255, 255}});
 }
 
+// The following four palettes adapt Textual's MIT-licensed theme definitions.
+// Copyright (c) 2021 Will McGugan. See vendor/textual/LICENSE and README.md for provenance.
+StyleSheet nordTheme() {
+  return themeFromTokens({.foreground = {0xD8, 0xDE, 0xE9},
+                          .background = {0x2E, 0x34, 0x40},
+                          .accent = {0x88, 0xC0, 0xD0},
+                          .muted = {0x81, 0xA1, 0xC1},
+                          .selection = {0x43, 0x4C, 0x5E},
+                          .heading = {0xB4, 0x8E, 0xAD}});
+}
+
+StyleSheet gruvboxTheme() {
+  return themeFromTokens({.foreground = {0xFB, 0xF1, 0xC7},
+                          .background = {0x28, 0x28, 0x28},
+                          .accent = {0x85, 0xA5, 0x98},
+                          .muted = {0xA8, 0x9A, 0x85},
+                          .selection = {0x50, 0x49, 0x45},
+                          .heading = {0xFA, 0xBD, 0x2F}});
+}
+
+StyleSheet tokyoNightTheme() {
+  return themeFromTokens({.foreground = {0xA9, 0xB1, 0xD6},
+                          .background = {0x1A, 0x1B, 0x26},
+                          .accent = {0xBB, 0x9A, 0xF7},
+                          .muted = {0x7A, 0xA2, 0xF7},
+                          .selection = {0x41, 0x48, 0x68},
+                          .heading = {0xFF, 0x9E, 0x64}});
+}
+
+StyleSheet catppuccinLatteTheme() {
+  return themeFromTokens({.foreground = {0x4C, 0x4F, 0x69},
+                          .background = {0xEF, 0xF1, 0xF5},
+                          .accent = {0x88, 0x39, 0xEF},
+                          .muted = {0xDC, 0x8A, 0x78},
+                          .selection = {0xCC, 0xD0, 0xDA},
+                          .heading = {0xFE, 0x64, 0x0B}});
+}
+
 StyleEngine::StyleEngine(WidgetTree &tree, std::size_t maxBindings) : tree_(tree), maxBindings_(maxBindings) {
 }
 

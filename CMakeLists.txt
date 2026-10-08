@@ -73,6 +73,9 @@ install(FILES vendor/utf8proc/manifest.json
   DESTINATION "${CMAKE_INSTALL_DATADIR}/Portals/utf8proc"
 )
 install(FILES docs/package.md DESTINATION "${CMAKE_INSTALL_DATADIR}/Portals/docs")
+install(FILES vendor/textual/LICENSE
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/Portals/licenses" RENAME textual-LICENSE.txt)
+install(FILES vendor/textual/README.md DESTINATION "${CMAKE_INSTALL_DATADIR}/Portals/textual")
 target_compile_definitions(portals_core PRIVATE
   PORTALS_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
   PORTALS_VERSION_MINOR=${PROJECT_VERSION_MINOR}
@@ -90,6 +93,10 @@ endfunction()
 portals_enable_warnings(portals_core)
 
 if(PORTALS_BUILD_TOOLS)
+  add_executable(portals_managed_benchmark tools/benchmarks/managed.cpp)
+  target_link_libraries(portals_managed_benchmark PRIVATE portals::core)
+  portals_enable_warnings(portals_managed_benchmark)
+  target_compile_definitions(portals_managed_benchmark PRIVATE PORTALS_BENCHMARK_BUILD_TYPE="$<CONFIG>")
   add_executable(portals_mvp_benchmark tools/benchmarks/mvp.cpp)
   target_link_libraries(portals_mvp_benchmark PRIVATE portals::core)
   portals_enable_warnings(portals_mvp_benchmark)
@@ -147,6 +154,10 @@ if(PORTALS_BUILD_TESTS)
   portals_enable_warnings(portals_terminal_cleanup)
   # Native launcher tests are opt-in: an ordinary CTest process has no emulator.
   if(PORTALS_BUILD_TOOLS)
+    add_test(NAME portals.managed-measurement COMMAND "${CMAKE_COMMAND}"
+      -DPROGRAM=$<TARGET_FILE:portals_managed_benchmark>
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tools/benchmarks/check_managed.cmake")
+    set_tests_properties(portals.managed-measurement PROPERTIES TIMEOUT 30)
     add_test(NAME portals.mvp-measurement COMMAND "${CMAKE_COMMAND}"
       -DPROGRAM=$<TARGET_FILE:portals_mvp_benchmark> -DOUTPUT_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}
       -P "${CMAKE_CURRENT_SOURCE_DIR}/tools/benchmarks/check.cmake")
@@ -223,6 +234,11 @@ if(PORTALS_BUILD_TESTS)
   set_tests_properties(portals.layout-grid PROPERTIES TIMEOUT 15)
 
   if(PORTALS_BUILD_EXAMPLES)
+    add_executable(portals_gallery_managed tests/gallery_managed.cpp)
+    target_link_libraries(portals_gallery_managed PRIVATE portals::core)
+    portals_enable_warnings(portals_gallery_managed)
+    add_test(NAME portals.gallery-managed COMMAND portals_gallery_managed)
+    set_tests_properties(portals.gallery-managed PROPERTIES TIMEOUT 20)
     set(portals_launcher_test_command "${CMAKE_COMMAND}"
       "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}" "-DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
       "-DPROGRAM=$<TARGET_FILE:portals_gallery>")
@@ -244,6 +260,13 @@ if(PORTALS_BUILD_TESTS)
     add_test(NAME portals.dashboard-check COMMAND portals_dashboard --check --ansi16 --ascii)
     add_test(NAME portals.dashboard-replay COMMAND portals_replay_example --check --delay-ms 250)
     add_test(NAME portals.custom-widget COMMAND portals_custom_widget --check)
+    foreach(palette IN ITEMS modern turbo nord gruvbox tokyo-night catppuccin-latte)
+      foreach(program IN ITEMS gallery custom_widget)
+        add_test(NAME portals.${program}-${palette}
+          COMMAND portals_${program} --check --ansi16 --theme ${palette})
+        set_tests_properties(portals.${program}-${palette} PROPERTIES TIMEOUT 20)
+      endforeach()
+    endforeach()
     set_tests_properties(portals.dashboard-check portals.dashboard-replay portals.custom-widget PROPERTIES TIMEOUT 20)
     set_tests_properties(portals.gallery-replay PROPERTIES TIMEOUT 15)
   endif()
@@ -426,7 +449,9 @@ if(PORTALS_BUILD_DOCS)
   set(DOXYGEN_GENERATE_HTML YES)
   set(DOXYGEN_GENERATE_LATEX NO)
   set(DOXYGEN_HAVE_DOT NO)
-  set(DOXYGEN_EXAMPLE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_consumer")
+  set(DOXYGEN_EXAMPLE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_consumer"
+    "${CMAKE_CURRENT_SOURCE_DIR}/examples" "${CMAKE_CURRENT_SOURCE_DIR}/tests/support")
+  set(DOXYGEN_EXAMPLE_RECURSIVE YES)
   set(DOXYGEN_IMAGE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/docs/images")
   set(DOXYGEN_WARN_AS_ERROR YES)
   set(DOXYGEN_WARN_NO_PARAMDOC YES)
@@ -434,14 +459,19 @@ if(PORTALS_BUILD_DOCS)
   set(DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/docs")
 
   doxygen_add_docs(portals_docs include README.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/scheduler.md docs/widget-tree.md docs/layout.md docs/grid.md docs/property.md docs/diagnostics.md docs/focus.md docs/model.md docs/input.md docs/terminal.md docs/terminal-probe.md docs/controls.md docs/line-edit.md docs/virtual-list.md docs/virtual-table.md docs/scroll.md docs/chart.md
-    docs/styles.md docs/managed-controls.md docs/declarative-ui.md docs/package.md docs/application.md docs/examples.md docs/architecture.md docs/getting-started.md docs/limitations.md docs/api-design.md experiments/module-spike/README.md fuzz/README.md
-    vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md
+    docs/styles.md docs/managed-controls.md docs/declarative-ui.md docs/managed-performance.md docs/package.md docs/application.md docs/examples.md docs/architecture.md docs/getting-started.md docs/limitations.md docs/api-design.md experiments/module-spike/README.md fuzz/README.md
+    vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md vendor/textual/README.md
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Generate Portals API documentation"
   )
   add_custom_command(TARGET portals_docs POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
       "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt" "${CMAKE_CURRENT_BINARY_DIR}/docs/html/LICENSE.txt"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/docs/html/vendor/textual"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "${CMAKE_CURRENT_SOURCE_DIR}/vendor/textual/LICENSE" "${CMAKE_CURRENT_BINARY_DIR}/docs/html/vendor/textual/LICENSE"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+      "${CMAKE_CURRENT_SOURCE_DIR}/docs/measurements" "${CMAKE_CURRENT_BINARY_DIR}/docs/html/measurements"
     COMMAND ${CMAKE_COMMAND} -E make_directory
       "${CMAKE_CURRENT_BINARY_DIR}/docs/html/tests/fixtures/unicode"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different

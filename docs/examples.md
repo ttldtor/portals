@@ -7,14 +7,39 @@ native terminal restoration or visual compatibility.
 
 | Program | What to try |
 | --- | --- |
-| `portals_gallery` | Tab through editor, checkbox, action and Quit; Enter commits; F2 switches themes. |
+| `portals_gallery` | Declarative managed form: Tab through editor, checkbox, action and Quit; Enter commits; F2 cycles six themes. |
 | `portals_dashboard` | Synthetic market, shared table/chart model, selection and delayed virtual ranges. |
-| `portals_custom_widget` | A custom meter widget and independent immutable model; Left/Right change its level. |
+| `portals_custom_widget` | A custom final meter with a managed presentation adapter and independent immutable model; Left/Right change its level, F2 cycles themes. |
 | `portals_replay_example` | The dashboard with the built-in recorded price tape selected by default. |
 
 F10 or Ctrl+C exits every interactive example. Mouse routing is provided by the
 existing bindings where supported by the terminal. The examples install no signal
 handlers and do not promise cleanup after abrupt process termination.
+
+## Gallery and custom widget options
+
+```text
+portals_gallery --theme nord
+portals_custom_widget --theme catppuccin-latte
+portals_gallery --check --theme gruvbox --ansi16
+```
+
+Both programs accept `--theme NAME`, `--ansi16`, `--check` and `--help`.
+`--theme` selects the initial palette: `modern` (default), `turbo`, `nord`,
+`gruvbox`, `tokyo-night`, or `catppuccin-latte`. F2 cycles in that order,
+including wraparound. `--ansi16` quantizes actual emitted colors to sixteen
+terminal colors; the terminal's configured ANSI palette determines their final
+appearance. `--check` uses a finite in-memory keyboard/resize replay and exits;
+it opens no native window. `--help` prints these options and exits. Unknown
+options or theme names and missing theme values return exit code 2. Runtime
+failures return 1 after the runner attempts terminal restoration; success is 0.
+The gallery also retains the historical `initial`, `keyboard`, `mouse` and
+`disabled` finite fixture modes. They use the same replay runner afterward.
+
+The four adapted [Textual palettes](styles.md) change colors
+through existing style transactions. They do not reproduce Textual's complete
+widget design or introduce a CSS cascade. The dashboard/replay example still
+uses Modern/Turbo and its existing explicit virtual-view preparation.
 
 ## Dashboard configuration
 
@@ -80,11 +105,14 @@ frame/tick/byte/queue totals after close.
 
 ## Where to start in the source
 
-`examples/gallery/form.hpp` shows explicit nodes, models and scoped bindings with
-`Application` handling the recurring terminal/frame mechanics. The older
+`examples/gallery/form.hpp` shows a complete owning `ui::column` form. Managed
+state, standard bindings, presentation synchronization and style registration
+are owned by `ManagedScene`; the application retains only business behavior,
+initial focus and scene-level keyboard commands. The older
 `gallery.hpp` finite fixture remains for existing semantic replay tests.
-`examples/custom_widget/main.cpp` shows an alternative provider and a widget which
-formats its presentation before rendering. `examples/dashboard/dashboard.hpp`
+`examples/custom_widget/meter.hpp` shows an alternative immutable provider and a
+final widget whose `.onPrepare` adapter formats changed presentation before
+rendering. This custom preparation remains explicit. `examples/dashboard/dashboard.hpp`
 shows shared pin preparation and an owning `pendingLatest` slot that is cleared
 only after the model publisher accepts it. No example requires private work files.
 
@@ -94,3 +122,26 @@ that ingress only, not the model's separate DATA endpoints. Null disables the
 sampling branch. `tickCount`, `scheduledTicks`, `pendingTicks` and `stoppedAt`
 expose observed provider progress for an external benchmark without inventing
 throughput from the configured rate. Observer storage remains caller-owned.
+
+## Complete gallery before and after
+
+These are complete form implementations, not abbreviated pseudocode. The
+frozen low-level form is compiled by `portals.gallery-managed`; the test replays
+keyboard editing, checkbox/action activation, mouse, Unicode, resize and the
+original Modern-to-Turbo switch through both implementations. It compares all
+terminal bytes, action counts and frame counts. A separate idle check requires
+exactly one frame. The shared `common.hpp` provides ordinary error reporting and
+text construction; it does not hide binding tokens or synchronization.
+
+### Before: explicit ownership and synchronization
+
+\include{lineno} gallery_before.hpp
+
+### After: managed declarative form
+
+\include{lineno} gallery/form.hpp
+
+The CLI parser and managed error reporter are additional application support,
+not costs silently attributed to the composition API. The complete installed
+consumer comparison remains available in [declarative composition](declarative-ui.md).
+Runtime costs and scaling limits have a separate [measurement guide](managed-performance.md).
