@@ -34,7 +34,7 @@ add_test(NAME consumer.model-widget COMMAND portals_package_consumer)
 set_tests_properties(consumer.model-widget PROPERTIES TIMEOUT 15)
 
 # Complete before/after forms are consumers of the relocated public package only.
-foreach(variant IN ITEMS before after)
+foreach(variant IN ITEMS before after declarative)
   add_executable(portals_form_${variant} form_${variant}.cpp)
   target_link_libraries(portals_form_${variant} PRIVATE portals::core)
   set_target_properties(portals_form_${variant} PROPERTIES CXX_EXTENSIONS OFF)
@@ -52,3 +52,11 @@ add_test(NAME consumer.form-equivalence
     -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_forms.cmake")
 add_test(NAME consumer.form-typed-error COMMAND portals_form_after --failure)
 set_tests_properties(consumer.form-equivalence consumer.form-typed-error PROPERTIES TIMEOUT 30)
+
+add_test(NAME consumer.form-declarative-equivalence
+  COMMAND "${CMAKE_COMMAND}"
+    "-DBEFORE=$<TARGET_FILE:portals_form_after>"
+    "-DAFTER=$<TARGET_FILE:portals_form_declarative>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_forms.cmake")
+add_test(NAME consumer.form-declarative-typed-error COMMAND portals_form_declarative --failure)
+set_tests_properties(consumer.form-declarative-equivalence consumer.form-declarative-typed-error PROPERTIES TIMEOUT 30)

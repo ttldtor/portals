@@ -121,6 +121,11 @@ if(PORTALS_BUILD_EXAMPLES)
 endif()
 
 if(PORTALS_BUILD_TESTS)
+  add_executable(portals_ui tests/ui.cpp)
+  target_link_libraries(portals_ui PRIVATE portals::core)
+  portals_enable_warnings(portals_ui)
+  add_test(NAME portals.ui COMMAND portals_ui)
+  set_tests_properties(portals.ui PROPERTIES TIMEOUT 20)
   add_executable(portals_managed tests/managed.cpp)
   target_link_libraries(portals_managed PRIVATE portals::core)
   portals_enable_warnings(portals_managed)
@@ -429,7 +434,7 @@ if(PORTALS_BUILD_DOCS)
   set(DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/docs")
 
   doxygen_add_docs(portals_docs include README.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/scheduler.md docs/widget-tree.md docs/layout.md docs/grid.md docs/property.md docs/diagnostics.md docs/focus.md docs/model.md docs/input.md docs/terminal.md docs/terminal-probe.md docs/controls.md docs/line-edit.md docs/virtual-list.md docs/virtual-table.md docs/scroll.md docs/chart.md
-    docs/styles.md docs/managed-controls.md docs/package.md docs/application.md docs/examples.md docs/architecture.md docs/getting-started.md docs/limitations.md docs/api-design.md experiments/module-spike/README.md fuzz/README.md
+    docs/styles.md docs/managed-controls.md docs/declarative-ui.md docs/package.md docs/application.md docs/examples.md docs/architecture.md docs/getting-started.md docs/limitations.md docs/api-design.md experiments/module-spike/README.md fuzz/README.md
     vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Generate Portals API documentation"

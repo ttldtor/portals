@@ -27,9 +27,14 @@ struct ManagedError {
   std::variant<TreeError, StyleError, ApplicationError> cause; ///< Unformatted original error.
   std::optional<ApplicationError> application;                 ///< Runner error, including terminal restoration.
   std::optional<TreeError> cleanup; ///< Independent failure while retiring the scene subtree.
+  std::optional<TextError> text{};  ///< Original text-validation category and byte offset, when text creation failed.
 };
 
 class ManagedScene;
+
+namespace ui::detail {
+struct Access;
+}
 
 /** @brief Owning, copyable custom input adapter; arguments are borrowed for one invocation.
  * @tparam T Concrete Widget subtype, including final types.
@@ -138,6 +143,20 @@ public:
   Node<Widget> root() const noexcept {
     return root_;
   }
+
+  /** @return Immutable text width policy shared with the borrowed Application. */
+  WidthPolicy widthPolicy() const noexcept {
+    return app_.widthPolicy();
+  }
+
+  /// @brief Retire one managed subtree and immediately reclaim its managed entry budget.
+  /// @param node Managed node other than root(); an already retired managed identity is accepted.
+  /// @return Success or typed boundary/removal error. State owners remain scene-owned.
+  /// Managed mutations reentering this remove call return WOULD_BLOCK.
+  /// An outer tree borrow can defer unmount beyond this call; those hooks follow the existing
+  /// tree contract and may remove other nodes. External callback effects are not rolled back.
+  /// Existing style metadata is pruned on the next style transaction, before budget admission.
+  std::expected<void, ManagedError> remove(Node<Widget> node);
 
   /** @brief Checked mount with automatic standard presentation and style registration.
    * Failure retires only the attempted child; earlier children remain owned. Destroying
@@ -401,6 +420,8 @@ public:
   void stop(Application &app) override;
 
 private:
+  friend struct ui::detail::Access;
+
   struct Entry {
     Node<Widget> node;
     std::optional<StyleTarget> target;

@@ -135,6 +135,57 @@ std::unexpected<ManagedError> ManagedScene::rollback(Node<Widget> node, TreeErro
   return std::unexpected(result);
 }
 
+std::expected<void, ManagedError> ManagedScene::remove(Node<Widget> node) {
+  auto allowed = boundary(ManagedPhase::CLEANUP, root_);
+
+  if (!allowed) {
+    return allowed;
+  }
+
+  if (node == root_) {
+    return std::unexpected(error(ManagedPhase::CLEANUP, node, TreeError::INVALID_ARGUMENT));
+  }
+
+  if (!find(node)) {
+    auto live = app_.tree().withScope(node, [](const UiScope &) {
+    });
+
+    if (!live && retired(live.error())) {
+      return {};
+    }
+
+    return std::unexpected(error(ManagedPhase::CLEANUP, node, live ? TreeError::INVALID_ARGUMENT : live.error()));
+  }
+
+  struct Removing {
+    bool &flag;
+
+    ~Removing() {
+      flag = false;
+    }
+  } guard{preparing_};
+
+  preparing_ = true;
+
+  auto removed = app_.tree().remove(node);
+
+  if (!removed && !retired(removed.error())) {
+    return std::unexpected(error(ManagedPhase::CLEANUP, node, removed.error()));
+  }
+
+  // Logical retirement is immediate even when the router still borrows an admitted callback.
+  // Do not call style hooks during rollback: pruning on its next transaction is allocation-safe.
+  std::erase_if(entries_, [&](const auto &entry) {
+    auto live = app_.tree().withScope(entry->node, [](const UiScope &) {
+    });
+
+    return !live && retired(live.error());
+  });
+  stylesDirty_ = true;
+
+  return {};
+}
+
 void ManagedScene::remember(ManagedError failure) {
   if (!failure_) {
     failure_ = std::move(failure);
