@@ -6,8 +6,8 @@ typed properties and immutable models, layouts, controls and LineEdit, virtual
 lists/tables, Canvas/charts, styles/themes, bounded terminal output and causal
 diagnostics.
 
-Start with [getting started](docs/getting-started.md), then the
-[runnable examples and keyboard/options](docs/examples.md). See
+Start with the [documentation guide and reading order](docs/index.md), then
+[build and run your first example](docs/getting-started.md). See
 [architecture](docs/architecture.md) for ownership, event flow and customization,
 [limitations](docs/limitations.md) for platform/lifecycle/output boundaries, and
 [installation](docs/package.md) for the relocatable CMake package.
@@ -123,31 +123,8 @@ Reference: [CMake presets](https://cmake.org/cmake/help/latest/manual/cmake-pres
 [CMake compile features](https://cmake.org/cmake/help/latest/manual/cmake-compile-features.7.html),
 [Doxygen integration](https://cmake.org/cmake/help/latest/module/FindDoxygen.html).
 
-Cell geometry: [units, clipping and numeric bounds](docs/geometry.md).
-
-UTF-8 text: [graphemes, width policy, cursor and clipping](docs/text.md).
-
-Frame output: [diff, transaction ownership and recovery](docs/diff.md).
-
-VT input: [bounded streaming decoder, events, timing and recovery](docs/input.md).
-
-Widget interaction: [focus, semantic actions and safe event bubbling](docs/focus.md).
-
-Managed controls: [lifecycle ownership and complete before/after forms](docs/managed-controls.md).
-
-Headless testing: [fake clock, independent snapshots and versioned trace/replay](docs/testing.md).
-
-API design sketches: [five scenarios](docs/api-design.md). The independent
-[header/module/shared-library spike](experiments/module-spike/README.md) tests
-compilation mechanics; UI sketches are design-only.
-
-Virtual list: [preparation, ownership and fixed-row navigation](docs/virtual-list.md).
-
-Virtual table: [typed columns, shared snapshots and bounded preparation](docs/virtual-table.md).
-
-Architecture: [components, event processing, ownership and customization](docs/architecture.md).
-
-Scrolling: [fractional motion, identity anchors and viewport culling](docs/scroll.md).
+For the full topic map and suggested reading order, use the
+[documentation guide](docs/index.md).
 
 ## License
 
@@ -155,10 +132,4 @@ Portals code: Boost Software License 1.0; see [LICENSE.txt](LICENSE.txt).
 Private utf8proc code and Unicode data notices: [dependency provenance](vendor/utf8proc/README.md).
 Unicode test data retain their [full license](tests/fixtures/unicode/Unicode-LICENSE.txt).
 
-Basic controls and the finite, runnable gallery are described in [controls](docs/controls.md).
-
-Unicode draft editing, selection, bounded paste and an injected clipboard boundary are documented in [LineEdit](docs/line-edit.md).
-
-Styles: [typed themes, PSS v0, atomic updates and ANSI16 output](docs/styles.md).
-
-Declarative composition: [owning descriptions, control factories and custom adapters](docs/declarative-ui.md).
+Adapted theme colors: [Textual attribution](vendor/textual/README.md).

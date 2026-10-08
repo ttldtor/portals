@@ -135,9 +135,14 @@ text construction; it does not hide binding tokens or synchronization.
 
 ### Before: explicit ownership and synchronization
 
+[Open the complete source](../tests/support/gallery_before.hpp).
+The generated HTML reference embeds it below with line numbers.
+
 \include{lineno} gallery_before.hpp
 
 ### After: managed declarative form
+
+[Open the complete source](../examples/gallery/form.hpp).
 
 \include{lineno} gallery/form.hpp
 

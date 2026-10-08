@@ -6,6 +6,9 @@ same [Application runner](application.md). The [architecture](architecture.md)
 explains ownership and data flow; [limitations](limitations.md) defines the
 boundaries of this release.
 
+The [documentation guide](index.md) gives the reading order and separates
+application guides from core contracts and contributor material.
+
 ## Build from source
 
 Requirements are CMake 3.24+, Ninja, a C99 compiler for the private vendored
@@ -67,33 +70,33 @@ establish physical display compatibility or native restoration.
 
 ## Your own main
 
-The complete small button program on [Application](application.md) checks every
-creation/binding/run result. Its `Application` is constructed first, and its
-scene and scoped binding are destroyed first. Keep the binding alive during
-`run`; a temporary binding would cancel the action before the user could click.
-
-For a complete form, the interactive path in `examples/gallery/main.cpp` is:
+Start with [declarative composition](declarative-ui.md) for an ordinary form.
+The gallery's `Form` owns a `ManagedScene`, which retains its state, standard
+bindings and presentation adapters. The `Application` must outlive that form.
+The interactive path in `examples/gallery/main.cpp` is:
 
 ```cpp
 auto app = example::take(portals::Application::create());
 gallery::Form form(*app);
 
-return example::report(app->run(form));
+return example::report(form.run());
 ```
 
 This excerpt uses example helpers, not additional public APIs:
 `example::take` throws on a failed `expected`; main catches construction
 failures. `example::report` handles the run result after restoration. See
-`examples/gallery/form.hpp` for the actual nodes, properties, models and scoped
-bindings owned by the form. The shorter main removes recurring loop mechanics,
-not lifetime or error handling.
+`examples/gallery/form.hpp` for the complete form description. Its `onInput`
+adapter handles global commands; the scene manages standard presentation and
+bindings. [Managed controls](managed-controls.md) explains custom adapters.
 
-Derive `ApplicationScene` for global commands and preparation. In
+For explicit low-level ownership, [Application](application.md) shows a small
+button program with an `ApplicationScene` and a retained scoped binding.
+Derive `ApplicationScene` when managing commands and preparation yourself. In
 `prepare`, synchronize bindings, pin each model once, prepare its sibling
 views at their final extents, then handle returned provider requests outside
 rendering. A custom widget implements `measure/arrange/paint`; prepare its
-owning presentation before paint. `examples/custom_widget/main.cpp` shows
-an independent immutable model and this lifecycle in full.
+owning presentation before paint. `examples/custom_widget/meter.hpp` shows
+an independent immutable model and a managed preparation adapter.
 
 ## Diagnose an action
 
@@ -121,14 +124,15 @@ cmake -S . -B build/docs -G Ninja -DPORTALS_BUILD_DOCS=ON
 cmake --build build/docs --target portals_docs
 ```
 
-Open `build/docs/docs/html/index.html`. The docs-only finalizer repairs two
-recognized Doxygen 1.18 member-index anchor defects and copies linked license
-notices. It fails explicitly if that repair encounters an unknown index shape.
-An optional Python 3 gate checks all local file and anchor links:
-`python tools/docs/check_links.py build/docs/docs/html`. Generated help belongs to the build
-directory and needs no private work files. A downloadable archive containing
-executables, HTML help and an installed SDK is planned; this page documents
-source builds and installation, not an already validated archive layout.
+Open `build/docs/docs/html/index.html`. Start with the reading guide; use the
+sidebar's API reference when you need a specific type or function. The HTML
+directory includes example source listings and license notices for offline
+reading. Generated help needs no private work files.
+
+When changing documentation, check its local file and anchor links with
+`python tools/docs/check_links.py build/docs/docs/html` (Python 3 is optional
+for ordinary builds). This page covers source builds and installation;
+the [package guide](package.md) describes distribution and consumer checks.
 
 References: [CMake presets](https://cmake.org/cmake/help/latest/manual/cmake-presets.7.html),
 [CMake build tool mode](https://cmake.org/cmake/help/latest/manual/cmake.1.html),

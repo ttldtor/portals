@@ -1,9 +1,35 @@
 # Copyright (c) 2026 ttldtor.
 # SPDX-License-Identifier: BSL-1.0
-# Repair only the two recognized Doxygen 1.18 member-index anchor defects.
+# Finalize portable example links and recognized Doxygen 1.18 index defects.
 if(NOT DEFINED HTML_DIR OR NOT IS_DIRECTORY "${HTML_DIR}")
   message(FATAL_ERROR "HTML_DIR must name the generated Doxygen HTML directory")
 endif()
+
+# GitHub links are relative to docs/*.md; generated HTML has a flat layout.
+# Ship the exact referenced sources inside the HTML tree so an offline copy
+# works without the repository or a hard-coded GitHub branch URL.
+set(example_sources
+  tests/support/gallery_before.hpp
+  examples/gallery/form.hpp
+  tests/package_consumer/form_declarative.cpp
+  tests/package_consumer/form_before.cpp
+  tests/package_consumer/form_after.cpp
+  tests/package_consumer/form_support.hpp
+  tests/package_consumer/form_replay.hpp)
+foreach(source IN LISTS example_sources)
+  get_filename_component(directory "${source}" DIRECTORY)
+  file(MAKE_DIRECTORY "${HTML_DIR}/source/${directory}")
+  configure_file("${CMAKE_CURRENT_LIST_DIR}/../${source}" "${HTML_DIR}/source/${source}" COPYONLY)
+endforeach()
+
+foreach(page examples managed-controls declarative-ui)
+  set(page_file "${HTML_DIR}/${page}.html")
+  file(READ "${page_file}" content)
+  foreach(source IN LISTS example_sources)
+    string(REPLACE "href=\"../${source}\"" "href=\"source/${source}\"" content "${content}")
+  endforeach()
+  file(WRITE "${page_file}" "${content}")
+endforeach()
 
 file(GLOB index_files "${HTML_DIR}/functions*.html")
 foreach(index_file IN LISTS index_files)

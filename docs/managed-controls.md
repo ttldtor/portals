@@ -191,16 +191,25 @@ the two `.cpp` files show all registration and lifecycle differences.
 
 ### Before: explicit binding ownership and presentation synchronization
 
+[Open the complete source](../tests/package_consumer/form_before.cpp).
+The generated HTML reference embeds these files below with line numbers.
+
 \include{lineno} form_before.cpp
 
 ### After: scene-owned lifecycle
+
+[Open the complete source](../tests/package_consumer/form_after.cpp).
 
 \include{lineno} form_after.cpp
 
 ### Shared custom widget and behavioral assertions
 
+[Open the shared widget and assertions](../tests/package_consumer/form_support.hpp).
+
 \include{lineno} form_support.hpp
 
 ### Shared deterministic terminal and input sequence
+
+[Open the replay fixture](../tests/package_consumer/form_replay.hpp).
 
 \include{lineno} form_replay.hpp

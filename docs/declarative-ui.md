@@ -80,6 +80,9 @@ the complete before/managed examples. Its full captured terminal output is
 compared with the existing managed form. The shared fixture supplies domain
 rendering and assertions; it contains no description mounting or binding setup.
 
+[Open the complete consumer source](../tests/package_consumer/form_declarative.cpp).
+The generated HTML reference embeds the same file below with line numbers.
+
 \include{lineno} form_declarative.cpp
 
 The executable is a finite, headless replay consumer, with no interactive window.
