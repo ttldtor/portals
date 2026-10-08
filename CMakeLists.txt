@@ -11,6 +11,9 @@ option(PORTALS_BUILD_FUZZERS "Build opt-in Clang libFuzzer targets with sanitize
 option(PORTALS_BUILD_DOCS "Build Portals API documentation with Doxygen" OFF)
 option(PORTALS_BUILD_TOOLS "Build the standalone terminal diagnostic probe" ${PROJECT_IS_TOP_LEVEL})
 
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
 include("${CMAKE_CURRENT_SOURCE_DIR}/vendor/utf8proc/verify.cmake")
 add_library(portals_utf8proc STATIC vendor/utf8proc/utf8proc.c)
 set_target_properties(portals_utf8proc PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED YES C_EXTENSIONS OFF)
@@ -32,8 +35,44 @@ target_include_directories(portals_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/ven
 target_compile_definitions(portals_core PRIVATE UTF8PROC_STATIC)
 add_library(portals::core ALIAS portals_core)
 target_compile_features(portals_core PUBLIC cxx_std_23)
-set_target_properties(portals_core PROPERTIES CXX_EXTENSIONS OFF)
-target_include_directories(portals_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+set_target_properties(portals_core PROPERTIES CXX_EXTENSIONS OFF EXPORT_NAME core)
+set_target_properties(portals_utf8proc PROPERTIES EXPORT_NAME utf8proc)
+target_include_directories(portals_core PUBLIC
+  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+  "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+)
+
+set(PORTALS_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/Portals")
+set(PORTALS_PACKAGE_NEEDS_THREADS OFF)
+if(UNIX)
+  set(PORTALS_PACKAGE_NEEDS_THREADS ON)
+endif()
+configure_package_config_file(cmake/PortalsConfig.cmake.in
+  "${CMAKE_CURRENT_BINARY_DIR}/PortalsConfig.cmake"
+  INSTALL_DESTINATION "${PORTALS_INSTALL_CMAKEDIR}"
+)
+write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/PortalsConfigVersion.cmake"
+  VERSION "${PROJECT_VERSION}" COMPATIBILITY SameMajorVersion
+)
+install(TARGETS portals_core portals_utf8proc EXPORT PortalsTargets
+  ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}/$<CONFIG>"
+)
+install(DIRECTORY include/portals DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+install(EXPORT PortalsTargets FILE PortalsTargets.cmake NAMESPACE portals::
+  DESTINATION "${PORTALS_INSTALL_CMAKEDIR}"
+)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/PortalsConfig.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/PortalsConfigVersion.cmake"
+  DESTINATION "${PORTALS_INSTALL_CMAKEDIR}"
+)
+install(FILES LICENSE.txt DESTINATION "${CMAKE_INSTALL_DATADIR}/Portals/licenses")
+install(FILES vendor/utf8proc/LICENSE.md
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/Portals/licenses" RENAME utf8proc-LICENSE.md
+)
+install(FILES vendor/utf8proc/manifest.json
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/Portals/utf8proc"
+)
+install(FILES docs/package.md DESTINATION "${CMAKE_INSTALL_DATADIR}/Portals/docs")
 target_compile_definitions(portals_core PRIVATE
   PORTALS_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
   PORTALS_VERSION_MINOR=${PROJECT_VERSION_MINOR}
@@ -82,6 +121,20 @@ if(PORTALS_BUILD_TESTS)
   add_test(NAME portals.style COMMAND portals_style "${CMAKE_CURRENT_SOURCE_DIR}/themes")
   set_tests_properties(portals.style PROPERTIES TIMEOUT 15)
   enable_testing()
+  set(portals_package_test_command "${CMAKE_COMMAND}"
+    "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}" "-DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+    "-DCONFIG=$<CONFIG>" "-DGENERATOR=${CMAKE_GENERATOR}"
+    "-DGENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}" "-DGENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
+    "-DCXX_COMPILER=${CMAKE_CXX_COMPILER}" "-DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
+    "-DMSVC_RUNTIME_LIBRARY=${CMAKE_MSVC_RUNTIME_LIBRARY}")
+  add_test(NAME portals.package-install COMMAND ${portals_package_test_command}
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_install.cmake")
+  if("Debug" IN_LIST CMAKE_CONFIGURATION_TYPES AND "Release" IN_LIST CMAKE_CONFIGURATION_TYPES)
+    add_test(NAME portals.package-install-multi-config COMMAND ${portals_package_test_command}
+      "-DINSTALL_CONFIGS=Debug;Release" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_install.cmake")
+    set_tests_properties(portals.package-install-multi-config PROPERTIES TIMEOUT 300 LABELS "package")
+  endif()
+  set_tests_properties(portals.package-install PROPERTIES TIMEOUT 180 LABELS "package")
   add_executable(portals_diagnostics tests/diagnostics.cpp)
   target_link_libraries(portals_diagnostics PRIVATE portals::core)
   portals_enable_warnings(portals_diagnostics)
@@ -303,7 +356,7 @@ if(PORTALS_BUILD_DOCS)
   set(DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/docs")
 
   doxygen_add_docs(portals_docs include README.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/scheduler.md docs/widget-tree.md docs/layout.md docs/grid.md docs/property.md docs/diagnostics.md docs/focus.md docs/model.md docs/input.md docs/terminal.md docs/terminal-probe.md docs/controls.md docs/line-edit.md docs/virtual-list.md docs/virtual-table.md docs/scroll.md docs/chart.md
-    docs/styles.md docs/architecture.md docs/api-design.md experiments/module-spike/README.md fuzz/README.md
+    docs/styles.md docs/package.md docs/architecture.md docs/api-design.md experiments/module-spike/README.md fuzz/README.md
     vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Generate Portals API documentation"

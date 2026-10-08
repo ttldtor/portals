@@ -82,7 +82,9 @@ width policy is authenticated by this diagnostic tool.
 
 Use `add_subdirectory(path/to/portals)` and link your target to `portals::core`.
 The target supplies its public include path and language standard.
-Installation and `find_package(Portals)` support are not available yet.
+For an installed package, use `find_package(Portals CONFIG REQUIRED)` and the
+same target. See [installation and relocation](docs/package.md) for commands,
+toolchain/runtime compatibility and the independent consumer test.
 
 The example is also a separate CMake project:
 
