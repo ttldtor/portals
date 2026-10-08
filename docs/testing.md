@@ -163,10 +163,12 @@ records child exit, exact termios/file-flag restoration, viewport changes, drive
 stages, and owned-process cleanup. Native launchers are opt-in; ordinary CTest
 never opens a terminal emulator.
 
-A `none` driver uses the caller's display (including WSLg) for finite native
-baseline programs and handled-error probes. It needs xterm but no XTest support.
-A `dashboard` driver additionally needs system Xvfb, xauth, xkbcomp (used by Xvfb),
-and the X11/XTest development libraries at configure time. CMake enables this
+Both drivers use a private Xvfb display by default, so automated runs cannot
+open windows over the caller's desktop. `-iconic` alone does not guarantee this
+on WSLg. A `none` driver runs finite native programs and handled-error probes
+without synthesizing input. Both drivers need xterm, Xvfb, xauth and xkbcomp
+(used by Xvfb). A `dashboard` driver additionally needs the X11/XTest development
+libraries at configure time. CMake enables this
 fixture's input driver only when both `X11::X11` and `X11::Xtst` are available;
 these are test dependencies, not dependencies of the Portals core. Without them,
 the supervisor still builds and `none` remains usable; `dashboard` fails before
@@ -179,7 +181,7 @@ sh tools/native_xterm.sh /usr/bin/xterm build/linux-gcc-debug/portals_terminal_c
   --trace /tmp/portals-native-dashboard.trace
 ```
 
-The log directory must not exist. The dashboard launcher creates its own free
+The log directory must not exist. By default, the launcher creates its own free
 nonzero Xvfb display with a private MIT-MAGIC-COOKIE-1 authority file, disables TCP
 listeners, and waits for that server's readiness. It ignores inherited isolation
 markers and replaces them with the created display and window title. The driver
@@ -190,6 +192,14 @@ translation belongs only to this xterm instance; no desktop keymap or clipboard
 is modified. `PORTALS_XVFB` may name an alternative Xvfb executable, and
 `PORTALS_XVFB_WORKDIR` its required working directory for a local test installation;
 both default to normal system behavior.
+
+For deliberate interactive inspection only, `PORTALS_NATIVE_VISIBLE=1` lets a
+`none` driver use the caller's `DISPLAY` and authority instead of Xvfb. This
+explicit choice may display a window over the desktop; it is rejected for
+`dashboard` so synthetic input remains isolated. The default is `0`; any other
+value is rejected. `launch.log` records the choice and actual display. Private
+Xvfb timings describe an offscreen X11 server and must not be labelled as WSLg
+desktop timings.
 
 XTest provides server-side keyboard, pointer motion and button press/release.
 The fixture does not enable `allowSendEvents` or relax `allowMouseOps`: xterm's
