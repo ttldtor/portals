@@ -45,35 +45,6 @@ TerminalDeadline deadlineAt(SchedulerTime time) {
   return TerminalDeadline(std::chrono::milliseconds(time));
 }
 
-class NativeTerminal final : public ApplicationTerminal {
-public:
-  explicit NativeTerminal(TerminalSession session) : session_(std::move(session)) {
-  }
-
-  TerminalRead read(TerminalDeadline deadline, std::stop_token stop) override {
-    return session_.read(deadline, stop);
-  }
-
-  std::expected<CellSize, TerminalError> size() const override {
-    return session_.size();
-  }
-
-  std::expected<void, TerminalError> submit(std::string bytes) override {
-    return session_.submit(std::move(bytes));
-  }
-
-  TerminalWrite flush(TerminalDeadline deadline, std::stop_token stop) override {
-    return session_.flush(deadline, stop);
-  }
-
-  std::expected<void, TerminalError> close() noexcept override {
-    return session_.close();
-  }
-
-private:
-  TerminalSession session_;
-};
-
 class SurfacePaint final : public PaintContext {
 public:
   SurfacePaint(NodeGeometry geometry, std::vector<RenderCommand> &commands, std::size_t limit)
@@ -609,7 +580,8 @@ std::expected<ApplicationStats, ApplicationError> Application::run(ApplicationSc
 #else
     NativeTerminalHandles handles{0, 1};
 #endif
-    auto opened = TerminalSession::open(handles, state_->options.terminal);
+    auto opened = openNativeApplicationTerminal(handles, state_->options.terminal, state_->options.outputSlice,
+                                                state_->options.nativeMouseReporting);
 
     if (!opened) {
       state_->ran = true;
@@ -617,9 +589,7 @@ std::expected<ApplicationStats, ApplicationError> Application::run(ApplicationSc
       return std::unexpected(ApplicationError{ApplicationPhase::OPEN, opened.error(), {}});
     }
 
-    NativeTerminal terminal(std::move(*opened));
-
-    return run(scene, terminal, stop);
+    return run(scene, **opened, stop);
   } catch (const std::bad_alloc &) {
     state_->ran = true;
 
