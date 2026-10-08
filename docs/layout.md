@@ -50,6 +50,11 @@ The pass does not create a frame. This precondition is contractual: the current
 tree API has no active-frame query. One frame can encompass layout, paint and
 rendering of borrowed commands:
 
+A preliminary pass may instead capture an owning `LayoutSnapshot`, as the
+[layout-driven view preparation](virtual-preparation.md) runner does. It does
+not retain widget borrows or render commands; final layout, paint and rendering
+still share one frame.
+
 ```cpp
 // Between frames, after a viewport change:
 auto invalidation = tree.invalidate(root, portals::Invalidation::LAYOUT);

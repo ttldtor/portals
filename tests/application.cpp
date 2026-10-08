@@ -261,15 +261,48 @@ void outputAndCleanup() {
   check(!limit && std::get<FrameError>(limit.error().cause) == FrameError::OUTPUT_LIMIT && overLimit.closed);
 }
 
-void diagnostics() {
+class DiagnosticScene final : public Scene {
+public:
+  using Scene::Scene;
+
+  bool usesPreparedLayout() const noexcept override {
+    return preparedLayout;
+  }
+
+  std::expected<void, TreeError> prepare(Application &app, CellSize size) override {
+    remaining = layoutRequests;
+
+    return Scene::prepare(app, size);
+  }
+
+  std::expected<void, TreeError> prepareViews(Application &app, const LayoutSnapshot &) override {
+    if (remaining) {
+      --remaining;
+
+      return app.tree().invalidate(app.root(), Invalidation::LAYOUT);
+    }
+
+    return {};
+  }
+
+  bool preparedLayout{};
+  std::size_t layoutRequests{}, remaining{};
+};
+
+void diagnostics(bool preparedLayout = false, bool resize = false, std::size_t layoutRequests = 0) {
   ApplicationOptions options;
   auto recorder = std::make_shared<Diagnostics>();
   take(recorder->enable({1024}));
   options.scheduler.diagnostics = recorder;
-  example::ReplayTerminal terminal({{100, "x", {}}}, 200);
+  const auto input =
+    resize ? example::ReplayTerminal::Input{100, {}, CellSize{40, 10}} : example::ReplayTerminal::Input{100, "x", {}};
+  example::ReplayTerminal terminal({input}, 200);
 
   auto app = take(Application::create(options, terminal.clock()));
-  Scene scene(*app);
+  DiagnosticScene scene(*app);
+
+  scene.preparedLayout = preparedLayout;
+  scene.layoutRequests = layoutRequests;
   scene.change = scene.prepareChanges = true;
   take(app->run(scene, terminal));
 
@@ -329,6 +362,269 @@ void stopAndObserver() {
   take(stopApp->run(stopScene, cancelled, stop.get_token()));
   check(cancelled.closed && stopScene.stopped && cancelled.output.empty());
 }
+
+struct PreparationTrace {
+  std::vector<std::string> phases;
+  std::vector<CellSize> sizes;
+  std::optional<TreeError> measureFailure;
+  std::size_t preparations{}, viewPasses{}, paints{};
+  bool throwMeasure{};
+};
+
+class PreparationProbe : public Widget {
+public:
+  explicit PreparationProbe(PreparationTrace &trace) : trace_(trace) {
+  }
+
+  std::expected<CellSize, TreeError> measure(CellSize available) override {
+    trace_.phases.emplace_back("measure");
+
+    if (trace_.throwMeasure) {
+      throw std::runtime_error("measure");
+    }
+
+    if (trace_.measureFailure) {
+      return std::unexpected(*trace_.measureFailure);
+    }
+
+    return available;
+  }
+
+  std::expected<void, TreeError> arrange(CellRect) override {
+    trace_.phases.emplace_back("arrange");
+
+    return {};
+  }
+
+  std::expected<void, TreeError> paint(PaintContext &) override {
+    trace_.phases.emplace_back("paint");
+    ++trace_.paints;
+
+    return {};
+  }
+
+private:
+  PreparationTrace &trace_;
+};
+
+class PreparedScene : public ApplicationScene {
+public:
+  explicit PreparedScene(Application &app) : probe(take(app.tree().emplace<PreparationProbe>(app.root(), trace))) {
+  }
+
+  bool usesPreparedLayout() const noexcept override {
+    return optIn;
+  }
+
+  std::expected<void, TreeError> prepare(Application &, CellSize) override {
+    trace.phases.emplace_back("prepare");
+    ++trace.preparations;
+    currentPass = 0;
+
+    return {};
+  }
+
+  std::expected<void, TreeError> prepareViews(Application &app, const LayoutSnapshot &snapshot) override {
+    trace.phases.emplace_back("views");
+    ++trace.viewPasses;
+    ++currentPass;
+    trace.sizes.push_back(take(snapshot.viewport(probe)));
+    take(app.tree().edit(probe, [](PreparationProbe &) {
+    }));
+
+    if (throwViews) {
+      throw std::runtime_error("views");
+    }
+
+    if (failure) {
+      return std::unexpected(*failure);
+    }
+
+    const auto invalidation = currentPass <= layoutRequests ? Invalidation::LAYOUT : Invalidation::PAINT;
+
+    take(app.tree().invalidate(probe, invalidation));
+    check(take(snapshot.viewport(probe)) == trace.sizes.back());
+
+    return {};
+  }
+
+  void stop(Application &) override {
+    stopped = true;
+  }
+
+  PreparationTrace trace;
+  Node<PreparationProbe> probe;
+  std::optional<TreeError> failure;
+  std::size_t layoutRequests{}, currentPass{};
+  bool optIn{true}, throwViews{}, stopped{};
+};
+
+void preparationOrderAndIdle() {
+  check(!ApplicationScene{}.usesPreparedLayout());
+
+  example::ReplayTerminal oldTerminal({}, 300);
+  auto oldApp = take(Application::create({}, oldTerminal.clock()));
+  PreparedScene oldScene(*oldApp);
+
+  oldScene.optIn = false;
+
+  const auto oldResult = take(oldApp->run(oldScene, oldTerminal));
+
+  check(oldResult.frames == 1 && oldScene.trace.preparations == 1 && oldScene.trace.viewPasses == 0);
+  check(oldScene.trace.phases == std::vector<std::string>{"prepare", "measure", "arrange", "paint"});
+
+  example::ReplayTerminal terminal({}, 300);
+  auto app = take(Application::create({}, terminal.clock()));
+  PreparedScene scene(*app);
+
+  scene.layoutRequests = 1;
+
+  const auto result = take(app->run(scene, terminal));
+
+  check(result.frames == 1 && scene.trace.preparations == 1 && scene.trace.viewPasses == 2);
+  check(scene.trace.phases == std::vector<std::string>{"prepare", "measure", "arrange", "views", "measure", "arrange",
+                                                       "views", "measure", "arrange", "paint"});
+  check(scene.trace.sizes == std::vector<CellSize>{{80, 24}, {80, 24}});
+  check(take(app->tree().consumeFrameRequest()) == Invalidation::NONE);
+}
+
+void preparationResize() {
+  example::ReplayTerminal terminal({{100, {}, CellSize{32, 7}}}, 300);
+  auto app = take(Application::create({}, terminal.clock()));
+  PreparedScene scene(*app);
+
+  const auto result = take(app->run(scene, terminal));
+
+  check(result.frames == 2 && scene.trace.preparations == 2 && scene.trace.viewPasses == 2);
+  check(scene.trace.sizes == std::vector<CellSize>{{80, 24}, {32, 7}});
+  check(scene.trace.paints == 2);
+}
+
+void preparationFailures() {
+  ApplicationOptions invalid;
+
+  invalid.maxPreparationPasses = 0;
+
+  const auto rejected = Application::create(invalid);
+
+  check(!rejected && std::get<ApplicationFailure>(rejected.error().cause) == ApplicationFailure::INVALID_OPTIONS);
+
+  for (const auto budget : {std::size_t{1}, std::size_t{3}}) {
+    ApplicationOptions options;
+
+    options.maxPreparationPasses = budget;
+
+    example::ReplayTerminal terminal;
+    auto app = take(Application::create(options, terminal.clock()));
+    PreparedScene scene(*app);
+
+    scene.layoutRequests = budget;
+
+    const auto result = app->run(scene, terminal);
+
+    check(!result && result.error().phase == ApplicationPhase::PREPARE);
+    check(std::get<TreeError>(result.error().cause) == TreeError::WOULD_BLOCK);
+    check(scene.trace.preparations == 1 && scene.trace.viewPasses == budget && scene.trace.paints == 0);
+    check(terminal.output.empty() && terminal.closed && scene.stopped);
+  }
+
+  for (const bool throwing : {false, true}) {
+    example::ReplayTerminal terminal;
+    auto app = take(Application::create({}, terminal.clock()));
+    PreparedScene scene(*app);
+
+    scene.throwViews = throwing;
+    scene.failure = TreeError::STALE_NODE;
+
+    const auto result = app->run(scene, terminal);
+
+    check(!result && result.error().phase == ApplicationPhase::PREPARE);
+
+    if (throwing) {
+      check(std::get<ApplicationFailure>(result.error().cause) == ApplicationFailure::CALLBACK_FAILED);
+    } else {
+      check(std::get<TreeError>(result.error().cause) == TreeError::STALE_NODE);
+    }
+
+    check(scene.trace.preparations == 1 && scene.trace.viewPasses == 1 && scene.trace.paints == 0);
+    check(terminal.output.empty() && terminal.closed && scene.stopped);
+  }
+}
+
+void owningLayoutSnapshot() {
+  auto app = take(Application::create());
+  auto container = take(app->tree().emplace<Column>(app->root()));
+  auto hidden = take(app->tree().emplace<Widget>(container));
+  auto descendant = take(app->tree().emplace<Widget>(hidden));
+  auto visible = take(app->tree().emplace<Widget>(container));
+
+  take(app->tree().setVisible(hidden, false));
+  take(app->tree().setEnabled(visible, false));
+
+  const auto invalid = LayoutSnapshot::capture(app->tree(), app->root());
+
+  check(!invalid && invalid.error() == TreeError::INVALID_GEOMETRY);
+
+  const auto rect = take(CellRect::from({}, {40, 8}));
+  std::optional<LayoutSnapshot> snapshot;
+
+  take(app->tree().frame([&] {
+    take(layoutTree(app->tree(), app->root(), rect, rect));
+    snapshot.emplace(take(LayoutSnapshot::capture(app->tree(), app->root())));
+  }));
+
+  const auto visibleSize = take(app->tree().inspect(visible)).geometry.local.size();
+
+  check(take(snapshot->viewport(visible)) == visibleSize && visibleSize.width == 40);
+  check(take(snapshot->viewport(hidden)) == CellSize{});
+  check(take(snapshot->viewport(descendant)) == CellSize{});
+
+  const auto subtree = take(LayoutSnapshot::capture(app->tree(), descendant));
+  const auto outside = subtree.viewport(hidden);
+
+  check(take(subtree.viewport(descendant)) == CellSize{});
+  check(!outside && outside.error() == TreeError::STALE_NODE);
+  take(app->tree().invalidate(visible, Invalidation::LAYOUT));
+  check(take(snapshot->viewport(visible)) == visibleSize);
+  take(app->tree().remove(visible));
+
+  auto replacement = take(app->tree().emplace<Widget>(container));
+  const auto absent = snapshot->viewport(replacement);
+  auto other = take(Application::create());
+  const auto wrongSession = snapshot->viewport(other->root());
+
+  check(replacement.id().slot == visible.id().slot && replacement.id().generation != visible.id().generation);
+  check(!absent && absent.error() == TreeError::STALE_NODE);
+  check(!wrongSession && wrongSession.error() == TreeError::WRONG_SESSION);
+
+  auto copied = *snapshot;
+  auto moved = std::move(copied);
+  const auto movedFrom = copied.viewport(visible);
+
+  check(!movedFrom && movedFrom.error() == TreeError::STALE_NODE);
+  check(take(moved.viewport(visible)) == visibleSize);
+  app.reset();
+  check(take(snapshot->viewport(visible)) == visibleSize);
+}
+
+void preparationLayoutFailures() {
+  for (const bool throwing : {false, true}) {
+    example::ReplayTerminal terminal;
+    auto app = take(Application::create({}, terminal.clock()));
+    PreparedScene scene(*app);
+
+    scene.trace.throwMeasure = throwing;
+    scene.trace.measureFailure = TreeError::INVALID_ARGUMENT;
+
+    const auto result = app->run(scene, terminal);
+    const auto expected = throwing ? TreeError::CALLBACK_FAILED : TreeError::INVALID_ARGUMENT;
+
+    check(!result && result.error().phase == ApplicationPhase::PREPARE);
+    check(std::get<TreeError>(result.error().cause) == expected);
+    check(scene.trace.preparations == 1 && scene.trace.viewPasses == 0 && scene.trace.paints == 0);
+    check(terminal.output.empty() && terminal.closed && scene.stopped);
+  }
+}
 } // namespace
 
 int main() {
@@ -344,8 +640,16 @@ int main() {
     eofCutoffRetainsFrameCap();
     std::cerr << "diagnostics\n";
     diagnostics();
+    diagnostics(true);
+    diagnostics(true, true);
+    diagnostics(true, false, 2);
     std::cerr << "stopAndObserver\n";
     stopAndObserver();
+    preparationOrderAndIdle();
+    preparationResize();
+    preparationFailures();
+    owningLayoutSnapshot();
+    preparationLayoutFailures();
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
 

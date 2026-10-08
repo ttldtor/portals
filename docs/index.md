@@ -27,7 +27,7 @@ before writing a form. Consult the chapters below as needed.
 | Choose and arrange controls | [Basic controls](controls.md), [LineEdit](line-edit.md), [Row and Column](layout.md), [Grid and Overlay](grid.md) |
 | Apply colors and themes | [Styles and themes](styles.md) |
 | Connect state and data | [Properties](property.md), [immutable models](model.md) |
-| Display large datasets | [Virtual lists](virtual-list.md), [virtual tables](virtual-table.md), [scrolling](scroll.md), [charts](chart.md) |
+| Display large datasets | [Layout-driven preparation](virtual-preparation.md), [virtual lists](virtual-list.md), [virtual tables](virtual-table.md), [scrolling](scroll.md), [charts](chart.md) |
 | Explain an action that did nothing | [Diagnostics](diagnostics.md), [terminal probe](terminal-probe.md) |
 
 ## Understand the core

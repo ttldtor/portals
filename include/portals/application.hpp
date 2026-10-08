@@ -5,32 +5,33 @@
 #include <portals/action.hpp>
 #include <portals/diff.hpp>
 #include <portals/layout.hpp>
+#include <portals/layout_snapshot.hpp>
 #include <portals/render.hpp>
 
 namespace portals {
 
 /** @brief Synchronous runner phase, also used to identify a failure boundary. */
 enum class ApplicationPhase {
-  CREATE,
-  OPEN,
-  INPUT,
-  DISPATCH,
-  PREPARE,
-  RENDER,
-  SUBMIT,
-  FLUSH,
-  STOP,
-  CLOSE,
-  CONTROL_LATENCY
+  CREATE,         ///< Validate options and construct the application and its core services.
+  OPEN,           ///< Enter a run and initialize its transport and runner state.
+  INPUT,          ///< Read, decode and enqueue terminal input or resize events.
+  DISPATCH,       ///< Deliver queued work through the existing scheduler.
+  PREPARE,        ///< Synchronize scene state and, when enabled, prepare views after preliminary layout.
+  RENDER,         ///< Lay out and paint the final frame, then consume commands into an owning cell buffer.
+  SUBMIT,         ///< Give the owning frame to FrameWriter for diff encoding; no transport write occurs here.
+  FLUSH,          ///< Write pending encoded output within the configured deadline.
+  STOP,           ///< Request cancellation, stop the scheduler and invoke the scene's stop hook.
+  CLOSE,          ///< Close the transport and attempt restoration of terminal state.
+  CONTROL_LATENCY ///< Observer-only logical queue delay for the runner's input/resize channel, not a work phase.
 };
 
 /** @brief Failures introduced by the runner itself. */
 enum class ApplicationFailure {
-  INVALID_OPTIONS,
-  ALREADY_RUN,
-  NO_MEMORY,
-  CALLBACK_FAILED,
-  OBSERVER_FAILED
+  INVALID_OPTIONS, ///< Runner options are invalid, or a native run was requested with an injected clock.
+  ALREADY_RUN,     ///< This application has already entered its single permitted run.
+  NO_MEMORY,       ///< Allocation failed at a runner exception boundary.
+  CALLBACK_FAILED, ///< A non-allocation exception escaped into a runner callback boundary.
+  OBSERVER_FAILED  ///< The optional measurement observer threw an exception.
 };
 
 /** @brief Original component error; no formatted text or borrowed exception is retained. */
@@ -82,6 +83,7 @@ struct ApplicationOptions {
   std::chrono::milliseconds inputSlice{10};    ///< Positive future read deadline; never read(now).
   std::chrono::milliseconds outputSlice{2000}; ///< Positive flush budget; Windows timeout can be uncertain.
   ApplicationObserver observer{};              ///< Optional borrowed measurement callback.
+  std::size_t maxPreparationPasses{3};         ///< Positive layout/view preparation budget for opt-in scenes per frame.
 };
 
 /** @brief Owning totals from a completed run, without samples or terminal data. */
@@ -161,13 +163,15 @@ class Application;
 class ApplicationScene {
 public:
   virtual ~ApplicationScene() = default; ///< Destroy bindings/providers before their Application owner.
-  /** @brief Synchronize controls and pin each model once; prepare every view from that same pin.
-   * Called only when a dirty frame can be submitted, outside tree.frame. Retained view preparations own
-   * pins; custom widgets must retain any other borrowed render data until rendering completes.
-   * @param application Borrowed UI services.
-   * @param size Viewport for this frame; prepare virtual views with their final layout sizes.
-   * @return Success or preparation error; no frame is submitted on failure.
-   */
+  /// @brief Synchronize controls and pin each model once for a dirty frame.
+  /// Called only when a dirty frame can be submitted, outside tree.frame.
+  /// Retained view preparations own pins; custom widgets retain any other borrowed
+  /// render data until rendering completes. Opt-in scenes retain the same pins
+  /// through every prepareViews pass and final rendering.
+  /// @param application Borrowed UI services.
+  /// @param size Terminal viewport for this frame; legacy scenes prepare views with
+  /// their final sizes here, while opt-in scenes obtain sizes in prepareViews.
+  /// @return Success or preparation error; no frame is submitted on failure.
   virtual std::expected<void, TreeError> prepare(Application &application, CellSize size);
   /** @brief Optional global command interception inside the bounded CONTROL callback.
    * @param application Borrowed UI services; requestStop is valid here.
@@ -179,6 +183,23 @@ public:
    * @param application Still-live UI services; scheduler has already been stopped.
    */
   virtual void stop(Application &application);
+  /// @brief Opt into bounded layout-driven view preparation; default is false.
+  /// @return True to run preliminary layout and prepareViews before the final frame.
+  /// False preserves the original single layout/paint/render path.
+  virtual bool usesPreparedLayout() const noexcept;
+  /// @brief Prepare views from one owning layout snapshot; default is a no-op.
+  /// Called only for opt-in scenes, on UI outside tree.frame, after prepare has
+  /// pinned models once. Use those same pins for all views and repeated passes;
+  /// do not dispatch the scheduler or replace pins here. Snapshot reads survive
+  /// invalidations caused by earlier views. A new LAYOUT request repeats layout
+  /// and this hook up to ApplicationOptions::maxPreparationPasses; PAINT does not.
+  /// @param application Borrowed UI services, available for checked view mutation.
+  /// @param snapshot Immutable owning geometry for this pass, borrowed for the call;
+  /// copy it if retention is needed. Hidden subtree viewports are zero.
+  /// @return Success or the original view error; failure submits no frame.
+  /// Exhausting the pass budget returns WOULD_BLOCK in PREPARE.
+  /// Hook exceptions also fail PREPARE.
+  virtual std::expected<void, TreeError> prepareViews(Application &application, const LayoutSnapshot &snapshot);
 };
 
 /** @brief One UI owner for scheduler, tree, routing and a single terminal run.

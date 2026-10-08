@@ -42,6 +42,12 @@ views from that pin using their final layout extents. `VirtualTable` and `Chart`
 retain their own copies of the pin and immutable prepared data. Dispatch returned
 `ModelRequest` receipts outside rendering; no provider work starts implicitly.
 
+For nested virtual views, opt into [layout-driven preparation](virtual-preparation.md).
+The runner then calls `prepareViews(application, snapshot)` after a preliminary
+layout, outside the tree frame. All siblings use the same owning geometry and
+the pins retained by `prepare`; bounded layout retries never repin models.
+The original explicit-size path remains the default.
+
 The runner performs layout, traverses visible nodes, translates local paint
 commands through the arranged surface geometry and clips, and consumes every
 borrowed text command into an owning `CellBuffer` before leaving the frame.

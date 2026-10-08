@@ -178,7 +178,9 @@ for the application consuming this API.
 ## Implemented flow
 
 ```mermaid
-flowchart LR
+flowchart TB
+  accTitle: Diagnostic event flow
+  accDescr: Input, dispatch, handlers and output contribute metadata to one bounded diagnostic ring. The application takes an owning snapshot between frames and writes its export after terminal restoration.
   I[Application input scope] --> Q[Existing Scheduler queue]
   Q --> R[EventRouter target and action]
   R --> H[Handler and Property evidence]

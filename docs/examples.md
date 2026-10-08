@@ -41,6 +41,10 @@ through existing style transactions. They do not reproduce Textual's complete
 widget design or introduce a CSS cascade. The dashboard/replay example still
 uses Modern/Turbo and its existing explicit virtual-view preparation.
 
+For nested tables and charts, the [layout preparation examples](virtual-preparation.md)
+show complete before/after C++23 consumers of the installed package. These finite
+examples test automatic view extents; the interactive dashboard migration is separate.
+
 ## Dashboard configuration
 
 ```text

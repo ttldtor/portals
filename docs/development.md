@@ -26,6 +26,18 @@ readers. Build `portals_docs` and run `tools/docs/check_links.py` as described i
 [getting started](getting-started.md). Inspect the generated navigation as well
 as checking links: a valid link does not establish a useful reading order.
 
+Use fenced `mermaid` blocks for flow and ownership diagrams. The same Markdown
+renders on GitHub and in Doxygen; do not maintain a separate hand-aligned ASCII
+copy. Give each diagram an `accTitle` and an `accDescr`, keep labels short, and
+prefer vertical flow or several smaller diagrams to one very wide graph.
+
+The documentation build requires Mermaid CLI and renders SVG locally. Its
+shared theme is configured in `docs/mermaid.json`. Diagrams use a light neutral
+canvas inside either documentation theme, and scale down to the page width.
+Check the generated images as well as parser success: valid Mermaid can still
+produce an unreadable layout. Existing architecture SVG illustrations remain
+ordinary image assets.
+
 ## Licenses and provenance
 
 Portals uses the Boost Software License 1.0 (`LICENSE.txt` in the repository root).

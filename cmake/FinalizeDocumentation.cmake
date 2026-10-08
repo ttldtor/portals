@@ -5,6 +5,8 @@ if(NOT DEFINED HTML_DIR OR NOT IS_DIRECTORY "${HTML_DIR}")
   message(FATAL_ERROR "HTML_DIR must name the generated Doxygen HTML directory")
 endif()
 
+include("${CMAKE_CURRENT_LIST_DIR}/FinalizeDiagrams.cmake")
+
 # GitHub links are relative to docs/*.md; generated HTML has a flat layout.
 # Ship the exact referenced sources inside the HTML tree so an offline copy
 # works without the repository or a hard-coded GitHub branch URL.
@@ -15,14 +17,19 @@ set(example_sources
   tests/package_consumer/form_before.cpp
   tests/package_consumer/form_after.cpp
   tests/package_consumer/form_support.hpp
-  tests/package_consumer/form_replay.hpp)
+  tests/package_consumer/form_replay.hpp
+  tests/package_consumer/virtual_before.cpp
+  tests/package_consumer/virtual_after.cpp
+  tests/package_consumer/virtual_scene.hpp
+  tests/package_consumer/virtual_support.hpp
+  tests/package_consumer/virtual_lifecycle.cpp)
 foreach(source IN LISTS example_sources)
   get_filename_component(directory "${source}" DIRECTORY)
   file(MAKE_DIRECTORY "${HTML_DIR}/source/${directory}")
   configure_file("${CMAKE_CURRENT_LIST_DIR}/../${source}" "${HTML_DIR}/source/${source}" COPYONLY)
 endforeach()
 
-foreach(page examples managed-controls declarative-ui)
+foreach(page examples managed-controls declarative-ui virtual-preparation)
   set(page_file "${HTML_DIR}/${page}.html")
   file(READ "${page_file}" content)
   foreach(source IN LISTS example_sources)

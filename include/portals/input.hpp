@@ -32,39 +32,40 @@ struct InputModifiers {
 
 /** @brief Semantic key identities; character uses KeyEvent::scalar. */
 enum class InputKey {
-  CHARACTER,
-  ESCAPE,
-  ENTER,
-  TAB,
-  BACKSPACE,
-  UP,
-  DOWN,
-  RIGHT,
-  LEFT,
-  HOME,
-  END,
-  INSERT,
-  DELETE_KEY,
-  PAGE_UP,
-  PAGE_DOWN,
-  F1,
-  F2,
-  F3,
-  F4,
-  F5,
-  F6,
-  F7,
-  F8,
-  F9,
-  F10,
-  F11,
-  F12
+  CHARACTER,  ///< Character key identified by KeyEvent::scalar; VT uses this for control combinations.
+  ESCAPE,     ///< Escape key, including a standalone ESC resolved by timeout or end of input.
+  ENTER,      ///< Enter key; the VT profile maps carriage return to this identity.
+  TAB,        ///< Tab key; modifiers distinguish Shift+Tab.
+  BACKSPACE,  ///< Backspace key; the VT profile accepts both BS and DEL bytes.
+  UP,         ///< Up arrow key.
+  DOWN,       ///< Down arrow key.
+  RIGHT,      ///< Right arrow key.
+  LEFT,       ///< Left arrow key.
+  HOME,       ///< Home navigation key.
+  END,        ///< End navigation key.
+  INSERT,     ///< Insert key.
+  DELETE_KEY, ///< Delete key, distinct from the DEL byte decoded as Backspace.
+  PAGE_UP,    ///< Page Up navigation key.
+  PAGE_DOWN,  ///< Page Down navigation key.
+  F1,         ///< Function key F1.
+  F2,         ///< Function key F2.
+  F3,         ///< Function key F3.
+  F4,         ///< Function key F4.
+  F5,         ///< Function key F5.
+  F6,         ///< Function key F6.
+  F7,         ///< Function key F7.
+  F8,         ///< Function key F8.
+  F9,         ///< Function key F9.
+  F10,        ///< Function key F10.
+  F11,        ///< Function key F11.
+  F12         ///< Function key F12.
 };
+
 /** @brief Native adapters may report repeat/release; VT emits press only. */
 enum class KeyAction {
-  PRESS,
-  REPEAT,
-  RELEASE
+  PRESS,  ///< Key press; the only action emitted by the VT decoder.
+  REPEAT, ///< Repeated key press reported by a native adapter.
+  RELEASE ///< Key release reported by a native adapter.
 };
 
 /** @brief Owning key value without an inferred physical keyboard scan code. */
@@ -93,21 +94,22 @@ struct TextInputEvent {
 
 /** @brief SGR button identity; NO_BUTTON is used for unbuttoned motion. */
 enum class MouseButton {
-  LEFT,
-  MIDDLE,
-  RIGHT,
-  NO_BUTTON,
-  WHEEL_UP,
-  WHEEL_DOWN,
-  WHEEL_LEFT,
-  WHEEL_RIGHT
+  LEFT,       ///< Left mouse button.
+  MIDDLE,     ///< Middle mouse button.
+  RIGHT,      ///< Right mouse button.
+  NO_BUTTON,  ///< Motion reported without a pressed button.
+  WHEEL_UP,   ///< Vertical wheel movement upward.
+  WHEEL_DOWN, ///< Vertical wheel movement downward.
+  WHEEL_LEFT, ///< Horizontal wheel movement leftward.
+  WHEEL_RIGHT ///< Horizontal wheel movement rightward.
 };
+
 /** @brief Motion and wheel are separate from button transitions. */
 enum class MouseAction {
-  PRESS,
-  RELEASE,
-  MOVE,
-  SCROLL
+  PRESS,   ///< Mouse button press.
+  RELEASE, ///< Mouse button release.
+  MOVE,    ///< Pointer motion, with a reported button or MouseButton::NO_BUTTON.
+  SCROLL   ///< Wheel movement in the direction given by MouseInputEvent::button.
 };
 
 /** @brief Checked zero-based cell coordinates; no viewport clipping is performed. */
@@ -138,8 +140,8 @@ struct PasteInputEvent {
 
 /** @brief Supported syntactic reply kinds, not proof of terminal identity. */
 enum class InputProbeKind {
-  PRIMARY_DEVICE_ATTRIBUTES,
-  CURSOR_POSITION
+  PRIMARY_DEVICE_ATTRIBUTES, ///< Primary device attributes reply; values contain its numeric parameters.
+  CURSOR_POSITION            ///< Cursor position reply; values contain the one-based row followed by column.
 };
 
 /** @brief A single-use expected reply window, captured at sequence start. */
@@ -166,15 +168,15 @@ struct InputProbeCandidate {
 
 /** @brief Recoverable decode issues; timeout may also leave the decoder failed. */
 enum class InputIssueKind {
-  INVALID_UTF8,
-  TRUNCATED,
-  UNKNOWN_SEQUENCE,
-  INVALID_SEQUENCE,
-  SEQUENCE_LIMIT,
-  PARAMETER_LIMIT,
-  NUMERIC_OVERFLOW,
-  PASTE_LIMIT,
-  TIMEOUT
+  INVALID_UTF8,     ///< Invalid UTF-8 byte sequence or a decoded value that is not a Unicode scalar.
+  TRUNCATED,        ///< Incomplete input at stream end, or an unfinished UTF-8 scalar at its deadline.
+  UNKNOWN_SEQUENCE, ///< Unsupported control sequence, including disabled features or unexpected replies.
+  INVALID_SEQUENCE, ///< Malformed control syntax or invalid SGR mouse parameters.
+  SEQUENCE_LIMIT,   ///< CSI or SS3 sequence exceeds InputOptions::max_sequence_bytes.
+  PARAMETER_LIMIT,  ///< Parameter count or decimal field length exceeds max_parameters or max_digits.
+  NUMERIC_OVERFLOW, ///< A decimal parameter cannot be represented as a uint32_t value.
+  PASTE_LIMIT,      ///< Paste payload exceeds max_paste_bytes; no partial paste event is delivered.
+  TIMEOUT           ///< Control sequence, control string or paste reached its deadline; reset is required.
 };
 
 /** @brief Byte offsets describe the consumed rejected prefix, without raw ANSI diagnostics.
@@ -197,20 +199,21 @@ using InputEvent =
 
 /** @brief Construction and call errors, separate from events caused by input bytes. */
 enum class InputError {
-  INVALID_OPTIONS,
-  BACKWARD_TIME,
-  CLOSED,
-  FAILED,
-  OFFSET_OVERFLOW,
-  INVALID_WINDOW
+  INVALID_OPTIONS, ///< A construction option is outside the supported storage, work or timeout bounds.
+  BACKWARD_TIME,   ///< The supplied timestamp precedes the last accepted next() or finish() timestamp.
+  CLOSED,          ///< next() was called after finish() began closing the stream; reset starts a new stream.
+  FAILED,          ///< The decoder previously failed and must be reset before decoding can continue.
+  OFFSET_OVERFLOW, ///< The maximum prefix this call could consume would overflow the session byte offset.
+  INVALID_WINDOW   ///< Reply interval is empty/reversed, or the decoder is not at an open, idle boundary.
 };
+
 /** @brief Why a pull stopped; event is delivered before calling again. */
 enum class InputStatus {
-  EVENT,
-  NEED_INPUT,
-  WORK_LIMIT,
-  FINISHED,
-  FAILED
+  EVENT,      ///< One event is ready; deliver it before resubmitting the unconsumed suffix.
+  NEED_INPUT, ///< All supplied bytes were consumed without an event; more input, time or finish() is needed.
+  WORK_LIMIT, ///< Per-call byte budget was reached without an event; resubmit the unconsumed suffix.
+  FINISHED,   ///< End-of-stream flushing is complete; this step may still contain the final event.
+  FAILED      ///< This step reports a fatal timeout event; reset is required before decoding can continue.
 };
 
 /** @brief One bounded pull result; no hidden output queue. */

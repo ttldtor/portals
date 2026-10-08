@@ -117,17 +117,35 @@ Use `add_subdirectory` and `portals::core` when embedding the source, or
 `find_package(Portals CONFIG REQUIRED)` for an installed package.
 [Package](package.md) supplies install, relocation and external consumer commands.
 
-With Doxygen installed:
+For HTML documentation, install Doxygen 1.18 or newer and Mermaid CLI. The
+verified diagram toolchain is Node.js 24 LTS with Mermaid CLI 12. In PowerShell:
+
+```powershell
+npm.cmd install --global @mermaid-js/mermaid-cli
+mmdc.cmd --version
+```
+
+Mermaid CLI uses a headless browser supplied by Puppeteer. Its first installation
+normally downloads that browser; subsequent documentation builds render diagrams
+locally. Ordinary library builds do not need Node.js, Mermaid or Doxygen.
+
+With `doxygen` and `mmdc` available on PATH:
 
 ```powershell
 cmake -S . -B build/docs -G Ninja -DPORTALS_BUILD_DOCS=ON
 cmake --build build/docs --target portals_docs
 ```
 
+If Mermaid is installed outside PATH, pass its executable explicitly with
+`-DPORTALS_MERMAID_EXECUTABLE=C:/path/to/mmdc.cmd` (or the `mmdc` executable on
+POSIX). CMake uses its directory for Doxygen's native Mermaid integration.
+
 Open `build/docs/docs/html/index.html`. Start with the reading guide; use the
 sidebar's API reference when you need a specific type or function. The HTML
 directory includes example source listings and license notices for offline
-reading. Generated help needs no private work files.
+reading. Mermaid blocks are rendered to SVG at build time; reading diagrams
+requires neither internet access nor an installed generator. Generated help
+needs no private work files.
 
 When changing documentation, check its local file and anchor links with
 `python tools/docs/check_links.py build/docs/docs/html` (Python 3 is optional

@@ -10,14 +10,14 @@ namespace portals {
 
 /** @brief Boundary at which a managed operation failed. */
 enum class ManagedPhase {
-  MOUNT,
-  STATE,
-  BIND,
-  STYLE,
-  PREPARE,
-  INPUT,
-  RUN,
-  CLEANUP
+  MOUNT,   ///< Create the scene root or attach and register a managed widget.
+  STATE,   ///< Create and retain a scene-owned property.
+  BIND,    ///< Register a managed callback, binding or presentation adapter.
+  STYLE,   ///< Register or apply styles, including a theme change.
+  PREPARE, ///< Synchronize managed presentation, focus and pending updates before a frame.
+  INPUT,   ///< Dispatch input or deliver a managed control/property callback.
+  RUN,     ///< Enter the application runner or propagate a failure from it.
+  CLEANUP  ///< Remove a managed subtree or retire the scene and its registrations.
 };
 
 /** @brief Original error plus independent runner/restoration and cleanup failures. */

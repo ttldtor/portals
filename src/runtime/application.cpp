@@ -141,6 +141,95 @@ DiagnosticInput inputCategory(const InputEvent &event) {
 }
 } // namespace
 
+LayoutSnapshot::LayoutSnapshot(std::uint64_t session, std::shared_ptr<const std::vector<Record>> records)
+    : session_(session), records_(std::move(records)) {
+}
+
+std::expected<LayoutSnapshot, TreeError> LayoutSnapshot::capture(WidgetTree &tree, Node<Widget> node) {
+  try {
+    auto ancestor = node;
+    bool ancestorsVisible = true;
+
+    // A subtree capture must also respect hidden ancestors outside that subtree.
+    while (ancestor != Node<Widget>{}) {
+      auto state = tree.inspect(ancestor);
+
+      if (!state) {
+        return std::unexpected(state.error());
+      }
+
+      ancestorsVisible = ancestorsVisible && state->visible;
+      ancestor = state->parent;
+    }
+
+    // Sharing immutable storage keeps snapshot moves allocation-free, including
+    // MSVC Debug where moving a vector may allocate an iterator proxy in noexcept.
+    auto records = std::make_shared<std::vector<Record>>(0);
+    auto collect = [&](auto &self, Node<Widget> current, bool parentVisible) -> std::expected<void, TreeError> {
+      auto state = tree.inspect(current);
+
+      if (!state) {
+        return std::unexpected(state.error());
+      }
+
+      const bool visible = parentVisible && state->visible;
+
+      if (visible && !state->geometry.valid) {
+        return std::unexpected(TreeError::INVALID_GEOMETRY);
+      }
+
+      records->push_back({current.id(), visible ? state->geometry.local.size() : CellSize{}});
+
+      // Hidden descendants still need identity records so all views can prepare
+      // against this snapshot after an earlier view invalidates the live tree.
+      for (const auto child : state->children) {
+        auto result = self(self, child, visible);
+
+        if (!result) {
+          return result;
+        }
+      }
+
+      return {};
+    };
+    auto captured = collect(collect, node, ancestorsVisible);
+
+    if (!captured) {
+      return std::unexpected(captured.error());
+    }
+
+    std::ranges::sort(*records, {}, [](const Record &record) {
+      return record.id.slot;
+    });
+
+    return LayoutSnapshot(node.id().session, std::move(records));
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(TreeError::NO_MEMORY);
+  }
+}
+
+std::expected<CellSize, TreeError> LayoutSnapshot::viewport(Node<Widget> node) const noexcept {
+  const auto id = node.id();
+
+  if (!id.session || !records_) {
+    return std::unexpected(TreeError::STALE_NODE);
+  }
+
+  if (id.session != session_) {
+    return std::unexpected(TreeError::WRONG_SESSION);
+  }
+
+  const auto found = std::ranges::lower_bound(*records_, id.slot, {}, [](const Record &record) {
+    return record.id.slot;
+  });
+
+  if (found == records_->end() || found->id != id) {
+    return std::unexpected(TreeError::STALE_NODE);
+  }
+
+  return found->size;
+}
+
 struct Application::State {
   struct Run;
   ApplicationOptions options;
@@ -392,6 +481,61 @@ struct Application::State::Run {
     return std::move(*frame);
   }
 
+  LayoutSnapshot captureLayout() {
+    std::optional<LayoutSnapshot> snapshot;
+    std::optional<Failure> failure;
+    auto framed = app.tree().frame([&] {
+      try {
+        const auto rect = require(CellRect::from({}, viewport).transform_error([](auto) {
+          return TreeError::INVALID_GEOMETRY;
+        }));
+
+        require(layoutTree(app.tree(), app.root(), rect, rect));
+        snapshot.emplace(require(LayoutSnapshot::capture(app.tree(), app.root())));
+      } catch (const Failure &value) {
+        failure.emplace(value);
+      }
+    });
+
+    if (failure) {
+      throw *failure;
+    }
+
+    require(std::move(framed));
+
+    return std::move(*snapshot);
+  }
+
+  Invalidation consumePreparationRequest(DiagnosticContext &frameContext) {
+    const auto dirty = require(app.tree().consumeFrameRequest());
+    const auto requestedContext = app.tree().diagnosticFrame();
+
+    // Layout's in-frame PAINT has no new causal token. Keep the last real request
+    // so an otherwise unchanged preparation still links input to submitted output.
+    if (requestedContext.frameId) {
+      frameContext = requestedContext;
+    }
+
+    return dirty;
+  }
+
+  void prepareViews(DiagnosticContext &frameContext) {
+    for (std::size_t pass = 0; pass < state.options.maxPreparationPasses; ++pass) {
+      const auto snapshot = captureLayout();
+
+      // Arrangement requests PAINT. Only fresh LAYOUT work from view preparation
+      // repeats the pass; all hooks share the pin established by prepare once.
+      consumePreparationRequest(frameContext);
+      require(scene.prepareViews(app, snapshot));
+
+      if (consumePreparationRequest(frameContext) != Invalidation::LAYOUT) {
+        return;
+      }
+    }
+
+    throw Failure{TreeError::WOULD_BLOCK};
+  }
+
   void renderReady() {
     if (writer.pending() || app.now() < nextFrame) {
       return;
@@ -403,16 +547,19 @@ struct Application::State::Run {
       return;
     }
 
-    const auto cause = app.tree().diagnosticFrame();
-    DiagnosticScope preparing(app.tree().diagnostics(), cause);
+    auto frameContext = app.tree().diagnosticFrame();
+    DiagnosticScope preparing(app.tree().diagnostics(), frameContext);
 
     phase = ApplicationPhase::PREPARE;
     state.measure(phase, [&] {
       require(scene.prepare(app, viewport));
-    });
-    require(app.tree().consumeFrameRequest());
+      consumePreparationRequest(frameContext);
 
-    const auto frameContext = app.tree().diagnosticFrame();
+      if (scene.usesPreparedLayout()) {
+        prepareViews(frameContext);
+      }
+    });
+
     std::optional<CellBuffer> frame;
 
     phase = ApplicationPhase::RENDER;
@@ -490,6 +637,14 @@ std::expected<void, TreeError> ApplicationScene::prepare(Application &, CellSize
   return {};
 }
 
+bool ApplicationScene::usesPreparedLayout() const noexcept {
+  return false;
+}
+
+std::expected<void, TreeError> ApplicationScene::prepareViews(Application &, const LayoutSnapshot &) {
+  return {};
+}
+
 std::expected<bool, TreeError> ApplicationScene::input(Application &, const InputEvent &) {
   return false;
 }
@@ -539,7 +694,7 @@ void Application::requestStop() noexcept {
 std::expected<std::unique_ptr<Application>, ApplicationError> Application::create(ApplicationOptions options,
                                                                                   SchedulerClock clock) {
   if (!options.framesPerSecond || options.framesPerSecond > 1000 || !options.inputBudget ||
-      options.inputSlice.count() <= 0 || options.outputSlice.count() <= 0 ||
+      !options.maxPreparationPasses || options.inputSlice.count() <= 0 || options.outputSlice.count() <= 0 ||
       (options.nativeScreen != NativeScreenMode::MAIN_SCREEN &&
        options.nativeScreen != NativeScreenMode::ALTERNATE_SCREEN)) {
     return std::unexpected(ApplicationError{ApplicationPhase::CREATE, ApplicationFailure::INVALID_OPTIONS, {}});

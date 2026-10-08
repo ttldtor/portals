@@ -9,15 +9,17 @@ preparation of virtual lists, tables and charts.
 
 ## Ownership and execution
 
-```text
-Application (UI thread; outlives the scene)
-  ├── WidgetTree: owns every concrete widget
-  ├── EventRouter / Scheduler
-  └── borrowed by ManagedScene
-        ├── owned subtree identity
-        ├── flat binding / presentation / style registrations
-        └── UI-owned Property values
-              ↑ weak ManagedState<T> handles
+```mermaid
+flowchart TB
+  accTitle: Managed control ownership
+  accDescr: Application owns core services and outlives ManagedScene, which borrows it. WidgetTree owns widgets. ManagedScene retains its subtree identity, registrations and properties; ManagedState handles are weak observers.
+  app["Application<br/>UI thread; outlives the scene"] --> tree["WidgetTree<br/>Owns concrete widgets"]
+  app --> services[EventRouter and Scheduler]
+  app -. borrowed by .-> scene[ManagedScene]
+  scene --> root[Subtree identity]
+  scene --> registrations["Binding, presentation<br/>and style registrations"]
+  scene --> properties[UI-owned Property values]
+  handles["ManagedState&lt;T&gt;"] -. weak observer .-> properties
 ```
 
 Create an `Application`, then `ManagedScene::create(application, options)`. The

@@ -7,12 +7,14 @@
 #include <span>
 
 namespace portals {
+
 /** @brief Main-axis allocation policy, in integer terminal cells. */
 enum class SizeMode {
-  AUTOMATIC,
-  FIXED,
-  FLEX
+  AUTOMATIC, ///< Use the preferred/intrinsic extent; shrink towards minimum when space is scarce.
+  FIXED,     ///< Keep the bounded preferred/intrinsic extent even when it overflows the available space.
+  FLEX       ///< Share spare main-axis cells by weight; allow shrinking towards minimum.
 };
+
 /** @brief Sentinel requesting the widget's intrinsic measurement. */
 inline constexpr std::int32_t INTRINSIC_EXTENT = -1;
 
@@ -35,6 +37,7 @@ struct SizePolicy {
 class LayoutItem {
 public:
   virtual ~LayoutItem() = default; ///< Destroy with the implementing widget.
+
   /** @brief Return an owning policy; no tree/model mutation or I/O.
    * @return Independent width/height policies to validate during layout; no widget reference escapes.
    */
@@ -48,6 +51,7 @@ public:
    * @param policy Owning width/height constraints; layout validates them before placement.
    */
   explicit SizedWidget(SizePolicy policy = {});
+
   /** @brief Copy current policy without borrowing storage.
    * @return A value copy of the current width/height constraints; obtain it only inside tree.read.
    */
@@ -72,16 +76,19 @@ struct MeasuredChild {
 class Layout {
 public:
   virtual ~Layout() = default; ///< Destroy with the implementing widget.
+
   /** @brief Measurement bounds.
    * @param available Normalized cell extent offered to this container.
    * @return Bounds to pass to child measurement, or a validation/arithmetic failure.
    */
   virtual std::expected<CellSize, TreeError> childAvailable(CellSize available) const = 0;
+
   /** @brief Own aggregate.
    * @param children Borrowed visible children in sibling order, including stable identities and copied policies.
    * @return The owning aggregate intrinsic extent, or a layout error.
    */
   virtual std::expected<CellSize, TreeError> measureChildren(std::span<const MeasuredChild> children) const = 0;
+
   /** @brief Own parent-local rectangles in child order.
    * @param children Borrowed measured children in the same order as the resulting rectangles.
    * @param available Container-local extent available for arrangement.
@@ -90,16 +97,18 @@ public:
   virtual std::expected<std::vector<CellRect>, TreeError> arrangeChildren(std::span<const MeasuredChild> children,
                                                                           CellSize available) const = 0;
 };
+
 /** @brief Alignment; center assigns floor(free/2) before the child/group. */
 enum class LayoutAlign {
-  START,
-  CENTER,
-  END,
-  STRETCH
+  START,  ///< Place at the leading edge of the available space.
+  CENTER, ///< Center within spare space, rounding the leading offset down to whole cells.
+  END,    ///< Place at the trailing edge of the available space.
+  STRETCH ///< Fill available cross-axis space within size bounds; acts as START on the linear main axis.
 };
+
 /** @brief Minimum/fixed sizes survive shortage and are clipped by ancestor geometry. */
 enum class LayoutOverflow {
-  CLIP
+  CLIP ///< Preserve hard minima and fixed extents; clip content that does not fit the viewport.
 };
 
 /** @brief Owning nonnegative padding in terminal cells. */
@@ -127,11 +136,13 @@ public:
    * @return Normalized inner extent after padding, or invalid settings/coordinate overflow.
    */
   std::expected<CellSize, TreeError> childAvailable(CellSize available) const override;
+
   /** @brief Checked sum/max.
    * @param children Visible child measurements and policies, borrowed only for this calculation.
    * @return Aggregate intrinsic extent including gaps/padding, or a validation, geometry or allocation error.
    */
   std::expected<CellSize, TreeError> measureChildren(std::span<const MeasuredChild> children) const override;
+
   /** @brief Deterministic bounded solve.
    * @param children Visible child measurements, policies and identities in sibling order.
    * @param available Container-local extent in terminal cells.
@@ -140,6 +151,7 @@ public:
    */
   std::expected<std::vector<CellRect>, TreeError> arrangeChildren(std::span<const MeasuredChild> children,
                                                                   CellSize available) const override;
+
   /** @brief Owning copy; no invalidation.
    * @return A value copy of gaps, padding, alignment and overflow policy.
    */
@@ -186,6 +198,7 @@ public:
  * @return Success after requesting layout, or the validation/access/invalidation error.
  */
 std::expected<void, TreeError> setSizePolicy(WidgetTree &tree, Node<SizedWidget> node, SizePolicy policy);
+
 /** @brief Validate, edit and invalidate layout between frames on the tree's UI owner; tree errors propagate.
  * @param tree Owning UI tree, borrowed for this call.
  * @param node Checked observer of the Row or Column to update.
@@ -193,12 +206,29 @@ std::expected<void, TreeError> setSizePolicy(WidgetTree &tree, Node<SizedWidget>
  * @return Success after requesting layout, or an error without replacing the previous settings.
  */
 std::expected<void, TreeError> setLinearOptions(WidgetTree &tree, Node<LinearLayout> node, LinearOptions options);
-/** @brief External two-phase traversal; call inside the frame that also paints/renders.
- * Tree owns nodes; all inspect/policy/measurement/placement snapshots are local owning values.
- * Call invalidate(layout) between frames before changed geometry. On any failure abort use of this pass.
- * Hidden subtrees are skipped, enabled has no effect. Plain parents allow at most one child (viewport passthrough).
- * Errors propagate as TreeError; arithmetic failures are INVALID_GEOMETRY, allocation failures NO_MEMORY.
- * Reentrant passes return WOULD_BLOCK. No implicit frame, I/O, model edits or retained secondary tree.
+
+/**
+ * @brief Measure and arrange a subtree inside an active tree frame.
+ *
+ * @par Ownership and frame lifetime
+ * The tree owns all widgets. Inspection results, size policies, measurements and
+ * placements are local owning values. A preliminary pass may capture geometry
+ * without painting. For final output, perform layout, paint and rendering within
+ * the same frame so borrowed render commands remain valid.
+ *
+ * @par Traversal
+ * Hidden subtrees are skipped; disabled widgets still participate. A plain widget
+ * without a Layout implementation can pass its viewport to at most one child.
+ * This function does not open a frame, perform I/O, edit models or retain a second tree.
+ *
+ * @pre Call on the tree's UI thread inside WidgetTree::frame. Request
+ * Invalidation::LAYOUT between frames when changing geometry.
+ *
+ * @par Failure handling
+ * Discard the pass on failure; partially arranged geometry must not be rendered.
+ * Tree errors propagate unchanged. Arithmetic failures return TreeError::INVALID_GEOMETRY,
+ * allocation failures return TreeError::NO_MEMORY, and reentrant passes return TreeError::WOULD_BLOCK.
+ *
  * @param tree Tree borrowed on its UI owner inside an active frame.
  * @param node Root of the subtree to measure and arrange.
  * @param local Root placement relative to its parent; descendants receive parent-local rectangles.
@@ -206,4 +236,5 @@ std::expected<void, TreeError> setLinearOptions(WidgetTree &tree, Node<LinearLay
  * @return Success when all participating geometry is valid, or an error requiring the caller to discard this pass.
  */
 std::expected<void, TreeError> layoutTree(WidgetTree &tree, Node<Widget> node, CellRect local, CellRect viewport);
+
 } // namespace portals
