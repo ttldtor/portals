@@ -100,3 +100,8 @@ Existing `portals.dashboard` and `portals.application` retain coverage for lossl
 saturation, bounded catchup/backlog, delayed/out-of-order range completion, Unicode,
 resize, input ordering, writer failures and shutdown. Real Windows Terminal/xterm,
 ConPTY pressure and native restoration checks are separate verification gates.
+
+Native runs use the same managed terminal factory as Application. Startup queries and
+mouse setup are included in native_open_ns. Restoration is included in close timing.
+These lifecycle protocol bytes bypass frame counters; throughput measures rendered
+frame submissions only. The terminal must support the documented native mouse policy.

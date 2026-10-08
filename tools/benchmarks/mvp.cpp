@@ -156,35 +156,6 @@ std::optional<std::uint64_t> processCpuNs(int &error) {
 #endif
 }
 
-class NativeTerminal final : public ApplicationTerminal {
-public:
-  explicit NativeTerminal(TerminalSession session) : session_(std::move(session)) {
-  }
-
-  TerminalRead read(TerminalDeadline deadline, std::stop_token stop) override {
-    return session_.read(deadline, stop);
-  }
-
-  std::expected<CellSize, TerminalError> size() const override {
-    return session_.size();
-  }
-
-  std::expected<void, TerminalError> submit(std::string bytes) override {
-    return session_.submit(std::move(bytes));
-  }
-
-  TerminalWrite flush(TerminalDeadline deadline, std::stop_token stop) override {
-    return session_.flush(deadline, stop);
-  }
-
-  std::expected<void, TerminalError> close() noexcept override {
-    return session_.close();
-  }
-
-private:
-  TerminalSession session_;
-};
-
 struct Boundary {
   Clock::time_point wall{};
   std::optional<std::uint64_t> cpu;
@@ -696,7 +667,8 @@ int run(const Options &options, std::ostream &report) {
     const NativeTerminalHandles handles{STDIN_FILENO, STDOUT_FILENO};
 #endif
     const auto begin = Clock::now();
-    auto session = TerminalSession::open(handles, config.terminal);
+    auto session =
+      openNativeApplicationTerminal(handles, config.terminal, config.outputSlice, config.nativeMouseReporting);
 
     nativeOpenNs = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - begin).count();
 
@@ -708,7 +680,7 @@ int run(const Options &options, std::ostream &report) {
       return 1;
     }
 
-    transport = std::make_unique<NativeTerminal>(std::move(*session));
+    transport = std::move(*session);
   } else {
     transport = std::make_unique<HeadlessTerminal>();
   }
