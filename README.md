@@ -140,6 +140,8 @@ Virtual list: [preparation, ownership and fixed-row navigation](docs/virtual-lis
 
 Virtual table: [typed columns, shared snapshots and bounded preparation](docs/virtual-table.md).
 
+Scrolling: [fractional motion, identity anchors and viewport culling](docs/scroll.md).
+
 ## License
 
 Portals code: Boost Software License 1.0; see [LICENSE.txt](LICENSE.txt).

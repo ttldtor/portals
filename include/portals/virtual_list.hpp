@@ -5,6 +5,7 @@
 #include <portals/action.hpp>
 #include <portals/layout.hpp>
 #include <portals/model.hpp>
+#include <portals/scroll.hpp>
 
 namespace portals {
 /** @brief Owning fixed-row presentation settings; invalid heights are rejected at preparation. */
@@ -141,8 +142,18 @@ public:
 
   /** @return Integral intended scroll position, clamped at the last successful preparation. */
   std::uint64_t firstRow() const noexcept {
-    return first_;
+    return scroll_.rasterOffset();
   } ///< Integral scroll position, clamped at preparation.
+
+  /** @return Owning logical/raster scroll position; reads require the UI owner's tree.read. */
+  ScrollState scrollState() const noexcept {
+    return scroll_;
+  }
+
+  /** @return First ready visible row identity retained across hidden periods, or no established anchor. */
+  std::optional<RowId> anchorRow() const noexcept {
+    return anchor_;
+  }
 
   /** @return Owning stable ID, including an offscreen/removed ID, or nullopt when cleared. */
   std::optional<RowId> selection() const noexcept {
@@ -213,6 +224,12 @@ private:
   template <class U>
   friend std::expected<ActionBinding, TreeError> bindVirtualList(EventRouter &, WidgetTree &, Node<VirtualList<U>>);
 
+  template <class U>
+  friend std::expected<void, TreeError> scrollVirtualList(WidgetTree &, Node<VirtualList<U>>, double);
+  template <class U>
+  friend std::expected<RowLookup, TreeError> ensureVirtualListVisible(WidgetTree &, Node<VirtualList<U>>,
+                                                                      const ModelFrame<U> &, RowId);
+
   /// @endcond
 
   struct Prepared {
@@ -229,16 +246,33 @@ private:
 
   std::expected<std::optional<ModelRequest<T>>, TreeError> prepare(const ModelFrame<T> &frame, CellSize viewport,
                                                                    bool &changed) {
-    auto window = detail::listWindow(frame.rowCount(), first_, viewport, options_);
-
-    if (!window || !delegate_) {
-      return std::unexpected(window ? TreeError::INVALID_ARGUMENT : window.error());
-    }
-
     auto consumer_range = frame.range(consumer_.id());
 
     if (!consumer_range) {
       return std::unexpected(consumer_range.error());
+    }
+
+    auto nextScroll = scroll_;
+
+    if (anchor_ && anchorRevision_ != frame.dataRevision() && !intent_) {
+      auto location = frame.locateRow(*anchor_);
+
+      if (!location) {
+        return std::unexpected(location.error());
+      }
+
+      if (location->state == RowLookupState::FOUND) {
+        (void)nextScroll.setOffset(location->index, nextScroll.fraction());
+      }
+      // Removed anchors and legacy providers retain the old ordinal, clamped below.
+    }
+
+    nextScroll.clamp(frame.rowCount());
+
+    auto window = detail::listWindow(frame.rowCount(), nextScroll.rasterOffset(), viewport, options_);
+
+    if (!window || !delegate_) {
+      return std::unexpected(window ? TreeError::INVALID_ARGUMENT : window.error());
     }
 
     if (prepared_ && !dirty_ && !retry_ && prepared_->frame.revision() == frame.revision() &&
@@ -325,7 +359,15 @@ private:
       prepared_.swap(next);
       changed = true;
       selected_ = selection;
-      first_ = window->visible.first;
+      scroll_ = nextScroll;
+
+      if (!prepared_->rows.empty() && prepared_->rows.front().id) {
+        anchor_ = prepared_->rows.front().id;
+        anchorRevision_ = frame.dataRevision();
+      } else if (frame.rowCount() == 0) {
+        anchor_.reset();
+      }
+
       dirty_ = false;
       retry_ = false;
 
@@ -350,13 +392,59 @@ private:
     intent_ = position;
     intent_revision_ = prepared_->frame.dataRevision();
 
-    if (position < first_) {
-      first_ = position;
-    } else if (count != 0 && position - first_ >= count) {
-      first_ = position - count + 1;
+    (void)scroll_.ensureVisible(position, count, prepared_->frame.rowCount());
+    anchor_.reset();
+    dirty_ = true;
+  }
+
+  std::expected<bool, TreeError> scrollBy(double rows) {
+    if (!prepared_) {
+      return std::unexpected(TreeError::WOULD_BLOCK);
     }
 
+    auto changed = scroll_.moveBy(rows, prepared_->frame.rowCount());
+
+    if (changed && *changed) {
+      anchor_.reset();
+      dirty_ = true;
+      intent_.reset();
+      request_.cancel();
+    }
+
+    return changed;
+  }
+
+  std::expected<RowLookup, TreeError> ensureVisible(const ModelFrame<T> &frame, RowId id) {
+    auto range = frame.range(consumer_.id());
+
+    if (!range) {
+      return std::unexpected(range.error());
+    }
+
+    if (!prepared_) {
+      return std::unexpected(TreeError::WOULD_BLOCK);
+    }
+
+    auto location = frame.locateRow(id);
+
+    if (!location) {
+      return std::unexpected(location.error());
+    }
+
+    if (location->state != RowLookupState::FOUND) {
+      return *location;
+    }
+
+    const auto height = prepared_->viewport.height;
+    const auto capacity = static_cast<std::uint64_t>(height == 0 ? 0 : std::max(1, height / options_.row_height));
+
+    (void)scroll_.ensureVisible(location->index, capacity, frame.rowCount());
+    anchor_.reset();
     dirty_ = true;
+    intent_.reset();
+    request_.cancel();
+
+    return *location;
   }
 
   EventReply action(Action action) {
@@ -364,7 +452,7 @@ private:
       return EventReply::IGNORED;
     }
 
-    auto position = intent_.value_or(first_);
+    auto position = intent_.value_or(scroll_.rasterOffset());
     bool located = intent_.has_value();
 
     // Locate identities only in bounded visible delegates; global index lookup belongs to the provider.
@@ -417,7 +505,9 @@ private:
   std::optional<RowId> selected_;
   std::optional<std::uint64_t> intent_;
   std::uint64_t intent_revision_{};
-  std::uint64_t first_{};
+  ScrollState scroll_;
+  std::optional<RowId> anchor_;
+  std::uint64_t anchorRevision_{};
   CellSize arranged_;
   bool dirty_{true};
   bool retry_{};
@@ -466,8 +556,9 @@ prepareVirtualList(WidgetTree &tree, Node<VirtualList<T>> node, const ModelFrame
 template <class T>
 std::expected<void, TreeError> setVirtualListFirst(WidgetTree &tree, Node<VirtualList<T>> node, std::uint64_t first) {
   auto edited = tree.edit(node, [&](VirtualList<T> &view) {
-    if (view.first_ != first) {
-      view.first_ = first;
+    if (view.scroll_.rasterOffset() != first || view.scroll_.fraction() != 0 || view.anchor_) {
+      (void)view.scroll_.setOffset(first);
+      view.anchor_.reset();
       view.dirty_ = true;
       view.intent_.reset();
       view.request_.cancel();
@@ -545,12 +636,10 @@ std::expected<ActionBinding, TreeError> bindVirtualList(EventRouter &router, Wid
                  (mouse->button == MouseButton::WHEEL_UP || mouse->button == MouseButton::WHEEL_DOWN)) {
         const auto count = view.prepared_->frame.rowCount();
 
-        if (mouse->button == MouseButton::WHEEL_UP && view.first_ > 0) {
-          --view.first_;
-        } else if (mouse->button == MouseButton::WHEEL_DOWN && count > 0 && view.first_ < count - 1) {
-          ++view.first_;
-        }
+        const double movement = mouse->button == MouseButton::WHEEL_UP ? -1.0 : 1.0;
 
+        (void)view.scroll_.moveBy(movement, count);
+        view.anchor_.reset();
         view.dirty_ = true;
         view.intent_.reset();
         view.request_.cancel();
@@ -565,4 +654,65 @@ std::expected<ActionBinding, TreeError> bindVirtualList(EventRouter &router, Wid
     return reply;
   });
 }
+
+/** @brief Accumulate fractional wheel input on UI using the last prepared model count.
+ * @tparam T Immutable row type satisfying VirtualList's provider contract.
+ * @param tree Borrowed UI owner, outside its frame.
+ * @param node Checked non-owning view observer.
+ * @param rows Finite signed movement in logical rows, positive toward the end.
+ * @return Success, WOULD_BLOCK before preparation, INVALID_ARGUMENT for nonfinite movement, or tree error.
+ * @note Only raster changes invalidate paint/cancel range work; fractional changes require no preparation.
+ */
+template <class T>
+std::expected<void, TreeError> scrollVirtualList(WidgetTree &tree, Node<VirtualList<T>> node, double rows) {
+  std::expected<bool, TreeError> result;
+  auto edited = tree.edit(node, [&](VirtualList<T> &view) {
+    result = view.scrollBy(rows);
+  });
+
+  if (!edited) {
+    return edited;
+  }
+
+  if (!result) {
+    return std::unexpected(result.error());
+  }
+
+  return *result ? tree.invalidate(node, Invalidation::PAINT) : std::expected<void, TreeError>{};
+}
+
+/** @brief Reveal a stable row using a caller-supplied shared pin and the last prepared viewport.
+ * @tparam T Immutable row type satisfying VirtualList's provider contract.
+ * @param tree Borrowed UI owner, outside its frame.
+ * @param node Checked non-owning view observer.
+ * @param frame Pin of the same model, used for identity and bounds; prepare this pin before painting.
+ * @param id Full stable row identity; selection is unchanged.
+ * @return Explicit FOUND/NOT_FOUND/UNSUPPORTED, or frame lookup/tree error; WOULD_BLOCK before preparation.
+ * @note FOUND invalidates paint and cancels prior work. Zero body height cannot reveal a row;
+ * a row taller than a nonempty viewport is revealed at its leading cell.
+ * The caller retains dispatch responsibility for the next prepareVirtualList result.
+ */
+template <class T>
+std::expected<RowLookup, TreeError> ensureVirtualListVisible(WidgetTree &tree, Node<VirtualList<T>> node,
+                                                             const ModelFrame<T> &frame, RowId id) {
+  std::expected<RowLookup, TreeError> result;
+  auto edited = tree.edit(node, [&](VirtualList<T> &view) {
+    result = view.ensureVisible(frame, id);
+  });
+
+  if (!edited) {
+    return std::unexpected(edited.error());
+  }
+
+  if (result && result->state == RowLookupState::FOUND) {
+    auto invalidated = tree.invalidate(node, Invalidation::PAINT);
+
+    if (!invalidated) {
+      return std::unexpected(invalidated.error());
+    }
+  }
+
+  return result;
+}
+
 } // namespace portals
