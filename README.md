@@ -102,7 +102,9 @@ does not promise API or ABI compatibility.
 
 ## API reference and IDEs
 
-Doxygen is optional and needed only when enabling documentation:
+Doxygen 1.18 or newer is required only when enabling documentation; 1.18 is
+the verified minimum for the complete reference. Ordinary library builds do not
+require Doxygen:
 
 ```powershell
 cmake -S . -B build/docs -G Ninja -DPORTALS_BUILD_DOCS=ON
