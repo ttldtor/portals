@@ -33,6 +33,31 @@ std::optional<Action> keyAction(InputKey key) {
   }
 }
 
+DiagnosticNodeId diagnosticNode(NodeId id) {
+  return {id.session, id.slot, id.generation};
+}
+
+struct RoutingTrace {
+  Diagnostics *recorder;
+  DiagnosticScope scope;
+
+  RoutingTrace(Diagnostics *value, DiagnosticInput input)
+      : recorder(value), scope(value, value && value->enabled()
+                                        ? (value->current().correlationId ? value->current() : value->beginInput(input))
+                                        : DiagnosticContext{}) {
+  }
+
+  ~RoutingTrace() {
+    if (recorder && recorder->enabled()) {
+      if (!scope.frameRequested()) {
+        recorder->note(DiagnosticEvent::FRAME_NOT_REQUESTED, DiagnosticReason::FRAME_NOT_REQUESTED);
+      }
+
+      recorder->note(DiagnosticEvent::COMPLETED, scope.outcome());
+    }
+  }
+};
+
 struct DeliveryGuard {
   bool &active;
 
@@ -139,19 +164,43 @@ EventRouter::add(Node<Widget> node, std::function<std::expected<EventReply, Tree
 
 std::expected<DispatchResult, TreeError> EventRouter::route(Node<Widget> target, const RoutedEvent &event) {
   DispatchResult result;
+  auto *recorder = tree().diagnostics();
+  const auto trace = [&](DiagnosticEvent stage, DiagnosticReason reason) {
+    if (recorder && recorder->enabled()) {
+      recorder->note(stage, reason, diagnosticNode(target.id()));
+    }
+  };
+
+  if (const auto *action = std::get_if<ActionEvent>(&event); recorder && recorder->enabled() && action) {
+    recorder->record({.context = recorder->current(),
+                      .event = DiagnosticEvent::ACTION,
+                      .semanticAction = static_cast<std::uint32_t>(action->action) + 1});
+  }
 
   if (target.id().session == 0) {
+    trace(DiagnosticEvent::TARGET, DiagnosticReason::NO_TARGET);
+
     return result;
   }
 
   auto eligible = tree().inputEligible(target);
 
   if (!eligible) {
+    trace(DiagnosticEvent::TARGET, DiagnosticReason::STALE_TARGET);
+
     return std::unexpected(eligible.error());
   }
 
   if (!*eligible) {
+    trace(DiagnosticEvent::TARGET, DiagnosticReason::TARGET_DISABLED);
+
     return result;
+  }
+
+  trace(DiagnosticEvent::TARGET, DiagnosticReason::NONE);
+
+  if (target == state_->focus) {
+    trace(DiagnosticEvent::FOCUS, DiagnosticReason::NONE);
   }
 
   result.target = target.id();
@@ -175,6 +224,8 @@ std::expected<DispatchResult, TreeError> EventRouter::route(Node<Widget> target,
   // Snapshot the ancestry before any handler can mutate it. Revalidate each admission so
   // removal/hiding/disabling suppresses that node while surviving original ancestors can run.
   // The local registration owner keeps captures alive through self-disconnect and collection.
+  bool hadHandler{};
+
   for (auto node : path) {
     auto live = tree().inputEligible(node);
 
@@ -196,7 +247,20 @@ std::expected<DispatchResult, TreeError> EventRouter::route(Node<Widget> target,
       continue;
     }
 
+    hadHandler = true;
+
+    DiagnosticScope handlerScope(recorder, recorder && recorder->enabled() ? recorder->current() : DiagnosticContext{});
+
+    if (recorder && recorder->enabled()) {
+      recorder->note(DiagnosticEvent::HANDLER_STARTED, DiagnosticReason::NONE, diagnosticNode(node.id()));
+    }
+
     auto reply = entry->callback(event);
+
+    if (recorder && recorder->enabled()) {
+      recorder->note(DiagnosticEvent::HANDLER_RETURNED,
+                     reply ? handlerScope.outcome() : DiagnosticReason::HANDLER_FAILED, diagnosticNode(node.id()));
+    }
 
     if (!reply) {
       return std::unexpected(reply.error());
@@ -208,6 +272,10 @@ std::expected<DispatchResult, TreeError> EventRouter::route(Node<Widget> target,
 
       break;
     }
+  }
+
+  if (result.status == DispatchStatus::UNHANDLED) {
+    trace(DiagnosticEvent::ACTION, hadHandler ? DiagnosticReason::UNHANDLED : DiagnosticReason::UNBOUND_ACTION);
   }
 
   return result;
@@ -225,6 +293,7 @@ std::expected<DispatchResult, TreeError> EventRouter::invoke(Node<Widget> target
   }
 
   DeliveryGuard guard(state_->dispatching);
+  RoutingTrace diagnostic(tree().diagnostics(), DiagnosticInput::OTHER);
 
   try {
     return route(target, RoutedEvent(action));
@@ -245,6 +314,18 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
   }
 
   DeliveryGuard guard(state_->dispatching);
+  auto *recorder = tree().diagnostics();
+  DiagnosticInput inputKind{DiagnosticInput::NONE};
+
+  if (recorder && recorder->enabled()) {
+    inputKind = std::holds_alternative<KeyEvent>(event)          ? DiagnosticInput::KEY
+                : std::holds_alternative<TextInputEvent>(event)  ? DiagnosticInput::TEXT
+                : std::holds_alternative<PasteInputEvent>(event) ? DiagnosticInput::PASTE
+                : std::holds_alternative<MouseInputEvent>(event) ? DiagnosticInput::MOUSE
+                                                                 : DiagnosticInput::OTHER;
+  }
+
+  RoutingTrace diagnostic(recorder, inputKind);
 
   try {
     if (const auto *key = std::get_if<KeyEvent>(&event)) {
@@ -254,6 +335,13 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
 
         if (!next) {
           return std::unexpected(next.error());
+        }
+
+        if (recorder && recorder->enabled()) {
+          recorder->note(DiagnosticEvent::TARGET,
+                         next->id().session ? DiagnosticReason::NONE : DiagnosticReason::NO_TARGET,
+                         diagnosticNode(next->id()));
+          recorder->note(DiagnosticEvent::ACTION);
         }
 
         return DispatchResult{
@@ -331,6 +419,10 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
       }
 
       return route(*target, *paste);
+    }
+
+    if (recorder && recorder->enabled()) {
+      recorder->note(DiagnosticEvent::TARGET, DiagnosticReason::NO_TARGET);
     }
 
     return DispatchResult{};

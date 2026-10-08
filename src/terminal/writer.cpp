@@ -15,32 +15,68 @@ TerminalWrite TerminalFrameOutput::flush(TerminalDeadline deadline, std::stop_to
   return session_.flush(deadline, stop);
 }
 
-FrameWriter::FrameWriter(FrameOutput &output, FrameWriterLimits limits) noexcept : output_(output), limits_(limits) {
+FrameWriter::FrameWriter(FrameOutput &output, FrameWriterLimits limits,
+                         std::shared_ptr<Diagnostics> diagnostics) noexcept
+    : diagnostics_(std::move(diagnostics)), output_(output), limits_(limits) {
 }
 
-std::expected<void, FrameError> FrameWriter::submit(CellBuffer &&frame) {
+void FrameWriter::trace(DiagnosticEvent event, DiagnosticReason reason) noexcept {
+  if (diagnostics_ && diagnostics_->enabled()) {
+    diagnostics_->record(
+      {.context = diagnostic_submission_ ? diagnostic_ : DiagnosticContext{}, .event = event, .reason = reason});
+  }
+}
+
+std::expected<void, FrameError> FrameWriter::submit(CellBuffer &&frame, DiagnosticContext context) {
+  const auto rejected = [&](FrameError error) -> std::expected<void, FrameError> {
+    if (diagnostics_ && diagnostics_->enabled()) {
+      diagnostics_->record(
+        {.context = context, .event = DiagnosticEvent::OUTPUT, .reason = DiagnosticReason::OUTPUT_FAILED});
+    }
+
+    return std::unexpected(error);
+  };
+
   if (poisoned_) {
-    return std::unexpected(FrameError::POISONED);
+    return rejected(FrameError::POISONED);
   }
 
   if (pending_) {
-    return std::unexpected(FrameError::PENDING);
+    return rejected(FrameError::PENDING);
   }
 
   if (frame.memory().total_bytes > limits_.max_frame_storage_bytes) {
-    return std::unexpected(FrameError::FRAME_LIMIT);
+    return rejected(FrameError::FRAME_LIMIT);
   }
 
+  diagnostic_submission_ = diagnostics_ && diagnostics_->enabled();
+
+  if (diagnostic_submission_) {
+    diagnostic_ = context;
+
+    if (!diagnostic_.frameId) {
+      diagnostic_.frameId = diagnostics_->nextIdentity();
+    }
+  }
+
+  // Admission while disabled cannot reuse the preceding frame's causal token if
+  // recording resumes before flush. Its later output is explicitly incomplete.
   // Encode before consuming the caller's frame. Rejection must preserve both its
   // storage and the last committed belief, and submit must never touch the transport.
   auto encoded = encodeDiff(committedFrame(), frame, limits_.max_output_bytes);
 
   if (!encoded) {
+    trace(DiagnosticEvent::OUTPUT, DiagnosticReason::OUTPUT_FAILED);
+
     return std::unexpected(encoded.error() == DiffError::OUTPUT_LIMIT ? FrameError::OUTPUT_LIMIT
                                                                       : FrameError::ALLOCATION_FAILURE);
   }
 
+  trace(DiagnosticEvent::FRAME_SUBMITTED, DiagnosticReason::NONE);
+
   if (encoded->empty()) {
+    trace(DiagnosticEvent::OUTPUT, DiagnosticReason::DIFF_EMPTY);
+
     committed_.emplace(std::move(frame));
 
     return {};
@@ -54,6 +90,8 @@ std::expected<void, FrameError> FrameWriter::submit(CellBuffer &&frame) {
 }
 
 void FrameWriter::poison() noexcept {
+  trace(DiagnosticEvent::OUTPUT, DiagnosticReason::OUTPUT_FAILED);
+
   poisoned_ = true;
   committed_.reset();
   pending_.reset();
@@ -119,6 +157,9 @@ TerminalWrite FrameWriter::flush(TerminalDeadline deadline, std::stop_token stop
       committed_ = std::move(pending_);
       pending_.reset();
       submitted_ = false;
+      trace(DiagnosticEvent::OUTPUT, DiagnosticReason::OUTPUT_ACCEPTED);
+    } else {
+      trace(DiagnosticEvent::OUTPUT, DiagnosticReason::OUTPUT_PENDING);
     }
 
     return result;

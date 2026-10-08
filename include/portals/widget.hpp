@@ -393,6 +393,16 @@ public:
    * @return Previously pending invalidation, cleared to none; WRONG_THREAD, closed, or WOULD_BLOCK during a frame.
    */
   std::expected<Invalidation, TreeError> consumeFrameRequest();
+  /** @brief Borrow the scheduler recorder without changing ownership.
+   * @return Configured recorder or null. The tree's scheduler retains it.
+   */
+  Diagnostics *diagnostics() const noexcept;
+  /** @brief Get the most recently consumed frame's causal token on the UI thread.
+   * Pass this token to FrameWriter::submit after rendering. Multiple invalidations share
+   * a frameId and each retains its own causal record; the token identifies the first recorded cause.
+   * @return Last consumed frame metadata, or an empty token while recording is disabled.
+   */
+  DiagnosticContext diagnosticFrame() const noexcept;
   /** @brief Guarded extension call.
    * @param node Live widget to measure; hidden ancestry returns an empty size without invoking its hook.
    * @param available Cell constraints normalized before calling the extension.
@@ -435,6 +445,7 @@ public:
     }
 
     Borrow guard(*this, true);
+    DiagnosticScope diagnostic(diagnostics(), diagnosticFrame());
 
     try {
       std::invoke(std::forward<Callback>(callback));

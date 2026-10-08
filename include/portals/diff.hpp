@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include <memory>
+#include <portals/diagnostics.hpp>
+
 #include <portals/cell_buffer.hpp>
 #include <portals/terminal.hpp>
 
@@ -115,8 +118,10 @@ public:
   /** @brief Borrow exclusive output.
    * @param output Transport that outlives the writer and receives no competing submissions.
    * @param limits Per-transaction output and per-frame storage caps; submit reports any excess.
+   * @param diagnostics Optional shared metadata recorder; records no terminal bytes.
    */
-  explicit FrameWriter(FrameOutput &output, FrameWriterLimits limits = {}) noexcept;
+  explicit FrameWriter(FrameOutput &output, FrameWriterLimits limits = {},
+                       std::shared_ptr<Diagnostics> diagnostics = {}) noexcept;
   FrameWriter(const FrameWriter &) = delete;            ///< Exclusive output cannot be shared by copying.
   FrameWriter &operator=(const FrameWriter &) = delete; ///< Exclusive output cannot be reassigned.
   /** @brief Encode and take frame only on success; reject busy/poisoned/limits without I/O.
@@ -124,9 +129,10 @@ public:
    * invalidate caller views through move; rejection retains them. Allocation errors
    * are returned. Submission invalidates any previously borrowed committed-frame view.
    * @param frame Desired owning frame, consumed only after successful validation and encoding.
+   * @param context Token from WidgetTree::diagnosticFrame, linking the actual output to invalidation.
    * @return Success when accepted, or pending, poisoned, FRAME_LIMIT, OUTPUT_LIMIT or ALLOCATION_FAILURE.
    */
-  [[nodiscard]] std::expected<void, FrameError> submit(CellBuffer &&frame);
+  [[nodiscard]] std::expected<void, FrameError> submit(CellBuffer &&frame, DiagnosticContext context = {});
   /** @brief Perform transport I/O; commit only after complete, consistent progress.
    * Must run outside paint/measure/layout. Stop/deadline without errors retain the frame.
    * An accompanying error normalizes the result status to error and preserves its details.
@@ -154,6 +160,10 @@ public:
 
 private:
   void poison() noexcept;
+  void trace(DiagnosticEvent event, DiagnosticReason reason) noexcept;
+  std::shared_ptr<Diagnostics> diagnostics_;
+  DiagnosticContext diagnostic_{};
+  bool diagnostic_submission_{};
   FrameOutput &output_;
   FrameWriterLimits limits_;
   std::optional<CellBuffer> committed_;

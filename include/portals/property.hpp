@@ -290,6 +290,13 @@ private:
 
     try {
       if (previous->value == value) {
+        if (auto *recorder = state->tree.diagnostics(); recorder && recorder->enabled()) {
+          const auto id = state->target.id();
+
+          recorder->note(DiagnosticEvent::PROPERTY, DiagnosticReason::VALUE_UNCHANGED,
+                         {id.session, id.slot, id.generation});
+        }
+
         return PropertyUpdate<T>{previous};
       }
 
@@ -313,6 +320,13 @@ private:
     // Invalidation is the last fallible precommit step. Once current changes, bounded queue
     // rejection is part of the receipt, never a reason to roll back the visible value.
     state->current = next;
+
+    if (auto *recorder = state->tree.diagnostics(); recorder && recorder->enabled()) {
+      const auto id = state->target.id();
+
+      recorder->note(DiagnosticEvent::PROPERTY, DiagnosticReason::VALUE_CHANGED, {id.session, id.slot, id.generation});
+    }
+
     state->prune();
 
     PropertyUpdate<T> result{next, true};
