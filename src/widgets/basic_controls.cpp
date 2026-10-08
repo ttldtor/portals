@@ -80,13 +80,24 @@ std::expected<void, TreeError> Control::paint(PaintContext &context) {
   // Paint uses only synchronized presentation. The frame owner transforms these local
   // commands and renders their borrowed text before releasing the enclosing tree frame.
   const auto &prefix = checked_ ? checked_prefix_ : prefix_;
-  const auto style = !enabled_ ? style_.disabled : focused_ ? style_.focused : style_.normal;
+  const auto resolved = computedStyle() ? *computedStyle() : Control::styleDefaults();
+  const auto style = !enabled_ ? resolved.disabled : focused_ ? resolved.focused : resolved.normal;
   const std::array<RenderCommand, 4> commands{
     FillCommand{bounds_, bounds_, style}, TextCommand{{}, prefix, bounds_, style},
     TextCommand{{prefix.measure(), 0}, text_, bounds_, style},
     TextCommand{{width->width - suffix_.measure(), 0}, suffix_, bounds_, style}};
 
   return context.submit(commands);
+}
+
+ComputedStyle Control::styleDefaults() const {
+  ComputedStyle result;
+
+  result.normal = style_.normal;
+  result.focused = style_.focused;
+  result.disabled = style_.disabled;
+
+  return result;
 }
 
 const GraphemeText &Control::text() const {

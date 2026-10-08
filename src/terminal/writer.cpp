@@ -63,7 +63,7 @@ std::expected<void, FrameError> FrameWriter::submit(CellBuffer &&frame, Diagnost
   // recording resumes before flush. Its later output is explicitly incomplete.
   // Encode before consuming the caller's frame. Rejection must preserve both its
   // storage and the last committed belief, and submit must never touch the transport.
-  auto encoded = encodeDiff(committedFrame(), frame, limits_.max_output_bytes);
+  auto encoded = encodeDiff(committedFrame(), frame, limits_.max_output_bytes, limits_.colorMode);
 
   if (!encoded) {
     trace(DiagnosticEvent::OUTPUT, DiagnosticReason::OUTPUT_FAILED);

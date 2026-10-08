@@ -204,6 +204,18 @@ void Widget::mount() {
 void Widget::unmount() {
 }
 
+ComputedStyle Widget::styleDefaults() const {
+  return {};
+}
+
+const std::optional<ComputedStyle> &Widget::computedStyle() const noexcept {
+  return computedStyle_;
+}
+
+std::uint64_t Widget::styleRevision() const noexcept {
+  return styleRevision_;
+}
+
 std::expected<CellSize, TreeError> Widget::measure(CellSize) {
   return CellSize{};
 }
@@ -719,6 +731,10 @@ std::expected<CellSize, TreeError> WidgetTree::measure(Node<Widget> node, CellSi
     report(node.id(), result.error());
   } else {
     *result = result->normalized();
+
+    if (const auto &style = (*record)->widget->computedStyle()) {
+      result->width = std::max(result->width, style->minWidth);
+    }
   }
 
   return result;

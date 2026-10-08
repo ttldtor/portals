@@ -173,13 +173,14 @@ void LineEdit::revealCursor() {
 }
 
 std::expected<void, TreeError> LineEdit::paint(PaintContext &context) {
-  const auto style = !enabled_ ? options_.style.disabled : focused_ ? options_.style.focused : options_.style.normal;
+  const auto resolved = computedStyle() ? *computedStyle() : LineEdit::styleDefaults();
+  const auto style = !enabled_ ? resolved.disabled : focused_ ? resolved.focused : resolved.normal;
   const auto selectionBegin = cellAt(std::min(cursor_, anchor_)) - scroll_;
   const auto selectionEnd = cellAt(std::max(cursor_, anchor_)) - scroll_;
   const auto selection = CellRect::from({selectionBegin, 0}, {selectionEnd - selectionBegin, 1}).value();
   const std::array<RenderCommand, 3> base{
     FillCommand{bounds_, bounds_, style}, TextCommand{{-scroll_, 0}, text_, bounds_, style},
-    TextCommand{{-scroll_, 0}, text_, selection.intersection(bounds_), enabled_ ? options_.selection : style}};
+    TextCommand{{-scroll_, 0}, text_, selection.intersection(bounds_), enabled_ ? resolved.selected : style}};
   auto submitted = context.submit(base);
 
   if (!submitted || !focused_ || !enabled_ || bounds_.empty()) {
@@ -191,10 +192,22 @@ std::expected<void, TreeError> LineEdit::paint(PaintContext &context) {
   const auto width = cluster != text_.graphemes().end() && cluster->cells <= bounds_.size().width ? cluster->cells : 1;
   const auto area = CellRect::from({caret, 0}, {width, 1}).value();
   const std::array<RenderCommand, 2> cursor{
-    FillCommand{area, bounds_, options_.cursor},
-    TextCommand{{-scroll_, 0}, text_, area.intersection(bounds_), options_.cursor}};
+    FillCommand{area, bounds_, resolved.caret},
+    TextCommand{{-scroll_, 0}, text_, area.intersection(bounds_), resolved.caret}};
 
   return context.submit(cursor);
+}
+
+ComputedStyle LineEdit::styleDefaults() const {
+  ComputedStyle result;
+
+  result.normal = options_.style.normal;
+  result.focused = options_.style.focused;
+  result.disabled = options_.style.disabled;
+  result.selected = options_.selection;
+  result.caret = options_.cursor;
+
+  return result;
 }
 
 const GraphemeText &LineEdit::text() const {

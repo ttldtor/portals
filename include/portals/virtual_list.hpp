@@ -205,8 +205,25 @@ public:
       return std::unexpected(TreeError::INVALID_GEOMETRY);
     }
 
-    return detail::paintList(context, arranged_, options_, prepared_->rows, selected_);
+    auto options = options_;
+
+    if (const auto &style = computedStyle()) {
+      options.normal = style->normal;
+      options.selected = style->selected;
+    }
+
+    return detail::paintList(context, arranged_, options, prepared_->rows, selected_);
   } ///< Emit widget-local commands; caller applies surface translation and ancestor clip.
+
+  /** @return Owning manual row appearances beneath theme declarations. */
+  ComputedStyle styleDefaults() const override {
+    ComputedStyle result;
+
+    result.normal = options_.normal;
+    result.selected = options_.selected;
+
+    return result;
+  }
 
 private:
   /// @cond INTERNAL

@@ -100,6 +100,9 @@ public:
    */
   bool dirty() const;
 
+  /** @return Owning manual control, selection and caret appearances beneath theme declarations. */
+  ComputedStyle styleDefaults() const override;
+
 private:
   friend class LineEditBinding;
   void revealCursor();

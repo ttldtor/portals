@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #include <portals/diff.hpp>
 
+#include <array>
 #include <charconv>
 #include <iterator>
 #include <limits>
@@ -87,7 +88,49 @@ void color(Encoding &out, const RgbColor &rgb, std::string_view selector) {
   out.number(rgb.blue);
 }
 
-void style(Encoding &out, const CellStyle &value) {
+void ansiColor(Encoding &out, RgbColor rgb, bool background) {
+  constexpr std::array<RgbColor, 16> ANSI_PALETTE{{{0, 0, 0},
+                                                   {170, 0, 0},
+                                                   {0, 170, 0},
+                                                   {170, 85, 0},
+                                                   {0, 0, 170},
+                                                   {170, 0, 170},
+                                                   {0, 170, 170},
+                                                   {170, 170, 170},
+                                                   {85, 85, 85},
+                                                   {255, 85, 85},
+                                                   {85, 255, 85},
+                                                   {255, 255, 85},
+                                                   {85, 85, 255},
+                                                   {255, 85, 255},
+                                                   {85, 255, 255},
+                                                   {255, 255, 255}}};
+  constexpr std::uint32_t BASIC_FOREGROUND = 30;
+  constexpr std::uint32_t BRIGHT_FOREGROUND = 90;
+  constexpr std::uint32_t BACKGROUND_OFFSET = 10;
+  constexpr std::size_t BASIC_COLORS = 8;
+  auto distance = [](RgbColor left, RgbColor right) {
+    const auto red = static_cast<int>(left.red) - right.red;
+    const auto green = static_cast<int>(left.green) - right.green;
+    const auto blue = static_cast<int>(left.blue) - right.blue;
+
+    return red * red + green * green + blue * blue;
+  };
+  std::size_t nearest{};
+
+  for (std::size_t index = 1; index < ANSI_PALETTE.size(); ++index) {
+    if (distance(rgb, ANSI_PALETTE[index]) < distance(rgb, ANSI_PALETTE[nearest])) {
+      nearest = index;
+    }
+  }
+
+  const auto base = nearest < BASIC_COLORS ? BASIC_FOREGROUND : BRIGHT_FOREGROUND;
+
+  out.append(";");
+  out.number(base + static_cast<std::uint32_t>(nearest % BASIC_COLORS) + (background ? BACKGROUND_OFFSET : 0));
+}
+
+void style(Encoding &out, const CellStyle &value, ColorMode colorMode) {
   out.append(SGR_RESET_PREFIX);
 
   if (value.bold) {
@@ -103,17 +146,25 @@ void style(Encoding &out, const CellStyle &value) {
   }
 
   if (value.foreground) {
-    color(out, *value.foreground, SGR_RGB_FOREGROUND);
+    if (colorMode == ColorMode::ANSI16) {
+      ansiColor(out, *value.foreground, false);
+    } else {
+      color(out, *value.foreground, SGR_RGB_FOREGROUND);
+    }
   }
 
   if (value.background) {
-    color(out, *value.background, SGR_RGB_BACKGROUND);
+    if (colorMode == ColorMode::ANSI16) {
+      ansiColor(out, *value.background, true);
+    } else {
+      color(out, *value.background, SGR_RGB_BACKGROUND);
+    }
   }
 
   out.append("m");
 }
 
-void encode(Encoding &out, const CellBuffer *previous, const CellBuffer &next) {
+void encode(Encoding &out, const CellBuffer *previous, const CellBuffer &next, ColorMode colorMode) {
   const bool full = !previous || previous->size() != next.size() || previous->policy() != next.policy();
   bool started = false;
   CellStyle current;
@@ -159,7 +210,7 @@ void encode(Encoding &out, const CellBuffer *previous, const CellBuffer &next) {
       }
 
       if (cell.style != current) {
-        style(out, cell.style);
+        style(out, cell.style, colorMode);
         current = cell.style;
       }
 
@@ -174,11 +225,11 @@ void encode(Encoding &out, const CellBuffer *previous, const CellBuffer &next) {
 } // namespace
 
 std::expected<std::string, DiffError> encodeDiff(const CellBuffer *previous, const CellBuffer &next,
-                                                 std::size_t max_bytes) {
+                                                 std::size_t max_bytes, ColorMode colorMode) {
   try {
     Encoding measure(max_bytes);
 
-    encode(measure, previous, next);
+    encode(measure, previous, next, colorMode);
 
     // MSVC Debug allocates a proxy even for empty strings. The pointer constructor
     // can propagate that failure; the default constructor is noexcept.
@@ -188,7 +239,7 @@ std::expected<std::string, DiffError> encodeDiff(const CellBuffer *previous, con
 
     Encoding output(max_bytes, &bytes);
 
-    encode(output, previous, next);
+    encode(output, previous, next, colorMode);
 
     return bytes;
   } catch (DiffError error) {
