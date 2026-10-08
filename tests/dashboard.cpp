@@ -181,6 +181,48 @@ void clockJumpRemainsBounded() {
   check(scene.scheduledTicks() == 50000 && scene.tickCount() == 37);
   check(scene.turbo() && result.inputs == 1 && result.iterations <= 3);
 }
+
+void chartAppearance(bool ascii, bool turbo, ColorMode colorMode = ColorMode::TRUE_COLOR) {
+  std::vector<example::ReplayTerminal::Input> input;
+
+  if (turbo) {
+    input.push_back({100, "\x1bOQ", {}});
+  }
+
+  example::ReplayTerminal terminal(std::move(input), 500);
+  ApplicationOptions application;
+
+  application.writer.colorMode = colorMode;
+
+  auto app = take(Application::create(application, terminal.clock()));
+  dashboard::Options options;
+
+  options.ascii = ascii;
+
+  dashboard::Scene scene(*app, options);
+
+  take(app->run(scene, terminal));
+
+  test_support::VtOracle oracle(80, 24);
+
+  oracle.feed(terminal.output);
+
+  const auto frame = oracle.snapshot();
+  const auto expectedBackground = turbo                            ? RgbColor{0, 0, 170}
+                                  : colorMode == ColorMode::ANSI16 ? RgbColor{0, 0, 0}
+                                                                   : RgbColor{24, 28, 36};
+  bool sawBody{}, sawWick{};
+
+  // The lower ten rows are the chart; inspect empty cells and both brushes,
+  // not merely the first label of an otherwise successful application run.
+  for (const auto &cell : frame.cells | std::views::drop(80 * 14)) {
+    check(cell.style.background == expectedBackground);
+    sawBody |= cell.glyph == (ascii ? "#" : "\xe2\x96\x88");
+    sawWick |= cell.glyph == (ascii ? "|" : "\xe2\x94\x82");
+  }
+
+  check(sawBody && sawWick);
+}
 } // namespace
 
 int main() {
@@ -191,6 +233,11 @@ int main() {
     delayedRangesAndKeyboard();
     clockJumpRemainsBounded();
     noOpDiagnosticAction();
+    chartAppearance(false, false);
+    chartAppearance(false, true);
+    chartAppearance(true, false);
+    chartAppearance(true, false, ColorMode::ANSI16);
+    chartAppearance(false, true, ColorMode::ANSI16);
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
 

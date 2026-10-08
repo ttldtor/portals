@@ -28,17 +28,20 @@ void OhlcBucket::reset() noexcept {
 }
 
 namespace detail {
-std::expected<ChartGlyphs, TreeError> chartGlyphs(WidthPolicy policy) {
+std::expected<ChartGlyphs, TreeError> chartGlyphs(WidthPolicy policy, ChartGlyphSet symbols) {
+  // Box-drawing symbols are ambiguous-width characters. Keep the entire set
+  // one cell wide instead of letting individual brush writes fail during paint.
+  const bool unicode = symbols == ChartGlyphSet::BOX_DRAWING && policy.ambiguous == AmbiguousWidth::NARROW;
   auto line = GraphemeText::from("*", policy);
-  auto wick = GraphemeText::from("|", policy);
+  auto wick = GraphemeText::from(unicode ? "\xe2\x94\x82" : "|", policy);
+  auto body = GraphemeText::from(unicode ? "\xe2\x96\x88" : "#", policy);
+  auto doji = GraphemeText::from(unicode ? "\xe2\x94\x81" : "#", policy);
 
-  auto body = GraphemeText::from("#", policy);
-
-  if (!line || !wick || !body) {
+  if (!line || !wick || !body || !doji) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
-  return ChartGlyphs{std::move(*line), std::move(*wick), std::move(*body)};
+  return ChartGlyphs{std::move(*line), std::move(*wick), std::move(*body), std::move(*doji)};
 }
 
 bool validOhlc(const Ohlc &v) noexcept {
@@ -48,6 +51,8 @@ bool validOhlc(const Ohlc &v) noexcept {
 
 bool validChartOptions(ChartOptions options) noexcept {
   return (options.mode == ChartMode::LINE || options.mode == ChartMode::CANDLES) &&
+         (options.glyph_set == ChartGlyphSet::ASCII || options.glyph_set == ChartGlyphSet::BOX_DRAWING) &&
+         options.candle_gap >= 0 &&
          (!options.y_range || (std::isfinite(options.y_range->minimum) && std::isfinite(options.y_range->maximum) &&
                                options.y_range->minimum <= options.y_range->maximum));
 }
@@ -192,8 +197,16 @@ std::expected<void, TreeError> paintChart(PaintContext &context, CellSize viewpo
   Canvas wick(context, *bounds, &glyphs.wick);
 
   Canvas body(context, *bounds, &glyphs.body);
+  Canvas doji(context, *bounds, &glyphs.doji);
+  const auto stride = std::int64_t{options.candle_gap} + 1;
 
   for (std::size_t index = 0; index < samples.size(); ++index) {
+    const auto column = static_cast<std::int64_t>(index) * stride;
+
+    if (column >= viewport.width) {
+      break;
+    }
+
     if (!samples[index]) {
       continue;
     }
@@ -204,7 +217,7 @@ std::expected<void, TreeError> paintChart(PaintContext &context, CellSize viewpo
       continue;
     }
 
-    const auto x = static_cast<std::int32_t>(index);
+    const auto x = static_cast<std::int32_t>(column);
 
     const auto style = sample.close >= sample.open ? options.rising : options.falling;
     result =
@@ -218,8 +231,10 @@ std::expected<void, TreeError> paintChart(PaintContext &context, CellSize viewpo
       continue;
     }
 
-    result =
-      body.line({x, row(sample.open, scale, viewport.height)}, {x, row(sample.close, scale, viewport.height)}, style);
+    const auto open = row(sample.open, scale, viewport.height);
+    const auto close = row(sample.close, scale, viewport.height);
+
+    result = open == close ? doji.point({x, open}, style) : body.line({x, open}, {x, close}, style);
 
     if (!result) {
       return result;
