@@ -60,6 +60,9 @@ public:
    */
   bool enabled() const;
 
+  /** @return Owning manual normal/focused/disabled appearances beneath theme declarations. */
+  ComputedStyle styleDefaults() const override;
+
 protected:
   /** @brief Own text/options and create fixed ASCII decorations under the text's validated width policy.
    * @param text Validated owning text, transferred into the control with its complete WidthPolicy.

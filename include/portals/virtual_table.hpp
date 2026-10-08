@@ -224,8 +224,27 @@ public:
       return std::unexpected(TreeError::INVALID_GEOMETRY);
     }
 
-    return detail::paintTable(context, arranged_, options_, prepared_->headings, prepared_->rows, selected_);
+    auto options = options_;
+
+    if (const auto &style = computedStyle()) {
+      options.normal = style->normal;
+      options.selected = style->selected;
+      options.header = style->header;
+    }
+
+    return detail::paintTable(context, arranged_, options, prepared_->headings, prepared_->rows, selected_);
   } ///< Emit widget-local commands; caller applies surface translation and ancestor clip.
+
+  /** @return Owning manual row and header appearances beneath theme declarations. */
+  ComputedStyle styleDefaults() const override {
+    ComputedStyle result;
+
+    result.normal = options_.normal;
+    result.selected = options_.selected;
+    result.header = options_.header;
+
+    return result;
+  }
 
 private:
   /// @cond INTERNAL

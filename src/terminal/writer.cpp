@@ -33,7 +33,7 @@ std::expected<void, FrameError> FrameWriter::submit(CellBuffer &&frame) {
 
   // Encode before consuming the caller's frame. Rejection must preserve both its
   // storage and the last committed belief, and submit must never touch the transport.
-  auto encoded = encodeDiff(committedFrame(), frame, limits_.max_output_bytes);
+  auto encoded = encodeDiff(committedFrame(), frame, limits_.max_output_bytes, limits_.colorMode);
 
   if (!encoded) {
     return std::unexpected(encoded.error() == DiffError::OUTPUT_LIMIT ? FrameError::OUTPUT_LIMIT

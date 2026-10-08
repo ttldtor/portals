@@ -10,6 +10,12 @@
 #include <string>
 
 namespace portals {
+/** @brief Color encoding selected explicitly by the terminal owner. */
+enum class ColorMode {
+  TRUE_COLOR, ///< RGB SGR 38;2/48;2, preserving the existing default.
+  ANSI16      ///< Nearest standard RGB palette entry encoded as SGR 30-37/90-97 and 40-47/100-107.
+};
+
 /** @brief Bounded encoding failure; input buffers are unchanged. */
 enum class DiffError {
   OUTPUT_LIMIT,      ///< The complete transaction cannot fit the configured byte cap.
@@ -19,6 +25,10 @@ enum class DiffError {
  * @param previous Borrowed last completed frame, or null for a complete repaint.
  * @param next Borrowed desired frame; no view is retained or invalidated.
  * @param max_bytes Maximum encoded bytes, including control sequences.
+ * @param colorMode Fixed output palette. Use
+ * the same mode for previous and next; changing mode requires previous=nullptr.
+ * ANSI16 uses the conventional RGB
+ * palette; a terminal may customize its physical palette.
  * @return Owning bytes, empty for semantically unchanged frames, or explicit failure.
  * @details Any thread with stable inputs; no I/O. IDs are never compared across
  * buffers. Size/policy changes force a clear and complete repaint. The surface
@@ -32,7 +42,8 @@ enum class DiffError {
  * Recovery covers only prefixes emitted by this encoder, never arbitrary OSC/DCS.
  */
 [[nodiscard]] std::expected<std::string, DiffError> encodeDiff(const CellBuffer *previous, const CellBuffer &next,
-                                                               std::size_t max_bytes = 1024 * 1024);
+                                                               std::size_t max_bytes = 1024 * 1024,
+                                                               ColorMode colorMode = ColorMode::TRUE_COLOR);
 
 /** @brief Exclusive transport boundary, borrowed by FrameWriter for its lifetime.
  * Implementations own submitted bytes, perform no I/O in submit, and preserve the
@@ -87,6 +98,7 @@ private:
 struct FrameWriterLimits {
   std::size_t max_output_bytes{1024 * 1024};             ///< Complete VT transaction cap.
   std::size_t max_frame_storage_bytes{64 * 1024 * 1024}; ///< Per-frame CellBuffer::memory().total_bytes cap.
+  ColorMode colorMode{ColorMode::TRUE_COLOR};            ///< Fixed output palette for this writer's complete lifetime.
 };
 /** @brief Submission failure; the supplied frame remains owned by the caller. */
 enum class FrameError {

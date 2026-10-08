@@ -153,3 +153,5 @@ Unicode test data retain their [full license](tests/fixtures/unicode/Unicode-LIC
 Basic controls and the finite, runnable gallery are described in [controls](docs/controls.md).
 
 Unicode draft editing, selection, bounded paste and an injected clipboard boundary are documented in [LineEdit](docs/line-edit.md).
+
+Styles: [typed themes, PSS v0, atomic updates and ANSI16 output](docs/styles.md).

@@ -3,6 +3,7 @@
 #pragma once
 
 #include <portals/scheduler.hpp>
+#include <portals/style_types.hpp>
 #include <portals/widget_types.hpp>
 
 #include <concepts>
@@ -14,6 +15,7 @@
 
 namespace portals {
 class WidgetTree;
+class StyleEngine;
 
 /** @brief UI-owned extension object. Hooks borrow their arguments for one call.
  * Models are separate explicit owners chosen by the application. Hooks must not block,
@@ -42,6 +44,29 @@ public:
    * @return Success after emitting commands (none by default), or a painting/sink failure.
    */
   virtual std::expected<void, TreeError> paint(PaintContext &context);
+  /** @brief Read manual presentation defaults during style staging on UI.
+   * @return Owning defaults beneath
+   * stylesheet declarations; empty by default.
+   * @note The engine holds a frame borrow: tree mutation/reentry is
+   * rejected. Do not perform
+   * I/O, mutate domain state or retain borrows. Exceptions abort the complete style
+   * transaction.
+   */
+  virtual ComputedStyle styleDefaults() const;
+
+  /** @brief Inspect the last atomically installed theme inside tree.read/frame.
+   * @return Borrowed optional value,
+   * empty before binding; expires on the next style transaction.
+   */
+  const std::optional<ComputedStyle> &computedStyle() const noexcept;
+
+  /** @return Last installed engine revision, or zero before binding; UI reads only. */
+  std::uint64_t styleRevision() const noexcept;
+
+private:
+  friend class StyleEngine;
+  std::optional<ComputedStyle> computedStyle_;
+  std::uint64_t styleRevision_{};
 };
 
 /** @brief Copyable typed observer; never owns or exposes an unchecked widget pointer.
@@ -449,6 +474,8 @@ public:
 
 private:
   struct State;
+
+  friend class StyleEngine;
 
   struct Borrow {
     explicit Borrow(WidgetTree &tree, bool frame = false);

@@ -389,6 +389,25 @@ private:
           style_.italic = true;
         } else if (code == 4) {
           style_.underline = true;
+        } else if ((code >= 30 && code <= 37) || (code >= 40 && code <= 47) || (code >= 90 && code <= 97) ||
+                   (code >= 100 && code <= 107)) {
+          // Decode standard ANSI channels independently of the production nearest-color encoder.
+          const bool background = (code >= 40 && code <= 47) || code >= 100;
+          const bool bright = code >= 90;
+          const auto index = code - (bright ? (background ? 100 : 90) : (background ? 40 : 30));
+          const auto low = static_cast<std::uint8_t>(bright ? 85 : 0);
+          const auto high = static_cast<std::uint8_t>(bright ? 255 : 170);
+          portals::RgbColor color{index & 1 ? high : low, index & 2 ? high : low, index & 4 ? high : low};
+
+          if (!bright && index == 3) {
+            color.green = 85;
+          }
+
+          if (background) {
+            style_.background = color;
+          } else {
+            style_.foreground = color;
+          }
         } else if ((code == 38 || code == 48) && i + 4 < values.size() && values[i + 1] == 2) {
           if (values[i + 2] > 255 || values[i + 3] > 255 || values[i + 4] > 255) {
             throw std::runtime_error("oracle: RGB component outside range");
