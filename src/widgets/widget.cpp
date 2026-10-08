@@ -71,6 +71,8 @@ struct WidgetTree::State {
   std::size_t count{};
   std::size_t borrows{};
   std::size_t frames{};
+  DiagnosticContext pending_diagnostic{};
+  DiagnosticContext frame_diagnostic{};
   std::size_t lifecycle{};
 
   bool extension{};
@@ -134,6 +136,25 @@ struct WidgetTree::State {
   }
 
   void invalidate(Invalidation kind) noexcept {
+    if (auto *recorder = scheduler.diagnostics(); recorder && recorder->enabled()) {
+      auto traceContext = recorder->current();
+
+      if (kind != Invalidation::NONE && frames == 0) {
+        if (!pending_diagnostic.frameId || pending_diagnostic.period != traceContext.period) {
+          pending_diagnostic = traceContext;
+          pending_diagnostic.frameId = recorder->nextIdentity();
+        }
+
+        traceContext.frameId = pending_diagnostic.frameId;
+        recorder->record({.context = traceContext, .event = DiagnosticEvent::FRAME_REQUESTED});
+      }
+
+      recorder->record({.context = traceContext,
+                        .event = DiagnosticEvent::INVALIDATION,
+                        .reason = kind == Invalidation::NONE ? DiagnosticReason::FRAME_NOT_REQUESTED
+                                                             : DiagnosticReason::VALUE_CHANGED});
+    }
+
     if (kind == Invalidation::LAYOUT) {
       dirty = kind;
 
@@ -631,7 +652,26 @@ std::expected<Invalidation, TreeError> WidgetTree::consumeFrameRequest() {
     return std::unexpected(TreeError::WOULD_BLOCK);
   }
 
+  if (auto *recorder = diagnostics(); recorder && recorder->enabled()) {
+    if (state_->dirty == Invalidation::NONE && recorder->current().correlationId) {
+      recorder->note(DiagnosticEvent::FRAME_NOT_REQUESTED, DiagnosticReason::FRAME_NOT_REQUESTED);
+    } else if (state_->dirty != Invalidation::NONE) {
+      state_->frame_diagnostic = state_->pending_diagnostic;
+      state_->pending_diagnostic = {};
+    }
+  }
+
   return std::exchange(state_->dirty, Invalidation::NONE);
+}
+
+Diagnostics *WidgetTree::diagnostics() const noexcept {
+  return state_->scheduler.diagnostics();
+}
+
+DiagnosticContext WidgetTree::diagnosticFrame() const noexcept {
+  auto *recorder = diagnostics();
+
+  return recorder && recorder->enabled() ? state_->frame_diagnostic : DiagnosticContext{};
 }
 
 std::expected<void, TreeError> WidgetTree::beginFrame() const {

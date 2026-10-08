@@ -38,12 +38,14 @@ struct SchedulerRegistration {
   SchedulerTime deadline{};
 
   bool active{true};
+  DiagnosticContext diagnostic{};
 };
 
 struct SchedulerPublication {
   std::uint64_t id{};
   std::shared_ptr<const void> value;
   SchedulerTime queued_at{};
+  DiagnosticContext diagnostic{};
 };
 
 struct SchedulerQueue {
@@ -89,6 +91,14 @@ struct SchedulerState {
     return ++next_id;
   }
 
+  void tracePublication(const SchedulerPublication &publication, DiagnosticEvent event, DiagnosticReason reason,
+                        bool controlLane = false) noexcept {
+    if (options.diagnostics && options.diagnostics->enabled()) {
+      options.diagnostics->record(
+        {.context = publication.diagnostic, .event = event, .reason = reason, .controlQueue = controlLane});
+    }
+  }
+
   void discard(SchedulerQueue &queue, std::uint64_t id) {
     for (;;) {
       SchedulerPublication removed;
@@ -109,6 +119,8 @@ struct SchedulerState {
         queue.metrics.pending = queue.values.size();
       }
 
+      tracePublication(removed, DiagnosticEvent::QUEUE_CANCELLED, DiagnosticReason::CANCELLED, &queue == &control);
+
       // User-supplied snapshot deleters are never called while holding the lock.
     }
   }
@@ -126,6 +138,12 @@ struct SchedulerState {
 
       removed = std::move(*found);
       registrations.erase(found);
+    }
+
+    if (removed->timer && options.diagnostics && options.diagnostics->enabled()) {
+      options.diagnostics->record({.context = removed->diagnostic,
+                                   .event = DiagnosticEvent::QUEUE_CANCELLED,
+                                   .reason = DiagnosticReason::CANCELLED});
     }
 
     discard(data, id);
@@ -184,6 +202,24 @@ struct SchedulerState {
       increment(control.metrics.cancelled, old_control.size());
       data.metrics.pending = control.metrics.pending = 0;
     }
+
+    if (options.diagnostics && options.diagnostics->enabled()) {
+      for (const auto &registration : removed) {
+        if (registration->timer) {
+          options.diagnostics->record({.context = registration->diagnostic,
+                                       .event = DiagnosticEvent::QUEUE_CANCELLED,
+                                       .reason = DiagnosticReason::CANCELLED});
+        }
+      }
+    }
+
+    for (const auto &publication : old_data) {
+      tracePublication(publication, DiagnosticEvent::QUEUE_CANCELLED, DiagnosticReason::CANCELLED);
+    }
+
+    for (const auto &publication : old_control) {
+      tracePublication(publication, DiagnosticEvent::QUEUE_CANCELLED, DiagnosticReason::CANCELLED, true);
+    }
   }
 
   std::optional<SchedulerTime> nextTimer() const {
@@ -226,16 +262,34 @@ std::expected<PublishResult, SchedulerError> schedulerPublish(const std::shared_
     return std::unexpected(SchedulerError::CLOSED);
   }
 
+  DiagnosticContext diagnostic;
+  auto *recorder = state->options.diagnostics.get();
+
+  if (recorder && recorder->enabled()) {
+    diagnostic = recorder->current();
+    diagnostic.publicationId = recorder->nextIdentity();
+  }
+
   // value also holds any displaced snapshot until after unlock.
   std::unique_lock lock(state->mutex);
 
   if (state->stopped) {
+    if (recorder && recorder->enabled()) {
+      recorder->record(
+        {.context = diagnostic, .event = DiagnosticEvent::QUEUE_REJECTED, .reason = DiagnosticReason::CANCELLED});
+    }
+
     return std::unexpected(SchedulerError::CLOSED);
   }
 
   auto found = state->find(id);
 
   if (found == state->registrations.end() || !(*found)->active) {
+    if (recorder && recorder->enabled()) {
+      recorder->record(
+        {.context = diagnostic, .event = DiagnosticEvent::QUEUE_REJECTED, .reason = DiagnosticReason::CANCELLED});
+    }
+
     return std::unexpected(SchedulerError::CLOSED);
   }
 
@@ -257,6 +311,17 @@ std::expected<PublishResult, SchedulerError> schedulerPublish(const std::shared_
   // Replacement preserves this sender's FIFO position, including when the queue is full;
   // only its latency origin changes to the newly accepted snapshot.
   if (pending != queue.values.end()) {
+    if (recorder && recorder->enabled()) {
+      recorder->record({.context = pending->diagnostic,
+                        .event = DiagnosticEvent::QUEUE_CANCELLED,
+                        .reason = DiagnosticReason::REPLACED});
+      recorder->record({.context = diagnostic,
+                        .relatedPublicationId = pending->diagnostic.publicationId,
+                        .event = DiagnosticEvent::QUEUE_REPLACED,
+                        .reason = DiagnosticReason::REPLACED});
+    }
+
+    pending->diagnostic = diagnostic;
     pending->value.swap(value);
     pending->queued_at = state->now();
     increment(queue.metrics.replaced);
@@ -265,12 +330,25 @@ std::expected<PublishResult, SchedulerError> schedulerPublish(const std::shared_
     if (queue.values.size() == queue.capacity) {
       increment(queue.metrics.rejected);
 
+      if (recorder && recorder->enabled()) {
+        recorder->record({.context = diagnostic,
+                          .event = DiagnosticEvent::QUEUE_REJECTED,
+                          .reason = DiagnosticReason::QUEUE_FULL,
+                          .controlQueue = registration.lane == SchedulerLane::CONTROL});
+      }
+
       return std::unexpected(SchedulerError::WOULD_BLOCK);
     }
 
-    queue.values.push_back({id, std::move(value), state->now()});
+    queue.values.push_back({id, std::move(value), state->now(), diagnostic});
     queue.metrics.pending = queue.values.size();
     queue.metrics.high_water = std::max(queue.metrics.high_water, queue.metrics.pending);
+  }
+
+  if (recorder && recorder->enabled()) {
+    recorder->record({.context = diagnostic,
+                      .event = DiagnosticEvent::QUEUE_ACCEPTED,
+                      .controlQueue = registration.lane == SchedulerLane::CONTROL});
   }
 
   increment(queue.metrics.accepted);
@@ -465,6 +543,11 @@ std::expected<std::uint64_t, SchedulerError> Scheduler::add(const UiScope &scope
   registration->timer = timer;
   registration->deadline = deadline;
 
+  if (timer && state_->options.diagnostics && state_->options.diagnostics->enabled()) {
+    registration->diagnostic = state_->options.diagnostics->current();
+    registration->diagnostic.publicationId = state_->options.diagnostics->nextIdentity();
+  }
+
   std::lock_guard lock(state_->mutex);
 
   if (state_->stopped) {
@@ -482,6 +565,11 @@ std::expected<std::uint64_t, SchedulerError> Scheduler::add(const UiScope &scope
   }
 
   registration->id = *id;
+
+  if (timer && state_->options.diagnostics && state_->options.diagnostics->enabled()) {
+    state_->options.diagnostics->record(
+      {.context = registration->diagnostic, .event = DiagnosticEvent::QUEUE_ACCEPTED});
+  }
   state_->registrations.push_back(std::move(registration));
 
   return *id;
@@ -511,7 +599,22 @@ std::expected<SchedulerDispatch, SchedulerError> Scheduler::dispatch() {
                     std::shared_ptr<const void> value) {
     try {
       registration->callback(std::move(value));
+
+      if (auto *recorder = diagnostics(); recorder && recorder->enabled()) {
+        recorder->record({.context = recorder->current(),
+                          .event = DiagnosticEvent::QUEUE_RETURNED,
+                          .reason = DiagnosticReason::OUTCOME_UNKNOWN,
+                          .controlQueue = registration->lane == SchedulerLane::CONTROL});
+      }
     } catch (...) {
+      if (auto *recorder = diagnostics(); recorder && recorder->enabled()) {
+        recorder->note(DiagnosticEvent::HANDLER_RETURNED, DiagnosticReason::HANDLER_FAILED);
+        recorder->record({.context = recorder->current(),
+                          .event = DiagnosticEvent::QUEUE_RETURNED,
+                          .reason = DiagnosticReason::HANDLER_FAILED,
+                          .controlQueue = registration->lane == SchedulerLane::CONTROL});
+      }
+
       state_->disconnect(registration->id);
       ++result.callback_failures;
       {
@@ -562,7 +665,14 @@ std::expected<SchedulerDispatch, SchedulerError> Scheduler::dispatch() {
 
       if (registration) {
         ++count;
+        DiagnosticScope context(diagnostics(), publication.diagnostic);
+
+        state_->tracePublication(publication, DiagnosticEvent::QUEUE_DISPATCH, DiagnosticReason::NONE,
+                                 registration->lane == SchedulerLane::CONTROL);
         invoke(registration, std::move(publication.value));
+      } else {
+        state_->tracePublication(publication, DiagnosticEvent::QUEUE_CANCELLED, DiagnosticReason::CANCELLED,
+                                 &queue == &state_->control);
       }
     }
   };
@@ -601,6 +711,12 @@ std::expected<SchedulerDispatch, SchedulerError> Scheduler::dispatch() {
     }
 
     ++result.timers;
+    DiagnosticScope context(diagnostics(), registration->diagnostic);
+
+    if (auto *recorder = diagnostics(); recorder && recorder->enabled()) {
+      recorder->note(DiagnosticEvent::QUEUE_DISPATCH);
+    }
+
     invoke(registration, {});
   }
 
@@ -690,6 +806,10 @@ std::expected<void, SchedulerError> Scheduler::stop() {
   state_->reclaim();
 
   return {};
+}
+
+Diagnostics *Scheduler::diagnostics() const noexcept {
+  return state_->options.diagnostics.get();
 }
 
 SchedulerMetrics Scheduler::metrics() const {

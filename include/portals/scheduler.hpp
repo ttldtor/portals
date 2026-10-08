@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include <portals/diagnostics.hpp>
+
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -61,12 +63,13 @@ struct SchedulerClock {
 
 /** @brief Finite resource limits and maximum work per dispatch; all fields must be positive. */
 struct SchedulerOptions {
-  std::size_t data_capacity{256};         ///< Maximum queued data owners.
-  std::size_t control_capacity{32};       ///< Maximum queued keyboard/resize/quit owners.
-  std::size_t data_budget{32};            ///< Maximum data deliveries per cycle.
-  std::size_t control_budget{32};         ///< Maximum control deliveries per cycle.
-  std::size_t timer_budget{32};           ///< Maximum due one-shot timers per cycle.
-  std::size_t subscription_capacity{256}; ///< Maximum live subscriptions and timers together.
+  std::size_t data_capacity{256};             ///< Maximum queued data owners.
+  std::size_t control_capacity{32};           ///< Maximum queued keyboard/resize/quit owners.
+  std::size_t data_budget{32};                ///< Maximum data deliveries per cycle.
+  std::size_t control_budget{32};             ///< Maximum control deliveries per cycle.
+  std::size_t timer_budget{32};               ///< Maximum due one-shot timers per cycle.
+  std::size_t subscription_capacity{256};     ///< Maximum live subscriptions and timers together.
+  std::shared_ptr<Diagnostics> diagnostics{}; ///< Optional shared recorder; disabled by default.
 };
 
 /** @brief Queue counters saturate at UINT64_MAX; latency is measured in clock milliseconds. */
@@ -347,6 +350,10 @@ public:
    * @return Owning snapshot of both queue counters and aggregate dispatch counters.
    */
   SchedulerMetrics metrics() const;
+  /** @brief Borrow the configured recorder; its lifetime is retained by this scheduler.
+   * @return Recorder pointer, or null when diagnostics were not configured.
+   */
+  Diagnostics *diagnostics() const noexcept;
 
 private:
   explicit Scheduler(std::shared_ptr<detail::SchedulerState> state);

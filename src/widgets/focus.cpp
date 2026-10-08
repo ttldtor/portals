@@ -178,6 +178,12 @@ std::expected<void, TreeError> EventRouter::changeFocus(Node<Widget> node) {
 
   state_->focus = node;
 
+  if (auto *recorder = tree().diagnostics(); recorder && recorder->enabled()) {
+    const auto id = node.id();
+
+    recorder->note(DiagnosticEvent::FOCUS, DiagnosticReason::NONE, {id.session, id.slot, id.generation});
+  }
+
   if (previous.id().session != 0) {
     auto status = tree().invalidate(previous, Invalidation::PAINT);
 
