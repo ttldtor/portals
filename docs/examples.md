@@ -52,11 +52,12 @@ The table and candle chart use a single provider pin per frame. Logical instrume
 share the market OHLC with a deterministic price offset. Table formatting covers
 only visible rows; preparation retains visible rows plus two overscan rows per
 side. No million-row materialization is performed. The title and editable note
-exercise Unicode; `--ascii` selects ASCII example labels. Charts already use ASCII
-`*`, `|`, and `#`; `--ansi16` selects actual ANSI16 encoding, not an advertised
-capability flag. Both themes are compiled typed equivalents of the distributed
-PSS themes and require no runtime theme-file lookup. Themes change controls and
-table colors; the chart deliberately retains its rising/falling market colors.
+exercise Unicode. Dashboard candles use one-cell Unicode wicks and filled bodies
+by default; `--ascii` selects ASCII labels and candle brushes. `--ansi16` selects
+actual ANSI16 encoding, not an advertised capability flag. Both themes are
+compiled typed equivalents of the distributed PSS themes and require no runtime
+theme-file lookup. Themes change controls, table colors and the chart background;
+rising/falling market colors remain distinct.
 
 Tab switches focus, arrows/Home/End select/scroll the table, Enter commits the
 note, and F2 switches Modern/Turbo. The Inspect button deliberately sets the note
