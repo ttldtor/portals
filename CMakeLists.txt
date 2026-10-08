@@ -20,7 +20,7 @@ set_target_properties(portals_utf8proc PROPERTIES C_STANDARD 99 C_STANDARD_REQUI
 target_compile_definitions(portals_utf8proc PRIVATE UTF8PROC_STATIC)
 target_include_directories(portals_utf8proc PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/utf8proc")
 
-add_library(portals_core STATIC src/version.cpp src/geometry.cpp src/text.cpp src/input.cpp src/cell_buffer.cpp src/render.cpp src/render/diff.cpp src/terminal/writer.cpp src/runtime/scheduler.cpp src/runtime/diagnostics.cpp src/widgets/widget.cpp src/layout/linear.cpp src/layout/grid.cpp src/layout/overlay.cpp src/widgets/focus.cpp src/widgets/event_routing.cpp src/models/model.cpp src/widgets/basic_controls.cpp src/widgets/line_edit.cpp src/views/virtual_list.cpp src/views/virtual_table.cpp src/views/scroll.cpp src/styles/style.cpp src/styles/pss.cpp src/charts/canvas.cpp src/charts/chart.cpp)
+add_library(portals_core STATIC src/version.cpp src/geometry.cpp src/text.cpp src/input.cpp src/cell_buffer.cpp src/render.cpp src/render/diff.cpp src/terminal/writer.cpp src/runtime/scheduler.cpp src/runtime/application.cpp src/runtime/diagnostics.cpp src/widgets/widget.cpp src/layout/linear.cpp src/layout/grid.cpp src/layout/overlay.cpp src/widgets/focus.cpp src/widgets/event_routing.cpp src/models/model.cpp src/widgets/basic_controls.cpp src/widgets/line_edit.cpp src/views/virtual_list.cpp src/views/virtual_table.cpp src/views/scroll.cpp src/styles/style.cpp src/styles/pss.cpp src/charts/canvas.cpp src/charts/chart.cpp)
 if(WIN32)
   target_sources(portals_core PRIVATE src/terminal/windows.cpp)
 elseif(UNIX)
@@ -111,10 +111,23 @@ endif()
 if(PORTALS_BUILD_EXAMPLES)
   add_subdirectory(examples/consumer)
   add_subdirectory(examples/gallery)
+  add_subdirectory(examples/dashboard)
+  add_subdirectory(examples/custom_widget)
+  add_subdirectory(examples/replay)
   portals_enable_warnings(portals_consumer)
 endif()
 
 if(PORTALS_BUILD_TESTS)
+  add_executable(portals_dashboard_tests tests/dashboard.cpp)
+  target_link_libraries(portals_dashboard_tests PRIVATE portals::core)
+  portals_enable_warnings(portals_dashboard_tests)
+  add_test(NAME portals.dashboard COMMAND portals_dashboard_tests)
+  set_tests_properties(portals.dashboard PROPERTIES TIMEOUT 20)
+  add_executable(portals_application tests/application.cpp)
+  target_link_libraries(portals_application PRIVATE portals::core)
+  portals_enable_warnings(portals_application)
+  add_test(NAME portals.application COMMAND portals_application)
+  set_tests_properties(portals.application PROPERTIES TIMEOUT 15)
   add_executable(portals_style tests/style.cpp)
   target_link_libraries(portals_style PRIVATE portals::core)
   portals_enable_warnings(portals_style)
@@ -168,6 +181,10 @@ if(PORTALS_BUILD_TESTS)
 
   if(PORTALS_BUILD_EXAMPLES)
     add_test(NAME portals.gallery-replay COMMAND portals_gallery --check)
+    add_test(NAME portals.dashboard-check COMMAND portals_dashboard --check --ansi16 --ascii)
+    add_test(NAME portals.dashboard-replay COMMAND portals_replay_example --check --delay-ms 250)
+    add_test(NAME portals.custom-widget COMMAND portals_custom_widget --check)
+    set_tests_properties(portals.dashboard-check portals.dashboard-replay portals.custom-widget PROPERTIES TIMEOUT 20)
     set_tests_properties(portals.gallery-replay PROPERTIES TIMEOUT 15)
   endif()
   add_executable(portals_line_edit tests/line_edit.cpp tests/support/test_terminal.cpp)
@@ -356,7 +373,7 @@ if(PORTALS_BUILD_DOCS)
   set(DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/docs")
 
   doxygen_add_docs(portals_docs include README.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/scheduler.md docs/widget-tree.md docs/layout.md docs/grid.md docs/property.md docs/diagnostics.md docs/focus.md docs/model.md docs/input.md docs/terminal.md docs/terminal-probe.md docs/controls.md docs/line-edit.md docs/virtual-list.md docs/virtual-table.md docs/scroll.md docs/chart.md
-    docs/styles.md docs/package.md docs/architecture.md docs/api-design.md experiments/module-spike/README.md fuzz/README.md
+    docs/styles.md docs/package.md docs/application.md docs/examples.md docs/architecture.md docs/api-design.md experiments/module-spike/README.md fuzz/README.md
     vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Generate Portals API documentation"
