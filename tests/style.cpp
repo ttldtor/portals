@@ -7,6 +7,7 @@
 #include <portals/style.hpp>
 #include <portals/virtual_table.hpp>
 
+#include <array>
 #include <fstream>
 #include <iostream>
 #include <thread>
@@ -365,6 +366,130 @@ void customAtomicity() {
         "allocation failure in staging leaves prior style intact");
 }
 
+void batchTransactions() {
+  Fixture fixture;
+  auto first = take(fixture.tree->emplace<CountedButton>(fixture.root));
+  auto second = take(fixture.tree->emplace<CountedButton>(fixture.root));
+  const std::array<StyleRegistration, 2> registrations{{{first, {.type = "Button"}}, {second, {.type = "Button"}}}};
+  const auto revision = fixture.styles.revision();
+
+  take(fixture.styles.bindBatch(registrations));
+
+  check(fixture.styles.revision() == revision + 1, "batch commits a single revision");
+  take(fixture.tree->read(first, [](const CountedButton &widget) {
+    check(widget.calls == 1, "batch recomputes each widget exactly once");
+  }));
+
+  take(fixture.styles.replace(modernTheme()));
+  check(readStyle(fixture, first) == readStyle(fixture, second), "batch registrations participate in theme updates");
+  take(fixture.styles.replacePss("#primary { min-width: 17; }"));
+
+  const std::array<StyleRegistration, 1> update{{{first, {.type = "Button", .id = "primary"}}}};
+
+  take(fixture.styles.bindBatch(update));
+  check(readStyle(fixture, first).minWidth == 17 && readStyle(fixture, second).minWidth != 17,
+        "batch upserts existing metadata without changing other registrations");
+
+  const auto committedRevision = fixture.styles.revision();
+  const std::array<StyleRegistration, 2> duplicate{{{first, {.id = "new"}}, {first, {.id = "other"}}}};
+  auto rejected = fixture.styles.bindBatch(duplicate);
+
+  check(!rejected && rejected.error().cause == TreeError::INVALID_ARGUMENT &&
+          fixture.styles.revision() == committedRevision && readStyle(fixture, first).minWidth == 17,
+        "duplicate batch targets leave registry and values unchanged");
+
+  take(fixture.tree->remove(second));
+  rejected = fixture.styles.bindBatch(registrations);
+  check(!rejected && rejected.error().cause == TreeError::STALE_NODE &&
+          fixture.styles.revision() == committedRevision && readStyle(fixture, first).minWidth == 17,
+        "late stale target does not publish earlier metadata");
+
+  auto custom = take(fixture.tree->emplace<CustomDefaults>(fixture.root));
+
+  take(fixture.tree->edit(custom, [&](CustomDefaults &widget) {
+    widget.tree = fixture.tree.get();
+    widget.target = first;
+    widget.engine = &fixture.styles;
+    widget.fail = true;
+  }));
+
+  const std::array<StyleRegistration, 2> throwing{{{first, {.type = "Button"}}, {custom, {.type = "Custom"}}}};
+
+  take(fixture.tree->consumeFrameRequest());
+  rejected = fixture.styles.bindBatch(throwing);
+  check(!rejected && rejected.error().cause == TreeError::CALLBACK_FAILED &&
+          fixture.styles.revision() == committedRevision && readStyle(fixture, first).minWidth == 17 &&
+          take(fixture.tree->consumeFrameRequest()) == Invalidation::NONE,
+        "late defaults failure rolls back whole batch including invalidation");
+  take(fixture.tree->read(custom, [](const CustomDefaults &widget) {
+    check(!widget.computedStyle(), "failed batch does not publish a new widget style");
+  }));
+  take(fixture.styles.refresh());
+  check(readStyle(fixture, first).minWidth == 17, "failed metadata is absent from subsequent refresh");
+}
+
+void batchBudgetAndAllocation() {
+  Fixture fixture;
+  StyleEngine styles(*fixture.tree, 2);
+  auto first = take(fixture.tree->emplace<Widget>(fixture.root));
+  auto second = take(fixture.tree->emplace<Widget>(fixture.root));
+  auto third = take(fixture.tree->emplace<Widget>(fixture.root));
+  const std::array<StyleRegistration, 2> initial{{{first, {.type = "Widget"}}, {second, {.type = "Widget"}}}};
+
+  take(styles.bindBatch(initial));
+
+  const std::array<StyleRegistration, 2> replacement{{{first, {.id = "updated"}}, {third, {.type = "Widget"}}}};
+  auto rejected = styles.bindBatch(replacement);
+
+  check(!rejected && rejected.error().cause == TreeError::NODE_LIMIT && styles.revision() == 1,
+        "over-budget batch retains all previous bindings");
+  take(fixture.tree->remove(second));
+  take(styles.bindBatch(replacement));
+  check(styles.revision() == 2, "batch prunes stale bindings before enforcing capacity");
+
+  const auto revision = styles.revision();
+  int failuresSeen{};
+  bool committed{};
+
+  for (std::ptrdiff_t budget = 0; budget < 160 && !committed; ++budget) {
+    allocation_test::remaining = budget;
+
+    auto result = styles.bindBatch(replacement);
+
+    allocation_test::remaining = -1;
+
+    if (result) {
+      committed = true;
+    } else {
+      ++failuresSeen;
+      check(result.error().cause == TreeError::NO_MEMORY && styles.revision() == revision,
+            "batch allocation failures preserve revision and bindings");
+    }
+  }
+
+  check(committed && failuresSeen >= 2 && styles.revision() == revision + 1,
+        "batch allocation sweep reaches one complete commit");
+
+  const auto committedRevision = styles.revision();
+  bool wrongThread{};
+  std::thread worker([&] {
+    auto result = styles.bindBatch(replacement);
+
+    wrongThread = !result && result.error().cause == TreeError::WRONG_THREAD;
+  });
+
+  worker.join();
+  check(wrongThread && styles.revision() == committedRevision, "batch rejects wrong-thread calls before staging");
+  take(fixture.tree->frame([&] {
+    auto result = styles.bindBatch(replacement);
+
+    check(!result && result.error().cause == TreeError::WOULD_BLOCK && styles.revision() == committedRevision,
+          "batch rejects frame-time calls before staging");
+  }));
+  take(styles.bindBatch({}));
+  check(styles.revision() == committedRevision + 1, "empty batch performs one ordinary refresh");
+}
+
 struct Page : ModelSnapshot<int> {
   std::vector<ModelRow<int>> rows{{{1, 1}, 7}, {{2, 1}, 8}};
 
@@ -596,6 +721,8 @@ int main(int argc, char **argv) {
   parserAndCascade(argv[1]);
   transactionsAndControls();
   customAtomicity();
+  batchTransactions();
+  batchBudgetAndAllocation();
   paintUsesSnapshot();
   viewsAndEditor();
   focusedEditorCaretIsVisible();

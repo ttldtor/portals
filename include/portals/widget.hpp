@@ -209,30 +209,36 @@ public:
   template <class T, class... Args>
     requires std::derived_from<T, Widget>
   std::expected<Node<T>, TreeError> emplace(Node<Widget> parent, Args &&...args) {
-    auto allowed = canInsert(parent.id());
+    return emplaceImpl<T>(parent, false, std::forward<Args>(args)...);
+  }
 
-    if (!allowed) {
-      return std::unexpected(allowed.error());
+  /// @brief Checked construction, including mount and deferred reclamation.
+  /// Uses the validation and construction boundary of emplace.
+  /// Mount exceptions reach the error sink and retire the attempted subtree.
+  /// External effects of constructors, lifecycle hooks and the sink are not rolled back.
+  /// @tparam T Publicly derived Widget constructible from Args.
+  /// @tparam Args Constructor argument types, perfectly forwarded without library copies.
+  /// @param parent Live parent that will own the child.
+  /// @param args Constructor arguments forwarded after insertion checks.
+  /// @return Live child or an emplace error; mount exceptions return CALLBACK_FAILED.
+  /// Removal during mount or deferred cleanup returns STALE_NODE; tree closure returns CLOSED.
+  template <class T, class... Args>
+    requires std::derived_from<T, Widget>
+  std::expected<Node<T>, TreeError> emplaceChecked(Node<Widget> parent, Args &&...args) {
+    auto node = emplaceImpl<T>(parent, true, std::forward<Args>(args)...);
+
+    if (!node) {
+      return node;
     }
 
-    Borrow guard(*this);
+    // Reclamation after mount may run another widget's unmount and retire this child.
+    auto live = access(node->id(), false);
 
-    try {
-      auto value = std::make_unique<T>(std::forward<Args>(args)...);
-      auto id = attach(parent.id(), std::move(value));
-
-      if (!id) {
-        return std::unexpected(id.error());
-      }
-
-      return Node<T>(*id);
-    } catch (const std::bad_alloc &) {
-      return std::unexpected(TreeError::NO_MEMORY);
-    } catch (...) {
-      report(parent.id(), TreeError::CALLBACK_FAILED);
-
-      return std::unexpected(TreeError::CALLBACK_FAILED);
+    if (!live) {
+      return std::unexpected(live.error());
     }
+
+    return node;
   }
 
   /** @brief Borrow T only during a void callback; nested edit/removal is supported.
@@ -498,7 +504,36 @@ private:
   explicit WidgetTree(std::unique_ptr<State> state);
   std::expected<Widget *, TreeError> access(NodeId id, bool mutation) const;
   std::expected<void, TreeError> canInsert(NodeId parent) const;
-  std::expected<NodeId, TreeError> attach(NodeId parent, std::unique_ptr<Widget> widget);
+  std::expected<NodeId, TreeError> attach(NodeId parent, std::unique_ptr<Widget> widget, bool checked);
+
+  template <class T, class... Args>
+  std::expected<Node<T>, TreeError> emplaceImpl(Node<Widget> parent, bool checked, Args &&...args) {
+    auto allowed = canInsert(parent.id());
+
+    if (!allowed) {
+      return std::unexpected(allowed.error());
+    }
+
+    Borrow guard(*this);
+
+    try {
+      auto value = std::make_unique<T>(std::forward<Args>(args)...);
+      auto id = attach(parent.id(), std::move(value), checked);
+
+      if (!id) {
+        return std::unexpected(id.error());
+      }
+
+      return Node<T>(*id);
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(TreeError::NO_MEMORY);
+    } catch (...) {
+      report(parent.id(), TreeError::CALLBACK_FAILED);
+
+      return std::unexpected(TreeError::CALLBACK_FAILED);
+    }
+  }
+
   std::expected<void, TreeError> beginFrame() const;
   const UiScope &scope(NodeId id) const;
   Scheduler &scheduler() const;

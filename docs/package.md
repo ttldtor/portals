@@ -73,6 +73,9 @@ existing noninteractive startup source copied beside the consumer fixture.
 The test rejects source/build paths and private warnings/definitions in installed
 CMake files, disables package registries, and retains its directories for inspection.
 
+The same installed consumer also runs the [managed-control before/after forms](managed-controls.md),
+including deterministic input replay, exact output comparison and typed callback errors.
+
 Multi-config generators that provide Debug and Release also register
 `portals.package-install-multi-config`. This test builds both core/utf8proc
 configurations, installs them into one prefix, moves it, then builds and runs

@@ -5,6 +5,7 @@
 #include <portals/style_types.hpp>
 #include <portals/widget.hpp>
 
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -32,6 +33,12 @@ struct StyleTarget {
   std::string id{""};   ///< Optional case-sensitive application identity, independent of NodeId.
   std::vector<std::string> classes =
     std::vector<std::string>(0); ///< Case-sensitive class names; all selector classes must match.
+};
+
+/** @brief Owned metadata for one checked target in an atomic binding batch. */
+struct StyleRegistration {
+  Node<Widget> node;  ///< Observing handle; the tree retains widget ownership.
+  StyleTarget target; ///< Matching metadata copied into the engine on success.
 };
 
 /** @brief Conjunction of optional type, id, classes and one state; no hierarchy combinators. */
@@ -146,6 +153,13 @@ public:
    * @return Coalesced invalidation, or error retaining every previous value and binding.
    */
   std::expected<Invalidation, StyleError> bind(Node<Widget> node, StyleTarget target);
+
+  /// @brief Update metadata in one transaction, then recompute every bound widget once.
+  /// Duplicate input nodes return INVALID_ARGUMENT. Stale bindings are pruned before admission.
+  /// Empty input performs the same refresh as refresh().
+  /// @param registrations Borrowed live targets and metadata, copied during staging.
+  /// @return Coalesced invalidation, or an error preserving all values, bindings and revisions.
+  std::expected<Invalidation, StyleError> bindBatch(std::span<const StyleRegistration> registrations);
   /** @brief Install a complete typed stylesheet atomically between frames.
    * @param sheet Owned replacement rules; validation and staging precede commit.
    * @return Actual paint/layout invalidation, or error retaining sheet/revision/widget values.
@@ -171,7 +185,7 @@ private:
     StyleTarget target;
   };
 
-  std::expected<Invalidation, StyleError> install(StyleSheet sheet, std::vector<Binding> bindings);
+  std::expected<Invalidation, StyleError> install(StyleSheet sheet, std::vector<Binding> &&bindings);
   std::expected<void, StyleError> checkBoundary();
   WidgetTree &tree_;
   std::size_t maxBindings_;

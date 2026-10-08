@@ -182,9 +182,59 @@ std::expected<Invalidation, StyleError> StyleEngine::bind(Node<Widget> node, Sty
       found->target = std::move(target);
     }
 
-    return install(sheet_, bindings);
+    return install(sheet_, std::move(bindings));
   } catch (const std::bad_alloc &) {
     return std::unexpected(error(TreeError::NO_MEMORY, "Style allocation failed"));
+  }
+}
+
+std::expected<Invalidation, StyleError> StyleEngine::bindBatch(std::span<const StyleRegistration> registrations) {
+  auto boundary = checkBoundary();
+
+  if (!boundary) {
+    return std::unexpected(boundary.error());
+  }
+
+  for (std::size_t index = 0; index < registrations.size(); ++index) {
+    const auto node = registrations[index].node;
+    auto access = tree_.access(node.id(), true);
+
+    if (!access) {
+      return std::unexpected(error(access.error(), "Style target is unavailable"));
+    }
+
+    if (std::ranges::find(registrations.first(index), node, &StyleRegistration::node) !=
+        registrations.first(index).end()) {
+      return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Duplicate target in style batch"));
+    }
+  }
+
+  try {
+    auto bindings = bindings_;
+
+    std::erase_if(bindings, [&](const Binding &binding) {
+      return !tree_.access(binding.node.id(), true);
+    });
+
+    for (const auto &registration : registrations) {
+      auto found = std::ranges::find(bindings, registration.node, &Binding::node);
+
+      if (found != bindings.end()) {
+        found->target = registration.target;
+
+        continue;
+      }
+
+      if (bindings.size() >= maxBindings_) {
+        return std::unexpected(error(TreeError::NODE_LIMIT, "Style binding budget exhausted"));
+      }
+
+      bindings.push_back({registration.node, registration.target});
+    }
+
+    return install(sheet_, std::move(bindings));
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(error(TreeError::NO_MEMORY, "Style batch allocation failed"));
   }
 }
 
@@ -196,7 +246,7 @@ std::expected<Invalidation, StyleError> StyleEngine::replace(StyleSheet sheet) {
   }
 
   try {
-    return install(std::move(sheet), bindings_);
+    return install(std::move(sheet), std::vector<Binding>(bindings_));
   } catch (const std::bad_alloc &) {
     return std::unexpected(error(TreeError::NO_MEMORY, "Style allocation failed"));
   }
@@ -230,7 +280,7 @@ std::expected<Invalidation, StyleError> StyleEngine::refresh() {
   }
 
   try {
-    return install(sheet_, bindings_);
+    return install(sheet_, std::vector<Binding>(bindings_));
   } catch (const std::bad_alloc &) {
     return std::unexpected(error(TreeError::NO_MEMORY, "Style allocation failed"));
   }
@@ -240,7 +290,7 @@ std::uint64_t StyleEngine::revision() const noexcept {
   return revision_;
 }
 
-std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, std::vector<Binding> bindings) {
+std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, std::vector<Binding> &&bindings) {
   auto valid = validate(sheet);
 
   if (!valid) {

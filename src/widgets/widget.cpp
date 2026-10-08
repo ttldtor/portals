@@ -418,7 +418,7 @@ std::expected<void, TreeError> WidgetTree::canInsert(NodeId parent) const {
   return {};
 }
 
-std::expected<NodeId, TreeError> WidgetTree::attach(NodeId parent, std::unique_ptr<Widget> widget) {
+std::expected<NodeId, TreeError> WidgetTree::attach(NodeId parent, std::unique_ptr<Widget> widget, bool checked) {
   if (auto allowed = canInsert(parent); !allowed) {
     return std::unexpected(allowed.error());
   }
@@ -457,13 +457,31 @@ std::expected<NodeId, TreeError> WidgetTree::attach(NodeId parent, std::unique_p
   state_->invalidate(Invalidation::LAYOUT);
   ++state_->lifecycle;
 
+  bool mountFailed{};
+
   try {
     pointer->widget->mount();
   } catch (...) {
+    mountFailed = true;
     report(id, TreeError::CALLBACK_FAILED);
   }
 
   --state_->lifecycle;
+
+  if (checked && mountFailed) {
+    // The enclosing borrow retains storage even when mount or the sink already removed this node.
+    if (state_->find(id)) {
+      (void)remove(Node<Widget>(id));
+    }
+
+    return std::unexpected(TreeError::CALLBACK_FAILED);
+  }
+
+  if (checked) {
+    if (auto live = state_->find(id); !live) {
+      return std::unexpected(live.error());
+    }
+  }
 
   return id;
 }

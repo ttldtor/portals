@@ -133,6 +133,8 @@ VT input: [bounded streaming decoder, events, timing and recovery](docs/input.md
 
 Widget interaction: [focus, semantic actions and safe event bubbling](docs/focus.md).
 
+Managed controls: [lifecycle ownership and complete before/after forms](docs/managed-controls.md).
+
 Headless testing: [fake clock, independent snapshots and versioned trace/replay](docs/testing.md).
 
 API design sketches: [five scenarios](docs/api-design.md). The independent

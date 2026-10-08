@@ -377,6 +377,95 @@ void lifecycleErrorsClose() {
   check(tree->close().has_value(), "close idempotent");
 }
 
+struct FailingConstructor : Widget {
+  explicit FailingConstructor(bool allocationFailure) {
+    if (allocationFailure) {
+      throw std::bad_alloc();
+    }
+
+    throw std::runtime_error("constructor failed");
+  }
+};
+
+void checkedInsertion() {
+  Life failedLife, removedLife, siblingLife, childLife, parentLife;
+  Fixture fixture;
+  auto failed = fixture.tree->emplaceChecked<Probe>(fixture.root, failedLife, [] {
+    throw std::runtime_error("mount failed");
+  });
+
+  check(error(failed, TreeError::CALLBACK_FAILED), "checked insertion returns mount failure");
+  check(take(fixture.tree->inspect(fixture.root)).children.empty() && failedLife.unmounts == 1 &&
+          failedLife.destroyed == 1,
+        "checked insertion removes failed attachment and balances lifecycle");
+
+  auto removed = fixture.tree->emplaceChecked<Probe>(fixture.root, removedLife, [&] {
+    const auto children = take(fixture.tree->inspect(fixture.root)).children;
+
+    (void)fixture.tree->remove(children.back());
+  });
+
+  check(error(removed, TreeError::STALE_NODE), "checked insertion rejects mount self-removal");
+
+  auto sibling = take(fixture.tree->emplaceChecked<Probe>(fixture.root, siblingLife));
+  auto parent = take(fixture.tree->emplaceChecked<Probe>(fixture.root, parentLife));
+  auto child = fixture.tree->emplaceChecked<Probe>(parent, childLife, [&] {
+    (void)fixture.tree->remove(parent);
+
+    throw std::runtime_error("removed subtree then failed");
+  });
+
+  check(error(child, TreeError::CALLBACK_FAILED) && childLife.destroyed == 1 && parentLife.destroyed == 1,
+        "mount exception after ancestor removal is not lost or double-reclaimed");
+  check(take(fixture.tree->inspect(fixture.root)).children == std::vector<Node<Widget>>{sibling},
+        "checked failure preserves unrelated live subtrees");
+
+  int reports{};
+  Life reportedLife;
+  auto reportedTree = take(WidgetTree::create(
+    *fixture.scheduler, {},
+    [](void *context, NodeId, TreeError code) noexcept {
+      check(code == TreeError::CALLBACK_FAILED, "checked mount failure sink receives original error");
+      ++*static_cast<int *>(context);
+    },
+    &reports));
+  auto reported = reportedTree->emplaceChecked<Probe>(take(reportedTree->root()), reportedLife, [] {
+    throw std::bad_alloc();
+  });
+
+  check(error(reported, TreeError::CALLBACK_FAILED) && reports == 1 && reportedLife.destroyed == 1,
+        "checked mount bad_alloc remains callback failure and reaches sink exactly once");
+  check(error(fixture.tree->emplaceChecked<FailingConstructor>(fixture.root, true), TreeError::NO_MEMORY) &&
+          error(fixture.tree->emplaceChecked<FailingConstructor>(fixture.root, false), TreeError::CALLBACK_FAILED),
+        "checked construction retains allocation and callback failure categories");
+}
+
+void checkedInsertionAfterReclamation() {
+  Life siblingLife, childLife;
+  Fixture fixture;
+  const auto parent = take(fixture.tree->emplace<Widget>(fixture.root));
+  const auto sibling = take(fixture.tree->emplace<Probe>(parent, siblingLife));
+
+  check(fixture.tree
+          ->edit(sibling,
+                 [&](Probe &widget) {
+                   widget.on_unmount = [&] {
+                     check(fixture.tree->remove(parent).has_value(), "deferred unmount removes parent");
+                   };
+                 })
+          .has_value(),
+        "install deferred unmount callback");
+
+  const auto inserted = fixture.tree->emplaceChecked<Probe>(parent, childLife, [&] {
+    check(fixture.tree->remove(sibling).has_value(), "mount retires sibling");
+  });
+
+  check(error(inserted, TreeError::STALE_NODE), "checked insertion revalidates after deferred unmount callbacks");
+  check(siblingLife.destroyed == 1 && childLife.destroyed == 1 &&
+          take(fixture.tree->inspect(fixture.root)).children.empty(),
+        "deferred ancestor removal retires the new child exactly once");
+}
+
 struct View : Widget {
   std::shared_ptr<int> model;
 
@@ -735,6 +824,8 @@ int main() {
   reentrantLifecycle();
   std::cerr << "lifecycle_errors_close\n";
   lifecycleErrorsClose();
+  checkedInsertion();
+  checkedInsertionAfterReclamation();
   std::cerr << "shared_model\n";
   sharedModel();
   std::cerr << "geometry_frame\n";
