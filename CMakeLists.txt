@@ -373,10 +373,22 @@ if(PORTALS_BUILD_DOCS)
   set(DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/docs")
 
   doxygen_add_docs(portals_docs include README.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/scheduler.md docs/widget-tree.md docs/layout.md docs/grid.md docs/property.md docs/diagnostics.md docs/focus.md docs/model.md docs/input.md docs/terminal.md docs/terminal-probe.md docs/controls.md docs/line-edit.md docs/virtual-list.md docs/virtual-table.md docs/scroll.md docs/chart.md
-    docs/styles.md docs/package.md docs/application.md docs/examples.md docs/architecture.md docs/api-design.md experiments/module-spike/README.md fuzz/README.md
+    docs/styles.md docs/package.md docs/application.md docs/examples.md docs/architecture.md docs/getting-started.md docs/limitations.md docs/api-design.md experiments/module-spike/README.md fuzz/README.md
     vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Generate Portals API documentation"
+  )
+  add_custom_command(TARGET portals_docs POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt" "${CMAKE_CURRENT_BINARY_DIR}/docs/html/LICENSE.txt"
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+      "${CMAKE_CURRENT_BINARY_DIR}/docs/html/tests/fixtures/unicode"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/unicode/Unicode-LICENSE.txt"
+      "${CMAKE_CURRENT_BINARY_DIR}/docs/html/tests/fixtures/unicode/Unicode-LICENSE.txt"
+    COMMAND ${CMAKE_COMMAND} "-DHTML_DIR=${CMAKE_CURRENT_BINARY_DIR}/docs/html"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FinalizeDocumentation.cmake"
+    COMMENT "Finalize HTML documentation and linked license notices"
   )
 endif()
 

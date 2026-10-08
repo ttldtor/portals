@@ -1,58 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="680" viewBox="0 0 1000 680" role="img" aria-label="Portals: component boundaries">
-<title>Portals: component boundaries</title>
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="680" viewBox="0 0 1100 680" role="img" aria-label="Components and shared data flow">
+<title>Components and shared data flow</title>
 <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="#365b78"/></marker></defs>
-<style>text{font-family:Arial,sans-serif;fill:#183247} .title{font-size:25px;font-weight:bold} .label{font-size:17px;font-weight:bold} .detail{font-size:14px} .edge{fill:none;stroke:#365b78;stroke-width:2;marker-end:url(#arrow)}</style>
-<rect width="1000" height="680" fill="#f7f9fc"/>
-<text x="36" y="42" class="title">Portals: component boundaries</text>
-<rect x="40" y="85" width="240" height="76" rx="9" fill="#fff" stroke="#b4c7d8" stroke-width="2"/>
-<text x="160.0" y="114" text-anchor="middle" class="label">Worker / provider</text>
-<text x="160.0" y="135" text-anchor="middle" class="detail">Own immutable payloads</text>
-<rect x="380" y="85" width="240" height="76" rx="9" fill="#fff" stroke="#b4c7d8" stroke-width="2"/>
-<text x="500.0" y="114" text-anchor="middle" class="label">Scheduler</text>
-<text x="500.0" y="135" text-anchor="middle" class="detail">Bounded queues and callbacks</text>
-<rect x="720" y="85" width="240" height="76" rx="9" fill="#fff" stroke="#b4c7d8" stroke-width="2"/>
-<text x="840.0" y="114" text-anchor="middle" class="label">Application handler</text>
-<text x="840.0" y="135" text-anchor="middle" class="detail">Runs on the UI owner</text>
-<path class="edge" d="M280,123 L380,123"/>
-<path class="edge" d="M620,123 L720,123"/>
-<text x="330" y="110" text-anchor="middle" class="detail">publish</text>
-<text x="670" y="110" text-anchor="middle" class="detail">dispatch</text>
-<rect x="40" y="245" width="240" height="76" rx="9" fill="#fff" stroke="#b4c7d8" stroke-width="2"/>
-<text x="160.0" y="274" text-anchor="middle" class="label">TerminalSession</text>
-<text x="160.0" y="295" text-anchor="middle" class="detail">Native I/O and InputDecoder</text>
-<rect x="380" y="245" width="240" height="76" rx="9" fill="#fff" stroke="#b4c7d8" stroke-width="2"/>
-<text x="500.0" y="274" text-anchor="middle" class="label">EventRouter</text>
-<text x="500.0" y="295" text-anchor="middle" class="detail">Focus, hit test, actions</text>
-<rect x="720" y="245" width="240" height="76" rx="9" fill="#fff" stroke="#b4c7d8" stroke-width="2"/>
-<text x="840.0" y="274" text-anchor="middle" class="label">WidgetTree</text>
-<text x="840.0" y="295" text-anchor="middle" class="detail">Lifetime and invalidation</text>
-<path class="edge" d="M280,283 L380,283"/>
-<text x="330" y="269" text-anchor="middle" class="detail">input</text>
-<path class="edge" d="M620,270 L750,166"/>
-<text x="664" y="188" text-anchor="middle" class="detail">checked call</text>
-<path class="edge" d="M840,161 L840,245"/>
-<text x="853" y="208" text-anchor="start" class="detail">edit</text>
-<rect x="40" y="405" width="240" height="76" rx="9" fill="#fff" stroke="#b4c7d8" stroke-width="2"/>
-<text x="160.0" y="434" text-anchor="middle" class="label">FrameWriter</text>
-<text x="160.0" y="455" text-anchor="middle" class="detail">Pending / committed output</text>
-<rect x="380" y="405" width="240" height="76" rx="9" fill="#fff" stroke="#b4c7d8" stroke-width="2"/>
-<text x="500.0" y="434" text-anchor="middle" class="label">Renderer + CellBuffer</text>
-<text x="500.0" y="455" text-anchor="middle" class="detail">Commands become owned cells</text>
-<rect x="720" y="405" width="240" height="76" rx="9" fill="#fff" stroke="#b4c7d8" stroke-width="2"/>
-<text x="840.0" y="434" text-anchor="middle" class="label">Layout + widgets</text>
-<text x="840.0" y="455" text-anchor="middle" class="detail">Measure, arrange, paint</text>
-<path class="edge" d="M840,321 L840,405"/>
-<text x="853" y="367" text-anchor="start" class="detail">frame</text>
-<path class="edge" d="M720,443 L620,443"/>
-<text x="670" y="431" text-anchor="middle" class="detail">commands</text>
-<path class="edge" d="M380,443 L280,443"/>
-<text x="330" y="431" text-anchor="middle" class="detail">cells</text>
-<path class="edge" d="M160,405 L160,321"/>
-<text x="145" y="369" text-anchor="end" class="detail">flush</text>
-<rect x="380" y="540" width="240" height="76" rx="9" fill="#fff" stroke="#b4c7d8" stroke-width="2"/>
-<text x="500.0" y="569" text-anchor="middle" class="label">Model / Property</text>
-<text x="500.0" y="590" text-anchor="middle" class="detail">Immutable values and revisions</text>
-<path class="edge" d="M620,563 L792,486"/>
-<text x="753" y="554" text-anchor="middle" class="detail">prepare between frames</text>
-<text x="40" y="655" text-anchor="start" class="detail">Application coordinates all phases; no hidden background UI event loop.</text>
-</svg>
+<style>text{font-family:Arial,sans-serif;fill:#183247}.title{font-size:26px;font-weight:bold}.label{font-size:18px;font-weight:bold}.detail{font-size:15px}.edge{fill:none;stroke:#365b78;stroke-width:2;marker-end:url(#arrow)}</style>
+<rect width="1100" height="680" fill="#f7f9fc"/>
+<text x="36" y="42" class="title">Components and shared data flow</text>
+<text x="36" y="74" class="detail">One UI runtime; scene-owned domain state; one rendering and output path.</text><rect x='36' y='110' width='320' height='102' rx='9' fill='#fff' stroke='#b4c7d8' stroke-width='2'/><text x='196' y='140' text-anchor='middle' class='label'>Application</text><text x='196' y='167' text-anchor='middle' class='detail'>UI owner: one scheduler/tree/router</text><text x='196' y='190' text-anchor='middle' class='detail'>Single-use synchronous terminal run</text><path class='edge' d='M356,161 L384,161'/><rect x='390' y='110' width='320' height='102' rx='9' fill='#fff' stroke='#b4c7d8' stroke-width='2'/><text x='550' y='140' text-anchor='middle' class='label'>Input and Scheduler</text><text x='550' y='167' text-anchor='middle' class='detail'>Owning CONTROL / immutable DATA</text><text x='550' y='190' text-anchor='middle' class='detail'>Bounded admission and dispatch</text><path class='edge' d='M710,161 L738,161'/><rect x='744' y='110' width='320' height='102' rx='9' fill='#fff' stroke='#b4c7d8' stroke-width='2'/><text x='904' y='140' text-anchor='middle' class='label'>Scene and domain models</text><text x='904' y='167' text-anchor='middle' class='detail'>Bindings, providers, coherent pins</text><text x='904' y='190' text-anchor='middle' class='detail'>Explicit prepare/input/stop hooks</text><path class='edge' d='M904,212 V242 H196 V262'/><rect x='36' y='268' width='320' height='102' rx='9' fill='#fff' stroke='#b4c7d8' stroke-width='2'/><text x='196' y='298' text-anchor='middle' class='label'>Tree, layout and styles</text><text x='196' y='325' text-anchor='middle' class='detail'>Checked nodes, geometry, invalidation</text><text x='196' y='348' text-anchor='middle' class='detail'>Controls / virtual views / Chart</text><path class='edge' d='M356,319 L384,319'/><rect x='390' y='268' width='320' height='102' rx='9' fill='#fff' stroke='#b4c7d8' stroke-width='2'/><text x='550' y='298' text-anchor='middle' class='label'>Renderer and CellBuffer</text><text x='550' y='325' text-anchor='middle' class='detail'>Consume borrowed text in tree.frame</text><text x='550' y='348' text-anchor='middle' class='detail'>Own desired cells before frame ends</text><path class='edge' d='M710,319 L738,319'/><rect x='744' y='268' width='320' height='102' rx='9' fill='#fff' stroke='#b4c7d8' stroke-width='2'/><text x='904' y='298' text-anchor='middle' class='label'>FrameWriter and terminal</text><text x='904' y='325' text-anchor='middle' class='detail'>Diff/encode, owned pending output</text><text x='904' y='348' text-anchor='middle' class='detail'>Commit only consistent acceptance</text><rect x='24' y='395' width='1052' height='148' rx='12' fill='none' stroke='#365b78' stroke-dasharray='6 5'/><text x='36' y='416' class='detail'>Optional causal metadata observations across the runtime and presentation flow</text><rect x='36' y='426' width='320' height='102' rx='9' fill='#fff' stroke='#b4c7d8' stroke-width='2'/><text x='196' y='456' text-anchor='middle' class='label'>Diagnostics input token</text><text x='196' y='483' text-anchor='middle' class='detail'>Admission, queues, target and action</text><text x='196' y='506' text-anchor='middle' class='detail'>Optional bounded metadata</text><path class='edge' stroke-dasharray='5 4' d='M356,477 L384,477'/><rect x='390' y='426' width='320' height='102' rx='9' fill='#fff' stroke='#b4c7d8' stroke-width='2'/><text x='550' y='456' text-anchor='middle' class='label'>Property and frame causes</text><text x='550' y='483' text-anchor='middle' class='detail'>Equality, commit, invalidation, frame ID</text><text x='550' y='506' text-anchor='middle' class='detail'>Coalesced causes stay observable</text><path class='edge' stroke-dasharray='5 4' d='M710,477 L738,477'/><rect x='744' y='426' width='320' height='102' rx='9' fill='#fff' stroke='#b4c7d8' stroke-width='2'/><text x='904' y='456' text-anchor='middle' class='label'>Post-close export</text><text x='904' y='483' text-anchor='middle' class='detail'>Actual diff/flush and loss status</text><text x='904' y='506' text-anchor='middle' class='detail'>Application owns file I/O and errors</text><text x='36' y='620' class='detail'>Top two rows: runtime/presentation flow. Bottom row: causal observations of that same flow.</text><text x='36' y='648' class='detail'>Themes and charts use existing boundaries; no second dispatcher or hidden provider worker.</text></svg>

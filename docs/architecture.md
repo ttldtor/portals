@@ -1,157 +1,142 @@
-# Architecture
+# Architecture {#architecture}
 
-Portals is a C++23 retained widget library. The application owns the runtime,
-models, and terminal session. One UI thread applies updates, routes input, and
-builds frames. Workers can publish immutable data through bounded queues; they
-cannot edit the widget tree.
-
-This page describes the implemented components. A standard application runner,
-integrated diagnostic tracing, scrolling extensions, charts, and themes are
-under development. Until the runner is available, the application coordinates
-the phases below explicitly. The gallery in `examples/gallery/gallery.hpp`
-demonstrates the current coordination; the earlier [API sketches](api-design.md)
-are proposals, not declarations of implemented interfaces.
+Portals is a C++23 retained terminal UI library. `Application` owns one UI
+runtime and services its terminal synchronously on the creating thread. The
+scene owns application models, scoped bindings and providers. Workers may
+publish immutable data through bounded scheduler endpoints; they cannot edit
+the widget tree. [Getting started](getting-started.md) links a simple main and
+the runnable examples; [limitations](limitations.md) defines release boundaries.
 
 ## Components and boundaries
 
 ![Components and data flow](images/components.svg)
 
-| Component | Responsibility | Does not do |
-|---|---|---|
-| `TerminalSession` and `InputDecoder` | Bounded native I/O and semantic input | Choose a widget or change a model |
-| `Scheduler` | Bounded publication, callback dispatch, timers, cancellation | Read the terminal or run a background UI loop |
-| `EventRouter` | Focus, hit testing, action resolution, checked delivery | Own widget storage or perform terminal output |
-| `WidgetTree` | Identity, parent ownership, checked borrows, geometry, invalidation | Own application models or define the application's loop |
-| `Property<T>` | Immutable value/revision, invalidation and observer receipts | Guarantee atomic multicast or roll back callback side effects |
-| `Model<T>` | Immutable snapshots, scoped ranges and bounded requests | Start provider workers or load data during paint |
-| Layout and widgets | Measure, arrange and emit clipped render commands | Perform blocking I/O or domain mutation in frame hooks |
-| `CellBuffer`, renderer and diff | Consume commands and describe desired cells | Claim that pending bytes are already visible |
-| `FrameWriter` | Retain pending output and advance committed frame state | Repair uncertain terminal state by guessing |
+| Component | Implemented responsibility |
+|---|---|
+| `Application` | Own scheduler/tree/router; coordinate bounded input, dispatch, preparation, frames, output and orderly cleanup |
+| `ApplicationScene` | Borrow UI services; own domain models/bindings/providers; synchronize and prepare views; stop owned producers |
+| `TerminalSession` / `InputDecoder` | Native bounded I/O and semantic input; Windows events are not decoded twice |
+| `Scheduler` | Separate CONTROL/DATA capacities and dispatch budgets; timers, publication and scoped cancellation |
+| `EventRouter` | Focus, hit testing, action resolution and checked delivery through the existing dispatcher |
+| `WidgetTree` | Own widget storage, identities, geometry and invalidation; expose checked callback borrows |
+| `Property<T>` / `Model<T>` | Immutable value/revision and snapshots; explicit observers, scoped ranges and request receipts |
+| Layout, controls, virtual views, `Chart<T>` | Measure/arrange/paint; prepare coherent bounded presentation before frames |
+| Typed themes / PSS v0 | Resolve styles and apply validated atomic theme updates; no second rendering path |
+| Renderer / `CellBuffer` | Consume clipped borrowed commands into owning desired cells inside the frame |
+| `FrameWriter` | Encode/diff, retain pending output, advance committed state only after consistent acceptance |
+| `Diagnostics` | Optional bounded causal metadata; owning snapshot and export chosen by the application |
 
-The core uses the standard library and native OS interfaces. Unicode processing
-is isolated behind `GraphemeText` and the vendored utf8proc dependency. Build
-tools, test oracles, fuzzers and Doxygen are not runtime dependencies of an
-installed application. See [text](text.md), [rendering](render.md),
-[diff](diff.md), and [terminal contracts](terminal.md).
+The core uses standard-library and native OS interfaces. Grapheme processing
+uses the private vendored utf8proc dependency. Doxygen, fuzzers and test oracles
+are build tools, not runtime dependencies. See [text](text.md), [render](render.md),
+[terminal](terminal.md), [styles](styles.md) and [chart](chart.md).
 
-## Who runs the event loop?
+## One event loop, explicit service bounds
 
-The application does. `Scheduler::dispatch()` performs one bounded dispatch;
-it does not start a thread or continue calling itself. `TerminalSession::read()`
-provides native input with explicit deadlines and stop handling. Scheduler
-`waitFor()` waits for scheduler activity; it is not a universal wait covering
-the native terminal as well. Their coordination belongs to the application.
+`Application::run` coordinates the loop; `Scheduler::dispatch` performs one
+bounded dispatch and starts no thread. Each service cycle admits bounded input,
+dispatches once, prepares/renders a ready dirty frame at most once, and services
+pending output at most once. One native batch/raw suffix and one rejected CONTROL
+owner survive admission pressure. Input is retained rather than silently dropped.
+Windows supplies decoded events; POSIX bytes retain arrival timestamps for
+streaming decoder deadlines.
 
-A loop must service control input, due timers, and data publications, prepare
-the views, build a requested frame, flush output, and wait without starving
-other work. These are responsibilities, not a prescription to block on each
-source sequentially. In particular, output backpressure must not turn a frame
-into an unbounded blocking operation. The final application runner will choose
-the concrete waiting and frame-cadence policy.
+The native terminal read is the wait primitive. Positive `inputSlice` deadlines
+also bound when worker publications are serviced; scheduler `waitFor` is not a
+universal wait covering native terminal I/O. Pending output prevents another
+submission, leaving dirty state in the tree. Frame cadence is measured from actual
+submission/completion; late work causes no catch-up burst. Idle samples input and
+resize, but emits no periodic frame without invalidation.
 
-The scheduler's control and data lanes have separate capacities and dispatch
-budgets. `REPLACE_LATEST` can replace a complete pending data snapshot for the
-same sender. It must be used **after** lossless domain aggregation: dropping a
-display snapshot is different from dropping a financial tick. Queue limits
-bound retained owners, not arbitrary payload bytes or callback execution time.
-See [scheduler fairness and overflow](scheduler.md).
+CONTROL and DATA have separate capacities and budgets. `REPLACE_LATEST` can
+coalesce a complete display snapshot for the same sender. Lossless domain
+aggregation must happen first: dropping a display snapshot is different from
+dropping a financial tick. The dashboard aggregates each generated tick into
+OHLC before publication; its provider runs on the UI thread. Queue bounds limit
+retained owners, not arbitrary payload bytes or callback duration.
+See [scheduler](scheduler.md) and [Application](application.md).
 
-## From input to a frame
+## From input and models to output
 
 ![Action processing and frame construction](images/event-flow.svg)
 
-1. Decode native input into semantic events. Windows exposes decoded events;
-   POSIX exposes bytes for the decoder. Do not deliver the same input twice.
-2. Dispatch through the existing router on the UI owner. Keyboard delivery
-   uses focus; pointer delivery also requires valid arranged geometry and clips.
-3. Run the checked handler. A property compares the proposed value with its
-   current immutable snapshot. Equal assignment requests no new frame.
-4. A changed property invalidates its target and publishes observer notifications.
-   Notifications run when the application dispatches the scheduler. A successful
-   property receipt can still contain notification rejections.
-5. Prepare virtual views between frames using a coherent model pin. The views
-   stage bounded, owning presentation data before measure/arrange/paint.
-6. Consume the coalesced frame request and build the frame inside
-   `WidgetTree::frame`. Render every borrowed command before that callback ends.
-7. Submit the resulting owning cell buffer to the writer and flush with a
-   deadline. Committed frame state advances only after the output contract is
-   satisfied; partial output remains pending or becomes explicitly uncertain.
+1. Admission creates a diagnostic input token when tracing is enabled, then
+   publishes an owning CONTROL payload. The queued token survives dispatch.
+2. `scene.input` may handle a global command; otherwise EventRouter resolves
+   focus/hit target and action, then invokes the checked handler.
+3. Property assignment compares immutable values. An equal value creates no
+   new invalidation; a changed value invalidates and queues observers. A successful
+   property receipt can still report notification rejections.
+4. When a dirty frame can be submitted, `scene.prepare` synchronizes bindings
+   and takes one pin per model. Sibling table/chart views prepare from that pin
+   at their final extents. Provider request receipts are handled outside painting.
+5. Inside `WidgetTree::frame`, Application lays out and paints visible nodes,
+   translating local commands through arranged surfaces and clips. The renderer
+   consumes every borrowed text command into an owning CellBuffer before returning.
+6. FrameWriter receives that buffer and the actual frame token. Diff/encoding and
+   bounded flush happen outside layout/paint. Partial output stays owned; committed
+   state advances only on complete consistent acceptance.
 
-An arbitrary handler that returns normally does not prove a model change.
-Likewise, an empty diff can follow a real domain update that has no visible
-effect. Future diagnostic tracing must distinguish these cases rather than
-equating "handler returned" with "screen changed".
+A paint/preparation/render failure ends the run with its original component
+cause; Application does not replace failed widgets with an implicit placeholder.
+The tree alone does not roll back earlier paint submissions. No partially built
+frame is submitted by the runner on failure.
 
-## Ownership and cancellation
+The causal chain records queue admission/dispatch, target/action, handler and
+Property evidence, invalidation/frame ID, and actual diff/output outcomes.
+Coalesced causes can share a frame; the frame token identifies its first recorded
+cause rather than an unbounded cause list. Handler return proves neither a domain
+change nor a displayed frame. A real update can produce an empty diff.
+Transport acceptance proves no physical display. Ring losses and incomplete
+chains remain explicit. [Diagnostics](diagnostics.md) defines these distinctions;
+the dashboard exports `--trace` only after terminal restoration.
+
+## Ownership and shutdown
 
 ![Ownership and observing handles](images/ownership.svg)
 
-Construct the scheduler before the tree, and keep it alive until the tree and
-UI-affine subscriptions are released. Keep the tree alive while properties,
-routers and bindings borrowing it are used. Models are explicit application
-objects, not children of the widget tree. Retained immutable snapshots may
-outlive their UI consumers, subject to their payload's destruction contract.
+Construct Application first and the scene/bindings/models afterward; destroy
+them before Application. The runner borrows the scene for one single-use run.
+Callbacks must not destroy/reenter either owner. Application releases router/tree
+before scheduler; retained immutable snapshots have their own payload lifetimes.
 
-`Node<T>` owns no widget and has no pointer operators. Its identity contains a
-session, slot and generation. `read` and `edit` validate the handle and lend a
-reference for the callback only. A copied handle neither prolongs lifetime nor
-makes a stale node valid again.
+`Node<T>` observes session/slot/generation and owns no widget. Checked
+`read/edit` lend a reference only during the callback. Removal closes node scopes
+and invalidates handles immediately; an active borrow defers physical reclamation
+until its outer boundary. Cancellation prevents new callbacks but does not unwind
+one already running or join a provider. [Widget tree](widget-tree.md) and
+[model](model.md) explain those guarantees.
 
-Removing a subtree invalidates its handles and closes node scopes immediately.
-An already executing callback retains its borrowed widget until it returns;
-physical reclamation follows the outer borrow boundary. Subscription cancellation
-prevents new invocations and does not forcibly unwind an active callback or join
-a provider worker. See [tree lifetime](widget-tree.md) and
-[model requests](model.md).
+Stop closes the scheduler, calls `scene.stop` to cancel/join scene-owned
+producers, then closes the terminal. The same cleanup is attempted after errors
+and pre-requested cancellation. `ApplicationError` retains the first phase/cause
+and a separate restoration error. Diagnostics/error printing belongs after run.
 
-The frame boundary is another borrow boundary. `TextCommand` borrows text;
-recording commands does not transfer ownership. The application renders them
-inside the frame and retains the resulting `CellBuffer`, not the borrowed
-command list. A paint failure can occur after earlier submissions, so the frame
-coordinator must discard a widget's partial command transaction and choose a
-clipped placeholder. The tree itself does not roll those submissions back.
+EOF finishes decoding, delivers admitted CONTROL and flushes submitted output.
+It does not wait for future frames/timers/DATA. A delivered edit may stay dirty
+and never appear in the final frame; replay must leave time before EOF.
+Cancellation can stop earlier. A retryable output transaction stays with
+FrameWriter; any transport error, including Windows `OUTPUT_UNCERTAIN`, ends
+the run without reopening or replaying uncertain bytes. Native close depends on
+host/driver progress and has no hard shutdown deadline.
 
-## Virtual lists and tables
+## Coherent views and customization
 
-An immutable `ModelFrame<T>` pins a coherent model revision. Sibling list/table
-views can prepare from that same pin without copying business rows. Each view
-uses its own scoped range consumer and requests only its viewport plus bounded
-overscan. A table reads one range for all columns and formats only visible cells.
+`ModelFrame<T>` pins one immutable revision. Sibling virtual lists/tables/charts
+use independent scoped ranges of the same pin, retaining bounded visible
+presentation plus overscan. Tables read one range for all columns. Stable
+`RowId`/`ColumnId` identities preserve meaning across reorder; an index cannot.
+Readiness, errors and cancellation remain explicit. Preparation starts no hidden
+provider worker. See [virtual list](virtual-list.md), [virtual table](virtual-table.md),
+[scroll](scroll.md) and [chart](chart.md).
 
-`RowId` and `ColumnId` represent stable identities, not current positions.
-Selection can survive a reorder; an index alone cannot express that guarantee.
-Provider readiness, errors and cancellation remain explicit. The application
-dispatches returned request receipts to its provider and later publishes results.
-Preparation does not silently start a worker.
+Extend ApplicationScene for global input and model preparation, public widget
+hooks for custom presentation, typed formatters for columns, and options for
+resource bounds, width policy and cadence. Retain owning prepared data through
+rendering; paint must not perform I/O, mutate models or dispatch the scheduler.
+Typed themes/PSS change presentation within the same tree/frame path.
 
-`prepareVirtualList` and `prepareVirtualTable` are tree-checked wrappers: they
-validate access, account for ancestor visibility, enter a guarded edit, and
-invalidate presentation when required. Their free-function spelling is an API
-choice; the safety requirement is the checked boundary, not that spelling.
-See [VirtualList](virtual-list.md) and [VirtualTable](virtual-table.md).
-
-## Customization without replacing the runtime
-
-Use public widget hooks for custom presentation, model snapshots for a custom
-data provider, formatter callbacks for typed table columns, and configured
-resource budgets for application limits. Keep the same ownership, frame and
-thread boundaries. Reusing these boundaries allows custom components to share
-routing, cancellation and rendering with ordinary controls.
-
-Convenience APIs should remove repeated coordination from a normal application
-while preserving these extension points and observable errors. A short example
-that merely hides its lifetime management in an unnamed helper is not a smaller
-public contract. Executable basic and customized examples will accompany the
-application runner.
-
-## Implemented guarantees and future work
-
-The current tests cover checked identity, callback self-removal, cancellation,
-bounded model ranges, Unicode boundaries, diff application, partial output and
-native Windows/Linux cleanup. Fuzzing adds bounded decoder/text campaigns;
-it does not prove the absence of all bugs. See [verification](testing.md).
-
-Coroutines, general Undo/Redo, system clipboard adapters and Drag-and-Drop are
-future work. Their diagrams and APIs must not be read into the components above.
-In particular, this library currently has no coroutine execution contract or
-second event loop hidden behind the scheduler.
+The runnable [examples](examples.md) show both a short form main and a custom
+widget with an independent model. Their helpers make setup errors explicit;
+they do not add public DSL/lifetime semantics. Coroutines, general Undo/Redo,
+system clipboard adapters and Drag-and-Drop remain after-MVP work.
