@@ -768,6 +768,10 @@ std::expected<void, TreeError> WidgetTree::paint(Node<Widget> node, PaintContext
     return std::unexpected(TreeError::INVALID_GEOMETRY);
   }
 
+  if ((*record)->geometry.clip.empty()) {
+    return {};
+  }
+
   Borrow guard(*this, true);
 
   state_->extension = true;

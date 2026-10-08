@@ -144,6 +144,8 @@ Virtual table: [typed columns, shared snapshots and bounded preparation](docs/vi
 
 Architecture: [components, event processing, ownership and customization](docs/architecture.md).
 
+Scrolling: [fractional motion, identity anchors and viewport culling](docs/scroll.md).
+
 ## License
 
 Portals code: Boost Software License 1.0; see [LICENSE.txt](LICENSE.txt).

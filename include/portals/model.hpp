@@ -71,6 +71,19 @@ template <class T> struct ModelRows {
   std::string_view error;                ///< Snapshot-owned description when error; otherwise empty.
 };
 
+/** @brief Identity lookup capability and outcome for a pinned provider snapshot. */
+enum class RowLookupState {
+  UNSUPPORTED, ///< Provider does not implement an identity index; ordinal scrolling remains available.
+  NOT_FOUND,   ///< Provider supports lookup, but this full RowId is absent.
+  FOUND        ///< The index identifies this RowId in the same snapshot.
+};
+
+/** @brief Owning lookup result; no row storage is borrowed. */
+struct RowLookup {
+  RowLookupState state{RowLookupState::UNSUPPORTED}; ///< Explicit capability/result, never inferred from an index.
+  std::uint64_t index{};                             ///< Logical index, meaningful only for FOUND.
+};
+
 /** @brief Immutable list/table provider storage, independent of view/source lifetime.
  * Implement read as bounded in-memory access, without I/O, waiting or domain mutation.
  * Every ready range of one data revision must agree, including overlapping ranges from
@@ -112,6 +125,19 @@ public:
    * pending has no rows or error; error has no rows. The provider must keep returned storage alive.
    */
   virtual ModelRows<T> read(RowRange range) const = 0;
+
+  /** @brief Resolve stable identity without materializing rows or blocking the UI.
+   * @param id Full nonzero row identity, including generation.
+   * @return FOUND with this snapshot's index, NOT_FOUND if absent, or UNSUPPORTED by default.
+   * @note Override with a bounded identity index to support stable viewport anchoring and ensure-visible.
+   * Do not scan the full model, perform I/O, mutate domain data, or retain the argument.
+   * Called during preparation on UI, never paint; exceptions are translated by ModelFrame::locateRow.
+   */
+  virtual RowLookup locateRow(RowId id) const {
+    (void)id;
+
+    return {};
+  }
 
 private:
   const std::uint64_t revision_;
@@ -429,6 +455,40 @@ public:
    */
   std::expected<ModelRange<T>, TreeError> read(RowRange range) const {
     return ModelRange<T>::read(data_->snapshot, range, max_rows_);
+  }
+
+  /** @brief Resolve identity against the same retained snapshot as this frame's base rows.
+   * @param id Full nonzero row identity to locate; no ownership is transferred.
+   * @return Owning capability/result, INVALID_ARGUMENT for invalid identity/result or out-of-bounds index,
+   * NO_MEMORY for allocation failure, or CALLBACK_FAILED for other provider exceptions.
+   * @note UI preparation only, outside a tree frame. No requests or tree invalidation are performed.
+   */
+  std::expected<RowLookup, TreeError> locateRow(RowId id) const {
+    if (id.value == 0 || id.generation == 0) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+
+    try {
+      const auto result = data_->snapshot->locateRow(id);
+
+      switch (result.state) {
+      case RowLookupState::UNSUPPORTED:
+      case RowLookupState::NOT_FOUND:
+        return result;
+      case RowLookupState::FOUND:
+        if (result.index < rowCount()) {
+          return result;
+        }
+
+        break;
+      }
+
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(TreeError::NO_MEMORY);
+    } catch (...) {
+      return std::unexpected(TreeError::CALLBACK_FAILED);
+    }
   }
 
 private:

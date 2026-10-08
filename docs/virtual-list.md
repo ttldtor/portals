@@ -107,10 +107,10 @@ resolve that intent to a stable ID. Pending input can continue scrolling.
 Left press uses the router's actual surface geometry and ancestor clip. It
 maps the hit cell to a logical row using fixed row height; stale dirty content
 is not clickable. Wheel up/down moves the first row by one without changing
-selection. Fractional scrolling, acceleration and anchor restoration belong to
-the later scroll component. Future anchor restoration needs a provider-side
-bounded `RowId -> logical position` lookup against an immutable revision; it
-must not ask the view to scan a million rows. No lookup index is added here.
+selection. Fractional input, identity anchoring and ensure-visible use the shared
+[scroll component](scroll.md). Providers opt into stable anchoring by implementing
+bounded `ModelSnapshot::locateRow`; unsupported providers retain ordinal scrolling.
+The view never scans the full model. Device acceleration remains an input-adapter concern.
 
 Preparation inspects ancestor visibility. Hidden lists cancel work, release their
 prepared delegates/frame, clear navigation intent, and keep stable selection.
