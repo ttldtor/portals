@@ -22,7 +22,7 @@ XON/XOFF output flow control (`IXON`), uses eight-bit characters, and sets `VMIN
 Output disables `OPOST`; both streams become nonblocking. Ctrl+C is consequently
 an input byte, not an application stop signal. No alternate screen, mouse-reporting
 or bracketed-paste VT modes are enabled by this layer. The higher-level
-[native Application transport](application.md#managed-native-transport) owns its
+[native Application transport](application.md) owns its
 alternate-screen lifecycle; the ordinary session `close()` contract below stays
 unchanged.
 
