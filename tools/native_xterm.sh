@@ -7,6 +7,10 @@ if [ "$#" -lt 8 ]; then exit 2; fi
 xterm=$1 supervisor=$2 logdir=$3 deadline=$4 expected=$5 drive=$6 quit=$7
 shift 7
 case "$drive" in none|dashboard) ;; *) exit 2 ;; esac
+# Automated runs use a private server; visible none runs require explicit opt-in.
+visible=${PORTALS_NATIVE_VISIBLE:-0}
+case "$visible" in 0|1) ;; *) exit 2 ;; esac
+if [ "$visible" = 1 ] && [ "$drive" != none ]; then exit 2; fi
 case "$deadline" in ''|*[!0-9]*) exit 2 ;; esac
 mkdir "$logdir"
 logdir=$(realpath "$logdir")
@@ -55,8 +59,9 @@ trap 'exit 1' HUP INT TERM
 
 sha256sum "$xterm" "$supervisor" "$1" > "$logdir/hashes.txt"
 printf 'title=%s\nparent_DISPLAY=%s\nTERM=%s\nexpected_child_exit=%s\n' "$title" "${DISPLAY-}" "${TERM-}" "$expected" > "$logdir/launch.log"
-if [ "$drive" = dashboard ]; then
-  # The driver must never synthesize input on the caller's X server. Select a
+printf 'visible_opt_in=%s\n' "$visible" >> "$logdir/launch.log"
+if [ "$visible" = 0 ]; then
+  # Automated runs must never open windows on the caller's X server. Select a
   # free nonzero display and require readiness from our exact server process.
   xvfb=${PORTALS_XVFB:-Xvfb}
   command -v "$xvfb" >/dev/null
