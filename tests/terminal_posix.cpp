@@ -2,20 +2,24 @@
 // SPDX-License-Identifier: BSL-1.0
 
 #include "posix_io.hpp"
-#include <portals/terminal.hpp>
+#include <portals/application.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
+#include <charconv>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <termios.h>
+#include <thread>
 #include <unistd.h>
 #include <utility>
 
@@ -129,6 +133,219 @@ private:
     return name ? ::open(name, O_RDWR | O_NOCTTY) : -1;
   }
 };
+
+std::string drainOutput(Pty &pty) {
+  std::string bytes;
+  char buffer[512];
+
+  for (;;) {
+    const auto count = ::read(pty.master.get(), buffer, sizeof(buffer));
+
+    if (count <= 0) {
+      return bytes;
+    }
+
+    bytes.append(buffer, static_cast<std::size_t>(count));
+  }
+}
+
+constexpr std::string_view ENCODING_REPLIES = "\x1b[?1005;2$y\x1b[?1006;1$y\x1b[?1015;2$y\x1b[?1016;2$y";
+
+std::expected<std::unique_ptr<ApplicationTerminal>, TerminalError>
+openMouseTestTerminal(Pty &pty, TerminalOptions options = {}, std::chrono::milliseconds timeout = 100ms,
+                      std::string replies = std::string(ENCODING_REPLIES)) {
+  std::jthread responder([&] {
+    std::string received;
+    const auto deadline = Clock::now() + timeout;
+
+    while (Clock::now() < deadline) {
+      received += drainOutput(pty);
+
+      if (received.find("\x1b[?1016$p") != std::string::npos) {
+        // Deliberately split replies across native reads; preserve ordinary input.
+        for (const char byte : replies) {
+          if (::write(pty.master.get(), &byte, 1) != 1) {
+            break;
+          }
+
+          std::this_thread::yield();
+        }
+
+        return;
+      }
+
+      std::this_thread::yield();
+    }
+  });
+
+  return openNativeApplicationTerminal(pty.handles(), options, timeout);
+}
+
+void managedMouse() {
+  Pty pty;
+  auto opened = openMouseTestTerminal(pty);
+
+  check(opened.has_value(), "managed terminal opens");
+
+  if (!opened) {
+    return;
+  }
+
+  const auto startup = drainOutput(pty);
+
+  check(startup.find("\x1b[?1000;1006h") != std::string::npos, "native transport enables SGR button tracking");
+  check(startup.find("s") < startup.find("h"), "mouse modes saved before mutation");
+  check((*opened)->submit("pending-frame").has_value(), "managed transport accepts pending frame");
+  check((*opened)->close().has_value(), "managed transport closes");
+
+  const auto shutdown = drainOutput(pty);
+
+  check(shutdown.starts_with("pending-frame"), "managed close drains retryable output before restoration");
+  check(shutdown.ends_with("r"), "managed close restores saved private modes");
+  check(pty.restored(), "managed close restores native OS modes");
+  check((*opened)->close().has_value() && drainOutput(pty).empty(), "managed close is idempotent");
+
+  auto invalid = openNativeApplicationTerminal(pty.handles(), {}, 0ms);
+
+  check(!invalid && invalid.error().kind == TerminalErrorKind::INVALID_OPTIONS && pty.restored(),
+        "invalid mouse timeout leaves terminal unchanged");
+
+  auto excessive = openNativeApplicationTerminal(pty.handles(), {}, std::chrono::milliseconds::max());
+
+  check(!excessive && excessive.error().kind == TerminalErrorKind::INVALID_OPTIONS && pty.restored(),
+        "unrepresentable mouse timeout is rejected before native mutation");
+
+  TerminalOptions small;
+
+  small.max_output_bytes = 1;
+
+  auto rejected = openMouseTestTerminal(pty, small);
+
+  check(!rejected && rejected.error().kind == TerminalErrorKind::OUTPUT_LIMIT && pty.restored(),
+        "startup output rejection rolls back OS state");
+  check(drainOutput(pty).empty(), "rejected startup emits no incomplete mode sequence");
+  Pty restoreLimitPty;
+  TerminalOptions limitedCleanup;
+
+  // Queries fit in 40 bytes, but restoring the original modes needs a larger batch.
+  limitedCleanup.max_output_bytes = 40;
+
+  auto restoreRejected = openMouseTestTerminal(restoreLimitPty, limitedCleanup);
+
+  check(!restoreRejected && restoreRejected.error().kind == TerminalErrorKind::OUTPUT_LIMIT &&
+          restoreLimitPty.restored(),
+        "cleanup output limit is rejected before enabling mouse reporting");
+  check(drainOutput(restoreLimitPty).empty(), "cleanup preflight emits neither mode save nor mutation");
+
+  {
+    auto scoped = openMouseTestTerminal(pty);
+
+    check(scoped.has_value(), "managed scope opens");
+    (void)drainOutput(pty);
+  }
+
+  check(drainOutput(pty).ends_with("r") && pty.restored(), "managed destructor restores without explicit close");
+}
+
+void managedMouseQueries() {
+  Pty pty;
+  TerminalOptions options;
+
+  options.max_input_bytes = 32;
+
+  const std::string mixed = "before\x1b[?1005;2$ybetween\x1b[?1006;1$y\x1b[?777;2$y\x1b[?1015;2$y\x1b[?1016;2$yafter";
+  auto opened = openMouseTestTerminal(pty, options, 100ms, mixed);
+
+  check(opened.has_value(), "small read cap permits mixed chunked replies and input");
+
+  if (opened) {
+    std::string retained;
+
+    for (int attempt = 0; attempt < 3 && retained.size() < 29; ++attempt) {
+      retained += (*opened)->read(Clock::now() + 50ms, {}).bytes;
+    }
+
+    check(retained == "beforebetween\x1b[?777;2$yafter",
+          "startup preserves non-query input and unknown replies in order");
+    check((*opened)->close().has_value() && pty.restored(), "mixed startup fixture restores");
+  }
+
+  (void)drainOutput(pty);
+
+  Pty overflowPty;
+  auto overflow =
+    openMouseTestTerminal(overflowPty, options, 100ms, std::string(33, 'x') + std::string(ENCODING_REPLIES));
+
+  check(!overflow && overflow.error().kind == TerminalErrorKind::INPUT_LIMIT && overflowPty.restored(),
+        "startup retained input limit fails before mode mutation");
+
+  Pty unsupportedPty;
+  auto unsupported =
+    openMouseTestTerminal(unsupportedPty, {}, 100ms, "\x1b[?1005;2$y\x1b[?1006;0$y\x1b[?1015;0$y\x1b[?1016;0$y");
+
+  check(!unsupported && unsupported.error().kind == TerminalErrorKind::UNSUPPORTED && unsupportedPty.restored(),
+        "unrecognized SGR query fails without assuming mouse modes disabled");
+
+  Pty missingPty;
+  auto missing = openNativeApplicationTerminal(missingPty.handles(), {}, 15ms);
+
+  check(!missing && missing.error().native_code == ETIMEDOUT && missingPty.restored(),
+        "missing query replies have a deadline");
+
+  Pty optedOutPty;
+  auto optedOut = openNativeApplicationTerminal(optedOutPty.handles(), {}, 15ms, false);
+
+  check(optedOut.has_value() && drainOutput(optedOutPty).empty(), "mouse opt-out requires no query or setup I/O");
+
+  if (optedOut) {
+    check((*optedOut)->close().has_value() && drainOutput(optedOutPty).empty() && optedOutPty.restored(),
+          "mouse opt-out performs native OS cleanup only");
+  }
+}
+
+void managedMouseFailures() {
+  Pty pty;
+  auto opened = openMouseTestTerminal(pty, {}, 100ms);
+
+  check(opened.has_value(), "managed deadline fixture opens");
+
+  if (!opened) {
+    return;
+  }
+
+  (void)drainOutput(pty);
+
+  std::string pressure(1024 * 1024, 'x');
+
+  check((*opened)->submit(std::move(pressure)).has_value(), "managed fixture retains output pressure");
+
+  const auto partial = (*opened)->flush(Clock::now() + 5ms, {});
+
+  check(partial.status == TerminalStatus::DEADLINE && partial.completed > 0 && partial.pending > 0,
+        "managed fixture observes actual partial native writes");
+
+  const auto begin = Clock::now();
+  const auto closed = (*opened)->close();
+
+  check(!closed && closed.error().native_code == ETIMEDOUT, "blocked shutdown reports restoration deadline");
+  check(Clock::now() - begin < 500ms && pty.restored(), "blocked shutdown stays bounded and still restores OS state");
+  check((*opened)->close().has_value(), "failed managed close still releases ownership");
+  (void)drainOutput(pty);
+
+  auto failed = openMouseTestTerminal(pty, {}, 100ms);
+
+  check(failed.has_value(), "managed I/O failure fixture opens");
+
+  if (failed) {
+    pty.master.reset();
+
+    const auto error = (*failed)->close();
+
+    check(!error && error.error().kind == TerminalErrorKind::SYSTEM, "broken terminal restoration remains an error");
+    check(!(*failed)->size() && (*failed)->size().error().kind == TerminalErrorKind::CLOSED,
+          "managed I/O failure still closes native session");
+  }
+}
 
 void sessions() {
   Pty pty;
@@ -488,8 +705,156 @@ void pipes() {
   pthread_sigmask(SIG_SETMASK, &before, nullptr);
 }
 
+constexpr std::array MOUSE_MODES{9, 1000, 1001, 1002, 1003, 1005, 1006, 1015, 1016};
+
+template <class Terminal> void sendControl(Terminal &terminal, std::string bytes) {
+  const auto submitted = terminal.submit(std::move(bytes));
+
+  if (!submitted) {
+    throw std::runtime_error("native mode submission");
+  }
+
+  const auto written = terminal.flush(Clock::now() + 1s, {});
+
+  if (written.error || written.status != TerminalStatus::PROGRESS || written.pending != 0) {
+    throw std::runtime_error("native mode flush");
+  }
+}
+
+template <class Terminal> std::array<int, MOUSE_MODES.size()> queryMouse(Terminal &terminal) {
+  std::string requests;
+
+  for (const int mode : MOUSE_MODES) {
+    requests += "\x1b[?" + std::to_string(mode) + "$p";
+  }
+
+  sendControl(terminal, std::move(requests));
+
+  const auto deadline = Clock::now() + 1s;
+  std::string replies;
+  std::array<int, MOUSE_MODES.size()> states;
+
+  states.fill(-1);
+
+  while (Clock::now() < deadline) {
+    const auto input = terminal.read(deadline, {});
+
+    replies += input.bytes;
+
+    for (std::size_t index = 0; index < MOUSE_MODES.size(); ++index) {
+      const auto prefix = "\x1b[?" + std::to_string(MOUSE_MODES[index]) + ";";
+      const auto begin = replies.find(prefix);
+
+      if (begin == std::string::npos) {
+        continue;
+      }
+
+      const auto end = replies.find("$y", begin + prefix.size());
+
+      if (end != std::string::npos) {
+        const auto value = replies.data() + begin + prefix.size();
+        const auto parsed = std::from_chars(value, replies.data() + end, states[index]);
+
+        if (parsed.ec != std::errc{} || parsed.ptr != replies.data() + end) {
+          throw std::runtime_error("invalid DECRQM response");
+        }
+      }
+    }
+
+    if (std::ranges::all_of(states, [](int state) {
+          return state >= 0;
+        })) {
+      return states;
+    }
+  }
+
+  throw std::runtime_error("DECRQM response deadline");
+}
+
+int nativeMouseModes(const char *path) {
+  std::ofstream log(path);
+  auto outer = TerminalSession::open({0, 1});
+
+  if (!log || !outer) {
+    return 2;
+  }
+
+  const auto original = queryMouse(*outer);
+  int result = 0;
+
+  try {
+    sendControl(*outer, "\x1b[?9;1000;1001;1002;1003;1005;1006;1015;1016l\x1b[?1002;1006h");
+
+    const auto before = queryMouse(*outer);
+
+    check(before[3] == 1 && before[6] == 1, "actual xterm pre-enables 1002 and 1006");
+    check(outer->close().has_value(), "close baseline OS session before managed owner");
+
+    auto managed = openNativeApplicationTerminal({0, 1});
+
+    if (!managed) {
+      throw std::runtime_error("native managed setup");
+    }
+
+    const auto active = queryMouse(**managed);
+
+    check(active[1] == 1 && active[3] == 2 && active[6] == 1 && active[8] == 2,
+          "actual xterm switches to SGR cell button tracking");
+    check((*managed)->close().has_value(), "actual xterm managed close");
+
+    outer = TerminalSession::open({0, 1});
+
+    if (!outer) {
+      throw std::runtime_error("native mode verification reopen");
+    }
+
+    const auto after = queryMouse(*outer);
+
+    check(before == after, "actual xterm restores all pre-enabled mouse modes");
+
+    for (std::size_t index = 0; index < MOUSE_MODES.size(); ++index) {
+      log << "mode=" << MOUSE_MODES[index] << " before=" << before[index] << " active=" << active[index]
+          << " after=" << after[index] << '\n';
+    }
+
+    result = failures == 0 ? 0 : 1;
+  } catch (const std::exception &error) {
+    log << "error=" << error.what() << '\n';
+    result = 2;
+  }
+
+  // This optional real-emulator probe owns the baseline it changed and restores it.
+  // Use explicit queried values because managed XTSAVE intentionally replaces its cache.
+  if (!outer || !outer->size()) {
+    outer = TerminalSession::open({0, 1});
+  }
+
+  if (outer) {
+    std::string reset = "\x1b[?9;1000;1001;1002;1003;1005;1006;1015;1016l";
+
+    for (std::size_t index = 0; index < MOUSE_MODES.size(); ++index) {
+      if (original[index] == 1) {
+        reset += "\x1b[?" + std::to_string(MOUSE_MODES[index]) + "h";
+      }
+    }
+
+    sendControl(*outer, std::move(reset));
+    check(queryMouse(*outer) == original, "native probe restores its original baseline");
+    check(outer->close().has_value(), "native probe closes original OS state");
+  } else {
+    result = 2;
+  }
+
+  log << "result=" << result << " failures=" << failures << '\n';
+
+  return failures == 0 ? result : 1;
+}
+
 int run() {
   sessions();
+  managedMouse();
+  managedMouseQueries();
+  managedMouseFailures();
   interruptedIo();
   terminalEof();
   pipes();
@@ -499,7 +864,12 @@ int run() {
 }
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+  if (argc == 3 && std::string_view(argv[1]) == "--native-mouse-modes") {
+    alarm(8);
+    return nativeMouseModes(argv[2]);
+  }
+
   // Only the fixture child owns PTYs, signals and descriptors. Its watchdog also
   // bounds a broken test when run directly without CTest's outer timeout.
   const pid_t child = fork();

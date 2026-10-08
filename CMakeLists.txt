@@ -20,7 +20,7 @@ set_target_properties(portals_utf8proc PROPERTIES C_STANDARD 99 C_STANDARD_REQUI
 target_compile_definitions(portals_utf8proc PRIVATE UTF8PROC_STATIC)
 target_include_directories(portals_utf8proc PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/utf8proc")
 
-add_library(portals_core STATIC src/version.cpp src/geometry.cpp src/text.cpp src/input.cpp src/cell_buffer.cpp src/render.cpp src/render/diff.cpp src/terminal/writer.cpp src/runtime/scheduler.cpp src/runtime/application.cpp src/runtime/diagnostics.cpp src/widgets/widget.cpp src/layout/linear.cpp src/layout/grid.cpp src/layout/overlay.cpp src/widgets/focus.cpp src/widgets/event_routing.cpp src/models/model.cpp src/widgets/basic_controls.cpp src/widgets/line_edit.cpp src/views/virtual_list.cpp src/views/virtual_table.cpp src/views/scroll.cpp src/styles/style.cpp src/styles/pss.cpp src/charts/canvas.cpp src/charts/chart.cpp)
+add_library(portals_core STATIC src/version.cpp src/geometry.cpp src/text.cpp src/input.cpp src/cell_buffer.cpp src/render.cpp src/render/diff.cpp src/terminal/writer.cpp src/runtime/scheduler.cpp src/runtime/application.cpp src/runtime/native_application.cpp src/runtime/diagnostics.cpp src/widgets/widget.cpp src/layout/linear.cpp src/layout/grid.cpp src/layout/overlay.cpp src/widgets/focus.cpp src/widgets/event_routing.cpp src/models/model.cpp src/widgets/basic_controls.cpp src/widgets/line_edit.cpp src/views/virtual_list.cpp src/views/virtual_table.cpp src/views/scroll.cpp src/styles/style.cpp src/styles/pss.cpp src/charts/canvas.cpp src/charts/chart.cpp)
 if(WIN32)
   target_sources(portals_core PRIVATE src/terminal/windows.cpp)
 elseif(UNIX)

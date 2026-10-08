@@ -38,14 +38,15 @@ struct TerminalOptions {
 
 /** @brief Terminal failure classification; native_code provides platform detail. */
 enum class TerminalErrorKind {
-  INVALID_OPTIONS, ///< An option or handle is outside its supported range.
-  UNSUPPORTED,     ///< Handles are not terminals, or no backend is implemented.
-  SYSTEM,          ///< A native system operation failed.
-  CLOSED,          ///< Session was closed or moved from.
-  OUTPUT_PENDING,  ///< The previous output batch is not complete.
-  OUTPUT_LIMIT,    ///< The new batch exceeds max_output_bytes.
-  INPUT_DECODE,    ///< Windows input decoder failed; close and reopen the session.
-  OUTPUT_UNCERTAIN ///< Windows output was cancelled/failed; close before further submission.
+  INVALID_OPTIONS,  ///< An option or handle is outside its supported range.
+  UNSUPPORTED,      ///< Handles are not terminals, or no backend is implemented.
+  SYSTEM,           ///< A native system operation failed.
+  CLOSED,           ///< Session was closed or moved from.
+  OUTPUT_PENDING,   ///< The previous output batch is not complete.
+  OUTPUT_LIMIT,     ///< The new batch exceeds max_output_bytes.
+  INPUT_DECODE,     ///< Windows input decoder failed; close and reopen the session.
+  OUTPUT_UNCERTAIN, ///< Windows output was cancelled/failed; close before further submission.
+  INPUT_LIMIT       ///< Retained managed startup input exceeds max_input_bytes.
 };
 
 /** @brief Owning error value, independent of session lifetime. */

@@ -111,3 +111,55 @@ preparation, and reaches the actual writer submission/output. Export snapshots
 only after `run` restores the terminal, as the dashboard's `--trace` demonstrates.
 EOF, cancellation, and output failure are observable outcomes, not evidence that
 a real terminal visually displayed a frame.
+
+## Native mouse lifecycle
+
+The native `Application::run(scene)` overload opens the same managed transport as
+`openNativeApplicationTerminal(handles, terminalOptions, modeTimeout, mouseReporting)`.
+Use that factory when decorating a native transport with custom measurements,
+then pass the returned `ApplicationTerminal` to the custom `run` overload. The
+factory's timeout defaults to two seconds; the native runner uses `outputSlice`.
+`ApplicationOptions::nativeMouseReporting` defaults to true. Set it to false, or
+pass false to the factory's `mouseReporting` parameter, to skip mouse setup on
+terminals that cannot answer the required queries. Custom transports own their policy.
+
+On POSIX, setup queries coordinate encoding modes 1005, 1006, 1015, and 1016 with
+DECRQM, saves tracking modes 9, 1000, 1001, 1002, and 1003 with XTSAVE, then enables
+1000 button tracking and 1006 SGR cell coordinates. Unsupported or permanently
+incompatible encodings fail before mutation. No initial mode is assumed disabled.
+The reader preserves non-query startup bytes, including input between fragmented
+replies, for its first read. Retained input is capped by `max_input_bytes`; one
+constant-sized incomplete query suffix can coexist with it. A missing reply,
+excess input, or transport error fails setup explicitly. Failed setup consumes
+already read input and returns no replay transport. Matching query syntax cannot
+authenticate terminal replies against byte-identical injected input.
+
+Cleanup restores encodings from their queried values and tracking with XTRESTORE.
+This split avoids a verified xterm 390 defect: its encoding restoration casts the
+saved numeric value to an 8-bit Boolean, while tracking restoration retains the
+integer value. See the versioned primary sources
+[ptyx.h macros](https://github.com/ThomasDickey/xterm-snapshots/blob/xterm-390/ptyx.h)
+and [charproc.c saved modes](https://github.com/ThomasDickey/xterm-snapshots/blob/xterm-390/charproc.c).
+Windows uses native console mouse events and sends no mouse queries or setup bytes.
+
+With mouse reporting enabled, close first drains retryable POSIX output and then
+restores modes, sharing one fresh `modeTimeout` deadline independent of cancellation.
+It always closes the underlying OS session afterward. Partial setup, exceptions,
+and destruction use the same cleanup path. A blocked or broken output path can
+prevent VT restoration; explicit `close` reports that failure alongside any OS
+cleanup failure. Destruction performs best effort and cannot report errors. Mouse
+opt-out performs OS cleanup only. `TerminalSession` still performs no VT setup
+and never flushes in close/destruction.
+
+The managed policy requires an emulator implementing the relevant
+[xterm control sequences](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html).
+There is no acknowledgement of terminal interpretation. XTSAVE overwrites the
+emulator's one-level saved tracking cache: active modes are restored, but a previously
+saved cache is not preserved. Nested owners, concurrent terminal output, and external
+changes to these modes are unsupported. Unsupported emulators do not acquire an
+exact VT restoration guarantee; the explicit opt-out avoids their query requirement.
+
+Setup and restoration bytes bypass FrameWriter and frame byte counters. A custom
+transport decorator sees frame submissions and flushes, while factory setup and
+close perform separate protocol I/O. Include them in lifecycle timing, not
+rendered-frame throughput.
