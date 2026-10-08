@@ -174,3 +174,12 @@ OHLC oracle. These are deterministic correctness tests, not CPU benchmarks.
 No indicators, exchange connection, automatic time-bucketing, resampling,
 interactive chart navigation, axis labels or standalone application runner are
 provided by this component.
+
+## Reusing completed pages during navigation
+
+Chart preparation can reuse its retained immutable completion snapshot for a new
+consecutive interval under the current model pin's revision, row count and read
+budget. Providers may prefetch a bounded page around an exact request. Only the
+current interval is sampled; paint performs no cache reads. A miss remains pending,
+and failed provider reads cannot fall back to older ready data. This does not
+merge consumer results or change `ModelFrame::read` base-snapshot semantics.

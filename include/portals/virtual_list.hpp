@@ -300,7 +300,7 @@ private:
     }
 
     try {
-      auto range = std::move(consumer_range);
+      auto range = consumer_range;
 
       if (window->requested.count == 0) {
         range = ModelRange<T>{};
@@ -310,6 +310,18 @@ private:
 
       if (!range) {
         return std::unexpected(range.error());
+      }
+
+      if (!retry_ && range->state() == RangeState::PENDING && window->requested.count != 0) {
+        auto cached = frame.readCached(*consumer_range, prepared_ ? &prepared_->range : nullptr, window->requested);
+
+        if (!cached) {
+          return std::unexpected(cached.error());
+        }
+
+        if (cached->dataRevision() != 0) {
+          range = std::move(cached);
+        }
       }
 
       // Stage all owning data before touching the visible state or issuing provider work.

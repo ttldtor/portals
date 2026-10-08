@@ -3,6 +3,7 @@
 #include "../examples/dashboard/dashboard.hpp"
 #include "../examples/replay/terminal.hpp"
 #include "support/vt_oracle.hpp"
+#include <functional>
 #include <source_location>
 
 namespace {
@@ -139,6 +140,110 @@ void delayedRangesAndKeyboard() {
   }));
 }
 
+void continuousNavigationKeepsRowsVisible(bool backwards) {
+  class ObservedTerminal final : public example::ReplayTerminal {
+  public:
+    using example::ReplayTerminal::ReplayTerminal;
+    std::function<void()> beforeRead;
+
+    TerminalRead read(TerminalDeadline deadline, std::stop_token stop) override {
+      if (beforeRead) {
+        beforeRead();
+      }
+
+      return example::ReplayTerminal::read(deadline, stop);
+    }
+  };
+
+  constexpr std::uint64_t FORWARD_FIRST = 240;
+  constexpr std::uint64_t BACKWARD_FIRST = 300;
+  const auto initialFirst = backwards ? BACKWARD_FIRST : FORWARD_FIRST;
+  constexpr std::uint64_t INITIAL_PAGE_ROWS = 256;
+  constexpr std::uint64_t REPEAT_START = 100;
+  constexpr std::uint64_t REPEAT_INTERVAL = 10;
+  constexpr std::uint64_t REPEAT_COUNT = 70;
+  constexpr std::uint64_t RELEASE_AT = REPEAT_START + REPEAT_INTERVAL * REPEAT_COUNT;
+  std::vector<example::ReplayTerminal::Input> input;
+
+  for (std::uint64_t i = 0; i < REPEAT_COUNT; ++i) {
+    input.push_back({REPEAT_START + i * REPEAT_INTERVAL, backwards ? "\x1b[A" : "\x1b[B", {}});
+  }
+
+  ObservedTerminal terminal(std::move(input), RELEASE_AT + 300);
+  auto app = take(Application::create({}, terminal.clock()));
+  dashboard::Options options;
+
+  options.rate = 0;
+
+  dashboard::Scene scene(*app, options);
+
+  take(app->router().setFocus(scene.table()));
+  take(setVirtualTableFirst(app->tree(), scene.table(), initialFirst));
+
+  constexpr std::size_t SCREEN_WIDTH = 80;
+  constexpr std::size_t TABLE_FIRST_ROW = 5;
+  constexpr std::size_t CHART_FIRST_ROW = 14;
+  constexpr std::size_t INSTRUMENT_WIDTH = 13;
+  test_support::VtOracle oracle(SCREEN_WIDTH, 24);
+  std::size_t consumed{}, heldSnapshots{}, blankSnapshots{}, blankCharts{};
+
+  terminal.beforeRead = [&] {
+    oracle.feed(std::string_view(terminal.output).substr(consumed));
+    consumed = terminal.output.size();
+    const auto clock = terminal.clock();
+    const auto now = clock.read(clock.context);
+    std::uint64_t first{};
+
+    take(app->tree().read(scene.table(), [&](const auto &table) {
+      first = table.visibleRange().first;
+    }));
+
+    if (now < REPEAT_START || now >= RELEASE_AT || first < INITIAL_PAGE_ROWS) {
+      return;
+    }
+
+    ++heldSnapshots;
+    const auto frame = oracle.snapshot();
+    bool hasData{};
+
+    // At 80x24 the chart follows nine table body rows, below four controls and a header.
+    for (std::size_t y = TABLE_FIRST_ROW; y < CHART_FIRST_ROW; ++y) {
+      for (std::size_t x = 0; x < INSTRUMENT_WIDTH; ++x) {
+        const auto &glyph = frame.cells[y * SCREEN_WIDTH + x].glyph;
+
+        hasData = hasData || (glyph.size() == 1 && glyph[0] >= '0' && glyph[0] <= '9');
+      }
+    }
+
+    blankSnapshots += !hasData;
+    bool hasCandle{};
+
+    for (const auto &cell : frame.cells | std::views::drop(SCREEN_WIDTH * CHART_FIRST_ROW)) {
+      hasCandle |= cell.glyph == "\xe2\x96\x88" || cell.glyph == "\xe2\x94\x82" || cell.glyph == "\xe2\x94\x81";
+    }
+
+    blankCharts += !hasCandle;
+  };
+
+  take(app->run(scene, terminal));
+  check(heldSnapshots >= 5);
+  take(app->tree().read(scene.table(), [&](const auto &table) {
+    check((backwards ? table.firstRow() < INITIAL_PAGE_ROWS : table.firstRow() > INITIAL_PAGE_ROWS) &&
+          table.rangeState() == RangeState::READY &&
+          table.selection() == RowId{backwards ? initialFirst - REPEAT_COUNT + 2 : initialFirst + REPEAT_COUNT, 1});
+  }));
+
+  if (blankSnapshots) {
+    throw std::runtime_error("continuous Down beyond initial page: " + std::to_string(blankSnapshots) + "/" +
+                             std::to_string(heldSnapshots) + " held snapshots contain only loading placeholders");
+  }
+
+  if (blankCharts) {
+    throw std::runtime_error("continuous Down: " + std::to_string(blankCharts) + "/" + std::to_string(heldSnapshots) +
+                             " held snapshots have no chart candles");
+  }
+}
+
 void noOpDiagnosticAction() {
   auto diagnostics = std::make_shared<Diagnostics>();
   take(diagnostics->enable({2048}));
@@ -231,6 +336,8 @@ int main() {
     losslessAndSaturated(true);
     pendingLatestOwnsRejectedValue();
     delayedRangesAndKeyboard();
+    continuousNavigationKeepsRowsVisible(false);
+    continuousNavigationKeepsRowsVisible(true);
     clockJumpRemainsBounded();
     noOpDiagnosticAction();
     chartAppearance(false, false);

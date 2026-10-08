@@ -518,6 +518,168 @@ void allocationTransactionAndIdle() {
   check(screen.row(1) == "55  65  ", "text survives model destruction");
 }
 
+void cachedFailuresAreNotHidden() {
+  struct FaultPage : Page {
+    bool throws;
+
+    explicit FaultPage(bool throwing) : Page(1, 1000, RowRange{190, 60}), throws(throwing) {
+    }
+
+    ModelRows<int> read(RowRange range) const override {
+      if (range.first < available.first) {
+        if (throws) {
+          throw std::runtime_error("completion read failed");
+        }
+
+        return {RangeState::FAILED, {}, "completion range failed"};
+      }
+
+      return Page::read(range);
+    }
+  };
+
+  for (const bool throwing : {false, true}) {
+    Fixture f;
+    auto base = std::make_shared<Page>(1, 1000, RowRange{}, RangeState::PENDING);
+    auto model = take(Model<int>::create(*f.tree, f.root, base));
+    auto table = take(f.tree->emplace<VirtualTable<int>>(f.root, take(model->openRange()), columns()));
+
+    take(setVirtualTableFirst(*f.tree, table, 100));
+
+    auto ready = take(prepareVirtualTable(*f.tree, table, take(model->pin()), {8, 4}));
+
+    take(ready->complete(std::make_shared<Page>(1, 1000, RowRange{80, 60})));
+    take(f.scheduler->dispatch());
+    ready.reset();
+    take(prepareVirtualTable(*f.tree, table, take(model->pin()), {8, 4}));
+    take(setVirtualTableFirst(*f.tree, table, 200));
+
+    auto later = take(prepareVirtualTable(*f.tree, table, take(model->pin()), {8, 4}));
+
+    take(later->complete(std::make_shared<FaultPage>(throwing)));
+    take(f.scheduler->dispatch());
+    take(setVirtualTableFirst(*f.tree, table, 90));
+
+    auto result = prepareVirtualTable(*f.tree, table, take(model->pin()), {8, 4});
+
+    if (throwing) {
+      check(!result && result.error() == TreeError::CALLBACK_FAILED,
+            "throwing cached provider is reported rather than hidden by a ready retained owner");
+      take(f.tree->read(table, [](const auto &value) {
+        check(value.visibleRange().first == 200 && value.rangeState() == RangeState::PENDING,
+              "cached read exception leaves the prior successful presentation intact");
+      }));
+    } else {
+      check(result && !result->has_value(), "failed cached range does not schedule replacement work");
+      take(f.tree->read(table, [](const auto &value) {
+        check(value.visibleRange().first == 90 && value.rangeState() == RangeState::FAILED,
+              "failed cached read is not converted to older ready rows");
+      }));
+    }
+  }
+}
+
+void prefetchedCompletionNavigation() {
+  Fixture f;
+  auto base = std::make_shared<Page>(1, 1000, RowRange{}, RangeState::PENDING);
+  auto model = take(Model<int>::create(*f.tree, f.root, base, ModelOptions{9, 2, 4}));
+  auto consumer = take(model->openRange());
+  const auto id = consumer.id();
+  auto view = take(f.tree->emplace<VirtualTable<int>>(f.root, std::move(consumer), columns()));
+
+  take(setVirtualTableFirst(*f.tree, view, 100));
+
+  auto work = take(prepareVirtualTable(*f.tree, view, take(model->pin()), {8, 4}));
+
+  check(work && work->range() == RowRange{98, 7}, "request remains exact and within the model budget");
+
+  auto cached = std::make_shared<Page>(1, 1000, RowRange{80, 60});
+  const std::weak_ptr<Page> lifetime = cached;
+
+  take(work->complete(cached));
+  take(f.scheduler->dispatch());
+  work.reset();
+  cached.reset();
+  take(prepareVirtualTable(*f.tree, view, take(model->pin()), {8, 4}));
+
+  for (std::uint64_t first = 101; first <= 120; ++first) {
+    take(setVirtualTableFirst(*f.tree, view, first));
+    check(!take(prepareVirtualTable(*f.tree, view, take(model->pin()), {8, 4})),
+          "forward navigation reuses the bounded completion without another request");
+  }
+
+  for (std::uint64_t first = 120; first >= 90; --first) {
+    take(setVirtualTableFirst(*f.tree, view, first));
+    check(!take(prepareVirtualTable(*f.tree, view, take(model->pin()), {8, 4})),
+          "backward navigation reuses the same immutable completion");
+  }
+
+  {
+    const auto pin = take(model->pin());
+
+    check(take(pin.range(id)).range() == RowRange{98, 7}, "consumer result stays exact, without spatial merging");
+    check(take(pin.read({88, 7})).state() == RangeState::PENDING, "public frame read still uses only the base");
+  }
+
+  take(f.tree->read(view, [](const auto &value) {
+    check(value.rangeState() == RangeState::READY && value.preparedRange() == RowRange{88, 7},
+          "ready presentation owns precisely the current requested interval");
+  }));
+
+  auto router = take(EventRouter::create(*f.tree));
+  auto binding = take(bindVirtualTable(*router, *f.tree, view));
+
+  take(setVirtualTableSelection(*f.tree, view, RowId{91, 1}));
+  take(router->invoke(view, {Action::MOVE_DOWN}));
+  take(prepareVirtualTable(*f.tree, view, take(model->pin()), {8, 4}));
+  check(selected(f, view) == RowId{92, 1}, "cached navigation selects the current row's full identity");
+
+  Screen screen;
+
+  take(screen.draw(f, view, {8, 4}));
+  check(screen.row(1) == "10  20  ", "cached rows are formatted at their actual current logical indices");
+
+  auto oversized = prepareVirtualTable(*f.tree, view, take(model->pin()), {8, 10});
+
+  check(!oversized && oversized.error() == TreeError::INVALID_ARGUMENT,
+        "prefetched storage cannot bypass the synchronous row budget");
+  take(setVirtualTableFirst(*f.tree, view, 200));
+
+  auto miss = take(prepareVirtualTable(*f.tree, view, take(model->pin()), {8, 4}));
+
+  check(miss.has_value(), "cache miss requests the new exact viewport");
+  take(screen.draw(f, view, {8, 4}));
+  check(screen.row(1) == "... ... ", "cache miss displays pending, not rows from the old viewport");
+  take(miss->complete(std::make_shared<Page>(1, 1000, RowRange{190, 60})));
+  take(f.scheduler->dispatch());
+  take(setVirtualTableFirst(*f.tree, view, 90));
+  check(!take(prepareVirtualTable(*f.tree, view, take(model->pin()), {8, 4})) && miss->stopRequested(),
+        "reverse after a delayed completion reuses the ready retained page");
+  miss.reset();
+
+  take(model->publisher().publish(std::make_shared<Page>(2, 1001, RowRange{}, RangeState::PENDING)));
+  take(f.scheduler->dispatch());
+
+  auto revised = take(prepareVirtualTable(*f.tree, view, take(model->pin()), {8, 4}));
+
+  check(revised && revised->dataRevision() == 2, "new revision requests its own rows, not cached old data");
+  check(lifetime.expired(), "old completion storage is released after revision and presentation replacement");
+  check(selected(f, view) == RowId{92, 1}, "pending revision does not assign identity from a stale ordinal");
+  take(screen.draw(f, view, {8, 4}));
+  check(screen.row(1) == "... ... ", "old revision rows are not displayed while the new revision is pending");
+
+  auto wrongCount = revised->complete(std::make_shared<Page>(2, 1000, RowRange{80, 60}));
+
+  check(!wrongCount && wrongCount.error() == SchedulerError::INVALID_ARGUMENT,
+        "completion row count must agree with the requesting domain snapshot");
+  take(revised->complete(std::make_shared<Page>(2, 1001, RowRange{80, 60})));
+  take(f.scheduler->dispatch());
+  revised.reset();
+  take(prepareVirtualTable(*f.tree, view, take(model->pin()), {8, 4}));
+  check(!take(prepareVirtualTable(*f.tree, view, take(model->pin()), {0, 0})),
+        "zero viewport does not request or materialize rows");
+}
+
 void singleBudgetRetryAndAffinity() {
   Fixture f;
   auto page = std::make_shared<Page>(1, 100, RowRange{}, RangeState::PENDING);
@@ -720,6 +882,8 @@ void columnReplacementAllocation() {
 } // namespace
 
 int main() {
+  cachedFailuresAreNotHidden();
+  prefetchedCompletionNavigation();
   boundedColumns();
   columnReplacementAllocation();
   coherentTypedColumns();

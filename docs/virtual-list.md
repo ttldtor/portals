@@ -53,6 +53,15 @@ Borrowed `TextCommand` text remains alive through rendering inside the enclosing
 `tree.frame`; do not retain commands after that frame. The output owner can
 submit the resulting owning framebuffer to `FrameWriter` afterward.
 
+A provider completion may contain a bounded prefetched page around the requested
+interval. During later preparation the view can read the new exact window from
+its retained completion snapshot when both data revision and row count match the
+current pin. It retains one such owner, formats only current visible rows, and
+respects the model's read budget. A cache miss remains pending and schedules the
+new exact request; provider failures are not replaced by older ready data. A
+revision change or hidden view releases the old prepared owner. Public base reads
+and independent consumer results retain their existing exact semantics.
+
 ## Range and request rules
 
 For a positive fixed row height `H`, the list realizes `ceil(viewport.height/H)`
@@ -63,8 +72,9 @@ requested range, but only visible rows are formatted. There is no million-row
 allocation, total-height multiplication, row-ID scan or hidden worker.
 
 Preparation first checks the consumer result in the supplied frame. A matching
-ready/error result belongs to that consumer. Otherwise it performs one bounded
-in-memory `frame.read`; this cannot initiate I/O. The whole requested interval
+ready/error result belongs to that consumer. Otherwise it performs a bounded
+in-memory `frame.read` and, while pending, checks its own completed page owners.
+These reads cannot initiate I/O. The whole requested interval
 must be ready: this version does not spatially merge a partially ready overscan.
 Pending rows show `...`, error rows show `!`, clipped as whole graphemes.
 `rangeState()` exposes the readiness independently of those placeholders.

@@ -43,6 +43,15 @@ table; the range-request and navigation protocol follows VirtualList without a
 new shared widget framework. See [the model contract](model.md) and
 [VirtualList preparation](virtual-list.md).
 
+A provider completion may contain a bounded prefetched page around the requested
+interval. During later preparation the view can read the new exact window from
+its retained completion snapshot when both data revision and row count match the
+current pin. It retains one such owner, formats only current visible rows, and
+respects the model's read budget. A cache miss remains pending and schedules the
+new exact request; provider failures are not replaced by older ready data. A
+revision change or hidden view releases the old prepared owner. Public base reads
+and independent consumer results retain their existing exact semantics.
+
 ## Rendering, requests, and selection
 
 `measure`, `arrange`, and `paint` do no provider reads, formatting, mutation,

@@ -263,6 +263,7 @@ public:
 private:
   template <class> friend class ModelConsumer;
   template <class> friend class Model;
+  template <class> friend class ModelFrame;
 
   ModelRange(std::shared_ptr<const ModelSnapshot<T>> owner, RowRange range, ModelRows<T> data)
       : owner_(std::move(owner)), range_(range), data_(data) {
@@ -493,6 +494,43 @@ public:
 
 private:
   template <class> friend class Model;
+  template <class> friend class VirtualList;
+  template <class> friend class VirtualTable;
+  template <class> friend class Chart;
+
+  // A view may reuse its own immutable completion snapshot, without merging consumer results.
+  // The current pin still supplies the domain revision, row count and synchronous read budget.
+  std::expected<ModelRange<T>, TreeError> readCached(const ModelRange<T> &completed, const ModelRange<T> *retained,
+                                                     RowRange range) const {
+    const auto readOwner = [&](const ModelRange<T> &cached) -> std::expected<ModelRange<T>, TreeError> {
+      if (!cached.owner_ || cached.owner_ == data_->snapshot || cached.dataRevision() != dataRevision() ||
+          cached.owner_->rowCount() != rowCount()) {
+        return ModelRange<T>{};
+      }
+
+      return ModelRange<T>::read(cached.owner_, range, max_rows_);
+    };
+
+    auto cached = readOwner(completed);
+
+    if (!cached || cached->state() != RangeState::PENDING || !retained) {
+      return cached;
+    }
+
+    auto previous = readOwner(*retained);
+
+    if (!previous) {
+      return std::unexpected(previous.error());
+    }
+
+    // A completion for another viewport can arrive just before a direction change.
+    // Preserve the ready retained page; never turn provider failure into cached success.
+    if (cached->dataRevision() == 0 || previous->state() != RangeState::PENDING) {
+      return previous;
+    }
+
+    return cached;
+  }
 
   ModelFrame(std::shared_ptr<const detail::ModelFrameData<T>> data, std::size_t max_rows)
       : data_(std::move(data)), max_rows_(max_rows) {
