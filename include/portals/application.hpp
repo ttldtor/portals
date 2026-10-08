@@ -107,40 +107,33 @@ public:
 
 /**
  * @brief Open an exclusive native transport with optional application-level mouse reporting.
- * POSIX queries
- * coordinate encodings and saves xterm tracking modes before enabling
- * SGR button reports. Windows uses native mouse
- * records and sends no mouse setup bytes.
- * Successful setup preserves non-query input for the first read; failed
- * setup consumes
- * already read input and returns no replay adapter. Replies are matched by mode/status,
- * not
- * authenticated. The adapter requires the steady-clock epoch and exclusive terminal I/O.
- * Close uses a fresh bounded
- * deadline to drain retryable POSIX output and restore mouse
- * modes, then always closes the OS session. Its noexcept
- * destructor performs best effort.
- * XTSAVE overwrites the emulator's one-level tracking cache; nested mode owners
- * and
- * competing mode changes are unsupported. Setup/cleanup bypass frame byte statistics.
- * @param handles Borrowed
- * native input/output handles, duplicated by TerminalSession.
- * @param options Positive resource limits, including
- * retained non-query startup input bytes.
- * @param modeTimeout Positive startup and separate shutdown I/O budget, in
- * milliseconds.
+ *
+ * POSIX setup queries coordinate encodings and saves xterm tracking modes before enabling SGR button reports. Windows
+ * uses native mouse records and sends no mouse setup bytes.
+ *
+ * Successful setup preserves non-query input for the first read; failed setup consumes already read input and returns
+ * no replay adapter. Replies are matched by mode/status, not authenticated. The adapter requires the steady-clock epoch
+ * and exclusive terminal I/O.
+ *
+ * Close uses a fresh bounded deadline to drain retryable POSIX output and restore mouse modes, then always closes the
+ * OS session. Its noexcept destructor performs best effort.
+ *
+ * XTSAVE overwrites the emulator's one-level tracking cache; nested mode owners and competing mode changes are
+ * unsupported. Setup/cleanup bypass frame byte statistics.
+ *
+ * @param handles Borrowed native input/output handles, duplicated by TerminalSession.
+ * @param options Positive resource limits, including retained non-query startup input bytes.
+ * @param modeTimeout Positive startup and separate shutdown I/O budget, in milliseconds.
  * @param mouseReporting Enable managed POSIX mouse modes; false skips all mouse setup I/O.
- * @return
- * Owning adapter, or setup error with cleanup failure in restoration_code.
- * Unsupported/missing queries, input
+ * @return Owning adapter, or setup error with cleanup failure in restoration_code. Unsupported/missing queries, input
  * pressure, and incomplete restoration remain explicit errors.
- * @throws std::bad_alloc If allocation fails; acquired
- * native/mouse state is cleaned up.
+ * @throws std::bad_alloc If allocation fails; acquired native/mouse state is cleaned up.
  */
 [[nodiscard]] std::expected<std::unique_ptr<ApplicationTerminal>, TerminalError>
 openNativeApplicationTerminal(NativeTerminalHandles handles, TerminalOptions options = {},
                               std::chrono::milliseconds modeTimeout = std::chrono::milliseconds{2000},
                               bool mouseReporting = true);
+
 class Application;
 
 /** @brief Borrowed scene extension; bindings/models/providers belong to the caller.
