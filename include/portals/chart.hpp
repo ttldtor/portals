@@ -238,7 +238,8 @@ private:
       }
     } guard(preparing_);
 
-    auto range = frame.range(consumer_.id());
+    auto consumer_range = frame.range(consumer_.id());
+    auto range = consumer_range;
 
     if (!range) {
       return std::unexpected(range.error());
@@ -265,6 +266,18 @@ private:
 
       if (!range) {
         return std::unexpected(range.error());
+      }
+
+      if (range->state() == RangeState::PENDING && interval.count != 0) {
+        auto cached = frame.readCached(*consumer_range, prepared_ ? &prepared_->range : nullptr, interval);
+
+        if (!cached) {
+          return std::unexpected(cached.error());
+        }
+
+        if (cached->dataRevision() != 0) {
+          range = std::move(cached);
+        }
       }
 
       auto glyphs = detail::chartGlyphs(options_.width_policy, options_.glyph_set);

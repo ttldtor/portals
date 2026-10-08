@@ -34,11 +34,17 @@ compiled into the executable, so running from another directory needs no data fi
 or network. Replay loops its 16 recorded prices in order.
 
 `--delay-ms` delays first acquisition of an uncached viewport range (0..60000 ms).
-The initial 256-row page is immediately ready; scroll beyond it to see placeholders.
+The initial 256-row page is immediately ready. Each acquired completion prefetches
+up to 128 rows on either side of its exact request, clipped to the logical model.
+The views reuse those immutable pages for nearby windows within the same market
+revision. This keeps held-arrow navigation from replacing work on every step,
+including `--rate 0`; a true cache miss still displays loading placeholders.
 Two independent bounded range slots serve table and chart, with intentionally
-reversed completion order. Changing a range cancels its old request. Once acquired,
-that current range can be regenerated with new immutable market revisions, so a
-continuous market does not permanently starve a delayed viewport.
+reversed completion order. An uncached range replaces its old request. Once
+acquired, a page can be regenerated with new immutable market revisions, so a
+continuous market does not permanently starve a delayed viewport. Each snapshot
+owns the initial page plus at most two prefetched pages; each of those contains
+at most the exact request count plus 256 rows. No full-model cache is built.
 
 `--pump-budget` sets 1..10000 ticks per provider callback, default 512. The source
 aggregates every generated tick into OHLC before publishing display snapshots.

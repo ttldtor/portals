@@ -38,7 +38,7 @@ struct Quote {
 };
 
 // Each logical instrument follows the same lossless market aggregate with a fixed
-// price offset. Pages own only the ranges displayed by the table and chart.
+// price offset. Pages own bounded prefetched ranges around the table and chart.
 class Snapshot final : public ModelSnapshot<Quote> {
 public:
   struct Page {
@@ -340,6 +340,7 @@ private:
   static constexpr std::int32_t HEADER_ROWS = 4;
   static constexpr std::uint64_t PROVIDER_CADENCE_MS = 10;
   static constexpr std::size_t INITIAL_PAGE_ROWS = 256;
+  static constexpr std::size_t PREFETCH_ROWS = INITIAL_PAGE_ROWS / 2;
 
   struct RequestSlot {
     std::optional<ModelRequest<Quote>> request;
@@ -377,10 +378,15 @@ private:
     }
 
     auto &slot = requests_[index];
+    const auto range = request->range();
+    const auto before = static_cast<std::size_t>(std::min<std::uint64_t>(range.first, PREFETCH_ROWS));
+    const auto after =
+      static_cast<std::size_t>(std::min<std::uint64_t>(options_.rows - range.first - range.count, PREFETCH_ROWS));
+    const RowRange page{range.first - before, range.count + before + after};
 
-    if (slot.range != request->range()) {
+    if (slot.range != page) {
       slot.readyAt = app_.now() + options_.delayMs;
-      slot.range = request->range();
+      slot.range = page;
       slot.acquired = false;
     }
 

@@ -693,6 +693,104 @@ void samePinAndFrameCap() {
   }
 }
 
+void prefetchedCompletionNavigation() {
+  struct CachedPage : ModelSnapshot<Ohlc> {
+    RowRange available;
+    std::vector<ModelRow<Ohlc>> rows;
+
+    CachedPage(std::uint64_t revision, std::uint64_t count, RowRange range)
+        : ModelSnapshot(revision, count), available(range) {
+      for (std::size_t i = 0; i < range.count; ++i) {
+        const auto index = range.first + i;
+        const auto price = static_cast<double>(index);
+
+        rows.push_back({{index + 1, 1}, {price, price + 1, price - 1, price}});
+      }
+    }
+
+    ModelRows<Ohlc> read(RowRange range) const override {
+      if (range.first < available.first || range.first - available.first > available.count ||
+          range.count > available.count - static_cast<std::size_t>(range.first - available.first)) {
+        return {};
+      }
+
+      return {RangeState::READY,
+              std::span(rows).subspan(static_cast<std::size_t>(range.first - available.first), range.count),
+              {}};
+    }
+  };
+
+  Fixture f;
+  auto base = std::make_shared<CachedPage>(1, 1000, RowRange{});
+  auto model = take(Model<Ohlc>::create(*f.tree, f.root, base, ModelOptions{9, 2, 4}));
+  auto consumer = take(model->openRange());
+  const auto id = consumer.id();
+  std::vector<double> observed;
+  auto chart = take(f.tree->emplace<Chart<Ohlc>>(f.root, std::move(consumer), [&](const Ohlc &value) {
+    observed.push_back(value.close);
+
+    return std::optional{value};
+  }));
+  auto work = take(prepareChart(*f.tree, chart, take(model->pin()), {3, 4}, 100));
+  auto cached = std::make_shared<CachedPage>(1, 1000, RowRange{80, 60});
+  const std::weak_ptr<CachedPage> lifetime = cached;
+
+  take(work->complete(cached));
+  take(f.scheduler->dispatch());
+  work.reset();
+  cached.reset();
+  take(prepareChart(*f.tree, chart, take(model->pin()), {3, 4}, 100));
+
+  for (std::uint64_t first = 101; first <= 120; ++first) {
+    check(!take(prepareChart(*f.tree, chart, take(model->pin()), {3, 4}, first)),
+          "chart forward navigation reuses its immutable completion");
+  }
+
+  for (std::uint64_t first = 120; first >= 90; --first) {
+    observed.clear();
+    check(!take(prepareChart(*f.tree, chart, take(model->pin()), {3, 4}, first)),
+          "chart backward navigation avoids replacement work");
+    check(observed.size() == 3 && observed.front() == static_cast<double>(first),
+          "chart cache samples match the current consecutive logical rows");
+  }
+
+  {
+    const auto pin = take(model->pin());
+
+    check(take(pin.range(id)).range() == RowRange{100, 3}, "chart consumer result remains exact");
+    check(take(pin.read({90, 3})).state() == RangeState::PENDING, "chart reuse does not change public base reads");
+  }
+
+  auto oversized = prepareChart(*f.tree, chart, take(model->pin()), {10, 4}, 90);
+
+  check(!oversized && oversized.error() == TreeError::INVALID_ARGUMENT, "chart cache obeys the model row budget");
+
+  auto miss = take(prepareChart(*f.tree, chart, take(model->pin()), {3, 4}, 200));
+
+  check(miss.has_value(), "chart cache miss requests its exact new interval");
+  take(f.tree->read(chart, [](const auto &value) {
+    check(value.rangeState() == RangeState::PENDING, "chart does not display old samples at a new ordinal");
+  }));
+  take(miss->complete(std::make_shared<CachedPage>(1, 1000, RowRange{190, 60})));
+  take(f.scheduler->dispatch());
+  check(!take(prepareChart(*f.tree, chart, take(model->pin()), {3, 4}, 90)) && miss->stopRequested(),
+        "chart reverse after completion uses its ready retained page");
+  miss.reset();
+  take(model->publisher().publish(std::make_shared<CachedPage>(2, 1001, RowRange{})));
+  take(f.scheduler->dispatch());
+
+  auto revised = take(prepareChart(*f.tree, chart, take(model->pin()), {3, 4}, 90));
+
+  check(revised && revised->dataRevision() == 2 && lifetime.expired(),
+        "chart releases old completion storage and requests its new domain revision");
+  take(f.tree->read(chart, [](const auto &value) {
+    check(value.rangeState() == RangeState::PENDING && value.dataRevision() == 2,
+          "chart never displays samples from a stale domain revision");
+  }));
+  check(!take(prepareChart(*f.tree, chart, take(model->pin()), {0, 0}, 90)),
+        "zero chart viewport cancels loading without reading rows");
+}
+
 void pendingAndReentry() {
   Fixture f;
 
@@ -798,6 +896,7 @@ void allocationFailuresPreservePresentation() {
 } // namespace
 
 int main() {
+  prefetchedCompletionNavigation();
   allocationFailuresPreservePresentation();
   retainedLatestSurvivesSaturation();
   canvasOracle();

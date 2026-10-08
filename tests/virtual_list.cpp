@@ -620,6 +620,107 @@ void allocationTransactionAndIdle() {
   check(screen.row(0) == "22  ", "successful allocation retry publishes new text");
 }
 
+void prefetchedCompletionNavigation() {
+  Fixture f;
+  auto base = std::make_shared<Page>(1, 1000, RowRange{}, RangeState::PENDING);
+  auto model = take(Model<int>::create(*f.tree, f.root, base, ModelOptions{9, 2, 4}));
+  auto consumer = take(model->openRange());
+  const auto id = consumer.id();
+  auto view = take(f.tree->emplace<VirtualList<int>>(f.root, std::move(consumer), label()));
+
+  take(setVirtualListFirst(*f.tree, view, 100));
+
+  auto work = take(prepareVirtualList(*f.tree, view, take(model->pin()), {4, 3}));
+
+  check(work && work->range() == RowRange{98, 7}, "request remains exact and within the model budget");
+
+  auto cached = std::make_shared<Page>(1, 1000, RowRange{80, 60});
+  const std::weak_ptr<Page> lifetime = cached;
+
+  take(work->complete(cached));
+  take(f.scheduler->dispatch());
+  work.reset();
+  cached.reset();
+  take(prepareVirtualList(*f.tree, view, take(model->pin()), {4, 3}));
+
+  for (std::uint64_t first = 101; first <= 120; ++first) {
+    take(setVirtualListFirst(*f.tree, view, first));
+    check(!take(prepareVirtualList(*f.tree, view, take(model->pin()), {4, 3})),
+          "forward navigation reuses the bounded completion without another request");
+  }
+
+  for (std::uint64_t first = 120; first >= 90; --first) {
+    take(setVirtualListFirst(*f.tree, view, first));
+    check(!take(prepareVirtualList(*f.tree, view, take(model->pin()), {4, 3})),
+          "backward navigation reuses the same immutable completion");
+  }
+
+  {
+    const auto pin = take(model->pin());
+
+    check(take(pin.range(id)).range() == RowRange{98, 7}, "consumer result stays exact, without spatial merging");
+    check(take(pin.read({88, 7})).state() == RangeState::PENDING, "public frame read still uses only the base");
+  }
+
+  take(f.tree->read(view, [](const auto &value) {
+    check(value.rangeState() == RangeState::READY && value.preparedRange() == RowRange{88, 7},
+          "ready presentation owns precisely the current requested interval");
+  }));
+
+  auto router = take(EventRouter::create(*f.tree));
+  auto binding = take(bindVirtualList(*router, *f.tree, view));
+
+  take(setVirtualListSelection(*f.tree, view, RowId{91, 1}));
+  take(router->invoke(view, {Action::MOVE_DOWN}));
+  take(prepareVirtualList(*f.tree, view, take(model->pin()), {4, 3}));
+  check(selected(f, view) == RowId{92, 1}, "cached navigation selects the current row's full identity");
+
+  Screen screen;
+
+  take(screen.draw(f, view, {4, 3}));
+  check(screen.row(0) == "91  ", "cached rows are formatted at their actual current logical indices");
+
+  auto oversized = prepareVirtualList(*f.tree, view, take(model->pin()), {8, 10});
+
+  check(!oversized && oversized.error() == TreeError::INVALID_ARGUMENT,
+        "prefetched storage cannot bypass the synchronous row budget");
+  take(setVirtualListFirst(*f.tree, view, 200));
+
+  auto miss = take(prepareVirtualList(*f.tree, view, take(model->pin()), {4, 3}));
+
+  check(miss.has_value(), "cache miss requests the new exact viewport");
+  take(screen.draw(f, view, {4, 3}));
+  check(screen.row(0) == "... ", "cache miss displays pending, not rows from the old viewport");
+  take(miss->complete(std::make_shared<Page>(1, 1000, RowRange{190, 60})));
+  take(f.scheduler->dispatch());
+  take(setVirtualListFirst(*f.tree, view, 90));
+  check(!take(prepareVirtualList(*f.tree, view, take(model->pin()), {4, 3})) && miss->stopRequested(),
+        "reverse after a delayed completion reuses the ready retained page");
+  miss.reset();
+
+  take(model->publisher().publish(std::make_shared<Page>(2, 1001, RowRange{}, RangeState::PENDING)));
+  take(f.scheduler->dispatch());
+
+  auto revised = take(prepareVirtualList(*f.tree, view, take(model->pin()), {4, 3}));
+
+  check(revised && revised->dataRevision() == 2, "new revision requests its own rows, not cached old data");
+  check(lifetime.expired(), "old completion storage is released after revision and presentation replacement");
+  check(selected(f, view) == RowId{92, 1}, "pending revision does not assign identity from a stale ordinal");
+  take(screen.draw(f, view, {4, 3}));
+  check(screen.row(0) == "... ", "old revision rows are not displayed while the new revision is pending");
+
+  auto wrongCount = revised->complete(std::make_shared<Page>(2, 1000, RowRange{80, 60}));
+
+  check(!wrongCount && wrongCount.error() == SchedulerError::INVALID_ARGUMENT,
+        "completion row count must agree with the requesting domain snapshot");
+  take(revised->complete(std::make_shared<Page>(2, 1001, RowRange{80, 60})));
+  take(f.scheduler->dispatch());
+  revised.reset();
+  take(prepareVirtualList(*f.tree, view, take(model->pin()), {4, 3}));
+  check(!take(prepareVirtualList(*f.tree, view, take(model->pin()), {0, 0})),
+        "zero viewport does not request or materialize rows");
+}
+
 void singleBudgetRetryAndAffinity() {
   Fixture f;
   auto page = std::make_shared<Page>(1, 100, RowRange{}, RangeState::PENDING);
@@ -651,6 +752,7 @@ void singleBudgetRetryAndAffinity() {
 } // namespace
 
 int main() {
+  prefetchedCompletionNavigation();
   singleBudgetRetryAndAffinity();
   allocationTransactionAndIdle();
   boundedDelegates();
