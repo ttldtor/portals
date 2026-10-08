@@ -116,7 +116,8 @@ bool drive(HANDLE input, const Options &options, int stage, std::ostream &log) {
   } else if (stage == 1) {
     passed = key(input, VK_TAB, L'\t') && key(input, 'A', 1, LEFT_CTRL_PRESSED);
 
-    for (const wchar_t character : std::wstring_view(L"Native note")) {
+    // Exercise UTF-16 surrogate assembly as well as combining and wide input.
+    for (const wchar_t character : std::wstring_view(L"Native note \u754c e\u0301 \U0001f642")) {
       passed = key(input, 0, character) && passed;
     }
 
