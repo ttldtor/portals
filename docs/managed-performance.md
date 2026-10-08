@@ -105,10 +105,10 @@ three sizes. A larger absolute managed cost also does not establish a worse
 growth rate; report both the timings and ratios.
 
 Batch registration avoids repeatedly recomputing previously registered styles
-after every `bind`. It **does not guarantee linear registration**: the current
-`StyleEngine::bindBatch` implementation scans preceding registrations to reject
-duplicates and searches a growing binding vector. Those identity comparisons
-are quadratic for a batch of distinct new nodes. Managed node lookup, router
+after every `bind`. It **does not guarantee linear registration**: the original baseline
+`StyleEngine::bindBatch` implementation scanned preceding registrations to reject
+duplicates and searched a growing binding vector. Those identity comparisons
+were quadratic for a batch of distinct new nodes. Managed node lookup, router
 bookkeeping and per-row removal also contain linear searches; construction and
 removal must be measured separately from style registration. The experiment
 does not change those contracts or silently optimize the core.
@@ -274,8 +274,76 @@ dirty-prepare and removal work:
 - [MSVC before](measurements/style-batch-before-msvc.json) and [MSVC after](measurements/style-batch-after-msvc.json).
 - [GCC before](measurements/style-batch-before-gcc.json) and [GCC after](measurements/style-batch-after-gcc.json).
 
-This change addresses indexed batch registration under normal memory availability.
-Repeated single-node `bind` still stages and resolves the whole registry. Router
-searches, managed lookup and repeated subtree cleanup are unchanged. The broader
+This style-only change addresses indexed batch registration under normal memory
+availability. Repeated single-node `bind` still stages and resolves the whole
+registry. It did not alter router searches, managed lookup or repeated subtree
+cleanup; the next section covers the subsequent focus-order change. The broader
 lifecycle scaling concerns from the original experiment therefore remain open;
 this result does not stabilize the entire managed API.
+
+## Focus-order lookup follow-up
+
+The focus-order walk now sorts a temporary index of focusable registrations and
+uses binary search for each visited node. Full session/slot/generation identity
+and the live atomic cancellation flag are checked. Structural tree preorder still
+defines Tab order. No permanent cache, new runtime or public API is introduced.
+The pointer index borrows the existing UI-owned registrations only for the walk;
+inspection invokes no widget callbacks. Nonfocusable handlers are not sorted.
+
+For R total registrations and V visited nodes, the previous registration lookup
+was O(VR). Index construction plus lookup is now O((R + V) log(R + 2)), with
+O(R) extra temporary storage. Collection still scans registrations and searches
+focus history linearly; snapshots, history recovery and managed synchronization
+have separate costs. This does not establish a bound for the complete focused()
+operation, construction or removal. The benchmark has a shallow fixed topology
+and short focus history, not an arbitrary deep tree or long focus history.
+
+Baseline: commit `92f67bc`, including the preceding style optimization. The
+optimized `src/widgets/focus.cpp` SHA-256 is `93501f3e40280b05bb9effcd5b8493a03f4db546f874395208da97ebe88f22a5`;
+the unchanged benchmark SHA-256 is `61c1ce34ed1c925ce6b889e362c4cb395d027557ae82c85499f3b73d0ba43014`.
+The runs use the same Ryzen 9 5950X host, Windows/MSVC 19.51 and WSL2/GCC 14.3,
+Release, 32/128/512 rows, five warmups and 30 retained samples per case.
+Windows reported High performance power mode; no settings were changed.
+Each benchmark ran separately after agent-owned builds/tests completed. Other
+desktop/system activity was not controlled. Every stored percentile was checked
+against its raw samples. Times are local observations, not CI limits.
+
+The table reports **dirty_prepare p50 / p95 in milliseconds**. This includes
+presentation synchronization and focus recovery, not just index lookup.
+
+| Compiler | API | Rows | Before p50 / p95 | After p50 / p95 | p50 speedup |
+| --- | --- | ---: | ---: | ---: | ---: |
+| MSVC | low_level | 32 | 0.009 / 0.009 | 0.008 / 0.010 | 1.06x |
+| MSVC | managed | 32 | 0.010 / 0.010 | 0.010 / 0.015 | 1.02x |
+| MSVC | descriptions | 32 | 0.010 / 0.011 | 0.010 / 0.011 | 1.00x |
+| MSVC | low_level | 128 | 0.049 / 0.064 | 0.036 / 0.046 | 1.33x |
+| MSVC | managed | 128 | 0.054 / 0.109 | 0.043 / 0.050 | 1.28x |
+| MSVC | descriptions | 128 | 0.054 / 0.085 | 0.043 / 0.050 | 1.28x |
+| MSVC | low_level | 512 | 0.503 / 0.536 | 0.156 / 0.175 | 3.23x |
+| MSVC | managed | 512 | 0.535 / 0.603 | 0.187 / 0.237 | 2.86x |
+| MSVC | descriptions | 512 | 0.542 / 0.619 | 0.196 / 0.246 | 2.77x |
+| GCC | low_level | 32 | 0.006 / 0.013 | 0.006 / 0.008 | 0.92x |
+| GCC | managed | 32 | 0.007 / 0.009 | 0.007 / 0.010 | 0.95x |
+| GCC | descriptions | 32 | 0.007 / 0.009 | 0.007 / 0.009 | 0.95x |
+| GCC | low_level | 128 | 0.048 / 0.058 | 0.029 / 0.044 | 1.64x |
+| GCC | managed | 128 | 0.053 / 0.058 | 0.034 / 0.056 | 1.55x |
+| GCC | descriptions | 128 | 0.053 / 0.055 | 0.033 / 0.047 | 1.62x |
+| GCC | low_level | 512 | 0.755 / 0.852 | 0.152 / 0.293 | 4.97x |
+| GCC | managed | 512 | 0.789 / 0.915 | 0.175 / 0.326 | 4.50x |
+| GCC | descriptions | 512 | 0.777 / 0.895 | 0.176 / 0.220 | 4.43x |
+
+The temporary index can add overhead at small sizes. A fourfold node-count
+increase still costs more than fourfold in some cases; these measurements do
+not close the overall lifecycle scaling gate. Managed node lookup, repeated
+subtree cleanup and registration collection remain separate follow-up work.
+
+Characterization tests retain preorder despite shuffled registration and slot
+reuse, ancestor visibility/enabled filtering, cancellation and foreign identities.
+Allocation injection verifies typed NO_MEMORY, unchanged focus and no paint
+request on failed traversal. Existing callback-lifetime, self-removal, worker
+disconnect, frame-boundary and LineEdit tests remain part of the matrix.
+
+Raw measurements include all lifecycle phases:
+
+- [MSVC before](measurements/focus-order-before-msvc.json) and [MSVC after](measurements/focus-order-after-msvc.json).
+- [GCC before](measurements/focus-order-before-gcc.json) and [GCC after](measurements/focus-order-after-gcc.json).

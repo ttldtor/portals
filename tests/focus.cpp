@@ -211,6 +211,81 @@ void traversalAndReturn() {
   check(take(f.router->focused()) == first, "recovery chooses remaining live node");
 }
 
+void traversalIdentityAndOrder() {
+  Fixture f;
+  auto retired = f.child(f.root);
+  auto group = f.child(f.root);
+  auto nested = f.child(group);
+  auto last = f.child(f.root);
+  auto retiredBinding = f.bind(retired);
+
+  check(f.tree->remove(retired).has_value(), "retire the first slot before reuse");
+
+  auto replacement = f.child(f.root);
+  auto lastBinding = f.bind(last);
+  auto replacementBinding = f.bind(replacement);
+  auto groupBinding = f.bind(group, false);
+  auto nestedBinding = f.bind(nested);
+
+  check(replacement.id().slot == retired.id().slot && replacement.id().generation != retired.id().generation,
+        "fixture reuses a slot with a new generation");
+  check(take(f.router->focused()) == nested, "initial focus follows tree order, not registration or slot order");
+  check(take(f.router->traverse()) == last, "forward traversal visits the next sibling after descendants");
+  check(take(f.router->traverse()) == replacement, "reused early slot remains the final sibling");
+  check(take(f.router->traverse()) == nested, "forward traversal wraps in tree order");
+  check(take(f.router->traverse(true)) == replacement, "reverse traversal wraps in tree order");
+
+  replacementBinding.disconnect();
+
+  check(take(f.router->focused()) == nested, "disconnected focus recovers the most recent eligible node");
+  check(f.tree->setVisible(group, false).has_value(), "hide ancestor of indexed candidate");
+  check(take(f.router->focused()) == last, "hidden ancestor excludes the indexed descendant");
+  check(f.tree->setVisible(group, true).has_value(), "restore hidden ancestor");
+  check(f.tree->setEnabled(group, false).has_value(), "disable ancestor of indexed candidate");
+  check(take(f.router->traverse()) == last, "disabled ancestor excludes the indexed descendant");
+  check(f.tree->setEnabled(group, true).has_value(), "restore disabled ancestor");
+  check(take(f.router->traverse()) == nested, "restored subtree returns to its structural position");
+  check(error(f.router->setFocus(retired), TreeError::STALE_NODE), "reused slot cannot restore a retired identity");
+
+  Fixture foreign;
+  auto foreignNode = foreign.child(foreign.root);
+
+  check(error(f.router->setFocus(foreignNode), TreeError::WRONG_SESSION),
+        "another tree cannot borrow a registered slot");
+}
+
+void traversalAllocationRollback() {
+  Fixture f;
+  auto first = f.child(f.root);
+  auto second = f.child(f.root);
+  auto firstBinding = f.bind(first);
+  auto secondBinding = f.bind(second);
+  int rejected{}, completed{};
+  constexpr std::ptrdiff_t MAX_ALLOCATION_ALLOWANCE = 40;
+
+  for (std::ptrdiff_t allowance = 0; allowance < MAX_ALLOCATION_ALLOWANCE; ++allowance) {
+    check(f.router->setFocus(first).has_value(), "reset focus before traversal allocation injection");
+    take(f.tree->consumeFrameRequest());
+    allocation_test::remaining = allowance;
+
+    auto traversed = f.router->traverse();
+
+    allocation_test::remaining = -1;
+
+    if (!traversed) {
+      ++rejected;
+      check(traversed.error() == TreeError::NO_MEMORY, "failed traversal reports typed allocation error");
+      check(take(f.tree->consumeFrameRequest()) == Invalidation::NONE, "failed traversal does not request paint");
+      check(take(f.router->focused()) == first, "failed traversal preserves the previous focus");
+    } else {
+      ++completed;
+      check(*traversed == second, "successful traversal advances exactly once");
+    }
+  }
+
+  check(rejected > 0 && completed > 0, "traversal allocation sweep reaches both failure and success");
+}
+
 void mouseGeometry() {
   Fixture f;
   auto under = f.child(f.root);
@@ -645,6 +720,8 @@ void registrationMaterialization() {
 int main() {
   activationAndInput();
   traversalAndReturn();
+  traversalIdentityAndOrder();
+  traversalAllocationRollback();
   mouseGeometry();
   bubblingAndLifetime();
   selfRemovalAndDisconnect();

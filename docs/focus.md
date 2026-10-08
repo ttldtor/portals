@@ -56,6 +56,20 @@ Use `focused()` before entering `tree.frame` to prepare presentation state; rout
 operations reject frame-time access with `WOULD_BLOCK`, so recovery never mutates
 state during layout or paint.
 
+Each focus-order walk builds a temporary sorted index of full focusable registration
+identities (session, slot, generation). The tree still determines visitation
+order; the index only replaces a linear handler lookup at each visited node.
+Cancellation is checked when a registration is used, rather than cached when
+the index is built. Callback ownership remains in the router on the UI thread.
+
+For R registrations and V visited nodes, index construction and registration
+lookup take O((R + V) log(R + 2)) work and O(R) additional temporary storage.
+This bound excludes tree snapshots, collection and focus-history recovery.
+In particular, collection still scans registrations and looks up history entries
+linearly; this is not an overall complexity guarantee for `focused()` or Tab.
+See the [managed performance measurements](managed-performance.md) for the
+measured workload and remaining costs.
+
 Hit testing uses the actual `NodeGeometry.surface` and `CLIP`, with half-open cell
 coordinates. Every ancestor must have fresh geometry and be visible/enabled.
 Reverse paint order wins: a later sibling's subtree is above an earlier one, and a

@@ -3,6 +3,7 @@
 #include "action_state.hpp"
 
 #include <algorithm>
+#include <tuple>
 
 namespace portals {
 EventRouter::EventRouter(std::unique_ptr<State> state) : state_(std::move(state)) {
@@ -127,6 +128,24 @@ std::expected<std::vector<Node<Widget>>, TreeError> EventRouter::focusOrder() {
     return std::unexpected(root.error());
   }
 
+  // Inspection does not call user code or mutate registrations on this UI thread.
+  // Borrow entries only for this walk; keep cancellation checks live for worker tokens.
+  std::vector<const detail::ActionRegistration *> index(0);
+  const auto identity = [](const detail::ActionRegistration *entry) {
+    const auto id = entry->node.id();
+
+    return std::tuple{id.session, id.slot, id.generation};
+  };
+
+  index.reserve(state_->registrations.size());
+
+  for (const auto &entry : state_->registrations) {
+    if (entry->focusable) {
+      index.push_back(entry.get());
+    }
+  }
+
+  std::ranges::sort(index, {}, identity);
   pending.push_back(*root);
 
   while (!pending.empty()) {
@@ -143,9 +162,10 @@ std::expected<std::vector<Node<Widget>>, TreeError> EventRouter::focusOrder() {
       continue;
     }
 
-    auto entry = registration(node);
+    const auto id = node.id();
+    const auto found = std::ranges::lower_bound(index, std::tuple{id.session, id.slot, id.generation}, {}, identity);
 
-    if (entry && entry->focusable) {
+    if (found != index.end() && (*found)->node == node && (*found)->cancellation->connected.load()) {
       result.push_back(node);
     }
 
