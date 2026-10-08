@@ -108,6 +108,8 @@ struct TerminalSession::Impl {
   bool input_changed{};
   bool output_changed{};
   bool page_changed{};
+  CONSOLE_CURSOR_INFO saved_cursor{};
+  bool cursor_saved{};
 
   TerminalOptions options;
   InputDecoder decoder;
@@ -158,8 +160,26 @@ struct TerminalSession::Impl {
     return 0;
   }
 
+  int stopWriter() noexcept {
+    if (!writer) {
+      return 0;
+    }
+
+    // Cancellation may race entry into WriteFile. Keep Impl/bytes alive until actual completion.
+    while (WaitForSingleObject(writer, 0) != WAIT_OBJECT_0) {
+      CancelSynchronousIo(writer);
+      WaitForSingleObject(writer, static_cast<DWORD>(options.wait_cadence.count()));
+    }
+
+    const int error = CloseHandle(writer) ? 0 : static_cast<int>(GetLastError());
+
+    writer = nullptr;
+
+    return error;
+  }
+
   int restore() noexcept {
-    int first_error = 0;
+    int first_error = stopWriter();
 
     const auto remember = [&first_error](BOOL success) {
       if (!success && first_error == 0) {
@@ -167,16 +187,9 @@ struct TerminalSession::Impl {
       }
     };
 
-    if (writer) {
-      // Cancellation can race entry into WriteFile; repeat until actual completion.
-
-      while (WaitForSingleObject(writer, 0) != WAIT_OBJECT_0) {
-        CancelSynchronousIo(writer);
-        WaitForSingleObject(writer, static_cast<DWORD>(options.wait_cadence.count()));
-      }
-
-      remember(CloseHandle(writer));
-      writer = nullptr;
+    if (cursor_saved) {
+      remember(SetConsoleCursorInfo(output, &saved_cursor));
+      cursor_saved = false;
     }
 
     // The console host may need to resume draining before these calls complete.
@@ -691,6 +704,63 @@ TerminalWrite TerminalSession::flush(TerminalDeadline deadline, std::stop_token 
 
 std::size_t TerminalSession::pendingBytes() const noexcept {
   return impl_ ? impl_->output_bytes.size() - impl_->output_offset : 0;
+}
+
+std::expected<void, TerminalError> TerminalSession::saveCursorVisibility() noexcept {
+  if (!impl_) {
+    return std::unexpected(contractError(TerminalErrorKind::CLOSED));
+  }
+
+  if (!GetConsoleCursorInfo(impl_->output, &impl_->saved_cursor)) {
+    return std::unexpected(systemError());
+  }
+
+  impl_->cursor_saved = true;
+
+  return {};
+}
+
+std::expected<void, TerminalError> TerminalSession::closeWithOutput(std::string bytes,
+                                                                    TerminalDeadline deadline) noexcept {
+  if (!impl_) {
+    return {};
+  }
+
+  std::optional<TerminalError> failure;
+  const int joined = impl_->stopWriter();
+
+  if (joined != 0) {
+    failure = systemError(static_cast<DWORD>(joined));
+  }
+
+  if (bytes.size() > impl_->options.max_output_bytes) {
+    failure = contractError(TerminalErrorKind::OUTPUT_LIMIT);
+  } else {
+    // Never replay the uncertain frame. A distinct final batch may still return to the main screen.
+    impl_->output_bytes = std::move(bytes);
+    impl_->output_offset = 0;
+    impl_->uncertain = false;
+
+    const auto written = flush(deadline);
+
+    if (written.error) {
+      failure = written.error;
+    } else if (written.pending != 0) {
+      failure = systemError(ERROR_TIMEOUT);
+    }
+  }
+
+  auto closed = close();
+
+  if (!closed) {
+    if (!failure) {
+      return closed;
+    }
+
+    failure->restoration_code = closed.error().native_code;
+  }
+
+  return failure ? std::unexpected(*failure) : std::expected<void, TerminalError>{};
 }
 
 std::expected<void, TerminalError> TerminalSession::close() noexcept {

@@ -112,25 +112,39 @@ only after `run` restores the terminal, as the dashboard's `--trace` demonstrate
 EOF, cancellation, and output failure are observable outcomes, not evidence that
 a real terminal visually displayed a frame.
 
-## Native mouse lifecycle
+## Managed native transport
 
-The native `Application::run(scene)` overload opens the same managed transport as
-`openNativeApplicationTerminal(handles, terminalOptions, modeTimeout, mouseReporting)`.
-Use that factory when decorating a native transport with custom measurements,
-then pass the returned `ApplicationTerminal` to the custom `run` overload. The
-factory's timeout defaults to two seconds; the native runner uses `outputSlice`.
-`ApplicationOptions::nativeMouseReporting` defaults to true. Set it to false, or
-pass false to the factory's `mouseReporting` parameter, to skip mouse setup on
-terminals that cannot answer the required queries. Custom transports own their policy.
+The native `Application::run(scene)` overload uses `openNativeApplicationTerminal`.
+By default, `ApplicationOptions::nativeScreen` is `NativeScreenMode::ALTERNATE_SCREEN`:
+the adapter enters a separate screen with VT `1049` before rendering and returns
+to the caller's main screen on close. The main screen's contents, cursor and
+rendition belong to the terminal host and are preserved through this lifecycle.
+The adapter also preserves cursor visibility: Windows saves/restores console
+cursor information; POSIX uses xterm saved private mode `25`.
 
-On POSIX, setup queries coordinate encoding modes 1005, 1006, 1015, and 1016 with
-DECRQM, saves tracking modes 9, 1000, 1001, 1002, and 1003 with XTSAVE, then enables
-1000 button tracking and 1006 SGR cell coordinates. Unsupported or permanently
-incompatible encodings fail before mutation. No initial mode is assumed disabled.
+Set `nativeScreen = NativeScreenMode::MAIN_SCREEN` to paint the caller's screen
+directly. This explicit opt-out leaves the final frame and cursor in that screen;
+it does not erase the frame at exit. The factory accepts the same screen policy
+as its final argument. Custom/replay transports own their screen policy and are
+not wrapped automatically. `TerminalSession::open/close` retain their low-level
+mode-only contract and add no screen switch.
+
+Changing the terminal window size during the run keeps the **new** size after
+exit. The terminal host may reflow or crop the main screen and clamp its saved
+cursor to the new geometry. Portals does not restore an old window size, an old
+pixel layout, or absolute cursor coordinates. This follows the host's
+[Windows alternate-screen behavior](https://learn.microsoft.com/en-us/windows/console/console-virtual-terminal-sequences#alternate-screen-buffer)
+and [xterm VT1049 protocol](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html).
+
+`ApplicationOptions::nativeMouseReporting` defaults to true. On POSIX, setup
+queries coordinate encoding modes 1005, 1006, 1015, and 1016 with DECRQM, saves
+tracking modes 9, 1000, 1001, 1002, and 1003 with XTSAVE, then enables 1000 button
+tracking and 1006 SGR cell coordinates. Unsupported or permanently incompatible
+encodings fail before their mutation. No initial mode is assumed disabled.
 The reader preserves non-query startup bytes, including input between fragmented
 replies, for its first read. Retained input is capped by `max_input_bytes`; one
-constant-sized incomplete query suffix can coexist with it. A missing reply,
-excess input, or transport error fails setup explicitly. Failed setup consumes
+constant-sized incomplete query suffix can coexist with it. Missing replies,
+excess input, or transport errors fail setup explicitly. Failed setup consumes
 already read input and returns no replay transport. Matching query syntax cannot
 authenticate terminal replies against byte-identical injected input.
 
@@ -140,24 +154,39 @@ saved numeric value to an 8-bit Boolean, while tracking restoration retains the
 integer value. See the versioned primary sources
 [ptyx.h macros](https://github.com/ThomasDickey/xterm-snapshots/blob/xterm-390/ptyx.h)
 and [charproc.c saved modes](https://github.com/ThomasDickey/xterm-snapshots/blob/xterm-390/charproc.c).
-Windows uses native console mouse events and sends no mouse queries or setup bytes.
+Windows uses native console mouse events and sends no mouse setup bytes.
+Mouse opt-out skips only mouse protocol I/O; it still manages the selected screen.
 
-With mouse reporting enabled, close first drains retryable POSIX output and then
-restores modes, sharing one fresh `modeTimeout` deadline independent of cancellation.
-It always closes the underlying OS session afterward. Partial setup, exceptions,
-and destruction use the same cleanup path. A blocked or broken output path can
-prevent VT restoration; explicit `close` reports that failure alongside any OS
-cleanup failure. Destruction performs best effort and cannot report errors. Mouse
-opt-out performs OS cleanup only. `TerminalSession` still performs no VT setup
-and never flushes in close/destruction.
+Close uses a fresh `modeTimeout` budget independent of application cancellation.
+It first drains retryable output. A failed or uncertain write remains an error;
+cleanup nevertheless attempts to return to the main screen. On Windows, it first
+cancels and joins the old writer before releasing its bytes or starting a distinct
+restoration batch. That batch begins with CAN to cancel an incomplete VT sequence
+and never replays uncertain frame bytes. A separate confirmed
+DECSC capture protects the caller's current cursor/rendition even when a partial
+entry never switches buffers: xterm's `1049` reset can restore its saved cursor
+while already on the main screen. Unconfirmed capture uses CAN only; failed
+startup suffixes are discarded rather than completed during rollback. Screen
+state is armed for rollback before entry is submitted, so partial entry still
+attempts an exit. Ordinary exit uses `1049` restoration without an extra DECRC. Cleanup capacity is
+checked before changing the managed modes. Explicit close reports output and OS
+restoration failures; repeated close adds no output. Destruction is best effort.
 
-The managed policy requires an emulator implementing the relevant
-[xterm control sequences](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html).
-There is no acknowledgement of terminal interpretation. XTSAVE overwrites the
-emulator's one-level saved tracking cache: active modes are restored, but a previously
-saved cache is not preserved. Nested owners, concurrent terminal output, and external
-changes to these modes are unsupported. Unsupported emulators do not acquire an
-exact VT restoration guarantee; the explicit opt-out avoids their query requirement.
+OS-mode restoration and owned-handle cleanup are always attempted, even when VT
+restoration fails.
+An expired output budget, broken transport, paused host, or abrupt process death
+can leave the alternate screen active: no exact restoration is promised then.
+Windows cancellation/join and native mode restoration still require host/driver
+progress and have no hard shutdown deadline. Check the result of `run` and
+`ApplicationError::restoration`; restored OS modes alone do not prove screen restoration.
+
+This policy requires compatible VT1049 support and starts on the caller's main
+screen. Nested alternate-screen owners, concurrent terminal output, and external
+mode mutations are unsupported. POSIX XTSAVE overwrites one-level tracking and
+cursor-visibility caches: current modes are restored, but previous saved caches
+are not preserved. Confirmed DECSC capture also overwrites the saved cursor
+cache; its previous contents cannot be preserved. Unsupported emulators do not acquire an exact VT restoration
+guarantee; use the explicit opt-outs for an external terminal owner.
 
 Setup and restoration bytes bypass FrameWriter and frame byte counters. A custom
 transport decorator sees frame submissions and flushes, while factory setup and

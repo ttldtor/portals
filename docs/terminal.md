@@ -21,7 +21,10 @@ canonical mode, echo, signal-generating control keys, input translations and
 XON/XOFF output flow control (`IXON`), uses eight-bit characters, and sets `VMIN=1`, `VTIME=0`.
 Output disables `OPOST`; both streams become nonblocking. Ctrl+C is consequently
 an input byte, not an application stop signal. No alternate screen, mouse-reporting
-or bracketed-paste VT modes are enabled by this layer.
+or bracketed-paste VT modes are enabled by this layer. The higher-level
+[native Application transport](application.md#managed-native-transport) owns its
+alternate-screen lifecycle; the ordinary session `close()` contract below stays
+unchanged.
 
 All calls, moves and destruction belong to one executor. A synchronized ownership
 transfer between executors is allowed; concurrent calls are not. The session

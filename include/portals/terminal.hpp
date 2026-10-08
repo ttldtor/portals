@@ -82,6 +82,10 @@ struct TerminalWrite {
   std::optional<TerminalError> error; ///< Native error, or OUTPUT_UNCERTAIN with Windows deadline/stopped.
 };
 
+namespace detail {
+class NativeTerminal;
+}
+
 /**
  * @brief Move-only terminal mode and I/O owner; no I/O belongs in paint/measure.
  * @details One executor owns all calls including destruction; concurrent calls are
@@ -173,6 +177,21 @@ public:
   [[nodiscard]] std::expected<void, TerminalError> close() noexcept;
 
 private:
+  friend class detail::NativeTerminal;
+  /** @brief Snapshot Windows cursor visibility for the native application; POSIX saves it through VT.
+   * @return Success or original snapshot error; the ordinary raw-session close contract remains unchanged.
+   */
+  [[nodiscard]] std::expected<void, TerminalError> saveCursorVisibility() noexcept;
+
+  /** @brief Application-only final batch after discarding pending/uncertain output, then always restore OS modes.
+   * Windows first cancels and joins the previous writer. No old frame suffix is replayed. Host/driver progress
+   * is still required for join/restoration; a hard close deadline is not promised.
+   * @param bytes Preallocated bounded restoration batch; its VT policy belongs to the native application adapter.
+   * @param deadline Fresh steady-clock output deadline shared by adapter drain and this final batch.
+   * @return Success, including repeated close, or output error retaining a subsequent native cleanup error.
+   */
+  [[nodiscard]] std::expected<void, TerminalError> closeWithOutput(std::string bytes,
+                                                                   TerminalDeadline deadline) noexcept;
   struct Impl;
   explicit TerminalSession(std::unique_ptr<Impl> impl) noexcept;
   std::unique_ptr<Impl> impl_;

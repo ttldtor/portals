@@ -16,6 +16,7 @@
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <string_view>
 #include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <termios.h>
@@ -24,6 +25,36 @@
 #include <utility>
 
 #ifdef PORTALS_TEST_WRAP_TERMIOS
+int screen_write_failure = 0;
+// Linker --wrap entry points must retain their externally required names.
+extern "C" ssize_t __real_write(int, const void *, std::size_t); // NOLINT(readability-identifier-naming)
+
+extern "C" ssize_t __wrap_write(int fd, const void *bytes, std::size_t count) { // NOLINT(readability-identifier-naming)
+  if (screen_write_failure == 1 &&
+      std::string_view(static_cast<const char *>(bytes), count).starts_with("\x1b[?1049h")) {
+    screen_write_failure = 2;
+
+    return __real_write(fd, bytes, count - 1);
+  }
+
+  if (screen_write_failure == 3 && std::string_view(static_cast<const char *>(bytes), count)
+                                     .ends_with("\x1b"
+                                                "7")) {
+    screen_write_failure = 4;
+
+    return __real_write(fd, bytes, count - 1);
+  }
+
+  if (screen_write_failure == 2 || screen_write_failure == 4) {
+    screen_write_failure = 0;
+    errno = EIO;
+
+    return -1;
+  }
+
+  return __real_write(fd, bytes, count);
+}
+
 int termios_calls = 0;
 int fail_termios_call = 0;
 int second_fail_termios_call = 0;
@@ -178,7 +209,7 @@ openMouseTestTerminal(Pty &pty, TerminalOptions options = {}, std::chrono::milli
     }
   });
 
-  return openNativeApplicationTerminal(pty.handles(), options, timeout);
+  return openNativeApplicationTerminal(pty.handles(), options, timeout, true, NativeScreenMode::MAIN_SCREEN);
 }
 
 void managedMouse() {
@@ -293,7 +324,7 @@ void managedMouseQueries() {
         "missing query replies have a deadline");
 
   Pty optedOutPty;
-  auto optedOut = openNativeApplicationTerminal(optedOutPty.handles(), {}, 15ms, false);
+  auto optedOut = openNativeApplicationTerminal(optedOutPty.handles(), {}, 15ms, false, NativeScreenMode::MAIN_SCREEN);
 
   check(optedOut.has_value() && drainOutput(optedOutPty).empty(), "mouse opt-out requires no query or setup I/O");
 
@@ -345,6 +376,82 @@ void managedMouseFailures() {
     check(!(*failed)->size() && (*failed)->size().error().kind == TerminalErrorKind::CLOSED,
           "managed I/O failure still closes native session");
   }
+}
+
+void managedScreen() {
+  Pty pty;
+  auto terminal = openNativeApplicationTerminal(pty.handles(), {}, 100ms, false);
+
+  check(terminal.has_value(), "screen transport opens without mouse queries");
+
+  if (!terminal) {
+    return;
+  }
+
+  const auto startup = drainOutput(pty);
+
+  check(startup.find("\x1b[?1049h") != std::string::npos && startup.find("\x1b[?25s") < startup.find("1049h"),
+        "alternate screen is entered after confirmed cursor visibility save");
+  check((*terminal)->submit("pending-screen-frame").has_value(), "screen frame accepted before close");
+  check((*terminal)->close().has_value() && pty.restored(), "screen close restores original OS state");
+
+  const auto shutdown = drainOutput(pty);
+
+  check(shutdown.starts_with("pending-screen-frame") && shutdown.find("\x1b[?1049l") != std::string::npos &&
+          shutdown.ends_with("\x1b[?1049l\x1b[?25r"),
+        "close drains frame then restores screen/cursor/rendition/visibility");
+  check((*terminal)->close().has_value() && drainOutput(pty).empty(), "screen close is idempotent");
+
+  {
+    auto scoped = openNativeApplicationTerminal(pty.handles(), {}, 100ms, false);
+
+    check(scoped.has_value(), "screen destructor fixture opens");
+    (void)drainOutput(pty);
+  }
+
+  check(drainOutput(pty).find("\x1b[?1049l") != std::string::npos && pty.restored(),
+        "screen destructor restores without explicit close");
+
+  auto direct = openNativeApplicationTerminal(pty.handles(), {}, 100ms, false, NativeScreenMode::MAIN_SCREEN);
+
+  check(direct.has_value() && drainOutput(pty).empty(), "MAIN opt-out emits no screen setup");
+  check((*direct)->close().has_value() && drainOutput(pty).empty() && pty.restored(),
+        "MAIN opt-out emits no screen cleanup");
+
+  TerminalOptions small;
+
+  small.max_output_bytes = 1;
+
+  auto rejected = openNativeApplicationTerminal(pty.handles(), small, 100ms, false);
+
+  check(!rejected && rejected.error().kind == TerminalErrorKind::OUTPUT_LIMIT && pty.restored() &&
+          drainOutput(pty).empty(),
+        "screen cleanup capacity rejected before native mutation");
+
+#ifdef PORTALS_TEST_WRAP_TERMIOS
+  screen_write_failure = 1;
+
+  auto partial = openNativeApplicationTerminal(pty.handles(), {}, 100ms, false);
+
+  check(!partial && partial.error().kind == TerminalErrorKind::SYSTEM && partial.error().native_code == EIO,
+        "partial alternate-screen entry remains a startup error");
+
+  const auto rollback = drainOutput(pty);
+
+  check(rollback.find("\x1b[?1049\x18") != std::string::npos && rollback.find("\x1b[?1049l") != std::string::npos &&
+          pty.restored(),
+        "partial entry aborts the incomplete sequence and attempts screen rollback");
+#endif
+
+  auto broken = openNativeApplicationTerminal(pty.handles(), {}, 100ms, false);
+
+  check(broken.has_value(), "broken screen cleanup fixture opens");
+  pty.master.reset();
+
+  const auto failed = (*broken)->close();
+
+  check(!failed && !(*broken)->size() && (*broken)->close().has_value(),
+        "failed screen restoration is reported and closes the session");
 }
 
 void sessions() {
@@ -771,6 +878,218 @@ template <class Terminal> std::array<int, MOUSE_MODES.size()> queryMouse(Termina
   throw std::runtime_error("DECRQM response deadline");
 }
 
+struct ScreenState {
+  std::string screen;
+  std::string visibility;
+  std::string cursor;
+  std::string rendition;
+  bool operator==(const ScreenState &) const = default;
+};
+
+template <class Terminal> ScreenState queryScreen(Terminal &terminal) {
+  sendControl(terminal, "\x1b[?1049$p\x1b[?25$p\x1b[6n\x1bP$qm\x1b\\");
+
+  const auto deadline = Clock::now() + 1s;
+  std::string bytes;
+
+  while (Clock::now() < deadline) {
+    bytes += terminal.read(deadline, {}).bytes;
+
+    auto field = [&](std::string_view begin, std::string_view end) {
+      const auto first = bytes.find(begin);
+
+      if (first == std::string::npos) {
+        return std::string{};
+      }
+
+      const auto start = first + begin.size();
+      const auto last = bytes.find(end, start);
+
+      return last == std::string::npos ? std::string{} : bytes.substr(start, last - start);
+    };
+
+    ScreenState state{field("\x1b[?1049;", "$y"), field("\x1b[?25;", "$y"), {}, field("\x1bP1$r", "m\x1b\\")};
+    const auto end = bytes.find('R');
+
+    if (end != std::string::npos) {
+      const auto start = bytes.rfind("\x1b[", end);
+
+      if (start != std::string::npos) {
+        state.cursor = bytes.substr(start + 2, end - start - 2);
+      }
+    }
+
+    if (!state.screen.empty() && !state.visibility.empty() && !state.cursor.empty() && !state.rendition.empty()) {
+      return state;
+    }
+  }
+
+  throw std::runtime_error("native screen state query deadline");
+}
+
+int nativeScreenRestore(const char *path) {
+  std::ofstream log(path);
+  auto outer = TerminalSession::open({0, 1});
+
+  if (!log || !outer) {
+    return 2;
+  }
+
+  auto stage = [&](std::string_view name) {
+    log << "stage=" << name << '\n';
+    log.flush();
+
+    const auto deadline = Clock::now() + 5s;
+    const auto ack = std::string(path) + "." + std::string(name) + ".ack";
+
+    while (::access(ack.c_str(), F_OK) != 0) {
+      if (Clock::now() >= deadline) {
+        throw std::runtime_error("private native screen acknowledgement deadline");
+      }
+
+      std::this_thread::sleep_for(10ms);
+    }
+  };
+  auto record = [&](std::string_view name, const ScreenState &state) {
+    log << "state=" << name << " screen=" << state.screen << " visibility=" << state.visibility
+        << " cursor=" << state.cursor << " rendition=" << state.rendition << '\n';
+    log.flush();
+  };
+  auto seed = [&] {
+    // Make an old DECSC cache differ from the actual caller state before opening the managed owner.
+    sendControl(*outer, "\x1b[3;5H\x1b[32;45m\x1b"
+                        "7\x1b[0m\x1b[2J\x1b[H"
+                        "Previous shell output: abcXYZ\r\nprompt> before gallery\x1b[39;118H\x1b[34;42m\x1b[?25l");
+  };
+  constexpr std::string_view FRAME = "\x1b[0m\x1b[2J\x1b[1;1H\x1b[31;44mAlerts\r\nRun\r\nQuit\x1b[1;1H\x1b[?25h";
+
+  try {
+    seed();
+
+    const auto before = queryScreen(*outer);
+
+    record("before", before);
+    stage("before");
+    check(outer->close().has_value(), "screen probe releases low-level OS owner");
+
+    auto terminal = openNativeApplicationTerminal({0, 1}, {}, 1s, false);
+
+    if (!terminal) {
+      throw std::runtime_error("native screen probe opens");
+    }
+
+    sendControl(**terminal, std::string(FRAME));
+
+    const auto active = queryScreen(**terminal);
+
+    record("active", active);
+    check(active.screen == "1", "actual xterm enters the alternate screen");
+    stage("active");
+    check((*terminal)->close().has_value(), "actual xterm managed screen closes");
+    outer = TerminalSession::open({0, 1});
+
+    const auto after = queryScreen(*outer);
+
+    record("after", after);
+    stage("after");
+    check(after == before, "actual xterm restores caller cursor/rendition/visibility on the main screen");
+
+#ifdef PORTALS_TEST_WRAP_TERMIOS
+    seed();
+
+    const auto partialBefore = queryScreen(*outer);
+
+    record("partial-before", partialBefore);
+    stage("partial-before");
+    check(outer->close().has_value(), "partial screen probe releases OS owner");
+    screen_write_failure = 1;
+
+    auto partial = openNativeApplicationTerminal({0, 1}, {}, 1s, false);
+
+    check(!partial && partial.error().native_code == EIO && partial.error().restoration_code == 0,
+          "actual partial screen entry retains EIO and successful cleanup");
+    outer = TerminalSession::open({0, 1});
+
+    const auto partialAfter = queryScreen(*outer);
+
+    record("partial-after", partialAfter);
+    stage("partial-after");
+    check(partialAfter == partialBefore,
+          "partial entry must preserve current caller state instead of stale DECSC cache");
+    seed();
+
+    const auto captureBefore = queryScreen(*outer);
+
+    record("capture-before", captureBefore);
+    stage("capture-before");
+    check(outer->close().has_value(), "capture failure probe releases OS owner");
+    screen_write_failure = 3;
+
+    auto capture = openNativeApplicationTerminal({0, 1}, {}, 1s, false);
+
+    check(!capture && capture.error().native_code == EIO && capture.error().restoration_code == 0,
+          "partial cursor capture retains EIO and successful cleanup");
+    outer = TerminalSession::open({0, 1});
+
+    const auto captureAfter = queryScreen(*outer);
+
+    record("capture-after", captureAfter);
+    stage("capture-after");
+    check(captureAfter == captureBefore, "unconfirmed cursor capture cleans up with CAN without stale restore");
+#endif
+
+    for (const auto target : {CellSize{40, 12}, CellSize{140, 44}}) {
+      const std::string name = target.width == 40 ? "small" : "large";
+
+      seed();
+      sendControl(*outer, "\x1b[?1049h");
+      sendControl(*outer, std::string(FRAME));
+      stage("resize-" + name + "-control");
+      check(outer->size() == target, "actual xterm control reaches resized viewport");
+      sendControl(*outer, "\x1b[?1049l\x1b[?25l");
+
+      const auto expected = queryScreen(*outer);
+
+      record(name + "-control", expected);
+      stage(name + "-control");
+      stage("resize-reset-" + name + "-control");
+      check(outer->size() == CellSize{120, 40}, "actual xterm baseline viewport reset between cases");
+      seed();
+      check(outer->close().has_value(), "resized probe releases low-level OS owner");
+      auto resized = openNativeApplicationTerminal({0, 1}, {}, 1s, false);
+
+      if (!resized) {
+        throw std::runtime_error("actual resized screen opens");
+      }
+
+      sendControl(**resized, std::string(FRAME));
+      stage("resize-" + name + "-managed");
+      check((*resized)->size() == target, "actual managed xterm reaches new viewport");
+      check((*resized)->close().has_value(), "actual resized screen closes");
+      outer = TerminalSession::open({0, 1});
+
+      const auto actual = queryScreen(*outer);
+
+      record(name + "-managed", actual);
+      stage(name + "-managed");
+      check(outer->size() == target && actual == expected,
+            "actual resized xterm returns host-restored primary state and retains new viewport");
+      stage("resize-reset-" + name + "-managed");
+    }
+  } catch (const std::exception &error) {
+    log << "exception=" << error.what() << '\n';
+    ++failures;
+  }
+
+  if (outer) {
+    check(outer->close().has_value(), "native screen probe closes final OS session");
+  }
+
+  log << "result=" << (failures == 0 ? 0 : 1) << " failures=" << failures << '\n';
+
+  return failures == 0 ? 0 : 1;
+}
+
 int nativeMouseModes(const char *path) {
   std::ofstream log(path);
   auto outer = TerminalSession::open({0, 1});
@@ -852,6 +1171,7 @@ int nativeMouseModes(const char *path) {
 
 int run() {
   sessions();
+  managedScreen();
   managedMouse();
   managedMouseQueries();
   managedMouseFailures();
@@ -865,6 +1185,12 @@ int run() {
 } // namespace
 
 int main(int argc, char **argv) {
+  if (argc == 3 && std::string_view(argv[1]) == "--native-screen-restore") {
+    alarm(40);
+
+    return nativeScreenRestore(argv[2]);
+  }
+
   if (argc == 3 && std::string_view(argv[1]) == "--native-mouse-modes") {
     alarm(8);
     return nativeMouseModes(argv[2]);

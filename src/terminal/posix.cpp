@@ -302,6 +302,47 @@ std::size_t TerminalSession::pendingBytes() const noexcept {
   return impl_ ? impl_->pending.size() - impl_->offset : 0;
 }
 
+std::expected<void, TerminalError> TerminalSession::saveCursorVisibility() noexcept {
+  return impl_ ? std::expected<void, TerminalError>{} : std::unexpected(closedError());
+}
+
+std::expected<void, TerminalError> TerminalSession::closeWithOutput(std::string bytes,
+                                                                    TerminalDeadline deadline) noexcept {
+  if (!impl_) {
+    return {};
+  }
+
+  std::optional<TerminalError> failure;
+
+  if (bytes.size() > impl_->options.max_output_bytes) {
+    failure = TerminalError{TerminalErrorKind::OUTPUT_LIMIT};
+  } else {
+    // Discard a retryable frame suffix; cleanup starts with CAN to abort its incomplete VT sequence.
+    impl_->pending = std::move(bytes);
+    impl_->offset = 0;
+
+    const auto written = flush(deadline);
+
+    if (written.error) {
+      failure = written.error;
+    } else if (written.pending != 0) {
+      failure = systemError(ETIMEDOUT);
+    }
+  }
+
+  auto closed = close();
+
+  if (!closed) {
+    if (!failure) {
+      return closed;
+    }
+
+    failure->restoration_code = closed.error().native_code;
+  }
+
+  return failure ? std::unexpected(*failure) : std::expected<void, TerminalError>{};
+}
+
 std::expected<void, TerminalError> TerminalSession::close() noexcept {
   if (!impl_) {
     return {};
