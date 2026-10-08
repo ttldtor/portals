@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <array>
 #include <limits>
+#include <map>
+#include <optional>
 #include <tuple>
 
 namespace portals {
@@ -233,32 +235,49 @@ std::expected<Invalidation, StyleError> StyleEngine::bindBatch(std::span<const S
     return std::unexpected(boundary.error());
   }
 
-  for (std::size_t index = 0; index < registrations.size(); ++index) {
-    const auto node = registrations[index].node;
-    auto access = tree_.access(node.id(), true);
-
-    if (!access) {
-      return std::unexpected(error(access.error(), "Style target is unavailable"));
-    }
-
-    if (std::ranges::find(registrations.first(index), node, &StyleRegistration::node) !=
-        registrations.first(index).end()) {
-      return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Duplicate target in style batch"));
-    }
-  }
+  bool identitiesValidated{};
 
   try {
+    // Validate full identities before using slots as keys. Every admitted target belongs
+    // to this tree's current generation; the temporary index owns no widget or metadata.
+    std::map<std::size_t, std::optional<std::size_t>> positions;
+
+    for (const auto &registration : registrations) {
+      const auto node = registration.node;
+      auto access = tree_.access(node.id(), true);
+
+      if (!access) {
+        return std::unexpected(error(access.error(), "Style target is unavailable"));
+      }
+
+      if (!positions.try_emplace(node.id().slot, std::nullopt).second) {
+        return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Duplicate target in style batch"));
+      }
+    }
+
+    identitiesValidated = true;
+
     auto bindings = bindings_;
 
     std::erase_if(bindings, [&](const Binding &binding) {
       return !tree_.access(binding.node.id(), true);
     });
 
-    for (const auto &registration : registrations) {
-      auto found = std::ranges::find(bindings, registration.node, &Binding::node);
+    // Index surviving bindings without sorting them: custom defaults keep their original
+    // evaluation order. Ordered lookup bounds identity work even for adversarial slot keys.
+    for (std::size_t index = 0; index < bindings.size(); ++index) {
+      auto found = positions.find(bindings[index].node.id().slot);
 
-      if (found != bindings.end()) {
-        found->target = registration.target;
+      if (found != positions.end()) {
+        found->second = index;
+      }
+    }
+
+    for (const auto &registration : registrations) {
+      const auto position = positions.find(registration.node.id().slot)->second;
+
+      if (position) {
+        bindings[*position].target = registration.target;
 
         continue;
       }
@@ -272,6 +291,26 @@ std::expected<Invalidation, StyleError> StyleEngine::bindBatch(std::span<const S
 
     return install(sheet_, std::move(bindings));
   } catch (const std::bad_alloc &) {
+    // Argument errors preceded allocation in the original API. If building the index
+    // fails, preserve that priority with an allocation-free scan; only this OOM path
+    // pays quadratic duplicate detection. A completed validation needs no replay.
+    if (!identitiesValidated) {
+      for (std::size_t index = 0; index < registrations.size(); ++index) {
+        const auto node = registrations[index].node;
+        auto access = tree_.access(node.id(), true);
+
+        if (!access) {
+          return std::unexpected(error(access.error(), "Style target is unavailable"));
+        }
+
+        const auto preceding = registrations.first(index);
+
+        if (std::ranges::find(preceding, node, &StyleRegistration::node) != preceding.end()) {
+          return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Duplicate target in style batch"));
+        }
+      }
+    }
+
     return std::unexpected(error(TreeError::NO_MEMORY, "Style batch allocation failed"));
   }
 }

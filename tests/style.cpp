@@ -428,6 +428,91 @@ void batchTransactions() {
   check(readStyle(fixture, first).minWidth == 17, "failed metadata is absent from subsequent refresh");
 }
 
+class OrderedDefaults final : public Widget {
+public:
+  OrderedDefaults(int tag, std::vector<int> &order) : tag_(tag), order_(order) {
+  }
+
+  ComputedStyle styleDefaults() const override {
+    order_.push_back(tag_);
+
+    return {};
+  }
+
+private:
+  int tag_;
+  std::vector<int> &order_;
+};
+
+void batchIdentityAndOrder() {
+  std::vector<int> order;
+  Fixture fixture;
+  auto first = take(fixture.tree->emplace<OrderedDefaults>(fixture.root, 1, order));
+  auto second = take(fixture.tree->emplace<OrderedDefaults>(fixture.root, 2, order));
+  auto third = take(fixture.tree->emplace<OrderedDefaults>(fixture.root, 3, order));
+  const std::array initial{StyleRegistration{second, {.id = "second"}}, StyleRegistration{first, {.id = "first"}}};
+
+  take(fixture.styles.bindBatch(initial));
+  check(order == std::vector{2, 1}, "initial defaults follow registration order, not slot order");
+  order.clear();
+  take(fixture.styles.replacePss("#changed {min-width: 13;} #new {min-width: 19;}"));
+  order.clear();
+
+  const std::array mixed{StyleRegistration{third, {.id = "new"}}, StyleRegistration{first, {.id = "changed"}},
+                         StyleRegistration{second, {.id = "second"}}};
+
+  take(fixture.styles.bindBatch(mixed));
+  check(order == std::vector{2, 1, 3}, "updates keep prior order and insertions append in input order");
+  check(readStyle(fixture, first).minWidth == 13 && readStyle(fixture, third).minWidth == 19 &&
+          readStyle(fixture, second).minWidth == 0,
+        "mixed batch maps each metadata update to its own identity");
+  take(fixture.tree->remove(second));
+
+  auto reused = take(fixture.tree->emplace<OrderedDefaults>(fixture.root, 4, order));
+
+  check(reused.id().slot == second.id().slot && reused.id().generation != second.id().generation,
+        "fixture reuses the removed slot with a different generation");
+  order.clear();
+  take(fixture.styles.bindBatch(std::array{StyleRegistration{reused, {.id = "new"}}}));
+  check(order == std::vector{1, 3, 4}, "stale binding is pruned and replacement appends as a new identity");
+  take(fixture.tree->consumeFrameRequest());
+  order.clear();
+
+  const auto revision = fixture.styles.revision();
+  const std::array duplicateBeforeStale{StyleRegistration{first, {}}, StyleRegistration{first, {}},
+                                        StyleRegistration{second, {}}};
+  auto rejected = fixture.styles.bindBatch(duplicateBeforeStale);
+
+  check(!rejected && rejected.error().cause == TreeError::INVALID_ARGUMENT,
+        "earlier duplicate wins over later stale target");
+
+  const std::array staleBeforeDuplicate{StyleRegistration{second, {}}, StyleRegistration{first, {}},
+                                        StyleRegistration{first, {}}};
+
+  rejected = fixture.styles.bindBatch(staleBeforeDuplicate);
+  check(!rejected && rejected.error().cause == TreeError::STALE_NODE, "earlier stale target wins over later duplicate");
+  check(order.empty() && fixture.styles.revision() == revision &&
+          take(fixture.tree->consumeFrameRequest()) == Invalidation::NONE && readStyle(fixture, first).minWidth == 13 &&
+          readStyle(fixture, reused).minWidth == 19,
+        "validation failures call no defaults and preserve styles, revision and invalidation");
+
+  allocation_test::remaining = 0;
+  rejected = fixture.styles.bindBatch(duplicateBeforeStale);
+  allocation_test::remaining = -1;
+
+  check(!rejected && rejected.error().cause == TreeError::INVALID_ARGUMENT,
+        "allocation pressure does not mask an earlier duplicate argument");
+
+  const std::array liveBeforeStale{StyleRegistration{first, {}}, StyleRegistration{second, {}}};
+
+  allocation_test::remaining = 0;
+  rejected = fixture.styles.bindBatch(liveBeforeStale);
+  allocation_test::remaining = -1;
+
+  check(!rejected && rejected.error().cause == TreeError::STALE_NODE,
+        "allocation pressure does not mask a stale argument after a live target");
+}
+
 void batchBudgetAndAllocation() {
   Fixture fixture;
   StyleEngine styles(*fixture.tree, 2);
@@ -444,10 +529,10 @@ void batchBudgetAndAllocation() {
   check(!rejected && rejected.error().cause == TreeError::NODE_LIMIT && styles.revision() == 1,
         "over-budget batch retains all previous bindings");
   take(fixture.tree->remove(second));
-  take(styles.bindBatch(replacement));
-  check(styles.revision() == 2, "batch prunes stale bindings before enforcing capacity");
+  take(fixture.tree->consumeFrameRequest());
 
   const auto revision = styles.revision();
+  const auto previous = readStyle(fixture, first);
   int failuresSeen{};
   bool committed{};
 
@@ -462,13 +547,18 @@ void batchBudgetAndAllocation() {
       committed = true;
     } else {
       ++failuresSeen;
-      check(result.error().cause == TreeError::NO_MEMORY && styles.revision() == revision,
-            "batch allocation failures preserve revision and bindings");
+      check(result.error().cause == TreeError::NO_MEMORY && styles.revision() == revision &&
+              readStyle(fixture, first) == previous && take(fixture.tree->consumeFrameRequest()) == Invalidation::NONE,
+            "mixed batch allocation failures preserve revision, styles and invalidation");
+      take(fixture.tree->read(third, [](const Widget &widget) {
+        check(!widget.computedStyle(), "failed insertion publishes no style to the new target");
+      }));
     }
   }
 
   check(committed && failuresSeen >= 2 && styles.revision() == revision + 1,
         "batch allocation sweep reaches one complete commit");
+  check(styles.revision() == 2, "batch prunes stale bindings before enforcing capacity");
 
   const auto committedRevision = styles.revision();
   bool wrongThread{};
@@ -783,6 +873,7 @@ int main(int argc, char **argv) {
   transactionsAndControls();
   customAtomicity();
   batchTransactions();
+  batchIdentityAndOrder();
   batchBudgetAndAllocation();
   paintUsesSnapshot();
   viewsAndEditor();

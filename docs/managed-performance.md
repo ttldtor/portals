@@ -6,6 +6,10 @@ microbenchmark, not an application frame-rate or terminal-throughput benchmark.
 The source is `tools/benchmarks/managed.cpp`; the correctness/schema check is
 `tools/benchmarks/check_managed.cmake`.
 
+The original measurements below describe the pre-optimization baseline.
+See the batch lookup follow-up at the end for the current algorithm and its
+separate before/after measurements.
+
 ## Reproducing a run
 
 Build the benchmark target with `PORTALS_BUILD_TOOLS=ON` and run the exact
@@ -193,3 +197,85 @@ The measured baseline is commit `0276ae2` plus the palette/example/benchmark
 changes described here. The measured `tools/benchmarks/managed.cpp` SHA-256 is
 `42a4f8f60a670f778919c4c5b0ef820dcece3cd73c52170817707b1ec02c061f`. Lifecycle core and owning-description code match that
 baseline; the palette additions do not change `bindBatch` or its algorithms.
+
+
+## Batch identity lookup follow-up
+
+The batch registry now builds a temporary ordered index for the input nodes.
+Every full node identity is checked before its slot is used as a key. Surviving
+bindings retain their order; new bindings append in input order. The index is
+local to staging, so failed transactions cannot publish a partially updated
+registry. The public API and retained ownership model are unchanged.
+
+Let B be the existing binding count and R the input registration count. The
+previous duplicate scan did R(R-1)/2 comparisons; repeated linear upsert searches
+added O(RB + R^2) work. With index allocation available, identity lookup now costs
+O((B + R) log(R + 2)) work with O(R) temporary index storage. This is not a bound
+on the complete style transaction: metadata copies, the staged binding vector,
+rule matching and user-provided `styleDefaults()` have separate costs.
+
+Allocation failure while building the index uses the original allocation-free
+validation scan. That exceptional path is O(R^2), preserving the previous priority
+of invalid/duplicate input errors over NO_MEMORY. A fully validated batch whose
+later staging allocation fails does not repeat validation. This distinction is
+intentional; no unconditional worst-case logarithmic guarantee is claimed.
+
+Characterization tests cover mixed updates/inserts, callback order, generation
+reuse and error precedence. Allocation injection covers both rollback of a mixed
+batch and duplicate/stale argument errors when index allocation fails. Existing
+frame/thread, theme-switch, custom-defaults and consumer tests remain applicable.
+
+### Before/after registration measurements
+
+These runs use the unchanged benchmark and the same 32/128/512-row workload,
+five warmups and 30 retained samples. Baseline: commit `bb84099`. The optimized
+style source SHA-256 is `c1b7885cfc81a559b436bc3a4d0edd5f262429396de8f27429a9dd5a84549f40`; benchmark SHA-256 is `61c1ce34ed1c925ce6b889e362c4cb395d027557ae82c85499f3b73d0ba43014`.
+MSVC 19.51 runs on Windows; GCC 14.3 runs in WSL2 on the same Ryzen 9 5950X host.
+Each compiler/run was measured separately, with no agent-owned builds or tests
+running concurrently. Other system/user activity was not controlled. Windows
+reported the High performance power plan after the runs; no settings were changed.
+These are local observations, not CI thresholds or end-to-end frame-rate claims.
+
+The table reports `initial_style_register` **p50 / p95 in milliseconds** and
+p50 speedup (before / after). This phase also applies the initial theme; it is
+not an isolated map microbenchmark.
+
+| Compiler | API | Rows | Before p50 / p95 | After p50 / p95 | p50 speedup |
+| --- | --- | ---: | ---: | ---: | ---: |
+| MSVC | low_level | 32 | 0.043 / 0.050 | 0.044 / 0.049 | 0.96x |
+| MSVC | managed | 32 | 0.045 / 0.050 | 0.048 / 0.064 | 0.93x |
+| MSVC | descriptions | 32 | 0.044 / 0.051 | 0.048 / 0.059 | 0.92x |
+| MSVC | low_level | 128 | 0.170 / 0.200 | 0.161 / 0.208 | 1.06x |
+| MSVC | managed | 128 | 0.182 / 0.227 | 0.171 / 0.198 | 1.06x |
+| MSVC | descriptions | 128 | 0.179 / 0.225 | 0.172 / 0.192 | 1.04x |
+| MSVC | low_level | 512 | 1.123 / 1.284 | 0.672 / 0.831 | 1.67x |
+| MSVC | managed | 512 | 1.247 / 1.529 | 0.716 / 0.891 | 1.74x |
+| MSVC | descriptions | 512 | 1.181 / 1.605 | 0.668 / 0.847 | 1.77x |
+| GCC | low_level | 32 | 0.032 / 0.039 | 0.033 / 0.046 | 0.97x |
+| GCC | managed | 32 | 0.034 / 0.038 | 0.034 / 0.039 | 1.00x |
+| GCC | descriptions | 32 | 0.034 / 0.043 | 0.034 / 0.047 | 1.00x |
+| GCC | low_level | 128 | 0.147 / 0.171 | 0.132 / 0.153 | 1.11x |
+| GCC | managed | 128 | 0.155 / 0.212 | 0.140 / 0.175 | 1.11x |
+| GCC | descriptions | 128 | 0.154 / 0.190 | 0.137 / 0.155 | 1.12x |
+| GCC | low_level | 512 | 1.228 / 1.752 | 0.565 / 0.827 | 2.17x |
+| GCC | managed | 512 | 1.455 / 1.807 | 0.793 / 0.919 | 1.83x |
+| GCC | descriptions | 512 | 1.444 / 1.856 | 0.785 / 1.063 | 1.84x |
+
+For a fourfold increase from 128 to 512 rows, the optimized registration
+p50 grew by 4.18x / 4.18x / 3.87x for MSVC and 4.28x / 5.66x / 5.72x for GCC
+(low-level / managed / descriptions). These timings do not establish linear
+scaling of the entire phase. At 32 rows, MSVC p50 was approximately 1–4 microseconds
+slower with the index; the added allocation/lookup overhead is not free for small
+batches. The larger workload benefits from eliminating repeated linear searches.
+
+Raw samples include every lifecycle phase, including the unchanged construction,
+dirty-prepare and removal work:
+
+- [MSVC before](measurements/style-batch-before-msvc.json) and [MSVC after](measurements/style-batch-after-msvc.json).
+- [GCC before](measurements/style-batch-before-gcc.json) and [GCC after](measurements/style-batch-after-gcc.json).
+
+This change addresses indexed batch registration under normal memory availability.
+Repeated single-node `bind` still stages and resolves the whole registry. Router
+searches, managed lookup and repeated subtree cleanup are unchanged. The broader
+lifecycle scaling concerns from the original experiment therefore remain open;
+this result does not stabilize the entire managed API.

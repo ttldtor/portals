@@ -169,6 +169,12 @@ public:
   /// @brief Update metadata in one transaction, then recompute every bound widget once.
   /// Duplicate input nodes return INVALID_ARGUMENT. Stale bindings are pruned before admission.
   /// Empty input performs the same refresh as refresh().
+  /// With index allocation available, identity lookup takes O((B + R) log(R + 2))
+  /// work and O(R) temporary space
+  /// for B existing bindings and R input registrations. Metadata copies and style
+  /// resolution are additional costs; existing callback order is preserved.
+  /// If index allocation fails, an allocation-free O(R^2) validation preserves
+  /// argument-error priority before returning NO_MEMORY for an otherwise valid batch.
   /// @param registrations Borrowed live targets and metadata, copied during staging.
   /// @return Coalesced invalidation, or an error preserving all values, bindings and revisions.
   std::expected<Invalidation, StyleError> bindBatch(std::span<const StyleRegistration> registrations);
