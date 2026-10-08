@@ -1,21 +1,20 @@
 # Portals
 
-Portals is a C++23 terminal UI library under development. It contains a static
-core library, a standalone consumer, a control gallery and headless tests.
-Checked cell geometry, UTF-8 grapheme measurements, VT input
-decoding, Windows/POSIX terminal sessions, a bounded cell framebuffer, a full-frame
-reference renderer, bounded row diff, transactional frame writer and a
-[UI scheduler with scoped cancellation](docs/scheduler.md) and a
-[retained widget tree](docs/widget-tree.md) with [typed properties](docs/property.md)
-and [Row/Column layouts and size policies](docs/layout.md), [Grid and Overlay](docs/grid.md),
-and [immutable list/table model ranges](docs/model.md) are available.
-[Label, Button and CheckBox](docs/controls.md), a [virtual list](docs/virtual-list.md)
-and a [virtual table](docs/virtual-table.md) are implemented. See the
-[architecture](docs/architecture.md) for component boundaries and remaining work.
+Portals is a C++23 retained terminal UI library under development. The static core
+includes an [Application runner](docs/application.md), checked widget ownership,
+typed properties and immutable models, layouts, controls and LineEdit, virtual
+lists/tables, Canvas/charts, styles/themes, bounded terminal output and causal
+diagnostics.
+
+Start with [getting started](docs/getting-started.md), then the
+[runnable examples and keyboard/options](docs/examples.md). See
+[architecture](docs/architecture.md) for ownership, event flow and customization,
+[limitations](docs/limitations.md) for platform/lifecycle/output boundaries, and
+[installation](docs/package.md) for the relocatable CMake package.
 
 ## Build and test
 
-Requirements: CMake 3.24+, Ninja and a compiler/standard library supporting C++23, including `<expected>` (MSVC or GCC).
+Requirements: CMake 3.24+, Ninja and a compiler/standard library supporting C++23, including `<expected>` and `<format>` (MSVC or GCC).
 The private vendored utf8proc dependency supplies Unicode 18.0.0 data; no automatic downloads or system Unicode library are required. A C99 compiler is needed alongside C++23.
 
 On Windows, use an **x64 Developer PowerShell for Visual Studio** with the C++
@@ -110,11 +109,9 @@ cmake -S . -B build/docs -G Ninja -DPORTALS_BUILD_DOCS=ON
 cmake --build build/docs --target portals_docs
 ```
 
-Open `build/docs/docs/html/index.html`. Public declarations include Doxygen
-contracts. The compiled core implements release metadata, checked cell geometry, grapheme text, a cell framebuffer and a full-frame reference renderer;
-the example consumes that contract and the smoke executable checks it through
-the same public header and linked target. The test uses an explicit nonzero
-failure exit code, so checks remain active with `NDEBUG`.
+Open `build/docs/docs/html/index.html`. Public declarations include Doxygen contracts
+for parameters, results, ownership, threading and errors. Generated help includes
+the application, architecture, examples, installation and limitations pages.
 
 In CLion, open the root CMake project and select the corresponding preset and
 an installed toolchain. The Windows preset requires an MSVC environment. Local
