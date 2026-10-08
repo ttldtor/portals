@@ -99,8 +99,13 @@ Release build, then tests a freshly unpacked archive before publishing it.
 It never removes or reuses a staging directory and never overwrites an archive.
 Choose new absolute paths; the staging path must be outside the source checkout.
 
+The complete reference requires Doxygen 1.18 or newer; 1.18 is the verified
+minimum. Ordinary library builds do not require Doxygen. A locally unpacked
+[official Doxygen release](https://www.doxygen.nl/download.html) can be placed on
+PATH for the packaging process without a system-wide installation.
+
 From an x64 MSVC developer PowerShell, with Git, CMake 3.24+, Ninja and Doxygen
-on PATH:
+1.18 or newer on PATH:
 
     ./tools/package/bundle.ps1 -WorkDir "C:/temp/portals bundle run-001" -OutputArchive "C:/artifacts/portals-mvp-windows-x64-release.zip"
 

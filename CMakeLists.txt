@@ -412,7 +412,7 @@ if(PORTALS_BUILD_TESTS)
 endif()
 
 if(PORTALS_BUILD_DOCS)
-  find_package(Doxygen REQUIRED)
+  find_package(Doxygen 1.18 REQUIRED)
   set(DOXYGEN_GENERATE_HTML YES)
   set(DOXYGEN_GENERATE_LATEX NO)
   set(DOXYGEN_HAVE_DOT NO)
