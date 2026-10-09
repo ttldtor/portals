@@ -1,5 +1,9 @@
 # Runnable examples {#examples}
 
+For a complete form combining an editor, custom final widget, list, table and chart,
+see the [declarative before/after consumers](declarative-ui.md). Their installed-package
+tests compare identical interactions and complete terminal output.
+
 Build with `PORTALS_BUILD_EXAMPLES=ON`. Each program runs through the same
 [Application runner](application.md) and has a finite `--check` mode for automation.
 The check modes use an in-memory terminal and logical clock; they do not prove

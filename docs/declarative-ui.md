@@ -17,8 +17,9 @@ consumes them. Reusing a consumed or moved-from description returns
 
 Use `ui::column(...)` and `ui::row(...)` for nested composition. Their overloads
 accept `LinearOptions` before the children when gaps, padding or alignment need
-customization. Standard factories are `label`, `button`, `checkbox` and
-`lineEdit`. Binding state belongs to the same `ManagedScene` as before.
+customization. Standard control factories are `label`, `button`, `checkbox` and
+`lineEdit`; `virtualList`, `virtualTable` and `chart` compose managed virtual views.
+Binding state and models belong to the same `ManagedScene` as before.
 `custom<T>(args...)` constructs the concrete public `Widget` subtype, including
 `final` classes. It does not introduce another base class.
 
@@ -71,6 +72,88 @@ Owning a callback does not make objects captured by reference live longer. Expli
 borrowed pointers or reference wrappers must remain valid for the uses made by
 the custom widget. Consult the `custom` factory reference for argument storage
 and forwarding requirements; arbitrary user types are not deep-copied magically.
+
+## Virtual views in the same composition
+
+Create a model once with `scene.model<T>(snapshot)` and pass its observing handle
+to any number of descriptions. The row type is deduced from that handle; arrays
+and vectors of existing `TableColumn<T>` convert to the table's span parameter.
+Each recipe opens its range only when mounted. There are no application-owned
+binding tokens, per-view style registrations or `prepareViews` hooks to retain.
+
+```cpp
+auto model = take(scene.model<Ohlc>(snapshot));
+auto columns = priceColumns();
+ui::NodeRef<VirtualTable<Ohlc>> table;
+
+auto description = ui::column(
+  ui::label("Prices"),
+  ui::row(
+    ui::virtualTable(model, columns).reference(table),
+    ui::chart(model, [](const Ohlc &value) { return std::optional{value}; })));
+
+take(ui::mount(scene, std::move(description)));
+```
+
+Here `take`, `snapshot` and `priceColumns` are application setup helpers/data;
+the complete programs below provide executable setup and error checks.
+
+`virtualTable` copies its column descriptions immediately, including headers and
+formatter objects. The source span may expire before mount. List formatters,
+chart accessors, chart-origin callbacks and provider callbacks are owned values.
+As elsewhere in C++, a reference inside a callback is still a borrow. The model
+handle remains weak and UI-affine: the receiving scene must own that model.
+
+Virtual factories retain their existing managed parameters. List/table settings
+and `SizePolicy` remain available, and chart settings include its optional origin
+callback. The final optional `prepared` callback receives the coherent borrowed
+model frame and an optional owning provider request. It runs in composition
+registration order, including layout retries. Resident snapshots need no provider
+callback; pending work without one fails with `INVALID_ARGUMENT` during preparation.
+Provider dispatch, request retention and cache policy remain application decisions.
+
+All children share the existing description transaction. A failed factory or
+later setup removes the newly mounted subtree, bindings, ranges and captures;
+no `NodeRef` is published. The pre-existing scene model survives rollback.
+An origin callback may observe published refs when preparation begins. Standard
+list/table input bindings cannot be replaced with `.onEvent`; that conflicting
+setup returns a typed error and rolls back, as for ordinary bound controls.
+Hidden views cancel their pending range work; disabling affects input, not visibility.
+Idle frames, theme changes, rejected notifications and removal use the same
+[managed virtual-view lifecycle](virtual-preparation.md).
+
+### Complete before/after form with virtual views
+
+These two installed-package programs implement the same form: a committing name
+editor, a self-removing button, a custom `final Badge`, a list, a table and an OHLC
+chart. Both receive identical scripted input, resize and theme changes. The tests
+check semantic outcomes and compare every emitted terminal byte. Their shared
+fixture contains domain rendering, input and assertions, not hidden mounting code.
+
+- [Before: explicit managed construction](../tests/package_consumer/composed_before.cpp)
+- [After: one owning composition](../tests/package_consumer/composed_after.cpp)
+- [Shared domain and replay assertions](../tests/package_consumer/composed_support.hpp)
+- [Finite terminal and immutable price snapshot](../tests/package_consumer/virtual_support.hpp)
+
+\include{lineno} composed_before.cpp
+
+\include{lineno} composed_after.cpp
+
+\include{lineno} composed_support.hpp
+
+Run `portals_composed_before` or `portals_composed_after` from the installed-consumer
+build directory (`.exe` on Windows). They accept no options, finish without a native
+window, and print a semantic summary followed by hex-encoded terminal output.
+Failures return a nonzero process status. Run `ctest -R consumer.composed` there
+to execute both programs and the equivalence comparison.
+
+The benefit is structural: parent handles and explicit binding calls disappear
+from construction, and the whole form gains transactional mount and owning inputs.
+Callbacks, error handling and test replay remain explicit. This is not a claim that
+the full program is shorter: observing slots and equivalence assertions add code.
+Typed-column conveniences and named view settings are separate future work.
+The description layer does not change the current delayed-range cache policy or
+provide compile-time scene construction.
 
 ## Complete installed consumer
 

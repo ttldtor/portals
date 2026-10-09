@@ -15,6 +15,9 @@ set(example_sources
   examples/gallery/form.hpp
   examples/dashboard/dashboard.hpp
   tests/package_consumer/form_declarative.cpp
+  tests/package_consumer/composed_before.cpp
+  tests/package_consumer/composed_after.cpp
+  tests/package_consumer/composed_support.hpp
   tests/package_consumer/form_before.cpp
   tests/package_consumer/form_after.cpp
   tests/package_consumer/form_support.hpp

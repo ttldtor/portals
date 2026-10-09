@@ -62,7 +62,7 @@ add_test(NAME consumer.form-declarative-typed-error COMMAND portals_form_declara
 set_tests_properties(consumer.form-declarative-equivalence consumer.form-declarative-typed-error PROPERTIES TIMEOUT 30)
 
 # Nested virtual views use only the public headers from the relocated package.
-foreach(variant IN ITEMS before after lifecycle managed managed_lifecycle)
+foreach(variant IN ITEMS before after lifecycle managed managed_lifecycle declarative_lifecycle)
   add_executable(portals_virtual_${variant} virtual_${variant}.cpp)
   target_link_libraries(portals_virtual_${variant} PRIVATE portals::core)
   set_target_properties(portals_virtual_${variant} PROPERTIES CXX_EXTENSIONS OFF)
@@ -86,3 +86,22 @@ add_test(NAME consumer.virtual-managed-equivalence
     "-DAFTER=$<TARGET_FILE:portals_virtual_managed>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_forms.cmake")
 set_tests_properties(consumer.virtual-managed-equivalence PROPERTIES TIMEOUT 30)
+
+# Identical form behavior, including virtual views and a custom final widget.
+foreach(variant IN ITEMS before after)
+  add_executable(portals_composed_${variant} composed_${variant}.cpp)
+  target_link_libraries(portals_composed_${variant} PRIVATE portals::core)
+  set_target_properties(portals_composed_${variant} PROPERTIES CXX_EXTENSIONS OFF)
+  if(WIN32)
+    target_sources(portals_composed_${variant} PRIVATE no_dialogs.cpp)
+  endif()
+  add_test(NAME consumer.composed-${variant} COMMAND portals_composed_${variant})
+  set_tests_properties(consumer.composed-${variant} PROPERTIES TIMEOUT 15)
+endforeach()
+
+add_test(NAME consumer.composed-equivalence
+  COMMAND "${CMAKE_COMMAND}"
+    "-DBEFORE=$<TARGET_FILE:portals_composed_before>"
+    "-DAFTER=$<TARGET_FILE:portals_composed_after>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_forms.cmake")
+set_tests_properties(consumer.composed-equivalence PROPERTIES TIMEOUT 30)

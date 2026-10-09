@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <tuple>
 
+/// @brief Owning construction descriptions mounted through the existing ManagedScene lifecycle.
 namespace portals::ui {
 /** @brief Single-use owning construction recipe; no mounted widget ownership.
  * @tparam T Public Widget subtype constructed by the recipe, including final types.
@@ -75,6 +76,14 @@ struct Access {
   template <class T>
   static std::expected<Node<T>, ManagedError> mount(Description<T> &&description, ManagedScene &scene,
                                                     Node<Widget> parent, MountContext &context);
+
+  /** @brief Wrap a checked managed factory without exposing recipe construction publicly.
+   * @tparam T Widget subtype returned by the factory.
+   * @tparam Factory Owning callable returning expected<Node<T>, ManagedError> for scene and parent.
+   * @param factory Capture retained until the consuming mount; construction may throw.
+   * @return Single-use description with the existing transaction semantics.
+   */
+  template <class T, class Factory> static Description<T> describe(Factory factory);
 
   /** @brief Verify a created node remains accessible before publishing references.
    * @param scene Existing managed
@@ -319,6 +328,10 @@ private:
 };
 
 namespace detail {
+template <class T, class Factory> Description<T> Access::describe(Factory factory) {
+  return Description<T>(std::move(factory));
+}
+
 template <class T>
 std::expected<Node<T>, ManagedError> Access::mount(Description<T> &&description, ManagedScene &scene,
                                                    Node<Widget> parent, MountContext &context) {
@@ -448,8 +461,78 @@ inline Description<LineEdit> lineEdit(ManagedState<std::string> model, LineEditC
     });
 }
 
+/// @brief Describe a managed virtual table without opening a range until mount.
+/// @tparam T Immutable model row accepted by the column formatters; deduced from model.
+/// @param model Weak UI-affine handle belonging to the scene receiving this recipe.
+/// @param columns Descriptions copied now, including owning headers and formatter objects.
+/// @param options Existing table settings, validated by managed preparation.
+/// @param policy Existing layout constraints for the table.
+/// @param prepared Owning provider callback after preparation, including retries.
+/// Empty is valid for ready snapshots; pending work without it returns INVALID_ARGUMENT.
+/// @return Single-use recipe with standard input, styles and automatic preparation.
+/// Construction may throw while copying columns or callbacks. Mount preserves typed errors
+/// and subtree rollback. The scene owns the model; reference captures remain borrowed.
+template <class T>
+Description<VirtualTable<T>> virtualTable(ManagedModel<T> model,
+                                          std::type_identity_t<std::span<const TableColumn<T>>> columns,
+                                          VirtualTableOptions options = {}, SizePolicy policy = {},
+                                          std::type_identity_t<ManagedViewHandler<T>> prepared = {}) {
+  // A recipe may outlive the caller's array or vector. Copy before retaining a mount callback.
+  auto ownedColumns = std::vector<TableColumn<T>>(columns.begin(), columns.end());
+
+  return detail::Access::describe<VirtualTable<T>>(
+    [model, columns = std::move(ownedColumns), options, policy,
+     prepared = std::move(prepared)](ManagedScene &scene, Node<Widget> parent) mutable {
+      return scene.virtualTable(parent, model, columns, options, policy, std::move(prepared));
+    });
+}
+
+/// @brief Describe a managed virtual list without opening a range until mount.
+/// @tparam T Immutable model row accepted by the formatter; deduced from model.
+/// @param model Weak UI-affine handle belonging to the receiving scene.
+/// @param delegate Owning formatter invoked for visible rows during preparation.
+/// @param options Existing list settings, validated by managed preparation.
+/// @param policy Existing layout constraints for the list.
+/// @param prepared Owning provider callback after preparation. Empty rejects pending work
+/// with INVALID_ARGUMENT. Captured references must remain valid until retirement.
+/// @return Single-use recipe retaining callbacks and standard managed input/style behavior.
+/// Capture construction may throw; mount preserves typed errors and subtree rollback.
+template <class T>
+Description<VirtualList<T>> virtualList(ManagedModel<T> model, std::type_identity_t<ManagedListFormatter<T>> delegate,
+                                        VirtualListOptions options = {}, SizePolicy policy = {},
+                                        std::type_identity_t<ManagedViewHandler<T>> prepared = {}) {
+  return detail::Access::describe<VirtualList<T>>(
+    [model, delegate = std::move(delegate), options, policy,
+     prepared = std::move(prepared)](ManagedScene &scene, Node<Widget> parent) mutable {
+      return scene.virtualList(parent, model, std::move(delegate), options, policy, std::move(prepared));
+    });
+}
+
+/// @brief Describe a managed chart using the existing frame preparation order.
+/// @tparam T Immutable model row projected into optional OHLC values; deduced from model.
+/// @param model Weak UI-affine handle belonging to the receiving scene.
+/// @param accessor Owning projection; nullopt represents a gap, as in the managed chart API.
+/// @param options Existing chart mode, width and glyph configuration.
+/// @param first Owning origin callback, invoked in composition registration order during
+/// preparation. Empty means row zero. NodeRef observations are already published then.
+/// @param prepared Owning provider callback after preparation, including retries. Empty
+/// rejects pending work with INVALID_ARGUMENT. Explicit reference captures remain borrowed.
+/// @return Single-use recipe with automatic style/preparation and no input binding.
+/// Capture construction may throw; mount preserves typed errors and subtree rollback.
+template <class T>
+Description<Chart<T>> chart(ManagedModel<T> model, std::type_identity_t<ManagedChartAccessor<T>> accessor,
+                            ChartOptions options = {}, ManagedChartOrigin first = {},
+                            std::type_identity_t<ManagedViewHandler<T>> prepared = {}) {
+  return detail::Access::describe<Chart<T>>(
+    [model, accessor = std::move(accessor), options, first = std::move(first),
+     prepared = std::move(prepared)](ManagedScene &scene, Node<Widget> parent) mutable {
+      return scene.chart(parent, model, std::move(accessor), options, std::move(first), std::move(prepared));
+    });
+}
+
 /** @brief Compose a retained linear layout with consuming child recipes.
- * @tparam T Existing Row or Column subtype accepting LinearOptions.
+ * @tparam T Existing Row or Column subtype
+ * accepting LinearOptions.
  * @tparam Children Description types, passed as rvalues.
  * @param options Owning layout settings, validated by the existing layout engine.
  * @param children Owning recipes, mounted in argument order after the parent setup.
