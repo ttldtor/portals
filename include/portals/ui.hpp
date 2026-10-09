@@ -530,6 +530,79 @@ Description<Chart<T>> chart(ManagedModel<T> model, std::type_identity_t<ManagedC
     });
 }
 
+/// @brief Named owning settings for a table recipe; defaults match the positional factory.
+/// @tparam T Immutable model row type, matching the receiving ManagedModel.
+/// Copying captures may throw; explicit reference captures remain borrowed until retirement.
+template <class T> struct VirtualTableConfig {
+  VirtualTableOptions options{};    ///< Existing dimensions, width policy, budgets and styles.
+  SizePolicy policy{};              ///< Layout constraints in terminal cells.
+  ManagedViewHandler<T> prepared{}; ///< Provider callback; empty rejects pending work with INVALID_ARGUMENT.
+};
+
+/// @brief Named owning settings for a list recipe; defaults match the positional factory.
+/// @tparam T Immutable model row type, matching the receiving ManagedModel.
+/// Copying captures may throw; explicit reference captures remain borrowed until retirement.
+template <class T> struct VirtualListConfig {
+  VirtualListOptions options{};     ///< Existing row height, overscan, width policy and styles.
+  SizePolicy policy{};              ///< Layout constraints in terminal cells.
+  ManagedViewHandler<T> prepared{}; ///< Provider callback; empty rejects pending work with INVALID_ARGUMENT.
+};
+
+/// @brief Named owning settings for a chart recipe; defaults match the positional factory.
+/// @tparam T Immutable model row type projected by the chart accessor.
+/// Copying captures may throw; explicit reference captures remain borrowed until retirement.
+template <class T> struct ChartConfig {
+  ChartOptions options{};           ///< Existing plot mode, width, glyphs and styles.
+  ManagedChartOrigin first{};       ///< Origin evaluated during preparation; empty starts at row zero.
+  ManagedViewHandler<T> prepared{}; ///< Provider callback; empty rejects pending work with INVALID_ARGUMENT.
+};
+
+/// @brief Describe a table using named settings and the same owning mount transaction.
+/// @tparam T Immutable row type deduced from model.
+/// @tparam Config Exactly VirtualTableConfig<T>, optionally cv/ref qualified.
+/// @param model Weak UI-affine handle belonging to the receiving scene.
+/// @param columns Definitions copied now, including headers and formatter captures.
+/// @param config Settings copied from lvalues or consumed from rvalues; captures may throw.
+/// @return Single-use recipe; mount and preparation preserve the positional factory's typed errors.
+/// Use an explicitly typed aggregate: bare {} continues to mean legacy table options.
+template <class T, class Config>
+  requires std::same_as<std::remove_cvref_t<Config>, VirtualTableConfig<T>>
+Description<VirtualTable<T>>
+virtualTable(ManagedModel<T> model, std::type_identity_t<std::span<const TableColumn<T>>> columns, Config &&config) {
+  return virtualTable(model, columns, config.options, config.policy, std::forward<Config>(config).prepared);
+}
+
+/// @brief Describe a list using named settings without changing its managed lifecycle.
+/// @tparam T Immutable row type deduced from model.
+/// @tparam Config Exactly VirtualListConfig<T>, optionally cv/ref qualified.
+/// @param model Weak UI-affine handle belonging to the receiving scene.
+/// @param delegate Owning visible-row formatter; reference captures remain borrowed.
+/// @param config Settings copied from lvalues or consumed from rvalues; captures may throw.
+/// @return Single-use recipe preserving positional mount, preparation and error semantics.
+/// Use an explicitly typed aggregate: bare {} continues to mean legacy list options.
+template <class T, class Config>
+  requires std::same_as<std::remove_cvref_t<Config>, VirtualListConfig<T>>
+Description<VirtualList<T>> virtualList(ManagedModel<T> model, std::type_identity_t<ManagedListFormatter<T>> delegate,
+                                        Config &&config) {
+  return virtualList(model, std::move(delegate), config.options, config.policy, std::forward<Config>(config).prepared);
+}
+
+/// @brief Describe a chart using named settings without changing preparation order.
+/// @tparam T Immutable row type deduced from model.
+/// @tparam Config Exactly ChartConfig<T>, optionally cv/ref qualified.
+/// @param model Weak UI-affine handle belonging to the receiving scene.
+/// @param accessor Owning projection to optional OHLC; nullopt represents a gap.
+/// @param config Settings copied from lvalues or consumed from rvalues; captures may throw.
+/// @return Single-use recipe preserving positional mount, preparation and error semantics.
+/// Use an explicitly typed aggregate: bare {} continues to mean legacy chart options.
+template <class T, class Config>
+  requires std::same_as<std::remove_cvref_t<Config>, ChartConfig<T>>
+Description<Chart<T>> chart(ManagedModel<T> model, std::type_identity_t<ManagedChartAccessor<T>> accessor,
+                            Config &&config) {
+  return chart(model, std::move(accessor), config.options, std::forward<Config>(config).first,
+               std::forward<Config>(config).prepared);
+}
+
 /** @brief Compose a retained linear layout with consuming child recipes.
  * @tparam T Existing Row or Column subtype
  * accepting LinearOptions.

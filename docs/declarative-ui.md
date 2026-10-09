@@ -151,9 +151,82 @@ The benefit is structural: parent handles and explicit binding calls disappear
 from construction, and the whole form gains transactional mount and owning inputs.
 Callbacks, error handling and test replay remain explicit. This is not a claim that
 the full program is shorter: observing slots and equivalence assertions add code.
-Typed-column conveniences and named view settings are separate future work.
+Typed columns and named view settings are available as additive conveniences below.
 The description layer does not change the current delayed-range cache policy or
 provide compile-time scene construction.
+
+## Typed columns and named view settings
+
+Include `<portals/table_column.hpp>` to compose a projection and a formatter into
+the existing `TableColumn<T>`. The projection reads `const T&`; the formatter
+receives its exact result category and returns owning `GraphemeText` by value.
+Data members, const member functions and lambdas work through `std::invoke`.
+`ColumnProjection` and `ColumnFormatter` constraints reject incompatible calls
+at the factory, including formatters that return borrowed text or `std::string`.
+
+```cpp
+const auto price = [](double value) {
+  return GraphemeText::from(std::format("{:.0f}", value)).value();
+};
+const std::array columns{
+  tableColumn<Ohlc>({.id = {1, 1},
+                     .header = GraphemeText::from("Close").value(),
+                     .width = 9},
+                    &Ohlc::close, price)};
+
+auto table = ui::virtualTable(model, columns,
+  ui::VirtualTableConfig<Ohlc>{.policy = tablePolicy, .prepared = provider});
+```
+
+Here `model` is the scene's `ManagedModel<Ohlc>`, `tablePolicy` is a `SizePolicy`
+and `provider` is a `ManagedViewHandler<Ohlc>`. The complete program below includes
+their definitions. `std::format` requires `<format>`; it is ordinary C++23 formatting,
+not a second text or reactive system. Select the same `WidthPolicy` for the header,
+formatted text and table options when changing the default policy.
+
+`TableColumnOptions` names the stable column ID, owning header and positive width
+in terminal cells. IDs are not derived from field names or display order. Existing
+column arrays remain valid, and the returned column can also be used by low-level
+`VirtualTable` or `setVirtualTableColumns` callers. No sorting or model reads happen
+at column construction. During preparation only visible ready cells are formatted.
+The adapter adds one projection call per formatted cell, no row copies or scans;
+callback cost remains application-defined.
+
+Both callables must be copy constructible because `TableColumn` still uses
+`std::function`. Their captures are owned, but captured references and projection
+references remain borrowed. A temporary result lasts through the formatter call.
+Do not retain row/result borrows, perform I/O or mutate the model/tree in either
+callback. Construction can throw on allocation or capture copy/move; preparation
+uses the existing typed callback/allocation errors. Direct `column.format(row)`
+invocation propagates exceptions to its caller.
+
+Named settings avoid positional placeholders:
+
+| Recipe | Configuration | Fields |
+| --- | --- | --- |
+| `ui::virtualTable` | `ui::VirtualTableConfig<T>` | `options`, `policy`, `prepared` |
+| `ui::virtualList` | `ui::VirtualListConfig<T>` | `options`, `policy`, `prepared` |
+| `ui::chart` | `ui::ChartConfig<T>` | `options`, `first`, `prepared` |
+
+All fields default to the corresponding positional factory defaults. For example,
+`ui::chart(model, accessor, ui::ChartConfig<Ohlc>{.prepared = provider})` starts at
+row zero without an explicit origin callback. Configurations own callbacks, copy
+from lvalues and consume rvalues; the model handle remains weak and UI-affine.
+Use the explicit configuration type with designated initializers. This keeps
+existing calls such as `ui::chart(model, accessor, {})` unambiguous: bare `{}` still
+means the old `ChartOptions`. Named overloads preserve mount rollback, input,
+preparation order, pending-work requirements and typed errors.
+
+[Complete named-settings form](../tests/package_consumer/composed_named.cpp)
+runs exactly the same replay as the [positional form](../tests/package_consumer/composed_after.cpp)
+and [managed form](../tests/package_consumer/composed_before.cpp). It accepts no
+arguments, opens no window and returns nonzero on failure. Run
+`portals_composed_named` (`.exe` on Windows) in the installed-consumer build directory,
+or `ctest -R consumer.composed` to compare the full captured output. Explicit names
+improve readability; this is not a promise of fewer total lines. Interactive example
+migration remains a separate step.
+
+\include{lineno} composed_named.cpp
 
 ## Complete installed consumer
 
@@ -200,8 +273,8 @@ every control. It makes the hierarchy explicit and mount failure cleanup local,
 but does not reduce the complete program's line count relative to the managed
 version. Custom event and presentation logic remain explicit C++.
 
-This stage does not implement reconciliation, dynamic tree replacement,
-virtual-view lifecycle, a new CSS cascade or SQLite integration. Descriptions
+This layer does not implement reconciliation, dynamic tree replacement,
+a new CSS cascade or SQLite integration. Descriptions
 assemble a tree once. The [performance experiment](managed-performance.md)
 compares retained lifecycle costs at several sizes; it does not measure
 compilation performance. Shorter construction code is not a speed claim.

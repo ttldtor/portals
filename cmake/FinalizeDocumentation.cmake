@@ -17,6 +17,7 @@ set(example_sources
   tests/package_consumer/form_declarative.cpp
   tests/package_consumer/composed_before.cpp
   tests/package_consumer/composed_after.cpp
+  tests/package_consumer/composed_named.cpp
   tests/package_consumer/composed_support.hpp
   tests/package_consumer/form_before.cpp
   tests/package_consumer/form_after.cpp

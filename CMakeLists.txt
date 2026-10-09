@@ -137,6 +137,16 @@ if(PORTALS_BUILD_TESTS)
   target_link_libraries(portals_ui_virtual PRIVATE portals::core)
   portals_enable_warnings(portals_ui_virtual)
   add_test(NAME portals.ui-virtual COMMAND portals_ui_virtual)
+
+  add_executable(portals_ui_named tests/ui_named.cpp)
+  target_link_libraries(portals_ui_named PRIVATE portals::core)
+  portals_enable_warnings(portals_ui_named)
+  add_test(NAME portals.ui-named COMMAND portals_ui_named)
+
+  add_executable(portals_table_column tests/table_column.cpp)
+  target_link_libraries(portals_table_column PRIVATE portals::core)
+  portals_enable_warnings(portals_table_column)
+  add_test(NAME portals.table-column COMMAND portals_table_column)
   set_tests_properties(portals.ui-virtual PROPERTIES TIMEOUT 20)
 
   add_executable(portals_managed tests/managed.cpp)

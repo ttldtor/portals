@@ -88,7 +88,7 @@ add_test(NAME consumer.virtual-managed-equivalence
 set_tests_properties(consumer.virtual-managed-equivalence PROPERTIES TIMEOUT 30)
 
 # Identical form behavior, including virtual views and a custom final widget.
-foreach(variant IN ITEMS before after)
+foreach(variant IN ITEMS before after named)
   add_executable(portals_composed_${variant} composed_${variant}.cpp)
   target_link_libraries(portals_composed_${variant} PRIVATE portals::core)
   set_target_properties(portals_composed_${variant} PROPERTIES CXX_EXTENSIONS OFF)
@@ -105,3 +105,25 @@ add_test(NAME consumer.composed-equivalence
     "-DAFTER=$<TARGET_FILE:portals_composed_after>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_forms.cmake")
 set_tests_properties(consumer.composed-equivalence PROPERTIES TIMEOUT 30)
+
+add_test(NAME consumer.composed-named-equivalence
+  COMMAND "${CMAKE_COMMAND}"
+    "-DBEFORE=$<TARGET_FILE:portals_composed_before>"
+    "-DAFTER=$<TARGET_FILE:portals_composed_named>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_forms.cmake")
+set_tests_properties(consumer.composed-named-equivalence PROPERTIES TIMEOUT 30)
+
+# Invalid expressions must fail at named constraints, not inside type-erased callbacks.
+foreach(kind IN ITEMS projection formatter)
+  add_library(portals_invalid_${kind} OBJECT EXCLUDE_FROM_ALL invalid_column.cpp)
+  target_link_libraries(portals_invalid_${kind} PRIVATE portals::core)
+  if(kind STREQUAL "projection")
+    target_compile_definitions(portals_invalid_${kind} PRIVATE PORTALS_INVALID_PROJECTION)
+  endif()
+  add_test(NAME consumer.invalid-${kind}
+    COMMAND "${CMAKE_COMMAND}"
+      "-DBUILD_DIR=${CMAKE_CURRENT_BINARY_DIR}" "-DCONFIG=$<CONFIG>"
+      "-DTARGET=portals_invalid_${kind}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/check_column_diagnostic.cmake")
+  set_tests_properties(consumer.invalid-${kind} PROPERTIES TIMEOUT 60 RUN_SERIAL TRUE)
+endforeach()

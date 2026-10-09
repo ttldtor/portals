@@ -1,5 +1,8 @@
 # Runnable examples {#examples}
 
+For the complete form using typed columns and named view settings, see
+[declarative composition](declarative-ui.md).
+
 For a complete form combining an editor, custom final widget, list, table and chart,
 see the [declarative before/after consumers](declarative-ui.md). Their installed-package
 tests compare identical interactions and complete terminal output.
