@@ -86,14 +86,28 @@ void pendingLatestOwnsRejectedValue() {
   check(received == 9 && observer.expired());
 }
 
+class ObservedTerminal final : public example::ReplayTerminal {
+public:
+  using example::ReplayTerminal::ReplayTerminal;
+  std::function<void()> beforeRead;
+
+  TerminalRead read(TerminalDeadline deadline, std::stop_token stop) override {
+    if (beforeRead) {
+      beforeRead();
+    }
+
+    return example::ReplayTerminal::read(deadline, stop);
+  }
+};
+
 void delayedRangesAndKeyboard() {
-  example::ReplayTerminal terminal({{100, "\x1b[B", {}},
-                                    {150, "\x1bOQ", {}},
-                                    {500,
-                                     "\t\x01"
-                                     "Edited note\r",
-                                     {}}},
-                                   900);
+  ObservedTerminal terminal({{100, "\x1b[B", {}},
+                             {150, "\x1bOQ", {}},
+                             {500,
+                              "\t\x01"
+                              "Edited note\r",
+                              {}}},
+                            900);
   ApplicationOptions application;
   dashboard::Scene *observed{};
   bool sawPending{}, sawReady{};
@@ -131,30 +145,24 @@ void delayedRangesAndKeyboard() {
   dashboard::Scene scene(*app, options);
   observed = &scene;
   take(setVirtualTableFirst(app->tree(), scene.table(), 10000));
+  bool finalReady{};
+
+  terminal.beforeRead = [&] {
+    take(app->tree().read(scene.table(), [&](const auto &table) {
+      finalReady =
+        table.rangeState() == RangeState::READY && table.firstRow() >= 10000 && table.selection().has_value();
+    }));
+  };
+
   take(app->run(scene, terminal));
   check(sawPending && sawReady && firstReady >= 260);
   check(scene.coherent() && scene.turbo());
-  check(take(scene.note()->snapshot())->value == "Edited note");
-  take(app->tree().read(scene.table(), [&](const auto &table) {
-    check(table.rangeState() == RangeState::READY && table.firstRow() >= 10000 && table.selection().has_value());
-  }));
+  check(take(scene.note().snapshot())->value == "Edited note");
+  check(finalReady);
+  check(!app->tree().inspect(scene.table()));
 }
 
 void continuousNavigationKeepsRowsVisible(bool backwards) {
-  class ObservedTerminal final : public example::ReplayTerminal {
-  public:
-    using example::ReplayTerminal::ReplayTerminal;
-    std::function<void()> beforeRead;
-
-    TerminalRead read(TerminalDeadline deadline, std::stop_token stop) override {
-      if (beforeRead) {
-        beforeRead();
-      }
-
-      return example::ReplayTerminal::read(deadline, stop);
-    }
-  };
-
   constexpr std::uint64_t FORWARD_FIRST = 240;
   constexpr std::uint64_t BACKWARD_FIRST = 300;
   const auto initialFirst = backwards ? BACKWARD_FIRST : FORWARD_FIRST;
@@ -186,6 +194,7 @@ void continuousNavigationKeepsRowsVisible(bool backwards) {
   constexpr std::size_t INSTRUMENT_WIDTH = 13;
   test_support::VtOracle oracle(SCREEN_WIDTH, 24);
   std::size_t consumed{}, heldSnapshots{}, blankSnapshots{}, blankCharts{};
+  bool finalReady{};
 
   terminal.beforeRead = [&] {
     oracle.feed(std::string_view(terminal.output).substr(consumed));
@@ -196,6 +205,10 @@ void continuousNavigationKeepsRowsVisible(bool backwards) {
 
     take(app->tree().read(scene.table(), [&](const auto &table) {
       first = table.visibleRange().first;
+      finalReady =
+        (backwards ? table.firstRow() < INITIAL_PAGE_ROWS : table.firstRow() > INITIAL_PAGE_ROWS) &&
+        table.rangeState() == RangeState::READY &&
+        table.selection() == RowId{backwards ? initialFirst - REPEAT_COUNT + 2 : initialFirst + REPEAT_COUNT, 1};
     }));
 
     if (now < REPEAT_START || now >= RELEASE_AT || first < INITIAL_PAGE_ROWS) {
@@ -227,11 +240,8 @@ void continuousNavigationKeepsRowsVisible(bool backwards) {
 
   take(app->run(scene, terminal));
   check(heldSnapshots >= 5);
-  take(app->tree().read(scene.table(), [&](const auto &table) {
-    check((backwards ? table.firstRow() < INITIAL_PAGE_ROWS : table.firstRow() > INITIAL_PAGE_ROWS) &&
-          table.rangeState() == RangeState::READY &&
-          table.selection() == RowId{backwards ? initialFirst - REPEAT_COUNT + 2 : initialFirst + REPEAT_COUNT, 1});
-  }));
+  check(finalReady);
+  check(!app->tree().inspect(scene.table()));
 
   if (blankSnapshots) {
     throw std::runtime_error("continuous Down beyond initial page: " + std::to_string(blankSnapshots) + "/" +

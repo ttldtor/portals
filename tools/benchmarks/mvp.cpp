@@ -226,6 +226,14 @@ public:
     return scene_.prepare(app, size);
   }
 
+  bool usesPreparedLayout() const noexcept override {
+    return scene_.usesPreparedLayout();
+  }
+
+  std::expected<void, TreeError> prepareViews(Application &app, const LayoutSnapshot &snapshot) override {
+    return scene_.prepareViews(app, snapshot);
+  }
+
   std::expected<bool, TreeError> input(Application &app, const InputEvent &event) override {
     quit = quit || example::quitKey(event);
 
@@ -233,14 +241,26 @@ public:
   }
 
   void stop(Application &app) override {
+    // Managed cleanup retires the table. Preserve its final observation before stop.
+    auto captured = app.tree().read(scene_.table(), [&](const auto &table) {
+      finalFirstRow = table.firstRow();
+      finalRangeState = table.rangeState();
+      finalSelection = table.selection();
+    });
+
     const auto begin = Clock::now();
 
-    scene_.stop(app);
+    scene_.stopProvider();
     providerStopNs = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - begin).count();
     providerStopped = scene_.stoppedAt().has_value();
+    scene_.stop(app);
+    take(captured);
   }
 
   CellSize viewport{120, 40};
+  std::uint64_t finalFirstRow{};
+  RangeState finalRangeState{RangeState::PENDING};
+  std::optional<RowId> finalSelection;
   std::int64_t providerStopNs{};
   bool providerStopped{}, quit{};
 
@@ -486,20 +506,19 @@ int writeResult(std::ostream &out, const Options &options, const Measurements &m
       << ",\"scheduled\":" << scene.scheduledTicks() << ",\"backlog\":" << scene.pendingTicks()
       << ",\"max_prepared_rows\":" << scene.maxPreparedRows() << ",\"pending_visible\":" << scene.pendingVisible()
       << ",\"theme\":\"" << (scene.turbo() ? "Turbo" : "Modern") << "\",\"note\":";
-  quoted(out, take(scene.note()->snapshot())->value);
+  quoted(out, take(scene.note().snapshot())->value);
   out << ",\"viewport\":{\"width\":" << terminal.finalSize.width << ",\"height\":" << terminal.finalSize.height
       << "},\"initial_viewport\":{\"width\":" << initialSize.width << ",\"height\":" << initialSize.height
       << "},\"resize_batches\":" << terminal.resizes;
-  take(app.tree().read(scene.table(), [&](const auto &table) {
-    out << ",\"first_row\":" << table.firstRow() << ",\"range_state\":" << static_cast<int>(table.rangeState())
-        << ",\"selection\":";
+  out << ",\"first_row\":" << observed.finalFirstRow
+      << ",\"range_state\":" << static_cast<int>(observed.finalRangeState) << ",\"selection\":";
 
-    if (const auto row = table.selection()) {
-      out << "{\"value\":" << row->value << ",\"generation\":" << row->generation << '}';
-    } else {
-      out << "null";
-    }
-  }));
+  if (const auto row = observed.finalSelection) {
+    out << "{\"value\":" << row->value << ",\"generation\":" << row->generation << '}';
+  } else {
+    out << "null";
+  }
+
   const auto aggregate = scene.aggregate();
 
   out << ",\"ohlc\":{\"open\":" << aggregate.open << ",\"high\":" << aggregate.high << ",\"low\":" << aggregate.low

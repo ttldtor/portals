@@ -7,7 +7,7 @@
 #include <format>
 #include <portals/chart.hpp>
 #include <portals/grid.hpp>
-#include <portals/line_edit.hpp>
+#include <portals/managed.hpp>
 #include <portals/style.hpp>
 #include <portals/virtual_table.hpp>
 #include <ranges>
@@ -120,24 +120,30 @@ inline std::expected<void, SchedulerError> forwardLatest(const Publisher<ModelSn
 class Scene final : public ApplicationScene {
 public:
   Scene(Application &app, Options options)
-      : app_(app), options_(options), styles_(app.tree()), scope_(take(app.scheduler().makeScope())),
-        started_(app.now()) {
+      : app_(app), options_(options), managed_(take(ManagedScene::create(app))),
+        scope_(take(app.scheduler().makeScope())), started_(app.now()) {
     auto &tree = app.tree();
-    grid_ = take(tree.emplace<Grid>(app.root()));
-    title_ = take(tree.emplace<Label>(
+    grid_ = take(managed_->emplace<Grid>(managed_->root()));
+    title_ = take(managed_->emplace<Label>(
       grid_, text(options.ascii ? "Portals | Tab focus | arrows select/scroll | F2 theme | F10 quit"
                                 : "Portals \xe7\x95\x8c e\xcc\x81 | Tab focus | F2 theme | F10 quit")));
-    editor_ = take(tree.emplace<LineEdit>(grid_));
-    inspect_ = take(tree.emplace<Button>(grid_, text("Inspect (unchanged)")));
-    status_ = take(tree.emplace<Label>(grid_, text("Starting market")));
-    name_ = take(Property<std::string>::create(tree, grid_, "Market note", Invalidation::PAINT));
-    editBinding_ = take(bindLineEdit(tree, app.router(), editor_, name_, [](LineEditResult) {
+    editor_ = take(managed_->emplace<LineEdit>(grid_));
+    inspect_ = take(managed_->emplace<Button>(grid_, text("Inspect (unchanged)")));
+    status_ = take(managed_->emplace<Label>(grid_, text("Starting market")));
+    name_ = take(managed_->state<std::string>("Market note"));
+    take(managed_->bind(editor_, name_));
+    take(managed_->onClick(inspect_, [this]() -> std::expected<void, TreeError> {
+      auto value = name_.snapshot();
+
+      if (!value) {
+        return std::unexpected(value.error());
+      }
+
+      auto result = name_.set((*value)->value);
+
+      return result ? std::expected<void, TreeError>{} : std::unexpected(result.error());
     }));
-    inspectBinding_ = take(bindButton(app.router(), inspect_, [this] {
-      take(name_->set(take(name_->snapshot())->value));
-    }));
-    auto initial = snapshot();
-    model_ = take(Model<Quote>::create(tree, grid_, initial));
+    model_ = take(managed_->model<Quote>(snapshot()));
     const std::array<TableColumn<Quote>, 5> columns{{{{1, 1},
                                                       text("Instrument"),
                                                       13,
@@ -168,7 +174,10 @@ public:
     VirtualTableOptions tableOptions;
     tableOptions.overscan_rows = 2;
     table_ =
-      take(tree.emplace<VirtualTable<Quote>>(grid_, take(model_->openRange()), std::span(columns), tableOptions));
+      take(managed_->virtualTable(grid_, model_, columns, tableOptions, {},
+                                  [this](const ModelFrame<Quote> &pin, const std::optional<ModelRequest<Quote>> &work) {
+                                    return tablePrepared(pin, work);
+                                  }));
 
     ChartOptions chartOptions;
 
@@ -177,21 +186,30 @@ public:
     chartOptions.glyph_set = options.ascii ? ChartGlyphSet::ASCII : ChartGlyphSet::BOX_DRAWING;
     chartOptions.candle_gap = 1;
 
-    chart_ = take(tree.emplace<Chart<Quote>>(
-      grid_, take(model_->openRange()),
+    chart_ = take(managed_->chart(
+      grid_, model_,
       [](const Quote &quote) -> std::optional<Ohlc> {
         return quote.prices;
       },
-      chartOptions));
-    tableBinding_ = take(bindVirtualTable(app.router(), tree, table_));
+      chartOptions,
+      [this]() -> std::expected<std::uint64_t, TreeError> {
+        return firstRow_;
+      },
+      [this](const ModelFrame<Quote> &pin, const std::optional<ModelRequest<Quote>> &work) {
+        return chartPrepared(pin, work);
+      }));
     take(app.router().setFocus(table_));
-    take(styles_.bind(title_, {.type = "Label"}));
-    take(styles_.bind(editor_, {.type = "LineEdit"}));
-    take(styles_.bind(inspect_, {.type = "Button"}));
-    take(styles_.bind(status_, {.type = "Label"}));
-    take(styles_.bind(table_, {.type = "Table"}));
-    take(styles_.bind(chart_, {.type = "Chart"}));
-    take(styles_.replace(modernTheme()));
+    take(managed_->theme(modernTheme()));
+
+    GridOptions grid;
+    const AxisSize flexible{.preferred = 0, .mode = SizeMode::FLEX};
+    const AxisSize header{.preferred = 1, .maximum = 1, .mode = SizeMode::FIXED};
+
+    grid.columns = {flexible};
+    grid.rows = {header, header, header, header, flexible, flexible};
+    grid.cells = {{title_.id(), 0, 0},  {editor_.id(), 1, 0}, {inspect_.id(), 2, 0},
+                  {status_.id(), 3, 0}, {table_.id(), 4, 0},  {chart_.id(), 5, 0}};
+    take(setGridOptions(tree, grid_, grid));
     ingress_ = take(app.scheduler().connect<ModelSnapshot<Quote>>(
       scope_,
       [this](auto value) {
@@ -206,56 +224,16 @@ public:
     schedule();
   }
 
+  bool usesPreparedLayout() const noexcept override {
+    return managed_->usesPreparedLayout();
+  }
+
   std::expected<void, TreeError> prepare(Application &app, CellSize size) override {
-    const auto body = std::max(0, size.height - HEADER_ROWS);
-    const CellSize tableSize{size.width, (body + 1) / 2};
-    const CellSize chartSize{size.width, body / 2};
+    return managed_->prepare(app, size);
+  }
 
-    if (!lastSize_ || *lastSize_ != size) {
-      GridOptions grid;
-      grid.columns = {fixed(size.width)};
-      grid.rows = {fixed(std::min(size.height, 1)),
-                   fixed(std::clamp(size.height - 1, 0, 1)),
-                   fixed(std::clamp(size.height - 2, 0, 1)),
-                   fixed(std::clamp(size.height - 3, 0, 1)),
-                   fixed(tableSize.height),
-                   fixed(chartSize.height)};
-      grid.cells = {{title_.id(), 0, 0},  {editor_.id(), 1, 0}, {inspect_.id(), 2, 0},
-                    {status_.id(), 3, 0}, {table_.id(), 4, 0},  {chart_.id(), 5, 0}};
-      take(setGridOptions(app.tree(), grid_, grid));
-      lastSize_ = size;
-    }
-
-    const auto focused = take(app.router().focused());
-    take(editBinding_->sync(focused));
-    take(syncControl(app.tree(), inspect_, focused));
-    // Exactly one model pin feeds both views. Each preparation retains the pin and
-    // its own immutable range through Application's following layout/paint frame.
-    const auto pin = take(model_->pin());
-    const auto base = take(pin.read({0, 1}));
-    const auto bar = base.rows().empty() ? aggregate() : base.rows()[0].value.prices;
-    const auto tableWork = take(prepareVirtualTable(app.tree(), table_, pin, tableSize));
-    std::uint64_t first{};
-    take(app.tree().read(table_, [&](const auto &table) {
-      first = table.firstRow();
-      maxPreparedRows_ = std::max(maxPreparedRows_, table.preparedRange().count);
-      pendingVisible_ = table.rangeState() == RangeState::PENDING;
-    }));
-    const auto chartWork = take(prepareChart(app.tree(), chart_, pin, chartSize, first));
-    accept(0, tableWork, bar);
-    accept(1, chartWork, bar);
-    std::uint64_t chartRevision{};
-    take(app.tree().read(chart_, [&](const auto &chart) {
-      chartRevision = chart.dataRevision();
-    }));
-    coherent_ = coherent_ && chartRevision == pin.dataRevision();
-    lastRevision_ = pin.dataRevision();
-    take(setControlText(
-      app.tree(), status_,
-      text(std::format("{} ticks | rev {} | {} rows | {} | {}", ticks_, lastRevision_, options_.rows,
-                       pendingVisible_ ? "range loading" : "range ready", turbo_ ? "Turbo" : "Modern"))));
-
-    return {};
+  std::expected<void, TreeError> prepareViews(Application &app, const LayoutSnapshot &layout) override {
+    return managed_->prepareViews(app, layout);
   }
 
   std::expected<bool, TreeError> input(Application &app, const InputEvent &event) override {
@@ -267,7 +245,7 @@ public:
 
     if (const auto *key = std::get_if<KeyEvent>(&event); key && key->key == InputKey::F2) {
       turbo_ = !turbo_;
-      take(styles_.replace(turbo_ ? turboTheme() : modernTheme()));
+      take(managed_->theme(turbo_ ? turboTheme() : modernTheme()));
 
       return true;
     }
@@ -275,7 +253,15 @@ public:
     return false;
   }
 
-  void stop(Application &) override {
+  /** @brief Cancel the synchronous provider once, independently of managed UI cleanup.
+   * This boundary lets the benchmark measure provider cancellation without tree teardown.
+   * Call on the application's UI thread; subsequent calls preserve the first stop time.
+   */
+  void stopProvider() {
+    if (stoppedAt_) {
+      return;
+    }
+
     take(timer_.disconnect());
 
     for (auto &slot : requests_) {
@@ -286,6 +272,11 @@ public:
 
     pendingLatest_.reset();
     stoppedAt_ = app_.now();
+  }
+
+  void stop(Application &app) override {
+    stopProvider();
+    managed_->stop(app);
   }
 
   std::uint64_t pendingTicks() const noexcept {
@@ -328,7 +319,7 @@ public:
     return turbo_;
   }
 
-  const std::shared_ptr<Property<std::string>> &note() const noexcept {
+  const ManagedState<std::string> &note() const noexcept {
     return name_;
   }
 
@@ -337,7 +328,6 @@ public:
   }
 
 private:
-  static constexpr std::int32_t HEADER_ROWS = 4;
   static constexpr std::uint64_t PROVIDER_CADENCE_MS = 10;
   static constexpr std::size_t INITIAL_PAGE_ROWS = 256;
   static constexpr std::size_t PREFETCH_ROWS = INITIAL_PAGE_ROWS / 2;
@@ -350,8 +340,49 @@ private:
     bool acquired{};
   };
 
-  static AxisSize fixed(std::int32_t extent) {
-    return {.minimum = extent, .preferred = extent, .maximum = extent, .mode = SizeMode::FIXED};
+  std::expected<void, TreeError> tablePrepared(const ModelFrame<Quote> &pin,
+                                               const std::optional<ModelRequest<Quote>> &work) {
+    auto read = app_.tree().read(table_, [&](const auto &table) {
+      firstRow_ = table.firstRow();
+      maxPreparedRows_ = std::max(maxPreparedRows_, table.preparedRange().count);
+      pendingVisible_ = table.rangeState() == RangeState::PENDING;
+    });
+
+    if (!read) {
+      return read;
+    }
+
+    auto base = pin.read({0, 1});
+
+    if (!base) {
+      return std::unexpected(base.error());
+    }
+
+    // The chart callback follows this table callback and uses the same immutable pin.
+    preparedAggregate_ = base->rows().empty() ? aggregate() : base->rows()[0].value.prices;
+    accept(0, work, preparedAggregate_);
+
+    return {};
+  }
+
+  std::expected<void, TreeError> chartPrepared(const ModelFrame<Quote> &pin,
+                                               const std::optional<ModelRequest<Quote>> &work) {
+    accept(1, work, preparedAggregate_);
+
+    auto read = app_.tree().read(chart_, [&](const auto &chart) {
+      coherent_ = coherent_ && chart.dataRevision() == pin.dataRevision();
+    });
+
+    if (!read) {
+      return read;
+    }
+
+    lastRevision_ = pin.dataRevision();
+
+    return setControlText(
+      app_.tree(), status_,
+      text(std::format("{} ticks | rev {} | {} rows | {} | {}", ticks_, lastRevision_, options_.rows,
+                       pendingVisible_ ? "range loading" : "range ready", turbo_ ? "Turbo" : "Modern")));
   }
 
   GraphemeText text(std::string_view value) const {
@@ -399,7 +430,7 @@ private:
   }
 
   void forward() {
-    auto result = forwardLatest(model_->publisher(), pendingLatest_);
+    auto result = forwardLatest(take(model_.publisher()), pendingLatest_);
 
     if (!result && result.error() != SchedulerError::WOULD_BLOCK) {
       take(std::move(result));
@@ -474,7 +505,7 @@ private:
 
   Application &app_;
   Options options_;
-  StyleEngine styles_;
+  std::unique_ptr<ManagedScene> managed_;
   UiScope scope_;
   Subscription timer_;
   SchedulerConnection<ModelSnapshot<Quote>> ingress_;
@@ -484,15 +515,14 @@ private:
   Node<Button> inspect_;
   Node<VirtualTable<Quote>> table_;
   Node<Chart<Quote>> chart_;
-  std::shared_ptr<Property<std::string>> name_;
-  std::unique_ptr<Model<Quote>> model_;
-  std::optional<LineEditBinding> editBinding_;
-  ActionBinding tableBinding_, inspectBinding_;
+  ManagedState<std::string> name_;
+  ManagedModel<Quote> model_;
   std::shared_ptr<const ModelSnapshot<Quote>> pendingLatest_;
   std::array<RequestSlot, 2> requests_;
   OhlcBucket bucket_;
+  Ohlc preparedAggregate_{};
   std::uint64_t started_, ticks_{}, lastRevision_{}, scheduledTicks_{};
-  std::optional<CellSize> lastSize_;
+  std::uint64_t firstRow_{};
   std::optional<SchedulerTime> stoppedAt_;
   std::size_t maxPreparedRows_{};
   bool coherent_{true}, pendingVisible_{}, turbo_{}, retrySnapshot_{};

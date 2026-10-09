@@ -1,32 +1,36 @@
 # Managed controls {#managed-controls}
 
 `<portals/managed.hpp>` adds `ManagedScene`, a lifecycle owner for ordinary
-controls and custom widgets. It uses the existing `Application`, `WidgetTree`,
-properties, bindings, router and style engine. The low-level APIs remain
-available. This P1.1 layer builds nodes imperatively once; it does not introduce
-an owning description DSL, reconciliation, a second widget tree, or automatic
-preparation of virtual lists, tables and charts.
+controls, custom widgets and opt-in virtual views. It uses the existing
+`Application`, `WidgetTree`, properties, bindings, router and style engine. The low-level APIs remain
+available. Nodes can be mounted imperatively or through the separate
+[declarative composition API](declarative-ui.md). Managed virtual factories add
+automatic preparation of lists, tables and charts without introducing
+reconciliation, a second widget tree or another runtime.
 
 ## Ownership and execution
 
 ```mermaid
 flowchart TB
   accTitle: Managed control ownership
-  accDescr: Application owns core services and outlives ManagedScene, which borrows it. WidgetTree owns widgets. ManagedScene retains its subtree identity, registrations and properties; ManagedState handles are weak observers.
+  accDescr: Application owns core services and outlives ManagedScene, which borrows it. WidgetTree owns widgets. ManagedScene retains its subtree identity, registrations, properties and models. ManagedState and ManagedModel handles are weak observers.
   app["Application<br/>UI thread; outlives the scene"] --> tree["WidgetTree<br/>Owns concrete widgets"]
   app --> services[EventRouter and Scheduler]
   app -. borrowed by .-> scene[ManagedScene]
   scene --> root[Subtree identity]
   scene --> registrations["Binding, presentation<br/>and style registrations"]
   scene --> properties[UI-owned Property values]
+  scene --> models["UI-owned models<br/>One pin per model per frame"]
   handles["ManagedState&lt;T&gt;"] -. weak observer .-> properties
+  modelHandles["ManagedModel&lt;T&gt;"] -. weak observer .-> models
 ```
 
 Create an `Application`, then `ManagedScene::create(application, options)`. The
-optional `ManagedOptions` sets positive `maxNodes` (4096 by default) and
-`maxStates` (256 by default) limits. Node entries include removed registrations
-until the next preparation prunes them; state owners remain until scene
-destruction. Exceeding either budget returns a typed `TreeError::NODE_LIMIT`.
+optional `ManagedOptions` sets positive `maxNodes` (4096 by default),
+`maxStates` (256 by default) and `maxModels` (64 by default) limits. Node entries
+include removed registrations until the next preparation prunes them; state
+owners remain until scene destruction, while model owners remain until close.
+Exceeding an owner budget returns a typed `TreeError::NODE_LIMIT`.
 Add a `Column`, `Row` or custom layout below `scene.root()`, and create controls with
 `scene.emplace<T>(parent, arguments...)`. The returned `Node<T>` remains the
 existing checked observer. Concrete custom types may be `final`; no additional
@@ -49,8 +53,9 @@ The `Application` still supplies options, width policy and the injected clock.
 The terminal overload supports the same deterministic replay contract as
 `Application::run`; no native terminal is required for tests.
 
-Normal stop disconnects scene registrations and removes its subtree. The scene
-retains properties until destruction so the caller can read final snapshots.
+Normal stop disconnects scene registrations, removes its subtree and destroys
+owned models. The scene retains properties until destruction so the caller can
+read final property snapshots. Model handles instead report `CLOSED` after stop.
 Writes after stop fail because the invalidation target is stale. After scene
 destruction, state operations on the creating UI thread return
 `TreeError::CLOSED`; wrong-thread operations still return `WRONG_THREAD` before
@@ -108,8 +113,42 @@ Register a custom event handler with `onEvent(node, callback)`, returning
 receives the concrete widget and the recovered focus observer. It reads domain
 state, updates retained presentation when needed and requests the appropriate
 invalidation. The scene invokes it; the application does not manually call it
-before each frame. Custom preparation is not an automatic virtual-view geometry
-protocol. Painting must still consume only prepared presentation.
+before each frame. Custom `onPrepare` runs before layout and does not supply
+virtual-view geometry. Use the dedicated virtual factories for automatic
+preparation from the arranged size. Painting must still consume only prepared
+presentation.
+
+## Managed virtual views
+
+`model<T>(initialSnapshot, options)` creates an existing `Model<T>` owned by the
+scene and returns a weak `ManagedModel<T>`. The handle exposes `publisher()` on
+UI so provider code can copy the existing worker-safe publication endpoint.
+Snapshots and rows must satisfy the immutable model contract. Handles copied
+outside the scene do not extend model ownership, and models cannot be shared
+between managed scenes through these factories.
+
+`virtualList`, `virtualTable` and `chart` accept that handle, create independent
+range consumers, and register preparation plus the standard `List`, `Table` or
+`Chart` style target. Lists and tables also own their standard input bindings.
+No per-view token, manual style registration, pin or size calculation is needed.
+The usual `style()` and `theme()` operations remain available for customization.
+
+The scene pins each model once during ordinary dirty-frame preparation and uses
+that pin for every registered view and bounded layout retry. An optional provider
+handler receives borrowed frame/request arguments after each successful view
+preparation, in registration order. Copy pending requests before retaining them;
+provider scheduling and rejected-completion retry remain application policy.
+A missing handler with pending work reports `PREPARE / INVALID_ARGUMENT` and
+cancels the unowned request. Do not mutate the managed registry or dispatch the
+scheduler from a preparation handler.
+
+Hiding cancels range work; disabling keeps preparation but suppresses input;
+removal retires the consumer. Closing the scene destroys model owners and closes
+their endpoints. A factory failure removes its attempted child, preserving
+earlier children. The [virtual preparation guide](virtual-preparation.md)
+describes callback ordering, lifetime, failures and the complete installed
+before/after programs. Explicit `ApplicationScene` hooks and low-level preparation
+helpers remain supported.
 
 ## Errors and partial construction
 

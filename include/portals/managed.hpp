@@ -4,7 +4,9 @@
 
 #include <portals/application.hpp>
 #include <portals/line_edit.hpp>
+#include <portals/managed_model.hpp>
 #include <portals/style.hpp>
+#include <portals/virtual_preparation.hpp>
 
 namespace portals {
 
@@ -51,6 +53,7 @@ template <class T> using ManagedPrepareHandler = std::function<std::expected<voi
 struct ManagedOptions {
   std::size_t maxNodes{4096}; ///< Maximum retained entries, including removals pending next preparation.
   std::size_t maxStates{256}; ///< Maximum scene-owned properties; they live until scene destruction.
+  std::size_t maxModels{64};  ///< Maximum scene-owned models; they live until close().
 };
 
 /** @brief Weak UI handle to a scene-owned Property, never an owning alias.
@@ -388,6 +391,75 @@ public:
   std::expected<void, ManagedError>
   onInput(std::function<std::expected<bool, ManagedError>(const InputEvent &)> callback);
 
+  /** @brief Create a scene-owned model and a weak typed UI handle.
+   * @tparam T Immutable domain row satisfying Model<T>'s provider contract.
+   * @param initial Non-null immutable initial snapshot, retained by the model.
+   * @param options Positive existing model range, consumer and work limits.
+   * @return Handle or original allocation/validation error in STATE phase.
+   */
+  template <class T>
+  std::expected<ManagedModel<T>, ManagedError> model(std::shared_ptr<const ModelSnapshot<T>> initial,
+                                                     ModelOptions options = {});
+
+  /** @brief Mount a table with owned range, input binding, style and automatic preparation.
+   * @tparam T Immutable model row accepted by the owning column delegates.
+   * @param parent Managed parent; failure removes only the attempted child.
+   * @param model Model belonging to this scene; no owner or pin escapes.
+   * @param columns Column descriptions copied by the table.
+   * @param options Existing table configuration, validated by preparation.
+   * @param policy Existing layout policy for the table.
+   * @param prepared Optional callback after each preparation, including retries; empty rejects pending work with
+   * INVALID_ARGUMENT.
+   * @return Observing node or typed error; standard input semantics are preserved.
+   */
+  template <class T>
+  std::expected<Node<VirtualTable<T>>, ManagedError>
+  virtualTable(Node<Widget> parent, ManagedModel<T> model,
+               std::type_identity_t<std::span<const TableColumn<T>>> columns, VirtualTableOptions options = {},
+               SizePolicy policy = {}, std::type_identity_t<ManagedViewHandler<T>> prepared = {});
+
+  /** @brief Mount a list with owned range, input binding, style and automatic preparation.
+   * @tparam T Immutable row accepted by the owning text delegate.
+   * @param parent Managed parent; failure removes only the attempted child.
+   * @param model Model belonging to this scene.
+   * @param delegate Owning row formatter, invoked only for visible rows.
+   * @param options Existing list configuration, validated by preparation.
+   * @param policy Existing layout policy for the list.
+   * @param prepared Optional callback after each preparation; empty rejects pending work with INVALID_ARGUMENT.
+   * @return Observing node or typed mount/bind error.
+   */
+  template <class T>
+  std::expected<Node<VirtualList<T>>, ManagedError>
+  virtualList(Node<Widget> parent, ManagedModel<T> model, std::type_identity_t<ManagedListFormatter<T>> delegate,
+              VirtualListOptions options = {}, SizePolicy policy = {},
+              std::type_identity_t<ManagedViewHandler<T>> prepared = {});
+
+  /** @brief Mount a chart with owned range, style and automatic preparation.
+   * @tparam T Immutable row projected into an optional OHLC value.
+   * @param parent Managed parent; failure removes only the attempted child.
+   * @param model Model belonging to this scene.
+   * @param accessor Owning OHLC projection; nullopt introduces a gap.
+   * @param options Existing chart mode, width and glyph configuration.
+   * @param first Optional source of the first row; empty means zero. Runs in registration order.
+   * @param prepared Optional callback after each preparation; empty rejects pending work with INVALID_ARGUMENT.
+   * @return Observing node or typed mount/bind error; chart adds no input binding.
+   */
+  template <class T>
+  std::expected<Node<Chart<T>>, ManagedError> chart(Node<Widget> parent, ManagedModel<T> model,
+                                                    std::type_identity_t<ManagedChartAccessor<T>> accessor,
+                                                    ChartOptions options = {}, ManagedChartOrigin first = {},
+                                                    std::type_identity_t<ManagedViewHandler<T>> prepared = {});
+
+  /// @return True while a managed virtual view requires layout-driven preparation.
+  bool usesPreparedLayout() const noexcept override;
+
+  /** @brief Prepare registered views from the pins captured by prepare(), in registration order.
+   * @param app Same application used at creation.
+   * @param snapshot Owning layout for this pass; hidden views retain cancellation semantics.
+   * @return Original TreeError; run() also preserves the managed phase and failing node.
+   */
+  std::expected<void, TreeError> prepareViews(Application &app, const LayoutSnapshot &snapshot) override;
+
   /** @param stop Optional cooperative cancellation.
    * @return Runner statistics or complete managed, runner/restoration and cleanup error.
    */
@@ -428,9 +500,18 @@ private:
     std::variant<std::monostate, ActionBinding, CheckBoxBinding, LineEditBinding> binding;
     std::function<std::expected<void, TreeError>(Node<Widget>)> sync;
     std::function<std::expected<void, TreeError>(Node<Widget>)> customSync;
+    std::function<std::expected<void, TreeError>(const LayoutSnapshot &)> viewPrepare;
     bool stylePending{};
     bool removed{};
   };
+
+  template <class T>
+  std::expected<std::shared_ptr<detail::ManagedModelSourceOf<T>>, ManagedError> modelSource(ManagedModel<T> model,
+                                                                                            Node<Widget> parent);
+
+  template <class T, class W, class Prepare>
+  std::expected<Node<W>, ManagedError> attachView(Node<W> node, std::shared_ptr<detail::ManagedModelSourceOf<T>> source,
+                                                  Prepare prepare, ManagedViewHandler<T> handler);
 
   explicit ManagedScene(Application &app, ManagedOptions options);
   static ManagedError error(ManagedPhase phase, Node<Widget> node, TreeError cause);
@@ -450,6 +531,7 @@ private:
   StyleEngine styles_;
   std::vector<std::shared_ptr<Entry>> entries_;
   std::vector<std::shared_ptr<void>> properties_;
+  std::vector<std::shared_ptr<detail::ManagedModelSource>> models_;
   std::shared_ptr<std::function<std::expected<bool, ManagedError>(const InputEvent &)>> input_;
   std::optional<ManagedError> failure_;
   std::optional<TreeError> cleanup_;
@@ -458,3 +540,5 @@ private:
   bool closed_{};
 };
 } // namespace portals
+
+#include <portals/detail/managed_views.hpp>

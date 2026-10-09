@@ -8,7 +8,7 @@ native terminal restoration or visual compatibility.
 | Program | What to try |
 | --- | --- |
 | `portals_gallery` | Declarative managed form: Tab through editor, checkbox, action and Quit; Enter commits; F2 cycles six themes. |
-| `portals_dashboard` | Synthetic market, shared table/chart model, selection and delayed virtual ranges. |
+| `portals_dashboard` | Synthetic market, managed table/chart lifecycle with one shared model, selection and delayed virtual ranges. |
 | `portals_custom_widget` | A custom final meter with a managed presentation adapter and independent immutable model; Left/Right change its level, F2 cycles themes. |
 | `portals_replay_example` | The dashboard with the built-in recorded price tape selected by default. |
 
@@ -38,12 +38,14 @@ The gallery also retains the historical `initial`, `keyboard`, `mouse` and
 
 The four adapted [Textual palettes](styles.md) change colors
 through existing style transactions. They do not reproduce Textual's complete
-widget design or introduce a CSS cascade. The dashboard/replay example still
-uses Modern/Turbo and its existing explicit virtual-view preparation.
+widget design or introduce a CSS cascade. The dashboard/replay example uses
+Modern/Turbo with managed table and chart preparation.
 
 For nested tables and charts, the [layout preparation examples](virtual-preparation.md)
-show complete before/after C++23 consumers of the installed package. These finite
-examples test automatic view extents; the interactive dashboard migration is separate.
+show complete C++23 consumers of the installed package, from explicit extents
+through layout snapshots to managed models and views. These finite examples
+compare terminal output and resize behavior. The interactive dashboard exercises
+the same managed factories with delayed provider work.
 
 ## Dashboard configuration
 
@@ -83,7 +85,8 @@ ordinal and catches up in bounded callbacks; scheduled ticks and actually genera
 claiming that ungenerated data was processed. This demo provider runs on the UI
 owner; it is not a benchmark of an independent market worker.
 
-The table and candle chart use a single provider pin per frame. Logical instruments
+The managed scene pins the shared model once per frame for both table and candle
+chart, including any bounded layout retries. Logical instruments
 share the market OHLC with a deterministic price offset. Table formatting covers
 only visible rows; preparation retains visible rows plus two overscan rows per
 side. No million-row materialization is performed. The title and editable note
@@ -116,9 +119,22 @@ initial focus and scene-level keyboard commands. The older
 `gallery.hpp` finite fixture remains for existing semantic replay tests.
 `examples/custom_widget/meter.hpp` shows an alternative immutable provider and a
 final widget whose `.onPrepare` adapter formats changed presentation before
-rendering. This custom preparation remains explicit. `examples/dashboard/dashboard.hpp`
-shows shared pin preparation and an owning `pendingLatest` slot that is cleared
-only after the model publisher accepts it. No example requires private work files.
+rendering. This custom preparation remains explicit.
+[The complete dashboard scene](../examples/dashboard/dashboard.hpp) delegates
+ordinary and virtual-view preparation to `ManagedScene`. Its managed factories
+own model ranges, input bindings and standard styles, while `Grid` determines
+the actual view extents. The scene no longer retains its own frame pin or calls
+per-view preparation helpers.
+
+Provider work remains visible in the dashboard. The table's preparation handler
+reads its first row before the chart's origin callback runs; their registration
+order keeps the chart aligned with the table. Both handlers receive the same
+borrowed frame pin and copy new requests into the existing bounded provider
+slots. The owning `pendingLatest` slot is cleared only after the model publisher
+accepts it. The provider keeps its timer, retry, cancellation and prefetch policy;
+managed preparation adds no second scheduler or cache. On stop, the scene cancels
+provider work before closing the managed subtree and model. No example requires
+private work files.
 
 For measurements, `dashboard::Options::ingressObserver` can collect bounded
 logical queue-latency samples at entry to the snapshot ingress callback. It covers

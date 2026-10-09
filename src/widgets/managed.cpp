@@ -41,7 +41,7 @@ std::expected<std::unique_ptr<ManagedScene>, ManagedError> ManagedScene::create(
     return std::unexpected(error(ManagedPhase::MOUNT, app.root(), allowed.error()));
   }
 
-  if (!options.maxNodes || !options.maxStates) {
+  if (!options.maxNodes || !options.maxStates || !options.maxModels) {
     return std::unexpected(error(ManagedPhase::MOUNT, app.root(), TreeError::INVALID_ARGUMENT));
   }
 
@@ -516,6 +516,16 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
       }
     }
 
+    for (const auto &source : models_) {
+      auto pinned = source->pin();
+
+      if (!pinned) {
+        remember(error(ManagedPhase::PREPARE, root_, pinned.error()));
+
+        return pinned;
+      }
+    }
+
     auto styled = flushStyles();
 
     if (!styled) {
@@ -534,6 +544,69 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
 
     return std::unexpected(TreeError::CALLBACK_FAILED);
   }
+}
+
+bool ManagedScene::usesPreparedLayout() const noexcept {
+  return std::ranges::any_of(entries_, [](const auto &entry) {
+    return static_cast<bool>(entry->viewPrepare);
+  });
+}
+
+std::expected<void, TreeError> ManagedScene::prepareViews(Application &app, const LayoutSnapshot &snapshot) {
+  auto allowed = boundary(ManagedPhase::PREPARE, root_);
+
+  if (!allowed) {
+    return std::unexpected(bridge(allowed.error()));
+  }
+
+  if (&app != &app_) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  struct Preparing {
+    bool &flag;
+
+    ~Preparing() {
+      flag = false;
+    }
+  } guard{preparing_};
+
+  preparing_ = true;
+
+  for (const auto &entry : entries_) {
+    if (!entry->viewPrepare) {
+      continue;
+    }
+
+    // Low-level removal from an earlier callback can retire a later sibling.
+    // Skip only retired identities; never erase an admitted callback's explicit error.
+    auto live = app_.tree().read(entry->node, [](const Widget &) {
+    });
+
+    if (!live && retired(live.error())) {
+      continue;
+    }
+
+    std::expected<void, TreeError> result = live;
+
+    try {
+      if (result) {
+        result = entry->viewPrepare(snapshot);
+      }
+    } catch (const std::bad_alloc &) {
+      result = std::unexpected(TreeError::NO_MEMORY);
+    } catch (...) {
+      result = std::unexpected(TreeError::CALLBACK_FAILED);
+    }
+
+    if (!result) {
+      remember(error(ManagedPhase::PREPARE, entry->node, result.error()));
+
+      return result;
+    }
+  }
+
+  return {};
 }
 
 std::expected<bool, TreeError> ManagedScene::input(Application &app, const InputEvent &event) {
@@ -603,6 +676,7 @@ std::expected<void, ManagedError> ManagedScene::close() {
   // Mark closed before retiring captures: their destructors may reenter application code.
   closed_ = true;
   entries_.clear();
+  models_.clear();
   input_ = {};
 
   return {};

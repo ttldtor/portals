@@ -13,6 +13,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/FinalizeDiagrams.cmake")
 set(example_sources
   tests/support/gallery_before.hpp
   examples/gallery/form.hpp
+  examples/dashboard/dashboard.hpp
   tests/package_consumer/form_declarative.cpp
   tests/package_consumer/form_before.cpp
   tests/package_consumer/form_after.cpp
@@ -20,6 +21,7 @@ set(example_sources
   tests/package_consumer/form_replay.hpp
   tests/package_consumer/virtual_before.cpp
   tests/package_consumer/virtual_after.cpp
+  tests/package_consumer/virtual_managed.cpp
   tests/package_consumer/virtual_scene.hpp
   tests/package_consumer/virtual_support.hpp
   tests/package_consumer/virtual_lifecycle.cpp)
