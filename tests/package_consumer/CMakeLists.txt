@@ -30,6 +30,15 @@ if(WIN32)
 endif()
 
 enable_testing()
+add_executable(portals_legacy_consumer legacy.cpp)
+target_link_libraries(portals_legacy_consumer PRIVATE portals::core)
+set_target_properties(portals_legacy_consumer PROPERTIES CXX_EXTENSIONS OFF)
+if(WIN32)
+  target_sources(portals_legacy_consumer PRIVATE no_dialogs.cpp)
+endif()
+add_test(NAME consumer.legacy-market-depth COMMAND portals_legacy_consumer)
+set_tests_properties(consumer.legacy-market-depth PROPERTIES TIMEOUT 15)
+
 add_test(NAME consumer.model-widget COMMAND portals_package_consumer)
 set_tests_properties(consumer.model-widget PROPERTIES TIMEOUT 15)
 

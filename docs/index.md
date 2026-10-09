@@ -29,6 +29,7 @@ before writing a form. Consult the chapters below as needed.
 | Connect state and data | [Properties](property.md), [immutable models](model.md) |
 | Display large datasets | [Layout-driven preparation](virtual-preparation.md), [virtual lists](virtual-list.md), [virtual tables](virtual-table.md), [scrolling](scroll.md), [charts](chart.md) |
 | Explain an action that did nothing | [Diagnostics](diagnostics.md), [terminal probe](terminal-probe.md) |
+| Keep an existing streaming MarketDepthModelSample building | [Minimal legacy compatibility](legacy.md) |
 
 ## Understand the core
 
@@ -63,6 +64,7 @@ maintenance and dependency notices.
   material, not the recommended first application or a stable API contract.
 - Dependency notices: [utf8proc](../vendor/utf8proc/README.md) and
   [Textual palette attribution](../vendor/textual/README.md).
+  [Private doctest dependency](../vendor/doctest/README.md) is used only by tests.
 
 ## Reading on GitHub and as HTML
 

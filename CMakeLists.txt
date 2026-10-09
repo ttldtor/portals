@@ -21,6 +21,7 @@ target_compile_definitions(portals_utf8proc PRIVATE UTF8PROC_STATIC)
 target_include_directories(portals_utf8proc PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/utf8proc")
 
 add_library(portals_core STATIC src/version.cpp src/geometry.cpp src/text.cpp src/input.cpp src/cell_buffer.cpp src/render.cpp src/render/diff.cpp src/terminal/writer.cpp src/runtime/scheduler.cpp src/runtime/application.cpp src/runtime/native_application.cpp src/runtime/diagnostics.cpp src/widgets/widget.cpp src/layout/linear.cpp src/layout/grid.cpp src/layout/overlay.cpp src/widgets/focus.cpp src/widgets/event_routing.cpp src/models/model.cpp src/widgets/basic_controls.cpp src/widgets/line_edit.cpp src/widgets/managed.cpp src/views/virtual_list.cpp src/views/virtual_table.cpp src/views/scroll.cpp src/styles/style.cpp src/styles/pss.cpp src/charts/canvas.cpp src/charts/chart.cpp)
+target_sources(portals_core PRIVATE src/terminal/legacy.cpp)
 if(WIN32)
   target_sources(portals_core PRIVATE src/terminal/windows.cpp)
 elseif(UNIX)
@@ -58,6 +59,7 @@ install(TARGETS portals_core portals_utf8proc EXPORT PortalsTargets
   ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}/$<CONFIG>"
 )
 install(DIRECTORY include/portals DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+install(FILES include/portals.hpp DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 install(EXPORT PortalsTargets FILE PortalsTargets.cmake NAMESPACE portals::
   DESTINATION "${PORTALS_INSTALL_CMAKEDIR}"
 )
@@ -128,6 +130,21 @@ if(PORTALS_BUILD_EXAMPLES)
 endif()
 
 if(PORTALS_BUILD_TESTS)
+  include("${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest/verify.cmake")
+  add_executable(portals_legacy tests/legacy.cpp)
+  target_include_directories(portals_legacy SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  target_link_libraries(portals_legacy PRIVATE portals::core)
+  portals_enable_warnings(portals_legacy)
+  add_test(NAME portals.legacy COMMAND portals_legacy)
+  if(WIN32)
+    add_executable(portals_legacy_windows tests/legacy_windows_probe.cpp)
+    target_link_libraries(portals_legacy_windows PRIVATE portals::core user32)
+    portals_enable_warnings(portals_legacy_windows)
+    add_test(NAME portals.legacy.windows-mode COMMAND portals_legacy_windows)
+    set_tests_properties(portals.legacy.windows-mode PROPERTIES TIMEOUT 15)
+  endif()
+  set_tests_properties(portals.legacy PROPERTIES TIMEOUT 15)
+
   add_executable(portals_ui tests/ui.cpp)
   target_link_libraries(portals_ui PRIVATE portals::core)
   portals_enable_warnings(portals_ui)
@@ -497,8 +514,8 @@ if(PORTALS_BUILD_DOCS)
   set(DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/docs")
 
   doxygen_add_docs(portals_docs include docs/index.md docs/development.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/scheduler.md docs/widget-tree.md docs/layout.md docs/grid.md docs/property.md docs/diagnostics.md docs/focus.md docs/model.md docs/input.md docs/terminal.md docs/terminal-probe.md docs/controls.md docs/line-edit.md docs/virtual-list.md docs/virtual-table.md docs/scroll.md docs/chart.md
-    docs/styles.md docs/managed-controls.md docs/declarative-ui.md docs/managed-performance.md docs/package.md docs/application.md docs/virtual-preparation.md docs/examples.md docs/architecture.md docs/getting-started.md docs/limitations.md docs/api-design.md experiments/module-spike/README.md fuzz/README.md
-    vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md vendor/textual/README.md
+    docs/styles.md docs/legacy.md docs/managed-controls.md docs/declarative-ui.md docs/managed-performance.md docs/package.md docs/application.md docs/virtual-preparation.md docs/examples.md docs/architecture.md docs/getting-started.md docs/limitations.md docs/api-design.md experiments/module-spike/README.md fuzz/README.md
+    vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md vendor/textual/README.md vendor/doctest/README.md
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Generate Portals API documentation"
   )
