@@ -3,12 +3,20 @@
 #pragma once
 #include "common.hpp"
 #include "options.hpp"
+#include <portals/input_match.hpp>
 #include <portals/ui.hpp>
 
 namespace gallery {
-// Application outlives the form; the scene owns its nodes, state and callbacks.
+/** @brief Interactive managed form with committed name editing and independent actions.
+ * Application must outlive the form; its scene owns nodes, state and callbacks.
+ * Enter commits the name, Tab changes focus, and Run only increments calls.
+ */
 class Form {
 public:
+  /** @param app UI-affine application which must outlive this scene and its callbacks.
+   * @param theme Initial index in example::THEME_PRESETS; invalid indices throw out_of_range.
+   * Construction owns all recipes, state and adapters; example::take reports setup failures.
+   */
   explicit Form(portals::Application &app, std::size_t theme = 0)
       : app_(app), theme_(theme), scene_(example::take(portals::ManagedScene::create(app))) {
     using namespace portals;
@@ -42,9 +50,7 @@ public:
         return true;
       }
 
-      const auto *key = std::get_if<KeyEvent>(&event);
-
-      if (key && key->action != KeyAction::RELEASE && key->key == InputKey::F2) {
+      if (keyPressed(event, InputKey::F2)) {
         const auto next = (theme_ + 1) % example::THEME_PRESETS.size();
         auto changed = scene_->theme(example::THEME_PRESETS[next].make());
 
@@ -61,10 +67,16 @@ public:
     }));
   }
 
+  /** @return Runner statistics or the original managed failure, including cleanup/restoration.
+   * Uses the native terminal and the application's owning UI thread.
+   */
   std::expected<portals::ApplicationStats, portals::ManagedError> run() {
     return scene_->run();
   }
 
+  /** @param terminal Transport borrowed for the run; the runner opens and closes it.
+   * @return Frame statistics or the original managed error and independent cleanup failure.
+   */
   std::expected<portals::ApplicationStats, portals::ManagedError> run(portals::ApplicationTerminal &terminal) {
     return scene_->run(terminal);
   }
@@ -72,8 +84,8 @@ public:
   int calls{}; ///< Observable business action count; Run deliberately changes no model.
 
 private:
-  portals::Application &app_;
-  std::size_t theme_{};
-  std::unique_ptr<portals::ManagedScene> scene_;
+  portals::Application &app_; ///< Borrowed application, outliving the scene and its callbacks.
+  std::size_t theme_{};       ///< Current preset index; updated only after successful theme application.
+  std::unique_ptr<portals::ManagedScene> scene_; ///< Owns nodes, state and scoped registrations.
 };
 } // namespace gallery

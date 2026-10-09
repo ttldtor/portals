@@ -30,6 +30,23 @@ if(WIN32)
 endif()
 
 enable_testing()
+add_executable(portals_compact_consumer compact.cpp)
+target_link_libraries(portals_compact_consumer PRIVATE portals::aggregate)
+set_target_properties(portals_compact_consumer PROPERTIES CXX_EXTENSIONS OFF)
+add_test(NAME consumer.compact-columns COMMAND portals_compact_consumer)
+foreach(example IN ITEMS gallery dashboard custom_widget)
+  add_executable(portals_installed_${example} examples/${example}/main.cpp)
+  target_link_libraries(portals_installed_${example} PRIVATE portals::core)
+  set_target_properties(portals_installed_${example} PROPERTIES CXX_EXTENSIONS OFF)
+  if(WIN32)
+    target_sources(portals_installed_${example} PRIVATE no_dialogs.cpp)
+  endif()
+endforeach()
+add_test(NAME consumer.example-gallery COMMAND portals_installed_gallery --check)
+add_test(NAME consumer.example-custom COMMAND portals_installed_custom_widget --check)
+add_test(NAME consumer.example-dashboard COMMAND portals_installed_dashboard --check --mode replay --duration-ms 200 --rows 1000)
+set_tests_properties(consumer.compact-columns consumer.example-gallery consumer.example-custom consumer.example-dashboard
+  PROPERTIES TIMEOUT 20)
 add_executable(portals_legacy_consumer legacy.cpp)
 target_link_libraries(portals_legacy_consumer PRIVATE portals::core)
 set_target_properties(portals_legacy_consumer PROPERTIES CXX_EXTENSIONS OFF)
@@ -97,7 +114,7 @@ add_test(NAME consumer.virtual-managed-equivalence
 set_tests_properties(consumer.virtual-managed-equivalence PROPERTIES TIMEOUT 30)
 
 # Identical form behavior, including virtual views and a custom final widget.
-foreach(variant IN ITEMS before after named)
+foreach(variant IN ITEMS before after named compact)
   add_executable(portals_composed_${variant} composed_${variant}.cpp)
   target_link_libraries(portals_composed_${variant} PRIVATE portals::core)
   set_target_properties(portals_composed_${variant} PROPERTIES CXX_EXTENSIONS OFF)
@@ -107,6 +124,13 @@ foreach(variant IN ITEMS before after named)
   add_test(NAME consumer.composed-${variant} COMMAND portals_composed_${variant})
   set_tests_properties(consumer.composed-${variant} PROPERTIES TIMEOUT 15)
 endforeach()
+
+add_test(NAME consumer.composed-compact-equivalence
+  COMMAND "${CMAKE_COMMAND}"
+    "-DBEFORE=$<TARGET_FILE:portals_composed_before>"
+    "-DAFTER=$<TARGET_FILE:portals_composed_compact>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_forms.cmake")
+set_tests_properties(consumer.composed-compact-equivalence PROPERTIES TIMEOUT 30)
 
 add_test(NAME consumer.composed-equivalence
   COMMAND "${CMAKE_COMMAND}"

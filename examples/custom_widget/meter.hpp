@@ -4,7 +4,8 @@
 #include "../gallery/common.hpp"
 #include "../gallery/options.hpp"
 #include <format>
-#include <portals/model.hpp>
+#include <portals/input_match.hpp>
+#include <portals/text_format.hpp>
 #include <portals/ui.hpp>
 
 namespace meter_example {
@@ -12,24 +13,11 @@ using namespace portals;
 using example::take;
 inline constexpr int MIN_LEVEL = 0;
 inline constexpr int MAX_LEVEL = 100;
+inline constexpr int INITIAL_LEVEL = 50;
 inline constexpr int LEVEL_STEP = 5;
 inline constexpr int BAR_TOP = 2;
 
-// The immutable provider stays independent of both Widget and managed composition.
-class LevelSnapshot final : public ModelSnapshot<int> {
-public:
-  LevelSnapshot(std::uint64_t revision, int value) : ModelSnapshot(revision, 1), row_{{1, 1}, value} {
-  }
-
-  ModelRows<int> read(RowRange range) const override {
-    return {RangeState::READY, std::span(&row_, 1).subspan(static_cast<std::size_t>(range.first), range.count), {}};
-  }
-
-private:
-  ModelRow<int> row_;
-};
-
-// Paint consumes retained presentation only; model reads and formatting belong to prepare.
+// Paint consumes retained presentation only; state reads and formatting belong to prepare.
 class LevelMeter final : public Widget {
 public:
   /** @param value Domain value in the inclusive MIN_LEVEL..MAX_LEVEL percent range.
@@ -40,7 +28,7 @@ public:
       return false;
     }
 
-    auto label = GraphemeText::from(std::format("Level {}% | Left/Right adjust | F2 theme | F10 quit", value));
+    auto label = formatText("Level {}% | Left/Right adjust | F2 theme | F10 quit", value);
 
     if (!label) {
       return std::unexpected(TreeError::INVALID_ARGUMENT);
@@ -86,35 +74,27 @@ private:
 
 class MeterScene {
 public:
+  /** @param app UI-affine application that must outlive this scene.
+   * @param theme Initial index into example::THEME_PRESETS; invalid indices throw.
+   */
   explicit MeterScene(Application &app, std::size_t theme = 0)
       : app_(app), theme_(theme), scene_(take(ManagedScene::create(app))) {
+    level_ = take(scene_->state(INITIAL_LEVEL));
+
     meter_ =
       take(ui::mount(*scene_, ui::custom<LevelMeter>()
                                 .style({.type = "Meter"})
                                 .onPrepare([&](LevelMeter &meter, Node<Widget>) -> std::expected<void, TreeError> {
-                                  auto pin = model_->pin();
-
-                                  if (!pin) {
-                                    return std::unexpected(pin.error());
-                                  }
-
-                                  auto value = pin->read({0, 1});
-
-                                  if (!value) {
-                                    return std::unexpected(value.error());
-                                  }
-
-                                  auto changed = meter.prepare(value->rows()[0].value);
-
-                                  if (!changed) {
-                                    return std::unexpected(changed.error());
-                                  }
-
-                                  return *changed ? app_.tree().invalidate(meter_, Invalidation::PAINT)
-                                                  : std::expected<void, TreeError>{};
+                                  return level_.snapshot()
+                                    .and_then([&](const auto &snapshot) {
+                                      return meter.prepare(snapshot->value);
+                                    })
+                                    .and_then([&](bool changed) -> std::expected<void, TreeError> {
+                                      return changed ? app_.tree().invalidate(meter_, Invalidation::PAINT)
+                                                     : std::expected<void, TreeError>{};
+                                    });
                                 })));
 
-    model_ = take(Model<int>::create(app.tree(), meter_, std::make_shared<const LevelSnapshot>(revision_, level_)));
     take(scene_->theme(example::THEME_PRESETS.at(theme_).make()));
     take(scene_->onInput([&](const InputEvent &event) -> std::expected<bool, ManagedError> {
       if (example::quitKey(event)) {
@@ -123,13 +103,7 @@ public:
         return true;
       }
 
-      const auto *key = std::get_if<KeyEvent>(&event);
-
-      if (!key || key->action == KeyAction::RELEASE) {
-        return false;
-      }
-
-      if (key->key == InputKey::F2) {
+      if (keyPressed(event, InputKey::F2)) {
         const auto next = (theme_ + 1) % example::THEME_PRESETS.size();
         auto changed = scene_->theme(example::THEME_PRESETS[next].make());
 
@@ -142,45 +116,43 @@ public:
         return true;
       }
 
-      if (key->key != InputKey::LEFT && key->key != InputKey::RIGHT) {
+      if (!keyPressed(event, {InputKey::LEFT, InputKey::RIGHT})) {
         return false;
       }
 
-      const auto next =
-        std::clamp(level_ + (key->key == InputKey::RIGHT ? LEVEL_STEP : -LEVEL_STEP), MIN_LEVEL, MAX_LEVEL);
-      auto published = model_->publisher().publish(std::make_shared<const LevelSnapshot>(revision_ + 1, next));
-
-      if (!published) {
-        return std::unexpected(ManagedError{.phase = ManagedPhase::INPUT,
-                                            .node = meter_.id(),
-                                            .cause = ApplicationError{ApplicationPhase::INPUT, published.error(), {}},
-                                            .application = {},
-                                            .cleanup = {}});
-      }
-
-      level_ = next;
-      ++revision_;
-
-      return true;
+      const auto step = keyPressed(event, InputKey::RIGHT) ? LEVEL_STEP : -LEVEL_STEP;
+      return level_.snapshot()
+        .and_then([&](const auto &current) {
+          return level_.set(std::clamp(current->value + step, MIN_LEVEL, MAX_LEVEL));
+        })
+        .transform([](const auto &) {
+          return true;
+        })
+        .transform_error([&](TreeError cause) {
+          return ManagedError{
+            .phase = ManagedPhase::INPUT, .node = meter_.id(), .cause = cause, .application = {}, .cleanup = {}};
+        });
     }));
   }
 
+  /** @return Runner statistics or the typed managed error, after native terminal cleanup. */
   std::expected<ApplicationStats, ManagedError> run() {
     return scene_->run();
   }
 
+  /** @param terminal Borrowed terminal opened and closed by the managed runner.
+   * @return Runner statistics or the typed managed error, including cleanup failures.
+   */
   std::expected<ApplicationStats, ManagedError> run(ApplicationTerminal &terminal) {
     return scene_->run(terminal);
   }
 
 private:
   Application &app_;
-  int level_{50};
-  std::uint64_t revision_{1};
+  ManagedState<int> level_;
   std::size_t theme_{};
   Node<LevelMeter> meter_;
-  std::unique_ptr<Model<int>> model_;
-  // Destroy captured adapters before their borrowed model and application references.
+  // Destroy captured adapters before their state handle and application reference.
   std::unique_ptr<ManagedScene> scene_;
 };
 } // namespace meter_example

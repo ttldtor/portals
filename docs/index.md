@@ -28,6 +28,7 @@ before writing a form. Consult the chapters below as needed.
 | Apply colors and themes | [Styles and themes](styles.md) |
 | Connect state and data | [Properties](property.md), [immutable models](model.md) |
 | Display large datasets | [Layout-driven preparation](virtual-preparation.md), [virtual lists](virtual-list.md), [virtual tables](virtual-table.md), [scrolling](scroll.md), [charts](chart.md) |
+| Write shorter checked text and typed columns | [Compact examples](compact-examples.md) |
 | Explain an action that did nothing | [Diagnostics](diagnostics.md), [terminal probe](terminal-probe.md) |
 | Keep an existing streaming MarketDepthModelSample building | [Minimal legacy compatibility](legacy.md) |
 

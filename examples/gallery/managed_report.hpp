@@ -5,8 +5,11 @@
 #include <portals/managed.hpp>
 
 namespace example {
-// Render diagnostics only after run has restored the terminal. Keep the typed
-// managed cause available rather than collapsing it into a generic exception.
+/** @brief Report typed managed failures after the runner has restored the terminal.
+ * @param result Borrowed result with original cause and independent cleanup/restoration errors.
+ * @return Zero on success, one on failure; diagnostics go to stderr only on failure.
+ * Stream exceptions propagate if enabled by the caller.
+ */
 inline int report(const std::expected<portals::ApplicationStats, portals::ManagedError> &result) {
   if (result) {
     return 0;

@@ -4,6 +4,7 @@
 
 #include <portals/virtual_table.hpp>
 
+#include <array>
 #include <concepts>
 #include <functional>
 #include <type_traits>
@@ -15,6 +16,23 @@ struct TableColumnOptions {
   ColumnId id;           ///< Nonzero unique value/generation pair within the table configuration.
   GraphemeText header;   ///< Owning header text using the table's width policy.
   std::int32_t width{1}; ///< Positive width in terminal cells; columns remain in configured order.
+};
+
+/** @brief Owning column recipe whose identity is assigned by tableColumns.
+ * @tparam T Immutable record borrowed by the formatter; never copied by the recipe.
+ * Use for a fixed schema. Assemble once, then retain/reorder the returned columns;
+ * rebuilding recipes in a different order creates a different positional schema.
+ */
+template <class T> struct TableColumnSpec {
+  std::string header;                            ///< Owning UTF-8 caption, validated when the schema is assembled.
+  std::int32_t width{1};                         ///< Width in terminal cells, validated by table preparation.
+  std::function<GraphemeText(const T &)> format; ///< Owning callback; reference captures remain borrowed.
+};
+
+/** @brief Owning fixed-schema caption and sizing, without identity bookkeeping. */
+struct ColumnCaption {
+  std::string header;    ///< UTF-8 copied into the schema; captions may change with locale.
+  std::int32_t width{1}; ///< Positive width in terminal cells, validated by table preparation.
 };
 
 /** @brief An owning copyable callable that projects a borrowed immutable row.
@@ -64,5 +82,169 @@ TableColumn<T> tableColumn(TableColumnOptions options, Projection projection, Fo
           [projection = std::move(projection), formatter = std::move(formatter)](const T &row) mutable -> GraphemeText {
             return std::invoke(formatter, std::invoke(projection, row));
           }};
+}
+
+/** @brief Deduce the domain record from a data or member-function pointer.
+ * @tparam T Record owning the member; rows are borrowed as const T &.
+ * @tparam Member Member type, invocable with the immutable record through std::invoke.
+ * @tparam Formatter Copyable formatter returning exactly owning GraphemeText.
+ * @param options Explicit stable identity, owning header and width in cells.
+ * @param member Member pointer owned by value; no record is copied.
+ * @param formatter Owning callback following the original ColumnFormatter contract.
+ * @return Existing typed column with unchanged validation and callback behavior.
+ */
+template <class T, class Member, class Formatter>
+  requires ColumnFormatter<T, Member T::*, Formatter>
+TableColumn<T> tableColumn(TableColumnOptions options, Member T::*member, Formatter formatter) {
+  return tableColumn<T, Member T::*, Formatter>(std::move(options), member, std::move(formatter));
+}
+
+/** @brief Construct typed metadata from UTF-8 without unchecked header extraction.
+ * @param id Explicit nonzero stable column identity; validation remains with the table.
+ * @param header UTF-8 bytes borrowed only for this call, copied on success.
+ * @param width Column width in cells; validated by the existing table preparation.
+ * @param policy Display policy matching the receiving table.
+ * @return Owning column options or the unchanged header TextError.
+ * @throws std::bad_alloc If independent text storage cannot be allocated.
+ */
+inline std::expected<TableColumnOptions, TextError> columnOptions(ColumnId id, std::string_view header,
+                                                                  std::int32_t width = 1, WidthPolicy policy = {}) {
+  auto text = GraphemeText::from(header, policy);
+
+  if (!text) {
+    return std::unexpected(text.error());
+  }
+
+  return TableColumnOptions{id, std::move(*text), width};
+}
+
+/** @brief Deduce a field's record and validate a plain UTF-8 header.
+ * @tparam T Record type inferred from the member pointer; borrowed immutable rows.
+ * @tparam Member Projected member type, satisfying ColumnProjection.
+ * @tparam Formatter Copyable exact GraphemeText formatter for that projection.
+ * @param id Explicit stable identity, retained unchanged.
+ * @param header Header bytes borrowed during construction and owned on success.
+ * @param member Owning member pointer; no row copies or reads during construction.
+ * @param formatter Callback owned by value; borrowed captures require external lifetime.
+ * @param width Width in terminal cells, validated during table preparation.
+ * @param policy Width policy used for the owning header; formatter text must match it.
+ * @return Existing TableColumn<T> or the original header TextError.
+ * Callback construction/allocation exceptions propagate, as in the original factory.
+ */
+template <class T, class Member, class Formatter>
+  requires ColumnFormatter<T, Member T::*, Formatter>
+std::expected<TableColumn<T>, TextError> tableColumn(ColumnId id, std::string_view header, Member T::*member,
+                                                     Formatter formatter, std::int32_t width = 1,
+                                                     WidthPolicy policy = {}) {
+  auto options = columnOptions(id, header, width, policy);
+
+  if (!options) {
+    return std::unexpected(options.error());
+  }
+
+  return tableColumn<T, Member T::*, Formatter>(std::move(*options), member, std::move(formatter));
+}
+
+/** @brief Describe a fixed-schema column without exposing identity bookkeeping.
+ * @tparam T Borrowed immutable row type, explicit for lambda projections.
+ * @tparam Projection Copyable projection satisfying ColumnProjection.
+ * @tparam Formatter Copyable exact GraphemeText formatter for the projected value.
+ * @param header UTF-8 caption copied now and validated by tableColumns.
+ * @param projection Owned callable; projection results borrow only for invocation.
+ * @param formatter Owned formatter using the eventual table's width policy.
+ * @param width Width in terminal cells; validated by the retained table.
+ * @return Owning recipe, with no ID until assembled; construction may allocate.
+ */
+template <class T, class Projection, class Formatter>
+  requires ColumnFormatter<T, Projection, Formatter>
+TableColumnSpec<T> tableColumn(std::string_view header, Projection projection, Formatter formatter,
+                               std::int32_t width = 1) {
+  return {std::string(header), width,
+          [projection = std::move(projection), formatter = std::move(formatter)](const T &row) mutable -> GraphemeText {
+            return std::invoke(formatter, std::invoke(projection, row));
+          }};
+}
+
+/** @brief Infer a fixed-schema record from a member pointer, without explicit IDs.
+ * @tparam T Immutable row type inferred from its member pointer.
+ * @tparam Member Data or const member-function type accepted through std::invoke.
+ * @tparam Formatter Copyable exact GraphemeText formatter.
+ * @param header Caption copied now, validated during tableColumns assembly.
+ * @param member Owned member pointer; no domain row is copied.
+ * @param formatter Owned callback; borrowed captures need external lifetime.
+ * @param width Width in cells; validated by the retained table.
+ * @return Owning identity-free recipe; construction may allocate.
+ */
+template <class T, class Member, class Formatter>
+  requires ColumnFormatter<T, Member T::*, Formatter>
+TableColumnSpec<T> tableColumn(std::string_view header, Member T::*member, Formatter formatter,
+                               std::int32_t width = 1) {
+  return tableColumn<T, Member T::*, Formatter>(header, member, std::move(formatter), width);
+}
+
+namespace detail {
+template <class T, std::size_t N, std::size_t... I>
+std::expected<std::array<TableColumn<T>, N>, TextError>
+assembleColumns(WidthPolicy policy, std::array<TableColumnSpec<T>, N> specs, std::index_sequence<I...>) {
+  constexpr std::uint64_t INITIAL_COLUMN_GENERATION = 1;
+
+  auto built = std::array{[&](std::size_t index) -> std::expected<TableColumn<T>, TextError> {
+    auto header = GraphemeText::from(specs[index].header, policy);
+
+    if (!header) {
+      return std::unexpected(header.error());
+    }
+
+    return TableColumn<T>{
+      {index + 1, INITIAL_COLUMN_GENERATION}, std::move(*header), specs[index].width, std::move(specs[index].format)};
+  }(I)...};
+
+  for (const auto &column : built) {
+    if (!column) {
+      return std::unexpected(column.error());
+    }
+  }
+
+  return std::array<TableColumn<T>, N>{std::move(*built[I])...};
+}
+} // namespace detail
+
+/** @brief Assemble a fixed schema and allocate deterministic table-local identities.
+ * @tparam T Immutable record type inferred from the first recipe.
+ * @tparam Rest Additional TableColumnSpec<T> arguments, in display order.
+ * @param policy Width policy used for every validated owning header.
+ * @param first First owning recipe, copied or moved into assembly.
+ * @param rest Remaining recipes, copied from lvalues or consumed from rvalues.
+ * @return Owning columns with IDs 1..N and initial generation, or the first header TextError.
+ * IDs are assigned once in argument order, independently per table; no global counter.
+ * Reordering the resulting array preserves identities. For dynamic schema replacement,
+ * use explicit TableColumnOptions/ColumnId instead of rebuilding a positional schema.
+ * Caption/locale changes never determine identity. Existing validation and callback
+ * exception behavior are unchanged; assembly itself may throw during allocation/copies.
+ */
+template <class T, class... Rest>
+  requires(std::same_as<std::remove_cvref_t<Rest>, TableColumnSpec<T>> && ...)
+std::expected<std::array<TableColumn<T>, 1 + sizeof...(Rest)>, TextError>
+tableColumns(WidthPolicy policy, TableColumnSpec<T> first, Rest &&...rest) {
+  constexpr std::size_t COLUMN_COUNT = 1 + sizeof...(Rest);
+
+  return detail::assembleColumns(
+    policy, std::array<TableColumnSpec<T>, COLUMN_COUNT>{std::move(first), std::forward<Rest>(rest)...},
+    std::make_index_sequence<COLUMN_COUNT>{});
+}
+
+/** @brief Assemble fixed-schema columns with the default display policy.
+ * @tparam T Immutable record type inferred from the first recipe.
+ * @tparam Rest Additional exact TableColumnSpec<T> arguments, in display order.
+ * @param first First recipe, copied or moved into the owning schema.
+ * @param rest Remaining recipes, retaining their formatter ownership rules.
+ * @return Checked columns with deterministic table-local IDs or the first header TextError.
+ * Use the policy overload for nondefault terminal widths; dynamic schemas use explicit IDs.
+ */
+template <class T, class... Rest>
+  requires(std::same_as<std::remove_cvref_t<Rest>, TableColumnSpec<T>> && ...)
+std::expected<std::array<TableColumn<T>, 1 + sizeof...(Rest)>, TextError> tableColumns(TableColumnSpec<T> first,
+                                                                                       Rest &&...rest) {
+  return tableColumns(WidthPolicy{}, std::move(first), std::forward<Rest>(rest)...);
 }
 } // namespace portals

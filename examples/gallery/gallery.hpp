@@ -10,6 +10,8 @@
 namespace gallery {
 using namespace portals;
 
+inline constexpr CellSize FIXTURE_SIZE{30, 9}; ///< Default semantic replay viewport in terminal cells.
+
 /** @brief Unwrap an owning expected result or stop this finite example with an exception.
  * @tparam T Success type accepted by std::expected: void, or a movable value returned by ownership transfer.
  * @tparam E Error type accepted by std::expected; the helper does not inspect or format its value.
@@ -39,13 +41,21 @@ inline GraphemeText text(std::string_view value) {
   return take(GraphemeText::from(value));
 }
 
-// Translate local control commands into the same surface geometry used by hit-testing.
-// The destination vector borrows widget text and is consumed by the renderer inside tree.frame.
+/** @brief Translate widget-local paint into the layout surface and ancestor clip.
+ * Commands borrow widget text; rendering must consume them inside the same tree frame.
+ */
 class SurfaceSink : public PaintContext {
 public:
+  /** @param geometry Owning transform/clip captured by the current layout pass.
+   * @param commands Borrowed output vector, kept alive through submit and frame rendering.
+   */
   SurfaceSink(NodeGeometry geometry, std::vector<RenderCommand> &commands) : geometry_(geometry), commands_(commands) {
   }
 
+  /** @param commands Borrowed local commands; copied metadata still borrows widget text.
+   * @return Success or INVALID_GEOMETRY for overflowing transforms; allocation exceptions propagate.
+   * Submission appends in order; on failure the caller must discard the incomplete frame.
+   */
   std::expected<void, TreeError> submit(std::span<const RenderCommand> commands) override {
     for (const auto &command : commands) {
       auto status = std::visit(
@@ -89,52 +99,76 @@ public:
   }
 
 private:
-  NodeGeometry geometry_;
-  std::vector<RenderCommand> &commands_;
+  NodeGeometry geometry_;                ///< Owning surface transform and ancestor clip for the current frame.
+  std::vector<RenderCommand> &commands_; ///< Borrowed frame output, consumed before widgets can change.
 };
 
+/** @brief Finite low-level fixture for semantic screenshots and control regression tests.
+ * The interactive program uses Form instead. This fixture intentionally retains explicit
+ * tree/router ownership, binding tokens and presentation sync to exercise the low-level API.
+ * All operations and destruction are UI-affine; field order keeps dependencies alive.
+ */
 struct Scene {
-  std::unique_ptr<Scheduler> scheduler = take(Scheduler::create());
-  std::unique_ptr<WidgetTree> tree = take(WidgetTree::create(*scheduler));
-  Node<Widget> root = take(tree->root());
-  std::unique_ptr<EventRouter> router = take(EventRouter::create(*tree));
-  Node<Column> column = take(tree->emplace<Column>(root));
-  Node<Label> title = take(tree->emplace<Label>(column, text("Portals controls")));
-  Node<Label> label = take(tree->emplace<Label>(column, text("Unicode: \xe7\x95\x8c e\xcc\x81")));
-  Node<Button> button = take(tree->emplace<Button>(column, text("Run")));
-  Node<CheckBox> checkbox = take(tree->emplace<CheckBox>(column, text("Alerts")));
-  Node<Column> disabled_group = take(tree->emplace<Column>(column));
-  Node<Label> disabled_label = take(tree->emplace<Label>(disabled_group, text("Disabled label")));
-  Node<Button> disabled_button = take(tree->emplace<Button>(disabled_group, text("Disabled button")));
-  Node<CheckBox> disabled_checkbox = take(tree->emplace<CheckBox>(disabled_group, text("Disabled check")));
-  Node<Label> status = take(tree->emplace<Label>(column, text("Initial focus: Run")));
-  std::vector<Node<Control>> controls{
-    title, label, button, checkbox, disabled_label, disabled_button, disabled_checkbox, status};
-  std::shared_ptr<Property<bool>> model = take(Property<bool>::create(*tree, root, false, Invalidation::PAINT));
-  int calls{};
-  int changes{};
-  int disabled_calls{};
-  ActionBinding button_binding = take(bindButton(*router, button, [&] {
-    ++calls;
-  }));
-  ActionBinding disabled_binding = take(bindButton(*router, disabled_button, [&] {
-    ++disabled_calls;
-  }));
-  CheckBoxBinding check_binding = take(bindCheckbox(*tree, *router, checkbox, model, [&](CheckBoxResult result) {
-    take(std::move(result));
-    ++changes;
-  }));
-  CheckBoxBinding disabled_check_binding =
-    take(bindCheckbox(*tree, *router, disabled_checkbox, model, [&](CheckBoxResult result) {
-      take(std::move(result));
-      ++disabled_calls;
-    }));
-  InputDecoder decoder = take(InputDecoder::create());
+  std::unique_ptr<Scheduler> scheduler = take(Scheduler::create());        ///< Dispatcher outliving tree and callbacks.
+  std::unique_ptr<WidgetTree> tree = take(WidgetTree::create(*scheduler)); ///< Owning retained control tree.
+  Node<Widget> root = take(tree->root()); ///< Observing tree root and property invalidation target.
+  std::unique_ptr<EventRouter> router = take(EventRouter::create(*tree)); ///< Input/focus owner borrowing tree.
 
+  Node<Column> column = take(tree->emplace<Column>(root));                          ///< Vertical fixture layout.
+  Node<Label> title = take(tree->emplace<Label>(column, text("Portals controls"))); ///< Static title.
+  // UTF-8 escapes test a fullwidth ideograph and an e + combining acute grapheme.
+  Node<Label> label = take(tree->emplace<Label>(column, text("Unicode: \xe7\x95\x8c e\xcc\x81"))); ///< Width fixture.
+  Node<Button> button = take(tree->emplace<Button>(column, text("Run")));          ///< Enabled business action target.
+  Node<CheckBox> checkbox = take(tree->emplace<CheckBox>(column, text("Alerts"))); ///< Shared boolean editor.
+
+  Node<Column> disabledGroup = take(tree->emplace<Column>(column)); ///< Disabled ancestor for input exclusion.
+  Node<Label> disabledLabel = take(tree->emplace<Label>(disabledGroup, text("Disabled label"))); ///< Disabled text.
+  Node<Button> disabledButton =
+    take(tree->emplace<Button>(disabledGroup, text("Disabled button"))); ///< Disabled action.
+  Node<CheckBox> disabledCheckbox =
+    take(tree->emplace<CheckBox>(disabledGroup, text("Disabled check")));              ///< Disabled editor.
+  Node<Label> status = take(tree->emplace<Label>(column, text("Initial focus: Run"))); ///< Stage diagnostic caption.
+
+  std::vector<Node<Control>> controls{title,         label,          button,           checkbox,
+                                      disabledLabel, disabledButton, disabledCheckbox, status}; ///< Paint/sync order.
+
+  /// Shared checkbox state; both registrations retain shared ownership of this UI-affine property.
+  std::shared_ptr<Property<bool>> model = take(Property<bool>::create(*tree, root, false, Invalidation::PAINT));
+  int calls{};         ///< Enabled button business callback count.
+  int changes{};       ///< Checkbox business callback count, excluding presentation sync.
+  int disabledCalls{}; ///< Disabled subtree callback count, expected to stay zero.
+
+  ActionBinding buttonBinding = take(bindButton(*router, button, [&] {
+    ++calls;
+  })); ///< Owns the enabled button action registration.
+  ActionBinding disabledBinding = take(bindButton(*router, disabledButton, [&] {
+    ++disabledCalls;
+  })); ///< Owns a registration suppressed by the disabled ancestor.
+  CheckBoxBinding checkBinding = take(bindCheckbox(*tree, *router, checkbox, model, [&](CheckBoxResult result) {
+    take(std::move(result));
+
+    ++changes;
+  })); ///< Synchronizes the enabled checkbox and retains its scoped registration.
+  CheckBoxBinding disabledCheckBinding =
+    take(bindCheckbox(*tree, *router, disabledCheckbox, model, [&](CheckBoxResult result) {
+      take(std::move(result));
+
+      ++disabledCalls;
+    })); ///< Retains the disabled checkbox registration for exclusion tests.
+
+  InputDecoder decoder = take(InputDecoder::create()); ///< Stateful VT byte decoder used only by this fixture.
+
+  /** @brief Disable the nested group after nodes and registrations exist.
+   * Setup errors throw through the example-only take helper.
+   */
   Scene() {
-    take(tree->setEnabled(disabled_group, false));
+    take(tree->setEnabled(disabledGroup, false));
   }
 
+  /** @param bytes Borrowed VT input, consumed synchronously through the retained decoder.
+   * @return The final dispatch result; default when no complete event was decoded.
+   * Decoder/router failures throw through take; no input bytes are retained by this view.
+   */
   DispatchResult input(std::string_view bytes) {
     DispatchResult result;
 
@@ -155,10 +189,16 @@ struct Scene {
     return result;
   }
 
-  CellBuffer render(CellSize size = {30, 9}) {
+  /** @param size Positive output size in terminal cells; defaults to FIXTURE_SIZE.
+   * @return Owning rendered cell buffer, independent of the command borrows used inside the frame.
+   * Synchronizes binding/focus presentation before entering the protected frame.
+   * Layout, paint and rendering consume borrowed commands inside that frame.
+   * API failures throw through take; callbacks and temporary commands do not escape the frame.
+   */
+  CellBuffer render(CellSize size = FIXTURE_SIZE) {
     // Apply model and focus presentation before entering the immutable render frame.
-    take(check_binding.sync());
-    take(disabled_check_binding.sync());
+    take(checkBinding.sync());
+    take(disabledCheckBinding.sync());
 
     const auto focused = take(router->focused());
 
@@ -193,6 +233,11 @@ struct Scene {
     return std::move(*buffer);
   }
 
+  /** @param name Cumulative stage: initial, keyboard, mouse or disabled.
+   * @return No value; mutates the fixture to the requested semantic screenshot state.
+   * Unknown direct names follow the disabled branch; CLI validates allowed stage spellings.
+   * The intermediate render establishes geometry for the subsequent mouse hit test.
+   */
   void stage(std::string_view name) {
     if (name == "initial") {
       return;
@@ -205,7 +250,7 @@ struct Scene {
       return;
     }
 
-    auto keyboard_frame = render();
+    auto keyboardFrame = render();
 
     input("\x1b[<0;2;3M\x1b[<0;2;3m");
     take(setControlText(*tree, status, text("Mouse: Run pressed once")));

@@ -43,6 +43,18 @@ target_include_directories(portals_core PUBLIC
   "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
+# Aggregate reflection is opt-in; ordinary core headers do not include PFR.
+include("${CMAKE_CURRENT_SOURCE_DIR}/vendor/pfr/verify.cmake")
+add_library(portals_aggregate INTERFACE)
+add_library(portals::aggregate ALIAS portals_aggregate)
+set_target_properties(portals_aggregate PROPERTIES EXPORT_NAME aggregate)
+target_link_libraries(portals_aggregate INTERFACE portals::core)
+target_include_directories(portals_aggregate SYSTEM INTERFACE
+  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor/pfr/include>"
+  "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/Portals/pfr>"
+)
+target_compile_definitions(portals_aggregate INTERFACE BOOST_PFR_USE_CPP26=0)
+
 set(PORTALS_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/Portals")
 set(PORTALS_PACKAGE_NEEDS_THREADS OFF)
 if(UNIX)
@@ -55,11 +67,14 @@ configure_package_config_file(cmake/PortalsConfig.cmake.in
 write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/PortalsConfigVersion.cmake"
   VERSION "${PROJECT_VERSION}" COMPATIBILITY SameMajorVersion
 )
-install(TARGETS portals_core portals_utf8proc EXPORT PortalsTargets
+install(TARGETS portals_core portals_utf8proc portals_aggregate EXPORT PortalsTargets
   ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}/$<CONFIG>"
 )
 install(DIRECTORY include/portals DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 install(FILES include/portals.hpp DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+install(DIRECTORY vendor/pfr/include/boost DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/Portals/pfr")
+install(FILES vendor/pfr/LICENSE_1_0.txt DESTINATION "${CMAKE_INSTALL_DATADIR}/Portals/licenses" RENAME pfr-LICENSE.txt)
+install(FILES vendor/pfr/manifest.json DESTINATION "${CMAKE_INSTALL_DATADIR}/Portals/pfr")
 install(EXPORT PortalsTargets FILE PortalsTargets.cmake NAMESPACE portals::
   DESTINATION "${PORTALS_INSTALL_CMAKEDIR}"
 )
@@ -95,6 +110,9 @@ endfunction()
 portals_enable_warnings(portals_core)
 
 if(PORTALS_BUILD_TOOLS)
+  add_executable(portals_compact_benchmark tools/benchmarks/compact.cpp)
+  target_link_libraries(portals_compact_benchmark PRIVATE portals::core)
+  portals_enable_warnings(portals_compact_benchmark)
   add_executable(portals_managed_benchmark tools/benchmarks/managed.cpp)
   target_link_libraries(portals_managed_benchmark PRIVATE portals::core)
   portals_enable_warnings(portals_managed_benchmark)
@@ -131,6 +149,17 @@ endif()
 
 if(PORTALS_BUILD_TESTS)
   include("${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest/verify.cmake")
+  add_executable(portals_compact_text tests/compact_text.cpp)
+  target_include_directories(portals_compact_text SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  target_link_libraries(portals_compact_text PRIVATE portals::core)
+  portals_enable_warnings(portals_compact_text)
+  add_test(NAME portals.compact-text COMMAND portals_compact_text)
+  add_executable(portals_aggregate_columns tests/aggregate_columns.cpp)
+  target_include_directories(portals_aggregate_columns SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  target_link_libraries(portals_aggregate_columns PRIVATE portals::aggregate)
+  portals_enable_warnings(portals_aggregate_columns)
+  add_test(NAME portals.aggregate-columns COMMAND portals_aggregate_columns)
+  set_tests_properties(portals.compact-text portals.aggregate-columns PROPERTIES TIMEOUT 15)
   add_executable(portals_legacy tests/legacy.cpp)
   target_include_directories(portals_legacy SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
   target_link_libraries(portals_legacy PRIVATE portals::core)
@@ -514,8 +543,8 @@ if(PORTALS_BUILD_DOCS)
   set(DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/docs")
 
   doxygen_add_docs(portals_docs include docs/index.md docs/development.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/scheduler.md docs/widget-tree.md docs/layout.md docs/grid.md docs/property.md docs/diagnostics.md docs/focus.md docs/model.md docs/input.md docs/terminal.md docs/terminal-probe.md docs/controls.md docs/line-edit.md docs/virtual-list.md docs/virtual-table.md docs/scroll.md docs/chart.md
-    docs/styles.md docs/legacy.md docs/managed-controls.md docs/declarative-ui.md docs/managed-performance.md docs/package.md docs/application.md docs/virtual-preparation.md docs/examples.md docs/architecture.md docs/getting-started.md docs/limitations.md docs/api-design.md experiments/module-spike/README.md fuzz/README.md
-    vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md vendor/textual/README.md vendor/doctest/README.md
+    docs/styles.md docs/legacy.md docs/managed-controls.md docs/declarative-ui.md docs/compact-examples.md docs/managed-performance.md docs/package.md docs/application.md docs/virtual-preparation.md docs/examples.md docs/architecture.md docs/getting-started.md docs/limitations.md docs/api-design.md experiments/module-spike/README.md fuzz/README.md
+    vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md vendor/textual/README.md vendor/doctest/README.md vendor/pfr/README.md
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Generate Portals API documentation"
   )

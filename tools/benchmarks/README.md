@@ -101,6 +101,24 @@ saturation, bounded catchup/backlog, delayed/out-of-order range completion, Unic
 resize, input ordering, writer failures and shutdown. Real Windows Terminal/xterm,
 ConPTY pressure and native restoration checks are separate verification gates.
 
+## Compact construction benchmark
+
+`portals_compact_benchmark` takes no arguments and writes JSON to stdout. It
+opens no native terminal. Build with `PORTALS_BUILD_TOOLS=ON`; run the Release
+executable for the measured configuration. Three warmups precede 30 samples.
+Equivalent managed and description-based three-label scenes report mount/theme,
+initial prepare/layout, idle prepare and one-frame run/cleanup. Separate explicit
+and compact column cases measure ten callback constructions and ten cell formats.
+The column comparison uses explicit identities on both paths and does not measure
+aggregate reflection or automatic schema assembly.
+
+Nearest-rank p50/p95 timings use steady-clock nanoseconds. Allocation counters cover
+ordinary `new`/`new[]` calls, excluding malloc, aligned allocation and allocated
+bytes. Application creation and JSON reporting are outside counted phases. The
+workload checks one submitted frame and terminal cleanup. These measurements do
+not establish universal allocation budgets or zero-cost abstractions; see
+[compact examples](../../docs/compact-examples.md) for API constraints.
+
 Native runs use the same managed terminal factory as Application. Startup queries and
 mouse setup are included in native_open_ns. Restoration is included in close timing.
 These lifecycle protocol bytes bypass frame counters; throughput measures rendered

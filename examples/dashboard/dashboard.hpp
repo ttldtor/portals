@@ -9,6 +9,9 @@
 #include <portals/grid.hpp>
 #include <portals/managed.hpp>
 #include <portals/style.hpp>
+#include <portals/table_column.hpp>
+#include <portals/text_format.hpp>
+#include <portals/ui.hpp>
 #include <portals/virtual_table.hpp>
 #include <ranges>
 
@@ -16,19 +19,29 @@ namespace dashboard {
 using namespace portals;
 using example::take;
 
+/** @brief Provider workload, replay and display settings for one dashboard run. */
 struct Options {
-  // Borrowed for the scene lifetime. Samples only this dashboard's snapshot ingress;
-  // no clocks, allocation or callback work occur when the observer is null.
+  /** @brief Borrowed callback sampling this scene's snapshot ingress latency in scheduler time units. */
   using IngressObserver = void (*)(void *, SchedulerTime);
+  /** @brief Optional observer; when null, ingress performs no sampling work. */
   IngressObserver ingressObserver{};
+  /** @brief Borrowed observer context, required to remain valid through scene shutdown. */
   void *ingressContext{};
+  /** @brief Number of logical instruments exposed by the virtual model. */
   std::uint64_t rows{1000000};
+  /** @brief Synthetic or replay ticks generated per second of application clock time. */
   std::uint32_t rate{1000};
+  /** @brief Seed for deterministic synthetic prices. */
   std::uint64_t seed{42};
+  /** @brief Maximum tick work in one provider pump after a clock jump. */
   std::size_t maxTicksPerPump{512};
+  /** @brief Additional delay in milliseconds before a requested range becomes ready. */
   std::uint64_t delayMs{};
+  /** @brief Optional run duration in milliseconds; zero leaves stopping to input or the caller. */
   std::uint64_t durationMs{};
+  /** @brief Use the fixed replay prices instead of the synthetic generator. */
   bool replay{};
+  /** @brief Select ASCII captions and chart glyphs for limited terminals. */
   bool ascii{};
 };
 
@@ -117,22 +130,20 @@ inline std::expected<void, SchedulerError> forwardLatest(const Publisher<ModelSn
   return {};
 }
 
+/** @brief Dashboard scene sharing one managed UI with a synchronous bounded provider. */
 class Scene final : public ApplicationScene {
 public:
+  /** @param app Borrowed application that outlives the scene and supplies its UI thread and clock.
+   * @param options Provider and display settings retained for this run.
+   * Mount and scheduler failures are propagated by example::take.
+   */
   Scene(Application &app, Options options)
       : app_(app), options_(options), managed_(take(ManagedScene::create(app))),
         scope_(take(app.scheduler().makeScope())), started_(app.now()) {
-    auto &tree = app.tree();
-    grid_ = take(managed_->emplace<Grid>(managed_->root()));
-    title_ = take(managed_->emplace<Label>(
-      grid_, text(options.ascii ? "Portals | Tab focus | arrows select/scroll | F2 theme | F10 quit"
-                                : "Portals \xe7\x95\x8c e\xcc\x81 | Tab focus | F2 theme | F10 quit")));
-    editor_ = take(managed_->emplace<LineEdit>(grid_));
-    inspect_ = take(managed_->emplace<Button>(grid_, text("Inspect (unchanged)")));
-    status_ = take(managed_->emplace<Label>(grid_, text("Starting market")));
     name_ = take(managed_->state<std::string>("Market note"));
-    take(managed_->bind(editor_, name_));
-    take(managed_->onClick(inspect_, [this]() -> std::expected<void, TreeError> {
+    model_ = take(managed_->model<Quote>(snapshot()));
+
+    const auto inspect = [this]() -> std::expected<void, TreeError> {
       auto value = name_.snapshot();
 
       if (!value) {
@@ -142,42 +153,41 @@ public:
       auto result = name_.set((*value)->value);
 
       return result ? std::expected<void, TreeError>{} : std::unexpected(result.error());
-    }));
-    model_ = take(managed_->model<Quote>(snapshot()));
-    const std::array<TableColumn<Quote>, 5> columns{{{{1, 1},
-                                                      text("Instrument"),
-                                                      13,
-                                                      [this](const Quote &q) {
-                                                        return text(std::format("SYM-{:07}", q.instrument));
-                                                      }},
-                                                     {{2, 1},
-                                                      text("Open"),
-                                                      12,
-                                                      [this](const Quote &q) {
-                                                        return text(std::format("{:.2f}", q.prices.open));
-                                                      }},
-                                                     {{3, 1},
-                                                      text("High"),
-                                                      12,
-                                                      [this](const Quote &q) {
-                                                        return text(std::format("{:.2f}", q.prices.high));
-                                                      }},
-                                                     {{4, 1},
-                                                      text("Low"),
-                                                      12,
-                                                      [this](const Quote &q) {
-                                                        return text(std::format("{:.2f}", q.prices.low));
-                                                      }},
-                                                     {{5, 1}, text("Close"), 12, [this](const Quote &q) {
-                                                        return text(std::format("{:.2f}", q.prices.close));
-                                                      }}}};
+    };
+
+    const auto priceText = cellFormat<double>("{:.2f}", app.widthPolicy());
+
+    const auto columns = take(tableColumns(
+      app.widthPolicy(),
+      tableColumn("Instrument", &Quote::instrument, cellFormat<std::uint64_t>("SYM-{:07}", app.widthPolicy()), 13),
+      tableColumn<Quote>(
+        "Open",
+        [](const Quote &quote) {
+          return quote.prices.open;
+        },
+        priceText, 12),
+      tableColumn<Quote>(
+        "High",
+        [](const Quote &quote) {
+          return quote.prices.high;
+        },
+        priceText, 12),
+      tableColumn<Quote>(
+        "Low",
+        [](const Quote &quote) {
+          return quote.prices.low;
+        },
+        priceText, 12),
+      tableColumn<Quote>(
+        "Close",
+        [](const Quote &quote) {
+          return quote.prices.close;
+        },
+        priceText, 12)));
+
     VirtualTableOptions tableOptions;
+
     tableOptions.overscan_rows = 2;
-    table_ =
-      take(managed_->virtualTable(grid_, model_, columns, tableOptions, {},
-                                  [this](const ModelFrame<Quote> &pin, const std::optional<ModelRequest<Quote>> &work) {
-                                    return tablePrepared(pin, work);
-                                  }));
 
     ChartOptions chartOptions;
 
@@ -186,18 +196,46 @@ public:
     chartOptions.glyph_set = options.ascii ? ChartGlyphSet::ASCII : ChartGlyphSet::BOX_DRAWING;
     chartOptions.candle_gap = 1;
 
-    chart_ = take(managed_->chart(
-      grid_, model_,
-      [](const Quote &quote) -> std::optional<Ohlc> {
-        return quote.prices;
-      },
-      chartOptions,
-      [this]() -> std::expected<std::uint64_t, TreeError> {
-        return firstRow_;
-      },
-      [this](const ModelFrame<Quote> &pin, const std::optional<ModelRequest<Quote>> &work) {
-        return chartPrepared(pin, work);
-      }));
+    ui::NodeRef<Label> title, status;
+    ui::NodeRef<LineEdit> editor;
+    ui::NodeRef<Button> inspectButton;
+    ui::NodeRef<VirtualTable<Quote>> table;
+    ui::NodeRef<Chart<Quote>> chart;
+
+    grid_ = take(ui::mount(
+      *managed_,
+      ui::grid(ui::label(options.ascii ? "Portals | Tab focus | arrows select/scroll | F2 theme | F10 quit"
+                                       : "Portals \xe7\x95\x8c e\xcc\x81 | Tab focus | F2 theme | F10 quit")
+                 .reference(title),
+               ui::lineEdit(name_).reference(editor),
+               ui::button("Inspect (unchanged)", inspect).reference(inspectButton),
+               ui::label("Starting market").reference(status),
+               ui::virtualTable(model_, columns, tableOptions, {},
+                                [this](const ModelFrame<Quote> &pin, const std::optional<ModelRequest<Quote>> &work) {
+                                  return tablePrepared(pin, work);
+                                })
+                 .reference(table),
+               ui::chart(
+                 model_,
+                 [](const Quote &quote) -> std::optional<Ohlc> {
+                   return quote.prices;
+                 },
+                 chartOptions,
+                 [this]() -> std::expected<std::uint64_t, TreeError> {
+                   return firstRow_;
+                 },
+                 [this](const ModelFrame<Quote> &pin, const std::optional<ModelRequest<Quote>> &work) {
+                   return chartPrepared(pin, work);
+                 })
+                 .reference(chart))));
+
+    title_ = title.node();
+    editor_ = editor.node();
+    inspect_ = inspectButton.node();
+    status_ = status.node();
+    table_ = table.node();
+    chart_ = chart.node();
+
     take(app.router().setFocus(table_));
     take(managed_->theme(modernTheme()));
 
@@ -209,7 +247,7 @@ public:
     grid.rows = {header, header, header, header, flexible, flexible};
     grid.cells = {{title_.id(), 0, 0},  {editor_.id(), 1, 0}, {inspect_.id(), 2, 0},
                   {status_.id(), 3, 0}, {table_.id(), 4, 0},  {chart_.id(), 5, 0}};
-    take(setGridOptions(tree, grid_, grid));
+    take(setGridOptions(app.tree(), grid_, grid));
     ingress_ = take(app.scheduler().connect<ModelSnapshot<Quote>>(
       scope_,
       [this](auto value) {
@@ -323,6 +361,7 @@ public:
     return name_;
   }
 
+  /** @return Observing table identity; tree access detects retirement after scene stop. */
   Node<VirtualTable<Quote>> table() const noexcept {
     return table_;
   }

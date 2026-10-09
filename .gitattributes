@@ -3,4 +3,6 @@
 *.sh text eol=lf
 
 /vendor/utf8proc/** -text
+/vendor/doctest/doctest.h -text
+/vendor/pfr/** -text
 /tests/fixtures/unicode/** -text

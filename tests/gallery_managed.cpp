@@ -5,6 +5,7 @@
 #include "../examples/gallery/managed_report.hpp"
 #include "../examples/replay/terminal.hpp"
 #include "support/gallery_before.hpp"
+#include "support/meter_before.hpp"
 #include "support/vt_oracle.hpp"
 #include <iostream>
 #include <sstream>
@@ -12,6 +13,15 @@
 namespace {
 using namespace portals;
 using example::take;
+
+// These shared predicates must remain usable during constant evaluation.
+static_assert(example::phaseName(ApplicationPhase::PREPARE) == "prepare");
+static_assert(example::phaseName(static_cast<ApplicationPhase>(-1)) == "unknown");
+constexpr InputEvent QUIT_PRESS = KeyEvent{.key = InputKey::F10, .action = KeyAction::PRESS};
+constexpr InputEvent QUIT_RELEASE = KeyEvent{.key = InputKey::F10, .action = KeyAction::RELEASE};
+
+static_assert(example::quitKey(QUIT_PRESS));
+static_assert(!example::quitKey(QUIT_RELEASE));
 
 struct Capture {
   std::string bytes;
@@ -49,10 +59,31 @@ void compare(const std::vector<example::ReplayTerminal::Input> &script, CellSize
   }
 }
 
+template <class Scene> Capture runMeter(std::size_t theme) {
+  example::ReplayTerminal terminal({{50, "\x1b[C\x1b[C", {}}, {100, "\x1bOQ", {}}, {200, "\x1b[21~", {}}}, 300,
+                                   {80, 8});
+  auto app = take(Application::create({}, terminal.clock()));
+  Scene scene(*app, theme);
+  const auto stats = take(scene.run(terminal));
+
+  if (!terminal.closed) {
+    throw std::runtime_error("Meter did not close its transport");
+  }
+
+  return {std::move(terminal.output), stats};
+}
+
 void meterThemes() {
   constexpr CellSize SIZE{80, 8};
 
   for (std::size_t theme = 0; theme < example::THEME_PRESETS.size(); ++theme) {
+    const auto before = runMeter<meter_before::MeterScene>(theme);
+    const auto after = runMeter<meter_example::MeterScene>(theme);
+
+    if (before.bytes != after.bytes || before.stats.frames != after.stats.frames) {
+      throw std::runtime_error("Scalar-state meter changed visible output or frame count");
+    }
+
     example::ReplayTerminal terminal({{50, "\x1b[C\x1b[C", {}}, {100, "\x1bOQ", {}}, {200, "\x1b[21~", {}}}, 300, SIZE);
     auto app = take(Application::create({}, terminal.clock()));
     meter_example::MeterScene scene(*app, theme);
@@ -79,6 +110,36 @@ void meterThemes() {
 
   if (take(scene.run(terminal)).frames != 1) {
     throw std::runtime_error("Idle custom adapter redraws without a change");
+  }
+
+  std::vector<example::ReplayTerminal::Input> held;
+
+  for (std::uint64_t press = 1; press <= 20; ++press) {
+    held.push_back({press * 25, "\x1b[C", {}});
+  }
+
+  auto toBound = held;
+
+  toBound.resize(10);
+
+  const auto capture = [&](std::vector<example::ReplayTerminal::Input> input) {
+    example::ReplayTerminal bounded(std::move(input), 600, SIZE);
+    auto boundedApp = take(Application::create({}, bounded.clock()));
+    meter_example::MeterScene boundedScene(*boundedApp);
+    const auto stats = take(boundedScene.run(bounded));
+
+    if (!bounded.closed) {
+      throw std::runtime_error("Bounded meter did not close its transport");
+    }
+
+    return Capture{std::move(bounded.output), stats};
+  };
+  const auto reached = capture(std::move(toBound));
+  const auto repeated = capture(std::move(held));
+
+  // Ten presses reach 100; later clamped sets must not change output or redraw.
+  if (reached.bytes != repeated.bytes || reached.stats.frames != repeated.stats.frames) {
+    throw std::runtime_error("Clamped scalar state redraws unchanged presentation");
   }
 }
 

@@ -2,6 +2,8 @@
 
 For the complete form using typed columns and named view settings, see
 [declarative composition](declarative-ui.md).
+For checked formatted text, member deduction, optional aggregate columns and
+full comparable programs, see [compact examples](compact-examples.md).
 
 For a complete form combining an editor, custom final widget, list, table and chart,
 see the [declarative before/after consumers](declarative-ui.md). Their installed-package
@@ -16,7 +18,7 @@ native terminal restoration or visual compatibility.
 | --- | --- |
 | `portals_gallery` | Declarative managed form: Tab through editor, checkbox, action and Quit; Enter commits; F2 cycles six themes. |
 | `portals_dashboard` | Synthetic market, managed table/chart lifecycle with one shared model, selection and delayed virtual ranges. |
-| `portals_custom_widget` | A custom final meter with a managed presentation adapter and independent immutable model; Left/Right change its level, F2 cycles themes. |
+| `portals_custom_widget` | A custom final meter with a managed presentation adapter and scalar managed state; Left/Right change its level, F2 cycles themes. |
 | `portals_replay_example` | The dashboard with the built-in recorded price tape selected by default. |
 
 F10 or Ctrl+C exits every interactive example. Mouse routing is provided by the
@@ -42,6 +44,13 @@ options or theme names and missing theme values return exit code 2. Runtime
 failures return 1 after the runner attempts terminal restoration; success is 0.
 The gallery also retains the historical `initial`, `keyboard`, `mouse` and
 `disabled` finite fixture modes. They use the same replay runner afterward.
+
+The interactive gallery uses `gallery::Form`: its managed scene owns the state,
+nodes and scoped registrations. The separate `gallery::Scene` is a finite
+low-level regression fixture, where binding tokens and presentation sync remain
+explicit to exercise the retained API. It runs only in the check/stage paths.
+The example-only `take` helper stops setup with a generic exception and loses
+the original error detail; it is not a production error-handling policy.
 
 The four adapted [Textual palettes](styles.md) change colors
 through existing style transactions. They do not reproduce Textual's complete

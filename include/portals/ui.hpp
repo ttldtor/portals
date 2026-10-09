@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include <portals/grid.hpp>
 #include <portals/managed.hpp>
 
 #include <algorithm>
@@ -217,6 +218,7 @@ private:
   template <class U, class... Args> friend Description<U> custom(Args &&...args);
   template <class U> friend Description<U> control(std::string_view, ControlStyle, SizePolicy);
   template <class U, detail::DescriptionInput... Children> friend Description<U> linear(LinearOptions, Children &&...);
+  template <detail::DescriptionInput... Children> friend Description<Grid> grid(Children &&...);
   friend Description<LineEdit> lineEdit(ManagedState<std::string>, LineEditConfig);
 
   /** @brief Owning constructor adapter using the existing checked managed mount. */
@@ -635,6 +637,30 @@ Description<T> linear(LinearOptions options, Children &&...children) {
  */
 template <detail::DescriptionInput... Children> Description<Row> row(LinearOptions options, Children &&...children) {
   return linear<Row>(options, std::forward<Children>(children)...);
+}
+
+/** @brief Compose an explicit grid using the existing managed mount transaction.
+ * @tparam Children Consuming child Description types, including custom final widgets.
+ * @param children Owning recipes mounted in sibling order; no placement is inferred.
+ * @return Single-use grid recipe; failed child mount rolls back the whole subtree.
+ * Configure tracks and identity-based placements with setGridOptions after successful
+ * mount, before running the scene. Published NodeRef observers supply those identities.
+ * Construction may allocate; mounting retains the existing typed error and cleanup rules.
+ */
+template <detail::DescriptionInput... Children> Description<Grid> grid(Children &&...children) {
+  auto description = custom<Grid>();
+
+  (description.state_->children.push_back(
+     [child =
+        std::forward<Children>(children)](ManagedScene &scene, Node<Widget> parent,
+                                          detail::MountContext &context) mutable -> std::expected<void, ManagedError> {
+       auto mounted = detail::Access::mount(std::move(child), scene, parent, context);
+
+       return mounted ? std::expected<void, ManagedError>{} : std::unexpected(mounted.error());
+     }),
+   ...);
+
+  return description;
 }
 
 /** @tparam Children Rvalue Description types.

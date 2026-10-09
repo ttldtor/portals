@@ -223,8 +223,9 @@ and [managed form](../tests/package_consumer/composed_before.cpp). It accepts no
 arguments, opens no window and returns nonzero on failure. Run
 `portals_composed_named` (`.exe` on Windows) in the installed-consumer build directory,
 or `ctest -R consumer.composed` to compare the full captured output. Explicit names
-improve readability; this is not a promise of fewer total lines. Interactive example
-migration remains a separate step.
+improve readability; this is not a promise of fewer total lines. The
+[compact examples](compact-examples.md) show the migrated dashboard and additional
+checked text and fixed-schema column conveniences.
 
 \include{lineno} composed_named.cpp
 

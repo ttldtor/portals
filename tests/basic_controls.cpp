@@ -148,7 +148,7 @@ void galleryReplay() {
   check(scene.changes == 1 && take(scene.model->snapshot())->value, "keyboard toggles authoritative property once");
   check(row(keyboard, 3) == "[x] Alerts" && row(keyboard, 6) == "[x] Disabled check", "shared model paints both views");
   check(keyboard.cells.at(90).style.bold && !keyboard.cells.at(60).style.bold, "Tab focus snapshot");
-  check(scene.disabled_calls == 0, "model synchronization is not a business action");
+  check(scene.disabledCalls == 0, "model synchronization is not a business action");
 
   scene.input("\x1b[<0;2;3M\x1b[<0;2;3m");
 
@@ -163,8 +163,8 @@ void galleryReplay() {
   check(scene.changes == 2 && !take(scene.model->snapshot())->value && row(mouse_check, 3) == "[ ] Alerts",
         "mouse checkbox press toggles once and release does not toggle again");
   scene.input("\x1b[<0;2;6M");
-  take(scene.router->invoke(scene.disabled_checkbox, {Action::ACTIVATE}));
-  check(scene.disabled_calls == 0, "router excludes disabled group for mouse and semantic actions");
+  take(scene.router->invoke(scene.disabledCheckbox, {Action::ACTIVATE}));
+  check(scene.disabledCalls == 0, "router excludes disabled group for mouse and semantic actions");
   take(scene.router->setFocus(scene.button));
   take(scene.tree->setEnabled(scene.button, false));
 
@@ -238,7 +238,7 @@ void textAndInvalidation() {
   check(take(scene.tree->consumeFrameRequest()) == Invalidation::NONE, "equal style is no-op");
   take(scene.tree->frame([&] {
     auto synced = syncControl(*scene.tree, scene.label, {});
-    auto model = scene.check_binding.sync();
+    auto model = scene.checkBinding.sync();
     auto text = setControlText(*scene.tree, scene.label, gallery::text("blocked"));
 
     check(!synced && synced.error() == TreeError::WOULD_BLOCK && !model && model.error() == TreeError::WOULD_BLOCK &&

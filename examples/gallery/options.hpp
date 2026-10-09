@@ -10,11 +10,13 @@
 #include <string_view>
 
 namespace example {
+/** @brief Named stylesheet factory shared by example CLI and theme cycling. */
 struct ThemePreset {
   std::string_view name;         ///< Command-line spelling, with static lifetime.
   portals::StyleSheet (*make)(); ///< Creates a fresh owning stylesheet.
 };
 
+/** @brief Static preset order shared by CLI selection and F2 theme cycling. */
 inline constexpr std::array THEME_PRESETS{ThemePreset{"modern", portals::modernTheme},
                                           ThemePreset{"turbo", portals::turboTheme},
                                           ThemePreset{"nord", portals::nordTheme},
@@ -22,6 +24,7 @@ inline constexpr std::array THEME_PRESETS{ThemePreset{"modern", portals::modernT
                                           ThemePreset{"tokyo-night", portals::tokyoNightTheme},
                                           ThemePreset{"catppuccin-latte", portals::catppuccinLatteTheme}};
 
+/** @brief Parsed example settings; stage borrows argv for the main function's lifetime. */
 struct SceneOptions {
   std::size_t theme{};    ///< Index in THEME_PRESETS; Modern is the compatibility default.
   bool check{};           ///< Run a finite in-memory replay; never open a native window.
@@ -30,7 +33,8 @@ struct SceneOptions {
   std::string_view stage; ///< Optional gallery fixture stage, borrowed from argv.
 };
 
-/** @param argc Number of argv entries including the executable.
+/** @brief Parse theme/rendering switches and optional historical gallery fixture modes.
+ * @param argc Number of argv entries including the executable.
  * @param argv Borrowed command-line arguments, retained only by the stage view.
  * @param galleryStages Accept the gallery's historical semantic fixture modes.
  * @return Valid options or an owning diagnostic for an unknown/missing option.
@@ -71,8 +75,10 @@ inline std::expected<SceneOptions, std::string> parseSceneOptions(int argc, char
   return result;
 }
 
-/** @param output Borrowed output stream; errors follow its configured stream policy.
+/** @brief Write shared example options, theme names and keyboard hints.
+ * @param output Borrowed output stream; errors follow its configured stream policy.
  * @param program Executable name displayed in the usage line.
+ * @return No value; stream failures follow its configured policy.
  */
 inline void printSceneUsage(std::ostream &output, std::string_view program) {
   output << "Usage: " << program << " [--check] [--ansi16] [--theme NAME] [--help]\nThemes: ";
