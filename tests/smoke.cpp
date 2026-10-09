@@ -9,8 +9,8 @@
 int main() {
   const portals::Version actual = portals::version();
 
-  if (actual.major != 0 || actual.minor != 1 || actual.patch != 0) {
-    std::cerr << "Expected Portals 0.1.0, got " << actual.major << '.' << actual.minor << '.' << actual.patch << '\n';
+  if (actual.major != 0 || actual.minor != 2 || actual.patch != 0) {
+    std::cerr << "Expected Portals 0.2.0, got " << actual.major << '.' << actual.minor << '.' << actual.patch << '\n';
 
     return EXIT_FAILURE;
   }

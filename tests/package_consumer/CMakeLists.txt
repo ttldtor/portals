@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 project(PortalsPackageConsumer LANGUAGES CXX)
 
-find_package(Portals 0.1 CONFIG REQUIRED)
+find_package(Portals 0.2 CONFIG REQUIRED)
 cmake_path(IS_PREFIX CMAKE_PREFIX_PATH "${Portals_DIR}" NORMALIZE fromInstalledPrefix)
 if(NOT fromInstalledPrefix)
   message(FATAL_ERROR "Portals was found outside the relocated prefix: ${Portals_DIR}")

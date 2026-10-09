@@ -181,7 +181,7 @@ mount hooks or business callbacks.
 
 The existing package test relocates the installation, copies the complete
 `tests/package_consumer` directory, configures it using `find_package(Portals
-0.1 CONFIG REQUIRED)`, and links only `portals::core`. No private header or
+0.2 CONFIG REQUIRED)`, and links only `portals::core`. No private header or
 source-tree include is needed. Its original model/custom-widget test remains.
 
 The complete before and managed programs included below use the same final

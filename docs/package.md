@@ -20,7 +20,7 @@ An external project uses only the installed prefix:
 ```cmake
 cmake_minimum_required(VERSION 3.24)
 project(MyApplication LANGUAGES CXX)
-find_package(Portals 0.1 CONFIG REQUIRED)
+find_package(Portals 0.2 CONFIG REQUIRED)
 add_executable(app main.cpp)
 target_link_libraries(app PRIVATE portals::core)
 ```

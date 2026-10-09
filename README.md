@@ -93,7 +93,7 @@ cmake --build build/consumer
 ./build/consumer/portals_consumer
 ```
 
-Expected output: `Portals 0.1.0`. The same commands work in a Linux shell.
+Expected output: `Portals 0.2.0`. The same commands work in a Linux shell.
 The consumer includes only `<portals/version.hpp>` and links the core target.
 `portals::version()` returns the linked library's version by value, without
 allocation, I/O, errors or exceptions. Calls may run on any thread concurrently;
