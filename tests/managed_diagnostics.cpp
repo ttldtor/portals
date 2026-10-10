@@ -255,8 +255,15 @@ TEST_CASE("every allocation failure during deep snapshot or drain preserves the 
   for (std::ptrdiff_t budget = 0; budget < MAX_ALLOCATION_BUDGET && !completed; ++budget) {
     allocationsBeforeFailure = budget;
 
-    // Both branches return prvalues, preserving the tested expected result without a container move.
-    const auto result = drain ? fixture.scene->drainErrors() : fixture.scene->diagnostics();
+    // Avoid a conditional-expression temporary: MSVC 2022 may move the expected here.
+    // Its Debug vector move allocates a proxy outside the tested error boundary.
+    const auto result = [&] {
+      if (drain) {
+        return fixture.scene->drainErrors();
+      }
+
+      return fixture.scene->diagnostics();
+    }();
 
     allocationsBeforeFailure = -1;
 
