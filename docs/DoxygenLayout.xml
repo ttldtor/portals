@@ -66,6 +66,7 @@
     </tab>
     <tab type="usergroup" title="5. Develop Portals">
       <tab type="user" title="Contributor guide and notices" url="@ref docs/development.md"/>
+      <tab type="user" title="Releasing and documentation deployment" url="@ref docs/releasing.md"/>
       <tab type="user" title="Testing" url="@ref docs/testing.md"/>
       <tab type="user" title="API performance experiment" url="@ref docs/managed-performance.md"/>
       <tab type="user" title="Design scenarios (experimental)" url="@ref docs/api-design.md"/>

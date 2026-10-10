@@ -60,6 +60,9 @@ and open the complete reference locally.
 The [contributor guide](development.md) collects tools, experiments, documentation
 maintenance and dependency notices.
 
+See [releasing](releasing.md) for tags, release candidates, artifacts and
+documentation deployment through GitHub Actions.
+
 - [Testing](testing.md) and [fuzzing](../fuzz/README.md): correctness tools.
 - [Managed API measurements](managed-performance.md): reproducible costs and
   known scaling limits, not a promise of linear performance.

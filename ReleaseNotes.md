@@ -41,6 +41,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
   independent of the Windows host code page.
 - [Changed] Naming checks omit statistics about suppressed diagnostics while
   retaining project diagnostics and failure exit codes.
+- [Added] Tag-triggered and manual release automation, version-specific release
+  descriptions, release candidates, verified bundles and GitHub Pages deployment
+  through Actions. Standalone PowerShell and Python commands prepare release PRs;
+  merging a release PR automatically starts tag creation and publication.
+  See [release process](docs/releasing.md).
 
 ### Known limitations
 
