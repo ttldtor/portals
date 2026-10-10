@@ -250,7 +250,22 @@ public:
       }
     }
 
-    auto closed = cleanup.empty() ? session_.close() : session_.closeWithOutput(std::move(cleanup), deadline);
+    if (!cleanup.empty()) {
+      // Joining uncertain native I/O may outlive the drain deadline. Start the
+      // mandatory restoration budget only after no worker borrows the old batch.
+      auto joined = session_.joinOutputWriter();
+
+      if (!joined) {
+        if (failure) {
+          failure->restoration_code = joined.error().native_code;
+        } else {
+          failure = joined.error();
+        }
+      }
+    }
+
+    auto closed =
+      cleanup.empty() ? session_.close() : session_.closeWithOutput(std::move(cleanup), deadlineAfter(timeout_));
 
     if (!closed) {
       if (failure) {

@@ -183,11 +183,18 @@ private:
    */
   [[nodiscard]] std::expected<void, TerminalError> saveCursorVisibility() noexcept;
 
+  /** @brief Join a native output worker before the application starts its final cleanup budget.
+   * Pending bytes remain owned by the session and are never replayed by this operation.
+   * Host/driver progress is required; this ownership boundary has no hard deadline.
+   * @return Success, including an already closed session, or the native worker cleanup error.
+   */
+  [[nodiscard]] std::expected<void, TerminalError> joinOutputWriter() noexcept;
+
   /** @brief Application-only final batch after discarding pending/uncertain output, then always restore OS modes.
    * Windows first cancels and joins the previous writer. No old frame suffix is replayed. Host/driver progress
    * is still required for join/restoration; a hard close deadline is not promised.
    * @param bytes Preallocated bounded restoration batch; its VT policy belongs to the native application adapter.
-   * @param deadline Fresh steady-clock output deadline shared by adapter drain and this final batch.
+   * @param deadline Absolute steady-clock deadline for the final batch; joining a worker does not extend it.
    * @return Success, including repeated close, or output error retaining a subsequent native cleanup error.
    */
   [[nodiscard]] std::expected<void, TerminalError> closeWithOutput(std::string bytes,

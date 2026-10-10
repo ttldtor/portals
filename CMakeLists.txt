@@ -490,7 +490,8 @@ if(PORTALS_BUILD_TESTS)
     target_link_libraries(portals_terminal_windows PRIVATE portals::core)
     portals_enable_warnings(portals_terminal_windows)
     add_test(NAME portals.terminal.windows COMMAND portals_terminal_windows)
-    set_tests_properties(portals.terminal.windows PROPERTIES TIMEOUT 30)
+    # Sequential ConPTY cases retain their own deadlines; older hosts drain large batches more slowly.
+    set_tests_properties(portals.terminal.windows PROPERTIES TIMEOUT 120)
   endif()
 
   add_executable(portals_probe_query_tests tests/probe_query.cpp tools/terminal_probe/query.cpp)

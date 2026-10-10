@@ -126,8 +126,9 @@ public:
  * no replay adapter. Replies are matched by mode/status, not authenticated. The adapter requires the steady-clock epoch
  * and exclusive terminal I/O.
  *
- * Close uses a fresh bounded deadline to drain retryable output and restore managed screen/mouse state, then closes the
- * OS session. Its noexcept destructor performs best effort.
+ * Close gives retryable output drain and final managed screen/mouse restoration separate fresh I/O budgets, then closes
+ * the OS session. Joining uncertain Windows I/O can exceed the drain budget; the restoration budget starts after that
+ * join. These budgets do not bound total close duration. Its noexcept destructor performs best effort.
  *
  * XTSAVE overwrites one-level tracking/visibility caches; confirmed DECSC capture overwrites saved cursor state.
  * Nested screen owners, previously saved caches and competing mode changes are unsupported. Setup/cleanup bypass frame
@@ -135,7 +136,8 @@ public:
  *
  * @param handles Borrowed native input/output handles, duplicated by TerminalSession.
  * @param options Positive resource limits, including retained non-query startup input bytes.
- * @param modeTimeout Positive startup and separate shutdown I/O budget, in milliseconds.
+ * @param modeTimeout Positive I/O budget for startup, shutdown drain and final restoration, applied separately in
+ * milliseconds. It does not bound a native worker join or total shutdown duration.
  * @param mouseReporting Enable managed POSIX mouse modes; false skips only mouse setup I/O.
  * @param screen ALTERNATE_SCREEN preserves the caller's main screen/cursor/rendition; MAIN_SCREEN paints it directly.
  * Alternate screen ownership starts on the main screen and is not nestable. POSIX saved cursor-visibility storage

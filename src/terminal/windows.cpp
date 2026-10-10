@@ -720,6 +720,16 @@ std::expected<void, TerminalError> TerminalSession::saveCursorVisibility() noexc
   return {};
 }
 
+std::expected<void, TerminalError> TerminalSession::joinOutputWriter() noexcept {
+  if (!impl_) {
+    return {};
+  }
+
+  const int joined = impl_->stopWriter();
+
+  return joined == 0 ? std::expected<void, TerminalError>{} : std::unexpected(systemError(static_cast<DWORD>(joined)));
+}
+
 std::expected<void, TerminalError> TerminalSession::closeWithOutput(std::string bytes,
                                                                     TerminalDeadline deadline) noexcept {
   if (!impl_) {
