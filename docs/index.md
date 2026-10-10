@@ -5,6 +5,9 @@ development; managed and declarative APIs are experimental. Read the
 [current limitations](limitations.md) before relying on a platform or
 lifecycle guarantee.
 
+See [release notes](../ReleaseNotes.md) for changes by version and publication
+status.
+
 ## First visit: read in this order
 
 1. [Getting started](getting-started.md): build Portals and launch the gallery.

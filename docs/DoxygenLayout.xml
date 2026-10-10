@@ -11,6 +11,7 @@
       <tab type="user" title="Managed controls" url="@ref docs/managed-controls.md"/>
       <tab type="user" title="Use the installed package" url="@ref docs/package.md"/>
       <tab type="user" title="Current limitations" url="@ref docs/limitations.md"/>
+      <tab type="user" title="Release notes" url="@ref ReleaseNotes.md"/>
     </tab>
     <tab type="usergroup" title="2. Build an application">
       <tab type="user" title="Application runner" url="@ref docs/application.md"/>

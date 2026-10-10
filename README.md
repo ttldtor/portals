@@ -6,6 +6,8 @@ typed properties and immutable models, layouts, controls and LineEdit, virtual
 lists/tables, Canvas/charts, styles/themes, bounded terminal output and causal
 diagnostics.
 
+See [release notes](ReleaseNotes.md) for implemented changes and release status.
+
 Start with the [documentation guide and reading order](docs/index.md), then
 [build and run your first example](docs/getting-started.md). See
 [architecture](docs/architecture.md) for ownership, event flow and customization,
