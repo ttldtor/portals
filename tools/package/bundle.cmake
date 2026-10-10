@@ -134,10 +134,7 @@ file(MAKE_DIRECTORY "${payload}/bin" "${payload}/docs/html" "${payload}/install"
 bundleRun("${CMAKE_COMMAND}" --install "${build}" --config Release --prefix "${payload}/install")
 file(COPY "${build}/docs/html/" DESTINATION "${payload}/docs/html")
 file(COPY "${source}/examples/" DESTINATION "${payload}/examples/source")
-file(COPY "${source}/tests/package_consumer/" DESTINATION "${payload}/examples/external-consumer")
-if(CMAKE_HOST_WIN32)
-  file(COPY "${source}/tests/support/no_dialogs.cpp" DESTINATION "${payload}/examples/external-consumer")
-endif()
+bundleStageConsumer("${source}" "${payload}/examples/external-consumer")
 file(COPY "${source}/themes" DESTINATION "${payload}")
 file(COPY "${source}/tests/fixtures/traces" DESTINATION "${payload}/data")
 file(COPY "${source}/examples/replay/data.hpp" DESTINATION "${payload}/data")
@@ -247,7 +244,7 @@ execute_process(COMMAND "${CMAKE_COMMAND}" -E tar ${archiveArgs} WORKING_DIRECTO
 if(NOT result EQUAL 0)
   message(FATAL_ERROR "Cannot archive bundle; staging preserved at ${WORK_DIR}")
 endif()
-set(smokeArgs "-DARCHIVE=${pendingArchive}" "-DTEST_WORK_DIR=${WORK_DIR}/fresh unpack проверка"
+set(smokeArgs "-DARCHIVE=${pendingArchive}" "-DTEST_WORK_DIR=${WORK_DIR}/fresh unpack é"
   "-DCXX_COMPILER=${CMAKE_CXX_COMPILER}" "-DGENERATOR=${GENERATOR}"
   "-DFORBIDDEN_SOURCE_DIR=${source}" "-DFORBIDDEN_BUILD_DIR=${build}")
 if(DEFINED PYTHON_EXECUTABLE)

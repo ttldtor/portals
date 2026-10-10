@@ -3,6 +3,14 @@
 # Shared, build-independent validation for bundle creation and fresh unpack tests.
 cmake_minimum_required(VERSION 3.24)
 
+function(bundleStageConsumer source destination)
+  file(COPY "${source}/tests/package_consumer/" DESTINATION "${destination}")
+  file(COPY "${source}/examples" DESTINATION "${destination}")
+  if(CMAKE_HOST_WIN32)
+    file(COPY "${source}/tests/support/no_dialogs.cpp" DESTINATION "${destination}")
+  endif()
+endfunction()
+
 function(bundleRun)
   execute_process(COMMAND ${ARGV} RESULT_VARIABLE result)
   if(NOT result EQUAL 0)
