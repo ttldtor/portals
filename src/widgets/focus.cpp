@@ -31,7 +31,8 @@ std::expected<std::unique_ptr<EventRouter>, TreeError> EventRouter::create(Widge
 }
 
 EventRouter::~EventRouter() {
-  if (state_->owner != std::this_thread::get_id() || state_->dispatching || state_->collecting || state_->closing) {
+  if (state_->owner != std::this_thread::get_id() || state_->dispatching || state_->deliveringFocus ||
+      state_->collecting || state_->closing) {
     std::terminate();
   }
 
@@ -178,7 +179,46 @@ std::expected<std::vector<Node<Widget>>, TreeError> EventRouter::focusOrder() {
   return std::expected<std::vector<Node<Widget>>, TreeError>(std::in_place, result);
 }
 
+std::expected<void, TreeError> EventRouter::deliverFocus(Node<Widget> node, bool focused) {
+  auto entry = registration(node);
+
+  if (!entry || !entry->focusCallback) {
+    return {};
+  }
+
+  auto live = tree().inspect(node);
+
+  if (!live) {
+    return live.error() == TreeError::STALE_NODE || live.error() == TreeError::CLOSED ? std::expected<void, TreeError>{}
+                                                                                      : std::unexpected(live.error());
+  }
+
+  if (focused) {
+    auto eligible = tree().inputEligible(node);
+
+    if (!eligible) {
+      return std::unexpected(eligible.error());
+    }
+
+    if (!*eligible || state_->focus != node) {
+      return {};
+    }
+  }
+
+  try {
+    return entry->focusCallback(focused);
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(TreeError::NO_MEMORY);
+  } catch (...) {
+    return std::unexpected(TreeError::CALLBACK_FAILED);
+  }
+}
+
 std::expected<void, TreeError> EventRouter::changeFocus(Node<Widget> node) {
+  if (state_->deliveringFocus) {
+    return std::unexpected(TreeError::WOULD_BLOCK);
+  }
+
   if (node == state_->focus) {
     return {};
   }
@@ -213,10 +253,46 @@ std::expected<void, TreeError> EventRouter::changeFocus(Node<Widget> node) {
   }
 
   if (node.id().session != 0) {
-    return tree().invalidate(node, Invalidation::PAINT);
+    auto status = tree().invalidate(node, Invalidation::PAINT);
+
+    if (!status) {
+      return status;
+    }
   }
 
-  return {};
+  struct FocusGuard {
+    bool &active;
+
+    ~FocusGuard() {
+      active = false;
+    }
+  } guard{state_->deliveringFocus};
+
+  state_->deliveringFocus = true;
+
+  auto lost = deliverFocus(previous, false);
+  auto gained = deliverFocus(node, true);
+
+  return lost ? gained : lost;
+}
+
+std::expected<Node<Widget>, TreeError> EventRouter::checkedFocus() {
+  auto entry = registration(state_->focus);
+
+  if (!entry || !entry->focusable) {
+    return Node<Widget>{};
+  }
+
+  auto eligible = tree().inputEligible(state_->focus);
+
+  if (!eligible) {
+    return eligible.error() == TreeError::STALE_NODE || eligible.error() == TreeError::CLOSED
+             ? std::expected<Node<Widget>, TreeError>(Node<Widget>{})
+             : std::unexpected(eligible.error());
+  }
+
+  // A callback can retire the selected target. Do not start another callback cycle here.
+  return *eligible ? state_->focus : Node<Widget>{};
 }
 
 std::expected<Node<Widget>, TreeError> EventRouter::focused() {
@@ -259,7 +335,7 @@ std::expected<Node<Widget>, TreeError> EventRouter::focused() {
       return std::unexpected(changed.error());
     }
 
-    return next;
+    return checkedFocus();
   } catch (const std::bad_alloc &) {
     return std::unexpected(TreeError::NO_MEMORY);
   }
@@ -326,7 +402,7 @@ std::expected<Node<Widget>, TreeError> EventRouter::traverse(bool reverse) {
       return std::unexpected(changed.error());
     }
 
-    return next;
+    return checkedFocus();
   } catch (const std::bad_alloc &) {
     return std::unexpected(TreeError::NO_MEMORY);
   }

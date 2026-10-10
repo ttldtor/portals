@@ -81,7 +81,7 @@ int main() {
   const auto form = take(scene->emplace<Column>(scene->root(), LinearOptions{.padding = {1, 1, 1, 1}}));
 
   nodes.title = take(scene->emplace<Label>(form, text("Composed prices: edit, run, inspect")));
-  nodes.editor = take(scene->emplace<LineEdit>(form));
+  nodes.editor = take(scene->emplace<LineEdit>(form, LineEditOptions{.editMode = EditMode::EXPLICIT}));
   take(scene->bind(nodes.editor, name, edited));
 
   const auto actions = take(scene->emplace<Row>(form, LinearOptions{.gap = 1}));

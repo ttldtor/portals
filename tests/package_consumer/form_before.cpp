@@ -12,7 +12,7 @@ public:
     const auto column = take(tree.emplace<Column>(app.root()));
 
     nodes.title = take(tree.emplace<Label>(column, text("Name: Enter saves | F2 theme | F10 quit")));
-    nodes.editor = take(tree.emplace<LineEdit>(column));
+    nodes.editor = take(tree.emplace<LineEdit>(column, LineEditOptions{.editMode = EditMode::EXPLICIT}));
     nodes.alerts = take(tree.emplace<CheckBox>(column, text("Alerts")));
     nodes.run = take(tree.emplace<Button>(column, text("Run")));
     nodes.status = take(tree.emplace<Label>(column, text("Ready")));

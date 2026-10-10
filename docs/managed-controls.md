@@ -79,13 +79,17 @@ notification admission. Resynchronization does not repeat a business callback.
 State invalidation must be `PAINT` or `LAYOUT`; `NONE` cannot guarantee this
 recovery and is rejected.
 
-Line editing keeps the existing contract:
+Line editing applies `LineEditOptions::editMode` equally to input, clipboard and
+fluent text changes; see [editing modes](line-edit.md):
 
-- Typing changes the local draft; losing focus does not commit it.
+- IMMEDIATE is the default: changed valid candidates publish without Enter.
+- ON_COMPLETION confirms a dirty draft synchronously on blur or Enter.
+- EXPLICIT preserves the previous opt-in draft/Enter behavior and keeps drafts on blur.
 - Enter validates and commits only if the source revision still matches.
 - Rejected validation or a revision conflict preserves the draft.
 - Escape adopts the latest committed value.
-- Invalid text and over-limit edits retain the previous draft.
+- Invalid text and over-limit edits retain the previous draft; semantic rejection
+  keeps the newly accepted intermediate text visible without publishing it.
 
 The standard behavior executes before the result callback. Returning a callback
 error cannot undo an already committed checkbox toggle or edit. The LineEdit
@@ -155,6 +159,13 @@ helpers remain supported.
 Managed operations return `expected<..., ManagedError>`. The error retains its
 phase, node identity and original `TreeError`, `StyleError` or `ApplicationError`.
 It can also retain an independent runner/restoration error and cleanup failure.
+`ManagedError::cause` keeps its original three variant alternatives. The optional
+`text` detail retains an exact `TextError`, including its byte offset; the optional
+`resource` detail retains an exact `TextResourceError`. Text/resource adapters can
+keep a compatible tree category in `cause` while preserving the original typed
+detail. Managed diagnostics includes the shared `<portals/text_resource.hpp>`
+resource categories without importing text factories.
+Existing visitors over the tree/style/application variant remain valid.
 The run wrapper is required when the caller needs these complete details;
 calling the `ApplicationScene` compatibility hooks directly cannot carry the
 whole error object through their `TreeError` return type.
@@ -176,6 +187,111 @@ Failed construction removes the attempted child; earlier successful children
 remain scene-owned. Destroying the scene cleans a partially built form. This is
 resource cleanup, not rollback of external effects performed by constructors,
 mount hooks or business callbacks.
+
+## Bounded scene diagnostics
+
+`ManagedOptions::diagnostics` configures positive `maxErrors` (64 by default),
+`maxContexts` (8) and `maxContextBytes` (1024) limits. The scene constructs a fixed
+array of error slots and a separate overflow slot before mounting its root,
+including the empty context containers. This finite construction cost allows
+reporting without creating or moving containers, including MSVC Debug iterator
+proxies. Invalid or unrepresentable budgets return
+`INVALID_ARGUMENT`; failed allocation returns `NO_MEMORY` without mounting a
+partial subtree. The count limit bounds the error history; the context count and
+combined label-byte limit bound the owning causal trace of each error.
+
+`reportError(error, contexts, origin)` collects an explicit error and notifies the
+optional `onError` observer. It does not request a frame, stop the runner or select
+a recovery policy. Checked setup calls continue returning their explicit
+`expected` errors and are not automatically duplicated in the history. Managed
+runtime failures are recorded through the existing first-failure path, which
+still requests orderly shutdown and returns the original failure from `run()`.
+Successful operations and ordinary redraws do not create diagnostic entries.
+
+Each `ManagedDiagnostic` owns a `ManagedError` and its copied
+`ManagedDiagnosticContext` breadcrumbs. A context contains `operation`, `name`,
+`scope`, `expectedType` and the original `origin`. Contexts are copied in supplied
+order, retaining up to `maxContexts`; label bytes are copied in the field order
+above until the shared `maxContextBytes` budget is exhausted. Truncation is a
+byte-prefix policy, so a truncated UTF-8 label may need escaping when formatted.
+`contextsTruncated` identifies either limit. Source locations are stored by value
+under the [standard source-location contract](https://eel.is/c++draft/support.srcloc).
+This is a causal trace, not a physical call stack. Deferred operations must capture an origin at
+registration and pass it when reporting; a default report origin only identifies
+the `reportError` call site. No formatted report or borrowed exception is stored.
+
+```cpp
+ManagedOptions options;
+options.diagnostics.maxErrors = 32;
+
+auto created = ManagedScene::create(application, options);
+if (!created) {
+  return std::unexpected(created.error());
+}
+
+auto scene = std::move(*created);
+auto registered = scene->onError([](const ManagedDiagnostic &diagnostic) {
+  // Inspect typed fields here; the reference is borrowed for this call only.
+  // Presentation/output remains application policy.
+});
+if (!registered) {
+  return std::unexpected(registered.error());
+}
+
+std::array contexts{ManagedDiagnosticContext{
+  "lookup", "message", "form", "LineEdit", std::source_location::current()}};
+auto reported = scene->reportError(
+  ManagedError{ManagedPhase::STATE, {}, TreeError::INVALID_ARGUMENT, {}, {}}, contexts);
+if (!reported) {
+  // Handle WRONG_THREAD or CLOSED explicitly.
+}
+```
+
+After `maxErrors` entries, the oldest errors survive and `droppedErrors` increases.
+The observer still receives the original overflowing error and report origin in
+an allocation-free reused diagnostic with `storageOverflow = true`; its
+contexts are omitted and `contextsTruncated` is set if contexts were supplied.
+When copying context storage fails, the stored original error and origin survive,
+the partial trace is discarded, `contextUnavailable` is set and `contextFailures`
+increases. Recording an error without contexts and the overflow fallback require
+no allocation after successful scene creation. Construction of caller arguments
+and allocations performed by an observer happen outside that guarantee.
+
+`onError` owns its copyable callback and mutable captures. It runs synchronously
+on UI after recording and can inspect `diagnostics()`. It must not retain a
+reference to the borrowed diagnostic, its labels or context storage. A thrown
+exception sets the record's `observerFailed` flag and increments
+`observerFailures`, preserving the original cause and stop policy. Nested
+`reportError` calls are collected, set `notificationSuppressed`, and increment
+`suppressedNotifications`; they do not recursively invoke the observer and are
+available through inspection/draining. Overflowing temporary flags are only
+available during their observer call; the batch retains the counters. Counters
+saturate at `size_t`'s maximum.
+
+Observer registration, scene mutation, `close()`, `clearErrors()` and
+`drainErrors()` return `WOULD_BLOCK` while an observer is active. Replacement or
+clearing outside a call releases the prior callback; close releases it after
+marking the scene closed. Immediate managed-error notifications occur before
+terminal restoration and never write mandatory stdout/stderr or display a dialog. After shutdown, `run()`
+adds independent application/restoration and cleanup details to its retained
+first runtime diagnostic. If that record was cleared or drained earlier, the
+complete final error is appended instead of rewriting an unrelated entry. An
+application-only runtime error is collected at that final boundary. No observer
+is called after close.
+
+`diagnostics()` copies an owning `ManagedDiagnosticBatch`; `drainErrors()` copies
+then clears it, preserving the constructed slots and context-container storage.
+Copies are constructed directly at the error boundary; no `noexcept` container
+move is relied on for allocation handling. Allocation failure returns
+`NO_MEMORY` and leaves the history/counters unchanged. `clearErrors()` clears
+history and counters without allocating. Neither clearing method resets a runtime
+first failure or changes shutdown policy. Inspection, clear and drain remain
+available after close, with `batch.closed = true`; reporting and registration
+return `CLOSED`. All these operations check UI affinity first and return
+`WRONG_THREAD` without mutating the collector or calling an observer. These are
+checked scene operations; a detached/worker-safe property channel belongs to the
+later property facade, not this collector foundation. The scene and application
+must remain alive throughout any operation.
 
 ## Installed consumer and Gate B
 

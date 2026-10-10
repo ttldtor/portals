@@ -47,6 +47,11 @@ rejected. Removing the mounted widget leaves a stale checked identity, not a
 live owning pointer. `Application`, `ManagedScene` and mutable widget operations
 keep their UI-thread contracts.
 
+`ui::Ref<T>` shares the same publication transaction and low-level `node()`
+observation. It adds [fluent text properties](text-property.md) for control
+captions and LineEdit drafts, including owning read-only concatenation. The
+existing `NodeRef<T>` interface remains available for other checked tree access.
+
 ## Explicit customization
 
 Standard controls inherit their normal managed bindings, styles and LineEdit

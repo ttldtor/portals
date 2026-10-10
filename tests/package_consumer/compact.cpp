@@ -3,6 +3,7 @@
 #include <portals/aggregate_columns.hpp>
 #include <portals/input_match.hpp>
 #include <portals/text_format.hpp>
+#include <portals/text_value.hpp>
 
 #include <array>
 #include <string>
@@ -14,6 +15,20 @@ struct Quote {
 
 int main() {
   using namespace portals;
+  const auto formatted = text("{}", 123.0).resolve(WidthPolicy{});
+  const auto currency =
+    i18n("currency").resolve(WidthPolicy{}, [](std::string_view key) -> std::expected<std::string, TextResourceError> {
+      if (key == "currency") {
+        return "USD";
+      }
+
+      return std::unexpected(TextResourceError::MISSING_RESOURCE);
+    });
+
+  if (!formatted || formatted->bytes() != "123" || !currency || currency->bytes() != "USD") {
+    return 1;
+  }
+
   static_assert(keyPressed(InputEvent{KeyEvent{.key = InputKey::F2}}, {InputKey::F1, InputKey::F2}));
   auto columns =
     aggregateColumns<Quote>(std::array{ColumnCaption{"Bid", 9}, ColumnCaption{"Ask", 9}}, cellFormat<double>("{:.2f}"));

@@ -17,7 +17,7 @@ public:
     const auto column = take(tree.emplace<Column>(app.root()));
     title_ = take(tree.emplace<Label>(column, text("Portals gallery | F2 theme | F10 quit")));
     label_ = take(tree.emplace<Label>(column, text("Name (Enter commits; Tab changes focus):")));
-    editor_ = take(tree.emplace<LineEdit>(column));
+    editor_ = take(tree.emplace<LineEdit>(column, LineEditOptions{.editMode = EditMode::EXPLICIT}));
     check_ = take(tree.emplace<CheckBox>(column, text("Alerts")));
     button_ = take(tree.emplace<Button>(column, text("Run (no model change)")));
     quit_ = take(tree.emplace<Button>(column, text("Quit")));

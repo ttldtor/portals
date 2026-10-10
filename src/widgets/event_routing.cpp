@@ -106,7 +106,7 @@ std::expected<void, TreeError> EventRouter::canBind(Node<Widget> node) {
     return allowed;
   }
 
-  if (state_->dispatching) {
+  if (state_->dispatching || state_->deliveringFocus) {
     return std::unexpected(TreeError::WOULD_BLOCK);
   }
 
@@ -142,13 +142,14 @@ std::expected<void, TreeError> EventRouter::canBind(Node<Widget> node) {
 
 std::expected<ActionBinding, TreeError>
 EventRouter::add(Node<Widget> node, std::function<std::expected<EventReply, TreeError>(const RoutedEvent &)> callback,
-                 bool focusable) {
+                 bool focusable, std::function<std::expected<void, TreeError>(bool)> focusCallback) {
   auto entry = std::make_shared<detail::ActionRegistration>();
 
   entry->cancellation = std::make_shared<detail::ActionCancellation>();
   entry->node = node;
   entry->focusable = focusable;
   entry->callback = std::move(callback);
+  entry->focusCallback = std::move(focusCallback);
 
   // Callback construction/move may reenter, remove the target, or fill the registry.
   auto allowed = canBind(node);
@@ -288,7 +289,7 @@ std::expected<DispatchResult, TreeError> EventRouter::invoke(Node<Widget> target
     return std::unexpected(allowed.error());
   }
 
-  if (state_->dispatching) {
+  if (state_->dispatching || state_->deliveringFocus) {
     return std::unexpected(TreeError::WOULD_BLOCK);
   }
 
@@ -309,7 +310,7 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
     return std::unexpected(allowed.error());
   }
 
-  if (state_->dispatching) {
+  if (state_->dispatching || state_->deliveringFocus) {
     return std::unexpected(TreeError::WOULD_BLOCK);
   }
 
@@ -395,6 +396,19 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
           }
 
           candidate = snapshot->parent;
+        }
+      }
+
+      if (target->id().session != 0) {
+        auto eligible = tree().inputEligible(*target);
+
+        if (!eligible && eligible.error() != TreeError::STALE_NODE && eligible.error() != TreeError::CLOSED) {
+          return std::unexpected(eligible.error());
+        }
+
+        if (!eligible || !*eligible) {
+          // Preserve the original hit: focus callbacks must not redirect this mouse event.
+          return route(Node<Widget>{}, *mouse);
         }
       }
 

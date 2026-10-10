@@ -18,6 +18,7 @@ struct ActionRegistration {
   bool focusable{};
   std::shared_ptr<ActionCancellation> cancellation;
   std::function<std::expected<EventReply, TreeError>(const RoutedEvent &)> callback;
+  std::function<std::expected<void, TreeError>(bool)> focusCallback;
 };
 } // namespace portals::detail
 
@@ -33,6 +34,7 @@ struct EventRouter::State {
   // These UI-only guards reject nested delivery and mutations during capture reclamation;
   // callback disconnect uses the independent atomic flag and remains available on any thread.
   bool dispatching{};
+  bool deliveringFocus{};
   bool collecting{};
   bool closing{};
 };

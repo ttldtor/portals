@@ -151,7 +151,8 @@ int main(int argc, char **argv) {
     ui::column(
       ui::label("Name: Enter saves | F2 theme | F10 quit").reference(title),
 
-      ui::lineEdit(name, {.result = editAction, .validate = nonemptyName}).reference(editor),
+      ui::lineEdit(name, {.result = editAction, .options = {.editMode = EditMode::EXPLICIT}, .validate = nonemptyName})
+        .reference(editor),
 
       ui::checkbox("Alerts", alerts, alertsAction).reference(alertsBox),
 

@@ -4,6 +4,7 @@
 
 #include <portals/grid.hpp>
 #include <portals/managed.hpp>
+#include <portals/ui_ref.hpp>
 
 #include <algorithm>
 #include <tuple>
@@ -62,6 +63,13 @@ struct MountContext {
 
 /** @brief Internal bridge to existing managed validation and private consuming recipes. */
 struct Access {
+  /** @param scene Borrowed managed owner; observed only during UI-affine publication.
+   * @return Weak token that expires before scene destruction releases registrations.
+   */
+  static std::weak_ptr<const void> lifetime(ManagedScene &scene) {
+    return scene.lifetime_;
+  }
+
   /** @brief Mount a root or child inside the same transaction.
    * @tparam T Public Widget subtype constructed by the
    * recipe.
@@ -118,14 +126,120 @@ public:
 
 private:
   friend class Description<T>;
+  template <class U> friend class Ref;
 
   /** @brief Shared identity storage; never owns a widget or its scene. */
   struct Slot {
-    Node<T> node;   ///< Published identity, empty until the complete mount succeeds.
-    bool pending{}; ///< Reserved by an in-progress mount, including across reentrant calls.
+    Node<T> node;             ///< Published identity, empty until the complete mount succeeds.
+    bool pending{};           ///< Reserved by an in-progress mount, including across reentrant calls.
+    detail::RefTarget target; ///< Weak scene context for the additive fluent reference.
+    bool fluent{};            ///< Only fluent references enforce their immutable construction-thread identity.
   };
 
   std::shared_ptr<Slot> slot_;
+};
+
+/** @brief Additive typed observation with fluent caption/draft access, sharing NodeRef publication.
+ * @tparam T Public Widget subtype; text() is available for Control subtypes and exactly LineEdit.
+ * Construct on the receiving UI thread. Publish with Description::reference only after successful mount.
+ * Copies share the observation and never own the scene/widget. Copy/destruction may occur on other
+ * threads after publication, but operations reject them before reading mutable scene/slot state.
+ * Synchronize transfer; publication must not race foreign-thread use. The low-level node() remains UI-only.
+ * Construction allocates and can throw; moved-from references produce an empty text observation.
+ */
+template <class T> class Ref : public NodeRef<T> {
+public:
+  /** @brief Allocate an empty observing slot on the UI thread; may throw std::bad_alloc. */
+  Ref() {
+    this->slot_->fluent = true;
+  }
+
+  /** @param resolver Optional owning synchronous adapter used only for i18n expressions.
+   * @param origin Property acquisition call site used by assignment/+= diagnostics.
+   * @return Owning observing proxy, valid after Ref destruction; never extends scene/widget lifetime.
+   * Resolver capture/storage allocation may throw before a mutation starts.
+   */
+  TextProperty text(TextResolver resolver = {}, std::source_location origin = std::source_location::current()) const
+    requires(std::derived_from<T, Control> || std::same_as<T, LineEdit>)
+  {
+    auto target = this->slot_ ? std::shared_ptr<detail::RefTarget>(this->slot_, &this->slot_->target) : nullptr;
+    constexpr std::string_view TYPE = std::same_as<T, LineEdit>   ? "LineEdit"
+                                      : std::same_as<T, Label>    ? "Label"
+                                      : std::same_as<T, Button>   ? "Button"
+                                      : std::same_as<T, CheckBox> ? "CheckBox"
+                                                                  : "Control";
+
+    return TextProperty(std::move(target), std::move(resolver), TYPE, origin);
+  }
+
+  /** @param change Owning policy override for every mutation of this proxy; does not change editor options.
+   * @param resolver Optional owning synchronous resource adapter.
+   * @param origin Property acquisition call site retained in diagnostics.
+   * @return Observing editor proxy; RESET_BASELINE also clears equal-text history without redraw.
+   */
+  TextProperty text(ProgrammaticChange change, TextResolver resolver = {},
+                    std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, LineEdit>
+  {
+    return TextProperty(target(), std::move(resolver), "LineEdit", origin, change);
+  }
+
+  /** @param origin Command call site retained in diagnostics.
+   * @return Owning checked Undo result, with exact reporting provenance for managed button adapters.
+   */
+  EditorCommandResult undo(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, LineEdit>
+  {
+    return detail::editorCommand(target(), false, false, origin);
+  }
+
+  /** @param origin Command call site retained in diagnostics.
+   * @return Owning checked Redo result; empty history is a no-op without callbacks or redraw.
+   */
+  EditorCommandResult redo(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, LineEdit>
+  {
+    return detail::editorCommand(target(), true, false, origin);
+  }
+
+  /** @param origin Command call site retained in diagnostics.
+   * @return Owning checked grouping boundary; does not change text or presentation.
+   */
+  EditorCommandResult stopGrouping(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, LineEdit>
+  {
+    return detail::editorCommand(target(), false, true, origin);
+  }
+
+  /** @return Effective checked availability without adoption, invalidation or error reporting. */
+  std::expected<HistoryAvailability, TreeError> historyAvailability() const
+    requires std::same_as<T, LineEdit>
+  {
+    return detail::editorAvailability(target());
+  }
+
+  /** @return Effective Undo availability; false on checked errors without reporting. */
+  bool canUndo() const
+    requires std::same_as<T, LineEdit>
+  {
+    const auto value = historyAvailability();
+
+    return value && value->canUndo;
+  }
+
+  /** @return Effective Redo availability; false on checked errors without reporting. */
+  bool canRedo() const
+    requires std::same_as<T, LineEdit>
+  {
+    const auto value = historyAvailability();
+
+    return value && value->canRedo;
+  }
+
+private:
+  std::shared_ptr<detail::RefTarget> target() const {
+    return this->slot_ ? std::shared_ptr<detail::RefTarget>(this->slot_, &this->slot_->target) : nullptr;
+  }
 };
 
 /** @brief Owning setup action invoked once after construction, before children.
@@ -135,13 +249,13 @@ private:
  */
 template <class T> using Setup = std::move_only_function<std::expected<void, ManagedError>(ManagedScene &, Node<T>)>;
 
-/** @brief Owning optional editor customization, preserving existing LineEdit behavior. */
+/** @brief Owning optional editor customization and confirmation policy. */
 struct LineEditConfig {
   std::function<std::expected<void, TreeError>(LineEditResult)> result{}; ///< Optional callback after standard editing.
   LineEditOptions options{}; ///< Editor limits and appearances; scene width policy overrides options.widthPolicy.
   SizePolicy policy{};       ///< Owning layout constraints validated by the existing layout engine.
   std::shared_ptr<Clipboard> clipboard{};           ///< Optional UI-owned clipboard adapter retained by the binding.
-  std::function<bool(std::string_view)> validate{}; ///< Optional commit validator; false rejects Enter.
+  std::function<bool(std::string_view)> validate{}; ///< Optional publication validator; false retains visible draft.
 };
 
 /** @brief Move-only recipe whose strings, arguments, children and callbacks survive their sources.
@@ -288,6 +402,10 @@ private:
     for (auto &reference : state->references) {
       auto slot = reference.slot_;
 
+      if (slot && slot->fluent && slot->target.owner != std::this_thread::get_id()) {
+        return std::unexpected(detail::error(*node, TreeError::WRONG_THREAD));
+      }
+
       if (!slot || slot->node != Node<T>{} || slot->pending) {
         return std::unexpected(detail::error(*node, TreeError::INVALID_ARGUMENT));
       }
@@ -297,8 +415,17 @@ private:
       context.release.push_back([slot] {
         slot->pending = false;
       });
-      context.publish.push_back([slot, value = *node] {
+      context.publish.push_back([slot, value = *node, owner = &scene, lifetime = detail::Access::lifetime(scene)] {
         slot->node = value;
+        slot->target.node = value;
+        slot->target.scene = owner;
+        slot->target.lifetime = lifetime;
+
+        if constexpr (std::derived_from<T, Control>) {
+          slot->target.caption = value;
+        } else if constexpr (std::same_as<T, LineEdit>) {
+          slot->target.draft = value;
+        }
       });
       slot->pending = true;
     }
@@ -422,6 +549,23 @@ inline Description<Label> label(std::string_view text, ControlStyle style = {}, 
  */
 inline Description<Button> button(std::string_view text, std::function<std::expected<void, TreeError>()> action,
                                   ControlStyle style = {}, SizePolicy policy = {}) {
+  return control<Button>(text, style, policy)
+    .setup([action = std::move(action)](ManagedScene &scene, Node<Button> node) mutable {
+      return scene.onClick(node, std::move(action));
+    });
+}
+
+/** @tparam Callback Owning callable returning exactly EditorCommandResult.
+ * @param text UTF-8 caption copied immediately.
+ * @param action Owning editor command callback; return field.undo/redo directly to preserve its receipt.
+ * @param style Owning manual appearances.
+ * @param policy Owning layout constraints.
+ * @return Single-use button recipe with exact command provenance reporting.
+ */
+template <class Callback>
+  requires std::same_as<std::invoke_result_t<Callback &>, EditorCommandResult>
+inline Description<Button> button(std::string_view text, Callback action, ControlStyle style = {},
+                                  SizePolicy policy = {}) {
   return control<Button>(text, style, policy)
     .setup([action = std::move(action)](ManagedScene &scene, Node<Button> node) mutable {
       return scene.onClick(node, std::move(action));

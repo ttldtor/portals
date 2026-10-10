@@ -18,6 +18,9 @@
       <tab type="usergroup" title="Controls and layout">
         <tab type="user" title="Basic controls" url="@ref docs/controls.md"/>
         <tab type="user" title="LineEdit" url="@ref docs/line-edit.md"/>
+        <tab type="user" title="Text history" url="@ref docs/text-history.md"/>
+        <tab type="user" title="Editor Undo and Redo" url="@ref docs/editor-history.md"/>
+        <tab type="user" title="Editor History Demo" url="@ref docs/editor-history-demo.md"/>
         <tab type="user" title="Row and Column" url="@ref docs/layout.md"/>
         <tab type="user" title="Grid and Overlay" url="@ref docs/grid.md"/>
         <tab type="user" title="Styles and themes" url="@ref docs/styles.md"/>

@@ -138,5 +138,5 @@ Typed themes/PSS change presentation within the same tree/frame path.
 
 The runnable [examples](examples.md) show both a short form main and a custom
 widget with an independent model. Their helpers make setup errors explicit;
-they do not add public DSL/lifetime semantics. Coroutines, general Undo/Redo,
+they do not add public DSL/lifetime semantics. Coroutines, application-wide Undo/Redo,
 system clipboard adapters and Drag-and-Drop remain after-MVP work.

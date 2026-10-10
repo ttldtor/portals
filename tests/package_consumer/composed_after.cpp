@@ -70,7 +70,7 @@ int main() {
     return {};
   };
   const auto format = [](const ModelRow<Ohlc> &row) {
-    return text("Close " + std::to_string(static_cast<int>(row.value.close)));
+    return virtualConsumer::text("Close " + std::to_string(static_cast<int>(row.value.close)));
   };
   const auto project = [](const Ohlc &value) {
     return std::optional{value};
@@ -101,7 +101,7 @@ int main() {
 
     return ui::column(
       LinearOptions{.padding = {1, 1, 1, 1}}, ui::label(heading).reference(title),
-      ui::lineEdit(name, {.result = edited}).reference(editor),
+      ui::lineEdit(name, {.result = edited, .options = {.editMode = EditMode::EXPLICIT}}).reference(editor),
       ui::row(LinearOptions{.gap = 1}, ui::button("Run", clicked).reference(button),
               ui::custom<Badge>(caption).reference(badge).onEvent(customEvent)),
       ui::row(LinearOptions{.gap = 1},
