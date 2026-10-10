@@ -1,5 +1,8 @@
 # Portals documentation
 
+The [online documentation and API reference](https://ttldtor.github.io/portals/)
+contains the guides below and the generated public API reference.
+
 Start here to build an application with Portals. The library is under
 development; managed and declarative APIs are experimental. Read the
 [current limitations](limitations.md) before relying on a platform or
