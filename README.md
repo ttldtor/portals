@@ -1,6 +1,7 @@
 # Portals
 
 [![Build and test](https://github.com/ttldtor/portals/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ttldtor/portals/actions/workflows/ci.yml)
+[![Documentation](https://img.shields.io/badge/docs-online-blue)](https://ttldtor.github.io/portals/)
 ![C++23](https://img.shields.io/badge/C%2B%2B-23-00599C?logo=c%2B%2B)
 [![License: BSL 1.0](https://img.shields.io/badge/License-BSL--1.0-blue.svg)](LICENSE.txt)
 
@@ -9,6 +10,9 @@ It provides a static core for applications with retained widgets, layouts,
 managed controls, virtual lists and tables, and charts. The API and ABI are
 evolving; see the [current limitations](docs/limitations.md) before depending
 on platform or lifecycle guarantees.
+
+Read the [online documentation and API reference](https://ttldtor.github.io/portals/)
+for guides, runnable examples, and public API contracts.
 
 ## Quick start
 
@@ -55,6 +59,7 @@ std::expected<Node<Column>, ManagedError> mountGreeting(Application &app, Manage
 
 ## Documentation
 
+- [Online documentation and API reference](https://ttldtor.github.io/portals/) — published through GitHub Actions.
 - [Documentation guide](docs/index.md) — reading order and topic map.
 - [Getting started](docs/getting-started.md) — build, run examples, and generate local HTML help.
 - [Runnable examples](docs/examples.md) — gallery, dashboard, custom widgets, and options.
