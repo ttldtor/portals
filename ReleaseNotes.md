@@ -3,7 +3,9 @@
 Versions are listed newest first. Entries describe implemented changes;
 planned work is not included. An **Unreleased** heading has no publication date.
 
-## v0.2.0 (Unreleased)
+## Unreleased
+
+## v0.2.0 (2026-10-10)
 
 - [Added] C++23 retained terminal UI core with UI-thread ownership, typed
   errors, bounded scheduling, event routing, focus and an application runner.
