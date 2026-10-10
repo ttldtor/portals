@@ -3,12 +3,66 @@
 #pragma once
 
 #include <portals/controls.hpp>
+#include <portals/text_history.hpp>
+
+#include <source_location>
 
 namespace portals {
+namespace ui::detail {
+struct RefAccess;
+}
+
+/** @brief When an accepted editing candidate is validated and published to its model. */
+enum class EditMode {
+  IMMEDIATE,     ///< Publish each semantic-valid text change; invalid intermediate text remains visible.
+  ON_COMPLETION, ///< Keep a draft until Enter, programmatic activation or focus loss.
+  EXPLICIT       ///< Keep a draft until Enter or programmatic activation; focus loss preserves it.
+};
+
+/** @brief History policy of an explicit programmatic text change. */
+enum class ProgrammaticChange {
+  RECORD,        ///< Record one separate reversible operation; equal text preserves Redo.
+  RESET_BASELINE ///< Discard history after accepting this baseline, even when bytes are equal.
+};
+
+/** @brief Owning exact editor shortcut; only identities surviving router key translation are accepted. */
+struct EditorChord {
+  InputKey key{InputKey::CHARACTER}; ///< CHARACTER, INSERT, PAGE_UP/DOWN or F1 through F12.
+  char32_t scalar{};                 ///< Valid Unicode scalar for CHARACTER; zero for other keys.
+  InputModifiers modifiers{};        ///< Exact modifiers; ASCII character case is normalized.
+};
+
+/** @brief Number of independently configurable Redo aliases. */
+inline constexpr std::size_t LINE_EDIT_REDO_CHORD_COUNT = 2;
+
+/** @brief Fixed-size owning shortcuts; nullopt disables an individual binding. */
+struct LineEditHistoryShortcuts {
+  std::optional<EditorChord> undo{EditorChord{InputKey::CHARACTER, U'z', {.control = true}}}; ///< Default Ctrl+Z.
+  std::array<std::optional<EditorChord>, LINE_EDIT_REDO_CHORD_COUNT> redo{
+    EditorChord{InputKey::CHARACTER, U'y', {.control = true}},
+    EditorChord{InputKey::CHARACTER, U'z', {.shift = true, .control = true}}}; ///< Ctrl+Y and Ctrl+Shift+Z.
+};
+
+/** @brief Effective history commands available without adopting a model revision or changing presentation. */
+struct HistoryAvailability {
+  bool canUndo{}; ///< Enabled writable live editor has an Undo operation and an unchanged external baseline.
+  bool canRedo{}; ///< Enabled writable live editor has a Redo operation and an unchanged external baseline.
+};
+
+namespace detail {
+/** @brief Private admission receipt retained until the managed wrapper reports its own command failure. */
+struct EditorCommandFeedback {
+  bool active{};   ///< One command is admitted under the existing binding reentry guard.
+  bool reported{}; ///< Its exact failure was actually recorded; independent callback errors do not set this flag.
+  std::string_view operation;  ///< Compiler/static-owned command label, without dynamic allocation.
+  std::source_location origin; ///< Public command call site, retained through outcome delivery.
+};
+} // namespace detail
+
 /** @brief Observable editing or service outcome; rejection preserves the draft. */
 enum class LineEditStatus {
   EDITED,            ///< A local draft or selection changed.
-  COMMITTED,         ///< Enter completed Property::set; inspect its exact receipt.
+  COMMITTED,         ///< Confirmation completed Property::set; inspect its exact receipt.
   CANCELLED,         ///< Escape adopted the latest model snapshot.
   COPIED,            ///< Selected bytes were accepted by the clipboard service.
   CONFLICT,          ///< The model revision changed since this draft began.
@@ -19,11 +73,19 @@ enum class LineEditStatus {
   FAILED             ///< A tree, allocation or callback failure; inspect error.
 };
 
-/** @brief Exact result delivered after an input operation on the UI thread. */
+/** @brief Entry path that produced an editing or confirmation outcome. */
+enum class LineEditTrigger {
+  INPUT,  ///< Routed input or programmatic activation.
+  FLUENT, ///< Accepted fluent text mutation.
+  BLUR    ///< Confirmation on synchronous focus loss.
+};
+
+/** @brief Exact editing or confirmation result delivered on the UI thread. */
 struct LineEditResult {
   LineEditStatus status{LineEditStatus::EDITED};       ///< Meaning of this operation.
   std::optional<PropertyUpdate<std::string>> commit{}; ///< Exact successful set receipt, including notification loss.
   std::optional<TreeError> error{}; ///< Underlying tree, allocation, callback or clipboard service failure.
+  LineEditTrigger trigger{LineEditTrigger::INPUT}; ///< Entry path; independent of the confirmation status.
 };
 
 /** @brief Injected UI clipboard boundary; called only from input handling, never from a frame.
@@ -53,6 +115,11 @@ struct LineEditOptions {
   ControlStyle style{};                                            ///< Normal, focused and disabled appearance.
   CellStyle selection{RgbColor{0, 0, 0}, RgbColor{180, 200, 255}}; ///< Whole selected grapheme appearance.
   CellStyle cursor{{}, {}, true, false, true}; ///< Software caret cell; whole wide glyph when it fits.
+  EditMode editMode{EditMode::IMMEDIATE};      ///< Confirmation policy shared by input, paste and fluent text edits.
+  TextHistoryOptions history{};                ///< Enabled by default: 128 combined groups, 1 MiB retained snapshots.
+  bool readOnly{}; ///< User edits and history commands are blocked; explicit programmatic text changes remain allowed.
+  ProgrammaticChange programmaticChange{ProgrammaticChange::RECORD}; ///< Default fluent mutation history policy.
+  LineEditHistoryShortcuts historyShortcuts{}; ///< Exact owning Undo/Redo shortcuts, validated at bind.
 };
 
 /** @brief UI-owned Unicode draft; mutate only through its scoped binding between frames.
@@ -95,8 +162,8 @@ public:
    * @return UTF-8 byte boundary; equals cursor() for an empty selection.
    */
   std::size_t anchor() const;
-  /** @brief Inspect whether a local edit awaits Enter or Escape.
-   * @return True after local replacement until successful commit or cancellation.
+  /** @brief Inspect whether visible text awaits successful publication or cancellation.
+   * @return True for a deferred, semantically rejected or conflicting candidate.
    */
   bool dirty() const;
 
@@ -105,6 +172,7 @@ public:
 
 private:
   friend class LineEditBinding;
+  friend struct ui::detail::RefAccess;
   void revealCursor();
   std::int32_t cellAt(std::size_t byte) const;
   LineEditOptions options_;
@@ -120,7 +188,8 @@ private:
 
 /** @brief Scoped model/action ownership; destroy and move on UI outside frames.
  * Tree, router and scheduler outlive the binding. Call sync before each frame. Drafts survive
- * external revisions; Enter detects conflict, Escape adopts latest. Focus loss never commits.
+ * external revisions; confirmation detects conflict and Escape adopts latest. EditMode selects
+ * immediate publication, confirmation on focus loss, or explicit confirmation only.
  * Admitted callbacks retain state; removal suppresses future callbacks and observer delivery.
  */
 class LineEditBinding {
@@ -146,7 +215,42 @@ public:
    */
   std::expected<void, TreeError> sync(Node<Widget> focused);
 
+  /** @return Success after restoring Undo and applying EditMode, or typed admission/publication failure.
+   * Empty history closes grouping without callbacks or invalidation. Semantic rejection remains a visible draft.
+   */
+
+  std::expected<void, TreeError> undo();
+
+  /** @return Success after restoring Redo and applying EditMode, or typed admission/publication failure. */
+
+  std::expected<void, TreeError> redo();
+
+  /** @return Success after closing grouping without redraw/notification, or typed liveness/reentry failure. */
+
+  std::expected<void, TreeError> stopGrouping();
+
+  /** @return Effective availability, or typed liveness/frame/reentry error; never adopts or reports. */
+
+  std::expected<HistoryAvailability, TreeError> historyAvailability() const;
+
+  /** @return Effective Undo availability; false on checked failure, with no error reporting. */
+  bool canUndo() const;
+
+  /** @return Effective Redo availability; false on checked failure, with no error reporting. */
+  bool canRedo() const;
+
 private:
+  friend struct ui::detail::RefAccess;
+  std::expected<std::uint64_t, TreeError> draftRevision() const;
+
+  friend class ManagedScene;
+  std::expected<void, TreeError> setDraft(GraphemeText text, std::uint64_t revision,
+
+                                          std::optional<ProgrammaticChange> change = {});
+
+  void commandFeedback(std::shared_ptr<detail::EditorCommandFeedback> feedback);
+  std::pair<std::expected<void, TreeError>, bool>
+  historyCommand(bool redo, std::source_location origin = std::source_location::current());
   struct State;
   friend std::expected<LineEditBinding, TreeError>
   bindLineEdit(WidgetTree &, EventRouter &, Node<LineEdit>, std::shared_ptr<Property<std::string>>,
@@ -162,16 +266,22 @@ private:
  * @param router Borrowed router for this tree, outliving binding.
  * @param node Observing editor handle; one action registration is allowed per node.
  * @param model Required shared model owner. External values must satisfy editor text limits.
- * @param result Required owning callback, invoked last for consumed editing operations; may remove
+ * @param result Required owning callback, invoked last for editing/confirmation operations; may remove
  * node/ancestors or destroy the binding. Successful commits stay committed if this callback throws.
  * @param clipboard Optional shared UI service for Ctrl+C/X/V; absence reports CLIPBOARD_FAILED.
- * @param validate Optional commit predicate borrowing the entire candidate only during its call.
+ * @param validate Optional publication predicate borrowing an owned candidate only during its call.
  * False preserves draft with VALIDATION_FAILED; exceptions report FAILED/CALLBACK_FAILED.
  * @return Owning binding or delegated tree/router/property error; invalid initial text is INVALID_ARGUMENT.
  * Internal allocations report NO_MEMORY; by-value argument construction may throw before entry.
- * Enter commits only if the starting revision still matches, including after validator reentry.
+ * Publication uses options.editMode and requires the original revision, including after validator reentry.
+ * IMMEDIATE is the default; semantic rejection retains the accepted candidate without a model set.
+ * Invoke Action::ACTIVATE for the same programmatic confirmation as Enter, in every mode.
+ * History owns bounded text/selection snapshots; accepted edits and restorations precede validator callbacks.
+ * Default Ctrl+Z/Ctrl+Y/Ctrl+Shift+Z chords are configurable; reserved router keys and Undo/Redo overlap reject bind.
+ * Read-only accepts explicit programmatic text changes but blocks user typing/deletion/cut/paste and Undo/Redo.
  * Escape adopts latest. Shift+arrows/Home/End select; Ctrl+A selects all. Cut changes draft only after
- * a successful service write. Paste rejects invalid UTF-8, CR/LF/U+2028/U+2029 and whole over-limit edits.
+ * a successful service write, then applies the same publication policy as input and fluent edits.
+ * Paste rejects invalid UTF-8, CR/LF/U+2028/U+2029 and whole over-limit edits.
  * Other controls remain logical data displayed as safe renderer placeholders.
  */
 std::expected<LineEditBinding, TreeError> bindLineEdit(WidgetTree &tree, EventRouter &router, Node<LineEdit> node,

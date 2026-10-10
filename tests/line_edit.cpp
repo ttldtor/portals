@@ -146,8 +146,9 @@ struct Fixture {
   std::optional<LineEditBinding> binding;
   InputDecoder decoder = take(InputDecoder::create());
 
-  explicit Fixture(std::string initial = "", LineEditOptions options = {}, std::shared_ptr<Clipboard> clipboard = {},
-                   std::function<bool(std::string_view)> validate = {}) {
+  // These compatibility scenarios intentionally exercise the former explicit-commit contract.
+  explicit Fixture(std::string initial = "", LineEditOptions options = {.editMode = EditMode::EXPLICIT},
+                   std::shared_ptr<Clipboard> clipboard = {}, std::function<bool(std::string_view)> validate = {}) {
     node = take(tree->emplace<LineEdit>(parent, options));
     model = take(Property<std::string>::create(*tree, root, std::move(initial), Invalidation::LAYOUT));
     binding.emplace(take(bindLineEdit(
@@ -295,7 +296,7 @@ void conflictAndOverflow() {
 
 void clipboardAndValidation() {
   auto clipboard = std::make_shared<FakeClipboard>();
-  Fixture f("start", {}, clipboard, [](std::string_view text) {
+  Fixture f("start", {.editMode = EditMode::EXPLICIT}, clipboard, [](std::string_view text) {
     return text != "bad";
   });
 
@@ -421,7 +422,7 @@ void callbackLifetimes() {
         "destructive commit callback removes ancestor without later delivery");
 
   auto clipboard = std::make_shared<FakeClipboard>();
-  Fixture removed("text", {}, clipboard);
+  Fixture removed("text", {.editMode = EditMode::EXPLICIT}, clipboard);
 
   clipboard->reenter = [&] {
     take(removed.tree->remove(removed.node));
@@ -432,7 +433,7 @@ void callbackLifetimes() {
         "clipboard reentry removing node cannot mutate dead presentation");
 
   Fixture *owner{};
-  Fixture changed("old", {}, {}, [&](std::string_view) {
+  Fixture changed("old", {.editMode = EditMode::EXPLICIT}, {}, [&](std::string_view) {
     take(owner->model->set("external"));
 
     return true;

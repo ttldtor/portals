@@ -38,6 +38,69 @@ char32_t shortcutCharacter(const KeyEvent *key) {
   return scalar == U'a' || scalar == U'c' || scalar == U'x' || scalar == U'v' ? scalar : U'\0';
 }
 
+TreeError historyError(TextHistoryError error) {
+  switch (error) {
+  case TextHistoryError::NO_MEMORY:
+    return TreeError::NO_MEMORY;
+  case TextHistoryError::INVALID_TEXT:
+  case TextHistoryError::NOT_BOUNDARY:
+    return TreeError::INVALID_ARGUMENT;
+  case TextHistoryError::EXHAUSTED:
+    return TreeError::NODE_LIMIT;
+  default:
+    return TreeError::WOULD_BLOCK;
+  }
+}
+
+char32_t normalizedScalar(char32_t scalar) {
+  return scalar >= U'A' && scalar <= U'Z' ? scalar + U'a' - U'A' : scalar;
+}
+
+bool matches(const EditorChord &chord, const KeyEvent &key) {
+  return key.action != KeyAction::RELEASE && chord.key == key.key && chord.modifiers == key.modifiers &&
+         normalizedScalar(chord.scalar) == normalizedScalar(key.scalar);
+}
+
+bool validChord(const EditorChord &chord) {
+  switch (chord.key) {
+  case InputKey::CHARACTER:
+    return chord.scalar > 0 && chord.scalar <= 0x10ffff && !(chord.scalar >= 0xd800 && chord.scalar <= 0xdfff);
+  case InputKey::INSERT:
+  case InputKey::PAGE_UP:
+  case InputKey::PAGE_DOWN:
+  case InputKey::F1:
+  case InputKey::F2:
+  case InputKey::F3:
+  case InputKey::F4:
+  case InputKey::F5:
+  case InputKey::F6:
+  case InputKey::F7:
+  case InputKey::F8:
+  case InputKey::F9:
+  case InputKey::F10:
+  case InputKey::F11:
+  case InputKey::F12:
+    return chord.scalar == 0;
+  default:
+    return false;
+  }
+}
+
+bool validShortcuts(const LineEditHistoryShortcuts &shortcuts) {
+  if (shortcuts.undo && !validChord(*shortcuts.undo)) {
+    return false;
+  }
+
+  for (const auto &redo : shortcuts.redo) {
+    if (redo && (!validChord(*redo) ||
+                 (shortcuts.undo && matches(*shortcuts.undo, KeyEvent{redo->key, redo->scalar, redo->modifiers})))) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 bool acceptsAction(const ActionEvent *command) {
   if (!command || command->modifiers.alt || command->modifiers.control || command->modifiers.super) {
     return false;
@@ -232,13 +295,79 @@ struct LineEditBinding::State {
   std::shared_ptr<Property<std::string>> model;
   std::shared_ptr<Clipboard> clipboard;
   std::function<bool(std::string_view)> validate;
+  std::function<void(LineEditResult)> onResult;
+  std::unique_ptr<TextHistory> history;
+  std::shared_ptr<detail::EditorCommandFeedback> feedback{};
   std::uint64_t revision{};
   bool initialized{};
   bool busy{};
 
+  struct BusyGuard {
+    bool &active;
+
+    explicit BusyGuard(bool &value) : active(value) {
+      active = true;
+    }
+
+    ~BusyGuard() {
+      active = false;
+    }
+  };
+
+  static LineEditOptions options(const LineEdit &edit) {
+    return edit.options_;
+  }
+
+  static bool validMode(const LineEdit &edit) {
+    return edit.options_.editMode == EditMode::IMMEDIATE || edit.options_.editMode == EditMode::ON_COMPLETION ||
+           edit.options_.editMode == EditMode::EXPLICIT;
+  }
+
   std::expected<void, TreeError> alive() {
     return tree.withScope(node, [](const UiScope &) {
     });
+  }
+
+  TextHistorySnapshot snapshot(const LineEdit &edit) const {
+    return {std::string(edit.text_.bytes()), edit.cursor_, edit.anchor_};
+  }
+
+  std::expected<void, TreeError> accept(LineEdit &edit, PreparedTextHistory &prepared, bool changed) {
+    auto checked = history->checkPrepared(prepared);
+
+    if (!checked) {
+      return std::unexpected(historyError(checked.error()));
+    }
+
+    const bool moved = edit.cursor_ != prepared.cursor() || edit.anchor_ != prepared.anchor();
+
+    if (changed || moved) {
+      auto invalidated = tree.invalidate(node, changed ? Invalidation::LAYOUT : Invalidation::PAINT);
+
+      if (!invalidated) {
+        return invalidated;
+      }
+    }
+
+    // No allocation, extension callback or history mutation occurs between this check and commit.
+
+    const auto cursor = prepared.cursor();
+    const auto anchor = prepared.anchor();
+
+    prepared.takeText(edit.text_);
+
+    auto committed = history->commit(std::move(prepared));
+
+    if (!committed) {
+      return std::unexpected(historyError(committed.error()));
+    }
+
+    edit.cursor_ = cursor;
+    edit.anchor_ = anchor;
+    edit.scroll_ = 0;
+    edit.revealCursor();
+
+    return {};
   }
 
   std::expected<void, TreeError> adopt(LineEdit &edit, const PropertyChange<std::string> &snapshot) {
@@ -246,24 +375,20 @@ struct LineEditBinding::State {
       return std::unexpected(TreeError::INVALID_ARGUMENT);
     }
 
-    auto text = GraphemeText::from(snapshot.value, edit.options_.widthPolicy, edit.options_.limits);
+    auto prepared =
+      history->prepareResetBaseline({std::string(snapshot.value), snapshot.value.size(), snapshot.value.size()});
 
-    if (!text) {
-      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    if (!prepared) {
+      return std::unexpected(historyError(prepared.error()));
     }
 
-    auto invalidated = tree.invalidate(node, Invalidation::LAYOUT);
+    auto applied = accept(edit, *prepared, edit.text_.bytes() != snapshot.value);
 
-    if (!invalidated) {
-      return invalidated;
+    if (!applied) {
+      return applied;
     }
 
-    edit.text_ = std::move(*text);
-    edit.cursor_ = edit.text_.bytes().size();
-    edit.anchor_ = edit.cursor_;
     edit.dirty_ = false;
-    edit.scroll_ = 0;
-    edit.revealCursor();
     revision = snapshot.revision;
     initialized = true;
 
@@ -329,7 +454,8 @@ struct LineEditBinding::State {
     return edited ? result : edited;
   }
 
-  LineEditResult replace(LineEdit &edit, std::size_t begin, std::size_t end, std::string_view inserted) {
+  LineEditResult replace(LineEdit &edit, std::size_t begin, std::size_t end, std::string_view inserted,
+                         TextHistoryKind kind) {
     const auto old = edit.text_.bytes();
     const auto remaining = old.size() - (end - begin);
 
@@ -366,27 +492,44 @@ struct LineEditBinding::State {
       }
     }
 
-    auto invalidated = tree.invalidate(node, Invalidation::LAYOUT);
+    const bool changed = edit.text_.bytes() != text->bytes();
 
-    if (!invalidated) {
-      return failed(invalidated.error());
+    if (!changed && edit.cursor_ == cursor && edit.anchor_ == cursor) {
+      return {LineEditStatus::EDITED};
     }
 
-    edit.text_ = std::move(*text);
-    edit.cursor_ = cursor;
-    edit.anchor_ = cursor;
-    edit.dirty_ = true;
-    edit.scroll_ = 0;
-    edit.revealCursor();
+    auto prepared = history->prepareEdit(snapshot(edit), {std::string(text->bytes()), cursor, cursor}, kind);
 
-    return {LineEditStatus::EDITED};
+    if (!prepared) {
+      return prepared.error() == TextHistoryError::WOULD_BLOCK ? LineEditResult{LineEditStatus::LIMIT_EXCEEDED}
+                                                               : failed(historyError(prepared.error()));
+    }
+
+    auto applied = accept(edit, *prepared, changed);
+
+    if (!applied) {
+      return failed(applied.error());
+    }
+
+    edit.dirty_ = changed || edit.dirty_;
+
+    return changed && edit.options_.editMode == EditMode::IMMEDIATE ? commit(edit, false)
+                                                                    : LineEditResult{LineEditStatus::EDITED};
   }
 
-  LineEditResult insert(LineEdit &edit, std::string_view bytes) {
-    return replace(edit, std::min(edit.cursor_, edit.anchor_), std::max(edit.cursor_, edit.anchor_), bytes);
+  LineEditResult insert(LineEdit &edit, std::string_view bytes, TextHistoryKind kind = TextHistoryKind::TYPING) {
+    if (kind == TextHistoryKind::TYPING && edit.cursor_ != edit.anchor_) {
+      kind = TextHistoryKind::REPLACEMENT;
+    }
+
+    return replace(edit, std::min(edit.cursor_, edit.anchor_), std::max(edit.cursor_, edit.anchor_), bytes, kind);
   }
 
-  LineEditResult commit(LineEdit &edit) {
+  LineEditResult commit(LineEdit &edit, bool closeGrouping = true) {
+    if (closeGrouping) {
+      history->stopGrouping();
+    }
+
     auto snapshot = model->snapshot();
 
     if (!snapshot) {
@@ -466,8 +609,14 @@ struct LineEditBinding::State {
         }
       }
 
-      return replace(edit, begin, end, "");
+      const auto kind = edit.cursor_ != edit.anchor_             ? TextHistoryKind::REPLACEMENT
+                        : event.action == Action::ERASE_BACKWARD ? TextHistoryKind::BACKSPACE
+                                                                 : TextHistoryKind::FORWARD_DELETE;
+
+      return replace(edit, begin, end, "", kind);
     }
+
+    history->stopGrouping();
 
     auto cursor = edit.cursor_;
 
@@ -492,6 +641,10 @@ struct LineEditBinding::State {
       break;
     }
 
+    if (cursor == edit.cursor_ && (event.modifiers.shift || edit.anchor_ == cursor)) {
+      return {LineEditStatus::EDITED};
+    }
+
     auto invalidated = tree.invalidate(node, Invalidation::PAINT);
 
     if (!invalidated) {
@@ -511,6 +664,8 @@ struct LineEditBinding::State {
 
   LineEditResult shortcut(LineEdit &edit, char32_t key) {
     if (key == U'a') {
+      history->stopGrouping();
+
       auto invalidated = tree.invalidate(node, Invalidation::PAINT);
 
       if (!invalidated) {
@@ -537,7 +692,7 @@ struct LineEditBinding::State {
 
       auto allowed = alive();
 
-      return allowed ? insert(edit, *bytes) : failed(allowed.error());
+      return allowed ? insert(edit, *bytes, TextHistoryKind::PASTE) : failed(allowed.error());
     }
 
     const auto begin = std::min(edit.cursor_, edit.anchor_);
@@ -555,10 +710,106 @@ struct LineEditBinding::State {
       return failed(allowed.error());
     }
 
-    return key == U'x' ? replace(edit, begin, end, "") : LineEditResult{LineEditStatus::COPIED};
+    return key == U'x' ? replace(edit, begin, end, "", TextHistoryKind::CUT) : LineEditResult{LineEditStatus::COPIED};
   }
 
-  std::optional<LineEditResult> handle(LineEdit &edit, const RoutedEvent &event) {
+  std::optional<bool> historyKey(const LineEdit &edit, const KeyEvent *key) const {
+    if (!key) {
+      return {};
+    }
+
+    const auto &shortcuts = edit.options_.historyShortcuts;
+
+    if (shortcuts.undo && matches(*shortcuts.undo, *key)) {
+      return false;
+    }
+
+    for (const auto &chord : shortcuts.redo) {
+      if (chord && matches(*chord, *key)) {
+        return true;
+      }
+    }
+
+    return {};
+  }
+
+  bool readOnlyBlocks(const LineEdit &edit, const RoutedEvent &event) const {
+    if (!edit.options_.readOnly) {
+      return false;
+    }
+
+    if (std::get_if<TextInputEvent>(&event) || std::get_if<PasteInputEvent>(&event)) {
+      return true;
+    }
+
+    if (const auto *action = std::get_if<ActionEvent>(&event)) {
+      return action->action == Action::ERASE_BACKWARD || action->action == Action::ERASE_FORWARD;
+    }
+
+    const auto scalar = shortcutCharacter(std::get_if<KeyEvent>(&event));
+
+    return scalar == U'x' || scalar == U'v';
+  }
+
+  struct HistoryOperation {
+    std::expected<void, TreeError> result;
+    std::optional<LineEditResult> outcome;
+  };
+
+  HistoryOperation restore(LineEdit &edit, bool redo) {
+    auto eligible = tree.inputEligible(node);
+
+    if (!eligible) {
+      return {std::unexpected(eligible.error()), {}};
+    }
+
+    if (!*eligible || edit.options_.readOnly) {
+      return {std::unexpected(TreeError::WOULD_BLOCK), {}};
+    }
+
+    auto latest = model->snapshot();
+
+    if (!latest) {
+      return {std::unexpected(latest.error()), {}};
+    }
+
+    if (revision != (*latest)->revision) {
+      if (edit.dirty_) {
+        return {std::unexpected(TreeError::WOULD_BLOCK), LineEditResult{LineEditStatus::CONFLICT}};
+      }
+
+      return {adopt(edit, **latest), {}};
+    }
+
+    auto prepared = redo ? history->prepareRedo() : history->prepareUndo();
+
+    if (!prepared) {
+      if (prepared.error() == TextHistoryError::EMPTY) {
+        history->stopGrouping();
+
+        return {{}, {}};
+      }
+
+      return {std::unexpected(historyError(prepared.error())), {}};
+    }
+
+    auto applied = accept(edit, *prepared, true);
+
+    if (!applied) {
+      return {applied, {}};
+    }
+
+    edit.dirty_ = true;
+    auto outcome =
+      edit.options_.editMode == EditMode::IMMEDIATE ? commit(edit, false) : LineEditResult{LineEditStatus::EDITED};
+
+    return {outcome.error ? std::expected<void, TreeError>(std::unexpected(*outcome.error))
+                          : std::expected<void, TreeError>{},
+
+            std::move(outcome)};
+  }
+
+  std::optional<LineEditResult> compute(LineEdit &edit, const RoutedEvent &event) {
     const auto *command = std::get_if<ActionEvent>(&event);
     const auto *text = std::get_if<TextInputEvent>(&event);
     const auto *paste = std::get_if<PasteInputEvent>(&event);
@@ -566,27 +817,22 @@ struct LineEditBinding::State {
     const auto shortcutScalar = shortcutCharacter(key);
     const bool shortcutKey = shortcutScalar != U'\0';
     const bool commandKey = acceptsAction(command);
+    const auto historyShortcut = historyKey(edit, key);
 
     if (!commandKey && !(text && !text->modifiers.alt && !text->modifiers.control && !text->modifiers.super) &&
-        !paste && !shortcutKey) {
+        !paste && !shortcutKey && !historyShortcut) {
       return {};
     }
 
-    if (busy) {
-      return failed(TreeError::WOULD_BLOCK);
-    }
-
-    struct BusyGuard {
-      bool &busy;
-
-      ~BusyGuard() {
-        busy = false;
-      }
-    } guard{busy};
-
-    busy = true;
-
     try {
+      if (historyShortcut) {
+        auto operation = restore(edit, *historyShortcut);
+
+        return operation.outcome   ? operation.outcome
+               : !operation.result ? std::optional(failed(operation.result.error()))
+                                   : std::nullopt;
+      }
+
       auto synced = syncModel(edit);
 
       if (!synced) {
@@ -602,7 +848,7 @@ struct LineEditBinding::State {
       }
 
       if (paste) {
-        return insert(edit, paste->bytes);
+        return insert(edit, paste->bytes, TextHistoryKind::PASTE);
       }
 
       const auto encoded = encode(text->scalar);
@@ -613,6 +859,67 @@ struct LineEditBinding::State {
     } catch (...) {
       return failed(TreeError::CALLBACK_FAILED);
     }
+  }
+
+  EventReply handle(LineEdit &edit, const RoutedEvent &event) {
+    if (busy) {
+      return EventReply::HANDLED;
+    }
+
+    BusyGuard guard(busy);
+
+    if (readOnlyBlocks(edit, event)) {
+      return EventReply::HANDLED;
+    }
+
+    const bool historyShortcut = historyKey(edit, std::get_if<KeyEvent>(&event)).has_value();
+    auto outcome = compute(edit, event);
+
+    if (outcome) {
+      // Last widget access occurred in compute; result may remove the node or binding.
+      onResult(*outcome);
+    }
+
+    return outcome || historyShortcut ? EventReply::HANDLED : EventReply::IGNORED;
+  }
+
+  std::expected<void, TreeError> focus(bool focused) {
+    if (busy) {
+      return std::unexpected(TreeError::WOULD_BLOCK);
+    }
+
+    BusyGuard guard(busy);
+
+    if (!focused) {
+      history->stopGrouping();
+    }
+
+    std::optional<LineEditResult> outcome;
+    auto edited = tree.edit(node, [&](LineEdit &edit) {
+      edit.focused_ = focused;
+
+      if (!focused && edit.dirty_ && edit.options_.editMode == EditMode::ON_COMPLETION) {
+        try {
+          outcome = commit(edit);
+        } catch (const std::bad_alloc &) {
+          outcome = failed(TreeError::NO_MEMORY);
+        } catch (...) {
+          outcome = failed(TreeError::CALLBACK_FAILED);
+        }
+      }
+    });
+
+    if (!edited) {
+      return edited;
+    }
+
+    if (outcome) {
+      outcome->trigger = LineEditTrigger::BLUR;
+      onResult(*outcome);
+    }
+
+    return outcome && outcome->error ? std::expected<void, TreeError>(std::unexpected(*outcome->error))
+                                     : std::expected<void, TreeError>{};
   }
 };
 
@@ -650,6 +957,278 @@ std::expected<void, TreeError> LineEditBinding::sync(Node<Widget> focused) {
   return state->sync(focused);
 }
 
+std::expected<std::uint64_t, TreeError> LineEditBinding::draftRevision() const {
+  auto state = state_;
+
+  if (!state) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  auto allowed = state->alive();
+
+  if (!allowed) {
+    return std::unexpected(allowed.error());
+  }
+
+  if (state->busy) {
+    return std::unexpected(TreeError::WOULD_BLOCK);
+  }
+
+  return state->revision;
+}
+
+std::expected<void, TreeError> LineEditBinding::setDraft(GraphemeText text, std::uint64_t revision,
+                                                         std::optional<ProgrammaticChange> change) {
+  auto state = state_;
+
+  if (!state) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  auto allowed = state->alive();
+
+  if (!allowed) {
+    return allowed;
+  }
+
+  if (state->busy) {
+    return std::unexpected(TreeError::WOULD_BLOCK);
+  }
+
+  State::BusyGuard guard(state->busy);
+  std::expected<void, TreeError> updated;
+  std::optional<LineEditResult> outcome;
+
+  bool accepted = false;
+  auto edited = state->tree.edit(state->node, [&](LineEdit &edit) {
+    try {
+      const auto policy = change.value_or(edit.options_.programmaticChange);
+
+      if (policy != ProgrammaticChange::RECORD && policy != ProgrammaticChange::RESET_BASELINE) {
+        updated = std::unexpected(TreeError::INVALID_ARGUMENT);
+
+        return;
+      }
+
+      auto latest = state->model->snapshot();
+
+      if (!latest) {
+        updated = std::unexpected(latest.error());
+
+        return;
+      }
+
+      const bool changed = edit.text_.bytes() != text.bytes() || edit.text_.policy() != text.policy();
+
+      if (!changed && policy == ProgrammaticChange::RECORD && state->revision == revision) {
+        return;
+      }
+
+      TextHistorySnapshot after{std::string(text.bytes()), changed ? text.bytes().size() : edit.cursor_,
+                                changed ? text.bytes().size() : edit.anchor_};
+      auto prepared = policy == ProgrammaticChange::RESET_BASELINE
+                        ? state->history->prepareResetBaseline(after)
+                        : state->history->prepareEdit(state->snapshot(edit), after, TextHistoryKind::PROGRAMMATIC);
+
+      if (!prepared) {
+        updated = std::unexpected(historyError(prepared.error()));
+
+        return;
+      }
+
+      updated = state->accept(edit, *prepared, changed);
+
+      if (!updated) {
+        return;
+      }
+
+      accepted = true;
+
+      const bool baselineChanged = state->revision != revision;
+
+      state->revision = policy == ProgrammaticChange::RESET_BASELINE ? (*latest)->revision : revision;
+
+      if (changed || baselineChanged) {
+        edit.dirty_ = true;
+        outcome = edit.options_.editMode == EditMode::IMMEDIATE ? state->commit(edit, false)
+                                                                : LineEditResult{LineEditStatus::EDITED};
+      }
+    } catch (const std::bad_alloc &) {
+      if (accepted) {
+        outcome = failed(TreeError::NO_MEMORY);
+      } else {
+        updated = std::unexpected(TreeError::NO_MEMORY);
+      }
+    } catch (...) {
+      if (accepted) {
+        outcome = failed(TreeError::CALLBACK_FAILED);
+      } else {
+        updated = std::unexpected(TreeError::CALLBACK_FAILED);
+      }
+    }
+  });
+
+  if (edited && updated && outcome) {
+    outcome->trigger = LineEditTrigger::FLUENT;
+    state->onResult(*outcome);
+  }
+
+  return edited ? updated : edited;
+}
+
+void LineEditBinding::commandFeedback(std::shared_ptr<detail::EditorCommandFeedback> feedback) {
+  state_->feedback = std::move(feedback);
+}
+
+std::pair<std::expected<void, TreeError>, bool> LineEditBinding::historyCommand(bool redo,
+                                                                                std::source_location origin) {
+  auto state = state_;
+
+  if (!state) {
+    return {std::unexpected(TreeError::INVALID_ARGUMENT), false};
+  }
+
+  auto allowed = state->alive();
+
+  if (!allowed) {
+    return {allowed, false};
+  }
+
+  if (state->busy) {
+    return {std::unexpected(TreeError::WOULD_BLOCK), false};
+  }
+
+  State::BusyGuard guard(state->busy);
+  auto feedback = state->feedback;
+
+  if (feedback) {
+    feedback->active = true;
+    feedback->reported = false;
+    feedback->operation = redo ? "lineEdit.redo" : "lineEdit.undo";
+    feedback->origin = origin;
+  }
+
+  struct FeedbackGuard {
+    std::shared_ptr<detail::EditorCommandFeedback> feedback;
+
+    ~FeedbackGuard() {
+      if (feedback) {
+        feedback->active = false;
+      }
+    }
+  } feedbackGuard{feedback};
+
+  State::HistoryOperation operation;
+  auto edited = state->tree.edit(state->node, [&](LineEdit &edit) {
+    try {
+      operation = state->restore(edit, redo);
+    } catch (const std::bad_alloc &) {
+      operation = {std::unexpected(TreeError::NO_MEMORY), failed(TreeError::NO_MEMORY)};
+    } catch (...) {
+      operation = {std::unexpected(TreeError::CALLBACK_FAILED), failed(TreeError::CALLBACK_FAILED)};
+    }
+  });
+
+  if (!edited) {
+    return {edited, false};
+  }
+
+  if (operation.outcome) {
+    operation.outcome->trigger = LineEditTrigger::FLUENT;
+    try {
+      state->onResult(*operation.outcome);
+    } catch (const std::bad_alloc &) {
+      return {std::unexpected(TreeError::NO_MEMORY), false};
+    } catch (...) {
+      return {std::unexpected(TreeError::CALLBACK_FAILED), false};
+    }
+  }
+
+  return {operation.result, feedback && feedback->reported};
+}
+
+std::expected<void, TreeError> LineEditBinding::undo() {
+  return historyCommand(false).first;
+}
+
+std::expected<void, TreeError> LineEditBinding::redo() {
+  return historyCommand(true).first;
+}
+
+std::expected<void, TreeError> LineEditBinding::stopGrouping() {
+  auto state = state_;
+
+  if (!state) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  auto allowed = state->alive();
+
+  if (!allowed) {
+    return allowed;
+  }
+
+  if (state->busy) {
+    return std::unexpected(TreeError::WOULD_BLOCK);
+  }
+
+  state->history->stopGrouping();
+
+  return {};
+}
+
+std::expected<HistoryAvailability, TreeError> LineEditBinding::historyAvailability() const {
+  auto state = state_;
+
+  if (!state) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  auto allowed = state->alive();
+
+  if (!allowed) {
+    return std::unexpected(allowed.error());
+  }
+
+  if (state->busy) {
+    return std::unexpected(TreeError::WOULD_BLOCK);
+  }
+
+  auto eligible = state->tree.inputEligible(state->node);
+
+  if (!eligible) {
+    return std::unexpected(eligible.error());
+  }
+
+  auto latest = state->model->snapshot();
+
+  if (!latest) {
+    return std::unexpected(latest.error());
+  }
+
+  HistoryAvailability result;
+
+  auto inspected = state->tree.read(state->node, [&](const LineEdit &edit) {
+    if (*eligible && !edit.options_.readOnly && state->revision == (*latest)->revision) {
+      result = {state->history->canUndo(), state->history->canRedo()};
+    }
+  });
+
+  return inspected ? std::expected<HistoryAvailability, TreeError>(result) : std::unexpected(inspected.error());
+}
+
+bool LineEditBinding::canUndo() const {
+  auto value = historyAvailability();
+
+  return value && value->canUndo;
+}
+
+bool LineEditBinding::canRedo() const {
+  auto value = historyAvailability();
+
+  return value && value->canRedo;
+}
+
 std::expected<LineEditBinding, TreeError> bindLineEdit(WidgetTree &tree, EventRouter &router, Node<LineEdit> node,
                                                        std::shared_ptr<Property<std::string>> model,
                                                        std::function<void(LineEditResult)> result,
@@ -660,8 +1239,24 @@ std::expected<LineEditBinding, TreeError> bindLineEdit(WidgetTree &tree, EventRo
   }
 
   try {
+    bool validMode = false;
+    LineEditOptions options;
+    auto inspected = tree.read(node, [&](const LineEdit &edit) {
+      options = LineEditBinding::State::options(edit);
+      validMode = LineEditBinding::State::validMode(edit) && validShortcuts(options.historyShortcuts) &&
+                  (options.programmaticChange == ProgrammaticChange::RECORD ||
+                   options.programmaticChange == ProgrammaticChange::RESET_BASELINE);
+    });
+
+    if (!inspected || !validMode) {
+      return std::unexpected(inspected ? TreeError::INVALID_ARGUMENT : inspected.error());
+    }
+
     auto state = std::make_shared<LineEditBinding::State>(
-      LineEditBinding::State{tree, node, std::move(model), std::move(clipboard), std::move(validate)});
+      LineEditBinding::State{tree, node, std::move(model), std::move(clipboard), std::move(validate), std::move(result),
+
+                             std::make_unique<TextHistory>(options.history, options.widthPolicy, options.limits)});
+
     auto subscription = state->model->observe(node, [state](LineEdit &, auto) {
       // Read latest rather than replaying a potentially obsolete delivered snapshot.
       auto synced = state->sync({});
@@ -675,18 +1270,14 @@ std::expected<LineEditBinding, TreeError> bindLineEdit(WidgetTree &tree, EventRo
       return std::unexpected(subscription.error());
     }
 
-    auto action = router.bind(node, [state, result = std::move(result)](LineEdit &edit, const RoutedEvent &event) {
-      auto outcome = state->handle(edit, event);
-
-      if (!outcome) {
-        return EventReply::IGNORED;
-      }
-
-      // Last access to the widget happened above: this callback may remove its ancestor.
-      result(std::move(*outcome));
-
-      return EventReply::HANDLED;
-    });
+    auto action = router.bind(
+      node,
+      [state](LineEdit &edit, const RoutedEvent &event) {
+        return state->handle(edit, event);
+      },
+      [state](LineEdit &, bool focused) {
+        return state->focus(focused);
+      });
 
     if (!action) {
       return std::unexpected(action.error());

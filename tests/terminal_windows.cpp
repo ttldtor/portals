@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <latch>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -582,12 +583,17 @@ DWORD pressureCase(HANDLE resultPipe, const wchar_t *kind) {
   const bool stop = wcscmp(kind, L"stop") == 0;
   std::stop_source source;
   std::jthread stopper;
+  std::latch stopperReady(1);
 
   if (stop) {
-    stopper = std::jthread([&source] {
+    stopper = std::jthread([&source, &stopperReady] {
+      stopperReady.count_down();
       Sleep(WRITER_OBSERVE_MS);
       source.request_stop();
     });
+
+    // Establish the observer before native pressure can delay thread startup.
+    stopperReady.wait();
   }
 
   const ULONGLONG start = GetTickCount64();
@@ -863,15 +869,6 @@ DWORD frameCase(HANDLE resultPipe, const wchar_t *kind) {
     require(writer.submit(std::move(next)).has_value(), "native pressure series keeps only one pending frame");
   }
 
-  if (pressureObserver.joinable()) {
-    pressureObserver.request_stop();
-    pressureObserver.join();
-  }
-
-  if (observerError) {
-    std::rethrow_exception(observerError);
-  }
-
   if (resume) {
     require(resumePressureObserved.load() && written.status == TerminalStatus::PROGRESS && !written.error &&
               written.completed == expectedBytes && written.pending == 0 && flushWaitMs >= MINIMUM_FRAME_WAIT_MS &&
@@ -902,6 +899,16 @@ DWORD frameCase(HANDLE resultPipe, const wchar_t *kind) {
               refusedRetry.error->kind == TerminalErrorKind::CLOSED && session->pendingBytes() == pendingNative,
             "poisoned writer rejects retry without forwarding to uncertain session");
     report(resultPipe, FRAME_POISONED, 0, BLOCKED, elapsed, written.completed);
+  }
+
+  // The host must resume before thread teardown can depend on ConPTY progress.
+  if (pressureObserver.joinable()) {
+    pressureObserver.request_stop();
+    pressureObserver.join();
+  }
+
+  if (observerError) {
+    std::rethrow_exception(observerError);
   }
 
   require(session->close().has_value(), "frame transport close joins old writer before recovery");
@@ -1110,24 +1117,24 @@ void waitViewport(HANDLE output, COORD size) {
 
 int screenResizeCase(HANDLE resultPipe, const wchar_t *kind) {
   NativeConsole native;
-  constexpr COORD initial{80, 25};
-  constexpr COORD position{77, 23};
-  constexpr WORD attributes = FOREGROUND_BLUE | FOREGROUND_INTENSITY | BACKGROUND_GREEN;
+  constexpr COORD INITIAL_SIZE{80, 25};
+  constexpr COORD CURSOR_POSITION{77, 23};
+  constexpr WORD ATTRIBUTES = FOREGROUND_BLUE | FOREGROUND_INTENSITY | BACKGROUND_GREEN;
   const COORD target = wcscmp(kind, L"screen-resize-smaller") == 0 ? COORD{40, 12} : COORD{100, 35};
-  std::vector<CHAR_INFO> original(initial.X * initial.Y);
+  std::vector<CHAR_INFO> original(INITIAL_SIZE.X * INITIAL_SIZE.Y);
 
   for (std::size_t index = 0; index < original.size(); ++index) {
     original[index].Char.UnicodeChar = static_cast<wchar_t>(L'A' + index % 26);
-    original[index].Attributes = attributes;
+    original[index].Attributes = ATTRIBUTES;
   }
 
   auto seed = [&] {
-    SMALL_RECT rectangle{0, 0, initial.X - 1, initial.Y - 1};
+    SMALL_RECT rectangle{0, 0, INITIAL_SIZE.X - 1, INITIAL_SIZE.Y - 1};
 
-    require(WriteConsoleOutputW(native.output.value, original.data(), initial, {0, 0}, &rectangle),
+    require(WriteConsoleOutputW(native.output.value, original.data(), INITIAL_SIZE, {0, 0}, &rectangle),
             "seed resize caller screen");
-    require(SetConsoleCursorPosition(native.output.value, position), "seed cursor outside smaller viewport");
-    require(SetConsoleTextAttribute(native.output.value, attributes), "seed resize caller rendition");
+    require(SetConsoleCursorPosition(native.output.value, CURSOR_POSITION), "seed cursor outside smaller viewport");
+    require(SetConsoleTextAttribute(native.output.value, ATTRIBUTES), "seed resize caller rendition");
   };
   auto directWrite = [&](std::string_view bytes) {
     DWORD amount = 0;
@@ -1154,7 +1161,7 @@ int screenResizeCase(HANDLE resultPipe, const wchar_t *kind) {
 
   require(SetConsoleMode(native.output.value, native.outputMode), "restore control output mode");
   report(resultPipe, SCREEN_RESET_READY);
-  waitViewport(native.output.value, initial);
+  waitViewport(native.output.value, INITIAL_SIZE);
   seed();
 
   auto terminal = openNativeApplicationTerminal(native.handles(), {}, 2s, false);
@@ -1200,21 +1207,22 @@ int screenRestoreCase(HANDLE resultPipe, const wchar_t *kind) {
 
   require(GetConsoleScreenBufferInfo(native.output.value, &before), "screen snapshot");
 
-  constexpr COORD extent{80, 25};
-  constexpr COORD position{7, 9};
-  constexpr WORD attributes = FOREGROUND_BLUE | FOREGROUND_INTENSITY | BACKGROUND_GREEN;
-  std::vector<CHAR_INFO> original(extent.X * extent.Y);
+  constexpr COORD SCREEN_SIZE{80, 25};
+  constexpr COORD CURSOR_POSITION{7, 9};
+  constexpr WORD ATTRIBUTES = FOREGROUND_BLUE | FOREGROUND_INTENSITY | BACKGROUND_GREEN;
+  std::vector<CHAR_INFO> original(SCREEN_SIZE.X * SCREEN_SIZE.Y);
 
   for (std::size_t index = 0; index < original.size(); ++index) {
     original[index].Char.UnicodeChar = static_cast<wchar_t>(L'A' + index % 26);
-    original[index].Attributes = attributes;
+    original[index].Attributes = ATTRIBUTES;
   }
 
-  SMALL_RECT rectangle{0, 0, extent.X - 1, extent.Y - 1};
+  SMALL_RECT rectangle{0, 0, SCREEN_SIZE.X - 1, SCREEN_SIZE.Y - 1};
 
-  require(WriteConsoleOutputW(native.output.value, original.data(), extent, {0, 0}, &rectangle), "seed caller screen");
-  require(SetConsoleCursorPosition(native.output.value, position), "seed caller cursor");
-  require(SetConsoleTextAttribute(native.output.value, attributes), "seed caller rendition");
+  require(WriteConsoleOutputW(native.output.value, original.data(), SCREEN_SIZE, {0, 0}, &rectangle),
+          "seed caller screen");
+  require(SetConsoleCursorPosition(native.output.value, CURSOR_POSITION), "seed caller cursor");
+  require(SetConsoleTextAttribute(native.output.value, ATTRIBUTES), "seed caller rendition");
 
   CONSOLE_CURSOR_INFO cursorBefore{};
 
@@ -1331,8 +1339,8 @@ int screenRestoreCase(HANDLE resultPipe, const wchar_t *kind) {
 
   std::vector<CHAR_INFO> restored(original.size());
 
-  rectangle = {0, 0, extent.X - 1, extent.Y - 1};
-  require(ReadConsoleOutputW(native.output.value, restored.data(), extent, {0, 0}, &rectangle),
+  rectangle = {0, 0, SCREEN_SIZE.X - 1, SCREEN_SIZE.Y - 1};
+  require(ReadConsoleOutputW(native.output.value, restored.data(), SCREEN_SIZE, {0, 0}, &rectangle),
           "read caller screen after close");
   const bool sameCells =
     std::equal(original.begin(), original.end(), restored.begin(), [](const CHAR_INFO &a, const CHAR_INFO &b) {
@@ -1364,9 +1372,9 @@ int screenRestoreCase(HANDLE resultPipe, const wchar_t *kind) {
   CONSOLE_SCREEN_BUFFER_INFO after{};
 
   require(GetConsoleScreenBufferInfo(native.output.value, &after), "caller cursor after close");
-  require(after.dwCursorPosition.X == position.X && after.dwCursorPosition.Y == position.Y,
+  require(after.dwCursorPosition.X == CURSOR_POSITION.X && after.dwCursorPosition.Y == CURSOR_POSITION.Y,
           "application close must restore caller cursor");
-  require(after.wAttributes == attributes, "application close must restore caller rendition");
+  require(after.wAttributes == ATTRIBUTES, "application close must restore caller rendition");
 
   CONSOLE_CURSOR_INFO cursorAfter{};
 

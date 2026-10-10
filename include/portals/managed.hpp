@@ -3,40 +3,21 @@
 #pragma once
 
 #include <portals/application.hpp>
+#include <portals/editor_command.hpp>
 #include <portals/line_edit.hpp>
+#include <portals/managed_diagnostics.hpp>
 #include <portals/managed_model.hpp>
 #include <portals/style.hpp>
 #include <portals/virtual_preparation.hpp>
 
 namespace portals {
 
-/** @brief Boundary at which a managed operation failed. */
-enum class ManagedPhase {
-  MOUNT,   ///< Create the scene root or attach and register a managed widget.
-  STATE,   ///< Create and retain a scene-owned property.
-  BIND,    ///< Register a managed callback, binding or presentation adapter.
-  STYLE,   ///< Register or apply styles, including a theme change.
-  PREPARE, ///< Synchronize managed presentation, focus and pending updates before a frame.
-  INPUT,   ///< Dispatch input or deliver a managed control/property callback.
-  RUN,     ///< Enter the application runner or propagate a failure from it.
-  CLEANUP  ///< Remove a managed subtree or retire the scene and its registrations.
-};
-
-/** @brief Original error plus independent runner/restoration and cleanup failures. */
-struct ManagedError {
-  ManagedPhase phase{ManagedPhase::RUN};                       ///< First failing managed operation.
-  NodeId node{};                                               ///< Target identity, empty when no node was involved.
-  std::variant<TreeError, StyleError, ApplicationError> cause; ///< Unformatted original error.
-  std::optional<ApplicationError> application;                 ///< Runner error, including terminal restoration.
-  std::optional<TreeError> cleanup; ///< Independent failure while retiring the scene subtree.
-  std::optional<TextError> text{};  ///< Original text-validation category and byte offset, when text creation failed.
-};
-
 class ManagedScene;
 
 namespace ui::detail {
 struct Access;
-}
+struct RefAccess;
+} // namespace ui::detail
 
 /** @brief Owning, copyable custom input adapter; arguments are borrowed for one invocation.
  * @tparam T Concrete Widget subtype, including final types.
@@ -51,9 +32,10 @@ template <class T> using ManagedPrepareHandler = std::function<std::expected<voi
 
 /** @brief Finite managed bookkeeping budgets, independent of the existing tree/queue limits. */
 struct ManagedOptions {
-  std::size_t maxNodes{4096}; ///< Maximum retained entries, including removals pending next preparation.
-  std::size_t maxStates{256}; ///< Maximum scene-owned properties; they live until scene destruction.
-  std::size_t maxModels{64};  ///< Maximum scene-owned models; they live until close().
+  std::size_t maxNodes{4096};             ///< Maximum retained entries, including removals pending next preparation.
+  std::size_t maxStates{256};             ///< Maximum scene-owned properties; they live until scene destruction.
+  std::size_t maxModels{64};              ///< Maximum scene-owned models; they live until close().
+  ManagedDiagnosticOptions diagnostics{}; ///< Positive limits for error history and owning causal traces.
 };
 
 /** @brief Weak UI handle to a scene-owned Property, never an owning alias.
@@ -272,6 +254,24 @@ public:
    */
   std::expected<void, ManagedError> onClick(Node<Button> node, std::function<std::expected<void, TreeError>()> action);
 
+  /** @tparam Callback Owning callable returning exactly EditorCommandResult; empty braces keep the original overload.
+   * @param node Live managed button without another action binding.
+   * @param action Owning checked editor command callback; return Ref.undo/redo directly to preserve provenance.
+   * @return Scoped registration success or typed binding failure. An already reported exact returned failure
+   * is not recorded again in the same live collector; independent failures and throws are still reported.
+   */
+  template <class Callback>
+    requires std::same_as<std::invoke_result_t<Callback &>, EditorCommandResult>
+  std::expected<void, ManagedError> onClick(Node<Button> node, Callback action) {
+    try {
+      return onEditorCommand(node, std::function<EditorCommandResult()>(std::move(action)));
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
+    } catch (...) {
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CALLBACK_FAILED));
+    }
+  }
+
   /** @param node Managed checkbox without a prior event binding.
    * @param model State created by this scene; shared internally on UI only.
    * @param changed Optional callback after the standard toggle, receiving its exact commit receipt.
@@ -391,6 +391,44 @@ public:
   std::expected<void, ManagedError>
   onInput(std::function<std::expected<bool, ManagedError>(const InputEvent &)> callback);
 
+  /** @brief Record an explicit error without changing runtime stop/recovery policy.
+   * @param failure Original typed error; argument construction precedes this call.
+   * @param contexts Borrowed breadcrumbs copied under the configured count and byte budgets.
+   * @param origin Report call site; supply the earlier origin for deferred operations.
+   * @return Success, WRONG_THREAD before any state access, or CLOSED. Overflow/context OOM
+   * retain the original cause through bounded history/counters and the observer fallback.
+   * Nested reports are collected but do not recursively invoke onError. No frame is requested.
+   * Checked setup operations remain explicit expected results and are not automatically recorded.
+   */
+  std::expected<void, TreeError> reportError(ManagedError failure,
+                                             std::span<const ManagedDiagnosticContext> contexts = {},
+                                             std::source_location origin = std::source_location::current()) noexcept;
+
+  /** @brief Retain or clear the UI error observer; empty clears it.
+   * @param callback Borrowing observer called after recording, including history overflow.
+   * It must not retain the diagnostic reference. Exceptions only increment diagnostic counters.
+   * @return Success or typed registration error; WOULD_BLOCK while an observer is active.
+   * Notifications precede terminal restoration; no output or continuation policy is imposed.
+   */
+  std::expected<void, ManagedError> onError(ManagedErrorHandler callback);
+
+  /** @brief Copy the bounded error history on UI, including after close.
+   * @return Owning snapshot, WRONG_THREAD, or NO_MEMORY with the history unchanged.
+   * Inspection is allowed during onError; its current observerFailed flag is not final yet.
+   */
+  std::expected<ManagedDiagnosticBatch, TreeError> diagnostics() const;
+
+  /** @brief Clear history and counters while preserving capacity and runtime first failure.
+   * @return Success, WRONG_THREAD, or WOULD_BLOCK during onError; allowed after close.
+   */
+  std::expected<void, TreeError> clearErrors() noexcept;
+
+  /** @brief Copy then clear history and counters; allocation failure leaves them unchanged.
+   * @return Owning batch, WRONG_THREAD, WOULD_BLOCK during onError, or NO_MEMORY.
+   * Allowed after close. Does not reset a runtime first failure or change stop policy.
+   */
+  std::expected<ManagedDiagnosticBatch, TreeError> drainErrors();
+
   /** @brief Create a scene-owned model and a weak typed UI handle.
    * @tparam T Immutable domain row satisfying Model<T>'s provider contract.
    * @param initial Non-null immutable initial snapshot, retained by the model.
@@ -493,6 +531,7 @@ public:
 
 private:
   friend struct ui::detail::Access;
+  friend struct ui::detail::RefAccess;
 
   struct Entry {
     Node<Widget> node;
@@ -514,13 +553,20 @@ private:
                                                   Prepare prepare, ManagedViewHandler<T> handler);
 
   explicit ManagedScene(Application &app, ManagedOptions options);
+
+  std::expected<void, ManagedError> onEditorCommand(Node<Button> node, std::function<EditorCommandResult()> action);
+
   static ManagedError error(ManagedPhase phase, Node<Widget> node, TreeError cause);
   std::expected<void, ManagedError> boundary(ManagedPhase phase, Node<Widget> node) const;
   std::shared_ptr<Entry> find(Node<Widget> node) const;
   std::expected<std::shared_ptr<Entry>, ManagedError> bindingEntry(Node<Widget> node);
   std::unexpected<ManagedError> rollback(Node<Widget> node, TreeError cause);
   std::expected<void, ManagedError> flushStyles();
-  void remember(ManagedError failure);
+  std::optional<std::size_t> recordError(ManagedError failure, std::span<const ManagedDiagnosticContext> contexts,
+                                         std::source_location origin) noexcept;
+  void notifyError(ManagedDiagnostic &diagnostic) noexcept;
+  void remember(ManagedError failure, std::source_location origin = std::source_location::current(),
+                std::span<const ManagedDiagnosticContext> contexts = {});
   std::expected<ApplicationStats, ManagedError> finish(std::expected<ApplicationStats, ApplicationError> result);
 
   Application &app_;
@@ -533,11 +579,24 @@ private:
   std::vector<std::shared_ptr<void>> properties_;
   std::vector<std::shared_ptr<detail::ManagedModelSource>> models_;
   std::shared_ptr<std::function<std::expected<bool, ManagedError>(const InputEvent &)>> input_;
+  std::shared_ptr<ManagedErrorHandler> errorObserver_;
+  std::vector<ManagedDiagnostic> errors_;
+  ManagedDiagnostic overflowDiagnostic_;
+  std::size_t errorCount_{};
+  std::size_t droppedErrors_{};
+  std::size_t contextFailures_{};
+  std::size_t observerFailures_{};
+  std::size_t suppressedNotifications_{};
+  std::optional<std::size_t> failureDiagnostic_;
   std::optional<ManagedError> failure_;
   std::optional<TreeError> cleanup_;
+  std::optional<TreeError> reportedFocusFailure_;
   bool stylesDirty_{};
   bool preparing_{};
+  bool recoveringFocus_{};
+  bool reporting_{};
   bool closed_{};
+  std::shared_ptr<bool> textMutating_ = std::make_shared<bool>(false);
 };
 } // namespace portals
 

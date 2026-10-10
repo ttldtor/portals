@@ -132,7 +132,30 @@ public:
    */
   template <class T, class Callback>
   std::expected<ActionBinding, TreeError> bind(Node<T> node, Callback &&callback, bool focusable = true) {
+    return bind(node, std::forward<Callback>(callback), std::function<std::expected<void, TreeError>(T &, bool)>{},
+                focusable);
+  }
+
+  /** @brief Register input and optional synchronous focus delivery in one scoped registration.
+   * Focus loss precedes gain and the next routed input. Delivery does not bubble; a live hidden
+   * or disabled previous target still receives loss. Removed/disconnected targets are skipped.
+   * Callbacks may remove nodes; nested focus changes or input delivery return WOULD_BLOCK.
+   * A callback error does not undo the published focus or model effects.
+   * @tparam T Registered widget type.
+   * @tparam Callback Owning copyable input handler returning EventReply.
+   * @tparam FocusCallback Owning copyable callable returning expected<void, TreeError>.
+   * @param node Live target of both callbacks.
+   * @param callback Input handler; widget/event borrows expire upon return.
+   * @param focusCallback Optional handler taking (T&, bool), true for gain and false for loss.
+   * @param focusable Whether the node participates in focus selection.
+   * @return One disconnect token or the same checked registration errors as input-only bind.
+   */
+  template <class T, class Callback, class FocusCallback>
+    requires std::invocable<FocusCallback &, T &, bool>
+  std::expected<ActionBinding, TreeError> bind(Node<T> node, Callback &&callback, FocusCallback &&focusCallback,
+                                               bool focusable = true) {
     static_assert(std::same_as<std::invoke_result_t<Callback &, T &, const RoutedEvent &>, EventReply>);
+    static_assert(std::same_as<std::invoke_result_t<FocusCallback &, T &, bool>, std::expected<void, TreeError>>);
 
     auto allowed = canBind(node);
 
@@ -141,6 +164,20 @@ public:
     }
 
     try {
+      std::function<std::expected<void, TreeError>(T &, bool)> focus(std::forward<FocusCallback>(focusCallback));
+      std::function<std::expected<void, TreeError>(bool)> focusDelivery;
+
+      if (focus) {
+        focusDelivery = [this, node, function = std::move(focus)](bool focused) {
+          std::expected<void, TreeError> outcome;
+          auto status = tree().edit(node, [&](T &widget) {
+            outcome = function(widget, focused);
+          });
+
+          return status ? outcome : status;
+        };
+      }
+
       return add(
         node,
         [this, node, function = std::forward<Callback>(callback)](
@@ -156,7 +193,7 @@ public:
 
           return reply;
         },
-        focusable);
+        focusable, std::move(focusDelivery));
     } catch (const std::bad_alloc &) {
       return std::unexpected(TreeError::NO_MEMORY);
     } catch (...) {
@@ -166,19 +203,20 @@ public:
 
   /** @brief Recover focus if needed; empty Node means no eligible focusable registration.
    * Recovery chooses the most recently focused eligible node, then the first preorder node.
+   * If its callbacks retire the selected target, return empty; the next call may recover again.
    * @return Eligible focused node (possibly recovered), an empty observer if none exists,
-   * or tree/router validation errors or NO_MEMORY. Recovery requests paint when focus changes.
+   * or tree/router/callback errors or NO_MEMORY. Recovery requests paint when focus changes.
    */
   std::expected<Node<Widget>, TreeError> focused();
   /** @brief Focus a live eligible registered node, or return INVALID_ARGUMENT; requests paint.
    * @param node Live, eligible node with a focusable registration.
    * @return Success, INVALID_ARGUMENT for an ineligible/unregistered/nonfocusable node,
-   * tree/router validation errors, or NO_MEMORY.
+   * tree/router validation errors, or the first loss/gain callback error; published focus is not rolled back.
    */
   std::expected<void, TreeError> setFocus(Node<Widget> node);
   /** @brief Traverse eligible registrations in tree preorder with wrap; reverse implements Shift+Tab.
    * @param reverse Traverse backward when true, forward otherwise; wrap at either end.
-   * @return Newly focused node, empty if no eligible registration exists, or tree/router errors or NO_MEMORY.
+   * @return Newly focused node, empty if none exists or callbacks retire it, or tree/router/callback errors.
    */
   std::expected<Node<Widget>, TreeError> traverse(bool reverse = false);
   /** @brief Hit target in paint order; descendants and later sibling subtrees take precedence.
@@ -193,6 +231,7 @@ public:
    * Unmodified Tab/Shift+Tab traverse. Enter/Escape/arrows/Home/End/Backspace/Delete map to actions;
    * release and other keys remain KeyEvent. Text (including space), paste and mouse retain type.
    * Left press focuses the nearest focusable target ancestor before bubbling the mouse event.
+   * If focus callbacks retire the original hit, suppress delivery without retargeting it.
    * @param event Decoded input borrowed for this call; handlers must not retain references.
    * @return Initial target, consuming handler and delivery status; NO_TARGET for a miss/ignored decoder event,
    * tree/router errors, WOULD_BLOCK for nested delivery, NO_MEMORY, or CALLBACK_FAILED.
@@ -215,11 +254,13 @@ private:
   std::expected<void, TreeError> canBind(Node<Widget> node);
   std::expected<ActionBinding, TreeError>
   add(Node<Widget> node, std::function<std::expected<EventReply, TreeError>(const RoutedEvent &)> callback,
-      bool focusable);
+      bool focusable, std::function<std::expected<void, TreeError>(bool)> focusCallback);
   std::expected<void, TreeError> collect();
   std::shared_ptr<detail::ActionRegistration> registration(Node<Widget> node) const;
   std::expected<std::vector<Node<Widget>>, TreeError> focusOrder();
   std::expected<void, TreeError> changeFocus(Node<Widget> node);
+  std::expected<void, TreeError> deliverFocus(Node<Widget> node, bool focused);
+  std::expected<Node<Widget>, TreeError> checkedFocus();
   std::expected<DispatchResult, TreeError> route(Node<Widget> target, const RoutedEvent &event);
   std::unique_ptr<State> state_;
 };

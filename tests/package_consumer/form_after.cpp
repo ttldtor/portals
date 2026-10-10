@@ -46,7 +46,7 @@ int main(int argc, char **argv) {
   bool light{};
 
   nodes.title = take(scene->emplace<Label>(column, text("Name: Enter saves | F2 theme | F10 quit")));
-  nodes.editor = take(scene->emplace<LineEdit>(column));
+  nodes.editor = take(scene->emplace<LineEdit>(column, LineEditOptions{.editMode = EditMode::EXPLICIT}));
   nodes.alerts = take(scene->emplace<CheckBox>(column, text("Alerts")));
   nodes.run = take(scene->emplace<Button>(column, text("Run")));
   nodes.status = take(scene->emplace<Label>(column, text("Ready")));

@@ -40,6 +40,19 @@ or destroy the router themselves.
 
 ## Focus and geometry
 
+The additive `bind(node, inputCallback, focusCallback, focusable)` overload owns
+both callbacks under one ordinary ActionBinding. The optional focus callback
+takes `(WidgetType&, bool focused)` and returns `expected<void, TreeError>`.
+The input-only overload keeps its existing behavior and RoutedEvent is unchanged.
+Transitions deliver direct loss then gain synchronously before further routed
+input; they do not bubble. Live hidden/disabled previous targets receive loss;
+removed or disconnected targets are skipped, and gain is rechecked after loss.
+Gain is attempted even after a loss error; the first loss/gain error is returned.
+Nested focus changes/input delivery return WOULD_BLOCK; inspection of a still
+eligible current focus remains available. Callback errors are typed and do not
+undo already published focus or model effects. These scoped callbacks implement
+LineEdit completion-on-blur through the existing router.
+
 Focusable registrations participate in structural preorder: parent before child,
 children in insertion order. Registration order and slot reuse do not change it.
 Tab advances and Shift+Tab reverses with wrap. With no current eligible focus,
@@ -52,6 +65,12 @@ recently focused eligible node, otherwise the first preorder node, otherwise an
 empty `Node<Widget>`. History contains each registered node at most once and is
 bounded by the registration limit. Merely showing a previously hidden node does
 not steal valid current focus. Focus changes request paint invalidation, not layout.
+`focused()` and `traverse()` recheck their selected registration after callbacks.
+If it has been removed, disconnected, hidden or disabled, this call returns an
+empty observer; a later call can recover again. Keyboard/text/paste delivery then
+returns `NO_TARGET`. A mouse event whose original hit or ancestor was retired by
+focus callbacks also returns `NO_TARGET`, without redirecting the event to another
+focus or hit. Callback errors still propagate before any routed input.
 Use `focused()` before entering `tree.frame` to prepare presentation state; router
 operations reject frame-time access with `WOULD_BLOCK`, so recovery never mutates
 state during layout or paint.

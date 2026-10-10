@@ -3,6 +3,8 @@
 #include <portals/managed.hpp>
 
 #include <algorithm>
+#include <exception>
+#include <limits>
 
 namespace portals {
 namespace {
@@ -21,11 +23,52 @@ TreeError bridge(const ManagedError &error) {
 
   return TreeError::CALLBACK_FAILED;
 }
+
+void increment(std::size_t &count) noexcept {
+  if (count != std::numeric_limits<std::size_t>::max()) {
+    ++count;
+  }
+}
+
+template <class T> std::size_t maxElementCount() noexcept {
+  const auto differenceLimit = static_cast<std::size_t>(std::numeric_limits<std::ptrdiff_t>::max()) / sizeof(T);
+  const auto allocatorLimit = std::allocator_traits<std::allocator<T>>::max_size(std::allocator<T>{});
+
+  return std::min(differenceLimit, allocatorLimit);
+}
+
+void copyLabel(std::string &target, const std::string &source, std::size_t &remaining, bool &truncated) {
+  const auto count = std::min(source.size(), remaining);
+
+  target.assign(source, 0, count);
+  remaining -= count;
+  truncated = truncated || count != source.size();
+}
+
+void copyContexts(ManagedDiagnostic &diagnostic, std::span<const ManagedDiagnosticContext> contexts,
+                  ManagedDiagnosticOptions options) {
+  const auto count = std::min(contexts.size(), options.maxContexts);
+  auto remaining = options.maxContextBytes;
+
+  diagnostic.contextsTruncated = count != contexts.size();
+  diagnostic.contexts.reserve(count);
+
+  for (const auto &source : contexts.first(count)) {
+    auto &target = diagnostic.contexts.emplace_back();
+
+    target.origin = source.origin;
+    copyLabel(target.operation, source.operation, remaining, diagnostic.contextsTruncated);
+    copyLabel(target.name, source.name, remaining, diagnostic.contextsTruncated);
+    copyLabel(target.scope, source.scope, remaining, diagnostic.contextsTruncated);
+    copyLabel(target.expectedType, source.expectedType, remaining, diagnostic.contextsTruncated);
+  }
+}
 } // namespace
 
 ManagedScene::ManagedScene(Application &app, ManagedOptions options)
     : app_(app), owner_(std::this_thread::get_id()), options_(options), lifetime_(std::make_shared<const bool>(true)),
-      styles_(app.tree(), options.maxNodes) {
+      styles_(app.tree(), options.maxNodes), entries_(0), properties_(0), models_(0),
+      errors_(options.diagnostics.maxErrors) {
 }
 
 ManagedError ManagedScene::error(ManagedPhase phase, Node<Widget> node, TreeError cause) {
@@ -41,7 +84,13 @@ std::expected<std::unique_ptr<ManagedScene>, ManagedError> ManagedScene::create(
     return std::unexpected(error(ManagedPhase::MOUNT, app.root(), allowed.error()));
   }
 
-  if (!options.maxNodes || !options.maxStates || !options.maxModels) {
+  const auto diagnostics = options.diagnostics;
+
+  if (!options.maxNodes || !options.maxStates || !options.maxModels || !diagnostics.maxErrors ||
+      !diagnostics.maxContexts || !diagnostics.maxContextBytes ||
+      diagnostics.maxErrors > maxElementCount<ManagedDiagnostic>() ||
+      diagnostics.maxContexts > maxElementCount<ManagedDiagnosticContext>() ||
+      diagnostics.maxContextBytes > static_cast<std::size_t>(std::numeric_limits<std::ptrdiff_t>::max())) {
     return std::unexpected(error(ManagedPhase::MOUNT, app.root(), TreeError::INVALID_ARGUMENT));
   }
 
@@ -64,7 +113,7 @@ std::expected<std::unique_ptr<ManagedScene>, ManagedError> ManagedScene::create(
 }
 
 ManagedScene::~ManagedScene() {
-  if (owner_ != std::this_thread::get_id() || preparing_) {
+  if (owner_ != std::this_thread::get_id() || preparing_ || reporting_) {
     std::terminate();
   }
 
@@ -88,7 +137,7 @@ std::expected<void, ManagedError> ManagedScene::boundary(ManagedPhase phase, Nod
     return std::unexpected(error(phase, node, TreeError::CLOSED));
   }
 
-  if (preparing_) {
+  if (preparing_ || reporting_) {
     return std::unexpected(error(phase, node, TreeError::WOULD_BLOCK));
   }
 
@@ -186,9 +235,212 @@ std::expected<void, ManagedError> ManagedScene::remove(Node<Widget> node) {
   return {};
 }
 
-void ManagedScene::remember(ManagedError failure) {
-  if (!failure_) {
-    failure_ = std::move(failure);
+std::optional<std::size_t> ManagedScene::recordError(ManagedError failure,
+                                                     std::span<const ManagedDiagnosticContext> contexts,
+                                                     std::source_location origin) noexcept {
+  if (errorCount_ == errors_.size()) {
+    increment(droppedErrors_);
+
+    if (reporting_) {
+      increment(suppressedNotifications_);
+
+      return {};
+    }
+
+    // Reuse storage created with the scene; nested overflow must not overwrite this active borrow.
+    overflowDiagnostic_.error = std::move(failure);
+    overflowDiagnostic_.origin = origin;
+    overflowDiagnostic_.storageOverflow = true;
+    overflowDiagnostic_.contextsTruncated = !contexts.empty();
+    overflowDiagnostic_.notificationSuppressed = false;
+    overflowDiagnostic_.observerFailed = false;
+    notifyError(overflowDiagnostic_);
+
+    return {};
+  }
+
+  const auto index = errorCount_++;
+
+  auto &diagnostic = errors_[index];
+
+  // Entries and their empty context containers were constructed before mounting the scene.
+  diagnostic.error = std::move(failure);
+  diagnostic.origin = origin;
+
+  try {
+    copyContexts(diagnostic, contexts, options_.diagnostics);
+  } catch (const std::bad_alloc &) {
+    diagnostic.contexts.clear();
+    diagnostic.contextUnavailable = true;
+    diagnostic.contextsTruncated = !contexts.empty();
+    increment(contextFailures_);
+  }
+
+  notifyError(diagnostic);
+
+  return index;
+}
+
+void ManagedScene::notifyError(ManagedDiagnostic &diagnostic) noexcept {
+  if (!errorObserver_) {
+    return;
+  }
+
+  if (reporting_) {
+    diagnostic.notificationSuppressed = true;
+    increment(suppressedNotifications_);
+
+    return;
+  }
+
+  struct Reporting {
+    bool &flag;
+
+    ~Reporting() {
+      flag = false;
+    }
+  } guard{reporting_};
+
+  auto callback = errorObserver_;
+
+  reporting_ = true;
+
+  try {
+    (*callback)(diagnostic);
+  } catch (...) {
+    diagnostic.observerFailed = true;
+    increment(observerFailures_);
+  }
+}
+
+std::expected<void, TreeError> ManagedScene::reportError(ManagedError failure,
+                                                         std::span<const ManagedDiagnosticContext> contexts,
+                                                         std::source_location origin) noexcept {
+  if (owner_ != std::this_thread::get_id()) {
+    return std::unexpected(TreeError::WRONG_THREAD);
+  }
+
+  if (closed_) {
+    return std::unexpected(TreeError::CLOSED);
+  }
+
+  (void)recordError(std::move(failure), contexts, origin);
+
+  return {};
+}
+
+std::expected<void, ManagedError> ManagedScene::onError(ManagedErrorHandler callback) {
+  auto allowed = boundary(ManagedPhase::BIND, root_);
+
+  if (!allowed) {
+    return allowed;
+  }
+
+  try {
+    auto replacement = callback ? std::make_shared<ManagedErrorHandler>(std::move(callback)) : nullptr;
+
+    errorObserver_ = std::move(replacement);
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::NO_MEMORY));
+  }
+
+  return {};
+}
+
+std::expected<ManagedDiagnosticBatch, TreeError> ManagedScene::diagnostics() const {
+  if (owner_ != std::this_thread::get_id()) {
+    return std::unexpected(TreeError::WRONG_THREAD);
+  }
+
+  try {
+    ManagedDiagnosticBatch batch{std::vector<ManagedDiagnostic>(errors_.begin(), errors_.begin() + errorCount_),
+                                 droppedErrors_,
+                                 contextFailures_,
+                                 observerFailures_,
+                                 suppressedNotifications_,
+                                 closed_};
+
+    // Copy into expected directly: MSVC Debug's noexcept vector move may allocate a proxy.
+    return std::expected<ManagedDiagnosticBatch, TreeError>(std::in_place, batch);
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(TreeError::NO_MEMORY);
+  }
+}
+
+std::expected<void, TreeError> ManagedScene::clearErrors() noexcept {
+  if (owner_ != std::this_thread::get_id()) {
+    return std::unexpected(TreeError::WRONG_THREAD);
+  }
+
+  if (reporting_) {
+    return std::unexpected(TreeError::WOULD_BLOCK);
+  }
+
+  for (auto &diagnostic : std::span(errors_.data(), errorCount_)) {
+    diagnostic.contexts.clear();
+    diagnostic.contextsTruncated = false;
+    diagnostic.contextUnavailable = false;
+    diagnostic.storageOverflow = false;
+    diagnostic.notificationSuppressed = false;
+    diagnostic.observerFailed = false;
+  }
+
+  errorCount_ = 0;
+  droppedErrors_ = 0;
+  contextFailures_ = 0;
+  observerFailures_ = 0;
+  suppressedNotifications_ = 0;
+  failureDiagnostic_.reset();
+
+  return {};
+}
+
+std::expected<ManagedDiagnosticBatch, TreeError> ManagedScene::drainErrors() {
+  if (owner_ != std::this_thread::get_id()) {
+    return std::unexpected(TreeError::WRONG_THREAD);
+  }
+
+  if (reporting_) {
+    return std::unexpected(TreeError::WOULD_BLOCK);
+  }
+
+  try {
+    ManagedDiagnosticBatch batch{std::vector<ManagedDiagnostic>(errors_.begin(), errors_.begin() + errorCount_),
+                                 droppedErrors_,
+                                 contextFailures_,
+                                 observerFailures_,
+                                 suppressedNotifications_,
+                                 closed_};
+
+    struct ClearOnSuccess {
+      ManagedScene &scene;
+      int exceptions{std::uncaught_exceptions()};
+
+      ~ClearOnSuccess() {
+        if (std::uncaught_exceptions() == exceptions) {
+          (void)scene.clearErrors();
+        }
+      }
+    } guard{*this};
+
+    return std::expected<ManagedDiagnosticBatch, TreeError>(std::in_place, batch);
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(TreeError::NO_MEMORY);
+  }
+}
+
+void ManagedScene::remember(ManagedError failure, std::source_location origin,
+                            std::span<const ManagedDiagnosticContext> contexts) {
+  const bool first = !failure_;
+
+  if (first) {
+    failure_ = failure;
+  }
+
+  const auto diagnostic = recordError(std::move(failure), contexts, origin);
+
+  if (first) {
+    failureDiagnostic_ = diagnostic;
   }
 
   app_.requestStop();
@@ -219,6 +471,53 @@ std::expected<void, ManagedError> ManagedScene::onClick(Node<Button> node,
       remember(error(ManagedPhase::INPUT, node, TreeError::CALLBACK_FAILED));
     }
   });
+
+  if (!bound) {
+    return std::unexpected(error(ManagedPhase::BIND, node, bound.error()));
+  }
+
+  (*entry)->binding.emplace<ActionBinding>(std::move(*bound));
+
+  return {};
+}
+
+std::expected<void, ManagedError> ManagedScene::onEditorCommand(Node<Button> node,
+                                                                std::function<EditorCommandResult()> action) {
+  auto entry = bindingEntry(node);
+
+  if (!entry) {
+    return std::unexpected(entry.error());
+  }
+
+  if (!action) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
+  }
+
+  auto bound =
+    bindButton(app_.router(), node, [this, node, lifetime = std::weak_ptr(lifetime_), action = std::move(action)] {
+      const auto report = [this, node, &lifetime](TreeError cause) {
+        if (!lifetime.expired()) {
+          remember(error(ManagedPhase::INPUT, node, cause));
+        }
+      };
+      try {
+        const auto command = action();
+
+        if (!command) {
+          const bool sameCollector = !lifetime.expired() && !command.collector_.expired() &&
+                                     !lifetime.owner_before(command.collector_) &&
+                                     !command.collector_.owner_before(lifetime);
+
+          if (!command.reported_ || !sameCollector) {
+            report(command.result_.error());
+          }
+        }
+      } catch (const std::bad_alloc &) {
+        report(TreeError::NO_MEMORY);
+      } catch (...) {
+        report(TreeError::CALLBACK_FAILED);
+      }
+    });
 
   if (!bound) {
     return std::unexpected(error(ManagedPhase::BIND, node, bound.error()));
@@ -290,25 +589,72 @@ ManagedScene::bind(Node<LineEdit> node, ManagedState<std::string> model,
     return std::unexpected(error(ManagedPhase::BIND, node, property ? TreeError::INVALID_ARGUMENT : property.error()));
   }
 
+  std::shared_ptr<detail::EditorCommandFeedback> feedback;
+
+  try {
+    feedback = std::make_shared<detail::EditorCommandFeedback>();
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
+  }
+
   auto bound = bindLineEdit(
     app_.tree(), app_.router(), node, *property,
-    [this, node, result = std::move(result)](LineEditResult receipt) {
+    [this, node, lifetime = std::weak_ptr(lifetime_), feedback, result = std::move(result)](LineEditResult receipt) {
+      const auto report = [this, node, &lifetime, feedback, trigger = receipt.trigger](TreeError cause,
+                                                                                       bool commandFailure = false) {
+        if (lifetime.expired()) {
+          return;
+        }
+
+        const auto phase = trigger == LineEditTrigger::FLUENT ? ManagedPhase::TEXT : ManagedPhase::INPUT;
+
+        const auto operation = commandFailure && feedback->active   ? feedback->operation
+                               : trigger == LineEditTrigger::BLUR   ? "lineEdit.blur"
+                               : trigger == LineEditTrigger::FLUENT ? "lineEdit.fluent"
+                                                                    : "lineEdit.input";
+
+        const auto origin = commandFailure && feedback->active ? feedback->origin : std::source_location::current();
+
+        try {
+          const ManagedDiagnosticContext context{std::string(operation), std::string(0, '\0'), std::string(0, '\0'),
+                                                 std::string("LineEdit"), origin};
+
+          remember(error(phase, node, cause), origin, std::span(&context, 1));
+        } catch (const std::bad_alloc &) {
+          remember(error(phase, node, cause), origin);
+        } catch (const std::length_error &) {
+          remember(error(phase, node, cause), origin);
+        }
+      };
+
       try {
         if (receipt.status == LineEditStatus::FAILED && receipt.error) {
-          remember(error(ManagedPhase::INPUT, node, *receipt.error));
+          if (receipt.trigger == LineEditTrigger::BLUR && !lifetime.expired() && recoveringFocus_ &&
+              !reportedFocusFailure_) {
+            // Only the receipt error returns through State::focus; result callback errors are independent.
+            reportedFocusFailure_ = *receipt.error;
+          }
+
+          const bool canReport = !lifetime.expired();
+
+          report(*receipt.error, true);
+
+          if (canReport && feedback->active) {
+            feedback->reported = true;
+          }
         }
 
         if (result) {
           auto status = result(std::move(receipt));
 
           if (!status) {
-            remember(error(ManagedPhase::INPUT, node, status.error()));
+            report(status.error());
           }
         }
       } catch (const std::bad_alloc &) {
-        remember(error(ManagedPhase::INPUT, node, TreeError::NO_MEMORY));
+        report(TreeError::NO_MEMORY);
       } catch (...) {
-        remember(error(ManagedPhase::INPUT, node, TreeError::CALLBACK_FAILED));
+        report(TreeError::CALLBACK_FAILED);
       }
     },
     std::move(clipboard), std::move(validate));
@@ -317,6 +663,7 @@ ManagedScene::bind(Node<LineEdit> node, ManagedState<std::string> model,
     return std::unexpected(error(ManagedPhase::BIND, node, bound.error()));
   }
 
+  bound->commandFeedback(std::move(feedback));
   (*entry)->binding.emplace<LineEditBinding>(std::move(*bound));
 
   return {};
@@ -437,6 +784,10 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
     return std::unexpected(TreeError::WRONG_THREAD);
   }
 
+  if (reporting_) {
+    return std::unexpected(TreeError::WOULD_BLOCK);
+  }
+
   auto allowed = boundary(ManagedPhase::PREPARE, root_);
 
   if (!allowed) {
@@ -471,11 +822,30 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
       }
     } prune{entries_};
 
-    auto focused = app_.router().focused();
+    const auto recoverFocus = [&] {
+      struct FocusRecovery {
+        ManagedScene &scene;
+
+        ~FocusRecovery() {
+          scene.recoveringFocus_ = false;
+          scene.reportedFocusFailure_.reset();
+        }
+      } recovery{*this};
+
+      recoveringFocus_ = true;
+      reportedFocusFailure_.reset();
+
+      auto focused = app_.router().focused();
+
+      if (!focused && reportedFocusFailure_ != focused.error()) {
+        remember(error(ManagedPhase::PREPARE, root_, focused.error()));
+      }
+
+      return focused;
+    };
+    auto focused = recoverFocus();
 
     if (!focused) {
-      remember(error(ManagedPhase::PREPARE, root_, focused.error()));
-
       return std::unexpected(focused.error());
     }
 
@@ -614,6 +984,10 @@ std::expected<bool, TreeError> ManagedScene::input(Application &app, const Input
     return std::unexpected(TreeError::WRONG_THREAD);
   }
 
+  if (reporting_) {
+    return std::unexpected(TreeError::WOULD_BLOCK);
+  }
+
   auto allowed = boundary(ManagedPhase::INPUT, root_);
 
   if (!allowed) {
@@ -659,7 +1033,7 @@ std::expected<void, ManagedError> ManagedScene::close() {
     return std::unexpected(error(ManagedPhase::CLEANUP, root_, TreeError::WRONG_THREAD));
   }
 
-  if (preparing_) {
+  if (preparing_ || reporting_) {
     return std::unexpected(error(ManagedPhase::CLEANUP, root_, TreeError::WOULD_BLOCK));
   }
 
@@ -678,6 +1052,7 @@ std::expected<void, ManagedError> ManagedScene::close() {
   entries_.clear();
   models_.clear();
   input_ = {};
+  errorObserver_ = {};
 
   return {};
 }
@@ -707,15 +1082,29 @@ ManagedScene::finish(std::expected<ApplicationStats, ApplicationError> result) {
 
     failure.cleanup = cleanup_;
 
+    if (failureDiagnostic_) {
+      errors_[*failureDiagnostic_].error = failure;
+    } else {
+      (void)recordError(failure, {}, std::source_location::current());
+    }
+
     return std::unexpected(failure);
   }
 
   if (!result) {
-    return std::unexpected(ManagedError{ManagedPhase::RUN, root_.id(), result.error(), result.error(), cleanup_});
+    ManagedError failure{ManagedPhase::RUN, root_.id(), result.error(), result.error(), cleanup_};
+
+    (void)recordError(failure, {}, std::source_location::current());
+
+    return std::unexpected(failure);
   }
 
   if (cleanup_) {
-    return std::unexpected(ManagedError{ManagedPhase::CLEANUP, root_.id(), *cleanup_, {}, cleanup_});
+    ManagedError failure{ManagedPhase::CLEANUP, root_.id(), *cleanup_, {}, cleanup_};
+
+    (void)recordError(failure, {}, std::source_location::current());
+
+    return std::unexpected(failure);
   }
 
   return *result;

@@ -16,13 +16,13 @@ auto describe(ManagedModel<Ohlc> model, ui::NodeRef<VirtualTable<Ohlc>> table, s
   auto columns = priceColumns();
 
   columns[0].format = [lifetime](const Ohlc &) {
-    return text(std::to_string(*lifetime));
+    return virtualConsumer::text(std::to_string(*lifetime));
   };
 
   return ui::column(ui::virtualTable(model, columns).reference(table),
                     ui::virtualList(model,
                                     [](const ModelRow<Ohlc> &row) {
-                                      return text(std::to_string(static_cast<int>(row.value.close)));
+                                      return virtualConsumer::text(std::to_string(static_cast<int>(row.value.close)));
                                     }),
                     ui::chart(model, [](const Ohlc &value) {
                       return std::optional{value};
@@ -111,7 +111,7 @@ void preparationOrderAndFailure() {
     columns[0].format = [lifetime, &formatted](const Ohlc &) {
       formatted = true;
 
-      return text(std::to_string(*lifetime));
+      return virtualConsumer::text(std::to_string(*lifetime));
     };
 
     return ui::row(
@@ -126,7 +126,7 @@ void preparationOrderAndFailure() {
       ui::virtualList(
         model,
         [](const ModelRow<Ohlc> &) {
-          return text("price");
+          return virtualConsumer::text("price");
         },
         {}, {},
         [&](const ModelFrame<Ohlc> &, const std::optional<ModelRequest<Ohlc>> &) -> std::expected<void, TreeError> {
@@ -202,7 +202,7 @@ void pendingViewsAndRejectedCompletion() {
 
   const auto body = take(ui::mount(*scene, ui::row(
     ui::virtualTable(model, priceColumns(), {}, textViewPolicy, handler(0)).reference(table),
-    ui::virtualList(model, [](const ModelRow<Ohlc> &) { return text("price"); }, {}, textViewPolicy, handler(1)).reference(list),
+    ui::virtualList(model, [](const ModelRow<Ohlc> &) { return virtualConsumer::text("price"); }, {}, textViewPolicy, handler(1)).reference(list),
     ui::chart(model, [](const Ohlc &value) { return std::optional{value}; }, {}, {}, handler(2)))));
 
   terminal.checkpoint = [&](std::size_t next, TerminalRead &) {

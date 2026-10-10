@@ -5,6 +5,42 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Added] Interactive editor history example comparing IMMEDIATE, ON_COMPLETION
+  and EXPLICIT drafts with read-only published model rows, compact Undo/Redo
+  buttons and fluent append. Finite headless checks exercise VT input and the
+  relocated installed package.
+- [Fixed] Windows terminal flush returns promptly on cancellation under ConPTY
+  pressure while retaining uncertain output until transport cleanup.
+
+- [Added] Bounded LineEdit Undo/Redo with Unicode cursor and selection restoration,
+  configurable grouping, limits and shortcuts, three publication modes, explicit
+  programmatic history policies, and fluent editor commands with typed diagnostics.
+
+- [Added] Specialized owning text history with staged Undo/Redo, grapheme-boundary
+  cursor and selection restoration, separate typing/deletion groups, configurable
+  operation and logical memory limits, and typed preparation failures. Editor
+  integration is separate from this low-level component.
+- [Changed] LineEdit defaults to immediate model publication after semantic
+  validation. ON_COMPLETION confirms on blur/Enter; EXPLICIT preserves opt-in
+  draft/Enter behavior. Input, clipboard and fluent changes share one policy;
+  rejected intermediate text remains visible without publishing an invalid value.
+- [Added] Optional scoped focus callbacks on existing EventRouter registrations,
+  delivered synchronously without changing RoutedEvent or creating another runtime.
+  Loss errors preserve best-effort gain; retired targets cannot receive subsequent
+  input. LineEdit results identify input/fluent/blur triggers, and managed blur
+  failures retain one diagnostic through preparation.
+- [Added] Typed `ui::Ref<T>` text properties with `=` and `+=`, owning read-only
+  concatenation with `+`, explicit resource resolution and scene diagnostics.
+  Captions and LineEdit drafts keep their existing ownership, thread-affinity,
+  conflict and text-validation contracts; rejected text mutations preserve text.
+- [Added] Bounded scene-owned managed diagnostics with owning causal context,
+  typed error details, `onError` notifications and inspect/clear/drain operations.
+  Overflow, context-allocation failures and observer failures remain explicit;
+  the existing runner and low-level error contracts are preserved.
+- [Added] Owning `text` and `i18n` argument values with compile-time checked
+  formatting and explicit resource resolution, preserving text-validation
+  errors and the receiving display policy.
+
 ## v0.2.0 (2026-10-10)
 
 - [Added] C++23 retained terminal UI core with UI-thread ownership, typed

@@ -253,7 +253,8 @@ void compositionAndRejectedNotification() {
 
 void lineEditConflictHideAndDisable() {
   Fixture fixture(1);
-  const auto node = take(fixture.scene->emplace<LineEdit>(fixture.scene->root()));
+  const auto node =
+    take(fixture.scene->emplace<LineEdit>(fixture.scene->root(), LineEditOptions{.editMode = EditMode::EXPLICIT}));
   const auto model = take(fixture.scene->state(std::string("old"), Invalidation::LAYOUT));
   std::vector<LineEditStatus> results;
 

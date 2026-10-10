@@ -35,6 +35,7 @@ before writing a form. Consult the chapters below as needed.
 | Connect state and data | [Properties](property.md), [immutable models](model.md) |
 | Display large datasets | [Layout-driven preparation](virtual-preparation.md), [virtual lists](virtual-list.md), [virtual tables](virtual-table.md), [scrolling](scroll.md), [charts](chart.md) |
 | Write shorter checked text and typed columns | [Compact examples](compact-examples.md) |
+| Change captions and editor drafts through observing references | [Text properties](text-property.md) |
 | Explain an action that did nothing | [Diagnostics](diagnostics.md), [terminal probe](terminal-probe.md) |
 | Keep an existing streaming MarketDepthModelSample building | [Minimal legacy compatibility](legacy.md) |
 
@@ -46,6 +47,9 @@ diagrams. These chapters describe the retained core and its low-level contracts.
 - Ownership and events: [widget tree](widget-tree.md), [focus and routing](focus.md),
   [scheduler](scheduler.md).
 - Text and coordinates: [UTF-8 and cell width](text.md), [geometry](geometry.md).
+- Owning low-level edit history: [text history](text-history.md).
+- Undo editor text and configure read-only or history shortcuts: [editor history](editor-history.md).
+- Try three editor confirmation modes: [editor history demo](editor-history-demo.md).
 - Input and output: [input decoder](input.md), [terminal session](terminal.md),
   [cell buffer](cell-buffer.md), [renderer](render.md), [diff and output](diff.md).
 

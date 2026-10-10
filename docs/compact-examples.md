@@ -47,6 +47,50 @@ must use the same width policy as the header and table. No domain row is copied.
 fields or explicit lambda projections. Display captions may be runtime strings:
 they are not used as identities or assumed to be translation keys.
 
+## Owning text and resource arguments
+
+Include `<portals/text_value.hpp>` for `text("literal")`,
+`text("{}", 123.0)` and `i18n("currency")`. Each expression owns its bytes or
+resource key. Formatting with arguments uses a compile-time checked standard
+format string. Without arguments, `text("{}")` is literal text, including braces.
+Literal/key construction and key inspection are `constexpr`; formatting and
+grapheme validation remain runtime operations in C++23. This does not guarantee
+that every owning string can be stored in a persistent constexpr object.
+Formatting runs immediately; UTF-8 validation and width measurement run during
+`resolve`, using the receiving context's explicit `WidthPolicy` and `TextLimits`.
+
+```cpp
+using namespace portals;
+const auto amount = text("{:.2f}", 123.0);
+const auto unit = i18n("currency");
+const auto translated = unit.resolve(
+  WidthPolicy{}, [](std::string_view key) -> std::expected<std::string, TextResourceError> {
+    if (key == "currency") {
+      return "USD";
+    }
+
+    return std::unexpected(TextResourceError::MISSING_RESOURCE);
+  });
+const auto formatted = amount.resolve(WidthPolicy{});
+```
+
+Resolution returns `expected<GraphemeText, TextValueError>`. The error variant
+retains the original `TextError`, or identifies a required resolver, missing
+resource or failed resolver through `TextResourceError`. A literal never calls
+the resolver. Resource values resolve each time they are used; Portals does not
+cache translations or keep a global locale. The callable is synchronous and
+must return an owning `expected<std::string, TextResourceError>`.
+
+Allocation and capacity exceptions propagate. Other resolver exceptions become
+`RESOLVER_FAILED`; their exception payload is not retained. Formatter exceptions
+propagate from `text` before resolution. `resourceKey()` borrows the stored key
+and remains valid only while its expression is alive and unmodified.
+
+Use these values with [fluent text properties](text-property.md) through
+`message.text() = text("{}", 123.0)` or `message.text() += i18n("currency")`.
+Resource expressions require an explicit resolver on the proxy. Automatic
+language switching and resource-file loading remain separate work.
+
 ## Optional aggregate fields
 
 Link `portals::aggregate` and include `<portals/aggregate_columns.hpp>` only where
