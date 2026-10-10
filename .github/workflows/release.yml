@@ -347,7 +347,7 @@ jobs:
           "C_COMPILER_PATH=$((Get-Command $env:C_COMPILER -ErrorAction Stop).Source)" >> $env:GITHUB_ENV
           "CXX_COMPILER_PATH=$((Get-Command $env:CXX_COMPILER -ErrorAction Stop).Source)" >> $env:GITHUB_ENV
           "PYTHON_EXECUTABLE=$((Get-Command python -ErrorAction Stop).Source)" >> $env:GITHUB_ENV
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: validation-${{ matrix.toolchain }}-*
           path: ${{ runner.temp }}/validation
@@ -420,12 +420,12 @@ jobs:
           cmake "-DTEST_ROOT_DIR=$RUNNER_TEMP/release-package-tests"
           "-DC_COMPILER=$C_COMPILER" "-DCXX_COMPILER=$CXX_COMPILER"
           "-DGENERATOR=$CMAKE_GENERATOR" -P tests/release_package.cmake
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: release-assets-*
           path: ${{ runner.temp }}/publication
           merge-multiple: true
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-metadata
           path: ${{ runner.temp }}/publication
@@ -460,7 +460,7 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.commit }}
           persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-candidate
           path: ${{ runner.temp }}/publication
