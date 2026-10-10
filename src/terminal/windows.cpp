@@ -649,7 +649,8 @@ TerminalWrite TerminalSession::flush(TerminalDeadline deadline, std::stop_token 
       // Once native I/O has been issued, cancellation does not reveal how many bytes
       // reached the console. Keep the batch alive and prohibit replay until close joins.
       if (state.writer) {
-        CancelSynchronousIo(state.writer);
+        // Cancellation itself may block under paused ConPTY pressure. Retain the
+        // worker and owned batch; close joins before releasing either.
         state.uncertain = true;
         result.error = contractError(TerminalErrorKind::OUTPUT_UNCERTAIN);
       }
