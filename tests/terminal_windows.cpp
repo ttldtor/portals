@@ -10,10 +10,12 @@
 #include <windows.h>
 
 #include <atomic>
+#include <bit>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -23,6 +25,9 @@ namespace {
 constexpr DWORD CHILD_DEADLINE_MS = 20000;
 constexpr DWORD WRITER_OBSERVE_MS = 500;
 constexpr DWORD MAXIMUM_DRAIN_PAUSE_MS = 1500;
+constexpr DWORD SLOW_DRAIN_PAUSE_MS = 3500;
+constexpr auto RESUMED_OUTPUT_TIMEOUT = std::chrono::seconds{10};
+constexpr auto SCREEN_MODE_TIMEOUT = std::chrono::seconds{2};
 constexpr DWORD PRESSURE_BYTES = 1024 * 1024;
 constexpr DWORD WATCHDOG_EXIT = 75;
 constexpr COORD FRAME_VIEWPORT{240, 160};
@@ -65,6 +70,72 @@ void require(bool result, const char *operation) {
     throw std::runtime_error(std::string(operation) + " error=" + std::to_string(GetLastError()));
   }
 }
+
+// A driver may refuse synchronous cancellation. Override only this fixture
+// child's import, leaving normal cancellation cases on the real Windows API.
+class UncancellableDriver {
+public:
+  UncancellableDriver() {
+    const auto native = GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "CancelSynchronousIo");
+
+    require(native != nullptr, "native cancellation entry point");
+    original_ = std::bit_cast<ULONG_PTR>(native);
+
+    const auto image = reinterpret_cast<unsigned char *>(GetModuleHandleW(nullptr));
+    const auto dos = reinterpret_cast<IMAGE_DOS_HEADER *>(image);
+    const auto headers = reinterpret_cast<IMAGE_NT_HEADERS *>(image + dos->e_lfanew);
+    auto imports = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR *>(
+      image + headers->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+
+    for (; imports->Name != 0 && !slot_; ++imports) {
+      auto entries = reinterpret_cast<IMAGE_THUNK_DATA *>(image + imports->FirstThunk);
+
+      for (; entries->u1.Function != 0; ++entries) {
+        if (entries->u1.Function == original_) {
+          slot_ = reinterpret_cast<ULONG_PTR *>(&entries->u1.Function);
+
+          break;
+        }
+      }
+    }
+
+    require(slot_ != nullptr, "fixture cancellation import");
+
+    DWORD protection{};
+
+    require(VirtualProtect(slot_, sizeof(*slot_), PAGE_READWRITE, &protection), "fixture import writable");
+    *slot_ = std::bit_cast<ULONG_PTR>(&refuseCancellation);
+
+    DWORD ignored{};
+
+    require(VirtualProtect(slot_, sizeof(*slot_), protection, &ignored), "fixture import protection restored");
+  }
+
+  UncancellableDriver(const UncancellableDriver &) = delete;
+  UncancellableDriver &operator=(const UncancellableDriver &) = delete;
+
+  ~UncancellableDriver() {
+    DWORD protection{};
+
+    if (VirtualProtect(slot_, sizeof(*slot_), PAGE_READWRITE, &protection)) {
+      *slot_ = original_;
+
+      DWORD ignored{};
+
+      VirtualProtect(slot_, sizeof(*slot_), protection, &ignored);
+    }
+  }
+
+private:
+  static BOOL WINAPI refuseCancellation(HANDLE) noexcept {
+    SetLastError(ERROR_NOT_FOUND);
+
+    return FALSE;
+  }
+
+  ULONG_PTR *slot_{};
+  ULONG_PTR original_{};
+};
 
 enum Stage : DWORD {
   INPUT_READY = 1,
@@ -523,8 +594,8 @@ DWORD pressureCase(HANDLE resultPipe, const wchar_t *kind) {
 
   report(resultPipe, PRESSURE_READY);
 
-  const auto written =
-    opened->flush(std::chrono::steady_clock::now() + (resume || stop ? 4s : 500ms), source.get_token());
+  const auto writeBudget = resume ? RESUMED_OUTPUT_TIMEOUT : stop ? 4s : 500ms;
+  const auto written = opened->flush(std::chrono::steady_clock::now() + writeBudget, source.get_token());
   const DWORD elapsed = static_cast<DWORD>(GetTickCount64() - start);
 
   require(written.status == (resume ? TerminalStatus::PROGRESS
@@ -733,7 +804,7 @@ DWORD frameCase(HANDLE resultPipe, const wchar_t *kind) {
   // ConPTY can accept one complete viewport before its renderer blocks on the
   // host pipe. Bound the warmup series and require actual pending uncertainty,
   // rather than treating a large encoded byte count as proof of backpressure.
-  const auto writeBudget = resume || stop ? 4s : 500ms;
+  const auto writeBudget = resume ? RESUMED_OUTPUT_TIMEOUT : stop ? 4s : 500ms;
   TerminalWrite written;
   DWORD elapsed = 0;
   DWORD flushWaitMs = 0;
@@ -1150,7 +1221,8 @@ int screenRestoreCase(HANDLE resultPipe, const wchar_t *kind) {
   require(GetConsoleCursorInfo(native.output.value, &cursorBefore), "caller cursor visibility");
 
   const bool mainScreen = wcscmp(kind, L"screen-main") == 0;
-  const bool uncertain = wcscmp(kind, L"screen-uncertain") == 0;
+  const bool slowDrain = wcscmp(kind, L"screen-uncertain-slow-drain") == 0;
+  const bool uncertain = wcscmp(kind, L"screen-uncertain") == 0 || slowDrain;
   const bool application = wcscmp(kind, L"screen-application") == 0 || wcscmp(kind, L"screen-failure") == 0;
 
   if (application) {
@@ -1206,7 +1278,7 @@ int screenRestoreCase(HANDLE resultPipe, const wchar_t *kind) {
     terminalOptions.max_output_bytes = PRESSURE_BYTES + 2;
 
     auto terminal =
-      openNativeApplicationTerminal(native.handles(), terminalOptions, 2s, false,
+      openNativeApplicationTerminal(native.handles(), terminalOptions, SCREEN_MODE_TIMEOUT, false,
                                     mainScreen ? NativeScreenMode::MAIN_SCREEN : NativeScreenMode::ALTERNATE_SCREEN);
 
     require(terminal.has_value(), "native application opens");
@@ -1227,10 +1299,20 @@ int screenRestoreCase(HANDLE resultPipe, const wchar_t *kind) {
               "issued Windows frame cancellation is uncertain");
     }
 
+    const auto closeStarted = GetTickCount64();
     const auto closed = (*terminal)->close();
+    const auto closeElapsed = static_cast<DWORD>(GetTickCount64() - closeStarted);
 
     require(uncertain ? !closed && closed.error().kind == TerminalErrorKind::OUTPUT_UNCERTAIN : closed.has_value(),
             "screen close preserves uncertain-write failure");
+
+    if (slowDrain) {
+      require(closeElapsed > std::chrono::duration_cast<std::chrono::milliseconds>(SCREEN_MODE_TIMEOUT).count(),
+              "uncancellable writer join exceeds the ordinary cleanup budget");
+      report(resultPipe, WRITER_COMPLETE, 0, BLOCKED, closeElapsed, 0,
+             "uncancellable write settled after delayed host drain");
+    }
+
     require((*terminal)->close().has_value(), "application screen closes twice");
   }
   native.checkRestored();
@@ -1296,7 +1378,7 @@ void launch(Session &session, const wchar_t *kind) {
 
   require(SUCCEEDED(created), "CreatePseudoConsole");
   session.enabled.store(wcscmp(kind, L"input") == 0 ||
-                        (wcsncmp(kind, L"screen-", 7) == 0 && wcscmp(kind, L"screen-uncertain") != 0));
+                        (wcsncmp(kind, L"screen-", 7) == 0 && wcsncmp(kind, L"screen-uncertain", 16) != 0));
   session.reader = std::thread(drain, session.outputRead.value, std::ref(session.enabled), std::ref(session.stop),
                                std::ref(session.drained));
   session.job.reset(CreateJobObjectW(nullptr, nullptr));
@@ -1452,7 +1534,13 @@ bool hostCase(const wchar_t *kind) {
     }
 
     if (pressureStarted != 0) {
-      const DWORD pause = wcscmp(kind, L"resume") == 0 ? 700 : MAXIMUM_DRAIN_PAUSE_MS;
+      DWORD pause = MAXIMUM_DRAIN_PAUSE_MS;
+
+      if (wcscmp(kind, L"screen-uncertain-slow-drain") == 0) {
+        pause = SLOW_DRAIN_PAUSE_MS;
+      } else if (wcscmp(kind, L"resume") == 0) {
+        pause = 700;
+      }
 
       if (GetTickCount64() - pressureStarted >= pause) {
         session.enabled.store(true);
@@ -1487,6 +1575,12 @@ int wmain(int argc, wchar_t **argv) {
     const HANDLE result = reinterpret_cast<HANDLE>(static_cast<std::uintptr_t>(_wcstoui64(argv[3], nullptr, 10)));
 
     try {
+      std::optional<UncancellableDriver> uncancellable;
+
+      if (wcscmp(argv[2], L"screen-uncertain-slow-drain") == 0) {
+        uncancellable.emplace();
+      }
+
       if (wcscmp(argv[2], L"hang") == 0) {
         Sleep(30000);
 
@@ -1514,17 +1608,22 @@ int wmain(int argc, wchar_t **argv) {
   }
 
   try {
+    if (argc == 2 && wcscmp(argv[1], L"--screen-uncertain-slow-drain") == 0) {
+      return hostCase(L"screen-uncertain-slow-drain") ? 0 : 1;
+    }
+
     if (argc == 2 && wcscmp(argv[1], L"--screen-restore") == 0) {
       const bool restored = hostCase(L"screen-restore");
       const bool main = hostCase(L"screen-main");
       const bool application = hostCase(L"screen-application");
       const bool failure = hostCase(L"screen-failure");
       const bool uncertain = hostCase(L"screen-uncertain");
+      const bool slowUncertain = hostCase(L"screen-uncertain-slow-drain");
 
       const bool smaller = hostCase(L"screen-resize-smaller");
       const bool larger = hostCase(L"screen-resize-larger");
 
-      return restored && main && application && failure && uncertain && smaller && larger ? 0 : 1;
+      return restored && main && application && failure && uncertain && slowUncertain && smaller && larger ? 0 : 1;
     }
 
     if (argc == 2 && wcscmp(argv[1], L"--child-watchdog") == 0) {
@@ -1542,7 +1641,8 @@ int wmain(int argc, wchar_t **argv) {
 
     const bool screen = hostCase(L"screen-restore") && hostCase(L"screen-main") && hostCase(L"screen-application") &&
                         hostCase(L"screen-failure") && hostCase(L"screen-uncertain") &&
-                        hostCase(L"screen-resize-smaller") && hostCase(L"screen-resize-larger");
+                        hostCase(L"screen-uncertain-slow-drain") && hostCase(L"screen-resize-smaller") &&
+                        hostCase(L"screen-resize-larger");
     const bool input = hostCase(L"input");
     const bool cancel = hostCase(L"cancel");
     const bool resume = hostCase(L"resume");

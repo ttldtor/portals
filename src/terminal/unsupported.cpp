@@ -45,6 +45,10 @@ std::size_t TerminalSession::pendingBytes() const noexcept {
   return 0;
 }
 
+std::expected<void, TerminalError> TerminalSession::joinOutputWriter() noexcept {
+  return {};
+}
+
 std::expected<void, TerminalError> TerminalSession::close() noexcept {
   impl_.reset();
 

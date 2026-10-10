@@ -306,6 +306,11 @@ std::expected<void, TerminalError> TerminalSession::saveCursorVisibility() noexc
   return impl_ ? std::expected<void, TerminalError>{} : std::unexpected(closedError());
 }
 
+std::expected<void, TerminalError> TerminalSession::joinOutputWriter() noexcept {
+  // POSIX output has no worker borrowing the pending byte storage.
+  return {};
+}
+
 std::expected<void, TerminalError> TerminalSession::closeWithOutput(std::string bytes,
                                                                     TerminalDeadline deadline) noexcept {
   if (!impl_) {
