@@ -101,7 +101,8 @@ target_compile_definitions(portals_core PRIVATE
 
 function(portals_enable_warnings target)
   if(MSVC)
-    target_compile_options(${target} PRIVATE /W4 /permissive-)
+    # Sources and narrow string literals use UTF-8 independently of the host code page.
+    target_compile_options(${target} PRIVATE /W4 /permissive- /utf-8)
   elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
   endif()

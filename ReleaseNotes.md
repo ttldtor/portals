@@ -37,6 +37,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
   diagrams.
 - [Fixed] Text-field caret visibility and orderly Windows terminal screen
   restoration in the example applications.
+- [Fixed] MSVC builds interpret project sources and string literals as UTF-8,
+  independent of the Windows host code page.
+- [Changed] Naming checks omit statistics about suppressed diagnostics while
+  retaining project diagnostics and failure exit codes.
 
 ### Known limitations
 

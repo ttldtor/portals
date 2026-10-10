@@ -33,7 +33,7 @@ def main():
     for source in sorted(files):
         print(f"Checking {source.relative_to(root)}", flush=True)
         result = subprocess.run([
-            args.clang_tidy, str(source), "-p", str(build),
+            args.clang_tidy, str(source), "-p", str(build), "--quiet",
             f"--config-file={root / '.clang-tidy'}",
         ], cwd=root, check=False)
         if result.returncode:
