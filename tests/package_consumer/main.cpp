@@ -127,7 +127,10 @@ int main() {
 
   auto linkedVersion = version();
 
-  check(linkedVersion.major == 0 && linkedVersion.minor == 2 && linkedVersion.patch == 0, "Wrong package version linked");
+  check(linkedVersion.major == EXPECTED_PORTALS_VERSION_MAJOR &&
+          linkedVersion.minor == EXPECTED_PORTALS_VERSION_MINOR &&
+          linkedVersion.patch == EXPECTED_PORTALS_VERSION_PATCH,
+        "Wrong package version linked");
   std::cout << "Installed Portals: model revision 2, custom widget total 42\n";
 
   return EXIT_SUCCESS;

@@ -6,6 +6,11 @@ network download or system utf8proc installation is required. The imported
 `portals::core` target carries the C++23 requirement and the complete static link
 chain; on UNIX the package configuration finds the platform Threads dependency.
 
+The top-level `project(Portals VERSION ...)` declaration is the sole source of
+the current library version. CMake uses it for the installed package metadata,
+and smoke and installed-consumer checks compare the linked library version with
+that metadata.
+
 Build and install from an x64 MSVC developer PowerShell, or use the same CMake
 commands with an appropriate C/C++ toolchain on Linux:
 
