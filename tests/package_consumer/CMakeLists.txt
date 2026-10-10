@@ -23,6 +23,10 @@ endforeach()
 
 add_executable(portals_package_consumer main.cpp)
 target_link_libraries(portals_package_consumer PRIVATE portals::core)
+target_compile_definitions(portals_package_consumer PRIVATE
+  EXPECTED_PORTALS_VERSION_MAJOR=${Portals_VERSION_MAJOR}
+  EXPECTED_PORTALS_VERSION_MINOR=${Portals_VERSION_MINOR}
+  EXPECTED_PORTALS_VERSION_PATCH=${Portals_VERSION_PATCH})
 set_target_properties(portals_package_consumer PROPERTIES CXX_EXTENSIONS OFF)
 if(WIN32)
   # The install test stages the existing process startup source beside this fixture.

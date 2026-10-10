@@ -430,6 +430,10 @@ if(PORTALS_BUILD_TESTS)
   set_tests_properties(portals.scheduler PROPERTIES TIMEOUT 15)
   add_executable(portals_smoke tests/smoke.cpp)
   target_link_libraries(portals_smoke PRIVATE portals::core)
+  target_compile_definitions(portals_smoke PRIVATE
+    EXPECTED_PORTALS_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+    EXPECTED_PORTALS_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+    EXPECTED_PORTALS_VERSION_PATCH=${PROJECT_VERSION_PATCH})
   portals_enable_warnings(portals_smoke)
   add_test(NAME portals.smoke COMMAND portals_smoke)
   add_executable(portals_geometry tests/geometry.cpp)
