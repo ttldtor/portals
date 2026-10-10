@@ -85,7 +85,7 @@ jobs:
           python3 tools/release/metadata.py prepare
           --tag "$RELEASE_TAG" --repository "$GITHUB_REPOSITORY"
           --source "$GITHUB_WORKSPACE" --output-dir "$RUNNER_TEMP/release-metadata"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-metadata
           path: ${{ runner.temp }}/release-metadata
@@ -221,7 +221,7 @@ jobs:
             configuration = $env:BUILD_CONFIGURATION
             headless = 'passed'
           } | ConvertTo-Json | Set-Content -Encoding utf8 "$env:RUNNER_TEMP/validation/$env:TOOLCHAIN-$env:BUILD_CONFIGURATION.json"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: validation-${{ matrix.toolchain }}-${{ matrix.configuration }}
           path: ${{ runner.temp }}/validation
@@ -376,13 +376,13 @@ jobs:
           "-DDEBUG_GATE_RECEIPT=$env:RUNNER_TEMP/validation/$env:TOOLCHAIN-Debug.json"
           "-DRELEASE_GATE_RECEIPT=$env:RUNNER_TEMP/validation/$env:TOOLCHAIN-Release.json"
           -P tools/release/package.cmake
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-assets-${{ matrix.platform }}
           path: ${{ runner.temp }}/release-assets
           if-no-files-found: error
           retention-days: 14
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: matrix.platform == 'linux'
         with:
           name: release-pages
@@ -437,7 +437,7 @@ jobs:
           python3 tools/release/publish.py --directory "$RUNNER_TEMP/publication"
           --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT"
           --dry-run
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-candidate
           path: ${{ runner.temp }}/publication
