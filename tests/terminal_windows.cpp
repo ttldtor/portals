@@ -1222,7 +1222,8 @@ int screenRestoreCase(HANDLE resultPipe, const wchar_t *kind) {
 
   const bool mainScreen = wcscmp(kind, L"screen-main") == 0;
   const bool slowDrain = wcscmp(kind, L"screen-uncertain-slow-drain") == 0;
-  const bool uncertain = wcscmp(kind, L"screen-uncertain") == 0 || slowDrain;
+  const bool delayedHost = wcscmp(kind, L"screen-uncertain-delayed-host") == 0;
+  const bool uncertain = wcscmp(kind, L"screen-uncertain") == 0 || slowDrain || delayedHost;
   const bool application = wcscmp(kind, L"screen-application") == 0 || wcscmp(kind, L"screen-failure") == 0;
 
   if (application) {
@@ -1293,10 +1294,16 @@ int screenRestoreCase(HANDLE resultPipe, const wchar_t *kind) {
       report(resultPipe, PRESSURE_READY);
       require((*terminal)->submit(std::string(PRESSURE_BYTES, '!') + "\x1b[").has_value(), "uncertain gallery frame");
 
+      const auto flushStarted = GetTickCount64();
       const auto cancelled = (*terminal)->flush(std::chrono::steady_clock::now() + 100ms, {});
+      const auto flushElapsed = static_cast<DWORD>(GetTickCount64() - flushStarted);
 
       require(cancelled.error && cancelled.error->kind == TerminalErrorKind::OUTPUT_UNCERTAIN,
               "issued Windows frame cancellation is uncertain");
+      require(flushElapsed < MAXIMUM_FRAME_CANCELLATION_MS,
+              "uncertain screen flush keeps its public deadline while host is paused");
+      report(resultPipe, CANCEL_RESULT, 0, BLOCKED, flushElapsed, cancelled.pending,
+             "public flush returned before host drain");
     }
 
     const auto closeStarted = GetTickCount64();
@@ -1306,11 +1313,15 @@ int screenRestoreCase(HANDLE resultPipe, const wchar_t *kind) {
     require(uncertain ? !closed && closed.error().kind == TerminalErrorKind::OUTPUT_UNCERTAIN : closed.has_value(),
             "screen close preserves uncertain-write failure");
 
-    if (slowDrain) {
+    if (uncertain) {
+      report(resultPipe, CANCEL_RESULT, static_cast<DWORD>(closed.error().restoration_code), 0, closeElapsed,
+             static_cast<std::uint64_t>(closed.error().native_code), "close native/restoration error codes");
+    }
+
+    if (slowDrain || delayedHost) {
       require(closeElapsed > std::chrono::duration_cast<std::chrono::milliseconds>(SCREEN_MODE_TIMEOUT).count(),
-              "uncancellable writer join exceeds the ordinary cleanup budget");
-      report(resultPipe, WRITER_COMPLETE, 0, BLOCKED, closeElapsed, 0,
-             "uncancellable write settled after delayed host drain");
+              "host synchronization exceeds the ordinary cleanup budget");
+      report(resultPipe, WRITER_COMPLETE, 0, BLOCKED, closeElapsed, 0, "write and host settled after delayed drain");
     }
 
     require((*terminal)->close().has_value(), "application screen closes twice");
@@ -1327,6 +1338,19 @@ int screenRestoreCase(HANDLE resultPipe, const wchar_t *kind) {
     std::equal(original.begin(), original.end(), restored.begin(), [](const CHAR_INFO &a, const CHAR_INFO &b) {
       return a.Char.UnicodeChar == b.Char.UnicodeChar && a.Attributes == b.Attributes;
     });
+
+  if (!mainScreen && !sameCells) {
+    const auto mismatch =
+      std::mismatch(original.begin(), original.end(), restored.begin(), [](const CHAR_INFO &a, const CHAR_INFO &b) {
+        return a.Char.UnicodeChar == b.Char.UnicodeChar && a.Attributes == b.Attributes;
+      });
+    char detail[128];
+
+    std::snprintf(detail, sizeof(detail), "first cell expected U+%04x attr=%u, actual U+%04x attr=%u",
+                  static_cast<unsigned>(mismatch.first->Char.UnicodeChar), mismatch.first->Attributes,
+                  static_cast<unsigned>(mismatch.second->Char.UnicodeChar), mismatch.second->Attributes);
+    report(resultPipe, CHILD_FAILURE, 0, 0, 0, static_cast<std::uint64_t>(mismatch.first - original.begin()), detail);
+  }
 
   require(mainScreen ? !sameCells : sameCells,
           "application close must restore caller screen instead of leaving gallery cells");
@@ -1536,7 +1560,7 @@ bool hostCase(const wchar_t *kind) {
     if (pressureStarted != 0) {
       DWORD pause = MAXIMUM_DRAIN_PAUSE_MS;
 
-      if (wcscmp(kind, L"screen-uncertain-slow-drain") == 0) {
+      if (wcscmp(kind, L"screen-uncertain-slow-drain") == 0 || wcscmp(kind, L"screen-uncertain-delayed-host") == 0) {
         pause = SLOW_DRAIN_PAUSE_MS;
       } else if (wcscmp(kind, L"resume") == 0) {
         pause = 700;
@@ -1612,6 +1636,10 @@ int wmain(int argc, wchar_t **argv) {
       return hostCase(L"screen-uncertain-slow-drain") ? 0 : 1;
     }
 
+    if (argc == 2 && wcscmp(argv[1], L"--screen-uncertain-delayed-host") == 0) {
+      return hostCase(L"screen-uncertain-delayed-host") ? 0 : 1;
+    }
+
     if (argc == 2 && wcscmp(argv[1], L"--screen-restore") == 0) {
       const bool restored = hostCase(L"screen-restore");
       const bool main = hostCase(L"screen-main");
@@ -1619,11 +1647,15 @@ int wmain(int argc, wchar_t **argv) {
       const bool failure = hostCase(L"screen-failure");
       const bool uncertain = hostCase(L"screen-uncertain");
       const bool slowUncertain = hostCase(L"screen-uncertain-slow-drain");
+      const bool delayedHost = hostCase(L"screen-uncertain-delayed-host");
 
       const bool smaller = hostCase(L"screen-resize-smaller");
       const bool larger = hostCase(L"screen-resize-larger");
 
-      return restored && main && application && failure && uncertain && slowUncertain && smaller && larger ? 0 : 1;
+      return restored && main && application && failure && uncertain && slowUncertain && delayedHost && smaller &&
+                 larger
+               ? 0
+               : 1;
     }
 
     if (argc == 2 && wcscmp(argv[1], L"--child-watchdog") == 0) {
@@ -1641,8 +1673,8 @@ int wmain(int argc, wchar_t **argv) {
 
     const bool screen = hostCase(L"screen-restore") && hostCase(L"screen-main") && hostCase(L"screen-application") &&
                         hostCase(L"screen-failure") && hostCase(L"screen-uncertain") &&
-                        hostCase(L"screen-uncertain-slow-drain") && hostCase(L"screen-resize-smaller") &&
-                        hostCase(L"screen-resize-larger");
+                        hostCase(L"screen-uncertain-slow-drain") && hostCase(L"screen-uncertain-delayed-host") &&
+                        hostCase(L"screen-resize-smaller") && hostCase(L"screen-resize-larger");
     const bool input = hostCase(L"input");
     const bool cancel = hostCase(L"cancel");
     const bool resume = hostCase(L"resume");

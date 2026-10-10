@@ -727,6 +727,16 @@ std::expected<void, TerminalError> TerminalSession::joinOutputWriter() noexcept 
 
   const int joined = impl_->stopWriter();
 
+  if (joined == 0 && impl_->uncertain) {
+    // A cancelled client write can finish before the console host processes its
+    // accepted bytes. Synchronize with the host before budgeting the final batch.
+    CONSOLE_SCREEN_BUFFER_INFO info{};
+
+    if (!GetConsoleScreenBufferInfo(impl_->output, &info)) {
+      return std::unexpected(systemError());
+    }
+  }
+
   return joined == 0 ? std::expected<void, TerminalError>{} : std::unexpected(systemError(static_cast<DWORD>(joined)));
 }
 

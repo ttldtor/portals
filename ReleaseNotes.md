@@ -38,7 +38,8 @@ planned work is not included. An **Unreleased** heading has no publication date.
   now has a reading path, complete examples, API contracts and offline Mermaid
   diagrams.
 - [Fixed] Text-field caret visibility and orderly Windows terminal screen
-  restoration in the example applications.
+  restoration in the example applications. After cancelled output, native cleanup
+  waits for the console host before restoring the caller's screen and cursor.
 - [Fixed] MSVC builds interpret project sources and string literals as UTF-8,
   independent of the Windows host code page.
 - [Changed] Naming checks omit statistics about suppressed diagnostics while

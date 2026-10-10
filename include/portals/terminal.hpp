@@ -183,10 +183,12 @@ private:
    */
   [[nodiscard]] std::expected<void, TerminalError> saveCursorVisibility() noexcept;
 
-  /** @brief Join a native output worker before the application starts its final cleanup budget.
+  /** @brief Settle native output before the application starts its final cleanup budget.
    * Pending bytes remain owned by the session and are never replayed by this operation.
-   * Host/driver progress is required; this ownership boundary has no hard deadline.
-   * @return Success, including an already closed session, or the native worker cleanup error.
+   * Windows also synchronizes with the console host after an uncertain write: joining
+   * the cancelled client worker alone does not settle host processing of accepted bytes.
+   * Host/driver progress is required; this boundary has no hard deadline.
+   * @return Success, including an already closed session, or a native worker/host synchronization error.
    */
   [[nodiscard]] std::expected<void, TerminalError> joinOutputWriter() noexcept;
 

@@ -166,8 +166,10 @@ Mouse opt-out skips only mouse protocol I/O; it still manages the selected scree
 Close uses a fresh `modeTimeout` budget independent of application cancellation.
 It first drains retryable output. A failed or uncertain write remains an error;
 cleanup nevertheless attempts to return to the main screen. On Windows, it first
-cancels and joins the old writer before releasing its bytes or starting a distinct
-restoration batch. That batch begins with CAN to cancel an incomplete VT sequence
+cancels and joins the old writer, then synchronizes with the console host after an
+uncertain write, before starting the final restoration budget. Cancellation can
+finish the client thread while accepted bytes still occupy the host. The
+distinct restoration batch begins with CAN to cancel an incomplete VT sequence
 and never replays uncertain frame bytes. A separate confirmed
 DECSC capture protects the caller's current cursor/rendition even when a partial
 entry never switches buffers: xterm's `1049` reset can restore its saved cursor
