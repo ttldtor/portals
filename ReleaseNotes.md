@@ -5,6 +5,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Added] Complete owning gallery and custom meter examples with equivalent method/pipe
+  composition, preserved editor/shortcut behavior, typed failures and cleanup, and
+  before/after replay checks across themes and color modes in the installed consumer.
+
 - [Added] Owning lazy scenes with prepare/configure/run methods and small pipe stages,
   internal-state text editors, typed setup/run failures and explicit managed cleanup
   after native open failure. Preparation uses the existing runtime without terminal I/O.

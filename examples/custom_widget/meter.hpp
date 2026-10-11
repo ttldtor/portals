@@ -17,7 +17,10 @@ inline constexpr int INITIAL_LEVEL = 50;
 inline constexpr int LEVEL_STEP = 5;
 inline constexpr int BAR_TOP = 2;
 
-// Paint consumes retained presentation only; state reads and formatting belong to prepare.
+/** @brief Final retained meter extension; state reads and formatting belong to prepare.
+ * Paint consumes presentation
+ * only; the managed scene controls its UI-affine lifetime.
+ */
 class LevelMeter final : public Widget {
 public:
   /** @param value Domain value in the inclusive MIN_LEVEL..MAX_LEVEL percent range.
@@ -41,16 +44,30 @@ public:
     return true;
   }
 
+  /** @param available Normalized cell constraints supplied by the layout owner.
+   * @return The full available extent;
+   * this example fills its scene viewport.
+   */
   std::expected<CellSize, TreeError> measure(CellSize available) override {
     return available;
   }
 
+  /** @param rect Parent-relative placement; only its size is retained.
+   * @return Success after retaining the current
+   * viewport extent.
+   */
   std::expected<void, TreeError> arrange(CellRect rect) override {
     size_ = rect.size();
 
     return {};
   }
 
+  /** @param context Borrowed synchronous sink; submitted text borrows this widget for the frame.
+   * @return The
+   * original sink failure or success after submitting background, bar and caption.
+   * Geometry construction failures
+   * throw through the finite example helper.
+   */
   std::expected<void, TreeError> paint(PaintContext &context) override {
     const auto area = take(CellRect::from({}, size_));
     const auto bar =
