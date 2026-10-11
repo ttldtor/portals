@@ -257,7 +257,14 @@ std::expected<ManagedDiagnosticBatch, TreeError> Scene::diagnostics() const {
   auto &state = *state_;
 
   try {
-    auto result = state.managed ? state.managed->diagnostics() : std::expected<ManagedDiagnosticBatch, TreeError>{};
+    // Older MSVC introduces a noexcept snapshot move when these prvalues use a conditional expression.
+    auto result = [&]() -> std::expected<ManagedDiagnosticBatch, TreeError> {
+      if (state.managed) {
+        return state.managed->diagnostics();
+      }
+
+      return std::expected<ManagedDiagnosticBatch, TreeError>(std::in_place);
+    }();
 
     if (!result) {
       return std::unexpected(result.error());
