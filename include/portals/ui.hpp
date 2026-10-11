@@ -154,6 +154,44 @@ public:
     this->slot_->fluent = true;
   }
 
+  /** @tparam Callback Owning compact click action, optionally taking const ClickEvent&.
+   * @param action Void, expected<void, TreeError> or exact EditorCommandResult callback.
+   * @param origin Registration call site retained in diagnostics.
+   * @return Checked registration on a mounted live button; CLOSED before publication/destruction,
+   * WRONG_THREAD, STALE_NODE, duplicate INVALID_ARGUMENT or allocation error. Scene owns captures/token.
+   * This adds one binding; it never replaces an existing one. Admitted calls survive self-removal.
+   * Registration failures are also recorded in a live UI collector, without stopping the scene.
+   * Internal callback transfers are checked; constructing the by-value argument before entry may throw.
+   */
+  template <class Callback>
+    requires(std::same_as<T, Button> && portals::detail::ManagedAction<Callback, ClickEvent>)
+  std::expected<void, ManagedError> onClick(Callback action,
+                                            std::source_location origin = std::source_location::current()) const {
+    auto observation = target();
+    auto scene = detail::eventScene(observation);
+
+    if (!scene) {
+      return std::unexpected(scene.error());
+    }
+
+    // The forwarding move into the checked scene API is still part of this boundary.
+    auto result = [&]() -> std::expected<void, ManagedError> {
+      try {
+        return (*scene)->onClick(this->node(), std::move(action));
+      } catch (const std::bad_alloc &) {
+        return std::unexpected(ManagedError{ManagedPhase::BIND, this->node().id(), TreeError::NO_MEMORY, {}, {}});
+      } catch (...) {
+        return std::unexpected(ManagedError{ManagedPhase::BIND, this->node().id(), TreeError::CALLBACK_FAILED, {}, {}});
+      }
+    }();
+
+    if (!result) {
+      detail::reportEventError(observation, result.error(), origin);
+    }
+
+    return result;
+  }
+
   /** @param resolver Optional owning synchronous adapter used only for i18n expressions.
    * @param origin Property acquisition call site used by assignment/+= diagnostics.
    * @return Owning observing proxy, valid after Ref destruction; never extends scene/widget lifetime.
@@ -292,8 +330,42 @@ public:
    * @return This consuming recipe for chaining.
    */
   Description &&style(StyleTarget target) && {
+    if (state_ && state_->id) {
+      if (target.id.empty()) {
+        target.id = *state_->id;
+      } else if (!target.id.empty()) {
+        state_->id = target.id;
+      }
+    }
+
     return std::move(*this).setup([target = std::move(target)](ManagedScene &scene, Node<T> node) mutable {
       return scene.style(node, std::move(target));
+    });
+  }
+
+  /** @param value Case-sensitive style id copied into this recipe; type/classes are preserved.
+   * @return Consuming recipe; id is assigned at mount in modifier order, before later styles.
+   * A later style with an empty id preserves it; an explicit nonempty style id replaces it.
+   */
+  Description &&id(std::string_view value) && {
+    if (state_) {
+      state_->id = std::string(value);
+    }
+
+    return std::move(*this).setup([value = std::string(value)](ManagedScene &scene, Node<T> node) {
+      return scene.id(node, value);
+    });
+  }
+
+  /** @tparam Callback Compact owning click callback, optionally receiving ClickEvent.
+   * @param callback Void, expected<void, TreeError> or EditorCommandResult action.
+   * @return Consuming button recipe using one existing managed binding; duplicates fail at mount.
+   */
+  template <class Callback>
+    requires(std::same_as<T, Button> && portals::detail::ManagedAction<Callback, ClickEvent>)
+  Description &&onClick(Callback callback) && {
+    return std::move(*this).setup([callback = std::move(callback)](ManagedScene &scene, Node<T> node) mutable {
+      return scene.onClick(node, std::move(callback));
     });
   }
 
@@ -347,6 +419,7 @@ private:
     std::vector<Setup<T>> setup;        ///< Customization actions in modifier order.
     std::vector<Child> children;        ///< Consuming child adapters in insertion order.
     std::vector<NodeRef<T>> references; ///< Observing slots reserved for this node.
+    std::optional<std::string> id;      ///< Compact recipe identity preserved by later style modifiers.
   };
 
   /** @brief Allocate recipe storage and take ownership of its constructor adapter.
@@ -555,15 +628,15 @@ inline Description<Button> button(std::string_view text, std::function<std::expe
     });
 }
 
-/** @tparam Callback Owning callable returning exactly EditorCommandResult.
+/** @tparam Callback Owning compact action returning void, expected<void, TreeError> or EditorCommandResult.
  * @param text UTF-8 caption copied immediately.
- * @param action Owning editor command callback; return field.undo/redo directly to preserve its receipt.
+ * @param action Action optionally borrowing ClickEvent; return field.undo/redo directly to preserve its receipt.
  * @param style Owning manual appearances.
  * @param policy Owning layout constraints.
- * @return Single-use button recipe with exact command provenance reporting.
+ * @return Single-use button recipe with scene-owned callback and exact command provenance reporting.
  */
 template <class Callback>
-  requires std::same_as<std::invoke_result_t<Callback &>, EditorCommandResult>
+  requires portals::detail::ManagedAction<Callback, ClickEvent>
 inline Description<Button> button(std::string_view text, Callback action, ControlStyle style = {},
                                   SizePolicy policy = {}) {
   return control<Button>(text, style, policy)
@@ -831,6 +904,259 @@ Description<Column> column(LinearOptions options, Children &&...children) {
  */
 template <detail::DescriptionInput... Children> Description<Column> column(Children &&...children) {
   return linear<Column>({}, std::forward<Children>(children)...);
+}
+
+/** @param value Semantic non-character key; raw input is matched before router normalization.
+ * @param modifiers Exact modifiers required by ManagedScene::onKey.
+ * @return Owning chord value; PRESS and REPEAT are admitted by onKey.
+ */
+inline KeyEvent key(InputKey value, InputModifiers modifiers = {}) {
+  return {value, {}, modifiers, KeyAction::PRESS};
+}
+
+/** @param scalar Character scalar, including existing control-key representations.
+ * @param modifiers Exact modifiers required by ManagedScene::onKey.
+ * @return Owning CHARACTER chord; no keyboard layout or scan code is inferred.
+ */
+inline KeyEvent character(char32_t scalar, InputModifiers modifiers = {}) {
+  return {InputKey::CHARACTER, scalar, modifiers, KeyAction::PRESS};
+}
+
+/** @param text Caption copied into an unbound button recipe.
+ * @return Consuming recipe; add onClick before mount or Ref.onClick after successful mount.
+ */
+inline Description<Button> button(std::string_view text) {
+  return control<Button>(text, {}, {});
+}
+
+/** @param reference Shared empty slot, published after the whole mount succeeds.
+ * @param text Caption copied now.
+ * @param style Manual appearances.
+ * @param policy Layout constraints.
+ * @return Label recipe sharing the existing reference transaction.
+ */
+inline Description<Label> label(Ref<Label> reference, std::string_view text, ControlStyle style = {},
+                                SizePolicy policy = {}) {
+  return label(text, style, policy).reference(std::move(reference));
+}
+
+/** @param reference Empty observing slot published only after complete mount.
+ * @param text Caption copied now.
+ * @param style Manual appearances.
+ * @param policy Layout constraints.
+ * @return Unbound button recipe for late Ref.onClick registration before run.
+ */
+inline Description<Button> button(Ref<Button> reference, std::string_view text, ControlStyle style = {},
+                                  SizePolicy policy = {}) {
+  return control<Button>(text, style, policy).reference(std::move(reference));
+}
+
+/** @tparam Callback Owning compact action, optionally taking ClickEvent; void/expected/command result.
+ * @param reference Empty observing slot published after complete mount.
+ * @param text Caption copied now.
+ * @param action Owning callback; captures transfer to the scene at mount.
+ * @param style Manual appearances.
+ * @param policy Layout constraints.
+ * @return Bound button recipe; registration errors participate in subtree rollback.
+ */
+template <class Callback>
+  requires portals::detail::ManagedAction<Callback, ClickEvent>
+Description<Button> button(Ref<Button> reference, std::string_view text, Callback action, ControlStyle style = {},
+                           SizePolicy policy = {}) {
+  return button(text, std::move(action), style, policy).reference(std::move(reference));
+}
+
+/** @param reference Empty observing slot published after complete mount.
+ * @param text Caption copied now.
+ * @param model Existing managed bool state.
+ * @param changed Optional typed receipt callback.
+ * @param style Manual appearances.
+ * @param policy Layout constraints.
+ * @return Checkbox recipe retaining its original commit semantics.
+ */
+inline Description<CheckBox> checkbox(Ref<CheckBox> reference, std::string_view text, ManagedState<bool> model,
+                                      std::function<std::expected<void, TreeError>(CheckBoxResult)> changed = {},
+                                      ControlStyle style = {}, SizePolicy policy = {}) {
+  return checkbox(text, model, std::move(changed), style, policy).reference(std::move(reference));
+}
+
+/** @param reference Empty observing editor slot published after complete mount.
+ * @param model Existing managed text state.
+ * @param config Owning editor callbacks/options; existing EditMode/history behavior is retained.
+ * @return Bound editor recipe using the original factory and reference transaction.
+ */
+inline Description<LineEdit> lineEdit(Ref<LineEdit> reference, ManagedState<std::string> model,
+                                      LineEditConfig config = {}) {
+  return lineEdit(model, std::move(config)).reference(std::move(reference));
+}
+
+/** @tparam T Public widget subtype compatible with the forwarded constructor arguments.
+ * @tparam Args Owning constructor argument types, following the existing custom factory contract.
+ * @param reference Empty observing slot published after complete mount.
+ * @param args Constructor arguments forwarded into owning recipe storage.
+ * @return Existing custom recipe with deferred reference publication.
+ */
+template <class T, class... Args> Description<T> custom(Ref<T> reference, Args &&...args) {
+  return custom<T>(std::forward<Args>(args)...).reference(std::move(reference));
+}
+
+/** @tparam Children Consuming child recipes, mounted in argument order.
+ * @param reference Empty layout slot published after complete mount.
+ * @param children Owning child recipes.
+ * @return Existing column recipe with one additional observation.
+ */
+template <detail::DescriptionInput... Children>
+Description<Column> column(Ref<Column> reference, Children &&...children) {
+  return column(std::forward<Children>(children)...).reference(std::move(reference));
+}
+
+/** @tparam Children Consuming child recipes, mounted in argument order.
+ * @param reference Empty layout slot published after complete mount.
+ * @param children Owning child recipes.
+ * @return Existing row recipe with one additional observation.
+ */
+template <detail::DescriptionInput... Children> Description<Row> row(Ref<Row> reference, Children &&...children) {
+  return row(std::forward<Children>(children)...).reference(std::move(reference));
+}
+
+/** @tparam Children Consuming child recipes, mounted in argument order.
+ * @param reference Empty grid slot published after complete mount.
+ * @param children Owning child recipes; placement remains explicit after mount.
+ * @return Existing grid recipe with one additional observation.
+ */
+template <detail::DescriptionInput... Children> Description<Grid> grid(Ref<Grid> reference, Children &&...children) {
+  return grid(std::forward<Children>(children)...).reference(std::move(reference));
+}
+
+/** @tparam Children Consuming child recipes.
+ * @param reference Empty row observation published after complete mount.
+ * @param options Existing owning linear layout options.
+ * @param children Owning child recipes, mounted in argument order.
+ * @return Existing row recipe retaining its layout configuration.
+ */
+template <detail::DescriptionInput... Children>
+Description<Row> row(Ref<Row> reference, LinearOptions options, Children &&...children) {
+  return row(options, std::forward<Children>(children)...).reference(std::move(reference));
+}
+
+/** @tparam Children Consuming child recipes.
+ * @param reference Empty column observation published after complete mount.
+ * @param options Existing owning linear layout options.
+ * @param children Owning child recipes, mounted in argument order.
+ * @return Existing column recipe retaining its layout configuration.
+ */
+template <detail::DescriptionInput... Children>
+Description<Column> column(Ref<Column> reference, LinearOptions options, Children &&...children) {
+  return column(options, std::forward<Children>(children)...).reference(std::move(reference));
+}
+
+/** @tparam T Control subtype compatible with the existing caption constructor.
+ * @param reference Empty control observation published after complete mount.
+ * @param text UTF-8 caption copied into owning storage.
+ * @param style Existing manual appearances.
+ * @param policy Existing layout constraints.
+ * @return Existing control recipe with additive reference publication.
+ */
+template <class T>
+Description<T> control(Ref<T> reference, std::string_view text, ControlStyle style = {}, SizePolicy policy = {}) {
+  return control<T>(text, style, policy).reference(std::move(reference));
+}
+
+/** @tparam T Immutable managed model row type.
+ * @param reference Empty view observation published after complete mount.
+ * @param model Existing scene-owned model.
+ * @param columns Column descriptions copied by the original factory.
+ * @param options Existing table configuration.
+ * @param policy Existing layout constraints.
+ * @param prepared Owning provider callback; pending ranges require it.
+ * @return Existing table recipe preserving preparation, rollback and provider semantics.
+ */
+template <class T>
+Description<VirtualTable<T>> virtualTable(Ref<VirtualTable<T>> reference, ManagedModel<T> model,
+                                          std::type_identity_t<std::span<const TableColumn<T>>> columns,
+                                          VirtualTableOptions options = {}, SizePolicy policy = {},
+                                          std::type_identity_t<ManagedViewHandler<T>> prepared = {}) {
+  return virtualTable(model, columns, options, policy, std::move(prepared)).reference(std::move(reference));
+}
+
+/** @tparam T Immutable managed model row type.
+ * @param reference Empty view observation published after complete mount.
+ * @param model Existing scene-owned model.
+ * @param delegate Owning row formatter retained by the original recipe.
+ * @param options Existing list configuration.
+ * @param policy Existing layout constraints.
+ * @param prepared Owning provider callback; pending ranges require it.
+ * @return Existing list recipe preserving preparation, rollback and provider semantics.
+ */
+template <class T>
+Description<VirtualList<T>> virtualList(Ref<VirtualList<T>> reference, ManagedModel<T> model,
+                                        std::type_identity_t<ManagedListFormatter<T>> delegate,
+                                        VirtualListOptions options = {}, SizePolicy policy = {},
+                                        std::type_identity_t<ManagedViewHandler<T>> prepared = {}) {
+  return virtualList(model, std::move(delegate), options, policy, std::move(prepared)).reference(std::move(reference));
+}
+
+/** @tparam T Immutable managed model row type.
+ * @param reference Empty chart observation published after complete mount.
+ * @param model Existing scene-owned model.
+ * @param accessor Owning OHLC projection retained by the original recipe.
+ * @param options Existing chart configuration.
+ * @param first Owning origin callback; empty starts at row zero.
+ * @param prepared Owning provider callback; pending ranges require it.
+ * @return Existing chart recipe preserving preparation, rollback and provider semantics.
+ */
+template <class T>
+Description<Chart<T>> chart(Ref<Chart<T>> reference, ManagedModel<T> model,
+                            std::type_identity_t<ManagedChartAccessor<T>> accessor, ChartOptions options = {},
+                            ManagedChartOrigin first = {}, std::type_identity_t<ManagedViewHandler<T>> prepared = {}) {
+  return chart(model, std::move(accessor), options, std::move(first), std::move(prepared))
+    .reference(std::move(reference));
+}
+
+/** @tparam T Immutable managed model row type.
+ * @tparam Config Exactly the original VirtualTableConfig<T>, optionally cv/ref qualified.
+ * @param reference Empty observing slot published after complete mount.
+ * @param model Existing scene-owned model.
+ * @param columns Owning column descriptions copied by the original factory.
+ * @param config Original named settings forwarded into the existing recipe.
+ * @return Existing named table recipe with additive reference publication.
+ */
+template <class T, class Config>
+  requires std::same_as<std::remove_cvref_t<Config>, VirtualTableConfig<T>>
+Description<VirtualTable<T>> virtualTable(Ref<VirtualTable<T>> reference, ManagedModel<T> model,
+                                          std::type_identity_t<std::span<const TableColumn<T>>> columns,
+                                          Config &&config) {
+  return virtualTable(model, columns, std::forward<Config>(config)).reference(std::move(reference));
+}
+
+/** @tparam T Immutable managed model row type.
+ * @tparam Config Exactly the original VirtualListConfig<T>, optionally cv/ref qualified.
+ * @param reference Empty observing slot published after complete mount.
+ * @param model Existing scene-owned model.
+ * @param delegate Owning row formatter retained by the original recipe.
+ * @param config Original named settings forwarded into the existing recipe.
+ * @return Existing named list recipe with additive reference publication.
+ */
+template <class T, class Config>
+  requires std::same_as<std::remove_cvref_t<Config>, VirtualListConfig<T>>
+Description<VirtualList<T>> virtualList(Ref<VirtualList<T>> reference, ManagedModel<T> model,
+                                        std::type_identity_t<ManagedListFormatter<T>> delegate, Config &&config) {
+  return virtualList(model, std::move(delegate), std::forward<Config>(config)).reference(std::move(reference));
+}
+
+/** @tparam T Immutable managed model row type.
+ * @tparam Config Exactly the original ChartConfig<T>, optionally cv/ref qualified.
+ * @param reference Empty observing slot published after complete mount.
+ * @param model Existing scene-owned model.
+ * @param accessor Owning OHLC projection retained by the original recipe.
+ * @param config Original named settings forwarded into the existing recipe.
+ * @return Existing named chart recipe with additive reference publication.
+ */
+template <class T, class Config>
+  requires std::same_as<std::remove_cvref_t<Config>, ChartConfig<T>>
+Description<Chart<T>> chart(Ref<Chart<T>> reference, ManagedModel<T> model,
+                            std::type_identity_t<ManagedChartAccessor<T>> accessor, Config &&config) {
+  return chart(model, std::move(accessor), std::forward<Config>(config)).reference(std::move(reference));
 }
 
 /** @brief Consume a recipe into the existing managed subtree, with failure cleanup.

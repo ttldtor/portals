@@ -140,27 +140,29 @@ int main(int argc, char **argv) {
   };
 
   // References observe the completed tree; no identity is exposed by a partial mount.
-  ui::NodeRef<Label> title, statusLabel;
-  ui::NodeRef<LineEdit> editor;
-  ui::NodeRef<CheckBox> alertsBox;
-  ui::NodeRef<Button> run;
-  ui::NodeRef<Meter> meter;
+  ui::Ref<Label> title, statusLabel;
+  ui::Ref<LineEdit> editor;
+  ui::Ref<CheckBox> alertsBox;
+  ui::Ref<Button> run;
+  ui::Ref<Meter> meter;
 
   take(ui::mount(
     *scene,
     ui::column(
-      ui::label("Name: Enter saves | F2 theme | F10 quit").reference(title),
+      ui::label(title, "Name: Enter saves | F2 theme | F10 quit"),
 
-      ui::lineEdit(name, {.result = editAction, .options = {.editMode = EditMode::EXPLICIT}, .validate = nonemptyName})
-        .reference(editor),
+      ui::lineEdit(editor, name,
+                   {.result = editAction, .options = {.editMode = EditMode::EXPLICIT}, .validate = nonemptyName}),
 
-      ui::checkbox("Alerts", alerts, alertsAction).reference(alertsBox),
+      ui::checkbox(alertsBox, "Alerts", alerts, alertsAction),
 
-      ui::button("Run", runAction).reference(run),
+      ui::button(run, "Run"),
 
-      ui::label("Ready").reference(statusLabel),
+      ui::label(statusLabel, "Ready"),
 
-      ui::custom<Meter>().reference(meter).style({.type = "Meter"}).onEvent(meterAction).onPrepare(presentMeter))));
+      ui::custom<Meter>(meter).style({.type = "Meter"}).onEvent(meterAction).onPrepare(presentMeter))));
+
+  take(run.onClick(runAction));
 
   // Business callbacks start in run(), after all observing identities are available.
   nodes = {title.node(), editor.node(), alertsBox.node(), run.node(), statusLabel.node(), meter.node()};

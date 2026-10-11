@@ -7,18 +7,18 @@
 
 namespace portals {
 namespace {
-bool activates(const RoutedEvent &event) {
+bool activates(const RoutedEvent &event, bool allowModified = false) {
   if (const auto *action = std::get_if<ActionEvent>(&event)) {
-    return action->action == Action::ACTIVATE && action->modifiers == InputModifiers{};
+    return action->action == Action::ACTIVATE && (allowModified || action->modifiers == InputModifiers{});
   }
 
   if (const auto *text = std::get_if<TextInputEvent>(&event)) {
-    return text->scalar == U' ' && text->modifiers == InputModifiers{};
+    return text->scalar == U' ' && (allowModified || text->modifiers == InputModifiers{});
   }
 
   if (const auto *mouse = std::get_if<MouseInputEvent>(&event)) {
     return mouse->button == MouseButton::LEFT && mouse->action == MouseAction::PRESS &&
-           mouse->modifiers == InputModifiers{};
+           (allowModified || mouse->modifiers == InputModifiers{});
   }
 
   return false;
@@ -208,12 +208,43 @@ std::expected<ActionBinding, TreeError> bindButton(EventRouter &router, Node<But
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
-  return router.bind(node, [action = std::move(action)](Button &, const RoutedEvent &event) {
-    if (!activates(event)) {
+  try {
+    return bindButtonClick(
+      router, node,
+      [action = std::move(action)](const ClickEvent &) {
+        action();
+      },
+      false);
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(TreeError::NO_MEMORY);
+  } catch (...) {
+    return std::unexpected(TreeError::CALLBACK_FAILED);
+  }
+}
+
+std::expected<ActionBinding, TreeError> bindButtonClick(EventRouter &router, Node<Button> node,
+                                                        std::function<void(const ClickEvent &)> action,
+                                                        bool allowModified) {
+  if (!action) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  return router.bind(node, [node, action = std::move(action), allowModified](Button &, const RoutedEvent &event) {
+    if (!activates(event, allowModified)) {
       return EventReply::IGNORED;
     }
 
-    action();
+    const auto modifiers = std::visit(
+      [](const auto &value) {
+        if constexpr (requires { value.modifiers; }) {
+          return value.modifiers;
+        } else {
+          return InputModifiers{};
+        }
+      },
+      event);
+
+    action(ClickEvent{node, modifiers, event});
 
     return EventReply::HANDLED;
   });
