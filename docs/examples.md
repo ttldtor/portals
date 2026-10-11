@@ -45,8 +45,9 @@ failures return 1 after the runner attempts terminal restoration; success is 0.
 The gallery also retains the historical `initial`, `keyboard`, `mouse` and
 `disabled` finite fixture modes. They use the same replay runner afterward.
 
-The interactive gallery uses `gallery::Form`: its managed scene owns the state,
-nodes and scoped registrations. The separate `gallery::Scene` is a finite
+The interactive gallery uses `gallery::FluentForm`: its lazy owning scene retains the state,
+nodes, application and scoped registrations. `gallery::Form` remains the compiled
+before specimen, and the new header shows complete method and pipe variants. The separate `gallery::Scene` is a finite
 low-level regression fixture, where binding tokens and presentation sync remain
 explicit to exercise the retained API. It runs only in the check/stage paths.
 The example-only `take` helper stops setup with a generic exception and loses

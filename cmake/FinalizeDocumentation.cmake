@@ -13,6 +13,9 @@ include("${CMAKE_CURRENT_LIST_DIR}/FinalizeDiagrams.cmake")
 set(example_sources
   tests/support/gallery_before.hpp
   examples/gallery/form.hpp
+  examples/gallery/fluent_form.hpp
+  examples/custom_widget/meter.hpp
+  examples/custom_widget/fluent_meter.hpp
   examples/dashboard/dashboard.hpp
   tests/package_consumer/form_declarative.cpp
   tests/package_consumer/composed_before.cpp
@@ -35,7 +38,7 @@ foreach(source IN LISTS example_sources)
   configure_file("${CMAKE_CURRENT_LIST_DIR}/../${source}" "${HTML_DIR}/source/${source}" COPYONLY)
 endforeach()
 
-foreach(page examples managed-controls declarative-ui virtual-preparation)
+foreach(page examples managed-controls declarative-ui virtual-preparation compact_examples)
   set(page_file "${HTML_DIR}/${page}.html")
   file(READ "${page_file}" content)
   foreach(source IN LISTS example_sources)

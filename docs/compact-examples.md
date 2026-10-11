@@ -261,10 +261,75 @@ were excluded. Median wall times were:
 These samples do not demonstrate a compiler-independent speedup. On GCC this
 particular PFR instantiation cost more than the explicit member-pointer variant.
 
-Full files also retain provider code and customization. Nonblank, noncomment
+The following line-count snapshot describes the compact helpers measured on
+10 October, before the owning-scene examples below. Full files also retain provider
+code and customization. Nonblank, noncomment
 line counts changed as follows (text counting, not a complexity metric): gallery
 59 to 59, dashboard 423 to 438, custom meter 140 to 119, installed composed form
 167 to 165. Dashboard removes manual mount/binding bookkeeping but adds explicit
 observers and readable descriptions; its complete file became longer. General
 layout shorthand and resource/i18n text are future work, not hidden helpers in
 this comparison.
+
+## Complete owning scene examples
+
+The interactive gallery and custom meter now own `ui::Scene`. This is the lazy
+facade over the existing `Application` and `ManagedScene`, with the same retained
+widgets, preparation, input router and single runner. Each complete after class
+contains both ordinary method composition and equivalent pipe composition;
+`Composition::PIPE` selects the pipe spelling without changing the recipe or
+configuration order. No macro, coroutine runner or extra reactive system is used.
+
+### Gallery before: borrowed application and managed ownership
+
+\include{lineno} form.hpp
+
+### Gallery after: owning scene and direct initial editor text
+
+\include{lineno} fluent_form.hpp
+
+`ui::lineEdit(editor, "Portals", ...)` owns its initial text and creates its
+scene-owned model during mounting. The explicit edit mode remains visible:
+Enter commits and Tab changes focus. The checkbox still uses a scene-owned
+boolean state. `Ref` observes the editor and publishes only after successful
+mount; it owns neither the widget nor the scene. The first focusable child is
+this editor, recovered by the existing router during managed preparation.
+
+### Custom widget before: borrowed application and scalar managed state
+
+\include{lineno} meter.hpp
+
+### Custom widget after: owning scene with the same final LevelMeter
+
+\include{lineno} fluent_meter.hpp
+
+The custom `LevelMeter` remains final. Its adapter reads an immutable scalar
+snapshot and updates retained presentation during preparation. A changed
+`ManagedState<int>` invalidates the scene root with `Invalidation::PAINT`, so the
+adapter needs no additional tree invalidation. Painting reads retained text and
+value; it never reads state or formats text. Equal or clamped sets request no
+additional frame.
+
+Both after classes are stationary because callbacks explicitly borrow their
+example object. Their last member is the scene owner: it closes callbacks and
+its application before the borrowed members are destroyed. The replay clock
+and terminal remain borrowed through the run. Existing `std::stop_source`
+provides cooperative cancellation for Quit/F10/Ctrl+C; the source outlives all
+callbacks and its token is passed to the existing scene runner.
+
+The short exact `onKey` chords are registered after the original typed input
+fallback. Unmodified keys use those handlers; modified arrows/F2/exit keys retain
+the examples' previous modifier-insensitive admission through `onInput`.
+Directly replacing `onInput` later would replace this chain. Theme replacement
+updates the preset index only after success. Factories return checked recipes
+and preserve state creation errors. `run` returns the original `ManagedError`,
+including independent runner/restoration and cleanup failures; the CLI reports
+it after restoration. Recipe construction, allocation and invalid preset indices
+can still throw before a checked boundary.
+
+The existing regression compares full output bytes, frame counts, action counts
+and closed transports for before/method/pipe, all six themes, both color modes,
+keyboard/mouse, explicit editing, Unicode, resize, modified shortcuts, idle and
+clamped state. The relocated installed consumer compiles and runs the same public
+headers. These checks prove their specified headless scenarios; native terminal
+compatibility remains a separate platform check.

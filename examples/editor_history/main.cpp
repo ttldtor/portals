@@ -380,7 +380,8 @@ private:
       ui::row(ui::label("Draft:"), ui::lineEdit(row.model, std::move(config)).reference(row.edit)),
       ui::row(ui::label("Model:"),
               ui::lineEdit(row.model, {.options = {.history = {.enabled = false}, .readOnly = true},
-                                       .policy = {.width = {.minimum = 12, .preferred = 24, .mode = SizeMode::FLEX}}})
+                                       .policy = {.width = {.minimum = 12, .preferred = 24, .mode = SizeMode::FLEX},
+                                                  .height = {}}})
                 .reference(row.view)),
       ui::row(ui::button("Undo",
                          [field = row.edit] {

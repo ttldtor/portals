@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include "../replay/terminal.hpp"
-#include "form.hpp"
+#include "fluent_form.hpp"
 #include "gallery.hpp"
 #include "managed_report.hpp"
 
@@ -43,14 +43,21 @@ int main(int argc, char **argv) {
 
       example::ReplayTerminal terminal({{20, "New name\r\t \t\r", {}}, {100, "\x1bOQ", {}}, {150, "\x1b[21~", {}}},
                                        250);
-      auto app = example::take(portals::Application::create(options, terminal.clock()));
-      gallery::Form form(*app, parsed->theme);
+      portals::ui::SceneOptions sceneOptions;
+
+      sceneOptions.application = options;
+      sceneOptions.clock = terminal.clock();
+
+      gallery::FluentForm form(sceneOptions, parsed->theme);
 
       return example::report(form.run(terminal));
     }
 
-    auto app = example::take(portals::Application::create(options));
-    gallery::Form form(*app, parsed->theme);
+    portals::ui::SceneOptions sceneOptions;
+
+    sceneOptions.application = options;
+
+    gallery::FluentForm form(sceneOptions, parsed->theme);
 
     return example::report(form.run());
   } catch (const std::exception &error) {

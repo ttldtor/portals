@@ -1,10 +1,12 @@
 # Control gallery
 
-Start with [`Form`](form.hpp): it mounts a managed form, binds the name and
+Start with [`FluentForm`](fluent_form.hpp): it owns a lazy scene, creates the editor and
 checkbox state, and registers scoped actions. Enter commits the name; Tab
 changes focus. Run increments an observable action count without changing a
 model. F2 cycles the six theme presets; F10 or Ctrl+C exits. The application
-must outlive the form and all calls use its owning UI thread.
+is owned by the scene; all calls use its constructing UI thread. The stationary
+example object outlives the callbacks borrowing it. [`Form`](form.hpp) remains
+the compiled before specimen; FluentForm includes method and pipe variants.
 
 ```powershell
 .\portals_gallery.exe --theme nord
