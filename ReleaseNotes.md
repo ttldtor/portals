@@ -5,6 +5,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Fixed] Scheduler creation reports MSVC Debug container allocation failures,
+  and shutdown releases callbacks and queued snapshots without allocating,
+  including reentrant cleanup under memory pressure.
+
 - [Added] Ref-first UI recipes, compact selector ids, void or typed click actions
   with routed parameters, checked late button registration, and composable short
   key handlers using the existing managed input lifecycle.
