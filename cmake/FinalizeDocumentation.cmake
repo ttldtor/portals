@@ -83,7 +83,9 @@ foreach(index_file IN LISTS index_files)
       message(FATAL_ERROR "Unrecognized flat member index in ${index_file}; left unchanged")
     endif()
     string(TOUPPER "${letter}" upper_letter)
-    string(REGEX MATCH "<li>[${letter}${upper_letter}][A-Za-z0-9_]*&#160;:" row "${content}")
+    # Related-symbol names include operator punctuation and encoded template characters.
+    # Stop before any link markup or next row, while retaining the exact displayed name.
+    string(REGEX MATCH "<li>[${letter}${upper_letter}][^<\r\n]*&#160;:" row "${content}")
     if(row STREQUAL "")
       message(FATAL_ERROR "Missing member row for index_${letter} in ${index_file}; left unchanged")
     endif()

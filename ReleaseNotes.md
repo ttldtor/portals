@@ -5,6 +5,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Added] Owning lazy scenes with prepare/configure/run methods and small pipe stages,
+  internal-state text editors, typed setup/run failures and explicit managed cleanup
+  after native open failure. Preparation uses the existing runtime without terminal I/O.
+
 - [Fixed] Scheduler creation reports MSVC Debug container allocation failures,
   and shutdown releases callbacks and queued snapshots without allocating,
   including reentrant cleanup under memory pressure.

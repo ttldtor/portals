@@ -237,7 +237,12 @@ std::expected<void, ManagedError> ManagedScene::remove(Node<Widget> node) {
 
 std::optional<std::size_t> ManagedScene::recordError(ManagedError failure,
                                                      std::span<const ManagedDiagnosticContext> contexts,
-                                                     std::source_location origin) noexcept {
+                                                     std::source_location origin, bool *observerInvoked,
+                                                     bool runFailure) noexcept {
+  if (observerInvoked) {
+    *observerInvoked = false;
+  }
+
   if (errorCount_ == errors_.size()) {
     increment(droppedErrors_);
 
@@ -254,7 +259,11 @@ std::optional<std::size_t> ManagedScene::recordError(ManagedError failure,
     overflowDiagnostic_.contextsTruncated = !contexts.empty();
     overflowDiagnostic_.notificationSuppressed = false;
     overflowDiagnostic_.observerFailed = false;
-    notifyError(overflowDiagnostic_);
+    const bool invoked = notifyError(overflowDiagnostic_, runFailure);
+
+    if (observerInvoked) {
+      *observerInvoked = invoked;
+    }
 
     return {};
   }
@@ -276,34 +285,42 @@ std::optional<std::size_t> ManagedScene::recordError(ManagedError failure,
     increment(contextFailures_);
   }
 
-  notifyError(diagnostic);
+  const bool invoked = notifyError(diagnostic, runFailure);
+
+  if (observerInvoked) {
+    *observerInvoked = invoked;
+  }
 
   return index;
 }
 
-void ManagedScene::notifyError(ManagedDiagnostic &diagnostic) noexcept {
+bool ManagedScene::notifyError(ManagedDiagnostic &diagnostic, bool runFailure) noexcept {
   if (!errorObserver_) {
-    return;
+    return false;
   }
 
   if (reporting_) {
     diagnostic.notificationSuppressed = true;
     increment(suppressedNotifications_);
 
-    return;
+    return false;
   }
 
   struct Reporting {
     bool &flag;
+    bool &runFlag;
+    bool previousRunFlag;
 
     ~Reporting() {
       flag = false;
+      runFlag = previousRunFlag;
     }
-  } guard{reporting_};
+  } guard{reporting_, notifyingRunFailure_, notifyingRunFailure_};
 
   auto callback = errorObserver_;
 
   reporting_ = true;
+  notifyingRunFailure_ = runFailure;
 
   try {
     (*callback)(diagnostic);
@@ -311,6 +328,8 @@ void ManagedScene::notifyError(ManagedDiagnostic &diagnostic) noexcept {
     diagnostic.observerFailed = true;
     increment(observerFailures_);
   }
+
+  return true;
 }
 
 std::expected<void, TreeError> ManagedScene::reportError(ManagedError failure,
@@ -437,10 +456,12 @@ void ManagedScene::remember(ManagedError failure, std::source_location origin,
     failure_ = failure;
   }
 
-  const auto diagnostic = recordError(std::move(failure), contexts, origin);
+  bool invoked{};
+  const auto diagnostic = recordError(std::move(failure), contexts, origin, &invoked, first);
 
   if (first) {
     failureDiagnostic_ = diagnostic;
+    failureNotified_ = invoked;
   }
 
   app_.requestStop();
@@ -1105,6 +1126,8 @@ void ManagedScene::stop(Application &app) {
 
 std::expected<ApplicationStats, ManagedError>
 ManagedScene::finish(std::expected<ApplicationStats, ApplicationError> result) {
+  runFailureNotified_ = false;
+
   if (failure_) {
     auto failure = *failure_;
 
@@ -1117,8 +1140,13 @@ ManagedScene::finish(std::expected<ApplicationStats, ApplicationError> result) {
     if (failureDiagnostic_) {
       errors_[*failureDiagnostic_].error = failure;
     } else {
-      (void)recordError(failure, {}, std::source_location::current());
+      bool invoked{};
+
+      (void)recordError(failure, {}, std::source_location::current(), &invoked, true);
+      failureNotified_ = failureNotified_ || invoked;
     }
+
+    runFailureNotified_ = failureNotified_;
 
     return std::unexpected(failure);
   }
@@ -1126,7 +1154,7 @@ ManagedScene::finish(std::expected<ApplicationStats, ApplicationError> result) {
   if (!result) {
     ManagedError failure{ManagedPhase::RUN, root_.id(), result.error(), result.error(), cleanup_};
 
-    (void)recordError(failure, {}, std::source_location::current());
+    (void)recordError(failure, {}, std::source_location::current(), &runFailureNotified_, true);
 
     return std::unexpected(failure);
   }
@@ -1134,7 +1162,7 @@ ManagedScene::finish(std::expected<ApplicationStats, ApplicationError> result) {
   if (cleanup_) {
     ManagedError failure{ManagedPhase::CLEANUP, root_.id(), *cleanup_, {}, cleanup_};
 
-    (void)recordError(failure, {}, std::source_location::current());
+    (void)recordError(failure, {}, std::source_location::current(), &runFailureNotified_, true);
 
     return std::unexpected(failure);
   }

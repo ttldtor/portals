@@ -6,6 +6,106 @@ They compose ordinary controls and custom widgets on the existing
 it is not another widget tree or a reactive runtime. Mounted objects remain
 owned by `WidgetTree`, while `ManagedScene` retains bindings and presentation work.
 
+## Own a lazy scene
+
+An ordinary form can also use `ui::scene` to own its existing `Application` and
+`ManagedScene`. Preparation mounts the complete form and publishes its `Ref`s;
+it performs no terminal I/O. Configure handlers after preparation, then run:
+
+```cpp
+ui::Ref<LineEdit> field;
+ui::Ref<Button> apply;
+
+auto form = ui::scene(ui::column(
+  ui::lineEdit(field, "initial"),
+  ui::button(apply, "Apply")));
+
+form.prepare().configure([&](ManagedScene &) {
+  return apply.onClick([field] { field.text() += "!"; });
+});
+
+auto result = form.run();
+```
+
+`lineEdit(string_view)` copies initial bytes immediately. The `TextValue` overload
+owns a literal, formatted value or resource expression and accepts an explicit
+`TextResolver`. It resolves under the scene's width policy at mount, creates an
+internal managed text state, and uses the existing editor binding. Confirmation
+modes, validation, paste, clipboard and Undo retain their existing behavior.
+The `lineEdit(ManagedState<string>, ...)` overload remains available for shared
+models. Ref-first forms support both kinds of initialization.
+
+A scene can consume a direct description or a factory receiving `ManagedScene&`.
+The factory returns a description or `expected<Description<T>, ManagedError>`;
+it runs once at preparation and can create the existing states and models.
+Recipe and callable construction can throw before a checked boundary. Captures
+are owned; explicitly borrowed services must outlive use. Scene construction
+and operations are UI-affine. Move construction preserves the stable owner and
+thread identity; move assignment is unavailable. Moving or destroying an active
+owner, foreign-thread destruction, and destruction within a tree frame retain
+the existing terminate contract.
+
+`SceneOptions` forwards `ApplicationOptions`, `ManagedOptions` and an optional
+borrowed `SchedulerClock`. `maxConfigurations` defaults to 64 and bounds pending
+configure/key closures. Before prepare, theme and observer replacements retain
+the latest setting. Configure and key registrations execute in registration
+order after complete mount. Prepared key handlers use the existing managed
+budget and newest matching chord consumes input. Direct `ManagedScene::onInput`
+still replaces that whole composition. PRESS and REPEAT remain admitted.
+
+The small pipe stages call the same methods:
+
+```cpp
+auto result = ui::scene(ui::lineEdit("initial"))
+  | ui::theme(StyleSheet{})
+  | ui::onKey(ui::key(InputKey::F2), [] { /* application action */ })
+  | ui::run();
+```
+
+`ui::prepare()`, `ui::configure(...)` and `ui::onError(...)` are also stages.
+`run(terminal, stop)` borrows an existing replay/custom terminal; moving a named
+facade or method adapter into a pipe requires `std::move`. A pipe introduces no new runtime,
+parser or control modifier system.
+
+Repeated prepare on a prepared owner is a no-op. `prepareChecked()` and
+`checked()` expose typed preparation/sticky failures; `managed()` only observes
+an already prepared live owner. `diagnostics()` snapshots the existing bounded
+collector. The first facade failure prevents further configuration actions.
+`run()` returns that first cause with independent runner/restoration and cleanup
+details. It closes the managed scene after every admitted attempt, including
+native open failure. Partial prepare/configure failures also close the owner;
+published refs then become stale/closed, rather than reusable empty slots.
+Successful completion and explicit close never remount or reopen the terminal.
+`close()` is idempotent and returns its own cleanup outcome.
+
+Configure actions return `void` or exactly `expected<void, ManagedError>`.
+An ignored low-level result inside a void action stays the caller's responsibility;
+arbitrary `reportError` calls are nonfatal. An `expected` has no diagnostic receipt:
+returning a failure adds a `scene.configure` boundary record even if the original
+Ref/report operation already recorded its cause and call site. Equal causes from
+different operations are preserved. Existing `EditorCommandResult` key/click
+adapters retain their exact reporting receipt.
+
+`onError` observes errors without vetoing operations. The first pre-owner failure
+uses one owning fallback diagnostic with an empty node and no contexts; a late
+observer receives an undelivered failure once. Run notification uses the exact
+managed receipt of whether the observer was invoked for its returned primary;
+finish-after-stop failures get a fallback notification, while already notified
+failures are not repeated. Observer exceptions remain separate from the original
+cause. Lifecycle/configuration reentry returns or stores WOULD_BLOCK and never
+retires an active owner. Runtime theme/key mutation can delegate to the existing
+managed boundary; failure is returned after run exits and cleanup completes.
+Foreign-thread checked calls return WRONG_THREAD before mutable state access;
+fluent calls there leave state untouched, and `checked()` on that thread exposes
+WRONG_THREAD. Fluent chaining is not a concurrent thread-safe interface.
+
+Internal theme and callback transfers belong to the checked facade boundary,
+including rvalue methods and pipe dispatch. Allocation failures become sticky
+typed errors and retire a prepared owner. Constructing caller arguments or a
+pipe adapter before dispatch may still throw. Final teardown releases retained
+state, runtime captures and owning option services while the complete facade
+state remains guarded; lifecycle reentry is rejected before owner destruction.
+
 ## Store descriptions, then mount
 
 A description owns its child descriptions and callback objects. Standard text
