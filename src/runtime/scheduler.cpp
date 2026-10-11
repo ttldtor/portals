@@ -49,7 +49,8 @@ struct SchedulerPublication {
 };
 
 struct SchedulerQueue {
-  std::vector<SchedulerPublication> values;
+  // The count constructor lets MSVC debug-proxy allocation fail through create(), not noexcept vector().
+  std::vector<SchedulerPublication> values = std::vector<SchedulerPublication>(0);
   SchedulerQueueMetrics metrics;
   std::size_t capacity{};
 };
@@ -186,25 +187,37 @@ struct SchedulerState {
   }
 
   void reclaim() {
+    if (reclaiming) {
+      return;
+    }
+
+    struct Reclaiming {
+      bool &active;
+
+      ~Reclaiming() {
+        active = false;
+      }
+    } guard{reclaiming};
+
+    reclaiming = true;
+
     // Detach all owners under the mutex, then destroy them on UI after unlock. Snapshot
     // deleters and callback captures can reenter without observing half-cleared queue bookkeeping.
-    std::vector<std::shared_ptr<SchedulerRegistration>> removed;
-    std::vector<SchedulerPublication> old_data;
-    std::vector<SchedulerPublication> old_control;
+    // Retirement storage is constructed at create(), so shutdown never allocates debug proxies.
 
     {
       std::lock_guard lock(mutex);
 
-      removed.swap(registrations);
-      old_data.swap(data.values);
-      old_control.swap(control.values);
-      increment(data.metrics.cancelled, old_data.size());
-      increment(control.metrics.cancelled, old_control.size());
+      retiredRegistrations.swap(registrations);
+      retiredData.swap(data.values);
+      retiredControl.swap(control.values);
+      increment(data.metrics.cancelled, retiredData.size());
+      increment(control.metrics.cancelled, retiredControl.size());
       data.metrics.pending = control.metrics.pending = 0;
     }
 
     if (options.diagnostics && options.diagnostics->enabled()) {
-      for (const auto &registration : removed) {
+      for (const auto &registration : retiredRegistrations) {
         if (registration->timer) {
           options.diagnostics->record({.context = registration->diagnostic,
                                        .event = DiagnosticEvent::QUEUE_CANCELLED,
@@ -213,13 +226,18 @@ struct SchedulerState {
       }
     }
 
-    for (const auto &publication : old_data) {
+    for (const auto &publication : retiredData) {
       tracePublication(publication, DiagnosticEvent::QUEUE_CANCELLED, DiagnosticReason::CANCELLED);
     }
 
-    for (const auto &publication : old_control) {
+    for (const auto &publication : retiredControl) {
       tracePublication(publication, DiagnosticEvent::QUEUE_CANCELLED, DiagnosticReason::CANCELLED, true);
     }
+
+    // Keep the previous off-lock destruction order; nested stop observes the complete detached state.
+    retiredControl.clear();
+    retiredData.clear();
+    retiredRegistrations.clear();
   }
 
   std::optional<SchedulerTime> nextTimer() const {
@@ -247,7 +265,13 @@ struct SchedulerState {
   std::condition_variable condition;
   SchedulerQueue data;
   SchedulerQueue control;
-  std::vector<std::shared_ptr<SchedulerRegistration>> registrations;
+  std::vector<std::shared_ptr<SchedulerRegistration>> registrations =
+    std::vector<std::shared_ptr<SchedulerRegistration>>(0);
+  std::vector<std::shared_ptr<SchedulerRegistration>> retiredRegistrations =
+    std::vector<std::shared_ptr<SchedulerRegistration>>(0);
+  std::vector<SchedulerPublication> retiredData = std::vector<SchedulerPublication>(0);
+  std::vector<SchedulerPublication> retiredControl = std::vector<SchedulerPublication>(0);
+  bool reclaiming{};
   SchedulerMetrics totals;
   std::uint64_t next_id{};
 
