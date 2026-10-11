@@ -17,6 +17,7 @@ class ManagedScene;
 namespace ui::detail {
 struct Access;
 struct RefAccess;
+struct SceneAccess;
 } // namespace ui::detail
 
 namespace detail {
@@ -225,7 +226,8 @@ public:
 
   /** @brief Create UI-owned state with guaranteed dirty-frame recovery of missed notifications.
    * @tparam T Equality-comparable, owning value satisfying Property<T>'s contract.
-   * @param initial Initial value moved into revision zero; argument construction precedes this call.
+   * @param initial Initial value moved into revision zero, except string copied inside the checked boundary;
+   * argument construction precedes this call.
    * @param kind PAINT or LAYOUT; NONE is rejected because it cannot guarantee recovery.
    * @param options Positive existing Property observer capacity.
    * @return Weak typed state handle, or validation/allocation/construction error.
@@ -247,7 +249,14 @@ public:
       return std::unexpected(error(ManagedPhase::STATE, root_, TreeError::NODE_LIMIT));
     }
 
-    auto created = Property<T>::create(app_.tree(), root_, std::move(initial), kind, options);
+    auto created = [&] {
+      if constexpr (std::same_as<T, std::string>) {
+        // MSVC Debug string moves may allocate a proxy in noexcept; copy inside Property's checked boundary.
+        return Property<T>::create(app_.tree(), root_, std::as_const(initial), kind, options);
+      } else {
+        return Property<T>::create(app_.tree(), root_, std::move(initial), kind, options);
+      }
+    }();
 
     if (!created) {
       return std::unexpected(error(ManagedPhase::STATE, root_, created.error()));
@@ -618,6 +627,7 @@ public:
 private:
   friend struct ui::detail::Access;
   friend struct ui::detail::RefAccess;
+  friend struct ui::detail::SceneAccess;
 
   struct Entry {
     Node<Widget> node;
@@ -687,8 +697,9 @@ private:
   std::unexpected<ManagedError> rollback(Node<Widget> node, TreeError cause);
   std::expected<void, ManagedError> flushStyles();
   std::optional<std::size_t> recordError(ManagedError failure, std::span<const ManagedDiagnosticContext> contexts,
-                                         std::source_location origin) noexcept;
-  void notifyError(ManagedDiagnostic &diagnostic) noexcept;
+                                         std::source_location origin, bool *observerInvoked = nullptr,
+                                         bool runFailure = false) noexcept;
+  bool notifyError(ManagedDiagnostic &diagnostic, bool runFailure) noexcept;
   void remember(ManagedError failure, std::source_location origin = std::source_location::current(),
                 std::span<const ManagedDiagnosticContext> contexts = {});
   std::expected<ApplicationStats, ManagedError> finish(std::expected<ApplicationStats, ApplicationError> result);
@@ -720,6 +731,9 @@ private:
   bool preparing_{};
   bool recoveringFocus_{};
   bool reporting_{};
+  bool failureNotified_{};
+  bool runFailureNotified_{};
+  bool notifyingRunFailure_{};
   bool closed_{};
   std::shared_ptr<bool> textMutating_ = std::make_shared<bool>(false);
 };

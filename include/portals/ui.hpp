@@ -5,6 +5,7 @@
 #include <portals/grid.hpp>
 #include <portals/managed.hpp>
 #include <portals/ui_ref.hpp>
+#include <portals/ui_scene.hpp>
 
 #include <algorithm>
 #include <tuple>
@@ -48,10 +49,13 @@ inline ManagedError error(Node<Widget> node, TreeError cause) {
 
 /** @brief Stack-owned transaction bookkeeping, discarded after one description mount. */
 struct MountContext {
-  Node<Widget> root;               ///< First created node; identifies the subtree to retire on failure.
-  std::vector<Node<Widget>> nodes; ///< Created observers checked for liveness before publication.
-  std::vector<std::move_only_function<void()>> publish; ///< Nonthrowing assignments publishing reserved refs.
-  std::vector<std::move_only_function<void()>> release; ///< Nonthrowing releases of temporary ref reservations.
+  Node<Widget> root; ///< First created node; identifies the subtree to retire on failure.
+  std::vector<Node<Widget>> nodes =
+    std::vector<Node<Widget>>(0); ///< Created observers checked for liveness before publication.
+  std::vector<std::move_only_function<void()>> publish =
+    std::vector<std::move_only_function<void()>>(0); ///< Nonthrowing assignments publishing reserved refs.
+  std::vector<std::move_only_function<void()>> release =
+    std::vector<std::move_only_function<void()>>(0); ///< Nonthrowing releases of temporary ref reservations.
 
   /** @brief Release ref reservations after either publication or rollback. */
   ~MountContext() {
@@ -680,6 +684,77 @@ inline Description<LineEdit> lineEdit(ManagedState<std::string> model, LineEditC
     });
 }
 
+/** @param initial Owning initial text expression, resolved under the receiving scene's width policy at mount.
+ * @param config Existing editor settings, including confirmation mode, history, validation and clipboard.
+ * @param resolver Optional owning synchronous resource adapter; borrowed services must outlive mount.
+ * @return Single-use editor recipe with an internal scene-owned text state; construction may throw.
+ */
+inline Description<LineEdit> lineEdit(TextValue initial, LineEditConfig config = {}, TextResolver resolver = {}) {
+  auto model = std::make_shared<ManagedState<std::string>>();
+  auto description = detail::Access::describe<LineEdit>(
+    [initial = std::move(initial), options = config.options, policy = config.policy, resolver = std::move(resolver),
+     model](ManagedScene &scene, Node<Widget> parent) mutable -> std::expected<Node<LineEdit>, ManagedError> {
+      auto resolved = resolver ? initial.resolve(scene.widthPolicy(), resolver) : initial.resolve(scene.widthPolicy());
+
+      if (!resolved) {
+        auto failure = detail::error(parent, TreeError::INVALID_ARGUMENT);
+
+        if (const auto *text = std::get_if<TextError>(&resolved.error())) {
+          failure.text = *text;
+        } else {
+          failure.resource = std::get<TextResourceError>(resolved.error());
+        }
+
+        return std::unexpected(failure);
+      }
+
+      auto state = scene.state(std::string(resolved->bytes()));
+
+      if (!state) {
+        return std::unexpected(state.error());
+      }
+
+      *model = *state;
+      options.widthPolicy = scene.widthPolicy();
+
+      return scene.emplace<LineEdit>(parent, options, policy);
+    });
+
+  return std::move(description)
+    .setup([model, result = std::move(config.result), clipboard = std::move(config.clipboard),
+            validate = std::move(config.validate)](ManagedScene &scene, Node<LineEdit> node) mutable {
+      return scene.bind(node, *model, std::move(result), std::move(clipboard), std::move(validate));
+    });
+}
+
+/** @param initial UTF-8 bytes copied immediately; validated at mount under the scene width policy.
+ * @param config Existing editor settings and owned callbacks.
+ * @return Single-use editor recipe with internal managed state; no caller state boilerplate is needed.
+ */
+inline Description<LineEdit> lineEdit(std::string_view initial, LineEditConfig config = {}) {
+  return lineEdit(TextValue(initial), std::move(config));
+}
+
+/** @param reference Empty typed observation published after the complete form mounts.
+ * @param initial Owning initial expression.
+ * @param config Existing editor settings.
+ * @param resolver Optional synchronous resource adapter.
+ * @return Existing internal-state editor recipe with additive Ref publication.
+ */
+inline Description<LineEdit> lineEdit(Ref<LineEdit> reference, TextValue initial, LineEditConfig config = {},
+                                      TextResolver resolver = {}) {
+  return lineEdit(std::move(initial), std::move(config), std::move(resolver)).reference(std::move(reference));
+}
+
+/** @param reference Empty typed observation.
+ * @param initial UTF-8 bytes copied immediately.
+ * @param config Existing editor settings.
+ * @return Internal-state editor recipe with Ref publication after complete mount.
+ */
+inline Description<LineEdit> lineEdit(Ref<LineEdit> reference, std::string_view initial, LineEditConfig config = {}) {
+  return lineEdit(initial, std::move(config)).reference(std::move(reference));
+}
+
 /// @brief Describe a managed virtual table without opening a range until mount.
 /// @tparam T Immutable model row accepted by the column formatters; deduced from model.
 /// @param model Weak UI-affine handle belonging to the scene receiving this recipe.
@@ -1167,7 +1242,7 @@ Description<Chart<T>> chart(Ref<Chart<T>> reference, ManagedModel<T> model,
  * scene nodes and states survive. Reusing an empty/moved/consumed recipe returns INVALID_ARGUMENT.
  * References publish only after all nodes remain live. External callback effects are not undone.
  */
-template <class T> std::expected<Node<T>, ManagedError> mount(ManagedScene &scene, Description<T> &&description) {
+template <class T> std::expected<Node<T>, ManagedError> mount(ManagedScene &scene, Description<T> &&description) try {
   detail::MountContext context;
   std::expected<Node<T>, ManagedError> result =
     std::unexpected(detail::error(scene.root(), TreeError::INVALID_ARGUMENT));
@@ -1211,5 +1286,180 @@ template <class T> std::expected<Node<T>, ManagedError> mount(ManagedScene &scen
   }
 
   return result;
+} catch (const std::bad_alloc &) {
+  // Transaction storage is constructed before any node exists; preserve the checked allocation boundary too.
+  auto consumed = std::move(description);
+
+  return std::unexpected(detail::error(scene.root(), TreeError::NO_MEMORY));
+}
+
+namespace detail {
+/** @brief Admit only owning descriptions or their exact managed checked result.
+ * @tparam T Factory result after cv/ref normalization.
+ */
+template <class T> struct IsSceneRecipe : IsDescription<T> {};
+
+/** @brief Admit a factory preserving an original managed error.
+ * @tparam T Concrete widget constructed by the returned description.
+ */
+template <class T> struct IsSceneRecipe<std::expected<Description<T>, ManagedError>> : std::true_type {};
+} // namespace detail
+
+/** @tparam T Concrete Widget type described by the consuming recipe.
+ * @param description Owning root recipe consumed once by prepare; creation/capture allocation may throw.
+ * @param options Existing runtime policies and bounded pending-configuration budget.
+ * @param origin Construction call site retained across lazy mount.
+ * @return UI-affine lazy facade; neither mount nor terminal I/O occurs during construction.
+ */
+template <class T>
+Scene scene(Description<T> &&description, SceneOptions options = {},
+            std::source_location origin = std::source_location::current()) {
+  return detail::SceneAccess::create(
+    [description = std::move(description)](ManagedScene &owner) mutable -> std::expected<void, ManagedError> {
+      auto mounted = mount(owner, std::move(description));
+
+      return mounted ? std::expected<void, ManagedError>{} : std::unexpected(mounted.error());
+    },
+    options, origin);
+}
+
+/** @tparam Factory Owning callable returning Description<T> or expected<Description<T>, ManagedError>.
+ * @param factory Invoked once at prepare with the existing managed owner; may create states/models.
+ * Explicitly borrowed services must outlive their use; construction/capture allocation may throw.
+ * @param options Existing runtime policies and finite facade limits.
+ * @param origin Factory registration call site retained in mount diagnostics.
+ * @return UI-affine lazy facade; the factory does not execute during construction.
+ */
+template <class Factory>
+  requires std::invocable<Factory &, ManagedScene &> &&
+           (!std::is_reference_v<std::invoke_result_t<Factory &, ManagedScene &>>) &&
+           detail::IsSceneRecipe<std::remove_cvref_t<std::invoke_result_t<Factory &, ManagedScene &>>>::value
+Scene scene(Factory factory, SceneOptions options = {}, std::source_location origin = std::source_location::current()) {
+  return detail::SceneAccess::create(
+    [factory = std::move(factory)](ManagedScene &owner) mutable -> std::expected<void, ManagedError> {
+      auto recipe = std::invoke(factory, owner);
+
+      if constexpr (detail::IsDescription<decltype(recipe)>::value) {
+        auto mounted = mount(owner, std::move(recipe));
+
+        return mounted ? std::expected<void, ManagedError>{} : std::unexpected(mounted.error());
+      } else {
+        if (!recipe) {
+          return std::unexpected(recipe.error());
+        }
+
+        auto mounted = mount(owner, std::move(*recipe));
+
+        return mounted ? std::expected<void, ManagedError>{} : std::unexpected(mounted.error());
+      }
+    },
+    options, origin);
+}
+
+namespace detail {
+/** @brief Owning minimal pipe adapter forwarding to the same facade method.
+ * @tparam Action Callable accepting Scene&; no separate configuration implementation.
+ */
+template <class Action> struct SceneStage {
+  Action action; ///< Owning method adapter; explicitly borrowed services remain borrowed.
+
+  /** @param owner Consumed idle facade; affinity is preserved.
+   * @param stage Consumed owning method adapter.
+   * @return The same facade after method dispatch, retaining any sticky failure.
+   */
+  friend Scene operator|(Scene owner, SceneStage &&stage) {
+    stage.action(owner);
+
+    return owner;
+  }
+};
+
+/** @brief Terminal pipe adapter; the borrowed transport is optional for native run. */
+struct RunStage {
+  ApplicationTerminal *terminal; ///< Borrowed transport, or null for the native run overload.
+  std::stop_token stop;          ///< Existing runner cancellation.
+  std::source_location origin;   ///< Pipe registration call site.
+
+  /** @param owner Consumed idle facade.
+   * @param stage Runner selection and call site.
+   * @return Same terminal checked result as Scene::run, including explicit cleanup.
+   */
+  friend std::expected<ApplicationStats, ManagedError> operator|(Scene owner, RunStage stage) {
+    return stage.terminal ? owner.run(*stage.terminal, stage.stop, stage.origin) : owner.run(stage.stop, stage.origin);
+  }
+};
+} // namespace detail
+
+/** @param origin Preparation stage call site.
+ * @return Owning stage forwarding to Scene::prepare without terminal I/O.
+ */
+inline auto prepare(std::source_location origin = std::source_location::current()) {
+  return detail::SceneStage{[origin](Scene &owner) {
+    owner.prepare(origin);
+  }};
+}
+
+/** @param sheet Owning replacement sheet captured before entry; construction may throw.
+ * @param origin Theme stage registration call site.
+ * @return Consuming stage forwarding to Scene::theme.
+ */
+inline auto theme(StyleSheet sheet, std::source_location origin = std::source_location::current()) {
+  return detail::SceneStage{[sheet = std::move(sheet), origin](Scene &owner) mutable {
+    detail::SceneAccess::theme(owner, sheet, origin);
+  }};
+}
+
+/** @param observer Owning observer, never a veto; capture construction may throw.
+ * @param origin Observer stage registration call site.
+ * @return Consuming stage forwarding to Scene::onError.
+ */
+inline auto onError(ManagedErrorHandler observer, std::source_location origin = std::source_location::current()) {
+  return detail::SceneStage{[observer = std::move(observer), origin](Scene &owner) mutable {
+    owner.onError(std::move(observer), origin);
+  }};
+}
+
+/** @tparam Callback Owning void/expected<void, ManagedError> configuration.
+ * @param callback Existing facade configuration action; capture construction may throw.
+ * @param origin Stage registration call site.
+ * @return Consuming stage forwarding to Scene::configure.
+ */
+template <detail::SceneConfiguration Callback>
+auto configure(Callback callback, std::source_location origin = std::source_location::current()) {
+  return detail::SceneStage{[callback = std::move(callback), origin](Scene &owner) mutable {
+    detail::SceneAccess::configure(owner, callback, origin);
+  }};
+}
+
+/** @tparam Callback Existing compact key action preserving typed command receipts.
+ * @param chord Exact key/scalar/modifiers admitted for PRESS and REPEAT.
+ * @param callback Owning action, optionally receiving KeyEvent; capture construction may throw.
+ * @param origin Stage registration call site.
+ * @return Consuming stage forwarding to Scene::onKey and its existing bounded composition.
+ */
+template <class Callback>
+  requires portals::detail::ManagedAction<Callback, KeyEvent>
+auto onKey(KeyEvent chord, Callback callback, std::source_location origin = std::source_location::current()) {
+  return detail::SceneStage{[chord, callback = std::move(callback), origin](Scene &owner) mutable {
+    detail::SceneAccess::onKey(owner, chord, callback, origin);
+  }};
+}
+
+/** @param stop Optional existing runner cancellation.
+ * @param origin Stage registration call site.
+ * @return Terminal stage opening the native terminal only when consumed.
+ */
+inline auto run(std::stop_token stop = {}, std::source_location origin = std::source_location::current()) {
+  return detail::RunStage{nullptr, stop, origin};
+}
+
+/** @param terminal Borrowed existing transport, outliving stage consumption.
+ * @param stop Optional cancellation.
+ * @param origin Stage registration call site.
+ * @return Terminal checked stage using the same Scene::run implementation.
+ */
+inline auto run(ApplicationTerminal &terminal, std::stop_token stop = {},
+                std::source_location origin = std::source_location::current()) {
+  return detail::RunStage{&terminal, stop, origin};
 }
 } // namespace portals::ui
