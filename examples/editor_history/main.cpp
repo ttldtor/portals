@@ -153,10 +153,9 @@ public:
             "mount editor history demo");
 
     for (const auto &row : rows_) {
-      checked(scene_->onClick(row.redo.node(),
-                              [field = row.edit] {
-                                return field.redo();
-                              }),
+      checked(row.redo.onClick([field = row.edit] {
+        return field.redo();
+      }),
               "bind late Redo");
     }
 
@@ -193,13 +192,7 @@ public:
 
         for (const auto &row : rows_) {
           if (*focused == row.edit.node()) {
-            // This proxy records its own typed failure in the existing scene collector.
-            // Do not return the same already reported failure through another adapter.
-            const auto appended = (row.edit.text() += "!").result();
-
-            if (!appended) {
-              lastAppendFailure_ = appended.error();
-            }
+            append(row.edit);
 
             return true;
           }
@@ -376,29 +369,31 @@ private:
     };
 
     return ui::column(
-      ui::label(MODE_NAMES[index]),
-      ui::row(ui::label("Draft:"), ui::lineEdit(row.model, std::move(config)).reference(row.edit)),
-      ui::row(ui::label("Model:"),
-              ui::lineEdit(row.model, {.options = {.history = {.enabled = false}, .readOnly = true},
-                                       .policy = {.width = {.minimum = 12, .preferred = 24, .mode = SizeMode::FLEX},
-                                                  .height = {}}})
-                .reference(row.view)),
-      ui::row(ui::button("Undo",
+      ui::label(MODE_NAMES[index]), ui::row(ui::label("Draft:"), ui::lineEdit(row.edit, row.model, std::move(config))),
+      ui::row(
+        ui::label("Model:"),
+        ui::lineEdit(row.view, row.model,
+                     {.options = {.history = {.enabled = false}, .readOnly = true},
+                      .policy = {.width = {.minimum = 12, .preferred = 24, .mode = SizeMode::FLEX}, .height = {}}})),
+      ui::row(ui::button(row.undo, "Undo",
                          [field = row.edit] {
                            return field.undo();
-                         })
-                .reference(row.undo),
-              ui::control<Button>("Redo", {}, {}).reference(row.redo),
-              ui::button("Append !", [this, field = row.edit]() -> std::expected<void, TreeError> {
-                const auto result = (field.text() += "!").result();
+                         }),
+              ui::button(row.redo, "Redo"), ui::button(row.append, "Append !", [this, field = row.edit] {
+                append(field);
+              })));
+  }
 
-                if (!result) {
-                  lastAppendFailure_ = result.error();
-                }
+  /** @brief Apply one reversible edit and retain its exact failure for the exit status.
+   * @param field Borrowed editor observation; the scene owns its text/history.
+   * The proxy reports its own failure; returning it through another adapter would duplicate diagnostics.
+   */
+  void append(const ui::Ref<LineEdit> &field) {
+    const auto result = (field.text() += "!").result();
 
-                // The text proxy reports itself; the collector controls runner stop policy.
-                return {};
-              }).reference(row.append)));
+    if (!result) {
+      lastAppendFailure_ = result.error();
+    }
   }
 
   Application &app_;
@@ -466,47 +461,33 @@ int main(int argc, char **argv) {
     std::size_t checkpoints{};
 
     if (check) {
+      struct Checkpoint {
+        std::size_t row;
+        std::string_view draft;
+        std::string_view model;
+      };
+
+      static constexpr std::array<Checkpoint, 12> EXPECTED_CHECKPOINTS{{
+        {0, "baseA", "baseA"},
+        {0, "base", "base"},
+        {0, "baseA", "baseA"},
+        {0, "baseA!", "baseA!"},
+        {1, "baseB", "base"},
+        {1, "baseB", "baseB"},
+        {2, "baseC", "base"},
+        {2, "baseC", "base"},
+        {2, "baseC", "baseC"},
+        {2, "base", "baseC"},
+        {2, "baseC", "baseC"},
+        {2, "baseC", "baseC"},
+      }};
+
       demo.checkpoint([&] {
-        switch (checkpoints++) {
-        case 0:
-          demo.verify(0, "baseA", "baseA", false);
-          break;
-        case 1:
-          demo.verify(0, "base", "base", false);
-          break;
-        case 2:
-          demo.verify(0, "baseA", "baseA", false);
-          break;
-        case 3:
-          demo.verify(0, "baseA!", "baseA!", false);
-          break;
-        case 4:
-          demo.verify(1, "baseB", "base", false);
-          break;
-        case 5:
-          demo.verify(1, "baseB", "baseB", false);
-          break;
-        case 6:
-          demo.verify(2, "baseC", "base", false);
-          break;
-        case 7:
-          demo.verify(2, "baseC", "base", false);
-          break;
-        case 8:
-          demo.verify(2, "baseC", "baseC", false);
-          break;
-        case 9:
-          demo.verify(2, "base", "baseC", false);
-          break;
-        case 10:
-          demo.verify(2, "baseC", "baseC", false);
-          break;
-        case 11:
-          demo.verify(2, "baseC", "baseC", false);
-          break;
-        default:
-          throw std::runtime_error("unexpected replay checkpoint");
-        }
+        expect(checkpoints < EXPECTED_CHECKPOINTS.size(), "unexpected replay checkpoint");
+
+        const auto &expected = EXPECTED_CHECKPOINTS[checkpoints++];
+
+        demo.verify(expected.row, expected.draft, expected.model, false);
       });
     }
 

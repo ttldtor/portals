@@ -17,7 +17,7 @@ native terminal restoration or visual compatibility.
 | Program | What to try |
 | --- | --- |
 | `portals_gallery` | Declarative managed form: Tab through editor, checkbox, action and Quit; Enter commits; F2 cycles six themes. |
-| `portals_dashboard` | Synthetic market, managed table/chart lifecycle with one shared model, selection and delayed virtual ranges. |
+| `portals_dashboard` | Compact market screen with a table and chart sharing one model; `--stress` adds detailed diagnostic status. |
 | `portals_custom_widget` | A custom final meter with a managed presentation adapter and scalar managed state; Left/Right change its level, F2 cycles themes. |
 | `portals_replay_example` | The dashboard with the built-in recorded price tape selected by default. |
 
@@ -71,7 +71,23 @@ portals_dashboard --rate 10000 --fps 30 --rows 1000000 --seed 42
 portals_dashboard --rate 0 --delay-ms 250 --ansi16 --ascii
 portals_dashboard --mode replay --trace trace.json --duration-ms 5000
 portals_dashboard --check --mode replay --delay-ms 250
+portals_dashboard --stress --rate 10000 --rows 1000000
 ```
+
+The default screen puts the editable note and Inspect action on one row, followed
+by a short status, the table and the chart. `--stress` preserves the detailed
+diagnostic layout used by the existing performance workloads. The shared replay
+program accepts the same option. Changing the layout does not select a different
+runtime or data source.
+
+Read [the UI composition](../examples/dashboard/dashboard.hpp) separately from
+[the data provider](../examples/dashboard/provider.hpp). The provider owns tick
+generation and bounded page requests; the UI adapter connects its model to the
+managed table and chart. Splitting those responsibilities improves local reasoning
+but increases the complete client footprint; neither file is omitted from
+compactness measurements. The example still uses a borrowed managed scene because
+its explicit provider shutdown and runner observers are not exposed by the owning
+scene facade. It is a larger integration example, not the first form to copy.
 
 `--rate` accepts 0..10000 scheduled ticks/second; zero demonstrates idle and delayed
 range navigation without market updates. `--fps` accepts 1..1000 frames/second.

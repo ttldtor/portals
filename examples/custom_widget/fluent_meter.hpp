@@ -87,15 +87,12 @@ private:
 
       if (keyPressed(event, InputKey::F2)) {
         const auto next = (theme_ + 1) % example::THEME_PRESETS.size();
-        auto changed = owner.theme(example::THEME_PRESETS[next].make());
 
-        if (!changed) {
-          return std::unexpected(changed.error());
-        }
+        return owner.theme(example::THEME_PRESETS[next].make()).transform([this, next] {
+          theme_ = next;
 
-        theme_ = next;
-
-        return true;
+          return true;
+        });
       }
 
       if (!keyPressed(event, {InputKey::LEFT, InputKey::RIGHT})) {

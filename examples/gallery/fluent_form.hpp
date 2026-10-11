@@ -55,22 +55,19 @@ private:
   auto recipe(portals::ManagedScene &owner)
     -> std::expected<portals::ui::Description<portals::Column>, portals::ManagedError> {
     using namespace portals;
-    auto alerts = owner.state(false);
 
-    if (!alerts) {
-      return std::unexpected(alerts.error());
-    }
-
-    return ui::column(
-      ui::label("Portals gallery | F2 theme | F10 quit"), ui::label("Name (Enter commits; Tab changes focus):"),
-      ui::lineEdit(editor_, "Portals", {.options = {.editMode = EditMode::EXPLICIT}}), ui::checkbox("Alerts", *alerts),
-      ui::button("Run (no model change)",
-                 [this] {
-                   ++calls;
-                 }),
-      ui::button("Quit", [this] {
-        stop_.request_stop();
-      }));
+    return owner.state(false).transform([this](ManagedState<bool> alerts) {
+      return ui::column(
+        ui::label("Portals gallery | F2 theme | F10 quit"), ui::label("Name (Enter commits; Tab changes focus):"),
+        ui::lineEdit(editor_, "Portals", {.options = {.editMode = EditMode::EXPLICIT}}), ui::checkbox("Alerts", alerts),
+        ui::button("Run (no model change)",
+                   [this] {
+                     ++calls;
+                   }),
+        ui::button("Quit", [this] {
+          stop_.request_stop();
+        }));
+    });
   }
 
   std::expected<void, portals::ManagedError> configure(portals::ManagedScene &owner) {
@@ -89,20 +86,18 @@ private:
       }
 
       const auto next = (theme_ + 1) % example::THEME_PRESETS.size();
-      auto changed = owner.theme(example::THEME_PRESETS[next].make());
 
-      if (!changed) {
-        return std::unexpected(changed.error());
-      }
+      return owner.theme(example::THEME_PRESETS[next].make()).transform([this, next] {
+        theme_ = next;
 
-      theme_ = next;
-
-      return true;
+        return true;
+      });
     });
   }
 
   portals::ui::Scene makeScene(portals::ui::SceneOptions options, Composition composition) {
     using namespace portals;
+
     auto factory = [this](ManagedScene &owner) {
       return recipe(owner);
     };

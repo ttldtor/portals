@@ -12,6 +12,7 @@ inline int run(int argc, char **argv, bool replayDefault = false) {
     Options options;
     ApplicationOptions application;
     options.replay = replayDefault;
+    options.stress = false;
     bool check{};
     std::string trace;
 
@@ -30,6 +31,12 @@ inline int run(int argc, char **argv, bool replayDefault = false) {
         continue;
       }
 
+      if (argument == "--stress") {
+        options.stress = true;
+
+        continue;
+      }
+
       if (argument == "--ansi16") {
         application.writer.colorMode = ColorMode::ANSI16;
 
@@ -40,7 +47,8 @@ inline int run(int argc, char **argv, bool replayDefault = false) {
         std::cout
           << "Usage: portals_dashboard [--rate 0..10000] [--fps 1..1000] [--rows 1..1000000000]\n"
              "  [--seed N] [--pump-budget 1..10000] [--mode synthetic|replay] [--delay-ms N] [--duration-ms N]\n"
-             "  [--ascii] [--ansi16] [--trace FILE] [--check]\n"
+             "  [--ascii] [--ansi16] [--stress] [--trace FILE] [--check]\n"
+             "The default view is compact; --stress keeps the detailed diagnostic layout.\n"
              "Keys: Tab changes focus, arrows/Home/End select and scroll the table,\n"
              "Enter commits the note, F2 changes theme, F10/Ctrl+C quits.\n";
 

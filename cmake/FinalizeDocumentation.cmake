@@ -17,6 +17,7 @@ set(example_sources
   examples/custom_widget/meter.hpp
   examples/custom_widget/fluent_meter.hpp
   examples/dashboard/dashboard.hpp
+  examples/dashboard/provider.hpp
   tests/package_consumer/form_declarative.cpp
   tests/package_consumer/composed_before.cpp
   tests/package_consumer/composed_after.cpp
