@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #include "../examples/dashboard/dashboard.hpp"
 #include "../examples/replay/terminal.hpp"
+#include "support/dashboard_before.hpp"
 #include "support/vt_oracle.hpp"
 #include <functional>
 #include <source_location>
@@ -338,10 +339,476 @@ void chartAppearance(bool ascii, bool turbo, ColorMode colorMode = ColorMode::TR
 
   check(sawBody && sawWick);
 }
+
+void ordinaryAppearance(bool ascii, bool turbo, ColorMode colorMode, bool resized = false, std::uint32_t rate = 1000) {
+  std::vector<example::ReplayTerminal::Input> input;
+
+  if (turbo) {
+    input.push_back({50, "\x1bOQ", {}});
+  }
+
+  input.push_back({100, "\x1b[B", {}});
+  const auto editedNote = ascii ? "Edited note" : "Edited \xe7\x95\x8c e\xcc\x81";
+  input.push_back({200, std::string("\t\x01") + editedNote, {}});
+  input.push_back({250, "\t\r", {}});
+  input.push_back({300, "\t", {}});
+  for (std::uint64_t at = 350; at <= 550; at += 10) {
+    input.push_back({at, "\x1b[B", {}});
+  }
+  if (resized) {
+    input.push_back({560, "", CellSize{100, 30}});
+  }
+  ObservedTerminal terminal(std::move(input), 600);
+  ApplicationOptions application;
+  application.writer.colorMode = colorMode;
+  auto app = take(Application::create(application, terminal.clock()));
+  dashboard::Options options;
+  options.rate = rate;
+  // Keep the visual/focus fixture warm; the large delayed provider workload has its own exact gate.
+  options.rows = 100;
+  options.ascii = ascii;
+  options.stress = false;
+  dashboard::Scene scene(*app, options);
+  test_support::VtOracle oracle(80, 24);
+  std::size_t consumed{};
+  std::size_t tableHeight{};
+  CellSize viewport{80, 24};
+  bool sawSelection{};
+
+  terminal.beforeRead = [&] {
+    const auto size = take(terminal.size());
+
+    if (size != viewport) {
+      oracle.resize(size.width, size.height);
+      viewport = size;
+    }
+
+    oracle.feed(std::string_view(terminal.output).substr(consumed));
+    consumed = terminal.output.size();
+    take(app->tree().read(scene.table(), [&](const auto &table) {
+      sawSelection |= table.selection().has_value();
+      tableHeight = table.visibleRange().count + 1;
+    }));
+  };
+
+  const auto result = take(app->run(scene, terminal));
+  oracle.feed(std::string_view(terminal.output).substr(consumed));
+  const auto frame = oracle.snapshot();
+  const auto rowText = [&](std::size_t row) {
+    std::string text;
+
+    for (int x = 0; x < viewport.width; ++x) {
+      const auto &cell = frame.cells[row * static_cast<std::size_t>(viewport.width) + x];
+
+      if (!cell.tail) {
+        text += cell.glyph;
+      }
+    }
+
+    return text;
+  };
+
+  check(rowText(0).starts_with(" Portals market | F2 theme | F10 quit"));
+  check(rowText(1).find(editedNote) != std::string::npos);
+  check(rowText(1).find("Inspect") != std::string::npos);
+  check(rowText(2).find(turbo ? "Turbo" : "Modern") != std::string::npos);
+  check(rowText(2).find("ticks | Live") != std::string::npos);
+  check(rowText(3).find("Instrument") != std::string::npos);
+  check(tableHeight == (resized ? 18 : 14));
+  check(rowText(3 + tableHeight) == std::string(viewport.width, ' '));
+  bool sawBody{}, sawWick{}, sawDoji{};
+
+  for (std::size_t y = 4 + tableHeight; y < static_cast<std::size_t>(viewport.height); ++y) {
+    for (int x = 1; x < viewport.width - 1; ++x) {
+      const auto &cell = frame.cells[y * static_cast<std::size_t>(viewport.width) + x];
+      sawBody |= cell.glyph == (ascii ? "#" : "\xe2\x96\x88");
+      sawWick |= cell.glyph == (ascii ? "|" : "\xe2\x94\x82");
+      sawDoji |= cell.glyph == (ascii ? "#" : "\xe2\x94\x81");
+    }
+  }
+
+  check(rate ? sawBody && sawWick : sawDoji);
+  // Live data revisions retire positional intent before paint; compare busy navigation separately.
+  check(rate != 0 || sawSelection);
+  check(take(scene.note().snapshot())->value == editedNote);
+  check(scene.coherent() && scene.tickCount() == rate * 600 / 1000);
+  check(result.frames <= application.framesPerSecond * 600 / 1000 + 1);
+  check(terminal.closed && !app->tree().inspect(scene.table()));
+}
+
+struct Presentation {
+  SchedulerTime time{};
+  std::uint64_t ticks{}, scheduled{}, revision{}, firstRow{};
+  std::size_t preparedRows{};
+  RangeState range{};
+  std::optional<RowId> selected;
+  std::string note;
+  bool coherent{}, pending{}, turbo{};
+  bool operator==(const Presentation &) const = default;
+};
+
+struct ComparedRun {
+  std::string output, trace;
+  std::vector<Presentation> checkpoints;
+  std::vector<SchedulerTime> ingressLatencies;
+  std::array<std::uint64_t, 5> stats;
+  std::array<std::uint64_t, 10> data, control;
+  std::array<std::uint64_t, 3> scheduler;
+  std::array<double, 4> aggregate;
+  std::optional<SchedulerTime> stoppedAt;
+  std::uint64_t ticks{}, pendingTicks{};
+  bool closed{}, tableRetired{};
+  bool operator==(const ComparedRun &) const = default;
+};
+
+void compareRuns(const ComparedRun &before, const ComparedRun &after) {
+  check(before.output == after.output);
+  check(before.trace == after.trace);
+  check(before.checkpoints == after.checkpoints);
+  check(before.ingressLatencies == after.ingressLatencies);
+  check(before.stats == after.stats);
+  check(before.data == after.data && before.control == after.control && before.scheduler == after.scheduler);
+  check(before.aggregate == after.aggregate);
+  check(before.stoppedAt == after.stoppedAt && before.ticks == after.ticks &&
+        before.pendingTicks == after.pendingTicks);
+  check(before.closed == after.closed && before.tableRetired == after.tableRetired);
+}
+
+auto queueTotals(const SchedulerQueueMetrics &queue) {
+  return std::array<std::uint64_t, 10>{queue.pending,     queue.high_water,   queue.accepted,  queue.rejected,
+                                       queue.replaced,    queue.delivered,    queue.cancelled, queue.last_latency,
+                                       queue.max_latency, queue.total_latency};
+}
+
+template <class Scene, class Options>
+ComparedRun captureRun(bool replay, bool ascii, ColorMode colorMode, std::uint32_t rate, std::uint64_t delay,
+                       bool saturated, std::uint64_t initialFirst, std::vector<example::ReplayTerminal::Input> input,
+                       bool compact = false) {
+  ComparedRun captured;
+  ObservedTerminal terminal(std::move(input), 1000);
+  auto diagnostics = std::make_shared<Diagnostics>();
+
+  take(diagnostics->enable({8192}));
+
+  ApplicationOptions application;
+
+  application.writer.colorMode = colorMode;
+  application.scheduler.diagnostics = diagnostics;
+
+  if (saturated) {
+    application.scheduler.data_capacity = application.scheduler.data_budget = 1;
+    application.scheduler.control_capacity = application.scheduler.control_budget = 1;
+  }
+
+  auto app = take(Application::create(application, terminal.clock()));
+  Options options;
+
+  options.rate = rate;
+  options.delayMs = delay;
+  options.replay = replay;
+  options.ascii = ascii;
+  if constexpr (std::same_as<Options, dashboard::Options>) {
+    options.stress = !compact;
+  }
+  options.ingressObserver = [](void *context, SchedulerTime latency) {
+    static_cast<std::vector<SchedulerTime> *>(context)->push_back(latency);
+  };
+  options.ingressContext = &captured.ingressLatencies;
+
+  Scene scene(*app, options);
+
+  take(setVirtualTableFirst(app->tree(), scene.table(), initialFirst));
+
+  terminal.beforeRead = [&] {
+    const auto clock = terminal.clock();
+    Presentation state{
+      clock.read(clock.context), scene.tickCount(), scene.scheduledTicks(), scene.displayedRevision(), 0,
+      scene.maxPreparedRows()};
+
+    state.note = take(scene.note().snapshot())->value;
+    state.coherent = scene.coherent();
+    state.pending = scene.pendingVisible();
+    state.turbo = scene.turbo();
+    take(app->tree().read(scene.table(), [&](const auto &table) {
+      state.firstRow = table.firstRow();
+      state.range = table.rangeState();
+      state.selected = table.selection();
+    }));
+    captured.checkpoints.push_back(std::move(state));
+  };
+
+  const auto result = take(app->run(scene, terminal));
+  const auto metrics = app->scheduler().metrics();
+  const auto aggregate = scene.aggregate();
+  auto trace = diagnostics->snapshot();
+
+  // Tree session IDs are deliberately process-unique; normalize only that identity namespace.
+  for (auto &record : trace.records) {
+    record.stableNodeId.session = record.stableNodeId.session ? 1 : 0;
+  }
+
+  captured.output = terminal.output;
+  captured.trace = exportDiagnostics(trace);
+  captured.stats = {result.iterations, result.frames, result.flushes, result.bytes, result.inputs};
+  captured.data = queueTotals(metrics.data);
+  captured.control = queueTotals(metrics.control);
+  captured.scheduler = {metrics.timer_callbacks, metrics.callback_failures, metrics.cycles};
+  captured.aggregate = {aggregate.open, aggregate.high, aggregate.low, aggregate.close};
+  captured.stoppedAt = scene.stoppedAt();
+  captured.ticks = scene.tickCount();
+  captured.pendingTicks = scene.pendingTicks();
+  captured.closed = terminal.closed;
+  captured.tableRetired = !app->tree().inspect(scene.table());
+
+  return captured;
+}
+
+void ordinaryBusyInputComparison() {
+  std::vector<example::ReplayTerminal::Input> input{{100, "\x1b[B", {}},
+                                                    {200,
+                                                     "\t\x01"
+                                                     "Edited note",
+                                                     {}},
+                                                    {250, "\t\r", {}},
+                                                    {300, "\t", {}}};
+
+  for (std::uint64_t at = 350; at <= 550; at += 10) {
+    input.push_back({at, "\x1b[B", {}});
+  }
+
+  const auto before = captureRun<dashboard_before::Scene, dashboard_before::Options>(
+    false, false, ColorMode::TRUE_COLOR, 1000, 0, false, 0, input);
+  const auto after = captureRun<dashboard::Scene, dashboard::Options>(false, false, ColorMode::TRUE_COLOR, 1000, 0,
+                                                                      false, 0, input, true);
+
+  check(before.checkpoints.size() == after.checkpoints.size());
+
+  for (std::size_t i = 0; i < before.checkpoints.size(); ++i) {
+    check(before.checkpoints[i].time == after.checkpoints[i].time);
+    check(before.checkpoints[i].selected == after.checkpoints[i].selected);
+    check(before.checkpoints[i].note == after.checkpoints[i].note);
+  }
+
+  check(before.ticks == after.ticks && before.aggregate == after.aggregate);
+  check(after.closed && after.tableRetired && after.pendingTicks == 0);
+}
+
+void exactBorrowedSceneComparison(ColorMode mode) {
+  std::vector<example::ReplayTerminal::Input> navigation;
+
+  // Cross the initial cached page, then navigate backwards while table/chart work completes independently.
+  for (std::uint64_t i = 0; i < 35; ++i) {
+    navigation.push_back({100 + i * 10, "\x1b[B", {}});
+  }
+
+  navigation.push_back({500, "\x1b[1;7Q", {}}); // Modified F2 keeps the old modifier-insensitive semantics.
+  navigation.push_back({550,
+                        "\t\x01"
+                        "Edited \xe7\x95\x8c e\xcc\x81\r",
+                        {}});
+  navigation.push_back({600, "\t\r", {}}); // Inspect publishes the unchanged note.
+  navigation.push_back({650, "\t\x1b[A\x1b[H", {}});
+  navigation.push_back({700, "", CellSize{100, 30}});
+
+  for (const auto ascii : {false, true}) {
+    for (const auto replay : {false, true}) {
+      for (const auto saturated : {false, true}) {
+        const auto before = captureRun<dashboard_before::Scene, dashboard_before::Options>(
+          replay, ascii, mode, saturated ? 10000 : 1000, 250, saturated, 240, navigation);
+        const auto after = captureRun<dashboard::Scene, dashboard::Options>(
+          replay, ascii, mode, saturated ? 10000 : 1000, 250, saturated, 240, navigation);
+
+        compareRuns(before, after);
+        check(after.closed && after.tableRetired && after.stoppedAt.has_value());
+      }
+    }
+  }
+
+  if (mode != ColorMode::TRUE_COLOR) {
+    return;
+  }
+
+  // Idle, immediate F10 and Ctrl+C exercise quiet pumping and early provider/terminal cleanup.
+  for (const auto &input : {std::vector<example::ReplayTerminal::Input>{},
+                            std::vector<example::ReplayTerminal::Input>{{100, "\x1b[21~", {}}},
+                            std::vector<example::ReplayTerminal::Input>{{100, "\x03", {}}}}) {
+    const auto before = captureRun<dashboard_before::Scene, dashboard_before::Options>(
+      false, false, ColorMode::TRUE_COLOR, 0, 0, false, 0, input);
+    const auto after =
+      captureRun<dashboard::Scene, dashboard::Options>(false, false, ColorMode::TRUE_COLOR, 0, 0, false, 0, input);
+
+    compareRuns(before, after);
+    check(after.stats[1] <= 1 && after.ticks == 0 && after.closed && after.tableRetired);
+  }
+}
+
+void exactModifiedShortcutComparison() {
+  auto beforeApp = take(Application::create());
+  auto afterApp = take(Application::create());
+  dashboard_before::Scene before(*beforeApp, {.rate = 0});
+  dashboard::Scene after(*afterApp, {.rate = 0});
+
+  for (unsigned mask = 0; mask < 16; ++mask) {
+    const InputModifiers modifiers{bool(mask & 1), bool(mask & 2), bool(mask & 4), bool(mask & 8)};
+
+    for (const auto action : {KeyAction::PRESS, KeyAction::REPEAT, KeyAction::RELEASE}) {
+      const InputEvent event = KeyEvent{InputKey::F2, {}, modifiers, action};
+
+      check(take(before.input(*beforeApp, event)) == take(after.input(*afterApp, event)));
+      check(before.turbo() == after.turbo());
+    }
+  }
+
+  for (const auto action : {KeyAction::PRESS, KeyAction::REPEAT, KeyAction::RELEASE}) {
+    for (const auto key : {KeyEvent{InputKey::F10, {}, {.alt = true}, action},
+                           KeyEvent{InputKey::CHARACTER, U'c', {.shift = true, .control = true}, action}}) {
+      check(take(before.input(*beforeApp, key)) == take(after.input(*afterApp, key)));
+    }
+  }
+}
+
+enum class TransportFailure {
+  READ,
+  SUBMIT,
+  CLOSE
+};
+
+class FailingTerminal final : public example::ReplayTerminal {
+public:
+  explicit FailingTerminal(TransportFailure failure) : ReplayTerminal({}, 100), failure_(failure) {
+  }
+
+  TerminalRead read(TerminalDeadline deadline, std::stop_token stop) override {
+    if (failure_ == TransportFailure::READ) {
+      return {.status = TerminalStatus::FAILED, .error = TerminalError{TerminalErrorKind::INPUT_DECODE, 71}};
+    }
+
+    return ReplayTerminal::read(deadline, stop);
+  }
+
+  std::expected<void, TerminalError> submit(std::string bytes) override {
+    if (failure_ == TransportFailure::SUBMIT) {
+      return std::unexpected(TerminalError{TerminalErrorKind::OUTPUT_LIMIT, 72});
+    }
+
+    return ReplayTerminal::submit(std::move(bytes));
+  }
+
+  std::expected<void, TerminalError> close() noexcept override {
+    auto closeResult = ReplayTerminal::close();
+
+    if (failure_ == TransportFailure::CLOSE) {
+      return std::unexpected(TerminalError{TerminalErrorKind::OUTPUT_UNCERTAIN, 73});
+    }
+
+    return closeResult;
+  }
+
+private:
+  TransportFailure failure_;
+};
+
+template <class Scene, class Options> auto captureFailure(TransportFailure failure, Options options = {}) {
+  FailingTerminal terminal(failure);
+  auto app = take(Application::create({}, terminal.clock()));
+  Scene scene(*app, options);
+  const auto result = app->run(scene, terminal);
+
+  check(!result && terminal.closed && scene.stoppedAt().has_value());
+  check(!app->tree().inspect(scene.table()));
+  check(take(scene.note().snapshot())->value == "Market note");
+
+  const auto &error = result.error();
+  const auto &cause = std::get<TerminalError>(error.cause);
+  const auto stoppedAt = scene.stoppedAt();
+
+  scene.stopProvider();
+  check(scene.stoppedAt() == stoppedAt);
+
+  return std::array<std::uint64_t, 8>{std::uint64_t(error.phase),
+                                      std::uint64_t(cause.kind),
+                                      std::uint64_t(cause.native_code),
+                                      error.restoration ? std::uint64_t(error.restoration->kind) + 1 : 0,
+                                      error.restoration ? std::uint64_t(error.restoration->native_code) : 0,
+                                      *scene.stoppedAt(),
+                                      scene.tickCount(),
+                                      scene.pendingTicks()};
+}
+
+void exactTransportFailureComparison() {
+  for (const auto failure : {TransportFailure::READ, TransportFailure::SUBMIT, TransportFailure::CLOSE}) {
+    check((captureFailure<dashboard_before::Scene, dashboard_before::Options>(failure) ==
+           captureFailure<dashboard::Scene, dashboard::Options>(failure)));
+    check((captureFailure<dashboard_before::Scene, dashboard_before::Options>(failure) ==
+           captureFailure<dashboard::Scene, dashboard::Options>(failure, {.stress = false})));
+  }
+}
+
+void unrunSceneRetiresBorrowedCallbacks() {
+  auto app = take(Application::create());
+  ManagedState<std::string> observedNote;
+  Node<VirtualTable<dashboard::Quote>> observedTable;
+
+  {
+    dashboard::Scene scene(*app, {.rate = 0});
+
+    observedNote = scene.note();
+    observedTable = scene.table();
+  }
+
+  check(!app->tree().inspect(observedTable));
+  check(!observedNote.snapshot() && observedNote.snapshot().error() == TreeError::CLOSED);
+  check(app->scheduler().metrics().data.pending == 0 && app->scheduler().metrics().control.pending == 0);
+  take(app->scheduler().dispatch());
+  check(app->scheduler().metrics().timer_callbacks == 0);
+}
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
   try {
+    if (argc > 2) {
+      throw std::runtime_error("Expected one dashboard regression group");
+    }
+
+    const std::string_view group = argc == 2 ? argv[1] : "";
+
+    if (group == "--exact-truecolor" || group == "--exact-ansi16") {
+      exactBorrowedSceneComparison(group == "--exact-truecolor" ? ColorMode::TRUE_COLOR : ColorMode::ANSI16);
+
+      return 0;
+    }
+
+    if (group == "--lifecycle") {
+      exactModifiedShortcutComparison();
+      exactTransportFailureComparison();
+      unrunSceneRetiresBorrowedCallbacks();
+
+      return 0;
+    }
+
+    if (group == "--ordinary-truecolor" || group == "--ordinary-ansi16") {
+      const auto mode = group == "--ordinary-truecolor" ? ColorMode::TRUE_COLOR : ColorMode::ANSI16;
+
+      if (mode == ColorMode::TRUE_COLOR) {
+        ordinaryBusyInputComparison();
+        ordinaryAppearance(false, false, mode, false, 0);
+      }
+
+      for (const auto ascii : {false, true}) {
+        ordinaryAppearance(ascii, false, mode);
+        ordinaryAppearance(ascii, true, mode);
+        ordinaryAppearance(ascii, true, mode, true);
+        ordinaryAppearance(ascii, true, mode, true, 0);
+      }
+
+      return 0;
+    }
+
+    if (!group.empty()) {
+      throw std::runtime_error("Unknown dashboard regression group");
+    }
+
+    // Preserve the original no-argument regression workload and its existing timeout.
     losslessAndSaturated(false);
     losslessAndSaturated(true);
     pendingLatestOwnsRejectedValue();
