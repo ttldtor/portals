@@ -82,6 +82,10 @@ documentation deployment through GitHub Actions.
 
 ## Reading on GitHub and as HTML
 
+For supplemental engineering measurements, see [source compactness](compactness.md)
+and [cognitive complexity and performance evidence](quality.md). These reports
+support review; they do not replace behavioral tests or decide API acceptance.
+
 This index and its relative Markdown links work in a checkout and on GitHub.
 Complete example sections link to the real, compiled source files. Their
 Doxygen `\include` lines expand into numbered listings in generated HTML;

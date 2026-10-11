@@ -113,6 +113,12 @@ endfunction()
 portals_enable_warnings(portals_core)
 
 if(PORTALS_BUILD_TOOLS)
+  add_executable(portals_compactness tools/compactness/main.cpp tools/compactness/scanner.cpp
+    tools/compactness/report.cpp)
+  target_compile_features(portals_compactness PRIVATE cxx_std_23)
+  set_target_properties(portals_compactness PROPERTIES CXX_EXTENSIONS OFF)
+  portals_enable_warnings(portals_compactness)
+
   add_executable(portals_compact_benchmark tools/benchmarks/compact.cpp)
   target_link_libraries(portals_compact_benchmark PRIVATE portals::core)
   portals_enable_warnings(portals_compact_benchmark)
@@ -171,6 +177,24 @@ if(PORTALS_BUILD_TESTS)
   endif()
 
   include("${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest/verify.cmake")
+  add_executable(portals_compactness_tests tests/compactness.cpp tools/compactness/scanner.cpp
+    tools/compactness/report.cpp)
+  target_include_directories(portals_compactness_tests SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  target_include_directories(portals_compactness_tests PRIVATE tools/compactness)
+  target_compile_features(portals_compactness_tests PRIVATE cxx_std_23)
+  target_compile_definitions(portals_compactness_tests PRIVATE
+    PORTALS_COMPACTNESS_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/compactness")
+  set_target_properties(portals_compactness_tests PROPERTIES CXX_EXTENSIONS OFF)
+  portals_enable_warnings(portals_compactness_tests)
+  add_test(NAME portals.compactness COMMAND portals_compactness_tests)
+  set_tests_properties(portals.compactness PROPERTIES TIMEOUT 10)
+
+  add_test(NAME portals.quality-tools
+    COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+      "-DTEST_ROOT_DIR=${CMAKE_CURRENT_BINARY_DIR}/quality-fixtures"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/quality_tools.cmake")
+  set_tests_properties(portals.quality-tools PROPERTIES TIMEOUT 60)
+
   add_executable(portals_compact_text tests/compact_text.cpp)
   target_include_directories(portals_compact_text SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
   target_link_libraries(portals_compact_text PRIVATE portals::core)
@@ -622,8 +646,8 @@ if(PORTALS_BUILD_DOCS)
   set(DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/docs")
 
   doxygen_add_docs(portals_docs include ReleaseNotes.md docs/index.md docs/development.md docs/releasing.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/scheduler.md docs/widget-tree.md docs/layout.md docs/grid.md docs/property.md docs/diagnostics.md docs/focus.md docs/model.md docs/input.md docs/terminal.md docs/terminal-probe.md docs/controls.md docs/line-edit.md docs/virtual-list.md docs/virtual-table.md docs/scroll.md docs/chart.md
-    docs/styles.md docs/legacy.md docs/managed-controls.md docs/declarative-ui.md docs/text-property.md docs/text-history.md docs/editor-history.md docs/editor-history-demo.md docs/compact-examples.md docs/managed-performance.md docs/package.md docs/application.md docs/virtual-preparation.md docs/examples.md docs/architecture.md docs/getting-started.md docs/limitations.md docs/api-design.md experiments/module-spike/README.md fuzz/README.md
-    vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md vendor/textual/README.md vendor/doctest/README.md vendor/pfr/README.md
+    docs/styles.md docs/legacy.md docs/managed-controls.md docs/declarative-ui.md docs/text-property.md docs/text-history.md docs/editor-history.md docs/editor-history-demo.md docs/compact-examples.md docs/compactness.md docs/quality.md tools/compactness/compactness.hpp docs/managed-performance.md docs/package.md docs/application.md docs/virtual-preparation.md docs/examples.md docs/architecture.md docs/getting-started.md docs/limitations.md docs/api-design.md experiments/module-spike/README.md fuzz/README.md
+    tools/benchmarks/README.md vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md vendor/textual/README.md vendor/doctest/README.md vendor/pfr/README.md
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Generate Portals API documentation"
   )
