@@ -4,6 +4,28 @@
 
 namespace portals::ui {
 namespace detail {
+std::expected<ManagedScene *, ManagedError> eventScene(const std::shared_ptr<RefTarget> &target) {
+  if (target && target->owner != std::this_thread::get_id()) {
+    return std::unexpected(ManagedError{ManagedPhase::BIND, {}, TreeError::WRONG_THREAD, {}, {}});
+  }
+
+  if (!target || target->lifetime.expired()) {
+    return std::unexpected(
+      ManagedError{ManagedPhase::BIND, target ? target->node.id() : NodeId{}, TreeError::CLOSED, {}, {}});
+  }
+
+  return target->scene;
+}
+
+void reportEventError(const std::shared_ptr<RefTarget> &target, const ManagedError &error,
+                      std::source_location origin) {
+  auto scene = eventScene(target);
+
+  if (scene) {
+    (void)(*scene)->reportError(error, {}, origin);
+  }
+}
+
 namespace {
 ManagedError failure(Node<Widget> node, TreeError cause) {
   return {ManagedPhase::TEXT, node.id(), cause, {}, {}};

@@ -86,8 +86,8 @@ std::expected<std::unique_ptr<ManagedScene>, ManagedError> ManagedScene::create(
 
   const auto diagnostics = options.diagnostics;
 
-  if (!options.maxNodes || !options.maxStates || !options.maxModels || !diagnostics.maxErrors ||
-      !diagnostics.maxContexts || !diagnostics.maxContextBytes ||
+  if (!options.maxNodes || !options.maxStates || !options.maxModels || !options.maxKeyHandlers ||
+      !diagnostics.maxErrors || !diagnostics.maxContexts || !diagnostics.maxContextBytes ||
       diagnostics.maxErrors > maxElementCount<ManagedDiagnostic>() ||
       diagnostics.maxContexts > maxElementCount<ManagedDiagnosticContext>() ||
       diagnostics.maxContextBytes > static_cast<std::size_t>(std::numeric_limits<std::ptrdiff_t>::max())) {
@@ -448,41 +448,18 @@ void ManagedScene::remember(ManagedError failure, std::source_location origin,
 
 std::expected<void, ManagedError> ManagedScene::onClick(Node<Button> node,
                                                         std::function<std::expected<void, TreeError>()> action) {
-  auto entry = bindingEntry(node);
-
-  if (!entry) {
-    return std::unexpected(entry.error());
+  try {
+    return onButtonClick(node, actionAdapter<ClickEvent>(std::move(action)), false);
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
+  } catch (...) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CALLBACK_FAILED));
   }
-
-  if (!action) {
-    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
-  }
-
-  auto bound = bindButton(app_.router(), node, [this, node, action = std::move(action)] {
-    try {
-      auto result = action();
-
-      if (!result) {
-        remember(error(ManagedPhase::INPUT, node, result.error()));
-      }
-    } catch (const std::bad_alloc &) {
-      remember(error(ManagedPhase::INPUT, node, TreeError::NO_MEMORY));
-    } catch (...) {
-      remember(error(ManagedPhase::INPUT, node, TreeError::CALLBACK_FAILED));
-    }
-  });
-
-  if (!bound) {
-    return std::unexpected(error(ManagedPhase::BIND, node, bound.error()));
-  }
-
-  (*entry)->binding.emplace<ActionBinding>(std::move(*bound));
-
-  return {};
 }
 
-std::expected<void, ManagedError> ManagedScene::onEditorCommand(Node<Button> node,
-                                                                std::function<EditorCommandResult()> action) {
+std::expected<void, ManagedError>
+ManagedScene::onButtonClick(Node<Button> node, std::function<EditorCommandResult(const ClickEvent &)> action,
+                            bool allowModified) {
   auto entry = bindingEntry(node);
 
   if (!entry) {
@@ -493,39 +470,42 @@ std::expected<void, ManagedError> ManagedScene::onEditorCommand(Node<Button> nod
     return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
   }
 
-  auto bound =
-    bindButton(app_.router(), node, [this, node, lifetime = std::weak_ptr(lifetime_), action = std::move(action)] {
-      const auto report = [this, node, &lifetime](TreeError cause) {
-        if (!lifetime.expired()) {
-          remember(error(ManagedPhase::INPUT, node, cause));
-        }
-      };
-      try {
-        const auto command = action();
+  try {
+    auto bound = bindButtonClick(
+      app_.router(), node,
+      [this, node, lifetime = std::weak_ptr(lifetime_), action = std::move(action)](const ClickEvent &event) {
+        const auto report = [this, node, &lifetime](TreeError cause) {
+          if (!lifetime.expired()) {
+            remember(error(ManagedPhase::INPUT, node, cause));
+          }
+        };
 
-        if (!command) {
-          const bool sameCollector = !lifetime.expired() && !command.collector_.expired() &&
-                                     !lifetime.owner_before(command.collector_) &&
-                                     !command.collector_.owner_before(lifetime);
+        try {
+          const auto command = action(event);
 
-          if (!command.reported_ || !sameCollector) {
+          if (!command && !commandReported(command, lifetime)) {
             report(command.result_.error());
           }
+        } catch (const std::bad_alloc &) {
+          report(TreeError::NO_MEMORY);
+        } catch (...) {
+          report(TreeError::CALLBACK_FAILED);
         }
-      } catch (const std::bad_alloc &) {
-        report(TreeError::NO_MEMORY);
-      } catch (...) {
-        report(TreeError::CALLBACK_FAILED);
-      }
-    });
+      },
+      allowModified);
 
-  if (!bound) {
-    return std::unexpected(error(ManagedPhase::BIND, node, bound.error()));
+    if (!bound) {
+      return std::unexpected(error(ManagedPhase::BIND, node, bound.error()));
+    }
+
+    (*entry)->binding.emplace<ActionBinding>(std::move(*bound));
+
+    return {};
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
+  } catch (...) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CALLBACK_FAILED));
   }
-
-  (*entry)->binding.emplace<ActionBinding>(std::move(*bound));
-
-  return {};
 }
 
 std::expected<void, ManagedError>
@@ -682,17 +662,59 @@ std::expected<void, ManagedError> ManagedScene::style(Node<Widget> node, StyleTa
     return std::unexpected(error(ManagedPhase::STYLE, node, TreeError::INVALID_ARGUMENT));
   }
 
-  auto dirty = app_.tree().invalidate(node, Invalidation::PAINT);
+  try {
+    auto prepared = std::make_shared<StyleTarget>(target);
+    auto dirty = app_.tree().invalidate(node, Invalidation::PAINT);
 
-  if (!dirty) {
-    return std::unexpected(error(ManagedPhase::STYLE, node, dirty.error()));
+    if (!dirty) {
+      return std::unexpected(error(ManagedPhase::STYLE, node, dirty.error()));
+    }
+
+    // Publish only the prepared owner: checked string/container moves can allocate on MSVC.
+    entry->target = std::move(prepared);
+    entry->stylePending = true;
+    stylesDirty_ = true;
+
+    return {};
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(error(ManagedPhase::STYLE, node, TreeError::NO_MEMORY));
+  }
+}
+
+std::expected<void, ManagedError> ManagedScene::id(Node<Widget> node, std::string_view value) {
+  auto allowed = boundary(ManagedPhase::STYLE, node);
+
+  if (!allowed) {
+    return allowed;
   }
 
-  entry->target = std::move(target);
-  entry->stylePending = true;
-  stylesDirty_ = true;
+  auto entry = find(node);
 
-  return {};
+  if (!entry) {
+    return std::unexpected(error(ManagedPhase::STYLE, node, TreeError::INVALID_ARGUMENT));
+  }
+
+  try {
+    auto target = entry->target ? *entry->target : StyleTarget{};
+
+    target.id = value;
+
+    // Unlike style(), an explicit empty id must clear the previous identity.
+    auto prepared = std::make_shared<StyleTarget>(target);
+    auto dirty = app_.tree().invalidate(node, Invalidation::PAINT);
+
+    if (!dirty) {
+      return std::unexpected(error(ManagedPhase::STYLE, node, dirty.error()));
+    }
+
+    entry->target = std::move(prepared);
+    entry->stylePending = true;
+    stylesDirty_ = true;
+
+    return {};
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(error(ManagedPhase::STYLE, node, TreeError::NO_MEMORY));
+  }
 }
 
 std::expected<void, ManagedError> ManagedScene::flushStyles() {
@@ -764,6 +786,12 @@ std::expected<void, ManagedError> ManagedScene::theme(StyleSheet sheet) {
 
 std::expected<void, ManagedError>
 ManagedScene::onInput(std::function<std::expected<bool, ManagedError>(const InputEvent &)> callback) {
+  return setInput(std::move(callback), 0);
+}
+
+std::expected<void, ManagedError>
+ManagedScene::setInput(std::function<std::expected<bool, ManagedError>(const InputEvent &)> callback,
+                       std::size_t keyHandlers) {
   auto allowed = boundary(ManagedPhase::BIND, root_);
 
   if (!allowed) {
@@ -771,7 +799,11 @@ ManagedScene::onInput(std::function<std::expected<bool, ManagedError>(const Inpu
   }
 
   try {
-    input_ = callback ? std::make_shared<decltype(callback)>(std::move(callback)) : nullptr;
+    auto prepared = callback ? std::make_shared<decltype(callback)>(std::move(callback)) : nullptr;
+
+    // Publish callback and count before retiring captures: their destructors can reenter onKey.
+    input_.swap(prepared);
+    keyHandlers_ = keyHandlers;
   } catch (const std::bad_alloc &) {
     return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::NO_MEMORY));
   }

@@ -13,6 +13,18 @@ static_assert(requires(ManagedModel<int> model, std::span<const TableColumn<int>
   ui::chart(model, accessor, {});
 });
 
+// Ref-first overloads retain bare positional options and owning named configurations.
+static_assert(requires(ManagedModel<int> model, std::span<const TableColumn<int>> columns,
+                       ManagedListFormatter<int> format, ManagedChartAccessor<int> accessor,
+                       ui::Ref<VirtualTable<int>> table, ui::Ref<VirtualList<int>> list, ui::Ref<Chart<int>> chart) {
+  ui::virtualTable(table, model, columns, {});
+  ui::virtualList(list, model, format, {});
+  ui::chart(chart, model, accessor, {});
+  ui::virtualTable(table, model, columns, ui::VirtualTableConfig<int>{});
+  ui::virtualList(list, model, format, ui::VirtualListConfig<int>{});
+  ui::chart(chart, model, accessor, ui::ChartConfig<int>{});
+});
+
 template <class Config>
 concept TableConfigAccepted =
   requires(ManagedModel<int> model, std::span<const TableColumn<int>> columns, Config &&config) {
@@ -49,8 +61,9 @@ void originLifetimeAndError() {
   const auto model = take(scene->model<Ohlc>(std::make_shared<const Prices>()));
   auto owned = std::make_shared<int>(0);
   const std::weak_ptr<int> observed = owned;
+  ui::Ref<Chart<Ohlc>> chart;
   auto recipe = ui::chart(
-    model,
+    chart, model,
     [](const Ohlc &value) {
       return std::optional{value};
     },

@@ -288,3 +288,77 @@ compilation performance. Shorter construction code is not a speed claim.
 The interactive [gallery and custom-widget examples](examples.md) now use these
 descriptions. The gallery preserves its former terminal output under the original
 themes; additional palettes use the same style engine.
+
+## Compact references, identities and actions
+
+A `ui::Ref<T>` can be the first factory argument. It shares the same complete-mount
+publication as `.reference(ref)`. Built-in controls, `custom`, row/column/grid and
+virtual view factories support this form, including existing positional options
+and named view configurations. References still observe objects owned by the
+scene; they do not become owning widget pointers.
+
+```cpp
+ui::Ref<Label> status;
+ui::Ref<LineEdit> name;
+ui::Ref<Button> apply;
+auto model = take(scene.state(std::string("Portals")));
+
+auto form = ui::column(
+  ui::label(status, "Ready").id("status"),
+  ui::lineEdit(name, model),
+  ui::button(apply, "Apply"));
+
+take(ui::mount(scene, std::move(form)));
+take(apply.onClick([status](const ClickEvent &click) {
+  status.text() = click.modifiers.shift ? "Apply with Shift" : "Applied";
+}));
+take(scene.onKey(ui::key(InputKey::F2), [status] { status.text() = "F2"; }));
+take(scene.onKey(ui::key(InputKey::F10), [&app] { app.requestStop(); }));
+```
+
+Callbacks can be supplied directly to `ui::button(ref, caption, callback)` or a
+consuming recipe's `.onClick(callback)`. They return `void` by default; existing
+`expected<void, TreeError>` and exact `EditorCommandResult` callbacks remain
+supported. Returning `editor.undo()` or `editor.redo()` directly preserves the
+command's receipt: a failure already reported to the same live collector is not
+reported again. Extracting `.result()` deliberately loses that provenance.
+Independent typed failures and thrown exceptions retain their own diagnostics.
+
+A click callback optionally takes `const ClickEvent&`. The value owns its routed
+activation and includes modifiers and the activated button's observing target.
+This target names the button handling activation, including a mouse event that
+bubbled from a descendant; it does not claim to be the router's original hit.
+Keyboard Enter arrives as the existing semantic `ActionEvent`, while Space and
+mouse press retain their routed event values. Parameterized callbacks admit
+modified activation. No-argument callbacks and low-level `bindButton` retain
+unmodified activation admission. Mouse release/motion and paste do not click.
+Low-level `bindButtonClick` exposes the same parameters with a caller-owned token.
+
+`Ref<Button>::onClick` registers one callback after successful mount, including
+after `prepare` and before `run`. The scene owns its binding and captures; later
+Ref destruction has no effect on registration. A duplicate binding returns
+`INVALID_ARGUMENT`; it is not replaced. Unpublished/destroyed references return
+`CLOSED`, retired widgets return `STALE_NODE`, and foreign-thread calls return
+`WRONG_THREAD` before reading mutable target state. A live UI collector records
+registration failures without stopping the scene. Allocation failure leaves an
+unbound button available for retry. Captured references remain borrowed; an
+admitted callback retains its captures through self-removal. A lazy description
+that has not mounted cannot receive runtime handlers through its Ref.
+
+`.id("status")` copies a case-sensitive selector identity and applies it in
+modifier order. Later recipe `.style(target)` with an empty id preserves the
+compact identity; a nonempty explicit id replaces it. Type and class metadata
+retain their existing meaning. `scene.id(node, value)` changes only the id;
+`scene.style(node, target)` retains its existing complete replacement semantics.
+Metadata allocation failure preserves the old target and pending frame request.
+
+`scene.onKey(ui::key(...), callback)` and `ui::character(scalar, modifiers)` match
+raw key identity, scalar and exact modifiers before semantic routing. Press and
+repeat match; release does not. Callbacks accept no arguments or `const KeyEvent&`
+and use the same void/typed/command result forms. Each registration composes an
+owning closure in the existing single `onInput` slot. The newest matching handler
+wins and consumes input on success; nonmatches delegate to the previous
+interceptor, then standard routing. Errors use the existing input failure path.
+Direct `onInput` replaces the whole chain. `ManagedOptions::maxKeyHandlers`
+(default 64, positive) bounds this composition; limit or allocation failure
+preserves the previous chain. There is no separate hotkey registry or event loop.

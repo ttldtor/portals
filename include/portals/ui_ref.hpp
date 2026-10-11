@@ -31,6 +31,17 @@ EditorCommandResult editorCommand(std::shared_ptr<RefTarget> target, bool redo, 
  */
 
 std::expected<HistoryAvailability, TreeError> editorAvailability(std::shared_ptr<RefTarget> target);
+
+/** @param target Observing slot checked for UI affinity and live scene ownership.
+ * @return Live managed scene or typed BIND error; never reads mutable target fields from a foreign thread.
+ */
+std::expected<ManagedScene *, ManagedError> eventScene(const std::shared_ptr<RefTarget> &target);
+
+/** @param target Weak scene context; destroyed/foreign-thread scenes are never dereferenced.
+ * @param error Exact registration error reported to a live UI collector without stopping run.
+ * @param origin Ref registration call site.
+ */
+void reportEventError(const std::shared_ptr<RefTarget> &target, const ManagedError &error, std::source_location origin);
 } // namespace detail
 
 /** @brief Explicit owning synchronous localization adapter; no global locale or resource storage. */

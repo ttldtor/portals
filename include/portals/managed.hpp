@@ -19,6 +19,26 @@ struct Access;
 struct RefAccess;
 } // namespace ui::detail
 
+namespace detail {
+/** @brief Accepted compact callback results; command receipts retain exact reporting provenance.
+ * @tparam T Exact callback result type.
+ */
+template <class T>
+concept ManagedActionResult =
+  std::same_as<T, void> || std::same_as<T, std::expected<void, TreeError>> || std::same_as<T, EditorCommandResult>;
+
+/** @brief A compact action optionally receives owning event parameters.
+ * @tparam Callback Copyable callable owned by a managed registration.
+ * @tparam Event Event type borrowed for an admitted call only.
+ */
+template <class Callback, class Event>
+concept ManagedAction = requires(Callback &action, const Event &event) {
+  { action(event) } -> ManagedActionResult;
+} || requires(Callback &action) {
+  { action() } -> ManagedActionResult;
+};
+} // namespace detail
+
 /** @brief Owning, copyable custom input adapter; arguments are borrowed for one invocation.
  * @tparam T Concrete Widget subtype, including final types.
  */
@@ -36,6 +56,7 @@ struct ManagedOptions {
   std::size_t maxStates{256};             ///< Maximum scene-owned properties; they live until scene destruction.
   std::size_t maxModels{64};              ///< Maximum scene-owned models; they live until close().
   ManagedDiagnosticOptions diagnostics{}; ///< Positive limits for error history and owning causal traces.
+  std::size_t maxKeyHandlers{64}; ///< Positive maximum composed onKey closures; direct onInput resets the count.
 };
 
 /** @brief Weak UI handle to a scene-owned Property, never an owning alias.
@@ -181,7 +202,7 @@ public:
       entry->node = *node;
 
       if constexpr (std::derived_from<T, Control> || std::same_as<T, LineEdit>) {
-        entry->target.emplace(StyleTarget{.type = "Control"});
+        entry->target = std::make_shared<StyleTarget>(StyleTarget{.type = "Control"});
         entry->stylePending = true;
         stylesDirty_ = true;
       }
@@ -254,21 +275,80 @@ public:
    */
   std::expected<void, ManagedError> onClick(Node<Button> node, std::function<std::expected<void, TreeError>()> action);
 
-  /** @tparam Callback Owning callable returning exactly EditorCommandResult; empty braces keep the original overload.
+  /** @tparam Callback Owning void, expected<void, TreeError> or EditorCommandResult action, optionally taking
+   * ClickEvent.
    * @param node Live managed button without another action binding.
    * @param action Owning checked editor command callback; return Ref.undo/redo directly to preserve provenance.
-   * @return Scoped registration success or typed binding failure. An already reported exact returned failure
+   * @return Scoped registration success or typed binding failure. Parameterized callbacks admit modifiers;
+   * no-argument callbacks retain legacy unmodified admission. An already reported exact returned failure
    * is not recorded again in the same live collector; independent failures and throws are still reported.
    */
   template <class Callback>
-    requires std::same_as<std::invoke_result_t<Callback &>, EditorCommandResult>
+    requires detail::ManagedAction<Callback, ClickEvent>
   std::expected<void, ManagedError> onClick(Node<Button> node, Callback action) {
     try {
-      return onEditorCommand(node, std::function<EditorCommandResult()>(std::move(action)));
+      return onButtonClick(node, actionAdapter<ClickEvent>(std::move(action)),
+                           std::invocable<Callback &, const ClickEvent &>);
     } catch (const std::bad_alloc &) {
       return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
     } catch (...) {
       return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CALLBACK_FAILED));
+    }
+  }
+
+  /** @tparam Callback Owning compact action, optionally borrowing the admitted KeyEvent.
+   * @param chord Exact key/scalar/modifiers; PRESS and REPEAT are admitted, RELEASE is ignored.
+   * @param action Void, expected<void, TreeError> or EditorCommandResult callback.
+   * @return Registration result with typed allocation/affinity errors; empty callbacks are rejected.
+   * Composes owning closures in the single existing onInput slot. Newest matching chord wins;
+   * nonmatches delegate to the previous interceptor, then standard routing. Matching success consumes
+   * input; errors follow existing input failure handling. Direct onInput replaces the whole chain.
+   * Command errors already reported to this scene are not reported twice.
+   */
+  template <class Callback>
+    requires detail::ManagedAction<Callback, KeyEvent>
+  std::expected<void, ManagedError> onKey(KeyEvent chord, Callback action) {
+    auto allowed = boundary(ManagedPhase::BIND, root_);
+
+    if (!allowed) {
+      return allowed;
+    }
+
+    if (keyHandlers_ >= options_.maxKeyHandlers) {
+      return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::NODE_LIMIT));
+    }
+
+    try {
+      auto adapter = actionAdapter<KeyEvent>(std::move(action));
+
+      if (!adapter) {
+        return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::INVALID_ARGUMENT));
+      }
+
+      const auto handlerCount = keyHandlers_ + 1;
+      return setInput(
+        [this, chord, lifetime = std::weak_ptr(lifetime_), previous = input_,
+         adapter = std::move(adapter)](const InputEvent &event) -> std::expected<bool, ManagedError> {
+          const auto *key = std::get_if<KeyEvent>(&event);
+
+          if (!key || key->action == KeyAction::RELEASE || key->key != chord.key || key->scalar != chord.scalar ||
+              key->modifiers != chord.modifiers) {
+            return previous ? (*previous)(event) : std::expected<bool, ManagedError>{false};
+          }
+
+          const auto command = adapter(*key);
+
+          if (!command && !commandReported(command, lifetime)) {
+            return std::unexpected(error(ManagedPhase::INPUT, root_, command.result_.error()));
+          }
+
+          return true;
+        },
+        handlerCount);
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::NO_MEMORY));
+    } catch (...) {
+      return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::CALLBACK_FAILED));
     }
   }
 
@@ -378,6 +458,12 @@ public:
    * @return Success staging the metadata for the next dirty frame, or validation error.
    */
   std::expected<void, ManagedError> style(Node<Widget> node, StyleTarget target);
+
+  /** @param node Live scene-owned node whose style identity is changed.
+   * @param value Case-sensitive id copied during this call; existing type/classes are preserved.
+   * @return Atomic metadata update or typed style/liveness/allocation error.
+   */
+  std::expected<void, ManagedError> id(Node<Widget> node, std::string_view value);
 
   /** @param sheet Owning stylesheet installed with the existing atomic style engine.
    * @return Success or original StyleError. Pending registrations are flushed first under the previous sheet.
@@ -535,7 +621,7 @@ private:
 
   struct Entry {
     Node<Widget> node;
-    std::optional<StyleTarget> target;
+    std::shared_ptr<StyleTarget> target;
     std::variant<std::monostate, ActionBinding, CheckBoxBinding, LineEditBinding> binding;
     std::function<std::expected<void, TreeError>(Node<Widget>)> sync;
     std::function<std::expected<void, TreeError>(Node<Widget>)> customSync;
@@ -554,7 +640,45 @@ private:
 
   explicit ManagedScene(Application &app, ManagedOptions options);
 
-  std::expected<void, ManagedError> onEditorCommand(Node<Button> node, std::function<EditorCommandResult()> action);
+  std::expected<void, ManagedError>
+  setInput(std::function<std::expected<bool, ManagedError>(const InputEvent &)> callback, std::size_t keyHandlers);
+
+  std::expected<void, ManagedError>
+  onButtonClick(Node<Button> node, std::function<EditorCommandResult(const ClickEvent &)> action, bool allowModified);
+
+  static bool commandReported(const EditorCommandResult &command, const std::weak_ptr<const void> &lifetime) {
+    return command.reported_ && !lifetime.expired() && !command.collector_.expired() &&
+           !lifetime.owner_before(command.collector_) && !command.collector_.owner_before(lifetime);
+  }
+
+  template <class Event, class Callback>
+  static std::function<EditorCommandResult(const Event &)> actionAdapter(Callback action) {
+    if constexpr (std::is_pointer_v<Callback> || requires { action.operator bool(); }) {
+      if (!static_cast<bool>(action)) {
+        return {};
+      }
+    }
+
+    return [action = std::move(action)]([[maybe_unused]] const Event &event) mutable {
+      const auto invoke = [&]() -> decltype(auto) {
+        if constexpr (std::invocable<Callback &, const Event &>) {
+          return action(event);
+        } else {
+          return action();
+        }
+      };
+
+      if constexpr (std::same_as<decltype(invoke()), EditorCommandResult>) {
+        return invoke();
+      } else if constexpr (std::same_as<decltype(invoke()), void>) {
+        invoke();
+
+        return EditorCommandResult({}, {}, false);
+      } else {
+        return EditorCommandResult(invoke(), {}, false);
+      }
+    };
+  }
 
   static ManagedError error(ManagedPhase phase, Node<Widget> node, TreeError cause);
   std::expected<void, ManagedError> boundary(ManagedPhase phase, Node<Widget> node) const;
@@ -579,6 +703,7 @@ private:
   std::vector<std::shared_ptr<void>> properties_;
   std::vector<std::shared_ptr<detail::ManagedModelSource>> models_;
   std::shared_ptr<std::function<std::expected<bool, ManagedError>(const InputEvent &)>> input_;
+  std::size_t keyHandlers_{};
   std::shared_ptr<ManagedErrorHandler> errorObserver_;
   std::vector<ManagedDiagnostic> errors_;
   ManagedDiagnostic overflowDiagnostic_;

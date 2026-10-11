@@ -128,6 +128,16 @@ public:
   explicit Button(GraphemeText text, ControlStyle style = {}, SizePolicy policy = {});
 };
 
+/** @brief Owning activation parameters copied from the existing router delivery.
+ * target is the activated button, including when input bubbled from a child.
+ * The observing identity may be stale after a callback removes its target.
+ */
+struct ClickEvent {
+  Node<Button> target;      ///< Activated button; does not retain the widget.
+  InputModifiers modifiers; ///< Modifiers supplied by the routed event.
+  RoutedEvent event;        ///< Owning action, Space or left mouse press that activated the button.
+};
+
 /** @brief Checkbox presentation; Property<bool> is its authoritative value when bound. */
 class CheckBox : public Control {
 public:
@@ -196,6 +206,19 @@ std::expected<void, TreeError> syncControl(WidgetTree &tree, Node<Control> node,
  */
 std::expected<ActionBinding, TreeError> bindButton(EventRouter &router, Node<Button> node,
                                                    std::function<void()> action);
+
+/** @brief Bind activation with owning parameters through the existing scoped router token.
+ * @param router Borrowed UI router; its ordinary lifetime and admission rules apply.
+ * @param node Live button whose identity is passed as ClickEvent::target.
+ * @param action Required owning callback; admitted calls survive self-removal and token destruction.
+ * @param allowModified Admit modified activation; false retains legacy unmodified admission.
+ * @return Scoped token or the same registration errors as bindButton, including NO_MEMORY.
+ * Action ACTIVATE, Space and left PRESS activate; release/motion/paste are ignored.
+ * Callback argument construction precedes entry and can throw. Captured references remain borrowed.
+ */
+std::expected<ActionBinding, TreeError> bindButtonClick(EventRouter &router, Node<Button> node,
+                                                        std::function<void(const ClickEvent &)> action,
+                                                        bool allowModified = true);
 /** @brief Exact Property set outcome; errors mean no commit, successful receipts can reject notifications. */
 using CheckBoxResult = std::expected<PropertyUpdate<bool>, TreeError>;
 

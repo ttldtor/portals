@@ -93,6 +93,26 @@ struct Fixture {
   std::unique_ptr<ManagedScene> scene = take(ManagedScene::create(*app));
 };
 
+struct ThrowingMoveClick {
+  TreeError cause;
+
+  explicit ThrowingMoveClick(TreeError value) : cause(value) {
+  }
+
+  ThrowingMoveClick(const ThrowingMoveClick &) = default;
+
+  ThrowingMoveClick(ThrowingMoveClick &&other) : cause(other.cause) {
+    if (cause == TreeError::NO_MEMORY) {
+      throw std::bad_alloc();
+    }
+
+    throw std::runtime_error("callback transfer failed");
+  }
+
+  void operator()(const ClickEvent &) const {
+  }
+};
+
 bool hasCause(const ManagedError &error, TreeError expected) {
   const auto *cause = std::get_if<TreeError>(&error.cause);
 
@@ -108,6 +128,37 @@ static_assert(HasText<ui::Ref<LineEdit>>);
 static_assert(!HasText<ui::Ref<Widget>>);
 static_assert(std::same_as<decltype(std::declval<ui::TextProperty>() += "x"), ui::TextProperty>);
 } // namespace
+
+TEST_CASE("late click internal callback transfer preserves typed errors and diagnostics") {
+  Fixture fixture;
+  ui::Ref<Button> button;
+
+  take(ui::mount(*fixture.scene, ui::button(button, "late")));
+
+  for (const auto cause : {TreeError::NO_MEMORY, TreeError::CALLBACK_FAILED}) {
+    // Passing an lvalue copies at API entry; only its internal forwarding move throws.
+    ThrowingMoveClick action(cause);
+    std::expected<void, ManagedError> result;
+
+    CHECK_NOTHROW(result = button.onClick(action));
+    REQUIRE_FALSE(result);
+    CHECK(hasCause(result.error(), cause));
+  }
+
+  const auto diagnostics = take(fixture.scene->diagnostics());
+
+  REQUIRE(diagnostics.errors.size() == 2);
+  CHECK(hasCause(diagnostics.errors[0].error, TreeError::NO_MEMORY));
+  CHECK(hasCause(diagnostics.errors[1].error, TreeError::CALLBACK_FAILED));
+
+  int clicks = 0;
+
+  take(button.onClick([&] {
+    ++clicks;
+  }));
+  take(fixture.app->router().invoke(button.node(), ActionEvent{Action::ACTIVATE}));
+  CHECK(clicks == 1);
+}
 
 TEST_CASE("text references append owned expressions and retain chain results") {
   Fixture fixture;
@@ -843,4 +894,401 @@ TEST_CASE("error observer self-removal and reuse of the same proxy preserve oute
   REQUIRE_FALSE(result.result());
   CHECK(result.result().error().text == TextError{TextErrorKind::INVALID_UTF8, 0});
   CHECK(property.result().error().text == TextError{TextErrorKind::INVALID_UTF8, 0});
+}
+
+TEST_CASE("compact ref-first factories publish complete observations and void clicks") {
+  Fixture fixture;
+  ui::Ref<Label> caption;
+  ui::Ref<Button> button;
+  ui::Ref<LineEdit> editor;
+  const auto model = take(fixture.scene->state(std::string("value")));
+  int clicks = 0;
+  take(ui::mount(*fixture.scene, ui::column(ui::label(caption, "caption").id("caption-id"),
+                                            ui::button(button, "go",
+                                                       [&] {
+                                                         ++clicks;
+                                                       }),
+                                            ui::lineEdit(editor, model))));
+  CHECK(take(caption.text().get()) == "caption");
+  CHECK(take(editor.text().get()) == "value");
+  take(fixture.app->router().invoke(button.node(), ActionEvent{Action::ACTIVATE}));
+  CHECK(clicks == 1);
+}
+
+TEST_CASE("late ref click owns routed parameters and rejects duplicate binding") {
+  Fixture fixture;
+  ui::Ref<Button> button;
+  take(ui::mount(*fixture.scene, ui::button(button, "late")));
+  std::optional<ClickEvent> observed;
+  take(button.onClick([&](const ClickEvent &event) {
+    observed = event;
+  }));
+  const InputModifiers modifiers{.shift = true};
+  take(fixture.app->router().invoke(button.node(), ActionEvent{Action::ACTIVATE, modifiers}));
+  REQUIRE(observed);
+  CHECK(observed->target == button.node());
+  CHECK(observed->modifiers == modifiers);
+  CHECK(std::get<ActionEvent>(observed->event).action == Action::ACTIVATE);
+  auto duplicate = button.onClick([] {
+  });
+  REQUIRE_FALSE(duplicate);
+  CHECK(hasCause(duplicate.error(), TreeError::INVALID_ARGUMENT));
+}
+
+TEST_CASE("late click checks publication affinity liveness and pre-run ownership") {
+  Fixture fixture;
+  ui::Ref<Button> button;
+  auto unpublished = button.onClick([] {
+  });
+  REQUIRE_FALSE(unpublished);
+  CHECK(hasCause(unpublished.error(), TreeError::CLOSED));
+  take(ui::mount(*fixture.scene, ui::button(button, "late")));
+  take(fixture.scene->prepare(*fixture.app, {40, 10}));
+  int clicks = 0;
+  take(button.onClick([&] {
+    ++clicks;
+  }));
+  take(fixture.app->router().invoke(button.node(), ActionEvent{Action::ACTIVATE}));
+  CHECK(clicks == 1);
+  std::optional<ManagedError> foreign;
+  std::thread worker([&] {
+    auto result = button.onClick([] {
+    });
+    if (!result) {
+      foreign = result.error();
+    }
+  });
+  worker.join();
+  REQUIRE(foreign);
+  CHECK(hasCause(*foreign, TreeError::WRONG_THREAD));
+  CHECK(take(fixture.scene->diagnostics()).errors.empty());
+  take(fixture.scene->remove(button.node()));
+  auto stale = button.onClick([] {
+  });
+  REQUIRE_FALSE(stale);
+  CHECK(hasCause(stale.error(), TreeError::STALE_NODE));
+  fixture.scene.reset();
+  auto destroyed = button.onClick([] {
+  });
+  REQUIRE_FALSE(destroyed);
+  CHECK(hasCause(destroyed.error(), TreeError::CLOSED));
+}
+
+TEST_CASE("ref-first mount failure does not publish callbacks or observations") {
+  Fixture fixture;
+  ui::Ref<Button> first;
+  ui::Ref<Button> second;
+  int clicks = 0;
+  auto mounted = ui::mount(
+    *fixture.scene,
+    ui::column(
+      ui::button(first, "first",
+                 [&] {
+                   ++clicks;
+                 }),
+      ui::button(second, "second").setup([](ManagedScene &, Node<Button>) -> std::expected<void, ManagedError> {
+        return std::unexpected(ManagedError{ManagedPhase::BIND, {}, TreeError::INVALID_ARGUMENT, {}, {}});
+      })));
+  REQUIRE_FALSE(mounted);
+  CHECK(first.node() == Node<Button>{});
+  CHECK(second.node() == Node<Button>{});
+  CHECK(clicks == 0);
+  CHECK(hasCause(first
+                   .onClick([] {
+                   })
+                   .error(),
+                 TreeError::CLOSED));
+  take(ui::mount(*fixture.scene, ui::button(first, "retry").onClick([&] {
+    ++clicks;
+  })));
+  take(fixture.app->router().invoke(first.node(), ActionEvent{Action::ACTIVATE}));
+  CHECK(clicks == 1);
+}
+
+TEST_CASE("late click keeps admitted captures through self-removal") {
+  Fixture fixture;
+  ui::Ref<Button> button;
+  take(ui::mount(*fixture.scene, ui::button(button, "remove")));
+  auto lifetime = std::make_shared<int>(7);
+  std::weak_ptr<int> observer = lifetime;
+  take(button.onClick([&, lifetime](const ClickEvent &event) {
+    CHECK(event.target == button.node());
+    take(fixture.scene->remove(event.target));
+    CHECK_FALSE(observer.expired());
+    CHECK(*lifetime == 7);
+  }));
+  lifetime.reset();
+  take(fixture.app->router().invoke(button.node(), ActionEvent{Action::ACTIVATE}));
+  take(fixture.app->router().focused());
+  CHECK(observer.expired());
+}
+
+TEST_CASE("late click parameter adapters preserve exact editor command diagnostics") {
+  Fixture fixture;
+  ui::Ref<Button> button;
+  ui::Ref<LineEdit> editor;
+  auto model = take(fixture.scene->state(std::string("value")));
+  take(ui::mount(*fixture.scene, ui::column(ui::button(button, "undo"), ui::lineEdit(editor, model))));
+  take(button.onClick([&](const ClickEvent &) {
+    return editor.undo();
+  }));
+  take(fixture.scene->remove(editor.node()));
+  take(fixture.app->router().invoke(button.node(), ActionEvent{Action::ACTIVATE}));
+  auto diagnostics = take(fixture.scene->diagnostics());
+  REQUIRE(diagnostics.errors.size() == 1);
+  CHECK(hasCause(diagnostics.errors[0].error, TreeError::STALE_NODE));
+  CHECK(diagnostics.errors[0].error.node == editor.node().id());
+}
+
+TEST_CASE("typed click errors and exceptions report their original cause once") {
+  for (const auto cause : {TreeError::NODE_LIMIT, TreeError::NO_MEMORY, TreeError::CALLBACK_FAILED}) {
+    Fixture fixture;
+    ui::Ref<Button> button;
+    take(ui::mount(*fixture.scene, ui::button(button, "error")));
+    take(button.onClick([cause](const ClickEvent &) -> std::expected<void, TreeError> {
+      if (cause == TreeError::NO_MEMORY) {
+        throw std::bad_alloc();
+      }
+      if (cause == TreeError::CALLBACK_FAILED) {
+        throw std::runtime_error("test failure");
+      }
+      return std::unexpected(cause);
+    }));
+    take(fixture.app->router().invoke(button.node(), ActionEvent{Action::ACTIVATE}));
+    auto diagnostics = take(fixture.scene->diagnostics());
+    REQUIRE(diagnostics.errors.size() == 1);
+    CHECK(hasCause(diagnostics.errors[0].error, cause));
+  }
+}
+
+TEST_CASE("failed late click allocation leaves the button available for a retry") {
+  constexpr std::ptrdiff_t ALLOCATION_BUDGETS = 12;
+  std::size_t failures = 0;
+  std::size_t successes = 0;
+  for (std::ptrdiff_t budget = 0; budget < ALLOCATION_BUDGETS; ++budget) {
+    Fixture fixture;
+    ui::Ref<Button> button;
+    take(ui::mount(*fixture.scene, ui::button(button, "allocation")));
+    take(fixture.app->tree().consumeFrameRequest());
+    auto capture = std::make_shared<int>(0);
+    auto action = [capture](const ClickEvent &) {
+      ++*capture;
+    };
+    allocationsBeforeFailure = budget;
+    auto registered = button.onClick(action);
+    allocationsBeforeFailure = -1;
+    if (!registered) {
+      ++failures;
+      CHECK(hasCause(registered.error(), TreeError::NO_MEMORY));
+      CHECK(take(fixture.app->tree().consumeFrameRequest()) == Invalidation::NONE);
+      take(button.onClick(action));
+    } else {
+      ++successes;
+    }
+    take(fixture.app->router().invoke(button.node(), ActionEvent{Action::ACTIVATE}));
+    CHECK(*capture == 1);
+  }
+  CHECK(failures > 0);
+  CHECK(successes > 0);
+}
+
+TEST_CASE("compact ids precede styles preserve classes and survive theme switching") {
+  Fixture fixture;
+  ui::Ref<Label> label;
+  take(ui::mount(*fixture.scene,
+                 ui::label(label, "id").id("message").style(StyleTarget{.type = "Control", .classes = {"accent"}})));
+  ui::Ref<Label> legacy;
+  take(ui::mount(*fixture.scene, ui::label(legacy, "legacy")
+                                   .style(StyleTarget{.type = "Control", .id = "message", .classes = {"accent"}})
+                                   .style(StyleTarget{.type = "Control", .classes = {"accent"}})));
+  auto checkColor = [&](std::optional<RgbColor> expected) {
+    take(fixture.scene->prepare(*fixture.app, {40, 10}));
+    take(fixture.app->tree().read(label.node(), [&](const Label &widget) {
+      REQUIRE(widget.computedStyle());
+      CHECK(widget.computedStyle()->normal.foreground == expected);
+    }));
+  };
+  take(fixture.scene->theme(take(parsePss("Control#message.accent { foreground: #010203; }"))));
+  checkColor(RgbColor{1, 2, 3});
+  take(fixture.app->tree().read(legacy.node(), [](const Label &widget) {
+    REQUIRE(widget.computedStyle());
+    CHECK_FALSE(widget.computedStyle()->normal.foreground);
+  }));
+  take(fixture.scene->theme(take(parsePss("Control#message.accent { foreground: #040506; }"))));
+  checkColor(RgbColor{4, 5, 6});
+  take(fixture.app->tree().consumeFrameRequest());
+  take(fixture.scene->prepare(*fixture.app, {40, 10}));
+  CHECK(take(fixture.app->tree().consumeFrameRequest()) == Invalidation::NONE);
+  take(fixture.scene->style(label.node(), StyleTarget{.type = "Control", .classes = {"accent"}}));
+  checkColor({});
+}
+
+TEST_CASE("short key handlers compose before routing and direct onInput replaces the chain") {
+  Fixture fixture;
+  int fallback = 0;
+  std::vector<InputKey> seen;
+  take(fixture.scene->onInput([&](const InputEvent &) -> std::expected<bool, ManagedError> {
+    ++fallback;
+    return false;
+  }));
+  take(fixture.scene->onKey(ui::key(InputKey::F2), [&] {
+    seen.push_back(InputKey::F2);
+  }));
+  take(fixture.scene->onKey(ui::key(InputKey::F3), [&](const KeyEvent &event) {
+    seen.push_back(event.key);
+  }));
+  take(fixture.scene->onKey(ui::key(InputKey::F10), [&] {
+    seen.push_back(InputKey::F10);
+  }));
+  for (const auto key : {InputKey::F2, InputKey::F3, InputKey::F10}) {
+    CHECK(take(fixture.scene->input(*fixture.app, KeyEvent{key})));
+  }
+  CHECK(seen == std::vector<InputKey>{InputKey::F2, InputKey::F3, InputKey::F10});
+  CHECK(fallback == 0);
+  CHECK_FALSE(take(fixture.scene->input(*fixture.app, KeyEvent{InputKey::F2, {}, {}, KeyAction::RELEASE})));
+  CHECK_FALSE(take(fixture.scene->input(*fixture.app, ui::key(InputKey::F2, {.shift = true}))));
+  CHECK(fallback == 2);
+  take(fixture.scene->onKey(ui::key(InputKey::F2), [&] {
+    seen.push_back(InputKey::F1);
+  }));
+  CHECK(take(fixture.scene->input(*fixture.app, KeyEvent{InputKey::F2, {}, {}, KeyAction::REPEAT})));
+  CHECK(seen.back() == InputKey::F1);
+  take(fixture.scene->onInput({}));
+  CHECK_FALSE(take(fixture.scene->input(*fixture.app, ui::key(InputKey::F2))));
+  CHECK(seen.size() == 4);
+}
+
+TEST_CASE("short character key preserves modifiers and editor command reporting") {
+  Fixture fixture;
+  ui::Ref<LineEdit> editor;
+  auto model = take(fixture.scene->state(std::string("value")));
+  take(ui::mount(*fixture.scene, ui::lineEdit(editor, model)));
+  take(fixture.scene->onKey(ui::character(U'z', {.control = true}), [&](const KeyEvent &event) {
+    CHECK(event.modifiers.control);
+    return editor.undo();
+  }));
+  CHECK_FALSE(take(fixture.scene->input(*fixture.app, ui::character(U'z'))));
+  take(fixture.scene->remove(editor.node()));
+  CHECK(take(fixture.scene->input(*fixture.app, ui::character(U'z', {.control = true}))));
+  auto diagnostics = take(fixture.scene->diagnostics());
+  REQUIRE(diagnostics.errors.size() == 1);
+  CHECK(hasCause(diagnostics.errors[0].error, TreeError::STALE_NODE));
+}
+
+TEST_CASE("short key allocation and capacity failures preserve the existing chain") {
+  auto app = take(Application::create());
+  auto scene = take(ManagedScene::create(*app, ManagedOptions{.maxKeyHandlers = 2}));
+  int first = 0;
+  int second = 0;
+  take(scene->onKey(ui::key(InputKey::F2), [&] {
+    ++first;
+  }));
+  allocationsBeforeFailure = 0;
+  auto failed = scene->onKey(ui::key(InputKey::F3), [&] {
+    ++second;
+  });
+  allocationsBeforeFailure = -1;
+  REQUIRE_FALSE(failed);
+  CHECK(hasCause(failed.error(), TreeError::NO_MEMORY));
+  CHECK(take(scene->input(*app, ui::key(InputKey::F2))));
+  CHECK(first == 1);
+  CHECK_FALSE(take(scene->input(*app, ui::key(InputKey::F3))));
+  take(scene->onKey(ui::key(InputKey::F3), [&] {
+    ++second;
+  }));
+  auto full = scene->onKey(ui::key(InputKey::F10), [] {
+  });
+  REQUIRE_FALSE(full);
+  CHECK(hasCause(full.error(), TreeError::NODE_LIMIT));
+  CHECK(take(scene->input(*app, ui::key(InputKey::F3))));
+  CHECK(second == 1);
+  take(scene->onInput({}));
+  take(scene->onKey(ui::key(InputKey::F10), [] {
+  }));
+  CHECK(take(scene->input(*app, ui::key(InputKey::F10))));
+}
+
+TEST_CASE("parameter clicks preserve keyboard space and mouse source values") {
+  Fixture fixture;
+  ui::Ref<Button> button;
+  std::vector<ClickEvent> clicks;
+  take(ui::mount(*fixture.scene, ui::button(button, "source", [&](const ClickEvent &event) {
+    clicks.push_back(event);
+  })));
+  const auto viewport = take(CellRect::from({}, {40, 10}));
+  take(fixture.app->tree().arrange(fixture.app->root(), viewport, viewport));
+  take(fixture.app->tree().arrange(fixture.scene->root(), viewport, viewport));
+  take(fixture.app->tree().arrange(button.node(), take(CellRect::from({2, 3}, {12, 1})), viewport));
+  take(fixture.app->router().setFocus(button.node()));
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::ENTER, {}, {.control = true}}));
+  take(fixture.app->router().dispatch(TextInputEvent{U' ', {.alt = true}}));
+  const MouseInputEvent mouse{3, 3, MouseButton::LEFT, MouseAction::PRESS, {.shift = true}};
+  take(fixture.app->router().dispatch(mouse));
+  take(fixture.app->router().dispatch(MouseInputEvent{3, 3, MouseButton::LEFT, MouseAction::RELEASE, {}}));
+  REQUIRE(clicks.size() == 3);
+  CHECK(clicks[0].modifiers.control);
+  CHECK(std::get<ActionEvent>(clicks[0].event).action == Action::ACTIVATE);
+  CHECK(clicks[1].modifiers.alt);
+  CHECK(std::get<TextInputEvent>(clicks[1].event).scalar == U' ');
+  CHECK(clicks[2].target == button.node());
+  CHECK(std::get<MouseInputEvent>(clicks[2].event) == mouse);
+}
+
+TEST_CASE("legacy empty button callback remains an unambiguous rejected recipe") {
+  Fixture fixture;
+  auto mounted = ui::mount(*fixture.scene, ui::button("empty", {}));
+  REQUIRE_FALSE(mounted);
+  CHECK(hasCause(mounted.error(), TreeError::INVALID_ARGUMENT));
+  CHECK(take(fixture.app->tree().inspect(fixture.scene->root())).children.empty());
+}
+
+TEST_CASE("failed compact id preparation preserves metadata and frame requests") {
+  Fixture fixture;
+  ui::Ref<Label> label;
+  take(ui::mount(*fixture.scene, ui::label(label, "id").id("original")));
+  take(fixture.scene->theme(take(parsePss("Control#original { foreground: #010203; }"))));
+  take(fixture.scene->prepare(*fixture.app, {40, 10}));
+  take(fixture.app->tree().consumeFrameRequest());
+  allocationsBeforeFailure = 0;
+  auto failed = fixture.scene->id(label.node(), "a new identity whose storage requires allocation");
+  allocationsBeforeFailure = -1;
+  REQUIRE_FALSE(failed);
+  CHECK(hasCause(failed.error(), TreeError::NO_MEMORY));
+  CHECK(take(fixture.app->tree().consumeFrameRequest()) == Invalidation::NONE);
+  take(fixture.scene->prepare(*fixture.app, {40, 10}));
+  take(fixture.app->tree().read(label.node(), [](const Label &widget) {
+    REQUIRE(widget.computedStyle());
+    CHECK(widget.computedStyle()->normal.foreground == RgbColor{1, 2, 3});
+  }));
+}
+
+TEST_CASE("input replacement publishes callback and key budget before retiring old captures") {
+  auto app = take(Application::create());
+  auto scene = take(ManagedScene::create(*app, ManagedOptions{.maxKeyHandlers = 1}));
+  int clicks = 0;
+
+  struct Reenter {
+    std::function<void()> retire;
+
+    ~Reenter() {
+      retire();
+    }
+  };
+
+  auto capture = std::make_shared<Reenter>();
+  capture->retire = [&] {
+    take(scene->onKey(ui::key(InputKey::F2), [&] {
+      ++clicks;
+    }));
+  };
+  take(scene->onKey(ui::key(InputKey::F3), [capture] {
+  }));
+  capture.reset();
+  take(scene->onInput({}));
+  CHECK(take(scene->input(*app, ui::key(InputKey::F2))));
+  CHECK(clicks == 1);
+  auto full = scene->onKey(ui::key(InputKey::F10), [] {
+  });
+  REQUIRE_FALSE(full);
+  CHECK(hasCause(full.error(), TreeError::NODE_LIMIT));
 }

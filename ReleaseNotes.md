@@ -5,6 +5,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Added] Ref-first UI recipes, compact selector ids, void or typed click actions
+  with routed parameters, checked late button registration, and composable short
+  key handlers using the existing managed input lifecycle.
+
 - [Added] Interactive editor history example comparing IMMEDIATE, ON_COMPLETION
   and EXPLICIT drafts with read-only published model rows, compact Undo/Redo
   buttons and fluent append. Finite headless checks exercise VT input and the

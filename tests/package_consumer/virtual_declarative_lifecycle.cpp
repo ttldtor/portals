@@ -95,9 +95,9 @@ void preparationOrderAndFailure() {
   auto app = take(Application::create({}, terminal.clock()));
   auto scene = take(ManagedScene::create(*app));
   const auto model = take(scene->model<Ohlc>(std::make_shared<const Prices>()));
-  ui::NodeRef<VirtualTable<Ohlc>> table;
-  ui::NodeRef<VirtualList<Ohlc>> list;
-  ui::NodeRef<Chart<Ohlc>> chart;
+  ui::Ref<VirtualTable<Ohlc>> table;
+  ui::Ref<VirtualList<Ohlc>> list;
+  ui::Ref<Chart<Ohlc>> chart;
   std::vector<int> order;
   auto lifetime = std::make_shared<int>(123);
   const std::weak_ptr<int> observed = lifetime;
@@ -116,15 +116,14 @@ void preparationOrderAndFailure() {
 
     return ui::row(
       ui::virtualTable(
-        model, columns, {}, {},
+        table, model, columns, {}, {},
         [&](const ModelFrame<Ohlc> &, const std::optional<ModelRequest<Ohlc>> &) -> std::expected<void, TreeError> {
           order.push_back(1);
 
           return {};
-        })
-        .reference(table),
+        }),
       ui::virtualList(
-        model,
+        list, model,
         [](const ModelRow<Ohlc> &) {
           return virtualConsumer::text("price");
         },
@@ -133,10 +132,9 @@ void preparationOrderAndFailure() {
           order.push_back(2);
 
           return {};
-        })
-        .reference(list),
+        }),
       ui::chart(
-        model,
+        chart, model,
         [](const Ohlc &value) {
           return std::optional{value};
         },
@@ -155,8 +153,7 @@ void preparationOrderAndFailure() {
           check(!observed.expired(), "Self-removal destroyed an active callback capture");
 
           return std::unexpected(TreeError::INVALID_GEOMETRY);
-        })
-        .reference(chart));
+        }));
   }();
 
   lifetime.reset();
