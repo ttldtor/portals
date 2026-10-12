@@ -8,6 +8,104 @@ owned by `WidgetTree`, while `ManagedScene` retains bindings and presentation wo
 
 ## Own a lazy scene
 
+A standalone program can use the standard exit and reporting policy:
+
+```cpp
+#include <portals/ui.hpp>
+
+int main() {
+  using namespace portals;
+
+  ui::Ref<LineEdit> message;
+
+  ui::Scene scene = ui::scene(ui::column(
+    ui::label("Message"), ui::lineEdit(message, "Hello"),
+    ui::row(ui::button("Append", [message] { message.text() += text(" {}", 123); }),
+            ui::button("Quit", [&scene] { (void)scene.quit(); }))));
+
+  scene.onKey(ui::key(InputKey::F10), [&scene] { (void)scene.quit(); });
+
+  return ui::runApp(scene); // Equivalent: return scene | ui::runApp();
+}
+```
+
+`Scene::runApp()`, `ui::runApp(scene)` and `scene | ui::runApp()` delegate to the
+same existing `run()` boundary: zero on success, one on a typed failure. All forms
+accept an optional stop token and a borrowed custom/replay `ApplicationTerminal`.
+The final pipe stage borrows its lvalue or temporary scene for the synchronous
+call; it does not move it. `scene.run()` and `scene | ui::run()` retain the owning
+`expected<ApplicationStats, ManagedError>` result for embedding and explicit logs.
+Typed run does not invoke the final report sink or impose stderr I/O.
+
+`quit()` requests orderly cancellation through the existing `Application`.
+It is UI-only and idempotent while the scene is live. Before preparation, or
+inside its recipe/configuration, the intent waits until complete successful
+mount and deferred configuration; bindings finish before cancellation. During
+a prepared configuration or running callback, the current action finishes
+before cleanup. Notification/close reentry returns sticky `WOULD_BLOCK`;
+a closed/moved scene returns `CLOSED`, and a foreign thread returns `WRONG_THREAD`
+without changing the owner. Pre-run quit preserves the native runner's
+opening/restoration path; it does not promise to skip terminal acquisition.
+
+`runApp` delivers one final report after terminal close/restoration was attempted
+and the existing scene cleanup boundary returned. Primary, independent runner/restoration, and cleanup
+causes returned by the existing lifecycle remain in the owning
+`SceneReport::failure` envelope. A current lower-layer limitation remains:
+`WidgetTree` catches `Widget::unmount` exceptions and sends them only to its
+optional tree error sink; that path does not return them through managed cleanup.
+`runApp` does not recover swallowed callback errors or claim that every unmount
+hook succeeded. The default
+`reportToStderr` formatter uses symbolic categories, source locations and native
+error codes without C++ allocation. When restoration fails, ordinary stderr is a
+best-effort fallback; a restoration failure is retained rather than declared
+successful. Repeated final calls do not duplicate a report. Foreign-thread,
+moved-from and nested calls return one quietly: only an admitted outer call can
+establish the terminal restoration boundary. Use typed `run()`/`checked()` to
+inspect rejected-call causes.
+
+`onError` is the application reaction channel: its existing non-veto notification
+timing is unchanged, and observer exceptions stay separate from the primary cause.
+`reportOnError` independently selects diagnostic delivery; neither registration
+order nor clearing an observer changes reporting priority:
+
+```cpp
+scene.onError([](const ManagedDiagnostic &diagnostic) {
+  // React to the operation failure without terminal output during the live run.
+}).reportOnError([](const ui::SceneReport &report) {
+  // Forward the final structured report to an application logger after cleanup.
+  ui::reportToStderr(report);
+});
+```
+
+Both method and `ui::reportOnError(sink)` pipe modifier own a copyable callable
+accepting `const SceneReport&` and returning void. Captures remain alive through
+synchronous delivery; explicitly borrowed services must outlive `runApp`.
+`reportOnError()` or `reportOnError({})` selects the default sink. Reporting is a
+read-only final boundary: typed lifecycle reentry returns `WOULD_BLOCK` quietly,
+fluent mutation/registration attempts do nothing, and the completed result stays
+unchanged. Self-removal/replacement during delivery is rejected; the active sink
+and captures remain alive until it returns. Sink exceptions invoke the default
+formatter once with the original report, bypassing both the sink and `onError`;
+they do not replace the typed primary or recursively generate diagnostics.
+Success with recoverable diagnostics keeps exit zero and reports only bounded
+retained/dropped counts. The sink does **not** deliver each recoverable record:
+`diagnostics()` provides their detailed owning envelopes. Clean success is quiet.
+
+Construction of recipes, captures, stages, and function arguments before final
+stage evaluation remains outside `runApp`. It does not catch arbitrary exceptions
+from that earlier work. Lazy recipe, configuration, and runtime callbacks execute
+inside their documented checked boundaries and preserve typed failures. Use an
+ordinary application `try`/`catch` around construction if its exceptions require
+an exit-code policy. There is no additional callable wrapper API.
+
+The explicit `ui::Scene scene` declaration above makes the name available for
+captures in its initializer; callbacks run only after construction. Keep that
+facade in place and alive through execution. Moving it after capturing `&scene`
+does not rewrite user captures. Other consuming scene modifiers may move the
+facade, so finish their composition before installing self-referencing callbacks.
+These rules follow ordinary C++ [declaration scope](https://eel.is/c++draft/basic.scope.pdecl)
+and [lambda capture lifetime](https://eel.is/c++draft/expr.prim.lambda.capture).
+
 An ordinary form can also use `ui::scene` to own its existing `Application` and
 `ManagedScene`. Preparation mounts the complete form and publishes its `Ref`s;
 it performs no terminal I/O. Configure handlers after preparation, then run:
@@ -62,7 +160,7 @@ auto result = ui::scene(ui::lineEdit("initial"))
   | ui::run();
 ```
 
-`ui::prepare()`, `ui::configure(...)` and `ui::onError(...)` are also stages.
+`ui::prepare()`, `ui::configure(...)` and `ui::onError(...)` and `ui::reportOnError(...)` are also stages.
 `run(terminal, stop)` borrows an existing replay/custom terminal; moving a named
 facade or method adapter into a pipe requires `std::move`. A pipe introduces no new runtime,
 parser or control modifier system.

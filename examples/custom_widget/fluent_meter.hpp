@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 #include "meter.hpp"
-#include <stop_token>
 
 namespace meter_example {
 /** @brief Equivalent method and pipe composition spellings. */
@@ -34,14 +33,26 @@ public:
 
   /** @return Statistics or typed lazy setup/runtime/cleanup failure after native restoration. */
   std::expected<ApplicationStats, ManagedError> run() {
-    return scene_.run(stop_.get_token());
+    return scene_.run({});
   }
 
   /** @param terminal Borrowed transport opened and closed by the existing runner.
    * @return Statistics or original typed cause plus independent runner/restoration and cleanup errors.
    */
   std::expected<ApplicationStats, ManagedError> run(ApplicationTerminal &terminal) {
-    return scene_.run(terminal, stop_.get_token());
+    return scene_.run(terminal, {});
+  }
+
+  /** @return Zero on success, one on a typed failure, with library reporting after terminal restoration. */
+  int runApp() {
+    return portals::ui::runApp(scene_);
+  }
+
+  /** @param terminal Borrowed replay/custom transport, living through this call.
+   * @return Same final status and library reporting as the native run.
+   */
+  int runApp(portals::ApplicationTerminal &terminal) {
+    return scene_ | portals::ui::runApp(terminal);
   }
 
 private:
@@ -80,7 +91,7 @@ private:
     // Retain modifier-insensitive legacy admission as the fallback beneath exact onKey chords.
     return owner.onInput([this, &owner](const InputEvent &event) -> std::expected<bool, ManagedError> {
       if (example::quitKey(event)) {
-        stop_.request_stop();
+        (void)scene_.quit();
 
         return true;
       }
@@ -120,7 +131,7 @@ private:
       return configure(owner);
     };
     auto quit = [this] {
-      stop_.request_stop();
+      (void)scene_.quit();
     };
     auto left = [this] {
       return adjust(-LEVEL_STEP);
@@ -149,7 +160,6 @@ private:
 
   ManagedState<int> level_;   ///< Weak scene-owned scalar state; immutable snapshots are read during prepare.
   std::size_t theme_{};       ///< Theme preset index, committed only after successful replacement.
-  std::stop_source stop_;     ///< Owned cancellation source outliving every callback.
   ui::Ref<LevelMeter> meter_; ///< Typed observing reference, published only after the complete mount.
   ui::Scene scene_;           ///< Destroy callbacks and owned runtime before the members they borrow.
 };

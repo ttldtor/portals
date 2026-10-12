@@ -5,6 +5,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Added] `ui::runApp(scene)` and the equivalent `scene | ui::runApp()` exit-code
+  adapter, orderly `scene.quit()`, and an independent `reportOnError` modifier
+  for structured final diagnostics after terminal restoration and cleanup attempts.
+  Typed `scene.run()` remains available; gallery and custom meter use the adapter.
+
 - [Added] Complete owning gallery and custom meter examples with equivalent method/pipe
   composition, preserved editor/shortcut behavior, typed failures and cleanup, and
   before/after replay checks across themes and color modes in the installed consumer.

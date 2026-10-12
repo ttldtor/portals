@@ -3,9 +3,284 @@
 #include <portals/ui_scene.hpp>
 
 #include <array>
+#include <cstdio>
 
 namespace portals::ui {
 namespace {
+constexpr const char *phaseName(ManagedPhase phase) noexcept {
+  switch (phase) {
+  case ManagedPhase::MOUNT:
+    return "MOUNT";
+  case ManagedPhase::STATE:
+    return "STATE";
+  case ManagedPhase::BIND:
+    return "BIND";
+  case ManagedPhase::STYLE:
+    return "STYLE";
+  case ManagedPhase::PREPARE:
+    return "PREPARE";
+  case ManagedPhase::INPUT:
+    return "INPUT";
+  case ManagedPhase::RUN:
+    return "RUN";
+  case ManagedPhase::CLEANUP:
+    return "CLEANUP";
+  case ManagedPhase::TEXT:
+    return "TEXT";
+  }
+
+  return "UNKNOWN";
+}
+
+constexpr const char *treeErrorName(TreeError cause) noexcept {
+  switch (cause) {
+  case TreeError::INVALID_ARGUMENT:
+    return "INVALID_ARGUMENT";
+  case TreeError::WRONG_THREAD:
+    return "WRONG_THREAD";
+  case TreeError::WRONG_SESSION:
+    return "WRONG_SESSION";
+  case TreeError::STALE_NODE:
+    return "STALE_NODE";
+  case TreeError::CLOSED:
+    return "CLOSED";
+  case TreeError::WOULD_BLOCK:
+    return "WOULD_BLOCK";
+  case TreeError::NO_MEMORY:
+    return "NO_MEMORY";
+  case TreeError::IDENTITY_EXHAUSTED:
+    return "IDENTITY_EXHAUSTED";
+  case TreeError::NODE_LIMIT:
+    return "NODE_LIMIT";
+  case TreeError::DEPTH_LIMIT:
+    return "DEPTH_LIMIT";
+  case TreeError::CALLBACK_FAILED:
+    return "CALLBACK_FAILED";
+  case TreeError::INVALID_GEOMETRY:
+    return "INVALID_GEOMETRY";
+  }
+
+  return "UNKNOWN";
+}
+
+constexpr const char *categoryName(ApplicationPhase value) noexcept {
+  switch (value) {
+  case ApplicationPhase::CREATE:
+    return "CREATE";
+  case ApplicationPhase::OPEN:
+    return "OPEN";
+  case ApplicationPhase::INPUT:
+    return "INPUT";
+  case ApplicationPhase::DISPATCH:
+    return "DISPATCH";
+  case ApplicationPhase::PREPARE:
+    return "PREPARE";
+  case ApplicationPhase::RENDER:
+    return "RENDER";
+  case ApplicationPhase::SUBMIT:
+    return "SUBMIT";
+  case ApplicationPhase::FLUSH:
+    return "FLUSH";
+  case ApplicationPhase::STOP:
+    return "STOP";
+  case ApplicationPhase::CLOSE:
+    return "CLOSE";
+  case ApplicationPhase::CONTROL_LATENCY:
+    return "CONTROL_LATENCY";
+  }
+
+  return "UNKNOWN";
+}
+
+constexpr const char *categoryName(ApplicationFailure value) noexcept {
+  switch (value) {
+  case ApplicationFailure::INVALID_OPTIONS:
+    return "INVALID_OPTIONS";
+  case ApplicationFailure::ALREADY_RUN:
+    return "ALREADY_RUN";
+  case ApplicationFailure::NO_MEMORY:
+    return "NO_MEMORY";
+  case ApplicationFailure::CALLBACK_FAILED:
+    return "CALLBACK_FAILED";
+  case ApplicationFailure::OBSERVER_FAILED:
+    return "OBSERVER_FAILED";
+  }
+
+  return "UNKNOWN";
+}
+
+constexpr const char *categoryName(TerminalErrorKind value) noexcept {
+  switch (value) {
+  case TerminalErrorKind::INVALID_OPTIONS:
+    return "INVALID_OPTIONS";
+  case TerminalErrorKind::UNSUPPORTED:
+    return "UNSUPPORTED";
+  case TerminalErrorKind::SYSTEM:
+    return "SYSTEM";
+  case TerminalErrorKind::CLOSED:
+    return "CLOSED";
+  case TerminalErrorKind::OUTPUT_PENDING:
+    return "OUTPUT_PENDING";
+  case TerminalErrorKind::OUTPUT_LIMIT:
+    return "OUTPUT_LIMIT";
+  case TerminalErrorKind::INPUT_DECODE:
+    return "INPUT_DECODE";
+  case TerminalErrorKind::OUTPUT_UNCERTAIN:
+    return "OUTPUT_UNCERTAIN";
+  case TerminalErrorKind::INPUT_LIMIT:
+    return "INPUT_LIMIT";
+  }
+
+  return "UNKNOWN";
+}
+
+constexpr const char *categoryName(SchedulerError value) noexcept {
+  switch (value) {
+  case SchedulerError::INVALID_ARGUMENT:
+    return "INVALID_ARGUMENT";
+  case SchedulerError::WRONG_THREAD:
+    return "WRONG_THREAD";
+  case SchedulerError::WRONG_SCHEDULER:
+    return "WRONG_SCHEDULER";
+  case SchedulerError::CLOSED:
+    return "CLOSED";
+  case SchedulerError::WOULD_BLOCK:
+    return "WOULD_BLOCK";
+  case SchedulerError::NO_MEMORY:
+    return "NO_MEMORY";
+  case SchedulerError::REENTRANT_DISPATCH:
+    return "REENTRANT_DISPATCH";
+  case SchedulerError::IDENTITY_EXHAUSTED:
+    return "IDENTITY_EXHAUSTED";
+  case SchedulerError::CALLBACK_FAILED:
+    return "CALLBACK_FAILED";
+  }
+
+  return "UNKNOWN";
+}
+
+constexpr const char *categoryName(InputError value) noexcept {
+  switch (value) {
+  case InputError::INVALID_OPTIONS:
+    return "INVALID_OPTIONS";
+  case InputError::BACKWARD_TIME:
+    return "BACKWARD_TIME";
+  case InputError::CLOSED:
+    return "CLOSED";
+  case InputError::FAILED:
+    return "FAILED";
+  case InputError::OFFSET_OVERFLOW:
+    return "OFFSET_OVERFLOW";
+  case InputError::INVALID_WINDOW:
+    return "INVALID_WINDOW";
+  }
+
+  return "UNKNOWN";
+}
+
+constexpr const char *categoryName(RenderErrorKind value) noexcept {
+  switch (value) {
+  case RenderErrorKind::COMMAND_LIMIT:
+    return "COMMAND_LIMIT";
+  case RenderErrorKind::TEXT_BYTE_LIMIT:
+    return "TEXT_BYTE_LIMIT";
+  case RenderErrorKind::WORK_LIMIT:
+    return "WORK_LIMIT";
+  case RenderErrorKind::POLICY_MISMATCH:
+    return "POLICY_MISMATCH";
+  case RenderErrorKind::BUFFER_ERROR:
+    return "BUFFER_ERROR";
+  case RenderErrorKind::ALLOCATION_FAILURE:
+    return "ALLOCATION_FAILURE";
+  }
+
+  return "UNKNOWN";
+}
+
+constexpr const char *categoryName(FrameError value) noexcept {
+  switch (value) {
+  case FrameError::PENDING:
+    return "PENDING";
+  case FrameError::POISONED:
+    return "POISONED";
+  case FrameError::FRAME_LIMIT:
+    return "FRAME_LIMIT";
+  case FrameError::OUTPUT_LIMIT:
+    return "OUTPUT_LIMIT";
+  case FrameError::ALLOCATION_FAILURE:
+    return "ALLOCATION_FAILURE";
+  }
+
+  return "UNKNOWN";
+}
+
+constexpr const char *categoryName(CellBufferError value) noexcept {
+  switch (value) {
+  case CellBufferError::INVALID_LIMITS:
+    return "INVALID_LIMITS";
+  case CellBufferError::INVALID_POLICY:
+    return "INVALID_POLICY";
+  case CellBufferError::COLUMN_LIMIT:
+    return "COLUMN_LIMIT";
+  case CellBufferError::ROW_LIMIT:
+    return "ROW_LIMIT";
+  case CellBufferError::CELL_LIMIT:
+    return "CELL_LIMIT";
+  case CellBufferError::OUT_OF_BOUNDS:
+    return "OUT_OF_BOUNDS";
+  case CellBufferError::INVALID_GRAPHEME:
+    return "INVALID_GRAPHEME";
+  case CellBufferError::POLICY_MISMATCH:
+    return "POLICY_MISMATCH";
+  case CellBufferError::WIDE_AT_EDGE:
+    return "WIDE_AT_EDGE";
+  case CellBufferError::GLYPH_LIMIT:
+    return "GLYPH_LIMIT";
+  case CellBufferError::GLYPH_BYTE_LIMIT:
+    return "GLYPH_BYTE_LIMIT";
+  case CellBufferError::STYLE_LIMIT:
+    return "STYLE_LIMIT";
+  case CellBufferError::ALLOCATION_FAILURE:
+    return "ALLOCATION_FAILURE";
+  }
+
+  return "UNKNOWN";
+}
+
+constexpr const char *categoryName(TextErrorKind value) noexcept {
+  switch (value) {
+  case TextErrorKind::INVALID_UTF8:
+    return "INVALID_UTF8";
+  case TextErrorKind::INPUT_LIMIT:
+    return "INPUT_LIMIT";
+  case TextErrorKind::CLUSTER_LIMIT:
+    return "CLUSTER_LIMIT";
+  case TextErrorKind::GRAPHEME_LIMIT:
+    return "GRAPHEME_LIMIT";
+  case TextErrorKind::CELL_LIMIT:
+    return "CELL_LIMIT";
+  case TextErrorKind::INVALID_POLICY:
+    return "INVALID_POLICY";
+  case TextErrorKind::NOT_BOUNDARY:
+    return "NOT_BOUNDARY";
+  }
+
+  return "UNKNOWN";
+}
+
+constexpr const char *categoryName(TextResourceError value) noexcept {
+  switch (value) {
+  case TextResourceError::MISSING_RESOURCE:
+    return "MISSING_RESOURCE";
+  case TextResourceError::RESOLVER_REQUIRED:
+    return "RESOLVER_REQUIRED";
+  case TextResourceError::RESOLVER_FAILED:
+    return "RESOLVER_FAILED";
+  }
+
+  return "UNKNOWN";
+}
+
 ManagedError error(ManagedPhase phase, TreeError cause, NodeId node = {}) {
   return {phase, node, cause, {}, {}};
 }
@@ -17,7 +292,83 @@ TreeError cleanupCause(const ManagedError &failure) {
 
   return TreeError::CALLBACK_FAILED;
 }
+
+void reportTerminal(const TerminalError &cause) noexcept {
+  std::fprintf(stderr, "TerminalError(kind=%s, native=%d, restoration=%d)", categoryName(cause.kind), cause.native_code,
+               cause.restoration_code);
+}
+
+void reportApplication(const ApplicationError &cause) noexcept {
+  std::fprintf(stderr, "ApplicationError(phase=%s, cause=", categoryName(cause.phase));
+  std::visit(
+    [](const auto &value) {
+      if constexpr (std::same_as<std::decay_t<decltype(value)>, TerminalError>) {
+        reportTerminal(value);
+      } else if constexpr (std::same_as<std::decay_t<decltype(value)>, RenderError>) {
+        std::fprintf(stderr, "RenderError(kind=%s, buffer=%s)", categoryName(value.kind),
+                     categoryName(value.buffer_error));
+      } else if constexpr (std::same_as<std::decay_t<decltype(value)>, TreeError>) {
+        std::fprintf(stderr, "TreeError(%s)", treeErrorName(value));
+      } else {
+        std::fprintf(stderr, "%s", categoryName(value));
+      }
+    },
+    cause.cause);
+  std::fputc(')', stderr);
+
+  if (cause.restoration) {
+    std::fputs(" restoration=", stderr);
+    reportTerminal(*cause.restoration);
+  }
+}
+
+void reportFailure(const ManagedError &failure, std::source_location origin) noexcept {
+  std::fprintf(stderr, "Portals: scene failed (phase=%s) at %s:%u: ", phaseName(failure.phase), origin.file_name(),
+               origin.line());
+  std::visit(
+    [](const auto &cause) {
+      using Cause = std::decay_t<decltype(cause)>;
+
+      if constexpr (std::same_as<Cause, TreeError>) {
+        std::fprintf(stderr, "TreeError(%s)", treeErrorName(cause));
+      } else if constexpr (std::same_as<Cause, StyleError>) {
+        std::fprintf(stderr, "StyleError(cause=%s, line=%zu, column=%zu)", treeErrorName(cause.cause), cause.line,
+                     cause.column);
+      } else {
+        reportApplication(cause);
+      }
+    },
+    failure.cause);
+
+  if (failure.application) {
+    std::fputs(" runner=", stderr);
+    reportApplication(*failure.application);
+  }
+
+  if (failure.cleanup) {
+    std::fprintf(stderr, " cleanup=TreeError(%s)", treeErrorName(*failure.cleanup));
+  }
+
+  if (failure.text) {
+    std::fprintf(stderr, " text=(kind=%s, offset=%zu)", categoryName(failure.text->kind), failure.text->byte_offset);
+  }
+
+  if (failure.resource) {
+    std::fprintf(stderr, " resource=%s", categoryName(*failure.resource));
+  }
+
+  std::fputc('\n', stderr);
+}
 } // namespace
+
+void reportToStderr(const SceneReport &report) noexcept {
+  if (report.failure) {
+    reportFailure(*report.failure, report.origin);
+  } else {
+    std::fprintf(stderr, "Portals: recoverable diagnostics: retained=%zu, dropped=%zu; inspect diagnostics()\n",
+                 report.retainedErrors, report.droppedErrors);
+  }
+}
 
 struct Scene::State {
   enum class Operation {
@@ -26,7 +377,8 @@ struct Scene::State {
     CONFIGURE,
     RUN,
     CLOSE,
-    NOTIFY
+    NOTIFY,
+    REPORT
   };
 
   struct Guard {
@@ -55,12 +407,14 @@ struct Scene::State {
   std::vector<Pending> pending = std::vector<Pending>(0);
   std::unique_ptr<StyleSheet> theme;
   std::shared_ptr<ManagedErrorHandler> observer;
+  std::shared_ptr<SceneReportHandler> reportSink;
   std::optional<ManagedError> failure;
   std::source_location failureOrigin;
   ManagedDiagnostic fallback;
   Operation active{Operation::NONE};
   bool prepared{}, completed{}, managedClosed{}, notified{}, fallbackObserverFailed{};
   bool publishingFailure{};
+  bool quitRequested{}, finalReported{};
 
   NodeId node() const {
     return managed ? managed->root().id() : NodeId{};
@@ -111,7 +465,8 @@ struct Scene::State {
   }
 
   void fail(ManagedError cause, std::string_view operation, std::source_location origin, bool report = true) {
-    if (failure) {
+    // Reporting is read-only: rejected final-sink reentry cannot alter a completed outcome or notify reactions.
+    if (failure || active == Operation::REPORT) {
       return;
     }
 
@@ -209,6 +564,7 @@ Scene::~Scene() {
 
   (void)state_->cleanup(std::source_location::current());
   state_->observer.reset();
+  state_->reportSink.reset();
 
   // Detach each public-facing owner before its user captures retire, while all State fields live.
   auto managed = std::move(state_->managed);
@@ -398,6 +754,8 @@ std::expected<void, ManagedError> Scene::prepareChecked(std::source_location ori
 
     if (state.failure) {
       (void)state.cleanup(origin);
+    } else if (state.quitRequested) {
+      state.application->requestStop();
     }
   }
 
@@ -545,8 +903,132 @@ Scene &Scene::onError(ManagedErrorHandler observer, std::source_location origin)
   return *this;
 }
 
+Scene &Scene::reportOnError(SceneReportHandler sink, std::source_location origin) & {
+  if (owner_ != std::this_thread::get_id() || !state_) {
+    return *this;
+  }
+
+  auto &state = *state_;
+
+  if (state.active != State::Operation::NONE) {
+    state.fail(error(ManagedPhase::BIND, TreeError::WOULD_BLOCK, state.node()), "scene.reportOnError", origin);
+
+    return *this;
+  }
+
+  State::Guard guard(state, State::Operation::CONFIGURE);
+
+  try {
+    auto replacement = sink ? std::make_shared<SceneReportHandler>(std::move(sink)) : nullptr;
+
+    state.reportSink.swap(replacement);
+  } catch (const std::bad_alloc &) {
+    state.fail(error(ManagedPhase::BIND, TreeError::NO_MEMORY, state.node()), "scene.reportOnError", origin);
+  } catch (...) {
+    state.fail(error(ManagedPhase::BIND, TreeError::CALLBACK_FAILED, state.node()), "scene.reportOnError", origin);
+  }
+
+  return *this;
+}
+
 std::expected<ApplicationStats, ManagedError> Scene::run(std::stop_token stop, std::source_location origin) {
   return runImpl(nullptr, stop, origin);
+}
+
+std::expected<void, ManagedError> Scene::quit(std::source_location origin) {
+  if (owner_ != std::this_thread::get_id()) {
+    return std::unexpected(error(ManagedPhase::RUN, TreeError::WRONG_THREAD));
+  }
+
+  if (!state_) {
+    return std::unexpected(error(ManagedPhase::RUN, TreeError::CLOSED));
+  }
+
+  auto &state = *state_;
+
+  if (state.active == State::Operation::NOTIFY || state.active == State::Operation::REPORT ||
+      state.active == State::Operation::CLOSE) {
+    auto cause = error(ManagedPhase::RUN, TreeError::WOULD_BLOCK, state.node());
+
+    state.fail(cause, "scene.quit", origin);
+
+    return std::unexpected(cause);
+  }
+
+  if (state.completed) {
+    return std::unexpected(error(ManagedPhase::RUN, TreeError::CLOSED, state.node()));
+  }
+
+  state.quitRequested = true;
+
+  if (state.prepared && state.active != State::Operation::PREPARE) {
+    state.application->requestStop();
+  }
+
+  return {};
+}
+
+int Scene::runApp(std::stop_token stop, std::source_location origin) {
+  return runAppImpl(nullptr, stop, origin);
+}
+
+int Scene::runApp(ApplicationTerminal &terminal, std::stop_token stop, std::source_location origin) {
+  return runAppImpl(&terminal, stop, origin);
+}
+
+int Scene::runAppImpl(ApplicationTerminal *terminal, std::stop_token stop, std::source_location origin) {
+  // An unadmitted facade cannot prove that another owner's terminal has been restored.
+  if (owner_ != std::this_thread::get_id() || !state_) {
+    return 1;
+  }
+
+  const auto result = runImpl(terminal, stop, origin);
+  auto &state = *state_;
+
+  // A nested runApp has not restored the terminal; leave all reporting to the admitted outer run.
+  if (state.active != State::Operation::NONE || state.finalReported) {
+    return result ? 0 : 1;
+  }
+
+  if (!state.completed) {
+    State::Guard guard(state, State::Operation::CLOSE);
+
+    (void)state.cleanup(origin);
+    state.notifyFallback();
+  }
+
+  state.finalReported = true;
+
+  SceneReport report;
+
+  report.origin = state.failure ? state.failureOrigin : origin;
+
+  if (!result) {
+    report.failure = state.failure ? *state.failure : result.error();
+  } else if (state.managed) {
+    const auto [retained, dropped] = detail::SceneAccess::reportCounts(*state.managed);
+
+    report.retainedErrors = retained;
+    report.droppedErrors = dropped;
+  }
+
+  if (report.failure || report.retainedErrors || report.droppedErrors) {
+    // Keep the callable alive and forbid facade mutation/destruction throughout delivery and fallback.
+    State::Guard guard(state, State::Operation::REPORT);
+    auto sink = state.reportSink;
+
+    try {
+      if (sink) {
+        (*sink)(report);
+      } else {
+        reportToStderr(report);
+      }
+    } catch (...) {
+      reportToStderr(report);
+    }
+  }
+
+  return result ? 0 : 1;
 }
 
 std::expected<ApplicationStats, ManagedError> Scene::run(ApplicationTerminal &terminal, std::stop_token stop,
