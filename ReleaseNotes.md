@@ -5,6 +5,26 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Fixed] Constant scene factories preserve immediate temporary expressions on
+  MSVC 19.44 by using explicit typed defaults and union-free internal style storage.
+  Public style values and compile-time validation remain unchanged.
+
+- [Added] Bounded dashboard page caching, prefetch and a backend job queue that
+  keep pending data loads progressing during continuous keyboard navigation.
+- [Added] Owning model queries with separate query generations, in-memory
+  projection and deferred providers using the existing scheduler.
+- [Added] C++23 constant scene descriptions with structural checks and runtime
+  attachment of references, bindings and callbacks through the retained core.
+- [Added] Constant style rules with typed live parameters and atomic batch
+  updates through the existing style cascade.
+- [Added] UI-affine coroutine tasks for timers and provider replies, with typed
+  failures, cancellation and late-reply handling on the existing scheduler.
+
+- [Added] `ui::runApp(scene)` and the equivalent `scene | ui::runApp()` exit-code
+  adapter, orderly `scene.quit()`, and an independent `reportOnError` modifier
+  for structured final diagnostics after terminal restoration and cleanup attempts.
+  Typed `scene.run()` remains available; gallery and custom meter use the adapter.
+
 - [Added] Complete owning gallery and custom meter examples with equivalent method/pipe
   composition, preserved editor/shortcut behavior, typed failures and cleanup, and
   before/after replay checks across themes and color modes in the installed consumer.

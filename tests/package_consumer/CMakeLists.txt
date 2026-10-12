@@ -34,6 +34,83 @@ if(WIN32)
 endif()
 
 enable_testing()
+foreach(variant IN ITEMS callback coroutine)
+  add_executable(portals_async_${variant} async_${variant}.cpp)
+  target_link_libraries(portals_async_${variant} PRIVATE portals::core)
+  set_target_properties(portals_async_${variant} PROPERTIES CXX_EXTENSIONS OFF)
+  if(WIN32)
+    target_sources(portals_async_${variant} PRIVATE no_dialogs.cpp)
+  endif()
+  add_test(NAME consumer.async-${variant} COMMAND portals_async_${variant})
+  set_tests_properties(consumer.async-${variant} PROPERTIES TIMEOUT 15)
+endforeach()
+add_test(NAME consumer.async-equivalence
+  COMMAND "${CMAKE_COMMAND}"
+    "-DBEFORE=$<TARGET_FILE:portals_async_callback>"
+    "-DAFTER=$<TARGET_FILE:portals_async_coroutine>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_forms.cmake")
+set_tests_properties(consumer.async-equivalence PROPERTIES TIMEOUT 30)
+
+add_executable(portals_query_consumer query.cpp)
+target_link_libraries(portals_query_consumer PRIVATE portals::core)
+set_target_properties(portals_query_consumer PROPERTIES CXX_EXTENSIONS OFF)
+if(WIN32)
+  target_sources(portals_query_consumer PRIVATE no_dialogs.cpp)
+endif()
+add_test(NAME consumer.query COMMAND portals_query_consumer)
+set_tests_properties(consumer.query PROPERTIES TIMEOUT 15)
+
+foreach(variant IN ITEMS static_styles static_styles_dynamic)
+  add_executable("portals_${variant}_consumer" "${variant}.cpp")
+  target_link_libraries("portals_${variant}_consumer" PRIVATE portals::core)
+  set_target_properties("portals_${variant}_consumer" PROPERTIES CXX_EXTENSIONS OFF)
+  if(WIN32)
+    target_sources("portals_${variant}_consumer" PRIVATE no_dialogs.cpp)
+  endif()
+  add_test(NAME "consumer.${variant}" COMMAND "portals_${variant}_consumer")
+  add_test(NAME "consumer.${variant}-typed-failure" COMMAND "portals_${variant}_consumer" --failure)
+  set_tests_properties("consumer.${variant}" "consumer.${variant}-typed-failure" PROPERTIES TIMEOUT 15)
+endforeach()
+add_test(NAME consumer.static-styles-equivalence
+  COMMAND "${CMAKE_COMMAND}" "-DBEFORE=$<TARGET_FILE:portals_static_styles_dynamic_consumer>"
+    "-DAFTER=$<TARGET_FILE:portals_static_styles_consumer>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_forms.cmake")
+set_tests_properties(consumer.static-styles-equivalence PROPERTIES TIMEOUT 30)
+foreach(variant IN ITEMS static_scene static_scene_dynamic)
+  add_executable("portals_${variant}_consumer" "${variant}.cpp")
+  target_link_libraries("portals_${variant}_consumer" PRIVATE portals::core)
+  set_target_properties("portals_${variant}_consumer" PROPERTIES CXX_EXTENSIONS OFF)
+  if(WIN32)
+    target_sources("portals_${variant}_consumer" PRIVATE no_dialogs.cpp)
+  endif()
+  add_test(NAME "consumer.${variant}" COMMAND "portals_${variant}_consumer")
+  add_test(NAME "consumer.${variant}-typed-failure" COMMAND "portals_${variant}_consumer" --failure)
+  set_tests_properties("consumer.${variant}" "consumer.${variant}-typed-failure" PROPERTIES TIMEOUT 15)
+endforeach()
+add_test(NAME consumer.static-scene-equivalence
+  COMMAND "${CMAKE_COMMAND}" "-DBEFORE=$<TARGET_FILE:portals_static_scene_dynamic_consumer>"
+    "-DAFTER=$<TARGET_FILE:portals_static_scene_consumer>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_forms.cmake")
+set_tests_properties(consumer.static-scene-equivalence PROPERTIES TIMEOUT 30)
+
+foreach(variant IN ITEMS scene_defaults scene_defaults_before)
+  add_executable(portals_${variant}_consumer ${variant}.cpp)
+  target_link_libraries(portals_${variant}_consumer PRIVATE portals::core)
+  set_target_properties(portals_${variant}_consumer PROPERTIES CXX_EXTENSIONS OFF)
+  if(WIN32)
+    target_sources(portals_${variant}_consumer PRIVATE no_dialogs.cpp)
+  endif()
+  add_test(NAME consumer.${variant} COMMAND portals_${variant}_consumer)
+  set_tests_properties(consumer.${variant} PROPERTIES TIMEOUT 15)
+endforeach()
+
+add_test(NAME consumer.scene-defaults-equivalence
+  COMMAND "${CMAKE_COMMAND}"
+    "-DBEFORE=$<TARGET_FILE:portals_scene_defaults_before_consumer>"
+    "-DAFTER=$<TARGET_FILE:portals_scene_defaults_consumer>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_forms.cmake")
+set_tests_properties(consumer.scene-defaults-equivalence PROPERTIES TIMEOUT 30)
+
 add_executable(portals_scene_facade_consumer scene_facade.cpp)
 target_link_libraries(portals_scene_facade_consumer PRIVATE portals::core)
 set_target_properties(portals_scene_facade_consumer PROPERTIES CXX_EXTENSIONS OFF)

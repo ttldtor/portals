@@ -25,6 +25,13 @@ def main():
         if not source.is_relative_to(root):
             continue
         relative = source.relative_to(root)
+        # These fixtures deliberately violate compile-time contracts. Their
+        # expected diagnostics are checked by dedicated CTest cases.
+        if relative.as_posix() in {
+            "tests/fixtures/static_scene/invalid.cpp",
+            "tests/fixtures/static_styles/invalid.cpp",
+        }:
+            continue
         if relative.parts[0] in {"src", "tests", "tools", "examples", "experiments", "fuzz"}:
             files.add(source)
     if not files:

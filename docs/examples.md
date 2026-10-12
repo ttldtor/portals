@@ -219,3 +219,16 @@ The CLI parser and managed error reporter are additional application support,
 not costs silently attributed to the composition API. The complete installed
 consumer comparison remains available in [declarative composition](declarative-ui.md).
 Runtime costs and scaling limits have a separate [measurement guide](managed-performance.md).
+
+### Standalone exit policy
+
+The gallery and custom widget executables use `Scene::quit()` and the library
+`runApp` final stage. Their fluent scene objects retain typed `run()` for replay
+comparisons and statistics; their application entry points use equivalent
+function/native and pipe/replay spellings with final reporting after cleanup.
+The editor history example retains its explicit `Application`/`ManagedScene`
+fixture: its contract checks directly exercise router focus, dispatch, activation
+and preparation. That low-level typed path is intentional; it is not a claim that
+`runApp(Scene)` accepts a borrowed `ManagedScene`, nor a reason to add router APIs
+solely for migration. Its explicit error policy remains part of its full client
+footprint.

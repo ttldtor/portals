@@ -20,6 +20,10 @@ struct RefAccess;
 struct SceneAccess;
 } // namespace ui::detail
 
+namespace style::ct::detail {
+struct Access;
+} // namespace style::ct::detail
+
 namespace detail {
 /** @brief Accepted compact callback results; command receipts retain exact reporting provenance.
  * @tparam T Exact callback result type.
@@ -625,6 +629,7 @@ public:
   void stop(Application &app) override;
 
 private:
+  friend struct style::ct::detail::Access;
   friend struct ui::detail::Access;
   friend struct ui::detail::RefAccess;
   friend struct ui::detail::SceneAccess;

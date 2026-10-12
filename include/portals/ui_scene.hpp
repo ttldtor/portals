@@ -14,6 +14,29 @@ struct SceneOptions {
   std::size_t maxConfigurations{64}; ///< Positive maximum queued configure/onKey callbacks before prepare.
 };
 
+/** @brief Final owning error envelope or bounded successful-run summary; no live widget references. */
+struct SceneReport {
+  std::optional<ManagedError> failure; ///< Exact primary plus independent runner/restoration/cleanup errors.
+  std::source_location origin{};       ///< Primary failure call site, or final run call site for a summary.
+  std::size_t retainedErrors{};        ///< Successful-run retained recoverable count; details remain in diagnostics().
+  std::size_t droppedErrors{};         ///< Successful-run overflow count; not an additional failure.
+};
+
+/** @brief Owning copyable diagnostic sink; the report is borrowed only until the call returns.
+ * Delivery occurs once, after terminal close/restoration was attempted and scene cleanup was attempted.
+ * Delivery is read-only: typed lifecycle reentry returns WOULD_BLOCK without changing the completed outcome.
+ * Fluent mutation/registration is ignored during delivery. A thrown sink exception falls back to stderr with the
+ * original report, without observer recursion.
+ */
+using SceneReportHandler = std::function<void(const SceneReport &)>;
+
+/** @brief Format a final report without C++ allocations, using symbolic error categories.
+ * @param report Borrowed owning error/summary, never live terminal or widget state.
+ * The caller must ensure terminal restoration has been attempted before calling this stderr sink.
+ * A failed restoration uses ordinary stderr as the best-effort fallback; it is not declared successful.
+ */
+void reportToStderr(const SceneReport &report) noexcept;
+
 namespace detail {
 /** @brief Admit exact configuration results without silently discarding a checked failure.
  * @tparam Callback Owning callable receiving the borrowed ManagedScene&.
@@ -108,6 +131,24 @@ public:
     return std::move(*this);
   }
 
+  /** @param sink Owning copyable callable accepting const SceneReport&; empty restores the default stderr sink.
+   * @param origin Registration call site retained on failure.
+   * @return This owner. Independent of onError and its registration order; no delivery during registration.
+   * Capture construction before entry may throw. Explicitly borrowed services must outlive runApp.
+   */
+  Scene &reportOnError(SceneReportHandler sink = {}, std::source_location origin = std::source_location::current()) &;
+
+  /** @param sink Owning copyable reporting sink, or empty for the default.
+   * @param origin Registration call site.
+   * @return Consuming owner for temporary fluent chains.
+   */
+  Scene &&reportOnError(SceneReportHandler sink = {},
+                        std::source_location origin = std::source_location::current()) && {
+    static_cast<Scene &>(*this).reportOnError(std::move(sink), origin);
+
+    return std::move(*this);
+  }
+
   /** @tparam Callback Owning action returning void or exactly expected<void, ManagedError>.
    * @param callback Configuration invoked once, in registration order after complete mount.
    * @param origin Registration call site retained across lazy preparation.
@@ -176,6 +217,32 @@ public:
    */
   std::expected<ApplicationStats, ManagedError> run(ApplicationTerminal &terminal, std::stop_token stop = {},
                                                     std::source_location origin = std::source_location::current());
+
+  /** @brief Request orderly exit through the existing application cancellation path.
+   * @param origin Exit request call site.
+   * @return Success, WRONG_THREAD, CLOSED, or sticky WOULD_BLOCK during notification/close; read-only reporting rejects
+   * with WOULD_BLOCK. Idempotent while live. Before complete preparation only the intent is retained; active callbacks
+   * finish normally and no widget or callback capture is retired by this call.
+   */
+  std::expected<void, ManagedError> quit(std::source_location origin = std::source_location::current());
+
+  /** @brief Run a standalone scene with standard post-restoration error reporting.
+   * @param stop Optional worker-safe cancellation.
+   * @param origin Runner call site.
+   * @return Zero on successful run, one on a typed failure. reportOnError selects diagnostic delivery.
+   * Recoverable-only reports preserve zero status and receive an aggregate summary by default.
+   * onError remains the independent operation-reaction channel; the final report is delivered once.
+   * Wrong-thread/moved-from calls return one quietly; typed run()/checked() retain their boundary cause.
+   */
+  int runApp(std::stop_token stop = {}, std::source_location origin = std::source_location::current());
+
+  /** @param terminal Borrowed custom/replay transport, outliving this call.
+   * @param stop Optional cancellation.
+   * @param origin Runner call site.
+   * @return Same exit status, cleanup and reporting policy as native runApp.
+   */
+  int runApp(ApplicationTerminal &terminal, std::stop_token stop = {},
+             std::source_location origin = std::source_location::current());
   /** @param origin Cleanup call site.
    * @return Idempotent explicit cleanup result; reentry returns WOULD_BLOCK without retiring an active owner.
    * The first facade failure remains observable through checked()/run().
@@ -238,6 +305,7 @@ private:
   void configurationException(TreeError cause, std::source_location origin);
   std::expected<ApplicationStats, ManagedError> runImpl(ApplicationTerminal *terminal, std::stop_token stop,
                                                         std::source_location origin);
+  int runAppImpl(ApplicationTerminal *terminal, std::stop_token stop, std::source_location origin);
 
   std::thread::id owner_;
   std::unique_ptr<State> state_;
@@ -291,6 +359,13 @@ struct SceneAccess {
     return owner.runFailureNotified_;
   }
 
+  /** @param owner Closed managed owner; no mutable storage or diagnostic borrow escapes.
+   * @return Retained and dropped report counts from the existing bounded history, without allocation.
+   */
+  static std::pair<std::size_t, std::size_t> reportCounts(const ManagedScene &owner) noexcept {
+    return {owner.errorCount_, owner.droppedErrors_};
+  }
+
   /** @param recipe Owning once-only mount action, constructed before entry.
    * @param options Existing runtime and finite facade policies.
    * @param origin Scene construction call site.
@@ -302,4 +377,26 @@ struct SceneAccess {
   }
 };
 } // namespace detail
+
+/** @param owner Borrowed stationary scene, living through this synchronous call.
+ * @param stop Optional cancellation.
+ * @param origin Final call site.
+ * @return Same zero/one status, cleanup and reporting as Scene::runApp.
+ * Recipe and argument construction before entry are outside the checked runtime boundaries.
+ */
+inline int runApp(Scene &owner, std::stop_token stop = {},
+                  std::source_location origin = std::source_location::current()) {
+  return owner.runApp(stop, origin);
+}
+
+/** @param owner Borrowed stationary scene.
+ * @param terminal Borrowed custom/replay transport living through this call.
+ * @param stop Optional cancellation.
+ * @param origin Final call site.
+ * @return Same exit status and reporting as Scene::runApp with a borrowed transport.
+ */
+inline int runApp(Scene &owner, ApplicationTerminal &terminal, std::stop_token stop = {},
+                  std::source_location origin = std::source_location::current()) {
+  return owner.runApp(terminal, stop, origin);
+}
 } // namespace portals::ui
