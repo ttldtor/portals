@@ -5,6 +5,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Added] Opt-in DEFAULTS/THEME/APPLICATION/USER style layers with property-wise
+  precedence, atomic updates and aggregate logical payload budgets. Theme switches
+  and live theme parameters preserve overrides; stale theme controllers report
+  typed errors. Legacy whole-sheet replacement remains available.
+
 - [Fixed] Constant scene factories preserve immediate temporary expressions on
   MSVC 19.44 by using explicit typed defaults and union-free internal style storage.
   Public style values and compile-time validation remain unchanged.

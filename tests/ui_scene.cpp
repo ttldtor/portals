@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <portals/style_static.hpp>
 #include <stdexcept>
 #include <thread>
 
@@ -2201,4 +2202,136 @@ TEST_CASE("recoverable-only throwing sink keeps success and falls back once") {
 
   CHECK(output.find("recoverable diagnostics: retained=1, dropped=0") != std::string::npos);
   CHECK(std::count(output.begin(), output.end(), '\n') == 1);
+}
+
+TEST_CASE("layer facade methods and pipes preserve owning overrides across theme changes") {
+  for (bool pipe : {false, true}) {
+    // Keep each transition beyond the frame pacing interval so each gets a preparation pass.
+    example::ReplayTerminal terminal({{50, "\x1bOQ", {}}, {100, "\x1bOR", {}}}, 200, {30, 4});
+    ui::SceneOptions options;
+    ui::Ref<Label> label;
+    const RgbColor foreground{255, 60, 80};
+    StyleSheet overrideSheet;
+    StyleRule overrideRule;
+    std::size_t observations{};
+    std::size_t themeChanges{};
+    std::size_t liveChanges{};
+
+    options.clock = terminal.clock();
+    overrideRule.selector.id = "message";
+    overrideRule.declarations.foreground = foreground;
+    overrideSheet.rules.push_back(overrideRule);
+
+    auto recipe = ui::label(label, "layered").id("message").onPrepare([&](Label &widget, Node<Widget>) {
+      REQUIRE(widget.computedStyle());
+      CHECK(widget.computedStyle()->normal.foreground == foreground);
+      ++observations;
+
+      return std::expected<void, TreeError>{};
+    });
+    auto scene = pipe ? ui::scene(std::move(recipe), options) | ui::styleLayers() |
+                          ui::styleLayer(StyleTier::USER, "contrast", overrideSheet)
+                      : ui::scene(std::move(recipe), options);
+
+    if (!pipe) {
+      scene.styleLayers().styleLayer(StyleTier::USER, "contrast", overrideSheet);
+    }
+
+    CHECK(label.node() == Node<Label>{});
+    REQUIRE(scene.checked());
+    scene.prepare();
+    REQUIRE(scene.checked());
+
+    auto &owner = take(scene.managed()).get();
+    constexpr auto THEME = style::ct::themeFromTokens(
+      ThemeTokens{{220, 225, 232}, {24, 28, 36}, {75, 180, 220}, {125, 130, 140}, {}, {75, 180, 220}});
+    auto live = take(style::ct::live(owner, THEME));
+
+    scene.onKey(ui::key(InputKey::F2), [&] {
+      scene.theme(turboTheme());
+      CHECK(scene.checked());
+      ++themeChanges;
+    });
+    scene.onKey(ui::key(InputKey::F3), [&] {
+      live = take(style::ct::live(owner, THEME));
+      take(live.set<"foreground">(RgbColor{1, 2, 3}));
+      ++liveChanges;
+    });
+    REQUIRE(scene.run(terminal));
+    CHECK(observations >= 3);
+    CHECK(themeChanges == 1);
+    CHECK(liveChanges == 1);
+    CHECK(terminal.closed);
+    CHECK_FALSE(label.text().get());
+  }
+}
+
+TEST_CASE("layer facade keeps configuration failures and allocation errors in the collector") {
+  SUBCASE("missing opt-in remains a typed setup error") {
+    auto scene = ui::scene(ui::label("setup"));
+
+    scene.styleLayer(StyleTier::USER, "contrast", {}).prepare();
+    REQUIRE_FALSE(scene.checked());
+    const auto result = scene.checked();
+    const auto *cause = std::get_if<StyleError>(&result.error().cause);
+
+    REQUIRE(cause);
+    CHECK(cause->cause == TreeError::INVALID_ARGUMENT);
+    CHECK_FALSE(scene.managed());
+  }
+
+  SUBCASE("pipe owning copy failure is captured after stage construction") {
+    StyleSheet sheet;
+    StyleRule rule;
+
+    rule.selector.id = "message";
+    rule.declarations.bold = true;
+    sheet.rules.push_back(rule);
+
+    auto scene = ui::scene(ui::label("setup"));
+    auto stage = ui::styleLayer(StyleTier::USER, "contrast", sheet);
+
+    const auto checkFailure = [&](ui::Scene owner, auto pendingStage, std::ptrdiff_t budget) {
+      bool escaped{};
+      bool typed{};
+      bool succeeded{};
+      const auto previousTerminate = std::set_terminate(oomTerminate);
+
+      allocationsBeforeFailure = budget;
+
+      try {
+        auto result = std::move(owner) | std::move(pendingStage);
+        const auto status = result.checked();
+
+        succeeded = status.has_value();
+        typed = !status && treeCause(status.error(), TreeError::NO_MEMORY);
+      } catch (const std::bad_alloc &) {
+        escaped = true;
+      }
+
+      allocationsBeforeFailure = -1;
+      std::set_terminate(previousTerminate);
+      CHECK_FALSE(escaped);
+      CHECK((typed || succeeded));
+
+      return succeeded;
+    };
+
+    CHECK_FALSE(checkFailure(std::move(scene), std::move(stage), 0));
+
+    // Cover copies, callback storage and pending registration, not only the first allocation.
+    constexpr std::ptrdiff_t MAX_ALLOCATION_PROBE = 64;
+    bool reachedSuccess{};
+
+    for (std::ptrdiff_t budget = 1; budget <= MAX_ALLOCATION_PROBE; ++budget) {
+      reachedSuccess =
+        checkFailure(ui::scene(ui::label("setup")), ui::styleLayer(StyleTier::USER, "contrast", sheet), budget);
+
+      if (reachedSuccess) {
+        break;
+      }
+    }
+
+    CHECK(reachedSuccess);
+  }
 }

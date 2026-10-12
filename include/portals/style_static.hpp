@@ -433,6 +433,46 @@ struct Access {
   static std::expected<void, ManagedError> boundary(ManagedScene &scene) {
     return scene.boundary(ManagedPhase::STYLE, scene.root_);
   }
+
+  /** @param scene Live scene admitted by the controller boundary.
+   * @return Whether equal layered values must also publish deferred metadata.
+   */
+  static bool pending(ManagedScene &scene) noexcept {
+    return scene.stylesDirty_;
+  }
+
+  /** @param scene Admitted scene, borrowed without retaining its lifetime.
+   * @return Current mode/epoch and reserved theme authority.
+   */
+  static portals::detail::StyleThemeLease lease(ManagedScene &scene) {
+    return scene.captureThemeLease();
+  }
+
+  /** @param scene Live admitted scene.
+   * @param lease Captured theme authority, checked even for equal updates.
+   * @return STYLE error if authority was revoked.
+   */
+  static std::expected<void, ManagedError> checkLease(ManagedScene &scene, portals::detail::StyleThemeLease lease) {
+    return scene.checkThemeLease(lease);
+  }
+
+  /** @param scene Live scene.
+   * @param sheet Materialized declarations.
+   * @param lease Preallocation authority checked again before installation.
+   * @return Newly acquired authority or original atomic failure.
+   */
+  static auto attachTheme(ManagedScene &scene, const StyleSheet &sheet, portals::detail::StyleThemeLease lease) {
+    return scene.attachTheme(sheet, lease);
+  }
+
+  /** @param scene Live scene.
+   * @param sheet Materialized replacement.
+   * @param lease Current controller authority; no handoff occurs.
+   * @return Original atomic installation result.
+   */
+  static auto applyTheme(ManagedScene &scene, const StyleSheet &sheet, portals::detail::StyleThemeLease lease) {
+    return scene.applyTheme(sheet, lease);
+  }
 };
 
 /** @param node Stable scene identity for diagnostics.
@@ -688,7 +728,8 @@ template <detail::Literal Name, class T> auto change(T value) {
 /** @brief Copyable UI-affine observer with owned rules and current scalar parameter values.
  * Copies share values but never extend scene lifetime. One handle owns no subscription or callback.
  * Destruction and copies are thread-independent; operations require the scene's UI thread.
- * Only this controller's changes are tracked: external theme() replacement supersedes its sheet
+ * In layered mode this controller observes reserved THEME authority; external theme() revokes it.
+ * In legacy mode only this controller's changes are tracked: external theme() replacement supersedes its sheet
  * until the next unequal parameter update. An equal update deliberately does not reinstall it.
  * @tparam S Validated owning static stylesheet type.
  */
@@ -704,6 +745,7 @@ class LiveTheme {
     std::weak_ptr<const void> lifetime;
     std::thread::id owner;
     NodeId root;
+    portals::detail::StyleThemeLease lease;
     bool applying{};
   };
 
@@ -726,11 +768,12 @@ public:
     const auto root = scene.root().id();
     const auto lifetime = detail::Access::lifetime(scene);
     const auto owner = detail::Access::owner(scene);
+    const auto lease = detail::Access::lease(scene);
 
     try {
       LiveTheme result;
       result.state_ =
-        std::make_shared<State>(description, description.parameters().defaults(), &scene, lifetime, owner, root);
+        std::make_shared<State>(description, description.parameters().defaults(), &scene, lifetime, owner, root, lease);
       auto sheet = detail::materializeValues(result.state_->description, result.state_->values);
       allowed = boundary(result.state_);
 
@@ -738,12 +781,13 @@ public:
         return std::unexpected(allowed.error());
       }
 
-      auto installed = result.state_->scene->theme(std::move(sheet));
+      auto installed = detail::Access::attachTheme(*result.state_->scene, sheet, result.state_->lease);
 
       if (!installed) {
         return std::unexpected(installed.error());
       }
 
+      result.state_->lease = *installed;
       return result;
     } catch (const std::bad_alloc &) {
       return std::unexpected(detail::error(root, TreeError::NO_MEMORY));
@@ -779,7 +823,8 @@ public:
   /** @tparam C Named update pack; names are known, unique, and values have exact parameter types.
    * @param changes Candidates committed together only after the existing engine accepts the complete sheet.
    * @return True after a committed batch, false for equal values, or original managed/style error.
-   * Equal batches still check the scene boundary but allocate nothing and request no invalidation.
+   * Equal batches still check scene authority. Without pending layered metadata they allocate nothing
+   * and request no invalidation; pending metadata is materialized and committed in the same transaction.
    * A rejected batch leaves both current values and installed widget styles unchanged.
    */
   template <class... C> std::expected<bool, ManagedError> apply(C... changes) const {
@@ -794,7 +839,8 @@ public:
     auto candidate = state->values;
     (update(candidate, changes), ...);
 
-    if (candidate == state->values) {
+    const bool changed = candidate != state->values;
+    if (!changed && (!state->lease.layered || !detail::Access::pending(*state->scene))) {
       return false;
     }
 
@@ -818,7 +864,7 @@ public:
         return std::unexpected(allowed.error());
       }
 
-      auto installed = state->scene->theme(std::move(sheet));
+      auto installed = detail::Access::applyTheme(*state->scene, sheet, state->lease);
 
       if (!installed) {
         return std::unexpected(installed.error());
@@ -826,7 +872,7 @@ public:
 
       state->values = candidate;
 
-      return true;
+      return changed;
     } catch (const std::bad_alloc &) {
       return std::unexpected(detail::error(state->root, TreeError::NO_MEMORY));
     }
@@ -869,7 +915,7 @@ private:
       return std::unexpected(detail::error(state->root, TreeError::WOULD_BLOCK));
     }
 
-    return detail::Access::boundary(*state->scene);
+    return detail::Access::checkLease(*state->scene, state->lease);
   }
 
   std::shared_ptr<State> state_;

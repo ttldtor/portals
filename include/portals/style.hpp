@@ -5,9 +5,11 @@
 #include <portals/style_types.hpp>
 #include <portals/widget.hpp>
 
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace portals {
@@ -52,6 +54,10 @@ struct StyleSelector {
   std::string id{""};                                             ///< Empty means any identity.
   std::vector<std::string> classes = std::vector<std::string>(0); ///< Every named class is required.
   StyleState state{StyleState::ANY};                              ///< Optional presentation-state predicate.
+  /** @param other Owning value to compare.
+   * @return Whether all typed fields are equal.
+   */
+  bool operator==(const StyleSelector &other) const = default;
 };
 
 /** @brief Typed declarations; absent values preserve less-specific rules or widget defaults. */
@@ -62,6 +68,10 @@ struct StyleDeclarations {
   std::optional<bool> italic;           ///< Explicit true/false italic request.
   std::optional<bool> underline;        ///< Explicit true/false underline request.
   std::optional<std::int32_t> minWidth; ///< Nonnegative cell minimum; allowed only on state-independent selectors.
+  /** @param other Owning value to compare.
+   * @return Whether all typed fields are equal.
+   */
+  bool operator==(const StyleDeclarations &other) const = default;
 };
 
 /** @brief One owned selector/declaration pair in source order. */
@@ -73,6 +83,10 @@ struct StyleRule {
 
   StyleSelector selector;         ///< Matching and specificity criteria.
   StyleDeclarations declarations; ///< Values overriding less-specific rules.
+  /** @param other Owning value to compare.
+   * @return Whether all typed fields are equal.
+   */
+  bool operator==(const StyleRule &other) const = default;
 };
 
 /** @brief Owned immutable-at-use rules; constructing typed values may allocate and throw. */
@@ -84,7 +98,61 @@ struct StyleSheet {
 
   std::vector<StyleRule> rules =
     std::vector<StyleRule>(0); ///< Source-order rules, at most MAX_STYLE_RULES when installed.
+  /** @param other Owning value to compare.
+   * @return Whether all typed fields are equal.
+   */
+  bool operator==(const StyleSheet &other) const = default;
 };
+
+/** @brief Independent cascade priority, before selector specificity. */
+enum class StyleTier {
+  DEFAULTS,    ///< Declarations above widget defaults and below all other tiers.
+  THEME,       ///< Reserved theme declarations controlled by one authority lease.
+  APPLICATION, ///< Application overrides, above THEME.
+  USER         ///< User overrides, above APPLICATION.
+};
+
+/** @brief Aggregate logical owning payload budgets; base slots count as layers. */
+struct StyleLayerOptions {
+  std::size_t maxLayers{16};              ///< Resident layer slots, including the two permanent bases.
+  std::size_t maxRules{1024};             ///< Rules summed across the complete resident table.
+  std::size_t maxDeclarations{6144};      ///< Present optional fields, including explicit false values.
+  std::size_t maxOwnedBytes{1024 * 1024}; ///< Logical payload charge; not a whole-heap allocator cap.
+  /** @param other Owning value to compare.
+   * @return Whether all typed fields are equal.
+   */
+  bool operator==(const StyleLayerOptions &other) const = default;
+};
+
+/** @brief Weak UI-affine observer; destruction does not remove its layer. */
+class StyleLayerHandle {
+public:
+  /** @brief Construct an empty observer; layer mutations reject it as INVALID_ARGUMENT. */
+  StyleLayerHandle() = default;
+
+private:
+  friend class StyleEngine;
+  std::weak_ptr<const void> lifetime_;
+  std::thread::id owner_;
+  std::uint64_t epoch_{};
+  std::uint64_t id_{};
+};
+
+/** @brief Replace an existing layer, or remove it when sheet is absent. */
+struct StyleLayerUpdate {
+  StyleLayerHandle handle;         ///< Existing layer identity; duplicate identities reject the batch.
+  std::optional<StyleSheet> sheet; ///< Owning replacement or nullopt for removal.
+};
+
+namespace detail {
+/** @brief Private captured theme authority, including legacy epoch admission. */
+struct StyleThemeLease {
+  bool layered{};        ///< Captured opt-in mode; controllers never silently adopt a new mode.
+  std::uint64_t epoch{}; ///< Engine identity generation captured at attach.
+  std::uint64_t id{};    ///< Permanent THEME slot identity, zero in legacy mode.
+  std::uint64_t owner{}; ///< Reserved THEME authority generation.
+};
+} // namespace detail
 
 /** @brief Finite typed/PSS rule budget. */
 inline constexpr std::size_t MAX_STYLE_RULES = 1024;
@@ -197,18 +265,116 @@ public:
    */
   std::uint64_t revision() const noexcept;
 
+  /** @brief Enable owning tiers atomically; equal configuration is a no-op.
+   * @param options Nonzero aggregate limits, including at least two layer slots.
+   * @return Effective invalidation or atomic boundary/budget/identity/allocation failure.
+   */
+  std::expected<Invalidation, StyleError> enableLayers(StyleLayerOptions options = {});
+  /** @brief Install an owning APPLICATION or USER layer with a unique tier name.
+   * @param tier APPLICATION or USER priority.
+   * @param name Nonempty tier-unique name, normalized into ownership after budget admission.
+   * @param sheet Borrowed declarations, copied after admission; input remains caller-owned.
+   * @return Weak observer or atomic failure; destroying the observer leaves declarations installed.
+   */
+  std::expected<StyleLayerHandle, StyleError> addLayer(StyleTier tier, std::string_view name, const StyleSheet &sheet);
+  /** @brief Replace a non-base layer while retaining its installation order.
+   * @param handle Existing non-base observer, admitted on the engine UI thread.
+   * @param sheet Borrowed candidate; equal values allocate nothing and retain revision.
+   * @return Actual invalidation or an error retaining all committed state.
+   */
+  std::expected<Invalidation, StyleError> replaceLayer(StyleLayerHandle handle, const StyleSheet &sheet);
+  /** @brief Remove declarations; base slots remain and revoke their owner.
+   * @param handle Live observer; removed non-base identities cannot be reused.
+   * @return Actual invalidation or an error retaining all committed state.
+   */
+  std::expected<Invalidation, StyleError> removeLayer(StyleLayerHandle handle);
+  /** @brief Atomically update existing unique handles. Empty input is a no-op.
+   * @param updates Borrowed complete batch; duplicate handles and base replacements are rejected.
+   * @return Actual invalidation or an error retaining all declarations, bindings and identities.
+   */
+  std::expected<Invalidation, StyleError> updateLayers(std::span<const StyleLayerUpdate> updates);
+  /** @brief Observe one permanent base slot on its UI thread.
+   * @param tier DEFAULTS or THEME priority.
+   * @return Weak observer or boundary/argument error; allocation-free.
+   */
+  std::expected<StyleLayerHandle, StyleError> baseLayer(StyleTier tier) const;
+  /** @brief Replace the DEFAULTS slot beneath all other layers.
+   * @param sheet Borrowed replacement declarations, copied only after budget admission.
+   * @return Actual invalidation or atomic failure; layers must already be enabled.
+   */
+  std::expected<Invalidation, StyleError> defaults(const StyleSheet &sheet);
+  /** @brief Replace THEME and hand authority to the caller, including equal values.
+   * @param sheet Borrowed replacement, installed as the whole sheet in legacy mode.
+   * @return Actual invalidation or atomic failure; failed changes never revoke prior authority.
+   */
+  std::expected<Invalidation, StyleError> theme(const StyleSheet &sheet);
+
 private:
+  friend class ManagedScene;
+  friend struct StyleLayerTestAccess;
+
+  struct Layer {
+    Layer(std::uint64_t identity = 0, std::uint64_t installationOrder = 0, StyleTier priority = StyleTier::DEFAULTS)
+        : id(identity), order(installationOrder), tier(priority), name("") {
+    }
+
+    // Checked MSVC string/container moves can allocate; transfer records by copy or swap.
+    ~Layer() = default;
+    std::uint64_t id;
+    std::uint64_t order;
+    StyleTier tier;
+    std::string name;
+    StyleSheet sheet;
+  };
+
+  struct LayerState {
+    std::vector<Layer> layers = std::vector<Layer>(0);
+    StyleLayerOptions options;
+    std::uint64_t epoch{}; ///< Engine identity generation captured at attach.
+    std::uint64_t nextId{1};
+    std::uint64_t nextOrder{1};
+    std::uint64_t owner{}; ///< Reserved THEME authority generation.
+    bool enabled{};
+  };
+  enum class Mutation {
+    ENABLE,
+    ADD,
+    UPDATE,
+    DEFAULTS,
+    THEME,
+    OWNED_THEME
+  };
+
   struct Binding {
     Node<Widget> node;
     StyleTarget target;
   };
 
-  std::expected<Invalidation, StyleError> install(StyleSheet sheet, std::vector<Binding> &&bindings);
-  std::expected<void, StyleError> checkBoundary();
+  std::expected<Invalidation, StyleError> install(StyleSheet sheet, std::vector<Binding> &&bindings,
+                                                  LayerState *candidate = nullptr, bool wholeReplace = false,
+                                                  const detail::StyleThemeLease *lease = nullptr);
+  std::expected<Invalidation, StyleError> replaceOwnedTheme(const StyleSheet &sheet, detail::StyleThemeLease lease);
+  std::expected<void, StyleError> mergeBindings(std::span<const StyleRegistration> registrations,
+                                                std::optional<std::vector<Binding>> &destination);
+  std::expected<Invalidation, StyleError>
+  mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier, std::string_view name, const StyleSheet *sheet,
+         std::span<const StyleLayerUpdate> updates, std::span<const StyleRegistration> registrations,
+         StyleLayerHandle *added = nullptr, const detail::StyleThemeLease *lease = nullptr);
+  std::expected<void, StyleError> validateHandle(const StyleLayerHandle &handle) const;
+  std::expected<void, StyleError> validateLease(detail::StyleThemeLease lease) const;
+  detail::StyleThemeLease themeLease() const noexcept;
+  StyleLayerHandle handle(std::uint64_t id, std::uint64_t epoch) const noexcept;
+  ComputedStyle resolve(const StyleSheet &sheet, const LayerState &state, const StyleTarget &target,
+                        ComputedStyle defaults) const noexcept;
+  std::expected<void, StyleError> checkBoundary(bool completing = false) const;
   WidgetTree &tree_;
   std::size_t maxBindings_;
   StyleSheet sheet_;
   std::vector<Binding> bindings_ = std::vector<Binding>(0);
   std::uint64_t revision_{};
+  std::shared_ptr<const void> lifetime_ = std::make_shared<const char>(char{});
+  const std::thread::id owner_ = std::this_thread::get_id();
+  LayerState layerState_;
+  bool stagingLayers_{};
 };
 } // namespace portals

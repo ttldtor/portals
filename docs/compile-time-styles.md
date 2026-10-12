@@ -62,8 +62,11 @@ using its value. Unknown names, wrong exact value types and repeated batch
 names are compile-time errors. Changed batches stage a complete stylesheet and
 commit all parameter values only after the existing engine accepts it. A
 rejected batch preserves both previous values and installed widget styles.
-Equal batches return `false`, allocate nothing and request no invalidation;
-they still check the scene boundary. Successful changes return `true`.
+Equal batches return `false`; with no pending style metadata they allocate
+nothing and request no invalidation. They still check the scene boundary and
+theme authority. Pending registrations/metadata may require materialization
+and change effective styles even when parameter values stay equal. Successful
+parameter changes return `true`.
 
 Operations return the original managed/style error: `CLOSED` after close or
 destruction, `WRONG_THREAD` on a foreign thread, and existing mutation/frame
@@ -71,8 +74,13 @@ boundary failures, including `WOULD_BLOCK` for reentry. Allocation failure
 inside live attachment or updates becomes a STYLE-phase `NO_MEMORY` error.
 Negative runtime width is rejected by the existing style engine. Copying and
 destroying handles are thread-independent; operating on them is UI-only.
-An external `scene.theme(...)` replacement supersedes the installed sheet until
-the next unequal parameter update; an equal update deliberately leaves it alone.
+In the legacy single-sheet mode, an external `scene.theme(...)` replacement
+supersedes the installed sheet until the next unequal parameter update; an equal
+update deliberately leaves it alone. Opt into [style layers](style-layers.md) to
+keep application/user overrides independent of the theme. In that mode a successful
+external theme replacement or another live attachment revokes the old theme owner:
+even equal updates and `get()` return a typed stale error. Enabling layers also
+revokes controllers attached before the transition; attach a new controller afterwards.
 
 ## Complete installed-package consumers
 
