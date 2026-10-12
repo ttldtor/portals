@@ -34,6 +34,58 @@ template <std::size_t N> struct Literal {
 };
 
 namespace detail {
+// MSVC 19.44 cannot materialize an immediate class result containing optional's union.
+// Keep its value and presence separately until the runtime-facing style is requested.
+/** @brief Union-free owning snapshot of one compile-time cell appearance. */
+struct PackedCellStyle {
+  RgbColor foreground; ///< Foreground value; ignored when absent.
+  RgbColor background; ///< Background value; ignored when absent.
+  bool hasForeground;  ///< Whether the foreground is an explicit RGB value.
+  bool hasBackground;  ///< Whether the background is an explicit RGB value.
+  bool bold;           ///< Explicit bold appearance.
+  bool italic;         ///< Explicit italic appearance.
+  bool underline;      ///< Explicit underline appearance.
+
+  /** @param style Owning appearance whose RGB presence and attributes are preserved. */
+  constexpr explicit PackedCellStyle(CellStyle style)
+      : foreground(style.foreground.value_or(RgbColor{})), background(style.background.value_or(RgbColor{})),
+        hasForeground(style.foreground.has_value()), hasBackground(style.background.has_value()), bold(style.bold),
+        italic(style.italic), underline(style.underline) {
+  }
+
+  /** @return Original owning appearance, including absent colors and explicit black. */
+  constexpr CellStyle value() const {
+    CellStyle result{.foreground = {}, .background = {}, .bold = bold, .italic = italic, .underline = underline};
+
+    if (hasForeground) {
+      result.foreground = foreground;
+    }
+
+    if (hasBackground) {
+      result.background = background;
+    }
+
+    return result;
+  }
+};
+
+/** @brief Union-free snapshot preserving each manual control appearance. */
+struct PackedControlStyle {
+  PackedCellStyle normal;   ///< Ordinary appearance.
+  PackedCellStyle focused;  ///< Focused appearance.
+  PackedCellStyle disabled; ///< Disabled appearance.
+
+  /** @param style Owning manual appearances copied without optional union storage. */
+  constexpr explicit PackedControlStyle(ControlStyle style)
+      : normal(style.normal), focused(style.focused), disabled(style.disabled) {
+  }
+
+  /** @return Owning manual appearances in their original public representation. */
+  constexpr ControlStyle value() const {
+    return {normal.value(), focused.value(), disabled.value()};
+  }
+};
+
 // Named non-constexpr boundaries give both MSVC and GCC useful rejection diagnostics.
 /** @brief Compile-time rejection marker for invalid linear settings; never called at runtime. */
 void staticSceneInvalidLinearOptions();
@@ -90,7 +142,7 @@ public:
 
   /** @return Owning manual appearances copied into the runtime recipe. */
   constexpr ControlStyle style() const {
-    return style_;
+    return style_.value();
   }
 
   /** @return Validated owning size constraints, in terminal cells. */
@@ -133,7 +185,7 @@ private:
   }
 
   Literal<N> text_;
-  ControlStyle style_;
+  detail::PackedControlStyle style_;
   SizePolicy policy_;
   LinearOptions options_;
   EditMode mode_;
@@ -271,7 +323,7 @@ struct Access {
  * @return A constant-built Label description with owning bytes.
  */
 template <Literal Id = "", std::size_t N>
-consteval auto label(const char (&text)[N], ControlStyle style = {}, SizePolicy policy = {}) {
+consteval auto label(const char (&text)[N], ControlStyle style = ControlStyle{}, SizePolicy policy = SizePolicy{}) {
   return detail::Access::element<Label, Id>(text, style, policy, {}, EditMode::IMMEDIATE);
 }
 
@@ -283,7 +335,7 @@ consteval auto label(const char (&text)[N], ControlStyle style = {}, SizePolicy 
  * @return Constant-built unbound Button; add a runtime onClick adapter when needed.
  */
 template <Literal Id = "", std::size_t N>
-consteval auto button(const char (&text)[N], ControlStyle style = {}, SizePolicy policy = {}) {
+consteval auto button(const char (&text)[N], ControlStyle style = ControlStyle{}, SizePolicy policy = SizePolicy{}) {
   return detail::Access::element<Button, Id>(text, style, policy, {}, EditMode::IMMEDIATE);
 }
 
@@ -296,8 +348,8 @@ consteval auto button(const char (&text)[N], ControlStyle style = {}, SizePolicy
  * @return Constant-built editor description; other editor options use existing runtime factories.
  */
 template <Literal Id = "", std::size_t N>
-consteval auto lineEdit(const char (&initial)[N], EditMode mode = EditMode::IMMEDIATE, ControlStyle style = {},
-                        SizePolicy policy = {}) {
+consteval auto lineEdit(const char (&initial)[N], EditMode mode = EditMode::IMMEDIATE,
+                        ControlStyle style = ControlStyle{}, SizePolicy policy = SizePolicy{}) {
   return detail::Access::element<LineEdit, Id>(initial, style, policy, {}, mode);
 }
 

@@ -29,6 +29,41 @@ static_assert(std::get<0>(std::get<1>(FORM.root().children()).children()).editMo
 static_assert(ui::ct::scene(ui::ct::column(ui::ct::label(""), ui::ct::label(""))).root().NODE_COUNT == 3);
 static_assert(ui::ct::scene(ui::ct::row()).root().NODE_COUNT == 1);
 
+constexpr ControlStyle ROUND_TRIP_STYLE{
+  .normal = {.foreground = RgbColor{}, .background = {}, .bold = true, .italic = false, .underline = true},
+  .focused = {.foreground = {}, .background = RgbColor{7, 8, 9}, .bold = false, .italic = true, .underline = false},
+  .disabled = {
+    .foreground = RgbColor{250, 251, 252}, .background = RgbColor{}, .bold = true, .italic = false, .underline = true}};
+constexpr ControlStyle ABSENT_STYLE{{}, {}, {}};
+constexpr SizePolicy ROUND_TRIP_POLICY{
+  .width = {.minimum = 2, .preferred = 5, .maximum = 13, .mode = SizeMode::FLEX, .weight = 3},
+  .height = {.minimum = 1, .preferred = INTRINSIC_EXTENT, .maximum = 17, .mode = SizeMode::FIXED, .weight = 4}};
+
+// Direct immediate results must preserve both optional-color presence and public value types.
+static_assert(std::same_as<decltype(ui::ct::label("").style()), ControlStyle>);
+static_assert(std::same_as<decltype(ui::ct::label("").sizePolicy()), SizePolicy>);
+static_assert(ui::ct::label("", ROUND_TRIP_STYLE).style() == ROUND_TRIP_STYLE);
+static_assert(ui::ct::button<"styled">("", ROUND_TRIP_STYLE).style() == ROUND_TRIP_STYLE);
+static_assert(ui::ct::lineEdit("", EditMode::EXPLICIT, ROUND_TRIP_STYLE).style() == ROUND_TRIP_STYLE);
+static_assert(ui::ct::label("", ABSENT_STYLE).style() == ABSENT_STYLE);
+static_assert(ui::ct::label("").style() == ControlStyle{});
+static_assert(ui::ct::label("", ROUND_TRIP_STYLE).style().normal.foreground == RgbColor{});
+static_assert(!ui::ct::label("", ROUND_TRIP_STYLE).style().normal.background);
+
+consteval bool samePolicy(SizePolicy left, SizePolicy right) {
+  const auto sameAxis = [](AxisSize first, AxisSize second) {
+    return first.minimum == second.minimum && first.preferred == second.preferred && first.maximum == second.maximum &&
+           first.mode == second.mode && first.weight == second.weight;
+  };
+
+  return sameAxis(left.width, right.width) && sameAxis(left.height, right.height);
+}
+
+static_assert(samePolicy(ui::ct::label("", ROUND_TRIP_STYLE, ROUND_TRIP_POLICY).sizePolicy(), ROUND_TRIP_POLICY));
+static_assert(samePolicy(ui::ct::lineEdit("", EditMode::EXPLICIT, {}, ROUND_TRIP_POLICY).sizePolicy(),
+                         ROUND_TRIP_POLICY));
+static_assert(samePolicy(ui::ct::button("").sizePolicy(), SizePolicy{}));
+
 consteval auto localBytes() {
   const char text[]{'o', 'w', 'n', 'e', 'd', '\0'};
 

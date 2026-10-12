@@ -5,6 +5,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Fixed] Constant scene factories preserve immediate temporary expressions on
+  MSVC 19.44 by using explicit typed defaults and union-free internal style storage.
+  Public style values and compile-time validation remain unchanged.
+
 - [Added] Bounded dashboard page caching, prefetch and a backend job queue that
   keep pending data loads progressing during continuous keyboard navigation.
 - [Added] Owning model queries with separate query generations, in-memory
