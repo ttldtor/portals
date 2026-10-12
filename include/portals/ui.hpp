@@ -1388,6 +1388,31 @@ struct RunStage {
     return stage.terminal ? owner.run(*stage.terminal, stage.stop, stage.origin) : owner.run(stage.stop, stage.origin);
   }
 };
+
+/** @brief Final int stage over the same runApp boundary; transport remains borrowed. */
+struct RunAppStage {
+  ApplicationTerminal *terminal; ///< Borrowed transport, or null for native terminal ownership.
+  std::stop_token stop;          ///< Optional worker-safe cancellation.
+  std::source_location origin;   ///< Final stage call site.
+
+  /** @param owner Borrowed lvalue scene or live temporary; it is never moved by this stage.
+   * @param stage Transport/cancellation selection.
+   * @return Same zero/one status and final diagnostic delivery as Scene::runApp.
+   */
+  friend int operator|(Scene &owner, RunAppStage stage) {
+    return stage.terminal ? owner.runApp(*stage.terminal, stage.stop, stage.origin)
+                          : owner.runApp(stage.stop, stage.origin);
+  }
+
+  /** @param owner Live temporary scene; its lifetime covers the entire run and reporting.
+   * @param stage Final runner selection.
+   * @return Same status as the lvalue overload, without relocating callback self-references.
+   */
+  friend int operator|(Scene &&owner, RunAppStage stage) {
+    return owner | stage;
+  }
+};
+
 } // namespace detail
 
 /** @param origin Preparation stage call site.
@@ -1416,6 +1441,16 @@ inline auto theme(StyleSheet sheet, std::source_location origin = std::source_lo
 inline auto onError(ManagedErrorHandler observer, std::source_location origin = std::source_location::current()) {
   return detail::SceneStage{[observer = std::move(observer), origin](Scene &owner) mutable {
     owner.onError(std::move(observer), origin);
+  }};
+}
+
+/** @param sink Owning copyable callable receiving const SceneReport&, or empty for default stderr.
+ * @param origin Reporting stage registration call site.
+ * @return Consuming stage forwarding to Scene::reportOnError; independent of onError order.
+ */
+inline auto reportOnError(SceneReportHandler sink = {}, std::source_location origin = std::source_location::current()) {
+  return detail::SceneStage{[sink = std::move(sink), origin](Scene &owner) mutable {
+    owner.reportOnError(std::move(sink), origin);
   }};
 }
 
@@ -1461,5 +1496,23 @@ inline auto run(std::stop_token stop = {}, std::source_location origin = std::so
 inline auto run(ApplicationTerminal &terminal, std::stop_token stop = {},
                 std::source_location origin = std::source_location::current()) {
   return detail::RunStage{&terminal, stop, origin};
+}
+
+/** @param stop Optional existing runner cancellation.
+ * @param origin Final stage registration call site.
+ * @return Native final stage, equivalent to ui::runApp(scene), returning zero or one.
+ */
+inline auto runApp(std::stop_token stop = {}, std::source_location origin = std::source_location::current()) {
+  return detail::RunAppStage{nullptr, stop, origin};
+}
+
+/** @param terminal Borrowed existing custom/replay transport, outliving consumption.
+ * @param stop Optional cancellation.
+ * @param origin Final stage registration call site.
+ * @return Same final reporting stage with custom transport; construction before evaluation is outside its boundary.
+ */
+inline auto runApp(ApplicationTerminal &terminal, std::stop_token stop = {},
+                   std::source_location origin = std::source_location::current()) {
+  return detail::RunAppStage{&terminal, stop, origin};
 }
 } // namespace portals::ui

@@ -5,7 +5,6 @@
 #include "options.hpp"
 #include <portals/input_match.hpp>
 #include <portals/ui.hpp>
-#include <stop_token>
 
 namespace gallery {
 /** @brief Equivalent spellings of the same owning scene configuration. */
@@ -39,17 +38,29 @@ public:
    * Admits a single run on the constructing UI thread.
    */
   std::expected<portals::ApplicationStats, portals::ManagedError> run() {
-    return scene_.run(stop_.get_token());
+    return scene_.run({});
   }
 
   /** @param terminal Borrowed transport opened and closed by the existing runner.
    * @return Statistics or typed primary, runner/restoration and independent cleanup failures.
    */
   std::expected<portals::ApplicationStats, portals::ManagedError> run(portals::ApplicationTerminal &terminal) {
-    return scene_.run(terminal, stop_.get_token());
+    return scene_.run(terminal, {});
   }
 
   int calls{}; ///< Observable Run count; the action does not change the editor or checkbox model.
+
+  /** @return Zero on success, one on a typed failure, with library reporting after terminal restoration. */
+  int runApp() {
+    return portals::ui::runApp(scene_);
+  }
+
+  /** @param terminal Borrowed replay/custom transport, living through this call.
+   * @return Same final status and library reporting as the native run.
+   */
+  int runApp(portals::ApplicationTerminal &terminal) {
+    return scene_ | portals::ui::runApp(terminal);
+  }
 
 private:
   auto recipe(portals::ManagedScene &owner)
@@ -65,7 +76,7 @@ private:
                      ++calls;
                    }),
         ui::button("Quit", [this] {
-          stop_.request_stop();
+          (void)scene_.quit();
         }));
     });
   }
@@ -76,7 +87,7 @@ private:
     // The fallback preserves the original modifier-insensitive F2 and exit shortcuts.
     return owner.onInput([this, &owner](const InputEvent &event) -> std::expected<bool, ManagedError> {
       if (example::quitKey(event)) {
-        stop_.request_stop();
+        (void)scene_.quit();
 
         return true;
       }
@@ -105,7 +116,7 @@ private:
       return configure(owner);
     };
     auto quit = [this] {
-      stop_.request_stop();
+      (void)scene_.quit();
     };
 
     if (composition == Composition::PIPE) {
@@ -123,7 +134,6 @@ private:
   }
 
   std::size_t theme_{};                        ///< Current preset, changed only after successful replacement.
-  std::stop_source stop_;                      ///< Existing cooperative runner cancellation, owned through cleanup.
   portals::ui::Ref<portals::LineEdit> editor_; ///< Weak editor observation published after complete mount.
   portals::ui::Scene scene_;                   ///< Owning runtime and callbacks; destroyed before borrowed members.
 };

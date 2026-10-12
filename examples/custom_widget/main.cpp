@@ -1,6 +1,5 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
-#include "../gallery/managed_report.hpp"
 #include "../replay/terminal.hpp"
 #include "fluent_meter.hpp"
 
@@ -38,7 +37,7 @@ int main(int argc, char **argv) {
 
     meter_example::FluentMeterScene scene(sceneOptions, parsed->theme);
 
-    return example::report(parsed->check ? scene.run(terminal) : scene.run());
+    return parsed->check ? scene.runApp(terminal) : scene.runApp();
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
 

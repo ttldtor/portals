@@ -3,7 +3,6 @@
 #include "../replay/terminal.hpp"
 #include "fluent_form.hpp"
 #include "gallery.hpp"
-#include "managed_report.hpp"
 
 /** @brief Run the managed gallery interactively or through a finite headless check.
  * @param argc Number of arguments, including the executable name.
@@ -50,7 +49,7 @@ int main(int argc, char **argv) {
 
       gallery::FluentForm form(sceneOptions, parsed->theme);
 
-      return example::report(form.run(terminal));
+      return form.runApp(terminal);
     }
 
     portals::ui::SceneOptions sceneOptions;
@@ -59,7 +58,7 @@ int main(int argc, char **argv) {
 
     gallery::FluentForm form(sceneOptions, parsed->theme);
 
-    return example::report(form.run());
+    return form.runApp();
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
 
