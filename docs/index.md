@@ -29,9 +29,11 @@ before writing a form. Consult the chapters below as needed.
 
 | Need | Read |
 | --- | --- |
+| Build constant-evaluated form structure | [Compile-time scene descriptions](compile-time-scenes.md) |
 | Compose a form and manage its lifetime | [Descriptions](declarative-ui.md), [managed controls](managed-controls.md), [application runner](application.md) |
 | Choose and arrange controls | [Basic controls](controls.md), [LineEdit](line-edit.md), [Row and Column](layout.md), [Grid and Overlay](grid.md) |
 | Apply colors and themes | [Styles and themes](styles.md) |
+| Build static style rules and update live typed parameters | [Compile-time styles](compile-time-styles.md) |
 | Connect state and data | [Properties](property.md), [immutable models](model.md) |
 | Display large datasets | [Layout-driven preparation](virtual-preparation.md), [virtual lists](virtual-list.md), [virtual tables](virtual-table.md), [scrolling](scroll.md), [charts](chart.md) |
 | Write shorter checked text and typed columns | [Compact examples](compact-examples.md) |
