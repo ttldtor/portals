@@ -5,6 +5,17 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Added] Bounded dashboard page caching, prefetch and a backend job queue that
+  keep pending data loads progressing during continuous keyboard navigation.
+- [Added] Owning model queries with separate query generations, in-memory
+  projection and deferred providers using the existing scheduler.
+- [Added] C++23 constant scene descriptions with structural checks and runtime
+  attachment of references, bindings and callbacks through the retained core.
+- [Added] Constant style rules with typed live parameters and atomic batch
+  updates through the existing style cascade.
+- [Added] UI-affine coroutine tasks for timers and provider replies, with typed
+  failures, cancellation and late-reply handling on the existing scheduler.
+
 - [Added] `ui::runApp(scene)` and the equivalent `scene | ui::runApp()` exit-code
   adapter, orderly `scene.quit()`, and an independent `reportOnError` modifier
   for structured final diagnostics after terminal restoration and cleanup attempts.
