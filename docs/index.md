@@ -42,6 +42,9 @@ before writing a form. Consult the chapters below as needed.
 | Explain an action that did nothing | [Diagnostics](diagnostics.md), [terminal probe](terminal-probe.md) |
 | Keep an existing streaming MarketDepthModelSample building | [Minimal legacy compatibility](legacy.md) |
 
+For theme switching that preserves application and user overrides, see
+[style layers](style-layers.md).
+
 ## Understand the core
 
 Read [architecture](architecture.md) first for component and event-flow

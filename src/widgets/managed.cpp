@@ -8,6 +8,18 @@
 
 namespace portals {
 namespace {
+struct StyleMutationGuard {
+  bool &active;
+
+  explicit StyleMutationGuard(bool &value) : active(value) {
+    active = true;
+  }
+
+  ~StyleMutationGuard() {
+    active = false;
+  }
+};
+
 bool retired(TreeError error) {
   return error == TreeError::STALE_NODE || error == TreeError::CLOSED;
 }
@@ -137,7 +149,7 @@ std::expected<void, ManagedError> ManagedScene::boundary(ManagedPhase phase, Nod
     return std::unexpected(error(phase, node, TreeError::CLOSED));
   }
 
-  if (preparing_ || reporting_) {
+  if (preparing_ || reporting_ || styling_) {
     return std::unexpected(error(phase, node, TreeError::WOULD_BLOCK));
   }
 
@@ -738,49 +750,222 @@ std::expected<void, ManagedError> ManagedScene::id(Node<Widget> node, std::strin
   }
 }
 
-std::expected<void, ManagedError> ManagedScene::flushStyles() {
-  if (!stylesDirty_) {
-    return {};
-  }
-
+std::expected<void, ManagedError>
+ManagedScene::pendingStyles(std::optional<std::vector<StyleRegistration>> &destination) {
   try {
-    std::vector<StyleRegistration> registrations;
-
+    if (!stylesDirty_) {
+      return {};
+    }
+    destination.emplace(0);
+    auto &registrations = *destination;
     registrations.reserve(entries_.size());
-
     for (const auto &entry : entries_) {
       auto live = app_.tree().read(entry->node, [](const Widget &) {
       });
-
       if (!live) {
         if (retired(live.error())) {
           continue;
         }
-
         return std::unexpected(error(ManagedPhase::STYLE, entry->node, live.error()));
       }
-
       if (entry->target && entry->stylePending) {
         registrations.push_back({entry->node, *entry->target});
       }
     }
-
-    auto installed = styles_.bindBatch(registrations);
-
-    if (!installed) {
-      return std::unexpected(ManagedError{ManagedPhase::STYLE, root_.id(), installed.error(), {}, {}});
-    }
-
-    for (const auto &entry : entries_) {
-      entry->stylePending = false;
-    }
-
-    stylesDirty_ = false;
-
     return {};
   } catch (const std::bad_alloc &) {
     return std::unexpected(error(ManagedPhase::STYLE, root_, TreeError::NO_MEMORY));
   }
+}
+
+void ManagedScene::publishStyleMetadata() noexcept {
+  for (const auto &entry : entries_) {
+    entry->stylePending = false;
+  }
+  stylesDirty_ = false;
+}
+
+std::expected<void, ManagedError> ManagedScene::flushStyles() {
+  if (!stylesDirty_) {
+    return {};
+  }
+  std::optional<std::vector<StyleRegistration>> registrations;
+  auto staged = pendingStyles(registrations);
+  if (!staged) {
+    return std::unexpected(staged.error());
+  }
+  auto installed = styles_.bindBatch(*registrations);
+  if (!installed) {
+    return std::unexpected(ManagedError{ManagedPhase::STYLE, root_.id(), installed.error(), {}, {}});
+  }
+  publishStyleMetadata();
+  return {};
+}
+
+std::expected<Invalidation, ManagedError>
+ManagedScene::mutateStyles(StyleEngine::Mutation mutation, StyleLayerOptions options, StyleTier tier,
+                           std::string_view name, const StyleSheet *sheet, std::span<const StyleLayerUpdate> updates,
+                           StyleLayerHandle *added, const detail::StyleThemeLease *lease) {
+  auto allowed = boundary(ManagedPhase::STYLE, root_);
+  if (!allowed) {
+    return std::unexpected(allowed.error());
+  }
+
+  struct Guard {
+    bool &active;
+
+    explicit Guard(bool &value) : active(value) {
+      active = true;
+    }
+
+    ~Guard() {
+      active = false;
+    }
+  } guard(styling_);
+
+  // Pending registrations and layer declarations share the engine's sole publication boundary.
+  std::optional<std::vector<StyleRegistration>> registrations;
+  auto staged = pendingStyles(registrations);
+  if (!staged) {
+    return std::unexpected(staged.error());
+  }
+  auto installed = styles_.mutate(mutation, options, tier, name, sheet, updates,
+                                  registrations ? std::span<const StyleRegistration>(*registrations)
+                                                : std::span<const StyleRegistration>{},
+                                  added, lease);
+  if (!installed) {
+    return std::unexpected(ManagedError{ManagedPhase::STYLE, root_.id(), installed.error(), {}, {}});
+  }
+  publishStyleMetadata();
+  return *installed;
+}
+
+std::expected<void, ManagedError> ManagedScene::enableStyleLayers(StyleLayerOptions options) {
+  auto installed = mutateStyles(StyleEngine::Mutation::ENABLE, options, {}, {}, nullptr, {});
+  if (!installed) {
+    return std::unexpected(installed.error());
+  }
+  return {};
+}
+
+std::expected<StyleLayerHandle, ManagedError> ManagedScene::addLayer(StyleTier tier, std::string_view name,
+                                                                     const StyleSheet &sheet) {
+  StyleLayerHandle added;
+  auto installed = mutateStyles(StyleEngine::Mutation::ADD, {}, tier, name, &sheet, {}, &added);
+  if (!installed) {
+    return std::unexpected(installed.error());
+  }
+  return added;
+}
+
+std::expected<Invalidation, ManagedError> ManagedScene::replaceLayer(StyleLayerHandle value, const StyleSheet &sheet) {
+  return mutateStyles(StyleEngine::Mutation::UPDATE, {}, {}, {}, &sheet, {}, &value);
+}
+
+std::expected<Invalidation, ManagedError> ManagedScene::removeLayer(StyleLayerHandle value) {
+  const StyleLayerUpdate update{value, std::nullopt};
+  return updateLayers(std::span(&update, 1));
+}
+
+std::expected<Invalidation, ManagedError> ManagedScene::updateLayers(std::span<const StyleLayerUpdate> updates) {
+  return mutateStyles(StyleEngine::Mutation::UPDATE, {}, {}, {}, nullptr, updates);
+}
+
+std::expected<StyleLayerHandle, ManagedError> ManagedScene::baseLayer(StyleTier tier) const {
+  auto allowed = boundary(ManagedPhase::STYLE, root_);
+  if (!allowed) {
+    return std::unexpected(allowed.error());
+  }
+  auto found = styles_.baseLayer(tier);
+  if (!found) {
+    return std::unexpected(ManagedError{ManagedPhase::STYLE, root_.id(), found.error(), {}, {}});
+  }
+  return *found;
+}
+
+std::expected<Invalidation, ManagedError> ManagedScene::styleDefaults(const StyleSheet &sheet) {
+  return mutateStyles(StyleEngine::Mutation::DEFAULTS, {}, {}, {}, &sheet, {});
+}
+
+detail::StyleThemeLease ManagedScene::captureThemeLease() const noexcept {
+  return styles_.themeLease();
+}
+
+std::expected<void, ManagedError> ManagedScene::checkThemeLease(detail::StyleThemeLease lease) const {
+  auto allowed = boundary(ManagedPhase::STYLE, root_);
+  if (!allowed) {
+    return allowed;
+  }
+  auto valid = styles_.validateLease(lease);
+  if (!valid) {
+    return std::unexpected(ManagedError{ManagedPhase::STYLE, root_.id(), valid.error(), {}, {}});
+  }
+  return {};
+}
+
+std::expected<detail::StyleThemeLease, ManagedError> ManagedScene::attachTheme(const StyleSheet &sheet,
+                                                                               detail::StyleThemeLease lease) {
+  auto allowed = checkThemeLease(lease);
+  if (!allowed) {
+    return std::unexpected(allowed.error());
+  }
+  if (lease.layered) {
+    auto installed = mutateStyles(StyleEngine::Mutation::THEME, {}, {}, {}, &sheet, {}, nullptr, &lease);
+    if (!installed) {
+      return std::unexpected(installed.error());
+    }
+  } else {
+    auto installed = applyLegacyTheme(sheet, lease);
+    if (!installed) {
+      return std::unexpected(installed.error());
+    }
+  }
+  return captureThemeLease();
+}
+
+std::expected<void, ManagedError> ManagedScene::applyLegacyTheme(const StyleSheet &sheet,
+                                                                 detail::StyleThemeLease lease) {
+  auto allowed = checkThemeLease(lease);
+  if (!allowed) {
+    return allowed;
+  }
+
+  struct Guard {
+    bool &active;
+
+    explicit Guard(bool &value) : active(value) {
+      active = true;
+    }
+
+    ~Guard() {
+      active = false;
+    }
+  } guard(styling_);
+
+  auto flushed = flushStyles();
+  if (!flushed) {
+    return flushed;
+  }
+  auto installed = styles_.replaceOwnedTheme(sheet, lease);
+  if (!installed) {
+    return std::unexpected(ManagedError{ManagedPhase::STYLE, root_.id(), installed.error(), {}, {}});
+  }
+  return {};
+}
+
+std::expected<void, ManagedError> ManagedScene::applyTheme(const StyleSheet &sheet, detail::StyleThemeLease lease) {
+  auto allowed = checkThemeLease(lease);
+  if (!allowed) {
+    return allowed;
+  }
+  if (!lease.layered) {
+    return applyLegacyTheme(sheet, lease);
+  }
+  auto installed = mutateStyles(StyleEngine::Mutation::OWNED_THEME, {}, {}, {}, &sheet, {}, nullptr, &lease);
+  if (!installed) {
+    return std::unexpected(installed.error());
+  }
+  return {};
 }
 
 std::expected<void, ManagedError> ManagedScene::theme(StyleSheet sheet) {
@@ -789,6 +974,16 @@ std::expected<void, ManagedError> ManagedScene::theme(StyleSheet sheet) {
   if (!allowed) {
     return allowed;
   }
+
+  if (styles_.layerState_.enabled) {
+    auto installed = mutateStyles(StyleEngine::Mutation::THEME, {}, {}, {}, &sheet, {});
+    if (!installed) {
+      return std::unexpected(installed.error());
+    }
+    return {};
+  }
+
+  StyleMutationGuard guard(styling_);
 
   auto flushed = flushStyles();
 
@@ -1086,7 +1281,7 @@ std::expected<void, ManagedError> ManagedScene::close() {
     return std::unexpected(error(ManagedPhase::CLEANUP, root_, TreeError::WRONG_THREAD));
   }
 
-  if (preparing_ || reporting_) {
+  if (preparing_ || reporting_ || styling_) {
     return std::unexpected(error(ManagedPhase::CLEANUP, root_, TreeError::WOULD_BLOCK));
   }
 

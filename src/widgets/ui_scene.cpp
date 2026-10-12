@@ -829,6 +829,56 @@ Scene &Scene::theme(StyleSheet sheet, std::source_location origin) & {
   return *this;
 }
 
+Scene &Scene::styleLayers(StyleLayerOptions options, std::source_location origin) & {
+  if (!admitConfiguration(true, origin)) {
+    return *this;
+  }
+
+  try {
+    addConfiguration(
+      [options](ManagedScene &scene) {
+        return scene.enableStyleLayers(options);
+      },
+      true, origin);
+  } catch (const std::bad_alloc &) {
+    configurationException(TreeError::NO_MEMORY, origin);
+  } catch (...) {
+    configurationException(TreeError::CALLBACK_FAILED, origin);
+  }
+
+  return *this;
+}
+
+Scene &Scene::styleLayer(StyleTier tier, std::string name, StyleSheet sheet, std::source_location origin) & {
+  applyStyleLayer(tier, name, sheet, origin);
+
+  return *this;
+}
+
+void Scene::applyStyleLayer(StyleTier tier, const std::string &name, const StyleSheet &sheet,
+                            std::source_location origin) {
+  if (!admitConfiguration(true, origin)) {
+    return;
+  }
+
+  try {
+    // Checked-container transfers may allocate even in noexcept closure moves on MSVC.
+    // Copy under this boundary, then retain only a non-throwing owner in the callback.
+    const auto payload = std::make_shared<const std::pair<std::string, StyleSheet>>(name, sheet);
+
+    addConfiguration(
+      [tier, payload](ManagedScene &scene) {
+        return scene.addLayer(tier, payload->first, payload->second).transform([](const StyleLayerHandle &) {
+        });
+      },
+      true, origin);
+  } catch (const std::bad_alloc &) {
+    configurationException(TreeError::NO_MEMORY, origin);
+  } catch (...) {
+    configurationException(TreeError::CALLBACK_FAILED, origin);
+  }
+}
+
 void Scene::applyTheme(const StyleSheet &sheet, std::source_location origin) {
   if (!admitConfiguration(true, origin)) {
     return;

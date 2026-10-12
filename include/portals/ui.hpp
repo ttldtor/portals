@@ -1434,6 +1434,30 @@ inline auto theme(StyleSheet sheet, std::source_location origin = std::source_lo
   }};
 }
 
+/** @param options Aggregate logical layer budgets, including permanent base slots.
+ * @param origin Configuration call site retained on failure.
+ * @return Consuming opt-in stage over the existing managed style engine; no second runtime.
+ */
+inline auto styleLayers(StyleLayerOptions options = {}, std::source_location origin = std::source_location::current()) {
+  return detail::SceneStage{[options, origin](Scene &owner) {
+    owner.styleLayers(options, origin);
+  }};
+}
+
+/** @param tier APPLICATION or USER override tier; enable styleLayers before this stage.
+ * @param name Owning tier-unique name retained until removal or scene cleanup.
+ * @param sheet Owning rules, independent of theme replacement.
+ * @param origin Configuration call site retained on typed failure.
+ * @return Consuming stage; the scene owns the layer without client token storage.
+ * Constructing stage captures may throw before the checked facade entry.
+ */
+inline auto styleLayer(StyleTier tier, std::string name, StyleSheet sheet,
+                       std::source_location origin = std::source_location::current()) {
+  return detail::SceneStage{[tier, name = std::move(name), sheet = std::move(sheet), origin](Scene &owner) {
+    detail::SceneAccess::styleLayer(owner, tier, name, sheet, origin);
+  }};
+}
+
 /** @param observer Owning observer, never a veto; capture construction may throw.
  * @param origin Observer stage registration call site.
  * @return Consuming stage forwarding to Scene::onError.

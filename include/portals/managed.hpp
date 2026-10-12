@@ -479,9 +479,44 @@ public:
   std::expected<void, ManagedError> id(Node<Widget> node, std::string_view value);
 
   /** @param sheet Owning stylesheet installed with the existing atomic style engine.
-   * @return Success or original StyleError. Pending registrations are flushed first under the previous sheet.
+   * @return Success or original StyleError. Layered mode updates reserved THEME with pending metadata
+   * atomically and revokes its prior controller; legacy mode flushes registrations before whole replacement.
    */
   std::expected<void, ManagedError> theme(StyleSheet sheet);
+
+  /** @brief Opt into owning style tiers; failure preserves pending registrations and legacy controllers.
+   * @param options Aggregate owning layer limits, fixed after successful opt-in.
+   * @return Success or the original STYLE boundary, budget or staging error.
+   */
+  std::expected<void, ManagedError> enableStyleLayers(StyleLayerOptions options = {});
+  /** @param tier APPLICATION or USER priority.
+   * @param name Nonempty tier-unique name, copied after budget admission.
+   * @param sheet Borrowed declarations, normalized into engine ownership on success.
+   * @return Weak observer or atomic STYLE failure.
+   */
+  std::expected<StyleLayerHandle, ManagedError> addLayer(StyleTier tier, std::string_view name,
+                                                         const StyleSheet &sheet);
+  /** @param handle Live non-base layer observer.
+   * @param sheet Borrowed replacement preserving identity and installation order.
+   * @return Effective invalidation or atomic STYLE failure.
+   */
+  std::expected<Invalidation, ManagedError> replaceLayer(StyleLayerHandle handle, const StyleSheet &sheet);
+  /** @param handle Live layer observer; base removal clears declarations but retains the slot.
+   * @return Effective invalidation or atomic STYLE failure.
+   */
+  std::expected<Invalidation, ManagedError> removeLayer(StyleLayerHandle handle);
+  /** @param updates Borrowed unique existing-handle updates, committed together with pending metadata.
+   * @return Effective invalidation or atomic STYLE failure; empty input without pending metadata is a no-op.
+   */
+  std::expected<Invalidation, ManagedError> updateLayers(std::span<const StyleLayerUpdate> updates);
+  /** @param tier DEFAULTS or THEME slot.
+   * @return Weak observer or STYLE boundary/argument error.
+   */
+  std::expected<StyleLayerHandle, ManagedError> baseLayer(StyleTier tier) const;
+  /** @param sheet Borrowed DEFAULTS declarations below THEME and application/user overrides.
+   * @return Effective invalidation or atomic STYLE failure.
+   */
+  std::expected<Invalidation, ManagedError> styleDefaults(const StyleSheet &sheet);
 
   /** @param callback Scene-level interceptor before routing; true suppresses routing, false continues.
    * Mutable captures persist between events. Empty clears the interceptor; replacement retains an active call.
@@ -701,6 +736,19 @@ private:
   std::expected<std::shared_ptr<Entry>, ManagedError> bindingEntry(Node<Widget> node);
   std::unexpected<ManagedError> rollback(Node<Widget> node, TreeError cause);
   std::expected<void, ManagedError> flushStyles();
+  std::expected<void, ManagedError> pendingStyles(std::optional<std::vector<StyleRegistration>> &destination);
+  void publishStyleMetadata() noexcept;
+  std::expected<Invalidation, ManagedError> mutateStyles(StyleEngine::Mutation mutation, StyleLayerOptions options,
+                                                         StyleTier tier, std::string_view name, const StyleSheet *sheet,
+                                                         std::span<const StyleLayerUpdate> updates,
+                                                         StyleLayerHandle *added = nullptr,
+                                                         const detail::StyleThemeLease *lease = nullptr);
+  std::expected<void, ManagedError> checkThemeLease(detail::StyleThemeLease lease) const;
+  detail::StyleThemeLease captureThemeLease() const noexcept;
+  std::expected<detail::StyleThemeLease, ManagedError> attachTheme(const StyleSheet &sheet,
+                                                                   detail::StyleThemeLease lease);
+  std::expected<void, ManagedError> applyLegacyTheme(const StyleSheet &sheet, detail::StyleThemeLease lease);
+  std::expected<void, ManagedError> applyTheme(const StyleSheet &sheet, detail::StyleThemeLease lease);
   std::optional<std::size_t> recordError(ManagedError failure, std::span<const ManagedDiagnosticContext> contexts,
                                          std::source_location origin, bool *observerInvoked = nullptr,
                                          bool runFailure = false) noexcept;
@@ -733,6 +781,7 @@ private:
   std::optional<TreeError> cleanup_;
   std::optional<TreeError> reportedFocusFailure_;
   bool stylesDirty_{};
+  bool styling_{};
   bool preparing_{};
   bool recoveringFocus_{};
   bool reporting_{};

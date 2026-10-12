@@ -115,6 +115,49 @@ public:
     return std::move(*this);
   }
 
+  /** @brief Opt into independent theme/application/user ownership at the existing configuration boundary.
+   * @param options Aggregate logical layer budgets, including the two permanent base slots.
+   * @param origin Configuration call site retained in the collector on failure.
+   * @return This owner; queued before prepare, applied immediately afterwards without terminal I/O.
+   * The successful transition revokes existing legacy LiveTheme controllers. Equal options are a no-op.
+   */
+  Scene &styleLayers(StyleLayerOptions options = {}, std::source_location origin = std::source_location::current()) &;
+
+  /** @param options Aggregate logical layer budgets.
+   * @param origin Configuration call site.
+   * @return Consuming owner for temporary fluent chains.
+   */
+  Scene &&styleLayers(StyleLayerOptions options = {},
+                      std::source_location origin = std::source_location::current()) && {
+    static_cast<Scene &>(*this).styleLayers(options, origin);
+
+    return std::move(*this);
+  }
+
+  /** @brief Add one scene-owned override; enable styleLayers() before this configuration.
+   * @param tier APPLICATION or USER cascade tier; base slots use their explicit managed operations.
+   * @param name Owning tier-unique layer name, retained until explicit removal or scene cleanup.
+   * @param sheet Owning rules, independent of the theme slot and retained by the existing style engine.
+   * @param origin Configuration call site retained on typed failure.
+   * @return This owner. The collector retains errors; use managed().addLayer when a removal handle is needed.
+   * Argument construction may throw before entry; copies within the facade are captured as typed errors.
+   */
+  Scene &styleLayer(StyleTier tier, std::string name, StyleSheet sheet,
+                    std::source_location origin = std::source_location::current()) &;
+
+  /** @param tier APPLICATION or USER cascade tier.
+   * @param name Owning layer name.
+   * @param sheet Owning override rules.
+   * @param origin Configuration call site.
+   * @return Consuming owner for temporary fluent chains.
+   */
+  Scene &&styleLayer(StyleTier tier, std::string name, StyleSheet sheet,
+                     std::source_location origin = std::source_location::current()) && {
+    applyStyleLayer(tier, name, sheet, origin);
+
+    return std::move(*this);
+  }
+
   /** @param observer Owning non-veto observer; exceptions remain separate from the original cause.
    * @param origin Registration call site retained on failure.
    * @return This owner; registration after sticky failure may deliver its pending notification once.
@@ -299,6 +342,7 @@ private:
   }
 
   void applyTheme(const StyleSheet &sheet, std::source_location origin);
+  void applyStyleLayer(StyleTier tier, const std::string &name, const StyleSheet &sheet, std::source_location origin);
   Scene(Configuration recipe, SceneOptions options, std::source_location origin);
   bool admitConfiguration(bool runtime, std::source_location origin);
   void addConfiguration(Configuration callback, bool runtime, std::source_location origin);
@@ -320,6 +364,17 @@ struct SceneAccess {
    */
   static void theme(Scene &owner, const StyleSheet &sheet, std::source_location origin) {
     owner.applyTheme(sheet, origin);
+  }
+
+  /** @param owner Existing facade receiving the checked configuration.
+   * @param tier APPLICATION or USER cascade tier.
+   * @param name Owning stage name, copied at the checked boundary.
+   * @param sheet Owning stage rules, copied at the checked boundary.
+   * @param origin Stage registration call site.
+   */
+  static void styleLayer(Scene &owner, StyleTier tier, const std::string &name, const StyleSheet &sheet,
+                         std::source_location origin) {
+    owner.applyStyleLayer(tier, name, sheet, origin);
   }
 
   /** @tparam Callback Configuration action accepted by the facade.
