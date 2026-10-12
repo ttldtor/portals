@@ -28,6 +28,8 @@
       <tab type="usergroup" title="State and data">
         <tab type="user" title="Properties" url="@ref docs/property.md"/>
         <tab type="user" title="Immutable models" url="@ref docs/model.md"/>
+        <tab type="user" title="Bounded queries" url="@ref docs/model-queries.md"/>
+        <tab type="user" title="UI coroutines" url="@ref docs/ui-coroutines.md"/>
         <tab type="user" title="Prepare views from layout" url="@ref docs/virtual-preparation.md"/>
         <tab type="user" title="Virtual lists" url="@ref docs/virtual-list.md"/>
         <tab type="user" title="Virtual tables" url="@ref docs/virtual-table.md"/>

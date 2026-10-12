@@ -32,7 +32,8 @@ before writing a form. Consult the chapters below as needed.
 | Compose a form and manage its lifetime | [Descriptions](declarative-ui.md), [managed controls](managed-controls.md), [application runner](application.md) |
 | Choose and arrange controls | [Basic controls](controls.md), [LineEdit](line-edit.md), [Row and Column](layout.md), [Grid and Overlay](grid.md) |
 | Apply colors and themes | [Styles and themes](styles.md) |
-| Connect state and data | [Properties](property.md), [immutable models](model.md) |
+| Await timer and provider results with UI-owned coroutines | [UI coroutines](ui-coroutines.md) |
+| Connect state and data | [Properties](property.md), [immutable models](model.md), [bounded queries](model-queries.md) |
 | Display large datasets | [Layout-driven preparation](virtual-preparation.md), [virtual lists](virtual-list.md), [virtual tables](virtual-table.md), [scrolling](scroll.md), [charts](chart.md) |
 | Write shorter checked text and typed columns | [Compact examples](compact-examples.md) |
 | Change captions and editor drafts through observing references | [Text properties](text-property.md) |
