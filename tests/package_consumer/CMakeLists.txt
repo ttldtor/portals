@@ -101,7 +101,17 @@ set_tests_properties(consumer.example-editor-history consumer.example-editor-his
 add_test(NAME consumer.example-gallery COMMAND portals_installed_gallery --check)
 add_test(NAME consumer.example-custom COMMAND portals_installed_custom_widget --check)
 add_test(NAME consumer.example-dashboard COMMAND portals_installed_dashboard --check --mode replay --duration-ms 200 --rows 1000)
+add_test(NAME consumer.example-dashboard-loading COMMAND portals_installed_dashboard --check --rate 0 --delay-ms 250
+  --page-rows 64 --cache-pages 6 --cache-bytes 65536 --load-jobs 2 --prefetch-pages 1)
+add_executable(portals_dashboard_loading_consumer dashboard_loading.cpp)
+target_link_libraries(portals_dashboard_loading_consumer PRIVATE portals::core)
+set_target_properties(portals_dashboard_loading_consumer PROPERTIES CXX_EXTENSIONS OFF)
+if(WIN32)
+  target_sources(portals_dashboard_loading_consumer PRIVATE no_dialogs.cpp)
+endif()
+add_test(NAME consumer.dashboard-continuous-loading COMMAND portals_dashboard_loading_consumer)
 set_tests_properties(consumer.compact-columns consumer.example-gallery consumer.example-custom consumer.example-dashboard
+  consumer.example-dashboard-loading consumer.dashboard-continuous-loading
   PROPERTIES TIMEOUT 20)
 add_executable(portals_legacy_consumer legacy.cpp)
 target_link_libraries(portals_legacy_consumer PRIVATE portals::core)

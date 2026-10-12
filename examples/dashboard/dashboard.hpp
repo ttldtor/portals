@@ -212,6 +212,11 @@ public:
     return provider_.tickCount();
   }
 
+  /** @return Owning copy of bounded provider loading counters; UI-thread only. */
+  LoadingMetrics loadingMetrics() const noexcept {
+    return provider_.loadingMetrics();
+  }
+
   /** @return Number of domain ticks due at the last provider pump. */
   std::uint64_t scheduledTicks() const noexcept {
     return provider_.scheduledTicks();
