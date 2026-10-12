@@ -487,6 +487,13 @@ if(PORTALS_BUILD_TESTS)
   add_test(NAME portals.model COMMAND portals_model)
   set_tests_properties(portals.model PROPERTIES TIMEOUT 15)
 
+  add_executable(portals_model_query tests/model_query.cpp)
+  target_link_libraries(portals_model_query PRIVATE portals::core)
+  target_include_directories(portals_model_query SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  portals_enable_warnings(portals_model_query)
+  add_test(NAME portals.model-query COMMAND portals_model_query)
+  set_tests_properties(portals.model-query PROPERTIES TIMEOUT 15)
+
   add_executable(portals_property tests/property.cpp)
   target_link_libraries(portals_property PRIVATE portals::core)
   portals_enable_warnings(portals_property)
@@ -657,7 +664,7 @@ if(PORTALS_BUILD_DOCS)
   set(DOXYGEN_WARN_IF_UNDOC_ENUM_VAL YES)
   set(DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/docs")
 
-  doxygen_add_docs(portals_docs include ReleaseNotes.md docs/index.md docs/development.md docs/releasing.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/scheduler.md docs/widget-tree.md docs/layout.md docs/grid.md docs/property.md docs/diagnostics.md docs/focus.md docs/model.md docs/input.md docs/terminal.md docs/terminal-probe.md docs/controls.md docs/line-edit.md docs/virtual-list.md docs/virtual-table.md docs/scroll.md docs/chart.md
+  doxygen_add_docs(portals_docs include docs/model-queries.md ReleaseNotes.md docs/index.md docs/development.md docs/releasing.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/scheduler.md docs/widget-tree.md docs/layout.md docs/grid.md docs/property.md docs/diagnostics.md docs/focus.md docs/model.md docs/input.md docs/terminal.md docs/terminal-probe.md docs/controls.md docs/line-edit.md docs/virtual-list.md docs/virtual-table.md docs/scroll.md docs/chart.md
     docs/styles.md docs/legacy.md docs/managed-controls.md docs/declarative-ui.md docs/text-property.md docs/text-history.md docs/editor-history.md docs/editor-history-demo.md docs/compact-examples.md docs/compactness.md docs/quality.md tools/compactness/compactness.hpp docs/managed-performance.md docs/package.md docs/application.md docs/virtual-preparation.md docs/examples.md docs/architecture.md docs/getting-started.md docs/limitations.md docs/api-design.md experiments/module-spike/README.md fuzz/README.md
     tools/benchmarks/README.md vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md vendor/textual/README.md vendor/doctest/README.md vendor/pfr/README.md
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
