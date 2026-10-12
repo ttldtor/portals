@@ -8,6 +8,7 @@
       <tab type="user" title="Getting started" url="@ref docs/getting-started.md"/>
       <tab type="user" title="Runnable examples" url="@ref docs/examples.md"/>
       <tab type="user" title="Declarative composition" url="@ref docs/declarative-ui.md"/>
+      <tab type="user" title="Compile-time scenes" url="@ref docs/compile-time-scenes.md"/>
       <tab type="user" title="Managed controls" url="@ref docs/managed-controls.md"/>
       <tab type="user" title="Use the installed package" url="@ref docs/package.md"/>
       <tab type="user" title="Current limitations" url="@ref docs/limitations.md"/>
