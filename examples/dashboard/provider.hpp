@@ -3,6 +3,7 @@
 #pragma once
 #include "../gallery/common.hpp"
 #include "../replay/data.hpp"
+#include "loading.hpp"
 #include <array>
 #include <portals/chart.hpp>
 #include <portals/managed.hpp>
@@ -30,6 +31,8 @@ struct Options {
   std::size_t maxTicksPerPump{512};
   /** @brief Additional delay in milliseconds before a requested range becomes ready. */
   std::uint64_t delayMs{};
+  /** @brief Finite synthetic page availability, payload and prefetch budgets. */
+  LoadingOptions loading;
   /** @brief Optional run duration in milliseconds; zero leaves stopping to input or the caller. */
   std::uint64_t durationMs{};
   /** @brief Use the fixed replay prices instead of the synthetic generator. */
@@ -56,8 +59,15 @@ public:
     std::vector<ModelRow<Quote>> rows;
   };
 
-  Snapshot(std::uint64_t revision, std::uint64_t count, Ohlc aggregate, std::span<const RowRange> ranges)
-      : ModelSnapshot(revision, count), aggregate(aggregate) {
+  /** @param revision Exact market data revision for this immutable payload.
+   * @param count Logical instrument count independent of loaded pages.
+   * @param aggregate Immutable prices shared by every row of this revision.
+   * @param ranges Loaded contiguous intervals whose row payload is copied into this snapshot.
+   * @param budgetFailure Return FAILED for uncovered reads when the complete request exceeds cache budgets.
+   */
+  Snapshot(std::uint64_t revision, std::uint64_t count, Ohlc aggregate, std::span<const RowRange> ranges,
+           bool budgetFailure = false)
+      : ModelSnapshot(revision, count), aggregate(aggregate), budgetFailure_(budgetFailure) {
     for (auto range : ranges) {
       range.first = std::min(range.first, count);
       range.count = static_cast<std::size_t>(std::min<std::uint64_t>(range.count, count - range.first));
@@ -87,7 +97,8 @@ public:
       }
     }
 
-    return {};
+    return budgetFailure_ ? ModelRows<Quote>{RangeState::FAILED, {}, "requested range exceeds page cache budget"}
+                          : ModelRows<Quote>{};
   }
 
   RowLookup locateRow(RowId id) const override {
@@ -99,6 +110,7 @@ public:
 
 private:
   std::vector<Page> pages_;
+  bool budgetFailure_{};
 };
 
 inline double syntheticPrice(std::uint64_t index, std::uint64_t seed) noexcept {
@@ -135,7 +147,8 @@ public:
    * Scheduler setup failures use the example's fail-fast policy.
    */
   Provider(Application &app, Options options)
-      : app_(app), options_(options), scope_(take(app.scheduler().makeScope())), started_(app.now()) {
+      : app_(app), options_(options), scope_(take(app.scheduler().makeScope())),
+        loading_(options.loading, sizeof(ModelRow<Quote>), options.rows, options.delayMs), started_(app.now()) {
   }
 
   Provider(const Provider &) = delete;
@@ -206,9 +219,11 @@ public:
     for (auto &slot : requests_) {
       if (slot.request) {
         slot.request->cancel();
+        slot.request.reset();
       }
     }
 
+    loading_.stop();
     pendingLatest_.reset();
     stoppedAt_ = app_.now();
   }
@@ -243,31 +258,23 @@ public:
     return bucket_.value().value_or(Ohlc{100, 100, 100, 100});
   }
 
+  /** @return Borrowed UI-only page budget and work counters through provider destruction. */
+  const LoadingMetrics &loadingMetrics() const noexcept {
+    return loading_.metrics();
+  }
+
 private:
   static constexpr std::uint64_t PROVIDER_CADENCE_MS = 10;
-  static constexpr std::size_t INITIAL_PAGE_ROWS = 256;
-  static constexpr std::size_t PREFETCH_ROWS = INITIAL_PAGE_ROWS / 2;
 
   struct RequestSlot {
     std::optional<ModelRequest<Quote>> request;
-    RowRange range{};
-    std::uint64_t readyAt{};
     Ohlc aggregate{};
-    bool acquired{};
   };
 
   std::shared_ptr<const Snapshot> snapshot() const {
-    std::array<RowRange, 3> pages{
-      {{0, static_cast<std::size_t>(std::min<std::uint64_t>(INITIAL_PAGE_ROWS, options_.rows))}}};
-    std::size_t count = 1;
+    const auto ranges = loading_.readyRanges();
 
-    for (const auto &slot : requests_) {
-      if (slot.acquired) {
-        pages[count++] = slot.range;
-      }
-    }
-
-    return std::make_shared<const Snapshot>(ticks_ + 1, options_.rows, aggregate(), std::span(pages).first(count));
+    return std::make_shared<const Snapshot>(ticks_ + 1, options_.rows, aggregate(), ranges);
   }
 
   void accept(std::size_t index, const std::optional<ModelRequest<Quote>> &request, Ohlc aggregate) {
@@ -276,17 +283,8 @@ private:
     }
 
     auto &slot = requests_[index];
-    const auto range = request->range();
-    const auto before = static_cast<std::size_t>(std::min<std::uint64_t>(range.first, PREFETCH_ROWS));
-    const auto after =
-      static_cast<std::size_t>(std::min<std::uint64_t>(options_.rows - range.first - range.count, PREFETCH_ROWS));
-    const RowRange page{range.first - before, range.count + before + after};
 
-    if (slot.range != page) {
-      slot.readyAt = app_.now() + options_.delayMs;
-      slot.range = page;
-      slot.acquired = false;
-    }
+    loading_.setDemand(index, request->range(), app_.now());
 
     if (slot.request) {
       slot.request->cancel();
@@ -305,16 +303,31 @@ private:
   }
 
   void serviceRanges() {
-    // Reverse order deliberately exercises independent chart/table completions.
+    loading_.advance(app_.now());
 
-    for (auto &slot : requests_ | std::views::reverse) {
-      if (!slot.request || app_.now() < slot.readyAt) {
+    // Reverse order deliberately exercises independent chart/table completions.
+    for (std::size_t index = requests_.size(); index-- > 0;) {
+      auto &slot = requests_[index];
+
+      if (!slot.request) {
         continue;
       }
 
-      slot.acquired = true;
-      const auto page = std::make_shared<const Snapshot>(slot.request->dataRevision(), options_.rows, slot.aggregate,
-                                                         std::span(&slot.range, 1));
+      if (slot.request->stopRequested()) {
+        slot.request.reset();
+
+        continue;
+      }
+
+      const auto failure = !loading_.admitted(index);
+
+      if (!failure && !loading_.loaded(slot.request->range())) {
+        continue;
+      }
+
+      const auto ranges = loading_.readyRanges();
+      const auto page =
+        std::make_shared<const Snapshot>(slot.request->dataRevision(), options_.rows, slot.aggregate, ranges, failure);
       auto completed = slot.request->complete(page);
 
       if (completed || completed.error() == SchedulerError::CLOSED) {
@@ -378,6 +391,7 @@ private:
   ManagedModel<Quote> model_;
   std::shared_ptr<const ModelSnapshot<Quote>> pendingLatest_;
   std::array<RequestSlot, 2> requests_;
+  PageLoading loading_;
   OhlcBucket bucket_;
   Ohlc preparedAggregate_{};
   std::uint64_t started_, ticks_{}, scheduledTicks_{};

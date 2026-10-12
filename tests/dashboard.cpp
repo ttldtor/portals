@@ -163,7 +163,7 @@ void delayedRangesAndKeyboard() {
   check(!app->tree().inspect(scene.table()));
 }
 
-void continuousNavigationKeepsRowsVisible(bool backwards) {
+void continuousNavigationKeepsRowsVisible(bool backwards, std::uint64_t delayMs = 0) {
   constexpr std::uint64_t FORWARD_FIRST = 240;
   constexpr std::uint64_t BACKWARD_FIRST = 300;
   const auto initialFirst = backwards ? BACKWARD_FIRST : FORWARD_FIRST;
@@ -183,6 +183,7 @@ void continuousNavigationKeepsRowsVisible(bool backwards) {
   dashboard::Options options;
 
   options.rate = 0;
+  options.delayMs = delayMs;
 
   dashboard::Scene scene(*app, options);
 
@@ -212,7 +213,7 @@ void continuousNavigationKeepsRowsVisible(bool backwards) {
         table.selection() == RowId{backwards ? initialFirst - REPEAT_COUNT + 2 : initialFirst + REPEAT_COUNT, 1};
     }));
 
-    if (now < REPEAT_START || now >= RELEASE_AT || first < INITIAL_PAGE_ROWS) {
+    if (now < REPEAT_START + delayMs || now >= RELEASE_AT || first < INITIAL_PAGE_ROWS) {
       return;
     }
 
@@ -244,12 +245,12 @@ void continuousNavigationKeepsRowsVisible(bool backwards) {
   check(finalReady);
   check(!app->tree().inspect(scene.table()));
 
-  if (blankSnapshots) {
+  if (delayMs ? blankSnapshots == heldSnapshots : blankSnapshots != 0) {
     throw std::runtime_error("continuous Down beyond initial page: " + std::to_string(blankSnapshots) + "/" +
                              std::to_string(heldSnapshots) + " held snapshots contain only loading placeholders");
   }
 
-  if (blankCharts) {
+  if (delayMs ? blankCharts == heldSnapshots : blankCharts != 0) {
     throw std::runtime_error("continuous Down: " + std::to_string(blankCharts) + "/" + std::to_string(heldSnapshots) +
                              " held snapshots have no chart candles");
   }
@@ -280,6 +281,106 @@ void noOpDiagnosticAction() {
   check(std::ranges::any_of(trace.records, [&](const auto &record) {
     return record.context.correlationId == unchanged && record.reason == DiagnosticReason::FRAME_NOT_REQUESTED;
   }));
+}
+
+void delayedLoadingSettles(bool hideDuringLoad) {
+  constexpr std::uint64_t LOAD_DELAY_MS = 250;
+  constexpr std::uint64_t HIDE_AT_MS = 100;
+  constexpr std::uint64_t SHOW_AT_MS = 500;
+  constexpr std::uint64_t IDLE_AT_MS = 800;
+  ObservedTerminal terminal({}, 1200);
+  auto app = take(Application::create({}, terminal.clock()));
+  dashboard::Options options;
+
+  options.rate = 0;
+  options.delayMs = LOAD_DELAY_MS;
+
+  dashboard::Scene scene(*app, options);
+  bool hidden{}, shown{}, idleStarted{}, idleReady{};
+  std::size_t idleBytes{};
+
+  take(setVirtualTableFirst(app->tree(), scene.table(), 10000));
+
+  terminal.beforeRead = [&] {
+    const auto clock = terminal.clock();
+    const auto now = clock.read(clock.context);
+
+    if (hideDuringLoad && !hidden && now >= HIDE_AT_MS) {
+      take(app->tree().setVisible(scene.table(), false));
+      hidden = true;
+    }
+
+    if (hidden && !shown && now >= SHOW_AT_MS) {
+      take(app->tree().setVisible(scene.table(), true));
+      shown = true;
+    }
+
+    if (now < IDLE_AT_MS) {
+      return;
+    }
+
+    if (!idleStarted) {
+      idleStarted = true;
+      idleBytes = terminal.output.size();
+
+      take(app->tree().read(scene.table(), [&](const auto &table) {
+        idleReady = table.rangeState() == RangeState::READY;
+      }));
+    }
+
+    check(terminal.output.size() == idleBytes);
+  };
+
+  const auto result = take(app->run(scene, terminal));
+  const auto loading = scene.loadingMetrics();
+
+  check(terminal.closed && idleStarted && idleReady && (!hideDuringLoad || shown));
+  check(result.frames < 10 && scene.coherent());
+  check(loading.usefulLoads > 0 && loading.activeJobs == 0 && loading.cachedPages == 0);
+}
+
+void continuousNavigationWithMarketTicks() {
+  constexpr std::uint64_t DELAY_MS = 250;
+  constexpr std::uint64_t REPEAT_START_MS = 100;
+  constexpr std::uint64_t REPEAT_END_MS = 1600;
+  constexpr std::uint64_t REPEAT_INTERVAL_MS = 10;
+  std::vector<example::ReplayTerminal::Input> input;
+
+  for (auto now = REPEAT_START_MS; now < REPEAT_END_MS; now += REPEAT_INTERVAL_MS) {
+    input.push_back({now, "\x1b[B", {}});
+  }
+
+  ObservedTerminal terminal(std::move(input), REPEAT_END_MS + DELAY_MS + 100);
+  auto app = take(Application::create({}, terminal.clock()));
+  dashboard::Options options;
+
+  options.rate = 1000;
+  options.delayMs = DELAY_MS;
+
+  dashboard::Scene scene(*app, options);
+  std::size_t readyWhileHeld{};
+
+  take(app->router().setFocus(scene.table()));
+  take(setVirtualTableFirst(app->tree(), scene.table(), 10000));
+
+  terminal.beforeRead = [&] {
+    const auto clock = terminal.clock();
+    const auto now = clock.read(clock.context);
+
+    if (now < REPEAT_START_MS + DELAY_MS || now >= REPEAT_END_MS) {
+      return;
+    }
+
+    take(app->tree().read(scene.table(), [&](const auto &table) {
+      readyWhileHeld += table.rangeState() == RangeState::READY;
+    }));
+  };
+
+  take(app->run(scene, terminal));
+
+  // Busy positional-selection intent has a separate preserved before/after regression.
+  // This case proves loading under source revisions without claiming that issue is fixed.
+  check(readyWhileHeld > 5 && scene.coherent() && scene.tickCount() > 1000);
 }
 
 void clockJumpRemainsBounded() {
@@ -771,6 +872,18 @@ int main(int argc, char **argv) {
     }
 
     const std::string_view group = argc == 2 ? argv[1] : "";
+
+    if (group == "--delayed-continuous") {
+      constexpr std::uint64_t NETWORK_DELAY_MS = 250;
+
+      continuousNavigationKeepsRowsVisible(false, NETWORK_DELAY_MS);
+      continuousNavigationKeepsRowsVisible(true, NETWORK_DELAY_MS);
+      delayedLoadingSettles(false);
+      delayedLoadingSettles(true);
+      continuousNavigationWithMarketTicks();
+
+      return 0;
+    }
 
     if (group == "--exact-truecolor" || group == "--exact-ansi16") {
       exactBorrowedSceneComparison(group == "--exact-truecolor" ? ColorMode::TRUE_COLOR : ColorMode::ANSI16);

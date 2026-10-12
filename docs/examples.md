@@ -97,18 +97,34 @@ selects the data source. The replay tape lives in `examples/replay/data.hpp` and
 compiled into the executable, so running from another directory needs no data file
 or network. Replay loops its 16 recorded prices in order.
 
-`--delay-ms` delays first acquisition of an uncached viewport range (0..60000 ms).
-The initial 256-row page is immediately ready. Each acquired completion prefetches
-up to 128 rows on either side of its exact request, clipped to the logical model.
-The views reuse those immutable pages for nearby windows within the same market
-revision. This keeps held-arrow navigation from replacing work on every step,
-including `--rate 0`; a true cache miss still displays loading placeholders.
-Two independent bounded range slots serve table and chart, with intentionally
-reversed completion order. An uncached range replaces its old request. Once
-acquired, a page can be regenerated with new immutable market revisions, so a
-continuous market does not permanently starve a delayed viewport. Each snapshot
-owns the initial page plus at most two prefetched pages; each of those contains
-at most the exact request count plus 256 rows. No full-model cache is built.
+`--delay-ms` delays acquisition of an uncached page (0..60000 ms). The first
+page is immediately ready. Moving within a useful page keeps its original load
+deadline even when the view replaces its model request. A cache miss can show
+loading placeholders; completing a useful page does not require releasing the
+arrow key. Table and chart keep independent model requests and share bounded
+provider page availability.
+
+| Loading option | Default | Meaning |
+| --- | --- | --- |
+| `--page-rows N` | 256 | Logical rows per fixed page. |
+| `--cache-pages N` | 8 | Maximum availability records, including the initial page and queued work. |
+| `--cache-bytes N` | 262144 | Charged row payload budget for one generated snapshot, in bytes. |
+| `--load-jobs N` | 4 | Maximum simultaneous delayed page jobs. |
+| `--prefetch-pages N` | 1 | Adjacent pages considered in each consumer's navigation direction; zero disables prefetch. |
+
+Positive sizes must fit `size_t`. Invalid or undersized combinations fail setup;
+a viewport that cannot fit the effective page budget produces a failed range.
+The byte charge uses a full page of `ModelRow<Quote>` even for the final short
+page. It excludes allocator overhead and old immutable snapshots retained by the
+model, so it is not a process memory limit. Demand takes priority over prefetch.
+`--check` prints cache hit/miss page probes, useful/cancelled jobs and page/job/byte
+high-water counters after shutdown.
+
+This synthetic provider caches availability of stable logical instruments, not
+network data. Each snapshot regenerates their values from its own market aggregate
+and revision. Reusing arbitrary provider results across revisions needs an explicit
+source contract. Readiness publication also works with `--rate 0`; an idle page
+does not cause repeated publication or redraw. No full-model cache is built.
 
 `--pump-budget` sets 1..10000 ticks per provider callback, default 512. The source
 aggregates every generated tick into OHLC before publishing display snapshots.
