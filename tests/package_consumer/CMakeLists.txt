@@ -34,6 +34,23 @@ if(WIN32)
 endif()
 
 enable_testing()
+foreach(variant IN ITEMS callback coroutine)
+  add_executable(portals_async_${variant} async_${variant}.cpp)
+  target_link_libraries(portals_async_${variant} PRIVATE portals::core)
+  set_target_properties(portals_async_${variant} PROPERTIES CXX_EXTENSIONS OFF)
+  if(WIN32)
+    target_sources(portals_async_${variant} PRIVATE no_dialogs.cpp)
+  endif()
+  add_test(NAME consumer.async-${variant} COMMAND portals_async_${variant})
+  set_tests_properties(consumer.async-${variant} PROPERTIES TIMEOUT 15)
+endforeach()
+add_test(NAME consumer.async-equivalence
+  COMMAND "${CMAKE_COMMAND}"
+    "-DBEFORE=$<TARGET_FILE:portals_async_callback>"
+    "-DAFTER=$<TARGET_FILE:portals_async_coroutine>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_forms.cmake")
+set_tests_properties(consumer.async-equivalence PROPERTIES TIMEOUT 30)
+
 add_executable(portals_query_consumer query.cpp)
 target_link_libraries(portals_query_consumer PRIVATE portals::core)
 set_target_properties(portals_query_consumer PROPERTIES CXX_EXTENSIONS OFF)

@@ -7,6 +7,10 @@ CheckOptions:
   readability-identifier-naming.MethodCase: camelBack
   readability-identifier-naming.ConstexprFunctionCase: camelBack
   readability-identifier-naming.ConstexprMethodCase: camelBack
+  # Coroutine customization points have spellings mandated by the C++ language.
+  # Only these exact names are exempt; ordinary methods still use lowCamelCase.
+  readability-identifier-naming.MethodIgnoredRegexp: '^(get_return_object|initial_suspend|final_suspend|return_value|unhandled_exception|await_transform|await_ready|await_suspend|await_resume)$'
+  readability-identifier-naming.ConstexprMethodIgnoredRegexp: '^(get_return_object|initial_suspend|final_suspend|return_value|unhandled_exception|await_transform|await_ready|await_suspend|await_resume)$'
   readability-identifier-naming.EnumConstantCase: UPPER_CASE
   readability-identifier-naming.ConstexprVariableCase: UPPER_CASE
   readability-identifier-naming.ClassConstantCase: UPPER_CASE

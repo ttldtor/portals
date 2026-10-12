@@ -23,6 +23,8 @@ target_include_directories(portals_utf8proc PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}
 add_library(portals_core STATIC src/version.cpp src/geometry.cpp src/text.cpp src/input.cpp src/cell_buffer.cpp src/render.cpp src/render/diff.cpp src/terminal/writer.cpp src/runtime/scheduler.cpp src/runtime/application.cpp src/runtime/native_application.cpp src/runtime/diagnostics.cpp src/widgets/widget.cpp src/layout/linear.cpp src/layout/grid.cpp src/layout/overlay.cpp src/widgets/focus.cpp src/widgets/event_routing.cpp src/models/model.cpp src/widgets/basic_controls.cpp src/widgets/line_edit.cpp src/widgets/ui_ref.cpp src/widgets/managed.cpp src/views/virtual_list.cpp src/views/virtual_table.cpp src/views/scroll.cpp src/styles/style.cpp src/styles/pss.cpp src/charts/canvas.cpp src/charts/chart.cpp)
 target_sources(portals_core PRIVATE src/terminal/legacy.cpp)
 target_sources(portals_core PRIVATE src/text_history.cpp)
+
+target_sources(portals_core PRIVATE src/runtime/async.cpp)
 target_sources(portals_core PRIVATE src/widgets/ui_scene.cpp)
 if(WIN32)
   target_sources(portals_core PRIVATE src/terminal/windows.cpp)
@@ -583,6 +585,27 @@ if(PORTALS_BUILD_TESTS)
   add_test(NAME portals.model-query COMMAND portals_model_query)
   set_tests_properties(portals.model-query PROPERTIES TIMEOUT 15)
 
+  add_executable(portals_async tests/async.cpp)
+  target_link_libraries(portals_async PRIVATE portals::core)
+  target_include_directories(portals_async SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  portals_enable_warnings(portals_async)
+  add_test(NAME portals.async COMMAND portals_async)
+  set_tests_properties(portals.async PROPERTIES TIMEOUT 15)
+
+  foreach(variant IN ITEMS callback coroutine)
+    add_executable(portals_async_${variant} tests/package_consumer/async_${variant}.cpp)
+    target_link_libraries(portals_async_${variant} PRIVATE portals::core)
+    portals_enable_warnings(portals_async_${variant})
+    add_test(NAME portals.async-${variant} COMMAND portals_async_${variant})
+    set_tests_properties(portals.async-${variant} PROPERTIES TIMEOUT 15)
+  endforeach()
+  add_test(NAME portals.async-equivalence
+    COMMAND "${CMAKE_COMMAND}"
+      "-DBEFORE=$<TARGET_FILE:portals_async_callback>"
+      "-DAFTER=$<TARGET_FILE:portals_async_coroutine>"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_consumer/compare_forms.cmake")
+  set_tests_properties(portals.async-equivalence PROPERTIES TIMEOUT 30)
+
   add_executable(portals_property tests/property.cpp)
   target_link_libraries(portals_property PRIVATE portals::core)
   portals_enable_warnings(portals_property)
@@ -753,7 +776,7 @@ if(PORTALS_BUILD_DOCS)
   set(DOXYGEN_WARN_IF_UNDOC_ENUM_VAL YES)
   set(DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/docs")
 
-  doxygen_add_docs(portals_docs include docs/model-queries.md docs/compile-time-styles.md docs/compile-time-scenes.md ReleaseNotes.md docs/index.md docs/development.md docs/releasing.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/scheduler.md docs/widget-tree.md docs/layout.md docs/grid.md docs/property.md docs/diagnostics.md docs/focus.md docs/model.md docs/input.md docs/terminal.md docs/terminal-probe.md docs/controls.md docs/line-edit.md docs/virtual-list.md docs/virtual-table.md docs/scroll.md docs/chart.md
+  doxygen_add_docs(portals_docs include docs/model-queries.md docs/ui-coroutines.md docs/compile-time-styles.md docs/compile-time-scenes.md ReleaseNotes.md docs/index.md docs/development.md docs/releasing.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/scheduler.md docs/widget-tree.md docs/layout.md docs/grid.md docs/property.md docs/diagnostics.md docs/focus.md docs/model.md docs/input.md docs/terminal.md docs/terminal-probe.md docs/controls.md docs/line-edit.md docs/virtual-list.md docs/virtual-table.md docs/scroll.md docs/chart.md
     docs/styles.md docs/legacy.md docs/managed-controls.md docs/declarative-ui.md docs/text-property.md docs/text-history.md docs/editor-history.md docs/editor-history-demo.md docs/compact-examples.md docs/compactness.md docs/quality.md tools/compactness/compactness.hpp docs/managed-performance.md docs/package.md docs/application.md docs/virtual-preparation.md docs/examples.md docs/architecture.md docs/getting-started.md docs/limitations.md docs/api-design.md experiments/module-spike/README.md fuzz/README.md
     tools/benchmarks/README.md vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md vendor/textual/README.md vendor/doctest/README.md vendor/pfr/README.md
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
