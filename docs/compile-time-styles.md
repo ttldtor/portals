@@ -5,6 +5,11 @@ Include `<portals/style_static.hpp>` for the experimental C++23
 materializes the ordinary `StyleSheet`. The existing [style engine](styles.md)
 still decides specificity, source order, property-wise cascade and invalidation.
 
+For scalar descriptions with short selectors and rules stored as bounded data,
+or for the same PSS string grammar at compile time and runtime, see
+[Compile-time PSS](compile-time-pss.md). Existing typed sheets and `LiveTheme`
+remain available; scalar snapshots do not retain live parameter expressions.
+
 ## Describe rules once
 
 ```cpp

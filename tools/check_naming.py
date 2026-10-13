@@ -30,6 +30,7 @@ def main():
         if relative.as_posix() in {
             "tests/fixtures/static_scene/invalid.cpp",
             "tests/fixtures/static_styles/invalid.cpp",
+            "tests/fixtures/ct_pss/invalid.cpp",
         }:
             continue
         if relative.parts[0] in {"src", "tests", "tools", "examples", "experiments", "fuzz"}:

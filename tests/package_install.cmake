@@ -12,6 +12,23 @@ foreach(required IN ITEMS SOURCE_DIR BINARY_DIR GENERATOR CXX_COMPILER)
   endif()
 endforeach()
 
+# File input preserves a producer's runtime generator expression for both consumer configurations.
+# The direct MSVC_RUNTIME_LIBRARY argument remains supported when no file is supplied.
+if(DEFINED MSVC_RUNTIME_LIBRARY_FILE)
+  if("${MSVC_RUNTIME_LIBRARY_FILE}" STREQUAL "" OR NOT EXISTS "${MSVC_RUNTIME_LIBRARY_FILE}")
+    message(FATAL_ERROR "MSVC_RUNTIME_LIBRARY_FILE must name an existing runtime settings file")
+  endif()
+  file(READ "${MSVC_RUNTIME_LIBRARY_FILE}" MSVC_RUNTIME_LIBRARY)
+endif()
+
+# Keep nested MSBuild/Ninja concurrency explicit without relying on the parent CTest job count.
+if(NOT DEFINED PACKAGE_CONSUMER_BUILD_JOBS)
+  set(PACKAGE_CONSUMER_BUILD_JOBS 4)
+endif()
+if(NOT PACKAGE_CONSUMER_BUILD_JOBS MATCHES "^[1-9][0-9]*$")
+  message(FATAL_ERROR "PACKAGE_CONSUMER_BUILD_JOBS must be a positive integer")
+endif()
+
 # Fresh directories avoid removing unrelated user files or previous evidence.
 string(RANDOM LENGTH 12 ALPHABET 0123456789abcdef runId)
 get_filename_component(binaryRoot "${BINARY_DIR}" ABSOLUTE)
@@ -65,7 +82,8 @@ foreach(exported IN LISTS exportedFiles)
 endforeach()
 
 function(runConsumerConfig config)
-  runStep("${CMAKE_COMMAND}" --build "${consumerBuild}" --config "${config}")
+  runStep("${CMAKE_COMMAND}" --build "${consumerBuild}" --config "${config}"
+    --parallel "${PACKAGE_CONSUMER_BUILD_JOBS}")
   runStep("${CMAKE_CTEST_COMMAND}" --test-dir "${consumerBuild}" -C "${config}"
     --output-on-failure --no-tests=error -V)
 endfunction()
