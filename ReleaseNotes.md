@@ -10,6 +10,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
   metadata for every declaration. Existing typed live themes and the legacy
   parser remain available.
 
+- [Added] Native Scene styling from C++23 PSS descriptors, runtime bytes,
+  owning documents and explicit native file paths, with shared source metadata,
+  named layer upsert and checked runApp factory/setup integration.
+
 - [Added] Opt-in DEFAULTS/THEME/APPLICATION/USER style layers with property-wise
   precedence, atomic updates and aggregate logical payload budgets. Theme switches
   and live theme parameters preserve overrides; stale theme controllers report

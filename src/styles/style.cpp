@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include <portals/detail/pss_data.hpp>
 #include <portals/style.hpp>
 
 #include <algorithm>
@@ -327,103 +328,203 @@ std::expected<Invalidation, StyleError>
 StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier, std::string_view name,
                     const StyleSheet *sheet, std::span<const StyleLayerUpdate> updates,
                     std::span<const StyleRegistration> registrations, StyleLayerHandle *added,
-                    const detail::StyleThemeLease *lease) {
+                    const detail::StyleThemeLease *lease, const PssDocument *document,
+                    std::optional<StyleLayerOptions> admissionOptions) {
   auto allowed = checkBoundary();
+
   if (!allowed) {
     return std::unexpected(allowed.error());
   }
+
   if (lease) {
     allowed = validateLease(*lease);
+
     if (!allowed) {
       return std::unexpected(allowed.error());
     }
-  }
-  const bool enabling = mutation == Mutation::ENABLE;
-  if (enabling) {
-    if (layerState_.enabled) {
-      if (options != layerState_.options) {
-        return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Style layer options already established"));
-      }
-      if (registrations.empty()) {
-        return Invalidation::NONE;
-      }
-      return bindBatch(registrations);
-    }
-    if (options.maxLayers < 2 || !options.maxRules || !options.maxDeclarations || !options.maxOwnedBytes) {
-      return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Invalid style layer budgets"));
-    }
-  } else if (!layerState_.enabled) {
-    return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Style layers are not enabled"));
-  } else {
-    options = layerState_.options;
   }
 
-  const bool adding = mutation == Mutation::ADD;
+  const bool admitting = mutation == Mutation::ADMIT;
+  const bool enabling = !layerState_.enabled && (mutation == Mutation::ENABLE || admitting);
+
+  if (mutation == Mutation::ENABLE && layerState_.enabled) {
+    if (options != layerState_.options) {
+      return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Style layer options already established"));
+    }
+
+    if (registrations.empty()) {
+      return Invalidation::NONE;
+    }
+
+    return bindBatch(registrations);
+  }
+
+  if (admitting) {
+    options = admissionOptions.value_or(layerState_.enabled ? layerState_.options : StyleLayerOptions{});
+
+    if (layerState_.enabled && options != layerState_.options) {
+      return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Style layer options already established"));
+    }
+  } else if (layerState_.enabled) {
+    options = layerState_.options;
+  } else if (!enabling) {
+    return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Style layers are not enabled"));
+  }
+
+  if (enabling && (options.maxLayers < 2 || !options.maxRules || !options.maxDeclarations || !options.maxOwnedBytes)) {
+    return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Invalid style layer budgets"));
+  }
+
+  if (admitting &&
+      (!document || options.maxLayers > std::numeric_limits<std::size_t>::max() / MAX_PSS_DOCUMENT_BYTES)) {
+    return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Invalid style document aggregate budget"));
+  }
+
+  std::uint64_t admittedId{};
+
+  if (admitting) {
+    for (const auto &layer : layerState_.layers) {
+      if (layer.tier == tier && layer.name == name) {
+        admittedId = layer.id;
+
+        break;
+      }
+    }
+  }
+
+  const bool adding = mutation == Mutation::ADD || (admitting && !admittedId);
   const bool directReplacement = mutation == Mutation::UPDATE && sheet;
-  if (adding && ((tier != StyleTier::APPLICATION && tier != StyleTier::USER) || name.empty() || name == "DEFAULTS" ||
-                 name == "THEME" || std::ranges::any_of(layerState_.layers, [&](const Layer &layer) {
-                   return layer.tier == tier && layer.name == name;
-                 }))) {
+
+  const bool invalidTier = tier != StyleTier::APPLICATION && tier != StyleTier::USER;
+  const bool invalidName = name.empty() || name == "DEFAULTS" || name == "THEME";
+  const bool duplicateName =
+    mutation == Mutation::ADD && std::ranges::any_of(layerState_.layers, [&](const Layer &layer) {
+      return layer.tier == tier && layer.name == name;
+    });
+
+  if ((adding || admitting) && (invalidTier || invalidName || duplicateName)) {
     return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Invalid or duplicate style layer name/tier"));
   }
+
   if (directReplacement) {
     allowed = validateHandle(*added);
+
     if (!allowed) {
       return std::unexpected(allowed.error());
     }
+
     const auto &layer = *std::ranges::find(layerState_.layers, added->id_, &Layer::id);
+
     if (layer.tier == StyleTier::DEFAULTS || layer.tier == StyleTier::THEME) {
       return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Base replacement requires its dedicated operation"));
     }
   }
+
   for (std::size_t index = 0; index < updates.size(); ++index) {
     allowed = validateHandle(updates[index].handle);
+
     if (!allowed) {
       return std::unexpected(allowed.error());
     }
+
     if (std::ranges::any_of(updates.first(index), [&](const StyleLayerUpdate &other) {
           return other.handle.id_ == updates[index].handle.id_;
         })) {
       return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Duplicate handle in style layer batch"));
     }
+
     const auto &layer = *std::ranges::find(layerState_.layers, updates[index].handle.id_, &Layer::id);
+
     if (updates[index].sheet && (layer.tier == StyleTier::DEFAULTS || layer.tier == StyleTier::THEME)) {
       return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Base replacement requires its dedicated operation"));
     }
   }
 
   const auto replacement = [&](const Layer &layer) -> const StyleSheet * {
-    if (directReplacement && layer.id == added->id_) {
+    if ((admitting && layer.id == admittedId) || (directReplacement && layer.id == added->id_)) {
       return sheet;
     }
+
     if ((mutation == Mutation::DEFAULTS && layer.tier == StyleTier::DEFAULTS) ||
         ((mutation == Mutation::THEME || mutation == Mutation::OWNED_THEME) && layer.tier == StyleTier::THEME)) {
       return sheet;
     }
+
     for (const auto &update : updates) {
       if (update.handle.id_ == layer.id) {
         return update.sheet ? &*update.sheet : nullptr;
       }
     }
+
     return &layer.sheet;
   };
+
   const auto removing = [&](const Layer &layer) {
     return !replacement(layer) && layer.tier != StyleTier::DEFAULTS && layer.tier != StyleTier::THEME;
   };
+
   const bool handoff = mutation == Mutation::THEME || std::ranges::any_of(updates, [&](const StyleLayerUpdate &update) {
                          return !update.sheet && update.handle.id_ == layerState_.layers[1].id;
                        });
   bool changed = enabling || adding || handoff;
   for (const auto &layer : layerState_.layers) {
     const auto next = replacement(layer);
+
     changed = changed || (next ? *next != layer.sheet : !layer.sheet.rules.empty() || removing(layer));
   }
+
+  std::shared_ptr<const PssDocument> admittedDocument;
+  const auto sourceFor = [&](const Layer &layer) -> std::shared_ptr<const PssDocument> {
+    if (admitting && layer.id == admittedId) {
+      return admittedDocument;
+    }
+
+    if ((directReplacement && layer.id == added->id_) ||
+        (mutation == Mutation::DEFAULTS && layer.tier == StyleTier::DEFAULTS) ||
+        ((mutation == Mutation::THEME || mutation == Mutation::OWNED_THEME) && layer.tier == StyleTier::THEME) ||
+        std::ranges::any_of(updates, [&](const StyleLayerUpdate &update) {
+          return update.handle.id_ == layer.id;
+        })) {
+      return {};
+    }
+
+    return layer.document;
+  };
+
   if (!changed && registrations.empty()) {
-    return Invalidation::NONE;
+    // Metadata publication has no style callbacks or invalidation, even for equal low-level replacements.
+    LayerMutationGuard guard(stagingLayers_, true);
+
+    try {
+      if (admitting) {
+        const auto &layer = *std::ranges::find(layerState_.layers, admittedId, &Layer::id);
+
+        if (layer.document && *layer.document == *document) {
+          *added = handle(admittedId, layerState_.epoch);
+
+          return Invalidation::NONE;
+        }
+
+        admittedDocument = std::make_shared<const PssDocument>(*document);
+      }
+
+      for (auto &layer : layerState_.layers) {
+        layer.document = sourceFor(layer);
+      }
+
+      if (admitting) {
+        *added = handle(admittedId, layerState_.epoch);
+      }
+
+      return Invalidation::NONE;
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(error(TreeError::NO_MEMORY, "Style document allocation failed"));
+    }
   }
 
   constexpr auto MAX_ID = std::numeric_limits<std::uint64_t>::max();
-  const std::uint64_t identities = enabling ? 2 : adding ? 1 : 0;
+  const std::uint64_t identities = (enabling ? 2 : 0) + (adding ? 1 : 0);
+
   if ((enabling && layerState_.epoch == MAX_ID) || identities > MAX_ID - layerState_.nextId ||
       identities > MAX_ID - layerState_.nextOrder || (handoff && layerState_.owner == MAX_ID)) {
     return std::unexpected(error(TreeError::IDENTITY_EXHAUSTED, "Style layer identity exhausted"));
@@ -436,26 +537,33 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
       return false;
     }
     used += amount;
+
     return true;
   };
+
   const auto chargeString = [&](std::string_view value) {
     return charge(bytes, value.size(), options.maxOwnedBytes) && charge(bytes, 1, options.maxOwnedBytes);
   };
+
   const auto account = [&](std::string_view layerName, const StyleSheet *value) -> std::expected<void, StyleError> {
     if (!charge(layerCount, 1, options.maxLayers) || !charge(bytes, sizeof(Layer), options.maxOwnedBytes) ||
         !chargeString(layerName)) {
       return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Style layer payload budget exhausted"));
     }
+
     if (!value) {
       return {};
     }
     auto valid = validate(*value);
+
     if (!valid) {
       return valid;
     }
+
     if (!charge(rules, value->rules.size(), options.maxRules)) {
       return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Aggregate style rule budget exhausted"));
     }
+
     for (const auto &rule : value->rules) {
       const auto &d = rule.declarations;
       const std::size_t count = d.foreground.has_value() + d.background.has_value() + d.bold.has_value() +
@@ -465,16 +573,20 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
           !chargeString(rule.selector.id)) {
         return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Style declaration/payload budget exhausted"));
       }
+
       for (const auto &className : rule.selector.classes) {
         if (!charge(bytes, sizeof(std::string), options.maxOwnedBytes) || !chargeString(className)) {
           return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Style class payload budget exhausted"));
         }
       }
     }
+
     return {};
   };
+
   if (enabling) {
     allowed = account("DEFAULTS", nullptr);
+
     if (allowed) {
       allowed = account("THEME", &sheet_);
     }
@@ -482,15 +594,18 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
     for (const auto &layer : layerState_.layers) {
       if (!removing(layer)) {
         allowed = account(layer.name, replacement(layer));
+
         if (!allowed) {
           break;
         }
       }
     }
-    if (allowed && adding) {
-      allowed = account(name, sheet);
-    }
   }
+
+  if (allowed && adding) {
+    allowed = account(name, sheet);
+  }
+
   if (!allowed) {
     return std::unexpected(allowed.error());
   }
@@ -498,23 +613,34 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
   LayerMutationGuard guard(stagingLayers_, true);
 
   try {
+    if (admitting) {
+      admittedDocument = std::make_shared<const PssDocument>(*document);
+    }
+
     const auto copySheetInto = [](StyleSheet &result, const StyleSheet *source) {
       if (!source) {
         return;
       }
+
       result.rules.reserve(source->rules.size());
+
       for (const auto &rule : source->rules) {
         StyleRule copied;
+
         copied.selector.type.assign(rule.selector.type.data(), rule.selector.type.size());
         copied.selector.id.assign(rule.selector.id.data(), rule.selector.id.size());
         copied.selector.state = rule.selector.state;
         copied.selector.classes.reserve(rule.selector.classes.size());
+
         for (const auto &className : rule.selector.classes) {
           copied.selector.classes.emplace_back(className.data(), className.size());
         }
+
         copied.declarations = rule.declarations;
         result.rules.emplace_back();
+
         auto &destination = result.rules.back();
+
         destination.selector.type.swap(copied.selector.type);
         destination.selector.id.swap(copied.selector.id);
         destination.selector.classes.swap(copied.selector.classes);
@@ -522,7 +648,9 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
         destination.declarations = copied.declarations;
       }
     };
+
     LayerState candidate;
+
     candidate.options = options;
     candidate.enabled = true;
     candidate.epoch = layerState_.epoch + enabling;
@@ -530,42 +658,59 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
     candidate.nextOrder = layerState_.nextOrder;
     candidate.owner = layerState_.owner + handoff;
     candidate.layers.reserve(layerCount);
+
     const auto append = [&](StyleTier nextTier, std::string_view nextName, const StyleSheet *value, std::uint64_t id,
-                            std::uint64_t order) {
+                            std::uint64_t order, std::shared_ptr<const PssDocument> source = {}) {
       // Empty construction plus swaps avoids duplicate owning replacement payload in staging.
       candidate.layers.emplace_back(id, order, nextTier);
+
       auto &destination = candidate.layers.back();
+
       destination.name.assign(nextName.data(), nextName.size());
       copySheetInto(destination.sheet, value);
+      destination.document = std::move(source);
     };
+
     if (enabling) {
       append(StyleTier::DEFAULTS, "DEFAULTS", nullptr, candidate.nextId++, candidate.nextOrder++);
       append(StyleTier::THEME, "THEME", &sheet_, candidate.nextId++, candidate.nextOrder++);
     } else {
       for (const auto &layer : layerState_.layers) {
         if (!removing(layer)) {
-          append(layer.tier, layer.name, replacement(layer), layer.id, layer.order);
+          append(layer.tier, layer.name, replacement(layer), layer.id, layer.order, sourceFor(layer));
         }
       }
-      if (adding) {
-        const auto id = candidate.nextId++;
-        append(tier, name, sheet, id, candidate.nextOrder++);
-        *added = handle(id, candidate.epoch);
-      }
     }
+
+    if (adding) {
+      admittedId = candidate.nextId++;
+
+      append(tier, name, sheet, admittedId, candidate.nextOrder++, admittedDocument);
+    }
+
     std::optional<std::vector<Binding>> bindings;
     auto merged = mergeBindings(registrations, bindings);
+
     if (!merged) {
       return std::unexpected(merged.error());
     }
+
     if (lease) {
       allowed = validateLease(*lease);
+
       if (!allowed) {
         return std::unexpected(allowed.error());
       }
     }
+
     // A layered table owns all rules; the inactive legacy sheet is released at this commit.
-    return install({}, std::move(*bindings), &candidate, false, lease);
+    auto installed = install({}, std::move(*bindings), &candidate, false, lease);
+
+    if (installed && (adding || admitting)) {
+      *added = handle(admittedId, layerState_.epoch);
+    }
+
+    return installed;
   } catch (const std::bad_alloc &) {
     return std::unexpected(error(TreeError::NO_MEMORY, "Style layer staging allocation failed"));
   }

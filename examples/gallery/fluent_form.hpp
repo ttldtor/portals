@@ -4,9 +4,10 @@
 #include "common.hpp"
 #include "options.hpp"
 #include <portals/input_match.hpp>
-#include <portals/ui.hpp>
+#include <portals/ui_style.hpp>
 
 namespace gallery {
+inline constexpr auto FOCUS_POLICY = portals::style::ct::pss("Button:focused { bold: true; }", "gallery-focus.pss");
 /** @brief Equivalent spellings of the same owning scene configuration. */
 enum class Composition {
   METHODS,
@@ -121,12 +122,14 @@ private:
 
     if (composition == Composition::PIPE) {
       return ui::scene(std::move(factory), options) | ui::theme(example::THEME_PRESETS.at(theme_).make()) |
-             ui::configure(std::move(configuration)) | ui::onKey(ui::key(InputKey::F10), std::move(quit));
+             ui::style(FOCUS_POLICY, {.name = "gallery-focus"}) | ui::configure(std::move(configuration)) |
+             ui::onKey(ui::key(InputKey::F10), std::move(quit));
     }
 
     auto form = ui::scene(std::move(factory), options);
 
     form.theme(example::THEME_PRESETS.at(theme_).make())
+      .style(FOCUS_POLICY, {.name = "gallery-focus"})
       .configure(std::move(configuration))
       .onKey(ui::key(InputKey::F10), std::move(quit));
 

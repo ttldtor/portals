@@ -5,62 +5,115 @@ owning source metadata. Both frontends use the same PSS v0 parser and the
 existing [style cascade](styles.md). Materialization and mounting still happen
 at runtime; this is not another renderer, scheduler or reactive system.
 
-## A complete native application
+## Before: checked setup with a manually managed `Scene`
 
-This program switches themes with F2 and exits with F10. The application layer
-keeps the accent across theme changes. The terminal runner owns normal shutdown,
-reports collected errors and returns 0 or 1. The outer exception boundary also
-covers construction before entry into the runner.
+This complete C++23 native client constructs a scene, installs an `APPLICATION`
+layer, registers reporting and a quit callback, then invokes the native runner.
+The PSS descriptor is compact, but the client still coordinates each step and
+handles construction exceptions itself.
 
-```cpp
+~~~cpp
 #include <portals/style_pss.hpp>
 #include <portals/ui.hpp>
-
+#include <cstdio>
 #include <exception>
-#include <iostream>
 
+namespace ui = portals::ui;
 namespace sc = portals::style::ct;
+
 inline constexpr auto STYLES = sc::pss(R"pss(
-#action { foreground: #ffd246; bold: true; min-width: 8; }
-)pss", "application.pss");
+  #message { min-width: 24; }
+  #append { bold: true; }
+)pss", "native-demo.pss");
 
-int main() try {
-  using namespace portals;
+/** @return Zero on success, one on setup, input, runner or cleanup failure. */
+int main() {
+  try {
+    ui::Ref<portals::LineEdit> message;
+    auto scene = ui::scene(ui::column(
+      ui::label("Portals | F10: quit"),
+      ui::lineEdit(message, "Hello").id("message"),
+      ui::button("Append", [message] {
+        message.text() += portals::text(" {}", "Portals");
+      }).id("append")));
 
-  auto document = sc::materializeDocument(STYLES);
+    scene.theme(portals::modernTheme())
+      .styleLayers()
+      .styleLayer(portals::StyleTier::APPLICATION, "demo", sc::materialize(STYLES))
+      .onKey(ui::key(portals::InputKey::F10), [&scene] {
+        (void)scene.quit();
+      });
 
-  if (!document) {
-    std::cerr << document.error().message << '\n';
+    scene.reportOnError();
+
+    return scene | ui::runApp();
+  } catch (const std::exception &error) {
+    std::fprintf(stderr, "Setup failed: %s\n", error.what());
+
+    return 1;
+  } catch (...) {
+    std::fputs("Setup failed: unknown exception\n", stderr);
 
     return 1;
   }
-
-  bool alternate{};
-  auto scene = ui::scene(ui::column(ui::label("F2: theme | F10: quit"),
-                                    ui::button("Accent").id("action")));
-
-  scene.theme(modernTheme())
-    .styleLayers()
-    .styleLayer(StyleTier::APPLICATION, "application", document->sheet)
-    .reportOnError()
-    .onKey(ui::key(InputKey::F2), [&] {
-      alternate = !alternate;
-      scene.theme(alternate ? turboTheme() : modernTheme());
-    })
-    .onKey(ui::key(InputKey::F10), [&] { (void)scene.quit(); });
-
-  return scene | ui::runApp();
-} catch (const std::exception &error) {
-  std::cerr << error.what() << '\n';
-
-  return 1;
 }
-```
+~~~
 
-Keep this `Scene` stationary after callbacks capture it. Passing only the final
-runner stage through the pipe preserves that lifetime. A string-consuming
-`scene | ui::style(STYLES) | ui::runApp()` stage and automatic installation of
-document metadata are subsequent integration work; neither is provided here.
+## After: factory construction with stationary setup
+
+This complete client delegates checked construction, setup, reporting, running
+and cleanup to `runApp`. The setup receives the stationary `Scene` by reference;
+`scene.ref()` supplies a weak quit action, so the callback does not capture the
+facade by address. The style stage enables layering before any live layer is
+attached.
+
+~~~cpp
+#include <portals/ui_style.hpp>
+
+namespace ui = portals::ui;
+namespace sc = portals::style::ct;
+
+inline constexpr auto STYLES = sc::pss(R"pss(
+  #message { min-width: 24; }
+  #append { bold: true; }
+)pss", "native-demo.pss");
+
+/** @return Zero on success, one after a reported construction, setup, input or cleanup error. */
+int main() {
+  return ui::runApp(
+    [] {
+      ui::Ref<portals::LineEdit> message;
+
+      return ui::column(
+        ui::label("Portals | F10: quit"),
+        ui::lineEdit(message, "Hello").id("message"),
+        ui::button("Append", [message] {
+          message.text() += portals::text(" {}", "Portals");
+        }).id("append"));
+    },
+    [](ui::Scene &scene) {
+      scene.theme(portals::modernTheme());
+      scene | ui::style(STYLES, {.name = "demo"}) | ui::reportOnError()
+            | ui::onKey(ui::key(portals::InputKey::F10), ui::quit(scene.ref()));
+    });
+}
+~~~
+
+For an already-built ordinary scene, the compact equivalent is
+`scene | ui::style(STYLES) | ui::runApp()`. The method
+`scene.style(source, options)`, the free function
+`ui::style(scene, ui::style(source, options))`, and the pipe form all dispatch
+through the same owning stage. A named `Scene` is kept stationary by the lvalue
+method and pipe overloads; temporary chains use the consuming overload.
+
+Style-stage construction (including parsing bytes or copying a document)
+happens before the receiving `Scene` call. Its allocation or argument-construction
+exceptions can therefore occur before that facade checked error boundary.
+`runApp(factory, setup)` invokes the description factory inside its checked
+boundary and maps factory/setup/run failures into the normal report and exit
+status. Construction of the callable objects and arguments passed to `runApp`
+still happens before invocation and is outside that boundary. The factory
+returns a scene description, never a `Scene`.
 
 ## Scalar rules stored as data
 
@@ -113,9 +166,12 @@ original PSS byte coordinates from synthetic typed ordinals, which are not C++
 file locations. Offsets are zero-based; lines and byte columns are one-based,
 with LF advancing the line. An accepted leading BOM remains part of the offsets.
 
-Installing `document.sheet` projects away this provenance. Layer-aware inspection
-and automatic scene registration of origins are subsequent work. No per-frame
-trace allocations or periodic redraw are introduced by this parser.
+Installing `document.sheet` through the low-level whole-sheet API projects away
+this provenance. `ui::style(document)` retains the owning document with its
+application or user layer, available through `ManagedScene::styleSources()`.
+A full inspector explaining the winning rule for every property is subsequent
+work. Metadata-only changes introduce no periodic redraw or per-frame trace
+allocations.
 
 ## Input policies and limits
 
@@ -166,7 +222,8 @@ they would lose bytes after an embedded NUL. A caller-created already-truncated
 
 The subject owns at most 64 ASCII bytes with an explicit truncation flag;
 non-ASCII bytes use a safe placeholder. Runtime errors do not retain a borrowed
-source identity; the caller or future file boundary supplies that context.
+source identity. Low-level callers supply that context; the scene loading
+boundary retains a bounded owning label in `ManagedError::styleSource`.
 
 ## Complete installed consumers
 

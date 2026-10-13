@@ -28,10 +28,62 @@ Binding metadata is explicit. `Button`, `CheckBox`, `LineEdit`, `List`, and
 Custom widgets use the same mechanism. One engine owns a node's theme at a
 time; assigning the same node to several engines is unsupported.
 
-To use PSS, load text outside the frame and call `replacePss(source)`. Loading
-files and hot reload are application responsibilities; the library does neither.
-`themes/modern.pss` and `themes/turbo.pss` exactly match `modernTheme()` and
-`turboTheme()`. `themeFromTokens(ThemeTokens)` customizes the same typed palette.
+The low-level `parsePssDocument(bytes, sourceName)` parser performs no file I/O.
+For a native UI scene, `ui::file(path)` creates an owning native-path source;
+`ui::style(ui::file(path))` reads and parses it when that stage is consumed by
+the `Scene`. This is an explicit file-loading boundary. There is no file watcher,
+include directive, or hot reload. `themes/modern.pss` and `themes/turbo.pss` exactly
+match `modernTheme()` and `turboTheme()`. `themeFromTokens(ThemeTokens)` customizes
+the same typed palette.
+
+## Native scene styling
+
+Include `<portals/ui_style.hpp>` for the native facade. `ui::style(source, options)` accepts
+strict PSS bytes, a mutable `PssDocument` (validated and deep-copied), a checked `sc::CompactSheet`, or an explicit `ui::FileSource`.
+The stage owns its source and parsed data; caller buffers and documents need
+only remain alive through stage construction. `ui::file(path)` owns a copy of
+the native filesystem path and defers reading until scene consumption.
+
+The same operation is available as `scene.style(source, options)`,
+`ui::style(scene, ui::style(source, options))`, or
+`scene | ui::style(source, options)`. These forms use the same stage and checked
+`Scene` boundary. For named scenes the lvalue method and pipe preserve the owner;
+the free function takes the owner and stage explicitly.
+
+~~~cpp
+scene.style(STYLES, {.name = "demo"});
+ui::style(scene, ui::style(STYLES, {.name = "demo"}));
+scene | ui::style(STYLES, {.name = "demo"});
+~~~
+
+`StyleOptions` defaults to the `APPLICATION` tier. Choose `USER` explicitly when that
+precedence is intended. A source stage has one shared identity: reusing it
+checks the original layer handle, retains its position, and reports a typed
+stale error if that layer was removed. Supplying a nonempty name opts into
+tier-and-name upsert, so a separately constructed stage with the same tier and
+name replaces that named layer while preserving its position.
+
+Install style layers before attaching a `ui::liveTheme(...)` stage. Layer
+activation retains the current theme as `THEME`; application and user overrides
+remain above it. `LiveTheme<S>` keeps its existing typed parameter model and
+`LiveThemeRef<S>` is a weak observer returned by the stage's `ref()` method.
+Copies of a live stage share one identity bound to one `Scene`. A failed
+first attachment may be retried; after successful attachment the identity cannot retarget to another `Scene`. Cleanup closes its
+weak references and releases the `Scene`-owned controller. After an external
+theme handoff makes its lease stale, the old stage does not reinstall itself;
+create a fresh live stage for a new binding.
+
+PSS provenance retains source byte coordinates (zero-based offsets, one-based
+lines and byte columns) with the shared source identity. Error labels retain
+only a bounded valid UTF-8 prefix; invalid UTF-8 or NUL labels are empty.
+Snapshots are available through `ManagedScene::styleSources()` as per-layer
+metadata. A full rule/property inspector remains future work. Metadata-only
+updates whose computed values are equal do not request redraw. Document and
+layer limits are logical payload budgets, not process RSS limits.
+
+Typed `StyleSheet` values and `sc::LiveTheme` remain available alongside the
+string frontend. PSS v0 adds no variables, file includes, cascade extensions,
+or CSS virtual machine.
 
 ## Built-in palettes
 

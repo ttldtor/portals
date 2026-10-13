@@ -34,6 +34,23 @@ if(WIN32)
 endif()
 
 enable_testing()
+foreach(variant IN ITEMS before after)
+  add_executable(portals_style_pss_${variant}_consumer style_pss_${variant}.cpp)
+  target_link_libraries(portals_style_pss_${variant}_consumer PRIVATE portals::core)
+  set_target_properties(portals_style_pss_${variant}_consumer PROPERTIES CXX_EXTENSIONS OFF)
+  if(WIN32)
+    target_sources(portals_style_pss_${variant}_consumer PRIVATE no_dialogs.cpp)
+  endif()
+  add_test(NAME consumer.style-pss-${variant} COMMAND portals_style_pss_${variant}_consumer)
+  add_test(NAME consumer.style-pss-${variant}-failure COMMAND portals_style_pss_${variant}_consumer --failure)
+  set_tests_properties(consumer.style-pss-${variant} consumer.style-pss-${variant}-failure PROPERTIES TIMEOUT 15)
+endforeach()
+add_test(NAME consumer.style-pss-equivalence
+  COMMAND "${CMAKE_COMMAND}" "-DBEFORE=$<TARGET_FILE:portals_style_pss_before_consumer>"
+    "-DAFTER=$<TARGET_FILE:portals_style_pss_after_consumer>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_forms.cmake")
+set_tests_properties(consumer.style-pss-equivalence PROPERTIES TIMEOUT 30)
+
 add_executable(portals_ct_pss_metadata_consumer ct_pss_metadata.cpp)
 target_link_libraries(portals_ct_pss_metadata_consumer PRIVATE portals::core)
 set_target_properties(portals_ct_pss_metadata_consumer PROPERTIES CXX_EXTENSIONS OFF)

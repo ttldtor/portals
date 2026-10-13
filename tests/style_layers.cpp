@@ -2,19 +2,28 @@
 // SPDX-License-Identifier: BSL-1.0
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest.h>
-#include <portals/style_static.hpp>
+#include <portals/style_pss.hpp>
 
 #include <functional>
 #include <limits>
+#include <stdexcept>
 #include <thread>
 
 namespace allocation_test {
 thread_local std::ptrdiff_t remaining = -1;
+thread_local bool recoverAfterFailure{};
+thread_local bool failureObserved{};
+thread_local std::size_t rejectedAllocations{};
+thread_local std::size_t allocationsAfterFailure{};
 thread_local void (*onAllocate)() = nullptr;
 thread_local std::size_t allocationsBeforeHook{};
 } // namespace allocation_test
 
 void *operator new(std::size_t size) {
+  if (allocation_test::failureObserved) {
+    ++allocation_test::allocationsAfterFailure;
+  }
+
   if (allocation_test::onAllocate) {
     if (allocation_test::allocationsBeforeHook) {
       --allocation_test::allocationsBeforeHook;
@@ -23,6 +32,13 @@ void *operator new(std::size_t size) {
     }
   }
   if (allocation_test::remaining == 0) {
+    ++allocation_test::rejectedAllocations;
+
+    if (allocation_test::recoverAfterFailure) {
+      allocation_test::failureObserved = true;
+      allocation_test::remaining = -1;
+    }
+
     throw std::bad_alloc();
   }
   if (allocation_test::remaining > 0) {
@@ -60,6 +76,13 @@ namespace sc = style::ct;
 namespace portals {
 // White-box limits are otherwise unreachable in a finite regression workload.
 struct StyleLayerTestAccess {
+  static auto admit(StyleEngine &engine, const PssDocument &document) {
+    StyleLayerHandle added;
+
+    return engine.mutate(StyleEngine::Mutation::ADMIT, {}, StyleTier::APPLICATION, "document", &document.sheet, {}, {},
+                         &added, nullptr, &document);
+  }
+
   static auto computedStage(StyleEngine &engine, std::size_t phase, void (*hook)()) {
     auto bindings = engine.bindings_;
     StyleSheet empty;
@@ -1296,4 +1319,778 @@ TEST_CASE("legacy flat rules and one theme layer agree for many selectors states
   CHECK(legacy[0].minWidth == 32);
   take(fixture.engine.bind(fixture.subject, targets[0]));
   CHECK(fixture.read() == resolveStyle(rules, targets[0]));
+}
+
+TEST_CASE("document admission enables layers atomically and retains legacy theme") {
+  ManagedFixture fixture;
+  take(fixture.scene->theme(foreground(RED)));
+
+  auto document = take(parsePssDocument("#subject { bold: true; }", "application.pss"));
+  auto rejected =
+    fixture.scene->styleDocument(StyleTier::APPLICATION, "application", document, StyleLayerOptions{.maxLayers = 2});
+
+  REQUIRE_FALSE(rejected);
+  CHECK(cause(rejected.error(), TreeError::INVALID_ARGUMENT));
+  CHECK(fixture.read().normal.foreground == RED);
+  CHECK(take(fixture.scene->styleSources()).empty());
+  REQUIRE_FALSE(fixture.scene->baseLayer(StyleTier::THEME));
+
+  auto admitted = fixture.scene->styleDocument(StyleTier::APPLICATION, "application", document);
+
+  REQUIRE(admitted);
+  CHECK(fixture.read().normal.foreground == RED);
+  CHECK(fixture.read().normal.bold);
+
+  auto sources = take(fixture.scene->styleSources());
+
+  REQUIRE(sources.size() == 3);
+  REQUIRE(sources[2].document);
+  CHECK(*sources[2].document == document);
+  REQUIRE(fixture.scene->validateStyleLayer(*admitted));
+}
+
+TEST_CASE("first document charges all three identities and every final aggregate budget before copies") {
+  SUBCASE("identity and installation order reserve three values") {
+    Fixture fixture;
+    take(fixture.engine.replace(foreground(RED)));
+
+    auto document = take(parsePssDocument("* { bold: true; }"));
+    const auto revision = fixture.engine.revision();
+
+    SUBCASE("id") {
+      StyleLayerTestAccess::identity(fixture.engine, std::numeric_limits<std::uint64_t>::max() - 2);
+    }
+
+    SUBCASE("order") {
+      StyleLayerTestAccess::order(fixture.engine, std::numeric_limits<std::uint64_t>::max() - 2);
+    }
+
+    allocation_test::remaining = 0;
+
+    auto rejected = StyleLayerTestAccess::admit(fixture.engine, document);
+
+    allocation_test::remaining = -1;
+
+    REQUIRE_FALSE(rejected);
+    CHECK(rejected.error().cause == TreeError::IDENTITY_EXHAUSTED);
+    CHECK(fixture.engine.revision() == revision);
+    CHECK(fixture.read().normal.foreground == RED);
+    REQUIRE_FALSE(fixture.engine.baseLayer(StyleTier::THEME));
+  }
+
+  SUBCASE("final budgets include legacy theme and new declarations") {
+    ManagedFixture fixture;
+    take(fixture.scene->theme(foreground(RED)));
+
+    auto document = take(parsePssDocument("* { bold: true; }", "budget.pss"));
+    StyleLayerOptions options;
+    const auto revision = fixture.revision();
+
+    SUBCASE("layer slots") {
+      options.maxLayers = 2;
+    }
+    SUBCASE("rules") {
+      options.maxRules = 1;
+    }
+    SUBCASE("declarations") {
+      options.maxDeclarations = 1;
+    }
+    SUBCASE("owning rule bytes") {
+      options.maxOwnedBytes = 1;
+    }
+    SUBCASE("metadata aggregate product") {
+      options.maxLayers = std::numeric_limits<std::size_t>::max();
+    }
+
+    allocation_test::remaining = 0;
+
+    auto rejected = fixture.scene->styleDocument(StyleTier::APPLICATION, "application", document, options);
+
+    allocation_test::remaining = -1;
+
+    REQUIRE_FALSE(rejected);
+    CHECK(cause(rejected.error(), TreeError::INVALID_ARGUMENT));
+    CHECK(fixture.revision() == revision);
+    CHECK(fixture.read().normal.foreground == RED);
+    REQUIRE_FALSE(fixture.scene->baseLayer(StyleTier::THEME));
+    CHECK(take(fixture.scene->styleSources()).empty());
+  }
+}
+
+TEST_CASE("document fault sweep preserves legacy lease mode pending targets styles and revision until sole commit") {
+  bool succeeded{};
+  std::size_t failures{};
+
+  for (std::ptrdiff_t budget = 0; budget < 240 && !succeeded; ++budget) {
+    ManagedFixture fixture;
+
+    auto live = take(sc::live(*fixture.scene, LIVE));
+    auto document = take(parsePssDocument("#future { foreground: #0000ff; }", "application.pss"));
+    const auto before = fixture.read();
+    const auto revision = fixture.revision();
+
+    take(fixture.scene->id(fixture.button.node(), "future"));
+    allocation_test::remaining = budget;
+
+    auto admitted = fixture.scene->styleDocument(StyleTier::APPLICATION, "application", document);
+
+    allocation_test::remaining = -1;
+
+    if (!admitted) {
+      ++failures;
+      CHECK(cause(admitted.error(), TreeError::NO_MEMORY));
+      CHECK(fixture.read() == before);
+      CHECK(fixture.revision() == revision);
+      CHECK(take(live.get<"color">()) == RED);
+      REQUIRE_FALSE(fixture.scene->baseLayer(StyleTier::THEME));
+      CHECK(take(fixture.scene->styleSources()).empty());
+
+      take(fixture.scene->styleDocument(StyleTier::APPLICATION, "application", document));
+
+      CHECK(fixture.read().normal.foreground == RgbColor{0, 0, 255});
+      CHECK(fixture.revision() == revision + 1);
+    } else {
+      succeeded = true;
+      CHECK(fixture.read().normal.foreground == RgbColor{0, 0, 255});
+      CHECK(fixture.revision() == revision + 1);
+      CHECK(take(fixture.scene->styleSources()).size() == 3);
+    }
+
+    auto stale = live.get<"color">();
+
+    REQUIRE_FALSE(stale);
+    CHECK(cause(stale.error(), TreeError::INVALID_ARGUMENT));
+  }
+
+  CHECK(succeeded);
+  CHECK(failures > 0);
+}
+
+TEST_CASE("documents deep copy ownership upsert stable order and adopt only omitted established budgets") {
+  ManagedFixture fixture;
+  StyleLayerOptions options{.maxLayers = 4};
+
+  take(fixture.scene->enableStyleLayers(options));
+
+  auto first = take(parsePssDocument("* { foreground: #ff0000; }", "first.pss"));
+  auto second = take(parsePssDocument("* { foreground: #0000ff; }", "second.pss"));
+  auto firstHandle = take(fixture.scene->styleDocument(StyleTier::APPLICATION, "first", first));
+  auto secondHandle = take(fixture.scene->styleDocument(StyleTier::APPLICATION, "second", second, options));
+
+  first.sourceName = "mutated caller";
+  first.sheet.rules[0].declarations.foreground = GOLD;
+
+  auto snapshot = take(fixture.scene->styleSources());
+
+  REQUIRE(snapshot.size() == 4);
+  REQUIRE(snapshot[2].document);
+  CHECK(snapshot[2].document->sourceName == "first.pss");
+  CHECK(snapshot[2].document->sheet.rules[0].declarations.foreground == RgbColor{255, 0, 0});
+  CHECK(fixture.read().normal.foreground == RgbColor{0, 0, 255});
+
+  auto replacement = take(parsePssDocument("* { foreground: #00ff00; }", "replacement.pss"));
+  const auto revision = fixture.revision();
+  auto incompatible = fixture.scene->styleDocument(StyleTier::APPLICATION, "first", replacement, StyleLayerOptions{});
+
+  REQUIRE_FALSE(incompatible);
+  CHECK(cause(incompatible.error(), TreeError::INVALID_ARGUMENT));
+  CHECK(fixture.revision() == revision);
+  CHECK(take(fixture.scene->styleSources())[2].document == snapshot[2].document);
+
+  take(fixture.scene->styleDocument(StyleTier::APPLICATION, "first", replacement));
+  take(fixture.scene->validateStyleLayer(firstHandle));
+  take(fixture.scene->validateStyleLayer(secondHandle));
+
+  CHECK(fixture.read().normal.foreground == RgbColor{0, 0, 255});
+
+  auto replaced = take(fixture.scene->styleSources());
+
+  CHECK(replaced[2].name == "first");
+  CHECK(replaced[3].name == "second");
+  CHECK(replaced[2].document->sourceName == "replacement.pss");
+}
+
+TEST_CASE("metadata only updates and equal low level replacements never call defaults revise or redraw") {
+  ManagedFixture fixture;
+
+  auto hook = take(fixture.scene->emplace<Hook>(fixture.scene->root()));
+
+  take(fixture.scene->style(hook, {"Hook", "hook", {}}));
+
+  auto document = take(parsePssDocument("* { foreground: #ff0000; }", "first.pss"));
+  auto layer = take(fixture.scene->styleDocument(StyleTier::APPLICATION, "application", document));
+  int calls{};
+  const auto revision = fixture.revision();
+
+  take(fixture.app->tree().read(hook, [&](const Hook &widget) {
+    calls = widget.calls;
+  }));
+  take(fixture.app->tree().consumeFrameRequest());
+  document.sourceName = "same declarations new source.pss";
+
+  take(fixture.scene->styleDocument(StyleTier::APPLICATION, "application", document));
+
+  CHECK(fixture.revision() == revision);
+  CHECK(take(fixture.app->tree().consumeFrameRequest()) == Invalidation::NONE);
+
+  take(fixture.app->tree().read(hook, [&](const Hook &widget) {
+    CHECK(widget.calls == calls);
+  }));
+
+  auto sources = take(fixture.scene->styleSources());
+
+  REQUIRE(sources[2].document);
+  CHECK(sources[2].document->sourceName == document.sourceName);
+  allocation_test::remaining = 0;
+
+  auto equalDocument = fixture.scene->styleDocument(StyleTier::APPLICATION, "application", document);
+  auto equalSheet = fixture.scene->replaceLayer(layer, document.sheet);
+
+  allocation_test::remaining = -1;
+
+  REQUIRE(equalDocument);
+  REQUIRE(equalSheet);
+  CHECK(*equalSheet == Invalidation::NONE);
+  CHECK(fixture.revision() == revision);
+  CHECK(take(fixture.app->tree().consumeFrameRequest()) == Invalidation::NONE);
+  CHECK_FALSE(take(fixture.scene->styleSources())[2].document);
+
+  take(fixture.app->tree().read(hook, [&](const Hook &widget) {
+    CHECK(widget.calls == calls);
+  }));
+}
+
+TEST_CASE("equal document with pending metadata performs the one real style transaction") {
+  ManagedFixture fixture;
+
+  auto document = take(parsePssDocument("#future { foreground: #0000ff; }", "application.pss"));
+
+  take(fixture.scene->styleDocument(StyleTier::APPLICATION, "application", document));
+
+  const auto revision = fixture.revision();
+
+  take(fixture.scene->id(fixture.button.node(), "future"));
+  take(fixture.scene->styleDocument(StyleTier::APPLICATION, "application", document));
+
+  CHECK(fixture.revision() == revision + 1);
+  CHECK(fixture.read().normal.foreground == RgbColor{0, 0, 255});
+}
+
+TEST_CASE("mutable document rejects malformed metadata before indexing and retains exact typed error") {
+  ManagedFixture fixture;
+
+  auto original = take(parsePssDocument("* { foreground: #ff0000; foreground: #00ff00; bold: false; }", "source.pss"));
+  auto layer = take(fixture.scene->styleDocument(StyleTier::APPLICATION, "application", original));
+  auto document = original;
+  auto prior = take(fixture.scene->styleSources());
+  const auto revision = fixture.revision();
+  const auto before = fixture.read();
+
+  SUBCASE("origin kind") {
+    document.originKind = static_cast<PssOriginKind>(-1);
+  }
+  SUBCASE("rule origins count") {
+    document.origins.clear();
+  }
+  SUBCASE("contiguous begin") {
+    document.origins[0].declarationBegin = std::numeric_limits<std::size_t>::max();
+  }
+  SUBCASE("overflow count") {
+    document.origins[0].declarationCount = std::numeric_limits<std::size_t>::max();
+  }
+  SUBCASE("escaped effective index") {
+    document.origins[0].effectiveDeclaration[0] = std::numeric_limits<std::size_t>::max() - 1;
+  }
+  SUBCASE("wrong rule index") {
+    document.declarations[0].ruleIndex = std::numeric_limits<std::size_t>::max();
+  }
+  SUBCASE("negative property") {
+    document.declarations[0].property = static_cast<PssProperty>(-1);
+  }
+  SUBCASE("large property") {
+    document.declarations[0].property = static_cast<PssProperty>(PSS_PROPERTY_COUNT);
+  }
+  SUBCASE("zero coordinate") {
+    document.declarations[0].location.line = 0;
+  }
+  SUBCASE("unbounded coordinate") {
+    document.origins[0].selector.offset = std::numeric_limits<std::size_t>::max();
+  }
+  SUBCASE("unordered coordinates") {
+    document.declarations[1].location = document.origins[0].selector;
+  }
+  SUBCASE("last wins link") {
+    document.origins[0].effectiveDeclaration[0] = 0;
+  }
+  SUBCASE("missing effective link") {
+    document.origins[0].effectiveDeclaration[2] = NO_PSS_DECLARATION;
+  }
+  SUBCASE("inactive scalar width") {
+    document.declarations[0].value.width = 1;
+  }
+  SUBCASE("inactive scalar color") {
+    document.declarations[2].value.color = RED;
+  }
+  SUBCASE("inactive scalar boolean") {
+    document.declarations[0].value.boolean = true;
+  }
+  SUBCASE("final declarations mismatch") {
+    document.sheet.rules[0].declarations.bold = true;
+  }
+  SUBCASE("invalid selector state") {
+    document.sheet.rules[0].selector.state = static_cast<StyleState>(-1);
+  }
+  SUBCASE("unclaimed occurrence") {
+    --document.origins[0].declarationCount;
+    document.origins[0].effectiveDeclaration[2] = NO_PSS_DECLARATION;
+  }
+  SUBCASE("source NUL") {
+    document.sourceName = std::string("bad\0name", 8);
+  }
+  SUBCASE("source UTF8") {
+    document.sourceName = std::string(1, '\xFF');
+  }
+  SUBCASE("source byte budget") {
+    document.sourceName.assign(MAX_PSS_SOURCE_NAME_BYTES + 1, 'a');
+  }
+  SUBCASE("logical document budget") {
+    document.sheet.rules[0].selector.type.assign(MAX_PSS_DOCUMENT_BYTES, 'a');
+  }
+
+  auto rejected = fixture.scene->styleDocument(StyleTier::APPLICATION, "application", document);
+
+  REQUIRE_FALSE(rejected);
+  CHECK(cause(rejected.error(), TreeError::INVALID_ARGUMENT));
+  CHECK(rejected.error().phase == ManagedPhase::STYLE);
+  REQUIRE(rejected.error().pss);
+  CHECK(rejected.error().pss->code != PssErrorCode::NONE);
+  CHECK(fixture.read() == before);
+  CHECK(fixture.revision() == revision);
+  REQUIRE(fixture.scene->validateStyleLayer(layer));
+  CHECK(take(fixture.scene->styleSources())[2].document == prior[2].document);
+
+  if (document.sourceName.size() <= MAX_PSS_SOURCE_NAME_BYTES) {
+    REQUIRE(rejected.error().styleSource);
+    CHECK(*rejected.error().styleSource == document.sourceName);
+  }
+}
+
+TEST_CASE("synthetic typed document ordinals are admitted separately from byte positions") {
+  ManagedFixture fixture;
+  constexpr auto COMPACT =
+    sc::compactSheet(std::array{sc::flatRule(sc::selector(), sc::foreground(sc::rgb(1, 2, 3)))}, "typed");
+
+  auto document = take(sc::materializeDocument(COMPACT));
+
+  REQUIRE(document.originKind == PssOriginKind::SYNTHETIC_TYPED);
+  REQUIRE(fixture.scene->styleDocument(StyleTier::USER, "typed", document));
+  document.declarations[0].location.offset = 100;
+
+  auto rejected = fixture.scene->styleDocument(StyleTier::USER, "typed", document);
+
+  REQUIRE_FALSE(rejected);
+  REQUIRE(rejected.error().pss);
+  CHECK(rejected.error().pss->code == PssErrorCode::INVALID_VALUE);
+}
+
+TEST_CASE("low level batch clear failure removal and cleanup follow actual layer source lifetime") {
+  ManagedFixture fixture;
+
+  auto application = take(parsePssDocument("* { bold: true; }", "application.pss"));
+  auto user = take(parsePssDocument("* { foreground: #0000ff; }", "user.pss"));
+  auto appLayer = take(fixture.scene->styleDocument(StyleTier::APPLICATION, "application", application));
+  auto userLayer = take(fixture.scene->styleDocument(StyleTier::USER, "user", user));
+  auto snapshot = take(fixture.scene->styleSources());
+  std::weak_ptr<const PssDocument> appDocument = snapshot[2].document;
+  std::weak_ptr<const PssDocument> userDocument = snapshot[3].document;
+  auto invalid = user.sheet;
+
+  invalid.rules[0].declarations.minWidth = -1;
+
+  const std::array invalidBatch{StyleLayerUpdate{appLayer, application.sheet}, StyleLayerUpdate{userLayer, invalid}};
+
+  REQUIRE_FALSE(fixture.scene->updateLayers(invalidBatch));
+  CHECK(take(fixture.scene->styleSources())[2].document == snapshot[2].document);
+  CHECK(take(fixture.scene->styleSources())[3].document == snapshot[3].document);
+
+  const std::array clearBatch{StyleLayerUpdate{appLayer, application.sheet}, StyleLayerUpdate{userLayer, std::nullopt}};
+
+  take(fixture.scene->updateLayers(clearBatch));
+
+  auto cleared = take(fixture.scene->styleSources());
+
+  REQUIRE(cleared.size() == 3);
+  CHECK_FALSE(cleared[2].document);
+  REQUIRE_FALSE(fixture.scene->validateStyleLayer(userLayer));
+  CHECK_FALSE(appDocument.expired());
+  CHECK_FALSE(userDocument.expired());
+  snapshot.clear();
+  CHECK(appDocument.expired());
+  CHECK(userDocument.expired());
+
+  take(fixture.scene->styleDocument(StyleTier::APPLICATION, "application", application));
+
+  auto retained = take(fixture.scene->styleSources());
+  std::weak_ptr<const PssDocument> retainedDocument = retained[2].document;
+
+  take(fixture.scene->close());
+
+  REQUIRE_FALSE(fixture.scene->styleSources());
+  CHECK_FALSE(retainedDocument.expired());
+  retained.clear();
+  CHECK(retainedDocument.expired());
+}
+
+TEST_CASE("theme handoff and live apply retain unrelated application and user source rows") {
+  ManagedFixture fixture;
+
+  auto document = take(parsePssDocument("* { bold: true; }", "application.pss"));
+
+  take(fixture.scene->styleDocument(StyleTier::APPLICATION, "application", document));
+
+  auto snapshot = take(fixture.scene->styleSources());
+
+  take(fixture.scene->theme(foreground(GREEN)));
+
+  CHECK(take(fixture.scene->styleSources())[2].document == snapshot[2].document);
+
+  auto live = take(sc::live(*fixture.scene, LIVE));
+
+  take(live.set<"color">(BLUE));
+
+  CHECK(take(fixture.scene->styleSources())[2].document == snapshot[2].document);
+  CHECK(fixture.read().normal.bold);
+}
+
+TEST_CASE("metadata allocation failures preserve document identity values revision and pending invalidation") {
+  bool succeeded{};
+  std::size_t failures{};
+
+  for (std::ptrdiff_t budget = 0; budget < 120 && !succeeded; ++budget) {
+    ManagedFixture fixture;
+
+    auto document = take(parsePssDocument("* { bold: true; }", "old source.pss"));
+
+    take(fixture.scene->styleDocument(StyleTier::APPLICATION, "application", document));
+
+    auto prior = take(fixture.scene->styleSources());
+    const auto revision = fixture.revision();
+    const auto before = fixture.read();
+
+    take(fixture.app->tree().consumeFrameRequest());
+    document.sourceName = "new source label with identical declarations.pss";
+    allocation_test::remaining = budget;
+
+    auto changed = fixture.scene->styleDocument(StyleTier::APPLICATION, "application", document);
+
+    allocation_test::remaining = -1;
+
+    CHECK(fixture.read() == before);
+    CHECK(fixture.revision() == revision);
+    CHECK(take(fixture.app->tree().consumeFrameRequest()) == Invalidation::NONE);
+
+    if (!changed) {
+      ++failures;
+      CHECK(cause(changed.error(), TreeError::NO_MEMORY));
+      REQUIRE(changed.error().pss);
+      CHECK(changed.error().pss->code == PssErrorCode::ALLOCATION);
+      CHECK(take(fixture.scene->styleSources())[2].document == prior[2].document);
+    } else {
+      succeeded = true;
+      CHECK(take(fixture.scene->styleSources())[2].document->sourceName == document.sourceName);
+    }
+  }
+
+  CHECK(succeeded);
+  CHECK(failures > 0);
+}
+
+TEST_CASE("source snapshot allocation sweep catches every owning transfer and preserves installed documents") {
+  bool succeeded{};
+  std::size_t failures{};
+
+  for (std::ptrdiff_t budget = 0; budget < 120 && !succeeded; ++budget) {
+    ManagedFixture fixture;
+
+    auto document = take(parsePssDocument("* { bold: true; }", "source.pss"));
+    auto layer = take(fixture.scene->styleDocument(
+      StyleTier::APPLICATION, "long application layer name requiring owned string storage", document));
+    auto prior = take(fixture.scene->styleSources());
+
+    allocation_test::remaining = budget;
+
+    auto snapshot = fixture.scene->styleSources();
+
+    allocation_test::remaining = -1;
+
+    if (!snapshot) {
+      ++failures;
+      CHECK(cause(snapshot.error(), TreeError::NO_MEMORY));
+    } else {
+      succeeded = true;
+      REQUIRE(snapshot->size() == 3);
+      CHECK((*snapshot)[2].document == prior[2].document);
+    }
+
+    REQUIRE(fixture.scene->validateStyleLayer(layer));
+    CHECK(take(fixture.scene->styleSources())[2].document == prior[2].document);
+  }
+
+  CHECK(succeeded);
+  CHECK(failures > 0);
+}
+
+TEST_CASE("document staging and snapshot allocation reject scene mutation and cleanup reentry") {
+  for (const bool snapshotting : {false, true}) {
+    ManagedFixture fixture;
+
+    auto document = take(parsePssDocument("* { bold: true; }", "source.pss"));
+    auto layer = take(fixture.scene->styleDocument(
+      StyleTier::APPLICATION, "long application layer name requiring owned string storage", document));
+    const auto nested = foreground(BLUE);
+
+    allocatorScene = fixture.scene.get();
+    allocatorSheet = &nested;
+    allocatorLayer = layer;
+    allocatorSubject = fixture.button.node();
+    stageHookFired = false;
+    document.sourceName = "new owning source requiring a document copy.pss";
+    allocation_test::allocationsBeforeHook = 0;
+    allocation_test::onAllocate = mutateSceneDuringMetadataStaging;
+
+    if (snapshotting) {
+      auto snapshot = fixture.scene->styleSources();
+
+      allocation_test::onAllocate = nullptr;
+      REQUIRE(snapshot);
+    } else {
+      auto updated = fixture.scene->styleDocument(
+        StyleTier::APPLICATION, "long application layer name requiring owned string storage", document);
+
+      allocation_test::onAllocate = nullptr;
+      REQUIRE(updated);
+    }
+
+    REQUIRE(stageHookFired);
+    CHECK(stageNestedBlocked);
+    REQUIRE(fixture.scene->validateStyleLayer(layer));
+    REQUIRE(fixture.scene->close());
+  }
+}
+
+TEST_CASE("style source admission snapshots and handle validation enforce owner frame foreign and stale boundaries") {
+  ManagedFixture fixture;
+  ManagedFixture other;
+
+  auto document = take(parsePssDocument("* { bold: true; }", "source.pss"));
+  auto layer = take(fixture.scene->styleDocument(StyleTier::APPLICATION, "application", document));
+
+  REQUIRE_FALSE(fixture.scene->validateStyleLayer({}));
+  REQUIRE_FALSE(other.scene->validateStyleLayer(layer));
+
+  bool wrongAdmission{};
+  bool wrongSnapshot{};
+  bool wrongValidation{};
+  std::thread worker([&] {
+    auto admitted = fixture.scene->styleDocument(StyleTier::APPLICATION, "application", document);
+    auto snapshot = fixture.scene->styleSources();
+    auto validated = fixture.scene->validateStyleLayer(layer);
+
+    wrongAdmission = !admitted && cause(admitted.error(), TreeError::WRONG_THREAD);
+    wrongSnapshot = !snapshot && cause(snapshot.error(), TreeError::WRONG_THREAD);
+    wrongValidation = !validated && cause(validated.error(), TreeError::WRONG_THREAD);
+  });
+
+  worker.join();
+
+  CHECK(wrongAdmission);
+  CHECK(wrongSnapshot);
+  CHECK(wrongValidation);
+
+  take(fixture.app->tree().frame([&] {
+    auto admitted = fixture.scene->styleDocument(StyleTier::APPLICATION, "application", document);
+    auto snapshot = fixture.scene->styleSources();
+    auto validated = fixture.scene->validateStyleLayer(layer);
+
+    REQUIRE_FALSE(admitted);
+    REQUIRE_FALSE(snapshot);
+    REQUIRE_FALSE(validated);
+    CHECK(cause(admitted.error(), TreeError::WOULD_BLOCK));
+    CHECK(cause(snapshot.error(), TreeError::WOULD_BLOCK));
+    CHECK(cause(validated.error(), TreeError::WOULD_BLOCK));
+  }));
+
+  take(fixture.scene->removeLayer(layer));
+
+  REQUIRE_FALSE(fixture.scene->validateStyleLayer(layer));
+
+  take(fixture.scene->addLayer(StyleTier::APPLICATION, "application", document.sheet));
+
+  REQUIRE_FALSE(fixture.scene->validateStyleLayer(layer));
+  take(fixture.scene->close());
+
+  auto closed = fixture.scene->validateStyleLayer(layer);
+
+  REQUIRE_FALSE(closed);
+  CHECK(cause(closed.error(), TreeError::CLOSED));
+}
+
+TEST_CASE("unequal document upsert fault sweep preserves every source and pending registration") {
+  bool succeeded{};
+  std::size_t failures{};
+
+  for (std::ptrdiff_t budget = 0; budget < 240 && !succeeded; ++budget) {
+    ManagedFixture fixture;
+
+    auto application = take(parsePssDocument("#subject { foreground: #ff0000; }", "old application.pss"));
+    auto user = take(parsePssDocument("* { bold: true; }", "user.pss"));
+    auto replacement = take(parsePssDocument("#future { foreground: #0000ff; }", "new application.pss"));
+    auto layer = take(fixture.scene->styleDocument(StyleTier::APPLICATION, "application", application));
+
+    take(fixture.scene->styleDocument(StyleTier::USER, "user", user));
+
+    auto prior = take(fixture.scene->styleSources());
+    const auto before = fixture.read();
+    const auto revision = fixture.revision();
+
+    take(fixture.scene->id(fixture.button.node(), "future"));
+    allocation_test::remaining = budget;
+
+    auto updated = fixture.scene->styleDocument(StyleTier::APPLICATION, "application", replacement);
+
+    allocation_test::remaining = -1;
+
+    if (!updated) {
+      ++failures;
+      CHECK(cause(updated.error(), TreeError::NO_MEMORY));
+      CHECK(fixture.read() == before);
+      CHECK(fixture.revision() == revision);
+      CHECK(take(fixture.scene->styleSources())[2].document == prior[2].document);
+      CHECK(take(fixture.scene->styleSources())[3].document == prior[3].document);
+
+      take(fixture.scene->styleDocument(StyleTier::APPLICATION, "application", replacement));
+    } else {
+      succeeded = true;
+    }
+
+    take(fixture.scene->validateStyleLayer(layer));
+
+    CHECK(fixture.read().normal.foreground == RgbColor{0, 0, 255});
+    CHECK(fixture.read().normal.bold);
+    CHECK(fixture.revision() == revision + 1);
+    CHECK(take(fixture.scene->styleSources())[3].document == prior[3].document);
+  }
+
+  CHECK(succeeded);
+  CHECK(failures > 0);
+}
+
+TEST_CASE("throwing widget defaults leaves first document legacy mode authority and source rows intact") {
+  ManagedFixture fixture;
+
+  auto hook = take(fixture.scene->emplace<Hook>(fixture.scene->root()));
+
+  take(fixture.scene->style(hook, {"Hook", "hook", {}}));
+
+  auto live = take(sc::live(*fixture.scene, LIVE));
+  auto document = take(parsePssDocument("* { bold: true; }", "application.pss"));
+  const auto before = fixture.read();
+  const auto revision = fixture.revision();
+
+  take(fixture.app->tree().edit(hook, [&](Hook &widget) {
+    widget.onDefaults = [] {
+      throw std::runtime_error("defaults failure");
+    };
+  }));
+
+  auto rejected = fixture.scene->styleDocument(StyleTier::APPLICATION, "application", document);
+
+  REQUIRE_FALSE(rejected);
+  CHECK(cause(rejected.error(), TreeError::CALLBACK_FAILED));
+  CHECK(fixture.read() == before);
+  CHECK(fixture.revision() == revision);
+  CHECK(take(fixture.scene->styleSources()).empty());
+  CHECK(take(live.get<"color">()) == RED);
+  REQUIRE_FALSE(fixture.scene->baseLayer(StyleTier::THEME));
+
+  take(fixture.app->tree().edit(hook, [](Hook &widget) {
+    widget.onDefaults = {};
+  }));
+  take(fixture.scene->styleDocument(StyleTier::APPLICATION, "application", document));
+
+  CHECK(fixture.revision() == revision + 1);
+  CHECK(take(fixture.scene->styleSources()).size() == 3);
+}
+
+TEST_CASE("byte provenance accepts BOM multiline UTF8 comments duplicates and explicit scalar false") {
+  ManagedFixture fixture;
+
+  auto document = take(
+    parsePssDocument("\xef\xbb\xbf/* \xc3\xa9 */\n* {\n bold: true; bold: false;\n min-width: 0;\n}\n", "source.pss"));
+
+  REQUIRE(fixture.scene->styleDocument(StyleTier::APPLICATION, "application", document));
+
+  auto snapshot = take(fixture.scene->styleSources());
+
+  REQUIRE(snapshot[2].document);
+  CHECK(*snapshot[2].document == document);
+}
+
+TEST_CASE("one shot allocation failure never retries source ownership after original NO_MEMORY") {
+  ManagedFixture fixture;
+
+  auto document = take(parsePssDocument("* { bold: true; }", "owning source identity requires allocated storage.pss"));
+  bool snapshotting{};
+
+  SUBCASE("admitted document reaches engine ownership failure after pending targets were flushed") {
+    snapshotting = false;
+  }
+
+  SUBCASE("source snapshot returns original allocation failure without a second allocation") {
+    take(fixture.scene->styleDocument(StyleTier::APPLICATION, "application", document));
+
+    snapshotting = true;
+  }
+
+  allocation_test::rejectedAllocations = 0;
+  allocation_test::allocationsAfterFailure = 0;
+  allocation_test::failureObserved = false;
+  allocation_test::recoverAfterFailure = true;
+  allocation_test::remaining = 0;
+
+  std::optional<ManagedError> failure;
+
+  if (snapshotting) {
+    auto result = fixture.scene->styleSources();
+
+    if (!result) {
+      failure = result.error();
+    }
+  } else {
+    auto result = fixture.scene->styleDocument(StyleTier::APPLICATION, "application", document);
+
+    if (!result) {
+      failure = result.error();
+    }
+  }
+
+  const auto rejectedAllocations = allocation_test::rejectedAllocations;
+  const auto allocationsAfterFailure = allocation_test::allocationsAfterFailure;
+
+  allocation_test::remaining = -1;
+  allocation_test::recoverAfterFailure = false;
+  allocation_test::failureObserved = false;
+
+  REQUIRE(failure);
+  CHECK(cause(*failure, TreeError::NO_MEMORY));
+  CHECK(rejectedAllocations == 1);
+  CHECK(allocationsAfterFailure == 0);
+  CHECK_FALSE(failure->styleSource);
+
+  if (!snapshotting) {
+    REQUIRE(failure->pss);
+    CHECK(failure->pss->code == PssErrorCode::ALLOCATION);
+    CHECK(failure->pss->cause == TreeError::NO_MEMORY);
+    CHECK(take(fixture.scene->styleSources()).empty());
+  }
 }
