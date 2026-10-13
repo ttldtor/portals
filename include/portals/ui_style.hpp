@@ -212,7 +212,7 @@ inline StyleStage style(std::string_view bytes, const StyleOptions &options = {}
  * @return Owning strict input stage; embedded NUL cannot be silently truncated by strlen.
  */
 template <std::size_t N>
-StyleStage style(const char (&bytes)[N], const StyleOptions &options = {},
+StyleStage style(const char (&bytes)[N], const StyleOptions &options = StyleOptions{},
                  std::source_location origin = std::source_location::current()) {
   return style(std::string_view(bytes, N && bytes[N - 1] == '\0' ? N - 1 : N), options, origin);
 }
