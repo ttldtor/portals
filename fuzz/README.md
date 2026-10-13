@@ -1,7 +1,7 @@
-# Bounded input and text fuzzing
+# Bounded input, text and style fuzzing
 
 These optional Clang/libFuzzer targets exercise the production input decoder and
-Unicode text code under AddressSanitizer and UndefinedBehaviorSanitizer. Core
+Unicode text code and PSS parser under AddressSanitizer and UndefinedBehaviorSanitizer. Core
 and vendored Unicode objects receive coverage and sanitizer instrumentation too.
 The default build is unchanged. No target opens a terminal or clipboard.
 
@@ -48,3 +48,19 @@ Inputs above 4096 bytes are intentionally ignored by both harnesses. Successful
 runs establish evidence for the sampled inputs, not the absence of all bugs.
 Model/lifecycle, renderer and full application fuzz campaigns are separate work.
 See the primary [libFuzzer documentation](https://llvm.org/docs/LibFuzzer.html).
+
+The PSS harness also consumes parsed rules after their temporary source has been
+destroyed and resolves them against several target identities. Build and run it
+in the same instrumented configuration:
+
+```sh
+cmake --build build/fuzz --target portals_fuzz_pss
+mkdir -p build/fuzz/corpus-pss
+cp fuzz/corpus/pss/* build/fuzz/corpus-pss/
+build/fuzz/fuzz/portals_fuzz_pss build/fuzz/corpus-pss \
+  -max_len=16384 -max_total_time=60 -timeout=5 -rss_limit_mb=1024 \
+  -seed=213 -artifact_prefix=build/fuzz/artifacts/
+```
+
+This harness ignores inputs above 16384 bytes. Unit tests cover the full parser
+input and rule limits separately; this bounded campaign does not replace them.

@@ -1,0 +1,2 @@
+Button.primary#action { foreground: #f0a010; min-width: 8; }
+LineEdit:caret { bold: true; background: #201810; }

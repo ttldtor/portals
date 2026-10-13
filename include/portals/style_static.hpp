@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include <portals/detail/pss_parser.hpp>
 #include <portals/ui_static.hpp>
 
 /// @brief Constant-built owning rules expanded into the existing runtime style cascade.
@@ -562,6 +563,44 @@ consteval auto selector(StyleState state = StyleState::ANY) {
   return detail::Selector<Type, Id, Classes...>{state};
 }
 
+/** @param state Optional presentation-state predicate.
+ * @return Owning universal selector using the existing conjunction semantics.
+ */
+consteval auto all(StyleState state = StyleState::ANY) {
+  return selector<>(state);
+}
+
+/** @tparam Name Static owned target identity, validated by the consuming API.
+ * @param state Optional presentation-state predicate.
+ * @return Owning ID selector with no widget-type constraint.
+ */
+template <detail::Literal Name> consteval auto id(StyleState state = StyleState::ANY) {
+  static_assert(portals::detail::isPssIdentifier(Name.view()), "Static style ID requires a PSS ASCII identifier");
+
+  return selector<"", Name>(state);
+}
+
+/** @tparam Name Static owned widget type, validated by the consuming API.
+ * @param state Optional presentation-state predicate.
+ * @return Owning type selector with no ID constraint.
+ */
+template <detail::Literal Name> consteval auto type(StyleState state = StyleState::ANY) {
+  static_assert(Name.view() == "*" || portals::detail::isPssIdentifier(Name.view()),
+                "Static style type requires a PSS ASCII identifier or universal '*'");
+
+  return selector<Name>(state);
+}
+
+/** @tparam Name Static owned required class identity, validated by the consuming API.
+ * @param state Optional presentation-state predicate.
+ * @return Owning single-class selector.
+ */
+template <detail::Literal Name> consteval auto className(StyleState state = StyleState::ANY) {
+  static_assert(portals::detail::isPssIdentifier(Name.view()), "Static style class requires a PSS ASCII identifier");
+
+  return selector<"", "", Name>(state);
+}
+
 /** @tparam E Color or color expression type.
  * @param expression Foreground value evaluated when the sheet is materialized.
  * @return Typed declaration.
@@ -576,6 +615,22 @@ template <class E> consteval auto foreground(E expression) {
  */
 template <class E> consteval auto background(E expression) {
   return detail::Declaration<detail::Property::BACKGROUND, E>{expression};
+}
+
+/** @tparam E RGB scalar or existing color expression type.
+ * @param expression Owned foreground expression, validated by the consuming sheet.
+ * @return Existing foreground declaration with identical token and materialization semantics.
+ */
+template <class E> consteval auto fg(E expression) {
+  return foreground(expression);
+}
+
+/** @tparam E RGB scalar or existing color expression type.
+ * @param expression Owned background expression, validated by the consuming sheet.
+ * @return Existing background declaration with identical token and materialization semantics.
+ */
+template <class E> consteval auto bg(E expression) {
+  return background(expression);
 }
 
 /** @tparam E Boolean or boolean token type.

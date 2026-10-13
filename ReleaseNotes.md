@@ -5,6 +5,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Added] A shared PSS v0 parser for C++23 constant strings and runtime owning
+  documents, with bounded data descriptors, short typed selectors and source
+  metadata for every declaration. Existing typed live themes and the legacy
+  parser remain available.
+
 - [Added] Opt-in DEFAULTS/THEME/APPLICATION/USER style layers with property-wise
   precedence, atomic updates and aggregate logical payload budgets. Theme switches
   and live theme parameters preserve overrides; stale theme controllers report

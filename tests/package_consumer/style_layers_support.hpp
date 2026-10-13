@@ -22,7 +22,18 @@ inline StyleSheet userSheet() {
 }
 
 // Both complete consumers include this helper and the replay terminal, including errors and cleanup.
-template <class Factory> int run(int argc, char **argv, Factory initialize, bool layered = false) {
+/** @tparam Factory Callable attaching a checked controller to a stable managed owner.
+ * @param argc Number of command-line arguments, including the executable name.
+ * @param argv Arguments accepting only the optional intentional --failure scenario.
+ * @param initialize Controller factory invoked after mount; errors retain managed cleanup.
+ * @param layered Whether to enable the existing application/user layer cascade.
+ * @param application Optional override borrowed for this synchronous run; null uses the original sheet.
+ * @param user Optional override borrowed for this synchronous run; null uses the original sheet.
+ * @return Zero when replay, typed failure and lifetime checks match the selected scenario.
+ */
+template <class Factory>
+int run(int argc, char **argv, Factory initialize, bool layered = false, const StyleSheet *application = nullptr,
+        const StyleSheet *user = nullptr) {
   const bool failure = argc == 2 && std::string_view(argv[1]) == "--failure";
 
   if (argc > 2 || (argc == 2 && !failure)) {
@@ -59,8 +70,8 @@ template <class Factory> int run(int argc, char **argv, Factory initialize, bool
                          options);
   if (layered) {
     scene.styleLayers()
-      .styleLayer(StyleTier::APPLICATION, "application", applicationSheet())
-      .styleLayer(StyleTier::USER, "user", userSheet());
+      .styleLayer(StyleTier::APPLICATION, "application", application ? *application : applicationSheet())
+      .styleLayer(StyleTier::USER, "user", user ? *user : userSheet());
   }
 
   scene.configure([&](ManagedScene &owner) -> std::expected<void, ManagedError> {

@@ -1,5 +1,31 @@
 # MVP measurements
 
+## PSS parser measurements
+
+`portals_pss_benchmark` measures the existing runtime `parsePss` entry point
+without opening a terminal. `--check` validates seven source cases and their
+complete successful results or exact error category and position. Timing covers
+the parser call and its result transfer; destruction of a successful result,
+source generation, semantic checking and JSON output happen outside the timer.
+Cleanup of a partially parsed failing result remains part of the call.
+
+```powershell
+.\portals_pss_benchmark.exe --check
+.\portals_pss_benchmark.exe --samples 100 --warmup 10 --batch 16 --output parse.json
+.\portals_pss_benchmark.exe --samples 100 --warmup 10 --batch 16 --reverse --output parse-reverse.json
+```
+
+`--samples` is the number of retained timed batches (1–10000); `--warmup` is
+the number of untimed batches (0–1000); `--batch` is the number of individually
+timed calls averaged within each sample (1–1024). `--reverse` reverses case
+order; `--output` writes JSON to an existing directory instead of stdout.
+Percentiles describe batch averages, not individual-call tail latency. Use
+matched Release compiler flags, preserve raw reports, and alternate before/after
+order over at least three process pairs. Parsing cost is separate from frame
+rendering cost and compile-time evaluation cost. Timer overhead remains included.
+
+## Application measurements
+
 `portals_mvp_benchmark` runs the production `Application::run` and dashboard once
 with real steady time. It does not implement another event loop. Build with
 `PORTALS_BUILD_TOOLS=ON`; tests additionally use `PORTALS_BUILD_TESTS=ON`.

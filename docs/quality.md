@@ -174,6 +174,7 @@ observations rather than trusting cached normalized numbers.
 | --- | --- |
 | `managed` | Schema-1 complete/correctness-verified managed benchmark; per API/rows/phase p50/p95 ns, retained min/max/count/raw timing samples, and scene-node context. `--check` is refused as a performance baseline. |
 | `compact` | Current compact benchmark stdout; per API/phase p50/p95 ns, ordinary allocation-call min/max, sample count, scene nodes, and column workload. This benchmark exports no raw timing arrays or timing variance; those fields remain absent/null in the evidence. |
+| `pss` | `portals.pss.v1` runtime parser benchmark; all seven case identities, raw batch averages and nearest-rank p50/p95. Values are exactly scaled to integer `ns_per_batch`; evidence records `distribution: batch_means`, the batch scale, and original `ns_per_parse` units. |
 | `mvp` application | Schema-1 complete fixed-viewport application observation with successful accounting, OHLC, and shutdown; phase, transport-read, data-ingress, and runner-control p50/p95 with retained range/count/overflow; actual accepted frames, bytes, wall time, and process CPU time as context. |
 | `mvp` separate encoding | Schema-1 complete oracle-verified encoding observation; full/diff/render p50/p95, retained ranges/counts/raw samples, and frame/byte context. |
 
@@ -186,6 +187,28 @@ no allocation metric to invent. Timing boundaries and units are described in the
 [benchmark README](../tools/benchmarks/README.md) and
 [managed measurement documentation](managed-performance.md).
 
+PSS v1 emits its report after validating every timed result outside the timer.
+It has no separate completion or correctness flag: import checks the known
+producer contract in `tools/benchmarks/pss.cpp`, positive checksum, complete case
+and sample sets, supported timing/cleanup headers, and successful process exit
+in the required metadata. This is provenance for that producer, not an independent
+semantic proof. Its p95 describes the distribution of batch means, not individual
+parse-call latency. Successful owning-result destruction is excluded; partial
+error cleanup is included. Memory remains `NOT_MEASURED`.
+
+The native CMake adapter reads original decimal tokens without floating-point
+evaluation. It accepts nonnegative ordinary decimal notation with at most 15
+fractional places after removing trailing zeros, only when multiplication by
+`batch` produces an exact integer within `2^53-1`. Scientific notation, excessive
+precision, inexact scaling, and overflow fail explicitly; arbitrary batch sizes
+can therefore produce unsupported reports. Raw JSON bytes and their SHA-256 are
+preserved unchanged. Scaling enables comparison without rounding, but does not
+turn batch averages into individual-call samples.
+PSS import rejects duplicate JSON object keys, including escaped spellings of
+the same key, before interpreting numeric tokens. Quoted key-like text is treated
+as a string value. The v1 case shape is flat except for its raw numeric array;
+nested case extensions are rejected to keep token extraction unambiguous.
+
 Comparison requires identical benchmark kind, toolchain metadata, configuration,
 host metadata, workload label, actual raw-derived workload signature, and metric
 shape/units. Managed signatures include compiler, assertion mode, pointer width,
@@ -194,6 +217,9 @@ sample/warmup/node/column counts and APIs. MVP application signatures include
 compiler, platform, transport, rate, seed, rows, frame cap, observation/warmup,
 delay, color/text modes, diagnostics, capacity, boundaries, and viewports.
 MVP encoding signatures include capture identity, frames, repetitions, and modes.
+PSS signatures include schema, API, units, sample/warmup/batch counts, traversal
+order, timing and destruction/cleanup boundaries, and each case's identity,
+source-byte count, validity, and expected-rule count.
 Revision and executable/output paths in recorded commands may differ. Configure
 commands inside toolchain metadata are compared exactly, so consistently record
 their invocation context. Mismatched inputs fail instead of quietly producing

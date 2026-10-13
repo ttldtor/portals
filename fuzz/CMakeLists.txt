@@ -9,7 +9,7 @@ foreach(target IN ITEMS portals_core portals_utf8proc)
   target_link_options(${target} INTERFACE -fsanitize=address,undefined)
 endforeach()
 
-foreach(component IN ITEMS input text)
+foreach(component IN ITEMS input text pss)
   add_executable(portals_fuzz_${component} ${component}.cpp)
   target_link_libraries(portals_fuzz_${component} PRIVATE portals::core)
   target_compile_options(portals_fuzz_${component} PRIVATE

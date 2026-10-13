@@ -1,280 +1,139 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
-#include <portals/style.hpp>
-
-#include <charconv>
+#include <portals/detail/pss_parser.hpp>
 
 namespace portals {
 namespace {
-bool letter(char value) {
-  return (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') || value == '_';
-}
-
-bool digit(char value) {
-  return value >= '0' && value <= '9';
-}
-
-class Parser {
+class RuntimeSink {
 public:
-  explicit Parser(std::string_view source) : source_(source) {
+  RuntimeSink(std::string_view source, bool metadata) : source_(source), metadata_(metadata) {
   }
 
-  StyleSheet parse() {
-    StyleSheet sheet;
+  std::expected<void, PssError> sourceName(std::string_view name) {
+    auto admitted = charge(name.size(), {});
 
-    skipSpace();
-
-    while (position_ != source_.size()) {
-      if (sheet.rules.size() == MAX_STYLE_RULES) {
-        fail("Too many style rules");
-      }
-
-      auto selector = parseSelector();
-
-      expect('{');
-
-      StyleDeclarations declarations;
-
-      while (peek() != '}') {
-        parseDeclaration(declarations, selector.state);
-      }
-
-      expect('}');
-      sheet.rules.push_back({std::move(selector), declarations});
+    if (!admitted) {
+      return admitted;
     }
 
-    return sheet;
+    document.sourceName.assign(name);
+
+    return {};
   }
+
+  std::expected<void, PssError> beginRule(PssLocation location) {
+    auto admitted = charge(sizeof(StyleRule) + sizeof(PssRuleOrigin), location);
+
+    if (!admitted) {
+      return admitted;
+    }
+
+    current_ = StyleRule{};
+    origin_ = PssRuleOrigin{};
+    origin_.selector = location;
+    origin_.declarationBegin = document.declarations.size();
+
+    return {};
+  }
+
+  std::expected<void, PssError> type(detail::PssSpan span, PssLocation location) {
+    return name(span, location, current_.selector.type);
+  }
+
+  std::expected<void, PssError> id(detail::PssSpan span, PssLocation location) {
+    return name(span, location, current_.selector.id);
+  }
+
+  std::expected<void, PssError> className(detail::PssSpan span, PssLocation location) {
+    auto admitted = charge(sizeof(std::string) + span.size, location);
+
+    if (!admitted) {
+      return admitted;
+    }
+
+    current_.selector.classes.emplace_back(source_.substr(span.offset, span.size));
+
+    return {};
+  }
+
+  std::expected<void, PssError> state(StyleState value) {
+    current_.selector.state = value;
+
+    return {};
+  }
+
+  std::expected<void, PssError> declaration(PssProperty property, detail::PssValue value, PssLocation location) {
+    if (metadata_) {
+      auto admitted = charge(sizeof(PssDeclarationOrigin), location);
+
+      if (!admitted) {
+        return admitted;
+      }
+
+      origin_.effectiveDeclaration[static_cast<std::size_t>(property)] = document.declarations.size();
+      ++origin_.declarationCount;
+      document.declarations.push_back({document.sheet.rules.size(), property, location, value});
+    }
+
+    detail::assignPssDeclaration(property, value, current_.declarations);
+
+    return {};
+  }
+
+  std::expected<void, PssError> endRule() {
+    document.sheet.rules.push_back(current_);
+
+    if (metadata_) {
+      document.origins.push_back(origin_);
+    }
+
+    return {};
+  }
+
+  PssDocument document;
 
 private:
-  char peek() const {
-    return position_ < source_.size() ? source_[position_] : '\0';
+  std::expected<void, PssError> charge(std::size_t bytes, PssLocation location) {
+    if (!metadata_) {
+      return {};
+    }
+
+    if (bytes > MAX_PSS_DOCUMENT_BYTES - ownedBytes_) {
+      return std::unexpected(
+        detail::pssError(PssErrorCode::DOCUMENT_LIMIT, location, "PSS document exceeds owning payload budget"));
+    }
+
+    ownedBytes_ += bytes;
+
+    return {};
   }
 
-  [[noreturn]] void fail(std::string_view message) const {
-    throw StyleError{TreeError::INVALID_ARGUMENT, line_, column_, message};
-  }
+  std::expected<void, PssError> name(detail::PssSpan span, PssLocation location, std::string &destination) {
+    auto admitted = charge(span.size, location);
 
-  void advance() {
-    if (peek() == '\n') {
-      ++line_;
-      column_ = 1;
-    } else {
-      ++column_;
+    if (!admitted) {
+      return admitted;
     }
 
-    ++position_;
-  }
+    destination.assign(source_.substr(span.offset, span.size));
 
-  void skipSpace() {
-    for (;;) {
-      while (peek() == ' ' || peek() == '\t' || peek() == '\r' || peek() == '\n') {
-        advance();
-      }
-
-      if (source_.substr(position_, 2) != "/*") {
-        return;
-      }
-
-      advance();
-      advance();
-
-      while (source_.substr(position_, 2) != "*/") {
-        if (position_ == source_.size()) {
-          fail("Unterminated comment");
-        }
-
-        advance();
-      }
-
-      advance();
-      advance();
-    }
-  }
-
-  void expect(char expected) {
-    if (peek() != expected) {
-      fail("Expected punctuation");
-    }
-
-    advance();
-    skipSpace();
-  }
-
-  std::string_view identifier() {
-    if (!letter(peek())) {
-      fail("Expected ASCII identifier");
-    }
-
-    const auto begin = position_;
-
-    while (letter(peek()) || digit(peek()) || peek() == '-') {
-      advance();
-    }
-
-    return source_.substr(begin, position_ - begin);
-  }
-
-  StyleState parseState() {
-    const auto location = StyleError{TreeError::INVALID_ARGUMENT, line_, column_, "Unknown presentation state"};
-    const auto name = identifier();
-
-    if (name == "normal") {
-      return StyleState::NORMAL;
-    }
-
-    if (name == "focused") {
-      return StyleState::FOCUSED;
-    }
-
-    if (name == "disabled") {
-      return StyleState::DISABLED;
-    }
-
-    if (name == "selected") {
-      return StyleState::SELECTED;
-    }
-
-    if (name == "header") {
-      return StyleState::HEADER;
-    }
-
-    if (name == "caret") {
-      return StyleState::CARET;
-    }
-
-    throw location;
-  }
-
-  StyleSelector parseSelector() {
-    StyleSelector selector;
-    bool present{};
-
-    if (peek() == '*') {
-      advance();
-      present = true;
-    } else if (letter(peek())) {
-      selector.type = identifier();
-      present = true;
-    }
-
-    while (peek() == '.' || peek() == '#' || peek() == ':') {
-      const auto marker = peek();
-
-      advance();
-      present = true;
-
-      if (marker == '.') {
-        selector.classes.emplace_back(identifier());
-      } else if (marker == '#') {
-        if (!selector.id.empty()) {
-          fail("Duplicate selector id");
-        }
-
-        selector.id = identifier();
-      } else {
-        if (selector.state != StyleState::ANY) {
-          fail("Duplicate selector state");
-        }
-
-        selector.state = parseState();
-      }
-    }
-
-    if (!present) {
-      fail("Expected selector");
-    }
-
-    skipSpace();
-
-    return selector;
-  }
-
-  std::string_view value() {
-    const auto begin = position_;
-
-    while (peek() != ';' && peek() != '}' && peek() != '\0' && peek() != ' ' && peek() != '\t' && peek() != '\r' &&
-           peek() != '\n') {
-      advance();
-    }
-
-    return source_.substr(begin, position_ - begin);
-  }
-
-  static RgbColor parseColor(std::string_view text, StyleError location) {
-    unsigned number{};
-
-    if (text.size() != 7 || text.front() != '#') {
-      throw location;
-    }
-
-    const auto result = std::from_chars(text.data() + 1, text.data() + text.size(), number, 16);
-
-    if (result.ec != std::errc{} || result.ptr != text.data() + text.size()) {
-      throw location;
-    }
-
-    return {static_cast<std::uint8_t>(number >> 16), static_cast<std::uint8_t>(number >> 8),
-            static_cast<std::uint8_t>(number)};
-  }
-
-  static bool parseBoolean(std::string_view text, StyleError location) {
-    if (text == "true") {
-      return true;
-    }
-
-    if (text == "false") {
-      return false;
-    }
-
-    throw location;
-  }
-
-  void parseDeclaration(StyleDeclarations &declarations, StyleState state) {
-    const auto propertyLocation = StyleError{TreeError::INVALID_ARGUMENT, line_, column_, "Unknown property"};
-    const auto name = identifier();
-
-    skipSpace();
-    expect(':');
-
-    auto location = StyleError{TreeError::INVALID_ARGUMENT, line_, column_, "Invalid property value"};
-    const auto text = value();
-
-    if (name == "foreground") {
-      declarations.foreground = parseColor(text, location);
-    } else if (name == "background") {
-      declarations.background = parseColor(text, location);
-    } else if (name == "bold") {
-      declarations.bold = parseBoolean(text, location);
-    } else if (name == "italic") {
-      declarations.italic = parseBoolean(text, location);
-    } else if (name == "underline") {
-      declarations.underline = parseBoolean(text, location);
-    } else if (name == "min-width") {
-      std::int32_t width{};
-      const auto parsed = std::from_chars(text.data(), text.data() + text.size(), width);
-
-      if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size() || width < 0 ||
-          state != StyleState::ANY) {
-        location.message = "Expected nonnegative state-independent cell width";
-
-        throw location;
-      }
-
-      declarations.minWidth = width;
-    } else {
-      throw propertyLocation;
-    }
-
-    skipSpace();
-    expect(';');
+    return {};
   }
 
   std::string_view source_;
-  std::size_t position_{};
-  std::size_t line_{1};
-  std::size_t column_{1};
+  bool metadata_;
+  std::size_t ownedBytes_{};
+  StyleRule current_;
+  PssRuleOrigin origin_;
 };
+
+PssError allocationError() {
+  auto error = detail::pssError(PssErrorCode::ALLOCATION, {}, "PSS allocation failed");
+
+  error.cause = TreeError::NO_MEMORY;
+
+  return error;
+}
 } // namespace
 
 std::expected<StyleSheet, StyleError> parsePss(std::string_view source) {
@@ -283,11 +142,54 @@ std::expected<StyleSheet, StyleError> parsePss(std::string_view source) {
   }
 
   try {
-    return Parser(source).parse();
-  } catch (const StyleError &error) {
-    return std::unexpected(error);
+    RuntimeSink sink(source, false);
+    auto parsed = detail::PssParser(source, sink, detail::PssPolicy::LEGACY).parse();
+
+    if (!parsed) {
+      const auto &error = parsed.error();
+
+      return std::unexpected(StyleError{error.cause, error.location.line, error.location.column, error.message});
+    }
+
+    return sink.document.sheet;
   } catch (const std::bad_alloc &) {
     return std::unexpected(StyleError{TreeError::NO_MEMORY, 1, 1, "PSS allocation failed"});
+  }
+}
+
+std::expected<PssDocument, PssError> parsePssDocument(std::string_view source, std::string_view sourceName) {
+  if (source.size() > MAX_PSS_BYTES) {
+    return std::unexpected(detail::pssError(PssErrorCode::INPUT_LIMIT, {}, "PSS source exceeds byte budget"));
+  }
+
+  if (sourceName.size() > MAX_PSS_SOURCE_NAME_BYTES) {
+    return std::unexpected(
+      detail::pssError(PssErrorCode::SOURCE_NAME_LIMIT, {}, "PSS source identity exceeds byte budget"));
+  }
+
+  auto validName = detail::validatePssUtf8(sourceName);
+
+  if (!validName) {
+    return std::unexpected(validName.error());
+  }
+
+  try {
+    RuntimeSink sink(source, true);
+    auto admitted = sink.sourceName(sourceName);
+
+    if (!admitted) {
+      return std::unexpected(admitted.error());
+    }
+
+    auto parsed = detail::PssParser(source, sink, detail::PssPolicy::STRICT_UTF8).parse();
+
+    if (!parsed) {
+      return std::unexpected(parsed.error());
+    }
+
+    return sink.document;
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(allocationError());
   }
 }
 } // namespace portals
