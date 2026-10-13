@@ -34,6 +34,23 @@ if(WIN32)
 endif()
 
 enable_testing()
+foreach(variant IN ITEMS pipe_contracts pipe_contracts_methods)
+  add_executable(portals_${variant}_consumer ${variant}.cpp)
+  target_link_libraries(portals_${variant}_consumer PRIVATE portals::core)
+  set_target_properties(portals_${variant}_consumer PROPERTIES CXX_EXTENSIONS OFF)
+  if(WIN32)
+    target_sources(portals_${variant}_consumer PRIVATE no_dialogs.cpp)
+  endif()
+  add_test(NAME consumer.${variant} COMMAND portals_${variant}_consumer)
+  set_tests_properties(consumer.${variant} PROPERTIES TIMEOUT 15)
+endforeach()
+add_test(NAME consumer.pipe-contracts-equivalence
+  COMMAND "${CMAKE_COMMAND}"
+    "-DBEFORE=$<TARGET_FILE:portals_pipe_contracts_methods_consumer>"
+    "-DAFTER=$<TARGET_FILE:portals_pipe_contracts_consumer>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_forms.cmake")
+set_tests_properties(consumer.pipe-contracts-equivalence PROPERTIES TIMEOUT 30)
+
 foreach(variant IN ITEMS before after)
   add_executable(portals_style_pss_${variant}_consumer style_pss_${variant}.cpp)
   target_link_libraries(portals_style_pss_${variant}_consumer PRIVATE portals::core)

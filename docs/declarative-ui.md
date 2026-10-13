@@ -161,9 +161,30 @@ auto result = ui::scene(ui::lineEdit("initial"))
 ```
 
 `ui::prepare()`, `ui::configure(...)` and `ui::onError(...)` and `ui::reportOnError(...)` are also stages.
-`run(terminal, stop)` borrows an existing replay/custom terminal; moving a named
-facade or method adapter into a pipe requires `std::move`. A pipe introduces no new runtime,
-parser or control modifier system.
+Configuration stages accept both named and temporary adapters. With a named
+`Scene`, they return the same `Scene&` without relocating the facade. With an
+rvalue `Scene`, they first move the idle facade, then dispatch the same method;
+use `std::move(scene)` when deliberately consuming a named owner. Prepared idle
+owners may also move. Moving an active scene or moving it on a foreign thread
+retains the existing terminating move guard. Callbacks that must survive a move
+should capture `SceneRef` rather than the facade's address.
+
+A stage owns its captures, but applying it may consume them. A named adapter is
+not a promise of repeated application. Configuration stages reject const
+facades, const mutable adapters, descriptions and adapter-to-adapter composition
+at overload resolution. `run(terminal, stop)` borrows the terminal while consuming
+the scene, so a named facade requires `std::move(scene)` for this typed final
+stage. The `runApp` final stage borrows either a named or temporary scene for its
+synchronous run and reporting. Modifiers remain lazy until explicit
+`prepare`/`run`/`runApp`; `prepare` mounts without terminal I/O. A pipe introduces
+no new runtime, parser or control modifier system.
+
+The complete C++23 installed consumer below includes deterministic replay,
+configuration, the final error-reporting boundary and cleanup checks. Its
+[method counterpart](../tests/package_consumer/pipe_contracts_methods.cpp) runs
+the same workload; both are built and compared by the relocated-package test.
+
+\include pipe_contracts.cpp
 
 Repeated prepare on a prepared owner is a no-op. `prepareChecked()` and
 `checked()` expose typed preparation/sticky failures; `managed()` only observes
