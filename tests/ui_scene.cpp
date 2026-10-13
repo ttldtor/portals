@@ -282,6 +282,28 @@ static_assert(!ProgramEntry<SceneFactory>);
 static_assert(!ProgramEntry<WrongProgram>);
 static_assert(!std::is_move_assignable_v<ui::Scene>);
 static_assert(!std::is_copy_constructible_v<ui::Scene>);
+
+template <class Input, class Stage>
+concept PipeExpression =
+  requires(Input &&input, Stage &&stage) { std::forward<Input>(input) | std::forward<Stage>(stage); };
+
+using PrepareStage = decltype(ui::prepare());
+using RunStage = decltype(ui::run());
+using RunAppStage = decltype(ui::runApp());
+static_assert(PipeExpression<ui::Scene &, PrepareStage &>);
+static_assert(PipeExpression<ui::Scene &, PrepareStage>);
+static_assert(PipeExpression<ui::Scene, PrepareStage &>);
+static_assert(PipeExpression<ui::Scene, PrepareStage>);
+static_assert(!PipeExpression<const ui::Scene &, PrepareStage>);
+static_assert(!PipeExpression<ui::Scene &, const PrepareStage &>);
+static_assert(!PipeExpression<ui::Description<Label>, PrepareStage>);
+static_assert(!PipeExpression<PrepareStage, PrepareStage>);
+static_assert(!PipeExpression<ui::Scene &, RunStage>);
+static_assert(PipeExpression<ui::Scene, RunStage>);
+static_assert(PipeExpression<ui::Scene &, RunAppStage>);
+static_assert(PipeExpression<ui::Scene, RunAppStage>);
+static_assert(std::same_as<decltype(std::declval<ui::Scene &>() | std::declval<PrepareStage &>()), ui::Scene &>);
+static_assert(std::same_as<decltype(std::declval<ui::Scene>() | std::declval<PrepareStage>()), ui::Scene>);
 } // namespace
 
 TEST_CASE("lazy scene prepares an ordinary form once without terminal I/O") {
@@ -730,15 +752,96 @@ TEST_CASE("recoverable summary reports bounded history independently of cleared 
 }
 
 TEST_CASE("bounded pipeline shares the method implementation") {
-  example::ReplayTerminal terminal({}, 100, {30, 4});
-  ui::SceneOptions options;
+  for (const bool consumeScene : {false, true}) {
+    for (const bool temporaryStage : {false, true}) {
+      for (const bool failSetup : {false, true}) {
+        example::ReplayTerminal terminal({}, 100, {30, 4});
+        ui::SceneOptions options;
+        ui::Ref<LineEdit> field;
+        std::vector<int> order;
+        int factories{};
 
-  options.clock = terminal.clock();
+        options.clock = terminal.clock();
 
-  auto result = ui::scene(ui::label("ready"), options) | ui::prepare() | ui::run(terminal);
+        auto scene = ui::scene(
+          [&](ManagedScene &) {
+            ++factories;
 
-  REQUIRE(result);
-  CHECK(terminal.closed);
+            return ui::lineEdit(field, "ready");
+          },
+          options);
+        auto first = ui::configure([&](ManagedScene &) -> std::expected<void, ManagedError> {
+          order.push_back(1);
+
+          if (failSetup) {
+            return std::unexpected(ManagedError{ManagedPhase::BIND, {}, TreeError::INVALID_ARGUMENT, {}, {}});
+          }
+
+          return {};
+        });
+        auto registerConfiguration = [&](ui::Scene &owner) {
+          auto second = ui::configure([&](ManagedScene &) {
+            order.push_back(2);
+          });
+
+          if (temporaryStage) {
+            CHECK(&(owner | std::move(second)) == &owner);
+          } else {
+            CHECK(&(owner | second) == &owner);
+          }
+
+          CHECK(factories == 0);
+          CHECK(order.empty());
+          CHECK(terminal.output.empty());
+          CHECK_FALSE(terminal.closed);
+        };
+        auto exercise = [&](ui::Scene &owner) {
+          auto preparation = ui::prepare();
+
+          if (temporaryStage) {
+            CHECK(&(owner | std::move(preparation)) == &owner);
+          } else {
+            CHECK(&(owner | preparation) == &owner);
+          }
+
+          CHECK(factories == 1);
+          CHECK(order == (failSetup ? std::vector<int>{1} : std::vector<int>{1, 2}));
+          CHECK(terminal.output.empty());
+          CHECK_FALSE(terminal.closed);
+
+          const auto result = std::move(owner) | ui::run(terminal);
+
+          REQUIRE(bool(result) == !failSetup);
+          CHECK_FALSE(field.text().get());
+
+          if (failSetup) {
+            CHECK(treeCause(result.error(), TreeError::INVALID_ARGUMENT));
+            CHECK_FALSE(terminal.closed);
+            CHECK(terminal.output.empty());
+          } else {
+            CHECK(terminal.closed);
+          }
+        };
+
+        if (consumeScene) {
+          auto moved = temporaryStage ? std::move(scene) | std::move(first) : std::move(scene) | first;
+
+          CHECK_FALSE(scene.checked());
+          registerConfiguration(moved);
+          exercise(moved);
+        } else {
+          if (temporaryStage) {
+            CHECK(&(scene | std::move(first)) == &scene);
+          } else {
+            CHECK(&(scene | first) == &scene);
+          }
+
+          registerConfiguration(scene);
+          exercise(scene);
+        }
+      }
+    }
+  }
 }
 
 TEST_CASE("configuration order and owned initial expressions preserve editor modes and Undo") {
