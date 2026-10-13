@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
-#include <portals/ui_scene.hpp>
+#include <portals/ui_style.hpp>
 
 #include <array>
 #include <cstdio>
@@ -281,6 +281,68 @@ constexpr const char *categoryName(TextResourceError value) noexcept {
   return "UNKNOWN";
 }
 
+constexpr const char *categoryName(PssErrorCode value) noexcept {
+  switch (value) {
+  case PssErrorCode::NONE:
+    return "NONE";
+  case PssErrorCode::INPUT_LIMIT:
+    return "INPUT_LIMIT";
+  case PssErrorCode::RULE_LIMIT:
+    return "RULE_LIMIT";
+  case PssErrorCode::CLASS_LIMIT:
+    return "CLASS_LIMIT";
+  case PssErrorCode::DECLARATION_LIMIT:
+    return "DECLARATION_LIMIT";
+  case PssErrorCode::TEXT_LIMIT:
+    return "TEXT_LIMIT";
+  case PssErrorCode::DOCUMENT_LIMIT:
+    return "DOCUMENT_LIMIT";
+  case PssErrorCode::SOURCE_NAME_LIMIT:
+    return "SOURCE_NAME_LIMIT";
+  case PssErrorCode::INVALID_UTF8:
+    return "INVALID_UTF8";
+  case PssErrorCode::NUL_BYTE:
+    return "NUL_BYTE";
+  case PssErrorCode::EXPECTED_SELECTOR:
+    return "EXPECTED_SELECTOR";
+  case PssErrorCode::EXPECTED_IDENTIFIER:
+    return "EXPECTED_IDENTIFIER";
+  case PssErrorCode::EXPECTED_PUNCTUATION:
+    return "EXPECTED_PUNCTUATION";
+  case PssErrorCode::UNTERMINATED_COMMENT:
+    return "UNTERMINATED_COMMENT";
+  case PssErrorCode::DUPLICATE_ID:
+    return "DUPLICATE_ID";
+  case PssErrorCode::DUPLICATE_STATE:
+    return "DUPLICATE_STATE";
+  case PssErrorCode::UNKNOWN_STATE:
+    return "UNKNOWN_STATE";
+  case PssErrorCode::UNKNOWN_PROPERTY:
+    return "UNKNOWN_PROPERTY";
+  case PssErrorCode::INVALID_VALUE:
+    return "INVALID_VALUE";
+  case PssErrorCode::INVALID_WIDTH:
+    return "INVALID_WIDTH";
+  case PssErrorCode::ALLOCATION:
+    return "ALLOCATION";
+  }
+
+  return "UNKNOWN";
+}
+
+constexpr const char *categoryName(PssFileOperation value) noexcept {
+  switch (value) {
+  case PssFileOperation::OPEN:
+    return "OPEN";
+  case PssFileOperation::READ:
+    return "READ";
+  case PssFileOperation::INPUT_LIMIT:
+    return "INPUT_LIMIT";
+  }
+
+  return "UNKNOWN";
+}
+
 ManagedError error(ManagedPhase phase, TreeError cause, NodeId node = {}) {
   return {phase, node, cause, {}, {}};
 }
@@ -339,6 +401,29 @@ void reportFailure(const ManagedError &failure, std::source_location origin) noe
       }
     },
     failure.cause);
+
+  if (failure.styleSource) {
+    std::fputs(" source=", stderr);
+    std::fwrite(failure.styleSource->data(), 1, failure.styleSource->size(), stderr);
+  }
+
+  if (failure.pss) {
+    const auto &pss = *failure.pss;
+
+    std::fprintf(stderr, " pss=(code=%s, offset=%zu, line=%zu, column=%zu, subject=", categoryName(pss.code),
+                 pss.location.offset, pss.location.line, pss.location.column);
+    std::fwrite(pss.subject.data(), 1, std::min(pss.subjectSize, pss.subject.size()), stderr);
+    std::fputs(", message=", stderr);
+    std::fwrite(pss.message.data(), 1, pss.message.size(), stderr);
+    std::fputc(')', stderr);
+  }
+
+  if (failure.file) {
+    const auto &file = *failure.file;
+
+    std::fprintf(stderr, " file=(operation=%s, category=%s, value=%d)", categoryName(file.operation),
+                 file.cause.category().name(), file.cause.value());
+  }
 
   if (failure.application) {
     std::fputs(" runner=", stderr);
@@ -415,6 +500,33 @@ struct Scene::State {
   bool prepared{}, completed{}, managedClosed{}, notified{}, fallbackObserverFailed{};
   bool publishingFailure{};
   bool quitRequested{}, finalReported{};
+
+  struct StyleBinding {
+    std::weak_ptr<const void> identity;
+    StyleLayerHandle handle;
+  };
+
+  std::shared_ptr<detail::SceneAnchor> anchor = std::make_shared<detail::SceneAnchor>();
+  std::vector<StyleBinding> styles = std::vector<StyleBinding>(0);
+  std::vector<std::shared_ptr<detail::LiveBinding>> live = std::vector<std::shared_ptr<detail::LiveBinding>>(0);
+
+  std::expected<void, ManagedError> requestQuit() {
+    if (active == Operation::NOTIFY || active == Operation::REPORT || active == Operation::CLOSE) {
+      return std::unexpected(error(ManagedPhase::RUN, TreeError::WOULD_BLOCK, node()));
+    }
+
+    if (completed) {
+      return std::unexpected(error(ManagedPhase::RUN, TreeError::CLOSED, node()));
+    }
+
+    quitRequested = true;
+
+    if (prepared && active != Operation::PREPARE) {
+      application->requestStop();
+    }
+
+    return {};
+  }
 
   NodeId node() const {
     return managed ? managed->root().id() : NodeId{};
@@ -499,6 +611,16 @@ struct Scene::State {
   std::expected<void, ManagedError> cleanup(std::source_location origin) {
     completed = true;
 
+    // Revoke observing publication and actual live controllers before managed input captures retire.
+    if (anchor) {
+      anchor->state = nullptr;
+      anchor->events->lifetime.reset();
+    }
+
+    anchor.reset();
+    live.clear();
+    styles.clear();
+
     auto result = managed ? managed->close() : std::expected<void, ManagedError>{};
 
     if (!result) {
@@ -541,6 +663,10 @@ Scene::Scene(Configuration recipe, SceneOptions options, std::source_location or
   state_->options = options;
   state_->recipe = std::move(recipe);
   state_->recipeOrigin = origin;
+  state_->anchor->state = state_.get();
+  state_->anchor->quit = [](void *raw, std::source_location) {
+    return static_cast<State *>(raw)->requestQuit();
+  };
 }
 
 Scene::Scene(Scene &&other) noexcept : owner_(other.owner_) {
@@ -700,6 +826,9 @@ std::expected<void, ManagedError> Scene::prepareChecked(std::source_location ori
           state.fail(managed.error(), "scene.owner", origin);
         } else {
           state.managed = std::move(*managed);
+          state.anchor->events->scene = state.managed.get();
+          state.anchor->events->lifetime = style::ct::detail::Access::lifetime(*state.managed);
+          state.anchor->events->node = state.managed->root();
 
           auto observer = state.installObserver();
 
@@ -847,6 +976,195 @@ Scene &Scene::styleLayers(StyleLayerOptions options, std::source_location origin
   }
 
   return *this;
+}
+
+SceneRef Scene::ref() const {
+  if (owner_ != std::this_thread::get_id() || !state_) {
+    return {std::weak_ptr<detail::SceneAnchor>{}, owner_};
+  }
+
+  return {state_->anchor, owner_};
+}
+
+std::expected<void, ManagedError> SceneRef::quit(std::source_location origin) const {
+  if (owner_ != std::thread::id{} && owner_ != std::this_thread::get_id()) {
+    return std::unexpected(error(ManagedPhase::RUN, TreeError::WRONG_THREAD));
+  }
+
+  const auto anchor = anchor_.lock();
+
+  if (!anchor || !anchor->state) {
+    return std::unexpected(error(ManagedPhase::RUN, TreeError::CLOSED));
+  }
+
+  return anchor->quit(anchor->state, origin);
+}
+
+void SceneRef::report(const ManagedError &failure, std::source_location origin) const {
+  if (owner_ != std::this_thread::get_id()) {
+    return;
+  }
+
+  const auto anchor = anchor_.lock();
+
+  if (anchor && anchor->state) {
+    detail::reportEventError(anchor->events, failure, origin);
+  }
+}
+
+void Scene::setupFailure(ManagedError failure, std::source_location origin) {
+  if (owner_ != std::this_thread::get_id() || !state_) {
+    return;
+  }
+
+  auto &state = *state_;
+
+  state.fail(std::move(failure), "scene.setup", origin);
+
+  if (state.active == State::Operation::NONE && !state.completed) {
+    State::Guard guard(state, State::Operation::CONFIGURE);
+
+    (void)state.cleanup(origin);
+  }
+}
+
+Scene &Scene::style(const StyleStage &stage, std::source_location origin) & {
+  if (!admitConfiguration(true, origin)) {
+    return *this;
+  }
+
+  auto &state = *state_;
+
+  {
+    State::Guard guard(state,
+                       state.active == State::Operation::RUN ? State::Operation::RUN : State::Operation::CONFIGURE);
+
+    try {
+      auto *stable = &state;
+
+      addConfiguration(
+        [stable, stage](ManagedScene &scene) -> std::expected<void, ManagedError> {
+          try {
+            // Keep reusable stage handles without owning retired documents or expired registry rows.
+            std::erase_if(stable->styles, [](const State::StyleBinding &binding) {
+              return binding.identity.expired();
+            });
+
+            for (const auto &binding : stable->styles) {
+              if (binding.identity.lock() == stage.payload_) {
+                return stage.apply(scene, &binding.handle).transform([](const StyleLayerHandle &) {
+                });
+              }
+            }
+
+            // Reserve facade identity storage before the existing engine can commit any layer.
+            stable->styles.reserve(stable->styles.size() + 1);
+
+            if (stable->failure) {
+              return std::unexpected(*stable->failure);
+            }
+
+            auto installed = stage.apply(scene, nullptr);
+
+            if (!installed) {
+              return std::unexpected(installed.error());
+            }
+
+            stable->styles.push_back({stage.payload_, *installed});
+
+            return {};
+          } catch (const std::bad_alloc &) {
+            return std::unexpected(stage.boundaryFailure(TreeError::NO_MEMORY));
+          } catch (...) {
+            return std::unexpected(stage.boundaryFailure(TreeError::CALLBACK_FAILED));
+          }
+        },
+        true, origin);
+    } catch (const std::bad_alloc &) {
+      state.fail(stage.boundaryFailure(TreeError::NO_MEMORY), "scene.style", origin);
+    } catch (...) {
+      state.fail(stage.boundaryFailure(TreeError::CALLBACK_FAILED), "scene.style", origin);
+    }
+  }
+
+  if (state.failure && state.active == State::Operation::NONE && !state.completed) {
+    State::Guard guard(state, State::Operation::CONFIGURE);
+
+    (void)state.cleanup(origin);
+  }
+
+  return *this;
+}
+
+void Scene::applyLiveBinding(std::shared_ptr<detail::LiveFactory> factory, std::source_location origin) {
+  if (!admitConfiguration(true, origin)) {
+    return;
+  }
+
+  auto &state = *state_;
+
+  {
+    State::Guard guard(state,
+                       state.active == State::Operation::RUN ? State::Operation::RUN : State::Operation::CONFIGURE);
+
+    try {
+      auto *stable = &state;
+
+      addConfiguration(
+        [stable, factory](ManagedScene &scene) -> std::expected<void, ManagedError> {
+          try {
+            auto created = factory->create(stable->anchor);
+
+            if (!created) {
+              return std::unexpected(created.error());
+            }
+
+            if (stable->failure) {
+              return std::unexpected(*stable->failure);
+            }
+
+            auto binding = *created;
+            const bool retained = std::ranges::find(stable->live, binding) != stable->live.end();
+
+            // First attachment reserves scene retention before attachTheme. Reuse allocates no controller/slot.
+            if (!retained) {
+              stable->live.push_back(binding);
+            }
+
+            if (stable->failure) {
+              if (!retained) {
+                stable->live.pop_back();
+              }
+
+              return std::unexpected(*stable->failure);
+            }
+
+            auto attached = binding->attach(scene, stable->anchor);
+
+            if ((!attached || !*attached) && !retained) {
+              stable->live.pop_back();
+            }
+
+            return attached ? std::expected<void, ManagedError>{} : std::unexpected(attached.error());
+          } catch (const std::bad_alloc &) {
+            return std::unexpected(error(ManagedPhase::STYLE, TreeError::NO_MEMORY, scene.root().id()));
+          } catch (...) {
+            return std::unexpected(error(ManagedPhase::STYLE, TreeError::CALLBACK_FAILED, scene.root().id()));
+          }
+        },
+        true, origin);
+    } catch (const std::bad_alloc &) {
+      state.fail(error(ManagedPhase::STYLE, TreeError::NO_MEMORY, state.node()), "scene.liveTheme", origin);
+    } catch (...) {
+      state.fail(error(ManagedPhase::STYLE, TreeError::CALLBACK_FAILED, state.node()), "scene.liveTheme", origin);
+    }
+  }
+
+  if (state.failure && state.active == State::Operation::NONE && !state.completed) {
+    State::Guard guard(state, State::Operation::CONFIGURE);
+
+    (void)state.cleanup(origin);
+  }
 }
 
 Scene &Scene::styleLayer(StyleTier tier, std::string name, StyleSheet sheet, std::source_location origin) & {

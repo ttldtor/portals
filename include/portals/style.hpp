@@ -13,6 +13,8 @@
 #include <vector>
 
 namespace portals {
+struct PssDocument;
+
 /** @brief Presentation states; ANY matches every state without changing behavior. */
 enum class StyleState {
   ANY,      ///< Match all presentation variants.
@@ -325,6 +327,7 @@ private:
     StyleTier tier;
     std::string name;
     StyleSheet sheet;
+    std::shared_ptr<const PssDocument> document;
   };
 
   struct LayerState {
@@ -342,7 +345,8 @@ private:
     UPDATE,
     DEFAULTS,
     THEME,
-    OWNED_THEME
+    OWNED_THEME,
+    ADMIT
   };
 
   struct Binding {
@@ -359,7 +363,8 @@ private:
   std::expected<Invalidation, StyleError>
   mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier, std::string_view name, const StyleSheet *sheet,
          std::span<const StyleLayerUpdate> updates, std::span<const StyleRegistration> registrations,
-         StyleLayerHandle *added = nullptr, const detail::StyleThemeLease *lease = nullptr);
+         StyleLayerHandle *added = nullptr, const detail::StyleThemeLease *lease = nullptr,
+         const PssDocument *document = nullptr, std::optional<StyleLayerOptions> admissionOptions = std::nullopt);
   std::expected<void, StyleError> validateHandle(const StyleLayerHandle &handle) const;
   std::expected<void, StyleError> validateLease(detail::StyleThemeLease lease) const;
   detail::StyleThemeLease themeLease() const noexcept;

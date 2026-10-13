@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include <portals/detail/pss_parser.hpp>
 #include <portals/managed.hpp>
 
 #include <algorithm>
@@ -7,6 +8,179 @@
 #include <limits>
 
 namespace portals {
+namespace detail {
+// Mutable runtime documents are admitted in two passes: shape before any linked index, then values.
+std::expected<void, PssError> validateStyleDocument(const PssDocument &document) {
+  const auto invalid = [](PssLocation location, std::string_view message) {
+    return std::unexpected(detail::pssError(PssErrorCode::INVALID_VALUE, location, message));
+  };
+
+  if (document.originKind != PssOriginKind::PSS_BYTES && document.originKind != PssOriginKind::SYNTHETIC_TYPED) {
+    return invalid({}, "Invalid PSS document origin kind");
+  }
+
+  if (document.sourceName.size() > MAX_PSS_SOURCE_NAME_BYTES) {
+    return std::unexpected(detail::pssError(PssErrorCode::SOURCE_NAME_LIMIT, {}, "PSS source identity exceeds budget"));
+  }
+
+  auto utf8 = detail::validatePssUtf8(document.sourceName);
+
+  if (!utf8) {
+    return utf8;
+  }
+
+  if (document.sheet.rules.size() > MAX_STYLE_RULES) {
+    return std::unexpected(detail::pssError(PssErrorCode::RULE_LIMIT, {}, "Too many PSS document rules"));
+  }
+
+  if (document.origins.size() != document.sheet.rules.size()) {
+    return invalid({}, "PSS document requires one origin per rule");
+  }
+
+  std::size_t ownedBytes{};
+  const auto charge = [&](std::size_t bytes) {
+    if (bytes > MAX_PSS_DOCUMENT_BYTES - ownedBytes) {
+      return false;
+    }
+
+    ownedBytes += bytes;
+
+    return true;
+  };
+  const auto chargeRecords = [&](std::size_t count, std::size_t size) {
+    return count <= (MAX_PSS_DOCUMENT_BYTES - ownedBytes) / size && charge(count * size);
+  };
+
+  if (!charge(document.sourceName.size()) || !chargeRecords(document.sheet.rules.size(), sizeof(StyleRule)) ||
+      !chargeRecords(document.origins.size(), sizeof(PssRuleOrigin)) ||
+      !chargeRecords(document.declarations.size(), sizeof(PssDeclarationOrigin))) {
+    return std::unexpected(detail::pssError(PssErrorCode::DOCUMENT_LIMIT, {}, "PSS document exceeds payload budget"));
+  }
+
+  const auto byteLocation = [](PssLocation location) {
+    return location.offset <= MAX_PSS_BYTES && location.line > 0 && location.column > 0 &&
+           location.line <= location.offset + 1 && location.column <= location.offset + 1;
+  };
+  const auto ordered = [](PssLocation previous, PssLocation next) {
+    return previous.offset <= next.offset && previous.line <= next.line &&
+           (previous.line != next.line || previous.column <= next.column);
+  };
+  std::size_t consumed{};
+  PssLocation previous;
+
+  for (std::size_t ruleIndex = 0; ruleIndex < document.origins.size(); ++ruleIndex) {
+    const auto &origin = document.origins[ruleIndex];
+    const auto &rule = document.sheet.rules[ruleIndex];
+    const bool synthetic = document.originKind == PssOriginKind::SYNTHETIC_TYPED;
+
+    if ((synthetic && origin.selector != PssLocation{ruleIndex, ruleIndex + 1, 1}) ||
+        (!synthetic && (!byteLocation(origin.selector) || (ruleIndex && !ordered(previous, origin.selector))))) {
+      return invalid(origin.selector, "Invalid PSS selector coordinates");
+    }
+
+    if (origin.declarationBegin != consumed || origin.declarationCount > document.declarations.size() - consumed) {
+      return invalid(origin.selector, "Invalid PSS contiguous occurrence range");
+    }
+
+    const auto end = consumed + origin.declarationCount;
+
+    for (const auto index : origin.effectiveDeclaration) {
+      if (index != NO_PSS_DECLARATION && (index < consumed || index >= end)) {
+        return invalid(origin.selector, "PSS effective declaration escapes its rule");
+      }
+    }
+
+    if (rule.selector.state < StyleState::ANY || rule.selector.state > StyleState::CARET) {
+      return invalid(origin.selector, "Invalid PSS selector state");
+    }
+
+    if (rule.declarations.minWidth && (*rule.declarations.minWidth < 0 || rule.selector.state != StyleState::ANY)) {
+      return std::unexpected(
+        detail::pssError(PssErrorCode::INVALID_WIDTH, origin.selector, "Invalid PSS document minimum width"));
+    }
+
+    if (!charge(rule.selector.type.size()) || !charge(rule.selector.id.size()) ||
+        !chargeRecords(rule.selector.classes.size(), sizeof(std::string))) {
+      return std::unexpected(
+        detail::pssError(PssErrorCode::DOCUMENT_LIMIT, origin.selector, "PSS selectors exceed document budget"));
+    }
+
+    for (const auto &name : rule.selector.classes) {
+      if (!charge(name.size())) {
+        return std::unexpected(
+          detail::pssError(PssErrorCode::DOCUMENT_LIMIT, origin.selector, "PSS classes exceed document budget"));
+      }
+    }
+
+    previous = origin.selector;
+
+    for (std::size_t index = consumed; index < end; ++index) {
+      const auto &declaration = document.declarations[index];
+
+      if (declaration.ruleIndex != ruleIndex || declaration.property < PssProperty::FOREGROUND ||
+          declaration.property > PssProperty::MIN_WIDTH) {
+        return invalid(declaration.location, "Invalid PSS declaration rule or property index");
+      }
+
+      const auto property = static_cast<std::size_t>(declaration.property);
+
+      if ((synthetic && declaration.location != PssLocation{property, ruleIndex + 1, property + 1}) ||
+          (!synthetic && (!byteLocation(declaration.location) || !ordered(previous, declaration.location)))) {
+        return invalid(declaration.location, "Invalid PSS declaration coordinates");
+      }
+
+      previous = declaration.location;
+    }
+
+    consumed = end;
+  }
+
+  if (consumed != document.declarations.size()) {
+    return invalid({}, "PSS document contains unclaimed declarations");
+  }
+
+  // Every enum, containment range and effective link is now safe to inspect.
+  for (std::size_t ruleIndex = 0; ruleIndex < document.origins.size(); ++ruleIndex) {
+    const auto &origin = document.origins[ruleIndex];
+    const auto &rule = document.sheet.rules[ruleIndex];
+    std::array<std::size_t, PSS_PROPERTY_COUNT> last;
+    StyleDeclarations effective;
+
+    last.fill(NO_PSS_DECLARATION);
+
+    for (std::size_t index = origin.declarationBegin; index < origin.declarationBegin + origin.declarationCount;
+         ++index) {
+      const auto &declaration = document.declarations[index];
+      const auto property = static_cast<std::size_t>(declaration.property);
+      const auto &value = declaration.value;
+      const bool color =
+        declaration.property == PssProperty::FOREGROUND || declaration.property == PssProperty::BACKGROUND;
+      const bool width = declaration.property == PssProperty::MIN_WIDTH;
+
+      if ((!color && value.color != RgbColor{}) || ((color || width) && value.boolean) ||
+          (!width && value.width != 0)) {
+        return invalid(declaration.location, "Noncanonical PSS scalar fields");
+      }
+
+      if (width && (value.width < 0 || rule.selector.state != StyleState::ANY)) {
+        return std::unexpected(
+          detail::pssError(PssErrorCode::INVALID_WIDTH, declaration.location, "Invalid PSS declaration minimum width"));
+      }
+
+      last[property] = index;
+      detail::assignPssDeclaration(declaration.property, value, effective);
+    }
+
+    if (last != origin.effectiveDeclaration || effective != rule.declarations) {
+      return invalid(origin.selector, "PSS last-wins provenance disagrees with final declarations");
+    }
+  }
+
+  return {};
+}
+
+} // namespace detail
+
 namespace {
 struct StyleMutationGuard {
   bool &active;
@@ -34,6 +208,19 @@ TreeError bridge(const ManagedError &error) {
   }
 
   return TreeError::CALLBACK_FAILED;
+}
+
+void retainStyleSource(ManagedError &error, const PssDocument &document) {
+  // The style boundary emits TreeError or StyleError; never allocate fallback identity after NO_MEMORY.
+  if (bridge(error) == TreeError::NO_MEMORY || document.sourceName.size() > MAX_PSS_SOURCE_NAME_BYTES) {
+    return;
+  }
+
+  try {
+    error.styleSource = std::make_shared<const std::string>(document.sourceName);
+  } catch (const std::bad_alloc &) {
+    // Retain the original cause even when the optional owning label cannot be allocated.
+  }
 }
 
 void increment(std::size_t &count) noexcept {
@@ -805,39 +992,129 @@ std::expected<void, ManagedError> ManagedScene::flushStyles() {
 std::expected<Invalidation, ManagedError>
 ManagedScene::mutateStyles(StyleEngine::Mutation mutation, StyleLayerOptions options, StyleTier tier,
                            std::string_view name, const StyleSheet *sheet, std::span<const StyleLayerUpdate> updates,
-                           StyleLayerHandle *added, const detail::StyleThemeLease *lease) {
+                           StyleLayerHandle *added, const detail::StyleThemeLease *lease, const PssDocument *document,
+                           std::optional<StyleLayerOptions> admissionOptions) {
   auto allowed = boundary(ManagedPhase::STYLE, root_);
+
   if (!allowed) {
     return std::unexpected(allowed.error());
   }
 
-  struct Guard {
-    bool &active;
+  StyleMutationGuard guard(styling_);
 
-    explicit Guard(bool &value) : active(value) {
-      active = true;
-    }
+  if (document) {
+    auto valid = detail::validateStyleDocument(*document);
 
-    ~Guard() {
-      active = false;
+    if (!valid) {
+      const auto &pss = valid.error();
+      ManagedError failure{ManagedPhase::STYLE,
+                           root_.id(),
+                           StyleError{pss.cause, pss.location.line, pss.location.column, pss.message},
+                           {},
+                           {}};
+
+      failure.pss = pss;
+      retainStyleSource(failure, *document);
+
+      return std::unexpected(failure);
     }
-  } guard(styling_);
+  }
 
   // Pending registrations and layer declarations share the engine's sole publication boundary.
   std::optional<std::vector<StyleRegistration>> registrations;
   auto staged = pendingStyles(registrations);
+
   if (!staged) {
     return std::unexpected(staged.error());
   }
+
   auto installed = styles_.mutate(mutation, options, tier, name, sheet, updates,
                                   registrations ? std::span<const StyleRegistration>(*registrations)
                                                 : std::span<const StyleRegistration>{},
-                                  added, lease);
+                                  added, lease, document, admissionOptions);
+
   if (!installed) {
-    return std::unexpected(ManagedError{ManagedPhase::STYLE, root_.id(), installed.error(), {}, {}});
+    ManagedError failure{ManagedPhase::STYLE, root_.id(), installed.error(), {}, {}};
+
+    if (document) {
+      if (installed.error().cause == TreeError::NO_MEMORY) {
+        auto pss = detail::pssError(PssErrorCode::ALLOCATION, {}, "Style document allocation failed");
+
+        pss.cause = TreeError::NO_MEMORY;
+        failure.pss = pss;
+      } else {
+        retainStyleSource(failure, *document);
+      }
+    }
+
+    return std::unexpected(failure);
   }
+
   publishStyleMetadata();
+
   return *installed;
+}
+
+std::expected<StyleLayerHandle, ManagedError> ManagedScene::styleDocument(StyleTier tier, std::string_view name,
+                                                                          const PssDocument &document,
+                                                                          std::optional<StyleLayerOptions> options) {
+  StyleLayerHandle admitted;
+  auto installed = mutateStyles(StyleEngine::Mutation::ADMIT, {}, tier, name, &document.sheet, {}, &admitted, nullptr,
+                                &document, options);
+
+  if (!installed) {
+    return std::unexpected(installed.error());
+  }
+
+  return admitted;
+}
+
+std::expected<std::vector<StyleLayerSource>, ManagedError> ManagedScene::styleSources() const {
+  auto allowed = boundary(ManagedPhase::STYLE, root_);
+
+  if (!allowed) {
+    return std::unexpected(allowed.error());
+  }
+
+  StyleMutationGuard guard(styling_);
+
+  try {
+    std::vector<StyleLayerSource> sources(0);
+
+    sources.reserve(styles_.layerState_.layers.size());
+
+    for (const auto &layer : styles_.layerState_.layers) {
+      sources.emplace_back();
+
+      auto &source = sources.back();
+
+      source.handle = styles_.handle(layer.id, styles_.layerState_.epoch);
+      source.tier = layer.tier;
+      source.name.assign(layer.name);
+      source.document = layer.document;
+    }
+
+    // MSVC Debug vector moves can allocate inside noexcept: copy directly into the checked result.
+    return std::expected<std::vector<StyleLayerSource>, ManagedError>(std::in_place, sources);
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(error(ManagedPhase::STYLE, root_, TreeError::NO_MEMORY));
+  }
+}
+
+std::expected<void, ManagedError> ManagedScene::validateStyleLayer(StyleLayerHandle handle) const {
+  auto allowed = boundary(ManagedPhase::STYLE, root_);
+
+  if (!allowed) {
+    return std::unexpected(allowed.error());
+  }
+
+  auto valid = styles_.validateHandle(handle);
+
+  if (!valid) {
+    return std::unexpected(ManagedError{ManagedPhase::STYLE, root_.id(), valid.error(), {}, {}});
+  }
+
+  return {};
 }
 
 std::expected<void, ManagedError> ManagedScene::enableStyleLayers(StyleLayerOptions options) {
@@ -1297,6 +1574,11 @@ std::expected<void, ManagedError> ManagedScene::close() {
 
   // Mark closed before retiring captures: their destructors may reenter application code.
   closed_ = true;
+
+  for (auto &layer : styles_.layerState_.layers) {
+    layer.document.reset();
+  }
+
   entries_.clear();
   models_.clear();
   input_ = {};

@@ -8,6 +8,7 @@
 #include <portals/managed_diagnostics.hpp>
 #include <portals/managed_model.hpp>
 #include <portals/style.hpp>
+#include <portals/style_source.hpp>
 #include <portals/virtual_preparation.hpp>
 
 namespace portals {
@@ -489,6 +490,50 @@ public:
    * @return Success or the original STYLE boundary, budget or staging error.
    */
   std::expected<void, ManagedError> enableStyleLayers(StyleLayerOptions options = {});
+
+  /**
+   * @brief Atomically install owning declarations and provenance in an APPLICATION or USER layer.
+   *
+   * Legacy mode becomes layered in the same commit, retaining the old sheet in THEME.
+   * Failure preserves mode, authority, pending registrations, computed values, and provenance.
+   * Equal declarations with changed metadata alone do not call defaults, advance revision, or request redraw.
+   *
+   * @param tier APPLICATION or USER priority; base tiers are rejected.
+   * @param name Nonempty tier identity; replacement preserves its handle and installation order.
+   * @param document Borrowed mutable document, validated and deep-copied into immutable ownership before publication.
+   * @param options Omitted limits adopt established budgets, or defaults at first enable; incompatible values reject.
+   * @return Weak identity or typed STYLE/PSS boundary, validation, budget, identity, or allocation failure.
+   *
+   * Metadata has a separate MAX_PSS_DOCUMENT_BYTES logical budget per document.
+   * Checked maxLayers times that limit bounds resident logical metadata; records also incur the layer payload charge.
+   * Document copies and candidate sheets may coexist while staging. These limits do not cap RSS.
+   * Coordinates are checked structurally; original bytes are unavailable for proving their exact positions.
+   * Non-allocation errors retain a best-effort owning source label. NO_MEMORY never allocates a fallback label.
+   * A facade may attach its already-owned immutable identity without allocating or changing the original cause.
+   */
+  std::expected<StyleLayerHandle, ManagedError> styleDocument(StyleTier tier, std::string_view name,
+                                                              const PssDocument &document,
+                                                              std::optional<StyleLayerOptions> options = std::nullopt);
+
+  /**
+   * @brief Copy every actual layer row in installation order on the UI thread.
+   *
+   * @return Owning names and shared immutable documents, or typed boundary/allocation failure.
+   *
+   * Unknown sources have null metadata. Legacy mode returns an empty snapshot.
+   * Retained documents may outlive cleanup; observing handles never keep the scene alive.
+   * Allocator reentry cannot mutate or retire the scene while the snapshot is copied.
+   */
+  std::expected<std::vector<StyleLayerSource>, ManagedError> styleSources() const;
+
+  /**
+   * @brief Validate an observing layer identity without resolving styles or invoking callbacks.
+   *
+   * @param handle UI-affine weak identity issued by this scene.
+   * @return Success or typed STYLE boundary, wrong-thread, foreign, removed, or stale identity failure.
+   */
+  std::expected<void, ManagedError> validateStyleLayer(StyleLayerHandle handle) const;
+
   /** @param tier APPLICATION or USER priority.
    * @param name Nonempty tier-unique name, copied after budget admission.
    * @param sheet Borrowed declarations, normalized into engine ownership on success.
@@ -738,11 +783,11 @@ private:
   std::expected<void, ManagedError> flushStyles();
   std::expected<void, ManagedError> pendingStyles(std::optional<std::vector<StyleRegistration>> &destination);
   void publishStyleMetadata() noexcept;
-  std::expected<Invalidation, ManagedError> mutateStyles(StyleEngine::Mutation mutation, StyleLayerOptions options,
-                                                         StyleTier tier, std::string_view name, const StyleSheet *sheet,
-                                                         std::span<const StyleLayerUpdate> updates,
-                                                         StyleLayerHandle *added = nullptr,
-                                                         const detail::StyleThemeLease *lease = nullptr);
+  std::expected<Invalidation, ManagedError>
+  mutateStyles(StyleEngine::Mutation mutation, StyleLayerOptions options, StyleTier tier, std::string_view name,
+               const StyleSheet *sheet, std::span<const StyleLayerUpdate> updates, StyleLayerHandle *added = nullptr,
+               const detail::StyleThemeLease *lease = nullptr, const PssDocument *document = nullptr,
+               std::optional<StyleLayerOptions> admissionOptions = std::nullopt);
   std::expected<void, ManagedError> checkThemeLease(detail::StyleThemeLease lease) const;
   detail::StyleThemeLease captureThemeLease() const noexcept;
   std::expected<detail::StyleThemeLease, ManagedError> attachTheme(const StyleSheet &sheet,
@@ -781,7 +826,7 @@ private:
   std::optional<TreeError> cleanup_;
   std::optional<TreeError> reportedFocusFailure_;
   bool stylesDirty_{};
-  bool styling_{};
+  mutable bool styling_{};
   bool preparing_{};
   bool recoveringFocus_{};
   bool reporting_{};

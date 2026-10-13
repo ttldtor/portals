@@ -3,6 +3,7 @@
 #pragma once
 
 #include <portals/managed.hpp>
+#include <portals/ui_ref.hpp>
 
 namespace portals::ui {
 
@@ -49,6 +50,108 @@ concept SceneConfiguration = requires(Callback &callback, ManagedScene &scene) {
 };
 
 struct SceneAccess;
+struct SceneAnchor;
+struct LiveBinding;
+struct LiveFactory;
+} // namespace detail
+
+class StyleStage;
+struct StyleOptions;
+
+/** @brief Weak facade observation, stable across Scene moves and revoked before capture cleanup.
+ * Copies never retain a facade, application, managed owner, or widget.
+ */
+class SceneRef {
+public:
+  /** @brief Construct an empty observer; operations return CLOSED. */
+  SceneRef() = default;
+
+  /** @param origin Checked stop-request site.
+   * @return Success or exact RUN failure; affinity precedes weak/raw access.
+   * Before preparation only stop intent is recorded. This checked method never reports an error.
+   */
+  std::expected<void, ManagedError> quit(std::source_location origin = std::source_location::current()) const;
+
+private:
+  friend class Scene;
+  friend struct detail::SceneAccess;
+  friend struct QuitAction;
+
+  SceneRef(std::weak_ptr<detail::SceneAnchor> anchor, std::thread::id owner)
+      : anchor_(std::move(anchor)), owner_(owner) {
+  }
+
+  void report(const ManagedError &failure, std::source_location origin) const;
+  std::weak_ptr<detail::SceneAnchor> anchor_;
+  std::thread::id owner_{};
+};
+
+/** @brief Owning weak stop action for existing compact key/button registrations. */
+struct QuitAction {
+  SceneRef scene;                ///< Weak stable facade observation.
+  std::source_location origin{}; ///< Original action site for recoverable diagnostics.
+
+  /** @brief Request stop; report exact errors only to a live UI collector. */
+  void operator()() const {
+    auto result = scene.quit(origin);
+
+    if (!result) {
+      scene.report(result.error(), origin);
+    }
+  }
+};
+
+/** @param scene Weak facade observation, safe across owning facade moves.
+ * @param origin Action construction site retained in diagnostics.
+ * @return Void compact action; SceneRef::quit retains its explicit checked result.
+ */
+inline QuitAction quit(SceneRef scene, std::source_location origin = std::source_location::current()) {
+  return {std::move(scene), origin};
+}
+
+/** @brief Checked factory/setup/run policies. */
+struct RunAppOptions {
+  SceneOptions scene{};            ///< Existing facade/application/managed policies.
+  SceneReportHandler report{};     ///< Owning optional final sink, available before factory invocation.
+  ApplicationTerminal *terminal{}; ///< Borrowed through synchronous run; null selects native.
+  std::stop_token stop{};          ///< Existing optional cancellation.
+};
+
+namespace detail {
+/** @brief Stable weak facade publication; mutable fields are accessed only after UI admission. */
+struct SceneAnchor {
+  const std::thread::id owner = std::this_thread::get_id(); ///< Immutable UI identity.
+  void *state{}; ///< Borrowed stable facade State, valid only while the anchor is published.
+  /** @brief Checked stop bridge, callable only while this anchor publishes its UI owner. */
+  std::expected<void, ManagedError> (*quit)(void *, std::source_location){};
+  std::shared_ptr<RefTarget> events = std::make_shared<RefTarget>(); ///< Existing weak collector context.
+};
+
+/** @brief Erased facade-owned binding; concrete bindings reuse the existing LiveTheme controller. */
+struct LiveBinding {
+  virtual ~LiveBinding() = default;
+
+  /** @param scene Existing managed owner.
+   * @param anchor Receiving facade identity; publication is weak and occurs only on successful attach.
+   * @return True for first bind, false for checked reuse, or exact failure.
+   * Controller/publication candidates are allocated before installing the theme.
+   */
+  virtual std::expected<bool, ManagedError> attach(ManagedScene &scene, const std::shared_ptr<SceneAnchor> &anchor) = 0;
+};
+
+/** @brief Erased owning live descriptor factory invoked only within facade admission.
+ * Concrete descriptor identity and weak publication storage already exist before invocation.
+ */
+struct LiveFactory {
+  virtual ~LiveFactory() = default;
+
+  /** @param anchor Receiving facade identity checked before any controller allocation.
+   * @return Existing same-scene binding, newly preallocated candidate, or exact typed failure.
+   */
+  virtual std::expected<std::shared_ptr<LiveBinding>, ManagedError>
+  create(const std::shared_ptr<SceneAnchor> &anchor) = 0;
+};
+
 } // namespace detail
 
 /** @brief Single-use lazy owner of one Application and ManagedScene; no second runtime.
@@ -133,6 +236,47 @@ public:
 
     return std::move(*this);
   }
+
+  /** @return Weak UI observer of stable state; cleanup and moved-from owners produce CLOSED. */
+  SceneRef ref() const;
+
+  /** @param stage Immutable owning style payload and stage identity.
+   * @param origin Registration site retained for deferred parse/read/admission failures.
+   * @return This owner after registration through the existing atomic styleDocument boundary.
+   */
+  Scene &style(const StyleStage &stage, std::source_location origin = std::source_location::current()) &;
+
+  /** @param stage Immutable owning style payload/identity.
+   * @param origin Registration site.
+   * @return Consuming owner after the same checked registration.
+   */
+  Scene &&style(const StyleStage &stage, std::source_location origin = std::source_location::current()) && {
+    static_cast<Scene &>(*this).style(stage, origin);
+
+    return std::move(*this);
+  }
+
+  /** @tparam Source Input accepted by an owning StyleStage constructor, available in ui_style.hpp.
+   * @param source Runtime bytes, checked descriptor, document or explicit file source.
+   * @param options Existing style admission/source policy.
+   * @param origin Registration site.
+   * @return This owner after the common stage path; source/stage construction may throw before entry.
+   */
+  template <class Source>
+    requires std::constructible_from<StyleStage, Source &&, const StyleOptions &, std::source_location>
+  Scene &style(Source &&source, const StyleOptions &options,
+               std::source_location origin = std::source_location::current()) &;
+
+  /** @tparam Source Input accepted by an owning StyleStage constructor.
+   * @param source Bytes/descriptor/document/file source.
+   * @param options Existing style policy.
+   * @param origin Registration site.
+   * @return Consuming owner after the same registration path.
+   */
+  template <class Source>
+    requires std::constructible_from<StyleStage, Source &&, const StyleOptions &, std::source_location>
+  Scene &&style(Source &&source, const StyleOptions &options,
+                std::source_location origin = std::source_location::current()) &&;
 
   /** @brief Add one scene-owned override; enable styleLayers() before this configuration.
    * @param tier APPLICATION or USER cascade tier; base slots use their explicit managed operations.
@@ -341,6 +485,8 @@ private:
     }
   }
 
+  void applyLiveBinding(std::shared_ptr<detail::LiveFactory> factory, std::source_location origin);
+  void setupFailure(ManagedError failure, std::source_location origin);
   void applyTheme(const StyleSheet &sheet, std::source_location origin);
   void applyStyleLayer(StyleTier tier, const std::string &name, const StyleSheet &sheet, std::source_location origin);
   Scene(Configuration recipe, SceneOptions options, std::source_location origin);
@@ -358,6 +504,23 @@ private:
 namespace detail {
 /** @brief Internal bridge from consuming recipes to one stable facade owner. */
 struct SceneAccess {
+
+  /** @param owner Stationary facade retaining an existing concrete live controller.
+   * @param factory Owning descriptor factory, invoked under facade admission before attaching a controller.
+   * @param origin Stage registration site.
+   */
+  static void live(Scene &owner, std::shared_ptr<LiveFactory> factory, std::source_location origin) {
+    owner.applyLiveBinding(std::move(factory), origin);
+  }
+
+  /** @param owner Facade retaining the first typed setup failure.
+   * @param failure Exact checked setup cause.
+   * @param origin Setup invocation site.
+   */
+  static void setupFailure(Scene &owner, ManagedError failure, std::source_location origin) {
+    owner.setupFailure(std::move(failure), origin);
+  }
+
   /** @param owner Existing facade receiving its stored pipe theme.
    * @param sheet Owning stage storage borrowed only for the checked copy.
    * @param origin Stage registration call site.

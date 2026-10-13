@@ -3,11 +3,14 @@
 #pragma once
 
 #include <portals/application.hpp>
+#include <portals/detail/pss_data.hpp>
+#include <portals/pss_file_error.hpp>
 #include <portals/style.hpp>
 #include <portals/text_resource.hpp>
 
 #include <cstddef>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <source_location>
 #include <string>
@@ -39,6 +42,14 @@ struct ManagedError {
   std::optional<TreeError> cleanup;            ///< Independent failure while retiring the subtree.
   std::optional<TextError> text{};             ///< Original text-validation category and byte offset, when present.
   std::optional<TextResourceError> resource{}; ///< Original resource lookup category, when present.
+  std::optional<PssError>
+    pss{}; ///< Exact allocation-free PSS failure, including its owned subject and source position.
+  std::optional<PssFileError> file{}; ///< Original file operation and error code, independent of parser failures.
+  /// @brief Immutable owning source identity, or empty when unavailable; never borrowed through an error message.
+  /// Facades may preallocate this identity before application. Low-level non-OOM failures may attach it best-effort.
+  /// Invalid/oversized identities use an empty label or a bounded complete UTF-8 prefix; original PSS errors survive.
+  /// NO_MEMORY handling performs no label allocation. Copies share the identity without retaining a scene.
+  std::shared_ptr<const std::string> styleSource{};
 };
 
 /** @brief Finite error-history and causal-context budgets. All limits must be positive. */

@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 #include "meter.hpp"
+#include <portals/ui_style.hpp>
 
 namespace meter_example {
+inline constexpr auto FOCUS_POLICY = portals::style::ct::pss("Meter:focused { bold: true; }", "meter-focus.pss");
 /** @brief Equivalent method and pipe composition spellings. */
 enum class Composition {
   METHODS,
@@ -142,14 +144,15 @@ private:
 
     if (composition == Composition::PIPE) {
       return ui::scene(std::move(factory), options) | ui::theme(example::THEME_PRESETS.at(theme_).make()) |
-             ui::configure(std::move(configuration)) | ui::onKey(ui::key(InputKey::F10), std::move(quit)) |
-             ui::onKey(ui::key(InputKey::LEFT), std::move(left)) |
+             ui::style(FOCUS_POLICY, {.name = "meter-focus"}) | ui::configure(std::move(configuration)) |
+             ui::onKey(ui::key(InputKey::F10), std::move(quit)) | ui::onKey(ui::key(InputKey::LEFT), std::move(left)) |
              ui::onKey(ui::key(InputKey::RIGHT), std::move(right));
     }
 
     auto meter = ui::scene(std::move(factory), options);
 
     meter.theme(example::THEME_PRESETS.at(theme_).make())
+      .style(FOCUS_POLICY, {.name = "meter-focus"})
       .configure(std::move(configuration))
       .onKey(ui::key(InputKey::F10), std::move(quit))
       .onKey(ui::key(InputKey::LEFT), std::move(left))

@@ -1303,6 +1303,40 @@ template <class T> struct IsSceneRecipe : IsDescription<T> {};
  * @tparam T Concrete widget constructed by the returned description.
  */
 template <class T> struct IsSceneRecipe<std::expected<Description<T>, ManagedError>> : std::true_type {};
+
+/** @brief Deliver a pre-owner factory failure through the already available final sink.
+ * @param sink Owning handler borrowed for this synchronous call; no copy is required on the error path.
+ * @param failure Original typed cause, independent of terminal/widget lifetime.
+ * @param origin Factory/setup invocation site.
+ */
+inline void reportFactoryFailure(const SceneReportHandler &sink, ManagedError failure,
+                                 std::source_location origin) noexcept {
+  SceneReport report;
+
+  report.failure = std::move(failure);
+  report.origin = origin;
+
+  try {
+    if (sink) {
+      sink(report);
+    } else {
+      reportToStderr(report);
+    }
+  } catch (...) {
+    reportToStderr(report);
+  }
+}
+
+/** @brief Admit exact stationary setup results.
+ * @tparam Setup Callable taking Scene& and returning void or exact expected<void,ManagedError>.
+ */
+template <class Setup>
+concept AppSetup = requires(Setup &setup, Scene &owner) {
+  { setup(owner) } -> std::same_as<void>;
+} || requires(Setup &setup, Scene &owner) {
+  { setup(owner) } -> std::same_as<std::expected<void, ManagedError>>;
+};
+
 } // namespace detail
 
 /** @tparam T Concrete Widget type described by the consuming recipe.
@@ -1363,11 +1397,45 @@ namespace detail {
 template <class Action> struct SceneStage {
   Action action; ///< Owning method adapter; explicitly borrowed services remain borrowed.
 
-  /** @param owner Consumed idle facade; affinity is preserved.
-   * @param stage Consumed owning method adapter.
-   * @return The same facade after method dispatch, retaining any sticky failure.
+  /** @param owner Stationary facade; no ownership move occurs.
+   * @param stage Borrowed owning adapter.
+   * @return The same owner reference after exactly one dispatch.
    */
-  friend Scene operator|(Scene owner, SceneStage &&stage) {
+  friend Scene &operator|(Scene &owner, SceneStage &stage) {
+    stage.action(owner);
+
+    return owner;
+  }
+
+  /** @param owner Stationary facade.
+   * @param stage Temporary owning adapter.
+   * @return The same owner reference after exactly one dispatch.
+   */
+  friend Scene &operator|(Scene &owner, SceneStage &&stage) {
+    stage.action(owner);
+
+    return owner;
+  }
+
+  /** @param input Consumed idle facade; move admission precedes action dispatch.
+   * @param stage Borrowed owning adapter.
+   * @return Owning facade preserving the existing early move guard.
+   */
+  friend Scene operator|(Scene &&input, SceneStage &stage) {
+    Scene owner(std::move(input));
+
+    stage.action(owner);
+
+    return owner;
+  }
+
+  /** @param input Consumed idle facade; move admission precedes action dispatch.
+   * @param stage Temporary owning adapter.
+   * @return Owning facade preserving the existing early move guard.
+   */
+  friend Scene operator|(Scene &&input, SceneStage &&stage) {
+    Scene owner(std::move(input));
+
     stage.action(owner);
 
     return owner;
@@ -1502,6 +1570,96 @@ auto onKey(KeyEvent chord, Callback callback, std::source_location origin = std:
   return detail::SceneStage{[chord, callback = std::move(callback), origin](Scene &owner) mutable {
     detail::SceneAccess::onKey(owner, chord, callback, origin);
   }};
+}
+
+/** @tparam Factory No-argument callable returning Description<T> or exact expected<Description<T>,ManagedError>.
+ * @tparam Setup Callable taking the stationary Scene&, returning void or exact expected<void,ManagedError>.
+ * @param factory Invoked inside the checked construction boundary, after final sink availability.
+ * @param setup Invoked on one stationary facade; capture SceneRef for later callbacks across facade moves.
+ * @param options Existing scene/runner policies, borrowed terminal, owning final sink and cancellation.
+ * @param origin Upper runner invocation site retained in typed failures.
+ * @return Zero after successful run, one for factory/construction/setup/run failure after cleanup.
+ * Callable and argument construction before actual invocation can throw outside this boundary.
+ * Factory must not return Scene. Setup exceptions map to NO_MEMORY or CALLBACK_FAILED.
+ */
+template <class Factory, detail::AppSetup Setup>
+  requires std::invocable<Factory &> && (!std::is_reference_v<std::invoke_result_t<Factory &>>) &&
+           detail::IsSceneRecipe<std::remove_cvref_t<std::invoke_result_t<Factory &>>>::value
+int runApp(Factory &&factory, Setup &&setup, const RunAppOptions &options = {},
+           std::source_location origin = std::source_location::current()) {
+  try {
+    auto description = std::invoke(factory);
+
+    auto create = [&]() {
+      if constexpr (detail::IsDescription<std::remove_cvref_t<decltype(description)>>::value) {
+        return scene(std::move(description), options.scene, origin);
+      } else {
+        return scene(std::move(*description), options.scene, origin);
+      }
+    };
+
+    if constexpr (!detail::IsDescription<std::remove_cvref_t<decltype(description)>>::value) {
+      if (!description) {
+        detail::reportFactoryFailure(options.report, description.error(), origin);
+
+        return 1;
+      }
+    }
+
+    // This owner stays stationary during setup and run; callbacks observe stable State through SceneRef.
+    auto owner = create();
+
+    owner.reportOnError(options.report, origin);
+
+    if (owner.checked()) {
+      try {
+        if constexpr (std::same_as<std::invoke_result_t<Setup &, Scene &>, void>) {
+          std::invoke(setup, owner);
+        } else {
+          auto configured = std::invoke(setup, owner);
+
+          if (!configured) {
+            detail::SceneAccess::setupFailure(owner, configured.error(), origin);
+          }
+        }
+      } catch (const std::bad_alloc &) {
+        detail::SceneAccess::setupFailure(owner, ManagedError{ManagedPhase::BIND, {}, TreeError::NO_MEMORY, {}, {}},
+                                          origin);
+      } catch (...) {
+        detail::SceneAccess::setupFailure(
+          owner, ManagedError{ManagedPhase::BIND, {}, TreeError::CALLBACK_FAILED, {}, {}}, origin);
+      }
+    }
+
+    return options.terminal ? owner.runApp(*options.terminal, options.stop, origin)
+                            : owner.runApp(options.stop, origin);
+  } catch (const std::bad_alloc &) {
+    detail::reportFactoryFailure(options.report, ManagedError{ManagedPhase::MOUNT, {}, TreeError::NO_MEMORY, {}, {}},
+                                 origin);
+  } catch (...) {
+    detail::reportFactoryFailure(options.report,
+                                 ManagedError{ManagedPhase::MOUNT, {}, TreeError::CALLBACK_FAILED, {}, {}}, origin);
+  }
+
+  return 1;
+}
+
+/** @tparam Factory No-argument checked owning description factory, never a Scene factory.
+ * @param factory Invoked inside the checked upper construction boundary.
+ * @param options Existing runtime policies and final sink, available before factory invocation.
+ * @param origin Upper invocation site.
+ * @return Same zero/one status and cleanup as the stationary setup overload with no setup action.
+ */
+template <class Factory>
+  requires std::invocable<Factory &> && (!std::is_reference_v<std::invoke_result_t<Factory &>>) &&
+           detail::IsSceneRecipe<std::remove_cvref_t<std::invoke_result_t<Factory &>>>::value
+int runApp(Factory &&factory, const RunAppOptions &options = {},
+           std::source_location origin = std::source_location::current()) {
+  return runApp(
+    std::forward<Factory>(factory),
+    [](Scene &) {
+    },
+    options, origin);
 }
 
 /** @param stop Optional existing runner cancellation.
