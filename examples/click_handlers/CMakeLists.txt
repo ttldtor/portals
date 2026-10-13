@@ -1,0 +1,3 @@
+add_executable(portals_click_handlers main.cpp)
+target_link_libraries(portals_click_handlers PRIVATE portals::core)
+portals_enable_warnings(portals_click_handlers)

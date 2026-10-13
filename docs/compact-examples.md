@@ -277,7 +277,7 @@ The interactive gallery and custom meter now own `ui::Scene`. This is the lazy
 facade over the existing `Application` and `ManagedScene`, with the same retained
 widgets, preparation, input router and single runner. Each complete after class
 contains both ordinary method composition and equivalent pipe composition;
-`Composition::PIPE` selects the pipe spelling without changing the recipe or
+`Composition::PIPE` is the gallery default and selects the pipe spelling without changing the recipe or
 configuration order. No macro, coroutine runner or extra reactive system is used.
 
 ### Gallery before: borrowed application and managed ownership
@@ -313,9 +313,10 @@ additional frame.
 Both after classes are stationary because callbacks explicitly borrow their
 example object. Their last member is the scene owner: it closes callbacks and
 its application before the borrowed members are destroyed. The replay clock
-and terminal remain borrowed through the run. Existing `std::stop_source`
-provides cooperative cancellation for Quit/F10/Ctrl+C; the source outlives all
-callbacks and its token is passed to the existing scene runner.
+and terminal remain borrowed through the run. Quit/F10/Ctrl+C request cooperative
+cancellation through `scene_.quit()`; these examples do not require a user-owned
+`std::stop_source`. Embedding applications can still pass an optional stop token
+to the existing scene runner.
 
 The short exact `onKey` chords are registered after the original typed input
 fallback. Unmodified keys use those handlers; modified arrows/F2/exit keys retain
@@ -333,3 +334,8 @@ keyboard/mouse, explicit editing, Unicode, resize, modified shortcuts, idle and
 clamped state. The relocated installed consumer compiles and runs the same public
 headers. These checks prove their specified headless scenarios; native terminal
 compatibility remains a separate platform check.
+
+
+## Late click registration without setup wrappers
+
+Use [ui::onClick in the pipe](declarative-ui.md#pipe-click-handlers) when a handler is added separately from its button recipe. The full [minimal program](../examples/click_handlers/main.cpp) includes runtime ui::style, F10 exit and standard cleanup/reporting. A callback placed directly on a button recipe remains a valid compact choice: Ref + pipe is not required for every inline action. ui::hbox/ui::vbox change vocabulary, not the layout algorithm or lexical token count.

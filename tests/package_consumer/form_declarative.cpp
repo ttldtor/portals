@@ -6,7 +6,7 @@
 using namespace consumer;
 
 int verifyTypedFailure() {
-  ReplayTerminal terminal({{key(InputKey::ENTER)}});
+  ReplayTerminal terminal({{consumer::key(InputKey::ENTER)}});
   auto app = take(Application::create(formOptions(), terminal.clock()));
   auto scene = take(ManagedScene::create(*app));
   const auto button = take(ui::mount(*scene, ui::button("Fail explicitly", []() -> std::expected<void, TreeError> {

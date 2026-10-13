@@ -26,7 +26,7 @@ public:
    * Recipe construction may allocate/throw; checked preparation and run preserve ManagedError.
    */
   explicit FluentForm(portals::ui::SceneOptions options = {}, std::size_t theme = 0,
-                      Composition composition = Composition::METHODS)
+                      Composition composition = Composition::PIPE)
       : theme_(theme), scene_(makeScene(options, composition)) {
   }
 
@@ -69,16 +69,10 @@ private:
     using namespace portals;
 
     return owner.state(false).transform([this](ManagedState<bool> alerts) {
-      return ui::column(
+      return ui::vbox(
         ui::label("Portals gallery | F2 theme | F10 quit"), ui::label("Name (Enter commits; Tab changes focus):"),
         ui::lineEdit(editor_, "Portals", {.options = {.editMode = EditMode::EXPLICIT}}), ui::checkbox("Alerts", alerts),
-        ui::button("Run (no model change)",
-                   [this] {
-                     ++calls;
-                   }),
-        ui::button("Quit", [this] {
-          (void)scene_.quit();
-        }));
+        ui::button(runButton_, "Run (no model change)"), ui::button(quitButton_, "Quit"));
     });
   }
 
@@ -119,25 +113,36 @@ private:
     auto quit = [this] {
       (void)scene_.quit();
     };
-
-    if (composition == Composition::PIPE) {
-      return ui::scene(std::move(factory), options) | ui::theme(example::THEME_PRESETS.at(theme_).make()) |
-             ui::style(FOCUS_POLICY, {.name = "gallery-focus"}) | ui::configure(std::move(configuration)) |
-             ui::onKey(ui::key(InputKey::F10), std::move(quit));
-    }
-
     auto form = ui::scene(std::move(factory), options);
 
-    form.theme(example::THEME_PRESETS.at(theme_).make())
-      .style(FOCUS_POLICY, {.name = "gallery-focus"})
-      .configure(std::move(configuration))
-      .onKey(ui::key(InputKey::F10), std::move(quit));
+    if (composition == Composition::PIPE) {
+      form | ui::theme(example::THEME_PRESETS.at(theme_).make()) | ui::style(FOCUS_POLICY, {.name = "gallery-focus"}) |
+        ui::configure(std::move(configuration)) | ui::onKey(ui::key(InputKey::F10), std::move(quit));
+    } else {
+      form.theme(example::THEME_PRESETS.at(theme_).make())
+        .style(FOCUS_POLICY, {.name = "gallery-focus"})
+        .configure(std::move(configuration))
+        .onKey(ui::key(InputKey::F10), std::move(quit));
+    }
 
-    return form;
+    return std::move(form) |
+           ui::onClick(runButton_,
+                       [this](const ui::ClickParams &params) {
+                         if (params.mods == InputModifiers{}) {
+                           ++calls;
+                         }
+                       }) |
+           ui::onClick(quitButton_, [this](const ui::ClickParams &params) {
+             if (params.mods == InputModifiers{}) {
+               (void)scene_.quit();
+             }
+           });
   }
 
-  std::size_t theme_{};                        ///< Current preset, changed only after successful replacement.
-  portals::ui::Ref<portals::LineEdit> editor_; ///< Weak editor observation published after complete mount.
-  portals::ui::Scene scene_;                   ///< Owning runtime and callbacks; destroyed before borrowed members.
+  std::size_t theme_{};                          ///< Current preset, changed only after successful replacement.
+  portals::ui::Ref<portals::LineEdit> editor_;   ///< Weak editor observation published after complete mount.
+  portals::ui::Ref<portals::Button> runButton_;  ///< Run target bound during mount, before late handlers execute.
+  portals::ui::Ref<portals::Button> quitButton_; ///< Quit target; scene owns its handler and cleanup.
+  portals::ui::Scene scene_;                     ///< Owning runtime and callbacks; destroyed before borrowed members.
 };
 } // namespace gallery

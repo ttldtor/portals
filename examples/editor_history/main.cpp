@@ -143,13 +143,13 @@ public:
     outcome_ = checked(scene_->state(std::string("Type in a draft; compare the read-only model below it.")),
                        "create outcome model");
     checked(ui::mount(*scene_,
-                      ui::column(ui::label("Editor history | F5/F6/F7 choose mode | F10 quit"),
-                                 ui::label("Type; Ctrl+Z Undo, Ctrl+Y Redo. Model rows are read-only."), buildRow(0),
-                                 buildRow(1), buildRow(2), ui::label("Last editor result:"),
-                                 ui::lineEdit(outcome_, {.options = {.history = {.enabled = false}, .readOnly = true}}),
-                                 ui::label("F3 or Append adds ! with field.text() += \"!\" (one history operation)."),
-                                 ui::label("Enter confirms; Tab/click blurs. EXPLICIT keeps its draft on blur."),
-                                 ui::label("Escape adopts model; IMMEDIATE does not undo already published changes."))),
+                      ui::vbox(ui::label("Editor history | F5/F6/F7 choose mode | F10 quit"),
+                               ui::label("Type; Ctrl+Z Undo, Ctrl+Y Redo. Model rows are read-only."), buildRow(0),
+                               buildRow(1), buildRow(2), ui::label("Last editor result:"),
+                               ui::lineEdit(outcome_, {.options = {.history = {.enabled = false}, .readOnly = true}}),
+                               ui::label("F3 or Append adds ! with field.text() += \"!\" (one history operation)."),
+                               ui::label("Enter confirms; Tab/click blurs. EXPLICIT keeps its draft on blur."),
+                               ui::label("Escape adopts model; IMMEDIATE does not undo already published changes."))),
             "mount editor history demo");
 
     for (const auto &row : rows_) {
@@ -368,20 +368,20 @@ private:
       return changed ? std::expected<void, TreeError>{} : std::unexpected(changed.error());
     };
 
-    return ui::column(
-      ui::label(MODE_NAMES[index]), ui::row(ui::label("Draft:"), ui::lineEdit(row.edit, row.model, std::move(config))),
-      ui::row(
+    return ui::vbox(
+      ui::label(MODE_NAMES[index]), ui::hbox(ui::label("Draft:"), ui::lineEdit(row.edit, row.model, std::move(config))),
+      ui::hbox(
         ui::label("Model:"),
         ui::lineEdit(row.view, row.model,
                      {.options = {.history = {.enabled = false}, .readOnly = true},
                       .policy = {.width = {.minimum = 12, .preferred = 24, .mode = SizeMode::FLEX}, .height = {}}})),
-      ui::row(ui::button(row.undo, "Undo",
-                         [field = row.edit] {
-                           return field.undo();
-                         }),
-              ui::button(row.redo, "Redo"), ui::button(row.append, "Append !", [this, field = row.edit] {
-                append(field);
-              })));
+      ui::hbox(ui::button(row.undo, "Undo",
+                          [field = row.edit] {
+                            return field.undo();
+                          }),
+               ui::button(row.redo, "Redo"), ui::button(row.append, "Append !", [this, field = row.edit] {
+                 append(field);
+               })));
   }
 
   /** @brief Apply one reversible edit and retain its exact failure for the exit status.

@@ -5,6 +5,18 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Added] Deferred `ui::onClick(ref, callback)` pipe stages with scene-owned FIFO
+  handlers, read-only click metadata, semantic modifier queries and explicit
+  `stop()`/`stopPropagation()`. Handler counts are bounded and configurable;
+  removal, hide, disable and cleanup stop further delivery safely.
+
+- [Added] `ui::hbox`/`ui::vbox` aliases and a complete minimal click-handler
+  example, compiled through the installed-package consumer. The usage guide
+  documents callback lifetime, errors and the current explicit scene quit command.
+
+- [Fixed] Click-chain allocation and retirement preserve checked out-of-memory
+  behavior with MSVC Debug container proxies.
+
 - [Added] A shared PSS v0 parser for C++23 constant strings and runtime owning
   documents, with bounded data descriptors, short typed selectors and source
   metadata for every declaration. Existing typed live themes and the legacy

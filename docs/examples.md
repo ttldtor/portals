@@ -9,19 +9,20 @@ For a complete form combining an editor, custom final widget, list, table and ch
 see the [declarative before/after consumers](declarative-ui.md). Their installed-package
 tests compare identical interactions and complete terminal output.
 
-Build with `PORTALS_BUILD_EXAMPLES=ON`. Each program runs through the same
+Build with `PORTALS_BUILD_EXAMPLES=ON`. The gallery, dashboard, replay and custom-widget programs run through the same
 [Application runner](application.md) and has a finite `--check` mode for automation.
 The check modes use an in-memory terminal and logical clock; they do not prove
 native terminal restoration or visual compatibility.
 
 | Program | What to try |
 | --- | --- |
+| `portals_click_handlers` | Minimal pipe example: click Add Hello; F10 quits. Native interactive mode only; its source is also compiled by the installed-package consumer. |
 | `portals_gallery` | Declarative managed form: Tab through editor, checkbox, action and Quit; Enter commits; F2 cycles six themes. |
 | `portals_dashboard` | Compact market screen with a table and chart sharing one model; `--stress` adds detailed diagnostic status. |
 | `portals_custom_widget` | A custom final meter with a managed presentation adapter and scalar managed state; Left/Right change its level, F2 cycles themes. |
 | `portals_replay_example` | The dashboard with the built-in recorded price tape selected by default. |
 
-F10 or Ctrl+C exits every interactive example. Mouse routing is provided by the
+F10 exits every interactive example. Gallery/dashboard/custom-widget also accept Ctrl+C. Mouse routing is provided by the
 existing bindings where supported by the terminal. The examples install no signal
 handlers and do not promise cleanup after abrupt process termination.
 
@@ -232,3 +233,8 @@ and preparation. That low-level typed path is intentional; it is not a claim tha
 `runApp(Scene)` accepts a borrowed `ManagedScene`, nor a reason to add router APIs
 solely for migration. Its explicit error policy remains part of its full client
 footprint.
+
+
+## Minimal click-handler program
+
+The complete current source is [click_handlers/main.cpp](../examples/click_handlers/main.cpp). It uses observing refs, runtime string styles and late pipe registration. The scene owns the controls; copied refs do not extend their lifetime. It has no CLI options or --check mode; automated tests compile it and exercise registration through the separate headless consumer. The ordinary runner reports typed setup/runtime failures after cleanup. See [callback parameters, stop and lifetime](declarative-ui.md#pipe-click-handlers).

@@ -19,6 +19,7 @@ namespace ui::detail {
 struct Access;
 struct RefAccess;
 struct SceneAccess;
+struct ClickAccess;
 } // namespace ui::detail
 
 namespace style::ct::detail {
@@ -62,7 +63,9 @@ struct ManagedOptions {
   std::size_t maxStates{256};             ///< Maximum scene-owned properties; they live until scene destruction.
   std::size_t maxModels{64};              ///< Maximum scene-owned models; they live until close().
   ManagedDiagnosticOptions diagnostics{}; ///< Positive limits for error history and owning causal traces.
-  std::size_t maxKeyHandlers{64}; ///< Positive maximum composed onKey closures; direct onInput resets the count.
+  std::size_t maxKeyHandlers{64};    ///< Positive maximum composed onKey closures; direct onInput resets the count.
+  std::size_t maxClickHandlers{256}; ///< Positive maximum retained pipe click callbacks across the scene.
+  std::size_t maxClickHandlersPerNode{64}; ///< Positive maximum pipe click callbacks for one button.
 };
 
 /** @brief Weak UI handle to a scene-owned Property, never an owning alias.
@@ -713,6 +716,18 @@ private:
   friend struct ui::detail::Access;
   friend struct ui::detail::RefAccess;
   friend struct ui::detail::SceneAccess;
+  friend struct ui::detail::ClickAccess;
+
+  struct ClickRecord {
+    std::function<EditorCommandResult(ui::ClickParams &)> action;
+    std::source_location origin;
+  };
+
+  struct ClickChain {
+    // MSVC Debug's noexcept default constructor allocates a proxy; the count constructor is checked.
+    std::vector<std::shared_ptr<ClickRecord>> records = std::vector<std::shared_ptr<ClickRecord>>(0);
+    bool retired{};
+  };
 
   struct Entry {
     Node<Widget> node;
@@ -723,6 +738,7 @@ private:
     std::function<std::expected<void, TreeError>(const LayoutSnapshot &)> viewPrepare;
     bool stylePending{};
     bool removed{};
+    std::shared_ptr<ClickChain> clicks;
   };
 
   template <class T>
@@ -740,6 +756,41 @@ private:
 
   std::expected<void, ManagedError>
   onButtonClick(Node<Button> node, std::function<EditorCommandResult(const ClickEvent &)> action, bool allowModified);
+
+  std::expected<void, ManagedError> composeButtonClick(Node<Button> node,
+                                                       std::function<EditorCommandResult(ui::ClickParams &)> action,
+                                                       std::source_location origin);
+  void retireClicks(Entry &entry) noexcept;
+  void dispatchClicks(Node<Button> node, const std::shared_ptr<ClickChain> &chain,
+                      const std::weak_ptr<const void> &lifetime, const ClickEvent &event);
+
+  template <class Callback> static std::function<EditorCommandResult(ui::ClickParams &)> clickAdapter(Callback action) {
+    if constexpr (std::is_pointer_v<Callback> || requires { action.operator bool(); }) {
+      if (!static_cast<bool>(action)) {
+        return {};
+      }
+    }
+
+    return [action = std::move(action)](ui::ClickParams &params) mutable {
+      const auto invoke = [&]() -> decltype(auto) {
+        if constexpr (std::invocable<Callback &, ui::ClickParams &>) {
+          return action(params);
+        } else {
+          return action();
+        }
+      };
+
+      if constexpr (std::same_as<decltype(invoke()), EditorCommandResult>) {
+        return invoke();
+      } else if constexpr (std::same_as<decltype(invoke()), void>) {
+        invoke();
+
+        return EditorCommandResult({}, {}, false);
+      } else {
+        return EditorCommandResult(invoke(), {}, false);
+      }
+    };
+  }
 
   static bool commandReported(const EditorCommandResult &command, const std::weak_ptr<const void> &lifetime) {
     return command.reported_ && !lifetime.expired() && !command.collector_.expired() &&
@@ -813,6 +864,7 @@ private:
   std::vector<std::shared_ptr<detail::ManagedModelSource>> models_;
   std::shared_ptr<std::function<std::expected<bool, ManagedError>(const InputEvent &)>> input_;
   std::size_t keyHandlers_{};
+  std::size_t clickHandlers_{};
   std::shared_ptr<ManagedErrorHandler> errorObserver_;
   std::vector<ManagedDiagnostic> errors_;
   ManagedDiagnostic overflowDiagnostic_;

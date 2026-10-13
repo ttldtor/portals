@@ -279,10 +279,58 @@ public:
   }
 
 private:
+  friend struct detail::ClickAccess;
+
   std::shared_ptr<detail::RefTarget> target() const {
     return this->slot_ ? std::shared_ptr<detail::RefTarget>(this->slot_, &this->slot_->target) : nullptr;
   }
 };
+
+namespace detail {
+/** @brief Checked adapter to the managed-owned click chain; never owns a widget or scene. */
+struct ClickAccess {
+  /** @tparam Callback Owning no-argument or ClickParams callback with a managed action result.
+   * @param scene Existing owner in which the reference must have been published.
+   * @param reference Observing button identity, read only after immutable affinity admission.
+   * @param callback Owning callable transferred into the bounded managed registry.
+   * @param origin Original registration site retained for callback failures.
+   * @return Success or exact affinity, identity, registration or allocation error.
+   */
+  template <class Callback>
+  static std::expected<void, ManagedError> attach(ManagedScene &scene, const Ref<Button> &reference, Callback callback,
+                                                  std::source_location origin) {
+    auto owner = eventScene(reference.target());
+
+    if (!owner) {
+      return std::unexpected(owner.error());
+    }
+
+    if (*owner != &scene) {
+      return std::unexpected(
+        ManagedError{ManagedPhase::BIND, reference.node().id(), TreeError::INVALID_ARGUMENT, {}, {}});
+    }
+
+    try {
+      return scene.composeButtonClick(reference.node(), ManagedScene::clickAdapter(std::move(callback)), origin);
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(ManagedError{ManagedPhase::BIND, reference.node().id(), TreeError::NO_MEMORY, {}, {}});
+    } catch (...) {
+      return std::unexpected(
+        ManagedError{ManagedPhase::BIND, reference.node().id(), TreeError::CALLBACK_FAILED, {}, {}});
+    }
+  }
+};
+
+/** @brief Admit callbacks borrowing the mutable chain context, or ordinary no-argument callbacks.
+ * @tparam Callback Copyable callable whose result is void, checked TreeError or an editor receipt.
+ */
+template <class Callback>
+concept ClickCallback = std::copy_constructible<Callback> && (requires(Callback &callback, ClickParams &params) {
+                          { callback(params) } -> portals::detail::ManagedActionResult;
+                        } || (!std::invocable<Callback &, ClickParams &> && requires(Callback &callback) {
+                                                                { callback() } -> portals::detail::ManagedActionResult;
+                                                              }));
+} // namespace detail
 
 /** @brief Owning setup action invoked once after construction, before children.
  * @tparam T Concrete Widget type observed by the action.
@@ -1293,6 +1341,26 @@ template <class T> std::expected<Node<T>, ManagedError> mount(ManagedScene &scen
   return std::unexpected(detail::error(scene.root(), TreeError::NO_MEMORY));
 }
 
+/** @tparam Args Arguments accepted by an existing row overload, including references and layout options.
+ * @param args Owning child recipes and optional row configuration, forwarded unchanged.
+ * @return The existing horizontal row recipe; ownership, checked failures and layout semantics are unchanged.
+ */
+template <class... Args>
+  requires requires(Args &&...args) { row(std::forward<Args>(args)...); }
+auto hbox(Args &&...args) {
+  return row(std::forward<Args>(args)...);
+}
+
+/** @tparam Args Arguments accepted by an existing column overload, including references and layout options.
+ * @param args Owning child recipes and optional column configuration, forwarded unchanged.
+ * @return The existing vertical column recipe; ownership, checked failures and layout semantics are unchanged.
+ */
+template <class... Args>
+  requires requires(Args &&...args) { column(std::forward<Args>(args)...); }
+auto vbox(Args &&...args) {
+  return column(std::forward<Args>(args)...);
+}
+
 namespace detail {
 /** @brief Admit only owning descriptions or their exact managed checked result.
  * @tparam T Factory result after cv/ref normalization.
@@ -1569,6 +1637,27 @@ template <class Callback>
 auto onKey(KeyEvent chord, Callback callback, std::source_location origin = std::source_location::current()) {
   return detail::SceneStage{[chord, callback = std::move(callback), origin](Scene &owner) mutable {
     detail::SceneAccess::onKey(owner, chord, callback, origin);
+  }};
+}
+
+/** @tparam Callback Owning no-argument or ClickParams callback returning void, checked TreeError or editor receipt.
+ * @param reference Button observation published by this scene's recipe; no scene/widget ownership is retained.
+ * @param callback Owning callback invoked FIFO with other pipe callbacks, including modified activations.
+ * @param origin Registration site retained through deferred mount and input diagnostics.
+ * @return Owning pipe stage over one existing managed/router binding. stop/stopPropagation end the remaining
+ * chain; the button already consumes ancestor propagation. Failure stops the chain without rollback.
+ * Callback parameters are borrowed synchronously; copies retain an owning event snapshot only.
+ * Runtime append affects the next event; a new binding during dispatch returns existing WOULD_BLOCK.
+ * UI affinity, finite ManagedOptions limits and sticky facade failures apply. Capture construction may throw.
+ */
+template <detail::ClickCallback Callback>
+auto onClick(Ref<Button> reference, Callback callback, std::source_location origin = std::source_location::current()) {
+  return detail::SceneStage{[registration = [reference = std::move(reference), callback = std::move(callback),
+                                             origin](ManagedScene &scene) mutable -> std::expected<void, ManagedError> {
+    return detail::ClickAccess::attach(scene, reference, std::move(callback), origin);
+  },
+                             origin](Scene &owner) mutable {
+    detail::SceneAccess::onClick(owner, registration, origin);
   }};
 }
 
