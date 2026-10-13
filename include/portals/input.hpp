@@ -90,6 +90,117 @@ enum class InputKey {
   F12         ///< Function key F12.
 };
 
+namespace key {
+/** @brief Compile-time semantic shortcut; letters match ASCII case with exact modifiers. */
+struct Chord {
+  InputKey key{};             ///< Semantic key identity.
+  char32_t scalar{};          ///< ASCII character identity, zero for named keys.
+  InputModifiers modifiers{}; ///< Exact observed semantic modifiers.
+};
+
+/** @param modifier Additional semantic modifier.
+ * @param chord Shortcut copied and extended without physical-key inference.
+ * @return Combined shortcut value.
+ */
+constexpr Chord operator+(Modifier modifier, Chord chord) noexcept {
+  switch (modifier) {
+  case Modifier::SHIFT:
+    chord.modifiers.shift = true;
+    break;
+  case Modifier::ALT:
+    chord.modifiers.alt = true;
+    break;
+  case Modifier::CTRL:
+    chord.modifiers.control = true;
+    break;
+  }
+
+  return chord;
+}
+
+/** @param first First modifier tag.
+ * @param second Second modifier tag.
+ * @return Observed semantic modifier set for a later chord.
+ */
+constexpr InputModifiers operator+(Modifier first, Modifier second) noexcept {
+  return (first + (second + Chord{})).modifiers;
+}
+
+/** @param modifiers Semantic modifiers to merge.
+ * @param chord Shortcut copied and extended.
+ * @return Combined shortcut with no physical-key or AltGr inference.
+ */
+constexpr Chord operator+(InputModifiers modifiers, Chord chord) noexcept {
+  chord.modifiers.shift = chord.modifiers.shift || modifiers.shift;
+  chord.modifiers.alt = chord.modifiers.alt || modifiers.alt;
+  chord.modifiers.control = chord.modifiers.control || modifiers.control;
+  chord.modifiers.super = chord.modifiers.super || modifiers.super;
+
+  return chord;
+}
+
+/** @param modifiers Existing semantic modifier set.
+ * @param modifier Additional semantic tag.
+ * @return Merged modifier set for a later chord.
+ */
+constexpr InputModifiers operator+(InputModifiers modifiers, Modifier modifier) noexcept {
+  return (modifiers + (modifier + Chord{})).modifiers;
+}
+
+inline constexpr Chord ESCAPE{InputKey::ESCAPE};         ///< ESCAPE shortcut.
+inline constexpr Chord ENTER{InputKey::ENTER};           ///< ENTER shortcut.
+inline constexpr Chord TAB{InputKey::TAB};               ///< TAB shortcut.
+inline constexpr Chord BACKSPACE{InputKey::BACKSPACE};   ///< BACKSPACE shortcut.
+inline constexpr Chord UP{InputKey::UP};                 ///< UP shortcut.
+inline constexpr Chord DOWN{InputKey::DOWN};             ///< DOWN shortcut.
+inline constexpr Chord RIGHT{InputKey::RIGHT};           ///< RIGHT shortcut.
+inline constexpr Chord LEFT{InputKey::LEFT};             ///< LEFT shortcut.
+inline constexpr Chord HOME{InputKey::HOME};             ///< HOME shortcut.
+inline constexpr Chord END{InputKey::END};               ///< END shortcut.
+inline constexpr Chord INSERT{InputKey::INSERT};         ///< INSERT shortcut.
+inline constexpr Chord DELETE_KEY{InputKey::DELETE_KEY}; ///< DELETE_KEY shortcut.
+inline constexpr Chord PAGE_UP{InputKey::PAGE_UP};       ///< PAGE_UP shortcut.
+inline constexpr Chord PAGE_DOWN{InputKey::PAGE_DOWN};   ///< PAGE_DOWN shortcut.
+inline constexpr Chord F1{InputKey::F1};                 ///< F1 shortcut.
+inline constexpr Chord F2{InputKey::F2};                 ///< F2 shortcut.
+inline constexpr Chord F3{InputKey::F3};                 ///< F3 shortcut.
+inline constexpr Chord F4{InputKey::F4};                 ///< F4 shortcut.
+inline constexpr Chord F5{InputKey::F5};                 ///< F5 shortcut.
+inline constexpr Chord F6{InputKey::F6};                 ///< F6 shortcut.
+inline constexpr Chord F7{InputKey::F7};                 ///< F7 shortcut.
+inline constexpr Chord F8{InputKey::F8};                 ///< F8 shortcut.
+inline constexpr Chord F9{InputKey::F9};                 ///< F9 shortcut.
+inline constexpr Chord F10{InputKey::F10};               ///< F10 shortcut.
+inline constexpr Chord F11{InputKey::F11};               ///< F11 shortcut.
+inline constexpr Chord F12{InputKey::F12};               ///< F12 shortcut.
+inline constexpr Chord A{InputKey::CHARACTER, U'A'};     ///< ASCII A shortcut, case insensitive.
+inline constexpr Chord B{InputKey::CHARACTER, U'B'};     ///< ASCII B shortcut, case insensitive.
+inline constexpr Chord C{InputKey::CHARACTER, U'C'};     ///< ASCII C shortcut, case insensitive.
+inline constexpr Chord D{InputKey::CHARACTER, U'D'};     ///< ASCII D shortcut, case insensitive.
+inline constexpr Chord E{InputKey::CHARACTER, U'E'};     ///< ASCII E shortcut, case insensitive.
+inline constexpr Chord F{InputKey::CHARACTER, U'F'};     ///< ASCII F shortcut, case insensitive.
+inline constexpr Chord G{InputKey::CHARACTER, U'G'};     ///< ASCII G shortcut, case insensitive.
+inline constexpr Chord H{InputKey::CHARACTER, U'H'};     ///< ASCII H shortcut, case insensitive.
+inline constexpr Chord I{InputKey::CHARACTER, U'I'};     ///< ASCII I shortcut, case insensitive.
+inline constexpr Chord J{InputKey::CHARACTER, U'J'};     ///< ASCII J shortcut, case insensitive.
+inline constexpr Chord K{InputKey::CHARACTER, U'K'};     ///< ASCII K shortcut, case insensitive.
+inline constexpr Chord L{InputKey::CHARACTER, U'L'};     ///< ASCII L shortcut, case insensitive.
+inline constexpr Chord M{InputKey::CHARACTER, U'M'};     ///< ASCII M shortcut, case insensitive.
+inline constexpr Chord N{InputKey::CHARACTER, U'N'};     ///< ASCII N shortcut, case insensitive.
+inline constexpr Chord O{InputKey::CHARACTER, U'O'};     ///< ASCII O shortcut, case insensitive.
+inline constexpr Chord P{InputKey::CHARACTER, U'P'};     ///< ASCII P shortcut, case insensitive.
+inline constexpr Chord Q{InputKey::CHARACTER, U'Q'};     ///< ASCII Q shortcut, case insensitive.
+inline constexpr Chord R{InputKey::CHARACTER, U'R'};     ///< ASCII R shortcut, case insensitive.
+inline constexpr Chord S{InputKey::CHARACTER, U'S'};     ///< ASCII S shortcut, case insensitive.
+inline constexpr Chord T{InputKey::CHARACTER, U'T'};     ///< ASCII T shortcut, case insensitive.
+inline constexpr Chord U{InputKey::CHARACTER, U'U'};     ///< ASCII U shortcut, case insensitive.
+inline constexpr Chord V{InputKey::CHARACTER, U'V'};     ///< ASCII V shortcut, case insensitive.
+inline constexpr Chord W{InputKey::CHARACTER, U'W'};     ///< ASCII W shortcut, case insensitive.
+inline constexpr Chord X{InputKey::CHARACTER, U'X'};     ///< ASCII X shortcut, case insensitive.
+inline constexpr Chord Y{InputKey::CHARACTER, U'Y'};     ///< ASCII Y shortcut, case insensitive.
+inline constexpr Chord Z{InputKey::CHARACTER, U'Z'};     ///< ASCII Z shortcut, case insensitive.
+} // namespace key
+
 /** @brief Native adapters may report repeat/release; VT emits press only. */
 enum class KeyAction {
   PRESS,  ///< Key press; the only action emitted by the VT decoder.

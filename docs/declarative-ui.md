@@ -361,8 +361,41 @@ new chain is rejected rather than silently replacing application behavior.
 The [complete minimal source](../examples/click_handlers/main.cpp) is compiled
 against the installed package. The headless click consumer separately checks
 registration, composition, exact errors and cleanup without opening a terminal.
-Short chord strings and current-scene `ui::quit()` are not required here:
-`ui::key(InputKey::F10)` and `ui::quit(scene.ref())` are the existing supported forms.
+## Short key bindings
+
+Key aliases and chords use semantic modifiers supplied by the terminal decoder:
+
+```cpp
+scene | ui::onKey(key::F10, ui::quit(scene.ref()));
+scene | ui::onKey(key::ALT + key::Q, ui::quit(scene.ref()));
+scene | ui::onKey({key::F10, key::ALT + key::Q}, ui::quit(scene.ref()));
+scene | ui::onKey("F10 | Alt + Q", ui::quit(scene.ref()));
+```
+
+These are alternative registrations shown independently. Choose one form for
+one action. A list or string registers one owning handler; duplicate alternatives
+invoke it once. Names in strings ignore ASCII case. Letter aliases match either
+ASCII letter case, with exact modifiers. Other Unicode text passes through unless
+an explicitly supported shortcut matches it. Modified text such as decoded
+`ESC + q` is admitted without a second input router.
+
+New shortcut bindings admit PRESS by default; REPEAT requires an explicit
+`ShortcutBehavior` option. Existing `ui::key(InputKey::F10)` / `KeyEvent` bindings
+retain PRESS and REPEAT behavior. A nonmatching shortcut delegates to the previous
+handler and normal widget routing. The newest matching binding wins.
+
+`parseShortcut` provides a checked `expected<Shortcut, ShortcutError>` path.
+Syntax diagnostics include a typed cause and a zero-based byte offset; no caller
+string is borrowed after registration. Default parser budgets are 4096 bytes,
+32 alternatives and 8 strokes per alternative, configurable through
+`ShortcutOptions`. This slice rejects multi-stroke sequences until their execution
+extension is available. Invalid syntax or exhausted registration budgets do not
+replace existing handlers. Facade errors reach the existing scene diagnostics.
+
+Generic SHIFT, ALT and CTRL describe observed semantic modifiers. The API does
+not infer left/right identity or AltGr from terminal events. The current-scene
+`ui::quit()` extension is separate; the explicit `ui::quit(scene.ref())` remains
+supported.
 
 ## Store descriptions, then mount
 

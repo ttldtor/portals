@@ -5,6 +5,7 @@
 #include <portals/application.hpp>
 #include <portals/detail/pss_data.hpp>
 #include <portals/pss_file_error.hpp>
+#include <portals/shortcut.hpp>
 #include <portals/style.hpp>
 #include <portals/text_resource.hpp>
 
@@ -50,6 +51,9 @@ struct ManagedError {
   /// Invalid/oversized identities use an empty label or a bounded complete UTF-8 prefix; original PSS errors survive.
   /// NO_MEMORY handling performs no label allocation. Copies share the identity without retaining a scene.
   std::shared_ptr<const std::string> styleSource{};
+  std::optional<ShortcutError> shortcut{}; ///< Exact shortcut syntax/value cause and owned offset, when present.
+  std::optional<std::source_location>
+    registrationOrigin{}; ///< Static registration identity for a shortcut action failure; never a borrowed source view.
 };
 
 /** @brief Finite error-history and causal-context budgets. All limits must be positive. */

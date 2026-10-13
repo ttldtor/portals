@@ -117,12 +117,12 @@ private:
 
     if (composition == Composition::PIPE) {
       form | ui::theme(example::THEME_PRESETS.at(theme_).make()) | ui::style(FOCUS_POLICY, {.name = "gallery-focus"}) |
-        ui::configure(std::move(configuration)) | ui::onKey(ui::key(InputKey::F10), std::move(quit));
+        ui::configure(std::move(configuration)) | ui::onKey(key::F10, std::move(quit));
     } else {
       form.theme(example::THEME_PRESETS.at(theme_).make())
         .style(FOCUS_POLICY, {.name = "gallery-focus"})
         .configure(std::move(configuration))
-        .onKey(ui::key(InputKey::F10), std::move(quit));
+        .onKey(key::F10, std::move(quit));
     }
 
     return std::move(form) |

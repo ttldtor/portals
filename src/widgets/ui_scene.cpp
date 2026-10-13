@@ -268,6 +268,37 @@ constexpr const char *categoryName(TextErrorKind value) noexcept {
   return "UNKNOWN";
 }
 
+constexpr const char *categoryName(ShortcutErrorKind value) noexcept {
+  switch (value) {
+  case ShortcutErrorKind::INVALID_OPTIONS:
+    return "INVALID_OPTIONS";
+  case ShortcutErrorKind::SOURCE_LIMIT:
+    return "SOURCE_LIMIT";
+  case ShortcutErrorKind::ALTERNATIVE_LIMIT:
+    return "ALTERNATIVE_LIMIT";
+  case ShortcutErrorKind::STROKE_LIMIT:
+    return "STROKE_LIMIT";
+  case ShortcutErrorKind::EMPTY_ALTERNATIVE:
+    return "EMPTY_ALTERNATIVE";
+  case ShortcutErrorKind::EMPTY_TOKEN:
+    return "EMPTY_TOKEN";
+  case ShortcutErrorKind::UNKNOWN_KEY:
+    return "UNKNOWN_KEY";
+  case ShortcutErrorKind::DUPLICATE_MODIFIER:
+    return "DUPLICATE_MODIFIER";
+  case ShortcutErrorKind::EXPECTED_KEY:
+    return "EXPECTED_KEY";
+  case ShortcutErrorKind::UNSUPPORTED_SEQUENCE:
+    return "UNSUPPORTED_SEQUENCE";
+  case ShortcutErrorKind::INVALID_CHORD:
+    return "INVALID_CHORD";
+  case ShortcutErrorKind::NO_MEMORY:
+    return "NO_MEMORY";
+  }
+
+  return "UNKNOWN";
+}
+
 constexpr const char *categoryName(TextResourceError value) noexcept {
   switch (value) {
   case TextResourceError::MISSING_RESOURCE:
@@ -440,6 +471,11 @@ void reportFailure(const ManagedError &failure, std::source_location origin) noe
 
   if (failure.resource) {
     std::fprintf(stderr, " resource=%s", categoryName(*failure.resource));
+  }
+
+  if (failure.shortcut) {
+    std::fprintf(stderr, " shortcut=(cause=%s, offset=%zu)", categoryName(failure.shortcut->cause),
+                 failure.shortcut->offset);
   }
 
   std::fputc('\n', stderr);
@@ -920,6 +956,23 @@ bool Scene::admitConfiguration(bool runtime, std::source_location origin) {
 void Scene::configurationException(TreeError cause, std::source_location origin) {
   if (owner_ == std::this_thread::get_id() && state_) {
     state_->fail(error(ManagedPhase::BIND, cause, state_->node()), "scene.configure", origin);
+
+    if (state_->prepared && state_->active == State::Operation::NONE) {
+      State::Guard guard(*state_, State::Operation::CONFIGURE);
+
+      (void)state_->cleanup(origin);
+    }
+  }
+}
+
+void Scene::shortcutConfigurationFailure(ShortcutError cause, std::source_location origin) {
+  if (owner_ == std::this_thread::get_id() && state_) {
+    const auto treeCause =
+      cause.cause == ShortcutErrorKind::NO_MEMORY ? TreeError::NO_MEMORY : TreeError::INVALID_ARGUMENT;
+    auto failure = error(ManagedPhase::BIND, treeCause, state_->node());
+
+    failure.shortcut = cause;
+    state_->fail(std::move(failure), "scene.onKey", origin);
 
     if (state_->prepared && state_->active == State::Operation::NONE) {
       State::Guard guard(*state_, State::Operation::CONFIGURE);

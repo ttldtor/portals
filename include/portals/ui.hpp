@@ -1640,6 +1640,87 @@ auto onKey(KeyEvent chord, Callback callback, std::source_location origin = std:
   }};
 }
 
+/** @tparam Source Constexpr chord, owning alternatives or string-view-convertible runtime text.
+ * @tparam Callback Owning compact checked action optionally taking a semantic KeyEvent.
+ * @param source Source normalized during stage construction; caller text is never retained.
+ * @param callback Action stored until checked stage consumption; caller callback construction/moves may throw.
+ * @param origin Registration site preserved across deferred configuration.
+ * @return Consuming stage registering one atomic owning alternative set in the existing input slot.
+ */
+template <portals::detail::ShortcutSource Source, class Callback>
+  requires portals::detail::ManagedAction<Callback, KeyEvent>
+auto onKey(Source &&source, Callback callback, std::source_location origin = std::source_location::current()) {
+  auto shortcut =
+    portals::detail::retainShortcut(portals::detail::prepareShortcut(std::forward<decltype(source)>(source), {}));
+
+  return detail::SceneStage{
+    [shortcut = std::move(shortcut), callback = std::move(callback), origin](Scene &owner) mutable {
+      detail::SceneAccess::onShortcut(owner, shortcut, callback, {}, {}, origin);
+    }};
+}
+
+/** @tparam Source Constexpr chord, owning alternatives or string-view-convertible runtime text.
+ * @tparam Callback Owning compact checked action optionally taking a semantic KeyEvent.
+ * @param source Source normalized during stage construction; caller text is never retained.
+ * @param callback Action stored until checked stage consumption; caller callback construction/moves may throw.
+ * @param behavior PRESS-only default; repeat requires explicit opt-in.
+ * @param options Positive finite parser budgets.
+ * @param origin Registration site preserved across deferred configuration.
+ * @return Consuming stage registering one atomic owning alternative set in the existing input slot.
+ */
+template <portals::detail::ShortcutSource Source, class Callback>
+  requires portals::detail::ManagedAction<Callback, KeyEvent>
+auto onKey(Source &&source, Callback callback, ShortcutBehavior behavior, ShortcutOptions options = {},
+           std::source_location origin = std::source_location::current()) {
+  auto shortcut =
+    portals::detail::retainShortcut(portals::detail::prepareShortcut(std::forward<decltype(source)>(source), options));
+
+  return detail::SceneStage{
+    [shortcut = std::move(shortcut), callback = std::move(callback), behavior, options, origin](Scene &owner) mutable {
+      detail::SceneAccess::onShortcut(owner, shortcut, callback, behavior, options, origin);
+    }};
+}
+
+/** @tparam Callback Owning compact checked action optionally taking a semantic KeyEvent.
+ * @param source Alternatives copied during stage construction.
+ * @param callback Action stored until checked stage consumption; caller callback construction/moves may throw.
+ * @param origin Registration site preserved across deferred configuration.
+ * @return Consuming stage registering one atomic owning alternative set in the existing input slot.
+ */
+template <class Callback>
+  requires portals::detail::ManagedAction<Callback, KeyEvent>
+auto onKey(std::initializer_list<key::Chord> source, Callback callback,
+           std::source_location origin = std::source_location::current()) {
+  auto shortcut =
+    portals::detail::retainShortcut(portals::detail::prepareShortcut(std::forward<decltype(source)>(source), {}));
+
+  return detail::SceneStage{
+    [shortcut = std::move(shortcut), callback = std::move(callback), origin](Scene &owner) mutable {
+      detail::SceneAccess::onShortcut(owner, shortcut, callback, {}, {}, origin);
+    }};
+}
+
+/** @tparam Callback Owning compact checked action optionally taking a semantic KeyEvent.
+ * @param source Alternatives copied during stage construction.
+ * @param callback Action stored until checked stage consumption; caller callback construction/moves may throw.
+ * @param behavior PRESS-only default; repeat requires explicit opt-in.
+ * @param options Positive finite parser budgets.
+ * @param origin Registration site preserved across deferred configuration.
+ * @return Consuming stage registering one atomic owning alternative set in the existing input slot.
+ */
+template <class Callback>
+  requires portals::detail::ManagedAction<Callback, KeyEvent>
+auto onKey(std::initializer_list<key::Chord> source, Callback callback, ShortcutBehavior behavior,
+           ShortcutOptions options = {}, std::source_location origin = std::source_location::current()) {
+  auto shortcut =
+    portals::detail::retainShortcut(portals::detail::prepareShortcut(std::forward<decltype(source)>(source), options));
+
+  return detail::SceneStage{
+    [shortcut = std::move(shortcut), callback = std::move(callback), behavior, options, origin](Scene &owner) mutable {
+      detail::SceneAccess::onShortcut(owner, shortcut, callback, behavior, options, origin);
+    }};
+}
+
 /** @tparam Callback Owning no-argument or ClickParams callback returning void, checked TreeError or editor receipt.
  * @param reference Button observation published by this scene's recipe; no scene/widget ownership is retained.
  * @param callback Owning callback invoked FIFO with other pipe callbacks, including modified activations.
