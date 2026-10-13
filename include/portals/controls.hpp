@@ -138,6 +138,61 @@ struct ClickEvent {
   RoutedEvent event;        ///< Owning action, Space or left mouse press that activated the button.
 };
 
+namespace ui {
+/** @brief Owning click snapshot used by pipe callbacks; no widget or scene ownership.
+ * The callback borrows this value synchronously. A saved copy keeps the event and observing
+ * identity, but stopPropagation on that copy cannot affect the original delivery.
+ * Metadata is read-only throughout the chain. Copy construction creates a snapshot;
+ * assignment is unavailable because the original event fields cannot be replaced.
+ */
+class ClickParams {
+public:
+  /** @param click Original owning router activation, copied into this synchronous chain context. */
+  explicit ClickParams(const ClickEvent &click)
+      : target(click.target), mods(click.modifiers), source(sourceOf(click.event)), event(click.event) {
+  }
+
+  /** @brief Stop remaining callbacks of this activation; the button already consumes router bubbling. */
+  void stopPropagation() noexcept {
+    stopped_ = true;
+  }
+
+  /** @brief Short alias for stopPropagation, affecting the same synchronous chain context. */
+  void stop() noexcept {
+    stopPropagation();
+  }
+
+  /** @return Whether this particular synchronous chain context was stopped. */
+  bool propagationStopped() const noexcept {
+    return stopped_;
+  }
+
+  const Node<Button> target; ///< Observing activated identity; may become stale after a callback.
+  const InputModifiers mods; ///< Original semantic modifiers, queryable with key tags.
+  const ClickSource source;  ///< Actual admitted event origin.
+  const RoutedEvent event;   ///< Owning original routed value; keyboard translation preserves its source.
+
+private:
+  static ClickSource sourceOf(const RoutedEvent &event) {
+    return std::visit(
+      [](const auto &value) {
+        using T = std::remove_cvref_t<decltype(value)>;
+
+        if constexpr (std::same_as<T, ActionEvent>) {
+          return value.source;
+        } else if constexpr (std::same_as<T, MouseInputEvent>) {
+          return ClickSource::MOUSE;
+        } else {
+          return ClickSource::KEYBOARD;
+        }
+      },
+      event);
+  }
+
+  bool stopped_{};
+};
+} // namespace ui
+
 /** @brief Checkbox presentation; Property<bool> is its authoritative value when bound. */
 class CheckBox : public Control {
 public:

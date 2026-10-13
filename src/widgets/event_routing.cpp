@@ -358,7 +358,7 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
       auto action = keyAction(key->key);
 
       if (action && key->action != KeyAction::RELEASE) {
-        return route(*target, ActionEvent{*action, key->modifiers});
+        return route(*target, ActionEvent{*action, key->modifiers, ClickSource::KEYBOARD});
       }
 
       return route(*target, *key);

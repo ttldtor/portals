@@ -20,15 +20,26 @@ enum class Action {
   ERASE_FORWARD   ///< Erase after the current position.
 };
 
+/** @brief Origin of an admitted activation, without inferred physical input. */
+enum class ClickSource {
+  PROGRAMMATIC, ///< Explicit semantic action, the default for caller-created ActionEvent.
+  KEYBOARD,     ///< Keyboard input, including a key translated into a semantic action.
+  MOUSE         ///< Mouse input supplied by the existing router.
+};
+
 /** @brief Owning semantic command, usable without terminal input. */
 struct ActionEvent {
-  Action action{};            ///< Command identity.
-  InputModifiers modifiers{}; ///< Selection and other modifier intent.
-  /** @brief Value equality.
-   * @param other Command and modifier value to compare.
-   * @return True when all compared fields are equal.
+  Action action{};                               ///< Command identity.
+  InputModifiers modifiers{};                    ///< Selection and other modifier intent.
+  ClickSource source{ClickSource::PROGRAMMATIC}; ///< Preserved origin when translating keyboard input.
+
+  /** @brief Compare semantic command intent, preserving the original equality contract.
+   * @param other Command and modifier value to compare; source annotation is inspected separately.
+   * @return True when action and modifiers are equal, regardless of observed source.
    */
-  bool operator==(const ActionEvent &other) const = default;
+  constexpr bool operator==(const ActionEvent &other) const noexcept {
+    return action == other.action && modifiers == other.modifiers;
+  }
 };
 
 /** @brief Synchronous input value; callback borrows it only until return. */

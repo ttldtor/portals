@@ -1,5 +1,14 @@
 # Headless terminal testing
 
+The relocated installed-package check builds all consumer targets from fresh
+sources before running their tests. `PORTALS_PACKAGE_TEST_TIMEOUT` controls its
+CTest limit in seconds per configuration (default 600, positive integer up to
+86400). The multi-configuration check gets twice this budget. For example,
+configure with `-DPORTALS_PACKAGE_TEST_TIMEOUT=900` on a slower development disk.
+This build-and-test limit does not change the shorter deadlines of individual
+runtime tests. A timeout is a failed check; increasing the budget still requires
+a complete successful run.
+
 `tests/support/test_terminal.hpp` is private test support, not an installed Portals
 API. `TestTerminal` implements `FrameOutput`, owns an independent VT oracle and
 input decoder, and borrows a `FakeClock`. One executor owns all calls. The clock

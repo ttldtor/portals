@@ -12,7 +12,7 @@ struct SceneOptions {
   ApplicationOptions application{};  ///< Existing runner policies, applied once at prepare.
   ManagedOptions managed{};          ///< Existing managed ownership and diagnostic budgets.
   SchedulerClock clock{};            ///< Optional borrowed replay clock; must outlive run.
-  std::size_t maxConfigurations{64}; ///< Positive maximum queued configure/onKey callbacks before prepare.
+  std::size_t maxConfigurations{64}; ///< Positive maximum queued configure/key/click callbacks before prepare.
 };
 
 /** @brief Final owning error envelope or bounded successful-run summary; no live widget references. */
@@ -485,6 +485,20 @@ private:
     }
   }
 
+  template <detail::SceneConfiguration Callback> void onClickImpl(Callback &callback, std::source_location origin) {
+    if (!admitConfiguration(true, origin)) {
+      return;
+    }
+
+    try {
+      addConfiguration(std::move(callback), true, origin);
+    } catch (const std::bad_alloc &) {
+      configurationException(TreeError::NO_MEMORY, origin);
+    } catch (...) {
+      configurationException(TreeError::CALLBACK_FAILED, origin);
+    }
+  }
+
   void applyLiveBinding(std::shared_ptr<detail::LiveFactory> factory, std::source_location origin);
   void setupFailure(ManagedError failure, std::source_location origin);
   void applyTheme(const StyleSheet &sheet, std::source_location origin);
@@ -504,6 +518,16 @@ private:
 namespace detail {
 /** @brief Internal bridge from consuming recipes to one stable facade owner. */
 struct SceneAccess {
+
+  /** @tparam Callback Owning checked click registration against the existing managed scene.
+   * @param owner Facade receiving the deferred or runtime registration.
+   * @param callback Owning configuration, transferred only after UI admission.
+   * @param origin Original pipe registration site retained in diagnostics.
+   */
+  template <SceneConfiguration Callback>
+  static void onClick(Scene &owner, Callback &callback, std::source_location origin) {
+    owner.onClickImpl(callback, origin);
+  }
 
   /** @param owner Stationary facade retaining an existing concrete live controller.
    * @param factory Owning descriptor factory, invoked under facade admission before attaching a controller.

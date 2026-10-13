@@ -13,6 +13,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/FinalizeDiagrams.cmake")
 set(example_sources
   tests/support/gallery_before.hpp
   examples/gallery/form.hpp
+  examples/click_handlers/main.cpp
   examples/gallery/fluent_form.hpp
   examples/custom_widget/meter.hpp
   examples/custom_widget/fluent_meter.hpp
@@ -45,6 +46,9 @@ foreach(page examples managed-controls declarative-ui virtual-preparation compac
   foreach(source IN LISTS example_sources)
     string(REPLACE "href=\"../${source}\"" "href=\"source/${source}\"" content "${content}")
   endforeach()
+  # Keep the Markdown deep link usable on GitHub and in the generated HTML.
+  string(REPLACE "href=\"declarative-ui.md#pipe-click-handlers\""
+    "href=\"declarative-ui.html#pipe-click-handlers\"" content "${content}")
   file(WRITE "${page_file}" "${content}")
 endforeach()
 

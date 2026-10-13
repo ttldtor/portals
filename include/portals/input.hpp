@@ -17,12 +17,41 @@ namespace portals {
 /** @brief Caller-supplied monotonic milliseconds; no wall clock or I/O is used. */
 using InputTime = std::uint64_t;
 
+namespace key {
+/** @brief Semantic modifier tags; physical left/right keys are not inferred. */
+enum class Modifier {
+  SHIFT, ///< Observed Shift intent.
+  ALT,   ///< Observed Alt intent.
+  CTRL   ///< Observed Control intent.
+};
+inline constexpr Modifier SHIFT = Modifier::SHIFT; ///< Shift query tag.
+inline constexpr Modifier ALT = Modifier::ALT;     ///< Alt query tag.
+inline constexpr Modifier CTRL = Modifier::CTRL;   ///< Control query tag.
+} // namespace key
+
 /** @brief Observed modifiers, also usable by a native input adapter. */
 struct InputModifiers {
   bool shift{};   ///< Shift modifier.
   bool alt{};     ///< Alt modifier (legacy ESC prefix is ambiguous).
   bool control{}; ///< Control modifier.
   bool super{};   ///< Super modifier; never inferred by this VT profile.
+
+  /** @param modifier Semantic modifier to inspect.
+   * @return Whether this event reports the requested modifier.
+   */
+  constexpr bool has(key::Modifier modifier) const noexcept {
+    switch (modifier) {
+    case key::Modifier::SHIFT:
+      return shift;
+    case key::Modifier::ALT:
+      return alt;
+    case key::Modifier::CTRL:
+      return control;
+    }
+
+    return false;
+  }
+
   /** @brief Compare the complete event value.
    * @param other Event or metadata value to compare, without interpreting its payload.
    * @return True when every stored field is equal; false otherwise.

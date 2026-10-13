@@ -105,7 +105,7 @@ public:
       options.stress ? ui::grid(std::move(heading), std::move(note), std::move(inspectAction), std::move(status),
                                 std::move(table), std::move(chart))
                      : ui::grid(std::move(heading),
-                                ui::row(toolbar, LinearOptions{.gap = 2}, std::move(note), std::move(inspectAction)),
+                                ui::hbox(toolbar, LinearOptions{.gap = 2}, std::move(note), std::move(inspectAction)),
                                 std::move(status), std::move(table), std::move(chart));
 
     const auto gridNode = take(ui::mount(*managed_, std::move(description)));

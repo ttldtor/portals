@@ -27,21 +27,21 @@ public:
     ui::NodeRef<LineEdit> editor;
 
     take(
-      ui::mount(*scene_, ui::column(ui::label("Portals gallery | F2 theme | F10 quit"),
-                                    ui::label("Name (Enter commits; Tab changes focus):"),
-                                    ui::lineEdit(name, {.options = {.editMode = EditMode::EXPLICIT}}).reference(editor),
-                                    ui::checkbox("Alerts", alerts),
-                                    ui::button("Run (no model change)",
-                                               [&]() -> std::expected<void, TreeError> {
-                                                 ++calls;
+      ui::mount(*scene_, ui::vbox(ui::label("Portals gallery | F2 theme | F10 quit"),
+                                  ui::label("Name (Enter commits; Tab changes focus):"),
+                                  ui::lineEdit(name, {.options = {.editMode = EditMode::EXPLICIT}}).reference(editor),
+                                  ui::checkbox("Alerts", alerts),
+                                  ui::button("Run (no model change)",
+                                             [&]() -> std::expected<void, TreeError> {
+                                               ++calls;
 
-                                                 return {};
-                                               }),
-                                    ui::button("Quit", [&]() -> std::expected<void, TreeError> {
-                                      app_.requestStop();
+                                               return {};
+                                             }),
+                                  ui::button("Quit", [&]() -> std::expected<void, TreeError> {
+                                    app_.requestStop();
 
-                                      return {};
-                                    }))));
+                                    return {};
+                                  }))));
 
     take(app.router().setFocus(editor.node()));
     take(scene_->theme(example::THEME_PRESETS.at(theme_).make()));

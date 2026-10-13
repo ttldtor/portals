@@ -11,21 +11,28 @@ owned by `WidgetTree`, while `ManagedScene` retains bindings and presentation wo
 A standalone program can use the standard exit and reporting policy:
 
 ```cpp
-#include <portals/ui.hpp>
+#include <portals/ui_style.hpp>
 
+/** @brief Run a minimal lazy scene with a late click handler and a runtime stylesheet.
+ * @return Zero on success, one on a typed setup/runtime failure after library cleanup/reporting.
+ * Click Add Hello to append one undoable text change; F10 quits. This minimal program defines no CLI options.
+ * The standard runner owns terminal restoration. Automated checks compile this example;
+ * headless consumer tests exercise the same registration and event semantics separately.
+ */
 int main() {
   using namespace portals;
 
   ui::Ref<LineEdit> message;
+  ui::Ref<Button> add;
 
-  ui::Scene scene = ui::scene(ui::column(
-    ui::label("Message"), ui::lineEdit(message, "Hello"),
-    ui::row(ui::button("Append", [message] { message.text() += text(" {}", 123); }),
-            ui::button("Quit", [&scene] { (void)scene.quit(); }))));
+  auto scene = ui::scene(ui::vbox(ui::lineEdit(message, ""), ui::button(add, "Add Hello")));
 
-  scene.onKey(ui::key(InputKey::F10), [&scene] { (void)scene.quit(); });
-
-  return ui::runApp(scene); // Equivalent: return scene | ui::runApp();
+  return scene | ui::style("Button { bold: true; }") |
+         ui::onClick(add,
+                     [message] {
+                       message.text() += "Hello!";
+                     }) |
+         ui::onKey(ui::key(InputKey::F10), ui::quit(scene.ref())) | ui::runApp();
 }
 ```
 
@@ -36,6 +43,18 @@ The final pipe stage borrows its lvalue or temporary scene for the synchronous
 call; it does not move it. `scene.run()` and `scene | ui::run()` retain the owning
 `expected<ApplicationStats, ManagedError>` result for embedding and explicit logs.
 Typed run does not invoke the final report sink or impose stderr I/O.
+
+The compact program constructs its recipe before entering the final `runApp`
+boundary. Allocation or capture-copy exceptions during that construction can
+still escape `main`; the exit-code policy does not retroactively catch them.
+Use the factory-based `runApp(factory, setup)` form described below when the
+application also needs the library to guard recipe construction.
+
+For an exit button, the current callable command is
+`ui::onClick(exitButton, ui::quit(scene.ref()))`. A no-argument imperative
+`ui::quit()` inside a callback is planned with the current-scene context (U125);
+it is not available in this version. The explicit `SceneRef` is an observing
+handle and does not keep a destroyed scene alive.
 
 `quit()` requests orderly cancellation through the existing `Application`.
 It is UI-only and idempotent while the scene is live. Before preparation, or
@@ -96,31 +115,23 @@ stage evaluation remains outside `runApp`. It does not catch arbitrary exception
 from that earlier work. Lazy recipe, configuration, and runtime callbacks execute
 inside their documented checked boundaries and preserve typed failures. Use an
 ordinary application `try`/`catch` around construction if its exceptions require
-an exit-code policy. There is no additional callable wrapper API.
+an exit-code policy. The existing ui::runApp(factory, setup) overload can place recipe construction inside its checked boundary; argument evaluation before entering that boundary is still outside it.
 
-The explicit `ui::Scene scene` declaration above makes the name available for
-captures in its initializer; callbacks run only after construction. Keep that
-facade in place and alive through execution. Moving it after capturing `&scene`
-does not rewrite user captures. Other consuming scene modifiers may move the
-facade, so finish their composition before installing self-referencing callbacks.
-These rules follow ordinary C++ [declaration scope](https://eel.is/c++draft/basic.scope.pdecl)
-and [lambda capture lifetime](https://eel.is/c++draft/expr.prim.lambda.capture).
+The complete program above captures observing Ref values and passes a weak SceneRef to quit. A user callback that explicitly borrows `&scene` must keep that facade stationary and alive; a move does not rewrite arbitrary C++ captures. Compose consuming modifiers before installing such self-referencing callbacks.
 
 An ordinary form can also use `ui::scene` to own its existing `Application` and
 `ManagedScene`. Preparation mounts the complete form and publishes its `Ref`s;
-it performs no terminal I/O. Configure handlers after preparation, then run:
+it performs no terminal I/O. Late Ref handlers can be registered directly in the pipe; they bind after successful mount, without a configure wrapper:
 
 ```cpp
 ui::Ref<LineEdit> field;
 ui::Ref<Button> apply;
 
-auto form = ui::scene(ui::column(
+auto form = ui::scene(ui::vbox(
   ui::lineEdit(field, "initial"),
   ui::button(apply, "Apply")));
 
-form.prepare().configure([&](ManagedScene &) {
-  return apply.onClick([field] { field.text() += "!"; });
-});
+form | ui::onClick(apply, [field] { field.text() += "!"; });
 
 auto result = form.run();
 ```
@@ -204,6 +215,134 @@ pipe adapter before dispatch may still throw. Final teardown releases retained
 state, runtime captures and owning option services while the complete facade
 state remains guarded; lifecycle reentry is rejected before owner destruction.
 
+## Pipe click handlers {#pipe-click-handlers}
+
+`ui::onClick(ref, callback)` installs a scene-owned handler after the complete
+recipe mounts. It accepts a `ui::Ref<Button>` belonging to that same scene; no
+binding token or presentation synchronization is required. The observing ref
+must name a button: stale, cross-scene and incomplete-mount references produce
+existing typed setup errors. `ui::hbox` and `ui::vbox` are forwarding aliases for
+`ui::row` and `ui::column`, including their reference and layout-options overloads.
+They create the same retained layouts and add no runtime layer.
+
+A handler can take no arguments or borrow `ui::ClickParams&`. Multiple handlers
+run in registration order. For example, replace the single handler in the full
+program above with these two stages:
+
+```cpp
+ui::onClick(add, [message](ui::ClickParams &params) {
+  if (params.mods.has(key::SHIFT)) {
+    message.text() += "HELLO!";
+    params.stop();
+  }
+})
+```
+
+followed by:
+
+```cpp
+ui::onClick(add, [message] { message.text() += "Hello!"; })
+```
+
+Without Shift the first callback leaves the chain running and the second appends
+`Hello!`. With an admitted Shift-modified activation, the first appends `HELLO!`
+and skips the second. A terminal may reserve Shift+mouse for selection instead
+of reporting it; the library cannot infer an event the terminal withheld.
+
+| Member | Meaning and lifetime |
+| --- | --- |
+| `target` | Observing `Node<Button>` identity. Does not own the control; may become stale after removal. |
+| `mods` | Original semantic modifiers; query `has(key::SHIFT)`, `has(key::ALT)` or `has(key::CTRL)`. No physical left/right distinction is claimed. |
+| `source` | `ClickSource::KEYBOARD`, `MOUSE` or `PROGRAMMATIC`. Enter-to-action translation preserves keyboard origin. |
+| `event` | Owning original routed activation. Translated actions carry their source, not a reconstructed raw keyboard record. |
+| `stop()` | Stops remaining handlers of this synchronous activation. Alias: `stopPropagation()`. |
+| `propagationStopped()` | Reads the stop flag of this particular context or saved copy. |
+
+The public event metadata is read-only. Callbacks borrow the shared parameters only during delivery. Copy construction (for example, `auto snapshot = params`) retains
+an owning event snapshot and observing identity; calling `stop()` on a saved copy
+cannot affect the original chain. For an optional snapshot, use `snapshot.emplace(params)`; const metadata deliberately prevents whole-object assignment. Activation already returns `HANDLED` through
+the existing button routing, so ancestor callbacks are suppressed even without
+`stop()`. This is not a new DOM bubbling model.
+
+### Where the handler lives
+
+```mermaid
+flowchart LR
+  accTitle: Late click handler ownership and dispatch
+  accDescr: A lazy pipe stage registers a scene-owned FIFO handler chain after mount. A shared callback record survives self-removal until the current invocation returns, while observing refs do not keep the scene alive.
+  pipe["ui::onClick(ref, callback)"] --> queue["Scene deferred registration"]
+  queue --> entry["ManagedScene Entry"]
+  entry --> binding["One existing ActionBinding"]
+  entry --> chain["Owning ClickChain"]
+  chain --> records["Owning callback records · FIFO"]
+  binding --> dispatch["Existing EventRouter"]
+  dispatch --> active["Shared current record + owning ClickParams"]
+  active --> eligible["Recheck lifetime / closed / input eligibility"]
+  eligible --> records
+  classDef facade fill:#dceeff,stroke:#2473a6,color:#132c40
+  classDef owner fill:#e3f2e7,stroke:#34724d,color:#193825
+  classDef runtime fill:#fff0d9,stroke:#a86b16,color:#453018
+  class pipe,queue facade
+  class entry,chain,records,active owner
+  class binding,dispatch,eligible runtime
+```
+
+The binding retains the chain, but only observes the scene lifetime. The chain
+owns callback records, never the scene or the binding. The active record stays
+alive through self-removal. Cleanup retires the registry and releases its handler
+budget before destroying inactive captures; dispatch stops before using a retired
+identity. This ownership is the same for keyboard, mouse and programmatic input.
+
+### Results, errors and mutation
+
+Callbacks may return `void`, `expected<void, TreeError>` or the existing
+`EditorCommandResult`. Return `field.undo()` or `field.redo()` directly to preserve
+its exact already-reported provenance. The first returned failure or exception
+stops the remaining handlers and reaches the existing typed diagnostics; an error
+already reported by that exact editor command is not reported a second time.
+Unrelated failures and observer failures remain distinct. Earlier external side
+effects are not rolled back.
+
+A short mutation such as `field.text() += "!"` in a `void` callback still uses the
+normal text-property diagnostics. It does not implicitly return its failure or
+abort the remaining C++ instructions. Choose an explicit checked return or `stop()`
+when the next action depends on success; the unified setup error policy is a
+separate extension. Successful text edits keep the editor's configured model,
+validation and Undo behavior. A mutation is not a new revision-management API.
+
+Removing, hiding or disabling the target or an ancestor, or closing the scene,
+ends the chain before the next handler. The currently executing owning callback
+survives cleanup until it returns; no callback retains a raw pointer to a removed
+widget. Captured references to application objects remain the caller's lifetime
+responsibility. These operations are UI-affine.
+
+Appending to an existing chain during delivery takes effect on the next event;
+the current event uses its original handler count. Creating a new action binding
+while the router dispatches retains the existing `WOULD_BLOCK` result. Manual
+per-handler disconnect handles are not part of this interface.
+
+### Limits and low-level compatibility
+
+`ManagedOptions::maxClickHandlers` defaults to 256 across the scene and
+`maxClickHandlersPerNode` to 64. Both must be positive. Exceeding either returns
+`TreeError::NODE_LIMIT` without replacing existing handlers; allocation failure
+returns `NO_MEMORY`. `SceneOptions::maxConfigurations` independently defaults to
+64 and bounds all deferred click/key/configure registrations before preparation.
+Raise the appropriate budget explicitly for larger forms.
+
+`Ref<Button>::onClick`, recipe `.onClick` and `ManagedScene::onClick` retain their
+single-binding contract and reject duplicate bindings. Their old no-argument
+form admits only unmodified activation; parameterized callbacks admit modifiers.
+The new pipe chain intentionally allows both no-argument and parameterized
+callbacks on a modified activation. Mixing a pre-existing single binding with a
+new chain is rejected rather than silently replacing application behavior.
+
+The [complete minimal source](../examples/click_handlers/main.cpp) is compiled
+against the installed package. The headless click consumer separately checks
+registration, composition, exact errors and cleanup without opening a terminal.
+Short chord strings and current-scene `ui::quit()` are not required here:
+`ui::key(InputKey::F10)` and `ui::quit(scene.ref())` are the existing supported forms.
+
 ## Store descriptions, then mount
 
 A description owns its child descriptions and callback objects. Standard text
@@ -213,7 +352,7 @@ or subscribe to events. Descriptions are movable and noncopyable; mounting
 consumes them. Reusing a consumed or moved-from description returns
 `TreeError::INVALID_ARGUMENT` through `ManagedError`.
 
-Use `ui::column(...)` and `ui::row(...)` for nested composition. Their overloads
+Use `ui::vbox(...)` and `ui::hbox(...)` for nested composition. Their overloads
 accept `LinearOptions` before the children when gaps, padding or alignment need
 customization. Standard control factories are `label`, `button`, `checkbox` and
 `lineEdit`; `virtualList`, `virtualTable` and `chart` compose managed virtual views.
@@ -289,9 +428,9 @@ auto model = take(scene.model<Ohlc>(snapshot));
 auto columns = priceColumns();
 ui::NodeRef<VirtualTable<Ohlc>> table;
 
-auto description = ui::column(
+auto description = ui::vbox(
   ui::label("Prices"),
-  ui::row(
+  ui::hbox(
     ui::virtualTable(model, columns).reference(table),
     ui::chart(model, [](const Ohlc &value) { return std::optional{value}; })));
 
@@ -366,6 +505,35 @@ receives its exact result category and returns owning `GraphemeText` by value.
 Data members, const member functions and lambdas work through `std::invoke`.
 `ColumnProjection` and `ColumnFormatter` constraints reject incompatible calls
 at the factory, including formatters that return borrowed text or `std::string`.
+
+For a fixed schema, prefer the identity-free recipes used by the current
+[dashboard source](../examples/dashboard/dashboard.hpp):
+
+```cpp
+#include <portals/table_column.hpp>
+#include <portals/text_format.hpp>
+
+struct PriceRow {
+  double close{};
+};
+
+auto closeColumns(portals::WidthPolicy policy = {}) {
+  using namespace portals;
+
+  return tableColumns(policy, tableColumn("Close", &PriceRow::close,
+                                         cellFormat<double>("{:.0f}", policy), 9));
+}
+```
+
+This helper returns `expected<array<TableColumn<PriceRow>, 1>, TextError>`:
+header validation remains checked, and the caller chooses its error boundary.
+`tableColumns` assigns table-local identities once in declaration order; clients
+do not invent generations for a fixed schema. The formatter owns its format
+string and converts its result to grapheme text with the same width policy.
+This is a column-construction fragment, not a complete running application.
+
+The explicit-ID low-level spelling below remains useful for dynamic schemas
+whose column identity must survive replacement or reordering:
 
 ```cpp
 const auto price = [](double value) {
@@ -501,7 +669,7 @@ ui::Ref<LineEdit> name;
 ui::Ref<Button> apply;
 auto model = take(scene.state(std::string("Portals")));
 
-auto form = ui::column(
+auto form = ui::vbox(
   ui::label(status, "Ready").id("status"),
   ui::lineEdit(name, model),
   ui::button(apply, "Apply"));

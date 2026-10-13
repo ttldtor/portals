@@ -286,7 +286,8 @@ std::expected<std::unique_ptr<ManagedScene>, ManagedError> ManagedScene::create(
   const auto diagnostics = options.diagnostics;
 
   if (!options.maxNodes || !options.maxStates || !options.maxModels || !options.maxKeyHandlers ||
-      !diagnostics.maxErrors || !diagnostics.maxContexts || !diagnostics.maxContextBytes ||
+      !options.maxClickHandlers || !options.maxClickHandlersPerNode || !diagnostics.maxErrors ||
+      !diagnostics.maxContexts || !diagnostics.maxContextBytes ||
       diagnostics.maxErrors > maxElementCount<ManagedDiagnostic>() ||
       diagnostics.maxContexts > maxElementCount<ManagedDiagnosticContext>() ||
       diagnostics.maxContextBytes > static_cast<std::size_t>(std::numeric_limits<std::ptrdiff_t>::max())) {
@@ -427,7 +428,13 @@ std::expected<void, ManagedError> ManagedScene::remove(Node<Widget> node) {
     auto live = app_.tree().withScope(entry->node, [](const UiScope &) {
     });
 
-    return !live && retired(live.error());
+    if (!live && retired(live.error())) {
+      retireClicks(*entry);
+
+      return true;
+    }
+
+    return false;
   });
   stylesDirty_ = true;
 
@@ -725,6 +732,140 @@ ManagedScene::onButtonClick(Node<Button> node, std::function<EditorCommandResult
     return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
   } catch (...) {
     return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CALLBACK_FAILED));
+  }
+}
+
+void ManagedScene::retireClicks(Entry &entry) noexcept {
+  if (!entry.clicks || entry.clicks->retired) {
+    return;
+  }
+
+  entry.clicks->retired = true;
+  clickHandlers_ -= entry.clicks->records.size();
+
+  // Revoke the registry and release its budget before capture destructors can reenter.
+  // Retiring callers already guard reentry. clear() avoids MSVC Debug's allocating noexcept vector move.
+  entry.clicks->records.clear();
+}
+
+std::expected<void, ManagedError>
+ManagedScene::composeButtonClick(Node<Button> node, std::function<EditorCommandResult(ui::ClickParams &)> action,
+                                 std::source_location origin) {
+  auto allowed = boundary(ManagedPhase::BIND, node);
+
+  if (!allowed) {
+    return allowed;
+  }
+
+  auto entry = find(node);
+
+  if (!entry || !action || (!entry->clicks && !std::holds_alternative<std::monostate>(entry->binding))) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
+  }
+
+  if (clickHandlers_ >= options_.maxClickHandlers ||
+      (entry->clicks && entry->clicks->records.size() >= options_.maxClickHandlersPerNode)) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NODE_LIMIT));
+  }
+
+  try {
+    auto record = std::make_shared<ClickRecord>(std::move(action), origin);
+
+    if (entry->clicks) {
+      entry->clicks->records.push_back(std::move(record));
+      ++clickHandlers_;
+
+      return {};
+    }
+
+    auto chain = std::make_shared<ClickChain>();
+
+    chain->records.push_back(std::move(record));
+
+    auto bound = bindButtonClick(app_.router(), node,
+                                 [this, node, chain, lifetime = std::weak_ptr(lifetime_)](const ClickEvent &event) {
+                                   // Test weak lifetime before invoking any member on the borrowed owner.
+                                   if (!lifetime.expired()) {
+                                     dispatchClicks(node, chain, lifetime, event);
+                                   }
+                                 });
+
+    if (!bound) {
+      return std::unexpected(error(ManagedPhase::BIND, node, bound.error()));
+    }
+
+    entry->binding.emplace<ActionBinding>(std::move(*bound));
+    entry->clicks = std::move(chain);
+    ++clickHandlers_;
+
+    return {};
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
+  } catch (...) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CALLBACK_FAILED));
+  }
+}
+
+void ManagedScene::dispatchClicks(Node<Button> node, const std::shared_ptr<ClickChain> &chain,
+                                  const std::weak_ptr<const void> &lifetime, const ClickEvent &event) {
+  // The router retains this chain through self-removal. It never retains the scene.
+  if (closed_ || chain->retired) {
+    return;
+  }
+
+  const auto count = chain->records.size();
+  auto origin = chain->records.front()->origin;
+
+  try {
+    ui::ClickParams params(event);
+
+    for (std::size_t index = 0; index < count; ++index) {
+      if (lifetime.expired() || chain->retired) {
+        return;
+      }
+
+      if (closed_) {
+        return;
+      }
+
+      auto eligible = app_.tree().inputEligible(node);
+
+      if (!eligible || !*eligible) {
+        if (!eligible && !retired(eligible.error())) {
+          remember(error(ManagedPhase::INPUT, node, eligible.error()), origin);
+        }
+
+        return;
+      }
+
+      // Never borrow an iterator/reference across user code: appending can reallocate,
+      // and removal clears the registry while this admitted record must stay alive.
+      const auto record = chain->records[index];
+
+      origin = record->origin;
+
+      const auto command = record->action(params);
+
+      if (!command) {
+        if (!lifetime.expired() && !commandReported(command, lifetime)) {
+          remember(error(ManagedPhase::INPUT, node, command.result_.error()), origin);
+        }
+
+        return;
+      }
+
+      if (params.propagationStopped()) {
+        return;
+      }
+    }
+  } catch (const std::bad_alloc &) {
+    if (!lifetime.expired()) {
+      remember(error(ManagedPhase::INPUT, node, TreeError::NO_MEMORY), origin);
+    }
+  } catch (...) {
+    if (!lifetime.expired()) {
+      remember(error(ManagedPhase::INPUT, node, TreeError::CALLBACK_FAILED), origin);
+    }
   }
 }
 
@@ -1338,14 +1479,18 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
   try {
     // The preparing guard rejects registry changes; prune only after every active borrow ends.
     struct Prune {
-      std::vector<std::shared_ptr<Entry>> &entries;
+      ManagedScene &scene;
 
       ~Prune() {
-        std::erase_if(entries, [](const auto &entry) {
+        std::erase_if(scene.entries_, [&](const auto &entry) {
+          if (entry->removed) {
+            scene.retireClicks(*entry);
+          }
+
           return entry->removed;
         });
       }
-    } prune{entries_};
+    } prune{*this};
 
     const auto recoverFocus = [&] {
       struct FocusRecovery {
@@ -1577,6 +1722,10 @@ std::expected<void, ManagedError> ManagedScene::close() {
 
   for (auto &layer : styles_.layerState_.layers) {
     layer.document.reset();
+  }
+
+  for (auto &entry : entries_) {
+    retireClicks(*entry);
   }
 
   entries_.clear();
