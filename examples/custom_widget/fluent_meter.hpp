@@ -145,8 +145,8 @@ private:
     if (composition == Composition::PIPE) {
       return ui::scene(std::move(factory), options) | ui::theme(example::THEME_PRESETS.at(theme_).make()) |
              ui::style(FOCUS_POLICY, {.name = "meter-focus"}) | ui::configure(std::move(configuration)) |
-             ui::onKey(ui::key(InputKey::F10), std::move(quit)) | ui::onKey(ui::key(InputKey::LEFT), std::move(left)) |
-             ui::onKey(ui::key(InputKey::RIGHT), std::move(right));
+             ui::onKey(key::F10, std::move(quit)) | ui::onKey(key::LEFT, std::move(left)) |
+             ui::onKey(key::RIGHT, std::move(right));
     }
 
     auto meter = ui::scene(std::move(factory), options);
@@ -154,9 +154,9 @@ private:
     meter.theme(example::THEME_PRESETS.at(theme_).make())
       .style(FOCUS_POLICY, {.name = "meter-focus"})
       .configure(std::move(configuration))
-      .onKey(ui::key(InputKey::F10), std::move(quit))
-      .onKey(ui::key(InputKey::LEFT), std::move(left))
-      .onKey(ui::key(InputKey::RIGHT), std::move(right));
+      .onKey(key::F10, std::move(quit))
+      .onKey(key::LEFT, std::move(left))
+      .onKey(key::RIGHT, std::move(right));
 
     return meter;
   }

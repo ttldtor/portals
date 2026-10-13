@@ -1681,7 +1681,7 @@ std::expected<bool, TreeError> ManagedScene::input(Application &app, const Input
     auto result = (*callback)(event);
 
     if (!result) {
-      remember(result.error());
+      remember(result.error(), result.error().registrationOrigin.value_or(std::source_location::current()));
 
       return std::unexpected(bridge(result.error()));
     }

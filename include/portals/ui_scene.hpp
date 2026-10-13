@@ -391,6 +391,136 @@ public:
     return std::move(*this);
   }
 
+  /** @tparam Source Constexpr chord, owning alternatives or string-view-convertible runtime text.
+   * @tparam Callback Owning compact action optionally receiving a semantic KeyEvent.
+   * @param source Shortcut source normalized and owned before deferral; no source text is retained.
+   * @param callback Checked action invoked at most once per matching event.
+   * @param origin Registration call site preserved through setup and input diagnostics.
+   * @return This owner. Newest registration wins through the existing managed input slot.
+   */
+  template <portals::detail::ShortcutSource Source, class Callback>
+    requires portals::detail::ManagedAction<Callback, KeyEvent>
+  Scene &onKey(Source &&source, Callback callback, std::source_location origin = std::source_location::current()) & {
+    onShortcutSourceImpl(std::forward<decltype(source)>(source), callback, {}, {}, origin);
+
+    return *this;
+  }
+
+  /** @tparam Source Constexpr chord, owning alternatives or string-view-convertible runtime text.
+   * @tparam Callback Owning compact action optionally receiving a semantic KeyEvent.
+   * @param source Shortcut source normalized and owned before deferral; no source text is retained.
+   * @param callback Checked action invoked at most once per matching event.
+   * @param origin Registration call site preserved through setup and input diagnostics.
+   * @return Consuming owner for fluent chains. Newest registration wins through the existing managed input slot.
+   */
+  template <portals::detail::ShortcutSource Source, class Callback>
+    requires portals::detail::ManagedAction<Callback, KeyEvent>
+  Scene &&onKey(Source &&source, Callback callback, std::source_location origin = std::source_location::current()) && {
+    onShortcutSourceImpl(std::forward<decltype(source)>(source), callback, {}, {}, origin);
+
+    return std::move(*this);
+  }
+
+  /** @tparam Source Constexpr chord, owning alternatives or string-view-convertible runtime text.
+   * @tparam Callback Owning compact action optionally receiving a semantic KeyEvent.
+   * @param source Shortcut source normalized and owned before deferral; no source text is retained.
+   * @param callback Checked action invoked at most once per matching event.
+   * @param behavior PRESS-only admission unless repeat is explicitly enabled.
+   * @param options Positive finite parser budgets.
+   * @param origin Registration call site preserved through setup and input diagnostics.
+   * @return This owner. Newest registration wins through the existing managed input slot.
+   */
+  template <portals::detail::ShortcutSource Source, class Callback>
+    requires portals::detail::ManagedAction<Callback, KeyEvent>
+  Scene &onKey(Source &&source, Callback callback, ShortcutBehavior behavior, ShortcutOptions options = {},
+               std::source_location origin = std::source_location::current()) & {
+    onShortcutSourceImpl(std::forward<decltype(source)>(source), callback, behavior, options, origin);
+
+    return *this;
+  }
+
+  /** @tparam Source Constexpr chord, owning alternatives or string-view-convertible runtime text.
+   * @tparam Callback Owning compact action optionally receiving a semantic KeyEvent.
+   * @param source Shortcut source normalized and owned before deferral; no source text is retained.
+   * @param callback Checked action invoked at most once per matching event.
+   * @param behavior PRESS-only admission unless repeat is explicitly enabled.
+   * @param options Positive finite parser budgets.
+   * @param origin Registration call site preserved through setup and input diagnostics.
+   * @return Consuming owner for fluent chains. Newest registration wins through the existing managed input slot.
+   */
+  template <portals::detail::ShortcutSource Source, class Callback>
+    requires portals::detail::ManagedAction<Callback, KeyEvent>
+  Scene &&onKey(Source &&source, Callback callback, ShortcutBehavior behavior, ShortcutOptions options = {},
+                std::source_location origin = std::source_location::current()) && {
+    onShortcutSourceImpl(std::forward<decltype(source)>(source), callback, behavior, options, origin);
+
+    return std::move(*this);
+  }
+
+  /** @tparam Callback Owning compact action optionally receiving a semantic KeyEvent.
+   * @param source Alternatives borrowed for this call and copied before deferral.
+   * @param callback Checked action invoked at most once per matching event.
+   * @param origin Registration call site preserved through setup and input diagnostics.
+   * @return This owner. Newest registration wins through the existing managed input slot.
+   */
+  template <class Callback>
+    requires portals::detail::ManagedAction<Callback, KeyEvent>
+  Scene &onKey(std::initializer_list<key::Chord> source, Callback callback,
+               std::source_location origin = std::source_location::current()) & {
+    onShortcutSourceImpl(std::forward<decltype(source)>(source), callback, {}, {}, origin);
+
+    return *this;
+  }
+
+  /** @tparam Callback Owning compact action optionally receiving a semantic KeyEvent.
+   * @param source Alternatives borrowed for this call and copied before deferral.
+   * @param callback Checked action invoked at most once per matching event.
+   * @param origin Registration call site preserved through setup and input diagnostics.
+   * @return Consuming owner for fluent chains. Newest registration wins through the existing managed input slot.
+   */
+  template <class Callback>
+    requires portals::detail::ManagedAction<Callback, KeyEvent>
+  Scene &&onKey(std::initializer_list<key::Chord> source, Callback callback,
+                std::source_location origin = std::source_location::current()) && {
+    onShortcutSourceImpl(std::forward<decltype(source)>(source), callback, {}, {}, origin);
+
+    return std::move(*this);
+  }
+
+  /** @tparam Callback Owning compact action optionally receiving a semantic KeyEvent.
+   * @param source Alternatives borrowed for this call and copied before deferral.
+   * @param callback Checked action invoked at most once per matching event.
+   * @param behavior PRESS-only admission unless repeat is explicitly enabled.
+   * @param options Positive finite parser budgets.
+   * @param origin Registration call site preserved through setup and input diagnostics.
+   * @return This owner. Newest registration wins through the existing managed input slot.
+   */
+  template <class Callback>
+    requires portals::detail::ManagedAction<Callback, KeyEvent>
+  Scene &onKey(std::initializer_list<key::Chord> source, Callback callback, ShortcutBehavior behavior,
+               ShortcutOptions options = {}, std::source_location origin = std::source_location::current()) & {
+    onShortcutSourceImpl(std::forward<decltype(source)>(source), callback, behavior, options, origin);
+
+    return *this;
+  }
+
+  /** @tparam Callback Owning compact action optionally receiving a semantic KeyEvent.
+   * @param source Alternatives borrowed for this call and copied before deferral.
+   * @param callback Checked action invoked at most once per matching event.
+   * @param behavior PRESS-only admission unless repeat is explicitly enabled.
+   * @param options Positive finite parser budgets.
+   * @param origin Registration call site preserved through setup and input diagnostics.
+   * @return Consuming owner for fluent chains. Newest registration wins through the existing managed input slot.
+   */
+  template <class Callback>
+    requires portals::detail::ManagedAction<Callback, KeyEvent>
+  Scene &&onKey(std::initializer_list<key::Chord> source, Callback callback, ShortcutBehavior behavior,
+                ShortcutOptions options = {}, std::source_location origin = std::source_location::current()) && {
+    onShortcutSourceImpl(std::forward<decltype(source)>(source), callback, behavior, options, origin);
+
+    return std::move(*this);
+  }
+
   /** @param stop Optional worker-safe cancellation for the single admitted native run.
    * @param origin Runner call site.
    * @return Statistics or first typed cause plus independent runner/cleanup errors; always closes after admission.
@@ -485,6 +615,51 @@ private:
     }
   }
 
+  template <class Source, class Callback>
+  void onShortcutSourceImpl(Source &&source, Callback &callback, ShortcutBehavior behavior, ShortcutOptions options,
+                            std::source_location origin) {
+    if (!admitConfiguration(true, origin)) {
+      return;
+    }
+
+    try {
+      auto shortcut = portals::detail::prepareShortcut(std::forward<decltype(source)>(source), options);
+
+      onShortcutImpl(shortcut, callback, behavior, options, origin);
+    } catch (const std::bad_alloc &) {
+      configurationException(TreeError::NO_MEMORY, origin);
+    } catch (...) {
+      configurationException(TreeError::CALLBACK_FAILED, origin);
+    }
+  }
+
+  template <class Callback>
+  void onShortcutImpl(std::expected<Shortcut, ShortcutError> &shortcut, Callback &callback, ShortcutBehavior behavior,
+                      ShortcutOptions options, std::source_location origin) {
+    if (!admitConfiguration(true, origin)) {
+      return;
+    }
+
+    if (!shortcut) {
+      shortcutConfigurationFailure(shortcut.error(), origin);
+
+      return;
+    }
+
+    try {
+      addConfiguration(
+        [shortcut = std::move(*shortcut), callback = std::move(callback), behavior, options,
+         origin](ManagedScene &scene) mutable {
+          return scene.onKey(std::move(shortcut), std::move(callback), behavior, options, origin);
+        },
+        true, origin);
+    } catch (const std::bad_alloc &) {
+      configurationException(TreeError::NO_MEMORY, origin);
+    } catch (...) {
+      configurationException(TreeError::CALLBACK_FAILED, origin);
+    }
+  }
+
   template <detail::SceneConfiguration Callback> void onClickImpl(Callback &callback, std::source_location origin) {
     if (!admitConfiguration(true, origin)) {
       return;
@@ -507,6 +682,7 @@ private:
   bool admitConfiguration(bool runtime, std::source_location origin);
   void addConfiguration(Configuration callback, bool runtime, std::source_location origin);
   void configurationException(TreeError cause, std::source_location origin);
+  void shortcutConfigurationFailure(ShortcutError cause, std::source_location origin);
   std::expected<ApplicationStats, ManagedError> runImpl(ApplicationTerminal *terminal, std::stop_token stop,
                                                         std::source_location origin);
   int runAppImpl(ApplicationTerminal *terminal, std::stop_token stop, std::source_location origin);
@@ -584,6 +760,45 @@ struct SceneAccess {
     requires portals::detail::ManagedAction<Callback, KeyEvent>
   static void onKey(Scene &owner, KeyEvent chord, Callback &callback, std::source_location origin) {
     owner.onKeyImpl(chord, callback, origin);
+  }
+
+  /** @tparam Callback Existing owning compact key action.
+   * @param owner Facade receiving the stored registration.
+   * @param shortcut Owned parsed alternatives or allocation-free syntax error.
+   * @param callback Stored action transferred after admission.
+   * @param behavior Explicit repeat policy.
+   * @param options Original finite parser budgets.
+   * @param origin Original stage registration call site.
+   */
+  template <class Callback>
+    requires portals::detail::ManagedAction<Callback, KeyEvent>
+  static void onShortcut(Scene &owner, std::expected<Shortcut, ShortcutError> &shortcut, Callback &callback,
+                         ShortcutBehavior behavior, ShortcutOptions options, std::source_location origin) {
+    owner.onShortcutImpl(shortcut, callback, behavior, options, origin);
+  }
+
+  /** @tparam Callback Existing owning compact key action.
+   * @param owner Facade receiving checked pending stage storage.
+   * @param shortcut Shared owning transfer receipt or allocation-free syntax error.
+   * @param callback Stored action transferred after admission.
+   * @param behavior Explicit repeat policy.
+   * @param options Original finite parser budgets.
+   * @param origin Original stage registration call site.
+   */
+  template <class Callback>
+    requires portals::detail::ManagedAction<Callback, KeyEvent>
+  static void onShortcut(Scene &owner, std::expected<std::shared_ptr<Shortcut>, ShortcutError> &shortcut,
+                         Callback &callback, ShortcutBehavior behavior, ShortcutOptions options,
+                         std::source_location origin) {
+    if (!shortcut) {
+      std::expected<Shortcut, ShortcutError> failure = std::unexpected(shortcut.error());
+
+      owner.onShortcutImpl(failure, callback, behavior, options, origin);
+
+      return;
+    }
+
+    owner.onShortcutSourceImpl(std::move(**shortcut), callback, behavior, options, origin);
   }
 
   /** @param owner Managed owner currently invoking its observer on UI.

@@ -6,11 +6,11 @@
 int main() {
   using namespace portals;
 
-  example::ReplayTerminal terminal({{10, "\r", {}}, {20, "\x1b ", {}}}, 50, {40, 8});
+  example::ReplayTerminal terminal({{10, "\r", {}}, {20, "\x1b ", {}}, {30, "\x1bq", {}}}, 50, {40, 8});
   ui::SceneOptions options;
   ui::Ref<Label> message;
   ui::Ref<Button> button;
-  int ordinary{}, modified{}, afterStop{};
+  int ordinary{}, modified{}, afterStop{}, shortcutCalls{};
   bool keyboardSource = true;
 
   options.clock = terminal.clock();
@@ -35,7 +35,18 @@ int main() {
                  ++afterStop;
                });
 
+  scene | ui::onKey("F10 | Alt + Q | alt + q", [&](const KeyEvent &event) {
+    ++shortcutCalls;
+
+    if (event.key == InputKey::CHARACTER && event.modifiers.has(key::ALT)) {
+      (void)scene.quit();
+    }
+  });
+
   const auto result = scene.run(terminal);
 
-  return result && terminal.closed && ordinary == 2 && modified == 1 && afterStop == 1 && keyboardSource ? 0 : 1;
+  return result && terminal.closed && ordinary == 2 && modified == 1 && afterStop == 1 && shortcutCalls == 1 &&
+             keyboardSource
+           ? 0
+           : 1;
 }

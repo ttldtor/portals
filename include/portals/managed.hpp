@@ -369,6 +369,93 @@ public:
     }
   }
 
+  /** @tparam Value Owning Shortcut value, borrowed until copied/moved inside the checked boundary.
+   * @tparam Callback Owning compact action, optionally receiving the admitted semantic KeyEvent.
+   * @param shortcut Normalized alternatives, validated before owning transfer and publication.
+   * @param action Checked callback invoked once, preserving the existing command-error receipt.
+   * @param behavior PRESS-only default; REPEAT is explicit.
+   * @param options Positive finite alternative budgets.
+   * @param origin Registration site retained for errors from this admitted action, including throws.
+   * @return Atomic registration or typed failure; newest matching registration wins in the existing input slot.
+   * Modified text produces a CHARACTER PRESS value with the original scalar and semantic modifiers.
+   * Callback storage stays pinned through dispatch, replacement and scene cleanup.
+   */
+  template <class Value, class Callback>
+    requires std::same_as<std::remove_cvref_t<Value>, Shortcut> && detail::ManagedAction<Callback, KeyEvent>
+  std::expected<void, ManagedError> onKey(Value &&shortcut, Callback action, ShortcutBehavior behavior = {},
+                                          ShortcutOptions options = {},
+                                          std::source_location origin = std::source_location::current()) {
+    auto allowed = boundary(ManagedPhase::BIND, root_);
+
+    if (!allowed) {
+      return allowed;
+    }
+
+    const auto valid = validateShortcut(shortcut, options);
+
+    if (!valid) {
+      auto failure = error(ManagedPhase::BIND, root_, TreeError::INVALID_ARGUMENT);
+
+      failure.shortcut = valid.error();
+
+      return std::unexpected(std::move(failure));
+    }
+
+    if (keyHandlers_ >= options_.maxKeyHandlers) {
+      return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::NODE_LIMIT));
+    }
+
+    try {
+      // Avoid both caller-side transfers and noexcept debug-vector moves before the checked boundary.
+      Shortcut owned(std::forward<Value>(shortcut));
+      auto adapter = actionAdapter<KeyEvent>(std::move(action));
+
+      if (!adapter) {
+        return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::INVALID_ARGUMENT));
+      }
+
+      const auto handlerCount = keyHandlers_ + 1;
+
+      return setInput(
+        [this, shortcut = std::move(owned), behavior, origin, lifetime = std::weak_ptr(lifetime_), previous = input_,
+         adapter = std::move(adapter)](const InputEvent &event) -> std::expected<bool, ManagedError> {
+          const auto key = matchShortcut(shortcut, event, behavior);
+
+          if (!key) {
+            return previous ? (*previous)(event) : std::expected<bool, ManagedError>{false};
+          }
+
+          const auto actionFailure = [this, origin](TreeError cause) -> std::expected<bool, ManagedError> {
+            auto failure = error(ManagedPhase::INPUT, root_, cause);
+
+            failure.registrationOrigin = origin;
+
+            return std::unexpected(std::move(failure));
+          };
+
+          // Only this admitted action owns this origin; fallback errors keep their own provenance.
+          try {
+            const auto command = adapter(*key);
+
+            if (!command && !commandReported(command, lifetime)) {
+              return actionFailure(command.result_.error());
+            }
+          } catch (const std::bad_alloc &) {
+            return actionFailure(TreeError::NO_MEMORY);
+          } catch (...) {
+            return actionFailure(TreeError::CALLBACK_FAILED);
+          }
+
+          return true;
+        },
+        handlerCount);
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::NO_MEMORY));
+    } catch (...) {
+      return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::CALLBACK_FAILED));
+    }
+  }
+
   /** @param node Managed checkbox without a prior event binding.
    * @param model State created by this scene; shared internally on UI only.
    * @param changed Optional callback after the standard toggle, receiving its exact commit receipt.

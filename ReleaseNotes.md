@@ -5,6 +5,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Added] Short semantic key aliases, modifier chords and owning alternative
+  bindings, including case-insensitive runtime shortcut strings. New commands
+  default to press-only with configurable repeat and parser budgets; the legacy
+  KeyEvent API retains its behavior. Modified text decoded by terminals uses
+  the same input router, with typed syntax diagnostics and atomic registration.
+
 - [Added] Deferred `ui::onClick(ref, callback)` pipe stages with scene-owned FIFO
   handlers, read-only click metadata, semantic modifier queries and explicit
   `stop()`/`stopPropagation()`. Handler counts are bounded and configurable;
