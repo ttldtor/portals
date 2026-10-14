@@ -4,7 +4,7 @@
 terminal handles, background thread, timer, event loop, environment lookup or
 dependency on the diagnostic probe. The caller supplies arrival timestamps and
 an explicit input profile. Enabling a decoder option does not enable a terminal
-mode; a future terminal session owner must do that separately.
+mode; the terminal session owner must enable the mode separately.
 
 ## Selecting shortcut phases
 
@@ -46,7 +46,7 @@ or release-only selections.
 
 Selections do not add backend capabilities: the VT decoder emits PRESS, including
 repeated bytes, and does not synthesize releases. A native adapter must supply real
-REPEAT/RELEASE values. Held-key state, focus-loss release and kitty negotiation are
+REPEAT/RELEASE values. Held-key state, focus-loss release and Kitty negotiation are
 outside this API. Native-value tests inject semantic events; replay tests verify
 the PRESS-only byte path. No new scheduler or input router is involved.
 
@@ -126,8 +126,8 @@ ESC followed by `[`, `O`, `]`, `P`, `X`, `^` or `_` is reserved for the
 corresponding sequence/string introducer, so these prefixes do not produce
 Alt text. This is another unavoidable convention of the selected legacy profile.
 
-Key values include modifiers and `press/repeat/release` for future native
-backends, but this VT profile emits only `press`. It cannot establish physical
+Key values include modifiers and `press/repeat/release` for native
+adapters, but this VT profile emits only `press`. It cannot establish physical
 key state. Mouse events preserve button, motion/release/wheel and modifiers;
 their coordinates are checked zero-based cells without viewport clipping.
 
@@ -158,7 +158,7 @@ must be 1..2147483648, then subtract one into signed 32-bit fields. Button bits
 motion, 64 is wheel. Wheel directions 64..67 are up/down/left/right. The decoder
 rejects unsupported bits, wheel+motion, wheel release, motion release and
 no-button transitions other than motion. Extended buttons and pixel coordinates
-are outside this profile. Raw 8-bit CSI, X10/1005/1015, kitty keyboard and OSC/DCS
+are outside this profile. Raw 8-bit CSI, X10/1005/1015, Kitty keyboard and OSC/DCS
 replies are not supported.
 
 ## Time and ambiguity

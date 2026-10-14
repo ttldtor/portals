@@ -1,13 +1,10 @@
-# Getting started {#getting-started}
+# Building Portals and its examples {#getting-started}
 
-Portals provides a C++23 static library and runnable terminal examples.
-Start with the gallery, then use the dashboard or custom widget to explore the
-same [Application runner](application.md). The [architecture](architecture.md)
-explains ownership and data flow; [limitations](limitations.md) defines the
-boundaries of this release.
-
-The [documentation guide](index.md) gives the reading order and separates
-application guides from core contracts and contributor material.
+This page covers building Portals from source, testing the library and running
+the examples in its repository. To create your own application, start with the
+[short guide](index.md). To use an installed library, see [package setup](package.md).
+The [architecture](architecture.md) explains ownership and data flow;
+[limitations](limitations.md) defines release boundaries.
 
 ## Build from source
 
@@ -22,7 +19,7 @@ cmake --build --preset windows-msvc-debug
 ctest --preset windows-msvc-debug
 ```
 
-On Linux with GCC and a compatible standard library. The preset uses the
+On Linux, use GCC with a compatible standard library. The preset uses the
 `g++` on PATH; select an installed supported compiler explicitly when that
 default is older, for example `cmake --preset linux-gcc-debug
 -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14` for GCC 14:
@@ -72,7 +69,7 @@ establish physical display compatibility or native restoration.
 
 Start with the compact declarative example in the [short library guide](index.md).
 Its runner executes the scene and reports failure after attempted cleanup;
-the recipe is constructed before the final `runApp` stage. Use the factory-based
+the [recipe](glossary.md#glossary-recipe) is constructed before the final `runApp` stage. Use the factory-based
 `ui::runApp(factory, setup)` overload when recipe construction also needs the
 checked boundary. [Declarative composition](declarative-ui.md) documents these
 construction and reporting boundaries.

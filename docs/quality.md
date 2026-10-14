@@ -40,7 +40,7 @@ path when supplied; otherwise the driver searches for `clang-tidy`. Optional
 `TIMEOUT_SECONDS` defaults to 120 per subprocess. Sources must have explicit
 compilation database entries. Optional `HEADERS` lists explicit headers to include
 in the diagnostic scope and SHA-256 receipt; headers need no invented compilation
-command and are analyzed through the real TUs. The driver does not switch
+command and are analyzed through the real translation units (TUs). The driver does not switch
 compilers to conceal an incompatible build. Canonical duplicate TUs and headers
 count once. Main-file and explicitly selected header diagnostics are reported;
 other headers are filtered out.

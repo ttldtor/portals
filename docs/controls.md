@@ -96,32 +96,23 @@ clips by `NodeGeometry::surface`, intersects with `NodeGeometry::clip`, and call
 that adapter for both text and fills. Borrowed commands/text must not escape the
 frame; the resulting owning `CellBuffer` may be submitted to `FrameWriter` after it.
 
-## Run the finite gallery
+## Run the gallery
 
-Configure with `PORTALS_BUILD_EXAMPLES=ON`, build `portals_gallery`, then run from
-a native terminal (PowerShell example for a Ninja build):
+Configure with `PORTALS_BUILD_EXAMPLES=ON` and build `portals_gallery`.
+Run the executable from a native terminal:
 
-```powershell
-cmake --build build/windows-msvc-debug --target portals_gallery
-& ./build/windows-msvc-debug/examples/gallery/portals_gallery.exe initial
-& ./build/windows-msvc-debug/examples/gallery/portals_gallery.exe keyboard
-& ./build/windows-msvc-debug/examples/gallery/portals_gallery.exe mouse
-& ./build/windows-msvc-debug/examples/gallery/portals_gallery.exe disabled
+```text
+portals_gallery
+portals_gallery --theme nord
+portals_gallery --check
 ```
 
-Linux uses `./build/linux-gcc-debug/examples/gallery/portals_gallery` with the same
-arguments. Each invocation replays a deterministic sequence, writes one final
-frame through `TerminalSession`/`FrameWriter`, restores modes and exits. It uses the
-current terminal size and overwrites the displayed area. At least 30 columns by
-9 rows shows the full fixture; smaller terminals clip it. Redirected streams are
-not native terminals and are rejected. `--check` runs the sequence headlessly,
-without I/O or a session. This is a runnable finite preview, not interactive input;
-the shared application loop, interactive resize handling and final dashboard are
-separate work. No native visual acceptance is claimed by the replay tests.
+The interactive gallery supports keyboard editing, focus traversal, checkbox and
+button activation, mouse input and resize. F2 cycles themes; F10 exits.
+`--check` runs a finite in-memory replay and exits without opening a terminal.
+See [runnable examples](examples.md) for build paths, options and exit codes.
 
-`portals.basic-controls` checks these same gallery scenes using the independent
-VT oracle, plus activation counts, ancestor eligibility, Unicode ownership,
-invalidation, removal during callbacks, subscription cancellation, precommit
-errors and queue overflow. `portals.gallery-replay` checks the executable's finite
-headless path. See also [focus and events](focus.md), [properties](property.md),
-[layout](layout.md) and [rendering](render.md).
+The basic-control tests cover activation, ancestor eligibility, Unicode ownership,
+invalidation, callback removal, subscription cancellation and queue errors.
+For the control contracts, see [focus and events](focus.md),
+[properties](property.md), [layout](layout.md) and [rendering](render.md).

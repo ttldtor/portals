@@ -1,12 +1,14 @@
 # Reference map {#reference-map}
 
+[Русская версия](ru/reference-map.md)
+
 Start with the [short library guide](index.md). This page is the full topic map;
 start with declarative composition, then read the relevant contract when a task needs it.
 
 The [online documentation and API reference](https://ttldtor.github.io/portals/)
 is generated from these guides and public headers.
 
-[User guide contents and subject index](guides.md) · [Glossary](glossary.md)
+[User guides](guides.md) · [Glossary](glossary.md)
 
 ## Build an application
 
@@ -46,7 +48,7 @@ The generated HTML site has a separate **API reference** menu for types,
 concepts, namespaces, members and headers. In a checkout, public contracts
 live under `include/portals`; start with `ui.hpp`, `managed.hpp` and
 `application.hpp` for ordinary application code. See
-[getting started](getting-started.md) to build
+[Building Portals](getting-started.md) to build
 and open the complete reference locally.
 
 ## Experimental compile-time alternatives
@@ -78,10 +80,6 @@ documentation deployment through GitHub Actions.
 
 ## Reading on GitHub and as HTML
 
-For supplemental engineering measurements, see [source compactness](compactness.md)
-and [cognitive complexity and performance evidence](quality.md). These reports
-support review; they do not replace behavioral tests or decide API acceptance.
-
 This index and its relative Markdown links work in a checkout and on GitHub.
 Complete example sections link to the real, compiled source files. Their
 Doxygen `\include` lines expand into numbered listings in generated HTML;
@@ -92,3 +90,5 @@ The HTML site adds structured navigation and API reference to the same guides.
 It is generated into a build directory, not maintained as a second copy.
 GitHub Actions publishes the generated site to the documentation URL linked above.
 The generated directory also works as a local, offline reference.
+
+[Dependencies and licenses](dependencies.md).

@@ -9,7 +9,9 @@ or a frame loop. See [model](model.md), [widget tree](widget-tree.md),
 ## One provider, two views
 
 A table and chart use independent range consumers of the **same** `Model<T>`.
-Pin once after scheduler dispatch and pass that pin to both preparations:
+Capture one [model pin](glossary.md#glossary-model-pin), an immutable
+`ModelFrame<T>` with data and availability, after scheduler dispatch and pass it
+to both preparations:
 
 ```cpp
 // tree, parent and model are existing UI-owned objects; unwrap handles expected errors.
@@ -26,7 +28,7 @@ auto tableWork = unwrap(portals::prepareVirtualTable(tree, table, frame, {40, 20
 ```
 
 The accessor borrows a typed immutable row, returning an optional `Ohlc`
-presentation value. A custom record can expose its OHLC member without copying
+presentation value containing open, high, low and close prices. A custom record can expose its OHLC member without copying
 its business model. The retained range and frame keep provider storage alive.
 Accessors run only during preparation and must not retain row borrows, mutate the
 tree/model, block, or perform I/O. Getter reads use `tree.read`; all view mutation,

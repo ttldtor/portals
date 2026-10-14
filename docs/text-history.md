@@ -8,7 +8,7 @@ Each `TextHistorySnapshot` owns `bytes`, `cursor` and `anchor`. Offsets are byte
 
 Retained entries own before/after snapshots. They contain no editor, model, widget, callback or external buffer references. Immutable entries are shared internally so preparation can copy entry handles without copying every retained string. `PreparedTextHistory` is an owning, move-only handle; destroying it abandons preparation without changing the history. Its move operations are `noexcept`.
 
-The caller must synchronize access. U1 neither enforces UI-thread affinity nor decides whether an editor is read-only, disabled or in conflict.
+The caller must synchronize access. `TextHistory` neither enforces UI-thread affinity nor decides whether an editor is read-only, disabled or in conflict.
 
 ## Configuration and bounds
 
@@ -34,11 +34,11 @@ With `enabled == false`, `maxOperations == 0` or `maxBytes == 0`, valid edits pr
 
 Only `TYPING`, `BACKSPACE` and `FORWARD_DELETE` can merge, subject to their grouping options. A merge requires the same category, an open group, collapsed selections in both snapshots, and exact agreement between the preceding after snapshot and the new before snapshot: bytes, cursor and anchor. Opposite deletion directions do not merge. `PASTE`, `CUT`, `REPLACEMENT` and `PROGRAMMATIC` are separate operations.
 
-There is no timer-based grouping. The editor calls `stopGrouping()` at its editing boundaries, such as navigation, selection or focus changes. U1 cannot infer those events. Committing a prepared Undo or Redo closes the group. An empty traversal does not change history; an editor must explicitly close its group for an empty command.
+There is no timer-based grouping. The editor calls `stopGrouping()` at its editing boundaries, such as navigation, selection or focus changes. `TextHistory` cannot infer those events. Committing a prepared Undo or Redo closes the group. An empty traversal does not change history; an editor must explicitly close its group for an empty command.
 
 Under enabled retention, equal before/after bytes are an ordinary history no-op: `changed()` is false and Redo is preserved, even if the validated target selection differs. A successful new text edit after Undo discards prospective Redo. `prepareResetBaseline()` clears every group even when baseline bytes are unchanged; its `changed()` is true. Disabled or zero-limit retention takes precedence over ordinary equal-text no-op handling.
 
-`prepareUndo()` and `prepareRedo()` restore the corresponding owning snapshot without recording a second edit. They return `EMPTY` when that direction has no operation. `canUndo()` and `canRedo()` describe local history position only; U1 does not translate `EMPTY` into an editor-level successful no-op.
+`prepareUndo()` and `prepareRedo()` restore the corresponding owning snapshot without recording a second edit. They return `EMPTY` when that direction has no operation. `canUndo()` and `canRedo()` describe local history position only; `TextHistory` does not translate `EMPTY` into an editor-level successful no-op.
 
 ## Prepare, check and accept
 
@@ -61,7 +61,7 @@ Construction and caller-side snapshot construction may throw. The prepare method
 
 Prepared validity uses an owning identity token, history generation and grouping state. A prepared value from another owner or an outdated generation is `STALE`. A changed commit advances generation. `stopGrouping()` closes the group and advances generation when possible; the counter saturates rather than wrapping. A regular no-op commit does not advance it. Generation exhaustion is reported as `EXHAUSTED` for operations requiring advancement.
 
-History generation is not a model revision. U1 has no model snapshot to inspect. When retained entries exist, an ordinary changed edit checks that its before bytes match the current history position, but this cannot detect an external model update to equal bytes. The editor integration must enforce model revision conflicts and adopt external baselines explicitly.
+History generation is not a model revision. `TextHistory` has no model snapshot to inspect. When retained entries exist, an ordinary changed edit checks that its before bytes match the current history position, but this cannot detect an external model update to equal bytes. The editor integration must enforce model revision conflicts and adopt external baselines explicitly.
 
 ## Cost
 

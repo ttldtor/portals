@@ -1,45 +1,34 @@
 # Loading scenes from text and files {#scene-loading-guide}
 
-**TBD — M1 / U84**, after named reference lookup U126 and scoped styling U127.
-This runtime loader is planned. The current API constructs scene descriptions
-in C++; [compile-time scenes](compile-time-scenes.md) are C++ constant-evaluated
-structures, not a parser for an external scene file.
+[Русская версия](ru/scene-loading-guide.md)
 
-Do not confuse a stylesheet file with a scene file. The existing
-`scene | ui::style(ui::file(path))` loads PSS declarations into a scene;
-it does not create controls or bind actions from that file.
+**TBD — M1:** scene loading from strings and files is planned after named
+reference lookup and scoped styles through `Ref`. Current scenes use
+[declarative C++](declarative-ui.md). [Compile-time scenes](compile-time-scenes.md)
+also use C++ descriptions.
 
-## Planned loader boundary
+A PSS file loaded through `scene | ui::style(ui::file(path))` styles existing
+controls. Creating controls and connecting actions from a file belongs to
+the planned scene loader.
 
-The accepted direction is text/file input, an allowlisted typed registry,
-named references and existing controls/i18n resolution. It uses the existing
-scene runtime. General runtime style expressions are a separate
-**TBD — M5 / U128** package, not a prerequisite for loader v0.
+## Planned contract
 
-## Syntax reference
+The loader will use the current scene runtime, an allowlisted typed control
+registry, named references and existing control/localized-resource resolution.
+General style expressions are **TBD — M5**; loader v0 can work without them.
 
-**TBD — U84 design review.** The concrete scene grammar, property value types,
-allowed nesting, source locations and action/model registration syntax are not
-yet an implemented contract. No example here should be copied as working code
-until that contract is approved and implemented.
+Grammar and examples are **TBD — M1**. The contract still needs to define:
 
-The guide will define:
+- value types, nesting and source locations;
+- references, actions and models supplied by application code;
+- unknown controls/properties, invalid values and duplicate IDs;
+- ownership, size/depth bounds, atomic rejection and cleanup;
+- file errors and reload policy. Automatic file watching is not currently planned.
 
-- Text input versus native file paths, encoding and source labels.
-- Control/layout declarations, ids and reference lookup.
-- Allowed property types and explicit resource/i18n resolution.
-- Connecting named actions/models supplied by C++ application code.
-- Unknown controls/properties, invalid values and duplicate ids.
-- Ownership, size/depth limits, atomic failure and cleanup.
-- File errors and the exact reload policy; no watcher behavior is assumed.
+## Future examples
 
-## Planned examples
+**TBD — M1:** a label and button from a string; a file-based form with named
+references, actions and PSS; a model-bound localized form with invalid-file handling.
+The final cookbook review is **TBD — M7**.
 
-All three are **TBD — U84**, with final cookbook integration in M7/U96:
-
-1. One label and one button loaded from an in-memory scene string.
-2. A form file with named references, application-provided actions and PSS.
-3. An integrated form with model binding, i18n and checked malformed-file failure.
-
-Until then use [declarative C++ composition](declarative-ui.md) and the existing
-[runnable examples](examples.md). Their syntax is already part of the library.
+Current runnable programs are listed in [examples](examples.md).

@@ -12,6 +12,9 @@ requiring someone to dismiss a window.
 
 ## Evaluate changes to the API
 
+[Source comparison tool](compactness.md) and [quality measurements](quality.md)
+are contributor references.
+
 [Managed API measurements](managed-performance.md) records equivalent workloads,
 raw samples and known scaling limits. [Design scenarios](api-design.md) and the
 [module experiment](../experiments/module-spike/README.md) are exploratory

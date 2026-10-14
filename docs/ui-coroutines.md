@@ -1,7 +1,8 @@
 # UI coroutines on the existing scheduler {#ui_coroutines}
 
 Include `<portals/async.hpp>` for the experimental, optional `UiAsync` adapter.
-It owns at most one `UiTask` frame and one suspended wait, using the existing
+It owns at most one `UiTask` coroutine frame, the storage for suspended local
+state, and one suspended wait, using the existing
 [scheduler](scheduler.md), queues, clock and dispatch budgets. Callback APIs
 remain available. The adapter creates no thread, executor or second event loop.
 
@@ -21,7 +22,7 @@ Destroying a task or owner on another thread terminates. A task owns its
 function parameters, but does not automatically own a captured coroutine
 lambda's closure. Do not keep borrowed widget or view references across
 suspension. The example's shared application `View` still requires its tree
-to remain alive; shared ownership is not a lifetime spell for borrowed members.
+to remain alive; shared ownership of the view does not extend the lifetime of its borrowed members.
 
 `owner.context()` returns a weak context, suitable as a value parameter. It
 does not extend owner lifetime. Only the adapter's exact `AsyncTimer` and
@@ -86,32 +87,19 @@ registration. Existing `SchedulerOptions` capacities and budgets remain the
 limits. It requests no redraw by itself; application effects invalidate through
 the ordinary control APIs.
 
-## Complete callback and coroutine consumers
+## Complete coroutine example
 
-Both installed-package programs bind a button, reject a repeated action, wait
-for a timer, encounter a full data queue, retain and retry its result, report
-provider failure, replace pending work, deliver from a worker, remove the node
-and explicitly close. They verify late-reply rejection, outcomes and cleanup.
-The provider's eight retained request slots are an example setting, not a
-new library queue. The shared file is part of each complete client footprint.
-
-- [Before: callback state machine](https://github.com/ttldtor/portals/blob/main/tests/package_consumer/async_callback.cpp).
-- [After: free owning coroutine and button binding](https://github.com/ttldtor/portals/blob/main/tests/package_consumer/async_coroutine.cpp).
-- [Complete shared scenario, provider, errors and cleanup](https://github.com/ttldtor/portals/blob/main/tests/package_consumer/async_scenario.hpp).
-
-### Before
-
-\include{lineno} async_callback.cpp
-
-### After
+The [installed-package program](../tests/package_consumer/async_coroutine.cpp)
+binds a button, rejects a repeated action, waits for a timer and retries a result
+when the data queue is full. It also exercises provider failure, replacement of
+pending work, worker delivery, node removal and explicit close.
 
 \include{lineno} async_coroutine.cpp
 
-### Shared scenario
+The [shared scenario](../tests/package_consumer/async_scenario.hpp) supplies the
+provider, errors and cleanup checks. Its eight retained request slots are an
+example configuration. A [callback implementation](../tests/package_consumer/async_callback.cpp)
+is available as an additional reference for the same operations.
 
-\include{lineno} async_scenario.hpp
-
-Compare each consumer together with the entire shared helper. A shorter
-coroutine body alone does not establish a shorter whole client or lower
-complexity; these listings make no measured claim. This adapter does not
-provide infinite generators, foreign executors or universal async composition.
+The adapter supports the timer and receive awaiters described above.
+Infinite generators and foreign executors are outside its supported API.

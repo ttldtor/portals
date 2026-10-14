@@ -1,14 +1,14 @@
 # References, bindings and events {#bindings-guide}
 
 Start with an explicit event handler and an observing control reference. Use a
-managed state when several controls need the same UI-owned value. A `Ref` is an
-addressable observer; it is not a subscription or a reactive expression.
-Automatic and derived bindings are **TBD — M2, U13/U14**.
+managed state when several controls need the same UI-owned value. A [`ui::Ref<T>`](glossary.md) identifies a control without keeping it alive.
+Copying the reference does not subscribe to changes.
+Automatic and derived bindings are **TBD — M2**.
 
 ## Change text from a button
 
-This complete program uses the current scene's exit command from an admitted
-key callback. Scoped `ui::quit` is available with U125.
+This complete program uses the current [scene](glossary.md#glossary-scene)'s exit
+command from a key callback invoked by that scene. Use scoped `ui::quit()` to exit from the handler.
 
 ```cpp
 #include <portals/ui.hpp>
@@ -28,7 +28,7 @@ int main() {
 }
 ```
 
-The scene mounts the complete recipe before publishing its references and
+The scene mounts the complete [recipe](glossary.md#glossary-recipe) before publishing its references and
 registering pipe handlers. Capturing a `Ref` by value does not keep its widget or
 scene alive. Recipe construction occurs before final `runApp` entry and can
 throw; use the factory runner when construction needs that checked boundary.
@@ -44,9 +44,9 @@ destination.text() = field.text();
 ```
 
 The last line copies the current text once. Subsequent source changes do not
-update the destination. `TextProperty` is an observing proxy, whereas
-`Property<T>` is an owning value/notification component. The similar names do
-not imply identical behavior.
+update the destination. `TextProperty` accesses text owned by a control.
+[`Property<T>`](glossary.md) stores a value and sends change notifications.
+These types have separate ownership and notification contracts.
 
 Use a retained operation result for explicit error handling:
 
@@ -161,7 +161,7 @@ For complete programs and failure paths, read
 The [property reference](property.md) specifies ownership, backpressure and
 cancellation; [declarative composition](declarative-ui.md) specifies runner reporting.
 
-**TBD — M2, U13/U14:** automatic/derived binding facilities. The future expression
+**TBD — M2:** automatic/derived binding facilities. The future expression
 syntax, dependency graph and cycle policy are not presented as working features.
 Typed live theme parameters are already available through explicit UI updates;
 see [themes](themes-guide.md). Their existence does not imply automatic domain
@@ -169,25 +169,24 @@ or string-PSS variable binding.
 
 ## Planned scene parameters, async and geometry
 
-**TBD — M5/U65/U128:** `$name` will refer to a code-assigned value or a registered
+**TBD — M5:** `$name` will refer to a code-assigned value or a registered
 notification source. `theme.*` refers to theme parameters and `this.*` to control
 properties. Capturing an ordinary C++ `int` does not create an observed source.
 Assignment is checked by default; the exact return signature of compact
 `ui::currentScene.setParam` still needs API design. Rejecting a candidate preserves
-previous parameters/styles, not an already changed external model.
+previous parameters and styles. Changes already made to an external model remain.
 See [themes](themes-guide.md).
 
-**TBD — M6/U83:** `ui::async` for functions and coroutine lambdas with `co_await`.
+**TBD — M6:** `ui::async` for functions and coroutine lambdas with `co_await`.
 Existing UiAsync/UiTask can await supported timers/replies, but ordinary
 `onClick`/`onKey` does not automatically accept arbitrary coroutine handlers.
 The adapter must own the lambda captures and coroutine frame, establish scene
 context at each UI resume and remove it before suspension. It does not move
 CPU work to a worker automatically. UI close cancels the continuation; the
 application still owns producer stop/join. See [current coroutines](ui-coroutines.md).
-An early slice is proposed; the master milestone remains M6 with no earlier
-schedule assigned.
+The planned milestone is M6.
 
-**TBD — M1/U130:** `onLayout` and checked arranged-geometry reads through Ref.
+**TBD — M1:** `onLayout` and checked arranged-geometry reads through Ref.
 Notification refers to completed layout and is delivered outside tree traversal;
 callback mutations request the next frame. Before valid layout, a getter must
 not fabricate a zero size. Exact getter syntax remains undecided.

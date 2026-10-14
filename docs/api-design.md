@@ -1,8 +1,8 @@
 # API design scenarios
 
 Status: design-only, 2026-10-07. The five sketches below select a C++23 API
-direction for review. These names and signatures are **not implemented**,
-installed headers, executable examples, or a compatibility promise. The implemented API is documented in the public headers. The separate
+direction for review. These proposed names and signatures are **not implemented**. They do not appear
+in installed headers or executable examples and carry no compatibility promise. The implemented API is documented in the public headers. The separate
 [module spike](../experiments/module-spike/README.md) tests language/linkage
 mechanics with a toy library; its tests cannot prove these UI contracts.
 

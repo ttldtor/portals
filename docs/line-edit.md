@@ -1,9 +1,10 @@
 # Unicode line editing
 
 `LineEdit` owns a UTF-8 draft and exposes byte-boundary cursor and anchor positions.
-Its `GraphemeText` segments editing into complete Unicode graphemes; terminal width
-and horizontal scrolling use cells. This includes combining marks, ZWJ emoji and
-CJK. Construct the widget, create a `Property<std::string>`, and retain the result
+Its `GraphemeText` groups editing into complete
+[graphemes](glossary.md#glossary-text-units), such as a letter with its combining accent.
+Terminal width and horizontal scrolling use cells. This includes emoji joined by
+a zero-width joiner (ZWJ) and Chinese, Japanese and Korean (CJK) text. Construct the widget, create a `Property<std::string>`, and retain the result
 of `bindLineEdit` for as long as input and observation should remain connected.
 
 ```cpp
@@ -41,7 +42,7 @@ cut/paste and fluent text changes publish valid changed candidates without Enter
 | ON_COMPLETION | Keep dirty draft | Validate and confirm once | Validate and confirm |
 | EXPLICIT | Keep dirty draft | Keep draft | Validate and confirm |
 
-Choose the previous behavior explicitly:
+For confirmation only on Enter or activation, select:
 `LineEditOptions{.editMode = EditMode::EXPLICIT}` or
 `ui::lineEdit(model, {.options = {.editMode = EditMode::EXPLICIT}})`.
 Programmatic `router.invoke(field, {Action::ACTIVATE})` uses the same handler as

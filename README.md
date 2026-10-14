@@ -1,13 +1,15 @@
 # Portals
 
+[Русская документация](docs/ru/index.md) · [User guides](docs/guides.md)
+
 [![Build and test](https://github.com/ttldtor/portals/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ttldtor/portals/actions/workflows/ci.yml)
 [![Documentation](https://img.shields.io/badge/docs-online-blue)](https://ttldtor.github.io/portals/)
 ![C++23](https://img.shields.io/badge/C%2B%2B-23-00599C?logo=c%2B%2B)
 [![License: BSL 1.0](https://img.shields.io/badge/License-BSL--1.0-blue.svg)](LICENSE.txt)
 
-Portals is a **C++23 retained terminal UI library**, currently under development.
+Portals is a **C++23 terminal UI library**, currently under development.
 Start with the declarative `ui` API to compose forms, bind events and run scenes.
-The retained core provides widgets, layouts, managed controls, virtual lists and
+The library provides widgets, layouts, managed controls, virtual lists and
 tables, and charts. The API and ABI are
 evolving; see the [current limitations](docs/limitations.md) before depending
 on platform or lifecycle guarantees.
@@ -21,6 +23,7 @@ Declare the control tree, style and event handlers in one composition.
 The button appends text; F10 requests an orderly exit:
 
 ```cpp
+#include <portals/ui.hpp>
 #include <portals/ui_style.hpp>
 
 int main() {
@@ -42,32 +45,18 @@ int main() {
 }
 ```
 
-This compact form constructs the recipe before `runApp`; the
+This compact form constructs the [recipe](docs/glossary.md#glossary-recipe) before `runApp`; the
 [factory-based runner](docs/declarative-ui.md) also guards recipe construction.
 
 Start with the [short library guide](docs/index.md), then follow its links for
 input, error reporting and ownership contracts.
 
-## Quick start
+## Create your application
 
-Requirements and compiler details are in [Getting started](docs/getting-started.md).
-Build the examples with the supplied preset, then launch the gallery in a terminal.
-
-**Windows — x64 Developer PowerShell for Visual Studio:**
-
-```powershell
-cmake --preset windows-msvc-debug
-cmake --build --preset windows-msvc-debug
-./build/windows-msvc-debug/examples/gallery/portals_gallery
-```
-
-**Linux — GCC, CMake and Ninja:**
-
-```sh
-cmake --preset linux-gcc-debug
-cmake --build --preset linux-gcc-debug
-./build/linux-gcc-debug/examples/gallery/portals_gallery
-```
+Save the example above as `main.cpp`. The [short guide](docs/index.md) provides
+a complete CMake project using FetchContent, plus configure, build and run commands.
+It also covers local sources and an installed SDK. For runnable library examples,
+see [the examples page](docs/examples.md).
 
 ## Documentation
 
@@ -79,7 +68,7 @@ cmake --build --preset linux-gcc-debug
 - [Glossary](docs/glossary.md) — terms and ownership distinctions.
 - [Declarative UI](docs/declarative-ui.md) — composition, events and scene lifecycle.
 - [Reference map](docs/reference-map.md) — complete topic map.
-- [Getting started](docs/getting-started.md) — build, run examples, and generate local HTML help.
+- [Building Portals and its examples](docs/getting-started.md) — build, run examples, and generate local HTML help.
 - [Runnable examples](docs/examples.md) — gallery, dashboard, custom widgets, and options.
 - [Architecture](docs/architecture.md) — ownership and event flow.
 - [CMake package](docs/package.md) — embed from source or install for consumers.
@@ -90,7 +79,6 @@ cmake --build --preset linux-gcc-debug
 ## License and notices
 
 Portals is licensed under the [Boost Software License 1.0](LICENSE.txt).
-Notices for vendored utf8proc, Unicode test data, and adapted theme colors are
-listed in [dependency provenance](vendor/utf8proc/README.md),
-[Unicode test data](tests/fixtures/unicode/Unicode-LICENSE.txt), and
-[Textual palette attribution](vendor/textual/README.md).
+[Dependencies and licenses](docs/dependencies.md) describes included third-party
+code, data, optional components and build requirements.
+[Зависимости и лицензии на русском](docs/ru/dependencies.md).
