@@ -3,6 +3,7 @@
 #pragma once
 
 #include <portals/application.hpp>
+#include <portals/detail/setup_failure.hpp>
 #include <portals/editor_command.hpp>
 #include <portals/line_edit.hpp>
 #include <portals/managed_diagnostics.hpp>
@@ -85,7 +86,10 @@ public:
    * @return Original commit/delivery receipt, WRONG_THREAD, CLOSED, or Property's error.
    */
   std::expected<PropertyUpdate<T>, TreeError> set(const T &value) const {
+    ui::detail::SetupFailurePause setup(facade_);
+    ui::detail::CurrentSceneScope mask;
     auto model = lock();
+    ui::detail::CurrentSceneScope current(facade_);
 
     return model ? (*model)->set(value) : std::unexpected(model.error());
   }
@@ -94,7 +98,10 @@ public:
    * @return Original commit/delivery receipt, WRONG_THREAD, CLOSED, or Property's error.
    */
   std::expected<PropertyUpdate<T>, TreeError> set(T &&value) const {
+    ui::detail::SetupFailurePause setup(facade_);
+    ui::detail::CurrentSceneScope mask;
     auto model = lock();
+    ui::detail::CurrentSceneScope current(facade_);
 
     return model ? (*model)->set(std::move(value)) : std::unexpected(model.error());
   }
@@ -130,6 +137,7 @@ private:
   }
 
   std::weak_ptr<Property<T>> model_;
+  std::weak_ptr<ui::detail::SceneAnchor> facade_;
   std::weak_ptr<const void> lifetime_;
   std::thread::id owner_{};
   NodeId scene_{};
@@ -277,6 +285,7 @@ public:
       ManagedState<T> handle;
 
       handle.model_ = model;
+      handle.facade_ = facade_;
       handle.lifetime_ = lifetime_;
       handle.owner_ = owner_;
       handle.scene_ = root_.id();
@@ -442,40 +451,51 @@ public:
    */
   template <class T>
   std::expected<void, ManagedError> onEvent(Node<T> node, std::type_identity_t<ManagedEventHandler<T>> callback) {
+    ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
+    ManagedEventHandler<T> incoming;
+
+    incoming.swap(callback);
     auto entry = bindingEntry(node);
 
     if (!entry) {
       return std::unexpected(entry.error());
     }
 
-    if (!callback) {
+    if (!incoming) {
       return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
     }
 
-    auto bound =
-      app_.router().bind(node, [this, node, callback = std::move(callback)](T &widget, const RoutedEvent &event) {
-        try {
-          auto result = callback(widget, event);
+    try {
+      auto bound = app_.router().bind(
+        node, [this, node, callback = ui::detail::currentSceneCallback(facadeContext(), std::move(incoming))](
+                T &widget, const RoutedEvent &event) {
+          try {
+            auto result = callback(widget, event);
 
-          if (result) {
-            return *result;
+            if (result) {
+              return *result;
+            }
+
+            remember(error(ManagedPhase::INPUT, node, result.error()));
+          } catch (...) {
+            remember(error(ManagedPhase::INPUT, node, TreeError::CALLBACK_FAILED));
           }
 
-          remember(error(ManagedPhase::INPUT, node, result.error()));
-        } catch (...) {
-          remember(error(ManagedPhase::INPUT, node, TreeError::CALLBACK_FAILED));
-        }
+          return EventReply::HANDLED;
+        });
 
-        return EventReply::HANDLED;
-      });
+      if (!bound) {
+        return std::unexpected(error(ManagedPhase::BIND, node, bound.error()));
+      }
 
-    if (!bound) {
-      return std::unexpected(error(ManagedPhase::BIND, node, bound.error()));
+      (*entry)->binding.template emplace<ActionBinding>(std::move(*bound));
+
+      return {};
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
+    } catch (...) {
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CALLBACK_FAILED));
     }
-
-    (*entry)->binding.template emplace<ActionBinding>(std::move(*bound));
-
-    return {};
   }
 
   /** @brief Register custom presentation work at the existing dirty-frame boundary.
@@ -487,6 +507,10 @@ public:
    */
   template <class T>
   std::expected<void, ManagedError> onPrepare(Node<T> node, std::type_identity_t<ManagedPrepareHandler<T>> callback) {
+    ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
+    ManagedPrepareHandler<T> incoming;
+
+    incoming.swap(callback);
     auto allowed = boundary(ManagedPhase::BIND, node);
 
     if (!allowed) {
@@ -495,19 +519,21 @@ public:
 
     auto entry = find(node);
 
-    if (!entry || !callback) {
+    if (!entry || !incoming) {
       return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
     }
 
     try {
-      entry->customSync = [this, node, callback = std::move(callback)](Node<Widget> focused) {
-        std::expected<void, TreeError> result;
-        auto edited = app_.tree().edit(node, [&](T &widget) {
-          result = callback(widget, focused);
-        });
+      entry->customSync =
+        [this, node,
+         callback = ui::detail::currentSceneCallback(facadeContext(), std::move(incoming))](Node<Widget> focused) {
+          std::expected<void, TreeError> result;
+          auto edited = app_.tree().edit(node, [&](T &widget) {
+            result = callback(widget, focused);
+          });
 
-        return edited ? result : edited;
-      };
+          return edited ? result : edited;
+        };
 
       return {};
     } catch (const std::bad_alloc &) {
@@ -853,6 +879,14 @@ private:
 
   explicit ManagedScene(Application &app, ManagedOptions options);
 
+  std::weak_ptr<ui::detail::SceneAnchor> facadeContext() const noexcept {
+    if (owner_ != std::this_thread::get_id() || closed_) {
+      return {};
+    }
+
+    return facade_;
+  }
+
   std::expected<void, ManagedError>
   setInput(std::function<std::expected<bool, ManagedError>(const InputEvent &)> callback, std::size_t keyHandlers,
            std::shared_ptr<KeySnapshot> keys = {});
@@ -867,14 +901,16 @@ private:
   void dispatchClicks(Node<Button> node, const std::shared_ptr<ClickChain> &chain,
                       const std::weak_ptr<const void> &lifetime, const ClickEvent &event);
 
-  template <class Callback> static std::function<EditorCommandResult(ui::ClickParams &)> clickAdapter(Callback action) {
+  template <class Callback> std::function<EditorCommandResult(ui::ClickParams &)> clickAdapter(Callback action) {
+    ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
     if constexpr (std::is_pointer_v<Callback> || requires { action.operator bool(); }) {
       if (!static_cast<bool>(action)) {
         return {};
       }
     }
 
-    return [action = std::move(action)](ui::ClickParams &params) mutable {
+    return [action = ui::detail::currentSceneCallback(facadeContext(), std::move(action))](
+             [[maybe_unused]] ui::ClickParams &params) mutable {
       const auto invoke = [&]() -> decltype(auto) {
         if constexpr (std::invocable<Callback &, ui::ClickParams &>) {
           return action(params);
@@ -901,14 +937,16 @@ private:
   }
 
   template <class Event, class Callback>
-  static std::function<EditorCommandResult(const Event &)> actionAdapter(Callback action) {
+  std::function<EditorCommandResult(const Event &)> actionAdapter(Callback action) {
+    ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
     if constexpr (std::is_pointer_v<Callback> || requires { action.operator bool(); }) {
       if (!static_cast<bool>(action)) {
         return {};
       }
     }
 
-    return [action = std::move(action)]([[maybe_unused]] const Event &event) mutable {
+    return [action = ui::detail::currentSceneCallback(facadeContext(), std::move(action))](
+             [[maybe_unused]] const Event &event) mutable {
       const auto invoke = [&]() -> decltype(auto) {
         if constexpr (std::invocable<Callback &, const Event &>) {
           return action(event);
@@ -972,6 +1010,7 @@ private:
   std::thread::id owner_;
   ManagedOptions options_;
   std::shared_ptr<const void> lifetime_;
+  std::weak_ptr<ui::detail::SceneAnchor> facade_;
   Node<Widget> root_;
   StyleEngine styles_;
   std::vector<std::shared_ptr<Entry>> entries_;

@@ -6,6 +6,7 @@
 #include <cstdio>
 
 namespace portals::ui {
+
 namespace {
 constexpr const char *phaseName(ManagedPhase phase) noexcept {
   switch (phase) {
@@ -589,8 +590,10 @@ struct Scene::State {
   }
 
   void observe(const ManagedDiagnostic &diagnostic) {
+    detail::CurrentSceneScope mask;
     Guard guard(*this, Operation::NOTIFY);
     auto callback = observer;
+    detail::CurrentSceneScope scope(anchor);
 
     // Latch an exact managed primary before user observer reentry can introduce a boundary error.
     if (!failure && guard.previous == Operation::RUN && detail::SceneAccess::notifyingRunFailure(*managed)) {
@@ -615,12 +618,14 @@ struct Scene::State {
   }
 
   void notifyFallback() noexcept {
+    detail::CurrentSceneScope mask;
     if (!failure || notified || !observer || active == Operation::NOTIFY) {
       return;
     }
 
     Guard guard(*this, Operation::NOTIFY);
     auto callback = observer;
+    detail::CurrentSceneScope scope(anchor);
     fallback.error = *failure;
     fallback.origin = failureOrigin;
     notified = true;
@@ -773,6 +778,7 @@ struct Scene::State {
   void invoke(Configuration &callback, std::source_location origin) {
     detail::SetupFailureScope scope(active == Operation::RUN ? std::weak_ptr<void>{} : anchor,
                                     active == Operation::RUN ? nullptr : setupEvent, "scene.configure");
+    detail::CurrentSceneScope current(anchor);
 
     try {
       auto result = callback(*managed);
@@ -972,6 +978,7 @@ std::expected<void, ManagedError> Scene::prepareChecked(std::source_location ori
           state.fail(managed.error(), "scene.owner", origin);
         } else {
           state.managed = std::move(*managed);
+          detail::SceneAccess::currentOwner(*state.managed, state.anchor);
           state.anchor->events->scene = state.managed.get();
           state.anchor->events->lifetime = style::ct::detail::Access::lifetime(*state.managed);
           state.anchor->events->node = state.managed->root();
@@ -991,7 +998,11 @@ std::expected<void, ManagedError> Scene::prepareChecked(std::source_location ori
           }
 
           if (!state.failure) {
-            auto mounted = state.recipe(*state.managed);
+            auto mounted = [&] {
+              detail::CurrentSceneScope current(state.anchor);
+
+              return state.recipe(*state.managed);
+            }();
 
             if (!mounted) {
               state.fail(mounted.error(), "scene.mount", state.recipeOrigin);
@@ -1157,11 +1168,20 @@ std::expected<void, ManagedError> SceneRef::quit(std::source_location origin) co
 
   const auto anchor = anchor_.lock();
 
+  if (anchor && anchor->owner != std::this_thread::get_id()) {
+    return std::unexpected(error(ManagedPhase::RUN, TreeError::WRONG_THREAD));
+  }
+
   if (!anchor || !anchor->state) {
     return std::unexpected(error(ManagedPhase::RUN, TreeError::CLOSED));
   }
 
   return anchor->quit(anchor->state, origin);
+}
+
+void quit(std::source_location origin) {
+  // Use the same weak snapshot for checked admission and any safe existing-channel report.
+  QuitAction{detail::SceneAccess::currentRef(), origin}();
 }
 
 void SceneRef::report(const ManagedError &failure, std::source_location origin) const {
@@ -1171,7 +1191,7 @@ void SceneRef::report(const ManagedError &failure, std::source_location origin) 
 
   const auto anchor = anchor_.lock();
 
-  if (anchor && anchor->state) {
+  if (anchor && anchor->owner == std::this_thread::get_id() && anchor->state) {
     detail::reportEventError(anchor->events, failure, origin);
   }
 }
@@ -1593,7 +1613,11 @@ std::expected<ApplicationStats, ManagedError> Scene::runImpl(ApplicationTerminal
   auto &state = *state_;
   State::Guard guard(state, State::Operation::RUN);
 
-  auto result = terminal ? state.managed->run(*terminal, stop) : state.managed->run(stop);
+  auto result = [&] {
+    detail::CurrentSceneScope current(state.anchor);
+
+    return terminal ? state.managed->run(*terminal, stop) : state.managed->run(stop);
+  }();
 
   if (!result) {
     if (state.failure) {

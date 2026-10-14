@@ -3413,3 +3413,722 @@ TEST_CASE("layer facade keeps configuration failures and allocation errors in th
     CHECK(reachedSuccess);
   }
 }
+
+TEST_CASE("U125 short quit uses actual method and pipe callbacks with explicit API compatibility") {
+  using ExplicitQuit = ui::QuitAction (*)(ui::SceneRef, std::source_location);
+  ExplicitQuit explicitQuit = ui::quit;
+  static_assert(std::same_as<decltype(ui::quit()), void>);
+  std::array<std::string, 4> baselines;
+
+  for (const bool shortForm : {false, true}) {
+    for (const bool pipe : {false, true}) {
+      for (const bool click : {false, true}) {
+        example::ReplayTerminal terminal({{50, click ? "\r" : "\x1b[21~", {}}}, 100, {30, 4});
+        ui::SceneOptions options;
+        ui::Ref<Button> button;
+
+        options.clock = terminal.clock();
+
+        auto scene = ui::scene(ui::button(button, "Exit"), options);
+
+        if (click) {
+          if (pipe) {
+            if (shortForm) {
+              scene | ui::onClick(button, ui::quit);
+            } else {
+              scene | ui::onClick(button, explicitQuit(scene.ref(), std::source_location::current()));
+            }
+          } else {
+            scene.configure([&](ManagedScene &) {
+              return shortForm ? button.onClick([] {
+                ui::quit();
+              })
+                               : button.onClick(ui::quit(scene.ref()));
+            });
+          }
+        } else if (pipe) {
+          if (shortForm) {
+            scene | ui::onKey(key::F10, ui::quit);
+          } else {
+            scene | ui::onKey(key::F10, ui::quit(scene.ref()));
+          }
+        } else if (shortForm) {
+          scene.onKey(key::F10, ui::quit);
+        } else {
+          scene.onKey(key::F10, ui::quit(scene.ref()));
+        }
+
+        const auto result = scene.run(terminal);
+
+        CHECK(result);
+        CHECK(terminal.closed);
+        CHECK(options.clock.read(options.clock.context) == 50);
+        CHECK_FALSE(terminal.output.empty());
+        CHECK(take(scene.diagnostics()).errors.empty());
+
+        auto &baseline = baselines[(pipe ? 2 : 0) + (click ? 1 : 0)];
+
+        if (baseline.empty()) {
+          baseline = terminal.output;
+        } else {
+          CHECK(terminal.output == baseline);
+        }
+
+        const auto unavailable = ui::detail::SceneAccess::currentRef().quit();
+
+        REQUIRE_FALSE(unavailable);
+        CHECK(unavailable.error().phase == ManagedPhase::RUN);
+        CHECK(treeCause(unavailable.error(), TreeError::CLOSED));
+        ui::quit();
+      }
+    }
+  }
+}
+
+TEST_CASE("U125 prepared direct managed callbacks target their own facade and restore the outer scene") {
+  enum class Dispatch {
+    KEY,
+    CLICK,
+    INPUT
+  };
+
+  for (const auto dispatch : {Dispatch::KEY, Dispatch::CLICK, Dispatch::INPUT}) {
+    for (const bool quitOuter : {false, true}) {
+      example::ReplayTerminal outerTerminal({}, 100, {30, 4});
+      example::ReplayTerminal innerTerminal({}, 100, {30, 4});
+      ui::SceneOptions outerOptions;
+      ui::SceneOptions innerOptions;
+      ui::Ref<Button> button;
+      int later{};
+
+      outerOptions.clock = outerTerminal.clock();
+      innerOptions.clock = innerTerminal.clock();
+
+      auto inner = ui::scene(ui::button(button, "Inner"), innerOptions);
+
+      inner.onKey(key::Q, ui::quit).configure([&](ManagedScene &owner) {
+        if (dispatch == Dispatch::INPUT) {
+          take(owner.onInput([](const InputEvent &) -> std::expected<bool, ManagedError> {
+            ui::quit();
+
+            return true;
+          }));
+        } else if (dispatch == Dispatch::CLICK) {
+          take(button.onClick([] {
+            ui::quit();
+          }));
+        }
+      });
+      take(inner.prepareChecked());
+
+      auto moved = std::move(inner);
+
+      CHECK_FALSE(inner.checked());
+
+      auto &managed = take(moved.managed()).get();
+      auto &application = ui::detail::SceneAccess::application(managed);
+      auto outer = ui::scene(ui::label("Outer"), outerOptions);
+
+      outer
+        .configure([&](ManagedScene &) {
+          if (dispatch == Dispatch::CLICK) {
+            take(application.router().invoke(button.node(), ActionEvent{Action::ACTIVATE}));
+          } else {
+            CHECK(take(managed.input(application, KeyEvent{InputKey::CHARACTER, U'Q'})));
+          }
+
+          if (quitOuter) {
+            ui::quit();
+          }
+        })
+        .configure([&](ManagedScene &) {
+          ++later;
+        });
+
+      CHECK(outer.prepareChecked());
+      CHECK(later == 1);
+      CHECK(moved.run(innerTerminal));
+      CHECK(innerTerminal.output.empty());
+      CHECK(outer.run(outerTerminal));
+      CHECK(outerTerminal.output.empty() == quitOuter);
+    }
+  }
+}
+
+TEST_CASE("U125 deferred router capture retirement masks both current quit and outer setup failure") {
+  for (const bool pipe : {false, true}) {
+    example::ReplayTerminal outerTerminal({}, 100, {30, 4});
+    example::ReplayTerminal innerTerminal({}, 100, {30, 4});
+    ui::SceneOptions outerOptions;
+    ui::SceneOptions innerOptions;
+    ui::Ref<Button> button;
+    ui::Ref<Label> missing;
+    int retired{}, later{};
+    bool attributed{}, currentUnavailable{};
+
+    outerOptions.clock = outerTerminal.clock();
+    innerOptions.clock = innerTerminal.clock();
+
+    struct Capture {
+      ui::Ref<Label> &missing;
+      int &retired;
+      bool &attributed;
+      bool &currentUnavailable;
+
+      ~Capture() {
+        const auto current = ui::detail::SceneAccess::currentRef().quit();
+
+        currentUnavailable = !current && treeCause(current.error(), TreeError::CLOSED);
+        ui::quit();
+
+        auto failure = missing.text() = "retired capture";
+
+        attributed = failure.result().error().setupStopped;
+        ++retired;
+      }
+    };
+
+    auto capture = std::make_shared<Capture>(missing, retired, attributed, currentUnavailable);
+    auto inner = ui::scene(ui::vbox(ui::label("Inner"), ui::button(button, "Remove")), innerOptions);
+    ManagedScene *managed{};
+
+    inner.configure([&](ManagedScene &owner) {
+      managed = &owner;
+    });
+
+    if (pipe) {
+      inner | ui::onClick(button, [&, capture] {
+        take(managed->remove(button.node()));
+      });
+    } else {
+      inner.configure([&](ManagedScene &) {
+        return button.onClick([&, capture] {
+          take(managed->remove(button.node()));
+        });
+      });
+    }
+
+    take(inner.prepareChecked());
+    capture.reset();
+
+    auto &application = ui::detail::SceneAccess::application(*managed);
+    auto outer = ui::scene(ui::label("Outer"), outerOptions);
+
+    outer
+      .configure([&](ManagedScene &) {
+        take(application.router().invoke(button.node(), ActionEvent{Action::ACTIVATE}));
+        take(application.router().focused());
+      })
+      .configure([&](ManagedScene &) {
+        ++later;
+      });
+
+    CHECK(outer.prepareChecked());
+    CHECK(retired == 1);
+    CHECK_FALSE(attributed);
+    CHECK(currentUnavailable);
+    CHECK(later == 1);
+    CHECK(inner.run(innerTerminal));
+    CHECK_FALSE(innerTerminal.output.empty());
+    CHECK(outer.run(outerTerminal));
+    CHECK_FALSE(outerTerminal.output.empty());
+  }
+}
+
+TEST_CASE("U125 owned notification preserves its own setup and suspends another setup") {
+  for (const bool ownSetup : {false, true}) {
+    ui::Ref<LineEdit> field;
+    ui::Ref<Label> missing;
+    bool attributed{};
+    int notifications{}, later{};
+    ui::LineEditConfig config;
+
+    config.result = [&](LineEditResult) -> std::expected<void, TreeError> {
+      auto failure = missing.text() = "notification";
+
+      attributed = failure.result().error().setupStopped;
+      ++notifications;
+
+      return {};
+    };
+
+    auto inner = ui::scene(ui::lineEdit(field, "initial", std::move(config)));
+
+    take(inner.prepareChecked());
+
+    const auto mutate = [&](ManagedScene &) {
+      CHECK(field.text().set("changed").result());
+    };
+
+    if (ownSetup) {
+      inner.configure(mutate).configure([&](ManagedScene &) {
+        ++later;
+      });
+      CHECK_FALSE(inner.checked());
+      CHECK(attributed);
+      CHECK(later == 0);
+    } else {
+      auto outer = ui::scene(ui::label("outer"));
+
+      outer.configure(mutate).configure([&](ManagedScene &) {
+        ++later;
+      });
+      CHECK(outer.prepareChecked());
+      CHECK_FALSE(attributed);
+      CHECK(inner.checked());
+      CHECK(later == 1);
+    }
+
+    CHECK(notifications == 1);
+  }
+}
+
+TEST_CASE("U125 rejected standard managed callback parameters retire before both masks end") {
+  for (const bool preparation : {false, true}) {
+    example::ReplayTerminal terminal({}, 100, {30, 4});
+    ui::SceneOptions options;
+    ui::Ref<Label> missing;
+    int retired{}, later{};
+    bool attributed{}, unavailable{};
+
+    options.clock = terminal.clock();
+
+    struct Capture {
+      ui::Ref<Label> &missing;
+      int &retired;
+      bool &attributed;
+      bool &unavailable;
+
+      ~Capture() {
+        auto context = ui::detail::SceneAccess::currentRef().quit();
+
+        unavailable = !context && treeCause(context.error(), TreeError::CLOSED);
+        ui::quit();
+
+        auto failure = missing.text() = "rejected registration";
+
+        attributed = failure.result().error().setupStopped;
+        ++retired;
+      }
+    };
+
+    auto inner = ui::scene(ui::label("inner"));
+
+    take(inner.prepareChecked());
+
+    auto &owner = take(inner.managed()).get();
+    auto capture = std::make_shared<Capture>(missing, retired, attributed, unavailable);
+    ManagedEventHandler<Widget> event = [capture](Widget &,
+                                                  const RoutedEvent &) -> std::expected<EventReply, TreeError> {
+      return EventReply::IGNORED;
+    };
+    ManagedPrepareHandler<Widget> prepare = [capture](Widget &, Node<Widget>) -> std::expected<void, TreeError> {
+      return {};
+    };
+
+    if (preparation) {
+      event = {};
+    } else {
+      prepare = {};
+    }
+
+    capture.reset();
+
+    auto outer = ui::scene(ui::label("outer"), options);
+
+    outer
+      .configure([&](ManagedScene &) {
+        const auto rejected = preparation ? owner.onPrepare(Node<Widget>{}, std::move(prepare))
+                                          : owner.onEvent(Node<Widget>{}, std::move(event));
+
+        CHECK_FALSE(rejected);
+      })
+      .configure([&](ManagedScene &) {
+        ++later;
+      });
+
+    CHECK(outer.prepareChecked());
+    CHECK(retired == 1);
+    CHECK(unavailable);
+    CHECK_FALSE(attributed);
+    CHECK(later == 1);
+    CHECK(outer.run(terminal));
+    CHECK_FALSE(terminal.output.empty());
+  }
+}
+
+TEST_CASE("U125 no current and independent factory cleanup do not reuse an outer scene") {
+  example::ReplayTerminal terminal({}, 100, {30, 4});
+  ui::SceneOptions options;
+  int later{}, sinks{};
+  bool workerClosed{};
+
+  options.clock = terminal.clock();
+
+  auto outer = ui::scene(ui::label("outer"), options);
+
+  outer
+    .configure([&](ManagedScene &) {
+      std::thread worker([&] {
+        const auto current = ui::detail::SceneAccess::currentRef().quit();
+
+        workerClosed = !current && treeCause(current.error(), TreeError::CLOSED);
+        ui::quit();
+      });
+
+      worker.join();
+
+      ui::RunAppOptions failed;
+
+      failed.report = [&](const ui::SceneReport &) {
+        ui::quit();
+        ++sinks;
+      };
+
+      const auto code = ui::runApp(
+        []() -> std::expected<ui::Description<Label>, ManagedError> {
+          ui::quit();
+
+          return std::unexpected(ManagedError{ManagedPhase::MOUNT, {}, TreeError::NODE_LIMIT});
+        },
+        [](ui::Scene &) {
+        },
+        failed);
+
+      CHECK(code == 1);
+    })
+    .configure([&](ManagedScene &) {
+      ++later;
+    });
+
+  CHECK(outer.prepareChecked());
+  CHECK(workerClosed);
+  CHECK(sinks == 1);
+  CHECK(later == 1);
+  CHECK(outer.run(terminal));
+  CHECK_FALSE(terminal.output.empty());
+
+  const auto current = ui::detail::SceneAccess::currentRef().quit();
+
+  REQUIRE_FALSE(current);
+  CHECK(current.error().phase == ManagedPhase::RUN);
+  CHECK(treeCause(current.error(), TreeError::CLOSED));
+  ui::quit();
+}
+
+TEST_CASE("U125 managed property user code keeps same-owner setup and masks unrelated setup") {
+  for (const bool ownSetup : {false, true}) {
+    for (const bool copiedValue : {false, true}) {
+      ui::Ref<Label> missing;
+      bool attributed{};
+      int comparisons{}, later{};
+      example::ReplayTerminal outerTerminal({}, 100, {30, 4});
+      example::ReplayTerminal innerTerminal({}, 100, {30, 4});
+      ui::SceneOptions innerOptions;
+      ui::SceneOptions outerOptions;
+
+      innerOptions.clock = innerTerminal.clock();
+      outerOptions.clock = outerTerminal.clock();
+
+      struct Value {
+        int number;
+        std::function<void()> compared;
+
+        bool operator==(const Value &other) const {
+          compared();
+
+          return number == other.number;
+        }
+      };
+
+      const auto compared = [&] {
+        auto failure = missing.text() = "property comparison";
+
+        attributed = failure.result().error().setupStopped;
+        ++comparisons;
+        ui::quit();
+      };
+      ManagedState<Value> state;
+      auto inner = ui::scene(
+        [&](ManagedScene &owner) {
+          state = take(owner.state(Value{1, compared}));
+
+          return ui::label("inner");
+        },
+        innerOptions);
+
+      take(inner.prepareChecked());
+
+      const auto change = [&](ManagedScene &) {
+        if (copiedValue) {
+          const Value value{2, compared};
+
+          CHECK(state.set(value));
+        } else {
+          CHECK(state.set(Value{2, compared}));
+        }
+      };
+
+      if (ownSetup) {
+        inner.configure(change).configure([&](ManagedScene &) {
+          ++later;
+        });
+        CHECK_FALSE(inner.checked());
+        CHECK(attributed);
+        CHECK(later == 0);
+      } else {
+        auto outer = ui::scene(ui::label("outer"), outerOptions);
+
+        outer.configure(change).configure([&](ManagedScene &) {
+          ++later;
+        });
+        CHECK(outer.prepareChecked());
+        CHECK_FALSE(attributed);
+        CHECK(later == 1);
+        CHECK(inner.run(innerTerminal));
+        CHECK(innerTerminal.output.empty());
+        CHECK(outer.run(outerTerminal));
+        CHECK_FALSE(outerTerminal.output.empty());
+      }
+
+      CHECK(comparisons == 1);
+    }
+  }
+}
+
+TEST_CASE("U125 rejected current quit reports once at the registered site without bypassing notify guards") {
+  example::ReplayTerminal terminal({}, 100, {30, 4});
+  ui::SceneOptions options;
+  ui::Ref<Button> button;
+  int notifications{};
+  Application *application{};
+  const auto origin = std::source_location::current();
+
+  options.clock = terminal.clock();
+
+  auto scene = ui::scene(ui::button(button, "Button"), options);
+
+  scene
+    .onError([&](const ManagedDiagnostic &) {
+      ++notifications;
+      take(application->router().invoke(button.node(), ActionEvent{Action::ACTIVATE}));
+    })
+    .configure([&](ManagedScene &owner) {
+      application = &ui::detail::SceneAccess::application(owner);
+
+      return button.onClick(ui::quit, origin);
+    });
+  take(scene.prepareChecked());
+
+  auto &owner = take(scene.managed()).get();
+
+  take(owner.reportError(ManagedError{ManagedPhase::STATE, {}, TreeError::NODE_LIMIT}));
+
+  const auto batch = take(scene.diagnostics());
+
+  CHECK(notifications == 1);
+  REQUIRE(batch.errors.size() == 2);
+  CHECK(batch.suppressedNotifications == 1);
+  CHECK(batch.errors[1].error.phase == ManagedPhase::RUN);
+  CHECK(treeCause(batch.errors[1].error, TreeError::WOULD_BLOCK));
+  CHECK(batch.errors[1].origin.line() == origin.line());
+  CHECK(scene.checked());
+  CHECK(scene.run(terminal));
+  CHECK_FALSE(terminal.output.empty());
+}
+
+TEST_CASE("U125 failed input storage transfer retires its sole capture under both masks") {
+  example::ReplayTerminal terminal({}, 100, {30, 4});
+  ui::SceneOptions options;
+  ui::Ref<Label> missing;
+  int retired{}, later{}, originalCalls{};
+  bool attributed{}, unavailable{};
+
+  options.clock = terminal.clock();
+
+  struct Capture {
+    ui::Ref<Label> &missing;
+    int &retired;
+    bool &attributed;
+    bool &unavailable;
+
+    ~Capture() {
+      const auto current = ui::detail::SceneAccess::currentRef().quit();
+
+      unavailable = !current && treeCause(current.error(), TreeError::CLOSED);
+      ui::quit();
+
+      auto failure = missing.text() = "failed transfer";
+
+      attributed = failure.result().error().setupStopped;
+      ++retired;
+    }
+  };
+
+  auto inner = ui::scene(ui::label("inner"));
+
+  take(inner.prepareChecked());
+
+  auto &owner = take(inner.managed()).get();
+
+  take(owner.onInput([&](const InputEvent &) -> std::expected<bool, ManagedError> {
+    ++originalCalls;
+
+    return true;
+  }));
+
+  std::function<std::expected<bool, ManagedError>(const InputEvent &)> callback =
+    [capture = std::make_shared<Capture>(missing, retired, attributed, unavailable)](
+      const InputEvent &) -> std::expected<bool, ManagedError> {
+    return true;
+  };
+  auto outer = ui::scene(ui::label("outer"), options);
+
+  outer
+    .configure([&](ManagedScene &) {
+      allocationsBeforeFailure = 0;
+
+      const auto rejected = owner.onInput(std::move(callback));
+
+      allocationsBeforeFailure = -1;
+      REQUIRE_FALSE(rejected);
+      CHECK(treeCause(rejected.error(), TreeError::NO_MEMORY));
+      CHECK(take(owner.input(ui::detail::SceneAccess::application(owner), KeyEvent{InputKey::F2})));
+    })
+    .configure([&](ManagedScene &) {
+      ++later;
+    });
+
+  CHECK(outer.prepareChecked());
+  CHECK(retired == 1);
+  CHECK(unavailable);
+  CHECK_FALSE(attributed);
+  CHECK(originalCalls == 1);
+  CHECK(later == 1);
+  CHECK(outer.run(terminal));
+  CHECK_FALSE(terminal.output.empty());
+}
+
+TEST_CASE("U125 nested throwing setup restores outer context and later scenes start empty") {
+  for (const bool quitOuter : {false, true}) {
+    example::ReplayTerminal outerTerminal({}, 100, {30, 4});
+    example::ReplayTerminal innerTerminal({}, 100, {30, 4});
+    ui::SceneOptions outerOptions;
+    ui::SceneOptions innerOptions;
+
+    outerOptions.clock = outerTerminal.clock();
+    innerOptions.clock = innerTerminal.clock();
+
+    auto outer = ui::scene(ui::label("outer"), outerOptions);
+    auto middle = ui::scene(ui::label("middle"));
+    auto inner = ui::scene(ui::label("inner"), innerOptions);
+
+    inner.configure([](ManagedScene &) {
+      ui::quit();
+    });
+    middle.configure([&](ManagedScene &) {
+      take(inner.prepareChecked());
+
+      throw std::runtime_error("middle");
+    });
+    outer.configure([&](ManagedScene &) {
+      CHECK_FALSE(middle.prepareChecked());
+
+      if (quitOuter) {
+        ui::quit();
+      }
+    });
+
+    CHECK(outer.prepareChecked());
+    CHECK(inner.run(innerTerminal));
+    CHECK(innerTerminal.output.empty());
+    CHECK(outer.run(outerTerminal));
+    CHECK(outerTerminal.output.empty() == quitOuter);
+  }
+
+  StderrCapture stderrCapture;
+
+  ui::quit();
+
+  const auto checked = ui::detail::SceneAccess::currentRef().quit();
+
+  REQUIRE_FALSE(checked);
+  CHECK(checked.error().phase == ManagedPhase::RUN);
+  CHECK(treeCause(checked.error(), TreeError::CLOSED));
+  CHECK(stderrCapture.contents().empty());
+}
+
+TEST_CASE("U125 weak callback identity cannot bypass immutable foreign-thread admission") {
+  example::ReplayTerminal terminal({}, 100, {30, 4});
+  ui::SceneOptions options;
+  std::weak_ptr<ui::detail::SceneAnchor> weak;
+  bool rejected{};
+  int notifications{};
+
+  options.clock = terminal.clock();
+
+  auto scene = ui::scene(ui::label("live"), options);
+
+  scene
+    .onError([&](const ManagedDiagnostic &) {
+      ++notifications;
+    })
+    .configure([&](ManagedScene &) {
+      weak = ui::detail::CurrentSceneScope::snapshot();
+    });
+  take(scene.prepareChecked());
+
+  std::thread worker([&] {
+    ui::detail::CurrentSceneScope scope(weak);
+
+    const auto result = ui::detail::SceneAccess::currentRef().quit();
+
+    rejected = !result && treeCause(result.error(), TreeError::WRONG_THREAD);
+    ui::quit();
+  });
+
+  worker.join();
+  CHECK(rejected);
+  CHECK(notifications == 0);
+  CHECK(scene.run(terminal));
+  CHECK_FALSE(terminal.output.empty());
+}
+
+TEST_CASE("U125 prepared callback close revokes current publication before capture retirement") {
+  example::ReplayTerminal terminal({}, 100, {30, 4});
+  ui::SceneOptions options;
+  ui::Ref<Button> button;
+  bool closed{};
+  int later{};
+
+  options.clock = terminal.clock();
+
+  auto inner = ui::scene(ui::button(button, "Close"));
+
+  inner | ui::onClick(button, [&] {
+    CHECK(inner.close());
+
+    const auto current = ui::detail::SceneAccess::currentRef().quit();
+
+    closed = !current && treeCause(current.error(), TreeError::CLOSED);
+    ui::quit();
+  });
+  take(inner.prepareChecked());
+
+  auto &application = ui::detail::SceneAccess::application(take(inner.managed()).get());
+  auto outer = ui::scene(ui::label("outer"), options);
+
+  outer
+    .configure([&](ManagedScene &) {
+      take(application.router().invoke(button.node(), ActionEvent{Action::ACTIVATE}));
+    })
+    .configure([&](ManagedScene &) {
+      ++later;
+    });
+
+  CHECK(outer.prepareChecked());
+  CHECK(closed);
+  CHECK(later == 1);
+  CHECK(outer.run(terminal));
+  CHECK_FALSE(terminal.output.empty());
+}

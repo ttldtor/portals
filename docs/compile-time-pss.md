@@ -63,7 +63,7 @@ int main() {
 
 This complete client delegates checked construction, setup, reporting, running
 and cleanup to `runApp`. The setup receives the stationary `Scene` by reference;
-`scene.ref()` supplies a weak quit action, so the callback does not capture the
+`ui::quit` uses the entered scene context, so the callback does not capture the
 facade by address. The style stage enables layering before any live layer is
 attached.
 
@@ -94,7 +94,7 @@ int main() {
     [](ui::Scene &scene) {
       scene.theme(portals::modernTheme());
       scene | ui::style(STYLES, {.name = "demo"}) | ui::reportOnError()
-            | ui::onKey(ui::key(portals::InputKey::F10), ui::quit(scene.ref()));
+            | ui::onKey(ui::key(portals::InputKey::F10), ui::quit);
     });
 }
 ~~~

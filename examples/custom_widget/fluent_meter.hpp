@@ -93,7 +93,7 @@ private:
     // Retain modifier-insensitive legacy admission as the fallback beneath exact onKey chords.
     return owner.onInput([this, &owner](const InputEvent &event) -> std::expected<bool, ManagedError> {
       if (example::quitKey(event)) {
-        (void)scene_.quit();
+        ui::quit();
 
         return true;
       }
@@ -132,9 +132,6 @@ private:
     auto configuration = [this](ManagedScene &owner) {
       return configure(owner);
     };
-    auto quit = [this] {
-      (void)scene_.quit();
-    };
     auto adjustKey = [this](const KeyEvent &event) {
       return adjust(event.key == InputKey::RIGHT ? LEVEL_STEP : -LEVEL_STEP);
     };
@@ -142,8 +139,7 @@ private:
     if (composition == Composition::PIPE) {
       return ui::scene(std::move(factory), options) | ui::theme(example::THEME_PRESETS.at(theme_).make()) |
              ui::style(FOCUS_POLICY, {.name = "meter-focus"}) | ui::configure(std::move(configuration)) |
-             ui::onKey(key::F10, std::move(quit)) |
-             ui::onKey(ui::pressRepeat({key::LEFT, key::RIGHT}), std::move(adjustKey));
+             ui::onKey(key::F10, ui::quit) | ui::onKey(ui::pressRepeat({key::LEFT, key::RIGHT}), std::move(adjustKey));
     }
 
     auto meter = ui::scene(std::move(factory), options);
@@ -151,7 +147,7 @@ private:
     meter.theme(example::THEME_PRESETS.at(theme_).make())
       .style(FOCUS_POLICY, {.name = "meter-focus"})
       .configure(std::move(configuration))
-      .onKey(key::F10, std::move(quit))
+      .onKey(key::F10, ui::quit)
       .onKey(ui::pressRepeat({key::LEFT, key::RIGHT}), std::move(adjustKey));
 
     return meter;

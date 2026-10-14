@@ -167,10 +167,11 @@ public:
    * Registration failures are also recorded in a live UI collector, without stopping the scene.
    * Internal callback transfers are checked; constructing the by-value argument before entry may throw.
    */
-  template <class Callback>
+  template <class Callback = detail::QuitCommand>
     requires(std::same_as<T, Button> && portals::detail::ManagedAction<Callback, ClickEvent>)
   std::expected<void, ManagedError> onClick(Callback action,
                                             std::source_location origin = std::source_location::current()) const {
+    detail::commandOrigin(action, origin);
     auto observation = target();
     auto scene = detail::eventScene(observation);
 
@@ -299,6 +300,7 @@ struct ClickAccess {
   template <class Callback>
   static std::expected<void, ManagedError> attach(ManagedScene &scene, const Ref<Button> &reference, Callback callback,
                                                   std::source_location origin) {
+    commandOrigin(callback, origin);
     auto owner = eventScene(reference.target());
 
     if (!owner) {
@@ -311,7 +313,7 @@ struct ClickAccess {
     }
 
     try {
-      return scene.composeButtonClick(reference.node(), ManagedScene::clickAdapter(std::move(callback)), origin);
+      return scene.composeButtonClick(reference.node(), scene.clickAdapter(std::move(callback)), origin);
     } catch (const std::bad_alloc &) {
       return std::unexpected(ManagedError{ManagedPhase::BIND, reference.node().id(), TreeError::NO_MEMORY, {}, {}});
     } catch (...) {
@@ -413,7 +415,7 @@ public:
    * @param callback Void, expected<void, TreeError> or EditorCommandResult action.
    * @return Consuming button recipe using one existing managed binding; duplicates fail at mount.
    */
-  template <class Callback>
+  template <class Callback = detail::QuitCommand>
     requires(std::same_as<T, Button> && portals::detail::ManagedAction<Callback, ClickEvent>)
   Description &&onClick(Callback callback) && {
     return std::move(*this).setup([callback = std::move(callback)](ManagedScene &scene, Node<T> node) mutable {
@@ -1640,7 +1642,7 @@ auto configure(Callback callback, std::source_location origin = std::source_loca
  * @param origin Stage registration call site.
  * @return Consuming stage forwarding to Scene::onKey and its existing bounded composition.
  */
-template <class Callback>
+template <class Callback = detail::QuitCommand>
   requires portals::detail::ManagedAction<Callback, KeyEvent>
 auto onKey(KeyEvent chord, Callback callback, std::source_location origin = std::source_location::current()) {
   return detail::SceneStage{[chord, callback = std::move(callback), origin](Scene &owner) mutable {
@@ -1766,7 +1768,7 @@ inline KeySelection pressRepeat(std::initializer_list<key::Chord> source, Shortc
  * construction.
  * @return Consuming stage using the existing bounded newest-first registration.
  */
-template <class Callback>
+template <class Callback = detail::QuitCommand>
   requires portals::detail::ManagedAction<Callback, KeyEvent>
 auto onKey(KeySelection selection, Callback callback, std::source_location origin = std::source_location::current()) {
   return detail::SceneStage{
@@ -1786,7 +1788,7 @@ auto onKey(KeySelection selection, Callback callback, std::source_location origi
  *
  * @return Consuming stage registering one atomic owning alternative set in the existing input slot.
  */
-template <portals::detail::ShortcutSource Source, class Callback>
+template <portals::detail::ShortcutSource Source, class Callback = detail::QuitCommand>
   requires portals::detail::ManagedAction<Callback, KeyEvent>
 auto onKey(Source &&source, Callback callback, std::source_location origin = std::source_location::current()) {
   auto shortcut =
@@ -1807,7 +1809,7 @@ auto onKey(Source &&source, Callback callback, std::source_location origin = std
  * @param origin Registration site preserved across deferred configuration.
  * @return Consuming stage registering one atomic owning alternative set in the existing input slot.
  */
-template <portals::detail::ShortcutSource Source, class Callback>
+template <portals::detail::ShortcutSource Source, class Callback = detail::QuitCommand>
   requires portals::detail::ManagedAction<Callback, KeyEvent>
 auto onKey(Source &&source, Callback callback, ShortcutBehavior behavior, ShortcutOptions options = {},
            std::source_location origin = std::source_location::current()) {
@@ -1826,7 +1828,7 @@ auto onKey(Source &&source, Callback callback, ShortcutBehavior behavior, Shortc
  * @param origin Registration site preserved across deferred configuration.
  * @return Consuming stage registering one atomic owning alternative set in the existing input slot.
  */
-template <class Callback>
+template <class Callback = detail::QuitCommand>
   requires portals::detail::ManagedAction<Callback, KeyEvent>
 auto onKey(std::initializer_list<key::Chord> source, Callback callback,
            std::source_location origin = std::source_location::current()) {
@@ -1847,7 +1849,7 @@ auto onKey(std::initializer_list<key::Chord> source, Callback callback,
  * @param origin Registration site preserved across deferred configuration.
  * @return Consuming stage registering one atomic owning alternative set in the existing input slot.
  */
-template <class Callback>
+template <class Callback = detail::QuitCommand>
   requires portals::detail::ManagedAction<Callback, KeyEvent>
 auto onKey(std::initializer_list<key::Chord> source, Callback callback, ShortcutBehavior behavior,
            ShortcutOptions options = {}, std::source_location origin = std::source_location::current()) {
@@ -1870,7 +1872,8 @@ auto onKey(std::initializer_list<key::Chord> source, Callback callback, Shortcut
  * Runtime append affects the next event; a new binding during dispatch returns existing WOULD_BLOCK.
  * UI affinity, finite ManagedOptions limits and sticky facade failures apply. Capture construction may throw.
  */
-template <detail::ClickCallback Callback>
+template <class Callback = detail::QuitCommand>
+  requires detail::ClickCallback<Callback>
 auto onClick(Ref<Button> reference, Callback callback, std::source_location origin = std::source_location::current()) {
   return detail::SceneStage{[registration = [reference = std::move(reference), callback = std::move(callback),
                                              origin](ManagedScene &scene) mutable -> std::expected<void, ManagedError> {
@@ -1929,6 +1932,7 @@ int runApp(Factory &&factory, Setup &&setup, const RunAppOptions &options = {},
 
       {
         auto setupScope = detail::SceneAccess::setupScope(owner);
+        auto currentScope = detail::SceneAccess::currentScope(owner);
 
         try {
           if constexpr (std::same_as<std::invoke_result_t<Setup &, Scene &>, void>) {

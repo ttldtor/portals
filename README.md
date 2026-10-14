@@ -37,23 +37,25 @@ cmake --build --preset linux-gcc-debug
 
 ## A first look
 
-This function mounts a small UI into an existing `ManagedScene`. The caller must
-check the result before calling `scene.run()`. See the [gallery form source](examples/gallery/form.hpp)
-and [Getting started](docs/getting-started.md) for a complete setup.
+This complete C++23 program adds text when a button is activated and exits through
+Exit or F10. The library owns the run loop, default error reporting and terminal
+cleanup. See [declarative composition](docs/declarative-ui.md) for checked operations
+and customization.
 
 ```cpp
 #include <portals/ui.hpp>
 
-using namespace portals;
+int main() {
+  using namespace portals;
 
-std::expected<Node<Column>, ManagedError> mountGreeting(Application &app, ManagedScene &scene) {
-  return ui::mount(scene, ui::column(
-    ui::label("Hello, Portals!"),
-    ui::button("Quit", [&app]() -> std::expected<void, TreeError> {
-      app.requestStop();
+  ui::Ref<LineEdit> message;
+  ui::Ref<Button> add;
+  ui::Ref<Button> exit;
 
-      return {};
-    })));
+  auto scene = ui::scene(ui::vbox(ui::lineEdit(message, ""), ui::button(add, "Add Hello"), ui::button(exit, "Exit")));
+
+  return scene | ui::onClick(add, [message] { message.text() += "Hello!"; }) |
+         ui::onClick(exit, [] { ui::quit(); }) | ui::onKey(key::F10, ui::quit) | ui::runApp();
 }
 ```
 

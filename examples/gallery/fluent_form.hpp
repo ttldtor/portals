@@ -82,7 +82,7 @@ private:
     // The fallback preserves the original modifier-insensitive F2 and exit shortcuts.
     return owner.onInput([this, &owner](const InputEvent &event) -> std::expected<bool, ManagedError> {
       if (example::quitKey(event)) {
-        (void)scene_.quit();
+        ui::quit();
 
         return true;
       }
@@ -110,19 +110,16 @@ private:
     auto configuration = [this](ManagedScene &owner) {
       return configure(owner);
     };
-    auto quit = [this] {
-      (void)scene_.quit();
-    };
     auto form = ui::scene(std::move(factory), options);
 
     if (composition == Composition::PIPE) {
       form | ui::theme(example::THEME_PRESETS.at(theme_).make()) | ui::style(FOCUS_POLICY, {.name = "gallery-focus"}) |
-        ui::configure(std::move(configuration)) | ui::onKey(key::F10, std::move(quit));
+        ui::configure(std::move(configuration)) | ui::onKey(key::F10, ui::quit);
     } else {
       form.theme(example::THEME_PRESETS.at(theme_).make())
         .style(FOCUS_POLICY, {.name = "gallery-focus"})
         .configure(std::move(configuration))
-        .onKey(key::F10, std::move(quit));
+        .onKey(key::F10, ui::quit);
     }
 
     return std::move(form) |
@@ -132,9 +129,9 @@ private:
                            ++calls;
                          }
                        }) |
-           ui::onClick(quitButton_, [this](const ui::ClickParams &params) {
+           ui::onClick(quitButton_, [](const ui::ClickParams &params) {
              if (params.mods == InputModifiers{}) {
-               (void)scene_.quit();
+               ui::quit();
              }
            });
   }
