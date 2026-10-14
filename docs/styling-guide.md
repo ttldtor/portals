@@ -41,7 +41,8 @@ The setup fragments below assume an open, idle [scene](glossary.md#glossary-scen
 ## Write a rule
 
 ```cpp
-scene | ui::style("Button { bold: true; }");
+scene
+  | ui::style("Button { bold: true; }");
 ```
 
 `Button` is a [selector](glossary.md) for a control type.
@@ -89,11 +90,15 @@ Each layer belongs to a [tier](glossary.md), a precedence group;
 the default is `APPLICATION`. A name identifies a layer within its tier:
 
 ```cpp
-scene | ui::style("Button { min-width: 12; }", {.name = "layout"});
-scene | ui::style("LineEdit { foreground: #ff5555; }", {.name = "validation"});
-scene | ui::style("Button { background: #181c24; }", {.name = "branding"});
+scene
+  | ui::style("Button { min-width: 12; }", {.name = "layout"});
+scene
+  | ui::style("LineEdit { foreground: #ff5555; }", {.name = "validation"});
+scene
+  | ui::style("Button { background: #181c24; }", {.name = "branding"});
 
-scene | ui::style("LineEdit { foreground: #55ff55; }", {.name = "validation"});
+scene
+  | ui::style("LineEdit { foreground: #55ff55; }", {.name = "validation"});
 ```
 
 The last stage replaces the entire `validation` stylesheet. `layout` and
@@ -130,7 +135,8 @@ Install application and user layers before attaching a live theme controller.
 ## Load a stylesheet from a file
 
 ```cpp
-scene | ui::style(ui::file("themes/modern.pss"), {.name = "palette-file"});
+scene
+  | ui::style(ui::file("themes/modern.pss"), {.name = "palette-file"});
 ```
 
 `ui::style(ui::file(...))` returns an object that stores its own copy of the path.

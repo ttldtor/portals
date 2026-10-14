@@ -9,8 +9,14 @@ portals::ui::Ref<portals::LineEdit> name;
 auto model = scene.state(std::string("Ada")).value();
 portals::ui::mount(scene, portals::ui::column(
   portals::ui::lineEdit(model).reference(name),
-  portals::ui::button("Undo", [name] { return name.undo(); }),
-  portals::ui::button("Redo", [name] { return name.redo(); }))).value();
+  portals::ui::button("Undo",
+                      [name] {
+                        return name.undo();
+                      }),
+  portals::ui::button("Redo",
+                      [name] {
+                        return name.redo();
+                      }))).value();
 
 name.text() = portals::text("{} {}", "Ada", "Lovelace");
 name.text(portals::ProgrammaticChange::RESET_BASELINE) = "Loaded name";

@@ -22,7 +22,10 @@ int main() {
     ui::button(append, "Append")));
 
   return scene
-    | ui::onClick(append, [field] { field.text() += "!"; })
+    | ui::onClick(append,
+                  [field] {
+                    field.text() += "!";
+                  })
     | ui::onKey("F10", ui::quit)
     | ui::runApp();
 }
@@ -118,10 +121,11 @@ subscription and expect it to remain connected.
 For a more involved click handler:
 
 ```cpp
-scene | ui::onClick(append, [field](ui::ClickParams &params) {
-  field.text() += params.mods.has(key::SHIFT) ? "HELLO!" : "Hello!";
-  params.stop();
-});
+scene
+  | ui::onClick(append, [field](ui::ClickParams &params) {
+    field.text() += params.mods.has(key::SHIFT) ? "HELLO!" : "Hello!";
+    params.stop();
+  });
 ```
 
 `ClickParams` exposes read-only `target`, `mods`, `source` and owning original
@@ -135,10 +139,14 @@ original chain. Semantic modifiers do not identify physical left/right keys.
 These fragments assume existing callbacks `move` and `stop`:
 
 ```cpp
-scene | ui::onKey("W", move);
-scene | ui::onKey(ui::repeat("W"), move);
-scene | ui::onKey(ui::release("W"), stop);
-scene | ui::onKey(ui::pressRepeat("W"), move);
+scene
+  | ui::onKey("W", move);
+scene
+  | ui::onKey(ui::repeat("W"), move);
+scene
+  | ui::onKey(ui::release("W"), stop);
+scene
+  | ui::onKey(ui::pressRepeat("W"), move);
 ```
 
 Plain shortcut strings select PRESS; explicit helpers select actual phases.

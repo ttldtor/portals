@@ -47,14 +47,15 @@ Theme changes belong between frames on the UI thread.
 [theme tokens](glossary.md), each stored as an `RgbColor`:
 
 ```cpp
-scene | ui::theme(themeFromTokens(ThemeTokens{
-  .foreground = RgbColor{220, 225, 232},
-  .background = RgbColor{24, 28, 36},
-  .accent = RgbColor{75, 180, 220},
-  .muted = RgbColor{125, 135, 150},
-  .selection = RgbColor{45, 75, 110},
-  .heading = RgbColor{255, 200, 85}
-}));
+scene
+  | ui::theme(themeFromTokens(ThemeTokens{
+    .foreground = RgbColor{220, 225, 232},
+    .background = RgbColor{24, 28, 36},
+    .accent = RgbColor{75, 180, 220},
+    .muted = RgbColor{125, 135, 150},
+    .selection = RgbColor{45, 75, 110},
+    .heading = RgbColor{255, 200, 85}
+  }));
 ```
 
 | Token | Role |
@@ -73,10 +74,11 @@ control-specific choices. Runtime PSS v0 cannot refer to these C++ tokens by nam
 ## Preserve application styles when changing a theme
 
 ```cpp
-scene | ui::style("Button { min-width: 12; }", {.name = "layout"})
-      | ui::style("Label { bold: true; }",
-                  {.tier = StyleTier::USER, .name = "contrast"})
-      | ui::theme(gruvboxTheme());
+scene
+  | ui::style("Button { min-width: 12; }", {.name = "layout"})
+  | ui::style("Label { bold: true; }",
+    {.tier = StyleTier::USER, .name = "contrast"})
+  | ui::theme(gruvboxTheme());
 ```
 
 Theme replacement updates `THEME`. `APPLICATION` and `USER` layers stay
@@ -90,7 +92,8 @@ The repository includes `themes/modern.pss` and `themes/turbo.pss`, matching
 their C++ factories. Load their rules as an application layer:
 
 ```cpp
-scene | ui::style(ui::file("themes/modern.pss"), {.name = "palette-file"});
+scene
+  | ui::style(ui::file("themes/modern.pss"), {.name = "palette-file"});
 ```
 
 Style-source stages accept `APPLICATION` and `USER`. A palette installed there
@@ -116,7 +119,8 @@ constexpr auto THEME = sc::sheet(
 
 auto stage = ui::liveTheme(THEME);
 auto colors = stage.ref();
-scene | stage;
+scene
+  | stage;
 ```
 
 The [UI stage](glossary.md#glossary-ui-stage) is the configuration object

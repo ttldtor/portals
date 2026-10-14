@@ -44,9 +44,12 @@ int main() {
         }).id("append"));
     },
     [](ui::Scene &scene) {
-      scene | ui::theme(portals::modernTheme());
-      scene | ui::style(STYLES, {.name = "demo"}) | ui::reportOnError()
-            | ui::onKey(ui::key(portals::InputKey::F10), ui::quit);
+      scene
+        | ui::theme(portals::modernTheme());
+      scene
+        | ui::style(STYLES, {.name = "demo"})
+        | ui::reportOnError()
+        | ui::onKey(ui::key(portals::InputKey::F10), ui::quit);
     });
 }
 ~~~
@@ -159,7 +162,9 @@ inline constexpr auto TYPED = sc::compactSheet(std::array{
 ```cpp
 using namespace std::literals;
 // Intentionally invalid: an unknown property at offset 4, line 1, column 5.
-constexpr auto INVALID = sc::pss([] { return "* { missing: true; }"sv; });
+constexpr auto INVALID = sc::pss([] {
+  return "* { missing: true; }"sv;
+});
 ```
 
 Первое сообщение компилятора указывает категорию, например `Unknown PSS property`;

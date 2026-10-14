@@ -39,7 +39,10 @@ int main() {
 
   return scene
     | ui::style("Button { bold: true; }")
-    | ui::onClick(add, [message] { message.text() += "Hello!"; })
+    | ui::onClick(add,
+                  [message] {
+                    message.text() += "Hello!";
+                  })
     | ui::onKey("F10", ui::quit)
     | ui::runApp();
 }

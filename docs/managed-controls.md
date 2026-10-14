@@ -26,8 +26,9 @@ flowchart TB
 ```
 
 Create an `Application`, then `ManagedScene::create(application, options)`. The
-optional `ManagedOptions` sets positive `maxNodes` (4096 by default),
-`maxStates` (256 by default) and `maxModels` (64 by default) limits. Node entries
+optional `ManagedOptions` sets `maxNodes`, `maxStates` and `maxModels`;
+each must be greater than zero. Their defaults are 4096, 256 and 64.
+See [setting scene limits](declarative-ui.md#scene-fine-settings). Node entries
 include removed registrations until the next preparation prunes them; state
 owners remain until scene destruction, while model owners remain until close.
 Exceeding an owner budget returns a typed `TreeError::NODE_LIMIT`.
@@ -189,8 +190,9 @@ mount hooks or business callbacks.
 
 ## Bounded scene diagnostics
 
-`ManagedOptions::diagnostics` configures positive `maxErrors` (64 by default),
-`maxContexts` (8) and `maxContextBytes` (1024) limits. The scene constructs a fixed
+`ManagedOptions::diagnostics` configures `maxErrors`, `maxContexts` and
+`maxContextBytes`; each must be greater than zero. Their defaults are 64,
+8 and 1024. The scene constructs a fixed
 array of error slots and a separate overflow slot before mounting its root,
 including the empty context containers. This finite construction cost allows
 reporting without creating or moving containers, including MSVC Debug iterator

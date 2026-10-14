@@ -42,9 +42,12 @@ int main() {
         }).id("append"));
     },
     [](ui::Scene &scene) {
-      scene | ui::theme(portals::modernTheme());
-      scene | ui::style(STYLES, {.name = "demo"}) | ui::reportOnError()
-            | ui::onKey(ui::key(portals::InputKey::F10), ui::quit);
+      scene
+        | ui::theme(portals::modernTheme());
+      scene
+        | ui::style(STYLES, {.name = "demo"})
+        | ui::reportOnError()
+        | ui::onKey(ui::key(portals::InputKey::F10), ui::quit);
     });
 }
 ~~~
@@ -156,7 +159,9 @@ captureless provider returning an explicit-length `string_view`:
 ```cpp
 using namespace std::literals;
 // Intentionally invalid: an unknown property at offset 4, line 1, column 5.
-constexpr auto INVALID = sc::pss([] { return "* { missing: true; }"sv; });
+constexpr auto INVALID = sc::pss([] {
+  return "* { missing: true; }"sv;
+});
 ```
 
 The first assertion reports a fixed category such as `Unknown PSS property`;

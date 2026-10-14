@@ -20,14 +20,20 @@ int main() {
   ui::Ref<Button> add;
   ui::Ref<Button> exit;
 
-  auto scene = ui::scene(ui::vbox(ui::lineEdit(message, ""), ui::button(add, "Add Hello"), ui::button(exit, "Exit")));
+  auto scene = ui::scene(ui::vbox(
+    ui::lineEdit(message, ""),
+    ui::button(add, "Add Hello"),
+    ui::button(exit, "Exit")));
 
-  return scene | ui::style("Button { bold: true; }") |
-         ui::onClick(add,
-                     [message] {
-                       message.text() += "Hello!";
-                     }) |
-         ui::onClick(exit, [] { ui::quit(); }) | ui::onKey(key::F10, ui::quit) | ui::runApp();
+  return scene
+    | ui::style("Button { bold: true; }")
+    | ui::onClick(add,
+                  [message] {
+                    message.text() += "Hello!";
+                  })
+    | ui::onClick(exit, ui::quit)
+    | ui::onKey(key::F10, ui::quit)
+    | ui::runApp();
 }
 ```
 
@@ -168,7 +174,11 @@ auto form = ui::scene(ui::vbox(
   ui::lineEdit(field, "initial"),
   ui::button(apply, "Apply")));
 
-form | ui::onClick(apply, [field] { field.text() += "!"; });
+form
+  | ui::onClick(apply,
+                [field] {
+                  field.text() += "!";
+                });
 
 auto result = form.run();
 ```
@@ -204,7 +214,10 @@ The small pipe stages call the same methods:
 ```cpp
 auto result = ui::scene(ui::lineEdit("initial"))
   | ui::theme(StyleSheet{})
-  | ui::onKey(ui::key(InputKey::F2), [] { /* application action */ })
+  | ui::onKey(ui::key(InputKey::F2),
+                      [] {
+                        /* application action */
+                      })
   | ui::run();
 ```
 
@@ -348,7 +361,10 @@ ui::onClick(add, [message](ui::ClickParams &params) {
 followed by:
 
 ```cpp
-ui::onClick(add, [message] { message.text() += "Hello!"; })
+ui::onClick(add,
+            [message] {
+              message.text() += "Hello!";
+            })
 ```
 
 Without Shift the first callback leaves the chain running and the second appends
@@ -452,10 +468,14 @@ registration, composition, exact errors and cleanup without opening a terminal.
 Key aliases and chords use semantic modifiers supplied by the terminal decoder:
 
 ```cpp
-scene | ui::onKey(key::F10, ui::quit(scene.ref()));
-scene | ui::onKey(key::ALT + key::Q, ui::quit(scene.ref()));
-scene | ui::onKey({key::F10, key::ALT + key::Q}, ui::quit(scene.ref()));
-scene | ui::onKey("F10 | Alt + Q", ui::quit(scene.ref()));
+scene
+  | ui::onKey(key::F10, ui::quit(scene.ref()));
+scene
+  | ui::onKey(key::ALT + key::Q, ui::quit(scene.ref()));
+scene
+  | ui::onKey({key::F10, key::ALT + key::Q}, ui::quit(scene.ref()));
+scene
+  | ui::onKey("F10 | Alt + Q", ui::quit(scene.ref()));
 ```
 
 These are alternative registrations shown independently. Choose one form for
@@ -481,9 +501,12 @@ replace existing handlers. Facade errors reach the existing scene diagnostics.
 Multi-stroke commands use the same registration path:
 
 ```cpp
-scene | ui::onKey("Ctrl + K + K", action);
-scene | ui::onKey("Ctrl + K, K", otherAction);
-scene | ui::onKey(ui::release("A, B"), releasedAction);
+scene
+  | ui::onKey("Ctrl + K + K", action);
+scene
+  | ui::onKey("Ctrl + K, K", otherAction);
+scene
+  | ui::onKey(ui::release("A, B"), releasedAction);
 ```
 
 `Ctrl+K+K` means Ctrl+K followed by Ctrl+K. All modifiers in one plus-separated
@@ -617,7 +640,10 @@ auto description = ui::vbox(
   ui::label("Prices"),
   ui::hbox(
     ui::virtualTable(model, columns).reference(table),
-    ui::chart(model, [](const Ohlc &value) { return std::optional{value}; })));
+    ui::chart(model,
+              [](const Ohlc &value) {
+                return std::optional{value};
+              })));
 
 take(ui::mount(scene, std::move(description)));
 ```
@@ -777,8 +803,14 @@ take(ui::mount(scene, std::move(form)));
 take(apply.onClick([status](const ClickEvent &click) {
   status.text() = click.modifiers.shift ? "Apply with Shift" : "Applied";
 }));
-take(scene.onKey(ui::key(InputKey::F2), [status] { status.text() = "F2"; }));
-take(scene.onKey(ui::key(InputKey::F10), [&app] { app.requestStop(); }));
+take(scene.onKey(ui::key(InputKey::F2),
+                         [status] {
+                           status.text() = "F2";
+                         }));
+take(scene.onKey(ui::key(InputKey::F10),
+                         [&app] {
+                           app.requestStop();
+                         }));
 ```
 
 Callbacks can be supplied directly to `ui::button(ref, caption, callback)` or a
@@ -827,3 +859,92 @@ interceptor, then standard routing. Errors use the existing input failure path.
 Direct `onInput` replaces the whole chain. `ManagedOptions::maxKeyHandlers`
 (default 64, positive) bounds this composition; limit or allocation failure
 preserves the previous chain. There is no separate hotkey registry or event loop.
+
+## Fine scene settings {#scene-fine-settings}
+
+<details>
+<summary>Set scene limits</summary>
+
+Set `ui::SceneOptions` before creating the scene and pass it as the second
+argument to `ui::scene`. The options are copied into the scene and checked
+during preparation. There is no API for changing these limits on an existing scene.
+
+| Field in `options.managed` | Meaning | Default |
+|---|---|---|
+| `maxNodes` | Retained managed node registrations, including removals awaiting preparation | 4096 |
+| `maxStates` | Scene-owned properties | 256 |
+| `maxModels` | Scene-owned models | 64 |
+| `diagnostics.maxErrors` | Retained diagnostic records | 64 |
+| `diagnostics.maxContexts` | Causal contexts retained per error | 8 |
+| `diagnostics.maxContextBytes` | Total label bytes retained per error | 1024 |
+
+All six limits must be greater than zero. Increase them when your form needs
+more managed objects or more diagnostic detail. `maxErrors` limits stored
+history; it does not specify how many errors the application tolerates.
+On history overflow, the oldest records remain and `droppedErrors` increases.
+
+```cpp
+#include <portals/ui.hpp>
+
+int main() {
+  using namespace portals;
+
+  ui::SceneOptions options;
+  options.managed.maxNodes = 8192;
+  options.managed.maxStates = 512;
+  options.managed.maxModels = 128;
+  options.managed.diagnostics.maxErrors = 128;
+  options.managed.diagnostics.maxContexts = 16;
+  options.managed.diagnostics.maxContextBytes = 2048;
+
+  auto scene = ui::scene(ui::label("F10: quit"), options);
+
+  return scene
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+</details>
+
+<details>
+<summary>Set handler limits and sequence timeout</summary>
+
+These options are also passed to `ui::scene` before creation. Change them
+when a form has many handlers or users need more time between shortcut strokes.
+
+| Field | Meaning | Default |
+|---|---|---|
+| `maxConfigurations` | Queued configure/key/click operations before preparation | 64 |
+| `managed.maxKeyHandlers` | Owning key registrations | 64 |
+| `managed.maxClickHandlers` | Pipe click handlers across the scene | 256 |
+| `managed.maxClickHandlersPerNode` | Pipe click handlers on one button | 64 |
+| `managed.keySequenceTimeout` | Inactivity between shortcut strokes, milliseconds | 1000 |
+
+Each value must be greater than zero. The example allows two seconds between
+the strokes of `Ctrl+K, K`. The comma denotes two successive strokes; see
+[shortcut syntax](input.md).
+
+```cpp
+#include <portals/ui.hpp>
+
+int main() {
+  using namespace portals;
+
+  ui::SceneOptions options;
+  options.maxConfigurations = 128;
+  options.managed.maxKeyHandlers = 128;
+  options.managed.maxClickHandlers = 512;
+  options.managed.maxClickHandlersPerNode = 128;
+  options.managed.keySequenceTimeout = 2000;
+
+  auto scene = ui::scene(ui::label("Ctrl+K, K or F10: quit"), options);
+
+  return scene
+    | ui::onKey("Ctrl + K, K", ui::quit)
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+</details>

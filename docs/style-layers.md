@@ -143,3 +143,38 @@ embedded resources are **TBD — M5/U65**; expanded parameters/expressions are
 **TBD — M5/U65/U128**. This does not add a resolver or accumulate irreversible
 computed-style patches. Existing `ui::style(ui::file(...))` defaults to
 `APPLICATION`, not the future theme-loading operation. See [themes](themes-guide.md).
+
+<details>
+<summary>Set style-layer limits</summary>
+
+Pass `StyleLayerOptions` when enabling layers for the first time. Defaults
+are 16 layers, 1024 rules, 6144 declarations and 1 MiB of logically counted
+payload. The two permanent base layers count toward the layer limit.
+Use at least two layer slots and values greater than zero for the other limits.
+
+The example doubles these defaults. `maxOwnedBytes` counts the logical payload
+of installed layers; it is not a limit on the application's total memory.
+Changing budgets through a repeated `styleLayers` call is rejected.
+
+```cpp
+#include <portals/ui_style.hpp>
+
+int main() {
+  using namespace portals;
+
+  StyleLayerOptions layers;
+  layers.maxLayers = 32;
+  layers.maxRules = 2048;
+  layers.maxDeclarations = 12288;
+  layers.maxOwnedBytes = 2 * 1024 * 1024;
+
+  auto scene = ui::scene(ui::label("F10: quit"));
+
+  return scene
+    | ui::styleLayers(layers)
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+</details>

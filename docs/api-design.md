@@ -185,7 +185,10 @@ public:
 };
 
 auto meter = TRY(app.root().emplace<Meter>(MeterOptions{.range = range}));
-TRY(app.ui().edit(meter, [](Meter& value) { return value.set_level(0.6); }));
+TRY(app.ui().edit(meter,
+                  [](Meter& value) {
+                    return value.set_level(0.6);
+                  }));
 ```
 
 The external application supplies this class without editing core. The tree
@@ -214,7 +217,9 @@ stale handle access and destructor after active callback teardown.
 ```cpp
 auto game = std::make_shared<GameState>();
 auto canvas = TRY(app.root().emplace<Canvas>(CanvasOptions{
-  .paint = [game](CanvasContext& draw) { return draw_game(draw, *game); }}));
+  .paint = [game](CanvasContext& draw) {
+    return draw_game(draw, *game);
+  }}));
 auto scope = TRY(app.ui().make_node_scope(canvas));
 auto input = TRY(app.ui().connect(scope, canvas.actions(),
   [&, game, canvas](const Action& action) {

@@ -18,7 +18,10 @@ int main() {
   if (!text) return 1;
   auto button = app->tree().emplace<portals::Button>(app->root(), std::move(*text));
   if (!button) return 1;
-  auto quit = portals::bindButton(app->router(), *button, [&] { app->requestStop(); });
+  auto quit = portals::bindButton(app->router(), *button,
+                                              [&] {
+                                                app->requestStop();
+                                              });
   if (!quit) return 1;
   portals::ApplicationScene scene;
   auto result = app->run(scene);
