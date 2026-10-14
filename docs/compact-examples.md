@@ -203,8 +203,10 @@ Their shared `example::take` is a fail-fast demonstration helper: it turns setup
 failure into a generic exception and does not preserve the complete original error.
 It is not part of the public API or a recommended production error policy. Public
 factories return their typed results so applications can report the original cause.
-General builder error composition remains future work; this step does not add
-TRY macros, an exception-based public error protocol, or a result coroutine runtime.
+This comparison predates the current checked setup boundary; see
+[construction and setup reporting](declarative-ui.md) for `runApp(factory, setup)`.
+The comparison does not add TRY macros, an exception-based public error protocol,
+or a result coroutine runtime.
 The three interactive programs are also compiled and run as relocated installed
 consumers. Their CLI options, exit codes and defaults are documented on the
 [examples page](examples.md). This step does not implement runtime reconciliation,
@@ -267,9 +269,10 @@ code and customization. Nonblank, noncomment
 line counts changed as follows (text counting, not a complexity metric): gallery
 59 to 59, dashboard 423 to 438, custom meter 140 to 119, installed composed form
 167 to 165. Dashboard removes manual mount/binding bookkeeping but adds explicit
-observers and readable descriptions; its complete file became longer. General
-layout shorthand and resource/i18n text are future work, not hidden helpers in
-this comparison.
+observers and readable descriptions; its complete file became longer. These counts describe this comparison snapshot.
+Current composition includes `hbox`/`vbox` aliases; see
+[declarative composition](declarative-ui.md) for the current syntax.
+Resource/i18n text is outside this comparison and is not supplied by its helpers.
 
 ## Complete owning scene examples
 

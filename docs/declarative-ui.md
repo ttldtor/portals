@@ -455,7 +455,7 @@ new chain is rejected rather than silently replacing application behavior.
 The [complete minimal source](../examples/click_handlers/main.cpp) is compiled
 against the installed package. The headless click consumer separately checks
 registration, composition, exact errors and cleanup without opening a terminal.
-## Short key bindings
+## Short key bindings {#short-key-bindings}
 
 Key aliases and chords use semantic modifiers supplied by the terminal decoder:
 

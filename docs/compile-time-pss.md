@@ -1,5 +1,9 @@
 # PSS strings at compile time and runtime {#compile_time_pss}
 
+Experimental compile-time chapter. For ordinary application code, start with
+[runtime PSS and declarative UI](styling-guide.md). This API is already
+implemented; experimental status does not mean TBD.
+
 Include `<portals/style_pss.hpp>` for the bounded C++23 string frontend and
 owning source metadata. Both frontends use the same PSS v0 parser and the
 existing [style cascade](styles.md). Materialization and mounting still happen

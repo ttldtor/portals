@@ -1,105 +1,88 @@
-# Portals documentation
+# Portals: short library guide
 
-The [online documentation and API reference](https://ttldtor.github.io/portals/)
-contains the guides below and the generated public API reference.
+[Русская версия](ru/index.md)
 
-Start here to build an application with Portals. The library is under
-development; managed and declarative APIs are experimental. Read the
-[current limitations](limitations.md) before relying on a platform or
-lifecycle guarantee.
+Portals is a C++23 retained terminal UI library under development.
+The declarative `ui` API is the primary entry point for application code.
+This page is the short reading guide; the [reference map](reference-map.md)
+contains the complete topic list and API reading paths.
 
-See [release notes](../ReleaseNotes.md) for changes by version and publication
-status.
+## Start with the declarative API
 
-## First visit: read in this order
+Declare the control tree, then attach style and event handlers with pipe stages.
+The button appends text to the editor; F10 requests an orderly exit.
 
-1. [Getting started](getting-started.md): build Portals and launch the gallery.
-2. [Runnable examples](examples.md): controls, options and complete source
-   examples. Try the gallery before the larger dashboard.
-3. [Declarative composition](declarative-ui.md): describe an ordinary form
-   with `ui` and understand what its state and callbacks own.
-4. [Managed controls](managed-controls.md): lifecycle, typed failures and
-   custom widgets. Read this when a form needs more customization.
-5. [Installed CMake package](package.md): link Portals into your own project.
+```cpp
+#include <portals/ui_style.hpp>
 
-You do not need to read the renderer, scheduler or every API declaration
-before writing a form. Consult the chapters below as needed.
+int main() {
+  using namespace portals;
 
-## Build an application
+  ui::Ref<LineEdit> message;
+  ui::Ref<Button> add;
 
-| Need | Read |
-| --- | --- |
-| Build constant-evaluated form structure | [Compile-time scene descriptions](compile-time-scenes.md) |
-| Compose a form and manage its lifetime | [Descriptions](declarative-ui.md), [managed controls](managed-controls.md), [application runner](application.md) |
-| Choose and arrange controls | [Basic controls](controls.md), [LineEdit](line-edit.md), [Row and Column](layout.md), [Grid and Overlay](grid.md) |
-| Apply colors and themes | [Styles and themes](styles.md) |
-| Build static style rules and update live typed parameters | [Compile-time styles](compile-time-styles.md) |
-| Use one PSS grammar at compile time and runtime | [Compile-time PSS](compile-time-pss.md) |
-| Await timer and provider results with UI-owned coroutines | [UI coroutines](ui-coroutines.md) |
-| Connect state and data | [Properties](property.md), [immutable models](model.md), [bounded queries](model-queries.md) |
-| Display large datasets | [Layout-driven preparation](virtual-preparation.md), [virtual lists](virtual-list.md), [virtual tables](virtual-table.md), [scrolling](scroll.md), [charts](chart.md) |
-| Write shorter checked text and typed columns | [Compact examples](compact-examples.md) |
-| Change captions and editor drafts through observing references | [Text properties](text-property.md) |
-| Explain an action that did nothing | [Diagnostics](diagnostics.md), [terminal probe](terminal-probe.md) |
-| Keep an existing streaming MarketDepthModelSample building | [Minimal legacy compatibility](legacy.md) |
+  auto scene = ui::scene(ui::vbox(
+    ui::label("Greeting"),
+    ui::lineEdit(message, ""),
+    ui::button(add, "Add Hello")));
 
-For theme switching that preserves application and user overrides, see
-[style layers](style-layers.md).
+  return scene
+    | ui::style("Button { bold: true; }")
+    | ui::onClick(add, [message] { message.text() += "Hello!"; })
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
 
-## Understand the core
+The runner attempts terminal cleanup and reports failures. This compact form
+constructs the recipe before `runApp`; use the factory-based overload when
+construction also needs its checked error boundary. The exit command resolves the active scene inside its admitted callback.
+An explicit `SceneRef` remains available when an action must target a named scene.
+[Declarative composition](declarative-ui.md) explains callbacks, setup errors
+and the lower-level typed `run()` result.
 
-Read [architecture](architecture.md) first for component and event-flow
-diagrams. These chapters describe the retained core and its low-level contracts.
+## Build and run
 
-- Ownership and events: [widget tree](widget-tree.md), [focus and routing](focus.md),
-  [scheduler](scheduler.md).
-- Text and coordinates: [UTF-8 and cell width](text.md), [geometry](geometry.md).
-- Owning low-level edit history: [text history](text-history.md).
-- Undo editor text and configure read-only or history shortcuts: [editor history](editor-history.md).
-- Try three editor confirmation modes: [editor history demo](editor-history-demo.md).
-- Input and output: [input decoder](input.md), [terminal session](terminal.md),
-  [cell buffer](cell-buffer.md), [renderer](render.md), [diff and output](diff.md).
+Use an x64 Developer PowerShell for Visual Studio on Windows:
 
-## API reference
+```powershell
+cmake --preset windows-msvc-debug
+cmake --build --preset windows-msvc-debug
+./build/windows-msvc-debug/examples/gallery/portals_gallery
+```
 
-The generated HTML site has a separate **API reference** menu for types,
-concepts, namespaces, members and headers. In a checkout, public contracts
-live under `include/portals`; start with `ui.hpp`, `managed.hpp` and
-`application.hpp` for ordinary application code. See
-[getting started](getting-started.md) to build
-and open the complete reference locally.
+On Linux use `linux-gcc-debug` and the matching build directory.
+[Getting started](getting-started.md) covers compiler requirements, tests and local HTML help.
 
-## Develop and evaluate Portals
+## What is available
 
-The [contributor guide](development.md) collects tools, experiments, documentation
-maintenance and dependency notices.
+- Forms: Label, Button, CheckBox, LineEdit, Row/Column, Grid/Overlay and observing references.
+- Data: immutable models, virtual lists/tables, scrolling and charts.
+- Styles: themes, style layers and compile-time/runtime PSS.
+- Async: optional, bounded UI coroutines on the existing Scheduler.
+- Input: shortcut strings, alternatives, sequences and explicit phase selectors.
+  Native delivery depends on the backend; Kitty negotiation and standalone modifier keys are not implemented in this version.
+- Errors: live `onError` reactions and a separate final report after cleanup;
+  no built-in diagnostic indicator or panel is provided yet.
 
-See [releasing](releasing.md) for tags, release candidates, artifacts and
-documentation deployment through GitHub Actions.
+These APIs are evolving. Read [limitations](limitations.md) for qualified
+platforms and the exact runtime boundaries.
 
-- [Testing](testing.md) and [fuzzing](../fuzz/README.md): correctness tools.
-- [Managed API measurements](managed-performance.md): reproducible costs and
-  known scaling limits, not a promise of linear performance.
-- [API design scenarios](api-design.md) and the
-  [module experiment](../experiments/module-spike/README.md): design/experiment
-  material, not the recommended first application or a stable API contract.
-- Dependency notices: [utf8proc](../vendor/utf8proc/README.md) and
-  [Textual palette attribution](../vendor/textual/README.md).
-  [Private doctest dependency](../vendor/doctest/README.md) is used only by tests.
+## User guides
 
-## Reading on GitHub and as HTML
+[Contents and subject index](guides.md) · [Glossary](glossary.md)
 
-For supplemental engineering measurements, see [source compactness](compactness.md)
-and [cognitive complexity and performance evidence](quality.md). These reports
-support review; they do not replace behavioral tests or decide API acceptance.
+| Task | Guide |
+|---|---|
+| Compose a form and handle errors | [Declarative UI](declarative-ui.md) |
+| Prepare styles and themes | [Styling guide](styling-guide.md), [themes guide](themes-guide.md) |
+| Bind state and handle events | [Bindings and events](bindings-guide.md) |
+| Load scene text/files (TBD — M1/U84) | [Scene loading](scene-loading-guide.md) |
+| Bind keys and understand input phases | [Input](input.md) |
+| Use an existing CMake project | [Package](package.md) |
+| Understand ownership and frame flow | [Architecture](architecture.md) |
+| Find another topic or API declaration | [Reference map](reference-map.md) |
 
-This index and its relative Markdown links work in a checkout and on GitHub.
-Complete example sections link to the real, compiled source files. Their
-Doxygen `\include` lines expand into numbered listings in generated HTML;
-GitHub shows those lines literally, so use the source links there. Header
-labels such as `{#examples}` are Doxygen identifiers, not part of a title.
-
-The HTML site adds structured navigation and API reference to the same guides.
-It is generated into a build directory, not maintained as a second copy.
-A future GitHub Pages deployment can publish that directory. This repository
-does not assume an existing hosted documentation URL.
+[Runnable examples](examples.md) link to complete source programs.
+[Release notes](../ReleaseNotes.md) record changes by version; design sketches
+and measurement comparisons describe their own dated scope.

@@ -5,16 +5,36 @@
   <navindex>
     <tab type="mainpage" visible="yes" title="Documentation home"/>
     <tab type="usergroup" title="1. Start here">
+      <tab type="user" title="Declarative composition" url="@ref docs/declarative-ui.md"/>
+      <tab type="user" title="User guides and contents" url="@ref docs/guides.md"/>
+      <tab type="user" title="Glossary" url="@ref docs/glossary.md"/>
+      <tab type="user" title="Reference map" url="@ref docs/reference-map.md"/>
       <tab type="user" title="Getting started" url="@ref docs/getting-started.md"/>
       <tab type="user" title="Runnable examples" url="@ref docs/examples.md"/>
-      <tab type="user" title="Declarative composition" url="@ref docs/declarative-ui.md"/>
-      <tab type="user" title="Compile-time scenes" url="@ref docs/compile-time-scenes.md"/>
       <tab type="user" title="Managed controls" url="@ref docs/managed-controls.md"/>
       <tab type="user" title="Use the installed package" url="@ref docs/package.md"/>
       <tab type="user" title="Current limitations" url="@ref docs/limitations.md"/>
       <tab type="user" title="Release notes" url="@ref ReleaseNotes.md"/>
     </tab>
+    <tab type="usergroup" title="Русские гайды">
+      <tab type="user" title="Краткое руководство" url="@ref docs/ru/index.md"/>
+      <tab type="user" title="Содержание и индекс" url="@ref docs/ru/guides.md"/>
+      <tab type="user" title="Глоссарий" url="@ref docs/ru/glossary.md"/>
+      <tab type="user" title="Стили и PSS" url="@ref docs/ru/styling-guide.md"/>
+      <tab type="user" title="Темы" url="@ref docs/ru/themes-guide.md"/>
+      <tab type="user" title="Биндинги и события" url="@ref docs/ru/bindings-guide.md"/>
+      <tab type="user" title="Слои стилей" url="@ref docs/ru/style-layers.md"/>
+      <tab type="usergroup" title="Экспериментальные compile-time варианты">
+        <tab type="user" title="Compile-time стили" url="@ref docs/ru/compile-time-styles.md"/>
+        <tab type="user" title="Compile-time PSS" url="@ref docs/ru/compile-time-pss.md"/>
+      </tab>
+      <tab type="user" title="Загрузка сцен (TBD)" url="@ref docs/ru/scene-loading-guide.md"/>
+    </tab>
     <tab type="usergroup" title="2. Build an application">
+      <tab type="user" title="Styling guide" url="@ref docs/styling-guide.md"/>
+      <tab type="user" title="Themes guide" url="@ref docs/themes-guide.md"/>
+      <tab type="user" title="Bindings and events" url="@ref docs/bindings-guide.md"/>
+      <tab type="user" title="Scene loading (TBD)" url="@ref docs/scene-loading-guide.md"/>
       <tab type="user" title="Application runner" url="@ref docs/application.md"/>
       <tab type="usergroup" title="Controls and layout">
         <tab type="user" title="Basic controls" url="@ref docs/controls.md"/>
@@ -25,9 +45,7 @@
         <tab type="user" title="Row and Column" url="@ref docs/layout.md"/>
         <tab type="user" title="Grid and Overlay" url="@ref docs/grid.md"/>
         <tab type="user" title="Styles and themes" url="@ref docs/styles.md"/>
-        <tab type="user" title="Compile-time styles" url="@ref docs/compile-time-styles.md"/>
         <tab type="user" title="Style layers" url="@ref docs/style-layers.md"/>
-        <tab type="user" title="PSS strings and provenance" url="@ref docs/compile-time-pss.md"/>
       </tab>
       <tab type="usergroup" title="State and data">
         <tab type="user" title="Properties" url="@ref docs/property.md"/>
@@ -55,6 +73,11 @@
       <tab type="user" title="Cell buffer" url="@ref docs/cell-buffer.md"/>
       <tab type="user" title="Renderer" url="@ref docs/render.md"/>
       <tab type="user" title="Diff and output" url="@ref docs/diff.md"/>
+    </tab>
+    <tab type="usergroup" title="Experimental compile-time alternatives">
+      <tab type="user" title="Compile-time scenes" url="@ref docs/compile-time-scenes.md"/>
+      <tab type="user" title="Typed styles" url="@ref docs/compile-time-styles.md"/>
+      <tab type="user" title="Compile-time PSS" url="@ref docs/compile-time-pss.md"/>
     </tab>
     <tab type="usergroup" title="4. API reference">
       <tab type="namespaces" visible="yes" title="Namespaces">

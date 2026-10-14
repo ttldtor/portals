@@ -6,13 +6,47 @@
 [![License: BSL 1.0](https://img.shields.io/badge/License-BSL--1.0-blue.svg)](LICENSE.txt)
 
 Portals is a **C++23 retained terminal UI library**, currently under development.
-It provides a static core for applications with retained widgets, layouts,
-managed controls, virtual lists and tables, and charts. The API and ABI are
+Start with the declarative `ui` API to compose forms, bind events and run scenes.
+The retained core provides widgets, layouts, managed controls, virtual lists and
+tables, and charts. The API and ABI are
 evolving; see the [current limitations](docs/limitations.md) before depending
 on platform or lifecycle guarantees.
 
 Read the [online documentation and API reference](https://ttldtor.github.io/portals/)
 for guides, runnable examples, and public API contracts.
+
+## Declarative API
+
+Declare the control tree, style and event handlers in one composition.
+The button appends text; F10 requests an orderly exit:
+
+```cpp
+#include <portals/ui_style.hpp>
+
+int main() {
+  using namespace portals;
+
+  ui::Ref<LineEdit> message;
+  ui::Ref<Button> add;
+
+  auto scene = ui::scene(ui::vbox(
+    ui::label("Greeting"),
+    ui::lineEdit(message, ""),
+    ui::button(add, "Add Hello")));
+
+  return scene
+    | ui::style("Button { bold: true; }")
+    | ui::onClick(add, [message] { message.text() += "Hello!"; })
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+This compact form constructs the recipe before `runApp`; the
+[factory-based runner](docs/declarative-ui.md) also guards recipe construction.
+
+Start with the [short library guide](docs/index.md), then follow its links for
+input, error reporting and ownership contracts.
 
 ## Quick start
 
@@ -35,34 +69,16 @@ cmake --build --preset linux-gcc-debug
 ./build/linux-gcc-debug/examples/gallery/portals_gallery
 ```
 
-## A first look
-
-This complete C++23 program adds text when a button is activated and exits through
-Exit or F10. The library owns the run loop, default error reporting and terminal
-cleanup. See [declarative composition](docs/declarative-ui.md) for checked operations
-and customization.
-
-```cpp
-#include <portals/ui.hpp>
-
-int main() {
-  using namespace portals;
-
-  ui::Ref<LineEdit> message;
-  ui::Ref<Button> add;
-  ui::Ref<Button> exit;
-
-  auto scene = ui::scene(ui::vbox(ui::lineEdit(message, ""), ui::button(add, "Add Hello"), ui::button(exit, "Exit")));
-
-  return scene | ui::onClick(add, [message] { message.text() += "Hello!"; }) |
-         ui::onClick(exit, [] { ui::quit(); }) | ui::onKey(key::F10, ui::quit) | ui::runApp();
-}
-```
-
 ## Documentation
 
+[Русские гайды](docs/ru/guides.md) · [Краткое руководство](docs/ru/index.md)
+
 - [Online documentation and API reference](https://ttldtor.github.io/portals/) — published through GitHub Actions.
-- [Documentation guide](docs/index.md) — reading order and topic map.
+- [Short library guide](docs/index.md) — declarative API first.
+- [User guides](docs/guides.md) — contents, subject index and planned milestones.
+- [Glossary](docs/glossary.md) — terms and ownership distinctions.
+- [Declarative UI](docs/declarative-ui.md) — composition, events and scene lifecycle.
+- [Reference map](docs/reference-map.md) — complete topic map.
 - [Getting started](docs/getting-started.md) — build, run examples, and generate local HTML help.
 - [Runnable examples](docs/examples.md) — gallery, dashboard, custom widgets, and options.
 - [Architecture](docs/architecture.md) — ownership and event flow.
