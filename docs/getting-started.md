@@ -1,6 +1,6 @@
 # Getting started {#getting-started}
 
-Portals provides a C++23 static library and four runnable terminal examples.
+Portals provides a C++23 static library and runnable terminal examples.
 Start with the gallery, then use the dashboard or custom widget to explore the
 same [Application runner](application.md). The [architecture](architecture.md)
 explains ownership and data flow; [limitations](limitations.md) defines the
@@ -70,33 +70,31 @@ establish physical display compatibility or native restoration.
 
 ## Your own main
 
-Start with [declarative composition](declarative-ui.md) for an ordinary form.
-The gallery's `Form` owns a `ManagedScene`, which retains its state, standard
-bindings and presentation adapters. The `Application` must outlive that form.
-The interactive path in `examples/gallery/main.cpp` is:
+Start with the compact declarative example in the [short library guide](index.md).
+Its runner executes the scene and reports failure after attempted cleanup;
+the recipe is constructed before the final `runApp` stage. Use the factory-based
+`ui::runApp(factory, setup)` overload when recipe construction also needs the
+checked boundary. [Declarative composition](declarative-ui.md) documents these
+construction and reporting boundaries.
+
+The gallery uses the same exit/report policy through its owning `Form`:
 
 ```cpp
 auto app = example::take(portals::Application::create());
 gallery::Form form(*app);
 
-return example::report(form.run());
+return form.runApp();
 ```
 
-This excerpt uses example helpers, not additional public APIs:
-`example::take` throws on a failed `expected`; main catches construction
-failures. `example::report` handles the run result after restoration. See
-`examples/gallery/form.hpp` for the complete form description. Its `onInput`
-adapter handles global commands; the scene manages standard presentation and
-bindings. [Managed controls](managed-controls.md) explains custom adapters.
+`example::take` is an example helper, not public API. See the complete
+[gallery source](../examples/gallery/main.cpp) for CLI and check-mode handling.
+For embedding with an explicit result instead of the standard final reporter,
+use typed `run()` and inspect its `expected` result.
 
-For explicit low-level ownership, [Application](application.md) shows a small
-button program with an `ApplicationScene` and a retained scoped binding.
-Derive `ApplicationScene` when managing commands and preparation yourself. In
-`prepare`, synchronize bindings, pin each model once, prepare its sibling
-views at their final extents, then handle returned provider requests outside
-rendering. A custom widget implements `measure/arrange/paint`; prepare its
-owning presentation before paint. `examples/custom_widget/meter.hpp` shows
-an independent immutable model and a managed preparation adapter.
+Custom adapters and widgets are covered by [managed controls](managed-controls.md)
+and [Application](application.md); they keep explicit ownership and preparation
+contracts. The [meter source](../examples/custom_widget/meter.hpp) demonstrates
+an independent immutable model and managed preparation.
 
 ## Diagnose an action
 

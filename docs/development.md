@@ -19,7 +19,9 @@ material, not the entry point for current applications.
 
 ## Maintain the documentation
 
-Keep the [reading guide](index.md) and `docs/DoxygenLayout.xml` in agreement.
+Keep the [short library guide](index.md), [reference map](reference-map.md) and `docs/DoxygenLayout.xml` in agreement.
+The short guide describes current usage; release notes, design sketches and dated
+measurements keep their historical scope and link back to current contracts.
 Use relative Markdown links that resolve in the checkout. When embedding a
 compiled example with a Doxygen command, also provide a source link for GitHub
 readers. Build `portals_docs` and run `tools/docs/check_links.py` as described in
@@ -47,3 +49,11 @@ The [Textual notice](../vendor/textual/README.md) identifies the adapted palette
 colors and their MIT license. These notices also belong in distributed help
 and packages.
 
+
+User guides distinguish the implemented baseline from accepted direction and
+proposed syntax. Mark every unavailable feature **TBD**, with its milestone and
+owning task; an unscheduled importer or early slice keeps its schedule undecided.
+Maintain English/Russian guide pairs together. Experimental compile-time APIs
+have a separate reading path. New native examples show application code;
+replay/check/stress fixtures remain test-owned. A candidate sketch must never be
+presented as a compiling example or shipped API.

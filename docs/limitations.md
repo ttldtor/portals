@@ -72,8 +72,10 @@ See [Application](application.md), [terminal](terminal.md), [diff](diff.md) and
 
 ## Work after the MVP
 
-Coroutines, application-wide Undo/Redo, system clipboard adapters and Drag-and-Drop remain
-future work. LineEdit has an injected clipboard boundary; that is not a system
+The optional [UiAsync adapter](ui-coroutines.md) supports bounded UI coroutines
+on the existing Scheduler; it is experimental and does not provide a general
+coroutine runtime. Application-wide Undo/Redo, system clipboard adapters and
+Drag-and-Drop remain future work. LineEdit has an injected clipboard boundary; that is not a system
 clipboard implementation. The module/shared-library spike is an experiment,
 not the installed core's distribution contract. No second event loop or implicit
 provider thread is supplied by these planned extensions.

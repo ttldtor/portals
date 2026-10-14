@@ -1,5 +1,9 @@
 # Compile-time styles and live parameters {#compile_time_styles}
 
+Experimental compile-time chapter. For ordinary application code, start with
+[runtime PSS and declarative UI](styling-guide.md). This API is already
+implemented; experimental status does not mean TBD.
+
 Include `<portals/style_static.hpp>` for the experimental C++23
 `portals::style::ct` layer. It builds owning, constant-evaluated rules and
 materializes the ordinary `StyleSheet`. The existing [style engine](styles.md)

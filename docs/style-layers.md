@@ -36,7 +36,9 @@ them installed. Argument and stage construction can throw before checked entry.
 Layer configuration is explicit: call `styleLayers` before `styleLayer`.
 Repeating the same options is a no-op; changing budgets by a repeated opt-in is
 rejected. This API accepts owning sheets, not a new string grammar. Runtime PSS
-remains available through `parsePss`; compile-time PSS literals are a later step.
+remains available through `parsePss`; compile-time PSS literals are already
+available through [compile-time PSS](compile-time-pss.md). Materialize a sheet
+for this API or use the separate source-based `ui::style` frontend.
 
 ## Resolve each property
 
@@ -58,7 +60,9 @@ precedence for every selector combination.
 `DEFAULTS` and `THEME` are permanent base slots, included in the layer count.
 Widget defaults remain below them. `ManagedScene::styleDefaults` replaces the
 defaults slot; `theme` replaces only the theme slot. Application/user layer
-removal does not remove controls. Identical names within one tier are rejected.
+removal does not remove controls. Adding through `addLayer` or `styleLayer` rejects duplicate names within one tier.
+The source-based `ui::style(..., {.name = ...})` frontend instead explicitly
+upserts by tier/name; see the [styling guide](styling-guide.md).
 
 ## Change and remove layers explicitly
 
@@ -154,3 +158,12 @@ equal, masked and visible updates and materialized visible, hidden and offscreen
 controls. Its output records actual defaults/paint counts and in-memory terminal
 diff bytes. It does not measure allocator usage or hardware terminal throughput;
 offscreen controls in that workload are not virtualized.
+
+## Themes and the planned PSS source
+
+The accepted direction loads themes through the style path into existing
+`THEME`, preserving `APPLICATION`/`USER` layers. Canonical PSS and generated
+embedded resources are **TBD — M5/U65**; expanded parameters/expressions are
+**TBD — M5/U65/U128**. This does not add a resolver or accumulate irreversible
+computed-style patches. Existing `ui::style(ui::file(...))` defaults to
+`APPLICATION`, not the future theme-loading operation. See [themes](themes-guide.md).

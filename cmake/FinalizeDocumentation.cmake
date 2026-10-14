@@ -11,9 +11,15 @@ include("${CMAKE_CURRENT_LIST_DIR}/FinalizeDiagrams.cmake")
 # Ship the exact referenced sources inside the HTML tree so an offline copy
 # works without the repository or a hard-coded GitHub branch URL.
 set(example_sources
+  tests/package_consumer/style_pss_after.cpp
+  tests/package_consumer/style_pss_support.hpp
+  tests/package_consumer/text_property.cpp
+  tests/package_consumer/shortcut_sequences.cpp
+  tests/package_consumer/setup_diagnostics_before.cpp
   tests/package_consumer/pipe_contracts.cpp
   tests/package_consumer/pipe_contracts_methods.cpp
   tests/support/gallery_before.hpp
+  examples/gallery/main.cpp
   examples/gallery/form.hpp
   examples/click_handlers/main.cpp
   examples/gallery/fluent_form.hpp
@@ -42,15 +48,22 @@ foreach(source IN LISTS example_sources)
   configure_file("${CMAKE_CURRENT_LIST_DIR}/../${source}" "${HTML_DIR}/source/${source}" COPYONLY)
 endforeach()
 
-foreach(page examples managed-controls declarative-ui virtual-preparation compact_examples)
+foreach(page short-guide-ru user-guides-ru glossary-ru styling-guide-ru themes-guide-ru bindings-guide-ru scene-loading-guide-ru style_layers-ru compile_time_styles-ru compile_time_pss-ru user-guides glossary styling-guide themes-guide bindings-guide scene-loading-guide md_docs_2input getting-started examples managed-controls declarative-ui virtual-preparation compact_examples)
   set(page_file "${HTML_DIR}/${page}.html")
   file(READ "${page_file}" content)
   foreach(source IN LISTS example_sources)
     string(REPLACE "href=\"../${source}\"" "href=\"source/${source}\"" content "${content}")
+    string(REPLACE "href=\"../../${source}\"" "href=\"source/${source}\"" content "${content}")
   endforeach()
   # Keep the Markdown deep link usable on GitHub and in the generated HTML.
   string(REPLACE "href=\"declarative-ui.md#pipe-click-handlers\""
     "href=\"declarative-ui.html#pipe-click-handlers\"" content "${content}")
+  string(REPLACE "href=\"declarative-ui.md#short-key-bindings\""
+    "href=\"declarative-ui.html#short-key-bindings\"" content "${content}")
+  string(REPLACE "href=\"styling-guide.md#future-style-parameters\""
+    "href=\"styling-guide.html#future-style-parameters\"" content "${content}")
+  string(REPLACE "href=\"styling-guide.md#future-style-parameters-ru\""
+    "href=\"styling-guide-ru.html#future-style-parameters-ru\"" content "${content}")
   file(WRITE "${page_file}" "${content}")
 endforeach()
 
