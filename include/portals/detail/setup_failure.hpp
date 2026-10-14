@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include <portals/detail/current_scene.hpp>
 #include <portals/managed_diagnostics.hpp>
 
 namespace portals::ui::detail {
@@ -104,10 +105,23 @@ public:
   }
 
 private:
+  friend class SetupFailurePause;
+  CurrentSceneScope currentSceneMask_;
   std::weak_ptr<void> owner_;
   SetupFailureSink sink_{};
   const char *execution_{};
   SetupFailureScope *previous_{};
   static inline thread_local SetupFailureScope *current_{};
 };
+
+/** @tparam Callback Existing owning callback type.
+ * @param scene Weak facade identity, never an owning Scene or ManagedScene pointer.
+ * @param callback Callable transferred under the registration's checked boundary.
+ * @return Owning callback; internal transfer and retirement suspend unrelated setup attribution.
+ */
+template <class Callback> auto currentSceneCallback(std::weak_ptr<SceneAnchor> scene, Callback &&callback) {
+  SetupFailureScope mask({}, nullptr, nullptr);
+
+  return CurrentSceneCallback<std::decay_t<Callback>>(std::move(scene), std::forward<Callback>(callback));
+}
 } // namespace portals::ui::detail

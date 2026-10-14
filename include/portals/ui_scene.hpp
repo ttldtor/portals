@@ -110,6 +110,45 @@ inline QuitAction quit(SceneRef scene, std::source_location origin = std::source
   return {std::move(scene), origin};
 }
 
+/** @param origin Stop request site, retained if the current live collector rejects the command.
+ * Request stop of this thread's entered facade. With no live current scene this is a safe no-op.
+ * SceneRef::quit remains the explicit checked alternative. Untyped &quit needs overload selection.
+ */
+void quit(std::source_location origin = std::source_location::current());
+
+namespace detail {
+/** @brief Exact overload-selection target for a bare short command in existing callback templates. */
+struct QuitCommand {
+  /** @brief Source-location-aware short command signature used for exact overload selection. */
+  using Function = void (*)(std::source_location);
+
+  /** @param command Exact short command; no default arguments survive a function pointer.
+   * @param origin Implicit conversion site, replaced by an explicit registration origin when supplied.
+   */
+  QuitCommand(Function command, std::source_location origin = std::source_location::current()) noexcept
+      : command(command), origin(origin) {
+  }
+
+  /** @brief Invoke the selected short command with its retained registration origin. */
+  void operator()() const {
+    command(origin);
+  }
+
+  Function command;            ///< Exact source-location-aware command target.
+  std::source_location origin; ///< Original registration site, never an invocation-internal location.
+};
+
+/** @tparam Callback Existing owning action.
+ * @param callback Only the internal bare-command adapter receives a registration origin.
+ * @param origin Original registration site, preserved through pipe deferral.
+ */
+template <class Callback> void commandOrigin(Callback &callback, std::source_location origin) noexcept {
+  if constexpr (std::same_as<Callback, QuitCommand>) {
+    callback.origin = origin;
+  }
+}
+} // namespace detail
+
 /** @brief Checked factory/setup/run policies. */
 struct RunAppOptions {
   SceneOptions scene{};            ///< Existing facade/application/managed policies.
@@ -384,7 +423,7 @@ public:
    * @param origin Registration call site, independent of helper construction.
    * @return This owner, retaining typed helper errors in the existing collector.
    */
-  template <class Callback>
+  template <class Callback = detail::QuitCommand>
     requires portals::detail::ManagedAction<Callback, KeyEvent>
   Scene &onKey(const KeySelection &selection, Callback callback,
                std::source_location origin = std::source_location::current()) & {
@@ -399,7 +438,7 @@ public:
    * @param origin Registration call site, independent of helper construction.
    * @return Consuming owner for temporary fluent chains.
    */
-  template <class Callback>
+  template <class Callback = detail::QuitCommand>
     requires portals::detail::ManagedAction<Callback, KeyEvent>
   Scene &&onKey(const KeySelection &selection, Callback callback,
                 std::source_location origin = std::source_location::current()) && {
@@ -414,7 +453,7 @@ public:
    * @param origin Registration call site retained across lazy preparation.
    * @return This owner; delegates the existing bounded newest-match-first onKey composition.
    */
-  template <class Callback>
+  template <class Callback = detail::QuitCommand>
     requires portals::detail::ManagedAction<Callback, KeyEvent>
   Scene &onKey(KeyEvent chord, Callback callback, std::source_location origin = std::source_location::current()) & {
     onKeyImpl(chord, callback, origin);
@@ -428,7 +467,7 @@ public:
    * @param origin Registration call site.
    * @return Consuming owner for temporary fluent chains.
    */
-  template <class Callback>
+  template <class Callback = detail::QuitCommand>
     requires portals::detail::ManagedAction<Callback, KeyEvent>
   Scene &&onKey(KeyEvent chord, Callback callback, std::source_location origin = std::source_location::current()) && {
     onKeyImpl(chord, callback, origin);
@@ -443,7 +482,7 @@ public:
    * @param origin Registration call site preserved through setup and input diagnostics.
    * @return This owner. Newest registration wins through the existing managed input slot.
    */
-  template <portals::detail::ShortcutSource Source, class Callback>
+  template <portals::detail::ShortcutSource Source, class Callback = detail::QuitCommand>
     requires portals::detail::ManagedAction<Callback, KeyEvent>
   Scene &onKey(Source &&source, Callback callback, std::source_location origin = std::source_location::current()) & {
     onShortcutSourceImpl(std::forward<decltype(source)>(source), callback, {}, {}, origin);
@@ -458,7 +497,7 @@ public:
    * @param origin Registration call site preserved through setup and input diagnostics.
    * @return Consuming owner for fluent chains. Newest registration wins through the existing managed input slot.
    */
-  template <portals::detail::ShortcutSource Source, class Callback>
+  template <portals::detail::ShortcutSource Source, class Callback = detail::QuitCommand>
     requires portals::detail::ManagedAction<Callback, KeyEvent>
   Scene &&onKey(Source &&source, Callback callback, std::source_location origin = std::source_location::current()) && {
     onShortcutSourceImpl(std::forward<decltype(source)>(source), callback, {}, {}, origin);
@@ -475,7 +514,7 @@ public:
    * @param origin Registration call site preserved through setup and input diagnostics.
    * @return This owner. Newest registration wins through the existing managed input slot.
    */
-  template <portals::detail::ShortcutSource Source, class Callback>
+  template <portals::detail::ShortcutSource Source, class Callback = detail::QuitCommand>
     requires portals::detail::ManagedAction<Callback, KeyEvent>
   Scene &onKey(Source &&source, Callback callback, ShortcutBehavior behavior, ShortcutOptions options = {},
                std::source_location origin = std::source_location::current()) & {
@@ -493,7 +532,7 @@ public:
    * @param origin Registration call site preserved through setup and input diagnostics.
    * @return Consuming owner for fluent chains. Newest registration wins through the existing managed input slot.
    */
-  template <portals::detail::ShortcutSource Source, class Callback>
+  template <portals::detail::ShortcutSource Source, class Callback = detail::QuitCommand>
     requires portals::detail::ManagedAction<Callback, KeyEvent>
   Scene &&onKey(Source &&source, Callback callback, ShortcutBehavior behavior, ShortcutOptions options = {},
                 std::source_location origin = std::source_location::current()) && {
@@ -508,7 +547,7 @@ public:
    * @param origin Registration call site preserved through setup and input diagnostics.
    * @return This owner. Newest registration wins through the existing managed input slot.
    */
-  template <class Callback>
+  template <class Callback = detail::QuitCommand>
     requires portals::detail::ManagedAction<Callback, KeyEvent>
   Scene &onKey(std::initializer_list<key::Chord> source, Callback callback,
                std::source_location origin = std::source_location::current()) & {
@@ -523,7 +562,7 @@ public:
    * @param origin Registration call site preserved through setup and input diagnostics.
    * @return Consuming owner for fluent chains. Newest registration wins through the existing managed input slot.
    */
-  template <class Callback>
+  template <class Callback = detail::QuitCommand>
     requires portals::detail::ManagedAction<Callback, KeyEvent>
   Scene &&onKey(std::initializer_list<key::Chord> source, Callback callback,
                 std::source_location origin = std::source_location::current()) && {
@@ -540,7 +579,7 @@ public:
    * @param origin Registration call site preserved through setup and input diagnostics.
    * @return This owner. Newest registration wins through the existing managed input slot.
    */
-  template <class Callback>
+  template <class Callback = detail::QuitCommand>
     requires portals::detail::ManagedAction<Callback, KeyEvent>
   Scene &onKey(std::initializer_list<key::Chord> source, Callback callback, ShortcutBehavior behavior,
                ShortcutOptions options = {}, std::source_location origin = std::source_location::current()) & {
@@ -557,7 +596,7 @@ public:
    * @param origin Registration call site preserved through setup and input diagnostics.
    * @return Consuming owner for fluent chains. Newest registration wins through the existing managed input slot.
    */
-  template <class Callback>
+  template <class Callback = detail::QuitCommand>
     requires portals::detail::ManagedAction<Callback, KeyEvent>
   Scene &&onKey(std::initializer_list<key::Chord> source, Callback callback, ShortcutBehavior behavior,
                 ShortcutOptions options = {}, std::source_location origin = std::source_location::current()) && {
@@ -646,6 +685,7 @@ private:
   template <class Callback>
     requires portals::detail::ManagedAction<Callback, KeyEvent>
   void onKeyImpl(KeyEvent chord, Callback &callback, std::source_location origin) {
+    detail::commandOrigin(callback, origin);
     if (!admitConfiguration(true, origin)) {
       return;
     }
@@ -665,6 +705,7 @@ private:
 
   template <class Callback>
   void onSelectionImpl(const KeySelection &selection, Callback &callback, std::source_location origin) {
+    detail::commandOrigin(callback, origin);
     if (!admitConfiguration(true, origin)) {
       return;
     }
@@ -712,6 +753,7 @@ private:
   template <class Callback>
   void onShortcutImpl(std::expected<Shortcut, ShortcutError> &shortcut, Callback &callback, ShortcutBehavior behavior,
                       ShortcutOptions options, std::source_location origin) {
+    detail::commandOrigin(callback, origin);
     if (!admitConfiguration(true, origin)) {
       return;
     }
@@ -770,6 +812,31 @@ private:
 namespace detail {
 /** @brief Internal bridge from consuming recipes to one stable facade owner. */
 struct SceneAccess {
+  /** @param owner UI-admitted managed owner borrowed by an internal synchronous bridge.
+   * @return Its existing application; no new runner or ownership is created.
+   */
+  static Application &application(ManagedScene &owner) noexcept {
+    return owner.app_;
+  }
+
+  /** @param owner Existing managed owner attached to the stationary facade.
+   * @param anchor Weak identity shared with Ref observation, revoked by facade cleanup.
+   */
+  static void currentOwner(ManagedScene &owner, std::weak_ptr<SceneAnchor> anchor) noexcept {
+    owner.facade_ = std::move(anchor);
+  }
+
+  /** @return One weak UI-thread snapshot; an absent scene stays CLOSED through the existing checked API. */
+  static SceneRef currentRef() noexcept {
+    return SceneRef(CurrentSceneScope::snapshot(), std::this_thread::get_id());
+  }
+
+  /** @param owner Stationary facade whose user code is executing on its UI thread.
+   * @return Weak synchronous publication, or an empty mask for an unavailable owner.
+   */
+  static CurrentSceneScope currentScope(Scene &owner) noexcept {
+    return CurrentSceneScope(owner.ref().anchor_);
+  }
 
   /** @param owner Stationary facade executing checked setup on its owning thread.
    * @return Synchronous setup attribution scope, restored before callback captures retire.

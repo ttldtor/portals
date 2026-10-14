@@ -16,23 +16,24 @@ A standalone program can use the standard exit and reporting policy:
 /** @brief Run a minimal lazy scene with a late click handler and a runtime stylesheet.
  * @return Zero on success, one on a typed setup/runtime failure after library cleanup/reporting.
  * Click Add Hello to append one undoable text change; F10 quits. This minimal program defines no CLI options.
- * The standard runner owns terminal restoration. Automated checks compile this example;
- * headless consumer tests exercise the same registration and event semantics separately.
+ * The standard runner owns terminal restoration; the installed headless consumer below
+ * exercises short key/click registration, early stop and cleanup separately.
  */
 int main() {
   using namespace portals;
 
   ui::Ref<LineEdit> message;
   ui::Ref<Button> add;
+  ui::Ref<Button> exit;
 
-  auto scene = ui::scene(ui::vbox(ui::lineEdit(message, ""), ui::button(add, "Add Hello")));
+  auto scene = ui::scene(ui::vbox(ui::lineEdit(message, ""), ui::button(add, "Add Hello"), ui::button(exit, "Exit")));
 
   return scene | ui::style("Button { bold: true; }") |
          ui::onClick(add,
                      [message] {
                        message.text() += "Hello!";
                      }) |
-         ui::onKey(ui::key(InputKey::F10), ui::quit(scene.ref())) | ui::runApp();
+         ui::onClick(exit, [] { ui::quit(); }) | ui::onKey(key::F10, ui::quit) | ui::runApp();
 }
 ```
 
@@ -50,13 +51,43 @@ still escape `main`; the exit-code policy does not retroactively catch them.
 Use the factory-based `runApp(factory, setup)` form described below when the
 application also needs the library to guard recipe construction.
 
-For an exit button, the current callable command is
-`ui::onClick(exitButton, ui::quit(scene.ref()))`. A no-argument imperative
-`ui::quit()` inside a callback is planned with the current-scene context (U125);
-it is not available in this version. The explicit `SceneRef` is an observing
-handle and does not keep a destroyed scene alive.
+`ui::quit()` is a void convenience command for the current entered scene.
+`scene.onKey(key::F10, ui::quit)`, `ui::onKey(key::F10, ui::quit)`,
+`button.onClick(ui::quit)` and `ui::onClick(button, [] { ui::quit(); })`
+use the same existing stop path. Bare commands retain the registration origin,
+including an explicitly supplied source location; a call inside a lambda retains
+that call's own site. Current ownership is resolved at invocation, so registering
+a lazy stage does not remember a previously run scene.
 
-`quit()` requests orderly cancellation through the existing `Application`.
+Current scene is scoped to actual facade recipe/setup/configure/run execution and
+managed key, button, custom-input, text-result/validator, checkbox and custom
+event/preparation callbacks. Those bridges also establish their owner during
+prepared direct dispatch. Managed property delivery uses its weak facade owner.
+Nested independent work suspends the caller's context; normal return and
+exceptions restore it. Cleanup, final reporting and owned capture retirement do
+not expose an unrelated outer scene. Same-owner actual setup retains its U121
+short-mutation policy; an independently owned callback cannot poison another
+scene's setup. A weak context does not retain the facade or widgets, survives
+facade moves, and is revoked before cleanup releases captures.
+
+The library does not infer ownership for arbitrary raw router, property, provider
+or scheduler callbacks invoked directly by client code outside these entered
+bridges. Use an explicit `SceneRef` when such work belongs to another scene.
+Caller argument/temporary construction and arbitrary custom by-value parameter
+epilogues retain the C++ execution limits described below.
+
+With no current live scene, the void command is a safe no-op without diagnostics,
+stderr or a deferred error. `SceneRef::quit()` remains the explicit checked API;
+an unavailable current snapshot has RUN/CLOSED internally. Existing UI affinity
+and notification/close/report guards still apply; context does not grant extra
+mutation authority. Quit failures use the same weak snapshot and existing live
+collector as `ui::quit(scene.ref())`, which remains supported. The explicit
+observing handle never keeps a destroyed scene alive. Adding the same-name
+overload makes untyped `auto action = &ui::quit` ambiguous; specify the desired
+function-pointer type. Existing typed pointers to the explicit-scene overload
+remain supported.
+
+`Scene::quit()` requests orderly cancellation through the existing `Application`.
 It is UI-only and idempotent while the scene is live. Before preparation, or
 inside its recipe/configuration, the intent waits until complete successful
 mount and deferred configuration; bindings finish before cancellation. During
@@ -117,7 +148,16 @@ inside their documented checked boundaries and preserve typed failures. Use an
 ordinary application `try`/`catch` around construction if its exceptions require
 an exit-code policy. The existing ui::runApp(factory, setup) overload can place recipe construction inside its checked boundary; argument evaluation before entering that boundary is still outside it.
 
-The complete program above captures observing Ref values and passes a weak SceneRef to quit. A user callback that explicitly borrows `&scene` must keep that facade stationary and alive; a move does not rewrite arbitrary C++ captures. Compose consuming modifiers before installing such self-referencing callbacks.
+The complete program above captures observing Ref values and resolves the weak
+current scene when a command runs. A user callback that explicitly borrows
+`&scene` must keep that facade stationary and alive; a move does not rewrite
+arbitrary C++ captures. Compose consuming modifiers before installing such
+self-referencing callbacks.
+
+The complete installed consumer executes both short forms, checks stop at the
+command event before replay EOF, and verifies quiet success and retired refs:
+
+\include short_quit.cpp
 
 An ordinary form can also use `ui::scene` to own its existing `Application` and
 `ManagedScene`. Preparation mounts the complete form and publishes its `Ref`s;
@@ -492,9 +532,8 @@ registration preserves old bindings and pending state. A timer-arm failure uses
 the existing fatal input error path and leaves no pending command.
 
 Generic SHIFT, ALT and CTRL describe observed semantic modifiers. The API does
-not infer left/right identity or AltGr from terminal events. The current-scene
-`ui::quit()` extension is separate; the explicit `ui::quit(scene.ref())` remains
-supported.
+not infer left/right identity or AltGr from terminal events. Current-scene quit
+uses these same registrations and event selections; it changes no input phases.
 
 ## Store descriptions, then mount
 

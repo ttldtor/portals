@@ -223,7 +223,7 @@ Runtime costs and scaling limits have a separate [measurement guide](managed-per
 
 ### Standalone exit policy
 
-The gallery and custom widget executables use `Scene::quit()` and the library
+The gallery and custom widget executables use scoped `ui::quit()` and the library
 `runApp` final stage. Their fluent scene objects retain typed `run()` for replay
 comparisons and statistics; their application entry points use equivalent
 function/native and pipe/replay spellings with final reporting after cleanup.

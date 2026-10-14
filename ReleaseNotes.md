@@ -5,6 +5,13 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Added] Scoped current-scene `ui::quit()` and bare `ui::quit` key/click commands.
+  Weak UI execution context follows setup and owned callbacks, restores across
+  nested scenes and exceptions, and is suspended during independent cleanup.
+  No current live scene is a safe no-op; explicit checked `SceneRef::quit` remains.
+  Existing explicit quit actions and typed pointers remain supported; untyped
+  `&ui::quit` now requires overload selection.
+
 - [Added] Scoped short text-write setup failures preserve the original typed cause, operation
   and source before diagnostic allocation or observer reentry. The current void
   callback finishes; later setup and terminal entry are skipped, without rollback.

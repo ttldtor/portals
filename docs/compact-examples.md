@@ -314,7 +314,7 @@ Both after classes are stationary because callbacks explicitly borrow their
 example object. Their last member is the scene owner: it closes callbacks and
 its application before the borrowed members are destroyed. The replay clock
 and terminal remain borrowed through the run. Quit/F10/Ctrl+C request cooperative
-cancellation through `scene_.quit()`; these examples do not require a user-owned
+cancellation through scoped `ui::quit()`; these examples do not require a user-owned
 `std::stop_source`. Embedding applications can still pass an optional stop token
 to the existing scene runner.
 

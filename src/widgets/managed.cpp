@@ -8,6 +8,27 @@
 #include <exception>
 #include <limits>
 
+namespace portals::ui::detail {
+SetupFailurePause::SetupFailurePause(const std::weak_ptr<SceneAnchor> &scene) noexcept
+    : previous_(SetupFailureScope::current_) {
+  if (!previous_ || !previous_->sink_ || scene.expired() || previous_->owner_.owner_before(scene) ||
+      scene.owner_before(previous_->owner_)) {
+    SetupFailureScope::current_ = nullptr;
+  }
+}
+
+SetupFailurePause::~SetupFailurePause() {
+  SetupFailureScope::current_ = previous_;
+}
+
+void retireSceneCallback(void *storage, void (*reset)(void *) noexcept) noexcept {
+  SetupFailureScope mask({}, nullptr, nullptr);
+
+  reset(storage);
+}
+
+} // namespace portals::ui::detail
+
 namespace portals {
 namespace detail {
 // Mutable runtime documents are admitted in two passes: shape before any linked index, then values.
@@ -345,6 +366,7 @@ std::expected<std::unique_ptr<ManagedScene>, ManagedError> ManagedScene::create(
 }
 
 ManagedScene::~ManagedScene() {
+  ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
   if (owner_ != std::this_thread::get_id() || preparing_ || reporting_) {
     std::terminate();
   }
@@ -358,6 +380,9 @@ ManagedScene::~ManagedScene() {
   if (!result && bridge(result.error()) == TreeError::WOULD_BLOCK) {
     std::terminate();
   }
+
+  // State payload deleters belong to this retired owner, never an unrelated entered facade.
+  properties_.clear();
 }
 
 std::expected<void, ManagedError> ManagedScene::boundary(ManagedPhase phase, Node<Widget> node) const {
@@ -417,6 +442,7 @@ std::unexpected<ManagedError> ManagedScene::rollback(Node<Widget> node, TreeErro
 }
 
 std::expected<void, ManagedError> ManagedScene::remove(Node<Widget> node) {
+  ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
   auto allowed = boundary(ManagedPhase::CLEANUP, root_);
 
   if (!allowed) {
@@ -545,6 +571,7 @@ std::optional<std::size_t> ManagedScene::recordError(ManagedError failure,
 
 bool ManagedScene::notifyError(ManagedDiagnostic &diagnostic, bool runFailure,
                                const ui::detail::SetupFailureTicket *shortTicket) noexcept {
+  ui::detail::CurrentSceneScope mask;
   if (!errorObserver_) {
     return false;
   }
@@ -631,6 +658,11 @@ void ManagedScene::reportShortError(ManagedError &failure, const char *operation
 }
 
 std::expected<void, ManagedError> ManagedScene::onError(ManagedErrorHandler callback) {
+  ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
+  ManagedErrorHandler incoming;
+
+  incoming.swap(callback);
+
   auto allowed = boundary(ManagedPhase::BIND, root_);
 
   if (!allowed) {
@@ -638,7 +670,10 @@ std::expected<void, ManagedError> ManagedScene::onError(ManagedErrorHandler call
   }
 
   try {
-    auto replacement = callback ? std::make_shared<ManagedErrorHandler>(std::move(callback)) : nullptr;
+    auto replacement =
+      incoming
+        ? std::make_shared<ManagedErrorHandler>(ui::detail::currentSceneCallback(facadeContext(), std::move(incoming)))
+        : nullptr;
 
     errorObserver_ = std::move(replacement);
   } catch (const std::bad_alloc &) {
@@ -751,8 +786,13 @@ void ManagedScene::remember(ManagedError failure, std::source_location origin,
 
 std::expected<void, ManagedError> ManagedScene::onClick(Node<Button> node,
                                                         std::function<std::expected<void, TreeError>()> action) {
+  ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
+  decltype(action) incoming;
+
+  incoming.swap(action);
+
   try {
-    return onButtonClick(node, actionAdapter<ClickEvent>(std::move(action)), false);
+    return onButtonClick(node, actionAdapter<ClickEvent>(std::move(incoming)), false);
   } catch (const std::bad_alloc &) {
     return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
   } catch (...) {
@@ -948,6 +988,11 @@ void ManagedScene::dispatchClicks(Node<Button> node, const std::shared_ptr<Click
 std::expected<void, ManagedError>
 ManagedScene::bind(Node<CheckBox> node, ManagedState<bool> model,
                    std::function<std::expected<void, TreeError>(CheckBoxResult)> changed) {
+  ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
+  decltype(changed) incomingChanged;
+
+  incomingChanged.swap(changed);
+
   auto entry = bindingEntry(node);
 
   if (!entry) {
@@ -960,40 +1005,55 @@ ManagedScene::bind(Node<CheckBox> node, ManagedState<bool> model,
     return std::unexpected(error(ManagedPhase::BIND, node, property ? TreeError::INVALID_ARGUMENT : property.error()));
   }
 
-  auto bound = bindCheckbox(app_.tree(), app_.router(), node, *property,
-                            [this, node, changed = std::move(changed)](CheckBoxResult receipt) {
-                              try {
-                                if (!receipt) {
-                                  remember(error(ManagedPhase::INPUT, node, receipt.error()));
-                                }
+  try {
+    auto bound = bindCheckbox(
+      app_.tree(), app_.router(), node, *property,
+      [this, node, changed = ui::detail::currentSceneCallback(facadeContext(), std::move(incomingChanged))](
+        CheckBoxResult receipt) {
+        try {
+          if (!receipt) {
+            remember(error(ManagedPhase::INPUT, node, receipt.error()));
+          }
 
-                                if (changed) {
-                                  auto result = changed(std::move(receipt));
+          if (changed) {
+            auto result = changed(std::move(receipt));
 
-                                  if (!result) {
-                                    remember(error(ManagedPhase::INPUT, node, result.error()));
-                                  }
-                                }
-                              } catch (const std::bad_alloc &) {
-                                remember(error(ManagedPhase::INPUT, node, TreeError::NO_MEMORY));
-                              } catch (...) {
-                                remember(error(ManagedPhase::INPUT, node, TreeError::CALLBACK_FAILED));
-                              }
-                            });
+            if (!result) {
+              remember(error(ManagedPhase::INPUT, node, result.error()));
+            }
+          }
+        } catch (const std::bad_alloc &) {
+          remember(error(ManagedPhase::INPUT, node, TreeError::NO_MEMORY));
+        } catch (...) {
+          remember(error(ManagedPhase::INPUT, node, TreeError::CALLBACK_FAILED));
+        }
+      });
 
-  if (!bound) {
-    return std::unexpected(error(ManagedPhase::BIND, node, bound.error()));
+    if (!bound) {
+      return std::unexpected(error(ManagedPhase::BIND, node, bound.error()));
+    }
+
+    (*entry)->binding.emplace<CheckBoxBinding>(std::move(*bound));
+
+    return {};
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
+  } catch (...) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CALLBACK_FAILED));
   }
-
-  (*entry)->binding.emplace<CheckBoxBinding>(std::move(*bound));
-
-  return {};
 }
 
 std::expected<void, ManagedError>
 ManagedScene::bind(Node<LineEdit> node, ManagedState<std::string> model,
                    std::function<std::expected<void, TreeError>(LineEditResult)> result,
                    std::shared_ptr<Clipboard> clipboard, std::function<bool(std::string_view)> validate) {
+  ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
+  decltype(result) incomingResult;
+  decltype(validate) incomingValidate;
+
+  incomingResult.swap(result);
+  incomingValidate.swap(validate);
+
   auto entry = bindingEntry(node);
 
   if (!entry) {
@@ -1014,76 +1074,86 @@ ManagedScene::bind(Node<LineEdit> node, ManagedState<std::string> model,
     return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
   }
 
-  auto bound = bindLineEdit(
-    app_.tree(), app_.router(), node, *property,
-    [this, node, lifetime = std::weak_ptr(lifetime_), feedback, result = std::move(result)](LineEditResult receipt) {
-      const auto report = [this, node, &lifetime, feedback, trigger = receipt.trigger](TreeError cause,
-                                                                                       bool commandFailure = false) {
-        if (lifetime.expired()) {
-          return;
-        }
+  try {
+    auto bound = bindLineEdit(
+      app_.tree(), app_.router(), node, *property,
+      [this, node, lifetime = std::weak_ptr(lifetime_), feedback,
+       result = ui::detail::currentSceneCallback(facadeContext(), std::move(incomingResult))](LineEditResult receipt) {
+        const auto report = [this, node, &lifetime, feedback, trigger = receipt.trigger](TreeError cause,
+                                                                                         bool commandFailure = false) {
+          if (lifetime.expired()) {
+            return;
+          }
 
-        const auto phase = trigger == LineEditTrigger::FLUENT ? ManagedPhase::TEXT : ManagedPhase::INPUT;
+          const auto phase = trigger == LineEditTrigger::FLUENT ? ManagedPhase::TEXT : ManagedPhase::INPUT;
 
-        const auto operation = commandFailure && feedback->active   ? feedback->operation
-                               : trigger == LineEditTrigger::BLUR   ? "lineEdit.blur"
-                               : trigger == LineEditTrigger::FLUENT ? "lineEdit.fluent"
-                                                                    : "lineEdit.input";
+          const auto operation = commandFailure && feedback->active   ? feedback->operation
+                                 : trigger == LineEditTrigger::BLUR   ? "lineEdit.blur"
+                                 : trigger == LineEditTrigger::FLUENT ? "lineEdit.fluent"
+                                                                      : "lineEdit.input";
 
-        const auto origin = commandFailure && feedback->active ? feedback->origin : std::source_location::current();
+          const auto origin = commandFailure && feedback->active ? feedback->origin : std::source_location::current();
+
+          try {
+            const ManagedDiagnosticContext context{std::string(operation), std::string(0, '\0'), std::string(0, '\0'),
+                                                   std::string("LineEdit"), origin};
+
+            remember(error(phase, node, cause), origin, std::span(&context, 1));
+          } catch (const std::bad_alloc &) {
+            remember(error(phase, node, cause), origin);
+          } catch (const std::length_error &) {
+            remember(error(phase, node, cause), origin);
+          }
+        };
 
         try {
-          const ManagedDiagnosticContext context{std::string(operation), std::string(0, '\0'), std::string(0, '\0'),
-                                                 std::string("LineEdit"), origin};
+          if (receipt.status == LineEditStatus::FAILED && receipt.error) {
+            if (receipt.trigger == LineEditTrigger::BLUR && !lifetime.expired() && recoveringFocus_ &&
+                !reportedFocusFailure_) {
+              // Only the receipt error returns through State::focus; result callback errors are independent.
+              reportedFocusFailure_ = *receipt.error;
+            }
 
-          remember(error(phase, node, cause), origin, std::span(&context, 1));
+            const bool canReport = !lifetime.expired();
+
+            report(*receipt.error, true);
+
+            if (canReport && feedback->active) {
+              feedback->reported = true;
+            }
+          }
+
+          if (result) {
+            auto status = result(std::move(receipt));
+
+            if (!status) {
+              report(status.error());
+            }
+          }
         } catch (const std::bad_alloc &) {
-          remember(error(phase, node, cause), origin);
-        } catch (const std::length_error &) {
-          remember(error(phase, node, cause), origin);
+          report(TreeError::NO_MEMORY);
+        } catch (...) {
+          report(TreeError::CALLBACK_FAILED);
         }
-      };
+      },
+      std::move(clipboard),
+      incomingValidate ? std::function<bool(std::string_view)>{ui::detail::currentSceneCallback(
+                           facadeContext(), std::move(incomingValidate))}
+                       : std::function<bool(std::string_view)>{});
 
-      try {
-        if (receipt.status == LineEditStatus::FAILED && receipt.error) {
-          if (receipt.trigger == LineEditTrigger::BLUR && !lifetime.expired() && recoveringFocus_ &&
-              !reportedFocusFailure_) {
-            // Only the receipt error returns through State::focus; result callback errors are independent.
-            reportedFocusFailure_ = *receipt.error;
-          }
+    if (!bound) {
+      return std::unexpected(error(ManagedPhase::BIND, node, bound.error()));
+    }
 
-          const bool canReport = !lifetime.expired();
+    bound->commandFeedback(std::move(feedback));
+    (*entry)->binding.emplace<LineEditBinding>(std::move(*bound));
 
-          report(*receipt.error, true);
-
-          if (canReport && feedback->active) {
-            feedback->reported = true;
-          }
-        }
-
-        if (result) {
-          auto status = result(std::move(receipt));
-
-          if (!status) {
-            report(status.error());
-          }
-        }
-      } catch (const std::bad_alloc &) {
-        report(TreeError::NO_MEMORY);
-      } catch (...) {
-        report(TreeError::CALLBACK_FAILED);
-      }
-    },
-    std::move(clipboard), std::move(validate));
-
-  if (!bound) {
-    return std::unexpected(error(ManagedPhase::BIND, node, bound.error()));
+    return {};
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
+  } catch (...) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CALLBACK_FAILED));
   }
-
-  bound->commandFeedback(std::move(feedback));
-  (*entry)->binding.emplace<LineEditBinding>(std::move(*bound));
-
-  return {};
 }
 
 std::expected<void, ManagedError> ManagedScene::style(Node<Widget> node, StyleTarget target) {
@@ -1784,12 +1854,22 @@ std::expected<bool, ManagedError> ManagedScene::dispatchKeys(const std::shared_p
 
 std::expected<void, ManagedError>
 ManagedScene::onInput(std::function<std::expected<bool, ManagedError>(const InputEvent &)> callback) {
-  return setInput(std::move(callback), 0);
+  ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
+  decltype(callback) incoming;
+
+  incoming.swap(callback);
+
+  return setInput(std::move(incoming), 0);
 }
 
 std::expected<void, ManagedError>
 ManagedScene::setInput(std::function<std::expected<bool, ManagedError>(const InputEvent &)> callback,
                        std::size_t keyHandlers, std::shared_ptr<KeySnapshot> keys) {
+  ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
+  decltype(callback) incoming;
+
+  incoming.swap(callback);
+
   auto allowed = boundary(ManagedPhase::BIND, root_);
 
   if (!allowed) {
@@ -1797,7 +1877,11 @@ ManagedScene::setInput(std::function<std::expected<bool, ManagedError>(const Inp
   }
 
   try {
-    auto prepared = callback ? std::make_shared<decltype(callback)>(std::move(callback)) : nullptr;
+    if (incoming && !keys) {
+      incoming = ui::detail::currentSceneCallback(facadeContext(), std::move(incoming));
+    }
+
+    auto prepared = incoming ? std::make_shared<decltype(incoming)>(std::move(incoming)) : nullptr;
 
     // Publish callback and count before retiring captures: their destructors can reenter onKey.
     input_.swap(prepared);
@@ -1815,6 +1899,9 @@ ManagedScene::setInput(std::function<std::expected<bool, ManagedError>(const Inp
 }
 
 std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize) {
+  ui::detail::SetupFailurePause setup(facadeContext());
+  ui::detail::CurrentSceneScope mask;
+  ui::detail::CurrentSceneScope current(facadeContext());
   if (owner_ != std::this_thread::get_id()) {
     return std::unexpected(TreeError::WRONG_THREAD);
   }
@@ -1962,6 +2049,9 @@ bool ManagedScene::usesPreparedLayout() const noexcept {
 }
 
 std::expected<void, TreeError> ManagedScene::prepareViews(Application &app, const LayoutSnapshot &snapshot) {
+  ui::detail::SetupFailurePause setup(facadeContext());
+  ui::detail::CurrentSceneScope mask;
+  ui::detail::CurrentSceneScope current(facadeContext());
   auto allowed = boundary(ManagedPhase::PREPARE, root_);
 
   if (!allowed) {
@@ -2019,6 +2109,8 @@ std::expected<void, TreeError> ManagedScene::prepareViews(Application &app, cons
 }
 
 std::expected<bool, TreeError> ManagedScene::input(Application &app, const InputEvent &event) {
+  ui::detail::SetupFailurePause setup(facadeContext());
+  ui::detail::CurrentSceneScope mask;
   if (owner_ != std::this_thread::get_id()) {
     return std::unexpected(TreeError::WRONG_THREAD);
   }
@@ -2068,6 +2160,7 @@ std::expected<bool, TreeError> ManagedScene::input(Application &app, const Input
 }
 
 std::expected<void, ManagedError> ManagedScene::close() {
+  ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
   if (owner_ != std::this_thread::get_id()) {
     return std::unexpected(error(ManagedPhase::CLEANUP, root_, TreeError::WRONG_THREAD));
   }

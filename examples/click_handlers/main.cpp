@@ -21,5 +21,5 @@ int main() {
                      [message] {
                        message.text() += "Hello!";
                      }) |
-         ui::onKey(key::F10, ui::quit(scene.ref())) | ui::runApp();
+         ui::onKey(key::F10, ui::quit) | ui::runApp();
 }
