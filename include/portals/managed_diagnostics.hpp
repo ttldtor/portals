@@ -20,6 +20,22 @@
 
 namespace portals {
 
+class ManagedScene;
+
+namespace detail {
+/** @brief Default-empty internal evidence that a short error entered one live collector.
+ * Copies preserve provenance without retaining a scene. Only the managed reporting boundary can stamp it.
+ */
+class ManagedErrorReceipt {
+public:
+  ManagedErrorReceipt() = default;
+
+private:
+  friend class portals::ManagedScene;
+  std::weak_ptr<const void> collector_;
+};
+} // namespace detail
+
 /** @brief Boundary at which a managed operation failed. */
 enum class ManagedPhase {
   MOUNT,   ///< Create the scene root or attach and register a managed widget.
@@ -54,6 +70,12 @@ struct ManagedError {
   std::optional<ShortcutError> shortcut{}; ///< Exact shortcut syntax/value cause and owned offset, when present.
   std::optional<std::source_location>
     registrationOrigin{}; ///< Static registration identity for a shortcut action failure; never a borrowed source view.
+  const char *operation{}; ///< Library static-storage operation label, independent of allocated diagnostic contexts.
+  std::optional<std::source_location>
+    operationOrigin{};     ///< Original entered operation site, before facade propagation.
+  const char *execution{}; ///< Library static-storage facade boundary label; does not replace the original phase.
+  bool setupStopped{};     ///< A scoped short failure stopped subsequent setup/run after the current callback returned.
+  detail::ManagedErrorReceipt reportReceipt{}; ///< Opaque copied reporting provenance; default construction is empty.
 };
 
 /** @brief Finite error-history and causal-context budgets. All limits must be positive. */

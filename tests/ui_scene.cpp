@@ -1154,6 +1154,981 @@ TEST_CASE("nonfatal reports and same-cause checked configuration retain both bou
   CHECK(batch.errors[1].contexts[0].operation == "scene.configure");
 }
 
+TEST_CASE("short setup failure finishes the current lambda and skips dependent configuration and terminal") {
+  for (const int mode : {0, 1, 2}) {
+    ui::Ref<Label> label;
+    example::ReplayTerminal terminal({}, 100, {30, 4});
+    ui::SceneOptions options;
+    options.clock = terminal.clock();
+    int tail{};
+    int later{};
+    int notifications{};
+    auto scene = mode ? ui::scene(ui::label(label, "ready"), options) : ui::scene(ui::label("ready"), options);
+
+    scene
+      .onError([&](const ManagedDiagnostic &) {
+        ++notifications;
+      })
+      .configure([&](ManagedScene &owner) {
+        if (mode == 2) {
+          take(owner.remove(label.node()));
+        }
+        label.text() = std::string_view("\xff", 1);
+        ++tail;
+      })
+      .configure([&](ManagedScene &) {
+        ++later;
+      });
+
+    CHECK(scene.checked());
+    CHECK(tail == 0);
+    const auto result = scene.run(terminal);
+    REQUIRE_FALSE(result);
+    CHECK(tail == 1);
+    CHECK(later == 0);
+    CHECK(notifications == 1);
+    CHECK_FALSE(terminal.closed);
+    const auto batch = take(scene.diagnostics());
+    REQUIRE(batch.errors.size() == 1);
+    CHECK(batch.errors[0].error.phase == ManagedPhase::TEXT);
+  }
+}
+
+TEST_CASE("returning the exact short setup result does not duplicate its report") {
+  ui::Ref<Label> label;
+  auto scene = ui::scene(ui::label(label, "ready"));
+  int notifications{};
+  scene
+    .onError([&](const ManagedDiagnostic &) {
+      ++notifications;
+    })
+    .configure([&](ManagedScene &) {
+      return (label.text() = std::string_view("\xff", 1)).result();
+    });
+
+  REQUIRE_FALSE(scene.prepareChecked());
+  CHECK(notifications == 1);
+  CHECK(take(scene.diagnostics()).errors.size() == 1);
+}
+
+TEST_CASE("short setup preserves the first operation site across observer reentry and callback exceptions") {
+  for (const int mode : {0, 1, 2}) {
+    ui::Ref<Label> label;
+    auto scene = ui::scene(ui::label(label, "ready"));
+    const auto origin = std::source_location::current();
+    int notifications{};
+    int later{};
+    scene
+      .onError([&](const ManagedDiagnostic &diagnostic) {
+        ++notifications;
+        CHECK(diagnostic.error.setupStopped);
+        REQUIRE_FALSE(scene.checked());
+        CHECK(scene.checked().error().text == TextError{TextErrorKind::INVALID_UTF8, 0});
+        CHECK_FALSE(scene.close());
+        auto &owner = take(scene.managed()).get();
+        take(owner.reportError({ManagedPhase::STATE, {}, TreeError::NODE_LIMIT, {}, {}}));
+        throw std::runtime_error("observer");
+      })
+      .configure([&](ManagedScene &) {
+        if (mode == 0) {
+          label.text({}, origin) = std::string_view("\xff", 1);
+        } else if (mode == 1) {
+          label.text().append(std::string_view("\xff", 1), origin);
+        } else {
+          label.text().set(std::string_view("\xff", 1), origin);
+        }
+        throw std::bad_alloc();
+      })
+      .configure([&](ManagedScene &) {
+        ++later;
+      });
+
+    const auto result = scene.prepareChecked();
+    REQUIRE_FALSE(result);
+    CHECK(result.error().phase == ManagedPhase::TEXT);
+    CHECK(result.error().text == TextError{TextErrorKind::INVALID_UTF8, 0});
+    CHECK(std::string_view(result.error().operation) == (mode == 1 ? "text.append" : "text.set"));
+    REQUIRE(result.error().operationOrigin);
+    CHECK(result.error().operationOrigin->line() == origin.line());
+    CHECK(std::string_view(result.error().execution) == "scene.configure");
+    CHECK(later == 0);
+    CHECK(notifications == 1);
+    const auto batch = take(scene.diagnostics());
+    CHECK(batch.observerFailures == 1);
+    CHECK(batch.suppressedNotifications >= 1);
+  }
+}
+
+TEST_CASE("short setup stop survives full history and missing observer") {
+  for (const bool observe : {false, true}) {
+    ui::SceneOptions options;
+    options.managed.diagnostics.maxErrors = 1;
+    ui::Ref<Label> label;
+    auto scene = ui::scene(ui::label(label, "ready"), options);
+    int notifications{};
+    int tail{};
+    if (observe) {
+      scene.onError([&](const ManagedDiagnostic &) {
+        ++notifications;
+      });
+    }
+    scene
+      .configure([](ManagedScene &owner) {
+        take(owner.reportError({ManagedPhase::STATE, {}, TreeError::NODE_LIMIT, {}, {}}));
+      })
+      .configure([&](ManagedScene &) {
+        label.text() = std::string_view("\xff", 1);
+        ++tail;
+      });
+
+    const auto result = scene.prepareChecked();
+    REQUIRE_FALSE(result);
+    CHECK(result.error().text == TextError{TextErrorKind::INVALID_UTF8, 0});
+    CHECK(result.error().setupStopped);
+    CHECK(tail == 1);
+    CHECK(notifications == (observe ? 2 : 0));
+    const auto batch = take(scene.diagnostics());
+    CHECK(batch.errors.size() == 1);
+    CHECK(batch.droppedErrors == 1);
+  }
+}
+
+TEST_CASE("short setup receipt and original source survive diagnostic context allocation failure") {
+  ui::Ref<Label> label;
+  ui::Ref<Label> missing;
+  auto scene = ui::scene(ui::label(label, "ready"));
+  take(scene.prepareChecked());
+  const auto origin = std::source_location::current();
+  const auto expression = label.text() + missing.text({}, origin);
+  int notifications{};
+  bool firstCause{};
+  scene.onError([&](const ManagedDiagnostic &diagnostic) {
+    ++notifications;
+    firstCause = treeCause(diagnostic.error, TreeError::CLOSED) && diagnostic.error.setupStopped;
+  });
+  scene.configure([&](ManagedScene &) {
+    allocationsBeforeFailure = 0;
+    auto result = label.text() = expression;
+    allocationsBeforeFailure = -1;
+    return result.result();
+  });
+  allocationsBeforeFailure = -1;
+
+  REQUIRE_FALSE(scene.checked());
+  CHECK(firstCause);
+  CHECK(notifications == 1);
+  CHECK(treeCause(scene.checked().error(), TreeError::CLOSED));
+  CHECK(std::string_view(scene.checked().error().operation) == "text.assign.concat");
+  REQUIRE(scene.checked().error().operationOrigin);
+  CHECK(scene.checked().error().operationOrigin->line() == origin.line());
+  const auto batch = take(scene.diagnostics());
+  CHECK(batch.errors.size() == 1);
+  CHECK(batch.errors[0].contexts.empty());
+  CHECK(batch.errors[0].contextUnavailable);
+  CHECK(batch.contextFailures == 1);
+}
+
+TEST_CASE("nested setup scopes restore their parent and do not leak into runtime mutations") {
+  ui::Ref<Label> missing;
+  auto outer = ui::scene(ui::label("outer"));
+  auto inner = ui::scene(ui::label("inner"));
+  int later{};
+  int innerTail{};
+  outer
+    .configure([&](ManagedScene &) {
+      inner.configure([&](ManagedScene &) {
+        missing.text() = "fail";
+        ++innerTail;
+      });
+      CHECK_FALSE(inner.prepareChecked());
+    })
+    .configure([&](ManagedScene &) {
+      ++later;
+    });
+  take(outer.prepareChecked());
+  CHECK(later == 1);
+  CHECK(innerTail == 1);
+  auto failed = missing.text() = "outside";
+  CHECK_FALSE(failed.result());
+  CHECK_FALSE(failed.result().error().setupStopped);
+  CHECK(outer.checked());
+
+  auto parent = ui::scene(ui::label("parent"));
+  auto child = ui::scene(ui::label("child"));
+  parent
+    .configure([&](ManagedScene &) {
+      child
+        .configure([](ManagedScene &) {
+        })
+        .prepare();
+      missing.text() = "parent failure";
+    })
+    .configure([&](ManagedScene &) {
+      ++later;
+    });
+  REQUIRE_FALSE(parent.prepareChecked());
+  CHECK(child.checked());
+  CHECK(later == 1);
+}
+
+TEST_CASE("short setup attributes foreign targets to the entered caller without foreign notification") {
+  ui::Ref<Label> foreign;
+  std::atomic<bool> published{};
+  std::atomic<bool> release{};
+  int foreignNotifications{};
+  std::thread worker([&] {
+    ui::Ref<Label> local;
+    auto scene = ui::scene(ui::label(local, "foreign"));
+    scene.onError([&](const ManagedDiagnostic &) {
+      ++foreignNotifications;
+    });
+    take(scene.prepareChecked());
+    foreign = local;
+    published = true;
+    while (!release.load()) {
+      std::this_thread::yield();
+    }
+  });
+  while (!published.load()) {
+    std::this_thread::yield();
+  }
+  auto caller = ui::scene(ui::label("caller"));
+  int tail{};
+  caller.configure([&](ManagedScene &) {
+    foreign.text() = "rejected";
+    ++tail;
+  });
+  const auto result = caller.prepareChecked();
+  release = true;
+  worker.join();
+
+  REQUIRE_FALSE(result);
+  CHECK(treeCause(result.error(), TreeError::WRONG_THREAD));
+  CHECK(result.error().setupStopped);
+  CHECK(tail == 1);
+  CHECK(foreignNotifications == 0);
+  CHECK(take(caller.diagnostics()).errors.size() == 1);
+}
+
+TEST_CASE("checked stationary setup catches an unbound short failure before mounting") {
+  ui::Ref<Label> missing;
+  example::ReplayTerminal terminal({}, 100, {30, 4});
+  ui::RunAppOptions options;
+  options.scene.clock = terminal.clock();
+  options.terminal = &terminal;
+  int tail{};
+  int later{};
+  int reports{};
+  options.report = [&](const ui::SceneReport &report) {
+    ++reports;
+    REQUIRE(report.failure);
+    CHECK(treeCause(*report.failure, TreeError::CLOSED));
+    CHECK(report.failure->setupStopped);
+    CHECK(std::string_view(report.failure->execution) == "scene.setup");
+  };
+  const int code = ui::runApp(
+    [] {
+      return ui::label("ready");
+    },
+    [&](ui::Scene &scene) {
+      missing.text() = "unbound";
+      ++tail;
+      scene.configure([&](ManagedScene &) {
+        ++later;
+      });
+    },
+    options);
+
+  CHECK(code == 1);
+  CHECK(tail == 1);
+  CHECK(later == 0);
+  CHECK(reports == 1);
+  CHECK_FALSE(terminal.closed);
+}
+
+TEST_CASE("setup deduplicates a copied short receipt but preserves a fresh equal-valued boundary error") {
+  for (const bool exact : {false, true}) {
+    ui::Ref<Label> label;
+    auto scene = ui::scene(ui::label(label, "ready"));
+    int notifications{};
+    scene.onError([&](const ManagedDiagnostic &) {
+      ++notifications;
+    });
+    take(scene.prepareChecked());
+    const auto failed = (label.text() = std::string_view("\xff", 1)).result();
+    REQUIRE_FALSE(failed);
+    CHECK(scene.checked());
+    scene.configure([&](ManagedScene &) -> std::expected<void, ManagedError> {
+      if (exact) {
+        return failed;
+      }
+      ManagedError fresh{failed.error().phase, failed.error().node, failed.error().cause, {}, {}};
+      fresh.text = failed.error().text;
+      return std::unexpected(fresh);
+    });
+
+    CHECK_FALSE(scene.checked());
+    CHECK(notifications == (exact ? 1 : 2));
+    CHECK(take(scene.diagnostics()).errors.size() == (exact ? 1 : 2));
+  }
+}
+
+TEST_CASE("short setup keeps different collector contexts distinct and observer captures pinned") {
+  ui::Ref<Label> label;
+  auto target = ui::scene(ui::label(label, "ready"));
+  take(target.prepareChecked());
+  int targetNotifications{};
+  int setupNotifications{};
+  target.onError([&](const ManagedDiagnostic &) {
+    ++targetNotifications;
+  });
+  auto setup = ui::scene(ui::label("setup"));
+  setup.onError([&](const ManagedDiagnostic &) {
+    ++setupNotifications;
+  });
+  setup.configure([&](ManagedScene &) {
+    return (label.text() = std::string_view("\xff", 1)).result();
+  });
+  CHECK_FALSE(setup.prepareChecked());
+  CHECK(target.checked());
+  CHECK(targetNotifications == 1);
+  CHECK(setupNotifications == 1);
+  CHECK(take(target.diagnostics()).errors.size() == 1);
+  CHECK(take(setup.diagnostics()).errors.size() == 1);
+
+  ui::Ref<Label> self;
+  auto scene = ui::scene(ui::label(self, "ready"));
+  bool pinned{};
+  bool retired{};
+
+  struct Capture {
+    bool &retired;
+
+    ~Capture() {
+      retired = true;
+    }
+  };
+
+  auto capture = std::make_shared<Capture>(retired);
+  auto weak = std::weak_ptr(capture);
+  take(scene.prepareChecked());
+  auto &owner = take(scene.managed()).get();
+  take(owner.onError([&, capture](const ManagedDiagnostic &) {
+    CHECK_FALSE(owner.onError({}));
+    pinned = !weak.expired();
+    CHECK_FALSE(owner.close());
+  }));
+  capture.reset();
+  scene.configure([&](ManagedScene &) {
+    self.text() = std::string_view("\xff", 1);
+  });
+  CHECK_FALSE(scene.checked());
+  CHECK(pinned);
+  CHECK(retired);
+  CHECK(take(scene.diagnostics()).errors.size() == 1);
+}
+
+TEST_CASE("short setup notification suppression retains the first cause without a duplicate record") {
+  ui::Ref<Label> label;
+  auto scene = ui::scene(ui::label(label, "ready"));
+  int notifications{};
+  scene
+    .onError([&](const ManagedDiagnostic &) {
+      if (++notifications == 1) {
+        label.text() = std::string_view("\xff", 1);
+        REQUIRE_FALSE(scene.checked());
+        CHECK(treeCause(scene.checked().error(), TreeError::WOULD_BLOCK));
+      }
+    })
+    .configure([](ManagedScene &owner) {
+      take(owner.reportError({ManagedPhase::STATE, {}, TreeError::NODE_LIMIT, {}, {}}));
+    });
+
+  REQUIRE_FALSE(scene.prepareChecked());
+  CHECK(notifications == 2);
+  const auto batch = take(scene.diagnostics());
+  CHECK(batch.errors.size() == 2);
+  CHECK(batch.suppressedNotifications == 1);
+  CHECK(treeCause(batch.errors[1].error, TreeError::WOULD_BLOCK));
+}
+
+TEST_CASE("checked editor commands inside void setup retain their existing recoverable policy") {
+  ui::Ref<LineEdit> field;
+  auto scene = ui::scene(ui::lineEdit(field, "ready"));
+  int tail{};
+  int later{};
+  scene
+    .configure([&](ManagedScene &owner) {
+      take(owner.remove(field.node()));
+      const auto command = field.undo();
+      CHECK_FALSE(command);
+      ++tail;
+    })
+    .configure([&](ManagedScene &) {
+      ++later;
+    });
+
+  take(scene.prepareChecked());
+  CHECK(tail == 1);
+  CHECK(later == 1);
+  CHECK(take(scene.diagnostics()).errors.size() == 1);
+}
+
+TEST_CASE("nested runtime errors do not inherit an outer setup failure scope") {
+  example::ReplayTerminal terminal({{10, "\x1bOQ", {}}}, 100, {30, 4});
+  ui::SceneOptions options;
+  options.clock = terminal.clock();
+  ui::Ref<Label> label;
+  auto runtime = ui::scene(ui::label(label, "ready"), options);
+  int callbacks{};
+  runtime.onKey(ui::key(InputKey::F2), [&] {
+    label.text() = std::string_view("\xff", 1);
+    ++callbacks;
+  });
+  auto setup = ui::scene(ui::label("setup"));
+  int later{};
+  setup
+    .configure([&](ManagedScene &) {
+      CHECK(runtime.run(terminal));
+    })
+    .configure([&](ManagedScene &) {
+      ++later;
+    });
+
+  CHECK(setup.prepareChecked());
+  CHECK(later == 1);
+  CHECK(callbacks == 1);
+  const auto batch = take(runtime.diagnostics());
+  REQUIRE(batch.errors.size() == 1);
+  CHECK_FALSE(batch.errors[0].error.setupStopped);
+}
+
+TEST_CASE("nested setup deferred error delivery cannot poison its outer setup scope") {
+  ui::Ref<Label> missing;
+  auto outer = ui::scene(ui::label("outer"));
+  auto inner = ui::scene(ui::label("inner"));
+  auto third = ui::scene(ui::label("third"));
+  int later{};
+  int notifications{};
+  inner.onError([&](const ManagedDiagnostic &) {
+    ++notifications;
+    auto rejected = missing.text() = "observer failure";
+    CHECK_FALSE(rejected.result());
+    CHECK_FALSE(rejected.result().error().setupStopped);
+    third.configure([&](ManagedScene &) {
+      missing.text() = "third setup";
+    });
+    CHECK_FALSE(third.prepareChecked());
+  });
+  outer
+    .configure([&](ManagedScene &) {
+      inner.configure([&](ManagedScene &) {
+        missing.text() = "inner setup";
+      });
+      CHECK_FALSE(inner.prepareChecked());
+    })
+    .configure([&](ManagedScene &) {
+      ++later;
+    });
+
+  CHECK(outer.prepareChecked());
+  CHECK(later == 1);
+  CHECK(notifications == 1);
+  CHECK_FALSE(inner.checked());
+  CHECK_FALSE(third.checked());
+}
+
+TEST_CASE("pre-owner short setup failure retains its typed cause while all allocations are rejected") {
+  ui::Ref<Label> missing;
+  example::ReplayTerminal terminal({}, 100, {30, 4});
+  ui::RunAppOptions options;
+  options.scene.clock = terminal.clock();
+  options.terminal = &terminal;
+  int notifications{};
+  int reports{};
+  int tail{};
+  bool observerCause{};
+  bool finalCause{};
+  options.report = [&](const ui::SceneReport &report) {
+    // Release the fault before the test framework can allocate assertion diagnostics.
+    allocationsBeforeFailure = -1;
+    ++reports;
+    finalCause = report.failure && treeCause(*report.failure, TreeError::CLOSED) &&
+                 report.failure->phase == ManagedPhase::TEXT && report.failure->setupStopped &&
+                 report.failure->operationOrigin && std::string_view(report.failure->operation) == "text.set";
+  };
+  const int code = ui::runApp(
+    [] {
+      return ui::label("ready");
+    },
+    [&](ui::Scene &scene) {
+      scene.onError([&](const ManagedDiagnostic &diagnostic) {
+        ++notifications;
+        observerCause = treeCause(diagnostic.error, TreeError::CLOSED) && diagnostic.error.setupStopped;
+      });
+      allocationsBeforeFailure = 0;
+      missing.text() = "unbound";
+      ++tail;
+    },
+    options);
+  allocationsBeforeFailure = -1;
+
+  CHECK(code == 1);
+  CHECK(tail == 1);
+  CHECK(notifications == 1);
+  CHECK(reports == 1);
+  CHECK(observerCause);
+  CHECK(finalCause);
+  CHECK_FALSE(terminal.closed);
+}
+
+TEST_CASE("r2 stationary setup delivers its first short failure before expected or exception cleanup") {
+  for (const int ending : {0, 1, 2}) {
+    ui::Ref<Label> missing;
+    example::ReplayTerminal terminal({}, 100, {30, 4});
+    ui::RunAppOptions options;
+    options.scene.clock = terminal.clock();
+    options.terminal = &terminal;
+    int notifications{};
+    int reports{};
+    int tail{};
+    const auto origin = std::source_location::current();
+    options.report = [&](const ui::SceneReport &report) {
+      ++reports;
+      REQUIRE(report.failure);
+      CHECK(treeCause(*report.failure, TreeError::CLOSED));
+      CHECK(report.failure->phase == ManagedPhase::TEXT);
+      CHECK(report.failure->operationOrigin->line() == origin.line());
+    };
+    const int code = ui::runApp(
+      [] {
+        return ui::label("ready");
+      },
+      [&](ui::Scene &scene) -> std::expected<void, ManagedError> {
+        scene.onError([&](const ManagedDiagnostic &diagnostic) {
+          ++notifications;
+          CHECK(treeCause(diagnostic.error, TreeError::CLOSED));
+          CHECK(diagnostic.origin.line() == origin.line());
+        });
+        const auto failure = (missing.text({}, origin) = "unbound").result();
+        ++tail;
+        if (ending == 1) {
+          throw std::bad_alloc();
+        }
+        if (ending == 2) {
+          throw std::runtime_error("later setup throw");
+        }
+        return failure;
+      },
+      options);
+
+    CHECK(code == 1);
+    CHECK(tail == 1);
+    CHECK(notifications == 1);
+    CHECK(reports == 1);
+    CHECK_FALSE(terminal.closed);
+  }
+}
+
+TEST_CASE("r2 independent factory and final sink cannot inherit outer setup attribution") {
+  for (const bool throwing : {false, true}) {
+    ui::Ref<Label> missing;
+    auto outer = ui::scene(ui::label("outer"));
+    auto nested = ui::scene(ui::label("nested"));
+    int later{};
+    int reports{};
+    outer
+      .configure([&](ManagedScene &) {
+        ui::RunAppOptions options;
+        options.report = [&](const ui::SceneReport &report) {
+          ++reports;
+          REQUIRE(report.failure);
+          CHECK(treeCause(*report.failure, throwing ? TreeError::CALLBACK_FAILED : TreeError::NODE_LIMIT));
+          auto failure = missing.text() = "sink only";
+          CHECK_FALSE(failure.result().error().setupStopped);
+          nested.configure([&](ManagedScene &) {
+            missing.text() = "nested setup";
+          });
+          CHECK_FALSE(nested.prepareChecked());
+        };
+        const int code = ui::runApp(
+          [&]() -> std::expected<decltype(ui::label("inner")), ManagedError> {
+            auto failure = missing.text() = "factory only";
+            CHECK_FALSE(failure.result().error().setupStopped);
+            if (throwing) {
+              throw std::runtime_error("factory");
+            }
+            return std::unexpected(ManagedError{ManagedPhase::MOUNT, {}, TreeError::NODE_LIMIT, {}, {}});
+          },
+          options);
+        CHECK(code == 1);
+      })
+      .configure([&](ManagedScene &) {
+        ++later;
+      });
+
+    CHECK(outer.prepareChecked());
+    CHECK(later == 1);
+    CHECK(reports == 1);
+    CHECK_FALSE(nested.checked());
+  }
+}
+
+TEST_CASE("r2 independent lifecycle and capture retirement isolate and then restore outer setup") {
+  struct Retirement {
+    ui::Ref<Label> &missing;
+    int &retired;
+    bool &attributed;
+
+    ~Retirement() {
+      auto result = missing.text() = "retirement";
+      ++retired;
+      attributed = attributed || result.result().error().setupStopped;
+    }
+  };
+
+  struct RetiringWidget final : Widget {
+    Retirement retirement;
+
+    RetiringWidget(ui::Ref<Label> &missing, int &retired, bool &attributed) : retirement{missing, retired, attributed} {
+    }
+  };
+
+  for (const int lifecycle : {0, 1, 2, 3, 4}) {
+    for (const bool outerFailure : {false, true}) {
+      ui::Ref<Label> missing;
+      auto outer = ui::scene(ui::label("outer"));
+      int retired{};
+      int later{};
+      bool attributed{};
+      const auto origin = std::source_location::current();
+      outer
+        .configure([&](ManagedScene &) {
+          {
+            example::ReplayTerminal terminal({}, 100, {30, 4});
+            ui::SceneOptions options;
+            options.clock = terminal.clock();
+            auto inner = ui::scene(
+              ui::custom<RetiringWidget>(std::ref(missing), std::ref(retired), std::ref(attributed)), options);
+            inner.reportOnError([](const ui::SceneReport &) {
+            });
+            inner.configure([capture = std::make_shared<Retirement>(missing, retired, attributed)](ManagedScene &) {
+            });
+            if (lifecycle < 3) {
+              inner.configure([](ManagedScene &) -> std::expected<void, ManagedError> {
+                return std::unexpected(ManagedError{ManagedPhase::BIND, {}, TreeError::NODE_LIMIT, {}, {}});
+              });
+              if (lifecycle == 0) {
+                CHECK_FALSE(inner.prepareChecked());
+              }
+              if (lifecycle == 1) {
+                CHECK_FALSE(inner.run(terminal));
+              }
+              if (lifecycle == 2) {
+                CHECK(inner.runApp(terminal) == 1);
+              }
+              REQUIRE_FALSE(inner.checked());
+              CHECK(treeCause(inner.checked().error(), TreeError::NODE_LIMIT));
+            } else {
+              CHECK(inner.prepareChecked());
+              if (lifecycle == 3) {
+                CHECK(inner.close());
+              }
+            }
+          }
+          CHECK(outer.checked());
+          if (outerFailure) {
+            missing.text({}, origin) = "outer continuation";
+          }
+        })
+        .configure([&](ManagedScene &) {
+          ++later;
+        });
+      const auto result = outer.prepareChecked();
+
+      CHECK(retired == 2);
+      CHECK_FALSE(attributed);
+      CHECK(later == (outerFailure ? 0 : 1));
+      if (outerFailure) {
+        REQUIRE_FALSE(result);
+        CHECK(result.error().operationOrigin->line() == origin.line());
+      } else {
+        CHECK(result);
+      }
+    }
+  }
+}
+
+TEST_CASE("r2 prepared configuration capture retirement cannot poison its caller") {
+  ui::Ref<Label> missing;
+  int retired{};
+  bool attributed{};
+
+  struct Capture {
+    ui::Ref<Label> &missing;
+    int &retired;
+    bool &attributed;
+
+    ~Capture() {
+      auto failure = missing.text() = "retire";
+      ++retired;
+      attributed = failure.result().error().setupStopped;
+    }
+  };
+
+  auto outer = ui::scene(ui::label("outer"));
+  auto inner = ui::scene(ui::label("inner"));
+  take(inner.prepareChecked());
+  outer.configure([&](ManagedScene &) {
+    inner.configure([capture = std::make_shared<Capture>(missing, retired, attributed)](ManagedScene &) {
+    });
+  });
+  CHECK(outer.prepareChecked());
+  CHECK(retired == 1);
+  CHECK_FALSE(attributed);
+}
+
+TEST_CASE("r2 recipe-only short writes are isolated while actual inner configure retains its scope") {
+  struct RecipeWriter final : Widget {
+    RecipeWriter(ui::Ref<Label> &missing, bool &attributed) {
+      auto failure = missing.text() = "recipe only";
+      attributed = failure.result().error().setupStopped;
+    }
+  };
+
+  for (const bool setupFailure : {false, true}) {
+    ui::Ref<Label> missing;
+    bool attributed{};
+    int later{};
+    auto outer = ui::scene(ui::label("outer"));
+    auto inner = ui::scene(ui::custom<RecipeWriter>(std::ref(missing), std::ref(attributed)));
+    outer
+      .configure([&](ManagedScene &) {
+        if (setupFailure) {
+          inner.configure([&](ManagedScene &) {
+            missing.text() = "actual setup";
+          });
+        }
+        const auto prepared = inner.prepareChecked();
+        CHECK(prepared.has_value() == !setupFailure);
+        if (!prepared) {
+          CHECK(prepared.error().setupStopped);
+        }
+      })
+      .configure([&](ManagedScene &) {
+        ++later;
+      });
+    CHECK(outer.prepareChecked());
+    CHECK_FALSE(attributed);
+    CHECK(later == 1);
+  }
+}
+
+TEST_CASE("r2 independent observer and report capture replacement cannot poison its caller") {
+  for (const bool finalReport : {false, true}) {
+    ui::Ref<Label> missing;
+    int retired{};
+    bool attributed{};
+
+    struct Capture {
+      ui::Ref<Label> &missing;
+      int &retired;
+      bool &attributed;
+
+      ~Capture() {
+        auto failure = missing.text() = "retired observer";
+        ++retired;
+        attributed = failure.result().error().setupStopped;
+      }
+    };
+
+    auto outer = ui::scene(ui::label("outer"));
+    auto inner = ui::scene(ui::label("inner"));
+    if (finalReport) {
+      inner.reportOnError([capture = std::make_shared<Capture>(missing, retired, attributed)](const ui::SceneReport &) {
+      });
+    } else {
+      inner.onError([capture = std::make_shared<Capture>(missing, retired, attributed)](const ManagedDiagnostic &) {
+      });
+    }
+    outer.configure([&](ManagedScene &) {
+      if (finalReport) {
+        inner.reportOnError({});
+      } else {
+        inner.onError({});
+      }
+    });
+    CHECK(outer.prepareChecked());
+    CHECK(retired == 1);
+    CHECK_FALSE(attributed);
+  }
+}
+
+TEST_CASE("r3 incoming diagnostic captures retire under isolation after allocation failure") {
+  for (const bool finalReport : {false, true}) {
+    for (const bool outerFailure : {false, true}) {
+      ui::Ref<Label> missing;
+      int retired{};
+      int later{};
+      bool attributed{};
+
+      struct Capture {
+        ui::Ref<Label> &missing;
+        int &retired;
+        bool &attributed;
+
+        ~Capture() {
+          auto failure = missing.text() = "incoming capture";
+
+          ++retired;
+          attributed = failure.result().error().setupStopped;
+        }
+      };
+
+      ManagedErrorHandler observer;
+      ui::SceneReportHandler sink;
+
+      if (finalReport) {
+        sink = [capture = std::make_shared<Capture>(missing, retired, attributed)](const ui::SceneReport &) {
+        };
+      } else {
+        observer = [capture = std::make_shared<Capture>(missing, retired, attributed)](const ManagedDiagnostic &) {
+        };
+      }
+
+      auto outer = ui::scene(ui::label("outer"));
+      auto inner = ui::scene(ui::label("inner"));
+      const auto setterOrigin = std::source_location::current();
+      const auto outerOrigin = std::source_location::current();
+
+      outer
+        .configure([&](ManagedScene &) {
+          allocationsBeforeFailure = 0;
+
+          if (finalReport) {
+            if (outerFailure) {
+              std::move(inner).reportOnError(std::move(sink), setterOrigin);
+            } else {
+              inner.reportOnError(std::move(sink), setterOrigin);
+            }
+          } else {
+            if (outerFailure) {
+              std::move(inner).onError(std::move(observer), setterOrigin);
+            } else {
+              inner.onError(std::move(observer), setterOrigin);
+            }
+          }
+
+          allocationsBeforeFailure = -1;
+
+          if (outerFailure) {
+            missing.text().set("outer failure", outerOrigin);
+          }
+        })
+        .configure([&](ManagedScene &) {
+          ++later;
+        });
+
+      const auto prepared = outer.prepareChecked();
+      const auto innerResult = inner.checked();
+
+      REQUIRE_FALSE(innerResult);
+      CHECK(treeCause(innerResult.error(), TreeError::NO_MEMORY));
+      REQUIRE(innerResult.error().operationOrigin);
+      CHECK(innerResult.error().operationOrigin->line() == setterOrigin.line());
+      CHECK(retired == 1);
+      CHECK_FALSE(attributed);
+      CHECK(prepared.has_value() == !outerFailure);
+      CHECK(later == (outerFailure ? 0 : 1));
+
+      if (outerFailure) {
+        REQUIRE_FALSE(prepared);
+        REQUIRE(prepared.error().operationOrigin);
+        CHECK(prepared.error().operationOrigin->line() == outerOrigin.line());
+        CHECK(prepared.error().setupStopped);
+      }
+    }
+  }
+}
+
+TEST_CASE("r3 rejected diagnostic setters retire incoming captures without acquiring caller setup") {
+  for (const bool finalReport : {false, true}) {
+    for (const bool movedOwner : {false, true}) {
+      ui::Ref<Label> missing;
+      int retired{};
+      int later{};
+      bool attributed{};
+
+      struct Capture {
+        ui::Ref<Label> &missing;
+        int &retired;
+        bool &attributed;
+
+        ~Capture() {
+          auto failure = missing.text() = "rejected incoming capture";
+
+          ++retired;
+          attributed = failure.result().error().setupStopped;
+        }
+      };
+
+      ManagedErrorHandler observer;
+      ui::SceneReportHandler sink;
+
+      if (finalReport) {
+        sink = [capture = std::make_shared<Capture>(missing, retired, attributed)](const ui::SceneReport &) {
+        };
+      } else {
+        observer = [capture = std::make_shared<Capture>(missing, retired, attributed)](const ManagedDiagnostic &) {
+        };
+      }
+
+      auto outer = ui::scene(ui::label("outer"));
+      auto inner = ui::scene(ui::label("inner"));
+
+      outer
+        .configure([&](ManagedScene &) {
+          if (finalReport) {
+            if (movedOwner) {
+              std::move(inner).reportOnError(std::move(sink));
+            } else {
+              inner.reportOnError(std::move(sink));
+            }
+          } else {
+            if (movedOwner) {
+              std::move(inner).onError(std::move(observer));
+            } else {
+              inner.onError(std::move(observer));
+            }
+          }
+        })
+        .configure([&](ManagedScene &) {
+          ++later;
+        });
+
+      if (movedOwner) {
+        auto owner = std::move(inner);
+
+        CHECK(outer.prepareChecked());
+        CHECK(owner.checked());
+      } else {
+        inner.configure([&](ManagedScene &) {
+          CHECK(outer.prepareChecked());
+        });
+
+        const auto prepared = inner.prepareChecked();
+
+        REQUIRE_FALSE(prepared);
+        CHECK(treeCause(prepared.error(), TreeError::WOULD_BLOCK));
+      }
+
+      CHECK(retired == 1);
+      CHECK_FALSE(attributed);
+      CHECK(later == 1);
+    }
+  }
+}
+
 TEST_CASE("void configuration report remains nonfatal and late Ref checked failure keeps setup context") {
   example::ReplayTerminal terminal({}, 100, {30, 4});
   ui::SceneOptions options;

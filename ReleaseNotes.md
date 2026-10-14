@@ -5,6 +5,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Added] Scoped short text-write setup failures preserve the original typed cause, operation
+  and source before diagnostic allocation or observer reentry. The current void
+  callback finishes; later setup and terminal entry are skipped, without rollback.
+  Exact short-result provenance avoids duplicate reports in the same collector;
+  manual recoverable reports and runtime text/editor behavior remain unchanged.
+
 - [Added] Owning multi-stroke shortcuts with shared-prefix matching in the existing
   managed input path. `Ctrl+K+K` shares modifiers; commas allow independent stroke
   modifiers. Explicit event selections apply to every stroke. Pending commands

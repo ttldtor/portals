@@ -209,12 +209,66 @@ Successful completion and explicit close never remount or reopen the terminal.
 `close()` is idempotent and returns its own cleanup outcome.
 
 Configure actions return `void` or exactly `expected<void, ManagedError>`.
-An ignored low-level result inside a void action stays the caller's responsibility;
-arbitrary `reportError` calls are nonfatal. An `expected` has no diagnostic receipt:
-returning a failure adds a `scene.configure` boundary record even if the original
-Ref/report operation already recorded its cause and call site. Equal causes from
-different operations are preserved. Existing `EditorCommandResult` key/click
-adapters retain their exact reporting receipt.
+Rejected short text mutations inside an entered configure or stationary `runApp`
+setup scope latch the first typed failure before context allocation or observer
+reentry. The current ordinary void lambda finishes: its remaining statements
+still execute. Later configure stages and terminal entry are skipped, and normal
+cleanup follows. Explicit expected/return remains the way to leave the current
+lambda early. Earlier UI changes and external side effects are not rolled back.
+
+Empty, unbound and stale observing refs also stop their active UI setup. A target
+owned on another thread is never inspected or notified through that foreign
+owner; the caller-operation error belongs to the entered setup on this thread.
+Nested independent setup scenes restore the outer context when they return.
+Independent factory/recipe execution, lifecycle cleanup, facade-owned capture
+retirement and final report delivery suspend the caller's setup attribution.
+Only an actual configure or stationary setup opens its own setup-fatal scope;
+a failed short write in recipe-only code does not silently acquire the outer
+scene's scope.
+This isolation covers entered library execution and the callback storage owned
+and retired by the facade. It does not extend to construction or destruction of
+caller arguments, temporaries, or arbitrary user-defined by-value callback
+parameters outside that execution. In particular, user work in a moved-from
+custom configure callable's destructor follows the setup scope active when that
+destructor actually runs. The standard `onError` and `reportOnError` handlers
+transfer incoming storage under isolation, including allocation failure and
+rejected entry; their incoming captures retire before that isolation ends.
+Stationary setup finishes short-error delivery before expected/exception handling
+can clean up its publication, so all return forms preserve one primary notification.
+Outside an entered setup scope, short runtime errors keep the existing recoverable
+policy. Arbitrary low-level `reportError` calls remain nonfatal, including inside
+void configure; ignored low-level expected results remain the caller's responsibility.
+The automatic setup stop covers TextProperty assignment, `+=`, `set` and `append`,
+including concatenation assignment and explicit programmatic editor text writes.
+Undo/Redo/stopGrouping keep their existing checked `EditorCommandResult` policy;
+Ref click registration remains its existing checked/recoverable operation. These
+are not silently turned into setup-fatal commands when their result is ignored.
+
+Returning the exact short mutation's error through expected preserves an opaque
+same-collector reporting receipt, so the configure boundary does not report it
+twice. History overflow, missing observer and observer throw do not erase that
+receipt or the setup stop. A fresh equal-valued error and the intentional manual
+`reportError(error); return unexpected(error);` case remain distinct boundary
+events. Existing `EditorCommandResult` key/click adapters retain their own receipt
+contract; extracting their `.result()` still deliberately loses that provenance.
+
+`ManagedError` remains an aggregate. Its additive `operation` and `execution`
+labels use library static storage, and `operationOrigin` preserves the entered
+source even when bounded diagnostic contexts cannot be allocated. `phase` remains
+the original managed operation category; `execution` names the facade boundary
+and `setupStopped` describes the response. Primary, restoration and cleanup causes
+remain independent typed values. The extra fields change data representation;
+this does not promise binary ABI compatibility. `checked()` only inspects state;
+it never executes deferred configure or mounting.
+
+The complete installed consumer below compares an explicit checked setup with a
+short void setup, in both ordinary and pipe forms. Both execute the same lambda
+tail, skip the dependent stage and terminal entry, retain typed source information
+and verify cleanup. These are contemporary equivalent alternatives, not a claimed
+historical reduction of an existing sample. The [complete checked counterpart](../tests/package_consumer/setup_diagnostics_before.cpp)
+and short program are compiled separately against the same installed package.
+
+\include setup_diagnostics_after.cpp
 
 `onError` observes errors without vetoing operations. The first pre-owner failure
 uses one owning fallback diagnostic with an empty node and no contexts; a late

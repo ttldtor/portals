@@ -20,6 +20,7 @@ struct Access;
 struct RefAccess;
 struct SceneAccess;
 struct ClickAccess;
+class SetupFailureTicket;
 } // namespace ui::detail
 
 namespace style::ct::detail {
@@ -949,8 +950,20 @@ private:
   std::expected<void, ManagedError> applyTheme(const StyleSheet &sheet, detail::StyleThemeLease lease);
   std::optional<std::size_t> recordError(ManagedError failure, std::span<const ManagedDiagnosticContext> contexts,
                                          std::source_location origin, bool *observerInvoked = nullptr,
-                                         bool runFailure = false) noexcept;
-  bool notifyError(ManagedDiagnostic &diagnostic, bool runFailure) noexcept;
+                                         bool runFailure = false,
+                                         const ui::detail::SetupFailureTicket *shortTicket = nullptr,
+                                         bool contextUnavailable = false) noexcept;
+  bool notifyError(ManagedDiagnostic &diagnostic, bool runFailure,
+                   const ui::detail::SetupFailureTicket *shortTicket = nullptr) noexcept;
+  void reportShortError(ManagedError &failure, const char *operation, std::string_view name,
+                        std::string_view expectedType, std::source_location origin) noexcept;
+
+  bool shortReported(const ManagedError &failure) const noexcept {
+    const auto &collector = failure.reportReceipt.collector_;
+
+    return !collector.expired() && !lifetime_.owner_before(collector) && !collector.owner_before(lifetime_);
+  }
+
   void remember(ManagedError failure, std::source_location origin = std::source_location::current(),
                 std::span<const ManagedDiagnosticContext> contexts = {});
   std::expected<ApplicationStats, ManagedError> finish(std::expected<ApplicationStats, ApplicationError> result);

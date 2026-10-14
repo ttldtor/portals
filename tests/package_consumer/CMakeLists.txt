@@ -48,6 +48,23 @@ if(WIN32)
 endif()
 
 enable_testing()
+foreach(variant IN ITEMS before after)
+  add_executable(portals_setup_${variant}_consumer setup_diagnostics_${variant}.cpp)
+  target_link_libraries(portals_setup_${variant}_consumer PRIVATE portals::core)
+  set_target_properties(portals_setup_${variant}_consumer PROPERTIES CXX_EXTENSIONS OFF)
+  if(WIN32)
+    target_sources(portals_setup_${variant}_consumer PRIVATE no_dialogs.cpp)
+  endif()
+  add_test(NAME consumer.setup-${variant} COMMAND portals_setup_${variant}_consumer)
+  set_tests_properties(consumer.setup-${variant} PROPERTIES TIMEOUT 15)
+endforeach()
+add_test(NAME consumer.setup-equivalence
+  COMMAND "${CMAKE_COMMAND}"
+    "-DBEFORE=$<TARGET_FILE:portals_setup_before_consumer>"
+    "-DAFTER=$<TARGET_FILE:portals_setup_after_consumer>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_forms.cmake")
+set_tests_properties(consumer.setup-equivalence PROPERTIES TIMEOUT 30)
+
 add_executable(portals_shortcut_consumer shortcut.cpp)
 target_link_libraries(portals_shortcut_consumer PRIVATE portals::core)
 set_target_properties(portals_shortcut_consumer PROPERTIES CXX_EXTENSIONS OFF)
