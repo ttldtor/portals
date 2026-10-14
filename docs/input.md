@@ -50,6 +50,39 @@ REPEAT/RELEASE values. Held-key state, focus-loss release and kitty negotiation 
 outside this API. Native-value tests inject semantic events; replay tests verify
 the PRESS-only byte path. No new scheduler or input router is involved.
 
+## Managed multi-stroke commands
+
+`ui::onKey("Ctrl+K+K", action)` registers Ctrl+K followed by Ctrl+K;
+`"Ctrl+K,K"` requires an unmodified second K. Plus-separated keys share all
+semantic modifiers of their segment. Comma starts independent modifiers.
+The owning `Shortcut::sequences` collection supplements the existing single
+`alternatives`; both share the configured alternative budget. The stateless
+`matchShortcut` predicate continues to check single chords only.
+
+Phase selectors apply to every stroke: `ui::release("A,B")` waits for two genuine
+RELEASE events. Intermediate PRESS events are ignored by its pending matcher and
+take the normal input path once. No RELEASE is synthesized. Mixed candidates
+are filtered only when an admitted continuation matches. An unmatched PRESS
+cancels pending input only if a pending candidate admits PRESS; unmatched
+REPEAT/RELEASE preserve it. A root prefix started by a passed-through event
+replaces the prior pending group.
+
+The newest matching registration decides terminal versus continuation at each
+depth, preserving legacy and selected-source ordering. Suppressed terminal
+commands never execute on timeout or mismatch. Unmodified Escape PRESS cancels
+and is consumed while pending; this chord is forbidden after the first stroke.
+Proper-prefix alternatives within one registration are rejected with
+`AMBIGUOUS_PREFIX`; reserved Escape produces `RESERVED_CANCEL` with a byte offset.
+
+The existing Scheduler owns one weak, scoped timeout. The positive
+`ManagedOptions::keySequenceTimeout` defaults to 1000 ms and restarts only on
+accepted nonterminal strokes. `now >= deadline` clears pending state before
+continuation, without a delayed command or replay. Focus changes and effective
+visibility/enabled/removal mutations invalidate pending input, even when state
+changes away and back. Tree invalidation conservatively includes other nodes;
+paint/layout alone do not cancel commands. Details and examples are in the
+[declarative UI guide](declarative-ui.md#short-key-bindings).
+
 ## Pulling events
 
 `InputDecoder::create(options)` validates settings and returns an owning decoder

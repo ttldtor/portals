@@ -490,6 +490,8 @@ public:
   }
 
 private:
+  friend class ManagedScene;
+  std::uint64_t inputGeneration() const noexcept;
   struct State;
 
   friend class StyleEngine;

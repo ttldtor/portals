@@ -31,6 +31,7 @@ struct EventRouter::State {
     std::vector<std::shared_ptr<detail::ActionRegistration>>(0);
   std::vector<Node<Widget>> history = std::vector<Node<Widget>>(0);
   Node<Widget> focus;
+  std::uint64_t focusGeneration{1};
   // These UI-only guards reject nested delivery and mutations during capture reclamation;
   // callback disconnect uses the independent atomic flag and remains available on any thread.
   bool dispatching{};

@@ -66,6 +66,7 @@ struct WidgetTree::State {
 
   const std::thread::id owner{std::this_thread::get_id()};
   std::uint64_t session{};
+  std::uint64_t inputGeneration{1};
   std::vector<Slot> slots;
   std::unique_ptr<Record> root;
   std::size_t count{};
@@ -501,6 +502,10 @@ std::expected<void, TreeError> WidgetTree::remove(Node<Widget> node) {
 
   // Revoke every descendant identity before closing scopes: releasing callback captures can
   // reenter the tree, but must never obtain a fresh borrow into the logically removed subtree.
+  if (state_->inputGeneration) {
+    ++state_->inputGeneration;
+  }
+
   State::markDead(**record);
   state_->removal_pending = true;
   state_->invalidate(Invalidation::LAYOUT);
@@ -525,6 +530,10 @@ std::expected<void, TreeError> WidgetTree::close() {
   Borrow guard(*this);
 
   state_->closed = true;
+
+  if (state_->inputGeneration) {
+    ++state_->inputGeneration;
+  }
   state_->removal_pending = true;
 
   if (state_->root) {
@@ -605,6 +614,10 @@ void WidgetTree::reclaim() noexcept {
   state_->reclaiming = false;
 }
 
+std::uint64_t WidgetTree::inputGeneration() const noexcept {
+  return state_->inputGeneration;
+}
+
 const UiScope &WidgetTree::scope(NodeId id) const {
   return state_->slots[id.slot].record->scope;
 }
@@ -624,6 +637,11 @@ std::expected<void, TreeError> WidgetTree::setVisible(Node<Widget> node, bool vi
 
   if (record.visible != visible) {
     record.visible = visible;
+
+    if (state_->inputGeneration) {
+      ++state_->inputGeneration;
+    }
+
     state_->invalidate(Invalidation::LAYOUT);
   }
 
@@ -641,6 +659,11 @@ std::expected<void, TreeError> WidgetTree::setEnabled(Node<Widget> node, bool en
 
   if (record.enabled != enabled) {
     record.enabled = enabled;
+
+    if (state_->inputGeneration) {
+      ++state_->inputGeneration;
+    }
+
     state_->invalidate(Invalidation::PAINT);
   }
 

@@ -9,7 +9,9 @@
 
 #include <atomic>
 #include <cstdlib>
+#include <limits>
 #include <new>
+#include <type_traits>
 
 namespace {
 std::atomic<std::ptrdiff_t> allocationsBeforeFailure{-1};
@@ -29,7 +31,7 @@ public:
   }
 };
 
-constexpr std::ptrdiff_t MAX_FAILURE_ATTEMPTS = 32;
+constexpr std::ptrdiff_t MAX_FAILURE_ATTEMPTS = 128;
 
 template <class Source>
 concept LegacySelectionBehavior = requires(Source source) {
@@ -105,12 +107,36 @@ void *operator new[](std::size_t size) {
   return ::operator new(size);
 }
 
+void *operator new(std::size_t size, const std::nothrow_t &) noexcept {
+  try {
+    return ::operator new(size);
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+void *operator new[](std::size_t size, const std::nothrow_t &) noexcept {
+  try {
+    return ::operator new[](size);
+  } catch (...) {
+    return nullptr;
+  }
+}
+
 void operator delete(void *memory) noexcept {
   std::free(memory);
 }
 
 void operator delete[](void *memory) noexcept {
   std::free(memory);
+}
+
+void operator delete(void *memory, const std::nothrow_t &) noexcept {
+  ::operator delete(memory);
+}
+
+void operator delete[](void *memory, const std::nothrow_t &) noexcept {
+  ::operator delete[](memory);
 }
 
 void operator delete(void *memory, std::size_t) noexcept {
@@ -123,8 +149,46 @@ void operator delete[](void *memory, std::size_t) noexcept {
 
 using namespace portals;
 
+TEST_CASE("multi-stroke shortcut strings execute through the managed input slot") {
+  auto shortcut = parseShortcut("Ctrl+K+K");
+
+  REQUIRE(shortcut);
+
+  example::ReplayTerminal terminal;
+  auto application = Application::create({}, terminal.clock());
+
+  REQUIRE(application);
+
+  auto owner = ManagedScene::create(**application);
+
+  REQUIRE(owner);
+
+  int calls{};
+  auto &scene = **owner;
+
+  REQUIRE(scene.onKey(*shortcut, [&] {
+    ++calls;
+  }));
+
+  const KeyEvent stroke{InputKey::CHARACTER, U'K', {.control = true}};
+  auto first = scene.input(**application, stroke);
+
+  REQUIRE(first);
+  CHECK(*first);
+  CHECK(calls == 0);
+
+  auto second = scene.input(**application, stroke);
+
+  REQUIRE(second);
+  CHECK(*second);
+  CHECK(calls == 1);
+  REQUIRE(scene.close());
+}
+
 static_assert((key::ALT + key::Q).scalar == U'Q');
 static_assert((key::CTRL + key::ALT + key::Q).modifiers.control);
+static_assert(!std::is_nothrow_default_constructible_v<ShortcutSequence>);
+static_assert(!std::is_nothrow_move_constructible_v<ShortcutSequence>);
 
 TEST_CASE("shortcut parser owns normalized alternatives and preserves typed offsets") {
   std::string source = " f10 | aLt + q | F10 ";
@@ -167,8 +231,8 @@ TEST_CASE("shortcut parser rejects malformed input and obeys every configured bu
                            {"LAlt + Q", ShortcutErrorKind::UNKNOWN_KEY},
                            {"AltGr + Q", ShortcutErrorKind::UNKNOWN_KEY},
                            {"\xc3\xa9", ShortcutErrorKind::UNKNOWN_KEY},
-                           {"Ctrl + K + K", ShortcutErrorKind::UNSUPPORTED_SEQUENCE},
-                           {"Ctrl+K, Ctrl+C", ShortcutErrorKind::UNSUPPORTED_SEQUENCE}};
+                           {"Ctrl+K, Escape", ShortcutErrorKind::RESERVED_CANCEL},
+                           {"Ctrl+K | Ctrl+K,K", ShortcutErrorKind::AMBIGUOUS_PREFIX}};
 
   for (const auto &invalid : cases) {
     CAPTURE(invalid.source);
@@ -1047,9 +1111,9 @@ TEST_CASE("facade method and pipe catch every shortcut ownership allocation fail
         };
 
         if (selected) {
-          registerSource(ui::pressRepeat("F10 | Alt+Q"));
+          registerSource(ui::pressRepeat("F10 | Alt+Q | Ctrl+K,K"));
         } else {
-          registerSource("F10 | Alt+Q");
+          registerSource("F10 | Alt+Q | Ctrl+K,K");
         }
       }
 
@@ -1203,4 +1267,912 @@ TEST_CASE("deferred selected callback transfer retains registration origin and r
 
   REQUIRE(repeated);
   CHECK(repeated->errors.size() == 1);
+}
+
+namespace {
+struct SequenceFixture {
+  SchedulerTime now{};
+  std::unique_ptr<Application> app;
+  std::unique_ptr<ManagedScene> scene;
+
+  explicit SequenceFixture(ManagedOptions options = {}, ApplicationOptions applicationOptions = {}) {
+    auto application = Application::create(applicationOptions, {[](void *context) noexcept {
+                                                                  return static_cast<SequenceFixture *>(context)->now;
+                                                                },
+                                                                this});
+
+    REQUIRE(application);
+
+    app = std::move(*application);
+
+    auto owner = ManagedScene::create(*app, options);
+
+    REQUIRE(owner);
+
+    scene = std::move(*owner);
+  }
+
+  template <class Callback>
+  void bind(std::string_view source, Callback callback, std::initializer_list<KeyAction> actions = {KeyAction::PRESS}) {
+    REQUIRE(scene->onKey(ui::keyActions(source, actions), std::move(callback)));
+  }
+
+  bool send(char32_t scalar, KeyAction action = KeyAction::PRESS, InputModifiers modifiers = {}) {
+    auto result = scene->input(*app, KeyEvent{InputKey::CHARACTER, scalar, modifiers, action});
+
+    REQUIRE(result);
+
+    return *result;
+  }
+};
+} // namespace
+
+TEST_CASE("sequence parser owns segments budgets and exact typed offsets") {
+  auto compact = parseShortcut("Ctrl+K+K");
+  auto explicitForm = parseShortcut("Ctrl+K,Ctrl+K");
+  auto independent = parseShortcut("Ctrl+K,K | F10");
+  auto modifiers = parseShortcut("Ctrl+K+Shift+C");
+
+  REQUIRE(compact);
+  REQUIRE(explicitForm);
+  REQUIRE(independent);
+  REQUIRE(modifiers);
+  REQUIRE(compact->sequences.size() == 1);
+  CHECK(compact->sequences.front().strokes[0].scalar == U'K');
+  CHECK(compact->sequences.front().strokes[1].scalar == U'K');
+  CHECK(compact->sequences.front().strokes[1].modifiers.control);
+  CHECK(explicitForm->sequences.front().strokes[1].modifiers.control);
+  CHECK(independent->alternatives.size() == 1);
+  CHECK(independent->sequences.front().strokes[0].modifiers.control);
+  CHECK_FALSE(independent->sequences.front().strokes[1].modifiers.control);
+  CHECK(modifiers->sequences.front().strokes[0].modifiers.shift);
+  CHECK(modifiers->sequences.front().strokes[1].modifiers.shift);
+  CHECK_FALSE(matchShortcut(*compact, KeyEvent{InputKey::CHARACTER, U'K', {.control = true}}));
+  CHECK(parseShortcut("Ctrl+K, Escape").error() == ShortcutError{ShortcutErrorKind::RESERVED_CANCEL, 8});
+  CHECK(parseShortcut("Ctrl+K | Ctrl+K,K").error() == ShortcutError{ShortcutErrorKind::AMBIGUOUS_PREFIX, 9});
+  CHECK(parseShortcut("Ctrl+K,K | Ctrl+K").error() == ShortcutError{ShortcutErrorKind::AMBIGUOUS_PREFIX, 11});
+  CHECK(parseShortcut("A,B|F10", {.maxAlternatives = 1}).error().cause == ShortcutErrorKind::ALTERNATIVE_LIMIT);
+  CHECK(parseShortcut("A,B,C", {.maxStrokes = 2}).error() == ShortcutError{ShortcutErrorKind::STROKE_LIMIT, 4});
+  CHECK(parseShortcut("A,Ctrl+Escape"));
+  CHECK(parseShortcut("A,B|A,B"));
+
+  Shortcut typed{key::F10};
+
+  typed.sequences.emplace_back(std::initializer_list<key::Chord>{key::A, key::B});
+  CHECK(validateShortcut(typed));
+  CHECK(validateShortcut(typed, {.maxAlternatives = 1}).error().cause == ShortcutErrorKind::ALTERNATIVE_LIMIT);
+
+  typed.alternatives.push_back(key::A);
+  CHECK(validateShortcut(typed).error().cause == ShortcutErrorKind::AMBIGUOUS_PREFIX);
+}
+
+TEST_CASE("sequence modifiers use observations without held state or replay") {
+  SequenceFixture fixture;
+  int calls{}, fallback{};
+
+  REQUIRE(fixture.scene->onInput([&](const InputEvent &) -> std::expected<bool, ManagedError> {
+    ++fallback;
+
+    return false;
+  }));
+  fixture.bind("Ctrl+K+K", [&] {
+    ++calls;
+  });
+
+  CHECK(fixture.send(U'K', KeyAction::PRESS, {.control = true}));
+  CHECK_FALSE(fixture.send(U'K', KeyAction::RELEASE, {.control = true}));
+  CHECK_FALSE(fixture.send(U'K'));
+  CHECK(calls == 0);
+  CHECK(fallback == 2);
+  CHECK(fixture.send(U'K', KeyAction::PRESS, {.control = true}));
+  CHECK(fixture.send(U'k', KeyAction::PRESS, {.control = true}));
+  CHECK(calls == 1);
+
+  fixture.bind("Ctrl+K,K", [&] {
+    ++calls;
+  });
+  CHECK(fixture.send(U'K', KeyAction::PRESS, {.control = true}));
+  CHECK(fixture.send(U'K'));
+  CHECK(calls == 2);
+}
+
+TEST_CASE("sequence phase masks apply independently to every stroke") {
+  SequenceFixture fixture;
+  int calls{}, rootCalls{};
+  KeyAction last{};
+
+  fixture.bind("C", [&] {
+    ++rootCalls;
+  });
+  fixture.bind("A,B",
+               [&](const KeyEvent &event) {
+                 ++calls;
+                 last = event.action;
+               },
+               {KeyAction::RELEASE});
+
+  CHECK_FALSE(fixture.send(U'A'));
+  CHECK(fixture.send(U'A', KeyAction::RELEASE));
+  CHECK(fixture.send(U'C'));
+  CHECK_FALSE(fixture.send(U'B'));
+  CHECK(fixture.send(U'B', KeyAction::RELEASE));
+  CHECK(calls == 1);
+  CHECK(rootCalls == 1);
+  CHECK(last == KeyAction::RELEASE);
+
+  fixture.bind("A,B",
+               [&](const KeyEvent &event) {
+                 ++calls;
+                 last = event.action;
+               },
+               {KeyAction::PRESS, KeyAction::RELEASE});
+  CHECK(fixture.send(U'A'));
+  CHECK(fixture.send(U'B', KeyAction::RELEASE));
+  CHECK(calls == 2);
+  CHECK(last == KeyAction::RELEASE);
+
+  REQUIRE(fixture.scene->onInput({}));
+  fixture.bind("A,B", [&] {
+    ++calls;
+  });
+  CHECK(fixture.send(U'A'));
+  CHECK_FALSE(fixture.send(U'B', KeyAction::REPEAT));
+  CHECK_FALSE(fixture.send(U'B', KeyAction::RELEASE));
+  CHECK(fixture.send(U'B'));
+  CHECK(calls == 3);
+
+  auto repeated = parseShortcut("A,B");
+
+  REQUIRE(repeated);
+  REQUIRE(fixture.scene->onKey(*repeated,
+                               [&] {
+                                 ++calls;
+                               },
+                               {.repeat = true}));
+  CHECK(fixture.send(U'A'));
+  CHECK(fixture.send(U'B', KeyAction::REPEAT));
+  CHECK(calls == 4);
+}
+
+TEST_CASE("ignored phase can replace pending through ordinary root prefix admission") {
+  SequenceFixture fixture;
+  int oldCalls{}, nextCalls{};
+
+  fixture.bind("A,B",
+               [&] {
+                 ++oldCalls;
+               },
+               {KeyAction::RELEASE});
+  fixture.bind("C,D", [&] {
+    ++nextCalls;
+  });
+
+  CHECK(fixture.send(U'A', KeyAction::RELEASE));
+  CHECK(fixture.send(U'C'));
+  CHECK_FALSE(fixture.send(U'B', KeyAction::RELEASE));
+  CHECK(fixture.send(U'D'));
+  CHECK(oldCalls == 0);
+  CHECK(nextCalls == 1);
+}
+
+TEST_CASE("shared prefix candidates and ambiguous terminals follow newest matching registration") {
+  SequenceFixture fixture;
+  int oldCalls{}, newCalls{};
+
+  SUBCASE("compatible older branch survives a nonmatching newer branch") {
+    fixture.bind("A,B", [&] {
+      ++oldCalls;
+    });
+    fixture.bind("A,C", [&] {
+      ++newCalls;
+    });
+    CHECK(fixture.send(U'A'));
+    CHECK(fixture.send(U'B'));
+    CHECK(oldCalls == 1);
+    CHECK(newCalls == 0);
+  }
+
+  SUBCASE("newer longer prefix suppresses older terminal permanently") {
+    fixture.bind("A,B", [&] {
+      ++oldCalls;
+    });
+    fixture.bind("A,B,C", [&] {
+      ++newCalls;
+    });
+    CHECK(fixture.send(U'A'));
+    CHECK(fixture.send(U'B'));
+    CHECK(oldCalls == 0);
+    fixture.now = 1000;
+    REQUIRE(fixture.app->scheduler().dispatch());
+    CHECK(oldCalls == 0);
+    CHECK(newCalls == 0);
+    CHECK_FALSE(fixture.send(U'C'));
+  }
+
+  SUBCASE("newer terminal wins over older longer prefix") {
+    fixture.bind("A,B,C", [&] {
+      ++oldCalls;
+    });
+    fixture.bind("A,B", [&] {
+      ++newCalls;
+    });
+    CHECK(fixture.send(U'A'));
+    CHECK(fixture.send(U'B'));
+    CHECK(newCalls == 1);
+    CHECK_FALSE(fixture.send(U'C'));
+  }
+
+  SUBCASE("single terminal wins at root when newer") {
+    fixture.bind("A,B", [&] {
+      ++oldCalls;
+    });
+    fixture.bind("A", [&] {
+      ++newCalls;
+    });
+    CHECK(fixture.send(U'A'));
+    CHECK(newCalls == 1);
+    CHECK_FALSE(fixture.send(U'B'));
+  }
+}
+
+TEST_CASE("sequence prefixes preserve mixed legacy order and current mismatch routes once") {
+  SequenceFixture fixture;
+  int oldCalls{}, sequenceCalls{}, fallback{};
+
+  REQUIRE(fixture.scene->onInput([&](const InputEvent &) -> std::expected<bool, ManagedError> {
+    ++fallback;
+
+    return false;
+  }));
+
+  SUBCASE("newer legacy terminal wins") {
+    fixture.bind("A,B", [&] {
+      ++sequenceCalls;
+    });
+    REQUIRE(fixture.scene->onKey(KeyEvent{InputKey::CHARACTER, U'A'}, [&] {
+      ++oldCalls;
+    }));
+    CHECK(fixture.send(U'A'));
+    CHECK(oldCalls == 1);
+    CHECK_FALSE(fixture.send(U'B'));
+  }
+
+  SUBCASE("newer sequence suppresses legacy terminal") {
+    REQUIRE(fixture.scene->onKey(KeyEvent{InputKey::CHARACTER, U'A'}, [&] {
+      ++oldCalls;
+    }));
+    fixture.bind("A,B", [&] {
+      ++sequenceCalls;
+    });
+    CHECK(fixture.send(U'A'));
+    CHECK(fixture.send(U'B'));
+    CHECK(oldCalls == 0);
+    CHECK(sequenceCalls == 1);
+  }
+
+  SUBCASE("mismatch may start a new prefix and does not replay old input") {
+    fixture.bind("A,B", [&] {
+      ++oldCalls;
+    });
+    fixture.bind("C,D", [&] {
+      ++sequenceCalls;
+    });
+    CHECK(fixture.send(U'A'));
+    CHECK(fixture.send(U'C'));
+    CHECK(fixture.send(U'D'));
+    CHECK(sequenceCalls == 1);
+    CHECK(fallback == 0);
+    CHECK(fixture.send(U'A'));
+    CHECK_FALSE(fixture.send(U'X'));
+    CHECK(fallback == 1);
+    CHECK(oldCalls == 0);
+  }
+}
+
+TEST_CASE("sequence timeout is exclusive rearmed only by admitted strokes and never invokes commands") {
+  SequenceFixture fixture({.keySequenceTimeout = 10});
+  int calls{};
+
+  fixture.bind("A,B,C", [&] {
+    ++calls;
+  });
+  CHECK(fixture.send(U'A'));
+  fixture.now = 9;
+  CHECK(fixture.send(U'B'));
+  fixture.now = 10;
+  REQUIRE(fixture.app->scheduler().dispatch());
+  CHECK(fixture.send(U'C'));
+  CHECK(calls == 1);
+
+  CHECK(fixture.send(U'A'));
+  fixture.now = 19;
+  CHECK_FALSE(fixture.send(U'B', KeyAction::RELEASE));
+  fixture.now = 20;
+  CHECK_FALSE(fixture.send(U'B'));
+  CHECK(calls == 1);
+
+  CHECK(fixture.send(U'A'));
+  fixture.now = 30;
+  REQUIRE(fixture.app->scheduler().dispatch());
+  CHECK_FALSE(fixture.send(U'B'));
+  CHECK(calls == 1);
+
+  fixture.now = std::numeric_limits<SchedulerTime>::max() - 1;
+  CHECK(fixture.send(U'A'));
+  fixture.now = std::numeric_limits<SchedulerTime>::max();
+  CHECK_FALSE(fixture.send(U'B'));
+  CHECK(calls == 1);
+}
+
+TEST_CASE("pending Escape cancels even release only while modified Escape remains a stroke") {
+  SequenceFixture fixture;
+  int calls{}, rootCalls{};
+
+  fixture.bind("Escape", [&] {
+    ++rootCalls;
+  });
+  fixture.bind("A,B",
+               [&] {
+                 ++calls;
+               },
+               {KeyAction::RELEASE});
+  CHECK(fixture.send(U'A', KeyAction::RELEASE));
+
+  auto cancelled = fixture.scene->input(*fixture.app, KeyEvent{InputKey::ESCAPE});
+
+  REQUIRE(cancelled);
+  CHECK(*cancelled);
+  CHECK(rootCalls == 0);
+  CHECK_FALSE(fixture.send(U'B', KeyAction::RELEASE));
+
+  auto rootEscape = fixture.scene->input(*fixture.app, KeyEvent{InputKey::ESCAPE});
+
+  REQUIRE(rootEscape);
+  CHECK(*rootEscape);
+  CHECK(rootCalls == 1);
+
+  fixture.bind("A,Ctrl+Escape", [&] {
+    ++calls;
+  });
+  CHECK(fixture.send(U'A'));
+
+  auto modified = fixture.scene->input(*fixture.app, KeyEvent{InputKey::ESCAPE, 0, {.control = true}});
+
+  REQUIRE(modified);
+  CHECK(*modified);
+  CHECK(calls == 1);
+}
+
+TEST_CASE("focus and tree eligibility generations invalidate prefixes through away and back") {
+  SequenceFixture fixture;
+  auto caption = GraphemeText::from("button");
+
+  REQUIRE(caption);
+
+  auto first = fixture.scene->emplace<Button>(fixture.scene->root(), *caption);
+  auto second = fixture.scene->emplace<Button>(fixture.scene->root(), *caption);
+
+  REQUIRE(first);
+  REQUIRE(second);
+  REQUIRE(fixture.scene->onClick(*first, [] {
+  }));
+  REQUIRE(fixture.scene->onClick(*second, [] {
+  }));
+  REQUIRE(fixture.app->router().setFocus(*first));
+
+  int calls{};
+
+  fixture.bind("A,B", [&] {
+    ++calls;
+  });
+  CHECK(fixture.send(U'A'));
+
+  SUBCASE("focus away and back") {
+    REQUIRE(fixture.app->router().setFocus(*second));
+    REQUIRE(fixture.app->router().setFocus(*first));
+  }
+
+  SUBCASE("hide and show ancestor") {
+    REQUIRE(fixture.app->tree().setVisible(fixture.scene->root(), false));
+    REQUIRE(fixture.app->tree().setVisible(fixture.scene->root(), true));
+  }
+
+  SUBCASE("disable and enable focused node") {
+    REQUIRE(fixture.app->tree().setEnabled(*first, false));
+    REQUIRE(fixture.app->tree().setEnabled(*first, true));
+  }
+
+  SUBCASE("unrelated direct low level remove is conservative reset") {
+    REQUIRE(fixture.app->tree().remove(*second));
+  }
+
+  SUBCASE("no-op and paint invalidation preserve prefix") {
+    REQUIRE(fixture.app->tree().setVisible(*first, true));
+    REQUIRE(fixture.app->tree().setEnabled(*first, true));
+    REQUIRE(fixture.app->router().setFocus(*first));
+    REQUIRE(fixture.app->tree().invalidate(*first, Invalidation::PAINT));
+    CHECK(fixture.send(U'B'));
+    CHECK(calls == 1);
+
+    return;
+  }
+
+  CHECK_FALSE(fixture.send(U'B'));
+  CHECK(calls == 0);
+}
+
+TEST_CASE("sequence completion clears before callbacks pins captures and preserves replacement") {
+  SequenceFixture fixture;
+  auto lifetime = std::make_shared<int>(1);
+  std::weak_ptr<int> observer = lifetime;
+  int next{};
+
+  fixture.bind("A,B", [&, lifetime] {
+    REQUIRE(fixture.scene->onInput({}));
+    CHECK_FALSE(observer.expired());
+    fixture.bind("C,D", [&] {
+      ++next;
+    });
+    CHECK(fixture.send(U'C'));
+  });
+  lifetime.reset();
+
+  CHECK(fixture.send(U'A'));
+  CHECK(fixture.send(U'B'));
+  CHECK(observer.expired());
+  CHECK(fixture.send(U'D'));
+  CHECK(next == 1);
+
+  fixture.bind("A,B", [&] {
+    REQUIRE(fixture.scene->close());
+  });
+  CHECK(fixture.send(U'A'));
+  CHECK(fixture.send(U'B'));
+  fixture.now = 2000;
+  REQUIRE(fixture.app->scheduler().dispatch());
+}
+
+TEST_CASE("sequence replacement is atomic for every registration allocation failure") {
+  int failures{};
+  bool succeeded{};
+
+  for (std::ptrdiff_t index{}; index < 96 && !succeeded; ++index) {
+    SequenceFixture fixture;
+    int calls{};
+
+    fixture.bind("A,B", [&] {
+      ++calls;
+    });
+    CHECK(fixture.send(U'A'));
+
+    auto candidate = parseShortcut("C,D");
+
+    REQUIRE(candidate);
+
+    AllocationFailure fault(index);
+    auto registered = fixture.scene->onKey(*candidate, [] {
+    });
+
+    fault.disable();
+
+    if (registered) {
+      succeeded = true;
+      CHECK_FALSE(fixture.send(U'B'));
+    } else {
+      ++failures;
+      CHECK(std::get<TreeError>(registered.error().cause) == TreeError::NO_MEMORY);
+      CHECK(fixture.send(U'B'));
+      CHECK(calls == 1);
+    }
+  }
+
+  CHECK(succeeded);
+  CHECK(failures > 0);
+}
+
+TEST_CASE("prefix timer allocation failure leaves idle through existing input stop handling") {
+  for (bool rearm : {false, true}) {
+    int failures{};
+    bool succeeded{};
+
+    for (std::ptrdiff_t index{}; index < 64 && !succeeded; ++index) {
+      SequenceFixture fixture;
+      int calls{};
+
+      fixture.bind("A,B,C", [&] {
+        ++calls;
+      });
+
+      if (rearm) {
+        CHECK(fixture.send(U'A'));
+      }
+
+      AllocationFailure fault(index);
+      auto admitted = fixture.scene->input(*fixture.app, KeyEvent{InputKey::CHARACTER, rearm ? U'B' : U'A'});
+
+      fault.disable();
+
+      if (admitted) {
+        succeeded = true;
+        CHECK(*admitted);
+      } else {
+        ++failures;
+        CHECK(admitted.error() == TreeError::NO_MEMORY);
+        CHECK_FALSE(fixture.send(U'B'));
+        CHECK_FALSE(fixture.send(U'C'));
+        CHECK(calls == 0);
+      }
+    }
+
+    CHECK(succeeded);
+    CHECK(failures > 0);
+  }
+}
+
+TEST_CASE("prefix timer and reset never request idle redraw") {
+  SequenceFixture fixture;
+  int calls{};
+
+  fixture.bind("A,B", [&] {
+    ++calls;
+  });
+  REQUIRE(fixture.app->tree().consumeFrameRequest());
+  CHECK(fixture.send(U'A'));
+
+  auto prefixFrame = fixture.app->tree().consumeFrameRequest();
+
+  REQUIRE(prefixFrame);
+  CHECK(*prefixFrame == Invalidation::NONE);
+  fixture.now = 1000;
+  REQUIRE(fixture.app->scheduler().dispatch());
+
+  auto timeoutFrame = fixture.app->tree().consumeFrameRequest();
+
+  REQUIRE(timeoutFrame);
+  CHECK(*timeoutFrame == Invalidation::NONE);
+  CHECK(calls == 0);
+}
+
+TEST_CASE("sequence storage and helpers catch every ownership allocation failure") {
+  for (int mode : {0, 1, 2, 3}) {
+    CAPTURE(mode);
+    int failures{};
+    bool succeeded{};
+
+    for (std::ptrdiff_t index{}; index < MAX_FAILURE_ATTEMPTS && !succeeded; ++index) {
+      auto source = parseShortcut("F10|Ctrl+K,K|A,B,C");
+
+      REQUIRE(source);
+
+      AllocationFailure fault(index);
+      const auto result = [&]() -> std::expected<Shortcut, ShortcutError> {
+        if (mode == 0) {
+          return parseShortcut("F10|Ctrl+K,K|A,B,C");
+        }
+
+        if (mode == 1) {
+          return detail::prepareShortcut(*source);
+        }
+
+        if (mode == 2) {
+          return detail::prepareShortcut(std::move(*source));
+        }
+
+        const auto selected = ui::release("F10|Ctrl+K,K|A,B,C");
+        const auto &retained = detail::KeySelectionAccess::shortcut(selected);
+
+        if (!retained) {
+          return std::unexpected(retained.error());
+        }
+
+        return detail::prepareShortcut(**retained);
+      }();
+
+      fault.disable();
+
+      if (result) {
+        succeeded = true;
+        CHECK(result->sequences.size() == 2);
+      } else {
+        ++failures;
+        CHECK(result.error().cause == ShortcutErrorKind::NO_MEMORY);
+      }
+    }
+
+    CHECK(succeeded);
+    if (mode != 2) {
+      CHECK(failures > 0);
+    }
+  }
+}
+
+TEST_CASE("sequence limits remain configurable above their defaults") {
+  std::string alternatives;
+
+  for (int index{}; index < 40; ++index) {
+    alternatives += index ? "|A,B,C,D,E,F,G,H,I" : "A,B,C,D,E,F,G,H,I";
+  }
+
+  alternatives.insert(0, 4100, ' ');
+
+  auto parsed = parseShortcut(alternatives, {.maxSourceBytes = 8192, .maxAlternatives = 40, .maxStrokes = 9});
+
+  REQUIRE(parsed);
+  CHECK(parsed->sequences.size() == 40);
+  CHECK(parsed->sequences.front().strokes.size() == 9);
+
+  SequenceFixture fixture({.maxKeyHandlers = 66});
+  int calls{};
+
+  for (int index{}; index < 66; ++index) {
+    fixture.bind("A,B", [&] {
+      ++calls;
+    });
+  }
+
+  CHECK(fixture.send(U'A'));
+  CHECK(fixture.send(U'B'));
+  CHECK(calls == 1);
+
+  SequenceFixture longFixture;
+  int longCalls{};
+
+  REQUIRE(longFixture.scene->onKey(*parsed,
+                                   [&] {
+                                     ++longCalls;
+                                   },
+                                   {}, {.maxSourceBytes = 8192, .maxAlternatives = 40, .maxStrokes = 9}));
+
+  for (char32_t scalar = U'A'; scalar <= U'I'; ++scalar) {
+    CHECK(longFixture.send(scalar));
+  }
+
+  CHECK(longCalls == 1);
+}
+
+TEST_CASE("sequence text and duplicate alternatives invoke once with original final event") {
+  SequenceFixture fixture;
+  int calls{};
+  char32_t scalar{};
+
+  fixture.bind("Alt+K,K | Alt+K,K", [&](const KeyEvent &event) {
+    ++calls;
+    scalar = event.scalar;
+  });
+
+  auto first = fixture.scene->input(*fixture.app, TextInputEvent{U'k', {.alt = true}});
+  auto second = fixture.scene->input(*fixture.app, TextInputEvent{U'k'});
+
+  REQUIRE(first);
+  REQUIRE(second);
+  CHECK(*first);
+  CHECK(*second);
+  CHECK(calls == 1);
+  CHECK(scalar == U'k');
+}
+
+TEST_CASE("sequence action errors retain winning registration origin and one collector record") {
+  for (int mode : {0, 1, 2}) {
+    SequenceFixture fixture;
+    auto source = parseShortcut("A,B");
+
+    REQUIRE(source);
+
+    const auto origin = std::source_location::current();
+    const auto callback = [mode]() -> std::expected<void, TreeError> {
+      if (mode == 1) {
+        throw std::runtime_error("sequence action");
+      }
+
+      if (mode == 2) {
+        throw std::bad_alloc();
+      }
+
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    };
+
+    REQUIRE(fixture.scene->onKey(*source, callback, {}, {}, origin));
+    CHECK(fixture.send(U'A'));
+
+    const auto result = fixture.scene->input(*fixture.app, KeyEvent{InputKey::CHARACTER, U'B'});
+
+    REQUIRE_FALSE(result);
+    CHECK(result.error() == (mode == 0   ? TreeError::INVALID_ARGUMENT
+                             : mode == 1 ? TreeError::CALLBACK_FAILED
+                                         : TreeError::NO_MEMORY));
+
+    auto diagnostics = fixture.scene->diagnostics();
+
+    REQUIRE(diagnostics);
+    REQUIRE(diagnostics->errors.size() == 1);
+    CHECK(diagnostics->errors.front().origin.line() == origin.line());
+  }
+}
+
+TEST_CASE("sequence rearm uses one live scheduler timer and bounded timer failure resets idle") {
+  SequenceFixture fixture({}, {.scheduler = {.subscription_capacity = 1}});
+  int calls{};
+
+  fixture.bind("A,B,C,D", [&] {
+    ++calls;
+  });
+  CHECK(fixture.send(U'A'));
+  CHECK(fixture.send(U'B'));
+  CHECK(fixture.send(U'C'));
+  CHECK(fixture.send(U'D'));
+  CHECK(calls == 1);
+
+  constexpr int CANCEL_CYCLES = 32;
+
+  for (int cycle{}; cycle < CANCEL_CYCLES; ++cycle) {
+    CHECK(fixture.send(U'A'));
+
+    const auto cancelled = fixture.scene->input(*fixture.app, KeyEvent{InputKey::ESCAPE});
+
+    REQUIRE(cancelled);
+    CHECK(*cancelled);
+  }
+
+  CHECK(fixture.send(U'A'));
+  CHECK(fixture.send(U'B'));
+  CHECK(fixture.send(U'C'));
+  CHECK(fixture.send(U'D'));
+  CHECK(calls == 2);
+
+  Subscription blocker;
+
+  REQUIRE(fixture.app->tree().withScope(fixture.scene->root(), [&](const UiScope &scope) {
+    auto timer = fixture.app->scheduler().at(scope, 5000, [] {
+    });
+
+    REQUIRE(timer);
+
+    blocker = std::move(*timer);
+  }));
+
+  const auto result = fixture.scene->input(*fixture.app, KeyEvent{InputKey::CHARACTER, U'A'});
+
+  REQUIRE_FALSE(result);
+  CHECK(result.error() == TreeError::WOULD_BLOCK);
+  CHECK_FALSE(fixture.send(U'B'));
+  CHECK_FALSE(fixture.send(U'C'));
+  CHECK_FALSE(fixture.send(U'D'));
+  CHECK(calls == 2);
+}
+
+TEST_CASE("failed onInput publication preserves pending and zero sequence timeout is rejected") {
+  SequenceFixture fixture;
+  int calls{};
+
+  fixture.bind("A,B", [&] {
+    ++calls;
+  });
+  CHECK(fixture.send(U'A'));
+
+  std::function<std::expected<bool, ManagedError>(const InputEvent &)> replacement =
+    [](const InputEvent &) -> std::expected<bool, ManagedError> {
+    return false;
+  };
+
+  AllocationFailure fault(0);
+  const auto replaced = fixture.scene->onInput(std::move(replacement));
+
+  fault.disable();
+
+  REQUIRE_FALSE(replaced);
+  CHECK(std::get<TreeError>(replaced.error().cause) == TreeError::NO_MEMORY);
+  CHECK(fixture.send(U'B'));
+  CHECK(calls == 1);
+
+  const auto invalid = ManagedScene::create(*fixture.app, {.keySequenceTimeout = 0});
+
+  REQUIRE_FALSE(invalid);
+  CHECK(std::get<TreeError>(invalid.error().cause) == TreeError::INVALID_ARGUMENT);
+}
+
+TEST_CASE("modifier-only segments report the first source modifier token") {
+  struct Invalid {
+    std::string_view source;
+    std::size_t offset;
+  };
+
+  const Invalid cases[] = {{"Alt", 0},        {"  Alt + Ctrl  ", 2},     {"Alt, A", 0},        {"  Alt + Ctrl  , A", 2},
+                           {"A,  Ctrl  ", 4}, {"A,  Alt + Ctrl , B", 4}, {"F10 | \t Ctrl ", 8}};
+
+  for (const auto &invalid : cases) {
+    CAPTURE(invalid.source);
+
+    const auto parsed = parseShortcut(invalid.source);
+
+    REQUIRE_FALSE(parsed);
+    CHECK(parsed.error().cause == ShortcutErrorKind::EXPECTED_KEY);
+    CHECK(parsed.error().offset == invalid.offset);
+  }
+}
+
+TEST_CASE("ignored-phase root terminal preserves reentrant registration and new prefix") {
+  for (bool replaceInput : {false, true}) {
+    CAPTURE(replaceInput);
+
+    SequenceFixture fixture;
+    int oldCalls{}, terminalCalls{}, nextCalls{};
+
+    fixture.bind("A,B",
+                 [&] {
+                   ++oldCalls;
+                 },
+                 {KeyAction::RELEASE});
+    fixture.bind("C", [&] {
+      ++terminalCalls;
+
+      if (replaceInput) {
+        REQUIRE(fixture.scene->onInput({}));
+      }
+
+      fixture.bind("D,E", [&] {
+        ++nextCalls;
+      });
+      CHECK(fixture.send(U'D'));
+    });
+
+    CHECK(fixture.send(U'A', KeyAction::RELEASE));
+    CHECK(fixture.send(U'C'));
+    CHECK(terminalCalls == 1);
+    CHECK_FALSE(fixture.send(U'B', KeyAction::RELEASE));
+    CHECK(fixture.send(U'E'));
+    CHECK(oldCalls == 0);
+    CHECK(nextCalls == 1);
+  }
+}
+
+TEST_CASE("ignored-phase root prefix arm failure clears live pending and retains winning origin") {
+  SequenceFixture fixture;
+  int oldCalls{}, nextCalls{};
+  auto oldShortcut = parseShortcut("A,B");
+  auto nextShortcut = parseShortcut("C,D");
+
+  REQUIRE(oldShortcut);
+  REQUIRE(nextShortcut);
+
+  const auto oldOrigin = std::source_location::current();
+
+  REQUIRE(fixture.scene->onKey(
+    ui::release(*oldShortcut),
+    [&] {
+      ++oldCalls;
+    },
+    oldOrigin));
+
+  const auto nextOrigin = std::source_location::current();
+
+  REQUIRE(fixture.scene->onKey(
+    *nextShortcut,
+    [&] {
+      ++nextCalls;
+    },
+    {}, {}, nextOrigin));
+  CHECK(fixture.send(U'A', KeyAction::RELEASE));
+  fixture.now = 5;
+
+  AllocationFailure fault(0);
+  const auto result = fixture.scene->input(*fixture.app, KeyEvent{InputKey::CHARACTER, U'C'});
+
+  fault.disable();
+
+  REQUIRE_FALSE(result);
+  CHECK(result.error() == TreeError::NO_MEMORY);
+  CHECK_FALSE(fixture.send(U'B', KeyAction::RELEASE));
+  CHECK_FALSE(fixture.send(U'D'));
+  CHECK(oldCalls == 0);
+  CHECK(nextCalls == 0);
+
+  const auto diagnostics = fixture.scene->diagnostics();
+
+  REQUIRE(diagnostics);
+  REQUIRE(diagnostics->errors.size() == 1);
+  CHECK(diagnostics->errors.front().error.phase == ManagedPhase::INPUT);
+  CHECK(diagnostics->errors.front().origin.line() == nextOrigin.line());
+  CHECK(diagnostics->errors.front().origin.line() != oldOrigin.line());
+  REQUIRE(diagnostics->errors.front().error.registrationOrigin);
+  CHECK(diagnostics->errors.front().error.registrationOrigin->line() == nextOrigin.line());
 }

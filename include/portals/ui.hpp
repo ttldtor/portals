@@ -1648,6 +1648,7 @@ auto onKey(KeyEvent chord, Callback callback, std::source_location origin = std:
  * @param options Positive finite normalization
  * budgets.
  * @return Owning selection or deferred ShortcutError; onKey supplies the registration origin.
+ * The action set applies independently to every sequence stroke without synthesizing phases.
  */
 template <portals::detail::ShortcutSource Source>
 KeySelection keyActions(Source &&source, std::initializer_list<KeyAction> actions, ShortcutOptions options = {}) {
@@ -1767,10 +1768,14 @@ auto onKey(KeySelection selection, Callback callback, std::source_location origi
 }
 
 /** @tparam Source Constexpr chord, owning alternatives or string-view-convertible runtime text.
- * @tparam Callback Owning compact checked action optionally taking a semantic KeyEvent.
- * @param source Source normalized during stage construction; caller text is never retained.
- * @param callback Action stored until checked stage consumption; caller callback construction/moves may throw.
+ * @tparam Callback
+ * Owning compact checked action optionally taking a semantic KeyEvent.
+ * @param source Source normalized during stage
+ * construction; caller text is never retained.
+ * @param callback Action stored until checked stage consumption; caller
+ * callback construction/moves may throw.
  * @param origin Registration site preserved across deferred configuration.
+ *
  * @return Consuming stage registering one atomic owning alternative set in the existing input slot.
  */
 template <portals::detail::ShortcutSource Source, class Callback>

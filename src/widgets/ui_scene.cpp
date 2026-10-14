@@ -296,6 +296,10 @@ constexpr const char *categoryName(ShortcutErrorKind value) noexcept {
     return "NO_MEMORY";
   case ShortcutErrorKind::INVALID_ACTION_SET:
     return "INVALID_ACTION_SET";
+  case ShortcutErrorKind::AMBIGUOUS_PREFIX:
+    return "AMBIGUOUS_PREFIX";
+  case ShortcutErrorKind::RESERVED_CANCEL:
+    return "RESERVED_CANCEL";
   }
 
   return "UNKNOWN";

@@ -40,6 +40,10 @@ EventRouter::~EventRouter() {
   state_->registrations.clear();
 }
 
+std::uint64_t EventRouter::focusGeneration() const noexcept {
+  return state_->focusGeneration;
+}
+
 WidgetTree &EventRouter::tree() {
   return state_->tree;
 }
@@ -237,6 +241,11 @@ std::expected<void, TreeError> EventRouter::changeFocus(Node<Widget> node) {
   const auto previous = state_->focus;
 
   state_->focus = node;
+
+  // Zero permanently invalidates sequence stamps after unsigned exhaustion; never reuse a stamp.
+  if (state_->focusGeneration) {
+    ++state_->focusGeneration;
+  }
 
   if (auto *recorder = tree().diagnostics(); recorder && recorder->enabled()) {
     const auto id = node.id();

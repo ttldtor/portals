@@ -93,14 +93,30 @@ bool validOptions(ShortcutOptions options) noexcept {
   return options.maxSourceBytes && options.maxAlternatives && options.maxStrokes;
 }
 
-std::expected<key::Chord, ShortcutError> parseAlternative(std::string_view source, std::size_t begin, std::size_t end,
-                                                          ShortcutOptions options) {
+bool validChord(key::Chord chord) noexcept {
+  const bool validCharacter = chord.scalar >= U' ' && chord.scalar <= U'~';
+  const bool validNamed = chord.key >= InputKey::ESCAPE && chord.key <= InputKey::F12 && chord.scalar == 0;
+
+  return chord.key == InputKey::CHARACTER ? validCharacter : validNamed;
+}
+
+bool properPrefix(std::span<const key::Chord> left, std::span<const key::Chord> right) noexcept {
+  return left.size() < right.size() &&
+         std::ranges::equal(
+           left, right.first(left.size()),
+           [](auto a, auto b) {
+             return detail::shortcutChordMatches(a, KeyEvent{b.key, b.scalar, b.modifiers});
+           });
+}
+
+std::expected<ShortcutSequence, ShortcutError> parseAlternative(std::string_view source, std::size_t begin,
+                                                                std::size_t end, ShortcutOptions options) {
+  ShortcutSequence result;
+  std::vector<std::size_t> offsets(0);
   std::size_t cursor = begin;
-  std::size_t strokes{};
-  std::size_t secondStroke{};
+  std::size_t segmentBegin{};
+  std::optional<std::size_t> modifierOffset;
   InputModifiers modifiers;
-  key::Chord first;
-  bool commaNeedsKey{};
 
   while (cursor < end && asciiSpace(source[cursor])) {
     ++cursor;
@@ -109,6 +125,24 @@ std::expected<key::Chord, ShortcutError> parseAlternative(std::string_view sourc
   if (cursor == end) {
     return std::unexpected(ShortcutError{ShortcutErrorKind::EMPTY_ALTERNATIVE, cursor});
   }
+
+  const auto finishSegment = [&]() -> std::expected<void, ShortcutError> {
+    if (segmentBegin == result.strokes.size()) {
+      return std::unexpected(ShortcutError{ShortcutErrorKind::EXPECTED_KEY, modifierOffset.value_or(cursor)});
+    }
+
+    for (auto index = segmentBegin; index < result.strokes.size(); ++index) {
+      auto &chord = result.strokes[index];
+
+      chord.modifiers = modifiers;
+
+      if (index && chord.key == InputKey::ESCAPE && modifiers == InputModifiers{}) {
+        return std::unexpected(ShortcutError{ShortcutErrorKind::RESERVED_CANCEL, offsets[index]});
+      }
+    }
+
+    return {};
+  };
 
   while (true) {
     while (cursor < end && asciiSpace(source[cursor])) {
@@ -147,82 +181,100 @@ std::expected<key::Chord, ShortcutError> parseAlternative(std::string_view sourc
         return std::unexpected(ShortcutError{ShortcutErrorKind::DUPLICATE_MODIFIER, tokenStart});
       }
 
+      if (!modifierOffset) {
+        modifierOffset = tokenStart;
+      }
+
       *modifier = true;
     } else {
-      auto chord = namedKey(token);
+      const auto chord = namedKey(token);
 
       if (!chord) {
         return std::unexpected(ShortcutError{ShortcutErrorKind::UNKNOWN_KEY, tokenStart});
       }
 
-      ++strokes;
-      commaNeedsKey = false;
-
-      if (strokes > options.maxStrokes) {
+      if (result.strokes.size() >= options.maxStrokes) {
         return std::unexpected(ShortcutError{ShortcutErrorKind::STROKE_LIMIT, tokenStart});
       }
 
-      if (strokes == 1) {
-        first = *chord;
-      } else if (strokes == 2) {
-        secondStroke = tokenStart;
+      result.strokes.push_back(*chord);
+      offsets.push_back(tokenStart);
+    }
+
+    if (cursor == end || source[cursor] == ',') {
+      auto finished = finishSegment();
+
+      if (!finished) {
+        return std::unexpected(finished.error());
       }
+
+      segmentBegin = result.strokes.size();
+      modifierOffset.reset();
+      modifiers = {};
     }
 
     if (cursor == end) {
       break;
     }
 
-    if (source[cursor] == ',') {
-      if (!strokes || commaNeedsKey) {
-        return std::unexpected(ShortcutError{ShortcutErrorKind::EXPECTED_KEY, cursor});
-      }
-
-      if (strokes == 1) {
-        first.modifiers = modifiers;
-      }
-
-      modifiers = {};
-      commaNeedsKey = true;
-    }
-
     ++cursor;
   }
 
-  if (!strokes || commaNeedsKey) {
-    return std::unexpected(ShortcutError{ShortcutErrorKind::EXPECTED_KEY, end});
-  }
-
-  if (strokes > 1) {
-    return std::unexpected(ShortcutError{ShortcutErrorKind::UNSUPPORTED_SEQUENCE, secondStroke});
-  }
-
-  first.modifiers = modifiers;
-
-  return first;
+  return result;
 }
 } // namespace
+
+std::span<const key::Chord> detail::shortcutAlternative(const Shortcut &shortcut, std::size_t index) noexcept {
+  if (index < shortcut.alternatives.size()) {
+    return {&shortcut.alternatives[index], 1};
+  }
+
+  return shortcut.sequences[index - shortcut.alternatives.size()].strokes;
+}
 
 std::expected<void, ShortcutError> validateShortcut(const Shortcut &shortcut, ShortcutOptions options) noexcept {
   if (!validOptions(options)) {
     return std::unexpected(ShortcutError{ShortcutErrorKind::INVALID_OPTIONS, 0});
   }
 
-  if (shortcut.alternatives.empty()) {
+  if (shortcut.alternatives.empty() && shortcut.sequences.empty()) {
     return std::unexpected(ShortcutError{ShortcutErrorKind::EMPTY_ALTERNATIVE, 0});
   }
 
-  if (shortcut.alternatives.size() > options.maxAlternatives) {
+  if (shortcut.alternatives.size() > options.maxAlternatives ||
+      shortcut.sequences.size() > options.maxAlternatives - shortcut.alternatives.size()) {
     return std::unexpected(ShortcutError{ShortcutErrorKind::ALTERNATIVE_LIMIT, options.maxAlternatives});
   }
 
-  for (std::size_t index{}; index < shortcut.alternatives.size(); ++index) {
-    const auto &chord = shortcut.alternatives[index];
-    const bool validCharacter = chord.scalar >= U' ' && chord.scalar <= U'~';
-    const bool validNamed = chord.key >= InputKey::ESCAPE && chord.key <= InputKey::F12 && chord.scalar == 0;
+  const auto count = shortcut.alternatives.size() + shortcut.sequences.size();
 
-    if (chord.key == InputKey::CHARACTER ? !validCharacter : !validNamed) {
+  for (std::size_t index{}; index < count; ++index) {
+    const auto strokes = detail::shortcutAlternative(shortcut, index);
+
+    if (index >= shortcut.alternatives.size() && strokes.size() < 2) {
       return std::unexpected(ShortcutError{ShortcutErrorKind::INVALID_CHORD, index});
+    }
+
+    if (strokes.size() > options.maxStrokes) {
+      return std::unexpected(ShortcutError{ShortcutErrorKind::STROKE_LIMIT, index});
+    }
+
+    for (std::size_t stroke{}; stroke < strokes.size(); ++stroke) {
+      if (!validChord(strokes[stroke])) {
+        return std::unexpected(ShortcutError{ShortcutErrorKind::INVALID_CHORD, index});
+      }
+
+      if (stroke && strokes[stroke].key == InputKey::ESCAPE && strokes[stroke].modifiers == InputModifiers{}) {
+        return std::unexpected(ShortcutError{ShortcutErrorKind::RESERVED_CANCEL, index});
+      }
+    }
+
+    for (std::size_t previous{}; previous < index; ++previous) {
+      const auto other = detail::shortcutAlternative(shortcut, previous);
+
+      if (properPrefix(strokes, other) || properPrefix(other, strokes)) {
+        return std::unexpected(ShortcutError{ShortcutErrorKind::AMBIGUOUS_PREFIX, index});
+      }
     }
   }
 
@@ -243,19 +295,39 @@ std::expected<Shortcut, ShortcutError> parseShortcut(std::string_view source, Sh
     std::size_t begin{};
 
     while (true) {
-      if (result.alternatives.size() >= options.maxAlternatives) {
+      const auto count = result.alternatives.size() + result.sequences.size();
+
+      if (count >= options.maxAlternatives) {
         return std::unexpected(ShortcutError{ShortcutErrorKind::ALTERNATIVE_LIMIT, begin});
       }
 
       const auto separator = source.find('|', begin);
       const auto end = separator == source.npos ? source.size() : separator;
-      auto chord = parseAlternative(source, begin, end, options);
+      auto parsed = parseAlternative(source, begin, end, options);
 
-      if (!chord) {
-        return std::unexpected(chord.error());
+      if (!parsed) {
+        return std::unexpected(parsed.error());
       }
 
-      result.alternatives.push_back(*chord);
+      const auto &strokes = parsed->strokes;
+
+      for (std::size_t previous{}; previous < count; ++previous) {
+        const auto other = detail::shortcutAlternative(result, previous);
+
+        if (properPrefix(strokes, other) || properPrefix(other, strokes)) {
+          while (begin < end && asciiSpace(source[begin])) {
+            ++begin;
+          }
+
+          return std::unexpected(ShortcutError{ShortcutErrorKind::AMBIGUOUS_PREFIX, begin});
+        }
+      }
+
+      if (strokes.size() == 1) {
+        result.alternatives.push_back(strokes.front());
+      } else {
+        result.sequences.push_back(std::move(*parsed));
+      }
 
       if (separator == source.npos) {
         break;
@@ -276,8 +348,7 @@ std::optional<KeyEvent> matchShortcut(const Shortcut &shortcut, const InputEvent
     shortcut, event, behavior.repeat ? detail::ShortcutActions::PRESS_REPEAT : detail::ShortcutActions::PRESS);
 }
 
-std::optional<KeyEvent> detail::matchShortcutActions(const Shortcut &shortcut, const InputEvent &event,
-                                                     detail::ShortcutActions actions) noexcept {
+std::optional<KeyEvent> detail::shortcutEvent(const InputEvent &event, ShortcutActions actions) noexcept {
   KeyEvent value;
 
   if (const auto *key = std::get_if<KeyEvent>(&event)) {
@@ -288,16 +359,25 @@ std::optional<KeyEvent> detail::matchShortcutActions(const Shortcut &shortcut, c
     return {};
   }
 
-  const auto bit = actionBit(value.action);
+  return (static_cast<unsigned>(actions) & actionBit(value.action)) != 0 ? std::optional(value) : std::nullopt;
+}
 
-  if ((static_cast<unsigned>(actions) & bit) == 0) {
+bool detail::shortcutChordMatches(key::Chord chord, const KeyEvent &event) noexcept {
+  return event.key == chord.key && event.modifiers == chord.modifiers &&
+         (event.key == InputKey::CHARACTER ? asciiUpper(event.scalar) == asciiUpper(chord.scalar)
+                                           : event.scalar == chord.scalar);
+}
+
+std::optional<KeyEvent> detail::matchShortcutActions(const Shortcut &shortcut, const InputEvent &event,
+                                                     ShortcutActions actions) noexcept {
+  const auto value = shortcutEvent(event, actions);
+
+  if (!value) {
     return {};
   }
 
   for (const auto &chord : shortcut.alternatives) {
-    if (value.key == chord.key && value.modifiers == chord.modifiers &&
-        (value.key == InputKey::CHARACTER ? asciiUpper(value.scalar) == asciiUpper(chord.scalar)
-                                          : value.scalar == chord.scalar)) {
+    if (shortcutChordMatches(chord, *value)) {
       return value;
     }
   }

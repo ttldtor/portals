@@ -364,7 +364,7 @@ public:
   }
 
   /** @tparam Callback Existing owning compact action, optionally taking const KeyEvent&.
-   * @param selection Immutable owning alternatives with exact native phase admission.
+   * @param selection Immutable owning alternatives; its native phase mask applies to each sequence stroke.
    * @param callback Action transferred into deferred scene configuration.
    * @param origin Registration call site, independent of helper construction.
    * @return This owner, retaining typed helper errors in the existing collector.
@@ -379,7 +379,7 @@ public:
   }
 
   /** @tparam Callback Existing owning compact action, optionally taking const KeyEvent&.
-   * @param selection Immutable owning alternatives with exact native phase admission.
+   * @param selection Immutable owning alternatives; its native phase mask applies to each sequence stroke.
    * @param callback Action transferred into deferred scene configuration.
    * @param origin Registration call site, independent of helper construction.
    * @return Consuming owner for temporary fluent chains.
