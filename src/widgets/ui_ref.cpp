@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include <portals/detail/setup_failure.hpp>
 #include <portals/ui_ref.hpp>
 
 namespace portals::ui {
@@ -52,6 +53,18 @@ ManagedError textFailure(Node<Widget> node, TextValueError cause) {
 
 /** @brief Checked bridge to existing scene ownership and standard retained setters. */
 struct RefAccess {
+  static void report(ManagedError &failure, const std::shared_ptr<RefTarget> &target, const char *operation,
+                     std::string_view key, std::string_view expectedType, std::source_location origin) noexcept {
+    failure.operation = operation;
+    failure.operationOrigin = origin;
+
+    if (target && target->owner == std::this_thread::get_id() && !target->lifetime.expired()) {
+      target->scene->reportShortError(failure, operation, key, expectedType, origin);
+    } else {
+      const auto ticket = SetupFailureScope::latch(failure);
+    }
+  }
+
   struct Snapshot {
     std::string bytes = std::string(0, '\0');
     WidthPolicy policy;
@@ -344,24 +357,16 @@ std::expected<void, ManagedError> TextProperty::result() const {
   return result_;
 }
 
-void TextProperty::report(std::string_view operation, std::string_view key, std::source_location origin) {
-  if (result_ || !target_ || target_->owner != std::this_thread::get_id() || target_->lifetime.expired()) {
+void TextProperty::report(const char *operation, std::string_view key, std::source_location origin) {
+  if (result_) {
     return;
   }
 
   // An observer can attempt another operation through this same proxy. Preserve the outer receipt.
   auto original = result_.error();
 
-  try {
-    const ManagedDiagnosticContext context{
-      std::string(operation), std::string(key), {}, std::string(expectedType_), origin};
-
-    static_cast<void>(target_->scene->reportError(original, std::span(&context, 1), origin));
-  } catch (const std::bad_alloc &) {
-    static_cast<void>(target_->scene->reportError(original, {}, origin));
-  } catch (const std::length_error &) {
-    static_cast<void>(target_->scene->reportError(original, {}, origin));
-  }
+  // Operation labels are library literals; no caller-owned view is retained in error metadata.
+  detail::RefAccess::report(original, target_, operation, key, expectedType_, origin);
 
   result_ = std::unexpected(std::move(original));
 }

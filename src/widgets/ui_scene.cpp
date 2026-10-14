@@ -424,6 +424,18 @@ void reportApplication(const ApplicationError &cause) noexcept {
 void reportFailure(const ManagedError &failure, std::source_location origin) noexcept {
   std::fprintf(stderr, "Portals: scene failed (phase=%s) at %s:%u: ", phaseName(failure.phase), origin.file_name(),
                origin.line());
+  if (failure.operation) {
+    std::fprintf(stderr, "operation=%s ", failure.operation);
+  }
+
+  if (failure.execution) {
+    std::fprintf(stderr, "execution=%s ", failure.execution);
+  }
+
+  if (failure.setupStopped) {
+    std::fputs("response=setup-stopped ", stderr);
+  }
+
   std::visit(
     [](const auto &cause) {
       using Cause = std::decay_t<decltype(cause)>;
@@ -542,6 +554,8 @@ struct Scene::State {
   bool prepared{}, completed{}, managedClosed{}, notified{}, fallbackObserverFailed{};
   bool publishingFailure{};
   bool quitRequested{}, finalReported{};
+  bool shortFailure{}, shortDeliveryPending{};
+  const void *primaryShortAttempt{};
 
   struct StyleBinding {
     std::weak_ptr<const void> identity;
@@ -618,39 +632,110 @@ struct Scene::State {
     }
   }
 
-  void fail(ManagedError cause, std::string_view operation, std::source_location origin, bool report = true) {
+  void fail(ManagedError cause, const char *operation, std::source_location origin, bool report = true) {
     // Reporting is read-only: rejected final-sink reentry cannot alter a completed outcome or notify reactions.
     if (failure || active == Operation::REPORT) {
       return;
     }
 
+    if (!cause.operation) {
+      cause.operation = operation;
+      cause.operationOrigin = origin;
+    }
+
+    if (!cause.execution) {
+      cause.execution = operation;
+    }
+
     failure = std::move(cause);
-    failureOrigin = origin;
+    failureOrigin = failure->operationOrigin.value_or(origin);
 
     if (!report) {
       return;
     }
 
+    if (managed && detail::SceneAccess::shortReported(*managed, *failure)) {
+      return;
+    }
+
+    publishFailure(operation, origin);
+  }
+
+  void publishFailure(const char *operation, std::source_location origin) {
     if (managed && !managedClosed) {
+      bool entered{};
+
       try {
         std::array<ManagedDiagnosticContext, 1> context;
 
         context[0].operation = operation;
         context[0].origin = origin;
         publishingFailure = true;
-        (void)managed->reportError(*failure, context, origin);
+        entered = managed->reportError(*failure, context, failureOrigin).has_value();
         publishingFailure = false;
       } catch (const std::bad_alloc &) {
         publishingFailure = true;
-        (void)managed->reportError(*failure, {}, origin);
+        entered = managed->reportError(*failure, {}, failureOrigin).has_value();
         publishingFailure = false;
+      }
+
+      if (!entered) {
+        notifyFallback();
       }
     } else {
       notifyFallback();
     }
   }
 
+  static void setupEvent(void *publication, detail::SetupFailureEvent event, ManagedError *cause,
+                         const void *attempt) noexcept {
+    auto &anchor = *static_cast<detail::SceneAnchor *>(publication);
+
+    if (anchor.owner != std::this_thread::get_id() || !anchor.state) {
+      return;
+    }
+
+    auto &state = *static_cast<State *>(anchor.state);
+
+    switch (event) {
+    case detail::SetupFailureEvent::LATCH:
+      if (!state.failure && !state.completed && state.active != Operation::REPORT) {
+        state.fail(*cause, cause->execution, cause->operationOrigin.value_or(std::source_location{}), false);
+        const bool entered = state.managed && detail::SceneAccess::shortReported(*state.managed, *cause);
+
+        state.shortFailure = true;
+        state.shortDeliveryPending = !entered;
+        state.primaryShortAttempt = entered ? attempt : nullptr;
+      }
+      break;
+    case detail::SetupFailureEvent::NOTIFY:
+      if (attempt && state.primaryShortAttempt == attempt) {
+        // Notification identity is synchronous, separate from whether bounded history retained the error.
+        state.notified = true;
+      }
+      break;
+    case detail::SetupFailureEvent::END_ATTEMPT:
+      if (attempt && state.primaryShortAttempt == attempt) {
+        state.primaryShortAttempt = nullptr;
+      }
+      break;
+    case detail::SetupFailureEvent::END_SCOPE:
+      state.primaryShortAttempt = nullptr;
+
+      if (state.shortDeliveryPending) {
+        state.shortDeliveryPending = false;
+        state.publishFailure(state.failure->execution, state.failureOrigin);
+      }
+
+      if (state.shortFailure) {
+        state.notifyFallback();
+      }
+      break;
+    }
+  }
+
   std::expected<void, ManagedError> cleanup(std::source_location origin) {
+    detail::SetupFailureScope cleanupScope({}, nullptr, nullptr);
     completed = true;
 
     // Revoke observing publication and actual live controllers before managed input captures retire.
@@ -686,6 +771,9 @@ struct Scene::State {
   }
 
   void invoke(Configuration &callback, std::source_location origin) {
+    detail::SetupFailureScope scope(active == Operation::RUN ? std::weak_ptr<void>{} : anchor,
+                                    active == Operation::RUN ? nullptr : setupEvent, "scene.configure");
+
     try {
       auto result = callback(*managed);
 
@@ -699,6 +787,14 @@ struct Scene::State {
     }
   }
 };
+
+detail::SetupFailureScope Scene::setupScope(const char *execution) noexcept {
+  if (owner_ != std::this_thread::get_id() || !state_) {
+    return detail::SetupFailureScope({}, nullptr, execution);
+  }
+
+  return detail::SetupFailureScope(state_->anchor, State::setupEvent, execution);
+}
 
 Scene::Scene(Configuration recipe, SceneOptions options, std::source_location origin)
     : owner_(std::this_thread::get_id()), state_(std::make_unique<State>()) {
@@ -728,21 +824,28 @@ Scene::~Scene() {
     std::terminate();
   }
 
-  State::Guard guard(*state_, State::Operation::CLOSE);
+  detail::SetupFailureScope lifecycleScope({}, nullptr, nullptr);
 
-  (void)state_->cleanup(std::source_location::current());
-  state_->observer.reset();
-  state_->reportSink.reset();
+  {
+    State::Guard guard(*state_, State::Operation::CLOSE);
 
-  // Detach each public-facing owner before its user captures retire, while all State fields live.
-  auto managed = std::move(state_->managed);
+    (void)state_->cleanup(std::source_location::current());
+    state_->observer.reset();
+    state_->reportSink.reset();
 
-  managed.reset();
+    // Detach each public-facing owner before its user captures retire, while all State fields live.
+    auto managed = std::move(state_->managed);
 
-  auto application = std::move(state_->application);
+    managed.reset();
 
-  application.reset();
-  state_->options.application.scheduler.diagnostics.reset();
+    auto application = std::move(state_->application);
+
+    application.reset();
+    state_->options.application.scheduler.diagnostics.reset();
+  }
+
+  // Retire passive diagnostic identities under the same mask, after guarded user services are gone.
+  state_.reset();
 }
 
 std::expected<void, ManagedError> Scene::checked() const {
@@ -827,6 +930,7 @@ std::expected<void, ManagedError> Scene::prepareChecked(std::source_location ori
     return checked();
   }
 
+  detail::SetupFailureScope lifecycleScope({}, nullptr, nullptr);
   auto &state = *state_;
 
   if (state.active != State::Operation::NONE) {
@@ -989,6 +1093,7 @@ void Scene::shortcutConfigurationFailure(ShortcutError cause, std::source_locati
 }
 
 void Scene::addConfiguration(Configuration callback, bool runtime, std::source_location origin) {
+  detail::SetupFailureScope configurationScope({}, nullptr, nullptr);
   auto &state = *state_;
 
   if (state.prepared) {
@@ -1289,6 +1394,12 @@ void Scene::applyTheme(const StyleSheet &sheet, std::source_location origin) {
 }
 
 Scene &Scene::onError(ManagedErrorHandler observer, std::source_location origin) & {
+  detail::SetupFailureScope observerScope({}, nullptr, nullptr);
+  ManagedErrorHandler incomingObserver;
+
+  // Empty the parameter so rejected or failed transfers retire its target before the scope.
+  incomingObserver.swap(observer);
+
   if (owner_ != std::this_thread::get_id() || !state_) {
     return *this;
   }
@@ -1304,7 +1415,7 @@ Scene &Scene::onError(ManagedErrorHandler observer, std::source_location origin)
   State::Guard guard(state, State::Operation::CONFIGURE);
 
   try {
-    auto replacement = observer ? std::make_shared<ManagedErrorHandler>(std::move(observer)) : nullptr;
+    auto replacement = incomingObserver ? std::make_shared<ManagedErrorHandler>(std::move(incomingObserver)) : nullptr;
 
     state.observer.swap(replacement);
 
@@ -1331,6 +1442,12 @@ Scene &Scene::onError(ManagedErrorHandler observer, std::source_location origin)
 }
 
 Scene &Scene::reportOnError(SceneReportHandler sink, std::source_location origin) & {
+  detail::SetupFailureScope reportingScope({}, nullptr, nullptr);
+  SceneReportHandler incomingSink;
+
+  // std::function::swap leaves the parameter empty without allocating.
+  incomingSink.swap(sink);
+
   if (owner_ != std::this_thread::get_id() || !state_) {
     return *this;
   }
@@ -1346,7 +1463,7 @@ Scene &Scene::reportOnError(SceneReportHandler sink, std::source_location origin
   State::Guard guard(state, State::Operation::CONFIGURE);
 
   try {
-    auto replacement = sink ? std::make_shared<SceneReportHandler>(std::move(sink)) : nullptr;
+    auto replacement = incomingSink ? std::make_shared<SceneReportHandler>(std::move(incomingSink)) : nullptr;
 
     state.reportSink.swap(replacement);
   } catch (const std::bad_alloc &) {
@@ -1409,6 +1526,7 @@ int Scene::runAppImpl(ApplicationTerminal *terminal, std::stop_token stop, std::
     return 1;
   }
 
+  detail::SetupFailureScope lifecycleScope({}, nullptr, nullptr);
   const auto result = runImpl(terminal, stop, origin);
   auto &state = *state_;
 
@@ -1465,6 +1583,7 @@ std::expected<ApplicationStats, ManagedError> Scene::run(ApplicationTerminal &te
 
 std::expected<ApplicationStats, ManagedError> Scene::runImpl(ApplicationTerminal *terminal, std::stop_token stop,
                                                              std::source_location origin) {
+  detail::SetupFailureScope lifecycleScope({}, nullptr, nullptr);
   auto prepared = prepareChecked(origin);
 
   if (!prepared) {
@@ -1507,6 +1626,7 @@ std::expected<void, ManagedError> Scene::close(std::source_location origin) {
     return std::unexpected(error(ManagedPhase::CLEANUP, TreeError::CLOSED));
   }
 
+  detail::SetupFailureScope lifecycleScope({}, nullptr, nullptr);
   auto &state = *state_;
 
   if (state.active != State::Operation::NONE) {

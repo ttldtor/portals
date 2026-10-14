@@ -1379,10 +1379,18 @@ template <class T> struct IsSceneRecipe<std::expected<Description<T>, ManagedErr
  */
 inline void reportFactoryFailure(const SceneReportHandler &sink, ManagedError failure,
                                  std::source_location origin) noexcept {
+  SetupFailureScope reportingScope({}, nullptr, nullptr);
   SceneReport report;
 
+  if (!failure.operation) {
+    failure.operation = "scene.factory";
+    failure.operationOrigin = origin;
+  }
+
+  failure.execution = "scene.factory";
+
   report.failure = std::move(failure);
-  report.origin = origin;
+  report.origin = report.failure->operationOrigin.value_or(origin);
 
   try {
     if (sink) {
@@ -1882,12 +1890,16 @@ auto onClick(Ref<Button> reference, Callback callback, std::source_location orig
  * @return Zero after successful run, one for factory/construction/setup/run failure after cleanup.
  * Callable and argument construction before actual invocation can throw outside this boundary.
  * Factory must not return Scene. Setup exceptions map to NO_MEMORY or CALLBACK_FAILED.
+ * A rejected short mutation inside setup latches its original typed cause before observers; the current void
+ * callback finishes, while later setup/run is skipped. Unbound targets can be attributed to this entered scope.
  */
 template <class Factory, detail::AppSetup Setup>
   requires std::invocable<Factory &> && (!std::is_reference_v<std::invoke_result_t<Factory &>>) &&
            detail::IsSceneRecipe<std::remove_cvref_t<std::invoke_result_t<Factory &>>>::value
 int runApp(Factory &&factory, Setup &&setup, const RunAppOptions &options = {},
            std::source_location origin = std::source_location::current()) {
+  detail::SetupFailureScope invocationScope({}, nullptr, nullptr);
+
   try {
     auto description = std::invoke(factory);
 
@@ -1913,22 +1925,31 @@ int runApp(Factory &&factory, Setup &&setup, const RunAppOptions &options = {},
     owner.reportOnError(options.report, origin);
 
     if (owner.checked()) {
-      try {
-        if constexpr (std::same_as<std::invoke_result_t<Setup &, Scene &>, void>) {
-          std::invoke(setup, owner);
-        } else {
-          auto configured = std::invoke(setup, owner);
+      std::optional<ManagedError> setupFailure;
 
-          if (!configured) {
-            detail::SceneAccess::setupFailure(owner, configured.error(), origin);
+      {
+        auto setupScope = detail::SceneAccess::setupScope(owner);
+
+        try {
+          if constexpr (std::same_as<std::invoke_result_t<Setup &, Scene &>, void>) {
+            std::invoke(setup, owner);
+          } else {
+            auto configured = std::invoke(setup, owner);
+
+            if (!configured) {
+              setupFailure = configured.error();
+            }
           }
+        } catch (const std::bad_alloc &) {
+          setupFailure = ManagedError{ManagedPhase::BIND, {}, TreeError::NO_MEMORY, {}, {}};
+        } catch (...) {
+          setupFailure = ManagedError{ManagedPhase::BIND, {}, TreeError::CALLBACK_FAILED, {}, {}};
         }
-      } catch (const std::bad_alloc &) {
-        detail::SceneAccess::setupFailure(owner, ManagedError{ManagedPhase::BIND, {}, TreeError::NO_MEMORY, {}, {}},
-                                          origin);
-      } catch (...) {
-        detail::SceneAccess::setupFailure(
-          owner, ManagedError{ManagedPhase::BIND, {}, TreeError::CALLBACK_FAILED, {}, {}}, origin);
+      }
+
+      // Finalize the short-error scope before cleanup can revoke its weak delivery publication.
+      if (setupFailure) {
+        detail::SceneAccess::setupFailure(owner, *setupFailure, origin);
       }
     }
 

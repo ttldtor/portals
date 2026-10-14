@@ -100,6 +100,8 @@ private:
  * setControlText; editor changes accept a draft and apply its configured EditMode confirmation rules.
  * Every rejected mutation preserves its target value and reports to the live scene collector on UI.
  * WRONG_THREAD and an absent/destroyed scene are observable through result(), without unsafe reporting.
+ * Within an entered UI setup scope, even an unavailable target failure stops that setup after the callback
+ * returns. It never notifies a foreign owner; outside setup, existing runtime recovery remains unchanged.
  * Each successful operation stands independently; a later failure does not roll back earlier changes.
  * Methods return an owning proxy value so chains and saved results never borrow a temporary proxy.
  * Resolver capture construction can throw before entry. Internally allocation/extension exceptions are
@@ -125,6 +127,7 @@ public:
 
   /** @brief Inspect the last mutation of this particular proxy; newly created proxies have success.
    * @return Success or exact text-acceptance failure; no scene/widget access is performed.
+   * Copies preserve internal short-report provenance for same-collector configure/setup deduplication.
    * Editor validation/publication outcomes use its LineEditResult callback, including accepted invalid drafts.
    */
   std::expected<void, ManagedError> result() const;
@@ -216,7 +219,7 @@ private:
   TextProperty mutate(std::string_view value, bool append, std::source_location origin);
   TextProperty mutate(const TextResult &value, bool append);
   TextResult readResult() const;
-  void report(std::string_view operation, std::string_view key, std::source_location origin);
+  void report(const char *operation, std::string_view key, std::source_location origin);
 
   std::shared_ptr<detail::RefTarget> target_;
   std::shared_ptr<TextResolver> resolver_;

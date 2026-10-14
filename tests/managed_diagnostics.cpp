@@ -13,6 +13,20 @@
 #include <new>
 #include <stdexcept>
 #include <thread>
+#include <type_traits>
+
+static_assert(std::is_aggregate_v<portals::ManagedError>);
+static_assert(std::is_nothrow_copy_constructible_v<portals::ManagedError>);
+
+TEST_CASE("managed errors preserve aggregate positional and designated initialization") {
+  const portals::ManagedError positional{portals::ManagedPhase::TEXT, {}, portals::TreeError::CLOSED, {}, {}};
+  const portals::ManagedError designated{.phase = portals::ManagedPhase::TEXT, .cause = portals::TreeError::CLOSED};
+  CHECK(positional.phase == designated.phase);
+  CHECK(std::get<portals::TreeError>(positional.cause) == std::get<portals::TreeError>(designated.cause));
+  CHECK_FALSE(positional.operation);
+  CHECK_FALSE(designated.operationOrigin);
+  CHECK_FALSE(designated.setupStopped);
+}
 
 namespace {
 std::atomic<bool> rejectAllocations{};

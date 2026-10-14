@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include <portals/detail/pss_parser.hpp>
+#include <portals/detail/setup_failure.hpp>
 #include <portals/managed.hpp>
 
 #include <algorithm>
@@ -475,9 +476,14 @@ std::expected<void, ManagedError> ManagedScene::remove(Node<Widget> node) {
 std::optional<std::size_t> ManagedScene::recordError(ManagedError failure,
                                                      std::span<const ManagedDiagnosticContext> contexts,
                                                      std::source_location origin, bool *observerInvoked,
-                                                     bool runFailure) noexcept {
+                                                     bool runFailure, const ui::detail::SetupFailureTicket *shortTicket,
+                                                     bool contextUnavailable) noexcept {
   if (observerInvoked) {
     *observerInvoked = false;
+  }
+
+  if (contextUnavailable) {
+    increment(contextFailures_);
   }
 
   if (errorCount_ == errors_.size()) {
@@ -493,10 +499,11 @@ std::optional<std::size_t> ManagedScene::recordError(ManagedError failure,
     overflowDiagnostic_.error = std::move(failure);
     overflowDiagnostic_.origin = origin;
     overflowDiagnostic_.storageOverflow = true;
-    overflowDiagnostic_.contextsTruncated = !contexts.empty();
+    overflowDiagnostic_.contextsTruncated = contextUnavailable || !contexts.empty();
+    overflowDiagnostic_.contextUnavailable = contextUnavailable;
     overflowDiagnostic_.notificationSuppressed = false;
     overflowDiagnostic_.observerFailed = false;
-    const bool invoked = notifyError(overflowDiagnostic_, runFailure);
+    const bool invoked = notifyError(overflowDiagnostic_, runFailure, shortTicket);
 
     if (observerInvoked) {
       *observerInvoked = invoked;
@@ -512,9 +519,14 @@ std::optional<std::size_t> ManagedScene::recordError(ManagedError failure,
   // Entries and their empty context containers were constructed before mounting the scene.
   diagnostic.error = std::move(failure);
   diagnostic.origin = origin;
+  diagnostic.contextUnavailable = contextUnavailable;
 
   try {
-    copyContexts(diagnostic, contexts, options_.diagnostics);
+    if (contextUnavailable) {
+      diagnostic.contextsTruncated = true;
+    } else {
+      copyContexts(diagnostic, contexts, options_.diagnostics);
+    }
   } catch (const std::bad_alloc &) {
     diagnostic.contexts.clear();
     diagnostic.contextUnavailable = true;
@@ -522,7 +534,7 @@ std::optional<std::size_t> ManagedScene::recordError(ManagedError failure,
     increment(contextFailures_);
   }
 
-  const bool invoked = notifyError(diagnostic, runFailure);
+  const bool invoked = notifyError(diagnostic, runFailure, shortTicket);
 
   if (observerInvoked) {
     *observerInvoked = invoked;
@@ -531,7 +543,8 @@ std::optional<std::size_t> ManagedScene::recordError(ManagedError failure,
   return index;
 }
 
-bool ManagedScene::notifyError(ManagedDiagnostic &diagnostic, bool runFailure) noexcept {
+bool ManagedScene::notifyError(ManagedDiagnostic &diagnostic, bool runFailure,
+                               const ui::detail::SetupFailureTicket *shortTicket) noexcept {
   if (!errorObserver_) {
     return false;
   }
@@ -559,6 +572,10 @@ bool ManagedScene::notifyError(ManagedDiagnostic &diagnostic, bool runFailure) n
   reporting_ = true;
   notifyingRunFailure_ = runFailure;
 
+  if (shortTicket) {
+    shortTicket->notifying();
+  }
+
   try {
     (*callback)(diagnostic);
   } catch (...) {
@@ -583,6 +600,34 @@ std::expected<void, TreeError> ManagedScene::reportError(ManagedError failure,
   (void)recordError(std::move(failure), contexts, origin);
 
   return {};
+}
+
+void ManagedScene::reportShortError(ManagedError &failure, const char *operation, std::string_view name,
+                                    std::string_view expectedType, std::source_location origin) noexcept {
+  failure.operation = operation;
+  failure.operationOrigin = origin;
+
+  if (owner_ != std::this_thread::get_id() || closed_) {
+    const auto ticket = ui::detail::SetupFailureScope::latch(failure);
+
+    return;
+  }
+
+  // Admission commits to collector entry. No allocation or user callback precedes this receipt and latch.
+  const std::byte attempt{};
+  failure.reportReceipt.collector_ = lifetime_;
+  const auto ticket = ui::detail::SetupFailureScope::latch(failure, &attempt);
+
+  try {
+    const ManagedDiagnosticContext context{
+      std::string(operation), std::string(name), {}, std::string(expectedType), origin};
+
+    (void)recordError(failure, std::span(&context, 1), origin, nullptr, false, &ticket);
+  } catch (const std::bad_alloc &) {
+    (void)recordError(failure, {}, origin, nullptr, false, &ticket, true);
+  } catch (const std::length_error &) {
+    (void)recordError(failure, {}, origin, nullptr, false, &ticket, true);
+  }
 }
 
 std::expected<void, ManagedError> ManagedScene::onError(ManagedErrorHandler callback) {

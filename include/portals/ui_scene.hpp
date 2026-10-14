@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include <portals/detail/setup_failure.hpp>
 #include <portals/managed.hpp>
 #include <portals/ui_ref.hpp>
 
@@ -313,7 +314,11 @@ public:
    * @return Consuming owner for temporary fluent chains.
    */
   Scene &&onError(ManagedErrorHandler observer, std::source_location origin = std::source_location::current()) && {
-    static_cast<Scene &>(*this).onError(std::move(observer), origin);
+    detail::SetupFailureScope observerScope({}, nullptr, nullptr);
+    ManagedErrorHandler incomingObserver;
+
+    incomingObserver.swap(observer);
+    static_cast<Scene &>(*this).onError(std::move(incomingObserver), origin);
 
     return std::move(*this);
   }
@@ -331,7 +336,11 @@ public:
    */
   Scene &&reportOnError(SceneReportHandler sink = {},
                         std::source_location origin = std::source_location::current()) && {
-    static_cast<Scene &>(*this).reportOnError(std::move(sink), origin);
+    detail::SetupFailureScope reportingScope({}, nullptr, nullptr);
+    SceneReportHandler incomingSink;
+
+    incomingSink.swap(sink);
+    static_cast<Scene &>(*this).reportOnError(std::move(incomingSink), origin);
 
     return std::move(*this);
   }
@@ -341,8 +350,13 @@ public:
    * @param origin Registration call site retained across lazy preparation.
    * @return This owner; captures are owned, while explicitly borrowed services must outlive use.
    * Ignoring low-level results inside a void callback remains the caller's responsibility.
-   * expected<void, ManagedError> carries no diagnostic receipt: a returned failure adds a
-   * scene.configure boundary record even if the callback already reported its original failure.
+   * Rejected short text mutations latch the first setup failure before observers. The current void callback
+   * finishes normally; subsequent setup/run is skipped without rollback. Expected permits explicit early return.
+   * Returning the exact internally reported short error preserves its collector receipt and avoids a duplicate.
+   * A fresh equal-valued error or a manual reportError followed by a returned error remains a distinct boundary.
+   * Isolation covers entered execution and facade-owned stored captures. Caller arguments, temporaries and
+   * arbitrary by-value custom callback parameter destructors outside that execution follow the active setup.
+   * Moving a custom callable does not promise an inert moved-from destructor.
    */
   template <detail::SceneConfiguration Callback>
   Scene &configure(Callback callback, std::source_location origin = std::source_location::current()) & {
@@ -355,6 +369,7 @@ public:
    * @param callback Owning configuration.
    * @param origin Registration call site.
    * @return Consuming owner for temporary fluent chains.
+   * The lvalue overload's boundary for custom callback parameter destruction also applies here.
    */
   template <detail::SceneConfiguration Callback>
   Scene &&configure(Callback callback, std::source_location origin = std::source_location::current()) && {
@@ -600,8 +615,11 @@ private:
   friend struct detail::SceneAccess;
   using Configuration = std::move_only_function<std::expected<void, ManagedError>(ManagedScene &)>;
   struct State;
+  detail::SetupFailureScope setupScope(const char *execution) noexcept;
 
   template <detail::SceneConfiguration Callback> void configureImpl(Callback &callback, std::source_location origin) {
+    detail::SetupFailureScope configurationScope({}, nullptr, nullptr);
+
     if (!admitConfiguration(false, origin)) {
       return;
     }
@@ -752,6 +770,21 @@ private:
 namespace detail {
 /** @brief Internal bridge from consuming recipes to one stable facade owner. */
 struct SceneAccess {
+
+  /** @param owner Stationary facade executing checked setup on its owning thread.
+   * @return Synchronous setup attribution scope, restored before callback captures retire.
+   */
+  static SetupFailureScope setupScope(Scene &owner) noexcept {
+    return owner.setupScope("scene.setup");
+  }
+
+  /** @param owner Live collector whose identity must match the returned error's internal receipt.
+   * @param failure Copied exact short result; equal freshly constructed causes have no receipt.
+   * @return True only when that short error entered this collector.
+   */
+  static bool shortReported(const ManagedScene &owner, const ManagedError &failure) noexcept {
+    return owner.shortReported(failure);
+  }
 
   /** @tparam Callback Owning checked click registration against the existing managed scene.
    * @param owner Facade receiving the deferred or runtime registration.
