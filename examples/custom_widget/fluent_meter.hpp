@@ -135,18 +135,15 @@ private:
     auto quit = [this] {
       (void)scene_.quit();
     };
-    auto left = [this] {
-      return adjust(-LEVEL_STEP);
-    };
-    auto right = [this] {
-      return adjust(LEVEL_STEP);
+    auto adjustKey = [this](const KeyEvent &event) {
+      return adjust(event.key == InputKey::RIGHT ? LEVEL_STEP : -LEVEL_STEP);
     };
 
     if (composition == Composition::PIPE) {
       return ui::scene(std::move(factory), options) | ui::theme(example::THEME_PRESETS.at(theme_).make()) |
              ui::style(FOCUS_POLICY, {.name = "meter-focus"}) | ui::configure(std::move(configuration)) |
-             ui::onKey(key::F10, std::move(quit)) | ui::onKey(key::LEFT, std::move(left)) |
-             ui::onKey(key::RIGHT, std::move(right));
+             ui::onKey(key::F10, std::move(quit)) |
+             ui::onKey(ui::pressRepeat({key::LEFT, key::RIGHT}), std::move(adjustKey));
     }
 
     auto meter = ui::scene(std::move(factory), options);
@@ -155,8 +152,7 @@ private:
       .style(FOCUS_POLICY, {.name = "meter-focus"})
       .configure(std::move(configuration))
       .onKey(key::F10, std::move(quit))
-      .onKey(key::LEFT, std::move(left))
-      .onKey(key::RIGHT, std::move(right));
+      .onKey(ui::pressRepeat({key::LEFT, key::RIGHT}), std::move(adjustKey));
 
     return meter;
   }

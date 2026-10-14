@@ -1640,6 +1640,132 @@ auto onKey(KeyEvent chord, Callback callback, std::source_location origin = std:
   }};
 }
 
+/** @tparam Source String-view-convertible text, chord or owning Shortcut normalized during this call.
+ * @param source
+ * Borrowed input copied or moved into immutable owned alternatives before return.
+ * @param actions Nonempty action
+ * set; duplicates are idempotent, invalid values retain their index.
+ * @param options Positive finite normalization
+ * budgets.
+ * @return Owning selection or deferred ShortcutError; onKey supplies the registration origin.
+ */
+template <portals::detail::ShortcutSource Source>
+KeySelection keyActions(Source &&source, std::initializer_list<KeyAction> actions, ShortcutOptions options = {}) {
+  return portals::detail::KeySelectionAccess::make(
+    portals::detail::prepareShortcut(std::forward<Source>(source), options), actions, options);
+}
+
+/** @param source Alternative chords copied before the temporary list expires.
+ * @param actions Nonempty action set,
+ * with duplicates admitted once.
+ * @param options Positive finite normalization budgets.
+ * @return Immutable owning
+ * selection or deferred typed failure.
+ */
+inline KeySelection keyActions(std::initializer_list<key::Chord> source, std::initializer_list<KeyAction> actions,
+                               ShortcutOptions options = {}) {
+  return portals::detail::KeySelectionAccess::make(portals::detail::prepareShortcut(source, options), actions, options);
+}
+
+/** @tparam Source Text, typed chord or owning Shortcut accepted by checked normalization.
+ * @param source Input
+ * normalized and owned before this helper returns.
+ * @param options Positive finite normalization budgets.
+ * @return
+ * Selection admitting PRESS only, or deferred typed failure.
+ */
+template <portals::detail::ShortcutSource Source> KeySelection press(Source &&source, ShortcutOptions options = {}) {
+  return keyActions(std::forward<Source>(source), {KeyAction::PRESS}, options);
+}
+
+/** @param source Alternative chords copied before the temporary list expires.
+ * @param options Positive finite
+ * normalization budgets.
+ * @return Selection admitting PRESS only, or deferred typed failure.
+ */
+inline KeySelection press(std::initializer_list<key::Chord> source, ShortcutOptions options = {}) {
+  return keyActions(source, {KeyAction::PRESS}, options);
+}
+
+/** @tparam Source Text, typed chord or owning Shortcut accepted by checked normalization.
+ * @param source Input
+ * normalized and owned before this helper returns.
+ * @param options Positive finite normalization budgets.
+ * @return
+ * Selection admitting REPEAT only, or deferred typed failure.
+ */
+template <portals::detail::ShortcutSource Source> KeySelection repeat(Source &&source, ShortcutOptions options = {}) {
+  return keyActions(std::forward<Source>(source), {KeyAction::REPEAT}, options);
+}
+
+/** @param source Alternative chords copied before the temporary list expires.
+ * @param options Positive finite
+ * normalization budgets.
+ * @return Selection admitting REPEAT only, or deferred typed failure.
+ */
+inline KeySelection repeat(std::initializer_list<key::Chord> source, ShortcutOptions options = {}) {
+  return keyActions(source, {KeyAction::REPEAT}, options);
+}
+
+/** @tparam Source Text, typed chord or owning Shortcut accepted by checked normalization.
+ * @param source Input
+ * normalized and owned before this helper returns.
+ * @param options Positive finite normalization budgets.
+ * @return
+ * Selection admitting RELEASE only, or deferred typed failure.
+ */
+template <portals::detail::ShortcutSource Source> KeySelection release(Source &&source, ShortcutOptions options = {}) {
+  return keyActions(std::forward<Source>(source), {KeyAction::RELEASE}, options);
+}
+
+/** @param source Alternative chords copied before the temporary list expires.
+ * @param options Positive finite
+ * normalization budgets.
+ * @return Selection admitting RELEASE only, or deferred typed failure.
+ */
+inline KeySelection release(std::initializer_list<key::Chord> source, ShortcutOptions options = {}) {
+  return keyActions(source, {KeyAction::RELEASE}, options);
+}
+
+/** @tparam Source Text, typed chord or owning Shortcut accepted by checked normalization.
+ * @param source Input
+ * normalized and owned before this helper returns.
+ * @param options Positive finite normalization budgets.
+ * @return
+ * Selection admitting PRESS or REPEAT only, or deferred typed failure.
+ */
+template <portals::detail::ShortcutSource Source>
+KeySelection pressRepeat(Source &&source, ShortcutOptions options = {}) {
+  return keyActions(std::forward<Source>(source), {KeyAction::PRESS, KeyAction::REPEAT}, options);
+}
+
+/** @param source Alternative chords copied before the temporary list expires.
+ * @param options Positive finite
+ * normalization budgets.
+ * @return Selection admitting PRESS or REPEAT only, or deferred typed failure.
+ */
+inline KeySelection pressRepeat(std::initializer_list<key::Chord> source, ShortcutOptions options = {}) {
+  return keyActions(source, {KeyAction::PRESS, KeyAction::REPEAT}, options);
+}
+
+/** @tparam Callback Existing owning compact key action, optionally taking const KeyEvent&.
+ * @param selection
+ * Immutable owning alternatives and exact selected native phases.
+ * @param callback Action stored until checked stage
+ * consumption; caller construction/moves may throw.
+ * @param origin Registration call site, independent of helper
+ * construction.
+ * @return Consuming stage using the existing bounded newest-first registration.
+ */
+template <class Callback>
+  requires portals::detail::ManagedAction<Callback, KeyEvent>
+auto onKey(KeySelection selection, Callback callback, std::source_location origin = std::source_location::current()) {
+  return detail::SceneStage{
+    [selection = std::move(selection), callback = std::move(callback), origin](Scene &owner) mutable {
+      detail::SceneAccess::onSelection(owner, selection, callback, origin);
+    }};
+}
+
 /** @tparam Source Constexpr chord, owning alternatives or string-view-convertible runtime text.
  * @tparam Callback Owning compact checked action optionally taking a semantic KeyEvent.
  * @param source Source normalized during stage construction; caller text is never retained.

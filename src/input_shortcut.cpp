@@ -8,6 +8,19 @@
 
 namespace portals {
 namespace {
+constexpr unsigned char actionBit(KeyAction action) noexcept {
+  switch (action) {
+  case KeyAction::PRESS:
+    return static_cast<unsigned char>(detail::ShortcutActions::PRESS);
+  case KeyAction::REPEAT:
+    return static_cast<unsigned char>(detail::ShortcutActions::REPEAT);
+  case KeyAction::RELEASE:
+    return static_cast<unsigned char>(detail::ShortcutActions::RELEASE);
+  }
+
+  return 0;
+}
+
 constexpr bool asciiSpace(char value) noexcept {
   return value == ' ' || value == '\t' || value == '\r' || value == '\n' || value == '\f' || value == '\v';
 }
@@ -259,17 +272,25 @@ std::expected<Shortcut, ShortcutError> parseShortcut(std::string_view source, Sh
 
 std::optional<KeyEvent> matchShortcut(const Shortcut &shortcut, const InputEvent &event,
                                       ShortcutBehavior behavior) noexcept {
+  return detail::matchShortcutActions(
+    shortcut, event, behavior.repeat ? detail::ShortcutActions::PRESS_REPEAT : detail::ShortcutActions::PRESS);
+}
+
+std::optional<KeyEvent> detail::matchShortcutActions(const Shortcut &shortcut, const InputEvent &event,
+                                                     detail::ShortcutActions actions) noexcept {
   KeyEvent value;
 
   if (const auto *key = std::get_if<KeyEvent>(&event)) {
-    if (key->action != KeyAction::PRESS && !(behavior.repeat && key->action == KeyAction::REPEAT)) {
-      return {};
-    }
-
     value = *key;
   } else if (const auto *text = std::get_if<TextInputEvent>(&event)) {
     value = {InputKey::CHARACTER, text->scalar, text->modifiers, KeyAction::PRESS};
   } else {
+    return {};
+  }
+
+  const auto bit = actionBit(value.action);
+
+  if ((static_cast<unsigned>(actions) & bit) == 0) {
     return {};
   }
 
@@ -285,6 +306,39 @@ std::optional<KeyEvent> matchShortcut(const Shortcut &shortcut, const InputEvent
 }
 
 namespace detail {
+KeySelection KeySelectionAccess::make(std::expected<Shortcut, ShortcutError> &&shortcut,
+                                      std::initializer_list<KeyAction> actions, ShortcutOptions options) {
+  unsigned char mask{};
+  std::size_t index{};
+
+  for (auto action : actions) {
+    const auto bit = actionBit(action);
+
+    if (bit == 0) {
+      return KeySelection(std::unexpected(ShortcutError{ShortcutErrorKind::INVALID_ACTION_SET, index}),
+                          ShortcutActions::PRESS, options);
+    }
+
+    mask |= bit;
+
+    ++index;
+  }
+
+  if (mask == 0) {
+    return KeySelection(std::unexpected(ShortcutError{ShortcutErrorKind::INVALID_ACTION_SET, 0}),
+                        ShortcutActions::PRESS, options);
+  }
+
+  auto retained = retainShortcut(std::move(shortcut));
+
+  if (!retained) {
+    return KeySelection(std::unexpected(retained.error()), static_cast<ShortcutActions>(mask), options);
+  }
+
+  return KeySelection(std::shared_ptr<const Shortcut>(std::move(*retained)), static_cast<ShortcutActions>(mask),
+                      options);
+}
+
 std::expected<Shortcut, ShortcutError> prepareShortcut(key::Chord chord, ShortcutOptions options) {
   return prepareShortcut({chord}, options);
 }

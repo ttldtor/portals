@@ -5,6 +5,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Added] Owning `ui::press`, `repeat`, `release`, `pressRepeat` and `keyActions`
+  shortcut selections for text, typed chords and alternative groups. Selections
+  admit exact native event phases, preserve typed construction errors and use
+  the existing checked registration and callback adapters. The VT decoder still
+  emits PRESS only; selectors do not synthesize backend repeat or release events.
+
 - [Added] Short semantic key aliases, modifier chords and owning alternative
   bindings, including case-insensitive runtime shortcut strings. New commands
   default to press-only with configurable repeat and parser budgets; the legacy

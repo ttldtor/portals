@@ -294,6 +294,8 @@ constexpr const char *categoryName(ShortcutErrorKind value) noexcept {
     return "INVALID_CHORD";
   case ShortcutErrorKind::NO_MEMORY:
     return "NO_MEMORY";
+  case ShortcutErrorKind::INVALID_ACTION_SET:
+    return "INVALID_ACTION_SET";
   }
 
   return "UNKNOWN";
