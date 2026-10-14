@@ -35,7 +35,7 @@ it must not retain the row reference, perform I/O, launch work, or mutate the
 tree/model. Captures are owned by the list and destroyed on UI.
 
 Between frames, the application applies Scheduler publications, obtains **one
-model pin**, and passes that same `ModelFrame<T>` to every view of the model.
+[model pin](glossary.md#glossary-model-pin)**, an immutable capture of data and availability, and passes that same `ModelFrame<T>` to every view of the model.
 `prepareVirtualList(tree, list, pin, viewport)` takes the **final local size
 of that view**, in integer cells. Determine it from application/layout
 constraints; repeat preparation after resize before painting. This preparation

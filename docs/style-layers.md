@@ -1,6 +1,7 @@
 # Style layers {#style_layers}
 
-Style layers keep application and user declarations installed while a theme is
+A [style layer](glossary.md) is an independently installed stylesheet.
+Layers keep application and user declarations installed while a theme is
 replaced or its live parameters change. They opt into the existing retained
 [style engine](styles.md); they do not introduce another resolver or runtime.
 
@@ -24,9 +25,9 @@ auto styled = std::move(scene)
   | ui::styleLayer(StyleTier::USER, "contrast", userStyles);
 ```
 
-These fragments assume an existing idle scene and owning sheets. The existing
-configuration stages consume a facade; move it before callbacks borrow its
-address. Use methods for an already stationary owner. Before preparation,
+These fragments assume an existing idle scene and owning sheets. Applying these configuration stages to a named scene preserves that scene
+and returns `Scene&`. The shown `std::move(scene)` chain transfers ownership
+to `styled`; complete that transfer before callbacks capture the facade by address. Before preparation,
 the stages retain their configuration in registration order. Afterwards they use
 the existing managed mutation boundary. Failures enter the scene collector and
 are observed through `checked`, typed `run`, or the `runApp` reporting policy.
@@ -128,36 +129,11 @@ This notation treats selector matching as bounded: class matching also scans
 the target's class list and compares strings, so unrestricted class/string sizes
 are an additional cost. Presentation states and paint properties are fixed sets.
 
-## Complete installed-package programs
+## Examples
 
-Both programs switch a theme, attach live parameters, change a width, preserve
-application/user overrides, resize and clean up the same replay scene. They also
-exercise an invalid width through `--failure` with the same typed error behavior.
-Setup fails before terminal ownership is acquired in that path.
-
-- Before: `tests/package_consumer/style_layers_before.cpp`.
-- After: `tests/package_consumer/style_layers.cpp`.
-- Shared scene, errors and cleanup: `tests/package_consumer/style_layers_support.hpp`.
-- Shared diagnostics: `tests/package_consumer/static_styles_support.hpp`.
-- Shared replay terminal: `examples/replay/terminal.hpp`.
-
-### Before
-
-\include{lineno} style_layers_before.cpp
-
-### After
-
-\include{lineno} style_layers.cpp
-
-### Shared setup and cleanup
-
-\include{lineno} style_layers_support.hpp
-
-The focused benchmark (`tools/benchmarks/style_layers.cpp`) distinguishes
-equal, masked and visible updates and materialized visible, hidden and offscreen
-controls. Its output records actual defaults/paint counts and in-memory terminal
-diff bytes. It does not measure allocator usage or hardware terminal throughput;
-offscreen controls in that workload are not virtualized.
+The [styling guide](styling-guide.md) shows independent named layers and
+replacement of one rule group. The [themes guide](themes-guide.md) shows
+how application and user overrides survive a theme change.
 
 ## Themes and the planned PSS source
 

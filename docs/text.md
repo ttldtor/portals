@@ -1,8 +1,9 @@
 # UTF-8 text and terminal width
 
 `<portals/text.hpp>` exposes `GraphemeText`, an owning UTF-8 value with immutable
-extended grapheme clusters and cell measurements. Bytes, graphemes and cells are
-separate units. The private dependency is [utf8proc v2.12.0](../vendor/utf8proc/README.md),
+[grapheme clusters and terminal-cell measurements](glossary.md#glossary-text-units).
+A grapheme groups text such as a letter with its combining accent; cells measure
+the screen columns occupied by that cluster. UTF-8 bytes measure its storage. The private dependency is [utf8proc v2.12.0](../vendor/utf8proc/README.md),
 Unicode 18.0.0. Segmentation follows [UAX #29](https://www.unicode.org/reports/tr29/)
 with stateful processing of every adjacent scalar pair. No normalization or
 input repair occurs. Invalid UTF-8 returns the byte offset of the offending

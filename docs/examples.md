@@ -1,16 +1,12 @@
 # Runnable examples {#examples}
 
-For the complete form using typed columns and named view settings, see
-[declarative composition](declarative-ui.md).
-For checked formatted text, member deduction, optional aggregate columns and
-full comparable programs, see [compact examples](compact-examples.md).
-
-For a complete form combining an editor, custom final widget, list, table and chart,
-see the [declarative before/after consumers](declarative-ui.md). Their installed-package
-tests compare identical interactions and complete terminal output.
+Start with the [minimal click-handler program](../examples/click_handlers/main.cpp).
+For a form with editing, actions, custom widgets and virtual views, see
+[declarative composition](declarative-ui.md). [Text and column examples](compact-examples.md)
+cover formatting, member projections and optional aggregate columns.
 
 Build with `PORTALS_BUILD_EXAMPLES=ON`. The gallery, dashboard, replay and custom-widget programs run through the same
-[Application runner](application.md) and has a finite `--check` mode for automation.
+[Application runner](application.md) and each has a finite `--check` mode for automation.
 The check modes use an in-memory terminal and logical clock; they do not prove
 native terminal restoration or visual compatibility.
 
@@ -46,13 +42,10 @@ failures return 1 after the runner attempts terminal restoration; success is 0.
 The gallery also retains the historical `initial`, `keyboard`, `mouse` and
 `disabled` finite fixture modes. They use the same replay runner afterward.
 
-The interactive gallery uses `gallery::FluentForm`: its lazy owning scene retains the state,
-nodes, application and scoped registrations. `gallery::Form` remains the compiled
-before specimen, and the new header shows complete method and pipe variants. The separate `gallery::Scene` is a finite
-low-level regression fixture, where binding tokens and presentation sync remain
-explicit to exercise the retained API. It runs only in the check/stage paths.
-The example-only `take` helper stops setup with a generic exception and loses
-the original error detail; it is not a production error-handling policy.
+The interactive gallery uses `gallery::FluentForm`. Its owning scene retains
+controls, state and scoped registrations. The example-only `take` helper converts
+setup failures to a generic exception. Applications that need detailed diagnostics
+should preserve the typed results and use the checked runner boundary.
 
 The four adapted [Textual palettes](styles.md) change colors
 through existing style transactions. They do not reproduce Textual's complete
@@ -84,11 +77,9 @@ runtime or data source.
 Read [the UI composition](../examples/dashboard/dashboard.hpp) separately from
 [the data provider](../examples/dashboard/provider.hpp). The provider owns tick
 generation and bounded page requests; the UI adapter connects its model to the
-managed table and chart. Splitting those responsibilities improves local reasoning
-but increases the complete client footprint; neither file is omitted from
-compactness measurements. The example still uses a borrowed managed scene because
+managed table and chart. The example uses a borrowed managed scene because
 its explicit provider shutdown and runner observers are not exposed by the owning
-scene facade. It is a larger integration example, not the first form to copy.
+scene facade. Use this example to study provider integration.
 
 `--rate` accepts 0..10000 scheduled ticks/second; zero demonstrates idle and delayed
 range navigation without market updates. `--fps` accepts 1..1000 frames/second.
@@ -162,19 +153,14 @@ frame/tick/byte/queue totals after close.
 
 ## Where to start in the source
 
-`examples/gallery/form.hpp` shows a complete owning `ui::column` form. Managed
-state, standard bindings, presentation synchronization and style registration
-are owned by `ManagedScene`; the application retains only business behavior,
-initial focus and scene-level keyboard commands. The older
-`gallery.hpp` finite fixture remains for existing semantic replay tests.
-`examples/custom_widget/meter.hpp` shows an alternative immutable provider and a
-final widget whose `.onPrepare` adapter formats changed presentation before
-rendering. This custom preparation remains explicit.
-[The complete dashboard scene](../examples/dashboard/dashboard.hpp) delegates
-ordinary and virtual-view preparation to `ManagedScene`. Its managed factories
-own model ranges, input bindings and standard styles, while `Grid` determines
-the actual view extents. The scene no longer retains its own frame pin or calls
-per-view preparation helpers.
+Start with [the fluent gallery](../examples/gallery/fluent_form.hpp) for editing,
+checkboxes, actions and themes. [The fluent custom meter](../examples/custom_widget/fluent_meter.hpp)
+shows a final widget whose preparation adapter reads immutable state and retains
+presentation for painting.
+
+[The dashboard scene](../examples/dashboard/dashboard.hpp) combines a model,
+virtual views and a data provider. Its managed factories own ranges, input bindings
+and standard styles. Grid layout determines the view extents.
 
 Provider work remains visible in the dashboard. The table's preparation handler
 reads its first row before the chart's origin callback runs; their registration
@@ -193,47 +179,13 @@ sampling branch. `tickCount`, `scheduledTicks`, `pendingTicks` and `stoppedAt`
 expose observed provider progress for an external benchmark without inventing
 throughput from the configured rate. Observer storage remains caller-owned.
 
-## Complete gallery before and after
+## Gallery source
 
-These are complete form implementations, not abbreviated pseudocode. The
-frozen low-level form is compiled by `portals.gallery-managed`; the test replays
-keyboard editing, checkbox/action activation, mouse, Unicode, resize and the
-original Modern-to-Turbo switch through both implementations. It compares all
-terminal bytes, action counts and frame counts. A separate idle check requires
-exactly one frame. The shared `common.hpp` provides ordinary error reporting and
-text construction; it does not hide binding tokens or synchronization.
+[Open the fluent gallery source](../examples/gallery/fluent_form.hpp).
 
-### Before: explicit ownership and synchronization
-
-[Open the complete source](../tests/support/gallery_before.hpp).
-The generated HTML reference embeds it below with line numbers.
-
-\include{lineno} gallery_before.hpp
-
-### After: managed declarative form
-
-[Open the complete source](../examples/gallery/form.hpp).
-
-\include{lineno} gallery/form.hpp
-
-The CLI parser and managed error reporter are additional application support,
-not costs silently attributed to the composition API. The complete installed
-consumer comparison remains available in [declarative composition](declarative-ui.md).
-Runtime costs and scaling limits have a separate [measurement guide](managed-performance.md).
-
-### Standalone exit policy
-
-The gallery and custom widget executables use scoped `ui::quit()` and the library
-`runApp` final stage. Their fluent scene objects retain typed `run()` for replay
-comparisons and statistics; their application entry points use equivalent
-function/native and pipe/replay spellings with final reporting after cleanup.
-The editor history example retains its explicit `Application`/`ManagedScene`
-fixture: its contract checks directly exercise router focus, dispatch, activation
-and preparation. That low-level typed path is intentional; it is not a claim that
-`runApp(Scene)` accepts a borrowed `ManagedScene`, nor a reason to add router APIs
-solely for migration. Its explicit error policy remains part of its full client
-footprint.
-
+The gallery and custom widget entry points use scoped `ui::quit()` and `ui::runApp`.
+The runner reports typed setup and runtime failures after attempting terminal cleanup.
+Their scene objects also provide typed `run()` for headless replay.
 
 ## Minimal click-handler program
 

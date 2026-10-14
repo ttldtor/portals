@@ -2,10 +2,10 @@
 
 Start with the [runnable examples](examples.md), then read
 [declarative composition](declarative-ui.md) for ownership and mount errors.
-The conveniences below are additive: retained widgets, `GraphemeText::from`,
-explicit projections, and the low-level model/view API remain available.
+This page covers checked text formatting, table columns and complete fluent
+scene examples.
 
-## Format text without discarding validation
+## Format and validate text
 
 Include `<portals/text_format.hpp>`. `formatText("Price {:.2f}", value)` checks
 the format specification at compile time and returns
@@ -22,7 +22,7 @@ preparation translates thrown exceptions to its existing `CALLBACK_FAILED`.
 Use checked `formatText` when the application needs the individual text error.
 This convenience does not introduce a second callback error protocol.
 
-## Fixed schemas without manual column IDs
+## Define fixed table schemas
 
 ```cpp
 const auto price = portals::cellFormat<double>("{:.2f}", policy);
@@ -35,10 +35,10 @@ if (!columns) {
 }
 ```
 
-The record type is inferred from the member pointer. Recipes own captions and
+The record type is inferred from the member pointer. Column descriptions (`TableColumnSpec<T>`) own captions and
 callbacks; assembly validates captions and assigns IDs 1..N with initial generation
 in argument order, independently for each table. Assemble a fixed schema once.
-Reordering the resulting columns retains their IDs. Rebuilding recipes in a new
+Reordering the resulting columns retains their IDs. Rebuilding column descriptions in a new
 order creates a different positional schema; dynamic replacement uses explicit
 `ColumnId` through the original factories. No global counter or caption-derived
 identity is introduced. The existing table validates widths during preparation. The formatter
@@ -126,7 +126,7 @@ The complete SDK-free installed adapter consumer is below:
 
 \include{lineno} compact.cpp
 
-## Matching keys without variant boilerplate
+## Match key events
 
 Include `<portals/input_match.hpp>` for the pure C++23 constexpr predicates:
 
@@ -152,193 +152,50 @@ inspect `KeyEvent::scalar` or `TextInputEvent` for character content. The key li
 allocates nothing and is searched linearly. Routing and focus still belong to the
 existing router; this convenience adds no key-binding subsystem.
 
-## One composition, explicit customization
+## Complete fluent scene examples
 
-Gallery uses `ui::column`, standard managed state and bindings; it already had
-this short form before these helpers. The custom final meter uses the existing
-`ManagedState<int>` for its scalar level, instead of a one-row dataset provider.
-State owns immutable snapshots and maintains its revisions internally; the input
-handler does not build `LevelSnapshot` or increment a revision. Dataset providers
-still use the low-level model API, as demonstrated in dashboard. The meter's
-presentation adapter uses checked `formatText` and C++23 `expected::and_then`.
-Each continuation runs only after success; the first typed error propagates to
-the caller. State snapshots retain their value while the adapter consumes it.
-`transform_error` adds managed input context without formatting or flattening the
-original `TreeError`. The adapter reads the snapshot directly, so rejected observer
-notifications cannot prevent its next preparation. Equal/clamped `set` is a no-op:
-unlike the old forced snapshot publication, it does not redraw unchanged output.
-Tests compare the old and new terminal bytes/frame counts across every theme,
-and separately check this intentional no-redraw improvement at the upper bound.
-No implicit widget discovery or separate reactive runtime is added.
+The [gallery](../examples/gallery/fluent_form.hpp) combines an editor, checkbox,
+actions and theme switching in an owning `ui::Scene`.
+The [custom meter](../examples/custom_widget/fluent_meter.hpp) adds a final widget
+whose presentation reads an immutable `ManagedState<int>` snapshot.
+Both scenes use the retained widget tree, input router and application runner.
 
-Dashboard now mounts its controls, table and chart together through `ui::grid`.
-Observers are published after successful mount. Grid tracks and identity-based
-placements remain explicit through `setGridOptions`, before running the scene.
-There is no implicit placement DSL: this is the low-level customization escape
-hatch, with the same four fixed header tracks and two flexible view tracks.
-Provider work, immutable model pins, delayed ranges, theme switching and cleanup
-keep their original contracts. Continuous-scroll loading is a separate data
-provider issue, not repaired by this example migration.
+### Gallery
 
-## Full comparable programs
+`ui::lineEdit(editor, "Portals", ...)` owns its initial text and creates the
+scene-owned model during mounting. Enter commits and Tab changes focus.
+The checkbox uses a scene-owned boolean state. `Ref` observes the editor and
+becomes available after successful mount. The scene owns the editor.
 
-The existing complete composed form and the compact version below perform the
-same edit/commit, click, self-removal, custom event, list/table/chart preparation,
-theme, hide/disable/remove, resize and cleanup scenario. Installed-package tests
-compare their summaries and complete terminal byte streams. The shared support
-contains domain rendering, terminal replay and assertions; construction and
-bindings remain in the programs. Both support files are presented on the
-[declarative composition page](declarative-ui.md).
+### Custom widget
 
-### Before: explicit text and typed columns
+The final `LevelMeter` reads its scalar snapshot during preparation and retains
+text and value for painting. A changed `ManagedState<int>` requests
+`Invalidation::PAINT`. Equal or clamped values request no additional frame.
+The presentation adapter uses checked `formatText` and `expected::and_then`;
+the first typed error propagates to the caller.
 
-\include{lineno} composed_named.cpp
+These example objects must remain at a stable address because callbacks borrow
+`this`. Their last member is the scene owner: it closes callbacks and the managed
+context while the referenced members still exist. `ui::onKey` handlers delegate
+nonmatching input to the earlier `onInput` callback. Replacing `onInput` later
+replaces that chain.
 
-### After: checked captions, inferred records and owning formatters
+Theme switching changes the preset index after a successful replacement. `run`
+returns `ManagedError`, including runner, restoration and cleanup failures.
+The command-line entry point reports failures after restoration. Recipe
+construction, allocation and invalid preset indices can throw before entering
+a checked runner boundary. See [setup and reporting](declarative-ui.md).
 
-\include{lineno} composed_compact.cpp
+For virtual views and their configuration, see
+[declarative composition](declarative-ui.md#typed-columns-and-named-view-settings).
 
-These are full programs, not a claim that removing every line is desirable.
-Their shared `example::take` is a fail-fast demonstration helper: it turns setup
-failure into a generic exception and does not preserve the complete original error.
-It is not part of the public API or a recommended production error policy. Public
-factories return their typed results so applications can report the original cause.
-This comparison predates the current checked setup boundary; see
-[construction and setup reporting](declarative-ui.md) for `runApp(factory, setup)`.
-The comparison does not add TRY macros, an exception-based public error protocol,
-or a result coroutine runtime.
-The three interactive programs are also compiled and run as relocated installed
-consumers. Their CLI options, exit codes and defaults are documented on the
-[examples page](examples.md). This step does not implement runtime reconciliation,
-compile-time scene construction, resources/i18n, or a general reflection schema.
+For build options, command-line arguments and exit codes, see
+[runnable examples](examples.md).
 
-## Costs and measurements
+## Register a click handler in the pipe
 
-`portals_compact_benchmark` compares equivalent three-label managed and owning
-description constructions. It samples mount/theme, initial prepare/layout,
-idle preparation, and a finite one-frame runner including cleanup: 30 samples
-after three warmups, nearest-rank p50/p95 in nanoseconds. The viewport is 80x24.
-Allocation counts cover ordinary C++ `new`/`new[]` calls in each phase, excluding
-malloc, aligned allocations and bytes. Application/scene creation and benchmark
-reporting are outside the counters. Counts are an instrumented workload, not
-the library's universal allocation budget. The runner assertion requires exactly
-one frame and a closed in-memory terminal; no native window is opened.
-
-The existing managed lifecycle benchmark remains the broader scaling workload.
-PFR instantiation and format checking can add compile time. A shorter source
-does not imply faster compilation, fewer allocations or faster rendering.
-
-### Local C++23 measurements
-
-Measured on 10 October 2026 with MSVC 19.51 x64 and GCC 14.3 in WSL,
-Release configuration. These small workloads are diagnostic snapshots, not
-portable performance thresholds. Timing noise and standard-library differences
-prevent comparing the two toolchains as a speed ranking.
-
-| Phase / allocation calls | MSVC explicit / compact | GCC explicit / compact |
-| --- | --- | --- |
-| Three-label mount and theme | 49 / 63 | 48 / 62 |
-| Initial prepare and layout | 48 / 48 | 47 / 47 |
-| Idle prepare | 8 / 8 | 8 / 8 |
-| One-frame run and cleanup | 70 / 70 | 68 / 68 |
-| Ten column callback constructions | 51 / 61 | 41 / 51 |
-| Ten cell formats | 50 / 50 | 40 / 40 |
-
-The description path adds 14 allocation calls at mount in this workload;
-owning cell formatters add ten during construction. Neither adds calls to the
-measured steady prepare/frame phases. The column comparison uses explicit IDs
-on both paths; it does not measure automatic schema assembly or PFR at runtime.
-
-A representative two-double-column translation unit was compiled to an object
-with `/O2 /std:c++latest` or `-O2 -std=c++23`, one warmup and three samples per
-variant. Filesystem caches were warm; linking and a complete clean project build
-were excluded. Median wall times were:
-
-| Column construction | MSVC milliseconds | GCC milliseconds |
-| --- | --- | --- |
-| Original explicit metadata and lambda | 2258 | 3201 |
-| Automatic IDs and cellFormat | 2382 | 3267 |
-| Optional aggregateColumns / PFR | 2216 | 3693 |
-
-These samples do not demonstrate a compiler-independent speedup. On GCC this
-particular PFR instantiation cost more than the explicit member-pointer variant.
-
-The following line-count snapshot describes the compact helpers measured on
-10 October, before the owning-scene examples below. Full files also retain provider
-code and customization. Nonblank, noncomment
-line counts changed as follows (text counting, not a complexity metric): gallery
-59 to 59, dashboard 423 to 438, custom meter 140 to 119, installed composed form
-167 to 165. Dashboard removes manual mount/binding bookkeeping but adds explicit
-observers and readable descriptions; its complete file became longer. These counts describe this comparison snapshot.
-Current composition includes `hbox`/`vbox` aliases; see
-[declarative composition](declarative-ui.md) for the current syntax.
-Resource/i18n text is outside this comparison and is not supplied by its helpers.
-
-## Complete owning scene examples
-
-The interactive gallery and custom meter now own `ui::Scene`. This is the lazy
-facade over the existing `Application` and `ManagedScene`, with the same retained
-widgets, preparation, input router and single runner. Each complete after class
-contains both ordinary method composition and equivalent pipe composition;
-`Composition::PIPE` is the gallery default and selects the pipe spelling without changing the recipe or
-configuration order. No macro, coroutine runner or extra reactive system is used.
-
-### Gallery before: borrowed application and managed ownership
-
-\include{lineno} form.hpp
-
-### Gallery after: owning scene and direct initial editor text
-
-\include{lineno} fluent_form.hpp
-
-`ui::lineEdit(editor, "Portals", ...)` owns its initial text and creates its
-scene-owned model during mounting. The explicit edit mode remains visible:
-Enter commits and Tab changes focus. The checkbox still uses a scene-owned
-boolean state. `Ref` observes the editor and publishes only after successful
-mount; it owns neither the widget nor the scene. The first focusable child is
-this editor, recovered by the existing router during managed preparation.
-
-### Custom widget before: borrowed application and scalar managed state
-
-\include{lineno} meter.hpp
-
-### Custom widget after: owning scene with the same final LevelMeter
-
-\include{lineno} fluent_meter.hpp
-
-The custom `LevelMeter` remains final. Its adapter reads an immutable scalar
-snapshot and updates retained presentation during preparation. A changed
-`ManagedState<int>` invalidates the scene root with `Invalidation::PAINT`, so the
-adapter needs no additional tree invalidation. Painting reads retained text and
-value; it never reads state or formats text. Equal or clamped sets request no
-additional frame.
-
-Both after classes are stationary because callbacks explicitly borrow their
-example object. Their last member is the scene owner: it closes callbacks and
-its application before the borrowed members are destroyed. The replay clock
-and terminal remain borrowed through the run. Quit/F10/Ctrl+C request cooperative
-cancellation through scoped `ui::quit()`; these examples do not require a user-owned
-`std::stop_source`. Embedding applications can still pass an optional stop token
-to the existing scene runner.
-
-The short exact `onKey` chords are registered after the original typed input
-fallback. Unmodified keys use those handlers; modified arrows/F2/exit keys retain
-the examples' previous modifier-insensitive admission through `onInput`.
-Directly replacing `onInput` later would replace this chain. Theme replacement
-updates the preset index only after success. Factories return checked recipes
-and preserve state creation errors. `run` returns the original `ManagedError`,
-including independent runner/restoration and cleanup failures; the CLI reports
-it after restoration. Recipe construction, allocation and invalid preset indices
-can still throw before a checked boundary.
-
-The existing regression compares full output bytes, frame counts, action counts
-and closed transports for before/method/pipe, all six themes, both color modes,
-keyboard/mouse, explicit editing, Unicode, resize, modified shortcuts, idle and
-clamped state. The relocated installed consumer compiles and runs the same public
-headers. These checks prove their specified headless scenarios; native terminal
-compatibility remains a separate platform check.
-
-
-## Late click registration without setup wrappers
-
-Use [ui::onClick in the pipe](declarative-ui.md#pipe-click-handlers) when a handler is added separately from its button recipe. The full [minimal program](../examples/click_handlers/main.cpp) includes runtime ui::style, F10 exit and standard cleanup/reporting. A callback placed directly on a button recipe remains a valid compact choice: Ref + pipe is not required for every inline action. ui::hbox/ui::vbox change vocabulary, not the layout algorithm or lexical token count.
+Use [ui::onClick](declarative-ui.md#pipe-click-handlers) to add a handler separately
+from its button [recipe](glossary.md#glossary-recipe). The [minimal program](../examples/click_handlers/main.cpp)
+includes runtime styles, F10 exit and cleanup reporting. A callback may also be
+placed directly on the button recipe.

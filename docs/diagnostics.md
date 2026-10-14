@@ -172,8 +172,9 @@ version headers before an application's reader interprets fields; it is a versio
 check, not a replay parser. The `portals_diagnostics_flow` headless fixture optionally
 accepts one export path, writes the real no-effect scenario, and returns 2 for a
 file failure. It uses TestTerminal, so it has no active native TUI to corrupt.
-Final dashboard wiring and a packaged HTML/export example are integration tasks
-for the application consuming this API.
+The dashboard exports this metadata with `--trace PATH` after restoration;
+see [the runnable example](examples.md). Applications choose their own export
+format presentation and file-error policy.
 
 ## Implemented flow
 

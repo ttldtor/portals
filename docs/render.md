@@ -1,7 +1,7 @@
 # Full-frame reference renderer
 
-`<portals/render.hpp>` provides `renderFullFrame`: a synchronous scene-to-cells
-oracle. Every call starts with a fresh blank `CellBuffer`. It has no dependency on
+`<portals/render.hpp>` provides `renderFullFrame`: an independent synchronous renderer that converts commands to cells.
+Its result serves as the reference for checking optimized output. Every call starts with a fresh blank `CellBuffer`. It has no dependency on
 diff, damage tracking, a terminal writer, widgets or a style engine, so later
 optimized output can be checked against its semantic result.
 

@@ -153,89 +153,22 @@ The overloads preserve `TreeError` rather than converting failures to a generic
 exception. A thrown hook is still reported by the runner's existing exception
 boundary. The default scene path has no preliminary layout pass.
 
-## Complete installed-package examples
+## Examples
 
-The three programs use identical nested layout, immutable OHLC data and
-finite replay input. They compare explicit extents, explicit snapshot hooks and
-managed registration. All link to the relocated installed package through
-`find_package(Portals CONFIG REQUIRED)`.
+The [dashboard](../examples/dashboard/dashboard.hpp) combines managed virtual
+views with a bounded data provider. For declarative view construction and named
+configuration, see [declarative composition](declarative-ui.md).
 
-The source listings and exact replay equivalence check are maintained with the
-package consumer, so the examples are compiled rather than illustrative API
-pseudocode. See [installed package testing](package.md) for the fixture workflow.
+The [installed-package lifecycle test](../tests/package_consumer/virtual_lifecycle.cpp)
+exercises pending requests, an odd-width resize, ancestor hiding, cancelled late
+completions and independent sibling completions with the same data revision.
+[Shared support](../tests/package_consumer/virtual_support.hpp) supplies immutable
+rows and a finite terminal. See [package testing](package.md) for build instructions.
 
-| Concern | Explicit extents | Explicit layout snapshot |
-| --- | --- | --- |
-| Nested sizes | Repeat padding, gaps, split rounding and title height in `prepare` | Pass the runner's snapshot to each view |
-| Model pin | Local pin in `prepare` | One retained pin shared by `prepareViews` retries |
-| Provider | Explicit request receipts | The same explicit request receipts |
-| Geometry cost | One final layout | Preliminary capture plus final layout; bounded retries |
-| Customization | Explicit `CellSize` | Captured local sizes, with explicit overloads still available |
+## Provider responsibilities
 
-The first step removes duplicated geometry rules without claiming that the
-entire example has fewer lines. The explicit snapshot scene deliberately keeps
-pin ownership and provider requests explicit. Counters and captured sizes in
-this fixture are test observations; applications do not need them. The managed
-example below then removes those routine ownership and preparation obligations.
-
-### Original baseline: explicit extents
-
-[Complete before program](../tests/package_consumer/virtual_before.cpp).
-
-\include{lineno} virtual_before.cpp
-
-### Before managed ownership: explicit layout snapshot
-
-[Complete scene](../tests/package_consumer/virtual_scene.hpp) and
-[complete after program](../tests/package_consumer/virtual_after.cpp).
-
-\include{lineno} virtual_scene.hpp
-
-\include{lineno} virtual_after.cpp
-
-### After: managed model and view lifecycle
-
-[Complete managed program](../tests/package_consumer/virtual_managed.cpp).
-
-\include{lineno} virtual_managed.cpp
-
-| Consumer responsibility | Explicit snapshot scene | Managed factories |
-| --- | --- | --- |
-| Model owner and range creation | Retained model; open a range per view | Scene-owned model; factory-owned ranges |
-| Frame pin | Retain and refresh it in `prepare` | One scene-owned pin per model and frame |
-| View preparation | Call each helper from `prepareViews` | Registered by the factory |
-| Layout opt-in hooks | Implement in the custom scene | Supplied by `ManagedScene` |
-| Standard view input and styles | Explicit when needed | Registered by the factory |
-| Provider work | Own request and retry policy | The same policy in a preparation handler |
-
-`consumer.virtual-managed-equivalence` compares the complete terminal capture
-of `virtual_after.cpp` and `virtual_managed.cpp`, including resize. The managed
-program also asserts two frames for its initial/resize replay, with no idle
-redraw, and checks that the model handle is closed after the run. This fixture
-uses immediately available immutable rows; pending-provider lifecycle coverage
-belongs to the separate lifecycle tests and the dashboard.
-
-### Shared provider and finite terminal
-
-[Shared support](../tests/package_consumer/virtual_support.hpp) supplies the same
-immutable rows and finite terminal to all three programs. It opens no native windows.
-
-\include{lineno} virtual_support.hpp
-
-The separate [lifecycle test](../tests/package_consumer/virtual_lifecycle.cpp)
-exercises real pending requests, an odd-width resize, ancestor hiding, cancelled
-late completions and independent same-data-revision sibling completions.
-
-## Limits of this step
-
-Managed factories remove routine model/range ownership and per-view preparation.
-The row type is deduced from the managed model, so column arrays and formatter
-lambdas can be passed directly without repeating template arguments or wrapping
-them in `std::span` or `std::function`.
-Custom layout, formatters, chart accessors, provider dispatch and retry policy
-remain explicit. The old hooks and explicit-size APIs remain available for
-applications that need full control. This step adds no virtual-view DSL,
-reconciliation, typed column builder, query facade, network page-cache policy or
-SQLite provider. It does not solve continuous scrolling across uncached network
-ranges. Future provider policies must preserve the current bounded requests and
-immutable snapshot contracts.
+Managed factories own model ranges and register view preparation. Column arrays
+and formatter lambdas infer their row type from the managed model.
+Applications supply custom layout, formatters, chart accessors, provider dispatch
+and retry policy. Explicit hooks and size overloads support custom preparation.
+Network loading policies must preserve bounded requests and immutable snapshots.

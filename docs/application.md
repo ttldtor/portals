@@ -28,8 +28,8 @@ int main() {
 ```
 
 The runnable [gallery](examples.md) demonstrates input bindings, explicit quit,
-control synchronization, two themes, and error reporting. There is no DSL or
-second dispatcher. Extend `ApplicationScene::input` for global commands; it runs
+control synchronization, theme selection, and error reporting. The `ApplicationScene` hooks use the existing runtime and dispatcher.
+For fluent application construction, see [declarative UI](declarative-ui.md). Extend `ApplicationScene::input` for global commands; it runs
 inside the existing bounded CONTROL channel before normal `EventRouter` routing.
 For ordinary control actions retain the existing `ActionBinding`/control bindings.
 
@@ -37,7 +37,8 @@ For ordinary control actions retain the existing `ActionBinding`/control binding
 
 `prepare(application, size)` runs only when a dirty frame can be submitted. It
 runs after the cycle's single scheduler dispatch, outside `WidgetTree::frame`.
-Synchronize bindings and focus, take **one pin per model**, and prepare all sibling
+Synchronize bindings and focus, take **one [model pin](glossary.md#glossary-model-pin) per model**
+(an immutable `ModelFrame<T>` capturing data and availability), and prepare all sibling
 views from that pin using their final layout extents. `VirtualTable` and `Chart`
 retain their own copies of the pin and immutable prepared data. Dispatch returned
 `ModelRequest` receipts outside rendering; no provider work starts implicitly.

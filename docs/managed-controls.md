@@ -150,8 +150,7 @@ Hiding cancels range work; disabling keeps preparation but suppresses input;
 removal retires the consumer. Closing the scene destroys model owners and closes
 their endpoints. A factory failure removes its attempted child, preserving
 earlier children. The [virtual preparation guide](virtual-preparation.md)
-describes callback ordering, lifetime, failures and the complete installed
-before/after programs. Explicit `ApplicationScene` hooks and low-level preparation
+describes callback ordering, lifetime and failures. Explicit `ApplicationScene` hooks and low-level preparation
 helpers remain supported.
 
 ## Errors and partial construction
@@ -293,80 +292,16 @@ checked scene operations; a detached/worker-safe property channel belongs to the
 later property facade, not this collector foundation. The scene and application
 must remain alive throughout any operation.
 
-## Installed consumer and Gate B
+## Examples and verification
 
-The existing package test relocates the installation, copies the complete
-`tests/package_consumer` directory, configures it using `find_package(Portals
-0.2 CONFIG REQUIRED)`, and links only `portals::core`. No private header or
-source-tree include is needed. Its original model/custom-widget test remains.
+For application code, start with [declarative composition](declarative-ui.md)
+and the [fluent gallery](../examples/gallery/fluent_form.hpp).
+These scene descriptions use the managed control factories internally.
 
-The complete before and managed programs included below use the same final
-`Meter`, domain messages, palette, dimensions and deterministic replay. Shared
-fixture files provide the custom widget, test observations and terminal adapter;
-they contain no hidden control registration or standard presentation sync.
-Setup helpers terminate on assertion failure and are test policy, not a proposed
-production error-reporting API. Application callbacks propagate typed failures.
-
-| Consumer responsibility | Before | Managed |
-|---|---:|---:|
-| Separately retained binding tokens, including custom input | 4 | 0 |
-| Explicit standard style registrations | 5 | 0 |
-| Custom style identity declarations | 1 | 1 |
-| Focus snapshot reads per prepare | 1 | 0 |
-| Standard synchronization calls per prepare | 6 | 0 |
-| Explicit initial focus and palette choice | Present | Present |
-| Custom presentation/input policy | Present | Present |
-
-The replay checks each intermediate state: draft before Enter, one successful
-commit, checkbox two-way state, Run reading committed state, Tab traversal,
-custom level adjustment, F2 palette change, empty-value validation, Escape
-reset, external-update conflict, rejected notification recovery without another
-business callback, invalid UTF-8, and custom self-removal. F10 stops the run.
-
-`consumer.form-before` and `consumer.form-after` execute these assertions.
-`consumer.form-equivalence` additionally compares the entire captured terminal
-byte stream and domain summary. Hex output keeps terminal escape sequences out
-of test logs. `consumer.form-typed-error` returns a deliberate
-`INVALID_GEOMETRY` from a business callback and checks the original cause,
+The [installed-package tests](package.md) compile controls against a relocated
+installation using `find_package(Portals CONFIG REQUIRED)` and `portals::core`.
+The [form fixture](../tests/package_consumer/form_support.hpp) exercises editing,
+validation, state updates, focus, theme changes and custom widget behavior.
+[Replay support](../tests/package_consumer/form_replay.hpp) supplies a finite
+terminal and scripted input. The typed-error scenario checks the original error,
 phase, node and transport cleanup.
-
-These tests cover the bounded P1.1 form/custom-widget scenario. They do not
-constitute the full future Gate B matrix for lists, tables, charts or every
-control family, and passing them is not user acceptance. Execution results and
-the tested configuration belong in the integration report. No runtime speedup,
-compile-time improvement or large-form performance claim follows from removing
-manual obligations; those require separate measurements.
-
-## Complete before and after programs
-
-Both source files below contain `main()` and are separate executables. Build
-them with the installed-consumer CMake project described above, using the same
-installed `portals::core` target. Keep `form_support.hpp` and `form_replay.hpp`
-beside both programs. These shared fixture files are included in full below:
-they provide identical domain rendering, observations and replay input, while
-the two `.cpp` files show all registration and lifecycle differences.
-
-### Before: explicit binding ownership and presentation synchronization
-
-[Open the complete source](../tests/package_consumer/form_before.cpp).
-The generated HTML reference embeds these files below with line numbers.
-
-\include{lineno} form_before.cpp
-
-### After: scene-owned lifecycle
-
-[Open the complete source](../tests/package_consumer/form_after.cpp).
-
-\include{lineno} form_after.cpp
-
-### Shared custom widget and behavioral assertions
-
-[Open the shared widget and assertions](../tests/package_consumer/form_support.hpp).
-
-\include{lineno} form_support.hpp
-
-### Shared deterministic terminal and input sequence
-
-[Open the replay fixture](../tests/package_consumer/form_replay.hpp).
-
-\include{lineno} form_replay.hpp
