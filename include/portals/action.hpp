@@ -258,6 +258,8 @@ public:
   std::expected<DispatchResult, TreeError> invoke(Node<Widget> target, ActionEvent action);
 
 private:
+  friend class ManagedScene;
+  std::uint64_t focusGeneration() const noexcept;
   struct State;
   explicit EventRouter(std::unique_ptr<State> state);
   WidgetTree &tree();

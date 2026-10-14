@@ -5,6 +5,13 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Added] Owning multi-stroke shortcuts with shared-prefix matching in the existing
+  managed input path. `Ctrl+K+K` shares modifiers; commas allow independent stroke
+  modifiers. Explicit event selections apply to every stroke. Pending commands
+  cancel on Escape, focus or eligibility changes, with one configurable scoped
+  timeout that never invokes delayed commands or requests idle redraw. Registration
+  remains bounded and atomic, with typed ambiguity and reserved-cancel errors.
+
 - [Added] Owning `ui::press`, `repeat`, `release`, `pressRepeat` and `keyActions`
   shortcut selections for text, typed chords and alternative groups. Selections
   admit exact native event phases, preserve typed construction errors and use

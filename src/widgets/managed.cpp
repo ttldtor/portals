@@ -264,6 +264,37 @@ void copyContexts(ManagedDiagnostic &diagnostic, std::span<const ManagedDiagnost
 }
 } // namespace
 
+struct ManagedScene::KeyRecord {
+  std::optional<KeyEvent> legacy;
+  std::optional<Shortcut> shortcut;
+  detail::ShortcutActions actions{detail::ShortcutActions::PRESS};
+  std::function<EditorCommandResult(const KeyEvent &)> action;
+  std::optional<std::source_location> origin;
+};
+
+struct ManagedScene::KeyPending {
+  struct Candidate {
+    std::size_t record{};
+    std::size_t alternative{};
+  };
+
+  // Count construction keeps MSVC Debug iterator-proxy failures inside registration catches.
+  std::vector<Candidate> candidates = std::vector<Candidate>(0);
+  std::vector<Candidate> scratch = std::vector<Candidate>(0);
+  Subscription timer;
+  std::size_t depth{};
+  std::uint64_t generation{1};
+  std::uint64_t focusGeneration{};
+  std::uint64_t inputGeneration{};
+  SchedulerTime deadline{};
+};
+
+struct ManagedScene::KeySnapshot {
+  std::vector<std::shared_ptr<KeyRecord>> records = std::vector<std::shared_ptr<KeyRecord>>(0);
+  std::shared_ptr<std::function<std::expected<bool, ManagedError>(const InputEvent &)>> fallback;
+  std::shared_ptr<KeyPending> pending;
+};
+
 ManagedScene::ManagedScene(Application &app, ManagedOptions options)
     : app_(app), owner_(std::this_thread::get_id()), options_(options), lifetime_(std::make_shared<const bool>(true)),
       styles_(app.tree(), options.maxNodes), entries_(0), properties_(0), models_(0),
@@ -286,8 +317,8 @@ std::expected<std::unique_ptr<ManagedScene>, ManagedError> ManagedScene::create(
   const auto diagnostics = options.diagnostics;
 
   if (!options.maxNodes || !options.maxStates || !options.maxModels || !options.maxKeyHandlers ||
-      !options.maxClickHandlers || !options.maxClickHandlersPerNode || !diagnostics.maxErrors ||
-      !diagnostics.maxContexts || !diagnostics.maxContextBytes ||
+      !options.maxClickHandlers || !options.maxClickHandlersPerNode || !options.keySequenceTimeout ||
+      !diagnostics.maxErrors || !diagnostics.maxContexts || !diagnostics.maxContextBytes ||
       diagnostics.maxErrors > maxElementCount<ManagedDiagnostic>() ||
       diagnostics.maxContexts > maxElementCount<ManagedDiagnosticContext>() ||
       diagnostics.maxContextBytes > static_cast<std::size_t>(std::numeric_limits<std::ptrdiff_t>::max())) {
@@ -1418,6 +1449,294 @@ std::expected<void, ManagedError> ManagedScene::theme(StyleSheet sheet) {
   return {};
 }
 
+void ManagedScene::resetKeys(KeyPending &pending) noexcept {
+  // Unsigned exhaustion produces a permanent invalid stamp instead of reusing an old generation.
+  if (pending.generation) {
+    ++pending.generation;
+  }
+
+  pending.candidates.clear();
+  pending.scratch.clear();
+  pending.depth = 0;
+  pending.timer = {};
+}
+
+std::expected<void, ManagedError>
+ManagedScene::registerLegacyKey(KeyEvent chord, std::function<EditorCommandResult(const KeyEvent &)> action) {
+  auto record = std::make_shared<KeyRecord>();
+
+  record->legacy = chord;
+  record->action = std::move(action);
+
+  return publishKey(std::move(record));
+}
+
+std::expected<void, ManagedError>
+ManagedScene::registerShortcut(Shortcut &&shortcut, std::function<EditorCommandResult(const KeyEvent &)> action,
+                               detail::ShortcutActions actions, std::source_location origin) {
+  auto record = std::make_shared<KeyRecord>();
+
+  record->shortcut.emplace(std::move(shortcut));
+  record->action = std::move(action);
+  record->actions = actions;
+  record->origin = origin;
+
+  return publishKey(std::move(record));
+}
+
+std::expected<void, ManagedError> ManagedScene::publishKey(std::shared_ptr<KeyRecord> record) {
+  auto snapshot = std::make_shared<KeySnapshot>();
+
+  if (keys_) {
+    snapshot->records = keys_->records;
+    snapshot->fallback = keys_->fallback;
+  } else {
+    snapshot->fallback = input_;
+  }
+
+  snapshot->records.push_back(std::move(record));
+  snapshot->pending = std::make_shared<KeyPending>();
+
+  std::size_t capacity{};
+
+  for (const auto &entry : snapshot->records) {
+    const auto count = entry->shortcut ? entry->shortcut->sequences.size() : 0;
+
+    if (count > maxElementCount<KeyPending::Candidate>() - capacity) {
+      return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::NODE_LIMIT));
+    }
+
+    capacity += count;
+  }
+
+  snapshot->pending->candidates.reserve(capacity);
+  snapshot->pending->scratch.reserve(capacity);
+
+  return setInput(
+    [this, snapshot](const InputEvent &event) {
+      return dispatchKeys(snapshot, event);
+    },
+    snapshot->records.size(), snapshot);
+}
+
+std::expected<bool, ManagedError> ManagedScene::invokeKey(const std::shared_ptr<KeyRecord> &record,
+                                                          const KeyEvent &event) {
+  const auto lifetime = std::weak_ptr(lifetime_);
+  const auto failure = [&](TreeError cause) -> std::expected<bool, ManagedError> {
+    auto result = error(ManagedPhase::INPUT, root_, cause);
+
+    result.registrationOrigin = record->origin;
+
+    return std::unexpected(std::move(result));
+  };
+
+  try {
+    const auto command = record->action(event);
+
+    if (!command && !commandReported(command, lifetime)) {
+      return failure(command.result_.error());
+    }
+  } catch (const std::bad_alloc &) {
+    return failure(TreeError::NO_MEMORY);
+  } catch (...) {
+    return failure(TreeError::CALLBACK_FAILED);
+  }
+
+  return true;
+}
+
+std::expected<bool, ManagedError> ManagedScene::waitForKey(const std::shared_ptr<KeySnapshot> &snapshot,
+                                                           const std::shared_ptr<KeyRecord> &winner,
+                                                           std::size_t depth) {
+  auto &pending = *snapshot->pending;
+  const auto focus = app_.router().focusGeneration();
+  const auto input = app_.tree().inputGeneration();
+  const auto failure = [&](TreeError cause) -> std::expected<bool, ManagedError> {
+    resetKeys(pending);
+
+    auto result = error(ManagedPhase::INPUT, root_, cause);
+
+    result.registrationOrigin = winner->origin;
+
+    return std::unexpected(std::move(result));
+  };
+
+  if (!pending.generation || !focus || !input) {
+    return failure(TreeError::IDENTITY_EXHAUSTED);
+  }
+
+  // Disconnect before rearming so the existing scheduler never needs two live prefix timers.
+  ++pending.generation;
+  pending.timer = {};
+
+  if (!pending.generation) {
+    return failure(TreeError::IDENTITY_EXHAUSTED);
+  }
+
+  const auto now = app_.now();
+  const auto deadline = now + std::min(options_.keySequenceTimeout, std::numeric_limits<SchedulerTime>::max() - now);
+  const auto generation = pending.generation;
+  std::expected<Subscription, SchedulerError> timer;
+  const auto scoped = app_.tree().withScope(root_, [&](const UiScope &scope) {
+    timer = app_.scheduler().at(scope, deadline, [weak = std::weak_ptr(snapshot->pending), generation] {
+      if (auto state = weak.lock(); state && state->generation == generation) {
+        resetKeys(*state);
+      }
+    });
+  });
+
+  if (!scoped) {
+    return failure(scoped.error());
+  }
+
+  if (!timer) {
+    return failure(WidgetTree::fromScheduler(timer.error()));
+  }
+
+  pending.candidates.swap(pending.scratch);
+  pending.scratch.clear();
+  pending.depth = depth;
+  pending.deadline = deadline;
+  pending.focusGeneration = focus;
+  pending.inputGeneration = input;
+  pending.timer = std::move(*timer);
+
+  return true;
+}
+
+std::expected<bool, ManagedError> ManagedScene::dispatchKeys(const std::shared_ptr<KeySnapshot> &snapshot,
+                                                             const InputEvent &event) {
+  auto &pending = *snapshot->pending;
+
+  if (!pending.candidates.empty() &&
+      (app_.now() >= pending.deadline || pending.focusGeneration != app_.router().focusGeneration() ||
+       pending.inputGeneration != app_.tree().inputGeneration())) {
+    resetKeys(pending);
+  }
+
+  if (!pending.candidates.empty()) {
+    const auto *cancel = std::get_if<KeyEvent>(&event);
+
+    if (cancel && cancel->action == KeyAction::PRESS && cancel->key == InputKey::ESCAPE &&
+        cancel->modifiers == InputModifiers{}) {
+      resetKeys(pending);
+
+      return true;
+    }
+
+    std::shared_ptr<KeyRecord> winner;
+    KeyEvent admitted;
+    bool terminal{};
+    bool pressAdmitted{};
+
+    pending.scratch.clear();
+
+    for (const auto candidate : pending.candidates) {
+      const auto &record = snapshot->records[candidate.record];
+      const auto key = detail::shortcutEvent(event, record->actions);
+
+      if (!key) {
+        continue;
+      }
+
+      pressAdmitted = pressAdmitted || key->action == KeyAction::PRESS;
+
+      const auto strokes = detail::shortcutAlternative(*record->shortcut, candidate.alternative);
+
+      if (!detail::shortcutChordMatches(strokes[pending.depth], *key)) {
+        continue;
+      }
+
+      const bool complete = pending.depth + 1 == strokes.size();
+
+      if (!winner) {
+        winner = record;
+        admitted = *key;
+        terminal = complete;
+      }
+
+      if (!complete) {
+        pending.scratch.push_back(candidate);
+      }
+    }
+
+    if (winner) {
+      if (terminal) {
+        resetKeys(pending);
+
+        return invokeKey(winner, admitted);
+      }
+
+      return waitForKey(snapshot, winner, pending.depth + 1);
+    }
+
+    if (pressAdmitted) {
+      resetKeys(pending);
+    }
+  }
+
+  // A mismatching or ignored-phase event reaches this root pass exactly once; old strokes are never replayed.
+  std::shared_ptr<KeyRecord> winner;
+  KeyEvent admitted;
+  bool terminal{};
+
+  pending.scratch.clear();
+
+  for (auto index = snapshot->records.size(); index-- > 0;) {
+    const auto &record = snapshot->records[index];
+
+    if (record->legacy) {
+      const auto *key = std::get_if<KeyEvent>(&event);
+      const auto chord = *record->legacy;
+
+      if (key && key->action != KeyAction::RELEASE && key->key == chord.key && key->scalar == chord.scalar &&
+          key->modifiers == chord.modifiers && !winner) {
+        return invokeKey(record, *key);
+      }
+
+      continue;
+    }
+
+    const auto key = detail::shortcutEvent(event, record->actions);
+
+    if (!key) {
+      continue;
+    }
+
+    const auto count = record->shortcut->alternatives.size() + record->shortcut->sequences.size();
+
+    for (std::size_t alternative{}; alternative < count; ++alternative) {
+      const auto strokes = detail::shortcutAlternative(*record->shortcut, alternative);
+
+      if (!detail::shortcutChordMatches(strokes.front(), *key)) {
+        continue;
+      }
+
+      const bool complete = strokes.size() == 1;
+
+      if (!winner) {
+        winner = record;
+        admitted = *key;
+        terminal = complete;
+      }
+
+      if (!complete) {
+        pending.scratch.push_back({index, alternative});
+      }
+    }
+
+    if (winner && terminal) {
+      return invokeKey(winner, admitted);
+    }
+  }
+
+  if (winner) {
+    return waitForKey(snapshot, winner, 1);
+  }
+
+  return snapshot->fallback ? (*snapshot->fallback)(event) : std::expected<bool, ManagedError>{false};
+}
+
 std::expected<void, ManagedError>
 ManagedScene::onInput(std::function<std::expected<bool, ManagedError>(const InputEvent &)> callback) {
   return setInput(std::move(callback), 0);
@@ -1425,7 +1744,7 @@ ManagedScene::onInput(std::function<std::expected<bool, ManagedError>(const Inpu
 
 std::expected<void, ManagedError>
 ManagedScene::setInput(std::function<std::expected<bool, ManagedError>(const InputEvent &)> callback,
-                       std::size_t keyHandlers) {
+                       std::size_t keyHandlers, std::shared_ptr<KeySnapshot> keys) {
   auto allowed = boundary(ManagedPhase::BIND, root_);
 
   if (!allowed) {
@@ -1438,6 +1757,11 @@ ManagedScene::setInput(std::function<std::expected<bool, ManagedError>(const Inp
     // Publish callback and count before retiring captures: their destructors can reenter onKey.
     input_.swap(prepared);
     keyHandlers_ = keyHandlers;
+    keys_.swap(keys);
+
+    if (keys) {
+      resetKeys(*keys->pending);
+    }
   } catch (const std::bad_alloc &) {
     return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::NO_MEMORY));
   }
@@ -1730,6 +2054,11 @@ std::expected<void, ManagedError> ManagedScene::close() {
 
   entries_.clear();
   models_.clear();
+  if (keys_) {
+    resetKeys(*keys_->pending);
+  }
+
+  keys_.reset();
   input_ = {};
   errorObserver_ = {};
 

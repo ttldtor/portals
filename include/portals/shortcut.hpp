@@ -6,6 +6,7 @@
 
 #include <initializer_list>
 #include <memory>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -21,10 +22,12 @@ enum class ShortcutErrorKind {
   UNKNOWN_KEY,          ///< Unsupported ASCII key/modifier name, including physical qualifiers.
   DUPLICATE_MODIFIER,   ///< One semantic modifier occurs twice in a stroke.
   EXPECTED_KEY,         ///< Modifiers were provided without a key.
-  UNSUPPORTED_SEQUENCE, ///< More than one stroke; execution is reserved for the sequence extension.
+  UNSUPPORTED_SEQUENCE, ///< Reserved legacy diagnostic; valid sequences are now supported.
   INVALID_CHORD,        ///< Invalid semantic key/scalar combination.
   NO_MEMORY,            ///< Owning alternative allocation failed.
-  INVALID_ACTION_SET    ///< Empty action set or invalid action; offset identifies the action index.
+  INVALID_ACTION_SET,   ///< Empty action set or invalid action; offset identifies the action index.
+  AMBIGUOUS_PREFIX,     ///< An alternative is a proper prefix of another in this registration.
+  RESERVED_CANCEL       ///< Unmodified Escape is reserved for cancelling pending input.
 };
 
 /** @brief Allocation-free diagnostic independent of source and scene lifetime. */
@@ -41,7 +44,7 @@ struct ShortcutError {
 struct ShortcutOptions {
   std::size_t maxSourceBytes{4096}; ///< Maximum runtime source length in bytes.
   std::size_t maxAlternatives{32};  ///< Maximum alternatives retained by one registration.
-  std::size_t maxStrokes{8};        ///< Maximum strokes parsed per alternative, before unsupported-sequence rejection.
+  std::size_t maxStrokes{8};        ///< Maximum strokes in one alternative.
 };
 
 /** @brief Command admission independent of low-level KeyEvent binding behavior. */
@@ -49,14 +52,49 @@ struct ShortcutBehavior {
   bool repeat{}; ///< Explicitly admit native REPEAT events; PRESS is always admitted, RELEASE never is.
 };
 
-/** @brief Owning shortcut alternatives; one registration invokes at most once per event. */
+/** @brief One owning multi-stroke alternative, without action or held-key state. */
+struct ShortcutSequence {
+  /** @brief Construct empty storage; debug iterator proxy allocation may throw. */
+  ShortcutSequence() : strokes(0) {
+  }
+
+  /** @param chords Ordered strokes copied for this alternative; validation requires at least two. */
+  explicit ShortcutSequence(std::initializer_list<key::Chord> chords) : strokes(chords) {
+  }
+
+  /** @param other Strokes copied without borrowing caller storage. */
+  ShortcutSequence(const ShortcutSequence &other) = default;
+
+  /** @param other Strokes transferred inside the caller's checked allocation boundary. */
+  ShortcutSequence(ShortcutSequence &&other) : strokes(0) {
+    strokes.swap(other.strokes);
+  }
+
+  /** @param other Strokes copied into this sequence.
+   * @return This value; allocation failures propagate to the checked caller.
+   */
+  ShortcutSequence &operator=(const ShortcutSequence &other) = default;
+
+  /** @param other Strokes exchanged without invoking a debug-vector move.
+   * @return This sequence; both values remain valid.
+   */
+  ShortcutSequence &operator=(ShortcutSequence &&other) noexcept {
+    strokes.swap(other.strokes);
+
+    return *this;
+  }
+
+  std::vector<key::Chord> strokes; ///< Owned ordered strokes with exact semantic modifiers.
+};
+
+/** @brief Owning shortcut alternatives; one registration invokes at most once per completed event. */
 struct Shortcut {
   /** @brief Construct empty owning storage; debug-container allocation is allowed to throw. */
-  Shortcut() : alternatives(0) {
+  Shortcut() : alternatives(0), sequences(0) {
   }
 
   /** @param chords Alternatives copied from storage borrowed only during construction. */
-  explicit Shortcut(std::initializer_list<key::Chord> chords) : alternatives(chords) {
+  explicit Shortcut(std::initializer_list<key::Chord> chords) : alternatives(chords), sequences(0) {
   }
 
   /** @param other Owning alternatives copied without retaining a source view. */
@@ -66,8 +104,9 @@ struct Shortcut {
    * This potentially throwing construction deliberately avoids a noexcept vector move:
    * some debug standard libraries allocate an iterator proxy in that move.
    */
-  Shortcut(Shortcut &&other) : alternatives(0) {
+  Shortcut(Shortcut &&other) : alternatives(0), sequences(0) {
     alternatives.swap(other.alternatives);
+    sequences.swap(other.sequences);
   }
 
   /** @param other Alternatives copied into this value.
@@ -80,23 +119,26 @@ struct Shortcut {
    */
   Shortcut &operator=(Shortcut &&other) noexcept {
     alternatives.swap(other.alternatives);
+    sequences.swap(other.sequences);
 
     return *this;
   }
 
-  std::vector<key::Chord> alternatives; ///< Owned values, never views into a caller string or initializer list.
+  std::vector<key::Chord> alternatives;    ///< Owned values, never views into a caller string or initializer list.
+  std::vector<ShortcutSequence> sequences; ///< Owned sequences sharing the alternative budget with single chords.
 };
 
 /** @param source Borrowed for this call only; ASCII names ignore case and surrounding ASCII whitespace.
  * @param options Positive finite byte/alternative/stroke budgets.
  * @return Owned alternatives or a typed byte offset. Plus joins modifiers and keys, pipe joins alternatives.
- * Multiple keys or comma-separated strokes are rejected until sequence execution is available.
+ * Plus-separated keys share all modifiers of their segment; comma starts independent modifiers.
+ * Proper-prefix alternatives and unmodified Escape after the first stroke are rejected.
  * No physical modifier identity or AltGr interpretation is inferred.
  */
 std::expected<Shortcut, ShortcutError> parseShortcut(std::string_view source, ShortcutOptions options = {});
 
 /** @param shortcut Borrowed owning values to validate before atomic registration.
- * @param options Positive finite parser/alternative budgets.
+ * @param options Positive finite alternative/stroke budgets shared by singles and sequences.
  * @return Success or an allocation-free typed value/index failure.
  */
 std::expected<void, ShortcutError> validateShortcut(const Shortcut &shortcut, ShortcutOptions options = {}) noexcept;
@@ -106,6 +148,7 @@ std::expected<void, ShortcutError> validateShortcut(const Shortcut &shortcut, Sh
  * @param behavior PRESS-only default; repeat requires explicit opt-in.
  * @return Original KeyEvent value, or a PRESS CHARACTER value preserving modified text scalar/modifiers.
  * Unmodified text matches only an explicitly registered character shortcut; other text passes through.
+ * This stateless predicate checks single chords only; ManagedScene executes sequences.
  */
 std::optional<KeyEvent> matchShortcut(const Shortcut &shortcut, const InputEvent &event,
                                       ShortcutBehavior behavior = {}) noexcept;
@@ -140,6 +183,24 @@ private:
 };
 
 namespace detail {
+/** @param event Native key or text event borrowed for this call.
+ * @param actions Fixed action mask applied to this stroke.
+ * @return Admitted original key or PRESS text; no synthetic native phases.
+ */
+std::optional<KeyEvent> shortcutEvent(const InputEvent &event, ShortcutActions actions) noexcept;
+
+/** @param chord Validated semantic chord.
+ * @param event Admitted stroke compared with ASCII letter folding.
+ * @return Whether key, scalar and exact semantic modifiers match.
+ */
+bool shortcutChordMatches(key::Chord chord, const KeyEvent &event) noexcept;
+
+/** @param shortcut Validated owning alternatives borrowed for this call.
+ * @param index Combined index, singles followed by sequences; must be in range.
+ * @return Borrowed strokes valid until the shortcut is modified or destroyed.
+ */
+std::span<const key::Chord> shortcutAlternative(const Shortcut &shortcut, std::size_t index) noexcept;
+
 /** @param shortcut Validated owning alternatives borrowed during matching.
  * @param event Original native event or text, which represents PRESS only.
  * @param actions Explicit fixed action set.

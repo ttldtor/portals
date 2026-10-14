@@ -59,13 +59,14 @@ template <class T> using ManagedPrepareHandler = std::function<std::expected<voi
 
 /** @brief Finite managed bookkeeping budgets, independent of the existing tree/queue limits. */
 struct ManagedOptions {
-  std::size_t maxNodes{4096};             ///< Maximum retained entries, including removals pending next preparation.
-  std::size_t maxStates{256};             ///< Maximum scene-owned properties; they live until scene destruction.
-  std::size_t maxModels{64};              ///< Maximum scene-owned models; they live until close().
-  ManagedDiagnosticOptions diagnostics{}; ///< Positive limits for error history and owning causal traces.
-  std::size_t maxKeyHandlers{64};    ///< Positive maximum composed onKey closures; direct onInput resets the count.
-  std::size_t maxClickHandlers{256}; ///< Positive maximum retained pipe click callbacks across the scene.
+  std::size_t maxNodes{4096};              ///< Maximum retained entries, including removals pending next preparation.
+  std::size_t maxStates{256};              ///< Maximum scene-owned properties; they live until scene destruction.
+  std::size_t maxModels{64};               ///< Maximum scene-owned models; they live until close().
+  ManagedDiagnosticOptions diagnostics{};  ///< Positive limits for error history and owning causal traces.
+  std::size_t maxKeyHandlers{64};          ///< Positive maximum owning onKey registrations; onInput resets the count.
+  std::size_t maxClickHandlers{256};       ///< Positive maximum retained pipe click callbacks across the scene.
   std::size_t maxClickHandlersPerNode{64}; ///< Positive maximum pipe click callbacks for one button.
+  SchedulerTime keySequenceTimeout{1000};  ///< Positive inactivity timeout between sequence strokes, in milliseconds.
 };
 
 /** @brief Weak UI handle to a scene-owned Property, never an owning alias.
@@ -317,7 +318,7 @@ public:
    * @param chord Exact key/scalar/modifiers; PRESS and REPEAT are admitted, RELEASE is ignored.
    * @param action Void, expected<void, TreeError> or EditorCommandResult callback.
    * @return Registration result with typed allocation/affinity errors; empty callbacks are rejected.
-   * Composes owning closures in the single existing onInput slot. Newest matching chord wins;
+   * Composes owning registrations in the single existing onInput slot. Newest matching chord wins;
    * nonmatches delegate to the previous interceptor, then standard routing. Matching success consumes
    * input; errors follow existing input failure handling. Direct onInput replaces the whole chain.
    * Command errors already reported to this scene are not reported twice.
@@ -342,26 +343,7 @@ public:
         return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::INVALID_ARGUMENT));
       }
 
-      const auto handlerCount = keyHandlers_ + 1;
-      return setInput(
-        [this, chord, lifetime = std::weak_ptr(lifetime_), previous = input_,
-         adapter = std::move(adapter)](const InputEvent &event) -> std::expected<bool, ManagedError> {
-          const auto *key = std::get_if<KeyEvent>(&event);
-
-          if (!key || key->action == KeyAction::RELEASE || key->key != chord.key || key->scalar != chord.scalar ||
-              key->modifiers != chord.modifiers) {
-            return previous ? (*previous)(event) : std::expected<bool, ManagedError>{false};
-          }
-
-          const auto command = adapter(*key);
-
-          if (!command && !commandReported(command, lifetime)) {
-            return std::unexpected(error(ManagedPhase::INPUT, root_, command.result_.error()));
-          }
-
-          return true;
-        },
-        handlerCount);
+      return registerLegacyKey(chord, std::move(adapter));
     } catch (const std::bad_alloc &) {
       return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::NO_MEMORY));
     } catch (...) {
@@ -379,6 +361,9 @@ public:
    * @return Atomic registration or typed failure; newest matching registration wins in the existing input slot.
    * Modified text produces a CHARACTER PRESS value with the original scalar and semantic modifiers.
    * Callback storage stays pinned through dispatch, replacement and scene cleanup.
+   * Each sequence stroke uses this admission policy. A prefix consumes without invoking;
+   * completion resets pending state before calling the action with the final stroke.
+   * Timeout and mismatch never invoke a suppressed terminal command or replay old events.
    */
   template <class Value, class Callback>
     requires std::same_as<std::remove_cvref_t<Value>, Shortcut> && detail::ManagedAction<Callback, KeyEvent>
@@ -397,7 +382,8 @@ public:
    * native phase.
    * @param origin Registration site preserved for configuration and action failures.
    * @return
-   * Atomic registration or typed failure, preserving previous handlers on failure.
+   * Atomic registration or typed failure, preserving previous handlers and pending input on failure.
+   * The explicit phase set applies to every sequence stroke; no backend phases are synthesized.
    */
   template <class Callback>
     requires detail::ManagedAction<Callback, KeyEvent>
@@ -426,6 +412,7 @@ public:
     return onShortcutActions(**shortcut, action, detail::KeySelectionAccess::actions(selection),
                              detail::KeySelectionAccess::options(selection), origin);
   }
+
   /** @param node Managed checkbox without a prior event binding.
    * @param model State created by this scene; shared internally on UI only.
    * @param changed Optional callback after the standard toggle, receiving its exact commit receipt.
@@ -802,47 +789,29 @@ private:
         return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::INVALID_ARGUMENT));
       }
 
-      const auto handlerCount = keyHandlers_ + 1;
-
-      return setInput(
-        [this, shortcut = std::move(owned), actions, origin, lifetime = std::weak_ptr(lifetime_), previous = input_,
-         adapter = std::move(adapter)](const InputEvent &event) -> std::expected<bool, ManagedError> {
-          const auto key = detail::matchShortcutActions(shortcut, event, actions);
-
-          if (!key) {
-            return previous ? (*previous)(event) : std::expected<bool, ManagedError>{false};
-          }
-
-          const auto actionFailure = [this, origin](TreeError cause) -> std::expected<bool, ManagedError> {
-            auto failure = error(ManagedPhase::INPUT, root_, cause);
-
-            failure.registrationOrigin = origin;
-
-            return std::unexpected(std::move(failure));
-          };
-
-          // Only this admitted action owns this origin; fallback errors keep their own provenance.
-          try {
-            const auto command = adapter(*key);
-
-            if (!command && !commandReported(command, lifetime)) {
-              return actionFailure(command.result_.error());
-            }
-          } catch (const std::bad_alloc &) {
-            return actionFailure(TreeError::NO_MEMORY);
-          } catch (...) {
-            return actionFailure(TreeError::CALLBACK_FAILED);
-          }
-
-          return true;
-        },
-        handlerCount);
+      return registerShortcut(std::move(owned), std::move(adapter), actions, origin);
     } catch (const std::bad_alloc &) {
       return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::NO_MEMORY));
     } catch (...) {
       return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::CALLBACK_FAILED));
     }
   }
+
+  struct KeyRecord;
+  struct KeySnapshot;
+  struct KeyPending;
+
+  std::expected<void, ManagedError> registerLegacyKey(KeyEvent chord,
+                                                      std::function<EditorCommandResult(const KeyEvent &)> action);
+  std::expected<void, ManagedError> registerShortcut(Shortcut &&shortcut,
+                                                     std::function<EditorCommandResult(const KeyEvent &)> action,
+                                                     detail::ShortcutActions actions, std::source_location origin);
+  std::expected<void, ManagedError> publishKey(std::shared_ptr<KeyRecord> record);
+  std::expected<bool, ManagedError> dispatchKeys(const std::shared_ptr<KeySnapshot> &snapshot, const InputEvent &event);
+  std::expected<bool, ManagedError> invokeKey(const std::shared_ptr<KeyRecord> &record, const KeyEvent &event);
+  std::expected<bool, ManagedError> waitForKey(const std::shared_ptr<KeySnapshot> &snapshot,
+                                               const std::shared_ptr<KeyRecord> &winner, std::size_t depth);
+  static void resetKeys(KeyPending &pending) noexcept;
 
   friend struct style::ct::detail::Access;
   friend struct ui::detail::Access;
@@ -884,7 +853,8 @@ private:
   explicit ManagedScene(Application &app, ManagedOptions options);
 
   std::expected<void, ManagedError>
-  setInput(std::function<std::expected<bool, ManagedError>(const InputEvent &)> callback, std::size_t keyHandlers);
+  setInput(std::function<std::expected<bool, ManagedError>(const InputEvent &)> callback, std::size_t keyHandlers,
+           std::shared_ptr<KeySnapshot> keys = {});
 
   std::expected<void, ManagedError>
   onButtonClick(Node<Button> node, std::function<EditorCommandResult(const ClickEvent &)> action, bool allowModified);
@@ -995,6 +965,7 @@ private:
   std::vector<std::shared_ptr<void>> properties_;
   std::vector<std::shared_ptr<detail::ManagedModelSource>> models_;
   std::shared_ptr<std::function<std::expected<bool, ManagedError>(const InputEvent &)>> input_;
+  std::shared_ptr<KeySnapshot> keys_;
   std::size_t keyHandlers_{};
   std::size_t clickHandlers_{};
   std::shared_ptr<ManagedErrorHandler> errorObserver_;

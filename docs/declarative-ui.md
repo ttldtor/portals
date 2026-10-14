@@ -388,9 +388,54 @@ handler and normal widget routing. The newest matching binding wins.
 Syntax diagnostics include a typed cause and a zero-based byte offset; no caller
 string is borrowed after registration. Default parser budgets are 4096 bytes,
 32 alternatives and 8 strokes per alternative, configurable through
-`ShortcutOptions`. This slice rejects multi-stroke sequences until their execution
-extension is available. Invalid syntax or exhausted registration budgets do not
+`ShortcutOptions`. Invalid syntax or exhausted registration budgets do not
 replace existing handlers. Facade errors reach the existing scene diagnostics.
+
+Multi-stroke commands use the same registration path:
+
+```cpp
+scene | ui::onKey("Ctrl + K + K", action);
+scene | ui::onKey("Ctrl + K, K", otherAction);
+scene | ui::onKey(ui::release("A, B"), releasedAction);
+```
+
+`Ctrl+K+K` means Ctrl+K followed by Ctrl+K. All modifiers in one plus-separated
+segment apply to every key in that segment, including modifiers written after a
+key. Comma starts a segment with independent modifiers: `Ctrl+K,K` requires an
+unmodified second K. No held-key state is inferred. `Shortcut::sequences` owns
+typed `ShortcutSequence` values while `alternatives` retains its single-chord
+meaning; their combined count uses `maxAlternatives`.
+
+At each stroke the newest matching registration decides whether to invoke a
+terminal command or wait for continuation. A prefix retains compatible longer
+candidates from older registrations, but suppresses older terminal commands
+permanently. Within one registration, an alternative that is a proper prefix of
+another is rejected with `AMBIGUOUS_PREFIX`; duplicate complete alternatives
+still invoke once. Pending continuation precedes standalone root bindings.
+
+An unmatched admitted PRESS clears the prefix and processes the current event
+normally once. Previously consumed prefix events are never replayed. An ignored
+phase or unmatched REPEAT/RELEASE keeps the prefix and passes through normally;
+if that root pass starts another prefix, the new group replaces the old one.
+Explicit phase selections apply independently to every stroke. Thus a PRESS
+between two explicitly selected RELEASE strokes does not cancel the sequence.
+Text represents PRESS only; backends do not gain new event phases.
+
+Unmodified Escape PRESS cancels pending input and is consumed. Such Escape in a
+continuation is rejected with `RESERVED_CANCEL`; modified Escape remains an exact
+chord. Focus changes, visibility/enabled changes, removal and input replacement
+invalidate a pending prefix, including changes away and back between strokes.
+The conservative tree invalidation also includes mutations of unrelated nodes;
+ordinary paint/layout invalidation does not cancel it.
+
+`ManagedOptions::keySequenceTimeout` defaults to 1000 milliseconds and must be
+positive; configure it through `SceneOptions::managed`. Each accepted nonterminal
+stroke restarts the timeout. Expiration clears the prefix without invoking any
+command, even before the scheduler dispatches its timer. There is one scoped
+timer and no idle redraw. Completion clears pending state before invoking the
+callback; its captures survive self-removal, close and input replacement. Failed
+registration preserves old bindings and pending state. A timer-arm failure uses
+the existing fatal input error path and leaves no pending command.
 
 Generic SHIFT, ALT and CTRL describe observed semantic modifiers. The API does
 not infer left/right identity or AltGr from terminal events. The current-scene
