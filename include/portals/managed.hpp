@@ -385,77 +385,47 @@ public:
   std::expected<void, ManagedError> onKey(Value &&shortcut, Callback action, ShortcutBehavior behavior = {},
                                           ShortcutOptions options = {},
                                           std::source_location origin = std::source_location::current()) {
+    return onShortcutActions(std::forward<Value>(shortcut), action,
+                             behavior.repeat ? detail::ShortcutActions::PRESS_REPEAT : detail::ShortcutActions::PRESS,
+                             options, origin);
+  }
+
+  /** @tparam Callback Owning compact action, optionally receiving const KeyEvent&.
+   * @param selection Immutable
+   * owning alternatives or a deferred helper error.
+   * @param action Checked callback invoked once for an admitted
+   * native phase.
+   * @param origin Registration site preserved for configuration and action failures.
+   * @return
+   * Atomic registration or typed failure, preserving previous handlers on failure.
+   */
+  template <class Callback>
+    requires detail::ManagedAction<Callback, KeyEvent>
+  std::expected<void, ManagedError> onKey(const KeySelection &selection, Callback action,
+                                          std::source_location origin = std::source_location::current()) {
     auto allowed = boundary(ManagedPhase::BIND, root_);
 
     if (!allowed) {
       return allowed;
     }
 
-    const auto valid = validateShortcut(shortcut, options);
+    const auto &shortcut = detail::KeySelectionAccess::shortcut(selection);
 
-    if (!valid) {
-      auto failure = error(ManagedPhase::BIND, root_, TreeError::INVALID_ARGUMENT);
+    if (!shortcut || !*shortcut) {
+      const auto cause = shortcut ? ShortcutError{ShortcutErrorKind::INVALID_CHORD, 0} : shortcut.error();
+      auto failure =
+        error(ManagedPhase::BIND, root_,
+              cause.cause == ShortcutErrorKind::NO_MEMORY ? TreeError::NO_MEMORY : TreeError::INVALID_ARGUMENT);
 
-      failure.shortcut = valid.error();
+      failure.shortcut = cause;
+      failure.registrationOrigin = origin;
 
       return std::unexpected(std::move(failure));
     }
 
-    if (keyHandlers_ >= options_.maxKeyHandlers) {
-      return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::NODE_LIMIT));
-    }
-
-    try {
-      // Avoid both caller-side transfers and noexcept debug-vector moves before the checked boundary.
-      Shortcut owned(std::forward<Value>(shortcut));
-      auto adapter = actionAdapter<KeyEvent>(std::move(action));
-
-      if (!adapter) {
-        return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::INVALID_ARGUMENT));
-      }
-
-      const auto handlerCount = keyHandlers_ + 1;
-
-      return setInput(
-        [this, shortcut = std::move(owned), behavior, origin, lifetime = std::weak_ptr(lifetime_), previous = input_,
-         adapter = std::move(adapter)](const InputEvent &event) -> std::expected<bool, ManagedError> {
-          const auto key = matchShortcut(shortcut, event, behavior);
-
-          if (!key) {
-            return previous ? (*previous)(event) : std::expected<bool, ManagedError>{false};
-          }
-
-          const auto actionFailure = [this, origin](TreeError cause) -> std::expected<bool, ManagedError> {
-            auto failure = error(ManagedPhase::INPUT, root_, cause);
-
-            failure.registrationOrigin = origin;
-
-            return std::unexpected(std::move(failure));
-          };
-
-          // Only this admitted action owns this origin; fallback errors keep their own provenance.
-          try {
-            const auto command = adapter(*key);
-
-            if (!command && !commandReported(command, lifetime)) {
-              return actionFailure(command.result_.error());
-            }
-          } catch (const std::bad_alloc &) {
-            return actionFailure(TreeError::NO_MEMORY);
-          } catch (...) {
-            return actionFailure(TreeError::CALLBACK_FAILED);
-          }
-
-          return true;
-        },
-        handlerCount);
-    } catch (const std::bad_alloc &) {
-      return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::NO_MEMORY));
-    } catch (...) {
-      return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::CALLBACK_FAILED));
-    }
+    return onShortcutActions(**shortcut, action, detail::KeySelectionAccess::actions(selection),
+                             detail::KeySelectionAccess::options(selection), origin);
   }
-
   /** @param node Managed checkbox without a prior event binding.
    * @param model State created by this scene; shared internally on UI only.
    * @param changed Optional callback after the standard toggle, receiving its exact commit receipt.
@@ -799,6 +769,81 @@ public:
   void stop(Application &app) override;
 
 private:
+  template <class Value, class Callback>
+  std::expected<void, ManagedError> onShortcutActions(Value &&shortcut, Callback &action,
+                                                      detail::ShortcutActions actions, ShortcutOptions options,
+                                                      std::source_location origin) {
+    auto allowed = boundary(ManagedPhase::BIND, root_);
+
+    if (!allowed) {
+      return allowed;
+    }
+
+    const auto valid = validateShortcut(shortcut, options);
+
+    if (!valid) {
+      auto failure = error(ManagedPhase::BIND, root_, TreeError::INVALID_ARGUMENT);
+
+      failure.shortcut = valid.error();
+
+      return std::unexpected(std::move(failure));
+    }
+
+    if (keyHandlers_ >= options_.maxKeyHandlers) {
+      return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::NODE_LIMIT));
+    }
+
+    try {
+      // Avoid both caller-side transfers and noexcept debug-vector moves before the checked boundary.
+      Shortcut owned(std::forward<Value>(shortcut));
+      auto adapter = actionAdapter<KeyEvent>(std::move(action));
+
+      if (!adapter) {
+        return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::INVALID_ARGUMENT));
+      }
+
+      const auto handlerCount = keyHandlers_ + 1;
+
+      return setInput(
+        [this, shortcut = std::move(owned), actions, origin, lifetime = std::weak_ptr(lifetime_), previous = input_,
+         adapter = std::move(adapter)](const InputEvent &event) -> std::expected<bool, ManagedError> {
+          const auto key = detail::matchShortcutActions(shortcut, event, actions);
+
+          if (!key) {
+            return previous ? (*previous)(event) : std::expected<bool, ManagedError>{false};
+          }
+
+          const auto actionFailure = [this, origin](TreeError cause) -> std::expected<bool, ManagedError> {
+            auto failure = error(ManagedPhase::INPUT, root_, cause);
+
+            failure.registrationOrigin = origin;
+
+            return std::unexpected(std::move(failure));
+          };
+
+          // Only this admitted action owns this origin; fallback errors keep their own provenance.
+          try {
+            const auto command = adapter(*key);
+
+            if (!command && !commandReported(command, lifetime)) {
+              return actionFailure(command.result_.error());
+            }
+          } catch (const std::bad_alloc &) {
+            return actionFailure(TreeError::NO_MEMORY);
+          } catch (...) {
+            return actionFailure(TreeError::CALLBACK_FAILED);
+          }
+
+          return true;
+        },
+        handlerCount);
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::NO_MEMORY));
+    } catch (...) {
+      return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::CALLBACK_FAILED));
+    }
+  }
+
   friend struct style::ct::detail::Access;
   friend struct ui::detail::Access;
   friend struct ui::detail::RefAccess;

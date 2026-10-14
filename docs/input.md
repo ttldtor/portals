@@ -6,6 +6,50 @@ dependency on the diagnostic probe. The caller supplies arrival timestamps and
 an explicit input profile. Enabling a decoder option does not enable a terminal
 mode; a future terminal session owner must do that separately.
 
+## Selecting shortcut phases
+
+`<portals/ui.hpp>` provides owning shortcut selections for the existing `onKey`
+registration path. Plain string/chord/alternative bindings admit PRESS only:
+
+```cpp
+scene.onKey("W", move);
+scene.onKey(ui::repeat("W"), move);       // Native REPEAT only.
+scene.onKey(ui::release("W"), stop);      // Native RELEASE only.
+scene.onKey(ui::pressRepeat("W"), move);  // PRESS or native REPEAT.
+scene.onKey(ui::release({key::F10, key::ALT + key::Q}), stop);
+scene.onKey(ui::repeat({key::UP, key::DOWN, key::LEFT, key::RIGHT}), move);
+scene | ui::onKey(ui::keyActions("W", {KeyAction::PRESS, KeyAction::RELEASE}), action);
+```
+
+`ui::press(source)` selects exact PRESS. All helpers accept text, a typed chord,
+an owning `Shortcut`, or an initializer list of alternative typed chords.
+`ui::keyActions(source, actions)` selects any nonempty subset of PRESS, REPEAT and
+RELEASE without more helper names. Alternatives and duplicate actions invoke at
+most once per event. Invalid/empty action sets report `INVALID_ACTION_SET`, with
+the offending action index (zero for empty). Normalization errors and allocation
+failures retain their existing typed errors. Parser budgets stay configurable.
+
+Helpers normalize before returning and retain immutable owning alternatives;
+temporary strings and lists may expire immediately. Copying a `KeySelection`
+shares immutable values; each registration owns its callback. Normalization runs
+once at setup, never in callbacks. Diagnostic source location identifies the
+`onKey` registration, independently of helper construction; parser/action offsets
+identify the bad input. Newest matching registration wins, with exact modifiers
+and the existing ASCII letter case policy. Callbacks may accept no argument or
+`const KeyEvent&`, using the existing checked result adapters.
+
+`ShortcutBehavior{.repeat = true}` remains the legacy PRESS+REPEAT adapter for
+ordinary shortcut sources. Explicit selections have no overload accepting that
+adapter; their phase set is complete. The raw `KeyEvent` overload still admits
+PRESS and REPEAT. Text input represents PRESS only, so cannot trigger repeat-only
+or release-only selections.
+
+Selections do not add backend capabilities: the VT decoder emits PRESS, including
+repeated bytes, and does not synthesize releases. A native adapter must supply real
+REPEAT/RELEASE values. Held-key state, focus-loss release and kitty negotiation are
+outside this API. Native-value tests inject semantic events; replay tests verify
+the PRESS-only byte path. No new scheduler or input router is involved.
+
 ## Pulling events
 
 `InputDecoder::create(options)` validates settings and returns an owning decoder

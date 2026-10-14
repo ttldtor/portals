@@ -363,6 +363,36 @@ public:
     return std::move(*this);
   }
 
+  /** @tparam Callback Existing owning compact action, optionally taking const KeyEvent&.
+   * @param selection Immutable owning alternatives with exact native phase admission.
+   * @param callback Action transferred into deferred scene configuration.
+   * @param origin Registration call site, independent of helper construction.
+   * @return This owner, retaining typed helper errors in the existing collector.
+   */
+  template <class Callback>
+    requires portals::detail::ManagedAction<Callback, KeyEvent>
+  Scene &onKey(const KeySelection &selection, Callback callback,
+               std::source_location origin = std::source_location::current()) & {
+    onSelectionImpl(selection, callback, origin);
+
+    return *this;
+  }
+
+  /** @tparam Callback Existing owning compact action, optionally taking const KeyEvent&.
+   * @param selection Immutable owning alternatives with exact native phase admission.
+   * @param callback Action transferred into deferred scene configuration.
+   * @param origin Registration call site, independent of helper construction.
+   * @return Consuming owner for temporary fluent chains.
+   */
+  template <class Callback>
+    requires portals::detail::ManagedAction<Callback, KeyEvent>
+  Scene &&onKey(const KeySelection &selection, Callback callback,
+                std::source_location origin = std::source_location::current()) && {
+    onSelectionImpl(selection, callback, origin);
+
+    return std::move(*this);
+  }
+
   /** @tparam Callback Existing compact void/expected<void, TreeError>/EditorCommandResult action.
    * @param chord Exact key/scalar/modifiers; PRESS and REPEAT retain the existing admission contract.
    * @param callback Owning handler, optionally receiving the borrowed KeyEvent&.
@@ -615,6 +645,34 @@ private:
     }
   }
 
+  template <class Callback>
+  void onSelectionImpl(const KeySelection &selection, Callback &callback, std::source_location origin) {
+    if (!admitConfiguration(true, origin)) {
+      return;
+    }
+
+    const auto &shortcut = portals::detail::KeySelectionAccess::shortcut(selection);
+
+    if (!shortcut || !*shortcut) {
+      shortcutConfigurationFailure(shortcut ? ShortcutError{ShortcutErrorKind::INVALID_CHORD, 0} : shortcut.error(),
+                                   origin);
+
+      return;
+    }
+
+    try {
+      addConfiguration(
+        [selection, callback = std::move(callback), origin](ManagedScene &scene) mutable {
+          return scene.onKey(selection, std::move(callback), origin);
+        },
+        true, origin);
+    } catch (const std::bad_alloc &) {
+      configurationException(TreeError::NO_MEMORY, origin);
+    } catch (...) {
+      configurationException(TreeError::CALLBACK_FAILED, origin);
+    }
+  }
+
   template <class Source, class Callback>
   void onShortcutSourceImpl(Source &&source, Callback &callback, ShortcutBehavior behavior, ShortcutOptions options,
                             std::source_location origin) {
@@ -760,6 +818,19 @@ struct SceneAccess {
     requires portals::detail::ManagedAction<Callback, KeyEvent>
   static void onKey(Scene &owner, KeyEvent chord, Callback &callback, std::source_location origin) {
     owner.onKeyImpl(chord, callback, origin);
+  }
+
+  /** @tparam Callback Existing owning compact action.
+   * @param owner Facade receiving checked selected registration.
+   * @param selection Immutable owning alternatives and exact action set.
+   * @param callback Stored callback transferred only inside the configuration catch.
+   * @param origin Original onKey registration call site.
+   */
+  template <class Callback>
+    requires portals::detail::ManagedAction<Callback, KeyEvent>
+  static void onSelection(Scene &owner, const KeySelection &selection, Callback &callback,
+                          std::source_location origin) {
+    owner.onSelectionImpl(selection, callback, origin);
   }
 
   /** @tparam Callback Existing owning compact key action.

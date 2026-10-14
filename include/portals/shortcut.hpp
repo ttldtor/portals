@@ -23,7 +23,8 @@ enum class ShortcutErrorKind {
   EXPECTED_KEY,         ///< Modifiers were provided without a key.
   UNSUPPORTED_SEQUENCE, ///< More than one stroke; execution is reserved for the sequence extension.
   INVALID_CHORD,        ///< Invalid semantic key/scalar combination.
-  NO_MEMORY             ///< Owning alternative allocation failed.
+  NO_MEMORY,            ///< Owning alternative allocation failed.
+  INVALID_ACTION_SET    ///< Empty action set or invalid action; offset identifies the action index.
 };
 
 /** @brief Allocation-free diagnostic independent of source and scene lifetime. */
@@ -110,6 +111,75 @@ std::optional<KeyEvent> matchShortcut(const Shortcut &shortcut, const InputEvent
                                       ShortcutBehavior behavior = {}) noexcept;
 
 namespace detail {
+/** @brief Fixed action mask used only after checked selection construction. */
+enum class ShortcutActions : unsigned char {
+  PRESS = 1,       ///< Admit PRESS.
+  REPEAT = 2,      ///< Admit native REPEAT.
+  RELEASE = 4,     ///< Admit native RELEASE.
+  PRESS_REPEAT = 3 ///< Legacy repeat opt-in.
+};
+struct KeySelectionAccess;
+} // namespace detail
+
+/** @brief Copyable immutable owning shortcut selection, or a deferred typed construction error.
+ * Copies share normalized values; no source string or initializer list is retained.
+ * Moving/copying this receipt allocates nothing. Registration origin belongs to onKey.
+ */
+class KeySelection {
+private:
+  friend struct detail::KeySelectionAccess;
+
+  KeySelection(std::expected<std::shared_ptr<const Shortcut>, ShortcutError> shortcut, detail::ShortcutActions actions,
+               ShortcutOptions options) noexcept
+      : shortcut_(std::move(shortcut)), actions_(actions), options_(options) {
+  }
+
+  std::expected<std::shared_ptr<const Shortcut>, ShortcutError> shortcut_;
+  detail::ShortcutActions actions_;
+  ShortcutOptions options_;
+};
+
+namespace detail {
+/** @param shortcut Validated owning alternatives borrowed during matching.
+ * @param event Original native event or text, which represents PRESS only.
+ * @param actions Explicit fixed action set.
+ * @return Original admitted key, converted PRESS text, or no match.
+ */
+std::optional<KeyEvent> matchShortcutActions(const Shortcut &shortcut, const InputEvent &event,
+                                             ShortcutActions actions) noexcept;
+
+/** @brief Internal bridge keeping selection payload immutable and checked. */
+struct KeySelectionAccess {
+  /** @param shortcut Checked normalized alternatives transferred within the allocation catch.
+   * @param actions Borrowed explicit native phases; invalid values retain their index.
+   * @param options Original finite normalization limits.
+   * @return Immutable receipt or deferred typed error; receipt transfer cannot allocate.
+   */
+  static KeySelection make(std::expected<Shortcut, ShortcutError> &&shortcut, std::initializer_list<KeyAction> actions,
+                           ShortcutOptions options);
+
+  /** @param selection Owning receipt borrowed during checked registration.
+   * @return Immutable payload or deferred construction failure, borrowed from selection.
+   */
+  static const auto &shortcut(const KeySelection &selection) noexcept {
+    return selection.shortcut_;
+  }
+
+  /** @param selection Owning receipt borrowed during registration.
+   * @return Validated fixed action set.
+   */
+  static ShortcutActions actions(const KeySelection &selection) noexcept {
+    return selection.actions_;
+  }
+
+  /** @param selection Owning receipt borrowed during registration.
+   * @return Original finite normalization limits.
+   */
+  static ShortcutOptions options(const KeySelection &selection) noexcept {
+    return selection.options_;
+  }
+};
+
 /** @param chord Owning constexpr chord value.
  * @param options Positive shortcut budgets.
  * @return Validated owning single-alternative shortcut or a typed error.
