@@ -8,18 +8,28 @@ Start with a declarative scene, then choose the task you need.
 
 | Task | Guide |
 |---|---|
-| Build and run a first application | [Short guide](index.md) |
-| Declare controls and event handlers | [Declarative UI](declarative-ui.md) |
-| Parse CLI before opening the terminal and read process snapshots | [Command-line startup](cli.md) |
-| Write PSS or load a stylesheet | [Styles](styling-guide.md) |
-| Choose or update a palette | [Themes](themes-guide.md) |
-| Connect state, references and events | [Bindings and events](bindings-guide.md) |
-| Arrange controls and focus | [Layout](layout.md), [grid and overlay](grid.md), [focus](focus.md) |
-| Work with text and editing | [Text references](text-property.md), [LineEdit](line-edit.md), [Undo and Redo](editor-history.md) |
-| Display large datasets | [Models](model.md), [virtual lists](virtual-list.md), [virtual tables](virtual-table.md) |
-| Report errors | [Diagnostics](diagnostics.md), [application runner](application.md) |
-| Await work on the UI thread | [UI coroutines](ui-coroutines.md) |
-| Use Portals in an existing project | [Package setup](package.md) |
+| Create a first form | [Declarative UI](declarative-ui.md) |
+| Start the application and parse options | [Application](application.md) |
+| Parse command-line arguments | [Command-line startup](cli.md) |
+| Apply styles | [Styles](styling-guide.md) |
+| Change the palette | [Themes](themes-guide.md) |
+| Connect events and state | [Bindings and events](bindings-guide.md) |
+| Arrange controls | [Layout](layout.md) |
+| Place controls in cells | [Grid and overlay](grid.md) |
+| Change a control through a reference | [Control references](text-property.md) |
+| Edit text | [LineEdit](line-edit.md) |
+| Undo and redo edits | [Undo and redo](editor-history.md) |
+| Create shared state | [Properties](property.md) |
+| Supply view data | [Models](model.md) |
+| Display a large list | [Virtual lists](virtual-list.md) |
+| Display a large table | [Virtual tables](virtual-table.md) |
+| Control scrolling | [Scrolling](scroll.md) |
+| Plot values | [Charts](chart.md) |
+| Handle keyboard input | [Input](input.md) |
+| Report errors | [Diagnostics](diagnostics.md) |
+| Wait without blocking the UI | [UI coroutines](ui-coroutines.md) |
+| Integrate frame rendering | [Rendering](render.md) |
+| Connect a CMake package | [Package setup](package.md) |
 
 ## Examples
 
@@ -44,3 +54,5 @@ See [planned features and milestones](planned-features.md) for the full list
 and [scene loading](scene-loading-guide.md) for its current status.
 
 [Dependencies and licenses](dependencies.md).
+
+[Scene and recipe reference](declarative-reference.md).

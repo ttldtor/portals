@@ -1,5 +1,7 @@
 # MVP measurements
 
+[Developer tool catalog](../../docs/developer-tools.md) · [Command reference](../../docs/developer-tools-measure.md)
+
 ## PSS parser measurements
 
 `portals_pss_benchmark` measures the existing runtime `parsePss` entry point

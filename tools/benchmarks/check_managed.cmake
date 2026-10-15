@@ -1,5 +1,11 @@
 # Copyright (c) 2026 ttldtor.
 # SPDX-License-Identifier: BSL-1.0
+# Internal CTest driver for portals.managed-measurement, not a benchmark CLI.
+# Caller supplies PROGRAM (managed benchmark executable). Runs --check in stdout
+# and temporary-file modes (30-second child deadlines), validates reports and
+# rejected arguments (10-second deadlines), and removes its unique temporary file.
+# Run through CTest in a tools-and-tests-enabled build. CMake fails on any check;
+# no standalone help flag is defined.
 if(NOT DEFINED PROGRAM)
   message(FATAL_ERROR "PROGRAM is required")
 endif()

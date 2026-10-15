@@ -88,6 +88,39 @@ std::size_t number(std::string_view value, std::size_t maximum) {
   return result;
 }
 
+// Help is handled before option parsing, workload construction and output creation.
+bool printHelp(int argc, char **argv) {
+  for (int index = 1; index < argc; ++index) {
+    const std::string_view argument(argv[index]);
+
+    if (argument != "--help" && argument != "-h") {
+      continue;
+    }
+
+    if (argc != 2) {
+      throw std::runtime_error("--help or -h must be the sole argument");
+    }
+
+    std::cout << R"help(Measure low-level, managed and declarative scene lifecycle phases.
+Usage: portals_managed_benchmark [options]
+       portals_managed_benchmark --help | -h
+Options:
+  --samples N  Timed samples per case, 1..200 (default: 30).
+  --warmup N   Untimed samples per case, 0..50 (default: 5).
+  --rows N     Use one row count, 1..1024 (default: 32, 128, 512).
+  --check      Override rows to 2, 8, samples to 3 and warmup to 1.
+  --output P   Write JSON to P, truncating it (default: stdout).
+  --help, -h   Show help as the sole argument; no workload or files.
+Output: JSON to stdout or --output.
+Exit: 0 on success/help; 1 on invalid arguments, workload or output failure.
+)help";
+
+    return true;
+  }
+
+  return false;
+}
+
 Options parse(int argc, char **argv) {
   Options options;
 
@@ -455,8 +488,17 @@ std::string execute(const Options &options) {
 }
 } // namespace
 
+/** @brief Measure retained scene lifecycle costs across three construction APIs.
+ * @param argc Number of command-line arguments, including the executable name.
+ * @param argv Borrowed argument strings; --help lists options, defaults and output behavior.
+ * @return Zero on a complete report or help; one on argument, workload or output failure.
+ */
 int main(int argc, char **argv) {
   try {
+    if (printHelp(argc, argv)) {
+      return 0;
+    }
+
     const auto options = parse(argc, argv);
     const auto output = execute(options);
 

@@ -1,5 +1,7 @@
 # Copyright (c) 2026 ttldtor.
 # SPDX-License-Identifier: BSL-1.0
+# Internal include; no standalone CLI. Functions take explicit arguments.
+# Function contracts and callers: docs/developer-tools-release.md.
 # Shared, build-independent validation for bundle creation and fresh unpack tests.
 cmake_minimum_required(VERSION 3.24)
 

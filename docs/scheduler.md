@@ -1,5 +1,59 @@
 # UI scheduler and bounded publication
 
+[`Scheduler`](../include/portals/scheduler.hpp) runs an action later on the UI thread and delivers worker results. Use it to dismiss a notification after a delay or deliver a calculation result to a model-update callback. It creates no worker thread: a long calculation inside a callback delays the interface.
+
+This standalone example schedules an action one second later, services the scheduler and prints a message. `at` takes an absolute millisecond deadline; its default clock is `steady_clock`. Keep both the `timer` token and [cancellation scope](glossary.md#glossary-cancellation) until delivery.
+
+```cpp
+#include <portals/scheduler.hpp>
+#include <chrono>
+#include <iostream>
+
+int main() {
+  using namespace portals;
+  using namespace std::chrono;
+
+  auto scheduler = Scheduler::create();
+
+  if (!scheduler) {
+    return 1;
+  }
+
+  auto scope = (*scheduler)->makeScope();
+
+  if (!scope) {
+    return 1;
+  }
+
+  constexpr auto DELAY = seconds(1);
+  const auto deadline = duration_cast<milliseconds>(steady_clock::now().time_since_epoch() + DELAY);
+  bool ready = false;
+  auto timer = (*scheduler)->at(*scope, static_cast<SchedulerTime>(deadline.count()),
+                               [&ready] {
+                                 ready = true;
+                               });
+
+  if (!timer) {
+    return 1;
+  }
+
+  while (!ready) {
+    if (!(*scheduler)->waitFor(duration_cast<milliseconds>(DELAY)) || !(*scheduler)->dispatch()) {
+      return 1;
+    }
+  }
+
+  std::cout << "Ready after one second\n";
+}
+```
+
+A Portals application already services `Application::scheduler()` between frames; do not add this standalone `waitFor`/`dispatch` loop to it. Register on the existing UI scheduler and retain the token and scope until delivery or cancellation. `WidgetTree::at(node, deadline, callback)` also ties a widget callback to node removal. A callback that changes text or a model uses the ordinary checked mutation API and its invalidation. `ui::Scene` currently has no fluent timer operator.
+
+[Build the standalone examples](examples.md).
+
+<details>
+<summary>Reference: queues, cancellation and clocks</summary>
+
 `Scheduler` binds to the thread that calls `create`. The application calls
 `dispatch()` between frames. It does not run a background executor, write to the
 terminal, mutate widgets, or request frames. Callback code applies changes and
@@ -7,7 +61,7 @@ chooses the resulting invalidation. Layout and paint must not call `dispatch` or
 `waitFor`. Reentrant dispatch and waiting inside a callback return
 `REENTRANT_DISPATCH`.
 
-## Queues, budgets and backpressure
+**Queues, budgets and backpressure**
 
 [Backpressure](glossary.md#glossary-backpressure) is a queue-capacity limit
 that requires the publisher to retry later or report rejected delivery.
@@ -46,7 +100,7 @@ lossless domain aggregation. Raw ticks, incremental changes and unresolved
 provider errors must not be silently removed; include status in the complete
 snapshot or use rejection/backpressure.
 
-## Ownership and cancellation
+**Ownership and cancellation**
 
 `connect<T>` creates a `SchedulerConnection<T>`. The controller retains its
 move-only `Subscription`; a worker receives only a copy of `Publisher<T>`.
@@ -98,7 +152,7 @@ and provider storage lifetime; it joins workers outside layout/paint. UI
 reclaims callbacks. `waitFor` only observes stop. Destroy the scheduler on its
 owner, outside callbacks. It never synchronously joins foreign work.
 
-## Timers, clocks and waiting
+**Timers, clocks and waiting**
 
 `at(scope, absolute_milliseconds, callback)` registers a one-shot timer using
 the same scoped cancellation contract. Due timers run in deadline order, then
@@ -122,7 +176,7 @@ so a notification immediately before waiting is not lost. An application that
 also owns terminal input must coordinate that input through its adapter; this
 API does not add an OS-wide terminal wait multiplexer.
 
-## Errors and measurements
+**Errors and measurements**
 
 Creation rejects zero/impossible capacities and translates allocation failure
 to `NO_MEMORY`. Registration translates allocation failure while taking
@@ -145,15 +199,12 @@ most recent replacement, in injected-clock milliseconds. Counters saturate at
 can sample these values or record callback timing externally for percentiles.
 No native latency or throughput claim is made by the deterministic tests.
 
-`tests/scheduler.cpp` covers sustained flood fairness, overflow/coalescing,
-clock-derived metrics, timer order/debt, cancellation and self-close, exceptions,
-reentrant deleters, UI affinity, late publishers, stop under saturation and one
-bounded native worker wakeup. Timer/latency tests do not sleep. The native wakeup
-uses a clock handshake while the wait holds the mutex, so the producer publishes
-only after the wait releases it.
+[Developer testing](testing.md).
 
 The synchronization and owner primitives follow the C++ working draft's
 [condition-variable rules](https://eel.is/c++draft/thread.condition.condvar)
 and [shared ownership rules](https://eel.is/c++draft/util.smartptr.shared).
 Platform failures of standard synchronization primitives follow their standard
 exception/termination contracts; Portals does not emulate a failed OS mutex.
+
+</details>

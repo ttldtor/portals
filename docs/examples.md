@@ -35,7 +35,34 @@ helpers, manual binding tokens, stop source or presentation-sync loop.
 
 [Open the source](../examples/click_handlers/main.cpp).
 
-\include{lineno} click_handlers/main.cpp
+```cpp
+// Copyright (c) 2026 ttldtor.
+// SPDX-License-Identifier: BSL-1.0
+#include <portals/ui_style.hpp>
+
+/** @brief Run a minimal lazy scene with a late click handler and a runtime stylesheet.
+ * @return Zero on success, one on a typed setup/runtime failure after library cleanup/reporting.
+ * Click Add Hello to append one undoable text change; F10 quits. This minimal program defines no CLI options.
+ * The standard runner owns terminal restoration.
+ */
+int main() {
+  using namespace portals;
+
+  ui::Ref<LineEdit> message;
+  ui::Ref<Button> add;
+
+  auto scene = ui::scene(ui::vbox(ui::lineEdit(message, ""), ui::button(add, "Add Hello")));
+
+  return scene
+    | ui::style("Button { bold: true; }")
+    | ui::onClick(add,
+                  [message] {
+                    message.text() += "Hello!";
+                  })
+    | ui::onKey(key::F10, ui::quit)
+    | ui::runApp();
+}
+```
 
 Clicking Add Hello appends an undoable change. `ui::quit` is a command accepted by
 `ui::onKey`; inside an admitted handler, `ui::quit()` closes its current scene.
@@ -193,3 +220,14 @@ See [compact API examples](compact-examples.md),
 [performance measurements](managed-performance.md) for complete advanced consumers.
 Passing a headless replay does not establish native terminal appearance or
 restoration under every host.
+
+## Guide examples
+
+The small programs in these guides live in `docs/examples`. From the Portals source root:
+
+```powershell
+cmake -S docs/examples -B build/guide-examples -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build/guide-examples
+```
+
+Run `build/guide-examples/docs_basic.exe` on Windows or `build/guide-examples/docs_basic` on Linux/macOS. F10 closes interactive programs. See the [editor history demonstration](editor-history-demo.md) for editing scenarios.

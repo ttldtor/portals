@@ -1,10 +1,98 @@
-# Виртуальная таблица {#virtual-table-ru}
+# Показать виртуальную таблицу {#virtual-table-ru}
 
-[Подробная английская версия](../virtual-table.md)
+Используйте [VirtualTable<T>](../../include/portals/virtual_table.hpp). Этот фрагмент показывает заголовок Name и три строки со стандартной навигацией клавиатурой и мышью. F10 закрывает приложение.
+
+Фрагмент предполагает подключение `<portals/ui.hpp>` и `using namespace portals`; он использует адаптер Names — неизменяемый `ModelSnapshot<std::string>` с тремя записями — и функцию displayText для создания GraphemeText. Адаптер, функция, заголовки и вся программа приведены ниже и в [guide_vtable.cpp](../examples/guide_vtable.cpp).
+
+```cpp
+int main() {
+  auto scene = ui::scene([](ManagedScene &owner) {
+    return owner.model<std::string>(std::make_shared<Names>()).transform([](auto model) {
+      const std::array<TableColumn<std::string>, 1> columns{{
+        {{1, 1}, displayText("Name"), 18, [](const std::string &name) {
+          return displayText(name);
+        }}
+      }};
+
+      return ui::virtualTable(model, columns);
+    });
+  });
+
+  return scene
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+<details>
+<summary>Полная программа</summary>
+
+```cpp
+#include <portals/ui.hpp>
+#include <array>
+#include <stdexcept>
+
+using namespace portals;
+
+class Names final : public ModelSnapshot<std::string> {
+public:
+  Names() : ModelSnapshot(1, 3) {
+  }
+
+  ModelRows<std::string> read(RowRange range) const override {
+    return {RangeState::READY,
+            std::span(rows_).subspan(static_cast<std::size_t>(range.first), range.count), {}};
+  }
+
+private:
+  const std::array<ModelRow<std::string>, 3> rows_{{
+    {{1, 1}, "Ada"}, {{2, 1}, "Grace"}, {{3, 1}, "Margaret"}
+  }};
+};
+
+GraphemeText displayText(std::string_view value) {
+  auto result = GraphemeText::from(value);
+
+  if (!result) {
+    throw std::runtime_error("Invalid display text");
+  }
+
+  return std::move(*result);
+}
+
+int main() {
+  auto scene = ui::scene([](ManagedScene &owner) {
+    return owner.model<std::string>(std::make_shared<Names>()).transform([](auto model) {
+      const std::array<TableColumn<std::string>, 1> columns{{
+        {{1, 1}, displayText("Name"), 18, [](const std::string &name) {
+          return displayText(name);
+        }}
+      }};
+
+      return ui::virtualTable(model, columns);
+    });
+  });
+
+  return scene
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+</details>
+
+[Исходник примера](../examples/guide_vtable.cpp). Добавьте исходник в C++23-проект и свяжите его с целью portals::core ([инструкция сборки](getting-started.md)). Запустите программу в терминале.
+
+Каждый TableColumn хранит стабильный ColumnId, заголовок, ширину в ячейках и форматировщик. Рецепт копирует массив столбцов: его можно создать внутри фабрики. Сцена выполняет подготовку и подключает ввод. Для ожидающих данных нужен prepared в ui::VirtualTableConfig<T>. TBD: запрошенный псевдоним ui::vtable отсутствует; срок не назначен.
+
+Термины: [рецепт](glossary.md#glossary-recipe-ru), [кадр](glossary.md#glossary-frame-ru), [владение](glossary.md#glossary-ownership-ru).
+
+<details>
+<summary>Справка API и ограничения</summary>
 
 `VirtualTable<T>` показывает неизменяемые записи в столбцах фиксированной ширины и строках фиксированной высоты. Первая строка ячеек — заголовок. Пустая модель сохраняет заголовки; пустой набор столбцов показывает пустую область. Отдельных виджетов строк и ячеек и скрытых рабочих потоков нет.
 
-## Столбцы и подготовка
+**Столбцы и подготовка**
 
 Создайте таблицу на UI с отдельным `ModelConsumer<T>`, массивом `TableColumn<T>` и параметрами. Конструктор копирует определения, заголовки и захваты форматировщиков; входной массив после возврата не нужен. Тип `T` может быть некопируемым. Форматировщик заимствует `const T&` и возвращает владеющий `GraphemeText`.
 
@@ -14,7 +102,7 @@
 
 Текст, заголовки, ID и снимок устанавливаются согласованно после полной подготовки. Ошибка сохраняет прежнее отображение. Неизменная подготовка не запрашивает кадр. Удержанная страница завершения может обслуживать новый точный интервал при совпадающих ревизии и числе строк в пределах лимита чтения. Промах остаётся ожидающим; ошибка источника сообщается явно. Новая ревизия и скрытие освобождают страницу.
 
-## Рисование и ввод
+**Рисование и ввод**
 
 Измерение, размещение и рисование не читают источник, не форматируют и не выполняют ввод-вывод. Команды локальны; владелец кадра переводит их на поверхность, применяет отсечение и потребляет текст до выхода из `tree.frame`. Каждая ячейка и заголовок имеют собственную область отсечения. Широкая графема не переходит в соседний столбец. Последняя строка может быть частичной; фон покрывает свободные ячейки.
 
@@ -22,7 +110,7 @@
 
 `bindVirtualTable` обслуживает стрелки, Home/End, левое нажатие и целую прокрутку колеса. Привязка живёт меньше дерева и маршрутизатора. Нажатие заголовка не выбирает строку. Нажатие тела учитывает начало поверхности, отсечение и высоту заголовка и строки. Выделение сохраняется при перестановке и уходе за экран; удалённый ID очищается явно. Навигационный поиск ограничен подготовленными видимыми ID и текущей ревизией данных.
 
-## Изменения и лимиты
+**Изменения и лимиты**
 
 - `setVirtualTableFirst` задаёт целое начало, отменяет прежние работу и намерение и запрашивает рисование. Подготовка ограничивает позицию моделью.
 - `setVirtualTableSelection` меняет стабильный ID и запрашивает рисование.
@@ -34,3 +122,5 @@
 Неверные размеры, ID, ширины, политика и превышение лимитов дают `INVALID_ARGUMENT`; память — `NO_MEMORY`; форматировщик и копирование захватов — `CALLBACK_FAILED`. Сохраняются проверки потока, дерева и сессии модели. Рисование возвращает `WOULD_BLOCK` без актуальной подготовки и `INVALID_GEOMETRY` при несовпадении размера. Ошибка требует отбросить частичные команды. Неудачная подготовка после изменения параметров не делает прежнее отображение пригодным.
 
 См. [модель](model.md), [список](virtual-list.md), [прокрутку](scroll.md).
+
+</details>

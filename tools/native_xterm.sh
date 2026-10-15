@@ -2,6 +2,40 @@
 # Copyright (c) 2026 ttldtor.
 # SPDX-License-Identifier: BSL-1.0
 # Usage: native_xterm.sh XTERM SUPERVISOR LOGDIR DEADLINE_MS EXPECTED_EXIT DRIVE QUIT_MS CHILD [ARGS...]
+if [ "${1-}" = "--help" ]; then
+  cat <<'PORTALS_HELP'
+Usage: native_xterm.sh XTERM SUPERVISOR LOGDIR DEADLINE_MS EXPECTED_EXIT DRIVE QUIT_MS CHILD [ARGS...]
+       native_xterm.sh --help
+
+Run a native xterm fixture and verify supervisor completion and process cleanup.
+All eight positional arguments are required; there are no positional defaults.
+  XTERM          xterm executable path (hashed before launch).
+  SUPERVISOR     Native supervisor executable path (hashed before launch).
+  LOGDIR         Fresh log directory; parent must exist. Never reused.
+  DEADLINE_MS    Nonnegative decimal integer supervisor deadline in milliseconds.
+  EXPECTED_EXIT  Expected child exit code, forwarded to the supervisor.
+  DRIVE          none or dashboard; forwarded input driver.
+  QUIT_MS        Scripted quit delay in milliseconds, forwarded to the supervisor.
+  CHILD [ARGS]   Child executable path (hashed) and arguments forwarded unchanged.
+
+Environment:
+  PORTALS_NATIVE_VISIBLE=0  Default: private Xvfb display; 1 opts into the caller's
+                            visible DISPLAY and requires DRIVE=none.
+  PORTALS_XVFB=Xvfb          Private X server command/path.
+  PORTALS_XVFB_WORKDIR       Optional working directory for Xvfb only.
+  TMPDIR=/tmp               Parent of private authentication/display directory.
+  DISPLAY, TERM             Recorded; DISPLAY is replaced for private runs.
+  PATH                      Resolves required POSIX tools, Xvfb and xauth.
+Requires Linux/X11 tools, sha256sum, realpath, xauth and Xvfb for private runs.
+Creates LOGDIR evidence, starts fixture processes, sends supervisor-driven input
+and cleans up only recorded/created PIDs and its private X11 files. A deadline
+adds 12000 ms launcher allowance. Forced termination is failure evidence.
+Exit: 0 passed (or help); 1 failed verification/setup in normal cases; 2 invalid
+argument count, DRIVE, visibility or deadline. External tool errors may propagate
+other nonzero codes through set -e. No validation, files or processes on --help.
+PORTALS_HELP
+  exit 0
+fi
 set -eu
 if [ "$#" -lt 8 ]; then exit 2; fi
 xterm=$1 supervisor=$2 logdir=$3 deadline=$4 expected=$5 drive=$6 quit=$7

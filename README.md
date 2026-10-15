@@ -14,8 +14,10 @@ tables, and charts. The API and ABI are
 evolving; see the [current limitations](docs/limitations.md) before depending
 on platform or lifecycle guarantees.
 
-Read the [online documentation and API reference](https://ttldtor.github.io/portals/)
-for guides, runnable examples, and public API contracts.
+Read the [current source guides](docs/index.md) or [русское руководство](docs/ru/index.md)
+on GitHub. The [published documentation and API reference](https://ttldtor.github.io/portals/)
+correspond to the latest stable release. Each pull request also provides a downloadable
+HTML documentation artifact after its checks pass.
 
 ## Declarative API
 

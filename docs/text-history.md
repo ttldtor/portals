@@ -1,8 +1,15 @@
 # Text history
 
+For Undo/Redo in an ordinary field, use [editor history](editor-history.md): `ui::lineEdit` already connects it to input and the model. [`TextHistory`](../include/portals/text_history.hpp) serves authors of custom text editors. It stores text and selection edits; it does not supply previous command entries or completion suggestions.
+
+The binding decides whether editing is allowed and when to publish. `TextHistory` only prepares and accepts snapshots, so it cannot be attached to an arbitrary model with one callback. The contract below supports that integration.
+
+<details>
+<summary>Reference: custom editor integration</summary>
+
 `TextHistory` is a specialized owning history for UTF-8 text and selection. This low-level component stages text edits and traversal before publication. Editor bindings, shortcuts, model publication and effective availability are separate integration responsibilities; see [LineEdit](line-edit.md) for the current editor contract.
 
-## Values and ownership
+**Values and ownership**
 
 Each `TextHistorySnapshot` owns `bytes`, `cursor` and `anchor`. Offsets are byte positions at extended grapheme boundaries, including the end of the text. Preparation validates both edit snapshots using the `WidthPolicy` and `TextLimits` captured by the constructor; restoration validates its target again. Original bytes are preserved without normalization.
 
@@ -10,7 +17,7 @@ Retained entries own before/after snapshots. They contain no editor, model, widg
 
 The caller must synchronize access. `TextHistory` neither enforces UI-thread affinity nor decides whether an editor is read-only, disabled or in conflict.
 
-## Configuration and bounds
+**Configuration and bounds**
 
 Construction is `explicit TextHistory(TextHistoryOptions options = {}, WidthPolicy policy = {}, TextLimits limits = {})`. These settings are captured at construction; this API has no configuration setter.
 
@@ -30,7 +37,7 @@ Preparation evicts whole oldest groups in its prospective state until both limit
 
 With `enabled == false`, `maxOperations == 0` or `maxBytes == 0`, valid edits prepare successfully without retaining records or rejecting an oversized record. Committing such an edit installs an empty history. Text validation and allocation failures remain possible.
 
-## Grouping, traversal and reset
+**Grouping, traversal and reset**
 
 Only `TYPING`, `BACKSPACE` and `FORWARD_DELETE` can merge, subject to their grouping options. A merge requires the same category, an open group, collapsed selections in both snapshots, and exact agreement between the preceding after snapshot and the new before snapshot: bytes, cursor and anchor. Opposite deletion directions do not merge. `PASTE`, `CUT`, `REPLACEMENT` and `PROGRAMMATIC` are separate operations.
 
@@ -40,7 +47,7 @@ Under enabled retention, equal before/after bytes are an ordinary history no-op:
 
 `prepareUndo()` and `prepareRedo()` restore the corresponding owning snapshot without recording a second edit. They return `EMPTY` when that direction has no operation. `canUndo()` and `canRedo()` describe local history position only; `TextHistory` does not translate `EMPTY` into an editor-level successful no-op.
 
-## Prepare, check and accept
+**Prepare, check and accept**
 
 `prepareEdit(before, after, kind)`, `prepareUndo()`, `prepareRedo()` and `prepareResetBaseline(baseline)` return `std::expected<PreparedTextHistory, TextHistoryError>`. Preparation performs allocation, segmentation and prospective history changes before publication. It does not mutate the live history.
 
@@ -55,7 +62,7 @@ The caller accepts a prepared result in one uninterrupted, synchronized interval
 
 `checkPrepared()` and a rejected `commit()` leave history and staging unchanged. If the caller mutates history after checking but before committing, commit can return `STALE`; it does not roll back text already transferred by the caller. The uninterrupted acceptance interval is therefore part of the caller's contract.
 
-## Failures and freshness
+**Failures and freshness**
 
 Construction and caller-side snapshot construction may throw. The prepare methods catch `std::bad_alloc` and `std::length_error` and return `NO_MEMORY`. Other technical results are `INVALID_TEXT`, `NOT_BOUNDARY`, `WOULD_BLOCK`, `EMPTY`, `STALE` and `EXHAUSTED`.
 
@@ -63,7 +70,8 @@ Prepared validity uses an owning identity token, history generation and grouping
 
 History generation is not a model revision. `TextHistory` has no model snapshot to inspect. When retained entries exist, an ordinary changed edit checks that its before bytes match the current history position, but this cannot detect an external model update to equal bytes. The editor integration must enforce model revision conflicts and adopt external baselines explicitly.
 
-## Cost
+**Cost**
 
 Preparing a changed edit or traversal copies O(retained groups) shared entry handles. New or merged entries copy their own before/after strings; unchanged retained strings are not recopied. Snapshot validation and restoration segmentation still cost work proportional to the relevant text. Count limits bound the group traversal, not the size of temporary text allocations. Acceptance avoids allocations, but releasing old state can destroy entries and free storage; it is not a constant-time latency guarantee.
 
+</details>

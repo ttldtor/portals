@@ -201,6 +201,15 @@ if(PORTALS_BUILD_TESTS)
 
   find_package(Python3 3.10 QUIET COMPONENTS Interpreter)
   if(Python3_Interpreter_FOUND)
+    add_test(NAME portals.tools-script-help COMMAND "${Python3_EXECUTABLE}"
+      -m unittest discover -s "${CMAKE_CURRENT_SOURCE_DIR}/tools/docs" -p test_cli_help.py -v)
+    set_tests_properties(portals.tools-script-help PROPERTIES TIMEOUT 30)
+    if(PORTALS_BUILD_TOOLS)
+      add_test(NAME portals.tools-benchmark-help COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/tool_help.py"
+        --bin-dir "$<TARGET_FILE_DIR:portals_mvp_benchmark>")
+      set_tests_properties(portals.tools-benchmark-help PROPERTIES TIMEOUT 60)
+    endif()
     add_test(NAME portals.release-metadata COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/release_metadata.py")
     add_test(NAME portals.release-publish COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/release_publish.py")
     add_test(NAME portals.release-start COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/release_start.py")
@@ -912,6 +921,7 @@ endif()
 
 if(PORTALS_BUILD_DOCS)
   find_package(Doxygen 1.18 REQUIRED)
+  find_package(Python3 3.10 COMPONENTS Interpreter REQUIRED)
   find_program(PORTALS_MERMAID_EXECUTABLE NAMES mmdc mmdc.cmd REQUIRED
     DOC "Mermaid CLI used to render offline documentation diagrams")
   get_filename_component(portals_mermaid_directory "${PORTALS_MERMAID_EXECUTABLE}" DIRECTORY)
@@ -928,9 +938,11 @@ if(PORTALS_BUILD_DOCS)
   # Layout 2.0 intentionally inherits Doxygen's member-page defaults.
   set(DOXYGEN_WARN_LAYOUT_FILE NO)
   set(DOXYGEN_GENERATE_TREEVIEW YES)
+  set(DOXYGEN_TOC_INCLUDE_HEADINGS 3)
+  set(DOXYGEN_GENERATE_TAGFILE "${CMAKE_CURRENT_BINARY_DIR}/docs/portals.tag")
   set(DOXYGEN_DISABLE_INDEX YES)
   set(DOXYGEN_FULL_SIDEBAR YES)
-  set(DOXYGEN_EXAMPLE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_consumer"
+  set(DOXYGEN_EXAMPLE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/docs/examples" "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_consumer"
     "${CMAKE_CURRENT_SOURCE_DIR}/examples" "${CMAKE_CURRENT_SOURCE_DIR}/tests/support")
   set(DOXYGEN_EXAMPLE_RECURSIVE YES)
   set(DOXYGEN_IMAGE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/docs/images")
@@ -940,7 +952,7 @@ if(PORTALS_BUILD_DOCS)
   set(DOXYGEN_WARN_IF_UNDOC_ENUM_VAL YES)
   set(DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/docs")
 
-  doxygen_add_docs(portals_docs include docs/compile-time-pss.md docs/style-layers.md docs/model-queries.md docs/ui-coroutines.md docs/compile-time-styles.md docs/compile-time-scenes.md ReleaseNotes.md docs/index.md docs/reference-map.md docs/guides.md docs/dependencies.md docs/planned-features.md docs/ru/application.md docs/ru/architecture.md docs/ru/bindings-guide.md docs/ru/cell-buffer.md docs/ru/chart.md docs/ru/cli.md docs/ru/compile-time-pss.md docs/ru/compile-time-scenes.md docs/ru/compile-time-styles.md docs/ru/controls.md docs/ru/declarative-ui.md docs/ru/dependencies.md docs/ru/diagnostics.md docs/ru/diff.md docs/ru/editor-history-demo.md docs/ru/editor-history.md docs/ru/examples.md docs/ru/focus.md docs/ru/geometry.md docs/ru/getting-started.md docs/ru/glossary.md docs/ru/grid.md docs/ru/guides.md docs/ru/index.md docs/ru/input.md docs/ru/layout.md docs/ru/limitations.md docs/ru/line-edit.md docs/ru/managed-controls.md docs/ru/model-queries.md docs/ru/model.md docs/ru/package.md docs/ru/planned-features.md docs/ru/property.md docs/ru/reference-map.md docs/ru/render.md docs/ru/scene-loading-guide.md docs/ru/scheduler.md docs/ru/scroll.md docs/ru/style-layers.md docs/ru/styles.md docs/ru/styling-guide.md docs/ru/terminal-probe.md docs/ru/terminal.md docs/ru/text-history.md docs/ru/text-property.md docs/ru/text.md docs/ru/themes-guide.md docs/ru/ui-coroutines.md docs/ru/virtual-list.md docs/ru/virtual-preparation.md docs/ru/virtual-table.md docs/ru/widget-tree.md docs/glossary.md docs/styling-guide.md docs/themes-guide.md docs/bindings-guide.md docs/scene-loading-guide.md docs/development.md docs/releasing.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/scheduler.md docs/widget-tree.md docs/layout.md docs/grid.md docs/property.md docs/diagnostics.md docs/focus.md docs/model.md docs/input.md docs/terminal.md docs/terminal-probe.md docs/controls.md docs/line-edit.md docs/virtual-list.md docs/virtual-table.md docs/scroll.md docs/chart.md
+  doxygen_add_docs(portals_docs include docs/developer-tools.md docs/ru/developer-tools.md docs/developer-tools-build.md docs/ru/developer-tools-build.md docs/developer-tools-measure.md docs/ru/developer-tools-measure.md docs/developer-tools-release.md docs/ru/developer-tools-release.md docs/ru/development.md docs/declarative-reference.md docs/ru/declarative-reference.md docs/ru/compact-examples.md docs/compile-time-pss.md docs/style-layers.md docs/model-queries.md docs/ui-coroutines.md docs/compile-time-styles.md docs/compile-time-scenes.md ReleaseNotes.md docs/index.md docs/reference-map.md docs/guides.md docs/dependencies.md docs/planned-features.md docs/ru/application.md docs/ru/architecture.md docs/ru/bindings-guide.md docs/ru/cell-buffer.md docs/ru/chart.md docs/ru/cli.md docs/ru/compile-time-pss.md docs/ru/compile-time-scenes.md docs/ru/compile-time-styles.md docs/ru/controls.md docs/ru/declarative-ui.md docs/ru/dependencies.md docs/ru/diagnostics.md docs/ru/diff.md docs/ru/editor-history-demo.md docs/ru/editor-history.md docs/ru/examples.md docs/ru/focus.md docs/ru/geometry.md docs/ru/getting-started.md docs/ru/glossary.md docs/ru/grid.md docs/ru/guides.md docs/ru/index.md docs/ru/input.md docs/ru/layout.md docs/ru/limitations.md docs/ru/line-edit.md docs/ru/managed-controls.md docs/ru/model-queries.md docs/ru/model.md docs/ru/package.md docs/ru/planned-features.md docs/ru/property.md docs/ru/reference-map.md docs/ru/render.md docs/ru/scene-loading-guide.md docs/ru/scheduler.md docs/ru/scroll.md docs/ru/style-layers.md docs/ru/styles.md docs/ru/styling-guide.md docs/ru/terminal-probe.md docs/ru/terminal.md docs/ru/text-history.md docs/ru/text-property.md docs/ru/text.md docs/ru/themes-guide.md docs/ru/ui-coroutines.md docs/ru/virtual-list.md docs/ru/virtual-preparation.md docs/ru/virtual-table.md docs/ru/widget-tree.md docs/glossary.md docs/styling-guide.md docs/themes-guide.md docs/bindings-guide.md docs/scene-loading-guide.md docs/development.md docs/releasing.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/scheduler.md docs/widget-tree.md docs/layout.md docs/grid.md docs/property.md docs/diagnostics.md docs/focus.md docs/model.md docs/input.md docs/terminal.md docs/terminal-probe.md docs/controls.md docs/line-edit.md docs/virtual-list.md docs/virtual-table.md docs/scroll.md docs/chart.md
     docs/styles.md docs/legacy.md docs/managed-controls.md docs/declarative-ui.md docs/text-property.md docs/text-history.md docs/editor-history.md docs/editor-history-demo.md docs/compact-examples.md docs/compactness.md docs/quality.md tools/compactness/compactness.hpp docs/managed-performance.md docs/package.md docs/application.md docs/virtual-preparation.md docs/examples.md docs/architecture.md docs/getting-started.md docs/limitations.md docs/api-design.md fuzz/README.md
     tools/benchmarks/README.md vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md vendor/textual/README.md vendor/doctest/README.md vendor/pfr/README.md vendor/lyra/README.md docs/cli.md
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -961,6 +973,8 @@ if(PORTALS_BUILD_DOCS)
       "${CMAKE_CURRENT_BINARY_DIR}/docs/html/tests/fixtures/unicode/Unicode-LICENSE.txt"
     COMMAND ${CMAKE_COMMAND} "-DHTML_DIR=${CMAKE_CURRENT_BINARY_DIR}/docs/html"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FinalizeDocumentation.cmake"
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/docs/finalize_html.py"
+      "${CMAKE_CURRENT_BINARY_DIR}/docs/html" "${CMAKE_CURRENT_BINARY_DIR}/docs/portals.tag"
     COMMENT "Finalize HTML documentation and linked license notices"
   )
 endif()

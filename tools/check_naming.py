@@ -9,9 +9,9 @@ import sys
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, epilog="Requires the configured compiler environment and project .clang-tidy. Runs clang-tidy without fixes. Exit 0: naming checks passed; nonzero: findings or tool/input failure; 2: invalid CLI syntax.")
     parser.add_argument("build", type=Path, help="Directory containing compile_commands.json")
-    parser.add_argument("--clang-tidy", default="clang-tidy", help="clang-tidy executable")
+    parser.add_argument("--clang-tidy", default="clang-tidy", help="Executable name on PATH or full path (default: clang-tidy)")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     build = args.build.resolve()

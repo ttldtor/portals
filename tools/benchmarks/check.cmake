@@ -1,5 +1,10 @@
 # Copyright (c) 2026 ttldtor.
 # SPDX-License-Identifier: BSL-1.0
+# Internal CTest driver for portals.mvp-measurement; not a benchmark CLI.
+# Caller supplies PROGRAM (MVP executable) and OUTPUT_DIRECTORY (existing build
+# directory). Runs finite headless idle/load/encoding checks with 20-second child
+# deadlines, writes mvp-*.json, and fails CMake on bad exits or invalid results.
+# Run through CTest in a tools-and-tests-enabled build; no help flag is defined.
 if(NOT DEFINED PROGRAM OR NOT DEFINED OUTPUT_DIRECTORY)
   message(FATAL_ERROR "PROGRAM and OUTPUT_DIRECTORY are required")
 endif()

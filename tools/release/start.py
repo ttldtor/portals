@@ -15,7 +15,8 @@ import metadata
 
 
 RELEASE_FILES = ("CMakeLists.txt", "ReleaseNotes.md")
-BRANCH_PREFIX = "task/release-"
+TASK_PATTERN = re.compile(r"PRTLS-[1-9][0-9]*(?:\.[1-9][0-9]*)?")
+BRANCH_PATTERN = re.compile(r"task/(?P<task>PRTLS-[1-9][0-9]*(?:\.[1-9][0-9]*)?)-BUILD-prepare-release-(?P<tag>v[0-9]+\.[0-9]+\.[0-9]+(?:-rc[0-9]+)?)")
 SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
 
 
@@ -48,6 +49,13 @@ def validate_tag(tag: str) -> re.Match[str]:
     if match is None:
         raise StartError("Tag must be vX.Y.Z or vX.Y.Z-rcN, without leading zeros")
     return match
+
+
+def release_identity(task_id: str, tag: str) -> tuple[str, str]:
+    if TASK_PATTERN.fullmatch(task_id) is None:
+        raise StartError("A pre-reserved task ID is required: PRTLS-N or PRTLS-N.N, with positive numbers and no leading zeros")
+    validate_tag(tag)
+    return f"task/{task_id}-BUILD-prepare-release-{tag}", f"[{task_id}][BUILD] Prepare release {tag}"
 
 
 def version_span(cmake: str) -> tuple[int, int, str]:
@@ -120,7 +128,9 @@ def validate_release(files: dict[str, str], tag: str) -> str:
     return dated[1]
 
 
-def validate_branch(root: Path, commit: str, main_commit: str, tag: str) -> None:
+def validate_branch(root: Path, commit: str, main_commit: str, tag: str, title: str | None = None) -> None:
+    if title is not None and git(root, "log", "-1", "--format=%s", commit) != title:
+        raise StartError("Preparation commit title does not match the reserved task and release")
     parents = git(root, "rev-list", "--parents", "-n", "1", commit).split()
     if len(parents) != 2:
         raise StartError("Preparation branch must contain a single release preparation commit")
@@ -137,10 +147,19 @@ def validate_branch(root: Path, commit: str, main_commit: str, tag: str) -> None
         raise StartError("Existing preparation branch differs from the requested version and unchanged notes body")
 
 
-def remote_refs(root: Path, branch: str, tag: str) -> dict[str, str]:
-    output = git(root, "ls-remote", "origin", "refs/heads/main", f"refs/heads/{branch}",
+def remote_refs(root: Path, tag: str) -> dict[str, str]:
+    output = git(root, "ls-remote", "origin", "refs/heads/main", "refs/heads/task/*",
                  f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}")
     return {ref: sha for sha, ref in (line.split() for line in output.splitlines())}
+
+
+def validate_preparation_refs(branches: set[str], branch: str, task_id: str, tag: str) -> None:
+    for candidate in branches - {branch}:
+        identity = BRANCH_PATTERN.fullmatch(candidate)
+        if candidate == f"task/release-{tag}":
+            raise StartError("Legacy preparation branch exists for this tag; migrate it explicitly before retrying")
+        if identity and (identity["task"] == task_id or identity["tag"] == tag):
+            raise StartError("Another preparation branch already uses this task ID or release tag; inspect it before retrying")
 
 
 def local_branch(root: Path, branch: str) -> str | None:
@@ -150,11 +169,11 @@ def local_branch(root: Path, branch: str) -> str | None:
 
 def pull_requests(root: Path, repository: str, branch: str) -> list[dict]:
     return json.loads(run(["gh", "pr", "list", "--repo", repository, "--head", branch, "--base", "main",
-                           "--state", "all", "--json", "url,state,headRefOid,mergeCommit,isCrossRepository"], root))
+                           "--state", "all", "--json", "url,state,headRefOid,mergeCommit,isCrossRepository,title"], root))
 
 
-def start(root: Path, tag: str, dry_run: bool = False) -> str:
-    validate_tag(tag)
+def start(root: Path, tag: str, task_id: str, dry_run: bool = False) -> str:
+    branch, title = release_identity(task_id, tag)
     root = Path(git(root, "rev-parse", "--show-toplevel"))
     if git(root, "status", "--porcelain", "--untracked-files=all"):
         raise StartError("Working tree must be clean before release preparation")
@@ -162,8 +181,10 @@ def start(root: Path, tag: str, dry_run: bool = False) -> str:
     push_urls = git(root, "remote", "get-url", "--push", "--all", "origin").splitlines()
     if len(push_urls) != 1 or repository_name(push_urls[0]).lower() != repository.lower():
         raise StartError("origin must have exactly one push URL for the same GitHub repository")
-    branch = BRANCH_PREFIX + tag
-    refs = remote_refs(root, branch, tag)
+    refs = remote_refs(root, tag)
+    local_preparations = git(root, "for-each-ref", "--format=%(refname:strip=2)", "refs/heads/task/").splitlines()
+    preparations = {ref.removeprefix("refs/heads/") for ref in refs if ref.startswith("refs/heads/task/")}
+    validate_preparation_refs(preparations | set(local_preparations), branch, task_id, tag)
     main_commit = refs.get("refs/heads/main")
     if main_commit is None:
         raise StartError("origin has no main branch")
@@ -177,7 +198,7 @@ def start(root: Path, tag: str, dry_run: bool = False) -> str:
             raise StartError("Release refs already exist; use the normal command to validate and resume")
         source = files_at(root, main_commit)
         prepared = prepare_files(source["CMakeLists.txt"], source["ReleaseNotes.md"], tag, date.today().isoformat())
-        return json.dumps({"tag": tag, "branch": branch, "base": "main", "main_commit": main_commit,
+        return json.dumps({"tag": tag, "task_id": task_id, "branch": branch, "commit_title": title, "pr_title": title, "base": "main", "main_commit": main_commit,
                            "changed_files": [name for name in RELEASE_FILES if source[name] != prepared[name]],
                            "dry_run": True}, indent=2)
     run(["gh", "auth", "status", "--hostname", "github.com"], root)
@@ -190,6 +211,8 @@ def start(root: Path, tag: str, dry_run: bool = False) -> str:
     pr = prs[0] if prs else None
     if pr and pr.get("isCrossRepository") is not False:
         raise StartError("Preparation PR must originate from the same repository")
+    if pr and pr.get("title") != title:
+        raise StartError("Preparation PR title does not match the reserved task and release")
     if pr and pr["state"] == "CLOSED":
         raise StartError("Preparation PR was closed without merging; inspect it before retrying")
     if pr and pr["state"] == "MERGED":
@@ -208,7 +231,7 @@ def start(root: Path, tag: str, dry_run: bool = False) -> str:
             raise StartError("Remote preparation branch changed; retry the command")
     commit = remote_branch or existing_local
     if commit:
-        validate_branch(root, commit, main_commit, tag)
+        validate_branch(root, commit, main_commit, tag, title)
     if pr:
         if pr["headRefOid"] != commit:
             raise StartError("Preparation PR head does not match the validated branch")
@@ -228,9 +251,9 @@ def start(root: Path, tag: str, dry_run: bool = False) -> str:
             for name, content in prepared.items():
                 (worktree / name).write_bytes(content.encode("utf-8"))
             git(worktree, "add", "--", *RELEASE_FILES)
-            git(worktree, "commit", "--only", "-m", f"Prepare release {tag}", "--", *RELEASE_FILES)
+            git(worktree, "commit", "--only", "-m", title, "--", *RELEASE_FILES)
             commit = git(worktree, "rev-parse", "HEAD")
-            validate_branch(root, commit, main_commit, tag)
+            validate_branch(root, commit, main_commit, tag, title)
         git(worktree, "push", "origin", f"HEAD:refs/heads/{branch}")
         body = (f"Prepare {tag}: update the numeric CMake project version and date the release notes. "
                 "The release notes body is preserved.\n\n"
@@ -239,7 +262,7 @@ def start(root: Path, tag: str, dry_run: bool = False) -> str:
         body_path = temporary / "pr-body.md"
         body_path.write_text(body, encoding="utf-8")
         return run(["gh", "pr", "create", "--repo", repository, "--head", branch, "--base", "main",
-                    "--title", f"Prepare release {tag}", "--body-file", str(body_path)], root).strip()
+                    "--title", title, "--body-file", str(body_path)], root).strip()
     finally:
         if worktree.exists():
             try:
@@ -266,10 +289,11 @@ def dispatch_inputs(event: dict, repository: str, checked_commit: str) -> tuple[
             or head.get("repo", {}).get("full_name") != repository):
         raise StartError("Only merged same-repository release preparation PRs into main may publish")
     branch = head.get("ref", "")
-    if not branch.startswith(BRANCH_PREFIX):
-        raise StartError("Unexpected release preparation branch")
-    tag = branch[len(BRANCH_PREFIX):]
-    validate_tag(tag)
+    identity = BRANCH_PATTERN.fullmatch(branch)
+    if identity is None:
+        raise StartError("Unexpected release preparation branch; legacy task/release-* branches require manual migration")
+    tag = identity["tag"]
+    release_identity(identity["task"], tag)
     if not SHA_PATTERN.fullmatch(commit) or commit != checked_commit:
         raise StartError("Checkout must match the trusted PR merge commit")
     return tag, commit
@@ -314,20 +338,23 @@ def dispatch_merged(root: Path, event: dict, repository: str) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("tag", nargs="?")
+    parser = argparse.ArgumentParser(description=__doc__, epilog="Preparation requires Git, a clean checkout, GitHub origin and authenticated gh; creates a worktree, commit, pushed branch and PR. --dry-run still reads remote refs but performs no fetch or writes. Actions dispatch requires GITHUB_REPOSITORY and authenticated gh with contents/actions write permissions. Exit 0: success, 1: handled preparation/dispatch failure, 2: invalid CLI syntax.")
+    parser.add_argument("tag", nargs="?", help="Release tag: vX.Y.Z or vX.Y.Z-rcN")
+    parser.add_argument("--task-id", help="Previously reserved Portals task ID (PRTLS-N or PRTLS-N.N); required for preparation")
     parser.add_argument("--dry-run", action="store_true", help="Validate and preview without writing repository or remote state")
     parser.add_argument("--dispatch-merged", type=Path, metavar="EVENT_JSON", help="Actions-only: validate a merged PR event and start publication")
     args = parser.parse_args()
     try:
         if args.dispatch_merged:
-            if args.tag or args.dry_run:
-                raise StartError("Dispatch does not accept a tag or --dry-run")
+            if args.tag or args.task_id or args.dry_run:
+                raise StartError("Dispatch does not accept a tag, --task-id or --dry-run")
             dispatch_merged(Path.cwd(), json.loads(args.dispatch_merged.read_text(encoding="utf-8")), os.environ["GITHUB_REPOSITORY"])
         else:
             if not args.tag:
                 raise StartError("A release tag is required")
-            print(start(Path.cwd(), args.tag, args.dry_run))
+            if not args.task_id:
+                raise StartError("--task-id is required; reserve the task in the shared registry before preparing a release")
+            print(start(Path.cwd(), args.tag, args.task_id, args.dry_run))
     except (StartError, metadata.MetadataError, OSError, ValueError, KeyError) as error:
         print(f"Release start error: {error}", file=sys.stderr)
         return 1

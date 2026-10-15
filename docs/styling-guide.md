@@ -173,7 +173,9 @@ For example, `Button { color: #ff5555; }` produces `UNKNOWN_PROPERTY`.
 Change `color` to `foreground` and apply the corrected stylesheet. The rejected
 update leaves the previous styles active.
 
-## Planned extensions {#future-style-parameters}
+## Planned extensions
+
+<a id="future-style-parameters"></a>
 
 Scoped styling through a control reference is **TBD — M1**.
 Extended selectors, parameters and expressions are **TBD — M5**.

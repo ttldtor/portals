@@ -1,5 +1,8 @@
 # Copyright (c) 2026 ttldtor.
 # SPDX-License-Identifier: BSL-1.0
+# Internal include of FinalizeDocumentation.cmake; HTML_DIR is the generated
+# HTML directory. Rewrites Mermaid object tags to responsive images in place.
+# Called by portals_docs; no standalone command-line interface.
 
 # Doxygen 1.18 emits SVG objects without intrinsic dimensions. Use responsive
 # images at the generated diagram's own width instead of the browser's default

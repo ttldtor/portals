@@ -1,25 +1,43 @@
 # Unicode line editing
 
+Create a field with [`ui::lineEdit`](../include/portals/ui.hpp) to connect input, a model and history automatically. In this application F2 copies the current draft to the label and appends `!`; Enter confirms the field, Escape restores the model, and F10 exits.
+
+```cpp
+#include <portals/ui.hpp>
+
+int main() {
+  using namespace portals;
+
+  ui::Ref<LineEdit> name;
+  ui::Ref<Label> greeting;
+
+  auto scene = ui::scene(ui::vbox(
+    ui::lineEdit(name, "Ada", {.options = {.editMode = EditMode::EXPLICIT}}),
+    ui::label(greeting, "Press F2 to read the draft")));
+
+  return scene
+    | ui::onKey("F2",
+                [name, greeting] {
+                  greeting.text() = name.text() + "!";
+                })
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+The example reads the draft through `name.text()`, so F2 sees unconfirmed text too. To share a model between fields, pass the same `ManagedScene::state(...)` value to each; see [declarative composition](declarative-ui.md).
+
+[Build the standalone examples](examples.md).
+
+<details>
+<summary>Reference: binding, publication and input</summary>
+
 `LineEdit` owns a UTF-8 draft and exposes byte-boundary cursor and anchor positions.
 Its `GraphemeText` groups editing into complete
 [graphemes](glossary.md#glossary-text-units), such as a letter with its combining accent.
 Terminal width and horizontal scrolling use cells. This includes emoji joined by
 a zero-width joiner (ZWJ) and Chinese, Japanese and Korean (CJK) text. Construct the widget, create a `Property<std::string>`, and retain the result
 of `bindLineEdit` for as long as input and observation should remain connected.
-
-```cpp
-const auto field = tree.emplace<portals::LineEdit>(parent).value();
-auto model = std::shared_ptr<portals::Property<std::string>>(
-  portals::Property<std::string>::create(tree, parent, "", portals::Invalidation::LAYOUT).value());
-auto binding = portals::bindLineEdit(
-  tree, router, field, model,
-  [](portals::LineEditResult result) {
-    // A COMMITTED receipt may also report rejected observer notifications.
-  }).value();
-
-// Synchronize after draining events and before the next immutable frame.
-binding.sync(router.focused().value()).value();
-```
 
 The tree, router and scheduler outlive the binding. The binding retains the model
 and optional clipboard service. Destroy or move it on the UI owner between frames.
@@ -30,7 +48,7 @@ the control gallery. Paint never reads the model, invokes a service or changes
 application data. Focus is a presentation snapshot supplied by the caller, while
 the router remains the authority for input eligibility.
 
-## Draft and model revisions
+**Draft and model revisions**
 
 `LineEditOptions::editMode` selects when technically accepted text is validated
 and published. The default is `EditMode::IMMEDIATE`: input, deletion, clipboard
@@ -89,7 +107,7 @@ destroy the binding. Already committed application effects are never rolled back
 when such a callback throws. Mutation through `sync` during a frame or an active
 input operation returns `WOULD_BLOCK`. Wrong-thread synchronization is rejected.
 
-## Input and clipboard
+**Input and clipboard**
 
 - Left/Right, Home/End move by grapheme boundaries; Shift extends selection.
 - Backspace/Delete remove complete selected or neighboring graphemes.
@@ -122,30 +140,9 @@ Bounded [editor Undo/Redo](editor-history.md) is enabled by default and shares t
 same admission, validation and model revision path. Mouse selection, IME
 composition and native clipboard implementations remain separate work.
 
-## Verification
-
-`portals.line-edit` exercises real decoder, router, property, layout and rendering
-through `FrameWriter` and `TestTerminal`'s independent VT oracle. It covers Unicode
-bytes and selection, safe paste, limits, draft conflicts, notification rejection,
-validator and clipboard reentry, removal, capture destruction and allocation
-failure. `portals.line-edit.native` runs finite hidden ConPTY/PTY sessions and
-checks native input, Unicode editing, native output and clean process exit.
-Windows uses the existing terminal fixture's `WriteConsoleInputW` record injection
-method; Linux drives UTF-8 through a PTY. No assertions are disabled and Windows
-uses the shared no-dialog test process setup.
-
-`portals.edit-modes` separately verifies the real immediate default, explicit
-compatibility, completion blur, validator/resource reentry, revision conflicts,
-clipboard policy, notification loss, scoped focus delivery, scene callback
-lifetime and real allocation-budget failures. The relocated installed
-`consumer.edit-modes` uses only public package headers to exercise all three modes.
-
-`portals_line_edit --native-pipe` is an additional Windows host-translation
-characterization. On the tested ConPTY host, combining/emoji input sent through
-the pipe disappeared before `LineEdit` received semantic events; it therefore
-fails the same strict expected-text check. The native-record test does not claim
-to fix that separate host/input-adapter limitation or replace a real Windows
-Terminal acceptance run.
+[Developer testing](testing.md).
 
 See [text ownership and Unicode policy](text.md), [property notifications](property.md),
 [focus and routing](focus.md), and [terminal ownership](terminal.md).
+
+</details>

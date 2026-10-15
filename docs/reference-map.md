@@ -69,6 +69,7 @@ maintenance and dependency notices.
 See [releasing](releasing.md) for tags, release candidates, artifacts and
 documentation deployment through GitHub Actions.
 
+- [Developer tools](developer-tools.md): entry points, parameters, outputs and effects.
 - [Testing](testing.md) and [fuzzing](../fuzz/README.md): correctness tools.
 - [Managed API measurements](managed-performance.md): reproducible costs and
   known scaling limits, not a promise of linear performance.
@@ -92,3 +93,5 @@ GitHub Actions publishes the generated site to the documentation URL linked abov
 The generated directory also works as a local, offline reference.
 
 [Dependencies and licenses](dependencies.md).
+
+[Scene and recipe reference](declarative-reference.md).

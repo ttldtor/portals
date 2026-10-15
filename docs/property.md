@@ -1,11 +1,95 @@
-# Typed properties
+# Properties and shared state
+
+[Русская версия](ru/property.md)
+
+For a form, create state with `ManagedScene::state`. The scene manages its lifetime and bindings. Both editors below share one string: committing an edit in either updates the other. F10 closes the application.
+
+```cpp
+#include <portals/ui.hpp>
+#include <string>
+
+int main() {
+  using namespace portals;
+
+  auto scene = ui::scene([](ManagedScene &owner) {
+    return owner.state(std::string("Portals")).transform([](auto model) {
+      return ui::vbox(ui::lineEdit(model), ui::lineEdit(model));
+    });
+  });
+
+  return scene
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+[Complete source](examples/docs_state.cpp). See [bindings and events](bindings-guide.md) for binding policies.
+
+<details>
+<summary>Create a Property in a host-owned tree</summary>
+
+Use this form when the host owns its `Scheduler` and `WidgetTree`. A snapshot retains its old value after a new value is published.
+
+```cpp
+#include <portals/property.hpp>
+#include <iostream>
+
+int main() {
+  using namespace portals;
+
+  auto scheduler = Scheduler::create();
+
+  if (!scheduler) {
+    return 1;
+  }
+
+  auto tree = WidgetTree::create(**scheduler);
+
+  if (!tree) {
+    return 1;
+  }
+
+  auto root = (*tree)->root();
+
+  if (!root) {
+    return 1;
+  }
+
+  auto count = Property<int>::create(**tree, *root, 0, Invalidation::PAINT);
+
+  if (!count) {
+    return 1;
+  }
+
+  auto before = (*count)->snapshot();
+  if (!before) {
+    return 1;
+  }
+
+  auto update = (*count)->set(1);
+
+  if (!update) {
+    return 1;
+  }
+
+  std::cout << (*before)->value << " -> " << update->snapshot->value << '\n';
+}
+```
+
+</details>
+
+
+[Build the standalone examples](examples.md).
+
+<details>
+<summary>Reference: ownership and notification guarantees</summary>
 
 `Property<T>` is a UI-owned value with immutable [snapshots](glossary.md) that retain their value and revision and ordinary
 [Scheduler subscriptions](scheduler.md). Include `<portals/property.hpp>`.
 It is a small value/notification component: there is no binding language, event
 bus, transaction across properties, or lossless multicast.
 
-## Ownership and access
+**Ownership and access**
 
 Create a property with `Property<T>::create(tree, target, initial, invalidation,
 options)`. The tree and its scheduler are borrowed and must outlive the property.
@@ -18,7 +102,7 @@ thread receives `TreeError::WRONG_THREAD`; wrong-thread destruction terminates,
 matching the tree and subscription ownership rules. Use a separate Scheduler
 publisher to transfer worker values to UI code before calling `set`.
 
-`snapshot()` returns `shared_ptr<const PropertyChange<T>>`, with `value` and a
+`snapshot()` returns a checked `expected<shared_ptr<const PropertyChange<T>>, TreeError>` with an owning value containing `value` and a
 monotonic `revision` starting at zero. The owner survives replacement, source
 removal, or destruction of the property and tree. It may be transferred to another
 thread if `T` supports destruction on the thread releasing the last owner.
@@ -34,7 +118,7 @@ initial value. Read `snapshot()` explicitly when initial state is needed.
 The source target is invalidated by `set`; callbacks that change other nodes
 request the corresponding invalidation themselves.
 
-## Commit and backpressure
+**Commit and backpressure**
 
 [Backpressure](glossary.md#glossary-backpressure) occurs when the bounded
 notification queue cannot accept another delivery.
@@ -71,7 +155,7 @@ must use the current snapshot through its own application policy. Do not use thi
 API as a lossless domain-event stream. No notification is promised to all observers
 when the bounded scheduler queue is full.
 
-## Construction and allocation boundaries
+**Construction and allocation boundaries**
 
 Both `create` and `set` provide ordinary `const T&` and `T&&` overloads. The
 const-reference overload copies directly into the immutable snapshot inside the
@@ -95,7 +179,7 @@ candidate can already be moved-from. Publication order, immutable revisions,
 old-value retention and notification receipts are identical for both overloads.
 Code taking the address of `create` or `set` must now select its desired overload
 explicitly; ordinary call syntax stays unchanged.
-## Reentry and cancellation
+**Reentry and cancellation**
 
 Callbacks run through the real Scheduler between frames. If observer A handles
 revision 1 and calls `set` for revision 2, already accepted revision-1 events stay
@@ -128,11 +212,6 @@ the original operation's revision, even if such reentry commits a newer value
 before the caller receives that receipt. Callback-capture destruction may also
 reenter a live property; Scheduler remains responsible for callback reclamation.
 
-## Verification
+[Developer testing](testing.md).
 
-`portals.property` drives real Scheduler and WidgetTree instances. It checks
-paint/layout counters, no-op equality, owning revisions, deterministic reentry,
-full and partially full queues, finite observer storage, source and node lifetime,
-scope closure, self-disconnect, destructor reentry, allocation failures, and
-wrong-thread/session rejection. The test runs without a terminal or interactive
-windows. See [the tree contract](widget-tree.md) for frame traversal and rendering.
+</details>

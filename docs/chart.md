@@ -1,4 +1,76 @@
-# Canvas and model-backed charts
+# Draw a line or candle chart
+
+Use [Chart<T>](../include/portals/chart.hpp). Both lines and candles are supported. This fragment plots four closing prices as a line. Press F10 to close.
+
+This fragment assumes `<portals/ui.hpp>` and `using namespace portals`; it uses Prices, an immutable `ModelSnapshot<Ohlc>` adapter with four records. The adapter, headers and complete program appear below and in [guide_chart.cpp](examples/guide_chart.cpp).
+
+```cpp
+int main() {
+  auto scene = ui::scene([](ManagedScene &owner) {
+    return owner.model<Ohlc>(std::make_shared<Prices>()).transform([](auto model) {
+      return ui::chart(model, [](const Ohlc &price) {
+        return std::optional{price};
+      }, ui::ChartConfig<Ohlc>{.options = {.mode = ChartMode::LINE}});
+    });
+  });
+
+  return scene
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+<details>
+<summary>Complete program</summary>
+
+```cpp
+#include <portals/ui.hpp>
+#include <array>
+
+using namespace portals;
+
+class Prices final : public ModelSnapshot<Ohlc> {
+public:
+  Prices() : ModelSnapshot(1, 4) {
+  }
+
+  ModelRows<Ohlc> read(RowRange range) const override {
+    return {RangeState::READY,
+            std::span(rows_).subspan(static_cast<std::size_t>(range.first), range.count), {}};
+  }
+
+private:
+  const std::array<ModelRow<Ohlc>, 4> rows_{{
+    {{1, 1}, {10, 14, 9, 12}}, {{2, 1}, {12, 16, 11, 15}},
+    {{3, 1}, {15, 15, 10, 11}}, {{4, 1}, {11, 14, 10, 13}}
+  }};
+};
+
+int main() {
+  auto scene = ui::scene([](ManagedScene &owner) {
+    return owner.model<Ohlc>(std::make_shared<Prices>()).transform([](auto model) {
+      return ui::chart(model, [](const Ohlc &price) {
+        return std::optional{price};
+      }, ui::ChartConfig<Ohlc>{.options = {.mode = ChartMode::LINE}});
+    });
+  });
+
+  return scene
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+</details>
+
+[Example source](examples/guide_chart.cpp). Add the source to a C++23 project and link it with the portals::core target ([build instructions](getting-started.md)). Run the program in a terminal.
+
+ChartMode::LINE connects consecutive valid close values. Change the mode to ChartMode::CANDLES to display the same open/high/low/close records as candles. The accessor returns optional<Ohlc>; nullopt creates a gap. The scene handles preparation and rendering. Pending data requires prepared in ui::ChartConfig<T>.
+
+Terms: [recipe](glossary.md#glossary-recipe), [frame](glossary.md#glossary-frame), [ownership](glossary.md#glossary-ownership).
+
+<details>
+<summary>API reference and constraints</summary>
 
 `Canvas` emits clipped widget-local cells during a retained widget's `paint`.
 `Chart<T>` is a retained widget: prepare it between frames, then use the normal
@@ -6,28 +78,12 @@
 or a frame loop. See [model](model.md), [widget tree](widget-tree.md),
 [renderer](render.md), and [scheduler](scheduler.md).
 
-## One provider, two views
+**One provider, two views**
 
 A table and chart use independent range consumers of the **same** `Model<T>`.
 Capture one [model pin](glossary.md#glossary-model-pin), an immutable
 `ModelFrame<T>` with data and availability, after scheduler dispatch and pass it
-to both preparations:
-
-```cpp
-// tree, parent and model are existing UI-owned objects; unwrap handles expected errors.
-auto chart = unwrap(tree.emplace<portals::Chart<portals::Ohlc>>(
-  parent, unwrap(model.openRange()),
-  [](const portals::Ohlc &bar) {
-    return std::optional{bar};
-  },
-  portals::ChartOptions{.mode = portals::ChartMode::CANDLES}));
-
-auto frame = unwrap(model.pin());
-auto chartWork = unwrap(portals::prepareChart(tree, chart, frame, {80, 20}));
-auto tableWork = unwrap(portals::prepareVirtualTable(tree, table, frame, {40, 20}));
-// Dispatch returned work receipts through the application's existing provider.
-// Then arrange and paint both widgets inside tree.frame, rendering before it returns.
-```
+to both preparations.
 
 The accessor borrows a typed immutable row, returning an optional `Ohlc`
 presentation value containing open, high, low and close prices. A custom record can expose its OHLC member without copying
@@ -68,7 +124,7 @@ Model contract. Removing a chart cancels its outstanding request; no worker is
 joined. Failed preparation preserves the prior presentation. A foreign pin is
 rejected before provider reads or accessor calls.
 
-## Domain aggregation precedes display coalescing
+**Domain aggregation precedes display coalescing**
 
 Feed **every ordered tick** into the producer-owned `OhlcBucket`. Its constant-size
 state preserves first open, maximum high, minimum low and last close. `add`
@@ -80,41 +136,7 @@ Publish immutable snapshots of that aggregate; do not put raw ticks in a
 replace-latest display queue. `Model::publisher()` currently uses rejecting
 publication. Keep one application-owned pending snapshot between the existing
 Scheduler display ingress and the Model queue. Both the ingress callback and
-retry step below execute on UI; producer threads only use `ingress.publisher`.
-
-```cpp
-using Snapshot = portals::ModelSnapshot<portals::Ohlc>;
-std::shared_ptr<const Snapshot> pendingLatest;
-
-auto tryForward = [publisher = model.publisher(), &pendingLatest]()
-  -> std::expected<void, portals::SchedulerError> {
-  if (!pendingLatest) {
-    return {};
-  }
-
-  auto sent = publisher.publish(pendingLatest); // Copy ownership; rejection must retain it.
-  if (!sent) {
-    return std::unexpected(sent.error());
-  }
-
-  pendingLatest.reset();
-  return {};
-};
-auto ingress = unwrap(scheduler.connect<Snapshot>(
-  scope,
-    [&pendingLatest](auto snapshot) {
-      pendingLatest = std::move(snapshot);
-    },
-  portals::SchedulerLane::DATA, portals::SchedulerOverflow::REPLACE_LATEST));
-
-// Run this step after each bounded dispatch in the application's existing loop.
-// A later snapshot may replace pendingLatest: it already includes every domain tick.
-unwrap(scheduler.dispatch());
-if (auto sent = tryForward(); !sent && sent.error() != portals::SchedulerError::WOULD_BLOCK) {
-  reportError(sent.error()); // Application handles closure/failure; the owner is still retained.
-}
-// WOULD_BLOCK leaves pendingLatest for the next cycle, even if the producer has stopped.
-```
+retry step execute on UI; producer threads only publish through the ingress publisher.
 
 Disconnect the ingress before destroying its borrowed pending slot. The scope
 outlives the connection. Snapshots must arrive in increasing revision order and
@@ -130,7 +152,7 @@ Model publications apply during subsequent scheduler dispatch, not at admission.
 Queue acceptance alone does not mean that the model applied a revision; inspect
 the pin or `Model::lastError()`. Do not busy-loop retry inside a callback.
 
-## Coordinates, gaps and paint
+**Coordinates, gaps and paint**
 
 Logical Y grows upward; cell Y grows downward. Automatic Y scale reads only
 prepared valid samples (close for line, high/low for candles). An explicit finite
@@ -164,25 +186,11 @@ coordinates even for INT32_MIN/MAX endpoints. The frame sink still applies
 surface translation and ancestor clipping. Errors propagate, and the caller must
 discard partial commands when painting fails.
 
-## Verification and limits
-
-`portals.chart` checks exact cells and wick/body glyphs, an independent full-line
-raster oracle followed by clipping, huge offscreen endpoints, OHLC aggregation,
-empty/single/gap/degenerate/extreme data, shared row identity with a table,
-preparation failure/reentry, foreign pins and pending completion. Allocation fault-injection
-checks every preparation allocation boundary and preserves old cells, revision and
-invalidation after failure. A one-slot saturation test retains the last display
-snapshot through WOULD_BLOCK and delivers it without producer republication; a
-new aggregate can replace the retained snapshot before retry. A real Scheduler
-with injected time demonstrates 1,000 and 7,000 updates per simulated second at
-the same ten-frame cap, while checking every published bucket against a separate
-OHLC oracle. These are deterministic correctness tests, not CPU benchmarks.
-
 No indicators, exchange connection, automatic time-bucketing, resampling,
 interactive chart navigation, axis labels or standalone application runner are
 provided by this component.
 
-## Reusing completed pages during navigation
+**Reusing completed pages during navigation**
 
 Chart preparation can reuse its retained immutable completion snapshot for a new
 consecutive interval under the current model pin's revision, row count and read
@@ -190,3 +198,5 @@ budget. Providers may prefetch a bounded page around an exact request. Only the
 current interval is sampled; paint performs no cache reads. A miss remains pending,
 and failed provider reads cannot fall back to older ready data. This does not
 merge consumer results or change `ModelFrame::read` base-snapshot semantics.
+
+</details>

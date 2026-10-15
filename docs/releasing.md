@@ -7,10 +7,12 @@ the publisher creates or moves tags.
 
 ## Release with one command
 
+Reserve a release task ID in the project registry. The examples below use
+`PRTLS-143`; replace it with the ID actually reserved for your release.
 From a clean checkout, run:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/start.ps1 -Tag v0.2.0
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/start.ps1 -Tag v0.2.0 -TaskId PRTLS-143
 ```
 
 For a release candidate, use `v0.2.0-rc1` instead. PowerShell, Git, and an
@@ -20,7 +22,7 @@ Linux or macOS, replace `powershell` with `pwsh`.
 Alternatively, with Python 3.10 or newer:
 
 ```powershell
-python tools/release/start.py v0.2.0
+python tools/release/start.py v0.2.0 --task-id PRTLS-143
 ```
 
 Both standalone entrypoints implement the same preparation contract. Python is
@@ -30,6 +32,12 @@ The release workflows must already have been merged into `main`. Add `-DryRun` (
 to validate and preview without changing local or remote refs or files. Preview
 requires the current remote `main` commit to be available locally; fetch it first
 if your checkout is stale. The preview itself does not fetch objects.
+
+The task ID is required, including in preview mode. A task such as `PRTLS-143`
+uses branch `task/PRTLS-143-BUILD-prepare-release-v0.2.0` and commit/PR title
+`[PRTLS-143][BUILD] Prepare release v0.2.0`. Existing legacy `task/release-*`
+preparations require explicit migration before starting again.
+See the [tool reference](developer-tools-release.md) for parameters and retry rules.
 
 The command prepares the numeric CMake version and dates the release-notes
 heading in an isolated worktree, commits only those two files, pushes a release
@@ -43,7 +51,7 @@ entries into a dated section for that exact RC. CMake keeps the numeric version,
 while tags and archives retain the full RC suffix.
 
 Review and merge the linked PR. Merging a same-repository
-`task/release-v*` PR into `main` is the explicit release approval: Actions checks
+`task/PRTLS-<number>-BUILD-prepare-release-v*` PR into `main` is the explicit release approval: Actions checks
 the merged version and notes, creates the tag at the merge commit, and dispatches
 the release workflow. No second terminal command is required. Closing the PR
 without merging does not release anything.
@@ -78,7 +86,7 @@ changed bytes. A pushed `v*` tag also remains a supported manual release trigger
 
 The first release set contains:
 
-- Windows x64 MSVC Release ZIP with four examples, installed static SDK and HTML.
+- Windows x64 MSVC Release ZIP with five examples, installed static SDK and HTML.
   The SDK uses `MultiThreaded` (`/MT`); applications must use a compatible
   compiler, architecture, configuration and CRT. It is not interchangeable with
   an `/MD` SDK. The compiler version and DLL imports are recorded.

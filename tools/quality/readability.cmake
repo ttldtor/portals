@@ -2,6 +2,34 @@
 # SPDX-License-Identifier: BSL-1.0
 cmake_minimum_required(VERSION 3.24)
 
+# Script-mode help must not validate paths, discover tools or create artifacts.
+if(HELP)
+  message([=[Usage: cmake -DHELP=ON -P tools/quality/readability.cmake
+       cmake -DBUILD_DIR=<build> "-DFILES=<a.cpp;b.cpp>" -DOUTPUT_DIR=<new-dir> [options] -P tools/quality/readability.cmake
+Collect clang-tidy cognitive-complexity observations and provenance.
+Required (no defaults):
+  BUILD_DIR       Build directory with nonempty compile_commands.json.
+  FILES           Semicolon-separated existing source files in the database.
+  OUTPUT_DIR      Fresh evidence directory; existing paths are never overwritten.
+Optional:
+  CLANG_TIDY      Executable path; default: find clang-tidy on PATH.
+  TIMEOUT_SECONDS=120  Positive integer timeout per clang-tidy invocation.
+  HEADERS        Semicolon-separated existing headers included in provenance.
+  EXTRA_ARGS     Semicolon-separated compiler arguments passed as --extra-arg.
+  ENABLE_FUNCTION_SIZE=OFF  Also collect readability-function-size observations.
+  ENABLE_MAGIC_NUMBERS=OFF  Also collect readability-magic-numbers observations.
+  HELP=OFF       ON prints usage and returns before input validation or writes.
+Requires CMake >=3.24 and a compatible clang-tidy with the selected checks.
+Relative paths resolve from the invocation working directory. Quote CMake lists.
+Effects: runs clang-tidy, creates OUTPUT_DIR with raw output, configuration,
+source/header/database hashes, summary and status.json. May leave failure evidence.
+Exit 0 on completed observations/help; nonzero for NOT_RUN or tool failures.
+Observations do not impose a universal cognitive-complexity acceptance threshold.
+Example: cmake -DBUILD_DIR=build -DFILES=src/input.cpp -DOUTPUT_DIR=observations/new -P tools/quality/readability.cmake
+]=])
+  return()
+endif()
+
 function(jsonQuote output value)
   string(REPLACE "\\" "\\\\" text "${value}")
   string(REPLACE "\"" "\\\"" text "${text}")

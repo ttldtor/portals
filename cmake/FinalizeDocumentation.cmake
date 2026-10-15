@@ -1,5 +1,8 @@
 # Copyright (c) 2026 ttldtor.
 # SPDX-License-Identifier: BSL-1.0
+# Internal portals_docs finalizer. Required HTML_DIR: existing generated HTML
+# directory. Rewrites known links/index defects and copies linked notices/sources
+# in place. Invalid inputs or I/O errors fail the CMake script; no rollback.
 # Finalize portable example links and recognized Doxygen 1.18 index defects.
 if(NOT DEFINED HTML_DIR OR NOT IS_DIRECTORY "${HTML_DIR}")
   message(FATAL_ERROR "HTML_DIR must name the generated Doxygen HTML directory")
@@ -17,6 +20,9 @@ endforeach()
 # Ship the exact referenced sources inside the HTML tree so an offline copy
 # works without the repository or a hard-coded GitHub branch URL.
 set(example_sources
+  docs/examples/docs_basic.cpp
+  docs/examples/docs_events.cpp
+  docs/examples/docs_state.cpp
   tests/package_consumer/pipe_contracts.cpp
   tests/package_consumer/pipe_contracts_methods.cpp
   tests/support/gallery_before.hpp
@@ -74,6 +80,10 @@ foreach(page_file IN LISTS guide_html_files)
   foreach(source IN LISTS example_sources)
     string(REPLACE "href=\"../${source}\"" "href=\"source/${source}\"" content "${content}")
     string(REPLACE "href=\"../../${source}\"" "href=\"source/${source}\"" content "${content}")
+  endforeach()
+  foreach(doc_example IN ITEMS docs_basic.cpp docs_events.cpp docs_state.cpp)
+    string(REPLACE "href=\"examples/${doc_example}\"" "href=\"source/docs/examples/${doc_example}\"" content "${content}")
+    string(REPLACE "href=\"../examples/${doc_example}\"" "href=\"source/docs/examples/${doc_example}\"" content "${content}")
   endforeach()
   # Keep the Markdown deep link usable on GitHub and in the generated HTML.
   string(REPLACE "href=\"declarative-ui.md#pipe-click-handlers\""

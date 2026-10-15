@@ -1,11 +1,64 @@
-# Grid and Overlay
+# Arrange controls in a grid
+
+Use [Grid](../include/portals/grid.hpp). This complete program puts a label and its value side by side. Press F10 to close.
+
+The current API requires low-level GridOptions configuration through setGridOptions after node creation; automatic cell placement is not available.
+
+```cpp
+#include <portals/ui.hpp>
+
+int main() {
+  using namespace portals;
+
+  ui::Ref<Grid> grid;
+  ui::Ref<Label> name;
+  ui::Ref<Label> value;
+
+  auto scene = ui::scene(ui::grid(grid,
+    ui::label("Name").reference(name),
+    ui::label("Ada").reference(value)));
+
+  return scene
+    | ui::configure([=](ManagedScene &, Application &app) -> std::expected<void, ManagedError> {
+        GridOptions options;
+
+        options.columns = {AxisSize{}, AxisSize{}};
+        options.rows = {AxisSize{}};
+        options.column_gap = 2;
+        options.cells = {
+          {name.node().id(), 0, 0},
+          {value.node().id(), 0, 1}
+        };
+
+        auto configured = setGridOptions(app.tree(), grid.node(), options);
+
+        if (!configured) {
+          return std::unexpected(
+            ManagedError{ManagedPhase::BIND, grid.node().id(), configured.error(), {}, {}});
+        }
+
+        return {};
+      })
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+[Example source](examples/guide_grid.cpp). Add the source to a C++23 project and link it with the portals::core target ([build instructions](getting-started.md)). Run the program in a terminal.
+
+Set tracks and full NodeId placements after mount and before running. ui::grid does not infer them. Overlay shares one content rectangle among children; use ui::custom<Overlay> for its recipe.
+
+Terms: [recipe](glossary.md#glossary-recipe), [frame](glossary.md#glossary-frame), [ownership](glossary.md#glossary-ownership).
+
+<details>
+<summary>API reference and constraints</summary>
 
 `<portals/grid.hpp>` adds sparse `Grid` and `Overlay` containers to the existing
 `Layout` / `SizedWidget` contracts. Run `layoutTree` inside the same tree frame
 that paints and renders. These classes perform no tree traversal, I/O, model
 mutation, or hit testing. Input spans are borrowed only during each method call.
 
-## Tracks and placement
+**Tracks and placement**
 
 `GridOptions` owns explicit, nonempty `columns` and `rows`, each using `AxisSize`.
 Every visible child needs one `GridCell` keyed by its complete `NodeId`.
@@ -36,7 +89,7 @@ share spare space with stable remainders and caps, later automatic/flex tracks
 shrink first under shortage, and minimum/fixed sizes survive. Spanning children
 use the rectangle from their first track to the end of their last track.
 
-## Alignment, clipping and stacking
+**Alignment, clipping and stacking**
 
 Each GridCell has horizontal and vertical `LayoutAlign`. Overlay supplies the
 same two alignments for every child in one shared padded content rectangle.
@@ -54,7 +107,7 @@ commands into surface coordinates, intersect their clips with NodeGeometry.clip,
 paint siblings in tree order, and render borrowed text before leaving the frame.
 Explicit command z values remain the frame owner's responsibility.
 
-## Mutation and errors
+**Mutation and errors**
 
 Constructors own their configuration. Invalid constructor settings are reported
 by layout methods. Use `setGridOptions` and `setOverlayOptions` on the UI
@@ -70,7 +123,7 @@ returns `NODE_LIMIT`, and layout allocation failure returns `NO_MEMORY`.
 Tree operations additionally preserve their owner-thread and lifetime errors.
 No callback retains the child spans or attempts tree/model mutation.
 
-`portals.layout-grid` exercises nested placement, spans, identity, rounding,
-shortage and actual layout/paint/render/FrameWriter/TestTerminal/EventRouter
-agreement. See also [linear layouts](layout.md), [geometry](geometry.md), and
+See also [linear layouts](layout.md), [geometry](geometry.md), and
 [the frame ownership contract](widget-tree.md).
+
+</details>

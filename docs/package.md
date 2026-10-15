@@ -1,26 +1,26 @@
-# Installed CMake package
+# Install and use the CMake package {#package}
 
-Portals installs its C++23 public headers, static core archive, private utf8proc
-archive, CMake configuration/version/targets files, and license notices. No
-network download or system utf8proc installation is required. The imported
-`portals::core` target carries the C++23 requirement and the complete static link
-chain; on UNIX the package configuration finds the platform Threads dependency.
+[Русская версия](ru/package.md)
 
-The top-level `project(Portals VERSION ...)` declaration is the sole source of
-the current library version. CMake uses it for the installed package metadata,
-and smoke and installed-consumer checks compare the linked library version with
-that metadata.
+Portals installs a C++23 static SDK: public headers, core and private utf8proc
+archives, CMake package metadata and license notices. Link `portals::core` to
+receive the language requirement and complete static link chain. No network
+download or system utf8proc installation is needed. On UNIX the package finds
+its platform Threads dependency.
 
-Build and install from an x64 MSVC developer PowerShell, or use the same CMake
-commands with an appropriate C/C++ toolchain on Linux:
+## Release with Ninja
+
+Run from an x64 MSVC developer PowerShell on Windows. On Linux, use the same
+commands with an appropriate C/C++ toolchain and installation path.
 
 ```powershell
-cmake -S . -B build/package -G Ninja -DCMAKE_BUILD_TYPE=Release -DPORTALS_BUILD_TESTS=OFF -DPORTALS_BUILD_EXAMPLES=OFF -DPORTALS_BUILD_TOOLS=OFF
-cmake --build build/package
-cmake --install build/package --prefix "C:/sdk/Portals"
+cmake -S . -B build/package-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DPORTALS_BUILD_TESTS=OFF -DPORTALS_BUILD_EXAMPLES=OFF -DPORTALS_BUILD_TOOLS=OFF
+cmake --build build/package-release
+cmake --install build/package-release --prefix "C:/sdk/Portals-release"
 ```
 
-An external project uses only the installed prefix:
+Place the [complete application example](examples/guide_application.cpp) in
+`my-application/main.cpp`, then create `my-application/CMakeLists.txt`:
 
 ```cmake
 cmake_minimum_required(VERSION 3.24)
@@ -31,149 +31,125 @@ target_link_libraries(app PRIVATE portals::core)
 ```
 
 ```powershell
-cmake -S my-application -B build/my-application -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="C:/sdk/Portals"
-cmake --build build/my-application
+cmake -S my-application -B build/my-application-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="C:/sdk/Portals-release"
+cmake --build build/my-application-release
 ```
 
-Move the entire installation directory, including headers, both archives,
-CMake metadata and notices, and pass its new location in `CMAKE_PREFIX_PATH`.
-The installed targets resolve paths relative to that location. Keep install
-directories such as `CMAKE_INSTALL_LIBDIR` and `CMAKE_INSTALL_INCLUDEDIR` relative
-when selecting a custom layout with GNUInstallDirs.
+The application and SDK above both use **Release**. `CMAKE_PREFIX_PATH` points
+to the installation prefix, not the source tree or its build directory.
 
-The optional `portals::lyra` target adds `<portals/ui_lyra.hpp>` and the pinned
-Lyra headers. Link it for [command-line startup](cli.md); its license and manifest
-are installed with the SDK. Core-only consumers continue to use `portals::core`.
+## Debug with Ninja
 
-## Toolchain and configuration compatibility
-
-The package is a static-library/header distribution. Use a compatible target
-architecture, compiler, standard library, C++ configuration and runtime for
-Portals, utf8proc and the application. Build/install Debug and Release separately,
-or install both configurations into one prefix with a compatible multi-config
-build. Archives are stored separately under `lib/Debug` and `lib/Release`
-(or the corresponding configured `CMAKE_INSTALL_LIBDIR`), so installing one
-configuration preserves the other. CMake's `SameMajorVersion` package-version selection is a discovery rule;
-it does not promise a stable ABI or binary portability. This package supplies no
-portable module BMI files.
-
-Portals preserves the caller's MSVC runtime selection. CMake's default
-`MultiThreaded$<$<CONFIG:Debug>:Debug>DLL` means `/MDd` for Debug and `/MD` for
-Release unless the caller explicitly selects another runtime. Match that choice
-when building the consumer; never infer `/MT` or absence of Visual C++ runtime
-redistributables from the word Release. Rebuild the archives when changing the
-runtime or other incompatible parts of the build tuple.
-
-## Relocation test
-
-With `PORTALS_BUILD_TESTS=ON`, build `portals_core` and run:
+Ninja selects one configuration when configured. Use separate SDK and application
+build directories and match **Debug** on both sides:
 
 ```powershell
-cmake --build build/windows-msvc-debug --target portals_core
-ctest --test-dir build/windows-msvc-debug -R "^portals.package-install$" --output-on-failure --no-tests=error
+cmake -S . -B build/package-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug -DPORTALS_BUILD_TESTS=OFF -DPORTALS_BUILD_EXAMPLES=OFF -DPORTALS_BUILD_TOOLS=OFF
+cmake --build build/package-debug
+cmake --install build/package-debug --prefix "C:/sdk/Portals-debug"
+cmake -S my-application -B build/my-application-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH="C:/sdk/Portals-debug"
+cmake --build build/my-application-debug
 ```
 
-The test installs the current build into a fresh directory, moves that directory
-to a path containing spaces and Unicode, and copies a small independent consumer
-into its own source/build directories. The consumer links imported targets only,
-publishes a new immutable model revision, prepares a custom widget and verifies
-its rendered total. It does not open a terminal. Windows test processes use the
-existing noninteractive startup source copied beside the consumer fixture.
-The test rejects source/build paths and private warnings/definitions in installed
-CMake files, disables package registries, and retains its directories for inspection.
+## Debug and Release in one installation
 
-The same installed consumer also runs the [managed-control programs](managed-controls.md),
-including deterministic input replay, exact output comparison and typed callback errors.
-
-Multi-config generators that provide Debug and Release also register
-`portals.package-install-multi-config`. This test builds both core/utf8proc
-configurations, installs them into one prefix, moves it, then builds and runs
-the external consumer in both configurations:
+With Ninja Multi-Config or Visual Studio, select the configuration at build and
+install time using `--config`. Do not use `CMAKE_BUILD_TYPE` for this workflow.
 
 ```powershell
-cmake -S . -B build/package-multi -G "Ninja Multi-Config" -DPORTALS_BUILD_TESTS=ON -DPORTALS_BUILD_EXAMPLES=OFF -DPORTALS_BUILD_TOOLS=OFF
-ctest --test-dir build/package-multi -C Debug -R "^portals.package-install-multi-config$" --output-on-failure --no-tests=error
+cmake -S . -B build/package-multi -G "Ninja Multi-Config" -DPORTALS_BUILD_TESTS=OFF -DPORTALS_BUILD_EXAMPLES=OFF -DPORTALS_BUILD_TOOLS=OFF
+cmake --build build/package-multi --config Debug
+cmake --install build/package-multi --config Debug --prefix "C:/sdk/Portals"
+cmake --build build/package-multi --config Release
+cmake --install build/package-multi --config Release --prefix "C:/sdk/Portals"
+cmake -S my-application -B build/my-application-multi -G "Ninja Multi-Config" -DCMAKE_PREFIX_PATH="C:/sdk/Portals"
+cmake --build build/my-application-multi --config Debug
+cmake --build build/my-application-multi --config Release
 ```
 
-The same test is available with a Visual Studio multi-config generator.
+Archives are stored separately in `lib/Debug` and `lib/Release` (under your
+configured `CMAKE_INSTALL_LIBDIR`). Installing one preserves the other. Both
+configurations must use compatible toolchains; do not silently mix independent SDKs.
+
+## Compatibility and relocation
+
+Match target architecture, compiler, standard library, C++ configuration and runtime
+across Portals, utf8proc and the application. The default MSVC runtime is `/MDd`
+in Debug and `/MD` in Release. Portals preserves an explicitly selected
+`CMAKE_MSVC_RUNTIME_LIBRARY`; rebuild all archives and the consumer if changing it.
+Release alone does not imply `/MT` or removal of runtime redistributable requirements.
+
+Move the **entire installation prefix**, including headers, both archives,
+CMake files and notices; point `CMAKE_PREFIX_PATH` to its new location. Installed
+target paths are relative to the prefix. Keep custom `CMAKE_INSTALL_LIBDIR` and
+`CMAKE_INSTALL_INCLUDEDIR` relative. `SameMajorVersion` is a CMake discovery rule,
+with no stable ABI or universal binary portability guarantee. Portable module
+BMI files are not supplied. The top-level `project(Portals VERSION ...)` declaration
+is the version source for package metadata.
+
+The optional `portals::lyra` target adds `<portals/ui_lyra.hpp>` and pinned Lyra
+headers for [command-line startup](cli.md). Its license and source manifest ship
+with the SDK. Core-only consumers link `portals::core`.
+
+## Runnable Release archives
+
+A Release bundle includes example executables, HTML reference, the static SDK,
+example source, themes/data, launchers, notices and a manifest. Its default Windows
+bundle runtime is `/MT`, selected by that packaging workflow; this does not change
+the SDK build default above. Use a compatible toolchain/runtime when building
+applications against the SDK inside a bundle. Linux bundles retain their host
+libc/toolchain compatibility requirements.
+
+<details>
+<summary>Build a Release bundle from a committed revision</summary>
+
+The pipeline builds one committed Git revision from a fresh source archive;
+uncommitted and ignored files are excluded. Choose new absolute staging/output
+paths; staging must be outside the checkout. Existing paths are never overwritten.
+
+On Windows, use an x64 MSVC developer PowerShell with Git, CMake 3.24+, Ninja,
+Doxygen 1.18+, Node.js and Mermaid CLI on PATH. Doxygen 1.18, Node.js 24 LTS and
+Mermaid CLI 12 are the verified documentation toolchain; ordinary SDK builds do
+not need documentation generators.
+
+```powershell
+./tools/package/bundle.ps1 -WorkDir "C:/temp/portals bundle run-001" -OutputArchive "C:/artifacts/portals-mvp-windows-x64-release.zip"
+```
+
+`-Revision` selects a committed revision; `-Parallel` controls build parallelism.
+`-Runtime MultiThreadedDLL` explicitly selects `/MD` instead of the bundle's `/MT`.
+`-PythonExecutable` enables the optional HTML local-link/anchor gate; without Python
+its manifest status is `not_run`. System Windows DLLs are not redistributed.
+
+On Linux:
+
+```sh
+cmake "-DSOURCE_DIR=/absolute/portals" "-DWORK_DIR=/tmp/portals-bundle-run-001" "-DOUTPUT_ARCHIVE=/absolute/artifacts/portals-mvp-linux-x64-release.tar.gz" "-DCXX_COMPILER=/usr/bin/g++" -P tools/package/bundle.cmake
+```
+
+The pipeline supports native x64 Windows/MSVC and Linux, with single-config Ninja
+by default. It builds examples, HTML and SDK from the same Release revision and
+checks a freshly unpacked archive before publication. No cross compilation is done.
+
+The manifest records the source revision/checksum, compiler/runtime tuple,
+executable imports and SHA256 payload inventory. It excludes itself from its own
+inventory; the archive has a separate checksum. Checksums detect accidental
+corruption, not authenticity. Themes/replay inputs are reference material; example
+binaries embed defaults and do not require current-directory data files.
+
+To inspect a trusted archive from a new location, use a fresh test directory:
+
+```powershell
+cmake "-DARCHIVE=<absolute archive path>" "-DTEST_WORK_DIR=<new absolute temporary path>" "-DCXX_COMPILER=<compatible compiler>" -P tests/bundle_smoke.cmake
+```
+
+This checks the inventory, finite example scenarios and relocated SDK consumer;
+its evidence directories are retained. It does not substitute for interactive
+terminal testing. `VERIFY_ONLY=ON` checks hashes without building.
+
+</details>
 
 References: [CMake importing/exporting](https://cmake.org/cmake/help/latest/guide/importing-exporting/index.html),
+[build configurations](https://cmake.org/cmake/help/latest/manual/cmake-buildsystem.7.html#build-configurations),
 [GNUInstallDirs](https://cmake.org/cmake/help/latest/module/GNUInstallDirs.html),
-[package configuration helpers](https://cmake.org/cmake/help/latest/module/CMakePackageConfigHelpers.html),
 [MSVC runtime selection](https://cmake.org/cmake/help/latest/prop_tgt/MSVC_RUNTIME_LIBRARY.html).
-
-## Runnable Release bundles
-
-The packaging pipeline builds one committed Git revision in a fresh source
-archive. Working-tree edits and ignored/private files are excluded. It builds
-the five examples, complete Doxygen HTML and the static SDK from that same
-Release build, then tests a freshly unpacked archive before publishing it.
-It never removes or reuses a staging directory and never overwrites an archive.
-Choose new absolute paths; the staging path must be outside the source checkout.
-
-The complete reference requires Doxygen 1.18 or newer and Mermaid CLI on PATH;
-1.18 is the verified Doxygen minimum. Node.js 24 LTS and Mermaid CLI 12 are the
-verified diagram toolchain. See [documentation setup](getting-started.md) for
-installation. Diagrams are packaged as SVG, so readers need no generator or
-network connection. Ordinary library builds do not require these tools. A locally unpacked
-[official Doxygen release](https://www.doxygen.nl/download.html) can be placed on
-PATH for the packaging process without a system-wide installation.
-
-From an x64 MSVC developer PowerShell, with Git, CMake 3.24+, Ninja and Doxygen
-1.18 or newer, Node.js and `mmdc` on PATH:
-
-    ./tools/package/bundle.ps1 -WorkDir "C:/temp/portals bundle run-001" -OutputArchive "C:/artifacts/portals-mvp-windows-x64-release.zip"
-
-Use -Revision to select a committed revision, -Parallel to set build parallelism,
-and -PythonExecutable with a known Python 3 interpreter to enable the existing
-HTML local-link/anchor checker. Without Python that optional gate is recorded as
-not_run. Windows bundle builds explicitly select MultiThreaded (/MT) by default;
-this changes neither the project's general CRT default nor another build tree.
--Runtime MultiThreadedDLL selects /MD deliberately and is recorded in the
-manifest. dumpbin /DEPENDENTS inspects each actual example; a dynamic CRT import
-is rejected when /MT was requested. System Windows DLLs are not redistributed.
-
-On Linux, run the same pipeline directly:
-
-    cmake "-DSOURCE_DIR=/absolute/portals" "-DWORK_DIR=/tmp/portals-bundle-run-001" "-DOUTPUT_ARCHIVE=/absolute/artifacts/portals-mvp-linux-x64-release.tar.gz" "-DCXX_COMPILER=/usr/bin/g++" -P tools/package/bundle.cmake
-
-The Linux archive records ldd output for each executable and the host's ldd/libc
-version. It supplies no universal-distribution binary compatibility promise.
-The pipeline supports native x64 Windows/MSVC and Linux toolchains, using
-single-config Ninja by default; no cross compilation is performed.
-
-Each archive contains bin, themes, data, docs/html, install, example source,
-an independent installed-package consumer, launchers, GETTING-STARTED.md,
-license notices, verification scripts and manifest.json. Themes and replay
-fixtures are useful source/reference inputs; the example binaries compile their
-defaults in and need no current-directory data files. The complete HTML tree is
-copied, including local resources and linked notices.
-
-The manifest records the source commit/archive checksum, OS/compiler/runtime
-tuple, executable imports and SHA256 of every payload file. manifest.json is
-excluded from its own inventory; the separately reported archive SHA256 covers
-the full archive. Checksums detect accidental corruption, not authenticity.
-The relocated consumer receives the manifest's runtime selection and uses only
-the installed prefix, with package registries disabled.
-
-To check an existing trusted archive from a new path:
-
-    cmake "-DARCHIVE=<absolute archive path>" "-DTEST_WORK_DIR=<new absolute temporary path>" "-DCXX_COMPILER=<compatible compiler>" -P tests/bundle_smoke.cmake
-
-The test unpacks into a path with spaces/Unicode, checks inventory and hashes,
-checks public example help and runs separate finite installed-consumer harnesses from
-a foreign working directory, relocates the SDK again and builds/runs the external
-consumer. Its evidence directories are retained. This proves the finite bundle
-scenario; interactive terminal acceptance and the full MVP gates are separate.
-The script can also verify a moved extracted bundle using BUNDLE_DIR and the
-copied verify/bundle_smoke.cmake. VERIFY_ONLY=ON checks hashes without building.
-
-With tests enabled, portals.bundle-scripts covers payload corruption, unlisted
-files, manifest path traversal and refusal to modify existing staging/output
-paths. It runs without a C++ build or terminal.
-
-References: [CMake archive commands](https://cmake.org/cmake/help/latest/manual/cmake.1.html#command-line-tool),
-[MSVC runtime selection](https://cmake.org/cmake/help/latest/prop_tgt/MSVC_RUNTIME_LIBRARY.html),
-[dumpbin DEPENDENTS](https://learn.microsoft.com/en-us/cpp/build/reference/dependents?view=msvc-170).
-
-The optional `portals::lyra` target supplies the native Lyra parser and the `<portals/ui_lyra.hpp>` launch adapter. Core-only consumers do not include Lyra. Its unchanged BSL-1.0 license and source manifest ship with the SDK; see [command-line startup](cli.md).

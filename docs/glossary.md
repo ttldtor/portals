@@ -36,7 +36,9 @@
 | TBD | Planned behavior or unfinished guide section; see the planned-feature milestones | [Planned features](planned-features.md) |
 | Milestone | Planned group and order of work; delivery dates are specified separately | [Planned features](planned-features.md) |
 
-## Recipe {#glossary-recipe}
+## Recipe
+
+<a id="glossary-recipe"></a>
 
 A recipe is a `ui::Description<T>` value describing how to create a control
 and its children. For example, `ui::label("Hello")` describes a label;
@@ -45,7 +47,9 @@ The recipe stores constructor arguments, child recipes and callbacks.
 It can be moved and is consumed once by mounting, including a failed mount.
 Creating a recipe does not insert controls into a tree.
 
-## Scene {#glossary-scene}
+## Scene
+
+<a id="glossary-scene"></a>
 
 `ui::scene(std::move(recipe))` returns a `ui::Scene` object that owns the application's
 runtime and manages preparation, configuration, running and cleanup.
@@ -55,7 +59,9 @@ and registers their bindings with `ManagedScene`. `ui::runApp()` prepares
 the scene before running it. See [declarative composition](declarative-ui.md)
 for preparation errors and lifecycle constraints.
 
-## UI stage {#glossary-ui-stage}
+## UI stage
+
+<a id="glossary-ui-stage"></a>
 
 A UI stage describes an operation applied to a scene with `|`.
 `ui::style(...)` returns a configuration object that specifies stylesheet rules.
@@ -64,7 +70,9 @@ For example, `auto styling = ui::style(pss);` creates a `ui::StyleStage`.
 inline: `scene | ui::style(pss)`.
 `ui::runApp()` returns a stage that runs the scene and produces an exit code.
 
-## Ownership {#glossary-ownership}
+## Ownership
+
+<a id="glossary-ownership"></a>
 
 An owning object stores the data it needs for its lifetime. The style object
 returned by `ui::style(pss)` owns the parsed stylesheet, so it does not need
@@ -73,7 +81,9 @@ permit access. For example, references supplied by `WidgetTree::read` are limite
 to its callback. An observing reference
 such as `ui::Ref<T>` accesses another owner's object and does not extend its lifetime.
 
-## Text units {#glossary-text-units}
+## Text units
+
+<a id="glossary-text-units"></a>
 
 `GraphemeText` divides Unicode text into extended grapheme clusters. A letter
 and its combining accent can form one cluster used for cursor movement.
@@ -81,27 +91,35 @@ A terminal cell is one grid position. `WidthPolicy` determines how many cells
 a supported text cluster occupies; bytes, clusters and cells are counted separately.
 See [text and width](text.md).
 
-## Frame {#glossary-frame}
+## Frame
+
+<a id="glossary-frame"></a>
 
 The application prepares data, calculates layout and consumes the widgets' paint
 commands into `CellBuffer`. `FrameWriter` then encodes the changed cells for the
 terminal. Entering `WidgetTree::frame` restricts which tree operations are allowed;
 frame preparation and output delivery are described in [the runner](application.md).
 
-## Model pin {#glossary-model-pin}
+## Model pin
+
+<a id="glossary-model-pin"></a>
 
 `model.pin()` captures a `ModelFrame<T>` that keeps the provider snapshot and
 one immutable table of consumer results alive. Pass the same pin to every view
 of that model during a frame so they see consistent data and availability.
 This model frame is distinct from the painted terminal frame. See [models](model.md).
 
-## Backpressure {#glossary-backpressure}
+## Backpressure
+
+<a id="glossary-backpressure"></a>
 
 A bounded queue can refuse a publication with `WOULD_BLOCK` when it is full.
 The caller decides whether to retry after delivery, report the refusal, or use
 an explicitly permitted replacement policy. See [scheduler queues](scheduler.md).
 
-## Cancellation scope {#glossary-cancellation}
+## Cancellation scope
+
+<a id="glossary-cancellation"></a>
 
 `UiScope` groups scheduler registrations. Closing it prevents new invocations,
 including queued deliveries; a running callback keeps its captures until it returns.

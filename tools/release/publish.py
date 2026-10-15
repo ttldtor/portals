@@ -197,12 +197,12 @@ def publish_release(github, directory, tag, commit, notes):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--directory", type=Path, required=True)
-    parser.add_argument("--repository", required=True)
-    parser.add_argument("--tag", required=True)
-    parser.add_argument("--commit", required=True)
-    parser.add_argument("--github-output", type=Path)
+    parser = argparse.ArgumentParser(description=__doc__, epilog="Requires authenticated gh for publication (GH_TOKEN or gh configuration). Verifies immutable remote tag and artifact hashes; can resume a matching draft. Even --dry-run rewrites release-manifest.json and SHA256SUMS locally. Exit 0: success, 2: invalid arguments; other failures return nonzero.")
+    parser.add_argument("--directory", type=Path, required=True, help="Existing verified release artifact directory (local manifests are written)")
+    parser.add_argument("--repository", required=True, help="Target GitHub owner/name")
+    parser.add_argument("--tag", required=True, help="Release tag matching local metadata and remote tag")
+    parser.add_argument("--commit", required=True, help="Verified release commit; publication requires 40 lowercase hex characters")
+    parser.add_argument("--github-output", type=Path, help="Optional file to append latest/pages_deploy after publication; ignored in dry run")
     parser.add_argument("--dry-run", action="store_true", help="Validate and inventory local artifacts without GitHub access")
     args = parser.parse_args()
     metadata = json.loads((args.directory / "release.json").read_text(encoding="utf-8"))

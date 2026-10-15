@@ -136,12 +136,12 @@ def prepare(tag: str, repository: str, source: Path, output_dir: Path, github_ou
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    command = commands.add_parser("prepare", help="Prepare release metadata and notes")
-    command.add_argument("--tag", required=True)
-    command.add_argument("--repository", required=True)
-    command.add_argument("--source", required=True, type=Path)
-    command.add_argument("--output-dir", required=True, type=Path)
-    command.add_argument("--github-output", type=Path)
+    command = commands.add_parser("prepare", help="Prepare release metadata and notes", description="Writes local metadata and normalized release notes; no GitHub access. Exit 0: success, 1: metadata/I/O failure, 2: invalid arguments.")
+    command.add_argument("--tag", required=True, help="Release tag vX.Y.Z[-rcN] matching source version and release notes")
+    command.add_argument("--repository", required=True, help="GitHub owner/name used to make release-note links; no network call")
+    command.add_argument("--source", required=True, type=Path, help="Directory containing CMakeLists.txt and ReleaseNotes.md (read only)")
+    command.add_argument("--output-dir", required=True, type=Path, help="Created output directory; release.json and release-notes.md are overwritten")
+    command.add_argument("--github-output", type=Path, help="Optional file to append tag/version/prerelease; parent must exist")
     args = parser.parse_args()
     try:
         prepare(args.tag, args.repository, args.source, args.output_dir, args.github_output)

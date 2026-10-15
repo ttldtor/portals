@@ -63,6 +63,41 @@ std::size_t number(std::string_view text, std::size_t maximum) {
   return value;
 }
 
+// Help is handled before option parsing, workload construction and output creation.
+bool printHelp(int argc, char **argv) {
+  for (int index = 1; index < argc; ++index) {
+    const std::string_view argument(argv[index]);
+
+    if (argument != "--help" && argument != "-h") {
+      continue;
+    }
+
+    if (argc != 2) {
+      throw std::runtime_error("--help or -h must be the sole argument");
+    }
+
+    std::cout << R"help(Validate PSS parser semantics or measure parsing of pre-generated sources.
+Usage: portals_pss_benchmark [options]
+       portals_pss_benchmark --help | -h
+Options:
+  --samples N  Timed batches per case, 1..10000 (default: 100).
+  --warmup N   Untimed batches per case, 0..1000 (default: 10).
+  --batch N    Parse calls per timed sample, 1..1024 (default: 16).
+  --reverse    Reverse source case order (default: forward).
+  --check      Validate cases without timing; print a summary to stdout.
+               --output is ignored in this mode; other options are still validated.
+  --output P   Write JSON to P, truncating it (default: stdout; empty P also uses stdout).
+  --help, -h   Show help as the sole argument; no workload or files.
+Output: JSON to stdout or --output; --check in PSS prints only a validation summary.
+Exit: 0 on success/help; 1 on invalid arguments, validation or report failure.
+)help";
+
+    return true;
+  }
+
+  return false;
+}
+
 Options parseOptions(int argc, char **argv) {
   Options options;
 
@@ -231,11 +266,15 @@ void writeReport(std::ostream &output, const Options &options, const std::vector
 
 /** @brief Validate PSS semantics or measure runtime parsing of pre-generated sources.
  * @param argc Number of command-line arguments.
- * @param argv Options --check, --reverse, --samples, --warmup, --batch and --output.
+ * @param argv Options described by --help (or -h).
  * @return Zero on complete semantic validation/reporting, one on failure.
  */
 int main(int argc, char **argv) {
   try {
+    if (printHelp(argc, argv)) {
+      return 0;
+    }
+
     const auto options = parseOptions(argc, argv);
     auto cases = makeCases();
     std::uint64_t checksum{};

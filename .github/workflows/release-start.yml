@@ -18,7 +18,8 @@ jobs:
       github.event.pull_request.merged == true &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.base.repo.full_name == github.repository &&
-      startsWith(github.event.pull_request.head.ref, 'task/release-v')
+      startsWith(github.event.pull_request.head.ref, 'task/PRTLS-') &&
+      contains(github.event.pull_request.head.ref, '-BUILD-prepare-release-v')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
