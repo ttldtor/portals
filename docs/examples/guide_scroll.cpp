@@ -43,4 +43,3 @@ int main() {
     | ui::onKey("F10", ui::quit)
     | ui::runApp();
 }
-
