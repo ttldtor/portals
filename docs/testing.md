@@ -226,3 +226,11 @@ fails the run; cleanup does not convert a deadline into a pass.
 Primary references: [XTest](https://xorg.freedesktop.org/archive/X11R7.6/doc/libXtst/xtestlib.html),
 [xterm security resources](https://invisible-island.net/xterm/manpage/xterm.html),
 [CMake FindX11](https://cmake.org/cmake/help/latest/module/FindX11.html).
+
+## Documentation checks
+
+Build `portals_docs`, then run `python tools/docs/check_links.py build/docs/html`.
+Run `python -m unittest discover -s tools/docs -p test_*.py -v` for the HTML-processing regressions.
+Build the public guide programs with `cmake -S docs/examples -B build/guide-examples -G Ninja -DCMAKE_BUILD_TYPE=Release` and `cmake --build build/guide-examples`.
+
+User guides describe operations and their public contracts. Replay transports, fault injection, pointer-retirement checks and scheduler/decoder stress cases belong to the test suite and developer documentation. The documented program sources stay separate from that harness. PR CI stores the generated help as the `documentation-preview` artifact; it does not deploy Pages.

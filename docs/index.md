@@ -7,6 +7,8 @@ The declarative `ui` API is the primary way to build an interface.
 This page is the short reading guide; the [reference map](reference-map.md)
 contains the complete topic list and API reading paths.
 
+These Markdown guides describe the current source branch. The [published HTML help](https://ttldtor.github.io/portals/) follows the latest stable release; PR checks also provide an HTML preview artifact.
+
 ## Start with the declarative API
 
 `<portals/ui.hpp>` provides scenes, recipes and event handlers.
@@ -126,15 +128,28 @@ platforms and the exact runtime boundaries.
 
 | Task | Guide |
 |---|---|
-| Compose a form and handle errors | [Declarative UI](declarative-ui.md) |
-| Parse CLI before opening the terminal and read process snapshots | [Command-line startup](cli.md) |
-| Prepare styles and themes | [Styling guide](styling-guide.md), [themes guide](themes-guide.md) |
-| Bind state and handle events | [Bindings and events](bindings-guide.md) |
-| Load scene text/files (TBD — M1/U84) | [Scene loading](scene-loading-guide.md) |
-| Bind keys and understand input phases | [Input](input.md) |
-| Use an existing CMake project | [Package](package.md) |
-| Understand ownership and frame flow | [Architecture](architecture.md) |
-| Find another topic or API declaration | [Reference map](reference-map.md) |
+| Create a first form | [Declarative UI](declarative-ui.md) |
+| Start the application and parse options | [Application](application.md) |
+| Parse command-line arguments | [Command-line startup](cli.md) |
+| Apply styles | [Styles](styling-guide.md) |
+| Change the palette | [Themes](themes-guide.md) |
+| Connect events and state | [Bindings and events](bindings-guide.md) |
+| Arrange controls | [Layout](layout.md) |
+| Place controls in cells | [Grid and overlay](grid.md) |
+| Change a control through a reference | [Control references](text-property.md) |
+| Edit text | [LineEdit](line-edit.md) |
+| Undo and redo edits | [Undo and redo](editor-history.md) |
+| Create shared state | [Properties](property.md) |
+| Supply view data | [Models](model.md) |
+| Display a large list | [Virtual lists](virtual-list.md) |
+| Display a large table | [Virtual tables](virtual-table.md) |
+| Control scrolling | [Scrolling](scroll.md) |
+| Plot values | [Charts](chart.md) |
+| Handle keyboard input | [Input](input.md) |
+| Report errors | [Diagnostics](diagnostics.md) |
+| Wait without blocking the UI | [UI coroutines](ui-coroutines.md) |
+| Integrate frame rendering | [Rendering](render.md) |
+| Connect a CMake package | [Package setup](package.md) |
 
 [Runnable examples](examples.md) link to complete source programs.
 [Release notes](../ReleaseNotes.md) record changes by version.

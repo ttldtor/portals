@@ -74,8 +74,6 @@ prices, sorts descending, requests two rows, dispatches the scheduler, checks
 source and projection provenance and full row identities, then closes.
 The same file contains its complete immutable source implementation.
 
-\include{lineno} query.cpp
-
 Close cancels work and disconnects endpoints without waiting for worker joins.
 Owning tokens can outlive the controller, but must not capture its UI object.
 This slice does not provide automatic history rebasing, a managed-model DSL

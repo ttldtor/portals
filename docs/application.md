@@ -1,42 +1,71 @@
-# Application runner {#application}
+# Run an application {#application}
 
-`portals::Application` owns one `Scheduler`, `WidgetTree`, and `EventRouter` on
-its creating UI thread. Construct it before a scene and destroy the scene first.
-The scene owns typed node observers, models, bindings and its own data source.
-`Application::run` borrows that scene for one run; callbacks must never destroy
-or reenter either owner.
+[Русская версия](ru/application.md)
+
+Use the [scene](glossary.md#glossary-scene) facade in [`<portals/ui.hpp>`](../include/portals/ui.hpp)
+to create controls, attach actions and run a native terminal application.
+**Apply** changes the label. **Exit** or F10 closes the application.
 
 ```cpp
-#include <portals/application.hpp>
-#include <portals/controls.hpp>
+#include <portals/ui.hpp>
 
 int main() {
-  auto created = portals::Application::create();
-  if (!created) return 1;
-  auto app = std::move(*created);
-  auto text = portals::GraphemeText::from("Quit");
-  if (!text) return 1;
-  auto button = app->tree().emplace<portals::Button>(app->root(), std::move(*text));
-  if (!button) return 1;
-  auto quit = portals::bindButton(app->router(), *button,
-                                              [&] {
-                                                app->requestStop();
-                                              });
-  if (!quit) return 1;
-  portals::ApplicationScene scene;
-  auto result = app->run(scene);
-  // The terminal has been restored; report result.error() here in a full program.
-  return result ? 0 : 1;
+  using namespace portals;
+
+  ui::Ref<Label> status;
+  ui::Ref<Button> exit;
+
+  return ui::scene(ui::vbox(
+    ui::label(status, "Ready"),
+    ui::button("Apply", [status] {
+      status.text() = "Applied";
+    }),
+    ui::button(exit, "Exit")))
+    | ui::onClick(exit, ui::quit)
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
 }
 ```
 
-The runnable [gallery](examples.md) demonstrates input bindings, explicit quit,
-control synchronization, theme selection, and error reporting. The `ApplicationScene` hooks use the existing runtime and dispatcher.
-For fluent application construction, see [declarative UI](declarative-ui.md). Extend `ApplicationScene::input` for global commands; it runs
-inside the existing bounded CONTROL channel before normal `EventRouter` routing.
-For ordinary control actions retain the existing `ActionBinding`/control bindings.
+Build this complete [source](examples/guide_application.cpp) with `portals::core`;
+see [package setup](package.md). The scene mounts its description when run,
+opens the terminal, services input and redraws changed controls. `ui::runApp()`
+attempts terminal restoration and scene cleanup before returning 0 on success
+or 1 on failure. Its default error report goes to stderr after cleanup.
 
-## Frame preparation
+`ui::Ref<Label>` observes the label; the scene owns the control. Capture the
+reference by value in actions, and keep actions on the UI thread. The text
+assignment uses the normal invalidation path; no explicit repaint is needed.
+See [text properties](text-property.md) for checked operations and [events](input.md)
+for input handling. Choose [coroutines](ui-coroutines.md) for an action that waits
+without blocking input, and [diagnostics](diagnostics.md) to change error reporting.
+
+## Configure the run
+
+`ui::applicationOptions(...)` supplies `ApplicationOptions` before application
+creation. Use it for cadence, input/output bounds and native screen policy.
+The native default uses the alternate screen and restores the caller's screen
+on close. Choose `NativeScreenMode::MAIN_SCREEN` explicitly to leave the final
+frame on the main screen. Window resizing remains under the terminal host's control.
+
+Use `ui::scene(factory)` when building controls requires scene-owned state or
+access to `Application`; use `ui::configure(...)` for work after mounting.
+Register `scene.onStop(...)` before preparation to cancel/join external producers
+and release services borrowing the application before its managed nodes retire.
+Callbacks must not destroy or reenter the scene or runner.
+
+## Integrate your own scene or transport
+
+Use [`Application`](../include/portals/application.hpp) directly when you need
+`ApplicationScene::input`, `prepare`, custom widget preparation, or your own
+`ApplicationTerminal`. The low-level runner returns `expected<ApplicationStats,
+ApplicationError>`; the caller checks it and reports errors after terminal cleanup.
+The facade above already owns this runtime for ordinary applications.
+
+<details>
+<summary>Runner reference: preparation, bounds, ownership and native transport</summary>
+
+**Frame preparation**
 
 `prepare(application, size)` runs only when a dirty frame can be submitted. It
 runs after the cycle's single scheduler dispatch, outside `WidgetTree::frame`.
@@ -60,7 +89,7 @@ built-in widgets. Painting must not do I/O, model mutation, scheduler dispatch,
 or asynchronous work. Geometry-driven paint invalidation is consumed by the frame
 which already painted it; idle does not schedule periodic repaint.
 
-## Service bounds and errors
+**Service bounds and errors**
 
 One owning terminal batch/raw suffix and one rejected CONTROL payload survive
 between cycles. Native Windows events are not decoded a second time. POSIX bytes
@@ -74,8 +103,7 @@ EOF is a transport cutoff: the decoder finishes, admitted CONTROL is delivered,
 and already submitted output is flushed before cleanup. It does not wait for a
 future frame deadline, timer or DATA publication. An accepted edit may therefore
 remain dirty and absent from the final output if EOF arrives before its next
-frame; there is no shutdown exception to the frame cap. Finite replay scenarios
-that assert visible changes must leave sufficient time before EOF. Cancellation
+frame; there is no shutdown exception to the frame cap. Cancellation
 can stop earlier and does not promise to deliver remaining CONTROL.
 
 `inputSlice` is a positive read deadline; `read(now)` would return an immediate
@@ -97,15 +125,14 @@ scheduler, then invokes `scene.stop` to cancel/join scene-owned producers, then
 closes the terminal. This also happens after errors and pre-requested cancellation.
 No diagnostics, exceptions or metrics are printed while the terminal is active.
 
-## Clocks, replay and measurements
+**Clocks, replay and measurements**
 
 The native overload requires the default steady clock. The custom
 `ApplicationTerminal` overload borrows an exclusive terminal through `close` and
 supports an injected monotonic clock. Its millisecond epoch must map directly to
 the terminal's `TerminalDeadline`; mixing a fake epoch with native I/O is rejected.
 Custom transports must honor the configured batch bounds and own their results.
-Both overloads are single-use. See `tests/support/examples/replay/terminal.hpp` for an in-memory
-transport; it is example code, not a second production terminal backend.
+Both overloads are single-use.
 
 An optional borrowed `ApplicationObserver` receives preparation/render, encode,
 flush, stop and close durations. With no callback, these measurements perform no
@@ -118,11 +145,11 @@ benchmarks own and bound their sample storage.
 Diagnostics remain disabled unless explicitly configured on the scheduler.
 Input correlation enters at admission, survives CONTROL delivery and frame
 preparation, and reaches the actual writer submission/output. Export snapshots
-only after `run` restores the terminal, as the finite dashboard diagnostic check demonstrates.
+only after `run` restores the terminal.
 EOF, cancellation, and output failure are observable outcomes, not evidence that
 a real terminal visually displayed a frame.
 
-## Managed native transport
+**Managed native transport**
 
 The native `Application::run(scene)` overload uses `openNativeApplicationTerminal`.
 By default, `ApplicationOptions::nativeScreen` is `NativeScreenMode::ALTERNATE_SCREEN`:
@@ -204,3 +231,5 @@ Setup and restoration bytes bypass FrameWriter and frame byte counters. A custom
 transport decorator sees frame submissions and flushes, while factory setup and
 close perform separate protocol I/O. Include them in lifecycle timing, not
 rendered-frame throughput.
+
+</details>

@@ -1,11 +1,101 @@
-# VirtualTable
+# Show a virtual table
+
+Use [VirtualTable<T>](../include/portals/virtual_table.hpp). This fragment displays a Name header and three rows with standard keyboard and mouse navigation. Press F10 to close.
+
+This fragment assumes `<portals/ui.hpp>` and `using namespace portals`; it uses Names, an immutable `ModelSnapshot<std::string>` adapter with three records, and displayText, which creates GraphemeText. The adapter, helper, headers and complete program appear below and in [guide_vtable.cpp](examples/guide_vtable.cpp).
+
+```cpp
+int main() {
+  auto scene = ui::scene([](ManagedScene &owner) {
+    return owner.model<std::string>(std::make_shared<Names>()).transform([](auto model) {
+      const std::array<TableColumn<std::string>, 1> columns{{
+        {{1, 1}, displayText("Name"), 18, [](const std::string &name) {
+          return displayText(name);
+        }}
+      }};
+
+      return ui::virtualTable(model, columns);
+    });
+  });
+
+  return scene
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+<details>
+<summary>Complete program</summary>
+
+```cpp
+#include <portals/ui.hpp>
+#include <array>
+#include <stdexcept>
+
+using namespace portals;
+
+class Names final : public ModelSnapshot<std::string> {
+public:
+  Names() : ModelSnapshot(1, 3) {
+  }
+
+  ModelRows<std::string> read(RowRange range) const override {
+    return {RangeState::READY,
+            std::span(rows_).subspan(static_cast<std::size_t>(range.first), range.count), {}};
+  }
+
+private:
+  const std::array<ModelRow<std::string>, 3> rows_{{
+    {{1, 1}, "Ada"}, {{2, 1}, "Grace"}, {{3, 1}, "Margaret"}
+  }};
+};
+
+GraphemeText displayText(std::string_view value) {
+  auto result = GraphemeText::from(value);
+
+  if (!result) {
+    throw std::runtime_error("Invalid display text");
+  }
+
+  return std::move(*result);
+}
+
+int main() {
+  auto scene = ui::scene([](ManagedScene &owner) {
+    return owner.model<std::string>(std::make_shared<Names>()).transform([](auto model) {
+      const std::array<TableColumn<std::string>, 1> columns{{
+        {{1, 1}, displayText("Name"), 18, [](const std::string &name) {
+          return displayText(name);
+        }}
+      }};
+
+      return ui::virtualTable(model, columns);
+    });
+  });
+
+  return scene
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+</details>
+
+[Example source](examples/guide_vtable.cpp). Add the source to a C++23 project and link it with the portals::core target ([build instructions](getting-started.md)). Run the program in a terminal.
+
+Each TableColumn owns a stable ColumnId, header, cell width and formatter. The recipe copies the column array, so it can be local to the factory. The scene handles preparation and input. Pending data requires prepared in ui::VirtualTableConfig<T>. TBD: the requested ui::vtable alias is unavailable; no delivery date is assigned.
+
+Terms: [recipe](glossary.md#glossary-recipe), [frame](glossary.md#glossary-frame), [ownership](glossary.md#glossary-ownership).
+
+<details>
+<summary>API reference and constraints</summary>
 
 `VirtualTable<T>` presents immutable typed records through contiguous fixed-width
 columns and fixed-height rows. The first cell row is always the header. A model
 with no rows still displays its headers; an empty column set displays a blank
 viewport. There are no row or cell widgets, editing controls, or implicit workers.
 
-## Ownership and preparation
+**Ownership and preparation**
 
 Create the table on the UI owner with an independent `ModelConsumer<T>` from
 `Model<T>::openRange()`, a span of `TableColumn<T>`, and `VirtualTableOptions`.
@@ -52,7 +142,7 @@ new exact request; provider failures are not replaced by older ready data. A
 revision change or hidden view releases the old prepared owner. Public base reads
 and independent consumer results retain their existing exact semantics.
 
-## Rendering, requests, and selection
+**Rendering, requests, and selection**
 
 `measure`, `arrange`, and `paint` do no provider reads, formatting, mutation,
 loading, or terminal I/O. Paint emits widget-local commands. The application
@@ -78,7 +168,7 @@ the whole body row, and survives offscreen movement or reordering. Removed IDs
 remain selected until explicitly cleared. Navigation searches only the prepared
 visible IDs; pending positional intent is scoped to its data revision.
 
-## Mutation, budgets, and errors
+**Mutation, budgets, and errors**
 
 Use the tree-checked free functions on the owner thread:
 
@@ -111,12 +201,4 @@ mismatch. Discard partial render commands on any paint/sink error. A setter can
 make the old presentation dirty; a later failed preparation does not clear that
 requirement.
 
-## Verification scope
-
-`tests/virtual_table.cpp` uses real model publications, tree frames, layout,
-router dispatch, rendering, FrameWriter, and the independent TestTerminal oracle.
-It covers million-row bounded work, invisible columns, unrelated range updates,
-publication during a real frame, typed string/integer columns, clipping and wide
-graphemes, selection, empty dimensions, explicit budgets, pending/error/retry,
-source destruction, wrong affinity/session, and real allocation failpoints.
-It is a headless semantic check, not an interactive terminal or performance claim.
+</details>

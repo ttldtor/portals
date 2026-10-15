@@ -34,7 +34,34 @@ F10 завершает интерактивные примеры. Галерея
 В ней нет частных вспомогательных файлов, ручных токенов привязки, stop_source
 или цикла синхронизации отображения.
 
-\include{lineno} click_handlers/main.cpp
+```cpp
+// Copyright (c) 2026 ttldtor.
+// SPDX-License-Identifier: BSL-1.0
+#include <portals/ui_style.hpp>
+
+/** @brief Run a minimal lazy scene with a late click handler and a runtime stylesheet.
+ * @return Zero on success, one on a typed setup/runtime failure after library cleanup/reporting.
+ * Click Add Hello to append one undoable text change; F10 quits. This minimal program defines no CLI options.
+ * The standard runner owns terminal restoration.
+ */
+int main() {
+  using namespace portals;
+
+  ui::Ref<LineEdit> message;
+  ui::Ref<Button> add;
+
+  auto scene = ui::scene(ui::vbox(ui::lineEdit(message, ""), ui::button(add, "Add Hello")));
+
+  return scene
+    | ui::style("Button { bold: true; }")
+    | ui::onClick(add,
+                  [message] {
+                    message.text() += "Hello!";
+                  })
+    | ui::onKey(key::F10, ui::quit)
+    | ui::runApp();
+}
+```
 
 `ui::quit` принимается как команда `ui::onKey`; внутри допущенного обработчика
 `ui::quit()` завершает текущую сцену. Ссылки наблюдают контролы и не продлевают
@@ -147,3 +174,14 @@ portals_dashboard --mode replay --duration-ms 5000
 в `tests/examples/`; терминал в памяти — в `tests/support/examples/replay/terminal.hpp`.
 Они завершаются автоматически и проверяют конечные сценарии, а внешний вид
 и восстановление настоящего терминала требуют отдельной проверки.
+
+## Примеры из руководств
+
+Все небольшие программы из этих руководств находятся в `docs/examples`. Из корня исходников Portals:
+
+```powershell
+cmake -S docs/examples -B build/guide-examples -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build/guide-examples
+```
+
+Запустите `build/guide-examples/docs_basic.exe` в Windows или `build/guide-examples/docs_basic` в Linux/macOS. F10 закрывает интерактивные программы. Для сценариев редактора см. [демонстрацию истории](editor-history-demo.md).

@@ -1,31 +1,96 @@
-# Fixed-height virtual lists
+# Show a virtual list
+
+Use [VirtualList<T>](../include/portals/virtual_list.hpp). This fragment displays three names with standard keyboard and mouse navigation. Press F10 to close.
+
+This fragment assumes `<portals/ui.hpp>` and `using namespace portals`; it uses Names, an immutable `ModelSnapshot<std::string>` adapter with three records, and displayText, which creates GraphemeText. The adapter, helper, headers and complete program appear below and in [guide_vlist.cpp](examples/guide_vlist.cpp).
+
+```cpp
+int main() {
+  auto scene = ui::scene([](ManagedScene &owner) {
+    return owner.model<std::string>(std::make_shared<Names>()).transform([](auto model) {
+      return ui::virtualList(model, [](const ModelRow<std::string> &row) {
+        return displayText(row.value);
+      });
+    });
+  });
+
+  return scene
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+<details>
+<summary>Complete program</summary>
+
+```cpp
+#include <portals/ui.hpp>
+#include <array>
+#include <stdexcept>
+
+using namespace portals;
+
+class Names final : public ModelSnapshot<std::string> {
+public:
+  Names() : ModelSnapshot(1, 3) {
+  }
+
+  ModelRows<std::string> read(RowRange range) const override {
+    return {RangeState::READY,
+            std::span(rows_).subspan(static_cast<std::size_t>(range.first), range.count), {}};
+  }
+
+private:
+  const std::array<ModelRow<std::string>, 3> rows_{{
+    {{1, 1}, "Ada"}, {{2, 1}, "Grace"}, {{3, 1}, "Margaret"}
+  }};
+};
+
+GraphemeText displayText(std::string_view value) {
+  auto result = GraphemeText::from(value);
+
+  if (!result) {
+    throw std::runtime_error("Invalid display text");
+  }
+
+  return std::move(*result);
+}
+
+int main() {
+  auto scene = ui::scene([](ManagedScene &owner) {
+    return owner.model<std::string>(std::make_shared<Names>()).transform([](auto model) {
+      return ui::virtualList(model, [](const ModelRow<std::string> &row) {
+        return displayText(row.value);
+      });
+    });
+  });
+
+  return scene
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+</details>
+
+[Example source](examples/guide_vlist.cpp). Add the source to a C++23 project and link it with the portals::core target ([build instructions](getting-started.md)). Run the program in a terminal.
+
+The scene owns input bindings, range consumers and preparation. The formatter returns owning text and only reads the supplied row. Ready in-memory data needs no provider callback. Pending data requires prepared in ui::VirtualListConfig<T> to dispatch the returned request; the library starts no workers. TBD: the requested ui::vlist alias is unavailable; no delivery date is assigned.
+
+Terms: [recipe](glossary.md#glossary-recipe), [frame](glossary.md#glossary-frame), [ownership](glossary.md#glossary-ownership).
+
+<details>
+<summary>API reference and constraints</summary>
 
 `VirtualList<T>` is one `SizedWidget`, regardless of the logical row count.
 It consumes the typed immutable [model](model.md), uses the existing
 [router](focus.md), and paints widget-local commands through the regular
 [layout and frame contract](layout.md). It does not create a widget for each row.
 
-## Owning data and preparing a frame
+**Owning data and preparing a frame**
 
 Create a separate `ModelConsumer<T>` for every view. Pass it by move to the
-list together with an owning, copyable formatter:
-
-```cpp
-auto consumer = model.openRange();
-if (!consumer) {
-  return std::unexpected(consumer.error());
-}
-auto list = tree.emplace<portals::VirtualList<MyRow>>(
-  parent, std::move(*consumer),
-  [](const portals::ModelRow<MyRow> &row) {
-    // title is immutable provider data; formatting must not load it.
-    auto text = portals::GraphemeText::from(row.value.title);
-    if (!text) {
-      throw std::runtime_error("invalid row title");
-    }
-    return std::move(*text);
-  });
-```
+list together with an owning, copyable formatter.
 
 `T` need not be default-constructible or copyable. The list only borrows each
 `const ModelRow<T>&` during formatting. Providers guarantee immutable reachable
@@ -62,7 +127,7 @@ new exact request; provider failures are not replaced by older ready data. A
 revision change or hidden view releases the old prepared owner. Public base reads
 and independent consumer results retain their existing exact semantics.
 
-## Range and request rules
+**Range and request rules**
 
 For a positive fixed row height `H`, the list realizes `ceil(viewport.height/H)`
 rows, including the last partial row. Zero width/height and an empty model
@@ -99,7 +164,7 @@ release completed/cancelled application tokens and retry. The configured model
 range limit also applies to viewport plus overscan; oversized ranges fail with
 `INVALID_ARGUMENT`, without silently reducing the requested viewport.
 
-## Selection, input and visibility
+**Selection, input and visibility**
 
 Selection is `optional<RowId>`, not a row position. Insertion, reordering,
 publication and scrolling do not replace it. Removed IDs remain selected until
@@ -128,7 +193,7 @@ Call preparation after a visibility change even if the view will not paint.
 Tree removal destroys the consumer and cancels its work independently. Disabled
 views still paint, but the router prevents their input.
 
-## Errors, invalidation and limits
+**Errors, invalidation and limits**
 
 All view mutation uses the tree's UI owner and occurs outside a frame. Wrong
 thread, stale/foreign node, closed tree, and frame mutation errors propagate.
@@ -146,9 +211,4 @@ Application-driven model publication already invalidates its model context.
 Row text and placeholders use the complete configured width policy, and the
 renderer preserves whole wide graphemes even in a one-cell viewport.
 
-The semantic tests use `layoutTree`, the reference renderer, `FrameWriter` and
-an independent `TestTerminal`. At 100 and 1,000,000 logical rows, a three-row
-viewport with two rows of overscan on each side performs one seven-row read and
-three formatter calls, with no child widgets. These counters prove bounded work,
-not measured throughput. Tests also cover async supersession, separate consumers,
-transactional real allocation failures, retained ownership, input and clipping.
+</details>

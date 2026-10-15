@@ -1,6 +1,84 @@
-# Диагностика {#diagnostics-ru}
+# Ошибки и диагностика {#diagnostics-ru}
 
-[Подробная английская версия](../diagnostics.md)
+[Английская версия](../diagnostics.md)
+
+Начните со стандартного поведения: завершите fluent-цепочку сцены этапом
+`| ui::runApp()`. Он проверяет ошибки подготовки и запуска, пытается очистить
+сцену и восстановить терминал, затем печатает ошибку в stderr и возвращает 1.
+Восстановимые ошибки действий сохраняются; успешный запуск может вывести
+ограниченную сводку таких ошибок и при этом вернуть 0.
+
+## Собственный получатель итогового отчёта
+
+Полная программа копирует итоговый [`SceneReport`](../../include/portals/ui_scene.hpp)
+и выводит его после запуска. Замените `reportToStderr` своей записью в файл или
+интеграцией с logger. Чистый запуск без сохранённых ошибок получателя не вызывает.
+
+```cpp
+#include <portals/ui.hpp>
+
+#include <optional>
+
+int main() {
+  using namespace portals;
+
+  std::optional<ui::SceneReport> finalReport;
+  ui::Ref<Button> exit;
+
+  const int result = ui::scene(ui::button(exit, "Exit"))
+    | ui::reportOnError([&finalReport](const ui::SceneReport &report) {
+        finalReport = report;
+      })
+    | ui::onClick(exit, ui::quit)
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+
+  if (finalReport) {
+    ui::reportToStderr(*finalReport);
+  }
+
+  return result;
+}
+```
+
+`ui::reportOnError(sink)` заменяет итоговый получатель; пустой `sink` возвращает
+стандартный stderr. Доставка выполняется один раз после попыток восстановления
+и очистки. Исключение получателя вызывает резервный вывод исходного отчёта в stderr.
+Отчёт заимствуется только на время вызова; для хранения скопируйте его.
+Не изменяйте и не запускайте сцену повторно из этого обработчика.
+
+## Наблюдение во время работы UI
+
+`ui::onError([](const ManagedDiagnostic &error) { ... })` устанавливает наблюдатель
+отдельных типизированных ошибок в UI-потоке. Он не заменяет итоговый получатель
+и не отменяет ошибку. Сохраняйте ограниченные данные приложения или меняйте своё
+состояние; не пишите в stdout/stderr при активном терминале. Вложенные сообщения
+не вызывают рекурсивных уведомлений; исключения наблюдателя учитываются отдельно
+от исходной причины. `ManagedScene::diagnostics()` возвращает владеющий снимок,
+`drainErrors()` передаёт накопленную историю. Поля и пределы описаны в
+[`managed_diagnostics.hpp`](../../include/portals/managed_diagnostics.hpp).
+
+Низкоуровневые результаты `expected` по-прежнему нужно проверять. Исключения
+в документированных callback-границах runner и managed API преобразуются в ошибки.
+Создание аргументов, захватов и кадра корутины может бросить до входа в эти границы.
+Для проверяемого входа с фабрикой описания используйте `ui::runApp(factory, ...)`
+из [`ui.hpp`](../../include/portals/ui.hpp).
+
+Автоматического постоянного журнала, ротации и фонового logging-сервиса нет.
+Эта интеграция — **TBD**, milestone в текущем [плане](planned-features.md) не назначен.
+Доступная точка расширения — итоговый получатель отчёта.
+
+## Почему действие не изменило экран
+
+[`Diagnostics`](../../include/portals/diagnostics.hpp) записывает ограниченные причинные
+метаданные. По умолчанию запись выключена. Она отделена от истории managed-ошибок
+и logger приложения. Передайте общий recorder в `SchedulerOptions::diagnostics`
+(для сцены — `ui::SceneOptions::application.scheduler.diagnostics`), включите его
+проверяемым вызовом `enable`, а после запуска выключите, получите снимок и экспорт.
+`exportDiagnostics` возвращает текст в памяти; файловый вывод и ошибки принадлежат приложению.
+
+<details>
+<summary>Справка recorder: контекст, пределы и экспорт</summary>
 
 Portals записывает ограниченные метаданные прохождения действия: от ввода
 до обработчика, изменения свойства и вывода кадра. Символы ввода, вставка,
@@ -8,20 +86,7 @@ Portals записывает ограниченные метаданные пр�
 не записываются. Формат диагностики имеет собственную версию; семантический
 replay использует PORTALS-TRACE 1.
 
-## Подключение
-
-```cpp
-#include <portals/diagnostics.hpp>
-
-// Keep ordinary error handling around every expected result in application code.
-auto trace = std::make_shared<portals::Diagnostics>();
-portals::SchedulerOptions options;
-options.diagnostics = trace;
-auto scheduler = portals::Scheduler::create(options).value();
-auto tree = portals::WidgetTree::create(*scheduler).value();
-portals::FrameWriter writer(output, {}, trace);
-trace->enable({.capacity = 1024}).value();
-```
+**Подключение**
 
 По умолчанию диагностика выключена. Отключённые точки записи проверяют указатель
 и при наличии регистратора его состояние; они не форматируют текст, не читают
@@ -35,19 +100,11 @@ Scheduler, writer удерживает регистратор. DiagnosticScope �
 остаётся на создавшем потоке и завершается раньше него. Вложенный контекст
 восстанавливается при обычном возврате и исключении.
 
-## Путь действия
+**Путь действия**
 
 На границе декодированного ввода создавайте токен до публикации, включая
-события, которым очередь впоследствии откажет:
-
-```cpp
-{
-  portals::DiagnosticScope action(trace.get(),
-    trace->beginInput(portals::DiagnosticInput::KEY));
-  auto publication = inputPublisher.publish(owningInput);
-  // Handle publication.error() normally. Diagnostics never retries delivery.
-}
-```
+события, которым очередь впоследствии откажет. Установите результат
+`trace->beginInput(DiagnosticInput::KEY)` в `DiagnosticScope` вокруг публикации.
 
 Scheduler удерживает токен в публикации и устанавливает его при вызове.
 Router, фокус, действие, начало/возврат обработчика, Property и инвалидация
@@ -63,7 +120,7 @@ Router, фокус, действие, начало/возврат обработ
 output_accepted подтверждает согласованное принятие транспортом;
 физическое отображение на экране этим не подтверждается.
 
-## Интерпретация
+**Интерпретация**
 
 Enter на Button с присваиванием равного значения Property может дать:
 
@@ -96,7 +153,7 @@ outcome_unknown, frame_not_requested, diff_empty, output_failed.
 отмену старой и связь с новой. Причину отсутствия ввода до инструментированной
 границы экспорт установить не может.
 
-## Ёмкость и неполные цепочки
+**Ёмкость и неполные цепочки**
 
 enable начинает новый интервал и очищает кольцо/потери; счётчики идентичности
 и последовательности сохраняются без переполнения. disable сохраняет интервал.
@@ -117,29 +174,15 @@ queue_returned или queue_cancelled. Исключение обработчик
 queue_returned reason=handler_failed. Отсутствие записи не доказывает
 отсутствие действия. Для выключенных точек полнота не учитывается.
 
-## Экспорт
+**Экспорт**
 
 exportDiagnostics(snapshot) возвращает текст в памяти. Приложение выбирает
 файл и обрабатывает ошибки. Снимок и сериализацию выполняйте между кадрами
 или после восстановления терминала. Выводить экспорт в stdout/stderr во время
 работы интерфейса в системном терминале нельзя.
 
-```cpp
-trace->disable();
-auto saved = trace->snapshot();
-// Restore/close the application's terminal before its final export.
-auto text = portals::exportDiagnostics(saved);
-std::ofstream file(chosenPath, std::ios::binary | std::ios::trunc);
-file << text;
-file.close();
-if (!file) {
-  // Report an export failure through the application's now-safe error channel.
-}
-```
-
 Создание снимка и форматирование могут бросить bad_alloc, включая служебные данные отладочных итераторов. Возврат использует ограниченную копию вне блокировки.
 Проверяйте открытие, запись и закрытие файла. validateDiagnosticVersion
 проверяет заголовок версии до чтения полей; парсер воспроизводимых сценариев имеет отдельный API.
-Проверочный пример portals_diagnostics_flow допускает путь экспорта, использует TestTerminal
-и возвращает 2 при ошибке файла. Тестовая программа `portals_dashboard_check` поддерживает `--trace` после восстановления терминала;
-смотрите [примеры](examples.md).
+
+</details>

@@ -1,26 +1,35 @@
 # Editor Undo and Redo
 
-Every bound `LineEdit` has its own bounded text history. History is enabled by
+Undo/Redo restores **one editor’s text and selection**. Completion (`EditMode::ON_COMPLETION`) determines when its draft reaches the model; it does not maintain a list of earlier values. Completion suggestions or previously entered commands are not supplied by this API. `ui::lineEdit` creates the binding and history automatically; ordinary fields do not need a separate `TextHistory`. Type, then use Ctrl+Z or Undo; F10 exits.
+
+Every bound [`LineEdit`](../include/portals/line_edit.hpp) has its own bounded text history. History is enabled by
 default: 128 combined Undo/Redo groups and 1 MiB of retained snapshot storage.
 `LineEditOptions::history` configures these bounds and typing/deletion grouping.
 There is no application command bus or scene-wide transaction history.
 
 ```cpp
-portals::ui::Ref<portals::LineEdit> name;
-auto model = scene.state(std::string("Ada")).value();
-portals::ui::mount(scene, portals::ui::column(
-  portals::ui::lineEdit(model).reference(name),
-  portals::ui::button("Undo",
-                      [name] {
-                        return name.undo();
-                      }),
-  portals::ui::button("Redo",
-                      [name] {
-                        return name.redo();
-                      }))).value();
+#include <portals/ui.hpp>
 
-name.text() = portals::text("{} {}", "Ada", "Lovelace"); // One separate reversible edit.
-name.text(portals::ProgrammaticChange::RESET_BASELINE) = "Loaded name";
+int main() {
+  using namespace portals;
+
+  ui::Ref<LineEdit> name;
+
+  auto scene = ui::scene(ui::vbox(
+    ui::lineEdit(name, "Ada"),
+    ui::button("Undo",
+               [name] {
+                 return name.undo();
+               }),
+    ui::button("Redo",
+               [name] {
+                 return name.redo();
+               })));
+
+  return scene
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
 ```
 
 Input, deletion, cut/paste and fluent changes all use the existing editor binding.
@@ -28,7 +37,14 @@ Undo restores owning text plus cursor and selection byte offsets at complete
 grapheme boundaries. Combining marks, ZWJ emoji and wide characters retain their
 bytes; the restored text uses the editor's captured width policy and limits.
 
-## Recording and publication
+By default Undo also publishes the restored value immediately. Deferred modes keep the restored draft until the same confirmation point as typing; see [confirmation modes](line-edit.md).
+
+[Build the standalone examples](examples.md).
+
+<details>
+<summary>Reference: recording, revisions and command results</summary>
+
+**Recording and publication**
 
 Plain consecutive typing, backward deletion and forward deletion form separate
 groups of their respective kinds. Selection replacement, paste, cut and recorded
@@ -66,7 +82,7 @@ a typed technical command failure and delivering its detailed `LineEditResult`.
 Do not retry Undo merely to deliver a rejected model notification. Its successful
 `PropertyUpdate` receipt remains authoritative.
 
-## Model revisions and availability
+**Model revisions and availability**
 
 A successful editor publication advances its own baseline; it does not reset
 history as an external change. A clean external model revision adopts the latest
@@ -94,7 +110,7 @@ cut and paste without calling clipboard or validator callbacks. Selection,
 navigation and Copy remain available. Explicit programmatic text mutations remain
 allowed and follow RECORD/RESET plus the configured publication mode.
 
-## Keyboard shortcuts
+**Keyboard shortcuts**
 
 Defaults are Ctrl+Z for Undo, Ctrl+Y and Ctrl+Shift+Z for Redo. Set the owning
 `LineEditOptions::historyShortcuts` values to remap them; `nullopt` disables an
@@ -112,7 +128,7 @@ is rejected. No new RoutedEvent alternative or Action is introduced. Ctrl+Shift+
 requires an input adapter that reports Shift distinctly; Ctrl+Y remains available
 with VT input.
 
-## Checked commands and diagnostics
+**Checked commands and diagnostics**
 
 Low-level binding commands return `expected<void, TreeError>`. Ref commands return
 `EditorCommandResult`: an owning checked result carrying a private receipt of
@@ -139,8 +155,9 @@ callbacks first checks weak lifetime. History contains owning text/selection,
 never borrowed widget storage. By-value argument and resolver construction may
 throw before entry; internal allocation failures are typed.
 
-`portals.undo-integration` covers Unicode, grouping, clipboard, modes, revisions,
-budgets, real allocation sweeps, removal/reentry and exact causal reporting.
-`consumer.undo-integration` uses only relocated installed package headers.
+[Developer testing](testing.md).
+
 See [LineEdit](line-edit.md), [text properties](text-property.md),
 [diagnostics](diagnostics.md) and [focus](focus.md).
+
+</details>

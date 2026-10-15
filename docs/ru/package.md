@@ -1,24 +1,25 @@
-# Установленный пакет CMake {#package-ru}
+# Установка и подключение пакета CMake {#package-ru}
 
-[Подробная английская версия](../package.md)
+[Английская версия](../package.md)
 
-Portals устанавливает открытые заголовки C++23, статические архивы core
-и встроенной utf8proc, CMake configuration/version/targets и лицензии.
-`portals::core` передаёт требование C++23 и полную цепочку линковки.
-В UNIX конфигурация находит платформенную Threads. Загрузка зависимостей
-по сети и системная utf8proc не требуются.
-Версию задаёт project(Portals VERSION ...) в CMake; метаданные и проверки
-потребителя сверяются с версией связанной библиотеки.
+Portals устанавливает статический SDK C++23: открытые заголовки, архивы core и
+частной utf8proc, метаданные CMake и лицензии. Цель `portals::core` передаёт требование
+к языку и полную цепочку линковки. Загрузка зависимостей по сети и системная utf8proc
+не нужны. В UNIX конфигурация находит платформенную Threads.
 
-## Установка и подключение
+## Release с Ninja
 
-В x64 Developer PowerShell MSVC или Linux с подходящим набором инструментов сборки C/C++:
+На Windows используйте x64 Developer PowerShell MSVC. На Linux команды те же,
+с подходящим набором инструментов C/C++ и путём установки.
 
 ```powershell
-cmake -S . -B build/package -G Ninja -DCMAKE_BUILD_TYPE=Release -DPORTALS_BUILD_TESTS=OFF -DPORTALS_BUILD_EXAMPLES=OFF -DPORTALS_BUILD_TOOLS=OFF
-cmake --build build/package
-cmake --install build/package --prefix "C:/sdk/Portals"
+cmake -S . -B build/package-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DPORTALS_BUILD_TESTS=OFF -DPORTALS_BUILD_EXAMPLES=OFF -DPORTALS_BUILD_TOOLS=OFF
+cmake --build build/package-release
+cmake --install build/package-release --prefix "C:/sdk/Portals-release"
 ```
+
+Поместите [полный пример приложения](../examples/guide_application.cpp) в
+`my-application/main.cpp`, создайте `my-application/CMakeLists.txt`:
 
 ```cmake
 cmake_minimum_required(VERSION 3.24)
@@ -29,114 +30,122 @@ target_link_libraries(app PRIVATE portals::core)
 ```
 
 ```powershell
-cmake -S my-application -B build/my-application -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="C:/sdk/Portals"
-cmake --build build/my-application
+cmake -S my-application -B build/my-application-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="C:/sdk/Portals-release"
+cmake --build build/my-application-release
 ```
 
-Для переноса переместите весь каталог установки: заголовки, оба архива, CMake и лицензии.
-Укажите новый CMAKE_PREFIX_PATH. Пути импортируемых целей CMake вычисляются относительно него.
-Собственные CMAKE_INSTALL_LIBDIR/INCLUDEDIR оставляйте относительными.
+Приложение и SDK здесь используют **Release**. `CMAKE_PREFIX_PATH` указывает
+каталог установки, а не исходники и не каталог сборки библиотеки.
 
-Необязательная цель `portals::lyra` добавляет `<portals/ui_lyra.hpp>` и
-закреплённые заголовки Lyra. Подключите её для [командной строки](cli.md);
-лицензия и манифест входят в SDK. Приложения без адаптера используют `portals::core`.
+## Debug с Ninja
 
-## Совместимость
-
-Архитектура, компилятор, стандартная библиотека, конфигурация C++ и среда выполнения
-библиотеки, utf8proc и приложения должны совпадать. Debug/Release собираются
-отдельно или через совместимый генератор с несколькими конфигурациями и устанавливаются в общий каталог установки.
-Архивы разделены по lib/Debug и lib/Release; установка одного сохраняет другой.
-SameMajorVersion — правило поиска CMake, без обещания стабильного ABI.
-Переносимых BMI модулей пакет не содержит.
-
-Проект сохраняет выбор среды выполнения MSVC вызывающего кода. Стандартный
-MultiThreaded$<$<CONFIG:Debug>:Debug>DLL означает /MDd в Debug и /MD в Release.
-Для /MT выбирайте среду выполнения явно и пересобирайте архивы. Release не означает
-отсутствие распространяемых компонентов среды выполнения Visual C++.
-
-## Проверка переноса
-
-При PORTALS_BUILD_TESTS=ON:
+Ninja выбирает одну конфигурацию при настройке. Используйте отдельные каталоги
+сборки SDK и приложения и одинаковый **Debug** с обеих сторон:
 
 ```powershell
-cmake --build build/windows-msvc-debug --target portals_core
-ctest --test-dir build/windows-msvc-debug -R "^portals.package-install$" --output-on-failure --no-tests=error
+cmake -S . -B build/package-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug -DPORTALS_BUILD_TESTS=OFF -DPORTALS_BUILD_EXAMPLES=OFF -DPORTALS_BUILD_TOOLS=OFF
+cmake --build build/package-debug
+cmake --install build/package-debug --prefix "C:/sdk/Portals-debug"
+cmake -S my-application -B build/my-application-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH="C:/sdk/Portals-debug"
+cmake --build build/my-application-debug
 ```
 
-Тест устанавливает текущую сборку, переносит её в путь с пробелами/Unicode
-и собирает независимое приложение-потребитель только через импортируемые цели CMake.
-Он публикует ревизию модели, готовит собственный виджет и проверяет отрисовку
-без терминала. Windows использует исходник неинтерактивного запуска из тестового окружения.
-Проверка запрещает включать пути исходников и сборки, внутренние параметры
-предупреждений и определения
-в установленных CMake-файлах, отключает реестры пакетов и сохраняет каталоги.
-Дополнительно выполняются сценарии ввода и ошибок для managed-контролов.
+## Debug и Release в одной установке
 
-Генератор с несколькими конфигурациями Debug/Release регистрирует
-`portals.package-install-multi-config`:
+С Ninja Multi-Config и Visual Studio конфигурация выбирается через `--config`
+при сборке и установке. В этом варианте `CMAKE_BUILD_TYPE` не используется.
 
 ```powershell
-cmake -S . -B build/package-multi -G "Ninja Multi-Config" -DPORTALS_BUILD_TESTS=ON -DPORTALS_BUILD_EXAMPLES=OFF -DPORTALS_BUILD_TOOLS=OFF
-ctest --test-dir build/package-multi -C Debug -R "^portals.package-install-multi-config$" --output-on-failure --no-tests=error
+cmake -S . -B build/package-multi -G "Ninja Multi-Config" -DPORTALS_BUILD_TESTS=OFF -DPORTALS_BUILD_EXAMPLES=OFF -DPORTALS_BUILD_TOOLS=OFF
+cmake --build build/package-multi --config Debug
+cmake --install build/package-multi --config Debug --prefix "C:/sdk/Portals"
+cmake --build build/package-multi --config Release
+cmake --install build/package-multi --config Release --prefix "C:/sdk/Portals"
+cmake -S my-application -B build/my-application-multi -G "Ninja Multi-Config" -DCMAKE_PREFIX_PATH="C:/sdk/Portals"
+cmake --build build/my-application-multi --config Debug
+cmake --build build/my-application-multi --config Release
 ```
 
-Он собирает/устанавливает обе конфигурации в общий каталог установки, переносит его
-и запускает приложение-потребитель в обеих конфигурациях. Поддерживается и генератор Visual Studio.
+Архивы разделены по `lib/Debug` и `lib/Release` (внутри настроенного
+`CMAKE_INSTALL_LIBDIR`). Установка одной конфигурации сохраняет другую. Наборы
+инструментов должны быть совместимы; не смешивайте молча независимые SDK.
 
-## Архивы Release
+## Совместимость и перенос
 
-Упаковка использует одну зафиксированную ревизию из свежего архива исходников,
-без незакоммиченных и внутренних рабочих файлов. Из одной Release-сборки формируются
-примеры, HTML и SDK, затем проверяется распакованный архив. Промежуточный каталог не
-переиспользуется и существующий архив не перезаписывается. Задайте новые абсолютные
-пути; промежуточный каталог должен находиться вне исходников.
-Для полной справки нужны Doxygen 1.18+, Mermaid CLI; проверенная связка
-Node.js 24 LTS + Mermaid CLI 12. Читателю достаточно упакованных SVG.
+Согласуйте архитектуру, компилятор, стандартную библиотеку, конфигурацию C++ и
+runtime Portals, utf8proc и приложения. Стандартный runtime MSVC — `/MDd` в Debug
+и `/MD` в Release. Portals сохраняет явно выбранный `CMAKE_MSVC_RUNTIME_LIBRARY`;
+при его смене пересоберите архивы и приложение. Сам Release не означает `/MT`
+и отсутствие требований к распространяемой среде выполнения.
+
+Переносите **весь каталог установки**: заголовки, оба архива, CMake и лицензии.
+Укажите новый `CMAKE_PREFIX_PATH`. Пути установленных целей относительны этому
+каталогу. Собственные `CMAKE_INSTALL_LIBDIR` и `CMAKE_INSTALL_INCLUDEDIR` оставляйте
+относительными. `SameMajorVersion` — правило поиска CMake, без обещания стабильного
+ABI и универсальной бинарной переносимости. Переносимые BMI модулей не поставляются.
+Источник версии метаданных — верхнеуровневый `project(Portals VERSION ...)`.
+
+Необязательная цель `portals::lyra` добавляет `<portals/ui_lyra.hpp>` и закреплённые
+заголовки Lyra для [командной строки](cli.md). Лицензия и манифест исходников входят
+в SDK. Без адаптера подключайте `portals::core`.
+
+## Запускаемые архивы Release
+
+Архив содержит примеры, HTML-справку, статический SDK, исходники примеров,
+темы/данные, скрипты запуска, лицензии и манифест. Windows-сборка архива по умолчанию
+явно выбирает `/MT`; это не меняет стандартный runtime обычного SDK выше.
+Приложению с SDK из архива нужен совместимый набор инструментов и runtime.
+Linux-архив сохраняет требования совместимости libc и инструментов своего хоста.
+
+<details>
+<summary>Создание архива Release из закоммиченной ревизии</summary>
+
+Pipeline строит одну ревизию Git из нового архива исходников; незакоммиченные
+и игнорируемые файлы исключены. Выберите новые абсолютные пути staging и архива;
+staging должен быть вне checkout. Существующие пути не перезаписываются.
+
+На Windows нужны x64 Developer PowerShell MSVC, Git, CMake 3.24+, Ninja,
+Doxygen 1.18+, Node.js и Mermaid CLI в PATH. Проверенная связка справки —
+Doxygen 1.18, Node.js 24 LTS и Mermaid CLI 12. Обычному SDK генераторы справки не нужны.
 
 ```powershell
 ./tools/package/bundle.ps1 -WorkDir "C:/temp/portals bundle run-001" -OutputArchive "C:/artifacts/portals-mvp-windows-x64-release.zip"
 ```
 
-Параметры: -Revision — коммит, -Parallel — параллелизм, -PythonExecutable —
-Python 3 для проверки HTML-ссылок. Без Python эта проверка помечается not_run.
-Архив для Windows по умолчанию явно использует MultiThreaded (/MT);
--Runtime MultiThreadedDLL выбирает /MD и записывает выбор в manifest.
-dumpbin /DEPENDENTS проверяет реальные программы; динамическая среда выполнения CRT при /MT
-отклоняется. Системные DLL Windows не перераспространяются.
+`-Revision` выбирает закоммиченную ревизию, `-Parallel` — параллелизм сборки.
+`-Runtime MultiThreadedDLL` явно выбирает `/MD` вместо `/MT` архива.
+`-PythonExecutable` включает необязательную проверку локальных HTML-ссылок и якорей;
+без Python в манифесте записывается `not_run`. Системные DLL Windows не поставляются.
+
+На Linux:
 
 ```sh
 cmake "-DSOURCE_DIR=/absolute/portals" "-DWORK_DIR=/tmp/portals-bundle-run-001" "-DOUTPUT_ARCHIVE=/absolute/artifacts/portals-mvp-linux-x64-release.tar.gz" "-DCXX_COMPILER=/usr/bin/g++" -P tools/package/bundle.cmake
 ```
 
-Linux записывает ldd каждой программы и версию ldd/libc системы сборки. Совместимость
-со всеми дистрибутивами не обещается. Поддержаны сборки для x64 Windows/MSVC на собственной платформе
-и Linux, по умолчанию Ninja с одной конфигурацией; кросс-компиляция не выполняется.
+Поддерживаются нативные x64 Windows/MSVC и Linux, по умолчанию single-config Ninja.
+Примеры, HTML и SDK собираются из одной Release-ревизии; новый распакованный архив
+проверяется до публикации. Кросс-компиляция не выполняется.
 
-Архив содержит bin, themes, data, docs/html, install, исходники примеров,
-независимое приложение-потребитель, файлы запуска, GETTING-STARTED.md, лицензии, проверки
-и manifest.json. Примеры имеют встроенные данные и не требуют файлов текущего
-каталога. HTML копируется вместе с ресурсами и уведомлениями лицензий.
-Манифест хранит коммит, контрольную сумму архива исходников,
-ОС/компилятор/среду выполнения, импортируемые зависимости
-и SHA256 файлов. Сам manifest.json исключён из собственного списка; SHA256 архива
-охватывает весь архив. Хеши выявляют повреждение без подтверждения подлинности.
+Манифест содержит ревизию/checksum исходников, компилятор/runtime, импорты executable
+и SHA256 файлов. Сам манифест исключён из собственного списка; архив имеет отдельную
+контрольную сумму. Они обнаруживают случайное повреждение, но не подтверждают
+подлинность. Темы и replay-данные служат справочными входами; значения по умолчанию
+встроены в примеры, файлы данных в текущем каталоге им не нужны.
 
-Проверка доверенного архива:
+Для проверки доверенного архива из нового места используйте новый тестовый каталог:
 
-```sh
+```powershell
 cmake "-DARCHIVE=<absolute archive path>" "-DTEST_WORK_DIR=<new absolute temporary path>" "-DCXX_COMPILER=<compatible compiler>" -P tests/bundle_smoke.cmake
 ```
 
-Проверяются инвентарь/хеши, справка/отказы публичного CLI из чужого каталога
-и установленный потребитель; каталоги свидетельств сохраняются.
-BUNDLE_DIR и скопированный verify/bundle_smoke.cmake проверяют перенесённую
-распаковку; VERIFY_ONLY=ON проверяет хеши без сборки.
-portals.bundle-scripts проверяет повреждения, лишние файлы, выход за пределы каталога по относительному пути
-и отказ менять существующие промежуточный каталог и архив без C++-сборки или терминала.
+Проверяются состав, конечные сценарии примеров и потребитель перенесённого SDK;
+каталоги доказательств сохраняются. Это не заменяет интерактивную проверку терминала.
+`VERIFY_ONLY=ON` проверяет хеши без сборки.
 
-Источники: [CMake import/export](https://cmake.org/cmake/help/latest/guide/importing-exporting/index.html),
+</details>
+
+Источники: [импорт/экспорт CMake](https://cmake.org/cmake/help/latest/guide/importing-exporting/index.html),
+[конфигурации сборки](https://cmake.org/cmake/help/latest/manual/cmake-buildsystem.7.html#build-configurations),
 [GNUInstallDirs](https://cmake.org/cmake/help/latest/module/GNUInstallDirs.html),
-[package helpers](https://cmake.org/cmake/help/latest/module/CMakePackageConfigHelpers.html),
-[MSVC runtime](https://cmake.org/cmake/help/latest/prop_tgt/MSVC_RUNTIME_LIBRARY.html),
-[dumpbin](https://learn.microsoft.com/en-us/cpp/build/reference/dependents?view=msvc-170).
+[runtime MSVC](https://cmake.org/cmake/help/latest/prop_tgt/MSVC_RUNTIME_LIBRARY.html).

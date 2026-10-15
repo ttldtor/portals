@@ -1,24 +1,90 @@
-# Diagnostics {#diagnostics}
+# Errors and diagnostics {#diagnostics}
+
+[Русская версия](ru/diagnostics.md)
+
+Start with the default: end a fluent scene with `| ui::runApp()`. It checks
+scene setup/run failures, attempts cleanup and terminal restoration, then prints
+an error to stderr and returns 1. Managed recoverable action errors are retained;
+a successful run can report a bounded error summary and still return 0.
+
+## Supply your own final report sink
+
+The complete program below copies the final [`SceneReport`](../include/portals/ui_scene.hpp)
+and reports it after the run. Replace `reportToStderr` with your application's
+file/logger integration at that point. A clean run with no retained errors does
+not call the sink.
+
+```cpp
+#include <portals/ui.hpp>
+
+#include <optional>
+
+int main() {
+  using namespace portals;
+
+  std::optional<ui::SceneReport> finalReport;
+  ui::Ref<Button> exit;
+
+  const int result = ui::scene(ui::button(exit, "Exit"))
+    | ui::reportOnError([&finalReport](const ui::SceneReport &report) {
+        finalReport = report;
+      })
+    | ui::onClick(exit, ui::quit)
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+
+  if (finalReport) {
+    ui::reportToStderr(*finalReport);
+  }
+
+  return result;
+}
+```
+
+`ui::reportOnError(sink)` replaces the final sink; an empty sink restores stderr.
+Delivery happens once after restoration and cleanup were attempted. A throwing
+sink falls back to stderr with the original report. The callback borrows the report
+only for its call: copy it to retain it. Do not reenter or mutate the scene there.
+
+## Observe errors while the UI runs
+
+`ui::onError([](const ManagedDiagnostic &error) { ... })` installs a UI-thread
+observer for individual typed errors. It does not replace the final sink or veto
+an error. Store bounded application data or update your own state there; avoid
+stdout/stderr while the terminal is active. Nested reports suppress recursive
+notification, and observer exceptions are recorded separately from the original cause.
+`ManagedScene::diagnostics()` returns an owning history snapshot;
+`drainErrors()` transfers the retained history. See
+[`managed_diagnostics.hpp`](../include/portals/managed_diagnostics.hpp) for error fields and limits.
+
+Low-level APIs returning `expected` still require explicit checks. Exceptions
+inside documented runner/managed callback boundaries become typed errors.
+Arguments, captures and coroutine frame construction can throw before entering
+those boundaries. For a checked description-factory entry, use the callable
+`ui::runApp(factory, ...)` overload in [`ui.hpp`](../include/portals/ui.hpp).
+
+There is no automatic persistent log, log rotation or background logging service.
+That integration is **TBD**, with no assigned milestone in the current
+[feature plan](planned-features.md). The final sink is the available extension point.
+
+## Trace why an action did not change the display
+
+[`Diagnostics`](../include/portals/diagnostics.hpp) records bounded causal metadata;
+it is opt-in and disabled by default. It is separate from managed error history
+and your logger. Share one recorder through `SchedulerOptions::diagnostics` (or
+`ui::SceneOptions::application.scheduler.diagnostics` when using a scene), enable
+it with a checked `enable` call, then disable/snapshot/export after the run.
+`exportDiagnostics` returns text in memory; your application owns file I/O and its errors.
+
+<details>
+<summary>Causal recorder reference: propagation, bounds and export</summary>
 
 Portals records bounded metadata to explain an input action, including an action that
 returns without requesting a frame. It does not record input characters, paste or
 clipboard contents, property values, exception messages, object addresses, or VT
 bytes. This metadata is **not** the `PORTALS-TRACE 1` replay format.
 
-## Connect one recorder
-
-```cpp
-#include <portals/diagnostics.hpp>
-
-// Keep ordinary error handling around every expected result in application code.
-auto trace = std::make_shared<portals::Diagnostics>();
-portals::SchedulerOptions options;
-options.diagnostics = trace;
-auto scheduler = portals::Scheduler::create(options).value();
-auto tree = portals::WidgetTree::create(*scheduler).value();
-portals::FrameWriter writer(output, {}, trace);
-trace->enable({.capacity = 1024}).value();
-```
+**Connect one recorder**
 
 Diagnostics is disabled by default. A null recorder costs a pointer check at a
 hook; a configured but disabled recorder adds an enabled-state check. Disabled
@@ -35,19 +101,11 @@ its constructing thread, and must end before the recorder. Scopes restore nested
 contexts on normal and exceptional exits. There is no process-wide recorder or
 second executor.
 
-## Follow actual input and frames
+**Follow actual input and frames**
 
 Create the input token at the application's **decoded input boundary**, before
-attempting publication, including an input subsequently rejected by a full queue:
-
-```cpp
-{
-  portals::DiagnosticScope action(trace.get(),
-    trace->beginInput(portals::DiagnosticInput::KEY));
-  auto publication = inputPublisher.publish(owningInput);
-  // Handle publication.error() normally. Diagnostics never retries delivery.
-}
-```
+attempting publication, including an input subsequently rejected by a full queue. Install
+`trace->beginInput(DiagnosticInput::KEY)` in a `DiagnosticScope` around publication.
 
 The scheduler retains a token with the publication and installs it around the UI
 callback. Router target selection, focus changes, semantic action resolution,
@@ -58,17 +116,7 @@ An application continuation on another thread can install a copied token with
 The context contains no UI pointer and never grants access to a widget.
 
 After bounded scheduler dispatch, consume the ordinary frame request, render the
-actual tree, then submit the result with its token:
-
-```cpp
-auto requested = tree->consumeFrameRequest().value();
-if (requested != portals::Invalidation::NONE) {
-  auto frame = renderApplicationTree(); // Uses tree->frame; no terminal I/O here.
-  writer.submit(std::move(frame), tree->diagnosticFrame()).value();
-  auto outputResult = writer.flush(deadline); // Outside layout/paint.
-  // Handle partial progress and errors normally.
-}
-```
+actual tree, then submit the result with `tree->diagnosticFrame()` as its token.
 
 Multiple invalidations coalesce into one frame ID. Each cause writes its own ring
 record referring to that frame; no growing list is attached to the tree. The frame
@@ -78,7 +126,7 @@ diagnostic frame request. The output records describe actual `FrameWriter` diff,
 submission and flush results. `output_accepted` means complete, consistent transport
 acceptance; it is not proof that a physical terminal displayed the frame.
 
-## Interpret evidence conservatively
+**Interpret evidence conservatively**
 
 A synthetic Enter on a focused Button whose callback calls `Property::set` with
 an equal value produces these stages (numeric IDs omitted):
@@ -117,7 +165,7 @@ A replaced publication records both the old publication's cancellation and a
 fixed-size link from the new publication. Queue metrics are unchanged. The export
 cannot establish why input never reached an instrumented application boundary.
 
-## Bounds, periods and incomplete chains
+**Bounds, periods and incomplete chains**
 
 `enable` starts a fresh interval and clears its ring/loss counters. Sequence and
 identity counters never reset or wrap. `disable` preserves the retained interval
@@ -143,25 +191,12 @@ This is deliberately conservative: an
 absent record is never proof that an action did not happen. No accounting is
 performed for disabled hooks.
 
-## Export without damaging a TUI
+**Export without damaging a TUI**
 
 `exportDiagnostics(snapshot)` returns schema-versioned text in memory; it performs
 no file, stream, or terminal I/O. The application chooses a file and owns error
 handling. Capture/serialize between frames, or after the terminal has been restored.
 Never send the text to stdout/stderr while a native TUI is active.
-
-```cpp
-trace->disable();
-auto saved = trace->snapshot();
-// Restore/close the application's terminal before its final export.
-auto text = portals::exportDiagnostics(saved);
-std::ofstream file(chosenPath, std::ios::binary | std::ios::trunc);
-file << text;
-file.close();
-if (!file) {
-  // Report an export failure through the application's now-safe error channel.
-}
-```
 
 Snapshot construction and return preserve `std::bad_alloc` propagation, including
 Debug iterator-proxy allocations. The return uses a bounded copy outside the lock
@@ -169,14 +204,9 @@ to avoid a potentially allocating `noexcept` container move.
 Allocation/formatting errors remain visible to the caller; file open, write and
 close errors must all be checked. `validateDiagnosticVersion` rejects unsupported
 version headers before an application's reader interprets fields; it is a version
-check, not a replay parser. The `portals_diagnostics_flow` headless fixture optionally
-accepts one export path, writes the real no-effect scenario, and returns 2 for a
-file failure. It uses TestTerminal, so it has no active native TUI to corrupt.
-The test-owned `portals_dashboard_check` exports this metadata with `--trace PATH` after restoration;
-see [the runnable example](examples.md). Applications choose their own export
-format presentation and file-error policy.
+check, not a replay parser. Applications choose their own export presentation and file-error policy.
 
-## Implemented flow
+**Implemented flow**
 
 ```mermaid
 flowchart TB
@@ -197,3 +227,5 @@ flowchart TB
   S --> E[In-memory versioned export]
   E --> F[Application file I/O after terminal restoration]
 ```
+
+</details>

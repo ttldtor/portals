@@ -15,7 +15,7 @@
 - [Стили](styling-guide.md), [темы](themes-guide.md), [синтаксис PSS](styles.md), [слои](style-layers.md).
 - [Привязки и события](bindings-guide.md), [свойства](property.md), [текстовые ссылки](text-property.md).
 - [Ввод](input.md), [фокус](focus.md), [диагностика](diagnostics.md).
-- [Примеры приложений](examples.md), [компактные примеры (EN)](../compact-examples.md), [пример редактора](editor-history-demo.md), [ограничения](limitations.md).
+- [Примеры приложений](examples.md), [текст и колонки](compact-examples.md), [пример редактора](editor-history-demo.md), [ограничения](limitations.md).
 
 ## Контролы и данные
 
@@ -50,3 +50,5 @@
 [выпуск версий](../releasing.md), [заметки о версиях](../../ReleaseNotes.md).
 
 [Зависимости и лицензии](dependencies.md).
+
+[Справка по сценам и рецептам](declarative-reference.md).

@@ -92,3 +92,5 @@ GitHub Actions publishes the generated site to the documentation URL linked abov
 The generated directory also works as a local, offline reference.
 
 [Dependencies and licenses](dependencies.md).
+
+[Scene and recipe reference](declarative-reference.md).

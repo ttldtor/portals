@@ -1,12 +1,17 @@
 # Widget tree and lifetime
 
+To assemble a window from built-in controls, start with [declarative composition](declarative-ui.md). [`WidgetTree`](../include/portals/widget.hpp) serves custom widget and integration code: it owns nodes, checks access and limits widget [borrows](glossary.md#glossary-ownership). `ui::Ref<T>` gives application code an observing reference without transferring tree ownership.
+
+<details>
+<summary>Reference: node access and lifetime</summary>
+
 `WidgetTree` is a C++23 UI-owned retained tree. It borrows an existing `Scheduler`,
 which must outlive it. Parents exclusively own their children; models remain
 separate explicit application owners. `Node<T>` is a copyable observer with no
 pointer operators. Its owning `NodeId` contains a process-unique session, registry
 slot and 64-bit generation. Slots retire instead of wrapping their generation.
 
-## Checked access and structure
+**Checked access and structure**
 
 Create the tree with `WidgetTree::create(scheduler)`, obtain its checked `root()`,
 and construct children with `emplace<CustomWidget>(parent, arguments...)`.
@@ -34,7 +39,7 @@ lifecycle hooks, reclamation and frame callbacks reject insertion with
 `WOULD_BLOCK`. This implementation does not provide the deferred insertion queue
 illustrated by the earlier design-only sketches.
 
-## Removal and callbacks
+**Removal and callbacks**
 
 `remove` first marks the complete subtree dead without allocation, then closes
 its node-owned `UiScope`s. All subsequent checked access fails immediately.
@@ -68,7 +73,7 @@ tree callback; destroying the tree from its own callback or another thread
 terminates. Close/reclaim the tree before stopping/destroying its Scheduler.
 Error sinks are borrowed, nonthrowing callbacks; nested reports are suppressed.
 
-## Geometry, input and frames
+**Geometry, input and frames**
 
 Hidden subtrees participate in neither layout, painting nor input. Disabled
 subtrees keep layout and paint but do not receive input. Equal visible/enabled
@@ -110,14 +115,9 @@ it does not render partial commands or synthesize an error placeholder.
 A custom frame owner may use per-widget transactions and clipped placeholders,
 but must provide that policy itself and consume borrowed commands within the frame.
 
-## Verification and references
+**Further reading**
 
-`portals.widget-tree` uses the real Scheduler for self/ancestor removal, queued
-publication and timer cancellation, exceptions, lifecycle reentry and shutdown.
-It checks session/generation/thread rejection, allocation failure before commit,
-allocation-free removal, shared-model ownership, generated mutation sequences,
-external custom-widget hooks and borrowed text rendered within the frame.
-Generation retirement arithmetic is checked at compile time at the 64-bit limit.
+[Developer testing](testing.md).
 
 The standard ownership and invocation building blocks are
 [unique_ptr](https://eel.is/c++draft/unique.ptr),
@@ -126,3 +126,5 @@ The standard ownership and invocation building blocks are
 See also [Scheduler cancellation](scheduler.md), [cell geometry](geometry.md), and
 [renderer borrowing](render.md). Those primitives alone do not establish the tree
 lifetime guarantees; the explicit boundaries above and regression tests do.
+
+</details>

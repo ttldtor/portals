@@ -1,6 +1,11 @@
 # Architecture {#architecture}
 
-Portals is a C++23 retained terminal UI library. `Application` owns one UI
+[Русская версия](ru/architecture.md)
+
+Portals is a C++23 retained terminal UI library. Start with the
+[complete application](application.md) for the fluent `ui::Scene` entry point:
+the facade owns the application and managed scene, builds the controls lazily,
+and runs the same scheduler/tree/router described here. [`Application`](../include/portals/application.hpp) owns one UI
 runtime and services its terminal synchronously on the creating thread. The
 scene owns application models, scoped bindings and providers. Workers may
 publish immutable data through bounded scheduler endpoints; they cannot edit
@@ -89,14 +94,16 @@ cause rather than an unbounded cause list. Handler return proves neither a domai
 change nor a displayed frame. A real update can produce an empty diff.
 Transport acceptance proves no physical display. Ring losses and incomplete
 chains remain explicit. [Diagnostics](diagnostics.md) defines these distinctions;
-the test-owned dashboard diagnostic check exports `--trace` only after terminal restoration.
+export snapshots after terminal restoration.
 
 ## Ownership and shutdown
 
 ![Ownership and observing handles](images/ownership.svg)
 
-Construct Application first and the scene/bindings/models afterward; destroy
-them before Application. The runner borrows the scene for one single-use run.
+When using `Application` directly, construct it first and the
+`ApplicationScene`/bindings/models afterward; destroy them before Application.
+With `ui::Scene`, the facade enforces its internal owner order; release external
+services borrowing the application through `scene.onStop` before managed teardown. The runner borrows the scene for one single-use run.
 Callbacks must not destroy/reenter either owner. Application releases router/tree
 before scheduler; retained immutable snapshots have their own payload lifetimes.
 
@@ -114,7 +121,7 @@ and a separate restoration error. Diagnostics/error printing belongs after run.
 
 EOF finishes decoding, delivers admitted CONTROL and flushes submitted output.
 It does not wait for future frames/timers/DATA. A delivered edit may stay dirty
-and never appear in the final frame; replay must leave time before EOF.
+and never appear in the final frame.
 Cancellation can stop earlier. A retryable output transaction stays with
 FrameWriter; any transport error, including Windows `OUTPUT_UNCERTAIN`, ends
 the run without reopening or replaying uncertain bytes. Native close depends on

@@ -1,12 +1,33 @@
-# Streaming VT input
+# Keyboard input
 
-`<portals/input.hpp>` supplies a synchronous, bounded byte decoder. It has no
-terminal handles, background thread, timer, event loop, environment lookup or
-dependency on the diagnostic probe. The caller supplies arrival timestamps and
-an explicit input profile. Enabling a decoder option does not enable a terminal
-mode; the terminal session owner must enable the mode separately.
+Bind a key to an action with [`ui::onKey`](../include/portals/ui.hpp). This example displays help on F1; F10 closes the application. The runner reads and decodes terminal input automatically.
 
-## Selecting shortcut phases
+```cpp
+#include <portals/ui.hpp>
+
+int main() {
+  using namespace portals;
+
+  ui::Ref<Label> help;
+
+  auto scene = ui::scene(ui::label(help, "F1: Help; F10: Exit"));
+
+  return scene
+    | ui::onKey("F1",
+                [help] {
+                  help.text() = "Use Tab to move focus and Enter to activate a control";
+                })
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+Use `"Ctrl+S"` for a chord and `{key::F10, key::ALT + key::Q}` for alternatives. Callbacks accept PRESS by default. Ordinary VT input reports PRESS, including repeated bytes from a held key; RELEASE and distinct REPEAT require an adapter that supplies them. See [routing and focus](focus.md).
+
+<details>
+<summary>Reference: key phases and sequences</summary>
+
+**Selecting shortcut phases**
 
 `<portals/ui.hpp>` provides owning shortcut selections for the existing `onKey`
 registration path. Plain string/chord/alternative bindings admit PRESS only:
@@ -48,10 +69,9 @@ or release-only selections.
 Selections do not add backend capabilities: the VT decoder emits PRESS, including
 repeated bytes, and does not synthesize releases. A native adapter must supply real
 REPEAT/RELEASE values. Held-key state, focus-loss release and Kitty negotiation are
-outside this API. Native-value tests inject semantic events; replay tests verify
-the PRESS-only byte path. No new scheduler or input router is involved.
+outside this API.
 
-## Managed multi-stroke commands
+**Managed multi-stroke commands**
 
 `ui::onKey("Ctrl+K+K", action)` registers Ctrl+K followed by Ctrl+K;
 `"Ctrl+K,K"` requires an unmodified second K. Plus-separated keys share all
@@ -84,7 +104,14 @@ changes away and back. Tree invalidation conservatively includes other nodes;
 paint/layout alone do not cancel commands. Details and examples are in the
 [declarative UI guide](declarative-ui.md#short-key-bindings).
 
-## Pulling events
+</details>
+
+<details>
+<summary>Reference: streaming VT decoder integration</summary>
+
+[`InputDecoder`](../include/portals/input.hpp) serves custom terminal adapters. It synchronously converts bytes to events; the caller supplies time, enables terminal modes, bounds its event queue and services timeouts. Applications using `ui::runApp()` do not need this loop.
+
+**Pulling events**
 
 `InputDecoder::create(options)` validates settings and returns an owning decoder
 or `InputError::INVALID_OPTIONS`. One executor owns its mutable state; different
@@ -115,7 +142,7 @@ prefix before a call. Allocation failures propagate and leave the decoder failed
 after an exception the caller must abandon that session, because a consumed
 count cannot be returned. No partially collected paste event escapes.
 
-## Events and the supported profile
+**Events and the supported profile**
 
 Text events carry a single validated Unicode scalar, not a grapheme cluster.
 Combining marks, ZWJ and regional indicators can arrive as separate events.
@@ -162,7 +189,7 @@ no-button transitions other than motion. Extended buttons and pixel coordinates
 are outside this profile. Raw 8-bit CSI, X10/1005/1015, Kitty keyboard and OSC/DCS
 replies are not supported.
 
-## Time and ambiguity
+**Time and ambiguity**
 
 All times are caller-supplied unsigned 64-bit monotonic milliseconds. Defaults
 are 30 ms for ESC/Alt completion, 1000 ms for an entire CSI/SS3/control string or
@@ -185,7 +212,7 @@ Introducing new time advances or delaying bytes can legitimately change ESC
 interpretation. Legacy Ctrl-I/Tab, Ctrl-M/Enter, Ctrl-H/Backspace, Ctrl-[/Escape
 and ESC+character/Alt+character cannot be distinguished from their encodings.
 
-## Probe candidates
+**Probe candidates**
 
 `expectReplies` installs an explicit inclusive-start/exclusive-deadline window,
 generation and one allowed response of each selected kind. It is valid only at
@@ -202,7 +229,7 @@ not distinguishable from genuine terminal responses by this syntax. The
 diagnostic tool's [probe limitations](terminal-probe.md) apply to interpreting
 observations, but its collector is not used by this library decoder.
 
-## Bounds and recovery
+**Bounds and recovery**
 
 Defaults cap CSI/SS3 at 64 bytes including ESC/introducer/final, at 16 numeric
 parameters and 10 decimal digits per parameter. These settings can be lowered;
@@ -235,7 +262,7 @@ for incomplete state and closes it. Issues contain kind and a half-open session
 byte range for the consumed rejected prefix, with no raw ANSI excerpt. Subsequent
 discard bytes are represented by consumed counts, not an ever-growing diagnostic.
 
-## Paste boundary
+**Paste boundary**
 
 With `bracketed_paste=true`, `CSI 200~` begins paste and exact `CSI 201~` ends it.
 Only the end delimiter has meaning inside paste. Nested begin delimiters, key,
@@ -255,17 +282,11 @@ promise protection from a hostile terminal stream. Downstream insertion policy
 must validate/repair text and treat paste controls as data; never forward raw
 paste to a terminal writer, shell or command dispatcher.
 
-## Verification and sources
-
-`portals.input` contains semantic golden fixtures, fake-time tests, all nonempty
-partitions of short fixtures (up to 12 bytes), every single split boundary of
-long fixtures, bytewise/fixed chunks, small work budgets and deterministic seeded
-malformed-stream fuzz. Long all-partition coverage is not claimed. Megabyte
-discard fixtures check continued progress and recovery without large retained
-input. No test requires a terminal, sleeps or interactive window. Unit tests do
-not certify real emulator behavior or negotiated terminal modes.
+[Developer testing](testing.md).
 
 Primary references: [xterm control sequences](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html)
 (Control Bytes, SGR mouse, Bracketed Paste, Device Attributes and DSR),
 [Microsoft input sequences](https://learn.microsoft.com/en-us/windows/console/console-virtual-terminal-sequences#input-sequences),
 and [Unicode UTF-8 definition, section 3.9](https://www.unicode.org/versions/latest/core-spec/chapter-3/#G7404).
+
+</details>

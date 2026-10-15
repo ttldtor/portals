@@ -2,6 +2,8 @@
 
 [Русская версия](ru/cli.md)
 
+## Connect the adapter
+
 The optional `portals::lyra` target supplies the pinned, header-only
 [Lyra 1.8.0](https://github.com/bfgroup/Lyra/releases/tag/1.8.0) dependency
 and `<portals/ui_lyra.hpp>`. Link it explicitly:
@@ -15,6 +17,8 @@ The same target works with `add_subdirectory`. Installed headers, CMake metadata
 license and dependency manifest travel with the SDK and require no network or
 system Lyra installation. Core-only consumers link `portals::core` and do not
 include or parse Lyra.
+
+## Parse application options
 
 Build a native Lyra declaration, bind it to ordinary typed options and pass the
 adapter to the lazy launch stage:
@@ -53,6 +57,8 @@ int main(int argc, char **argv) {
 }
 ```
 
+## Keep bound options alive
+
 `ui::lyra::cli` owns a copy of the parser declaration. It does not capture argv
 or parse during construction. Lyra's bound variables and reference captures
 remain borrowed: keep them alive through synchronous `runApp`. The lazy scene
@@ -60,6 +66,9 @@ factory observes the parsed options. `ui::opts(options)` can pass the same
 read-only typed options into a reusable lazy scene factory.
 Parser/recipe construction and owning captures can allocate before the runner
 boundary. Callbacks invoked by the runner use its checked error policy.
+
+<details>
+<summary>Diagnostic text ownership and allocation</summary>
 
 `CommandLineError::message` and `LaunchAction::output` use `LaunchText`, which
 shares immutable owning bytes. Empty construction, copying and moving allocate
@@ -69,6 +78,10 @@ its bytes. Constructing nonempty text copies the supplied bytes and can allocate
 When this happens inside the parser callback, allocation failure becomes
 `NO_MEMORY` with an empty diagnostic and exit status 2. Text constructed before
 the runner call follows the construction boundary described above.
+
+</details>
+
+## Help and version
 
 By default the adapter adds Lyra's `-?`, `-h`, `--help`. A nonempty `version`
 adds `--version`. These options use Lyra's own short-circuit results and return
@@ -82,6 +95,8 @@ must outlive the call. This explicit observer is necessary because Lyra hides
 the help flag behind its callback; inspecting argument strings would bypass
 the parser. Initialize it to false for each launch.
 
+## Invalid arguments
+
 Invalid numbers, missing values, unknown options and failed native `.choices`
 validation become `CommandLineErrorCode::INVALID_ARGUMENT` with an owning
 Lyra diagnostic; `runApp` returns status 2 for command-line failure. The generic
@@ -90,11 +105,15 @@ errors. Lyra can update some bound values
 or invoke callbacks before a later parse failure; the adapter preserves that
 upstream behavior and never constructs the application after failure.
 
+## Unicode arguments
+
 Lyra consumes the strings supplied by the launch argument snapshot. It does
 not convert Windows narrow `main` arguments into Unicode. Non-ASCII command
 arguments therefore depend on how the executable obtains its argv; the
 Windows Unicode environment snapshot is a separate facility and does not
 repair narrow argv. POSIX argument bytes are preserved.
+
+## Read arguments and environment
 
 `ui::app::args()`, `ui::app::environment()` and its alias `ui::app::env()` return
 checked owning read-only snapshots after successful `ui::app::initialize`,
@@ -109,6 +128,8 @@ views. Windows lookup compares Unicode names without case; POSIX preserves
 native bytes and compares names exactly. Reading a snapshot never refreshes or
 mutates the process environment. Capture it before other threads can mutate the
 live environment; Portals cannot synchronize foreign environment writers.
+
+## Lyra reference and license
 
 Lyra is licensed under BSL-1.0, independently of Portals. The unchanged notice
 is installed as `share/Portals/licenses/lyra-LICENSE.txt`; the vendored

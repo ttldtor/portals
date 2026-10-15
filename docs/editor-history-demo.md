@@ -1,7 +1,9 @@
 # Three-mode editor history demo
 
+[Back to samples](examples.md).
+
 `portals_editor_history` is a compact interactive example of the installed public
-API. It owns a lazy `ui::Scene` with three editors and read-only views of
+API ([source](../examples/editor_history/editor.hpp)). It owns a lazy `ui::Scene` with three editors and read-only views of
 their published models. The models start at `base`; draft and model rows are
 deliberately separate so deferred confirmation is visible.
 
@@ -15,8 +17,7 @@ cmake --build build/debug --target portals_editor_history
 With a multi-configuration generator, pass `--config Debug` and use its `Debug`
 executable subdirectory. On Unix run the executable without the `.exe` suffix.
 The example needs approximately 80 columns and 24 rows; smaller terminals clip
-the ordinary layout. No new renderer, reactive system or application command bus
-is introduced.
+the ordinary layout.
 
 ## Try the confirmation policies
 
@@ -49,34 +50,12 @@ plain language. No numeric status codes are required to use the example.
 The example has no system clipboard adapter; it demonstrates the existing
 read-only selection policy without adding a clipboard service.
 
-## Headless verification and replay
+[Developer testing and headless replay](testing.md).
 
-```powershell
-& ./build/debug/portals_editor_history_check.exe --check
-& ./build/debug/portals_editor_history_check.exe --replay
-& ./build/debug/examples/editor_history/portals_editor_history.exe --help
-```
+<details>
+<summary>Reference: errors and ownership</summary>
 
-The separate `portals_editor_history_check` test harness first exercises the real button bindings, late command adapter,
-programmatic RECORD/RESET, Enter, Ctrl+Z, Escape and blocked read-only typing for
-all three modes. It compares editor bytes, published model snapshots and the
-actual prepared read-only model widgets. A RESET used by the check clears both
-history stacks; it is intentionally not a user-facing load control.
-
-It then runs the preserved contract scene through the existing `ReplayTerminal` and native VT
-decoder. Twelve F1 checkpoints inspect the preceding prepared presentation after
-typing, Ctrl+Z/Y, F3 append, blur, Enter and Escape. The final published values
-must be `baseA!`, `baseB`, `baseC`. Output must have been rendered and the replay
-transport must have closed. The check never opens a native terminal or waits for
-a person to close a window. The harness also compares the new public scene against the preserved scene. Its `--replay` runs that finite input and prints final
-model values without assertions; `--help` creates no runtime.
-
-CTest names are `portals.editor-history-check`, `portals.editor-history-replay`
-and `portals.editor-history-help`. The existing relocated package consumer also
-compiles the public example and its separate finite harness, and runs `consumer.example-editor-history` and
-`consumer.example-editor-history-replay` using installed headers and archives.
-
-## Checked errors and ownership
+**Checked errors and ownership**
 
 Factory and configure callbacks return typed results to the scene collector.
 The native entry point uses `demo.scene() | ui::reportOnError() |
@@ -99,3 +78,5 @@ The finite test harness wraps this actual demo and checks diagnostics separately
 it does not duplicate the interface or alter the native entry point.
 See [editor history](editor-history.md), [LineEdit](line-edit.md),
 [text properties](text-property.md) and [diagnostics](diagnostics.md).
+
+</details>

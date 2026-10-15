@@ -99,6 +99,8 @@ jobs:
       DOXYGEN_SHA256: 14fa81bdc34171edb5f1f02b1d60e74802f0439b77fa44e592565d517d72df90
     steps:
       - uses: actions/checkout@v7
+      - name: Test documentation HTML processing
+        run: python3 -m unittest discover -s tools/docs -p test_*.py -v
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
@@ -130,12 +132,20 @@ jobs:
         run: >-
           cmake -S . -B build/documentation -G Ninja
           -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14
+          -DDOXYGEN_PROJECT_NUMBER="PR ${{ github.event.pull_request.number }} preview"
           -DPORTALS_BUILD_DOCS=ON -DPORTALS_BUILD_TESTS=OFF
           -DPORTALS_BUILD_EXAMPLES=OFF -DPORTALS_BUILD_TOOLS=OFF -DPORTALS_BUILD_FUZZERS=OFF
       - name: Build strict documentation
         run: cmake --build build/documentation --target portals_docs --parallel 2
       - name: Check generated HTML links and anchors
         run: python3 tools/docs/check_links.py build/documentation/docs/html
+      - name: Save the documentation preview
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: documentation-preview
+          path: build/documentation/docs/html
+          if-no-files-found: error
+          retention-days: 14
 
   result:
     name: CI result

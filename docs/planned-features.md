@@ -32,7 +32,9 @@ calendar dates are not assigned here. See [user guides](guides.md) for current A
 Sample reorganization is **TBD — M1**. Guides are updated as their features become available.
 The design details below remain proposals. Runtime PSS v0 currently accepts literal values.
 
-## Style parameters {#planned-style-parameters}
+## Style parameters
+
+<a id="planned-style-parameters"></a>
 
 **TBD — M5:** typed runtime parameters, expressions, source diagnostics and
 dependency-driven updates. Scoped style sources through `Ref` are **TBD — M1**.
@@ -100,7 +102,9 @@ Dependent colors request PAINT, sizes request LAYOUT, and unchanged results
 avoid extra redraw. The existing experimental C++ tokens and `mix` are covered in
 [compile-time styles](compile-time-styles.md).
 
-## Themes {#planned-themes}
+## Themes
+
+<a id="planned-themes"></a>
 
 **TBD — M5:** built-in themes will use a single editable PSS source.
 Generated C++ materialization and embedded resources will derive from it,

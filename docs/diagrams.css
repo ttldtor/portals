@@ -14,3 +14,27 @@
   background: white;
   border-radius: 6px;
 }
+
+/* SVG illustrations have their own light palette; adapt it with the page. */
+html.dark-mode .mermaidgraph img,
+html.dark-mode .contents :is(img[src$="components.svg"], object[data$="components.svg"]),
+html.dark-mode .contents :is(img[src$="event-flow.svg"], object[data$="event-flow.svg"]),
+html.dark-mode .contents :is(img[src$="ownership.svg"], object[data$="ownership.svg"]) {
+  filter: invert(0.88) hue-rotate(180deg);
+  background: transparent;
+}
+
+@media (prefers-color-scheme: dark) {
+  html:not(.light-mode) .mermaidgraph img,
+  html:not(.light-mode) .contents :is(img[src$="components.svg"], object[data$="components.svg"]),
+  html:not(.light-mode) .contents :is(img[src$="event-flow.svg"], object[data$="event-flow.svg"]),
+  html:not(.light-mode) .contents :is(img[src$="ownership.svg"], object[data$="ownership.svg"]) {
+    filter: invert(0.88) hue-rotate(180deg);
+    background: transparent;
+  }
+}
+
+.contents .image object[type="image/svg+xml"] {
+  max-width: 100%;
+  height: auto;
+}

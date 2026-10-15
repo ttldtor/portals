@@ -1,4 +1,86 @@
-# Immutable model snapshots and scoped ranges
+# Give views immutable model data
+
+Use [ModelSnapshot<T>](../include/portals/model.hpp). This fragment supplies three names to a list. The scene owns the model and prepares visible rows automatically. Press F10 to close.
+
+This fragment assumes `<portals/ui.hpp>` and `using namespace portals`; it uses Names, an immutable `ModelSnapshot<std::string>` adapter with three records, and displayText, which creates GraphemeText. The adapter, helper, headers and complete program appear below and in [guide_model.cpp](examples/guide_model.cpp).
+
+```cpp
+int main() {
+  auto scene = ui::scene([](ManagedScene &owner) {
+    return owner.model<std::string>(std::make_shared<Names>()).transform([](auto model) {
+      return ui::virtualList(model, [](const ModelRow<std::string> &row) {
+        return displayText(row.value);
+      });
+    });
+  });
+
+  return scene
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+<details>
+<summary>Complete program</summary>
+
+```cpp
+#include <portals/ui.hpp>
+#include <array>
+#include <stdexcept>
+
+using namespace portals;
+
+class Names final : public ModelSnapshot<std::string> {
+public:
+  Names() : ModelSnapshot(1, 3) {
+  }
+
+  ModelRows<std::string> read(RowRange range) const override {
+    return {RangeState::READY,
+            std::span(rows_).subspan(static_cast<std::size_t>(range.first), range.count), {}};
+  }
+
+private:
+  const std::array<ModelRow<std::string>, 3> rows_{{
+    {{1, 1}, "Ada"}, {{2, 1}, "Grace"}, {{3, 1}, "Margaret"}
+  }};
+};
+
+GraphemeText displayText(std::string_view value) {
+  auto result = GraphemeText::from(value);
+
+  if (!result) {
+    throw std::runtime_error("Invalid display text");
+  }
+
+  return std::move(*result);
+}
+
+int main() {
+  auto scene = ui::scene([](ManagedScene &owner) {
+    return owner.model<std::string>(std::make_shared<Names>()).transform([](auto model) {
+      return ui::virtualList(model, [](const ModelRow<std::string> &row) {
+        return displayText(row.value);
+      });
+    });
+  });
+
+  return scene
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+</details>
+
+[Example source](examples/guide_model.cpp). Add the source to a C++23 project and link it with the portals::core target ([build instructions](getting-started.md)). Run the program in a terminal.
+
+The provider returns a borrowed span from its immutable array. Model retains that snapshot while views use it. RowId identifies the record independently of position. Publish a new snapshot with a strictly newer revision through ManagedModel::publisher(); handle queue rejection and retain the snapshot for retry.
+
+Terms: [recipe](glossary.md#glossary-recipe), [frame](glossary.md#glossary-frame), [ownership](glossary.md#glossary-ownership).
+
+<details>
+<summary>API reference and constraints</summary>
 
 `Model<T>` separates a typed domain provider from its list, table or chart views.
 For a list, `T` can be a scalar; for a table/chart it is an application record.
@@ -19,7 +101,7 @@ Providers are responsible for unique stable IDs and agreement between every
 ready range of the same data revision, including overlapping ranges returned in
 separate snapshot objects. Provider metadata is immutable after construction.
 
-## Ownership and a coherent frame
+**Ownership and a coherent frame**
 
 Create the model on the UI owner with a real `WidgetTree` and a context node.
 The tree must outlive the source. A root or long-lived application context lets
@@ -45,7 +127,7 @@ other aliases. Snapshot/row/work destructors can run on whichever thread drops
 the final owner. Any destructor that reenters UI requires a live UI context and
 must itself run on the UI owner.
 
-## Asynchronous ranges
+**Asynchronous ranges**
 
 `model.openRange()` returns a move-only UI-owned `ModelConsumer<T>`. Each consumer
 has a never-reused `ModelRangeId`, even when two consumers request identical or
@@ -83,14 +165,13 @@ No domain events are coalesced by the model.
 
 Assignments replace all fields before releasing old storage. A last-owner destructor may reenter the live UI context, including releasing the assigned owner; code must not use the returned reference after such destruction. No concurrent mutation of the same owner object is supported.
 
-## Bounds and failures
+**Bounds and failures**
 
 `ModelOptions` separately bounds rows per read/request, live consumer slots and
 in-flight request owners. All limits are positive. Logical row count does not
 allocate rows or widgets. Capturing a pin and reading a ready range only copy
 small owners, not the domain rows. Publication copies at most the bounded consumer
-table. The synthetic regression compares allocation counts/bytes for 100 and
-1,000,000 logical rows and verifies zero row copies over ten publications.
+table.
 
 - Out-of-bounds/oversized ranges and malformed provider results return
   `TreeError::INVALID_ARGUMENT` (completion uses `SchedulerError::INVALID_ARGUMENT`).
@@ -116,3 +197,5 @@ spatial merge, coroutine runtime or automatic worker cancellation is implemented
 See [Scheduler ownership and bounded queues](scheduler.md),
 [tree scopes and frame boundaries](widget-tree.md) and
 [typed property lifetimes](property.md) for the adjacent contracts.
+
+</details>
