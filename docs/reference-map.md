@@ -72,9 +72,8 @@ documentation deployment through GitHub Actions.
 - [Testing](testing.md) and [fuzzing](../fuzz/README.md): correctness tools.
 - [Managed API measurements](managed-performance.md): reproducible costs and
   known scaling limits, not a promise of linear performance.
-- [API design scenarios](api-design.md) and the
-  [module experiment](../experiments/module-spike/README.md): design/experiment
-  material, not the recommended first application or a stable API contract.
+- [API design scenarios](api-design.md): exploratory material, not the
+  recommended first application or a stable API contract.
 - Dependency notices: [utf8proc](../vendor/utf8proc/README.md) and
   [Textual palette attribution](../vendor/textual/README.md).
   [Private doctest dependency](../vendor/doctest/README.md) is used only by tests.

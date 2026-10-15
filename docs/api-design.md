@@ -2,9 +2,7 @@
 
 Status: design-only, 2026-10-07. The five sketches below select a C++23 API
 direction for review. These proposed names and signatures are **not implemented**. They do not appear
-in installed headers or executable examples and carry no compatibility promise. The implemented API is documented in the public headers. The separate
-[module spike](../experiments/module-spike/README.md) tests language/linkage
-mechanics with a toy library; its tests cannot prove these UI contracts.
+in installed headers or executable examples and carry no compatibility promise. The implemented API is documented in the public headers.
 
 ## Common contracts
 
@@ -263,7 +261,7 @@ These are proposed API contracts scoped to these scenarios. Runtime teardown,
 snapshot/model interfaces, geometry types and packaging must receive their own
 implementation tests before being called supported. No stable C ABI, wire
 protocol, remote callbacks, installed modules, solver or complete widget catalogue
-is implemented here. The module spike does not change the core's CMake minimum.
+is implemented here.
 
 Primary references: [CMake C++ modules](https://cmake.org/cmake/help/v4.4/manual/cmake-cxxmodules.7.html),
 [Clang ABI-preserving module styles](https://clang.llvm.org/docs/StandardCPlusPlusModules.html#abi-preserving-styles),
