@@ -21,6 +21,34 @@ point for current applications.
 
 ## Maintain the documentation
 
+### Pull request checks
+
+CI selects `docs` when every changed file is a recognized documentation input:
+Markdown below `docs/`, images below `docs/images/`, `README.md`, `ReleaseNotes.md`,
+or the documentation layout, stylesheet and Mermaid configuration. It builds
+strict Doxygen HTML and checks local links and anchors in both modes.
+
+All other changes select `full`, which also runs the naming checker and the
+Windows/Linux build, test and standalone-consumer jobs. This includes headers,
+included example sources, build scripts, CI tools and unknown paths. Deletions
+and both paths of a rename participate in selection. An empty diff selects `full`.
+
+`CI result` runs after all jobs, including when a dependency fails. It rejects
+failed selection and any selected job that fails, is cancelled or is skipped.
+Repository branch protection must require `CI result`; requiring only the
+conditional build jobs does not enforce the documentation check. When adopting
+this workflow, add that required check after its first run. PR checks do not
+publish Pages or create releases. Markdown code blocks are rendered, but are
+not automatically compiled by the documentation job.
+
+Run the selection and gate regression tests locally with:
+
+```powershell
+python -m unittest discover -s tools/ci -p test_checks.py -v
+```
+
+### Documentation content
+
 Keep the [short library guide](index.md), [reference map](reference-map.md) and `docs/DoxygenLayout.xml` in agreement.
 The short guide describes current usage; release notes, design sketches and dated
 measurements keep their historical scope and link back to current contracts.

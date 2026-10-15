@@ -11,7 +11,27 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      mode: ${{ steps.select.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test check selection and result gate
+        run: python3 -m unittest discover -s tools/ci -p test_checks.py -v
+      - name: Select checks from the complete PR diff
+        id: select
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 tools/ci/checks.py select --base "$BASE_SHA" --head "$HEAD_SHA"
+
   naming:
+    needs: changes
+    if: needs.changes.outputs.mode == 'full'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -33,6 +53,8 @@ jobs:
         run: python3 tools/check_naming.py build/naming --clang-tidy clang-tidy-20
 
   smoke:
+    needs: changes
+    if: needs.changes.outputs.mode == 'full'
     strategy:
       fail-fast: false
       matrix:
@@ -68,3 +90,61 @@ jobs:
         run: cmake --build build/consumer
       - name: Run standalone consumer
         run: ./build/consumer/portals_consumer
+
+  docs:
+    needs: changes
+    runs-on: ubuntu-24.04
+    env:
+      DOXYGEN_VERSION: '1.18.0'
+      DOXYGEN_SHA256: 14fa81bdc34171edb5f1f02b1d60e74802f0439b77fa44e592565d517d72df90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Install documentation toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-14 g++-14 ninja-build
+          archive="doxygen-$DOXYGEN_VERSION.linux.bin.tar.gz"
+          release="Release_${DOXYGEN_VERSION//./_}"
+          mkdir -p "$RUNNER_TEMP/doxygen"
+          curl --fail --location --retry 3 "https://github.com/doxygen/doxygen/releases/download/$release/$archive" -o "$RUNNER_TEMP/$archive"
+          echo "$DOXYGEN_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check
+          tar -xf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP/doxygen"
+          binary=$(find "$RUNNER_TEMP/doxygen" -type f -name doxygen)
+          test -n "$binary"
+          version=$("$binary" --version)
+          test "${version%% *}" = "$DOXYGEN_VERSION"
+          dirname "$binary" >> "$GITHUB_PATH"
+          npm install --global @mermaid-js/mermaid-cli@12.0.0
+      - name: Configure Mermaid renderer
+        run: |
+          mkdir -p "$RUNNER_TEMP/mermaid-renderer"
+          echo '{"args":["--no-sandbox"]}' > "$RUNNER_TEMP/mermaid-renderer/puppeteer.json"
+          mmdc_path=$(command -v mmdc)
+          printf '#!/bin/sh\nexec "%s" --puppeteerConfigFile "%s" "$@"\n' "$mmdc_path" "$RUNNER_TEMP/mermaid-renderer/puppeteer.json" > "$RUNNER_TEMP/mermaid-renderer/mmdc"
+          chmod +x "$RUNNER_TEMP/mermaid-renderer/mmdc"
+          echo "$RUNNER_TEMP/mermaid-renderer" >> "$GITHUB_PATH"
+      - name: Configure documentation
+        run: >-
+          cmake -S . -B build/documentation -G Ninja
+          -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14
+          -DPORTALS_BUILD_DOCS=ON -DPORTALS_BUILD_TESTS=OFF
+          -DPORTALS_BUILD_EXAMPLES=OFF -DPORTALS_BUILD_TOOLS=OFF -DPORTALS_BUILD_FUZZERS=OFF
+      - name: Build strict documentation
+        run: cmake --build build/documentation --target portals_docs --parallel 2
+      - name: Check generated HTML links and anchors
+        run: python3 tools/docs/check_links.py build/documentation/docs/html
+
+  result:
+    name: CI result
+    if: always()
+    needs: [changes, docs, naming, smoke]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Require success from every selected check
+        env:
+          CI_NEEDS: ${{ toJSON(needs) }}
+        run: python3 tools/ci/checks.py gate
