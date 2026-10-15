@@ -9,7 +9,7 @@ portals_editor_history показывает три режима подтверж
 
 ```powershell
 cmake --build build/debug --target portals_editor_history
-& ./build/debug/examples/editor_history/portals_editor_history.exe
+& ./build/debug/portals_editor_history_check.exe
 ```
 
 Для генератора с несколькими конфигурациями укажите `--config Debug` и подкаталог Debug; в Unix уберите .exe.
@@ -41,9 +41,9 @@ cmake --build build/debug --target portals_editor_history
 ## Проверка без терминала
 
 ```powershell
-& ./build/debug/examples/editor_history/portals_editor_history.exe --check
-& ./build/debug/examples/editor_history/portals_editor_history.exe --replay
-& ./build/debug/examples/editor_history/portals_editor_history.exe --help
+& ./build/debug/portals_editor_history_check.exe --check
+& ./build/debug/portals_editor_history_check.exe --replay
+& ./build/debug/portals_editor_history_check.exe --help
 ```
 
 --check проверяет настоящие кнопки, регистрацию команд после монтирования, RECORD/RESET,

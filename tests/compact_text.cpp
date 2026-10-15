@@ -3,7 +3,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest.h>
 
-#include "../examples/replay/terminal.hpp"
+#include "support/examples/replay/terminal.hpp"
 #include <portals/input_match.hpp>
 #include <portals/table_column.hpp>
 #include <portals/text_format.hpp>

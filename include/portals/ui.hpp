@@ -159,7 +159,7 @@ public:
   }
 
   /** @tparam Callback Owning compact click action, optionally taking const ClickEvent&.
-   * @param action Void, expected<void, TreeError> or exact EditorCommandResult callback.
+   * @param action Void, expected<Value, TreeError> or exact EditorCommandResult callback; success values are ignored.
    * @param origin Registration call site retained in diagnostics.
    * @return Checked registration on a mounted live button; CLOSED before publication/destruction,
    * WRONG_THREAD, STALE_NODE, duplicate INVALID_ARGUMENT or allocation error. Scene owns captures/token.
@@ -412,7 +412,7 @@ public:
   }
 
   /** @tparam Callback Compact owning click callback, optionally receiving ClickEvent.
-   * @param callback Void, expected<void, TreeError> or EditorCommandResult action.
+   * @param callback Void, expected<Value, TreeError> or EditorCommandResult action; success values are ignored.
    * @return Consuming button recipe using one existing managed binding; duplicates fail at mount.
    */
   template <class Callback = detail::QuitCommand>
@@ -439,6 +439,31 @@ public:
     return std::move(*this).setup([callback = std::move(callback)](ManagedScene &scene, Node<T> node) mutable {
       return scene.onPrepare(node, std::move(callback));
     });
+  }
+
+  /** @tparam Callback Owning copyable callback returning expected<Value, TreeError> with non-void Value.
+   * @param callback Existing dirty-frame work; its success value is ignored inside the entered scene scope.
+   * @return This consuming recipe; errors are unchanged and no additional invalidation is requested.
+   */
+  template <class Callback>
+    requires std::copy_constructible<Callback> &&
+             portals::detail::ManagedTreeResult<std::invoke_result_t<Callback &, T &, Node<Widget>>> &&
+             (!std::same_as<std::invoke_result_t<Callback &, T &, Node<Widget>>, std::expected<void, TreeError>>)
+  Description &&onPrepare(Callback callback) && {
+    ManagedPrepareHandler<T> normalized;
+    bool present = true;
+
+    if constexpr (std::is_pointer_v<Callback> || requires { callback.operator bool(); }) {
+      present = static_cast<bool>(callback);
+    }
+
+    if (present) {
+      normalized = [callback = std::move(callback)](T &widget, Node<Widget> focused) mutable {
+        return portals::detail::invokeIgnoringValue(callback, widget, focused);
+      };
+    }
+
+    return std::move(*this).onPrepare(std::move(normalized));
   }
 
   /** @param callback Owning customization action, run in modifier order before children.
@@ -712,6 +737,24 @@ inline Description<CheckBox> checkbox(std::string_view text, ManagedState<bool> 
   return control<CheckBox>(text, style, policy)
     .setup([model, changed = std::move(changed)](ManagedScene &scene, Node<CheckBox> node) mutable {
       return scene.bind(node, model, std::move(changed));
+    });
+}
+
+/** @param text UTF-8 caption copied immediately.
+ * @param initial Initial checked value, owned by the receiving scene after mount.
+ * @param changed Optional callback after the standard commit.
+ * @param style Owning manual appearances.
+ * @param policy Owning layout constraints.
+ * @return Checkbox recipe with internal managed state; no binding token escapes.
+ */
+inline Description<CheckBox> checkbox(std::string_view text, bool initial = false,
+                                      std::function<std::expected<void, TreeError>(CheckBoxResult)> changed = {},
+                                      ControlStyle style = {}, SizePolicy policy = {}) {
+  return control<CheckBox>(text, style, policy)
+    .setup([initial, changed = std::move(changed)](ManagedScene &scene, Node<CheckBox> node) mutable {
+      return scene.state(initial).and_then([&scene, node, &changed](ManagedState<bool> model) {
+        return scene.bind(node, model, std::move(changed));
+      });
     });
 }
 
@@ -1374,6 +1417,17 @@ template <class T> struct IsSceneRecipe : IsDescription<T> {};
  */
 template <class T> struct IsSceneRecipe<std::expected<Description<T>, ManagedError>> : std::true_type {};
 
+/** @brief Select the legacy factory signature before considering an Application borrow.
+ * @tparam Factory Owning scene factory returning an owning description or exact checked description.
+ */
+template <class Factory>
+concept SceneFactory =
+  (std::invocable<Factory &, ManagedScene &> && !std::is_reference_v<std::invoke_result_t<Factory &, ManagedScene &>> &&
+   IsSceneRecipe<std::remove_cvref_t<std::invoke_result_t<Factory &, ManagedScene &>>>::value) ||
+  (!std::invocable<Factory &, ManagedScene &> && std::invocable<Factory &, ManagedScene &, Application &> &&
+   !std::is_reference_v<std::invoke_result_t<Factory &, ManagedScene &, Application &>> &&
+   IsSceneRecipe<std::remove_cvref_t<std::invoke_result_t<Factory &, ManagedScene &, Application &>>>::value);
+
 /** @brief Deliver a pre-owner factory failure through the already available final sink.
  * @param sink Owning handler borrowed for this synchronous call; no copy is required on the error path.
  * @param failure Original typed cause, independent of terminal/widget lifetime.
@@ -1436,20 +1490,28 @@ Scene scene(Description<T> &&description, SceneOptions options = {},
 }
 
 /** @tparam Factory Owning callable returning Description<T> or expected<Description<T>, ManagedError>.
- * @param factory Invoked once at prepare with the existing managed owner; may create states/models.
+ * @param factory Invoked once at prepare with ManagedScene&, optionally followed by Application&;
+ * the one-argument form has priority. May create states/models and application-backed services.
  * Explicitly borrowed services must outlive their use; construction/capture allocation may throw.
+ * Application remains UI-only and facade-owned. It supplies UI services; run this owner through Scene,
+ * never
+ * Application::run directly from factory, configuration or shutdown. Stop external work with onStop before managed
+ * teardown, and release borrowed services before the facade is destroyed.
  * @param options Existing runtime policies and finite facade limits.
  * @param origin Factory registration call site retained in mount diagnostics.
  * @return UI-affine lazy facade; the factory does not execute during construction.
  */
-template <class Factory>
-  requires std::invocable<Factory &, ManagedScene &> &&
-           (!std::is_reference_v<std::invoke_result_t<Factory &, ManagedScene &>>) &&
-           detail::IsSceneRecipe<std::remove_cvref_t<std::invoke_result_t<Factory &, ManagedScene &>>>::value
+template <detail::SceneFactory Factory>
 Scene scene(Factory factory, SceneOptions options = {}, std::source_location origin = std::source_location::current()) {
   return detail::SceneAccess::create(
     [factory = std::move(factory)](ManagedScene &owner) mutable -> std::expected<void, ManagedError> {
-      auto recipe = std::invoke(factory, owner);
+      auto recipe = [&] {
+        if constexpr (std::invocable<Factory &, ManagedScene &>) {
+          return std::invoke(factory, owner);
+        } else {
+          return std::invoke(factory, owner, detail::SceneAccess::application(owner));
+        }
+      }();
 
       if constexpr (detail::IsDescription<decltype(recipe)>::value) {
         auto mounted = mount(owner, std::move(recipe));
@@ -1556,6 +1618,34 @@ struct RunAppStage {
    */
   friend int operator|(Scene &&owner, RunAppStage stage) {
     return owner | stage;
+  }
+};
+
+/** @brief Lazy command-line preflight followed by the existing final runner boundary. */
+struct CommandLineRunStage {
+  int argc{};                      ///< Input argument count, including program name.
+  const char *const *argv{};       ///< Borrowed input array, copied at consumption.
+  CommandLineParser parser;        ///< Owning parser adapter; bound options remain caller-owned.
+  ApplicationTerminal *terminal{}; ///< Optional borrowed custom transport.
+  std::stop_token stop;            ///< Optional worker-safe cancellation.
+  std::source_location origin;     ///< Final stage call site.
+
+  /** @param owner Existing UI-affine lazy scene.
+   * @param stage Single-use command-line stage.
+   * @return Zero for success/help, two for launch errors, one for runtime failure.
+   */
+  friend int operator|(Scene &owner, CommandLineRunStage stage) {
+    return stage.terminal
+             ? owner.runApp(*stage.terminal, stage.argc, stage.argv, std::move(stage.parser), stage.stop, stage.origin)
+             : owner.runApp(stage.argc, stage.argv, std::move(stage.parser), stage.stop, stage.origin);
+  }
+
+  /** @param owner Live temporary scene, kept in place throughout preflight and run.
+   * @param stage Owning parser and borrowed transport selection.
+   * @return Same status as the lvalue overload, without moving the scene.
+   */
+  friend int operator|(Scene &&owner, CommandLineRunStage stage) {
+    return owner | std::move(stage);
   }
 };
 
@@ -2022,5 +2112,39 @@ inline auto runApp(std::stop_token stop = {}, std::source_location origin = std:
 inline auto runApp(ApplicationTerminal &terminal, std::stop_token stop = {},
                    std::source_location origin = std::source_location::current()) {
   return detail::RunAppStage{&terminal, stop, origin};
+}
+
+/** @param callback Owning settings factory, evaluated after CLI success and before Application creation.
+ * @param origin Registration call site.
+ * @return Lazy application policy modifier; borrowed option storage must outlive run.
+ */
+inline auto applicationOptions(std::function<ApplicationOptions()> callback,
+                               std::source_location origin = std::source_location::current()) {
+  return detail::SceneStage{[callback = std::move(callback), origin](Scene &owner) mutable {
+    owner.applicationOptions(std::move(callback), origin);
+  }};
+}
+
+/** @param argc Input argument count, including program name.
+ * @param argv Borrowed input strings, copied when the final stage is consumed.
+ * @param parser Owning parser adapter, invoked before mount or terminal acquisition.
+ * @param origin Final stage call site.
+ * @return Single-use launch stage; help/version and failures never open a terminal.
+ */
+inline auto runApp(int argc, const char *const *argv, CommandLineParser parser,
+                   std::source_location origin = std::source_location::current()) {
+  return detail::CommandLineRunStage{argc, argv, std::move(parser), nullptr, {}, origin};
+}
+
+/** @param terminal Borrowed custom transport, untouched on preflight help/failure.
+ * @param argc Input argument count.
+ * @param argv Borrowed input array.
+ * @param parser Owning generic command-line adapter.
+ * @param origin Final stage call site.
+ * @return The same checked launch stage with an explicit test/embedding transport.
+ */
+inline auto runApp(ApplicationTerminal &terminal, int argc, const char *const *argv, CommandLineParser parser,
+                   std::source_location origin = std::source_location::current()) {
+  return detail::CommandLineRunStage{argc, argv, std::move(parser), &terminal, {}, origin};
 }
 } // namespace portals::ui

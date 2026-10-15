@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
-#include "../examples/gallery/gallery.hpp"
+#include "support/examples/gallery/gallery.hpp"
 #include "support/test_terminal.hpp"
 #include <portals/line_edit.hpp>
 

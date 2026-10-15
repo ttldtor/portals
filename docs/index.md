@@ -127,6 +127,7 @@ platforms and the exact runtime boundaries.
 | Task | Guide |
 |---|---|
 | Compose a form and handle errors | [Declarative UI](declarative-ui.md) |
+| Parse CLI before opening the terminal and read process snapshots | [Command-line startup](cli.md) |
 | Prepare styles and themes | [Styling guide](styling-guide.md), [themes guide](themes-guide.md) |
 | Bind state and handle events | [Bindings and events](bindings-guide.md) |
 | Load scene text/files (TBD — M1/U84) | [Scene loading](scene-loading-guide.md) |

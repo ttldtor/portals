@@ -112,11 +112,13 @@ The following interfaces serve different registration paths:
 | `Property<T>::observe(receiver, callback)` | `W&`, `shared_ptr<const PropertyChange<T>>` | Scheduled value notification to a checked receiver |
 | `ManagedScene::onEvent(node, callback)` | Existing custom event contract | Explicit custom-widget routing |
 
-Click/key adapters accept `void`, `expected<void, TreeError>` or the exact editor
+Click/key adapters accept `void`, `expected<T, TreeError>` or the exact editor
 command receipt. Return an editor undo/redo receipt directly to preserve its
 diagnostic provenance. `Property::observe` returns a caller-owned subscription;
 managed scene registrations retain their own tokens. Do not discard a low-level
 subscription and expect it to remain connected.
+A successful expected payload is ignored and destroyed before leaving the handler.
+Even `false` means handled; inspect success-side receipts before returning.
 
 For a more involved click handler:
 

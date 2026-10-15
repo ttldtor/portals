@@ -9,6 +9,8 @@
 
 ## API приложения
 
+- [Командная строка и снимки процесса](cli.md).
+
 - [Декларативная сцена](declarative-ui.md), [запуск](application.md), [управляемые контролы](managed-controls.md).
 - [Стили](styling-guide.md), [темы](themes-guide.md), [синтаксис PSS](styles.md), [слои](style-layers.md).
 - [Привязки и события](bindings-guide.md), [свойства](property.md), [текстовые ссылки](text-property.md).

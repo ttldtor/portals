@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -487,7 +488,8 @@ private:
   char32_t minimum_scalar_{};
   unsigned remaining_{};
   bool alt_{};
-  std::string paste_;
+  // Allocate paste storage only under pull's checked allocation boundary; create/move/reset stay allocation-free.
+  std::unique_ptr<std::string> paste_;
   std::size_t marker_{};
   InputProbeWindow window_;
   std::optional<InputEvent> pending_;

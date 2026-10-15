@@ -27,11 +27,12 @@ int main() {
 
   return scene
     | ui::style("Button { bold: true; }")
-    | ui::onClick(add,
-                  [message] {
-                    message.text() += "Hello!";
-                  })
-    | ui::onClick(exit, ui::quit)
+    | ui::onClick(add, [message] {
+           message.text() += "Hello!";
+         })
+    | ui::onClick(exit, [] {
+           ui::quit();
+         })
     | ui::onKey(key::F10, ui::quit)
     | ui::runApp();
 }
@@ -175,10 +176,9 @@ auto form = ui::scene(ui::vbox(
   ui::button(apply, "Apply")));
 
 form
-  | ui::onClick(apply,
-                [field] {
-                  field.text() += "!";
-                });
+  | ui::onClick(apply, [field] {
+      field.text() += "!";
+    });
 
 auto result = form.run();
 ```
@@ -190,6 +190,13 @@ internal managed text state, and uses the existing editor binding. Confirmation
 modes, validation, paste, clipboard and Undo retain their existing behavior.
 The `lineEdit(ManagedState<string>, ...)` overload remains available for shared
 models. Ref-first forms support both kinds of initialization.
+
+For CLI launch, return a lazy scene from an ordinary function and borrow typed
+settings with `ui::opts(options)`. `ui::applicationOptions(provider)` reads those
+settings after successful parsing and before mounting. The final
+`ui::runApp(argc, argv, parser)` captures process snapshots and invokes the parser;
+help, version and parse failures return before the scene factory or terminal acquisition.
+See [command-line startup](cli.md) for `ui::lyra::cli`, errors and snapshot lifetimes.
 
 A scene can consume a direct description or a factory receiving `ManagedScene&`.
 The factory returns a description or `expected<Description<T>, ManagedError>`;
@@ -418,9 +425,16 @@ identity. This ownership is the same for keyboard, mouse and programmatic input.
 
 ### Results, errors and mutation
 
-Callbacks may return `void`, `expected<void, TreeError>` or the existing
-`EditorCommandResult`. Return `field.undo()` or `field.redo()` directly to preserve
-its exact already-reported provenance. The first returned failure or exception
+Key and click actions may return `void`, `expected<T, TreeError>` or the existing
+`EditorCommandResult`. A successful expected payload is ignored and destroyed
+before leaving the callback scope. In particular, a successful `false` payload
+still means the action was handled; it does not request input fallthrough.
+The adapter does not interpret fields inside a successful payload. If an application
+needs a notification-delivery receipt or another success-side status, inspect that
+receipt explicitly before returning from the callback.
+
+Return `field.undo()` or `field.redo()` directly to preserve its exact
+already-reported provenance. The first returned failure or exception
 stops the remaining handlers and reaches the existing typed diagnostics; an error
 already reported by that exact editor command is not reported a second time.
 Unrelated failures and observer failures remain distinct. Earlier external side
@@ -597,6 +611,30 @@ observation. It adds [fluent text properties](text-property.md) for control
 captions and LineEdit drafts, including owning read-only concatenation. The
 existing `NodeRef<T>` interface remains available for other checked tree access.
 
+## Integrate a provider without another runtime
+
+Ordinary forms need only the declarative factory. A custom provider can opt into
+`ui::scene([](ManagedScene &owner, Application &app) { ... })` and
+`scene.configure([](ManagedScene &owner, Application &app) { ... })` to use the
+same scheduler, router and tree. Existing one-argument factories/configurations
+keep priority, including generic and variadic callbacks. Results obey the same
+typed-error rules as the original overloads.
+
+`Application&` is a UI-affine borrow, not a worker-thread API or an independent
+owner. It supplies UI services; run the facade through Scene, never by calling its borrowed Application::run directly from factory, configure or shutdown. Do not retain it beyond the facade lifetime. Register `scene.onStop(...)`
+before preparation when partial provider construction needs cleanup. The one
+owning, replaceable shutdown callback runs once before nodes and models retire,
+including failed preparation, explicit close and destruction. It accepts void
+or exactly `expected<void, ManagedError>`. Registering a replacement retires the
+old callback without calling it. An exception becomes a typed cleanup failure;
+managed cleanup still runs. An earlier setup/input/run error remains primary.
+Checked Scene methods and ManagedScene::run reject lifecycle reentry. Raw Application::run retains its documented prohibition on entering run from hooks; the borrow does not turn that low-level API into an independent runner. Shutdown executes with empty current-scene/setup contexts, so use explicit
+provider cancellation rather than contextual `ui::quit()` there.
+
+The complete [dashboard composition](../examples/dashboard/dashboard.hpp) uses
+these opt-in hooks. Its provider retains its existing scheduler and bounded page
+loading, and stops before the model it publishes to is destroyed. Basic forms do
+not need these hooks or a manual `Application`.
 ## Explicit customization
 
 Standard controls inherit their normal managed bindings, styles and LineEdit
@@ -776,9 +814,60 @@ and exits with F10 through the application runner.
 For an editor, checkbox and theme switching, see
 [the fluent gallery](../examples/gallery/fluent_form.hpp).
 
-Descriptions assemble a retained widget tree once. Standard control factories
-install their bindings during mount; custom event and presentation logic remains
-explicit C++. For build and run instructions, see [runnable examples](examples.md).
+The program below uses only the installed `portals::core` package. It retains the
+same custom final `Meter`, domain behavior, palette and deterministic input as
+the complete before/managed examples. Its full captured terminal output is
+compared with the existing managed form. The shared fixture supplies domain
+rendering and assertions; it contains no description mounting or binding setup.
+
+[Open the complete consumer source](../tests/package_consumer/form_declarative.cpp).
+The generated HTML reference embeds the same file below with line numbers.
+
+\include{lineno} form_declarative.cpp
+
+The executable is a finite, headless replay consumer, with no interactive window.
+From its build output directory, run `./portals_form_declarative` to execute the
+normal scenario and write its outcome summary and captured terminal bytes to
+standard output. Run `./portals_form_declarative --failure` to exercise the
+intentional `INVALID_GEOMETRY` callback error and verify its phase, node and
+terminal cleanup. That verification returns success when the expected error is
+preserved. These are the only supported invocation forms; Windows builds use
+the same executable name with the `.exe` suffix.
+
+The shared `form_support.hpp` and `form_replay.hpp` are included in full on the
+[managed controls page](managed-controls.md).
+
+### What became simpler
+
+All three complete programs run the same replay, including validation, conflicting
+edits, rejected notifications, hide/disable/remove, theme changes and cleanup.
+The installed-package test compares both their outcome summaries and terminal
+byte streams. The declarative program expresses the hierarchy in one `column`
+and mounts it once; standard binding setup stays inside the control factories.
+
+| Complete source | Lines | Nonempty lines |
+| --- | ---: | ---: |
+| Low-level `form_before.cpp` | 256 | 193 |
+| Managed `form_after.cpp` | 218 | 160 |
+| Declarative `form_declarative.cpp` | 236 | 165 |
+
+These counts include the failure mode, business callbacks and replay assertions.
+The declarative form needs six observing slots so the unchanged test can inspect
+every control. It makes the hierarchy explicit and mount failure cleanup local,
+but does not reduce the complete program's line count relative to the managed
+version. Custom event and presentation logic remain explicit C++.
+
+This layer does not implement reconciliation, dynamic tree replacement,
+a new CSS cascade or SQLite integration. Descriptions
+assemble a tree once. The [performance experiment](managed-performance.md)
+compares retained lifecycle costs at several sizes; it does not measure
+compilation performance. Shorter construction code is not a speed claim.
+
+The interactive [gallery and custom-widget examples](examples.md) now use these
+descriptions. The gallery is now a lazy scene returned by an ordinary form function,
+with internal editor/checkbox state, explicit commit, focus traversal and standard
+quit/theme handlers. Its CLI runs before mounting; additional palettes use the same
+style engine. See [command-line startup](cli.md).
 
 ## Compact references, identities and actions
 
@@ -815,9 +904,10 @@ take(scene.onKey(ui::key(InputKey::F10),
 
 Callbacks can be supplied directly to `ui::button(ref, caption, callback)` or a
 consuming recipe's `.onClick(callback)`. They return `void` by default; existing
-`expected<void, TreeError>` and exact `EditorCommandResult` callbacks remain
-supported. Returning `editor.undo()` or `editor.redo()` directly preserves the
-command's receipt: a failure already reported to the same live collector is not
+`expected<T, TreeError>` and exact `EditorCommandResult` callbacks are also
+supported. Successful payloads are ignored, including `false`; returned errors
+retain their original `TreeError`. Returning `editor.undo()` or `editor.redo()`
+directly preserves the command's receipt: a failure already reported to the same live collector is not
 reported again. Extracting `.result()` deliberately loses that provenance.
 Independent typed failures and thrown exceptions retain their own diagnostics.
 

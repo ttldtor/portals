@@ -37,6 +37,10 @@ cmake --build build/my-application
 Укажите новый CMAKE_PREFIX_PATH. Пути импортируемых целей CMake вычисляются относительно него.
 Собственные CMAKE_INSTALL_LIBDIR/INCLUDEDIR оставляйте относительными.
 
+Необязательная цель `portals::lyra` добавляет `<portals/ui_lyra.hpp>` и
+закреплённые заголовки Lyra. Подключите её для [командной строки](cli.md);
+лицензия и манифест входят в SDK. Приложения без адаптера используют `portals::core`.
+
 ## Совместимость
 
 Архитектура, компилятор, стандартная библиотека, конфигурация C++ и среда выполнения
@@ -124,7 +128,7 @@ Linux записывает ldd каждой программы и версию l
 cmake "-DARCHIVE=<absolute archive path>" "-DTEST_WORK_DIR=<new absolute temporary path>" "-DCXX_COMPILER=<compatible compiler>" -P tests/bundle_smoke.cmake
 ```
 
-Проверяются инвентарь/хеши, запуск конечных --check из чужого каталога
+Проверяются инвентарь/хеши, справка/отказы публичного CLI из чужого каталога
 и установленный потребитель; каталоги свидетельств сохраняются.
 BUNDLE_DIR и скопированный verify/bundle_smoke.cmake проверяют перенесённую
 распаковку; VERIFY_ONLY=ON проверяет хеши без сборки.

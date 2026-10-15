@@ -11,34 +11,31 @@ terminal (for example Windows Terminal). Run an interactive example:
     ./run.ps1 dashboard
     ./run.ps1 gallery
     ./run.ps1 custom_widget
-    ./run.ps1 replay
+    ./run.ps1 editor_history
+    ./run.ps1 click_handlers
 
 The scripts locate bin relative to their own location, so you can also call
 them by absolute path from another working directory. They run in your existing
 terminal. Dashboard supports --ansi16 --ascii for conservative terminal
 capabilities. Each example displays its keyboard help; use F10 or Ctrl+C to exit.
-No installation or network connection is needed to run the four executables.
+No installation or network connection is needed to run the five executables.
 
 On Linux, use a VT-capable terminal:
 
     ./run.sh dashboard
     ./run.sh gallery
     ./run.sh custom_widget
-    ./run.sh replay
+    ./run.sh editor_history
+    ./run.sh click_handlers
 
 The Linux binaries require the dynamic libraries and libc listed in
 manifest.json. They are built for the recorded Linux x64 toolchain; this archive
 does not promise compatibility with every Linux distribution.
 
-For finite checks that do not open a terminal session:
-
-    ./run.ps1 dashboard --check --ansi16 --ascii
-    ./run.ps1 gallery --check
-    ./run.ps1 custom_widget --check
-    ./run.ps1 replay --check --delay-ms 250
-
-Use run.sh with the same arguments on Linux. These checks exercise deterministic
-example behavior. They do not replace interactive terminal acceptance.
+The interactive examples do not contain headless replay terminals. Use --help
+for gallery, dashboard, custom_widget and editor_history. click_handlers has no
+CLI options. Finite behavioral checks are separate installed-consumer targets,
+run by the verification commands below without opening a terminal.
 
 ## Read the documentation and inspect data
 
@@ -85,7 +82,7 @@ using a new absolute work path outside the extracted bundle:
 
     cmake "-DBUNDLE_DIR=<absolute bundle path>" "-DTEST_WORK_DIR=<new absolute temporary path>" "-DCXX_COMPILER=<compatible compiler>" -P "<absolute bundle path>/verify/bundle_smoke.cmake"
 
-It checks every payload SHA256, runs all four --check scenarios, moves the SDK
+It checks every payload SHA256, checks public help commands and finite consumer scenarios, moves the SDK
 again, and builds/runs the external consumer using only that installed prefix.
 A Windows consumer receives the manifest's exact MSVC runtime selection.
 Set PYTHON_EXECUTABLE to a known Python 3 interpreter to additionally check every

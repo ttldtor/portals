@@ -29,12 +29,44 @@ struct Access;
 } // namespace style::ct::detail
 
 namespace detail {
+template <class T> inline constexpr bool IS_MANAGED_TREE_RESULT = false;
+template <class Value> inline constexpr bool IS_MANAGED_TREE_RESULT<std::expected<Value, TreeError>> = true;
+
+/** @brief Exact checked TreeError result, including owning success values.
+ * @tparam T Exact callback result type; unrelated error types are not adapted.
+ */
+template <class T>
+concept ManagedTreeResult = IS_MANAGED_TREE_RESULT<T>;
+
 /** @brief Accepted compact callback results; command receipts retain exact reporting provenance.
  * @tparam T Exact callback result type.
  */
 template <class T>
-concept ManagedActionResult =
-  std::same_as<T, void> || std::same_as<T, std::expected<void, TreeError>> || std::same_as<T, EditorCommandResult>;
+concept ManagedActionResult = std::same_as<T, void> || ManagedTreeResult<T> || std::same_as<T, EditorCommandResult>;
+
+/** @brief Ignore a successful payload and destroy it before leaving the entered callback scope.
+ * @tparam Callback Callable returning void or an exact checked TreeError result.
+ * @tparam Args Borrowed invocation argument types.
+ * @param callback Entered user action; exceptions retain the caller's existing handling.
+ * @param args Arguments forwarded for this synchronous invocation only.
+ * @return Success or the unchanged TreeError; a false bool payload is still success.
+ */
+template <class Callback, class... Args>
+  requires(std::same_as<std::invoke_result_t<Callback &, Args...>, void> ||
+           ManagedTreeResult<std::invoke_result_t<Callback &, Args...>>)
+std::expected<void, TreeError> invokeIgnoringValue(Callback &callback, Args &&...args) {
+  if constexpr (std::same_as<std::invoke_result_t<Callback &, Args...>, void>) {
+    std::invoke(callback, std::forward<Args>(args)...);
+  } else {
+    auto result = std::invoke(callback, std::forward<Args>(args)...);
+
+    if (!result) {
+      return std::unexpected(result.error());
+    }
+  }
+
+  return {};
+}
 
 /** @brief A compact action optionally receives owning event parameters.
  * @tparam Callback Copyable callable owned by a managed registration.
@@ -303,13 +335,14 @@ public:
    */
   std::expected<void, ManagedError> onClick(Node<Button> node, std::function<std::expected<void, TreeError>()> action);
 
-  /** @tparam Callback Owning void, expected<void, TreeError> or EditorCommandResult action, optionally taking
+  /** @tparam Callback Owning void, expected<Value, TreeError> or EditorCommandResult action, optionally taking
    * ClickEvent.
    * @param node Live managed button without another action binding.
    * @param action Owning checked editor command callback; return Ref.undo/redo directly to preserve provenance.
    * @return Scoped registration success or typed binding failure. Parameterized callbacks admit modifiers;
    * no-argument callbacks retain legacy unmodified admission. An already reported exact returned failure
    * is not recorded again in the same live collector; independent failures and throws are still reported.
+   * Successful expected payloads are ignored within the entered callback scope.
    */
   template <class Callback>
     requires detail::ManagedAction<Callback, ClickEvent>
@@ -326,7 +359,7 @@ public:
 
   /** @tparam Callback Owning compact action, optionally borrowing the admitted KeyEvent.
    * @param chord Exact key/scalar/modifiers; PRESS and REPEAT are admitted, RELEASE is ignored.
-   * @param action Void, expected<void, TreeError> or EditorCommandResult callback.
+   * @param action Void, expected<Value, TreeError> or EditorCommandResult callback; success payloads are ignored.
    * @return Registration result with typed allocation/affinity errors; empty callbacks are rejected.
    * Composes owning registrations in the single existing onInput slot. Newest matching chord wins;
    * nonmatches delegate to the previous interceptor, then standard routing. Matching success consumes
@@ -763,7 +796,10 @@ public:
   std::expected<ApplicationStats, ManagedError> run(ApplicationTerminal &terminal, std::stop_token stop = {});
 
   /** @brief Idempotently retire callbacks and subtree; properties survive until scene destruction.
-   * @return Success, WRONG_THREAD, WOULD_BLOCK inside managed preparation/frame, or tree cleanup error.
+   * A facade-installed shutdown action runs once before root/model retirement. Its failure does not skip
+   * subtree cleanup; an independent tree cleanup failure is retained in the shutdown error's cleanup field.
+   * @return Success, WRONG_THREAD, WOULD_BLOCK inside managed preparation/frame or close reentry,
+   * an exact facade shutdown failure, or tree cleanup error.
    */
   std::expected<void, ManagedError> close();
 
@@ -909,26 +945,22 @@ private:
       }
     }
 
-    return [action = ui::detail::currentSceneCallback(facadeContext(), std::move(action))](
-             [[maybe_unused]] ui::ClickParams &params) mutable {
-      const auto invoke = [&]() -> decltype(auto) {
-        if constexpr (std::invocable<Callback &, ui::ClickParams &>) {
-          return action(params);
+    return ui::detail::currentSceneCallback(
+      facadeContext(), [action = std::move(action)]([[maybe_unused]] ui::ClickParams &params) mutable {
+        const auto invoke = [&]() -> decltype(auto) {
+          if constexpr (std::invocable<Callback &, ui::ClickParams &>) {
+            return action(params);
+          } else {
+            return action();
+          }
+        };
+
+        if constexpr (std::same_as<decltype(invoke()), EditorCommandResult>) {
+          return invoke();
         } else {
-          return action();
+          return EditorCommandResult(detail::invokeIgnoringValue(invoke), {}, false);
         }
-      };
-
-      if constexpr (std::same_as<decltype(invoke()), EditorCommandResult>) {
-        return invoke();
-      } else if constexpr (std::same_as<decltype(invoke()), void>) {
-        invoke();
-
-        return EditorCommandResult({}, {}, false);
-      } else {
-        return EditorCommandResult(invoke(), {}, false);
-      }
-    };
+      });
   }
 
   static bool commandReported(const EditorCommandResult &command, const std::weak_ptr<const void> &lifetime) {
@@ -945,26 +977,22 @@ private:
       }
     }
 
-    return [action = ui::detail::currentSceneCallback(facadeContext(), std::move(action))](
-             [[maybe_unused]] const Event &event) mutable {
-      const auto invoke = [&]() -> decltype(auto) {
-        if constexpr (std::invocable<Callback &, const Event &>) {
-          return action(event);
+    return ui::detail::currentSceneCallback(
+      facadeContext(), [action = std::move(action)]([[maybe_unused]] const Event &event) mutable {
+        const auto invoke = [&]() -> decltype(auto) {
+          if constexpr (std::invocable<Callback &, const Event &>) {
+            return action(event);
+          } else {
+            return action();
+          }
+        };
+
+        if constexpr (std::same_as<decltype(invoke()), EditorCommandResult>) {
+          return invoke();
         } else {
-          return action();
+          return EditorCommandResult(detail::invokeIgnoringValue(invoke), {}, false);
         }
-      };
-
-      if constexpr (std::same_as<decltype(invoke()), EditorCommandResult>) {
-        return invoke();
-      } else if constexpr (std::same_as<decltype(invoke()), void>) {
-        invoke();
-
-        return EditorCommandResult({}, {}, false);
-      } else {
-        return EditorCommandResult(invoke(), {}, false);
-      }
-    };
+      });
   }
 
   static ManagedError error(ManagedPhase phase, Node<Widget> node, TreeError cause);
@@ -1005,6 +1033,7 @@ private:
   void remember(ManagedError failure, std::source_location origin = std::source_location::current(),
                 std::span<const ManagedDiagnosticContext> contexts = {});
   std::expected<ApplicationStats, ManagedError> finish(std::expected<ApplicationStats, ApplicationError> result);
+  void retainCloseFailure();
 
   Application &app_;
   std::thread::id owner_;
@@ -1030,6 +1059,8 @@ private:
   std::size_t suppressedNotifications_{};
   std::optional<std::size_t> failureDiagnostic_;
   std::optional<ManagedError> failure_;
+  std::optional<ManagedError> closeFailure_;
+  bool closeFailureRetained_{};
   std::optional<TreeError> cleanup_;
   std::optional<TreeError> reportedFocusFailure_;
   bool stylesDirty_{};
@@ -1040,6 +1071,9 @@ private:
   bool failureNotified_{};
   bool runFailureNotified_{};
   bool notifyingRunFailure_{};
+  void *closeContext_{};
+  std::expected<void, ManagedError> (*beforeClose_)(void *){};
+  bool closing_{};
   bool closed_{};
   std::shared_ptr<bool> textMutating_ = std::make_shared<bool>(false);
 };

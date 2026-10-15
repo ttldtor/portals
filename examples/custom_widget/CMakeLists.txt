@@ -1,3 +1,3 @@
 add_executable(portals_custom_widget main.cpp)
-target_link_libraries(portals_custom_widget PRIVATE portals::core)
+target_link_libraries(portals_custom_widget PRIVATE portals::core portals::lyra)
 portals_enable_warnings(portals_custom_widget)

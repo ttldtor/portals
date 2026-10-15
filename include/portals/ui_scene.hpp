@@ -4,6 +4,7 @@
 
 #include <portals/detail/setup_failure.hpp>
 #include <portals/managed.hpp>
+#include <portals/ui_app.hpp>
 #include <portals/ui_ref.hpp>
 
 namespace portals::ui {
@@ -22,6 +23,7 @@ struct SceneReport {
   std::source_location origin{};       ///< Primary failure call site, or final run call site for a summary.
   std::size_t retainedErrors{};        ///< Successful-run retained recoverable count; details remain in diagnostics().
   std::size_t droppedErrors{};         ///< Successful-run overflow count; not an additional failure.
+  std::optional<CommandLineError> commandLineFailure{}; ///< Owning preflight failure, before any terminal open.
 };
 
 /** @brief Owning copyable diagnostic sink; the report is borrowed only until the call returns.
@@ -41,13 +43,28 @@ void reportToStderr(const SceneReport &report) noexcept;
 
 namespace detail {
 /** @brief Admit exact configuration results without silently discarding a checked failure.
- * @tparam Callback Owning callable receiving the borrowed ManagedScene&.
+ * @tparam Callback Owning callable receiving ManagedScene&, optionally followed by Application&.
  */
 template <class Callback>
 concept SceneConfiguration = requires(Callback &callback, ManagedScene &scene) {
   { callback(scene) } -> std::same_as<void>;
 } || requires(Callback &callback, ManagedScene &scene) {
   { callback(scene) } -> std::same_as<std::expected<void, ManagedError>>;
+} || (!std::invocable<Callback &, ManagedScene &> &&
+      (requires(Callback &callback, ManagedScene &scene, Application &application) {
+        { callback(scene, application) } -> std::same_as<void>;
+      } || requires(Callback &callback, ManagedScene &scene, Application &application) {
+        { callback(scene, application) } -> std::same_as<std::expected<void, ManagedError>>;
+      }));
+
+/** @brief Exact owning shutdown results, without admitting silently discarded errors.
+ * @tparam Callback Zero-argument callable returning void or exactly expected<void, ManagedError>.
+ */
+template <class Callback>
+concept SceneStop = requires(Callback &callback) {
+  { callback() } -> std::same_as<void>;
+} || requires(Callback &callback) {
+  { callback() } -> std::same_as<std::expected<void, ManagedError>>;
 };
 
 struct SceneAccess;
@@ -237,7 +254,9 @@ public:
    * The reference is UI-only and must not outlive this facade. Runtime mutations use existing boundaries.
    */
   std::expected<std::reference_wrapper<ManagedScene>, ManagedError> managed() const;
-  /** @return Existing collector snapshot, or the single pre-owner fallback and notification flags.
+  /** @return Existing collector snapshot, or the pre-owner primary and independent shutdown failure.
+   * The primary fallback is always retained; the optional shutdown diagnostic follows maxErrors and
+   * increments droppedErrors when that budget has no remaining slot. Notification flags are preserved.
    * Allocation failure is NO_MEMORY. Snapshotting never prepares or reports an error.
    */
   std::expected<ManagedDiagnosticBatch, TreeError> diagnostics() const;
@@ -384,7 +403,8 @@ public:
     return std::move(*this);
   }
 
-  /** @tparam Callback Owning action returning void or exactly expected<void, ManagedError>.
+  /** @tparam Callback Owning action taking ManagedScene&, optionally followed by Application&,
+   * returning void or exactly expected<void, ManagedError>. The one-argument form has priority.
    * @param callback Configuration invoked once, in registration order after complete mount.
    * @param origin Registration call site retained across lazy preparation.
    * @return This owner; captures are owned, while explicitly borrowed services must outlive use.
@@ -396,6 +416,10 @@ public:
    * Isolation covers entered execution and facade-owned stored captures. Caller arguments, temporaries and
    * arbitrary by-value custom callback parameter destructors outside that execution follow the active setup.
    * Moving a custom callable does not promise an inert moved-from destructor.
+   * Application is borrowed on UI and must not escape this facade's lifetime. Stop its external work
+   * with onStop before managed nodes/models retire; it does not grant worker-thread access.
+   * The borrow supplies UI
+   * services, not an independent runner: do not call Application::run directly.
    */
   template <detail::SceneConfiguration Callback>
   Scene &configure(Callback callback, std::source_location origin = std::source_location::current()) & {
@@ -413,6 +437,37 @@ public:
   template <detail::SceneConfiguration Callback>
   Scene &&configure(Callback callback, std::source_location origin = std::source_location::current()) && {
     configureImpl(callback, origin);
+
+    return std::move(*this);
+  }
+
+  /** @tparam Callback Owning zero-argument callable returning void or exactly expected<void, ManagedError>.
+   * @param callback Replacement shutdown action, invoked once before managed root/model retirement,
+   * including failed preparation and an unprepared owner's close/destruction. Register before preparation
+   * when partial factory work requires cleanup. An earlier callback is retired without being invoked.
+   * @param origin Registration site retained in shutdown diagnostics.
+   * @return This owner. Exceptions become CLEANUP/NO_MEMORY or CALLBACK_FAILED; subtree cleanup still runs.
+   * Earlier setup/input/runner failures remain primary, with shutdown failure in cleanup.
+   * Runs on UI with empty current-scene/setup contexts. Scene and ManagedScene::run reentry return WOULD_BLOCK and
+   * cannot replace the shutdown outcome. Raw Application::run retains its existing no-hook-reentry precondition;
+   *
+   * do not start it from shutdown. Captures retire before this owner's Application is released.
+   */
+  template <detail::SceneStop Callback>
+  Scene &onStop(Callback callback, std::source_location origin = std::source_location::current()) & {
+    stopImpl(callback, origin);
+
+    return *this;
+  }
+
+  /** @tparam Callback Shutdown callable accepted by the lvalue overload.
+   * @param callback Owning shutdown action.
+   * @param origin Registration site.
+   * @return Consuming owner for temporary fluent chains, with the same lifetime/error contract.
+   */
+  template <detail::SceneStop Callback>
+  Scene &&onStop(Callback callback, std::source_location origin = std::source_location::current()) && {
+    stopImpl(callback, origin);
 
     return std::move(*this);
   }
@@ -644,6 +699,38 @@ public:
    */
   int runApp(ApplicationTerminal &terminal, std::stop_token stop = {},
              std::source_location origin = std::source_location::current());
+
+  /** @brief Parse copied process arguments once before preparing the application or mounting widgets.
+   * @param argc Argument count including the program name.
+   * @param argv Arguments borrowed only for the initialization copy.
+   * @param parser Owning lazy parser; exceptions become typed command-line failures.
+   * @param stop Optional runner cancellation.
+   * @param origin Final call site.
+   * @return Zero for successful run/help/version, two for command-line failure, one for runtime failure.
+   */
+  int runApp(int argc, const char *const *argv, CommandLineParser parser, std::stop_token stop = {},
+             std::source_location origin = std::source_location::current());
+
+  /** @brief Same preflight boundary with a borrowed custom terminal.
+   * @param terminal Borrowed transport, untouched for help/version or preflight failure.
+   * @param argc Nonnegative count, including the program name when present.
+   * @param argv Borrowed array copied before invoking parser.
+   * @param parser Owning parser, invoked synchronously on the scene's UI thread.
+   * @param stop Optional runner cancellation.
+   * @param origin Final call site.
+   * @return Same zero/two/one status as the native command-line overload.
+   */
+  int runApp(ApplicationTerminal &terminal, int argc, const char *const *argv, CommandLineParser parser,
+             std::stop_token stop = {}, std::source_location origin = std::source_location::current());
+
+  /** @brief Store a lazy application policy provider, invoked after CLI preflight and before Application::create.
+   * @param provider Owning callback; borrowed captures must outlive synchronous preparation.
+   * @param origin Registration call site.
+   * @return This stationary scene; registration follows the same admission rules as other configuration.
+   */
+  Scene &applicationOptions(std::function<ApplicationOptions()> provider,
+                            std::source_location origin = std::source_location::current()) &;
+
   /** @param origin Cleanup call site.
    * @return Idempotent explicit cleanup result; reentry returns WOULD_BLOCK without retiring an active owner.
    * The first facade failure remains observable through checked()/run().
@@ -653,8 +740,10 @@ public:
 private:
   friend struct detail::SceneAccess;
   using Configuration = std::move_only_function<std::expected<void, ManagedError>(ManagedScene &)>;
+  using Stop = std::move_only_function<std::expected<void, ManagedError>()>;
   struct State;
   detail::SetupFailureScope setupScope(const char *execution) noexcept;
+  static Application &admittedApplication(ManagedScene &scene) noexcept;
 
   template <detail::SceneConfiguration Callback> void configureImpl(Callback &callback, std::source_location origin) {
     detail::SetupFailureScope configurationScope({}, nullptr, nullptr);
@@ -666,15 +755,50 @@ private:
     try {
       addConfiguration(
         [callback = std::move(callback)](ManagedScene &scene) mutable -> std::expected<void, ManagedError> {
-          if constexpr (std::same_as<std::invoke_result_t<Callback &, ManagedScene &>, void>) {
-            std::invoke(callback, scene);
+          const auto invoke = [&]() -> decltype(auto) {
+            if constexpr (std::invocable<Callback &, ManagedScene &>) {
+              return std::invoke(callback, scene);
+            } else {
+              return std::invoke(callback, scene, admittedApplication(scene));
+            }
+          };
+
+          if constexpr (std::same_as<decltype(invoke()), void>) {
+            invoke();
 
             return {};
           } else {
-            return std::invoke(callback, scene);
+            return invoke();
           }
         },
         false, origin);
+    } catch (const std::bad_alloc &) {
+      configurationException(TreeError::NO_MEMORY, origin);
+    } catch (...) {
+      configurationException(TreeError::CALLBACK_FAILED, origin);
+    }
+  }
+
+  template <detail::SceneStop Callback> void stopImpl(Callback &callback, std::source_location origin) {
+    detail::SetupFailureScope scope({}, nullptr, nullptr);
+    detail::CurrentSceneScope currentMask;
+
+    if (!admitConfiguration(false, origin)) {
+      return;
+    }
+
+    try {
+      setStop(
+        [callback = std::move(callback)]() mutable -> std::expected<void, ManagedError> {
+          if constexpr (std::same_as<std::invoke_result_t<Callback &>, void>) {
+            std::invoke(callback);
+
+            return {};
+          } else {
+            return std::invoke(callback);
+          }
+        },
+        origin);
     } catch (const std::bad_alloc &) {
       configurationException(TreeError::NO_MEMORY, origin);
     } catch (...) {
@@ -799,11 +923,14 @@ private:
   Scene(Configuration recipe, SceneOptions options, std::source_location origin);
   bool admitConfiguration(bool runtime, std::source_location origin);
   void addConfiguration(Configuration callback, bool runtime, std::source_location origin);
+  void setStop(Stop callback, std::source_location origin);
   void configurationException(TreeError cause, std::source_location origin);
   void shortcutConfigurationFailure(ShortcutError cause, std::source_location origin);
   std::expected<ApplicationStats, ManagedError> runImpl(ApplicationTerminal *terminal, std::stop_token stop,
                                                         std::source_location origin);
   int runAppImpl(ApplicationTerminal *terminal, std::stop_token stop, std::source_location origin);
+  int runAppPreflight(ApplicationTerminal *terminal, int argc, const char *const *argv, CommandLineParser &parser,
+                      std::stop_token stop, std::source_location origin);
 
   std::thread::id owner_;
   std::unique_ptr<State> state_;
@@ -817,6 +944,23 @@ struct SceneAccess {
    */
   static Application &application(ManagedScene &owner) noexcept {
     return owner.app_;
+  }
+
+  /** @param owner Managed owner whose close entry must first stop facade-owned external work.
+   * @param context Stable facade State, outliving its managed owner.
+   * @param callback UI-only checked shutdown bridge, consumed before first close attempt.
+   */
+  static void beforeClose(ManagedScene &owner, void *context,
+                          std::expected<void, ManagedError> (*callback)(void *)) noexcept {
+    owner.closeContext_ = context;
+    owner.beforeClose_ = callback;
+  }
+
+  /** @param owner Managed collector retaining an exact shutdown error independently of an earlier primary.
+   * Repeated calls do not duplicate the diagnostic; no widget or callback reference escapes.
+   */
+  static void retainCloseFailure(ManagedScene &owner) {
+    owner.retainCloseFailure();
   }
 
   /** @param owner Existing managed owner attached to the stationary facade.

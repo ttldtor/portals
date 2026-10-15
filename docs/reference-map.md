@@ -15,6 +15,7 @@ is generated from these guides and public headers.
 | Need | Read |
 | --- | --- |
 | Compose a form and manage its lifetime | [Declarative UI](declarative-ui.md), [managed controls](managed-controls.md), [application runner](application.md) |
+| Parse CLI before opening the terminal and read process snapshots | [Command-line startup](cli.md) |
 | Choose and arrange controls | [Basic controls](controls.md), [LineEdit](line-edit.md), [Row and Column](layout.md), [Grid and Overlay](grid.md) |
 | Apply colors and themes | [Styles and themes](styles.md) |
 | Await timer and provider results with UI-owned coroutines | [UI coroutines](ui-coroutines.md) |

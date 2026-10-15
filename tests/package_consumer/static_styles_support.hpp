@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
-#include "examples/replay/terminal.hpp"
+#include "tests/support/examples/replay/terminal.hpp"
 #include <portals/ui.hpp>
 
 #include <iostream>

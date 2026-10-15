@@ -3,7 +3,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest.h>
 
-#include "../examples/replay/terminal.hpp"
+#include "support/examples/replay/terminal.hpp"
 #include <portals/ui.hpp>
 
 #include <atomic>
@@ -164,6 +164,15 @@ struct WrongConfiguration {
   }
 };
 
+struct WrongLegacyComposition {
+  int operator()(ManagedScene &) const;
+  ui::Description<Label> operator()(ManagedScene &, Application &) const;
+};
+
+struct BorrowedComposition {
+  ui::Description<Label> &operator()(ManagedScene &, Application &) const;
+};
+
 struct SceneFactory {
   ui::Scene operator()() const;
 };
@@ -278,6 +287,9 @@ struct AllocationFailureTerminal : FailingTerminal {
 };
 
 static_assert(!ui::detail::SceneConfiguration<WrongConfiguration>);
+static_assert(!ui::detail::SceneConfiguration<WrongLegacyComposition>);
+static_assert(!ui::detail::SceneFactory<WrongLegacyComposition>);
+static_assert(!ui::detail::SceneFactory<BorrowedComposition>);
 static_assert(!ProgramEntry<SceneFactory>);
 static_assert(!ProgramEntry<WrongProgram>);
 static_assert(!std::is_move_assignable_v<ui::Scene>);
@@ -344,6 +356,446 @@ TEST_CASE("lazy scene prepares an ordinary form once without terminal I/O") {
   CHECK(terminal.closed);
   CHECK_FALSE(field.text().get());
   CHECK_FALSE(scene.run(terminal));
+}
+
+TEST_CASE("scene composition borrows its existing application and prefers legacy generic callbacks") {
+  example::ReplayTerminal terminal({}, 100, {30, 4});
+  ui::SceneOptions options;
+  ui::Ref<LineEdit> field;
+  Application *created{};
+  int configured{}, stopped{};
+
+  options.clock = terminal.clock();
+
+  auto scene = ui::scene(
+    [&](ManagedScene &owner, Application &app) {
+      created = &app;
+      CHECK(owner.widthPolicy() == app.widthPolicy());
+
+      return ui::lineEdit(field, "ready");
+    },
+    options);
+
+  scene.configure([&](ManagedScene &, Application &app) -> std::expected<void, ManagedError> {
+    CHECK(&app == created);
+    ++configured;
+
+    auto focused = app.router().setFocus(field.node());
+
+    return focused ? std::expected<void, ManagedError>{}
+                   : std::unexpected(ManagedError{ManagedPhase::BIND, field.node().id(), focused.error(), {}, {}});
+  });
+  scene.onStop([&] {
+    ++stopped;
+    CHECK(take(field.text().get()) == "ready");
+  });
+  take(scene.run(terminal));
+  CHECK(configured == 1);
+  CHECK(stopped == 1);
+  take(scene.close());
+  CHECK(stopped == 1);
+
+  auto legacy = ui::scene([](auto &, auto &...extra) {
+    static_assert(sizeof...(extra) == 0);
+
+    return ui::label("legacy");
+  });
+
+  legacy.configure([](auto &, auto &...extra) {
+    static_assert(sizeof...(extra) == 0);
+  });
+  take(legacy.prepareChecked());
+  take(legacy.close());
+}
+
+TEST_CASE("scene stop hook runs once after partial preparation and before managed retirement") {
+  for (const bool failFactory : {false, true}) {
+    ui::Ref<Label> label;
+    int stopped{};
+
+    auto scene = ui::scene([&](ManagedScene &) -> std::expected<ui::Description<Label>, ManagedError> {
+      if (failFactory) {
+        return std::unexpected(ManagedError{ManagedPhase::MOUNT, {}, TreeError::INVALID_ARGUMENT, {}, {}});
+      }
+
+      return ui::label(label, "mounted");
+    });
+
+    scene.onStop([&] {
+      ++stopped;
+
+      if (!failFactory) {
+        CHECK(take(label.text().get()) == "mounted");
+      }
+    });
+    scene.configure([](ManagedScene &) -> std::expected<void, ManagedError> {
+      return std::unexpected(ManagedError{ManagedPhase::BIND, {}, TreeError::INVALID_ARGUMENT, {}, {}});
+    });
+
+    CHECK_FALSE(scene.prepareChecked());
+    CHECK(stopped == 1);
+    take(scene.close());
+    CHECK(stopped == 1);
+    CHECK_FALSE(label.text().get());
+  }
+}
+
+TEST_CASE("scene stop exceptions retain cleanup and never prevent mounted widget retirement") {
+  example::ReplayTerminal terminal({}, 100, {30, 4});
+  ui::SceneOptions options;
+  ui::Ref<Label> label;
+  int stopped{};
+
+  options.clock = terminal.clock();
+
+  auto scene = ui::scene(ui::label(label, "mounted"), options);
+
+  scene.onStop([&] {
+    ++stopped;
+
+    throw std::runtime_error("stop failed");
+  });
+
+  const auto result = scene.run(terminal);
+
+  REQUIRE_FALSE(result);
+  CHECK(result.error().phase == ManagedPhase::CLEANUP);
+  CHECK(std::get<TreeError>(result.error().cause) == TreeError::CALLBACK_FAILED);
+  CHECK(stopped == 1);
+  CHECK(terminal.closed);
+  CHECK_FALSE(label.text().get());
+  take(scene.close());
+  CHECK(stopped == 1);
+}
+
+TEST_CASE("scene stop preserves prior runner and restoration failures") {
+  FailingTerminal terminal({}, 100, {30, 4});
+  ui::SceneOptions options;
+  int stopped{};
+
+  options.clock = terminal.clock();
+
+  auto scene = ui::scene(ui::label("mounted"), options);
+
+  scene.onStop([&]() -> std::expected<void, ManagedError> {
+    ++stopped;
+
+    return std::unexpected(ManagedError{ManagedPhase::CLEANUP, {}, TreeError::INVALID_ARGUMENT, {}, {}});
+  });
+
+  const auto result = scene.run(terminal);
+
+  REQUIRE_FALSE(result);
+  CHECK(std::holds_alternative<ApplicationError>(result.error().cause));
+  REQUIRE(result.error().application);
+  CHECK(result.error().application->restoration.has_value());
+  CHECK(result.error().cleanup == TreeError::INVALID_ARGUMENT);
+  CHECK(stopped == 1);
+
+  const auto diagnostics = take(scene.diagnostics());
+
+  CHECK(std::ranges::any_of(diagnostics.errors, [](const auto &diagnostic) {
+    return diagnostic.error.phase == ManagedPhase::CLEANUP && treeCause(diagnostic.error, TreeError::INVALID_ARGUMENT);
+  }));
+}
+
+TEST_CASE("scene stop reentry is rejected and idle destruction still stops once") {
+  int stopped{};
+
+  {
+    auto scene = ui::scene(ui::label("idle"));
+
+    scene.onStop([&] {
+      ++stopped;
+
+      const auto closed = scene.close();
+
+      REQUIRE_FALSE(closed);
+      CHECK(std::get<TreeError>(closed.error().cause) == TreeError::WOULD_BLOCK);
+    });
+  }
+
+  CHECK(stopped == 1);
+}
+
+TEST_CASE("scene stop preserves exact returned failure and independent root cleanup failure") {
+  for (const bool blockRemoval : {false, true}) {
+    Application *application{};
+    int stopped{};
+    auto scene = ui::scene([&](ManagedScene &, Application &app) {
+      application = &app;
+
+      return ui::label("mounted");
+    });
+    const auto origin = std::source_location::current();
+
+    scene.onStop([&]() -> std::expected<void, ManagedError> {
+      ++stopped;
+      ManagedError failure{ManagedPhase::CLEANUP, {}, TreeError::INVALID_ARGUMENT, {}, {}};
+
+      failure.operation = "provider.stop";
+      failure.operationOrigin = origin;
+
+      return std::unexpected(failure);
+    });
+    take(scene.prepareChecked());
+
+    const auto close = [&] {
+      const auto result = scene.close();
+
+      REQUIRE_FALSE(result);
+      CHECK(treeCause(result.error(), TreeError::INVALID_ARGUMENT));
+      CHECK(std::string_view(result.error().operation) == "provider.stop");
+      CHECK(result.error().operationOrigin->line() == origin.line());
+      CHECK(result.error().cleanup == (blockRemoval ? std::optional{TreeError::WOULD_BLOCK} : std::nullopt));
+    };
+
+    if (blockRemoval) {
+      take(application->tree().frame(close));
+    } else {
+      close();
+    }
+
+    take(scene.close());
+    CHECK(stopped == 1);
+  }
+}
+
+TEST_CASE("scene stop body and owned capture retirement suspend unrelated current and setup contexts") {
+  example::ReplayTerminal terminal({}, 100, {30, 4});
+  ui::SceneOptions options;
+  ui::Ref<Label> missing;
+  int stopped{}, retired{}, later{};
+  bool attributed{}, currentAvailable{};
+
+  options.clock = terminal.clock();
+
+  struct Capture {
+    ui::Ref<Label> &missing;
+    int &retired;
+    bool &attributed;
+    bool &currentAvailable;
+
+    ~Capture() {
+      currentAvailable = ui::detail::SceneAccess::currentRef().quit().has_value();
+      ui::quit();
+
+      const auto result = missing.text() = "retiring stop";
+
+      attributed = result.result().error().setupStopped;
+      ++retired;
+    }
+  };
+
+  auto inner = ui::scene(ui::label("inner"));
+  auto outer = ui::scene(ui::label("outer"), options);
+
+  inner.onStop([&, capture = std::make_unique<Capture>(missing, retired, attributed, currentAvailable)] {
+    ++stopped;
+    CHECK_FALSE(ui::detail::SceneAccess::currentRef().quit());
+    ui::quit();
+
+    const auto result = missing.text() = "stopping";
+
+    CHECK_FALSE(result.result().error().setupStopped);
+  });
+  outer.configure([&](ManagedScene &) {
+    take(inner.close());
+  });
+  outer.configure([&](ManagedScene &) {
+    ++later;
+  });
+
+  take(outer.prepareChecked());
+  CHECK(stopped == 1);
+  CHECK(retired == 1);
+  CHECK_FALSE(attributed);
+  CHECK_FALSE(currentAvailable);
+  CHECK(later == 1);
+  take(outer.run(terminal));
+  CHECK_FALSE(terminal.output.empty());
+}
+
+TEST_CASE("scene stop handles pre-owner preparation failure and foreign registration") {
+  int stopped{}, foreign{};
+  ui::SceneOptions options;
+
+  options.application.framesPerSecond = 0;
+
+  auto scene = ui::scene(ui::label("unprepared"), options);
+
+  scene.onStop([&] {
+    ++stopped;
+  });
+
+  std::thread worker([&] {
+    scene.onStop([&] {
+      ++foreign;
+    });
+
+    const auto closed = scene.close();
+
+    REQUIRE_FALSE(closed);
+    CHECK(treeCause(closed.error(), TreeError::WRONG_THREAD));
+  });
+
+  worker.join();
+  CHECK_FALSE(scene.prepareChecked());
+  CHECK(stopped == 1);
+  CHECK(foreign == 0);
+  take(scene.close());
+  CHECK(stopped == 1);
+}
+
+TEST_CASE("scene stop retains an exact secondary error without a managed owner") {
+  ui::SceneOptions options;
+  int stopped{};
+
+  options.application.framesPerSecond = 0;
+
+  auto scene = ui::scene(ui::label("unprepared"), options);
+  const auto origin = std::source_location::current();
+  const ApplicationError shutdown{ApplicationPhase::STOP, TerminalError{TerminalErrorKind::SYSTEM, 37},
+                                  TerminalError{TerminalErrorKind::SYSTEM, 41}};
+
+  scene.onStop([&]() -> std::expected<void, ManagedError> {
+    ++stopped;
+    ManagedError failure{ManagedPhase::CLEANUP, {}, shutdown, shutdown, {}};
+
+    failure.operation = "provider.stop";
+    failure.operationOrigin = origin;
+    failure.registrationOrigin = origin;
+
+    return std::unexpected(failure);
+  });
+
+  const auto result = scene.prepareChecked();
+
+  REQUIRE_FALSE(result);
+  CHECK(result.error().phase == ManagedPhase::PREPARE);
+  CHECK(result.error().cleanup == TreeError::CALLBACK_FAILED);
+
+  const auto diagnostics = take(scene.diagnostics());
+
+  REQUIRE(diagnostics.errors.size() == 2);
+  const auto &secondary = diagnostics.errors[1];
+
+  CHECK(std::string_view(secondary.error.operation) == "provider.stop");
+  CHECK(secondary.origin.line() == origin.line());
+  CHECK(secondary.error.registrationOrigin->line() == origin.line());
+  REQUIRE(std::holds_alternative<ApplicationError>(secondary.error.cause));
+  const auto &cause = std::get<ApplicationError>(secondary.error.cause);
+
+  CHECK(cause.phase == ApplicationPhase::STOP);
+  CHECK(std::get<TerminalError>(cause.cause).native_code == 37);
+  REQUIRE(cause.restoration);
+  CHECK(cause.restoration->native_code == 41);
+  REQUIRE(secondary.error.application);
+  CHECK(secondary.error.application->restoration->native_code == 41);
+  CHECK(stopped == 1);
+  take(scene.close());
+  CHECK(take(scene.diagnostics()).errors.size() == 2);
+
+  options.managed.diagnostics.maxErrors = 1;
+
+  auto limited = ui::scene(ui::label("bounded fallback"), options);
+
+  limited.onStop([&]() -> std::expected<void, ManagedError> {
+    return std::unexpected(ManagedError{ManagedPhase::CLEANUP, {}, shutdown, {}, {}});
+  });
+  CHECK_FALSE(limited.prepareChecked());
+
+  const auto bounded = take(limited.diagnostics());
+
+  CHECK(bounded.errors.size() == 1);
+  CHECK(bounded.droppedErrors == 1);
+}
+
+TEST_CASE("scene direct quit rejects shutdown reentry before completed state") {
+  for (const bool run : {false, true}) {
+    example::ReplayTerminal terminal({}, 100, {30, 4});
+    ui::SceneOptions options;
+    int stopped{};
+
+    options.clock = terminal.clock();
+
+    auto scene = ui::scene(ui::label("mounted"), options);
+    const auto observer = scene.ref();
+
+    scene.onStop([&] {
+      ++stopped;
+
+      const auto direct = scene.quit();
+      const auto weak = observer.quit();
+
+      CHECK_FALSE(direct);
+
+      if (!direct) {
+        CHECK(treeCause(direct.error(), TreeError::WOULD_BLOCK));
+      }
+
+      REQUIRE_FALSE(weak);
+      CHECK(treeCause(weak.error(), run ? TreeError::WOULD_BLOCK : TreeError::CLOSED));
+    });
+
+    if (run) {
+      take(scene.run(terminal));
+    } else {
+      take(scene.prepareChecked());
+      take(scene.close());
+    }
+
+    CHECK(scene.checked());
+    CHECK(stopped == 1);
+  }
+}
+
+TEST_CASE("managed run rejects a stop hook before entering application terminal work") {
+  struct CountingTerminal : example::ReplayTerminal {
+    using example::ReplayTerminal::ReplayTerminal;
+    mutable int sizes{};
+    int reads{};
+
+    std::expected<CellSize, TerminalError> size() const override {
+      ++sizes;
+
+      return example::ReplayTerminal::size();
+    }
+
+    TerminalRead read(TerminalDeadline deadline, std::stop_token stop) override {
+      ++reads;
+
+      return example::ReplayTerminal::read(deadline, stop);
+    }
+  } terminal({}, 100, {30, 4});
+
+  ui::SceneOptions options;
+  ui::Ref<Label> label;
+  ManagedScene *owner{};
+
+  options.clock = terminal.clock();
+
+  auto scene = ui::scene(
+    [&](ManagedScene &managed) {
+      owner = &managed;
+
+      return ui::label(label, "mounted");
+    },
+    options);
+
+  scene.onStop([&] {
+    const auto result = owner->run(terminal);
+
+    REQUIRE_FALSE(result);
+    CHECK(treeCause(result.error(), TreeError::WOULD_BLOCK));
+    CHECK(terminal.sizes == 0);
+    CHECK(terminal.reads == 0);
+    CHECK_FALSE(terminal.closed);
+    CHECK(terminal.output.empty());
+    CHECK(take(label.text().get()) == "mounted");
+  });
+  take(scene.prepareChecked());
+  take(scene.close());
 }
 
 TEST_CASE("standard scene execution supports deferred idempotent quit") {
@@ -4131,4 +4583,350 @@ TEST_CASE("U125 prepared callback close revokes current publication before captu
   CHECK(later == 1);
   CHECK(outer.run(terminal));
   CHECK_FALSE(terminal.output.empty());
+}
+
+TEST_CASE("unbound checkbox owns its state and commits before the business callback") {
+  using namespace portals;
+
+  for (const auto initial : {false, true}) {
+    ui::Ref<CheckBox> box;
+    int changes{};
+    auto scene =
+      ui::scene(ui::checkbox("Alerts", initial, [&](CheckBoxResult result) -> std::expected<void, TreeError> {
+                  REQUIRE(result);
+                  CHECK(result->changed);
+                  CHECK(result->snapshot->value == !initial);
+                  ++changes;
+
+                  return {};
+                }).reference(box));
+
+    take(scene.prepareChecked());
+
+    auto &owner = take(scene.managed()).get();
+    auto &application = ui::detail::SceneAccess::application(owner);
+
+    take(application.tree().read(box.node(), [initial](const CheckBox &value) {
+      CHECK(value.checked() == initial);
+    }));
+    take(application.router().invoke(box.node(), ActionEvent{Action::ACTIVATE}));
+    take(application.tree().read(box.node(), [initial](const CheckBox &value) {
+      CHECK(value.checked() == !initial);
+    }));
+    CHECK(changes == 1);
+    CHECK(scene.close());
+  }
+}
+
+TEST_CASE("unbound checkbox partial mount retires unpublished refs and internal state") {
+  using namespace portals;
+
+  ui::SceneOptions policies;
+  ui::Ref<CheckBox> first;
+  ui::Ref<CheckBox> second;
+
+  policies.managed.maxStates = 1;
+
+  auto scene =
+    ui::scene(ui::vbox(ui::checkbox("First").reference(first), ui::checkbox("Second").reference(second)), policies);
+  const auto prepared = scene.prepareChecked();
+
+  REQUIRE_FALSE(prepared);
+  CHECK(prepared.error().phase == ManagedPhase::STATE);
+  CHECK(treeCause(prepared.error(), TreeError::NODE_LIMIT));
+  CHECK_FALSE(first.node().id().generation);
+  CHECK_FALSE(second.node().id().generation);
+  CHECK(scene.close());
+}
+
+TEST_CASE("unbound checkbox mount reports state allocation failure and retires the partial recipe") {
+  using namespace portals;
+
+  constexpr std::ptrdiff_t MAX_MOUNT_FAILURE_BUDGET = 256;
+  bool stateFailure{};
+  bool completed{};
+
+  for (std::ptrdiff_t budget = 0; budget <= MAX_MOUNT_FAILURE_BUDGET; ++budget) {
+    ui::Ref<CheckBox> box;
+    auto scene = ui::scene(ui::checkbox("Alerts").reference(box));
+
+    allocationsBeforeFailure = budget;
+
+    const auto prepared = scene.prepareChecked();
+
+    allocationsBeforeFailure = -1;
+
+    if (prepared) {
+      completed = true;
+
+      break;
+    }
+
+    if (prepared.error().phase == ManagedPhase::STATE) {
+      stateFailure = true;
+      CHECK(treeCause(prepared.error(), TreeError::NO_MEMORY));
+      CHECK(box.node() == Node<CheckBox>{});
+    }
+
+    CHECK(scene.close());
+  }
+
+  CHECK(stateFailure);
+  CHECK(completed);
+}
+
+TEST_CASE("input decoder empty lifecycle remains allocation free before checkbox mount") {
+  using namespace portals;
+
+  static_assert(std::is_nothrow_move_constructible_v<InputDecoder>);
+  static_assert(std::is_nothrow_move_assignable_v<InputDecoder>);
+  bool created{};
+  const auto previousTerminate = std::set_terminate(oomTerminate);
+
+  try {
+    allocationsBeforeFailure = 0;
+
+    {
+      auto decoder = InputDecoder::create();
+
+      created = decoder.has_value();
+
+      if (decoder) {
+        InputDecoder moved(std::move(*decoder));
+
+        decoder->reset();
+        *decoder = std::move(moved);
+        decoder->reset();
+        moved.reset();
+      }
+    }
+
+    allocationsBeforeFailure = -1;
+    std::set_terminate(previousTerminate);
+  } catch (...) {
+    allocationsBeforeFailure = -1;
+    std::set_terminate(previousTerminate);
+
+    throw;
+  }
+
+  CHECK(created);
+}
+
+TEST_CASE("readonly process snapshots preserve allocation failures as typed errors") {
+  using namespace portals;
+
+  const char *arguments[]{"synthetic-test"};
+
+  allocationsBeforeFailure = 0;
+
+  const auto args = ui::app::Arguments::capture(1, arguments);
+
+  allocationsBeforeFailure = -1;
+
+  REQUIRE_FALSE(args);
+  CHECK(args.error() == ui::app::ProcessContextError::NO_MEMORY);
+
+#ifdef _WIN32
+  const std::array entries{ui::app::Environment::Entry{"KNOWN", "value"}};
+  const auto environment = ui::app::Environment::fromEntries(entries);
+
+  REQUIRE(environment);
+
+  allocationsBeforeFailure = 0;
+
+  const auto queried = environment->get("A_SYNTHETIC_QUERY_LONG_ENOUGH_TO_REQUIRE_UTF16_STORAGE");
+
+  allocationsBeforeFailure = -1;
+
+  REQUIRE_FALSE(queried);
+  CHECK(queried.error() == ui::app::ProcessContextError::NO_MEMORY);
+#endif
+}
+
+TEST_CASE("CLI preflight sustained OOM reports before terminal acquisition") {
+  using namespace portals;
+
+  const char *arguments[]{"synthetic-cli-oom"};
+  const auto environment = ui::app::Environment::fromEntries({});
+
+  REQUIRE(environment);
+  const auto beforeInitialization = ui::app::args();
+
+  REQUIRE_FALSE(beforeInitialization);
+  CHECK(beforeInitialization.error() == ui::app::ProcessContextError::UNINITIALIZED);
+
+  struct UntouchedTerminal : example::ReplayTerminal {
+    mutable int queries{};
+
+    std::expected<CellSize, TerminalError> size() const override {
+      ++queries;
+
+      return example::ReplayTerminal::size();
+    }
+  };
+
+  const auto checkPreflight = [&](bool expectedParser, bool allocateMessage = false) {
+    UntouchedTerminal terminal;
+    int mounted{}, reports{}, status{};
+    bool parsed{}, typedFailure{}, emptyDiagnostic{}, managedFailure{}, contextFailure{};
+    auto owner = ui::scene([&](ManagedScene &) {
+      ++mounted;
+
+      return ui::label("never mounted");
+    });
+
+    owner.reportOnError([&](const ui::SceneReport &report) {
+      ++reports;
+      typedFailure =
+        report.commandLineFailure && report.commandLineFailure->code == ui::CommandLineErrorCode::NO_MEMORY;
+      emptyDiagnostic = report.commandLineFailure && report.commandLineFailure->message.empty();
+      contextFailure = report.commandLineFailure &&
+                       report.commandLineFailure->processContext == ui::app::ProcessContextError::NO_MEMORY;
+      managedFailure = report.failure.has_value();
+    });
+
+    ui::CommandLineParser parser =
+      [&](const ui::app::Arguments &) -> std::expected<ui::LaunchAction, ui::CommandLineError> {
+      parsed = true;
+
+      if (allocateMessage) {
+        return std::unexpected(ui::CommandLineError{ui::CommandLineErrorCode::INVALID_ARGUMENT,
+                                                    "new nonempty diagnostic requires an allocation"});
+      }
+
+      throw std::bad_alloc();
+    };
+    const auto previousTerminate = std::set_terminate(oomTerminate);
+
+    try {
+      allocationsBeforeFailure = 0;
+      status = owner.runApp(terminal, 1, arguments, std::move(parser));
+      allocationsBeforeFailure = -1;
+      std::set_terminate(previousTerminate);
+    } catch (...) {
+      allocationsBeforeFailure = -1;
+      std::set_terminate(previousTerminate);
+
+      throw;
+    }
+
+    CHECK(status == 2);
+    CHECK(parsed == expectedParser);
+    CHECK(typedFailure);
+    CHECK(emptyDiagnostic);
+    CHECK(contextFailure == !expectedParser);
+    CHECK_FALSE(managedFailure);
+    CHECK(reports == 1);
+    CHECK(mounted == 0);
+    CHECK(terminal.queries == 0);
+    CHECK_FALSE(terminal.closed);
+  };
+
+  checkPreflight(false);
+  REQUIRE(ui::app::initialize(1, arguments, *environment));
+  checkPreflight(true);
+  checkPreflight(true, true);
+
+  static_assert(std::is_nothrow_default_constructible_v<ui::LaunchText>);
+  static_assert(std::is_nothrow_copy_constructible_v<ui::LaunchText>);
+  static_assert(std::is_nothrow_move_constructible_v<ui::LaunchText>);
+  static_assert(std::is_nothrow_copy_assignable_v<ui::LaunchText>);
+  static_assert(std::is_nothrow_move_assignable_v<ui::LaunchText>);
+  static_assert(std::is_nothrow_copy_constructible_v<ui::CommandLineError>);
+  static_assert(std::is_nothrow_move_constructible_v<ui::CommandLineError>);
+  static_assert(std::is_nothrow_copy_constructible_v<ui::LaunchAction>);
+  static_assert(std::is_nothrow_move_constructible_v<ui::LaunchAction>);
+
+  constexpr const char *ORIGINAL_MESSAGE = "original CLI message retained after source and parser retirement";
+  ui::CommandLineError original;
+
+  {
+    std::string source(ORIGINAL_MESSAGE);
+
+    original = {ui::CommandLineErrorCode::INVALID_ARGUMENT, source};
+    source.assign("changed source");
+  }
+
+  const ui::LaunchAction output{ui::LaunchDisposition::FINISH, std::string("synthetic help output\n")};
+  UntouchedTerminal terminal;
+  std::optional<ui::SceneReport> retained;
+  int retired{}, nestedStatus{}, reportReentry{}, reports{}, status{};
+  bool emptyText{}, ownedText{}, outputText{};
+  auto owner = ui::scene(ui::label("never mounted"));
+
+  struct Retirement {
+    ui::Scene &owner;
+    UntouchedTerminal &terminal;
+    int &retired;
+    int &status;
+
+    ~Retirement() {
+      ++retired;
+      status = owner.runApp(terminal);
+    }
+  };
+
+  owner.reportOnError([&](const ui::SceneReport &report) {
+    ++reports;
+    retained.emplace(report);
+    reportReentry = owner.runApp(terminal);
+  });
+
+  ui::CommandLineParser parser =
+    [failure = original,
+     retirement = std::unique_ptr<Retirement>(new Retirement{owner, terminal, retired, nestedStatus})](
+      const ui::app::Arguments &) -> std::expected<ui::LaunchAction, ui::CommandLineError> {
+    return std::unexpected(failure);
+  };
+  const auto previousTerminate = std::set_terminate(oomTerminate);
+
+  try {
+    allocationsBeforeFailure = 0;
+
+    ui::LaunchText empty;
+    ui::LaunchText emptyView(std::string_view{});
+    ui::LaunchText null(nullptr);
+    ui::LaunchText copy(original.message);
+    ui::LaunchText moved(std::move(copy));
+    ui::LaunchText assigned;
+
+    assigned = original.message;
+    emptyText = empty.empty() && emptyView.empty() && null.empty() && copy.empty() && empty.data()[0] == '\0';
+    ownedText = moved == ORIGINAL_MESSAGE && assigned == original.message && moved.data() == original.message.data();
+
+    ui::LaunchAction copiedOutput(output);
+    ui::LaunchAction movedOutput(std::move(copiedOutput));
+    std::expected<ui::LaunchAction, ui::CommandLineError> outputResult(std::in_place, movedOutput);
+
+    outputText = outputResult->output.view() == "synthetic help output\n" &&
+                 outputResult->output.find("help") != std::string_view::npos &&
+                 outputResult->output.size() == output.output.size() &&
+                 outputResult->output.data() == output.output.data();
+    status = owner.runApp(terminal, 1, arguments, std::move(parser));
+    allocationsBeforeFailure = -1;
+    std::set_terminate(previousTerminate);
+  } catch (...) {
+    allocationsBeforeFailure = -1;
+    std::set_terminate(previousTerminate);
+
+    throw;
+  }
+
+  CHECK(emptyText);
+  CHECK(ownedText);
+  CHECK(outputText);
+  CHECK(status == 2);
+  CHECK(retired == 1);
+  CHECK(nestedStatus == 1);
+  CHECK(reportReentry == 1);
+  CHECK(reports == 1);
+  REQUIRE(retained);
+  REQUIRE(retained->commandLineFailure);
+  CHECK(retained->commandLineFailure->code == ui::CommandLineErrorCode::INVALID_ARGUMENT);
+  CHECK(retained->commandLineFailure->message == ORIGINAL_MESSAGE);
+  REQUIRE(retained->failure);
+  CHECK(treeCause(*retained->failure, TreeError::WOULD_BLOCK));
+  CHECK(terminal.queries == 0);
+  CHECK_FALSE(terminal.closed);
 }

@@ -107,12 +107,13 @@ Run the executable from a native terminal:
 ```text
 portals_gallery
 portals_gallery --theme nord
-portals_gallery --check
+portals_gallery --help
 ```
 
 The interactive gallery supports keyboard editing, focus traversal, checkbox and
 button activation, mouse input and resize. F2 cycles themes; F10 exits.
-`--check` runs a finite in-memory replay and exits without opening a terminal.
+`--help` prints the native Lyra help and exits before opening a terminal.
+Finite replay checks use the separate `portals_gallery_check` test harness.
 See [runnable examples](examples.md) for build paths, options and exit codes.
 
 The basic-control tests cover activation, ancestor eligibility, Unicode ownership,

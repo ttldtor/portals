@@ -1,7 +1,8 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
-#include "common.hpp"
+#include "../../../../examples/gallery/common.hpp"
+#include "application_report.hpp"
 #include <portals/managed.hpp>
 
 namespace example {

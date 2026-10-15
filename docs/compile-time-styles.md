@@ -94,15 +94,26 @@ revokes controllers attached before the transition; attach a new controller afte
 
 ## Complete example
 
-The [static-style program](../tests/package_consumer/static_styles.cpp) changes a
-palette, overrides its background and updates a button's minimum width.
-It uses a finite replay terminal and closes the scene when the replay ends.
-`--failure` exercises a typed style error and cleanup.
+The two programs below change a palette, override its background, change a
+button's minimum width, resize and close the same replay terminal. `--failure`
+checks a typed style error and scene cleanup. Partial scene configuration or
+mount failure retains the existing managed rollback and error-reporting contract.
+
+- [Before: runtime stylesheet](https://github.com/ttldtor/portals/blob/main/tests/package_consumer/static_styles_dynamic.cpp).
+- [After: static rules and live parameters](https://github.com/ttldtor/portals/blob/main/tests/package_consumer/static_styles.cpp).
+- [Shared setup, errors and cleanup](https://github.com/ttldtor/portals/blob/main/tests/package_consumer/static_styles_support.hpp).
+- [Shared replay terminal](https://github.com/ttldtor/portals/blob/main/tests/support/examples/replay/terminal.hpp).
+
+### Before
+
+\include{lineno} static_styles_dynamic.cpp
+
+### After
 
 \include{lineno} static_styles.cpp
 
 Its [shared setup](../tests/package_consumer/static_styles_support.hpp) supplies
-error handling and the [replay terminal](../examples/replay/terminal.hpp).
+error handling and the [replay terminal](../tests/support/examples/replay/terminal.hpp).
 
 \include{lineno} static_styles_support.hpp
 

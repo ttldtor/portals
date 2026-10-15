@@ -10,6 +10,7 @@ Start with a declarative scene, then choose the task you need.
 |---|---|
 | Build and run a first application | [Short guide](index.md) |
 | Declare controls and event handlers | [Declarative UI](declarative-ui.md) |
+| Parse CLI before opening the terminal and read process snapshots | [Command-line startup](cli.md) |
 | Write PSS or load a stylesheet | [Styles](styling-guide.md) |
 | Choose or update a palette | [Themes](themes-guide.md) |
 | Connect state, references and events | [Bindings and events](bindings-guide.md) |

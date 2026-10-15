@@ -104,7 +104,7 @@ The native overload requires the default steady clock. The custom
 supports an injected monotonic clock. Its millisecond epoch must map directly to
 the terminal's `TerminalDeadline`; mixing a fake epoch with native I/O is rejected.
 Custom transports must honor the configured batch bounds and own their results.
-Both overloads are single-use. See `examples/replay/terminal.hpp` for an in-memory
+Both overloads are single-use. See `tests/support/examples/replay/terminal.hpp` for an in-memory
 transport; it is example code, not a second production terminal backend.
 
 An optional borrowed `ApplicationObserver` receives preparation/render, encode,
@@ -118,7 +118,7 @@ benchmarks own and bound their sample storage.
 Diagnostics remain disabled unless explicitly configured on the scheduler.
 Input correlation enters at admission, survives CONTROL delivery and frame
 preparation, and reaches the actual writer submission/output. Export snapshots
-only after `run` restores the terminal, as the dashboard's `--trace` demonstrates.
+only after `run` restores the terminal, as the finite dashboard diagnostic check demonstrates.
 EOF, cancellation, and output failure are observable outcomes, not evidence that
 a real terminal visually displayed a frame.
 

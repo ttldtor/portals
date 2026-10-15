@@ -1,3 +1,0 @@
-add_executable(portals_replay_example main.cpp)
-target_link_libraries(portals_replay_example PRIVATE portals::core)
-portals_enable_warnings(portals_replay_example)

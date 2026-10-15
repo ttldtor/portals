@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
-#include "../../examples/replay/terminal.hpp"
+#include "../../tests/support/examples/gallery/application_report.hpp"
+#include "../../tests/support/examples/replay/terminal.hpp"
 #include "../../tests/support/vt_oracle.hpp"
 #include "measurement.hpp"
 #include <charconv>
@@ -24,7 +25,7 @@ constexpr std::size_t CAPTURE_LIMIT = 16;
 constexpr std::size_t ENCODING_REPETITIONS = 20;
 
 struct Options {
-  dashboard::Options workload;
+  dashboard_test::Options workload;
   std::uint32_t fps{30};
   std::uint64_t warmupMs{5000}, durationMs{30000};
   std::size_t capacity{65536};
@@ -193,7 +194,7 @@ struct Measurements {
     self.ingress.add(elapsed, self.active);
   }
 
-  Boundary snapshot(Application &app, dashboard::Scene &scene, const CountedTerminal &terminal) const {
+  Boundary snapshot(Application &app, dashboard_test::Scene &scene, const CountedTerminal &terminal) const {
     Boundary result;
 
     result.wall = Clock::now();
@@ -217,7 +218,7 @@ struct Measurements {
 
 class ObservedScene final : public ApplicationScene {
 public:
-  explicit ObservedScene(dashboard::Scene &scene) : scene_(scene) {
+  explicit ObservedScene(dashboard_test::Scene &scene) : scene_(scene) {
   }
 
   std::expected<void, TreeError> prepare(Application &app, CellSize size) override {
@@ -265,7 +266,7 @@ public:
   bool providerStopped{}, quit{};
 
 private:
-  dashboard::Scene &scene_;
+  dashboard_test::Scene &scene_;
 };
 
 void quoted(std::ostream &out, std::string_view value) {
@@ -347,7 +348,7 @@ void boundary(std::ostream &out, const Boundary &b) {
 }
 
 int writeResult(std::ostream &out, const Options &options, const Measurements &m, Application &app,
-                dashboard::Scene &scene, const ObservedScene &observed, const CountedTerminal &terminal,
+                dashboard_test::Scene &scene, const ObservedScene &observed, const CountedTerminal &terminal,
                 CellSize initialSize, std::uint64_t nativeOpenNs,
                 const std::expected<ApplicationStats, ApplicationError> &result,
                 const DiagnosticSnapshot &diagnostics) {
@@ -408,7 +409,7 @@ int writeResult(std::ostream &out, const Options &options, const Measurements &m
 #endif
   out << ",\"transport\":";
   quoted(out, options.transport);
-  out << ",\"generator\":\"dashboard::syntheticPrice index+seed v1\",\"configured_rate\":" << options.workload.rate
+  out << ",\"generator\":\"dashboard_test::syntheticPrice index+seed v1\",\"configured_rate\":" << options.workload.rate
       << ",\"seed\":" << options.workload.seed << ",\"rows\":" << options.workload.rows
       << ",\"fps_cap\":" << options.fps << ",\"warmup_ms\":" << options.warmupMs
       << ",\"duration_ms\":" << options.durationMs << ",\"delay_ms\":" << options.workload.delayMs
@@ -551,10 +552,10 @@ void encodingBenchmark(std::ostream &out, const Options &options) {
   ApplicationOptions config;
   config.writer.colorMode = options.ansi16 ? ColorMode::ANSI16 : ColorMode::TRUE_COLOR;
   auto app = take(Application::create(config, capture.clock()));
-  dashboard::Options workload;
+  dashboard_test::Options workload;
   workload.seed = options.workload.seed;
   workload.ascii = true;
-  dashboard::Scene scene(*app, workload);
+  dashboard_test::Scene scene(*app, workload);
 
   take(app->run(scene, capture));
 
@@ -673,7 +674,7 @@ int run(const Options &options, std::ostream &report) {
   workload.ingressObserver = Measurements::displayIngress;
   workload.ingressContext = &measurements;
 
-  dashboard::Scene scene(*app, workload);
+  dashboard_test::Scene scene(*app, workload);
   ObservedScene observed(scene);
   std::unique_ptr<ApplicationTerminal> transport;
   std::uint64_t nativeOpenNs{};

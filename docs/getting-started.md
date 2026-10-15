@@ -1,10 +1,13 @@
 # Building Portals and its examples {#getting-started}
 
-This page covers building Portals from source, testing the library and running
-the examples in its repository. To create your own application, start with the
-[short guide](index.md). To use an installed library, see [package setup](package.md).
-The [architecture](architecture.md) explains ownership and data flow;
-[limitations](limitations.md) defines release boundaries.
+Portals provides a C++23 static library and five runnable terminal examples.
+Start with the gallery, then use the dashboard or custom widget to explore the
+same [Application runner](application.md). The [architecture](architecture.md)
+explains ownership and data flow; [limitations](limitations.md) defines the
+boundaries of this release.
+
+The [documentation guide](index.md) gives the reading order and separates
+application guides from core contracts and contributor material.
 
 ## Build from source
 
@@ -51,54 +54,75 @@ In a terminal with native input/output attached, run:
 ./build/windows-msvc-debug/examples/gallery/portals_gallery
 ./build/windows-msvc-debug/examples/dashboard/portals_dashboard --rate 10000 --fps 30 --rows 1000000
 ./build/windows-msvc-debug/examples/custom_widget/portals_custom_widget
-./build/windows-msvc-debug/examples/replay/portals_replay_example
+./build/windows-msvc-debug/examples/editor_history/portals_editor_history
+./build/windows-msvc-debug/examples/click_handlers/portals_click_handlers
 ```
 
 On Linux substitute `build/linux-gcc-debug`. F10 or Ctrl+C exits. Gallery:
 Tab changes focus, Enter commits/activates, F2 changes theme. Dashboard: arrows,
-Home and End navigate the table, Enter commits the note, F2 changes theme.
+Home and End navigate the table; valid note edits apply immediately, and F2 changes theme.
 Custom widget: Left/Right adjusts the meter. [Examples](examples.md) describes
 synthetic/replay sources, delay, ASCII and ANSI16 options.
 
-Each executable also accepts `--check`. These finite checks use an in-memory
-terminal and logical clock, exit automatically, and print results after close.
-They verify runner behavior without requiring a native terminal; they do not
-establish physical display compatibility or native restoration.
+The gallery also accepts `--theme NAME` (or `-t NAME`), `--ansi16` and `--help`.
+Its native Lyra schema runs before any terminal is opened; help returns zero,
+and invalid options return two. The public program has no `--check` mode.
+
+Finite checks live in separate test harnesses and the installed-package consumer.
+They use an in-memory terminal and logical clock, exit automatically, and verify
+runner behavior without establishing physical display compatibility.
 
 ## Your own main
 
-Start with the compact declarative example in the [short library guide](index.md).
-Its runner executes the scene and reports failure after attempted cleanup;
-the [recipe](glossary.md#glossary-recipe) is constructed before the final `runApp` stage. Use the factory-based
-`ui::runApp(factory, setup)` overload when recipe construction also needs the
-checked boundary. [Declarative composition](declarative-ui.md) documents these
-construction and reporting boundaries.
-
-The gallery uses the same exit/report policy through its owning `Form`:
+Start with [the complete click-handler program](../examples/click_handlers/main.cpp)
+and [declarative composition](declarative-ui.md). Describe controls, attach handlers,
+and finish the scene with `ui::runApp()`. The owning scene retains the application,
+models, bindings and standard presentation adapters. Ref copies observe controls.
 
 ```cpp
-auto app = example::take(portals::Application::create());
-gallery::Form form(*app);
+#include <portals/ui.hpp>
 
-return form.runApp();
+int main() {
+  using namespace portals;
+
+  ui::Ref<LineEdit> message;
+  ui::Ref<Button> add;
+  auto scene = ui::scene(ui::vbox(ui::lineEdit(message, ""), ui::button(add, "Add Hello")));
+
+  return scene
+    | ui::onClick(add, [message] {
+           message.text() += "Hello!";
+         })
+    | ui::onKey(key::F10, ui::quit)
+    | ui::runApp();
+}
 ```
 
-`example::take` is an example helper, not public API. See the complete
-[gallery source](../examples/gallery/main.cpp) for CLI and check-mode handling.
-For embedding with an explicit result instead of the standard final reporter,
-use typed `run()` and inspect its `expected` result.
-
-Custom adapters and widgets are covered by [managed controls](managed-controls.md)
-and [Application](application.md); they keep explicit ownership and preparation
-contracts. The [meter source](../examples/custom_widget/meter.hpp) demonstrates
-an independent immutable model and managed preparation.
+The final stage returns zero on success or a failure code after cleanup and default
+error reporting. There is no application-written event loop or stop source here.
+For a larger complete form, read [the gallery function](../examples/gallery/fluent_form.hpp)
+and its [entry point](../examples/gallery/main.cpp). The form returns a lazy
+scene from `gallery::form(ui::opts(options))`; a native Lyra declaration fills
+the caller-owned options through the final `ui::runApp(argc, argv, parser)` stage.
+The options must outlive the synchronous call. See [CLI startup](cli.md) for
+`ui::lyra::cli`, typed errors, help/version and read-only process snapshots.
+[Managed controls](managed-controls.md) explains custom presentation adapters.
+For explicit low-level ownership, [Application](application.md) shows a small
+button program with an `ApplicationScene` and a retained scoped binding.
+Derive `ApplicationScene` when managing commands and preparation yourself. In
+`prepare`, synchronize bindings, pin each model once, prepare its sibling
+views at their final extents, then handle returned provider requests outside
+rendering. A custom widget implements `measure/arrange/paint`; prepare its
+owning presentation before paint. `examples/custom_widget/meter.hpp` shows
+an independent immutable model and a managed preparation adapter.
 
 ## Diagnose an action
 
 ```text
-portals_dashboard --rate 0 --trace trace.json
+portals_dashboard_check --rate 0 --trace trace.json
 ```
 
+This command runs the test-owned diagnostic harness, built with `PORTALS_BUILD_TESTS=ON`.
 Tab to Inspect and press Enter. Inspect assigns the note its existing value.
 After exit, the metadata export can distinguish `handler_returned`,
 `value_unchanged` and `frame_not_requested`. Export occurs after restoration;
@@ -111,6 +135,9 @@ metadata differs from the versioned semantic replay format in [testing](testing.
 Use `add_subdirectory` and `portals::core` when embedding the source, or
 `find_package(Portals CONFIG REQUIRED)` for an installed package.
 [Package](package.md) supplies install, relocation and external consumer commands.
+For the optional Lyra adapter, link `portals::lyra`; its headers, BSL-1.0 license
+and pinned manifest are included in the offline SDK. Core-only applications
+continue to link `portals::core`.
 
 For HTML documentation, install Doxygen 1.18 or newer and Mermaid CLI. The
 verified diagram toolchain is Node.js 24 LTS with Mermaid CLI 12. In PowerShell:

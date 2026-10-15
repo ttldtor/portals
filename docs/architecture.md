@@ -89,7 +89,7 @@ cause rather than an unbounded cause list. Handler return proves neither a domai
 change nor a displayed frame. A real update can produce an empty diff.
 Transport acceptance proves no physical display. Ring losses and incomplete
 chains remain explicit. [Diagnostics](diagnostics.md) defines these distinctions;
-the dashboard exports `--trace` only after terminal restoration.
+the test-owned dashboard diagnostic check exports `--trace` only after terminal restoration.
 
 ## Ownership and shutdown
 

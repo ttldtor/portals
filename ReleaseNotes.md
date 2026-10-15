@@ -5,6 +5,29 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Added] Optional `portals::lyra` and `ui::lyra::cli` adapt native Lyra declarations
+  to lazy command-line startup, with help/version before terminal acquisition and
+  owning typed CLI diagnostics. Lyra 1.8.0 headers, BSL-1.0 notice and provenance
+  manifest ship in the offline SDK. Read-only argument/environment snapshots and
+  borrowed `ui::opts` supply launch data without a second application runtime.
+- [Changed] The gallery is an ordinary `gallery::form(ui::opts(options))` function
+  returning a lazy owning scene. Its native Lyra schema fills theme/color options
+  before writer settings or mounting; internal editor/checkbox state and standard
+  quit/theme handlers replace the stationary public wrapper and manual argv loop.
+
+- [Added] Owning scene factories and configuration callbacks can opt into the
+  existing UI-affine `Application` alongside `ManagedScene`; compatible one-argument
+  callbacks keep priority. `Scene::onStop` owns one shutdown callback, runs it once
+  before nodes/models retire, and preserves typed failures while attempting cleanup.
+
+- [Changed] Public gallery, dashboard, custom-widget and editor-history examples
+  use the owning declarative scene and standard `runApp` exit policy. Finite replay,
+  low-level comparison and stress fixtures live under tests; their `--check` and
+  `--stress` modes are no longer options of the interactive public executables.
+  The installed consumer and offline bundles include the separate finite harnesses.
+  Public introductory styles use runtime PSS strings; compile-time styles remain
+  optional experimental material.
+
 - [Added] Scoped current-scene `ui::quit()` and bare `ui::quit` key/click commands.
   Weak UI execution context follows setup and owned callbacks, restores across
   nested scenes and exceptions, and is suspended during independent cleanup.

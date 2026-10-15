@@ -1,10 +1,11 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
-#include "../examples/dashboard/dashboard.hpp"
-#include "../examples/replay/terminal.hpp"
+#include "support/examples/dashboard/dashboard.hpp"
 #include "support/dashboard_before.hpp"
+#include "support/examples/replay/terminal.hpp"
 #include "support/vt_oracle.hpp"
 #include <functional>
+#include <iostream>
 #include <source_location>
 
 namespace {
@@ -23,7 +24,7 @@ void losslessAndSaturated(bool replay) {
   application.scheduler.data_capacity = application.scheduler.data_budget = 1;
   application.scheduler.control_capacity = application.scheduler.control_budget = 1;
   auto app = take(Application::create(application, terminal.clock()));
-  dashboard::Options options;
+  dashboard_test::Options options;
   options.rate = 10000;
   options.replay = replay;
   std::size_t ingressSamples{};
@@ -32,7 +33,7 @@ void losslessAndSaturated(bool replay) {
   };
   options.ingressContext = &ingressSamples;
 
-  dashboard::Scene scene(*app, options);
+  dashboard_test::Scene scene(*app, options);
 
   const auto result = take(app->run(scene, terminal));
   check(terminal.closed && scene.tickCount() == 10000 && scene.scheduledTicks() == 10000);
@@ -42,8 +43,8 @@ void losslessAndSaturated(bool replay) {
   double first{}, last{}, high = -1e9, low = 1e9;
 
   for (std::uint64_t i = 0; i != 10000; ++i) {
-    const auto price =
-      replay ? example::REPLAY_PRICES[i % example::REPLAY_PRICES.size()] : dashboard::syntheticPrice(i, options.seed);
+    const auto price = replay ? example::REPLAY_PRICES[i % example::REPLAY_PRICES.size()]
+                              : dashboard_test::syntheticPrice(i, options.seed);
 
     if (i == 0) {
       first = price;
@@ -70,18 +71,18 @@ void pendingLatestOwnsRejectedValue() {
   auto occupied = take(scheduler->connect<int>(scope, [](auto) {
   }));
   std::uint64_t received{};
-  auto destination = take(scheduler->connect<ModelSnapshot<dashboard::Quote>>(scope, [&](auto snapshot) {
+  auto destination = take(scheduler->connect<ModelSnapshot<dashboard_test::Quote>>(scope, [&](auto snapshot) {
     received = snapshot->revision();
   }));
   take(occupied.publisher.publish(std::make_shared<const int>(1)));
 
-  std::shared_ptr<const ModelSnapshot<dashboard::Quote>> pending =
-    std::make_shared<const dashboard::Snapshot>(9, 1, Ohlc{2, 5, 1, 3}, std::array<RowRange, 1>{{{0, 1}}});
-  std::weak_ptr<const ModelSnapshot<dashboard::Quote>> observer = pending;
-  auto rejected = dashboard::forwardLatest(destination.publisher, pending);
+  std::shared_ptr<const ModelSnapshot<dashboard_test::Quote>> pending =
+    std::make_shared<const dashboard_test::Snapshot>(9, 1, Ohlc{2, 5, 1, 3}, std::array<RowRange, 1>{{{0, 1}}});
+  std::weak_ptr<const ModelSnapshot<dashboard_test::Quote>> observer = pending;
+  auto rejected = dashboard_test::forwardLatest(destination.publisher, pending);
   check(!rejected && rejected.error() == SchedulerError::WOULD_BLOCK && pending && !observer.expired());
   take(scheduler->dispatch());
-  take(dashboard::forwardLatest(destination.publisher, pending));
+  take(dashboard_test::forwardLatest(destination.publisher, pending));
   check(!pending && !observer.expired());
   take(scheduler->dispatch());
   check(received == 9 && observer.expired());
@@ -110,12 +111,12 @@ void delayedRangesAndKeyboard() {
                               {}}},
                             900);
   ApplicationOptions application;
-  dashboard::Scene *observed{};
+  dashboard_test::Scene *observed{};
   bool sawPending{}, sawReady{};
   std::uint64_t firstReady{};
 
   struct Context {
-    dashboard::Scene **scene;
+    dashboard_test::Scene **scene;
     example::ReplayTerminal *terminal;
     bool *pending;
     bool *ready;
@@ -140,10 +141,10 @@ void delayedRangesAndKeyboard() {
                           },
                           &context};
   auto app = take(Application::create(application, terminal.clock()));
-  dashboard::Options options;
+  dashboard_test::Options options;
   options.rate = 0;
   options.delayMs = 250;
-  dashboard::Scene scene(*app, options);
+  dashboard_test::Scene scene(*app, options);
   observed = &scene;
   take(setVirtualTableFirst(app->tree(), scene.table(), 10000));
   bool finalReady{};
@@ -180,12 +181,12 @@ void continuousNavigationKeepsRowsVisible(bool backwards, std::uint64_t delayMs 
 
   ObservedTerminal terminal(std::move(input), RELEASE_AT + 300);
   auto app = take(Application::create({}, terminal.clock()));
-  dashboard::Options options;
+  dashboard_test::Options options;
 
   options.rate = 0;
   options.delayMs = delayMs;
 
-  dashboard::Scene scene(*app, options);
+  dashboard_test::Scene scene(*app, options);
 
   take(app->router().setFocus(scene.table()));
   take(setVirtualTableFirst(app->tree(), scene.table(), initialFirst));
@@ -263,9 +264,9 @@ void noOpDiagnosticAction() {
   options.scheduler.diagnostics = diagnostics;
   example::ReplayTerminal terminal({{100, "\t\t\r", {}}}, 300);
   auto app = take(Application::create(options, terminal.clock()));
-  dashboard::Options data;
+  dashboard_test::Options data;
   data.rate = 0;
-  dashboard::Scene scene(*app, data);
+  dashboard_test::Scene scene(*app, data);
   take(app->run(scene, terminal));
 
   const auto trace = diagnostics->snapshot();
@@ -290,12 +291,12 @@ void delayedLoadingSettles(bool hideDuringLoad) {
   constexpr std::uint64_t IDLE_AT_MS = 800;
   ObservedTerminal terminal({}, 1200);
   auto app = take(Application::create({}, terminal.clock()));
-  dashboard::Options options;
+  dashboard_test::Options options;
 
   options.rate = 0;
   options.delayMs = LOAD_DELAY_MS;
 
-  dashboard::Scene scene(*app, options);
+  dashboard_test::Scene scene(*app, options);
   bool hidden{}, shown{}, idleStarted{}, idleReady{};
   std::size_t idleBytes{};
 
@@ -352,12 +353,12 @@ void continuousNavigationWithMarketTicks() {
 
   ObservedTerminal terminal(std::move(input), REPEAT_END_MS + DELAY_MS + 100);
   auto app = take(Application::create({}, terminal.clock()));
-  dashboard::Options options;
+  dashboard_test::Options options;
 
   options.rate = 1000;
   options.delayMs = DELAY_MS;
 
-  dashboard::Scene scene(*app, options);
+  dashboard_test::Scene scene(*app, options);
   std::size_t readyWhileHeld{};
 
   take(app->router().setFocus(scene.table()));
@@ -389,10 +390,10 @@ void clockJumpRemainsBounded() {
   example::ReplayTerminal terminal({{5000, "\x1bOQ", {}}}, 5000);
 
   auto app = take(Application::create(application, terminal.clock()));
-  dashboard::Options options;
+  dashboard_test::Options options;
   options.rate = 10000;
   options.maxTicksPerPump = 37;
-  dashboard::Scene scene(*app, options);
+  dashboard_test::Scene scene(*app, options);
 
   const auto result = take(app->run(scene, terminal));
   check(scene.scheduledTicks() == 50000 && scene.tickCount() == 37);
@@ -412,11 +413,11 @@ void chartAppearance(bool ascii, bool turbo, ColorMode colorMode = ColorMode::TR
   application.writer.colorMode = colorMode;
 
   auto app = take(Application::create(application, terminal.clock()));
-  dashboard::Options options;
+  dashboard_test::Options options;
 
   options.ascii = ascii;
 
-  dashboard::Scene scene(*app, options);
+  dashboard_test::Scene scene(*app, options);
 
   take(app->run(scene, terminal));
 
@@ -463,13 +464,13 @@ void ordinaryAppearance(bool ascii, bool turbo, ColorMode colorMode, bool resize
   ApplicationOptions application;
   application.writer.colorMode = colorMode;
   auto app = take(Application::create(application, terminal.clock()));
-  dashboard::Options options;
+  dashboard_test::Options options;
   options.rate = rate;
   // Keep the visual/focus fixture warm; the large delayed provider workload has its own exact gate.
   options.rows = 100;
   options.ascii = ascii;
   options.stress = false;
-  dashboard::Scene scene(*app, options);
+  dashboard_test::Scene scene(*app, options);
   test_support::VtOracle oracle(80, 24);
   std::size_t consumed{};
   std::size_t tableHeight{};
@@ -608,7 +609,7 @@ ComparedRun captureRun(bool replay, bool ascii, ColorMode colorMode, std::uint32
   options.delayMs = delay;
   options.replay = replay;
   options.ascii = ascii;
-  if constexpr (std::same_as<Options, dashboard::Options>) {
+  if constexpr (std::same_as<Options, dashboard_test::Options>) {
     options.stress = !compact;
   }
   options.ingressObserver = [](void *context, SchedulerTime latency) {
@@ -679,8 +680,8 @@ void ordinaryBusyInputComparison() {
 
   const auto before = captureRun<dashboard_before::Scene, dashboard_before::Options>(
     false, false, ColorMode::TRUE_COLOR, 1000, 0, false, 0, input);
-  const auto after = captureRun<dashboard::Scene, dashboard::Options>(false, false, ColorMode::TRUE_COLOR, 1000, 0,
-                                                                      false, 0, input, true);
+  const auto after = captureRun<dashboard_test::Scene, dashboard_test::Options>(false, false, ColorMode::TRUE_COLOR,
+                                                                                1000, 0, false, 0, input, true);
 
   check(before.checkpoints.size() == after.checkpoints.size());
 
@@ -716,7 +717,7 @@ void exactBorrowedSceneComparison(ColorMode mode) {
       for (const auto saturated : {false, true}) {
         const auto before = captureRun<dashboard_before::Scene, dashboard_before::Options>(
           replay, ascii, mode, saturated ? 10000 : 1000, 250, saturated, 240, navigation);
-        const auto after = captureRun<dashboard::Scene, dashboard::Options>(
+        const auto after = captureRun<dashboard_test::Scene, dashboard_test::Options>(
           replay, ascii, mode, saturated ? 10000 : 1000, 250, saturated, 240, navigation);
 
         compareRuns(before, after);
@@ -735,8 +736,8 @@ void exactBorrowedSceneComparison(ColorMode mode) {
                             std::vector<example::ReplayTerminal::Input>{{100, "\x03", {}}}}) {
     const auto before = captureRun<dashboard_before::Scene, dashboard_before::Options>(
       false, false, ColorMode::TRUE_COLOR, 0, 0, false, 0, input);
-    const auto after =
-      captureRun<dashboard::Scene, dashboard::Options>(false, false, ColorMode::TRUE_COLOR, 0, 0, false, 0, input);
+    const auto after = captureRun<dashboard_test::Scene, dashboard_test::Options>(false, false, ColorMode::TRUE_COLOR,
+                                                                                  0, 0, false, 0, input);
 
     compareRuns(before, after);
     check(after.stats[1] <= 1 && after.ticks == 0 && after.closed && after.tableRetired);
@@ -747,7 +748,7 @@ void exactModifiedShortcutComparison() {
   auto beforeApp = take(Application::create());
   auto afterApp = take(Application::create());
   dashboard_before::Scene before(*beforeApp, {.rate = 0});
-  dashboard::Scene after(*afterApp, {.rate = 0});
+  dashboard_test::Scene after(*afterApp, {.rate = 0});
 
   for (unsigned mask = 0; mask < 16; ++mask) {
     const InputModifiers modifiers{bool(mask & 1), bool(mask & 2), bool(mask & 4), bool(mask & 8)};
@@ -839,19 +840,19 @@ template <class Scene, class Options> auto captureFailure(TransportFailure failu
 void exactTransportFailureComparison() {
   for (const auto failure : {TransportFailure::READ, TransportFailure::SUBMIT, TransportFailure::CLOSE}) {
     check((captureFailure<dashboard_before::Scene, dashboard_before::Options>(failure) ==
-           captureFailure<dashboard::Scene, dashboard::Options>(failure)));
+           captureFailure<dashboard_test::Scene, dashboard_test::Options>(failure)));
     check((captureFailure<dashboard_before::Scene, dashboard_before::Options>(failure) ==
-           captureFailure<dashboard::Scene, dashboard::Options>(failure, {.stress = false})));
+           captureFailure<dashboard_test::Scene, dashboard_test::Options>(failure, {.stress = false})));
   }
 }
 
 void unrunSceneRetiresBorrowedCallbacks() {
   auto app = take(Application::create());
   ManagedState<std::string> observedNote;
-  Node<VirtualTable<dashboard::Quote>> observedTable;
+  Node<VirtualTable<dashboard_test::Quote>> observedTable;
 
   {
-    dashboard::Scene scene(*app, {.rate = 0});
+    dashboard_test::Scene scene(*app, {.rate = 0});
 
     observedNote = scene.note();
     observedTable = scene.table();

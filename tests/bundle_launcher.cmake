@@ -24,11 +24,11 @@ else()
   file(COPY "${SOURCE_DIR}/tools/package/run.sh" DESTINATION "${payload}")
   set(command /bin/sh "${payload}/run.sh")
 endif()
-execute_process(COMMAND ${command} gallery --check WORKING_DIRECTORY "${foreign}"
+execute_process(COMMAND ${command} gallery --help WORKING_DIRECTORY "${foreign}"
   TIMEOUT 20 RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 file(WRITE "${root}/gallery.log" "${output}\n${error}\nresult=${result}\n")
 if(NOT result EQUAL 0)
-  message(FATAL_ERROR "Relocated launcher finite check failed: ${result}; ${error}")
+  message(FATAL_ERROR "Relocated launcher help check failed: ${result}; ${error}")
 endif()
 execute_process(COMMAND ${command} invalid-example WORKING_DIRECTORY "${foreign}"
   TIMEOUT 10 RESULT_VARIABLE invalidResult OUTPUT_VARIABLE invalidOutput ERROR_VARIABLE invalidError)

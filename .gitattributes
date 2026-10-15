@@ -5,4 +5,5 @@
 /vendor/utf8proc/** -text
 /vendor/doctest/doctest.h -text
 /vendor/pfr/** -text
+/vendor/lyra/** -text
 /tests/fixtures/unicode/** -text

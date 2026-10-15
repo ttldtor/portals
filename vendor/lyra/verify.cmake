@@ -1,0 +1,15 @@
+# Verify the complete pinned upstream include tree without downloads.
+file(READ "${CMAKE_CURRENT_LIST_DIR}/manifest.json" lyra_manifest)
+string(JSON lyra_count LENGTH "${lyra_manifest}" files)
+math(EXPR lyra_last "${lyra_count} - 1")
+foreach(index RANGE 0 ${lyra_last})
+  string(JSON path GET "${lyra_manifest}" files ${index} path)
+  string(JSON expected GET "${lyra_manifest}" files ${index} sha256)
+  string(JSON expected_size GET "${lyra_manifest}" files ${index} bytes)
+  file(SHA256 "${CMAKE_CURRENT_LIST_DIR}/${path}" actual)
+  file(SIZE "${CMAKE_CURRENT_LIST_DIR}/${path}" actual_size)
+  if(NOT actual STREQUAL expected OR NOT actual_size EQUAL expected_size)
+    message(FATAL_ERROR "Pinned Lyra artifact changed: vendor/lyra/${path}")
+  endif()
+endforeach()
+

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 
-#include "../examples/gallery/form.hpp"
+#include "support/examples/gallery/form.hpp"
 #include <algorithm>
 #include <portals/application.hpp>
 #include <portals/diff.hpp>

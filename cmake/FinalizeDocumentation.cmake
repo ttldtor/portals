@@ -7,7 +7,7 @@ endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/FinalizeDiagrams.cmake")
 
-foreach(notice IN ITEMS vendor/pfr/LICENSE_1_0.txt vendor/doctest/LICENSE.txt tests/fixtures/unicode/manifest.json)
+foreach(notice IN ITEMS vendor/pfr/LICENSE_1_0.txt vendor/doctest/LICENSE.txt vendor/lyra/LICENSE.txt vendor/lyra/manifest.json tests/fixtures/unicode/manifest.json)
   get_filename_component(notice_directory "${notice}" DIRECTORY)
   file(MAKE_DIRECTORY "${HTML_DIR}/${notice_directory}")
   configure_file("${CMAKE_CURRENT_LIST_DIR}/../${notice}" "${HTML_DIR}/${notice}" COPYONLY)
@@ -17,15 +17,27 @@ endforeach()
 # Ship the exact referenced sources inside the HTML tree so an offline copy
 # works without the repository or a hard-coded GitHub branch URL.
 set(example_sources
+  tests/package_consumer/pipe_contracts.cpp
+  tests/package_consumer/pipe_contracts_methods.cpp
+  tests/support/gallery_before.hpp
+  tests/support/examples/custom_widget/meter.hpp
+  tests/package_consumer/form_declarative.cpp
+  examples/gallery/main.cpp
+  examples/custom_widget/main.cpp
+  examples/editor_history/main.cpp
+  examples/editor_history/editor.hpp
+  examples/dashboard/main.cpp
   examples/click_handlers/main.cpp
-  examples/custom_widget/fluent_meter.hpp
+  examples/gallery/fluent_form.hpp
+  examples/gallery/options.hpp
+  examples/gallery/settings.hpp
+  examples/gallery/themes.hpp
   examples/custom_widget/meter.hpp
+  examples/custom_widget/fluent_meter.hpp
   examples/dashboard/dashboard.hpp
   examples/dashboard/provider.hpp
-  examples/gallery/fluent_form.hpp
-  examples/gallery/form.hpp
-  examples/gallery/main.cpp
-  examples/replay/terminal.hpp
+  tests/support/examples/gallery/form.hpp
+  tests/support/examples/replay/terminal.hpp
   tests/compactness.cpp
   tests/package_consumer/async_callback.cpp
   tests/package_consumer/async_coroutine.cpp
@@ -55,7 +67,7 @@ file(GLOB guide_html_files "${HTML_DIR}/*.html")
 foreach(page_file IN LISTS guide_html_files)
   file(READ "${page_file}" content)
   foreach(notice IN ITEMS LICENSE.txt vendor/pfr/LICENSE_1_0.txt vendor/doctest/LICENSE.txt
-      vendor/textual/LICENSE tests/fixtures/unicode/Unicode-LICENSE.txt tests/fixtures/unicode/manifest.json)
+      vendor/textual/LICENSE vendor/lyra/LICENSE.txt vendor/lyra/manifest.json tests/fixtures/unicode/Unicode-LICENSE.txt tests/fixtures/unicode/manifest.json)
     string(REPLACE "href=\"../../${notice}\"" "href=\"${notice}\"" content "${content}")
     string(REPLACE "href=\"../${notice}\"" "href=\"${notice}\"" content "${content}")
   endforeach()

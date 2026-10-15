@@ -9,6 +9,7 @@ Portals использует [Boost Software License 1.0](../../LICENSE.txt).
 | Компонент | Назначение и поставка | Лицензия и сведения об исходниках |
 |---|---|---|
 | utf8proc 2.12.0 | Декодирование Unicode, границы [графем](glossary.md#glossary-text-units-ru), свойства и ширина символов. Встроенные исходники C собираются в статическую зависимость `portals::core`; её архив входит в установленный SDK. | MIT/Expat для кода и условия Unicode для данных: [лицензия](../../vendor/utf8proc/LICENSE.md), [сведения об исходниках (EN)](../../vendor/utf8proc/README.md) |
+| Lyra 1.8.0 | Необязательный адаптер командной строки `<portals/ui_lyra.hpp>` через `portals::lyra`; заголовки, лицензия и манифест входят в SDK. | [Boost Software License 1.0](../../vendor/lyra/LICENSE.txt), [закреплённые исходники](../../vendor/lyra/manifest.json) |
 | Boost.PFR, снимок boost-1.92.0 | Необязательная рефлексия столбцов агрегатных типов через `<portals/aggregate_columns.hpp>` и `portals::aggregate`. Встроенные заголовки входят в SDK. | [Boost Software License 1.0](../../vendor/pfr/LICENSE_1_0.txt), [сведения об исходниках (EN)](../../vendor/pfr/README.md) |
 | Цвета палитр Textual | Цвета Nord, Gruvbox, Tokyo Night и Catppuccin Latte адаптированы для встроенных тем Portals. Среда Python для Textual не требуется. | [Уведомление MIT](../../vendor/textual/LICENSE), [авторство и сведения об исходниках (EN)](../../vendor/textual/README.md) |
 | doctest 2.4.11 | Встроенный однозаголовочный фреймворк тестов библиотеки; в установленный SDK и публичные заголовки не входит. | [Лицензия MIT](../../vendor/doctest/LICENSE.txt), [сведения об исходниках (EN)](../../vendor/doctest/README.md) |
@@ -32,7 +33,7 @@ C++ компилировать исходники C не требуется.
 статической компоновки. На UNIX также подключается системная цель Threads.
 Совместимость компилятора, архитектуры и среды выполнения описана в
 [подключении пакета](package.md). Сведения об исходниках по ссылкам выше
-указывают закреплённые версии и ревизии. Для utf8proc, Boost.PFR, doctest
+указывают закреплённые версии и ревизии. Для utf8proc, Boost.PFR, Lyra, doctest
 и тестовых данных Unicode также сохранены манифесты файлов. CMake проверяет
 их контрольные суммы при конфигурации соответствующих компонентов сборки.
 

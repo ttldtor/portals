@@ -9,6 +9,7 @@ The linked notices contain the full license texts.
 | Component | Purpose and delivery | License and source record |
 |---|---|---|
 | utf8proc 2.12.0 | Unicode decoding, [grapheme](glossary.md#glossary-text-units) boundaries, character properties and widths. Its vendored C sources build as a private static dependency of `portals::core`; its archive is included in the installed SDK. | MIT/Expat for code and Unicode notices for data: [license](../vendor/utf8proc/LICENSE.md), [source record](../vendor/utf8proc/README.md) |
+| Lyra 1.8.0 | Optional command-line adapter `<portals/ui_lyra.hpp>` through `portals::lyra`; headers, license and manifest are installed with the SDK. | [Boost Software License 1.0](../vendor/lyra/LICENSE.txt), [pinned source record](../vendor/lyra/manifest.json) |
 | Boost.PFR, boost-1.92.0 snapshot | Optional aggregate-column reflection through `<portals/aggregate_columns.hpp>` and `portals::aggregate`. Vendored headers are included in the SDK. | [Boost Software License 1.0](../vendor/pfr/LICENSE_1_0.txt), [source record](../vendor/pfr/README.md) |
 | Textual palette values | Nord, Gruvbox, Tokyo Night and Catppuccin Latte colors adapted into Portals' built-in themes. No Textual Python runtime is required. | [MIT notice](../vendor/textual/LICENSE), [attribution and source record](../vendor/textual/README.md) |
 | doctest 2.4.11 | Vendored single-header framework used by library tests; not included in the installed SDK or public headers. | [MIT license](../vendor/doctest/LICENSE.txt), [source record](../vendor/doctest/README.md) |
@@ -31,7 +32,7 @@ the archives, so a C++ application linking it does not need to compile C sources
 the static link dependencies. On UNIX it also links the system Threads target.
 See [package setup](package.md) for compiler, architecture and runtime compatibility.
 The source records above identify the pinned versions and revisions.
-utf8proc, Boost.PFR, doctest and Unicode test data also have file manifests.
+utf8proc, Boost.PFR, Lyra, doctest and Unicode test data also have file manifests.
 CMake verifies their file hashes when the corresponding build components are configured.
 
 ## Documentation tools

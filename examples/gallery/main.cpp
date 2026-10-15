@@ -1,67 +1,16 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
-#include "../replay/terminal.hpp"
 #include "fluent_form.hpp"
-#include "gallery.hpp"
+#include "options.hpp"
 
-/** @brief Run the managed gallery interactively or through a finite headless check.
- * @param argc Number of arguments, including the executable name.
- * @param argv Borrowed arguments, alive through option parsing and the selected run.
- * @return Zero on success/help, two for invalid options, one for setup/replay/runtime failure.
- */
+/** @brief Parse CLI before mounting the interactive gallery; the runner reports checked errors. */
 int main(int argc, char **argv) {
-  try {
-    const auto parsed = example::parseSceneOptions(argc, argv, true);
+  using namespace portals;
 
-    if (!parsed || parsed->help) {
-      if (!parsed) {
-        std::cerr << parsed.error() << '\n';
-      }
+  example::Options options;
+  auto lyraCli = example::commandLine(options);
 
-      example::printSceneUsage(std::cout, "portals_gallery");
-
-      return parsed ? 0 : 2;
-    }
-
-    portals::ApplicationOptions options;
-
-    options.writer.colorMode = parsed->ansi16 ? portals::ColorMode::ANSI16 : portals::ColorMode::TRUE_COLOR;
-
-    if (parsed->check) {
-      // Keep the low-level fixture as a regression path alongside the managed form.
-      gallery::Scene legacy;
-      auto initial = legacy.render();
-
-      legacy.stage(parsed->stage.empty() ? "disabled" : parsed->stage);
-
-      auto final = legacy.render();
-
-      if (parsed->stage.empty() && (legacy.calls != 2 || legacy.changes != 1 || legacy.disabledCalls != 0)) {
-        return 1;
-      }
-
-      example::ReplayTerminal terminal({{20, "New name\r\t \t\r", {}}, {100, "\x1bOQ", {}}, {150, "\x1b[21~", {}}},
-                                       250);
-      portals::ui::SceneOptions sceneOptions;
-
-      sceneOptions.application = options;
-      sceneOptions.clock = terminal.clock();
-
-      gallery::FluentForm form(sceneOptions, parsed->theme);
-
-      return form.runApp(terminal);
-    }
-
-    portals::ui::SceneOptions sceneOptions;
-
-    sceneOptions.application = options;
-
-    gallery::FluentForm form(sceneOptions, parsed->theme);
-
-    return form.runApp();
-  } catch (const std::exception &error) {
-    std::cerr << error.what() << '\n';
-
-    return 1;
-  }
+  return gallery::form(ui::opts(options))
+    | ui::reportOnError()
+    | ui::runApp(argc, argv, ui::lyra::cli(lyraCli));
 }

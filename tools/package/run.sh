@@ -9,7 +9,8 @@ case "$example" in
   dashboard) program=portals_dashboard ;;
   gallery) program=portals_gallery ;;
   custom_widget) program=portals_custom_widget ;;
-  replay) program=portals_replay_example ;;
+  editor_history) program=portals_editor_history ;;
+  click_handlers) program=portals_click_handlers ;;
   *) printf 'Unknown example: %s\n' "$example" >&2; exit 2 ;;
 esac
 exec "$bundle_dir/bin/$program" "$@"

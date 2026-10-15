@@ -21,7 +21,7 @@ commands are available in [getting started](getting-started.md); runnable archiv
 assembly and validation remain a separate delivery step.
 
 Native interactive execution needs terminal input and output. Redirected streams
-are not a replacement interactive backend. The finite example `--check` modes
+are not a replacement interactive backend. The separate finite example test harnesses
 use an in-memory transport. A passing replay proves neither native restoration
 nor the appearance of a real terminal. Width policy is explicit, and terminal
 fonts/Unicode support can still disagree with it; see [text](text.md).

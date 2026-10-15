@@ -55,19 +55,24 @@ ctest --test-dir build/release --output-on-failure --no-tests=error
 ./build/windows-msvc-debug/examples/gallery/portals_gallery
 ./build/windows-msvc-debug/examples/dashboard/portals_dashboard --rate 10000 --fps 30 --rows 1000000
 ./build/windows-msvc-debug/examples/custom_widget/portals_custom_widget
-./build/windows-msvc-debug/examples/replay/portals_replay_example
+./build/windows-msvc-debug/examples/editor_history/portals_editor_history
+./build/windows-msvc-debug/examples/click_handlers/portals_click_handlers
 ```
 
 В Linux замените каталог на `build/linux-gcc-debug`. F10 или Ctrl+C завершает
 работу. В галерее Tab меняет фокус, Enter подтверждает ввод или действие,
 F2 меняет тему. В dashboard стрелки, Home и End перемещают выделение таблицы;
-Enter подтверждает заметку. В custom widget стрелки Left/Right меняют уровень.
+Корректные изменения заметки применяются сразу. В custom widget стрелки Left/Right меняют уровень.
 Полный список параметров находится на странице [примеров](examples.md).
 
-`--check` запускает конечный сценарий с терминалом в памяти и логическими часами.
-Он завершается самостоятельно и выводит результат после закрытия. Проверка
-охватывает работу цикла приложения; внешний вид и восстановление настоящего
-терминала требуют отдельной проверки.
+Галерея принимает `--theme NAME` (или `-t NAME`), `--ansi16` и `--help`.
+Объявление Lyra разбирается до открытия терминала: справка возвращает 0,
+неверные параметры — 2. Публичные программы не имеют режима `--check`.
+
+Конечные проверки находятся в отдельных тестовых программах и потребителе
+установленного пакета. Терминал в памяти и логические часы позволяют завершать
+их автоматически. Успех не подтверждает внешний вид или восстановление
+настоящего терминала.
 
 ## Собственное приложение
 
@@ -79,16 +84,21 @@ Enter подтверждает заметку. В custom widget стрелки L
 
 Для встраивания и собственной обработки результата используйте `run()`:
 он возвращает `expected` со статистикой или ошибкой.
-Пример [gallery/form.hpp](../../examples/gallery/form.hpp) показывает форму,
-а [custom_widget/meter.hpp](../../examples/custom_widget/meter.hpp) — собственный
+Пример [функции галереи](../../examples/gallery/fluent_form.hpp) показывает форму
+`gallery::form(ui::opts(options))`. Настройки остаются во владении вызывающего кода
+и должны пережить синхронный `ui::runApp(argc, argv, ui::lyra::cli(parser))`.
+Разбор выполняется до монтажа; [командная строка](cli.md) описывает ошибки, справку,
+версию и снимки аргументов/окружения. Пример подключает `portals::lyra`.
+[custom_widget/meter.hpp](../../examples/custom_widget/meter.hpp) показывает собственный
 виджет с неизменяемой моделью и подготовкой отображения.
 
 ## Диагностика действия
 
 ```text
-portals_dashboard --rate 0 --trace trace.json
+portals_dashboard_check --rate 0 --trace trace.json
 ```
 
+Команда запускает тестовую диагностическую программу, собранную с `PORTALS_BUILD_TESTS=ON`.
 Переведите фокус на Inspect и нажмите Enter. Обработчик присвоит заметке её
 текущее значение. После выхода трасса различает `handler_returned`,
 `value_unchanged` и `frame_not_requested`. Ошибки записи файла сообщаются

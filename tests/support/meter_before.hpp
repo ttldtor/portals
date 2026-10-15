@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 #include "../../examples/gallery/common.hpp"
-#include "../../examples/gallery/options.hpp"
+#include "../../examples/gallery/themes.hpp"
 #include <format>
 #include <portals/model.hpp>
 #include <portals/ui.hpp>
