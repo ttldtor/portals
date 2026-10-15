@@ -158,6 +158,9 @@ are reported after terminal restoration, independently of a prior run failure.
 opportunity (up to 3600000 ms); zero leaves it interactive. Output/host stalls can
 still extend real cleanup, as documented by `TerminalSession`. A separate test harness replays finite keyboard/resize input and prints frame/tick/byte/queue totals after close.
 
+The gallery and custom widget entry points use scoped `ui::quit()` and `ui::runApp`.
+The runner reports typed setup and runtime failures after attempting terminal cleanup.
+Their scene objects also provide typed `run()` for headless replay.
 
 ## Customize a final widget
 

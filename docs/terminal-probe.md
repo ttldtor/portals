@@ -31,7 +31,8 @@ Options accept positive decimal integers: `--timeout-ms` is 1..10000 (default
 250), and `--max-bytes` is 1..65536 (default 4096). `--width-policy narrow|wide`
 selects the **advisory** ambiguous-width policy (`NARROW` by default). This probe
 does not measure glyph widths or choose a Unicode version; its report explicitly
-labels those facts unknown. A real library width profile belongs to later work.
+labels those facts unknown. The library
+uses its explicit `WidthPolicy`; see [text width](text.md).
 
 Exit status is 0 for a completed diagnostic observation, including unsupported
 queries, byte limits, missing replies or skipped queries. Status 1 reports a native

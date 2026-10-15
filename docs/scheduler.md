@@ -9,6 +9,9 @@ chooses the resulting invalidation. Layout and paint must not call `dispatch` or
 
 ## Queues, budgets and backpressure
 
+[Backpressure](glossary.md#glossary-backpressure) is a queue-capacity limit
+that requires the publisher to retry later or report rejected delivery.
+
 `SchedulerOptions` has independent positive capacities for control (32 by
 default) and data (256), separate callback budgets (32 each), a timer budget
 (32), and a combined live subscription/timer capacity (256). Storage for the
@@ -55,9 +58,13 @@ UI resources. Callback captures, by contrast, are released on the UI.
 
 ```cpp
 auto runtime = Scheduler::create();
-if (!runtime) { return; } // Report the creation error in the application.
+if (!runtime) {
+  return;
+} // Report the creation error in the application.
 auto scope = (*runtime)->makeScope();
-if (!scope) { return; } // Report the scope error in the application.
+if (!scope) {
+  return;
+} // Report the scope error in the application.
 auto connection = (*runtime)->connect<QuoteSnapshot>(
   *scope, [model](std::shared_ptr<const QuoteSnapshot> snapshot) {
     model->apply(std::move(snapshot));

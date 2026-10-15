@@ -2,8 +2,8 @@
 
 `<portals/ui.hpp>` supplies owning, single-use descriptions in `portals::ui`.
 They compose ordinary controls and custom widgets on the existing
-[managed lifecycle](managed-controls.md). A description is a construction value;
-it is not another widget tree or a reactive runtime. Mounted objects remain
+[managed lifecycle](managed-controls.md). A [description, or recipe](glossary.md#glossary-recipe), is a value storing the controls
+to construct when the [scene](glossary.md#glossary-scene) is prepared. Mounted objects remain
 owned by `WidgetTree`, while `ManagedScene` retains bindings and presentation work.
 
 ## Own a lazy scene
@@ -13,12 +13,6 @@ A standalone program can use the standard exit and reporting policy:
 ```cpp
 #include <portals/ui_style.hpp>
 
-/** @brief Run a minimal lazy scene with a late click handler and a runtime stylesheet.
- * @return Zero on success, one on a typed setup/runtime failure after library cleanup/reporting.
- * Click Add Hello to append one undoable text change; F10 quits. This minimal program defines no CLI options.
- * The standard runner owns terminal restoration; the installed headless consumer below
- * exercises short key/click registration, early stop and cleanup separately.
- */
 int main() {
   using namespace portals;
 
@@ -26,7 +20,10 @@ int main() {
   ui::Ref<Button> add;
   ui::Ref<Button> exit;
 
-  auto scene = ui::scene(ui::vbox(ui::lineEdit(message, ""), ui::button(add, "Add Hello"), ui::button(exit, "Exit")));
+  auto scene = ui::scene(ui::vbox(
+    ui::lineEdit(message, ""),
+    ui::button(add, "Add Hello"),
+    ui::button(exit, "Exit")));
 
   return scene
     | ui::style("Button { bold: true; }")
@@ -44,7 +41,8 @@ int main() {
 `Scene::runApp()`, `ui::runApp(scene)` and `scene | ui::runApp()` delegate to the
 same existing `run()` boundary: zero on success, one on a typed failure. All forms
 accept an optional stop token and a borrowed custom/replay `ApplicationTerminal`.
-The final pipe stage borrows its lvalue or temporary scene for the synchronous
+The final [UI stage](glossary.md#glossary-ui-stage), returned by `ui::runApp()`,
+borrows its lvalue or temporary scene for the synchronous
 call; it does not move it. `scene.run()` and `scene | ui::run()` retain the owning
 `expected<ApplicationStats, ManagedError>` result for embedding and explicit logs.
 Typed run does not invoke the final report sink or impose stderr I/O.
@@ -69,9 +67,11 @@ event/preparation callbacks. Those bridges also establish their owner during
 prepared direct dispatch. Managed property delivery uses its weak facade owner.
 Nested independent work suspends the caller's context; normal return and
 exceptions restore it. Cleanup, final reporting and owned capture retirement do
-not expose an unrelated outer scene. Same-owner actual setup retains its U121
-short-mutation policy; an independently owned callback cannot poison another
-scene's setup. A weak context does not retain the facade or widgets, survives
+not expose an unrelated outer scene. During configure/setup, a rejected short
+text mutation records the first setup failure before notifying observers. The
+current void callback finishes; later setup and terminal entry are skipped.
+A failure in a callback entered by another scene does not change the caller's
+setup state. A weak context does not retain the facade or widgets, survives
 facade moves, and is revoked before cleanup releases captures.
 
 The library does not infer ownership for arbitrary raw router, property, provider
@@ -191,6 +191,13 @@ modes, validation, paste, clipboard and Undo retain their existing behavior.
 The `lineEdit(ManagedState<string>, ...)` overload remains available for shared
 models. Ref-first forms support both kinds of initialization.
 
+For CLI launch, return a lazy scene from an ordinary function and borrow typed
+settings with `ui::opts(options)`. `ui::applicationOptions(provider)` reads those
+settings after successful parsing and before mounting. The final
+`ui::runApp(argc, argv, parser)` captures process snapshots and invokes the parser;
+help, version and parse failures return before the scene factory or terminal acquisition.
+See [command-line startup](cli.md) for `ui::lyra::cli`, errors and snapshot lifetimes.
+
 A scene can consume a direct description or a factory receiving `ManagedScene&`.
 The factory returns a description or `expected<Description<T>, ManagedError>`;
 it runs once at preparation and can create the existing states and models.
@@ -214,7 +221,10 @@ The small pipe stages call the same methods:
 ```cpp
 auto result = ui::scene(ui::lineEdit("initial"))
   | ui::theme(StyleSheet{})
-  | ui::onKey(ui::key(InputKey::F2), [] { /* application action */ })
+  | ui::onKey(ui::key(InputKey::F2),
+                      [] {
+                        /* application action */
+                      })
   | ui::run();
 ```
 
@@ -238,9 +248,7 @@ synchronous run and reporting. Modifiers remain lazy until explicit
 no new runtime, parser or control modifier system.
 
 The complete C++23 installed consumer below includes deterministic replay,
-configuration, the final error-reporting boundary and cleanup checks. Its
-[method counterpart](../tests/package_consumer/pipe_contracts_methods.cpp) runs
-the same workload; both are built and compared by the relocated-package test.
+configuration, the final error-reporting boundary and cleanup checks. It uses the scene pipe API.
 
 \include pipe_contracts.cpp
 
@@ -308,12 +316,9 @@ remain independent typed values. The extra fields change data representation;
 this does not promise binary ABI compatibility. `checked()` only inspects state;
 it never executes deferred configure or mounting.
 
-The complete installed consumer below compares an explicit checked setup with a
-short void setup, in both ordinary and pipe forms. Both execute the same lambda
-tail, skip the dependent stage and terminal entry, retain typed source information
-and verify cleanup. These are contemporary equivalent alternatives, not a claimed
-historical reduction of an existing sample. The [complete checked counterpart](../tests/package_consumer/setup_diagnostics_before.cpp)
-and short program are compiled separately against the same installed package.
+The following installed-package example uses a short void setup callback.
+It preserves the typed error and source information, skips dependent stages after
+failure, and checks cleanup.
 
 \include setup_diagnostics_after.cpp
 
@@ -363,7 +368,10 @@ ui::onClick(add, [message](ui::ClickParams &params) {
 followed by:
 
 ```cpp
-ui::onClick(add, [message] { message.text() += "Hello!"; })
+ui::onClick(add,
+            [message] {
+              message.text() += "Hello!";
+            })
 ```
 
 Without Shift the first callback leaves the chain running and the second appends
@@ -435,8 +443,8 @@ effects are not rolled back.
 A short mutation such as `field.text() += "!"` in a `void` callback still uses the
 normal text-property diagnostics. It does not implicitly return its failure or
 abort the remaining C++ instructions. Choose an explicit checked return or `stop()`
-when the next action depends on success; the unified setup error policy is a
-separate extension. Successful text edits keep the editor's configured model,
+when the next action depends on success. The setup error policy described
+above applies to entered configure and stationary setup scopes. Successful text edits keep the editor's configured model,
 validation and Undo behavior. A mutation is not a new revision-management API.
 
 Removing, hiding or disabling the target or an ancestor, or closing the scene,
@@ -460,7 +468,7 @@ returns `NO_MEMORY`. `SceneOptions::maxConfigurations` independently defaults to
 Raise the appropriate budget explicitly for larger forms.
 
 `Ref<Button>::onClick`, recipe `.onClick` and `ManagedScene::onClick` retain their
-single-binding contract and reject duplicate bindings. Their old no-argument
+single-binding contract and reject duplicate bindings. Their no-argument
 form admits only unmodified activation; parameterized callbacks admit modifiers.
 The new pipe chain intentionally allows both no-argument and parameterized
 callbacks on a modified activation. Mixing a pre-existing single binding with a
@@ -469,7 +477,7 @@ new chain is rejected rather than silently replacing application behavior.
 The [complete minimal source](../examples/click_handlers/main.cpp) is compiled
 against the installed package. The headless click consumer separately checks
 registration, composition, exact errors and cleanup without opening a terminal.
-## Short key bindings
+## Short key bindings {#short-key-bindings}
 
 Key aliases and chords use semantic modifiers supplied by the terminal decoder:
 
@@ -491,8 +499,9 @@ ASCII letter case, with exact modifiers. Other Unicode text passes through unles
 an explicitly supported shortcut matches it. Modified text such as decoded
 `ESC + q` is admitted without a second input router.
 
-New shortcut bindings admit PRESS by default; REPEAT requires an explicit
-`ShortcutBehavior` option. Existing `ui::key(InputKey::F10)` / `KeyEvent` bindings
+New shortcut bindings admit PRESS by default. Select REPEAT explicitly with
+`ui::repeat` or `ui::pressRepeat`; the compatibility `ShortcutBehavior` option
+also enables repeats. See [phase selection](input.md). Existing `ui::key(InputKey::F10)` / `KeyEvent` bindings
 retain PRESS and REPEAT behavior. A nonmatching shortcut delegates to the previous
 handler and normal widget routing. The newest matching binding wins.
 
@@ -569,7 +578,7 @@ Use `ui::vbox(...)` and `ui::hbox(...)` for nested composition. Their overloads
 accept `LinearOptions` before the children when gaps, padding or alignment need
 customization. Standard control factories are `label`, `button`, `checkbox` and
 `lineEdit`; `virtualList`, `virtualTable` and `chart` compose managed virtual views.
-Binding state and models belong to the same `ManagedScene` as before.
+Binding state and models belong to the scene's `ManagedScene`.
 `custom<T>(args...)` constructs the concrete public `Widget` subtype, including
 `final` classes. It does not introduce another base class.
 
@@ -669,7 +678,10 @@ auto description = ui::vbox(
   ui::label("Prices"),
   ui::hbox(
     ui::virtualTable(model, columns).reference(table),
-    ui::chart(model, [](const Ohlc &value) { return std::optional{value}; })));
+    ui::chart(model,
+              [](const Ohlc &value) {
+                return std::optional{value};
+              })));
 
 take(ui::mount(scene, std::move(description)));
 ```
@@ -701,40 +713,22 @@ Hidden views cancel their pending range work; disabling affects input, not visib
 Idle frames, theme changes, rejected notifications and removal use the same
 [managed virtual-view lifecycle](virtual-preparation.md).
 
-### Complete before/after form with virtual views
+### Complete form with virtual views
 
-These two installed-package programs implement the same form: a committing name
-editor, a self-removing button, a custom `final Badge`, a list, a table and an OHLC
-chart. Both receive identical scripted input, resize and theme changes. The tests
-check semantic outcomes and compare every emitted terminal byte. Their shared
-fixture contains domain rendering, input and assertions, not hidden mounting code.
+This installed-package example combines a committing name editor, a self-removing
+button, a custom final `Badge`, a list, a table and an OHLC chart.
+It uses scripted input, resize and theme changes.
 
-- [Before: explicit managed construction](../tests/package_consumer/composed_before.cpp)
-- [After: one owning composition](../tests/package_consumer/composed_after.cpp)
+- [Fluent form](../tests/package_consumer/composed_named.cpp)
 - [Shared domain and replay assertions](../tests/package_consumer/composed_support.hpp)
 - [Finite terminal and immutable price snapshot](../tests/package_consumer/virtual_support.hpp)
 
-\include{lineno} composed_before.cpp
+Run `portals_composed_named` from the installed-consumer build directory
+(`.exe` on Windows). It accepts no options, finishes without a native window,
+and prints a semantic summary followed by hex-encoded terminal output.
+Failures return a nonzero process status.
 
-\include{lineno} composed_after.cpp
-
-\include{lineno} composed_support.hpp
-
-Run `portals_composed_before` or `portals_composed_after` from the installed-consumer
-build directory (`.exe` on Windows). They accept no options, finish without a native
-window, and print a semantic summary followed by hex-encoded terminal output.
-Failures return a nonzero process status. Run `ctest -R consumer.composed` there
-to execute both programs and the equivalence comparison.
-
-The benefit is structural: parent handles and explicit binding calls disappear
-from construction, and the whole form gains transactional mount and owning inputs.
-Callbacks, error handling and test replay remain explicit. This is not a claim that
-the full program is shorter: observing slots and equivalence assertions add code.
-Typed columns and named view settings are available as additive conveniences below.
-The description layer does not change the current delayed-range cache policy or
-provide compile-time scene construction.
-
-## Typed columns and named view settings
+## Typed columns and named view settings {#typed-columns-and-named-view-settings}
 
 Include `<portals/table_column.hpp>` to compose a projection and a formatter into
 the existing `TableColumn<T>`. The projection reads `const T&`; the formatter
@@ -769,28 +763,9 @@ do not invent generations for a fixed schema. The formatter owns its format
 string and converts its result to grapheme text with the same width policy.
 This is a column-construction fragment, not a complete running application.
 
-The explicit-ID low-level spelling below remains useful for dynamic schemas
-whose column identity must survive replacement or reordering:
-
-```cpp
-const auto price = [](double value) {
-  return GraphemeText::from(std::format("{:.0f}", value)).value();
-};
-const std::array columns{
-  tableColumn<Ohlc>({.id = {1, 1},
-                     .header = GraphemeText::from("Close").value(),
-                     .width = 9},
-                    &Ohlc::close, price)};
-
-auto table = ui::virtualTable(model, columns,
-  ui::VirtualTableConfig<Ohlc>{.policy = tablePolicy, .prepared = provider});
-```
-
-Here `model` is the scene's `ManagedModel<Ohlc>`, `tablePolicy` is a `SizePolicy`
-and `provider` is a `ManagedViewHandler<Ohlc>`. The complete program below includes
-their definitions. `std::format` requires `<format>`; it is ordinary C++23 formatting,
-not a second text or reactive system. Select the same `WidthPolicy` for the header,
-formatted text and table options when changing the default policy.
+For dynamic schemas, use explicit IDs in `TableColumnOptions` so a column keeps
+its identity across replacement or reordering. See [virtual tables](virtual-table.md)
+for the column contract.
 
 `TableColumnOptions` names the stable column ID, owning header and positive width
 in terminal cells. IDs are not derived from field names or display order. Existing
@@ -822,22 +797,22 @@ row zero without an explicit origin callback. Configurations own callbacks, copy
 from lvalues and consume rvalues; the model handle remains weak and UI-affine.
 Use the explicit configuration type with designated initializers. This keeps
 existing calls such as `ui::chart(model, accessor, {})` unambiguous: bare `{}` still
-means the old `ChartOptions`. Named overloads preserve mount rollback, input,
+means `ChartOptions`. Named overloads preserve mount rollback, input,
 preparation order, pending-work requirements and typed errors.
 
-[Complete named-settings form](../tests/package_consumer/composed_named.cpp)
-runs exactly the same replay as the [positional form](../tests/package_consumer/composed_after.cpp)
-and [managed form](../tests/package_consumer/composed_before.cpp). It accepts no
-arguments, opens no window and returns nonzero on failure. Run
-`portals_composed_named` (`.exe` on Windows) in the installed-consumer build directory,
-or `ctest -R consumer.composed` to compare the full captured output. Explicit names
-improve readability; this is not a promise of fewer total lines. The
-[compact examples](compact-examples.md) show the migrated dashboard and additional
-checked text and fixed-schema column conveniences.
+The [complete named-settings form](../tests/package_consumer/composed_named.cpp)
+accepts no arguments, opens no window and returns nonzero on failure.
+Run `portals_composed_named` (`.exe` on Windows) in the installed-consumer build
+directory. For checked text and fixed-schema columns, see
+[text and column examples](compact-examples.md).
 
-\include{lineno} composed_named.cpp
+## Complete example
 
-## Complete installed consumer
+Start with the [minimal fluent program](../examples/click_handlers/main.cpp).
+It creates an owning scene, registers styles and click handlers in the pipe,
+and exits with F10 through the application runner.
+For an editor, checkbox and theme switching, see
+[the fluent gallery](../examples/gallery/fluent_form.hpp).
 
 The program below uses only the installed `portals::core` package. It retains the
 same custom final `Meter`, domain behavior, palette and deterministic input as
@@ -917,8 +892,14 @@ take(ui::mount(scene, std::move(form)));
 take(apply.onClick([status](const ClickEvent &click) {
   status.text() = click.modifiers.shift ? "Apply with Shift" : "Applied";
 }));
-take(scene.onKey(ui::key(InputKey::F2), [status] { status.text() = "F2"; }));
-take(scene.onKey(ui::key(InputKey::F10), [&app] { app.requestStop(); }));
+take(scene.onKey(ui::key(InputKey::F2),
+                         [status] {
+                           status.text() = "F2";
+                         }));
+take(scene.onKey(ui::key(InputKey::F10),
+                         [&app] {
+                           app.requestStop();
+                         }));
 ```
 
 Callbacks can be supplied directly to `ui::button(ref, caption, callback)` or a
@@ -968,3 +949,92 @@ interceptor, then standard routing. Errors use the existing input failure path.
 Direct `onInput` replaces the whole chain. `ManagedOptions::maxKeyHandlers`
 (default 64, positive) bounds this composition; limit or allocation failure
 preserves the previous chain. There is no separate hotkey registry or event loop.
+
+## Fine scene settings {#scene-fine-settings}
+
+<details>
+<summary>Set scene limits</summary>
+
+Set `ui::SceneOptions` before creating the scene and pass it as the second
+argument to `ui::scene`. The options are copied into the scene and checked
+during preparation. There is no API for changing these limits on an existing scene.
+
+| Field in `options.managed` | Meaning | Default |
+|---|---|---|
+| `maxNodes` | Retained managed node registrations, including removals awaiting preparation | 4096 |
+| `maxStates` | Scene-owned properties | 256 |
+| `maxModels` | Scene-owned models | 64 |
+| `diagnostics.maxErrors` | Retained diagnostic records | 64 |
+| `diagnostics.maxContexts` | Causal contexts retained per error | 8 |
+| `diagnostics.maxContextBytes` | Total label bytes retained per error | 1024 |
+
+All six limits must be greater than zero. Increase them when your form needs
+more managed objects or more diagnostic detail. `maxErrors` limits stored
+history; it does not specify how many errors the application tolerates.
+On history overflow, the oldest records remain and `droppedErrors` increases.
+
+```cpp
+#include <portals/ui.hpp>
+
+int main() {
+  using namespace portals;
+
+  ui::SceneOptions options;
+  options.managed.maxNodes = 8192;
+  options.managed.maxStates = 512;
+  options.managed.maxModels = 128;
+  options.managed.diagnostics.maxErrors = 128;
+  options.managed.diagnostics.maxContexts = 16;
+  options.managed.diagnostics.maxContextBytes = 2048;
+
+  auto scene = ui::scene(ui::label("F10: quit"), options);
+
+  return scene
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+</details>
+
+<details>
+<summary>Set handler limits and sequence timeout</summary>
+
+These options are also passed to `ui::scene` before creation. Change them
+when a form has many handlers or users need more time between shortcut strokes.
+
+| Field | Meaning | Default |
+|---|---|---|
+| `maxConfigurations` | Queued configure/key/click operations before preparation | 64 |
+| `managed.maxKeyHandlers` | Owning key registrations | 64 |
+| `managed.maxClickHandlers` | Pipe click handlers across the scene | 256 |
+| `managed.maxClickHandlersPerNode` | Pipe click handlers on one button | 64 |
+| `managed.keySequenceTimeout` | Inactivity between shortcut strokes, milliseconds | 1000 |
+
+Each value must be greater than zero. The example allows two seconds between
+the strokes of `Ctrl+K, K`. The comma denotes two successive strokes; see
+[shortcut syntax](input.md).
+
+```cpp
+#include <portals/ui.hpp>
+
+int main() {
+  using namespace portals;
+
+  ui::SceneOptions options;
+  options.maxConfigurations = 128;
+  options.managed.maxKeyHandlers = 128;
+  options.managed.maxClickHandlers = 512;
+  options.managed.maxClickHandlersPerNode = 128;
+  options.managed.keySequenceTimeout = 2000;
+
+  auto scene = ui::scene(ui::label("Ctrl+K, K or F10: quit"), options);
+
+  return scene
+    | ui::onKey("Ctrl + K, K", ui::quit)
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+</details>

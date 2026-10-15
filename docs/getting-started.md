@@ -1,4 +1,4 @@
-# Getting started {#getting-started}
+# Building Portals and its examples {#getting-started}
 
 Portals provides a C++23 static library and five runnable terminal examples.
 Start with the gallery, then use the dashboard or custom widget to explore the
@@ -22,7 +22,7 @@ cmake --build --preset windows-msvc-debug
 ctest --preset windows-msvc-debug
 ```
 
-On Linux with GCC and a compatible standard library. The preset uses the
+On Linux, use GCC with a compatible standard library. The preset uses the
 `g++` on PATH; select an installed supported compiler explicitly when that
 default is older, for example `cmake --preset linux-gcc-debug
 -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14` for GCC 14:
@@ -119,9 +119,10 @@ an independent immutable model and a managed preparation adapter.
 ## Diagnose an action
 
 ```text
-portals_dashboard --rate 0 --trace trace.json
+portals_dashboard_check --rate 0 --trace trace.json
 ```
 
+This command runs the test-owned diagnostic harness, built with `PORTALS_BUILD_TESTS=ON`.
 Tab to Inspect and press Enter. Inspect assigns the note its existing value.
 After exit, the metadata export can distinguish `handler_returned`,
 `value_unchanged` and `frame_not_requested`. Export occurs after restoration;

@@ -102,13 +102,13 @@ after the frame. The tree does not introduce a second renderer, focus system,
 property bus, or paint command owner. Hooks perform no blocking I/O or terminal
 writes, and application model mutation is prohibited during frame work.
 
-Paint error handling belongs to the frame owner: it must record each widget's
-commands in a temporary transaction and include them only when `paint` succeeds.
-On error, it must discard that transaction and emit a clipped error placeholder,
-following the API design contract. `WidgetTree::paint` does not roll back earlier
-`submit` calls or constrain arbitrary commands supplied to a caller-owned sink.
-The application frame coordinator planned for PORTALS-028 supplies this policy
-using `NodeGeometry::clip`; it is not implemented by the tree.
+Paint error handling belongs to the frame owner. `WidgetTree::paint` does not
+roll back earlier `submit` calls or constrain a caller-owned sink.
+The current [Application runner](application.md) collects commands inside one
+`tree.frame` boundary and abandons the frame on layout, paint or render failure;
+it does not render partial commands or synthesize an error placeholder.
+A custom frame owner may use per-widget transactions and clipped placeholders,
+but must provide that policy itself and consume borrowed commands within the frame.
 
 ## Verification and references
 

@@ -136,7 +136,8 @@ resource bounds, width policy and cadence. Retain owning prepared data through
 rendering; paint must not perform I/O, mutate models or dispatch the scheduler.
 Typed themes/PSS change presentation within the same tree/frame path.
 
-The runnable [examples](examples.md) show both a short form main and a custom
-widget with an independent model. Their helpers make setup errors explicit;
-they do not add public DSL/lifetime semantics. Coroutines, application-wide Undo/Redo,
-system clipboard adapters and Drag-and-Drop remain after-MVP work.
+The runnable [examples](examples.md) include owning declarative scenes and custom
+widgets. The experimental [UI coroutine adapter](ui-coroutines.md) runs bounded
+timer and receive waits on the existing scheduler. Application-wide Undo/Redo,
+system clipboard adapters and Drag-and-Drop remain planned work; see
+[planned features](planned-features.md) for status and milestones.

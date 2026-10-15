@@ -53,7 +53,8 @@ the free function takes the owner and stage explicitly.
 ~~~cpp
 scene.style(STYLES, {.name = "demo"});
 ui::style(scene, ui::style(STYLES, {.name = "demo"}));
-scene | ui::style(STYLES, {.name = "demo"});
+scene
+  | ui::style(STYLES, {.name = "demo"});
 ~~~
 
 `StyleOptions` defaults to the `APPLICATION` tier. Choose `USER` explicitly when that

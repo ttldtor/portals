@@ -1,4 +1,6 @@
-# Command-line launch with Lyra
+# Command-line launch with Lyra {#cli}
+
+[Русская версия](ru/cli.md)
 
 The optional `portals::lyra` target supplies the pinned, header-only
 [Lyra 1.8.0](https://github.com/bfgroup/Lyra/releases/tag/1.8.0) dependency

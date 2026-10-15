@@ -1,71 +1,21 @@
 # PSS strings at compile time and runtime {#compile_time_pss}
 
+Experimental compile-time chapter. For ordinary application code, start with
+[runtime PSS and declarative UI](styling-guide.md). This API is already
+implemented; experimental status does not mean TBD.
+
 Include `<portals/style_pss.hpp>` for the bounded C++23 string frontend and
 owning source metadata. Both frontends use the same PSS v0 parser and the
 existing [style cascade](styles.md). Materialization and mounting still happen
 at runtime; this is not another renderer, scheduler or reactive system.
 
-## Before: checked setup with a manually managed `Scene`
-
-This complete C++23 native client constructs a scene, installs an `APPLICATION`
-layer, registers reporting and a quit callback, then invokes the native runner.
-The PSS descriptor is compact, but the client still coordinates each step and
-handles construction exceptions itself.
-
-~~~cpp
-#include <portals/style_pss.hpp>
-#include <portals/ui.hpp>
-#include <cstdio>
-#include <exception>
-
-namespace ui = portals::ui;
-namespace sc = portals::style::ct;
-
-inline constexpr auto STYLES = sc::pss(R"pss(
-  #message { min-width: 24; }
-  #append { bold: true; }
-)pss", "native-demo.pss");
-
-/** @return Zero on success, one on setup, input, runner or cleanup failure. */
-int main() {
-  try {
-    ui::Ref<portals::LineEdit> message;
-    auto scene = ui::scene(ui::column(
-      ui::label("Portals | F10: quit"),
-      ui::lineEdit(message, "Hello").id("message"),
-      ui::button("Append", [message] {
-        message.text() += portals::text(" {}", "Portals");
-      }).id("append")));
-
-    scene.theme(portals::modernTheme())
-      .styleLayers()
-      .styleLayer(portals::StyleTier::APPLICATION, "demo", sc::materialize(STYLES))
-      .onKey(ui::key(portals::InputKey::F10), [&scene] {
-        (void)scene.quit();
-      });
-
-    scene.reportOnError();
-
-    return scene | ui::runApp();
-  } catch (const std::exception &error) {
-    std::fprintf(stderr, "Setup failed: %s\n", error.what());
-
-    return 1;
-  } catch (...) {
-    std::fputs("Setup failed: unknown exception\n", stderr);
-
-    return 1;
-  }
-}
-~~~
-
-## After: factory construction with stationary setup
+## Construct a scene through a factory
 
 This complete client delegates checked construction, setup, reporting, running
 and cleanup to `runApp`. The setup receives the stationary `Scene` by reference;
 `ui::quit` uses the entered scene context, so the callback does not capture the
-facade by address. The style stage enables layering before any live layer is
-attached.
+facade by address. The `ui::style(...)` [configuration stage](glossary.md#glossary-ui-stage)
+enables layering before any live layer is attached.
 
 ~~~cpp
 #include <portals/ui_style.hpp>
@@ -92,9 +42,12 @@ int main() {
         }).id("append"));
     },
     [](ui::Scene &scene) {
-      scene.theme(portals::modernTheme());
-      scene | ui::style(STYLES, {.name = "demo"}) | ui::reportOnError()
-            | ui::onKey(ui::key(portals::InputKey::F10), ui::quit);
+      scene
+        | ui::theme(portals::modernTheme());
+      scene
+        | ui::style(STYLES, {.name = "demo"})
+        | ui::reportOnError()
+        | ui::onKey(ui::key(portals::InputKey::F10), ui::quit);
     });
 }
 ~~~
@@ -139,7 +92,7 @@ names; the final descriptor copies them. Default-constructed `FlatRule` is a
 universal empty rule.
 
 Snapshots have no live parameter expressions. Use the existing
-[CT-002 `LiveTheme`](compile-time-styles.md) for reactive parameters; it continues
+[`LiveTheme`](compile-time-styles.md) for reactive parameters; it continues
 to coexist with constant PSS application/user overrides in the same engine.
 Variables, color expressions and extended selectors in string PSS are not part
 of v0. Repeated text declarations use last-wins semantics; the old typed rule
@@ -206,7 +159,9 @@ captureless provider returning an explicit-length `string_view`:
 ```cpp
 using namespace std::literals;
 // Intentionally invalid: an unknown property at offset 4, line 1, column 5.
-constexpr auto INVALID = sc::pss([] { return "* { missing: true; }"sv; });
+constexpr auto INVALID = sc::pss([] {
+  return "* { missing: true; }"sv;
+});
 ```
 
 The first assertion reports a fixed category such as `Unknown PSS property`;
@@ -225,19 +180,8 @@ non-ASCII bytes use a safe placeholder. Runtime errors do not retain a borrowed
 source identity. Low-level callers supply that context; the scene loading
 boundary retains a bounded owning label in `ManagedError::styleSource`.
 
-## Complete installed consumers
+## Additional examples
 
-The three forms share theme switching, live parameters, collected style failures
-and cleanup. The metadata ownership test is a separate workload.
-
-\include{lineno} ct_pss_before.cpp
-\include{lineno} ct_pss.cpp
-\include{lineno} ct_pss_flat.cpp
-\include{lineno} ct_pss_support.hpp
-\include{lineno} ct_pss_metadata.cpp
-
-For complete client footprint measurement also include `style_layers_support.hpp`,
-`static_styles_support.hpp`, the replay terminal and the Windows test startup.
-C++ lexical token counts treat a raw PSS string as one literal: inspect string
-bytes and semantic rule/declaration counts too. Moving syntax into a string does
-not make its contents free or establish human readability by itself.
+The [typed client](../tests/package_consumer/ct_pss.cpp) and
+[metadata ownership test](../tests/package_consumer/ct_pss_metadata.cpp)
+cover additional scenarios and checks.

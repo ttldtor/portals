@@ -2,10 +2,10 @@
 
 Start with the [runnable examples](examples.md), then read
 [declarative composition](declarative-ui.md) for ownership and mount errors.
-The conveniences below are additive: retained widgets, `GraphemeText::from`,
-explicit projections, and the low-level model/view API remain available.
+This page covers checked text formatting, table columns and complete fluent
+scene examples.
 
-## Format text without discarding validation
+## Format and validate text
 
 Include `<portals/text_format.hpp>`. `formatText("Price {:.2f}", value)` checks
 the format specification at compile time and returns
@@ -22,7 +22,7 @@ preparation translates thrown exceptions to its existing `CALLBACK_FAILED`.
 Use checked `formatText` when the application needs the individual text error.
 This convenience does not introduce a second callback error protocol.
 
-## Fixed schemas without manual column IDs
+## Define fixed table schemas
 
 ```cpp
 const auto price = portals::cellFormat<double>("{:.2f}", policy);
@@ -35,10 +35,10 @@ if (!columns) {
 }
 ```
 
-The record type is inferred from the member pointer. Recipes own captions and
+The record type is inferred from the member pointer. Column descriptions (`TableColumnSpec<T>`) own captions and
 callbacks; assembly validates captions and assigns IDs 1..N with initial generation
 in argument order, independently for each table. Assemble a fixed schema once.
-Reordering the resulting columns retains their IDs. Rebuilding recipes in a new
+Reordering the resulting columns retains their IDs. Rebuilding column descriptions in a new
 order creates a different positional schema; dynamic replacement uses explicit
 `ColumnId` through the original factories. No global counter or caption-derived
 identity is introduced. The existing table validates widths during preparation. The formatter
@@ -126,7 +126,7 @@ The complete SDK-free installed adapter consumer is below:
 
 \include{lineno} compact.cpp
 
-## Matching keys without variant boilerplate
+## Match key events
 
 Include `<portals/input_match.hpp>` for the pure C++23 constexpr predicates:
 
@@ -205,10 +205,11 @@ It is not part of the public API or a recommended production error policy. Publi
 factories return their typed results so applications can report the original cause.
 General builder error composition remains future work; this step does not add
 TRY macros, an exception-based public error protocol, or a result coroutine runtime.
-The three interactive programs are also compiled and run as relocated installed
-consumers. Their CLI options, exit codes and defaults are documented on the
-[examples page](examples.md). This step does not implement runtime reconciliation,
-compile-time scene construction, resources/i18n, or a general reflection schema.
+The interactive programs are also compiled as relocated installed consumers,
+and their CLI preflight is checked without opening a terminal. Their CLI options, exit codes and defaults are documented on the
+[examples page](examples.md). These helper comparisons do not cover runtime reconciliation, resources/i18n
+or a general reflection schema. The implemented experimental
+[compile-time scenes](compile-time-scenes.md) have a separate chapter.
 
 ## Costs and measurements
 
@@ -283,6 +284,8 @@ are test-owned. See [command-line startup](cli.md).
 
 ### Gallery before: borrowed application and managed ownership
 
+[Preserved managed form](../tests/support/examples/gallery/form.hpp).
+
 \include{lineno} form.hpp
 
 ### Gallery after: owning scene and direct initial editor text
@@ -293,7 +296,8 @@ The editor owns its initial text and the checkbox owns its initial boolean state
 
 ### Custom widget before: borrowed application and scalar managed state
 
-\include{lineno} custom_widget/meter.hpp
+[Preserved managed meter](../tests/support/examples/custom_widget/meter.hpp).
+
 
 ### Custom widget after: owning scene with the same final LevelMeter
 

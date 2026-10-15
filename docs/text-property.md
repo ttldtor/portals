@@ -1,7 +1,8 @@
 # Observing text properties
 
-Include `<portals/ui.hpp>` and publish `ui::Ref<T>` through the existing
-description transaction. A reference observes the widget and its scene; it
+Include `<portals/ui.hpp>` and attach a [`ui::Ref<T>`](glossary.md) to a
+control description. The scene publishes the reference after the complete
+description mounts successfully. A reference observes the widget and its scene; it
 does not own either. `text()` is available for `Label`, `Button`, `CheckBox`,
 public `Control` subtypes and `LineEdit`.
 
@@ -133,8 +134,8 @@ mutation/concatenation boundary, allocation failure is typed `NO_MEMORY`, and
 capacity failure is `NODE_LIMIT`. Diagnostics retain the original cause when
 breadcrumb allocation fails. Checked `get()` does not report failures; fluent
 mutations report to the existing bounded collector without changing runtime
-stop policy. Ref-first factories, callback shorthand and a lazy scene pipeline
-remain separate work.
+stop policy. For Ref-first factories, callback shorthand and lazy scene pipelines, see
+[declarative composition](declarative-ui.md).
 
 The installed `consumer.text-property` program exercises these headers through
 the relocated package:

@@ -1,6 +1,6 @@
 # Typed properties
 
-`Property<T>` is a UI-owned value with immutable owning snapshots and ordinary
+`Property<T>` is a UI-owned value with immutable [snapshots](glossary.md) that retain their value and revision and ordinary
 [Scheduler subscriptions](scheduler.md). Include `<portals/property.hpp>`.
 It is a small value/notification component: there is no binding language, event
 bus, transaction across properties, or lossless multicast.
@@ -35,6 +35,9 @@ The source target is invalidated by `set`; callbacks that change other nodes
 request the corresponding invalidation themselves.
 
 ## Commit and backpressure
+
+[Backpressure](glossary.md#glossary-backpressure) occurs when the bounded
+notification queue cannot accept another delivery.
 
 `set(value)` first validates the target and frame boundary, compares the value,
 and prepares an immutable next snapshot. Equal values neither advance revision,

@@ -1,9 +1,14 @@
 # Compile-time styles and live parameters {#compile_time_styles}
 
+Experimental compile-time chapter. For ordinary application code, start with
+[runtime PSS and declarative UI](styling-guide.md). This API is already
+implemented; experimental status does not mean TBD.
+
 Include `<portals/style_static.hpp>` for the experimental C++23
 `portals::style::ct` layer. It builds owning, constant-evaluated rules and
 materializes the ordinary `StyleSheet`. The existing [style engine](styles.md)
-still decides specificity, source order, property-wise cascade and invalidation.
+still decides specificity, source order, the cascade for each property and
+[invalidation](glossary.md), which requests layout or repainting.
 
 For scalar descriptions with short selectors and rules stored as bounded data,
 or for the same PSS string grammar at compile time and runtime, see
@@ -87,7 +92,7 @@ external theme replacement or another live attachment revokes the old theme owne
 even equal updates and `get()` return a typed stale error. Enabling layers also
 revokes controllers attached before the transition; attach a new controller afterwards.
 
-## Complete installed-package consumers
+## Complete example
 
 The two programs below change a palette, override its background, change a
 button's minimum width, resize and close the same replay terminal. `--failure`
@@ -107,17 +112,10 @@ mount failure retains the existing managed rollback and error-reporting contract
 
 \include{lineno} static_styles.cpp
 
-### Shared helper
+Its [shared setup](../tests/package_consumer/static_styles_support.hpp) supplies
+error handling and the [replay terminal](../tests/support/examples/replay/terminal.hpp).
 
 \include{lineno} static_styles_support.hpp
 
-### Replay terminal
-
-\include{lineno} replay/terminal.hpp
-
-Each full client footprint includes its consumer, the complete shared helper
-and replay terminal. Moving setup into a helper does not shorten that footprint.
-These listings alone make no measured compactness or performance claim.
-This layer adds no CSS parser, hierarchical selectors, custom properties,
-reactive subscriptions or compile-time virtual controls. See
-[compile-time scenes](compile-time-scenes.md) for the separate structure layer.
+For constant-evaluated scene descriptions, see
+[compile-time scenes](compile-time-scenes.md).

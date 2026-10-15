@@ -1,7 +1,8 @@
 # Cell geometry
 
 `<portals/geometry.hpp>` supplies `CellPoint`, `CellSize` and `CellRect` in the
-`portals` namespace. Coordinates and extents use `std::int32_t`: columns increase
+`portals` namespace. Coordinates and extents are measured in
+[terminal cells](glossary.md#glossary-text-units) and use `std::int32_t`: columns increase
 rightward and rows downward from the upper-left origin. Negative origins are
 valid for local/offscreen geometry. Canvas logical coordinates and future GUI
 units require an explicit transform; these types define no such conversions.
@@ -57,7 +58,7 @@ Every parameter/result is an owning value with independent lifetime and no
 borrowed storage. These operations are thread-agnostic, have no callbacks, I/O,
 allocation or exceptions, and do not mutate inputs or invalidate other values.
 Concurrent reads are safe; callers synchronize shared assignment. Geometry
-changes do not dispatch layout/paint invalidation: the future UI owner will do so
+changes do not dispatch layout/paint invalidation: the UI owner requests invalidation
 when installing new geometry. No runtime tree or GUI functionality is implied.
 
 The headless `portals.geometry` test checks integer limits, normalization,

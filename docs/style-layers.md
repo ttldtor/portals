@@ -1,6 +1,7 @@
 # Style layers {#style_layers}
 
-Style layers keep application and user declarations installed while a theme is
+A [style layer](glossary.md) is an independently installed stylesheet.
+Layers keep application and user declarations installed while a theme is
 replaced or its live parameters change. They opt into the existing retained
 [style engine](styles.md); they do not introduce another resolver or runtime.
 
@@ -24,9 +25,9 @@ auto styled = std::move(scene)
   | ui::styleLayer(StyleTier::USER, "contrast", userStyles);
 ```
 
-These fragments assume an existing idle scene and owning sheets. The existing
-configuration stages consume a facade; move it before callbacks borrow its
-address. Use methods for an already stationary owner. Before preparation,
+These fragments assume an existing idle scene and owning sheets. Applying these configuration stages to a named scene preserves that scene
+and returns `Scene&`. The shown `std::move(scene)` chain transfers ownership
+to `styled`; complete that transfer before callbacks capture the facade by address. Before preparation,
 the stages retain their configuration in registration order. Afterwards they use
 the existing managed mutation boundary. Failures enter the scene collector and
 are observed through `checked`, typed `run`, or the `runApp` reporting policy.
@@ -36,7 +37,9 @@ them installed. Argument and stage construction can throw before checked entry.
 Layer configuration is explicit: call `styleLayers` before `styleLayer`.
 Repeating the same options is a no-op; changing budgets by a repeated opt-in is
 rejected. This API accepts owning sheets, not a new string grammar. Runtime PSS
-remains available through `parsePss`; compile-time PSS literals are a later step.
+remains available through `parsePss`; compile-time PSS literals are already
+available through [compile-time PSS](compile-time-pss.md). Materialize a sheet
+for this API or use the separate source-based `ui::style` frontend.
 
 ## Resolve each property
 
@@ -58,7 +61,9 @@ precedence for every selector combination.
 `DEFAULTS` and `THEME` are permanent base slots, included in the layer count.
 Widget defaults remain below them. `ManagedScene::styleDefaults` replaces the
 defaults slot; `theme` replaces only the theme slot. Application/user layer
-removal does not remove controls. Identical names within one tier are rejected.
+removal does not remove controls. Adding through `addLayer` or `styleLayer` rejects duplicate names within one tier.
+The source-based `ui::style(..., {.name = ...})` frontend instead explicitly
+upserts by tier/name; see the [styling guide](styling-guide.md).
 
 ## Change and remove layers explicitly
 
@@ -124,33 +129,52 @@ This notation treats selector matching as bounded: class matching also scans
 the target's class list and compares strings, so unrestricted class/string sizes
 are an additional cost. Presentation states and paint properties are fixed sets.
 
-## Complete installed-package programs
+## Examples
 
-Both programs switch a theme, attach live parameters, change a width, preserve
-application/user overrides, resize and clean up the same replay scene. They also
-exercise an invalid width through `--failure` with the same typed error behavior.
-Setup fails before terminal ownership is acquired in that path.
+The [styling guide](styling-guide.md) shows independent named layers and
+replacement of one rule group. The [themes guide](themes-guide.md) shows
+how application and user overrides survive a theme change.
 
-- Before: `tests/package_consumer/style_layers_before.cpp`.
-- After: `tests/package_consumer/style_layers.cpp`.
-- Shared scene, errors and cleanup: `tests/package_consumer/style_layers_support.hpp`.
-- Shared diagnostics: `tests/package_consumer/static_styles_support.hpp`.
-- Shared replay terminal: `tests/support/examples/replay/terminal.hpp`.
+## Themes and the planned PSS source
 
-### Before
+The accepted direction loads themes through the style path into existing
+`THEME`, preserving `APPLICATION`/`USER` layers. Canonical PSS and generated
+embedded resources are **TBD — M5/U65**; expanded parameters/expressions are
+**TBD — M5/U65/U128**. This does not add a resolver or accumulate irreversible
+computed-style patches. Existing `ui::style(ui::file(...))` defaults to
+`APPLICATION`, not the future theme-loading operation. See [themes](themes-guide.md).
 
-\include{lineno} style_layers_before.cpp
+<details>
+<summary>Set style-layer limits</summary>
 
-### After
+Pass `StyleLayerOptions` when enabling layers for the first time. Defaults
+are 16 layers, 1024 rules, 6144 declarations and 1 MiB of logically counted
+payload. The two permanent base layers count toward the layer limit.
+Use at least two layer slots and values greater than zero for the other limits.
 
-\include{lineno} style_layers.cpp
+The example doubles these defaults. `maxOwnedBytes` counts the logical payload
+of installed layers; it is not a limit on the application's total memory.
+Changing budgets through a repeated `styleLayers` call is rejected.
 
-### Shared setup and cleanup
+```cpp
+#include <portals/ui_style.hpp>
 
-\include{lineno} style_layers_support.hpp
+int main() {
+  using namespace portals;
 
-The focused benchmark (`tools/benchmarks/style_layers.cpp`) distinguishes
-equal, masked and visible updates and materialized visible, hidden and offscreen
-controls. Its output records actual defaults/paint counts and in-memory terminal
-diff bytes. It does not measure allocator usage or hardware terminal throughput;
-offscreen controls in that workload are not virtualized.
+  StyleLayerOptions layers;
+  layers.maxLayers = 32;
+  layers.maxRules = 2048;
+  layers.maxDeclarations = 12288;
+  layers.maxOwnedBytes = 2 * 1024 * 1024;
+
+  auto scene = ui::scene(ui::label("F10: quit"));
+
+  return scene
+    | ui::styleLayers(layers)
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+</details>

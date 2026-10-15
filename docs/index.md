@@ -1,106 +1,145 @@
-# Portals documentation
+# Portals: short library guide
 
-The [online documentation and API reference](https://ttldtor.github.io/portals/)
-contains the guides below and the generated public API reference.
+[Русская версия](ru/index.md)
 
-Start here to build an application with Portals. The library is under
-development; managed and declarative APIs are experimental. Read the
-[current limitations](limitations.md) before relying on a platform or
-lifecycle guarantee.
+Portals is a C++23 terminal UI library under development.
+The declarative `ui` API is the primary way to build an interface.
+This page is the short reading guide; the [reference map](reference-map.md)
+contains the complete topic list and API reading paths.
 
-See [release notes](../ReleaseNotes.md) for changes by version and publication
-status.
+## Start with the declarative API
 
-## First visit: read in this order
+`<portals/ui.hpp>` provides scenes, recipes and event handlers.
+`<portals/ui_style.hpp>` adds the style operations used in this example.
 
-1. [Getting started](getting-started.md): build Portals and launch the gallery.
-2. [Runnable examples](examples.md): controls, options and complete source
-   examples. Try the gallery before the larger dashboard.
-3. [Declarative composition](declarative-ui.md): describe an ordinary form
-   with `ui` and understand what its state and callbacks own.
-4. [Managed controls](managed-controls.md): lifecycle, typed failures and
-   custom widgets. Read this when a form needs more customization.
-5. [Installed CMake package](package.md): link Portals into your own project.
+Declare the control tree, then attach style and event handlers with
+[UI stages](glossary.md#glossary-ui-stage), the objects describing operations after each `|`.
+In the example, `ui::vbox(...)` creates a [recipe](glossary.md#glossary-recipe),
+a description of the controls to construct. `ui::scene(...)` stores it in a
+[scene](glossary.md#glossary-scene), which manages preparation and running.
+The button appends text to the editor; F10 requests an orderly exit.
 
-You do not need to read the renderer, scheduler or every API declaration
-before writing a form. Consult the chapters below as needed.
+```cpp
+#include <portals/ui.hpp>
+#include <portals/ui_style.hpp>
 
-## Build an application
+int main() {
+  using namespace portals;
 
-| Need | Read |
-| --- | --- |
-| Build constant-evaluated form structure | [Compile-time scene descriptions](compile-time-scenes.md) |
-| Compose a form and manage its lifetime | [Descriptions](declarative-ui.md), [managed controls](managed-controls.md), [application runner](application.md) |
+  ui::Ref<LineEdit> message;
+  ui::Ref<Button> add;
+
+  auto scene = ui::scene(ui::vbox(
+    ui::label("Greeting"),
+    ui::lineEdit(message, ""),
+    ui::button(add, "Add Hello")));
+
+  return scene
+    | ui::style("Button { bold: true; }")
+    | ui::onClick(add,
+                  [message] {
+                    message.text() += "Hello!";
+                  })
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+The runner attempts terminal cleanup and reports failures. This compact form
+constructs the recipe before `runApp`; use the factory-based overload when
+construction also needs its checked error boundary. The exit command resolves the active scene inside a callback entered by the scene.
+An explicit `SceneRef` remains available when an action must target a named scene.
+[Declarative composition](declarative-ui.md) explains callbacks, setup errors
+and the lower-level typed `run()` result.
+
+## Build your application
+
+Create a directory named `my-app`. Save the complete example above as
+`main.cpp` and the following configuration as `CMakeLists.txt` in that directory:
+
+```cmake
+cmake_minimum_required(VERSION 3.24)
+project(MyApplication LANGUAGES CXX)
+
+include(FetchContent)
+FetchContent_Declare(portals
+  GIT_REPOSITORY https://github.com/ttldtor/portals.git
+  GIT_TAG 7f09c7db9547c34c547b05e4fbf18d5c9f492ee5
+)
+FetchContent_MakeAvailable(portals)
+
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE portals::core)
+```
+
+Run these commands from `my-app`. CMake downloads the selected Portals revision
+during configuration and builds your `my_app` executable:
+
+```powershell
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target my_app
+./build/my_app
+```
+
+On Windows, use an x64 Developer PowerShell for Visual Studio. On Linux,
+use a compatible C++ compiler and standard library. You need Git, CMake 3.24+,
+Ninja and a toolchain supporting C99 and C++23, including the C++ library
+headers `<expected>` and `<format>`.
+
+Run `my_app` in a terminal: click **Add Hello** to append text, and press F10
+to exit. On Windows the executable is `build/my_app.exe`; on Linux it is
+`build/my_app`. The commands above use the Ninja single-configuration generator.
+
+`GIT_TAG` fixes the source revision for this example. Change it when choosing
+a newer Portals version. FetchContent integration is described in the
+[CMake documentation](https://cmake.org/cmake/help/latest/module/FetchContent.html).
+
+### Use local sources or an installed SDK
+
+If you already have Portals sources in a `portals` subdirectory of your project,
+replace `include(FetchContent)` and both `FetchContent_*` calls with
+`add_subdirectory(portals)`. No download is needed.
+
+For an installed SDK, replace those same lines with
+`find_package(Portals CONFIG REQUIRED)` and pass its installation prefix in
+`CMAKE_PREFIX_PATH` when configuring. All variants use
+`target_link_libraries(my_app PRIVATE portals::core)`. See
+[package setup](package.md) for installation and toolchain compatibility.
+
+## What is available
+
+- Forms: Label, Button, CheckBox, LineEdit, Row/Column, Grid/Overlay and observing references.
+- Data: immutable models, virtual lists/tables, scrolling and charts.
+- Styles: themes, style layers and compile-time/runtime PSS.
+- Async: optional, bounded UI coroutines on the existing Scheduler.
+- Input: shortcut strings, alternatives, sequences and explicit phase selectors.
+  Native delivery depends on the backend; Kitty negotiation and standalone modifier keys are not implemented in this version.
+- Errors: live `onError` reactions and a separate final report after cleanup;
+  no built-in diagnostic indicator or panel is provided yet.
+
+These APIs are evolving. Read [limitations](limitations.md) for qualified
+platforms and the exact runtime boundaries.
+
+## User guides
+
+[Contents](guides.md) · [Glossary](glossary.md)
+
+| Task | Guide |
+|---|---|
+| Compose a form and handle errors | [Declarative UI](declarative-ui.md) |
 | Parse CLI before opening the terminal and read process snapshots | [Command-line startup](cli.md) |
-| Choose and arrange controls | [Basic controls](controls.md), [LineEdit](line-edit.md), [Row and Column](layout.md), [Grid and Overlay](grid.md) |
-| Apply colors and themes | [Styles and themes](styles.md) |
-| Build static style rules and update live typed parameters | [Compile-time styles](compile-time-styles.md) |
-| Use one PSS grammar at compile time and runtime | [Compile-time PSS](compile-time-pss.md) |
-| Await timer and provider results with UI-owned coroutines | [UI coroutines](ui-coroutines.md) |
-| Connect state and data | [Properties](property.md), [immutable models](model.md), [bounded queries](model-queries.md) |
-| Display large datasets | [Layout-driven preparation](virtual-preparation.md), [virtual lists](virtual-list.md), [virtual tables](virtual-table.md), [scrolling](scroll.md), [charts](chart.md) |
-| Write shorter checked text and typed columns | [Compact examples](compact-examples.md) |
-| Change captions and editor drafts through observing references | [Text properties](text-property.md) |
-| Explain an action that did nothing | [Diagnostics](diagnostics.md), [terminal probe](terminal-probe.md) |
-| Keep an existing streaming MarketDepthModelSample building | [Minimal legacy compatibility](legacy.md) |
+| Prepare styles and themes | [Styling guide](styling-guide.md), [themes guide](themes-guide.md) |
+| Bind state and handle events | [Bindings and events](bindings-guide.md) |
+| Load scene text/files (TBD — M1/U84) | [Scene loading](scene-loading-guide.md) |
+| Bind keys and understand input phases | [Input](input.md) |
+| Use an existing CMake project | [Package](package.md) |
+| Understand ownership and frame flow | [Architecture](architecture.md) |
+| Find another topic or API declaration | [Reference map](reference-map.md) |
 
-For theme switching that preserves application and user overrides, see
-[style layers](style-layers.md).
+[Runnable examples](examples.md) link to complete source programs.
+[Release notes](../ReleaseNotes.md) record changes by version.
 
-## Understand the core
+[Dependencies and licenses](dependencies.md) are listed separately.
 
-Read [architecture](architecture.md) first for component and event-flow
-diagrams. These chapters describe the retained core and its low-level contracts.
-
-- Ownership and events: [widget tree](widget-tree.md), [focus and routing](focus.md),
-  [scheduler](scheduler.md).
-- Text and coordinates: [UTF-8 and cell width](text.md), [geometry](geometry.md).
-- Owning low-level edit history: [text history](text-history.md).
-- Undo editor text and configure read-only or history shortcuts: [editor history](editor-history.md).
-- Try three editor confirmation modes: [editor history demo](editor-history-demo.md).
-- Input and output: [input decoder](input.md), [terminal session](terminal.md),
-  [cell buffer](cell-buffer.md), [renderer](render.md), [diff and output](diff.md).
-
-## API reference
-
-The generated HTML site has a separate **API reference** menu for types,
-concepts, namespaces, members and headers. In a checkout, public contracts
-live under `include/portals`; start with `ui.hpp`, `managed.hpp` and
-`application.hpp` for ordinary application code. See
-[getting started](getting-started.md) to build
-and open the complete reference locally.
-
-## Develop and evaluate Portals
-
-The [contributor guide](development.md) collects tools, experiments, documentation
-maintenance and dependency notices.
-
-See [releasing](releasing.md) for tags, release candidates, artifacts and
-documentation deployment through GitHub Actions.
-
-- [Testing](testing.md) and [fuzzing](../fuzz/README.md): correctness tools.
-- [Managed API measurements](managed-performance.md): reproducible costs and
-  known scaling limits, not a promise of linear performance.
-- [API design scenarios](api-design.md) and the
-  [module experiment](../experiments/module-spike/README.md): design/experiment
-  material, not the recommended first application or a stable API contract.
-- Dependency notices: [utf8proc](../vendor/utf8proc/README.md) and
-  [Textual palette attribution](../vendor/textual/README.md).
-  [Private doctest dependency](../vendor/doctest/README.md) is used only by tests.
-
-## Reading on GitHub and as HTML
-
-For supplemental engineering measurements, see [source compactness](compactness.md)
-and [cognitive complexity and performance evidence](quality.md). These reports
-support review; they do not replace behavioral tests or decide API acceptance.
-
-This index and its relative Markdown links work in a checkout and on GitHub.
-Complete example sections link to the real, compiled source files. Their
-Doxygen `\include` lines expand into numbered listings in generated HTML;
-GitHub shows those lines literally, so use the source links there. Header
-labels such as `{#examples}` are Doxygen identifiers, not part of a title.
-
-The HTML site adds structured navigation and API reference to the same guides.
-It is generated into a build directory, not maintained as a second copy.
-A future GitHub Pages deployment can publish that directory. This repository
-does not assume an existing hosted documentation URL.
+[Fine scene settings](declarative-ui.md#scene-fine-settings) contains
+expandable examples of ownership budgets and input settings.

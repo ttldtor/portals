@@ -41,28 +41,13 @@ the initial text instead of the descriptor's literal. Callbacks keep the existin
 managed action contract. References observe mounted controls and become invalid
 after their lifetime ends. They do not own controls.
 
-## Complete before and after
+## Complete example
 
-Both installed-package consumers edit the name to `Ada`, activate Apply, update
-the status, apply the same styles, resize, and close the same replay terminal.
-They also support `--failure` to verify typed callback failure and cleanup.
-The shared helper is part of both full client footprints.
-
-- [Dynamic description](https://github.com/ttldtor/portals/blob/main/tests/package_consumer/static_scene_dynamic.cpp).
-- [Constant-evaluated description](https://github.com/ttldtor/portals/blob/main/tests/package_consumer/static_scene.cpp).
-- [Shared runtime, errors and cleanup](https://github.com/ttldtor/portals/blob/main/tests/package_consumer/static_scene_support.hpp).
-
-### Before: ordinary description
-
-\include{lineno} static_scene_dynamic.cpp
-
-### After: static structure and runtime adapters
-
-\include{lineno} static_scene.cpp
-
-### Shared behavior and error handling
-
-\include{lineno} static_scene_support.hpp
+The [static scene client](../tests/package_consumer/static_scene.cpp)
+edits a name, activates Apply, updates status, changes styles and resizes.
+Its `--failure` path checks typed callback errors and cleanup.
+The [shared setup](../tests/package_consumer/static_scene_support.hpp)
+contains runtime and error handling.
 
 ## What remains runtime
 

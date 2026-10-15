@@ -1,9 +1,10 @@
 # Cell buffer
 
-`<portals/cell_buffer.hpp>` provides an owning framebuffer in terminal columns
-and rows. Construct it with `CellBuffer::from(size, policy, limits)`, then write
+`<portals/cell_buffer.hpp>` provides a `CellBuffer` storing a frame in
+[terminal cells](glossary.md#glossary-text-units), the column-and-row units of the screen. Construct it with `CellBuffer::from(size, policy, limits)`, then write
 one validated `GraphemeText` element with `put(position, text, grapheme_index,
-style)`. The index selects a complete extended grapheme, not a UTF-8 byte.
+style)`. The index selects a complete [grapheme](glossary.md#glossary-text-units),
+a text cluster such as a letter with its combining accent.
 `CellStyle` is a small value containing optional RGB foreground/background and
 bold/italic/underline flags; themes and terminal encoding are later components.
 
