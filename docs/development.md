@@ -16,9 +16,8 @@ requiring someone to dismiss a window.
 are contributor references.
 
 [Managed API measurements](managed-performance.md) records equivalent workloads,
-raw samples and known scaling limits. [Design scenarios](api-design.md) and the
-[module experiment](../experiments/module-spike/README.md) are exploratory
-material, not the entry point for current applications.
+raw samples and known scaling limits. [Design scenarios](api-design.md) are exploratory material, not the entry
+point for current applications.
 
 ## Maintain the documentation
 
