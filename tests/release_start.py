@@ -116,6 +116,43 @@ class TransformTests(unittest.TestCase):
                 START.validate_release({"CMakeLists.txt": CM, "ReleaseNotes.md": notes}, "v0.2.0-rc1")
 
 
+class TaskIdentityTests(unittest.TestCase):
+    def test_canonical_task_and_release_names(self) -> None:
+        for task_id in ("PRTLS-1", "PRTLS-144", "PRTLS-124.1"):
+            for tag in ("v0.3.0", "v1.20.3-rc2"):
+                branch, title = START.release_identity(task_id, tag)
+                self.assertEqual(branch, f"task/{task_id}-BUILD-prepare-release-{tag}")
+                self.assertEqual(title, f"[{task_id}][BUILD] Prepare release {tag}")
+
+    def test_rejects_noncanonical_or_injected_task_ids(self) -> None:
+        for task_id in ("", "PRTLS-0", "PRTLS-01", "PRTLS-1.0", "PRTLS-1.01", "PRTLS-1.1.1",
+                        "prtls-1", "OTHER-1", "PRTLS-1\n", " PRTLS-1", "PRTLS-1;exit", "PRTLS-1/other"):
+            with self.subTest(task_id=task_id), self.assertRaises(START.StartError):
+                START.release_identity(task_id, "v0.3.0")
+
+    def test_cli_requires_task_id_and_rejects_dispatch_override_before_git(self) -> None:
+        arguments = (["v0.3.0"], ["v0.3.0", "--dry-run"], ["v0.3.0", "--task-id", "PRTLS-0"],
+                     ["--dispatch-merged", "missing.json", "--task-id", "PRTLS-144"],
+                     ["--dispatch-merged", "missing.json", "--dry-run"])
+        for args in arguments:
+            with self.subTest(args=args), patch.object(sys, "argv", [str(SCRIPT), *args]), patch.object(START, "run") as run:
+                self.assertEqual(START.main(), 1)
+                run.assert_not_called()
+
+    @unittest.skipUnless(POWERSHELLS, "PowerShell is unavailable")
+    def test_powershell_cli_requires_canonical_task_id_before_git(self) -> None:
+        for shell in POWERSHELLS:
+            for task_id in (None, "PRTLS-0", "PRTLS-01", "OTHER-1", "PRTLS-1.0", "PRTLS-1;exit"):
+                command = shell_command(shell, SCRIPT.with_suffix(".ps1")) + ["-Tag", "v0.3.0", "-DryRun"]
+                if task_id is not None:
+                    command += ["-TaskId", task_id]
+                result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", check=False)
+                with self.subTest(shell=shell, task_id=task_id):
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("pre-reserved task ID", result.stderr)
+
+
+
 class GitFixtureTests(unittest.TestCase):
     def setUp(self) -> None:
         fixture_parent = SCRIPT.parents[2] / "build/release-start-tests"
@@ -168,55 +205,90 @@ class GitFixtureTests(unittest.TestCase):
             self.assertIn("Merging this PR authorizes tag creation and release publication", body)
             self.prs = [{"url": "https://github.com/owner/portals/pull/1", "state": "OPEN",
                          "headRefOid": self.git("rev-parse", command[command.index("--head") + 1]),
-                         "headRefName": command[command.index("--head") + 1], "mergeCommit": None, "isCrossRepository": False}]
+                         "headRefName": command[command.index("--head") + 1], "title": command[command.index("--title") + 1], "mergeCommit": None, "isCrossRepository": False}]
             return self.prs[0]["url"] + "\n"
         if command[1:3] == ["workflow", "run"]:
             return ""
         self.fail(f"Unexpected external command: {command}")
 
+    def test_invalid_task_rejected_before_any_commands(self) -> None:
+        with self.assertRaises(START.StartError):
+            START.start(self.root, "v0.3.0", "PRTLS-0", True)
+        self.assertEqual(self.commands, [])
+
+    def test_preparation_ref_collisions_rejected_without_writes(self) -> None:
+        for branch in ("task/PRTLS-144-BUILD-prepare-release-v0.4.0",
+                       "task/PRTLS-145-BUILD-prepare-release-v0.3.0", "task/release-v0.3.0"):
+            with self.subTest(branch=branch):
+                self.git("branch", branch)
+                for remote in (False, True):
+                    if remote:
+                        self.git("push", "origin", f"refs/heads/{branch}")
+                        self.git("branch", "-D", branch)
+                    self.commands.clear()
+                    with self.assertRaisesRegex(START.StartError, "preparation branch"):
+                        START.start(self.root, "v0.3.0", "PRTLS-144", True)
+                    self.assertFalse(any(command[0] == "gh" or "fetch" in command or "push" in command for command in self.commands))
+                self.git("push", "origin", f":refs/heads/{branch}")
+
+    def test_retry_rejects_tampered_pr_or_commit_title(self) -> None:
+        START.start(self.root, "v0.3.0", "PRTLS-144")
+        self.prs[0]["title"] = "Prepare release v0.3.0"
+        with self.assertRaisesRegex(START.StartError, "PR title"):
+            START.start(self.root, "v0.3.0", "PRTLS-144")
+        commit = self.git("rev-parse", "task/PRTLS-144-BUILD-prepare-release-v0.3.0")
+        with self.assertRaisesRegex(START.StartError, "commit title"):
+            START.validate_branch(self.root, commit, self.git("rev-parse", "main"), "v0.3.0", "Wrong title")
+
     def test_dirty_rejected_before_external_commands(self) -> None:
         (self.root / "untracked.txt").write_text("User data", encoding="utf-8")
         with self.assertRaisesRegex(START.StartError, "clean"):
-            START.start(self.root, "v0.3.0")
+            START.start(self.root, "v0.3.0", "PRTLS-144")
         self.assertFalse(any(command[0] == "gh" or "ls-remote" in command for command in self.commands))
 
     def test_different_push_repository_rejected_before_any_write(self) -> None:
         self.git("remote", "set-url", "--push", "origin", "https://github.com/another/project.git")
         with patch.object(START, "repository_name", side_effect=[REPOSITORY, "another/project"]), self.assertRaisesRegex(START.StartError, "push URL"):
-            START.start(self.root, "v0.3.0")
+            START.start(self.root, "v0.3.0", "PRTLS-144")
         self.assertFalse(any(command[0] == "gh" or "fetch" in command or "ls-remote" in command for command in self.commands))
 
     def test_multiple_push_urls_rejected(self) -> None:
         self.git("remote", "set-url", "--push", "--add", "origin", str(self.remote))
         self.git("remote", "set-url", "--push", "--add", "origin", str(self.remote))
         with self.assertRaisesRegex(START.StartError, "push URL"):
-            START.start(self.root, "v0.3.0")
+            START.start(self.root, "v0.3.0", "PRTLS-144")
 
     def test_dry_run_does_not_change_git_or_source(self) -> None:
         before = {str(path.relative_to(self.root)): path.read_bytes() for path in self.root.rglob("*") if path.is_file()}
         remote_before = {str(path.relative_to(self.remote)): path.read_bytes() for path in self.remote.rglob("*") if path.is_file()}
-        preview = json.loads(START.start(self.root, "v0.3.0", True))
+        preview = json.loads(START.start(self.root, "v0.3.0", "PRTLS-144", True))
         self.assertEqual(preview["changed_files"], list(START.RELEASE_FILES))
+        self.assertEqual(preview["task_id"], "PRTLS-144")
+        self.assertEqual(preview["branch"], "task/PRTLS-144-BUILD-prepare-release-v0.3.0")
+        self.assertEqual(preview["commit_title"], "[PRTLS-144][BUILD] Prepare release v0.3.0")
+        self.assertEqual(preview["pr_title"], preview["commit_title"])
         self.assertEqual(before, {str(path.relative_to(self.root)): path.read_bytes() for path in self.root.rglob("*") if path.is_file()})
         self.assertEqual(remote_before, {str(path.relative_to(self.remote)): path.read_bytes() for path in self.remote.rglob("*") if path.is_file()})
         self.assertFalse(any(command[0] == "gh" for command in self.commands))
 
     def test_real_git_prepare_push_and_resume_pr(self) -> None:
-        self.assertEqual(START.start(self.root, "v0.3.0"), "https://github.com/owner/portals/pull/1")
+        self.assertEqual(START.start(self.root, "v0.3.0", "PRTLS-144"), "https://github.com/owner/portals/pull/1")
         self.assertEqual(self.git("branch", "--show-current"), "main")
         self.assertEqual(self.git("status", "--porcelain"), "")
-        commit = self.git("rev-parse", "task/release-v0.3.0")
+        commit = self.git("rev-parse", "task/PRTLS-144-BUILD-prepare-release-v0.3.0")
         changed = self.git("diff-tree", "--no-commit-id", "--name-only", "-r", commit).splitlines()
         self.assertEqual(set(changed), set(START.RELEASE_FILES))
         self.assertNotIn("Co-authored-by", self.git("log", "-1", "--format=%B", commit))
+        self.assertEqual(self.git("log", "-1", "--format=%s", commit), "[PRTLS-144][BUILD] Prepare release v0.3.0")
+        self.assertEqual(self.prs[0]["title"], "[PRTLS-144][BUILD] Prepare release v0.3.0")
         self.assertEqual(len(self.git("worktree", "list", "--porcelain").split("worktree ")) - 1, 1)
         creates = sum(command[0:3] == ["gh", "pr", "create"] for command in self.commands)
-        self.assertEqual(START.start(self.root, "v0.3.0"), self.prs[0]["url"])
+        self.assertEqual(START.start(self.root, "v0.3.0", "PRTLS-144"), self.prs[0]["url"])
         self.assertEqual(creates, sum(command[0:3] == ["gh", "pr", "create"] for command in self.commands))
 
     def test_real_git_second_stable_release_after_only_manual_body_entry(self) -> None:
-        START.start(self.root, "v0.2.0")
-        self.git("merge", "--no-ff", "task/release-v0.2.0", "-m", "Merge first stable release")
+        START.start(self.root, "v0.2.0", "PRTLS-143")
+        self.git("merge", "--no-ff", "task/PRTLS-143-BUILD-prepare-release-v0.2.0", "-m", "Merge first stable release")
         first_raw = (self.root / "ReleaseNotes.md").read_bytes().decode("utf-8")
         first_notes = (self.root / "ReleaseNotes.md").read_text(encoding="utf-8")
         entry = "\n- Added a new feature by hand.\n\n"
@@ -224,8 +296,8 @@ class GitFixtureTests(unittest.TestCase):
         self.git("add", "ReleaseNotes.md")
         self.git("commit", "-m", "Document the next feature")
         self.git("push", "origin", "main")
-        START.start(self.root, "v0.3.0")
-        prepared = START.files_at(self.root, self.git("rev-parse", "task/release-v0.3.0"))
+        START.start(self.root, "v0.3.0", "PRTLS-144")
+        prepared = START.files_at(self.root, self.git("rev-parse", "task/PRTLS-144-BUILD-prepare-release-v0.3.0"))
         self.assertEqual(START.version_span(prepared["CMakeLists.txt"])[2], "0.3.0")
         self.assertIn("## v0.3.0 (", prepared["ReleaseNotes.md"])
         self.assertIn("- Added a new feature by hand.", prepared["ReleaseNotes.md"])
@@ -235,52 +307,64 @@ class GitFixtureTests(unittest.TestCase):
     def test_pr_failure_preserves_branch_for_safe_retry(self) -> None:
         self.fail_create = True
         with self.assertRaisesRegex(START.StartError, "PR failure"):
-            START.start(self.root, "v0.3.0")
-        commit = self.git("rev-parse", "task/release-v0.3.0")
+            START.start(self.root, "v0.3.0", "PRTLS-144")
+        commit = self.git("rev-parse", "task/PRTLS-144-BUILD-prepare-release-v0.3.0")
         self.fail_create = False
-        START.start(self.root, "v0.3.0")
-        self.assertEqual(self.git("rev-parse", "task/release-v0.3.0"), commit)
+        START.start(self.root, "v0.3.0", "PRTLS-144")
+        self.assertEqual(self.git("rev-parse", "task/PRTLS-144-BUILD-prepare-release-v0.3.0"), commit)
 
     def test_remote_resume_without_local_branch(self) -> None:
-        START.start(self.root, "v0.3.0")
-        commit = self.git("rev-parse", "task/release-v0.3.0")
-        self.git("branch", "-D", "task/release-v0.3.0")
-        self.assertEqual(START.start(self.root, "v0.3.0"), self.prs[0]["url"])
+        START.start(self.root, "v0.3.0", "PRTLS-144")
+        commit = self.git("rev-parse", "task/PRTLS-144-BUILD-prepare-release-v0.3.0")
+        self.git("branch", "-D", "task/PRTLS-144-BUILD-prepare-release-v0.3.0")
+        self.assertEqual(START.start(self.root, "v0.3.0", "PRTLS-144"), self.prs[0]["url"])
         self.assertEqual(self.prs[0]["headRefOid"], commit)
 
     def test_resume_refuses_different_local_hash(self) -> None:
-        START.start(self.root, "v0.3.0")
-        self.git("update-ref", "refs/heads/task/release-v0.3.0", self.git("rev-parse", "main"))
+        START.start(self.root, "v0.3.0", "PRTLS-144")
+        self.git("update-ref", "refs/heads/task/PRTLS-144-BUILD-prepare-release-v0.3.0", self.git("rev-parse", "main"))
         with self.assertRaisesRegex(START.StartError, "branches differ"):
-            START.start(self.root, "v0.3.0")
+            START.start(self.root, "v0.3.0", "PRTLS-144")
 
     def test_matching_branch_name_in_fork_pr_is_rejected(self) -> None:
         self.prs = [{"url": "https://github.com/owner/portals/pull/2", "state": "OPEN", "isCrossRepository": True}]
         with self.assertRaisesRegex(START.StartError, "same repository"):
-            START.start(self.root, "v0.3.0")
+            START.start(self.root, "v0.3.0", "PRTLS-144")
 
     def test_resume_rejects_changed_prose_even_if_metadata_valid(self) -> None:
         prepared = START.prepare_files(CM, NOTES, "v0.3.0", "2026-10-10")
-        self.git("checkout", "-b", "task/release-v0.3.0")
+        self.git("checkout", "-b", "task/PRTLS-144-BUILD-prepare-release-v0.3.0")
         for name, content in prepared.items():
             (self.root / name).write_text(content.replace("Literal", "Rewritten"), encoding="utf-8")
         self.git("add", *START.RELEASE_FILES)
-        self.git("commit", "-m", "Wrong body")
+        self.git("commit", "-m", "[PRTLS-144][BUILD] Prepare release v0.3.0")
         self.git("checkout", "main")
         with self.assertRaisesRegex(START.StartError, "unchanged notes body"):
-            START.start(self.root, "v0.3.0")
+            START.start(self.root, "v0.3.0", "PRTLS-144")
 
     def event(self, commit: str) -> dict:
         return {"action": "closed", "pull_request": {"merged": True, "merge_commit_sha": commit,
                 "base": {"ref": "main", "repo": {"full_name": REPOSITORY}},
-                "head": {"ref": "task/release-v0.3.0", "repo": {"full_name": REPOSITORY}}}}
+                "head": {"ref": "task/PRTLS-144-BUILD-prepare-release-v0.3.0", "repo": {"full_name": REPOSITORY}}}}
 
     def merged_source(self) -> tuple[str, dict]:
-        START.start(self.root, "v0.3.0")
-        self.git("merge", "--no-ff", "task/release-v0.3.0", "-m", "Merge release")
+        START.start(self.root, "v0.3.0", "PRTLS-144")
+        self.git("merge", "--no-ff", "task/PRTLS-144-BUILD-prepare-release-v0.3.0", "-m", "Merge release")
         self.git("push", "origin", "main")
         commit = self.git("rev-parse", "HEAD")
         return commit, self.event(commit)
+
+    def test_dispatch_invalid_identity_never_calls_remote_api(self) -> None:
+        commit, event = self.merged_source()
+        for branch in ("task/release-v0.3.0", "task/PRTLS-0-BUILD-prepare-release-v0.3.0",
+                       "task/PRTLS-144-CORE-prepare-release-v0.3.0",
+                       "task/PRTLS-144-BUILD-prepare-release-v0.3.0;evil"):
+            event["pull_request"]["head"]["ref"] = branch
+            self.commands.clear()
+            with self.subTest(branch=branch), patch.object(START, "api") as api, self.assertRaises(START.StartError):
+                START.dispatch_merged(self.root, event, REPOSITORY)
+            api.assert_not_called()
+            self.assertFalse(any(command[0] == "gh" for command in self.commands))
 
     def test_dispatch_creates_annotated_tag_and_typed_publication_input(self) -> None:
         commit, event = self.merged_source()
@@ -302,8 +386,8 @@ class GitFixtureTests(unittest.TestCase):
         self.assertFalse(any(command[0:3] == ["gh", "workflow", "run"] for command in self.commands[count:]))
 
     def test_dispatch_requires_main_ancestry(self) -> None:
-        START.start(self.root, "v0.3.0")
-        self.git("checkout", "task/release-v0.3.0")
+        START.start(self.root, "v0.3.0", "PRTLS-144")
+        self.git("checkout", "task/PRTLS-144-BUILD-prepare-release-v0.3.0")
         commit = self.git("rev-parse", "HEAD")
         with patch.object(START, "api") as api, self.assertRaises(START.StartError):
             START.dispatch_merged(self.root, self.event(commit), REPOSITORY)
@@ -316,7 +400,7 @@ class GitFixtureTests(unittest.TestCase):
         self.git("tag", "v0.3.0", "HEAD~1")
         self.git("push", "origin", "refs/tags/v0.3.0")
         with self.assertRaisesRegex(START.StartError, "merge commit"):
-            START.start(self.root, "v0.3.0")
+            START.start(self.root, "v0.3.0", "PRTLS-144")
 
     @unittest.skipUnless(POWERSHELLS, "PowerShell is unavailable")
     def test_powershell_real_git_prepare_and_retry(self) -> None:
@@ -340,13 +424,13 @@ function Invoke-ReleaseProcess {
     if ($Command[1] -eq 'pr' -and $Command[2] -eq 'create') {
         $branch = $Command[[array]::IndexOf($Command, '--head') + 1]
         $oid = (Invoke-ReleaseGit $Root @('rev-parse', $branch))
-        $pr = @{ url = 'https://github.com/owner/portals/pull/1'; state = 'OPEN'; headRefOid = $oid; headRefName = $branch; mergeCommit = $null; isCrossRepository = $false }
+        $pr = @{ url = 'https://github.com/owner/portals/pull/1'; state = 'OPEN'; headRefOid = $oid; headRefName = $branch; title = $Command[[array]::IndexOf($Command, '--title') + 1]; mergeCommit = $null; isCrossRepository = $false }
         [IO.File]::WriteAllText($env:RELEASE_PRS, ('[' + ($pr | ConvertTo-Json -Compress) + ']'))
         return $pr.url
     }
     throw 'Unexpected fixture gh command'
 }
-Start-Release -Root $env:RELEASE_SOURCE -ReleaseTag $env:RELEASE_TAG -Preview:($env:RELEASE_PREVIEW -eq 'true')
+Start-Release -Root $env:RELEASE_SOURCE -ReleaseTag $env:RELEASE_TAG -TaskId $env:RELEASE_TASK -Preview:($env:RELEASE_PREVIEW -eq 'true')
 ''', encoding="utf-8")
         initial_root = self.root
         for index, shell in enumerate(POWERSHELLS):
@@ -360,11 +444,13 @@ Start-Release -Root $env:RELEASE_SOURCE -ReleaseTag $env:RELEASE_TAG -Preview:($
             self.git("config", "core.autocrlf", "false")
             prs.write_text("[]", encoding="utf-8")
             env = {**os.environ, "RELEASE_PS_SCRIPT": str(SCRIPT.with_suffix(".ps1")), "RELEASE_PRS": str(prs),
-                   "RELEASE_SOURCE": str(source), "TEMP": str(self.container), "TMP": str(self.container), "RELEASE_PREVIEW": "true", "RELEASE_TAG": "v0.3.0"}
+                   "RELEASE_SOURCE": str(source), "TEMP": str(self.container), "TMP": str(self.container), "RELEASE_PREVIEW": "true", "RELEASE_TAG": "v0.3.0", "RELEASE_TASK": "PRTLS-144"}
             before = {str(path.relative_to(source)): path.read_bytes() for path in source.rglob("*") if path.is_file()}
             preview = subprocess.run(shell_command(shell, runner), env=env, capture_output=True, text=True, encoding="utf-8", check=False)
             self.assertEqual(preview.returncode, 0, preview.stderr)
-            self.assertEqual(json.loads(preview.stdout)["changed_files"], list(START.RELEASE_FILES))
+            preview_data = json.loads(preview.stdout)
+            self.assertEqual(preview_data["changed_files"], list(START.RELEASE_FILES))
+            self.assertEqual(preview_data, json.loads(START.start(source, "v0.3.0", "PRTLS-144", True)))
             self.assertEqual(before, {str(path.relative_to(source)): path.read_bytes() for path in source.rglob("*") if path.is_file()})
             env["RELEASE_PREVIEW"] = "false"
             for attempt in range(2):
@@ -372,15 +458,34 @@ Start-Release -Root $env:RELEASE_SOURCE -ReleaseTag $env:RELEASE_TAG -Preview:($
                     result = subprocess.run(shell_command(shell, runner), env=env, capture_output=True, text=True, encoding="utf-8", check=False)
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(result.stdout.strip(), "https://github.com/owner/portals/pull/1")
-            commit = self.git("rev-parse", "task/release-v0.3.0")
+            commit = self.git("rev-parse", "task/PRTLS-144-BUILD-prepare-release-v0.3.0")
             START.validate_branch(self.root, commit, self.git("rev-parse", "main"), "v0.3.0")
             self.assertEqual(self.git("status", "--porcelain"), "")
+            self.assertEqual(self.git("log", "-1", "--format=%s", commit), "[PRTLS-144][BUILD] Prepare release v0.3.0")
+            self.assertEqual(json.loads(prs.read_text(encoding="utf-8"))[0]["title"], "[PRTLS-144][BUILD] Prepare release v0.3.0")
+            for collision in ("task/PRTLS-144-BUILD-prepare-release-v0.4.0",
+                              "task/PRTLS-145-BUILD-prepare-release-v0.3.0", "task/release-v0.3.0"):
+                self.git("branch", collision)
+                for remote_collision in (False, True):
+                    if remote_collision:
+                        self.git("push", "origin", f"refs/heads/{collision}")
+                        self.git("branch", "-D", collision)
+                    result = subprocess.run(shell_command(shell, runner), env=env, capture_output=True, text=True, encoding="utf-8", check=False)
+                    self.assertNotEqual(result.returncode, 0, (shell, collision, remote_collision))
+                    self.assertIn("preparation branch", result.stderr)
+                self.git("push", "origin", f":refs/heads/{collision}")
+            current_prs = json.loads(prs.read_text(encoding="utf-8"))
+            current_prs[0]["title"] = "Prepare release v0.3.0"
+            prs.write_text(json.dumps(current_prs), encoding="utf-8")
+            result = subprocess.run(shell_command(shell, runner), env=env, capture_output=True, text=True, encoding="utf-8", check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("PR title", result.stderr)
             prs.write_text(json.dumps([{"url": "a"}, {"url": "b"}]), encoding="utf-8")
             result = subprocess.run(shell_command(shell, runner), env=env, capture_output=True, text=True, encoding="utf-8", check=False)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Multiple release preparation PRs", result.stderr)
             prs.write_text("[]", encoding="utf-8")
-            self.git("merge", "--no-ff", "task/release-v0.3.0", "-m", "Merge first stable release")
+            self.git("merge", "--no-ff", "task/PRTLS-144-BUILD-prepare-release-v0.3.0", "-m", "Merge first stable release")
             first_raw = (source / "ReleaseNotes.md").read_bytes().decode("utf-8")
             notes = (source / "ReleaseNotes.md").read_text(encoding="utf-8")
             (source / "ReleaseNotes.md").write_text(notes.replace("## Unreleased\n\n", "## Unreleased\n\n- Manually documented the next feature.\n\n", 1), encoding="utf-8")
@@ -388,15 +493,51 @@ Start-Release -Root $env:RELEASE_SOURCE -ReleaseTag $env:RELEASE_TAG -Preview:($
             self.git("commit", "-m", "Document the next feature")
             self.git("push", "origin", "main")
             env["RELEASE_TAG"] = "v0.4.0"
+            env["RELEASE_TASK"] = "PRTLS-145"
             result = subprocess.run(shell_command(shell, runner), env=env, capture_output=True, text=True, encoding="utf-8", check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
-            next_commit = self.git("rev-parse", "task/release-v0.4.0")
+            next_commit = self.git("rev-parse", "task/PRTLS-145-BUILD-prepare-release-v0.4.0")
             START.validate_branch(self.root, next_commit, self.git("rev-parse", "main"), "v0.4.0")
             self.assertTrue(START.files_at(self.root, next_commit)["ReleaseNotes.md"].endswith(first_raw[first_raw.index("## v0.3.0 ("):]))
         self.root = initial_root
 
 
 class PowerShellParityTests(unittest.TestCase):
+    @unittest.skipUnless(POWERSHELLS, "PowerShell is unavailable")
+    def test_task_identity_parity(self) -> None:
+        cases = [{"task": task_id, "tag": tag} for task_id in
+                 ("PRTLS-1", "PRTLS-124.1", "PRTLS-0", "PRTLS-01", "PRTLS-1.0", "OTHER-1", "PRTLS-1\n")
+                 for tag in ("v0.3.0", "v0.3.0-rc2", "v0.3.0-rc01")]
+        expected = []
+        for case in cases:
+            try:
+                branch, title = START.release_identity(case["task"], case["tag"])
+                expected.append({"ok": True, "branch": branch, "title": title})
+            except START.StartError:
+                expected.append({"ok": False})
+        parent = SCRIPT.parents[2] / "build/release-start-tests"
+        parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=parent) as temporary:
+            inputs = Path(temporary) / "identities.json"
+            inputs.write_text(json.dumps(cases), encoding="utf-8")
+            runner = Path(temporary) / "identity.ps1"
+            runner.write_text(r'''
+. $env:RELEASE_PS_SCRIPT
+$cases = [IO.File]::ReadAllText($env:RELEASE_CASES) | ConvertFrom-Json
+$results = foreach ($case in $cases) {
+    try {
+        $identity = Get-ReleaseIdentity $case.task $case.tag
+        @{ ok = $true; branch = $identity.Branch; title = $identity.Title }
+    } catch { @{ ok = $false } }
+}
+ConvertTo-Json -InputObject @($results) -Depth 8 -Compress
+''', encoding="utf-8")
+            for shell in POWERSHELLS:
+                result = subprocess.run(shell_command(shell, runner), capture_output=True, text=True, encoding="utf-8", check=False,
+                                        env={**os.environ, "RELEASE_PS_SCRIPT": str(SCRIPT.with_suffix(".ps1")), "RELEASE_CASES": str(inputs)})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout), expected, shell)
+
     @unittest.skipUnless(POWERSHELLS, "PowerShell is unavailable")
     def test_shared_transform_fixtures_in_powershell_and_python(self) -> None:
         cases = [{"cmake": CM, "notes": NOTES, "tag": tag, "date": "2026-10-10"}
@@ -455,9 +596,16 @@ class DispatchInputTests(unittest.TestCase):
         sha = "a" * 40
         event = {"action": "closed", "pull_request": {"merged": True, "merge_commit_sha": sha,
                  "base": {"ref": "main", "repo": {"full_name": REPOSITORY}},
-                 "head": {"ref": "task/release-v0.3.0", "repo": {"full_name": REPOSITORY}}}}
+                 "head": {"ref": "task/PRTLS-144-BUILD-prepare-release-v0.3.0", "repo": {"full_name": REPOSITORY}}}}
         self.assertEqual(START.dispatch_inputs(event, REPOSITORY, sha), ("v0.3.0", sha))
-        mutations = [("merged", False), ("head_ref", "task/release-v0.3.0;evil"), ("head_repo", "fork/portals"),
+        mutations = [("head_ref", "task/release-v0.3.0"),
+                     ("head_ref", "task/PRTLS-0144-BUILD-prepare-release-v0.3.0"),
+                     ("head_ref", "task/PRTLS-0-BUILD-prepare-release-v0.3.0"),
+                     ("head_ref", "task/OTHER-144-BUILD-prepare-release-v0.3.0"),
+                     ("head_ref", "task/PRTLS-144-CORE-prepare-release-v0.3.0"),
+                     ("head_ref", "task/PRTLS-144-BUILD-prepare-release-v0.3.0\n"),
+                     ("head_ref", "task/PRTLS-144-BUILD-prepare-release-v0.3.0-rc01"),
+                     ("merged", False), ("head_ref", "task/PRTLS-144-BUILD-prepare-release-v0.3.0;evil"), ("head_repo", "fork/portals"),
                      ("base_ref", "development"), ("action", "opened"), ("merge_commit_sha", "b" * 40)]
         for key, value in mutations:
             changed = json.loads(json.dumps(event))

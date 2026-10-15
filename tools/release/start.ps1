@@ -7,21 +7,35 @@
 Prepare a release pull request without merging it or publishing a release.
 .PARAMETER Tag
 Release identity: vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-rcN.
+.PARAMETER TaskId
+Previously reserved Portals task ID: PRTLS-N or PRTLS-N.N, with positive numbers
+and no leading zeros. The script does not allocate or reserve task numbers.
 .PARAMETER DryRun
 Validate and preview without writing files or refs. The remote main commit
 must already be available locally; preview does not fetch missing objects.
 .EXAMPLE
-powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/start.ps1 -Tag v0.2.0
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/start.ps1 -Tag v0.2.0 -TaskId PRTLS-144
 #>
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)][string]$Tag,
+    [string]$TaskId,
     [switch]$DryRun
 )
 
 $ErrorActionPreference = 'Stop'
 $script:ReleaseFiles = @('CMakeLists.txt', 'ReleaseNotes.md')
 $script:TagPattern = '\Av(?<base>(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))(?<rc>-rc[1-9][0-9]*)?\z'
+
+function Get-ReleaseIdentity {
+    param([string]$TaskId, [string]$ReleaseTag)
+    if ($TaskId -cnotmatch '\APRTLS-[1-9][0-9]*(?:\.[1-9][0-9]*)?\z') {
+        throw 'A pre-reserved task ID is required: PRTLS-N or PRTLS-N.N, with positive numbers and no leading zeros'
+    }
+    [void](Get-ReleaseTag $ReleaseTag)
+    return @{ Branch = "task/$TaskId-BUILD-prepare-release-$ReleaseTag"; Title = "[$TaskId][BUILD] Prepare release $ReleaseTag" }
+}
+
 
 function Invoke-ReleaseProcess {
     param([string[]]$Command, [string]$Root)
@@ -177,7 +191,8 @@ function Assert-PreparedRelease {
 }
 
 function Assert-ReleaseBranch {
-    param([string]$Root, [string]$Commit, [string]$MainCommit, [string]$ReleaseTag)
+    param([string]$Root, [string]$Commit, [string]$MainCommit, [string]$ReleaseTag, [string]$Title)
+    if ($Title -and (Invoke-ReleaseGit $Root @('log', '-1', '--format=%s', $Commit)) -cne $Title) { throw 'Preparation commit title does not match the reserved task and release' }
     $parents = (Invoke-ReleaseGit $Root @('rev-list', '--parents', '-n', '1', $Commit)) -split '\s+'
     if ($parents.Count -ne 2) { throw 'Preparation branch must contain a single release preparation commit' }
     [void](Invoke-ReleaseGit $Root @('merge-base', '--is-ancestor', $parents[1], $MainCommit))
@@ -191,17 +206,26 @@ function Assert-ReleaseBranch {
 }
 
 function Start-Release {
-    param([string]$Root, [string]$ReleaseTag, [switch]$Preview)
-    [void](Get-ReleaseTag $ReleaseTag)
+    param([string]$Root, [string]$ReleaseTag, [string]$TaskId, [switch]$Preview)
+    $identity = Get-ReleaseIdentity $TaskId $ReleaseTag
+    $branch = $identity.Branch
+    $title = $identity.Title
     $Root = Invoke-ReleaseGit $Root @('rev-parse', '--show-toplevel')
     if (Invoke-ReleaseGit $Root @('status', '--porcelain', '--untracked-files=all')) { throw 'Working tree must be clean before release preparation' }
     $repository = Get-ReleaseRepository (Invoke-ReleaseGit $Root @('remote', 'get-url', 'origin'))
     $pushUrls = @((Invoke-ReleaseGit $Root @('remote', 'get-url', '--push', '--all', 'origin')) -split '\r?\n')
     if ($pushUrls.Count -ne 1 -or (Get-ReleaseRepository $pushUrls[0]) -ine $repository) { throw 'origin must have exactly one push URL for the same GitHub repository' }
-    $branch = "task/release-$ReleaseTag"
     $refs = @{}
-    $remoteLines = Invoke-ReleaseGit $Root @('ls-remote', 'origin', 'refs/heads/main', "refs/heads/$branch", "refs/tags/$ReleaseTag", "refs/tags/$ReleaseTag^{}")
+    $remoteLines = Invoke-ReleaseGit $Root @('ls-remote', 'origin', 'refs/heads/main', 'refs/heads/task/*', "refs/tags/$ReleaseTag", "refs/tags/$ReleaseTag^{}")
     foreach ($line in $remoteLines -split '\r?\n') { if ($line) { $parts = $line -split '\s+'; $refs[$parts[1]] = $parts[0] } }
+    $localPreparations = (Invoke-ReleaseGit $Root @('for-each-ref', '--format=%(refname:strip=2)', 'refs/heads/task/')) -split '\r?\n'
+    $remotePreparations = @($refs.Keys | Where-Object { $_.StartsWith('refs/heads/task/', [StringComparison]::Ordinal) } | ForEach-Object { $_.Substring('refs/heads/'.Length) })
+    foreach ($candidate in @($localPreparations) + $remotePreparations) {
+        if ($candidate -ceq $branch) { continue }
+        if ($candidate -ceq "task/release-$ReleaseTag") { throw 'Legacy preparation branch exists for this tag; migrate it explicitly before retrying' }
+        $other = [regex]::Match($candidate, '\Atask/(?<task>PRTLS-[1-9][0-9]*(?:\.[1-9][0-9]*)?)-BUILD-prepare-release-(?<tag>v[0-9]+\.[0-9]+\.[0-9]+(?:-rc[0-9]+)?)\z')
+        if ($other.Success -and ($other.Groups['task'].Value -ceq $TaskId -or $other.Groups['tag'].Value -ceq $ReleaseTag)) { throw 'Another preparation branch already uses this task ID or release tag; inspect it before retrying' }
+    }
     $mainCommit = $refs['refs/heads/main']
     if (-not $mainCommit) { throw 'origin has no main branch' }
     $tagCommit = $refs["refs/tags/$ReleaseTag^{}"]
@@ -214,18 +238,19 @@ function Start-Release {
         $source = Get-ReleaseFilesAt $Root $mainCommit
         $prepared = Get-PreparedReleaseFiles $source['CMakeLists.txt'] $source['ReleaseNotes.md'] $ReleaseTag (Get-Date -Format 'yyyy-MM-dd')
         $changed = @($script:ReleaseFiles | Where-Object { $source[$_] -cne $prepared[$_] })
-        return (@{ tag = $ReleaseTag; branch = $branch; base = 'main'; main_commit = $mainCommit; changed_files = $changed; dry_run = $true } | ConvertTo-Json)
+        return (@{ tag = $ReleaseTag; task_id = $TaskId; branch = $branch; commit_title = $title; pr_title = $title; base = 'main'; main_commit = $mainCommit; changed_files = $changed; dry_run = $true } | ConvertTo-Json)
     }
     [void](Invoke-ReleaseProcess -Command @('gh', 'auth', 'status', '--hostname', 'github.com') -Root $Root)
     [void](Invoke-ReleaseGit $Root @('fetch', '--no-tags', 'origin', 'refs/heads/main'))
     if ((Invoke-ReleaseGit $Root @('rev-parse', 'FETCH_HEAD')) -ne $mainCommit) { throw 'origin/main changed during preparation; retry the command' }
-    $prJson = Invoke-ReleaseProcess -Command @('gh', 'pr', 'list', '--repo', $repository, '--head', $branch, '--base', 'main', '--state', 'all', '--json', 'url,state,headRefOid,mergeCommit,isCrossRepository') -Root $Root
+    $prJson = Invoke-ReleaseProcess -Command @('gh', 'pr', 'list', '--repo', $repository, '--head', $branch, '--base', 'main', '--state', 'all', '--json', 'url,state,headRefOid,mergeCommit,isCrossRepository,title') -Root $Root
     $parsedPrs = ConvertFrom-Json -InputObject $prJson
     $prs = @($parsedPrs)
     if ($prs.Count -gt 1) { throw 'Multiple release preparation PRs exist; inspect them before retrying' }
     $pr = $null
     if ($prs.Count) { $pr = $prs[0] }
     if ($pr -and $pr.isCrossRepository -ne $false) { throw 'Preparation PR must originate from the same repository' }
+    if ($pr -and $pr.title -cne $title) { throw 'Preparation PR title does not match the reserved task and release' }
     if ($pr -and $pr.state -eq 'CLOSED') { throw 'Preparation PR was closed without merging; inspect it before retrying' }
     if ($pr -and $pr.state -eq 'MERGED') {
         $merged = $pr.mergeCommit.oid
@@ -242,7 +267,7 @@ function Start-Release {
     }
     $commit = $remoteBranch
     if (-not $commit) { $commit = $localBranch }
-    if ($commit) { Assert-ReleaseBranch $Root $commit $mainCommit $ReleaseTag }
+    if ($commit) { Assert-ReleaseBranch $Root $commit $mainCommit $ReleaseTag $title }
     if ($pr) {
         if ($pr.headRefOid -ne $commit) { throw 'Preparation PR head does not match the validated branch' }
         return $pr.url
@@ -267,14 +292,14 @@ function Start-Release {
         if (-not $commit) {
             foreach ($name in $script:ReleaseFiles) { [IO.File]::WriteAllText((Join-Path $worktree $name), $prepared[$name], $utf8) }
             [void](Invoke-ReleaseGit $worktree (@('add', '--') + $script:ReleaseFiles))
-            [void](Invoke-ReleaseGit $worktree (@('commit', '--only', '-m', "Prepare release $ReleaseTag", '--') + $script:ReleaseFiles))
+            [void](Invoke-ReleaseGit $worktree (@('commit', '--only', '-m', $title, '--') + $script:ReleaseFiles))
             $commit = Invoke-ReleaseGit $worktree @('rev-parse', 'HEAD')
-            Assert-ReleaseBranch $Root $commit $mainCommit $ReleaseTag
+            Assert-ReleaseBranch $Root $commit $mainCommit $ReleaseTag $title
         }
         [void](Invoke-ReleaseGit $worktree @('push', 'origin', "HEAD:refs/heads/$branch"))
         $body = "Prepare ${ReleaseTag}: update the numeric CMake project version and date the release notes. The release notes body is preserved.`n`nReview and merge this PR into main to create the release tag and start the verified release publication workflow. Merging this PR authorizes tag creation and release publication; this command does not merge it.`n"
         [IO.File]::WriteAllText($bodyPath, $body, $utf8)
-        return (Invoke-ReleaseProcess -Command @('gh', 'pr', 'create', '--repo', $repository, '--head', $branch, '--base', 'main', '--title', "Prepare release $ReleaseTag", '--body-file', $bodyPath) -Root $Root).Trim()
+        return (Invoke-ReleaseProcess -Command @('gh', 'pr', 'create', '--repo', $repository, '--head', $branch, '--base', 'main', '--title', $title, '--body-file', $bodyPath) -Root $Root).Trim()
     } finally {
         if (Test-Path -LiteralPath $worktree) {
             try {
@@ -290,6 +315,6 @@ function Start-Release {
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
-    try { Start-Release -Root (Get-Location).Path -ReleaseTag $Tag -Preview:$DryRun }
+    try { Start-Release -Root (Get-Location).Path -ReleaseTag $Tag -TaskId $TaskId -Preview:$DryRun }
     catch { [Console]::Error.WriteLine("Release start error: $($_.Exception.Message)"); exit 1 }
 }
