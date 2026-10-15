@@ -128,6 +128,7 @@ jobs:
             cxx_compiler: cl
             configuration: Debug
             msvc_runtime: MultiThreadedDebug
+            cxx_flags: /bigobj
             toolchain_packages: ''
           - os: windows-2022
             platform: windows
@@ -136,6 +137,7 @@ jobs:
             cxx_compiler: cl
             configuration: Release
             msvc_runtime: MultiThreaded
+            cxx_flags: /bigobj
             toolchain_packages: ''
           - os: ubuntu-24.04
             platform: linux
@@ -144,6 +146,7 @@ jobs:
             cxx_compiler: g++-14
             configuration: Debug
             msvc_runtime: ''
+            cxx_flags: ''
             toolchain_packages: gcc-14 g++-14 ninja-build
           - os: ubuntu-24.04
             platform: linux
@@ -152,6 +155,7 @@ jobs:
             cxx_compiler: g++-14
             configuration: Release
             msvc_runtime: ''
+            cxx_flags: ''
             toolchain_packages: gcc-14 g++-14 ninja-build
     runs-on: ${{ matrix.os }}
     env:
@@ -163,6 +167,7 @@ jobs:
       CXX_COMPILER: ${{ matrix.cxx_compiler }}
       BUILD_CONFIGURATION: ${{ matrix.configuration }}
       MSVC_RUNTIME_LIBRARY: ${{ matrix.msvc_runtime }}
+      CXXFLAGS: ${{ matrix.cxx_flags }}
       TOOLCHAIN_PACKAGES: ${{ matrix.toolchain_packages }}
     defaults:
       run:
@@ -209,6 +214,10 @@ jobs:
           --output-on-failure --no-tests=error -E $env:HEADLESS_EXCLUSION
       - name: Record the successful validation gate
         run: |
+          $cacheFlags = @(Get-Content -LiteralPath "$env:RUNNER_TEMP/validation-build/CMakeCache.txt" | Where-Object { $_ -match '^CMAKE_CXX_FLAGS:STRING=' })
+          if ($cacheFlags.Count -ne 1) { throw 'Expected one CMAKE_CXX_FLAGS cache entry' }
+          $cxxFlags = $cacheFlags[0].Substring('CMAKE_CXX_FLAGS:STRING='.Length)
+          if ($env:RELEASE_PLATFORM -eq 'windows' -and $cxxFlags -notmatch '(^|\s)/bigobj(\s|$)') { throw 'Windows validation requires /bigobj' }
           New-Item -ItemType Directory -Path "$env:RUNNER_TEMP/validation" | Out-Null
           @{
             schema_version = 1
@@ -218,6 +227,7 @@ jobs:
             toolchain = $env:TOOLCHAIN
             c_compiler = $env:C_COMPILER
             cxx_compiler = $env:CXX_COMPILER
+            cxx_flags = $cxxFlags
             configuration = $env:BUILD_CONFIGURATION
             headless = 'passed'
           } | ConvertTo-Json | Set-Content -Encoding utf8 "$env:RUNNER_TEMP/validation/$env:TOOLCHAIN-$env:BUILD_CONFIGURATION.json"
@@ -242,6 +252,7 @@ jobs:
             cxx_compiler: cl
             configuration: Release
             msvc_runtime: MultiThreaded
+            cxx_flags: /bigobj
             toolchain_packages: ''
             archive_extension: zip
             doxygen_archive_suffix: windows.x64.bin.zip
@@ -254,6 +265,7 @@ jobs:
             cxx_compiler: g++-14
             configuration: Release
             msvc_runtime: ''
+            cxx_flags: ''
             toolchain_packages: gcc-14 g++-14 ninja-build
             archive_extension: tar.gz
             doxygen_archive_suffix: linux.bin.tar.gz
@@ -269,6 +281,7 @@ jobs:
       CXX_COMPILER: ${{ matrix.cxx_compiler }}
       BUILD_CONFIGURATION: ${{ matrix.configuration }}
       MSVC_RUNTIME_LIBRARY: ${{ matrix.msvc_runtime }}
+      CXXFLAGS: ${{ matrix.cxx_flags }}
       TOOLCHAIN_PACKAGES: ${{ matrix.toolchain_packages }}
       ARCHIVE_EXTENSION: ${{ matrix.archive_extension }}
       DOXYGEN_ARCHIVE_SUFFIX: ${{ matrix.doxygen_archive_suffix }}
