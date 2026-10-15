@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(Portals VERSION 0.2.0 LANGUAGES C CXX)
+project(Portals VERSION 0.3.0 LANGUAGES C CXX)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
   message(FATAL_ERROR "Use an out-of-tree build directory, for example cmake -S . -B build/debug")

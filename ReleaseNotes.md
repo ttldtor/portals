@@ -5,6 +5,8 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+## v0.3.0 (2026-10-15)
+
 - [Added] Optional `portals::lyra` and `ui::lyra::cli` adapt native Lyra declarations
   to lazy command-line startup, with help/version before terminal acquisition and
   owning typed CLI diagnostics. Lyra 1.8.0 headers, BSL-1.0 notice and provenance
