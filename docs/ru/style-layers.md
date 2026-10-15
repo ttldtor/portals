@@ -156,3 +156,38 @@ PAINT; изменение минимальной ширины — LAYOUT. Тай
 Тема заменяет таблицу правил в `THEME`; правила приложения и пользователя сохраняются.
 Действующий `ui::style(ui::file(...))` по умолчанию устанавливает `APPLICATION`.
 Загрузка файла непосредственно как темы пока запланирована. [Подробности](themes-guide.md).
+
+<details>
+<summary>Как установить лимиты слоёв стилей</summary>
+
+Передайте `StyleLayerOptions` при первом включении слоёв. По умолчанию
+доступны 16 слоёв, 1024 правила, 6144 декларации и 1 MiB логически учитываемых
+данных. Два постоянных базовых слоя входят в лимит слоёв.
+Нужно не меньше двух слотов слоёв; остальные лимиты должны быть больше нуля.
+
+Пример удваивает значения по умолчанию. `maxOwnedBytes` учитывает логический
+объём данных установленных слоёв, а не всю память приложения.
+Изменение лимитов повторным вызовом `styleLayers` отклоняется.
+
+```cpp
+#include <portals/ui_style.hpp>
+
+int main() {
+  using namespace portals;
+
+  StyleLayerOptions layers;
+  layers.maxLayers = 32;
+  layers.maxRules = 2048;
+  layers.maxDeclarations = 12288;
+  layers.maxOwnedBytes = 2 * 1024 * 1024;
+
+  auto scene = ui::scene(ui::label("F10: quit"));
+
+  return scene
+    | ui::styleLayers(layers)
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+</details>

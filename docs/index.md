@@ -36,7 +36,10 @@ int main() {
 
   return scene
     | ui::style("Button { bold: true; }")
-    | ui::onClick(add, [message] { message.text() += "Hello!"; })
+    | ui::onClick(add,
+                  [message] {
+                    message.text() += "Hello!";
+                  })
     | ui::onKey("F10", ui::quit)
     | ui::runApp();
 }
@@ -136,3 +139,6 @@ platforms and the exact runtime boundaries.
 [Release notes](../ReleaseNotes.md) record changes by version.
 
 [Dependencies and licenses](dependencies.md) are listed separately.
+
+[Fine scene settings](declarative-ui.md#scene-fine-settings) contains
+expandable examples of ownership budgets and input settings.

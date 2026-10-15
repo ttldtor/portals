@@ -18,7 +18,8 @@ scene.onKey(ui::release("W"), stop);      // Native RELEASE only.
 scene.onKey(ui::pressRepeat("W"), move);  // PRESS or native REPEAT.
 scene.onKey(ui::release({key::F10, key::ALT + key::Q}), stop);
 scene.onKey(ui::repeat({key::UP, key::DOWN, key::LEFT, key::RIGHT}), move);
-scene | ui::onKey(ui::keyActions("W", {KeyAction::PRESS, KeyAction::RELEASE}), action);
+scene
+  | ui::onKey(ui::keyActions("W", {KeyAction::PRESS, KeyAction::RELEASE}), action);
 ```
 
 `ui::press(source)` выбирает PRESS. Все помощники принимают строку, типизированный

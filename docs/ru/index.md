@@ -36,7 +36,10 @@ int main() {
 
   return scene
     | ui::style("Button { bold: true; }")
-    | ui::onClick(add, [message] { message.text() += "Hello!"; })
+    | ui::onClick(add,
+                  [message] {
+                    message.text() += "Hello!";
+                  })
     | ui::onKey("F10", ui::quit)
     | ui::runApp();
 }
@@ -142,3 +145,6 @@ API развивается. Поддержанные платформы и то�
 [Заметки о версиях (EN)](../../ReleaseNotes.md) описывают изменения по версиям.
 
 [Зависимости и лицензии](dependencies.md) описаны отдельно.
+
+[Тонкие настройки сцены](declarative-ui.md#scene-fine-settings-ru) содержат
+раскрываемые примеры изменения лимитов и параметров ввода.

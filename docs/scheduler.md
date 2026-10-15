@@ -58,9 +58,13 @@ UI resources. Callback captures, by contrast, are released on the UI.
 
 ```cpp
 auto runtime = Scheduler::create();
-if (!runtime) { return; } // Report the creation error in the application.
+if (!runtime) {
+  return;
+} // Report the creation error in the application.
 auto scope = (*runtime)->makeScope();
-if (!scope) { return; } // Report the scope error in the application.
+if (!scope) {
+  return;
+} // Report the scope error in the application.
 auto connection = (*runtime)->connect<QuoteSnapshot>(
   *scope, [model](std::shared_ptr<const QuoteSnapshot> snapshot) {
     model->apply(std::move(snapshot));

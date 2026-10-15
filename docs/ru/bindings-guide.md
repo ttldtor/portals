@@ -24,7 +24,10 @@ int main() {
     ui::button(append, "Append")));
 
   return scene
-    | ui::onClick(append, [field] { field.text() += "!"; })
+    | ui::onClick(append,
+                  [field] {
+                    field.text() += "!";
+                  })
     | ui::onKey("F10", ui::quit)
     | ui::runApp();
 }
@@ -123,10 +126,11 @@ auto scene = ui::scene(makeEditors);
 Пример более сложного обработчика нажатия:
 
 ```cpp
-scene | ui::onClick(append, [field](ui::ClickParams &params) {
-  field.text() += params.mods.has(key::SHIFT) ? "HELLO!" : "Hello!";
-  params.stop();
-});
+scene
+  | ui::onClick(append, [field](ui::ClickParams &params) {
+    field.text() += params.mods.has(key::SHIFT) ? "HELLO!" : "Hello!";
+    params.stop();
+  });
 ```
 
 `ClickParams` предоставляет доступные только для чтения `target`, `mods`, `source`
@@ -141,10 +145,14 @@ scene | ui::onClick(append, [field](ui::ClickParams &params) {
 Во фрагментах ниже предполагаются уже существующие обработчики `move` и `stop`:
 
 ```cpp
-scene | ui::onKey("W", move);
-scene | ui::onKey(ui::repeat("W"), move);
-scene | ui::onKey(ui::release("W"), stop);
-scene | ui::onKey(ui::pressRepeat("W"), move);
+scene
+  | ui::onKey("W", move);
+scene
+  | ui::onKey(ui::repeat("W"), move);
+scene
+  | ui::onKey(ui::release("W"), stop);
+scene
+  | ui::onKey(ui::pressRepeat("W"), move);
 ```
 
 Обычные строки сочетаний выбирают PRESS; явные помощники выбирают соответствующие

@@ -39,7 +39,8 @@ int main() {
 ## Напишите правило
 
 ```cpp
-scene | ui::style("Button { bold: true; }");
+scene
+  | ui::style("Button { bold: true; }");
 ```
 
 `Button` — [селектор](glossary.md), выбирающий тип контрола.
@@ -86,11 +87,15 @@ ID чувствительны к регистру. Каждое объявлен
 [Уровень приоритета](glossary.md) по умолчанию — `APPLICATION`. Имя обозначает слой в пределах уровня:
 
 ```cpp
-scene | ui::style("Button { min-width: 12; }", {.name = "layout"});
-scene | ui::style("LineEdit { foreground: #ff5555; }", {.name = "validation"});
-scene | ui::style("Button { background: #181c24; }", {.name = "branding"});
+scene
+  | ui::style("Button { min-width: 12; }", {.name = "layout"});
+scene
+  | ui::style("LineEdit { foreground: #ff5555; }", {.name = "validation"});
+scene
+  | ui::style("Button { background: #181c24; }", {.name = "branding"});
 
-scene | ui::style("LineEdit { foreground: #55ff55; }", {.name = "validation"});
+scene
+  | ui::style("LineEdit { foreground: #55ff55; }", {.name = "validation"});
 ```
 
 Последняя стадия заменяет всю таблицу `validation`. Слои `layout` и `branding`
@@ -127,7 +132,8 @@ scene | ui::style("LineEdit { foreground: #55ff55; }", {.name = "validation"});
 ## Загрузите стили из файла
 
 ```cpp
-scene | ui::style(ui::file("themes/modern.pss"), {.name = "palette-file"});
+scene
+  | ui::style(ui::file("themes/modern.pss"), {.name = "palette-file"});
 ```
 
 `ui::style(ui::file(...))` возвращает объект с собственной копией пути.

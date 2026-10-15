@@ -18,14 +18,20 @@ int main() {
   ui::Ref<Button> add;
   ui::Ref<Button> exit;
 
-  auto scene = ui::scene(ui::vbox(ui::lineEdit(message, ""), ui::button(add, "Add Hello"), ui::button(exit, "Exit")));
+  auto scene = ui::scene(ui::vbox(
+    ui::lineEdit(message, ""),
+    ui::button(add, "Add Hello"),
+    ui::button(exit, "Exit")));
 
-  return scene | ui::style("Button { bold: true; }") |
-         ui::onClick(add,
-                     [message] {
-                       message.text() += "Hello!";
-                     }) |
-         ui::onClick(exit, [] { ui::quit(); }) | ui::onKey(key::F10, ui::quit) | ui::runApp();
+  return scene
+    | ui::style("Button { bold: true; }")
+    | ui::onClick(add,
+                  [message] {
+                    message.text() += "Hello!";
+                  })
+    | ui::onClick(exit, ui::quit)
+    | ui::onKey(key::F10, ui::quit)
+    | ui::runApp();
 }
 ```
 
@@ -169,7 +175,10 @@ ui::onClick(add, [message](ui::ClickParams &params) {
 ```
 
 ```cpp
-ui::onClick(add, [message] { message.text() += "Hello!"; })
+ui::onClick(add,
+            [message] {
+              message.text() += "Hello!";
+            })
 ```
 
 Без Shift первый обработчик пропускает действие, второй дописывает Hello!.
@@ -214,10 +223,14 @@ Ref<Button>::onClick, recipe.onClick и ManagedScene::onClick хранят од�
 ## Клавиатура {#short-key-bindings-ru}
 
 ```cpp
-scene | ui::onKey(key::F10, ui::quit(scene.ref()));
-scene | ui::onKey(key::ALT + key::Q, ui::quit(scene.ref()));
-scene | ui::onKey({key::F10, key::ALT + key::Q}, ui::quit(scene.ref()));
-scene | ui::onKey("F10 | Alt + Q", ui::quit(scene.ref()));
+scene
+  | ui::onKey(key::F10, ui::quit(scene.ref()));
+scene
+  | ui::onKey(key::ALT + key::Q, ui::quit(scene.ref()));
+scene
+  | ui::onKey({key::F10, key::ALT + key::Q}, ui::quit(scene.ref()));
+scene
+  | ui::onKey("F10 | Alt + Q", ui::quit(scene.ref()));
 ```
 
 Выберите одну форму для действия. Альтернативы создают одного владельца обработчика;
@@ -317,3 +330,93 @@ TableColumnOptions, сохраняя их при замене/перестано
 ошибка даёт ненулевой статус. Общее окружение примеров содержит данные и проверки.
 Сцена собирается один раз; согласование изменяемых описаний с существующим деревом и динамическая замена дерева
 в этот интерфейс не входят.
+
+## Тонкие настройки сцены {#scene-fine-settings-ru}
+
+<details>
+<summary>Как установить лимиты сцены</summary>
+
+Задайте `ui::SceneOptions` до создания сцены и передайте вторым аргументом
+в `ui::scene`. Настройки копируются в сцену и проверяются при подготовке.
+Изменение этих лимитов у уже созданной сцены API не предусматривает.
+
+| Поле в `options.managed` | Назначение | По умолчанию |
+|---|---|---|
+| `maxNodes` | Сохраняемые регистрации управляемых узлов, включая удалённые до следующей подготовки | 4096 |
+| `maxStates` | Свойства во владении сцены | 256 |
+| `maxModels` | Модели во владении сцены | 64 |
+| `diagnostics.maxErrors` | Сохраняемые записи диагностики | 64 |
+| `diagnostics.maxContexts` | Сохраняемые причинные контексты одной ошибки | 8 |
+| `diagnostics.maxContextBytes` | Суммарное число байтов подписей контекстов одной ошибки | 1024 |
+
+Все шесть лимитов должны быть больше нуля. Увеличьте их, если форме нужно
+больше управляемых объектов или подробностей диагностики. `maxErrors`
+ограничивает размер истории; число ошибок, которое допускает приложение,
+он не задаёт. При переполнении сохраняются старые записи и растёт `droppedErrors`.
+
+```cpp
+#include <portals/ui.hpp>
+
+int main() {
+  using namespace portals;
+
+  ui::SceneOptions options;
+  options.managed.maxNodes = 8192;
+  options.managed.maxStates = 512;
+  options.managed.maxModels = 128;
+  options.managed.diagnostics.maxErrors = 128;
+  options.managed.diagnostics.maxContexts = 16;
+  options.managed.diagnostics.maxContextBytes = 2048;
+
+  auto scene = ui::scene(ui::label("F10: quit"), options);
+
+  return scene
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+</details>
+
+<details>
+<summary>Как настроить обработчики и паузу последовательности</summary>
+
+Эти настройки также передаются в `ui::scene` при создании. Меняйте их,
+когда у формы много обработчиков или пользователям нужно больше времени
+между нажатиями в клавиатурной последовательности.
+
+| Поле | Назначение | По умолчанию |
+|---|---|---|
+| `maxConfigurations` | Отложенные операции configure/key/click до подготовки | 64 |
+| `managed.maxKeyHandlers` | Сохраняемые регистрации клавиатурных обработчиков | 64 |
+| `managed.maxClickHandlers` | Обработчики нажатия в цепочках всей сцены | 256 |
+| `managed.maxClickHandlersPerNode` | Такие обработчики одной кнопки | 64 |
+| `managed.keySequenceTimeout` | Пауза без ввода между нажатиями последовательности, миллисекунды | 1000 |
+
+Каждое значение должно быть больше нуля. В примере между нажатиями
+`Ctrl+K, K` допускаются две секунды. Запятая обозначает два последовательных
+нажатия; подробнее — в [синтаксисе клавиатурных сочетаний](input.md).
+
+```cpp
+#include <portals/ui.hpp>
+
+int main() {
+  using namespace portals;
+
+  ui::SceneOptions options;
+  options.maxConfigurations = 128;
+  options.managed.maxKeyHandlers = 128;
+  options.managed.maxClickHandlers = 512;
+  options.managed.maxClickHandlersPerNode = 128;
+  options.managed.keySequenceTimeout = 2000;
+
+  auto scene = ui::scene(ui::label("Ctrl+K, K or F10: quit"), options);
+
+  return scene
+    | ui::onKey("Ctrl + K, K", ui::quit)
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+</details>

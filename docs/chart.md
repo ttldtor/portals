@@ -17,7 +17,9 @@ to both preparations:
 // tree, parent and model are existing UI-owned objects; unwrap handles expected errors.
 auto chart = unwrap(tree.emplace<portals::Chart<portals::Ohlc>>(
   parent, unwrap(model.openRange()),
-  [](const portals::Ohlc &bar) { return std::optional{bar}; },
+  [](const portals::Ohlc &bar) {
+    return std::optional{bar};
+  },
   portals::ChartOptions{.mode = portals::ChartMode::CANDLES}));
 
 auto frame = unwrap(model.pin());
@@ -99,7 +101,10 @@ auto tryForward = [publisher = model.publisher(), &pendingLatest]()
   return {};
 };
 auto ingress = unwrap(scheduler.connect<Snapshot>(
-  scope, [&pendingLatest](auto snapshot) { pendingLatest = std::move(snapshot); },
+  scope,
+    [&pendingLatest](auto snapshot) {
+      pendingLatest = std::move(snapshot);
+    },
   portals::SchedulerLane::DATA, portals::SchedulerOverflow::REPLACE_LATEST));
 
 // Run this step after each bounded dispatch in the application's existing loop.
