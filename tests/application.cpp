@@ -4,6 +4,7 @@
 #include "support/examples/replay/terminal.hpp"
 #include "support/vt_oracle.hpp"
 #include <cassert>
+#include <iostream>
 #include <portals/controls.hpp>
 #include <source_location>
 
