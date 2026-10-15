@@ -338,7 +338,7 @@ def dispatch_merged(root: Path, event: dict, repository: str) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, epilog="Preparation requires Git, a clean checkout, GitHub origin and authenticated gh; creates a worktree, commit, pushed branch and PR. --dry-run still reads remote refs but performs no fetch or writes. Actions dispatch requires GITHUB_REPOSITORY and authenticated gh with contents/actions write permissions. Exit 0: success, 1: handled preparation/dispatch failure, 2: invalid CLI syntax.")
     parser.add_argument("tag", nargs="?", help="Release tag: vX.Y.Z or vX.Y.Z-rcN")
     parser.add_argument("--task-id", help="Previously reserved Portals task ID (PRTLS-N or PRTLS-N.N); required for preparation")
     parser.add_argument("--dry-run", action="store_true", help="Validate and preview without writing repository or remote state")

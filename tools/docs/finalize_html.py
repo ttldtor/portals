@@ -1,4 +1,12 @@
-"""Complete portable Doxygen guides: type links, CMake colors and navigation."""
+"""Finalize Doxygen HTML: API links, CMake highlighting and navigation.
+
+Run automatically through the portals_docs target. For diagnosis, pass the
+existing HTML directory and Doxygen XML tag file from the same build. This
+rewrites guide HTML and navigation JS in place and copies linked repository
+sources into HTML/source. Keep the script in its checkout. No network access.
+Prints JSON guide/type counts; exits 0 on success, 1 on an uncaught I/O/XML/HTML
+processing failure, 2 on invalid CLI syntax. Rebuild portals_docs after failure.
+"""
 
 import argparse
 import html
@@ -11,6 +19,7 @@ import xml.etree.ElementTree as ET
 
 
 def type_links(tag_file):
+    """Map only unambiguous documented type names to their generated API pages."""
     candidates = {}
     for compound in ET.parse(tag_file).getroot().findall("compound"):
         if compound.get("kind") not in {"class", "struct", "concept"}:
@@ -24,6 +33,7 @@ def type_links(tag_file):
 
 
 class GuideParser(HTMLParser):
+    """Link inline type references and collect headings without nesting anchors."""
     def __init__(self, links):
         super().__init__(convert_charrefs=False)
         self.links = links
@@ -99,6 +109,11 @@ class GuideParser(HTMLParser):
 
 
 def color_cmake(content):
+    """Color recognized plain CMake fragments with Doxygen CSS token classes.
+
+    This is a small line-oriented lexer, not a complete CMake grammar. Existing
+    highlighted fragments remain intact. Bracket strings/comments are not parsed.
+    """
     def fragment(match):
         block = match[0]
         if "cmake-colors" in block or re.search(r'<span class="(?:keyword|preprocessor)', block):
@@ -140,6 +155,7 @@ def write_variable(text, name, value):
 
 
 def complete_navigation(directory, headings):
+    """Attach guide headings to NAVTREE and rebuild matching index paths."""
     tree_file = directory / "navtreedata.js"
     text = tree_file.read_text(encoding="utf-8")
     tree, _ = read_variable(text, "NAVTREE")
@@ -185,6 +201,7 @@ def complete_navigation(directory, headings):
 
 
 def portable_links(content, directory, source, links, russian=False):
+    """Resolve checkout-relative links and copy source files within the repository."""
     def rewrite(match):
         href, label = html.unescape(match[1]), match[2]
         if re.match(r"[a-z]+:", href) or href.startswith(("#", "/")):
@@ -223,6 +240,7 @@ def portable_links(content, directory, source, links, russian=False):
 
 
 def finalize(directory, tag_file):
+    """Rewrite registered guide pages and their navigation after Doxygen finishes."""
     links = type_links(tag_file)
     pages = {"index.html"}
     for compound in ET.parse(tag_file).getroot().findall("compound"):
@@ -246,7 +264,7 @@ def finalize(directory, tag_file):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("html", type=Path)
-    parser.add_argument("tag_file", type=Path)
+    parser.add_argument("html", type=Path, help="Existing generated HTML directory, modified in place")
+    parser.add_argument("tag_file", type=Path, help="Doxygen XML tag file from the same documentation build")
     args = parser.parse_args()
     finalize(args.html, args.tag_file)

@@ -201,6 +201,15 @@ if(PORTALS_BUILD_TESTS)
 
   find_package(Python3 3.10 QUIET COMPONENTS Interpreter)
   if(Python3_Interpreter_FOUND)
+    add_test(NAME portals.tools-script-help COMMAND "${Python3_EXECUTABLE}"
+      -m unittest discover -s "${CMAKE_CURRENT_SOURCE_DIR}/tools/docs" -p test_cli_help.py -v)
+    set_tests_properties(portals.tools-script-help PROPERTIES TIMEOUT 30)
+    if(PORTALS_BUILD_TOOLS)
+      add_test(NAME portals.tools-benchmark-help COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/tool_help.py"
+        --bin-dir "$<TARGET_FILE_DIR:portals_mvp_benchmark>")
+      set_tests_properties(portals.tools-benchmark-help PROPERTIES TIMEOUT 60)
+    endif()
     add_test(NAME portals.release-metadata COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/release_metadata.py")
     add_test(NAME portals.release-publish COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/release_publish.py")
     add_test(NAME portals.release-start COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/release_start.py")

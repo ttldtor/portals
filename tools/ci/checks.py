@@ -42,10 +42,10 @@ def validate_results(needs):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    select = commands.add_parser("select")
-    select.add_argument("--base", required=True)
-    select.add_argument("--head", required=True)
-    commands.add_parser("gate")
+    select = commands.add_parser("select", help="Choose docs/full from the complete base...head Git diff", description="Reads Git only. Prints JSON; appends mode/summary to GITHUB_OUTPUT/GITHUB_STEP_SUMMARY when set. Exit 0 on success, nonzero on Git or output failure.")
+    select.add_argument("--base", required=True, help="Existing base Git revision; compare using its merge base with head")
+    select.add_argument("--head", required=True, help="Existing candidate Git revision")
+    commands.add_parser("gate", help="Validate CI_NEEDS JSON from completed jobs", description="Requires CI_NEEDS in the environment, containing the needs jobs/results JSON. Exit 0 only when all selected jobs succeeded; failures return nonzero. Does not run tests or change repository files.")
     args = parser.parse_args()
     if args.command == "gate":
         validate_results(json.loads(os.environ["CI_NEEDS"]))

@@ -1,5 +1,8 @@
 # Copyright (c) 2026 ttldtor.
 # SPDX-License-Identifier: BSL-1.0
+# Internal portals_docs finalizer. Required HTML_DIR: existing generated HTML
+# directory. Rewrites known links/index defects and copies linked notices/sources
+# in place. Invalid inputs or I/O errors fail the CMake script; no rollback.
 # Finalize portable example links and recognized Doxygen 1.18 index defects.
 if(NOT DEFINED HTML_DIR OR NOT IS_DIRECTORY "${HTML_DIR}")
   message(FATAL_ERROR "HTML_DIR must name the generated Doxygen HTML directory")

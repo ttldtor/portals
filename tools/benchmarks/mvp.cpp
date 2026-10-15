@@ -44,6 +44,52 @@ std::uint64_t number(std::string_view text) {
   return value;
 }
 
+// Help is handled before option parsing, workload construction and output creation.
+bool printHelp(int argc, char **argv) {
+  for (int index = 1; index < argc; ++index) {
+    const std::string_view argument(argv[index]);
+
+    if (argument != "--help" && argument != "-h") {
+      continue;
+    }
+
+    if (argc != 2) {
+      throw std::runtime_error("--help or -h must be the sole argument");
+    }
+
+    std::cout << R"help(Measure the dashboard workload, or separately measure saved-frame encoding.
+Usage: portals_mvp_benchmark --output PATH [options]
+       portals_mvp_benchmark --help | -h
+Options:
+  --output PATH       Required JSON report path; existing file is truncated.
+  --transport MODE    headless or native (default: headless).
+                      Native mode opens the terminal; use a 120x40 viewport.
+  --diagnostics MODE  enabled or disabled (default: disabled).
+  --rate N            Updates per second, 0..1000000 (default: 1000).
+  --seed N            Unsigned 64-bit seed (default: 42).
+  --rows N            Model rows, 1..1000000000 (default: 1000000).
+  --fps N             Frame rate, 1..1000 (default: 30).
+  --warmup-ms N       Warmup, 0..3600000 ms (default: 5000).
+  --duration-ms N     Observation, 1..3600000 ms (default: 30000).
+  --delay-ms N        Page delay, unsigned 64-bit ms (default: 0).
+  --sample-capacity N Retained measurement samples, 1..1000000 (default: 65536).
+  --ascii             Use ASCII workload text (default: Unicode).
+  --ansi16            Use 16-color output (default: full color).
+  --encoding-only     Run finite saved-frame encoding comparison instead of observation.
+                      Uses fixed ASCII replay defaults, plus --seed and --ansi16;
+                      all other workload options are validated but ignored.
+  --help, -h          Show help as the sole argument; no workload, terminal or files.
+Output: JSON at PATH; failures after parsing may write an incomplete report.
+Exit: 0 on complete observation/encoding/help; 1 on argument, application or export
+failure; 2 when the application succeeds but the observation is incomplete.
+)help";
+
+    return true;
+  }
+
+  return false;
+}
+
 Options parse(int argc, char **argv) {
   Options options;
 
@@ -739,10 +785,19 @@ int run(const Options &options, std::ostream &report) {
 }
 } // namespace
 
+/** @brief Measure dashboard execution or finite saved-frame encoding.
+ * @param argc Number of command-line arguments, including the executable name.
+ * @param argv Borrowed argument strings; --help lists options, defaults and output behavior.
+ * @return Zero on completion/help, one on failure, two on an incomplete observation.
+ */
 int main(int argc, char **argv) {
   std::string outputPath;
 
   try {
+    if (printHelp(argc, argv)) {
+      return 0;
+    }
+
     const auto options = parse(argc, argv);
 
     outputPath = options.output;

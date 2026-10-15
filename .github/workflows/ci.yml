@@ -100,7 +100,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Test documentation HTML processing
-        run: python3 -m unittest discover -s tools/docs -p test_*.py -v
+        run: python3 -m unittest discover -s tools/docs -p 'test_*.py' -v
       - uses: actions/setup-node@v7
         with:
           node-version: '24'

@@ -6,6 +6,11 @@ This reference describes the maintained entry points in `tools/package` and
 `tools/release`. Run repository commands from the checkout root. Commands which
 create branches, upload assets or publish a release require release authorization.
 
+`bundle.cmake` and `tools/release/package.cmake` accept `-DHELP=ON`
+(default `OFF`): print embedded help and return `0` before path validation or
+file writes. For PowerShell use `Get-Help <script-path> -Full`; Python supports
+`--help` and `-h`.
+
 ## Choose an entry point
 
 | Task | Entry point | Result / effects |

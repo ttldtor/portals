@@ -1,3 +1,11 @@
+"""Regression fixtures for HTML links, CMake colors and navigation.
+
+Run: python -m unittest discover -s tools/docs -p test_finalize_html.py -v
+Uses temporary fixture files; no real HTML build, browser or network is required.
+Unittest prints results and returns nonzero on failure. This is a test module,
+not a production command; unittest owns its help and selection options.
+"""
+
 import json
 from pathlib import Path
 from html.parser import HTMLParser

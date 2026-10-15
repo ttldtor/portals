@@ -12,6 +12,7 @@ this source revision; the installed SDK and the release HTML may contain an olde
 | Check names | `python tools/check_naming.py` | [Naming](developer-tools-build.md#tool-naming) |
 | Select and validate CI checks | `python tools/ci/checks.py` | [CI selection](developer-tools-build.md#tool-ci) |
 | Build and check HTML help | `portals_docs`, then `check_links.py` | [Documentation tools](developer-tools-build.md#tool-documentation) |
+| Process HTML and highlight CMake | `tools/docs/finalize_html.py` | [HTML finalizer](developer-tools-build.md#tool-html-processor) |
 | Measure source changes | `portals_compactness` | [Measurements](developer-tools-measure.md#tool-compactness) |
 | Measure runtime costs | Five `portals_*_benchmark` executables | [Benchmarks](developer-tools-measure.md#tool-benchmarks) |
 | Save and compare measurements | `tools/quality/performance.cmake` | [Performance receipts](developer-tools-measure.md#tool-performance) |
@@ -31,11 +32,59 @@ script arguments precede `-P script.cmake`. With a multi-configuration generator
 add `--config Release` to builds and use the executable in its `Release` directory.
 Measurement examples use Ninja Release and a dedicated `build/tools` directory.
 
-A CLI's `--help` describes accepted arguments when implemented. Several benchmark
-programs and shell launchers have no help mode; use their parameter tables here.
+A CLI's `--help` describes accepted arguments when implemented. The benchmark programs and shell launchers support standalone `--help`;
+PowerShell uses `Get-Help`, and direct CMake scripts accept `-DHELP=ON`.
 A failed check returns a nonzero status. Exact exit values are listed where the
 implementation defines them; CMake and PowerShell failures are described as
 nonzero instead of promising a portable numeric value.
+
+## Built-in help
+
+Help is maintained alongside each implementation and is available before required
+operational inputs. These commands print help without starting the main operation:
+
+```powershell
+python tools/docs/finalize_html.py --help
+python tools/ci/checks.py select --help
+Get-Help ./tools/native_windows.ps1 -Full
+cmake -DHELP=ON -P tools/quality/performance.cmake
+./build/tools/portals_mvp_benchmark.exe --help
+```
+
+## All maintained scripts
+
+Use this list to find a script by filename in `tools/` or `cmake/`. Each source
+contains built-in help or an internal-helper description. Detailed parameters
+are in the linked reference.
+
+| File | Reference |
+| --- | --- |
+| [cmake/FinalizeDiagrams.cmake](../cmake/FinalizeDiagrams.cmake) | [Internal helper](developer-tools-build.md) |
+| [cmake/FinalizeDocumentation.cmake](../cmake/FinalizeDocumentation.cmake) | [Internal helper](developer-tools-build.md) |
+| [cmake/TestProcesses.cmake](../cmake/TestProcesses.cmake) | [Internal helper](developer-tools-build.md) |
+| [tools/benchmarks/check.cmake](../tools/benchmarks/check.cmake) | [Measurements](developer-tools-measure.md) |
+| [tools/benchmarks/check_managed.cmake](../tools/benchmarks/check_managed.cmake) | [Measurements](developer-tools-measure.md) |
+| [tools/check_naming.py](../tools/check_naming.py) | [Build and checks](developer-tools-build.md) |
+| [tools/ci/checks.py](../tools/ci/checks.py) | [Build and checks](developer-tools-build.md) |
+| [tools/ci/test_checks.py](../tools/ci/test_checks.py) | [Regression test](developer-tools-build.md) |
+| [tools/docs/check_links.py](../tools/docs/check_links.py) | [Build and checks](developer-tools-build.md) |
+| [tools/docs/finalize_html.py](../tools/docs/finalize_html.py) | [Build and checks](developer-tools-build.md) |
+| [tools/docs/test_cli_help.py](../tools/docs/test_cli_help.py) | [Regression test](developer-tools-build.md) |
+| [tools/docs/test_finalize_html.py](../tools/docs/test_finalize_html.py) | [Regression test](developer-tools-build.md) |
+| [tools/native_windows.ps1](../tools/native_windows.ps1) | [Build and checks](developer-tools-build.md) |
+| [tools/native_xterm.sh](../tools/native_xterm.sh) | [Build and checks](developer-tools-build.md) |
+| [tools/package/bundle.cmake](../tools/package/bundle.cmake) | [Packaging and releases](developer-tools-release.md) |
+| [tools/package/bundle.ps1](../tools/package/bundle.ps1) | [Packaging and releases](developer-tools-release.md) |
+| [tools/package/common.cmake](../tools/package/common.cmake) | [Internal helper](developer-tools-release.md) |
+| [tools/package/run.ps1](../tools/package/run.ps1) | [Packaging and releases](developer-tools-release.md) |
+| [tools/package/run.sh](../tools/package/run.sh) | [Packaging and releases](developer-tools-release.md) |
+| [tools/quality/performance.cmake](../tools/quality/performance.cmake) | [Measurements](developer-tools-measure.md) |
+| [tools/quality/readability.cmake](../tools/quality/readability.cmake) | [Measurements](developer-tools-measure.md) |
+| [tools/release/metadata.py](../tools/release/metadata.py) | [Packaging and releases](developer-tools-release.md) |
+| [tools/release/package.cmake](../tools/release/package.cmake) | [Packaging and releases](developer-tools-release.md) |
+| [tools/release/publish.py](../tools/release/publish.py) | [Packaging and releases](developer-tools-release.md) |
+| [tools/release/start.ps1](../tools/release/start.ps1) | [Packaging and releases](developer-tools-release.md) |
+| [tools/release/start.py](../tools/release/start.py) | [Packaging and releases](developer-tools-release.md) |
 
 ## Internal helpers and tests
 

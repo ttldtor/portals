@@ -1,16 +1,25 @@
 # Copyright (c) 2026 ttldtor.
 # SPDX-License-Identifier: BSL-1.0
-"""Validate generated HTML file and anchor links; optional Python 3 gate."""
+"""Validate local files and anchors in generated Doxygen HTML.
+
+Reads the HTML tree without changing files. External URLs are not requested.
+Writes a JSON summary to stdout; exits 0 on success, 1 on missing input/links
+or read failure, and 2 on invalid CLI syntax. Invoke --help for usage.
+"""
+import argparse
 import json
-import sys
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlsplit, unquote
 
-if len(sys.argv) != 2 or not Path(sys.argv[1]).is_dir():
-    raise SystemExit("Usage: python tools/docs/check_links.py <generated-html-directory>")
-root = Path(sys.argv[1]).resolve()
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("html", type=Path, help="Existing generated HTML directory; scanned recursively")
+args = parser.parse_args()
+if not args.html.is_dir():
+    raise SystemExit("HTML directory does not exist or is not a directory: " + str(args.html))
+root = args.html.resolve()
 class Page(HTMLParser):
+    """Collect local-link candidates and defined IDs from one HTML document."""
     def __init__(self):
         super().__init__()
         self.links = []

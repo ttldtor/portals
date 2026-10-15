@@ -2,6 +2,34 @@
 # SPDX-License-Identifier: BSL-1.0
 # Build and package one immutable source revision. Never remove or reuse directories.
 cmake_minimum_required(VERSION 3.24)
+
+# Script-mode help must not validate paths, discover tools or create artifacts.
+if(HELP)
+  message([=[Usage: cmake -DHELP=ON -P tools/package/bundle.cmake
+       cmake -DSOURCE_DIR=<checkout> -DWORK_DIR=<new-dir> -DOUTPUT_ARCHIVE=<new-file> [options] -P tools/package/bundle.cmake
+Build and verify a runnable x64 Release SDK bundle from committed source.
+Required:
+  SOURCE_DIR       Absolute existing committed Git checkout.
+  WORK_DIR         New absolute staging directory outside SOURCE_DIR.
+  OUTPUT_ARCHIVE   New absolute .zip (Windows) or .tar.gz (Linux), outside WORK_DIR.
+Optional -D settings:
+  SOURCE_REVISION=HEAD   Git revision resolved to a commit; excludes uncommitted edits.
+  GENERATOR=Ninja       CMake generator.
+  PARALLEL=2            Positive integer build parallelism (no explicit upper bound).
+  MSVC_RUNTIME_LIBRARY=MultiThreaded  Windows: MultiThreaded or MultiThreadedDLL.
+  CXX_COMPILER, C_COMPILER, MAKE_PROGRAM  Explicit CMake tool paths; otherwise discovered.
+  PYTHON_EXECUTABLE     Optional interpreter for extra HTML-link checks; omitted means that gate is not_run.
+                        Documentation builds independently require Python.
+  HELP=OFF              ON prints this usage and returns without validation or writes.
+Requires CMake >=3.24, Git, native x64 compiler, Doxygen/documentation dependencies,
+Python, dumpbin (Windows) or ldd (Linux), and the selected build tool.
+Effects: archives Git source, configures/builds/installs Release examples and docs,
+runs bundle checks, writes staging evidence and the archive; staging is preserved.
+Does not publish or modify Git history. Exit 0 on success/help; nonzero on failure.
+Example: cmake -DSOURCE_DIR=C:/src/portals -DWORK_DIR=C:/stage/new -DOUTPUT_ARCHIVE=C:/out/portals.zip -P tools/package/bundle.cmake
+]=])
+  return()
+endif()
 include("${CMAKE_CURRENT_LIST_DIR}/common.cmake")
 
 foreach(required IN ITEMS SOURCE_DIR WORK_DIR OUTPUT_ARCHIVE)

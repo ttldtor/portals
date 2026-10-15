@@ -14,6 +14,7 @@
 #include <new>
 #include <source_location>
 #include <stdexcept>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -58,6 +59,38 @@ using Clock = std::chrono::steady_clock;
 constexpr std::size_t SAMPLES = 30;
 constexpr std::size_t WARMUP = 3;
 constexpr CellSize VIEWPORT{80, 24};
+
+// Help is handled before option parsing, workload construction and output creation.
+bool printHelp(int argc, char **argv) {
+  for (int index = 1; index < argc; ++index) {
+    const std::string_view argument(argv[index]);
+
+    if (argument != "--help" && argument != "-h") {
+      continue;
+    }
+
+    if (argc != 2) {
+      throw std::runtime_error("--help or -h must be the sole argument");
+    }
+
+    std::cout << R"help(Measure compact and explicit API construction, preparation and frame cleanup.
+Usage: portals_compact_benchmark
+       portals_compact_benchmark --help | -h
+Options:
+  --help, -h  Show help as the sole argument; no workload or files.
+There are no workload options. Legacy invocations without a help flag ignore arguments.
+Fixed workload: 30 timed samples after 3 warmups, 4 scene nodes, 80x24 viewport;
+column cases construct and format 10 columns. Counts cover ordinary C++ allocation
+calls, excluding malloc, aligned allocations and byte totals.
+Output: JSON to stdout with p50/p95 nanoseconds and allocation-call ranges.
+Exit: 0 on success/help; 1 on mixed help arguments or a measurement exception.
+)help";
+
+    return true;
+  }
+
+  return false;
+}
 
 template <class T, class E>
 T take(std::expected<T, E> result, std::source_location location = std::source_location::current()) {
@@ -244,8 +277,17 @@ void reportColumns(bool compact) {
 }
 } // namespace
 
-int main() {
+/** @brief Measure fixed compact-API and explicit-API workloads.
+ * @param argc Number of command-line arguments, including the executable name.
+ * @param argv Borrowed argument strings; --help lists options, defaults and output behavior.
+ * @return Zero on a complete report or help; one on mixed help arguments or an exception.
+ */
+int main(int argc, char **argv) {
   try {
+    if (printHelp(argc, argv)) {
+      return 0;
+    }
+
     std::cout << "{\"samples\":30,\"warmup\":3,\"nodes\":4,\"cases\":[";
     report(false);
     std::cout << ',';

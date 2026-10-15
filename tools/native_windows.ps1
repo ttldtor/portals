@@ -1,3 +1,44 @@
+<#
+.SYNOPSIS
+Runs a native Windows Terminal fixture and verifies process cleanup.
+.DESCRIPTION
+Starts the supplied supervisor and child in a uniquely titled 120x40 terminal.
+Preserves pre-existing Windows Terminal/OpenConsole processes and records evidence.
+.PARAMETER Supervisor
+Required path to the native application supervisor executable; must exist.
+.PARAMETER Child
+Required path to the child executable; must exist.
+.PARAMETER LogDirectory
+Required fresh directory for logs, hashes and JSON launch/process evidence.
+.PARAMETER ChildArguments
+Arguments forwarded unchanged to the child. Default: empty array.
+.PARAMETER Drive
+Supervisor input driver: none (default) or dashboard.
+.PARAMETER HostWheel
+Posts one wheel message to this fixture window after 2200 ms. Disabled by default.
+Submission is recorded separately from semantic input verification.
+.PARAMETER ExpectedExit
+Expected child exit code passed to the supervisor. Default: 0.
+.PARAMETER DeadlineMs
+Supervisor deadline in milliseconds. Default: 15000. The launcher allows 12000 ms
+more to observe completion; this parameter has no PowerShell range validation.
+.PARAMETER QuitMs
+Time in milliseconds passed to the supervisor for scripted quit. Default: 4500.
+.PARAMETER Terminal
+Terminal launcher command or path. Default: wt.exe.
+.EXAMPLE
+Get-Help ./tools/native_windows.ps1 -Full
+.EXAMPLE
+./tools/native_windows.ps1 -Supervisor C:/build/supervisor.exe -Child C:/build/demo.exe -LogDirectory C:/logs/new-native -Drive dashboard
+.OUTPUTS
+Supervisor log text; files in LogDirectory. Exit 0 means the supervisor passed,
+the fixture disappeared naturally, its child processes exited and baseline
+terminal processes survived. Exit 1 means a failed check; setup errors throw.
+.NOTES
+Requires Windows, Windows Terminal and an interactive desktop. Opens a fixture
+window, may send fixture input, and closes only its own titled window on timeout.
+Never use a pre-existing LogDirectory. Get-Help does not launch the script.
+#>
 param(
   [Parameter(Mandatory)][string]$Supervisor,
   [Parameter(Mandatory)][string]$Child,

@@ -184,7 +184,7 @@ python tools/docs/check_links.py build/documentation/docs/html
 
 The only accepted argument is one positional path to an existing generated
 HTML directory. There are no switches, defaults or dedicated environment
-variables; `--help` is not supported. It recursively reads UTF-8 `*.html`
+variables. `--help` / `-h` prints usage without scanning files. It recursively reads UTF-8 `*.html`
 files and collects `href`, `src`, `id` and legacy anchor `name` attributes.
 For local references it checks target existence and, for parsed HTML targets,
 fragment existence after URL decoding. External URLs are skipped and never
@@ -195,8 +195,8 @@ the referring page and can refer outside the supplied directory.
 It prints a JSON object with `html_files`, `local_links_checked` and `broken`.
 Each broken entry contains the source page relative to the HTML root, original
 link and `missing file` or `missing anchor`. It does not modify the HTML.
-Exit `0` means no broken local links; `1` means broken links, an invalid argument
-count or directory, or no HTML files. Input/read errors also terminate
+Exit `0` means no broken local links; `1` means broken links, an invalid
+directory or no HTML files; `2` means invalid CLI syntax. Input/read errors also terminate
 unsuccessfully with a Python diagnostic.
 
 <a id="tool-documentation"></a>
@@ -216,7 +216,9 @@ and Mermaid CLI (`mmdc` or `mmdc.cmd` on `PATH`); CMake locates Python 3.10+.
 `PORTALS_BUILD_DOCS` defaults to `OFF`. A successful target produces
 `<build>/docs/html` and `<build>/docs/portals.tag`. It does not publish them.
 
-### Python processor
+<a id="tool-html-processor"></a>
+
+### HTML processing and CMake highlighting
 
 [Source: finalize_html.py](../tools/docs/finalize_html.py). For diagnosing a
 generated copy, its complete CLI is:

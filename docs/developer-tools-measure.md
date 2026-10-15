@@ -44,9 +44,10 @@ its counts do not establish equivalent behavior.
 ## Run a benchmark
 
 All five executables below build with `PORTALS_BUILD_TOOLS=ON`. Only the MVP
-`--transport native` mode opens a terminal. The others run in process. None of
-these benchmarks implements `--help`; unknown options fail for the managed,
-style-layer, PSS and MVP programs. The compact benchmark takes no parsed options.
+`--transport native` mode opens a terminal. The others run in process. Each benchmark supports standalone `--help` or `-h`, which prints usage and
+returns 0 before workload, terminal or output creation. Mixing a help flag with
+other arguments returns 1. Other option parsing is unchanged; the compact
+benchmark has no workload options.
 
 ### Managed construction and style layers
 
@@ -146,6 +147,10 @@ files and gives each child 20 seconds. `check_managed.cmake` is the
 a 30-second child timeout, and it also tests output and invalid arguments.
 Run these through CTest in a build with tests and tools enabled. They are
 correctness checks, not baseline collectors. CMake failures return nonzero.
+
+`readability.cmake` and `performance.cmake` accept `-DHELP=ON`
+(default `OFF`): embedded help needs no required inputs and returns `0` before
+creating files or running analyzers.
 
 <a id="tool-readability"></a>
 ## Collect readability observations
@@ -264,8 +269,7 @@ Windows Terminal by default, and the built supervisor and child.
 powershell -NoProfile -File tools/native_windows.ps1 -Supervisor ./build/tests/portals_terminal_cleanup.exe -Child ./build/tests/portals_gallery.exe -LogDirectory ./native-run -Drive dashboard
 ```
 
-Paths above assume those executables have been built in `build/tests`. The script
-has no dedicated help block. It accepts integer timing arguments without its own
+Paths above assume those executables have been built in `build/tests`. Run `Get-Help ./tools/native_windows.ps1 -Full` for its embedded reference. The script accepts integer timing arguments without its own
 range validation; the supervisor validates them. It writes `supervisor.log`,
 `runtime.json`, `baseline.json`, `hashes.json`, `after.json`, `launch.json` and optional
 `host-input.json`. Exit 0 requires supervisor success, fixture termination and
@@ -299,4 +303,4 @@ Xauthority. This needs `Xvfb`, `xauth` and `xterm`, plus the standard shell util
 Other visibility values are rejected. `PORTALS_XVFB` overrides the server executable (default `Xvfb`); `PORTALS_XVFB_WORKDIR` optionally changes its working directory. `TMPDIR` selects the private temporary directory parent (default `/tmp`). The visible mode uses the caller’s `DISPLAY` and `XAUTHORITY`. The script records launch state, xterm stdout/stderr
 and supervisor output, and cleans up its own created processes and private server.
 Exit 0 means success; exit 1 means a failed completed check; invalid arguments can
-return 2, and shell/setup failures return nonzero. There is no `--help` mode.
+return 2, and shell/setup failures return nonzero. Standalone `--help` prints usage before any terminal, process or file work.

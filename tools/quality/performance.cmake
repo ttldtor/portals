@@ -2,6 +2,35 @@
 # SPDX-License-Identifier: BSL-1.0
 cmake_minimum_required(VERSION 3.24)
 
+# Script-mode help must not validate paths, discover tools or create artifacts.
+if(HELP)
+  message([=[Usage: cmake -DHELP=ON -P tools/quality/performance.cmake
+       cmake -DMODE=record <record settings> -P tools/quality/performance.cmake
+       cmake -DMODE=compare <comparison settings> -P tools/quality/performance.cmake
+Normalize benchmark observations and compare compatible performance receipts.
+MODE is required: record or compare; no default.
+record settings (all required, no defaults):
+  KIND           pss, managed, compact or mvp; selects raw JSON validation/metrics.
+  RAW_FILE       Existing benchmark JSON with required complete provenance.
+  METADATA_FILE  Existing JSON: revision, toolchain, configuration, host, workload.
+  OUTPUT_DIR     New history directory; refuses an existing path.
+compare settings (all required, no defaults):
+  BEFORE_DIR     Existing directory containing a validated record.json and raw.json.
+  AFTER_DIR      Existing compatible candidate history directory.
+  OUTPUT_FILE    New comparison JSON file; parent must exist; never overwritten.
+Optional: HELP=OFF; ON prints usage and returns before validation or writes.
+Requires CMake >=3.24. Paths may be relative to the invocation directory.
+Input metrics use nonnegative exact integers <=9007199254740991; PSS decimals
+support at most 15 fractional places after trailing zero removal. Records must
+match actual workload and provenance. See docs/performance.md for schemas.
+Effects: record copies raw.json and writes record.json; compare writes OUTPUT_FILE.
+Does not run benchmarks or decide causality/acceptance. No environment overrides.
+Exit 0 on success/help; nonzero on missing, invalid or incompatible observations.
+Example: cmake -DMODE=compare -DBEFORE_DIR=history/before -DAFTER_DIR=history/after -DOUTPUT_FILE=history/comparison.json -P tools/quality/performance.cmake
+]=])
+  return()
+endif()
+
 function(jsonQuote output value)
   string(REPLACE "\\" "\\\\" text "${value}")
   string(REPLACE "\"" "\\\"" text "${text}")

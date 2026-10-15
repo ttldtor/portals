@@ -1,3 +1,6 @@
+# Internal test-enabled configure helper. Takes an existing CMake directory;
+# recursively adds no_dialogs.cpp to executable target definitions only.
+# No standalone CLI and no source-file changes.
 # Apply only to executable targets in this test-enabled Portals build tree.
 # The core library and consumers built with PORTALS_BUILD_TESTS=OFF are untouched.
 function(portals_configure_test_processes directory)

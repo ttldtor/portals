@@ -5,6 +5,11 @@
 <#
 .SYNOPSIS
 Prepare a release pull request without merging it or publishing a release.
+.DESCRIPTION
+Requires Git, a clean checkout, a GitHub origin and authenticated gh for preparation.
+Creates a temporary worktree, version/notes commit, pushed task branch and PR.
+DryRun reads remote refs without fetching or writing. Merging the preparation PR
+authorizes the configured release automation; this command does not merge it.
 .PARAMETER Tag
 Release identity: vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-rcN.
 .PARAMETER TaskId
@@ -15,6 +20,12 @@ Validate and preview without writing files or refs. The remote main commit
 must already be available locally; preview does not fetch missing objects.
 .EXAMPLE
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/start.ps1 -Tag v0.2.0 -TaskId PRTLS-144
+.OUTPUTS
+DryRun: JSON preview containing task/tag, branch, commit/PR titles and base commit.
+Preparation: PR URL; exit 0 on success, 1 on handled failure.
+.NOTES
+Legacy task/release-* preparations require explicit migration. Existing tags are
+never overwritten. Temporary worktrees with residual files are retained.
 #>
 [CmdletBinding()]
 param(

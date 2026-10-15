@@ -2,6 +2,41 @@
 # SPDX-License-Identifier: BSL-1.0
 # Package already verified build outputs; compilation gates belong to the workflow.
 cmake_minimum_required(VERSION 3.24)
+
+# Script-mode help must not validate paths, discover tools or create artifacts.
+if(HELP)
+  message([=[Usage: cmake -DHELP=ON -P tools/release/package.cmake
+       cmake <required -D settings> [optional -D settings] -P tools/release/package.cmake
+Package already verified build outputs; compilation gates run separately.
+Required -D settings (no defaults):
+  SOURCE_DIR        Absolute existing checkout, without symlink, matching HEAD/tag.
+  SOURCE_REVISION   Full 40-character lowercase SHA-1 commit.
+  RELEASE_TAG       vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-rcN (N >=1).
+  PLATFORM          windows or linux (native x64 package).
+  PAYLOAD_DIR       Absolute existing verified extracted bundle directory, no symlink.
+  OUTPUT_DIR        Absolute existing directory containing only the verified release
+                    bundle archive; separate from SOURCE_DIR and PAYLOAD_DIR.
+  WORK_DIR          New absolute directory, separate from source, payload and output.
+  CONFIGURATION     Release only.
+  PARALLEL          Positive integer build parallelism, no explicit upper bound.
+  TOOLCHAIN         Toolchain identity, matching both gate receipts.
+  DEBUG_GATE_RECEIPT, RELEASE_GATE_RECEIPT  Absolute regular JSON receipt files,
+                    no symlink, proving matching Debug and Release headless gates.
+Linux-only required settings:
+  C_COMPILER, CXX_COMPILER, GENERATOR  Explicit tools for the offline source consumer.
+Optional:
+  PAGES_DIR         Linux only: new absolute directory for Pages HTML, separate
+                    from source/payload/output/work; omitted means no Pages staging.
+  HELP=OFF          ON prints usage and returns before validation, includes or writes.
+Requires CMake >=3.24, Git and the package-check/offline-consumer toolchain.
+Effects: validates revision/tag/receipts and bundle provenance, stages release
+assets and checks, runs offline consumers, writes release manifests and checksums.
+Preserves work on failure. Does not push tags, publish releases or deploy Pages.
+Exit 0 on success/help; nonzero on invalid inputs or failed verification.
+Example: cmake -DHELP=ON -P tools/release/package.cmake
+]=])
+  return()
+endif()
 include("${CMAKE_CURRENT_LIST_DIR}/../package/common.cmake")
 
 # Resolve existing ancestors to detect symlink escapes without creating new paths.
