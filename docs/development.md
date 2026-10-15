@@ -1,7 +1,15 @@
-# Developing Portals
+# Developing Portals {#development}
+
+[Русская версия](ru/development.md)
 
 This chapter is for library contributors. To write an application instead,
 start with the [documentation guide](index.md).
+
+## Choose a developer tool
+
+The [tool catalog](developer-tools.md) lists entry points by task, with complete
+parameter references for build/CI/documentation, measurements, packaging and
+releases. It also identifies internal helpers and private workspace scripts.
 
 ## Verify changes
 
@@ -64,8 +72,8 @@ copy. Give each diagram an `accTitle` and an `accDescr`, keep labels short, and
 prefer vertical flow or several smaller diagrams to one very wide graph.
 
 The documentation build requires Mermaid CLI and renders SVG locally. Its
-shared theme is configured in `docs/mermaid.json`. Diagrams use a light neutral
-canvas inside either documentation theme, and scale down to the page width.
+shared theme is configured in `docs/mermaid.json`. Diagrams scale down to the page width. The stylesheet adapts their SVG palette
+to the active light or dark theme.
 Check the generated images as well as parser success: valid Mermaid can still
 produce an unreadable layout. Existing architecture SVG illustrations remain
 ordinary image assets.

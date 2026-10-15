@@ -1,5 +1,7 @@
 # Additional quality evidence
 
+[Developer tool catalog](../../docs/developer-tools.md) · [Command reference](../../docs/developer-tools-measure.md)
+
 These CMake 3.24+ drivers have no Python runtime requirement:
 
 - `readability.cmake`: explicit translation units, optional explicit headers, and an existing compilation

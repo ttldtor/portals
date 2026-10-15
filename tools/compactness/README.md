@@ -1,5 +1,7 @@
 # Native source compactness tool
 
+[Developer tool catalog](../../docs/developer-tools.md) · [Command reference](../../docs/developer-tools-measure.md)
+
 Build `portals_compactness` and `portals_compactness_tests` with CMake. Neither
 target links the Portals core; the tool needs only a C++23 standard library.
 Run `portals_compactness --help` for the CLI contract.
