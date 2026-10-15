@@ -28,12 +28,16 @@ int main() {
 
   auto scene = ui::scene(ui::vbox(ui::lineEdit(message, ""), ui::button(add, "Add Hello"), ui::button(exit, "Exit")));
 
-  return scene | ui::style("Button { bold: true; }") |
-         ui::onClick(add,
-                     [message] {
-                       message.text() += "Hello!";
-                     }) |
-         ui::onClick(exit, [] { ui::quit(); }) | ui::onKey(key::F10, ui::quit) | ui::runApp();
+  return scene
+    | ui::style("Button { bold: true; }")
+    | ui::onClick(add, [message] {
+           message.text() += "Hello!";
+         })
+    | ui::onClick(exit, [] {
+           ui::quit();
+         })
+    | ui::onKey(key::F10, ui::quit)
+    | ui::runApp();
 }
 ```
 
@@ -171,7 +175,10 @@ auto form = ui::scene(ui::vbox(
   ui::lineEdit(field, "initial"),
   ui::button(apply, "Apply")));
 
-form | ui::onClick(apply, [field] { field.text() += "!"; });
+form
+  | ui::onClick(apply, [field] {
+      field.text() += "!";
+    });
 
 auto result = form.run();
 ```
@@ -410,9 +417,16 @@ identity. This ownership is the same for keyboard, mouse and programmatic input.
 
 ### Results, errors and mutation
 
-Callbacks may return `void`, `expected<void, TreeError>` or the existing
-`EditorCommandResult`. Return `field.undo()` or `field.redo()` directly to preserve
-its exact already-reported provenance. The first returned failure or exception
+Key and click actions may return `void`, `expected<T, TreeError>` or the existing
+`EditorCommandResult`. A successful expected payload is ignored and destroyed
+before leaving the callback scope. In particular, a successful `false` payload
+still means the action was handled; it does not request input fallthrough.
+The adapter does not interpret fields inside a successful payload. If an application
+needs a notification-delivery receipt or another success-side status, inspect that
+receipt explicitly before returning from the callback.
+
+Return `field.undo()` or `field.redo()` directly to preserve its exact
+already-reported provenance. The first returned failure or exception
 stops the remaining handlers and reaches the existing typed diagnostics; an error
 already reported by that exact editor command is not reported a second time.
 Unrelated failures and observer failures remain distinct. Earlier external side
@@ -460,10 +474,14 @@ registration, composition, exact errors and cleanup without opening a terminal.
 Key aliases and chords use semantic modifiers supplied by the terminal decoder:
 
 ```cpp
-scene | ui::onKey(key::F10, ui::quit(scene.ref()));
-scene | ui::onKey(key::ALT + key::Q, ui::quit(scene.ref()));
-scene | ui::onKey({key::F10, key::ALT + key::Q}, ui::quit(scene.ref()));
-scene | ui::onKey("F10 | Alt + Q", ui::quit(scene.ref()));
+scene
+  | ui::onKey(key::F10, ui::quit(scene.ref()));
+scene
+  | ui::onKey(key::ALT + key::Q, ui::quit(scene.ref()));
+scene
+  | ui::onKey({key::F10, key::ALT + key::Q}, ui::quit(scene.ref()));
+scene
+  | ui::onKey("F10 | Alt + Q", ui::quit(scene.ref()));
 ```
 
 These are alternative registrations shown independently. Choose one form for
@@ -488,9 +506,12 @@ replace existing handlers. Facade errors reach the existing scene diagnostics.
 Multi-stroke commands use the same registration path:
 
 ```cpp
-scene | ui::onKey("Ctrl + K + K", action);
-scene | ui::onKey("Ctrl + K, K", otherAction);
-scene | ui::onKey(ui::release("A, B"), releasedAction);
+scene
+  | ui::onKey("Ctrl + K + K", action);
+scene
+  | ui::onKey("Ctrl + K, K", otherAction);
+scene
+  | ui::onKey(ui::release("A, B"), releasedAction);
 ```
 
 `Ctrl+K+K` means Ctrl+K followed by Ctrl+K. All modifiers in one plus-separated
@@ -581,6 +602,30 @@ observation. It adds [fluent text properties](text-property.md) for control
 captions and LineEdit drafts, including owning read-only concatenation. The
 existing `NodeRef<T>` interface remains available for other checked tree access.
 
+## Integrate a provider without another runtime
+
+Ordinary forms need only the declarative factory. A custom provider can opt into
+`ui::scene([](ManagedScene &owner, Application &app) { ... })` and
+`scene.configure([](ManagedScene &owner, Application &app) { ... })` to use the
+same scheduler, router and tree. Existing one-argument factories/configurations
+keep priority, including generic and variadic callbacks. Results obey the same
+typed-error rules as the original overloads.
+
+`Application&` is a UI-affine borrow, not a worker-thread API or an independent
+owner. It supplies UI services; run the facade through Scene, never by calling its borrowed Application::run directly from factory, configure or shutdown. Do not retain it beyond the facade lifetime. Register `scene.onStop(...)`
+before preparation when partial provider construction needs cleanup. The one
+owning, replaceable shutdown callback runs once before nodes and models retire,
+including failed preparation, explicit close and destruction. It accepts void
+or exactly `expected<void, ManagedError>`. Registering a replacement retires the
+old callback without calling it. An exception becomes a typed cleanup failure;
+managed cleanup still runs. An earlier setup/input/run error remains primary.
+Checked Scene methods and ManagedScene::run reject lifecycle reentry. Raw Application::run retains its documented prohibition on entering run from hooks; the borrow does not turn that low-level API into an independent runner. Shutdown executes with empty current-scene/setup contexts, so use explicit
+provider cancellation rather than contextual `ui::quit()` there.
+
+The complete [dashboard composition](../examples/dashboard/dashboard.hpp) uses
+these opt-in hooks. Its provider retains its existing scheduler and bounded page
+loading, and stops before the model it publishes to is destroyed. Basic forms do
+not need these hooks or a manual `Application`.
 ## Explicit customization
 
 Standard controls inherit their normal managed bindings, styles and LineEdit
@@ -844,8 +889,10 @@ compares retained lifecycle costs at several sizes; it does not measure
 compilation performance. Shorter construction code is not a speed claim.
 
 The interactive [gallery and custom-widget examples](examples.md) now use these
-descriptions. The gallery preserves its former terminal output under the original
-themes; additional palettes use the same style engine.
+descriptions. The gallery is now a lazy scene returned by an ordinary form function,
+with internal editor/checkbox state, explicit commit, focus traversal and standard
+quit/theme handlers. Its CLI runs before mounting; additional palettes use the same
+style engine. See [command-line startup](cli.md).
 
 ## Compact references, identities and actions
 
@@ -876,9 +923,10 @@ take(scene.onKey(ui::key(InputKey::F10), [&app] { app.requestStop(); }));
 
 Callbacks can be supplied directly to `ui::button(ref, caption, callback)` or a
 consuming recipe's `.onClick(callback)`. They return `void` by default; existing
-`expected<void, TreeError>` and exact `EditorCommandResult` callbacks remain
-supported. Returning `editor.undo()` or `editor.redo()` directly preserves the
-command's receipt: a failure already reported to the same live collector is not
+`expected<T, TreeError>` and exact `EditorCommandResult` callbacks are also
+supported. Successful payloads are ignored, including `false`; returned errors
+retain their original `TreeError`. Returning `editor.undo()` or `editor.redo()`
+directly preserves the command's receipt: a failure already reported to the same live collector is not
 reported again. Extracting `.result()` deliberately loses that provenance.
 Independent typed failures and thrown exceptions retain their own diagnostics.
 

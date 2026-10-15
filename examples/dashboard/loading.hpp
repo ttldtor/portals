@@ -43,8 +43,7 @@ public:
    */
   PageLoading(LoadingOptions options, std::size_t rowBytes, std::uint64_t rows, std::uint64_t delayMs)
       : options_(options), rows_(rows), delayMs_(delayMs) {
-    if (!options.pageRows || !options.cachePages || !options.backendJobs || !rowBytes ||
-        options.pageRows > std::numeric_limits<std::size_t>::max() / rowBytes) {
+    if (!options.pageRows || !options.cachePages || !options.backendJobs || !rowBytes || options.pageRows > std::numeric_limits<std::size_t>::max() / rowBytes) {
       throw std::invalid_argument("invalid page loading budget");
     }
 
@@ -215,8 +214,7 @@ private:
 
   bool demanded(std::uint64_t index) const {
     return std::ranges::any_of(demands_, [&](const auto &demand) {
-      return demand.admitted && demand.range.count && index >= demand.range.first / options_.pageRows &&
-             index <= lastPage(demand.range);
+      return demand.admitted && demand.range.count && index >= demand.range.first / options_.pageRows && index <= lastPage(demand.range);
     });
   }
 

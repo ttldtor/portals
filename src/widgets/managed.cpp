@@ -2165,7 +2165,7 @@ std::expected<void, ManagedError> ManagedScene::close() {
     return std::unexpected(error(ManagedPhase::CLEANUP, root_, TreeError::WRONG_THREAD));
   }
 
-  if (preparing_ || reporting_ || styling_) {
+  if (preparing_ || reporting_ || styling_ || closing_) {
     return std::unexpected(error(ManagedPhase::CLEANUP, root_, TreeError::WOULD_BLOCK));
   }
 
@@ -2173,9 +2173,30 @@ std::expected<void, ManagedError> ManagedScene::close() {
     return {};
   }
 
+  struct Closing {
+    bool &flag;
+
+    ~Closing() {
+      flag = false;
+    }
+  } guard{closing_};
+
+  closing_ = true;
+
+  // Consume before entry: failed removal or callback reentry must never stop external work twice.
+  const auto beforeClose = std::exchange(beforeClose_, nullptr);
+  auto stopped = beforeClose ? beforeClose(closeContext_) : std::expected<void, ManagedError>{};
+
   auto removed = app_.tree().remove(root_);
 
   if (!removed && !retired(removed.error())) {
+    if (!stopped) {
+      stopped.error().cleanup = removed.error();
+      closeFailure_ = stopped.error();
+
+      return stopped;
+    }
+
     return std::unexpected(error(ManagedPhase::CLEANUP, root_, removed.error()));
   }
 
@@ -2200,7 +2221,11 @@ std::expected<void, ManagedError> ManagedScene::close() {
   input_ = {};
   errorObserver_ = {};
 
-  return {};
+  if (!stopped) {
+    closeFailure_ = stopped.error();
+  }
+
+  return stopped;
 }
 
 void ManagedScene::stop(Application &app) {
@@ -2217,9 +2242,23 @@ void ManagedScene::stop(Application &app) {
   }
 }
 
+void ManagedScene::retainCloseFailure() {
+  if (!closeFailure_ || closeFailureRetained_) {
+    return;
+  }
+
+  closeFailureRetained_ = true;
+  (void)recordError(*closeFailure_, {}, closeFailure_->operationOrigin.value_or(std::source_location::current()));
+}
+
 std::expected<ApplicationStats, ManagedError>
 ManagedScene::finish(std::expected<ApplicationStats, ApplicationError> result) {
   runFailureNotified_ = false;
+
+  // Keep exact shutdown details even when an earlier input/runner error owns the primary envelope.
+  if (failure_ || !result) {
+    retainCloseFailure();
+  }
 
   if (failure_) {
     auto failure = *failure_;
@@ -2252,6 +2291,14 @@ ManagedScene::finish(std::expected<ApplicationStats, ApplicationError> result) {
     return std::unexpected(failure);
   }
 
+  if (closeFailure_) {
+    closeFailureRetained_ = true;
+    (void)recordError(*closeFailure_, {}, closeFailure_->operationOrigin.value_or(std::source_location::current()),
+                      &runFailureNotified_, true);
+
+    return std::unexpected(*closeFailure_);
+  }
+
   if (cleanup_) {
     ManagedError failure{ManagedPhase::CLEANUP, root_.id(), *cleanup_, {}, cleanup_};
 
@@ -2270,6 +2317,10 @@ std::expected<ApplicationStats, ManagedError> ManagedScene::run(std::stop_token 
     return std::unexpected(allowed.error());
   }
 
+  if (closing_) {
+    return std::unexpected(error(ManagedPhase::RUN, root_, TreeError::WOULD_BLOCK));
+  }
+
   return finish(app_.run(*this, stop));
 }
 
@@ -2278,6 +2329,10 @@ std::expected<ApplicationStats, ManagedError> ManagedScene::run(ApplicationTermi
 
   if (!allowed) {
     return std::unexpected(allowed.error());
+  }
+
+  if (closing_) {
+    return std::unexpected(error(ManagedPhase::RUN, root_, TreeError::WOULD_BLOCK));
   }
 
   return finish(app_.run(*this, terminal, stop));

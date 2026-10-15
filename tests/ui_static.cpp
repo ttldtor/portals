@@ -3,7 +3,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest.h>
 
-#include "../examples/replay/terminal.hpp"
+#include "support/examples/replay/terminal.hpp"
 #include <portals/ui_static.hpp>
 
 #include <thread>

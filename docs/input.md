@@ -13,12 +13,13 @@ registration path. Plain string/chord/alternative bindings admit PRESS only:
 
 ```cpp
 scene.onKey("W", move);
-scene.onKey(ui::repeat("W"), move);       // Native REPEAT only.
-scene.onKey(ui::release("W"), stop);      // Native RELEASE only.
-scene.onKey(ui::pressRepeat("W"), move);  // PRESS or native REPEAT.
+scene.onKey(ui::repeat("W"), move);      // Native REPEAT only.
+scene.onKey(ui::release("W"), stop);     // Native RELEASE only.
+scene.onKey(ui::pressRepeat("W"), move); // PRESS or native REPEAT.
 scene.onKey(ui::release({key::F10, key::ALT + key::Q}), stop);
 scene.onKey(ui::repeat({key::UP, key::DOWN, key::LEFT, key::RIGHT}), move);
-scene | ui::onKey(ui::keyActions("W", {KeyAction::PRESS, KeyAction::RELEASE}), action);
+scene
+  | ui::onKey(ui::keyActions("W", {KeyAction::PRESS, KeyAction::RELEASE}), action);
 ```
 
 `ui::press(source)` selects exact PRESS. All helpers accept text, a typed chord,

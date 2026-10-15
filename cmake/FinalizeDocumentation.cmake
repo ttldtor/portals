@@ -14,9 +14,16 @@ set(example_sources
   tests/package_consumer/pipe_contracts.cpp
   tests/package_consumer/pipe_contracts_methods.cpp
   tests/support/gallery_before.hpp
-  examples/gallery/form.hpp
+  examples/gallery/main.cpp
+  examples/custom_widget/main.cpp
+  examples/editor_history/main.cpp
+  examples/editor_history/editor.hpp
+  examples/dashboard/main.cpp
   examples/click_handlers/main.cpp
   examples/gallery/fluent_form.hpp
+  examples/gallery/options.hpp
+  examples/gallery/settings.hpp
+  examples/gallery/themes.hpp
   examples/custom_widget/meter.hpp
   examples/custom_widget/fluent_meter.hpp
   examples/dashboard/dashboard.hpp
@@ -42,7 +49,7 @@ foreach(source IN LISTS example_sources)
   configure_file("${CMAKE_CURRENT_LIST_DIR}/../${source}" "${HTML_DIR}/source/${source}" COPYONLY)
 endforeach()
 
-foreach(page examples managed-controls declarative-ui virtual-preparation compact_examples)
+foreach(page examples getting-started managed-controls declarative-ui virtual-preparation compact_examples)
   set(page_file "${HTML_DIR}/${page}.html")
   file(READ "${page_file}" content)
   foreach(source IN LISTS example_sources)

@@ -1,8 +1,9 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
-#include "../examples/dashboard/dashboard.hpp"
-#include "../examples/replay/terminal.hpp"
 #include "../tools/benchmarks/measurement.hpp"
+#include "support/examples/dashboard/dashboard.hpp"
+#include "support/examples/replay/terminal.hpp"
+#include <iostream>
 #include <source_location>
 
 namespace {
@@ -48,9 +49,9 @@ void realWaitAndLossless() {
   portals::ApplicationOptions config;
   config.scheduler.data_capacity = config.scheduler.data_budget = 1;
   auto app = example::take(portals::Application::create(config, replay.clock()));
-  dashboard::Options workload;
+  dashboard_test::Options workload;
   workload.rate = 10000;
-  dashboard::Scene scene(*app, workload);
+  dashboard_test::Scene scene(*app, workload);
   example::take(app->run(scene, replay));
   check(benchmark::verifyOhlc(scene.aggregate(), scene.tickCount(), workload.seed));
   check(scene.tickCount() == 10000 && scene.pendingTicks() == 0 && scene.coherent());

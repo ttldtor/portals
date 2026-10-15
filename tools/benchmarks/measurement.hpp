@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
-#include "../../examples/dashboard/dashboard.hpp"
+#include "../../tests/support/examples/dashboard/dashboard.hpp"
 #include <algorithm>
 #include <condition_variable>
 #include <mutex>
@@ -246,11 +246,11 @@ inline bool verifyOhlc(Ohlc actual, std::uint64_t ticks, std::uint64_t seed) {
     return actual.open == 100 && actual.high == 100 && actual.low == 100 && actual.close == 100;
   }
 
-  const auto first = dashboard::syntheticPrice(0, seed);
+  const auto first = dashboard_test::syntheticPrice(0, seed);
   double high = first, low = first, last = first;
 
   for (std::uint64_t i = 0; i < ticks; ++i) {
-    last = dashboard::syntheticPrice(i, seed);
+    last = dashboard_test::syntheticPrice(i, seed);
     high = std::max(high, last);
     low = std::min(low, last);
   }

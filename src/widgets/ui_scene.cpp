@@ -502,9 +502,29 @@ void reportFailure(const ManagedError &failure, std::source_location origin) noe
 } // namespace
 
 void reportToStderr(const SceneReport &report) noexcept {
+  if (report.commandLineFailure) {
+    const char *category = "INVALID_ARGUMENT";
+
+    switch (report.commandLineFailure->code) {
+    case CommandLineErrorCode::INVALID_ARGUMENT:
+      break;
+    case CommandLineErrorCode::CALLBACK_FAILED:
+      category = "CALLBACK_FAILED";
+      break;
+    case CommandLineErrorCode::NO_MEMORY:
+      category = "NO_MEMORY";
+      break;
+    case CommandLineErrorCode::PROCESS_CONTEXT:
+      category = "PROCESS_CONTEXT";
+      break;
+    }
+
+    std::fprintf(stderr, "Portals: command line error (%s): %s\n", category, report.commandLineFailure->message.data());
+  }
+
   if (report.failure) {
     reportFailure(*report.failure, report.origin);
-  } else {
+  } else if (!report.commandLineFailure) {
     std::fprintf(stderr, "Portals: recoverable diagnostics: retained=%zu, dropped=%zu; inspect diagnostics()\n",
                  report.retainedErrors, report.droppedErrors);
   }
@@ -513,9 +533,11 @@ void reportToStderr(const SceneReport &report) noexcept {
 struct Scene::State {
   enum class Operation {
     NONE,
+    PREFLIGHT,
     PREPARE,
     CONFIGURE,
     RUN,
+    STOP,
     CLOSE,
     NOTIFY,
     REPORT
@@ -541,6 +563,10 @@ struct Scene::State {
 
   SceneOptions options;
   Configuration recipe;
+  std::function<ApplicationOptions()> applicationOptions;
+  std::source_location applicationOptionsOrigin;
+  Stop stopCallback;
+  std::source_location stopOrigin;
   std::source_location recipeOrigin;
   std::unique_ptr<Application> application;
   std::unique_ptr<ManagedScene> managed;
@@ -549,12 +575,15 @@ struct Scene::State {
   std::shared_ptr<ManagedErrorHandler> observer;
   std::shared_ptr<SceneReportHandler> reportSink;
   std::optional<ManagedError> failure;
+  std::optional<ManagedError> stopFailure;
   std::source_location failureOrigin;
   ManagedDiagnostic fallback;
   Operation active{Operation::NONE};
   bool prepared{}, completed{}, managedClosed{}, notified{}, fallbackObserverFailed{};
   bool publishingFailure{};
   bool quitRequested{}, finalReported{};
+  std::optional<int> preflightStatus;
+  bool stopped{};
   bool shortFailure{}, shortDeliveryPending{};
   const void *primaryShortAttempt{};
 
@@ -567,8 +596,45 @@ struct Scene::State {
   std::vector<StyleBinding> styles = std::vector<StyleBinding>(0);
   std::vector<std::shared_ptr<detail::LiveBinding>> live = std::vector<std::shared_ptr<detail::LiveBinding>>(0);
 
+  void deliverReport(const SceneReport &report) noexcept {
+    Guard guard(*this, Operation::REPORT);
+    auto sink = reportSink;
+
+    try {
+      if (sink) {
+        (*sink)(report);
+      } else {
+        reportToStderr(report);
+      }
+    } catch (...) {
+      reportToStderr(report);
+    }
+  }
+
+  void applyApplicationOptions() {
+    if (!applicationOptions) {
+      return;
+    }
+
+    auto provider = std::move(applicationOptions);
+
+    try {
+      options.application = provider();
+    } catch (const std::bad_alloc &) {
+      fail(error(ManagedPhase::PREPARE, TreeError::NO_MEMORY, node()), "scene.applicationOptions",
+           applicationOptionsOrigin);
+    } catch (...) {
+      fail(error(ManagedPhase::PREPARE, TreeError::CALLBACK_FAILED, node()), "scene.applicationOptions",
+           applicationOptionsOrigin);
+    }
+
+    // Retire owning captures while PREPARE still excludes lifecycle reentry.
+    provider = {};
+  }
+
   std::expected<void, ManagedError> requestQuit() {
-    if (active == Operation::NOTIFY || active == Operation::REPORT || active == Operation::CLOSE) {
+    if (active == Operation::NOTIFY || active == Operation::REPORT || active == Operation::STOP ||
+        active == Operation::CLOSE) {
       return std::unexpected(error(ManagedPhase::RUN, TreeError::WOULD_BLOCK, node()));
     }
 
@@ -639,7 +705,7 @@ struct Scene::State {
 
   void fail(ManagedError cause, const char *operation, std::source_location origin, bool report = true) {
     // Reporting is read-only: rejected final-sink reentry cannot alter a completed outcome or notify reactions.
-    if (failure || active == Operation::REPORT) {
+    if (failure || active == Operation::REPORT || active == Operation::STOP) {
       return;
     }
 
@@ -739,6 +805,42 @@ struct Scene::State {
     }
   }
 
+  std::expected<void, ManagedError> stop() {
+    detail::SetupFailureScope setupMask({}, nullptr, nullptr);
+    detail::CurrentSceneScope currentMask;
+
+    if (stopped) {
+      return {};
+    }
+
+    stopped = true;
+
+    Guard guard(*this, Operation::STOP);
+    auto callback = std::move(stopCallback);
+    std::expected<void, ManagedError> result;
+
+    try {
+      if (callback) {
+        result = callback();
+      }
+    } catch (const std::bad_alloc &) {
+      result = std::unexpected(error(ManagedPhase::CLEANUP, TreeError::NO_MEMORY, node()));
+    } catch (...) {
+      result = std::unexpected(error(ManagedPhase::CLEANUP, TreeError::CALLBACK_FAILED, node()));
+    }
+
+    if (!result) {
+      if (!result.error().operation) {
+        result.error().operation = "scene.stop";
+        result.error().operationOrigin = stopOrigin;
+      }
+
+      result.error().execution = "scene.stop";
+    }
+
+    return result;
+  }
+
   std::expected<void, ManagedError> cleanup(std::source_location origin) {
     detail::SetupFailureScope cleanupScope({}, nullptr, nullptr);
     completed = true;
@@ -753,12 +855,17 @@ struct Scene::State {
     live.clear();
     styles.clear();
 
-    auto result = managed ? managed->close() : std::expected<void, ManagedError>{};
+    auto result = managed ? managed->close() : stop();
 
     if (!result) {
       const auto cause = cleanupCause(result.error());
 
       if (failure) {
+        if (!managed) {
+          // Pre-owner failures have no managed collector; retain one exact independent shutdown cause.
+          stopFailure = result.error();
+        }
+
         failure->cleanup = cause;
       } else {
         fail(result.error(), "scene.close", origin);
@@ -767,8 +874,13 @@ struct Scene::State {
       managedClosed = true;
     }
 
+    if (managed) {
+      detail::SceneAccess::retainCloseFailure(*managed);
+    }
+
     // Publish completion before captures retire: destructors can reenter the facade.
     recipe = {};
+    applicationOptions = {};
     pending.clear();
     theme.reset();
 
@@ -793,6 +905,10 @@ struct Scene::State {
     }
   }
 };
+
+Application &Scene::admittedApplication(ManagedScene &scene) noexcept {
+  return detail::SceneAccess::application(scene);
+}
 
 detail::SetupFailureScope Scene::setupScope(const char *execution) noexcept {
   if (owner_ != std::this_thread::get_id() || !state_) {
@@ -910,6 +1026,18 @@ std::expected<ManagedDiagnosticBatch, TreeError> Scene::diagnostics() const {
       diagnostic.origin = state.failureOrigin;
       diagnostic.observerFailed = state.fallbackObserverFailed;
       result->errors.push_back(diagnostic);
+
+      if (state.stopFailure) {
+        if (result->errors.size() < state.options.managed.diagnostics.maxErrors) {
+          ManagedDiagnostic shutdown;
+
+          shutdown.error = *state.stopFailure;
+          shutdown.origin = shutdown.error.operationOrigin.value_or(state.stopOrigin);
+          result->errors.push_back(shutdown);
+        } else {
+          ++result->droppedErrors;
+        }
+      }
     }
 
     if (state.fallbackObserverFailed) {
@@ -965,6 +1093,15 @@ std::expected<void, ManagedError> Scene::prepareChecked(std::source_location ori
     if (!state.options.maxConfigurations || !state.recipe) {
       state.fail(error(ManagedPhase::PREPARE, TreeError::INVALID_ARGUMENT), "scene.prepare", origin);
     } else {
+      state.applyApplicationOptions();
+
+      if (state.failure) {
+        (void)state.cleanup(origin);
+        state.notifyFallback();
+
+        return std::unexpected(*state.failure);
+      }
+
       auto application = Application::create(state.options.application, state.options.clock);
 
       if (!application) {
@@ -978,6 +1115,9 @@ std::expected<void, ManagedError> Scene::prepareChecked(std::source_location ori
           state.fail(managed.error(), "scene.owner", origin);
         } else {
           state.managed = std::move(*managed);
+          detail::SceneAccess::beforeClose(*state.managed, &state, [](void *context) {
+            return static_cast<State *>(context)->stop();
+          });
           detail::SceneAccess::currentOwner(*state.managed, state.anchor);
           state.anchor->events->scene = state.managed.get();
           state.anchor->events->lifetime = style::ct::detail::Access::lifetime(*state.managed);
@@ -1125,6 +1265,22 @@ void Scene::addConfiguration(Configuration callback, bool runtime, std::source_l
   } else {
     state.pending.push_back({std::move(callback), origin});
   }
+}
+
+void Scene::setStop(Stop callback, std::source_location origin) {
+  detail::SetupFailureScope setupMask({}, nullptr, nullptr);
+  detail::CurrentSceneScope currentMask;
+  auto &state = *state_;
+  State::Guard guard(state, State::Operation::CONFIGURE);
+
+  if (state.stopped) {
+    state.fail(error(ManagedPhase::CLEANUP, TreeError::CLOSED, state.node()), "scene.onStop", origin);
+
+    return;
+  }
+
+  state.stopOrigin = origin;
+  state.stopCallback = std::move(callback);
 }
 
 Scene &Scene::theme(StyleSheet sheet, std::source_location origin) & {
@@ -1511,7 +1667,7 @@ std::expected<void, ManagedError> Scene::quit(std::source_location origin) {
   auto &state = *state_;
 
   if (state.active == State::Operation::NOTIFY || state.active == State::Operation::REPORT ||
-      state.active == State::Operation::CLOSE) {
+      state.active == State::Operation::STOP || state.active == State::Operation::CLOSE) {
     auto cause = error(ManagedPhase::RUN, TreeError::WOULD_BLOCK, state.node());
 
     state.fail(cause, "scene.quit", origin);
@@ -1532,6 +1688,124 @@ std::expected<void, ManagedError> Scene::quit(std::source_location origin) {
   return {};
 }
 
+Scene &Scene::applicationOptions(std::function<ApplicationOptions()> provider, std::source_location origin) & {
+  if (!admitConfiguration(false, origin)) {
+    return *this;
+  }
+
+  auto &state = *state_;
+  State::Guard guard(state, State::Operation::CONFIGURE);
+
+  if (state.prepared) {
+    state.fail(error(ManagedPhase::PREPARE, TreeError::WOULD_BLOCK, state.node()), "scene.applicationOptions", origin);
+  } else {
+    state.applicationOptions.swap(provider);
+    state.applicationOptionsOrigin = origin;
+  }
+
+  // Replaced callback captures retire before the admission guard is released.
+  provider = {};
+
+  return *this;
+}
+
+int Scene::runApp(int argc, const char *const *argv, CommandLineParser parser, std::stop_token stop,
+                  std::source_location origin) {
+  return runAppPreflight(nullptr, argc, argv, parser, stop, origin);
+}
+
+int Scene::runApp(ApplicationTerminal &terminal, int argc, const char *const *argv, CommandLineParser parser,
+                  std::stop_token stop, std::source_location origin) {
+  return runAppPreflight(&terminal, argc, argv, parser, stop, origin);
+}
+
+int Scene::runAppPreflight(ApplicationTerminal *terminal, int argc, const char *const *argv, CommandLineParser &parser,
+                           std::stop_token stop, std::source_location origin) {
+  if (owner_ != std::this_thread::get_id() || !state_) {
+    return 1;
+  }
+
+  auto &state = *state_;
+
+  if (state.prepared && !state.completed && state.active == State::Operation::NONE) {
+    state.fail(error(ManagedPhase::PREPARE, TreeError::WOULD_BLOCK, state.node()), "scene.preflight", origin);
+  }
+
+  if (state.active != State::Operation::NONE || state.failure || state.completed || state.finalReported) {
+    return runAppImpl(terminal, stop, origin);
+  }
+
+  std::expected<LaunchAction, CommandLineError> action;
+
+  {
+    State::Guard guard(state, State::Operation::PREFLIGHT);
+    detail::SetupFailureScope lifecycleScope({}, nullptr, nullptr);
+    detail::CurrentSceneScope currentMask;
+
+    try {
+      const auto initialized = app::initialize(argc, argv);
+
+      if (!initialized) {
+        const auto code = initialized.error() == app::ProcessContextError::NO_MEMORY
+                            ? CommandLineErrorCode::NO_MEMORY
+                            : CommandLineErrorCode::PROCESS_CONTEXT;
+
+        action = std::unexpected(CommandLineError{code, {}, initialized.error()});
+      } else if (parser) {
+        action = parser(*app::args());
+      }
+    } catch (const std::bad_alloc &) {
+      action = std::unexpected(CommandLineError{CommandLineErrorCode::NO_MEMORY, {}});
+    } catch (...) {
+      action = std::unexpected(CommandLineError{CommandLineErrorCode::CALLBACK_FAILED, {}});
+    }
+
+    // Parser captures may call back into the facade from their destructors.
+    parser = nullptr;
+  }
+
+  // A failed CLI result remains primary even if capture retirement independently failed.
+  if (state.failure && action) {
+    return runAppImpl(terminal, stop, origin);
+  }
+
+  if (action && action->disposition == LaunchDisposition::CONTINUE) {
+    return runAppImpl(terminal, stop, origin);
+  }
+
+  state.preflightStatus = action ? 0 : 2;
+
+  {
+    State::Guard guard(state, State::Operation::CLOSE);
+
+    (void)state.cleanup(origin);
+    state.notifyFallback();
+  }
+
+  state.finalReported = true;
+
+  SceneReport report;
+
+  report.origin = origin;
+  report.failure = state.failure;
+
+  if (!action) {
+    report.commandLineFailure = std::move(action.error());
+  } else if (!action->output.empty()) {
+    std::fwrite(action->output.data(), 1, action->output.size(), stdout);
+  }
+
+  if (report.commandLineFailure || report.failure) {
+    state.deliverReport(report);
+  }
+
+  if (state.failure && action) {
+    state.preflightStatus = 1;
+  }
+
+  return *state.preflightStatus;
+}
+
 int Scene::runApp(std::stop_token stop, std::source_location origin) {
   return runAppImpl(nullptr, stop, origin);
 }
@@ -1544,6 +1818,10 @@ int Scene::runAppImpl(ApplicationTerminal *terminal, std::stop_token stop, std::
   // An unadmitted facade cannot prove that another owner's terminal has been restored.
   if (owner_ != std::this_thread::get_id() || !state_) {
     return 1;
+  }
+
+  if (state_->completed && state_->preflightStatus && state_->active == State::Operation::NONE) {
+    return *state_->preflightStatus;
   }
 
   detail::SetupFailureScope lifecycleScope({}, nullptr, nullptr);
@@ -1579,18 +1857,7 @@ int Scene::runAppImpl(ApplicationTerminal *terminal, std::stop_token stop, std::
 
   if (report.failure || report.retainedErrors || report.droppedErrors) {
     // Keep the callable alive and forbid facade mutation/destruction throughout delivery and fallback.
-    State::Guard guard(state, State::Operation::REPORT);
-    auto sink = state.reportSink;
-
-    try {
-      if (sink) {
-        (*sink)(report);
-      } else {
-        reportToStderr(report);
-      }
-    } catch (...) {
-      reportToStderr(report);
-    }
+    state.deliverReport(report);
   }
 
   return result ? 0 : 1;

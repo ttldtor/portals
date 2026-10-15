@@ -1,0 +1,167 @@
+{
+  "dependency": "Lyra",
+  "version": "1.8.0",
+  "repository": "https://github.com/bfgroup/Lyra",
+  "tag": "1.8.0",
+  "commit": "4186a07f52392aaac31726c64c574d3496cdc13a",
+  "license": "BSL-1.0",
+  "archive_url": "https://github.com/bfgroup/Lyra/archive/refs/tags/1.8.0.tar.gz",
+  "archive_sha256": "cd657146167cd2f80c27e4414ecd1a6639537f5a6d527e608bcd0c633d8beca9",
+  "files": [
+    {
+      "path": "include/lyra/arg.hpp",
+      "bytes": 4098,
+      "sha256": "9937d2b469ad17f95c4d8225b1b669fb933e912998778a194df2191ebbbb3818"
+    },
+    {
+      "path": "include/lyra/args.hpp",
+      "bytes": 1676,
+      "sha256": "48f85344a824ab1d87f9bed5d31038b71c44f8b2e9534aacaa3bcaa304d2b0d6"
+    },
+    {
+      "path": "include/lyra/arguments.hpp",
+      "bytes": 19744,
+      "sha256": "88fe8ece56627a01292e889c25235570353e83eb147f5520d0aa19babc6d2422"
+    },
+    {
+      "path": "include/lyra/cli_parser.hpp",
+      "bytes": 349,
+      "sha256": "7d9d528687879282e247868e116a06ebfbf9073a7970299a1b8b2104bbeb7a79"
+    },
+    {
+      "path": "include/lyra/cli.hpp",
+      "bytes": 10351,
+      "sha256": "5c23400fb80c20061c40bec641482ce4e13079aae62a4ca9d4632474b40b2d8a"
+    },
+    {
+      "path": "include/lyra/command.hpp",
+      "bytes": 5650,
+      "sha256": "9817bdc7ee171c0e530b70d4e3567fa32ce10f3fccb8119066e99cf0dbc97b62"
+    },
+    {
+      "path": "include/lyra/exe_name.hpp",
+      "bytes": 3474,
+      "sha256": "70e6bbfd51ccdf9dc69f7600bf6bf498ebc86eb0878e7045fcb87c54e12f41fb"
+    },
+    {
+      "path": "include/lyra/group.hpp",
+      "bytes": 4890,
+      "sha256": "e8cc7704f98295de5d9d0f745d7e0c5873dda7676aff9366e09859989fc8fbbd"
+    },
+    {
+      "path": "include/lyra/help.hpp",
+      "bytes": 1810,
+      "sha256": "f9900cb5d4e8675164e9aaf399a468985125f3b8af98bc48837e604e0d8a746a"
+    },
+    {
+      "path": "include/lyra/literal.hpp",
+      "bytes": 3131,
+      "sha256": "95b991c21693c7f1c758594fe190266a0619b7b45bda108e445364c17e39e98f"
+    },
+    {
+      "path": "include/lyra/lyra.hpp",
+      "bytes": 770,
+      "sha256": "af683293563d43bb6aeba56e1cf73d3aa0e7031012a935098863a88c8c57c702"
+    },
+    {
+      "path": "include/lyra/main.hpp",
+      "bytes": 6338,
+      "sha256": "ada6f41115f8b41463a0922fcc6d2443a169a79a498cc3f556711055b6273135"
+    },
+    {
+      "path": "include/lyra/opt.hpp",
+      "bytes": 10865,
+      "sha256": "75ac13cf0bfe4320a2331ef74430f71057ea5acea5c7cefb1c929c73eea1f237"
+    },
+    {
+      "path": "include/lyra/option_style.hpp",
+      "bytes": 6259,
+      "sha256": "cd6f6581e3eec7141b881d2dc4b65d415dd725b4e32543e42fc6834a44c19d07"
+    },
+    {
+      "path": "include/lyra/parser_result.hpp",
+      "bytes": 1023,
+      "sha256": "178f25ef09fcab514a851ed8bd59ec0cf4b38e14978f40782ef9314718131ace"
+    },
+    {
+      "path": "include/lyra/parser.hpp",
+      "bytes": 17314,
+      "sha256": "54a25bab8abe8a4ba32e7502a6a6000bc71f60c14c1a78d3d9574b944fa79863"
+    },
+    {
+      "path": "include/lyra/printer.hpp",
+      "bytes": 3890,
+      "sha256": "829bfcae785a1e38afa7d903ed394b2d42d9906fc4b0065aa264f3c5f57152fb"
+    },
+    {
+      "path": "include/lyra/val.hpp",
+      "bytes": 899,
+      "sha256": "5842d1f494c77bbce23723ba204b070e96dd7ef6d9a61ecdfef8c636e6aefcc9"
+    },
+    {
+      "path": "include/lyra/version.hpp",
+      "bytes": 480,
+      "sha256": "0f0b974192c66113b7896dd6abfd0fa757a8524f95257445c31111677b12a8eb"
+    },
+    {
+      "path": "include/lyra/detail/bound.hpp",
+      "bytes": 4665,
+      "sha256": "dfb79e3f8e688f15d0539fa7792a7250c52fef38792f9acc92420ebf0997588a"
+    },
+    {
+      "path": "include/lyra/detail/choices.hpp",
+      "bytes": 3677,
+      "sha256": "220f58be37e2c9f721e3d5fd6d0898ab86fa2ab336b81c0dc74b55aca94d3b87"
+    },
+    {
+      "path": "include/lyra/detail/deprecated_parser_customization.hpp",
+      "bytes": 1612,
+      "sha256": "c8e2676e62d40b368e30bc49e8cd0420ad909381ac0d25d6e1dfb31570f6d434"
+    },
+    {
+      "path": "include/lyra/detail/from_string.hpp",
+      "bytes": 4945,
+      "sha256": "bd9cef8d9663dbd33f0f3b02221f7749e17a9bcafb3e89bbc2e88669fd9bacf6"
+    },
+    {
+      "path": "include/lyra/detail/invoke_lambda.hpp",
+      "bytes": 1251,
+      "sha256": "f1a572dfe966b66e880050fe46d57dd96fc566117bf259235840388b01826056"
+    },
+    {
+      "path": "include/lyra/detail/parse.hpp",
+      "bytes": 779,
+      "sha256": "171dd12f8b1638e5c98efff0db0296a5ed7b2f6955c3f40e16d01f177050a5dd"
+    },
+    {
+      "path": "include/lyra/detail/print.hpp",
+      "bytes": 1597,
+      "sha256": "151a7c8f87a62c10c7473e7e3b0a41fe5a8a358424883122b9c3c00d01bbb3bb"
+    },
+    {
+      "path": "include/lyra/detail/result.hpp",
+      "bytes": 3563,
+      "sha256": "da411ba276ee46f787b0727e02b880aa7336eebe8f4f6fb8e8b9ca3117912c87"
+    },
+    {
+      "path": "include/lyra/detail/tokens.hpp",
+      "bytes": 8115,
+      "sha256": "86fb0b233a5546c0db8ac827fb6537085971cb93f820e72fede5d40544f06e68"
+    },
+    {
+      "path": "include/lyra/detail/trait_utils.hpp",
+      "bytes": 1823,
+      "sha256": "81f072ba0077de105809c729725fcb7316f6c015f074f914586b72d4a489ea98"
+    },
+    {
+      "path": "include/lyra/detail/unary_lambda_traits.hpp",
+      "bytes": 1089,
+      "sha256": "b17d0d68ca2bc10cf3238543ef74b08fd1c39c5bb2eaa6eba882a73d6a7a743e"
+    },
+    {
+      "path": "LICENSE.txt",
+      "bytes": 1338,
+      "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566"
+    }
+  ]
+}

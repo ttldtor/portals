@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
-#include "../examples/replay/terminal.hpp"
+#include "support/examples/replay/terminal.hpp"
 #include "support/vt_oracle.hpp"
 #include <portals/managed.hpp>
 

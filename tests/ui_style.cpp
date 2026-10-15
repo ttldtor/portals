@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
-#include "../examples/replay/terminal.hpp"
+#include "support/examples/replay/terminal.hpp"
 #include <doctest.h>
 #include <portals/ui_style.hpp>
 

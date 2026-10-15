@@ -147,10 +147,12 @@ std::optional<InputKey> tildeKey(std::uint32_t number) noexcept {
 
 std::expected<InputDecoder, InputError> InputDecoder::create(InputOptions options) {
   constexpr auto SEQUENCE_CAPACITY = decltype(sequence_){}.size();
+  // Evaluate the exact implementation limit without constructing an MSVC Debug string proxy at runtime.
+  constexpr auto MAX_PASTE_BYTES = std::string{}.max_size();
 
   if (options.max_sequence_bytes < MIN_SEQUENCE_BYTES || options.max_sequence_bytes > SEQUENCE_CAPACITY ||
       options.max_parameters == 0 || options.max_parameters > MAX_PARAMETERS || options.max_digits == 0 ||
-      options.max_digits > MAX_PARAMETER_DIGITS || options.max_paste_bytes > std::string{}.max_size() ||
+      options.max_digits > MAX_PARAMETER_DIGITS || options.max_paste_bytes > MAX_PASTE_BYTES ||
       options.work_bytes == 0 || options.escape_timeout == 0 || options.sequence_timeout == 0 ||
       options.paste_timeout == 0) {
     return std::unexpected(InputError::INVALID_OPTIONS);
@@ -167,7 +169,7 @@ void InputDecoder::reset() noexcept {
   intermediate_ = string_osc_ = string_escape_ = alt_ = ending_ = finished_ = false;
   remaining_ = 0;
   scalar_ = minimum_scalar_ = 0;
-  std::string{}.swap(paste_);
+  paste_.reset();
   window_ = {};
   pending_.reset();
 }
@@ -237,7 +239,7 @@ std::optional<InputEvent> InputDecoder::expire(InputTime now) {
 
   // Without a terminator, accepting a suffix as keys would cross the data boundary.
   state_ = State::FAILED;
-  std::string{}.swap(paste_);
+  paste_.reset();
 
   return issue(InputIssueKind::TIMEOUT);
 }
@@ -465,7 +467,7 @@ std::optional<InputEvent> InputDecoder::sequence(InputTime now) {
   }
 
   if (!ss3 && final == '~' && count == 1 && values[0] == PASTE_BEGIN_PARAMETER && options_.bracketed_paste) {
-    paste_.clear();
+    paste_.reset();
     marker_ = 0;
     begin(State::PASTE, now, options_.paste_timeout);
 
@@ -505,9 +507,12 @@ std::optional<InputEvent> InputDecoder::paste(unsigned char value) {
       clearSequence();
 
       if (!discarded) {
-        std::string payload;
+        std::string payload{""};
 
-        payload.swap(paste_);
+        if (paste_) {
+          payload.swap(*paste_);
+          paste_.reset();
+        }
 
         return PasteInputEvent{std::move(payload)};
       }
@@ -528,17 +533,26 @@ std::optional<InputEvent> InputDecoder::paste(unsigned char value) {
     return {};
   }
 
-  if (extra > options_.max_paste_bytes - paste_.size()) {
-    std::string{}.swap(paste_);
+  const auto size = paste_ ? paste_->size() : 0;
+
+  if (extra > options_.max_paste_bytes - size) {
+    paste_.reset();
     state_ = State::DISCARD_PASTE;
 
     return issue(InputIssueKind::PASTE_LIMIT);
   }
 
-  paste_.append(PASTE_END.substr(0, held));
+  if (extra) {
+    if (!paste_) {
+      // The explicit string overload can propagate Debug proxy allocation failures into pull's catch.
+      paste_ = std::make_unique<std::string>("");
+    }
 
-  if (marker_ == 0) {
-    paste_ += static_cast<char>(value);
+    paste_->append(PASTE_END.substr(0, held));
+
+    if (marker_ == 0) {
+      *paste_ += static_cast<char>(value);
+    }
   }
 
   return {};
@@ -689,7 +703,7 @@ std::expected<InputStep, InputError> InputDecoder::pull(std::string_view bytes, 
       }
 
       clearSequence();
-      std::string{}.swap(paste_);
+      paste_.reset();
     }
 
     finished_ = true;
@@ -722,7 +736,7 @@ std::expected<InputStep, InputError> InputDecoder::pull(std::string_view bytes, 
     }
   } catch (...) {
     state_ = State::FAILED;
-    std::string{}.swap(paste_);
+    paste_.reset();
     throw;
   }
 

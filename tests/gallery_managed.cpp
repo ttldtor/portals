@@ -1,12 +1,12 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
-#include "../examples/custom_widget/fluent_meter.hpp"
-#include "../examples/custom_widget/meter.hpp"
-#include "../examples/gallery/fluent_form.hpp"
-#include "../examples/gallery/form.hpp"
-#include "../examples/gallery/managed_report.hpp"
-#include "../examples/replay/terminal.hpp"
+#include "support/custom_widget_fluent.hpp"
+#include "support/examples/custom_widget/meter.hpp"
+#include "support/examples/gallery/form.hpp"
+#include "support/examples/gallery/managed_report.hpp"
+#include "support/examples/replay/terminal.hpp"
 #include "support/gallery_before.hpp"
+#include "support/gallery_fluent.hpp"
 #include "support/meter_before.hpp"
 #include "support/vt_oracle.hpp"
 #include <iostream>
@@ -146,14 +146,14 @@ void meterThemes() {
 }
 
 Capture fluentForm(const std::vector<example::ReplayTerminal::Input> &script, CellSize size, std::size_t theme,
-                   ColorMode colors, gallery::Composition composition) {
+                   ColorMode colors) {
   example::ReplayTerminal terminal(script, 500, size);
   ui::SceneOptions options;
 
   options.clock = terminal.clock();
   options.application.writer.colorMode = colors;
 
-  gallery::FluentForm form(options, theme, composition);
+  gallery::FluentForm form(options, theme);
   const auto stats = take(form.run(terminal));
 
   if (!terminal.closed) {
@@ -179,8 +179,8 @@ void owningFormEquivalence() {
                                                  {}},
                                                 {150, "", CellSize{12, 4}},
                                                 {300, "\x1b[21~", {}}},
-    // Modified F2 and F10 retain legacy admission through the typed onInput fallback.
-    std::vector<example::ReplayTerminal::Input>{{50, "\x1b[1;2Q", {}}, {150, "\x1b[21;2~", {}}},
+    // Gallery commands use exact F2, F10 or Ctrl+C.
+    std::vector<example::ReplayTerminal::Input>{{50, "\x1bOQ", {}}, {150, "\x1b[21~", {}}},
     std::vector<example::ReplayTerminal::Input>{{50, "\x03", {}}}};
 
   for (std::size_t theme = 0; theme < example::THEME_PRESETS.size(); ++theme) {
@@ -196,8 +196,8 @@ void owningFormEquivalence() {
         gallery::Form before(*app, theme);
         const auto stats = take(before.run(terminal));
 
-        for (auto composition : {gallery::Composition::METHODS, gallery::Composition::PIPE}) {
-          const auto after = fluentForm(script, SIZE, theme, colors, composition);
+        {
+          const auto after = fluentForm(script, SIZE, theme, colors);
 
           if (!terminal.closed || terminal.output != after.bytes || stats.frames != after.stats.frames ||
               before.calls != after.calls) {
@@ -206,6 +206,21 @@ void owningFormEquivalence() {
         }
       }
     }
+  }
+}
+
+void exactGalleryQuit() {
+  const auto control = fluentForm({{50, "\x03", {}}, {300, "x", {}}}, {80, 24}, 0, ColorMode::TRUE_COLOR);
+
+  if (control.stats.inputs != 1) {
+    throw std::runtime_error("Ctrl+C must quit before subsequent input");
+  }
+
+  const auto ignored =
+    fluentForm({{50, "\x1b[21;2~", {}}, {150, "\x1b[21~", {}}, {300, "x", {}}}, {80, 24}, 0, ColorMode::TRUE_COLOR);
+
+  if (ignored.stats.inputs != 2) {
+    throw std::runtime_error("Modified F10 must not quit the gallery");
   }
 }
 
@@ -221,7 +236,7 @@ void owningMeterEquivalence() {
     std::vector<example::ReplayTerminal::Input>{
       {50, "\x1b[C\x1b[C\x1b[D", {}}, {100, "", CellSize{50, 8}}, {150, "\x1bOQ", {}}, {200, "\x1b[21~", {}}},
     std::vector<example::ReplayTerminal::Input>{
-      {50, "\x1b[1;2C", {}}, {100, "\x1b[1;2D", {}}, {150, "\x1b[1;2Q", {}}, {200, "\x1b[21;2~", {}}},
+      {50, "\x1b[C", {}}, {100, "\x1b[D", {}}, {150, "\x1bOQ", {}}, {200, "\x1b[21~", {}}},
     std::vector<example::ReplayTerminal::Input>{{50, "\x03", {}}}, held};
 
   for (std::size_t theme = 0; theme < example::THEME_PRESETS.size(); ++theme) {
@@ -237,14 +252,14 @@ void owningMeterEquivalence() {
         meter_example::MeterScene before(*app, theme);
         const auto stats = take(before.run(terminal));
 
-        for (auto composition : {meter_example::Composition::METHODS, meter_example::Composition::PIPE}) {
+        {
           example::ReplayTerminal replay(script, 600, SIZE);
           ui::SceneOptions sceneOptions;
 
           sceneOptions.application = options;
           sceneOptions.clock = replay.clock();
 
-          meter_example::FluentMeterScene after(sceneOptions, theme, composition);
+          meter_example::FluentMeterScene after(sceneOptions, theme);
           const auto fluentStats = take(after.run(replay));
 
           if (!terminal.closed || !replay.closed || terminal.output != replay.output ||
@@ -307,6 +322,7 @@ int main() {
     meterThemes();
     diagnosticFailures();
     owningFormEquivalence();
+    exactGalleryQuit();
     owningMeterEquivalence();
 
     const auto idle = runForm<gallery::Form>({}, {80, 24});

@@ -1,6 +1,6 @@
 # Getting started {#getting-started}
 
-Portals provides a C++23 static library and four runnable terminal examples.
+Portals provides a C++23 static library and five runnable terminal examples.
 Start with the gallery, then use the dashboard or custom widget to explore the
 same [Application runner](application.md). The [architecture](architecture.md)
 explains ownership and data flow; [limitations](limitations.md) defines the
@@ -54,41 +54,59 @@ In a terminal with native input/output attached, run:
 ./build/windows-msvc-debug/examples/gallery/portals_gallery
 ./build/windows-msvc-debug/examples/dashboard/portals_dashboard --rate 10000 --fps 30 --rows 1000000
 ./build/windows-msvc-debug/examples/custom_widget/portals_custom_widget
-./build/windows-msvc-debug/examples/replay/portals_replay_example
+./build/windows-msvc-debug/examples/editor_history/portals_editor_history
+./build/windows-msvc-debug/examples/click_handlers/portals_click_handlers
 ```
 
 On Linux substitute `build/linux-gcc-debug`. F10 or Ctrl+C exits. Gallery:
 Tab changes focus, Enter commits/activates, F2 changes theme. Dashboard: arrows,
-Home and End navigate the table, Enter commits the note, F2 changes theme.
+Home and End navigate the table; valid note edits apply immediately, and F2 changes theme.
 Custom widget: Left/Right adjusts the meter. [Examples](examples.md) describes
 synthetic/replay sources, delay, ASCII and ANSI16 options.
 
-Each executable also accepts `--check`. These finite checks use an in-memory
-terminal and logical clock, exit automatically, and print results after close.
-They verify runner behavior without requiring a native terminal; they do not
-establish physical display compatibility or native restoration.
+The gallery also accepts `--theme NAME` (or `-t NAME`), `--ansi16` and `--help`.
+Its native Lyra schema runs before any terminal is opened; help returns zero,
+and invalid options return two. The public program has no `--check` mode.
+
+Finite checks live in separate test harnesses and the installed-package consumer.
+They use an in-memory terminal and logical clock, exit automatically, and verify
+runner behavior without establishing physical display compatibility.
 
 ## Your own main
 
-Start with [declarative composition](declarative-ui.md) for an ordinary form.
-The gallery's `Form` owns a `ManagedScene`, which retains its state, standard
-bindings and presentation adapters. The `Application` must outlive that form.
-The interactive path in `examples/gallery/main.cpp` is:
+Start with [the complete click-handler program](../examples/click_handlers/main.cpp)
+and [declarative composition](declarative-ui.md). Describe controls, attach handlers,
+and finish the scene with `ui::runApp()`. The owning scene retains the application,
+models, bindings and standard presentation adapters. Ref copies observe controls.
 
 ```cpp
-auto app = example::take(portals::Application::create());
-gallery::Form form(*app);
+#include <portals/ui.hpp>
 
-return example::report(form.run());
+int main() {
+  using namespace portals;
+
+  ui::Ref<LineEdit> message;
+  ui::Ref<Button> add;
+  auto scene = ui::scene(ui::vbox(ui::lineEdit(message, ""), ui::button(add, "Add Hello")));
+
+  return scene
+    | ui::onClick(add, [message] {
+           message.text() += "Hello!";
+         })
+    | ui::onKey(key::F10, ui::quit)
+    | ui::runApp();
+}
 ```
 
-This excerpt uses example helpers, not additional public APIs:
-`example::take` throws on a failed `expected`; main catches construction
-failures. `example::report` handles the run result after restoration. See
-`examples/gallery/form.hpp` for the complete form description. Its `onInput`
-adapter handles global commands; the scene manages standard presentation and
-bindings. [Managed controls](managed-controls.md) explains custom adapters.
-
+The final stage returns zero on success or a failure code after cleanup and default
+error reporting. There is no application-written event loop or stop source here.
+For a larger complete form, read [the gallery function](../examples/gallery/fluent_form.hpp)
+and its [entry point](../examples/gallery/main.cpp). The form returns a lazy
+scene from `gallery::form(ui::opts(options))`; a native Lyra declaration fills
+the caller-owned options through the final `ui::runApp(argc, argv, parser)` stage.
+The options must outlive the synchronous call. See [CLI startup](cli.md) for
+`ui::lyra::cli`, typed errors, help/version and read-only process snapshots.
+[Managed controls](managed-controls.md) explains custom presentation adapters.
 For explicit low-level ownership, [Application](application.md) shows a small
 button program with an `ApplicationScene` and a retained scoped binding.
 Derive `ApplicationScene` when managing commands and preparation yourself. In
@@ -116,6 +134,9 @@ metadata differs from the versioned semantic replay format in [testing](testing.
 Use `add_subdirectory` and `portals::core` when embedding the source, or
 `find_package(Portals CONFIG REQUIRED)` for an installed package.
 [Package](package.md) supplies install, relocation and external consumer commands.
+For the optional Lyra adapter, link `portals::lyra`; its headers, BSL-1.0 license
+and pinned manifest are included in the offline SDK. Core-only applications
+continue to link `portals::core`.
 
 For HTML documentation, install Doxygen 1.18 or newer and Mermaid CLI. The
 verified diagram toolchain is Node.js 24 LTS with Mermaid CLI 12. In PowerShell:

@@ -35,6 +35,7 @@ target_sources(portals_core PRIVATE src/widgets/ui_scene.cpp)
 target_sources(portals_core PRIVATE src/input_shortcut.cpp)
 
 target_sources(portals_core PRIVATE src/widgets/ui_style.cpp)
+target_sources(portals_core PRIVATE src/widgets/ui_app.cpp)
 if(WIN32)
   target_sources(portals_core PRIVATE src/terminal/windows.cpp)
 elseif(UNIX)
@@ -68,6 +69,17 @@ target_include_directories(portals_aggregate SYSTEM INTERFACE
 )
 target_compile_definitions(portals_aggregate INTERFACE BOOST_PFR_USE_CPP26=0)
 
+# Command-line parsing is opt-in; core-only consumers never include Lyra.
+include("${CMAKE_CURRENT_SOURCE_DIR}/vendor/lyra/verify.cmake")
+add_library(portals_lyra INTERFACE)
+add_library(portals::lyra ALIAS portals_lyra)
+set_target_properties(portals_lyra PROPERTIES EXPORT_NAME lyra)
+target_link_libraries(portals_lyra INTERFACE portals::core)
+target_include_directories(portals_lyra SYSTEM INTERFACE
+  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor/lyra/include>"
+  "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/Portals/lyra>"
+)
+
 set(PORTALS_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/Portals")
 set(PORTALS_PACKAGE_NEEDS_THREADS OFF)
 if(UNIX)
@@ -80,7 +92,7 @@ configure_package_config_file(cmake/PortalsConfig.cmake.in
 write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/PortalsConfigVersion.cmake"
   VERSION "${PROJECT_VERSION}" COMPATIBILITY SameMajorVersion
 )
-install(TARGETS portals_core portals_utf8proc portals_aggregate EXPORT PortalsTargets
+install(TARGETS portals_core portals_utf8proc portals_aggregate portals_lyra EXPORT PortalsTargets
   ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}/$<CONFIG>"
 )
 install(DIRECTORY include/portals DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
@@ -88,6 +100,9 @@ install(FILES include/portals.hpp DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 install(DIRECTORY vendor/pfr/include/boost DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/Portals/pfr")
 install(FILES vendor/pfr/LICENSE_1_0.txt DESTINATION "${CMAKE_INSTALL_DATADIR}/Portals/licenses" RENAME pfr-LICENSE.txt)
 install(FILES vendor/pfr/manifest.json DESTINATION "${CMAKE_INSTALL_DATADIR}/Portals/pfr")
+install(DIRECTORY vendor/lyra/include/ DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/Portals/lyra")
+install(FILES vendor/lyra/LICENSE.txt DESTINATION "${CMAKE_INSTALL_DATADIR}/Portals/licenses" RENAME lyra-LICENSE.txt)
+install(FILES vendor/lyra/manifest.json vendor/lyra/README.md DESTINATION "${CMAKE_INSTALL_DATADIR}/Portals/lyra")
 install(EXPORT PortalsTargets FILE PortalsTargets.cmake NAMESPACE portals::
   DESTINATION "${PORTALS_INSTALL_CMAKEDIR}"
 )
@@ -102,7 +117,7 @@ install(FILES vendor/utf8proc/LICENSE.md
 install(FILES vendor/utf8proc/manifest.json
   DESTINATION "${CMAKE_INSTALL_DATADIR}/Portals/utf8proc"
 )
-install(FILES docs/package.md DESTINATION "${CMAKE_INSTALL_DATADIR}/Portals/docs")
+install(FILES docs/package.md docs/cli.md DESTINATION "${CMAKE_INSTALL_DATADIR}/Portals/docs")
 install(FILES vendor/textual/LICENSE
   DESTINATION "${CMAKE_INSTALL_DATADIR}/Portals/licenses" RENAME textual-LICENSE.txt)
 install(FILES vendor/textual/README.md DESTINATION "${CMAKE_INSTALL_DATADIR}/Portals/textual")
@@ -172,7 +187,6 @@ if(PORTALS_BUILD_EXAMPLES)
   add_subdirectory(examples/click_handlers)
   add_subdirectory(examples/dashboard)
   add_subdirectory(examples/custom_widget)
-  add_subdirectory(examples/replay)
   portals_enable_warnings(portals_consumer)
 endif()
 
@@ -196,6 +210,24 @@ if(PORTALS_BUILD_TESTS)
   endif()
 
   include("${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest/verify.cmake")
+  add_executable(portals_ui_app tests/ui_app.cpp)
+  target_include_directories(portals_ui_app SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  target_link_libraries(portals_ui_app PRIVATE portals::core)
+  portals_enable_warnings(portals_ui_app)
+  add_test(NAME portals.ui-app COMMAND portals_ui_app)
+  set_tests_properties(portals.ui-app PROPERTIES TIMEOUT 15)
+  add_executable(portals_ui_app_oom tests/ui_app_oom.cpp)
+  target_include_directories(portals_ui_app_oom SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  target_link_libraries(portals_ui_app_oom PRIVATE portals::core)
+  portals_enable_warnings(portals_ui_app_oom)
+  add_test(NAME portals.ui-app-oom COMMAND portals_ui_app_oom --order-by=file)
+  set_tests_properties(portals.ui-app-oom PROPERTIES TIMEOUT 30)
+  add_executable(portals_cli tests/cli.cpp)
+  target_include_directories(portals_cli SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  target_link_libraries(portals_cli PRIVATE portals::lyra)
+  portals_enable_warnings(portals_cli)
+  add_test(NAME portals.cli COMMAND portals_cli)
+  set_tests_properties(portals.cli PROPERTIES TIMEOUT 15)
   add_executable(portals_compactness_tests tests/compactness.cpp tools/compactness/scanner.cpp
     tools/compactness/report.cpp)
   target_include_directories(portals_compactness_tests SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
@@ -633,19 +665,33 @@ if(PORTALS_BUILD_TESTS)
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/bundle_launcher.cmake")
       set_tests_properties(portals.bundle-launcher PROPERTIES TIMEOUT 40 LABELS "package")
     endif()
-    add_test(NAME portals.gallery-replay COMMAND portals_gallery --check)
-    add_test(NAME portals.editor-history-check COMMAND portals_editor_history --check)
-    add_test(NAME portals.editor-history-replay COMMAND portals_editor_history --replay)
+    foreach(example IN ITEMS gallery custom_widget dashboard editor_history replay)
+      add_executable(portals_${example}_check tests/examples/${example}/main.cpp)
+      target_link_libraries(portals_${example}_check PRIVATE portals::core)
+      portals_enable_warnings(portals_${example}_check)
+    endforeach()
+    add_executable(portals_dashboard_fluent_check tests/examples/dashboard/equivalence.cpp)
+    target_link_libraries(portals_dashboard_fluent_check PRIVATE portals::core)
+    portals_enable_warnings(portals_dashboard_fluent_check)
+    add_test(NAME portals.dashboard-fluent COMMAND portals_dashboard_fluent_check)
+    set_tests_properties(portals.dashboard-fluent PROPERTIES TIMEOUT 20)
+    add_test(NAME portals.gallery-replay COMMAND portals_gallery_check --check)
+    add_test(NAME portals.editor-history-check COMMAND portals_editor_history_check --check)
+    add_test(NAME portals.editor-history-replay COMMAND portals_editor_history_check --replay)
+    foreach(example IN ITEMS gallery custom_widget dashboard)
+      add_test(NAME portals.${example}-help COMMAND portals_${example} --help)
+      set_tests_properties(portals.${example}-help PROPERTIES TIMEOUT 5)
+    endforeach()
     add_test(NAME portals.editor-history-help COMMAND portals_editor_history --help)
     set_tests_properties(portals.editor-history-check portals.editor-history-replay portals.editor-history-help
       PROPERTIES TIMEOUT 20)
-    add_test(NAME portals.dashboard-check COMMAND portals_dashboard --check --ansi16 --ascii)
-    add_test(NAME portals.dashboard-replay COMMAND portals_replay_example --check --delay-ms 250)
-    add_test(NAME portals.custom-widget COMMAND portals_custom_widget --check)
+    add_test(NAME portals.dashboard-check COMMAND portals_dashboard_check --check --ansi16 --ascii)
+    add_test(NAME portals.dashboard-replay COMMAND portals_replay_check --check --delay-ms 250)
+    add_test(NAME portals.custom-widget COMMAND portals_custom_widget_check --check)
     foreach(palette IN ITEMS modern turbo nord gruvbox tokyo-night catppuccin-latte)
       foreach(program IN ITEMS gallery custom_widget)
         add_test(NAME portals.${program}-${palette}
-          COMMAND portals_${program} --check --ansi16 --theme ${palette})
+          COMMAND portals_${program}_check --check --ansi16 --theme ${palette})
         set_tests_properties(portals.${program}-${palette} PROPERTIES TIMEOUT 20)
       endforeach()
     endforeach()
@@ -896,7 +942,7 @@ if(PORTALS_BUILD_DOCS)
 
   doxygen_add_docs(portals_docs include docs/compile-time-pss.md docs/style-layers.md docs/model-queries.md docs/ui-coroutines.md docs/compile-time-styles.md docs/compile-time-scenes.md ReleaseNotes.md docs/index.md docs/development.md docs/releasing.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/scheduler.md docs/widget-tree.md docs/layout.md docs/grid.md docs/property.md docs/diagnostics.md docs/focus.md docs/model.md docs/input.md docs/terminal.md docs/terminal-probe.md docs/controls.md docs/line-edit.md docs/virtual-list.md docs/virtual-table.md docs/scroll.md docs/chart.md
     docs/styles.md docs/legacy.md docs/managed-controls.md docs/declarative-ui.md docs/text-property.md docs/text-history.md docs/editor-history.md docs/editor-history-demo.md docs/compact-examples.md docs/compactness.md docs/quality.md tools/compactness/compactness.hpp docs/managed-performance.md docs/package.md docs/application.md docs/virtual-preparation.md docs/examples.md docs/architecture.md docs/getting-started.md docs/limitations.md docs/api-design.md experiments/module-spike/README.md fuzz/README.md
-    tools/benchmarks/README.md vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md vendor/textual/README.md vendor/doctest/README.md vendor/pfr/README.md
+    tools/benchmarks/README.md vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md vendor/textual/README.md vendor/doctest/README.md vendor/pfr/README.md vendor/lyra/README.md docs/cli.md
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Generate Portals API documentation"
   )

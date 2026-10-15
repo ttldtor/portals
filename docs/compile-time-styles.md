@@ -97,7 +97,7 @@ mount failure retains the existing managed rollback and error-reporting contract
 - [Before: runtime stylesheet](https://github.com/ttldtor/portals/blob/main/tests/package_consumer/static_styles_dynamic.cpp).
 - [After: static rules and live parameters](https://github.com/ttldtor/portals/blob/main/tests/package_consumer/static_styles.cpp).
 - [Shared setup, errors and cleanup](https://github.com/ttldtor/portals/blob/main/tests/package_consumer/static_styles_support.hpp).
-- [Shared replay terminal](https://github.com/ttldtor/portals/blob/main/examples/replay/terminal.hpp).
+- [Shared replay terminal](https://github.com/ttldtor/portals/blob/main/tests/support/examples/replay/terminal.hpp).
 
 ### Before
 

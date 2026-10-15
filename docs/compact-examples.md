@@ -154,8 +154,8 @@ existing router; this convenience adds no key-binding subsystem.
 
 ## One composition, explicit customization
 
-Gallery uses `ui::column`, standard managed state and bindings; it already had
-this short form before these helpers. The custom final meter uses the existing
+The earlier managed gallery used `ui::column`, standard managed state and bindings;
+it already had this short form before these helpers. The custom final meter uses the existing
 `ManagedState<int>` for its scalar level, instead of a one-row dataset provider.
 State owns immutable snapshots and maintains its revisions internally; the input
 handler does not build `LevelSnapshot` or increment a revision. Dataset providers
@@ -273,12 +273,13 @@ this comparison.
 
 ## Complete owning scene examples
 
-The interactive gallery and custom meter now own `ui::Scene`. This is the lazy
-facade over the existing `Application` and `ManagedScene`, with the same retained
-widgets, preparation, input router and single runner. Each complete after class
-contains both ordinary method composition and equivalent pipe composition;
-`Composition::PIPE` is the gallery default and selects the pipe spelling without changing the recipe or
-configuration order. No macro, coroutine runner or extra reactive system is used.
+The gallery and custom meter are functions returning lazy owning scenes:
+`gallery::form(ui::opts(options))` and
+`meter_example::meter(ui::opts(options))`. Both reuse the existing
+Application/ManagedScene runtime. Native Lyra schemas are parsed by `runApp`
+before writer settings, mounting or terminal acquisition. Caller-owned options
+remain alive through the synchronous run. Test transports and statistics wrappers
+are test-owned. See [command-line startup](cli.md).
 
 ### Gallery before: borrowed application and managed ownership
 
@@ -288,16 +289,11 @@ configuration order. No macro, coroutine runner or extra reactive system is used
 
 \include{lineno} fluent_form.hpp
 
-`ui::lineEdit(editor, "Portals", ...)` owns its initial text and creates its
-scene-owned model during mounting. The explicit edit mode remains visible:
-Enter commits and Tab changes focus. The checkbox still uses a scene-owned
-boolean state. `Ref` observes the editor and publishes only after successful
-mount; it owns neither the widget nor the scene. The first focusable child is
-this editor, recovered by the existing router during managed preparation.
+The editor owns its initial text and the checkbox owns its initial boolean state through standard managed bindings. Explicit edit mode is visible in the description: Enter commits, Tab changes focus. Buttons attach compact actions directly in the description; the default runner restores the terminal. Only the test adapter keeps action counters and custom transport methods.
 
 ### Custom widget before: borrowed application and scalar managed state
 
-\include{lineno} meter.hpp
+\include{lineno} custom_widget/meter.hpp
 
 ### Custom widget after: owning scene with the same final LevelMeter
 
@@ -310,19 +306,20 @@ adapter needs no additional tree invalidation. Painting reads retained text and
 value; it never reads state or formats text. Equal or clamped sets request no
 additional frame.
 
-Both after classes are stationary because callbacks explicitly borrow their
-example object. Their last member is the scene owner: it closes callbacks and
-its application before the borrowed members are destroyed. The replay clock
-and terminal remain borrowed through the run. Quit/F10/Ctrl+C request cooperative
-cancellation through scoped `ui::quit()`; these examples do not require a user-owned
-`std::stop_source`. Embedding applications can still pass an optional stop token
+The returned scenes own their recipes and callbacks. The meter shares its
+managed-state handle between input and preparation callbacks; those callbacks do
+not borrow a temporary factory object. Options remain borrowed through
+`ui::OptionsRef`, and any custom clock or terminal remains borrowed through the
+run. Quit/F10/Ctrl+C request cooperative cancellation through scoped `ui::quit()`;
+these examples do not require a user-owned `std::stop_source`. Embedding applications can still pass an optional stop token
 to the existing scene runner.
 
-The short exact `onKey` chords are registered after the original typed input
-fallback. Unmodified keys use those handlers; modified arrows/F2/exit keys retain
-the examples' previous modifier-insensitive admission through `onInput`.
-Directly replacing `onInput` later would replace this chain. Theme replacement
-updates the preset index only after success. Factories return checked recipes
+The gallery registers exact F10/Ctrl+C quit shortcuts and its F2 theme handler
+through `onKey`. The meter installs its typed F2 fallback before composing exact
+quit and PRESS/REPEAT arrow shortcuts. Modified arrows and quit chords do not
+inherit the old modifier-insensitive matching. Replacing `onInput` after key
+registration would replace that handler chain. Theme replacement updates the
+preset index only after success. Factories return checked recipes
 and preserve state creation errors. `run` returns the original `ManagedError`,
 including independent runner/restoration and cleanup failures; the CLI reports
 it after restoration. Recipe construction, allocation and invalid preset indices
@@ -330,10 +327,12 @@ can still throw before a checked boundary.
 
 The existing regression compares full output bytes, frame counts, action counts
 and closed transports for before/method/pipe, all six themes, both color modes,
-keyboard/mouse, explicit editing, Unicode, resize, modified shortcuts, idle and
-clamped state. The relocated installed consumer compiles and runs the same public
-headers. These checks prove their specified headless scenarios; native terminal
-compatibility remains a separate platform check.
+keyboard/mouse, explicit editing, Unicode, resize, idle and clamped state.
+Exact-shortcut regressions separately check the current modifier admission and
+that quit prevents later input from being delivered. The relocated installed
+consumer compiles and runs the same public headers. These checks prove their
+specified headless scenarios; native terminal compatibility remains a separate
+platform check.
 
 
 ## Late click registration without setup wrappers

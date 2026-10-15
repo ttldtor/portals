@@ -3,7 +3,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest.h>
 
-#include "../examples/replay/terminal.hpp"
+#include "support/examples/replay/terminal.hpp"
 #include <portals/ui.hpp>
 
 #include <atomic>
@@ -111,6 +111,35 @@ struct Fixture {
   }
 };
 
+struct IgnoredValue {
+  std::weak_ptr<ui::detail::SceneAnchor> expectedScene;
+  int *destroyed{};
+  bool *correctScene{};
+
+  IgnoredValue(std::weak_ptr<ui::detail::SceneAnchor> expected, int &count, bool &correct)
+      : expectedScene(std::move(expected)), destroyed(&count), correctScene(&correct) {
+  }
+
+  IgnoredValue(const IgnoredValue &) = delete;
+  IgnoredValue &operator=(const IgnoredValue &) = delete;
+
+  IgnoredValue(IgnoredValue &&other) noexcept
+      : expectedScene(std::move(other.expectedScene)), destroyed(std::exchange(other.destroyed, nullptr)),
+        correctScene(other.correctScene) {
+  }
+
+  ~IgnoredValue() {
+    if (destroyed) {
+      const auto current = ui::detail::CurrentSceneScope::snapshot();
+
+      ++*destroyed;
+      *correctScene =
+        !current.expired() && !current.owner_before(expectedScene) && !expectedScene.owner_before(current);
+      ui::quit();
+    }
+  }
+};
+
 static_assert(InputModifiers{.shift = true}.has(key::SHIFT));
 static_assert(InputModifiers{.alt = true}.has(key::ALT));
 static_assert(InputModifiers{.control = true}.has(key::CTRL));
@@ -119,6 +148,15 @@ static_assert(ui::detail::ClickCallback<decltype([](const ui::ClickParams &) {
 })>);
 static_assert(!ui::detail::ClickCallback<decltype([] {
   return 1;
+})>);
+static_assert(!ui::detail::ClickCallback<decltype([] {
+  return false;
+})>);
+static_assert(!ui::detail::ClickCallback<decltype([]() -> std::expected<int, ManagedError> {
+  return 1;
+})>);
+static_assert(ui::detail::ClickCallback<decltype([]() -> std::expected<std::unique_ptr<int>, TreeError> {
+  return std::make_unique<int>(1);
 })>);
 static_assert(!ui::detail::ClickCallback<decltype([capture = std::unique_ptr<int>{}] {
 })>);
@@ -764,4 +802,209 @@ TEST_CASE("preparation prunes raw tree retirement and returns the click budget")
   fixture.click(second, [] {
   });
   take(fixture.app->router().invoke(second.node(), ActionEvent{Action::ACTIVATE}));
+}
+
+TEST_CASE("checked click values ignore false payloads and preserve exact failures") {
+  for (const bool pipe : {false, true}) {
+    for (const auto cause : {std::optional<TreeError>{}, std::optional{TreeError::NODE_LIMIT},
+                             std::optional{TreeError::CLOSED}, std::optional{TreeError::CALLBACK_FAILED}}) {
+      Fixture fixture;
+      ui::Ref<Button> button;
+      int calls{}, following{};
+      auto action = [&]() -> std::expected<bool, TreeError> {
+        ++calls;
+
+        if (cause) {
+          return std::unexpected(*cause);
+        }
+
+        return false;
+      };
+
+      if (pipe) {
+        take(ui::mount(*fixture.scene, ui::button(button, "Click")));
+        fixture.click(button, action);
+        fixture.click(button, [&] {
+          ++following;
+        });
+      } else {
+        take(ui::mount(*fixture.scene, ui::button(button, "Click").onClick(action)));
+      }
+
+      CHECK(take(fixture.app->router().invoke(button.node(), ActionEvent{Action::ACTIVATE})).status ==
+            DispatchStatus::HANDLED);
+
+      const auto diagnostics = take(fixture.scene->diagnostics());
+
+      CHECK(calls == 1);
+      CHECK(following == (pipe && !cause ? 1 : 0));
+
+      if (cause) {
+        REQUIRE(diagnostics.errors.size() == 1);
+        CHECK(hasCause(diagnostics.errors[0].error, *cause));
+        CHECK(diagnostics.errors[0].error.node == button.node().id());
+      } else {
+        CHECK(diagnostics.errors.empty());
+      }
+    }
+  }
+}
+
+TEST_CASE("checked key values consume false success and preserve exact failures") {
+  for (const bool shortcut : {false, true}) {
+    for (const auto cause : {std::optional<TreeError>{}, std::optional{TreeError::NODE_LIMIT},
+                             std::optional{TreeError::CLOSED}, std::optional{TreeError::CALLBACK_FAILED}}) {
+      Fixture fixture;
+      int calls{}, previous{};
+      auto action = [&](const KeyEvent &) -> std::expected<bool, TreeError> {
+        ++calls;
+
+        if (cause) {
+          return std::unexpected(*cause);
+        }
+
+        return false;
+      };
+
+      take(fixture.scene->onKey(KeyEvent{InputKey::F2}, [&] {
+        ++previous;
+      }));
+
+      if (shortcut) {
+        take(fixture.scene->onKey(ui::press(key::F2), action));
+      } else {
+        take(fixture.scene->onKey(KeyEvent{InputKey::F2}, action));
+      }
+
+      const auto result = fixture.scene->input(*fixture.app, KeyEvent{InputKey::F2});
+
+      CHECK(calls == 1);
+      CHECK(previous == 0);
+
+      if (cause) {
+        REQUIRE_FALSE(result);
+        CHECK(result.error() == *cause);
+      } else {
+        REQUIRE(result);
+        CHECK(*result);
+      }
+    }
+  }
+}
+
+TEST_CASE("ignored move-only callback payloads retire inside their entered facade") {
+  enum class Dispatch {
+    PIPE_CLICK,
+    DIRECT_CLICK,
+    KEY,
+    PREPARE
+  };
+
+  for (const auto dispatch : {Dispatch::PIPE_CLICK, Dispatch::DIRECT_CLICK, Dispatch::KEY, Dispatch::PREPARE}) {
+    INFO("dispatch=", static_cast<int>(dispatch));
+
+    example::ReplayTerminal terminal({{10, dispatch == Dispatch::KEY ? "\x1bOQ" : "\r", {}}}, 100, {30, 4});
+    ui::SceneOptions options;
+    ui::Ref<Button> button;
+    std::weak_ptr<ui::detail::SceneAnchor> expectedScene;
+    ManagedScene *managed{};
+    int destroyed{}, following{};
+    bool correctScene{};
+
+    options.clock = terminal.clock();
+
+    auto value = [&]() -> std::expected<IgnoredValue, TreeError> {
+      return std::expected<IgnoredValue, TreeError>(std::in_place, expectedScene, destroyed, correctScene);
+    };
+    auto recipe = ui::button(button, "Click");
+
+    if (dispatch == Dispatch::PREPARE) {
+      std::move(recipe).onPrepare([&](Button &, Node<Widget>) {
+        return value();
+      });
+    } else if (dispatch == Dispatch::DIRECT_CLICK) {
+      std::move(recipe).onClick(value);
+    }
+
+    auto scene = ui::scene(std::move(recipe), options);
+
+    scene.configure([&](ManagedScene &owner) {
+      expectedScene = ui::detail::CurrentSceneScope::snapshot();
+      managed = &owner;
+    });
+
+    if (dispatch == Dispatch::PIPE_CLICK) {
+      scene | ui::onClick(button, [&]() -> std::expected<IgnoredValue, TreeError> {
+        REQUIRE(managed);
+        take(managed->remove(button.node()));
+
+        return value();
+      });
+      scene | ui::onClick(button, [&] {
+        ++following;
+      });
+    }
+
+    if (dispatch == Dispatch::KEY) {
+      scene.onKey(key::F2, value);
+    }
+
+    const auto result = scene.run(terminal);
+
+    if (!result) {
+      INFO("phase=", static_cast<int>(result.error().phase));
+
+      const auto *cause = std::get_if<TreeError>(&result.error().cause);
+
+      INFO("tree cause=", cause ? static_cast<int>(*cause) : -1);
+      REQUIRE(result);
+    }
+
+    REQUIRE(result);
+    CHECK(destroyed == 1);
+    CHECK(correctScene);
+    CHECK(following == 0);
+    CHECK(terminal.clock().read(terminal.clock().context) == 10);
+    CHECK(ui::detail::CurrentSceneScope::snapshot().expired());
+    CHECK(take(scene.diagnostics()).errors.empty());
+  }
+}
+
+TEST_CASE("checked preparation values preserve failures without scheduling idle frames") {
+  for (const auto cause :
+       {std::optional<TreeError>{}, std::optional{TreeError::NODE_LIMIT}, std::optional{TreeError::CLOSED}}) {
+    example::ReplayTerminal terminal({}, 100, {30, 4});
+    ui::SceneOptions options;
+    ui::Ref<Label> label;
+    int prepared{};
+
+    options.clock = terminal.clock();
+
+    auto scene =
+      ui::scene(ui::label(label, "Idle").onPrepare([&](Label &, Node<Widget>) -> std::expected<bool, TreeError> {
+        ++prepared;
+
+        if (cause) {
+          return std::unexpected(*cause);
+        }
+
+        return false;
+      }),
+                options);
+    const auto result = scene.run(terminal);
+
+    CHECK(prepared == 1);
+    CHECK(terminal.closed);
+
+    if (cause) {
+      REQUIRE_FALSE(result);
+      CHECK(result.error().phase == ManagedPhase::PREPARE);
+      CHECK(result.error().node == label.node().id());
+      CHECK(hasCause(result.error(), *cause));
+    } else {
+      REQUIRE(result);
+      CHECK(result->frames == 1);
+      CHECK(take(scene.diagnostics()).errors.empty());
+    }
+  }
 }

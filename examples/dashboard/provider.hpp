@@ -15,12 +15,6 @@ using example::take;
 
 /** @brief Provider workload, replay and display settings for one dashboard run. */
 struct Options {
-  /** @brief Borrowed callback sampling this scene's snapshot ingress latency in scheduler time units. */
-  using IngressObserver = void (*)(void *, SchedulerTime);
-  /** @brief Optional observer; when null, ingress performs no sampling work. */
-  IngressObserver ingressObserver{};
-  /** @brief Borrowed observer context, required to remain valid through scene shutdown. */
-  void *ingressContext{};
   /** @brief Number of logical instruments exposed by the virtual model. */
   std::uint64_t rows{1000000};
   /** @brief Synthetic or replay ticks generated per second of application clock time. */
@@ -39,10 +33,6 @@ struct Options {
   bool replay{};
   /** @brief Select ASCII captions and chart glyphs for limited terminals. */
   bool ascii{};
-  /** @brief Preserve the detailed legacy layout for direct Scene and benchmark consumers.
-   * The shared CLI selects the compact showcase by default and exposes this layout through --stress.
-   */
-  bool stress{true};
 };
 
 struct Quote {
@@ -89,8 +79,7 @@ public:
 
   ModelRows<Quote> read(RowRange range) const override {
     for (const auto &page : pages_) {
-      if (range.first >= page.range.first && range.first - page.range.first <= page.range.count &&
-          range.count <= page.range.count - static_cast<std::size_t>(range.first - page.range.first)) {
+      if (range.first >= page.range.first && range.first - page.range.first <= page.range.count && range.count <= page.range.count - static_cast<std::size_t>(range.first - page.range.first)) {
         return {RangeState::READY,
                 std::span(page.rows).subspan(static_cast<std::size_t>(range.first - page.range.first), range.count),
                 {}};
@@ -142,7 +131,7 @@ inline std::expected<void, SchedulerError> forwardLatest(const Publisher<ModelSn
 class Provider {
 public:
   /** @param app Borrowed runtime and clock; it outlives this UI-only provider.
-   * @param options Owning workload and borrowed ingress observer, valid through stop().
+   * @param options Owning workload and bounded page-loading settings.
    *
    * Scheduler setup failures use the example's fail-fast policy.
    */
@@ -166,14 +155,20 @@ public:
    * Call once after UI setup. Ingress, timer and model completion use the same scheduler.
    */
   void start(ManagedModel<Quote> model) {
+    start(model, [] {
+    });
+  }
+
+  /** @param received UI-affine callback invoked when a snapshot arrives, before forwarding it. */
+  template <class Received>
+    requires std::invocable<Received &> && std::same_as<std::invoke_result_t<Received &>, void>
+  void start(ManagedModel<Quote> model, Received received) {
     model_ = model;
 
     ingress_ = take(app_.scheduler().connect<ModelSnapshot<Quote>>(
       scope_,
-      [this](auto value) {
-        if (options_.ingressObserver) {
-          options_.ingressObserver(options_.ingressContext, app_.scheduler().metrics().data.last_latency);
-        }
+      [this, received = std::move(received)](auto value) mutable {
+        received();
 
         pendingLatest_ = std::move(value);
         forward();
@@ -207,7 +202,6 @@ public:
   /** @brief Cancel provider work once, before the receiving managed scene retires its model.
    *
    * UI-only; subsequent calls preserve the first stop time and perform no additional work.
-   * The benchmark uses this boundary independently of tree teardown.
    */
   void stop() {
     if (stoppedAt_) {

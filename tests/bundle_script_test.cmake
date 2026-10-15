@@ -67,7 +67,7 @@ endif()
 set(consumer "${testRoot}/external consumer é")
 bundleStageConsumer("${SOURCE_DIR}" "${consumer}")
 file(GLOB_RECURSE exampleInputs LIST_DIRECTORIES FALSE RELATIVE "${SOURCE_DIR}"
-  "${SOURCE_DIR}/examples/*")
+  "${SOURCE_DIR}/examples/*" "${SOURCE_DIR}/tests/examples/*" "${SOURCE_DIR}/tests/support/*")
 file(GLOB_RECURSE fixtureInputs LIST_DIRECTORIES FALSE RELATIVE "${SOURCE_DIR}/tests/package_consumer"
   "${SOURCE_DIR}/tests/package_consumer/*")
 foreach(relative IN LISTS exampleInputs fixtureInputs)

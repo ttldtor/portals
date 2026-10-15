@@ -135,7 +135,7 @@ Setup fails before terminal ownership is acquired in that path.
 - After: `tests/package_consumer/style_layers.cpp`.
 - Shared scene, errors and cleanup: `tests/package_consumer/style_layers_support.hpp`.
 - Shared diagnostics: `tests/package_consumer/static_styles_support.hpp`.
-- Shared replay terminal: `examples/replay/terminal.hpp`.
+- Shared replay terminal: `tests/support/examples/replay/terminal.hpp`.
 
 ### Before
 

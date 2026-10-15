@@ -1,33 +1,42 @@
 # Control gallery
 
-Start with [`FluentForm`](fluent_form.hpp): it owns a lazy scene, creates the editor and
-checkbox state, and registers scoped actions. Enter commits the name; Tab
-changes focus. Run increments an observable action count without changing a
-model. F2 cycles the six theme presets; F10 or Ctrl+C exits. The application
-is owned by the scene; all calls use its constructing UI thread. The stationary
-example object outlives the callbacks borrowing it. [`Form`](form.hpp) remains
-the compiled before specimen; FluentForm includes method and pipe variants.
+[`form`](fluent_form.hpp) is an ordinary function returning a lazy owning scene.
+It describes labels, an explicit-mode text field, a checkbox and two buttons,
+then applies styles and handlers through pipe modifiers. It has no test transport,
+statistics, counter or stationary wrapper object. The optional Run callback is an
+application action; by default Run leaves the field models unchanged.
+
+```cpp
+example::Options options;
+auto lyraCli = example::commandLine(options);
+
+return gallery::form(ui::opts(options))
+  | ui::reportOnError()
+  | ui::runApp(argc, argv, ui::lyra::cli(lyraCli));
+```
+
+The generic runner invokes the native Lyra schema before it creates Application,
+reads writer settings, mounts controls or opens a terminal. Help returns zero;
+invalid options report an owning CLI diagnostic and return two. The Options object
+must outlive the synchronous run. Schema/recipe construction can allocate before
+the runner boundary; user callbacks invoked inside the boundary are checked.
+
+[`settings.hpp`](settings.hpp) defines the two settings; [`options.hpp`](options.hpp)
+defines their native Lyra schema, with no handwritten argv loop. The separate
+[`themes.hpp`](themes.hpp) preserves the existing preset order and F2 behavior;
+the planned universal theme selector is not implemented here. Enter commits the
+name, Tab changes focus, F2 changes theme, F10 or Ctrl+C quits.
 
 ```powershell
 .\portals_gallery.exe --theme nord
-.\portals_gallery.exe --check
+.\portals_gallery.exe --ansi16
 .\portals_gallery.exe --help
 ```
 
-`--check` runs a finite in-memory replay and closes its transport automatically.
-It also exercises the low-level [`Scene`](gallery.hpp). That fixture deliberately
-owns binding tokens and synchronizes presentation explicitly: it preserves
-coverage of the retained API, rather than demonstrating the shortest form API.
-Its positional stages (`initial`, `keyboard`, `mouse`, `disabled`) select
-cumulative semantic checks; they imply `--check` and do not open a native window.
+The core scene does not depend on Lyra. Link the CLI executable with `portals::lyra`;
+Lyra headers, license and manifest are included in the offline SDK. See the
+[CLI guide](../../docs/cli.md) and [examples guide](../../docs/examples.md).
 
-[`options.hpp`](options.hpp) documents parsed settings and theme order.
-`--ansi16` requests the terminal's sixteen-color output mode; the default is
-true color. [`common.hpp`](common.hpp) contains shared setup helpers and typed
-application diagnostics; [`managed_report.hpp`](managed_report.hpp) reports
-managed failures after terminal restoration. The example-only `take` helper
-throws a generic setup exception and loses the original error detail. Production
-applications should retain their typed error policy.
-
-Build and installation instructions are in the project's
-[examples guide](../../docs/examples.md).
+The former stationary form wrapper is now test-owned in
+[`tests/support/gallery_fluent.hpp`](../../tests/support/gallery_fluent.hpp).
+Finite transports and checks remain in tests.

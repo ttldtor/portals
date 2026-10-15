@@ -102,7 +102,7 @@ References: [CMake importing/exporting](https://cmake.org/cmake/help/latest/guid
 
 The packaging pipeline builds one committed Git revision in a fresh source
 archive. Working-tree edits and ignored/private files are excluded. It builds
-the four examples, complete Doxygen HTML and the static SDK from that same
+the five examples, complete Doxygen HTML and the static SDK from that same
 Release build, then tests a freshly unpacked archive before publishing it.
 It never removes or reuses a staging directory and never overwrites an archive.
 Choose new absolute paths; the staging path must be outside the source checkout.
@@ -157,7 +157,7 @@ To check an existing trusted archive from a new path:
     cmake "-DARCHIVE=<absolute archive path>" "-DTEST_WORK_DIR=<new absolute temporary path>" "-DCXX_COMPILER=<compatible compiler>" -P tests/bundle_smoke.cmake
 
 The test unpacks into a path with spaces/Unicode, checks inventory and hashes,
-runs dashboard/gallery/custom-widget/replay with finite --check arguments from
+checks public example help and runs separate finite installed-consumer harnesses from
 a foreign working directory, relocates the SDK again and builds/runs the external
 consumer. Its evidence directories are retained. This proves the finite bundle
 scenario; interactive terminal acceptance and the full MVP gates are separate.
@@ -171,3 +171,5 @@ paths. It runs without a C++ build or terminal.
 References: [CMake archive commands](https://cmake.org/cmake/help/latest/manual/cmake.1.html#command-line-tool),
 [MSVC runtime selection](https://cmake.org/cmake/help/latest/prop_tgt/MSVC_RUNTIME_LIBRARY.html),
 [dumpbin DEPENDENTS](https://learn.microsoft.com/en-us/cpp/build/reference/dependents?view=msvc-170).
+
+The optional `portals::lyra` target supplies the native Lyra parser and the `<portals/ui_lyra.hpp>` launch adapter. Core-only consumers do not include Lyra. Its unchanged BSL-1.0 license and source manifest ship with the SDK; see [command-line startup](cli.md).

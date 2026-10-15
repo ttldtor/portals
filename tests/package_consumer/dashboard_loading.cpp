@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
-#include "examples/dashboard/dashboard.hpp"
-#include "examples/replay/terminal.hpp"
+#include "tests/support/examples/dashboard/dashboard.hpp"
+#include "tests/support/examples/replay/terminal.hpp"
 #include <functional>
 
 namespace {
@@ -37,12 +37,12 @@ int main() {
 
   ObservedTerminal terminal(std::move(input), REPEAT_END_MS + DELAY_MS + 100);
   auto app = take(Application::create({}, terminal.clock()));
-  dashboard::Options options;
+  dashboard_test::Options options;
 
   options.rate = 0;
   options.delayMs = DELAY_MS;
 
-  dashboard::Scene scene(*app, options);
+  dashboard_test::Scene scene(*app, options);
   bool readyWhileHeld{};
 
   take(app->router().setFocus(scene.table()));

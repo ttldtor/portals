@@ -3,34 +3,80 @@
 #pragma once
 #include "provider.hpp"
 #include <format>
-#include <portals/chart.hpp>
 #include <portals/grid.hpp>
-#include <portals/managed.hpp>
-#include <portals/style.hpp>
+#include <portals/input_match.hpp>
 #include <portals/table_column.hpp>
 #include <portals/text_format.hpp>
 #include <portals/ui.hpp>
-#include <portals/virtual_table.hpp>
 
 namespace dashboard {
 using namespace portals;
 using example::take;
 
-/** @brief Declarative dashboard UI and borrowed adapter over one existing managed runtime.
- * Market provider work is separate from presentation. The object is stationary on UI because
- * the managed callbacks borrow it; the application outlives this scene.
+/** @brief Compact market scene with bounded provider loading and one owning fluent runtime.
+ * The stationary object outlives callbacks borrowing it. Provider cancellation precedes model retirement.
  */
-class Scene final : public ApplicationScene {
+class FluentScene {
 public:
-  /** @param app Borrowed application that outlives the scene and supplies its UI thread and clock.
-   * @param options Provider and display settings retained for this run.
-   * Mount and scheduler failures are propagated by example::take.
+  /** @param options Provider and display settings retained for this run.
+   * @param runtime Existing runner policies and optional borrowed replay clock.
    */
-  Scene(Application &app, Options options)
-      : app_(app), managed_(take(ManagedScene::create(app))), provider_(app, options), stress_(options.stress) {
-    name_ = take(managed_->state<std::string>("Market note"));
+  explicit FluentScene(Options options = {}, ui::SceneOptions runtime = {})
+      : FluentScene(
+          [options] {
+            return options;
+          },
+          runtime) {
+  }
 
-    const auto model = take(managed_->model<Quote>(provider_.initialSnapshot()));
+  /** @param options Caller-owned settings read after command-line preflight.
+   * @param runtime Existing runner policies for embedding.
+   */
+  explicit FluentScene(ui::OptionsRef<Options> options, ui::SceneOptions runtime = {})
+      : FluentScene(
+          [options] {
+            return options.get();
+          },
+          runtime) {
+  }
+
+  /** @return The owning scene for application options, handlers and the standard runner. */
+  ui::Scene &scene() noexcept {
+    return scene_;
+  }
+
+private:
+  FluentScene(std::function<Options()> readOptions, ui::SceneOptions runtime)
+      : scene_(ui::scene(
+          [this, readOptions = std::move(readOptions)](ManagedScene &owner, Application &app) {
+            return recipe(owner, app, readOptions());
+          },
+          runtime)) {
+    scene_.theme(modernTheme())
+      .configure([this](ManagedScene &owner, Application &app) {
+        configure(owner, app);
+      })
+      .onStop([this] {
+        if (provider_) {
+          auto provider = std::move(provider_);
+
+          provider->stop();
+        }
+      });
+  }
+
+public:
+  FluentScene(const FluentScene &) = delete;
+  FluentScene &operator=(const FluentScene &) = delete;
+  FluentScene(FluentScene &&) = delete;
+  FluentScene &operator=(FluentScene &&) = delete;
+
+private:
+  ui::Description<Grid> recipe(ManagedScene &owner, Application &app, Options options) {
+    app_ = &app;
+    provider_ = std::make_unique<Provider>(app, options);
+    name_ = take(owner.state<std::string>("Market note"));
+    model_ = take(owner.model<Quote>(provider_->initialSnapshot()));
 
     const auto inspect = [this] {
       return name_.snapshot().and_then([this](const auto &value) {
@@ -69,10 +115,6 @@ public:
         },
         priceText, 12)));
 
-    ui::Ref<Label> title;
-    ui::Ref<LineEdit> editor;
-    ui::Ref<Button> inspectButton;
-    ui::Ref<Row> toolbar;
     const ui::VirtualTableConfig<Quote> tableConfig{.prepared = [this](const auto &pin, const auto &work) {
       return tablePrepared(pin, work);
     }};
@@ -89,225 +131,87 @@ public:
           return chartPrepared(pin, work);
         }};
 
-    auto heading = ui::label(
-      title, options.stress ? (options.ascii ? "Portals | Tab focus | arrows select/scroll | F2 theme | F10 quit"
-                                             : "Portals \xe7\x95\x8c e\xcc\x81 | Tab focus | F2 theme | F10 quit")
-                            : "Portals market | F2 theme | F10 quit");
-    auto note = ui::lineEdit(editor, name_,
-                             {.policy = options.stress ? SizePolicy{} : SizePolicy{.width = {.mode = SizeMode::FLEX}}});
-    auto inspectAction = ui::button(inspectButton, options.stress ? "Inspect (unchanged)" : "Inspect", inspect);
-    auto status = ui::label(status_, "Starting market");
-    auto table = ui::virtualTable(table_, model, columns, tableConfig);
-    auto chart = ui::chart(chart_, model, &Quote::prices, chartConfig);
+    return ui::grid(grid_, ui::label(title_, "Portals market | F2 theme | F10 quit"),
+                    ui::hbox(toolbar_, LinearOptions{.gap = 2},
+                             ui::lineEdit(editor_, name_, {.policy = {.width = {.mode = SizeMode::FLEX}}}),
+                             ui::button(inspectButton_, "Inspect", inspect)),
+                    ui::label(status_, "Starting market"), ui::virtualTable(table_, model_, columns, tableConfig),
+                    ui::chart(chart_, model_, &Quote::prices, chartConfig));
+  }
 
-    // Both compositions consume the same views and preserve editor/button/table focus order.
-    auto description =
-      options.stress ? ui::grid(std::move(heading), std::move(note), std::move(inspectAction), std::move(status),
-                                std::move(table), std::move(chart))
-                     : ui::grid(std::move(heading),
-                                ui::hbox(toolbar, LinearOptions{.gap = 2}, std::move(note), std::move(inspectAction)),
-                                std::move(status), std::move(table), std::move(chart));
-
-    const auto gridNode = take(ui::mount(*managed_, std::move(description)));
-
+  void configure(ManagedScene &owner, Application &app) {
     take(app.router().setFocus(table_.node()));
-    take(managed_->theme(modernTheme()));
 
-    GridOptions grid;
     const AxisSize flexible{.preferred = 0, .mode = SizeMode::FLEX};
     const AxisSize header{.preferred = 1, .maximum = 1, .mode = SizeMode::FIXED};
+    GridOptions grid;
 
     grid.columns = {flexible};
-    grid.rows = {header, header, header, header, flexible, flexible};
-    grid.cells = {{title.node().id(), 0, 0},   {editor.node().id(), 1, 0}, {inspectButton.node().id(), 2, 0},
-                  {status_.node().id(), 3, 0}, {table_.node().id(), 4, 0}, {chart_.node().id(), 5, 0}};
+    grid.padding = {.left = 1, .right = 1};
+    grid.rows = {header, header, header, AxisSize{.preferred = 0, .mode = SizeMode::FLEX, .weight = 2},
+                 header, flexible};
+    grid.cells = {{title_.node().id(), 0, 0},
+                  {toolbar_.node().id(), 1, 0},
+                  {status_.node().id(), 2, 0},
+                  {table_.node().id(), 3, 0},
+                  {chart_.node().id(), 5, 0}};
 
-    if (!options.stress) {
-      // Four fixed tracks leave the remaining height to table/chart in a 2:1 ratio.
-      grid.padding = {.left = 1, .right = 1};
-      grid.rows = {header, header,  header, AxisSize{.preferred = 0, .mode = SizeMode::FLEX, .weight = 2},
-                   header, flexible};
-      grid.cells = {{title.node().id(), 0, 0},
-                    {toolbar.node().id(), 1, 0},
-                    {status_.node().id(), 2, 0},
-                    {table_.node().id(), 3, 0},
-                    {chart_.node().id(), 5, 0}};
-    }
+    take(setGridOptions(app.tree(), grid_.node(), grid));
+    take(owner.onInput([this, &owner](const InputEvent &event) -> std::expected<bool, ManagedError> {
+      if (!keyPressed(event, InputKey::F2, {})) {
+        return false;
+      }
 
-    take(setGridOptions(app.tree(), gridNode, grid));
+      const auto next = !turbo_;
 
-    provider_.start(model);
+      return owner.theme(next ? turboTheme() : modernTheme()).transform([this, next] {
+        turbo_ = next;
+
+        return true;
+      });
+    }));
+    take(owner.onKey(ui::press("F10 | Ctrl+C"), [] {
+      ui::quit();
+    }));
+    provider_->start(model_);
   }
 
-  Scene(const Scene &) = delete;
-  Scene &operator=(const Scene &) = delete;
-  Scene(Scene &&) = delete;
-  Scene &operator=(Scene &&) = delete;
-
-  /** @brief Retire provider and UI callbacks before the presentation state they borrow is destroyed. */
-  ~Scene() override {
-    stopProvider();
-    take(managed_->close());
-  }
-
-  /** @copydoc portals::ApplicationScene::usesPreparedLayout */
-  bool usesPreparedLayout() const noexcept override {
-    return managed_->usesPreparedLayout();
-  }
-
-  /** @copydoc portals::ApplicationScene::prepare */
-  std::expected<void, TreeError> prepare(Application &app, CellSize size) override {
-    return managed_->prepare(app, size);
-  }
-
-  /** @copydoc portals::ApplicationScene::prepareViews */
-  std::expected<void, TreeError> prepareViews(Application &app, const LayoutSnapshot &layout) override {
-    return managed_->prepareViews(app, layout);
-  }
-
-  /** @copydoc portals::ApplicationScene::input */
-  std::expected<bool, TreeError> input(Application &app, const InputEvent &event) override {
-    if (example::quitKey(event)) {
-      app.requestStop();
-
-      return true;
-    }
-
-    if (const auto *key = std::get_if<KeyEvent>(&event); key && key->key == InputKey::F2) {
-      turbo_ = !turbo_;
-      take(managed_->theme(turbo_ ? turboTheme() : modernTheme()));
-
-      return true;
-    }
-
-    return false;
-  }
-
-  /** @brief Cancel the synchronous provider once, independently of managed UI cleanup.
-   * This boundary lets the benchmark measure provider cancellation without tree teardown.
-   * Call on the application's UI thread; subsequent calls preserve the first stop time.
-   */
-  void stopProvider() {
-    provider_.stop();
-  }
-
-  /** @copydoc portals::ApplicationScene::stop */
-  void stop(Application &app) override {
-    stopProvider();
-    managed_->stop(app);
-  }
-
-  /** @return Domain ticks still waiting after a bounded pump or provider cancellation. */
-  std::uint64_t pendingTicks() const noexcept {
-    return provider_.pendingTicks();
-  }
-
-  /** @return First provider cancellation time in scheduler units, or empty before stopping. */
-  std::optional<SchedulerTime> stoppedAt() const noexcept {
-    return provider_.stoppedAt();
-  }
-
-  /** @return Number of domain ticks accumulated before display coalescing. */
-  std::uint64_t tickCount() const noexcept {
-    return provider_.tickCount();
-  }
-
-  /** @return Owning copy of bounded provider loading counters; UI-thread only. */
-  LoadingMetrics loadingMetrics() const noexcept {
-    return provider_.loadingMetrics();
-  }
-
-  /** @return Number of domain ticks due at the last provider pump. */
-  std::uint64_t scheduledTicks() const noexcept {
-    return provider_.scheduledTicks();
-  }
-
-  /** @return Lossless market aggregate, or the initial flat price before the first tick. */
-  Ohlc aggregate() const noexcept {
-    return provider_.aggregate();
-  }
-
-  /** @return Whether every prepared chart revision matched the shared managed table pin. */
-  bool coherent() const noexcept {
-    return coherent_;
-  }
-
-  /** @return Largest bounded table interval prepared during this run, including overscan. */
-  std::size_t maxPreparedRows() const noexcept {
-    return maxPreparedRows_;
-  }
-
-  /** @return Whether the latest table preparation displayed pending provider data. */
-  bool pendingVisible() const noexcept {
-    return pendingVisible_;
-  }
-
-  /** @return Model revision used by the latest chart preparation. */
-  std::uint64_t displayedRevision() const noexcept {
-    return lastRevision_;
-  }
-
-  /** @return Whether the current UI theme is Turbo rather than Modern. */
-  bool turbo() const noexcept {
-    return turbo_;
-  }
-
-  /** @return Borrowed weak managed note handle; the property survives stop until scene destruction. */
-  const ManagedState<std::string> &note() const noexcept {
-    return name_;
-  }
-
-  /** @return Observing table identity; tree access detects retirement after scene stop. */
-  Node<VirtualTable<Quote>> table() const noexcept {
-    return table_.node();
-  }
-
-private:
   std::expected<void, TreeError> tablePrepared(const ModelFrame<Quote> &pin,
                                                const std::optional<ModelRequest<Quote>> &work) {
-    auto read = app_.tree().read(table_.node(), [&](const auto &table) {
+    auto read = app_->tree().read(table_.node(), [&](const auto &table) {
       firstRow_ = table.firstRow();
-      maxPreparedRows_ = std::max(maxPreparedRows_, table.preparedRange().count);
       pendingVisible_ = table.rangeState() == RangeState::PENDING;
     });
 
     return read.and_then([&] {
-      return provider_.tablePrepared(pin, work);
+      return provider_->tablePrepared(pin, work);
     });
   }
 
-  std::expected<void, TreeError> chartPrepared(const ModelFrame<Quote> &pin,
+  std::expected<void, TreeError> chartPrepared(const ModelFrame<Quote> &,
                                                const std::optional<ModelRequest<Quote>> &work) {
-    provider_.chartPrepared(work);
+    provider_->chartPrepared(work);
 
-    auto read = app_.tree().read(chart_.node(), [&](const auto &chart) {
-      coherent_ = coherent_ && chart.dataRevision() == pin.dataRevision();
-    });
+    // Ref::text mutation is disallowed during managed preparation; this is the existing view callback.
+    const auto caption = std::format("{} | {} ticks | {}", turbo_ ? "Turbo" : "Modern", provider_->tickCount(),
+                                     pendingVisible_ ? "Loading" : "Live");
 
-    return read.and_then([&] {
-      lastRevision_ = pin.dataRevision();
-
-      // Ref::text mutation is disallowed during managed preparation; this is the existing view callback.
-      const auto caption =
-        stress_
-          ? std::format("{} ticks | rev {} | {} rows | {} | {}", provider_.tickCount(), lastRevision_, provider_.rows(),
-                        pendingVisible_ ? "range loading" : "range ready", turbo_ ? "Turbo" : "Modern")
-          : std::format("{} | {} ticks | {}", turbo_ ? "Turbo" : "Modern", provider_.tickCount(),
-                        pendingVisible_ ? "Loading" : "Live");
-
-      return setControlText(app_.tree(), status_.node(), example::text(caption, app_.widthPolicy()));
-    });
+    return setControlText(app_->tree(), status_.node(), example::text(caption, app_->widthPolicy()));
   }
 
-  Application &app_;
-  std::unique_ptr<ManagedScene> managed_;
-  Provider provider_;
-  ui::Ref<Label> status_;
+  Application *app_{};
+  std::unique_ptr<Provider> provider_;
+  ui::Ref<Grid> grid_;
+  ui::Ref<Label> title_, status_;
+  ui::Ref<LineEdit> editor_;
+  ui::Ref<Button> inspectButton_;
+  ui::Ref<Row> toolbar_;
   ui::Ref<VirtualTable<Quote>> table_;
   ui::Ref<Chart<Quote>> chart_;
   ManagedState<std::string> name_;
-  std::uint64_t firstRow_{}, lastRevision_{};
-  std::size_t maxPreparedRows_{};
-  bool coherent_{true}, pendingVisible_{}, turbo_{}, stress_;
+  ManagedModel<Quote> model_;
+  std::uint64_t firstRow_{};
+  bool pendingVisible_{}, turbo_{};
+  ui::Scene scene_;
 };
 } // namespace dashboard
