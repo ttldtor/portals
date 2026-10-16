@@ -1,5 +1,15 @@
 # Terminal diagnostic probe
 
+[Русская версия](ru/terminal-probe.md)
+
+`portals_terminal_probe` inspects the terminal environment and collects limited
+DA/CPR replies. Run it separately after closing your Portals application.
+Use the [result guide](#terminal-probe-result) to interpret the report and the
+[observation table](#terminal-observations) to see what has been checked.
+
+<details>
+<summary>Standalone probe execution contract</summary>
+
 `portals_terminal_probe` is a standalone C++23 diagnostic executable. It is the
 sole owner of its standard terminal handles while running; do not run a second
 reader or a UI session against those handles concurrently. It does not link the
@@ -7,15 +17,18 @@ Portals core or expose a library TerminalSession API. All report values own thei
 strings, and calls run on the main thread. No callbacks or borrowed results escape
 the executable. There is no model, widget or layout invalidation involved.
 
+</details>
+
 ## Build and use
 
-The executable is built by default for top-level projects on Windows and POSIX.
+The executable is built by default when Portals is the top-level CMake project
+on Windows and POSIX.
 Embedded projects default `PORTALS_BUILD_TOOLS` to OFF. No extra dependency or
-download is required.
+download is required. Run these commands from a Portals source checkout:
 
 ```powershell
 cmake --preset windows-msvc-debug
-cmake --build --preset windows-msvc-debug
+cmake --build --preset windows-msvc-debug --target portals_terminal_probe
 ./build/windows-msvc-debug/portals_terminal_probe --help
 ./build/windows-msvc-debug/portals_terminal_probe --no-query
 ./build/windows-msvc-debug/portals_terminal_probe --timeout-ms 250 --max-bytes 4096
@@ -38,6 +51,79 @@ Exit status is 0 for a completed diagnostic observation, including unsupported
 queries, byte limits, missing replies or skipped queries. Status 1 reports a native
 I/O/mode/restore failure or failed report output. Status 2 reports invalid options.
 Missing replies are not classified as proof that a feature is unsupported.
+
+<a id="terminal-probe-result"></a>
+## Read the result
+
+To obtain terminal replies, run the probe without `>` redirection or a pipeline.
+Redirecting stdin or stdout skips queries. Copy the completed report after the
+program exits. Use `--no-query` to inspect the environment without reading input
+or changing modes.
+
+| Report field | Meaning | Next action |
+|---|---|---|
+| `query.stop="replies"` | Matching replies were collected for both queries | Keep `query.da.reply` and `query.cpr.reply` with the run conditions |
+| `query.stop="disabled"` | `--no-query` or `--headless` was selected | This is environment inspection; terminal replies were not tested |
+| `query.stop` starts with `skipped:` | Suitable terminal handles are unavailable, for example because of redirection | Repeat in the intended terminal without redirection |
+| `query.da.reply` or `query.cpr.reply` contains `unknown` | No matching reply was received | Check the environment, timeout and `query.error`. A missing reply does not establish its cause |
+| `query.error` differs from `none` | A terminal operation or restoration failed | Keep the cause; use a new terminal session after a restoration failure |
+| `input.byte_limit_hit="true"` | The input byte budget was exhausted | Repeat without keyboard input; if needed, increase `--max-bytes` within its documented range |
+| `input.unmatched` is not empty | The probe consumed bytes that were not accepted as DA/CPR replies | Repeat without keyboard input for a clean observation. These bytes have already been consumed |
+
+Exit code 0 means the observation completed. Queries may still have been skipped
+or replies absent. Successful DA/CPR establish the replies received in that run;
+keys, mouse and Kitty support need separate checks.
+
+<a id="terminal-observations"></a>
+## Observed terminal behavior
+
+These are retained historical runs, limited to the named programs and conditions.
+Compatibility with the current Portals release requires a repeat run.
+The records were reviewed on 16 October 2026. Unknown facts remain unknown.
+
+| Terminal and environment | Confirmed observation | Method | Not tested |
+|---|---|---|---|
+| XTerm 390 (`390-1ubuntu3`), Ubuntu 24.04 / WSL2 / WSLg, probe on 7 October 2026 | DA and CPR received; before/after termios settings matched | Real XTerm through a `script` PTY; the driver did not inject replies | Keys, mouse, event phases, glyph width and appearance |
+| Windows Terminal package `1.24.11911.0`, executable FileVersion `1.24.2607.10001`; Windows, OS version unknown | The application received key, text and mouse events; resize and mode/code-page restoration passed | Windowed application run; input records injected through `WriteConsoleInputW` | Physical keyboard/mouse input, DA/CPR, event phases and glyph appearance |
+| XTerm 390, Linux / WSL2 / WSLg; windowed application run | Key and text events received; resize and termios/descriptor-flag restoration passed | Automated X11 driver: `XSendEvent` and `XResizeWindow` | Physical input, DA/CPR in this run, event phases and glyph appearance; mouse delivery unconfirmed |
+
+In the last run, the application did not enable DEC mouse tracking modes
+1000/1006. Zero delivered events does not determine XTerm's capabilities.
+All input scenarios in this table used automation; they did not exercise manual
+input or visually assess Unicode glyphs.
+
+The [observation records](measurements/terminal-observations.json) contain separate
+scenarios, tested binary hashes where available and redacted results. The dates
+and runtime source revisions of the windowed runs are not established and remain
+`null`. The Windows Terminal package version and executable FileVersion are
+recorded separately. The probe does not reliably identify either.
+
+Kitty, individual left/right modifiers and the full PRESS/REPEAT/RELEASE set were
+not tested by these observations. Kitty negotiation in Portals is **TBD — M7 / PRTLS-89**.
+Current phase delivery depends on the adapter; the ordinary VT decoder emits
+PRESS, including repeated bytes. See [keyboard input](input.md).
+
+<a id="terminal-observation-checklist"></a>
+## Check your environment
+
+1. Close the Portals application. Record its build, OS, independently observed
+   terminal version (for example, from its About dialog) and launch path:
+   local, WSL/SSH or a multiplexer.
+2. Run `portals_terminal_probe --no-query` and keep the initial modes,
+   code pages or termios values from the report.
+3. Run `portals_terminal_probe --timeout-ms 250 --max-bytes 4096`
+   without redirection. Do not type during the query window. Then repeat
+   `--no-query` and compare mode fields with the initial report. Record DA/CPR
+   success and restoration separately.
+4. Run the [first application](first-application.md) separately: check Tab,
+   Enter, F2, F3 and F10. Use separate scenarios for the mouse, paste, resize
+   and glyphs your application needs. Record the conditions and actual results,
+   including what was not tested.
+
+Do not run the probe and application against the same terminal input concurrently.
+Synthetic PTY/ConPTY and replay tests check their own boundaries; they do not by
+themselves establish behavior in a particular GUI terminal. Query and restoration
+contracts follow below.
 
 ## Report and evidence
 
@@ -137,9 +223,9 @@ For an interactive qualification, run the native Windows build in a real Windows
 Terminal, and the Linux build in a real Linux terminal emulator. Record executable
 build/configuration, OS/terminal versions from independently observed sources,
 transport, report, elapsed time and modes before/after. Test missing-reply timeout
-and typing during the window as separate cases. WSL/PTYS/headless runners cannot
-substitute for either mandatory real-terminal observation; record NOT_RUN when
-those surfaces are unavailable.
+and typing during the window as separate cases. A WSL shell alone, a synthetic PTY or a headless runner does not
+replace a run in a real terminal frontend; record NOT_RUN when that surface
+is unavailable.
 
 Primary references:
 
