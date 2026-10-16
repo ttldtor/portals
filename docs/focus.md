@@ -1,5 +1,7 @@
 # Focus, input routing and semantic actions
 
+[Русская версия](ru/focus.md)
+
 `EventRouter` is a synchronous UI component over `WidgetTree`. It owns focus and a
 bounded registry, and uses the existing tree's checked `edit` borrow for each typed
 handler. It does not own the tree, create a second scheduler, queue events, or write

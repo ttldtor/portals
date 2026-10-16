@@ -1,5 +1,7 @@
 # Runnable examples {#examples}
 
+[Русская версия](ru/examples.md)
+
 Start with **click handlers**, then the **gallery**. Both use the owning declarative
 scene: describe controls, attach behavior, and finish with `ui::runApp()`.
 The library collects typed setup errors and restores the terminal before reporting

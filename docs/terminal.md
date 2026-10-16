@@ -1,5 +1,7 @@
 # Terminal session
 
+[Русская версия](ru/terminal.md)
+
 `<portals/terminal.hpp>` provides a move-only Windows/POSIX terminal session.
 Native Windows ConPTY and Linux PTY/pipe fixtures exercise the actual backends.
 The separate diagnostic probe does not implement this API.

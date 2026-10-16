@@ -1,5 +1,7 @@
 # Building Portals and its examples {#getting-started}
 
+[Русская версия](ru/getting-started.md)
+
 Portals provides a C++23 static library and five runnable terminal examples.
 Start with the gallery, then use the dashboard or custom widget to explore the
 same [Application runner](application.md). The [architecture](architecture.md)

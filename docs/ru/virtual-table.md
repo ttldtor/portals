@@ -1,5 +1,7 @@
 # Показать виртуальную таблицу {#virtual-table-ru}
 
+[Английская версия](../virtual-table.md)
+
 Используйте [VirtualTable<T>](../../include/portals/virtual_table.hpp). Этот фрагмент показывает заголовок Name и три строки со стандартной навигацией клавиатурой и мышью. F10 закрывает приложение.
 
 Фрагмент предполагает подключение `<portals/ui.hpp>` и `using namespace portals`; он использует адаптер Names — неизменяемый `ModelSnapshot<std::string>` с тремя записями — и функцию displayText для создания GraphemeText. Адаптер, функция, заголовки и вся программа приведены ниже и в [guide_vtable.cpp](../examples/guide_vtable.cpp).

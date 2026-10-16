@@ -1,5 +1,7 @@
 # Basic controls
 
+[Русская версия](ru/controls.md)
+
 `Label`, `Button` and `CheckBox` implement the existing `SizedWidget` extension
 contract. They own validated `GraphemeText`, measure in terminal cells and emit
 ordinary fill/text commands. Their intrinsic height is one row; layout policies

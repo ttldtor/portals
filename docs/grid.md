@@ -1,5 +1,7 @@
 # Arrange controls in a grid
 
+[Русская версия](ru/grid.md)
+
 Use [Grid](../include/portals/grid.hpp). This complete program puts a label and its value side by side. Press F10 to close.
 
 The current API requires low-level GridOptions configuration through setGridOptions after node creation; automatic cell placement is not available.

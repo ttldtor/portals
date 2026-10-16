@@ -1,5 +1,7 @@
 # Text history
 
+[Русская версия](ru/text-history.md)
+
 For Undo/Redo in an ordinary field, use [editor history](editor-history.md): `ui::lineEdit` already connects it to input and the model. [`TextHistory`](../include/portals/text_history.hpp) serves authors of custom text editors. It stores text and selection edits; it does not supply previous command entries or completion suggestions.
 
 The binding decides whether editing is allowed and when to publish. `TextHistory` only prepares and accepts snapshots, so it cannot be attached to an arbitrary model with one callback. The contract below supports that integration.

@@ -1,5 +1,7 @@
 # Scroll and keep the viewport position
 
+[Русская версия](ru/scroll.md)
+
 Use [ScrollState](../include/portals/scroll.hpp). Lists and tables each keep their own logical row and fractional remainder. This fragment supports wheel and keyboard scrolling. Resize the terminal to reduce the visible area. Press F10 to close.
 
 This fragment assumes `<portals/ui.hpp>` and `using namespace portals`; it uses Names, an immutable `ModelSnapshot<std::string>` adapter with three records, and displayText, which creates GraphemeText. The adapter, helper, headers and complete program appear below and in [guide_scroll.cpp](examples/guide_scroll.cpp).

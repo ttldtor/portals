@@ -1,5 +1,7 @@
 # Compile-time styles and live parameters {#compile_time_styles}
 
+[Русская версия](ru/compile-time-styles.md)
+
 Experimental compile-time chapter. For ordinary application code, start with
 [runtime PSS and declarative UI](styling-guide.md). This API is already
 implemented; experimental status does not mean TBD.

@@ -1,5 +1,7 @@
 # Unicode line editing
 
+[Русская версия](ru/line-edit.md)
+
 Create a field with [`ui::lineEdit`](../include/portals/ui.hpp) to connect input, a model and history automatically. In this application F2 copies the current draft to the label and appends `!`; Enter confirms the field, Escape restores the model, and F10 exits.
 
 ```cpp

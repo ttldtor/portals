@@ -1,5 +1,7 @@
 # References, bindings and events {#bindings-guide}
 
+[Русская версия](ru/bindings-guide.md)
+
 Start with an explicit event handler and an observing control reference. Use a
 managed state when several controls need the same UI-owned value. A [`ui::Ref<T>`](glossary.md) identifies a control without keeping it alive.
 Copying the reference does not subscribe to changes.

@@ -1,5 +1,7 @@
 # Показать виртуальный список {#virtual-list-ru}
 
+[Английская версия](../virtual-list.md)
+
 Используйте [VirtualList<T>](../../include/portals/virtual_list.hpp). Этот фрагмент показывает три имени со стандартной навигацией клавиатурой и мышью. F10 закрывает приложение.
 
 Фрагмент предполагает подключение `<portals/ui.hpp>` и `using namespace portals`; он использует адаптер Names — неизменяемый `ModelSnapshot<std::string>` с тремя записями — и функцию displayText для создания GraphemeText. Адаптер, функция, заголовки и вся программа приведены ниже и в [guide_vlist.cpp](../examples/guide_vlist.cpp).

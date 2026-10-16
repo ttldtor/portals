@@ -1,5 +1,7 @@
 # Glossary {#glossary}
 
+[Русская версия](ru/glossary.md)
+
 | Term | Meaning in Portals | Read next |
 |---|---|---|
 | Description / recipe | Owning single-use value describing controls to construct; awaiting construction and mount | [Definition](#glossary-recipe) |

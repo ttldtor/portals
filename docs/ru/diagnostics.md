@@ -1,4 +1,4 @@
-# Ошибки и диагностика {#diagnostics-ru}
+# Диагностика {#diagnostics-ru}
 
 [Английская версия](../diagnostics.md)
 

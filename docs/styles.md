@@ -1,5 +1,7 @@
 # Styles and PSS v0
 
+[Русская версия](ru/styles.md)
+
 `<portals/style.hpp>` provides typed declarations and an optional PSS parser.
 Both use `resolveStyle`; a stylesheet never contains actions or model updates.
 All strings and rules are owned. Parsing and standalone resolution perform no I/O.

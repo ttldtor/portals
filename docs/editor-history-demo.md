@@ -1,5 +1,7 @@
 # Three-mode editor history demo
 
+[Русская версия](ru/editor-history-demo.md)
+
 [Back to samples](examples.md).
 
 `portals_editor_history` is a compact interactive example of the installed public

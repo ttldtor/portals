@@ -1,5 +1,7 @@
 # Give views immutable model data
 
+[Русская версия](ru/model.md)
+
 Use [ModelSnapshot<T>](../include/portals/model.hpp). This fragment supplies three names to a list. The scene owns the model and prepares visible rows automatically. Press F10 to close.
 
 This fragment assumes `<portals/ui.hpp>` and `using namespace portals`; it uses Names, an immutable `ModelSnapshot<std::string>` adapter with three records, and displayText, which creates GraphemeText. The adapter, helper, headers and complete program appear below and in [guide_model.cpp](examples/guide_model.cpp).

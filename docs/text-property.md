@@ -1,5 +1,7 @@
 # Observing text properties
 
+[Русская версия](ru/text-property.md)
+
 A [`ui::Ref<T>`](../include/portals/ui.hpp) lets you change text, register button handlers and operate editor history. Its type selects the available operations. In this example **Greet** changes the label; F10 closes the application.
 
 Include `<portals/ui.hpp>` and attach a [`ui::Ref<T>`](glossary.md) to a

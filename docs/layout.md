@@ -1,5 +1,7 @@
 # Row, Column and size policies
 
+[Русская версия](ru/layout.md)
+
 All sizes are integer terminal columns/rows. Rectangles are parent-local,
 half-open values; `WidgetTree::arrange` translates and intersects clips through
 the checked geometry API. Row orders visible children left to right; Column

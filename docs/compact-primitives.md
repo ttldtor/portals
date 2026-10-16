@@ -1,5 +1,7 @@
 # Compact frames, gauges and sizing
 
+[Русская версия](ru/compact-primitives.md)
+
 Build a small retained scene with standard widgets. The button uses the existing
 Button/action/router path with caption-only chrome; Enter, Space and a left press
 activate it. F10 also exits. No client widget subclass or polling loop is needed.

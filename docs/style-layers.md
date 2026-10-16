@@ -1,5 +1,7 @@
 # Style layers {#style_layers}
 
+[Русская версия](ru/style-layers.md)
+
 A [style layer](glossary.md) is an independently installed stylesheet.
 Layers keep application and user declarations installed while a theme is
 replaced or its live parameters change. They opt into the existing retained
