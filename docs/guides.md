@@ -16,6 +16,7 @@ Follow the [first application](first-application.md): a quick-note form in four 
 | Parse command-line arguments | [Command-line startup](cli.md) |
 | Apply styles | [Styles](styling-guide.md) |
 | Change the palette | [Themes](themes-guide.md) |
+| Load a scene from text or a file | [Scene loading](scene-loading-guide.md) |
 | Connect events and state | [Bindings and events](bindings-guide.md) |
 | Arrange controls | [Layout](layout.md) |
 | Place controls in cells | [Grid and overlay](grid.md) |
@@ -53,9 +54,7 @@ Experimental [compile-time styles](compile-time-styles.md) and
 
 ## Planned capabilities
 
-Scene loading from strings or files is **TBD — M1**; automatic binding is
-**TBD — M2**; expanded PSS and theme parameters are **TBD — M5**.
-See [planned features and milestones](planned-features.md) for the full list
-and [scene loading](scene-loading-guide.md) for its current status.
+Automatic binding is **TBD — M2**; expanded PSS and theme parameters are
+**TBD — M5**. See [planned features and milestones](planned-features.md) for the full list.
 
 [Dependencies and licenses](dependencies.md).

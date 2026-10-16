@@ -213,18 +213,18 @@ JSON with provenance. These observations exclude aligned allocations, `malloc`,
 live/peak memory and work outside those phases, so they describe the stated
 workload rather than universal runtime cost.
 
-Scene resources use the existing lazy scene recipe and managed mount. A string
-source is copied when the recipe is built; an explicitly typed file source is
-read at prepare. Before any resource node is mounted, the loader parses and
+Scene resources use the existing lazy scene recipe and mount transaction.
+The recipe copies a string source when it is built; it reads an explicitly
+typed file source during scene preparation. Before any resource node is mounted, the loader parses and
 validates the full bounded grammar, builtin or explicitly registered type and
-property schema, duplicate IDs, and resolved text. It then builds owning
-existing widget recipes and mounts them through the enclosing transaction.
+property schema, duplicate IDs, and resolved text. It then builds recipes that own their widget descriptions and mounts them
+through the enclosing transaction.
 Localization uses the supplied `TextResolver`; PSS remains its own existing
 style stage. The defaults cap input at 1 MiB, node count at 4096, depth at 64,
 each decoded string or resolved text at 64 KiB, and properties per node at 16.
 The hard depth ceiling is 64 because parsing uses the native stack. Typed
-resource failures retain owning source identity and byte position, with the
-file system cause preserved for file errors. See the [scene loading guide](scene-loading-guide.md)
+resource failures retain the source text or file path and byte position,
+with the file system cause preserved for file errors. See the [scene loading guide](scene-loading-guide.md)
 for syntax and the public calls.
 
 ## Coherent views and customization

@@ -23,6 +23,7 @@
 - [Командная строка](cli.md): разбор аргументов до открытия терминала и снимки данных процесса.
 - [Привязки и события](bindings-guide.md), [свойства](property.md), [ссылки на контролы](text-property.md).
 - [Ввод](input.md), [фокус и маршрутизация](focus.md), [диагностика](diagnostics.md).
+- [Загрузка сцен](scene-loading-guide.md).
 
 ## Стили и темы
 
@@ -60,7 +61,7 @@
 
 ## Планы и разработка
 
-[Возможности и майлстоуны](planned-features.md) · [Загрузка сцен — TBD](scene-loading-guide.md)
+[Возможности и майлстоуны](planned-features.md)
 
 - [Разработка библиотеки](development.md), [инструменты разработчика](developer-tools.md), [тестирование (English)](../testing.md), [фаззинг (English)](../../fuzz/README.md).
 - [Измерения managed API (English)](../managed-performance.md): воспроизводимые затраты и известные ограничения масштабирования. Результаты относятся к измеренным нагрузкам.

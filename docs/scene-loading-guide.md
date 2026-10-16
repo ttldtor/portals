@@ -2,17 +2,21 @@
 
 [Русская версия](ru/scene-loading-guide.md)
 
-`ui::scene(source)` copies UTF-8 resource text into an ordinary lazy
-[Scene](declarative-ui.md). Parsing and construction happen at `prepareChecked()`
-or preparation inside `run`/`runApp`, before a terminal opens. Include
+`ui::scene(source)` copies UTF-8 resource text into a lazy
+[scene](glossary.md#glossary-scene), `ui::Scene`. Parsing and construction happen at
+`prepareChecked()` or preparation inside `run`/`runApp`, before a terminal opens. Include
 `<portals/ui.hpp>` or `<portals/ui_scene_resource.hpp>` and link `portals::core`
-(C++23). Named references, actions, models, PSS and cleanup use the existing runtime.
+(C++23). The loaded controls use the same named references, event handlers,
+models, PSS and cleanup as controls declared in C++.
 
 ## A complete form
 
 Build `portals_scene_resource` with `PORTALS_BUILD_EXAMPLES=ON`. Add Hello
 appends text; Exit or F10 closes the scene. The native runner restores the
 terminal and reports failures.
+
+Sources: [form definition](../examples/scene_resource/form.hpp) and
+[application entry point](../examples/scene_resource/main.cpp).
 
 \include{lineno} scene_resource/form.hpp
 \include{lineno} scene_resource/main.cpp
@@ -143,14 +147,15 @@ loading.
 `ui::resource(source, options)` returns the same owning lazy `Description<Widget>`
 used by the string/file `scene` overloads. It can be a child of a C++ description
 or the result of an existing scene factory. Create managed models in that factory,
-capture their weak handles in typed registry adapters, and return `resource`.
+capture their observing handles in the registered factories, and return `resource`.
+These handles refer to scene-owned models without keeping them alive.
 This uses the enclosing mount transaction and creates no additional scene owner.
 
 ## Bounds, failures and lifetime
 
 `SceneResourceOptions::limits` defaults to 1 MiB source, 4096 nodes, depth 64,
 64 KiB per decoded string or resolved text, and 16 properties per node. Every
-limit is positive; the hard depth ceiling is 64 because parsing uses the native
+limit must be greater than zero; the hard depth ceiling is 64 because parsing uses the native
 stack. Larger configured depths return `INVALID_LIMIT`; a source exceeding its
 configured depth returns `DEPTH_LIMIT`. Resource recipes mount iteratively in one
 existing transaction. Existing managed/tree/text/state limits also apply.
@@ -163,17 +168,20 @@ created scene state are outside subtree rollback; the failing lazy Scene perform
 its ordinary full cleanup.
 
 `ManagedError::sceneResource` retains a typed category, zero-based byte offset,
-one-based line and byte column, and shared owning source text or file path.
+one-based line and byte column. It also retains the source text or file path
+in shared storage, so the diagnostic does not borrow the caller's buffer.
 This immutable shared context is attached best-effort; if its allocation fails,
 the field stays empty and the original typed cause survives. Copying a
 `ManagedError` allocates no memory and remains `noexcept`.
 File failures also retain an OS `error_code`. Original factory/tree/text causes
-and independent cleanup errors survive. Default stderr reporting prints category
-and position without echoing untrusted source bytes. Facade construction can
-throw on allocation; checked prepare translates allocation/callback failures.
+and independent cleanup errors survive. Default stderr reporting prints the category
+and position without echoing untrusted source bytes. Constructing `ui::Scene` can
+throw on allocation; checked preparation converts allocation and callback
+exceptions to typed errors.
 
-The lazy recipe owns resource, registry and resolver; temporary source views do
-not survive. Preparation follows Scene UI affinity and reentry rules: a nested
-lifecycle operation returns `WOULD_BLOCK`. Mounted callbacks and named refs retain
+The lazy [recipe](glossary.md#glossary-recipe) owns the resource text, registry
+and resolver; it retains no views into temporary source buffers. Prepare the
+scene on its UI thread. A nested lifecycle operation returns `WOULD_BLOCK`.
+Mounted callbacks and named refs retain
 their existing checked lifetime rules. See [text properties](text-property.md),
 [style layers](style-layers.md) and [managed controls](managed-controls.md).

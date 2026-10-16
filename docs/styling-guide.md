@@ -173,11 +173,13 @@ For example, `Button { color: #ff5555; }` produces `UNKNOWN_PROPERTY`.
 Change `color` to `foreground` and apply the corrected stylesheet. The rejected
 update leaves the previous styles active.
 
+To style one control, use `ui::style(ref, source)` or `ui::styleFile(ref, path)`.
+See [reference styles and file loading](declarative-ui.md) for scope and lifetime.
+
 ## Planned extensions
 
 <a id="future-style-parameters"></a>
 
-Scoped styling through a control reference is **TBD — M1**.
 Extended selectors, parameters and expressions are **TBD — M5**.
 See [planned features](planned-features.md#planned-style-parameters) for their
 status, proposed syntax and update rules.
