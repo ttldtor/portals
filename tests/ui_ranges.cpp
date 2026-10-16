@@ -23,6 +23,8 @@ struct BorrowedRecipes {
 } // namespace range_test
 
 namespace std::ranges {
+// This standard customization point has a library-mandated spelling.
+// NOLINTNEXTLINE(readability-identifier-naming)
 template <> inline constexpr bool enable_borrowed_range<range_test::BorrowedRecipes> = true;
 } // namespace std::ranges
 
@@ -99,12 +101,12 @@ void temporarySinglePassRange() {
     auto capture = std::make_shared<int>(0);
 
     transformCapture = capture;
-    stored = ui::vbox(std::ranges::istream_view<int>(input) |
-                      std::views::transform([capture = std::move(capture), &live, &visits, &refs](int value) {
-                        ++*capture;
+    stored = ui::vbox(std::views::transform(
+      std::ranges::istream_view<int>(input), [capture = std::move(capture), &live, &visits, &refs](int value) {
+        ++*capture;
 
-                        return ui::custom<Owned>(std::make_unique<Payload>(live, value)).reference(refs[visits++]);
-                      }));
+        return ui::custom<Owned>(std::make_unique<Payload>(live, value)).reference(refs[visits++]);
+      }));
   }
 
   check(transformCapture.expired() && visits == 3 && live == 3, "range consumed now; transform not retained");
