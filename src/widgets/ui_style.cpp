@@ -225,6 +225,17 @@ StyleStage StyleStage::failure(PssError failure, const StyleOptions &options, st
   return StyleStage(std::make_shared<const Impl>(options, options.sourceName, nullptr, nullptr, failure), origin);
 }
 
+StyleStage StyleStage::scoped(std::shared_ptr<detail::RefTarget> target) const {
+  StyleStage result(std::make_shared<const Impl>(payload_->options, *payload_->source, payload_->document,
+                                                 payload_->path, payload_->error),
+                    origin_);
+
+  result.scoped_ = true;
+  result.target_ = std::move(target);
+
+  return result;
+}
+
 ManagedError StyleStage::boundaryFailure(TreeError cause) const {
   if (cause == TreeError::NO_MEMORY) {
     auto failure = portals::detail::pssError(PssErrorCode::ALLOCATION, {}, "UI style allocation failed");
@@ -243,6 +254,21 @@ ManagedError StyleStage::boundaryFailure(TreeError cause) const {
 
 std::expected<StyleLayerHandle, ManagedError> StyleStage::apply(ManagedScene &scene,
                                                                 const StyleLayerHandle *existing) const {
+  std::optional<NodeId> scope;
+
+  if (scoped_) {
+    auto checkedScope = detail::NamedAccess::scope(scene, target_);
+
+    if (!checkedScope) {
+      auto failure = checkedScope.error();
+      failure.styleSource = payload_->source;
+
+      return std::unexpected(failure);
+    }
+
+    scope = *checkedScope;
+  }
+
   if (existing) {
     auto checked = scene.validateStyleLayer(*existing);
 
@@ -290,7 +316,15 @@ std::expected<StyleLayerHandle, ManagedError> StyleStage::apply(ManagedScene &sc
     }
 
     auto install = [&](const PssDocument &document) {
-      auto result = scene.styleDocument(payload_->options.tier, payload_->name, document, payload_->options.layers);
+      std::optional<PssDocument> scopedDocument;
+
+      if (scope) {
+        scopedDocument.emplace(document);
+        scopedDocument->sheet.scope = scope;
+      }
+
+      auto result = scene.styleDocument(payload_->options.tier, payload_->name,
+                                        scopedDocument ? *scopedDocument : document, payload_->options.layers);
 
       if (!result) {
         result.error().styleSource = payload_->source;

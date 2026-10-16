@@ -7,6 +7,40 @@ PowerShell выполняются из корня репозитория. Нуж
 эти Python-скрипты используют стандартную библиотеку. Пути сборки в примерах
 можно заменить своими.
 
+<a id="tool-architecture-ru"></a>
+## Exports архитектурных снимков
+
+`tools/docs/architecture.py` создаёт SVG на EN/RU и автономный HTML viewer
+из `maps.json` и включённого в репозиторий шаблона. Python 3.10+ со стандартной
+библиотекой нужен только автору. Для просмотра exports не нужны сервер или
+установка пакетов. См. [процесс сопровождения снимков](architecture.md).
+
+```powershell
+python tools/docs/architecture.py --help
+python tools/docs/architecture.py
+python tools/docs/architecture.py --check
+python tools/docs/architecture.py --source docs/architecture/snapshots/m1-968651a/maps.json --check
+python tools/docs/architecture_test.py
+```
+
+`--source` выбирает существующий UTF-8 JSON manifest; по умолчанию это
+`docs/architecture/snapshots/m1-968651a/maps.json` относительно репозитория,
+независимо от рабочего каталога. Генерация заменяет только готовые
+`<map>-<language>.svg` и `index.html` рядом с manifest. Перед изменением данных
+создайте новый каталог, сохранив закреплённые снимки. `--check` проверяет paths,
+границы номеров строк и точные bytes exports без записи. Единиц измерения и
+параметров нагрузки нет. Код завершения: 0 — успех, 1 — некорректные данные,
+ошибка I/O или устаревшие exports, 2 — неверный CLI syntax. `--help`/`-h` не
+требует manifest, не запускает работу и ничего не записывает. Exporter не
+использует Git или сеть и не проверяет, что строка исходника выражает заявленный
+контракт; это дают проверка закреплённой ревизии и fact review.
+
+`architecture_test.py` — внутренний regression driver для команды выше.
+Он проверяет справку без побочных действий в пустом каталоге, воспроизводимость,
+source references в закреплённой Git-ревизии, геометрию SVG и автономные ресурсы.
+Код завершения соответствует unittest; CLI-проверки используют временные
+каталоги. Browser-проверка и независимое fact review выполняются отдельно.
+
 <a id="tool-check-plan-ru"></a>
 ## Составить локальный contract check plan
 

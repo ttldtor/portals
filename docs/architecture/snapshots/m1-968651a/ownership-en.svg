@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 670" role="img" aria-labelledby="title desc">
+<title id="title">Owners and borrowed services</title>
+<desc id="desc">M1 in progress · committed source baseline. Roles: blue owns resources; purple observes or borrows; green coordinates work. All mutable UI services stay on their creating thread. These cards state relations explicitly.</desc>
+<style>text{font-family:system-ui,Segoe UI,sans-serif} .paper{fill:#f5f7fc}.card{fill:#fff}.ink{fill:#17233a}.muted{fill:#42516a} a:focus rect{stroke-width:5} @media(prefers-color-scheme:dark){.paper{fill:#121b2b}.card{fill:#1c2a40}.ink{fill:#f2f5fc}.muted{fill:#d2dced}}</style>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7387a8"/></marker></defs>
+<rect class="paper" width="960" height="670" rx="12"/>
+<text class="ink" x="22" y="32" font-size="23" font-weight="700">Owners and borrowed services</text>
+<text class="muted" x="22" y="58" font-size="14">m1-968651a · M1 in progress · committed source baseline</text>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/src/widgets/ui_scene.cpp#L921" target="_blank" rel="noopener" data-node="facade"><title>The facade retains an owning recipe and pending configuration. Preparation creates Application and ManagedScene. Teardown releases ManagedScene before Application. Moving or destroying an active facade, or doing so on the wrong thread, terminates; callbacks must not destroy or reenter owners.</title>
+<rect class="card" x="22" y="80" width="440" height="154" rx="10" stroke="#1759a8" stroke-width="2"/>
+<rect x="22" y="80" width="7" height="154" rx="3" fill="#1759a8"/>
+<text class="ink" x="42" y="110" font-size="20" font-weight="650">Scene facade</text>
+<text class="muted" x="42" y="168" font-size="14">ui::Scene → Application + ManagedScene</text>
+<text class="muted" x="42" y="213" font-size="12">1 · owner · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/src/runtime/application.cpp#L233" target="_blank" rel="noopener" data-node="application"><title>Application owns one synchronous UI runtime. Router and tree are released before Scheduler. ApplicationScene borrows these services for a single-use run; the caller keeps it alive until run returns.</title>
+<rect class="card" x="498" y="80" width="440" height="154" rx="10" stroke="#1759a8" stroke-width="2"/>
+<rect x="498" y="80" width="7" height="154" rx="3" fill="#1759a8"/>
+<text class="ink" x="518" y="110" font-size="20" font-weight="650">Application services</text>
+<text class="muted" x="518" y="168" font-size="14">Application → Scheduler / WidgetTree /</text>
+<text class="muted" x="518" y="187" font-size="14">EventRouter</text>
+<text class="muted" x="518" y="213" font-size="12">2 · owner · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/docs/managed-controls.md#L40" target="_blank" rel="noopener" data-node="managed"><title>ManagedScene borrows Application and owns its model owners, scoped bindings, callback captures and managed subtree. Close disconnects registrations and removes the subtree. Captured external services still follow the application lifetime contract.</title>
+<rect class="card" x="498" y="270" width="440" height="154" rx="10" stroke="#1759a8" stroke-width="2"/>
+<rect x="498" y="270" width="7" height="154" rx="3" fill="#1759a8"/>
+<text class="ink" x="518" y="300" font-size="20" font-weight="650">Managed scene resources</text>
+<text class="muted" x="518" y="358" font-size="14">ManagedScene → models / bindings / subtree</text>
+<text class="muted" x="518" y="403" font-size="12">3 · owner · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/docs/widget-tree.md#L1" target="_blank" rel="noopener" data-node="handles"><title>Node&lt;T&gt; owns no widget. Session, slot and generation identify a checked observer; read/edit lend a reference for the callback only. Removal invalidates handles immediately. An active borrow delays physical reclamation until its outer boundary. ui::Ref is published through successful mount rules.</title>
+<rect class="card" x="22" y="270" width="440" height="154" rx="10" stroke="#7045a1" stroke-width="2"/>
+<rect x="22" y="270" width="7" height="154" rx="3" fill="#7045a1"/>
+<text class="ink" x="42" y="300" font-size="20" font-weight="650">Checked node observers</text>
+<text class="muted" x="42" y="358" font-size="14">Node&lt;T&gt; / ui::Ref&lt;T&gt; / read / edit</text>
+<text class="muted" x="42" y="403" font-size="12">4 · borrow · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/docs/scheduler.md#L1" target="_blank" rel="noopener" data-node="producers"><title>Workers publish owning immutable data through bounded endpoints; they do not mutate tree, scene or collector. Scoped cancellation prevents future callbacks, but does not unwind an active callback or join a producer. Scene-owned producers must be stopped and joined by scene stop policy.</title>
+<rect class="card" x="22" y="460" width="440" height="154" rx="10" stroke="#7045a1" stroke-width="2"/>
+<rect x="22" y="460" width="7" height="154" rx="3" fill="#7045a1"/>
+<text class="ink" x="42" y="490" font-size="20" font-weight="650">Worker publication boundary</text>
+<text class="muted" x="42" y="548" font-size="14">Worker → bounded Scheduler endpoint → UI</text>
+<text class="muted" x="42" y="593" font-size="12">5 · borrow · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/docs/render.md#L1" target="_blank" rel="noopener" data-node="presentation"><title>ModelFrame pins one immutable revision for sibling views. Prepared presentation owns the data needed through paint. The renderer consumes borrowed text commands before returning into an owning CellBuffer. FrameWriter retains pending output until consistent acceptance; transport acceptance does not prove physical display.</title>
+<rect class="card" x="498" y="460" width="440" height="154" rx="10" stroke="#1759a8" stroke-width="2"/>
+<rect x="498" y="460" width="7" height="154" rx="3" fill="#1759a8"/>
+<text class="ink" x="518" y="490" font-size="20" font-weight="650">Frame data ownership</text>
+<text class="muted" x="518" y="548" font-size="14">ModelFrame → prepared views → CellBuffer →</text>
+<text class="muted" x="518" y="567" font-size="14">FrameWriter</text>
+<text class="muted" x="518" y="593" font-size="12">6 · owner · source ↗</text></a>
+</svg>

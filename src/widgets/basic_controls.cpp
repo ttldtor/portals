@@ -41,7 +41,21 @@ Label::Label(GraphemeText text, ControlStyle style, SizePolicy policy)
 }
 
 Button::Button(GraphemeText text, ControlStyle style, SizePolicy policy)
-    : Control(std::move(text), "[ ", " ]", style, policy) {
+    : Button(std::move(text), style, policy, ButtonChrome::BRACKETS) {
+}
+
+Button::Button(GraphemeText text, ControlStyle style, SizePolicy policy, ButtonChrome chrome)
+    : Control(std::move(text), chrome == ButtonChrome::NONE ? "" : "[ ", chrome == ButtonChrome::NONE ? "" : " ]",
+              style, policy),
+      chrome_(chrome) {
+}
+
+std::expected<CellSize, TreeError> Button::measure(CellSize available) {
+  if (chrome_ != ButtonChrome::BRACKETS && chrome_ != ButtonChrome::NONE) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  return Control::measure(available);
 }
 
 CheckBox::CheckBox(GraphemeText text, ControlStyle style, SizePolicy policy)

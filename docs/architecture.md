@@ -2,6 +2,74 @@
 
 [Русская версия](ru/architecture.md)
 
+## Versioned architecture maps
+
+The [offline architecture viewer](architecture/snapshots/m1-968651a/index.html)
+contains ownership, lifecycle, frame, errors and milestone maps. All data is
+embedded; it needs no server, CDN or additional installation. Choose English or
+Russian, a map and a node to inspect its contract and pinned source. Tab and
+Enter operate the controls. Each map exports an independent SVG. Source links
+open GitHub and require a connection.
+
+This snapshot describes source revision
+`968651a90b6a1542fd3ab2cec159b457e548681f`. **M1 remains in progress.**
+It excludes later uncommitted work and does not assert milestone acceptance.
+The comparison baseline is `849dc6285d7ef863206e8248810ee0650413b0a2`.
+Baseline integration was published as [PR #36](https://github.com/ttldtor/portals/pull/36),
+whose [CI run](https://github.com/ttldtor/portals/actions/runs/38799649714)
+completed six checks successfully for PR head `28723ed04810c597c2fe31f0d75cd9416c5916ac`,
+then merged as the pinned source revision. Snapshot authoring separately passed
+eight exporter/source/help tests and 40 offline browser combinations across maps,
+languages, themes and widths (1440/390 px), including real SVG downloads.
+These authoring checks do not run the C++ runtime suite. The complete generated
+documentation and delivered artifact for this new foundation are **NOT_VERIFIED**
+at this snapshot's authoring boundary; integration checks remain required.
+The prose after the maps describes the current checkout and can evolve after
+this pinned snapshot.
+
+![Ownership map](architecture/snapshots/m1-968651a/ownership-en.svg)
+
+![Lifecycle map](architecture/snapshots/m1-968651a/lifecycle-en.svg)
+
+![Dirty frame and idle map](architecture/snapshots/m1-968651a/frame-en.svg)
+
+![Error boundaries map](architecture/snapshots/m1-968651a/errors-en.svg)
+
+![Milestone changes map](architecture/snapshots/m1-968651a/milestones-en.svg)
+
+Blue cards describe owners, purple cards observers or borrowed services, green
+cards work coordination, red cards error boundaries, and ochre cards status and
+limits. Text also names each role. Lifecycle and frame arrows show the normal
+successful path; the error map explains failure exits. Other card order is a
+reading path; ownership relations are explicit in each node's details.
+
+### Maintaining snapshots
+
+The readable [maps.json](architecture/snapshots/m1-968651a/maps.json) generates
+the checked-in SVG and HTML. SVG exports work without JavaScript in repository
+Markdown and generated documentation. SDK users need no Python, Node.js or diagram
+renderer. Authors use the existing Python developer-tool environment and the
+standard-library-only [exporter](developer-tools-build.md#tool-architecture).
+
+For an integrated milestone, create a new directory named
+`<milestone>-<source-revision-prefix>` under `docs/architecture/snapshots`.
+Copy the manifest, set a unique `id`, full `revision`, comparison revision and
+accurate bilingual status. Update every node and source reference against that
+revision; describe new behavior, changed guarantees and retained invariants.
+Intermediate snapshots use an in-progress status; closure requires the project's
+verification and review evidence. Future targets have no fabricated revision or
+generated snapshot.
+
+Generate and check with `--source <directory>/maps.json`. Verify pinned links,
+exact regeneration, EN/RU parity, SVG text and connectors, desktop and narrow
+screens, both themes, keyboard navigation and export. Obtain bounded independent
+fact review and check the delivered documentation artifact. Add the snapshot to
+this page and its translation; register its directory in the documentation asset
+copy step. Keep previous snapshots unchanged; corrections get a new snapshot ID.
+The publishing commit records the exporter/template version and verification
+evidence. The manifest `revision` identifies runtime source and can precede the
+commit that publishes its documentation.
+
 Portals is a C++23 retained terminal UI library. Start with the
 [complete application](application.md) for the fluent `ui::Scene` entry point:
 the facade owns the application and managed scene, builds the controls lazily,

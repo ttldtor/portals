@@ -36,6 +36,30 @@ class GuideTests(unittest.TestCase):
             self.assertIn('href="guide.html#section"', result)
             self.assertEqual((output / "source/docs/examples/demo.cpp").read_text(), "int main() {}")
 
+    def test_flat_assets_preserve_query_fragment_attributes_and_idempotence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, output = root / "checkout", root / "html"
+            source.mkdir()
+            assets = output / "architecture/snapshots/m1"
+            assets.mkdir(parents=True)
+            (assets / "index.html").write_text("viewer", encoding="utf-8")
+            (assets / "ownership-ru.svg").write_text("<svg/>", encoding="utf-8")
+            checkout_assets = source / "docs/architecture/snapshots/m1"
+            checkout_assets.mkdir(parents=True)
+            (checkout_assets / "ownership-ru.svg").write_text("<svg/>", encoding="utf-8")
+            text = ('<a class="viewer" href="../architecture/snapshots/m1/index.html?lang=ru&amp;theme=dark#map">Open</a>'
+                    '<a href="../architecture/snapshots/m1/ownership-ru.svg">SVG</a>'
+                    '<img alt="Diagram" src="../architecture/snapshots/m1/ownership-ru.svg">'
+                    '<a href="../missing.html">Missing</a>')
+            result = portable_links(text, output, source, {}, russian=True)
+            self.assertIn('class="viewer" href="architecture/snapshots/m1/index.html?lang=ru&amp;theme=dark#map"', result)
+            self.assertIn('href="architecture/snapshots/m1/ownership-ru.svg"', result)
+            self.assertIn('alt="Diagram" src="architecture/snapshots/m1/ownership-ru.svg"', result)
+            self.assertIn('href="../missing.html"', result)
+            self.assertEqual(portable_links(result, output, source, {}, russian=True), result)
+            self.assertFalse((output / "source").exists())
+
     def test_inline_types_preserve_existing_links_and_code(self):
         parser = GuideParser({"WidgetTree": "tree.html"})
         parser.feed('<p><span class="tt">WidgetTree</span></p>'

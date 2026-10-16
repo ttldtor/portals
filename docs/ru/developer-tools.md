@@ -71,6 +71,8 @@ cmake -DHELP=ON -P tools/quality/performance.cmake
 | [tools/ci/test_check_plan.py](../../tools/ci/test_check_plan.py) | [Регрессионная проверка](developer-tools-build.md#tool-check-plan-ru) |
 | [tools/ci/test_checks.py](../../tools/ci/test_checks.py) | [Регрессионный тест](developer-tools-build.md) |
 | [tools/docs/check_links.py](../../tools/docs/check_links.py) | [Сборка и проверки](developer-tools-build.md) |
+| [tools/docs/architecture.py](../../tools/docs/architecture.py) | [Exports архитектуры](developer-tools-build.md#tool-architecture-ru) |
+| [tools/docs/architecture_test.py](../../tools/docs/architecture_test.py) | [Регрессионная проверка](developer-tools-build.md#tool-architecture-ru) |
 | [tools/docs/finalize_html.py](../../tools/docs/finalize_html.py) | [Сборка и проверки](developer-tools-build.md) |
 | [tools/docs/test_cli_help.py](../../tools/docs/test_cli_help.py) | [Регрессионный тест](developer-tools-build.md) |
 | [tools/docs/test_finalize_html.py](../../tools/docs/test_finalize_html.py) | [Регрессионный тест](developer-tools-build.md) |

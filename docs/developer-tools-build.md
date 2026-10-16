@@ -7,6 +7,42 @@ Run the PowerShell commands from the repository root. Use Python 3.10 or newer;
 these Python tools use the standard library. Paths below are examples and may
 be replaced with your build directories.
 
+<a id="tool-architecture"></a>
+## Architecture snapshot exports
+
+`tools/docs/architecture.py` generates SVG in EN/RU and a self-contained offline
+HTML viewer from a snapshot's `maps.json` and the checked-in viewer template.
+Python 3.10+ with its standard library is an authoring dependency only. Reading
+the exports needs no server or package installation. See the
+[snapshot maintenance process](architecture.md).
+
+```powershell
+python tools/docs/architecture.py --help
+python tools/docs/architecture.py
+python tools/docs/architecture.py --check
+python tools/docs/architecture.py --source docs/architecture/snapshots/m1-968651a/maps.json --check
+python tools/docs/architecture_test.py
+```
+
+`--source` selects an existing UTF-8 JSON manifest; by default it selects
+`docs/architecture/snapshots/m1-968651a/maps.json` relative to this repository,
+regardless of the working directory. Generation replaces only generated
+`<map>-<language>.svg` and `index.html` beside that manifest. Preserve frozen
+snapshots by creating a new directory before changing the data. `--check`
+validates source paths, line bounds and exact export bytes without writing.
+There are no units or workload parameters. Exit status is 0 for success,
+1 for invalid data, I/O failure or stale exports, and 2 for invalid CLI syntax.
+`--help`/`-h` needs no manifest and performs no workload or writes. The exporter
+does not use Git or network and does not verify that a source line expresses the
+claimed contract; pinned-revision checks and fact review supply that evidence.
+
+`architecture_test.py` is an internal regression driver invoked by the command
+above. It checks side-effect-free help in an empty directory, deterministic
+exports, source references against the pinned Git revision, SVG geometry and
+offline resources. It returns the standard unittest success/failure status and
+uses temporary directories for CLI checks. Browser and independent fact review
+remain separate checks.
+
 <a id="tool-check-plan"></a>
 ## Plan local contract checks
 

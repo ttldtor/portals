@@ -15,7 +15,8 @@ The categories describe the learning path; the source directories remain stable.
 
 | Category | Program and complete source | What it demonstrates |
 | --- | --- | --- |
-| Basics | [click handlers](../examples/click_handlers/main.cpp), `portals_click_handlers` | Observing refs, late click handlers, runtime string styles and short quit. No CLI. |
+| Basics | [click handlers](../examples/click_handlers/main.cpp), `portals_click_handlers` | Observing refs, late click handlers and short quit. No CLI. |
+| Basics | [compact framed form](../examples/compact/main.cpp), `portals_compact_form` | Ready-made border and gauge, fixed sizing, a plain button and exact-ref styling; no custom widget or CLI. |
 | Basics | [gallery](../examples/gallery/main.cpp), [form](../examples/gallery/fluent_form.hpp), `portals_gallery` | A function returning a lazy scene, internal editor/checkbox state, buttons, six themes and CLI preflight. |
 | Showcase | [editor history](../examples/editor_history/main.cpp), `portals_editor_history` | Immediate, editing-finished and explicit model application; Undo/Redo; draft and published values. |
 | Showcase | [dashboard](../examples/dashboard/main.cpp), [composition](../examples/dashboard/dashboard.hpp), `portals_dashboard` | A table and chart sharing an immutable model, delayed pages and bounded provider work. |
@@ -38,9 +39,9 @@ helpers, manual binding tokens, stop source or presentation-sync loop.
 ```cpp
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
-#include <portals/ui_style.hpp>
+#include <portals/ui.hpp>
 
-/** @brief Run a minimal lazy scene with a late click handler and a runtime stylesheet.
+/** @brief Run a minimal lazy scene with a late click handler.
  * @return Zero on success, one on a typed setup/runtime failure after library cleanup/reporting.
  * Click Add Hello to append one undoable text change; F10 quits. This minimal program defines no CLI options.
  * The standard runner owns terminal restoration.
@@ -54,7 +55,6 @@ int main() {
   auto scene = ui::scene(ui::vbox(ui::lineEdit(message, ""), ui::button(add, "Add Hello")));
 
   return scene
-    | ui::style("Button { bold: true; }")
     | ui::onClick(add,
                   [message] {
                     message.text() += "Hello!";
@@ -92,8 +92,9 @@ portals_gallery --theme nord --ansi16
 portals_gallery --help
 ```
 
-A theme supplies the theme layer. Add stable application declarations with
-`scene | ui::style("Button { bold: true; }")`; subsequent theme changes preserve
+Include `<portals/ui_style.hpp>` for style stages. A theme supplies the theme layer.
+Add stable application declarations with
+`scene | ui::style(add, "* { bold: true; }")`; subsequent theme changes preserve
 application overrides. An explicit file source uses `ui::file(path)` with the same
 style stage. Read [style layers and precedence](style-layers.md), including checked
 failure behavior and layer limits, before adding multiple overrides.
@@ -103,6 +104,19 @@ content-size expressions and importing arbitrary external theme formats are
 planned work; these examples do not pretend those bindings already exist.
 Colors and supported attributes can be customized. A general effects system,
 shadow engine and arbitrary border styles are not supplied by this catalogue.
+
+## Compact controls
+
+[The framed form](../examples/compact/main.cpp) combines `ui::border`, `ui::gauge`,
+`ui::plainButton` and `.width(24)`. Its late click handler appends an undoable
+text change; the exact-ref stylesheet affects only its Add button. F10 or Ctrl+C
+requests ordinary runner cleanup. It has no parser, transport emulator or local
+widget implementation. See [compact primitives](compact-primitives.md) for
+complete method and pipe forms, clipping and checked limits.
+
+The dashboard uses `.flexX()` for its editor and `.flexY(2)` / `.flexY()` for
+the table and chart. These declarations use the existing layout solver; the
+provider and model lifetimes remain separate from UI composition.
 
 ## Dashboard data and loading
 

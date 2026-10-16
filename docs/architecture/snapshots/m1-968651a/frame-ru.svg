@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 860" role="img" aria-labelledby="title desc">
+<title id="title">Один цикл и dirty-кадр</title>
+<desc id="desc">M1 в работе · закреплённая версия исходников. Runner обслуживает ограниченную работу один раз за цикл. Незавершённый вывод или срок cadence откладывает rendering, сохраняя dirty-состояние.</desc>
+<style>text{font-family:system-ui,Segoe UI,sans-serif} .paper{fill:#f5f7fc}.card{fill:#fff}.ink{fill:#17233a}.muted{fill:#42516a} a:focus rect{stroke-width:5} @media(prefers-color-scheme:dark){.paper{fill:#121b2b}.card{fill:#1c2a40}.ink{fill:#f2f5fc}.muted{fill:#d2dced}}</style>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7387a8"/></marker></defs>
+<rect class="paper" width="960" height="860" rx="12"/>
+<text class="ink" x="22" y="32" font-size="23" font-weight="700">Один цикл и dirty-кадр</text>
+<text class="muted" x="22" y="58" font-size="14">m1-968651a · M1 в работе · закреплённая версия исходников</text>
+<path d="M 462 157.0 L 498 157.0" fill="none" stroke="#7387a8" stroke-width="2" marker-end="url(#arrow)"><title>Обычный успешный путь; ошибки проходят cleanup</title></path>
+<path d="M 718.0 234 L 718.0 270" fill="none" stroke="#7387a8" stroke-width="2" marker-end="url(#arrow)"><title>Обычный успешный путь; ошибки проходят cleanup</title></path>
+<path d="M 498 347.0 L 462 347.0" fill="none" stroke="#7387a8" stroke-width="2" marker-end="url(#arrow)"><title>Обычный успешный путь; ошибки проходят cleanup</title></path>
+<path d="M 242.0 424 L 242.0 460" fill="none" stroke="#7387a8" stroke-width="2" marker-end="url(#arrow)"><title>Обычный успешный путь; ошибки проходят cleanup</title></path>
+<path d="M 462 537.0 L 498 537.0" fill="none" stroke="#7387a8" stroke-width="2" marker-end="url(#arrow)"><title>Обычный успешный путь; ошибки проходят cleanup</title></path>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/src/runtime/application.cpp#L337" target="_blank" rel="noopener" data-node="input"><title>Native read служит примитивом ожидания. Ограниченный admission при перегрузке удерживает один native batch/raw suffix и отклонённого CONTROL owner. Windows events уже декодированы; POSIX-ввод сохраняет время прихода для deadlines потокового decoder.</title>
+<rect class="card" x="22" y="80" width="440" height="154" rx="10" stroke="#08796b" stroke-width="2"/>
+<rect x="22" y="80" width="7" height="154" rx="3" fill="#08796b"/>
+<text class="ink" x="42" y="110" font-size="20" font-weight="650">1. Прочитать и допустить</text>
+<text class="muted" x="42" y="168" font-size="14">native read → decoder → CONTROL</text>
+<text class="muted" x="42" y="213" font-size="12">1 · flow · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/src/runtime/application.cpp#L443" target="_blank" rel="noopener" data-node="dispatch"><title>CONTROL и DATA имеют отдельные budgets. scene.input может обработать глобальный ввод; иначе EventRouter определяет focus/hit target и action, затем вызывает проверенные handlers. Равное значение Property не создаёт новой invalidation. Успешная квитанция изменения может содержать отклонения уведомлений.</title>
+<rect class="card" x="498" y="80" width="440" height="154" rx="10" stroke="#08796b" stroke-width="2"/>
+<rect x="498" y="80" width="7" height="154" rx="3" fill="#08796b"/>
+<text class="ink" x="518" y="110" font-size="20" font-weight="650">2. Один dispatch</text>
+<text class="muted" x="518" y="168" font-size="14">Scheduler → scene.input → EventRouter</text>
+<text class="muted" x="518" y="213" font-size="12">2 · flow · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/src/runtime/application.cpp#L539" target="_blank" rel="noopener" data-node="idle"><title>renderReady возвращается, пока вывод не завершён или не наступил срок cadence. Без dirty-request он возвращается до подготовки и paint. Idle продолжает проверять input и resize; периодического кадра без invalidation нет. Опоздание цикла не вызывает догоняющую серию кадров.</title>
+<rect class="card" x="498" y="270" width="440" height="154" rx="10" stroke="#08796b" stroke-width="2"/>
+<rect x="498" y="270" width="7" height="154" rx="3" fill="#08796b"/>
+<text class="ink" x="518" y="300" font-size="20" font-weight="650">3. Проверить dirty и вывод</text>
+<text class="muted" x="518" y="358" font-size="14">pending? / cadence? / Invalidation::NONE?</text>
+<text class="muted" x="518" y="403" font-size="12">3 · flow · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/src/runtime/application.cpp#L522" target="_blank" rel="noopener" data-node="prepare-frame"><title>Подготовка сцены синхронизирует bindings и удерживает ревизии моделей. Подготовленные views используют итоговую геометрию layout; layout-invalidation при подготовке может повторить ограниченный проход. Квитанции provider requests обрабатываются вне paint. Подготовка не запускает скрытый provider worker.</title>
+<rect class="card" x="22" y="270" width="440" height="154" rx="10" stroke="#08796b" stroke-width="2"/>
+<rect x="22" y="270" width="7" height="154" rx="3" fill="#08796b"/>
+<text class="ink" x="42" y="300" font-size="20" font-weight="650">4. Подготовить согласованные</text>
+<text class="ink" x="42" y="324" font-size="20" font-weight="650">views</text>
+<text class="muted" x="42" y="358" font-size="14">scene.prepare → layout snapshot →</text>
+<text class="muted" x="42" y="377" font-size="14">prepareViews</text>
+<text class="muted" x="42" y="403" font-size="12">4 · flow · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/src/runtime/application.cpp#L454" target="_blank" rel="noopener" data-node="paint"><title>Видимые узлы рисуют через arranged surfaces и clips внутри WidgetTree::frame. Renderer преобразует заимствованные команды во владеющие cells. Ошибка prepare/render завершает run с исходной причиной; runner не отправляет частично построенный кадр. Само рисование tree не откатывает предыдущие эффекты callback.</title>
+<rect class="card" x="22" y="460" width="440" height="154" rx="10" stroke="#08796b" stroke-width="2"/>
+<rect x="22" y="460" width="7" height="154" rx="3" fill="#08796b"/>
+<text class="ink" x="42" y="490" font-size="20" font-weight="650">5. Layout и paint</text>
+<text class="muted" x="42" y="548" font-size="14">WidgetTree::frame → renderer → CellBuffer</text>
+<text class="muted" x="42" y="593" font-size="12">5 · flow · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/src/runtime/application.cpp#L582" target="_blank" rel="noopener" data-node="output"><title>FrameWriter удерживает частичный вывод и меняет committed state только после полного согласованного принятия. Обновление может дать пустой diff. Любая транспортная ошибка завершает этот run; неопределённые байты не переотправляются и transport не открывается повторно. Flush выполняется не чаще раза за цикл.</title>
+<rect class="card" x="498" y="460" width="440" height="154" rx="10" stroke="#1759a8" stroke-width="2"/>
+<rect x="498" y="460" width="7" height="154" rx="3" fill="#1759a8"/>
+<text class="ink" x="518" y="490" font-size="20" font-weight="650">6. Отправить и дописать</text>
+<text class="muted" x="518" y="548" font-size="14">FrameWriter: diff → encode → bounded flush</text>
+<text class="muted" x="518" y="593" font-size="12">6 · owner · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/src/runtime/application.cpp#L610" target="_blank" rel="noopener" data-node="eof"><title>EOF завершает decoding, доставляет допущенный CONTROL и дописывает отправленный вывод. Он не ждёт будущих кадров, timers или DATA: доставленное изменение может остаться dirty и не отобразиться. Cancellation может остановить раньше. Native close зависит от host/driver progress.</title>
+<rect class="card" x="498" y="650" width="440" height="154" rx="10" stroke="#705400" stroke-width="2"/>
+<rect x="498" y="650" width="7" height="154" rx="3" fill="#705400"/>
+<text class="ink" x="518" y="680" font-size="20" font-weight="650">Ограничения EOF и cancellation</text>
+<text class="muted" x="518" y="738" font-size="14">EOF ≠ render all future work</text>
+<text class="muted" x="518" y="783" font-size="12">7 · status · source ↗</text></a>
+</svg>

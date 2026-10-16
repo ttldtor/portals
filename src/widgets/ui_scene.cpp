@@ -536,6 +536,7 @@ struct Scene::State {
     PREFLIGHT,
     PREPARE,
     CONFIGURE,
+    LOOKUP,
     RUN,
     STOP,
     CLOSE,
@@ -586,6 +587,50 @@ struct Scene::State {
   bool stopped{};
   bool shortFailure{}, shortDeliveryPending{};
   const void *primaryShortAttempt{};
+
+  struct NamedRequest {
+    NamedRequest() = default;
+
+    // Copies remain fallible inside the admitted boundary, including vector reallocation.
+    NamedRequest(const detail::LookupSource &request, const detail::LookupPublisher &publication)
+        : source(request), publish(publication) {
+    }
+
+    ~NamedRequest() = default;
+
+    detail::LookupSource source;
+    detail::LookupPublisher publish;
+  };
+
+  std::vector<NamedRequest> lookups = std::vector<NamedRequest>(0);
+
+  std::expected<void, ManagedError> resolve(const detail::LookupSource &source, detail::LookupPublisher &publish) {
+    auto result = [&]() -> std::expected<void, ManagedError> {
+      try {
+        auto found = source.observation ? detail::NamedAccess::observe(*managed, source.observation)
+                                        : detail::NamedAccess::find(*managed, source.name);
+
+        return publish(*managed, found);
+      } catch (const std::bad_alloc &) {
+        return std::unexpected(error(ManagedPhase::BIND, TreeError::NO_MEMORY));
+      } catch (...) {
+        return std::unexpected(error(ManagedPhase::BIND, TreeError::CALLBACK_FAILED));
+      }
+    }();
+
+    if (!result) {
+      if (!prepared) {
+        // Latch the startup cause before observer reentry; one publication owns its notification.
+        fail(result.error(), "scene.get", source.origin, false);
+        publishingFailure = true;
+      }
+
+      detail::NamedAccess::report(*managed, result.error(), source);
+      publishingFailure = false;
+    }
+
+    return result;
+  }
 
   struct StyleBinding {
     std::weak_ptr<const void> identity;
@@ -882,6 +927,7 @@ struct Scene::State {
     recipe = {};
     applicationOptions = {};
     pending.clear();
+    lookups.clear();
     theme.reset();
 
     return result;
@@ -924,9 +970,63 @@ Scene::Scene(Configuration recipe, SceneOptions options, std::source_location or
   state_->recipe = std::move(recipe);
   state_->recipeOrigin = origin;
   state_->anchor->state = state_.get();
+  state_->anchor->lookup = [](void *raw, const detail::LookupSource &source,
+                              detail::LookupPublisher publish) -> std::expected<void, ManagedError> {
+    auto &state = *static_cast<State *>(raw);
+
+    if (state.failure) {
+      return std::unexpected(*state.failure);
+    }
+
+    if (state.completed || state.active == State::Operation::REPORT || state.active == State::Operation::STOP ||
+        state.active == State::Operation::CLOSE || state.active == State::Operation::NOTIFY ||
+        state.active == State::Operation::PREPARE || state.active == State::Operation::LOOKUP) {
+      return std::unexpected(error(ManagedPhase::BIND, TreeError::WOULD_BLOCK));
+    }
+
+    State::Guard guard(state, State::Operation::LOOKUP);
+
+    try {
+      if (state.prepared) {
+        return state.resolve(source, publish);
+      }
+
+      if (state.lookups.size() >= state.options.maxConfigurations) {
+        state.fail(error(ManagedPhase::BIND, TreeError::NODE_LIMIT), "scene.get", source.origin);
+
+        return std::unexpected(*state.failure);
+      }
+
+      state.lookups.emplace_back(source, publish);
+
+      return {};
+    } catch (const std::bad_alloc &) {
+      state.fail(error(ManagedPhase::BIND, TreeError::NO_MEMORY), "scene.get", source.origin);
+
+      return std::unexpected(*state.failure);
+    }
+  };
   state_->anchor->quit = [](void *raw, std::source_location) {
     return static_cast<State *>(raw)->requestQuit();
   };
+}
+
+DynamicRef Scene::get(std::string_view name, std::source_location origin) {
+  return DynamicRef({ref().anchor_, owner_, std::string(name), origin});
+}
+
+std::expected<void, ManagedError> detail::requestLookup(const LookupSource &source, LookupPublisher publish) {
+  if (source.owner != std::this_thread::get_id()) {
+    return std::unexpected(ManagedError{ManagedPhase::BIND, {}, TreeError::WRONG_THREAD, {}, {}});
+  }
+
+  const auto anchor = source.anchor.lock();
+
+  if (!anchor || !anchor->state || !anchor->lookup) {
+    return std::unexpected(ManagedError{ManagedPhase::BIND, {}, TreeError::CLOSED, {}, {}});
+  }
+
+  return anchor->lookup(anchor->state, source, std::move(publish));
 }
 
 Scene::Scene(Scene &&other) noexcept : owner_(other.owner_) {
@@ -1149,6 +1249,24 @@ std::expected<void, ManagedError> Scene::prepareChecked(std::source_location ori
             }
           }
 
+          if (!state.failure) {
+            for (auto current = state.lookups.begin(); current != state.lookups.end(); ++current) {
+              auto resolved = state.resolve(current->source, current->publish);
+
+              if (!resolved) {
+                // A dynamic observation and its typed conversion may queue the same name.
+                // Preserve the primary failure in those unpublished slots without reporting twice.
+                for (auto remaining = std::next(current); remaining != state.lookups.end(); ++remaining) {
+                  if (remaining->source.name == current->source.name) {
+                    (void)remaining->publish(*state.managed, std::unexpected(resolved.error()));
+                  }
+                }
+
+                break;
+              }
+            }
+          }
+
           // Ref publication belongs to ui::mount; all deferred configuration starts afterwards.
           if (!state.failure) {
             state.prepared = true;
@@ -1176,6 +1294,7 @@ std::expected<void, ManagedError> Scene::prepareChecked(std::source_location ori
   } else {
     state.recipe = {};
     state.pending.clear();
+    state.lookups.clear();
     state.theme.reset();
 
     if (state.failure) {

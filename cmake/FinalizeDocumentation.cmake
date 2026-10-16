@@ -21,6 +21,7 @@ endforeach()
 # works without the repository or a hard-coded GitHub branch URL.
 set(example_sources
   docs/examples/docs_basic.cpp
+  tests/package_consumer/named_scoped.cpp
   docs/examples/docs_events.cpp
   docs/examples/docs_state.cpp
   tests/package_consumer/pipe_contracts.cpp

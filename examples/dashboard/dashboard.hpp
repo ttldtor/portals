@@ -3,7 +3,6 @@
 #pragma once
 #include "provider.hpp"
 #include <format>
-#include <portals/grid.hpp>
 #include <portals/input_match.hpp>
 #include <portals/table_column.hpp>
 #include <portals/text_format.hpp>
@@ -72,7 +71,7 @@ public:
   FluentScene &operator=(FluentScene &&) = delete;
 
 private:
-  ui::Description<Grid> recipe(ManagedScene &owner, Application &app, Options options) {
+  ui::Description<Column> recipe(ManagedScene &owner, Application &app, Options options) {
     app_ = &app;
     provider_ = std::make_unique<Provider>(app, options);
     name_ = take(owner.state<std::string>("Market note"));
@@ -131,32 +130,19 @@ private:
           return chartPrepared(pin, work);
         }};
 
-    return ui::grid(grid_, ui::label(title_, "Portals market | F2 theme | F10 quit"),
-                    ui::hbox(toolbar_, LinearOptions{.gap = 2},
-                             ui::lineEdit(editor_, name_, {.policy = {.width = {.mode = SizeMode::FLEX}}}),
+    return ui::vbox(LinearOptions{.padding = {.left = 1, .right = 1}},
+                    ui::label(title_, "Portals market | F2 theme | F10 quit"),
+                    ui::hbox(LinearOptions{.gap = 2}, ui::lineEdit(editor_, name_).flexX(),
                              ui::button(inspectButton_, "Inspect", inspect)),
-                    ui::label(status_, "Starting market"), ui::virtualTable(table_, model_, columns, tableConfig),
-                    ui::chart(chart_, model_, &Quote::prices, chartConfig));
+                    ui::label(status_, "Starting market"),
+                    ui::virtualTable(table_, model_, columns, tableConfig).flexY(2),
+                    ui::vbox().height(1),
+                    ui::vbox(ui::chart(chart_, model_, &Quote::prices, chartConfig)).flexY());
   }
 
   void configure(ManagedScene &owner, Application &app) {
     take(app.router().setFocus(table_.node()));
 
-    const AxisSize flexible{.preferred = 0, .mode = SizeMode::FLEX};
-    const AxisSize header{.preferred = 1, .maximum = 1, .mode = SizeMode::FIXED};
-    GridOptions grid;
-
-    grid.columns = {flexible};
-    grid.padding = {.left = 1, .right = 1};
-    grid.rows = {header, header, header, AxisSize{.preferred = 0, .mode = SizeMode::FLEX, .weight = 2},
-                 header, flexible};
-    grid.cells = {{title_.node().id(), 0, 0},
-                  {toolbar_.node().id(), 1, 0},
-                  {status_.node().id(), 2, 0},
-                  {table_.node().id(), 3, 0},
-                  {chart_.node().id(), 5, 0}};
-
-    take(setGridOptions(app.tree(), grid_.node(), grid));
     take(owner.onInput([this, &owner](const InputEvent &event) -> std::expected<bool, ManagedError> {
       if (!keyPressed(event, InputKey::F2, {})) {
         return false;
@@ -201,11 +187,9 @@ private:
 
   Application *app_{};
   std::unique_ptr<Provider> provider_;
-  ui::Ref<Grid> grid_;
   ui::Ref<Label> title_, status_;
   ui::Ref<LineEdit> editor_;
   ui::Ref<Button> inspectButton_;
-  ui::Ref<Row> toolbar_;
   ui::Ref<VirtualTable<Quote>> table_;
   ui::Ref<Chart<Quote>> chart_;
   ManagedState<std::string> name_;
