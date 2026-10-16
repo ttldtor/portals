@@ -10,6 +10,8 @@ is generated from these guides and public headers.
 
 [User guides](guides.md) · [Glossary](glossary.md)
 
+Follow the [first application](first-application.md): a quick-note form in four steps.
+
 ## Build an application
 
 | Need | Read |

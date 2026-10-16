@@ -9,6 +9,8 @@ contains the complete topic list and API reading paths.
 
 These Markdown guides describe the current source branch. The [published HTML help](https://ttldtor.github.io/portals/) follows the latest stable release; PR checks also provide an HTML preview artifact.
 
+Follow the [first application](first-application.md): a quick-note form in four steps.
+
 ## Start with the declarative API
 
 `<portals/ui.hpp>` provides scenes, recipes and event handlers.
