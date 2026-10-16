@@ -1115,7 +1115,10 @@ private:
    * @param create Owning checked
    * constructor callback, invoked only at mount.
    */
-  template <class Create> explicit Description(Create create) : state_(std::make_unique<State>()) {
+  // Reject unrelated by-value conversions before checked-result constructor probes recurse.
+  template <class Create>
+    requires std::invocable<Create &, ManagedScene &, Node<Widget> &>
+  explicit Description(Create create) : state_(std::make_unique<State>()) {
     state_->create = [create = std::move(create)](ManagedScene &scene, Node<Widget> parent,
                                                   detail::MountContext &) mutable {
       return create(scene, parent);

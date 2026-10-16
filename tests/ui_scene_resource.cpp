@@ -144,6 +144,23 @@ struct Custom final : SizedWidget {
 };
 } // namespace
 
+TEST_CASE("description factories can borrow the parent node as an lvalue") {
+  bool invoked{};
+  auto recipe = ui::detail::Access::describe<Custom>([&](ManagedScene &scene, Node<Widget> &parent) {
+    invoked = true;
+
+    return scene.emplace<Custom>(parent, "borrowed parent");
+  });
+  auto owner = ui::scene(std::move(recipe));
+
+  CHECK_FALSE(invoked);
+  REQUIRE(owner.prepareChecked());
+  CHECK(invoked);
+  CHECK(Custom::alive == 1);
+  REQUIRE(owner.close());
+  CHECK(Custom::alive == 0);
+}
+
 TEST_CASE("runtime resource retains temporary source and publishes typed named refs") {
   auto owner = portals::ui::scene(std::string("VBox{ LineEdit#message{\"\"} Button#add{\"Add\"} }"));
   auto add = owner.get<portals::Button>("add");
