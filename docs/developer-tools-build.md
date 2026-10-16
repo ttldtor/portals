@@ -7,6 +7,100 @@ Run the PowerShell commands from the repository root. Use Python 3.10 or newer;
 these Python tools use the standard library. Paths below are examples and may
 be replaced with your build directories.
 
+<a id="tool-check-plan"></a>
+## Plan local contract checks
+
+`tools/ci/check_plan.py` reads explicit change records and a captured CTest
+inventory. It prints a JSON check plan; it executes no Git, tests, builds,
+compiler, network or external application. Python 3.10+ standard library is an
+authoring dependency only. See the [task/integration/milestone matrix](development.md).
+The [audited contract registry](../tools/ci/check_contracts.json) maps exact paths
+to named CTest registrations, source witnesses and cross-contract focus checks.
+This is a bounded registry; it does not claim to classify every project file.
+A source witness is an existing test source that supports the contract/test
+mapping. Its byte hash makes the cited version auditable; the hash does not
+prove that the behavior passed.
+
+```powershell
+ctest --test-dir build/windows-msvc-debug --show-only=json-v1 | Set-Content -Encoding utf8 build/check-inventory.json
+@'
+[{"path":"tools/ci/checks.py","status":"M"}]
+'@ | Set-Content -Encoding utf8 build/changes.json
+python tools/ci/check_plan.py --changes build/changes.json --inventory build/check-inventory.json
+python tools/ci/check_plan.py --changes build/changes.json --inventory build/check-inventory.json --level integration
+python tools/ci/check_plan.py --help
+python tools/ci/test_check_plan.py
+```
+
+Capture the inventory from your chosen configured build. On POSIX use normal
+stdout redirection to capture `ctest --show-only=json-v1`. UTF-8 with an optional
+BOM is accepted. Change input is an array of `{path,status}` objects. Paths must
+be normalized repository-relative POSIX paths, including on Windows. Only `M`
+(modified) can qualify for narrow task preflight. Supply added/deleted/copied
+files as `A`/`D`/`C`; include both paths for a rename with `R`. These and unknown
+statuses force full. The planner trusts the declared complete change list; it
+does not discover Git status or validate a caller's `M` declaration.
+
+| Argument | Meaning | Default |
+| --- | --- | --- |
+| `--changes FILE` | Existing UTF-8 JSON change records | Required |
+| `--inventory FILE` | Existing CTest JSON inventory | Absent: full with unknown configured test set |
+| `--impact FILE` | Optional [Ninja dependency receipt](developer-tools-measure.md#tool-change-impact) | No dependency evidence |
+| `--source-root DIR` | Checkout used to check exact changed paths and source witnesses | Repository containing the script |
+| `--level LEVEL` | `task`, `integration` or `milestone` | `task` |
+| `--output FILE` | New JSON file; parent must exist, existing files are rejected | stdout only |
+
+There are no timing units or execution parameters. Exit 0 means a plan was
+produced, including a full fallback; 1 means invalid data/I/O; 2 means invalid
+arguments. `--help`/`-h` needs no operational inputs and writes nothing. Apart
+from an explicitly requested new output file, inputs and the environment remain
+unchanged. Source archives need neither `.git` nor private workspace data.
+
+`focus_tests` is an ordering aid, with exact source witnesses and byte hashes.
+`selected_tests` names actual registrations in the supplied inventory. A missing
+inventory produces null, never a fabricated empty set. Full plans supply no
+CTest filter; documentation-only plans supply no CTest command. A focused task
+plan supplies an exact-name regex. The caller chooses build directory, compiler,
+configuration and whether to execute it; a plan is not a PASS receipt. Policy
+and inventory hashes identify canonical JSON content; witness hashes identify
+source bytes.
+
+The pilot permits a narrow task preflight only for explicitly mapped modified
+Python tools with all registrations and witnesses present. C++ core, templates,
+styles, consumers and runtime always retain the full configured suite. Include
+graphs show rebuild dependencies, not semantic test coverage. Missing, stale,
+unbuilt or unobserved dependency coverage is recorded and cannot authorize
+skipping; even complete dependency coverage does not qualify runtime exclusions
+in this pilot. Unknown/new/deleted/renamed paths, missing witnesses or missing
+CTest names also give full.
+
+The JSON retains integration and milestone obligations and reports the hosted
+mode from the unchanged `checks.py` selector. A narrow Python task preflight
+still requires full hosted checks for infrastructure changes. The existing
+docs-only hosted classification is preserved. Integration/milestone plans
+select every configured test; applicability of broader platform/native/docs
+checks follows the verification matrix. No hosted runtime reduction or measured
+time saving is claimed.
+
+The [recorded pilot](measurements/check-plan-pilot-968651a.json) uses 136 actual
+CTest registrations from a Ninja Release configuration with tests enabled and
+tools/examples/docs disabled. Fourteen hypothetical declared-change scenarios
+produce 42 CLI plans across the three levels: 39 full plans retain all 136 tests,
+two Python task preflights select two and one registered fixtures, and one
+docs-only task plan has no CTest command. There are no unexpected omissions
+against these asserted expectations. The runtime source baseline is
+`968651a90b6a1542fd3ab2cec159b457e548681f`; the record hashes the planner/matrix
+working-tree additions separately. The dependency input covers 46 of 51 compile
+outputs and cannot justify a full-project exclusion. The pilot executes plans,
+not runtime tests or hosted jobs, and measures no elapsed-time improvement.
+
+`test_check_plan.py` is an internal unittest driver invoked above. It creates
+temporary fixtures/source bundles and tests invalid/new/unknown/stale inputs,
+cross-contract closure, full-suite preservation, deterministic plans, native
+help, BOM input and no-overwrite output. It runs without `.git`, compilers or
+runtime tests and returns unittest status. `portals.ci-selection` registers the
+existing selector/gate fixtures; `portals.check-plan` registers this driver.
+
 ## Choose a command
 
 | Task | Command or target | Changes |

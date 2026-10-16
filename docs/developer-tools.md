@@ -66,6 +66,8 @@ are in the linked reference.
 | [tools/benchmarks/check_managed.cmake](../tools/benchmarks/check_managed.cmake) | [Measurements](developer-tools-measure.md) |
 | [tools/check_naming.py](../tools/check_naming.py) | [Build and checks](developer-tools-build.md) |
 | [tools/ci/checks.py](../tools/ci/checks.py) | [Build and checks](developer-tools-build.md) |
+| [tools/ci/check_plan.py](../tools/ci/check_plan.py) | [Local contract check plans](developer-tools-build.md#tool-check-plan) |
+| [tools/ci/test_check_plan.py](../tools/ci/test_check_plan.py) | [Regression test](developer-tools-build.md#tool-check-plan) |
 | [tools/ci/test_checks.py](../tools/ci/test_checks.py) | [Regression test](developer-tools-build.md) |
 | [tools/docs/check_links.py](../tools/docs/check_links.py) | [Build and checks](developer-tools-build.md) |
 | [tools/docs/finalize_html.py](../tools/docs/finalize_html.py) | [Build and checks](developer-tools-build.md) |
@@ -79,6 +81,8 @@ are in the linked reference.
 | [tools/package/run.ps1](../tools/package/run.ps1) | [Packaging and releases](developer-tools-release.md) |
 | [tools/package/run.sh](../tools/package/run.sh) | [Packaging and releases](developer-tools-release.md) |
 | [tools/quality/performance.cmake](../tools/quality/performance.cmake) | [Measurements](developer-tools-measure.md) |
+| [tools/quality/change_impact.py](../tools/quality/change_impact.py) | [Include and rebuild footprint](developer-tools-measure.md#tool-change-impact) |
+| [tools/quality/test_change_impact.py](../tools/quality/test_change_impact.py) | [Regression test](developer-tools-measure.md#tool-change-impact) |
 | [tools/quality/readability.cmake](../tools/quality/readability.cmake) | [Measurements](developer-tools-measure.md) |
 | [tools/release/metadata.py](../tools/release/metadata.py) | [Packaging and releases](developer-tools-release.md) |
 | [tools/release/package.cmake](../tools/release/package.cmake) | [Packaging and releases](developer-tools-release.md) |
