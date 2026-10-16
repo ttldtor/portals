@@ -1,0 +1,3 @@
+add_executable(portals_scene_resource main.cpp)
+target_link_libraries(portals_scene_resource PRIVATE portals::core)
+portals_enable_warnings(portals_scene_resource)

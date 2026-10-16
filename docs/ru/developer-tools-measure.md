@@ -309,7 +309,7 @@ cmake "-DBUILD_DIR=$PWD/build/tools" "-DFILES=$PWD/tools/compactness/scanner.cpp
 | Переменная CMake | Где обязательна | Назначение |
 | --- | --- | --- |
 | `MODE` | В обоих режимах | `record` или `compare` |
-| `KIND` | `record` | `managed`, `compact`, `mvp` или `pss`; адаптера JSON слоёв стилей нет |
+| `KIND` | `record` | `managed`, `compact`, `mvp`, `pss` или `style_layers` |
 | `RAW_FILE` | `record` | Существующий JSON исходных измерений |
 | `METADATA_FILE` | `record` | Существующий JSON происхождения данных по схеме, указанной ниже |
 | `OUTPUT_DIR` | `record` | Новый каталог архива; не должен существовать |
@@ -322,6 +322,20 @@ cmake "-DBUILD_DIR=$PWD/build/tools" "-DFILES=$PWD/tools/compactness/scanner.cpp
 метаданных и полный пример записи. Сохраняйте вместе с исходными измерениями
 сведения о наборе инструментов, конфигурации, машине, нагрузке и выполненной
 команде.
+
+`style_layers` импортирует полные, проверенные на корректность отчёты схемы 1;
+вывод `--check` отклоняется. Адаптер сверяет p50/p95 обновления и явного кадра
+с сохранёнными отсчётами в нс по методу nearest-rank, включает идентичность
+сценариев и нагрузку кадра в проверку совместимости, а счётчики отрисовки и
+инвалидации сохраняет как контекст. Необязательная метка
+`allocations: ordinary_new_calls_and_requested_bytes` включает отдельные серии
+числа обычных выделений и запрошенных байтов для обновления и кадра
+(`calls`/`bytes`). Отсутствующая метка или прежнее значение null сохраняют
+`NOT_MEASURED`. Режим подсчёта входит в сигнатуру совместимости: null и отсутствие
+метки дают `not_instrumented`. Такие запуски нельзя сравнивать с измерениями,
+в которых счётчики включены внутри измеряемых фаз. Поля и границы измерения описаны в
+[поддерживаемых наблюдениях](../quality.md#supported-observations-and-compatibility)
+(на английском).
 
 ```powershell
 cmake -DMODE=record -DKIND=managed -DRAW_FILE=managed.json -DMETADATA_FILE=metadata.json -DOUTPUT_DIR=history/managed-before -P tools/quality/performance.cmake

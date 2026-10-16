@@ -93,6 +93,51 @@ protects its ordinary Widget hooks and rejects editing inside frames. Arbitrary
 model mutation/I/O and direct tree calls from a custom pure callback remain
 contract violations; the library does not claim to sandbox user C++ code.
 
+## Observe final arranged bounds
+
+Register `ui::onLayout(ref, callback)` on a scene to receive the initial valid
+geometry and subsequent changes to its local, surface or clip bounds. The scene
+owns the registration and captures. The callback runs on the UI thread during a
+subsequent scheduler dispatch, after the successful final layout, paint and owning
+render have left the tree frame. Preliminary view-preparation passes do not notify.
+This event identifies arranged geometry; terminal output may still be pending.
+
+\include guide_layout_observe.cpp
+
+`geometry.local` is parent-relative; `surface` includes ancestor translations;
+`clip` intersects the viewport and ancestor clips. Each `NodeGeometry` owns its
+values: copy the callback argument to retain it. Equal bounds do not notify or
+request another frame. A callback may change controls or remove/close its scene;
+its executing capture survives retirement. Changes request later work through
+the normal runner. At EOF the existing frame cap remains in force: callback
+mutations may remain dirty without another final frame or notification.
+
+For a checked read, use `ref.geometry()` or `ref.size()`, returning
+`std::expected<NodeGeometry, ManagedError>` and `std::expected<CellSize, ManagedError>`.
+Size is the local arranged extent. Reading never starts layout or reports an
+error. Before a successful final frame, while hidden, or after layout invalidation
+or rearrangement, reads return `TreeError::INVALID_GEOMETRY` until the next final
+publication. Equal-valued replacement geometry still revokes the old read.
+Unpublished/destroyed references return `CLOSED`, removed identities retain their
+typed stale-node error, and foreign threads return `WRONG_THREAD` before owner
+access. Disabled controls keep their geometry.
+
+Hidden ancestors cancel pending observations. Showing a hidden subtree produces
+a new initial valid observation, including hide/show between final frames. Removal and close
+cancel queued observations; already running callbacks finish safely. Runtime
+registration through `ref.onLayout(callback)` follows the same contract and first
+queues its current final value after the current dispatch, if one is available.
+
+The existing scheduler DATA capacity, subscription capacity and data budget bound
+the queue and deliveries. `ManagedOptions::maxLayoutHandlers` defaults to 256.
+Newest pending values replace older ones. Queue-full recovery makes at most
+`maxLayoutPublicationRetries` attempts (default 3) without requesting redraw.
+Exhaustion cancels that pending value and reports `SchedulerError::WOULD_BLOCK`
+once through the managed error channel; it does not mark it delivered. A later
+final frame can begin a fresh attempt. Callback failures retain their original
+typed cause and existing scene-stop policy. Registering against another scene
+or after retirement fails through the normal checked registration channel.
+
 ## Extending layouts and controls
 
 Controls can derive from `Widget` and provide intrinsic measure only, or derive

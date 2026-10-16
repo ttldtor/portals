@@ -923,7 +923,7 @@ private:
     }
   }
 
-  template <detail::SceneConfiguration Callback> void onClickImpl(Callback &callback, std::source_location origin) {
+  template <detail::SceneConfiguration Callback> void onEventImpl(Callback &callback, std::source_location origin) {
     if (!admitConfiguration(true, origin)) {
       return;
     }
@@ -1025,7 +1025,17 @@ struct SceneAccess {
    */
   template <SceneConfiguration Callback>
   static void onClick(Scene &owner, Callback &callback, std::source_location origin) {
-    owner.onClickImpl(callback, origin);
+    owner.onEventImpl(callback, origin);
+  }
+
+  /** @tparam Callback Owning checked layout registration against the existing managed scene.
+   * @param owner Facade receiving the deferred or runtime registration.
+   * @param callback Owning configuration transferred only after UI admission.
+   * @param origin Original registration site retained in diagnostics.
+   */
+  template <SceneConfiguration Callback>
+  static void onLayout(Scene &owner, Callback &callback, std::source_location origin) {
+    owner.onEventImpl(callback, origin);
   }
 
   /** @param owner Stationary facade retaining an existing concrete live controller.

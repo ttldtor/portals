@@ -17,6 +17,7 @@
 | --- | --- | --- |
 | Основы | [Обработчики нажатия](../../examples/click_handlers/main.cpp), `portals_click_handlers` | Наблюдающие ссылки, обработчики через цепочку, строковые стили, выход. CLI отсутствует. |
 | Основы | [Форма с рамкой](../../examples/compact/main.cpp), `portals_compact_form` | Готовые рамка и индикатор, фиксированный размер, кнопка без скобок и стиль по Ref; без собственного виджета и CLI. |
+| Основы | [Форма из ресурса](../../examples/scene_resource/main.cpp), `portals_scene_resource` | Runtime текст сцены, именованные ссылки и существующие managed действия; см. [загрузку сцен](scene-loading-guide.md). |
 | Основы | [Галерея](../../examples/gallery/main.cpp), [функция формы](../../examples/gallery/fluent_form.hpp), `portals_gallery` | Функция, возвращающая ленивую сцену, внутренние состояния редактора и CheckBox, кнопки, шесть тем и разбор CLI до монтажа. |
 | Демонстрация | [История редактора](../../examples/editor_history/main.cpp), `portals_editor_history` | Немедленное подтверждение, подтверждение по окончании редактирования и явное применение; Undo/Redo, черновик и опубликованное значение. |
 | Демонстрация | [Dashboard](../../examples/dashboard/main.cpp), [композиция](../../examples/dashboard/dashboard.hpp), `portals_dashboard` | Таблица и график общей неизменяемой модели, отложенные страницы и ограниченная работа поставщика. |

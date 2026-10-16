@@ -7,7 +7,7 @@ These CMake 3.24+ drivers have no Python runtime requirement:
 - `readability.cmake`: explicit translation units, optional explicit headers, and an existing compilation
   database, installed Clang-tidy cognitive complexity at reporting Threshold 0,
   optional existing readability checks, preserved raw logs/version/SHA receipts.
-- `performance.cmake`: `MODE=record` archives existing managed/compact/MVP JSON
+- `performance.cmake`: `MODE=record` archives existing PSS/managed/compact/MVP/style-layer JSON
   with explicit provenance; `MODE=compare` checks compatibility and reports
   available p50/p95/allocation/node/frame observations without a causal verdict.
 

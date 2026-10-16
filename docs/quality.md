@@ -168,17 +168,20 @@ and normalized observations. Import time is not the measurement start time.
 The original input is untouched. Compare mode rechecks the raw hash and recomputes
 observations rather than trusting cached normalized numbers.
 
+<a id="supported-observations-and-compatibility"></a>
+
 ## Supported observations and compatibility
 
 | `KIND` | Existing output and observations |
 | --- | --- |
 | `managed` | Schema-1 complete/correctness-verified managed benchmark; per API/rows/phase p50/p95 ns, retained min/max/count/raw timing samples, and scene-node context. `--check` is refused as a performance baseline. |
+| `style_layers` | Schema-1 complete/correctness-verified style-layer benchmark; update and explicit frame-render p50/p95 ns with retained samples, plus defaults/paint calls, render commands, invalidation, redraw requests, explicit frames, idle redraws and terminal bytes as context. `--check` is refused as a performance baseline. Optional ordinary allocation calls and requested bytes are separate update/frame series. |
 | `compact` | Current compact benchmark stdout; per API/phase p50/p95 ns, ordinary allocation-call min/max, sample count, scene nodes, and column workload. This benchmark exports no raw timing arrays or timing variance; those fields remain absent/null in the evidence. |
 | `pss` | `portals.pss.v1` runtime parser benchmark; all seven case identities, raw batch averages and nearest-rank p50/p95. Values are exactly scaled to integer `ns_per_batch`; evidence records `distribution: batch_means`, the batch scale, and original `ns_per_parse` units. |
 | `mvp` application | Schema-1 complete fixed-viewport application observation with successful accounting, OHLC, and shutdown; phase, transport-read, data-ingress, and runner-control p50/p95 with retained range/count/overflow; actual accepted frames, bytes, wall time, and process CPU time as context. |
 | `mvp` separate encoding | Schema-1 complete oracle-verified encoding observation; full/diff/render p50/p95, retained ranges/counts/raw samples, and frame/byte context. |
 
-For managed and MVP series, nearest-rank summaries are checked against retained
+For managed, style-layer and MVP series, nearest-rank summaries are checked against retained
 raw samples. Empty or overflowed MVP series have `NOT_MEASURED` evidence and null
 comparison values; retained partial sample ranges remain visible. Never turn a
 missing latency phase into zero. Compact allocation counters count ordinary
@@ -186,6 +189,22 @@ missing latency phase into zero. Compact allocation counters count ordinary
 no allocation metric to invent. Timing boundaries and units are described in the
 [benchmark README](../tools/benchmarks/README.md) and
 [managed measurement documentation](managed-performance.md).
+
+Style-layer summaries contain `count`, `p50`, `p95` and `samples`; each series
+must contain exactly `samples_per_case` nonnegative integer samples. The adapter
+requires `unit: ns` and `percentile: nearest_rank`. Allocation measurement uses
+the optional top-level stamp `allocations: ordinary_new_calls_and_requested_bytes`
+and per-case `update_allocations`, `frame_allocations`, `update_allocated_bytes`
+and `frame_allocated_bytes` summaries with the same shape. Their units are `calls`
+and `bytes`, respectively. They count calling-thread ordinary `new`/`new[]` calls and requested
+bytes during each phase; aligned allocation, malloc and live memory are outside
+that scope. Legacy `allocations: null` or an absent allocation stamp produces
+`NOT_MEASURED` values. A measured stamp requires all four series in every case;
+allocation series without that stamp are rejected.
+Allocation instrumentation is part of timing compatibility because its counters
+run inside the timed phases. Null and absent stamps share the `not_instrumented`
+signature; they cannot be compared with an instrumented run. Instrumented runs
+must use the same allocation method to compare timings.
 
 PSS v1 emits its report after validating every timed result outside the timer.
 It has no separate completion or correctness flag: import checks the known
@@ -220,6 +239,11 @@ MVP encoding signatures include capture identity, frames, repetitions, and modes
 PSS signatures include schema, API, units, sample/warmup/batch counts, traversal
 order, timing and destruction/cleanup boundaries, and each case's identity,
 source-byte count, validity, and expected-rule count.
+Style-layer signatures include compiler/build, assertion mode, pointer width,
+clock, units, percentile method, sample/warmup counts, explicit frame workload
+and the ordered case identities: API, control count, theme-rule count, visibility,
+operation and update kind. Empty or duplicate identities fail import. Missing or
+reordered cases fail comparison rather than pairing unrelated scenarios.
 Revision and executable/output paths in recorded commands may differ. Configure
 commands inside toolchain metadata are compared exactly, so consistently record
 their invocation context. Mismatched inputs fail instead of quietly producing
@@ -246,7 +270,7 @@ with one short fixture observation. Missing historical baselines remain missing.
 Errors in setup, metadata, JSON shape, raw-summary consistency, complete/correctness
 flags, SHA-256, compatibility, or numeric support produce nonzero `FAIL` diagnostics.
 Failed comparisons publish no success report. CMake fixture tests cover managed,
-compact, and both MVP adapters, zero/null values, incomplete/overflowed samples,
+style-layer, compact, and both MVP adapters, zero/null values, incomplete/overflowed samples,
 raw retention/tampering, metadata/workload incompatibility, malformed inputs,
 and unavailable/unsupported Clang policy without running slow benchmarks.
 Pass an absolute `TEST_CLANG_TIDY` executable to `tests/quality_tools.cmake` to

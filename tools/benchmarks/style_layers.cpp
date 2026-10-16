@@ -6,11 +6,53 @@
 #include <array>
 #include <charconv>
 #include <chrono>
+#include <cstdlib>
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <new>
 #include <source_location>
 #include <stdexcept>
+
+namespace {
+thread_local bool countingAllocations{};
+thread_local std::size_t allocationCalls{};
+thread_local std::size_t requestedBytes{};
+} // namespace
+
+// Count ordinary new/new[] requests in scoped phases; exclude malloc, aligned allocations and live memory.
+void *operator new(std::size_t size) {
+  if (auto *memory = std::malloc(std::max<std::size_t>(size, 1))) {
+    if (countingAllocations) {
+      ++allocationCalls;
+      requestedBytes += size;
+    }
+
+    return memory;
+  }
+
+  throw std::bad_alloc();
+}
+
+void *operator new[](std::size_t size) {
+  return ::operator new(size);
+}
+
+void operator delete(void *memory) noexcept {
+  std::free(memory);
+}
+
+void operator delete[](void *memory) noexcept {
+  std::free(memory);
+}
+
+void operator delete(void *memory, std::size_t) noexcept {
+  std::free(memory);
+}
+
+void operator delete[](void *memory, std::size_t) noexcept {
+  std::free(memory);
+}
 
 namespace {
 using namespace portals;
@@ -80,7 +122,9 @@ Options:
   --check      Override rows to 2, 8, samples to 3 and warmup to 1.
   --output P   Write JSON to P, truncating it (default: stdout; empty P also uses stdout).
   --help, -h   Show help as the sole argument; no workload or files.
-Output: JSON to stdout or --output.
+Output: JSON to stdout or --output, with nanosecond distributions, ordinary
+new/new[] calls and requested bytes for update/frame phases. Counts exclude
+malloc, aligned allocations and live memory; counter overhead remains included.
 Exit: 0 on success/help; 1 on invalid arguments, workload or output failure.
 )help";
 
@@ -327,17 +371,78 @@ struct Workload {
   }
 };
 
-template <class F> std::int64_t measure(F &&operation) {
+// Scope retirement also restores the counter on a failed workload; reporting runs outside the window.
+class AllocationWindow {
+public:
+  AllocationWindow() : previous_(countingAllocations), calls_(allocationCalls), bytes_(requestedBytes) {
+    countingAllocations = true;
+  }
+
+  ~AllocationWindow() {
+    countingAllocations = previous_;
+  }
+
+  std::size_t calls() const {
+    return allocationCalls - calls_;
+  }
+
+  std::size_t bytes() const {
+    return requestedBytes - bytes_;
+  }
+
+private:
+  bool previous_;
+  std::size_t calls_;
+  std::size_t bytes_;
+};
+
+// A check-only oracle keeps measurement instrumentation honest without adding work to timed cases.
+void verifyAllocationCounter() {
+  constexpr std::size_t PROBE_BYTES = 17;
+
+  {
+    AllocationWindow window;
+    auto *single = ::operator new(PROBE_BYTES);
+    auto *array = ::operator new[](PROBE_BYTES);
+
+    ::operator delete(single);
+    ::operator delete[](array);
+    check(window.calls() == 2 && window.bytes() == 2 * PROBE_BYTES, "allocation counter differs from oracle");
+  }
+
+  check(!countingAllocations, "allocation window survived normal completion");
+
+  try {
+    AllocationWindow window;
+
+    throw std::bad_alloc();
+  } catch (const std::bad_alloc &) {
+  }
+
+  check(!countingAllocations, "allocation window survived failure");
+}
+
+template <class F> std::int64_t measure(F &&operation, std::size_t &calls, std::size_t &bytes) {
+  AllocationWindow allocations;
   const auto start = Clock::now();
 
   operation();
 
-  return std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count();
+  const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count();
+
+  calls = allocations.calls();
+  bytes = allocations.bytes();
+
+  return elapsed;
 }
 
 struct Sample {
   std::int64_t update{};
   std::int64_t frame{};
+  std::size_t updateAllocations{};
+  std::size_t frameAllocations{};
+  std::size_t updateAllocatedBytes{};
+  std::size_t frameAllocatedBytes{};
   std::size_t defaults{};
   std::size_t paints{};
   std::size_t commands{};
@@ -363,9 +468,11 @@ Sample run(std::size_t count, std::size_t rules, bool layered, std::size_t kind,
   workload.output.bytes = 0;
 
   Sample sample;
-  sample.update = measure([&] {
-    workload.update(second);
-  });
+  sample.update = measure(
+    [&] {
+      workload.update(second);
+    },
+    sample.updateAllocations, sample.updateAllocatedBytes);
   sample.defaults = workload.counts.defaults;
   sample.invalidation = take(workload.app->tree().consumeFrameRequest());
   workload.verify(masked, kind == 0 ? FIRST_COLOR : SECOND_COLOR);
@@ -379,9 +486,11 @@ Sample run(std::size_t count, std::size_t rules, bool layered, std::size_t kind,
   }
 
   // Measure an explicit full frame separately, even when the update requests no redraw.
-  sample.frame = measure([&] {
-    sample.commands = workload.render(visibility);
-  });
+  sample.frame = measure(
+    [&] {
+      sample.commands = workload.render(visibility);
+    },
+    sample.frameAllocations, sample.frameAllocatedBytes);
   sample.paints = workload.counts.paints;
   sample.bytes = workload.output.bytes;
   sample.explicitFrames = workload.renders;
@@ -433,15 +542,15 @@ std::string execute(const Options &options) {
 #else
   constexpr bool ASSERTIONS = true;
 #endif
-  auto result =
-    std::format("{{\"schema\":1,\"complete\":true,\"correctness_verified\":true,\"check_only\":{},"
-                "\"compiler\":\"{}\",\"build\":\"{}\",\"assertions_enabled\":{},\"pointer_bits\":{},"
-                "\"clock\":\"steady_clock\",\"unit\":\"ns\",\"percentile\":\"nearest_rank\","
-                "\"samples_per_case\":{},\"warmup_per_case\":{},\"allocations\":null,"
-                "\"frame_workload\":\"explicit arrange/paint/renderFullFrame/diff submit/flush to memory "
-                "output; visible rows overlap; "
-                "offscreen controls remain materialized; no virtualization\",\"cases\":[",
-                options.checkOnly, compiler(), BUILD, ASSERTIONS, sizeof(void *) * 8, options.samples, options.warmup);
+  auto result = std::format(
+    "{{\"schema\":1,\"complete\":true,\"correctness_verified\":true,\"check_only\":{},"
+    "\"compiler\":\"{}\",\"build\":\"{}\",\"assertions_enabled\":{},\"pointer_bits\":{},"
+    "\"clock\":\"steady_clock\",\"unit\":\"ns\",\"percentile\":\"nearest_rank\","
+    "\"samples_per_case\":{},\"warmup_per_case\":{},\"allocations\":\"ordinary_new_calls_and_requested_bytes\","
+    "\"frame_workload\":\"explicit arrange/paint/renderFullFrame/diff submit/flush to memory "
+    "output; visible rows overlap; "
+    "offscreen controls remain materialized; no virtualization\",\"cases\":[",
+    options.checkOnly, compiler(), BUILD, ASSERTIONS, sizeof(void *) * 8, options.samples, options.warmup);
   bool first = true;
 
   for (const auto count : options.sizes) {
@@ -450,6 +559,10 @@ std::string execute(const Options &options) {
         for (std::size_t kind = 0; kind < UPDATE_NAMES.size(); ++kind) {
           std::array<std::vector<std::int64_t>, 2> updates;
           std::array<std::vector<std::int64_t>, 2> frames;
+          std::array<std::vector<std::int64_t>, 2> updateAllocations;
+          std::array<std::vector<std::int64_t>, 2> frameAllocations;
+          std::array<std::vector<std::int64_t>, 2> updateBytes;
+          std::array<std::vector<std::int64_t>, 2> frameBytes;
           std::array<Sample, 2> last;
 
           for (std::size_t round = 0; round < options.samples + options.warmup; ++round) {
@@ -460,6 +573,10 @@ std::string execute(const Options &options) {
               if (round >= options.warmup) {
                 updates[api].push_back(last[api].update);
                 frames[api].push_back(last[api].frame);
+                updateAllocations[api].push_back(static_cast<std::int64_t>(last[api].updateAllocations));
+                frameAllocations[api].push_back(static_cast<std::int64_t>(last[api].frameAllocations));
+                updateBytes[api].push_back(static_cast<std::int64_t>(last[api].updateAllocatedBytes));
+                frameBytes[api].push_back(static_cast<std::int64_t>(last[api].frameAllocatedBytes));
               }
             }
           }
@@ -467,17 +584,19 @@ std::string execute(const Options &options) {
           for (std::size_t api = 0; api < 2; ++api) {
             const auto &sample = last[api];
 
-            result += std::format("{}{{\"api\":\"{}\",\"controls\":{},\"theme_rules\":{},\"visibility\":\"{}\","
-                                  "\"operation\":\"theme_handoff\",\"update_kind\":\"{}\",\"update\":{},\"frame_"
-                                  "render\":{},\"defaults_calls\":{},"
-                                  "\"paint_calls\":{},\"render_commands\":{},\"effective_invalidation\":{},"
-                                  "\"update_redraw_requests\":{},\"explicit_frame_count\":{},\"idle_redraws\":0,"
-                                  "\"terminal_output_bytes\":{}}}",
-                                  first ? "" : ",", api == 0 ? "legacy_composition" : "layers", count, rules,
-                                  VISIBILITY_NAMES[visibility], UPDATE_NAMES[kind], summarize(updates[api]),
-                                  summarize(frames[api]), sample.defaults, sample.paints, sample.commands,
-                                  std::to_underlying(sample.invalidation), sample.updateRedrawRequests,
-                                  sample.explicitFrames, sample.bytes);
+            result += std::format(
+              "{}{{\"api\":\"{}\",\"controls\":{},\"theme_rules\":{},\"visibility\":\"{}\","
+              "\"operation\":\"theme_handoff\",\"update_kind\":\"{}\",\"update\":{},\"frame_"
+              "render\":{},\"defaults_calls\":{},"
+              "\"paint_calls\":{},\"render_commands\":{},\"effective_invalidation\":{},"
+              "\"update_redraw_requests\":{},\"explicit_frame_count\":{},\"idle_redraws\":0,"
+              "\"terminal_output_bytes\":{},\"update_allocations\":{},\"frame_allocations\":{},"
+              "\"update_allocated_bytes\":{},\"frame_allocated_bytes\":{}}}",
+              first ? "" : ",", api == 0 ? "legacy_composition" : "layers", count, rules, VISIBILITY_NAMES[visibility],
+              UPDATE_NAMES[kind], summarize(updates[api]), summarize(frames[api]), sample.defaults, sample.paints,
+              sample.commands, std::to_underlying(sample.invalidation), sample.updateRedrawRequests,
+              sample.explicitFrames, sample.bytes, summarize(updateAllocations[api]), summarize(frameAllocations[api]),
+              summarize(updateBytes[api]), summarize(frameBytes[api]));
             first = false;
           }
         }
@@ -501,6 +620,11 @@ int main(int argc, char **argv) {
     }
 
     const auto options = parse(argc, argv);
+
+    if (options.checkOnly) {
+      verifyAllocationCounter();
+    }
+
     const auto output = execute(options);
 
     if (options.output.empty()) {

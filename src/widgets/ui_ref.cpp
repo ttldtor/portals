@@ -5,6 +5,14 @@
 
 namespace portals::ui {
 namespace detail {
+std::expected<NodeGeometry, ManagedError> geometry(const std::shared_ptr<RefTarget> &target) {
+  auto owner = eventScene(target);
+  if (!owner) {
+    return std::unexpected(owner.error());
+  }
+  return (*owner)->geometry(target->node);
+}
+
 std::expected<ManagedScene *, ManagedError> eventScene(const std::shared_ptr<RefTarget> &target) {
   if (target && target->owner != std::this_thread::get_id()) {
     return std::unexpected(ManagedError{ManagedPhase::BIND, {}, TreeError::WRONG_THREAD, {}, {}});

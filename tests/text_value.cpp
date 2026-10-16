@@ -11,9 +11,46 @@
 namespace {
 static_assert(portals::text("literal").resourceKey().empty());
 static_assert(portals::i18n("currency").resourceKey() == "currency");
+static_assert(std::copy_constructible<portals::TextValue>);
+static_assert(std::move_constructible<portals::TextValue>);
+static_assert(std::is_copy_assignable_v<portals::TextValue>);
+static_assert(std::is_move_assignable_v<portals::TextValue>);
+#if defined(_MSVC_STL_VERSION) && defined(_ITERATOR_DEBUG_LEVEL) && _ITERATOR_DEBUG_LEVEL != 0
+static_assert(!std::is_nothrow_move_constructible_v<portals::TextValue>);
+static_assert(!std::is_nothrow_move_assignable_v<portals::TextValue>);
+#else
+static_assert(std::is_nothrow_move_constructible_v<portals::TextValue>);
+static_assert(std::is_nothrow_move_assignable_v<portals::TextValue>);
+#endif
+static_assert([] {
+  auto original = portals::i18n("key");
+  auto copied = original;
+  auto transferred = std::move(copied);
+
+  copied = std::move(transferred);
+
+  return copied.resourceKey() == "key";
+}());
 
 struct ThrowingValue {};
 } // namespace
+
+TEST_CASE("text expressions preserve owning copy and rvalue construction assignment") {
+  auto original = portals::i18n("owned-key");
+  auto copied = original;
+  auto transferred = std::move(original);
+
+  CHECK(copied.resourceKey() == "owned-key");
+  CHECK(transferred.resourceKey() == "owned-key");
+
+  copied = portals::text("literal");
+  transferred = std::move(copied);
+
+  const auto value = transferred.resolve({});
+
+  REQUIRE(value);
+  CHECK(value->bytes() == "literal");
+}
 
 template <> struct std::formatter<ThrowingValue> : std::formatter<std::string_view> {
   auto format(const ThrowingValue &, std::format_context &) const -> std::format_context::iterator {

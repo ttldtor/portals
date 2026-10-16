@@ -23,6 +23,7 @@ struct RefAccess;
 struct SceneAccess;
 struct ClickAccess;
 struct NamedAccess;
+struct LayoutAccess;
 class SetupFailureTicket;
 } // namespace ui::detail
 
@@ -103,6 +104,9 @@ struct ManagedOptions {
   std::size_t maxClickHandlers{256};       ///< Positive maximum retained pipe click callbacks across the scene.
   std::size_t maxClickHandlersPerNode{64}; ///< Positive maximum pipe click callbacks for one button.
   SchedulerTime keySequenceTimeout{1000};  ///< Positive inactivity timeout between sequence strokes, in milliseconds.
+  std::size_t maxLayoutHandlers{256}; ///< Positive maximum scene-owned geometry observers; scheduler limits apply too.
+  std::size_t maxLayoutPublicationRetries{
+    3}; ///< Positive queue-full attempt cap before one typed rejection and cancellation.
 };
 
 /** @brief Weak UI handle to a scene-owned Property, never an owning alias.
@@ -825,6 +829,49 @@ public:
   /// @return True while a managed virtual view requires layout-driven preparation.
   bool usesPreparedLayout() const noexcept override;
 
+  /** @brief Read an owning final arranged value without performing layout or reporting errors.
+   * @param node Full identity of a managed widget in this scene.
+   * @return Final geometry, or typed affinity/liveness/reentry/INVALID_GEOMETRY failure.
+   * Invalidation or any rearrangement revokes it until the next successful final frame.
+   */
+  std::expected<NodeGeometry, ManagedError> geometry(Node<Widget> node) const;
+
+  /** @tparam Callback Owning compact action accepting const NodeGeometry& or no arguments.
+   * @param node Live managed widget whose local, surface and clip bounds are observed.
+   * @param callback Void, checked TreeError or EditorCommandResult callback owned by this scene.
+   * @param origin Registration site retained in diagnostics.
+   * @return Success or typed admission/budget/allocation failure, without partial registration.
+   * Initial valid and changed values arrive on a subsequent UI scheduler dispatch outside frames.
+   * Hidden/removal/close cancel pending values. Copy the callback argument to retain its owning value.
+   */
+  template <class Callback>
+    requires detail::ManagedAction<Callback, NodeGeometry>
+  std::expected<void, ManagedError> onLayout(Node<Widget> node, Callback callback,
+                                             std::source_location origin = std::source_location::current()) {
+    auto allowed = boundary(ManagedPhase::BIND, node);
+    if (!allowed) {
+      return allowed;
+    }
+    try {
+      return registerLayout(node, actionAdapter<NodeGeometry>(std::move(callback)), origin);
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
+    } catch (...) {
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CALLBACK_FAILED));
+    }
+  }
+
+  /** @param app Same borrowed application used at creation.
+   * @return Success after final observation publication or original typed failure.
+   */
+  std::expected<void, TreeError> completedLayout(Application &app) override;
+  /** @param app Same borrowed application used at creation.
+   * @return Success after bounded pending-publication recovery or original typed failure.
+   */
+  std::expected<void, TreeError> afterDispatch(Application &app) override;
+  /** @return Whether this scene owns undelivered layout work; unrelated DATA does not extend EOF. */
+  bool hasPendingLayout() const noexcept override;
+
   /** @brief Prepare registered views from the pins captured by prepare(), in registration order.
    * @param app Same application used at creation.
    * @param snapshot Owning layout for this pass; hidden views retain cancellation semantics.
@@ -930,6 +977,34 @@ private:
   friend struct ui::detail::SceneAccess;
   friend struct ui::detail::ClickAccess;
   friend struct ui::detail::NamedAccess;
+  friend struct ui::detail::LayoutAccess;
+
+  struct Entry;
+
+  struct LayoutValue {
+    NodeGeometry geometry;
+    std::uint64_t revision{};
+  };
+
+  struct LayoutRecord {
+    Node<Widget> node;
+    std::function<EditorCommandResult(const NodeGeometry &)> action;
+    std::source_location origin;
+    SchedulerConnection<LayoutValue> connection;
+    std::shared_ptr<const LayoutValue> pending;
+    std::optional<NodeGeometry> delivered;
+    std::uint64_t visibilityRevision{};
+    bool queued{};
+    std::size_t rejected{};
+    bool retired{};
+  };
+
+  std::expected<void, ManagedError> registerLayout(Node<Widget> node,
+                                                   std::function<EditorCommandResult(const NodeGeometry &)> action,
+                                                   std::source_location origin);
+  void retireLayouts(Entry &entry) noexcept;
+  void deliverLayout(const std::shared_ptr<LayoutRecord> &record, std::shared_ptr<const LayoutValue> value);
+  std::expected<void, TreeError> publishLayout(const std::shared_ptr<LayoutRecord> &record);
 
   struct ClickRecord {
     std::function<EditorCommandResult(ui::ClickParams &)> action;
@@ -1107,6 +1182,8 @@ private:
   std::shared_ptr<KeySnapshot> keys_;
   std::size_t keyHandlers_{};
   std::size_t clickHandlers_{};
+  std::vector<std::shared_ptr<LayoutRecord>> layouts_ = std::vector<std::shared_ptr<LayoutRecord>>(0);
+  std::uint64_t layoutRevision_{};
   std::shared_ptr<ManagedErrorHandler> errorObserver_;
   std::vector<ManagedDiagnostic> errors_;
   ManagedDiagnostic overflowDiagnostic_;

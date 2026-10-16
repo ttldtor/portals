@@ -202,6 +202,22 @@ public:
   /// Exhausting the pass budget returns WOULD_BLOCK in PREPARE.
   /// Hook exceptions also fail PREPARE.
   virtual std::expected<void, TreeError> prepareViews(Application &application, const LayoutSnapshot &snapshot);
+  /** @brief Publish owning observations of the successful final frame, outside tree.frame.
+   * @param application Borrowed UI services after final layout, paint and owning render.
+   * @return Success or original scene failure; the default does nothing.
+   * This is not a terminal flush notification. User callbacks must be deferred through the scheduler.
+   */
+  virtual std::expected<void, TreeError> completedLayout(Application &application);
+  /** @brief Retry deferred publication after existing scheduler work has freed queue capacity.
+   * @param application Borrowed UI services, outside dispatch and tree.frame.
+   * @return Success or original scene failure; the default does nothing.
+   * Publications accepted here are delivered by a subsequent dispatch.
+   */
+  virtual std::expected<void, TreeError> afterDispatch(Application &application);
+  /** @return True only while this scene owns pending final-layout notifications to drain at EOF.
+   * The default is false; unrelated scheduler DATA never extends the original EOF policy.
+   */
+  virtual bool hasPendingLayout() const noexcept;
 };
 
 /** @brief One UI owner for scheduler, tree, routing and a single terminal run.

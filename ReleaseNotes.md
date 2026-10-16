@@ -5,6 +5,26 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- Add fluent `SceneResourceOptions::control<T>()` registration. Registration failures
+  reach the existing `runApp` error handler before resource work or terminal open;
+  checked `registry.add<T>()` remains available for explicit recovery.
+
+- [Added] Lazy `ui::scene` and `ui::resource` accept owning scene text or an
+  explicit file source. The bounded loader validates the complete grammar,
+  allowlisted typed registry, IDs and localized text before managed mounting;
+  file, parser, resolver and factory errors retain their typed cause and source
+  position. Defaults cap source at 1 MiB, nodes at 4096, depth at 64, each text
+  value at 64 KiB and properties per node at 16; depth cannot be configured
+  above 64. PSS remains a separate existing stage.
+- [Added] Managed `Ref` geometry reads return checked owning snapshots from the
+  last successful final layout. Scene-owned `onLayout` observers deliver the
+  initial and changed values on the existing scheduler outside tree frames;
+  bounded queue recovery preserves the latest value, and EOF drains only these
+  pending observations without bypassing the frame-rate cap.
+- [Added] Style-layer benchmarks compare equivalent legacy and layered updates
+  with scoped allocation/work counters; the quality adapter preserves raw
+  samples and provenance for review. Counters cover documented allocation
+  classes and phases, not total process memory or universal runtime cost.
 - [Added] Focus scopes select their last eligible control or configured default
   on entry while preserving ordinary global Tab and Shift+Tab traversal.
 - [Added] Focus-only activations restore the previous target after leaving a
