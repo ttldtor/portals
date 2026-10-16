@@ -209,13 +209,17 @@ StyleEngine::StyleEngine(WidgetTree &tree, std::size_t maxBindings) : tree_(tree
 }
 
 ComputedStyle StyleEngine::resolve(const StyleSheet &sheet, const LayerState &state, const StyleTarget &target,
-                                   ComputedStyle defaults) const noexcept {
+                                   ComputedStyle defaults, NodeId node) const noexcept {
   if (!state.enabled) {
-    return resolveStyle(sheet, target, defaults);
+    return !sheet.scope || *sheet.scope == node ? resolveStyle(sheet, target, defaults) : defaults;
   }
   return resolveRules<Rank>(
     [&](auto &&apply) {
       for (const auto &layer : state.layers) {
+        if (layer.sheet.scope && *layer.sheet.scope != node) {
+          continue;
+        }
+
         for (std::size_t index = 0; index < layer.sheet.rules.size(); ++index) {
           const auto &rule = layer.sheet.rules[index];
           apply(rule, [&layer, &rule, index] {
@@ -622,6 +626,7 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
         return;
       }
 
+      result.scope = source->scope;
       result.rules.reserve(source->rules.size());
 
       for (const auto &rule : source->rules) {
@@ -1008,8 +1013,11 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
             return;
           }
           auto defaults = (*widget)->styleDefaults();
-          auto next = wholeReplace ? resolveStyle(sheet, binding.target, defaults)
-                                   : resolve(sheet, candidate ? *candidate : layerState_, binding.target, defaults);
+          auto next =
+            wholeReplace
+              ? (!sheet.scope || *sheet.scope == binding.node.id() ? resolveStyle(sheet, binding.target, defaults)
+                                                                   : defaults)
+              : resolve(sheet, candidate ? *candidate : layerState_, binding.target, defaults, binding.node.id());
 
           if (next.minWidth < 0) {
             result = std::unexpected(error(TreeError::INVALID_ARGUMENT, "Widget default minimum width is negative"));
@@ -1071,6 +1079,7 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
       }
 
       sheet_.rules.swap(sheet.rules);
+      sheet_.scope = sheet.scope;
       bindings_.swap(bindings);
       if (candidate) {
         layerState_.layers.swap(candidate->layers);

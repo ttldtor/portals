@@ -7,6 +7,34 @@
 
 namespace portals::ui {
 namespace detail {
+struct SceneAnchor;
+struct RefTarget;
+
+/** @brief Owning request identity; the facade and its widgets remain weakly observed. */
+struct LookupSource {
+  /** @brief Suppress implicit noexcept moves; checked MSVC string transfers can allocate. */
+  ~LookupSource() = default;
+
+  std::weak_ptr<SceneAnchor> anchor;        ///< Stable facade publication, revoked before cleanup.
+  std::thread::id owner;                    ///< Immutable originating UI thread.
+  std::string name = std::string(0, '\0');  ///< Case-sensitive ID; fallible default construction stays checked.
+  std::source_location origin;              ///< Original lookup site.
+  const char *expectedType{"Widget"};       ///< Static RTTI label for typed diagnostic context.
+  std::shared_ptr<RefTarget> observation{}; ///< Optional original dynamic slot for identity-preserving conversion.
+};
+
+/** @brief Owning publication callback; invoked synchronously after checked name resolution. */
+using LookupPublisher =
+  std::function<std::expected<void, ManagedError>(ManagedScene &, std::expected<Node<Widget>, ManagedError>)>;
+
+/** @param source Owning name and weak facade observation.
+ * @param publish Owning slot publication callback, transferred before deferred execution.
+ * @return Success for a queued/published request or the exact admission error.
+ */
+std::expected<void, ManagedError> requestLookup(const LookupSource &source, LookupPublisher publish);
+
+struct NamedAccess;
+
 /** @brief Shared observation; publication and all mutable fields belong to the constructing UI thread. */
 struct RefTarget {
   const std::thread::id owner = std::this_thread::get_id(); ///< Immutable affinity checked before mutable fields.
@@ -14,7 +42,8 @@ struct RefTarget {
   std::weak_ptr<const void> lifetime;                       ///< Does not retain the scene or its widgets.
   Node<Widget> node;                                        ///< Published identity, never automatically reset.
   Node<Control> caption;                                    ///< Typed caption identity, empty for other widgets.
-  Node<LineEdit> draft;                                     ///< Typed editor identity, empty for other widgets.
+  std::shared_ptr<const ManagedError> failure; ///< Owning failure, allocated only for a rejected named request.
+  Node<LineEdit> draft;                        ///< Typed editor identity, empty for other widgets.
 };
 
 struct RefAccess;
@@ -216,6 +245,7 @@ public:
 
 private:
   template <class T> friend class Ref;
+  friend class DynamicRef;
   friend struct detail::RefAccess;
   friend class TextResult;
 

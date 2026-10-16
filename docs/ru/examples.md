@@ -16,6 +16,7 @@
 | Категория | Программа и полные исходники | Что показывает |
 | --- | --- | --- |
 | Основы | [Обработчики нажатия](../../examples/click_handlers/main.cpp), `portals_click_handlers` | Наблюдающие ссылки, обработчики через цепочку, строковые стили, выход. CLI отсутствует. |
+| Основы | [Форма с рамкой](../../examples/compact/main.cpp), `portals_compact_form` | Готовые рамка и индикатор, фиксированный размер, кнопка без скобок и стиль по Ref; без собственного виджета и CLI. |
 | Основы | [Галерея](../../examples/gallery/main.cpp), [функция формы](../../examples/gallery/fluent_form.hpp), `portals_gallery` | Функция, возвращающая ленивую сцену, внутренние состояния редактора и CheckBox, кнопки, шесть тем и разбор CLI до монтажа. |
 | Демонстрация | [История редактора](../../examples/editor_history/main.cpp), `portals_editor_history` | Немедленное подтверждение, подтверждение по окончании редактирования и явное применение; Undo/Redo, черновик и опубликованное значение. |
 | Демонстрация | [Dashboard](../../examples/dashboard/main.cpp), [композиция](../../examples/dashboard/dashboard.hpp), `portals_dashboard` | Таблица и график общей неизменяемой модели, отложенные страницы и ограниченная работа поставщика. |
@@ -37,9 +38,9 @@ F10 завершает интерактивные примеры. Галерея
 ```cpp
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
-#include <portals/ui_style.hpp>
+#include <portals/ui.hpp>
 
-/** @brief Run a minimal lazy scene with a late click handler and a runtime stylesheet.
+/** @brief Run a minimal lazy scene with a late click handler.
  * @return Zero on success, one on a typed setup/runtime failure after library cleanup/reporting.
  * Click Add Hello to append one undoable text change; F10 quits. This minimal program defines no CLI options.
  * The standard runner owns terminal restoration.
@@ -53,7 +54,6 @@ int main() {
   auto scene = ui::scene(ui::vbox(ui::lineEdit(message, ""), ui::button(add, "Add Hello")));
 
   return scene
-    | ui::style("Button { bold: true; }")
     | ui::onClick(add,
                   [message] {
                     message.text() += "Hello!";
@@ -68,6 +68,10 @@ int main() {
 их жизнь. Подробности — [параметры и время жизни обработчиков](declarative-ui.md#pipe-click-handlers-ru).
 
 ## Темы и прикладные стили
+
+Публичные примеры используют стандартный runner и стандартные метаданные слоёв стилей.
+Явные имена источников, экспорт трассировки, часы replay и проверки транспорта
+относятся к диагностическим примерам и тестам; для обычной формы они не нужны.
 
 Галерея и собственный виджет принимают `--theme NAME`, `--ansi16` и `--help`.
 Имена тем: `modern` по умолчанию, `turbo`, `nord`, `gruvbox`, `tokyo-night`,
@@ -89,14 +93,29 @@ portals_gallery --theme nord --ansi16
 portals_gallery --help
 ```
 
-Тема занимает слой темы. Постоянные правила приложения добавляются через
-`scene | ui::style("Button { bold: true; }")` и сохраняются при смене темы.
+Для этапов стилей подключите `<portals/ui_style.hpp>`. Тема занимает слой темы.
+Постоянные правила приложения добавляются через
+`scene | ui::style(add, "* { bold: true; }")` и сохраняются при смене темы.
 Файловый источник передаётся как `ui::file(path)` тому же этапу стилей.
 [Слои стилей](style-layers.md) описывают приоритеты, ошибки и бюджеты.
 
 Сейчас PSS задаёт конкретные значения. `$name` времени выполнения, `theme.text`,
 выражения размера содержимого и импорт внешних форматов тем запланированы.
 Общий движок эффектов, теней и произвольных рамок этими примерами не предоставляется.
+
+## Компактные контролы
+
+[Форма с рамкой](../../examples/compact/main.cpp) сочетает `ui::border`,
+`ui::gauge`, `ui::plainButton` и `.width(24)`. Обработчик добавляет отменяемое
+изменение текста; стиль по Ref действует только на кнопку Add. F10 и Ctrl+C
+запрашивают штатное завершение. В примере нет парсера, эмулятора терминала
+и собственной реализации виджета. Полные варианты с методами и цепочкой,
+обрезка содержимого и проверяемые ограничения описаны в
+[компактных примитивах](compact-primitives.md).
+
+Dashboard использует `.flexX()` у поля и `.flexY(2)` / `.flexY()` у таблицы
+и графика. Это декларации для существующего решателя компоновки; время жизни
+поставщика и модели остаётся отделено от композиции интерфейса.
 
 ## Данные и загрузка dashboard
 

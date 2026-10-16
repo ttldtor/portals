@@ -67,8 +67,12 @@ cmake -DHELP=ON -P tools/quality/performance.cmake
 | [tools/benchmarks/check_managed.cmake](../../tools/benchmarks/check_managed.cmake) | [Измерения](developer-tools-measure.md) |
 | [tools/check_naming.py](../../tools/check_naming.py) | [Сборка и проверки](developer-tools-build.md) |
 | [tools/ci/checks.py](../../tools/ci/checks.py) | [Сборка и проверки](developer-tools-build.md) |
+| [tools/ci/check_plan.py](../../tools/ci/check_plan.py) | [Локальный contract check plan](developer-tools-build.md#tool-check-plan-ru) |
+| [tools/ci/test_check_plan.py](../../tools/ci/test_check_plan.py) | [Регрессионная проверка](developer-tools-build.md#tool-check-plan-ru) |
 | [tools/ci/test_checks.py](../../tools/ci/test_checks.py) | [Регрессионный тест](developer-tools-build.md) |
 | [tools/docs/check_links.py](../../tools/docs/check_links.py) | [Сборка и проверки](developer-tools-build.md) |
+| [tools/docs/architecture.py](../../tools/docs/architecture.py) | [Exports архитектуры](developer-tools-build.md#tool-architecture-ru) |
+| [tools/docs/architecture_test.py](../../tools/docs/architecture_test.py) | [Регрессионная проверка](developer-tools-build.md#tool-architecture-ru) |
 | [tools/docs/finalize_html.py](../../tools/docs/finalize_html.py) | [Сборка и проверки](developer-tools-build.md) |
 | [tools/docs/test_cli_help.py](../../tools/docs/test_cli_help.py) | [Регрессионный тест](developer-tools-build.md) |
 | [tools/docs/test_finalize_html.py](../../tools/docs/test_finalize_html.py) | [Регрессионный тест](developer-tools-build.md) |
@@ -80,6 +84,8 @@ cmake -DHELP=ON -P tools/quality/performance.cmake
 | [tools/package/run.ps1](../../tools/package/run.ps1) | [Упаковка и выпуск](developer-tools-release.md) |
 | [tools/package/run.sh](../../tools/package/run.sh) | [Упаковка и выпуск](developer-tools-release.md) |
 | [tools/quality/performance.cmake](../../tools/quality/performance.cmake) | [Измерения](developer-tools-measure.md) |
+| [tools/quality/change_impact.py](../../tools/quality/change_impact.py) | [Includes и rebuild footprint](developer-tools-measure.md#tool-change-impact-ru) |
+| [tools/quality/test_change_impact.py](../../tools/quality/test_change_impact.py) | [Регрессионная проверка](developer-tools-measure.md#tool-change-impact-ru) |
 | [tools/quality/readability.cmake](../../tools/quality/readability.cmake) | [Измерения](developer-tools-measure.md) |
 | [tools/release/metadata.py](../../tools/release/metadata.py) | [Упаковка и выпуск](developer-tools-release.md) |
 | [tools/release/package.cmake](../../tools/release/package.cmake) | [Упаковка и выпуск](developer-tools-release.md) |

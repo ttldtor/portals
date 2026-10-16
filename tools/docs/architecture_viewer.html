@@ -1,0 +1,89 @@
+<!doctype html>
+<!-- Copyright (c) 2026 ttldtor. SPDX-License-Identifier: BSL-1.0 -->
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Portals architecture snapshot</title>
+<style>
+:root{color-scheme:light dark;--bg:#f4f6fb;--panel:#fff;--ink:#17233a;--line:#66758f;--accent:#1759a8}
+@media(prefers-color-scheme:dark){:root{--bg:#121b2b;--panel:#1c2a40;--ink:#f2f5fc;--line:#a2b1cb;--accent:#a6ccff}}
+:root[data-theme=light]{color-scheme:light;--bg:#f4f6fb;--panel:#fff;--ink:#17233a;--line:#66758f;--accent:#1759a8}
+:root[data-theme=dark]{color-scheme:dark;--bg:#121b2b;--panel:#1c2a40;--ink:#f2f5fc;--line:#a2b1cb;--accent:#a6ccff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.55 system-ui,Segoe UI,sans-serif}main{max-width:1300px;margin:auto;padding:24px}a{color:var(--accent)}h1{font-size:clamp(1.5rem,4vw,2.3rem);line-height:1.2}h2{font-size:1.3rem}button,select{font:inherit;padding:8px 12px;border:1px solid var(--line);border-radius:7px;background:var(--panel);color:var(--ink)}button{cursor:pointer}button[aria-pressed=true]{outline:3px solid var(--accent);outline-offset:2px}:focus-visible{outline:3px solid var(--accent);outline-offset:3px}header,.controls,nav{display:flex;gap:12px;flex-wrap:wrap;align-items:center}header{justify-content:space-between}.status{border-left:6px solid #cb9100;padding:12px;background:var(--panel)}.layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:24px}section,aside{min-width:0}aside,.nodes{background:var(--panel);border-radius:10px;padding:18px}.diagram{overflow:auto;border:1px solid var(--line);border-radius:10px}.diagram svg{display:block;width:100%;min-width:720px}.diagram .paper{fill:var(--bg)}.diagram .card{fill:var(--panel)}.diagram .ink{fill:var(--ink)}.diagram .muted{fill:var(--ink)}.nodes{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0}.nodes button{text-align:left;font-size:15px}#source,#detail{overflow-wrap:anywhere}nav{margin:20px 0}footer{border-top:1px solid var(--line);margin-top:24px;padding-top:12px;font-size:14px}.skip{position:absolute;left:-10000px}.skip:focus{position:static}@media(max-width:850px){main{padding:16px}.layout{grid-template-columns:1fr}aside{order:-1}.nodes button{flex:1 1 140px}}
+</style>
+<a class="skip" href="#details">Details / Подробности</a>
+<main>
+<header><h1 id="heading"></h1><div class="controls"><label>Language / Язык <select id="lang"><option value="en">English</option><option value="ru">Русский</option></select></label><button id="theme" type="button">Light / dark</button></div></header>
+<p id="status" class="status"></p>
+<p id="intro"></p>
+<nav id="maps" aria-label="Architecture maps"></nav>
+<div class="layout"><section aria-labelledby="map-title"><h2 id="map-title"></h2><p id="map-intro"></p><a id="export" download>SVG</a><div id="nodes" class="nodes" aria-label="Map nodes"></div><div id="diagram" class="diagram" tabindex="0" aria-label="Scrollable SVG diagram"></div></section><aside id="details" tabindex="-1" aria-labelledby="node-title"><h2 id="node-title"></h2><p id="detail"></p><p id="role"></p><a id="source" target="_blank" rel="noopener"></a><ul id="evidence"></ul></aside></div>
+<footer><p id="revision"></p><p id="offline"></p><a href="maps.json" id="data-link">maps.json</a></footer>
+</main>
+<script>
+"use strict";
+const snapshot = /*SNAPSHOT_DATA*/;
+let language = new URLSearchParams(location.search).get("lang") === "ru" ? "ru" : "en";
+let selectedMap = snapshot.maps[0].id;
+let selectedNode = snapshot.maps[0].nodes[0].id;
+const strings = {
+ en:{heading:"Portals architecture",intro:"Select a map and a node. Cards describe responsibilities; their order is a reading path, not an ownership arrow. Node buttons and SVG links work with Tab and Enter. The diagram scrolls horizontally on narrow screens.",source:"Pinned source",role:"Role",offline:"Offline: all maps and details are embedded. Source links open GitHub and require a connection. Downloaded SVGs work independently; maps.json is the readable authoring input.",theme:"Toggle light / dark",export:"Download SVG",maps:"Architecture maps",nodes:"Map nodes"},
+ ru:{heading:"Архитектура Portals",intro:"Выберите карту и узел. Карточки показывают обязанности; порядок чтения не обозначает владение. Кнопки узлов и SVG-ссылки доступны через Tab и Enter. На узком экране схема прокручивается по горизонтали.",source:"Закреплённый исходник",role:"Роль",offline:"Автономный просмотр: карты и описания встроены. Ссылкам на GitHub требуется сеть. Скачанные SVG работают отдельно; maps.json содержит редактируемые данные.",theme:"Сменить светлую / тёмную тему",export:"Скачать SVG",maps:"Архитектурные карты",nodes:"Узлы карты"}
+};
+const byId = id => document.getElementById(id);
+function chooseNode(id, focus = false) {
+ const map = snapshot.maps.find(item => item.id === selectedMap);
+ const node = map.nodes.find(item => item.id === id);
+ selectedNode = id;
+ byId("node-title").textContent = node.title[language];
+ byId("detail").textContent = node.detail[language];
+ byId("role").textContent = strings[language].role + ": " + node.kind + " · " + node.label;
+ byId("source").textContent = strings[language].source + ": " + node.source.path + ":" + node.source.line;
+ byId("source").href = "https://github.com/ttldtor/portals/blob/" + (node.source.revision || snapshot.revision) + "/" + node.source.path + "#L" + node.source.line;
+ byId("evidence").replaceChildren(...(node.evidence || []).map(item => {
+  const li = document.createElement("li"); const link = document.createElement("a");
+  link.href = item.url; link.textContent = item.label[language]; link.target = "_blank"; link.rel = "noopener"; li.append(link); return li;
+ }));
+ byId("nodes").querySelectorAll("button").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.node === id)));
+ if (focus) byId("details").focus();
+}
+function render() {
+ const text = strings[language];
+ const map = snapshot.maps.find(item => item.id === selectedMap);
+ document.documentElement.lang = language;
+ byId("lang").value = language;
+ byId("heading").textContent = text.heading;
+ byId("status").textContent = snapshot.id + " · " + snapshot.status[language];
+ byId("intro").textContent = text.intro;
+ byId("theme").textContent = text.theme;
+ byId("revision").textContent = "Source revision: " + snapshot.revision;
+ byId("offline").textContent = text.offline;
+ byId("maps").setAttribute("aria-label",text.maps);
+ byId("nodes").setAttribute("aria-label",text.nodes);
+ byId("maps").replaceChildren(...snapshot.maps.map(item => {
+  const button = document.createElement("button"); button.type = "button";
+  button.textContent = item.title[language]; button.dataset.map = item.id; button.setAttribute("aria-pressed",String(item.id === selectedMap));
+  button.onclick = () => {selectedMap = item.id; selectedNode = item.nodes[0].id; render();byId("maps").querySelector('[data-map="'+selectedMap+'"]').focus();}; return button;
+ }));
+ byId("map-title").textContent = map.title[language];
+ byId("map-intro").textContent = map.intro[language];
+ byId("nodes").replaceChildren(...map.nodes.map((node,index) => {
+  const button = document.createElement("button"); button.type = "button"; button.dataset.node = node.id;
+  button.textContent = /^\d+\./.test(node.title[language]) ? node.title[language] : (index+1) + " · " + node.title[language]; button.onclick = () => chooseNode(node.id,true); return button;
+ }));
+ const svg = snapshot.svgs[map.id + "-" + language + ".svg"];
+ byId("diagram").innerHTML = svg;
+ byId("diagram").querySelectorAll("a[data-node]").forEach(link => link.onclick = event => {event.preventDefault();chooseNode(link.dataset.node,true);});
+ byId("export").href = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+ byId("export").download = snapshot.id + "-" + map.id + "-" + language + ".svg";
+ byId("export").textContent = text.export;
+ chooseNode(selectedNode);
+}
+byId("lang").onchange = event => {language = event.target.value;render();};
+byId("theme").onclick = () => {
+ const current = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+ document.documentElement.dataset.theme = current === "dark" ? "light" : "dark";
+};
+render();
+</script>
+</html>

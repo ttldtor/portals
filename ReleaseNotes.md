@@ -13,6 +13,32 @@ planned work is not included. An **Unreleased** heading has no publication date.
 - [Changed] Focus recovery retains the original managed blur diagnostic once,
   including when its callback removes the source control.
 
+- [Added] Lazy named control lookup through `Scene::get` preserves exact widget
+  identity across rename/removal and reports missing, duplicate and incompatible
+  targets through the existing typed diagnostics and startup boundary.
+- [Added] Exact-Ref PSS string/file stages reuse style layers and the existing
+  resolver, including atomic metadata admission for unstyled targets. Theme
+  replacement preserves application overrides without synthetic selector IDs.
+
+- [Added] Owning range composition for `vbox`, `hbox`, `row` and `column`
+  materializes consuming recipes immediately without retaining source views.
+- [Added] Compact width/height/flex modifiers, a single-child border/frame,
+  a determinate gauge and plain buttons reuse retained layout, painting and routing.
+  Scoped PSS overrides support theme changes for these controls.
+- [Changed] Layouts can constrain their children's content clip. The new optional
+  virtual hook requires rebuilding C++ consumers together with the updated SDK.
+- [Added] Offline architecture maps in English and Russian, an interactive viewer
+  and a reproducible standard-library generator with source-archive checks.
+- [Changed] The dashboard uses declarative size composition; a compact native form
+  demonstrates a border, gauge, button actions, scoped styles and standard shutdown.
+
+- [Added] Developer tools report observed Ninja translation-unit dependencies and
+  public include relationships, separating link records, incomplete builds and
+  unknown impact instead of presenting them as complete rebuild coverage.
+- [Added] A local contract check planner distinguishes task preflight from full
+  integration and milestone checks. Runtime exclusions remain unqualified; existing
+  hosted compiler, package and documentation gates are unchanged.
+
 ## v0.3.0 (2026-10-15)
 
 - [Added] Optional `portals::lyra` and `ui::lyra::cli` adapt native Lyra declarations

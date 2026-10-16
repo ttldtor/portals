@@ -115,6 +115,12 @@ public:
   explicit Label(GraphemeText text, ControlStyle style = {}, SizePolicy policy = {});
 };
 
+/** @brief Button caption decoration; action routing and identity remain unchanged. */
+enum class ButtonChrome {
+  BRACKETS, ///< Existing ASCII bracket decoration.
+  NONE      ///< Caption only, including a single-glyph action button.
+};
+
 /** @brief One-line button; registration is an explicit caller-owned ActionBinding. */
 class Button : public Control {
 public:
@@ -126,6 +132,20 @@ public:
    * reports internal allocation failure as NO_MEMORY, excluding construction of its arguments.
    */
   explicit Button(GraphemeText text, ControlStyle style = {}, SizePolicy policy = {});
+  /** @param text Owning caption with its complete WidthPolicy.
+   * @param style Owning normal/focused/disabled appearances.
+   * @param policy Owning layout constraints.
+   * @param chrome BRACKETS or NONE; invalid enum values fail with INVALID_ARGUMENT during measure/paint.
+   * Construction may allocate; existing checked tree emplacement translates exceptions.
+   */
+  Button(GraphemeText text, ControlStyle style, SizePolicy policy, ButtonChrome chrome);
+  /** @param available Offered extent, not used to truncate intrinsic caption measurement.
+   * @return Caption/decorations size, INVALID_ARGUMENT for invalid chrome, or Control measurement failure.
+   */
+  std::expected<CellSize, TreeError> measure(CellSize available) override;
+
+private:
+  ButtonChrome chrome_;
 };
 
 /** @brief Owning activation parameters copied from the existing router delivery.

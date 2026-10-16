@@ -1471,6 +1471,45 @@ ManagedScene::mutateStyles(StyleEngine::Mutation mutation, StyleLayerOptions opt
     return std::unexpected(staged.error());
   }
 
+  // A scoped sheet can style an otherwise unregistered layout/custom widget. Stage its
+  // metadata together with the candidate layer, and publish ownership only after commit.
+  std::shared_ptr<Entry> scopedEntry;
+  std::shared_ptr<StyleTarget> scopedTarget;
+
+  if (sheet && sheet->scope) {
+    const auto found = std::ranges::find_if(entries_, [&](const auto &entry) {
+      return entry->node.id() == *sheet->scope && !entry->removed;
+    });
+
+    if (found == entries_.end()) {
+      const auto cause = sheet->scope->session != root_.id().session ? TreeError::WRONG_SESSION : TreeError::STALE_NODE;
+
+      return std::unexpected(ManagedError{ManagedPhase::STYLE, *sheet->scope, cause, {}, {}});
+    }
+
+    auto live = app_.tree().withScope((*found)->node, [](const UiScope &) {
+    });
+
+    if (!live) {
+      return std::unexpected(error(ManagedPhase::STYLE, (*found)->node, live.error()));
+    }
+
+    if (!(*found)->target) {
+      try {
+        scopedEntry = *found;
+        scopedTarget = std::make_shared<StyleTarget>();
+
+        if (!registrations) {
+          registrations.emplace(0);
+        }
+
+        registrations->push_back({scopedEntry->node, *scopedTarget});
+      } catch (const std::bad_alloc &) {
+        return std::unexpected(error(ManagedPhase::STYLE, scopedEntry->node, TreeError::NO_MEMORY));
+      }
+    }
+  }
+
   auto installed = styles_.mutate(mutation, options, tier, name, sheet, updates,
                                   registrations ? std::span<const StyleRegistration>(*registrations)
                                                 : std::span<const StyleRegistration>{},
@@ -1491,6 +1530,10 @@ ManagedScene::mutateStyles(StyleEngine::Mutation mutation, StyleLayerOptions opt
     }
 
     return std::unexpected(failure);
+  }
+
+  if (scopedEntry) {
+    scopedEntry->target = std::move(scopedTarget);
   }
 
   publishStyleMetadata();

@@ -1,0 +1,783 @@
+{
+  "schema": 1,
+  "id": "m1-968651a",
+  "revision": "968651a90b6a1542fd3ab2cec159b457e548681f",
+  "previousRevision": "849dc6285d7ef863206e8248810ee0650413b0a2",
+  "status": {
+    "en": "M1 in progress · committed source baseline",
+    "ru": "M1 в работе · закреплённая версия исходников"
+  },
+  "maps": [
+    {
+      "id": "ownership",
+      "title": {
+        "en": "Owners and borrowed services",
+        "ru": "Владельцы и заимствованные сервисы"
+      },
+      "intro": {
+        "en": "Roles: blue owns resources; purple observes or borrows; green coordinates work. All mutable UI services stay on their creating thread. These cards state relations explicitly.",
+        "ru": "Роли: синий — владелец ресурсов, фиолетовый — наблюдение или заимствование, зелёный — координация. Изменяемые UI-сервисы работают в создавшем их потоке. Отношения указаны в описаниях."
+      },
+      "nodes": [
+        {
+          "id": "facade",
+          "kind": "owner",
+          "title": {
+            "en": "Scene facade",
+            "ru": "Фасад Scene"
+          },
+          "label": "ui::Scene → Application + ManagedScene",
+          "detail": {
+            "en": "The facade retains an owning recipe and pending configuration. Preparation creates Application and ManagedScene. Teardown releases ManagedScene before Application. Moving or destroying an active facade, or doing so on the wrong thread, terminates; callbacks must not destroy or reenter owners.",
+            "ru": "Фасад хранит описание и отложенные настройки. Подготовка создаёт Application и ManagedScene. При разрушении ManagedScene освобождается раньше Application. Перемещение или разрушение активного фасада либо выполнение этого в чужом потоке завершает процесс; callback не должен разрушать владельца или повторно входить в его lifecycle."
+          },
+          "source": {
+            "path": "src/widgets/ui_scene.cpp",
+            "line": 921,
+            "anchor": "Scene::Scene(Configuration recipe, SceneOptions options, std::source_location origin)"
+          }
+        },
+        {
+          "id": "application",
+          "kind": "owner",
+          "title": {
+            "en": "Application services",
+            "ru": "Сервисы Application"
+          },
+          "label": "Application → Scheduler / WidgetTree / EventRouter",
+          "detail": {
+            "en": "Application owns one synchronous UI runtime. Router and tree are released before Scheduler. ApplicationScene borrows these services for a single-use run; the caller keeps it alive until run returns.",
+            "ru": "Application владеет одним синхронным UI runtime. Router и tree освобождаются раньше Scheduler. ApplicationScene заимствует сервисы на одноразовый запуск; вызывающая сторона сохраняет сцену до возврата run."
+          },
+          "source": {
+            "path": "src/runtime/application.cpp",
+            "line": 233,
+            "anchor": "struct Application::State {"
+          }
+        },
+        {
+          "id": "managed",
+          "kind": "owner",
+          "title": {
+            "en": "Managed scene resources",
+            "ru": "Ресурсы ManagedScene"
+          },
+          "label": "ManagedScene → models / bindings / subtree",
+          "detail": {
+            "en": "ManagedScene borrows Application and owns its model owners, scoped bindings, callback captures and managed subtree. Close disconnects registrations and removes the subtree. Captured external services still follow the application lifetime contract.",
+            "ru": "ManagedScene заимствует Application и владеет моделями, scoped bindings, захватами callback и управляемым поддеревом. Close отключает регистрации и удаляет поддерево. Захваченные внешние сервисы по-прежнему подчиняются контракту lifetime приложения."
+          },
+          "source": {
+            "path": "docs/managed-controls.md",
+            "line": 40,
+            "anchor": "The scene is noncopyable, nonmovable and UI-affine. Destroy it before its"
+          }
+        },
+        {
+          "id": "handles",
+          "kind": "borrow",
+          "title": {
+            "en": "Checked node observers",
+            "ru": "Проверяемые наблюдатели узлов"
+          },
+          "label": "Node<T> / ui::Ref<T> / read / edit",
+          "detail": {
+            "en": "Node<T> owns no widget. Session, slot and generation identify a checked observer; read/edit lend a reference for the callback only. Removal invalidates handles immediately. An active borrow delays physical reclamation until its outer boundary. ui::Ref is published through successful mount rules.",
+            "ru": "Node<T> не владеет виджетом. Session, slot и generation задают проверяемый наблюдатель; read/edit выдают ссылку только на время callback. Удаление сразу инвалидирует handles. Активное заимствование откладывает физическое освобождение до внешней границы. ui::Ref публикуется по правилам успешного mount."
+          },
+          "source": {
+            "path": "docs/widget-tree.md",
+            "line": 1,
+            "anchor": "# Widget tree and lifetime"
+          }
+        },
+        {
+          "id": "producers",
+          "kind": "borrow",
+          "title": {
+            "en": "Worker publication boundary",
+            "ru": "Граница worker-публикации"
+          },
+          "label": "Worker → bounded Scheduler endpoint → UI",
+          "detail": {
+            "en": "Workers publish owning immutable data through bounded endpoints; they do not mutate tree, scene or collector. Scoped cancellation prevents future callbacks, but does not unwind an active callback or join a producer. Scene-owned producers must be stopped and joined by scene stop policy.",
+            "ru": "Worker публикует владеющие неизменяемые данные через ограниченные endpoints; tree, scene и collector он не изменяет. Scoped cancellation запрещает будущие callback, но не прерывает активный и не выполняет join производителя. При остановке сцена должна остановить и присоединить принадлежащих ей производителей."
+          },
+          "source": {
+            "path": "docs/scheduler.md",
+            "line": 1,
+            "anchor": "# UI scheduler and bounded publication"
+          }
+        },
+        {
+          "id": "presentation",
+          "kind": "owner",
+          "title": {
+            "en": "Frame data ownership",
+            "ru": "Владение данными кадра"
+          },
+          "label": "ModelFrame → prepared views → CellBuffer → FrameWriter",
+          "detail": {
+            "en": "ModelFrame pins one immutable revision for sibling views. Prepared presentation owns the data needed through paint. The renderer consumes borrowed text commands before returning into an owning CellBuffer. FrameWriter retains pending output until consistent acceptance; transport acceptance does not prove physical display.",
+            "ru": "ModelFrame удерживает одну неизменяемую ревизию для соседних views. Подготовленное представление владеет данными до конца paint. Renderer преобразует заимствованные текстовые команды во владеющий CellBuffer до возврата. FrameWriter удерживает ожидающий вывод до согласованного принятия; принятие транспортом не доказывает физическое отображение."
+          },
+          "source": {
+            "path": "docs/render.md",
+            "line": 1,
+            "anchor": "# Render a frame for your host loop {#render}"
+          }
+        }
+      ],
+      "edges": []
+    },
+    {
+      "id": "lifecycle",
+      "title": {
+        "en": "Construction to final report",
+        "ru": "От создания до итогового отчёта"
+      },
+      "intro": {
+        "en": "Reading order follows the normal fluent launch. Every failure follows the cleanup boundary applicable to the resources already acquired. Direct low-level use retains its explicit contracts.",
+        "ru": "Порядок чтения соответствует обычному fluent-запуску. Любая ошибка проходит cleanup для уже полученных ресурсов. Прямое низкоуровневое использование сохраняет явные контракты."
+      },
+      "nodes": [
+        {
+          "id": "recipe",
+          "kind": "owner",
+          "title": {
+            "en": "1. Capture a recipe",
+            "ru": "1. Сохранить описание"
+          },
+          "label": "ui::scene / ui::launch / configure",
+          "detail": {
+            "en": "Ordinary scene construction retains an owning description; managed controls are created lazily. Before preparation configure is queued; after preparation admitted configure runs immediately. Admission guards still apply. ui::launch can avoid evaluating the scene factory for CLI help.",
+            "ru": "Обычное создание scene сохраняет владеющее описание; управляемые controls создаются лениво. До подготовки configure помещается в очередь; после подготовки допущенный configure выполняется сразу. Admission guards сохраняются. ui::launch может показать CLI-справку без вычисления фабрики сцены."
+          },
+          "source": {
+            "path": "src/widgets/ui_scene.cpp",
+            "line": 1246,
+            "anchor": "void Scene::addConfiguration(Configuration callback, bool runtime, std::source_location origin) {"
+          }
+        },
+        {
+          "id": "prepare",
+          "kind": "owner",
+          "title": {
+            "en": "2. Prepare services",
+            "ru": "2. Подготовить сервисы"
+          },
+          "label": "Scene::prepareChecked",
+          "detail": {
+            "en": "Preparation validates options, creates Application then ManagedScene, installs the observer and applies the theme. It has not opened the native terminal. Explicit prepareChecked permits this boundary before run.",
+            "ru": "Подготовка проверяет options, создаёт Application, затем ManagedScene, устанавливает observer и применяет тему. Native terminal ещё не открыт. Явный prepareChecked позволяет пройти эту границу до run."
+          },
+          "source": {
+            "path": "src/widgets/ui_scene.cpp",
+            "line": 1062,
+            "anchor": "std::expected<void, ManagedError> Scene::prepareChecked(std::source_location origin) {"
+          }
+        },
+        {
+          "id": "mount",
+          "kind": "flow",
+          "title": {
+            "en": "3. Mount and configure",
+            "ru": "3. Mount и настройка"
+          },
+          "label": "recipe → mount → Ref publication → configure",
+          "detail": {
+            "en": "The recipe mounts retained nodes and bindings. Deferred configure callbacks run in registration order after successful mount; the first latched failure stops later configuration. Rejected short setup mutations retain their typed cause, including inside a void configure. Cleanup releases partial resources; external callback effects are not rolled back.",
+            "ru": "Описание монтирует retained-узлы и bindings. Отложенные configure выполняются по порядку регистрации после успешного mount; первая сохранённая ошибка останавливает следующие настройки. Отклонённые короткие setup-изменения сохраняют типизированную причину, в том числе внутри void configure. Cleanup освобождает частичные ресурсы; внешние эффекты callback не откатываются."
+          },
+          "source": {
+            "path": "src/widgets/ui_scene.cpp",
+            "line": 1141,
+            "anchor": "auto mounted = [&] {"
+          }
+        },
+        {
+          "id": "terminal",
+          "kind": "borrow",
+          "title": {
+            "en": "4. Open and run",
+            "ru": "4. Открыть и запустить"
+          },
+          "label": "ManagedScene::run → Application::run",
+          "detail": {
+            "en": "Native transport opens after preparation; a caller-provided transport is borrowed synchronously. Application run is single-use and checks thread affinity. Input, Scheduler, router and frames use the same runtime. Native open failure also requires explicit managed cleanup.",
+            "ru": "Native transport открывается после подготовки; пользовательский transport заимствуется синхронно. Application run одноразовый и проверяет поток. Input, Scheduler, router и кадры используют один runtime. При ошибке native open также нужен явный managed cleanup."
+          },
+          "source": {
+            "path": "src/runtime/application.cpp",
+            "line": 720,
+            "anchor": "std::expected<ApplicationStats, ApplicationError> Application::run(ApplicationScene &scene, std::stop_token stop) {"
+          }
+        },
+        {
+          "id": "stop",
+          "kind": "flow",
+          "title": {
+            "en": "5. Stop producers",
+            "ru": "5. Остановить производителей"
+          },
+          "label": "requestStop → Scheduler::stop → scene.stop",
+          "detail": {
+            "en": "On exit or failure the runner requests stop, stops Scheduler and calls scene.stop. ui::onStop releases external services borrowing Application before managed teardown. Callback failure is captured and terminal close is still attempted. Cancellation is not a hard shutdown deadline.",
+            "ru": "При выходе или ошибке runner запрашивает stop, останавливает Scheduler и вызывает scene.stop. ui::onStop освобождает внешние сервисы, заимствующие Application, до managed teardown. Ошибка callback сохраняется, попытка terminal close всё равно выполняется. Cancellation не задаёт жёсткого срока завершения."
+          },
+          "source": {
+            "path": "src/runtime/application.cpp",
+            "line": 788,
+            "anchor": "phase = ApplicationPhase::STOP;"
+          }
+        },
+        {
+          "id": "cleanup",
+          "kind": "flow",
+          "title": {
+            "en": "6. Restore and close",
+            "ru": "6. Восстановить и закрыть"
+          },
+          "label": "terminal.close → Scene::cleanup",
+          "detail": {
+            "en": "Terminal close attempts restoration. The fluent boundary then revokes public observation, clears live controllers, closes ManagedScene and retires recipe/configuration captures. Original failure, independent application/restoration detail and cleanup failure remain distinguishable.",
+            "ru": "Terminal close пытается восстановить терминал. Затем fluent-граница отзывает публичное наблюдение, очищает live controllers, закрывает ManagedScene и освобождает захваты описания и настроек. Исходная ошибка, независимые application/restoration details и ошибка cleanup остаются различимыми."
+          },
+          "source": {
+            "path": "src/widgets/ui_scene.cpp",
+            "line": 844,
+            "anchor": "std::expected<void, ManagedError> cleanup(std::source_location origin) {"
+          }
+        },
+        {
+          "id": "report",
+          "kind": "error",
+          "title": {
+            "en": "7. Return or report",
+            "ru": "7. Вернуть или сообщить"
+          },
+          "label": "run → expected / runApp → exit code",
+          "detail": {
+            "en": "Scene::run returns typed expected. runApp reports only after its run and cleanup boundary, returning 0 for success or 1 for failure. Its default final sink writes stderr; a custom sink controls presentation. Factory/setup wrappers cover work inside their callables, not argument evaluation before entry.",
+            "ru": "Scene::run возвращает типизированный expected. runApp сообщает результат после run и cleanup: 0 при успехе, 1 при ошибке. По умолчанию итоговый sink пишет в stderr; пользовательский sink задаёт представление. Обёртки factory/setup покрывают работу внутри callable, но не вычисление аргументов до входа."
+          },
+          "source": {
+            "path": "src/widgets/ui_scene.cpp",
+            "line": 1817,
+            "anchor": "int Scene::runAppImpl(ApplicationTerminal *terminal, std::stop_token stop, std::source_location origin) {"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "recipe",
+          "to": "prepare",
+          "label": {
+            "en": "Normal successful path; failures follow cleanup",
+            "ru": "Обычный успешный путь; ошибки проходят cleanup"
+          }
+        },
+        {
+          "from": "prepare",
+          "to": "mount",
+          "label": {
+            "en": "Normal successful path; failures follow cleanup",
+            "ru": "Обычный успешный путь; ошибки проходят cleanup"
+          }
+        },
+        {
+          "from": "mount",
+          "to": "terminal",
+          "label": {
+            "en": "Normal successful path; failures follow cleanup",
+            "ru": "Обычный успешный путь; ошибки проходят cleanup"
+          }
+        },
+        {
+          "from": "terminal",
+          "to": "stop",
+          "label": {
+            "en": "Normal successful path; failures follow cleanup",
+            "ru": "Обычный успешный путь; ошибки проходят cleanup"
+          }
+        },
+        {
+          "from": "stop",
+          "to": "cleanup",
+          "label": {
+            "en": "Normal successful path; failures follow cleanup",
+            "ru": "Обычный успешный путь; ошибки проходят cleanup"
+          }
+        },
+        {
+          "from": "cleanup",
+          "to": "report",
+          "label": {
+            "en": "Normal successful path; failures follow cleanup",
+            "ru": "Обычный успешный путь; ошибки проходят cleanup"
+          }
+        }
+      ]
+    },
+    {
+      "id": "frame",
+      "title": {
+        "en": "One service cycle and dirty frame",
+        "ru": "Один цикл и dirty-кадр"
+      },
+      "intro": {
+        "en": "The runner services bounded work once per cycle. A pending output transaction or cadence deadline postpones rendering without discarding dirty state.",
+        "ru": "Runner обслуживает ограниченную работу один раз за цикл. Незавершённый вывод или срок cadence откладывает rendering, сохраняя dirty-состояние."
+      },
+      "nodes": [
+        {
+          "id": "input",
+          "kind": "flow",
+          "title": {
+            "en": "1. Read and admit",
+            "ru": "1. Прочитать и допустить"
+          },
+          "label": "native read → decoder → CONTROL",
+          "detail": {
+            "en": "Native read is the wait primitive. Bounded admission retains one native batch/raw suffix and a rejected CONTROL owner under pressure. Windows events are already decoded; POSIX input preserves arrival timestamps for streaming decoder deadlines.",
+            "ru": "Native read служит примитивом ожидания. Ограниченный admission при перегрузке удерживает один native batch/raw suffix и отклонённого CONTROL owner. Windows events уже декодированы; POSIX-ввод сохраняет время прихода для deadlines потокового decoder."
+          },
+          "source": {
+            "path": "src/runtime/application.cpp",
+            "line": 337,
+            "anchor": "void readInput() {"
+          }
+        },
+        {
+          "id": "dispatch",
+          "kind": "flow",
+          "title": {
+            "en": "2. Dispatch once",
+            "ru": "2. Один dispatch"
+          },
+          "label": "Scheduler → scene.input → EventRouter",
+          "detail": {
+            "en": "CONTROL and DATA have separate budgets. scene.input may consume global input; otherwise EventRouter resolves focus/hit target and action, then delivers checked handlers. Equal Property values do not cause a new invalidation. A successful mutation receipt can still carry notification rejections.",
+            "ru": "CONTROL и DATA имеют отдельные budgets. scene.input может обработать глобальный ввод; иначе EventRouter определяет focus/hit target и action, затем вызывает проверенные handlers. Равное значение Property не создаёт новой invalidation. Успешная квитанция изменения может содержать отклонения уведомлений."
+          },
+          "source": {
+            "path": "src/runtime/application.cpp",
+            "line": 443,
+            "anchor": "bool dispatch() {"
+          }
+        },
+        {
+          "id": "idle",
+          "kind": "flow",
+          "title": {
+            "en": "3. Dirty and output gate",
+            "ru": "3. Проверить dirty и вывод"
+          },
+          "label": "pending? / cadence? / Invalidation::NONE?",
+          "detail": {
+            "en": "renderReady returns while output is pending or cadence is not ready. With no dirty request it returns before preparation and painting. Idle still samples input and resize; it emits no periodic frame without invalidation. A late cycle does not cause catch-up frames.",
+            "ru": "renderReady возвращается, пока вывод не завершён или не наступил срок cadence. Без dirty-request он возвращается до подготовки и paint. Idle продолжает проверять input и resize; периодического кадра без invalidation нет. Опоздание цикла не вызывает догоняющую серию кадров."
+          },
+          "source": {
+            "path": "src/runtime/application.cpp",
+            "line": 539,
+            "anchor": "void renderReady() {"
+          }
+        },
+        {
+          "id": "prepare-frame",
+          "kind": "flow",
+          "title": {
+            "en": "4. Prepare coherent views",
+            "ru": "4. Подготовить согласованные views"
+          },
+          "label": "scene.prepare → layout snapshot → prepareViews",
+          "detail": {
+            "en": "Scene preparation synchronizes bindings and pins model revisions. Prepared views use final layout extents; a preparation-triggered layout invalidation can repeat the bounded pass. Provider request receipts are handled outside paint. Preparation starts no hidden provider worker.",
+            "ru": "Подготовка сцены синхронизирует bindings и удерживает ревизии моделей. Подготовленные views используют итоговую геометрию layout; layout-invalidation при подготовке может повторить ограниченный проход. Квитанции provider requests обрабатываются вне paint. Подготовка не запускает скрытый provider worker."
+          },
+          "source": {
+            "path": "src/runtime/application.cpp",
+            "line": 522,
+            "anchor": "void prepareViews(DiagnosticContext &frameContext) {"
+          }
+        },
+        {
+          "id": "paint",
+          "kind": "flow",
+          "title": {
+            "en": "5. Layout and paint",
+            "ru": "5. Layout и paint"
+          },
+          "label": "WidgetTree::frame → renderer → CellBuffer",
+          "detail": {
+            "en": "Visible nodes paint through arranged surfaces and clips inside WidgetTree::frame. Renderer consumes borrowed commands into owning cells. A prepare/render failure ends the run with its original cause; the runner submits no partially built frame. Tree painting alone does not roll back earlier callback effects.",
+            "ru": "Видимые узлы рисуют через arranged surfaces и clips внутри WidgetTree::frame. Renderer преобразует заимствованные команды во владеющие cells. Ошибка prepare/render завершает run с исходной причиной; runner не отправляет частично построенный кадр. Само рисование tree не откатывает предыдущие эффекты callback."
+          },
+          "source": {
+            "path": "src/runtime/application.cpp",
+            "line": 454,
+            "anchor": "CellBuffer buildFrame() {"
+          }
+        },
+        {
+          "id": "output",
+          "kind": "owner",
+          "title": {
+            "en": "6. Submit and flush",
+            "ru": "6. Отправить и дописать"
+          },
+          "label": "FrameWriter: diff → encode → bounded flush",
+          "detail": {
+            "en": "FrameWriter retains partial output and advances committed state only after complete consistent acceptance. An update can produce an empty diff. Any transport error ends this run; uncertain bytes are not reopened or replayed. Flush occurs at most once per cycle.",
+            "ru": "FrameWriter удерживает частичный вывод и меняет committed state только после полного согласованного принятия. Обновление может дать пустой diff. Любая транспортная ошибка завершает этот run; неопределённые байты не переотправляются и transport не открывается повторно. Flush выполняется не чаще раза за цикл."
+          },
+          "source": {
+            "path": "src/runtime/application.cpp",
+            "line": 582,
+            "anchor": "void flushOutput() {"
+          }
+        },
+        {
+          "id": "eof",
+          "kind": "status",
+          "title": {
+            "en": "EOF and cancellation limits",
+            "ru": "Ограничения EOF и cancellation"
+          },
+          "label": "EOF ≠ render all future work",
+          "detail": {
+            "en": "EOF finishes decoding, delivers admitted CONTROL and flushes submitted output. It does not wait for future frames, timers or DATA: a delivered edit may remain dirty and never be displayed. Cancellation can stop earlier. Native close depends on host/driver progress.",
+            "ru": "EOF завершает decoding, доставляет допущенный CONTROL и дописывает отправленный вывод. Он не ждёт будущих кадров, timers или DATA: доставленное изменение может остаться dirty и не отобразиться. Cancellation может остановить раньше. Native close зависит от host/driver progress."
+          },
+          "source": {
+            "path": "src/runtime/application.cpp",
+            "line": 610,
+            "anchor": "void execute() {"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "input",
+          "to": "dispatch",
+          "label": {
+            "en": "Normal successful path; failures follow cleanup",
+            "ru": "Обычный успешный путь; ошибки проходят cleanup"
+          }
+        },
+        {
+          "from": "dispatch",
+          "to": "idle",
+          "label": {
+            "en": "Normal successful path; failures follow cleanup",
+            "ru": "Обычный успешный путь; ошибки проходят cleanup"
+          }
+        },
+        {
+          "from": "idle",
+          "to": "prepare-frame",
+          "label": {
+            "en": "Normal successful path; failures follow cleanup",
+            "ru": "Обычный успешный путь; ошибки проходят cleanup"
+          }
+        },
+        {
+          "from": "prepare-frame",
+          "to": "paint",
+          "label": {
+            "en": "Normal successful path; failures follow cleanup",
+            "ru": "Обычный успешный путь; ошибки проходят cleanup"
+          }
+        },
+        {
+          "from": "paint",
+          "to": "output",
+          "label": {
+            "en": "Normal successful path; failures follow cleanup",
+            "ru": "Обычный успешный путь; ошибки проходят cleanup"
+          }
+        }
+      ]
+    },
+    {
+      "id": "errors",
+      "title": {
+        "en": "Failure collection and policy",
+        "ru": "Сбор ошибок и политика"
+      },
+      "intro": {
+        "en": "Red cards mark failure boundaries. Collector, observer and final sink have different lifetimes and effects. Reporting an error alone does not choose recovery.",
+        "ru": "Красные карточки отмечают границы ошибок. Collector, observer и итоговый sink имеют разные lifetime и эффекты. Само сообщение об ошибке не выбирает recovery."
+      },
+      "nodes": [
+        {
+          "id": "typed",
+          "kind": "error",
+          "title": {
+            "en": "Typed cause and provenance",
+            "ru": "Типизированная причина и источник"
+          },
+          "label": "ManagedError / ApplicationError",
+          "detail": {
+            "en": "Checked operations return expected. ManagedError retains phase, node, original tree/style/application cause and optional exact text/resource details. ApplicationError keeps the primary phase/cause and separate restoration. Optional independent application and cleanup details do not overwrite the primary managed cause.",
+            "ru": "Проверяемые операции возвращают expected. ManagedError сохраняет phase, node, исходную tree/style/application cause и точные text/resource details. ApplicationError хранит primary phase/cause отдельно от restoration. Независимые application и cleanup details не подменяют исходную managed cause."
+          },
+          "source": {
+            "path": "include/portals/managed_diagnostics.hpp",
+            "line": 53,
+            "anchor": "struct ManagedError {"
+          }
+        },
+        {
+          "id": "collect",
+          "kind": "owner",
+          "title": {
+            "en": "Bounded collector",
+            "ru": "Ограниченный collector"
+          },
+          "label": "ManagedScene::reportError / diagnostics",
+          "detail": {
+            "en": "Explicit reportError records and notifies, without requesting a frame or stopping the runner. History retains the oldest errors up to maxErrors; overflow increments droppedErrors. Context count and bytes are bounded. Owning diagnostics snapshots remain inspectable after close.",
+            "ru": "Явный reportError сохраняет и уведомляет, не запрашивая кадр и не останавливая runner. История удерживает старые ошибки до maxErrors; overflow увеличивает droppedErrors. Количество contexts и bytes ограничено. Владеющие diagnostics snapshots доступны для чтения после close."
+          },
+          "source": {
+            "path": "src/widgets/managed.cpp",
+            "line": 616,
+            "anchor": "std::expected<void, TreeError> ManagedScene::reportError(ManagedError failure,"
+          }
+        },
+        {
+          "id": "observer",
+          "kind": "borrow",
+          "title": {
+            "en": "Synchronous observer",
+            "ru": "Синхронный observer"
+          },
+          "label": "onError(ManagedDiagnostic const&)",
+          "detail": {
+            "en": "Immediate managed notifications run on UI after recording, before terminal restoration; the diagnostic is borrowed for the call. A throw marks observerFailed without replacing the cause. Nested reports do not recurse; mutation/clear/drain/close are rejected during notification. No managed observer runs after close. The fluent facade can use a fallback observer when no live managed collector can deliver the primary, including a pre-owner setup failure after its cleanup attempt.",
+            "ru": "Немедленные managed-уведомления выполняются в UI после записи, до восстановления терминала; diagnostic заимствован на время вызова. Исключение отмечает observerFailed, сохраняя причину. Вложенные reports не вызывают рекурсию; mutation/clear/drain/close отклоняются во время уведомления. После close managed observer не вызывается. Fluent-фасад может использовать fallback observer, когда живой managed collector не может доставить primary, в том числе для setup-ошибки до создания владельца после попытки cleanup."
+          },
+          "source": {
+            "path": "docs/managed-controls.md",
+            "line": 261,
+            "anchor": "`onError` owns its copyable callback and mutable captures. It runs synchronously"
+          }
+        },
+        {
+          "id": "recover",
+          "kind": "flow",
+          "title": {
+            "en": "Explicit recovery policy",
+            "ru": "Явная политика recovery"
+          },
+          "label": "expected handling / explicit reportError",
+          "detail": {
+            "en": "Applications may handle a returned checked error and explicitly report it while continuing. Collector inspection or draining does not clear a latched runtime failure. Recovery must respect the operation contract; there is no automatic widget replacement or retry of uncertain output.",
+            "ru": "Приложение может обработать возвращённую checked-ошибку и явно сообщить её, продолжая работу. Чтение или drain collector не снимает сохранённую runtime-ошибку. Recovery соблюдает контракт операции; автоматической замены виджета или повтора неопределённого вывода нет."
+          },
+          "source": {
+            "path": "docs/managed-controls.md",
+            "line": 204,
+            "anchor": "`reportError(error, contexts, origin)` collects an explicit error and notifies the"
+          }
+        },
+        {
+          "id": "fatal",
+          "kind": "error",
+          "title": {
+            "en": "Latched failure and stop",
+            "ru": "Сохранённая ошибка и stop"
+          },
+          "label": "setup short mutation / managed runtime failure",
+          "detail": {
+            "en": "Managed runtime failure uses the first-failure path and requests orderly shutdown. Short rejected setup mutations latch their original typed cause before observers and stop later configuration. Callback exceptions translate to boundary errors. Failure of the observer does not turn a fatal result into success.",
+            "ru": "Managed runtime failure сохраняет первую ошибку и запрашивает упорядоченное завершение. Короткие отклонённые setup-изменения сохраняют исходную типизированную причину до observers и останавливают последующие настройки. Исключения callback преобразуются в ошибки границы. Сбой observer не превращает fatal result в успех."
+          },
+          "source": {
+            "path": "src/widgets/ui_scene.cpp",
+            "line": 761,
+            "anchor": "static void setupEvent(void *publication, detail::SetupFailureEvent event, ManagedError *cause,"
+          }
+        },
+        {
+          "id": "primary-cleanup",
+          "kind": "error",
+          "title": {
+            "en": "Preserve cleanup evidence",
+            "ru": "Сохранить ошибки cleanup"
+          },
+          "label": "stop → close → primary + restoration + cleanup",
+          "detail": {
+            "en": "Cleanup is attempted after failure, including partial construction. Application retains the first phase/cause plus separate terminal restoration; it does not collect every later exception. Managed wrappers retain independent cleanup details and shutdown diagnostics. Resource cleanup does not roll back domain effects. OS and screen restoration have separate limitations; native close has no hard deadline.",
+            "ru": "Cleanup выполняется после ошибки, включая частичное создание. Application хранит первую phase/cause и отдельно terminal restoration; он не собирает все последующие исключения. Managed-обёртки сохраняют независимые cleanup details и shutdown diagnostics. Освобождение ресурсов не откатывает domain effects. Восстановление OS и экрана имеет отдельные ограничения; у native close нет жёсткого deadline."
+          },
+          "source": {
+            "path": "src/runtime/application.cpp",
+            "line": 788,
+            "anchor": "phase = ApplicationPhase::STOP;"
+          }
+        },
+        {
+          "id": "sink",
+          "kind": "error",
+          "title": {
+            "en": "Final application sink",
+            "ru": "Итоговый sink приложения"
+          },
+          "label": "reportOnError / runApp / stderr default",
+          "detail": {
+            "en": "The final SceneReport carries a typed final failure or bounded retained/dropped counts after the run/cleanup boundary; full details remain in diagnostics(). The sink borrows the report for its call only. A thrown sink falls back to stderr with the original report. Direct run callers inspect expected and choose reporting.",
+            "ru": "Итоговый SceneReport передаёт типизированную итоговую ошибку или ограниченные retained/dropped counts после границы run/cleanup; полные details остаются в diagnostics(). Sink заимствует report только на время вызова. Исключение sink вызывает fallback в stderr с исходным report. Вызывающий прямой run проверяет expected и выбирает способ сообщения."
+          },
+          "source": {
+            "path": "include/portals/ui_scene.hpp",
+            "line": 21,
+            "anchor": "struct SceneReport {"
+          }
+        }
+      ],
+      "edges": []
+    },
+    {
+      "id": "milestones",
+      "title": {
+        "en": "Milestone evidence and remaining work",
+        "ru": "Milestones: факты и оставшаяся работа"
+      },
+      "intro": {
+        "en": "This is an in-progress M1 source snapshot. It is not milestone acceptance or a release declaration. Earlier baseline and current changes are pinned; future snapshots are a maintenance process.",
+        "ru": "Это снимок исходников внутри M1. Он не означает приёмку milestone или выпуск. Предыдущая база и текущие изменения закреплены; будущие snapshots — процесс сопровождения."
+      },
+      "nodes": [
+        {
+          "id": "baseline",
+          "kind": "status",
+          "title": {
+            "en": "Earlier source baseline",
+            "ru": "Предыдущая исходная база"
+          },
+          "label": "M0 comparison: 849dc6285d7ef863206e8248810ee0650413b0a2",
+          "detail": {
+            "en": "The earlier comparison revision already contains typed styles/PSS integration. The public foundation does not claim to publish or independently qualify a historical M0 snapshot. Use the pinned revision for source comparison; the current cards describe 968651a.",
+            "ru": "Предыдущая сравниваемая ревизия уже содержит typed styles/PSS integration. Публичная foundation не объявляет исторический M0 snapshot опубликованным или независимо проверенным. Для сравнения используйте закреплённую ревизию; текущие карточки описывают 968651a."
+          },
+          "source": {
+            "path": "docs/compile-time-pss.md",
+            "line": 1,
+            "revision": "849dc6285d7ef863206e8248810ee0650413b0a2",
+            "anchor": "# PSS strings at compile time and runtime {#compile_time_pss}"
+          }
+        },
+        {
+          "id": "keys",
+          "kind": "status",
+          "title": {
+            "en": "Delivered since the baseline",
+            "ru": "Реализовано после базы"
+          },
+          "label": "semantic keys / phase selection / sequences",
+          "detail": {
+            "en": "The current committed source has semantic key bindings, press/repeat/release selection, bounded key sequences and scoped quit commands. These additions use the existing router and scheduler. This statement covers these source features, not all M1 work.",
+            "ru": "Текущая закреплённая версия содержит semantic key bindings, выбор press/repeat/release, ограниченные key sequences и scoped quit commands. Дополнения используют существующие router и scheduler. Это статус перечисленных возможностей исходников, не всего M1."
+          },
+          "source": {
+            "path": "docs/input.md",
+            "line": 1,
+            "anchor": "# Keyboard input"
+          }
+        },
+        {
+          "id": "setup-change",
+          "kind": "status",
+          "title": {
+            "en": "Setup failure propagation",
+            "ru": "Передача setup-ошибок"
+          },
+          "label": "first rejected short setup mutation → stop",
+          "detail": {
+            "en": "Since the earlier baseline, rejected short setup mutations retain typed failure and stop subsequent configure callbacks. This corrects the older limitation where a void configure could record the diagnostic without stopping setup. Current snapshot follows the corrected contract.",
+            "ru": "После предыдущей базы короткие отклонённые setup-изменения сохраняют типизированную ошибку и останавливают следующие configure. Это исправляет прежнее ограничение, когда void configure мог записать diagnostic без остановки setup. Текущий snapshot следует исправленному контракту."
+          },
+          "source": {
+            "path": "src/widgets/ui_scene.cpp",
+            "line": 761,
+            "anchor": "static void setupEvent(void *publication, detail::SetupFailureEvent event, ManagedError *cause,"
+          }
+        },
+        {
+          "id": "launch-change",
+          "kind": "status",
+          "title": {
+            "en": "Lazy launch and retained core",
+            "ru": "Ленивый запуск и retained core"
+          },
+          "label": "ui::launch + same Application / tree / router",
+          "detail": {
+            "en": "Lazy CLI launch can show help without constructing the scene factory. Fluent stages still prepare and run the same retained core. Single UI-thread ownership, checked observing handles, dirty-only frames and explicit cleanup remain the core invariants.",
+            "ru": "Ленивый CLI-запуск может показать справку без создания scene factory. Fluent stages по-прежнему подготавливают и запускают тот же retained core. Владение в одном UI-потоке, проверяемые observing handles, dirty-only frames и явный cleanup сохраняются как основные инварианты."
+          },
+          "source": {
+            "path": "include/portals/ui.hpp",
+            "line": 1980,
+            "anchor": "* @param setup Invoked on one stationary facade; capture SceneRef for later callbacks across facade moves."
+          }
+        },
+        {
+          "id": "remaining",
+          "kind": "status",
+          "title": {
+            "en": "M1 remains in progress",
+            "ru": "M1 остаётся в работе"
+          },
+          "label": "Concurrent and future changes require a new snapshot",
+          "detail": {
+            "en": "This source baseline does not include uncommitted range composition, named references/scoped style changes or later controls/focus work. Their delivery and verification are separate. Update the architecture only from integrated, checked source; do not mark the whole milestone complete from this foundation.",
+            "ru": "Эта исходная база не включает незакоммиченные range composition, named references/scoped style changes и последующую работу controls/focus. Их поставка и проверки учитываются отдельно. Обновляйте архитектуру по интегрированным проверенным исходникам; foundation не завершает весь milestone."
+          },
+          "source": {
+            "path": "docs/planned-features.md",
+            "line": 1,
+            "anchor": "# Planned features {#planned-features}"
+          }
+        },
+        {
+          "title": {
+            "en": "Named verification evidence",
+            "ru": "Доказательства проверок"
+          },
+          "detail": {
+            "en": "Baseline integration: PR36 CI run 38799649714 completed 6/6 checks successfully for PR head 28723ed04810c597c2fe31f0d75cd9416c5916ac, merged as 968651a. Snapshot authoring separately passed 8 exporter/source/help tests and 40 offline browser map/language/theme/width combinations, including actual SVG downloads. These are documentation checks, not a new C++ runtime suite. New full Doxygen build and delivered artifact: NOT_VERIFIED at authoring boundary; integration remains required.",
+            "ru": "Интеграция базы: PR36 CI run 38799649714 завершил 6/6 проверок успешно для PR head 28723ed04810c597c2fe31f0d75cd9416c5916ac, слитого как 968651a. Отдельно при подготовке snapshot прошли 8 exporter/source/help tests и 40 offline browser combinations карт/языков/тем/ширины, включая реальные скачивания SVG. Это проверки документации, не новый C++ runtime suite. Новая полная Doxygen-сборка и поставленный артефакт: NOT_VERIFIED на границе подготовки; интеграция обязательна."
+          },
+          "label": "Baseline CI 6/6 / exporter 8 / browser 40",
+          "id": "checks",
+          "evidence": [
+            {
+              "label": {
+                "en": "Baseline integration PR #36",
+                "ru": "PR #36: интеграция базы"
+              },
+              "url": "https://github.com/ttldtor/portals/pull/36"
+            },
+            {
+              "label": {
+                "en": "Baseline CI run: 6/6 SUCCESS",
+                "ru": "CI базы: 6/6 SUCCESS"
+              },
+              "url": "https://github.com/ttldtor/portals/actions/runs/38799649714"
+            }
+          ],
+          "source": {
+            "line": 1,
+            "path": "docs/testing.md",
+            "anchor": "# Headless terminal testing"
+          },
+          "kind": "status"
+        }
+      ],
+      "edges": []
+    }
+  ]
+}

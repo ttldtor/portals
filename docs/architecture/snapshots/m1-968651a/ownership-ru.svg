@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 670" role="img" aria-labelledby="title desc">
+<title id="title">Владельцы и заимствованные сервисы</title>
+<desc id="desc">M1 в работе · закреплённая версия исходников. Роли: синий — владелец ресурсов, фиолетовый — наблюдение или заимствование, зелёный — координация. Изменяемые UI-сервисы работают в создавшем их потоке. Отношения указаны в описаниях.</desc>
+<style>text{font-family:system-ui,Segoe UI,sans-serif} .paper{fill:#f5f7fc}.card{fill:#fff}.ink{fill:#17233a}.muted{fill:#42516a} a:focus rect{stroke-width:5} @media(prefers-color-scheme:dark){.paper{fill:#121b2b}.card{fill:#1c2a40}.ink{fill:#f2f5fc}.muted{fill:#d2dced}}</style>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7387a8"/></marker></defs>
+<rect class="paper" width="960" height="670" rx="12"/>
+<text class="ink" x="22" y="32" font-size="23" font-weight="700">Владельцы и заимствованные сервисы</text>
+<text class="muted" x="22" y="58" font-size="14">m1-968651a · M1 в работе · закреплённая версия исходников</text>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/src/widgets/ui_scene.cpp#L921" target="_blank" rel="noopener" data-node="facade"><title>Фасад хранит описание и отложенные настройки. Подготовка создаёт Application и ManagedScene. При разрушении ManagedScene освобождается раньше Application. Перемещение или разрушение активного фасада либо выполнение этого в чужом потоке завершает процесс; callback не должен разрушать владельца или повторно входить в его lifecycle.</title>
+<rect class="card" x="22" y="80" width="440" height="154" rx="10" stroke="#1759a8" stroke-width="2"/>
+<rect x="22" y="80" width="7" height="154" rx="3" fill="#1759a8"/>
+<text class="ink" x="42" y="110" font-size="20" font-weight="650">Фасад Scene</text>
+<text class="muted" x="42" y="168" font-size="14">ui::Scene → Application + ManagedScene</text>
+<text class="muted" x="42" y="213" font-size="12">1 · owner · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/src/runtime/application.cpp#L233" target="_blank" rel="noopener" data-node="application"><title>Application владеет одним синхронным UI runtime. Router и tree освобождаются раньше Scheduler. ApplicationScene заимствует сервисы на одноразовый запуск; вызывающая сторона сохраняет сцену до возврата run.</title>
+<rect class="card" x="498" y="80" width="440" height="154" rx="10" stroke="#1759a8" stroke-width="2"/>
+<rect x="498" y="80" width="7" height="154" rx="3" fill="#1759a8"/>
+<text class="ink" x="518" y="110" font-size="20" font-weight="650">Сервисы Application</text>
+<text class="muted" x="518" y="168" font-size="14">Application → Scheduler / WidgetTree /</text>
+<text class="muted" x="518" y="187" font-size="14">EventRouter</text>
+<text class="muted" x="518" y="213" font-size="12">2 · owner · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/docs/managed-controls.md#L40" target="_blank" rel="noopener" data-node="managed"><title>ManagedScene заимствует Application и владеет моделями, scoped bindings, захватами callback и управляемым поддеревом. Close отключает регистрации и удаляет поддерево. Захваченные внешние сервисы по-прежнему подчиняются контракту lifetime приложения.</title>
+<rect class="card" x="498" y="270" width="440" height="154" rx="10" stroke="#1759a8" stroke-width="2"/>
+<rect x="498" y="270" width="7" height="154" rx="3" fill="#1759a8"/>
+<text class="ink" x="518" y="300" font-size="20" font-weight="650">Ресурсы ManagedScene</text>
+<text class="muted" x="518" y="358" font-size="14">ManagedScene → models / bindings / subtree</text>
+<text class="muted" x="518" y="403" font-size="12">3 · owner · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/docs/widget-tree.md#L1" target="_blank" rel="noopener" data-node="handles"><title>Node&lt;T&gt; не владеет виджетом. Session, slot и generation задают проверяемый наблюдатель; read/edit выдают ссылку только на время callback. Удаление сразу инвалидирует handles. Активное заимствование откладывает физическое освобождение до внешней границы. ui::Ref публикуется по правилам успешного mount.</title>
+<rect class="card" x="22" y="270" width="440" height="154" rx="10" stroke="#7045a1" stroke-width="2"/>
+<rect x="22" y="270" width="7" height="154" rx="3" fill="#7045a1"/>
+<text class="ink" x="42" y="300" font-size="20" font-weight="650">Проверяемые наблюдатели узлов</text>
+<text class="muted" x="42" y="358" font-size="14">Node&lt;T&gt; / ui::Ref&lt;T&gt; / read / edit</text>
+<text class="muted" x="42" y="403" font-size="12">4 · borrow · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/docs/scheduler.md#L1" target="_blank" rel="noopener" data-node="producers"><title>Worker публикует владеющие неизменяемые данные через ограниченные endpoints; tree, scene и collector он не изменяет. Scoped cancellation запрещает будущие callback, но не прерывает активный и не выполняет join производителя. При остановке сцена должна остановить и присоединить принадлежащих ей производителей.</title>
+<rect class="card" x="22" y="460" width="440" height="154" rx="10" stroke="#7045a1" stroke-width="2"/>
+<rect x="22" y="460" width="7" height="154" rx="3" fill="#7045a1"/>
+<text class="ink" x="42" y="490" font-size="20" font-weight="650">Граница worker-публикации</text>
+<text class="muted" x="42" y="548" font-size="14">Worker → bounded Scheduler endpoint → UI</text>
+<text class="muted" x="42" y="593" font-size="12">5 · borrow · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/docs/render.md#L1" target="_blank" rel="noopener" data-node="presentation"><title>ModelFrame удерживает одну неизменяемую ревизию для соседних views. Подготовленное представление владеет данными до конца paint. Renderer преобразует заимствованные текстовые команды во владеющий CellBuffer до возврата. FrameWriter удерживает ожидающий вывод до согласованного принятия; принятие транспортом не доказывает физическое отображение.</title>
+<rect class="card" x="498" y="460" width="440" height="154" rx="10" stroke="#1759a8" stroke-width="2"/>
+<rect x="498" y="460" width="7" height="154" rx="3" fill="#1759a8"/>
+<text class="ink" x="518" y="490" font-size="20" font-weight="650">Владение данными кадра</text>
+<text class="muted" x="518" y="548" font-size="14">ModelFrame → prepared views → CellBuffer →</text>
+<text class="muted" x="518" y="567" font-size="14">FrameWriter</text>
+<text class="muted" x="518" y="593" font-size="12">6 · owner · source ↗</text></a>
+</svg>

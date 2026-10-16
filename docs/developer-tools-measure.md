@@ -2,6 +2,103 @@
 
 [Русская версия](ru/developer-tools-measure.md) · [Tool catalog](developer-tools.md)
 
+<a id="tool-change-impact"></a>
+## Measure includes and rebuild footprint
+
+`tools/quality/change_impact.py` reads the dependencies recorded by an existing
+Ninja build. It identifies observed affected compile outputs, translation units
+and CMake targets for each `--changed` file. It never builds or selects CI jobs.
+Python 3.10+ with the standard library is an authoring dependency; SDK consumers
+do not need it. Ninja's [tool reference](https://ninja-build.org/manual.html#_extra_tools)
+defines `-t deps` and `-t compdb`.
+
+```powershell
+python tools/quality/change_impact.py --help
+python tools/quality/change_impact.py --build-dir build/tools --changed include/portals/managed_diagnostics.hpp --output-dir build/impact-001
+python tools/quality/change_impact.py --deps build/impact-001/ninja-deps.txt --compdb build/impact-001/ninja-compdb.json --recorded-source-root C:/src/portals --changed include/portals/style.hpp
+python tools/quality/test_change_impact.py
+```
+
+The offline example assumes the capture was built from `C:/src/portals`; supply
+the actual root spelling in your records. Use a new output directory for each
+receipt. Ordinary `compile_commands.json` can lack `output`; this tool requires
+Ninja's `-t compdb` format and rejects records without that field.
+
+| Argument | Meaning | Default |
+| --- | --- | --- |
+| `--build-dir DIR` | Existing Ninja build; read-only `-t deps` and `-t compdb` | No default; choose this or `--deps` |
+| `--deps FILE` | Recorded UTF-8 dependency capture; requires `--compdb` and `--recorded-source-root` | No default |
+| `--compdb FILE` | Recorded Ninja JSON with `directory`, `file` and `output` | No default |
+| `--source-root DIR` | Checkout scanned for the separate lexical public include graph | Repository containing the script |
+| `--recorded-source-root PATH` | Absolute source-root spelling in captures, including a different host's Windows/POSIX paths | Live: `--source-root`; offline: required |
+| `--source-revision LABEL` | Caller-declared source revision; the analyzer does not verify this label | `unknown` |
+| `--changed FILE` | Source-relative or absolute changed path; repeatable | No impact queries |
+| `--ninja FILE` | Installed Ninja executable, live mode only | `ninja` from PATH |
+| `--output-dir DIR` | New receipt directory; existing paths are rejected | JSON stdout only |
+
+There are no timing units or workload limits. Exit 0 means analysis was produced,
+including a partial/unknown result; 1 means malformed input, I/O or Ninja failure;
+2 means invalid arguments. Help needs no operational inputs and writes nothing.
+An output directory contains `impact.json`, `public-includes.dot`,
+`observed-headers.dot`, `subsystems.dot`, `summary.md` and both raw captures.
+Existing receipts and inputs are never overwritten. An I/O failure may leave a
+partial new directory. JSON includes capture hashes and per-header source hashes.
+No source, build output, Git configuration or running process is changed.
+Graphviz is optional for viewing DOT; the JSON and Markdown need no renderer.
+
+Two different graphs remain explicit. Ninja dependencies are transitive
+observations from the last build. Literal public `#include` edges come from a
+lexical scan of `--source-root`; they include inactive conditional branches and
+do not resolve macro includes or module imports. `subsystems.dot` groups observed
+paths by containing directory; these names do not define architectural roles.
+Live mode checks observed object/dependency modification times. Offline captures
+cannot establish current freshness. Keep the scanned checkout consistent with
+the captured revision; the declared revision label is not a verification step.
+
+Coverage reports unbuilt compile outputs, stale/empty records, unsupported module
+sources and unknown dependency records. Linker and phony compdb rows are excluded;
+linker dependency records are reported separately. Windows paths are normalized
+case-insensitively; case-sensitive Windows directories are outside this model.
+CMake target names come from `CMakeFiles/<target>.dir` paths, preserving their
+spelling; other generators or output layouts can leave a target unknown.
+An unobserved changed file has null impact, never a claimed zero. Missing coverage
+or freshness returns a full/unknown recommendation. Even complete observed
+coverage describes only that configuration and retains required checks.
+
+### Recorded baseline and the diagnostic/style boundary
+
+The [numeric baseline](measurements/include-impact-968651a.json) describes
+source `968651a90b6a1542fd3ab2cec159b457e548681f`, Ninja Release, GCC C++ 14.3.0
+and C 13.3.0, `-O3 -DNDEBUG`, tools enabled and tests/examples/docs disabled.
+Only core and selected quality/benchmark targets were built. It records 46
+compile outputs from 51 configured compile rows; five outputs were unbuilt.
+The 50 raw Ninja records also include four linker records. These counts are
+dependency footprint, not measured compile time or a speed improvement.
+
+| Measurement | Observed value |
+| --- | ---: |
+| Compiler-observed public headers | 57 |
+| Public headers in the separate lexical scan | 61 |
+| Literal public include edges | 99 |
+| `geometry.hpp` affected compile outputs | 34 |
+| `text.hpp` affected compile outputs | 32 |
+| `managed_diagnostics.hpp` affected compile outputs | 7 |
+| `style.hpp` / `detail/pss_data.hpp` affected compile outputs | 9 / 9 |
+| `pss_file_error.hpp` affected compile outputs | 7 |
+
+The baseline [public include graph](measurements/include-impact-968651a.dot)
+and [directory-group graph](measurements/include-subsystems-968651a.dot) are DOT
+text, with the full relative-path edges also in JSON. The
+[diagnostic header](../include/portals/managed_diagnostics.hpp) directly includes
+style, PSS data and file-error categories. The observed fan-in quantifies the
+current boundary; it does not justify moving error variants or predict the
+benefit of a header split. Such changes need their own contracts and measurements.
+
+`test_change_impact.py` is an internal unittest driver: it creates temporary
+fixtures and checks parser failures, stale/unbuilt coverage, Windows/POSIX paths
+with spaces, help side effects, deterministic receipts and preservation of prior
+outputs. It returns unittest status and invokes no compiler or real build.
+
 ## Build the executables
 
 Use CMake 3.24+, Ninja and a C99/C++23 toolchain. On Windows use an x64 Developer

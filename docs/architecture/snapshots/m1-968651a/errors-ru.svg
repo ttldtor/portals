@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 860" role="img" aria-labelledby="title desc">
+<title id="title">Сбор ошибок и политика</title>
+<desc id="desc">M1 в работе · закреплённая версия исходников. Красные карточки отмечают границы ошибок. Collector, observer и итоговый sink имеют разные lifetime и эффекты. Само сообщение об ошибке не выбирает recovery.</desc>
+<style>text{font-family:system-ui,Segoe UI,sans-serif} .paper{fill:#f5f7fc}.card{fill:#fff}.ink{fill:#17233a}.muted{fill:#42516a} a:focus rect{stroke-width:5} @media(prefers-color-scheme:dark){.paper{fill:#121b2b}.card{fill:#1c2a40}.ink{fill:#f2f5fc}.muted{fill:#d2dced}}</style>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7387a8"/></marker></defs>
+<rect class="paper" width="960" height="860" rx="12"/>
+<text class="ink" x="22" y="32" font-size="23" font-weight="700">Сбор ошибок и политика</text>
+<text class="muted" x="22" y="58" font-size="14">m1-968651a · M1 в работе · закреплённая версия исходников</text>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/include/portals/managed_diagnostics.hpp#L53" target="_blank" rel="noopener" data-node="typed"><title>Проверяемые операции возвращают expected. ManagedError сохраняет phase, node, исходную tree/style/application cause и точные text/resource details. ApplicationError хранит primary phase/cause отдельно от restoration. Независимые application и cleanup details не подменяют исходную managed cause.</title>
+<rect class="card" x="22" y="80" width="440" height="154" rx="10" stroke="#a33b27" stroke-width="2"/>
+<rect x="22" y="80" width="7" height="154" rx="3" fill="#a33b27"/>
+<text class="ink" x="42" y="110" font-size="20" font-weight="650">Типизированная причина и</text>
+<text class="ink" x="42" y="134" font-size="20" font-weight="650">источник</text>
+<text class="muted" x="42" y="168" font-size="14">ManagedError / ApplicationError</text>
+<text class="muted" x="42" y="213" font-size="12">1 · error · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/src/widgets/managed.cpp#L616" target="_blank" rel="noopener" data-node="collect"><title>Явный reportError сохраняет и уведомляет, не запрашивая кадр и не останавливая runner. История удерживает старые ошибки до maxErrors; overflow увеличивает droppedErrors. Количество contexts и bytes ограничено. Владеющие diagnostics snapshots доступны для чтения после close.</title>
+<rect class="card" x="498" y="80" width="440" height="154" rx="10" stroke="#1759a8" stroke-width="2"/>
+<rect x="498" y="80" width="7" height="154" rx="3" fill="#1759a8"/>
+<text class="ink" x="518" y="110" font-size="20" font-weight="650">Ограниченный collector</text>
+<text class="muted" x="518" y="168" font-size="14">ManagedScene::reportError / diagnostics</text>
+<text class="muted" x="518" y="213" font-size="12">2 · owner · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/docs/managed-controls.md#L261" target="_blank" rel="noopener" data-node="observer"><title>Немедленные managed-уведомления выполняются в UI после записи, до восстановления терминала; diagnostic заимствован на время вызова. Исключение отмечает observerFailed, сохраняя причину. Вложенные reports не вызывают рекурсию; mutation/clear/drain/close отклоняются во время уведомления. После close managed observer не вызывается. Fluent-фасад может использовать fallback observer, когда живой managed collector не может доставить primary, в том числе для setup-ошибки до создания владельца после попытки cleanup.</title>
+<rect class="card" x="498" y="270" width="440" height="154" rx="10" stroke="#7045a1" stroke-width="2"/>
+<rect x="498" y="270" width="7" height="154" rx="3" fill="#7045a1"/>
+<text class="ink" x="518" y="300" font-size="20" font-weight="650">Синхронный observer</text>
+<text class="muted" x="518" y="358" font-size="14">onError(ManagedDiagnostic const&amp;)</text>
+<text class="muted" x="518" y="403" font-size="12">3 · borrow · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/docs/managed-controls.md#L204" target="_blank" rel="noopener" data-node="recover"><title>Приложение может обработать возвращённую checked-ошибку и явно сообщить её, продолжая работу. Чтение или drain collector не снимает сохранённую runtime-ошибку. Recovery соблюдает контракт операции; автоматической замены виджета или повтора неопределённого вывода нет.</title>
+<rect class="card" x="22" y="270" width="440" height="154" rx="10" stroke="#08796b" stroke-width="2"/>
+<rect x="22" y="270" width="7" height="154" rx="3" fill="#08796b"/>
+<text class="ink" x="42" y="300" font-size="20" font-weight="650">Явная политика recovery</text>
+<text class="muted" x="42" y="358" font-size="14">expected handling / explicit reportError</text>
+<text class="muted" x="42" y="403" font-size="12">4 · flow · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/src/widgets/ui_scene.cpp#L761" target="_blank" rel="noopener" data-node="fatal"><title>Managed runtime failure сохраняет первую ошибку и запрашивает упорядоченное завершение. Короткие отклонённые setup-изменения сохраняют исходную типизированную причину до observers и останавливают последующие настройки. Исключения callback преобразуются в ошибки границы. Сбой observer не превращает fatal result в успех.</title>
+<rect class="card" x="22" y="460" width="440" height="154" rx="10" stroke="#a33b27" stroke-width="2"/>
+<rect x="22" y="460" width="7" height="154" rx="3" fill="#a33b27"/>
+<text class="ink" x="42" y="490" font-size="20" font-weight="650">Сохранённая ошибка и stop</text>
+<text class="muted" x="42" y="548" font-size="14">setup short mutation / managed runtime</text>
+<text class="muted" x="42" y="567" font-size="14">failure</text>
+<text class="muted" x="42" y="593" font-size="12">5 · error · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/src/runtime/application.cpp#L788" target="_blank" rel="noopener" data-node="primary-cleanup"><title>Cleanup выполняется после ошибки, включая частичное создание. Application хранит первую phase/cause и отдельно terminal restoration; он не собирает все последующие исключения. Managed-обёртки сохраняют независимые cleanup details и shutdown diagnostics. Освобождение ресурсов не откатывает domain effects. Восстановление OS и экрана имеет отдельные ограничения; у native close нет жёсткого deadline.</title>
+<rect class="card" x="498" y="460" width="440" height="154" rx="10" stroke="#a33b27" stroke-width="2"/>
+<rect x="498" y="460" width="7" height="154" rx="3" fill="#a33b27"/>
+<text class="ink" x="518" y="490" font-size="20" font-weight="650">Сохранить ошибки cleanup</text>
+<text class="muted" x="518" y="548" font-size="14">stop → close → primary + restoration +</text>
+<text class="muted" x="518" y="567" font-size="14">cleanup</text>
+<text class="muted" x="518" y="593" font-size="12">6 · error · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/include/portals/ui_scene.hpp#L21" target="_blank" rel="noopener" data-node="sink"><title>Итоговый SceneReport передаёт типизированную итоговую ошибку или ограниченные retained/dropped counts после границы run/cleanup; полные details остаются в diagnostics(). Sink заимствует report только на время вызова. Исключение sink вызывает fallback в stderr с исходным report. Вызывающий прямой run проверяет expected и выбирает способ сообщения.</title>
+<rect class="card" x="498" y="650" width="440" height="154" rx="10" stroke="#a33b27" stroke-width="2"/>
+<rect x="498" y="650" width="7" height="154" rx="3" fill="#a33b27"/>
+<text class="ink" x="518" y="680" font-size="20" font-weight="650">Итоговый sink приложения</text>
+<text class="muted" x="518" y="738" font-size="14">reportOnError / runApp / stderr default</text>
+<text class="muted" x="518" y="783" font-size="12">7 · error · source ↗</text></a>
+</svg>

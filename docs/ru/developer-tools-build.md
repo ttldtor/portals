@@ -7,6 +7,131 @@ PowerShell выполняются из корня репозитория. Нуж
 эти Python-скрипты используют стандартную библиотеку. Пути сборки в примерах
 можно заменить своими.
 
+<a id="tool-architecture-ru"></a>
+## Exports архитектурных снимков
+
+`tools/docs/architecture.py` создаёт SVG на EN/RU и автономный HTML viewer
+из `maps.json` и включённого в репозиторий шаблона. Python 3.10+ со стандартной
+библиотекой нужен только автору. Для просмотра exports не нужны сервер или
+установка пакетов. См. [процесс сопровождения снимков](architecture.md).
+
+```powershell
+python tools/docs/architecture.py --help
+python tools/docs/architecture.py
+python tools/docs/architecture.py --check
+python tools/docs/architecture.py --source docs/architecture/snapshots/m1-968651a/maps.json --check
+python tools/docs/architecture_test.py
+```
+
+`--source` выбирает существующий UTF-8 JSON manifest; по умолчанию это
+`docs/architecture/snapshots/m1-968651a/maps.json` относительно репозитория,
+независимо от рабочего каталога. Генерация заменяет только готовые
+`<map>-<language>.svg` и `index.html` рядом с manifest. Перед изменением данных
+создайте новый каталог, сохранив закреплённые снимки. `--check` проверяет paths,
+границы номеров строк и точные bytes exports без записи. Единиц измерения и
+параметров нагрузки нет. Код завершения: 0 — успех, 1 — некорректные данные,
+ошибка I/O или устаревшие exports, 2 — неверный CLI syntax. `--help`/`-h` не
+требует manifest, не запускает работу и ничего не записывает. Exporter не
+использует Git или сеть и не проверяет, что строка исходника выражает заявленный
+контракт; это дают проверка закреплённой ревизии и fact review.
+
+`architecture_test.py` — внутренний regression driver для команды выше.
+Он проверяет справку без побочных действий в пустом каталоге, воспроизводимость,
+source references в закреплённой Git-ревизии, геометрию SVG и автономные ресурсы.
+Код завершения соответствует unittest; CLI-проверки используют временные
+каталоги. Browser-проверка и независимое fact review выполняются отдельно.
+
+<a id="tool-check-plan-ru"></a>
+## Составить локальный contract check plan
+
+`tools/ci/check_plan.py` читает явный список изменений и сохранённый CTest
+inventory, затем печатает JSON plan. Git, tests, build, compiler, сеть и внешние
+приложения он не запускает. Python 3.10+ со стандартной библиотекой нужен только
+автору. См. [матрицу task/integration/milestone](development.md).
+[Реестр контрактов](../../tools/ci/check_contracts.json) сопоставляет точные paths
+с CTest registrations, source witnesses и cross-contract focus checks.
+Реестр ограничен и не претендует на классификацию всех файлов проекта.
+Source witness — существующий исходник теста, обосновывающий сопоставление
+контракта и проверки. Hash его bytes фиксирует версию для аудита, но сам по себе
+не доказывает прохождение проверки.
+
+```powershell
+ctest --test-dir build/windows-msvc-debug --show-only=json-v1 | Set-Content -Encoding utf8 build/check-inventory.json
+@'
+[{"path":"tools/ci/checks.py","status":"M"}]
+'@ | Set-Content -Encoding utf8 build/changes.json
+python tools/ci/check_plan.py --changes build/changes.json --inventory build/check-inventory.json
+python tools/ci/check_plan.py --changes build/changes.json --inventory build/check-inventory.json --level integration
+python tools/ci/check_plan.py --help
+python tools/ci/test_check_plan.py
+```
+
+Inventory берите из выбранной настроенной сборки. В POSIX сохраните stdout
+`ctest --show-only=json-v1` обычным перенаправлением. Принимается UTF-8, в том
+числе с BOM. Вход изменений — массив `{path,status}`. Paths нормализованы,
+относительны корню репозитория и используют POSIX-разделители даже в Windows.
+Только `M` (modified) допускает narrow task preflight. Новые/удалённые/copied
+файлы задавайте как `A`/`D`/`C`; для rename укажите оба пути со статусом `R`.
+Эти и неизвестные статусы дают full. Planner доверяет полноте списка и заявлению
+`M`; Git status он не обнаруживает и не проверяет.
+
+| Аргумент | Значение | По умолчанию |
+| --- | --- | --- |
+| `--changes FILE` | Существующие UTF-8 JSON change records | Обязателен |
+| `--inventory FILE` | Существующий CTest JSON inventory | Без него: full с неизвестным configured test set |
+| `--impact FILE` | Необязательный [Ninja receipt](developer-tools-measure.md#tool-change-impact-ru) | Без dependency evidence |
+| `--source-root DIR` | Checkout для проверки точных changed paths и source witnesses | Репозиторий, содержащий script |
+| `--level LEVEL` | `task`, `integration` или `milestone` | `task` |
+| `--output FILE` | Новый JSON file; parent существует, старый файл отклоняется | Только stdout |
+
+Единиц времени и execution parameters нет. Код 0 — plan сформирован, включая
+full fallback; 1 — неверные данные/I/O; 2 — неверные аргументы. `--help`/`-h` не
+требует рабочих входов и ничего не пишет. Кроме явно запрошенного нового output
+file, входы и окружение не изменяются. Source archive не требует `.git` или
+приватных workspace data.
+
+`focus_tests` задаёт порядок, с точными source witnesses и byte hashes.
+`selected_tests` содержит настоящие registrations переданного inventory.
+Без inventory результат null, а не выдуманный пустой набор. Full plan не даёт
+CTest filter; documentation-only plan не даёт CTest command. Focused task plan
+содержит exact-name regex. Build directory, compiler, configuration и запуск
+выбирает вызывающая сторона; plan не является PASS receipt. Policy/inventory
+hashes относятся к canonical JSON content, witness hashes — к bytes исходников.
+
+Пилот разрешает narrow task preflight только для явно перечисленных modified
+Python tools при наличии registrations и witnesses. Для C++ core, templates,
+styles, consumers и runtime сохраняется полный настроенный suite. Include graph
+показывает rebuild dependencies, а не semantic test coverage. Missing/stale/
+unbuilt/unobserved coverage записывается и не разрешает skip; даже полное
+dependency coverage в этом пилоте не обосновывает runtime exclusions.
+Unknown/new/deleted/renamed paths, missing witnesses и CTest names также дают full.
+
+JSON сохраняет обязанности integration/milestone и hosted mode из неизменённого
+`checks.py`. Узкий Python task preflight по-прежнему требует full hosted checks
+для infrastructure changes. Существующий docs-only hosted режим сохранён.
+Integration/milestone plans выбирают все настроенные tests; применимость более
+широких platform/native/docs checks определяется матрицей. Сокращение hosted
+runtime matrix и измеренная экономия времени не заявляются.
+
+[Записанный pilot](../measurements/check-plan-pilot-968651a.json) использует 136
+реально зарегистрированных CTest-проверок в Ninja Release: tests включены,
+tools/examples/docs выключены. Для 14 гипотетических списков изменений получены
+42 CLI-плана трёх уровней: 39 full plans сохраняют все 136 проверок, два Python
+task preflight выбирают две и одну зарегистрированные проверки, один docs-only
+task plan не даёт CTest command. Неожиданных пропусков относительно этих заданных
+ожиданий нет. Runtime-база — `968651a90b6a1542fd3ab2cec159b457e548681f`;
+hashes planner/matrix additions рабочей версии записаны отдельно. Dependency
+вход покрывает 46 из 51 compile outputs и не обосновывает full-project exclusion.
+Pilot выполняет plans, не runtime tests или hosted jobs; улучшение времени не
+измерялось.
+
+`test_check_plan.py` — внутренний unittest driver команды выше. Временные
+fixtures/source bundles проверяют invalid/new/unknown/stale inputs, cross-contract
+closure, сохранение full suite, воспроизводимость, native help, BOM и запрет
+перезаписи. Driver работает без `.git`, compiler и runtime tests; код завершения
+соответствует unittest. `portals.ci-selection` регистрирует существующие
+selector/gate fixtures; `portals.check-plan` — этот driver.
+
 ## Выбор команды
 
 | Задача | Команда или цель | Что изменяет |

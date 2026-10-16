@@ -15,3 +15,12 @@ See [the full workflow and limitations](../../docs/quality.md). Existing formatt
 naming, behavioral tests, and human review remain independent evidence. No
 overall score, invented complexity, performance framework, or Git operation is
 introduced. Every receipt directory is immutable by these drivers.
+
+`change_impact.py` is a separate Python 3.10+ standard-library authoring tool.
+It reads Ninja dependency/compilation captures without building and reports
+observed translation units, CMake targets and public-header fan-in. Its lexical
+include graph is separate from compiler-observed transitive dependencies.
+Run `python tools/quality/change_impact.py --help`; see the
+[EN/RU command reference](../../docs/developer-tools-measure.md#tool-change-impact).
+`python tools/quality/test_change_impact.py` runs its disposable parser/CLI
+fixtures. These tools add no SDK runtime dependency or CI selection policy.

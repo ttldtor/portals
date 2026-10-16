@@ -239,18 +239,25 @@ public:
     return index;
   }
 
-  std::expected<void, TreeError> arrange(std::size_t index, CellRect local, CellRect viewport) {
-    auto result = tree_.arrange(entries_[index].node, local, viewport);
+  std::expected<void, TreeError> arrange(std::size_t index, CellRect local, CellRect viewport,
+                                         std::optional<CellRect> contentClip = {}) {
+    auto result = contentClip ? tree_.arrange(entries_[index].node, local, viewport, *contentClip)
+                              : tree_.arrange(entries_[index].node, local, viewport);
 
     if (!result) {
       return result;
     }
 
     auto children = childInputs(index);
+    std::expected<CellRect, TreeError> clip = *CellRect::from({}, local.size());
     std::expected<std::vector<CellRect>, TreeError> placements(std::in_place, 0);
     auto read = tree_.read(entries_[index].node, [&](const Widget &widget) {
       if (auto layout = dynamic_cast<const Layout *>(&widget)) {
-        placements = layout->arrangeChildren(children, local.size());
+        clip = layout->childClip(local.size());
+
+        if (clip) {
+          placements = layout->arrangeChildren(children, local.size());
+        }
       } else if (!children.empty()) {
         auto rect = CellRect::from({}, local.size());
 
@@ -270,12 +277,41 @@ public:
       return std::unexpected(read ? placements.error() : read.error());
     }
 
+    if (!clip) {
+      return std::unexpected(clip.error());
+    }
+
+    const auto bounds = CellRect::from({}, local.size());
+
+    if (!bounds || !bounds->contains(*clip)) {
+      return std::unexpected(TreeError::INVALID_GEOMETRY);
+    }
+
+    std::optional<CellRect> childContentClip;
+
+    // Existing layouts keep their full clip without extra tree snapshots or allocations.
+    if (clip->origin() != CellPoint{} || clip->size() != local.size()) {
+      const auto snapshot = tree_.inspect(entries_[index].node);
+
+      if (!snapshot) {
+        return std::unexpected(snapshot.error());
+      }
+
+      const auto surfaceClip = clip->translated(snapshot->geometry.surface.origin());
+
+      if (!surfaceClip) {
+        return std::unexpected(TreeError::INVALID_GEOMETRY);
+      }
+
+      childContentClip = *surfaceClip;
+    }
+
     if (placements->size() != entries_[index].children.size()) {
       return std::unexpected(TreeError::INVALID_ARGUMENT);
     }
 
     for (std::size_t i = 0; i < placements->size(); ++i) {
-      auto child_result = arrange(entries_[index].children[i], (*placements)[i], viewport);
+      auto child_result = arrange(entries_[index].children[i], (*placements)[i], viewport, childContentClip);
 
       if (!child_result) {
         return child_result;
@@ -303,6 +339,12 @@ private:
   std::vector<Entry> entries_ = std::vector<Entry>(0);
 };
 } // namespace
+
+std::expected<CellRect, TreeError> Layout::childClip(CellSize available) const {
+  const auto result = CellRect::from({}, available);
+
+  return result ? std::expected<CellRect, TreeError>(*result) : std::unexpected(TreeError::INVALID_GEOMETRY);
+}
 
 SizedWidget::SizedWidget(SizePolicy policy) : policy_(policy) {
 }

@@ -1,0 +1,3 @@
+add_executable(portals_compact_form main.cpp)
+target_link_libraries(portals_compact_form PRIVATE portals::core)
+portals_enable_warnings(portals_compact_form)

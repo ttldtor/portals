@@ -9,7 +9,7 @@ Use the declarative API to arrange controls and attach event handlers.
 ## Run a form
 
 In this program, **Add Hello** appends text to the editor. **Exit** and F10
-close the application. Buttons use a bold style.
+close the application. **Add Hello** uses a bold style.
 
 [Source](examples/docs_basic.cpp). To connect Portals and build your application,
 follow the [short library guide](index.md).
@@ -20,17 +20,16 @@ follow the [short library guide](index.md).
 int main() {
   using namespace portals;
 
-  ui::Ref<LineEdit> message;
-  ui::Ref<Button> add;
-  ui::Ref<Button> exit;
-
   auto scene = ui::scene(ui::vbox(
-    ui::lineEdit(message, ""),
-    ui::button(add, "Add Hello"),
-    ui::button(exit, "Exit")));
+    ui::lineEdit("").id("message"),
+    ui::button("Add Hello").id("add"),
+    ui::button("Exit").id("exit")));
+  auto message = scene.get("message");
+  ui::Ref<Button> add = scene.get("add");
+  auto exit = scene.get<Button>("exit");
 
   return scene
-    | ui::style("Button { bold: true; }")
+    | ui::style(add, "* { bold: true; }")
     | ui::onClick(add,
                   [message] {
                     message.text() += "Hello!";
@@ -68,6 +67,52 @@ A reference observes the control; the scene owns it. References become usable
 after the complete recipe has mounted. Once the control is removed or the scene
 closes, the reference cannot access it. Objects captured by C++ reference must
 remain alive while their handlers can run.
+
+
+### Look up a named control
+
+Assign an owning ID with `.id("message")`, then call `scene.get("message")`.
+The dynamic observation supports checked `text()` and Button `onClick()` capabilities.
+`ui::Ref<Button> add = scene.get("add")` and `scene.get<Button>("add")` require
+that the mounted widget derives from `Button`. No call to `get` prepares the scene.
+IDs are case sensitive and copied; their input buffers need not survive the call.
+
+Pending requests resolve after the whole recipe mounts and before configure/handler
+stages. A missing or empty ID, an ambiguous ID, or a wrong type records
+`BIND/INVALID_ARGUMENT` with the owning name, expected type and original call site.
+Startup then skips configuration and terminal acquisition. Legacy style selectors may
+still match repeated IDs; requesting such an ID is ambiguous. `maxConfigurations`
+also bounds the pending lookup queue independently of pending configuration stages.
+
+A lookup after preparation resolves immediately and reports recoverable failures to
+the existing collector. In a checked setup/configuration scope, a short failure also
+stops subsequent setup through the existing policy. A published Ref keeps its original
+NodeId when an ID changes; removal and ID reuse never retarget it. Operations reject
+foreign threads before reading mutable scene state. A successfully published observation
+returns CLOSED after cleanup; a removed node returns STALE_NODE. Failed lookup slots
+retain their original error for inspection. Capture refs by value in callbacks.
+
+### Style one reference or read a file
+
+`ui::style(add, "* { bold: true; }")` applies complete strict PSS v0 rules to
+exactly the referenced node. It does not include its children. Existing PSS selectors
+still filter that node, with their original specificity. This scope uses NodeId and
+survives an ID rename without applying to a replacement node. A foreign scene's Ref
+returns WRONG_SESSION; an expired or removed target rejects before style publication.
+
+`ui::styleFile(add, "button.pss")` owns a native path and reads it only when the
+scene consumes the stage. `ui::styleFile("application.pss")` is the scene-wide form.
+For example, a file containing `* { bold: true; }` can replace the inline stage in
+the complete program above. Relative paths use the process working directory at
+consumption. Missing files and parse errors stop startup before terminal activity;
+diagnostics retain the file operation, source label and PSS position when applicable.
+
+These forms use the existing layer resolver and source metadata. Unnamed stages own
+independent APPLICATION layers; reusing one stage updates its layer. `StyleOptions`
+selects USER or an explicit named upsert using the same precedence and budgets as
+[style layers](style-layers.md). Files have no watcher, includes or new expressions.
+[Installed replay consumer](../tests/package_consumer/named_scoped.cpp) verifies
+the complete handler/error/cleanup path without opening a native terminal.
 
 ## Handle button activation
 
@@ -283,3 +328,67 @@ int main() {
 ```
 
 </details>
+
+## Compose children from a range
+
+`ui::vbox(range)` and `ui::hbox(range)` consume an input range immediately,
+in iteration order. The range produces one concrete `Description<T>` type; use
+the variadic overload for heterogeneous children. A temporary transform view
+and its captures are destroyed after construction, while the parent owns all
+produced recipes. The range is never used during mount.
+
+```cpp
+#include <portals/ui.hpp>
+
+#include <array>
+
+int main() {
+  using namespace portals;
+
+  const std::array<std::string_view, 3> captions{"Mercury", "Venus", "Earth"};
+  auto scene = ui::scene(ui::vbox(captions | std::views::transform([](std::string_view text) {
+                                  return ui::label(text);
+                                })));
+
+  scene.onKey(key::F10, ui::quit);
+
+  return scene.runApp();
+}
+```
+The same scene with pipe stages:
+
+```cpp
+#include <portals/ui.hpp>
+
+#include <array>
+
+int main() {
+  using namespace portals;
+
+  const std::array<std::string_view, 3> captions{"Mercury", "Venus", "Earth"};
+  auto scene = ui::scene(ui::vbox(captions | std::views::transform([](std::string_view text) {
+                                  return ui::label(text);
+                                })));
+
+  return scene | ui::onKey(key::F10, ui::quit) | ui::runApp();
+}
+```
+
+Both versions use the same scene, error reporting and cleanup. Existing
+`row`/`column` overloads also accept ranges; `vbox(options, range)` and
+`hbox(options, range)` preserve `LinearOptions`. Empty ranges create empty
+layouts. A child mount failure preserves its typed error, rolls back the
+created subtree and publishes no partial `NodeRef` or `Ref`.
+
+Lvalue containers of move-only descriptions require explicit transfer:
+`ui::vbox(children | std::views::as_rvalue)`. `ui::vbox(std::move(children))`
+also transfers an owning non-view container that does not opt into
+`enable_borrowed_range`. User-defined ranges must own their elements when using
+this implicit-element-transfer overload; that ownership cannot be inferred. A temporary view yielding lvalue
+descriptions is rejected, since its elements may belong to another owner.
+Construction and iteration may throw; recipes already transferred from a
+source are not restored. Borrowed references inside recipes retain their
+existing lifetime requirements.
+
+[Frames, gauges and compact sizing](compact-primitives.md) provide standard
+widgets and consuming methods/pipe stages for a complete small scene.

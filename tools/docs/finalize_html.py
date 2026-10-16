@@ -16,6 +16,7 @@ from pathlib import Path
 import re
 import shutil
 import xml.etree.ElementTree as ET
+from urllib.parse import urlsplit, urlunsplit
 
 
 def type_links(tag_file):
@@ -202,9 +203,26 @@ def complete_navigation(directory, headings):
 
 def portable_links(content, directory, source, links, russian=False):
     """Resolve checkout-relative links and copy source files within the repository."""
+    def asset_link(match):
+        href = html.unescape(match[2])
+        if re.match(r"[a-z]+:", href) or href.startswith(("#", "/")):
+            return match[0]
+        asset = urlsplit(href)
+        flat_path = re.sub(r"^(?:\.\./)+", "", asset.path)
+        destination = (directory / flat_path).resolve()
+        if destination.is_relative_to(directory.resolve()) and destination.is_file():
+            url = urlunsplit(("", "", flat_path, asset.query, asset.fragment))
+            return match[1] + html.escape(url, quote=True) + '"'
+        return match[0]
+
+    content = re.sub(r'\b((?:href|src)=")([^"]+)"', asset_link, content)
+
     def rewrite(match):
         href, label = html.unescape(match[1]), match[2]
         if re.match(r"[a-z]+:", href) or href.startswith(("#", "/")):
+            return match[0]
+        destination = (directory / urlsplit(href).path).resolve()
+        if destination.is_relative_to(directory.resolve()) and destination.is_file():
             return match[0]
         target, separator, anchor = href.partition("#")
         if target.endswith(".html"):

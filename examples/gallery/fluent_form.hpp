@@ -3,7 +3,7 @@
 #pragma once
 #include "settings.hpp"
 #include "themes.hpp"
-#include <portals/ui_style.hpp>
+#include <portals/ui.hpp>
 
 namespace gallery {
 /** @param options Borrowed settings, read after command-line parsing.
@@ -63,7 +63,6 @@ inline portals::ui::Scene form(portals::ui::OptionsRef<example::Options> options
 
            return result;
          })
-    | ui::style("Button:focused { bold: true; }")
     | ui::onKey("F10 | Ctrl+C", ui::quit)
     | onTheme(options);
 }

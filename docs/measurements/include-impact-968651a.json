@@ -1,0 +1,1602 @@
+{
+  "schema": 1,
+  "source_revision": "968651a90b6a1542fd3ab2cec159b457e548681f",
+  "scope": "Core and selected quality/benchmark targets only; not the full test suite",
+  "toolchain": {
+    "generator": "Ninja",
+    "configuration": "Release",
+    "cxx": "GCC14.3.0",
+    "c": "GCC13.3.0",
+    "release_flags": "-O3 -DNDEBUG",
+    "PORTALS_BUILD_TOOLS": true,
+    "PORTALS_BUILD_TESTS": false,
+    "PORTALS_BUILD_EXAMPLES": false,
+    "PORTALS_BUILD_DOCS": false
+  },
+  "captured_input_sha256": {
+    "ninja-deps.txt": "50129a0e347c6f0a24d6f0a1b2cf56b089794e3cb8b519b7cac94d8925382420",
+    "ninja-compdb.json": "db08a6ed81da2f4bf34217f85d83b109cd6dabc11c34a1a8d4fef5c7f25099d1"
+  },
+  "coverage": {
+    "configured_compile_objects": 51,
+    "observed_compile_objects": 46,
+    "valid_compile_objects": 46,
+    "filtered_noncompile_rows": 30,
+    "noncompile_dependency_records": [
+      "portals_compactness",
+      "portals_managed_benchmark",
+      "portals_mvp_benchmark",
+      "portals_style_layers_benchmark"
+    ],
+    "missing_objects": [
+      "CMakeFiles/portals_compact_benchmark.dir/tools/benchmarks/compact.cpp.o",
+      "CMakeFiles/portals_pss_benchmark.dir/tools/benchmarks/pss.cpp.o",
+      "CMakeFiles/portals_terminal_probe.dir/tools/terminal_probe/main.cpp.o",
+      "CMakeFiles/portals_terminal_probe.dir/tools/terminal_probe/native_posix.cpp.o",
+      "CMakeFiles/portals_terminal_probe.dir/tools/terminal_probe/query.cpp.o"
+    ],
+    "stale_objects": [],
+    "unmatched_dependency_records": [],
+    "unsupported_module_sources": [],
+    "record_coverage_complete": false,
+    "freshness": "not checked for recorded captures",
+    "unavailable_dependency_paths": []
+  },
+  "summary": {
+    "observed_public_headers": 57,
+    "lexical_public_headers": 61,
+    "literal_public_include_edges": 99,
+    "observed_source_subsystems": [
+      "src",
+      "src/charts",
+      "src/layout",
+      "src/models",
+      "src/render",
+      "src/runtime",
+      "src/styles",
+      "src/terminal",
+      "src/views",
+      "src/widgets",
+      "tools/benchmarks",
+      "tools/compactness",
+      "vendor/utf8proc"
+    ],
+    "observed_targets": [
+      "portals_compactness",
+      "portals_core",
+      "portals_managed_benchmark",
+      "portals_mvp_benchmark",
+      "portals_style_layers_benchmark",
+      "portals_utf8proc"
+    ]
+  },
+  "headers": [
+    {
+      "path": "include/portals/geometry.hpp",
+      "affected_objects": 34,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/cell_buffer.cpp.o",
+        "CMakeFiles/portals_core.dir/src/charts/canvas.cpp.o",
+        "CMakeFiles/portals_core.dir/src/charts/chart.cpp.o",
+        "CMakeFiles/portals_core.dir/src/geometry.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/grid.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/linear.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/overlay.cpp.o",
+        "CMakeFiles/portals_core.dir/src/models/model.cpp.o",
+        "CMakeFiles/portals_core.dir/src/render.cpp.o",
+        "CMakeFiles/portals_core.dir/src/render/diff.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/async.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/native_application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/styles/pss.cpp.o",
+        "CMakeFiles/portals_core.dir/src/styles/style.cpp.o",
+        "CMakeFiles/portals_core.dir/src/terminal/legacy.cpp.o",
+        "CMakeFiles/portals_core.dir/src/terminal/posix.cpp.o",
+        "CMakeFiles/portals_core.dir/src/terminal/posix_io.cpp.o",
+        "CMakeFiles/portals_core.dir/src/terminal/writer.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/scroll.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_list.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_table.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/basic_controls.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/event_routing.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/focus.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/line_edit.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/widget.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/text.hpp",
+      "affected_objects": 32,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/cell_buffer.cpp.o",
+        "CMakeFiles/portals_core.dir/src/charts/canvas.cpp.o",
+        "CMakeFiles/portals_core.dir/src/charts/chart.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/grid.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/linear.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/overlay.cpp.o",
+        "CMakeFiles/portals_core.dir/src/models/model.cpp.o",
+        "CMakeFiles/portals_core.dir/src/render.cpp.o",
+        "CMakeFiles/portals_core.dir/src/render/diff.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/async.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/native_application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/styles/pss.cpp.o",
+        "CMakeFiles/portals_core.dir/src/styles/style.cpp.o",
+        "CMakeFiles/portals_core.dir/src/terminal/writer.cpp.o",
+        "CMakeFiles/portals_core.dir/src/text.cpp.o",
+        "CMakeFiles/portals_core.dir/src/text_history.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/scroll.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_list.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_table.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/basic_controls.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/event_routing.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/focus.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/line_edit.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/widget.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/cell_buffer.hpp",
+      "affected_objects": 30,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/cell_buffer.cpp.o",
+        "CMakeFiles/portals_core.dir/src/charts/canvas.cpp.o",
+        "CMakeFiles/portals_core.dir/src/charts/chart.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/grid.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/linear.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/overlay.cpp.o",
+        "CMakeFiles/portals_core.dir/src/models/model.cpp.o",
+        "CMakeFiles/portals_core.dir/src/render.cpp.o",
+        "CMakeFiles/portals_core.dir/src/render/diff.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/async.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/native_application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/styles/pss.cpp.o",
+        "CMakeFiles/portals_core.dir/src/styles/style.cpp.o",
+        "CMakeFiles/portals_core.dir/src/terminal/writer.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/scroll.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_list.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_table.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/basic_controls.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/event_routing.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/focus.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/line_edit.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/widget.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/diagnostics.hpp",
+      "affected_objects": 28,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/charts/chart.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/grid.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/linear.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/overlay.cpp.o",
+        "CMakeFiles/portals_core.dir/src/models/model.cpp.o",
+        "CMakeFiles/portals_core.dir/src/render/diff.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/async.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/diagnostics.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/native_application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/scheduler.cpp.o",
+        "CMakeFiles/portals_core.dir/src/styles/pss.cpp.o",
+        "CMakeFiles/portals_core.dir/src/styles/style.cpp.o",
+        "CMakeFiles/portals_core.dir/src/terminal/writer.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_list.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_table.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/basic_controls.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/event_routing.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/focus.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/line_edit.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/widget.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/render.hpp",
+      "affected_objects": 27,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/charts/canvas.cpp.o",
+        "CMakeFiles/portals_core.dir/src/charts/chart.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/grid.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/linear.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/overlay.cpp.o",
+        "CMakeFiles/portals_core.dir/src/models/model.cpp.o",
+        "CMakeFiles/portals_core.dir/src/render.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/async.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/native_application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/styles/pss.cpp.o",
+        "CMakeFiles/portals_core.dir/src/styles/style.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/scroll.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_list.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_table.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/basic_controls.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/event_routing.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/focus.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/line_edit.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/widget.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/widget_types.hpp",
+      "affected_objects": 26,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/charts/canvas.cpp.o",
+        "CMakeFiles/portals_core.dir/src/charts/chart.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/grid.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/linear.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/overlay.cpp.o",
+        "CMakeFiles/portals_core.dir/src/models/model.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/async.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/native_application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/styles/pss.cpp.o",
+        "CMakeFiles/portals_core.dir/src/styles/style.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/scroll.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_list.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_table.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/basic_controls.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/event_routing.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/focus.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/line_edit.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/widget.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/scheduler.hpp",
+      "affected_objects": 25,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/charts/chart.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/grid.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/linear.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/overlay.cpp.o",
+        "CMakeFiles/portals_core.dir/src/models/model.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/async.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/native_application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/scheduler.cpp.o",
+        "CMakeFiles/portals_core.dir/src/styles/pss.cpp.o",
+        "CMakeFiles/portals_core.dir/src/styles/style.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_list.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_table.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/basic_controls.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/event_routing.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/focus.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/line_edit.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/widget.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/style_types.hpp",
+      "affected_objects": 24,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/charts/chart.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/grid.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/linear.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/overlay.cpp.o",
+        "CMakeFiles/portals_core.dir/src/models/model.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/async.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/native_application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/styles/pss.cpp.o",
+        "CMakeFiles/portals_core.dir/src/styles/style.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_list.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_table.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/basic_controls.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/event_routing.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/focus.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/line_edit.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/widget.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/widget.hpp",
+      "affected_objects": 24,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/charts/chart.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/grid.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/linear.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/overlay.cpp.o",
+        "CMakeFiles/portals_core.dir/src/models/model.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/async.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/native_application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/styles/pss.cpp.o",
+        "CMakeFiles/portals_core.dir/src/styles/style.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_list.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_table.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/basic_controls.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/event_routing.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/focus.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/line_edit.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/widget.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/input.hpp",
+      "affected_objects": 22,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/input.cpp.o",
+        "CMakeFiles/portals_core.dir/src/input_shortcut.cpp.o",
+        "CMakeFiles/portals_core.dir/src/render/diff.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/native_application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/terminal/legacy.cpp.o",
+        "CMakeFiles/portals_core.dir/src/terminal/posix.cpp.o",
+        "CMakeFiles/portals_core.dir/src/terminal/posix_io.cpp.o",
+        "CMakeFiles/portals_core.dir/src/terminal/writer.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_list.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_table.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/basic_controls.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/event_routing.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/focus.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/line_edit.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/layout.hpp",
+      "affected_objects": 16,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/layout/grid.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/linear.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/overlay.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/native_application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_list.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_table.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/basic_controls.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/line_edit.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/action.hpp",
+      "affected_objects": 15,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/runtime/application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/native_application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_list.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_table.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/basic_controls.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/event_routing.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/focus.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/line_edit.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/terminal.hpp",
+      "affected_objects": 14,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/render/diff.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/native_application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/terminal/legacy.cpp.o",
+        "CMakeFiles/portals_core.dir/src/terminal/posix.cpp.o",
+        "CMakeFiles/portals_core.dir/src/terminal/posix_io.cpp.o",
+        "CMakeFiles/portals_core.dir/src/terminal/writer.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/diff.hpp",
+      "affected_objects": 11,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/render/diff.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/native_application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/terminal/writer.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/model.hpp",
+      "affected_objects": 11,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/charts/chart.cpp.o",
+        "CMakeFiles/portals_core.dir/src/models/model.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_list.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_table.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/scroll.hpp",
+      "affected_objects": 10,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/views/scroll.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_list.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_table.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/application.hpp",
+      "affected_objects": 9,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/runtime/application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/native_application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/canvas.hpp",
+      "affected_objects": 9,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/charts/canvas.cpp.o",
+        "CMakeFiles/portals_core.dir/src/charts/chart.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/controls.hpp",
+      "affected_objects": 9,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/widgets/basic_controls.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/line_edit.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/detail/pss_data.hpp",
+      "affected_objects": 9,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/styles/pss.cpp.o",
+        "CMakeFiles/portals_core.dir/src/styles/style.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/layout_snapshot.hpp",
+      "affected_objects": 9,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/runtime/application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/runtime/native_application.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/property.hpp",
+      "affected_objects": 9,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/widgets/basic_controls.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/line_edit.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/style.hpp",
+      "affected_objects": 9,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/styles/pss.cpp.o",
+        "CMakeFiles/portals_core.dir/src/styles/style.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/text_history.hpp",
+      "affected_objects": 9,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/text_history.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/line_edit.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/virtual_list.hpp",
+      "affected_objects": 9,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/views/virtual_list.cpp.o",
+        "CMakeFiles/portals_core.dir/src/views/virtual_table.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/chart.hpp",
+      "affected_objects": 8,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/charts/chart.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/line_edit.hpp",
+      "affected_objects": 8,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/widgets/line_edit.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/shortcut.hpp",
+      "affected_objects": 8,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/input_shortcut.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/virtual_table.hpp",
+      "affected_objects": 8,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/views/virtual_table.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/detail/current_scene.hpp",
+      "affected_objects": 7,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/detail/managed_views.hpp",
+      "affected_objects": 7,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/detail/setup_failure.hpp",
+      "affected_objects": 7,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/editor_command.hpp",
+      "affected_objects": 7,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/grid.hpp",
+      "affected_objects": 7,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/layout/grid.cpp.o",
+        "CMakeFiles/portals_core.dir/src/layout/overlay.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/managed.hpp",
+      "affected_objects": 7,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/managed_diagnostics.hpp",
+      "affected_objects": 7,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/managed_model.hpp",
+      "affected_objects": 7,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/pss_file_error.hpp",
+      "affected_objects": 7,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/style_source.hpp",
+      "affected_objects": 7,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/text_resource.hpp",
+      "affected_objects": 7,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/virtual_preparation.hpp",
+      "affected_objects": 7,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/text_value.hpp",
+      "affected_objects": 6,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/ui_app.hpp",
+      "affected_objects": 6,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/widgets/ui_app.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/ui_ref.hpp",
+      "affected_objects": 6,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/widgets/ui_ref.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/ui.hpp",
+      "affected_objects": 5,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/ui_scene.hpp",
+      "affected_objects": 5,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o",
+        "CMakeFiles/portals_managed_benchmark.dir/tools/benchmarks/managed.cpp.o",
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o",
+        "CMakeFiles/portals_style_layers_benchmark.dir/tools/benchmarks/style_layers.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/detail/pss_parser.hpp",
+      "affected_objects": 4,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/styles/pss.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/managed.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/detail/pss_compact.hpp",
+      "affected_objects": 2,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/style_pss.hpp",
+      "affected_objects": 2,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/style_static.hpp",
+      "affected_objects": 2,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/ui_static.hpp",
+      "affected_objects": 2,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/ui_style.hpp",
+      "affected_objects": 2,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/widgets/ui_scene.cpp.o",
+        "CMakeFiles/portals_core.dir/src/widgets/ui_style.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/async.hpp",
+      "affected_objects": 1,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/runtime/async.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/legacy.hpp",
+      "affected_objects": 1,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/terminal/legacy.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/table_column.hpp",
+      "affected_objects": 1,
+      "objects": [
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/text_format.hpp",
+      "affected_objects": 1,
+      "objects": [
+        "CMakeFiles/portals_mvp_benchmark.dir/tools/benchmarks/mvp.cpp.o"
+      ]
+    },
+    {
+      "path": "include/portals/version.hpp",
+      "affected_objects": 1,
+      "objects": [
+        "CMakeFiles/portals_core.dir/src/version.cpp.o"
+      ]
+    }
+  ],
+  "public_include_graph": {
+    "kind": "lexical literal #include; includes inactive conditional branches; excludes macro and module imports",
+    "nodes": [
+      "include/portals/action.hpp",
+      "include/portals/aggregate_columns.hpp",
+      "include/portals/application.hpp",
+      "include/portals/async.hpp",
+      "include/portals/canvas.hpp",
+      "include/portals/cell_buffer.hpp",
+      "include/portals/chart.hpp",
+      "include/portals/controls.hpp",
+      "include/portals/detail/current_scene.hpp",
+      "include/portals/detail/managed_views.hpp",
+      "include/portals/detail/pss_compact.hpp",
+      "include/portals/detail/pss_data.hpp",
+      "include/portals/detail/pss_parser.hpp",
+      "include/portals/detail/setup_failure.hpp",
+      "include/portals/diagnostics.hpp",
+      "include/portals/diff.hpp",
+      "include/portals/editor_command.hpp",
+      "include/portals/geometry.hpp",
+      "include/portals/grid.hpp",
+      "include/portals/input.hpp",
+      "include/portals/input_match.hpp",
+      "include/portals/layout.hpp",
+      "include/portals/layout_snapshot.hpp",
+      "include/portals/legacy.hpp",
+      "include/portals/line_edit.hpp",
+      "include/portals/managed.hpp",
+      "include/portals/managed_diagnostics.hpp",
+      "include/portals/managed_model.hpp",
+      "include/portals/model.hpp",
+      "include/portals/model_query.hpp",
+      "include/portals/property.hpp",
+      "include/portals/pss_file_error.hpp",
+      "include/portals/render.hpp",
+      "include/portals/scheduler.hpp",
+      "include/portals/scroll.hpp",
+      "include/portals/shortcut.hpp",
+      "include/portals/style.hpp",
+      "include/portals/style_pss.hpp",
+      "include/portals/style_source.hpp",
+      "include/portals/style_static.hpp",
+      "include/portals/style_types.hpp",
+      "include/portals/table_column.hpp",
+      "include/portals/terminal.hpp",
+      "include/portals/text.hpp",
+      "include/portals/text_format.hpp",
+      "include/portals/text_history.hpp",
+      "include/portals/text_resource.hpp",
+      "include/portals/text_value.hpp",
+      "include/portals/ui.hpp",
+      "include/portals/ui_app.hpp",
+      "include/portals/ui_lyra.hpp",
+      "include/portals/ui_ref.hpp",
+      "include/portals/ui_scene.hpp",
+      "include/portals/ui_static.hpp",
+      "include/portals/ui_style.hpp",
+      "include/portals/version.hpp",
+      "include/portals/virtual_list.hpp",
+      "include/portals/virtual_preparation.hpp",
+      "include/portals/virtual_table.hpp",
+      "include/portals/widget.hpp",
+      "include/portals/widget_types.hpp"
+    ],
+    "edges": [
+      [
+        "include/portals/action.hpp",
+        "include/portals/input.hpp"
+      ],
+      [
+        "include/portals/action.hpp",
+        "include/portals/widget.hpp"
+      ],
+      [
+        "include/portals/aggregate_columns.hpp",
+        "include/portals/table_column.hpp"
+      ],
+      [
+        "include/portals/application.hpp",
+        "include/portals/action.hpp"
+      ],
+      [
+        "include/portals/application.hpp",
+        "include/portals/diff.hpp"
+      ],
+      [
+        "include/portals/application.hpp",
+        "include/portals/layout.hpp"
+      ],
+      [
+        "include/portals/application.hpp",
+        "include/portals/layout_snapshot.hpp"
+      ],
+      [
+        "include/portals/application.hpp",
+        "include/portals/render.hpp"
+      ],
+      [
+        "include/portals/async.hpp",
+        "include/portals/widget.hpp"
+      ],
+      [
+        "include/portals/canvas.hpp",
+        "include/portals/widget_types.hpp"
+      ],
+      [
+        "include/portals/cell_buffer.hpp",
+        "include/portals/geometry.hpp"
+      ],
+      [
+        "include/portals/cell_buffer.hpp",
+        "include/portals/text.hpp"
+      ],
+      [
+        "include/portals/chart.hpp",
+        "include/portals/canvas.hpp"
+      ],
+      [
+        "include/portals/chart.hpp",
+        "include/portals/model.hpp"
+      ],
+      [
+        "include/portals/controls.hpp",
+        "include/portals/action.hpp"
+      ],
+      [
+        "include/portals/controls.hpp",
+        "include/portals/layout.hpp"
+      ],
+      [
+        "include/portals/controls.hpp",
+        "include/portals/property.hpp"
+      ],
+      [
+        "include/portals/detail/pss_compact.hpp",
+        "include/portals/detail/pss_parser.hpp"
+      ],
+      [
+        "include/portals/detail/pss_data.hpp",
+        "include/portals/style.hpp"
+      ],
+      [
+        "include/portals/detail/pss_parser.hpp",
+        "include/portals/detail/pss_data.hpp"
+      ],
+      [
+        "include/portals/detail/setup_failure.hpp",
+        "include/portals/detail/current_scene.hpp"
+      ],
+      [
+        "include/portals/detail/setup_failure.hpp",
+        "include/portals/managed_diagnostics.hpp"
+      ],
+      [
+        "include/portals/diff.hpp",
+        "include/portals/cell_buffer.hpp"
+      ],
+      [
+        "include/portals/diff.hpp",
+        "include/portals/diagnostics.hpp"
+      ],
+      [
+        "include/portals/diff.hpp",
+        "include/portals/terminal.hpp"
+      ],
+      [
+        "include/portals/editor_command.hpp",
+        "include/portals/widget.hpp"
+      ],
+      [
+        "include/portals/grid.hpp",
+        "include/portals/layout.hpp"
+      ],
+      [
+        "include/portals/input_match.hpp",
+        "include/portals/input.hpp"
+      ],
+      [
+        "include/portals/layout.hpp",
+        "include/portals/widget.hpp"
+      ],
+      [
+        "include/portals/layout_snapshot.hpp",
+        "include/portals/widget.hpp"
+      ],
+      [
+        "include/portals/legacy.hpp",
+        "include/portals/terminal.hpp"
+      ],
+      [
+        "include/portals/line_edit.hpp",
+        "include/portals/controls.hpp"
+      ],
+      [
+        "include/portals/line_edit.hpp",
+        "include/portals/text_history.hpp"
+      ],
+      [
+        "include/portals/managed.hpp",
+        "include/portals/application.hpp"
+      ],
+      [
+        "include/portals/managed.hpp",
+        "include/portals/detail/managed_views.hpp"
+      ],
+      [
+        "include/portals/managed.hpp",
+        "include/portals/detail/setup_failure.hpp"
+      ],
+      [
+        "include/portals/managed.hpp",
+        "include/portals/editor_command.hpp"
+      ],
+      [
+        "include/portals/managed.hpp",
+        "include/portals/line_edit.hpp"
+      ],
+      [
+        "include/portals/managed.hpp",
+        "include/portals/managed_diagnostics.hpp"
+      ],
+      [
+        "include/portals/managed.hpp",
+        "include/portals/managed_model.hpp"
+      ],
+      [
+        "include/portals/managed.hpp",
+        "include/portals/style.hpp"
+      ],
+      [
+        "include/portals/managed.hpp",
+        "include/portals/style_source.hpp"
+      ],
+      [
+        "include/portals/managed.hpp",
+        "include/portals/virtual_preparation.hpp"
+      ],
+      [
+        "include/portals/managed_diagnostics.hpp",
+        "include/portals/application.hpp"
+      ],
+      [
+        "include/portals/managed_diagnostics.hpp",
+        "include/portals/detail/pss_data.hpp"
+      ],
+      [
+        "include/portals/managed_diagnostics.hpp",
+        "include/portals/pss_file_error.hpp"
+      ],
+      [
+        "include/portals/managed_diagnostics.hpp",
+        "include/portals/shortcut.hpp"
+      ],
+      [
+        "include/portals/managed_diagnostics.hpp",
+        "include/portals/style.hpp"
+      ],
+      [
+        "include/portals/managed_diagnostics.hpp",
+        "include/portals/text_resource.hpp"
+      ],
+      [
+        "include/portals/managed_model.hpp",
+        "include/portals/chart.hpp"
+      ],
+      [
+        "include/portals/model.hpp",
+        "include/portals/widget.hpp"
+      ],
+      [
+        "include/portals/model_query.hpp",
+        "include/portals/model.hpp"
+      ],
+      [
+        "include/portals/property.hpp",
+        "include/portals/widget.hpp"
+      ],
+      [
+        "include/portals/render.hpp",
+        "include/portals/cell_buffer.hpp"
+      ],
+      [
+        "include/portals/scheduler.hpp",
+        "include/portals/diagnostics.hpp"
+      ],
+      [
+        "include/portals/scroll.hpp",
+        "include/portals/widget_types.hpp"
+      ],
+      [
+        "include/portals/shortcut.hpp",
+        "include/portals/input.hpp"
+      ],
+      [
+        "include/portals/style.hpp",
+        "include/portals/style_types.hpp"
+      ],
+      [
+        "include/portals/style.hpp",
+        "include/portals/widget.hpp"
+      ],
+      [
+        "include/portals/style_pss.hpp",
+        "include/portals/detail/pss_compact.hpp"
+      ],
+      [
+        "include/portals/style_pss.hpp",
+        "include/portals/style_static.hpp"
+      ],
+      [
+        "include/portals/style_source.hpp",
+        "include/portals/detail/pss_data.hpp"
+      ],
+      [
+        "include/portals/style_static.hpp",
+        "include/portals/detail/pss_parser.hpp"
+      ],
+      [
+        "include/portals/style_static.hpp",
+        "include/portals/ui_static.hpp"
+      ],
+      [
+        "include/portals/style_types.hpp",
+        "include/portals/cell_buffer.hpp"
+      ],
+      [
+        "include/portals/table_column.hpp",
+        "include/portals/virtual_table.hpp"
+      ],
+      [
+        "include/portals/terminal.hpp",
+        "include/portals/geometry.hpp"
+      ],
+      [
+        "include/portals/terminal.hpp",
+        "include/portals/input.hpp"
+      ],
+      [
+        "include/portals/text_format.hpp",
+        "include/portals/text.hpp"
+      ],
+      [
+        "include/portals/text_history.hpp",
+        "include/portals/text.hpp"
+      ],
+      [
+        "include/portals/text_value.hpp",
+        "include/portals/text.hpp"
+      ],
+      [
+        "include/portals/text_value.hpp",
+        "include/portals/text_resource.hpp"
+      ],
+      [
+        "include/portals/ui.hpp",
+        "include/portals/grid.hpp"
+      ],
+      [
+        "include/portals/ui.hpp",
+        "include/portals/managed.hpp"
+      ],
+      [
+        "include/portals/ui.hpp",
+        "include/portals/ui_ref.hpp"
+      ],
+      [
+        "include/portals/ui.hpp",
+        "include/portals/ui_scene.hpp"
+      ],
+      [
+        "include/portals/ui_lyra.hpp",
+        "include/portals/ui_app.hpp"
+      ],
+      [
+        "include/portals/ui_ref.hpp",
+        "include/portals/managed.hpp"
+      ],
+      [
+        "include/portals/ui_ref.hpp",
+        "include/portals/text_value.hpp"
+      ],
+      [
+        "include/portals/ui_scene.hpp",
+        "include/portals/detail/setup_failure.hpp"
+      ],
+      [
+        "include/portals/ui_scene.hpp",
+        "include/portals/managed.hpp"
+      ],
+      [
+        "include/portals/ui_scene.hpp",
+        "include/portals/ui_app.hpp"
+      ],
+      [
+        "include/portals/ui_scene.hpp",
+        "include/portals/ui_ref.hpp"
+      ],
+      [
+        "include/portals/ui_static.hpp",
+        "include/portals/ui.hpp"
+      ],
+      [
+        "include/portals/ui_style.hpp",
+        "include/portals/style_pss.hpp"
+      ],
+      [
+        "include/portals/ui_style.hpp",
+        "include/portals/ui.hpp"
+      ],
+      [
+        "include/portals/virtual_list.hpp",
+        "include/portals/action.hpp"
+      ],
+      [
+        "include/portals/virtual_list.hpp",
+        "include/portals/layout.hpp"
+      ],
+      [
+        "include/portals/virtual_list.hpp",
+        "include/portals/model.hpp"
+      ],
+      [
+        "include/portals/virtual_list.hpp",
+        "include/portals/scroll.hpp"
+      ],
+      [
+        "include/portals/virtual_preparation.hpp",
+        "include/portals/chart.hpp"
+      ],
+      [
+        "include/portals/virtual_preparation.hpp",
+        "include/portals/layout_snapshot.hpp"
+      ],
+      [
+        "include/portals/virtual_preparation.hpp",
+        "include/portals/virtual_table.hpp"
+      ],
+      [
+        "include/portals/virtual_table.hpp",
+        "include/portals/virtual_list.hpp"
+      ],
+      [
+        "include/portals/widget.hpp",
+        "include/portals/scheduler.hpp"
+      ],
+      [
+        "include/portals/widget.hpp",
+        "include/portals/style_types.hpp"
+      ],
+      [
+        "include/portals/widget.hpp",
+        "include/portals/widget_types.hpp"
+      ],
+      [
+        "include/portals/widget_types.hpp",
+        "include/portals/geometry.hpp"
+      ],
+      [
+        "include/portals/widget_types.hpp",
+        "include/portals/render.hpp"
+      ]
+    ],
+    "subsystems": [
+      "include/portals",
+      "include/portals/detail"
+    ],
+    "unresolved_public_includes": [],
+    "nonliteral_include_headers": [],
+    "source_sha256": {
+      "include/portals/action.hpp": "2f8847cc23af3761f299925317b8ef70397744b680ae2cf84b1320438039141d",
+      "include/portals/aggregate_columns.hpp": "8aee12393656619a00beec4a79b72b8f10653589ff697bb9e5c0170f00145d2c",
+      "include/portals/application.hpp": "a328516bcebb677ee20242f53457179fe152dba1fd8ec790fabcefe4de294867",
+      "include/portals/async.hpp": "a548f40b8d8060d4fd2cf606459646451637fb2c5dfeacab19695f23f958c64b",
+      "include/portals/canvas.hpp": "be8a657b1e6f6ca16a3dd7a1c38153109f7e9a2fea0ea7736ba87ed1c8dd1e21",
+      "include/portals/cell_buffer.hpp": "2548fcc0501ed2a876c0090c226ea626c52b857f194c82cd4d8da9f35fe4ec95",
+      "include/portals/chart.hpp": "efcd778c21490e8402c412a1121a19badb962c665b32bf28b88c53e68fb55d3f",
+      "include/portals/controls.hpp": "081a6b39ed0e6f427ac307ccefb0b94e6c963a550cb23d49a18d50864d44d70b",
+      "include/portals/detail/current_scene.hpp": "e872990c417de414ccfb032a50c23323673f607d3fc6fb39d3f492a0517cf9fc",
+      "include/portals/detail/managed_views.hpp": "7702fe9e56f66055862fbcc7e539e76ef16408c732044bc6932c22c55112bc70",
+      "include/portals/detail/pss_compact.hpp": "cc81587f4c50b41da66e9b5b889cdad60a0c0c3b7bd399e257f7b227d919a03d",
+      "include/portals/detail/pss_data.hpp": "6a700b82cff8c31e94d8f305f144789a09bf457423b75159a12a5c164795ca12",
+      "include/portals/detail/pss_parser.hpp": "5903c5ca8e0d966d718c5afc5789daafe4a78da014ff13c652e021b735999cd1",
+      "include/portals/detail/setup_failure.hpp": "52b5fd33c989f081ade40fe31ebdd93905cb1d81bfc23f319108f43065a890f6",
+      "include/portals/diagnostics.hpp": "9274f72610e3abe25e5f91366efd495dbf1d4755daa93df13d4ee6f83eaf9f7a",
+      "include/portals/diff.hpp": "098afbe11de9dc4c5b79e3be399c1fe53f6d06e2848eab9f17a58aed08150473",
+      "include/portals/editor_command.hpp": "41b802fbd7cc6a6be68ba16de7dd152957c039dbfec3a2b42478c32dad06c771",
+      "include/portals/geometry.hpp": "87a010fdedcd0ad121a4a5ae1d93d0def793bd3336cb072e18c33f2b0e4caaea",
+      "include/portals/grid.hpp": "86f4f70cd45437b61aa91971581bbce3e58f3c0cb79e171e26c26c939336516c",
+      "include/portals/input.hpp": "9aec3c90484f08030a496acfd26c876b0a38e2040e1c1b76bf3d340042362cbb",
+      "include/portals/input_match.hpp": "5fb73d2a917ee00dea3a24a3343b36ec7af55762887c6936110d047a95b2c181",
+      "include/portals/layout.hpp": "7a89b9572c8cd9fb2676e73415442b3a1aff0e5a159c5fbbaa690b5842708726",
+      "include/portals/layout_snapshot.hpp": "753ddbc0ec8aabfd968fe002f98ca22d3bf63e90931920d230d115b704b82456",
+      "include/portals/legacy.hpp": "59492d9aa19ed61785fe0beadbcfb7a6b54fe97f8e0a53b39e14902685ff9fcf",
+      "include/portals/line_edit.hpp": "c67c466cdd664aa88f394aee91594077866984a488759fef0827a87c53a01f6b",
+      "include/portals/managed.hpp": "1d2300d382e14567c76f872984ec2d383b844b0ebddb4cd0cde82c14ddae7aa2",
+      "include/portals/managed_diagnostics.hpp": "09c279ef02e6cc6b2e6b72c6b777cc4820cd62a49ad1ff12a1bc3163532d0c72",
+      "include/portals/managed_model.hpp": "a67635465bea461819f3dd47fbfbf852518bc7cdb6124f4c79e46929cf8dea47",
+      "include/portals/model.hpp": "ddf5b11ad32a0cc6f1e58b271ae31889a8a99e100dc27f2c6ccdee5b210d0ca6",
+      "include/portals/model_query.hpp": "1be4be13c884429b8f014afe7765fc69d9aeef620fb341fca352897824cbc825",
+      "include/portals/property.hpp": "43a48df03a6a15f304b7f4789946e0ef847191220653864ac1f50f1c5e3a8ae0",
+      "include/portals/pss_file_error.hpp": "36acfacfe80f004789403ba50b22ab3bb48a97ebfcd059183f7aaf7d6d46bc7a",
+      "include/portals/render.hpp": "d52bb26e0c9ee664b8b002e52e9b5463f8a2a4dba92ab3cfc16eda0e2ce96669",
+      "include/portals/scheduler.hpp": "227ccaabe03bae747f1b3228bd1997cb3a0a8e66e1178e6b961db8316e5f535b",
+      "include/portals/scroll.hpp": "cd6d3568ac1cad83e62bbe96154d18a9d9c2dc95acd85af393e68be8cf9aaf22",
+      "include/portals/shortcut.hpp": "c0e3dc7bd8819701d43c7bd27bb4f0e85666958dbb2da8ad7cc69651535a1a8f",
+      "include/portals/style.hpp": "f7875b94fcd490dd2e0e5cf9390b8484689258c31aac2f5f9725c761e0b4ed69",
+      "include/portals/style_pss.hpp": "7bdfd9c2fea2e43435e92ac6947e98728931057ce6e1ae067cb346e6607a0b63",
+      "include/portals/style_source.hpp": "5f0b98dde1bf57593324afb7e8997337d53b4771bb29c0371c10d00ed46d929a",
+      "include/portals/style_static.hpp": "1f197ccd90a13db36c1ca5471f359da6efb939b3b9318ad2ccf48f5570eb3ee4",
+      "include/portals/style_types.hpp": "627b597d8a548336500a255971794a20a5e12d8aa716b6337c94e72d92db2931",
+      "include/portals/table_column.hpp": "5ae05a77ba3e42b720c4859fc9a6870175789900de6667be3a9ea0e99b7b3678",
+      "include/portals/terminal.hpp": "05ca3e9996cdee0e3e1560592c8642a203a298f1c4dfd22d338ad0f80e59cf96",
+      "include/portals/text.hpp": "c1ae2f3c9e7d39e9fdb631a227335f6bb48a53684a52fe8f56ca25b89b4f590e",
+      "include/portals/text_format.hpp": "3aa4c7e6d24f404822e5bec57929b559543cf971658a8bae1fbe525592acf4e5",
+      "include/portals/text_history.hpp": "b7ed9089161716a049b2b6c5d7965e913b23eb4725b094344bb8c936d3f14866",
+      "include/portals/text_resource.hpp": "1d79eb99155e41b0ce1446845e020878e193869a8396b822cfd576acf57c3fa4",
+      "include/portals/text_value.hpp": "98c039a193c9353b812508afd9f91aef4e31a2f62e336c716770255b248659af",
+      "include/portals/ui.hpp": "2c792e8b3b073a38c8de0dc9150ea964d7ceca9fed47a87c3ac2c1a0c679c494",
+      "include/portals/ui_app.hpp": "9db731cc45c52e5b29ab5a06342eb2c904563d48a14602ba968b6cec6b0f90c8",
+      "include/portals/ui_lyra.hpp": "188d672047086a62217f47030fc747d29534895e7d2b71c724857af2307ae3c7",
+      "include/portals/ui_ref.hpp": "e617cf4fb8b247110493e4bea0c4e74b29d126d510db750014d50306fdb60d7e",
+      "include/portals/ui_scene.hpp": "72132922d8732c26d586e599134bb27203f1084f6962792a0c258b7c91d6a7af",
+      "include/portals/ui_static.hpp": "921c3c35367a487e3b2743bdce68846fd85143d5d7e7ae2bd242bbfe107a5027",
+      "include/portals/ui_style.hpp": "31f82ac82931fb3a15c463b9a65860fc4a8392f6406629ace877cdd1d1f6f93b",
+      "include/portals/version.hpp": "5e5999a42e4ca427033bf086d314d87e63ad8a2e882cd0b7a70b9c7477e77ad3",
+      "include/portals/virtual_list.hpp": "b05ef0b07f3a5b1cc8f71258b7e5c74a6fb9b992c8afddebacb553b4a2f02960",
+      "include/portals/virtual_preparation.hpp": "ffb2a6b8a2d2372583e669df8eeff22717655def4cf15cd18e5f2bbc3c8a74ac",
+      "include/portals/virtual_table.hpp": "191ca5d5b6e12ee24cf56cdfd200241037b8a43069b5d6e28288fbb1142ddbf1",
+      "include/portals/widget.hpp": "953cfa32c46b38c3379dff0ea6301b93364058fa9d717507ab82f41b33cef8c6",
+      "include/portals/widget_types.hpp": "73c11f9bfc62a4b581cb6eecb00d03f3ededd13aa432839db74eaa43b58b0320"
+    }
+  },
+  "observed_directory_edges": [
+    [
+      "src",
+      "include/portals"
+    ],
+    [
+      "src/charts",
+      "include/portals"
+    ],
+    [
+      "src/layout",
+      "include/portals"
+    ],
+    [
+      "src/models",
+      "include/portals"
+    ],
+    [
+      "src/render",
+      "include/portals"
+    ],
+    [
+      "src/runtime",
+      "include/portals"
+    ],
+    [
+      "src/styles",
+      "include/portals"
+    ],
+    [
+      "src/styles",
+      "include/portals/detail"
+    ],
+    [
+      "src/terminal",
+      "include/portals"
+    ],
+    [
+      "src/views",
+      "include/portals"
+    ],
+    [
+      "src/widgets",
+      "include/portals"
+    ],
+    [
+      "src/widgets",
+      "include/portals/detail"
+    ],
+    [
+      "tools/benchmarks",
+      "include/portals"
+    ],
+    [
+      "tools/benchmarks",
+      "include/portals/detail"
+    ]
+  ],
+  "duration": "NOT_MEASURED; dependency counts are not compile timing"
+}

@@ -8,7 +8,9 @@
 #include <portals/ui_scene.hpp>
 
 #include <algorithm>
+#include <ranges>
 #include <tuple>
+#include <typeinfo>
 
 /// @brief Owning construction descriptions mounted through the existing ManagedScene lifecycle.
 namespace portals::ui {
@@ -36,6 +38,18 @@ template <class T> struct IsDescription<Description<T>> : std::true_type {};
 template <class T>
 concept DescriptionInput = IsDescription<std::remove_cvref_t<T>>::value && !std::is_lvalue_reference_v<T>;
 
+/** @brief Admit immediately consumable recipes without draining borrowed lvalue elements.
+ * @tparam R Input range producing Description values, explicit rvalue references, or an rvalue owning container.
+ */
+template <class R>
+concept DescriptionRange =
+  std::ranges::input_range<R> && IsDescription<std::ranges::range_value_t<R>>::value &&
+  ((DescriptionInput<std::ranges::range_reference_t<R>> &&
+    std::constructible_from<std::ranges::range_value_t<R>, std::ranges::range_reference_t<R>>) ||
+   (!std::is_lvalue_reference_v<R> && !std::ranges::view<std::remove_cvref_t<R>> &&
+    !std::ranges::enable_borrowed_range<std::remove_cvref_t<R>> &&
+    std::same_as<std::ranges::range_reference_t<R>, std::ranges::range_value_t<R> &>));
+
 /** @brief Preserve a construction failure without formatting its diagnostic.
  * @param node Observing target identity,
  * possibly empty before allocation.
@@ -46,6 +60,38 @@ concept DescriptionInput = IsDescription<std::remove_cvref_t<T>>::value && !std:
 inline ManagedError error(Node<Widget> node, TreeError cause) {
   return {ManagedPhase::MOUNT, node.id(), cause, {}, {}};
 }
+
+/** @brief Preserve the standard text-control error mapping and diagnostic payload.
+ * @param node Observing parent before text-control allocation.
+ * @param cause Original semantic or resource-limit text error.
+ * @return MOUNT error: NODE_LIMIT for text resource caps, otherwise INVALID_ARGUMENT, with unchanged text payload.
+ */
+inline ManagedError textError(Node<Widget> node, TextError cause) {
+  const auto kind = cause.kind;
+  const bool limited = kind == TextErrorKind::INPUT_LIMIT || kind == TextErrorKind::CLUSTER_LIMIT ||
+                       kind == TextErrorKind::GRAPHEME_LIMIT || kind == TextErrorKind::CELL_LIMIT;
+  auto failure = error(node, limited ? TreeError::NODE_LIMIT : TreeError::INVALID_ARGUMENT);
+
+  failure.text = cause;
+
+  return failure;
+}
+
+/** @brief One existing size-policy update, retained until checked mount. */
+enum class SizeDimension {
+  WIDTH,
+  HEIGHT,
+  FLEX_X,
+  FLEX_Y,
+  FLEX
+};
+
+/** @brief Owning compact size operation; validation remains in setSizePolicy. */
+struct SizeChange {
+  SizeDimension dimension; ///< Axis or axes receiving the change.
+  std::int32_t extent{};   ///< Fixed cells for WIDTH/HEIGHT.
+  std::uint32_t weight{1}; ///< Positive flex weight for FLEX operations.
+};
 
 /** @brief Stack-owned transaction bookkeeping, discarded after one description mount. */
 struct MountContext {
@@ -98,6 +144,51 @@ struct Access {
    */
   template <class T, class Factory> static Description<T> describe(Factory factory);
 
+  /** @param scene Existing managed owner receiving a checked policy update.
+   * @param node Live sized target created by this mount transaction.
+   * @param change Owning operation; other axes and unrelated bounds are preserved.
+   * @return Original managed boundary/tree/validation error, or success.
+   */
+  static std::expected<void, ManagedError> resize(ManagedScene &scene, Node<SizedWidget> node, SizeChange change) {
+    const auto allowed = scene.boundary(ManagedPhase::MOUNT, node);
+
+    if (!allowed) {
+      return allowed;
+    }
+
+    SizePolicy policy;
+    auto &tree = scene.app_.tree();
+    const auto read = tree.read(node, [&](const SizedWidget &widget) {
+      policy = widget.sizePolicy();
+    });
+
+    if (!read) {
+      return std::unexpected(error(node, read.error()));
+    }
+
+    if (change.dimension == SizeDimension::WIDTH) {
+      policy.width = {change.extent, change.extent, change.extent, SizeMode::FIXED, 1};
+    } else if (change.dimension == SizeDimension::HEIGHT) {
+      policy.height = {change.extent, change.extent, change.extent, SizeMode::FIXED, 1};
+    } else {
+      if (change.dimension != SizeDimension::FLEX_Y) {
+        policy.width.mode = SizeMode::FLEX;
+        policy.width.preferred = 0;
+        policy.width.weight = change.weight;
+      }
+
+      if (change.dimension != SizeDimension::FLEX_X) {
+        policy.height.mode = SizeMode::FLEX;
+        policy.height.preferred = 0;
+        policy.height.weight = change.weight;
+      }
+    }
+
+    const auto changed = setSizePolicy(tree, node, policy);
+
+    return changed ? std::expected<void, ManagedError>{} : std::unexpected(error(node, changed.error()));
+  }
+
   /** @brief Verify a created node remains accessible before publishing references.
    * @param scene Existing managed
    * owner, borrowed for this check.
@@ -110,6 +201,15 @@ struct Access {
   }
 };
 } // namespace detail
+
+/** @tparam Child Consuming Description type, including layouts and final custom widgets.
+ * @param child Owning single child transferred into this same mount transaction.
+ * @param options Owning glyph selection and finite allocated-perimeter paint cap.
+ * @param style Owning manual appearances beneath theme declarations.
+ * @return Owning frame recipe; errors roll back the entire subtree without partial ref publication.
+ */
+template <detail::DescriptionInput Child>
+Description<Border> border(Child &&child, BorderOptions options = {}, ControlStyle style = {});
 
 /** @brief Shared observing slot published only after a complete successful description mount.
  * @tparam T Observed public Widget subtype; no widget or scene ownership is retained.
@@ -129,6 +229,7 @@ public:
   }
 
 private:
+  friend struct detail::NamedAccess;
   friend class Description<T>;
   template <class U> friend class Ref;
 
@@ -308,6 +409,8 @@ public:
 
 private:
   friend struct detail::ClickAccess;
+  friend struct detail::NamedAccess;
+  friend class DynamicRef;
 
   std::expected<void, ManagedError>
   focusOperation(std::expected<void, ManagedError> (ManagedScene::*operation)(Node<Widget>),
@@ -332,6 +435,275 @@ private:
     return this->slot_ ? std::shared_ptr<detail::RefTarget>(this->slot_, &this->slot_->target) : nullptr;
   }
 };
+
+namespace detail {
+/** @brief Internal checked named publication bridge; no widget or scene ownership escapes. */
+struct NamedAccess {
+  /** @param stage Existing owning style payload.
+   * @param target Weak exact-node observation.
+   * @return Independent scoped stage using the same existing style implementation.
+   */
+  static StyleStage scopeStyle(const StyleStage &stage, std::shared_ptr<RefTarget> target);
+
+  /** @param reference Dynamic observation.
+   * @return Shared weak target with no scene ownership.
+   */
+  static std::shared_ptr<RefTarget> target(const DynamicRef &reference);
+
+  /** @param scene Receiving managed owner.
+   * @param target Shared observation, checked before reading mutable fields.
+   * @return Exact node scope or typed thread/owner/liveness failure.
+   */
+  static std::expected<NodeId, ManagedError> scope(ManagedScene &scene, const std::shared_ptr<RefTarget> &target) {
+    auto owner = eventScene(target);
+
+    if (!owner) {
+      auto failure = owner.error();
+      failure.phase = ManagedPhase::STYLE;
+
+      return std::unexpected(failure);
+    }
+
+    if (*owner != &scene) {
+      return std::unexpected(ManagedError{ManagedPhase::STYLE, target->node.id(), TreeError::WRONG_SESSION, {}, {}});
+    }
+
+    auto live = scene.boundary(ManagedPhase::STYLE, target->node);
+
+    return live ? std::expected<NodeId, ManagedError>(target->node.id()) : std::unexpected(live.error());
+  }
+
+  /** @param scene Receiving managed owner.
+   * @param source Original dynamic observation, never resolved again by name.
+   * @return Original live identity, or exact prior lookup/type/liveness/owner error.
+   */
+  static std::expected<Node<Widget>, ManagedError> observe(ManagedScene &scene,
+                                                           const std::shared_ptr<RefTarget> &source) {
+    auto owner = eventScene(source);
+
+    if (!owner) {
+      return std::unexpected(owner.error());
+    }
+
+    if (*owner != &scene) {
+      return std::unexpected(ManagedError{ManagedPhase::BIND, source->node.id(), TreeError::WRONG_SESSION, {}, {}});
+    }
+
+    auto allowed = scene.boundary(ManagedPhase::BIND, source->node);
+
+    return allowed ? std::expected<Node<Widget>, ManagedError>(source->node) : std::unexpected(allowed.error());
+  }
+
+  /** @param scene Borrowed live managed owner.
+   * @param name Case-sensitive ID; empty, absent and duplicate names reject.
+   * @return Unique live managed identity, or exact boundary/name error.
+   */
+  static std::expected<Node<Widget>, ManagedError> find(ManagedScene &scene, std::string_view name) {
+    auto allowed = scene.boundary(ManagedPhase::BIND, scene.root_);
+
+    if (!allowed) {
+      return std::unexpected(allowed.error());
+    }
+
+    Node<Widget> found;
+
+    for (const auto &entry : scene.entries_) {
+      if (entry->removed || !entry->target || entry->target->id != name || name.empty()) {
+        continue;
+      }
+
+      auto live = scene.app_.tree().read(entry->node, [](const Widget &) {
+      });
+
+      if (!live && (live.error() == TreeError::STALE_NODE || live.error() == TreeError::CLOSED)) {
+        continue;
+      }
+
+      if (!live) {
+        return std::unexpected(ManagedError{ManagedPhase::BIND, entry->node.id(), live.error(), {}, {}});
+      }
+
+      if (found != Node<Widget>{}) {
+        return std::unexpected(ManagedError{ManagedPhase::BIND, entry->node.id(), TreeError::INVALID_ARGUMENT, {}, {}});
+      }
+
+      found = entry->node;
+    }
+
+    if (found == Node<Widget>{}) {
+      return std::unexpected(ManagedError{ManagedPhase::BIND, {}, TreeError::INVALID_ARGUMENT, {}, {}});
+    }
+
+    return found;
+  }
+
+  /** @tparam T Public Widget subtype checked with RTTI before constructing its observer.
+   * @param reference Empty shared observing slot to publish.
+   * @param scene Existing owner, borrowed only during checked validation.
+   * @param node Unique name result; no unchecked downcast is exposed.
+   * @return Success after one publication or INVALID_ARGUMENT for a wrong type.
+   */
+  template <class T>
+  static std::expected<void, ManagedError> publish(const Ref<T> &reference, ManagedScene &scene, Node<Widget> node) {
+    auto &slot = *reference.slot_;
+    bool compatible{};
+    Node<Control> caption;
+    Node<LineEdit> draft;
+    auto checked = scene.app_.tree().read(node, [&](const Widget &widget) {
+      if constexpr (std::same_as<T, Widget>) {
+        compatible = true;
+      } else {
+        compatible = dynamic_cast<const T *>(&widget) != nullptr;
+      }
+
+      if (dynamic_cast<const Control *>(&widget)) {
+        caption = Node<Control>(node.id());
+      }
+
+      if (dynamic_cast<const LineEdit *>(&widget)) {
+        draft = Node<LineEdit>(node.id());
+      }
+    });
+
+    if (!checked || !compatible) {
+      return std::unexpected(
+        ManagedError{ManagedPhase::BIND, node.id(), checked ? TreeError::INVALID_ARGUMENT : checked.error(), {}, {}});
+    }
+
+    slot.node = Node<T>(node.id());
+    slot.target.scene = &scene;
+    slot.target.lifetime = scene.lifetime_;
+    slot.target.node = node;
+    slot.target.caption = caption;
+    slot.target.draft = draft;
+
+    return {};
+  }
+
+  /** @tparam T Observed public widget type.
+   * @param reference Shared slot retaining this request's original failure.
+   * @param failure Exact failure copied without widget access.
+   */
+  template <class T> static void reject(const Ref<T> &reference, const ManagedError &failure) {
+    reference.slot_->target.failure = std::make_shared<const ManagedError>(failure);
+  }
+
+  /** @param scene Existing collector.
+   * @param failure Exact cause stamped with short-error provenance.
+   * @param source Owned name and static expected-type diagnostic.
+   */
+  static void report(ManagedScene &scene, ManagedError &failure, const LookupSource &source) {
+    scene.reportShortError(failure, "scene.get", source.name, source.expectedType, source.origin);
+  }
+
+  /** @tparam T Observed widget subtype.
+   * @param reference Existing typed observation.
+   * @return Shared weak target, never scene or widget ownership.
+   */
+  template <class T> static std::shared_ptr<RefTarget> target(const Ref<T> &reference) {
+    return reference.target();
+  }
+
+  /** @tparam T Public Widget subtype required by this request.
+   * @param request Name and weak facade identity, copied through fallible owning transfers.
+   * @return Typed slot with deferred publication or its retained admission failure.
+   */
+  template <class T> static Ref<T> request(const LookupSource &request) {
+    Ref<T> reference;
+    LookupSource source(request);
+
+    source.expectedType = typeid(T).name();
+
+    auto result =
+      requestLookup(source, [reference](ManagedScene &scene, std::expected<Node<Widget>, ManagedError> node) {
+        auto published =
+          node ? publish(reference, scene, *node) : std::expected<void, ManagedError>(std::unexpected(node.error()));
+
+        if (!published) {
+          reject(reference, published.error());
+        }
+
+        return published;
+      });
+
+    if (!result) {
+      reject(reference, result.error());
+    }
+
+    return reference;
+  }
+};
+} // namespace detail
+
+/** @brief Dynamic named observation with checked caption/editor and Button capabilities.
+ * Copies own the request name and observing slot; they never retain a scene/widget.
+ * Converting to Ref<T> checks the same published NodeId, or waits for this slot before mount.
+ */
+class DynamicRef {
+public:
+  /** @tparam T Public Widget subtype tested during deferred/immediate name resolution.
+   * @return Typed weak slot; wrong type records INVALID_ARGUMENT before startup or in the live collector.
+   * Conversion construction may allocate. A successful slot never retargets on later ID reuse.
+   */
+  template <class T>
+    requires std::derived_from<T, Widget>
+  operator Ref<T>() const {
+    auto source = source_;
+
+    source.observation = detail::NamedAccess::target(reference_);
+
+    return detail::NamedAccess::request<T>(source);
+  }
+
+  /** @param resolver Optional owning synchronous localization adapter.
+   * @param origin Property acquisition call site retained for short mutations.
+   * @return Existing checked text proxy; non-text widgets return INVALID_ARGUMENT.
+   */
+  TextProperty text(TextResolver resolver = {}, std::source_location origin = std::source_location::current()) const {
+    return TextProperty(reference_.target(), std::move(resolver), "Widget", origin);
+  }
+
+  /** @tparam Callback Owning compact Button action accepted by Ref<Button>::onClick.
+   * @param callback Action transferred into the existing managed binding.
+   * @param origin Registration call site.
+   * @return Checked Button registration result; use a pipe stage for registration before preparation.
+   */
+  template <class Callback = detail::QuitCommand>
+    requires portals::detail::ManagedAction<Callback, ClickEvent>
+  std::expected<void, ManagedError> onClick(Callback callback,
+                                            std::source_location origin = std::source_location::current()) const {
+    Ref<Button> typed = *this;
+
+    return typed.onClick(std::move(callback), origin);
+  }
+
+  /** @return Observing published identity, empty before mount; UI-thread only. */
+  Node<Widget> node() const noexcept {
+    return reference_.node();
+  }
+
+private:
+  friend class Scene;
+  friend struct detail::NamedAccess;
+
+  explicit DynamicRef(const detail::LookupSource &source)
+      : source_(source), reference_(detail::NamedAccess::request<Widget>(source_)) {
+  }
+
+  detail::LookupSource source_;
+  Ref<Widget> reference_;
+};
+
+inline std::shared_ptr<detail::RefTarget> detail::NamedAccess::target(const DynamicRef &reference) {
+  return reference.reference_.target();
+}
+
+// The public contract is documented on Scene::get in ui_scene.hpp.
+template <class T>
+  requires std::derived_from<T, Widget>
+Ref<T> Scene::get(std::string_view name, std::source_location origin) {
+  return detail::NamedAccess::request<T>({ref().anchor_, owner_, std::string(name), origin});
+}
 
 namespace detail {
 /** @brief Checked adapter to the managed-owned click chain; never owns a widget or scene. */
@@ -512,6 +884,53 @@ public:
     return std::move(*this).onPrepare(std::move(normalized));
   }
 
+  /** @param cells Nonnegative fixed width; replaces only the horizontal bounds/mode.
+   * @return Consuming recipe; invalid cells fail at mount without publishing refs.
+   */
+  Description &&width(std::int32_t cells) &&
+    requires std::derived_from<T, SizedWidget>
+  {
+    return std::move(*this).resize({detail::SizeDimension::WIDTH, cells});
+  }
+
+  /** @param cells Nonnegative fixed height; replaces only the vertical bounds/mode.
+   * @return Consuming recipe; invalid cells fail at mount without publishing refs.
+   */
+  Description &&height(std::int32_t cells) &&
+    requires std::derived_from<T, SizedWidget>
+  {
+    return std::move(*this).resize({detail::SizeDimension::HEIGHT, cells});
+  }
+
+  /** @param weight Positive horizontal flex weight; zero preferred basis, existing bounds and vertical axis are
+   * preserved.
+   * @return Consuming recipe; zero weight fails at checked mount.
+   */
+  Description &&flexX(std::uint32_t weight = 1) &&
+    requires std::derived_from<T, SizedWidget>
+  {
+    return std::move(*this).resize({detail::SizeDimension::FLEX_X, 0, weight});
+  }
+
+  /** @param weight Positive vertical flex weight; zero preferred basis, existing bounds and horizontal axis are
+   * preserved.
+   * @return Consuming recipe; zero weight fails at checked mount.
+   */
+  Description &&flexY(std::uint32_t weight = 1) &&
+    requires std::derived_from<T, SizedWidget>
+  {
+    return std::move(*this).resize({detail::SizeDimension::FLEX_Y, 0, weight});
+  }
+
+  /** @param weight Positive flex weight for both axes, with zero preferred bases and existing bounds preserved.
+   * @return Consuming recipe; zero weight fails at checked mount. A prior fixed bound still caps flex growth.
+   */
+  Description &&flex(std::uint32_t weight = 1) &&
+    requires std::derived_from<T, SizedWidget>
+  {
+    return std::move(*this).resize({detail::SizeDimension::FLEX, 0, weight});
+  }
+
   /** @param callback Owning customization action, run in modifier order before children.
    * Capture the existing Application explicitly when a low-level tree operation is needed.
    * @return This consuming recipe for chaining. Empty callbacks fail at mount.
@@ -549,9 +968,12 @@ public:
 
 private:
   friend struct detail::Access;
+  template <detail::DescriptionInput Child> friend Description<Border> border(Child &&, BorderOptions, ControlStyle);
+
   template <class U, class... Args> friend Description<U> custom(Args &&...args);
   template <class U> friend Description<U> control(std::string_view, ControlStyle, SizePolicy);
   template <class U, detail::DescriptionInput... Children> friend Description<U> linear(LinearOptions, Children &&...);
+  template <class U, detail::DescriptionRange R> friend Description<U> linear(LinearOptions, R &&);
   template <detail::DescriptionInput... Children> friend Description<Grid> grid(Children &&...);
   friend Description<LineEdit> lineEdit(ManagedState<std::string>, LineEditConfig);
 
@@ -578,6 +1000,17 @@ private:
    */
   explicit Description(Factory create) : state_(std::make_unique<State>()) {
     state_->create = std::move(create);
+  }
+
+  /** @param change Owning policy operation applied in setup/modifier order.
+   * @return This consuming recipe; existing checked policy errors propagate at mount.
+   */
+  Description &&resize(detail::SizeChange change) &&
+    requires std::derived_from<T, SizedWidget>
+  {
+    return std::move(*this).setup([change](ManagedScene &scene, Node<T> node) {
+      return detail::Access::resize(scene, node, change);
+    });
   }
 
   /** @brief Retain a shared observing slot without publishing it yet.
@@ -757,12 +1190,7 @@ template <class T> Description<T> control(std::string_view text, ControlStyle st
     auto value = GraphemeText::from(text, scene.widthPolicy());
 
     if (!value) {
-      const auto kind = value.error().kind;
-      const bool limited = kind == TextErrorKind::INPUT_LIMIT || kind == TextErrorKind::CLUSTER_LIMIT ||
-                           kind == TextErrorKind::GRAPHEME_LIMIT || kind == TextErrorKind::CELL_LIMIT;
-      auto failure = detail::error(parent, limited ? TreeError::NODE_LIMIT : TreeError::INVALID_ARGUMENT);
-
-      failure.text = value.error();
+      auto failure = detail::textError(parent, value.error());
 
       return std::expected<Node<T>, ManagedError>(std::unexpected(failure));
     }
@@ -1100,6 +1528,69 @@ Description<T> linear(LinearOptions options, Children &&...children) {
    ...);
 
   return description;
+}
+
+/** @brief Immediately consume a range into the existing linear-layout mount transaction.
+ * @tparam T Existing Row or Column subtype accepting LinearOptions.
+ * @tparam R Input range of one Description type; elements must be rvalues, or R an rvalue non-view, non-borrowed
+ * container.
+ * @param options Owning layout settings, validated by the existing layout engine.
+ * @param children Recipes consumed once, in iteration order, before this function returns.
+ * @return Single-use parent owning every recipe; an empty range creates an empty layout.
+ * Use views::as_rvalue for explicit transfer from lvalue containers. Borrowed lvalue elements,
+ * including those exposed by temporary views, are rejected. No iterator or view is retained.
+ * Custom non-view, non-borrowed ranges must own their elements; that ownership cannot be inferred.
+ * Construction/iteration may throw; already transferred source elements are not restored.
+ * Mount preserves the original child error, subtree rollback and deferred reference publication.
+ */
+template <class T, detail::DescriptionRange R> Description<T> linear(LinearOptions options, R &&children) {
+  auto description = custom<T>(options);
+
+  for (auto &&child : children) {
+    description.state_->children.push_back(
+      [child = std::move(child)](ManagedScene &scene, Node<Widget> parent,
+                                 detail::MountContext &context) mutable -> std::expected<void, ManagedError> {
+        auto mounted = detail::Access::mount(std::move(child), scene, parent, context);
+
+        return mounted ? std::expected<void, ManagedError>{} : std::unexpected(mounted.error());
+      });
+  }
+
+  return description;
+}
+
+/** @tparam R Immediately consumable range of one Description type, as required by linear.
+ * @param options Owning horizontal layout settings.
+ * @param children Recipes transferred now, in left-to-right order; lvalue elements require explicit transfer.
+ * @return Owning row recipe with transactional child mounting.
+ */
+template <detail::DescriptionRange R> Description<Row> row(LinearOptions options, R &&children) {
+  return linear<Row>(options, std::forward<R>(children));
+}
+
+/** @tparam R Immediately consumable range of one Description type, as required by linear.
+ * @param children Recipes transferred now, in left-to-right order; lvalue elements require explicit transfer.
+ * @return Owning row recipe with default settings and transactional child mounting.
+ */
+template <detail::DescriptionRange R> Description<Row> row(R &&children) {
+  return linear<Row>({}, std::forward<R>(children));
+}
+
+/** @tparam R Immediately consumable range of one Description type, as required by linear.
+ * @param options Owning vertical layout settings.
+ * @param children Recipes transferred now, in top-to-bottom order; lvalue elements require explicit transfer.
+ * @return Owning column recipe with transactional child mounting.
+ */
+template <detail::DescriptionRange R> Description<Column> column(LinearOptions options, R &&children) {
+  return linear<Column>(options, std::forward<R>(children));
+}
+
+/** @tparam R Immediately consumable range of one Description type, as required by linear.
+ * @param children Recipes transferred now, in top-to-bottom order; lvalue elements require explicit transfer.
+ * @return Owning column recipe with default settings and transactional child mounting.
+ */
+template <detail::DescriptionRange R> Description<Column> column(R &&children) {
+  return linear<Column>({}, std::forward<R>(children));
 }
 
 /** @tparam Children Rvalue Description types.
@@ -1491,6 +1982,198 @@ template <class... Args>
   requires requires(Args &&...args) { column(std::forward<Args>(args)...); }
 auto vbox(Args &&...args) {
   return column(std::forward<Args>(args)...);
+}
+
+/** @brief Owning compact size stage; uses the same methods and existing solver as ordinary composition. */
+struct SizeModifier {
+  detail::SizeChange change; ///< Owning checked policy operation; no scene/widget borrow.
+
+  /** @tparam T SizedWidget subtype described by the consuming input.
+   * @param description Owning recipe consumed by this stage.
+   * @param modifier Owning axis/weight update, applied in pipe order at mount.
+   * @return Updated owning recipe; invalid values preserve transactional mount failure semantics.
+   */
+  template <std::derived_from<SizedWidget> T>
+  friend Description<T> operator|(Description<T> &&description, SizeModifier modifier) {
+    switch (modifier.change.dimension) {
+    case detail::SizeDimension::WIDTH:
+      return std::move(description).width(modifier.change.extent);
+    case detail::SizeDimension::HEIGHT:
+      return std::move(description).height(modifier.change.extent);
+    case detail::SizeDimension::FLEX_X:
+      return std::move(description).flexX(modifier.change.weight);
+    case detail::SizeDimension::FLEX_Y:
+      return std::move(description).flexY(modifier.change.weight);
+    case detail::SizeDimension::FLEX:
+      return std::move(description).flex(modifier.change.weight);
+    }
+
+    return std::move(description).flex(0);
+  }
+};
+
+/** @param cells Nonnegative fixed horizontal extent; checked at mount.
+ * @return Owning size stage replacing only the horizontal policy.
+ */
+constexpr SizeModifier width(std::int32_t cells) {
+  return {{detail::SizeDimension::WIDTH, cells}};
+}
+
+/** @param cells Nonnegative fixed vertical extent; checked at mount.
+ * @return Owning size stage replacing only the vertical policy.
+ */
+constexpr SizeModifier height(std::int32_t cells) {
+  return {{detail::SizeDimension::HEIGHT, cells}};
+}
+
+/** @param weight Positive horizontal flex weight; checked at mount.
+ * @return Owning zero-basis flex stage preserving existing bounds and vertical policy.
+ */
+constexpr SizeModifier flexX(std::uint32_t weight = 1) {
+  return {{detail::SizeDimension::FLEX_X, 0, weight}};
+}
+
+/** @param weight Positive vertical flex weight; checked at mount.
+ * @return Owning zero-basis flex stage preserving existing bounds and horizontal policy.
+ */
+constexpr SizeModifier flexY(std::uint32_t weight = 1) {
+  return {{detail::SizeDimension::FLEX_Y, 0, weight}};
+}
+
+/** @param weight Positive weight for both axes; checked at mount.
+ * @return Owning zero-basis flex stage preserving existing bounds.
+ */
+constexpr SizeModifier flex(std::uint32_t weight = 1) {
+  return {{detail::SizeDimension::FLEX, 0, weight}};
+}
+
+template <detail::DescriptionInput Child>
+Description<Border> border(Child &&child, BorderOptions options, ControlStyle style) {
+  auto description = detail::Access::describe<Border>([options, style](ManagedScene &scene, Node<Widget> parent) {
+    const auto valid = Border::validate(options);
+
+    if (!valid) {
+      return std::expected<Node<Border>, ManagedError>(std::unexpected(detail::error(parent, valid.error())));
+    }
+
+    return scene.emplace<Border>(parent, scene.widthPolicy(), options, style);
+  });
+
+  description.state_->children.push_back(
+    [child = std::forward<Child>(child)](ManagedScene &scene, Node<Widget> parent,
+                                         detail::MountContext &context) mutable -> std::expected<void, ManagedError> {
+      const auto mounted = detail::Access::mount(std::move(child), scene, parent, context);
+
+      return mounted ? std::expected<void, ManagedError>{} : std::unexpected(mounted.error());
+    });
+
+  return description;
+}
+
+/** @tparam Child Consuming Description type.
+ * @param child Owning child mounted within the frame transaction.
+ * @param options Owning frame glyph/paint-work policy.
+ * @param style Owning manual appearances beneath themes.
+ * @return Same owning frame recipe as border, with identical layout and failure semantics.
+ */
+template <detail::DescriptionInput Child>
+Description<Border> frame(Child &&child, BorderOptions options = {}, ControlStyle style = {}) {
+  return border(std::forward<Child>(child), options, style);
+}
+
+/** @brief Owning frame pipe stage over the same transactional border factory. */
+struct BorderModifier {
+  BorderOptions options; ///< Owning glyph/work settings.
+  ControlStyle style;    ///< Owning manual appearances beneath themes.
+
+  /** @tparam T Widget subtype described by the consuming input.
+   * @param description Owning child recipe consumed by the frame.
+   * @param modifier Owning glyph, style and finite work settings.
+   * @return Owning frame containing the input in the same mount transaction.
+   */
+  template <class T> friend Description<Border> operator|(Description<T> &&description, BorderModifier modifier) {
+    return border(std::move(description), modifier.options, modifier.style);
+  }
+};
+
+/** @param options Owning frame glyph selection and finite paint cap.
+ * @param style Owning manual appearances beneath themes.
+ * @return Frame stage for a consuming description; no view/widget borrow is retained.
+ */
+inline BorderModifier border(BorderOptions options = {}, ControlStyle style = {}) {
+  return {options, style};
+}
+
+/** @param options Owning frame glyph selection and finite paint cap.
+ * @param style Owning manual appearances beneath themes.
+ * @return The same frame stage as border(options, style).
+ */
+inline BorderModifier frame(BorderOptions options = {}, ControlStyle style = {}) {
+  return {options, style};
+}
+
+/** @param value Finite value in the inclusive configured range; checked at mount.
+ * @param options Owning finite bounds, intrinsic width, glyph mode and allocated-area paint cap.
+ * @param style Owning manual appearances beneath theme declarations.
+ * @param policy Owning layout constraints, validated by the existing solver.
+ * @return Single-use determinate gauge recipe; invalid values/settings preserve typed mount errors.
+ */
+inline Description<Gauge> gauge(double value, GaugeOptions options = {}, ControlStyle style = {},
+                                SizePolicy policy = {}) {
+  return detail::Access::describe<Gauge>([value, options, style, policy](ManagedScene &scene, Node<Widget> parent) {
+    const auto valid = Gauge::validate(value, options);
+
+    if (!valid) {
+      return std::expected<Node<Gauge>, ManagedError>(std::unexpected(detail::error(parent, valid.error())));
+    }
+
+    return scene.emplace<Gauge>(parent, value, scene.widthPolicy(), options, style, policy);
+  });
+}
+
+/** @param text UTF-8 caption copied now and checked at mount under the receiving WidthPolicy.
+ * @param style Owning manual normal/focused/disabled appearances beneath themes.
+ * @param policy Owning layout constraints, checked by the existing solver.
+ * @return Existing Button recipe without brackets; activation still uses existing bindings/router.
+ */
+inline Description<Button> plainButton(std::string_view text, ControlStyle style = {}, SizePolicy policy = {}) {
+  return detail::Access::describe<Button>(
+    [text = std::string(text), style, policy](ManagedScene &scene, Node<Widget> parent) {
+      auto caption = GraphemeText::from(text, scene.widthPolicy());
+
+      if (!caption) {
+        auto failure = detail::textError(parent, caption.error());
+
+        return std::expected<Node<Button>, ManagedError>(std::unexpected(failure));
+      }
+
+      return scene.emplace<Button>(parent, std::move(*caption), style, policy, ButtonChrome::NONE);
+    });
+}
+
+/** @tparam Callback Existing compact action accepting optionally const ClickEvent&.
+ * @param text UTF-8 caption copied immediately.
+ * @param action Owning action transferred to the existing managed click binding at mount.
+ * @param style Owning manual appearances beneath themes.
+ * @param policy Owning layout constraints.
+ * @return Existing unbracketed Button recipe; action errors preserve their checked boundary/provenance.
+ */
+template <class Callback>
+  requires portals::detail::ManagedAction<Callback, ClickEvent>
+Description<Button> plainButton(std::string_view text, Callback action, ControlStyle style = {},
+                                SizePolicy policy = {}) {
+  return plainButton(text, style, policy).onClick(std::move(action));
+}
+
+/** @param reference Empty shared observing slot, published only after complete mount.
+ * @param text UTF-8 caption copied immediately.
+ * @param style Owning manual appearances beneath themes.
+ * @param policy Owning layout constraints.
+ * @return Existing unbracketed Button recipe sharing normal transactional reference publication.
+ */
+inline Description<Button> plainButton(Ref<Button> reference, std::string_view text, ControlStyle style = {},
+                                       SizePolicy policy = {}) {
+  return plainButton(text, style, policy).reference(std::move(reference));
 }
 
 namespace detail {
