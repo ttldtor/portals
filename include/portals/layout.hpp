@@ -83,6 +83,14 @@ public:
    */
   virtual std::expected<CellSize, TreeError> childAvailable(CellSize available) const = 0;
 
+  /** @brief Clip descendants within this container without changing allocation.
+   * @param available Allocated normalized container extent in cells.
+   * @return Container-local descendant clip; the default is the complete extent.
+   * Overrides must return a clip contained in that extent, or an unchanged typed error.
+   * Adding this virtual requires rebuilding consumers; old object-file ABI compatibility is not promised.
+   */
+  virtual std::expected<CellRect, TreeError> childClip(CellSize available) const;
+
   /** @brief Own aggregate.
    * @param children Borrowed visible children in sibling order, including stable identities and copied policies.
    * @return The owning aggregate intrinsic extent, or a layout error.

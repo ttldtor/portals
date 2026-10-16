@@ -8,6 +8,7 @@
 #include <portals/line_edit.hpp>
 #include <portals/managed_diagnostics.hpp>
 #include <portals/managed_model.hpp>
+#include <portals/primitives.hpp>
 #include <portals/style.hpp>
 #include <portals/style_source.hpp>
 #include <portals/virtual_preparation.hpp>
@@ -253,8 +254,17 @@ public:
 
       entry->node = *node;
 
-      if constexpr (std::derived_from<T, Control> || std::same_as<T, LineEdit>) {
-        entry->target = std::make_shared<StyleTarget>(StyleTarget{.type = "Control"});
+      if constexpr (std::derived_from<T, Control> || std::same_as<T, LineEdit> || std::same_as<T, Border> ||
+                    std::same_as<T, Gauge>) {
+        const char *type = "Control";
+
+        if constexpr (std::same_as<T, Border>) {
+          type = "Border";
+        } else if constexpr (std::same_as<T, Gauge>) {
+          type = "Gauge";
+        }
+
+        entry->target = std::make_shared<StyleTarget>(StyleTarget{.type = type});
         entry->stylePending = true;
         stylesDirty_ = true;
       }
@@ -262,6 +272,14 @@ public:
       if constexpr (std::derived_from<T, Control>) {
         entry->sync = [this, node = *node](Node<Widget> focused) {
           return syncControl(app_.tree(), node, focused);
+        };
+      } else if constexpr (std::same_as<T, Border>) {
+        entry->sync = [this, node = *node](Node<Widget>) {
+          return syncBorder(app_.tree(), node);
+        };
+      } else if constexpr (std::same_as<T, Gauge>) {
+        entry->sync = [this, node = *node](Node<Widget>) {
+          return syncGauge(app_.tree(), node);
         };
       }
 

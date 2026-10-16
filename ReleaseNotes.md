@@ -12,6 +12,18 @@ planned work is not included. An **Unreleased** heading has no publication date.
   resolver, including atomic metadata admission for unstyled targets. Theme
   replacement preserves application overrides without synthetic selector IDs.
 
+- [Added] Owning range composition for `vbox`, `hbox`, `row` and `column`
+  materializes consuming recipes immediately without retaining source views.
+- [Added] Compact width/height/flex modifiers, a single-child border/frame,
+  a determinate gauge and plain buttons reuse retained layout, painting and routing.
+  Scoped PSS overrides support theme changes for these controls.
+- [Changed] Layouts can constrain their children's content clip. The new optional
+  virtual hook requires rebuilding C++ consumers together with the updated SDK.
+- [Added] Offline architecture maps in English and Russian, an interactive viewer
+  and a reproducible standard-library generator with source-archive checks.
+- [Changed] The dashboard uses declarative size composition; a compact native form
+  demonstrates a border, gauge, button actions, scoped styles and standard shutdown.
+
 ## v0.3.0 (2026-10-15)
 
 - [Added] Optional `portals::lyra` and `ui::lyra::cli` adapt native Lyra declarations

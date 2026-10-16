@@ -454,6 +454,17 @@ public:
    * INVALID_GEOMETRY for an unarranged parent/translation overflow, CALLBACK_FAILED, or the hook's error.
    */
   std::expected<void, TreeError> arrange(Node<Widget> node, CellRect local, CellRect viewport);
+  /** @brief Arrange with an additional surface clip, inherited by this node's descendants.
+   * @param node Live widget whose geometry is replaced after its arranged parent.
+   * @param local Parent-relative allocation; root coordinates are already on the surface.
+   * @param viewport Root surface clip, with the unchanged three-argument semantics.
+   * @param contentClip Extra surface-cell clip intersected with the ordinary inherited/root clip.
+   * @return The same checked errors as three-argument arrange; clipping never changes allocation.
+   * The additional clip narrows this node's geometry.clip and therefore its paint and hit-test
+   * footprint and all descendant clips. Transforms remain checked before geometry publication.
+   */
+  std::expected<void, TreeError> arrange(Node<Widget> node, CellRect local, CellRect viewport, CellRect contentClip);
+
   /** @brief Requires an active frame borrow.
    * @param node Live, arranged widget to paint; hidden ancestry skips the hook.
    * @param context Sink borrowed for this hook and the enclosing frame only.
@@ -540,6 +551,8 @@ private:
     }
   }
 
+  std::expected<void, TreeError> arrangeImpl(Node<Widget> node, CellRect local, CellRect viewport,
+                                             std::optional<CellRect> contentClip);
   std::expected<void, TreeError> beginFrame() const;
   const UiScope &scope(NodeId id) const;
   Scheduler &scheduler() const;

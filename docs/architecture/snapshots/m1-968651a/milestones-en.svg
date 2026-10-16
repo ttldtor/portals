@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 670" role="img" aria-labelledby="title desc">
+<title id="title">Milestone evidence and remaining work</title>
+<desc id="desc">M1 in progress · committed source baseline. This is an in-progress M1 source snapshot. It is not milestone acceptance or a release declaration. Earlier baseline and current changes are pinned; future snapshots are a maintenance process.</desc>
+<style>text{font-family:system-ui,Segoe UI,sans-serif} .paper{fill:#f5f7fc}.card{fill:#fff}.ink{fill:#17233a}.muted{fill:#42516a} a:focus rect{stroke-width:5} @media(prefers-color-scheme:dark){.paper{fill:#121b2b}.card{fill:#1c2a40}.ink{fill:#f2f5fc}.muted{fill:#d2dced}}</style>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7387a8"/></marker></defs>
+<rect class="paper" width="960" height="670" rx="12"/>
+<text class="ink" x="22" y="32" font-size="23" font-weight="700">Milestone evidence and remaining work</text>
+<text class="muted" x="22" y="58" font-size="14">m1-968651a · M1 in progress · committed source baseline</text>
+<a href="https://github.com/ttldtor/portals/blob/849dc6285d7ef863206e8248810ee0650413b0a2/docs/compile-time-pss.md#L1" target="_blank" rel="noopener" data-node="baseline"><title>The earlier comparison revision already contains typed styles/PSS integration. The public foundation does not claim to publish or independently qualify a historical M0 snapshot. Use the pinned revision for source comparison; the current cards describe 968651a.</title>
+<rect class="card" x="22" y="80" width="440" height="154" rx="10" stroke="#705400" stroke-width="2"/>
+<rect x="22" y="80" width="7" height="154" rx="3" fill="#705400"/>
+<text class="ink" x="42" y="110" font-size="20" font-weight="650">Earlier source baseline</text>
+<text class="muted" x="42" y="168" font-size="14">M0 comparison:</text>
+<text class="muted" x="42" y="187" font-size="14">849dc6285d7ef863206e8248810ee0650413b0a2</text>
+<text class="muted" x="42" y="213" font-size="12">1 · status · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/docs/input.md#L1" target="_blank" rel="noopener" data-node="keys"><title>The current committed source has semantic key bindings, press/repeat/release selection, bounded key sequences and scoped quit commands. These additions use the existing router and scheduler. This statement covers these source features, not all M1 work.</title>
+<rect class="card" x="498" y="80" width="440" height="154" rx="10" stroke="#705400" stroke-width="2"/>
+<rect x="498" y="80" width="7" height="154" rx="3" fill="#705400"/>
+<text class="ink" x="518" y="110" font-size="20" font-weight="650">Delivered since the baseline</text>
+<text class="muted" x="518" y="168" font-size="14">semantic keys / phase selection /</text>
+<text class="muted" x="518" y="187" font-size="14">sequences</text>
+<text class="muted" x="518" y="213" font-size="12">2 · status · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/src/widgets/ui_scene.cpp#L761" target="_blank" rel="noopener" data-node="setup-change"><title>Since the earlier baseline, rejected short setup mutations retain typed failure and stop subsequent configure callbacks. This corrects the older limitation where a void configure could record the diagnostic without stopping setup. Current snapshot follows the corrected contract.</title>
+<rect class="card" x="498" y="270" width="440" height="154" rx="10" stroke="#705400" stroke-width="2"/>
+<rect x="498" y="270" width="7" height="154" rx="3" fill="#705400"/>
+<text class="ink" x="518" y="300" font-size="20" font-weight="650">Setup failure propagation</text>
+<text class="muted" x="518" y="358" font-size="14">first rejected short setup mutation → stop</text>
+<text class="muted" x="518" y="403" font-size="12">3 · status · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/include/portals/ui.hpp#L1980" target="_blank" rel="noopener" data-node="launch-change"><title>Lazy CLI launch can show help without constructing the scene factory. Fluent stages still prepare and run the same retained core. Single UI-thread ownership, checked observing handles, dirty-only frames and explicit cleanup remain the core invariants.</title>
+<rect class="card" x="22" y="270" width="440" height="154" rx="10" stroke="#705400" stroke-width="2"/>
+<rect x="22" y="270" width="7" height="154" rx="3" fill="#705400"/>
+<text class="ink" x="42" y="300" font-size="20" font-weight="650">Lazy launch and retained core</text>
+<text class="muted" x="42" y="358" font-size="14">ui::launch + same Application / tree /</text>
+<text class="muted" x="42" y="377" font-size="14">router</text>
+<text class="muted" x="42" y="403" font-size="12">4 · status · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/docs/planned-features.md#L1" target="_blank" rel="noopener" data-node="remaining"><title>This source baseline does not include uncommitted range composition, named references/scoped style changes or later controls/focus work. Their delivery and verification are separate. Update the architecture only from integrated, checked source; do not mark the whole milestone complete from this foundation.</title>
+<rect class="card" x="22" y="460" width="440" height="154" rx="10" stroke="#705400" stroke-width="2"/>
+<rect x="22" y="460" width="7" height="154" rx="3" fill="#705400"/>
+<text class="ink" x="42" y="490" font-size="20" font-weight="650">M1 remains in progress</text>
+<text class="muted" x="42" y="548" font-size="14">Concurrent and future changes require a</text>
+<text class="muted" x="42" y="567" font-size="14">new snapshot</text>
+<text class="muted" x="42" y="593" font-size="12">5 · status · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/docs/testing.md#L1" target="_blank" rel="noopener" data-node="checks"><title>Baseline integration: PR36 CI run 38799649714 completed 6/6 checks successfully for PR head 28723ed04810c597c2fe31f0d75cd9416c5916ac, merged as 968651a. Snapshot authoring separately passed 8 exporter/source/help tests and 40 offline browser map/language/theme/width combinations, including actual SVG downloads. These are documentation checks, not a new C++ runtime suite. New full Doxygen build and delivered artifact: NOT_VERIFIED at authoring boundary; integration remains required.</title>
+<rect class="card" x="498" y="460" width="440" height="154" rx="10" stroke="#705400" stroke-width="2"/>
+<rect x="498" y="460" width="7" height="154" rx="3" fill="#705400"/>
+<text class="ink" x="518" y="490" font-size="20" font-weight="650">Named verification evidence</text>
+<text class="muted" x="518" y="548" font-size="14">Baseline CI 6/6 / exporter 8 / browser 40</text>
+<text class="muted" x="518" y="593" font-size="12">6 · status · source ↗</text></a>
+</svg>

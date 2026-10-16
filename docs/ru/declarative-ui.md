@@ -335,3 +335,67 @@ int main() {
 ```
 
 </details>
+
+## Композиция дочерних элементов из диапазона
+
+`ui::vbox(range)` и `ui::hbox(range)` немедленно поглощают входной диапазон
+в порядке обхода. Диапазон выдаёт один конкретный тип `Description<T>`;
+для разнородных дочерних элементов используйте variadic-перегрузку. Временный
+transform view и его captures уничтожаются после construction; родитель владеет
+всеми полученными рецептами. При mount диапазон больше не используется.
+
+```cpp
+#include <portals/ui.hpp>
+
+#include <array>
+
+int main() {
+  using namespace portals;
+
+  const std::array<std::string_view, 3> captions{"Mercury", "Venus", "Earth"};
+  auto scene = ui::scene(ui::vbox(captions | std::views::transform([](std::string_view text) {
+                                  return ui::label(text);
+                                })));
+
+  scene.onKey(key::F10, ui::quit);
+
+  return scene.runApp();
+}
+```
+Та же сцена с pipe-стадиями:
+
+```cpp
+#include <portals/ui.hpp>
+
+#include <array>
+
+int main() {
+  using namespace portals;
+
+  const std::array<std::string_view, 3> captions{"Mercury", "Venus", "Earth"};
+  auto scene = ui::scene(ui::vbox(captions | std::views::transform([](std::string_view text) {
+                                  return ui::label(text);
+                                })));
+
+  return scene | ui::onKey(key::F10, ui::quit) | ui::runApp();
+}
+```
+
+Оба варианта используют одну сцену, обработку ошибок и cleanup. Перегрузки
+`row`/`column` также принимают диапазоны; `vbox(options, range)` и
+`hbox(options, range)` сохраняют `LinearOptions`. Пустой диапазон создаёт пустой
+layout. Ошибка mount дочернего элемента сохраняет исходную типизированную ошибку,
+откатывает созданное поддерево и не публикует частичные `NodeRef` или `Ref`.
+
+Lvalue-контейнеры move-only descriptions требуют явного переноса:
+`ui::vbox(children | std::views::as_rvalue)`. `ui::vbox(std::move(children))`
+также переносит owning-контейнер, который не является view и не включает
+`enable_borrowed_range`. Пользовательский range обязан владеть элементами для
+этой перегрузки: автоматически доказать такое владение невозможно. Временный view,
+возвращающий lvalue descriptions, отклоняется: его элементы могут принадлежать
+другому владельцу. Construction и обход могут бросить исключение; уже перенесённые
+рецепты не восстанавливаются в источнике. Borrowed-ссылки внутри рецептов
+сохраняют существующие требования времени жизни.
+
+[Рамки, индикаторы и короткие размеры](compact-primitives.md) дают стандартные
+виджеты и consuming-методы/pipe-стадии для полной небольшой сцены.

@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 860" role="img" aria-labelledby="title desc">
+<title id="title">One service cycle and dirty frame</title>
+<desc id="desc">M1 in progress · committed source baseline. The runner services bounded work once per cycle. A pending output transaction or cadence deadline postpones rendering without discarding dirty state.</desc>
+<style>text{font-family:system-ui,Segoe UI,sans-serif} .paper{fill:#f5f7fc}.card{fill:#fff}.ink{fill:#17233a}.muted{fill:#42516a} a:focus rect{stroke-width:5} @media(prefers-color-scheme:dark){.paper{fill:#121b2b}.card{fill:#1c2a40}.ink{fill:#f2f5fc}.muted{fill:#d2dced}}</style>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7387a8"/></marker></defs>
+<rect class="paper" width="960" height="860" rx="12"/>
+<text class="ink" x="22" y="32" font-size="23" font-weight="700">One service cycle and dirty frame</text>
+<text class="muted" x="22" y="58" font-size="14">m1-968651a · M1 in progress · committed source baseline</text>
+<path d="M 462 157.0 L 498 157.0" fill="none" stroke="#7387a8" stroke-width="2" marker-end="url(#arrow)"><title>Normal successful path; failures follow cleanup</title></path>
+<path d="M 718.0 234 L 718.0 270" fill="none" stroke="#7387a8" stroke-width="2" marker-end="url(#arrow)"><title>Normal successful path; failures follow cleanup</title></path>
+<path d="M 498 347.0 L 462 347.0" fill="none" stroke="#7387a8" stroke-width="2" marker-end="url(#arrow)"><title>Normal successful path; failures follow cleanup</title></path>
+<path d="M 242.0 424 L 242.0 460" fill="none" stroke="#7387a8" stroke-width="2" marker-end="url(#arrow)"><title>Normal successful path; failures follow cleanup</title></path>
+<path d="M 462 537.0 L 498 537.0" fill="none" stroke="#7387a8" stroke-width="2" marker-end="url(#arrow)"><title>Normal successful path; failures follow cleanup</title></path>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/src/runtime/application.cpp#L337" target="_blank" rel="noopener" data-node="input"><title>Native read is the wait primitive. Bounded admission retains one native batch/raw suffix and a rejected CONTROL owner under pressure. Windows events are already decoded; POSIX input preserves arrival timestamps for streaming decoder deadlines.</title>
+<rect class="card" x="22" y="80" width="440" height="154" rx="10" stroke="#08796b" stroke-width="2"/>
+<rect x="22" y="80" width="7" height="154" rx="3" fill="#08796b"/>
+<text class="ink" x="42" y="110" font-size="20" font-weight="650">1. Read and admit</text>
+<text class="muted" x="42" y="168" font-size="14">native read → decoder → CONTROL</text>
+<text class="muted" x="42" y="213" font-size="12">1 · flow · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/src/runtime/application.cpp#L443" target="_blank" rel="noopener" data-node="dispatch"><title>CONTROL and DATA have separate budgets. scene.input may consume global input; otherwise EventRouter resolves focus/hit target and action, then delivers checked handlers. Equal Property values do not cause a new invalidation. A successful mutation receipt can still carry notification rejections.</title>
+<rect class="card" x="498" y="80" width="440" height="154" rx="10" stroke="#08796b" stroke-width="2"/>
+<rect x="498" y="80" width="7" height="154" rx="3" fill="#08796b"/>
+<text class="ink" x="518" y="110" font-size="20" font-weight="650">2. Dispatch once</text>
+<text class="muted" x="518" y="168" font-size="14">Scheduler → scene.input → EventRouter</text>
+<text class="muted" x="518" y="213" font-size="12">2 · flow · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/src/runtime/application.cpp#L539" target="_blank" rel="noopener" data-node="idle"><title>renderReady returns while output is pending or cadence is not ready. With no dirty request it returns before preparation and painting. Idle still samples input and resize; it emits no periodic frame without invalidation. A late cycle does not cause catch-up frames.</title>
+<rect class="card" x="498" y="270" width="440" height="154" rx="10" stroke="#08796b" stroke-width="2"/>
+<rect x="498" y="270" width="7" height="154" rx="3" fill="#08796b"/>
+<text class="ink" x="518" y="300" font-size="20" font-weight="650">3. Dirty and output gate</text>
+<text class="muted" x="518" y="358" font-size="14">pending? / cadence? / Invalidation::NONE?</text>
+<text class="muted" x="518" y="403" font-size="12">3 · flow · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/src/runtime/application.cpp#L522" target="_blank" rel="noopener" data-node="prepare-frame"><title>Scene preparation synchronizes bindings and pins model revisions. Prepared views use final layout extents; a preparation-triggered layout invalidation can repeat the bounded pass. Provider request receipts are handled outside paint. Preparation starts no hidden provider worker.</title>
+<rect class="card" x="22" y="270" width="440" height="154" rx="10" stroke="#08796b" stroke-width="2"/>
+<rect x="22" y="270" width="7" height="154" rx="3" fill="#08796b"/>
+<text class="ink" x="42" y="300" font-size="20" font-weight="650">4. Prepare coherent views</text>
+<text class="muted" x="42" y="358" font-size="14">scene.prepare → layout snapshot →</text>
+<text class="muted" x="42" y="377" font-size="14">prepareViews</text>
+<text class="muted" x="42" y="403" font-size="12">4 · flow · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/src/runtime/application.cpp#L454" target="_blank" rel="noopener" data-node="paint"><title>Visible nodes paint through arranged surfaces and clips inside WidgetTree::frame. Renderer consumes borrowed commands into owning cells. A prepare/render failure ends the run with its original cause; the runner submits no partially built frame. Tree painting alone does not roll back earlier callback effects.</title>
+<rect class="card" x="22" y="460" width="440" height="154" rx="10" stroke="#08796b" stroke-width="2"/>
+<rect x="22" y="460" width="7" height="154" rx="3" fill="#08796b"/>
+<text class="ink" x="42" y="490" font-size="20" font-weight="650">5. Layout and paint</text>
+<text class="muted" x="42" y="548" font-size="14">WidgetTree::frame → renderer → CellBuffer</text>
+<text class="muted" x="42" y="593" font-size="12">5 · flow · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/src/runtime/application.cpp#L582" target="_blank" rel="noopener" data-node="output"><title>FrameWriter retains partial output and advances committed state only after complete consistent acceptance. An update can produce an empty diff. Any transport error ends this run; uncertain bytes are not reopened or replayed. Flush occurs at most once per cycle.</title>
+<rect class="card" x="498" y="460" width="440" height="154" rx="10" stroke="#1759a8" stroke-width="2"/>
+<rect x="498" y="460" width="7" height="154" rx="3" fill="#1759a8"/>
+<text class="ink" x="518" y="490" font-size="20" font-weight="650">6. Submit and flush</text>
+<text class="muted" x="518" y="548" font-size="14">FrameWriter: diff → encode → bounded flush</text>
+<text class="muted" x="518" y="593" font-size="12">6 · owner · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/src/runtime/application.cpp#L610" target="_blank" rel="noopener" data-node="eof"><title>EOF finishes decoding, delivers admitted CONTROL and flushes submitted output. It does not wait for future frames, timers or DATA: a delivered edit may remain dirty and never be displayed. Cancellation can stop earlier. Native close depends on host/driver progress.</title>
+<rect class="card" x="498" y="650" width="440" height="154" rx="10" stroke="#705400" stroke-width="2"/>
+<rect x="498" y="650" width="7" height="154" rx="3" fill="#705400"/>
+<text class="ink" x="518" y="680" font-size="20" font-weight="650">EOF and cancellation limits</text>
+<text class="muted" x="518" y="738" font-size="14">EOF ≠ render all future work</text>
+<text class="muted" x="518" y="783" font-size="12">7 · status · source ↗</text></a>
+</svg>

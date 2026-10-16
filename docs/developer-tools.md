@@ -68,6 +68,8 @@ are in the linked reference.
 | [tools/ci/checks.py](../tools/ci/checks.py) | [Build and checks](developer-tools-build.md) |
 | [tools/ci/test_checks.py](../tools/ci/test_checks.py) | [Regression test](developer-tools-build.md) |
 | [tools/docs/check_links.py](../tools/docs/check_links.py) | [Build and checks](developer-tools-build.md) |
+| [tools/docs/architecture.py](../tools/docs/architecture.py) | [Architecture exports](developer-tools-build.md#tool-architecture) |
+| [tools/docs/architecture_test.py](../tools/docs/architecture_test.py) | [Regression test](developer-tools-build.md#tool-architecture) |
 | [tools/docs/finalize_html.py](../tools/docs/finalize_html.py) | [Build and checks](developer-tools-build.md) |
 | [tools/docs/test_cli_help.py](../tools/docs/test_cli_help.py) | [Regression test](developer-tools-build.md) |
 | [tools/docs/test_finalize_html.py](../tools/docs/test_finalize_html.py) | [Regression test](developer-tools-build.md) |

@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 670" role="img" aria-labelledby="title desc">
+<title id="title">Milestones: факты и оставшаяся работа</title>
+<desc id="desc">M1 в работе · закреплённая версия исходников. Это снимок исходников внутри M1. Он не означает приёмку milestone или выпуск. Предыдущая база и текущие изменения закреплены; будущие snapshots — процесс сопровождения.</desc>
+<style>text{font-family:system-ui,Segoe UI,sans-serif} .paper{fill:#f5f7fc}.card{fill:#fff}.ink{fill:#17233a}.muted{fill:#42516a} a:focus rect{stroke-width:5} @media(prefers-color-scheme:dark){.paper{fill:#121b2b}.card{fill:#1c2a40}.ink{fill:#f2f5fc}.muted{fill:#d2dced}}</style>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7387a8"/></marker></defs>
+<rect class="paper" width="960" height="670" rx="12"/>
+<text class="ink" x="22" y="32" font-size="23" font-weight="700">Milestones: факты и оставшаяся работа</text>
+<text class="muted" x="22" y="58" font-size="14">m1-968651a · M1 в работе · закреплённая версия исходников</text>
+<a href="https://github.com/ttldtor/portals/blob/849dc6285d7ef863206e8248810ee0650413b0a2/docs/compile-time-pss.md#L1" target="_blank" rel="noopener" data-node="baseline"><title>Предыдущая сравниваемая ревизия уже содержит typed styles/PSS integration. Публичная foundation не объявляет исторический M0 snapshot опубликованным или независимо проверенным. Для сравнения используйте закреплённую ревизию; текущие карточки описывают 968651a.</title>
+<rect class="card" x="22" y="80" width="440" height="154" rx="10" stroke="#705400" stroke-width="2"/>
+<rect x="22" y="80" width="7" height="154" rx="3" fill="#705400"/>
+<text class="ink" x="42" y="110" font-size="20" font-weight="650">Предыдущая исходная база</text>
+<text class="muted" x="42" y="168" font-size="14">M0 comparison:</text>
+<text class="muted" x="42" y="187" font-size="14">849dc6285d7ef863206e8248810ee0650413b0a2</text>
+<text class="muted" x="42" y="213" font-size="12">1 · status · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/docs/input.md#L1" target="_blank" rel="noopener" data-node="keys"><title>Текущая закреплённая версия содержит semantic key bindings, выбор press/repeat/release, ограниченные key sequences и scoped quit commands. Дополнения используют существующие router и scheduler. Это статус перечисленных возможностей исходников, не всего M1.</title>
+<rect class="card" x="498" y="80" width="440" height="154" rx="10" stroke="#705400" stroke-width="2"/>
+<rect x="498" y="80" width="7" height="154" rx="3" fill="#705400"/>
+<text class="ink" x="518" y="110" font-size="20" font-weight="650">Реализовано после базы</text>
+<text class="muted" x="518" y="168" font-size="14">semantic keys / phase selection /</text>
+<text class="muted" x="518" y="187" font-size="14">sequences</text>
+<text class="muted" x="518" y="213" font-size="12">2 · status · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/src/widgets/ui_scene.cpp#L761" target="_blank" rel="noopener" data-node="setup-change"><title>После предыдущей базы короткие отклонённые setup-изменения сохраняют типизированную ошибку и останавливают следующие configure. Это исправляет прежнее ограничение, когда void configure мог записать diagnostic без остановки setup. Текущий snapshot следует исправленному контракту.</title>
+<rect class="card" x="498" y="270" width="440" height="154" rx="10" stroke="#705400" stroke-width="2"/>
+<rect x="498" y="270" width="7" height="154" rx="3" fill="#705400"/>
+<text class="ink" x="518" y="300" font-size="20" font-weight="650">Передача setup-ошибок</text>
+<text class="muted" x="518" y="358" font-size="14">first rejected short setup mutation → stop</text>
+<text class="muted" x="518" y="403" font-size="12">3 · status · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/include/portals/ui.hpp#L1980" target="_blank" rel="noopener" data-node="launch-change"><title>Ленивый CLI-запуск может показать справку без создания scene factory. Fluent stages по-прежнему подготавливают и запускают тот же retained core. Владение в одном UI-потоке, проверяемые observing handles, dirty-only frames и явный cleanup сохраняются как основные инварианты.</title>
+<rect class="card" x="22" y="270" width="440" height="154" rx="10" stroke="#705400" stroke-width="2"/>
+<rect x="22" y="270" width="7" height="154" rx="3" fill="#705400"/>
+<text class="ink" x="42" y="300" font-size="20" font-weight="650">Ленивый запуск и retained core</text>
+<text class="muted" x="42" y="358" font-size="14">ui::launch + same Application / tree /</text>
+<text class="muted" x="42" y="377" font-size="14">router</text>
+<text class="muted" x="42" y="403" font-size="12">4 · status · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/docs/planned-features.md#L1" target="_blank" rel="noopener" data-node="remaining"><title>Эта исходная база не включает незакоммиченные range composition, named references/scoped style changes и последующую работу controls/focus. Их поставка и проверки учитываются отдельно. Обновляйте архитектуру по интегрированным проверенным исходникам; foundation не завершает весь milestone.</title>
+<rect class="card" x="22" y="460" width="440" height="154" rx="10" stroke="#705400" stroke-width="2"/>
+<rect x="22" y="460" width="7" height="154" rx="3" fill="#705400"/>
+<text class="ink" x="42" y="490" font-size="20" font-weight="650">M1 остаётся в работе</text>
+<text class="muted" x="42" y="548" font-size="14">Concurrent and future changes require a</text>
+<text class="muted" x="42" y="567" font-size="14">new snapshot</text>
+<text class="muted" x="42" y="593" font-size="12">5 · status · source ↗</text></a>
+<a href="https://github.com/ttldtor/portals/blob/968651a90b6a1542fd3ab2cec159b457e548681f/docs/testing.md#L1" target="_blank" rel="noopener" data-node="checks"><title>Интеграция базы: PR36 CI run 38799649714 завершил 6/6 проверок успешно для PR head 28723ed04810c597c2fe31f0d75cd9416c5916ac, слитого как 968651a. Отдельно при подготовке snapshot прошли 8 exporter/source/help tests и 40 offline browser combinations карт/языков/тем/ширины, включая реальные скачивания SVG. Это проверки документации, не новый C++ runtime suite. Новая полная Doxygen-сборка и поставленный артефакт: NOT_VERIFIED на границе подготовки; интеграция обязательна.</title>
+<rect class="card" x="498" y="460" width="440" height="154" rx="10" stroke="#705400" stroke-width="2"/>
+<rect x="498" y="460" width="7" height="154" rx="3" fill="#705400"/>
+<text class="ink" x="518" y="490" font-size="20" font-weight="650">Доказательства проверок</text>
+<text class="muted" x="518" y="548" font-size="14">Baseline CI 6/6 / exporter 8 / browser 40</text>
+<text class="muted" x="518" y="593" font-size="12">6 · status · source ↗</text></a>
+</svg>

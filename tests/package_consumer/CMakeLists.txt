@@ -45,6 +45,13 @@ set_target_properties(portals_installed_click_handlers PROPERTIES CXX_EXTENSIONS
 if(WIN32)
   target_sources(portals_installed_click_handlers PRIVATE no_dialogs.cpp)
 endif()
+add_executable(portals_installed_compact_form examples/compact/main.cpp)
+target_link_libraries(portals_installed_compact_form PRIVATE portals::core)
+set_target_properties(portals_installed_compact_form PROPERTIES CXX_EXTENSIONS OFF)
+if(WIN32)
+  target_sources(portals_installed_compact_form PRIVATE no_dialogs.cpp)
+endif()
+
 target_link_libraries(portals_package_consumer PRIVATE portals::core)
 target_compile_definitions(portals_package_consumer PRIVATE
   EXPECTED_PORTALS_VERSION_MAJOR=${Portals_VERSION_MAJOR}
@@ -490,3 +497,24 @@ foreach(kind IN ITEMS projection formatter)
       -P "${CMAKE_CURRENT_SOURCE_DIR}/check_column_diagnostic.cmake")
   set_tests_properties(consumer.invalid-${kind} PROPERTIES TIMEOUT 60 RUN_SERIAL TRUE)
 endforeach()
+
+# Public owning-range templates must work against relocated installed headers.
+foreach(variant IN ITEMS before after)
+  add_executable(portals_ranges_${variant}_consumer ranges_${variant}.cpp)
+  target_link_libraries(portals_ranges_${variant}_consumer PRIVATE portals::core)
+  set_target_properties(portals_ranges_${variant}_consumer PROPERTIES CXX_EXTENSIONS OFF)
+  if(WIN32)
+    target_sources(portals_ranges_${variant}_consumer PRIVATE no_dialogs.cpp)
+  endif()
+  add_test(NAME consumer.ranges-${variant} COMMAND portals_ranges_${variant}_consumer)
+  set_tests_properties(consumer.ranges-${variant} PROPERTIES TIMEOUT 15)
+endforeach()
+
+add_executable(portals_primitives_consumer primitives.cpp)
+target_link_libraries(portals_primitives_consumer PRIVATE portals::core)
+set_target_properties(portals_primitives_consumer PROPERTIES CXX_EXTENSIONS OFF)
+if(WIN32)
+  target_sources(portals_primitives_consumer PRIVATE no_dialogs.cpp)
+endif()
+add_test(NAME consumer.primitives COMMAND portals_primitives_consumer)
+set_tests_properties(consumer.primitives PROPERTIES TIMEOUT 15)

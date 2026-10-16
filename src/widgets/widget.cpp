@@ -782,6 +782,16 @@ std::expected<CellSize, TreeError> WidgetTree::measure(Node<Widget> node, CellSi
 }
 
 std::expected<void, TreeError> WidgetTree::arrange(Node<Widget> node, CellRect local, CellRect viewport) {
+  return arrangeImpl(node, local, viewport, std::nullopt);
+}
+
+std::expected<void, TreeError> WidgetTree::arrange(Node<Widget> node, CellRect local, CellRect viewport,
+                                                   CellRect contentClip) {
+  return arrangeImpl(node, local, viewport, contentClip);
+}
+
+std::expected<void, TreeError> WidgetTree::arrangeImpl(Node<Widget> node, CellRect local, CellRect viewport,
+                                                       std::optional<CellRect> contentClip) {
   auto record = state_->find(node.id());
 
   if (!record) {
@@ -818,6 +828,10 @@ std::expected<void, TreeError> WidgetTree::arrange(Node<Widget> node, CellRect l
 
     surface = *translated;
     clip = value.parent->geometry.clip;
+  }
+
+  if (contentClip) {
+    clip = clip.intersection(*contentClip);
   }
 
   Borrow guard(*this, true);

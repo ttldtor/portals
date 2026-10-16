@@ -328,3 +328,67 @@ int main() {
 ```
 
 </details>
+
+## Compose children from a range
+
+`ui::vbox(range)` and `ui::hbox(range)` consume an input range immediately,
+in iteration order. The range produces one concrete `Description<T>` type; use
+the variadic overload for heterogeneous children. A temporary transform view
+and its captures are destroyed after construction, while the parent owns all
+produced recipes. The range is never used during mount.
+
+```cpp
+#include <portals/ui.hpp>
+
+#include <array>
+
+int main() {
+  using namespace portals;
+
+  const std::array<std::string_view, 3> captions{"Mercury", "Venus", "Earth"};
+  auto scene = ui::scene(ui::vbox(captions | std::views::transform([](std::string_view text) {
+                                  return ui::label(text);
+                                })));
+
+  scene.onKey(key::F10, ui::quit);
+
+  return scene.runApp();
+}
+```
+The same scene with pipe stages:
+
+```cpp
+#include <portals/ui.hpp>
+
+#include <array>
+
+int main() {
+  using namespace portals;
+
+  const std::array<std::string_view, 3> captions{"Mercury", "Venus", "Earth"};
+  auto scene = ui::scene(ui::vbox(captions | std::views::transform([](std::string_view text) {
+                                  return ui::label(text);
+                                })));
+
+  return scene | ui::onKey(key::F10, ui::quit) | ui::runApp();
+}
+```
+
+Both versions use the same scene, error reporting and cleanup. Existing
+`row`/`column` overloads also accept ranges; `vbox(options, range)` and
+`hbox(options, range)` preserve `LinearOptions`. Empty ranges create empty
+layouts. A child mount failure preserves its typed error, rolls back the
+created subtree and publishes no partial `NodeRef` or `Ref`.
+
+Lvalue containers of move-only descriptions require explicit transfer:
+`ui::vbox(children | std::views::as_rvalue)`. `ui::vbox(std::move(children))`
+also transfers an owning non-view container that does not opt into
+`enable_borrowed_range`. User-defined ranges must own their elements when using
+this implicit-element-transfer overload; that ownership cannot be inferred. A temporary view yielding lvalue
+descriptions is rejected, since its elements may belong to another owner.
+Construction and iteration may throw; recipes already transferred from a
+source are not restored. Borrowed references inside recipes retain their
+existing lifetime requirements.
+
+[Frames, gauges and compact sizing](compact-primitives.md) provide standard
+widgets and consuming methods/pipe stages for a complete small scene.
