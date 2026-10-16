@@ -7,6 +7,7 @@
       <tab type="usergroup" title="Русская документация">
         <tab type="usergroup" title="Начало работы">
           <tab type="user" title="Краткое руководство" url="@ref docs/ru/index.md" />
+          <tab type="user" title="Первое приложение" url="@ref docs/ru/first-application.md" />
           <tab type="user" title="Руководства по задачам" url="@ref docs/ru/guides.md" />
           <tab type="user" title="Содержание документации" url="@ref docs/ru/reference-map.md" />
           <tab type="user" title="Глоссарий" url="@ref docs/ru/glossary.md" />
@@ -82,6 +83,7 @@
       </tab>
     </tab>
     <tab type="usergroup" title="1. Start here">
+      <tab type="user" title="First application" url="@ref docs/first-application.md" />
       <tab type="user" title="Declarative UI" url="@ref docs/declarative-ui.md" />
       <tab type="user" title="Scene and recipe reference" url="@ref docs/declarative-reference.md" />
       <tab type="user" title="User guides and contents" url="@ref docs/guides.md" />

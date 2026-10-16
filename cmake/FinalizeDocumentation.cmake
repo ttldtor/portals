@@ -20,6 +20,10 @@ endforeach()
 # Ship the exact referenced sources inside the HTML tree so an offline copy
 # works without the repository or a hard-coded GitHub branch URL.
 set(example_sources
+  docs/examples/tutorial_note_1.cpp
+  docs/examples/tutorial_note_2.cpp
+  docs/examples/tutorial_note_3.cpp
+  docs/examples/tutorial_note_4.cpp
   docs/examples/docs_basic.cpp
   tests/package_consumer/named_scoped.cpp
   docs/examples/docs_events.cpp
@@ -82,7 +86,8 @@ foreach(page_file IN LISTS guide_html_files)
     string(REPLACE "href=\"../${source}\"" "href=\"source/${source}\"" content "${content}")
     string(REPLACE "href=\"../../${source}\"" "href=\"source/${source}\"" content "${content}")
   endforeach()
-  foreach(doc_example IN ITEMS docs_basic.cpp docs_events.cpp docs_state.cpp)
+  foreach(doc_example IN ITEMS docs_basic.cpp docs_events.cpp docs_state.cpp
+      tutorial_note_1.cpp tutorial_note_2.cpp tutorial_note_3.cpp tutorial_note_4.cpp)
     string(REPLACE "href=\"examples/${doc_example}\"" "href=\"source/docs/examples/${doc_example}\"" content "${content}")
     string(REPLACE "href=\"../examples/${doc_example}\"" "href=\"source/docs/examples/${doc_example}\"" content "${content}")
   endforeach()

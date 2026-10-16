@@ -4,6 +4,8 @@
 
 Start with a declarative scene, then choose the task you need.
 
+Follow the [first application](first-application.md): a quick-note form in four steps.
+
 ## Guides by task
 
 | Task | Guide |
