@@ -1,5 +1,7 @@
 # Widget tree and lifetime
 
+[Русская версия](ru/widget-tree.md)
+
 To assemble a window from built-in controls, start with [declarative composition](declarative-ui.md). [`WidgetTree`](../include/portals/widget.hpp) serves custom widget and integration code: it owns nodes, checks access and limits widget [borrows](glossary.md#glossary-ownership). `ui::Ref<T>` gives application code an observing reference without transferring tree ownership.
 
 <details>

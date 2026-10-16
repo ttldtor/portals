@@ -1,5 +1,7 @@
 # UTF-8 text and terminal width
 
+[Русская версия](ru/text.md)
+
 `<portals/text.hpp>` exposes `GraphemeText`, an owning UTF-8 value with immutable
 [grapheme clusters and terminal-cell measurements](glossary.md#glossary-text-units).
 A grapheme groups text such as a letter with its combining accent; cells measure

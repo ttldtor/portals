@@ -1,5 +1,7 @@
 # Show a virtual list
 
+[Русская версия](ru/virtual-list.md)
+
 Use [VirtualList<T>](../include/portals/virtual_list.hpp). This fragment displays three names with standard keyboard and mouse navigation. Press F10 to close.
 
 This fragment assumes `<portals/ui.hpp>` and `using namespace portals`; it uses Names, an immutable `ModelSnapshot<std::string>` adapter with three records, and displayText, which creates GraphemeText. The adapter, helper, headers and complete program appear below and in [guide_vlist.cpp](examples/guide_vlist.cpp).

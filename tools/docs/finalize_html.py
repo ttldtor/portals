@@ -1,8 +1,8 @@
-"""Finalize Doxygen HTML: API links, CMake highlighting and navigation.
+"""Finalize Doxygen HTML: API links, CMake highlighting, navigation, search and language.
 
 Run automatically through the portals_docs target. For diagnosis, pass the
 existing HTML directory and Doxygen XML tag file from the same build. This
-rewrites guide HTML and navigation JS in place and copies linked repository
+rewrites guide HTML and navigation/search JS in place and copies linked repository
 sources into HTML/source. Keep the script in its checkout. No network access.
 Prints JSON guide/type counts; exits 0 on success, 1 on an uncaught I/O/XML/HTML
 processing failure, 2 on invalid CLI syntax. Rebuild portals_docs after failure.
@@ -257,6 +257,43 @@ def portable_links(content, directory, source, links, russian=False):
     return re.sub(r'<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>', rewrite, content, flags=re.S)
 
 
+def document_language(content, language):
+    """Set the page language on the root element without changing code or links."""
+    def root(match):
+        tag = match[0]
+        for attribute in ("lang", "xml:lang"):
+            pattern = rf'\s{attribute}=["\'][^"\']*["\']'
+            value = f' {attribute}="{language}"'
+            if re.search(pattern, tag):
+                tag = re.sub(pattern, lambda _: value, tag)
+            else:
+                tag = tag[:-1] + value + ">"
+        return tag
+
+    return re.sub(r"<html\b[^>]*>", root, content, count=1)
+
+
+def complete_search(directory):
+    """Initialize shared local search when generated HTML lacks Doxygen config."""
+    script = directory / "search" / "search.js"
+    if not script.is_file():
+        return
+    text = script.read_text(encoding="utf-8")
+    marker = "// Portals search initialization for layouts without doxygen-config."
+    config_gate = "const configElem = document.getElementById('doxygen-config');"
+    if marker in text or config_gate not in text:
+        return
+    text += "\n" + marker + "\n" + """document.addEventListener('DOMContentLoaded', () => {
+  if (!document.getElementById('doxygen-config') &&
+      document.getElementById('MSearchField') &&
+      typeof searchBox !== 'undefined') {
+    init_search();
+  }
+});
+"""
+    script.write_text(text, encoding="utf-8")
+
+
 def finalize(directory, tag_file):
     """Rewrite registered guide pages and their navigation after Doxygen finishes."""
     links = type_links(tag_file)
@@ -271,12 +308,15 @@ def finalize(directory, tag_file):
             continue
         parser = GuideParser(links)
         parser.feed(path.read_text(encoding="utf-8"))
+        russian = name.endswith("-ru.html") or "_2ru_2" in name
         content = portable_links("".join(parser.output), directory,
                                  Path(__file__).resolve().parents[2], links,
-                                 name.endswith("-ru.html") or "_2ru_2" in name)
+                                 russian)
+        content = document_language(content, "ru" if russian else "en")
         path.write_text(color_cmake(content), encoding="utf-8")
         headings[name] = parser.headings
     complete_navigation(directory, headings)
+    complete_search(directory)
     print(json.dumps({"guide_pages": len(headings), "unambiguous_types": len(links)}))
 
 

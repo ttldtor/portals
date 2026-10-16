@@ -1,5 +1,7 @@
 # UI scheduler and bounded publication
 
+[Русская версия](ru/scheduler.md)
+
 [`Scheduler`](../include/portals/scheduler.hpp) runs an action later on the UI thread and delivers worker results. Use it to dismiss a notification after a delay or deliver a calculation result to a model-update callback. It creates no worker thread: a long calculation inside a callback delays the interface.
 
 This standalone example schedules an action one second later, services the scheduler and prints a message. `at` takes an absolute millisecond deadline; its default clock is `steady_clock`. Keep both the `timer` token and [cancellation scope](glossary.md#glossary-cancellation) until delivery.

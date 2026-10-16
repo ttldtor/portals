@@ -1,5 +1,7 @@
 # Diff encoding and frame output
 
+[Русская версия](ru/diff.md)
+
 `<portals/diff.hpp>` separates pure framebuffer comparison from terminal I/O.
 `encodeDiff(previous, next, max_bytes)` returns one owning bounded VT byte string.
 `FrameWriter::submit` takes a move-only desired frame only after successful

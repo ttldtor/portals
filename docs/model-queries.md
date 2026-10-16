@@ -1,5 +1,7 @@
 # Bounded model queries {#model_queries}
 
+[Русская версия](ru/model-queries.md)
+
 Include `<portals/model_query.hpp>` for an experimental, explicit query layer
 over immutable indexed snapshots. It keeps the existing model and scheduler.
 It does not introduce a query language, database, implicit I/O, or another

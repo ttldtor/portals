@@ -1,5 +1,7 @@
 # Prepare virtual views from layout {#virtual-preparation}
 
+[Русская версия](ru/virtual-preparation.md)
+
 Virtual tables, lists and charts can use their arranged sizes without duplicating
 layout arithmetic in application code. Choose either the managed factories in
 `portals/managed.hpp` or the explicit hooks in `portals/virtual_preparation.hpp`.

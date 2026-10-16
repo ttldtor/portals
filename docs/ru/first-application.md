@@ -1,5 +1,10 @@
 # Первое приложение: заметка {#first-application-ru}
 
+<!-- translation-source: docs/first-application.md
+source-revision: d6ef4e75340772de254ef7a2d7514856e5f8e7f5
+status: current
+-->
+
 [English](../first-application.md) · [Руководства](guides.md) · [Глоссарий](glossary.md)
 
 Создадим приложение с полем ввода, кнопками **Save** и **Clear draft**.

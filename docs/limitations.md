@@ -1,5 +1,7 @@
 # Limitations {#limitations}
 
+[Русская версия](ru/limitations.md)
+
 Portals is an evolving C++23 terminal UI library. Its public headers document
 checked access and component errors; neither version 0.2 nor CMake version
 selection promises a stable API/ABI.

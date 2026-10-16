@@ -1,6 +1,6 @@
 # User guides {#user-guides}
 
-[Русская версия](ru/guides.md)
+[Русская версия](ru/guides.md) · [Short guide](index.md) · [Documentation contents](reference-map.md) · [Glossary](glossary.md)
 
 Start with a declarative scene, then choose the task you need.
 
@@ -10,7 +10,8 @@ Follow the [first application](first-application.md): a quick-note form in four 
 
 | Task | Guide |
 |---|---|
-| Create a first form | [Declarative UI](declarative-ui.md) |
+| Build an application step by step | [First application](first-application.md) |
+| Compose a scene | [Declarative UI](declarative-ui.md) |
 | Start the application and parse options | [Application](application.md) |
 | Parse command-line arguments | [Command-line startup](cli.md) |
 | Apply styles | [Styles](styling-guide.md) |
@@ -42,7 +43,9 @@ controls, models and application state. Build and run instructions are on the ex
 
 ## Reference and terminology
 
-[Glossary](glossary.md) · [Reference map](reference-map.md) · [Current limitations](limitations.md)
+[Glossary](glossary.md) · [Documentation contents](reference-map.md) · [Current limitations](limitations.md)
+
+[Scene and recipe reference](declarative-reference.md) describes the exact scene API.
 
 For exact style rules, see [PSS syntax](styles.md) and [style layers](style-layers.md).
 Experimental [compile-time styles](compile-time-styles.md) and
@@ -56,5 +59,3 @@ See [planned features and milestones](planned-features.md) for the full list
 and [scene loading](scene-loading-guide.md) for its current status.
 
 [Dependencies and licenses](dependencies.md).
-
-[Scene and recipe reference](declarative-reference.md).

@@ -1,5 +1,7 @@
 # PSS strings at compile time and runtime {#compile_time_pss}
 
+[Русская версия](ru/compile-time-pss.md)
+
 Experimental compile-time chapter. For ordinary application code, start with
 [runtime PSS and declarative UI](styling-guide.md). This API is already
 implemented; experimental status does not mean TBD.

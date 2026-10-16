@@ -375,6 +375,8 @@ It processes the main page and guide pages listed in the tag file, then:
 - resolves supported relative Markdown links and copies linked repository
   sources into `html/source/<repository-path>` for offline use; source copies
   must resolve inside the checkout;
+- initializes local search for recognized Doxygen layouts missing the configuration element; layouts that provide it keep their own initialization;
+- sets root `lang` and `xml:lang` to `en` or `ru` from the current guide filename conventions; generated API pages retain Doxygen's language;
 - colors recognized plain CMake fragments using Doxygen CSS classes;
 - adds guide headings through level three to the navigation tree and rebuilds
   navigation-index chunks of up to 250 entries while retaining API entries.
@@ -386,7 +388,8 @@ comments are not handled as multiline constructs. Ambiguous short type names
 remain unlinked. The processor does not check external URLs or validate all
 resulting links; run the link checker afterwards.
 
-It rewrites guide HTML, `navtreedata.js` and generated `navtreeindex*.js`, and
+It rewrites guide HTML, `navtreedata.js`, generated `navtreeindex*.js` and the
+recognized shared `search/search.js`, and
 copies referenced source files. Standard output is JSON with `guide_pages`
 and `unambiguous_types`. Success exits `0`, CLI errors `2`; malformed XML,
 missing navigation data or read/write failures terminate unsuccessfully with
@@ -398,7 +401,7 @@ regenerate the documentation after a failure.
 [Test source: test_finalize_html.py](../tools/docs/test_finalize_html.py) uses
 unittest with no project-specific options or environment variables. The
 discovery command above checks portable source links, inline type linking,
-ambiguous names, CMake text preservation and navigation/idempotence against
+ambiguous names, page-language metadata, guarded search initialization, CMake text preservation and navigation/idempotence against
 temporary fixtures. It does not require Doxygen or Mermaid and does not
 process the real documentation tree. A writable system temporary directory
 is required; fixture directories are removed after the tests. Unittest prints

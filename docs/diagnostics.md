@@ -1,4 +1,4 @@
-# Errors and diagnostics {#diagnostics}
+# Diagnostics {#diagnostics}
 
 [Русская версия](ru/diagnostics.md)
 

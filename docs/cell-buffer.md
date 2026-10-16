@@ -1,5 +1,7 @@
 # Cell buffer
 
+[Русская версия](ru/cell-buffer.md)
+
 `<portals/cell_buffer.hpp>` provides a `CellBuffer` storing a frame in
 [terminal cells](glossary.md#glossary-text-units), the column-and-row units of the screen. Construct it with `CellBuffer::from(size, policy, limits)`, then write
 one validated `GraphemeText` element with `put(position, text, grapheme_index,

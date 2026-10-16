@@ -1,5 +1,7 @@
 # Managed controls {#managed-controls}
 
+[Русская версия](ru/managed-controls.md)
+
 `<portals/managed.hpp>` adds `ManagedScene`, a lifecycle owner for ordinary
 controls, custom widgets and opt-in virtual views. It uses the existing
 `Application`, `WidgetTree`, properties, bindings, router and style engine. The low-level APIs remain

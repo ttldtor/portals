@@ -1,10 +1,10 @@
 # Portals: short library guide
 
-[Русская версия](ru/index.md)
+[Русская версия](ru/index.md) · [Task guides](guides.md) · [Documentation contents](reference-map.md) · [Glossary](glossary.md)
 
 Portals is a C++23 terminal UI library under development.
 The declarative `ui` API is the primary way to build an interface.
-This page is the short reading guide; the [reference map](reference-map.md)
+This page is the short reading guide; the [documentation contents](reference-map.md)
 contains the complete topic list and API reading paths.
 
 These Markdown guides describe the current source branch. The [published HTML help](https://ttldtor.github.io/portals/) follows the latest stable release; PR checks also provide an HTML preview artifact.
@@ -124,34 +124,13 @@ For an installed SDK, replace those same lines with
 These APIs are evolving. Read [limitations](limitations.md) for qualified
 platforms and the exact runtime boundaries.
 
-## User guides
+## Continue reading
 
-[Contents](guides.md) · [Glossary](glossary.md)
-
-| Task | Guide |
-|---|---|
-| Create a first form | [Declarative UI](declarative-ui.md) |
-| Start the application and parse options | [Application](application.md) |
-| Parse command-line arguments | [Command-line startup](cli.md) |
-| Apply styles | [Styles](styling-guide.md) |
-| Change the palette | [Themes](themes-guide.md) |
-| Connect events and state | [Bindings and events](bindings-guide.md) |
-| Arrange controls | [Layout](layout.md) |
-| Place controls in cells | [Grid and overlay](grid.md) |
-| Change a control through a reference | [Control references](text-property.md) |
-| Edit text | [LineEdit](line-edit.md) |
-| Undo and redo edits | [Undo and redo](editor-history.md) |
-| Create shared state | [Properties](property.md) |
-| Supply view data | [Models](model.md) |
-| Display a large list | [Virtual lists](virtual-list.md) |
-| Display a large table | [Virtual tables](virtual-table.md) |
-| Control scrolling | [Scrolling](scroll.md) |
-| Plot values | [Charts](chart.md) |
-| Handle keyboard input | [Input](input.md) |
-| Report errors | [Diagnostics](diagnostics.md) |
-| Wait without blocking the UI | [UI coroutines](ui-coroutines.md) |
-| Integrate frame rendering | [Rendering](render.md) |
-| Connect a CMake package | [Package setup](package.md) |
+- [First application](first-application.md): build a note form in four steps.
+- [Task guides](guides.md): choose a guide for styles, events, data or other application work.
+- [Documentation contents](reference-map.md): find a topic or an API contract.
+- [Glossary](glossary.md): look up scenes, recipes, UI stages and other terms.
+- [Diagnostics](diagnostics.md): find a check and an action for a symptom.
 
 [Runnable examples](examples.md) link to complete source programs.
 [Release notes](../ReleaseNotes.md) record changes by version.

@@ -1,5 +1,7 @@
 # Compile-time scene descriptions {#compile_time_scenes}
 
+[Русская версия](ru/compile-time-scenes.md)
+
 Include `<portals/ui_static.hpp>` to build an owning scene descriptor in C++23
 constant evaluation. The experimental `ui::ct` layer describes existing `Label`,
 `Button`, `LineEdit`, `Row` and `Column` controls. Mounting, input, state and

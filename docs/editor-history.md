@@ -1,5 +1,7 @@
 # Editor Undo and Redo
 
+[Русская версия](ru/editor-history.md)
+
 Undo/Redo restores **one editor’s text and selection**. Completion (`EditMode::ON_COMPLETION`) determines when its draft reaches the model; it does not maintain a list of earlier values. Completion suggestions or previously entered commands are not supplied by this API. `ui::lineEdit` creates the binding and history automatically; ordinary fields do not need a separate `TextHistory`. Type, then use Ctrl+Z or Undo; F10 exits.
 
 Every bound [`LineEdit`](../include/portals/line_edit.hpp) has its own bounded text history. History is enabled by

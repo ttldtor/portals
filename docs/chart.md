@@ -1,5 +1,7 @@
 # Draw a line or candle chart
 
+[Русская версия](ru/chart.md)
+
 Use [Chart<T>](../include/portals/chart.hpp). Both lines and candles are supported. This fragment plots four closing prices as a line. Press F10 to close.
 
 This fragment assumes `<portals/ui.hpp>` and `using namespace portals`; it uses Prices, an immutable `ModelSnapshot<Ohlc>` adapter with four records. The adapter, headers and complete program appear below and in [guide_chart.cpp](examples/guide_chart.cpp).

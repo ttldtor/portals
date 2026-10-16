@@ -1,5 +1,7 @@
 # Cell geometry
 
+[Русская версия](ru/geometry.md)
+
 `<portals/geometry.hpp>` supplies `CellPoint`, `CellSize` and `CellRect` in the
 `portals` namespace. Coordinates and extents are measured in
 [terminal cells](glossary.md#glossary-text-units) and use `std::int32_t`: columns increase

@@ -75,7 +75,7 @@ python -m unittest discover -s tools/ci -p test_checks.py -v
 
 ### Documentation content
 
-Keep the [short library guide](index.md), [reference map](reference-map.md) and `docs/DoxygenLayout.xml` in agreement.
+Keep the [short library guide](index.md), [documentation contents](reference-map.md) and `docs/DoxygenLayout.xml` in agreement.
 The short guide describes current usage; release notes, design sketches and dated
 measurements keep their historical scope and link back to current contracts.
 Use relative Markdown links that resolve in the checkout. When embedding a
@@ -95,6 +95,67 @@ to the active light or dark theme.
 Check the generated images as well as parser success: valid Mermaid can still
 produce an unreadable layout. Existing architecture SVG illustrations remain
 ordinary image assets.
+
+<a id="documentation-translations"></a>
+### Languages and translation updates
+
+The English source is `docs/<topic>.md`; its Russian translation is
+`docs/ru/<topic>.md`. The relative topic path is the logical page name.
+Keep existing page IDs and links stable. Each translated page links to the same
+topic in the other language. Mark a link to untranslated material with its
+language, such as **English**; do not redirect it to an unrelated landing page.
+
+The short guide provides the quick start and a few next steps. Keep the full
+task catalog in [user guides](guides.md), and group detailed contracts in the
+[documentation contents](reference-map.md). Keep shared links in the same order
+in EN/RU, and register pages in `docs/DoxygenLayout.xml`. Its large groups can
+follow each language's reading path. Preserve the tutorial's shared source files
+under `docs/examples/`; check code once and links in each language.
+
+Record the source revision in an HTML comment near the translated page's title.
+The [Russian first-application tutorial](ru/first-application.md) is the pilot:
+
+```text
+<!-- translation-source: docs/first-application.md
+source-revision: d6ef4e75340772de254ef7a2d7514856e5f8e7f5
+status: current
+-->
+```
+
+| State | Meaning and action |
+|---|---|
+| `current` | The translation was checked against the recorded source revision. When the source changes, compare and update both pages. |
+| `outdated` | Source changes remain untranslated. Mark the translation as outdated visibly, link to the newer source language, and retain its last reviewed revision. |
+| Missing | There is no translated page. Link to the available language and label it explicitly. |
+| Not tracked | The page has no source-revision comment yet. Do not infer that it is current; add the comment after reviewing it. |
+
+Before changing a translated topic, compare its source with the recorded revision:
+
+```powershell
+git diff d6ef4e75340772de254ef7a2d7514856e5f8e7f5 -- docs/first-application.md
+```
+
+The command includes working-tree source changes. Review changed explanations,
+commands, API names, ownership/error conditions, TBD labels and milestones.
+Update the translation and recorded revision together. If the source contains
+uncommitted changes, record its revision after committing that source; do not
+mark the translation current against a commit that lacks those changes. A changed
+source requires this review even when the translation comment still says `current`.
+The marker records a review; it does not detect drift automatically.
+
+Keep Markdown current for its selected branch. Stable HTML follows the latest
+release, and PR HTML is a preview. Release notes and measurements retain their
+version/date scope. Before adding another language, choose its locale directory
+and unique page IDs, add reciprocal links and navigation, and extend the language
+mapping and fixtures in `tools/docs/finalize_html.py`. It currently recognizes
+EN/RU guide filenames; generated API pages remain English.
+
+Build `portals_docs`, check links, and inspect both themes. Confirm the root HTML
+`lang` and `xml:lang`, language round trips, glossary definitions, API type links
+and search routes to the tutorial and relevant contracts. Search covers both
+languages in one index; select a result by its title and destination. These checks
+also apply to the local offline HTML directory. Translation state is maintained
+in the translated Markdown; no separate catalog or generated translation is required.
 
 ## Licenses and provenance
 

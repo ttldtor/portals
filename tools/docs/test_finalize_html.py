@@ -1,4 +1,4 @@
-"""Regression fixtures for HTML links, CMake colors and navigation.
+"""Regression fixtures for HTML links, CMake colors, navigation, search and language.
 
 Run: python -m unittest discover -s tools/docs -p test_finalize_html.py -v
 Uses temporary fixture files; no real HTML build, browser or network is required.
@@ -12,10 +12,58 @@ from html.parser import HTMLParser
 import tempfile
 import unittest
 
-from finalize_html import GuideParser, color_cmake, complete_navigation, portable_links, read_variable, type_links
+from finalize_html import GuideParser, color_cmake, complete_navigation, complete_search, document_language, finalize, portable_links, read_variable, type_links
 
 
 class GuideTests(unittest.TestCase):
+    def test_missing_config_search_fallback_is_guarded_and_idempotent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "search").mkdir()
+            script = root / "search/search.js"
+            original = ("function init_search() {}\n"
+                        "document.addEventListener('DOMContentLoaded', () => {\n"
+                        "  const configElem = document.getElementById('doxygen-config');\n"
+                        "  if (configElem) { init_search(); }\n});\n")
+            script.write_text(original)
+            complete_search(root)
+            rendered = script.read_text()
+            self.assertTrue(rendered.startswith(original))
+            self.assertIn("!document.getElementById('doxygen-config')", rendered)
+            self.assertIn("document.getElementById('MSearchField')", rendered)
+            self.assertIn("typeof searchBox !== 'undefined'", rendered)
+            complete_search(root)
+            self.assertEqual(script.read_text(), rendered)
+            script.write_text("function init_search() { /* Different generator. */ }")
+            complete_search(root)
+            self.assertEqual(script.read_text(), "function init_search() { /* Different generator. */ }")
+
+    def test_document_language_preserves_code_links_and_other_root_attributes(self):
+        text = ('<html xmlns="http://www.w3.org/1999/xhtml" lang="en-US" xml:lang="en-US">'
+                '<a href="guide.html">Guide</a><code>lang="en-US"</code></html>')
+        rendered = document_language(text, "ru")
+        self.assertIn('xmlns="http://www.w3.org/1999/xhtml" lang="ru" xml:lang="ru"', rendered)
+        self.assertIn('<a href="guide.html">Guide</a><code>lang="en-US"</code>', rendered)
+        self.assertEqual(document_language(rendered, "ru"), rendered)
+
+    def test_finalize_sets_language_for_both_russian_page_naming_forms(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            names = ["index.html", "first-application-ru.html", "md_docs_2ru_2guide.html"]
+            tag = root / "pages.tag"
+            tag.write_text('<tagfile>' + ''.join(
+                '<compound kind="page"><filename>' + name + '</filename></compound>'
+                for name in names) + '</tagfile>', encoding="utf-8")
+            (root / "navtreedata.js").write_text(
+                'var NAVTREE = [["Project", "index.html", []]];\nvar NAVTREEINDEX = [];\n')
+            for name in names:
+                (root / name).write_text('<html lang="en-US"><body>Guide</body></html>')
+            finalize(root, tag)
+            for name in names:
+                language = "en" if name == "index.html" else "ru"
+                self.assertIn(f'lang="{language}"', (root / name).read_text())
+                self.assertIn(f'xml:lang="{language}"', (root / name).read_text())
+
     def test_repository_links_work_in_a_portable_html_copy(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

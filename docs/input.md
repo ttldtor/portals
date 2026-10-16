@@ -1,5 +1,7 @@
 # Keyboard input
 
+[Русская версия](ru/input.md)
+
 Bind a key to an action with [`ui::onKey`](../include/portals/ui.hpp). This example displays help on F1; F10 closes the application. The runner reads and decodes terminal input automatically.
 
 ```cpp

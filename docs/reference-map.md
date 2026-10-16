@@ -1,99 +1,84 @@
-# Reference map {#reference-map}
+# Documentation contents {#reference-map}
 
-[Русская версия](ru/reference-map.md)
+[Русская версия](ru/reference-map.md) · [Short guide](index.md) · [Task guides](guides.md) · [Glossary](glossary.md)
 
-Start with the [short library guide](index.md). This page is the full topic map;
-start with declarative composition, then read the relevant contract when a task needs it.
+Follow the [first application](first-application.md) to build a note form in four
+steps. For a particular change, choose a [task guide](guides.md). The sections
+below collect the detailed guides and API contracts.
 
-The [online documentation and API reference](https://ttldtor.github.io/portals/)
-is generated from these guides and public headers.
+## Start here
 
-[User guides](guides.md) · [Glossary](glossary.md)
+[Short guide](index.md) · [First application](first-application.md) · [Task guides](guides.md) · [Glossary](glossary.md)
 
-Follow the [first application](first-application.md): a quick-note form in four steps.
+[Runnable examples](examples.md), [frames, gauges and sizing](compact-primitives.md),
+and the [editor history example](editor-history-demo.md) provide complete programs.
+[Text formatting and columns](compact-examples.md) explains the shorter text and table API.
+[Package setup](package.md) covers SDK installation and toolchain compatibility;
+[building Portals and its examples](getting-started.md) is for working with the library sources.
+Read [current limitations](limitations.md) for qualified platforms and runtime boundaries.
 
-## Build an application
+## Application API
 
-| Need | Read |
-| --- | --- |
-| Compose a form and manage its lifetime | [Declarative UI](declarative-ui.md), [managed controls](managed-controls.md), [application runner](application.md) |
-| Parse CLI before opening the terminal and read process snapshots | [Command-line startup](cli.md) |
-| Choose and arrange controls | [Basic controls](controls.md), [LineEdit](line-edit.md), [Row and Column](layout.md), [Grid and Overlay](grid.md) |
-| Apply colors and themes | [Styles and themes](styles.md) |
-| Await timer and provider results with UI-owned coroutines | [UI coroutines](ui-coroutines.md) |
-| Connect state and data | [Properties](property.md), [immutable models](model.md), [bounded queries](model-queries.md) |
-| Display large datasets | [Layout-driven preparation](virtual-preparation.md), [virtual lists](virtual-list.md), [virtual tables](virtual-table.md), [scrolling](scroll.md), [charts](chart.md) |
-| Write shorter checked text and typed columns | [Compact examples](compact-examples.md) |
-| Change captions and editor drafts through observing references | [Text properties](text-property.md) |
-| Explain an action that did nothing | [Diagnostics](diagnostics.md), [terminal probe](terminal-probe.md) |
-| Keep an existing streaming MarketDepthModelSample building | [Minimal legacy compatibility](legacy.md) |
+- [Declarative composition](declarative-ui.md), [scene and recipe reference](declarative-reference.md), [application runner](application.md), [managed controls](managed-controls.md).
+- [Command-line startup](cli.md): parse arguments before opening the terminal and read process snapshots.
+- [Bindings and events](bindings-guide.md), [properties](property.md), [control references](text-property.md).
+- [Input](input.md), [focus and routing](focus.md), [diagnostics](diagnostics.md).
 
-For theme switching that preserves application and user overrides, see
-[style layers](style-layers.md).
+## Styles and themes
 
-## Understand the core
+[Styling guide](styling-guide.md) · [Themes guide](themes-guide.md) · [PSS syntax](styles.md) · [Style layers](style-layers.md)
 
-Read [architecture](architecture.md) first for component and event-flow
-diagrams. These chapters describe the retained core and its low-level contracts.
+Use style layers when palette changes must preserve application and user overrides.
 
-- Ownership and events: [widget tree](widget-tree.md), [focus and routing](focus.md),
-  [scheduler](scheduler.md).
-- Text and coordinates: [UTF-8 and cell width](text.md), [geometry](geometry.md).
-- Owning low-level edit history: [text history](text-history.md).
-- Undo editor text and configure read-only or history shortcuts: [editor history](editor-history.md).
-- Try three editor confirmation modes: [editor history demo](editor-history-demo.md).
-- Input and output: [input decoder](input.md), [terminal session](terminal.md),
-  [cell buffer](cell-buffer.md), [renderer](render.md), [diff and output](diff.md).
+## Controls and data
+
+- [Basic controls](controls.md), [LineEdit](line-edit.md), [text history](text-history.md), [editor undo and redo](editor-history.md).
+- [Layout](layout.md), [grid and overlay](grid.md), [scrolling](scroll.md), [charts](chart.md).
+- [Immutable models](model.md), [bounded queries](model-queries.md), [layout-driven view preparation](virtual-preparation.md).
+- [Virtual lists](virtual-list.md), [virtual tables](virtual-table.md).
+- [UI coroutines](ui-coroutines.md), [scheduler](scheduler.md).
+
+## Library internals
+
+- [Architecture and event-flow diagrams](architecture.md), [widget ownership](widget-tree.md), [geometry](geometry.md).
+- [UTF-8 and cell width](text.md), [cell buffer](cell-buffer.md), [rendering](render.md), [frame diff and output](diff.md).
+- [Terminal session](terminal.md), [terminal probe and observed capabilities](terminal-probe.md).
+- [Legacy compatibility](legacy.md): the supported path for the existing streaming MarketDepthModelSample.
 
 ## API reference
 
-The generated HTML site has a separate **API reference** menu for types,
-concepts, namespaces, members and headers. In a checkout, public contracts
-live under `include/portals`; start with `ui.hpp`, `managed.hpp` and
-`application.hpp` for ordinary application code. See
-[Building Portals](getting-started.md) to build
-and open the complete reference locally.
+In generated HTML, use **API reference** to find types, concepts, namespaces,
+members and headers. For example, [ui::Scene](../include/portals/ui_scene.hpp)
+and [WidgetTree](../include/portals/widget.hpp) link to type contracts in HTML
+and to their public headers in the repository. Ordinary application code starts
+with `ui.hpp`, `managed.hpp` and `application.hpp`.
 
-## Experimental compile-time alternatives
+Experimental alternatives have separate contracts:
+[compile-time scenes](compile-time-scenes.md), [typed compile-time styles](compile-time-styles.md)
+and [compile-time PSS](compile-time-pss.md). Applications can use declarative
+composition and runtime PSS without these alternatives.
 
-These implemented APIs have their own review path; ordinary applications start
-with declarative composition and runtime PSS.
+## Plans and development
 
-- [Compile-time scenes](compile-time-scenes.md): constant-evaluated structure.
-- [Typed compile-time styles](compile-time-styles.md): typed expressions and live parameters.
-- [Compile-time PSS](compile-time-pss.md): the same bounded PSS v0 string grammar.
+[Planned features and milestones](planned-features.md) · [Scene loading — TBD](scene-loading-guide.md)
 
-## Develop and evaluate Portals
-
-The [contributor guide](development.md) collects tools, experiments, documentation
-maintenance and dependency notices.
-
-See [releasing](releasing.md) for tags, release candidates, artifacts and
-documentation deployment through GitHub Actions.
-
-- [Developer tools](developer-tools.md): entry points, parameters, outputs and effects.
-- [Testing](testing.md) and [fuzzing](../fuzz/README.md): correctness tools.
-- [Managed API measurements](managed-performance.md): reproducible costs and
-  known scaling limits, not a promise of linear performance.
-- [API design scenarios](api-design.md): exploratory material, not the
-  recommended first application or a stable API contract.
-- Dependency notices: [utf8proc](../vendor/utf8proc/README.md) and
-  [Textual palette attribution](../vendor/textual/README.md).
-  [Private doctest dependency](../vendor/doctest/README.md) is used only by tests.
+- [Contributor guide](development.md), [developer tools](developer-tools.md), [testing](testing.md), [fuzzing](../fuzz/README.md).
+- [Managed API measurements](managed-performance.md): reproducible costs and known scaling limits. Results describe the measured workloads.
+- [API design scenarios](api-design.md): exploratory material; check current contracts before using a proposal.
+- [Releasing](releasing.md), [release notes](../ReleaseNotes.md), [dependencies and licenses](dependencies.md).
+- Dependency provenance: [utf8proc](../vendor/utf8proc/README.md), [Textual palette attribution](../vendor/textual/README.md), [test-only doctest](../vendor/doctest/README.md).
 
 ## Reading on GitHub and as HTML
 
-This index and its relative Markdown links work in a checkout and on GitHub.
-Complete example sections link to the real, compiled source files. Their
-Doxygen `\include` lines expand into numbered listings in generated HTML;
-GitHub shows those lines literally, so use the source links there. Header
-labels such as `{#examples}` are Doxygen identifiers, not part of a title.
+Relative Markdown links work in a checkout and on GitHub. Complete example
+sections link to real source files. Doxygen `\include` commands expand into
+numbered listings in HTML; on GitHub, use the accompanying source link. Labels
+such as `{#examples}` are Doxygen identifiers.
 
-The HTML site adds structured navigation and API reference to the same guides.
-It is generated into a build directory, not maintained as a second copy.
-GitHub Actions publishes the generated site to the documentation URL linked above.
-The generated directory also works as a local, offline reference.
-
-[Dependencies and licenses](dependencies.md).
-
-[Scene and recipe reference](declarative-reference.md).
+Markdown describes the selected source branch. The [published HTML](https://ttldtor.github.io/portals/)
+follows the latest stable release; PR checks provide a preview artifact.
+HTML adds structured navigation, search and API links to these same guides.
+Its generated directory also works offline. Language links at the top of each
+translated page lead to the same topic. Links marked **English** lead to material
+that has no Russian translation yet. See [translation maintenance](development.md#documentation-translations)
+for source revisions and update rules.
