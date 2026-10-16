@@ -5,6 +5,14 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Added] Focus scopes select their last eligible control or configured default
+  on entry while preserving ordinary global Tab and Shift+Tab traversal.
+- [Added] Focus-only activations restore the previous target after leaving a
+  scope or hiding, disabling or removing it, including nested return order.
+  These activations do not capture input or create a modal input shield.
+- [Changed] Focus recovery retains the original managed blur diagnostic once,
+  including when its callback removes the source control.
+
 ## v0.3.0 (2026-10-15)
 
 - [Added] Optional `portals::lyra` and `ui::lyra::cli` adapt native Lyra declarations
