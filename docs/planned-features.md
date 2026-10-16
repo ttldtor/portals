@@ -7,11 +7,14 @@ calendar dates are not assigned here. See [user guides](guides.md) for current A
 
 ## Milestones
 
+Available capabilities refer to the current source branch; this does not
+identify a released version.
+
 | Feature | Status / milestone |
 |---|---|
-| Named reference lookup | **TBD — M1** |
-| Scoped styling by Ref and its file convenience | **TBD — M1**; global `ui::style(ui::file(...))` already exists |
-| Scene text/file loader with allowlisted registry | **TBD — M1** |
+| Named reference lookup | Available — M1; [named references](declarative-ui.md) |
+| Scoped styling by Ref and its file convenience | Available — M1; [reference styles and files](declarative-ui.md) |
+| Scene text/file loader with allowlisted registry | Available — M1; [syntax and examples](scene-loading-guide.md) |
 | Remaining text-source/model-view contracts | **TBD — M2**; existing TextValue/Ref are usable |
 | Automatic one-way binding and observation facade | **TBD — M2** |
 | Derived state and binding expressions | **TBD — M2** |
@@ -21,7 +24,7 @@ calendar dates are not assigned here. See [user guides](guides.md) for current A
 | Canonical PSS themes, common defaults and generated embedded resources | **TBD — M5** |
 | Import external theme formats into PSS | **TBD**; separate slice and schedule not assigned |
 | Code-provided `$name`, checked assignment and localized `this.text` sizing | **TBD — M5** |
-| `onLayout` and checked arranged-geometry reads through Ref | **TBD — M1** |
+| `onLayout` and checked arranged-geometry reads through Ref | Available — M1; [layout observation](layout.md) |
 | `ui::async` for functions and coroutine lambdas with `co_await` | **TBD — M6** |
 | Game viewport/camera and bounded surface snapshot publication | **TBD — M6** |
 | Screen-space HUD, free placement and manual/auto switching | **TBD**; overlay foundation M2, surface M6; separate slice not assigned |
@@ -29,7 +32,7 @@ calendar dates are not assigned here. See [user guides](guides.md) for current A
 | Kitty keyboard protocol: detection, mode restoration, modifier keys and diagnostics | **TBD — M7** |
 | Complete cookbook/gallery/documentation sweep | **TBD — M7** |
 
-Sample reorganization is **TBD — M1**. Guides are updated as their features become available.
+The reorganized [examples](examples.md) are available in the current source branch (M1).
 The design details below remain proposals. Runtime PSS v0 currently accepts literal values.
 
 ## Style parameters
@@ -37,7 +40,8 @@ The design details below remain proposals. Runtime PSS v0 currently accepts lite
 <a id="planned-style-parameters"></a>
 
 **TBD — M5:** typed runtime parameters, expressions, source diagnostics and
-dependency-driven updates. Scoped style sources through `Ref` are **TBD — M1**.
+dependency-driven updates. Scoped style sources through `Ref` are already
+available; see [reference styles](declarative-ui.md).
 
 | Proposed form | Meaning |
 |---|---|

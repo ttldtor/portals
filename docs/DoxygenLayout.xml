@@ -23,6 +23,7 @@
         <tab type="usergroup" title="API приложения">
           <tab type="user" title="Декларативный API" url="@ref docs/ru/declarative-ui.md" />
           <tab type="user" title="Справка по сценам" url="@ref docs/ru/declarative-reference.md" />
+          <tab type="user" title="Загрузка сцен" url="@ref docs/ru/scene-loading-guide.md" />
           <tab type="user" title="Командная строка" url="@ref docs/ru/cli.md" />
           <tab type="user" title="Запуск приложения" url="@ref docs/ru/application.md" />
           <tab type="user" title="Привязки и события" url="@ref docs/ru/bindings-guide.md" />
@@ -79,7 +80,6 @@
           </tab>
           <tab type="user" title="Ограничения" url="@ref docs/ru/limitations.md" />
           <tab type="user" title="Возможности и майлстоуны" url="@ref docs/ru/planned-features.md" />
-          <tab type="user" title="Загрузка сцен (TBD)" url="@ref docs/ru/scene-loading-guide.md" />
         </tab>
       </tab>
     </tab>
@@ -109,7 +109,7 @@
       <tab type="user" title="Themes guide" url="@ref docs/themes-guide.md" />
       <tab type="user" title="Bindings and events" url="@ref docs/bindings-guide.md" />
       <tab type="user" title="Control references and text" url="@ref docs/text-property.md" />
-      <tab type="user" title="Scene loading (TBD)" url="@ref docs/scene-loading-guide.md" />
+      <tab type="user" title="Scene loading" url="@ref docs/scene-loading-guide.md" />
       <tab type="user" title="Application runner" url="@ref docs/application.md" />
       <tab type="usergroup" title="Controls and layout">
         <tab type="user" title="Basic controls" url="@ref docs/controls.md" />

@@ -111,6 +111,7 @@ The following interfaces serve different registration paths:
 | `ui::onClick(buttonRef, callback)` | No arguments or `ui::ClickParams&` | Ordered scene-owned pipe handlers |
 | Recipe `.onClick(callback)` / `Ref<Button>::onClick(callback)` | No arguments or `const ClickEvent&` | Existing managed activation adapter |
 | `ui::onKey(selection, callback)` | No arguments or `const KeyEvent&` | Raw keyboard interception before semantic routing |
+| `ui::onLayout(ref, callback)` / `ref.onLayout(callback)` | No arguments or `const NodeGeometry&` | Scene-owned notification after final layout |
 | `Property<T>::observe(receiver, callback)` | `W&`, `shared_ptr<const PropertyChange<T>>` | Scheduled value notification to a checked receiver |
 | `ManagedScene::onEvent(node, callback)` | Existing custom event contract | Explicit custom-widget routing |
 
@@ -179,7 +180,16 @@ Typed live theme parameters are already available through explicit UI updates;
 see [themes](themes-guide.md). Their existence does not imply automatic domain
 or string-PSS variable binding.
 
-## Planned scene parameters, async and geometry
+## Observe layout changes
+
+`ui::onLayout(ref, callback)` reports the initial final geometry and later
+changes after the tree frame has ended. Callback mutations request the next
+frame. `ref.geometry()` and `ref.size()` return checked copies of the final
+bounds or local size. Before final layout, while hidden, or after layout
+invalidation, they return `TreeError::INVALID_GEOMETRY`. See
+[layout observation](layout.md) for an example and delivery rules.
+
+## Planned scene parameters and async
 
 **TBD — M5:** `$name` will refer to a code-assigned value or a registered
 notification source. `theme.*` refers to theme parameters and `this.*` to control
@@ -197,8 +207,3 @@ context at each UI resume and remove it before suspension. It does not move
 CPU work to a worker automatically. UI close cancels the continuation; the
 application still owns producer stop/join. See [current coroutines](ui-coroutines.md).
 The planned milestone is M6.
-
-**TBD — M1:** `onLayout` and checked arranged-geometry reads through Ref.
-Notification refers to completed layout and is delivered outside tree traversal;
-callback mutations request the next frame. Before valid layout, a getter must
-not fabricate a zero size. Exact getter syntax remains undecided.

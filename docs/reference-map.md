@@ -23,6 +23,7 @@ Read [current limitations](limitations.md) for qualified platforms and runtime b
 - [Command-line startup](cli.md): parse arguments before opening the terminal and read process snapshots.
 - [Bindings and events](bindings-guide.md), [properties](property.md), [control references](text-property.md).
 - [Input](input.md), [focus and routing](focus.md), [diagnostics](diagnostics.md).
+- [Scene loading](scene-loading-guide.md).
 
 ## Styles and themes
 
@@ -60,7 +61,7 @@ composition and runtime PSS without these alternatives.
 
 ## Plans and development
 
-[Planned features and milestones](planned-features.md) · [Scene loading — TBD](scene-loading-guide.md)
+[Planned features and milestones](planned-features.md)
 
 - [Contributor guide](development.md), [developer tools](developer-tools.md), [testing](testing.md), [fuzzing](../fuzz/README.md).
 - [Managed API measurements](managed-performance.md): reproducible costs and known scaling limits. Results describe the measured workloads.
