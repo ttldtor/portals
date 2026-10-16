@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <tuple>
+#include <typeinfo>
 
 /// @brief Owning construction descriptions mounted through the existing ManagedScene lifecycle.
 namespace portals::ui {
@@ -129,6 +130,7 @@ public:
   }
 
 private:
+  friend struct detail::NamedAccess;
   friend class Description<T>;
   template <class U> friend class Ref;
 
@@ -281,11 +283,282 @@ public:
 
 private:
   friend struct detail::ClickAccess;
+  friend struct detail::NamedAccess;
+  friend class DynamicRef;
 
   std::shared_ptr<detail::RefTarget> target() const {
     return this->slot_ ? std::shared_ptr<detail::RefTarget>(this->slot_, &this->slot_->target) : nullptr;
   }
 };
+
+namespace detail {
+/** @brief Internal checked named publication bridge; no widget or scene ownership escapes. */
+struct NamedAccess {
+  /** @param stage Existing owning style payload.
+   * @param target Weak exact-node observation.
+   * @return Independent scoped stage using the same existing style implementation.
+   */
+  static StyleStage scopeStyle(const StyleStage &stage, std::shared_ptr<RefTarget> target);
+
+  /** @param reference Dynamic observation.
+   * @return Shared weak target with no scene ownership.
+   */
+  static std::shared_ptr<RefTarget> target(const DynamicRef &reference);
+
+  /** @param scene Receiving managed owner.
+   * @param target Shared observation, checked before reading mutable fields.
+   * @return Exact node scope or typed thread/owner/liveness failure.
+   */
+  static std::expected<NodeId, ManagedError> scope(ManagedScene &scene, const std::shared_ptr<RefTarget> &target) {
+    auto owner = eventScene(target);
+
+    if (!owner) {
+      auto failure = owner.error();
+      failure.phase = ManagedPhase::STYLE;
+
+      return std::unexpected(failure);
+    }
+
+    if (*owner != &scene) {
+      return std::unexpected(ManagedError{ManagedPhase::STYLE, target->node.id(), TreeError::WRONG_SESSION, {}, {}});
+    }
+
+    auto live = scene.boundary(ManagedPhase::STYLE, target->node);
+
+    return live ? std::expected<NodeId, ManagedError>(target->node.id()) : std::unexpected(live.error());
+  }
+
+  /** @param scene Receiving managed owner.
+   * @param source Original dynamic observation, never resolved again by name.
+   * @return Original live identity, or exact prior lookup/type/liveness/owner error.
+   */
+  static std::expected<Node<Widget>, ManagedError> observe(ManagedScene &scene,
+                                                           const std::shared_ptr<RefTarget> &source) {
+    auto owner = eventScene(source);
+
+    if (!owner) {
+      return std::unexpected(owner.error());
+    }
+
+    if (*owner != &scene) {
+      return std::unexpected(ManagedError{ManagedPhase::BIND, source->node.id(), TreeError::WRONG_SESSION, {}, {}});
+    }
+
+    auto allowed = scene.boundary(ManagedPhase::BIND, source->node);
+
+    return allowed ? std::expected<Node<Widget>, ManagedError>(source->node) : std::unexpected(allowed.error());
+  }
+
+  /** @param scene Borrowed live managed owner.
+   * @param name Case-sensitive ID; empty, absent and duplicate names reject.
+   * @return Unique live managed identity, or exact boundary/name error.
+   */
+  static std::expected<Node<Widget>, ManagedError> find(ManagedScene &scene, std::string_view name) {
+    auto allowed = scene.boundary(ManagedPhase::BIND, scene.root_);
+
+    if (!allowed) {
+      return std::unexpected(allowed.error());
+    }
+
+    Node<Widget> found;
+
+    for (const auto &entry : scene.entries_) {
+      if (entry->removed || !entry->target || entry->target->id != name || name.empty()) {
+        continue;
+      }
+
+      auto live = scene.app_.tree().read(entry->node, [](const Widget &) {
+      });
+
+      if (!live && (live.error() == TreeError::STALE_NODE || live.error() == TreeError::CLOSED)) {
+        continue;
+      }
+
+      if (!live) {
+        return std::unexpected(ManagedError{ManagedPhase::BIND, entry->node.id(), live.error(), {}, {}});
+      }
+
+      if (found != Node<Widget>{}) {
+        return std::unexpected(ManagedError{ManagedPhase::BIND, entry->node.id(), TreeError::INVALID_ARGUMENT, {}, {}});
+      }
+
+      found = entry->node;
+    }
+
+    if (found == Node<Widget>{}) {
+      return std::unexpected(ManagedError{ManagedPhase::BIND, {}, TreeError::INVALID_ARGUMENT, {}, {}});
+    }
+
+    return found;
+  }
+
+  /** @tparam T Public Widget subtype checked with RTTI before constructing its observer.
+   * @param reference Empty shared observing slot to publish.
+   * @param scene Existing owner, borrowed only during checked validation.
+   * @param node Unique name result; no unchecked downcast is exposed.
+   * @return Success after one publication or INVALID_ARGUMENT for a wrong type.
+   */
+  template <class T>
+  static std::expected<void, ManagedError> publish(const Ref<T> &reference, ManagedScene &scene, Node<Widget> node) {
+    auto &slot = *reference.slot_;
+    bool compatible{};
+    Node<Control> caption;
+    Node<LineEdit> draft;
+    auto checked = scene.app_.tree().read(node, [&](const Widget &widget) {
+      if constexpr (std::same_as<T, Widget>) {
+        compatible = true;
+      } else {
+        compatible = dynamic_cast<const T *>(&widget) != nullptr;
+      }
+
+      if (dynamic_cast<const Control *>(&widget)) {
+        caption = Node<Control>(node.id());
+      }
+
+      if (dynamic_cast<const LineEdit *>(&widget)) {
+        draft = Node<LineEdit>(node.id());
+      }
+    });
+
+    if (!checked || !compatible) {
+      return std::unexpected(
+        ManagedError{ManagedPhase::BIND, node.id(), checked ? TreeError::INVALID_ARGUMENT : checked.error(), {}, {}});
+    }
+
+    slot.node = Node<T>(node.id());
+    slot.target.scene = &scene;
+    slot.target.lifetime = scene.lifetime_;
+    slot.target.node = node;
+    slot.target.caption = caption;
+    slot.target.draft = draft;
+
+    return {};
+  }
+
+  /** @tparam T Observed public widget type.
+   * @param reference Shared slot retaining this request's original failure.
+   * @param failure Exact failure copied without widget access.
+   */
+  template <class T> static void reject(const Ref<T> &reference, const ManagedError &failure) {
+    reference.slot_->target.failure = std::make_shared<const ManagedError>(failure);
+  }
+
+  /** @param scene Existing collector.
+   * @param failure Exact cause stamped with short-error provenance.
+   * @param source Owned name and static expected-type diagnostic.
+   */
+  static void report(ManagedScene &scene, ManagedError &failure, const LookupSource &source) {
+    scene.reportShortError(failure, "scene.get", source.name, source.expectedType, source.origin);
+  }
+
+  /** @tparam T Observed widget subtype.
+   * @param reference Existing typed observation.
+   * @return Shared weak target, never scene or widget ownership.
+   */
+  template <class T> static std::shared_ptr<RefTarget> target(const Ref<T> &reference) {
+    return reference.target();
+  }
+
+  /** @tparam T Public Widget subtype required by this request.
+   * @param request Name and weak facade identity, copied through fallible owning transfers.
+   * @return Typed slot with deferred publication or its retained admission failure.
+   */
+  template <class T> static Ref<T> request(const LookupSource &request) {
+    Ref<T> reference;
+    LookupSource source(request);
+
+    source.expectedType = typeid(T).name();
+
+    auto result =
+      requestLookup(source, [reference](ManagedScene &scene, std::expected<Node<Widget>, ManagedError> node) {
+        auto published =
+          node ? publish(reference, scene, *node) : std::expected<void, ManagedError>(std::unexpected(node.error()));
+
+        if (!published) {
+          reject(reference, published.error());
+        }
+
+        return published;
+      });
+
+    if (!result) {
+      reject(reference, result.error());
+    }
+
+    return reference;
+  }
+};
+} // namespace detail
+
+/** @brief Dynamic named observation with checked caption/editor and Button capabilities.
+ * Copies own the request name and observing slot; they never retain a scene/widget.
+ * Converting to Ref<T> checks the same published NodeId, or waits for this slot before mount.
+ */
+class DynamicRef {
+public:
+  /** @tparam T Public Widget subtype tested during deferred/immediate name resolution.
+   * @return Typed weak slot; wrong type records INVALID_ARGUMENT before startup or in the live collector.
+   * Conversion construction may allocate. A successful slot never retargets on later ID reuse.
+   */
+  template <class T>
+    requires std::derived_from<T, Widget>
+  operator Ref<T>() const {
+    auto source = source_;
+
+    source.observation = detail::NamedAccess::target(reference_);
+
+    return detail::NamedAccess::request<T>(source);
+  }
+
+  /** @param resolver Optional owning synchronous localization adapter.
+   * @param origin Property acquisition call site retained for short mutations.
+   * @return Existing checked text proxy; non-text widgets return INVALID_ARGUMENT.
+   */
+  TextProperty text(TextResolver resolver = {}, std::source_location origin = std::source_location::current()) const {
+    return TextProperty(reference_.target(), std::move(resolver), "Widget", origin);
+  }
+
+  /** @tparam Callback Owning compact Button action accepted by Ref<Button>::onClick.
+   * @param callback Action transferred into the existing managed binding.
+   * @param origin Registration call site.
+   * @return Checked Button registration result; use a pipe stage for registration before preparation.
+   */
+  template <class Callback = detail::QuitCommand>
+    requires portals::detail::ManagedAction<Callback, ClickEvent>
+  std::expected<void, ManagedError> onClick(Callback callback,
+                                            std::source_location origin = std::source_location::current()) const {
+    Ref<Button> typed = *this;
+
+    return typed.onClick(std::move(callback), origin);
+  }
+
+  /** @return Observing published identity, empty before mount; UI-thread only. */
+  Node<Widget> node() const noexcept {
+    return reference_.node();
+  }
+
+private:
+  friend class Scene;
+  friend struct detail::NamedAccess;
+
+  explicit DynamicRef(const detail::LookupSource &source)
+      : source_(source), reference_(detail::NamedAccess::request<Widget>(source_)) {
+  }
+
+  detail::LookupSource source_;
+  Ref<Widget> reference_;
+};
+
+inline std::shared_ptr<detail::RefTarget> detail::NamedAccess::target(const DynamicRef &reference) {
+  return reference.reference_.target();
+}
+
+// The public contract is documented on Scene::get in ui_scene.hpp.
+template <class T>
+  requires std::derived_from<T, Widget>
+Ref<T> Scene::get(std::string_view name, std::source_location origin) {
+  return detail::NamedAccess::request<T>({ref().anchor_, owner_, std::string(name), origin});
+}
 
 namespace detail {
 /** @brief Checked adapter to the managed-owned click chain; never owns a widget or scene. */

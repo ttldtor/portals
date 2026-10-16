@@ -14,6 +14,9 @@
 #include <vector>
 
 namespace portals {
+namespace ui::detail {
+struct NamedAccess;
+}
 class WidgetTree;
 class StyleEngine;
 
@@ -101,6 +104,7 @@ public:
 
 private:
   friend class WidgetTree;
+  friend struct ui::detail::NamedAccess;
 
   explicit Node(NodeId id) : id_(id) {
   }

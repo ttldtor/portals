@@ -4,6 +4,40 @@
 
 This page describes preparation, lifetime, dispatch and error contracts.
 
+## Named references and scoped styles
+
+`Scene::get(id)` returns `DynamicRef`; `get<T>(id)` and conversion to `Ref<T>`
+validate public Widget inheritance with RTTI. Deferred conversion waits for the
+original dynamic slot. Once published, conversion checks that slot's original
+NodeId even after rename or ID reuse. It never searches the name again.
+A request owns its ID and call site, while its scene anchor remains weak.
+All successful slots remain observations; the scene owns widgets and registrations.
+
+Requests are bounded independently by `SceneOptions::maxConfigurations` and resolve
+between complete recipe mount and pending configuration. Startup lookup errors are
+latched before observer callbacks and notified once. Same-name deferred conversions
+retain that primary cause without another notification. Immediate failures are
+recoverable reports except inside the existing checked setup/configuration scope.
+Construction and argument/capture allocation before request admission may throw;
+admitted internal failures map to BIND/NO_MEMORY or CALLBACK_FAILED.
+
+Scoped `ui::style(ref, bytes)` and `styleFile(ref, path)` use complete strict PSS v0.
+The optional `StyleSheet::scope` is an exact NodeId filter before existing selectors;
+it changes neither selector specificity nor tier order. The standalone metadata-only
+`resolveStyle` preview has no live node identity and ignores this filter; StyleEngine
+checks it for actual bindings. The scoped source document retains unchanged selector
+and declaration coordinates. New metadata for an unstyled layout/custom widget is
+staged atomically with the layer; rejection publishes neither. Existing global sheets
+continue to register the same targets as before.
+
+Scope excludes descendants and rejects cross-scene, stale, closed and wrong-thread
+references before publication. Equal sheet/identity reuse keeps existing no-op and
+invalidation behavior. Theme-slot replacement preserves independent scoped APPLICATION
+and USER layers. File I/O remains deferred to admitted consumption and uses the existing
+bounded reader, file error carrier and source-aware parser; no watcher or loader is added.
+See the [complete guide](declarative-ui.md) and
+[installed consumer](../tests/package_consumer/named_scoped.cpp).
+
 ## Running and reporting
 
 `Scene::runApp()`, `ui::runApp(scene)` and `scene | ui::runApp()` delegate to the

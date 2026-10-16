@@ -1313,3 +1313,251 @@ TEST_CASE("retained named stage reuses layer order and remains stale after remov
   REQUIRE_FALSE(owner.checked());
   CHECK(std::holds_alternative<StyleError>(owner.checked().error().cause));
 }
+
+TEST_CASE("scoped layout admission keeps metadata and layer atomic under allocation failures") {
+  unsigned failures{}, successes{};
+
+  for (std::ptrdiff_t limit = 0; limit != 128; ++limit) {
+    ui::Ref<Column> group;
+    auto owner = ui::scene(ui::vbox(group, ui::label("child")));
+    auto document = parsePssDocument("* { bold: true; }", "scoped-oom.pss");
+
+    REQUIRE(document);
+    REQUIRE(owner.prepareChecked());
+
+    document->sheet.scope = group.node().id();
+
+    auto managed = owner.managed();
+
+    REQUIRE(managed);
+
+    fault::remaining = limit;
+
+    auto installed = managed->get().styleDocument(StyleTier::APPLICATION, "scoped", *document);
+
+    fault::remaining = -1;
+
+    if (installed) {
+      ++successes;
+    } else {
+      ++failures;
+      CHECK(treeCause(installed.error(), TreeError::NO_MEMORY));
+    }
+
+    bool hasStyle{};
+    bool bold{};
+
+    owner.configure([&](ManagedScene &, Application &application) {
+      REQUIRE(application.tree().read(group.node(), [&](const Widget &widget) {
+        hasStyle = widget.computedStyle().has_value();
+        bold = widget.computedStyle() && widget.computedStyle()->normal.bold;
+      }));
+    });
+
+    CHECK(hasStyle == installed.has_value());
+    CHECK(bold == installed.has_value());
+    REQUIRE(owner.checked());
+  }
+
+  CHECK(failures > 0);
+  CHECK(successes > 0);
+}
+
+namespace fault {
+thread_local unsigned lookupCountdown{};
+
+void lookupAllocationHook() {
+  if (--lookupCountdown) {
+    hook = lookupAllocationHook;
+  } else {
+    reentry();
+  }
+}
+} // namespace fault
+
+TEST_CASE("lookup queue rejects allocator reentry before vector growth and restores its caller") {
+  unsigned blocked{}, entered{};
+
+  for (unsigned allocation = 1; allocation != 16; ++allocation) {
+    auto owner = ui::scene(ui::button("A").id("a"));
+
+    fault::reentry = [&] {
+      ++entered;
+
+      auto nested = owner.get<Button>("a");
+      auto read = nested.text().get();
+
+      if (!read && treeCause(read.error(), TreeError::WOULD_BLOCK)) {
+        ++blocked;
+      }
+    };
+    fault::lookupCountdown = allocation;
+    fault::hook = fault::lookupAllocationHook;
+
+    auto reference = owner.get<Button>("a");
+
+    fault::hook = nullptr;
+    fault::reentry = {};
+
+    REQUIRE(owner.checked());
+    REQUIRE(owner.prepareChecked());
+    auto text = reference.text().get();
+
+    REQUIRE(text);
+    CHECK(*text == "A");
+  }
+
+  CHECK(entered > 0);
+  CHECK(blocked > 0);
+}
+
+TEST_CASE("reusing an equal exact-node style requests no defaults work or idle redraw") {
+  example::ReplayTerminal terminal({{20, "\x1b[21~", {}}}, 80, {20, 4});
+  ui::SceneOptions options;
+  ui::Ref<Defaults> reference;
+  int defaults{}, reuses{};
+
+  options.clock = terminal.clock();
+
+  auto owner = ui::scene(ui::custom<Defaults>(std::ref(defaults)).reference(reference), options);
+  const auto scoped = ui::style(reference, "* { bold: true; }");
+
+  owner | scoped;
+  owner.onKey(key::F10, [&] {
+    const auto before = defaults;
+
+    owner | scoped;
+
+    CHECK(defaults == before);
+    ++reuses;
+  });
+
+  auto result = owner.run(terminal);
+
+  REQUIRE(result);
+  CHECK(reuses == 1);
+  CHECK(result->frames == 1);
+  CHECK(terminal.closed);
+}
+
+static_assert(std::is_copy_constructible_v<ui::detail::LookupSource>);
+static_assert(!std::is_nothrow_move_constructible_v<ui::detail::LookupSource>);
+
+TEST_CASE("named lookup carriers copy under allocation failure without noexcept termination") {
+  unsigned caught{}, rejected{}, completed{};
+  const std::string id(80, 'a');
+
+  for (const unsigned mode : {0u, 1u, 2u}) {
+    for (std::ptrdiff_t limit = 0; limit != 64; ++limit) {
+      auto owner = ui::scene(ui::button("A").id(id));
+      auto original = owner.get(id);
+      ui::Ref<Button> observed;
+      bool obtained{};
+
+      try {
+        fault::remaining = limit;
+
+        if (mode == 0) {
+          observed = owner.get<Button>(id);
+        } else if (mode == 1) {
+          auto dynamic = owner.get(id);
+
+          fault::remaining = -1;
+          observed = dynamic;
+        } else {
+          observed = original;
+        }
+
+        fault::remaining = -1;
+        obtained = true;
+      } catch (const std::bad_alloc &) {
+        fault::remaining = -1;
+        ++caught;
+      }
+
+      auto status = owner.checked();
+
+      if (!status) {
+        ++rejected;
+        CHECK(treeCause(status.error(), TreeError::NO_MEMORY));
+      } else {
+        REQUIRE(owner.prepareChecked());
+
+        if (obtained) {
+          auto text = observed.text().get();
+
+          REQUIRE(text);
+          CHECK(*text == "A");
+          ++completed;
+        }
+      }
+    }
+  }
+
+  CHECK(caught > 0);
+  CHECK(rejected > 0);
+  CHECK(completed > 0);
+}
+
+TEST_CASE("upper runner reports named lookup allocation failures once after cleanup before terminal") {
+  struct ResetFault {
+    ~ResetFault() {
+      fault::remaining = -1;
+    }
+  };
+
+  unsigned failures{}, successes{};
+  const std::string id(80, 'a');
+
+  for (std::ptrdiff_t limit = 0; limit != 64; ++limit) {
+    example::ReplayTerminal terminal({}, 5, {20, 4});
+    ui::RunAppOptions options;
+    std::optional<ManagedError> failure;
+    unsigned reports{}, cleanup{};
+
+    options.terminal = &terminal;
+    options.scene.clock = terminal.clock();
+    options.report = [&](const ui::SceneReport &report) {
+      ++reports;
+      failure = report.failure;
+      CHECK(cleanup == 1);
+    };
+
+    const auto result = ui::runApp(
+      [&] {
+        return ui::button("A").id(id);
+      },
+      [&](ui::Scene &owner) {
+        owner.onStop([&] {
+          ++cleanup;
+        });
+
+        ResetFault reset;
+
+        fault::remaining = limit;
+
+        auto reference = owner.get<Button>(id);
+      },
+      options);
+
+    REQUIRE(cleanup == 1);
+
+    if (result) {
+      ++failures;
+      REQUIRE(failure);
+      CHECK(treeCause(*failure, TreeError::NO_MEMORY));
+      CHECK(failure->phase == ManagedPhase::BIND);
+      CHECK(reports == 1);
+      CHECK(terminal.output.empty());
+      CHECK_FALSE(terminal.closed);
+    } else {
+      ++successes;
+      CHECK_FALSE(failure);
+      CHECK(reports == 0);
+      CHECK(terminal.closed);
+    }
+  }
+
+  CHECK(failures > 0);
+  CHECK(successes > 0);
+}

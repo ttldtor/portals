@@ -100,6 +100,8 @@ struct StyleSheet {
 
   std::vector<StyleRule> rules =
     std::vector<StyleRule>(0); ///< Source-order rules, at most MAX_STYLE_RULES when installed.
+  std::optional<NodeId>
+    scope{}; ///< Optional exact node restriction; preserves selector specificity and source metadata.
   /** @param other Owning value to compare.
    * @return Whether all typed fields are equal.
    */
@@ -177,6 +179,7 @@ std::expected<StyleSheet, StyleError> parsePss(std::string_view source);
 
 /** @brief Resolve one subject through the same engine used by typed and PSS installation.
  * @param sheet Valid rules (nonnegative minWidth, at most MAX_STYLE_RULES); immutable during this call.
+ * This metadata-only preview ignores a sheet node scope; the owning engine checks scope against live NodeId.
  * @param target Borrowed matching metadata; no data are retained.
  * @param defaults Owning built-in/custom widget defaults beneath all matching declarations.
  * @return Complete owning style. No allocation, I/O or thread affinity; caller owns input stability.
@@ -370,7 +373,7 @@ private:
   detail::StyleThemeLease themeLease() const noexcept;
   StyleLayerHandle handle(std::uint64_t id, std::uint64_t epoch) const noexcept;
   ComputedStyle resolve(const StyleSheet &sheet, const LayerState &state, const StyleTarget &target,
-                        ComputedStyle defaults) const noexcept;
+                        ComputedStyle defaults, NodeId node = {}) const noexcept;
   std::expected<void, StyleError> checkBoundary(bool completing = false) const;
   WidgetTree &tree_;
   std::size_t maxBindings_;

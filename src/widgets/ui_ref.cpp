@@ -10,6 +10,10 @@ std::expected<ManagedScene *, ManagedError> eventScene(const std::shared_ptr<Ref
     return std::unexpected(ManagedError{ManagedPhase::BIND, {}, TreeError::WRONG_THREAD, {}, {}});
   }
 
+  if (target && target->failure) {
+    return std::unexpected(*target->failure);
+  }
+
   if (!target || target->lifetime.expired()) {
     return std::unexpected(
       ManagedError{ManagedPhase::BIND, target ? target->node.id() : NodeId{}, TreeError::CLOSED, {}, {}});
@@ -87,6 +91,10 @@ struct RefAccess {
       return std::unexpected(failure({}, TreeError::WRONG_THREAD));
     }
 
+    if (target && target->failure) {
+      return std::unexpected(*target->failure);
+    }
+
     if (!target || target->lifetime.expired()) {
       return std::unexpected(failure(target ? target->node : Node<Widget>{}, TreeError::CLOSED));
     }
@@ -96,6 +104,10 @@ struct RefAccess {
 
     if (!allowed) {
       return std::unexpected(allowed.error());
+    }
+
+    if (target->caption == Node<Control>{} && target->draft == Node<LineEdit>{}) {
+      return std::unexpected(failure(target->node, TreeError::INVALID_ARGUMENT));
     }
 
     if (*owner->textMutating_) {

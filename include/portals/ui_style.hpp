@@ -184,6 +184,14 @@ private:
 
   ManagedError boundaryFailure(TreeError cause) const;
 
+  friend struct detail::NamedAccess;
+
+  /** @param target Weak typed/dynamic observation; never owns the scene or widget.
+   * @return Owning scoped stage copy with exact NodeId admission at consumption.
+   * Construction may allocate; scope does not change PSS selectors or specificity.
+   */
+  StyleStage scoped(std::shared_ptr<detail::RefTarget> target) const;
+
   struct Impl;
 
   StyleStage(std::shared_ptr<const Impl> payload, std::source_location origin)
@@ -191,9 +199,15 @@ private:
   }
 
   std::expected<StyleLayerHandle, ManagedError> apply(ManagedScene &scene, const StyleLayerHandle *existing) const;
+  bool scoped_{};
+  std::shared_ptr<detail::RefTarget> target_;
   std::shared_ptr<const Impl> payload_;
   std::source_location origin_;
 };
+
+inline StyleStage detail::NamedAccess::scopeStyle(const StyleStage &stage, std::shared_ptr<RefTarget> target) {
+  return stage.scoped(std::move(target));
+}
 
 /** @param bytes Borrowed strict PSS input copied/parsed during stage construction.
  * @param options Existing layer policy; APPLICATION is default.
@@ -253,6 +267,69 @@ StyleStage style(const style::ct::CompactSheet<R, C, D, B> &description, const S
 
   return document ? StyleStage::document(*document, options, origin)
                   : StyleStage::failure(document.error(), options, origin);
+}
+
+/** @tparam T Public Widget subtype observed by the existing reference.
+ * @param reference Weak target, validated for affinity, owner and liveness when consumed.
+ * @param bytes Complete strict PSS v0 rules; copied before deferral.
+ * @param options Existing layer/source policy; selectors retain their normal specificity.
+ * @param origin Style registration site retained for deferred errors.
+ * @return Owning stage scoped to exactly one node; never applies to descendants or reused IDs.
+ */
+template <class T>
+StyleStage style(const Ref<T> &reference, std::string_view bytes, const StyleOptions &options = {},
+                 std::source_location origin = std::source_location::current()) {
+  return detail::NamedAccess::scopeStyle(style(bytes, options, origin), detail::NamedAccess::target(reference));
+}
+
+/** @param reference Dynamic named observation with the same exact-node scope policy.
+ * @param bytes Complete strict PSS v0 rules, copied before deferral.
+ * @param options Existing layer/source policy.
+ * @param origin Registration site retained for errors.
+ * @return Owning stage, validated only at scene consumption.
+ */
+inline StyleStage style(const DynamicRef &reference, std::string_view bytes, const StyleOptions &options = {},
+                        std::source_location origin = std::source_location::current()) {
+  return detail::NamedAccess::scopeStyle(style(bytes, options, origin), detail::NamedAccess::target(reference));
+}
+
+/** @tparam T Ref<T> or DynamicRef accepted by the scoped style path.
+ * @tparam N Array size including a trailing NUL when present.
+ * @param reference Weak exact-node observation, validated during consumption.
+ * @param bytes Entire literal array; embedded NUL remains a deferred parser failure.
+ * @param options Existing layer/source policy.
+ * @param origin Original registration site.
+ * @return Owning scoped stage with the same sized-byte parsing as the global style overload.
+ */
+template <class T, std::size_t N>
+  requires requires(const T &reference) { detail::NamedAccess::target(reference); }
+StyleStage style(const T &reference, const char (&bytes)[N], const StyleOptions &options = {},
+                 std::source_location origin = std::source_location::current()) {
+  return style(reference, std::string_view(bytes, N && bytes[N - 1] == '\0' ? N - 1 : N), options, origin);
+}
+
+/** @param path Native file path copied now and read only at admitted consumption.
+ * @param options Existing layer/source policy.
+ * @param origin Registration site retained for read/parse errors.
+ * @return Existing owning file stage; no watcher or implicit includes.
+ */
+inline StyleStage styleFile(const std::filesystem::path &path, const StyleOptions &options = {},
+                            std::source_location origin = std::source_location::current()) {
+  return style(file(path), options, origin);
+}
+
+/** @tparam T Ref<T> or DynamicRef accepted by the scoped style overload.
+ * @param reference Weak exact-node observation, validated after mount.
+ * @param path Native file path copied before deferred I/O.
+ * @param options Existing layer/source policy.
+ * @param origin Registration site retained in owning diagnostics.
+ * @return Owning file stage scoped through the existing layer/resolver path.
+ */
+template <class T>
+  requires requires(const T &reference) { detail::NamedAccess::target(reference); }
+StyleStage styleFile(const T &reference, const std::filesystem::path &path, const StyleOptions &options = {},
+                     std::source_location origin = std::source_location::current()) {
+  return detail::NamedAccess::scopeStyle(style(file(path), options, origin), detail::NamedAccess::target(reference));
 }
 
 /** @param owner Stationary facade.

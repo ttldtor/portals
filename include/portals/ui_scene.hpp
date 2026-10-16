@@ -11,10 +11,11 @@ namespace portals::ui {
 
 /** @brief Policies for one lazy facade over the existing managed runtime. */
 struct SceneOptions {
-  ApplicationOptions application{};  ///< Existing runner policies, applied once at prepare.
-  ManagedOptions managed{};          ///< Existing managed ownership and diagnostic budgets.
-  SchedulerClock clock{};            ///< Optional borrowed replay clock; must outlive run.
-  std::size_t maxConfigurations{64}; ///< Positive maximum queued configure/key/click callbacks before prepare.
+  ApplicationOptions application{}; ///< Existing runner policies, applied once at prepare.
+  ManagedOptions managed{};         ///< Existing managed ownership and diagnostic budgets.
+  SchedulerClock clock{};           ///< Optional borrowed replay clock; must outlive run.
+  std::size_t maxConfigurations{
+    64}; ///< Positive per-queue maximum for deferred configuration callbacks and named lookups.
 };
 
 /** @brief Final owning error envelope or bounded successful-run summary; no live widget references. */
@@ -73,6 +74,8 @@ struct LiveBinding;
 struct LiveFactory;
 } // namespace detail
 
+template <class T> class Ref;
+class DynamicRef;
 class StyleStage;
 struct StyleOptions;
 
@@ -181,6 +184,8 @@ struct SceneAnchor {
   void *state{}; ///< Borrowed stable facade State, valid only while the anchor is published.
   /** @brief Checked stop bridge, callable only while this anchor publishes its UI owner. */
   std::expected<void, ManagedError> (*quit)(void *, std::source_location){};
+  /** @brief Checked bridge to bounded named lookup requests; called only on the UI thread. */
+  std::expected<void, ManagedError> (*lookup)(void *, const LookupSource &, LookupPublisher){};
   std::shared_ptr<RefTarget> events = std::make_shared<RefTarget>(); ///< Existing weak collector context.
 };
 
@@ -229,6 +234,22 @@ public:
   Scene &operator=(const Scene &) = delete;
   /** @brief Close the managed owner before releasing its Application, on UI outside operations/frames. */
   ~Scene();
+
+  /** @param name Case-sensitive ID copied before deferred resolution after mount.
+   * @param origin Lookup call site retained in diagnostics.
+   * @return Dynamic weak observation; missing/duplicate names stop startup before terminal acquisition.
+   * Does not prepare. Construction may allocate; foreign-thread/closed access yields a failed observation.
+   */
+  DynamicRef get(std::string_view name, std::source_location origin = std::source_location::current());
+
+  /** @tparam T Public Widget subtype required by checked runtime conversion.
+   * @param name Case-sensitive ID copied before deferred resolution.
+   * @param origin Lookup site retained through typed publication.
+   * @return Typed weak observation, never rebound after successful publication; errors stop startup.
+   */
+  template <class T>
+    requires std::derived_from<T, Widget>
+  Ref<T> get(std::string_view name, std::source_location origin = std::source_location::current());
 
   /** @param origin Preparation call site retained if this boundary fails.
    * @return This owner, preserving the first failure for checked()/run(). Does not open a terminal.

@@ -5,6 +5,13 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Added] Lazy named control lookup through `Scene::get` preserves exact widget
+  identity across rename/removal and reports missing, duplicate and incompatible
+  targets through the existing typed diagnostics and startup boundary.
+- [Added] Exact-Ref PSS string/file stages reuse style layers and the existing
+  resolver, including atomic metadata admission for unstyled targets. Theme
+  replacement preserves application overrides without synthetic selector IDs.
+
 ## v0.3.0 (2026-10-15)
 
 - [Added] Optional `portals::lyra` and `ui::lyra::cli` adapt native Lyra declarations

@@ -21,6 +21,7 @@ struct Access;
 struct RefAccess;
 struct SceneAccess;
 struct ClickAccess;
+struct NamedAccess;
 class SetupFailureTicket;
 } // namespace ui::detail
 
@@ -881,6 +882,7 @@ private:
   friend struct ui::detail::RefAccess;
   friend struct ui::detail::SceneAccess;
   friend struct ui::detail::ClickAccess;
+  friend struct ui::detail::NamedAccess;
 
   struct ClickRecord {
     std::function<EditorCommandResult(ui::ClickParams &)> action;
