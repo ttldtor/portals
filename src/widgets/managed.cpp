@@ -441,6 +441,154 @@ std::unexpected<ManagedError> ManagedScene::rollback(Node<Widget> node, TreeErro
   return std::unexpected(result);
 }
 
+std::expected<void, ManagedError> ManagedScene::focusScope(Node<Widget> node) {
+  ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
+  auto allowed = boundary(ManagedPhase::BIND, node);
+
+  if (!allowed) {
+    return allowed;
+  }
+
+  auto entry = find(node);
+
+  if (!entry) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
+  }
+
+  auto bound = app_.router().focusScope(node);
+
+  if (!bound) {
+    return std::unexpected(error(ManagedPhase::BIND, node, bound.error()));
+  }
+
+  entry->focusScope = std::move(*bound);
+
+  return {};
+}
+
+std::expected<void, ManagedError> ManagedScene::focusDefault(Node<Widget> node) {
+  ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
+  auto allowed = boundary(ManagedPhase::BIND, node);
+
+  if (!allowed) {
+    return allowed;
+  }
+
+  if (!find(node)) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
+  }
+
+  auto result = app_.router().focusDefault(node);
+
+  return result ? std::expected<void, ManagedError>{}
+                : std::unexpected(error(ManagedPhase::BIND, node, result.error()));
+}
+
+struct ManagedScene::FocusReport {
+  static thread_local FocusReport *active;
+  Application *application;
+  std::optional<ManagedError> reported;
+  FocusReport *previous;
+
+  explicit FocusReport(ManagedScene &owner) : application(&owner.app_), previous(active) {
+    active = this;
+  }
+
+  ~FocusReport() {
+    // Only call-local values survive callbacks; no scene is touched during restoration.
+    active = previous;
+  }
+
+  static std::optional<ManagedError> *destination(Application &application) noexcept {
+    for (auto *entry = active; entry; entry = entry->previous) {
+      if (entry->application == &application) {
+        return &entry->reported;
+      }
+    }
+
+    return nullptr;
+  }
+
+  bool matches(TreeError cause) const noexcept {
+    const auto *reportedCause = reported ? std::get_if<TreeError>(&reported->cause) : nullptr;
+
+    return reportedCause && *reportedCause == cause;
+  }
+
+  ManagedError failure(Node<Widget> node, TreeError cause) const {
+    if (matches(cause)) {
+      return *reported;
+    }
+
+    return ManagedScene::error(ManagedPhase::INPUT, node, cause);
+  }
+};
+
+thread_local ManagedScene::FocusReport *ManagedScene::FocusReport::active{};
+
+std::expected<void, ManagedError> ManagedScene::focus(Node<Widget> node) {
+  ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
+  auto allowed = boundary(ManagedPhase::INPUT, node);
+
+  if (!allowed) {
+    return allowed;
+  }
+
+  if (!find(node)) {
+    return std::unexpected(error(ManagedPhase::INPUT, node, TreeError::INVALID_ARGUMENT));
+  }
+
+  FocusReport report(*this);
+
+  if (app_.router().scope(node)) {
+    auto result = app_.router().enterScope(node);
+
+    return result ? std::expected<void, ManagedError>{} : std::unexpected(report.failure(node, result.error()));
+  }
+
+  auto result = app_.router().setFocus(node);
+
+  return result ? std::expected<void, ManagedError>{} : std::unexpected(report.failure(node, result.error()));
+}
+
+std::expected<void, ManagedError> ManagedScene::enterFocusScope(Node<Widget> node) {
+  ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
+  auto allowed = boundary(ManagedPhase::INPUT, node);
+
+  if (!allowed) {
+    return allowed;
+  }
+
+  if (!find(node)) {
+    return std::unexpected(error(ManagedPhase::INPUT, node, TreeError::INVALID_ARGUMENT));
+  }
+
+  FocusReport report(*this);
+
+  auto result = app_.router().enterFocusScope(node);
+
+  return result ? std::expected<void, ManagedError>{} : std::unexpected(report.failure(node, result.error()));
+}
+
+std::expected<void, ManagedError> ManagedScene::leaveFocusScope(Node<Widget> node) {
+  ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
+  auto allowed = boundary(ManagedPhase::INPUT, node);
+
+  if (!allowed) {
+    return allowed;
+  }
+
+  if (!find(node)) {
+    return std::unexpected(error(ManagedPhase::INPUT, node, TreeError::INVALID_ARGUMENT));
+  }
+
+  FocusReport report(*this);
+
+  auto result = app_.router().leaveFocusScope(node);
+
+  return result ? std::expected<void, ManagedError>{} : std::unexpected(report.failure(node, result.error()));
+}
+
 std::expected<void, ManagedError> ManagedScene::remove(Node<Widget> node) {
   ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
   auto allowed = boundary(ManagedPhase::CLEANUP, root_);
@@ -1094,26 +1242,34 @@ ManagedScene::bind(Node<LineEdit> node, ManagedState<std::string> model,
 
           const auto origin = commandFailure && feedback->active ? feedback->origin : std::source_location::current();
 
+          auto failure = error(phase, node, cause);
+
+          failure.operation = trigger == LineEditTrigger::BLUR ? "lineEdit.blur" : nullptr;
+          failure.operationOrigin = origin;
+          failure.reportReceipt.collector_ = lifetime_;
+
+          auto *destination = FocusReport::destination(app_);
+
+          if (commandFailure && trigger == LineEditTrigger::BLUR && destination && !*destination) {
+            // Only this Application's failed loss receipt returns through the active focus call.
+            // Independent result failures and other Applications never populate its destination.
+            destination->emplace(failure);
+          }
+
           try {
             const ManagedDiagnosticContext context{std::string(operation), std::string(0, '\0'), std::string(0, '\0'),
                                                    std::string("LineEdit"), origin};
 
-            remember(error(phase, node, cause), origin, std::span(&context, 1));
+            remember(failure, origin, std::span(&context, 1));
           } catch (const std::bad_alloc &) {
-            remember(error(phase, node, cause), origin);
+            remember(failure, origin);
           } catch (const std::length_error &) {
-            remember(error(phase, node, cause), origin);
+            remember(failure, origin);
           }
         };
 
         try {
           if (receipt.status == LineEditStatus::FAILED && receipt.error) {
-            if (receipt.trigger == LineEditTrigger::BLUR && !lifetime.expired() && recoveringFocus_ &&
-                !reportedFocusFailure_) {
-              // Only the receipt error returns through State::focus; result callback errors are independent.
-              reportedFocusFailure_ = *receipt.error;
-            }
-
             const bool canReport = !lifetime.expired();
 
             report(*receipt.error, true);
@@ -1949,21 +2105,10 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
     } prune{*this};
 
     const auto recoverFocus = [&] {
-      struct FocusRecovery {
-        ManagedScene &scene;
-
-        ~FocusRecovery() {
-          scene.recoveringFocus_ = false;
-          scene.reportedFocusFailure_.reset();
-        }
-      } recovery{*this};
-
-      recoveringFocus_ = true;
-      reportedFocusFailure_.reset();
-
+      FocusReport report(*this);
       auto focused = app_.router().focused();
 
-      if (!focused && reportedFocusFailure_ != focused.error()) {
+      if (!focused && !report.matches(focused.error())) {
         remember(error(ManagedPhase::PREPARE, root_, focused.error()));
       }
 

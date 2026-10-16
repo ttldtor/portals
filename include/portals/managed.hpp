@@ -476,6 +476,35 @@ public:
                                          std::shared_ptr<Clipboard> clipboard = {},
                                          std::function<bool(std::string_view)> validate = {});
 
+  /** @brief Declare a nested focus scope; this scene owns its disconnect token.
+   * @param node Live managed scope root, possibly also an ordinary bound control.
+   * @return Success or the existing typed router/binding error; no token escapes.
+   */
+  std::expected<void, ManagedError> focusScope(Node<Widget> node);
+  /** @brief Set a live managed node as its nearest scope's default.
+   * @param node Default descendant; hidden/disabled defaults are skipped on entry.
+   * @return Success, INVALID_ARGUMENT without an enclosing scope, or typed validation error.
+   */
+  std::expected<void, ManagedError> focusDefault(Node<Widget> node);
+  /** @brief Enter a scope or focus an ordinary registered control through the same blur path.
+   * @param node Live managed target; scope selection uses last/default/preorder fallback.
+   * @return Success or typed validation/callback error. Published focus is not rolled back.
+   */
+  std::expected<void, ManagedError> focus(Node<Widget> node);
+  /** @brief Enter a declared scope while saving exact previous focus in the existing router.
+   * This focus-only operation does not restrict input or global Tab traversal.
+   * @param node Live eligible managed scope root, absent from the return stack.
+   * @return Success or typed validation/allocation/callback error. Published entry errors retain
+   * the return record; leaveFocusScope can still restore focus after such an error.
+   */
+  std::expected<void, ManagedError> enterFocusScope(Node<Widget> node);
+  /** @brief Leave the top focus-return scope; callback errors retain the published return.
+   * @param node Live managed root matching the top stack record.
+   * @return Success, INVALID_ARGUMENT for another root, or typed boundary/router error.
+   * Removed roots recover lazily through the router rather than through a stale managed reference.
+   */
+  std::expected<void, ManagedError> leaveFocusScope(Node<Widget> node);
+
   /** @brief Own one custom event callback, without subclassing or an additional router.
    * @tparam T Custom Widget type; callable signature is checked through std::function.
    * @param node Managed node without another binding; standard bound controls reject replacement.
@@ -897,6 +926,7 @@ private:
     Node<Widget> node;
     std::shared_ptr<StyleTarget> target;
     std::variant<std::monostate, ActionBinding, CheckBoxBinding, LineEditBinding> binding;
+    ActionBinding focusScope;
     std::function<std::expected<void, TreeError>(Node<Widget>)> sync;
     std::function<std::expected<void, TreeError>(Node<Widget>)> customSync;
     std::function<std::expected<void, TreeError>(const LayoutSnapshot &)> viewPrepare;
@@ -1030,6 +1060,14 @@ private:
     return !collector.expired() && !lifetime_.owner_before(collector) && !collector.owner_before(lifetime_);
   }
 
+  static bool focusReported(const ManagedError &failure) noexcept {
+    const auto &collector = failure.reportReceipt.collector_;
+    const std::weak_ptr<const void> empty;
+
+    // Focus propagation preserves a delivered receipt even after its source scene is destroyed.
+    return collector.owner_before(empty) || empty.owner_before(collector);
+  }
+
   void remember(ManagedError failure, std::source_location origin = std::source_location::current(),
                 std::span<const ManagedDiagnosticContext> contexts = {});
   std::expected<ApplicationStats, ManagedError> finish(std::expected<ApplicationStats, ApplicationError> result);
@@ -1062,11 +1100,10 @@ private:
   std::optional<ManagedError> closeFailure_;
   bool closeFailureRetained_{};
   std::optional<TreeError> cleanup_;
-  std::optional<TreeError> reportedFocusFailure_;
+  struct FocusReport;
   bool stylesDirty_{};
   mutable bool styling_{};
   bool preparing_{};
-  bool recoveringFocus_{};
   bool reporting_{};
   bool failureNotified_{};
   bool runFailureNotified_{};

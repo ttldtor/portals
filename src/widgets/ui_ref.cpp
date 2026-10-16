@@ -18,15 +18,6 @@ std::expected<ManagedScene *, ManagedError> eventScene(const std::shared_ptr<Ref
   return target->scene;
 }
 
-void reportEventError(const std::shared_ptr<RefTarget> &target, const ManagedError &error,
-                      std::source_location origin) {
-  auto scene = eventScene(target);
-
-  if (scene) {
-    (void)(*scene)->reportError(error, {}, origin);
-  }
-}
-
 namespace {
 ManagedError failure(Node<Widget> node, TreeError cause) {
   return {ManagedPhase::TEXT, node.id(), cause, {}, {}};
@@ -53,6 +44,14 @@ ManagedError textFailure(Node<Widget> node, TextValueError cause) {
 
 /** @brief Checked bridge to existing scene ownership and standard retained setters. */
 struct RefAccess {
+  static bool eventReported(const ManagedScene &scene, const ManagedError &error) noexcept {
+    return scene.shortReported(error);
+  }
+
+  static bool focusReported(const ManagedError &error) noexcept {
+    return ManagedScene::focusReported(error);
+  }
+
   static void report(ManagedError &failure, const std::shared_ptr<RefTarget> &target, const char *operation,
                      std::string_view key, std::string_view expectedType, std::source_location origin) noexcept {
     failure.operation = operation;
@@ -313,6 +312,24 @@ struct RefAccess {
     return property;
   }
 };
+
+void reportEventError(const std::shared_ptr<RefTarget> &target, const ManagedError &error,
+                      std::source_location origin) {
+  auto scene = eventScene(target);
+
+  if (scene && !RefAccess::eventReported(**scene, error)) {
+    (void)(*scene)->reportError(error, {}, origin);
+  }
+}
+
+void reportFocusError(const std::shared_ptr<RefTarget> &target, const ManagedError &error,
+                      std::source_location origin) {
+  auto scene = eventScene(target);
+
+  if (scene && !RefAccess::focusReported(error)) {
+    (void)(*scene)->reportError(error, {}, origin);
+  }
+}
 
 EditorCommandResult editorCommand(std::shared_ptr<RefTarget> target, bool redo, bool stop,
                                   std::source_location origin) {

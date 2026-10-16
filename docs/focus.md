@@ -107,6 +107,139 @@ terminal snapshots and mouse targets agree across viewport clipping, resize and
 hidden-child reflow. Keyboard and programmatic actions share the same handler;
 bubbling rechecks an ancestor hidden or disabled by a lower handler.
 
+## Nested focus scopes
+
+Declare a subtree with `EventRouter::focusScope(root, defaultTarget)` and retain
+its `ActionBinding`. Scope and action records share `max_registrations`; one of
+each can be registered on a node. A scope owns exact session/slot/generation
+observers and an independent cancellation flag. Disconnect can run on a worker;
+the next UI collection reclaims its record. It never owns a widget or callback.
+
+`enterScope(root)` selects the eligible last focused descendant, then its default,
+then the first eligible preorder member. A removed, hidden, disabled or
+disconnected target is skipped. An empty eligible subtree clears focus. The
+configured default must initially belong to the subtree; it need not be focusable
+or eligible until entry. `focusDefault(node)` replaces the nearest enclosing
+scope's default. With several declarations, the last preorder declaration wins.
+Scope registration itself leaves current focus unchanged and remembers an existing
+focused descendant. Explicit `setFocus` can select a control outside all scopes.
+
+Every transition remembers its exact target in all containing scopes. Tab and
+Shift+Tab visit the complete global preorder and reverse preorder, with wrap;
+scope boundaries never skip a control. Initial global focus keeps the existing
+first-eligible policy. Only explicit scope entry and recovery use last/default
+selection. A remembered or default target is selected exactly, including when it
+lies in a nested scope. Explicit-entry fallback recursively enters nested scopes.
+
+When focus becomes ineligible, recovery tries its remembered containing scopes
+from nearest to outermost, then the existing global history/preorder policy.
+Scope membership uses allocation-free parent inspection, independent of geometry.
+Scope selection scans eligible order and scope ancestry; this adds work for scope
+entry/recovery and is not covered by the registration-index complexity above.
+No polling, timers or idle redraw are added. Reentering the current target does
+not request paint. Allocation failure before focus publication leaves the previous
+focus unchanged. Loss/gain errors retain the published focus as described above.
+
+For declarative clients, ManagedScene retains scope tokens automatically:
+
+```cpp
+ui::Ref<Column> form;
+ui::Ref<Button> apply;
+auto recipe = ui::column(form,
+    ui::button("Back", [] {}),
+    ui::button(apply, "Apply", [] {}).focusDefault()).focusScope();
+auto mounted = ui::mount(scene, std::move(recipe));
+if (!mounted) {
+  return std::unexpected(mounted.error());
+}
+auto focused = form.focus();
+```
+
+Here `scene` is an existing UI-thread `ManagedScene`. Check `focused` as an
+ordinary `expected<void, ManagedError>`. `Ref::focus()` enters scope refs and
+focuses ordinary registered controls through the existing blur/validation path.
+A void action may call `(void)form.focus()` and let its owning scene collect an
+error once. Directly returning `form.focus()` is not a supported compact action
+result. An unpublished/unowned Ref has no scene collector: its checked `CLOSED`
+result must be handled by the caller; no unrelated ambient scene is inferred.
+References retain weak scene lifetime: unpublished/closed refs return `CLOSED`,
+removed targets return `STALE_NODE`, and foreign-thread calls return `WRONG_THREAD`.
+Failed mounts publish no refs and retire scope tokens with their subtree. Scope
+declarations are processed before child defaults. A default without an enclosing
+scope fails the mount with `INVALID_ARGUMENT`.
+
+The complete [installed consumer](../tests/package_consumer/focus_scopes.cpp)
+checks default entry, remembered return, Tab exit, stale identity and closed refs.
+Scopes do not implement modal capture or automatic modal return.
+
+## Saving and returning focus
+
+`enterFocusScope(root)` saves the exact current focus and its enclosing scopes,
+then enters a declared eligible scope using last/default/first selection.
+`leaveFocusScope(root)` restores that saved focus. These operations use a focus-return
+stack owned by the existing router. They do not install input shielding or a Tab
+trap: global Tab order, explicit programmatic focus outside and mouse targeting
+remain available. Input-modal interaction is not provided by this API.
+
+Scopes may nest with different roots. Entering a root already in the stack, or
+leaving a root other than the top, returns `INVALID_ARGUMENT`. An eligible scope
+without focusable members enters with empty focus and still retains its return
+record. The existing scope registration token controls registration lifetime;
+clients do not store another token. Stack depth is bounded by `max_registrations`;
+exhaustion returns `NODE_LIMIT`. Saved ancestry adds storage proportional to the
+sum of saved scope depths. No timer or idle frame request is added.
+
+Return first checks the saved session/slot/generation and eligibility. If that
+target is gone, it tries the saved enclosing scopes from nearest to outer, then
+eligible global history and the first global preorder node. Reusing a slot never
+substitutes a new generation. Hidden, disabled, removed or disconnected activation
+roots end lazily at `focused()` or input dispatch. Ended outer entries wait behind
+an active inner entry; consecutive ended entries unwind together on return.
+An automatic return consumes that Tab/Shift+Tab navigation step, so its callback
+cycle is not immediately followed by another traversal. The following Tab resumes normal global traversal. A mouse event that performs this return also skips its automatic focus-on-press step. Showing an ended root
+does not recreate its activation. Disconnecting and registering the same root
+again also does not revive its old record.
+
+All allocation and validation before publication preserve focus and the stack on
+failure. Once published, an entry callback error retains the new focus and saved
+record; the caller can still leave. A published return consumes its record even
+if its loss/gain callback reports an error. Callback self-removal returns an empty
+checked observer; a later focus operation may recover. Nested enter/leave from
+a focus callback returns `WOULD_BLOCK`. Ordinary action callbacks may enter/leave.
+The existing LineEdit IMMEDIATE, ON_COMPLETION and EXPLICIT blur/validation rules
+continue to apply; rejected validation does not discard a surviving dirty draft.
+
+With an existing UI-owned `ManagedScene scene`, declare the scope and capture its
+observing Ref in ordinary void callbacks:
+
+```cpp
+ui::Ref<Column> panel;
+ui::Ref<Button> accept;
+auto recipe = ui::column(
+    ui::column(panel,
+        ui::button(accept, "Accept", [] {}).focusDefault()).focusScope(),
+    ui::button("Open", [panel] { (void)panel.enterFocusScope(); }),
+    ui::button("Back", [panel] { (void)panel.leaveFocusScope(); }));
+auto mounted = ui::mount(scene, std::move(recipe));
+if (!mounted) {
+  return std::unexpected(mounted.error());
+}
+```
+
+`ManagedScene::enterFocusScope(node)` and `leaveFocusScope(node)` expose the same
+operations. `Ref` methods return `expected<void, ManagedError>` and report owned
+failures once to the scene collector. An already reported editor blur failure retains
+its original editor identity and reporting receipt, including across scenes in the same
+Application. Automatic return during managed prepare and input traversal preserves
+the same single managed diagnostic for one failed blur. The destination scene does
+not report it again. Independent result/gain failures remain separate diagnostics;
+the existing ApplicationError runner envelope keeps its own policy. Check that result when explicit error handling
+is needed. An unpublished/destroyed owner yields `CLOSED`; a removed managed Ref
+yields `STALE_NODE`. Its activation recovers through the router, without dereferencing
+the stale Ref. The complete installed-consumer program is
+`tests/package_consumer/focus_return.cpp`; it exercises entry, return and external hide
+after SDK installation and relocation.
+
 ## Events and bubbling
 
 `dispatch` accepts the owning `InputEvent` produced by `InputDecoder`. It borrows

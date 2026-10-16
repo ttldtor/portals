@@ -133,7 +133,7 @@ std::expected<void, TreeError> EventRouter::canBind(Node<Widget> node) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
-  if (state_->registrations.size() >= state_->options.max_registrations) {
+  if (state_->registrations.size() + state_->scopes.size() >= state_->options.max_registrations) {
     return std::unexpected(TreeError::NODE_LIMIT);
   }
 
@@ -367,13 +367,20 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
     // Mouse targeting uses geometry independently of focus. A left press updates focus on
     // the nearest focusable ancestor, but bubbles the original mouse event from the actual hit.
     if (const auto *mouse = std::get_if<MouseInputEvent>(&event)) {
+      auto returned = recoverFocusScopes();
+
+      if (!returned) {
+        return std::unexpected(returned.error());
+      }
+
       auto target = hitTest({mouse->column, mouse->row});
 
       if (!target) {
         return std::unexpected(target.error());
       }
 
-      if (mouse->button == MouseButton::LEFT && mouse->action == MouseAction::PRESS) {
+      // Automatic return already performed this event's focus transition.
+      if (!*returned && mouse->button == MouseButton::LEFT && mouse->action == MouseAction::PRESS) {
         auto candidate = *target;
 
         while (candidate.id().session != 0) {

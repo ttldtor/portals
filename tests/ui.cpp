@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #include <portals/ui.hpp>
 
+#include <array>
 #include <iostream>
 #include <source_location>
 #include <stdexcept>
@@ -508,10 +509,330 @@ void exceptionsAndForeignMount() {
   check(rejected && take(fixture.app->tree().inspect(fixture.scene->root())).children.empty(),
         "foreign mount rejected without mutation");
 }
+
+void managedFocusSetupIsolation() {
+  enum class Boundary {
+    FOCUS,
+    SCOPE,
+    DEFAULT,
+    ENTER,
+    LEAVE
+  };
+
+  struct Observation {
+    Boundary boundary;
+    int calls{};
+    int later{};
+    bool attributed{};
+    bool closed{};
+    bool prepared{};
+  };
+
+  struct Retirement {
+    std::function<void()> callback;
+
+    explicit Retirement(std::function<void()> action) : callback(std::move(action)) {
+    }
+
+    ~Retirement() {
+      callback();
+    }
+  };
+
+  constexpr std::array BOUNDARIES{Boundary::FOCUS, Boundary::SCOPE, Boundary::DEFAULT, Boundary::ENTER,
+                                  Boundary::LEAVE};
+  std::array<Observation, BOUNDARIES.size()> observations{};
+  std::size_t index{};
+
+  // Raw callbacks and capture retirement bypass the existing managed callback masks.
+  for (auto boundary : BOUNDARIES) {
+    Fixture fixture;
+    ui::Ref<Column> target, abandoned;
+    ui::Ref<Label> missing;
+
+    take(ui::mount(*fixture.scene, ui::column(ui::column(target), ui::column(abandoned))));
+
+    Observation observed{boundary};
+    const auto unavailable = [&] {
+      ++observed.calls;
+
+      auto failure = missing.text() = "unrelated callback or retirement";
+      auto result = failure.result();
+
+      observed.closed = !result && treeCause(result.error(), TreeError::CLOSED);
+      observed.attributed = !result && result.error().setupStopped;
+    };
+    ActionBinding binding, scope, priorBinding;
+    bool observing{};
+
+    if (boundary == Boundary::FOCUS || boundary == Boundary::ENTER || boundary == Boundary::LEAVE) {
+      binding = take(fixture.app->router().bind(
+        target.node(),
+        [](Column &, const RoutedEvent &) {
+          return EventReply::IGNORED;
+        },
+        [&](Column &, bool focused) -> std::expected<void, TreeError> {
+          if (observing && focused == (boundary != Boundary::LEAVE)) {
+            unavailable();
+          }
+
+          return {};
+        }));
+      if (boundary == Boundary::ENTER || boundary == Boundary::LEAVE) {
+        take(fixture.scene->focusScope(target.node()));
+      }
+      if (boundary == Boundary::LEAVE) {
+        priorBinding = take(fixture.app->router().bind(abandoned.node(), [](Column &, const RoutedEvent &) {
+          return EventReply::IGNORED;
+        }));
+        take(fixture.app->router().setFocus(abandoned.node()));
+        take(target.enterFocusScope());
+      }
+    } else {
+      if (boundary == Boundary::DEFAULT) {
+        scope = take(fixture.app->router().focusScope(target.node()));
+      }
+
+      auto capture = std::make_shared<Retirement>(unavailable);
+
+      binding = take(fixture.app->router().bind(abandoned.node(), [capture](Column &, const RoutedEvent &) {
+        return EventReply::IGNORED;
+      }));
+      capture.reset();
+      binding.disconnect();
+    }
+
+    observing = true;
+    auto outer = ui::scene(ui::label("outer"));
+
+    outer.onError([](const ManagedDiagnostic &) {
+    });
+    outer
+      .configure([&](ManagedScene &) {
+        switch (boundary) {
+        case Boundary::FOCUS:
+          take(target.focus());
+
+          break;
+        case Boundary::SCOPE:
+          take(fixture.scene->focusScope(target.node()));
+
+          break;
+        case Boundary::DEFAULT:
+          take(fixture.scene->focusDefault(target.node()));
+
+          break;
+        case Boundary::ENTER:
+          take(target.enterFocusScope());
+
+          break;
+        case Boundary::LEAVE:
+          take(target.leaveFocusScope());
+
+          break;
+        }
+      })
+      .configure([&](ManagedScene &) {
+        ++observed.later;
+      });
+    observed.prepared = outer.prepareChecked().has_value();
+    observations[index++] = observed;
+  }
+
+  // Gather every path before asserting so the red run records all three boundaries.
+  for (const auto &observed : observations) {
+    std::cout << "focus setup boundary=" << static_cast<int>(observed.boundary) << " calls=" << observed.calls
+              << " attributed=" << observed.attributed << " prepared=" << observed.prepared
+              << " later=" << observed.later << '\n';
+  }
+
+  for (const auto &observed : observations) {
+    check(observed.calls == 1 && observed.closed && !observed.attributed && observed.prepared && observed.later == 1,
+          "managed focus callback/retirement cannot stop unrelated outer setup");
+  }
+}
+
+void focusCallbacksAndRemount() {
+  Fixture fixture;
+  ui::Ref<Button> target, trigger, unownedTrigger, missing;
+  bool unownedClosed{};
+
+  take(ui::mount(*fixture.scene, ui::column(ui::button(target, "Target",
+                                                       [] {
+                                                       }),
+                                            ui::button(trigger, "Focus",
+                                                       [target] {
+                                                         (void)target.focus();
+                                                       }),
+                                            ui::button(unownedTrigger, "Unowned", [&] {
+                                              auto result = missing.focus();
+
+                                              unownedClosed = !result && treeCause(result.error(), TreeError::CLOSED);
+                                            }))));
+  take(fixture.app->router().invoke(trigger.node(), {Action::ACTIVATE}));
+  check(take(fixture.app->router().focused()) == target.node(), "void action can request checked Ref focus");
+  check(take(fixture.scene->diagnostics()).errors.empty(), "successful void focus action reports no error");
+  take(fixture.app->tree().setVisible(target.node(), false));
+  take(fixture.app->router().invoke(trigger.node(), {Action::ACTIVATE}));
+
+  auto errors = take(fixture.scene->diagnostics());
+
+  check(errors.errors.size() == 1 && treeCause(errors.errors.front().error, TreeError::INVALID_ARGUMENT),
+        "owned failure in void focus action is collected exactly once");
+  take(fixture.app->router().invoke(unownedTrigger.node(), {Action::ACTIVATE}));
+  check(unownedClosed && take(fixture.scene->diagnostics()).errors.size() == 1,
+        "unpublished Ref returns CLOSED without borrowing the unrelated action collector");
+
+  ui::Ref<Column> retiredGroup;
+  ui::Ref<Button> retiredChild;
+  auto retired = take(ui::mount(*fixture.scene, ui::column(retiredGroup, ui::button(retiredChild, "Retired",
+                                                                                    [] {
+                                                                                    })
+                                                                           .focusDefault())
+                                                  .focusScope()));
+
+  take(retiredGroup.focus());
+  take(fixture.scene->remove(retired));
+
+  ui::Ref<Column> replacementGroup;
+  ui::Ref<Button> replacementChild;
+  auto replacement =
+    take(ui::mount(*fixture.scene, ui::column(replacementGroup, ui::button(replacementChild, "Replacement",
+                                                                           [] {
+                                                                           })
+                                                                  .focusDefault())
+                                     .focusScope()));
+
+  check(replacement.id().slot == retired.id().slot && replacement.id() != retired.id(),
+        "scope remount reuses slot only with a fresh exact generation");
+
+  auto stale = retiredGroup.focus();
+
+  check(!stale && treeCause(stale.error(), TreeError::STALE_NODE), "retired scope Ref cannot enter remounted scope");
+  take(replacementGroup.focus());
+  check(take(fixture.app->router().focused()) == replacementChild.node(), "new scope Ref selects only remounted child");
+
+  auto reused = ui::mount(*fixture.scene, ui::column(retiredGroup).focusScope());
+
+  check(!reused && treeCause(reused.error(), TreeError::INVALID_ARGUMENT), "remount requires a fresh observing Ref");
+  check(take(fixture.app->router().focused()) == replacementChild.node(),
+        "failed stale Ref remount preserves new focus");
+}
+
+void declarativeFocusReturn() {
+  Fixture fixture;
+  ui::Ref<Column> group;
+  ui::Ref<Button> inside, outside, enter, leave, remove;
+  take(ui::mount(*fixture.scene, ui::column(ui::button(outside, "Outside",
+                                                       [] {
+                                                       }),
+                                            ui::column(group, ui::button(inside, "Inside",
+                                                                         [] {
+                                                                         })
+                                                                .focusDefault())
+                                              .focusScope(),
+                                            ui::button(enter, "Enter",
+                                                       [group] {
+                                                         (void)group.enterFocusScope();
+                                                       }),
+                                            ui::button(leave, "Leave",
+                                                       [group] {
+                                                         (void)group.leaveFocusScope();
+                                                       }),
+                                            ui::button(remove, "Remove", [&] {
+                                              take(fixture.scene->remove(group.node()));
+                                            }))));
+  take(outside.focus());
+  take(fixture.app->router().invoke(enter.node(), {Action::ACTIVATE}));
+  check(take(fixture.app->router().focused()) == inside.node(), "void callback enters focus-return scope");
+  take(fixture.app->router().invoke(enter.node(), {Action::ACTIVATE}));
+  check(take(fixture.scene->diagnostics()).errors.size() == 1, "duplicate void entry reports once");
+  take(fixture.app->router().invoke(leave.node(), {Action::ACTIVATE}));
+  check(take(fixture.app->router().focused()) == outside.node(), "void callback leaves to saved focus");
+  check(take(fixture.scene->diagnostics()).errors.size() == 1, "successful leave adds no diagnostic");
+  take(group.enterFocusScope());
+  take(fixture.app->router().invoke(remove.node(), {Action::ACTIVATE}));
+  check(take(fixture.app->router().focused()) == outside.node(), "callback removal recovers through same router");
+  auto stale = group.leaveFocusScope();
+  check(!stale && treeCause(stale.error(), TreeError::STALE_NODE), "removed reference cannot leave a remounted root");
+  fixture.scene.reset();
+  auto closed = group.enterFocusScope();
+  check(!closed && treeCause(closed.error(), TreeError::CLOSED), "return reference safely outlives owner");
+}
+
+void declarativeFocusScopes() {
+  Fixture fixture;
+  ui::Ref<Column> group;
+  ui::Ref<Button> first;
+  ui::Ref<Button> preferred;
+  ui::Ref<Button> outside;
+
+  check(!group.focus() && treeCause(group.focus().error(), TreeError::CLOSED), "unpublished scope Ref is closed");
+
+  auto mounted = take(ui::mount(*fixture.scene, ui::column(ui::column(group,
+                                                                      ui::button(first, "First",
+                                                                                 [] {
+                                                                                 }),
+                                                                      ui::button(preferred, "Preferred",
+                                                                                 [] {
+                                                                                 })
+                                                                        .focusDefault())
+                                                             .focusScope(),
+                                                           ui::button(outside, "Outside", [] {
+                                                           }))));
+
+  take(group.focus());
+  check(take(fixture.app->router().focused()) == preferred.node(), "declarative scope enters default without tokens");
+  take(first.focus());
+  take(outside.focus());
+  take(group.focus());
+  check(take(fixture.app->router().focused()) == first.node(), "Ref scope restores exact last target");
+
+  std::thread worker([&] {
+    auto rejected = group.focus();
+
+    check(!rejected && treeCause(rejected.error(), TreeError::WRONG_THREAD), "Ref focus rejects foreign thread");
+  });
+
+  worker.join();
+  take(fixture.scene->remove(mounted));
+
+  auto stale = group.focus();
+
+  check(!stale && treeCause(stale.error(), TreeError::STALE_NODE), "removed scope Ref never resolves by slot");
+  fixture.scene.reset();
+
+  auto closed = group.focus();
+
+  check(!closed && treeCause(closed.error(), TreeError::CLOSED), "scope Ref safely outlives scene");
+
+  Fixture rollback;
+  ui::Ref<Column> failed;
+  auto result =
+    ui::mount(*rollback.scene,
+              ui::column(failed, ui::button("No action").focusDefault())
+                .focusScope()
+                .setup([](ManagedScene &, Node<Column>) -> std::expected<void, ManagedError> {
+                  return std::unexpected(ManagedError{ManagedPhase::MOUNT, {}, TreeError::INVALID_ARGUMENT, {}, {}});
+                }));
+
+  check(!result && failed.node() == Node<Column>{}, "failed scope mount publishes no Ref");
+
+  ui::Ref<Button> noScope;
+  auto missing = ui::mount(*rollback.scene, ui::button(noScope, "Missing scope", [] {
+                                            }).focusDefault());
+
+  check(!missing && treeCause(missing.error(), TreeError::INVALID_ARGUMENT) && noScope.node() == Node<Button>{},
+        "default without scope rolls back instead of silently mutating global focus");
+}
 } // namespace
 
 int main() {
   try {
+    managedFocusSetupIsolation();
+    focusCallbacksAndRemount();
+    declarativeFocusReturn();
+    declarativeFocusScopes();
     customArgumentShape();
     setupOrderIsPreorder();
     textLimitKeepsTypedError();

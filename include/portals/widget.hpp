@@ -490,6 +490,9 @@ public:
   }
 
 private:
+  friend class EventRouter;
+  // Allocation-free ancestry for the existing router; no record pointer escapes.
+  std::expected<Node<Widget>, TreeError> inputParent(Node<Widget> node) const;
   friend class ManagedScene;
   std::uint64_t inputGeneration() const noexcept;
   struct State;
