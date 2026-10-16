@@ -5,6 +5,8 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+## v0.4.0 (2026-10-16)
+
 - Add fluent `SceneResourceOptions::control<T>()` registration. Registration failures
   reach the existing `runApp` error handler before resource work or terminal open;
   checked `registry.add<T>()` remains available for explicit recovery.
