@@ -210,6 +210,14 @@ if(PORTALS_BUILD_TESTS)
     add_test(NAME portals.tools-script-help COMMAND "${Python3_EXECUTABLE}"
       -m unittest discover -s "${CMAKE_CURRENT_SOURCE_DIR}/tools/docs" -p test_cli_help.py -v)
     set_tests_properties(portals.tools-script-help PROPERTIES TIMEOUT 30)
+    add_test(NAME portals.change-impact COMMAND "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tools/quality/test_change_impact.py")
+    set_tests_properties(portals.change-impact PROPERTIES TIMEOUT 30)
+    add_test(NAME portals.ci-selection COMMAND "${Python3_EXECUTABLE}"
+      -m unittest discover -s "${CMAKE_CURRENT_SOURCE_DIR}/tools/ci" -p test_checks.py -v)
+    add_test(NAME portals.check-plan COMMAND "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tools/ci/test_check_plan.py")
+    set_tests_properties(portals.ci-selection portals.check-plan PROPERTIES TIMEOUT 30 LABELS "quality;contract")
     if(PORTALS_BUILD_TOOLS)
       add_test(NAME portals.tools-benchmark-help COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/tool_help.py"

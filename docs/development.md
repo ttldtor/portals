@@ -13,6 +13,24 @@ releases. It also identifies internal helpers and private workspace scripts.
 
 ## Verify changes
 
+Use a task preflight to find failures early, then retain integration and milestone
+qualification for the applicable scope. A local subset is never evidence that
+the omitted runtime contracts passed.
+
+| Level | Checks and evidence |
+| --- | --- |
+| Task | Explicit changed-contract regression/negative cases, format/static checks, relevant public consumer and docs; pure documentation uses strict docs/links rather than invented runtime targets |
+| Integration | For runtime/API changes: MSVC and GCC Debug/Release presets, full configured CTest, installed/relocated and standalone consumers, naming/static checks, strict EN/RU docs; applicable sanitizer/lifetime checks |
+| Milestone | Integration plus supported-platform native terminal smoke, comparable benchmarks and limitations, SDK qualification, delivered docs artifact/browser checks and independent review |
+
+The [local check planner](developer-tools-build.md#tool-check-plan) provides an
+auditable focus order from exact contracts and a real CTest inventory. Its bounded
+pilot does not qualify runtime test exclusions: C++ changes remain full plans.
+Only registered non-C++ Python fixtures may narrow task preflight. Added,
+deleted, renamed, unknown or uncovered files fall back to full. Integration and
+milestone obligations persist; unavailable checks stay NOT_RUN. The
+existing PR policy and hosted MSVC/GCC/docs gates are unchanged.
+
 Use [headless testing](testing.md) for the normal test suite, naming checks
 and terminal fixtures. [Fuzzing](../fuzz/README.md) describes the bounded input
 and text targets and sanitizer setup. Automated checks must finish without

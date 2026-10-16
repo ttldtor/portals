@@ -13,6 +13,24 @@
 
 ## Проверка изменений
 
+Task preflight помогает рано найти ошибку, затем сохраняются интеграционные
+проверки и qualification milestone для применимой области. Локальный subset не
+доказывает прохождение пропущенных runtime-контрактов.
+
+| Уровень | Проверки и доказательства |
+| --- | --- |
+| Task | Явные regression/negative cases изменённого контракта, format/static checks, относящиеся public consumer и docs; чистая документация проверяется strict docs/links без выдуманных runtime targets |
+| Integration | Для runtime/API: MSVC и GCC Debug/Release presets, полный настроенный CTest, installed/relocated и standalone consumers, naming/static checks, strict EN/RU docs; применимые sanitizer/lifetime checks |
+| Milestone | Integration и supported-platform native terminal smoke, сопоставимые benchmarks и ограничения, SDK qualification, поставленный docs artifact/browser checks и независимое ревью |
+
+[Локальный planner](developer-tools-build.md#tool-check-plan-ru) задаёт проверяемый
+порядок focus tests по точным контрактам и настоящему CTest inventory. Пилот не
+обосновывает исключение runtime tests: изменения C++ получают full plan.
+Только зарегистрированные non-C++ Python fixtures могут сузить task preflight.
+Новые, удалённые, переименованные, неизвестные или непокрытые файлы дают full.
+Обязанности integration/milestone сохраняются; недоступные проверки остаются
+NOT_RUN. Действующая PR policy и hosted MSVC/GCC/docs gates не изменены.
+
 [Тестирование без терминала (на английском)](../testing.md) описывает обычный
 набор тестов, проверки имён и терминальные фикстуры. [Фаззинг (на английском)](../../fuzz/README.md)
 описывает ограниченные входные данные, тестовые цели для текста и настройку

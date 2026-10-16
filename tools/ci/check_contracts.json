@@ -1,0 +1,96 @@
+{
+  "schema": 1,
+  "policy": "Bounded local preflight only. Runtime exclusion is not qualified. Existing hosted selection and required checks remain authoritative.",
+  "integration": ["windows-msvc-debug", "windows-msvc-release", "linux-gcc-debug", "linux-gcc-release", "full configured CTest including relocated package consumers", "standalone consumer", "naming/static checks", "strict EN/RU documentation and links", "applicable sanitizer and lifetime checks"],
+  "milestone_additions": ["native terminal smoke on supported platforms", "comparable benchmark provenance and limitations", "installed/relocated SDK qualification", "delivered documentation artifact and browser review", "bounded independent contract review"],
+  "contracts": {
+    "selector": {
+      "kind": "python",
+      "paths": ["tools/ci/checks.py", "tools/ci/test_checks.py", "tools/ci/check_plan.py", "tools/ci/test_check_plan.py", "tools/ci/check_contracts.json"],
+      "tests": ["portals.ci-selection", "portals.check-plan"],
+      "witnesses": ["tools/ci/test_checks.py", "tools/ci/test_check_plan.py"],
+      "reason": "Existing docs/full classification and result gate; conservative local planner fixtures.",
+      "cross": []
+    },
+    "include-impact": {
+      "kind": "python",
+      "paths": ["tools/quality/change_impact.py", "tools/quality/test_change_impact.py"],
+      "tests": ["portals.change-impact"],
+      "witnesses": ["tools/quality/test_change_impact.py"],
+      "reason": "Ninja parser, path identity, coverage and immutable receipt fixtures.",
+      "cross": []
+    },
+    "geometry": {
+      "kind": "cxx",
+      "paths": ["include/portals/geometry.hpp", "src/geometry.cpp"],
+      "tests": ["portals.geometry", "portals.layout-linear", "portals.layout-grid", "portals.focus-layout"],
+      "witnesses": ["tests/geometry.cpp", "tests/layout_linear.cpp", "tests/layout_grid.cpp", "tests/focus_layout.cpp"],
+      "reason": "Checked cell geometry, layout bounds and focus geometry.",
+      "cross": ["render"]
+    },
+    "templates": {
+      "kind": "cxx",
+      "paths": ["include/portals/ui.hpp", "include/portals/ui_scene.hpp", "include/portals/managed.hpp"],
+      "tests": ["portals.ui", "portals.ui-ref", "portals.ui-scene", "portals.ui-click", "portals.ui-static"],
+      "witnesses": ["tests/ui.cpp", "tests/ui_ref.cpp", "tests/ui_scene.cpp", "tests/ui_click.cpp", "tests/ui_static.cpp"],
+      "reason": "Public template composition, checked references, setup and callback contracts.",
+      "cross": ["lifetime", "styles", "consumer"]
+    },
+    "consumer": {
+      "kind": "cxx",
+      "paths": ["tests/package_install.cmake", "tests/package_consumer/CMakeLists.txt", "tests/package_consumer/main.cpp", "examples/consumer/main.cpp", "examples/consumer/CMakeLists.txt"],
+      "tests": ["portals.package-install"],
+      "witnesses": ["tests/package_install.cmake", "tests/package_consumer/CMakeLists.txt"],
+      "reason": "Fresh installed/relocated consumers exercise installed headers and linked artifacts.",
+      "cross": []
+    },
+    "styles": {
+      "kind": "cxx",
+      "paths": ["include/portals/style.hpp", "include/portals/detail/pss_data.hpp", "include/portals/pss_file_error.hpp", "include/portals/style_pss.hpp", "include/portals/ui_style.hpp", "src/styles/style.cpp", "src/styles/pss.cpp", "src/widgets/ui_style.cpp"],
+      "tests": ["portals.style", "portals.style-layers", "portals.ui-style", "portals.ct-pss", "portals.style-pss-equivalence"],
+      "witnesses": ["tests/style.cpp", "tests/style_layers.cpp", "tests/ui_style.cpp"],
+      "reason": "Typed style resolution, PSS categories, fluent updates and consumer equivalence.",
+      "cross": ["diagnostics", "consumer"]
+    },
+    "runtime": {
+      "kind": "cxx",
+      "paths": ["include/portals/application.hpp", "src/runtime/application.cpp", "src/runtime/native_application.cpp", "src/widgets/ui_scene.cpp"],
+      "tests": ["portals.application", "portals.ui-app", "portals.ui-app-oom", "portals.ui-scene"],
+      "witnesses": ["tests/application.cpp", "tests/ui_app.cpp", "tests/ui_app_oom.cpp", "tests/ui_scene.cpp"],
+      "reason": "Runner, single-use launch, setup failure, primary/cleanup and shutdown boundaries.",
+      "cross": ["lifetime", "render", "scheduler", "diagnostics"]
+    },
+    "lifetime": {
+      "kind": "cxx",
+      "paths": ["include/portals/widget.hpp", "src/widgets/widget.cpp", "src/widgets/managed.cpp"],
+      "tests": ["portals.widget-tree", "portals.managed", "portals.ui-ref"],
+      "witnesses": ["tests/widget_tree.cpp", "tests/managed.cpp", "tests/ui_ref.cpp"],
+      "reason": "Checked node borrows, invalidation and scene-owned resource cleanup.",
+      "cross": ["consumer"]
+    },
+    "diagnostics": {
+      "kind": "cxx",
+      "paths": ["include/portals/managed_diagnostics.hpp", "include/portals/diagnostics.hpp", "src/runtime/diagnostics.cpp"],
+      "tests": ["portals.managed-diagnostics", "portals.diagnostics", "portals.diagnostics-flow"],
+      "witnesses": ["tests/managed_diagnostics.cpp", "tests/diagnostics.cpp", "tests/diagnostics_flow.cpp"],
+      "reason": "Collector/observer, causal metadata and error preservation across runtime boundaries.",
+      "cross": ["runtime", "styles"]
+    },
+    "render": {
+      "kind": "cxx",
+      "paths": ["include/portals/render.hpp", "include/portals/cell_buffer.hpp", "src/render.cpp", "src/render/diff.cpp", "src/terminal/writer.cpp"],
+      "tests": ["portals.render", "portals.cell-buffer", "portals.diff", "portals.writer", "portals.replay"],
+      "witnesses": ["tests/render.cpp", "tests/cell_buffer.cpp", "tests/diff.cpp", "tests/writer.cpp", "tests/replay.cpp"],
+      "reason": "Owning frame cells, diff/output acceptance and independent replay oracle.",
+      "cross": []
+    },
+    "scheduler": {
+      "kind": "cxx",
+      "paths": ["include/portals/scheduler.hpp", "src/runtime/scheduler.cpp"],
+      "tests": ["portals.scheduler", "portals.scheduler-oom", "portals.property", "portals.model"],
+      "witnesses": ["tests/scheduler.cpp", "tests/scheduler_oom.cpp", "tests/property.cpp", "tests/model.cpp"],
+      "reason": "Bounded admission/dispatch, scoped cancellation and model/property publication.",
+      "cross": []
+    }
+  }
+}
