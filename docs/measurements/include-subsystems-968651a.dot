@@ -1,0 +1,32 @@
+digraph dependencies {
+  graph [label="Observed directory groups; directory names are not architectural role declarations", labelloc="t"];
+  rankdir=LR;
+  node [shape=box];
+  "src";
+  "src/charts";
+  "src/layout";
+  "src/models";
+  "src/render";
+  "src/runtime";
+  "src/styles";
+  "src/terminal";
+  "src/views";
+  "src/widgets";
+  "tools/benchmarks";
+  "tools/compactness";
+  "vendor/utf8proc";
+  "src" -> "include/portals";
+  "src/charts" -> "include/portals";
+  "src/layout" -> "include/portals";
+  "src/models" -> "include/portals";
+  "src/render" -> "include/portals";
+  "src/runtime" -> "include/portals";
+  "src/styles" -> "include/portals";
+  "src/styles" -> "include/portals/detail";
+  "src/terminal" -> "include/portals";
+  "src/views" -> "include/portals";
+  "src/widgets" -> "include/portals";
+  "src/widgets" -> "include/portals/detail";
+  "tools/benchmarks" -> "include/portals";
+  "tools/benchmarks" -> "include/portals/detail";
+}

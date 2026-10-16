@@ -2,6 +2,106 @@
 
 [Английская версия](../developer-tools-measure.md) · [Каталог инструментов](developer-tools.md)
 
+<a id="tool-change-impact-ru"></a>
+## Измерить includes и rebuild footprint
+
+`tools/quality/change_impact.py` читает зависимости существующей Ninja-сборки.
+Для каждого `--changed` он показывает наблюдавшиеся затронутые compile outputs,
+translation units и CMake targets. Сборку и выбор CI jobs он не запускает.
+Python 3.10+ со стандартной библиотекой нужен только автору; потребителю SDK он
+не требуется. Команды `-t deps` и `-t compdb` описаны в
+[справке Ninja](https://ninja-build.org/manual.html#_extra_tools).
+
+```powershell
+python tools/quality/change_impact.py --help
+python tools/quality/change_impact.py --build-dir build/tools --changed include/portals/managed_diagnostics.hpp --output-dir build/impact-001
+python tools/quality/change_impact.py --deps build/impact-001/ninja-deps.txt --compdb build/impact-001/ninja-compdb.json --recorded-source-root C:/src/portals --changed include/portals/style.hpp
+python tools/quality/test_change_impact.py
+```
+
+Offline-пример предполагает сборку из `C:/src/portals`; укажите фактическое
+написание source root в capture. Для каждого receipt выбирайте новый каталог.
+Обычный `compile_commands.json` может не содержать `output`; здесь требуется
+формат Ninja `-t compdb`, записи без этого поля отклоняются.
+
+| Аргумент | Значение | По умолчанию |
+| --- | --- | --- |
+| `--build-dir DIR` | Существующая Ninja-сборка; только чтение через `-t deps` и `-t compdb` | Нет; выберите его или `--deps` |
+| `--deps FILE` | Сохранённый UTF-8 dependency capture; требует `--compdb` и `--recorded-source-root` | Нет |
+| `--compdb FILE` | Ninja JSON с `directory`, `file`, `output` | Нет |
+| `--source-root DIR` | Checkout для отдельного lexical public include graph | Репозиторий, содержащий script |
+| `--recorded-source-root PATH` | Абсолютный source root в captures, в том числе Windows/POSIX-путь другого host | Live: `--source-root`; offline: обязателен |
+| `--source-revision LABEL` | Ревизия, заявленная вызывающей стороной; анализатор её не проверяет | `unknown` |
+| `--changed FILE` | Изменённый относительный от source root или абсолютный путь; повторяемый | Без impact queries |
+| `--ninja FILE` | Установленный Ninja executable, только live mode | `ninja` из PATH |
+| `--output-dir DIR` | Новый каталог receipt; существующие paths отклоняются | Только JSON stdout |
+
+Единиц времени и параметров нагрузки нет. Код 0 означает готовый анализ,
+включая partial/unknown; 1 — неверные данные, ошибка I/O или Ninja; 2 — неверные
+аргументы. Help не требует рабочих входов и ничего не записывает. Каталог
+результата содержит `impact.json`, `public-includes.dot`, `observed-headers.dot`,
+`subsystems.dot`, `summary.md` и оба raw captures. Старые receipts и входы не
+перезаписываются. При ошибке I/O новый каталог может остаться частичным. JSON
+включает hashes captures и каждого публичного header. Исходники, build outputs,
+Git configuration и работающие процессы не изменяются. Graphviz необязателен
+и нужен только для просмотра DOT; JSON и Markdown не требуют renderer.
+
+Два вида графа разделены. Ninja dependencies — transitive observations последней
+сборки. Literal public `#include` edges получены lexical scan каталога
+`--source-root`; они включают неактивные conditional branches, но не разрешают
+macro includes и module imports. `subsystems.dot` группирует наблюдавшиеся paths
+по содержащему каталогу; эти имена не определяют архитектурные роли. Live mode
+сверяет modification times наблюдавшихся object/dependency files. Offline
+captures не доказывают текущую freshness. Сканируемый checkout должен
+соответствовать capture revision; заявленная метка ревизии не является проверкой.
+
+Coverage показывает несобранные compile outputs, stale/empty records,
+неподдержанные module sources и неизвестные dependency records. Linker и phony
+строки compdb исключаются; linker dependency records учитываются отдельно.
+Windows paths нормализуются без учёта регистра; case-sensitive Windows directories
+выходят за рамки модели. Имена CMake targets извлекаются из
+`CMakeFiles/<target>.dir` с сохранением написания; другой generator или layout
+может оставить target неизвестным. Для ненаблюдавшегося изменённого файла impact
+равен null, а не объявленному нулю. При неполном coverage или неизвестной
+freshness рекомендация — full/unknown. Даже полное наблюдавшееся coverage
+относится только к этой конфигурации и сохраняет обязательные проверки.
+
+### Записанная база и граница diagnostics/styles
+
+[Численная база](../measurements/include-impact-968651a.json) относится к
+`968651a90b6a1542fd3ab2cec159b457e548681f`: Ninja Release, GCC C++ 14.3.0 и
+C 13.3.0, `-O3 -DNDEBUG`; tools включены, tests/examples/docs выключены.
+Собраны только core и выбранные quality/benchmark targets. Наблюдаются 46
+compile outputs из 51 настроенной compile row; пять outputs не собраны.
+В 50 raw Ninja records входят также четыре linker records. Эти числа описывают
+dependency footprint, а не измеренное время компиляции или ускорение.
+
+| Измерение | Наблюдаемое значение |
+| --- | ---: |
+| Public headers в compiler dependencies | 57 |
+| Public headers в отдельном lexical scan | 61 |
+| Literal public include edges | 99 |
+| Затронутые compile outputs для `geometry.hpp` | 34 |
+| Для `text.hpp` | 32 |
+| Для `managed_diagnostics.hpp` | 7 |
+| Для `style.hpp` / `detail/pss_data.hpp` | 9 / 9 |
+| Для `pss_file_error.hpp` | 7 |
+
+Базовые [public include graph](../measurements/include-impact-968651a.dot) и
+[directory-group graph](../measurements/include-subsystems-968651a.dot) — текст
+DOT; полные edges с относительными paths находятся также в JSON.
+[Diagnostics header](../../include/portals/managed_diagnostics.hpp) напрямую
+включает style, PSS data и file-error categories. Наблюдавшийся fan-in измеряет
+текущую границу, но не обосновывает перенос error variants и не предсказывает
+выгоду разделения headers. Такое изменение требует собственных контрактов и
+измерений.
+
+`test_change_impact.py` — внутренний unittest driver. Он создаёт временные
+fixtures и проверяет parser failures, stale/unbuilt coverage, Windows/POSIX paths
+с пробелами, help без побочных действий, воспроизводимость и сохранность прежних
+результатов. Код завершения соответствует unittest; compiler и настоящая сборка
+не запускаются.
+
 ## Собрать исполняемые файлы
 
 Нужны CMake 3.24+, Ninja и набор инструментов с поддержкой C99/C++23.
