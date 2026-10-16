@@ -298,6 +298,33 @@ public:
     return result;
   }
 
+  /** @param origin Focus request call site retained in managed diagnostics.
+   * @return Checked focus/entry result; CLOSED before publication/after scene destruction,
+   * WRONG_THREAD, STALE_NODE, typed eligibility or callback failure. No lifetime is extended.
+   * Programmatic focus preserves the same editor blur and validation policies as keyboard focus.
+   */
+  std::expected<void, ManagedError> focus(std::source_location origin = std::source_location::current()) const {
+    return focusOperation(&ManagedScene::focus, origin);
+  }
+
+  /** @param origin Focus-entry call site retained in managed diagnostics.
+   * @return Checked focus-only scope entry, saving a return record; no input trap is installed.
+   * Published callback errors retain entry and can be followed by leaveFocusScope().
+   */
+  std::expected<void, ManagedError>
+  enterFocusScope(std::source_location origin = std::source_location::current()) const {
+    return focusOperation(&ManagedScene::enterFocusScope, origin);
+  }
+
+  /** @param origin Focus-return call site retained in managed diagnostics.
+   * @return Checked top-scope return; stale/unpublished/foreign-thread errors follow focus().
+   * Owned failures are reported once, allowing use in ordinary void button callbacks.
+   */
+  std::expected<void, ManagedError>
+  leaveFocusScope(std::source_location origin = std::source_location::current()) const {
+    return focusOperation(&ManagedScene::leaveFocusScope, origin);
+  }
+
   /** @param resolver Optional owning synchronous adapter used only for i18n expressions.
    * @param origin Property acquisition call site used by assignment/+= diagnostics.
    * @return Owning observing proxy, valid after Ref destruction; never extends scene/widget lifetime.
@@ -384,6 +411,25 @@ private:
   friend struct detail::ClickAccess;
   friend struct detail::NamedAccess;
   friend class DynamicRef;
+
+  std::expected<void, ManagedError>
+  focusOperation(std::expected<void, ManagedError> (ManagedScene::*operation)(Node<Widget>),
+                 std::source_location origin) const {
+    auto observation = target();
+    auto owner = detail::eventScene(observation);
+
+    if (!owner) {
+      return std::unexpected(owner.error());
+    }
+
+    auto result = ((*owner)->*operation)(this->node());
+
+    if (!result) {
+      detail::reportFocusError(observation, result.error(), origin);
+    }
+
+    return result;
+  }
 
   std::shared_ptr<detail::RefTarget> target() const {
     return this->slot_ ? std::shared_ptr<detail::RefTarget>(this->slot_, &this->slot_->target) : nullptr;
@@ -897,6 +943,29 @@ public:
     return std::move(*this);
   }
 
+  /** @brief Declare this subtree as a nested focus scope, with scene-owned lifetime.
+   * @return This consuming recipe; mount registers before child defaults and rolls back on failure.
+   */
+  Description &&focusScope() && {
+    if (state_) {
+      state_->focusScope = true;
+    }
+
+    return std::move(*this);
+  }
+
+  /** @brief Prefer this node when entering its nearest scope without eligible history.
+   * @return This consuming recipe; mount fails with INVALID_ARGUMENT without an enclosing scope.
+   * With multiple defaults in one scope, the last declared preorder default wins.
+   */
+  Description &&focusDefault() && {
+    if (state_) {
+      state_->focusDefault = true;
+    }
+
+    return std::move(*this);
+  }
+
 private:
   friend struct detail::Access;
   template <detail::DescriptionInput Child> friend Description<Border> border(Child &&, BorderOptions, ControlStyle);
@@ -920,6 +989,8 @@ private:
     std::vector<Setup<T>> setup;        ///< Customization actions in modifier order.
     std::vector<Child> children;        ///< Consuming child adapters in insertion order.
     std::vector<NodeRef<T>> references; ///< Observing slots reserved for this node.
+    bool focusScope{};                  ///< Register before setup/children; scene owns its token.
+    bool focusDefault{};                ///< Set the nearest registered scope's default before children.
     std::optional<std::string> id;      ///< Compact recipe identity preserved by later style modifiers.
   };
 
@@ -1013,6 +1084,22 @@ private:
         }
       });
       slot->pending = true;
+    }
+
+    if (state->focusScope) {
+      auto registered = scene.focusScope(*node);
+
+      if (!registered) {
+        return std::unexpected(registered.error());
+      }
+    }
+
+    if (state->focusDefault) {
+      auto configured = scene.focusDefault(*node);
+
+      if (!configured) {
+        return std::unexpected(configured.error());
+      }
     }
 
     for (auto &setup : state->setup) {

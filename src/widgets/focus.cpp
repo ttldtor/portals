@@ -38,6 +38,7 @@ EventRouter::~EventRouter() {
 
   state_->closing = true;
   state_->registrations.clear();
+  state_->scopes.clear();
 }
 
 std::uint64_t EventRouter::focusGeneration() const noexcept {
@@ -100,6 +101,18 @@ std::expected<void, TreeError> EventRouter::collect() {
     }
   }
 
+  for (auto &entry : state_->scopes) {
+    auto live = tree().inputEligible(entry.root);
+
+    if (!live && live.error() != TreeError::STALE_NODE) {
+      return std::unexpected(live.error());
+    }
+
+    if (!live) {
+      entry.cancellation->connected.store(false);
+    }
+  }
+
   // Destructors of captures cannot reenter while registry storage is being changed.
   struct CollectionGuard {
     bool &active;
@@ -117,11 +130,378 @@ std::expected<void, TreeError> EventRouter::collect() {
   std::erase_if(state_->registrations, [](const auto &entry) {
     return !entry->cancellation->connected.load();
   });
+  std::erase_if(state_->scopes, [](const auto &entry) {
+    return !entry.cancellation->connected.load();
+  });
   std::erase_if(state_->history, [&](auto node) {
     return !registration(node);
   });
 
   return {};
+}
+
+detail::FocusScopeRegistration *EventRouter::scope(Node<Widget> root) const {
+  for (auto &entry : state_->scopes) {
+    if (entry.root == root && entry.cancellation->connected.load()) {
+      return &entry;
+    }
+  }
+
+  return nullptr;
+}
+
+bool EventRouter::within(Node<Widget> root, Node<Widget> node) const {
+  while (node.id().session != 0) {
+    if (node == root) {
+      return true;
+    }
+
+    auto parent = state_->tree.inputParent(node);
+
+    if (!parent) {
+      return false;
+    }
+
+    node = *parent;
+  }
+
+  return false;
+}
+
+Node<Widget> EventRouter::scopeEntry(Node<Widget> root, const std::vector<Node<Widget>> &order, bool reverse) const {
+  auto *entry = scope(root);
+
+  if (!entry) {
+    return {};
+  }
+
+  for (auto candidate : {entry->last, entry->defaultTarget}) {
+    if (std::ranges::contains(order, candidate) && within(root, candidate)) {
+      return candidate;
+    }
+  }
+
+  Node<Widget> candidate;
+
+  for (auto node : order) {
+    if (within(root, node)) {
+      candidate = node;
+
+      if (!reverse) {
+        break;
+      }
+    }
+  }
+
+  // A fallback enters nested scopes, while a remembered/default identity is exact.
+  return entering(candidate, root, order, reverse);
+}
+
+Node<Widget> EventRouter::entering(Node<Widget> node, Node<Widget> previous, const std::vector<Node<Widget>> &order,
+                                   bool reverse) const {
+  Node<Widget> outermost;
+
+  for (auto ancestor = node; ancestor.id().session != 0;) {
+    if (scope(ancestor) && !within(ancestor, previous)) {
+      outermost = ancestor;
+    }
+
+    auto parent = state_->tree.inputParent(ancestor);
+
+    if (!parent) {
+      break;
+    }
+
+    ancestor = *parent;
+  }
+
+  return outermost.id().session != 0 ? scopeEntry(outermost, order, reverse) : node;
+}
+
+std::expected<ActionBinding, TreeError> EventRouter::focusScope(Node<Widget> root, Node<Widget> defaultTarget) {
+  auto allowed = collect();
+
+  if (!allowed) {
+    return std::unexpected(allowed.error());
+  }
+
+  if (state_->dispatching || state_->deliveringFocus) {
+    return std::unexpected(TreeError::WOULD_BLOCK);
+  }
+
+  auto live = tree().inputEligible(root);
+
+  if (!live) {
+    return std::unexpected(live.error());
+  }
+
+  if (defaultTarget.id().session != 0) {
+    auto valid = tree().inputEligible(defaultTarget);
+
+    if (!valid) {
+      return std::unexpected(valid.error());
+    }
+
+    if (!within(root, defaultTarget)) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+  }
+
+  if (scope(root)) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  if (state_->registrations.size() + state_->scopes.size() >= state_->options.max_registrations) {
+    return std::unexpected(TreeError::NODE_LIMIT);
+  }
+
+  try {
+    auto cancellation = std::make_shared<detail::ActionCancellation>();
+    std::vector<Node<Widget>> ancestry(0);
+
+    for (auto ancestor = state_->focus; ancestor.id().session != 0;) {
+      if (ancestor == root || scope(ancestor)) {
+        ancestry.push_back(ancestor);
+      }
+
+      auto parent = tree().inputParent(ancestor);
+
+      if (!parent) {
+        // A retired focus is recovered lazily; keep its existing scope ancestry.
+        ancestry = state_->focusScopes;
+
+        break;
+      }
+
+      ancestor = *parent;
+    }
+
+    const auto remembered = within(root, state_->focus) ? state_->focus : Node<Widget>{};
+
+    state_->scopes.push_back({root, defaultTarget, remembered, cancellation});
+    state_->focusScopes.swap(ancestry);
+
+    return ActionBinding(cancellation);
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(TreeError::NO_MEMORY);
+  }
+}
+
+std::expected<void, TreeError> EventRouter::focusDefault(Node<Widget> node) {
+  auto allowed = collect();
+
+  if (!allowed) {
+    return allowed;
+  }
+
+  if (state_->dispatching || state_->deliveringFocus) {
+    return std::unexpected(TreeError::WOULD_BLOCK);
+  }
+
+  for (auto ancestor = node; ancestor.id().session != 0;) {
+    auto parent = tree().inputParent(ancestor);
+
+    if (!parent) {
+      return std::unexpected(parent.error());
+    }
+
+    if (auto *entry = scope(ancestor)) {
+      entry->defaultTarget = node;
+
+      return {};
+    }
+
+    ancestor = *parent;
+  }
+
+  return std::unexpected(TreeError::INVALID_ARGUMENT);
+}
+
+std::expected<Node<Widget>, TreeError> EventRouter::enterScope(Node<Widget> root) {
+  auto allowed = collect();
+
+  if (!allowed) {
+    return std::unexpected(allowed.error());
+  }
+
+  auto live = tree().inputEligible(root);
+
+  if (!live) {
+    return std::unexpected(live.error());
+  }
+
+  if (!scope(root)) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  try {
+    auto order = focusOrder();
+
+    if (!order) {
+      return std::unexpected(order.error());
+    }
+
+    auto changed = changeFocus(scopeEntry(root, *order, false));
+
+    if (!changed) {
+      return std::unexpected(changed.error());
+    }
+
+    return checkedFocus();
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(TreeError::NO_MEMORY);
+  }
+}
+
+std::expected<Node<Widget>, TreeError> EventRouter::enterFocusScope(Node<Widget> root) {
+  auto allowed = collect();
+
+  if (!allowed) {
+    return std::unexpected(allowed.error());
+  }
+
+  if (state_->deliveringFocus) {
+    return std::unexpected(TreeError::WOULD_BLOCK);
+  }
+
+  auto eligible = tree().inputEligible(root);
+
+  if (!eligible) {
+    return std::unexpected(eligible.error());
+  }
+
+  auto *entry = scope(root);
+
+  if (!*eligible || !entry || std::ranges::any_of(state_->focusReturns, [&](const auto &saved) {
+        return saved->root == root;
+      })) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  const auto previous = state_->focus;
+  const auto depth = state_->focusReturns.size();
+
+  if (depth >= state_->options.max_registrations) {
+    return std::unexpected(TreeError::NODE_LIMIT);
+  }
+
+  try {
+    auto order = focusOrder();
+
+    if (!order) {
+      return std::unexpected(order.error());
+    }
+
+    auto saved =
+      std::make_unique<detail::FocusReturnRegistration>(root, previous, state_->focusScopes, entry->cancellation);
+    state_->focusReturns.reserve(depth + 1);
+    state_->focusReturns.push_back(std::move(saved));
+
+    auto changed = changeFocus(scopeEntry(root, *order, false));
+
+    if (!changed) {
+      if (state_->focus == previous) {
+        state_->focusReturns.resize(depth);
+      }
+
+      return std::unexpected(changed.error());
+    }
+
+    return checkedFocus();
+  } catch (const std::bad_alloc &) {
+    // Allocation in changeFocus precedes its publication. Callback exceptions are translated there.
+    state_->focusReturns.resize(depth);
+
+    return std::unexpected(TreeError::NO_MEMORY);
+  }
+}
+
+bool EventRouter::endedFocusScope(std::size_t index) const {
+  const auto &saved = *state_->focusReturns[index];
+  auto eligible = state_->tree.inputEligible(saved.root);
+
+  return !saved.cancellation->connected.load() || !eligible || !*eligible;
+}
+
+Node<Widget> EventRouter::fallbackFocus(const std::vector<Node<Widget>> &scopes,
+                                        const std::vector<Node<Widget>> &order) const {
+  for (auto root : scopes) {
+    if (scope(root)) {
+      auto next = scopeEntry(root, order, false);
+
+      if (next.id().session != 0) {
+        return next;
+      }
+    }
+  }
+
+  for (auto it = state_->history.rbegin(); it != state_->history.rend(); ++it) {
+    if (std::ranges::contains(order, *it)) {
+      return *it;
+    }
+  }
+
+  return order.empty() ? Node<Widget>{} : order.front();
+}
+
+std::expected<Node<Widget>, TreeError> EventRouter::returnFocusScopes(std::size_t first) {
+  while (first != 0 && endedFocusScope(first - 1)) {
+    --first;
+  }
+
+  try {
+    auto order = focusOrder();
+
+    if (!order) {
+      return std::unexpected(order.error());
+    }
+
+    const auto &saved = *state_->focusReturns[first];
+    const auto next =
+      std::ranges::contains(*order, saved.previous) ? saved.previous : fallbackFocus(saved.previousScopes, *order);
+    const auto previous = state_->focus;
+    auto changed = changeFocus(next);
+
+    if (changed || state_->focus != previous) {
+      state_->focusReturns.resize(first);
+    }
+
+    return changed ? checkedFocus() : std::unexpected(changed.error());
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(TreeError::NO_MEMORY);
+  }
+}
+
+std::expected<Node<Widget>, TreeError> EventRouter::leaveFocusScope(Node<Widget> root) {
+  auto allowed = collect();
+
+  if (!allowed) {
+    return std::unexpected(allowed.error());
+  }
+
+  if (state_->deliveringFocus) {
+    return std::unexpected(TreeError::WOULD_BLOCK);
+  }
+
+  if (state_->focusReturns.empty() || state_->focusReturns.back()->root != root) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  return returnFocusScopes(state_->focusReturns.size() - 1);
+}
+
+std::expected<bool, TreeError> EventRouter::recoverFocusScopes() {
+  if (state_->focusReturns.empty() || !endedFocusScope(state_->focusReturns.size() - 1)) {
+    return false;
+  }
+
+  if (state_->deliveringFocus) {
+    return std::unexpected(TreeError::WOULD_BLOCK);
+  }
+
+  auto returned = returnFocusScopes(state_->focusReturns.size() - 1);
+
+  return returned ? std::expected<bool, TreeError>(true) : std::unexpected(returned.error());
 }
 
 std::expected<std::vector<Node<Widget>>, TreeError> EventRouter::focusOrder() {
@@ -227,6 +607,25 @@ std::expected<void, TreeError> EventRouter::changeFocus(Node<Widget> node) {
     return {};
   }
 
+  // Prepare scope ancestry and history capacity before publishing any focus state.
+  std::vector<Node<Widget>> ancestry(0);
+
+  for (auto ancestor = node; ancestor.id().session != 0;) {
+    if (scope(ancestor)) {
+      ancestry.push_back(ancestor);
+    }
+
+    auto parent = tree().inputParent(ancestor);
+
+    if (!parent) {
+      return std::unexpected(parent.error());
+    }
+
+    ancestor = *parent;
+  }
+
+  state_->history.reserve(state_->history.size() + (node.id().session != 0));
+
   // Allocate history before publishing the new focus.
   if (node.id().session != 0) {
     auto found = std::ranges::find(state_->history, node);
@@ -241,6 +640,13 @@ std::expected<void, TreeError> EventRouter::changeFocus(Node<Widget> node) {
   const auto previous = state_->focus;
 
   state_->focus = node;
+  state_->focusScopes.swap(ancestry);
+
+  for (auto root : state_->focusScopes) {
+    if (auto *entry = scope(root)) {
+      entry->last = node;
+    }
+  }
 
   // Zero permanently invalidates sequence stamps after unsigned exhaustion; never reuse a stamp.
   if (state_->focusGeneration) {
@@ -311,6 +717,12 @@ std::expected<Node<Widget>, TreeError> EventRouter::focused() {
     return std::unexpected(allowed.error());
   }
 
+  auto returned = recoverFocusScopes();
+
+  if (!returned || *returned) {
+    return returned ? checkedFocus() : std::unexpected(returned.error());
+  }
+
   try {
     auto order = focusOrder();
 
@@ -322,21 +734,7 @@ std::expected<Node<Widget>, TreeError> EventRouter::focused() {
       return state_->focus;
     }
 
-    Node<Widget> next;
-
-    // Recover from still-eligible focus history before choosing a never-focused preorder node.
-    // Hiding a subtree need not erase its history, so restoring it can make that entry useful again.
-    for (auto it = state_->history.rbegin(); it != state_->history.rend(); ++it) {
-      if (std::ranges::contains(*order, *it)) {
-        next = *it;
-
-        break;
-      }
-    }
-
-    if (next.id().session == 0 && !order->empty()) {
-      next = order->front();
-    }
+    Node<Widget> next = fallbackFocus(state_->focusScopes, *order);
 
     auto changed = changeFocus(next);
 
@@ -381,6 +779,12 @@ std::expected<Node<Widget>, TreeError> EventRouter::traverse(bool reverse) {
 
   if (!allowed) {
     return std::unexpected(allowed.error());
+  }
+
+  auto returned = recoverFocusScopes();
+
+  if (!returned || *returned) {
+    return returned ? checkedFocus() : std::unexpected(returned.error());
   }
 
   try {

@@ -66,12 +66,13 @@ struct DispatchResult {
 
 /** @brief Bounded router storage; no event queue is created. */
 struct EventRouterOptions {
-  std::size_t max_registrations{4096}; ///< Positive maximum; one registration per node.
+  std::size_t max_registrations{4096}; ///< Positive shared maximum of action and scope records; one of each per node.
 };
 
 namespace detail {
 struct ActionRegistration;
 struct ActionCancellation;
+struct FocusScopeRegistration;
 } // namespace detail
 
 /** @brief Move-only scoped disconnect token; never owns a tree or widget.
@@ -212,8 +213,44 @@ public:
     }
   }
 
+  /** @brief Declare a nested focus scope using an existing owning disconnect token.
+   * Scope and action records share max_registrations. A scope can share its root with an action.
+   * @param root Live subtree root; duplicate scopes return INVALID_ARGUMENT.
+   * @param defaultTarget Optional live descendant (including root), skipped while ineligible or stale.
+   * @return Scoped token, validation error, NODE_LIMIT or NO_MEMORY; failure publishes no scope.
+   */
+  std::expected<ActionBinding, TreeError> focusScope(Node<Widget> root, Node<Widget> defaultTarget = {});
+  /** @brief Set the default of the nearest live enclosing scope without changing current focus.
+   * @param node Live descendant to use when its scope has no eligible remembered target.
+   * @return Success, INVALID_ARGUMENT without a scope, or tree/router validation errors.
+   */
+  std::expected<void, TreeError> focusDefault(Node<Widget> node);
+  /** @brief Enter a declared scope at its eligible last/default/preorder target.
+   * @param root Live registered scope root; hidden/disabled subtrees select empty focus.
+   * @return Selected observer, empty for no eligible member or callback retirement, or typed error.
+   * Callback errors preserve already published focus, exactly like setFocus.
+   */
+  std::expected<Node<Widget>, TreeError> enterScope(Node<Widget> root);
+
+  /** @brief Enter a scope while saving exact focus and ancestry for a later return.
+   * This focus-only stack does not shield input or restrict global Tab traversal.
+   * @param root Eligible declared scope, absent from the existing return stack.
+   * @return Selected observer (possibly empty), INVALID_ARGUMENT for duplicate/ineligible entry,
+   * or typed tree/allocation/callback errors. Before publication failure preserves the stack;
+   * after publication callback errors retain both the new focus and its return record.
+   */
+  std::expected<Node<Widget>, TreeError> enterFocusScope(Node<Widget> root);
+  /** @brief Leave the top scope and restore eligible saved focus, scope fallback or global fallback.
+   * Ended outer records unwind together. Hidden/disabled/removed/disconnected scope roots also
+   * unwind lazily on the next focus query or input dispatch. Saved identities include generations.
+   * @param root Exact top activation root; other roots return INVALID_ARGUMENT.
+   * @return Selected observer (possibly empty), validation/allocation/callback errors. A published
+   * return consumes its record even when a blur callback fails. Nested focus delivery is WOULD_BLOCK.
+   */
+  std::expected<Node<Widget>, TreeError> leaveFocusScope(Node<Widget> root);
+
   /** @brief Recover focus if needed; empty Node means no eligible focusable registration.
-   * Recovery chooses the most recently focused eligible node, then the first preorder node.
+   * Recovery tries containing scopes, then global history and the first preorder node.
    * If its callbacks retire the selected target, return empty; the next call may recover again.
    * @return Eligible focused node (possibly recovered), an empty observer if none exists,
    * or tree/router/callback errors or NO_MEMORY. Recovery requests paint when focus changes.
@@ -226,6 +263,7 @@ public:
    */
   std::expected<void, TreeError> setFocus(Node<Widget> node);
   /** @brief Traverse eligible registrations in tree preorder with wrap; reverse implements Shift+Tab.
+   * Scope boundaries preserve the full global order; remembered/default entry is explicit via enterScope.
    * @param reverse Traverse backward when true, forward otherwise; wrap at either end.
    * @return Newly focused node, empty if none exists or callbacks retire it, or tree/router/callback errors.
    */
@@ -271,6 +309,15 @@ private:
   std::expected<void, TreeError> collect();
   std::shared_ptr<detail::ActionRegistration> registration(Node<Widget> node) const;
   std::expected<std::vector<Node<Widget>>, TreeError> focusOrder();
+  detail::FocusScopeRegistration *scope(Node<Widget> root) const;
+  bool within(Node<Widget> root, Node<Widget> node) const;
+  Node<Widget> scopeEntry(Node<Widget> root, const std::vector<Node<Widget>> &order, bool reverse) const;
+  Node<Widget> entering(Node<Widget> node, Node<Widget> previous, const std::vector<Node<Widget>> &order,
+                        bool reverse) const;
+  bool endedFocusScope(std::size_t index) const;
+  std::expected<Node<Widget>, TreeError> returnFocusScopes(std::size_t first);
+  std::expected<bool, TreeError> recoverFocusScopes();
+  Node<Widget> fallbackFocus(const std::vector<Node<Widget>> &scopes, const std::vector<Node<Widget>> &order) const;
   std::expected<void, TreeError> changeFocus(Node<Widget> node);
   std::expected<void, TreeError> deliverFocus(Node<Widget> node, bool focused);
   std::expected<Node<Widget>, TreeError> checkedFocus();

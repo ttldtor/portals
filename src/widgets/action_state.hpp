@@ -13,6 +13,20 @@ struct ActionCancellation {
   std::atomic<bool> connected{true};
 };
 
+struct FocusScopeRegistration {
+  Node<Widget> root;
+  Node<Widget> defaultTarget;
+  Node<Widget> last;
+  std::shared_ptr<ActionCancellation> cancellation;
+};
+
+struct FocusReturnRegistration {
+  Node<Widget> root;
+  Node<Widget> previous;
+  std::vector<Node<Widget>> previousScopes;
+  std::shared_ptr<ActionCancellation> cancellation;
+};
+
 struct ActionRegistration {
   Node<Widget> node;
   bool focusable{};
@@ -30,6 +44,12 @@ struct EventRouter::State {
   std::vector<std::shared_ptr<detail::ActionRegistration>> registrations =
     std::vector<std::shared_ptr<detail::ActionRegistration>>(0);
   std::vector<Node<Widget>> history = std::vector<Node<Widget>>(0);
+  std::vector<detail::FocusScopeRegistration> scopes = std::vector<detail::FocusScopeRegistration>(0);
+  // Exact scope ancestry survives removal of the focused node until the next recovery.
+  std::vector<Node<Widget>> focusScopes = std::vector<Node<Widget>>(0);
+  // Owning records keep exact saved ancestry across subtree retirement and slot reuse.
+  std::vector<std::unique_ptr<detail::FocusReturnRegistration>> focusReturns =
+    std::vector<std::unique_ptr<detail::FocusReturnRegistration>>(0);
   Node<Widget> focus;
   std::uint64_t focusGeneration{1};
   // These UI-only guards reject nested delivery and mutations during capture reclamation;

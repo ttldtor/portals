@@ -362,6 +362,18 @@ std::expected<Node<Widget>, TreeError> WidgetTree::root() const {
   return Node<Widget>(state_->root->id);
 }
 
+std::expected<Node<Widget>, TreeError> WidgetTree::inputParent(Node<Widget> node) const {
+  auto value = state_->find(node.id());
+
+  if (!value) {
+    return std::unexpected(value.error());
+  }
+
+  const auto *parent = (*value)->parent;
+
+  return parent ? Node<Widget>(parent->id) : Node<Widget>{};
+}
+
 std::expected<NodeSnapshot, TreeError> WidgetTree::inspect(Node<Widget> node) const {
   auto value = state_->find(node.id());
 

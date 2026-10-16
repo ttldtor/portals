@@ -71,6 +71,14 @@ std::expected<ManagedScene *, ManagedError> eventScene(const std::shared_ptr<Ref
  * @param origin Ref registration call site.
  */
 void reportEventError(const std::shared_ptr<RefTarget> &target, const ManagedError &error, std::source_location origin);
+
+/** @brief Report an unreported checked focus failure, preserving its original editor collector.
+ * @param target Weak destination scene context checked for immutable UI affinity and lifetime.
+ * @param error Exact focus result; a copied opaque delivery receipt prevents a second report.
+ * @param origin Original Ref focus request call site.
+ */
+void reportFocusError(const std::shared_ptr<RefTarget> &target, const ManagedError &error, std::source_location origin);
+
 } // namespace detail
 
 /** @brief Explicit owning synchronous localization adapter; no global locale or resource storage. */
