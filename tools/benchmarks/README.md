@@ -151,3 +151,42 @@ Native runs use the same managed terminal factory as Application. Startup querie
 mouse setup are included in native_open_ns. Restoration is included in close timing.
 These lifecycle protocol bytes bypass frame counters; throughput measures rendered
 frame submissions only. The terminal must support the documented native mouse policy.
+
+## Style-layer attribution
+
+`portals_style_layers_benchmark` compares equivalent legacy-composed and layered
+styles in one executable, alternating their order within each sample round.
+It observes 32, 128 and 512 materialized controls by default, eight or 32 theme
+rules, visible/hidden/offscreen states and equal/masked/visible updates.
+The independent state oracle verifies the resulting colors and override order.
+
+```powershell
+./portals_style_layers_benchmark.exe --check
+./portals_style_layers_benchmark.exe --samples 30 --warmup 5 --output styles.json
+```
+
+`--help` lists limits and exit codes. `--check` uses smaller correctness fixtures;
+it is rejected as a performance baseline. Use at least three independent process
+invocations, and alternate baseline/candidate executable order when comparing a
+library change. Keep their compiler, Release flags, harness and workload identical.
+The `style_layers` adapter in `tools/quality/performance.cmake` checks the samples
+and retains the raw JSON alongside provenance.
+
+Each case retains nearest-rank p50/p95 nanoseconds for theme handoff and a separate
+explicit full frame. That frame includes arrange, paint, cell rendering, diff
+submission and a flush to an in-memory output; it is forced by the benchmark even
+when the style update requests no redraw. Visible rows overlap in its fixed 80x24
+viewport. Hidden/offscreen controls remain materialized; this benchmark does not
+represent virtualization or native terminal-host throughput. The work counters
+report style-default reads, paint calls, render commands, update frame requests
+and output bytes. The idle check consumes a request twice and verifies no new one;
+long-running idle behavior is measured separately by the application benchmark.
+
+Scoped allocation series count calling-thread ordinary C++ `new`/`new[]` calls and requested bytes
+within update and explicit-frame phases. They exclude `malloc`, aligned allocations
+and live/peak memory; destruction and output generation outside the phases are
+not included. The check-only allocation oracle verifies a known pair of requests
+and retirement after an exception. Counter overhead remains inside timing windows.
+Allocation instrumentation belongs to the comparison signature: timing from an
+older uninstrumented report cannot be directly compared with instrumented timing.
+Older null allocation reports remain importable as `NOT_MEASURED`.

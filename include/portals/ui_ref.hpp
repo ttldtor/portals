@@ -66,6 +66,11 @@ std::expected<HistoryAvailability, TreeError> editorAvailability(std::shared_ptr
  */
 std::expected<ManagedScene *, ManagedError> eventScene(const std::shared_ptr<RefTarget> &target);
 
+/** @param target Observation checked for immutable affinity before mutable owner access.
+ * @return Owning final arranged geometry or exact checked failure; never performs layout or reports.
+ */
+std::expected<NodeGeometry, ManagedError> geometry(const std::shared_ptr<RefTarget> &target);
+
 /** @param target Weak scene context; destroyed/foreign-thread scenes are never dereferenced.
  * @param error Exact registration error reported to a live UI collector without stopping run.
  * @param origin Ref registration call site.

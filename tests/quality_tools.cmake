@@ -69,6 +69,7 @@ set(metadata [=[{
   "command":["fixture-benchmark","--fixture"],"benchmark_exit_code":0,"workload":"fixture-only"
 }]=])
 file(WRITE "${root}/metadata.json" "${metadata}\n")
+include("${SOURCE_DIR}/tests/quality_style_layers.cmake")
 set(pss [=[{
   "schema":"portals.pss.v1","api":"parsePss","unit":"ns_per_parse",
   "timing":"parse_return_with_clock_overhead","successful_result_destruction":"excluded",

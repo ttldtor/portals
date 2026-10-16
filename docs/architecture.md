@@ -14,6 +14,8 @@ open GitHub and require a connection.
 This snapshot describes source revision
 `968651a90b6a1542fd3ab2cec159b457e548681f`. **M1 remains in progress.**
 It excludes later uncommitted work and does not assert milestone acceptance.
+An updated architecture map for the current M1 working tree is pending source
+revision pinning and publication; this historical snapshot remains unchanged.
 The comparison baseline is `849dc6285d7ef863206e8248810ee0650413b0a2`.
 Baseline integration was published as [PR #36](https://github.com/ttldtor/portals/pull/36),
 whose [CI run](https://github.com/ttldtor/portals/actions/runs/38799649714)
@@ -194,6 +196,36 @@ Cancellation can stop earlier. A retryable output transaction stays with
 FrameWriter; any transport error, including Windows `OUTPUT_UNCERTAIN`, ends
 the run without reopening or replaying uncertain bytes. Native close depends on
 host/driver progress and has no hard shutdown deadline.
+
+Managed geometry observation uses that same loop. `Ref::geometry()` reads an
+owning snapshot from the last successful final layout and returns a typed error
+while geometry is invalid; the read does not arrange or render. Scene-owned
+`onLayout` observers receive initial and changed snapshots on a later dispatch,
+outside `WidgetTree::frame`. Queue pressure retains the latest pending snapshot
+for bounded recovery through the existing scheduler. At EOF, the runner drains
+only pending layout observations owned by that scene; it does not wait for
+unrelated DATA or create a final frame outside the configured frame cadence.
+
+The style-layer benchmark records paired legacy/layered workloads, ordinary
+allocation counts and requested bytes inside the measured update and frame
+phases, plus work counters and raw samples. Its quality adapter retains the raw
+JSON with provenance. These observations exclude aligned allocations, `malloc`,
+live/peak memory and work outside those phases, so they describe the stated
+workload rather than universal runtime cost.
+
+Scene resources use the existing lazy scene recipe and managed mount. A string
+source is copied when the recipe is built; an explicitly typed file source is
+read at prepare. Before any resource node is mounted, the loader parses and
+validates the full bounded grammar, builtin or explicitly registered type and
+property schema, duplicate IDs, and resolved text. It then builds owning
+existing widget recipes and mounts them through the enclosing transaction.
+Localization uses the supplied `TextResolver`; PSS remains its own existing
+style stage. The defaults cap input at 1 MiB, node count at 4096, depth at 64,
+each decoded string or resolved text at 64 KiB, and properties per node at 16.
+The hard depth ceiling is 64 because parsing uses the native stack. Typed
+resource failures retain owning source identity and byte position, with the
+file system cause preserved for file errors. See the [scene loading guide](scene-loading-guide.md)
+for syntax and the public calls.
 
 ## Coherent views and customization
 

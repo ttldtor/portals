@@ -28,6 +28,8 @@ constexpr const char *phaseName(ManagedPhase phase) noexcept {
     return "CLEANUP";
   case ManagedPhase::TEXT:
     return "TEXT";
+  case ManagedPhase::LAYOUT:
+    return "LAYOUT";
   }
 
   return "UNKNOWN";
@@ -455,6 +457,20 @@ void reportFailure(const ManagedError &failure, std::source_location origin) noe
   if (failure.styleSource) {
     std::fputs(" source=", stderr);
     std::fwrite(failure.styleSource->data(), 1, failure.styleSource->size(), stderr);
+  }
+
+  if (failure.sceneResource) {
+    const auto &resource = *failure.sceneResource;
+
+    // Source text stays in the owning error; never echo untrusted terminal escape bytes.
+    if (resource.line == 0) {
+      std::fprintf(stderr, " scene-resource=(code=%u, registration, system=%d)", static_cast<unsigned>(resource.code),
+                   resource.system.value());
+    } else {
+      std::fprintf(stderr, " scene-resource=(code=%u, offset=%zu, line=%zu, column=%zu, system=%d)",
+                   static_cast<unsigned>(resource.code), resource.offset, resource.line, resource.column,
+                   resource.system.value());
+    }
   }
 
   if (failure.pss) {

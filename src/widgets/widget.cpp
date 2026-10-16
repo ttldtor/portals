@@ -44,6 +44,7 @@ struct WidgetTree::State {
     std::unique_ptr<Widget> widget;
     UiScope scope;
     NodeGeometry geometry;
+    std::uint64_t visibilityRevision{1};
     std::size_t depth{};
 
     bool live{true};
@@ -67,6 +68,7 @@ struct WidgetTree::State {
   const std::thread::id owner{std::this_thread::get_id()};
   std::uint64_t session{};
   std::uint64_t inputGeneration{1};
+  std::uint64_t geometryRevision{1};
   std::vector<Slot> slots;
   std::unique_ptr<Record> root;
   std::size_t count{};
@@ -126,17 +128,29 @@ struct WidgetTree::State {
     return slot.record;
   }
 
-  static void invalidateGeometry(Record &record) noexcept {
+  static void invalidateGeometry(Record &record, const Record *visibilityRoot = nullptr, std::uint64_t revision = 0,
+                                 bool inheritedVisibility = false) noexcept {
     record.geometry.valid = false;
+    const bool visibilityChanged = inheritedVisibility || &record == visibilityRoot;
+    if (visibilityChanged) {
+      record.visibilityRevision = revision;
+    }
 
     for (auto &child : record.children) {
       if (child) {
-        invalidateGeometry(*child);
+        invalidateGeometry(*child, visibilityRoot, revision, visibilityChanged);
       }
     }
   }
 
-  void invalidate(Invalidation kind) noexcept {
+  void replaceGeometry() noexcept {
+    // Zero permanently revokes observation after exhaustion; retained layout remains usable.
+    if (geometryRevision) {
+      geometryRevision = nextGeneration(geometryRevision);
+    }
+  }
+
+  void invalidate(Invalidation kind, const Record *visibilityRoot = nullptr) noexcept {
     if (auto *recorder = scheduler.diagnostics(); recorder && recorder->enabled()) {
       auto traceContext = recorder->current();
 
@@ -157,10 +171,11 @@ struct WidgetTree::State {
     }
 
     if (kind == Invalidation::LAYOUT) {
+      replaceGeometry();
       dirty = kind;
 
       if (root) {
-        invalidateGeometry(*root);
+        invalidateGeometry(*root, visibilityRoot, geometryRevision);
       }
     } else if (kind == Invalidation::PAINT && dirty == Invalidation::NONE) {
       dirty = kind;
@@ -372,6 +387,30 @@ std::expected<Node<Widget>, TreeError> WidgetTree::inputParent(Node<Widget> node
   const auto *parent = (*value)->parent;
 
   return parent ? Node<Widget>(parent->id) : Node<Widget>{};
+}
+
+std::expected<std::uint64_t, TreeError> WidgetTree::geometryRevision() const {
+  if (state_->owner != std::this_thread::get_id()) {
+    return std::unexpected(TreeError::WRONG_THREAD);
+  }
+  if (state_->closed) {
+    return std::unexpected(TreeError::CLOSED);
+  }
+  if (!state_->geometryRevision) {
+    return std::unexpected(TreeError::IDENTITY_EXHAUSTED);
+  }
+  return state_->geometryRevision;
+}
+
+std::expected<WidgetTree::GeometryObservation, TreeError> WidgetTree::observeGeometry(Node<Widget> node) const {
+  auto value = state_->find(node.id());
+  if (!value) {
+    return std::unexpected(value.error());
+  }
+  if (state_->frames) {
+    return std::unexpected(TreeError::WOULD_BLOCK);
+  }
+  return GeometryObservation{(*value)->geometry, (*value)->visibilityRevision};
 }
 
 std::expected<NodeSnapshot, TreeError> WidgetTree::inspect(Node<Widget> node) const {
@@ -654,7 +693,7 @@ std::expected<void, TreeError> WidgetTree::setVisible(Node<Widget> node, bool vi
       ++state_->inputGeneration;
     }
 
-    state_->invalidate(Invalidation::LAYOUT);
+    state_->invalidate(Invalidation::LAYOUT, &record);
   }
 
   return {};
@@ -818,6 +857,7 @@ std::expected<void, TreeError> WidgetTree::arrangeImpl(Node<Widget> node, CellRe
 
   // A parent rearrangement invalidates descendant surface coordinates too. Publish fresh
   // geometry only after the hook succeeds; failures leave hit-testing unable to use stale cells.
+  state_->replaceGeometry();
   State::invalidateGeometry(value);
 
   if (!State::shown(value, false)) {

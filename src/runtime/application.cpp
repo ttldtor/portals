@@ -448,6 +448,10 @@ struct Application::State::Run {
       throw Failure{SchedulerError::CALLBACK_FAILED};
     }
 
+    if (!dispatched.stopped && !state.stop.stop_requested()) {
+      require(scene.afterDispatch(app));
+    }
+
     return !dispatched.stopped && !state.stop.stop_requested();
   }
 
@@ -571,6 +575,8 @@ struct Application::State::Run {
     // Consume that work without losing the actual submission's causal token.
     require(app.tree().consumeFrameRequest());
 
+    require(scene.completedLayout(app));
+
     phase = ApplicationPhase::SUBMIT;
     state.measure(phase, [&] {
       require(writer.submit(std::move(*frame), frameContext));
@@ -626,7 +632,8 @@ struct Application::State::Run {
       renderReady();
       flushOutput();
 
-      if (finished && !pending && !batch && app.scheduler().metrics().control.pending == 0 && !writer.pending()) {
+      if (finished && !pending && !batch && app.scheduler().metrics().control.pending == 0 &&
+          !scene.hasPendingLayout() && !writer.pending()) {
         break;
       }
     }
@@ -643,6 +650,18 @@ bool ApplicationScene::usesPreparedLayout() const noexcept {
 
 std::expected<void, TreeError> ApplicationScene::prepareViews(Application &, const LayoutSnapshot &) {
   return {};
+}
+
+std::expected<void, TreeError> ApplicationScene::completedLayout(Application &) {
+  return {};
+}
+
+std::expected<void, TreeError> ApplicationScene::afterDispatch(Application &) {
+  return {};
+}
+
+bool ApplicationScene::hasPendingLayout() const noexcept {
+  return false;
 }
 
 std::expected<bool, TreeError> ApplicationScene::input(Application &, const InputEvent &) {

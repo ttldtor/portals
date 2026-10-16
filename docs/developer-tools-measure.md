@@ -289,7 +289,7 @@ benchmark. It requires CMake 3.24+.
 | CMake variable | Required in | Meaning |
 | --- | --- | --- |
 | `MODE` | Both | `record` or `compare` |
-| `KIND` | `record` | `managed`, `compact`, `mvp` or `pss`; style-layer JSON has no adapter |
+| `KIND` | `record` | `managed`, `compact`, `mvp`, `pss` or `style_layers` |
 | `RAW_FILE` | `record` | Existing raw benchmark JSON |
 | `METADATA_FILE` | `record` | Existing provenance JSON with the schema described below |
 | `OUTPUT_DIR` | `record` | New archive directory; must not exist |
@@ -300,6 +300,19 @@ benchmark. It requires CMake 3.24+.
 All listed variables have no default. The [quality guide](quality.md) gives the
 metadata schema and complete record example. Preserve toolchain, configuration,
 host, workload and executed-command provenance with the raw observation.
+
+`style_layers` imports complete, correctness-verified schema-1 reports, excluding
+`--check` output. It checks update/frame timing samples against nearest-rank
+p50/p95 in ns, preserves case identities and frame workload for compatibility,
+and records rendering/invalidation counters as context. Optional
+`allocations: ordinary_new_calls_and_requested_bytes` enables separate update/frame
+ordinary allocation-call and requested-byte series (`calls`/`bytes`). Legacy null
+or absent allocation metadata remains `NOT_MEASURED`. Allocation instrumentation
+scope is part of the compatibility signature: null/absent
+stamps normalize to `not_instrumented`, which cannot be compared with instrumented
+timings because the counters run inside timed phases. See the
+[supported observations](quality.md#supported-observations-and-compatibility)
+for the raw fields and measurement scope.
 
 ```powershell
 cmake -DMODE=record -DKIND=managed -DRAW_FILE=managed.json -DMETADATA_FILE=metadata.json -DOUTPUT_DIR=history/managed-before -P tools/quality/performance.cmake

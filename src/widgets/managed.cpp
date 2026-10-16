@@ -340,7 +340,8 @@ std::expected<std::unique_ptr<ManagedScene>, ManagedError> ManagedScene::create(
 
   if (!options.maxNodes || !options.maxStates || !options.maxModels || !options.maxKeyHandlers ||
       !options.maxClickHandlers || !options.maxClickHandlersPerNode || !options.keySequenceTimeout ||
-      !diagnostics.maxErrors || !diagnostics.maxContexts || !diagnostics.maxContextBytes ||
+      !options.maxLayoutHandlers || !options.maxLayoutPublicationRetries || !diagnostics.maxErrors ||
+      !diagnostics.maxContexts || !diagnostics.maxContextBytes ||
       diagnostics.maxErrors > maxElementCount<ManagedDiagnostic>() ||
       diagnostics.maxContexts > maxElementCount<ManagedDiagnosticContext>() ||
       diagnostics.maxContextBytes > static_cast<std::size_t>(std::numeric_limits<std::ptrdiff_t>::max())) {
@@ -636,6 +637,7 @@ std::expected<void, ManagedError> ManagedScene::remove(Node<Widget> node) {
 
     if (!live && retired(live.error())) {
       retireClicks(*entry);
+      retireLayouts(*entry);
 
       return true;
     }
@@ -1010,6 +1012,255 @@ void ManagedScene::retireClicks(Entry &entry) noexcept {
   // Revoke the registry and release its budget before capture destructors can reenter.
   // Retiring callers already guard reentry. clear() avoids MSVC Debug's allocating noexcept vector move.
   entry.clicks->records.clear();
+}
+
+namespace {
+bool sameGeometry(const NodeGeometry &left, const NodeGeometry &right) noexcept {
+  return left.local == right.local && left.surface == right.surface && left.clip == right.clip;
+}
+
+ManagedError layoutSchedulerFailure(Node<Widget> node, SchedulerError cause) {
+  return {ManagedPhase::LAYOUT, node.id(), ApplicationError{ApplicationPhase::DISPATCH, cause, {}}, {}, {}};
+}
+} // namespace
+
+std::expected<NodeGeometry, ManagedError> ManagedScene::geometry(Node<Widget> node) const {
+  auto allowed = boundary(ManagedPhase::LAYOUT, node);
+  if (!allowed) {
+    return std::unexpected(allowed.error());
+  }
+  if (!find(node)) {
+    return std::unexpected(error(ManagedPhase::LAYOUT, node, TreeError::INVALID_ARGUMENT));
+  }
+  auto revision = app_.tree().geometryRevision();
+  if (!revision) {
+    return std::unexpected(error(ManagedPhase::LAYOUT, node, revision.error()));
+  }
+  if (*revision != layoutRevision_) {
+    return std::unexpected(error(ManagedPhase::LAYOUT, node, TreeError::INVALID_GEOMETRY));
+  }
+  auto snapshot = app_.tree().observeGeometry(node);
+  if (!snapshot) {
+    return std::unexpected(error(ManagedPhase::LAYOUT, node, snapshot.error()));
+  }
+  if (!snapshot->geometry.valid) {
+    return std::unexpected(error(ManagedPhase::LAYOUT, node, TreeError::INVALID_GEOMETRY));
+  }
+  return snapshot->geometry;
+}
+
+std::expected<void, ManagedError>
+ManagedScene::registerLayout(Node<Widget> node, std::function<EditorCommandResult(const NodeGeometry &)> action,
+                             std::source_location origin) {
+  auto entry = find(node);
+  if (!entry || !action) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
+  }
+  if (layouts_.size() >= options_.maxLayoutHandlers) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NODE_LIMIT));
+  }
+
+  auto record = std::make_shared<LayoutRecord>();
+  record->node = node;
+  record->action.swap(action);
+  record->origin = origin;
+  std::expected<SchedulerConnection<LayoutValue>, SchedulerError> connection = std::unexpected(SchedulerError::CLOSED);
+  auto scoped = app_.tree().withScope(node, [&](const UiScope &scope) {
+    connection = app_.scheduler().connect<LayoutValue>(
+      scope,
+      [this, weak = std::weak_ptr(record),
+       lifetime = std::weak_ptr(lifetime_)](std::shared_ptr<const LayoutValue> value) {
+        // The executor owns only weak scene/registration observations; no widget borrow spans user code.
+        if (!lifetime.expired()) {
+          if (auto live = weak.lock()) {
+            deliverLayout(live, std::move(value));
+          }
+        }
+      },
+      SchedulerLane::DATA, SchedulerOverflow::REPLACE_LATEST);
+  });
+  if (!scoped) {
+    return std::unexpected(error(ManagedPhase::BIND, node, scoped.error()));
+  }
+  if (!connection) {
+    return std::unexpected(layoutSchedulerFailure(node, connection.error()));
+  }
+  record->connection = std::move(*connection);
+  auto revision = app_.tree().geometryRevision();
+  if (!revision) {
+    return std::unexpected(error(ManagedPhase::BIND, node, revision.error()));
+  }
+  if (*revision == layoutRevision_) {
+    auto snapshot = app_.tree().observeGeometry(node);
+    if (!snapshot) {
+      return std::unexpected(error(ManagedPhase::BIND, node, snapshot.error()));
+    }
+    record->visibilityRevision = snapshot->visibilityRevision;
+    if (snapshot->geometry.valid) {
+      record->pending = std::make_shared<const LayoutValue>(snapshot->geometry, layoutRevision_);
+    }
+  }
+  layouts_.push_back(record);
+  // Runtime registrations are first admitted after dispatch, never in the dispatch that registered them.
+  return {};
+}
+
+void ManagedScene::retireLayouts(Entry &entry) noexcept {
+  // Publish retirement and budgets before releasing captures that can reenter user code.
+  std::erase_if(layouts_, [&](const auto &record) {
+    if (record->node != entry.node) {
+      return false;
+    }
+    record->retired = true;
+    record->pending.reset();
+    (void)record->connection.subscription.disconnect();
+    return true;
+  });
+}
+
+std::expected<void, TreeError> ManagedScene::publishLayout(const std::shared_ptr<LayoutRecord> &record) {
+  if (record->retired || !record->pending || record->queued) {
+    return {};
+  }
+  auto published = record->connection.publisher.publish(record->pending);
+  if (published) {
+    record->queued = true;
+    record->rejected = 0;
+    return {};
+  }
+  auto failure = layoutSchedulerFailure(record->node, published.error());
+  if (published.error() == SchedulerError::WOULD_BLOCK) {
+    ++record->rejected;
+    if (record->rejected < options_.maxLayoutPublicationRetries) {
+      return {};
+    }
+    record->pending.reset();
+    record->rejected = 0;
+    (void)reportError(std::move(failure), {}, record->origin);
+    return {};
+  }
+  remember(std::move(failure), record->origin);
+  return std::unexpected(published.error() == SchedulerError::NO_MEMORY ? TreeError::NO_MEMORY : TreeError::CLOSED);
+}
+
+void ManagedScene::deliverLayout(const std::shared_ptr<LayoutRecord> &record,
+                                 std::shared_ptr<const LayoutValue> value) {
+  if (closed_ || record->retired || record->pending != value) {
+    return;
+  }
+  record->queued = false;
+  record->pending.reset();
+  auto current = geometry(record->node);
+  if (!current || value->revision != layoutRevision_) {
+    return;
+  }
+  // Commit before invoking: failed user side effects are never replayed automatically.
+  record->delivered = value->geometry;
+  const auto lifetime = std::weak_ptr(lifetime_);
+  try {
+    const auto result = record->action(value->geometry);
+    if (!result && !lifetime.expired() && !commandReported(result, lifetime)) {
+      remember(error(ManagedPhase::LAYOUT, record->node, result.result_.error()), record->origin);
+    }
+  } catch (const std::bad_alloc &) {
+    if (!lifetime.expired()) {
+      remember(error(ManagedPhase::LAYOUT, record->node, TreeError::NO_MEMORY), record->origin);
+    }
+  } catch (...) {
+    if (!lifetime.expired()) {
+      remember(error(ManagedPhase::LAYOUT, record->node, TreeError::CALLBACK_FAILED), record->origin);
+    }
+  }
+}
+
+std::expected<void, TreeError> ManagedScene::afterDispatch(Application &app) {
+  if (&app != &app_ || owner_ != std::this_thread::get_id()) {
+    return std::unexpected(owner_ != std::this_thread::get_id() ? TreeError::WRONG_THREAD
+                                                                : TreeError::INVALID_ARGUMENT);
+  }
+  if (closed_) {
+    return {};
+  }
+  for (const auto &record : layouts_) {
+    if (record->pending && !record->queued) {
+      auto current = geometry(record->node);
+      if (!current || record->pending->revision != layoutRevision_) {
+        record->pending.reset();
+        continue;
+      }
+      auto published = publishLayout(record);
+      if (!published) {
+        return published;
+      }
+    }
+  }
+  return {};
+}
+
+bool ManagedScene::hasPendingLayout() const noexcept {
+  if (owner_ != std::this_thread::get_id() || closed_) {
+    return false;
+  }
+  return std::ranges::any_of(layouts_, [](const auto &record) {
+    return !record->retired && static_cast<bool>(record->pending);
+  });
+}
+
+std::expected<void, TreeError> ManagedScene::completedLayout(Application &app) {
+  auto allowed = boundary(ManagedPhase::LAYOUT, root_);
+  if (!allowed) {
+    return std::unexpected(bridge(allowed.error()));
+  }
+  if (&app != &app_) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+  auto revision = app_.tree().geometryRevision();
+  if (!revision) {
+    return std::unexpected(revision.error());
+  }
+  // The final stamp is constant work without observers. Checked Ref reads inspect only
+  // their own node on demand; copying a complete tree here would tax unrelated clients.
+  layoutRevision_ = *revision;
+  try {
+    for (const auto &record : layouts_) {
+      auto snapshot = app_.tree().observeGeometry(record->node);
+      if (!snapshot) {
+        record->pending.reset();
+        record->delivered.reset();
+        record->queued = false;
+        if (!retired(snapshot.error())) {
+          return std::unexpected(snapshot.error());
+        }
+        continue;
+      }
+      if (record->visibilityRevision != snapshot->visibilityRevision) {
+        record->delivered.reset();
+        record->visibilityRevision = snapshot->visibilityRevision;
+      }
+      if (!snapshot->geometry.valid) {
+        record->pending.reset();
+        record->delivered.reset();
+        record->queued = false;
+        continue;
+      }
+      if (record->delivered && sameGeometry(*record->delivered, snapshot->geometry)) {
+        record->pending.reset();
+        record->queued = false;
+        continue;
+      }
+      record->pending = std::make_shared<const LayoutValue>(snapshot->geometry, layoutRevision_);
+      record->queued = false;
+      auto published = publishLayout(record);
+      if (!published) {
+        return published;
+      }
+    }
+    return {};
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(TreeError::NO_MEMORY);
+  } catch (...) {
+    return std::unexpected(TreeError::CALLBACK_FAILED);
+  }
 }
 
 std::expected<void, ManagedError>
@@ -2140,6 +2391,7 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
         std::erase_if(scene.entries_, [&](const auto &entry) {
           if (entry->removed) {
             scene.retireClicks(*entry);
+            scene.retireLayouts(*entry);
           }
 
           return entry->removed;
@@ -2397,6 +2649,7 @@ std::expected<void, ManagedError> ManagedScene::close() {
 
   for (auto &entry : entries_) {
     retireClicks(*entry);
+    retireLayouts(*entry);
   }
 
   entries_.clear();

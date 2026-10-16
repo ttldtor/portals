@@ -30,9 +30,54 @@ using TextValueError = std::variant<TextError, TextResourceError>;
  * Independent values have no thread affinity. Concurrent reads are safe when
  * the caller's resolver is safe; mutation/destruction require synchronization.
  * Construction and copy may throw std::bad_alloc or std::length_error.
+ * With the MSVC standard library and nonzero _ITERATOR_DEBUG_LEVEL, rvalue
+ * construction/assignment use fallible owning copies to avoid noexcept proxy
+ * allocation. Other library modes retain their default string moves.
  */
 class TextValue {
 public:
+  /** @brief Release the independently owned expression bytes. */
+  constexpr ~TextValue() = default;
+
+  /** @brief Copy expression bytes and kind into independent storage.
+   * @param other Source expression; copying may allocate and leaves it unchanged.
+   */
+  constexpr TextValue(const TextValue &other) = default;
+
+  /** @brief Replace expression bytes and kind with an owning copy.
+   * @param other Source expression; self-assignment is supported.
+   * @return This expression; copying may allocate.
+   */
+  constexpr TextValue &operator=(const TextValue &other) = default;
+
+#if defined(_MSVC_STL_VERSION) && defined(_ITERATOR_DEBUG_LEVEL) && _ITERATOR_DEBUG_LEVEL != 0
+  /** @brief Copy on rvalue construction with the checked MSVC standard library.
+   * @param other Source preserved unchanged; its debug string proxy can allocate even in a noexcept move.
+   * This fallible copy keeps allocation failure catchable. Other standard-library modes use default moves.
+   */
+  constexpr TextValue(TextValue &&other) : TextValue(static_cast<const TextValue &>(other)) {
+  }
+
+  /** @brief Copy on rvalue assignment with the checked MSVC standard library.
+   * @param other Source preserved unchanged, including self-assignment.
+   * @return This expression; allocation failures remain catchable.
+   */
+  constexpr TextValue &operator=(TextValue &&other) {
+    return *this = static_cast<const TextValue &>(other);
+  }
+#else
+  /** @brief Transfer expression storage using the standard library's default move.
+   * @param other Source expression; its moved-from value remains valid but unspecified.
+   */
+  constexpr TextValue(TextValue &&other) = default;
+
+  /** @brief Transfer expression storage using the standard library's default move assignment.
+   * @param other Source expression; existing storage is released.
+   * @return This expression; noexcept follows the underlying string move assignment.
+   */
+  constexpr TextValue &operator=(TextValue &&other) = default;
+#endif
+
   /**
    * @brief Copy a literal buffer into independent expression storage.
    * @param bytes Literal bytes borrowed only during construction, including invalid UTF-8.

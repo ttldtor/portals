@@ -1,5 +1,13 @@
 # Headless terminal testing
 
+`PORTALS_RELEASE_START_TEST_TIMEOUT` controls the offline release-start suite's
+overall CTest budget: 600 seconds by default, a positive integer up to 86400.
+The suite creates disposable local Git repositories and checks available
+PowerShell implementations; it does not publish a release. Slow disks and
+process startup can dominate this test. Override the budget explicitly at
+configure time, for example `-DPORTALS_RELEASE_START_TEST_TIMEOUT=900`.
+This budget does not change the assertions or the timeout of other tests.
+
 The relocated installed-package check builds all consumer targets from fresh
 sources before running their tests. `PORTALS_PACKAGE_TEST_TIMEOUT` controls its
 CTest limit in seconds per configuration (default 600, positive integer up to

@@ -5,6 +5,7 @@
 #include <portals/application.hpp>
 #include <portals/detail/pss_data.hpp>
 #include <portals/pss_file_error.hpp>
+#include <portals/scene_resource_error.hpp>
 #include <portals/shortcut.hpp>
 #include <portals/style.hpp>
 #include <portals/text_resource.hpp>
@@ -46,7 +47,8 @@ enum class ManagedPhase {
   INPUT,   ///< Dispatch input or deliver a managed control/property callback.
   RUN,     ///< Enter the application runner or propagate a failure from it.
   CLEANUP, ///< Remove a managed subtree or retire the scene and its registrations.
-  TEXT     ///< Read or mutate a fluent caption/editor draft through a checked observing reference.
+  TEXT,    ///< Read or mutate a fluent caption/editor draft through a checked observing reference.
+  LAYOUT   ///< Read final arranged geometry or deliver a deferred owning layout observation.
 };
 
 /** @brief Original error plus independent runner/restoration and cleanup failures. */
@@ -76,6 +78,9 @@ struct ManagedError {
   const char *execution{}; ///< Library static-storage facade boundary label; does not replace the original phase.
   bool setupStopped{};     ///< A scoped short failure stopped subsequent setup/run after the current callback returned.
   detail::ManagedErrorReceipt reportReceipt{}; ///< Opaque copied reporting provenance; default construction is empty.
+  /// @brief Shared immutable runtime scene source, category and position; copies allocate no memory.
+  /// Context attachment is best-effort: allocation failure leaves this empty and preserves the original typed cause.
+  std::shared_ptr<const SceneResourceError> sceneResource{};
 };
 
 /** @brief Finite error-history and causal-context budgets. All limits must be positive. */

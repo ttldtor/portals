@@ -77,6 +77,36 @@ inline ManagedError textError(Node<Widget> node, TextError cause) {
   return failure;
 }
 
+// Checked MSVC strings allocate iterator proxies in otherwise noexcept moves.
+#if defined(_MSVC_STL_VERSION) && defined(_ITERATOR_DEBUG_LEVEL) && _ITERATOR_DEBUG_LEVEL != 0
+inline constexpr bool CHECKED_STRING_MOVES = true; ///< Use stationary string captures only in the affected STL mode.
+#else
+inline constexpr bool CHECKED_STRING_MOVES = false; ///< Ordinary string moves retain their original construction cost.
+#endif
+
+/** @param value Text copied during capture; no borrowed view survives.
+ * @return Stationary shared bytes only for checked MSVC, otherwise the ordinary owning string.
+ */
+inline auto captureText(std::string_view value) {
+  if constexpr (CHECKED_STRING_MOVES) {
+    return std::make_shared<const std::string>(value);
+  } else {
+    return std::string(value);
+  }
+}
+
+/** @tparam T Exact owning string or shared string storage returned by captureText.
+ * @param value Storage borrowed only during one synchronous recipe operation.
+ * @return Bytes borrowed until the capture is replaced or destroyed.
+ */
+template <class T> std::string_view captionView(const T &value) {
+  if constexpr (std::same_as<T, std::string>) {
+    return value;
+  } else {
+    return *value;
+  }
+}
+
 /** @brief One existing size-policy update, retained until checked mount. */
 enum class SizeDimension {
   WIDTH,
@@ -143,6 +173,19 @@ struct Access {
    * @return Single-use description with the existing transaction semantics.
    */
   template <class T, class Factory> static Description<T> describe(Factory factory);
+
+  /** @tparam Factory Owning checked callable accepting scene, parent and the shared mount context.
+   * @param factory Internal adapter performing a complete existing recipe transaction.
+   * @return Single-use erased recipe; no extra widget or lifecycle owner is created.
+   */
+  template <class Factory> static Description<Widget> transaction(Factory factory);
+
+  /** @brief Erase only the observer type while preserving one mount transaction.
+   * @tparam T Concrete public widget type produced by the existing recipe.
+   * @param description Owning typed recipe consumed once.
+   * @return Single-use recipe sharing rollback and deferred reference publication.
+   */
+  template <class T> static Description<Widget> erase(Description<T> description);
 
   /** @param scene Existing managed owner receiving a checked policy update.
    * @param node Live sized target created by this mount transaction.
@@ -257,6 +300,52 @@ public:
   /** @brief Allocate an empty observing slot on the UI thread; may throw std::bad_alloc. */
   Ref() {
     this->slot_->fluent = true;
+  }
+
+  /** @return Owning final local/surface/clip geometry, or checked affinity/liveness/reentry failure.
+   * Before final layout, while hidden, or after invalidation/rearrangement returns INVALID_GEOMETRY.
+   * Does not perform layout or report errors; copies never borrow widgets or the scene.
+   */
+  std::expected<NodeGeometry, ManagedError> geometry() const {
+    return detail::geometry(target());
+  }
+
+  /** @return Owning final local size or the exact geometry() error; never performs layout. */
+  std::expected<CellSize, ManagedError> size() const {
+    return geometry().transform([](const NodeGeometry &value) {
+      return value.local.size();
+    });
+  }
+
+  /** @tparam Callback Owning compact action receiving const NodeGeometry& or no arguments.
+   * @param callback Void, checked TreeError or EditorCommandResult action retained by the scene.
+   * @param origin Registration site retained in diagnostics.
+   * @return Scene-owned registration or checked admission/budget/allocation error.
+   * Initial valid and changed local/surface/clip bounds arrive on a subsequent UI dispatch.
+   * Removal/close retires captures; an executing capture survives self-removal.
+   */
+  template <class Callback>
+    requires portals::detail::ManagedAction<Callback, NodeGeometry>
+  std::expected<void, ManagedError> onLayout(Callback callback,
+                                             std::source_location origin = std::source_location::current()) const {
+    auto observation = target();
+    auto owner = detail::eventScene(observation);
+    if (!owner) {
+      return std::unexpected(owner.error());
+    }
+    auto result = [&]() -> std::expected<void, ManagedError> {
+      try {
+        return (*owner)->onLayout(this->node(), std::move(callback), origin);
+      } catch (const std::bad_alloc &) {
+        return std::unexpected(ManagedError{ManagedPhase::BIND, this->node().id(), TreeError::NO_MEMORY, {}, {}});
+      } catch (...) {
+        return std::unexpected(ManagedError{ManagedPhase::BIND, this->node().id(), TreeError::CALLBACK_FAILED, {}, {}});
+      }
+    }();
+    if (!result) {
+      detail::reportEventError(observation, result.error(), origin);
+    }
+    return result;
   }
 
   /** @tparam Callback Owning compact click action, optionally taking const ClickEvent&.
@@ -409,6 +498,7 @@ public:
 
 private:
   friend struct detail::ClickAccess;
+  friend struct detail::LayoutAccess;
   friend struct detail::NamedAccess;
   friend class DynamicRef;
 
@@ -706,6 +796,31 @@ Ref<T> Scene::get(std::string_view name, std::source_location origin) {
 }
 
 namespace detail {
+/** @brief Checked adapter to managed-owned layout observations; never owns a widget or scene. */
+struct LayoutAccess {
+  /** @tparam T Observed widget type.
+   * @tparam Callback Owning compact geometry action.
+   * @param scene Existing receiving managed owner.
+   * @param reference Immutable-affinity checked observing reference.
+   * @param callback Action transferred after scene identity admission.
+   * @param origin Original registration site.
+   * @return Success or exact checked admission/registration failure.
+   */
+  template <class T, class Callback>
+  static std::expected<void, ManagedError> attach(ManagedScene &scene, const Ref<T> &reference, Callback callback,
+                                                  std::source_location origin) {
+    auto owner = eventScene(reference.target());
+    if (!owner) {
+      return std::unexpected(owner.error());
+    }
+    if (*owner != &scene) {
+      return std::unexpected(
+        ManagedError{ManagedPhase::BIND, reference.node().id(), TreeError::INVALID_ARGUMENT, {}, {}});
+    }
+    return scene.onLayout(reference.node(), std::move(callback), origin);
+  }
+};
+
 /** @brief Checked adapter to the managed-owned click chain; never owns a widget or scene. */
 struct ClickAccess {
   /** @tparam Callback Owning no-argument or ClickParams callback with a managed action result.
@@ -821,11 +936,11 @@ public:
    */
   Description &&id(std::string_view value) && {
     if (state_) {
-      state_->id = std::string(value);
+      state_->id.emplace(value);
     }
 
-    return std::move(*this).setup([value = std::string(value)](ManagedScene &scene, Node<T> node) {
-      return scene.id(node, value);
+    return std::move(*this).setup([value = detail::captureText(value)](ManagedScene &scene, Node<T> node) {
+      return scene.id(node, detail::captionView(value));
     });
   }
 
@@ -978,28 +1093,36 @@ private:
   friend Description<LineEdit> lineEdit(ManagedState<std::string>, LineEditConfig);
 
   /** @brief Owning constructor adapter using the existing checked managed mount. */
-  using Factory = std::move_only_function<std::expected<Node<T>, ManagedError>(ManagedScene &, Node<Widget>)>;
+  using Factory =
+    std::move_only_function<std::expected<Node<T>, ManagedError>(ManagedScene &, Node<Widget>, detail::MountContext &)>;
   /** @brief Owning child recipe adapter sharing the parent's transaction bookkeeping. */
   using Child =
     std::move_only_function<std::expected<void, ManagedError>(ManagedScene &, Node<Widget>, detail::MountContext &)>;
 
   /** @brief Unmounted recipe storage, consumed and destroyed during mount. */
   struct State {
-    Factory create;                     ///< Constructs exactly one managed node.
-    std::vector<Setup<T>> setup;        ///< Customization actions in modifier order.
-    std::vector<Child> children;        ///< Consuming child adapters in insertion order.
-    std::vector<NodeRef<T>> references; ///< Observing slots reserved for this node.
-    bool focusScope{};                  ///< Register before setup/children; scene owns its token.
-    bool focusDefault{};                ///< Set the nearest registered scope's default before children.
-    std::optional<std::string> id;      ///< Compact recipe identity preserved by later style modifiers.
+    Factory create;                                                  ///< Constructs exactly one managed node.
+    std::vector<Setup<T>> setup = std::vector<Setup<T>>(0);          ///< Customization actions in modifier order.
+    std::vector<Child> children = std::vector<Child>(0);             ///< Consuming child adapters in insertion order.
+    std::vector<NodeRef<T>> references = std::vector<NodeRef<T>>(0); ///< Observing slots reserved for this node.
+    bool focusScope{};             ///< Register before setup/children; scene owns its token.
+    bool focusDefault{};           ///< Set the nearest registered scope's default before children.
+    std::optional<std::string> id; ///< Compact recipe identity preserved by later style modifiers.
   };
 
   /** @brief Allocate recipe storage and take ownership of its constructor adapter.
+   * @tparam Create Owning callable returning a checked typed node for ManagedScene and parent.
    * @param create Owning checked
    * constructor callback, invoked only at mount.
    */
-  explicit Description(Factory create) : state_(std::make_unique<State>()) {
-    state_->create = std::move(create);
+  // Reject unrelated by-value conversions before checked-result constructor probes recurse.
+  template <class Create>
+    requires std::invocable<Create &, ManagedScene &, Node<Widget> &>
+  explicit Description(Create create) : state_(std::make_unique<State>()) {
+    state_->create = [create = std::move(create)](ManagedScene &scene, Node<Widget> parent,
+                                                  detail::MountContext &) mutable {
+      return create(scene, parent);
+    };
   }
 
   /** @param change Owning policy operation applied in setup/modifier order.
@@ -1043,7 +1166,7 @@ private:
       return std::unexpected(detail::error(parent, TreeError::INVALID_ARGUMENT));
     }
 
-    auto node = state->create(scene, parent);
+    auto node = state->create(scene, parent, context);
 
     if (!node) {
       return node;
@@ -1133,6 +1256,34 @@ template <class T, class Factory> Description<T> Access::describe(Factory factor
   return Description<T>(std::move(factory));
 }
 
+template <class Factory> Description<Widget> Access::transaction(Factory factory) {
+  Description<Widget> description;
+
+  description.state_ = std::make_unique<Description<Widget>::State>();
+  description.state_->create = std::move(factory);
+
+  return description;
+}
+
+template <class T> Description<Widget> Access::erase(Description<T> description) {
+  Description<Widget> erased;
+
+  erased.state_ = std::make_unique<Description<Widget>::State>();
+  erased.state_->create =
+    [description = std::move(description)](ManagedScene &scene, Node<Widget> parent,
+                                           MountContext &context) mutable -> std::expected<Node<Widget>, ManagedError> {
+    auto result = mount(std::move(description), scene, parent, context);
+
+    if (!result) {
+      return std::unexpected(result.error());
+    }
+
+    return Node<Widget>(*result);
+  };
+
+  return erased;
+}
+
 template <class T>
 std::expected<Node<T>, ManagedError> Access::mount(Description<T> &&description, ManagedScene &scene,
                                                    Node<Widget> parent, MountContext &context) {
@@ -1154,6 +1305,19 @@ template <class T> auto own(T &&value) {
     return std::decay_t<T>(std::forward<T>(value));
   }
 }
+
+/** @brief Borrow string bytes only while constructing the final owning argument tuple.
+ * @tparam T Forwarded constructor argument; string-like values convert to string_view.
+ * @param value Input living through the immediate tuple constructor.
+ * @return A temporary string view, or the unchanged nonstring forwarding reference.
+ */
+template <class T> decltype(auto) constructionArgument(T &&value) {
+  if constexpr (std::convertible_to<T, std::string_view>) {
+    return std::string_view(value);
+  } else {
+    return std::forward<T>(value);
+  }
+}
 } // namespace detail
 
 /** @brief Capture constructor arguments without requiring inheritance from a DSL widget.
@@ -1165,16 +1329,33 @@ template <class T> auto own(T &&value) {
  */
 template <class T, class... Args> Description<T> custom(Args &&...args) {
   using OwnedArguments = std::tuple<decltype(detail::own(std::forward<Args>(args)))...>;
+  constexpr bool HAS_TEXT_ARGUMENT = (std::convertible_to<Args, std::string_view> || ...);
 
-  // Explicit element types keep a tuple or pair argument intact instead of applying CTAD's copy deduction guide.
-  auto owned = OwnedArguments(detail::own(std::forward<Args>(args))...);
+  // Construct strings directly in stationary tuple storage. Moving a string or tuple<string>
+  // can allocate a checked MSVC proxy despite noexcept; a string_view constructor stays fallible.
+  // Explicit element types also preserve tuple/pair constructor arguments without CTAD flattening.
+  auto owned = [&] {
+    if constexpr (HAS_TEXT_ARGUMENT && detail::CHECKED_STRING_MOVES) {
+      return std::make_unique<OwnedArguments>(detail::constructionArgument(std::forward<Args>(args))...);
+    } else {
+      return OwnedArguments(detail::own(std::forward<Args>(args))...);
+    }
+  }();
 
   return Description<T>([owned = std::move(owned)](ManagedScene &scene, Node<Widget> parent) mutable {
+    auto &arguments = [&]() -> auto & {
+      if constexpr (HAS_TEXT_ARGUMENT && detail::CHECKED_STRING_MOVES) {
+        return *owned;
+      } else {
+        return owned;
+      }
+    }();
+
     return std::apply(
       [&](auto &...values) {
         return scene.emplace<T>(parent, std::move(values)...);
       },
-      owned);
+      arguments);
   });
 }
 
@@ -1186,8 +1367,8 @@ template <class T, class... Args> Description<T> custom(Args &&...args) {
  * @return Single-use owning recipe; allocation while copying may throw.
  */
 template <class T> Description<T> control(std::string_view text, ControlStyle style, SizePolicy policy) {
-  return Description<T>([text = std::string(text), style, policy](ManagedScene &scene, Node<Widget> parent) {
-    auto value = GraphemeText::from(text, scene.widthPolicy());
+  return Description<T>([text = detail::captureText(text), style, policy](ManagedScene &scene, Node<Widget> parent) {
+    auto value = GraphemeText::from(detail::captionView(text), scene.widthPolicy());
 
     if (!value) {
       auto failure = detail::textError(parent, value.error());
@@ -2744,6 +2925,26 @@ auto onClick(Ref<Button> reference, Callback callback, std::source_location orig
   }};
 }
 
+/** @tparam T Observed widget type.
+ * @tparam Callback Owning compact action accepting geometry or no arguments.
+ * @param reference Ref published by this scene's description.
+ * @param callback Void, checked TreeError or EditorCommandResult action retained by the scene.
+ * @param origin Registration site retained in diagnostics.
+ * @return Scene pipe stage registering deferred final local/surface/clip observations.
+ * Callbacks run on UI outside tree frames. Equal bounds do not notify or request redraw.
+ */
+template <class T, class Callback>
+  requires portals::detail::ManagedAction<Callback, NodeGeometry>
+auto onLayout(Ref<T> reference, Callback callback, std::source_location origin = std::source_location::current()) {
+  return detail::SceneStage{[registration = [reference = std::move(reference), callback = std::move(callback),
+                                             origin](ManagedScene &scene) mutable -> std::expected<void, ManagedError> {
+    return detail::LayoutAccess::attach(scene, reference, std::move(callback), origin);
+  },
+                             origin](Scene &owner) mutable {
+    detail::SceneAccess::onLayout(owner, registration, origin);
+  }};
+}
+
 /** @tparam Factory No-argument callable returning Description<T> or exact expected<Description<T>,ManagedError>.
  * @tparam Setup Callable taking the stationary Scene&, returning void or exact expected<void,ManagedError>.
  * @param factory Invoked inside the checked construction boundary, after final sink availability.
@@ -2918,3 +3119,5 @@ inline auto runApp(ApplicationTerminal &terminal, int argc, const char *const *a
   return detail::CommandLineRunStage{argc, argv, std::move(parser), &terminal, {}, origin};
 }
 } // namespace portals::ui
+
+#include <portals/ui_scene_resource.hpp>

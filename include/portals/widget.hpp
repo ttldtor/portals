@@ -509,6 +509,15 @@ private:
   // Allocation-free ancestry for the existing router; no record pointer escapes.
   std::expected<Node<Widget>, TreeError> inputParent(Node<Widget> node) const;
   friend class ManagedScene;
+
+  // Allocation-free owning observation for the managed final-layout bridge; no children or record pointers escape.
+  struct GeometryObservation {
+    NodeGeometry geometry;
+    std::uint64_t visibilityRevision{};
+  };
+
+  std::expected<GeometryObservation, TreeError> observeGeometry(Node<Widget> node) const;
+  std::expected<std::uint64_t, TreeError> geometryRevision() const;
   std::uint64_t inputGeneration() const noexcept;
   struct State;
 
