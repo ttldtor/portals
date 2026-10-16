@@ -7,38 +7,63 @@ scene setup/run failures, attempts cleanup and terminal restoration, then prints
 an error to stderr and returns 1. Managed recoverable action errors are retained;
 a successful run can report a bounded error summary and still return 0.
 
-## Supply your own final report sink
+## Report errors to stderr
 
-The complete program below copies the final [`SceneReport`](../include/portals/ui_scene.hpp)
-and reports it after the run. Replace `reportToStderr` with your application's
-file/logger integration at that point. A clean run with no retained errors does
-not call the sink.
+Use `| ui::reportOnError()` to select the standard final report sink explicitly:
 
 ```cpp
 #include <portals/ui.hpp>
 
-#include <optional>
-
 int main() {
   using namespace portals;
 
-  std::optional<ui::SceneReport> finalReport;
   ui::Ref<Button> exit;
 
-  const int result = ui::scene(ui::button(exit, "Exit"))
-    | ui::reportOnError([&finalReport](const ui::SceneReport &report) {
-        finalReport = report;
-      })
+  return ui::scene(ui::button(exit, "Exit"))
+    | ui::reportOnError()
     | ui::onClick(exit, ui::quit)
     | ui::onKey("F10", ui::quit)
     | ui::runApp();
-
-  if (finalReport) {
-    ui::reportToStderr(*finalReport);
-  }
-
-  return result;
 }
+```
+
+The sink is called after terminal restoration and cleanup were attempted.
+A clean run with no retained errors does not call it. `ui::runApp()` uses this
+sink by default, so the explicit stage is optional. With a custom sink installed,
+`ui::reportOnError()` restores standard stderr reporting.
+
+<a id="diagnostic-symptoms"></a>
+## Find the cause by symptom
+
+The [first application](first-application.md) already uses default error handling
+through `ui::runApp()`. You do not need to install a separate handler to start.
+
+| What happened | What to check | Next action |
+|---|---|---|
+| The scene did not open and the application returned 1 | Read the final stderr report: the operation, source and error cause | Fix the reported configuration or file. Connect a [final report sink](#diagnostic-final-report) for your own log |
+| A button does not invoke its action | Can Tab focus it, is it enabled, and is its reference passed to `ui::onClick`? | Compare the registration with [step 2 of the first application](first-application.md). Try Enter on the focused button; see [focus and routing](focus.md) for dispatch order |
+| The handler ran but the display did not change | Does the value change, and are you updating the intended control? Assigning an equal value again may require no frame | Check the value and assignment target. If needed, enable [causal diagnostics](#diagnostic-action-trace) to follow the action |
+| A shortcut or key release does not arrive | Does the terminal intercept the shortcut, and does the input path provide the requested phase? | First try an ordinary F2 press. Choose a supported key or phase using the [input guide](input.md); see the [terminal table](terminal-probe.md#terminal-observations) for observed conditions |
+| Styling does not change a control | Does the selector match the type, ID and state? Does a higher-priority layer override the rule? | Check [PSS selectors and properties](styling-guide.md), then [layer precedence](style-layers.md). For `styleFile`, check the path relative to the process working directory |
+| Access through a `Ref` returns `CLOSED`, `STALE_NODE` or `WRONG_THREAD` | Are the scene and target control alive, and does the operation run on the UI thread? | Use a reference to a live control on its scene thread. Check the returned `expected` for explicit reads; see [control references](text-property.md) |
+| An error did not appear in the log file | Is a custom sink connected, and was there an error? A clean run does not call `reportOnError` | Add file output to the [final report sink](#diagnostic-final-report). Use [onError](#diagnostic-live-errors) for live observation; defer terminal output until the UI ends |
+| Terminal modes remain changed after exit | Did the runner report a restoration failure, or was the process terminated forcibly? | Keep the report and open a new terminal session for further inspection. Compare [mode restoration](terminal-probe.md#terminal-observation-checklist) on a normal repeat run |
+
+Run `portals_terminal_probe` separately, after closing the application.
+It checks the environment and DA/CPR replies; it does not test delivery of every key.
+See [how to read probe results](terminal-probe.md#terminal-probe-result).
+
+<a id="diagnostic-final-report"></a>
+## Supply your own final report sink
+
+`ui::reportOnError(sink)` accepts a function receiving
+[`const ui::SceneReport &`](../include/portals/ui_scene.hpp). Write to your file
+or logger directly in this callback. Calling `ui::reportToStderr(report)` there
+is also safe: terminal restoration and cleanup have already been attempted.
+You can pass that function directly:
+
+```cpp
+    | ui::reportOnError(ui::reportToStderr)
 ```
 
 `ui::reportOnError(sink)` replaces the final sink; an empty sink restores stderr.
@@ -46,6 +71,7 @@ Delivery happens once after restoration and cleanup were attempted. A throwing
 sink falls back to stderr with the original report. The callback borrows the report
 only for its call: copy it to retain it. Do not reenter or mutate the scene there.
 
+<a id="diagnostic-live-errors"></a>
 ## Observe errors while the UI runs
 
 `ui::onError([](const ManagedDiagnostic &error) { ... })` installs a UI-thread
@@ -67,6 +93,7 @@ There is no automatic persistent log, log rotation or background logging service
 That integration is **TBD**, with no assigned milestone in the current
 [feature plan](planned-features.md). The final sink is the available extension point.
 
+<a id="diagnostic-action-trace"></a>
 ## Trace why an action did not change the display
 
 [`Diagnostics`](../include/portals/diagnostics.hpp) records bounded causal metadata;

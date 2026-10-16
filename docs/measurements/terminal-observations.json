@@ -1,0 +1,185 @@
+{
+  "schema_version": 1,
+  "reviewed_on": "2026-10-16",
+  "scope": "Historical, bounded observations of named binaries and input paths. Not certification of the current Portals revision or all features of a terminal.",
+  "records": [
+    {
+      "id": "xterm-390-probe",
+      "observed_on": "2026-10-07",
+      "terminal": {
+        "name": "XTerm",
+        "version": "390",
+        "package_version": "390-1ubuntu3"
+      },
+      "environment": {
+        "os": "Ubuntu 24.04 under WSL2/WSLg",
+        "architecture": "x86_64",
+        "path": "XTerm -> util-linux script PTY -> native POSIX probe"
+      },
+      "method": "DA/CPR queries in a real XTerm; no replies injected by the test driver. Before/after stty states compared.",
+      "program": {
+        "name": "portals_terminal_probe",
+        "build": "Clang20.1.2 Release",
+        "source_revision": "85422ff",
+        "revision_scope": "probe sources only"
+      },
+      "observed": {
+        "probe_fields": {
+          "query.stop": "replies",
+          "query.error": "none",
+          "query.da.reply": "\\x1b[?64;1;2;6;9;15;16;17;18;21;22;28c",
+          "query.cpr.reply": "\\x1b[1;1R",
+          "input.bytes_consumed": "41",
+          "input.unmatched": ""
+        },
+        "exit_code": 0,
+        "termios_restored": true
+      },
+      "not_tested": [
+        "physical keyboard/mouse delivery",
+        "Kitty keyboard protocol",
+        "individual modifiers and event phases",
+        "visual glyph correctness or width"
+      ],
+      "evidence": {
+        "query_capture_sha256": "4140604e75c8190f7699faf09fb95b747b42b1c6f47321714eb86c7d7df71471",
+        "restoration_receipt_sha256": "cd115ce5f03ed37a00a616bb3a14b9ba1eabae02fc6d2ec12acaf9667b412a43"
+      }
+    },
+    {
+      "id": "windows-terminal-1.24-app",
+      "observed_on": null,
+      "terminal": {
+        "name": "Windows Terminal",
+        "package_version": "1.24.11911.0",
+        "executable_file_version": "1.24.2607.10001"
+      },
+      "environment": {
+        "os": "Windows",
+        "os_version": null,
+        "path": "Windows Terminal window; native Win32 console API",
+        "underlying_transport": null
+      },
+      "method": "Automated application run; input records injected through WriteConsoleInputW. Not physical keyboard or pointer input.",
+      "program": {
+        "name": "portals_dashboard",
+        "build": "Debug",
+        "binary_sha256": "19c991bc30a1aad9906b334eaf4d639b32137ee0cffa16c1ab77c30045bfa2ce",
+        "source_revision": null
+      },
+      "observed": {
+        "input_event_counts": {
+          "key": 9,
+          "mouse": 2,
+          "other": 2,
+          "text": 11
+        },
+        "viewports": [
+          [
+            120,
+            40
+          ],
+          [
+            106,
+            36
+          ],
+          [
+            120,
+            40
+          ]
+        ],
+        "input_mode_before_after": [
+          503,
+          503
+        ],
+        "output_mode_before_after": [
+          7,
+          7
+        ],
+        "input_codepage_before_after": [
+          65001,
+          65001
+        ],
+        "output_codepage_before_after": [
+          65001,
+          65001
+        ],
+        "exit_code": 0,
+        "exact_restore": true
+      },
+      "not_tested": [
+        "DA/CPR replies",
+        "physical input delivery",
+        "Kitty keyboard protocol",
+        "individual modifiers and event phases",
+        "visual glyph correctness or width"
+      ],
+      "evidence": {
+        "host_version_receipt_sha256": "99a160faebe24627f505da19c5379b5b5d1c754a84588c91e0797c6888cb65fb",
+        "supervisor_receipt_sha256": "6b470af8e5ee0b08ed98a295e74335de53f608d6d43c601cdab0d96ec284fb20",
+        "input_trace_sha256": "9b8f800fa22d5d5d142261ad4fccbff3a8ee7d36a62c8b7c6a8d6e76655498f1",
+        "binary_manifest_sha256": "03b3bee9368d3c33d3e3daa06ffc5c5baeb3f445dc115b79642faf0f08287798"
+      }
+    },
+    {
+      "id": "xterm-390-app",
+      "observed_on": null,
+      "terminal": {
+        "name": "XTerm",
+        "version": "390",
+        "package_version": null
+      },
+      "environment": {
+        "os": "Linux under WSL2/WSLg",
+        "path": "XTerm window; native POSIX tty, X11 test driver"
+      },
+      "method": "Automated application run; XSendEvent for input and XResizeWindow for resize. Not physical input.",
+      "program": {
+        "name": "portals_dashboard",
+        "build": "Debug",
+        "binary_sha256": "95e524d72237ba291e49d4b8fdb3334efb6dade79ec0fc472c2489e3eb3bd4c8",
+        "source_revision": null
+      },
+      "observed": {
+        "input_event_counts": {
+          "key": 9,
+          "other": 2,
+          "text": 11
+        },
+        "viewports": [
+          [
+            120,
+            40
+          ],
+          [
+            100,
+            32
+          ],
+          [
+            120,
+            40
+          ]
+        ],
+        "exit_code": 0,
+        "termios_and_descriptor_flags_restored": true
+      },
+      "not_tested": [
+        "DA/CPR in this application run",
+        "physical input delivery",
+        "mouse delivery with DEC tracking enabled",
+        "Kitty keyboard protocol",
+        "individual modifiers and event phases",
+        "visual glyph correctness or width"
+      ],
+      "limitations": [
+        "The application did not enable DEC1000/1006 mouse tracking; zero mouse events does not establish lack of terminal mouse support."
+      ],
+      "evidence": {
+        "supervisor_receipt_sha256": "360f9e33e0437d524e64467b8f24d5221a719c13727b530aecdbc35831ae5a25",
+        "input_trace_sha256": "8688682e653643baa9daa3e682d00caf1ec848d4a6ee205cd7c060938c77a9ee",
+        "binary_manifest_sha256": "30ca4d9411612829bcc2bb086298295bd32ee258aad1334d55e3d39310ea6b23"
+      }
+    }
+  ],
+  "null_means": "Not established by retained evidence."
+}
