@@ -5,6 +5,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Added] Read-only managed derived sources compute owning values from explicit
+  state or earlier derived sources. Initial creation is atomic and checked;
+  runtime failures preserve the last good output. Existing captions and managed
+  observers accept the result and recover rejected notifications without polling.
+
 - [Added] Scene-owned managed-state observers deliver the latest value through
   checked callbacks, with initial synchronization after reference publication,
   bounded dirty-preparation recovery and receiver-scoped cleanup.

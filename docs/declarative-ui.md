@@ -225,6 +225,10 @@ The scene owns delivery, starting after all references are published; see
 [managed observation](bindings-guide.md#managed-observation) for errors, limits
 and the latest-value contract.
 
+Use [`owner.derive(input, transform)`](bindings-guide.md#managed-derivation) when
+several captions need one computed owning value. Its read-only ManagedSource is
+accepted by the same label, button and observation recipes.
+
 For large datasets, create a model in the same factory and pass its observing
 handle to `ui::virtualList`, `ui::virtualTable` or `ui::chart`.
 See [models](model.md) and [virtual tables](virtual-table.md).

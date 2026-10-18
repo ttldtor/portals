@@ -231,6 +231,10 @@ int main() {
 ошибки, лимиты и контракт последнего значения описаны в
 [управляемом наблюдении](bindings-guide.md#managed-observation-ru).
 
+Если нескольким подписям нужно одно вычисляемое владеющее значение, используйте
+[`owner.derive(input, transform)`](bindings-guide.md#managed-derivation-ru).
+Его read-only ManagedSource принимают те же рецепты label, button и наблюдения.
+
 Для больших наборов данных создайте модель в той же фабрике и передайте
 наблюдаемую ссылку на неё в `ui::virtualList`, `ui::virtualTable` или `ui::chart`.
 Подробнее — в разделах [моделей](model.md) и [виртуальных таблиц](virtual-table.md).
