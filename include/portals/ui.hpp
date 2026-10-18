@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include <portals/detail/move_only_function.hpp>
 #include <portals/grid.hpp>
 #include <portals/managed.hpp>
 #include <portals/ui_ref.hpp>
@@ -128,10 +129,10 @@ struct MountContext {
   Node<Widget> root; ///< First created node; identifies the subtree to retire on failure.
   std::vector<Node<Widget>> nodes =
     std::vector<Node<Widget>>(0); ///< Created observers checked for liveness before publication.
-  std::vector<std::move_only_function<void()>> publish =
-    std::vector<std::move_only_function<void()>>(0); ///< Nonthrowing assignments publishing reserved refs.
-  std::vector<std::move_only_function<void()>> release =
-    std::vector<std::move_only_function<void()>>(0); ///< Nonthrowing releases of temporary ref reservations.
+  std::vector<portals::detail::MoveOnlyFunction<void()>> publish =
+    std::vector<portals::detail::MoveOnlyFunction<void()>>(0); ///< Nonthrowing assignments publishing reserved refs.
+  std::vector<portals::detail::MoveOnlyFunction<void()>> release =
+    std::vector<portals::detail::MoveOnlyFunction<void()>>(0); ///< Nonthrowing releases of temporary ref reservations.
 
   /** @brief Release ref reservations after either publication or rollback. */
   ~MountContext() {
@@ -872,7 +873,8 @@ concept ClickCallback = std::copy_constructible<Callback> && (requires(Callback 
  * Arguments are borrowed for the invocation. External effects and separately created scene
  * state are not rolled back; the attempted description subtree is removed on failure.
  */
-template <class T> using Setup = std::move_only_function<std::expected<void, ManagedError>(ManagedScene &, Node<T>)>;
+template <class T>
+using Setup = portals::detail::MoveOnlyFunction<std::expected<void, ManagedError>(ManagedScene &, Node<T>)>;
 
 /** @brief Owning optional editor customization and confirmation policy. */
 struct LineEditConfig {
@@ -1093,11 +1095,11 @@ private:
   friend Description<LineEdit> lineEdit(ManagedState<std::string>, LineEditConfig);
 
   /** @brief Owning constructor adapter using the existing checked managed mount. */
-  using Factory =
-    std::move_only_function<std::expected<Node<T>, ManagedError>(ManagedScene &, Node<Widget>, detail::MountContext &)>;
+  using Factory = portals::detail::MoveOnlyFunction<std::expected<Node<T>, ManagedError>(ManagedScene &, Node<Widget>,
+                                                                                         detail::MountContext &)>;
   /** @brief Owning child recipe adapter sharing the parent's transaction bookkeeping. */
-  using Child =
-    std::move_only_function<std::expected<void, ManagedError>(ManagedScene &, Node<Widget>, detail::MountContext &)>;
+  using Child = portals::detail::MoveOnlyFunction<std::expected<void, ManagedError>(ManagedScene &, Node<Widget>,
+                                                                                    detail::MountContext &)>;
 
   /** @brief Unmounted recipe storage, consumed and destroyed during mount. */
   struct State {

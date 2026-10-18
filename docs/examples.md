@@ -248,3 +248,7 @@ cmake --build build/guide-examples
 ```
 
 Run `build/guide-examples/docs_basic.exe` on Windows or `build/guide-examples/docs_basic` on Linux/macOS. F10 closes interactive programs. See the [editor history demonstration](editor-history-demo.md) for editing scenarios.
+
+## Browser sample
+
+[Gallery and Level in WebAssembly](wasm-gallery.md) are opt-in experimental browser scenes. They use xterm.js and the incremental runner; building native examples does not build this target.

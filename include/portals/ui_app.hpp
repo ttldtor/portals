@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include <portals/detail/move_only_function.hpp>
+
 #include <expected>
 #include <functional>
 #include <memory>
@@ -299,5 +301,5 @@ struct LaunchAction {
 
 /** @brief Owning lazy parser; borrowed bound options must outlive its synchronous invocation. */
 using CommandLineParser =
-  std::move_only_function<std::expected<LaunchAction, CommandLineError>(const app::Arguments &)>;
+  portals::detail::MoveOnlyFunction<std::expected<LaunchAction, CommandLineError>(const app::Arguments &)>;
 } // namespace portals::ui

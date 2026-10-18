@@ -127,3 +127,7 @@ When changing a maintained tool, update its parameter table, command examples an
 EN/RU pages together. Document defaults, units, required files, output locations,
 exit behavior and any file, terminal or remote changes. Link new entry points from
 this catalog. Keep test traces and run-specific evidence outside these guides.
+
+## WASM sample host {#tool-wasm-host}
+
+From `examples/wasm_gallery/web`, run `npm ci`, then `npm run build -- --help` for the host builder reference. `npm run build -- [output-directory]` bundles the existing runtime with JS/CSS, HTML, source maps, artifact hashes and license notices. The default is `build/wasm-debug/wasm-gallery` from the repository root. Exit codes are 0 for success/help, 1 for build/input failures and 2 for invalid arguments. It preserves runtime artifacts and writes only host output files in the chosen directory. [WASM Gallery and Level](wasm-gallery.md) describes Emscripten setup, Node/browser checks and the test-server environment variables.

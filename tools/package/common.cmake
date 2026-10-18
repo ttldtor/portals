@@ -7,7 +7,8 @@ cmake_minimum_required(VERSION 3.24)
 
 function(bundleStageConsumer source destination)
   file(COPY "${source}/tests/package_consumer/" DESTINATION "${destination}")
-  file(COPY "${source}/examples" DESTINATION "${destination}")
+  # Browser development dependencies are not native consumer sources.
+  file(COPY "${source}/examples" DESTINATION "${destination}" PATTERN "node_modules" EXCLUDE)
   file(COPY "${source}/tests/examples" "${source}/tests/support" DESTINATION "${destination}/tests")
   if(CMAKE_HOST_WIN32)
     file(COPY "${source}/tests/support/no_dialogs.cpp" DESTINATION "${destination}")

@@ -101,6 +101,10 @@ constexpr const char *categoryName(ApplicationFailure value) noexcept {
     return "INVALID_OPTIONS";
   case ApplicationFailure::ALREADY_RUN:
     return "ALREADY_RUN";
+  case ApplicationFailure::NOT_STARTED:
+    return "NOT_STARTED";
+  case ApplicationFailure::REENTRANT_OPERATION:
+    return "REENTRANT_OPERATION";
   case ApplicationFailure::NO_MEMORY:
     return "NO_MEMORY";
   case ApplicationFailure::CALLBACK_FAILED:
@@ -601,6 +605,8 @@ struct Scene::State {
   bool quitRequested{}, finalReported{};
   std::optional<int> preflightStatus;
   bool stopped{};
+  bool sessionStarted{}, sessionActive{};
+  std::optional<std::expected<ApplicationStep, ManagedError>> sessionResult;
   bool shortFailure{}, shortDeliveryPending{};
   const void *primaryShortAttempt{};
 
@@ -904,6 +910,20 @@ struct Scene::State {
 
   std::expected<void, ManagedError> cleanup(std::source_location origin) {
     detail::SetupFailureScope cleanupScope({}, nullptr, nullptr);
+
+    if (sessionActive) {
+      // Configuration can fail between host callbacks. Finish the borrowed application
+      // before revoking publication or retiring its scene, just as the native run does.
+      Guard guard(*this, Operation::RUN);
+      detail::CurrentSceneScope current(anchor);
+
+      application->requestStop();
+
+      auto finished = finishStep(managed->step(), origin);
+
+      return finished ? std::expected<void, ManagedError>{} : std::unexpected(finished.error());
+    }
+
     completed = true;
 
     // Revoke observing publication and actual live controllers before managed input captures retire.
@@ -947,6 +967,50 @@ struct Scene::State {
     theme.reset();
 
     return result;
+  }
+
+  std::expected<ApplicationStats, ManagedError> finishRun(std::expected<ApplicationStats, ManagedError> result,
+                                                          std::source_location origin) {
+    if (!result) {
+      if (failure) {
+        if (result.error().application) {
+          failure->application = result.error().application;
+        }
+
+        if (result.error().cleanup) {
+          failure->cleanup = result.error().cleanup;
+        }
+      } else {
+        fail(result.error(), "scene.run", origin, false);
+        notified = detail::SceneAccess::runFailureNotified(*managed);
+      }
+    }
+
+    // Native open can fail before scene.stop; both drivers require this final cleanup.
+    (void)cleanup(origin);
+    notifyFallback();
+
+    return failure ? std::unexpected(*failure) : result;
+  }
+
+  std::expected<ApplicationStep, ManagedError> finishStep(std::expected<ApplicationStep, ManagedError> result,
+                                                          std::source_location origin) {
+    if (result && !result->finished) {
+      return *result;
+    }
+
+    sessionActive = false;
+
+    auto finished = finishRun(
+      result ? std::expected<ApplicationStats, ManagedError>(result->stats) : std::unexpected(result.error()), origin);
+
+    if (finished) {
+      sessionResult.emplace(ApplicationStep{true, *finished});
+    } else {
+      sessionResult.emplace(std::unexpected(finished.error()));
+    }
+
+    return *sessionResult;
   }
 
   void invoke(Configuration &callback, std::source_location origin) {
@@ -1063,6 +1127,14 @@ Scene::~Scene() {
   }
 
   detail::SetupFailureScope lifecycleScope({}, nullptr, nullptr);
+
+  if (state_->sessionActive) {
+    State::Guard guard(*state_, State::Operation::RUN);
+    detail::CurrentSceneScope current(state_->anchor);
+
+    state_->application->requestStop();
+    (void)state_->finishStep(state_->managed->step(), std::source_location::current());
+  }
 
   {
     State::Guard guard(*state_, State::Operation::CLOSE);
@@ -1183,7 +1255,7 @@ std::expected<void, ManagedError> Scene::prepareChecked(std::source_location ori
   detail::SetupFailureScope lifecycleScope({}, nullptr, nullptr);
   auto &state = *state_;
 
-  if (state.active != State::Operation::NONE) {
+  if (state.active != State::Operation::NONE || state.sessionActive) {
     auto cause = error(ManagedPhase::PREPARE, TreeError::WOULD_BLOCK, state.node());
 
     state.fail(cause, "scene.prepare", origin);
@@ -1330,7 +1402,8 @@ bool Scene::admitConfiguration(bool runtime, std::source_location origin) {
 
   auto &state = *state_;
 
-  if (state.active != State::Operation::NONE && !(runtime && state.active == State::Operation::RUN)) {
+  if ((state.active != State::Operation::NONE && !(runtime && state.active == State::Operation::RUN)) ||
+      (state.sessionActive && !runtime)) {
     state.fail(error(ManagedPhase::BIND, TreeError::WOULD_BLOCK, state.node()), "scene.configure", origin);
 
     return false;
@@ -1383,7 +1456,9 @@ void Scene::addConfiguration(Configuration callback, bool runtime, std::source_l
   auto &state = *state_;
 
   if (state.prepared) {
-    if (runtime && state.active == State::Operation::RUN) {
+    if (runtime && (state.active == State::Operation::RUN || state.sessionActive)) {
+      State::Guard guard(state, State::Operation::RUN);
+
       state.invoke(callback, origin);
     } else {
       State::Guard guard(state, State::Operation::CONFIGURE);
@@ -1717,7 +1792,7 @@ Scene &Scene::onError(ManagedErrorHandler observer, std::source_location origin)
 
   auto &state = *state_;
 
-  if (state.active != State::Operation::NONE) {
+  if (state.active != State::Operation::NONE || state.sessionActive) {
     state.fail(error(ManagedPhase::BIND, TreeError::WOULD_BLOCK, state.node()), "scene.onError", origin);
 
     return *this;
@@ -1765,7 +1840,7 @@ Scene &Scene::reportOnError(SceneReportHandler sink, std::source_location origin
 
   auto &state = *state_;
 
-  if (state.active != State::Operation::NONE) {
+  if (state.active != State::Operation::NONE || state.sessionActive) {
     state.fail(error(ManagedPhase::BIND, TreeError::WOULD_BLOCK, state.node()), "scene.reportOnError", origin);
 
     return *this;
@@ -2005,6 +2080,10 @@ std::expected<ApplicationStats, ManagedError> Scene::run(ApplicationTerminal &te
 
 std::expected<ApplicationStats, ManagedError> Scene::runImpl(ApplicationTerminal *terminal, std::stop_token stop,
                                                              std::source_location origin) {
+  if (owner_ == std::this_thread::get_id() && state_ && state_->sessionActive) {
+    return std::unexpected(error(ManagedPhase::RUN, TreeError::WOULD_BLOCK, state_->node()));
+  }
+
   detail::SetupFailureScope lifecycleScope({}, nullptr, nullptr);
   auto prepared = prepareChecked(origin);
 
@@ -2021,26 +2100,78 @@ std::expected<ApplicationStats, ManagedError> Scene::runImpl(ApplicationTerminal
     return terminal ? state.managed->run(*terminal, stop) : state.managed->run(stop);
   }();
 
-  if (!result) {
-    if (state.failure) {
-      if (result.error().application) {
-        state.failure->application = result.error().application;
-      }
+  return state.finishRun(std::move(result), origin);
+}
 
-      if (result.error().cleanup) {
-        state.failure->cleanup = result.error().cleanup;
-      }
-    } else {
-      state.fail(result.error(), "scene.run", origin, false);
-      state.notified = detail::SceneAccess::runFailureNotified(*state.managed);
+std::expected<void, ManagedError> Scene::start(ApplicationReadyTerminal &terminal, std::stop_token stop,
+                                               std::source_location origin) {
+  if (owner_ != std::this_thread::get_id()) {
+    return std::unexpected(error(ManagedPhase::RUN, TreeError::WRONG_THREAD));
+  }
+
+  if (!state_) {
+    return std::unexpected(error(ManagedPhase::RUN, TreeError::CLOSED));
+  }
+
+  if (state_->active != State::Operation::NONE || state_->sessionActive) {
+    return std::unexpected(error(ManagedPhase::RUN, TreeError::WOULD_BLOCK, state_->node()));
+  }
+
+  detail::SetupFailureScope lifecycleScope({}, nullptr, nullptr);
+  auto prepared = prepareChecked(origin);
+
+  if (!prepared) {
+    return prepared;
+  }
+
+  auto &state = *state_;
+  State::Guard guard(state, State::Operation::RUN);
+  detail::CurrentSceneScope current(state.anchor);
+
+  state.sessionStarted = state.sessionActive = true;
+
+  auto result = state.managed->start(terminal, stop);
+
+  if (!result || state.stopped) {
+    auto finished = state.finishStep(result ? state.managed->step() : std::unexpected(result.error()), origin);
+
+    if (!finished) {
+      return std::unexpected(finished.error());
     }
   }
 
-  // Native open may fail before Application calls scene.stop; explicit close is mandatory.
-  (void)state.cleanup(origin);
-  state.notifyFallback();
+  return {};
+}
 
-  return state.failure ? std::unexpected(*state.failure) : result;
+std::expected<ApplicationStep, ManagedError> Scene::step(std::source_location origin) {
+  if (owner_ != std::this_thread::get_id()) {
+    return std::unexpected(error(ManagedPhase::RUN, TreeError::WRONG_THREAD));
+  }
+
+  if (!state_) {
+    return std::unexpected(error(ManagedPhase::RUN, TreeError::CLOSED));
+  }
+
+  auto &state = *state_;
+
+  if (state.active != State::Operation::NONE) {
+    return std::unexpected(error(ManagedPhase::RUN, TreeError::WOULD_BLOCK, state.node()));
+  }
+
+  if (state.sessionResult) {
+    return *state.sessionResult;
+  }
+
+  if (!state.sessionStarted) {
+    return std::unexpected(
+      error(ManagedPhase::RUN, state.completed ? TreeError::CLOSED : TreeError::INVALID_ARGUMENT, state.node()));
+  }
+
+  detail::SetupFailureScope lifecycleScope({}, nullptr, nullptr);
+  State::Guard guard(state, State::Operation::RUN);
+  detail::CurrentSceneScope current(state.anchor);
+
+  return state.finishStep(state.managed->step(), origin);
 }
 
 std::expected<void, ManagedError> Scene::close(std::source_location origin) {
@@ -2054,6 +2185,10 @@ std::expected<void, ManagedError> Scene::close(std::source_location origin) {
 
   detail::SetupFailureScope lifecycleScope({}, nullptr, nullptr);
   auto &state = *state_;
+
+  if (state.sessionActive) {
+    return std::unexpected(error(ManagedPhase::CLEANUP, TreeError::WOULD_BLOCK, state.node()));
+  }
 
   if (state.active != State::Operation::NONE) {
     auto cause = error(ManagedPhase::CLEANUP, TreeError::WOULD_BLOCK, state.node());

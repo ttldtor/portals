@@ -83,3 +83,7 @@ Its generated directory also works offline. Language links at the top of each
 translated page lead to the same topic. Links marked **English** lead to material
 that has no Russian translation yet. See [translation maintenance](development.md#documentation-translations)
 for source revisions and update rules.
+
+## Experimental browser host
+
+[WASM Gallery and Level](wasm-gallery.md): build, host tools, input, lifecycle and device qualification limits.

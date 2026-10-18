@@ -1,0 +1,116 @@
+name: WASM build and browser tests
+
+on:
+  pull_request:
+    paths:
+      - 'CMake*'
+      - 'cmake/**'
+      - 'include/**'
+      - 'src/**'
+      - 'vendor/**'
+      - 'examples/wasm_gallery/**'
+      - 'tests/**'
+      - 'tools/package/**'
+      - 'LICENSE.txt'
+      - '.github/workflows/wasm.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'CMake*'
+      - 'cmake/**'
+      - 'include/**'
+      - 'src/**'
+      - 'vendor/**'
+      - 'examples/wasm_gallery/**'
+      - 'tests/**'
+      - 'tools/package/**'
+      - 'LICENSE.txt'
+      - '.github/workflows/wasm.yml'
+
+concurrency:
+  group: wasm-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  wasm:
+    name: WASM ${{ matrix.mode }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [debug, release]
+    env:
+      EMSDK_VERSION: '6.0.12'
+      EMSDK_COMMIT: 35ff8a6d150541276abbc6bae512ca90bcfbe220
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Install pinned Emscripten SDK
+        run: |
+          git clone --depth 1 --branch "$EMSDK_VERSION" https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+          test "$(git -C "$RUNNER_TEMP/emsdk" rev-parse HEAD)" = "$EMSDK_COMMIT"
+          "$RUNNER_TEMP/emsdk/emsdk" install "$EMSDK_VERSION"
+          "$RUNNER_TEMP/emsdk/emsdk" activate "$EMSDK_VERSION"
+          source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+          emcc --version
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+      - name: Configure
+        run: |
+          source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+          cmake --preset wasm-${{ matrix.mode }}
+      - name: Build runtime and SDK smoke test
+        run: |
+          source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+          cmake --build build/wasm-${{ matrix.mode }} --target portals_wasm_gallery portals_wasm_sdk_smoke --parallel 2
+      - name: Run SDK smoke test with Node.js
+        run: node build/wasm-${{ matrix.mode }}/examples/wasm_gallery/portals_wasm_sdk_smoke.js
+      - name: Install browser host dependencies
+        working-directory: examples/wasm_gallery/web
+        run: npm ci
+      - name: Test browser host
+        working-directory: examples/wasm_gallery/web
+        run: npm test
+      - name: Bundle browser host
+        id: bundle
+        run: node examples/wasm_gallery/web/build.mjs build/wasm-${{ matrix.mode }}/wasm-gallery
+      - name: Install Chromium
+        working-directory: examples/wasm_gallery/web
+        run: npx playwright install --with-deps chromium
+      - name: Test browser runtime
+        working-directory: examples/wasm_gallery/web
+        env:
+          PORTALS_WASM_DIR: ${{ github.workspace }}/build/wasm-${{ matrix.mode }}/wasm-gallery
+          PORTALS_WASM_PORT: '41813'
+        run: npm run test:browser 2>&1 | tee "$RUNNER_TEMP/wasm-browser-${{ matrix.mode }}.log"
+      - name: Save static browser bundle
+        if: always() && steps.bundle.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wasm-gallery-${{ matrix.mode }}
+          path: build/wasm-${{ matrix.mode }}/wasm-gallery
+          if-no-files-found: error
+          retention-days: 14
+      - name: Save browser test evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wasm-browser-results-${{ matrix.mode }}
+          path: |
+            build/browser-results
+            ${{ runner.temp }}/wasm-browser-${{ matrix.mode }}.log
+          if-no-files-found: ignore
+          retention-days: 14
