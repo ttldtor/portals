@@ -1009,6 +1009,23 @@ public:
     });
   }
 
+  /** @tparam Value Owning derived source value.
+   * @tparam Callback Copyable presentation callback taking const Value& and returning void or expected<void,
+   * TreeError>.
+   * @param source Read-only source owned by the receiving scene.
+   * @param callback Owning action first delivered after complete mount and Ref publication.
+   * @return Consuming recipe with the existing scene-owned subscription and checked failures.
+   */
+  template <std::equality_comparable Value, class Callback>
+    requires std::copy_constructible<Callback> &&
+             (std::same_as<std::invoke_result_t<Callback &, const Value &>, void> ||
+              std::same_as<std::invoke_result_t<Callback &, const Value &>, std::expected<void, TreeError>>)
+  Description &&observe(ManagedSource<Value> source, Callback callback) && {
+    return std::move(*this).setup([source, callback = std::move(callback)](ManagedScene &scene, Node<T> node) mutable {
+      return scene.observe(node, source, std::move(callback));
+    });
+  }
+
   /** @param callback Existing managed custom event adapter; standard bindings reject duplicates.
    * @return This consuming recipe for chaining; the scene owns the callback after mounting.
    */
@@ -1485,14 +1502,15 @@ inline Description<Label> label(TextValue text, ControlStyle style = {}, SizePol
   return detail::textControl<Label>(std::move(text), style, policy, std::move(resolver));
 }
 
-/** @tparam State Exact ManagedState<string> observation; bare braces retain the literal overload.
+/** @tparam State Exact ManagedState<string> or read-only ManagedSource<string>; bare braces retain literal overload.
  * @param model Scene-owned accepted text state; must belong to the receiving scene.
  * @param style Manual appearances.
  * @param policy Layout constraints.
  * @return One-way caption recipe; changed revisions synchronize before dirty frames without caller tokens.
  */
 template <class State>
-  requires std::same_as<std::remove_cvref_t<State>, ManagedState<std::string>>
+  requires(std::same_as<std::remove_cvref_t<State>, ManagedState<std::string>> ||
+           std::same_as<std::remove_cvref_t<State>, ManagedSource<std::string>>)
 inline Description<Label> label(State &&model, ControlStyle style = {}, SizePolicy policy = {}) {
   return control<Label>("", style, policy).setup([model](ManagedScene &scene, Node<Label> node) {
     return scene.bindText(node, model);
@@ -1510,21 +1528,22 @@ inline Description<Button> button(TextValue text, ControlStyle style = {}, SizeP
   return detail::textControl<Button>(std::move(text), style, policy, std::move(resolver));
 }
 
-/** @tparam State Exact ManagedState<string> observation; bare braces retain the literal overload.
+/** @tparam State Exact ManagedState<string> or read-only ManagedSource<string>; bare braces retain literal overload.
  * @param model Scene-owned accepted text state; must belong to the receiving scene.
  * @param style Manual appearances.
  * @param policy Layout constraints.
  * @return One-way caption recipe with independent action attachment and existing dirty-frame recovery.
  */
 template <class State>
-  requires std::same_as<std::remove_cvref_t<State>, ManagedState<std::string>>
+  requires(std::same_as<std::remove_cvref_t<State>, ManagedState<std::string>> ||
+           std::same_as<std::remove_cvref_t<State>, ManagedSource<std::string>>)
 inline Description<Button> button(State &&model, ControlStyle style = {}, SizePolicy policy = {}) {
   return control<Button>("", style, policy).setup([model](ManagedScene &scene, Node<Button> node) {
     return scene.bindText(node, model);
   });
 }
 
-/** @tparam Caption Owning TextValue expression or scene-owned ManagedState<string> observation.
+/** @tparam Caption Owning TextValue, ManagedState<string> or read-only ManagedSource<string> observation.
  * @tparam Callback Owning compact managed action, optionally borrowing ClickEvent.
  * @param text Caption expression or explicit accepted text state.
  * @param action Independent activation callback with existing checked result handling.
@@ -1534,7 +1553,8 @@ inline Description<Button> button(State &&model, ControlStyle style = {}, SizePo
  */
 template <class Caption, class Callback>
   requires((std::same_as<std::remove_cvref_t<Caption>, TextValue> ||
-            std::same_as<std::remove_cvref_t<Caption>, ManagedState<std::string>>) &&
+            std::same_as<std::remove_cvref_t<Caption>, ManagedState<std::string>> ||
+            std::same_as<std::remove_cvref_t<Caption>, ManagedSource<std::string>>) &&
            portals::detail::ManagedAction<Callback, ClickEvent>)
 inline Description<Button> button(Caption &&text, Callback action, ControlStyle style = {}, SizePolicy policy = {}) {
   return button(std::forward<Caption>(text), style, policy).onClick(std::move(action));

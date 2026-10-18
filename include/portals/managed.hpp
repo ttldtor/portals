@@ -13,6 +13,8 @@
 #include <portals/style_source.hpp>
 #include <portals/virtual_preparation.hpp>
 
+#include <ranges>
+
 namespace portals {
 
 class ManagedScene;
@@ -81,6 +83,63 @@ concept ManagedAction = requires(Callback &action, const Event &event) {
 } || requires(Callback &action) {
   { action() } -> ManagedActionResult;
 };
+
+/** @brief Recognize only the supported checked transform result.
+ * @tparam T Exact normalized transform result type.
+ */
+template <class T> inline constexpr bool IS_DERIVED_EXPECTED = false;
+template <class T> inline constexpr bool IS_DERIVED_EXPECTED<std::expected<T, TreeError>> = true;
+/** @brief Keep unrelated expected error types out of the owning-value overload.
+ * @tparam T Exact normalized transform result type.
+ */
+template <class T> inline constexpr bool IS_UNSUPPORTED_DERIVED_EXPECTED = false;
+template <class T, class E>
+inline constexpr bool IS_UNSUPPORTED_DERIVED_EXPECTED<std::expected<T, E>> = !std::same_as<E, TreeError>;
+
+/** @brief Unwrap the supported checked transform result without constructing an output.
+ * @tparam T Normalized owning result or expected with TreeError.
+ */
+template <class T> struct DerivedValue {
+  /// @brief Owning output type.
+  using Type = T;
+};
+
+/** @brief Successful owning payload of a checked computation.
+ * @tparam T Owning output type, without requiring a default constructor.
+ */
+template <class T> struct DerivedValue<std::expected<T, TreeError>> {
+  /// @brief Owning successful payload type.
+  using Type = T;
+};
+/** @brief Identify common borrowed outputs that cannot own their callback input.
+ * @tparam T Normalized computed value type.
+ */
+template <class T> inline constexpr bool IS_BORROWED_DERIVED_VALUE = false;
+template <class Char, class Traits>
+inline constexpr bool IS_BORROWED_DERIVED_VALUE<std::basic_string_view<Char, Traits>> = true;
+template <class T, std::size_t Extent> inline constexpr bool IS_BORROWED_DERIVED_VALUE<std::span<T, Extent>> = true;
+template <class T> inline constexpr bool IS_BORROWED_DERIVED_VALUE<std::reference_wrapper<T>> = true;
+
+/** @brief Owning payload type of one pure managed computation.
+ * @tparam Callback Callable invoked with const In&.
+ * @tparam In Declared owning input type.
+ */
+template <class Callback, class In>
+using DerivedOutput = typename DerivedValue<std::remove_cvref_t<std::invoke_result_t<Callback &, const In &>>>::Type;
+
+/** @brief Reject known borrowed outputs; arbitrary user values still satisfy Property's owning contract.
+ * @tparam Callback Owning synchronous computation taking the declared input by const reference.
+ * @tparam In Equality-comparable source value retained for one call.
+ */
+template <class Callback, class In>
+concept ManagedDerivation =
+  std::copy_constructible<std::decay_t<Callback>> && std::invocable<Callback &, const In &> &&
+  std::equality_comparable<DerivedOutput<Callback, In>> &&
+  std::constructible_from<DerivedOutput<Callback, In>, DerivedOutput<Callback, In> &&> &&
+  (!std::is_reference_v<std::invoke_result_t<Callback &, const In &>>) &&
+  (!IS_UNSUPPORTED_DERIVED_EXPECTED<std::remove_cvref_t<std::invoke_result_t<Callback &, const In &>>>) &&
+  (!std::is_pointer_v<DerivedOutput<Callback, In>>) && (!IS_BORROWED_DERIVED_VALUE<DerivedOutput<Callback, In>>) &&
+  (!std::ranges::view<DerivedOutput<Callback, In>>);
 } // namespace detail
 
 /** @brief Owning, copyable custom input adapter; arguments are borrowed for one invocation.
@@ -182,6 +241,29 @@ private:
   std::weak_ptr<const void> lifetime_;
   std::thread::id owner_{};
   NodeId scene_{};
+};
+
+/** @brief Read-only weak scene-owned derived value; no writable alias or subscription escapes.
+ * @tparam T Equality-comparable, transitively owning immutable Property value.
+ * Snapshots remain readable after close until scene destruction, matching ManagedState.
+ */
+template <std::equality_comparable T> class ManagedSource {
+public:
+  /** @brief Construct an empty source whose operations return CLOSED. */
+  ManagedSource() = default;
+
+  /** @return Independent immutable value/revision owner, WRONG_THREAD, or CLOSED after owner destruction. */
+  std::expected<std::shared_ptr<const PropertyChange<T>>, TreeError> snapshot() const {
+    return state_.snapshot();
+  }
+
+private:
+  friend class ManagedScene;
+
+  explicit ManagedSource(ManagedState<T> state) : state_(std::move(state)) {
+  }
+
+  ManagedState<T> state_;
 };
 
 /** @brief Additive lifecycle owner over one existing Application subtree.
@@ -394,35 +476,7 @@ public:
       auto record = std::make_shared<ObserverRecord>();
       record->scene = this;
       record->node = receiver;
-      record->revision = [source = std::weak_ptr(*property)]() -> std::expected<std::uint64_t, TreeError> {
-        auto locked = source.lock();
-        if (!locked) {
-          return std::unexpected(TreeError::CLOSED);
-        }
-        auto snapshot = locked->snapshot();
-        return snapshot ? std::expected<std::uint64_t, TreeError>((*snapshot)->revision)
-                        : std::unexpected(snapshot.error());
-      };
-      record->deliver = ui::detail::currentSceneCallback(
-        facadeContext(),
-        [source = std::weak_ptr(*property), scene = facadeContext(), action = std::forward<Callback>(callback)](
-          const std::shared_ptr<ObserverRecord> &entered) mutable -> std::expected<std::uint64_t, TreeError> {
-          auto locked = source.lock();
-          if (!locked) {
-            return std::unexpected(TreeError::CLOSED);
-          }
-          auto snapshot = locked->snapshot();
-          if (!snapshot) {
-            return std::unexpected(snapshot.error());
-          }
-
-          // Keep both the immutable value and the entered callable alive through self-removal.
-          ui::detail::SetupFailureScope collector(entered, ObserverRecord::collectShortFailure, "managed.observe");
-          ui::detail::CurrentSceneScope current(scene);
-          auto status = detail::invokeIgnoringValue(action, std::as_const((*snapshot)->value));
-          return status ? std::expected<std::uint64_t, TreeError>((*snapshot)->revision)
-                        : std::unexpected(status.error());
-        });
+      prepareObserverRecord(record, *property, std::forward<Callback>(callback));
 
       // User capture construction/destruction may have changed either identity or the budget.
       admitted = observerAdmission(receiver);
@@ -435,14 +489,7 @@ public:
           error(ManagedPhase::BIND, receiver, property ? TreeError::INVALID_ARGUMENT : property.error()));
       }
       observers_.reserve(observers_.size() + 1);
-      auto token =
-        (*property)->observe(receiver, [this, weak = std::weak_ptr(record), lifetime = std::weak_ptr(lifetime_)](
-                                         W &, std::shared_ptr<const PropertyChange<T>>) {
-          auto entered = weak.lock();
-          if (!lifetime.expired() && entered && !entered->initialPending) {
-            (void)invokeObserver(entered, ManagedPhase::INPUT);
-          }
-        });
+      auto token = connectObserverRecord(receiver, *property, record);
       if (!token) {
         return std::unexpected(error(ManagedPhase::BIND, receiver, token.error()));
       }
@@ -475,6 +522,70 @@ public:
               std::same_as<std::invoke_result_t<Callback &, const T &>, std::expected<void, TreeError>>)
   std::expected<void, ManagedError> observe(ManagedState<T> model, Callback &&callback) {
     return observe(root_, model, std::forward<Callback>(callback));
+  }
+
+  /** @tparam W Receiving managed widget type.
+   * @tparam T Owning derived value.
+   * @tparam Callback Copyable presentation callback with the writable source overload's result contract.
+   * @param receiver Live node that scopes the observation.
+   * @param source Read-only source owned by this scene.
+   * @param callback Owned callback, first invoked after complete mount.
+   * @return Existing typed observation admission result; no writable handle escapes.
+   */
+  template <class W, std::equality_comparable T, class Callback>
+    requires std::copy_constructible<std::decay_t<Callback>> &&
+             (std::same_as<std::invoke_result_t<Callback &, const T &>, void> ||
+              std::same_as<std::invoke_result_t<Callback &, const T &>, std::expected<void, TreeError>>)
+  std::expected<void, ManagedError> observe(Node<W> receiver, ManagedSource<T> source, Callback &&callback) {
+    return observe(receiver, source.state_, std::forward<Callback>(callback));
+  }
+
+  /** @tparam T Owning derived value.
+   * @tparam Callback Copyable presentation callback with the receiving overload's result contract.
+   * @param source Read-only source owned by this scene.
+   * @param callback Action scoped to the scene root.
+   * @return The receiving overload's checked observation admission result.
+   */
+  template <std::equality_comparable T, class Callback>
+    requires std::copy_constructible<std::decay_t<Callback>> &&
+             (std::same_as<std::invoke_result_t<Callback &, const T &>, void> ||
+              std::same_as<std::invoke_result_t<Callback &, const T &>, std::expected<void, TreeError>>)
+  std::expected<void, ManagedError> observe(ManagedSource<T> source, Callback &&callback) {
+    return observe(root_, source.state_, std::forward<Callback>(callback));
+  }
+
+  /** @brief Create an owning read-only computation using the existing observer runtime.
+   * @tparam In Owning equality-comparable input value.
+   * @tparam Transform Copyable pure function returning an owning Out or expected<Out, TreeError>.
+   * @param input Existing source owned by this scene; its immutable value is borrowed during computation.
+   * @param transform Owned synchronous computation; must not mutate UI or depend on Ref publication.
+   * @param kind PAINT or LAYOUT invalidation for changed output; NONE is rejected.
+   * @param options Positive existing output Property observer capacity.
+   * @param origin Derivation registration retained in failure diagnostics.
+   * @return Immediately readable source, or checked initial error with no retained output/attachment.
+   * Runtime failures preserve the last good output and follow the existing managed stop policy.
+   */
+  template <std::equality_comparable In, class Transform>
+    requires detail::ManagedDerivation<Transform, In>
+  std::expected<ManagedSource<detail::DerivedOutput<Transform, In>>, ManagedError>
+  derive(ManagedState<In> input, Transform &&transform, Invalidation kind = Invalidation::PAINT,
+         PropertyOptions options = {}, std::source_location origin = std::source_location::current());
+
+  /** @tparam In Owning equality-comparable input value.
+   * @tparam Transform Copyable pure owning computation with the writable input overload's contract.
+   * @param input Previously created read-only source; fresh outputs make declared dependency cycles unexpressible.
+   * @param transform Owned synchronous computation.
+   * @param kind Output invalidation, PAINT or LAYOUT.
+   * @param options Positive output Property observer capacity.
+   * @param origin Derivation registration retained in diagnostics.
+   * @return Immediately readable source or unchanged typed creation failure.
+   */
+  template <std::equality_comparable In, class Transform>
+    requires detail::ManagedDerivation<Transform, In>
+  std::expected<ManagedSource<detail::DerivedOutput<Transform, In>>, ManagedError>
+  derive(ManagedSource<In> input, Transform &&transform, Invalidation kind = Invalidation::PAINT,
+         PropertyOptions options = {}, std::source_location origin = std::source_location::current()) {
+    return derive(input.state_, std::forward<Transform>(transform), kind, options, origin);
   }
 
   /** @param node Managed button without a prior event binding.
@@ -633,6 +744,14 @@ public:
    * A manual caption change remains visible until the next changed model revision. No reverse write occurs.
    */
   std::expected<void, ManagedError> bindText(Node<Control> node, ManagedState<std::string> model);
+
+  /** @param node Live managed caption receiver.
+   * @param source Read-only owning string source from this scene.
+   * @return Existing caption binding result; updates are synchronized at dirty preparation.
+   */
+  std::expected<void, ManagedError> bindText(Node<Control> node, ManagedSource<std::string> source) {
+    return bindText(node, source.state_);
+  }
 
   /** @brief Declare a nested focus scope; this scene owns its disconnect token.
    * @param node Live managed scope root, possibly also an ordinary bound control.
@@ -1070,6 +1189,9 @@ private:
     std::optional<ManagedError> shortFailure;
     const void *shortAttempt{};
     bool promotesFailure{};
+    bool runtime{true};
+    const char *operation{};
+    std::source_location origin{};
     bool initialPending{true};
     bool running{};
     bool retired{};
@@ -1081,7 +1203,7 @@ private:
         record.shortFailure = *failure;
         record.shortAttempt = attempt;
         auto &scene = *record.scene;
-        if (!scene.failure_ && scene.shortReported(*failure)) {
+        if (record.runtime && !scene.failure_ && scene.shortReported(*failure)) {
           // LATCH precedes recordError without intervening user code. Reserve that exact diagnostic receipt;
           // clearErrors already revokes it if user code explicitly clears history after the short operation.
           scene.failure_ = *failure;
@@ -1100,6 +1222,13 @@ private:
   };
 
   std::expected<void, ManagedError> observerAdmission(Node<Widget> node);
+  template <class T, class Callback>
+  void prepareObserverRecord(const std::shared_ptr<ObserverRecord> &record, const std::shared_ptr<Property<T>> &source,
+                             Callback &&callback);
+  template <class W, class T>
+  std::expected<Subscription, TreeError> connectObserverRecord(Node<W> receiver,
+                                                               const std::shared_ptr<Property<T>> &source,
+                                                               const std::shared_ptr<ObserverRecord> &record);
   std::expected<void, TreeError> invokeObserver(const std::shared_ptr<ObserverRecord> &record, ManagedPhase phase);
   std::expected<void, TreeError> recoverObservers();
   void pruneObservers() noexcept;
@@ -1425,4 +1554,5 @@ private:
 };
 } // namespace portals
 
+#include <portals/detail/managed_derive.hpp>
 #include <portals/detail/managed_views.hpp>

@@ -7,7 +7,7 @@ managed state when several controls need the same UI-owned value. A [`ui::Ref<T>
 Copying the reference does not subscribe to changes.
 Explicit shared text state is supported by editors, labels and buttons.
 Managed observation delivers the latest state values.
-Derived bindings remain **TBD — M2**.
+Read-only derived managed sources share the same observation and caption paths.
 
 ## Change text from a button
 
@@ -204,6 +204,67 @@ still borrow their objects. Removing the receiver from its callback is supported
 destroying the active scene from a callback is prohibited. Registration and nested
 preparation, run or close during recovery are rejected by the existing checked
 boundaries.
+
+## Derive a read-only value {#managed-derivation}
+
+Use `owner.derive(input, transform)` to compute an owning value from one managed
+state or earlier derived source. The returned `ManagedSource<T>` exposes owning
+immutable `snapshot()` values and has no `set()` or conversion to writable state.
+Labels, buttons and managed `.observe` accept it directly. Editors and checkboxes
+still require writable state for their two-way bindings.
+
+[Complete program](examples/docs_derive.cpp): edit the name to update both the label
+and button caption. Click the button or press F10 to close the scene. Build
+`portals_docs_derive` with examples enabled. Setup failures flow through the scene
+factory's `expected` result to the existing runner.
+
+\include{lineno} docs_derive.cpp
+
+Check the returned `expected<ManagedSource<Out>, ManagedError>` before using it.
+Initial computation runs synchronously, so a successful source is immediately
+readable during mounting. Initial failure publishes neither output nor subscription
+and can be handled without stopping a later valid run. A transform takes `const In&`
+and returns an owning, equality-comparable Out or `expected<Out, TreeError>`;
+Out need not have a default constructor. References and known borrowed result
+forms such as string_view, span, pointers and range views are rejected. Custom
+types must still satisfy [Property's owning-value contract](property.md).
+
+The transform must be a pure synchronous value computation. It must not mutate
+the UI, enter lifecycle operations, or depend on unpublished sibling references.
+One owned callable instance serves initial and later computations. Its input
+snapshot remains alive throughout invocation. A changed declared input during
+initial computation rejects admission with `WOULD_BLOCK`; arbitrary client side
+effects cannot be rolled back.
+
+Changed inputs use the existing Scheduler and bounded dirty recovery. Equal
+transformed values advance the processed input revision without publishing an
+output revision. A committed output whose notification was rejected is recovered
+from its snapshot; repeating `set` is unnecessary. Pure chains settle before
+ordinary caption synchronization in the same dirty frame when the input changed
+before preparation. Later mutations from user `onPrepare` callbacks have no such
+same-frame guarantee.
+
+Runtime errors preserve the last good output and unchanged output revision;
+the input remains committed. Returned TreeError values stay exact, bad_alloc maps
+to `NO_MEMORY`, and other transform exceptions map to `CALLBACK_FAILED`.
+The runner and bounded scene diagnostics carry the error and derivation call site;
+snapshot still returns the last good value. Existing stop policy applies, with
+retry only through an explicit later preparation. Close retires computation;
+final snapshots remain readable until scene destruction. Retained immutable
+snapshots can outlive the owner.
+
+Each derive consumes one existing `maxStates` slot and one root observer slot.
+Defaults are 256 states, 256 scene observers, 64 observers per node, 64 Property
+endpoints and 16 recovery passes; the remaining intersection of those limits
+determines capacity. `derive` accepts the existing optional output invalidation
+(PAINT by default, or LAYOUT) and PropertyOptions; NONE is rejected.
+
+Every output is fresh and read-only, so declared dependency cycles cannot be
+constructed. Arbitrary captured side effects are not tracked; bounded
+nonconvergence returns `WOULD_BLOCK` and does not diagnose a hidden graph cycle.
+`Ref::draftText()`, `captionText()` and `committedText()` are snapshot-only text
+sources and are not reactive derive inputs. Live text and derived-list/model
+adapters remain separate planned work.
 
 ## Choose the event interface
 

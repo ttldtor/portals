@@ -739,7 +739,13 @@ std::expected<void, TreeError> ManagedScene::invokeObserver(const std::shared_pt
   record->promotesFailure = false;
 
   const auto report = [&](TreeError cause) -> std::expected<void, TreeError> {
-    remember(error(phase, record->node, cause));
+    auto failure = error(phase, record->node, cause);
+    if (record->operation) {
+      failure.operation = record->operation;
+      failure.operationOrigin = record->origin;
+      failure.registrationOrigin = record->origin;
+    }
+    remember(failure);
     return std::unexpected(cause);
   };
   const auto reportShort = [&]() -> std::expected<void, TreeError> {
