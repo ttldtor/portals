@@ -16,7 +16,7 @@ identify a released version.
 | Scoped styling by Ref and its file convenience | Available — M1; [reference styles and files](declarative-ui.md) |
 | Scene text/file loader with allowlisted registry | Available — M1; [syntax and examples](scene-loading-guide.md) |
 | Text sources and shared caption state | Available; [shared state](bindings-guide.md) and [read-only sources](text-property.md) |
-| Automatic one-way binding and observation facade | **TBD — M2** |
+| Managed state observation | Available; [latest-value delivery](bindings-guide.md#managed-observation) |
 | Derived state and binding expressions | **TBD — M2** |
 | PSS v1 selectors, parts and inheritance | **TBD — M5** |
 | Expanded theme tokens and computed dependency graph | **TBD — M5**; current typed LiveTheme parameters already exist |

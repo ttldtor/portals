@@ -6,7 +6,8 @@ Start with an explicit event handler and an observing control reference. Use a
 managed state when several controls need the same UI-owned value. A [`ui::Ref<T>`](glossary.md) identifies a control without keeping it alive.
 Copying the reference does not subscribe to changes.
 Explicit shared text state is supported by editors, labels and buttons.
-General observation and derived bindings remain **TBD — M2**.
+Managed observation delivers the latest state values.
+Derived bindings remain **TBD — M2**.
 
 ## Change text from a button
 
@@ -125,6 +126,85 @@ An invalid intermediate editor draft remains visible without changing the shared
 caption. `ON_COMPLETION` and `EXPLICIT` defer model publication by their existing
 rules. [Editor modes](line-edit.md) and [history](editor-history.md) still apply.
 
+## Observe a managed value {#managed-observation}
+
+Use `.observe(state, callback)` when a control needs to present a managed value
+through application code. The scene owns the subscription and callback. For
+ordinary shared text captions, `ui::label(model)` and `ui::button(model)` remain
+the direct forms.
+
+[Complete program](examples/docs_observe.cpp).
+
+The editor publishes accepted strings; the label formats the latest accepted value.
+Run this complete program, edit the text, and press F10 or click Quit to close it:
+
+```cpp
+#include <portals/ui.hpp>
+
+#include <string>
+
+int main() {
+  using namespace portals;
+
+  auto scene = ui::scene([](ManagedScene &owner) {
+    return owner.state(std::string("Portals")).transform([](auto model) {
+      ui::Ref<Label> summary;
+
+      return ui::vbox(
+        ui::lineEdit(model),
+        ui::label(summary, "").observe(model, [summary](const std::string &value) {
+          summary.text() = text("Accepted: {}", value);
+        }),
+        ui::button("Quit", [] { ui::quit(); }));
+    });
+  });
+
+  return scene
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+The initial callback runs during the first permitted preparation after the whole
+recipe has mounted and all `Ref` objects have been published. Registration and
+description setup do not invoke it. Captured sibling references may appear before
+or after the observing control in the recipe. A failure in this initial callback
+is a `PREPARE` failure handled by the runner; it does not undo a successful mount.
+For a scene with managed observers, preparation or run/session entry during an
+unfinished mount returns `WOULD_BLOCK`, including nested mounts.
+
+For explicit registration, `owner.observe(receiver, state, callback)` scopes
+delivery to a managed node; `owner.observe(state, callback)` uses the scene root.
+Both return `std::expected<void, ManagedError>`. Failed registration leaves no
+managed attachment or subscription. The receiver and state must belong
+to that scene, and operations run on its UI thread. A copyable callback takes `const T&`
+and returns `void` or `std::expected<void, TreeError>`. Its value is backed by an
+immutable owning snapshot for the invocation; copy data that must outlive it.
+
+Each registration tracks its own last successful value revision. Equal assignment
+does not deliver again. Updates use the existing scheduler and may coalesce to the
+latest state; this API is intended for presentation, not a lossless event log.
+When delivery is rejected, existing dirty preparation retries from the latest
+snapshot. Do not repeat `set()` to retry notification: the value has already
+committed. Callback failure preserves the original receiver, phase and typed
+error; a failed callback does not advance its successful revision or roll back
+the source. Short `Ref` mutation failures inside a void callback still reach the
+scene diagnostic collector and the existing runner stop policy.
+
+`ManagedOptions::maxObservers` defaults to 256 per scene and
+`maxObserversPerNode` to 64. Existing property and scheduler limits also apply.
+`maxObserverRecoveryPasses` defaults to 16 and must be positive. If callbacks keep
+changing earlier observed values and recovery cannot converge within that limit,
+preparation returns `WOULD_BLOCK`; no timer or idle retry is installed. A later
+explicit preparation may retry after the cause is resolved.
+
+Removing the receiver or closing the scene retires delivery. A retained callback
+never follows a replacement node that reuses its slot. Captures by C++ reference
+still borrow their objects. Removing the receiver from its callback is supported;
+destroying the active scene from a callback is prohibited. Registration and nested
+preparation, run or close during recovery are rejected by the existing checked
+boundaries.
+
 ## Choose the event interface
 
 The following interfaces serve different registration paths:
@@ -135,6 +215,7 @@ The following interfaces serve different registration paths:
 | Recipe `.onClick(callback)` / `Ref<Button>::onClick(callback)` | No arguments or `const ClickEvent&` | Existing managed activation adapter |
 | `ui::onKey(selection, callback)` | No arguments or `const KeyEvent&` | Raw keyboard interception before semantic routing |
 | `ui::onLayout(ref, callback)` / `ref.onLayout(callback)` | No arguments or `const NodeGeometry&` | Scene-owned notification after final layout |
+| Recipe `.observe(state, callback)` / `ManagedScene::observe(receiver, state, callback)` | `const T&` | Scene-owned presentation of the latest managed state |
 | `Property<T>::observe(receiver, callback)` | `W&`, `shared_ptr<const PropertyChange<T>>` | Scheduled value notification to a checked receiver |
 | `ManagedScene::onEvent(node, callback)` | Existing custom event contract | Explicit custom-widget routing |
 
@@ -197,7 +278,7 @@ For complete programs and failure paths, read
 The [property reference](property.md) specifies ownership, backpressure and
 cancellation; [declarative composition](declarative-ui.md) specifies runner reporting.
 
-**TBD — M2:** automatic/derived binding facilities. The future expression
+**TBD — M2:** derived binding facilities. The future expression
 syntax, dependency graph and cycle policy are not presented as working features.
 Typed live theme parameters are already available through explicit UI updates;
 see [themes](themes-guide.md). Their existence does not imply automatic domain

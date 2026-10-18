@@ -106,7 +106,10 @@ struct ManagedOptions {
   SchedulerTime keySequenceTimeout{1000};  ///< Positive inactivity timeout between sequence strokes, in milliseconds.
   std::size_t maxLayoutHandlers{256}; ///< Positive maximum scene-owned geometry observers; scheduler limits apply too.
   std::size_t maxLayoutPublicationRetries{
-    3}; ///< Positive queue-full attempt cap before one typed rejection and cancellation.
+    3};                                ///< Positive queue-full attempt cap before one typed rejection and cancellation.
+  std::size_t maxObservers{256};       ///< Positive scene-owned state observer limit.
+  std::size_t maxObserversPerNode{64}; ///< Positive state observer limit per receiving node.
+  std::size_t maxObserverRecoveryPasses{16}; ///< Positive dirty-prepare convergence bound.
 };
 
 /** @brief Weak UI handle to a scene-owned Property, never an owning alias.
@@ -350,6 +353,128 @@ public:
     } catch (const std::bad_alloc &) {
       return std::unexpected(error(ManagedPhase::STATE, root_, TreeError::NO_MEMORY));
     }
+  }
+
+  /** @brief Own a one-way presentation observer until its receiver or scene retires.
+   * Initial delivery reads the latest value at dirty preparation after complete declarative mount.
+   * Later queued revisions may coalesce. Callbacks borrow an immutable value only for their invocation;
+   * captures must not destroy this scene. Equal updates do not deliver again. Registration never invokes user code.
+   * @tparam W Managed receiving widget type.
+   * @tparam T Owning equality-comparable state value.
+   * @tparam Callback Copyable callable taking const T&, returning void or expected<void, TreeError>.
+   * @param receiver Live managed identity, or this scene's root.
+   * @param model State created by this scene.
+   * @param callback Owned presentation action; node removal during invocation is allowed.
+   * @return Success or BIND validation, capacity, allocation or callback-construction error.
+   */
+  template <class W, std::equality_comparable T, class Callback>
+    requires std::copy_constructible<std::decay_t<Callback>> &&
+             (std::same_as<std::invoke_result_t<Callback &, const T &>, void> ||
+              std::same_as<std::invoke_result_t<Callback &, const T &>, std::expected<void, TreeError>>)
+  std::expected<void, ManagedError> observe(Node<W> receiver, ManagedState<T> model, Callback &&callback) {
+    ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
+    auto admitted = observerAdmission(receiver);
+    if (!admitted) {
+      return admitted;
+    }
+
+    auto property = model.lock();
+    if (!property || model.scene_ != root_.id()) {
+      return std::unexpected(
+        error(ManagedPhase::BIND, receiver, property ? TreeError::INVALID_ARGUMENT : property.error()));
+    }
+
+    try {
+      if constexpr (std::is_pointer_v<std::decay_t<Callback>> || requires { callback.operator bool(); }) {
+        if (!static_cast<bool>(callback)) {
+          return std::unexpected(error(ManagedPhase::BIND, receiver, TreeError::INVALID_ARGUMENT));
+        }
+      }
+
+      auto record = std::make_shared<ObserverRecord>();
+      record->scene = this;
+      record->node = receiver;
+      record->revision = [source = std::weak_ptr(*property)]() -> std::expected<std::uint64_t, TreeError> {
+        auto locked = source.lock();
+        if (!locked) {
+          return std::unexpected(TreeError::CLOSED);
+        }
+        auto snapshot = locked->snapshot();
+        return snapshot ? std::expected<std::uint64_t, TreeError>((*snapshot)->revision)
+                        : std::unexpected(snapshot.error());
+      };
+      record->deliver = ui::detail::currentSceneCallback(
+        facadeContext(),
+        [source = std::weak_ptr(*property), scene = facadeContext(), action = std::forward<Callback>(callback)](
+          const std::shared_ptr<ObserverRecord> &entered) mutable -> std::expected<std::uint64_t, TreeError> {
+          auto locked = source.lock();
+          if (!locked) {
+            return std::unexpected(TreeError::CLOSED);
+          }
+          auto snapshot = locked->snapshot();
+          if (!snapshot) {
+            return std::unexpected(snapshot.error());
+          }
+
+          // Keep both the immutable value and the entered callable alive through self-removal.
+          ui::detail::SetupFailureScope collector(entered, ObserverRecord::collectShortFailure, "managed.observe");
+          ui::detail::CurrentSceneScope current(scene);
+          auto status = detail::invokeIgnoringValue(action, std::as_const((*snapshot)->value));
+          return status ? std::expected<std::uint64_t, TreeError>((*snapshot)->revision)
+                        : std::unexpected(status.error());
+        });
+
+      // User capture construction/destruction may have changed either identity or the budget.
+      admitted = observerAdmission(receiver);
+      property = model.lock();
+      if (!admitted) {
+        return admitted;
+      }
+      if (!property || model.scene_ != root_.id()) {
+        return std::unexpected(
+          error(ManagedPhase::BIND, receiver, property ? TreeError::INVALID_ARGUMENT : property.error()));
+      }
+      observers_.reserve(observers_.size() + 1);
+      auto token =
+        (*property)->observe(receiver, [this, weak = std::weak_ptr(record), lifetime = std::weak_ptr(lifetime_)](
+                                         W &, std::shared_ptr<const PropertyChange<T>>) {
+          auto entered = weak.lock();
+          if (!lifetime.expired() && entered && !entered->initialPending) {
+            (void)invokeObserver(entered, ManagedPhase::INPUT);
+          }
+        });
+      if (!token) {
+        return std::unexpected(error(ManagedPhase::BIND, receiver, token.error()));
+      }
+
+      auto dirty = app_.tree().invalidate(root_, Invalidation::PAINT);
+      if (!dirty) {
+        return std::unexpected(error(ManagedPhase::BIND, receiver, dirty.error()));
+      }
+      record->subscription = std::move(*token);
+      observers_.push_back(std::move(record));
+      return {};
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(error(ManagedPhase::BIND, receiver, TreeError::NO_MEMORY));
+    } catch (const std::length_error &) {
+      return std::unexpected(error(ManagedPhase::BIND, receiver, TreeError::NODE_LIMIT));
+    } catch (...) {
+      return std::unexpected(error(ManagedPhase::BIND, receiver, TreeError::CALLBACK_FAILED));
+    }
+  }
+
+  /** @tparam T Owning equality-comparable state value.
+   * @tparam Callback Copyable callback with the receiving observe overload's result contract.
+   * @param model State created by this scene.
+   * @param callback Presentation action retained until scene retirement.
+   * @return The receiving overload's typed registration result, scoped to root().
+   */
+  template <std::equality_comparable T, class Callback>
+    requires std::copy_constructible<std::decay_t<Callback>> &&
+             (std::same_as<std::invoke_result_t<Callback &, const T &>, void> ||
+              std::same_as<std::invoke_result_t<Callback &, const T &>, std::expected<void, TreeError>>)
+  std::expected<void, ManagedError> observe(ManagedState<T> model, Callback &&callback) {
+    return observe(root_, model, std::forward<Callback>(callback));
   }
 
   /** @param node Managed button without a prior event binding.
@@ -935,6 +1060,54 @@ public:
   void stop(Application &app) override;
 
 private:
+  struct ObserverRecord {
+    ManagedScene *scene{};
+    Node<Widget> node;
+    Subscription subscription;
+    std::function<std::expected<std::uint64_t, TreeError>()> revision;
+    std::function<std::expected<std::uint64_t, TreeError>(const std::shared_ptr<ObserverRecord> &)> deliver;
+    std::optional<std::uint64_t> successful;
+    std::optional<ManagedError> shortFailure;
+    const void *shortAttempt{};
+    bool promotesFailure{};
+    bool initialPending{true};
+    bool running{};
+    bool retired{};
+
+    static void collectShortFailure(void *owner, ui::detail::SetupFailureEvent event, ManagedError *failure,
+                                    const void *attempt) noexcept {
+      auto &record = *static_cast<ObserverRecord *>(owner);
+      if (event == ui::detail::SetupFailureEvent::LATCH && !record.shortFailure && failure) {
+        record.shortFailure = *failure;
+        record.shortAttempt = attempt;
+        auto &scene = *record.scene;
+        if (!scene.failure_ && scene.shortReported(*failure)) {
+          // LATCH precedes recordError without intervening user code. Reserve that exact diagnostic receipt;
+          // clearErrors already revokes it if user code explicitly clears history after the short operation.
+          scene.failure_ = *failure;
+          scene.failureDiagnostic_ =
+            scene.errorCount_ < scene.errors_.size() ? std::optional<std::size_t>(scene.errorCount_) : std::nullopt;
+          record.promotesFailure = true;
+        }
+      }
+      if (event == ui::detail::SetupFailureEvent::NOTIFY && attempt == record.shortAttempt && record.promotesFailure) {
+        record.scene->failureNotified_ = true;
+      }
+      if (event == ui::detail::SetupFailureEvent::END_ATTEMPT && attempt == record.shortAttempt) {
+        record.shortAttempt = nullptr;
+      }
+    }
+  };
+
+  std::expected<void, ManagedError> observerAdmission(Node<Widget> node);
+  std::expected<void, TreeError> invokeObserver(const std::shared_ptr<ObserverRecord> &record, ManagedPhase phase);
+  std::expected<void, TreeError> recoverObservers();
+  void pruneObservers() noexcept;
+
+  bool observerMountPending() const noexcept {
+    return mountDepth_ && !observers_.empty();
+  }
+
   template <class Value, class Callback>
   std::expected<void, ManagedError> onShortcutActions(Value &&shortcut, Callback &action,
                                                       detail::ShortcutActions actions, ShortcutOptions options,
@@ -1209,6 +1382,7 @@ private:
   StyleEngine styles_;
   std::vector<std::shared_ptr<Entry>> entries_;
   std::vector<std::shared_ptr<void>> properties_;
+  std::vector<std::shared_ptr<ObserverRecord>> observers_ = std::vector<std::shared_ptr<ObserverRecord>>(0);
   std::vector<std::shared_ptr<detail::ManagedModelSource>> models_;
   std::shared_ptr<std::function<std::expected<bool, ManagedError>(const InputEvent &)>> input_;
   std::shared_ptr<KeySnapshot> keys_;
@@ -1233,6 +1407,10 @@ private:
   bool stylesDirty_{};
   mutable bool styling_{};
   bool preparing_{};
+  bool recoveringObservers_{};
+  bool pruningObservers_{};
+  std::size_t observerCallbacks_{};
+  std::size_t mountDepth_{};
   bool reporting_{};
   bool failureNotified_{};
   bool runFailureNotified_{};

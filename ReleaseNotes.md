@@ -5,6 +5,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Added] Scene-owned managed-state observers deliver the latest value through
+  checked callbacks, with initial synchronization after reference publication,
+  bounded dirty-preparation recovery and receiver-scoped cleanup.
+
 - [Added] Labels and buttons accept owning text expressions and explicit shared
   scene-owned string state. Caption synchronization reuses managed dirty-frame
   preparation and preserves typed text failures. Read-only caption, draft and

@@ -584,3 +584,21 @@ set_target_properties(portals_text_sources_form_consumer PROPERTIES CXX_EXTENSIO
 if(WIN32)
   target_sources(portals_text_sources_form_consumer PRIVATE no_dialogs.cpp)
 endif()
+
+# Managed observation is available from relocated public headers and libraries.
+add_executable(portals_managed_observe_consumer managed_observe.cpp)
+target_link_libraries(portals_managed_observe_consumer PRIVATE portals::core)
+set_target_properties(portals_managed_observe_consumer PROPERTIES CXX_EXTENSIONS OFF)
+if(WIN32)
+  target_sources(portals_managed_observe_consumer PRIVATE no_dialogs.cpp)
+endif()
+add_test(NAME consumer.managed-observe COMMAND portals_managed_observe_consumer)
+set_tests_properties(consumer.managed-observe PROPERTIES TIMEOUT 15)
+
+# The complete native guide compiles without the finite test harness.
+add_executable(portals_managed_observe_form_consumer managed_observe_form.cpp)
+target_link_libraries(portals_managed_observe_form_consumer PRIVATE portals::core)
+set_target_properties(portals_managed_observe_form_consumer PROPERTIES CXX_EXTENSIONS OFF)
+if(WIN32)
+  target_sources(portals_managed_observe_form_consumer PRIVATE no_dialogs.cpp)
+endif()

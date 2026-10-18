@@ -220,6 +220,11 @@ int main() {
 }
 ```
 
+For custom presentation, attach `.observe(state, callback)` to a control recipe.
+The scene owns delivery, starting after all references are published; see
+[managed observation](bindings-guide.md#managed-observation) for errors, limits
+and the latest-value contract.
+
 For large datasets, create a model in the same factory and pass its observing
 handle to `ui::virtualList`, `ui::virtualTable` or `ui::chart`.
 See [models](model.md) and [virtual tables](virtual-table.md).

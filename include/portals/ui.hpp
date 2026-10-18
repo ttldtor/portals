@@ -144,6 +144,20 @@ struct MountContext {
 
 /** @brief Internal bridge to existing managed validation and private consuming recipes. */
 struct Access {
+  /** @param scene Owner of the nested mount transaction entered on this thread. */
+  static void beginMount(ManagedScene &scene) noexcept {
+    if (scene.owner_ == std::this_thread::get_id()) {
+      ++scene.mountDepth_;
+    }
+  }
+
+  /** @param scene Owner whose complete transaction, including Ref publication, has ended. */
+  static void endMount(ManagedScene &scene) noexcept {
+    if (scene.owner_ == std::this_thread::get_id()) {
+      --scene.mountDepth_;
+    }
+  }
+
   /** @param scene Borrowed managed owner; observed only during UI-affine publication.
    * @return Weak token that expires before scene destruction releases registrations.
    */
@@ -976,6 +990,22 @@ public:
   Description &&onClick(Callback callback) && {
     return std::move(*this).setup([callback = std::move(callback)](ManagedScene &scene, Node<T> node) mutable {
       return scene.onClick(node, std::move(callback));
+    });
+  }
+
+  /** @tparam Value Owning equality-comparable managed state value.
+   * @tparam Callback Copyable presentation callback taking const Value&, returning void or expected<void, TreeError>.
+   * @param model State owned by the receiving scene.
+   * @param callback Owning action, first delivered after the entire lazy mount and reference publication.
+   * @return Consuming recipe; the scene owns the subscription after successful mount.
+   */
+  template <std::equality_comparable Value, class Callback>
+    requires std::copy_constructible<Callback> &&
+             (std::same_as<std::invoke_result_t<Callback &, const Value &>, void> ||
+              std::same_as<std::invoke_result_t<Callback &, const Value &>, std::expected<void, TreeError>>)
+  Description &&observe(ManagedState<Value> model, Callback callback) && {
+    return std::move(*this).setup([model, callback = std::move(callback)](ManagedScene &scene, Node<T> node) mutable {
+      return scene.observe(node, model, std::move(callback));
     });
   }
 
@@ -2263,6 +2293,15 @@ Description<Chart<T>> chart(Ref<Chart<T>> reference, ManagedModel<T> model,
  * References publish only after all nodes remain live. External callback effects are not undone.
  */
 template <class T> std::expected<Node<T>, ManagedError> mount(ManagedScene &scene, Description<T> &&description) try {
+  struct Mounting {
+    ManagedScene &scene;
+
+    ~Mounting() {
+      detail::Access::endMount(scene);
+    }
+  } guard{scene};
+
+  detail::Access::beginMount(scene);
   detail::MountContext context;
   std::expected<Node<T>, ManagedError> result =
     std::unexpected(detail::error(scene.root(), TreeError::INVALID_ARGUMENT));
