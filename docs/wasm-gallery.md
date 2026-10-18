@@ -33,6 +33,13 @@ Use `wasm-release` in place of `wasm-debug` for Release. The sample is controlle
 C++23 and native Wasm exceptions, with no Asyncify, JSPI or pthreads. They do not
 build the native terminal examples or native test executables.
 
+The gallery reserves a 1 MiB fixed Wasm stack: Emscripten 6.0.12's default
+64 KiB is insufficient for unoptimized scene mounting. Override the byte budget
+with `cmake --preset wasm-debug -DPORTALS_WASM_STACK_SIZE=1048576`.
+Growing the heap does not grow this stack. Debug enables pointer checks with
+`STACK_OVERFLOW_CHECK=2`; see Emscripten's [stack size](https://emscripten.org/docs/tools_reference/settings_reference.html#stack-size)
+and [overflow checks](https://emscripten.org/docs/tools_reference/settings_reference.html#stack-overflow-check).
+
 Build the static host beside the runtime:
 
 ```powershell

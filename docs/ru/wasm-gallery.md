@@ -34,6 +34,13 @@ node build/wasm-debug/examples/wasm_gallery/portals_wasm_sdk_smoke.js
 Эти presets используют C++23 и native Wasm exceptions, без Asyncify, JSPI и pthreads.
 Нативные терминальные примеры и нативные тестовые программы в них не собираются.
 
+Gallery резервирует фиксированный Wasm stack размером 1 МиБ: стандартных
+64 КиБ в Emscripten 6.0.12 недостаточно для неоптимизированного mount сцены.
+Бюджет в байтах задаётся через `cmake --preset wasm-debug -DPORTALS_WASM_STACK_SIZE=1048576`.
+Рост heap не увеличивает этот stack. В Debug включена проверка указателя
+`STACK_OVERFLOW_CHECK=2`; см. описание [размера stack](https://emscripten.org/docs/tools_reference/settings_reference.html#stack-size)
+и [проверок переполнения](https://emscripten.org/docs/tools_reference/settings_reference.html#stack-overflow-check) Emscripten.
+
 Соберите статический host рядом с runtime:
 
 ```powershell
