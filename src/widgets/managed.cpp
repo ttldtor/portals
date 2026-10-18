@@ -1451,6 +1451,93 @@ ManagedScene::bind(Node<CheckBox> node, ManagedState<bool> model,
   }
 }
 
+std::expected<void, ManagedError> ManagedScene::syncCaption(Node<Control> node, CaptionBinding &binding,
+                                                            ManagedPhase phase) try {
+  auto snapshot = binding.model.snapshot();
+
+  if (!snapshot) {
+    return std::unexpected(error(phase, node, snapshot.error()));
+  }
+
+  if (binding.revision == (*snapshot)->revision) {
+    return {};
+  }
+
+  auto text = GraphemeText::from((*snapshot)->value, widthPolicy());
+
+  if (!text) {
+    const auto kind = text.error().kind;
+    const bool limited = kind == TextErrorKind::INPUT_LIMIT || kind == TextErrorKind::CLUSTER_LIMIT ||
+                         kind == TextErrorKind::GRAPHEME_LIMIT || kind == TextErrorKind::CELL_LIMIT;
+    auto failure = error(phase, node, limited ? TreeError::NODE_LIMIT : TreeError::INVALID_ARGUMENT);
+
+    failure.text = text.error();
+
+    return std::unexpected(failure);
+  }
+
+  auto applied = setControlText(app_.tree(), node, std::move(*text));
+
+  if (!applied) {
+    return std::unexpected(error(phase, node, applied.error()));
+  }
+
+  binding.revision = (*snapshot)->revision;
+
+  return {};
+} catch (const std::bad_alloc &) {
+  return std::unexpected(error(phase, node, TreeError::NO_MEMORY));
+} catch (const std::length_error &) {
+  return std::unexpected(error(phase, node, TreeError::NODE_LIMIT));
+} catch (...) {
+  return std::unexpected(error(phase, node, TreeError::CALLBACK_FAILED));
+}
+
+std::expected<void, ManagedError> ManagedScene::bindText(Node<Control> node, ManagedState<std::string> model) {
+  ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
+  auto allowed = boundary(ManagedPhase::BIND, node);
+
+  if (!allowed) {
+    return allowed;
+  }
+
+  auto entry = find(node);
+
+  if (!entry || entry->caption) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
+  }
+
+  auto property = model.lock();
+
+  if (!property || model.scene_ != root_.id()) {
+    return std::unexpected(error(ManagedPhase::BIND, node, property ? TreeError::INVALID_ARGUMENT : property.error()));
+  }
+
+  try {
+    auto candidate = std::make_unique<CaptionBinding>();
+
+    candidate->node = node;
+    candidate->model = model;
+
+    auto synced = syncCaption(node, *candidate, ManagedPhase::BIND);
+
+    if (!synced) {
+      return synced;
+    }
+
+    // Allocate metadata before changing the caption; publication itself cannot allocate.
+    entry->caption = std::move(candidate);
+
+    return {};
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
+  } catch (const std::length_error &) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NODE_LIMIT));
+  } catch (...) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CALLBACK_FAILED));
+  }
+}
+
 std::expected<void, ManagedError>
 ManagedScene::bind(Node<LineEdit> node, ManagedState<std::string> model,
                    std::function<std::expected<void, TreeError>(LineEditResult)> result,
@@ -1475,8 +1562,10 @@ ManagedScene::bind(Node<LineEdit> node, ManagedState<std::string> model,
   }
 
   std::shared_ptr<detail::EditorCommandFeedback> feedback;
+  std::unique_ptr<ManagedState<std::string>> incomingModel;
 
   try {
+    incomingModel = std::make_unique<ManagedState<std::string>>(model);
     feedback = std::make_shared<detail::EditorCommandFeedback>();
   } catch (const std::bad_alloc &) {
     return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
@@ -1563,6 +1652,7 @@ ManagedScene::bind(Node<LineEdit> node, ManagedState<std::string> model,
 
     bound->commandFeedback(std::move(feedback));
     (*entry)->binding.emplace<LineEditBinding>(std::move(*bound));
+    (*entry)->textModel = std::move(incomingModel);
 
     return {};
   } catch (const std::bad_alloc &) {
@@ -2436,6 +2526,16 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
       }
 
       std::expected<void, TreeError> status = live;
+
+      if (status && entry->caption) {
+        auto synced = syncCaption(entry->caption->node, *entry->caption, ManagedPhase::PREPARE);
+
+        if (!synced) {
+          remember(synced.error());
+
+          return std::unexpected(bridge(synced.error()));
+        }
+      }
 
       if (status) {
         if (auto *edit = std::get_if<LineEditBinding>(&entry->binding)) {

@@ -5,7 +5,8 @@
 Start with an explicit event handler and an observing control reference. Use a
 managed state when several controls need the same UI-owned value. A [`ui::Ref<T>`](glossary.md) identifies a control without keeping it alive.
 Copying the reference does not subscribe to changes.
-Automatic and derived bindings are **TBD — M2**.
+Explicit shared text state is supported by editors, labels and buttons.
+General observation and derived bindings remain **TBD — M2**.
 
 ## Change text from a button
 
@@ -75,32 +76,54 @@ keeps its scene alive. See [the scoped context contract](declarative-ui.md).
 
 ## Share a managed value
 
-A scene factory receives `ManagedScene&` and can create a scene-owned state.
-This factory fragment shares one text model between two editors and returns
-either its recipe or the original typed setup failure:
+Create an optional shared string state in the scene factory. The field publishes
+according to its edit mode; the label and button show the model value. The button
+caption changes with that value and its action still exits the application.
+State creation failures reach the standard runner through the checked factory.
+
+[Complete source](examples/docs_state.cpp).
 
 ```cpp
-auto makeEditors = [](ManagedScene &owner)
-  -> std::expected<ui::Description<Column>, ManagedError> {
-  auto text = owner.state<std::string>("shared");
-  if (!text) {
-    return std::unexpected(text.error());
-  }
-  return ui::vbox(ui::lineEdit(*text), ui::lineEdit(*text));
-};
-auto scene = ui::scene(makeEditors);
+#include <portals/ui.hpp>
+#include <string>
+
+int main() {
+  using namespace portals;
+
+  auto scene = ui::scene([](ManagedScene &owner) {
+    return owner.state(std::string("Portals")).transform([](auto model) {
+      return ui::vbox(
+        ui::lineEdit(model),
+        ui::label(model),
+        ui::button(model, [] { ui::quit(); }));
+    });
+  });
+
+  return scene
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
 ```
 
-`ManagedState<T>` weakly observes a scene-owned `Property<T>`. `set()` changes
-that model; `snapshot()` returns its owning immutable value and revision. Check
-the returned update receipt: a value can commit successfully while some bounded
-notification deliveries are rejected. Equal assignments are no-ops and do not
-retry rejected delivery. Editor confirmation and validation determine when a
-draft publishes; see [managed controls](managed-controls.md) and [editor](line-edit.md).
+`ManagedState<T>` weakly observes the scene-owned `Property<T>`. It cannot be
+attached to another scene. Its operations run on the owning UI thread; use model
+publishers or scheduler endpoints for worker delivery. `snapshot()` owns its value;
+`set()` returns the original commit/delivery receipt. A committed value can survive
+rejected observer delivery. Setting an equal value neither creates a revision nor
+resends a rejected notification.
 
-Managed handles belong to their scene and UI thread. They are not worker-side
-mutation endpoints. Use worker-safe model publishers or scheduler endpoints
-for cross-thread delivery; see [models](model.md) and [scheduler](scheduler.md).
+Captions consume the latest changed revision during the existing dirty-frame
+preparation. They do not create a timer or require presentation synchronization
+from application code. A direct `caption.text() = ...` changes only that caption:
+it leaves the binding and model intact until a new model revision replaces the
+caption. A failed text conversion preserves the previous caption and typed error;
+an explicit later preparation can retry the latest model value. Failed preparation
+keeps the existing runner error/stop policy; it does not promise automatic recovery
+of an active run.
+
+An invalid intermediate editor draft remains visible without changing the shared
+caption. `ON_COMPLETION` and `EXPLICIT` defer model publication by their existing
+rules. [Editor modes](line-edit.md) and [history](editor-history.md) still apply.
 
 ## Choose the event interface
 

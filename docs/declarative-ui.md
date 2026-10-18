@@ -192,8 +192,9 @@ Create a shared state in the scene's recipe factory. The factory receives
 `ManagedScene&` and runs during preparation. Its checked result passes state
 creation failures to the application runner.
 
-The two editors below use the same string state. Committing a change in one
-updates the other through the managed binding. F10 exits.
+The editor, label and button below share the same string state. Accepted editor
+changes update both captions through managed preparation. Click the button or
+press F10 to exit.
 
 [Source](examples/docs_state.cpp).
 
@@ -206,7 +207,10 @@ int main() {
 
   auto scene = ui::scene([](ManagedScene &owner) {
     return owner.state(std::string("Portals")).transform([](auto model) {
-      return ui::vbox(ui::lineEdit(model), ui::lineEdit(model));
+      return ui::vbox(
+        ui::lineEdit(model),
+        ui::label(model),
+        ui::button(model, [] { ui::quit(); }));
     });
   });
 

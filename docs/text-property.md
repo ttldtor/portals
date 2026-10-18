@@ -180,3 +180,56 @@ stop policy. For Ref-first factories, callback shorthand and lazy scene pipeline
 [declarative composition](declarative-ui.md).
 
 </details>
+
+
+## Read caption, draft and committed text
+
+Use read-only sources when code needs to distinguish an editor draft from its
+model value. Ordinary text changes still use `field.text() = ...` and `+=`.
+These fragments assume successfully mounted references:
+
+```cpp
+auto caption = label.captionText().snapshot();
+auto draft = field.draftText().snapshot();
+auto committed = field.committedText().snapshot();
+```
+
+Each result is `std::expected<GraphemeText, ManagedError>`; check it before
+accessing the text. A successful snapshot owns its storage and remains usable
+after the control or scene is destroyed. Copying a `TextSource` neither reads
+text nor creates a subscription. A source retains an observation of the original
+control identity and does not look up a replacement after removal or slot reuse.
+
+| Source | Observed value |
+|---|---|
+| `captionText()` on a `Control` reference | Current caption, excluding button decorations |
+| `draftText()` on a `LineEdit` reference | Visible editable text, including intermediate or invalid input |
+| `committedText()` on a `LineEdit` reference | Latest bound model value, including an external update not yet adopted by the draft |
+
+Read sources on their owning UI thread between frames. Reading before mount or
+after scene closure returns `CLOSED`; foreign-thread and stale-node failures
+retain their typed cause. A retained successful snapshot has no live UI access.
+`committedText()` validates external model bytes under the editor's text limits
+and width policy. Malformed UTF-8 or an excessive value returns the original
+text error; a valid line separator returns `TreeError::INVALID_ARGUMENT` without
+a `TextError`. Neither failure returns the previous value or draft. Reading does not call the
+application validator, change history, publish a value or report an error
+automatically. General observation is a separate planned API.
+
+## Construct a caption from text or a resource
+
+Labels and buttons accept owning `TextValue` expressions as well as ordinary
+strings:
+
+```cpp
+auto count = ui::label(text("Count: {}", 42));
+auto close = ui::button(text("Close"), [] { ui::quit(); });
+```
+
+An `i18n(key)` expression needs an explicit `TextResolver`; pass it as the final
+argument after style and size policy, for example
+`ui::label(i18n("title"), {}, {}, resolver)`. The recipe owns the expression and
+resolver. It resolves once at mount; resource failures preserve their typed
+cause. It does not subscribe to locale changes or load a localization bundle
+implicitly. [Text values](compact-examples.md) explain formatting and resource
+resolution.

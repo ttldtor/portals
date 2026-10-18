@@ -472,6 +472,27 @@ public:
     return detail::editorCommand(target(), false, true, origin);
   }
 
+  /** @return Read-only visible caption source; acquisition never reads or subscribes. */
+  TextSource captionText() const
+    requires std::derived_from<T, Control>
+  {
+    return TextSource(target(), TextSource::Kind::CAPTION);
+  }
+
+  /** @return Read-only visible draft source, including uncommitted or semantically rejected text. */
+  TextSource draftText() const
+    requires std::same_as<T, LineEdit>
+  {
+    return TextSource(target(), TextSource::Kind::DRAFT);
+  }
+
+  /** @return Read-only latest accepted model source, independent of the editor's visible draft. */
+  TextSource committedText() const
+    requires std::same_as<T, LineEdit>
+  {
+    return TextSource(target(), TextSource::Kind::COMMITTED);
+  }
+
   /** @return Effective checked availability without adoption, invalidation or error reporting. */
   std::expected<HistoryAvailability, TreeError> historyAvailability() const
     requires std::same_as<T, LineEdit>
@@ -1391,6 +1412,104 @@ inline Description<Label> label(std::string_view text, ControlStyle style = {}, 
   return control<Label>(text, style, policy);
 }
 
+namespace detail {
+/** @brief Resolve an owning caption expression once inside the existing mount transaction.
+ * @tparam T Existing text control constructed with text, style and size policy.
+ * @param text Owning literal, format result or localization key.
+ * @param style Manual appearances copied into the recipe.
+ * @param policy Owning layout constraints.
+ * @param resolver Owning explicit localization adapter; no locale subscription is created.
+ * @return Single-use caption recipe with original text/resource errors.
+ */
+template <class T>
+Description<T> textControl(TextValue text, ControlStyle style, SizePolicy policy, TextResolver resolver) {
+  return Access::describe<T>([text = std::move(text), style, policy, resolver = std::move(resolver)](
+                               ManagedScene &scene, Node<Widget> parent) -> std::expected<Node<T>, ManagedError> {
+    auto value = resolver ? text.resolve(scene.widthPolicy(), resolver) : text.resolve(scene.widthPolicy());
+
+    if (!value) {
+      if (const auto *failure = std::get_if<TextError>(&value.error())) {
+        return std::unexpected(textError(parent, *failure));
+      }
+
+      auto failure = error(parent, TreeError::INVALID_ARGUMENT);
+
+      failure.resource = std::get<TextResourceError>(value.error());
+
+      return std::unexpected(failure);
+    }
+
+    return scene.emplace<T>(parent, std::move(*value), style, policy);
+  });
+}
+} // namespace detail
+
+/** @param text Owning literal, format result or localization key, resolved once at mount.
+ * @param style Manual appearances.
+ * @param policy Layout constraints.
+ * @param resolver Explicit owning localization adapter; borrowed services must outlive mount.
+ * @return Independent label recipe; expression/resource failures retain their typed payload.
+ */
+inline Description<Label> label(TextValue text, ControlStyle style = {}, SizePolicy policy = {},
+                                TextResolver resolver = {}) {
+  return detail::textControl<Label>(std::move(text), style, policy, std::move(resolver));
+}
+
+/** @tparam State Exact ManagedState<string> observation; bare braces retain the literal overload.
+ * @param model Scene-owned accepted text state; must belong to the receiving scene.
+ * @param style Manual appearances.
+ * @param policy Layout constraints.
+ * @return One-way caption recipe; changed revisions synchronize before dirty frames without caller tokens.
+ */
+template <class State>
+  requires std::same_as<std::remove_cvref_t<State>, ManagedState<std::string>>
+inline Description<Label> label(State &&model, ControlStyle style = {}, SizePolicy policy = {}) {
+  return control<Label>("", style, policy).setup([model](ManagedScene &scene, Node<Label> node) {
+    return scene.bindText(node, model);
+  });
+}
+
+/** @param text Owning literal, format result or localization key, resolved once at mount.
+ * @param style Manual appearances.
+ * @param policy Layout constraints.
+ * @param resolver Explicit owning localization adapter; borrowed services must outlive mount.
+ * @return Unbound button recipe with an independent caption; onClick can be composed separately.
+ */
+inline Description<Button> button(TextValue text, ControlStyle style = {}, SizePolicy policy = {},
+                                  TextResolver resolver = {}) {
+  return detail::textControl<Button>(std::move(text), style, policy, std::move(resolver));
+}
+
+/** @tparam State Exact ManagedState<string> observation; bare braces retain the literal overload.
+ * @param model Scene-owned accepted text state; must belong to the receiving scene.
+ * @param style Manual appearances.
+ * @param policy Layout constraints.
+ * @return One-way caption recipe with independent action attachment and existing dirty-frame recovery.
+ */
+template <class State>
+  requires std::same_as<std::remove_cvref_t<State>, ManagedState<std::string>>
+inline Description<Button> button(State &&model, ControlStyle style = {}, SizePolicy policy = {}) {
+  return control<Button>("", style, policy).setup([model](ManagedScene &scene, Node<Button> node) {
+    return scene.bindText(node, model);
+  });
+}
+
+/** @tparam Caption Owning TextValue expression or scene-owned ManagedState<string> observation.
+ * @tparam Callback Owning compact managed action, optionally borrowing ClickEvent.
+ * @param text Caption expression or explicit accepted text state.
+ * @param action Independent activation callback with existing checked result handling.
+ * @param style Manual appearances.
+ * @param policy Layout constraints.
+ * @return Button recipe with scene-owned caption/action lifetimes and transactional mount cleanup.
+ */
+template <class Caption, class Callback>
+  requires((std::same_as<std::remove_cvref_t<Caption>, TextValue> ||
+            std::same_as<std::remove_cvref_t<Caption>, ManagedState<std::string>>) &&
+           portals::detail::ManagedAction<Callback, ClickEvent>)
+inline Description<Button> button(Caption &&text, Callback action, ControlStyle style = {}, SizePolicy policy = {}) {
+  return button(std::forward<Caption>(text), style, policy).onClick(std::move(action));
+}
+
 /** @param text UTF-8 caption copied immediately.
  * @param action Standard managed activation callback; must be nonempty.
  * @param style Owning manual appearances.
@@ -1878,6 +1997,53 @@ inline Description<Label> label(Ref<Label> reference, std::string_view text, Con
 inline Description<Button> button(Ref<Button> reference, std::string_view text, ControlStyle style = {},
                                   SizePolicy policy = {}) {
   return control<Button>(text, style, policy).reference(std::move(reference));
+}
+
+/** @tparam Caption Owning TextValue or scene-owned ManagedState<string>.
+ * @param reference Empty observing slot published only after the complete mount succeeds.
+ * @param text Caption expression or explicit accepted text state.
+ * @param style Manual appearances.
+ * @param policy Layout constraints.
+ * @return Label recipe retaining the original transactional reference publication.
+ */
+template <class Caption>
+  requires(std::same_as<std::remove_cvref_t<Caption>, TextValue> ||
+           std::same_as<std::remove_cvref_t<Caption>, ManagedState<std::string>>)
+inline Description<Label> label(Ref<Label> reference, Caption &&text, ControlStyle style = {}, SizePolicy policy = {}) {
+  return label(std::forward<Caption>(text), style, policy).reference(std::move(reference));
+}
+
+/** @tparam Caption Owning TextValue or scene-owned ManagedState<string>.
+ * @param reference Empty observing slot published only after the complete mount succeeds.
+ * @param text Caption expression or explicit accepted text state.
+ * @param style Manual appearances.
+ * @param policy Layout constraints.
+ * @return Button caption recipe; action registration remains independent.
+ */
+template <class Caption>
+  requires(std::same_as<std::remove_cvref_t<Caption>, TextValue> ||
+           std::same_as<std::remove_cvref_t<Caption>, ManagedState<std::string>>)
+inline Description<Button> button(Ref<Button> reference, Caption &&text, ControlStyle style = {},
+                                  SizePolicy policy = {}) {
+  return button(std::forward<Caption>(text), style, policy).reference(std::move(reference));
+}
+
+/** @tparam Caption Owning TextValue or scene-owned ManagedState<string>.
+ * @tparam Callback Owning compact managed action, optionally borrowing ClickEvent.
+ * @param reference Empty observing slot published after the whole mount succeeds.
+ * @param text Caption expression or explicit accepted text state.
+ * @param action Independent checked activation callback.
+ * @param style Manual appearances.
+ * @param policy Layout constraints.
+ * @return Bound button recipe preserving existing callback and rollback contracts.
+ */
+template <class Caption, class Callback>
+  requires((std::same_as<std::remove_cvref_t<Caption>, TextValue> ||
+            std::same_as<std::remove_cvref_t<Caption>, ManagedState<std::string>>) &&
+           portals::detail::ManagedAction<Callback, ClickEvent>)
+inline Description<Button> button(Ref<Button> reference, Caption &&text, Callback action, ControlStyle style = {},
+                                  SizePolicy policy = {}) {
+  return button(std::forward<Caption>(text), std::move(action), style, policy).reference(std::move(reference));
 }
 
 /** @tparam Callback Owning compact action, optionally taking ClickEvent; void/expected/command result.

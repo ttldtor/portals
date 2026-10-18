@@ -5,6 +5,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Added] Labels and buttons accept owning text expressions and explicit shared
+  scene-owned string state. Caption synchronization reuses managed dirty-frame
+  preparation and preserves typed text failures. Read-only caption, draft and
+  committed-text sources return owning snapshots without adding subscriptions;
+  existing editor confirmation modes and undo history remain unchanged.
+
 ## v0.4.0 (2026-10-16)
 
 - Add fluent `SceneResourceOptions::control<T>()` registration. Registration failures

@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <cstdlib>
+#include <limits>
 #include <stdexcept>
 #include <thread>
 
@@ -1260,6 +1261,557 @@ TEST_CASE("failed compact id preparation preserves metadata and frame requests")
     REQUIRE(widget.computedStyle());
     CHECK(widget.computedStyle()->normal.foreground == RgbColor{1, 2, 3});
   }));
+}
+
+TEST_CASE("legacy empty caption braces remain literal overloads with and without references or actions") {
+  Fixture fixture;
+  ui::Ref<Label> label;
+  ui::Ref<Button> button;
+  int clicks = 0;
+
+  take(ui::mount(*fixture.scene,
+                 ui::column(ui::label({}), ui::button({}), ui::label(label, {}), ui::button(button, {}, [&] {
+                              ++clicks;
+                            }))));
+  CHECK(take(label.text().get()).empty());
+  CHECK(take(button.text().get()).empty());
+  take(fixture.app->router().invoke(button.node(), {Action::ACTIVATE}));
+  CHECK(clicks == 1);
+}
+
+TEST_CASE("caption expressions own bytes and resolve localization once at mount") {
+  Fixture fixture;
+  ui::Ref<Label> label;
+  ui::Ref<Button> button;
+  std::string bytes = "captured";
+  auto description = ui::label(label, text(bytes));
+
+  bytes = "replaced";
+
+  int resolutions = 0;
+  int clicks = 0;
+  auto localized = ui::button(i18n("caption"), {}, {},
+                              [&](std::string_view key) -> std::expected<std::string, TextResourceError> {
+                                ++resolutions;
+                                CHECK(key == "caption");
+
+                                return "localized";
+                              })
+                     .onClick([&] {
+                       ++clicks;
+                     })
+                     .reference(button);
+
+  CHECK(resolutions == 0);
+  take(ui::mount(*fixture.scene, ui::column(std::move(description), std::move(localized))));
+  CHECK(take(label.captionText().snapshot()).bytes() == "captured");
+  CHECK(take(button.captionText().snapshot()).bytes() == "localized");
+  CHECK(resolutions == 1);
+  take(fixture.scene->prepare(*fixture.app, {40, 10}));
+  take(fixture.app->router().invoke(button.node(), {Action::ACTIVATE}));
+  CHECK(clicks == 1);
+  CHECK(resolutions == 1);
+
+  const auto missing = ui::mount(*fixture.scene, ui::label(i18n("missing")));
+
+  REQUIRE_FALSE(missing);
+  CHECK(missing.error().resource == TextResourceError::RESOLVER_REQUIRED);
+
+  const auto malformed = ui::mount(*fixture.scene, ui::button(text(std::string_view("\xff", 1))));
+
+  REQUIRE_FALSE(malformed);
+  CHECK(malformed.error().text == TextError{TextErrorKind::INVALID_UTF8, 0});
+}
+
+TEST_CASE("one accepted state drives editor label and button while manual captions stay one-way") {
+  Fixture fixture;
+  const auto model = take(fixture.scene->state(std::string("initial")));
+  ui::Ref<Label> label;
+  ui::Ref<Label> independent;
+  ui::Ref<Button> button;
+  ui::Ref<LineEdit> editor;
+  int clicks = 0;
+
+  take(ui::mount(*fixture.scene, ui::column(ui::label(label, model),
+                                            ui::button(button, model,
+                                                       [&] {
+                                                         ++clicks;
+                                                       }),
+                                            ui::lineEdit(editor, model), ui::label(independent, "independent"))));
+  CHECK(take(label.captionText().snapshot()).bytes() == "initial");
+  CHECK(take(button.captionText().snapshot()).bytes() == "initial");
+  take((label.text() = "manual view").result());
+  CHECK(take(model.snapshot())->value == "initial");
+  CHECK_FALSE(take(model.set("initial")).changed);
+  take(fixture.scene->prepare(*fixture.app, {40, 10}));
+  CHECK(take(label.captionText().snapshot()).bytes() == "manual view");
+  take(model.set("next revision"));
+  take(fixture.scene->prepare(*fixture.app, {40, 10}));
+  CHECK(take(label.captionText().snapshot()).bytes() == "next revision");
+  CHECK(take(button.captionText().snapshot()).bytes() == "next revision");
+  CHECK(take(editor.draftText().snapshot()).bytes() == "next revision");
+  CHECK(take(editor.committedText().snapshot()).bytes() == "next revision");
+  CHECK(take(independent.captionText().snapshot()).bytes() == "independent");
+  take(fixture.app->router().invoke(button.node(), {Action::ACTIVATE}));
+  CHECK(clicks == 1);
+  take(fixture.app->tree().consumeFrameRequest());
+  take(fixture.scene->prepare(*fixture.app, {40, 10}));
+  CHECK(take(fixture.app->tree().consumeFrameRequest()) == Invalidation::NONE);
+}
+
+TEST_CASE("draft and committed sources preserve all editor confirmation modes and conflicts") {
+  for (const auto mode : {EditMode::IMMEDIATE, EditMode::ON_COMPLETION, EditMode::EXPLICIT}) {
+    Fixture fixture;
+    const auto model = take(fixture.scene->state(std::string("accepted")));
+    ui::Ref<LineEdit> editor;
+    ui::Ref<Label> label;
+    ui::LineEditConfig config;
+
+    config.options.editMode = mode;
+    config.validate = [](std::string_view value) {
+      return value != "invalid";
+    };
+    take(ui::mount(*fixture.scene, ui::column(ui::lineEdit(editor, model, config), ui::label(label, model))));
+    take(fixture.app->router().setFocus(editor.node()));
+    take((editor.text() = "draft").result());
+
+    const auto accepted = mode == EditMode::IMMEDIATE ? "draft" : "accepted";
+
+    CHECK(take(editor.draftText().snapshot()).bytes() == "draft");
+    CHECK(take(editor.committedText().snapshot()).bytes() == accepted);
+    take(fixture.scene->prepare(*fixture.app, {40, 10}));
+    CHECK(take(label.captionText().snapshot()).bytes() == accepted);
+    take((editor.text() = "invalid").result());
+    CHECK(take(editor.draftText().snapshot()).bytes() == "invalid");
+    CHECK(take(editor.committedText().snapshot()).bytes() == accepted);
+    take(model.set("external"));
+    CHECK(take(editor.committedText().snapshot()).bytes() == "external");
+    CHECK(take(editor.draftText().snapshot()).bytes() == "invalid");
+    take(fixture.app->router().dispatch(KeyEvent{InputKey::ENTER}));
+    CHECK(take(editor.committedText().snapshot()).bytes() == "external");
+    CHECK(take(editor.draftText().snapshot()).bytes() == "invalid");
+    take(fixture.app->router().dispatch(KeyEvent{InputKey::ESCAPE}));
+    CHECK(take(editor.draftText().snapshot()).bytes() == "external");
+  }
+}
+
+TEST_CASE("text source acquisition is lazy and snapshots own bytes across removal close and threads") {
+  Fixture fixture;
+  ui::Ref<Label> label;
+  ui::Ref<Label> copy;
+  const auto source = label.captionText();
+  const auto alias = source;
+
+  CHECK(hasCause(source.snapshot().error(), TreeError::CLOSED));
+  take(ui::mount(*fixture.scene, ui::label(copy, "unchanged")));
+
+  const auto failedCopy = copy.text() = label.text();
+
+  CHECK(hasCause(failedCopy.result().error(), TreeError::CLOSED));
+  CHECK(take(copy.text().get()) == "unchanged");
+  take(ui::mount(*fixture.scene, ui::label(label, "mounted value")));
+
+  const auto owned = take(alias.snapshot());
+
+  CHECK(owned.bytes() == "mounted value");
+  take((label.text() = "new value").result());
+  CHECK(owned.bytes() == "mounted value");
+  CHECK(take(source.snapshot()).bytes() == "new value");
+  CHECK(take(copy.text().get()) == "unchanged");
+
+  std::optional<ManagedError> foreign;
+  std::thread worker([&] {
+    foreign = source.snapshot().error();
+  });
+
+  worker.join();
+  REQUIRE(foreign);
+  CHECK(hasCause(*foreign, TreeError::WRONG_THREAD));
+  take(fixture.scene->remove(label.node()));
+
+  ui::Ref<Label> replacement;
+
+  take(ui::mount(*fixture.scene, ui::label(replacement, "replacement")));
+  CHECK(hasCause(source.snapshot().error(), TreeError::STALE_NODE));
+  CHECK(take(replacement.captionText().snapshot()).bytes() == "replacement");
+  take(fixture.scene->close());
+  CHECK(hasCause(replacement.captionText().snapshot().error(), TreeError::CLOSED));
+  fixture.scene.reset();
+  CHECK(hasCause(source.snapshot().error(), TreeError::CLOSED));
+  CHECK(owned.bytes() == "mounted value");
+}
+
+TEST_CASE("caption binding rejects duplicates and foreign state without changing the existing view") {
+  Fixture fixture;
+  Fixture foreign;
+  ui::Ref<Button> button;
+  const auto model = take(fixture.scene->state(std::string("bound")));
+  const auto foreignModel = take(foreign.scene->state(std::string("foreign")));
+  int clicks = 0;
+
+  take(ui::mount(*fixture.scene, ui::button(button, "original", [&] {
+    ++clicks;
+  })));
+
+  const auto wrongScene = fixture.scene->bindText(button.node(), foreignModel);
+
+  REQUIRE_FALSE(wrongScene);
+  CHECK(hasCause(wrongScene.error(), TreeError::INVALID_ARGUMENT));
+  CHECK(take(button.text().get()) == "original");
+  take(fixture.scene->bindText(button.node(), model));
+
+  const auto duplicate = fixture.scene->bindText(button.node(), model);
+
+  REQUIRE_FALSE(duplicate);
+  CHECK(hasCause(duplicate.error(), TreeError::INVALID_ARGUMENT));
+  take(fixture.app->router().invoke(button.node(), {Action::ACTIVATE}));
+  CHECK(clicks == 1);
+  CHECK(take(button.text().get()) == "bound");
+}
+
+TEST_CASE("malformed initial caption state rolls back mount and a failed direct attachment can retry") {
+  Fixture fixture;
+  ui::Ref<Label> label;
+  const auto model = take(fixture.scene->state(std::string("\xff", 1)));
+  const auto failed = ui::mount(*fixture.scene, ui::label(label, model));
+
+  REQUIRE_FALSE(failed);
+  CHECK(failed.error().text == TextError{TextErrorKind::INVALID_UTF8, 0});
+  CHECK(label.node() == Node<Label>{});
+  CHECK(take(fixture.app->tree().inspect(fixture.scene->root())).children.empty());
+  take(ui::mount(*fixture.scene, ui::label(label, "original")));
+
+  const auto failedBind = fixture.scene->bindText(label.node(), model);
+
+  REQUIRE_FALSE(failedBind);
+  CHECK(failedBind.error().text == TextError{TextErrorKind::INVALID_UTF8, 0});
+  CHECK(take(label.text().get()) == "original");
+  take(model.set("valid"));
+  take(fixture.scene->bindText(label.node(), model));
+  CHECK(take(label.text().get()) == "valid");
+}
+
+TEST_CASE("malformed caption revision preserves view and original diagnostics until a valid revision recovers") {
+  Fixture fixture;
+  ui::Ref<Label> label;
+  const auto model = take(fixture.scene->state(std::string("valid")));
+
+  take(ui::mount(*fixture.scene, ui::label(label, model)));
+  take(model.set(std::string("\xff", 1)));
+
+  const auto failed = fixture.scene->prepare(*fixture.app, {40, 10});
+
+  REQUIRE_FALSE(failed);
+  CHECK(take(label.text().get()) == "valid");
+
+  const auto diagnostics = take(fixture.scene->diagnostics());
+
+  REQUIRE_FALSE(diagnostics.errors.empty());
+  CHECK(diagnostics.errors.back().error.text == TextError{TextErrorKind::INVALID_UTF8, 0});
+  CHECK(diagnostics.errors.back().error.node == label.node().id());
+  CHECK_FALSE(fixture.scene->prepare(*fixture.app, {40, 10}));
+  take(model.set("recovered"));
+  take(fixture.scene->prepare(*fixture.app, {40, 10}));
+  CHECK(take(label.text().get()) == "recovered");
+}
+
+TEST_CASE("committed snapshots validate the latest external model without substituting the visible draft") {
+  Fixture fixture;
+  ui::Ref<LineEdit> editor;
+  const auto model = take(fixture.scene->state(std::string("accepted")));
+  ui::LineEditConfig config;
+
+  config.options.editMode = EditMode::EXPLICIT;
+  config.options.limits.max_input_bytes = 16;
+  take(ui::mount(*fixture.scene, ui::lineEdit(editor, model, config)));
+  take((editor.text() = "draft").result());
+  take(model.set(std::string("\xff", 1)));
+
+  const auto invalid = editor.committedText().snapshot();
+
+  REQUIRE_FALSE(invalid);
+  CHECK(invalid.error().text == TextError{TextErrorKind::INVALID_UTF8, 0});
+  CHECK(take(editor.draftText().snapshot()).bytes() == "draft");
+  take(model.set(std::string(17, 'x')));
+
+  const auto tooLong = editor.committedText().snapshot();
+
+  REQUIRE_FALSE(tooLong);
+  CHECK(hasCause(tooLong.error(), TreeError::NODE_LIMIT));
+  CHECK(tooLong.error().text == TextError{TextErrorKind::INPUT_LIMIT, 0});
+  CHECK(take(editor.draftText().snapshot()).bytes() == "draft");
+
+  for (const auto separator : {"\r", "\n", "\xe2\x80\xa8", "\xe2\x80\xa9"}) {
+    take(model.set(std::string(separator)));
+
+    const auto multiline = editor.committedText().snapshot();
+
+    REQUIRE_FALSE(multiline);
+    CHECK(hasCause(multiline.error(), TreeError::INVALID_ARGUMENT));
+    CHECK_FALSE(multiline.error().text);
+    CHECK(take(editor.draftText().snapshot()).bytes() == "draft");
+  }
+}
+
+TEST_CASE("caption allocation failures leave attachment and view unchanged for a later retry") {
+  const std::string LONG_TEXT(256, 'x');
+  bool sawFailure = false;
+  bool sawSuccess = false;
+
+  for (std::ptrdiff_t budget = 0; budget < 48; ++budget) {
+    Fixture fixture;
+    ui::Ref<Label> label;
+    const auto model = take(fixture.scene->state(LONG_TEXT));
+
+    take(ui::mount(*fixture.scene, ui::label(label, "original")));
+    take(fixture.scene->prepare(*fixture.app, {40, 10}));
+    take(fixture.app->tree().consumeFrameRequest());
+
+    allocationsBeforeFailure = budget;
+    auto attached = fixture.scene->bindText(label.node(), model);
+    allocationsBeforeFailure = -1;
+
+    if (attached) {
+      sawSuccess = true;
+      CHECK(take(label.text().get()) == LONG_TEXT);
+    } else {
+      sawFailure = true;
+      CHECK(hasCause(attached.error(), TreeError::NO_MEMORY));
+      CHECK(take(label.text().get()) == "original");
+      CHECK(take(fixture.app->tree().consumeFrameRequest()) == Invalidation::NONE);
+      take(fixture.scene->bindText(label.node(), model));
+      CHECK(take(label.text().get()) == LONG_TEXT);
+    }
+  }
+
+  CHECK(sawFailure);
+  CHECK(sawSuccess);
+}
+
+TEST_CASE("rejected editor notifications recover shared captions from the latest state without idle redraw") {
+  ApplicationOptions options;
+
+  options.scheduler.data_capacity = 1;
+
+  auto app = take(Application::create(options));
+  auto scene = take(ManagedScene::create(*app));
+  const auto model = take(scene->state(std::string("initial")));
+  ui::Ref<Label> label;
+  ui::Ref<Button> button;
+  ui::Ref<LineEdit> editor;
+
+  take(ui::mount(*scene, ui::column(ui::label(label, model), ui::button(button, model), ui::lineEdit(editor, model))));
+  take(scene->prepare(*app, {40, 10}));
+  take(app->tree().consumeFrameRequest());
+  take(model.set("queued"));
+
+  const auto latest = take(model.set("latest"));
+
+  CHECK(latest.rejected == 1);
+  CHECK(latest.notification_error.has_value());
+  CHECK(take(label.text().get()) == "initial");
+  CHECK(take(app->tree().consumeFrameRequest()) != Invalidation::NONE);
+  take(scene->prepare(*app, {40, 10}));
+  CHECK(take(label.text().get()) == "latest");
+  CHECK(take(button.text().get()) == "latest");
+  CHECK(take(editor.text().get()) == "latest");
+  take(app->scheduler().dispatch());
+  take(scene->prepare(*app, {40, 10}));
+  CHECK(take(label.text().get()) == "latest");
+  take(app->tree().consumeFrameRequest());
+  take(scene->prepare(*app, {40, 10}));
+  CHECK(take(app->tree().consumeFrameRequest()) == Invalidation::NONE);
+}
+
+TEST_CASE("caption-bound button action retains captures through self-removal and preserves its original error") {
+  for (const bool fail : {false, true}) {
+    Fixture fixture;
+    const auto model = take(fixture.scene->state(std::string("caption")));
+    ui::Ref<Button> button;
+    int destroyed = 0;
+    bool completed = false;
+
+    struct Capture {
+      int &destroyed;
+
+      ~Capture() {
+        ++destroyed;
+      }
+    };
+
+    auto capture = std::make_shared<Capture>(destroyed);
+
+    take(ui::mount(*fixture.scene, ui::button(button, model, [&, capture]() -> std::expected<void, TreeError> {
+      take(fixture.scene->remove(button.node()));
+      CHECK(destroyed == 0);
+      take(model.set("after removal"));
+      completed = true;
+
+      if (fail) {
+        return std::unexpected(TreeError::INVALID_GEOMETRY);
+      }
+
+      return {};
+    })));
+    capture.reset();
+
+    const auto original = button.node().id();
+
+    take(fixture.app->router().invoke(button.node(), {Action::ACTIVATE}));
+    CHECK(completed);
+    // ActionBinding retains disconnected captures until the next collecting router operation.
+    CHECK(destroyed == 0);
+    take(fixture.app->router().focused());
+    CHECK(destroyed == 1);
+    CHECK(hasCause(button.captionText().snapshot().error(), TreeError::STALE_NODE));
+
+    const auto diagnostics = take(fixture.scene->diagnostics());
+
+    if (fail) {
+      REQUIRE(diagnostics.errors.size() == 1);
+      CHECK(hasCause(diagnostics.errors.front().error, TreeError::INVALID_GEOMETRY));
+      CHECK(diagnostics.errors.front().error.node == original);
+    } else {
+      CHECK(diagnostics.errors.empty());
+
+      ui::Ref<Button> remounted;
+
+      take(ui::mount(*fixture.scene, ui::button(remounted, model)));
+      CHECK(take(remounted.captionText().snapshot()).bytes() == "after removal");
+    }
+  }
+}
+
+TEST_CASE("caption preparation rejects error-observer reentry without losing the original text failure") {
+  Fixture fixture;
+  const auto model = take(fixture.scene->state(std::string("valid")));
+  ui::Ref<Label> label;
+  std::optional<ManagedError> reentry;
+
+  take(ui::mount(*fixture.scene, ui::label(label, model)));
+  take(fixture.scene->onError([&](const ManagedDiagnostic &diagnostic) {
+    CHECK(diagnostic.error.text == TextError{TextErrorKind::INVALID_UTF8, 0});
+    reentry = fixture.scene->remove(label.node()).error();
+  }));
+  take(model.set(std::string("\xff", 1)));
+  CHECK_FALSE(fixture.scene->prepare(*fixture.app, {40, 10}));
+  REQUIRE(reentry);
+  CHECK(hasCause(*reentry, TreeError::WOULD_BLOCK));
+  CHECK(take(label.text().get()) == "valid");
+
+  const auto diagnostics = take(fixture.scene->diagnostics());
+
+  REQUIRE(diagnostics.errors.size() == 1);
+  CHECK(diagnostics.errors.front().error.text == TextError{TextErrorKind::INVALID_UTF8, 0});
+}
+
+TEST_CASE("caption mount allocation failures roll back unpublished references and permit a fresh recipe") {
+  const std::string LONG_TEXT(256, 'x');
+  constexpr auto ALLOCATION_COUNTDOWN = std::numeric_limits<std::ptrdiff_t>::max();
+  std::ptrdiff_t requiredAllocations{};
+
+  {
+    Fixture fixture;
+    const auto model = take(fixture.scene->state(LONG_TEXT));
+    ui::Ref<Label> label;
+    auto description = ui::label(label, model);
+
+    // Measure the successful path in this build; debug iterators require extra allocations.
+    allocationsBeforeFailure = ALLOCATION_COUNTDOWN;
+    auto mounted = ui::mount(*fixture.scene, std::move(description));
+    requiredAllocations = ALLOCATION_COUNTDOWN - allocationsBeforeFailure.load();
+    allocationsBeforeFailure = -1;
+    REQUIRE(mounted);
+    REQUIRE(requiredAllocations > 0);
+  }
+
+  bool sawFailure = false;
+  bool sawSuccess = false;
+
+  for (std::ptrdiff_t budget = 0; budget <= requiredAllocations; ++budget) {
+    Fixture fixture;
+    const auto model = take(fixture.scene->state(LONG_TEXT));
+    ui::Ref<Label> label;
+    auto description = ui::label(label, model);
+
+    allocationsBeforeFailure = budget;
+    auto mounted = ui::mount(*fixture.scene, std::move(description));
+    allocationsBeforeFailure = -1;
+
+    if (mounted) {
+      sawSuccess = true;
+      CHECK(take(label.text().get()) == LONG_TEXT);
+    } else {
+      sawFailure = true;
+      CHECK(hasCause(mounted.error(), TreeError::NO_MEMORY));
+      CHECK(label.node() == Node<Label>{});
+      CHECK(take(fixture.app->tree().inspect(fixture.scene->root())).children.empty());
+      take(ui::mount(*fixture.scene, ui::label(label, model)));
+      CHECK(take(label.text().get()) == LONG_TEXT);
+    }
+  }
+
+  CHECK(sawFailure);
+  CHECK(sawSuccess);
+}
+
+TEST_CASE("editor source metadata allocation failure preserves the existing unbound editor for retry") {
+  Fixture fixture;
+  ui::Ref<LineEdit> editor;
+  const auto model = take(fixture.scene->state(std::string("accepted")));
+
+  take(ui::mount(*fixture.scene, ui::custom<LineEdit>().reference(editor)));
+  take(fixture.scene->prepare(*fixture.app, {40, 10}));
+  take(fixture.app->tree().consumeFrameRequest());
+
+  allocationsBeforeFailure = 0;
+  const auto failed = fixture.scene->bind(editor.node(), model);
+  allocationsBeforeFailure = -1;
+
+  REQUIRE_FALSE(failed);
+  CHECK(hasCause(failed.error(), TreeError::NO_MEMORY));
+  CHECK(take(fixture.app->tree().consumeFrameRequest()) == Invalidation::NONE);
+  CHECK(take(model.snapshot())->revision == 0);
+  take(fixture.app->tree().read(editor.node(), [](const LineEdit &view) {
+    CHECK(view.text().bytes().empty());
+  }));
+  CHECK(hasCause(editor.committedText().snapshot().error(), TreeError::INVALID_ARGUMENT));
+  take(fixture.scene->bind(editor.node(), model));
+  CHECK(take(editor.draftText().snapshot()).bytes() == "accepted");
+  CHECK(take(editor.committedText().snapshot()).bytes() == "accepted");
+}
+
+TEST_CASE("source snapshot allocation failures remain typed and retain the last successful owning snapshot") {
+  Fixture fixture;
+  ui::Ref<Label> label;
+  const std::string LONG_TEXT(256, 'x');
+
+  take(ui::mount(*fixture.scene, ui::label(label, LONG_TEXT)));
+
+  const auto source = label.captionText();
+  const auto owned = take(source.snapshot());
+  bool sawFailure = false;
+  bool sawSuccess = false;
+
+  for (std::ptrdiff_t budget = 0; budget < 48; ++budget) {
+    allocationsBeforeFailure = budget;
+    auto snapshot = source.snapshot();
+    allocationsBeforeFailure = -1;
+
+    if (snapshot) {
+      sawSuccess = true;
+      CHECK(snapshot->bytes() == LONG_TEXT);
+    } else {
+      sawFailure = true;
+      CHECK(hasCause(snapshot.error(), TreeError::NO_MEMORY));
+    }
+
+    CHECK(owned.bytes() == LONG_TEXT);
+    CHECK(take(label.text().get()) == LONG_TEXT);
+  }
+
+  CHECK(sawFailure);
+  CHECK(sawSuccess);
 }
 
 TEST_CASE("input replacement publishes callback and key budget before retiring old captures") {

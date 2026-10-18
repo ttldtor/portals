@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include <portals/detail/line_edit_text.hpp>
 #include <portals/line_edit.hpp>
 
 #include <algorithm>
@@ -8,11 +9,6 @@
 
 namespace portals {
 namespace {
-bool hasLineSeparator(std::string_view bytes) {
-  return bytes.find_first_of("\r\n") != std::string_view::npos || bytes.contains("\xe2\x80\xa8") ||
-         bytes.contains("\xe2\x80\xa9");
-}
-
 LineEditResult failed(TreeError error) {
   return {LineEditStatus::FAILED, {}, error};
 }
@@ -371,7 +367,7 @@ struct LineEditBinding::State {
   }
 
   std::expected<void, TreeError> adopt(LineEdit &edit, const PropertyChange<std::string> &snapshot) {
-    if (hasLineSeparator(snapshot.value)) {
+    if (detail::hasLineSeparator(snapshot.value)) {
       return std::unexpected(TreeError::INVALID_ARGUMENT);
     }
 
@@ -464,7 +460,7 @@ struct LineEditBinding::State {
       return {LineEditStatus::LIMIT_EXCEEDED};
     }
 
-    if (hasLineSeparator(inserted)) {
+    if (detail::hasLineSeparator(inserted)) {
       return {LineEditStatus::INVALID_TEXT};
     }
 

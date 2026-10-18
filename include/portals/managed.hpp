@@ -499,6 +499,16 @@ public:
                                          std::shared_ptr<Clipboard> clipboard = {},
                                          std::function<bool(std::string_view)> validate = {});
 
+  /** @brief Observe accepted text as a one-way caption, independently of the control's action.
+   * @param node Live managed control without an existing caption binding.
+   * @param model Text state created by this scene; ownership stays with the scene.
+   * @return Success after initial synchronization, or typed validation/allocation error without attachment.
+   * Duplicate attachment returns INVALID_ARGUMENT. Changed revisions synchronize before dirty frames;
+   * failed synchronization preserves the caption and retries at the next dirty or explicit preparation.
+   * A manual caption change remains visible until the next changed model revision. No reverse write occurs.
+   */
+  std::expected<void, ManagedError> bindText(Node<Control> node, ManagedState<std::string> model);
+
   /** @brief Declare a nested focus scope; this scene owns its disconnect token.
    * @param node Live managed scope root, possibly also an ordinary bound control.
    * @return Success or the existing typed router/binding error; no token escapes.
@@ -1028,10 +1038,18 @@ private:
     bool retired{};
   };
 
+  struct CaptionBinding {
+    Node<Control> node;
+    ManagedState<std::string> model;
+    std::optional<std::uint64_t> revision;
+  };
+
   struct Entry {
     Node<Widget> node;
     std::shared_ptr<StyleTarget> target;
     std::variant<std::monostate, ActionBinding, CheckBoxBinding, LineEditBinding> binding;
+    std::unique_ptr<CaptionBinding> caption;
+    std::unique_ptr<ManagedState<std::string>> textModel;
     ActionBinding focusScope;
     std::function<std::expected<void, TreeError>(Node<Widget>)> sync;
     std::function<std::expected<void, TreeError>(Node<Widget>)> customSync;
@@ -1040,6 +1058,8 @@ private:
     bool removed{};
     std::shared_ptr<ClickChain> clicks;
   };
+
+  std::expected<void, ManagedError> syncCaption(Node<Control> node, CaptionBinding &binding, ManagedPhase phase);
 
   template <class T>
   std::expected<std::shared_ptr<detail::ManagedModelSourceOf<T>>, ManagedError> modelSource(ManagedModel<T> model,

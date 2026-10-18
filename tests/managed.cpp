@@ -251,6 +251,56 @@ void compositionAndRejectedNotification() {
         "real dirty frame presents latest unchecked state without repeated action or idle redraw");
 }
 
+void textCaptionsRecoverWithoutIdleFrames() {
+  Fixture fixture(1, {{100, "x", {}}});
+  const auto model = take(fixture.scene->state(std::string("initial")));
+  const auto column = take(fixture.scene->emplace<Column>(fixture.scene->root()));
+  const auto label = take(fixture.scene->emplace<Label>(column, text("label")));
+  const auto button = take(fixture.scene->emplace<Button>(column, text("button")));
+  const auto editor = take(fixture.scene->emplace<LineEdit>(column));
+
+  take(fixture.scene->bindText(label, model));
+  take(fixture.scene->bindText(button, model));
+  take(fixture.scene->bind(editor, model));
+
+  std::string labelSnapshot;
+  std::string buttonSnapshot;
+  std::string editorSnapshot;
+
+  take(fixture.scene->onPrepare<Label>(label, [&](Label &view, Node<Widget>) -> std::expected<void, TreeError> {
+    labelSnapshot = view.text().bytes();
+
+    return {};
+  }));
+  take(fixture.scene->onPrepare<Button>(button, [&](Button &view, Node<Widget>) -> std::expected<void, TreeError> {
+    buttonSnapshot = view.text().bytes();
+
+    return {};
+  }));
+  take(fixture.scene->onPrepare<LineEdit>(editor, [&](LineEdit &view, Node<Widget>) -> std::expected<void, TreeError> {
+    editorSnapshot = view.text().bytes();
+
+    return {};
+  }));
+  take(fixture.scene->onInput([&](const InputEvent &) -> std::expected<bool, ManagedError> {
+    take(model.set("queued"));
+    take(model.set("middle"));
+
+    const auto latest = take(model.set("latest"));
+
+    check(latest.rejected == 1, "full editor notification queue retains the latest shared state");
+
+    return true;
+  }));
+
+  const auto result = take(fixture.scene->run(fixture.terminal));
+
+  check(result.frames == 2 && fixture.terminal.closed,
+        "shared text captions recover in one dirty frame without continuous idle frames");
+  check(labelSnapshot == "latest" && buttonSnapshot == "latest" && editorSnapshot == "latest",
+        "all three controls prepared the latest accepted text before orderly scene closure");
+}
+
 void lineEditConflictHideAndDisable() {
   Fixture fixture(1);
   const auto node =
@@ -611,6 +661,7 @@ int main() {
     partialConstructionAndWeakState();
     selfRemovalKeepsAdmittedCallback();
     compositionAndRejectedNotification();
+    textCaptionsRecoverWithoutIdleFrames();
     lineEditConflictHideAndDisable();
     customCallbacksRetireTheirNodes();
     removedPreparationPreservesFailure();
