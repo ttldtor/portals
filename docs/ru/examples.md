@@ -209,3 +209,7 @@ cmake --build build/guide-examples
 ## Браузерный пример
 
 [Gallery и Level в WebAssembly](wasm-gallery.md) — подключаемые экспериментальные браузерные сцены с xterm.js и пошаговым runner. Обычная сборка нативных примеров их не включает.
+
+[Пример CheckBox с тремя состояниями](../../examples/check_state/main.cpp)
+использует явный цикл ввода и штатный runner; дополнительный
+[helper группы](../../examples/check_state/group.hpp) сохраняет частичные отказы.

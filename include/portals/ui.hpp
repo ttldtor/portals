@@ -1625,6 +1625,78 @@ inline Description<CheckBox> checkbox(std::string_view text, bool initial = fals
     });
 }
 
+/** @param text UTF-8 caption copied immediately.
+ * @param model Observing managed state from the scene receiving this recipe.
+ * @param changed Optional callback after the standard commit; cannot undo the commit.
+ * @param style Owning manual appearances.
+ * @param policy Owning layout constraints.
+ * @param options Typed user activation cycle.
+ * @return Single-use bound checkbox recipe.
+ */
+inline Description<CheckBox> checkbox(std::string_view text, ManagedState<CheckState> model,
+                                      std::function<std::expected<void, TreeError>(CheckStateResult)> changed = {},
+                                      ControlStyle style = {}, SizePolicy policy = {}, CheckBoxOptions options = {}) {
+  return control<CheckBox>(text, style, policy)
+    .setup([model, changed = std::move(changed), options](ManagedScene &scene, Node<CheckBox> node) mutable {
+      return scene.bind(node, model, std::move(changed), options);
+    });
+}
+
+/** @param text UTF-8 caption copied immediately.
+ * @param initial Initial checked value, owned by the receiving scene after mount.
+ * @param changed Optional callback after the standard commit.
+ * @param style Owning manual appearances.
+ * @param policy Owning layout constraints.
+ * @param options Typed user activation cycle.
+ * @return Checkbox recipe with internal managed state; no binding token escapes.
+ */
+inline Description<CheckBox> checkbox(std::string_view text, CheckState initial,
+                                      std::function<std::expected<void, TreeError>(CheckStateResult)> changed = {},
+                                      ControlStyle style = {}, SizePolicy policy = {}, CheckBoxOptions options = {}) {
+  return control<CheckBox>(text, style, policy)
+    .setup([initial, changed = std::move(changed), options](ManagedScene &scene, Node<CheckBox> node) mutable {
+      return scene.state(initial).and_then([&scene, node, &changed, options](ManagedState<CheckState> model) {
+        return scene.bind(node, model, std::move(changed), options);
+      });
+    });
+}
+
+/** @brief Configure an explicit checkbox value without positional callback/style placeholders.
+ * @tparam Options Exactly CheckBoxOptions after cv/ref removal; bare braces do not deduce this overload.
+ * @param text UTF-8 caption copied immediately.
+ * @param initial Initial state owned by the receiving scene after mount.
+ * @param options Owning activation policy copied now; invalid values fail through the existing bind boundary.
+ * @param changed Optional exact commit receipt callback; cannot undo a committed value.
+ * @param style Owning manual appearances.
+ * @param policy Owning layout constraints.
+ * @return The existing checkbox recipe, preserving its ownership, errors and synchronization behavior.
+ */
+template <class Options>
+  requires std::same_as<std::remove_cvref_t<Options>, CheckBoxOptions>
+inline Description<CheckBox> checkbox(std::string_view text, CheckState initial, Options &&options,
+                                      std::function<std::expected<void, TreeError>(CheckStateResult)> changed = {},
+                                      ControlStyle style = {}, SizePolicy policy = {}) {
+  return checkbox(text, initial, std::move(changed), style, policy, std::forward<Options>(options));
+}
+
+/** @brief Configure shared checkbox state without positional callback/style placeholders.
+ * @tparam Options Exactly CheckBoxOptions after cv/ref removal; implicit conversions are not admitted.
+ * @param text UTF-8 caption copied immediately.
+ * @param model Observing managed explicit state from the receiving scene.
+ * @param options Owning activation policy copied now, including from a temporary or const lvalue.
+ * @param changed Optional exact commit receipt callback.
+ * @param style Owning manual appearances.
+ * @param policy Owning layout constraints.
+ * @return The existing shared-state checkbox recipe; captures and cleanup follow the original factory.
+ */
+template <class Options>
+  requires std::same_as<std::remove_cvref_t<Options>, CheckBoxOptions>
+inline Description<CheckBox> checkbox(std::string_view text, ManagedState<CheckState> model, Options &&options,
+                                      std::function<std::expected<void, TreeError>(CheckStateResult)> changed = {},
+                                      ControlStyle style = {}, SizePolicy policy = {}) {
+  return checkbox(text, model, std::move(changed), style, policy, std::forward<Options>(options));
+}
+
 /** @param model Observing scene-owned text; existing draft/commit/conflict semantics are retained.
  * @param config Owning optional callbacks, limits, appearances, layout and clipboard service.
  * @return Single-use bound editor recipe; width policy always follows the scene.
@@ -2123,6 +2195,21 @@ inline Description<CheckBox> checkbox(Ref<CheckBox> reference, std::string_view 
                                       std::function<std::expected<void, TreeError>(CheckBoxResult)> changed = {},
                                       ControlStyle style = {}, SizePolicy policy = {}) {
   return checkbox(text, model, std::move(changed), style, policy).reference(std::move(reference));
+}
+
+/** @param reference Empty observing slot published after complete mount.
+ * @param text Caption copied now.
+ * @param model Existing managed explicit checkbox state.
+ * @param changed Optional typed receipt callback.
+ * @param style Manual appearances.
+ * @param policy Layout constraints.
+ * @param options Typed user activation cycle.
+ * @return Checkbox recipe retaining its original commit semantics.
+ */
+inline Description<CheckBox> checkbox(Ref<CheckBox> reference, std::string_view text, ManagedState<CheckState> model,
+                                      std::function<std::expected<void, TreeError>(CheckStateResult)> changed = {},
+                                      ControlStyle style = {}, SizePolicy policy = {}, CheckBoxOptions options = {}) {
+  return checkbox(text, model, std::move(changed), style, policy, options).reference(std::move(reference));
 }
 
 /** @param reference Empty observing editor slot published after complete mount.

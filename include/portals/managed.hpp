@@ -723,6 +723,16 @@ public:
   std::expected<void, ManagedError> bind(Node<CheckBox> node, ManagedState<bool> model,
                                          std::function<std::expected<void, TreeError>(CheckBoxResult)> changed = {});
 
+  /** @param node Managed checkbox without a prior event binding.
+   * @param model State created by this scene; shared internally on UI only.
+   * @param changed Optional callback after the standard toggle, receiving its exact commit receipt.
+   * @param options Typed activation cycle; invalid values return INVALID_ARGUMENT.
+   * @return Success or typed registration error. Returning an error cannot undo a committed toggle.
+   */
+  std::expected<void, ManagedError> bind(Node<CheckBox> node, ManagedState<CheckState> model,
+                                         std::function<std::expected<void, TreeError>(CheckStateResult)> changed = {},
+                                         CheckBoxOptions options = {});
+
   /** @param node Managed editor without a prior event binding.
    * @param model State created by this scene.
    * @param result Optional callback after standard editing/commit/conflict handling; cannot undo a commit.
@@ -1349,7 +1359,7 @@ private:
   struct Entry {
     Node<Widget> node;
     std::shared_ptr<StyleTarget> target;
-    std::variant<std::monostate, ActionBinding, CheckBoxBinding, LineEditBinding> binding;
+    std::variant<std::monostate, ActionBinding, CheckBoxBinding, CheckStateBinding, LineEditBinding> binding;
     std::unique_ptr<CaptionBinding> caption;
     std::unique_ptr<ManagedState<std::string>> textModel;
     ActionBinding focusScope;

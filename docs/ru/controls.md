@@ -76,3 +76,89 @@ Button добавляет `[ ` и ` ]`, CheckBox — `[ ] ` или `[x] `.
 терминала. Конечный сценарий в памяти выполняет отдельный тест `portals_gallery_check`. Запуск и параметры описаны в [примерах](examples.md).
 См. также [фокус](focus.md), [свойства](property.md), [компоновку](layout.md)
 и [рисование](render.md).
+
+## CheckBox с тремя состояниями
+
+`CheckState::UNCHECKED`, `CHECKED` и `MIXED` — явные значения модели.
+`checkState()` возвращает последнее корректное представление, а прежний
+`checked()` — true только для `CHECKED`. Boolean API, `Property<bool>`,
+`CheckBoxResult` и старый цикл ввода сохранены.
+
+Полная программа использует штатное владение сценой, маршрутизацию и cleanup:
+
+\include check_state/main.cpp
+
+По умолчанию `CheckBoxOptions::cycle = CheckCycle::TWO_STATE`: unchecked → checked,
+checked → unchecked, mixed → checked. `THREE_STATE` явно включает цикл unchecked →
+checked → mixed → unchecked. Enter/Space без модификаторов и нажатие левой кнопки
+мыши используют одну политику; отпускание, движение, paste и ввод с модификаторами
+не активируют контрол. Hidden/disabled предки запрещают ввод. Отдельного режима
+read-only нет. `[-] ` отличается от `[ ] ` и `[x] ` без помощи цвета и имеет ту же
+ширину, в том числе при disabled, linear и high-contrast выводе. Используются
+обычные стили normal/focused/disabled; новый PSS pseudo-state не добавлен.
+
+Общую модель создают через `ManagedScene::state(CheckState::MIXED)`, затем
+`scene.bind(node, state, callback, options)` либо декларацию
+`ui::checkbox(text, state, callback, style, sizePolicy, options)`. Callback
+`CheckStateResult` необязателен. `.reference(ref)` и overload с Ref для managed
+state публикуют прежний наблюдающий `Ref<CheckBox>` после успешного mount.
+Callback получает точный результат `Property::set`: успешный commit может иметь
+отклонённые или отменённые уведомления. Равные значения не публикуются повторно.
+Callback не откатывает commit, его исключения проходят прежнюю typed boundary.
+Внешнее изменение модели не вызывает business callback.
+
+Низкоуровневый `bindCheckbox(tree, router, node, sharedProperty, callback, options)`
+возвращает move-only `CheckStateBinding`. Он разделяет владение моделью, заимствует
+tree/router/scheduler; они должны пережить token и модель. Уничтожение/перемещение
+выполняется на UI между кадрами. Допущенный callback переживает удаление узла и
+собственного binding. `sync()` перемещённого token возвращает `INVALID_ARGUMENT`.
+Вызывай `sync()` перед кадрами после внешних изменений: отклонённое уведомление
+не отменяет commit, равный `set()` не повторяет доставку. Managed scene выполняет
+такую синхронизацию сама. Старое уведомление не заменяет новый snapshot.
+Только изменение представления инвалидирует paint; ошибка invalidation сохраняет
+старое представление. Смена состояния не выделяет память.
+
+Некорректный `CheckCycle` или значение `CheckState` в модели дают
+`TreeError::INVALID_ARGUMENT`. Ошибочное сырое значение Property остаётся
+committed, но не попадает в glyph и не превращается молча в корректное при вводе.
+Ошибки регистрации, UI-affinity, stale identity, закрытого владельца, активного
+кадра и памяти используют прежние `TreeError`/`ManagedError`. Неуспешная
+регистрация не оставляет action/subscription. Создание аргументов может бросить
+до входа в API, как у boolean API.
+
+### Агрегат и частичный отказ
+
+`aggregateCheckState(span<const CheckState>)` не выделяет память и поддерживает
+constexpr: пустой/полностью unchecked набор даёт unchecked, полностью checked —
+checked, остальные корректные сочетания — mixed. Результат —
+`expected<CheckState, TreeError>`, некорректный enum даёт `INVALID_ARGUMENT`.
+
+Обновление группы — политика приложения без транзакционных гарантий. Полный
+helper пытается обновить каждого ребёнка по порядку, сохраняет каждый настоящий
+результат и затем пересчитывает агрегат по авторитетным snapshot:
+
+\include check_state/group.hpp
+
+Вызывай `checkbox_example::updateSelection(children, CheckState::CHECKED)` либо
+`UNCHECKED` на UI. Проверяй каждый `children` receipt и его поля
+`rejected`/`cancelled`, показывай частичный отказ; обновляй агрегат родителя,
+только если `aggregate` успешен. Старое committed значение отказавшего ребёнка
+участвует в расчёте. Пустая группа даёт unchecked; null owner — явная ошибка
+ребёнка. Ошибка выделения хранилища receipts возникает до записи. Helper ничего
+не удерживает; borrowed captures callback приложения должны переживать
+допущенный вызов. Не связывай parent/child business callbacks рекурсивно:
+внешние Property updates уже обходят business callback.
+[Полная программа](../../examples/check_state/main.cpp) и
+[политика группы](../../examples/check_state/group.hpp) поставляются исходниками.
+
+Явный цикл задаётся без позиционных заглушек:
+`ui::checkbox(text, CheckState::MIXED,
+CheckBoxOptions{.cycle = CheckCycle::THREE_STATE})`.
+Та же форма принимает общий `ManagedState<CheckState>`; необязательный callback
+квитанции следует после options. Options копируются сразу, в том числе из
+временного значения. Прежние callback-first/trailing-options вызовы сохранены;
+exact-type constraint не делает старый callback `{}` неоднозначным.
+
+`GroupUpdate` отдельно возвращает `committed`, `unchanged`, `failed`,
+`rejectedNotifications` и `cancelledNotifications`. `reportGroupUpdate(result, output)`
+выводит эти счётчики, сохраняя у вызывающего все receipts и результат агрегата.

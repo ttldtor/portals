@@ -122,3 +122,91 @@ The basic-control tests cover activation, ancestor eligibility, Unicode ownershi
 invalidation, callback removal, subscription cancellation and queue errors.
 For the control contracts, see [focus and events](focus.md),
 [properties](property.md), [layout](layout.md) and [rendering](render.md).
+
+## CheckBox with three states
+
+`CheckState::UNCHECKED`, `CHECKED` and `MIXED` are explicit model values.
+`checkState()` reads the last valid presentation; legacy `checked()` is true only
+for `CHECKED`. The existing `Property<bool>`, `CheckBoxResult`, binding and
+`ui::checkbox("Caption", bool)` keep their boolean behavior.
+
+A complete native program uses the same scene owner, input router and runner:
+
+\include check_state/main.cpp
+
+The default `CheckBoxOptions::cycle` is `CheckCycle::TWO_STATE`: unchecked toggles
+to checked, checked to unchecked, and mixed to checked. Opt in to `THREE_STATE`
+for unchecked → checked → mixed → unchecked. Unmodified Enter/Space and left
+mouse press use the same policy; release, motion, paste and modified gestures
+are ignored. Hidden/disabled ancestors prevent activation. There is no separate
+read-only checkbox mode. The `[-] ` mixed prefix has the same width as `[ ] `
+and `[x] ` and remains distinct without color, including disabled, linear and
+high-contrast output. Styling uses the existing normal/focused/disabled control
+styles; this change adds no PSS pseudo-state.
+
+Use `ManagedScene::state(CheckState::MIXED)` and `scene.bind(node, state, callback,
+options)` for shared managed state, or `ui::checkbox(text, state, callback, style,
+sizePolicy, options)` in a declaration. Both accept an optional typed
+`CheckStateResult` callback. `.reference(ref)` and the managed-state Ref factory
+publish the existing observing `Ref<CheckBox>` after successful mount. A callback
+receives the exact `PropertyUpdate<CheckState>` set receipt: a successful commit
+can contain rejected/cancelled notifications. Equal values do not publish again.
+The callback cannot undo a commit; exceptions retain the existing typed failure
+boundary. External model updates do not invoke the business callback.
+
+For explicit ownership, `bindCheckbox(tree, router, node, sharedProperty,
+callback, options)` returns a move-only `CheckStateBinding`. The model is shared;
+the tree, router and scheduler remain borrowed and must outlive the token/model.
+Destroy or move it on UI between frames. An admitted callback survives removal
+of its node or destruction of its binding. Moving leaves the source empty;
+`sync()` then returns `INVALID_ARGUMENT`. Call `sync()` before frames after
+external changes: notification rejection does not roll back a model commit,
+and an equal `set()` does not retry notification. Managed scenes perform this
+recovery before frames. Old queued values cannot replace a newer snapshot.
+Only actual presentation changes invalidate paint, and failed invalidation
+retains the previous presentation. No state-switch allocation occurs.
+
+Invalid `CheckCycle` or committed `CheckState` values report
+`TreeError::INVALID_ARGUMENT`; an invalid raw Property value remains committed,
+but cannot change the glyph or be silently toggled to a valid value. Registration,
+affinity, stale identity, closed owner, active-frame and allocation failures use
+the existing `TreeError`/`ManagedError` paths. A failed registration retains no
+action/subscription. Argument construction can throw before entry as for the
+boolean API.
+
+### Aggregate and partial failure customization
+
+`aggregateCheckState(span<const CheckState>)` is allocation-free and constexpr:
+empty/all-unchecked input yields unchecked, all-checked yields checked, and other
+valid combinations yield mixed. It returns `expected<CheckState, TreeError>`;
+invalid enum input returns `INVALID_ARGUMENT`.
+
+A group update is an application policy, not a transaction. The following complete
+helper attempts every child in input order, preserves each actual error/commit
+receipt, then reads authoritative snapshots to compute the aggregate:
+
+\include check_state/group.hpp
+
+Call `checkbox_example::updateSelection(children, CheckState::CHECKED)` or
+`UNCHECKED` on UI. Inspect **every** `children` receipt and its `rejected`/`cancelled`
+fields, report partial failures, then set the parent aggregate only if
+`aggregate` succeeded. A failed child's old committed value participates in the
+aggregate. Empty groups yield unchecked. Null owners are explicit child errors;
+receipt storage failure occurs before writes. This helper retains no model or
+callback; captures in application callbacks must outlive admitted input.
+Do not wire parent and child business callbacks recursively: external Property
+updates already bypass business callbacks. The helper and the native program
+are [complete source files](../examples/check_state/main.cpp), with
+[group policy source](../examples/check_state/group.hpp).
+
+Use `ui::checkbox(text, CheckState::MIXED,
+CheckBoxOptions{.cycle = CheckCycle::THREE_STATE})` for explicit input configuration.
+The same options-first form accepts a shared `ManagedState<CheckState>`; an
+optional receipt callback follows the options. Both forms copy the owning
+options immediately. Existing callback-first/trailing-options calls remain
+available, including an empty callback written as `{}`. The exact options-type
+constraint keeps those braced calls unambiguous.
+
+`GroupUpdate` exposes `committed`, `unchanged`, `failed`, `rejectedNotifications` and
+`cancelledNotifications` separately. `reportGroupUpdate(result, output)` prints
+these counters while the caller retains every receipt and the aggregate result.

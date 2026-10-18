@@ -5,6 +5,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Added] CheckBox supports explicit unchecked, checked and mixed states through
+  typed Property/managed/declarative bindings. Boolean APIs retain their cycle;
+  an explicit option enables a three-state input cycle. Mixed selection has a
+  distinct text glyph, and aggregate helpers preserve partial update receipts.
+
 - [Added] Read-only managed derived sources compute owning values from explicit
   state or earlier derived sources. Initial creation is atomic and checked;
   runtime failures preserve the last good output. Existing captions and managed

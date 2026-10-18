@@ -1,0 +1,3 @@
+add_executable(portals_check_state_example main.cpp)
+target_link_libraries(portals_check_state_example PRIVATE portals::core)
+portals_enable_warnings(portals_check_state_example)

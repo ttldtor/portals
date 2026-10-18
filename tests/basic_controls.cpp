@@ -5,6 +5,7 @@
 
 #include <array>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <thread>
 
@@ -397,16 +398,11 @@ void callbackLifetimes() {
 
 void allocationFailures() {
   Fixture f;
-  constexpr std::ptrdiff_t PROBE_LIMIT = 40;
+  constexpr auto COUNTING_BUDGET = std::numeric_limits<std::ptrdiff_t>::max();
 
   for (int kind = 0; kind != 3; ++kind) {
-    bool created{};
-
-    for (std::ptrdiff_t budget = 0; budget < PROBE_LIMIT; ++budget) {
-      auto text = gallery::text("Allocated text");
+    auto create = [&](GraphemeText &&text) -> std::expected<Node<Control>, TreeError> {
       std::expected<Node<Control>, TreeError> result;
-
-      allocation_test::remaining = budget;
 
       if (kind == 0) {
         auto node = f.tree->emplace<Label>(f.root, std::move(text));
@@ -422,6 +418,27 @@ void allocationFailures() {
         result = node ? std::expected<Node<Control>, TreeError>(*node) : std::unexpected(node.error());
       }
 
+      return result;
+    };
+    auto calibrationText = gallery::text("Allocated text");
+
+    allocation_test::remaining = COUNTING_BUDGET;
+
+    auto calibrated = create(std::move(calibrationText));
+    const auto allocations = COUNTING_BUDGET - allocation_test::remaining;
+
+    allocation_test::remaining = -1;
+    take(f.tree->remove(take(std::move(calibrated))));
+    std::cout << "control allocation calibration kind=" << kind << " count=" << allocations << '\n';
+
+    bool created{};
+
+    for (std::ptrdiff_t budget = 0; budget <= allocations; ++budget) {
+      auto text = gallery::text("Allocated text");
+
+      allocation_test::remaining = budget;
+
+      auto result = create(std::move(text));
       allocation_test::remaining = -1;
 
       if (result) {
@@ -437,9 +454,21 @@ void allocationFailures() {
     check(created, "control construction eventually succeeds under finite allocation budget");
   }
 
+  Fixture calibration;
+  auto calibrationText = gallery::text("Replacement");
+
+  allocation_test::remaining = COUNTING_BUDGET;
+
+  auto calibrated = setControlText(*calibration.tree, calibration.node, std::move(calibrationText));
+  const auto replacementAllocations = COUNTING_BUDGET - allocation_test::remaining;
+
+  allocation_test::remaining = -1;
+  take(calibrated);
+  std::cout << "text replacement allocation calibration count=" << replacementAllocations << '\n';
+
   bool changed{};
 
-  for (std::ptrdiff_t budget = 0; budget < PROBE_LIMIT; ++budget) {
+  for (std::ptrdiff_t budget = 0; budget <= replacementAllocations; ++budget) {
     auto replacement = gallery::text("Replacement");
 
     take(f.tree->consumeFrameRequest());
@@ -510,6 +539,171 @@ void bindingReplacementAndCaptureReentry() {
   check(weak.expired(), "disconnected bindings release their model after router reclamation");
 }
 
+void typedBindingRegistrationAllocationFailures() {
+  constexpr auto COUNTING_BUDGET = std::numeric_limits<std::ptrdiff_t>::max();
+  Fixture calibration;
+  auto calibrationModel = std::shared_ptr<Property<CheckState>>(
+    take(Property<CheckState>::create(*calibration.tree, calibration.root, CheckState::MIXED, Invalidation::PAINT)));
+  std::function<void(CheckStateResult)> calibratedCallback = [](CheckStateResult) {
+  };
+
+  allocation_test::remaining = COUNTING_BUDGET;
+
+  auto calibrated = bindCheckbox(*calibration.tree, *calibration.router, calibration.node, calibrationModel,
+                                 std::move(calibratedCallback));
+  const auto allocations = COUNTING_BUDGET - allocation_test::remaining;
+
+  allocation_test::remaining = -1;
+  take(std::move(calibrated));
+  std::cout << "typed binding registration allocation calibration count=" << allocations << '\n';
+
+  for (std::ptrdiff_t budget = 0; budget <= allocations; ++budget) {
+    Fixture f;
+    auto model = std::shared_ptr<Property<CheckState>>(
+      take(Property<CheckState>::create(*f.tree, f.root, CheckState::MIXED, Invalidation::PAINT)));
+    int calls{};
+    std::function<void(CheckStateResult)> changed = [&](CheckStateResult) {
+      ++calls;
+    };
+    std::expected<CheckStateBinding, TreeError> result = std::unexpected(TreeError::NO_MEMORY);
+    bool argumentFailed{};
+
+    take(f.tree->consumeFrameRequest());
+    allocation_test::remaining = budget;
+
+    try {
+      result = bindCheckbox(*f.tree, *f.router, f.node, model, std::move(changed));
+    } catch (const std::bad_alloc &) {
+      argumentFailed = true;
+    }
+
+    allocation_test::remaining = -1;
+
+    if (!argumentFailed && result) {
+      take(f.tree->read(f.node, [](const CheckBox &box) {
+        check(box.checkState() == CheckState::MIXED, "successful typed registration applies initial value");
+      }));
+
+      continue;
+    }
+
+    check(argumentFailed || result.error() == TreeError::NO_MEMORY, "typed registration OOM is explicit");
+    take(f.tree->read(f.node, [](const CheckBox &box) {
+      check(box.checkState() == CheckState::UNCHECKED, "failed typed registration preserves old view");
+    }));
+    check(take(f.tree->consumeFrameRequest()) == Invalidation::NONE, "failed registration adds no invalidation");
+    take(f.router->invoke(f.node, {Action::ACTIVATE}));
+    take(model->set(CheckState::CHECKED));
+    take(f.scheduler->dispatch());
+    check(calls == 0 && !f.checked(), "failed registration leaves neither action nor subscription");
+
+    auto replacement = take(bindCheckbox(*f.tree, *f.router, f.node, model, [](CheckStateResult) {
+    }));
+
+    take(replacement.sync());
+  }
+}
+
+void typedBindingReplacementAndCaptureReentry() {
+  Fixture f;
+  auto model = std::shared_ptr<Property<CheckState>>(
+    take(Property<CheckState>::create(*f.tree, f.root, CheckState::UNCHECKED, Invalidation::PAINT)));
+  const auto second = take(f.tree->emplace<CheckBox>(f.root, gallery::text("Second")));
+  std::optional<CheckStateBinding> binding;
+  int released{}, newCalls{};
+  auto release = std::make_shared<OnDestroy>();
+
+  release->action = [&] {
+    ++released;
+    binding.reset();
+    take(f.tree->invalidate(f.root, Invalidation::PAINT));
+  };
+  binding.emplace(take(bindCheckbox(*f.tree, *f.router, f.node, model, [release](CheckStateResult result) {
+    take(std::move(result));
+  })));
+  release.reset();
+
+  auto replacement = take(bindCheckbox(*f.tree, *f.router, second, model, [&](CheckStateResult result) {
+    take(std::move(result));
+    ++newCalls;
+  }));
+
+  *binding = std::move(replacement);
+  take(f.router->focused());
+  check(!binding && released == 1, "typed old capture can destroy replacement binding during reclamation");
+  take(f.router->invoke(second, {Action::ACTIVATE}));
+  take(f.scheduler->dispatch());
+  check(newCalls == 0, "typed reentry disconnects replacement action and subscription");
+
+  std::weak_ptr<Property<CheckState>> weak = model;
+
+  model.reset();
+  take(f.router->focused());
+  check(weak.expired(), "typed model owner is released after capture retirement");
+}
+
+struct LegacyCheckBox : CheckBox {
+  using CheckBox::CheckBox;
+
+  void forceCheckedPresentation() {
+    showChecked(true);
+  }
+};
+
+void verifyLegacyProjectionRecovery(Fixture &fixture, Node<LegacyCheckBox> node, auto &binding, CheckState expected,
+                                    int &callbacks) {
+  take(fixture.tree->edit(node, [](LegacyCheckBox &box) {
+    box.forceCheckedPresentation();
+  }));
+  take(fixture.tree->invalidate(node, Invalidation::PAINT));
+  take(fixture.tree->read(node, [](const LegacyCheckBox &box) {
+    check(box.checked(), "legacy protected setter changed the checked presentation");
+  }));
+  take(fixture.tree->consumeFrameRequest());
+  take(binding.sync());
+  take(fixture.tree->read(node, [expected](const LegacyCheckBox &box) {
+    check(box.checkState() == expected && box.checked() == (expected == CheckState::CHECKED),
+          "binding sync restores coherent authoritative state after legacy protected setter");
+  }));
+  check(take(fixture.tree->consumeFrameRequest()) == Invalidation::PAINT,
+        "legacy projection repair invalidates paint once");
+  take(binding.sync());
+  check(take(fixture.tree->consumeFrameRequest()) == Invalidation::NONE,
+        "repaired equal state does not invalidate again");
+  take(fixture.scheduler->dispatch());
+  check(callbacks == 0, "presentation repair creates no business events");
+}
+
+void legacyProtectedProjectionRecovery() {
+  {
+    Fixture f;
+    const auto node = take(f.tree->emplace<LegacyCheckBox>(f.root, gallery::text("Legacy bool")));
+    int callbacks{};
+    auto binding = take(bindCheckbox(*f.tree, *f.router, node, f.model, [&](CheckBoxResult) {
+      ++callbacks;
+    }));
+    const auto revision = take(f.model->snapshot())->revision;
+
+    verifyLegacyProjectionRecovery(f, node, binding, CheckState::UNCHECKED, callbacks);
+    check(take(f.model->snapshot())->revision == revision, "bool projection repair does not republish the model");
+  }
+
+  for (const auto state : {CheckState::UNCHECKED, CheckState::MIXED}) {
+    Fixture f;
+    const auto node = take(f.tree->emplace<LegacyCheckBox>(f.root, gallery::text("Legacy typed")));
+    auto model = std::shared_ptr<Property<CheckState>>(
+      take(Property<CheckState>::create(*f.tree, f.root, state, Invalidation::PAINT)));
+    int callbacks{};
+    auto binding = take(bindCheckbox(*f.tree, *f.router, node, model, [&](CheckStateResult) {
+      ++callbacks;
+    }));
+    const auto revision = take(model->snapshot())->revision;
+
+    verifyLegacyProjectionRecovery(f, node, binding, state, callbacks);
+    check(take(model->snapshot())->revision == revision, "typed projection repair does not republish the model");
+  }
+}
+
 void precommitFailure() {
   Fixture f;
   const auto source = take(f.tree->emplace<Widget>(f.root));
@@ -535,6 +729,9 @@ int main() {
   bindingAndOverflow();
   callbackLifetimes();
   precommitFailure();
+  legacyProtectedProjectionRecovery();
+  typedBindingRegistrationAllocationFailures();
+  typedBindingReplacementAndCaptureReentry();
   allocationFailures();
   bindingReplacementAndCaptureReentry();
 
