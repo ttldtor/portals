@@ -77,24 +77,87 @@ std::expected<Node<W>, ManagedError> ManagedScene::attachView(Node<W> node,
   };
 
   try {
+    if constexpr (std::same_as<W, VirtualList<T>>) {
+      auto configured = app_.tree().edit(node, [&](W &list) {
+        list.clearMissingSelection_ = source->sinkOnly;
+      });
+      if (!configured) {
+        return fail(configured.error());
+      }
+    }
     auto entry = find(node);
+
+    std::shared_ptr<detail::ManagedPreparedRegistration<T>> registration;
+    if (handler) {
+      registration = std::make_shared<detail::ManagedPreparedRegistration<T>>();
+      registration->action = std::make_shared<ManagedViewHandler<T>>(std::move(handler));
+      std::erase_if(source->prepared, [](const auto &weak) {
+        return weak.expired();
+      });
+      source->prepared.push_back(registration);
+    }
 
     // Factory-created nodes cannot carry another binding. Construct the whole callback
     // before publishing it, so allocation failure retires the new child transactionally.
-    entry->viewPrepare = [source, prepare = std::move(prepare), handler = std::move(handler)](
-                           const LayoutSnapshot &layout) -> std::expected<void, TreeError> {
+    entry->viewPrepare = [this, node, source, prepare = std::move(prepare),
+                          registration](const LayoutSnapshot &layout) -> std::expected<void, TreeError> {
+      const auto retireOrigin = [&]() -> std::expected<void, TreeError> {
+        if (source->origin) {
+          auto live = source->origin->check();
+          if (!live) {
+            if (!source->origin->retired && !source->origin->closed) {
+              return std::unexpected(live.error());
+            }
+            pruneLiveText();
+          }
+        }
+        return {};
+      };
+      auto live = retireOrigin();
+      if (!live) {
+        return live;
+      }
       if (!source->frame) {
         return std::unexpected(TreeError::INVALID_ARGUMENT);
       }
 
+      if constexpr (std::same_as<W, VirtualList<T>>) {
+        if (source->retired) {
+          auto detached = app_.tree().edit(node, [](W &view) {
+            view.detachedCollection_ = true;
+            view.request_.cancel();
+            view.request_ = {};
+            view.consumer_ = {};
+          });
+          if (!detached) {
+            return detached;
+          }
+        }
+      }
       auto work = prepare(*source->frame, layout);
 
       if (!work) {
         return std::unexpected(work.error());
       }
 
-      if (handler) {
-        return handler(*source->frame, *work);
+      live = retireOrigin();
+      if (!live) {
+        return live;
+      }
+      if (source->retired) {
+        return {};
+      }
+      // Disconnecting registration never destroys the std::function currently being invoked.
+      auto action = registration ? registration->action : nullptr;
+      if (action) {
+        try {
+          auto result = (*action)(*source->frame, *work);
+          auto retired = retireOrigin();
+          return result ? retired : result;
+        } catch (...) {
+          (void)retireOrigin();
+          throw;
+        }
       }
 
       // Without a provider callback there is nobody to retain and dispatch a receipt.

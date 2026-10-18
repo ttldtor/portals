@@ -372,3 +372,104 @@ context at each UI resume and remove it before suspension. It does not move
 CPU work to a worker automatically. UI close cancels the continuation; the
 application still owns producer stop/join. See [current coroutines](ui-coroutines.md).
 The planned milestone is M6.
+
+## Transform live editor text {#live-text-transforms}
+
+This complete application shows the current editor draft as two virtual lists.
+Edit the field; words and graphemes update through the existing dirty-frame
+preparation. Click Quit or press F10 to exit. The standard runner handles typed
+setup/runtime failures and terminal restoration.
+
+[Complete source](examples/guide_text_transforms.cpp). Include `<portals/ui.hpp>`
+and link `portals::core`; see [consumer setup](index.md). To build this source
+inside the repository, configure with `PORTALS_BUILD_TESTS=ON`, then build and run
+`portals_docs_text_transforms`. It opens the native terminal and has no CLI options.
+
+```cpp
+// Copyright (c) 2026 ttldtor.
+// SPDX-License-Identifier: BSL-1.0
+#include <portals/ui.hpp>
+
+/** @brief Show whitespace-delimited words and extended graphemes from the live editor draft. */
+int main() {
+  using namespace portals;
+
+  ui::Ref<LineEdit> input;
+  auto scene = ui::scene(ui::vbox(ui::lineEdit(input, "Hello, Portals!"), ui::label("Words"),
+                                  ui::virtualList(ui::words(input.draftText())).height(4),
+                                  ui::label("Graphemes (including spaces)"),
+                                  ui::virtualList(ui::graphemes(input.draftText())).height(4), ui::button("Quit", [] {
+                                    ui::quit();
+                                  })));
+
+  // clang-format off
+  return scene
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+  // clang-format on
+}
+```
+
+`ui::words(source)` and `ui::graphemes(source)` are cold descriptions: construction
+neither reads text nor subscribes. Mount resolves direct references from the whole
+recipe, including later siblings, and initializes the private graph before
+publishing references. An initial failure rolls back the attempted mount. The
+scene owns synchronization and cleanup; application code needs no timer,
+subscription token or manual revision counter.
+
+`words` separates tokens only at whole graphemes whose scalars all have Unicode
+`White_Space`. Punctuation, apostrophes, CJK and emoji remain in their tokens.
+This is whitespace tokenization, not linguistic segmentation or Unicode UAX #29
+word breaking. `graphemes` returns every existing extended grapheme, including
+whitespace. Both retain owning input storage; `TextSegment::bytes()` is a view
+valid while that segment is retained and unchanged.
+
+`TextSplitOptions` defaults to 4096 tokens and `TextLimits{}`: 1 MiB input,
+64 KiB per cluster, 1,048,576 graphemes and 2,097,152 cells. `maxTokens` must be
+positive. Limits reject the complete candidate rather than truncate it. Customize
+an individual recipe with `ui::words(input.draftText(), {.maxTokens = 1000})`.
+The editor's own validation, text limits, width policy and confirmation mode
+still apply; a draft source includes intermediate text without publishing it to
+the editor model.
+
+Token IDs conservatively use reset-on-change (`RESET_ON_CHANGE`) semantics:
+any changed ordered token sequence receives a new generation. The same ordered
+token bytes and width policy are a no-op even when delimiter offsets change.
+Undo can therefore create fresh IDs. Only newly collection-bound lists use
+clear-missing (`CLEAR_MISSING`) selection behavior, checked against the complete
+ID index; ordinary provider lists keep their existing policy.
+
+Transform and collection-model application are separate commits. Runtime
+failure preserves the last good output/model and owning model pins; it does not
+undo an already accepted editor or source value. Failures retain typed causes
+and the existing runner stop policy. After origin removal, delivery quietly
+retires and the list retains its last good owning collection for local scrolling
+and resize; old prepared callbacks retire too. Removal of the receiving list
+reclaims its private graph. Explicit stale source access still reports
+`STALE_NODE`; scene closure reports `CLOSED`.
+
+### Explicit sources and collections
+
+For a mounted reference, `owner.liveText(input.draftText())` returns a checked
+`ManagedSource<GraphemeText>` immediately initialized from the source. Its
+`snapshot()` is an owning property-change snapshot. Use `owner.derive` and
+`owner.observe` for explicit transformations and presentation. The finite
+`portals::words(text)` and `portals::graphemes(text)` return
+`std::expected<TextSegments, TreeError>` and need no scene.
+
+For domain rows with application-owned stable IDs, create an owning
+`RowCollection<T>`, expose it through a read-only managed derived source, then
+call `owner.model(source)`. This sink-only model has no writable publication
+endpoint (`publisher()` returns `WOULD_BLOCK`). `CollectionModelOptions::maxRows`
+and the existing model budgets bound admission. A failed source change leaves
+the old source; an accepted source followed by failed model staging leaves the
+new source and last good model. Equal source assignment does not resend a failed
+notification; a later permitted preparation can retry the latest value.
+
+All live registration, snapshots and mutation use the owning UI thread between
+frames. Handles weakly observe their original scene/control identity; copies do
+not prolong it or follow a reused node slot. Retained successful text snapshots,
+segments, collections and model pins own their data independently. Callback
+captures by reference still borrow their objects. See [managed
+observation](#managed-observation), [text sources](text-property.md) and
+[virtual lists](virtual-list.md) for the underlying contracts.

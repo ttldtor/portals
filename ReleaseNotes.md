@@ -15,6 +15,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
   an explicit option enables a three-state input cycle. Mixed selection has a
   distinct text glyph, and aggregate helpers preserve partial update receipts.
 
+- [Added] Scene-owned live caption/draft/committed text sources, bounded owning
+  whitespace-token and grapheme transforms, and cold text-to-virtual-list recipes.
+  Collection-bound lists preserve last good data on failure or origin retirement;
+  changed tokens receive fresh IDs and missing selection clears on new bound lists.
+  Explicit owning row collections also bind read-only managed sources to models.
+
 - [Added] Read-only managed derived sources compute owning values from explicit
   state or earlier derived sources. Initial creation is atomic and checked;
   runtime failures preserve the last good output. Existing captions and managed

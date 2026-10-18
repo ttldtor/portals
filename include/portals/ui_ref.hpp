@@ -106,6 +106,8 @@ public:
 
 private:
   template <class T> friend class Ref;
+  friend class portals::ManagedScene;
+  friend struct detail::Access;
   enum class Kind {
     CAPTION,
     DRAFT,

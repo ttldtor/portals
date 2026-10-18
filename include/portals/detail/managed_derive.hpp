@@ -20,6 +20,13 @@ void ManagedScene::prepareObserverRecord(const std::shared_ptr<ObserverRecord> &
     facadeContext(),
     [source = std::weak_ptr(source), scene = facadeContext(), action = std::forward<Callback>(callback)](
       const std::shared_ptr<ObserverRecord> &entered) mutable -> std::expected<std::uint64_t, TreeError> {
+      auto live = entered->scene->observerLive(entered);
+
+      if (!live || !*live) {
+        return live ? std::expected<std::uint64_t, TreeError>(entered->successful.value_or(0))
+                    : std::unexpected(live.error());
+      }
+
       auto locked = source.lock();
       if (!locked) {
         return std::unexpected(TreeError::CLOSED);
@@ -99,6 +106,8 @@ ManagedScene::derive(ManagedState<In> input, Transform &&transform, Invalidation
       }
     }
     auto record = std::make_shared<ObserverRecord>();
+    record->inputOrigin = input.origin_;
+    record->recoveryOrigin = input.origin_ ? input.origin_ : input.recoveryOrigin_;
     record->scene = this;
     record->node = root_;
     record->runtime = false;
@@ -185,13 +194,19 @@ ManagedScene::derive(ManagedState<In> input, Transform &&transform, Invalidation
 
     prepareObserverRecord(
       record, *source,
-      [callable, output = std::weak_ptr(output)](
+      [this, callable, output = std::weak_ptr(output)](
         const In &value, const std::shared_ptr<ObserverRecord> &entered) -> std::expected<void, TreeError> {
         auto locked = output.lock();
         if (!locked) {
           return std::unexpected(TreeError::CLOSED);
         }
         return (*callable)(value, entered, [&](Out &candidate) -> std::expected<void, TreeError> {
+          auto live = observerLive(entered);
+
+          if (!live || !*live) {
+            return live ? std::expected<void, TreeError>{} : std::unexpected(live.error());
+          }
+
           auto changed = [&] {
             if constexpr (std::same_as<Out, std::string>) {
               return locked->set(std::as_const(candidate));
@@ -236,6 +251,7 @@ ManagedScene::derive(ManagedState<In> input, Transform &&transform, Invalidation
     handle.lifetime_ = lifetime_;
     handle.owner_ = owner_;
     handle.scene_ = root_.id();
+    handle.recoveryOrigin_ = record->recoveryOrigin;
     record->subscription = std::move(*token);
     record->successful = (*initial)->revision;
     record->initialPending = false;

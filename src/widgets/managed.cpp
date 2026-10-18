@@ -659,31 +659,184 @@ std::expected<void, ManagedError> ManagedScene::remove(Node<Widget> node) {
 
     return false;
   });
+  pruneLiveText();
   pruneObservers();
   stylesDirty_ = true;
 
   return {};
 }
 
+void ManagedScene::pruneLiveText() noexcept {
+  struct Pruning {
+    bool &flag;
+    bool previous;
+
+    ~Pruning() {
+      flag = previous;
+    }
+  } guard{pruningObservers_, pruningObservers_};
+
+  pruningObservers_ = true;
+  // Complete the logical mark first. Disconnecting a direct edge can release arbitrary captures.
+  for (const auto &record : liveText_) {
+    (void)record->origin->check();
+  }
+  for (const auto &record : observers_) {
+    (void)observerLive(record);
+  }
+  for (const auto &source : models_) {
+    if (source->origin && (source->origin->retired || source->origin->closed)) {
+      source->retired = true;
+    }
+    if (source->receiver != Node<Widget>{}) {
+      auto receiver = app_.tree().withScope(source->receiver, [](const UiScope &) {
+      });
+      if (!receiver && retired(receiver.error())) {
+        source->retired = true;
+      }
+    }
+  }
+  for (const auto &record : liveText_) {
+    if (!record->publicUse && !coldMountPending_ &&
+        !std::ranges::any_of(observers_,
+                             [&](const auto &edge) {
+                               return !edge->retired && edge->inputOrigin == record->origin;
+                             }) &&
+        !std::ranges::any_of(models_, [&](const auto &edge) {
+          return !edge->retired && edge->origin == record->origin;
+        })) {
+      record->origin->retired = true;
+    }
+  }
+  pruneObservers();
+  for (const auto &source : models_) {
+    if (source->retired) {
+      source->retire();
+    }
+  }
+  std::erase_if(models_, [](const auto &source) {
+    return source->retired;
+  });
+  std::erase_if(originProperties_, [&](const auto &record) {
+    auto receiver = app_.tree().withScope(record.receiver, [](const UiScope &) {
+    });
+    if (record.origin->retired || record.origin->closed || (!receiver && retired(receiver.error()))) {
+      if (auto property = record.property.lock()) {
+        std::erase(properties_, property);
+      }
+      return true;
+    }
+    return record.property.expired();
+  });
+  std::erase_if(liveText_, [&](const auto &record) {
+    if (!record->origin->retired && !record->origin->closed) {
+      return false;
+    }
+    std::erase(properties_, std::shared_ptr<void>(record->property));
+    return true;
+  });
+}
+
+std::expected<bool, TreeError> ManagedScene::captureLiveText() {
+  struct Capturing {
+    bool &flag;
+    bool previous;
+
+    ~Capturing() {
+      flag = previous;
+    }
+  } guard{preparing_, preparing_};
+
+  preparing_ = true;
+  pruneLiveText();
+  bool changed{};
+  const auto snapshot = liveText_;
+  for (const auto &record : snapshot) {
+    auto live = record->origin->check();
+    if (!live) {
+      if (record->origin->retired || record->origin->closed) {
+        continue;
+      }
+      return std::unexpected(live.error());
+    }
+    auto previous = record->property->snapshot();
+    if (!previous) {
+      return std::unexpected(previous.error());
+    }
+    auto next = record->capture(&(*previous)->value);
+    if (!next) {
+      auto failure = next.error();
+      failure.phase = ManagedPhase::PREPARE;
+      failure.operation = record->operation;
+      failure.registrationOrigin = record->registered;
+      remember(failure);
+      return std::unexpected(bridge(failure));
+    }
+    if (*next) {
+      auto updated = record->property->set(std::move(**next));
+      if (!updated) {
+        remember(error(ManagedPhase::PREPARE, record->origin->node, updated.error()));
+        return std::unexpected(updated.error());
+      }
+      changed = changed || updated->changed;
+    }
+  }
+  return changed;
+}
+
 void ManagedScene::pruneObservers() noexcept {
   struct Pruning {
     bool &flag;
+    bool previous;
 
     ~Pruning() {
-      flag = false;
+      flag = previous;
     }
-  } guard{pruningObservers_};
+  } guard{pruningObservers_, pruningObservers_};
 
   pruningObservers_ = true;
+  // Mark every affected edge before disconnecting owners whose destructors may reenter.
+  for (const auto &record : observers_) {
+    (void)observerLive(record);
+  }
+
   std::erase_if(observers_, [&](const auto &record) {
-    auto live = app_.tree().withScope(record->node, [](const UiScope &) {
-    });
-    if (!live && retired(live.error())) {
-      record->retired = true;
+    if (record->retired) {
       record->subscription = {};
     }
     return record->retired;
   });
+}
+
+std::expected<bool, TreeError> ManagedScene::observerLive(const std::shared_ptr<ObserverRecord> &record) {
+  if (record->retired) {
+    return false;
+  }
+
+  if (record->inputOrigin) {
+    auto origin = record->inputOrigin->check();
+
+    if (!origin) {
+      if (record->inputOrigin->retired || record->inputOrigin->closed || record->inputOrigin->lifetime.expired()) {
+        record->retired = true;
+
+        return false;
+      }
+
+      return std::unexpected(origin.error());
+    }
+  }
+
+  auto live = app_.tree().withScope(record->node, [](const UiScope &) {
+  });
+
+  if (!live && retired(live.error())) {
+    record->retired = true;
+
+    return false;
+  }
+
+  return live ? std::expected<bool, TreeError>(true) : std::unexpected(live.error());
 }
 
 std::expected<void, ManagedError> ManagedScene::observerAdmission(Node<Widget> node) {
@@ -697,12 +850,19 @@ std::expected<void, ManagedError> ManagedScene::observerAdmission(Node<Widget> n
   if (node != root_ && !find(node)) {
     return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
   }
-  pruneObservers();
+  pruneLiveText();
   const auto nodeCount = std::ranges::count(observers_, node, [](const auto &record) {
     return record->node;
   });
-  if (observers_.size() >= options_.maxObservers ||
-      static_cast<std::size_t>(nodeCount) >= options_.maxObserversPerNode) {
+  const auto captures = std::ranges::count_if(liveText_, [&](const auto &record) {
+    return record->origin->node == node;
+  });
+  const auto boundModels = std::ranges::count_if(models_, [](const auto &source) {
+    return source->bound();
+  });
+  const auto rootModels = node == root_ ? boundModels : 0;
+  if (observers_.size() + liveText_.size() + static_cast<std::size_t>(boundModels) >= options_.maxObservers ||
+      static_cast<std::size_t>(nodeCount + captures + rootModels) >= options_.maxObserversPerNode) {
     return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NODE_LIMIT));
   }
   return {};
@@ -714,10 +874,8 @@ std::expected<void, TreeError> ManagedScene::invokeObserver(const std::shared_pt
       (phase == ManagedPhase::INPUT && recoveringObservers_)) {
     return {};
   }
-  auto live = app_.tree().withScope(record->node, [](const UiScope &) {
-  });
-  if (!live && retired(live.error())) {
-    record->retired = true;
+  auto live = observerLive(record);
+  if (live && !*live) {
     record->subscription = {};
     return {};
   }
@@ -739,7 +897,14 @@ std::expected<void, TreeError> ManagedScene::invokeObserver(const std::shared_pt
   record->promotesFailure = false;
 
   const auto report = [&](TreeError cause) -> std::expected<void, TreeError> {
+    record->failed = true;
     auto failure = error(phase, record->node, cause);
+    if (record->textFailure) {
+      failure.text = *record->textFailure;
+      if (failure.text && record->inputOrigin) {
+        failure.node = record->inputOrigin->node.id();
+      }
+    }
     if (record->operation) {
       failure.operation = record->operation;
       failure.operationOrigin = record->origin;
@@ -749,6 +914,7 @@ std::expected<void, TreeError> ManagedScene::invokeObserver(const std::shared_pt
     return std::unexpected(cause);
   };
   const auto reportShort = [&]() -> std::expected<void, TreeError> {
+    record->failed = true;
     // Same-scene short collectors promoted their exact history receipt at synchronous admission.
     // A foreign collector has its own history; retain the unchanged failure in this runner too.
     if (!failure_) {
@@ -766,6 +932,7 @@ std::expected<void, TreeError> ManagedScene::invokeObserver(const std::shared_pt
       return report(latest.error());
     }
     if (!record->initialPending && record->successful == *latest) {
+      record->failed = false;
       return {};
     }
 
@@ -778,6 +945,7 @@ std::expected<void, TreeError> ManagedScene::invokeObserver(const std::shared_pt
     }
     record->successful = *delivered;
     record->initialPending = false;
+    record->failed = false;
     return {};
   } catch (const std::bad_alloc &) {
     return record->shortFailure ? reportShort() : report(TreeError::NO_MEMORY);
@@ -786,7 +954,17 @@ std::expected<void, TreeError> ManagedScene::invokeObserver(const std::shared_pt
   }
 }
 
-std::expected<void, TreeError> ManagedScene::recoverObservers() {
+std::expected<void, TreeError> ManagedScene::recoverObservers(std::size_t maxPasses, bool *invoked, bool *remaining,
+                                                              bool deferFailedLive) {
+  if (invoked) {
+    *invoked = false;
+  }
+  if (remaining) {
+    *remaining = false;
+  }
+  if (!maxPasses) {
+    maxPasses = options_.maxObserverRecoveryPasses;
+  }
   if (observers_.empty()) {
     return {};
   }
@@ -802,15 +980,34 @@ std::expected<void, TreeError> ManagedScene::recoverObservers() {
   recoveringObservers_ = true;
 
   try {
-    pruneObservers();
+    pruneLiveText();
     if (observers_.empty()) {
       return {};
     }
     // Immutable owners survive immediate registry erase and deferred capture retirement.
     const auto snapshot = observers_;
-    for (std::size_t pass = 0; pass < options_.maxObserverRecoveryPasses; ++pass) {
+    const auto deferred = [&](const auto &record) {
+      if (!deferFailedLive || !record->failed) {
+        return false;
+      }
+      auto origin = record->recoveryOrigin.lock();
+      // Failed live computations need the next built-in sync/capture before retrying. An owning
+      // derived output remains independent when its original widget or capture has retired.
+      return origin && origin->check() && std::ranges::any_of(liveText_, [&](const auto &capture) {
+               return capture->origin == origin;
+             });
+    };
+    for (std::size_t pass = 0; pass < maxPasses; ++pass) {
       for (const auto &record : snapshot) {
+        if (deferred(record)) {
+          continue;
+        }
+        const auto before = record->successful;
+        const bool initial = record->initialPending;
         auto result = invokeObserver(record, ManagedPhase::PREPARE);
+        if (invoked) {
+          *invoked = *invoked || before != record->successful || (initial && !record->initialPending);
+        }
         if (!result) {
           return result;
         }
@@ -818,7 +1015,17 @@ std::expected<void, TreeError> ManagedScene::recoverObservers() {
 
       bool pending{};
       for (const auto &record : snapshot) {
-        if (record->retired) {
+        // A later callback may have removed an earlier origin through the low-level tree.
+        // Retire it before the weak source revision lookup, just as INPUT admission does.
+        auto live = observerLive(record);
+
+        if (!live) {
+          remember(error(ManagedPhase::PREPARE, record->node, live.error()));
+
+          return std::unexpected(live.error());
+        }
+
+        if (!*live || deferred(record)) {
           continue;
         }
         auto current = record->revision();
@@ -831,6 +1038,10 @@ std::expected<void, TreeError> ManagedScene::recoverObservers() {
       if (!pending) {
         return {};
       }
+    }
+    if (remaining) {
+      *remaining = true;
+      return {};
     }
     remember(error(ManagedPhase::PREPARE, root_, TreeError::WOULD_BLOCK));
     return std::unexpected(TreeError::WOULD_BLOCK);
@@ -1695,6 +1906,12 @@ ManagedScene::bind(Node<CheckBox> node, ManagedState<CheckState> model,
 
 std::expected<void, ManagedError> ManagedScene::syncCaption(Node<Control> node, CaptionBinding &binding,
                                                             ManagedPhase phase) try {
+  if (binding.model.origin_) {
+    auto live = binding.model.origin_->check();
+    if (!live && (binding.model.origin_->retired || binding.model.origin_->closed)) {
+      return {};
+    }
+  }
   auto snapshot = binding.model.snapshot();
 
   if (!snapshot) {
@@ -2713,20 +2930,10 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
-  auto recovered = recoverObservers();
+  auto recovered = recoverObservers(0, nullptr, nullptr, true);
   if (!recovered) {
     return recovered;
   }
-
-  struct Preparing {
-    bool &flag;
-
-    ~Preparing() {
-      flag = false;
-    }
-  } guard{preparing_};
-
-  preparing_ = true;
 
   try {
     // The preparing guard rejects registry changes; prune only after every active borrow ends.
@@ -2734,6 +2941,8 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
       ManagedScene &scene;
 
       ~Prune() {
+        const bool previous = scene.preparing_;
+        scene.preparing_ = true;
         std::erase_if(scene.entries_, [&](const auto &entry) {
           if (entry->removed) {
             scene.retireClicks(*entry);
@@ -2742,6 +2951,7 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
 
           return entry->removed;
         });
+        scene.preparing_ = previous;
       }
     } prune{*this};
 
@@ -2761,55 +2971,170 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
       return std::unexpected(focused.error());
     }
 
-    for (const auto &entry : entries_) {
-      auto live = app_.tree().read(entry->node, [](const Widget &) {
-      });
-
-      if (!live && retired(live.error())) {
-        stylesDirty_ = true;
-        entry->removed = true;
-
-        continue;
+    const bool hasAdapters = !liveText_.empty() || std::ranges::any_of(models_, [](const auto &source) {
+      return source->bound();
+    });
+    std::optional<std::vector<Node<Widget>>> customDone;
+    if (hasAdapters) {
+      customDone.emplace(0);
+      customDone->reserve(entries_.size());
+    }
+    const auto syncEntries = [&]() -> std::expected<void, TreeError> {
+      struct Preparing {
+        bool &flag;
+        ~Preparing() {
+          flag = false;
+        }
+      } guard{preparing_};
+      preparing_ = true;
+      std::optional<std::vector<std::shared_ptr<Entry>>> owners;
+      if (hasAdapters) {
+        owners.emplace(entries_);
       }
+      const std::span<const std::shared_ptr<Entry>> entries = owners ? std::span(*owners) : std::span(entries_);
+      for (const auto &entry : entries) {
+        auto live = app_.tree().read(entry->node, [](const Widget &) {
+        });
 
-      std::expected<void, TreeError> status = live;
+        if (!live && retired(live.error())) {
+          stylesDirty_ = true;
+          entry->removed = true;
 
-      if (status && entry->caption) {
-        auto synced = syncCaption(entry->caption->node, *entry->caption, ManagedPhase::PREPARE);
+          continue;
+        }
 
-        if (!synced) {
-          remember(synced.error());
+        std::expected<void, TreeError> status = live;
 
-          return std::unexpected(bridge(synced.error()));
+        if (status && entry->caption) {
+          auto synced = syncCaption(entry->caption->node, *entry->caption, ManagedPhase::PREPARE);
+
+          if (!synced) {
+            remember(synced.error());
+
+            return std::unexpected(bridge(synced.error()));
+          }
+        }
+
+        if (status) {
+          if (auto *edit = std::get_if<LineEditBinding>(&entry->binding)) {
+            status = edit->sync(*focused);
+          } else if (auto *check = std::get_if<CheckBoxBinding>(&entry->binding)) {
+            status = check->sync();
+          } else if (auto *typedCheck = std::get_if<CheckStateBinding>(&entry->binding)) {
+            status = typedCheck->sync();
+          }
+        }
+
+        if (!status) {
+          auto failure = error(ManagedPhase::PREPARE, entry->node, status.error());
+          for (const auto &capture : liveText_) {
+            if ((status.error() == TreeError::INVALID_ARGUMENT || status.error() == TreeError::NODE_LIMIT) &&
+                capture->origin->node == entry->node && capture->validateModel) {
+              try {
+                auto validated = capture->validateModel();
+                if (!validated && validated.error().text && bridge(validated.error()) == status.error()) {
+                  failure.text = validated.error().text;
+                  failure.operation = capture->operation;
+                  failure.registrationOrigin = capture->registered;
+                  break;
+                }
+              } catch (...) {
+                // Diagnostic enrichment is best effort and cannot replace the original sync failure.
+              }
+            }
+          }
+          remember(failure);
+          return status;
+        }
+
+        if (status && entry->sync) {
+          status = entry->sync(*focused);
+        }
+
+        if (status && entry->customSync && (!customDone || !std::ranges::contains(*customDone, entry->node))) {
+          if (customDone) {
+            customDone->push_back(entry->node);
+          }
+          status = entry->customSync(*focused);
+        }
+
+        if (!status) {
+          // Retirement cannot erase an explicit error from an admitted callback.
+          remember(error(ManagedPhase::PREPARE, entry->node, status.error()));
+
+          return status;
         }
       }
 
-      if (status) {
-        if (auto *edit = std::get_if<LineEditBinding>(&entry->binding)) {
-          status = edit->sync(*focused);
-        } else if (auto *check = std::get_if<CheckBoxBinding>(&entry->binding)) {
-          status = check->sync();
-        } else if (auto *typedCheck = std::get_if<CheckStateBinding>(&entry->binding)) {
-          status = typedCheck->sync();
+      return {};
+    };
+    auto synced = syncEntries();
+    if (!synced) {
+      return synced;
+    }
+    // Each post-sync round contains exactly one observer scan; arbitrary custom sync is never repeated.
+    if (hasAdapters) {
+      bool stable{};
+      for (std::size_t pass = 0; pass < options_.maxObserverRecoveryPasses; ++pass) {
+        if (pass) {
+          focused = recoverFocus();
+          if (!focused) {
+            return std::unexpected(focused.error());
+          }
+          synced = syncEntries();
+          if (!synced) {
+            return synced;
+          }
+        }
+        auto captured = captureLiveText();
+        if (!captured) {
+          return std::unexpected(captured.error());
+        }
+        bool invoked{}, pending{};
+        auto scanned = recoverObservers(1, &invoked, &pending);
+        if (!scanned) {
+          return scanned;
+        }
+        bool applied{};
+
+        struct Applying {
+          bool &flag;
+
+          ~Applying() {
+            flag = false;
+          }
+        } applying{preparing_};
+
+        preparing_ = true;
+        const auto models = models_;
+        for (const auto &source : models) {
+          auto result = source->synchronize();
+          if (!result) {
+            remember(error(ManagedPhase::PREPARE, root_, result.error()));
+            return std::unexpected(result.error());
+          }
+          applied = applied || *result;
+        }
+        if (!*captured && !invoked && !pending && !applied) {
+          stable = true;
+          break;
         }
       }
-
-      if (status && entry->sync) {
-        status = entry->sync(*focused);
-      }
-
-      if (status && entry->customSync) {
-        status = entry->customSync(*focused);
-      }
-
-      if (!status) {
-        // Retirement cannot erase an explicit error from an admitted callback.
-        remember(error(ManagedPhase::PREPARE, entry->node, status.error()));
-
-        return status;
+      if (!stable) {
+        remember(error(ManagedPhase::PREPARE, root_, TreeError::WOULD_BLOCK));
+        return std::unexpected(TreeError::WOULD_BLOCK);
       }
     }
 
+    struct Pinning {
+      bool &flag;
+
+      ~Pinning() {
+        flag = false;
+      }
+    } pinning{preparing_};
+
+    preparing_ = true;
     for (const auto &source : models_) {
       auto pinned = source->pin();
 
@@ -3002,11 +3327,16 @@ std::expected<void, ManagedError> ManagedScene::close() {
   // Mark closed before retiring captures: their destructors may reenter application code.
   closed_ = true;
 
+  for (const auto &record : liveText_) {
+    record->origin->closed = true;
+  }
+
   for (const auto &record : observers_) {
     record->retired = true;
     record->subscription = {};
   }
   observers_.clear();
+  pruneLiveText();
 
   for (auto &layer : styles_.layerState_.layers) {
     layer.document.reset();

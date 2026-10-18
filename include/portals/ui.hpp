@@ -152,8 +152,28 @@ struct MountContext {
   std::vector<portals::detail::MoveOnlyFunction<void()>> release =
     std::vector<portals::detail::MoveOnlyFunction<void()>>(0); ///< Nonthrowing releases of temporary ref reservations.
 
-  /** @brief Release ref reservations after either publication or rollback. */
+  /** @brief Same-attempt Ref reservation used by cold graph finalization before publication. */
+  struct PendingRef {
+    const RefTarget *identity{}; ///< Original unpublished slot identity; never dereferenced from another thread.
+    RefTarget target;            ///< Checked private identity used only by cold finalization.
+  };
+
+  std::vector<PendingRef> pending = std::vector<PendingRef>(0); ///< Private same-attempt reservations.
+  std::vector<portals::detail::MoveOnlyFunction<std::expected<void, ManagedError>()>> finalize =
+    std::vector<portals::detail::MoveOnlyFunction<std::expected<void, ManagedError>()>>(
+      0); ///< Pure cold graph completion.
+  std::vector<portals::detail::MoveOnlyFunction<void()>> rollback =
+    std::vector<portals::detail::MoveOnlyFunction<void()>>(
+      0);           ///< Explicit attempt-owned resources, never numeric checkpoints.
+  bool committed{}; ///< True only after every finalizer and node check succeeds.
+
+  /** @brief Release attempt-owned resources and ref reservations after publication or rollback. */
   ~MountContext() {
+    if (!committed) {
+      for (auto &retire : rollback) {
+        retire();
+      }
+    }
     for (auto &reservation : release) {
       reservation();
     }
@@ -206,6 +226,151 @@ struct Access {
    * @return Single-use description with the existing transaction semantics.
    */
   template <class T, class Factory> static Description<T> describe(Factory factory);
+
+  /// @cond INTERNAL
+  template <class T, class Factory> static Description<T> cold(Factory factory);
+
+  static void beginCold(ManagedScene &scene) noexcept {
+    ++scene.coldMountPending_;
+  }
+
+  struct ColdGraph {
+    ManagedScene *scene{};
+    std::shared_ptr<ManagedScene::LiveTextRecord> live;
+    std::shared_ptr<void> output;
+    std::shared_ptr<ManagedScene::ObserverRecord> observer;
+    std::shared_ptr<portals::detail::ManagedModelSource> model;
+    bool pending{};
+
+    void retire() noexcept {
+      // The complete logical mark precedes disconnect/destructor reentry.
+      if (pending) {
+        --scene->coldMountPending_;
+        pending = false;
+      }
+      if (observer) {
+        observer->retired = true;
+      }
+      if (observer) {
+        observer->subscription = {};
+      }
+      if (model) {
+        std::erase(scene->models_, model);
+      }
+      if (observer) {
+        std::erase(scene->observers_, observer);
+      }
+      if (output) {
+        std::erase(scene->properties_, output);
+        std::erase_if(scene->originProperties_, [&](const auto &record) {
+          return record.property.lock() == output;
+        });
+      }
+      if (live) {
+        live->origin->retired = true;
+        scene->pruneLiveText();
+      }
+    }
+  };
+
+  static std::expected<void, ManagedError> completeTextList(ManagedScene &scene, Node<VirtualList<TextSegment>> node,
+                                                            const TextSource &source, bool splitWords,
+                                                            TextSplitOptions options, MountContext &context,
+                                                            const std::shared_ptr<ColdGraph> &graph,
+                                                            ManagedViewHandler<TextSegment> prepared) {
+    auto target = source.target_;
+    for (const auto &pending : context.pending) {
+      if (pending.identity == target.get()) {
+        target = std::make_shared<RefTarget>(pending.target);
+        break;
+      }
+    }
+    if (target && target->owner != std::this_thread::get_id()) {
+      return std::unexpected(error({}, TreeError::WRONG_THREAD));
+    }
+    if (!target) {
+      return std::unexpected(error({}, TreeError::CLOSED));
+    }
+    const bool existed = std::ranges::any_of(scene.liveText_, [&](const auto &record) {
+      return record->origin->node == target->node && record->kind == static_cast<int>(source.kind_);
+    });
+    auto resolved = TextSource(target, source.kind_);
+    auto live = scene.attachLiveText(resolved, PropertyOptions{}, std::source_location::current(), false);
+    if (!live) {
+      return std::unexpected(live.error());
+    }
+    const auto existing = std::ranges::find_if(scene.liveText_, [&](const auto &record) {
+      return record->origin == live->state_.origin_;
+    });
+    // Ownership is assigned by the finalizer that created the bridge, not by every shared consumer.
+    if (!existed && existing != scene.liveText_.end()) {
+      graph->live = *existing;
+    }
+    auto initialText = live->snapshot();
+    if (!initialText) {
+      return std::unexpected(error(target->node, initialText.error()));
+    }
+    if ((*initialText)->value.policy() != scene.widthPolicy()) {
+      return std::unexpected(error(target->node, TreeError::INVALID_ARGUMENT));
+    }
+    auto admitted = scene.observerAdmission(node);
+    if (!admitted) {
+      return std::unexpected(admitted.error());
+    }
+    auto textFailure = std::make_shared<std::optional<TextError>>();
+    auto derived = scene.derive(*live, [splitWords, options, textFailure](const GraphemeText &text) {
+      *textFailure = portals::detail::textSplitLimit(text, options.limits);
+      return splitWords ? portals::words(text, options) : portals::graphemes(text, options);
+    });
+    if (!derived) {
+      auto failure = derived.error();
+      failure.node = target->node.id();
+      failure.text = *textFailure;
+      return std::unexpected(failure);
+    }
+    graph->output = *derived->state_.lock();
+    graph->observer = scene.observers_.back();
+    graph->observer->textFailure = std::move(textFailure);
+    graph->observer->operation = splitWords ? "text.words" : "text.graphemes";
+    graph->observer->node = node;
+    scene.originProperties_.push_back({live->state_.origin_, graph->output, node});
+    // Private cold edges share origin retirement; ordinary public derived outputs remain independent.
+    derived->state_.origin_ = live->state_.origin_;
+    auto model =
+      scene.collectionModel<TextSegment>(derived->state_, CollectionModelOptions{}, portals::detail::segmentRows);
+    if (!model) {
+      return std::unexpected(model.error());
+    }
+    auto owned = model->lock();
+    if (!owned) {
+      return std::unexpected(error(node, owned.error()));
+    }
+    graph->model = *owned;
+    graph->model->receiver = node;
+    auto range = (*owned)->model->openRange();
+    if (!range) {
+      return std::unexpected(error(node, range.error()));
+    }
+    auto installed = scene.app_.tree().edit(node, [&](VirtualList<TextSegment> &view) {
+      view.consumer_ = std::move(*range);
+    });
+    if (!installed) {
+      return std::unexpected(error(node, installed.error()));
+    }
+    auto attached = scene.attachView(
+      node, *owned,
+      [&scene, node](const ModelFrame<TextSegment> &frame, const LayoutSnapshot &layout) {
+        return prepareVirtualList(scene.app_.tree(), node, frame, layout);
+      },
+      std::move(prepared));
+    if (attached && graph->pending) {
+      --scene.coldMountPending_;
+      graph->pending = false;
+    }
+    return attached ? std::expected<void, ManagedError>{} : std::unexpected(attached.error());
+  }
+
+  /// @endcond
 
   /** @tparam Factory Owning checked callable accepting scene, parent and the shared mount context.
    * @param factory Internal adapter performing a complete existing recipe transaction.
@@ -1306,6 +1471,16 @@ private:
           slot->target.draft = value;
         }
       });
+      detail::RefTarget pending;
+      pending.node = *node;
+      pending.scene = &scene;
+      pending.lifetime = detail::Access::lifetime(scene);
+      if constexpr (std::derived_from<T, Control>) {
+        pending.caption = *node;
+      } else if constexpr (std::same_as<T, LineEdit>) {
+        pending.draft = *node;
+      }
+      context.pending.push_back({&slot->target, std::move(pending)});
       slot->pending = true;
     }
 
@@ -1355,6 +1530,16 @@ namespace detail {
 template <class T, class Factory> Description<T> Access::describe(Factory factory) {
   return Description<T>(std::move(factory));
 }
+
+/// @cond INTERNAL
+template <class T, class Factory> Description<T> Access::cold(Factory factory) {
+  Description<T> description;
+  description.state_ = std::make_unique<typename Description<T>::State>();
+  description.state_->create = std::move(factory);
+  return description;
+}
+
+/// @endcond
 
 template <class Factory> Description<Widget> Access::transaction(Factory factory) {
   Description<Widget> description;
@@ -1923,6 +2108,65 @@ template <class T> struct ChartConfig {
   ManagedViewHandler<T> prepared{}; ///< Provider callback; empty rejects pending work with INVALID_ARGUMENT.
 };
 
+/** @brief Owning cold text collection recipe; attaching happens only during a complete mount. */
+struct TextCollectionRecipe {
+  TextSource source;        ///< Weak direct caption/draft/committed text identity, including same-attempt pending Ref.
+  TextSplitOptions options; ///< Positive token and whole-input limits.
+  bool splitWords{};        ///< True for whitespace-delimited tokens; false for extended graphemes.
+};
+
+/** @param source Read-only text identity; copying does not read or attach.
+ * @param options Whole-input limits and positive token cap.
+ * @return Cold whitespace-token recipe; punctuation is preserved, not UAX #29 word-break.
+ */
+inline TextCollectionRecipe words(TextSource source, TextSplitOptions options = {}) {
+  return {std::move(source), options, true};
+}
+
+/** @param source Read-only text identity, including a direct Ref reserved in this mount.
+ * @param options Whole-input limits and positive token cap.
+ * @return Cold recipe with one token per existing extended grapheme, including whitespace.
+ */
+inline TextCollectionRecipe graphemes(TextSource source, TextSplitOptions options = {}) {
+  return {std::move(source), options, false};
+}
+
+/** @param recipe Cold text transform retaining owning segments with reset-on-change row IDs.
+ * @param config Existing list options and sizing; the default formatter displays each complete token.
+ * @return Single-use list recipe; pure initial finalization precedes all public Ref publication.
+ * The temporary internal shell cannot prepare or paint before its real model and consumer are installed.
+ */
+inline Description<VirtualList<TextSegment>> virtualList(TextCollectionRecipe recipe,
+                                                         VirtualListConfig<TextSegment> config = {}) {
+  return detail::Access::cold<VirtualList<TextSegment>>(
+    [recipe = std::move(recipe), config = std::move(config)](
+      ManagedScene &scene, Node<Widget> parent,
+      detail::MountContext &context) mutable -> std::expected<Node<VirtualList<TextSegment>>, ManagedError> {
+      auto graph = std::make_shared<detail::Access::ColdGraph>();
+      graph->scene = &scene;
+      context.rollback.push_back([graph] {
+        graph->retire();
+      });
+      graph->pending = true;
+      detail::Access::beginCold(scene);
+      config.options.width_policy = scene.widthPolicy();
+      auto node = scene.emplace<VirtualList<TextSegment>>(
+        parent, ModelConsumer<TextSegment>{}, ManagedListFormatter<TextSegment>([](const ModelRow<TextSegment> &row) {
+          return row.value.text();
+        }),
+        config.options, config.policy);
+      if (!node) {
+        return node;
+      }
+      context.finalize.push_back([&scene, &context, graph, node = *node, recipe = std::move(recipe),
+                                  prepared = std::move(config.prepared)]() mutable {
+        return detail::Access::completeTextList(scene, node, recipe.source, recipe.splitWords, recipe.options, context,
+                                                graph, std::move(prepared));
+      });
+      return node;
+    });
+}
+
 /// @brief Describe a table using named settings and the same owning mount transaction.
 /// @tparam T Immutable row type deduced from model.
 /// @tparam Config Exactly VirtualTableConfig<T>, optionally cv/ref qualified.
@@ -2457,6 +2701,15 @@ template <class T> std::expected<Node<T>, ManagedError> mount(ManagedScene &scen
     result = detail::Access::mount(std::move(description), scene, scene.root(), context);
 
     if (result) {
+      for (auto &finalize : context.finalize) {
+        auto completed = finalize();
+        if (!completed) {
+          result = std::unexpected(completed.error());
+          break;
+        }
+      }
+    }
+    if (result) {
       for (auto node : context.nodes) {
         auto live = detail::Access::check(scene, node);
 
@@ -2486,6 +2739,7 @@ template <class T> std::expected<Node<T>, ManagedError> mount(ManagedScene &scen
   }
 
   if (result) {
+    context.committed = true;
     for (auto &publish : context.publish) {
       publish();
     }

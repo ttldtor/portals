@@ -228,6 +228,60 @@ struct RefAccess {
     return std::move(*text);
   }
 
+  // Preparation already owns the UI turn. Compare borrowed bytes before allocating or segmenting.
+  static std::expected<std::optional<GraphemeText>, ManagedError>
+  capture(ManagedScene &scene, const RefTarget &target, bool committed, const GraphemeText *previous) {
+    std::shared_ptr<const PropertyChange<std::string>> model;
+    if (committed) {
+      auto entry = scene.find(target.node);
+      if (!entry || !entry->textModel) {
+        return std::unexpected(failure(target.node, TreeError::INVALID_ARGUMENT));
+      }
+      auto value = entry->textModel->snapshot();
+      if (!value) {
+        return std::unexpected(failure(target.node, value.error()));
+      }
+      model = *value;
+    } else if (target.draft != Node<LineEdit>{}) {
+      auto entry = scene.find(target.node);
+      auto *binding = entry ? std::get_if<LineEditBinding>(&entry->binding) : nullptr;
+      auto revision = binding ? binding->draftRevision() : std::unexpected(TreeError::INVALID_ARGUMENT);
+      if (!revision) {
+        return std::unexpected(failure(target.node, revision.error()));
+      }
+    }
+
+    std::expected<std::optional<GraphemeText>, ManagedError> result;
+    const auto copy = [&](const auto &widget) {
+      try {
+        const auto bytes = model ? std::string_view(model->value) : widget.text().bytes();
+        const auto policy = widget.text().policy();
+        if (previous && previous->bytes() == bytes && previous->policy() == policy) {
+          return;
+        }
+        TextLimits limits;
+        if constexpr (std::same_as<std::remove_cvref_t<decltype(widget)>, LineEdit>) {
+          limits = widget.options_.limits;
+        }
+        auto text = GraphemeText::from(bytes, policy, limits);
+        if (!text) {
+          result = std::unexpected(textFailure(target.node, text.error()));
+        } else if (model && portals::detail::hasLineSeparator(bytes)) {
+          result = std::unexpected(failure(target.node, TreeError::INVALID_ARGUMENT));
+        } else {
+          result->emplace(std::move(*text));
+        }
+      } catch (const std::bad_alloc &) {
+        result = std::unexpected(failure(target.node, TreeError::NO_MEMORY));
+      } catch (const std::length_error &) {
+        result = std::unexpected(failure(target.node, TreeError::NODE_LIMIT));
+      }
+    };
+    auto read = target.draft != Node<LineEdit>{} ? scene.app_.tree().read(target.draft, copy)
+                                                 : scene.app_.tree().read(target.caption, copy);
+    return read ? std::move(result) : std::unexpected(failure(target.node, read.error()));
+  }
+
   static EditorCommandResult command(std::shared_ptr<RefTarget> target, bool redo, bool stop,
                                      std::source_location origin, bool clear) {
     auto owner = scene(target);
@@ -669,3 +723,120 @@ TextResult TextResult::operator+(const TextResult &value) const {
   return join(value.value_->bytes());
 }
 } // namespace portals::ui
+
+namespace portals {
+std::expected<ManagedSource<GraphemeText>, ManagedError>
+ManagedScene::liveText(const ui::TextSource &source, PropertyOptions options, std::source_location registered) {
+  return attachLiveText(source, options, registered, true);
+}
+
+std::expected<ManagedSource<GraphemeText>, ManagedError> ManagedScene::attachLiveText(const ui::TextSource &source,
+                                                                                      PropertyOptions options,
+                                                                                      std::source_location registered,
+                                                                                      bool publicUse) {
+  ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
+  const auto fail = [&](TreeError cause) {
+    auto failure = error(ManagedPhase::TEXT, root_, cause);
+    failure.operation = "liveText.register";
+    failure.registrationOrigin = registered;
+    return std::unexpected(failure);
+  };
+  if (owner_ != std::this_thread::get_id()) {
+    return fail(TreeError::WRONG_THREAD);
+  }
+  auto target = source.target_;
+  auto owner = ui::detail::RefAccess::scene(target);
+  if (!owner) {
+    return std::unexpected(owner.error());
+  }
+  if (*owner != this || !options.max_observers) {
+    return fail(TreeError::INVALID_ARGUMENT);
+  }
+  pruneLiveText();
+  const auto kind = static_cast<int>(source.kind_);
+  const char *operation = source.kind_ == ui::TextSource::Kind::CAPTION ? "liveText.caption"
+                          : source.kind_ == ui::TextSource::Kind::DRAFT ? "liveText.draft"
+                                                                        : "liveText.committed";
+  const auto handle = [&](const std::shared_ptr<LiveTextRecord> &record) {
+    ManagedState<GraphemeText> state;
+    state.model_ = record->property;
+    state.facade_ = facade_;
+    state.lifetime_ = lifetime_;
+    state.owner_ = owner_;
+    state.scene_ = root_.id();
+    state.origin_ = record->origin;
+    return ManagedSource<GraphemeText>(std::move(state));
+  };
+  for (const auto &record : liveText_) {
+    if (record->origin->node == target->node && record->kind == kind) {
+      if (record->options.max_observers == options.max_observers && publicUse) {
+        record->publicUse = true;
+      }
+      return record->options.max_observers == options.max_observers
+               ? std::expected<ManagedSource<GraphemeText>, ManagedError>(handle(record))
+               : fail(TreeError::INVALID_ARGUMENT);
+    }
+  }
+  auto admitted = observerAdmission(target->node);
+  if (!admitted) {
+    return std::unexpected(admitted.error());
+  }
+  if (properties_.size() >= options_.maxStates) {
+    return fail(TreeError::NODE_LIMIT);
+  }
+
+  try {
+    auto initial =
+      ui::detail::RefAccess::capture(*this, *target, source.kind_ == ui::TextSource::Kind::COMMITTED, nullptr);
+    if (!initial) {
+      auto failure = initial.error();
+      failure.operation = operation;
+      failure.registrationOrigin = registered;
+      return std::unexpected(failure);
+    }
+    auto created =
+      Property<GraphemeText>::create(app_.tree(), root_, std::move(**initial), Invalidation::PAINT, options);
+    if (!created) {
+      return fail(created.error());
+    }
+    auto record = std::make_shared<LiveTextRecord>();
+    record->origin = std::make_shared<detail::ManagedOrigin>();
+    record->origin->tree = &app_.tree();
+    record->origin->node = target->node;
+    record->origin->lifetime = lifetime_;
+    record->kind = kind;
+    record->options = options;
+    record->publicUse = publicUse;
+    record->registered = registered;
+    record->operation = operation;
+    record->property = std::shared_ptr<Property<GraphemeText>>(std::move(*created));
+    record->capture = [this, target,
+                       committed = source.kind_ == ui::TextSource::Kind::COMMITTED](const GraphemeText *last) {
+      return ui::detail::RefAccess::capture(*this, *target, committed, last);
+    };
+    if (target->draft != Node<LineEdit>{}) {
+      record->validateModel = [this, target] {
+        return ui::detail::RefAccess::capture(*this, *target, true, nullptr);
+      };
+    }
+    properties_.reserve(properties_.size() + 1);
+    liveText_.reserve(liveText_.size() + 1);
+    auto dirty = app_.tree().invalidate(root_, Invalidation::PAINT);
+    if (!dirty) {
+      return fail(dirty.error());
+    }
+    auto checked = record->origin->check();
+    if (!checked) {
+      return fail(checked.error());
+    }
+    auto result = handle(record);
+    properties_.push_back(record->property);
+    liveText_.push_back(std::move(record));
+    return result;
+  } catch (const std::bad_alloc &) {
+    return fail(TreeError::NO_MEMORY);
+  } catch (...) {
+    return fail(TreeError::CALLBACK_FAILED);
+  }
+}
+} // namespace portals

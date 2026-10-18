@@ -961,36 +961,9 @@ public:
             return;
           }
 
-          auto previous = state->current;
-          auto next = state->next();
-
-          if (!next) {
-            state->application_error = next.error();
-
-            return;
-          }
-
-          (*next)->snapshot = std::move(value);
-
-          // A new provider revision invalidates every old range as one table publication.
-          // Cancel old leases only after commit succeeds, preserving old work on rejection.
-          for (auto &entry : (*next)->entries) {
-            entry.result = ModelRange<T>((*next)->snapshot, {}, {});
-            entry.work.reset();
-          }
-
-          auto result = state->commit(std::move(*next));
-
-          if (!result) {
-            state->application_error = result.error();
-
-            return;
-          }
-
-          for (const auto &entry : previous->entries) {
-            if (auto work = entry.work.lock()) {
-              work->cancelled.store(true);
-            }
+          auto applied = applySnapshot(*state, std::move(value));
+          if (!applied) {
+            state->application_error = applied.error();
           }
         });
 
@@ -1098,6 +1071,48 @@ public:
   }
 
 private:
+  friend class ManagedScene;
+
+  // Both queued provider delivery and managed UI collection adapters use this same transaction.
+  static std::expected<void, TreeError> applySnapshot(detail::ModelState<T> &state,
+                                                      std::shared_ptr<const ModelSnapshot<T>> value) {
+    auto allowed = state.allowed();
+    if (!allowed) {
+      return allowed;
+    }
+    if (!value || value->revision() <= state.current->snapshot->revision()) {
+      return std::unexpected(TreeError::WOULD_BLOCK);
+    }
+    auto previous = state.current;
+    auto next = state.next();
+
+    if (!next) {
+      return std::unexpected(next.error());
+    }
+
+    (*next)->snapshot = std::move(value);
+
+    // A new provider revision invalidates every old range as one table publication.
+    // Cancel old leases only after commit succeeds, preserving old work on rejection.
+    for (auto &entry : (*next)->entries) {
+      entry.result = ModelRange<T>((*next)->snapshot, {}, {});
+      entry.work.reset();
+    }
+
+    auto result = state.commit(std::move(*next));
+
+    if (!result) {
+      return result;
+    }
+
+    for (const auto &entry : previous->entries) {
+      if (auto work = entry.work.lock()) {
+        work->cancelled.store(true);
+      }
+    }
+    return {};
+  }
+
   static bool retired(const detail::ModelState<T> &state, ModelRangeId id) {
     return std::ranges::contains(state.retired, id);
   }

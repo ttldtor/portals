@@ -8,6 +8,10 @@
 #include <portals/scroll.hpp>
 
 namespace portals {
+namespace ui::detail {
+struct Access;
+}
+
 /** @brief Owning fixed-row presentation settings; invalid heights are rejected at preparation. */
 struct VirtualListOptions {
   std::int32_t row_height{1};   ///< Positive cell rows per logical row.
@@ -226,6 +230,10 @@ public:
   }
 
 private:
+  friend class ManagedScene;
+  friend struct ui::detail::Access;
+  bool clearMissingSelection_{};
+  bool detachedCollection_{};
   /// @cond INTERNAL
   template <class U>
   friend std::expected<std::optional<ModelRequest<U>>, TreeError> prepareVirtualList(WidgetTree &, Node<VirtualList<U>>,
@@ -263,7 +271,8 @@ private:
 
   std::expected<std::optional<ModelRequest<T>>, TreeError> prepare(const ModelFrame<T> &frame, CellSize viewport,
                                                                    bool &changed) {
-    auto consumer_range = frame.range(consumer_.id());
+    auto consumer_range =
+      detachedCollection_ ? std::expected<ModelRange<T>, TreeError>(ModelRange<T>{}) : frame.range(consumer_.id());
 
     if (!consumer_range) {
       return std::unexpected(consumer_range.error());
@@ -329,6 +338,15 @@ private:
       // Construct in place: MSVC Debug vector move is noexcept but may allocate an iterator proxy.
       auto next = std::make_unique<Prepared>(frame, *range, viewport, *window);
       auto selection = selected_;
+      if (clearMissingSelection_ && selection) {
+        auto found = frame.locateRow(*selection);
+        if (!found) {
+          return std::unexpected(found.error());
+        }
+        if (found->state == RowLookupState::NOT_FOUND) {
+          selection.reset();
+        }
+      }
       const bool apply_intent = intent_ && intent_revision_ == frame.dataRevision();
 
       next->rows.reserve(window->visible.count);
@@ -361,7 +379,9 @@ private:
       }
 
       std::optional<ModelRequest<T>> dispatch;
-      const bool needs_request = window->requested.count != 0 && (retry_ || range->state() == RangeState::PENDING) &&
+      // A frozen complete collection consumes retry as local preparation, without a live provider endpoint.
+      const bool needs_request = !detachedCollection_ && window->requested.count != 0 &&
+                                 (retry_ || range->state() == RangeState::PENDING) &&
                                  (retry_ || request_.stopRequested() || request_.range() != window->requested ||
                                   request_.dataRevision() != frame.dataRevision());
 
@@ -444,7 +464,8 @@ private:
   }
 
   std::expected<RowLookup, TreeError> ensureVisible(const ModelFrame<T> &frame, RowId id) {
-    auto range = frame.range(consumer_.id());
+    auto range =
+      detachedCollection_ ? std::expected<ModelRange<T>, TreeError>(ModelRange<T>{}) : frame.range(consumer_.id());
 
     if (!range) {
       return std::unexpected(range.error());
