@@ -340,7 +340,8 @@ std::expected<std::unique_ptr<ManagedScene>, ManagedError> ManagedScene::create(
 
   if (!options.maxNodes || !options.maxStates || !options.maxModels || !options.maxKeyHandlers ||
       !options.maxClickHandlers || !options.maxClickHandlersPerNode || !options.keySequenceTimeout ||
-      !options.maxLayoutHandlers || !options.maxLayoutPublicationRetries || !diagnostics.maxErrors ||
+      !options.maxLayoutHandlers || !options.maxLayoutPublicationRetries || !options.maxObservers ||
+      !options.maxObserversPerNode || !options.maxObserverRecoveryPasses || !diagnostics.maxErrors ||
       !diagnostics.maxContexts || !diagnostics.maxContextBytes ||
       diagnostics.maxErrors > maxElementCount<ManagedDiagnostic>() ||
       diagnostics.maxContexts > maxElementCount<ManagedDiagnosticContext>() ||
@@ -368,7 +369,7 @@ std::expected<std::unique_ptr<ManagedScene>, ManagedError> ManagedScene::create(
 
 ManagedScene::~ManagedScene() {
   ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
-  if (owner_ != std::this_thread::get_id() || preparing_ || reporting_) {
+  if (owner_ != std::this_thread::get_id() || preparing_ || reporting_ || recoveringObservers_ || observerCallbacks_) {
     std::terminate();
   }
 
@@ -404,7 +405,12 @@ std::expected<void, ManagedError> ManagedScene::boundary(ManagedPhase phase, Nod
     return std::unexpected(error(phase, node, TreeError::CLOSED));
   }
 
-  if (preparing_ || reporting_ || styling_) {
+  if (preparing_ || reporting_ || styling_ || pruningObservers_) {
+    return std::unexpected(error(phase, node, TreeError::WOULD_BLOCK));
+  }
+
+  if ((phase == ManagedPhase::PREPARE || phase == ManagedPhase::RUN) &&
+      (recoveringObservers_ || observerCallbacks_ || observerMountPending())) {
     return std::unexpected(error(phase, node, TreeError::WOULD_BLOCK));
   }
 
@@ -653,9 +659,179 @@ std::expected<void, ManagedError> ManagedScene::remove(Node<Widget> node) {
 
     return false;
   });
+  pruneObservers();
   stylesDirty_ = true;
 
   return {};
+}
+
+void ManagedScene::pruneObservers() noexcept {
+  struct Pruning {
+    bool &flag;
+
+    ~Pruning() {
+      flag = false;
+    }
+  } guard{pruningObservers_};
+
+  pruningObservers_ = true;
+  std::erase_if(observers_, [&](const auto &record) {
+    auto live = app_.tree().withScope(record->node, [](const UiScope &) {
+    });
+    if (!live && retired(live.error())) {
+      record->retired = true;
+      record->subscription = {};
+    }
+    return record->retired;
+  });
+}
+
+std::expected<void, ManagedError> ManagedScene::observerAdmission(Node<Widget> node) {
+  auto allowed = boundary(ManagedPhase::BIND, node);
+  if (!allowed) {
+    return allowed;
+  }
+  if (recoveringObservers_ || closing_) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::WOULD_BLOCK));
+  }
+  if (node != root_ && !find(node)) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
+  }
+  pruneObservers();
+  const auto nodeCount = std::ranges::count(observers_, node, [](const auto &record) {
+    return record->node;
+  });
+  if (observers_.size() >= options_.maxObservers ||
+      static_cast<std::size_t>(nodeCount) >= options_.maxObserversPerNode) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NODE_LIMIT));
+  }
+  return {};
+}
+
+std::expected<void, TreeError> ManagedScene::invokeObserver(const std::shared_ptr<ObserverRecord> &record,
+                                                            ManagedPhase phase) {
+  if (closed_ || record->retired || record->running || observerMountPending() ||
+      (phase == ManagedPhase::INPUT && recoveringObservers_)) {
+    return {};
+  }
+  auto live = app_.tree().withScope(record->node, [](const UiScope &) {
+  });
+  if (!live && retired(live.error())) {
+    record->retired = true;
+    record->subscription = {};
+    return {};
+  }
+
+  struct Invoking {
+    ObserverRecord &record;
+    std::size_t &count;
+
+    ~Invoking() {
+      record.running = false;
+      --count;
+    }
+  } guard{*record, observerCallbacks_};
+
+  record->running = true;
+  ++observerCallbacks_;
+  record->shortFailure.reset();
+  record->shortAttempt = nullptr;
+  record->promotesFailure = false;
+
+  const auto report = [&](TreeError cause) -> std::expected<void, TreeError> {
+    remember(error(phase, record->node, cause));
+    return std::unexpected(cause);
+  };
+  const auto reportShort = [&]() -> std::expected<void, TreeError> {
+    // Same-scene short collectors promoted their exact history receipt at synchronous admission.
+    // A foreign collector has its own history; retain the unchanged failure in this runner too.
+    if (!failure_) {
+      remember(*record->shortFailure);
+    }
+    app_.requestStop();
+    return std::unexpected(bridge(*record->shortFailure));
+  };
+  try {
+    if (!live) {
+      return report(live.error());
+    }
+    auto latest = record->revision();
+    if (!latest) {
+      return report(latest.error());
+    }
+    if (!record->initialPending && record->successful == *latest) {
+      return {};
+    }
+
+    auto delivered = record->deliver(record);
+    if (record->shortFailure) {
+      return reportShort();
+    }
+    if (!delivered) {
+      return report(delivered.error());
+    }
+    record->successful = *delivered;
+    record->initialPending = false;
+    return {};
+  } catch (const std::bad_alloc &) {
+    return record->shortFailure ? reportShort() : report(TreeError::NO_MEMORY);
+  } catch (...) {
+    return record->shortFailure ? reportShort() : report(TreeError::CALLBACK_FAILED);
+  }
+}
+
+std::expected<void, TreeError> ManagedScene::recoverObservers() {
+  if (observers_.empty()) {
+    return {};
+  }
+
+  struct Recovering {
+    bool &flag;
+
+    ~Recovering() {
+      flag = false;
+    }
+  } guard{recoveringObservers_};
+
+  recoveringObservers_ = true;
+
+  try {
+    pruneObservers();
+    if (observers_.empty()) {
+      return {};
+    }
+    // Immutable owners survive immediate registry erase and deferred capture retirement.
+    const auto snapshot = observers_;
+    for (std::size_t pass = 0; pass < options_.maxObserverRecoveryPasses; ++pass) {
+      for (const auto &record : snapshot) {
+        auto result = invokeObserver(record, ManagedPhase::PREPARE);
+        if (!result) {
+          return result;
+        }
+      }
+
+      bool pending{};
+      for (const auto &record : snapshot) {
+        if (record->retired) {
+          continue;
+        }
+        auto current = record->revision();
+        if (!current) {
+          remember(error(ManagedPhase::PREPARE, record->node, current.error()));
+          return std::unexpected(current.error());
+        }
+        pending = pending || record->initialPending || record->successful != *current;
+      }
+      if (!pending) {
+        return {};
+      }
+    }
+    remember(error(ManagedPhase::PREPARE, root_, TreeError::WOULD_BLOCK));
+    return std::unexpected(TreeError::WOULD_BLOCK);
+  } catch (const std::bad_alloc &) {
+    remember(error(ManagedPhase::PREPARE, root_, TreeError::NO_MEMORY));
+    return std::unexpected(TreeError::NO_MEMORY);
+  }
 }
 
 std::optional<std::size_t> ManagedScene::recordError(ManagedError failure,
@@ -1223,6 +1399,7 @@ std::expected<void, TreeError> ManagedScene::completedLayout(Application &app) {
   if (&app != &app_) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
+
   auto revision = app_.tree().geometryRevision();
   if (!revision) {
     return std::unexpected(revision.error());
@@ -2455,7 +2632,7 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
     return std::unexpected(TreeError::WRONG_THREAD);
   }
 
-  if (reporting_) {
+  if (reporting_ || recoveringObservers_ || observerCallbacks_ || observerMountPending()) {
     return std::unexpected(TreeError::WOULD_BLOCK);
   }
 
@@ -2469,6 +2646,11 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
 
   if (&app != &app_) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  auto recovered = recoverObservers();
+  if (!recovered) {
+    return recovered;
   }
 
   struct Preparing {
@@ -2714,7 +2896,8 @@ std::expected<void, ManagedError> ManagedScene::close() {
     return std::unexpected(error(ManagedPhase::CLEANUP, root_, TreeError::WRONG_THREAD));
   }
 
-  if (preparing_ || reporting_ || styling_ || closing_ || (sessionActive_ && !stoppingSession_)) {
+  if (preparing_ || reporting_ || styling_ || closing_ || recoveringObservers_ || pruningObservers_ ||
+      observerCallbacks_ || (sessionActive_ && !stoppingSession_)) {
     return std::unexpected(error(ManagedPhase::CLEANUP, root_, TreeError::WOULD_BLOCK));
   }
 
@@ -2751,6 +2934,12 @@ std::expected<void, ManagedError> ManagedScene::close() {
 
   // Mark closed before retiring captures: their destructors may reenter application code.
   closed_ = true;
+
+  for (const auto &record : observers_) {
+    record->retired = true;
+    record->subscription = {};
+  }
+  observers_.clear();
 
   for (auto &layer : styles_.layerState_.layers) {
     layer.document.reset();
