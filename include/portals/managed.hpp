@@ -19,6 +19,9 @@ namespace portals {
 
 class ManagedScene;
 
+/** @brief Exact scene access failure or owning table preparation/provider failure. */
+using VisibleModelError = std::variant<ManagedError, VisibleModelReadError>;
+
 namespace ui::detail {
 struct Access;
 struct RefAccess;
@@ -1099,6 +1102,15 @@ public:
    * Invalidation or any rearrangement revokes it until the next successful final frame.
    */
   std::expected<NodeGeometry, ManagedError> geometry(Node<Widget> node) const;
+
+  /** @brief Read ready physical rows after successful final layout publication.
+   * @tparam T Immutable domain row type retained by the resulting pin.
+   * @param node Original managed table identity; removal never retargets another node.
+   * @return Owning stable ready range, or exact access/preparation/provider failure; never reports errors.
+   * @note UI-affine, outside preparation and tree frames. Hidden tables successfully yield no rows.
+   */
+  template <class T>
+  std::expected<VisibleModelSnapshot<T>, VisibleModelError> visibleModelSnapshot(Node<VirtualTable<T>> node) const;
 
   /** @tparam Callback Owning compact action accepting const NodeGeometry& or no arguments.
    * @param node Live managed widget whose local, surface and clip bounds are observed.

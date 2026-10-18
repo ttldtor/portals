@@ -3,6 +3,7 @@
 #pragma once
 
 #include <portals/virtual_list.hpp>
+#include <portals/visible_model.hpp>
 
 namespace portals {
 /** @brief Owning table settings; preparation rejects invalid dimensions and exceeded budgets.
@@ -203,6 +204,47 @@ public:
   RangeState rangeState() const noexcept {
     return prepared_ ? prepared_->range.state() : RangeState::PENDING;
   } ///< Last prepared model readiness; error text is owned by its retained model range.
+
+  /** @brief Capture prepared ready body rows intersecting final arranged geometry.
+   * @param geometry Current published geometry from the table's UI owner; never inferred or laid out here.
+   * @return Owning ready values, NOT_PREPARED after invalidation, or explicit provider readiness/error.
+   * @note Call through the owning tree's read boundary on UI. Includes each partially clipped row once.
+   * No provider call, formatting, domain copy or overscan traversal occurs. Error text copying may throw.
+   */
+  std::expected<VisibleModelSnapshot<T>, VisibleModelReadError> visibleSnapshot(const NodeGeometry &geometry) const {
+    if (!prepared_ || dirty_ || !geometry.valid || geometry.local.size() != prepared_->viewport) {
+      return std::unexpected(VisibleModelReadError{VisibleModelReadState::NOT_PREPARED, {}});
+    }
+
+    const auto clipped = geometry.surface.intersection(geometry.clip);
+    const auto top = static_cast<std::int64_t>(geometry.surface.origin().y) + detail::TABLE_HEADER_HEIGHT;
+    const auto firstCell = std::max<std::int64_t>(top, clipped.origin().y);
+    const auto lastCell = static_cast<std::int64_t>(clipped.bottom());
+
+    if (clipped.empty() || firstCell >= lastCell || prepared_->window.visible.count == 0) {
+      return VisibleModelSnapshot<T>{prepared_->range, {}, {prepared_->window.visible.first, 0}};
+    }
+
+    const auto first = static_cast<std::size_t>((firstCell - top) / options_.row_height);
+    const auto end = std::min(prepared_->window.visible.count,
+                              static_cast<std::size_t>((lastCell - top - 1) / options_.row_height + 1));
+
+    if (first >= end) {
+      return VisibleModelSnapshot<T>{prepared_->range, {}, {prepared_->window.visible.first + end, 0}};
+    }
+
+    if (prepared_->range.state() != RangeState::READY) {
+      return std::unexpected(VisibleModelReadError{prepared_->range.state() == RangeState::PENDING
+                                                     ? VisibleModelReadState::PENDING
+                                                     : VisibleModelReadState::FAILED,
+                                                   std::string(prepared_->range.error())});
+    }
+
+    const RowRange interval{prepared_->window.visible.first + first, end - first};
+    const auto offset = static_cast<std::size_t>(interval.first - prepared_->window.requested.first);
+
+    return VisibleModelSnapshot<T>{prepared_->range, prepared_->range.rows().subspan(offset, interval.count), interval};
+  }
 
   /** @param available Borrowed-by-value cell bounds; negative extents normalize to zero.
    * @return Normalized available extent without model access, formatting, allocation or invalidation.

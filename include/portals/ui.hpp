@@ -523,6 +523,18 @@ public:
     return TextSource(target(), TextSource::Kind::CAPTION);
   }
 
+  /** @return Deferred physical body-row source; acquisition never reads or subscribes.
+   * Retains the original observing slot, including when acquired before mount, without owning the scene.
+   */
+  auto visibleModel() const
+    requires requires { typename detail::TableRowType<T>::Type; }
+  {
+    using Row = typename detail::TableRowType<T>::Type;
+    auto node = this->slot_ ? std::shared_ptr<const Node<T>>(this->slot_, &this->slot_->node) : nullptr;
+
+    return VisibleModelSource<Row>(target(), std::move(node));
+  }
+
   /** @return Read-only visible draft source, including uncommitted or semantically rejected text. */
   TextSource draftText() const
     requires std::same_as<T, LineEdit>
