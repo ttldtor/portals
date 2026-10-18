@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include <portals/detail/line_edit_text.hpp>
 #include <portals/detail/setup_failure.hpp>
 #include <portals/ui_ref.hpp>
 
@@ -190,6 +191,43 @@ struct RefAccess {
     return updated ? std::expected<void, ManagedError>{} : std::unexpected(failure(target.node, updated.error()));
   }
 
+  static std::expected<GraphemeText, ManagedError> committedSnapshot(ManagedScene &scene, const RefTarget &target) {
+    auto entry = scene.find(target.node);
+
+    if (!entry || !entry->textModel || !std::holds_alternative<LineEditBinding>(entry->binding)) {
+      return std::unexpected(failure(target.node, TreeError::INVALID_ARGUMENT));
+    }
+
+    auto model = entry->textModel->snapshot();
+
+    if (!model) {
+      return std::unexpected(failure(target.node, model.error()));
+    }
+
+    WidthPolicy policy;
+    TextLimits limits;
+    auto read = scene.app_.tree().read(target.draft, [&](const LineEdit &editor) {
+      policy = editor.text().policy();
+      limits = editor.options_.limits;
+    });
+
+    if (!read) {
+      return std::unexpected(failure(target.node, read.error()));
+    }
+
+    auto text = GraphemeText::from((*model)->value, policy, limits);
+
+    if (!text) {
+      return std::unexpected(textFailure(target.node, text.error()));
+    }
+
+    if (portals::detail::hasLineSeparator((*model)->value)) {
+      return std::unexpected(failure(target.node, TreeError::INVALID_ARGUMENT));
+    }
+
+    return std::move(*text);
+  }
+
   static EditorCommandResult command(std::shared_ptr<RefTarget> target, bool redo, bool stop,
                                      std::source_location origin) {
     auto owner = scene(target);
@@ -306,8 +344,7 @@ struct RefAccess {
 
           if (!text) {
             property.result_ = std::unexpected(textFailure(target->node, TextValueError{text.error()}));
-          } else if (current->draft && (candidate.find_first_of("\r\n") != std::string::npos ||
-                                        candidate.contains("\xe2\x80\xa8") || candidate.contains("\xe2\x80\xa9"))) {
+          } else if (current->draft && portals::detail::hasLineSeparator(candidate)) {
             // These are valid Unicode; the one-line editor contract rejects them without inventing a TextError.
             property.result_ = std::unexpected(failure(target->node, TreeError::INVALID_ARGUMENT));
           } else {
@@ -360,6 +397,38 @@ std::expected<HistoryAvailability, TreeError> editorAvailability(std::shared_ptr
   return RefAccess::availability(std::move(target));
 }
 } // namespace detail
+
+std::expected<GraphemeText, ManagedError> TextSource::snapshot() const {
+  auto owner = detail::RefAccess::scene(target_);
+
+  if (!owner) {
+    return std::unexpected(owner.error());
+  }
+
+  try {
+    if (kind_ == Kind::COMMITTED) {
+      return detail::RefAccess::committedSnapshot(**owner, *target_);
+    }
+
+    auto value = detail::RefAccess::snapshot(**owner, *target_);
+
+    if (!value) {
+      return std::unexpected(value.error());
+    }
+
+    auto text = GraphemeText::from(value->bytes, value->policy, value->limits);
+
+    if (!text) {
+      return std::unexpected(detail::textFailure(target_->node, text.error()));
+    }
+
+    return std::move(*text);
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(detail::failure(target_->node, TreeError::NO_MEMORY));
+  } catch (const std::length_error &) {
+    return std::unexpected(detail::failure(target_->node, TreeError::NODE_LIMIT));
+  }
+}
 
 TextProperty::TextProperty(std::shared_ptr<detail::RefTarget> target, TextResolver resolver,
                            std::string_view expectedType, std::source_location origin,

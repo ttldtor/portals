@@ -15,7 +15,7 @@ identify a released version.
 | Named reference lookup | Available — M1; [named references](declarative-ui.md) |
 | Scoped styling by Ref and its file convenience | Available — M1; [reference styles and files](declarative-ui.md) |
 | Scene text/file loader with allowlisted registry | Available — M1; [syntax and examples](scene-loading-guide.md) |
-| Remaining text-source/model-view contracts | **TBD — M2**; existing TextValue/Ref are usable |
+| Text sources and shared caption state | Available; [shared state](bindings-guide.md) and [read-only sources](text-property.md) |
 | Automatic one-way binding and observation facade | **TBD — M2** |
 | Derived state and binding expressions | **TBD — M2** |
 | PSS v1 selectors, parts and inheritance | **TBD — M5** |

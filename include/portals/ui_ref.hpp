@@ -89,6 +89,34 @@ void reportFocusError(const std::shared_ptr<RefTarget> &target, const ManagedErr
 /** @brief Explicit owning synchronous localization adapter; no global locale or resource storage. */
 using TextResolver = std::function<std::expected<std::string, TextResourceError>(std::string_view)>;
 
+/** @brief Copyable read-only source observing one caption, visible draft or accepted editor model.
+ * Construction and copying do not read, subscribe or retain the scene/widget. Operations are UI-affine;
+ * an unpublished source returns CLOSED, and removal preserves the original stale node identity.
+ * There is no automatic binding or remount retargeting. Returned text owns its storage independently.
+ */
+class TextSource {
+public:
+  /** @return Owning text snapshot or the original typed availability/text failure, without reporting.
+   * Accepted editor values are read from the latest model, even while a dirty/conflicted draft differs.
+   * Model bytes are validated under the editor's width policy and limits; malformed values remain errors.
+   */
+  std::expected<GraphemeText, ManagedError> snapshot() const;
+
+private:
+  template <class T> friend class Ref;
+  enum class Kind {
+    CAPTION,
+    DRAFT,
+    COMMITTED
+  };
+
+  TextSource(std::shared_ptr<detail::RefTarget> target, Kind kind) : target_(std::move(target)), kind_(kind) {
+  }
+
+  std::shared_ptr<detail::RefTarget> target_;
+  Kind kind_;
+};
+
 class TextProperty;
 
 /** @brief Owning read-only concatenation, including the original typed failure when reading fails.
