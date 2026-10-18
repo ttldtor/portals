@@ -1634,6 +1634,65 @@ ManagedScene::bind(Node<CheckBox> node, ManagedState<bool> model,
   }
 }
 
+std::expected<void, ManagedError>
+ManagedScene::bind(Node<CheckBox> node, ManagedState<CheckState> model,
+                   std::function<std::expected<void, TreeError>(CheckStateResult)> changed, CheckBoxOptions options) {
+  ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
+  decltype(changed) incomingChanged;
+
+  incomingChanged.swap(changed);
+
+  auto entry = bindingEntry(node);
+
+  if (!entry) {
+    return std::unexpected(entry.error());
+  }
+
+  auto property = model.lock();
+
+  if (!property || model.scene_ != root_.id()) {
+    return std::unexpected(error(ManagedPhase::BIND, node, property ? TreeError::INVALID_ARGUMENT : property.error()));
+  }
+
+  try {
+    auto bound = bindCheckbox(
+      app_.tree(), app_.router(), node, *property,
+      [this, node, changed = ui::detail::currentSceneCallback(facadeContext(), std::move(incomingChanged))](
+        CheckStateResult receipt) {
+        try {
+          if (!receipt) {
+            remember(error(ManagedPhase::INPUT, node, receipt.error()));
+          }
+
+          if (changed) {
+            auto result = changed(std::move(receipt));
+
+            if (!result) {
+              remember(error(ManagedPhase::INPUT, node, result.error()));
+            }
+          }
+        } catch (const std::bad_alloc &) {
+          remember(error(ManagedPhase::INPUT, node, TreeError::NO_MEMORY));
+        } catch (...) {
+          remember(error(ManagedPhase::INPUT, node, TreeError::CALLBACK_FAILED));
+        }
+      },
+      options);
+
+    if (!bound) {
+      return std::unexpected(error(ManagedPhase::BIND, node, bound.error()));
+    }
+
+    (*entry)->binding.emplace<CheckStateBinding>(std::move(*bound));
+
+    return {};
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
+  } catch (...) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CALLBACK_FAILED));
+  }
+}
+
 std::expected<void, ManagedError> ManagedScene::syncCaption(Node<Control> node, CaptionBinding &binding,
                                                             ManagedPhase phase) try {
   auto snapshot = binding.model.snapshot();
@@ -2730,6 +2789,8 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
           status = edit->sync(*focused);
         } else if (auto *check = std::get_if<CheckBoxBinding>(&entry->binding)) {
           status = check->sync();
+        } else if (auto *typedCheck = std::get_if<CheckStateBinding>(&entry->binding)) {
+          status = typedCheck->sync();
         }
       }
 

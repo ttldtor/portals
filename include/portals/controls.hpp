@@ -6,6 +6,9 @@
 #include <portals/layout.hpp>
 #include <portals/property.hpp>
 
+#include <optional>
+#include <span>
+
 namespace portals {
 /** @brief Owning paint values; no theme engine or behavior is encoded here. */
 struct ControlStyle {
@@ -67,7 +70,7 @@ protected:
   /** @brief Own text/options and create fixed ASCII decorations under the text's validated width policy.
    * @param text Validated owning text, transferred into the control with its complete WidthPolicy.
    * @param prefix Borrowed leading ASCII decoration, copied during construction; "[ ] " enables
-   * an alternate same-width "[x] " decoration for checkbox presentation.
+   * alternate same-width "[x] " and "[-] " decorations for checkbox presentation.
    * @param suffix Borrowed trailing ASCII decoration, copied during construction.
    * @param style Owning normal/focused/disabled paint values.
    * @param policy Owning layout size policy, subsequently validated by the layout owner.
@@ -86,6 +89,10 @@ protected:
    * @return The last value supplied to showChecked, initially false.
    */
   bool shownChecked() const;
+  /** @brief Select the fixed mixed decoration after caller-owned paint invalidation.
+   * @param mixed Whether the mixed decoration overrides the checked decoration.
+   */
+  void showMixed(bool mixed);
 
 private:
   friend std::expected<void, TreeError> setControlText(WidgetTree &, Node<Control>, GraphemeText);
@@ -94,10 +101,12 @@ private:
   GraphemeText text_;
   GraphemeText prefix_;
   GraphemeText checked_prefix_;
+  std::optional<GraphemeText> mixed_prefix_;
   GraphemeText suffix_;
   ControlStyle style_;
   CellRect bounds_;
   bool checked_{};
+  bool mixed_{};
   bool focused_{};
   bool enabled_{true};
 };
@@ -213,7 +222,54 @@ private:
 };
 } // namespace ui
 
-/** @brief Checkbox presentation; Property<bool> is its authoritative value when bound. */
+/** @brief Explicit checkbox value; MIXED describes an aggregate or an opt-in user choice. */
+enum class CheckState {
+  UNCHECKED, ///< No selection.
+  CHECKED,   ///< Complete selection.
+  MIXED      ///< Partial selection, displayed independently of color.
+};
+
+/** @brief User activation policy for an explicitly typed checkbox binding. */
+enum class CheckCycle {
+  TWO_STATE,  ///< Unchecked/checked toggle; mixed activates to checked.
+  THREE_STATE ///< Unchecked, checked, mixed, then unchecked.
+};
+
+/** @brief Owning typed checkbox input configuration. */
+struct CheckBoxOptions {
+  CheckCycle cycle{CheckCycle::TWO_STATE}; ///< Default preserves the boolean input cycle.
+};
+
+/** @brief Combine borrowed states without allocation or retained references.
+ * @param states Values read during this call; empty input is unchecked.
+ * @return Unchecked for all unchecked, checked for all checked, otherwise mixed;
+ * INVALID_ARGUMENT for any invalid enum value. May run in constant evaluation.
+ */
+constexpr std::expected<CheckState, TreeError> aggregateCheckState(std::span<const CheckState> states) {
+  bool checked = false;
+  bool unchecked = false;
+  bool mixed = false;
+
+  for (const auto state : states) {
+    switch (state) {
+    case CheckState::UNCHECKED:
+      unchecked = true;
+      break;
+    case CheckState::CHECKED:
+      checked = true;
+      break;
+    case CheckState::MIXED:
+      mixed = true;
+      break;
+    default:
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+  }
+
+  return mixed || (checked && unchecked) ? CheckState::MIXED : checked ? CheckState::CHECKED : CheckState::UNCHECKED;
+}
+
+/** @brief Checkbox presentation; its bound boolean or explicit-state Property remains authoritative. */
 class CheckBox : public Control {
 public:
   /** @brief Construct an owning initially unchecked view on UI, normally through tree.emplace.
@@ -228,10 +284,15 @@ public:
    * @return The checked presentation value, initially false; the binding's Property remains authoritative.
    */
   bool checked() const;
+  /** @return Last valid synchronized state on UI; the model remains authoritative. */
+  CheckState checkState() const;
 
 private:
   friend class CheckBoxBinding;
+  friend class CheckStateBinding;
   void display(bool value);
+  void display(CheckState value);
+  CheckState state_{CheckState::UNCHECKED};
 };
 
 /** @brief Replace owning text between frames; equal bytes/policy are a no-op, changes invalidate layout.
@@ -296,6 +357,73 @@ std::expected<ActionBinding, TreeError> bindButtonClick(EventRouter &router, Nod
                                                         bool allowModified = true);
 /** @brief Exact Property set outcome; errors mean no commit, successful receipts can reject notifications. */
 using CheckBoxResult = std::expected<PropertyUpdate<bool>, TreeError>;
+
+/** @brief Exact typed Property set receipt; successful commits can reject notifications. */
+using CheckStateResult = std::expected<PropertyUpdate<CheckState>, TreeError>;
+
+/** @brief Own one checkbox's action, subscription and shared UI model owner.
+ * Tree, router and scheduler must outlive this token; destroy/move on UI between frames,
+ * including from its callback. Model changes never invoke the business callback.
+ * Call sync before each frame after external changes/draining events: notifications can
+ * be rejected, and equal Property::set does not retry them. Latest committed value wins.
+ */
+class CheckStateBinding {
+public:
+  /** @brief Disconnect subscription/action and release model ownership on UI.
+   * Admitted callbacks retain their captures; router collection may defer the final model release.
+   * Wrong-thread subscription destruction terminates rather than throwing.
+   */
+  ~CheckStateBinding();
+  /** @brief Transfer all ownership from the unnamed source binding argument on UI.
+   * The source becomes empty; its sync returns INVALID_ARGUMENT and destruction is harmless.
+   * No callbacks run during this nonthrowing transfer.
+   */
+  CheckStateBinding(CheckStateBinding &&) noexcept;
+  /** @brief Replace ownership from the unnamed source binding argument on UI; self-move is a no-op.
+   * The source becomes empty. All replacement fields are installed before retiring old resources;
+   * deferred capture reclamation can reenter UI code. Neither binding owns its tree/router.
+   * @return This binding by reference; callers must not use the result if reentrant cleanup destroyed its owner.
+   */
+  CheckStateBinding &operator=(CheckStateBinding &&) noexcept;
+  CheckStateBinding(const CheckStateBinding &) = delete;
+  CheckStateBinding &operator=(const CheckStateBinding &) = delete;
+  /** @brief Read the latest committed model snapshot on UI between frames and synchronize presentation.
+   * @return Success with paint invalidation only on a value change; INVALID_ARGUMENT for a moved-from token,
+   * WRONG_THREAD from the model/tree, or the tree's WRONG_SESSION, STALE_NODE, closed, WOULD_BLOCK (active frame),
+   * CALLBACK_FAILED or invalidation error. Rejected notifications do not prevent resynchronization.
+   * @note No business callback runs; old queued notifications cannot overwrite a newer committed value.
+   */
+  std::expected<void, TreeError> sync();
+
+private:
+  struct State;
+  friend std::expected<CheckStateBinding, TreeError> bindCheckbox(WidgetTree &, EventRouter &, Node<CheckBox>,
+                                                                  std::shared_ptr<Property<CheckState>>,
+                                                                  std::function<void(CheckStateResult)>,
+                                                                  CheckBoxOptions);
+  CheckStateBinding(std::shared_ptr<State> state, ActionBinding action, Subscription subscription);
+  std::shared_ptr<State> state_;
+  ActionBinding action_;
+  Subscription subscription_;
+};
+
+/** @brief Bind an explicit checkbox state on UI, preserving Property commit receipts.
+ * @param tree Borrowed UI tree; outlives binding, model and router.
+ * @param router Borrowed router for tree; existing eligibility/admission rules apply.
+ * @param node Observing live checkbox identity.
+ * @param model Required shared UI model; invalid committed enum values are rejected by sync/input.
+ * @param changed Required owning activation callback; receives one exact receipt, even on failure.
+ * @param options Owning cycle policy; invalid policy returns INVALID_ARGUMENT.
+ * @return Scoped binding or existing TreeError registration/synchronization errors; INVALID_ARGUMENT
+ * for null model, empty callback or invalid enum values. No business callback on external updates.
+ * @note Tree/router/scheduler outlive the UI-affine token. Admitted callbacks survive self-removal.
+ * Call sync before frames to recover rejected notifications. Equal values never repaint or republish.
+ * Callback exceptions become CALLBACK_FAILED through routing and cannot undo a committed model value.
+ */
+std::expected<CheckStateBinding, TreeError> bindCheckbox(WidgetTree &tree, EventRouter &router, Node<CheckBox> node,
+                                                         std::shared_ptr<Property<CheckState>> model,
+                                                         std::function<void(CheckStateResult)> changed,
+                                                         CheckBoxOptions options = {});
 
 /** @brief Own one checkbox's action, subscription and shared UI model owner.
  * Tree, router and scheduler must outlive this token; destroy/move on UI between frames,

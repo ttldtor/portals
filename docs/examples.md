@@ -252,3 +252,7 @@ Run `build/guide-examples/docs_basic.exe` on Windows or `build/guide-examples/do
 ## Browser sample
 
 [Gallery and Level in WebAssembly](wasm-gallery.md) are opt-in experimental browser scenes. They use xterm.js and the incremental runner; building native examples does not build this target.
+
+The [CheckBox with three states example](../examples/check_state/main.cpp) uses
+an explicit input cycle and the standard terminal runner. Its optional
+[group update helper](../examples/check_state/group.hpp) preserves partial failures.

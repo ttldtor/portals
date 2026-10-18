@@ -33,6 +33,7 @@ Control::Control(GraphemeText text, std::string_view prefix, std::string_view su
                  SizePolicy policy)
     : SizedWidget(policy), text_(std::move(text)), prefix_(decoration(prefix, text_.policy())),
       checked_prefix_(decoration(prefix == "[ ] " ? "[x] " : prefix, text_.policy())),
+      mixed_prefix_(prefix == "[ ] " ? std::optional(decoration("[-] ", text_.policy())) : std::nullopt),
       suffix_(decoration(suffix, text_.policy())), style_(style) {
 }
 
@@ -93,7 +94,7 @@ std::expected<void, TreeError> Control::paint(PaintContext &context) {
 
   // Paint uses only synchronized presentation. The frame owner transforms these local
   // commands and renders their borrowed text before releasing the enclosing tree frame.
-  const auto &prefix = checked_ ? checked_prefix_ : prefix_;
+  const auto &prefix = mixed_ && mixed_prefix_ ? *mixed_prefix_ : checked_ ? checked_prefix_ : prefix_;
   const auto resolved = computedStyle() ? *computedStyle() : Control::styleDefaults();
   const auto style = !enabled_ ? resolved.disabled : focused_ ? resolved.focused : resolved.normal;
   const std::array<RenderCommand, 4> commands{
@@ -138,8 +139,22 @@ bool CheckBox::checked() const {
   return shownChecked();
 }
 
+void Control::showMixed(bool mixed) {
+  mixed_ = mixed;
+}
+
+CheckState CheckBox::checkState() const {
+  return state_;
+}
+
 void CheckBox::display(bool value) {
-  showChecked(value);
+  display(value ? CheckState::CHECKED : CheckState::UNCHECKED);
+}
+
+void CheckBox::display(CheckState value) {
+  state_ = value;
+  showChecked(value == CheckState::CHECKED);
+  showMixed(value == CheckState::MIXED);
 }
 
 std::expected<void, TreeError> setControlText(WidgetTree &tree, Node<Control> node, GraphemeText text) {
@@ -154,6 +169,8 @@ std::expected<void, TreeError> setControlText(WidgetTree &tree, Node<Control> no
       // Allocation failure must preserve both the old caption and the pending frame request.
       auto prefix = decoration(control.prefix_.bytes(), text.policy());
       auto checked = decoration(control.checked_prefix_.bytes(), text.policy());
+      auto mixed =
+        control.mixed_prefix_ ? std::optional(decoration(control.mixed_prefix_->bytes(), text.policy())) : std::nullopt;
       auto suffix = decoration(control.suffix_.bytes(), text.policy());
 
       result = tree.invalidate(node, Invalidation::LAYOUT);
@@ -165,6 +182,7 @@ std::expected<void, TreeError> setControlText(WidgetTree &tree, Node<Control> no
       control.text_ = std::move(text);
       control.prefix_ = std::move(prefix);
       control.checked_prefix_ = std::move(checked);
+      control.mixed_prefix_ = std::move(mixed);
       control.suffix_ = std::move(suffix);
     } catch (const std::bad_alloc &) {
       result = std::unexpected(TreeError::NO_MEMORY);
@@ -272,7 +290,7 @@ struct CheckBoxBinding::State {
   std::expected<void, TreeError> apply(bool value) {
     std::expected<void, TreeError> result;
     auto edited = tree.edit(node, [&](CheckBox &control) {
-      if (control.checked() == value) {
+      if (control.checked() == value && control.checkState() == (value ? CheckState::CHECKED : CheckState::UNCHECKED)) {
         return;
       }
 
@@ -390,6 +408,162 @@ std::expected<CheckBoxBinding, TreeError> bindCheckbox(WidgetTree &tree, EventRo
     }
 
     return CheckBoxBinding(std::move(state), std::move(*action), std::move(*subscription));
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(TreeError::NO_MEMORY);
+  }
+}
+
+struct CheckStateBinding::State {
+  WidgetTree &tree;
+  Node<CheckBox> node;
+  std::shared_ptr<Property<CheckState>> model;
+  CheckBoxOptions options;
+
+  std::expected<void, TreeError> apply(CheckState value) {
+    const std::array states{value};
+
+    if (!aggregateCheckState(states)) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+
+    std::expected<void, TreeError> result;
+    auto edited = tree.edit(node, [&](CheckBox &control) {
+      if (control.checkState() == value && control.checked() == (value == CheckState::CHECKED)) {
+        return;
+      }
+
+      result = tree.invalidate(node, Invalidation::PAINT);
+
+      if (result) {
+        control.display(value);
+      }
+    });
+
+    return edited ? result : edited;
+  }
+
+  std::expected<void, TreeError> sync() {
+    auto snapshot = model->snapshot();
+
+    if (!snapshot) {
+      return std::unexpected(snapshot.error());
+    }
+
+    return apply((*snapshot)->value);
+  }
+};
+
+CheckStateBinding::CheckStateBinding(std::shared_ptr<State> state, ActionBinding action, Subscription subscription)
+    : state_(std::move(state)), action_(std::move(action)), subscription_(std::move(subscription)) {
+}
+
+CheckStateBinding::~CheckStateBinding() = default;
+CheckStateBinding::CheckStateBinding(CheckStateBinding &&) noexcept = default;
+
+CheckStateBinding &CheckStateBinding::operator=(CheckStateBinding &&other) noexcept {
+  if (this == &other) {
+    return *this;
+  }
+
+  // Install the complete replacement before retiring old resources. Reclaimed captures
+  // may reenter UI code and destroy the destination token; no partial state may be visible.
+  CheckStateBinding retired(std::move(other));
+
+  using std::swap;
+
+  swap(state_, retired.state_);
+  swap(action_, retired.action_);
+  swap(subscription_, retired.subscription_);
+
+  return *this;
+}
+
+std::expected<void, TreeError> CheckStateBinding::sync() {
+  if (!state_) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  return state_->sync();
+}
+
+std::expected<CheckStateBinding, TreeError> bindCheckbox(WidgetTree &tree, EventRouter &router, Node<CheckBox> node,
+                                                         std::shared_ptr<Property<CheckState>> model,
+                                                         std::function<void(CheckStateResult)> changed,
+                                                         CheckBoxOptions options) {
+  if (!model || !changed || (options.cycle != CheckCycle::TWO_STATE && options.cycle != CheckCycle::THREE_STATE)) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  try {
+    auto state =
+      std::make_shared<CheckStateBinding::State>(CheckStateBinding::State{tree, node, std::move(model), options});
+
+    // Ignore the queued event value: delayed delivery must not roll back a newer model commit.
+    auto subscription = state->model->observe(node, [state](CheckBox &, auto) {
+      auto synced = state->sync();
+
+      if (!synced) {
+        throw synced.error();
+      }
+    });
+
+    if (!subscription) {
+      return std::unexpected(subscription.error());
+    }
+
+    auto action = router.bind(node, [state, changed = std::move(changed)](CheckBox &, const RoutedEvent &event) {
+      if (!activates(event)) {
+        return EventReply::IGNORED;
+      }
+
+      // Read the authoritative value once and perform one toggle. Retain this exact set
+      // receipt, including rejected/cancelled notifications, for the business callback.
+      auto current = state->model->snapshot();
+      CheckStateResult result = std::unexpected(current ? TreeError::INVALID_ARGUMENT : current.error());
+
+      if (current) {
+        const auto value = (*current)->value;
+        const std::array values{value};
+
+        if (aggregateCheckState(values)) {
+          const auto next =
+            value == CheckState::UNCHECKED ? CheckState::CHECKED
+            : value == CheckState::CHECKED
+              ? (state->options.cycle == CheckCycle::THREE_STATE ? CheckState::MIXED : CheckState::UNCHECKED)
+            : state->options.cycle == CheckCycle::THREE_STATE ? CheckState::UNCHECKED
+                                                              : CheckState::CHECKED;
+
+          result = state->model->set(next);
+        }
+      }
+
+      if (result) {
+        auto synced = state->apply(result->snapshot->value);
+
+        // A property observer capture can remove the target while set prunes observers.
+        // Removal ends presentation, but must not conceal a successful model commit.
+        if (!synced && synced.error() != TreeError::STALE_NODE && synced.error() != TreeError::CLOSED) {
+          throw synced.error();
+        }
+      }
+
+      // A callback exception cannot undo the model commit or replace its receipt.
+      changed(std::move(result));
+
+      return EventReply::HANDLED;
+    });
+
+    if (!action) {
+      return std::unexpected(action.error());
+    }
+
+    auto synced = state->sync();
+
+    if (!synced) {
+      return std::unexpected(synced.error());
+    }
+
+    return CheckStateBinding(std::move(state), std::move(*action), std::move(*subscription));
   } catch (const std::bad_alloc &) {
     return std::unexpected(TreeError::NO_MEMORY);
   }

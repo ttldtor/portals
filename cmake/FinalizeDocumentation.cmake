@@ -38,6 +38,9 @@ set(example_sources
   examples/editor_history/main.cpp
   examples/editor_history/editor.hpp
   examples/dashboard/main.cpp
+  tests/package_consumer/check_state_explicit.cpp
+  examples/check_state/main.cpp
+  examples/check_state/group.hpp
   examples/click_handlers/main.cpp
   examples/gallery/fluent_form.hpp
   examples/gallery/options.hpp
