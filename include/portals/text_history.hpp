@@ -113,6 +113,10 @@ public:
    * @return Byte offset of the fixed selection end, or zero for an empty handle.
    */
   [[nodiscard]] std::size_t anchor() const noexcept;
+  /** @brief Borrow the already segmented target before publication.
+   * @return Target text, or nullptr for an empty handle or after takeText; expires on transfer/destruction.
+   */
+  [[nodiscard]] const GraphemeText *text() const noexcept;
   /** @brief Transfer staged text into existing storage without allocating.
    * @param destination Existing text value to replace by noexcept move assignment.
    * @note Call TextHistory::checkPrepared first, then transfer and commit without

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include <portals/detail/line_edit_text.hpp>
 #include <portals/detail/move_only_function.hpp>
 #include <portals/grid.hpp>
 #include <portals/managed.hpp>
@@ -76,6 +77,23 @@ inline ManagedError textError(Node<Widget> node, TextError cause) {
   failure.text = cause;
 
   return failure;
+}
+
+/** @param options Editor options under the receiving scene width policy; owned placeholder bytes are consumed.
+ * @param parent Receiving parent identity retained on preparation failure.
+ * @return Prepared presentation or exact checked mount error, before internal state publication.
+ */
+inline std::expected<portals::detail::LineEditPlaceholder, ManagedError> lineEditPlaceholder(LineEditOptions &options,
+                                                                                             Node<Widget> parent) {
+  if (!portals::detail::validLineEditDisplayMode(options.displayMode) ||
+      (options.placeholder && portals::detail::hasLineSeparator(*options.placeholder))) {
+    return std::unexpected(error(parent, TreeError::INVALID_ARGUMENT));
+  }
+  auto prepared = portals::detail::prepareLineEditPlaceholder(options);
+  if (!prepared) {
+    return std::unexpected(textError(parent, prepared.error()));
+  }
+  return std::move(*prepared);
 }
 
 // Checked MSVC strings allocate iterator proxies in otherwise noexcept moves.
@@ -475,6 +493,18 @@ public:
     requires std::same_as<T, LineEdit>
   {
     return detail::editorCommand(target(), true, false, origin);
+  }
+
+  /** @brief Clear the visible draft as one user operation, applying the configured EditMode.
+   * @param origin Command call site retained in diagnostics.
+   * @return Checked technical result with reporting provenance; semantic validation/conflict uses LineEditResult.
+   * Empty writable drafts are no-ops. Read-only/disabled editors return WOULD_BLOCK. Return the complete
+   * EditorCommandResult from managed callbacks to preserve report-once behavior.
+   */
+  EditorCommandResult clear(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, LineEdit>
+  {
+    return detail::editorCommand(target(), false, false, origin, true);
   }
 
   /** @param origin Command call site retained in diagnostics.
@@ -1702,11 +1732,16 @@ inline Description<CheckBox> checkbox(std::string_view text, ManagedState<CheckS
  * @return Single-use bound editor recipe; width policy always follows the scene.
  */
 inline Description<LineEdit> lineEdit(ManagedState<std::string> model, LineEditConfig config = {}) {
-  auto description = Description<LineEdit>(
-    [options = config.options, policy = config.policy](ManagedScene &scene, Node<Widget> parent) mutable {
+  auto description = detail::Access::describe<LineEdit>(
+    [options = config.options, policy = config.policy](
+      ManagedScene &scene, Node<Widget> parent) mutable -> std::expected<Node<LineEdit>, ManagedError> {
       options.widthPolicy = scene.widthPolicy();
+      auto placeholder = detail::lineEditPlaceholder(options, parent);
+      if (!placeholder) {
+        return std::unexpected(placeholder.error());
+      }
 
-      return scene.emplace<LineEdit>(parent, options, policy);
+      return scene.emplace<LineEdit>(parent, std::move(options), policy, std::move(*placeholder));
     });
 
   return std::move(description)
@@ -1740,6 +1775,12 @@ inline Description<LineEdit> lineEdit(TextValue initial, LineEditConfig config =
         return std::unexpected(failure);
       }
 
+      options.widthPolicy = scene.widthPolicy();
+      auto placeholder = detail::lineEditPlaceholder(options, parent);
+      if (!placeholder) {
+        return std::unexpected(placeholder.error());
+      }
+
       auto state = scene.state(std::string(resolved->bytes()));
 
       if (!state) {
@@ -1747,9 +1788,8 @@ inline Description<LineEdit> lineEdit(TextValue initial, LineEditConfig config =
       }
 
       *model = *state;
-      options.widthPolicy = scene.widthPolicy();
 
-      return scene.emplace<LineEdit>(parent, options, policy);
+      return scene.emplace<LineEdit>(parent, std::move(options), policy, std::move(*placeholder));
     });
 
   return std::move(description)

@@ -639,3 +639,20 @@ set_target_properties(portals_installed_check_state_explicit PROPERTIES CXX_EXTE
 if(WIN32)
   target_sources(portals_installed_check_state_explicit PRIVATE no_dialogs.cpp)
 endif()
+
+# Display policy and checked user Clear are available through the installed SDK.
+add_executable(portals_editor_display_consumer editor_display.cpp)
+target_link_libraries(portals_editor_display_consumer PRIVATE portals::core)
+set_target_properties(portals_editor_display_consumer PROPERTIES CXX_EXTENSIONS OFF)
+if(WIN32)
+  target_sources(portals_editor_display_consumer PRIVATE no_dialogs.cpp)
+endif()
+add_test(NAME consumer.editor-display COMMAND portals_editor_display_consumer)
+set_tests_properties(consumer.editor-display PROPERTIES TIMEOUT 15)
+
+add_executable(portals_editor_display_form_consumer editor_display_form.cpp)
+target_link_libraries(portals_editor_display_form_consumer PRIVATE portals::core)
+set_target_properties(portals_editor_display_form_consumer PROPERTIES CXX_EXTENSIONS OFF)
+if(WIN32)
+  target_sources(portals_editor_display_form_consumer PRIVATE no_dialogs.cpp)
+endif()

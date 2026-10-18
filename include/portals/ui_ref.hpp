@@ -52,9 +52,11 @@ struct RefAccess;
  * @param redo Select Redo instead of Undo when stop is false.
  * @param stop Select a grouping boundary instead of a history restoration.
  * @param origin Public command call site retained in diagnostics.
+ * @param clear Select user Clear instead of a history restoration.
  * @return Owning checked result with exactly its own reporting receipt.
  */
-EditorCommandResult editorCommand(std::shared_ptr<RefTarget> target, bool redo, bool stop, std::source_location origin);
+EditorCommandResult editorCommand(std::shared_ptr<RefTarget> target, bool redo, bool stop, std::source_location origin,
+                                  bool clear = false);
 /** @param target Owning observing slot, without scene/widget ownership.
  * @return Checked effective availability without reporting, adoption or invalidation.
  */
