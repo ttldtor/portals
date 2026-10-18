@@ -372,6 +372,15 @@ ManagedScene::~ManagedScene() {
     std::terminate();
   }
 
+  if (sessionOperating_) {
+    std::terminate();
+  }
+
+  if (sessionActive_) {
+    app_.requestStop();
+    (void)step();
+  }
+
   // Router/scheduler may retain disconnected captures until their next collection.
   // Weak state handles end with this owner even while those internal borrows drain.
   lifetime_.reset();
@@ -2605,7 +2614,7 @@ std::expected<void, ManagedError> ManagedScene::close() {
     return std::unexpected(error(ManagedPhase::CLEANUP, root_, TreeError::WRONG_THREAD));
   }
 
-  if (preparing_ || reporting_ || styling_ || closing_) {
+  if (preparing_ || reporting_ || styling_ || closing_ || (sessionActive_ && !stoppingSession_)) {
     return std::unexpected(error(ManagedPhase::CLEANUP, root_, TreeError::WOULD_BLOCK));
   }
 
@@ -2676,7 +2685,11 @@ void ManagedScene::stop(Application &app) {
     return;
   }
 
+  stoppingSession_ = true;
+
   auto result = close();
+
+  stoppingSession_ = false;
 
   if (!result) {
     cleanup_ = bridge(result.error());
@@ -2752,6 +2765,10 @@ ManagedScene::finish(std::expected<ApplicationStats, ApplicationError> result) {
 }
 
 std::expected<ApplicationStats, ManagedError> ManagedScene::run(std::stop_token stop) {
+  if (owner_ == std::this_thread::get_id() && (sessionActive_ || sessionOperating_)) {
+    return std::unexpected(error(ManagedPhase::RUN, root_, TreeError::WOULD_BLOCK));
+  }
+
   auto allowed = boundary(ManagedPhase::RUN, root_);
 
   if (!allowed) {
@@ -2762,10 +2779,20 @@ std::expected<ApplicationStats, ManagedError> ManagedScene::run(std::stop_token 
     return std::unexpected(error(ManagedPhase::RUN, root_, TreeError::WOULD_BLOCK));
   }
 
-  return finish(app_.run(*this, stop));
+  sessionOperating_ = true;
+
+  auto result = finish(app_.run(*this, stop));
+
+  sessionOperating_ = false;
+
+  return result;
 }
 
 std::expected<ApplicationStats, ManagedError> ManagedScene::run(ApplicationTerminal &terminal, std::stop_token stop) {
+  if (owner_ == std::this_thread::get_id() && (sessionActive_ || sessionOperating_)) {
+    return std::unexpected(error(ManagedPhase::RUN, root_, TreeError::WOULD_BLOCK));
+  }
+
   auto allowed = boundary(ManagedPhase::RUN, root_);
 
   if (!allowed) {
@@ -2776,6 +2803,99 @@ std::expected<ApplicationStats, ManagedError> ManagedScene::run(ApplicationTermi
     return std::unexpected(error(ManagedPhase::RUN, root_, TreeError::WOULD_BLOCK));
   }
 
-  return finish(app_.run(*this, terminal, stop));
+  sessionOperating_ = true;
+
+  auto result = finish(app_.run(*this, terminal, stop));
+
+  sessionOperating_ = false;
+
+  return result;
+}
+
+std::expected<ApplicationStep, ManagedError>
+ManagedScene::finishStep(std::expected<ApplicationStep, ApplicationError> result) {
+  if (result && !result->finished) {
+    return *result;
+  }
+
+  sessionActive_ = false;
+
+  auto finished =
+    finish(result ? std::expected<ApplicationStats, ApplicationError>(result->stats) : std::unexpected(result.error()));
+
+  if (finished) {
+    sessionResult_.emplace(ApplicationStep{true, *finished});
+  } else {
+    sessionResult_.emplace(std::unexpected(finished.error()));
+  }
+
+  return *sessionResult_;
+}
+
+std::expected<void, ManagedError> ManagedScene::start(ApplicationReadyTerminal &terminal, std::stop_token stop) {
+  if (owner_ != std::this_thread::get_id()) {
+    return std::unexpected(error(ManagedPhase::RUN, root_, TreeError::WRONG_THREAD));
+  }
+
+  if (sessionActive_ || sessionOperating_) {
+    return std::unexpected(error(ManagedPhase::RUN, root_, TreeError::WOULD_BLOCK));
+  }
+
+  auto allowed = boundary(ManagedPhase::RUN, root_);
+
+  if (!allowed) {
+    return allowed;
+  }
+
+  if (closing_) {
+    return std::unexpected(error(ManagedPhase::RUN, root_, TreeError::WOULD_BLOCK));
+  }
+
+  sessionActive_ = sessionOperating_ = true;
+
+  auto result = app_.start(*this, terminal, stop);
+
+  // Application may finish synchronously for cancellation or a start failure.
+  if (!result || closed_) {
+    auto finished =
+      finishStep(result ? std::expected<ApplicationStep, ApplicationError>(ApplicationStep{true, app_.stats()})
+                        : std::unexpected(result.error()));
+
+    sessionOperating_ = false;
+
+    if (!finished) {
+      return std::unexpected(finished.error());
+    }
+  } else {
+    sessionOperating_ = false;
+  }
+
+  return {};
+}
+
+std::expected<ApplicationStep, ManagedError> ManagedScene::step() {
+  if (owner_ != std::this_thread::get_id()) {
+    return std::unexpected(error(ManagedPhase::RUN, root_, TreeError::WRONG_THREAD));
+  }
+
+  if (sessionOperating_ || preparing_ || reporting_ || styling_ || closing_) {
+    return std::unexpected(error(ManagedPhase::RUN, root_, TreeError::WOULD_BLOCK));
+  }
+
+  if (sessionResult_) {
+    return *sessionResult_;
+  }
+
+  if (!sessionActive_) {
+    return std::unexpected(error(ManagedPhase::RUN, root_, closed_ ? TreeError::CLOSED : TreeError::INVALID_ARGUMENT));
+  }
+
+  sessionOperating_ = true;
+
+  auto result = finishStep(app_.step());
+
+  sessionOperating_ = false;
+
+  return result;
 }
 } // namespace portals

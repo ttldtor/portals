@@ -2,6 +2,36 @@
   "version": 5,
   "cmakeMinimumRequired": { "major": 3, "minor": 24, "patch": 0 },
   "configurePresets": [
+      {
+        "name": "wasm-base",
+        "hidden": true,
+        "generator": "Ninja",
+        "binaryDir": "${sourceDir}/build/${presetName}",
+        "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+        "cacheVariables": {
+          "CMAKE_EXPORT_COMPILE_COMMANDS": true,
+          "PORTALS_BUILD_TESTS": false,
+          "PORTALS_BUILD_EXAMPLES": false,
+          "PORTALS_BUILD_TOOLS": false,
+          "PORTALS_BUILD_WASM_GALLERY": true
+        }
+      },
+      {
+        "name": "wasm-debug",
+        "inherits": "wasm-base",
+        "displayName": "Emscripten Debug (SDK 6.0.12)",
+        "cacheVariables": {
+          "CMAKE_BUILD_TYPE": "Debug"
+        }
+      },
+      {
+        "name": "wasm-release",
+        "inherits": "wasm-base",
+        "displayName": "Emscripten Release (SDK 6.0.12)",
+        "cacheVariables": {
+          "CMAKE_BUILD_TYPE": "Release"
+        }
+      },
     {
       "name": "debug-base",
       "hidden": true,
@@ -50,6 +80,8 @@
     }
   ],
   "buildPresets": [
+    { "name": "wasm-debug", "configurePreset": "wasm-debug", "targets": ["portals_wasm_gallery"] },
+    { "name": "wasm-release", "configurePreset": "wasm-release", "targets": ["portals_wasm_gallery"] },
     { "name": "windows-msvc-debug", "configurePreset": "windows-msvc-debug" },
     { "name": "linux-gcc-debug", "configurePreset": "linux-gcc-debug" },
     { "name": "windows-msvc-release", "configurePreset": "windows-msvc-release" },

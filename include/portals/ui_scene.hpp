@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include <portals/detail/move_only_function.hpp>
 #include <portals/detail/setup_failure.hpp>
 #include <portals/managed.hpp>
 #include <portals/ui_app.hpp>
@@ -225,14 +226,17 @@ struct LiveFactory {
  */
 class Scene {
 public:
-  /** @brief Transfer an idle UI-affine owner; wrong-thread/active moves terminate.
+  /** @brief Transfer a UI-affine owner between operations, including between session steps.
+   * Wrong-thread moves and moves from inside an operation or callback terminate.
    * @param other Source owner, left empty with checked CLOSED results.
    */
   Scene(Scene &&other) noexcept;
   Scene &operator=(Scene &&) = delete;
   Scene(const Scene &) = delete;
   Scene &operator=(const Scene &) = delete;
-  /** @brief Close the managed owner before releasing its Application, on UI outside operations/frames. */
+  /** @brief Cancel and finish an active session, then close its managed owner before releasing Application.
+   * Destruction is UI-only, outside operations/frames; the borrowed ready terminal must still be alive.
+   */
   ~Scene();
 
   /** @param name Case-sensitive ID copied before deferred resolution after mount.
@@ -695,6 +699,20 @@ public:
   std::expected<ApplicationStats, ManagedError> run(ApplicationTerminal &terminal, std::stop_token stop = {},
                                                     std::source_location origin = std::source_location::current());
 
+  /** @param terminal Ready-only transport borrowed until terminal step or scene destruction.
+   * @param stop Cooperative cancellation retained by the application.
+   * @param origin Start call site retained in diagnostics.
+   * @return Success or first typed cause with cleanup details. UI-only and single-use.
+   */
+  std::expected<void, ManagedError> start(ApplicationReadyTerminal &terminal, std::stop_token stop = {},
+                                          std::source_location origin = std::source_location::current());
+
+  /** @param origin Step call site retained in diagnostics.
+   * @return Bounded ready progress or retained terminal result. No current-scene context escapes the call.
+   * Reentry and calls before start are rejected without poisoning an active session.
+   */
+  std::expected<ApplicationStep, ManagedError> step(std::source_location origin = std::source_location::current());
+
   /** @brief Request orderly exit through the existing application cancellation path.
    * @param origin Exit request call site.
    * @return Success, WRONG_THREAD, CLOSED, or sticky WOULD_BLOCK during notification/close; read-only reporting rejects
@@ -753,15 +771,15 @@ public:
                             std::source_location origin = std::source_location::current()) &;
 
   /** @param origin Cleanup call site.
-   * @return Idempotent explicit cleanup result; reentry returns WOULD_BLOCK without retiring an active owner.
+   * @return Idempotent explicit cleanup result; active sessions and reentry return WOULD_BLOCK without retirement.
    * The first facade failure remains observable through checked()/run().
    */
   std::expected<void, ManagedError> close(std::source_location origin = std::source_location::current());
 
 private:
   friend struct detail::SceneAccess;
-  using Configuration = std::move_only_function<std::expected<void, ManagedError>(ManagedScene &)>;
-  using Stop = std::move_only_function<std::expected<void, ManagedError>()>;
+  using Configuration = portals::detail::MoveOnlyFunction<std::expected<void, ManagedError>(ManagedScene &)>;
+  using Stop = portals::detail::MoveOnlyFunction<std::expected<void, ManagedError>()>;
   struct State;
   detail::SetupFailureScope setupScope(const char *execution) noexcept;
   static Application &admittedApplication(ManagedScene &scene) noexcept;
@@ -1174,7 +1192,7 @@ struct SceneAccess {
    * @param origin Scene construction call site.
    * @return UI-affine lazy owner; storage allocation may throw before preparation.
    */
-  static Scene create(std::move_only_function<std::expected<void, ManagedError>(ManagedScene &)> recipe,
+  static Scene create(portals::detail::MoveOnlyFunction<std::expected<void, ManagedError>(ManagedScene &)> recipe,
                       SceneOptions options, std::source_location origin) {
     return Scene(std::move(recipe), options, origin);
   }

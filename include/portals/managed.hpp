@@ -890,10 +890,21 @@ public:
    */
   std::expected<ApplicationStats, ManagedError> run(ApplicationTerminal &terminal, std::stop_token stop = {});
 
+  /** @param terminal Ready-only transport borrowed until terminal step or destruction.
+   * @param stop Cooperative cancellation sampled by each ready operation.
+   * @return Success or complete managed start failure. UI-only and single-use.
+   */
+  std::expected<void, ManagedError> start(ApplicationReadyTerminal &terminal, std::stop_token stop = {});
+
+  /** @return One bounded ready step or terminal managed failure; terminal results are retained.
+   * UI-only; reentry is rejected without changing the active session.
+   */
+  std::expected<ApplicationStep, ManagedError> step();
+
   /** @brief Idempotently retire callbacks and subtree; properties survive until scene destruction.
    * A facade-installed shutdown action runs once before root/model retirement. Its failure does not skip
    * subtree cleanup; an independent tree cleanup failure is retained in the shutdown error's cleanup field.
-   * @return Success, WRONG_THREAD, WOULD_BLOCK inside managed preparation/frame or close reentry,
+   * @return Success, WRONG_THREAD, WOULD_BLOCK during an active session, managed preparation/frame or close reentry,
    * an exact facade shutdown failure, or tree cleanup error.
    */
   std::expected<void, ManagedError> close();
@@ -1167,6 +1178,7 @@ private:
                 std::span<const ManagedDiagnosticContext> contexts = {});
   std::expected<ApplicationStats, ManagedError> finish(std::expected<ApplicationStats, ApplicationError> result);
   void retainCloseFailure();
+  std::expected<ApplicationStep, ManagedError> finishStep(std::expected<ApplicationStep, ApplicationError> result);
 
   Application &app_;
   std::thread::id owner_;
@@ -1207,6 +1219,8 @@ private:
   bool notifyingRunFailure_{};
   void *closeContext_{};
   std::expected<void, ManagedError> (*beforeClose_)(void *){};
+  std::optional<std::expected<ApplicationStep, ManagedError>> sessionResult_;
+  bool sessionActive_{}, sessionOperating_{}, stoppingSession_{};
   bool closing_{};
   bool closed_{};
   std::shared_ptr<bool> textMutating_ = std::make_shared<bool>(false);

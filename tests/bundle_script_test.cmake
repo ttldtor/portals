@@ -68,6 +68,10 @@ set(consumer "${testRoot}/external consumer é")
 bundleStageConsumer("${SOURCE_DIR}" "${consumer}")
 file(GLOB_RECURSE exampleInputs LIST_DIRECTORIES FALSE RELATIVE "${SOURCE_DIR}"
   "${SOURCE_DIR}/examples/*" "${SOURCE_DIR}/tests/examples/*" "${SOURCE_DIR}/tests/support/*")
+list(FILTER exampleInputs EXCLUDE REGEX "(^|/)node_modules(/|$)")
+if(EXISTS "${consumer}/examples/wasm_gallery/web/node_modules")
+  message(FATAL_ERROR "Browser development dependencies were staged as native consumer sources")
+endif()
 file(GLOB_RECURSE fixtureInputs LIST_DIRECTORIES FALSE RELATIVE "${SOURCE_DIR}/tests/package_consumer"
   "${SOURCE_DIR}/tests/package_consumer/*")
 foreach(relative IN LISTS exampleInputs fixtureInputs)

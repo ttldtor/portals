@@ -10,7 +10,7 @@
 
 namespace portals {
 
-/** @brief Synchronous runner phase, also used to identify a failure boundary. */
+/** @brief Application runner phase, also used to identify a failure boundary. */
 enum class ApplicationPhase {
   CREATE,         ///< Validate options and construct the application and its core services.
   OPEN,           ///< Enter a run and initialize its transport and runner state.
@@ -19,7 +19,7 @@ enum class ApplicationPhase {
   PREPARE,        ///< Synchronize scene state and, when enabled, prepare views after preliminary layout.
   RENDER,         ///< Lay out and paint the final frame, then consume commands into an owning cell buffer.
   SUBMIT,         ///< Give the owning frame to FrameWriter for diff encoding; no transport write occurs here.
-  FLUSH,          ///< Write pending encoded output within the configured deadline.
+  FLUSH,          ///< Advance encoded output through ready operations or the native deadline driver.
   STOP,           ///< Request cancellation, stop the scheduler and invoke the scene's stop hook.
   CLOSE,          ///< Close the transport and attempt restoration of terminal state.
   CONTROL_LATENCY ///< Observer-only logical queue delay for the runner's input/resize channel, not a work phase.
@@ -27,11 +27,13 @@ enum class ApplicationPhase {
 
 /** @brief Failures introduced by the runner itself. */
 enum class ApplicationFailure {
-  INVALID_OPTIONS, ///< Runner options are invalid, or a native run was requested with an injected clock.
-  ALREADY_RUN,     ///< This application has already entered its single permitted run.
-  NO_MEMORY,       ///< Allocation failed at a runner exception boundary.
-  CALLBACK_FAILED, ///< A non-allocation exception escaped into a runner callback boundary.
-  OBSERVER_FAILED  ///< The optional measurement observer threw an exception.
+  INVALID_OPTIONS,    ///< Runner options are invalid, or a native run was requested with an injected clock.
+  ALREADY_RUN,        ///< This application has already entered its single permitted run.
+  NO_MEMORY,          ///< Allocation failed at a runner exception boundary.
+  CALLBACK_FAILED,    ///< A non-allocation exception escaped into a runner callback boundary.
+  OBSERVER_FAILED,    ///< The optional measurement observer threw an exception.
+  NOT_STARTED,        ///< A step was requested before an accepted start.
+  REENTRANT_OPERATION ///< A lifecycle operation was requested from an active operation or callback.
 };
 
 /** @brief Original component error; no formatted text or borrowed exception is retained. */
@@ -46,8 +48,8 @@ struct ApplicationError {
 };
 
 /** @brief Optional synchronous measurement sink; disabled by default.
- * The borrowed observer must outlive run. It must not perform I/O, mutate/reenter the application,
- * or retain borrowed state. It may collect bounded samples. Exceptions fail run explicitly.
+ * The borrowed observer must outlive run or active session cleanup. It must not perform I/O, mutate/reenter the
+ * application, or retain borrowed state. It may collect bounded samples. Exceptions fail run explicitly.
  */
 struct ApplicationObserver {
   /** @brief Receive one completed phase duration; called outside tree frames.
@@ -86,7 +88,7 @@ struct ApplicationOptions {
   std::size_t maxPreparationPasses{3};         ///< Positive layout/view preparation budget for opt-in scenes per frame.
 };
 
-/** @brief Owning totals from a completed run, without samples or terminal data. */
+/** @brief Owning cumulative totals from a run or session, without samples or terminal data. */
 struct ApplicationStats {
   std::uint64_t iterations{}; ///< Bounded service cycles executed.
   std::uint64_t frames{};     ///< Accepted frame submissions, including semantically unchanged frames.
@@ -113,6 +115,43 @@ public:
    * throws.
    * @return Success or original restoration/cleanup error. No hard native close deadline is promised.
    */
+  virtual std::expected<void, TerminalError> close() noexcept = 0;
+};
+
+/** @brief One owning snapshot returned by a bounded session step. */
+struct ApplicationStep {
+  bool finished{};        ///< True after orderly stop and cleanup; subsequent steps preserve this result.
+  ApplicationStats stats; ///< Cumulative progress, independent of the borrowed transport and scene.
+};
+
+/** @brief Exclusive ready-only transport borrowed by an application session.
+ * Every operation must return without waiting for I/O, a timer or another callback.
+ * Operations perform bounded work; poll returns one owning batch respecting TerminalOptions limits.
+ * DEADLINE with no error means no input/progress is currently available. Errors remain explicit.
+ * submit transfers a complete encoded batch into bounded owned storage, without acknowledging output.
+ * flushReady reports exact newly accepted bytes and the retained suffix, using FrameOutput accounting.
+ * Acceptance into a bounded host queue may count as progress; physical display is not promised.
+ * close must also be nonblocking, idempotent and noexcept. The transport must outlive cleanup,
+ * including Application destruction when a session is still active. Calls run on the UI owner thread.
+ */
+class ApplicationReadyTerminal {
+public:
+  virtual ~ApplicationReadyTerminal() = default; ///< Destroy after session cleanup.
+  /** @param stop Cooperative cancellation signal; never wait for cancellation.
+   * @return One ready owning input batch, no input, EOF, stop, or an explicit error.
+   */
+  virtual TerminalRead poll(std::stop_token stop) = 0;
+  /** @return Current nonnegative viewport, or its original error, without waiting. */
+  virtual std::expected<CellSize, TerminalError> size() const = 0;
+  /** @param bytes Complete owning transaction; reject before output if it cannot be retained.
+   * @return Success after retaining bytes, or the original transport rejection.
+   */
+  virtual std::expected<void, TerminalError> submit(std::string bytes) = 0;
+  /** @param stop Cooperative cancellation signal.
+   * @return Exact progress from bounded ready output work and the remaining owned suffix.
+   */
+  virtual TerminalWrite flushReady(std::stop_token stop) = 0;
+  /** @return Success or original cleanup error; no waiting or exceptions. */
   virtual std::expected<void, TerminalError> close() noexcept = 0;
 };
 
@@ -234,7 +273,11 @@ public:
    */
   static std::expected<std::unique_ptr<Application>, ApplicationError> create(ApplicationOptions options = {},
                                                                               SchedulerClock clock = {});
-  ~Application(); ///< Release routing/tree before the scheduler; scene must already be destroyed.
+  /** @brief Finish an active session, then release routing/tree before the scheduler.
+   * Destroy on the UI owner thread. An active session's borrowed scene, observer and terminal
+   * must remain alive through this call; a completed session retains no borrowed scene callbacks.
+   */
+  ~Application();
   Application(const Application &) = delete;
   Application &operator=(const Application &) = delete;
   /** @return Borrowed UI scheduler; publishers may retain its closed channel state. */
@@ -251,6 +294,25 @@ public:
   WidthPolicy widthPolicy() const noexcept;
   /** @brief Worker-safe while this owner lives; wakes scheduler and cancels terminal waits. */
   void requestStop() noexcept;
+  /** @brief Start the single permitted ready-only session, without waiting or running a frame.
+   * @param scene Borrowed scene which must outlive session cleanup, including destructor cleanup.
+   * @param terminal Exclusive bounded transport borrowed through cleanup; no ownership transfer.
+   * @param stop Caller cancellation signal sampled at start and each step; retained safely until cleanup.
+   * @return Success, or the first start failure after cleanup once start was accepted.
+   * Wrong-thread, reentrant and repeated starts reject without changing the active session.
+   */
+  std::expected<void, ApplicationError> start(ApplicationScene &scene, ApplicationReadyTerminal &terminal,
+                                              std::stop_token stop = {});
+  /** @brief Service one bounded input/dispatch/render/output cycle without waiting.
+   * Uses existing input/scheduler/preparation budgets and at most one frame and one flush.
+   * User callbacks and ready transport operations must themselves return in bounded time.
+   * EOF preserves run's cutoff: it drains admitted input/output, without waiting for a frame deadline.
+   * @return Owning cumulative progress and completion, or the retained first failure after cleanup.
+   * NOT_STARTED, WRONG_THREAD and REENTRANT_OPERATION reject without stopping a session.
+   */
+  std::expected<ApplicationStep, ApplicationError> step();
+  /** @return Owning cumulative totals; call only on the UI owner thread outside concurrent operations. */
+  ApplicationStats stats() const noexcept;
   /** @brief Open standard input/output and restore them before returning.
    * Requires the default steady clock; an injected clock returns INVALID_OPTIONS before opening.
    * EOF finishes decoding, delivers admitted CONTROL and flushes submitted output. It does not
@@ -274,6 +336,7 @@ public:
 private:
   struct State;
   explicit Application(std::unique_ptr<State> state);
+  void finishSession() noexcept;
   std::unique_ptr<State> state_;
 };
 } // namespace portals

@@ -1,0 +1,19 @@
+{
+  "name": "portals-wasm-gallery",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test ../../../tests/wasm_gallery/*.test.mjs",
+    "test:browser": "playwright test --config ../../../tests/wasm_gallery/playwright.config.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "esbuild": "0.28.2"
+  }
+}

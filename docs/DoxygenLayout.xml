@@ -16,6 +16,7 @@
           <tab type="usergroup" title="Примеры" url="@ref docs/ru/examples.md">
             <tab type="user" title="Пример редактора" url="@ref docs/ru/editor-history-demo.md" />
             <tab type="user" title="Текст и колонки" url="@ref docs/ru/compact-examples.md" />
+        <tab type="user" title="WASM Gallery и Level" url="@ref docs/ru/wasm-gallery.md" />
             <tab type="user" title="Рамки, индикаторы и размеры" url="@ref docs/ru/compact-primitives.md" />
           </tab>
           <tab type="user" title="Подключение пакета" url="@ref docs/ru/package.md" />
@@ -96,6 +97,7 @@
       <tab type="usergroup" title="Runnable examples" url="@ref docs/examples.md">
         <tab type="user" title="Editor history example" url="@ref docs/editor-history-demo.md" />
         <tab type="user" title="Text and columns" url="@ref docs/compact-examples.md" />
+        <tab type="user" title="WASM Gallery and Level" url="@ref docs/wasm-gallery.md" />
         <tab type="user" title="Frames, gauges and sizing" url="@ref docs/compact-primitives.md" />
       </tab>
       <tab type="user" title="Managed controls" url="@ref docs/managed-controls.md" />

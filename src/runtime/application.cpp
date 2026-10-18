@@ -240,24 +240,43 @@ struct Application::State {
   std::unique_ptr<EventRouter> router;
   Node<Widget> root;
   std::stop_source stop;
-  bool ran{};
+  bool ran{}, operating{}, complete{};
+  ApplicationStats stats;
+  ApplicationPhase phase{ApplicationPhase::OPEN};
+  std::optional<ApplicationError> error;
+  ApplicationScene *scene{};
+  ApplicationTerminal *legacy{};
+  ApplicationReadyTerminal *ready{};
+  std::unique_ptr<Run> run;
 
-  State(ApplicationOptions policy, SchedulerClock time) : options(std::move(policy)), clock(time) {
-  }
+  struct Cancel {
+    Application *app;
 
-  void observe(ApplicationPhase phase, std::chrono::nanoseconds elapsed) {
+    void operator()() const noexcept {
+      app->requestStop();
+    }
+  };
+
+  std::unique_ptr<std::stop_callback<Cancel>> cancellation;
+  std::stop_token readyStop;
+
+  ~State();
+
+  State(ApplicationOptions policy, SchedulerClock time);
+
+  void observe(ApplicationPhase measuredPhase, std::chrono::nanoseconds elapsed) {
     if (!options.observer.callback) {
       return;
     }
 
     try {
-      options.observer.callback(options.observer.context, phase, elapsed);
+      options.observer.callback(options.observer.context, measuredPhase, elapsed);
     } catch (...) {
       throw Failure{ApplicationFailure::OBSERVER_FAILED};
     }
   }
 
-  template <class Callback> void measure(ApplicationPhase phase, Callback &&callback) {
+  template <class Callback> void measure(ApplicationPhase measuredPhase, Callback &&callback) {
     if (!options.observer.callback) {
       callback();
 
@@ -268,7 +287,7 @@ struct Application::State {
 
     callback();
 
-    observe(phase, std::chrono::steady_clock::now() - begin);
+    observe(measuredPhase, std::chrono::steady_clock::now() - begin);
   }
 };
 
@@ -277,7 +296,24 @@ struct Application::State::Run {
   Application &app;
   State &state;
   ApplicationScene &scene;
-  ApplicationTerminal &terminal;
+
+  // The writer sees only one stable output adapter. Legacy deadline I/O is used
+  // exclusively by the synchronous host, while step installs only ready operations.
+  struct Output final : FrameOutput {
+    State &state;
+
+    explicit Output(State &owner) : state(owner) {
+    }
+
+    std::expected<void, TerminalError> submit(std::string bytes) override {
+      return state.ready ? state.ready->submit(std::move(bytes)) : state.legacy->submit(std::move(bytes));
+    }
+
+    TerminalWrite flush(TerminalDeadline deadline, std::stop_token stop) override {
+      return state.ready ? state.ready->flushReady(stop) : state.legacy->flush(deadline, stop);
+    }
+  } output;
+
   ApplicationStats &stats;
   ApplicationPhase &phase;
   std::optional<ApplicationError> &error;
@@ -294,12 +330,11 @@ struct Application::State::Run {
   bool ending{}, finished{}, drain{};
   const std::uint32_t frameInterval;
 
-  Run(Application &application, State &owner, ApplicationScene &content, ApplicationTerminal &transport,
-      ApplicationStats &totals, ApplicationPhase &currentPhase, std::optional<ApplicationError> &failure)
-      : app(application), state(owner), scene(content), terminal(transport), stats(totals), phase(currentPhase),
-        error(failure), viewport(require(terminal.size())), decoder(require(InputDecoder::create(state.options.input))),
-        scope(require(app.scheduler().makeScope())),
-        writer(terminal, state.options.writer, state.options.scheduler.diagnostics),
+  Run(Application &application, State &owner)
+      : app(application), state(owner), scene(*owner.scene), output(owner), stats(owner.stats), phase(owner.phase),
+        error(owner.error), viewport(require(owner.ready ? owner.ready->size() : owner.legacy->size())),
+        decoder(require(InputDecoder::create(state.options.input))), scope(require(app.scheduler().makeScope())),
+        writer(output, state.options.writer, state.options.scheduler.diagnostics),
         frameInterval((1000u + state.options.framesPerSecond - 1) / state.options.framesPerSecond) {
     require(app.tree().invalidate(app.root(), Invalidation::LAYOUT));
     channel = require(app.scheduler().connect<Control>(
@@ -350,7 +385,10 @@ struct Application::State::Run {
         deadline = std::min(deadline, deadlineAt(*decodeDeadline));
       }
 
-      batch.emplace(terminal.read(deadline, state.stop.get_token()));
+      // Only the synchronous host reaches the legacy branch. The public step
+      // accepts no deadline transport and therefore cannot accidentally read(now).
+      batch.emplace(state.ready ? state.ready->poll(state.stop.get_token())
+                                : state.legacy->read(deadline, state.stop.get_token()));
       arrival = app.now();
       byteOffset = eventOffset = 0;
 
@@ -613,30 +651,26 @@ struct Application::State::Run {
     }
   }
 
-  void execute() {
-    while (!state.stop.stop_requested()) {
-      ++stats.iterations;
-      phase = ApplicationPhase::INPUT;
-      readInput();
-
-      if (state.stop.stop_requested()) {
-        break;
-      }
-
-      admitInput();
-
-      if (!dispatch()) {
-        break;
-      }
-
-      renderReady();
-      flushOutput();
-
-      if (finished && !pending && !batch && app.scheduler().metrics().control.pending == 0 &&
-          !scene.hasPendingLayout() && !writer.pending()) {
-        break;
-      }
+  bool process() {
+    if (state.stop.stop_requested()) {
+      return false;
     }
+
+    admitInput();
+
+    if (!dispatch()) {
+      return false;
+    }
+
+    renderReady();
+
+    return true;
+  }
+
+  bool finishedWork() const {
+    return state.stop.stop_requested() ||
+           (finished && !pending && !batch && app.scheduler().metrics().control.pending == 0 &&
+            !scene.hasPendingLayout() && !writer.pending());
   }
 };
 
@@ -674,7 +708,17 @@ void ApplicationScene::stop(Application &) {
 Application::Application(std::unique_ptr<State> state) : state_(std::move(state)) {
 }
 
-Application::~Application() = default;
+Application::State::State(ApplicationOptions policy, SchedulerClock time) : options(std::move(policy)), clock(time) {
+}
+
+Application::State::~State() = default;
+
+Application::~Application() {
+  if (state_->scene && !state_->complete) {
+    state_->operating = true;
+    finishSession();
+  }
+}
 
 Scheduler &Application::scheduler() noexcept {
   return *state_->scheduler;
@@ -773,6 +817,158 @@ std::expected<ApplicationStats, ApplicationError> Application::run(ApplicationSc
   }
 }
 
+std::expected<void, ApplicationError> Application::start(ApplicationScene &scene, ApplicationReadyTerminal &terminal,
+                                                         std::stop_token externalStop) {
+  if (state_->owner != std::this_thread::get_id()) {
+    return std::unexpected(ApplicationError{ApplicationPhase::OPEN, TreeError::WRONG_THREAD, {}});
+  }
+
+  if (state_->operating) {
+    return std::unexpected(ApplicationError{ApplicationPhase::OPEN, ApplicationFailure::REENTRANT_OPERATION, {}});
+  }
+
+  if (state_->ran) {
+    return std::unexpected(ApplicationError{ApplicationPhase::OPEN, ApplicationFailure::ALREADY_RUN, {}});
+  }
+
+  state_->ran = state_->operating = true;
+  state_->scene = &scene;
+  state_->ready = &terminal;
+
+  try {
+    // The ready host never waits: sampling its retained token avoids destroying
+    // a stop_callback that could join a concurrently executing external callback.
+    state_->readyStop = externalStop;
+
+    if (state_->readyStop.stop_requested()) {
+      requestStop();
+    }
+
+    if (!state_->stop.stop_requested()) {
+      state_->run = std::make_unique<State::Run>(*this, *state_);
+    } else {
+      finishSession();
+    }
+  } catch (...) {
+    captureFailure(state_->phase, state_->error);
+    finishSession();
+  }
+
+  state_->operating = false;
+
+  if (state_->error) {
+    return std::unexpected(*state_->error);
+  }
+
+  return {};
+}
+
+std::expected<ApplicationStep, ApplicationError> Application::step() {
+  if (state_->owner != std::this_thread::get_id()) {
+    return std::unexpected(ApplicationError{ApplicationPhase::OPEN, TreeError::WRONG_THREAD, {}});
+  }
+
+  if (state_->operating) {
+    return std::unexpected(ApplicationError{ApplicationPhase::OPEN, ApplicationFailure::REENTRANT_OPERATION, {}});
+  }
+
+  if (!state_->ran || (!state_->ready && !state_->complete)) {
+    return std::unexpected(ApplicationError{ApplicationPhase::OPEN, ApplicationFailure::NOT_STARTED, {}});
+  }
+
+  state_->operating = true;
+
+  if (state_->readyStop.stop_requested()) {
+    requestStop();
+  }
+
+  if (!state_->complete && state_->stop.stop_requested()) {
+    finishSession();
+  }
+
+  if (!state_->complete) {
+    try {
+      ++state_->stats.iterations;
+      state_->phase = ApplicationPhase::INPUT;
+      state_->run->readInput();
+
+      if (state_->run->process()) {
+        state_->run->flushOutput();
+      }
+
+      if (state_->run->finishedWork()) {
+        finishSession();
+      }
+    } catch (...) {
+      captureFailure(state_->phase, state_->error);
+      finishSession();
+    }
+  }
+
+  state_->operating = false;
+
+  if (state_->error) {
+    return std::unexpected(*state_->error);
+  }
+
+  return ApplicationStep{state_->complete, state_->stats};
+}
+
+ApplicationStats Application::stats() const noexcept {
+  return state_->stats;
+}
+
+void Application::finishSession() noexcept {
+  if (state_->complete) {
+    return;
+  }
+
+  // Disconnect callbacks that capture Run before stopping producers or the scene.
+  // All progress and errors remain in State after the engine storage is released.
+  state_->run.reset();
+  state_->complete = true;
+  state_->phase = ApplicationPhase::STOP;
+
+  try {
+    state_->measure(state_->phase, [&] {
+      requestStop();
+      require(scheduler().stop());
+      state_->scene->stop(*this);
+    });
+  } catch (...) {
+    captureFailure(state_->phase, state_->error);
+  }
+
+  state_->phase = ApplicationPhase::CLOSE;
+  std::optional<TerminalError> restoration;
+
+  try {
+    state_->measure(state_->phase, [&] {
+      auto closed = state_->ready ? state_->ready->close() : state_->legacy->close();
+
+      if (!closed) {
+        restoration = closed.error();
+      }
+    });
+  } catch (...) {
+    captureFailure(state_->phase, state_->error);
+  }
+
+  if (restoration) {
+    if (!state_->error) {
+      state_->error.emplace(ApplicationError{state_->phase, *restoration, {}});
+    }
+
+    state_->error->restoration = restoration;
+  }
+
+  state_->cancellation.reset();
+  state_->readyStop = {};
+  state_->scene = nullptr;
+  state_->legacy = nullptr;
+  state_->ready = nullptr;
+}
+
 std::expected<ApplicationStats, ApplicationError>
 Application::run(ApplicationScene &scene, ApplicationTerminal &terminal, std::stop_token externalStop) {
   if (state_->owner != std::this_thread::get_id()) {
@@ -783,66 +979,43 @@ Application::run(ApplicationScene &scene, ApplicationTerminal &terminal, std::st
     return std::unexpected(ApplicationError{ApplicationPhase::OPEN, ApplicationFailure::ALREADY_RUN, {}});
   }
 
-  state_->ran = true;
-
-  ApplicationStats stats;
-  ApplicationPhase phase = ApplicationPhase::OPEN;
-  std::optional<ApplicationError> error;
-  auto capture = [&] {
-    captureFailure(phase, error);
-  };
-  std::stop_callback cancellation(externalStop, [&] {
-    requestStop();
-  });
+  state_->ran = state_->operating = true;
+  state_->scene = &scene;
+  state_->legacy = &terminal;
 
   try {
+    state_->cancellation = std::make_unique<std::stop_callback<State::Cancel>>(externalStop, State::Cancel{this});
+
     if (!state_->stop.stop_requested()) {
-      State::Run run(*this, *state_, scene, terminal, stats, phase, error);
-      run.execute();
-    }
-  } catch (...) {
-    capture();
-  }
+      state_->run = std::make_unique<State::Run>(*this, *state_);
 
-  phase = ApplicationPhase::STOP;
+      while (!state_->stop.stop_requested()) {
+        ++state_->stats.iterations;
+        state_->phase = ApplicationPhase::INPUT;
+        // Deadline reads and flushes belong to this synchronous host, outside
+        // the shared bounded processing engine and the public ready-only step.
+        state_->run->readInput();
 
-  try {
-    state_->measure(phase, [&] {
-      requestStop();
-      require(scheduler().stop());
-      scene.stop(*this);
-    });
-  } catch (...) {
-    capture();
-  }
+        if (state_->run->process()) {
+          state_->run->flushOutput();
+        }
 
-  phase = ApplicationPhase::CLOSE;
-  std::optional<TerminalError> restoration;
-
-  try {
-    state_->measure(phase, [&] {
-      auto closed = terminal.close();
-
-      if (!closed) {
-        restoration = closed.error();
+        if (state_->run->finishedWork()) {
+          break;
+        }
       }
-    });
-  } catch (...) {
-    capture();
-  }
-
-  if (restoration) {
-    if (!error) {
-      error.emplace(ApplicationError{phase, *restoration, {}});
     }
-
-    error->restoration = restoration;
+  } catch (...) {
+    captureFailure(state_->phase, state_->error);
   }
 
-  if (error) {
-    return std::unexpected(*error);
+  finishSession();
+  state_->operating = false;
+
+  if (state_->error) {
+    return std::unexpected(*state_->error);
   }
 
-  return stats;
+  return state_->stats;
 }
 } // namespace portals

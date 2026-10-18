@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Portals WASM gallery</title>
+  <link rel="stylesheet" href="./main.css?v=aa53d7a58adb2ee6b76ca940fc7c7972fb2e48365c37ae8ed82e33f75541c88a">
+  <script src="https://telegram.org/js/telegram-web-app.js?64"></script>
+</head>
+<body>
+  <header><h1>Portals gallery</h1><p>WebAssembly · xterm.js</p><p id="environment">Loading…</p></header>
+  <nav aria-label="Applications"><button type="button" data-app="gallery" aria-pressed="true" disabled>Gallery</button><button type="button" data-app="level" aria-pressed="false" disabled>Level</button></nav>
+  <main><div id="terminal" aria-label="Portals terminal gallery"></div></main>
+  <p id="status" role="status" data-state="loading">Loading gallery…</p>
+  <script type="module" src="./main.js?v=51e48aad969c37631943a58ea64b89d956300a92d3dcd460a2975dc8454c114c"></script>
+</body>
+</html>
