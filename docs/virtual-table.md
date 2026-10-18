@@ -87,6 +87,71 @@ int main() {
 
 Each TableColumn owns a stable ColumnId, header, cell width and formatter. The recipe copies the column array, so it can be local to the factory. The scene handles preparation and input. Pending data requires prepared in ui::VirtualTableConfig<T>. TBD: the requested ui::vtable alias is unavailable; no delivery date is assigned.
 
+## Read the visible rows
+
+Keep a typed table reference and obtain its deferred visible source:
+
+```cpp
+ui::Ref<VirtualTable<std::string>> table;
+auto visible = table.visibleModel();
+```
+
+Pass `table` to the reference overload of `ui::virtualTable`. Creating `visible`
+does not read data; the table can be mounted later. In a UI event handler after
+the table has been prepared, obtain one stable snapshot:
+
+```cpp
+auto rows = visible.snapshot();
+
+if (!rows) {
+  summary.text() = "Visible rows are not available";
+  return;
+}
+
+std::size_t bytes = 0;
+
+for (const auto &name : *rows) {
+  bytes += name.size();
+}
+
+summary.text() = std::format("{} rows, {} UTF-8 bytes", rows->size(), bytes);
+```
+
+This fragment assumes `summary` is a mounted `ui::Ref<Label>` and the model row
+type is `std::string`. Include `<format>` for `std::format`.
+
+[`VisibleModelSnapshot<T>`](../include/portals/visible_model.hpp) is an owning,
+read-only forward range of `const T&`. Its rows remain unchanged when the table
+scrolls or is removed. `rows()` additionally exposes each value's `RowId`.
+Copying a snapshot shares its immutable storage; it does not copy every value.
+Retain the snapshot while using its iterators or references.
+
+The range contains body rows intersecting the final viewport and ancestor clip,
+including a partially visible row once. It excludes the header and overscan.
+An empty ready table yields a successful empty range. Provider waiting/failure
+and an unprepared view are distinct errors, not successful empty data.
+
+<details>
+<summary>Snapshot availability and lifetime</summary>
+
+Call `snapshot()` on the owning UI thread, outside tree frames and managed
+preparation callbacks. Before mount or after scene cleanup, access is closed;
+removal preserves the original stale identity. A scroll/configuration change
+can leave the view `NOT_PREPARED` until its next completed preparation/layout.
+`PENDING` and `FAILED` describe provider readiness; failure text is owned.
+`VisibleModelError` distinguishes these states from a `ManagedError` for access.
+Checked reads return errors directly without automatic reporting.
+
+A retained snapshot pins its provider storage, which can be larger than the
+visible range. Avoid accumulating snapshots without a retention policy. Already
+obtained snapshots stay readable after scene destruction; payload destruction
+follows the model's existing thread contract. This API does not copy history or
+add a streaming buffer.
+
+</details>
+
+Automatic computations and bindings over the visible source remain **TBD — M4**.
+
 Terms: [recipe](glossary.md#glossary-recipe), [frame](glossary.md#glossary-frame), [ownership](glossary.md#glossary-ownership).
 
 <details>

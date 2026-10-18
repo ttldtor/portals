@@ -5,6 +5,63 @@
 // Included by managed.hpp after the scene definition; no additional runtime lives here.
 namespace portals {
 template <class T>
+std::expected<VisibleModelSnapshot<T>, VisibleModelError>
+ManagedScene::visibleModelSnapshot(Node<VirtualTable<T>> node) const {
+  auto allowed = boundary(ManagedPhase::LAYOUT, node);
+
+  if (!allowed) {
+    return std::unexpected(allowed.error());
+  }
+
+  auto revision = app_.tree().geometryRevision();
+
+  if (!revision) {
+    return std::unexpected(error(ManagedPhase::PREPARE, node, revision.error()));
+  }
+
+  if (*revision != layoutRevision_) {
+    return std::unexpected(VisibleModelReadError{VisibleModelReadState::NOT_PREPARED, {}});
+  }
+
+  auto shown = detail::listShown(app_.tree(), node);
+
+  if (!shown) {
+    return std::unexpected(error(ManagedPhase::PREPARE, node, shown.error()));
+  }
+
+  if (!*shown) {
+    return VisibleModelSnapshot<T>{};
+  }
+
+  auto geometry = app_.tree().observeGeometry(node);
+
+  if (!geometry) {
+    return std::unexpected(error(ManagedPhase::PREPARE, node, geometry.error()));
+  }
+
+  std::expected<VisibleModelSnapshot<T>, VisibleModelError> result;
+  auto read = app_.tree().read(node, [&](const VirtualTable<T> &table) {
+    try {
+      auto snapshot = table.visibleSnapshot(geometry->geometry);
+
+      if (snapshot) {
+        result = std::move(*snapshot);
+      } else {
+        result = std::unexpected(std::move(snapshot.error()));
+      }
+    } catch (const std::bad_alloc &) {
+      result = std::unexpected(error(ManagedPhase::PREPARE, node, TreeError::NO_MEMORY));
+    }
+  });
+
+  if (!read) {
+    return std::unexpected(error(ManagedPhase::PREPARE, node, read.error()));
+  }
+
+  return result;
+}
+
+template <class T>
 std::expected<ManagedModel<T>, ManagedError> ManagedScene::model(std::shared_ptr<const ModelSnapshot<T>> initial,
                                                                  ModelOptions options) {
   auto allowed = boundary(ManagedPhase::STATE, root_);

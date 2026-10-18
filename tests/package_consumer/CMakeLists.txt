@@ -656,3 +656,12 @@ set_target_properties(portals_editor_display_form_consumer PROPERTIES CXX_EXTENS
 if(WIN32)
   target_sources(portals_editor_display_form_consumer PRIVATE no_dialogs.cpp)
 endif()
+
+add_executable(portals_visible_model_consumer visible_model.cpp)
+target_link_libraries(portals_visible_model_consumer PRIVATE portals::core)
+set_target_properties(portals_visible_model_consumer PROPERTIES CXX_EXTENSIONS OFF)
+if(WIN32)
+  target_sources(portals_visible_model_consumer PRIVATE no_dialogs.cpp)
+endif()
+add_test(NAME consumer.visible-model COMMAND portals_visible_model_consumer)
+set_tests_properties(consumer.visible-model PROPERTIES TIMEOUT 15)

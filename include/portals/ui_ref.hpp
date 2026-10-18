@@ -47,6 +47,13 @@ struct RefTarget {
 };
 
 struct RefAccess;
+template <class> struct TableRowType;
+
+/** @brief Domain row type associated with a typed virtual table reference. */
+template <class T> struct TableRowType<VirtualTable<T>> {
+  using Type = T; ///< Domain value retained by each model row.
+};
+
 /** @brief Checked bridge preserving immutable Ref affinity before reading its mutable published target.
  * @param target Owning observation with weak scene lifetime; may be empty.
  * @param redo Select Redo instead of Undo when stop is false.
@@ -120,6 +127,34 @@ private:
 };
 
 class TextProperty;
+
+/** @brief Copyable deferred observation of one original table, without scene/widget ownership.
+ * @tparam T Immutable domain row type. Acquisition/copying never reads, subscribes or performs layout.
+ * snapshot() is UI-affine and errors preserve original node identity. Saved snapshots are independent.
+ */
+template <class T> class VisibleModelSource {
+public:
+  /** @return Stable ready range or exact typed access/preparation/provider failure, without reporting. */
+  std::expected<VisibleModelSnapshot<T>, VisibleModelError> snapshot() const {
+    auto owner = detail::eventScene(target_);
+
+    if (!owner) {
+      return std::unexpected(owner.error());
+    }
+
+    return (*owner)->visibleModelSnapshot(*node_);
+  }
+
+private:
+  template <class> friend class Ref;
+
+  VisibleModelSource(std::shared_ptr<detail::RefTarget> target, std::shared_ptr<const Node<VirtualTable<T>>> node)
+      : target_(std::move(target)), node_(node) {
+  }
+
+  std::shared_ptr<detail::RefTarget> target_;
+  std::shared_ptr<const Node<VirtualTable<T>>> node_;
+};
 
 /** @brief Owning read-only concatenation, including the original typed failure when reading fails.
  * Successful results validate complete joined graphemes under the leftmost property/result policy
