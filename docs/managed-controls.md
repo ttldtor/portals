@@ -91,6 +91,8 @@ fluent text changes; see [editing modes](line-edit.md):
 - Enter validates and commits only if the source revision still matches.
 - Rejected validation or a revision conflict preserves the draft.
 - Escape adopts the latest committed value.
+- `Ref<LineEdit>::clear()` is a checked user edit applying the same mode and Undo history;
+  immutable placeholder and protected display options are described in [LineEdit](line-edit.md).
 - Invalid text and over-limit edits retain the previous draft; semantic rejection
   keeps the newly accepted intermediate text visible without publishing it.
 

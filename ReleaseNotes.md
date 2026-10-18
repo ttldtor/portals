@@ -5,6 +5,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Added] LineEdit supports an owning placeholder, immutable NORMAL/PASSWORD/NO_ECHO
+  display policies and a checked undoable user Clear command. Protected modes suppress
+  outbound copy/cut while allowing writable paste; plaintext models, getters and bounded
+  history remain available to the application, without a zeroization guarantee.
+
 - [Added] CheckBox supports explicit unchecked, checked and mixed states through
   typed Property/managed/declarative bindings. Boolean APIs retain their cycle;
   an explicit option enables a three-state input cycle. Mixed selection has a

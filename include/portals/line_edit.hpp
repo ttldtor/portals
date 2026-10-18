@@ -19,6 +19,13 @@ enum class EditMode {
   EXPLICIT       ///< Keep a draft until Enter or programmatic activation; focus loss preserves it.
 };
 
+/** @brief Immutable presentation and outbound clipboard policy; plaintext model/history remain application-owned. */
+enum class LineEditDisplayMode {
+  NORMAL,   ///< Render the draft using its actual grapheme widths; copying and cutting retain normal behavior.
+  PASSWORD, ///< Render one ASCII '*' per grapheme, revealing its count; suppress outbound copy/cut.
+  NO_ECHO   ///< Render no value or selection, with a fixed-origin caret and intrinsic width one; suppress copy/cut.
+};
+
 /** @brief History policy of an explicit programmatic text change. */
 enum class ProgrammaticChange {
   RECORD,        ///< Record one separate reversible operation; equal text preserves Redo.
@@ -120,11 +127,24 @@ struct LineEditOptions {
   bool readOnly{}; ///< User edits and history commands are blocked; explicit programmatic text changes remain allowed.
   ProgrammaticChange programmaticChange{ProgrammaticChange::RECORD}; ///< Default fluent mutation history policy.
   LineEditHistoryShortcuts historyShortcuts{}; ///< Exact owning Undo/Redo shortcuts, validated at bind.
+  LineEditDisplayMode displayMode{LineEditDisplayMode::NORMAL}; ///< Remount to change this presentation policy.
+  std::optional<std::string>
+    placeholder{}; ///< Owned single-line UTF-8 shown only for an empty draft, never model data.
 };
+
+namespace detail {
+/** @brief Already checked owning placeholder transferred by declarative construction before state publication. */
+struct LineEditPlaceholder {
+  std::unique_ptr<GraphemeText> text; ///< Validated under the receiving editor's width policy and limits.
+};
+} // namespace detail
 
 /** @brief UI-owned Unicode draft; mutate only through its scoped binding between frames.
  * Cursor/anchor are UTF-8 byte boundaries, while scrolling and painting use terminal cells.
  * Paint borrows owning text through the enclosing tree.frame and performs no service/model calls.
+ * PASSWORD caches one ASCII '*' per grapheme; NO_ECHO has fixed width one and a fixed-origin caret.
+ * Protected modes suppress outbound copy/cut but permit inbound paste when writable.
+ * Models, getters, commit receipts and bounded history can contain plaintext; no storage zeroization is promised.
  */
 class LineEdit : public SizedWidget {
 public:
@@ -132,10 +152,19 @@ public:
    * @param options Owning immutable limits, width policy and styles.
    * @param policy Owning layout size policy validated by layout.
    * @throws std::bad_alloc If initial text storage cannot be allocated.
-   * @throws std::bad_expected_access<TextError> If the width policy is invalid.
+   * @throws std::bad_expected_access<TextError> If the width policy or placeholder text violates its bounds.
+   * @throws std::invalid_argument If the display mode is unknown or the placeholder contains a line separator.
+   * Declarative recipes prepare placeholder validation/storage in their checked mount boundary instead.
    */
   explicit LineEdit(LineEditOptions options = {}, SizePolicy policy = {});
-  /** @brief Measure the full draft plus one caret cell.
+  /** @brief Internal prepared-presentation construction used by checked recipes.
+   * @param options Immutable editor settings, with display mode already checked.
+   * @param policy Owning layout size policy.
+   * @param placeholder Owning prevalidated placeholder; no placeholder parsing/allocation occurs here.
+   * @throws std::bad_alloc If initial draft storage cannot be allocated.
+   */
+  LineEdit(LineEditOptions options, SizePolicy policy, detail::LineEditPlaceholder placeholder);
+  /** @brief Measure displayed content plus one caret cell; NO_ECHO always measures one cell.
    * @param available Offered extent; does not constrain intrinsic measurement.
    * @return Intrinsic cell width and height one, or INVALID_GEOMETRY on overflow.
    */
@@ -177,6 +206,8 @@ private:
   std::int32_t cellAt(std::size_t byte) const;
   LineEditOptions options_;
   GraphemeText text_;
+  std::unique_ptr<GraphemeText> placeholder_;
+  std::unique_ptr<GraphemeText> masked_;
   CellRect bounds_;
   std::size_t cursor_{};
   std::size_t anchor_{};
@@ -225,6 +256,13 @@ public:
 
   std::expected<void, TreeError> redo();
 
+  /** @brief Clear a writable eligible editor as one separate user edit, applying its EditMode.
+   * @return Success for an empty draft or semantic rejection; technical failures retain their exact TreeError.
+   * Pre-accept failures preserve draft/history; post-accept publication failure keeps a dirty undoable draft.
+   * Read-only and disabled editors return WOULD_BLOCK, including when already empty.
+   */
+  std::expected<void, TreeError> clear();
+
   /** @return Success after closing grouping without redraw/notification, or typed liveness/reentry failure. */
 
   std::expected<void, TreeError> stopGrouping();
@@ -251,6 +289,8 @@ private:
   void commandFeedback(std::shared_ptr<detail::EditorCommandFeedback> feedback);
   std::pair<std::expected<void, TreeError>, bool>
   historyCommand(bool redo, std::source_location origin = std::source_location::current());
+  std::pair<std::expected<void, TreeError>, bool> clearCommand(std::source_location origin);
+  std::pair<std::expected<void, TreeError>, bool> editorCommand(bool redo, bool clear, std::source_location origin);
   struct State;
   friend std::expected<LineEditBinding, TreeError>
   bindLineEdit(WidgetTree &, EventRouter &, Node<LineEdit>, std::shared_ptr<Property<std::string>>,
@@ -279,6 +319,8 @@ private:
  * History owns bounded text/selection snapshots; accepted edits and restorations precede validator callbacks.
  * Default Ctrl+Z/Ctrl+Y/Ctrl+Shift+Z chords are configurable; reserved router keys and Undo/Redo overlap reject bind.
  * Read-only accepts explicit programmatic text changes but blocks user typing/deletion/cut/paste and Undo/Redo.
+ * User clear is also blocked by read-only/disabled eligibility; programmatic text mutation remains unchanged.
+ * PASSWORD/NO_ECHO consume Ctrl+C/X without service access or outcomes. Ctrl+V and paste remain writable inputs.
  * Escape adopts latest. Shift+arrows/Home/End select; Ctrl+A selects all. Cut changes draft only after
  * a successful service write, then applies the same publication policy as input and fluent edits.
  * Paste rejects invalid UTF-8, CR/LF/U+2028/U+2029 and whole over-limit edits.

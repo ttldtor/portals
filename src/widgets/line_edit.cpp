@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <limits>
+#include <stdexcept>
 
 namespace portals {
 namespace {
@@ -157,14 +158,29 @@ EncodedScalar encode(char32_t scalar) noexcept {
 
 LineEdit::LineEdit(LineEditOptions options, SizePolicy policy)
     : SizedWidget(policy), options_(options), text_(GraphemeText::from("", options.widthPolicy).value()) {
+  if (!detail::validLineEditDisplayMode(options.displayMode) ||
+      (options.placeholder && detail::hasLineSeparator(*options.placeholder))) {
+    throw std::invalid_argument("Invalid LineEdit presentation options");
+  }
+
+  placeholder_ = std::move(detail::prepareLineEditPlaceholder(options_).value().text);
+}
+
+LineEdit::LineEdit(LineEditOptions options, SizePolicy policy, detail::LineEditPlaceholder placeholder)
+    : SizedWidget(policy), options_(std::move(options)), text_(GraphemeText::from("", options_.widthPolicy).value()),
+      placeholder_(std::move(placeholder.text)) {
 }
 
 std::expected<CellSize, TreeError> LineEdit::measure(CellSize) {
-  if (text_.measure() == std::numeric_limits<std::int32_t>::max()) {
+  const auto width = options_.displayMode == LineEditDisplayMode::NO_ECHO ? 0
+                     : text_.bytes().empty() && placeholder_              ? placeholder_->measure()
+                     : masked_                                            ? masked_->measure()
+                                                                          : text_.measure();
+  if (width == std::numeric_limits<std::int32_t>::max()) {
     return std::unexpected(TreeError::INVALID_GEOMETRY);
   }
 
-  return CellSize{text_.measure() + 1, 1};
+  return CellSize{width + 1, 1};
 }
 
 std::expected<void, TreeError> LineEdit::arrange(CellRect local) {
@@ -181,6 +197,9 @@ std::expected<void, TreeError> LineEdit::arrange(CellRect local) {
 }
 
 std::int32_t LineEdit::cellAt(std::size_t byte) const {
+  if (options_.displayMode == LineEditDisplayMode::NO_ECHO) {
+    return 0;
+  }
   std::int32_t cells{};
 
   for (const auto &cluster : text_.graphemes()) {
@@ -188,17 +207,22 @@ std::int32_t LineEdit::cellAt(std::size_t byte) const {
       break;
     }
 
-    cells += cluster.cells;
+    cells += options_.displayMode == LineEditDisplayMode::PASSWORD ? 1 : cluster.cells;
   }
 
   return cells;
 }
 
 void LineEdit::revealCursor() {
+  if (options_.displayMode == LineEditDisplayMode::NO_ECHO) {
+    scroll_ = 0;
+    return;
+  }
   const auto width = bounds_.size().width;
   const auto caret = cellAt(cursor_);
 
-  if (static_cast<std::int64_t>(text_.measure()) + 1 <= width) {
+  const auto displayWidth = masked_ ? masked_->measure() : text_.measure();
+  if (static_cast<std::int64_t>(displayWidth) + 1 <= width) {
     scroll_ = 0;
 
     return;
@@ -206,7 +230,8 @@ void LineEdit::revealCursor() {
   auto caretWidth = 1;
   const auto atCursor = std::ranges::find(text_.graphemes(), cursor_, &Grapheme::byte_begin);
 
-  if (atCursor != text_.graphemes().end() && atCursor->cells <= width) {
+  if (options_.displayMode == LineEditDisplayMode::NORMAL && atCursor != text_.graphemes().end() &&
+      atCursor->cells <= width) {
     caretWidth = atCursor->cells;
   }
 
@@ -223,7 +248,7 @@ void LineEdit::revealCursor() {
       break;
     }
 
-    origin += cluster.cells;
+    origin += options_.displayMode == LineEditDisplayMode::PASSWORD ? 1 : cluster.cells;
 
     if (origin > scroll_) {
       scroll_ = origin;
@@ -237,10 +262,19 @@ std::expected<void, TreeError> LineEdit::paint(PaintContext &context) {
   const auto selectionBegin = cellAt(std::min(cursor_, anchor_)) - scroll_;
   const auto selectionEnd = cellAt(std::max(cursor_, anchor_)) - scroll_;
   const auto selection = CellRect::from({selectionBegin, 0}, {selectionEnd - selectionBegin, 1}).value();
-  const std::array<RenderCommand, 3> base{
-    FillCommand{bounds_, bounds_, style}, TextCommand{{-scroll_, 0}, text_, bounds_, style},
-    TextCommand{{-scroll_, 0}, text_, selection.intersection(bounds_), enabled_ ? resolved.selected : style}};
-  auto submitted = context.submit(base);
+  const auto *shown = text_.bytes().empty()                                  ? placeholder_.get()
+                      : options_.displayMode == LineEditDisplayMode::NO_ECHO ? nullptr
+                      : masked_                                              ? masked_.get()
+                                                                             : &text_;
+  const std::array<RenderCommand, 1> background{FillCommand{bounds_, bounds_, style}};
+  auto submitted = context.submit(background);
+
+  if (submitted && shown) {
+    const std::array<RenderCommand, 2> value{
+      TextCommand{{-scroll_, 0}, *shown, bounds_, style},
+      TextCommand{{-scroll_, 0}, *shown, selection.intersection(bounds_), enabled_ ? resolved.selected : style}};
+    submitted = context.submit(value);
+  }
 
   if (!submitted || !focused_ || !enabled_ || bounds_.empty()) {
     return submitted;
@@ -248,13 +282,19 @@ std::expected<void, TreeError> LineEdit::paint(PaintContext &context) {
 
   const auto caret = cellAt(cursor_) - scroll_;
   const auto cluster = std::ranges::find(text_.graphemes(), cursor_, &Grapheme::byte_begin);
-  const auto width = cluster != text_.graphemes().end() && cluster->cells <= bounds_.size().width ? cluster->cells : 1;
+  const auto width = options_.displayMode == LineEditDisplayMode::NORMAL && cluster != text_.graphemes().end() &&
+                         cluster->cells <= bounds_.size().width
+                       ? cluster->cells
+                       : 1;
   const auto area = CellRect::from({caret, 0}, {width, 1}).value();
-  const std::array<RenderCommand, 2> cursor{
-    FillCommand{area, bounds_, resolved.caret},
-    TextCommand{{-scroll_, 0}, text_, area.intersection(bounds_), resolved.caret}};
-
-  return context.submit(cursor);
+  const std::array<RenderCommand, 1> cursor{FillCommand{area, bounds_, resolved.caret}};
+  submitted = context.submit(cursor);
+  if (submitted && shown) {
+    const std::array<RenderCommand, 1> glyph{
+      TextCommand{{-scroll_, 0}, *shown, area.intersection(bounds_), resolved.caret}};
+    submitted = context.submit(glyph);
+  }
+  return submitted;
 }
 
 ComputedStyle LineEdit::styleDefaults() const {
@@ -315,8 +355,9 @@ struct LineEditBinding::State {
   }
 
   static bool validMode(const LineEdit &edit) {
-    return edit.options_.editMode == EditMode::IMMEDIATE || edit.options_.editMode == EditMode::ON_COMPLETION ||
-           edit.options_.editMode == EditMode::EXPLICIT;
+    return detail::validLineEditDisplayMode(edit.options_.displayMode) &&
+           (edit.options_.editMode == EditMode::IMMEDIATE || edit.options_.editMode == EditMode::ON_COMPLETION ||
+            edit.options_.editMode == EditMode::EXPLICIT);
   }
 
   std::expected<void, TreeError> alive() {
@@ -329,6 +370,20 @@ struct LineEditBinding::State {
   }
 
   std::expected<void, TreeError> accept(LineEdit &edit, PreparedTextHistory &prepared, bool changed) {
+    // Build the complete mask before invalidation or local/history publication. Pointer transfer below cannot allocate.
+    std::unique_ptr<GraphemeText> mask;
+    if (edit.options_.displayMode == LineEditDisplayMode::PASSWORD) {
+      const auto *target = prepared.text();
+      if (!target) {
+        return std::unexpected(TreeError::WOULD_BLOCK);
+      }
+      auto masked = GraphemeText::from(std::string(target->graphemes().size(), '*'), edit.options_.widthPolicy,
+                                       edit.options_.limits);
+      if (!masked) {
+        return std::unexpected(TreeError::INVALID_ARGUMENT);
+      }
+      mask = std::make_unique<GraphemeText>(std::move(*masked));
+    }
     auto checked = history->checkPrepared(prepared);
 
     if (!checked) {
@@ -351,6 +406,7 @@ struct LineEditBinding::State {
     const auto anchor = prepared.anchor();
 
     prepared.takeText(edit.text_);
+    edit.masked_.swap(mask);
 
     auto committed = history->commit(std::move(prepared));
 
@@ -752,6 +808,37 @@ struct LineEditBinding::State {
     std::optional<LineEditResult> outcome;
   };
 
+  HistoryOperation clear(LineEdit &edit) {
+    auto eligible = tree.inputEligible(node);
+    if (!eligible) {
+      return {std::unexpected(eligible.error()), {}};
+    }
+    if (!*eligible || edit.options_.readOnly) {
+      return {std::unexpected(TreeError::WOULD_BLOCK), {}};
+    }
+    if (edit.text_.bytes().empty()) {
+      return {{}, {}};
+    }
+
+    // PROGRAMMATIC stages a separate group; never close the live typing group before fallible preparation.
+    auto prepared = history->prepareEdit(snapshot(edit), {std::string(0, '\0'), 0, 0}, TextHistoryKind::PROGRAMMATIC);
+    if (!prepared) {
+      const auto error = historyError(prepared.error());
+      return {std::unexpected(error), failed(error)};
+    }
+    auto applied = accept(edit, *prepared, true);
+    if (!applied) {
+      return {applied, failed(applied.error())};
+    }
+
+    edit.dirty_ = true;
+    auto outcome =
+      edit.options_.editMode == EditMode::IMMEDIATE ? commit(edit, false) : LineEditResult{LineEditStatus::EDITED};
+    return {outcome.error ? std::expected<void, TreeError>(std::unexpected(*outcome.error))
+                          : std::expected<void, TreeError>{},
+            std::move(outcome)};
+  }
+
   HistoryOperation restore(LineEdit &edit, bool redo) {
     auto eligible = tree.inputEligible(node);
 
@@ -863,6 +950,11 @@ struct LineEditBinding::State {
     }
 
     BusyGuard guard(busy);
+
+    const auto shortcut = shortcutCharacter(std::get_if<KeyEvent>(&event));
+    if (edit.options_.displayMode != LineEditDisplayMode::NORMAL && (shortcut == U'c' || shortcut == U'x')) {
+      return EventReply::HANDLED;
+    }
 
     if (readOnlyBlocks(edit, event)) {
       return EventReply::HANDLED;
@@ -1078,6 +1170,15 @@ void LineEditBinding::commandFeedback(std::shared_ptr<detail::EditorCommandFeedb
 
 std::pair<std::expected<void, TreeError>, bool> LineEditBinding::historyCommand(bool redo,
                                                                                 std::source_location origin) {
+  return editorCommand(redo, false, origin);
+}
+
+std::pair<std::expected<void, TreeError>, bool> LineEditBinding::clearCommand(std::source_location origin) {
+  return editorCommand(false, true, origin);
+}
+
+std::pair<std::expected<void, TreeError>, bool> LineEditBinding::editorCommand(bool redo, bool clear,
+                                                                               std::source_location origin) {
   auto state = state_;
 
   if (!state) {
@@ -1100,7 +1201,7 @@ std::pair<std::expected<void, TreeError>, bool> LineEditBinding::historyCommand(
   if (feedback) {
     feedback->active = true;
     feedback->reported = false;
-    feedback->operation = redo ? "lineEdit.redo" : "lineEdit.undo";
+    feedback->operation = clear ? "lineEdit.clear" : redo ? "lineEdit.redo" : "lineEdit.undo";
     feedback->origin = origin;
   }
 
@@ -1117,7 +1218,7 @@ std::pair<std::expected<void, TreeError>, bool> LineEditBinding::historyCommand(
   State::HistoryOperation operation;
   auto edited = state->tree.edit(state->node, [&](LineEdit &edit) {
     try {
-      operation = state->restore(edit, redo);
+      operation = clear ? state->clear(edit) : state->restore(edit, redo);
     } catch (const std::bad_alloc &) {
       operation = {std::unexpected(TreeError::NO_MEMORY), failed(TreeError::NO_MEMORY)};
     } catch (...) {
@@ -1149,6 +1250,10 @@ std::expected<void, TreeError> LineEditBinding::undo() {
 
 std::expected<void, TreeError> LineEditBinding::redo() {
   return historyCommand(true).first;
+}
+
+std::expected<void, TreeError> LineEditBinding::clear() {
+  return clearCommand(std::source_location::current()).first;
 }
 
 std::expected<void, TreeError> LineEditBinding::stopGrouping() {

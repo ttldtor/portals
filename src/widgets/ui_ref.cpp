@@ -229,7 +229,7 @@ struct RefAccess {
   }
 
   static EditorCommandResult command(std::shared_ptr<RefTarget> target, bool redo, bool stop,
-                                     std::source_location origin) {
+                                     std::source_location origin, bool clear) {
     auto owner = scene(target);
     std::weak_ptr<const void> collector;
     std::expected<void, TreeError> result;
@@ -249,7 +249,7 @@ struct RefAccess {
       } else if (stop) {
         result = binding->stopGrouping();
       } else {
-        auto receipt = binding->historyCommand(redo, origin);
+        auto receipt = clear ? binding->clearCommand(origin) : binding->historyCommand(redo, origin);
 
         result = receipt.first;
         reported = receipt.second;
@@ -264,7 +264,8 @@ struct RefAccess {
       const auto commandFailure = failure(target->node, result.error());
 
       try {
-        const ManagedDiagnosticContext context{std::string(stop   ? "lineEdit.stopGrouping"
+        const ManagedDiagnosticContext context{std::string(clear  ? "lineEdit.clear"
+                                                           : stop ? "lineEdit.stopGrouping"
                                                            : redo ? "lineEdit.redo"
                                                                   : "lineEdit.undo"),
                                                std::string(0, '\0'), std::string(0, '\0'), std::string("LineEdit"),
@@ -388,9 +389,9 @@ void reportFocusError(const std::shared_ptr<RefTarget> &target, const ManagedErr
   }
 }
 
-EditorCommandResult editorCommand(std::shared_ptr<RefTarget> target, bool redo, bool stop,
-                                  std::source_location origin) {
-  return RefAccess::command(std::move(target), redo, stop, origin);
+EditorCommandResult editorCommand(std::shared_ptr<RefTarget> target, bool redo, bool stop, std::source_location origin,
+                                  bool clear) {
+  return RefAccess::command(std::move(target), redo, stop, origin, clear);
 }
 
 std::expected<HistoryAvailability, TreeError> editorAvailability(std::shared_ptr<RefTarget> target) {

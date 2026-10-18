@@ -146,6 +146,10 @@ std::size_t PreparedTextHistory::anchor() const noexcept {
   return state_ ? state_->anchor : 0;
 }
 
+const GraphemeText *PreparedTextHistory::text() const noexcept {
+  return state_ && !state_->textTaken ? &state_->text : nullptr;
+}
+
 void PreparedTextHistory::takeText(GraphemeText &destination) noexcept {
   if (state_ && !state_->textTaken) {
     destination = std::move(state_->text);
