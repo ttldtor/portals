@@ -1,0 +1,21 @@
+{
+  "default": "en",
+  "languages": [
+    {
+      "code": "en",
+      "name": "English",
+      "directory": "",
+      "source": "docs",
+      "main": "docs/index.md",
+      "output_language": "English"
+    },
+    {
+      "code": "ru",
+      "name": "Русский",
+      "directory": "ru",
+      "source": "docs/ru",
+      "main": "docs/ru/index.md",
+      "output_language": "Russian"
+    }
+  ]
+}

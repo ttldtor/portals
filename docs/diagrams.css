@@ -38,3 +38,15 @@ html.dark-mode .contents :is(img[src$="ownership.svg"], object[data$="ownership.
   max-width: 100%;
   height: auto;
 }
+/* Page-level language navigation remains usable without JavaScript. */
+.portals-languages {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.45rem 1rem;
+  font-size: 0.9rem;
+}
+.portals-languages [aria-current="page"] { font-weight: bold; }
+.portals-languages a:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }

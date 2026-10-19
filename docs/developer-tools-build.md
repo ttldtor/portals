@@ -147,7 +147,7 @@ existing selector/gate fixtures; `portals.check-plan` registers this driver.
 | Build the complete HTML documentation | `cmake --build <build> --target portals_docs` | Generates and finalizes the HTML tree |
 | Check generated links | `python tools/docs/check_links.py <html>` | Reads HTML and referenced local paths |
 | Test the CI selector | `python -m unittest discover -s tools/ci -p test_checks.py -v` | Creates temporary Git repositories |
-| Test HTML processing | `python -m unittest discover -s tools/docs -p test_finalize_html.py -v` | Creates temporary fixture files |
+| Test HTML processing | `python -m unittest discover -s tools/docs -p "test_*.py" -v` | Creates temporary fixture files |
 
 The [development guide](development.md) describes contributor workflows;
 [testing](testing.md) covers the C++ suite and documentation build setup.
@@ -354,13 +354,14 @@ and Mermaid CLI (`mmdc` or `mmdc.cmd` on `PATH`); CMake locates Python 3.10+.
 generated copy, its complete CLI is:
 
 ```powershell
-python tools/docs/finalize_html.py build/documentation/docs/html build/documentation/docs/portals.tag
+python tools/docs/finalize_html.py build/documentation/docs/html build/documentation/docs/portals.tag --language-sites ru=build/documentation/docs/portals-ru.tag
 ```
 
 | Argument | Required/default | Meaning |
 |---|---|---|
 | `html` | Required positional path | Existing Doxygen HTML directory to modify |
 | `tag_file` | Required positional path | Doxygen XML tag file from the same documentation build |
+| `--language-sites CODE=TAG ...` | Optional; omitted for a single-site diagnostic | Finalize all configured language sites, using the default tag plus one tag per additional language |
 | `-h`, `--help` | Optional | Print usage and exit |
 
 Paths resolve from the current directory. There are no dedicated environment
@@ -376,7 +377,7 @@ It processes the main page and guide pages listed in the tag file, then:
   sources into `html/source/<repository-path>` for offline use; source copies
   must resolve inside the checkout;
 - initializes local search for recognized Doxygen layouts missing the configuration element; layouts that provide it keep their own initialization;
-- sets root `lang` and `xml:lang` to `en` or `ru` from the current guide filename conventions; generated API pages retain Doxygen's language;
+- sets root `lang` and `xml:lang` from the configured site language; the single-site diagnostic retains filename-based detection;
 - colors recognized plain CMake fragments using Doxygen CSS classes;
 - adds guide headings through level three to the navigation tree and rebuilds
   navigation-index chunks of up to 250 entries while retaining API entries.
@@ -395,6 +396,36 @@ and `unambiguous_types`. Success exits `0`, CLI errors `2`; malformed XML,
 missing navigation data or read/write failures terminate unsuccessfully with
 a Python diagnostic. There is no rollback for a partially processed tree;
 regenerate the documentation after a failure.
+
+### Language build preparation
+
+[Source: prepare_languages.py](../tools/docs/prepare_languages.py) runs during
+CMake configuration:
+
+```powershell
+python tools/docs/prepare_languages.py docs/languages.json docs/DoxygenLayout.xml --output build/documentation/languages
+```
+
+The positional `docs/languages.json` selects language metadata;
+`docs/DoxygenLayout.xml` supplies navigation per language; `--output`
+names the generated configuration directory. All three paths are required and
+resolve from the current directory. `--help` needs no inputs and does no work.
+The helper writes `languages.cmake` and `layout-<code>.xml`, replacing existing
+outputs. It does not invoke Doxygen or access the network. Success exits `0`,
+invalid data or I/O exits `1`, invalid CLI syntax exits `2`.
+
+Doxygen also invokes its internal filter mode with `manifest`,
+`--filter-language CODE`, `--source-root ROOT` and `--filter-input FILE`. The
+filter writes the source to stdout, converting links to another language into
+HTML links for later resolution. It preserves source Markdown and code blocks.
+This mode does not write configuration files. No dedicated environment variables
+are used in either mode.
+
+The internal [language_site.py](../tools/docs/language_site.py) is called by the
+HTML finalizer after every configured language has been built. It reads the
+manifest, tag files and HTML, rewrites language links, adds the page selector and
+creates redirects for old translated URLs. Invalid inputs or I/O fail the build;
+regenerate the site after failure. It has no separate CLI.
 
 ### Processor regression tests
 

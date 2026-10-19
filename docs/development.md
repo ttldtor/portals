@@ -112,6 +112,12 @@ in EN/RU, and register pages in `docs/DoxygenLayout.xml`. Its large groups can
 follow each language's reading path. Preserve the tutorial's shared source files
 under `docs/examples/`; check code once and links in each language.
 
+The header language links open the same topic in another language. A section
+is retained when both pages define corresponding explicit IDs; otherwise the
+link opens the page at its beginning. Missing translations are labelled in the
+selector. Old Russian page URLs redirect into `ru/`; their fragments are retained.
+Markdown language links continue to work when browsing the repository on GitHub.
+
 Record the source revision in an HTML comment near the translated page's title.
 The [Russian first-application tutorial](ru/first-application.md) is the pilot:
 
@@ -146,14 +152,16 @@ The marker records a review; it does not detect drift automatically.
 Keep Markdown current for its selected branch. Stable HTML follows the latest
 release, and PR HTML is a preview. Release notes and measurements retain their
 version/date scope. Before adding another language, choose its locale directory
-and unique page IDs, add reciprocal links and navigation, and extend the language
-mapping and fixtures in `tools/docs/finalize_html.py`. It currently recognizes
-EN/RU guide filenames; generated API pages remain English.
+and unique page IDs, add reciprocal links and navigation, and register it in `docs/languages.json` and `docs/DoxygenLayout.xml`.
+The build generates a separate site and search index for each language.
+Keep English as the default at the root. Test language links and legacy URLs
+with the fixtures under `tools/docs/`.
 
 Build `portals_docs`, check links, and inspect both themes. Confirm the root HTML
 `lang` and `xml:lang`, language round trips, glossary definitions, API type links
-and search routes to the tutorial and relevant contracts. Search covers both
-languages in one index; select a result by its title and destination. These checks
+and search routes to the tutorial and relevant contracts. Each language has its own navigation and search index. English HTML is at the
+site root; Russian HTML is under `ru/`. C++ API reference remains in English,
+with an explicit link from the Russian site. These checks
 also apply to the local offline HTML directory. Translation state is maintained
 in the translated Markdown; no separate catalog or generated translation is required.
 
