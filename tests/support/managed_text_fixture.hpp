@@ -9,13 +9,22 @@
 #include <source_location>
 #include <stdexcept>
 #include <thread>
+#include <utility>
 
 namespace allocationTest {
 thread_local std::ptrdiff_t remaining = -1;
 thread_local std::size_t count{};
+thread_local std::size_t attempts{};
+thread_local void (*hook)(){};
+thread_local std::ptrdiff_t hookAfter{};
 } // namespace allocationTest
 
 void *operator new(std::size_t size) {
+  ++allocationTest::attempts;
+  if (allocationTest::hook && allocationTest::hookAfter-- == 0) {
+    auto hook = std::exchange(allocationTest::hook, nullptr);
+    hook();
+  }
   if (allocationTest::remaining == 0) {
     throw std::bad_alloc();
   }

@@ -32,7 +32,7 @@ public:
   }
 
   /** @return Independent exact expected value for explicit checked helpers or monadic use.
-   * Extracting it does not introduce a new accepted managed callback return type.
+   * The extracted expected value is accepted as a rich managed callback result.
    */
   std::expected<void, ManagedError> result() const {
     return result_;

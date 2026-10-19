@@ -440,6 +440,11 @@ std::expected<Node<Widget>, TreeError> EventRouter::enterFocusScope(Node<Widget>
     auto saved =
       std::make_unique<detail::FocusReturnRegistration>(root, previous, state_->focusScopes, entry->cancellation);
     state_->focusReturns.reserve(depth + 1);
+    if (state_->requiredFocusReceipt == root &&
+        state_->focusReturnSerial == std::numeric_limits<std::uint64_t>::max()) {
+      return std::unexpected(TreeError::IDENTITY_EXHAUSTED);
+    }
+    saved->publish(state_->focusReturnSerial);
     state_->focusReturns.push_back(std::move(saved));
 
     auto changed = changeFocus(scopeEntry(root, *order, false));
@@ -699,6 +704,7 @@ void EventRouter::publishFocus(detail::FocusChange &change) noexcept {
     });
   }
   if (change.entry) {
+    change.entry->publish(state_->focusReturnSerial);
     state_->focusReturns.push_back(std::move(change.entry));
   }
   if (node.id().session != 0) {

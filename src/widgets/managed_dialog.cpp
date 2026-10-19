@@ -658,6 +658,7 @@ std::expected<void, TreeError> ManagedScene::changeDialog(Node<Widget> node, boo
             router.state_->focusReturns.erase(router.state_->focusReturns.begin() +
                                               static_cast<std::ptrdiff_t>(returnIndex));
           }
+          saved->publish(router.state_->focusReturnSerial);
           router.state_->focusReturns.push_back(std::move(saved));
         } else if (!opening && returnIndex != router.state_->focusReturns.size()) {
           router.state_->focusReturns.erase(router.state_->focusReturns.begin() +

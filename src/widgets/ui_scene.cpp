@@ -608,6 +608,7 @@ struct Scene::State {
   bool sessionStarted{}, sessionActive{};
   std::optional<std::expected<ApplicationStep, ManagedError>> sessionResult;
   bool shortFailure{}, shortDeliveryPending{};
+  bool primaryRecorded{};
   const void *primaryShortAttempt{};
 
   struct NamedRequest {
@@ -731,6 +732,7 @@ struct Scene::State {
     // Latch an exact managed primary before user observer reentry can introduce a boundary error.
     if (!failure && guard.previous == Operation::RUN && detail::SceneAccess::notifyingRunFailure(*managed)) {
       fail(diagnostic.error, "scene.run", diagnostic.origin, false);
+      primaryRecorded = detail::SceneAccess::primaryRecorded(*managed);
       notified = true;
     }
 
@@ -752,7 +754,7 @@ struct Scene::State {
 
   void notifyFallback() noexcept {
     detail::CurrentSceneScope mask;
-    if (!failure || notified || !observer || active == Operation::NOTIFY) {
+    if (!failure || notified || primaryRecorded || !observer || active == Operation::NOTIFY) {
       return;
     }
 
@@ -982,6 +984,7 @@ struct Scene::State {
         }
       } else {
         fail(result.error(), "scene.run", origin, false);
+        primaryRecorded = detail::SceneAccess::primaryRecorded(*managed);
         notified = detail::SceneAccess::runFailureNotified(*managed);
       }
     }

@@ -497,6 +497,53 @@ public:
     return std::move(*this);
   }
 
+  /** @tparam Info Consuming annotated metadata. @tparam Callback Exact managed action.
+   * @param selection Owning shortcut receipt. @param info Metadata resolved after mount.
+   * @param callback One canonical action. @param origin Registration site. @return This facade. */
+  template <class Info, class Callback>
+    requires std::same_as<std::remove_cvref_t<Info>, ui::KeyInfo> && portals::detail::ManagedAction<Callback, KeyEvent>
+  Scene &onKey(KeySelection selection, Info info, Callback callback,
+               std::source_location origin = std::source_location::current()) & {
+    onAnnotatedImpl(std::move(selection), std::move(info), callback, origin);
+    return *this;
+  }
+
+  /** @tparam Info Consuming metadata. @tparam Callback Exact managed action.
+   * @param selection Shortcut receipt. @param info Metadata. @param callback Action. @param origin Call site.
+   * @return This consuming facade. */
+  template <class Info, class Callback>
+    requires std::same_as<std::remove_cvref_t<Info>, ui::KeyInfo> && portals::detail::ManagedAction<Callback, KeyEvent>
+  Scene &&onKey(KeySelection selection, Info info, Callback callback,
+                std::source_location origin = std::source_location::current()) && {
+    onAnnotatedImpl(std::move(selection), std::move(info), callback, origin);
+    return std::move(*this);
+  }
+
+  /** @tparam Source Existing shortcut source. @tparam Info Annotated metadata. @tparam Callback Managed action.
+   * @param source Normalized immediately. @param info Deferred metadata. @param callback Action. @param origin Call
+   * site.
+   * @return This facade. */
+  template <portals::detail::ShortcutSource Source, class Info, class Callback>
+    requires std::same_as<std::remove_cvref_t<Info>, ui::KeyInfo> && portals::detail::ManagedAction<Callback, KeyEvent>
+  Scene &onKey(Source &&source, Info info, Callback callback,
+               std::source_location origin = std::source_location::current()) & {
+    auto selection = portals::detail::KeySelectionAccess::make(
+      portals::detail::prepareShortcut(std::forward<Source>(source), {}), {KeyAction::PRESS}, {});
+    return onKey(std::move(selection), std::move(info), std::move(callback), origin);
+  }
+
+  /** @tparam Source Existing shortcut source. @tparam Info Annotated metadata. @tparam Callback Managed action.
+   * @param source Normalized immediately. @param info Deferred metadata. @param callback Action. @param origin Call
+   * site.
+   * @return This consuming facade. */
+  template <portals::detail::ShortcutSource Source, class Info, class Callback>
+    requires std::same_as<std::remove_cvref_t<Info>, ui::KeyInfo> && portals::detail::ManagedAction<Callback, KeyEvent>
+  Scene &&onKey(Source &&source, Info info, Callback callback,
+                std::source_location origin = std::source_location::current()) && {
+    onKey(std::forward<Source>(source), std::move(info), std::move(callback), origin);
+    return std::move(*this);
+  }
+
   /** @tparam Callback Existing owning compact action, optionally taking const KeyEvent&.
    * @param selection Immutable owning alternatives; its native phase mask applies to each sequence stroke.
    * @param callback Action transferred into deferred scene configuration.
@@ -866,6 +913,31 @@ private:
     }
   }
 
+  template <class Info, class Callback>
+  void onAnnotatedImpl(KeySelection selection, Info info, Callback &callback, std::source_location origin) {
+    detail::commandOrigin(callback, origin);
+    if (!admitConfiguration(true, origin)) {
+      return;
+    }
+    try {
+      addConfiguration(
+        [selection, info = std::move(info), callback = std::move(callback),
+         origin](ManagedScene &scene) mutable -> std::expected<void, ManagedError> {
+          auto metadata = info.resolve(scene);
+          if (!metadata) {
+            return std::unexpected(metadata.error());
+          }
+          auto result = scene.onKey(selection, std::move(*metadata), std::move(callback), origin);
+          return result ? std::expected<void, ManagedError>{} : std::unexpected(result.error());
+        },
+        true, origin);
+    } catch (const std::bad_alloc &) {
+      configurationException(TreeError::NO_MEMORY, origin);
+    } catch (...) {
+      configurationException(TreeError::CALLBACK_FAILED, origin);
+    }
+  }
+
   template <class Callback>
   void onSelectionImpl(const KeySelection &selection, Callback &callback, std::source_location origin) {
     detail::commandOrigin(callback, origin);
@@ -1170,6 +1242,12 @@ struct SceneAccess {
    */
   static bool notifyingRunFailure(const ManagedScene &owner) noexcept {
     return owner.notifyingRunFailure_;
+  }
+
+  /** @param owner Managed owner retaining its first admitted full-error primary.
+   * @return Whether admission already handled collection, independently of observer notification. */
+  static bool primaryRecorded(const ManagedScene &owner) noexcept {
+    return owner.dialogPrimaryRecorded_;
   }
 
   /** @param owner Existing managed scene whose completed run returned a failure.

@@ -21,6 +21,7 @@
       <tab type="user" title="Managed controls" url="@ref docs/managed-controls.md" />
       <tab type="user" title="Dialogs" url="@ref docs/dialogs.md" />
       <tab type="user" title="Notifications" url="@ref docs/notifications.md" />
+      <tab type="user" title="Key hints and help" url="@ref docs/key-help.md" />
       <tab type="user" title="Use the installed package" url="@ref docs/package.md" />
       <tab type="user" title="Current limitations" url="@ref docs/limitations.md" />
       <tab type="user" title="Release notes" url="@ref ReleaseNotes.md" />
@@ -144,6 +145,7 @@
       <tab type="user" title="Управляемые контролы" url="@ref docs/ru/managed-controls.md" />
       <tab type="user" title="Диалоги" url="@ref docs/ru/dialogs.md" />
       <tab type="user" title="Уведомления" url="@ref docs/ru/notifications.md" />
+      <tab type="user" title="Подсказки клавиш и справка" url="@ref docs/ru/key-help.md" />
     </tab>
     <tab type="usergroup" title="Стили и темы">
       <tab type="user" title="Гайд по стилям" url="@ref docs/ru/styling-guide.md" />
