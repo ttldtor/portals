@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include "scroll_intent.hpp"
 #include <atomic>
+#include <optional>
 #include <portals/action.hpp>
 #include <thread>
 
@@ -34,6 +36,57 @@ struct ActionRegistration {
   std::function<std::expected<EventReply, TreeError>(const RoutedEvent &)> callback;
   std::function<std::expected<void, TreeError>(bool)> focusCallback;
 };
+
+// Worker tokens own neither callbacks nor widgets; registration identity is a separate weak owner.
+struct PointerCaptureCancellation {
+  std::atomic<bool> connected{true};
+  std::weak_ptr<ActionCancellation> binding;
+};
+
+struct PointerCaptureRecord {
+  Node<Widget> node;
+  Node<Widget> focusRoot;
+  std::weak_ptr<ActionRegistration> registration;
+  std::shared_ptr<PointerCaptureCancellation> cancellation;
+  std::uint64_t inputGeneration{};
+};
+
+// Internal checked adapter for native installers and contract tests. It keeps the same tree.edit
+// admission/pin as public bind; the checked reply uses the router's existing erased callback type.
+struct EventRouterAccess {
+  static std::expected<std::shared_ptr<const FocusObservation>, TreeError> observeFocus(EventRouter &router);
+
+  template <class T, class Callback>
+  static std::expected<ActionBinding, TreeError> bindChecked(EventRouter &router, Node<T> node, Callback callback,
+                                                             bool focusable = true) {
+    static_assert(
+      std::same_as<std::invoke_result_t<Callback &, T &, const RoutedEvent &>, std::expected<EventReply, TreeError>>);
+
+    auto allowed = router.canBind(node);
+
+    if (!allowed) {
+      return std::unexpected(allowed.error());
+    }
+
+    try {
+      return router.add(node,
+                        [&router, node, function = std::move(callback)](
+                          const RoutedEvent &event) mutable -> std::expected<EventReply, TreeError> {
+                          std::expected<EventReply, TreeError> reply{EventReply::IGNORED};
+                          auto edited = router.tree().edit(node, [&](T &widget) {
+                            reply = function(widget, event);
+                          });
+
+                          return edited ? reply : std::unexpected(edited.error());
+                        },
+                        focusable, {});
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(TreeError::NO_MEMORY);
+    } catch (...) {
+      return std::unexpected(TreeError::CALLBACK_FAILED);
+    }
+  }
+};
 } // namespace portals::detail
 
 namespace portals {
@@ -52,6 +105,12 @@ struct EventRouter::State {
     std::vector<std::unique_ptr<detail::FocusReturnRegistration>>(0);
   Node<Widget> focus;
   std::uint64_t focusGeneration{1};
+  std::weak_ptr<detail::FocusObservation> focusObservation;
+  PointerCaptureCapabilities pointerCapabilities;
+  std::optional<detail::PointerCaptureRecord> pointerCapture;
+  // Only the dynamically executing handler can acquire capture from its own LEFT PRESS.
+  std::weak_ptr<detail::ActionRegistration> admittedAction;
+  std::optional<MouseInputEvent> admittedMouse;
   // These UI-only guards reject nested delivery and mutations during capture reclamation;
   // callback disconnect uses the independent atomic flag and remains available on any thread.
   bool dispatching{};

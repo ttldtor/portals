@@ -452,6 +452,17 @@ struct Access {
 template <detail::DescriptionInput Child>
 Description<Border> border(Child &&child, BorderOptions options = {}, ControlStyle style = {});
 
+/** @tparam Child Consuming ordinary content recipe.
+ * @param child Single content root, mounted in the same rollback transaction.
+ * @param options Owning placement/input options.
+ * @param controller Shared values; empty creates default values automatically at mount.
+ * @param style Manual appearance defaults beneath themes.
+ * @return Automatically initialized, bound and prepared ordinary scroll owner.
+ */
+template <detail::DescriptionInput Child>
+Description<ScrollArea> scrollArea(Child &&child, ScrollAreaOptions options = {},
+                                   std::shared_ptr<ScrollController> controller = {}, ControlStyle style = {});
+
 /** @brief Shared observing slot published only after a complete successful description mount.
  * @tparam T Observed public Widget subtype; no widget or scene ownership is retained.
  * Read/write the slot only on the UI thread. Copies share the slot. A published identity is
@@ -498,6 +509,45 @@ public:
   /** @brief Allocate an empty observing slot on the UI thread; may throw std::bad_alloc. */
   Ref() {
     this->slot_->fluent = true;
+  }
+
+  /** @param axis Selected logical axis.
+   * @param offset Exact logical offset, clamped to the current range.
+   * @param origin Command site retained by the scene collector.
+   * @return Checked programmatic command or reported affinity/liveness/lease error.
+   */
+  std::expected<void, ManagedError> setOffset(ScrollAxis axis, ScrollOffset offset,
+                                              std::source_location origin = std::source_location::current()) const
+    requires(std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+  {
+    return detail::scrollOffset(target(), axis, offset, origin);
+  }
+
+  /** @param metrics Exact standalone extent and viewport.
+   * @param origin Command site retained by the scene collector.
+   * @return Checked metrics command; an area projection is not a metrics writer.
+   */
+  std::expected<void, ManagedError> setMetrics(ScrollAxisMetrics metrics,
+                                               std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, ScrollBar>
+  {
+    const auto observation = target();
+    auto owner = detail::eventScene(observation);
+    if (!owner) {
+      return std::unexpected(owner.error());
+    }
+    auto result = (*owner)->setScrollMetrics(this->node(), metrics);
+    if (!result) {
+      detail::reportEventError(observation, result.error(), origin);
+    }
+    return result;
+  }
+
+  /** @param origin Request site retained by the scene collector.
+   * @return Checked one-shot reveal admission; final rendering remains asynchronous.
+   */
+  std::expected<void, ManagedError> ensureVisible(std::source_location origin = std::source_location::current()) const {
+    return detail::ensureVisible(target(), origin);
   }
 
   /** @return Owning final local/surface/clip geometry, or checked affinity/liveness/reentry failure.
@@ -1361,6 +1411,9 @@ public:
 private:
   friend struct detail::Access;
   template <detail::DescriptionInput Child> friend Description<Border> border(Child &&, BorderOptions, ControlStyle);
+  template <detail::DescriptionInput Child>
+  friend Description<ScrollArea> scrollArea(Child &&, ScrollAreaOptions, std::shared_ptr<ScrollController>,
+                                            ControlStyle);
 
   template <class U, class... Args> friend Description<U> custom(Args &&...args);
   template <class U> friend Description<U> control(std::string_view, ControlStyle, SizePolicy);
@@ -2846,6 +2899,91 @@ constexpr SizeModifier flexY(std::uint32_t weight = 1) {
  */
 constexpr SizeModifier flex(std::uint32_t weight = 1) {
   return {{detail::SizeDimension::FLEX, 0, weight}};
+}
+
+template <detail::DescriptionInput Child>
+Description<ScrollArea> scrollArea(Child &&child, ScrollAreaOptions options,
+                                   std::shared_ptr<ScrollController> controller, ControlStyle style) {
+  auto description = detail::Access::describe<ScrollArea>(
+    [options, controller = std::move(controller), style](ManagedScene &scene, Node<Widget> parent) {
+      return scene.emplace<ScrollArea>(parent, controller, scene.widthPolicy(), options, style);
+    });
+  description.state_->children.push_back(
+    [child = std::forward<Child>(child)](ManagedScene &scene, Node<Widget> parent,
+                                         detail::MountContext &context) mutable -> std::expected<void, ManagedError> {
+      auto mounted = detail::Access::mount(std::move(child), scene, parent, context);
+      return mounted ? std::expected<void, ManagedError>{} : std::unexpected(mounted.error());
+    });
+  return description;
+}
+
+/** @tparam Child Consuming ordinary content recipe.
+ * @param reference Empty area slot, published only after the complete subtree mounts.
+ * @param child Single ordinary content root.
+ * @param options Owning placement/input settings.
+ * @param controller Optional owning shared values.
+ * @param style Manual appearance defaults.
+ * @return Ref-first recipe with automatic lifecycle and checked rollback.
+ */
+template <detail::DescriptionInput Child>
+Description<ScrollArea> scrollArea(Ref<ScrollArea> reference, Child &&child, ScrollAreaOptions options = {},
+                                   std::shared_ptr<ScrollController> controller = {}, ControlStyle style = {}) {
+  return scrollArea(std::forward<Child>(child), options, std::move(controller), style).reference(std::move(reference));
+}
+
+/** @param axis Projected axis.
+ * @param options Owning input/paint settings.
+ * @param style Manual defaults beneath themes.
+ * @return Standalone bar with automatic default controller and sole metrics-writer lease.
+ */
+inline Description<ScrollBar> scrollBar(ScrollAxis axis = ScrollAxis::VERTICAL, ScrollBarOptions options = {},
+                                        ControlStyle style = {}) {
+  return detail::Access::describe<ScrollBar>([axis, options, style](ManagedScene &scene, Node<Widget> parent) {
+    return scene.scrollBar(parent, {}, axis, options, style);
+  });
+}
+
+/** @param controller Owning values shared with an area's metrics writer.
+ * @param axis Projected axis.
+ * @param options Owning input/paint settings.
+ * @param style Manual defaults beneath themes.
+ * @return Read projection; a missing controller is rejected rather than creating orphan metrics.
+ */
+inline Description<ScrollBar> scrollBar(std::shared_ptr<ScrollController> controller,
+                                        ScrollAxis axis = ScrollAxis::VERTICAL, ScrollBarOptions options = {},
+                                        ControlStyle style = {}) {
+  return detail::Access::describe<ScrollBar>(
+    [controller = std::move(controller), axis, options,
+     style](ManagedScene &scene, Node<Widget> parent) -> std::expected<Node<ScrollBar>, ManagedError> {
+      if (!controller) {
+        return std::unexpected(detail::error(parent, TreeError::INVALID_ARGUMENT));
+      }
+      return scene.scrollBar(parent, controller, axis, options, style, false);
+    });
+}
+
+/** @param reference Empty bar observer published after successful mount.
+ * @param axis Selected standalone axis.
+ * @param options Owning bar settings.
+ * @param style Manual defaults.
+ * @return Ref-first standalone writer recipe.
+ */
+inline Description<ScrollBar> scrollBar(Ref<ScrollBar> reference, ScrollAxis axis = ScrollAxis::VERTICAL,
+                                        ScrollBarOptions options = {}, ControlStyle style = {}) {
+  return scrollBar(axis, options, style).reference(std::move(reference));
+}
+
+/** @param reference Empty observer published after successful mount.
+ * @param controller Owning area-shared values.
+ * @param axis Selected projection axis.
+ * @param options Owning bar settings.
+ * @param style Manual defaults.
+ * @return Ref-first area projection recipe with automatic binding and cleanup.
+ */
+inline Description<ScrollBar> scrollBar(Ref<ScrollBar> reference, std::shared_ptr<ScrollController> controller,
+                                        ScrollAxis axis = ScrollAxis::VERTICAL, ScrollBarOptions options = {},
+                                        ControlStyle style = {}) {
+  return scrollBar(std::move(controller), axis, options, style).reference(std::move(reference));
 }
 
 template <detail::DescriptionInput Child>

@@ -69,10 +69,19 @@ struct EventRouterOptions {
   std::size_t max_registrations{4096}; ///< Positive shared maximum of action and scope records; one of each per node.
 };
 
+/** @brief Host-declared input guarantees; this value does not enable terminal reporting modes. */
+struct PointerCaptureCapabilities {
+  bool motion{};               ///< Host supplies pointer motion while dragging.
+  bool release{};              ///< Host supplies matching LEFT release or explicitly cancels a lost sequence.
+  bool motionButtonIdentity{}; ///< MOVE button reliably reports held LEFT versus no/different button.
+};
+
 namespace detail {
 struct ActionRegistration;
 struct ActionCancellation;
 struct FocusScopeRegistration;
+struct PointerCaptureCancellation;
+struct EventRouterAccess;
 } // namespace detail
 
 /** @brief Move-only scoped disconnect token; never owns a tree or widget.
@@ -106,6 +115,43 @@ private:
   std::weak_ptr<detail::ActionCancellation> registration_;
 };
 
+/** @brief Move-only weak cancellation token; owns no callback, widget, tree or router.
+ * Destruction/disconnect may run on any thread and prevents future admission. Already admitted
+ * delivery keeps its callable and widget alive until return. Tokens may outlive the router.
+ * Eligibility and focus retirement are checked on UI, without background polling.
+ */
+class PointerCapture {
+public:
+  /** @brief Construct an empty disconnected token. */
+  PointerCapture() = default;
+  /** @brief Disconnect without user callbacks or tree access, on any thread. */
+  ~PointerCapture();
+  /** @brief Transfer cancellation responsibility and empty the source.
+   * @param other Token to transfer; any thread, without invoking callbacks.
+   */
+  PointerCapture(PointerCapture &&other) noexcept;
+  /** @brief Disconnect the old token, then transfer; self-assignment is a no-op.
+   * @param other Token to empty and transfer.
+   * @return This token; any thread, without callbacks or tree access.
+   */
+  PointerCapture &operator=(PointerCapture &&other) noexcept;
+  PointerCapture(const PointerCapture &) = delete;
+  PointerCapture &operator=(const PointerCapture &) = delete;
+  /** @brief Idempotently deny future admission, without cancelling an already admitted call. */
+  void disconnect() noexcept;
+  /** @brief Observe cancellation flags without consulting live UI/tree eligibility.
+   * @return True while capture and its action binding remain connected; false after disconnection,
+   * release or router retirement. Use EventRouter::pointerCapture for checked effective eligibility.
+   * @note Any thread; no allocation, callbacks, mutation or tree access.
+   */
+  [[nodiscard]] bool connected() const noexcept;
+
+private:
+  friend class EventRouter;
+  explicit PointerCapture(std::weak_ptr<detail::PointerCaptureCancellation> cancellation) noexcept;
+  std::weak_ptr<detail::PointerCaptureCancellation> cancellation_;
+};
+
 /** @brief UI-owned focus and synchronous bubbling over an existing WidgetTree.
  * Tree and Scheduler must outlive the router. Destroy on its creating UI thread outside
  * a router callback; violation terminates. All operations reject wrong-thread calls before
@@ -127,6 +173,41 @@ public:
   ~EventRouter();
   EventRouter(const EventRouter &) = delete;
   EventRouter &operator=(const EventRouter &) = delete;
+
+  /** @brief Declare host motion/release guarantees, without terminal I/O.
+   * @param capabilities Owning capability value; defaults are all false until explicitly declared.
+   * @return Success, tree/router validation errors or WOULD_BLOCK during input/focus delivery.
+   * A changed capability value cancels an active capture before further delivery. A paint failure
+   * preserves the new declaration and retired capture, just like already-published focus effects.
+   * @note UI-only; no callback, queue, timer or terminal mode is created.
+   */
+  std::expected<void, TreeError> setPointerCaptureCapabilities(PointerCaptureCapabilities capabilities);
+  /** @brief Capture LEFT continuation from this owner's currently admitted LEFT PRESS handler.
+   * @param owner Live full identity of the currently executing action registration.
+   * @param focusRoot Optional live ancestor containing owner, defaulting to owner. Only a subsequent
+   * focus transition outside this subtree cancels capture; existing external/empty focus is permitted.
+   * @return Weak cancellation token; tree/session/thread errors, INVALID_ARGUMENT for absent
+   * capabilities/wrong owner/root, WOULD_BLOCK outside that press or while another capture is active,
+   * NO_MEMORY, or IDENTITY_EXHAUSTED after the tree's input-generation stamp is exhausted.
+   * Failure publishes no new capture. Pure LAYOUT invalidation does not cancel capture. Any
+   * visibility/enabled/removal mutation conservatively cancels it, including unrelated nodes;
+   * this protects hide/show and disable/enable pairs without a per-ancestor history observer.
+   * @note UI-only; callable and widget borrows never escape their existing admission.
+   */
+  std::expected<PointerCapture, TreeError> capturePointer(Node<Widget> owner, Node<Widget> focusRoot = {});
+  /** @brief Revalidate action identity and visible/enabled ancestry without consulting geometry.
+   * @return Effective captured observer, empty when absent/retired, or a tree/router/paint error.
+   * Retired records are unhooked before invalidation; no cancellation callback is invoked.
+   * @note UI-only; no terminal focus-loss detection or polling is implied.
+   */
+  std::expected<Node<Widget>, TreeError> pointerCapture();
+  /** @brief Explicitly end capture for host resize, stop, capability loss or application policy.
+   * @param requestPaint Whether a surviving owner needs one PAINT; false is appropriate during stop/cleanup.
+   * @return Success or tree/router/invalidation error. Capture is unhooked before a paint error;
+   * a CLOSED tree also retires it without paint before returning CLOSED.
+   * @note UI-only; allowed from the current input handler, without nested dispatch or user callbacks.
+   */
+  std::expected<void, TreeError> cancelPointerCapture(bool requestPaint = true);
 
   /** @brief Register one typed handler; the scoped token owns disconnect responsibility.
    * Callback must be copy-constructible and return EventReply. Invocation uses tree.edit,
@@ -297,6 +378,7 @@ public:
 
 private:
   friend class ManagedScene;
+  friend struct detail::EventRouterAccess;
   std::uint64_t focusGeneration() const noexcept;
   struct State;
   explicit EventRouter(std::unique_ptr<State> state);
@@ -322,6 +404,11 @@ private:
   std::expected<void, TreeError> deliverFocus(Node<Widget> node, bool focused);
   std::expected<Node<Widget>, TreeError> checkedFocus();
   std::expected<DispatchResult, TreeError> route(Node<Widget> target, const RoutedEvent &event);
+  std::expected<EventReply, TreeError> deliver(std::shared_ptr<detail::ActionRegistration> entry,
+                                               const RoutedEvent &event);
+  std::expected<Node<Widget>, TreeError> checkedPointerCapture();
+  std::expected<void, TreeError> retirePointerCapture(bool requestPaint);
+  std::expected<DispatchResult, TreeError> routeCaptured(const MouseInputEvent &event);
   std::unique_ptr<State> state_;
 };
 } // namespace portals

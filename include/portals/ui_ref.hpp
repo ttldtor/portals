@@ -80,6 +80,20 @@ std::expected<ManagedScene *, ManagedError> eventScene(const std::shared_ptr<Ref
  */
 std::expected<NodeGeometry, ManagedError> geometry(const std::shared_ptr<RefTarget> &target);
 
+/** @param target Weak published area/bar observation checked for immutable UI affinity.
+ * @param axis Selected logical axis.
+ * @param offset Exact logical position.
+ * @param origin Command site retained by the existing error collector.
+ * @return Checked command result; failures are also reported to a surviving scene collector.
+ */
+std::expected<void, ManagedError> scrollOffset(const std::shared_ptr<RefTarget> &target, ScrollAxis axis,
+                                               ScrollOffset offset, std::source_location origin);
+/** @param target Weak published descendant observation.
+ * @param origin Request site retained by the existing collector.
+ * @return Checked one-shot reveal admission or reported failure; no synchronous layout occurs.
+ */
+std::expected<void, ManagedError> ensureVisible(const std::shared_ptr<RefTarget> &target, std::source_location origin);
+
 /** @param target Weak scene context; destroyed/foreign-thread scenes are never dereferenced.
  * @param error Exact registration error reported to a live UI collector without stopping run.
  * @param origin Ref registration call site.

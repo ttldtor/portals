@@ -192,6 +192,16 @@ integer value. See the versioned primary sources
 [ptyx.h macros](https://github.com/ThomasDickey/xterm-snapshots/blob/xterm-390/ptyx.h)
 and [charproc.c saved modes](https://github.com/ThomasDickey/xterm-snapshots/blob/xterm-390/charproc.c).
 Windows uses native console mouse events and sends no mouse setup bytes.
+Mounted [scroll controls](scroll-controls.md) request a session button-motion
+profile before native open. POSIX additionally queries 1002 with DECRQM and
+requires set, reset or permanently-set status; unknown/permanently-reset or
+missing replies fail setup explicitly. It then enables 1002 with 1006 instead of the
+original 1000 profile, using the same saved tracking restoration. The default
+scene query is false; explicit mouse opt-out still takes precedence. Controls
+mounted later cannot change the opened profile. Custom terminal hosts explicitly
+declare motion/release guarantees through `pointerCaptureCapabilities()`; its
+default is empty. External focus/capability loss requires explicit host
+cancellation because no unsignalled OS focus-loss event is inferred.
 Mouse opt-out skips only mouse protocol I/O; it still manages the selected screen.
 
 Close uses a fresh `modeTimeout` budget independent of application cancellation.

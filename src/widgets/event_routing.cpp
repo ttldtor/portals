@@ -163,6 +163,112 @@ EventRouter::add(Node<Widget> node, std::function<std::expected<EventReply, Tree
   return ActionBinding(entry->cancellation);
 }
 
+std::expected<EventReply, TreeError> EventRouter::deliver(std::shared_ptr<detail::ActionRegistration> entry,
+                                                          const RoutedEvent &event) {
+  struct AdmissionGuard {
+    State &state;
+    std::weak_ptr<detail::ActionRegistration> previousAction;
+    std::optional<MouseInputEvent> previousMouse;
+
+    ~AdmissionGuard() {
+      state.admittedAction = std::move(previousAction);
+      state.admittedMouse = previousMouse;
+    }
+  } guard{*state_, state_->admittedAction, state_->admittedMouse};
+
+  state_->admittedAction = entry;
+
+  if (const auto *mouse = std::get_if<MouseInputEvent>(&event)) {
+    state_->admittedMouse = *mouse;
+  } else {
+    state_->admittedMouse.reset();
+  }
+
+  // This shared entry and the existing tree.edit wrapper pin the callable and widget
+  // through self-removal, binding disconnect and cancellation of an admitted call.
+  auto reply = entry->callback(event);
+
+  if (!reply) {
+    // Preserve the original handler failure even if repainting retirement also fails.
+    static_cast<void>(retirePointerCapture(true));
+
+    return reply;
+  }
+
+  auto capture = checkedPointerCapture();
+
+  return capture ? reply : std::unexpected(capture.error());
+}
+
+std::expected<DispatchResult, TreeError> EventRouter::routeCaptured(const MouseInputEvent &event) {
+  auto captured = checkedPointerCapture();
+
+  if (!captured) {
+    return std::unexpected(captured.error());
+  }
+
+  if (captured->id().session == 0) {
+    return DispatchResult{};
+  }
+
+  const auto capture = *state_->pointerCapture;
+  auto entry = capture.registration.lock();
+  DispatchResult result{capture.node.id(), {}, DispatchStatus::UNHANDLED};
+
+  if (!entry || !capture.cancellation->connected.load() || !entry->cancellation->connected.load()) {
+    auto retired = retirePointerCapture(true);
+
+    return retired ? std::expected<DispatchResult, TreeError>(result) : std::unexpected(retired.error());
+  }
+
+  if (event.action == MouseAction::MOVE && state_->pointerCapabilities.motionButtonIdentity &&
+      event.button != MouseButton::LEFT) {
+    // Unknown-motion hosts leave this capability false. NO_BUTTON is then not proof
+    // of a lost release, and those moves continue until explicit release/cancellation.
+    auto retired = retirePointerCapture(true);
+
+    return retired ? std::expected<DispatchResult, TreeError>(result) : std::unexpected(retired.error());
+  }
+
+  if (event.action == MouseAction::RELEASE) {
+    // Admission is established above. Unhook first, while the local shared entry keeps
+    // this one final callback alive independently of the weak token and router record.
+    auto retired = retirePointerCapture(true);
+
+    if (!retired) {
+      return std::unexpected(retired.error());
+    }
+  }
+
+  auto *recorder = tree().diagnostics();
+  DiagnosticScope handlerScope(recorder, recorder && recorder->enabled() ? recorder->current() : DiagnosticContext{});
+
+  if (recorder && recorder->enabled()) {
+    recorder->note(DiagnosticEvent::TARGET, DiagnosticReason::NONE, diagnosticNode(capture.node.id()));
+    recorder->note(DiagnosticEvent::HANDLER_STARTED, DiagnosticReason::NONE, diagnosticNode(capture.node.id()));
+  }
+
+  auto reply = deliver(std::move(entry), RoutedEvent(event));
+
+  if (recorder && recorder->enabled()) {
+    recorder->note(DiagnosticEvent::HANDLER_RETURNED, reply ? handlerScope.outcome() : DiagnosticReason::HANDLER_FAILED,
+                   diagnosticNode(capture.node.id()));
+  }
+
+  if (!reply) {
+    return std::unexpected(reply.error());
+  }
+
+  if (*reply == EventReply::HANDLED) {
+    result.handler = capture.node.id();
+    result.status = DispatchStatus::HANDLED;
+  }
+
+  // An ignored continuation is still exclusive to its capture owner, without bubbling
+  // to original ancestors or retargeting the unrelated widget beneath the pointer.
+  return result;
+}
+
 std::expected<DispatchResult, TreeError> EventRouter::route(Node<Widget> target, const RoutedEvent &event) {
   DispatchResult result;
   auto *recorder = tree().diagnostics();
@@ -256,7 +362,7 @@ std::expected<DispatchResult, TreeError> EventRouter::route(Node<Widget> target,
       recorder->note(DiagnosticEvent::HANDLER_STARTED, DiagnosticReason::NONE, diagnosticNode(node.id()));
     }
 
-    auto reply = entry->callback(event);
+    auto reply = deliver(std::move(entry), event);
 
     if (recorder && recorder->enabled()) {
       recorder->note(DiagnosticEvent::HANDLER_RETURNED,
@@ -330,6 +436,14 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
 
   try {
     if (const auto *key = std::get_if<KeyEvent>(&event)) {
+      if (key->key == InputKey::ESCAPE && key->action != KeyAction::RELEASE) {
+        auto cancelled = retirePointerCapture(true);
+
+        if (!cancelled) {
+          return std::unexpected(cancelled.error());
+        }
+      }
+
       if (key->key == InputKey::TAB && key->action != KeyAction::RELEASE && !key->modifiers.alt &&
           !key->modifiers.control && !key->modifiers.super) {
         auto next = traverse(key->modifiers.shift);
@@ -371,6 +485,19 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
 
       if (!returned) {
         return std::unexpected(returned.error());
+      }
+
+      if (mouse->action == MouseAction::MOVE ||
+          (mouse->action == MouseAction::RELEASE && mouse->button == MouseButton::LEFT)) {
+        auto captured = checkedPointerCapture();
+
+        if (!captured) {
+          return std::unexpected(captured.error());
+        }
+
+        if (captured->id().session != 0) {
+          return routeCaptured(*mouse);
+        }
       }
 
       auto target = hitTest({mouse->column, mouse->row});

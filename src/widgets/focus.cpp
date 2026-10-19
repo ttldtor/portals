@@ -37,6 +37,20 @@ EventRouter::~EventRouter() {
   }
 
   state_->closing = true;
+
+  if (auto observation = state_->focusObservation.lock()) {
+    observation->retired = true;
+    observation->focused = {};
+    observation->generation = 0;
+  }
+  state_->focusObservation.reset();
+
+  // Capture tokens never invoke cancellation callbacks or retain action captures.
+  if (state_->pointerCapture) {
+    state_->pointerCapture->cancellation->connected.store(false);
+    state_->pointerCapture.reset();
+  }
+
   state_->registrations.clear();
   state_->scopes.clear();
 }
@@ -86,6 +100,10 @@ std::expected<void, TreeError> EventRouter::collect() {
   auto allowed = check();
 
   if (!allowed) {
+    if (allowed.error() == TreeError::CLOSED) {
+      static_cast<void>(retirePointerCapture(false));
+    }
+
     return allowed;
   }
 
@@ -111,6 +129,12 @@ std::expected<void, TreeError> EventRouter::collect() {
     if (!live) {
       entry.cancellation->connected.store(false);
     }
+  }
+
+  auto capture = checkedPointerCapture();
+
+  if (!capture) {
+    return std::unexpected(capture.error());
   }
 
   // Destructors of captures cannot reenter while registry storage is being changed.
@@ -651,6 +675,22 @@ std::expected<void, TreeError> EventRouter::changeFocus(Node<Widget> node) {
   // Zero permanently invalidates sequence stamps after unsigned exhaustion; never reuse a stamp.
   if (state_->focusGeneration) {
     ++state_->focusGeneration;
+  }
+
+  // Publish the optional owning observation before any reentrant focus delivery.
+  if (auto observation = state_->focusObservation.lock()) {
+    observation->focused = node;
+    observation->generation = state_->focusGeneration;
+  }
+
+  // Only this actual transition can leave the capture focus subtree. Acquiring from a
+  // non-focusable pointer owner does not require changing a pre-existing external focus.
+  if (state_->pointerCapture && !within(state_->pointerCapture->focusRoot, node)) {
+    auto cancelled = retirePointerCapture(false);
+
+    if (!cancelled) {
+      return cancelled;
+    }
   }
 
   if (auto *recorder = tree().diagnostics(); recorder && recorder->enabled()) {

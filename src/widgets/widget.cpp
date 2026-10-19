@@ -389,6 +389,14 @@ std::expected<Node<Widget>, TreeError> WidgetTree::inputParent(Node<Widget> node
   return parent ? Node<Widget>(parent->id) : Node<Widget>{};
 }
 
+std::expected<bool, TreeError> WidgetTree::revealVisible(Node<Widget> node) const {
+  auto record = state_->find(node.id());
+  if (!record) {
+    return std::unexpected(record.error());
+  }
+  return State::shown(**record, false);
+}
+
 std::expected<std::uint64_t, TreeError> WidgetTree::geometryRevision() const {
   if (state_->owner != std::this_thread::get_id()) {
     return std::unexpected(TreeError::WRONG_THREAD);

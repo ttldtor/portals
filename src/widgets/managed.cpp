@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include "scroll_preparation_state.hpp"
 #include <portals/detail/pss_parser.hpp>
 #include <portals/detail/setup_failure.hpp>
 #include <portals/managed.hpp>
@@ -661,6 +662,7 @@ std::expected<void, ManagedError> ManagedScene::remove(Node<Widget> node) {
   });
   pruneLiveText();
   pruneObservers();
+  pruneScroll();
   stylesDirty_ = true;
 
   return {};
@@ -1658,6 +1660,7 @@ std::expected<void, TreeError> ManagedScene::completedLayout(Application &app) {
         return published;
       }
     }
+    completeScrollFrame();
     return {};
   } catch (const std::bad_alloc &) {
     return std::unexpected(TreeError::NO_MEMORY);
@@ -2951,6 +2954,7 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
 
           return entry->removed;
         });
+        scene.pruneScroll();
         scene.preparing_ = previous;
       }
     } prune{*this};
@@ -2969,6 +2973,11 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
 
     if (!focused) {
       return std::unexpected(focused.error());
+    }
+
+    auto scrollFocus = sampleScrollFocus();
+    if (!scrollFocus) {
+      return scrollFocus;
     }
 
     const bool hasAdapters = !liveText_.empty() || std::ranges::any_of(models_, [](const auto &source) {
@@ -3166,9 +3175,9 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
 }
 
 bool ManagedScene::usesPreparedLayout() const noexcept {
-  return std::ranges::any_of(entries_, [](const auto &entry) {
-    return static_cast<bool>(entry->viewPrepare);
-  });
+  return usesGeometrySnapshot() || std::ranges::any_of(entries_, [](const auto &entry) {
+           return static_cast<bool>(entry->viewPrepare);
+         });
 }
 
 std::expected<void, TreeError> ManagedScene::prepareViews(Application &app, const LayoutSnapshot &snapshot) {
@@ -3228,7 +3237,11 @@ std::expected<void, TreeError> ManagedScene::prepareViews(Application &app, cons
     }
   }
 
-  return {};
+  auto scrollPrepared = prepareScrollFrame(snapshot);
+  if (!scrollPrepared) {
+    remember(error(ManagedPhase::PREPARE, root_, scrollPrepared.error()));
+  }
+  return scrollPrepared;
 }
 
 std::expected<bool, TreeError> ManagedScene::input(Application &app, const InputEvent &event) {
@@ -3348,6 +3361,10 @@ std::expected<void, ManagedError> ManagedScene::close() {
   }
 
   entries_.clear();
+  if (scroll_) {
+    scroll_->pending.reset();
+  }
+  scroll_.reset();
   models_.clear();
   if (keys_) {
     resetKeys(*keys_->pending);
