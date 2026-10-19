@@ -24,6 +24,7 @@
 | Демонстрация | [Dashboard](../../examples/dashboard/main.cpp), [композиция](../../examples/dashboard/dashboard.hpp), `portals_dashboard` | Таблица и график общей неизменяемой модели, отложенные страницы и ограниченная работа поставщика. |
 | Расширение | [Собственный виджет](../../examples/custom_widget/main.cpp), [Meter](../../examples/custom_widget/meter.hpp), [фабрика сцены](../../examples/custom_widget/fluent_meter.hpp), `portals_custom_widget` | Final-виджет, подготовленное отображение, управляемая подготовка и функция ленивой сцены. |
 | Основы | [Списки из живого текста](../examples/guide_text_transforms.cpp), `portals_docs_text_transforms` | Черновик редактора → слова/графемы → виртуальные списки; [сборка и контракты](bindings-guide.md#live-text-transforms-ru). |
+| Расширение | [Вложенная scroll-форма](../examples/guide_nested_scroll.cpp), `portals_docs_nested_scroll` | Редактируемые поля, CheckBox с внутренним состоянием и вложенные полосы на рамках; [контракты](scroll-controls.md#nested-scroll-areas-ru). Собирается при включённых тестах. |
 | Эксперимент | [Стили времени компиляции](compile-time-styles.md) | Необязательные дескрипторы и проверка PSS; для первой формы не требуются. |
 
 F10 завершает интерактивные примеры. Галерея, dashboard и собственный виджет
@@ -211,6 +212,10 @@ cmake --build build/guide-examples
 
 [Руководство по обычной прокрутке](scroll-controls.md) собирается в `guide_scroll_controls`:
 восемь кнопок в области высотой пять строк, wheel/key/drag и выход через Exit/F10.
+
+[Вложенная форма настроек](scroll-controls.md#nested-scroll-areas-ru) собирается как
+`guide_nested_scroll`; корневая сборка с тестами называет её `portals_docs_nested_scroll`.
+Она использует редактируемые поля, CheckBox с внутренним состоянием и две области `ON_FRAME`.
 
 ## Браузерный пример
 
