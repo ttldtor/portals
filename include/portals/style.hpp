@@ -15,6 +15,10 @@
 namespace portals {
 struct PssDocument;
 
+namespace detail {
+struct StyleThemeReceiver;
+}
+
 /** @brief Presentation states; ANY matches every state without changing behavior. */
 enum class StyleState {
   ANY,      ///< Match all presentation variants.
@@ -371,7 +375,8 @@ private:
   std::expected<Invalidation, StyleError> install(StyleSheet sheet, std::vector<Binding> &&bindings,
                                                   LayerState *candidate = nullptr, bool wholeReplace = false,
                                                   const detail::StyleThemeLease *lease = nullptr,
-                                                  const PreviewCapture *previewCapture = nullptr);
+                                                  const PreviewCapture *previewCapture = nullptr,
+                                                  bool notifyTheme = false);
   std::expected<Invalidation, StyleError> replaceOwnedTheme(const StyleSheet &sheet, detail::StyleThemeLease lease);
   std::expected<void, StyleError> mergeBindings(std::span<const StyleRegistration> registrations,
                                                 std::optional<std::vector<Binding>> &destination);
@@ -392,6 +397,7 @@ private:
                         ComputedStyle defaults, NodeId node = {}) const noexcept;
   std::expected<void, StyleError> checkBoundary(bool completing = false) const;
   WidgetTree &tree_;
+  std::weak_ptr<detail::StyleThemeReceiver> themeReceiver_;
   std::size_t maxBindings_;
   StyleSheet sheet_;
   std::vector<Binding> bindings_ = std::vector<Binding>(0);

@@ -676,6 +676,7 @@ std::expected<void, ManagedError> ManagedScene::remove(Node<Widget> node) {
 
   // Logical retirement is immediate even when the router still borrows an admitted callback.
   // Do not call style hooks during rollback: pruning on its next transaction is allocation-safe.
+  retireThemeSelector();
   std::erase_if(entries_, [&](const auto &entry) {
     auto live = app_.tree().withScope(entry->node, [](const UiScope &) {
     });
@@ -2731,8 +2732,7 @@ std::expected<void, ManagedError> ManagedScene::publishKey(std::shared_ptr<KeyRe
     snapshot->scopeConnected.emplace(0);
     snapshot->scopeConnected->reserve(snapshot->records.size());
     for (const auto &entry : snapshot->records) {
-      auto cancellation = entry->metadata ? entry->metadata->cancellation.lock() : nullptr;
-      snapshot->scopeConnected->push_back(cancellation && cancellation->connected.load());
+      snapshot->scopeConnected->push_back(entry->metadata ? entry->metadata->observation() : 0);
     }
   }
   snapshot->pending = std::make_shared<KeyPending>();
@@ -3103,6 +3103,11 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
 
   if (&app != &app_) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  auto selector = prepareThemeSelector();
+  if (!selector) {
+    return std::unexpected(bridge(selector.error()));
   }
 
   auto recovered = recoverObservers(0, nullptr, nullptr, true);
@@ -3536,6 +3541,7 @@ std::expected<void, ManagedError> ManagedScene::close() {
 
   // Mark closed before retiring captures: their destructors may reenter application code.
   closed_ = true;
+  retireThemeSelector();
   themeSelection_.reset();
   retireMessages();
   pruneDataStates();

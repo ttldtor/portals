@@ -179,6 +179,9 @@ ManagedScene::registerAnnotatedKey(const KeySelection &selection, KeyInfo info,
   metadata->owner = owner;
   metadata->scope = info.scope;
   metadata->cancellation = cancellation;
+  if (info.ownerLifetime_) {
+    metadata->ownerLifetime = info.ownerLifetime_;
+  }
   metadata->enabled = info.enabled;
   metadata->visible = info.visible;
   auto record = std::make_shared<KeyRecord>();
@@ -219,19 +222,19 @@ ManagedScene::publishKeyCandidate(std::shared_ptr<KeySnapshot> snapshot, bool pr
   snapshot->scopeConnected.emplace(0);
   snapshot->scopeConnected->reserve(snapshot->records.size());
   for (const auto &record : snapshot->records) {
-    bool observed = record->metadata && connected(record->metadata->cancellation);
+    unsigned char observed = record->metadata ? record->metadata->observation() : 0;
     if (record->metadata && transaction.previous && transaction.previous->annotated) {
       for (std::size_t i{}; i < transaction.previous->records.size(); ++i) {
         const auto &previous = transaction.previous->records[i]->metadata;
         if (previous && previous->id == record->metadata->id) {
-          observed = bool((*transaction.previous->scopeConnected)[i]);
+          observed = (*transaction.previous->scopeConnected)[i];
           break;
         }
       }
     }
     if (result && record->metadata && record->metadata->id == result->id_ &&
         record->metadata->scope != Node<Widget>{}) {
-      observed = true;
+      observed |= KeyRecord::Metadata::SCOPE_CONNECTED;
     }
     snapshot->scopeConnected->push_back(observed);
   }
@@ -274,8 +277,12 @@ ManagedScene::publishKeyCandidate(std::shared_ptr<KeySnapshot> snapshot, bool pr
       continue;
     }
     if (metadata->scope != Node<Widget>{} &&
-        connected(metadata->cancellation) != bool((*snapshot->scopeConnected)[i])) {
+        connected(metadata->cancellation) !=
+          bool((*snapshot->scopeConnected)[i] & KeyRecord::Metadata::SCOPE_CONNECTED)) {
       return std::unexpected(keyError(TreeError::INVALID_ARGUMENT, metadata->scope.id()));
+    }
+    if (metadata->ownerLifetime && metadata->observation() != (*snapshot->scopeConnected)[i]) {
+      return std::unexpected(keyError(TreeError::INVALID_ARGUMENT, metadata->owner.id()));
     }
     if (result && metadata->id == result->id_ && !app_.tree().inputParent(metadata->owner)) {
       return std::unexpected(keyError(TreeError::STALE_NODE, metadata->owner.id()));
@@ -443,7 +450,7 @@ std::expected<void, ManagedError> ManagedScene::keyPreflight(KeyInfo &info) {
 
 KeyEligibility ManagedScene::keyEligibility(const KeyRecord &record, Node<Widget> focus) const {
   if (record.metadata) {
-    if (!app_.tree().inputParent(record.metadata->owner)) {
+    if (!record.metadata->ownerConnected() || !app_.tree().inputParent(record.metadata->owner)) {
       return KeyEligibility::OWNER_RETIRED;
     }
     if (!record.metadata->visible) {
@@ -490,6 +497,7 @@ KeyEligibility ManagedScene::keyEligibility(const KeyRecord &record, Node<Widget
 }
 
 std::expected<void, ManagedError> ManagedScene::observeKeyScopes() {
+  retireThemeSelector();
   if (!keys_ || !keys_->annotated) {
     return {};
   }
@@ -499,8 +507,8 @@ std::expected<void, ManagedError> ManagedScene::observeKeyScopes() {
   bool changed{};
   for (std::size_t i{}; i < keys_->records.size(); ++i) {
     const auto &metadata = keys_->records[i]->metadata;
-    const bool current = metadata && connected(metadata->cancellation);
-    if (current != bool((*keys_->scopeConnected)[i])) {
+    const unsigned char current = metadata ? metadata->observation() : 0;
+    if (current != (*keys_->scopeConnected)[i]) {
       changed = true;
       (*keys_->scopeConnected)[i] = current;
     }
@@ -727,7 +735,7 @@ std::expected<std::shared_ptr<const KeyBindingsSnapshot>, ManagedError> ManagedS
     if (canonical && canonical->annotated) {
       for (std::size_t i{}; i < canonical->records.size(); ++i) {
         const auto &metadata = canonical->records[i]->metadata;
-        if ((metadata && connected(metadata->cancellation)) != bool((*canonical->scopeConnected)[i])) {
+        if ((metadata ? metadata->observation() : 0) != (*canonical->scopeConnected)[i]) {
           return std::unexpected(keyError(TreeError::WOULD_BLOCK));
         }
       }

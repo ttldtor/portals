@@ -5,6 +5,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Added] A modal theme selector provides catalog navigation, live previews,
+  checked cancellation and explicit recovery without replacing application/user
+  styles. Optional post-commit delivery preserves independent callback and close
+  errors; the view uses the existing dialogs and canonical shortcut routing.
 - [Added] A checked theme-selection model previews catalog choices, atomically
   applies or cancels a preview and preserves application/user style overrides.
   External theme changes retire stale preview authority. A complete native guide

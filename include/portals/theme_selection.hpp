@@ -22,6 +22,7 @@ class Scene;
 namespace detail {
 struct ThemeSelectionTarget;
 struct ThemeSelectionAccess;
+struct ThemeSelectorAccess;
 struct ThemeSelectionDescription;
 } // namespace detail
 
@@ -163,6 +164,7 @@ public:
 private:
   friend class portals::ManagedScene;
   friend struct detail::ThemeSelectionAccess;
+  friend struct detail::ThemeSelectorAccess;
   std::shared_ptr<detail::ThemeSelectionTarget> target_;
 };
 

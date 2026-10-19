@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #include <portals/detail/pss_data.hpp>
 #include <portals/style.hpp>
+#include "theme_receiver.hpp"
 
 #include <algorithm>
 #include <array>
@@ -777,7 +778,8 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
     }
 
     // A layered table owns all rules; the inactive legacy sheet is released at this commit.
-    auto installed = install({}, std::move(*bindings), &candidate, false, lease, previewCapture);
+    auto installed = install({}, std::move(*bindings), &candidate, false, lease, previewCapture,
+                             previewing || promoting || cancelling || externalTheme);
 
     if (installed && (adding || admitting)) {
       *added = handle(admittedId, layerState_.epoch);
@@ -1038,7 +1040,7 @@ std::uint64_t StyleEngine::revision() const noexcept {
 std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, std::vector<Binding> &&bindings,
                                                              LayerState *candidate, bool wholeReplace,
                                                              const detail::StyleThemeLease *lease,
-                                                             const PreviewCapture *previewCapture) {
+                                                             const PreviewCapture *previewCapture, bool notifyTheme) {
   if (previewCapture) {
     auto valid = validatePreviewCapture(*previewCapture);
 
@@ -1151,6 +1153,17 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
         }
       }
 
+      auto receiver = notifyTheme || wholeReplace ? themeReceiver_.lock() : nullptr;
+      if (receiver && (receiver->retired || !tree_.access(receiver->node.id(), true))) {
+        receiver.reset();
+      }
+      if (receiver && receiver->visible && invalidation == Invalidation::NONE) {
+        const auto eligible = tree_.inputEligible(receiver->node);
+        if (eligible && *eligible) {
+          invalidation = Invalidation::PAINT;
+        }
+      }
+
       if (invalidation != Invalidation::NONE) {
         auto requested = tree_.invalidate(*root, invalidation);
 
@@ -1189,6 +1202,9 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
         ++layerState_.epoch;
       }
       ++revision_;
+      if (receiver) {
+        receiver->dirty = true;
+      }
       result = invalidation;
     } catch (const std::bad_alloc &) {
       result = std::unexpected(error(TreeError::NO_MEMORY, "Style staging allocation failed"));

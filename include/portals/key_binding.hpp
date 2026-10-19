@@ -20,7 +20,8 @@ class KeyBindingRef;
 
 namespace detail {
 struct KeyBindingSlot;
-}
+struct ActionCancellation;
+} // namespace detail
 
 /** @brief Scene-local, never reused registration identity; not a persistence key. */
 class KeyBindingId {
@@ -73,6 +74,7 @@ private:
   friend class ui::KeyInfo;
   std::shared_ptr<detail::KeyBindingSlot> publication_;
   std::weak_ptr<const void> scopeIdentity_;
+  std::shared_ptr<detail::ActionCancellation> ownerLifetime_;
 };
 
 /** @brief Eligibility observed for one immutable snapshot, not a universal conflict winner. */

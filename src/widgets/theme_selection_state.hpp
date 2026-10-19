@@ -7,6 +7,7 @@
 #include <thread>
 
 namespace portals::detail {
+struct ThemeSelectorRecord;
 enum class ThemeSelectionCommand {
   PREVIEW,
   COMMIT,
@@ -19,12 +20,16 @@ struct ThemeSelectionChoice {
 };
 
 struct ThemeSelectionRecord {
+  std::weak_ptr<ThemeSelectorRecord> selector;
   std::vector<ThemeSelectionChoice> choices = std::vector<ThemeSelectionChoice>(0);
   std::shared_ptr<const ui::ThemeSelectionSnapshot> snapshot;
 
   std::optional<StyleLayerOptions> layers;
   StyleLayerHandle preview;
   bool busy{};
+
+  // Every caller checks this before owning staging and again before the model guard is acquired.
+  std::expected<void, ManagedError> checkTransition(NodeId owner, std::source_location origin) const;
 };
 } // namespace portals::detail
 

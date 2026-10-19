@@ -7,6 +7,9 @@
 namespace portals {
 struct ManagedScene::KeyRecord {
   struct Metadata {
+    static constexpr unsigned char SCOPE_CONNECTED = 1u;
+    static constexpr unsigned char OWNER_RETIRED = 2u;
+
     Metadata(GraphemeText caption, GraphemeText explanation)
         : label(std::move(caption)), description(std::move(explanation)) {
     }
@@ -17,8 +20,23 @@ struct ManagedScene::KeyRecord {
     Node<Widget> owner;
     Node<Widget> scope;
     std::weak_ptr<detail::ActionCancellation> cancellation;
+    std::optional<std::weak_ptr<detail::ActionCancellation>> ownerLifetime;
     bool enabled{true};
     bool visible{true};
+
+    bool ownerConnected() const noexcept {
+      if (!ownerLifetime) {
+        return true;
+      }
+      const auto state = ownerLifetime->lock();
+      return state && state->connected.load();
+    }
+
+    unsigned char observation() const noexcept {
+      const auto scopeState = cancellation.lock();
+      return static_cast<unsigned char>((scopeState && scopeState->connected.load() ? SCOPE_CONNECTED : 0u) |
+                                        (ownerConnected() ? 0u : OWNER_RETIRED));
+    }
   };
 
   std::optional<KeyEvent> legacy;
@@ -51,6 +69,7 @@ struct ManagedScene::KeySnapshot {
   std::vector<std::shared_ptr<KeyRecord>> records = std::vector<std::shared_ptr<KeyRecord>>(0);
   std::shared_ptr<std::function<std::expected<bool, ManagedError>(const InputEvent &)>> fallback;
   std::shared_ptr<KeyPending> pending;
+  // Private cancellation observations; immutable public projections contain only historical data.
   std::optional<std::vector<unsigned char>> scopeConnected;
   bool annotated{};
 };

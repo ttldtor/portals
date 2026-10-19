@@ -53,6 +53,16 @@ void selectionOrigin(ManagedError &failure, std::source_location origin) {
 }
 } // namespace
 
+std::expected<void, ManagedError> detail::ThemeSelectionRecord::checkTransition(NodeId owner,
+                                                                                std::source_location origin) const {
+  if (busy) {
+    return std::unexpected(
+      selectionError(owner, TreeError::WOULD_BLOCK, "Theme selection transition is active", origin));
+  }
+
+  return {};
+}
+
 namespace ui::detail {
 struct ThemeSelectionAccess {
   static std::expected<std::shared_ptr<portals::detail::ThemeSelectionRecord>, ManagedError>
@@ -88,9 +98,9 @@ struct ThemeSelectionAccess {
       return std::unexpected(failure);
     }
 
-    if (record->busy) {
-      return std::unexpected(
-        selectionError(target->root, TreeError::WOULD_BLOCK, "Theme selection transition is active", origin));
+    auto transition = record->checkTransition(target->root, origin);
+    if (!transition) {
+      return std::unexpected(transition.error());
     }
 
     return record;
@@ -327,7 +337,12 @@ ManagedScene::readThemeSelection(const std::shared_ptr<detail::ThemeSelectionRec
 std::expected<void, ManagedError>
 ManagedScene::changeThemeSelection(const std::shared_ptr<detail::ThemeSelectionRecord> &record,
                                    detail::ThemeSelectionCommand command, std::string_view id,
-                                   std::source_location origin) {
+                                   std::source_location origin, std::optional<std::string_view> expectedId) {
+  auto admitted = record->checkTransition(root_.id(), origin);
+  if (!admitted) {
+    return admitted;
+  }
+
   using Command = detail::ThemeSelectionCommand;
 
   const auto root = root_.id();
@@ -426,6 +441,12 @@ ManagedScene::changeThemeSelection(const std::shared_ptr<detail::ThemeSelectionR
 
     if (lifetime.expired()) {
       return std::unexpected(selectionError(root, TreeError::CLOSED, "Theme selection owner was destroyed", origin));
+    }
+
+    if (expectedId && (command != Command::COMMIT || !record->snapshot->previewedId ||
+                       *record->snapshot->previewedId != *expectedId)) {
+      return std::unexpected(
+        selectionError(root, TreeError::INVALID_ARGUMENT, "Selected preview changed before Apply", origin));
     }
 
     auto installed = mutateStyles(mutation, {}, {}, {}, sheet ? &*sheet : nullptr, {}, &preview, nullptr, nullptr,
