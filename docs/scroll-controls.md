@@ -43,6 +43,47 @@ not supply that frame. Missing frame/invalid options return
 focus reveal and checked programmatic commands available. Nested ordinary areas
 use the same tree clipping and managed preparation; each owns its own content root.
 
+## Compose nested forms {#nested-scroll-areas}
+
+This complete form uses editable connection fields and internal-state checkboxes.
+Each area owns an `ON_FRAME` frame; the inner form is six rows high and the outer
+form is nine. Tab moves between controls, Space toggles a checkbox, and Exit or
+F10 closes the standard runner. Values live in this scene and are not persisted.
+
+\include guide_nested_scroll.cpp
+
+[Complete source](examples/guide_nested_scroll.cpp). Build `guide_nested_scroll`
+with the [standalone guide project](examples.md), or `portals_docs_nested_scroll`
+with `PORTALS_BUILD_TESTS=ON`. The installed-package consumer compiles this same
+source; it does not run the interactive program as an automated test.
+
+Wheel input starts at the hit descendant and follows ordinary ancestor routing.
+If the inner area changes its offset, it handles the whole event, including a
+partial move to its boundary; it does not forward an unused delta. A later event
+at that boundary leaves its offset unchanged and can scroll the outer area.
+A descendant handler that handles the event stops this propagation.
+
+Manual wheel or checked `setOffset` scrolling keeps focus on the same control
+and does not repeatedly reveal that unchanged focus. A newly focused control
+re-arms reveal through the enclosing areas. `reference.ensureVisible()` requests
+a checked one-shot reveal for the next prepared frame without changing focus;
+check its `std::expected<void, ManagedError>` result. See [focus](focus.md).
+`readOnly` disables an area's user scrolling, not its child controls or checked
+commands and focus reveal; an ignored wheel event may still reach an ancestor.
+
+Paint and hit testing use the same inherited content clips. The inner frame
+moves with the outer content, while a `ui::border` outside an area stays fixed.
+Tracks on the area's own frame exclude corners and add no second gutter; content
+cannot receive input through clipped frame cells. Hiding an ancestor or disabling
+an area cancels its drag capture; hiding preserves the canonical offset. Removing
+an area retires its bindings and capture, so late motion/release cannot reuse the
+removed target. Resize or content removal clamps offsets during visible preparation.
+
+Both forms are ordinary retained subtrees: even off-viewport children participate
+in ordinary layout, whose work grows with their count. For large logical datasets,
+[virtual views](virtual-preparation.md) prepare bounded visible/overscan ranges and
+own their own scroll state. Nesting ordinary areas does not add virtualization.
+
 ## Share a controller and issue checked commands
 
 The default area needs no application-held controller. Create an explicit

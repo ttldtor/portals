@@ -5,6 +5,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Docs/Tests] A complete native nested settings form demonstrates editable fields,
+  internal-state checkboxes and frame-edge scroll bars. Installed-package consumers
+  check nested wheel ownership, focus reveal, clipping and capture retirement,
+  and compile the same maintained guide.
+
 - [Tests] Installed-package consumers check live editor words and graphemes in
   the same frame as an external model update, routed input, token identity,
   owning pins, failed-mount cleanup and idle redraw behavior. The complete

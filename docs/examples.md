@@ -26,6 +26,7 @@ The categories describe the learning path; the source directories remain stable.
 | Showcase | [dashboard](../examples/dashboard/main.cpp), [composition](../examples/dashboard/dashboard.hpp), `portals_dashboard` | A table and chart sharing an immutable model, delayed pages and bounded provider work. |
 | Customization | [custom widget](../examples/custom_widget/main.cpp), [meter](../examples/custom_widget/meter.hpp), [scene factory](../examples/custom_widget/fluent_meter.hpp), `portals_custom_widget` | A final widget, retained painting, managed presentation and a function returning a lazy scene. |
 | Basics | [live text lists](examples/guide_text_transforms.cpp), `portals_docs_text_transforms` | Native editor draft → words/graphemes → virtual lists; [build and contracts](bindings-guide.md#live-text-transforms). |
+| Customization | [nested scroll form](examples/guide_nested_scroll.cpp), `portals_docs_nested_scroll` | Editable fields, internal-state checkboxes and nested frame-edge bars; [contracts](scroll-controls.md#nested-scroll-areas). Built with tests enabled. |
 | Experimental | [compile-time styles](compile-time-styles.md) | Compile-time descriptors and PSS checking: optional advanced material, not prerequisites for a form. |
 
 F10 exits the interactive programs. The gallery, custom widget and dashboard
@@ -254,6 +255,10 @@ Run `build/guide-examples/docs_basic.exe` on Windows or `build/guide-examples/do
 
 The [ordinary scroll guide](scroll-controls.md) builds as `guide_scroll_controls`: eight
 buttons in a five-row area, wheel/key/drag input, and Exit/F10 cleanup.
+
+The [nested settings form](scroll-controls.md#nested-scroll-areas) builds as
+`guide_nested_scroll`; the root test-enabled build names it `portals_docs_nested_scroll`.
+It uses editable fields and internal-state checkboxes with two `ON_FRAME` areas.
 
 ## Browser sample
 
