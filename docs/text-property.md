@@ -214,7 +214,8 @@ and width policy. Malformed UTF-8 or an excessive value returns the original
 text error; a valid line separator returns `TreeError::INVALID_ARGUMENT` without
 a `TextError`. Neither failure returns the previous value or draft. Reading does not call the
 application validator, change history, publish a value or report an error
-automatically. General observation is a separate planned API.
+automatically. For scene-owned live capture and text-to-list transforms, see
+[the bindings guide](bindings-guide.md#live-text-transforms).
 
 ## Construct a caption from text or a resource
 

@@ -5,6 +5,9 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Fixed] Browser gallery Debug startup uses an explicit configurable Wasm stack
+  budget, with Debug stack overflow checks.
+
 - [Added] LineEdit supports an owning placeholder, immutable NORMAL/PASSWORD/NO_ECHO
   display policies and a checked undoable user Clear command. Protected modes suppress
   outbound copy/cut while allowing writable paste; plaintext models, getters and bounded
@@ -14,6 +17,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
   typed Property/managed/declarative bindings. Boolean APIs retain their cycle;
   an explicit option enables a three-state input cycle. Mixed selection has a
   distinct text glyph, and aggregate helpers preserve partial update receipts.
+
+- [Added] Scene-owned live caption/draft/committed text sources, bounded owning
+  whitespace-token and grapheme transforms, and cold text-to-virtual-list recipes.
+  Collection-bound lists preserve last good data on failure or origin retirement;
+  changed tokens receive fresh IDs and missing selection clears on new bound lists.
+  Explicit owning row collections also bind read-only managed sources to models.
 
 - [Added] Read-only managed derived sources compute owning values from explicit
   state or earlier derived sources. Initial creation is atomic and checked;

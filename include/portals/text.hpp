@@ -163,6 +163,12 @@ public:
    */
   GraphemeText &operator=(GraphemeText &&other) noexcept;
 
+  /** @brief Compare logical UTF-8 bytes and the complete captured width policy without allocating.
+   * @param other Owning immutable text to compare; segmentation is determined by bytes and policy.
+   * @return True for equal bytes and policy, independently of storage identity.
+   */
+  bool operator==(const GraphemeText &other) const noexcept;
+
   /**
    * @brief Validate, segment and measure a single logical UTF-8 buffer.
    * @param bytes Borrowed only for this synchronous call; copied on success.

@@ -412,3 +412,9 @@ Lvalue-контейнеры move-only descriptions требуют явного �
 
 [Рамки, индикаторы и короткие размеры](compact-primitives.md) дают стандартные
 виджеты и consuming-методы/pipe-стадии для полной небольшой сцены.
+
+## Списки из текста
+
+`ui::virtualList(ui::words(field.draftText()))` и
+`ui::virtualList(ui::graphemes(field.draftText()))` связывают текст со списком
+с автоматическим владением. [Полное приложение и контракты](bindings-guide.md#live-text-transforms-ru).

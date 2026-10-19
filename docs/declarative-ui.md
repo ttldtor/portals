@@ -405,3 +405,9 @@ existing lifetime requirements.
 
 [Frames, gauges and compact sizing](compact-primitives.md) provide standard
 widgets and consuming methods/pipe stages for a complete small scene.
+
+## Text-driven lists
+
+Use `ui::virtualList(ui::words(field.draftText()))` or
+`ui::virtualList(ui::graphemes(field.draftText()))` for an automatically owned
+text-to-list binding. [Complete native application and contracts](bindings-guide.md#live-text-transforms).

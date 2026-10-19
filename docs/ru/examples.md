@@ -23,6 +23,7 @@
 | Демонстрация | [История редактора](../../examples/editor_history/main.cpp), `portals_editor_history` | Немедленное подтверждение, подтверждение по окончании редактирования и явное применение; Undo/Redo, черновик и опубликованное значение. |
 | Демонстрация | [Dashboard](../../examples/dashboard/main.cpp), [композиция](../../examples/dashboard/dashboard.hpp), `portals_dashboard` | Таблица и график общей неизменяемой модели, отложенные страницы и ограниченная работа поставщика. |
 | Расширение | [Собственный виджет](../../examples/custom_widget/main.cpp), [Meter](../../examples/custom_widget/meter.hpp), [фабрика сцены](../../examples/custom_widget/fluent_meter.hpp), `portals_custom_widget` | Final-виджет, подготовленное отображение, управляемая подготовка и функция ленивой сцены. |
+| Основы | [Списки из живого текста](../examples/guide_text_transforms.cpp), `portals_docs_text_transforms` | Черновик редактора → слова/графемы → виртуальные списки; [сборка и контракты](bindings-guide.md#live-text-transforms-ru). |
 | Эксперимент | [Стили времени компиляции](compile-time-styles.md) | Необязательные дескрипторы и проверка PSS; для первой формы не требуются. |
 
 F10 завершает интерактивные примеры. Галерея, dashboard и собственный виджет

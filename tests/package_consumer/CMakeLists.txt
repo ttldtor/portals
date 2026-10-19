@@ -657,6 +657,16 @@ if(WIN32)
   target_sources(portals_editor_display_form_consumer PRIVATE no_dialogs.cpp)
 endif()
 
+# Live text collection adapters remain usable through relocated installed headers.
+add_executable(portals_text_transforms_consumer text_transforms.cpp)
+target_link_libraries(portals_text_transforms_consumer PRIVATE portals::core)
+set_target_properties(portals_text_transforms_consumer PROPERTIES CXX_EXTENSIONS OFF)
+if(WIN32)
+  target_sources(portals_text_transforms_consumer PRIVATE no_dialogs.cpp)
+endif()
+add_test(NAME consumer.text-transforms COMMAND portals_text_transforms_consumer)
+set_tests_properties(consumer.text-transforms PROPERTIES TIMEOUT 15)
+
 add_executable(portals_visible_model_consumer visible_model.cpp)
 target_link_libraries(portals_visible_model_consumer PRIVATE portals::core)
 set_target_properties(portals_visible_model_consumer PROPERTIES CXX_EXTENSIONS OFF)

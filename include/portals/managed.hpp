@@ -3,6 +3,8 @@
 #pragma once
 
 #include <portals/application.hpp>
+#include <portals/collection.hpp>
+#include <portals/detail/managed_origin.hpp>
 #include <portals/detail/setup_failure.hpp>
 #include <portals/editor_command.hpp>
 #include <portals/line_edit.hpp>
@@ -11,6 +13,7 @@
 #include <portals/primitives.hpp>
 #include <portals/style.hpp>
 #include <portals/style_source.hpp>
+#include <portals/text_transform.hpp>
 #include <portals/virtual_preparation.hpp>
 
 #include <ranges>
@@ -31,6 +34,10 @@ struct NamedAccess;
 struct LayoutAccess;
 class SetupFailureTicket;
 } // namespace ui::detail
+
+namespace ui {
+class TextSource;
+}
 
 namespace style::ct::detail {
 struct Access;
@@ -158,9 +165,9 @@ template <class T> using ManagedPrepareHandler = std::function<std::expected<voi
 
 /** @brief Finite managed bookkeeping budgets, independent of the existing tree/queue limits. */
 struct ManagedOptions {
-  std::size_t maxNodes{4096};              ///< Maximum retained entries, including removals pending next preparation.
-  std::size_t maxStates{256};              ///< Maximum scene-owned properties; they live until scene destruction.
-  std::size_t maxModels{64};               ///< Maximum scene-owned models; they live until close().
+  std::size_t maxNodes{4096}; ///< Maximum retained entries, including removals pending next preparation.
+  std::size_t maxStates{256}; ///< Maximum scene-owned properties; retired private text adapters release their slots.
+  std::size_t maxModels{64};  ///< Maximum scene-owned models; they live until close().
   ManagedDiagnosticOptions diagnostics{};  ///< Positive limits for error history and owning causal traces.
   std::size_t maxKeyHandlers{64};          ///< Positive maximum owning onKey registrations; onInput resets the count.
   std::size_t maxClickHandlers{256};       ///< Positive maximum retained pipe click callbacks across the scene.
@@ -220,6 +227,7 @@ public:
 
 private:
   friend class ManagedScene;
+  friend struct ui::detail::Access;
 
   std::expected<std::shared_ptr<Property<T>>, TreeError> lock() const {
     if (owner_ != std::thread::id{} && owner_ != std::this_thread::get_id()) {
@@ -228,6 +236,14 @@ private:
 
     if (lifetime_.expired()) {
       return std::unexpected(TreeError::CLOSED);
+    }
+
+    if (origin_) {
+      auto live = origin_->check();
+
+      if (!live) {
+        return std::unexpected(live.error());
+      }
     }
 
     auto model = model_.lock();
@@ -244,30 +260,53 @@ private:
   std::weak_ptr<const void> lifetime_;
   std::thread::id owner_{};
   NodeId scene_{};
+  std::shared_ptr<detail::ManagedOrigin> origin_;
+  // Scheduling provenance never participates in source lifetime checks.
+  std::weak_ptr<detail::ManagedOrigin> recoveryOrigin_;
 };
 
 /** @brief Read-only weak scene-owned derived value; no writable alias or subscription escapes.
  * @tparam T Equality-comparable, transitively owning immutable Property value.
- * Snapshots remain readable after close until scene destruction, matching ManagedState.
+ * Ordinary derived snapshots remain readable after close until scene destruction, matching ManagedState.
+ * liveText sources additionally validate their original UI identity: removal is STALE_NODE and close is CLOSED.
  */
 template <std::equality_comparable T> class ManagedSource {
 public:
   /** @brief Construct an empty source whose operations return CLOSED. */
   ManagedSource() = default;
 
-  /** @return Independent immutable value/revision owner, WRONG_THREAD, or CLOSED after owner destruction. */
+  /** @return Independent immutable value/revision owner, WRONG_THREAD, or CLOSED after owner destruction.
+   * A liveText source also returns STALE_NODE after origin removal and CLOSED after scene close.
+   */
   std::expected<std::shared_ptr<const PropertyChange<T>>, TreeError> snapshot() const {
     return state_.snapshot();
   }
 
 private:
   friend class ManagedScene;
+  friend struct ui::detail::Access;
 
   explicit ManagedSource(ManagedState<T> state) : state_(std::move(state)) {
   }
 
   ManagedState<T> state_;
 };
+
+/// @cond INTERNAL
+namespace detail {
+template <class Source> struct CollectionSource;
+
+template <class T>
+  requires std::copy_constructible<T> && std::equality_comparable<T>
+struct CollectionSource<ManagedSource<RowCollection<T>>> {
+  using Row = T;
+};
+
+template <class Source>
+concept ManagedCollectionSource = requires { typename CollectionSource<std::remove_cvref_t<Source>>::Row; };
+} // namespace detail
+
+/// @endcond
 
 /** @brief Additive lifecycle owner over one existing Application subtree.
  * UI affine and nonmovable. Application/tree/router/scheduler must outlive this owner.
@@ -299,6 +338,17 @@ public:
   WidthPolicy widthPolicy() const noexcept {
     return app_.widthPolicy();
   }
+
+  /** @brief Attach a readonly node-scoped source to a published caption, draft or accepted editor value.
+   * @param source Weak text identity belonging to this scene; unpublished references return CLOSED.
+   * @param options Positive Property observer capacity; sharing requires identical admitted options.
+   * @param origin Registration site retained on capture failures.
+   * @return Immediately readable owning source, or exact typed availability/text/allocation error.
+   * Origin removal quietly retires existing direct edges; explicit later access returns STALE_NODE.
+   */
+  std::expected<ManagedSource<GraphemeText>, ManagedError>
+  liveText(const ui::TextSource &source, PropertyOptions options = {},
+           std::source_location origin = std::source_location::current());
 
   /// @brief Retire one managed subtree and immediately reclaim its managed entry budget.
   /// @param node Managed node other than root(); an already retired managed identity is accepted.
@@ -406,6 +456,9 @@ public:
       return std::unexpected(error(ManagedPhase::STATE, root_, TreeError::INVALID_ARGUMENT));
     }
 
+    if (!liveText_.empty() || !originProperties_.empty()) {
+      pruneLiveText();
+    }
     if (properties_.size() >= options_.maxStates) {
       return std::unexpected(error(ManagedPhase::STATE, root_, TreeError::NODE_LIMIT));
     }
@@ -477,6 +530,8 @@ public:
       }
 
       auto record = std::make_shared<ObserverRecord>();
+      record->inputOrigin = model.origin_;
+      record->recoveryOrigin = model.origin_ ? model.origin_ : model.recoveryOrigin_;
       record->scene = this;
       record->node = receiver;
       prepareObserverRecord(record, *property, std::forward<Callback>(callback));
@@ -1044,6 +1099,19 @@ public:
   std::expected<ManagedModel<T>, ManagedError> model(std::shared_ptr<const ModelSnapshot<T>> initial,
                                                      ModelOptions options = {});
 
+  /** @brief Bind owning immutable rows to a fresh sink-only model using the existing UI transaction.
+   * @tparam Source Exact ManagedSource<RowCollection<T>>, with copyable equality-comparable immutable T.
+   * @param source Read-only collection owned by this scene; explicit IDs survive updates and reordering.
+   * @param options Positive whole-collection and existing Model budgets.
+   * @return Immediately initialized model or the original typed admission/allocation failure.
+   * Changed source and model application are separate commits; failure preserves the last good model.
+   * Its publisher returns WOULD_BLOCK. New bound lists clear missing selection using the complete ID index.
+   */
+  template <class Source>
+    requires detail::ManagedCollectionSource<Source>
+  std::expected<ManagedModel<typename detail::CollectionSource<std::remove_cvref_t<Source>>::Row>, ManagedError>
+  model(Source &&source, CollectionModelOptions options = {});
+
   /** @brief Mount a table with owned range, input binding, style and automatic preparation.
    * @tparam T Immutable model row accepted by the owning column delegates.
    * @param parent Managed parent; failure removes only the attempted child.
@@ -1201,12 +1269,40 @@ public:
   void stop(Application &app) override;
 
 private:
+  struct OriginProperty {
+    std::shared_ptr<detail::ManagedOrigin> origin;
+    std::weak_ptr<void> property;
+    Node<Widget> receiver;
+  };
+
+  struct LiveTextRecord {
+    std::shared_ptr<detail::ManagedOrigin> origin;
+    int kind{};
+    PropertyOptions options;
+    bool publicUse{};
+    std::shared_ptr<Property<GraphemeText>> property;
+    std::function<std::expected<std::optional<GraphemeText>, ManagedError>(const GraphemeText *)> capture;
+    std::function<std::expected<std::optional<GraphemeText>, ManagedError>()> validateModel;
+    const char *operation{};
+    std::source_location registered;
+  };
+
+  std::expected<ManagedSource<GraphemeText>, ManagedError> attachLiveText(const ui::TextSource &source,
+                                                                          PropertyOptions options,
+                                                                          std::source_location registered,
+                                                                          bool publicUse);
+  std::expected<bool, TreeError> captureLiveText();
+  void pruneLiveText() noexcept;
+
   struct ObserverRecord {
     ManagedScene *scene{};
     Node<Widget> node;
+    std::shared_ptr<detail::ManagedOrigin> inputOrigin;
+    std::weak_ptr<detail::ManagedOrigin> recoveryOrigin;
     Subscription subscription;
     std::function<std::expected<std::uint64_t, TreeError>()> revision;
     std::function<std::expected<std::uint64_t, TreeError>(const std::shared_ptr<ObserverRecord> &)> deliver;
+    std::shared_ptr<std::optional<TextError>> textFailure;
     std::optional<std::uint64_t> successful;
     std::optional<ManagedError> shortFailure;
     const void *shortAttempt{};
@@ -1215,6 +1311,7 @@ private:
     const char *operation{};
     std::source_location origin{};
     bool initialPending{true};
+    bool failed{};
     bool running{};
     bool retired{};
 
@@ -1252,11 +1349,13 @@ private:
                                                                const std::shared_ptr<Property<T>> &source,
                                                                const std::shared_ptr<ObserverRecord> &record);
   std::expected<void, TreeError> invokeObserver(const std::shared_ptr<ObserverRecord> &record, ManagedPhase phase);
-  std::expected<void, TreeError> recoverObservers();
+  std::expected<void, TreeError> recoverObservers(std::size_t maxPasses = 0, bool *invoked = nullptr,
+                                                  bool *pending = nullptr, bool deferFailedLive = false);
+  std::expected<bool, TreeError> observerLive(const std::shared_ptr<ObserverRecord> &record);
   void pruneObservers() noexcept;
 
   bool observerMountPending() const noexcept {
-    return mountDepth_ && !observers_.empty();
+    return coldMountPending_ || (mountDepth_ && !observers_.empty());
   }
 
   template <class Value, class Callback>
@@ -1388,6 +1487,10 @@ private:
   template <class T>
   std::expected<std::shared_ptr<detail::ManagedModelSourceOf<T>>, ManagedError> modelSource(ManagedModel<T> model,
                                                                                             Node<Widget> parent);
+
+  template <class T, class Collection, class MakeRows>
+  std::expected<ManagedModel<T>, ManagedError> collectionModel(ManagedState<Collection> input,
+                                                               CollectionModelOptions options, MakeRows makeRows);
 
   template <class T, class W, class Prepare>
   std::expected<Node<W>, ManagedError> attachView(Node<W> node, std::shared_ptr<detail::ManagedModelSourceOf<T>> source,
@@ -1534,6 +1637,9 @@ private:
   std::vector<std::shared_ptr<Entry>> entries_;
   std::vector<std::shared_ptr<void>> properties_;
   std::vector<std::shared_ptr<ObserverRecord>> observers_ = std::vector<std::shared_ptr<ObserverRecord>>(0);
+  std::vector<OriginProperty> originProperties_ = std::vector<OriginProperty>(0);
+  std::size_t coldMountPending_{};
+  std::vector<std::shared_ptr<LiveTextRecord>> liveText_ = std::vector<std::shared_ptr<LiveTextRecord>>(0);
   std::vector<std::shared_ptr<detail::ManagedModelSource>> models_;
   std::shared_ptr<std::function<std::expected<bool, ManagedError>(const InputEvent &)>> input_;
   std::shared_ptr<KeySnapshot> keys_;
@@ -1578,3 +1684,5 @@ private:
 
 #include <portals/detail/managed_derive.hpp>
 #include <portals/detail/managed_views.hpp>
+
+#include <portals/detail/managed_collections.hpp>

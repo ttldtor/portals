@@ -193,6 +193,10 @@ std::expected<GraphemeText, TextError> GraphemeText::from(std::string_view bytes
   return result;
 }
 
+bool GraphemeText::operator==(const GraphemeText &other) const noexcept {
+  return bytes_ == other.bytes_ && policy_ == other.policy_;
+}
+
 std::string_view GraphemeText::bytes() const noexcept {
   return bytes_;
 }
