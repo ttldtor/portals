@@ -113,6 +113,10 @@ std::expected<void, ManagedError> ManagedScene::overlayHost(Node<OverlayHost> ho
     if ((existing && !existing->retired) || !find(host) || !find(body)) {
       return std::unexpected(error(ManagedPhase::BIND, host, TreeError::INVALID_ARGUMENT));
     }
+    if (auto notifications = router.state_->notifications.lock();
+        notifications && !notifications->retired && !router.within(body, notifications->wrapper)) {
+      return std::unexpected(error(ManagedPhase::BIND, host, TreeError::INVALID_ARGUMENT));
+    }
     if (auto registration = router.registration(host); registration && registration->focusable) {
       return std::unexpected(error(ManagedPhase::BIND, host, TreeError::INVALID_ARGUMENT));
     }
@@ -127,7 +131,7 @@ std::expected<void, ManagedError> ManagedScene::overlayHost(Node<OverlayHost> ho
       return std::unexpected(error(ManagedPhase::BIND, host, read ? parent.error() : read.error()));
     }
     if (!record->maximum || *parent != host ||
-        router.state_->registrations.size() + router.state_->scopes.size() >=
+        router.state_->registrations.size() + router.state_->scopes.size() + !router.state_->notifications.expired() >=
           router.state_->options.max_registrations) {
       return std::unexpected(
         error(ManagedPhase::BIND, host,

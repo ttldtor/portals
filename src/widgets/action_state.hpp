@@ -3,6 +3,7 @@
 #pragma once
 
 #include "dialog_state.hpp"
+#include "toast_state.hpp"
 #include "scroll_intent.hpp"
 #include <atomic>
 #include <optional>
@@ -128,5 +129,6 @@ struct EventRouter::State {
   bool closing{};
   bool dialogCancelRepeat{};
   std::weak_ptr<detail::DialogHostRecord> dialogs;
+  std::weak_ptr<detail::NotificationRecord> notifications;
 };
 } // namespace portals

@@ -133,7 +133,8 @@ std::expected<void, TreeError> EventRouter::canBind(Node<Widget> node) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
-  if (state_->registrations.size() + state_->scopes.size() + !state_->dialogs.expired() >=
+  if (state_->registrations.size() + state_->scopes.size() + !state_->dialogs.expired() +
+        !state_->notifications.expired() >=
       state_->options.max_registrations) {
     return std::unexpected(TreeError::NODE_LIMIT);
   }
@@ -160,6 +161,10 @@ EventRouter::add(Node<Widget> node, std::function<std::expected<EventReply, Tree
   }
 
   if (auto host = state_->dialogs.lock(); focusable && host && !host->retired && host->root == node) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+  if (auto notifications = state_->notifications.lock();
+      focusable && notifications && !notifications->retired && notifications->root == node) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
@@ -557,8 +562,8 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
 
       // Automatic return already performed this event's focus transition.
       const auto layer = dialogLayer(*target);
-      if (!*returned && (!layer || layer->options.mode == DialogMode::MODAL) && mouse->button == MouseButton::LEFT &&
-          mouse->action == MouseAction::PRESS) {
+      if (!*returned && !notificationHit(*target) && (!layer || layer->options.mode == DialogMode::MODAL) &&
+          mouse->button == MouseButton::LEFT && mouse->action == MouseAction::PRESS) {
         auto candidate = *target;
 
         while (candidate.id().session != 0) {
