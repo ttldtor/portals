@@ -9,7 +9,7 @@ int verifyTypedFailure() {
   ReplayTerminal terminal({{consumer::key(InputKey::ENTER)}});
   auto app = take(Application::create(formOptions(), terminal.clock()));
   auto scene = take(ManagedScene::create(*app));
-  const auto button = take(scene->emplace<Button>(scene->root(), text("Fail explicitly")));
+  const auto button = take(scene->emplace<Button>(scene->root(), consumer::text("Fail explicitly")));
 
   take(scene->onClick(button, []() -> std::expected<void, TreeError> {
     return std::unexpected(TreeError::INVALID_GEOMETRY);
@@ -45,11 +45,11 @@ int main(int argc, char **argv) {
   Outcome outcome;
   bool light{};
 
-  nodes.title = take(scene->emplace<Label>(column, text("Name: Enter saves | F2 theme | F10 quit")));
+  nodes.title = take(scene->emplace<Label>(column, consumer::text("Name: Enter saves | F2 theme | F10 quit")));
   nodes.editor = take(scene->emplace<LineEdit>(column, LineEditOptions{.editMode = EditMode::EXPLICIT}));
-  nodes.alerts = take(scene->emplace<CheckBox>(column, text("Alerts")));
-  nodes.run = take(scene->emplace<Button>(column, text("Run")));
-  nodes.status = take(scene->emplace<Label>(column, text("Ready")));
+  nodes.alerts = take(scene->emplace<CheckBox>(column, consumer::text("Alerts")));
+  nodes.run = take(scene->emplace<Button>(column, consumer::text("Run")));
+  nodes.status = take(scene->emplace<Label>(column, consumer::text("Ready")));
   nodes.meter = take(scene->emplace<Meter>(column));
 
   auto name = take(scene->state<std::string>("Portals"));

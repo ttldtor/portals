@@ -57,6 +57,16 @@ ManagedError textFailure(Node<Widget> node, TextValueError cause) {
 
 /** @brief Checked bridge to existing scene ownership and standard retained setters. */
 struct RefAccess {
+  static std::expected<void, TreeError> display(ManagedScene &scene, Node<Widget> target, DataPresentation value) {
+    auto found = std::ranges::find_if(scene.dataStates_, [&](const auto &record) {
+      return record->node == target;
+    });
+    if (found == scene.dataStates_.end()) {
+      return std::unexpected(TreeError::STALE_NODE);
+    }
+    return setDataStateView(scene.app_.tree(), (*found)->node, value);
+  }
+
   static bool eventReported(const ManagedScene &scene, const ManagedError &error) noexcept {
     return scene.shortReported(error);
   }
@@ -840,3 +850,19 @@ std::expected<ManagedSource<GraphemeText>, ManagedError> ManagedScene::attachLiv
   }
 }
 } // namespace portals
+
+std::expected<void, portals::TreeError> portals::ui::detail::displayDataState(std::shared_ptr<RefTarget> target,
+                                                                              DataPresentation value,
+                                                                              std::source_location origin) {
+  auto scene = eventScene(target);
+  auto result = scene ? RefAccess::display(**scene, target->node, value)
+                      : std::expected<void, TreeError>(std::unexpected(std::get_if<TreeError>(&scene.error().cause)
+                                                                         ? std::get<TreeError>(scene.error().cause)
+                                                                         : TreeError::CALLBACK_FAILED));
+  if (!result) {
+    auto failure =
+      scene ? ManagedError{ManagedPhase::PREPARE, target->node.id(), result.error(), {}, {}} : scene.error();
+    RefAccess::report(failure, target, "dataState.display", {}, "DataStateView", origin);
+  }
+  return result;
+}

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
+#include <portals/data_presentation.hpp>
 
 #include <portals/virtual_list.hpp>
 #include <portals/visible_model.hpp>
@@ -246,6 +247,15 @@ public:
     return VisibleModelSnapshot<T>{prepared_->range, prepared_->range.rows().subspan(offset, interval.count), interval};
   }
 
+  /** @return Owning facts of this successful preparation, without reading or pinning the model.
+   * Call through tree.read on UI. Hidden/unprepared views return prepared=false.
+   */
+  DataRangeStatus dataStatus() const noexcept {
+    return prepared_ ? DataRangeStatus{true, prepared_->range.state(), prepared_->frame.rowCount(),
+                                       prepared_->frame.dataRevision(), !request_.stopRequested()}
+                     : DataRangeStatus{};
+  }
+
   /** @param available Borrowed-by-value cell bounds; negative extents normalize to zero.
    * @return Normalized available extent without model access, formatting, allocation or invalidation.
    */
@@ -419,10 +429,16 @@ private:
 
     try {
       auto range = consumer_range;
+      const bool waitingRetry = retryPending_ && !request_.stopRequested() && request_.range() == window->requested &&
+                                request_.dataRevision() == frame.dataRevision() &&
+                                (frame.revision() == retryFrameRevision_ || range->state() == RangeState::PENDING);
+      // Retain the current explicit lease independently from the provider's base-read policy.
+      const bool waitingFailedBase = waitingRetry && retryFailedBase_;
 
       if (window->requested.count == 0) {
         range = ModelRange<T>{};
-      } else if (retry_ || range->range() != window->requested || range->state() == RangeState::PENDING) {
+      } else if (!waitingFailedBase &&
+                 (retry_ || range->range() != window->requested || range->state() == RangeState::PENDING)) {
         range = frame.read(window->requested);
       }
 
@@ -430,7 +446,7 @@ private:
         return std::unexpected(range.error());
       }
 
-      if (!retry_ && range->state() == RangeState::PENDING && window->requested.count != 0) {
+      if (!retry_ && !waitingFailedBase && range->state() == RangeState::PENDING && window->requested.count != 0) {
         auto cached = frame.readCached(*consumer_range, prepared_ ? &prepared_->range : nullptr, window->requested);
 
         if (!cached) {
@@ -517,6 +533,7 @@ private:
 
       // Work is requested only after every fallible formatting/allocation step succeeded.
       // Drop our cancelled lease before requesting, so a one-slot budget can recover after caller release.
+      const bool explicitRetry = retry_;
       if (needs_request) {
         request_.cancel();
         request_ = {};
@@ -529,7 +546,7 @@ private:
 
         dispatch.emplace(*request);
         request_ = std::move(*request);
-      } else if (range->state() != RangeState::PENDING || window->requested.count == 0) {
+      } else if ((!waitingRetry && range->state() != RangeState::PENDING) || window->requested.count == 0) {
         request_.cancel();
         request_ = {};
       }
@@ -547,6 +564,12 @@ private:
         anchor_.reset();
       }
 
+      retryPending_ =
+        (explicitRetry && needs_request) || (waitingRetry && window->requested.count && !request_.stopRequested());
+      if (explicitRetry && needs_request) {
+        retryFrameRevision_ = frame.revision();
+        retryFailedBase_ = range->state() == RangeState::FAILED;
+      }
       dirty_ = false;
       retry_ = false;
 
@@ -690,6 +713,9 @@ private:
   CellSize arranged_;
   bool dirty_{true};
   bool retry_{};
+  bool retryPending_{};
+  bool retryFailedBase_{};
+  std::uint64_t retryFrameRevision_{};
 };
 
 template <class T>

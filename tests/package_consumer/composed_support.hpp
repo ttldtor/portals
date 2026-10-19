@@ -31,7 +31,7 @@ inline SizePolicy viewPolicy(int width) {
 class Badge final : public Widget {
 public:
   /** @param caption UTF-8 caption copied into the widget. */
-  explicit Badge(std::string_view caption) : caption_(text(caption)) {
+  explicit Badge(std::string_view caption) : caption_(virtualConsumer::text(caption)) {
   }
 
   /** @param available Offered extent in terminal cells.

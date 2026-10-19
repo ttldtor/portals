@@ -16,7 +16,7 @@ bool causedBy(const ManagedError &error, TreeError cause) {
 }
 
 GraphemeText formatPrice(const ModelRow<Ohlc> &row) {
-  return text(std::to_string(static_cast<int>(row.value.close)));
+  return virtualConsumer::text(std::to_string(static_cast<int>(row.value.close)));
 }
 
 // The callbacks observe one borrowed frame, including retries caused by opening ranges.
@@ -82,7 +82,7 @@ void managedLifecycle() {
   auto scene = take(ManagedScene::create(*app));
   const auto root = scene->root();
   const auto column = take(scene->emplace<Column>(root));
-  const auto button = take(scene->emplace<Button>(column, text("Remove views")));
+  const auto button = take(scene->emplace<Button>(column, virtualConsumer::text("Remove views")));
   SizePolicy fill;
 
   fill.width = {.preferred = 0, .mode = SizeMode::FLEX};
@@ -268,7 +268,7 @@ void partialFactoryFailure() {
 
   auto scene = take(ManagedScene::create(*app, managedOptions));
   const auto column = take(scene->emplace<Column>(scene->root()));
-  const auto button = take(scene->emplace<Button>(column, text("Attempt nested factory")));
+  const auto button = take(scene->emplace<Button>(column, virtualConsumer::text("Attempt nested factory")));
   ModelOptions modelOptions;
 
   modelOptions.max_consumers = 1;

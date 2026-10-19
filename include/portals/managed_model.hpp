@@ -26,6 +26,7 @@ namespace detail {
 struct ManagedModelSource {
   virtual ~ManagedModelSource() = default;
   virtual std::expected<void, TreeError> pin() = 0;
+  virtual std::expected<std::optional<TreeError>, TreeError> dataError() const = 0;
   virtual bool bound() const noexcept = 0;
   virtual std::expected<bool, TreeError> synchronize() = 0;
   virtual void retire() noexcept = 0;
@@ -72,6 +73,10 @@ template <class T> struct ManagedModelSourceOf final : ManagedModelSource {
 
   std::expected<bool, TreeError> synchronize() override {
     return sync ? sync() : std::expected<bool, TreeError>(false);
+  }
+
+  std::expected<std::optional<TreeError>, TreeError> dataError() const override {
+    return model ? model->lastError() : std::expected<std::optional<TreeError>, TreeError>{std::nullopt};
   }
 
   std::expected<void, TreeError> pin() override {

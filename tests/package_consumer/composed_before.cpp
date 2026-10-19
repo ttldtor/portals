@@ -69,7 +69,7 @@ int main() {
     return {};
   };
   const auto format = [](const ModelRow<Ohlc> &row) {
-    return text("Close " + std::to_string(static_cast<int>(row.value.close)));
+    return virtualConsumer::text("Close " + std::to_string(static_cast<int>(row.value.close)));
   };
   const auto project = [](const Ohlc &value) {
     return std::optional{value};
@@ -80,13 +80,13 @@ int main() {
 
   const auto form = take(scene->emplace<Column>(scene->root(), LinearOptions{.padding = {1, 1, 1, 1}}));
 
-  nodes.title = take(scene->emplace<Label>(form, text("Composed prices: edit, run, inspect")));
+  nodes.title = take(scene->emplace<Label>(form, virtualConsumer::text("Composed prices: edit, run, inspect")));
   nodes.editor = take(scene->emplace<LineEdit>(form, LineEditOptions{.editMode = EditMode::EXPLICIT}));
   take(scene->bind(nodes.editor, name, edited));
 
   const auto actions = take(scene->emplace<Row>(form, LinearOptions{.gap = 1}));
 
-  nodes.button = take(scene->emplace<Button>(actions, text("Run")));
+  nodes.button = take(scene->emplace<Button>(actions, virtualConsumer::text("Run")));
   take(scene->onClick(nodes.button, clicked));
   nodes.badge = take(scene->emplace<Badge>(actions, "Custom: Right, Delete"));
   take(scene->onEvent(nodes.badge, customEvent));

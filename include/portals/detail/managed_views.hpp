@@ -156,6 +156,7 @@ std::expected<Node<W>, ManagedError> ManagedScene::attachView(Node<W> node,
 
     // Factory-created nodes cannot carry another binding. Construct the whole callback
     // before publishing it, so allocation failure retires the new child transactionally.
+    entry->viewSource = source;
     entry->viewPrepare = [this, node, source, prepare = std::move(prepare),
                           registration](const LayoutSnapshot &layout) -> std::expected<void, TreeError> {
       const auto retireOrigin = [&]() -> std::expected<void, TreeError> {

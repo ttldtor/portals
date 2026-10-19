@@ -20,6 +20,7 @@ The categories describe the learning path; the source directories remain stable.
 | Basics | [click handlers](../examples/click_handlers/main.cpp), `portals_click_handlers` | Observing refs, late click handlers and short quit. No CLI. |
 | Basics | [compact framed form](../examples/compact/main.cpp), `portals_compact_form` | Ready-made border and gauge, fixed sizing, a plain button and exact-ref styling; no custom widget or CLI. |
 | Basics | [protected editor](examples/guide_editor_display.cpp), `portals_docs_editor_display` | Internal editor state, owning placeholder, password display and checked undoable Clear; no CLI. Built with tests enabled. |
+| Basics | [data presentation](data-presentation.md), [complete source](examples/guide_data_state.cpp), `portals_docs_data_state` | Explicit loading, ready, empty, failed, offline and refreshing states around ordinary content; no CLI. Built with tests enabled. |
 | Basics | [resource form](../examples/scene_resource/main.cpp), `portals_scene_resource` | Runtime scene text, named references and existing managed actions; see [scene loading](scene-loading-guide.md). |
 | Basics | [gallery](../examples/gallery/main.cpp), [form](../examples/gallery/fluent_form.hpp), `portals_gallery` | A function returning a lazy scene, internal editor/checkbox state, buttons, six themes and CLI preflight. |
 | Showcase | [editor history](../examples/editor_history/main.cpp), `portals_editor_history` | Immediate, editing-finished and explicit model application; Undo/Redo; draft and published values. |

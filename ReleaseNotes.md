@@ -18,6 +18,9 @@ planned work is not included. An **Unreleased** heading has no publication date.
 - [Fixed] Browser gallery Debug startup uses an explicit configurable Wasm stack
   budget, with Debug stack overflow checks.
 
+- [Added] Data-state presentation for ordinary content and prepared virtual lists/tables,
+  with owning or read-only bound state, localized status labels, explicit retry and scoped animation.
+
 - [Added] LineEdit supports an owning placeholder, immutable NORMAL/PASSWORD/NO_ECHO
   display policies and a checked undoable user Clear command. Protected modes suppress
   outbound copy/cut while allowing writable paste; plaintext models, getters and bounded

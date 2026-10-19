@@ -56,7 +56,7 @@ void checkListOverload() {
   auto model = take(Model<Ohlc>::create(*tree, root, std::make_shared<const Prices>()));
   const auto list =
     take(tree->emplace<VirtualList<Ohlc>>(root, take(model->openRange()), [](const ModelRow<Ohlc> &row) {
-      return text(std::to_string(static_cast<int>(row.value.close)));
+      return virtualConsumer::text(std::to_string(static_cast<int>(row.value.close)));
     }));
   const auto frame = take(model->pin());
   const auto bounds = take(CellRect::from({}, {12, 4}));

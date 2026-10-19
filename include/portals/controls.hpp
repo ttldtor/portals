@@ -95,6 +95,7 @@ protected:
   void showMixed(bool mixed);
 
 private:
+  friend class ManagedScene;
   friend std::expected<void, TreeError> setControlText(WidgetTree &, Node<Control>, GraphemeText);
   friend std::expected<void, TreeError> setControlStyle(WidgetTree &, Node<Control>, ControlStyle);
   friend std::expected<void, TreeError> syncControl(WidgetTree &, Node<Control>, Node<Widget>);

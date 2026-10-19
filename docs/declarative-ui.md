@@ -6,6 +6,9 @@ Use the declarative API to arrange controls and attach event handlers.
 `ui::scene(...)` creates a [scene](glossary.md#glossary-scene), and
 `ui::runApp()` runs the application.
 
+Use [data presentation](data-presentation.md) to show loading and result states
+around ordinary content or a managed virtual list/table.
+
 ## Run a form
 
 In this program, **Add Hello** appends text to the editor. **Exit** and F10

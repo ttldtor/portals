@@ -10,7 +10,7 @@ int main() {
   auto app = take(Application::create({}, terminal.clock()));
   auto scene = take(ManagedScene::create(*app));
   const auto outer = take(scene->emplace<Column>(scene->root(), LinearOptions{.gap = 1, .padding = {1, 1, 1, 1}}));
-  const auto title = take(scene->emplace<Label>(outer, text("Immutable prices: table and chart")));
+  const auto title = take(scene->emplace<Label>(outer, virtualConsumer::text("Immutable prices: table and chart")));
 
   (void)title;
 

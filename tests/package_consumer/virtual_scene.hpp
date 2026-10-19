@@ -11,7 +11,7 @@ public:
   explicit Dashboard(Application &app, bool pending = false) {
     auto &tree = app.tree();
     const auto outer = take(tree.emplace<Column>(app.root(), LinearOptions{.gap = 1, .padding = {1, 1, 1, 1}}));
-    const auto title = take(tree.emplace<Label>(outer, text("Immutable prices: table and chart")));
+    const auto title = take(tree.emplace<Label>(outer, virtualConsumer::text("Immutable prices: table and chart")));
 
     (void)title;
 
