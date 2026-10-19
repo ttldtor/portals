@@ -2,18 +2,26 @@
 
 [Русская версия](ru/first-application.md) · [User guides](guides.md) · [Glossary](glossary.md)
 
-Build an application with an editor and **Save** and **Clear draft** buttons.
-In four steps, you will describe a form, connect actions and add styling.
-**Save** copies the editor text to the line below it. The note lasts until the
-application exits; this example does not write a file.
+This tutorial develops a small note form in four steps. The finished application
+has an editor, **Save** and **Clear draft** buttons, keyboard shortcuts and a theme.
+**Save** copies the current editor text to a line below it; **Clear draft** clears
+the editor while leaving that saved line unchanged. The note lasts until the
+application exits, because this example does not write a file.
 
-## 1. Create and run a form
+The animation shows the finished application: F2 saves the initial text, F3
+clears the editor, a new note is entered, and F2 saves it. We will start with
+a form containing an editor, then add button actions, shortcuts and styling.
+
+![Quick note form with an editor, a saved line, and Save and Clear draft buttons.](images/quick-note.gif)
+
+## 1. A form you can run
 
 You need Git, CMake 3.24+, Ninja and a toolchain supporting C99 and C++23,
-including `<expected>` and `<format>`. On Windows, open an x64 Developer
-PowerShell for Visual Studio. See the [short guide](index.md) for integration details.
+including `<expected>` and `<format>`. On Windows, an x64 Developer PowerShell
+for Visual Studio is required. Integration details are in the [short guide](index.md).
 
-Create a `quick-note` directory and save this code as `main.cpp`:
+For the first version, you can create a `quick-note` directory and save this
+code as `main.cpp`:
 
 <details open>
 <summary>Complete main.cpp after step 1</summary>
@@ -39,12 +47,13 @@ int main() {
 
 </details>
 
-`ui::vbox` describes a vertical arrangement of controls. This [recipe](glossary.md#glossary-recipe)
-is stored in a [scene](glossary.md#glossary-scene) by `ui::scene`.
-`ui::Ref<LineEdit> draft` provides access to the created editor. Run the program
-to edit **Remember the milk**; F10 exits.
+Here, `ui::vbox` describes a vertical arrangement of controls. It is a
+[recipe](glossary.md#glossary-recipe), which `ui::scene` stores in a
+[scene](glossary.md#glossary-scene). `ui::Ref<LineEdit> draft` provides access
+to the editor created from that recipe. When the program runs, you can edit
+**Remember the milk**; F10 exits the application.
 
-Create `CMakeLists.txt` in the same directory:
+The second file, `CMakeLists.txt`, connects this application to Portals:
 
 ```cmake
 cmake_minimum_required(VERSION 3.24)
@@ -61,7 +70,7 @@ add_executable(quick_note main.cpp)
 target_link_libraries(quick_note PRIVATE portals::core)
 ```
 
-Run these commands from `quick-note`:
+From `quick-note`, these commands configure, build and run the application:
 
 ```powershell
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -69,33 +78,34 @@ cmake --build build --target quick_note
 ./build/quick_note
 ```
 
-On Windows, the file is `build/quick_note.exe`. Run it in a terminal.
-CMake downloads the pinned Portals revision during the first configuration.
-To use an existing local checkout, add
+On Windows, the executable is `build/quick_note.exe`; it can be run in a terminal.
+During the first configuration, CMake downloads the pinned Portals revision.
+An existing local checkout can be used by adding
 `-DFETCHCONTENT_SOURCE_DIR_PORTALS="C:/path/to/portals"` to the configure command,
 substituting your path. [Complete step 1 source](examples/tutorial_note_1.cpp).
 
-## 2. Display the saved text
+## 2. Showing the saved text
 
-Exit the application. Continue editing the same `main.cpp` from step 1.
-After `ui::Ref<LineEdit> draft;`, add references to the label and button:
+The first version has an editor, but no place to see a saved copy. After exiting
+the application, continue in the same `main.cpp` from step 1. The label and
+button need references of their own, placed after `ui::Ref<LineEdit> draft;`:
 
 ```cpp
   ui::Ref<Label> saved;
   ui::Ref<Button> save;
 ```
 
-Inside `ui::vbox(...)`, immediately after `ui::lineEdit(draft, "Remember the milk"),`,
-add these two controls. Keep the final hint label after them:
+Inside `ui::vbox(...)`, the label and **Save** button follow the editor, with
+the hint label at the end:
 
 ```cpp
     ui::label(saved, "Nothing saved yet"),
     ui::button(save, "Save"),
 ```
 
-Between the `scene` declaration and `return scene`, create the `saveNote` action.
-In the chain after `return scene`, add `ui::onClick(save, saveNote)` before
-`ui::onKey("F10", ui::quit)`. This part of `main` becomes:
+The `saveNote` action copies the editor text into the label. It belongs between
+the `scene` declaration and `return scene`; the `ui::onClick` stage connects it
+to the button before the existing F10 handler:
 
 ```cpp
   auto saveNote = [draft, saved] {
@@ -108,11 +118,11 @@ In the chain after `return scene`, add `ui::onClick(save, saveNote)` before
     | ui::runApp();
 ```
 
-`saveNote` reads the current editor text and assigns it to the label.
-The `|` operator attaches a [UI stage](glossary.md#glossary-ui-stage) to the scene;
-`ui::onClick` connects the button to an action. Capture references by value in
-handlers: they observe the scene's controls and do not extend their lifetime.
-See [control references](text-property.md) for details.
+When **Save** is activated, `saveNote` reads the editor and assigns its current
+text to the label. The `|` operator attaches a [UI stage](glossary.md#glossary-ui-stage)
+to the scene, and `ui::onClick` connects the button to an action. The handler
+captures references by value; they observe the scene's controls and do not
+extend their lifetime. See [control references](text-property.md) for details.
 
 <details>
 <summary>Complete main.cpp after step 2</summary>
@@ -149,21 +159,25 @@ int main() {
 
 [Download the step 2 source](examples/tutorial_note_2.cpp).
 
-Repeat the build command from step 1 and run the application. Edit the text,
-press Tab to focus **Save**, then Enter. The note appears below the editor.
-Further editing leaves that line unchanged until the next **Save**.
+The build command from step 1 prepares this version. You can then run it
+with the same `./build/quick_note` command. While the application is
+running, the text can be edited; Tab moves focus to **Save**, and Enter activates
+the focused button. The saved copy appears below the editor. Further edits leave
+it unchanged until **Save** is activated again.
 
-## 3. Add clearing and shortcuts
+## 3. Draft clearing and shortcuts
 
-Exit the application. In `main.cpp` from step 2, after `ui::Ref<Button> save;`,
-add a reference to the clear button:
+The form can now save a copy. The next version adds a separate way to clear the
+editor and shortcuts for both actions. After exiting the application, the next
+changes go into `main.cpp` from step 2. A reference for the new button follows
+`ui::Ref<Button> save;`:
 
 ```cpp
   ui::Ref<Button> clear;
 ```
 
-Inside `ui::vbox(...)`, add **Clear draft** after **Save** and update the final
-hint label. The `scene` declaration now looks like this:
+Inside `ui::vbox(...)`, the **Clear draft** button follows **Save**. The final
+hint label also lists the new shortcuts; the `scene` declaration becomes:
 
 ```cpp
   auto scene = ui::scene(ui::vbox(
@@ -175,9 +189,9 @@ hint label. The `scene` declaration now looks like this:
     ui::label("Tab: focus | F2: save | F3: clear | F10: quit")));
 ```
 
-After the existing `saveNote` action, declare `clearDraft`.
-Extend the handler chain: connect the new button to clearing, F2 to saving,
-and F3 to clearing. The section from `clearDraft` to the end of the chain is:
+The `clearDraft` action clears the editor. After the existing `saveNote` action,
+it can be connected to the new button and F3; F2 can call the existing save
+action. The code from `clearDraft` through the end of the handler chain is:
 
 ```cpp
   auto clearDraft = [draft] {
@@ -241,22 +255,23 @@ int main() {
 
 [Download the step 3 source](examples/tutorial_note_3.cpp).
 
-Build and run again. Press F2, then F3: the editor becomes empty and the saved
-note remains. Type new text and press F2 to replace it. Tab moves focus between
-the editor and buttons; Enter activates the focused button. See the
-[input guide](input.md) for other shortcut forms.
+After rebuilding and running, F2 saves the current text and F3 clears the editor.
+The saved line remains visible when the draft is cleared. New text can replace
+that line with another F2 press. Tab moves focus between the editor and buttons;
+Enter activates the focused button. The [input guide](input.md) describes other
+shortcut forms.
 
-## 4. Add styling
+## 4. A theme and style
 
-Exit the application. At the start of `main.cpp` from step 3, after
-`#include <portals/ui.hpp>`, add the header for styling operations:
+The final version adds a palette and a rule that changes button appearance.
+After exiting the application, the styling header can follow
+`#include <portals/ui.hpp>` in `main.cpp` from step 3:
 
 ```cpp
 #include <portals/ui_style.hpp>
 ```
 
-In the chain after `return scene`, before `ui::onClick(save, saveNote)`,
-add these two stages:
+The theme and style stages can precede the existing event handlers in the chain:
 
 ```cpp
     | ui::theme(nordTheme())
@@ -264,9 +279,9 @@ add these two stages:
 ```
 
 `ui::theme(nordTheme())` selects a palette. The PSS rule makes button text bold
-and sets a minimum width of 16 terminal cells. Keep the references, form
-and handlers from step 3 in place. See [styles](styling-guide.md) and
-[themes](themes-guide.md) for more options.
+and sets a minimum width of 16 terminal cells. The references, form and handlers
+from step 3 remain part of the completed program. [Styles](styling-guide.md) and
+[themes](themes-guide.md) describe the available options.
 
 <details>
 <summary>Complete main.cpp after step 4</summary>
@@ -313,8 +328,8 @@ int main() {
 
 </details>
 
-[Download the step 4 source](examples/tutorial_note_4.cpp).
-Build with the same command and run the application to see the styling.
+[Download the step 4 source](examples/tutorial_note_4.cpp). After building with
+the same command, `./build/quick_note` runs this version with its theme and button styling.
 
 ## Result
 
@@ -330,5 +345,5 @@ before `runApp()` follows ordinary C++ exception rules; use the
 [factory overload](declarative-ui.md) to include that step in the error boundary.
 [Diagnostics](diagnostics.md) covers default and custom reports.
 
-Next, [add shared state](property.md) or [change the layout](layout.md).
-Choose a [user guide](guides.md) for your next task.
+Further topics include [shared state](property.md) and [layout](layout.md).
+Other practical tasks are covered in the [user guides](guides.md).

@@ -50,3 +50,10 @@ html.dark-mode .contents :is(img[src$="ownership.svg"], object[data$="ownership.
 }
 .portals-languages [aria-current="page"] { font-weight: bold; }
 .portals-languages a:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+
+/* Markdown screenshots and animations fit the reading column. */
+#doc-content img.inline,
+#doc-content .image img {
+  max-width: 100%;
+  height: auto;
+}
