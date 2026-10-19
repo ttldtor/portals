@@ -68,12 +68,15 @@ test('Run animates forward and backward once, ignores activation while disabled,
   await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
   await page.reload();
   await expect(page.locator('#status')).toHaveAttribute('data-state', 'running');
+  const row = page.locator('.xterm-rows > div').nth(10);
+  // Session startup precedes xterm's asynchronous first render.
+  await expect(galleryRow(page, 'Run something')).toBeVisible();
+  await expect(row).toContainText('(S)omething');
   await page.clock.pauseAt(pausedAt);
   await activateControl(page, 'Run something');
   const frames = ['(S)omething', 's(O)mething', 'so(M)ething', 'som(E)thing', 'some(T)hing',
     'somet(H)ing', 'someth(I)ng', 'somethi(N)g', 'somethin(G)', 'somethi(N)g',
     'someth(I)ng', 'somet(H)ing', 'some(T)hing', 'som(E)thing', 'so(M)ething', 's(O)mething', '(S)omething'];
-  const row = page.locator('.xterm-rows > div').nth(10);
   await expect(row).toContainText(frames[0]);
   const observed = [frames[0]];
   const frameStepMs = 16;
