@@ -5,6 +5,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Added] Ready-made message, confirmation and unsaved-changes dialogs provide
+  safe initial choices, owning localized captions and reusable observing handles.
+  Callback and coroutine consumers share the existing UI loop and retain complete
+  typed results; choosing Save requests an action without performing file I/O.
+
 - [Docs/Tests] A complete native nested settings form demonstrates editable fields,
   internal-state checkboxes and frame-edge scroll bars. Installed-package consumers
   check nested wheel ownership, focus reveal, clipping and capture retirement,

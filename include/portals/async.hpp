@@ -14,6 +14,9 @@
 #include <thread>
 
 namespace portals {
+namespace ui::detail {
+struct MessageAccess;
+}
 class AsyncTimer;
 template <class T> class AsyncReceive;
 
@@ -51,6 +54,29 @@ struct UiTaskOutcome {
 
 namespace detail {
 struct AsyncControl;
+struct AsyncWait;
+
+/// @cond INTERNAL
+struct AsyncInvocation {
+  std::weak_ptr<AsyncControl> control;
+  std::uint64_t generation{};
+  std::weak_ptr<AsyncWait> wait;
+  Publisher<int> wake;
+};
+
+AsyncInvocation asyncInvocation(const std::weak_ptr<AsyncControl> &control) noexcept;
+bool asyncInvocationCurrent(const AsyncInvocation &identity) noexcept;
+void asyncCancelInvocation(const AsyncInvocation &identity) noexcept;
+
+// Optional private adapter gate; ordinary receives have no additional admission condition.
+struct AsyncReceiveAdmission {
+  std::weak_ptr<const void> lifetime;
+  std::weak_ptr<const void> request;
+  const void *context{};
+  bool (*allows)(const void *, const std::shared_ptr<const void> &) noexcept {};
+};
+
+/// @endcond
 
 /** @brief Exact adapter awaiter classification; foreign resume contracts are rejected.
  * @tparam T Unqualified candidate awaiter type.
@@ -308,13 +334,23 @@ public:
         std::unexpected(SchedulerError::CLOSED);
       auto allowed = detail::asyncTree(state).withScope(detail::asyncNode(state), [&](const UiScope &scope) {
         connection = detail::asyncScheduler(state).template connect<detail::AsyncCompletion<T>>(
-          scope, [weak = std::weak_ptr(wait_), control = std::weak_ptr(state),
-                  generation = frame.promise().generation](std::shared_ptr<const detail::AsyncCompletion<T>> event) {
+          scope, [weak = std::weak_ptr(wait_), control = std::weak_ptr(state), generation = frame.promise().generation,
+                  admission = admission_](std::shared_ptr<const detail::AsyncCompletion<T>> event) {
             auto wait = weak.lock();
             auto retained = control.lock();
 
             if (!wait || !retained || wait->settled) {
               return;
+            }
+
+            if (admission.allows) {
+              const auto request = admission.request.lock();
+              // UI-affine, callback-free inspection must not prolong a raw context's lifetime token
+              // across frame destruction: the cancelled frame may itself destroy that context.
+              if (admission.lifetime.expired() || !request || !admission.allows(admission.context, request)) {
+                detail::asyncCancelInvocation({retained, generation, wait, {}});
+                return;
+              }
             }
 
             wait->result = event->result;
@@ -363,6 +399,7 @@ public:
 
 private:
   friend class UiAsyncContext;
+  friend struct ui::detail::MessageAccess;
 
   AsyncReceive(std::weak_ptr<detail::AsyncControl> control, std::function<void(AsyncReply<T>)> start)
       : control_(std::move(control)), start_(std::move(start)) {
@@ -371,6 +408,7 @@ private:
   std::weak_ptr<detail::AsyncControl> control_;
   std::function<void(AsyncReply<T>)> start_;
   std::shared_ptr<Wait> wait_;
+  detail::AsyncReceiveAdmission admission_;
   AsyncError fallback_{AsyncError::CLOSED};
 };
 
@@ -428,6 +466,7 @@ public:
 
 private:
   friend class UiAsync;
+  friend struct ui::detail::MessageAccess;
 
   explicit UiAsyncContext(std::weak_ptr<detail::AsyncControl> control) : control_(std::move(control)) {
   }

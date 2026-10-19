@@ -6,6 +6,7 @@
 #include <portals/detail/move_only_function.hpp>
 #include <portals/grid.hpp>
 #include <portals/managed.hpp>
+#include <portals/message_box.hpp>
 #include <portals/ui_ref.hpp>
 #include <portals/ui_scene.hpp>
 
@@ -526,6 +527,8 @@ private:
  * Construction allocates and can throw; moved-from references produce an empty text observation.
  */
 template <class T> class Ref : public NodeRef<T> {
+  friend struct detail::MessageAccess;
+
 public:
   /** @brief Allocate an empty observing slot on the UI thread; may throw std::bad_alloc. */
   Ref() {

@@ -29,6 +29,7 @@ The categories describe the learning path; the source directories remain stable.
 | Basics | [live text lists](examples/guide_text_transforms.cpp), `portals_docs_text_transforms` | Native editor draft → words/graphemes → virtual lists; [build and contracts](bindings-guide.md#live-text-transforms). |
 | Customization | [nested scroll form](examples/guide_nested_scroll.cpp), `portals_docs_nested_scroll` | Editable fields, internal-state checkboxes and nested frame-edge bars; [contracts](scroll-controls.md#nested-scroll-areas). Built with tests enabled. |
 | Customization | [modal settings](examples/guide_dialog.cpp), `portals_docs_dialog` | Retained editable dialog, inline open/dismiss and ordinary cleanup; [contracts](dialogs.md). Built with tests enabled. |
+| Basics | [modal choices](examples/guide_message_box.cpp), `portals_docs_message_box` | Three ready-made modal choice sets, safe cancellation defaults and a deferred `MessageResult` callback; [contracts](dialogs.md). Built with tests enabled. |
 | Experimental | [compile-time styles](compile-time-styles.md) | Compile-time descriptors and PSS checking: optional advanced material, not prerequisites for a form. |
 
 F10 exits the interactive programs. The gallery, custom widget and dashboard

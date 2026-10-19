@@ -146,3 +146,52 @@ Closed and unchanged dialogs need no polling timer or permanent redraw. Scene
 shutdown retires them with other managed resources. MessageBox results,
 save/discard workflows and asynchronous dialog results are application
 compositions, not additional promises of this foundation.
+
+## Ready-made modal choices
+
+Use `ui::messageBox`, `ui::confirmDialog` or `ui::unsavedChangesDialog` when a
+modal needs one of the maintained button sets. The [complete source](examples/guide_message_box.cpp)
+is included below; link `portals::core` as for the dialog guide. The standalone
+guide project builds `guide_message_box`; the root build with
+`PORTALS_BUILD_TESTS=ON` builds `portals_docs_message_box`.
+
+\include guide_message_box.cpp
+
+| Preset | Buttons | Default focus |
+| --- | --- | --- |
+| `messageBox` | `ACKNOWLEDGE` | `ACKNOWLEDGE` |
+| `confirmDialog` | `CONFIRM`, `CANCEL` | Safe `CANCEL` |
+| `unsavedChangesDialog` | `SAVE`, `DISCARD`, `CANCEL` | Safe `CANCEL` |
+
+`MessageOptions::defaultChoice` can select another button in that preset.
+`CONFIRM` and `DISCARD` require the explicit `allowDestructiveDefault` opt-in.
+These helpers require a modal `DialogOptions` configuration with Escape enabled;
+use `ui::dialog` for custom layouts, button sets or non-modal panels. Captions
+and title/body text are owning and may use the existing synchronous resolver.
+Captions must be non-empty single-line text. `textLimits` defaults to
+16,384 input bytes, 4,096 bytes per cluster, 16,384 graphemes and 32,768 cells;
+`maxBodyLines` defaults to 4,096 wrapped lines.
+
+`MessageBox` is a UI-thread-affine observer. Its copies do not own the scene,
+widget or callbacks; a cold handle reports `CLOSED`, a retired identity reports
+`STALE_NODE`, and wrong-thread/session access is checked. Mount the associated
+dialog, then call `open(callback)` or `cancel()` through the ordinary declarative
+handler chain. The action receives `const MessageResult&`; check it before
+reading the choice. A value is a user/programmatic choice, while an error is a
+technical managed failure retaining its full `ManagedError`. `CANCEL` is a
+choice, never a technical failure. `SAVE` records a request only: the example
+does not persist data or prove that a save completed.
+The example displays successful action requests. For application-specific recovery,
+inspect the complete managed failure in the callback.
+
+`lastResult()` returns an owning immutable snapshot once a request completes;
+before then it reports `WOULD_BLOCK`. Requests remain busy while callback
+delivery or async retirement is pending. Callback delivery uses the existing
+UI scheduler and runner. `receive()` integrates with an existing `UiTask` and
+`UiAsyncContext`; it does not add an event loop, custom awaiter or coroutine
+runtime. Async delivery may be deferred when the bounded completion queue is
+full; the existing after-dispatch retry handles available capacity. The scene
+limits outstanding/reserved/retired MessageBox requests to 32 by default
+(`ManagedOptions::maxMessageRequests`). Queue exhaustion and teardown can
+still reject or cancel delivery, so an asynchronous result is not a durable
+business record.

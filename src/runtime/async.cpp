@@ -18,6 +18,7 @@ struct AsyncControl {
   std::coroutine_handle<UiTask::promise_type> frame{};
   std::weak_ptr<AsyncWait> wait;
   Subscription sentinel;
+  Publisher<int> scopeWake;
   std::weak_ptr<AsyncScopeLifetime> scopeLifetime;
   UiTaskOutcome outcome;
   std::uint64_t generation{};
@@ -38,6 +39,28 @@ struct AsyncScopeLifetime {
     }
   }
 };
+
+AsyncInvocation asyncInvocation(const std::weak_ptr<AsyncControl> &control) noexcept {
+  auto state = control.lock();
+  if (!state || state->owner != std::this_thread::get_id() || !state->alive) {
+    return {};
+  }
+  return {state, state->generation, state->wait, state->scopeWake};
+}
+
+bool asyncInvocationCurrent(const AsyncInvocation &identity) noexcept {
+  auto state = identity.control.lock();
+  auto wait = identity.wait.lock();
+  return state && state->owner == std::this_thread::get_id() && state->alive && wait &&
+         state->generation == identity.generation && state->wait.lock() == wait;
+}
+
+void asyncCancelInvocation(const AsyncInvocation &identity) noexcept {
+  if (asyncInvocationCurrent(identity)) {
+    auto state = identity.control.lock();
+    state->stop(AsyncError::CLOSED, false);
+  }
+}
 
 AsyncError asyncError(SchedulerError error) noexcept {
   switch (error) {
@@ -383,6 +406,7 @@ std::expected<std::unique_ptr<UiAsync>, AsyncError> UiAsync::create(Scheduler &s
     }
 
     state->sentinel = std::move(sentinel->subscription);
+    state->scopeWake = sentinel->publisher;
     state->scopeLifetime = lifetime;
     lifetime->armed = true;
 

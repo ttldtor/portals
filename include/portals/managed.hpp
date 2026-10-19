@@ -35,6 +35,7 @@ struct SceneAccess;
 struct ClickAccess;
 struct NamedAccess;
 struct LayoutAccess;
+struct MessageAccess;
 class SetupFailureTicket;
 } // namespace ui::detail
 
@@ -52,6 +53,8 @@ struct ScrollIntentRecord;
 struct ManagedScrollTestAccess;
 struct DialogHostRecord;
 struct DialogRecord;
+struct MessageRecord;
+struct MessageRequest;
 template <class T> inline constexpr bool IS_MANAGED_TREE_RESULT = false;
 template <class Value> inline constexpr bool IS_MANAGED_TREE_RESULT<std::expected<Value, TreeError>> = true;
 
@@ -187,6 +190,7 @@ struct ManagedOptions {
   std::size_t maxObservers{256};       ///< Positive scene-owned state observer limit.
   std::size_t maxObserversPerNode{64}; ///< Positive state observer limit per receiving node.
   std::size_t maxObserverRecoveryPasses{16}; ///< Positive dirty-prepare convergence bound.
+  std::size_t maxMessageRequests{32};        ///< Positive cap including reservations and retired undelivered requests.
 };
 
 /** @brief Weak UI handle to a scene-owned Property, never an owning alias.
@@ -1482,9 +1486,19 @@ private:
   friend struct ui::detail::ClickAccess;
   friend struct ui::detail::NamedAccess;
   friend struct ui::detail::LayoutAccess;
+  friend struct ui::detail::MessageAccess;
   friend struct detail::ManagedScrollTestAccess;
 
   struct Entry;
+  std::shared_ptr<detail::MessageRecord> findMessage(Node<Widget> node) const;
+  bool messageOwner(Node<Widget> owner) const;
+  bool messageWithin(Node<Widget> root, Node<Widget> node) const;
+  std::expected<Node<Widget>, TreeError> messageParent(Node<Widget> node) const;
+  std::expected<void, TreeError> prepareMessages();
+  void retireMessages() noexcept;
+  void completeMessage(const std::shared_ptr<detail::MessageRecord> &record,
+                       const std::expected<void, ManagedError> &result, bool opening, bool committed);
+  void deliverMessage(const std::shared_ptr<detail::MessageRequest> &request);
   std::shared_ptr<detail::DialogRecord> findDialog(Node<Widget> node) const;
   std::expected<void, TreeError> changeDialog(Node<Widget> node, bool open, DialogDismissReason reason);
   std::expected<void, ManagedError> dialogCommand(Node<Widget> node, bool opening, DialogDismissReason reason);
@@ -1805,6 +1819,11 @@ private:
   std::size_t clickHandlers_{};
   std::vector<std::shared_ptr<LayoutRecord>> layouts_ = std::vector<std::shared_ptr<LayoutRecord>>(0);
   std::shared_ptr<detail::DialogHostRecord> dialogs_;
+  std::vector<std::shared_ptr<detail::MessageRecord>> messages_ =
+    std::vector<std::shared_ptr<detail::MessageRecord>>(0);
+  std::vector<std::shared_ptr<detail::MessageRequest>> messageRequests_ =
+    std::vector<std::shared_ptr<detail::MessageRequest>>(0);
+  bool collectingMessages_{};
   bool dialogOperation_{};
   bool collectingDialogs_{};
   std::uint64_t layoutRevision_{};
