@@ -145,6 +145,7 @@ public:
   }
 
 private:
+  friend class ManagedScene;
   friend constexpr TextValue i18n(std::string_view key);
 
   constexpr TextValue(std::string_view key, bool resource) : bytes_(key), resource_(resource) {

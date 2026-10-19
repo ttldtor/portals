@@ -5,6 +5,18 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Added] A checked theme-selection model previews catalog choices, atomically
+  applies or cancels a preview and preserves application/user style overrides.
+  External theme changes retire stale preview authority. A complete native guide
+  demonstrates the model without introducing another event loop or theme registry.
+- [Added] Annotated key bindings expose shared labels, availability and shortcuts
+  through KeyHints and nonmodal HelpView. Weak observing handles support checked
+  rebinding and removal without a separate keymap or manual presentation sync.
+- [Added] Managed action handlers can return the complete checked ManagedError
+  result while retaining its diagnostic receipt, original cause and first failure.
+- [Docs] English and Russian guides now have separate navigation and search,
+  paired language links, updated walkthroughs and a complete native quick-note example.
+
 - [Added] Ready-made message, confirmation and unsaved-changes dialogs provide
   safe initial choices, owning localized captions and reusable observing handles.
   Callback and coroutine consumers share the existing UI loop and retain complete

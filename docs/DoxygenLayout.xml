@@ -21,6 +21,7 @@
       <tab type="user" title="Managed controls" url="@ref docs/managed-controls.md" />
       <tab type="user" title="Dialogs" url="@ref docs/dialogs.md" />
       <tab type="user" title="Notifications" url="@ref docs/notifications.md" />
+      <tab type="user" title="Key hints and help" url="@ref docs/key-help.md" />
       <tab type="user" title="Use the installed package" url="@ref docs/package.md" />
       <tab type="user" title="Current limitations" url="@ref docs/limitations.md" />
       <tab type="user" title="Release notes" url="@ref ReleaseNotes.md" />
@@ -42,6 +43,7 @@
         <tab type="user" title="Grid and Overlay" url="@ref docs/grid.md" />
         <tab type="user" title="Styles and themes" url="@ref docs/styles.md" />
         <tab type="user" title="Style layers" url="@ref docs/style-layers.md" />
+        <tab type="user" title="Checked theme previews" url="@ref docs/theme-selection.md" />
       </tab>
       <tab type="usergroup" title="State and data">
         <tab type="user" title="Properties" url="@ref docs/property.md" />
@@ -144,12 +146,14 @@
       <tab type="user" title="Управляемые контролы" url="@ref docs/ru/managed-controls.md" />
       <tab type="user" title="Диалоги" url="@ref docs/ru/dialogs.md" />
       <tab type="user" title="Уведомления" url="@ref docs/ru/notifications.md" />
+      <tab type="user" title="Подсказки клавиш и справка" url="@ref docs/ru/key-help.md" />
     </tab>
     <tab type="usergroup" title="Стили и темы">
       <tab type="user" title="Гайд по стилям" url="@ref docs/ru/styling-guide.md" />
       <tab type="user" title="Гайд по темам" url="@ref docs/ru/themes-guide.md" />
       <tab type="user" title="Синтаксис PSS" url="@ref docs/ru/styles.md" />
       <tab type="user" title="Слои стилей" url="@ref docs/ru/style-layers.md" />
+      <tab type="user" title="Предпросмотр тем" url="@ref docs/ru/theme-selection.md" />
       <tab type="user" title="Стили времени компиляции" url="@ref docs/ru/compile-time-styles.md" />
       <tab type="user" title="PSS времени компиляции" url="@ref docs/ru/compile-time-pss.md" />
     </tab>

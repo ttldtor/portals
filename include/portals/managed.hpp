@@ -9,6 +9,7 @@
 #include <portals/detail/setup_failure.hpp>
 #include <portals/dialog.hpp>
 #include <portals/editor_command.hpp>
+#include <portals/key_binding.hpp>
 #include <portals/line_edit.hpp>
 #include <portals/managed_diagnostics.hpp>
 #include <portals/managed_model.hpp>
@@ -38,12 +39,18 @@ struct ClickAccess;
 struct NamedAccess;
 struct LayoutAccess;
 struct MessageAccess;
+struct KeyHelpAccess;
+struct ThemeSelectionAccess;
 class SetupFailureTicket;
 } // namespace ui::detail
 
 namespace ui {
 class TextSource;
-}
+class ThemeChoice;
+class ThemeSelectionRef;
+struct ThemeSelectionOptions;
+struct ThemeSelectionSnapshot;
+} // namespace ui
 
 namespace style::ct::detail {
 struct Access;
@@ -61,6 +68,9 @@ struct NotificationRecord;
 struct ToastCandidate;
 struct ToastTimerMarker;
 struct ToastPayload;
+struct KeyHelpRecord;
+struct ThemeSelectionRecord;
+enum class ThemeSelectionCommand;
 template <class T> inline constexpr bool IS_MANAGED_TREE_RESULT = false;
 template <class Value> inline constexpr bool IS_MANAGED_TREE_RESULT<std::expected<Value, TreeError>> = true;
 
@@ -74,7 +84,8 @@ concept ManagedTreeResult = IS_MANAGED_TREE_RESULT<T>;
  * @tparam T Exact callback result type.
  */
 template <class T>
-concept ManagedActionResult = std::same_as<T, void> || ManagedTreeResult<T> || std::same_as<T, EditorCommandResult>;
+concept ManagedActionResult = std::same_as<T, void> || ManagedTreeResult<T> || std::same_as<T, EditorCommandResult> ||
+                              std::same_as<T, std::expected<void, ManagedError>>;
 
 /** @brief Ignore a successful payload and destroy it before leaving the entered callback scope.
  * @tparam Callback Callable returning void or an exact checked TreeError result.
@@ -195,8 +206,12 @@ struct ManagedOptions {
     3};                                ///< Positive queue-full attempt cap before one typed rejection and cancellation.
   std::size_t maxObservers{256};       ///< Positive scene-owned state observer limit.
   std::size_t maxObserversPerNode{64}; ///< Positive state observer limit per receiving node.
-  std::size_t maxObserverRecoveryPasses{16}; ///< Positive dirty-prepare convergence bound.
-  std::size_t maxMessageRequests{32};        ///< Positive cap including reservations and retired undelivered requests.
+  std::size_t maxObserverRecoveryPasses{16};  ///< Positive dirty-prepare convergence bound.
+  std::size_t maxMessageRequests{32};         ///< Positive cap including reservations and retired undelivered requests.
+  std::size_t maxKeyLabelBytes{512};          ///< Positive input and resolved label byte cap.
+  std::size_t maxKeyDescriptionBytes{2048};   ///< Positive input and resolved description byte cap.
+  std::size_t maxKeyProjectionBytes{1048576}; ///< Positive aggregate logical projection payload budget.
+  KeyCapabilities keyCapabilities{};          ///< Explicit native phase knowledge; UNKNOWN remains routable.
 };
 
 /** @brief Weak UI handle to a scene-owned Property, never an owning alias.
@@ -675,7 +690,7 @@ public:
   template <class Callback>
     requires detail::ManagedAction<Callback, KeyEvent>
   std::expected<void, ManagedError> onKey(KeyEvent chord, Callback action) {
-    auto allowed = boundary(ManagedPhase::BIND, root_);
+    auto allowed = keyBoundary();
 
     if (!allowed) {
       return allowed;
@@ -699,6 +714,57 @@ public:
       return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::CALLBACK_FAILED));
     }
   }
+
+  /** @tparam Callback Exact compact managed action, optionally borrowing the admitted key.
+   * @param selection Owning normalized alternatives and native phases.
+   * @param info Owning annotated metadata, resolved before publication.
+   * @param action Action owned only by the canonical registration.
+   * @param origin Registration site used only when the error has no more precise provenance.
+   * @return Atomic registration and weak handle, or the exact typed failure. */
+  template <class Callback>
+    requires detail::ManagedAction<Callback, KeyEvent>
+  std::expected<KeyBinding, ManagedError> onKey(const KeySelection &selection, KeyInfo info, Callback action,
+                                                std::source_location origin = std::source_location::current()) {
+    auto allowed = keyBoundary();
+    if (!allowed) {
+      return std::unexpected(allowed.error());
+    }
+    auto observed = observeKeyScopes();
+    if (!observed) {
+      return std::unexpected(observed.error());
+    }
+    KeyTransaction transaction(*this);
+    try {
+      const auto &shortcut = detail::KeySelectionAccess::shortcut(selection);
+      if (!shortcut || !*shortcut) {
+        const auto cause = shortcut ? ShortcutError{ShortcutErrorKind::INVALID_CHORD, 0} : shortcut.error();
+        auto failure =
+          error(ManagedPhase::BIND, root_,
+                cause.cause == ShortcutErrorKind::NO_MEMORY ? TreeError::NO_MEMORY : TreeError::INVALID_ARGUMENT);
+        failure.shortcut = cause;
+        failure.registrationOrigin = origin;
+        return std::unexpected(failure);
+      }
+      auto validated = keyPreflight(info);
+      if (!validated) {
+        return std::unexpected(validated.error());
+      }
+      transaction.owner = info.owner;
+      return registerAnnotatedKey(selection, std::move(info), actionAdapter<KeyEvent>(std::move(action), origin),
+                                  origin, transaction);
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::NO_MEMORY));
+    } catch (...) {
+      return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::CALLBACK_FAILED));
+    }
+  }
+
+  /** @return Independent owning DTO after existing focus recovery; may deliver existing focus callbacks.
+   * No action/resolver is invoked while constructing rows; never returns a stale projection. */
+  std::expected<KeyBindingsSnapshot, ManagedError> keyBindings();
+  /** @param capabilities Explicit native phase knowledge. @return Checked admission change; equal values are a no-op.
+   */
+  std::expected<void, ManagedError> setKeyCapabilities(KeyCapabilities capabilities);
 
   /** @tparam Value Owning Shortcut value, borrowed until copied/moved inside the checked boundary.
    * @tparam Callback Owning compact action, optionally receiving the admitted semantic KeyEvent.
@@ -738,7 +804,7 @@ public:
     requires detail::ManagedAction<Callback, KeyEvent>
   std::expected<void, ManagedError> onKey(const KeySelection &selection, Callback action,
                                           std::source_location origin = std::source_location::current()) {
-    auto allowed = boundary(ManagedPhase::BIND, root_);
+    auto allowed = keyBoundary();
 
     if (!allowed) {
       return allowed;
@@ -1266,7 +1332,7 @@ public:
       return allowed;
     }
     try {
-      return registerLayout(node, actionAdapter<NodeGeometry>(std::move(callback)), origin);
+      return registerLayout(node, actionAdapter<NodeGeometry>(std::move(callback), origin), origin);
     } catch (const std::bad_alloc &) {
       return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
     } catch (...) {
@@ -1432,7 +1498,7 @@ private:
   std::expected<void, ManagedError> onShortcutActions(Value &&shortcut, Callback &action,
                                                       detail::ShortcutActions actions, ShortcutOptions options,
                                                       std::source_location origin) {
-    auto allowed = boundary(ManagedPhase::BIND, root_);
+    auto allowed = keyBoundary();
 
     if (!allowed) {
       return allowed;
@@ -1455,7 +1521,7 @@ private:
     try {
       // Avoid both caller-side transfers and noexcept debug-vector moves before the checked boundary.
       Shortcut owned(std::forward<Value>(shortcut));
-      auto adapter = actionAdapter<KeyEvent>(std::move(action));
+      auto adapter = actionAdapter<KeyEvent>(std::move(action), origin);
 
       if (!adapter) {
         return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::INVALID_ARGUMENT));
@@ -1471,6 +1537,36 @@ private:
 
   struct KeyRecord;
   struct KeySnapshot;
+
+  struct KeyTransaction {
+    bool &active;
+    std::shared_ptr<KeySnapshot> previous;
+    std::shared_ptr<std::function<std::expected<bool, ManagedError>(const InputEvent &)>> input;
+    std::uint64_t revision, focus, tree;
+    Node<Widget> owner;
+
+    explicit KeyTransaction(ManagedScene &scene)
+        : active(scene.keyStaging_), previous(scene.keys_), input(scene.input_), revision(scene.keyRevision_),
+          focus(scene.app_.router().focusGeneration()), tree(scene.app_.tree().inputGeneration()) {
+      active = true;
+    }
+
+    ~KeyTransaction() {
+      active = false;
+    }
+
+    void release() noexcept {
+      active = false;
+    }
+  };
+  enum class KeyChange {
+    ENABLED,
+    VISIBLE,
+    TEXT,
+    REBIND,
+    UNBIND,
+    REMOVE
+  };
   struct KeyPending;
 
   std::expected<void, ManagedError> registerLegacyKey(KeyEvent chord,
@@ -1484,6 +1580,32 @@ private:
   std::expected<bool, ManagedError> waitForKey(const std::shared_ptr<KeySnapshot> &snapshot,
                                                const std::shared_ptr<KeyRecord> &winner, std::size_t depth);
   static void resetKeys(KeyPending &pending) noexcept;
+  std::expected<KeyBinding, ManagedError>
+  registerAnnotatedKey(const KeySelection &selection, KeyInfo info,
+                       std::function<EditorCommandResult(const KeyEvent &)> action, std::source_location origin,
+                       KeyTransaction &transaction);
+  std::expected<void, ManagedError> keyBoundary() const;
+  std::expected<void, ManagedError> keyPreflight(KeyInfo &info);
+  std::expected<void, ManagedError> changeKey(KeyBindingId id, KeyChange change, bool value = false,
+                                              const KeySelection *selection = nullptr, const KeyInfo *text = nullptr);
+  std::expected<void, ManagedError> observeKeyScopes();
+  std::expected<std::shared_ptr<const KeyBindingsSnapshot>, ManagedError> readKeyProjection(bool recover);
+  std::expected<void, TreeError> prepareKeyHelp(const std::shared_ptr<detail::KeyHelpRecord> &record,
+                                                const LayoutSnapshot &snapshot);
+  std::expected<void, ManagedError>
+  checkKeyProjectionBudget(const detail::KeyHelpRecord *replacement,
+                           const std::shared_ptr<const KeyBindingsSnapshot> &projection, std::size_t projectionBytes,
+                           std::size_t textBytes);
+  std::expected<void, ManagedError> changeHelp(Node<Widget> node, bool opening);
+  std::uint64_t helpActivation(Node<Widget> node) const noexcept;
+  std::weak_ptr<detail::ActionCancellation> helpScope(Node<Widget> node) const noexcept;
+  std::expected<GraphemeText, ManagedError> keyText(const TextValue &value, const KeyTextResolver &resolver,
+                                                    std::size_t limit, bool label);
+  KeyEligibility keyEligibility(const KeyRecord &record, Node<Widget> focus) const;
+  std::expected<void, ManagedError> publishKeyCandidate(std::shared_ptr<KeySnapshot> snapshot, bool preserve,
+                                                        KeyTransaction &transaction, KeyBinding *result = nullptr,
+                                                        const std::shared_ptr<detail::KeyBindingSlot> &slot = {});
+  friend class KeyBinding;
 
   friend struct style::ct::detail::Access;
   friend struct ui::detail::Access;
@@ -1495,6 +1617,8 @@ private:
   friend struct ui::detail::MessageAccess;
   friend struct ui::detail::NotificationAccess;
   friend class ui::NotificationCenter;
+  friend struct ui::detail::KeyHelpAccess;
+  friend struct ui::detail::ThemeSelectionAccess;
   friend struct detail::ManagedScrollTestAccess;
 
   struct Entry;
@@ -1616,6 +1740,7 @@ private:
     std::function<std::expected<void, TreeError>(Node<Widget>)> sync;
     std::function<std::expected<void, TreeError>(Node<Widget>)> customSync;
     std::function<std::expected<void, TreeError>(const LayoutSnapshot &)> viewPrepare;
+    std::shared_ptr<detail::KeyHelpRecord> keyHelp;
     std::weak_ptr<detail::ManagedModelSource> viewSource;
     bool stylePending{};
     bool removed{};
@@ -1704,7 +1829,9 @@ private:
     return root ? std::expected<void, TreeError>{} : std::unexpected(root.error());
   }
 
-  template <class Callback> std::function<EditorCommandResult(ui::ClickParams &)> clickAdapter(Callback action) {
+  template <class Callback>
+  std::function<EditorCommandResult(ui::ClickParams &)>
+  clickAdapter(Callback action, std::source_location origin = std::source_location::current()) {
     ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
     if constexpr (std::is_pointer_v<Callback> || requires { action.operator bool(); }) {
       if (!static_cast<bool>(action)) {
@@ -1712,32 +1839,54 @@ private:
       }
     }
 
-    return ui::detail::currentSceneCallback(
-      facadeContext(),
-      [this, lifetime = std::weak_ptr<const void>(lifetime_),
-       action = std::move(action)]([[maybe_unused]] ui::ClickParams &params) mutable -> EditorCommandResult {
-        if (lifetime.expired()) {
-          return EditorCommandResult(std::unexpected(TreeError::CLOSED), {}, false);
-        }
-        auto admitted = actionBoundary();
-        if (!admitted) {
-          return EditorCommandResult(std::move(admitted), {}, false);
-        }
-        ActionAdmission admission(*this);
-        const auto invoke = [&]() -> decltype(auto) {
+    if constexpr (requires(Callback &callback, ui::ClickParams &params) {
+                    { callback(params) } -> std::same_as<std::expected<void, ManagedError>>;
+                  } || (!std::invocable<Callback &, ui::ClickParams &> && requires(Callback &callback) {
+                    { callback() } -> std::same_as<std::expected<void, ManagedError>>;
+                  })) {
+      return clickAdapter([this, action = std::move(action),
+                           origin]([[maybe_unused]] ui::ClickParams &params) mutable -> EditorCommandResult {
+        auto result = [&] {
           if constexpr (std::invocable<Callback &, ui::ClickParams &>) {
             return action(params);
           } else {
             return action();
           }
-        };
-
-        if constexpr (std::same_as<decltype(invoke()), EditorCommandResult>) {
-          return invoke();
-        } else {
-          return EditorCommandResult(detail::invokeIgnoringValue(invoke), {}, false);
+        }();
+        if (!result && !result.error().registrationOrigin) {
+          result.error().registrationOrigin = origin;
         }
+        return admitActionResult(std::move(result));
       });
+    } else {
+      return ui::detail::currentSceneCallback(
+        facadeContext(),
+        [this, lifetime = std::weak_ptr<const void>(lifetime_),
+         action = std::move(action)]([[maybe_unused]] ui::ClickParams &params) mutable -> EditorCommandResult {
+          if (lifetime.expired()) {
+            return EditorCommandResult(std::unexpected(TreeError::CLOSED), {}, false);
+          }
+          auto admitted = actionBoundary();
+          if (!admitted) {
+            return EditorCommandResult(std::move(admitted), {}, false);
+          }
+          ActionAdmission admission(*this);
+          const auto invoke = [&]() -> decltype(auto) {
+            if constexpr (std::invocable<Callback &, ui::ClickParams &>) {
+              return action(params);
+            } else {
+              return action();
+            }
+          };
+
+          if constexpr (std::same_as<decltype(invoke()), EditorCommandResult>) {
+            return invoke();
+
+          } else {
+            return EditorCommandResult(detail::invokeIgnoringValue(invoke), {}, false);
+          }
+        });
+    }
   }
 
   static bool commandReported(const EditorCommandResult &command, const std::weak_ptr<const void> &lifetime) {
@@ -1746,7 +1895,8 @@ private:
   }
 
   template <class Event, class Callback>
-  std::function<EditorCommandResult(const Event &)> actionAdapter(Callback action) {
+  std::function<EditorCommandResult(const Event &)>
+  actionAdapter(Callback action, std::source_location origin = std::source_location::current()) {
     ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
     if constexpr (std::is_pointer_v<Callback> || requires { action.operator bool(); }) {
       if (!static_cast<bool>(action)) {
@@ -1754,34 +1904,57 @@ private:
       }
     }
 
-    return ui::detail::currentSceneCallback(
-      facadeContext(),
-      [this, lifetime = std::weak_ptr<const void>(lifetime_),
-       action = std::move(action)]([[maybe_unused]] const Event &event) mutable -> EditorCommandResult {
-        if (lifetime.expired()) {
-          return EditorCommandResult(std::unexpected(TreeError::CLOSED), {}, false);
-        }
-        auto admitted = actionBoundary();
-        if (!admitted) {
-          return EditorCommandResult(std::move(admitted), {}, false);
-        }
-        ActionAdmission admission(*this);
-        const auto invoke = [&]() -> decltype(auto) {
-          if constexpr (std::invocable<Callback &, const Event &>) {
-            return action(event);
-          } else {
-            return action();
+    if constexpr (requires(Callback &callback, const Event &event) {
+                    { callback(event) } -> std::same_as<std::expected<void, ManagedError>>;
+                  } || (!std::invocable<Callback &, const Event &> && requires(Callback &callback) {
+                    { callback() } -> std::same_as<std::expected<void, ManagedError>>;
+                  })) {
+      return actionAdapter<Event>(
+        [this, action = std::move(action), origin]([[maybe_unused]] const Event &event) mutable -> EditorCommandResult {
+          auto result = [&] {
+            if constexpr (std::invocable<Callback &, const Event &>) {
+              return action(event);
+            } else {
+              return action();
+            }
+          }();
+          if (!result && !result.error().registrationOrigin) {
+            result.error().registrationOrigin = origin;
           }
-        };
+          return admitActionResult(std::move(result));
+        });
+    } else {
+      return ui::detail::currentSceneCallback(
+        facadeContext(),
+        [this, lifetime = std::weak_ptr<const void>(lifetime_),
+         action = std::move(action)]([[maybe_unused]] const Event &event) mutable -> EditorCommandResult {
+          if (lifetime.expired()) {
+            return EditorCommandResult(std::unexpected(TreeError::CLOSED), {}, false);
+          }
+          auto admitted = actionBoundary();
+          if (!admitted) {
+            return EditorCommandResult(std::move(admitted), {}, false);
+          }
+          ActionAdmission admission(*this);
+          const auto invoke = [&]() -> decltype(auto) {
+            if constexpr (std::invocable<Callback &, const Event &>) {
+              return action(event);
+            } else {
+              return action();
+            }
+          };
 
-        if constexpr (std::same_as<decltype(invoke()), EditorCommandResult>) {
-          return invoke();
-        } else {
-          return EditorCommandResult(detail::invokeIgnoringValue(invoke), {}, false);
-        }
-      });
+          if constexpr (std::same_as<decltype(invoke()), EditorCommandResult>) {
+            return invoke();
+
+          } else {
+            return EditorCommandResult(detail::invokeIgnoringValue(invoke), {}, false);
+          }
+        });
+    }
   }
 
+  EditorCommandResult admitActionResult(std::expected<void, ManagedError> result);
   static ManagedError error(ManagedPhase phase, Node<Widget> node, TreeError cause);
   std::expected<void, ManagedError> boundary(ManagedPhase phase, Node<Widget> node) const;
   std::shared_ptr<Entry> find(Node<Widget> node) const;
@@ -1794,7 +1967,16 @@ private:
   mutateStyles(StyleEngine::Mutation mutation, StyleLayerOptions options, StyleTier tier, std::string_view name,
                const StyleSheet *sheet, std::span<const StyleLayerUpdate> updates, StyleLayerHandle *added = nullptr,
                const detail::StyleThemeLease *lease = nullptr, const PssDocument *document = nullptr,
-               std::optional<StyleLayerOptions> admissionOptions = std::nullopt);
+               std::optional<StyleLayerOptions> admissionOptions = std::nullopt,
+               const StyleEngine::PreviewCapture *previewCapture = nullptr);
+  std::expected<void, ManagedError> installThemeSelection(const ui::ThemeSelectionRef &reference,
+                                                          const std::vector<ui::ThemeChoice> &choices,
+                                                          const ui::ThemeSelectionOptions &options);
+  std::expected<void, ManagedError> changeThemeSelection(const std::shared_ptr<detail::ThemeSelectionRecord> &record,
+                                                         detail::ThemeSelectionCommand command, std::string_view id,
+                                                         std::source_location origin);
+  std::expected<std::shared_ptr<const ui::ThemeSelectionSnapshot>, ManagedError>
+  readThemeSelection(const std::shared_ptr<detail::ThemeSelectionRecord> &record) const;
   std::expected<void, ManagedError> checkThemeLease(detail::StyleThemeLease lease) const;
   detail::StyleThemeLease captureThemeLease() const noexcept;
   std::expected<detail::StyleThemeLease, ManagedError> attachTheme(const StyleSheet &sheet,
@@ -1839,6 +2021,8 @@ private:
   std::weak_ptr<ui::detail::SceneAnchor> facade_;
   Node<Widget> root_;
   StyleEngine styles_;
+  std::shared_ptr<detail::ThemeSelectionRecord> themeSelection_;
+  bool installingThemeSelection_{};
   std::vector<std::shared_ptr<Entry>> entries_;
   std::shared_ptr<detail::ManagedScrollState> scroll_;
   std::vector<std::shared_ptr<void>> properties_;
@@ -1849,6 +2033,13 @@ private:
   std::vector<std::shared_ptr<detail::ManagedModelSource>> models_;
   std::shared_ptr<std::function<std::expected<bool, ManagedError>(const InputEvent &)>> input_;
   std::shared_ptr<KeySnapshot> keys_;
+  std::shared_ptr<const KeyBindingsSnapshot> keyProjection_;
+  std::uint64_t keyRevision_{1};
+  std::uint64_t keySerial_{};
+  std::uint64_t keyScopeGeneration_{1};
+  bool keyStaging_{};
+  std::array<std::uint64_t, 4> failedKeyProjection_{};
+  std::size_t keyProjectionBytes_{};
   std::size_t keyHandlers_{};
   std::size_t clickHandlers_{};
   std::vector<std::shared_ptr<LayoutRecord>> layouts_ = std::vector<std::shared_ptr<LayoutRecord>>(0);

@@ -31,6 +31,8 @@ The categories describe the learning path; the source directories remain stable.
 | Customization | [modal settings](examples/guide_dialog.cpp), `portals_docs_dialog` | Retained editable dialog, inline open/dismiss and ordinary cleanup; [contracts](dialogs.md). Built with tests enabled. |
 | Basics | [modal choices](examples/guide_message_box.cpp), `portals_docs_message_box` | Three ready-made modal choice sets, safe cancellation defaults and a deferred `MessageResult` callback; [contracts](dialogs.md). Built with tests enabled. |
 | Basics | [notifications](notifications.md), [complete source](examples/guide_toast.cpp), `portals_docs_toast` | Application-owned bounded messages, explicit actions and expiry without automatic focus changes; no CLI. Built with tests enabled. |
+| Basics | [key hints and help](key-help.md), [complete source](examples/guide_key_help.cpp), `portals_docs_key_help` | Annotated commands, shared hints/help, enable and rebind controls; no terminal emulator or CLI. Built with tests enabled. |
+| Customization | [checked theme previews](theme-selection.md), [complete source](examples/guide_theme_selection.cpp), `portals_docs_theme_selection` | Preview, apply and cancel catalog choices with checked results and preserved overrides; the model API, before the ready-made selector. Built with tests enabled. |
 | Experimental | [compile-time styles](compile-time-styles.md) | Compile-time descriptors and PSS checking: optional advanced material, not prerequisites for a form. |
 
 F10 exits the interactive programs. The gallery, custom widget and dashboard

@@ -1,7 +1,8 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
-#include "scroll_preparation_state.hpp"
+#include "key_binding_state.hpp"
 #include "message_box_state.hpp"
+#include "scroll_preparation_state.hpp"
 #include <portals/detail/pss_parser.hpp>
 #include <portals/detail/setup_failure.hpp>
 #include <portals/managed.hpp>
@@ -288,37 +289,6 @@ void copyContexts(ManagedDiagnostic &diagnostic, std::span<const ManagedDiagnost
 }
 } // namespace
 
-struct ManagedScene::KeyRecord {
-  std::optional<KeyEvent> legacy;
-  std::optional<Shortcut> shortcut;
-  detail::ShortcutActions actions{detail::ShortcutActions::PRESS};
-  std::function<EditorCommandResult(const KeyEvent &)> action;
-  std::optional<std::source_location> origin;
-};
-
-struct ManagedScene::KeyPending {
-  struct Candidate {
-    std::size_t record{};
-    std::size_t alternative{};
-  };
-
-  // Count construction keeps MSVC Debug iterator-proxy failures inside registration catches.
-  std::vector<Candidate> candidates = std::vector<Candidate>(0);
-  std::vector<Candidate> scratch = std::vector<Candidate>(0);
-  Subscription timer;
-  std::size_t depth{};
-  std::uint64_t generation{1};
-  std::uint64_t focusGeneration{};
-  std::uint64_t inputGeneration{};
-  SchedulerTime deadline{};
-};
-
-struct ManagedScene::KeySnapshot {
-  std::vector<std::shared_ptr<KeyRecord>> records = std::vector<std::shared_ptr<KeyRecord>>(0);
-  std::shared_ptr<std::function<std::expected<bool, ManagedError>(const InputEvent &)>> fallback;
-  std::shared_ptr<KeyPending> pending;
-};
-
 ManagedScene::ManagedScene(Application &app, ManagedOptions options)
     : app_(app), owner_(std::this_thread::get_id()), options_(options), lifetime_(std::make_shared<const bool>(true)),
       styles_(app.tree(), options.maxNodes), entries_(0), properties_(0), models_(0),
@@ -340,9 +310,17 @@ std::expected<std::unique_ptr<ManagedScene>, ManagedError> ManagedScene::create(
 
   const auto diagnostics = options.diagnostics;
 
+  for (const auto support :
+       {options.keyCapabilities.press, options.keyCapabilities.repeat, options.keyCapabilities.release}) {
+    if (support != KeySupport::UNKNOWN && support != KeySupport::SUPPORTED && support != KeySupport::UNSUPPORTED) {
+      return std::unexpected(error(ManagedPhase::MOUNT, app.root(), TreeError::INVALID_ARGUMENT));
+    }
+  }
+
   if (!options.maxNodes || !options.maxStates || !options.maxModels || !options.maxKeyHandlers ||
       !options.maxClickHandlers || !options.maxClickHandlersPerNode || !options.keySequenceTimeout ||
-      !options.maxMessageRequests || !options.maxLayoutHandlers || !options.maxLayoutPublicationRetries ||
+      !options.maxMessageRequests || !options.maxKeyLabelBytes || !options.maxKeyDescriptionBytes ||
+      !options.maxKeyProjectionBytes || !options.maxLayoutHandlers || !options.maxLayoutPublicationRetries ||
       !options.maxObservers || !options.maxObserversPerNode || !options.maxObserverRecoveryPasses ||
       !diagnostics.maxErrors || !diagnostics.maxContexts || !diagnostics.maxContextBytes ||
       diagnostics.maxErrors > maxElementCount<ManagedDiagnostic>() ||
@@ -1403,6 +1381,33 @@ std::expected<ManagedDiagnosticBatch, TreeError> ManagedScene::drainErrors() {
   }
 }
 
+EditorCommandResult ManagedScene::admitActionResult(std::expected<void, ManagedError> result) {
+  if (result) {
+    return EditorCommandResult({}, {}, false);
+  }
+
+  const auto failure = result.error();
+  const bool first = !failure_;
+  if (first) {
+    // First-primary disposition is committed before any observer or capture can reenter.
+    failure_ = failure;
+    dialogPrimaryRecorded_ = true;
+    failureDiagnostic_.reset();
+  }
+  app_.requestStop();
+  if (!focusReported(failure)) {
+    bool invoked{};
+    (void)recordError(
+      failure, {},
+      failure.operationOrigin.value_or(failure.registrationOrigin.value_or(std::source_location::current())), &invoked,
+      first, nullptr, false, first);
+    if (first) {
+      failureNotified_ = failureNotified_ || invoked;
+    }
+  }
+  return EditorCommandResult(std::unexpected(bridge(failure)), lifetime_, true);
+}
+
 void ManagedScene::remember(ManagedError failure, std::source_location origin,
                             std::span<const ManagedDiagnosticContext> contexts) {
   const bool first = !failure_;
@@ -2337,7 +2342,8 @@ std::expected<Invalidation, ManagedError>
 ManagedScene::mutateStyles(StyleEngine::Mutation mutation, StyleLayerOptions options, StyleTier tier,
                            std::string_view name, const StyleSheet *sheet, std::span<const StyleLayerUpdate> updates,
                            StyleLayerHandle *added, const detail::StyleThemeLease *lease, const PssDocument *document,
-                           std::optional<StyleLayerOptions> admissionOptions) {
+                           std::optional<StyleLayerOptions> admissionOptions,
+                           const StyleEngine::PreviewCapture *previewCapture) {
   auto allowed = boundary(ManagedPhase::STYLE, root_);
 
   if (!allowed) {
@@ -2414,7 +2420,7 @@ ManagedScene::mutateStyles(StyleEngine::Mutation mutation, StyleLayerOptions opt
   auto installed = styles_.mutate(mutation, options, tier, name, sheet, updates,
                                   registrations ? std::span<const StyleRegistration>(*registrations)
                                                 : std::span<const StyleRegistration>{},
-                                  added, lease, document, admissionOptions);
+                                  added, lease, document, admissionOptions, previewCapture);
 
   if (!installed) {
     ManagedError failure{ManagedPhase::STYLE, root_.id(), installed.error(), {}, {}};
@@ -2475,6 +2481,9 @@ std::expected<std::vector<StyleLayerSource>, ManagedError> ManagedScene::styleSo
     sources.reserve(styles_.layerState_.layers.size());
 
     for (const auto &layer : styles_.layerState_.layers) {
+      if (layer.id == styles_.layerState_.preview) {
+        continue;
+      }
       sources.emplace_back();
 
       auto &source = sources.back();
@@ -2715,6 +2724,17 @@ std::expected<void, ManagedError> ManagedScene::publishKey(std::shared_ptr<KeyRe
   }
 
   snapshot->records.push_back(std::move(record));
+  snapshot->annotated = std::ranges::any_of(snapshot->records, [](const auto &entry) {
+    return bool(entry->metadata);
+  });
+  if (snapshot->annotated) {
+    snapshot->scopeConnected.emplace(0);
+    snapshot->scopeConnected->reserve(snapshot->records.size());
+    for (const auto &entry : snapshot->records) {
+      auto cancellation = entry->metadata ? entry->metadata->cancellation.lock() : nullptr;
+      snapshot->scopeConnected->push_back(cancellation && cancellation->connected.load());
+    }
+  }
   snapshot->pending = std::make_shared<KeyPending>();
 
   std::size_t capacity{};
@@ -2751,7 +2771,18 @@ std::expected<bool, ManagedError> ManagedScene::invokeKey(const std::shared_ptr<
   };
 
   try {
-    const auto command = record->action(event);
+    if (record->metadata) {
+      if (!keys_ ||
+          std::ranges::none_of(keys_->records,
+                               [&](const auto &current) {
+                                 return current == record;
+                               }) ||
+          keyEligibility(*record, app_.router().state_->focus) != KeyEligibility::ELIGIBLE) {
+        return false;
+      }
+    }
+    const auto action = record->annotatedAction;
+    const auto command = action ? (*action)(event) : record->action(event);
 
     if (!command && !commandReported(command, lifetime)) {
       return failure(command.result_.error());
@@ -2826,6 +2857,37 @@ std::expected<bool, ManagedError> ManagedScene::waitForKey(const std::shared_ptr
 
 std::expected<bool, ManagedError> ManagedScene::dispatchKeys(const std::shared_ptr<KeySnapshot> &snapshot,
                                                              const InputEvent &event) {
+  Node<Widget> focus;
+  if (snapshot->annotated) {
+    const auto revision = keyRevision_;
+    const auto input = input_;
+    auto recovered = app_.router().focused();
+    if (!recovered) {
+      return std::unexpected(error(ManagedPhase::INPUT, root_, recovered.error()));
+    }
+    if (keys_ != snapshot || keyRevision_ != revision || input_ != input) {
+      return false;
+    }
+    focus = *recovered;
+    auto observed = observeKeyScopes();
+    if (!observed) {
+      return std::unexpected(observed.error());
+    }
+  }
+  const auto eligible = [&](const std::shared_ptr<KeyRecord> &record) {
+    if (!record->metadata) {
+      return true;
+    }
+    if (keyEligibility(*record, focus) != KeyEligibility::ELIGIBLE) {
+      return false;
+    }
+    const auto *key = std::get_if<KeyEvent>(&event);
+    const auto phase = key ? key->action : KeyAction::PRESS;
+    const auto support = phase == KeyAction::PRESS    ? options_.keyCapabilities.press
+                         : phase == KeyAction::REPEAT ? options_.keyCapabilities.repeat
+                                                      : options_.keyCapabilities.release;
+    return support != KeySupport::UNSUPPORTED;
+  };
   auto &pending = *snapshot->pending;
 
   if (!pending.candidates.empty() &&
@@ -2853,6 +2915,9 @@ std::expected<bool, ManagedError> ManagedScene::dispatchKeys(const std::shared_p
 
     for (const auto candidate : pending.candidates) {
       const auto &record = snapshot->records[candidate.record];
+      if (!eligible(record)) {
+        continue;
+      }
       const auto key = detail::shortcutEvent(event, record->actions);
 
       if (!key) {
@@ -2904,6 +2969,9 @@ std::expected<bool, ManagedError> ManagedScene::dispatchKeys(const std::shared_p
 
   for (auto index = snapshot->records.size(); index-- > 0;) {
     const auto &record = snapshot->records[index];
+    if (!eligible(record)) {
+      continue;
+    }
 
     if (record->legacy) {
       const auto *key = std::get_if<KeyEvent>(&event);
@@ -2959,6 +3027,12 @@ std::expected<bool, ManagedError> ManagedScene::dispatchKeys(const std::shared_p
 
 std::expected<void, ManagedError>
 ManagedScene::onInput(std::function<std::expected<bool, ManagedError>(const InputEvent &)> callback) {
+  if (owner_ != std::this_thread::get_id()) {
+    return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::WRONG_THREAD));
+  }
+  if (keyStaging_) {
+    return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::WOULD_BLOCK));
+  }
   ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
   decltype(callback) incoming;
 
@@ -2992,6 +3066,10 @@ ManagedScene::setInput(std::function<std::expected<bool, ManagedError>(const Inp
     input_.swap(prepared);
     keyHandlers_ = keyHandlers;
     keys_.swap(keys);
+    if (keyRevision_) {
+      ++keyRevision_;
+    }
+    keyProjection_.reset();
 
     if (keys) {
       resetKeys(*keys->pending);
@@ -3067,6 +3145,11 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
 
     if (!focused) {
       return std::unexpected(focused.error());
+    }
+
+    auto keyScopes = observeKeyScopes();
+    if (!keyScopes) {
+      return std::unexpected(bridge(keyScopes.error()));
     }
 
     auto scrollFocus = sampleScrollFocus();
@@ -3453,6 +3536,7 @@ std::expected<void, ManagedError> ManagedScene::close() {
 
   // Mark closed before retiring captures: their destructors may reenter application code.
   closed_ = true;
+  themeSelection_.reset();
   retireMessages();
   pruneDataStates();
   if (dataStateOwner_) {

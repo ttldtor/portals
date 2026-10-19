@@ -76,6 +76,42 @@ namespace sc = style::ct;
 namespace portals {
 // White-box limits are otherwise unreachable in a finite regression workload.
 struct StyleLayerTestAccess {
+  static auto preview(StyleEngine &engine, const StyleSheet &sheet, StyleLayerHandle &handle,
+                      std::optional<StyleLayerOptions> options = {}) {
+    const auto capture = engine.capturePreview();
+    return engine.mutate(StyleEngine::Mutation::PREVIEW, {}, {}, {}, &sheet, {}, {}, &handle, nullptr, nullptr, options,
+                         &capture);
+  }
+
+  static auto finishPreview(StyleEngine &engine, StyleLayerHandle handle, bool commit) {
+    const auto capture = engine.capturePreview();
+    return engine.mutate(commit ? StyleEngine::Mutation::PREVIEW_COMMIT : StyleEngine::Mutation::PREVIEW_CANCEL, {}, {},
+                         {}, nullptr, {}, {}, &handle, nullptr, nullptr, {}, &capture);
+  }
+
+  static auto previewAfterCopy(StyleEngine &engine, const StyleSheet &sheet, StyleLayerHandle &handle) {
+    const auto capture = engine.capturePreview();
+    const StyleSheet staged(sheet);
+    return engine.mutate(StyleEngine::Mutation::PREVIEW, {}, {}, {}, &staged, {}, {}, &handle, nullptr, nullptr, {},
+                         &capture);
+  }
+
+  static bool ownsPreview(const StyleEngine &engine, StyleLayerHandle handle) {
+    return engine.ownsPreview(handle);
+  }
+
+  static bool layered(const StyleEngine &engine) {
+    return engine.layerState_.enabled;
+  }
+
+  static auto lease(const StyleEngine &engine) {
+    return engine.themeLease();
+  }
+
+  static auto validateLease(const StyleEngine &engine, detail::StyleThemeLease lease) {
+    return engine.validateLease(lease);
+  }
+
   static auto admit(StyleEngine &engine, const PssDocument &document) {
     StyleLayerHandle added;
 
@@ -2093,4 +2129,137 @@ TEST_CASE("one shot allocation failure never retries source ownership after orig
     CHECK(failure->pss->cause == TreeError::NO_MEMORY);
     CHECK(take(fixture.scene->styleSources()).empty());
   }
+}
+
+TEST_CASE("private theme preview masks the base and charges both resident contributions") {
+  Fixture fixture;
+  auto baseSheet = foreground(BLUE);
+
+  baseSheet.rules[0].declarations.minWidth = 19;
+  take(fixture.engine.theme(baseSheet));
+
+  const auto lease = StyleLayerTestAccess::lease(fixture.engine);
+  const auto before = fixture.engine.revision();
+  StyleLayerHandle preview;
+  StyleLayerOptions limited;
+
+  limited.maxLayers = 2;
+
+  auto rejected = StyleLayerTestAccess::preview(fixture.engine, foreground(RED), preview, limited);
+
+  REQUIRE_FALSE(rejected);
+  CHECK(rejected.error().cause == TreeError::INVALID_ARGUMENT);
+  CHECK(fixture.engine.revision() == before);
+  CHECK(StyleLayerTestAccess::validateLease(fixture.engine, lease));
+  CHECK_FALSE(StyleLayerTestAccess::layered(fixture.engine));
+
+  CHECK(take(StyleLayerTestAccess::preview(fixture.engine, foreground(RED), preview)) == Invalidation::LAYOUT);
+  CHECK(fixture.read().normal.foreground == RED);
+  CHECK(fixture.read().minWidth != 19);
+  CHECK_FALSE(StyleLayerTestAccess::validateLease(fixture.engine, lease));
+  CHECK(StyleLayerTestAccess::ownsPreview(fixture.engine, preview));
+
+  StyleLayerHandle other;
+  auto busy = StyleLayerTestAccess::preview(fixture.engine, foreground(GREEN), other);
+
+  REQUIRE_FALSE(busy);
+  CHECK(busy.error().cause == TreeError::WOULD_BLOCK);
+
+  const auto permanent = take(fixture.engine.baseLayer(StyleTier::THEME));
+
+  take(StyleLayerTestAccess::finishPreview(fixture.engine, preview, false));
+  CHECK(fixture.read().normal.foreground == BLUE);
+  CHECK(fixture.read().minWidth == 19);
+  CHECK(StyleLayerTestAccess::layered(fixture.engine));
+  CHECK_FALSE(StyleLayerTestAccess::validateLease(fixture.engine, lease));
+  CHECK(take(fixture.engine.removeLayer(permanent)) == Invalidation::LAYOUT);
+}
+
+TEST_CASE("preview promotion and cancellation preserve later application and user layers") {
+  Fixture fixture;
+
+  take(fixture.engine.theme(foreground(BLUE)));
+
+  StyleLayerHandle preview;
+
+  CHECK(take(StyleLayerTestAccess::preview(fixture.engine, foreground(RED), preview)) == Invalidation::PAINT);
+
+  const auto application = take(fixture.engine.addLayer(StyleTier::APPLICATION, "application", foreground(GREEN)));
+  const auto user = take(fixture.engine.addLayer(StyleTier::USER, "user", foreground(GOLD)));
+
+  CHECK(take(StyleLayerTestAccess::finishPreview(fixture.engine, preview, true)) == Invalidation::NONE);
+  CHECK(fixture.read().normal.foreground == GOLD);
+  take(fixture.engine.removeLayer(user));
+  CHECK(fixture.read().normal.foreground == GREEN);
+  take(fixture.engine.removeLayer(application));
+  CHECK(fixture.read().normal.foreground == RED);
+
+  StyleLayerHandle next;
+
+  take(StyleLayerTestAccess::preview(fixture.engine, foreground(BLUE), next));
+  take(StyleLayerTestAccess::finishPreview(fixture.engine, next, false));
+  CHECK(fixture.read().normal.foreground == RED);
+}
+
+TEST_CASE("equal external theme takeover and permanent theme removal retire the private preview") {
+  for (const int operation : {0, 1, 2}) {
+    Fixture fixture;
+
+    take(fixture.engine.theme(foreground(BLUE)));
+
+    StyleLayerHandle preview;
+
+    take(StyleLayerTestAccess::preview(fixture.engine, foreground(RED), preview));
+
+    auto invalid = foreground(GREEN);
+
+    invalid.rules[0].declarations.minWidth = -1;
+    CHECK_FALSE(fixture.engine.theme(invalid));
+    CHECK(StyleLayerTestAccess::ownsPreview(fixture.engine, preview));
+
+    if (operation == 0) {
+      take(fixture.engine.theme(foreground(RED)));
+      CHECK(fixture.read().normal.foreground == RED);
+    } else if (operation == 1) {
+      take(fixture.engine.removeLayer(take(fixture.engine.baseLayer(StyleTier::THEME))));
+      CHECK(fixture.read().normal.foreground != RED);
+    } else {
+      take(fixture.engine.replace(foreground(GREEN)));
+      CHECK(fixture.read().normal.foreground == GREEN);
+    }
+
+    CHECK_FALSE(StyleLayerTestAccess::ownsPreview(fixture.engine, preview));
+
+    const auto cancelled = StyleLayerTestAccess::finishPreview(fixture.engine, preview, false);
+
+    REQUIRE_FALSE(cancelled);
+    CHECK(cancelled.error().cause == TreeError::INVALID_ARGUMENT);
+  }
+}
+
+TEST_CASE("legacy equal mutation during owning preview staging invalidates the revision capture") {
+  Fixture fixture;
+
+  take(fixture.engine.theme(foreground(BLUE)));
+
+  const auto candidate = foreground(RED);
+  static StyleEngine *entered;
+  static const StyleSheet *external;
+  const auto equal = foreground(BLUE);
+
+  entered = &fixture.engine;
+  external = &equal;
+  allocation_test::onAllocate = [] {
+    take(entered->theme(*external));
+  };
+  allocation_test::allocationsBeforeHook = 0;
+
+  StyleLayerHandle preview;
+  const auto result = StyleLayerTestAccess::previewAfterCopy(fixture.engine, candidate, preview);
+
+  allocation_test::onAllocate = nullptr;
+  REQUIRE_FALSE(result);
+  CHECK(result.error().cause == TreeError::INVALID_ARGUMENT);
+  CHECK(fixture.read().normal.foreground == BLUE);
+  CHECK_FALSE(StyleLayerTestAccess::layered(fixture.engine));
 }

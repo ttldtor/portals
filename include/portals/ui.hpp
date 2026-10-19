@@ -5,8 +5,10 @@
 #include <portals/detail/line_edit_text.hpp>
 #include <portals/detail/move_only_function.hpp>
 #include <portals/grid.hpp>
+#include <portals/key_hints.hpp>
 #include <portals/managed.hpp>
 #include <portals/message_box.hpp>
+#include <portals/theme_selection.hpp>
 #include <portals/ui_ref.hpp>
 #include <portals/ui_scene.hpp>
 
@@ -566,6 +568,20 @@ public:
     this->slot_->fluent = true;
   }
 
+  /** @param origin Operation site. @return Pure checked scope entry; already open is a no-op. */
+  std::expected<void, ManagedError> open(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, HelpView>
+  {
+    return detail::helpCommand(target(), true, origin);
+  }
+
+  /** @param origin Operation site. @return Pure checked focus return; already closed is a no-op. */
+  std::expected<void, ManagedError> close(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, HelpView>
+  {
+    return detail::helpCommand(target(), false, origin);
+  }
+
   /** @param axis Selected logical axis.
    * @param offset Exact logical offset, clamped to the current range.
    * @param origin Command site retained by the scene collector.
@@ -884,6 +900,8 @@ public:
 
 private:
   friend struct detail::ClickAccess;
+  friend class KeyInfo;
+  friend struct detail::KeyHelpAccess;
   friend struct detail::LayoutAccess;
   friend struct detail::NamedAccess;
   friend class DynamicRef;
@@ -912,6 +930,94 @@ private:
     return this->slot_ ? std::shared_ptr<detail::RefTarget>(this->slot_, &this->slot_->target) : nullptr;
   }
 };
+
+/** @brief Consuming metadata for one canonical annotated registration; refs resolve after complete mount. */
+class KeyInfo {
+public:
+  /** @param label Owning required label. @param resolver Local resource resolver, never retained by a row. */
+  explicit KeyInfo(TextValue label, TextResolver resolver = {}) : value_(std::move(label)) {
+    value_.resolver = std::move(resolver);
+  }
+
+  /** @param text Owning explanation. @return This consuming metadata. */
+  KeyInfo &&description(TextValue text) && {
+    value_.description = std::move(text);
+    return std::move(*this);
+  }
+
+  /** @param reference Deferred command slot. @return This consuming metadata. */
+  KeyInfo &&reference(KeyBindingRef reference) && {
+    value_.publication_ = std::move(reference.slot_);
+    return std::move(*this);
+  }
+
+  /** @tparam T Widget type. @param reference Original owner observation. @return This consuming metadata. */
+  template <class T>
+    requires std::derived_from<T, Widget>
+  KeyInfo &&owner(const Ref<T> &reference) && {
+    owner_ = reference.target();
+    return std::move(*this);
+  }
+
+  /** @tparam T Widget type. @param reference Declared scope observation. @return This consuming metadata. */
+  template <class T>
+    requires std::derived_from<T, Widget>
+  KeyInfo &&scope(const Ref<T> &reference) && {
+    scope_ = reference.target();
+    return std::move(*this);
+  }
+
+  /** @param value New admission state. @return This consuming metadata. */
+  KeyInfo &&enabled(bool value) && {
+    value_.enabled = value;
+    return std::move(*this);
+  }
+
+  /** @param value New visibility/admission state. @return This consuming metadata. */
+  KeyInfo &&visible(bool value) && {
+    value_.visible = value;
+    return std::move(*this);
+  }
+
+private:
+  friend class Scene;
+
+  std::expected<portals::KeyInfo, ManagedError> resolve(ManagedScene &scene) {
+    for (const auto &target : {owner_, scope_}) {
+      if (!target) {
+        continue;
+      }
+      auto owner = detail::eventScene(target);
+      if (!owner) {
+        return std::unexpected(owner.error());
+      }
+      if (*owner != &scene) {
+        return std::unexpected(
+          ManagedError{ManagedPhase::BIND, target->node.id(), TreeError::INVALID_ARGUMENT, {}, {}});
+      }
+    }
+    if (owner_) {
+      value_.owner = owner_->node;
+    }
+    if (scope_) {
+      value_.scope = scope_->node;
+    }
+    return std::move(value_);
+  }
+
+  portals::KeyInfo value_;
+  std::shared_ptr<detail::RefTarget> owner_, scope_;
+};
+
+/** @param label Literal bytes copied now. @return Owning consuming metadata. */
+inline KeyInfo keyInfo(std::string_view label) {
+  return KeyInfo(TextValue(label));
+}
+
+/** @param label Owning expression. @param resolver Local resolver. @return Owning consuming metadata. */
+inline KeyInfo keyInfo(TextValue label, TextResolver resolver = {}) {
+  return KeyInfo(std::move(label), std::move(resolver));
+}
 
 namespace detail {
 /** @brief Internal checked named publication bridge; no widget or scene ownership escapes. */
@@ -1233,7 +1339,7 @@ struct ClickAccess {
     }
 
     try {
-      return scene.composeButtonClick(reference.node(), scene.clickAdapter(std::move(callback)), origin);
+      return scene.composeButtonClick(reference.node(), scene.clickAdapter(std::move(callback), origin), origin);
     } catch (const std::bad_alloc &) {
       return std::unexpected(ManagedError{ManagedPhase::BIND, reference.node().id(), TreeError::NO_MEMORY, {}, {}});
     } catch (...) {
@@ -3988,12 +4094,37 @@ inline KeySelection pressRepeat(std::initializer_list<key::Chord> source, Shortc
 /** @tparam Callback Existing owning compact key action, optionally taking const KeyEvent&.
  * @param selection
  * Immutable owning alternatives and exact selected native phases.
+ * @param info Owning metadata resolved once after complete mount.
  * @param callback Action stored until checked stage
  * consumption; caller construction/moves may throw.
  * @param origin Registration call site, independent of helper
  * construction.
  * @return Consuming stage using the existing bounded newest-first registration.
  */
+template <class Callback = detail::QuitCommand>
+  requires portals::detail::ManagedAction<Callback, KeyEvent>
+auto onKey(KeySelection selection, KeyInfo info, Callback callback,
+           std::source_location origin = std::source_location::current()) {
+  return detail::SceneStage{[selection = std::move(selection), info = std::move(info), callback = std::move(callback),
+                             origin](Scene &owner) mutable {
+    owner.onKey(std::move(selection), std::move(info), std::move(callback), origin);
+  }};
+}
+
+/** @tparam Source Existing shortcut source. @tparam Callback Exact managed action.
+ * @param source Owning normalization input. @param info Metadata registered once with the action.
+ * @param callback Action. @param origin Original registration site. @return Consuming annotated stage. */
+template <portals::detail::ShortcutSource Source, class Callback = detail::QuitCommand>
+  requires portals::detail::ManagedAction<Callback, KeyEvent>
+auto onKey(Source &&source, KeyInfo info, Callback callback,
+           std::source_location origin = std::source_location::current()) {
+  return onKey(press(std::forward<Source>(source)), std::move(info), std::move(callback), origin);
+}
+
+/** @tparam Callback Existing compact key action preserving old callback result forms.
+ * @param selection Owning alternatives and exact native phases.
+ * @param callback Owning action. @param origin Original registration site.
+ * @return Consuming unannotated stage with existing routing behavior. */
 template <class Callback = detail::QuitCommand>
   requires portals::detail::ManagedAction<Callback, KeyEvent>
 auto onKey(KeySelection selection, Callback callback, std::source_location origin = std::source_location::current()) {

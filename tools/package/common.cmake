@@ -13,6 +13,8 @@ function(bundleStageConsumer source destination)
     "${source}/docs/examples/guide_dialog.cpp"
     "${source}/docs/examples/guide_message_box.cpp"
     "${source}/docs/examples/guide_toast.cpp"
+    "${source}/docs/examples/guide_key_help.cpp"
+    "${source}/docs/examples/guide_theme_selection.cpp"
     DESTINATION "${destination}/docs/examples")
   # Browser development dependencies are not native consumer sources.
   file(COPY "${source}/examples" DESTINATION "${destination}" PATTERN "node_modules" EXCLUDE)

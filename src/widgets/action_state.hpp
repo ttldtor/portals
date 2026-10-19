@@ -3,9 +3,10 @@
 #pragma once
 
 #include "dialog_state.hpp"
-#include "toast_state.hpp"
 #include "scroll_intent.hpp"
+#include "toast_state.hpp"
 #include <atomic>
+#include <limits>
 #include <optional>
 #include <portals/action.hpp>
 #include <thread>
@@ -30,6 +31,14 @@ struct FocusReturnRegistration {
   std::vector<Node<Widget>> previousScopes;
   std::shared_ptr<ActionCancellation> cancellation;
   bool dialog{};
+  std::uint64_t activation{};
+
+  // Exact internal receipt. Exhaustion never rejects legacy focus operations or reuses a serial.
+  void publish(std::uint64_t &serial) noexcept {
+    if (serial != std::numeric_limits<std::uint64_t>::max()) {
+      activation = ++serial;
+    }
+  }
 };
 
 struct FocusChange {
@@ -65,6 +74,8 @@ struct PointerCaptureRecord {
 // admission/pin as public bind; the checked reply uses the router's existing erased callback type.
 struct EventRouterAccess {
   static std::expected<std::shared_ptr<const FocusObservation>, TreeError> observeFocus(EventRouter &router);
+  static void exhaustFocusReturnSerial(EventRouter &router) noexcept;
+  static Node<Widget> requiredFocusReceipt(const EventRouter &router) noexcept;
 
   template <class T, class Callback>
   static std::expected<ActionBinding, TreeError> bindChecked(EventRouter &router, Node<T> node, Callback callback,
@@ -115,6 +126,8 @@ struct EventRouter::State {
     std::vector<std::unique_ptr<detail::FocusReturnRegistration>>(0);
   Node<Widget> focus;
   std::uint64_t focusGeneration{1};
+  std::uint64_t focusReturnSerial{};
+  Node<Widget> requiredFocusReceipt;
   std::weak_ptr<detail::FocusObservation> focusObservation;
   PointerCaptureCapabilities pointerCapabilities;
   std::optional<detail::PointerCaptureRecord> pointerCapture;
@@ -132,3 +145,12 @@ struct EventRouter::State {
   std::weak_ptr<detail::NotificationRecord> notifications;
 };
 } // namespace portals
+
+inline void portals::detail::EventRouterAccess::exhaustFocusReturnSerial(EventRouter &router) noexcept {
+  router.state_->focusReturnSerial = std::numeric_limits<std::uint64_t>::max();
+}
+
+inline portals::Node<portals::Widget>
+portals::detail::EventRouterAccess::requiredFocusReceipt(const EventRouter &router) noexcept {
+  return router.state_->requiredFocusReceipt;
+}
