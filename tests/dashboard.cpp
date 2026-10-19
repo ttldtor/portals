@@ -164,7 +164,7 @@ void delayedRangesAndKeyboard() {
   check(!app->tree().inspect(scene.table()));
 }
 
-void continuousNavigationKeepsRowsVisible(bool backwards, std::uint64_t delayMs = 0) {
+void continuousNavigationKeepsRowsVisible(bool backwards, std::uint64_t delayMs = 0, bool presentDataState = false) {
   constexpr std::uint64_t FORWARD_FIRST = 240;
   constexpr std::uint64_t BACKWARD_FIRST = 300;
   const auto initialFirst = backwards ? BACKWARD_FIRST : FORWARD_FIRST;
@@ -186,7 +186,7 @@ void continuousNavigationKeepsRowsVisible(bool backwards, std::uint64_t delayMs 
   options.rate = 0;
   options.delayMs = delayMs;
 
-  dashboard_test::Scene scene(*app, options);
+  dashboard_test::Scene scene(*app, options, presentDataState);
 
   take(app->router().setFocus(scene.table()));
   take(setVirtualTableFirst(app->tree(), scene.table(), initialFirst));
@@ -284,7 +284,7 @@ void noOpDiagnosticAction() {
   }));
 }
 
-void delayedLoadingSettles(bool hideDuringLoad) {
+void delayedLoadingSettles(bool hideDuringLoad, bool presentDataState = false) {
   constexpr std::uint64_t LOAD_DELAY_MS = 250;
   constexpr std::uint64_t HIDE_AT_MS = 100;
   constexpr std::uint64_t SHOW_AT_MS = 500;
@@ -296,7 +296,7 @@ void delayedLoadingSettles(bool hideDuringLoad) {
   options.rate = 0;
   options.delayMs = LOAD_DELAY_MS;
 
-  dashboard_test::Scene scene(*app, options);
+  dashboard_test::Scene scene(*app, options, presentDataState);
   bool hidden{}, shown{}, idleStarted{}, idleReady{};
   std::size_t idleBytes{};
 
@@ -340,7 +340,7 @@ void delayedLoadingSettles(bool hideDuringLoad) {
   check(loading.usefulLoads > 0 && loading.activeJobs == 0 && loading.cachedPages == 0);
 }
 
-void continuousNavigationWithMarketTicks() {
+void continuousNavigationWithMarketTicks(bool presentDataState = false) {
   constexpr std::uint64_t DELAY_MS = 250;
   constexpr std::uint64_t REPEAT_START_MS = 100;
   constexpr std::uint64_t REPEAT_END_MS = 1600;
@@ -358,13 +358,21 @@ void continuousNavigationWithMarketTicks() {
   options.rate = 1000;
   options.delayMs = DELAY_MS;
 
-  dashboard_test::Scene scene(*app, options);
+  dashboard_test::Scene scene(*app, options, presentDataState);
   std::size_t readyWhileHeld{};
+  std::size_t usefulWhileHeld{}, consumed{};
+  constexpr std::size_t SCREEN_WIDTH = 80;
+  constexpr std::size_t TABLE_FIRST_ROW = 5;
+  constexpr std::size_t CHART_FIRST_ROW = 14;
+  constexpr std::size_t INSTRUMENT_WIDTH = 13;
+  test_support::VtOracle oracle(SCREEN_WIDTH, 24);
 
   take(app->router().setFocus(scene.table()));
   take(setVirtualTableFirst(app->tree(), scene.table(), 10000));
 
   terminal.beforeRead = [&] {
+    oracle.feed(std::string_view(terminal.output).substr(consumed));
+    consumed = terminal.output.size();
     const auto clock = terminal.clock();
     const auto now = clock.read(clock.context);
 
@@ -375,13 +383,29 @@ void continuousNavigationWithMarketTicks() {
     take(app->tree().read(scene.table(), [&](const auto &table) {
       readyWhileHeld += table.rangeState() == RangeState::READY;
     }));
+
+    const auto frame = oracle.snapshot();
+    bool hasData{}, hasCandle{};
+
+    for (std::size_t y = TABLE_FIRST_ROW; y < CHART_FIRST_ROW; ++y) {
+      for (std::size_t x = 0; x < INSTRUMENT_WIDTH; ++x) {
+        const auto &glyph = frame.cells[y * SCREEN_WIDTH + x].glyph;
+        hasData |= glyph.size() == 1 && glyph[0] >= '0' && glyph[0] <= '9';
+      }
+    }
+
+    for (const auto &cell : frame.cells | std::views::drop(SCREEN_WIDTH * CHART_FIRST_ROW)) {
+      hasCandle |= cell.glyph == "\xe2\x96\x88" || cell.glyph == "\xe2\x94\x82" || cell.glyph == "\xe2\x94\x81";
+    }
+
+    usefulWhileHeld += hasData && hasCandle;
   };
 
   take(app->run(scene, terminal));
 
   // Busy positional-selection intent has a separate preserved before/after regression.
   // This case proves loading under source revisions without claiming that issue is fixed.
-  check(readyWhileHeld > 5 && scene.coherent() && scene.tickCount() > 1000);
+  check(readyWhileHeld > 5 && usefulWhileHeld > 5 && scene.coherent() && scene.tickCount() > 1000);
 }
 
 void clockJumpRemainsBounded() {
@@ -873,6 +897,20 @@ int main(int argc, char **argv) {
     }
 
     const std::string_view group = argc == 2 ? argv[1] : "";
+
+    if (group == "--data-presentation-loading") {
+      constexpr std::uint64_t NETWORK_DELAY_MS = 250;
+
+      continuousNavigationKeepsRowsVisible(false, 0, true);
+      continuousNavigationKeepsRowsVisible(true, 0, true);
+      continuousNavigationKeepsRowsVisible(false, NETWORK_DELAY_MS, true);
+      continuousNavigationKeepsRowsVisible(true, NETWORK_DELAY_MS, true);
+      delayedLoadingSettles(false, true);
+      delayedLoadingSettles(true, true);
+      continuousNavigationWithMarketTicks(true);
+
+      return 0;
+    }
 
     if (group == "--delayed-continuous") {
       constexpr std::uint64_t NETWORK_DELAY_MS = 250;

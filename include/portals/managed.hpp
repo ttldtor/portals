@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
+#include <portals/data_presentation.hpp>
 
 #include <portals/application.hpp>
 #include <portals/collection.hpp>
@@ -1336,7 +1337,8 @@ private:
   void pruneObservers() noexcept;
 
   bool observerMountPending() const noexcept {
-    return coldMountPending_ || (mountDepth_ && !observers_.empty());
+    return coldMountPending_ || (mountDepth_ && (!observers_.empty() || !dataStates_.empty())) ||
+           dataStateMountPending();
   }
 
   template <class Value, class Callback>
@@ -1449,6 +1451,27 @@ private:
     std::optional<std::uint64_t> revision;
   };
 
+  std::expected<Node<DataStateView>, ManagedError> beginDataState(Node<Widget> parent, DataPresentation initial,
+                                                                  DataStateConfig config, bool automatic = false);
+  template <class Source>
+  std::expected<Node<DataStateView>, ManagedError> beginBoundDataState(Node<Widget> parent, Source source,
+                                                                       DataStateConfig config);
+  template <class Content>
+  std::expected<void, ManagedError> finishDataState(Node<Widget> root, Node<Content> body, bool automatic);
+  std::expected<void, TreeError> applyDataState(const std::shared_ptr<detail::DataStateRecord> &record,
+                                                DataPresentation value);
+  std::expected<void, TreeError> prepareDataStates(const LayoutSnapshot &layout);
+  std::expected<void, TreeError> animateDataState(const std::shared_ptr<detail::DataStateRecord> &record);
+  std::expected<bool, TreeError> reserveDataTimer(const std::shared_ptr<detail::DataStateRecord> &record,
+                                                  DataPhase phase, Subscription &reserved);
+  void tickDataState(const std::shared_ptr<detail::DataStateRecord> &record, std::uint64_t generation);
+  void pruneDataStates() noexcept;
+  bool dataStateMountPending() const noexcept;
+  std::expected<Node<Widget>, TreeError> repairDataFocus();
+  std::vector<std::shared_ptr<detail::DataStateRecord>> dataStates_ =
+    std::vector<std::shared_ptr<detail::DataStateRecord>>(0);
+  std::shared_ptr<detail::DataStateOwner> dataStateOwner_;
+
   struct Entry {
     Node<Widget> node;
     std::shared_ptr<StyleTarget> target;
@@ -1459,6 +1482,7 @@ private:
     std::function<std::expected<void, TreeError>(Node<Widget>)> sync;
     std::function<std::expected<void, TreeError>(Node<Widget>)> customSync;
     std::function<std::expected<void, TreeError>(const LayoutSnapshot &)> viewPrepare;
+    std::weak_ptr<detail::ManagedModelSource> viewSource;
     bool stylePending{};
     bool removed{};
     std::shared_ptr<ClickChain> clicks;
@@ -1689,3 +1713,5 @@ private:
 #include <portals/detail/managed_views.hpp>
 
 #include <portals/detail/managed_collections.hpp>
+
+#include <portals/detail/managed_data_presentation.hpp>

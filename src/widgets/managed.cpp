@@ -383,6 +383,13 @@ ManagedScene::~ManagedScene() {
     (void)step();
   }
 
+  if (dataStateOwner_) {
+    dataStateOwner_->scene = nullptr;
+  }
+  for (const auto &record : dataStates_) {
+    record->retired = true;
+    record->timer = {};
+  }
   // Router/scheduler may retain disconnected captures until their next collection.
   // Weak state handles end with this owner even while those internal borrows drain.
   lifetime_.reset();
@@ -543,6 +550,15 @@ struct ManagedScene::FocusReport {
 
 thread_local ManagedScene::FocusReport *ManagedScene::FocusReport::active{};
 
+std::expected<Node<Widget>, TreeError> ManagedScene::repairDataFocus() {
+  FocusReport report(*this);
+  auto focused = app_.router().focused();
+  if (!focused && !report.matches(focused.error())) {
+    remember(error(ManagedPhase::PREPARE, root_, focused.error()));
+  }
+  return focused;
+}
+
 std::expected<void, ManagedError> ManagedScene::focus(Node<Widget> node) {
   ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
   auto allowed = boundary(ManagedPhase::INPUT, node);
@@ -663,6 +679,7 @@ std::expected<void, ManagedError> ManagedScene::remove(Node<Widget> node) {
   pruneLiveText();
   pruneObservers();
   pruneScroll();
+  pruneDataStates();
   stylesDirty_ = true;
 
   return {};
@@ -3175,7 +3192,7 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
 }
 
 bool ManagedScene::usesPreparedLayout() const noexcept {
-  return usesGeometrySnapshot() || std::ranges::any_of(entries_, [](const auto &entry) {
+  return usesGeometrySnapshot() || !dataStates_.empty() || std::ranges::any_of(entries_, [](const auto &entry) {
            return static_cast<bool>(entry->viewPrepare);
          });
 }
@@ -3240,8 +3257,11 @@ std::expected<void, TreeError> ManagedScene::prepareViews(Application &app, cons
   auto scrollPrepared = prepareScrollFrame(snapshot);
   if (!scrollPrepared) {
     remember(error(ManagedPhase::PREPARE, root_, scrollPrepared.error()));
+
+    return scrollPrepared;
   }
-  return scrollPrepared;
+
+  return prepareDataStates(snapshot);
 }
 
 std::expected<bool, TreeError> ManagedScene::input(Application &app, const InputEvent &event) {
@@ -3339,6 +3359,11 @@ std::expected<void, ManagedError> ManagedScene::close() {
 
   // Mark closed before retiring captures: their destructors may reenter application code.
   closed_ = true;
+  pruneDataStates();
+  if (dataStateOwner_) {
+    dataStateOwner_->scene = nullptr;
+  }
+  dataStateOwner_.reset();
 
   for (const auto &record : liveText_) {
     record->origin->closed = true;

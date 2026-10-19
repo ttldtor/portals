@@ -54,6 +54,12 @@ template <class T> struct TableRowType<VirtualTable<T>> {
   using Type = T; ///< Domain value retained by each model row.
 };
 
+/** @param target Weak checked observation. @param value Owning explicit state.
+ * @param origin Public mutation call site. @return Original TreeError, reported once through the live collector.
+ */
+std::expected<void, TreeError> displayDataState(std::shared_ptr<RefTarget> target, DataPresentation value,
+                                                std::source_location origin);
+
 /** @brief Checked bridge preserving immutable Ref affinity before reading its mutable published target.
  * @param target Owning observation with weak scene lifetime; may be empty.
  * @param redo Select Redo instead of Undo when stop is false.

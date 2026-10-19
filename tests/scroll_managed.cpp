@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <new>
 #include <optional>
 #include <source_location>
 #include <thread>
@@ -60,6 +61,30 @@ void operator delete[](void *memory, std::size_t) noexcept {
   std::free(memory);
 }
 
+void *operator new(std::size_t size, const std::nothrow_t &) noexcept {
+  try {
+    return ::operator new(size);
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+void *operator new[](std::size_t size, const std::nothrow_t &) noexcept {
+  try {
+    return ::operator new[](size);
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+void operator delete(void *memory, const std::nothrow_t &) noexcept {
+  ::operator delete(memory);
+}
+
+void operator delete[](void *memory, const std::nothrow_t &) noexcept {
+  ::operator delete[](memory);
+}
+
 namespace {
 using namespace portals;
 int failures{};
@@ -69,6 +94,58 @@ void check(bool value, const char *message) {
     std::cerr << message << '\n';
     ++failures;
   }
+}
+
+void allocatorNothrowRoundtrip() {
+  const auto savedFailOnce = std::exchange(allocation_test::failOnce, false);
+  const auto savedHook = std::exchange(allocation_test::hook, nullptr);
+  static thread_local int hookCalls{};
+  const auto savedHookCalls = std::exchange(hookCalls, 0);
+  constexpr auto ALLOCATION_BYTES = sizeof(std::size_t);
+  const auto hook = +[] {
+    ++hookCalls;
+  };
+  bool success = true;
+  bool failure = true;
+  bool recovery = true;
+
+  for (bool array : {false, true}) {
+    hookCalls = 0;
+    allocation_test::hook = hook;
+    void *memory =
+      array ? ::operator new[](ALLOCATION_BYTES, std::nothrow) : ::operator new(ALLOCATION_BYTES, std::nothrow);
+    success &= memory != nullptr && hookCalls == 1 && allocation_test::hook == nullptr;
+    if (array) {
+      ::operator delete[](memory, ALLOCATION_BYTES);
+    } else {
+      ::operator delete(memory, ALLOCATION_BYTES);
+    }
+
+    allocation_test::hook = hook;
+    allocation_test::failOnce = true;
+    memory = array ? ::operator new[](ALLOCATION_BYTES, std::nothrow) : ::operator new(ALLOCATION_BYTES, std::nothrow);
+    failure &= memory == nullptr && !allocation_test::failOnce && hookCalls == 1 && allocation_test::hook == hook;
+    if (array) {
+      ::operator delete[](memory, std::nothrow);
+    } else {
+      ::operator delete(memory, std::nothrow);
+    }
+
+    memory = array ? ::operator new[](ALLOCATION_BYTES, std::nothrow) : ::operator new(ALLOCATION_BYTES, std::nothrow);
+    recovery &= memory != nullptr && hookCalls == 2 && allocation_test::hook == nullptr;
+    if (array) {
+      ::operator delete[](memory, std::nothrow);
+    } else {
+      ::operator delete(memory, std::nothrow);
+    }
+  }
+
+  allocation_test::failOnce = savedFailOnce;
+  allocation_test::hook = savedHook;
+  hookCalls = savedHookCalls;
+  check(success, "scalar and array nothrow allocations use the test allocation family and consume the hook once");
+  check(failure, "scalar and array nothrow allocation failures return null and consume failOnce before the hook");
+  check(recovery, "scalar and array nothrow allocation recovers after failure and consumes the pending hook once");
 }
 
 template <class T, class E>
@@ -1145,6 +1222,7 @@ void liveTextAndScrollSamePrepare() {
 } // namespace
 
 int main() {
+  allocatorNothrowRoundtrip();
   runtimeOrderingAndIdle();
   commandFocusOrder(true);
   commandFocusOrder(false);

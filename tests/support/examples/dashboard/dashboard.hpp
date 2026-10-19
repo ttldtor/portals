@@ -24,9 +24,10 @@ class Scene final : public ApplicationScene {
 public:
   /** @param app Borrowed application that outlives the scene and supplies its UI thread and clock.
    * @param options Provider and display settings retained for this run.
+   * @param presentDataState Add the automatic status composition for loading integration tests.
    * Mount and scheduler failures are propagated by example::take.
    */
-  Scene(Application &app, Options options)
+  Scene(Application &app, Options options, bool presentDataState = false)
       : app_(app), managed_(take(ManagedScene::create(app))), provider_(app, options), stress_(options.stress) {
     name_ = take(managed_->state<std::string>("Market note"));
 
@@ -100,13 +101,27 @@ public:
     auto table = ui::virtualTable(table_, model, columns, tableConfig);
     auto chart = ui::chart(chart_, model, &Quote::prices, chartConfig);
 
-    // Both compositions consume the same views and preserve editor/button/table focus order.
-    auto description =
-      options.stress ? ui::grid(std::move(heading), std::move(note), std::move(inspectAction), std::move(status),
-                                std::move(table), std::move(chart))
-                     : ui::grid(std::move(heading),
-                                ui::hbox(toolbar, LinearOptions{.gap = 2}, std::move(note), std::move(inspectAction)),
-                                std::move(status), std::move(table), std::move(chart));
+    ui::Ref<DataStateView> presentation;
+    // The optional test composition uses the real provider without changing baseline scenarios.
+    auto description = [&] {
+      if (presentDataState) {
+        auto content = ui::dataStateView(std::move(table)).reference(presentation);
+
+        return options.stress
+                 ? ui::grid(std::move(heading), std::move(note), std::move(inspectAction), std::move(status),
+                            std::move(content), std::move(chart))
+                 : ui::grid(std::move(heading),
+                            ui::hbox(toolbar, LinearOptions{.gap = 2}, std::move(note), std::move(inspectAction)),
+                            std::move(status), std::move(content), std::move(chart));
+      }
+
+      return options.stress
+               ? ui::grid(std::move(heading), std::move(note), std::move(inspectAction), std::move(status),
+                          std::move(table), std::move(chart))
+               : ui::grid(std::move(heading),
+                          ui::hbox(toolbar, LinearOptions{.gap = 2}, std::move(note), std::move(inspectAction)),
+                          std::move(status), std::move(table), std::move(chart));
+    }();
 
     const auto gridNode = take(ui::mount(*managed_, std::move(description)));
 
@@ -114,13 +129,14 @@ public:
     take(managed_->theme(modernTheme()));
 
     GridOptions grid;
+    const auto tableCell = presentDataState ? presentation.node().id() : table_.node().id();
     const AxisSize flexible{.preferred = 0, .mode = SizeMode::FLEX};
     const AxisSize header{.preferred = 1, .maximum = 1, .mode = SizeMode::FIXED};
 
     grid.columns = {flexible};
     grid.rows = {header, header, header, header, flexible, flexible};
     grid.cells = {{title.node().id(), 0, 0},   {editor.node().id(), 1, 0}, {inspectButton.node().id(), 2, 0},
-                  {status_.node().id(), 3, 0}, {table_.node().id(), 4, 0}, {chart_.node().id(), 5, 0}};
+                  {status_.node().id(), 3, 0}, {tableCell, 4, 0},          {chart_.node().id(), 5, 0}};
 
     if (!options.stress) {
       // Four fixed tracks leave the remaining height to table/chart in a 2:1 ratio.
@@ -130,7 +146,7 @@ public:
       grid.cells = {{title.node().id(), 0, 0},
                     {toolbar.node().id(), 1, 0},
                     {status_.node().id(), 2, 0},
-                    {table_.node().id(), 3, 0},
+                    {tableCell, 3, 0},
                     {chart_.node().id(), 5, 0}};
     }
 

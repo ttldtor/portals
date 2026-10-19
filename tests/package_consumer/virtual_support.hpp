@@ -68,13 +68,13 @@ private:
 
 inline std::array<TableColumn<Ohlc>, 2> priceColumns() {
   return {{{{1, 1},
-            text("Open"),
+            virtualConsumer::text("Open"),
             9,
             [](const Ohlc &value) {
-              return text(std::to_string(static_cast<int>(value.open)));
+              return virtualConsumer::text(std::to_string(static_cast<int>(value.open)));
             }},
-           {{2, 1}, text("Close"), 9, [](const Ohlc &value) {
-              return text(std::to_string(static_cast<int>(value.close)));
+           {{2, 1}, virtualConsumer::text("Close"), 9, [](const Ohlc &value) {
+              return virtualConsumer::text(std::to_string(static_cast<int>(value.close)));
             }}}};
 }
 

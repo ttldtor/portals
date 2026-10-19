@@ -160,7 +160,7 @@ public:
   }
 
 private:
-  GraphemeText text_ = text("");
+  GraphemeText text_ = consumer::text("");
   CellRect bounds_;
   int level_{};
   bool focused_{};

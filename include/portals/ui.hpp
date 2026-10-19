@@ -372,6 +372,19 @@ struct Access {
 
   /// @endcond
 
+  /** @brief Build the shared checked data-presentation recipe for public overloads.
+   * @tparam Content Retained body widget type.
+   * @tparam Initial Owning presentation value or same-scene managed source.
+   * @param initial Initial value or source retained by the consuming recipe.
+   * @param content Single-use body recipe mounted in the same transaction.
+   * @param config Owning construction-only labels, styles and retry action.
+   * @param automatic Read the virtual body's prepared status when true.
+   * @return Single-use composition preserving mount rollback and deferred reference publication.
+   */
+  template <class Content, class Initial>
+  static Description<DataStateView> dataState(Initial initial, Description<Content> content, DataStateConfig config,
+                                              bool automatic);
+
   /** @tparam Factory Owning checked callable accepting scene, parent and the shared mount context.
    * @param factory Internal adapter performing a complete existing recipe transaction.
    * @return Single-use erased recipe; no extra widget or lifecycle owner is created.
@@ -633,6 +646,17 @@ public:
     }
 
     return result;
+  }
+
+  /** @param value Owning explicit presentation for an own-value composite; older generations are ignored.
+   * @param origin Public call site for the existing short diagnostic collector.
+   * @return Original checked TreeError; bound/automatic composites reject writes with INVALID_ARGUMENT.
+   */
+  std::expected<void, TreeError> display(DataPresentation value,
+                                         std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DataStateView>
+  {
+    return detail::displayDataState(target(), value, origin);
   }
 
   /** @param origin Focus request call site retained in managed diagnostics.
@@ -1707,6 +1731,82 @@ template <class T, class... Args> Description<T> custom(Args &&...args) {
       },
       arguments);
   });
+}
+
+template <class Content, class Initial>
+Description<DataStateView> detail::Access::dataState(Initial initial, Description<Content> content,
+                                                     DataStateConfig config, bool automatic) {
+  auto result = describe<DataStateView>(
+    [initial, config = std::move(config), automatic](ManagedScene &scene, Node<Widget> parent) mutable {
+      if constexpr (std::same_as<Initial, DataPresentation>) {
+        return scene.beginDataState(parent, initial, std::move(config), automatic);
+      } else {
+        return scene.beginBoundDataState(parent, initial, std::move(config));
+      }
+    });
+  result.state_->children.push_back(
+    [content = std::move(content), automatic](ManagedScene &scene, Node<Widget> parent,
+                                              MountContext &context) mutable -> std::expected<void, ManagedError> {
+      const auto finalizers = context.finalize.size();
+
+      auto child = mount(std::move(content), scene, parent, context);
+
+      if (!child) {
+        return std::unexpected(child.error());
+      }
+
+      if (automatic && context.finalize.size() != finalizers) {
+        // Cold virtual bodies attach their model during the existing mount finalization.
+        // Publish the relationship afterward, before any reference or preparation escapes.
+        context.finalize.push_back([&scene, parent, body = *child] {
+          return scene.finishDataState(parent, body, true);
+        });
+
+        return {};
+      }
+
+      return scene.finishDataState(parent, *child, automatic);
+    });
+  return result;
+}
+
+/** @tparam Content Retained widget type mounted as the one body subtree.
+ * @param initial Owning explicit state, with nonzero producer generation.
+ * @param content Consuming body recipe; independent work is required when REPLACE hides it.
+ * @param config Construction-only labels, fixed strip, styles and optional retry.
+ * @return Single-use composition; validation/allocation errors preserve ordinary mount rollback.
+ */
+template <class Content>
+Description<DataStateView> dataStateView(DataPresentation initial, Description<Content> content,
+                                         DataStateConfig config = {}) {
+  return detail::Access::dataState(initial, std::move(content), std::move(config), false);
+}
+
+/** @tparam Source Exactly ManagedState<DataPresentation> or readonly ManagedSource<DataPresentation>.
+ * @tparam Content Retained body widget type.
+ * @param source Weak same-scene one-way observation; no writable alias escapes.
+ * @param content Consuming body recipe. @param config Owning immutable presentation settings.
+ * @return Single-use bound composition; initial snapshot is validated before publication.
+ */
+template <class Source, class Content>
+  requires(std::same_as<Source, ManagedState<DataPresentation>> ||
+           std::same_as<Source, ManagedSource<DataPresentation>>)
+Description<DataStateView> dataStateView(Source source, Description<Content> content, DataStateConfig config = {}) {
+  return detail::Access::dataState(source, std::move(content), std::move(config), false);
+}
+
+/** @tparam View VirtualList/VirtualTable type exposing existing prepared owning facts.
+ * @param content Consuming managed virtual view; its provider callback retains ordinary work ownership.
+ * @param config Stable strip and optional explicit retry; REPLACE is rejected.
+ * @return Automatic composition using the body's successful Prepared without repinning or I/O.
+ */
+template <class View>
+  requires requires(const View &view) {
+    { view.dataStatus() } -> std::same_as<DataRangeStatus>;
+  }
+Description<DataStateView> dataStateView(Description<View> content, DataStateConfig config = {}) {
+  return detail::Access::dataState(DataPresentation{DataPhase::LOADING, 1}, std::move(content), std::move(config),
+                                   true);
 }
 
 /** @brief Construct a standard text-control recipe with the scene's width policy.
