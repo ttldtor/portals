@@ -386,6 +386,19 @@ DWORD inputCase(HANDLE resultPipe) {
   }
 
   mouse.Event.MouseEvent.dwButtonState = RIGHTMOST_BUTTON_PRESSED;
+  auto moved = mouse;
+
+  moved.Event.MouseEvent.dwButtonState = FROM_LEFT_1ST_BUTTON_PRESSED;
+  moved.Event.MouseEvent.dwEventFlags = MOUSE_MOVED;
+  moved.Event.MouseEvent.dwMousePosition = {25, 9};
+  native.inject({moved});
+
+  const auto held = collect(session, 1);
+
+  require(std::get<MouseInputEvent>(held[0]).button == MouseButton::LEFT &&
+            std::get<MouseInputEvent>(held[0]).action == MouseAction::MOVE &&
+            std::get<MouseInputEvent>(held[0]).column == 25,
+          "native motion preserves reliably held LEFT identity outside the old position");
   native.inject({mouse});
 
   const auto switched = collect(session, 2);
@@ -395,6 +408,17 @@ DWORD inputCase(HANDLE resultPipe) {
             std::get<MouseInputEvent>(switched[1]).button == MouseButton::RIGHT &&
             std::get<MouseInputEvent>(switched[1]).action == MouseAction::PRESS,
           "all changed mouse buttons retained");
+
+  mouse.Event.MouseEvent.dwButtonState = 0;
+  moved.Event.MouseEvent.dwButtonState = 0;
+  native.inject({mouse, moved});
+
+  const auto released = collect(session, 2);
+
+  require(std::get<MouseInputEvent>(released[0]).action == MouseAction::RELEASE &&
+            std::get<MouseInputEvent>(released[1]).action == MouseAction::MOVE &&
+            std::get<MouseInputEvent>(released[1]).button == MouseButton::NO_BUTTON,
+          "native no-button motion is distinguished from an unknown held-button identity");
 
   auto highRepeat = key(L'\xd83d');
   auto lowRepeat = key(L'\xde00');
@@ -516,6 +540,18 @@ DWORD inputCase(HANDLE resultPipe) {
   require(output.status == TerminalStatus::PROGRESS && output.completed == 18 && output.pending == 0,
           "actual output completion");
   require(session.close().has_value() && session.close().has_value(), "explicit close idempotence");
+  native.checkRestored();
+
+  auto adapter = openNativeApplicationTerminal(native.handles(), {}, 1s, true, NativeScreenMode::MAIN_SCREEN, true);
+
+  require(adapter.has_value(), "native motion adapter opens");
+
+  const auto capability = (*adapter)->pointerCaptureCapabilities();
+
+  require(capability.motion && capability.release && capability.motionButtonIdentity,
+          "Windows native adapter declares its tested motion/button/release contract");
+  require((*adapter)->close().has_value() && !(*adapter)->pointerCaptureCapabilities().motion,
+          "Windows native close revokes capability");
   native.checkRestored();
 
   try {
@@ -1640,6 +1676,10 @@ int wmain(int argc, wchar_t **argv) {
   }
 
   try {
+    if (argc == 2 && wcscmp(argv[1], L"--input-only") == 0) {
+      return hostCase(L"input") ? 0 : 1;
+    }
+
     if (argc == 2 && wcscmp(argv[1], L"--screen-uncertain-slow-drain") == 0) {
       return hostCase(L"screen-uncertain-slow-drain") ? 0 : 1;
     }

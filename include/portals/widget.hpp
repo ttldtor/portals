@@ -506,8 +506,11 @@ public:
 
 private:
   friend class EventRouter;
+  friend class LayoutSnapshot;
   // Allocation-free ancestry for the existing router; no record pointer escapes.
   std::expected<Node<Widget>, TreeError> inputParent(Node<Widget> node) const;
+  // Allocation-free full identity/visible ancestry admission; disabled nodes remain revealable.
+  std::expected<bool, TreeError> revealVisible(Node<Widget> node) const;
   friend class ManagedScene;
 
   // Allocation-free owning observation for the managed final-layout bridge; no children or record pointers escape.

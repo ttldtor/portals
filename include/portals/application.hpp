@@ -104,6 +104,11 @@ struct ApplicationStats {
  */
 class ApplicationTerminal : public FrameOutput {
 public:
+  /** @return Host motion/release guarantees for this session; default is no pointer capture.
+   * This declaration enables no terminal modes. The host must explicitly cancel lost sequences;
+   * an unsignalled OS focus loss cannot be detected by the runner. UI-thread only.
+   */
+  virtual PointerCaptureCapabilities pointerCaptureCapabilities() const noexcept;
   /** @param deadline Future absolute deadline in the application's clock.
    * @param stop Cooperative cancellation request.
    * @return One bounded owning input batch, timeout, stop, EOF, or original error.
@@ -137,6 +142,10 @@ struct ApplicationStep {
 class ApplicationReadyTerminal {
 public:
   virtual ~ApplicationReadyTerminal() = default; ///< Destroy after session cleanup.
+  /** @return Host motion/release guarantees; default is no pointer capture.
+   * The host must cancel lost sequences explicitly. No I/O or allocation is performed by the default.
+   */
+  virtual PointerCaptureCapabilities pointerCaptureCapabilities() const noexcept;
   /** @param stop Cooperative cancellation signal; never wait for cancellation.
    * @return One ready owning input batch, no input, EOF, stop, or an explicit error.
    */
@@ -194,6 +203,22 @@ openNativeApplicationTerminal(NativeTerminalHandles handles, TerminalOptions opt
                               std::chrono::milliseconds modeTimeout = std::chrono::milliseconds{2000},
                               bool mouseReporting = true, NativeScreenMode screen = NativeScreenMode::ALTERNATE_SCREEN);
 
+/** @brief Open the native transport with an explicit session button-motion requirement.
+ * @param handles Borrowed native handles, duplicated by the session.
+ * @param options Positive bounded native resource limits.
+ * @param modeTimeout Positive independent setup/cleanup I/O budget in milliseconds.
+ * @param mouseReporting False disables mouse protocol setup and pointer capture regardless of buttonMotion.
+ * @param screen Managed main or alternate screen policy, as in the original overload.
+ * @param buttonMotion Opt into POSIX 1002 and native held-button motion/release capability for this session.
+ * Late-mounted controls cannot activate another mode; hosts must explicitly cancel lost sequences.
+ * @return Owning adapter or the original typed setup/cleanup error. Capability is published only after setup.
+ * @throws std::bad_alloc Allocation failure; acquired native state receives best-effort cleanup.
+ */
+[[nodiscard]] std::expected<std::unique_ptr<ApplicationTerminal>, TerminalError>
+openNativeApplicationTerminal(NativeTerminalHandles handles, TerminalOptions options,
+                              std::chrono::milliseconds modeTimeout, bool mouseReporting, NativeScreenMode screen,
+                              bool buttonMotion);
+
 class Application;
 
 /** @brief Borrowed scene extension; bindings/models/providers belong to the caller.
@@ -228,6 +253,15 @@ public:
   /// @return True to run preliminary layout and prepareViews before the final frame.
   /// False preserves the original single layout/paint/render path.
   virtual bool usesPreparedLayout() const noexcept;
+  /** @return True to capture owning geometry/visibility/child clips for preparation; default false.
+   * The existing dimensions-only capture and its cost remain unchanged when false.
+   */
+  virtual bool usesGeometrySnapshot() const noexcept;
+  /** @return True when mounted controls require held-button motion; default false without allocation or tree walks.
+   * Sampled once after checked mount, immediately before native open. This requirement does not override
+   * ApplicationOptions::nativeMouseReporting=false or dynamically change an already opened transport.
+   */
+  virtual bool requiresPointerMotion() const noexcept;
   /// @brief Prepare views from one owning layout snapshot; default is a no-op.
   /// Called only for opt-in scenes, on UI outside tree.frame, after prepare has
   /// pinned models once. Use those same pins for all views and repeated passes;

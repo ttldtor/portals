@@ -233,6 +233,14 @@ For large datasets, create a model in the same factory and pass its observing
 handle to `ui::virtualList`, `ui::virtualTable` or `ui::chart`.
 See [models](model.md) and [virtual tables](virtual-table.md).
 
+
+## Scroll ordinary content
+
+Use `ui::scrollArea` for a retained form and `ui::scrollBar` for a standalone or
+shared axis. The [ordinary scroll guide](scroll-controls.md) contains a complete
+native application, bar placement, checked commands and host capture requirements.
+For datasets, keep using the existing [virtual views](virtual-preparation.md).
+
 ## Configure virtual views
 
 <a id="typed-columns-and-named-view-settings"></a>

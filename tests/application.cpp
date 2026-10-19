@@ -626,6 +626,220 @@ void preparationLayoutFailures() {
     check(terminal.output.empty() && terminal.closed && scene.stopped);
   }
 }
+
+using NativeOpenResult = std::expected<std::unique_ptr<ApplicationTerminal>, TerminalError>;
+using OriginalNativeOpen = NativeOpenResult (*)(NativeTerminalHandles, TerminalOptions, std::chrono::milliseconds, bool,
+                                                NativeScreenMode);
+static_assert(
+  std::same_as<decltype(static_cast<OriginalNativeOpen>(&openNativeApplicationTerminal)), OriginalNativeOpen>);
+static_assert(requires { openNativeApplicationTerminal({}, {}, {}, {}, {}); });
+static_assert(requires { openNativeApplicationTerminal({}, {}, {}, {}, {}, {}); });
+
+struct MotionTerminal : example::ReplayTerminal {
+  using ReplayTerminal::ReplayTerminal;
+  bool motion{true};
+
+  PointerCaptureCapabilities pointerCaptureCapabilities() const noexcept override {
+    return motion ? PointerCaptureCapabilities{true, true, true} : PointerCaptureCapabilities{};
+  }
+};
+
+struct CaptureScene : ApplicationScene {
+  Application &app;
+  Node<Label> owner;
+  ActionBinding binding;
+  PointerCapture capture;
+  int presses{}, moves{}, releases{}, intercepted{};
+  bool failMove{}, removeMove{}, stopPress{}, stopped{};
+
+  explicit CaptureScene(Application &app)
+      : app(app), owner(take(app.tree().emplace<Label>(app.root(), example::text("capture")))) {
+    binding = take(app.router().bind(
+      owner,
+      [&](Label &, const RoutedEvent &event) {
+        const auto *mouse = std::get_if<MouseInputEvent>(&event);
+        if (!mouse) {
+          return EventReply::IGNORED;
+        }
+        if (mouse->action == MouseAction::PRESS) {
+          ++presses;
+
+          auto acquired = app.router().capturePointer(owner);
+
+          if (acquired) {
+            capture = std::move(*acquired);
+          } else {
+            check(acquired.error() == TreeError::INVALID_ARGUMENT);
+          }
+          if (stopPress) {
+            app.requestStop();
+          }
+        } else if (mouse->action == MouseAction::MOVE) {
+          ++moves;
+          if (failMove) {
+            throw std::runtime_error("captured callback failure");
+          }
+          if (removeMove) {
+            take(app.tree().remove(owner));
+          }
+        } else if (mouse->action == MouseAction::RELEASE) {
+          ++releases;
+          check(!capture.connected());
+        }
+
+        return EventReply::HANDLED;
+      },
+      false));
+  }
+
+  std::expected<bool, TreeError> input(Application &, const InputEvent &event) override {
+    if (const auto *mouse = std::get_if<MouseInputEvent>(&event); mouse && mouse->action == MouseAction::PRESS) {
+      return false;
+    }
+    if (const auto *key = std::get_if<KeyEvent>(&event); key && key->key == InputKey::ESCAPE) {
+      check(!capture.connected());
+    }
+    ++intercepted;
+
+    return true;
+  }
+
+  void stop(Application &) override {
+    check(!capture.connected());
+    stopped = true;
+  }
+};
+
+void captureRunnerBridge() {
+  constexpr std::string_view PRESS = "\x1b[<0;1;1M";
+  constexpr std::string_view MOVE = "\x1b[<32;31;5M";
+  constexpr std::string_view RELEASE = "\x1b[<0;31;5m";
+  for (int mode = 0; mode < 8; ++mode) {
+    std::vector<example::ReplayTerminal::Input> input{{100, std::string(PRESS), {}}};
+    if (mode == 2) {
+      input.push_back({150, {}, CellSize{12, 8}});
+    }
+    if (mode == 3) {
+      input.push_back({150, "\x1b", {}});
+    }
+    input.push_back({200, std::string(MOVE), {}});
+    input.push_back({300, std::string(RELEASE), {}});
+    input.push_back({400, "\x1b[<65;1;1M", {}});
+
+    MotionTerminal terminal(std::move(input), 1000, {10, 8});
+    terminal.motion = mode != 1;
+
+    auto app = take(Application::create({}, terminal.clock()));
+    CaptureScene scene(*app);
+
+    scene.failMove = mode == 4;
+    scene.removeMove = mode == 5;
+    scene.stopPress = mode == 6;
+    if (mode == 7) {
+      // EOF after an admitted press must retire an otherwise unterminated sequence.
+      terminal = MotionTerminal({{100, std::string(PRESS), {}}}, 200, {10, 8});
+    }
+
+    const auto result = app->run(scene, terminal);
+
+    check(static_cast<bool>(result) == !scene.failMove);
+    check(scene.presses == 1 && scene.stopped && terminal.closed && !scene.capture.connected());
+    check(take(app->router().pointerCapture()) == Node<Widget>{});
+    if (mode == 0) {
+      check(scene.moves == 1 && scene.releases == 1 && scene.intercepted == 1 && result->frames <= 3);
+    } else if (mode == 1 || mode == 2 || mode == 3) {
+      check(scene.moves == 0 && scene.releases == 0);
+    } else if (mode == 5) {
+      check(scene.moves == 1 && scene.releases == 0);
+    } else if (mode == 6 || mode == 7) {
+      check(scene.moves == 0 && scene.releases == 0);
+    }
+  }
+  ApplicationScene ordinary;
+  example::ReplayTerminal defaultTerminal;
+
+  check(!ordinary.requiresPointerMotion() && !defaultTerminal.pointerCaptureCapabilities().motion);
+}
+
+struct ReadyMotionTerminal : ApplicationReadyTerminal {
+  bool motion{true}, closed{};
+  int polls{};
+  std::string pending;
+
+  PointerCaptureCapabilities pointerCaptureCapabilities() const noexcept override {
+    return motion ? PointerCaptureCapabilities{true, true, true} : PointerCaptureCapabilities{};
+  }
+
+  TerminalRead poll(std::stop_token) override {
+    TerminalRead result;
+    switch (polls++) {
+    case 0:
+      result.status = TerminalStatus::DEADLINE;
+      break;
+    case 1:
+      result.events.emplace_back(MouseInputEvent{0, 0, MouseButton::LEFT, MouseAction::PRESS, {}});
+      break;
+    case 2:
+      result.events.emplace_back(MouseInputEvent{30, 4, MouseButton::LEFT, MouseAction::MOVE, {}});
+      break;
+    case 3:
+      result.events.emplace_back(MouseInputEvent{30, 4, MouseButton::LEFT, MouseAction::RELEASE, {}});
+      break;
+    default:
+      result.status = TerminalStatus::END_OF_INPUT;
+      break;
+    }
+
+    return result;
+  }
+
+  std::expected<CellSize, TerminalError> size() const override {
+    return CellSize{10, 8};
+  }
+
+  std::expected<void, TerminalError> submit(std::string bytes) override {
+    pending = std::move(bytes);
+
+    return {};
+  }
+
+  TerminalWrite flushReady(std::stop_token) override {
+    const auto count = pending.size();
+    pending.clear();
+
+    return {TerminalStatus::PROGRESS, count, 0, {}};
+  }
+
+  std::expected<void, TerminalError> close() noexcept override {
+    closed = true;
+
+    return {};
+  }
+};
+
+void readyCaptureBridge() {
+  for (const bool motion : {false, true}) {
+    ReadyMotionTerminal terminal;
+    terminal.motion = motion;
+    std::uint64_t time{};
+    SchedulerClock clock{[](void *value) noexcept {
+                           return *static_cast<std::uint64_t *>(value);
+                         },
+                         &time};
+    auto app = take(Application::create({}, clock));
+    CaptureScene scene(*app);
+
+    take(app->start(scene, terminal));
+
+    bool finished{};
+    for (int step = 0; step < 20 && !finished; ++step) {
+      time += 100;
+      finished = take(app->step()).finished;
+    }
+    check(finished && terminal.closed && scene.stopped && scene.presses == 1);
+    check(scene.moves == (motion ? 1 : 0) && scene.releases == (motion ? 1 : 0));
+  }
+}
 } // namespace
 
 int main() {
@@ -651,6 +865,8 @@ int main() {
     preparationFailures();
     owningLayoutSnapshot();
     preparationLayoutFailures();
+    captureRunnerBridge();
+    readyCaptureBridge();
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
 

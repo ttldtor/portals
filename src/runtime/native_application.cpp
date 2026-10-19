@@ -24,7 +24,9 @@ constexpr std::string_view CANCEL_SEQUENCE = "\x18";
 constexpr std::string_view SAVE_TRACKING = "\x1b[?9;1000;1001;1002;1003s";
 constexpr std::string_view RESTORE_TRACKING = "\x1b[?9;1000;1001;1002;1003r";
 constexpr std::string_view ENABLE_MOUSE = "\x1b[?1005;1015;1016l\x1b[?1000;1006h";
+constexpr std::string_view ENABLE_BUTTON_MOTION = "\x1b[?1005;1015;1016l\x1b[?1002;1006h";
 constexpr std::array ENCODING_MODES{1005, 1006, 1015, 1016};
+constexpr std::array MOTION_QUERY_MODES{1005, 1006, 1015, 1016, 1002};
 constexpr std::size_t MAX_QUERY_REPLY_BYTES = 16;
 constexpr int MODE_SET = 1;
 constexpr int MODE_RESET = 2;
@@ -44,17 +46,18 @@ TerminalDeadline deadlineAfter(std::chrono::milliseconds timeout) {
   return now + interval;
 }
 
-// Remove only complete replies for our four queries. Preserve unrelated input and
+// Remove only complete replies for the selected queries. Preserve unrelated input and
 // an unfinished reply suffix, including bytes arriving before or between replies.
-std::size_t collectReplies(std::string &bytes, std::array<int, ENCODING_MODES.size()> &states) {
+template <std::size_t N>
+std::size_t collectReplies(std::string &bytes, std::array<int, N> &states, const std::array<int, N> &modes) {
   std::size_t cursor = 0;
 
   while ((cursor = bytes.find('\x1b', cursor)) != std::string::npos) {
     const std::string_view tail(bytes.data() + cursor, bytes.size() - cursor);
     bool consumed = false;
 
-    for (std::size_t index = 0; index < ENCODING_MODES.size(); ++index) {
-      const auto prefix = "\x1b[?" + std::to_string(ENCODING_MODES[index]) + ";";
+    for (std::size_t index = 0; index < modes.size(); ++index) {
+      const auto prefix = "\x1b[?" + std::to_string(modes[index]) + ";";
       const auto length = prefix.size() + 3;
 
       if (tail.starts_with(prefix) && tail.size() >= length && tail[prefix.size()] >= '0' &&
@@ -91,9 +94,9 @@ namespace detail {
 class NativeTerminal final : public ApplicationTerminal {
 public:
   NativeTerminal(TerminalSession session, TerminalOptions options, std::chrono::milliseconds timeout, bool mouse,
-                 NativeScreenMode screen)
+                 NativeScreenMode screen, bool buttonMotion)
       : session_(std::move(session)), inputLimit_(options.max_input_bytes), outputLimit_(options.max_output_bytes),
-        timeout_(timeout), mouseReporting_(mouse), screen_(screen) {
+        timeout_(timeout), mouseReporting_(mouse), buttonMotion_(mouse && buttonMotion), screen_(screen) {
     if (screen_ == NativeScreenMode::ALTERNATE_SCREEN) {
       screenCleanup_ = std::string(CANCEL_SEQUENCE) + std::string(LEAVE_SCREEN);
       screenSave_ = std::string(SAVE_VISIBILITY) + std::string(SAVE_CURSOR);
@@ -103,6 +106,11 @@ public:
 
   ~NativeTerminal() noexcept override {
     (void)close();
+  }
+
+  PointerCaptureCapabilities pointerCaptureCapabilities() const noexcept override {
+    return started_ && !closed_ && buttonMotion_ ? PointerCaptureCapabilities{true, true, true}
+                                                 : PointerCaptureCapabilities{};
   }
 
   std::expected<void, TerminalError> start() {
@@ -152,7 +160,7 @@ public:
     }
 
     const auto deadline = deadlineAfter(timeout_);
-    auto queried = queryEncodings(deadline);
+    auto queried = buttonMotion_ ? queryModes(deadline, MOTION_QUERY_MODES) : queryModes(deadline, ENCODING_MODES);
 
     if (!queried) {
       return queried;
@@ -179,7 +187,7 @@ public:
     // Arm cleanup before allocating submission storage or partially changing modes.
     restoreNeeded_ = true;
 
-    return send(ENABLE_MOUSE, deadline);
+    return send(buttonMotion_ ? ENABLE_BUTTON_MOTION : ENABLE_MOUSE, deadline);
 #else
     return {};
 #endif
@@ -283,10 +291,11 @@ public:
   }
 
 private:
-  std::expected<void, TerminalError> queryEncodings(TerminalDeadline deadline) {
+  template <std::size_t N>
+  std::expected<void, TerminalError> queryModes(TerminalDeadline deadline, const std::array<int, N> &modes) {
     std::string queries;
 
-    for (const int mode : ENCODING_MODES) {
+    for (const int mode : modes) {
       queries += "\x1b[?" + std::to_string(mode) + "$p";
     }
 
@@ -296,7 +305,7 @@ private:
       return sent;
     }
 
-    std::array<int, ENCODING_MODES.size()> states;
+    std::array<int, N> states;
 
     states.fill(-1);
 
@@ -328,7 +337,7 @@ private:
         startupInput_.bytes.append(input.bytes, offset, amount);
         offset += amount;
 
-        const auto suffix = collectReplies(startupInput_.bytes, states);
+        const auto suffix = collectReplies(startupInput_.bytes, states, modes);
 
         if (startupInput_.bytes.size() - suffix > inputLimit_) {
           return std::unexpected(TerminalError{TerminalErrorKind::INPUT_LIMIT});
@@ -353,13 +362,22 @@ private:
       return std::unexpected(TerminalError{TerminalErrorKind::UNSUPPORTED});
     }
 
-    for (std::size_t index = 0; index < states.size(); ++index) {
+    if constexpr (N == MOTION_QUERY_MODES.size()) {
+      const auto motion = states.back();
+      if (motion != MODE_SET && motion != MODE_RESET && motion != MODE_PERMANENTLY_SET) {
+        return std::unexpected(TerminalError{TerminalErrorKind::UNSUPPORTED});
+      }
+    }
+
+    // Encoding restoration uses only its original four queried values. Tracking,
+    // including 1002, belongs exclusively to the existing XTSAVE/XTRESTORE batch.
+    for (std::size_t index = 0; index < ENCODING_MODES.size(); ++index) {
       if (states[index] == MODE_SET || states[index] == MODE_RESET) {
         restoreBytes_ += "\x1b[?" + std::to_string(ENCODING_MODES[index]) + "l";
       }
     }
 
-    for (std::size_t index = 0; index < states.size(); ++index) {
+    for (std::size_t index = 0; index < ENCODING_MODES.size(); ++index) {
       if (states[index] == MODE_SET) {
         restoreBytes_ += "\x1b[?" + std::to_string(ENCODING_MODES[index]) + "h";
       }
@@ -398,7 +416,8 @@ private:
   std::chrono::milliseconds timeout_;
   TerminalRead startupInput_;
   std::string restoreBytes_, mouseCleanup_, screenCleanup_, combinedCleanup_, screenSave_, captureCleanup_;
-  bool mouseReporting_{}, restoreNeeded_{}, captureStarted_{}, screenRestoreNeeded_{}, started_{}, closed_{};
+  bool mouseReporting_{}, buttonMotion_{}, restoreNeeded_{}, captureStarted_{}, screenRestoreNeeded_{}, started_{},
+    closed_{};
   NativeScreenMode screen_;
 };
 } // namespace detail
@@ -406,6 +425,13 @@ private:
 std::expected<std::unique_ptr<ApplicationTerminal>, TerminalError>
 openNativeApplicationTerminal(NativeTerminalHandles handles, TerminalOptions options,
                               std::chrono::milliseconds modeTimeout, bool mouseReporting, NativeScreenMode screen) {
+  return openNativeApplicationTerminal(handles, options, modeTimeout, mouseReporting, screen, false);
+}
+
+std::expected<std::unique_ptr<ApplicationTerminal>, TerminalError>
+openNativeApplicationTerminal(NativeTerminalHandles handles, TerminalOptions options,
+                              std::chrono::milliseconds modeTimeout, bool mouseReporting, NativeScreenMode screen,
+                              bool buttonMotion) {
   if (modeTimeout.count() <= 0 || modeTimeout > MAX_MODE_TIMEOUT ||
       options.max_input_bytes > std::string{}.max_size() - MAX_QUERY_REPLY_BYTES) {
     return std::unexpected(TerminalError{TerminalErrorKind::INVALID_OPTIONS});
@@ -428,8 +454,8 @@ openNativeApplicationTerminal(NativeTerminalHandles handles, TerminalOptions opt
     return std::unexpected(session.error());
   }
 
-  auto terminal =
-    std::make_unique<detail::NativeTerminal>(std::move(*session), options, modeTimeout, mouseReporting, screen);
+  auto terminal = std::make_unique<detail::NativeTerminal>(std::move(*session), options, modeTimeout, mouseReporting,
+                                                           screen, buttonMotion);
   auto started = terminal->start();
 
   if (!started) {

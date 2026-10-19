@@ -208,6 +208,10 @@ cmake --build build/guide-examples
 
 Запустите `build/guide-examples/docs_basic.exe` в Windows или `build/guide-examples/docs_basic` в Linux/macOS. F10 закрывает интерактивные программы. Для сценариев редактора см. [демонстрацию истории](editor-history-demo.md).
 
+
+[Руководство по обычной прокрутке](scroll-controls.md) собирается в `guide_scroll_controls`:
+восемь кнопок в области высотой пять строк, wheel/key/drag и выход через Exit/F10.
+
 ## Браузерный пример
 
 [Gallery и Level в WebAssembly](wasm-gallery.md) — подключаемые экспериментальные браузерные сцены с xterm.js и пошаговым runner. Обычная сборка нативных примеров их не включает.

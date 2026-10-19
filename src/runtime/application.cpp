@@ -1,5 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include "../widgets/scroll_controls_state.hpp"
+#include "../widgets/scroll_preparation_state.hpp"
 #include <portals/application.hpp>
 
 #include <algorithm>
@@ -145,6 +147,13 @@ LayoutSnapshot::LayoutSnapshot(std::uint64_t session, std::shared_ptr<const std:
     : session_(session), records_(std::move(records)) {
 }
 
+LayoutSnapshot::LayoutSnapshot(std::uint64_t session, std::shared_ptr<const std::vector<Record>> records,
+                               std::shared_ptr<const std::vector<GeometryRecord>> geometry, std::uint64_t revision,
+                               std::uint64_t inputGeneration)
+    : session_(session), records_(std::move(records)), geometry_(std::move(geometry)), geometryRevision_(revision),
+      inputGeneration_(inputGeneration) {
+}
+
 std::expected<LayoutSnapshot, TreeError> LayoutSnapshot::capture(WidgetTree &tree, Node<Widget> node) {
   try {
     auto ancestor = node;
@@ -230,6 +239,167 @@ std::expected<CellSize, TreeError> LayoutSnapshot::viewport(Node<Widget> node) c
   return found->size;
 }
 
+std::expected<LayoutSnapshot, TreeError> LayoutSnapshot::capture(WidgetTree &tree, Node<Widget> node,
+                                                                 LayoutSnapshotProfile profile) {
+  if (profile == LayoutSnapshotProfile::DIMENSIONS) {
+    return capture(tree, node);
+  }
+  if (profile != LayoutSnapshotProfile::GEOMETRY) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+  auto revision = tree.geometryRevision();
+  if (!revision) {
+    return std::unexpected(revision.error());
+  }
+  const auto inputGeneration = tree.inputGeneration();
+  try {
+    bool ancestorsVisible = true;
+    for (auto ancestor = node; ancestor != Node<Widget>{};) {
+      auto value = tree.inspect(ancestor);
+      if (!value) {
+        return std::unexpected(value.error());
+      }
+      ancestorsVisible &= value->visible;
+      ancestor = value->parent;
+    }
+    auto records = std::make_shared<std::vector<Record>>(0);
+    auto geometry = std::make_shared<std::vector<GeometryRecord>>(0);
+    auto collect = [&](auto &self, Node<Widget> current, bool parentVisible) -> std::expected<void, TreeError> {
+      auto value = tree.inspect(current);
+      if (!value) {
+        return std::unexpected(value.error());
+      }
+      const bool visible = parentVisible && value->visible;
+      if (visible && !value->geometry.valid) {
+        return std::unexpected(TreeError::INVALID_GEOMETRY);
+      }
+      LayoutGeometrySnapshot captured{value->parent, value->geometry, {}, visible, {}};
+      std::expected<void, TreeError> status;
+      auto read = tree.read(current, [&](const Widget &widget) {
+        if (visible) {
+          auto clip = CellRect::from({}, value->geometry.local.size());
+          if (!clip) {
+            status = std::unexpected(TreeError::INVALID_GEOMETRY);
+            return;
+          }
+          const auto bounds = *clip;
+          if (const auto *layout = dynamic_cast<const Layout *>(&widget)) {
+            auto local = layout->childClip(value->geometry.local.size());
+            if (!local) {
+              status = std::unexpected(local.error());
+              return;
+            }
+            clip = *local;
+          }
+          if (!bounds.contains(*clip)) {
+            status = std::unexpected(TreeError::INVALID_GEOMETRY);
+            return;
+          }
+          auto surface = clip->translated(value->geometry.surface.origin());
+          if (!surface) {
+            status = std::unexpected(TreeError::INVALID_GEOMETRY);
+            return;
+          }
+          captured.descendantClip = *surface;
+        } else {
+          captured.geometry.valid = false;
+        }
+        if (const auto *area = dynamic_cast<const ScrollArea *>(&widget)) {
+          auto observation = detail::ScrollWidgetAccess::snapshot(*area, current.id(), captured.geometry, visible);
+          if (!observation) {
+            status = std::unexpected(observation.error());
+            return;
+          }
+          captured.scrollArea = *observation;
+        }
+      });
+      if (!read || !status) {
+        return read ? status : read;
+      }
+      records->push_back({current.id(), visible ? value->geometry.local.size() : CellSize{}});
+      geometry->push_back({current.id(), captured});
+      for (const auto child : value->children) {
+        auto copied = self(self, child, visible);
+        if (!copied) {
+          return copied;
+        }
+      }
+      return {};
+    };
+    auto copied = collect(collect, node, ancestorsVisible);
+    if (!copied) {
+      return std::unexpected(copied.error());
+    }
+    std::ranges::sort(*records, {}, [](const Record &record) {
+      return record.id.slot;
+    });
+    std::ranges::sort(*geometry, {}, [](const GeometryRecord &record) {
+      return record.id.slot;
+    });
+    auto currentRevision = tree.geometryRevision();
+    if (!currentRevision) {
+      return std::unexpected(currentRevision.error());
+    }
+    if (*currentRevision != *revision) {
+      return std::unexpected(TreeError::WOULD_BLOCK);
+    }
+    return LayoutSnapshot(node.id().session, std::move(records), std::move(geometry), *revision, inputGeneration);
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(TreeError::NO_MEMORY);
+  }
+}
+
+std::expected<LayoutGeometrySnapshot, TreeError> LayoutSnapshot::geometry(Node<Widget> node) const noexcept {
+  const auto id = node.id();
+  if (!id.session || !records_) {
+    return std::unexpected(TreeError::STALE_NODE);
+  }
+  if (id.session != session_) {
+    return std::unexpected(TreeError::WRONG_SESSION);
+  }
+  if (!geometry_) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+  const auto found = std::ranges::lower_bound(*geometry_, id.slot, {}, [](const GeometryRecord &record) {
+    return record.id.slot;
+  });
+  return found == geometry_->end() || found->id != id
+           ? std::expected<LayoutGeometrySnapshot, TreeError>(std::unexpected(TreeError::STALE_NODE))
+           : std::expected<LayoutGeometrySnapshot, TreeError>(found->value);
+}
+
+std::expected<std::uint64_t, TreeError> LayoutSnapshot::geometryRevision() const noexcept {
+  if (!records_) {
+    return std::unexpected(TreeError::STALE_NODE);
+  }
+  return geometry_ ? std::expected<std::uint64_t, TreeError>(geometryRevision_)
+                   : std::unexpected(TreeError::INVALID_ARGUMENT);
+}
+
+std::expected<detail::ScrollSnapshotAdmission, TreeError> LayoutSnapshot::admitScrollSnapshot(WidgetTree &tree) const {
+  if (!geometry_) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+  auto root = tree.root();
+  if (!root) {
+    return std::unexpected(root.error());
+  }
+  if (root->id().session != session_) {
+    return std::unexpected(TreeError::WRONG_SESSION);
+  }
+  auto allowed = tree.withScope(*root, [](const UiScope &) {
+  });
+  if (!allowed) {
+    return std::unexpected(allowed.error());
+  }
+  const auto current = tree.inputGeneration();
+  if (!current || !inputGeneration_) {
+    return std::unexpected(TreeError::IDENTITY_EXHAUSTED);
+  }
+  return current == inputGeneration_ ? detail::ScrollSnapshotAdmission::CURRENT
+                                     : detail::ScrollSnapshotAdmission::STALE;
+}
+
 struct Application::State {
   struct Run;
   ApplicationOptions options;
@@ -240,7 +410,7 @@ struct Application::State {
   std::unique_ptr<EventRouter> router;
   Node<Widget> root;
   std::stop_source stop;
-  bool ran{}, operating{}, complete{};
+  bool ran{}, operating{}, complete{}, pointerRouting{};
   ApplicationStats stats;
   ApplicationPhase phase{ApplicationPhase::OPEN};
   std::optional<ApplicationError> error;
@@ -347,6 +517,7 @@ struct Application::State::Run {
           }
 
           if (const auto *size = std::get_if<CellSize>(control.get())) {
+            require(app.router().cancelPointerCapture());
             viewport = *size;
             require(app.tree().invalidate(app.root(), Invalidation::LAYOUT));
 
@@ -356,6 +527,26 @@ struct Application::State::Run {
           const auto &event = std::get<InputEvent>(*control);
 
           ++stats.inputs;
+
+          if (state.pointerRouting) {
+            if (const auto *key = std::get_if<KeyEvent>(&event);
+                key && key->key == InputKey::ESCAPE && key->action != KeyAction::RELEASE) {
+              require(app.router().cancelPointerCapture());
+            }
+
+            if (const auto *mouse = std::get_if<MouseInputEvent>(&event);
+                mouse && (mouse->action == MouseAction::MOVE ||
+                          (mouse->action == MouseAction::RELEASE && mouse->button == MouseButton::LEFT))) {
+              const auto captured = require(app.router().pointerCapture());
+
+              if (captured != Node<Widget>{}) {
+                // A global interceptor must not swallow a captured continuation or release.
+                require(app.router().dispatch(event));
+
+                return;
+              }
+            }
+          }
 
           if (!require(scene.input(app, event))) {
             require(app.router().dispatch(event));
@@ -533,7 +724,9 @@ struct Application::State::Run {
         }));
 
         require(layoutTree(app.tree(), app.root(), rect, rect));
-        snapshot.emplace(require(LayoutSnapshot::capture(app.tree(), app.root())));
+        snapshot.emplace(require(scene.usesGeometrySnapshot()
+                                   ? LayoutSnapshot::capture(app.tree(), app.root(), LayoutSnapshotProfile::GEOMETRY)
+                                   : LayoutSnapshot::capture(app.tree(), app.root())));
       } catch (const Failure &value) {
         failure.emplace(value);
       }
@@ -682,6 +875,22 @@ bool ApplicationScene::usesPreparedLayout() const noexcept {
   return false;
 }
 
+bool ApplicationScene::usesGeometrySnapshot() const noexcept {
+  return false;
+}
+
+bool ApplicationScene::requiresPointerMotion() const noexcept {
+  return false;
+}
+
+PointerCaptureCapabilities ApplicationTerminal::pointerCaptureCapabilities() const noexcept {
+  return {};
+}
+
+PointerCaptureCapabilities ApplicationReadyTerminal::pointerCaptureCapabilities() const noexcept {
+  return {};
+}
+
 std::expected<void, TreeError> ApplicationScene::prepareViews(Application &, const LayoutSnapshot &) {
   return {};
 }
@@ -800,8 +1009,10 @@ std::expected<ApplicationStats, ApplicationError> Application::run(ApplicationSc
 #else
     NativeTerminalHandles handles{0, 1};
 #endif
-    auto opened = openNativeApplicationTerminal(handles, state_->options.terminal, state_->options.outputSlice,
-                                                state_->options.nativeMouseReporting, state_->options.nativeScreen);
+    const auto buttonMotion = scene.requiresPointerMotion();
+    auto opened =
+      openNativeApplicationTerminal(handles, state_->options.terminal, state_->options.outputSlice,
+                                    state_->options.nativeMouseReporting, state_->options.nativeScreen, buttonMotion);
 
     if (!opened) {
       state_->ran = true;
@@ -839,6 +1050,11 @@ std::expected<void, ApplicationError> Application::start(ApplicationScene &scene
     // The ready host never waits: sampling its retained token avoids destroying
     // a stop_callback that could join a concurrently executing external callback.
     state_->readyStop = externalStop;
+
+    const auto capabilities = terminal.pointerCaptureCapabilities();
+
+    require(router().setPointerCaptureCapabilities(capabilities));
+    state_->pointerRouting = capabilities.motion && capabilities.release;
 
     if (state_->readyStop.stop_requested()) {
       requestStop();
@@ -930,6 +1146,13 @@ void Application::finishSession() noexcept {
   state_->phase = ApplicationPhase::STOP;
 
   try {
+    require(router().cancelPointerCapture(false));
+    require(router().setPointerCaptureCapabilities({}));
+  } catch (...) {
+    captureFailure(state_->phase, state_->error);
+  }
+
+  try {
     state_->measure(state_->phase, [&] {
       requestStop();
       require(scheduler().stop());
@@ -984,6 +1207,10 @@ Application::run(ApplicationScene &scene, ApplicationTerminal &terminal, std::st
   state_->legacy = &terminal;
 
   try {
+    const auto capabilities = terminal.pointerCaptureCapabilities();
+
+    require(router().setPointerCaptureCapabilities(capabilities));
+    state_->pointerRouting = capabilities.motion && capabilities.release;
     state_->cancellation = std::make_unique<std::stop_callback<State::Cancel>>(externalStop, State::Cancel{this});
 
     if (!state_->stop.stop_requested()) {

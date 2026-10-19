@@ -15,6 +15,7 @@
 #include <fcntl.h>
 #include <fstream>
 #include <iostream>
+#include <new>
 #include <stdexcept>
 #include <string_view>
 #include <sys/ioctl.h>
@@ -24,12 +25,63 @@
 #include <unistd.h>
 #include <utility>
 
+thread_local bool fail_native_allocation{};
+
+void *operator new(std::size_t size) {
+  if (std::exchange(fail_native_allocation, false)) {
+    throw std::bad_alloc();
+  }
+  if (auto *memory = std::malloc(size ? size : 1)) {
+    return memory;
+  }
+
+  throw std::bad_alloc();
+}
+
+void *operator new[](std::size_t size) {
+  return ::operator new(size);
+}
+
+void operator delete(void *memory) noexcept {
+  std::free(memory);
+}
+
+void operator delete[](void *memory) noexcept {
+  std::free(memory);
+}
+
+void operator delete(void *memory, std::size_t) noexcept {
+  std::free(memory);
+}
+
+void operator delete[](void *memory, std::size_t) noexcept {
+  std::free(memory);
+}
+
 #ifdef PORTALS_TEST_WRAP_TERMIOS
 int screen_write_failure = 0;
+thread_local int motion_write_failure{};
+thread_local bool fail_motion_allocation_after_save{};
 // Linker --wrap entry points must retain their externally required names.
 extern "C" ssize_t __real_write(int, const void *, std::size_t); // NOLINT(readability-identifier-naming)
 
 extern "C" ssize_t __wrap_write(int fd, const void *bytes, std::size_t count) { // NOLINT(readability-identifier-naming)
+  const std::string_view output(static_cast<const char *>(bytes), count);
+  if (fail_motion_allocation_after_save && output == "\x1b[?9;1000;1001;1002;1003s") {
+    fail_motion_allocation_after_save = false;
+    fail_native_allocation = true;
+  }
+  if (motion_write_failure == 1 && output == "\x1b[?1005;1015;1016l\x1b[?1002;1006h") {
+    motion_write_failure = 2;
+
+    return __real_write(fd, bytes, count - 1);
+  }
+  if (motion_write_failure == 2) {
+    motion_write_failure = 0;
+    errno = EIO;
+
+    return -1;
+  }
   if (screen_write_failure == 1 &&
       std::string_view(static_cast<const char *>(bytes), count).starts_with("\x1b[?1049h")) {
     screen_write_failure = 2;
@@ -181,10 +233,17 @@ std::string drainOutput(Pty &pty) {
 }
 
 constexpr std::string_view ENCODING_REPLIES = "\x1b[?1005;2$y\x1b[?1006;1$y\x1b[?1015;2$y\x1b[?1016;2$y";
+// The responder writes this receipt; its jthread joins before the caller observes it.
+std::string observedNativeQueries;
 
 std::expected<std::unique_ptr<ApplicationTerminal>, TerminalError>
 openMouseTestTerminal(Pty &pty, TerminalOptions options = {}, std::chrono::milliseconds timeout = 100ms,
-                      std::string replies = std::string(ENCODING_REPLIES)) {
+                      std::string replies = std::string(ENCODING_REPLIES), bool buttonMotion = false,
+                      int motionStatus = 2) {
+  observedNativeQueries.clear();
+  if (buttonMotion && motionStatus >= 0) {
+    replies += "\x1b[?1002;" + std::to_string(motionStatus) + "$y";
+  }
   std::jthread responder([&] {
     std::string received;
     const auto deadline = Clock::now() + timeout;
@@ -192,7 +251,8 @@ openMouseTestTerminal(Pty &pty, TerminalOptions options = {}, std::chrono::milli
     while (Clock::now() < deadline) {
       received += drainOutput(pty);
 
-      if (received.find("\x1b[?1016$p") != std::string::npos) {
+      if (received.find(buttonMotion ? "\x1b[?1002$p" : "\x1b[?1016$p") != std::string::npos) {
+        observedNativeQueries = received;
         // Deliberately split replies across native reads; preserve ordinary input.
         for (const char byte : replies) {
           if (::write(pty.master.get(), &byte, 1) != 1) {
@@ -209,7 +269,9 @@ openMouseTestTerminal(Pty &pty, TerminalOptions options = {}, std::chrono::milli
     }
   });
 
-  return openNativeApplicationTerminal(pty.handles(), options, timeout, true, NativeScreenMode::MAIN_SCREEN);
+  return buttonMotion
+           ? openNativeApplicationTerminal(pty.handles(), options, timeout, true, NativeScreenMode::MAIN_SCREEN, true)
+           : openNativeApplicationTerminal(pty.handles(), options, timeout, true, NativeScreenMode::MAIN_SCREEN);
 }
 
 void managedMouse() {
@@ -225,6 +287,10 @@ void managedMouse() {
   const auto startup = drainOutput(pty);
 
   check(startup.find("\x1b[?1000;1006h") != std::string::npos, "native transport enables SGR button tracking");
+  check(startup.find("\x1b[?1002;1006h") == std::string::npos && !(*opened)->pointerCaptureCapabilities().motion,
+        "original native overload preserves button-only bytes and default capability");
+  check(observedNativeQueries.find("\x1b[?1002$p") == std::string::npos,
+        "default native startup retains exactly its original four-mode query profile");
   check(startup.find("s") < startup.find("h"), "mouse modes saved before mutation");
   check((*opened)->submit("pending-frame").has_value(), "managed transport accepts pending frame");
   check((*opened)->close().has_value(), "managed transport closes");
@@ -276,6 +342,113 @@ void managedMouse() {
   }
 
   check(drainOutput(pty).ends_with("r") && pty.restored(), "managed destructor restores without explicit close");
+}
+
+void managedButtonMotion() {
+  Pty pty;
+  auto opened = openMouseTestTerminal(pty, {}, 100ms, std::string(ENCODING_REPLIES), true);
+
+  check(opened.has_value(), "button-motion native transport opens");
+  if (!opened) {
+    return;
+  }
+  const auto startup = drainOutput(pty);
+  const auto capabilities = (*opened)->pointerCaptureCapabilities();
+
+  check(startup.find("\x1b[?1002;1006h") != std::string::npos && startup.find("\x1b[?1000;1006h") == std::string::npos,
+        "opt-in session enables SGR button motion instead of the old tracking profile");
+  check(capabilities.motion && capabilities.release && capabilities.motionButtonIdentity,
+        "successful setup admits reliable drag motion and release");
+  check((*opened)->close().has_value(), "button-motion session closes");
+
+  const auto shutdown = drainOutput(pty);
+
+  check(shutdown.find("\x1b[?9;1000;1001;1002;1003r") != std::string::npos && pty.restored(),
+        "button-motion session restores tracking and native modes");
+  check(!(*opened)->pointerCaptureCapabilities().motion && (*opened)->close().has_value() && drainOutput(pty).empty(),
+        "close revokes drag capability and remains idempotent");
+
+  auto disabled = openNativeApplicationTerminal(pty.handles(), {}, 100ms, false, NativeScreenMode::MAIN_SCREEN, true);
+
+  check(disabled.has_value() && !(*disabled)->pointerCaptureCapabilities().motion && drainOutput(pty).empty(),
+        "explicit mouse opt-out overrides the button-motion requirement without protocol bytes");
+  if (disabled) {
+    check((*disabled)->close().has_value() && pty.restored(), "mouse opt-out restores native modes");
+  }
+
+  auto failed = openMouseTestTerminal(pty, {}, 100ms, "\x1b[?1005;2$y\x1b[?1006;0$y\x1b[?1015;2$y\x1b[?1016;2$y", true);
+
+  check(!failed && failed.error().kind == TerminalErrorKind::UNSUPPORTED && pty.restored(),
+        "unsupported motion setup retains typed failure and restores native modes");
+  check(drainOutput(pty).find("\x1b[?1002;1006h") == std::string::npos,
+        "failed setup never enables the motion profile");
+}
+
+void confirmedButtonMotion() {
+  for (const int status : {1, 2, 3}) {
+    Pty pty;
+    TerminalOptions options;
+    options.max_input_bytes = 2;
+
+    auto opened = openMouseTestTerminal(pty, options, 100ms, "q" + std::string(ENCODING_REPLIES) + "r", true, status);
+
+    check(opened.has_value(), "confirmed supported motion states admit startup");
+    if (!opened) {
+      continue;
+    }
+    const auto input = (*opened)->read(Clock::now() + 100ms, {});
+
+    check(input.bytes == "qr", "fragmented opt-in reply is consumed while ordinary startup input is preserved");
+    check((*opened)->pointerCaptureCapabilities().motion && (*opened)->close().has_value() && pty.restored(),
+          "confirmed motion session restores native state");
+  }
+  for (const int status : {0, 4, -1, 5}) {
+    Pty pty;
+
+    auto denied = openMouseTestTerminal(pty, {}, 100ms, std::string(ENCODING_REPLIES), true, status);
+    const auto unsupported = status == 0 || status == 4;
+
+    check(!denied && denied.error().kind == (unsupported ? TerminalErrorKind::UNSUPPORTED : TerminalErrorKind::SYSTEM),
+          "unsupported or missing/malformed motion confirmation remains a typed startup failure");
+    check(unsupported || (!denied && denied.error().native_code == ETIMEDOUT),
+          "missing/malformed motion reply consumes only the existing startup deadline");
+
+    const auto bytes = drainOutput(pty);
+
+    check(observedNativeQueries.find("\x1b[?1002$p") != std::string::npos,
+          "opt-in setup actually queries motion support before admitting a capability");
+    check(bytes.find("\x1b[?1002;1006h") == std::string::npos,
+          "unconfirmed motion cannot enable button-motion tracking");
+    check(pty.restored(), "unconfirmed motion startup releases native mode ownership");
+  }
+#ifdef PORTALS_TEST_WRAP_TERMIOS
+  {
+    Pty pty;
+    motion_write_failure = 1;
+
+    const auto denied = openMouseTestTerminal(pty, {}, 100ms, std::string(ENCODING_REPLIES), true);
+
+    check(!denied && denied.error().native_code == EIO && motion_write_failure == 0 && pty.restored(),
+          "partial motion-mode setup preserves I/O failure and restores OS modes");
+    check(drainOutput(pty).find("\x18\x1b[?1005l") != std::string::npos,
+          "partial motion setup is cancelled before the encoding/tracking restoration batch");
+  }
+  {
+    Pty pty;
+    bool caught{};
+    fail_motion_allocation_after_save = true;
+    try {
+      (void)openMouseTestTerminal(pty, {}, 100ms, std::string(ENCODING_REPLIES), true);
+    } catch (const std::bad_alloc &) {
+      caught = true;
+    }
+    fail_motion_allocation_after_save = false;
+    fail_native_allocation = false;
+    check(caught && pty.restored(), "motion setup allocation failure unwinds native session ownership");
+    check(drainOutput(pty).find("\x1b[?9;1000;1001;1002;1003r") != std::string::npos,
+          "allocation failure after tracking save runs the prebuilt restoration batch");
+  }
+#endif
 }
 
 void managedMouseQueries() {
@@ -1173,6 +1346,8 @@ int run() {
   sessions();
   managedScreen();
   managedMouse();
+  managedButtonMotion();
+  confirmedButtonMotion();
   managedMouseQueries();
   managedMouseFailures();
   interruptedIo();

@@ -28,6 +28,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
   Collection-bound lists preserve last good data on failure or origin retirement;
   changed tokens receive fresh IDs and missing selection clears on new bound lists.
   Explicit owning row collections also bind read-only managed sources to models.
+- [Added] Ordinary scroll areas and standalone/shared scroll bars support exact
+  offsets, wheel/key/track/thumb input, managed focus reveal, and reserved, overlay
+  or frame-edge placement. Native sessions request checked held-button motion only
+  for mounted scroll controls; scoped capture and scene cleanup preserve ownership.
 
 - [Added] Read-only managed derived sources compute owning values from explicit
   state or earlier derived sources. Initial creation is atomic and checked;

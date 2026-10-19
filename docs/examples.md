@@ -251,6 +251,10 @@ cmake --build build/guide-examples
 
 Run `build/guide-examples/docs_basic.exe` on Windows or `build/guide-examples/docs_basic` on Linux/macOS. F10 closes interactive programs. See the [editor history demonstration](editor-history-demo.md) for editing scenarios.
 
+
+The [ordinary scroll guide](scroll-controls.md) builds as `guide_scroll_controls`: eight
+buttons in a five-row area, wheel/key/drag input, and Exit/F10 cleanup.
+
 ## Browser sample
 
 [Gallery and Level in WebAssembly](wasm-gallery.md) are opt-in experimental browser scenes. They use xterm.js and the incremental runner; building native examples does not build this target.

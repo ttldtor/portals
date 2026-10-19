@@ -11,6 +11,7 @@
 #include <portals/managed_diagnostics.hpp>
 #include <portals/managed_model.hpp>
 #include <portals/primitives.hpp>
+#include <portals/scroll_controls.hpp>
 #include <portals/style.hpp>
 #include <portals/style_source.hpp>
 #include <portals/text_transform.hpp>
@@ -44,6 +45,9 @@ struct Access;
 } // namespace style::ct::detail
 
 namespace detail {
+struct ManagedScrollState;
+struct ScrollIntentRecord;
+struct ManagedScrollTestAccess;
 template <class T> inline constexpr bool IS_MANAGED_TREE_RESULT = false;
 template <class Value> inline constexpr bool IS_MANAGED_TREE_RESULT<std::expected<Value, TreeError>> = true;
 
@@ -371,69 +375,40 @@ public:
   template <class T, class... Args>
     requires std::derived_from<T, Widget>
   std::expected<Node<T>, ManagedError> emplace(Node<Widget> parent, Args &&...args) {
-    auto allowed = boundary(ManagedPhase::MOUNT, parent);
-
-    if (!allowed) {
-      return std::unexpected(allowed.error());
-    }
-
-    if (parent != root_ && !find(parent)) {
-      return std::unexpected(error(ManagedPhase::MOUNT, parent, TreeError::INVALID_ARGUMENT));
-    }
-
-    if (entries_.size() >= options_.maxNodes) {
-      return std::unexpected(error(ManagedPhase::MOUNT, parent, TreeError::NODE_LIMIT));
-    }
-
-    auto node = app_.tree().emplaceChecked<T>(parent, std::forward<Args>(args)...);
-
-    if (!node) {
-      return std::unexpected(error(ManagedPhase::MOUNT, parent, node.error()));
-    }
-
-    try {
-      auto entry = std::make_shared<Entry>();
-
-      entry->node = *node;
-
-      if constexpr (std::derived_from<T, Control> || std::same_as<T, LineEdit> || std::same_as<T, Border> ||
-                    std::same_as<T, Gauge>) {
-        const char *type = "Control";
-
-        if constexpr (std::same_as<T, Border>) {
-          type = "Border";
-        } else if constexpr (std::same_as<T, Gauge>) {
-          type = "Gauge";
-        }
-
-        entry->target = std::make_shared<StyleTarget>(StyleTarget{.type = type});
-        entry->stylePending = true;
-        stylesDirty_ = true;
-      }
-
-      if constexpr (std::derived_from<T, Control>) {
-        entry->sync = [this, node = *node](Node<Widget> focused) {
-          return syncControl(app_.tree(), node, focused);
-        };
-      } else if constexpr (std::same_as<T, Border>) {
-        entry->sync = [this, node = *node](Node<Widget>) {
-          return syncBorder(app_.tree(), node);
-        };
-      } else if constexpr (std::same_as<T, Gauge>) {
-        entry->sync = [this, node = *node](Node<Widget>) {
-          return syncGauge(app_.tree(), node);
-        };
-      }
-
-      entries_.push_back(std::move(entry));
-
-      return *node;
-    } catch (const std::bad_alloc &) {
-      return rollback(*node, TreeError::NO_MEMORY);
-    } catch (...) {
-      return rollback(*node, TreeError::CALLBACK_FAILED);
-    }
+    return emplaceConfigured<T>(parent, {}, std::forward<Args>(args)...);
   }
+
+  /** @param parent Live managed parent.
+   * @param controller Owning shared values; empty creates standalone values.
+   * @param axis Projected axis.
+   * @param options Owning input and paint settings.
+   * @param style Manual appearance defaults.
+   * @param geometryWriter True for standalone metrics ownership, false for an area projection.
+   * @return Mounted automatically initialized/bound bar or checked mount/lease error.
+   */
+  std::expected<Node<ScrollBar>, ManagedError> scrollBar(Node<Widget> parent,
+                                                         std::shared_ptr<ScrollController> controller = {},
+                                                         ScrollAxis axis = ScrollAxis::VERTICAL,
+                                                         ScrollBarOptions options = {}, ControlStyle style = {},
+                                                         bool geometryWriter = true);
+
+  /** @param node Live managed area or bar.
+   * @param axis Requested axis.
+   * @param offset Exact integral and fractional position; programmatic commands allow readOnly.
+   * @return Checked command result; logical movement suppresses older intersecting reveal requests.
+   */
+  std::expected<void, ManagedError> setScrollOffset(Node<Widget> node, ScrollAxis axis, ScrollOffset offset);
+  /** @param node Live managed standalone metrics writer.
+   * @param metrics Exact extent and viewport.
+   * @return Checked writer/configuration error or success; metric clamping is not a new scroll intent.
+   */
+  std::expected<void, ManagedError> setScrollMetrics(Node<ScrollBar> node, ScrollAxisMetrics metrics);
+  /** @param node Live managed descendant to reveal once.
+   * @param root Optional managed ancestor limiting the request; empty uses this scene root.
+   * @return Checked identity/admission/allocation error, or a queued one-shot request.
+   * New explicit requests replace pending requests. Consumption requires successful final rendering.
+   */
+  std::expected<void, ManagedError> ensureVisible(Node<Widget> node, Node<Widget> root = {});
 
   /** @brief Create UI-owned state with guaranteed dirty-frame recovery of missed notifications.
    * @tparam T Equality-comparable, owning value satisfying Property<T>'s contract.
@@ -1163,6 +1138,12 @@ public:
 
   /// @return True while a managed virtual view requires layout-driven preparation.
   bool usesPreparedLayout() const noexcept override;
+  /** @return True only while this scene owns ordinary scroll areas needing copied geometry. */
+  bool usesGeometrySnapshot() const noexcept override;
+  /** @return True while any mounted scroll registration requires the session input profile,
+   * including hidden, disabled or read-only controls; ordinary scenes return false without a walk.
+   */
+  bool requiresPointerMotion() const noexcept override;
 
   /** @brief Read an owning final arranged value without performing layout or reporting errors.
    * @param node Full identity of a managed widget in this scene.
@@ -1422,6 +1403,7 @@ private:
   friend struct ui::detail::ClickAccess;
   friend struct ui::detail::NamedAccess;
   friend struct ui::detail::LayoutAccess;
+  friend struct detail::ManagedScrollTestAccess;
 
   struct Entry;
 
@@ -1480,7 +1462,26 @@ private:
     bool stylePending{};
     bool removed{};
     std::shared_ptr<ClickChain> clicks;
+    std::shared_ptr<detail::ScrollIntentRecord> scrollIntent;
+    std::shared_ptr<detail::ManagedScrollState> scrollOwner;
+    std::shared_ptr<ScrollController> scrollController;
+    Node<ScrollArea> scrollArea;
   };
+
+  template <class T, class... Args>
+    requires std::derived_from<T, Widget>
+  std::expected<Node<T>, ManagedError> emplaceConfigured(Node<Widget> parent, std::optional<bool> scrollWriter,
+                                                         Args &&...args);
+  std::expected<void, TreeError> attachScroll(const std::shared_ptr<Entry> &entry, Node<ScrollArea> node, bool writer);
+  std::expected<void, TreeError> attachScroll(const std::shared_ptr<Entry> &entry, Node<ScrollBar> node, bool writer);
+  std::expected<void, TreeError> attachScrollValues(const std::shared_ptr<Entry> &entry);
+  void publishScroll(const std::shared_ptr<Entry> &entry) noexcept;
+  void pruneScroll() noexcept;
+  std::expected<void, TreeError> sampleScrollFocus();
+  std::expected<void, TreeError> queueScrollReveal(Node<Widget> node, Node<Widget> root, bool explicitRequest);
+  bool scrollIntentIntersects(const Entry &entry, std::span<const Node<Widget>> chain) const noexcept;
+  std::expected<void, TreeError> prepareScrollFrame(const LayoutSnapshot &snapshot);
+  void completeScrollFrame() noexcept;
 
   std::expected<void, ManagedError> syncCaption(Node<Control> node, CaptionBinding &binding, ManagedPhase phase);
 
@@ -1635,6 +1636,7 @@ private:
   Node<Widget> root_;
   StyleEngine styles_;
   std::vector<std::shared_ptr<Entry>> entries_;
+  std::shared_ptr<detail::ManagedScrollState> scroll_;
   std::vector<std::shared_ptr<void>> properties_;
   std::vector<std::shared_ptr<ObserverRecord>> observers_ = std::vector<std::shared_ptr<ObserverRecord>>(0);
   std::vector<OriginProperty> originProperties_ = std::vector<OriginProperty>(0);
@@ -1683,6 +1685,7 @@ private:
 } // namespace portals
 
 #include <portals/detail/managed_derive.hpp>
+#include <portals/detail/managed_scroll.hpp>
 #include <portals/detail/managed_views.hpp>
 
 #include <portals/detail/managed_collections.hpp>
