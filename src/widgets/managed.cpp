@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include "scroll_preparation_state.hpp"
+#include "message_box_state.hpp"
 #include <portals/detail/pss_parser.hpp>
 #include <portals/detail/setup_failure.hpp>
 #include <portals/managed.hpp>
@@ -341,9 +342,9 @@ std::expected<std::unique_ptr<ManagedScene>, ManagedError> ManagedScene::create(
 
   if (!options.maxNodes || !options.maxStates || !options.maxModels || !options.maxKeyHandlers ||
       !options.maxClickHandlers || !options.maxClickHandlersPerNode || !options.keySequenceTimeout ||
-      !options.maxLayoutHandlers || !options.maxLayoutPublicationRetries || !options.maxObservers ||
-      !options.maxObserversPerNode || !options.maxObserverRecoveryPasses || !diagnostics.maxErrors ||
-      !diagnostics.maxContexts || !diagnostics.maxContextBytes ||
+      !options.maxMessageRequests || !options.maxLayoutHandlers || !options.maxLayoutPublicationRetries ||
+      !options.maxObservers || !options.maxObserversPerNode || !options.maxObserverRecoveryPasses ||
+      !diagnostics.maxErrors || !diagnostics.maxContexts || !diagnostics.maxContextBytes ||
       diagnostics.maxErrors > maxElementCount<ManagedDiagnostic>() ||
       diagnostics.maxContexts > maxElementCount<ManagedDiagnosticContext>() ||
       diagnostics.maxContextBytes > static_cast<std::size_t>(std::numeric_limits<std::ptrdiff_t>::max())) {
@@ -577,9 +578,20 @@ std::expected<void, ManagedError> ManagedScene::dismissDialog(Node<Widget> node)
 
 std::expected<void, ManagedError> ManagedScene::dialogCommand(Node<Widget> node, bool opening,
                                                               DialogDismissReason reason) {
+  auto message = findMessage(node);
+  if (opening && message && (!message->current || !message->current->starting || message->current->done)) {
+    return std::unexpected(error(ManagedPhase::INPUT, node, TreeError::INVALID_ARGUMENT));
+  }
+
   FocusReport report(*this);
+  const auto before = message ? message->dialog->activationRevision : 0;
   auto result = changeDialog(node, opening, reason);
-  return result ? std::expected<void, ManagedError>{} : std::unexpected(report.failure(node, result.error()));
+  std::expected<void, ManagedError> full =
+    result ? std::expected<void, ManagedError>{} : std::unexpected(report.failure(node, result.error()));
+
+  completeMessage(message, full, opening, message && message->dialog->activationRevision != before);
+
+  return full;
 }
 
 std::expected<void, ManagedError> ManagedScene::focus(Node<Widget> node) {
@@ -1669,7 +1681,7 @@ std::expected<void, TreeError> ManagedScene::afterDispatch(Application &app) {
       }
     }
   }
-  return {};
+  return prepareMessages();
 }
 
 bool ManagedScene::hasPendingLayout() const noexcept {
@@ -3426,6 +3438,7 @@ std::expected<void, ManagedError> ManagedScene::close() {
 
   // Mark closed before retiring captures: their destructors may reenter application code.
   closed_ = true;
+  retireMessages();
   pruneDataStates();
   if (dataStateOwner_) {
     dataStateOwner_->scene = nullptr;

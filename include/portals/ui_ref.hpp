@@ -49,6 +49,7 @@ struct RefTarget {
 };
 
 struct RefAccess;
+struct MessageAccess;
 template <class> struct TableRowType;
 
 /** @brief Domain row type associated with a typed virtual table reference. */
@@ -154,6 +155,7 @@ public:
 
 private:
   friend struct detail::RefAccess;
+  friend struct detail::MessageAccess;
 
   explicit DialogCommandResult(std::expected<void, ManagedError> result) : result_(std::move(result)) {
   }

@@ -6,15 +6,18 @@
 
 namespace portals::detail {
 struct DialogHostRecord;
+struct MessageRecord;
 
 struct DialogRecord {
   Node<Dialog> root;
   Node<Widget> panel;
   Node<Widget> body;
   Node<Widget> anchor;
+  Node<Widget> initialFocus;
   DialogOptions options;
   std::uint64_t activationRevision{};
   std::weak_ptr<DialogHostRecord> host;
+  std::weak_ptr<MessageRecord> message;
   std::shared_ptr<std::function<std::expected<void, TreeError>(DialogDismissReason)>> dismissed;
   bool ready{};
   bool open{};

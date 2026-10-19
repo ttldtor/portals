@@ -4,11 +4,31 @@
 
 #include "action_state.hpp"
 #include "dialog_detail.hpp"
+#include "message_box_state.hpp"
 
 #include <algorithm>
 #include <limits>
 
 namespace portals {
+std::expected<Node<Widget>, TreeError> ManagedScene::messageParent(Node<Widget> node) const {
+  return app_.tree().inputParent(node);
+}
+
+bool ManagedScene::messageWithin(Node<Widget> root, Node<Widget> node) const {
+  return app_.router().within(root, node);
+}
+
+bool ManagedScene::messageOwner(Node<Widget> owner) const {
+  if (owner == root_) {
+    return true;
+  }
+
+  auto &router = app_.router();
+  const auto modal = router.modalRoot();
+
+  return dialogs_ && (router.within(dialogs_->body, owner) || (modal != Node<Widget>{} && router.within(modal, owner)));
+}
+
 std::shared_ptr<detail::DialogRecord> EventRouter::dialogLayer(Node<Widget> node) const {
   auto host = state_->dialogs.lock();
   if (!host || host->retired) {
@@ -430,6 +450,8 @@ std::expected<void, TreeError> ManagedScene::changeDialog(Node<Widget> node, boo
     if (!opening && record->options.mode == DialogMode::MODAL && modal != node) {
       return std::unexpected(TreeError::WOULD_BLOCK);
     }
+    auto message = record->message.lock();
+    auto request = message ? message->current : nullptr;
     auto targetRevision = app_.tree().inputRevision(node);
     if (!targetRevision) {
       return std::unexpected(targetRevision.error());
@@ -525,6 +547,9 @@ std::expected<void, TreeError> ManagedScene::changeDialog(Node<Widget> node, boo
           router.state_->focusReturns.reserve(router.state_->focusReturns.size() + 1);
         }
         next = router.scopeEntry(node, *focusOrder, false);
+        if (record->initialFocus != Node<Widget>{} && std::ranges::contains(*focusOrder, record->initialFocus)) {
+          next = record->initialFocus;
+        }
       } else if (!opening && (record->options.mode == DialogMode::MODAL || router.within(node, next))) {
         if (returnIndex != router.state_->focusReturns.size()) {
           const auto &previous = *router.state_->focusReturns[returnIndex];
@@ -595,6 +620,24 @@ std::expected<void, TreeError> ManagedScene::changeDialog(Node<Widget> node, boo
           if (!eligible || !*eligible) {
             committed = std::unexpected(eligible ? TreeError::INVALID_ARGUMENT : eligible.error());
             return;
+          }
+        }
+        if (message && request && !request->result) {
+          if (message->current != request || request->done ||
+              (request->async && !detail::asyncInvocationCurrent(request->invocation)) ||
+              !app_.tree().inputParent(request->owner)) {
+            committed = std::unexpected(TreeError::CLOSED);
+            return;
+          }
+          if (!app_.tree().inputParent(message->paragraph) || !app_.tree().inputParent(message->actions)) {
+            committed = std::unexpected(TreeError::STALE_NODE);
+            return;
+          }
+          for (std::size_t i = 0; i < message->count; ++i) {
+            if (!app_.tree().inputParent(message->buttons[i])) {
+              committed = std::unexpected(TreeError::STALE_NODE);
+              return;
+            }
           }
         }
         committed = app_.tree().commitOverlay(host->root, host->body, node, order, opening);

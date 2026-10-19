@@ -3,6 +3,7 @@
 #include <portals/detail/line_edit_text.hpp>
 #include <portals/detail/setup_failure.hpp>
 #include <portals/ui_ref.hpp>
+#include <portals/message_box.hpp>
 
 namespace portals::ui {
 namespace detail {
@@ -470,6 +471,14 @@ void reportFocusError(const std::shared_ptr<RefTarget> &target, const ManagedErr
   if (scene && !RefAccess::focusReported(error)) {
     (void)(*scene)->reportError(error, {}, origin);
   }
+}
+
+DialogCommandResult MessageAccess::command(std::shared_ptr<RefTarget> target, std::expected<void, ManagedError> result,
+                                           std::source_location origin) {
+  if (!result && !RefAccess::focusReported(result.error())) {
+    RefAccess::reportDialog(result.error(), target, "MessageBox.command", origin);
+  }
+  return DialogCommandResult(std::move(result));
 }
 
 DialogCommandResult dialogCommand(const std::shared_ptr<RefTarget> &target, bool opening, std::source_location origin) {
