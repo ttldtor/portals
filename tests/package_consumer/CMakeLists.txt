@@ -667,6 +667,23 @@ endif()
 add_test(NAME consumer.text-transforms COMMAND portals_text_transforms_consumer)
 set_tests_properties(consumer.text-transforms PROPERTIES TIMEOUT 15)
 
+add_executable(portals_text_bindings_consumer text_bindings.cpp)
+target_link_libraries(portals_text_bindings_consumer PRIVATE portals::core)
+set_target_properties(portals_text_bindings_consumer PROPERTIES CXX_EXTENSIONS OFF)
+if(WIN32)
+  target_sources(portals_text_bindings_consumer PRIVATE no_dialogs.cpp)
+endif()
+add_test(NAME consumer.text-bindings COMMAND portals_text_bindings_consumer)
+set_tests_properties(consumer.text-bindings PROPERTIES TIMEOUT 15)
+
+# Staging supplies this exact public native source; do not fall back to the checkout.
+add_executable(portals_text_transforms_form_consumer "docs/examples/guide_text_transforms.cpp")
+target_link_libraries(portals_text_transforms_form_consumer PRIVATE portals::core)
+set_target_properties(portals_text_transforms_form_consumer PROPERTIES CXX_EXTENSIONS OFF)
+if(WIN32)
+  target_sources(portals_text_transforms_form_consumer PRIVATE no_dialogs.cpp)
+endif()
+
 add_executable(portals_visible_model_consumer visible_model.cpp)
 target_link_libraries(portals_visible_model_consumer PRIVATE portals::core)
 set_target_properties(portals_visible_model_consumer PROPERTIES CXX_EXTENSIONS OFF)

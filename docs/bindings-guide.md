@@ -417,6 +417,12 @@ publishing references. An initial failure rolls back the attempted mount. The
 scene owns synchronization and cleanup; application code needs no timer,
 subscription token or manual revision counter.
 
+A clean editor bound to an externally updated string state synchronizes before
+the live transforms and list models are prepared for that dirty frame. Both
+lists therefore pin the new text in that frame. Equal ordered token values do
+not publish another collection-model revision. An editor with an unconfirmed
+draft still follows its configured edit-mode conflict policy.
+
 `words` separates tokens only at whole graphemes whose scalars all have Unicode
 `White_Space`. Punctuation, apostrophes, CJK and emoji remain in their tokens.
 This is whitespace tokenization, not linguistic segmentation or Unicode UAX #29
@@ -449,6 +455,22 @@ reclaims its private graph. Explicit stale source access still reports
 `STALE_NODE`; scene closure reports `CLOSED`.
 
 ### Explicit sources and collections
+
+For an existing `ManagedScene`, pass the complete subtree recipe to
+`ui::mount(owner, recipe)` and check its `std::expected<Node<T>, ManagedError>`
+result. This uses the same cold text-to-list bridge as the native example.
+`ui::mount` mounts beneath the scene root; it has no public parent-node overload.
+A factory callback passed to `ui::scene` must return an owning description,
+optionally wrapped in `std::expected<Description<T>, ManagedError>`; `ui::scene`
+itself returns `Scene`. The callback cannot return an already-mounted node or
+a `void` setup result. Description constructor callbacks are internal.
+Use the complete recipe rather than nesting an unsupported mount
+factory or rebuilding the automatic token-ID adapter in application code.
+
+Individual `ManagedScene::emplace` calls retain earlier successful children when
+a later call fails; closing the scene cleans that partial form. A complete
+`ui::mount` call instead rolls back its attempted subtree. These are different
+transaction boundaries, even when successful layouts are the same.
 
 For a mounted reference, `owner.liveText(input.draftText())` returns a checked
 `ManagedSource<GraphemeText>` immediately initialized from the source. Its

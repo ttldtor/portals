@@ -5,6 +5,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+- [Tests] Installed-package consumers check live editor words and graphemes in
+  the same frame as an external model update, routed input, token identity,
+  owning pins, failed-mount cleanup and idle redraw behavior. The complete
+  native text-transform guide also compiles against the installed SDK.
+
 - [Fixed] Browser gallery Debug startup uses an explicit configurable Wasm stack
   budget, with Debug stack overflow checks.
 
