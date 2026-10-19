@@ -2,7 +2,8 @@
 
 [Русская версия](ru/themes-guide.md)
 
-A [theme](glossary.md) supplies presentation rules and a palette. Install one with `ui::theme`:
+A [theme](glossary.md) supplies presentation rules and a palette. An application
+can install one with `ui::theme`:
 
 ```cpp
 #include <portals/ui.hpp>
@@ -20,13 +21,13 @@ int main() {
 }
 ```
 
-See [the short guide](index.md) and [package setup](package.md) to build
+The [short guide](index.md) and [package setup](package.md) explain how to build
 a client. The compact runner attempts cleanup and reports failures;
 [declarative UI](declarative-ui.md) describes checked construction.
 The fragments below assume an open, idle [scene](glossary.md#glossary-scene), `ui::Scene`, named `scene`,
 `using namespace portals;`, and `<portals/ui_style.hpp>`.
 
-## Choose a built-in palette
+## Built-in palettes
 
 | Factory | Appearance |
 |---|---|
@@ -41,7 +42,7 @@ Factories return a `StyleSheet` that owns its rules and may allocate.
 The `ui::Scene` facade collects installation errors for `scene.checked()` or the runner.
 Theme changes belong between frames on the UI thread.
 
-## Supply your own colors
+## A custom palette
 
 `ThemeTokens` supplies six named palette values, or
 [theme tokens](glossary.md), each stored as an `RgbColor`:
@@ -68,10 +69,11 @@ scene
 | `heading` | Header text |
 
 The built-in rules request bold for focus, selection and headers.
-The caret reverses the focused field colors. Add PSS rules for other
-control-specific choices. Runtime PSS v0 cannot refer to these C++ tokens by name.
+The caret reverses the focused field colors. Additional control-specific choices
+can be expressed with PSS rules. Runtime PSS v0 cannot refer to these C++ tokens
+by name.
 
-## Preserve application styles when changing a theme
+## Application styles during a theme change
 
 ```cpp
 scene
@@ -84,12 +86,13 @@ scene
 Theme replacement updates `THEME`. `APPLICATION` and `USER` layers stay
 installed above it. If an application layer sets a foreground color, that
 declaration continues to take priority over the theme's foreground.
-See [style precedence](styling-guide.md) and [layer contracts](style-layers.md).
+[Style precedence](styling-guide.md) and [layer contracts](style-layers.md)
+describe the details.
 
-## Load palette rules from a file
+## Palette rules from a file
 
 The repository includes `themes/modern.pss` and `themes/turbo.pss`, matching
-their C++ factories. Load their rules as an application layer:
+their C++ factories. Their rules can be loaded as an application layer:
 
 ```cpp
 scene
@@ -100,9 +103,9 @@ Style-source stages accept `APPLICATION` and `USER`. A palette installed there
 can override colors from `ui::theme`. Current theme factories and
 `ui::theme(StyleSheet)` replace the reserved `THEME` slot; direct PSS-file theme
 loading is **TBD — M5**. PSS v0 has no automatic reload or theme-variable
-substitution. See [file loading](styling-guide.md).
+substitution. File loading is described in [the styling guide](styling-guide.md).
 
-## Change a typed color while the application runs
+## Changing a typed color while the application runs
 
 The experimental C++ descriptor supports named `RgbColor`, `bool` and
 `std::int32_t` parameters. This setup declares a live accent:
@@ -133,13 +136,14 @@ After successful attachment, an event handler on the UI thread can update it:
 auto changed = colors.set<"accent">(sc::rgb(255, 200, 85));
 ```
 
-Check the result: `true` means changed, `false` means equal, and an error
-preserves previous values and styles. `mix` accepts a percentage from 0 to 100.
-For atomic batches, exact type checks and controller lifetime, see
+The result is `true` when the value changed and `false` when it was already
+equal. An error preserves previous values and styles. `mix` accepts a percentage
+from 0 to 100.
+Atomic batches, exact type checks and controller lifetime are described in
 [compile-time styles](compile-time-styles.md).
 The scene owns the controller. `colors` observes it without extending its lifetime.
 Reads and updates require the UI thread. A closed scene or superseded theme
-controller returns a typed error; attach a fresh stage for a new controller.
+controller returns a typed error; a fresh stage is required for a new controller.
 
 ## Terminal appearance
 

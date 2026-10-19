@@ -2,17 +2,19 @@
 
 [Русская версия](ru/bindings-guide.md)
 
-Start with an explicit event handler and an observing control reference. Use a
-managed state when several controls need the same UI-owned value. A [`ui::Ref<T>`](glossary.md) identifies a control without keeping it alive.
+An explicit event handler and an observing control reference let you connect
+a user action to a change in another control. Managed state can hold a shared
+UI-owned value for several controls. A [`ui::Ref<T>`](glossary.md) identifies a control without keeping it alive.
 Copying the reference does not subscribe to changes.
 Explicit shared text state is supported by editors, labels and buttons.
 Managed observation delivers the latest state values.
 Read-only derived managed sources share the same observation and caption paths.
 
-## Change text from a button
+## Text changes from a button
 
 This complete program uses the current [scene](glossary.md#glossary-scene)'s exit
-command from a key callback invoked by that scene. Use scoped `ui::quit()` to exit from the handler.
+command from a key callback invoked by that scene. The scoped `ui::quit()`
+exits from the handler.
 
 ```cpp
 #include <portals/ui.hpp>
@@ -38,9 +40,9 @@ int main() {
 The scene mounts the complete [recipe](glossary.md#glossary-recipe) before publishing its references and
 registering pipe handlers. Capturing a `Ref` by value does not keep its widget or
 scene alive. Recipe construction occurs before final `runApp` entry and can
-throw; use the factory runner when construction needs that checked boundary.
+throw. The factory runner places construction inside that checked boundary.
 
-## Understand text assignment
+## Text assignment
 
 These are UI callback fragments for successfully mounted references:
 
@@ -55,7 +57,7 @@ update the destination. `TextProperty` accesses text owned by a control.
 [`Property<T>`](glossary.md) stores a value and sends change notifications.
 These types have separate ownership and notification contracts.
 
-Use a retained operation result for explicit error handling:
+Retaining the operation result lets you handle errors explicitly:
 
 ```cpp
 auto update = field.text().set("replacement");
@@ -63,7 +65,7 @@ auto accepted = update.result();
 auto snapshot = field.text().get();
 ```
 
-Check `accepted` and `snapshot` before reading them. `get()` returns owning bytes
+Both `accepted` and `snapshot` require a success check before their values can be read. `get()` returns owning bytes
 and does not report errors automatically. Mutation preserves typed errors and
 reports through a live scene collector where applicable. A rejected text candidate
 preserves the previous text. `+=` appends to the complete draft/caption rather
@@ -71,13 +73,13 @@ than replacing the editor selection. The receiving control still validates text
 against its width policy and limits.
 
 `ui::quit()` inside a managed callback resolves that entered scene; it is a safe
-no-op without a current live scene. Use `ui::quit(scene.ref())` or the checked
-`SceneRef::quit()` for an explicit owner outside those bridges. Neither reference
+no-op without a current live scene. Outside those bridges, you can name an
+explicit owner with `ui::quit(scene.ref())` or the checked `SceneRef::quit()`. Neither reference
 keeps its scene alive. See [the scoped context contract](declarative-ui.md).
 
-## Share a managed value
+## Shared managed values
 
-Create an optional shared string state in the scene factory. The field publishes
+The scene factory can create an optional shared string state. The field publishes
 according to its edit mode; the label and button show the model value. The button
 caption changes with that value and its action still exits the application.
 State creation failures reach the standard runner through the checked factory.
@@ -126,9 +128,9 @@ An invalid intermediate editor draft remains visible without changing the shared
 caption. `ON_COMPLETION` and `EXPLICIT` defer model publication by their existing
 rules. [Editor modes](line-edit.md) and [history](editor-history.md) still apply.
 
-## Observe a managed value {#managed-observation}
+## Observing a managed value {#managed-observation}
 
-Use `.observe(state, callback)` when a control needs to present a managed value
+`.observe(state, callback)` provides observation when a control needs to present a managed value
 through application code. The scene owns the subscription and callback. For
 ordinary shared text captions, `ui::label(model)` and `ui::button(model)` remain
 the direct forms.
@@ -136,7 +138,8 @@ the direct forms.
 [Complete program](examples/docs_observe.cpp).
 
 The editor publishes accepted strings; the label formats the latest accepted value.
-Run this complete program, edit the text, and press F10 or click Quit to close it:
+This complete program lets you edit text and watch the label update.
+F10 and the Quit button close the application:
 
 ```cpp
 #include <portals/ui.hpp>
@@ -185,7 +188,7 @@ Each registration tracks its own last successful value revision. Equal assignmen
 does not deliver again. Updates use the existing scheduler and may coalesce to the
 latest state; this API is intended for presentation, not a lossless event log.
 When delivery is rejected, existing dirty preparation retries from the latest
-snapshot. Do not repeat `set()` to retry notification: the value has already
+snapshot. Notification retries must not repeat `set()`: the value has already
 committed. Callback failure preserves the original receiver, phase and typed
 error; a failed callback does not advance its successful revision or roll back
 the source. Short `Ref` mutation failures inside a void callback still reach the
@@ -205,9 +208,9 @@ destroying the active scene from a callback is prohibited. Registration and nest
 preparation, run or close during recovery are rejected by the existing checked
 boundaries.
 
-## Derive a read-only value {#managed-derivation}
+## Deriving a read-only value {#managed-derivation}
 
-Use `owner.derive(input, transform)` to compute an owning value from one managed
+`owner.derive(input, transform)` computes an owning value from one managed
 state or earlier derived source. The returned `ManagedSource<T>` exposes owning
 immutable `snapshot()` values and has no `set()` or conversion to writable state.
 Labels, buttons and managed `.observe` accept it directly. Editors and checkboxes
@@ -220,7 +223,7 @@ factory's `expected` result to the existing runner.
 
 \include{lineno} docs_derive.cpp
 
-Check the returned `expected<ManagedSource<Out>, ManagedError>` before using it.
+The returned `expected<ManagedSource<Out>, ManagedError>` requires a success check before use.
 Initial computation runs synchronously, so a successful source is immediately
 readable during mounting. Initial failure publishes neither output nor subscription
 and can be handled without stopping a later valid run. A transform takes `const In&`
@@ -266,7 +269,7 @@ nonconvergence returns `WOULD_BLOCK` and does not diagnose a hidden graph cycle.
 sources and are not reactive derive inputs. Live text and derived-list/model
 adapters remain separate planned work.
 
-## Choose the event interface
+## Event interfaces
 
 The following interfaces serve different registration paths:
 
@@ -281,7 +284,7 @@ The following interfaces serve different registration paths:
 | `ManagedScene::onEvent(node, callback)` | Existing custom event contract | Explicit custom-widget routing |
 
 Click/key adapters accept `void`, `expected<T, TreeError>` or the exact editor
-command receipt. Return an editor undo/redo receipt directly to preserve its
+command receipt. Returning an editor undo/redo receipt directly preserves its
 diagnostic provenance. `Property::observe` returns a caller-owned subscription;
 managed scene registrations retain their own tokens. Do not discard a low-level
 subscription and expect it to remain connected.
@@ -304,7 +307,7 @@ activation. It does not introduce DOM bubbling. The callback borrows the context
 a copied context owns its event snapshot, but stopping that copy cannot stop the
 original chain. Semantic modifiers do not identify physical left/right keys.
 
-## Select keyboard phases
+## Keyboard phases
 
 These fragments assume existing callbacks `move` and `stop`:
 
@@ -345,7 +348,7 @@ Typed live theme parameters are already available through explicit UI updates;
 see [themes](themes-guide.md). Their existence does not imply automatic domain
 or string-PSS variable binding.
 
-## Observe layout changes
+## Observing layout changes
 
 `ui::onLayout(ref, callback)` reports the initial final geometry and later
 changes after the tree frame has ended. Callback mutations request the next
@@ -373,7 +376,7 @@ CPU work to a worker automatically. UI close cancels the continuation; the
 application still owns producer stop/join. See [current coroutines](ui-coroutines.md).
 The planned milestone is M6.
 
-## Transform live editor text {#live-text-transforms}
+## Transforming live editor text {#live-text-transforms}
 
 This complete application shows the current editor draft as two virtual lists.
 Edit the field; words and graphemes update through the existing dirty-frame
@@ -464,7 +467,7 @@ A factory callback passed to `ui::scene` must return an owning description,
 optionally wrapped in `std::expected<Description<T>, ManagedError>`; `ui::scene`
 itself returns `Scene`. The callback cannot return an already-mounted node or
 a `void` setup result. Description constructor callbacks are internal.
-Use the complete recipe rather than nesting an unsupported mount
+The complete recipe avoids nesting an unsupported mount
 factory or rebuilding the automatic token-ID adapter in application code.
 
 Individual `ManagedScene::emplace` calls retain earlier successful children when
@@ -474,8 +477,8 @@ transaction boundaries, even when successful layouts are the same.
 
 For a mounted reference, `owner.liveText(input.draftText())` returns a checked
 `ManagedSource<GraphemeText>` immediately initialized from the source. Its
-`snapshot()` is an owning property-change snapshot. Use `owner.derive` and
-`owner.observe` for explicit transformations and presentation. The finite
+`snapshot()` is an owning property-change snapshot. `owner.derive` and
+`owner.observe` provide explicit transformations and presentation. The finite
 `portals::words(text)` and `portals::graphemes(text)` return
 `std::expected<TextSegments, TreeError>` and need no scene.
 
