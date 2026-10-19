@@ -67,12 +67,31 @@ struct RefAccess {
     return setDataStateView(scene.app_.tree(), (*found)->node, value);
   }
 
+  static DialogCommandResult dialogResult(std::expected<void, ManagedError> result) {
+    return DialogCommandResult(std::move(result));
+  }
+
   static bool eventReported(const ManagedScene &scene, const ManagedError &error) noexcept {
     return scene.shortReported(error);
   }
 
   static bool focusReported(const ManagedError &error) noexcept {
     return ManagedScene::focusReported(error);
+  }
+
+  static void reportDialog(ManagedError &failure, const std::shared_ptr<RefTarget> &target, const char *operation,
+                           std::source_location origin) noexcept {
+    // Closed/foreign owners never report through another entered facade's collector.
+    if (!target || target->owner != std::this_thread::get_id() || target->lifetime.expired()) {
+      return;
+    }
+
+    auto &scene = *target->scene;
+    if (scene.closed_ || !scene.app_.tree().root()) {
+      return;
+    }
+
+    scene.reportShortError(failure, operation, {}, "Dialog", origin, scene.actionAdmitted_);
   }
 
   static void report(ManagedError &failure, const std::shared_ptr<RefTarget> &target, const char *operation,
@@ -451,6 +470,18 @@ void reportFocusError(const std::shared_ptr<RefTarget> &target, const ManagedErr
   if (scene && !RefAccess::focusReported(error)) {
     (void)(*scene)->reportError(error, {}, origin);
   }
+}
+
+DialogCommandResult dialogCommand(const std::shared_ptr<RefTarget> &target, bool opening, std::source_location origin) {
+  auto owner = eventScene(target);
+  if (!owner) {
+    return RefAccess::dialogResult(std::unexpected(owner.error()));
+  }
+  auto result = opening ? (*owner)->openDialog(target->node) : (*owner)->dismissDialog(target->node);
+  if (!result && !RefAccess::focusReported(result.error())) {
+    RefAccess::reportDialog(result.error(), target, opening ? "Dialog.open" : "Dialog.dismiss", origin);
+  }
+  return RefAccess::dialogResult(std::move(result));
 }
 
 EditorCommandResult editorCommand(std::shared_ptr<RefTarget> target, bool redo, bool stop, std::source_location origin,

@@ -7,6 +7,7 @@
 #include <portals/collection.hpp>
 #include <portals/detail/managed_origin.hpp>
 #include <portals/detail/setup_failure.hpp>
+#include <portals/dialog.hpp>
 #include <portals/editor_command.hpp>
 #include <portals/line_edit.hpp>
 #include <portals/managed_diagnostics.hpp>
@@ -49,6 +50,8 @@ namespace detail {
 struct ManagedScrollState;
 struct ScrollIntentRecord;
 struct ManagedScrollTestAccess;
+struct DialogHostRecord;
+struct DialogRecord;
 template <class T> inline constexpr bool IS_MANAGED_TREE_RESULT = false;
 template <class Value> inline constexpr bool IS_MANAGED_TREE_RESULT<std::expected<Value, TreeError>> = true;
 
@@ -802,6 +805,80 @@ public:
    * @return Success or the existing typed router/binding error; no token escapes.
    */
   std::expected<void, ManagedError> focusScope(Node<Widget> node);
+
+  /** @brief Bind the scene's sole retained host to its exact ordinary body.
+   * @param host Managed host with body as its first child.
+   * @param body Live ordinary body subtree, retained across activations.
+   * @return Checked registration errors; failure publishes no host.
+   */
+  std::expected<void, ManagedError> overlayHost(Node<OverlayHost> host, Node<Widget> body);
+  /** @brief Register an initially hidden layer under the declared host.
+   * @param node Exact full-host dialog root.
+   * @param panel Its sole opaque panel child.
+   * @param body Application content inside the panel.
+   * @return Checked identity, budget, allocation or binding error.
+   */
+  std::expected<void, ManagedError> dialog(Node<Dialog> node, Node<Widget> panel, Node<Widget> body);
+  /** @brief Open a ready registered layer; an already open layer is unchanged.
+   * @param node Exact dialog root; anchored initial admission requires arranged body geometry.
+   * @return Checked error; focus callback failures preserve the published activation.
+   */
+  std::expected<void, ManagedError> openDialog(Node<Widget> node);
+  /** @brief Dismiss a layer; a closed layer is unchanged and callbacks never replay.
+   * @param node Exact dialog root; only the top modal can be dismissed.
+   * @return Checked admission or first postpublication callback error.
+   */
+  std::expected<void, ManagedError> dismissDialog(Node<Widget> node);
+  /** @param node Exact registered dialog root.
+   * @return Effective activation, or exact affinity/lifetime/identity error without reporting.
+   */
+  std::expected<bool, ManagedError> dialogOpened(Node<Widget> node);
+  /** @brief Set the body-only anchor before the first activation.
+   * @param node Registered dialog root.
+   * @param anchor Ordinary body descendant of the same host.
+   * @param placement BELOW_START or ABOVE_START; CENTER ignores the anchor.
+   * @return Checked identity/domain error; failure preserves the prior anchor.
+   */
+  std::expected<void, ManagedError> dialogAnchor(Node<Widget> node, Node<Widget> anchor, DialogPlacement placement);
+
+  /** @tparam Callback Copyable callback taking DialogDismissReason, returning void or expected<void,TreeError>.
+   * @param node Registered layer receiving this owning callback.
+   * @param callback Admitted once after dismissal publication; self-removal is supported.
+   * @return Checked registration failure; teardown never invokes the callback.
+   */
+  template <class Callback>
+    requires std::copy_constructible<Callback> &&
+             (std::same_as<std::invoke_result_t<Callback &, DialogDismissReason>, void> ||
+              std::same_as<std::invoke_result_t<Callback &, DialogDismissReason>, std::expected<void, TreeError>>)
+  std::expected<void, ManagedError> onDismiss(Node<Dialog> node, Callback callback) {
+    try {
+      return setDialogDismiss(
+        node, ui::detail::currentSceneCallback(
+                facadeContext(),
+                [this, lifetime = std::weak_ptr<const void>(lifetime_),
+                 callback = std::move(callback)](DialogDismissReason reason) mutable -> std::expected<void, TreeError> {
+                  if (lifetime.expired()) {
+                    return std::unexpected(TreeError::CLOSED);
+                  }
+                  auto admitted = actionBoundary();
+                  if (!admitted) {
+                    return admitted;
+                  }
+                  ActionAdmission admission(*this);
+                  if constexpr (std::same_as<std::invoke_result_t<Callback &, DialogDismissReason>, void>) {
+                    callback(reason);
+                    return {};
+                  } else {
+                    return callback(reason);
+                  }
+                }));
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
+    } catch (...) {
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CALLBACK_FAILED));
+    }
+  }
+
   /** @brief Set a live managed node as its nearest scope's default.
    * @param node Default descendant; hidden/disabled defaults are skipped on entry.
    * @return Success, INVALID_ARGUMENT without an enclosing scope, or typed validation error.
@@ -1408,6 +1485,15 @@ private:
   friend struct detail::ManagedScrollTestAccess;
 
   struct Entry;
+  std::shared_ptr<detail::DialogRecord> findDialog(Node<Widget> node) const;
+  std::expected<void, TreeError> changeDialog(Node<Widget> node, bool open, DialogDismissReason reason);
+  std::expected<void, ManagedError> dialogCommand(Node<Widget> node, bool opening, DialogDismissReason reason);
+  std::expected<void, TreeError> prepareDialogs();
+  bool modalDialogInput();
+  void retireDialogs() noexcept;
+  std::expected<Node<Widget>, ManagedError> makeDialogPanel(Node<Dialog> node, BorderOptions options);
+  std::expected<void, ManagedError>
+  setDialogDismiss(Node<Dialog> node, std::function<std::expected<void, TreeError>(DialogDismissReason)> callback);
 
   struct LayoutValue {
     NodeGeometry geometry;
@@ -1545,6 +1631,31 @@ private:
   void dispatchClicks(Node<Button> node, const std::shared_ptr<ClickChain> &chain,
                       const std::weak_ptr<const void> &lifetime, const ClickEvent &event);
 
+  struct ActionAdmission {
+    ManagedScene &scene;
+    bool previous;
+
+    explicit ActionAdmission(ManagedScene &owner) noexcept : scene(owner), previous(owner.actionAdmitted_) {
+      scene.actionAdmitted_ = true;
+    }
+
+    ~ActionAdmission() {
+      scene.actionAdmitted_ = previous;
+    }
+  };
+
+  std::expected<void, TreeError> actionBoundary() const noexcept {
+    if (owner_ != std::this_thread::get_id()) {
+      return std::unexpected(TreeError::WRONG_THREAD);
+    }
+    if (closed_) {
+      return std::unexpected(TreeError::CLOSED);
+    }
+    auto root = app_.tree().root();
+
+    return root ? std::expected<void, TreeError>{} : std::unexpected(root.error());
+  }
+
   template <class Callback> std::function<EditorCommandResult(ui::ClickParams &)> clickAdapter(Callback action) {
     ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
     if constexpr (std::is_pointer_v<Callback> || requires { action.operator bool(); }) {
@@ -1554,7 +1665,17 @@ private:
     }
 
     return ui::detail::currentSceneCallback(
-      facadeContext(), [action = std::move(action)]([[maybe_unused]] ui::ClickParams &params) mutable {
+      facadeContext(),
+      [this, lifetime = std::weak_ptr<const void>(lifetime_),
+       action = std::move(action)]([[maybe_unused]] ui::ClickParams &params) mutable -> EditorCommandResult {
+        if (lifetime.expired()) {
+          return EditorCommandResult(std::unexpected(TreeError::CLOSED), {}, false);
+        }
+        auto admitted = actionBoundary();
+        if (!admitted) {
+          return EditorCommandResult(std::move(admitted), {}, false);
+        }
+        ActionAdmission admission(*this);
         const auto invoke = [&]() -> decltype(auto) {
           if constexpr (std::invocable<Callback &, ui::ClickParams &>) {
             return action(params);
@@ -1586,7 +1707,17 @@ private:
     }
 
     return ui::detail::currentSceneCallback(
-      facadeContext(), [action = std::move(action)]([[maybe_unused]] const Event &event) mutable {
+      facadeContext(),
+      [this, lifetime = std::weak_ptr<const void>(lifetime_),
+       action = std::move(action)]([[maybe_unused]] const Event &event) mutable -> EditorCommandResult {
+        if (lifetime.expired()) {
+          return EditorCommandResult(std::unexpected(TreeError::CLOSED), {}, false);
+        }
+        auto admitted = actionBoundary();
+        if (!admitted) {
+          return EditorCommandResult(std::move(admitted), {}, false);
+        }
+        ActionAdmission admission(*this);
         const auto invoke = [&]() -> decltype(auto) {
           if constexpr (std::invocable<Callback &, const Event &>) {
             return action(event);
@@ -1626,11 +1757,12 @@ private:
                                          std::source_location origin, bool *observerInvoked = nullptr,
                                          bool runFailure = false,
                                          const ui::detail::SetupFailureTicket *shortTicket = nullptr,
-                                         bool contextUnavailable = false) noexcept;
+                                         bool contextUnavailable = false, bool dialogPrimary = false) noexcept;
   bool notifyError(ManagedDiagnostic &diagnostic, bool runFailure,
                    const ui::detail::SetupFailureTicket *shortTicket = nullptr) noexcept;
   void reportShortError(ManagedError &failure, const char *operation, std::string_view name,
-                        std::string_view expectedType, std::source_location origin) noexcept;
+                        std::string_view expectedType, std::source_location origin,
+                        bool admittedRuntime = false) noexcept;
 
   bool shortReported(const ManagedError &failure) const noexcept {
     const auto &collector = failure.reportReceipt.collector_;
@@ -1672,6 +1804,9 @@ private:
   std::size_t keyHandlers_{};
   std::size_t clickHandlers_{};
   std::vector<std::shared_ptr<LayoutRecord>> layouts_ = std::vector<std::shared_ptr<LayoutRecord>>(0);
+  std::shared_ptr<detail::DialogHostRecord> dialogs_;
+  bool dialogOperation_{};
+  bool collectingDialogs_{};
   std::uint64_t layoutRevision_{};
   std::shared_ptr<ManagedErrorHandler> errorObserver_;
   std::vector<ManagedDiagnostic> errors_;
@@ -1695,6 +1830,8 @@ private:
   std::size_t observerCallbacks_{};
   std::size_t mountDepth_{};
   bool reporting_{};
+  bool actionAdmitted_{};
+  bool dialogPrimaryRecorded_{};
   bool failureNotified_{};
   bool runFailureNotified_{};
   bool notifyingRunFailure_{};

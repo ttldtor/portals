@@ -82,6 +82,8 @@ struct ActionCancellation;
 struct FocusScopeRegistration;
 struct PointerCaptureCancellation;
 struct EventRouterAccess;
+struct FocusChange;
+struct DialogRecord;
 } // namespace detail
 
 /** @brief Move-only scoped disconnect token; never owns a tree or widget.
@@ -183,7 +185,7 @@ public:
    */
   std::expected<void, TreeError> setPointerCaptureCapabilities(PointerCaptureCapabilities capabilities);
   /** @brief Capture LEFT continuation from this owner's currently admitted LEFT PRESS handler.
-   * @param owner Live full identity of the currently executing action registration.
+   * @param owner Live full identity of the currently executing action registration, inside any active managed modal.
    * @param focusRoot Optional live ancestor containing owner, defaulting to owner. Only a subsequent
    * focus transition outside this subtree cancels capture; existing external/empty focus is permitted.
    * @return Weak cancellation token; tree/session/thread errors, INVALID_ARGUMENT for absent
@@ -192,6 +194,7 @@ public:
    * Failure publishes no new capture. Pure LAYOUT invalidation does not cancel capture. Any
    * visibility/enabled/removal mutation conservatively cancels it, including unrelated nodes;
    * this protects hide/show and disable/enable pairs without a per-ancestor history observer.
+   * A newly admitted modal also cancels an outside owner even when focusRoot spans the host.
    * @note UI-only; callable and widget borrows never escape their existing admission.
    */
   std::expected<PointerCapture, TreeError> capturePointer(Node<Widget> owner, Node<Widget> focusRoot = {});
@@ -310,6 +313,7 @@ public:
    * @param root Live registered scope root; hidden/disabled subtrees select empty focus.
    * @return Selected observer, empty for no eligible member or callback retirement, or typed error.
    * Callback errors preserve already published focus, exactly like setFocus.
+   * A managed modal rejects an outside root with INVALID_ARGUMENT; dialog staging reentry is WOULD_BLOCK.
    */
   std::expected<Node<Widget>, TreeError> enterScope(Node<Widget> root);
 
@@ -341,10 +345,12 @@ public:
    * @param node Live, eligible node with a focusable registration.
    * @return Success, INVALID_ARGUMENT for an ineligible/unregistered/nonfocusable node,
    * tree/router validation errors, or the first loss/gain callback error; published focus is not rolled back.
+   * Managed modal confinement rejects outside nodes; reentry during dialog staging is WOULD_BLOCK.
    */
   std::expected<void, TreeError> setFocus(Node<Widget> node);
   /** @brief Traverse eligible registrations in tree preorder with wrap; reverse implements Shift+Tab.
    * Scope boundaries preserve the full global order; remembered/default entry is explicit via enterScope.
+   * A managed modal restricts traversal to its active subtree.
    * @param reverse Traverse backward when true, forward otherwise; wrap at either end.
    * @return Newly focused node, empty if none exists or callbacks retire it, or tree/router/callback errors.
    */
@@ -362,6 +368,8 @@ public:
    * release and other keys remain KeyEvent. Text (including space), paste and mouse retain type.
    * Left press focuses the nearest focusable target ancestor before bubbling the mouse event.
    * If focus callbacks retire the original hit, suppress delivery without retargeting it.
+   * Managed nonmodal pointer input does not steal focus. A modal consumes outside physical input,
+   * and layer bubbling stops at the structural dialog root.
    * @param event Decoded input borrowed for this call; handlers must not retain references.
    * @return Initial target, consuming handler and delivery status; NO_TARGET for a miss/ignored decoder event,
    * tree/router errors, WOULD_BLOCK for nested delivery, NO_MEMORY, or CALLBACK_FAILED.
@@ -369,6 +377,7 @@ public:
   std::expected<DispatchResult, TreeError> dispatch(const InputEvent &event);
   /** @brief Invoke the same handler path with a semantic command; target need not be focusable.
    * Foreign/stale targets return their tree error. Ineligible targets return DispatchStatus::NO_TARGET.
+   * A managed modal rejects an explicit outside target with INVALID_ARGUMENT.
    * @param target Explicit live destination; focus is unchanged.
    * @param action Owning semantic command and modifier intent to bubble along the original ancestry.
    * @return Initial target, consuming handler and delivery status; tree/router errors,
@@ -390,7 +399,13 @@ private:
       bool focusable, std::function<std::expected<void, TreeError>(bool)> focusCallback);
   std::expected<void, TreeError> collect();
   std::shared_ptr<detail::ActionRegistration> registration(Node<Widget> node) const;
-  std::expected<std::vector<Node<Widget>>, TreeError> focusOrder();
+  std::expected<std::vector<Node<Widget>>, TreeError> focusOrder(Node<Widget> reveal = {}, Node<Widget> exclude = {});
+  std::shared_ptr<detail::DialogRecord> dialogLayer(Node<Widget> node) const;
+  Node<Widget> modalRoot(Node<Widget> exclude = {}) const;
+  bool dialogEligible(Node<Widget> node, Node<Widget> reveal = {}, Node<Widget> exclude = {}) const;
+  std::expected<void, TreeError> stageFocus(Node<Widget> node, detail::FocusChange &change);
+  void publishFocus(detail::FocusChange &change) noexcept;
+  std::expected<void, TreeError> notifyFocus(const detail::FocusChange &change);
   detail::FocusScopeRegistration *scope(Node<Widget> root) const;
   bool within(Node<Widget> root, Node<Widget> node) const;
   Node<Widget> scopeEntry(Node<Widget> root, const std::vector<Node<Widget>> &order, bool reverse) const;
@@ -403,7 +418,7 @@ private:
   std::expected<void, TreeError> changeFocus(Node<Widget> node);
   std::expected<void, TreeError> deliverFocus(Node<Widget> node, bool focused);
   std::expected<Node<Widget>, TreeError> checkedFocus();
-  std::expected<DispatchResult, TreeError> route(Node<Widget> target, const RoutedEvent &event);
+  std::expected<DispatchResult, TreeError> route(Node<Widget> target, const RoutedEvent &event, bool physical = false);
   std::expected<EventReply, TreeError> deliver(std::shared_ptr<detail::ActionRegistration> entry,
                                                const RoutedEvent &event);
   std::expected<Node<Widget>, TreeError> checkedPointerCapture();

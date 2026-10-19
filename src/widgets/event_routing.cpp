@@ -133,7 +133,8 @@ std::expected<void, TreeError> EventRouter::canBind(Node<Widget> node) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
-  if (state_->registrations.size() + state_->scopes.size() >= state_->options.max_registrations) {
+  if (state_->registrations.size() + state_->scopes.size() + !state_->dialogs.expired() >=
+      state_->options.max_registrations) {
     return std::unexpected(TreeError::NODE_LIMIT);
   }
 
@@ -156,6 +157,10 @@ EventRouter::add(Node<Widget> node, std::function<std::expected<EventReply, Tree
 
   if (!allowed) {
     return std::unexpected(allowed.error());
+  }
+
+  if (auto host = state_->dialogs.lock(); focusable && host && !host->retired && host->root == node) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
   state_->registrations.push_back(entry);
@@ -269,7 +274,8 @@ std::expected<DispatchResult, TreeError> EventRouter::routeCaptured(const MouseI
   return result;
 }
 
-std::expected<DispatchResult, TreeError> EventRouter::route(Node<Widget> target, const RoutedEvent &event) {
+std::expected<DispatchResult, TreeError> EventRouter::route(Node<Widget> target, const RoutedEvent &event,
+                                                            bool physical) {
   DispatchResult result;
   auto *recorder = tree().diagnostics();
   const auto trace = [&](DiagnosticEvent stage, DiagnosticReason reason) {
@@ -285,6 +291,12 @@ std::expected<DispatchResult, TreeError> EventRouter::route(Node<Widget> target,
   }
 
   if (target.id().session == 0) {
+    if (physical) {
+      auto modal = modalRoot();
+      if (modal != Node<Widget>{}) {
+        return DispatchResult{modal.id(), modal.id(), DispatchStatus::HANDLED};
+      }
+    }
     trace(DiagnosticEvent::TARGET, DiagnosticReason::NO_TARGET);
 
     return result;
@@ -298,9 +310,16 @@ std::expected<DispatchResult, TreeError> EventRouter::route(Node<Widget> target,
     return std::unexpected(eligible.error());
   }
 
+  auto boundary = dialogLayer(target);
+  const auto modal = modalRoot();
+  if (!dialogEligible(target) || (modal != Node<Widget>{} && !within(modal, target))) {
+    if (physical) {
+      return DispatchResult{target.id(), modal.id(), DispatchStatus::HANDLED};
+    }
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
   if (!*eligible) {
     trace(DiagnosticEvent::TARGET, DiagnosticReason::TARGET_DISABLED);
-
     return result;
   }
 
@@ -318,6 +337,9 @@ std::expected<DispatchResult, TreeError> EventRouter::route(Node<Widget> target,
 
   while (current.id().session != 0) {
     path.push_back(current);
+    if (boundary && current == boundary->root) {
+      break;
+    }
 
     auto snapshot = tree().inspect(current);
 
@@ -329,7 +351,7 @@ std::expected<DispatchResult, TreeError> EventRouter::route(Node<Widget> target,
   }
 
   // Snapshot the ancestry before any handler can mutate it. Revalidate each admission so
-  // removal/hiding/disabling suppresses that node while surviving original ancestors can run.
+  // removal/hiding/disabling or a newly published modal suppresses ineligible nodes.
   // The local registration owner keeps captures alive through self-disconnect and collection.
   bool hadHandler{};
 
@@ -344,7 +366,8 @@ std::expected<DispatchResult, TreeError> EventRouter::route(Node<Widget> target,
       return std::unexpected(live.error());
     }
 
-    if (!*live) {
+    const auto currentModal = modalRoot();
+    if (!*live || !dialogEligible(node) || (currentModal != Node<Widget>{} && !within(currentModal, node))) {
       continue;
     }
 
@@ -381,6 +404,16 @@ std::expected<DispatchResult, TreeError> EventRouter::route(Node<Widget> target,
     }
   }
 
+  if (physical && result.status == DispatchStatus::UNHANDLED) {
+    const auto currentModal = modalRoot();
+    if (currentModal != Node<Widget>{}) {
+      result.status = DispatchStatus::HANDLED;
+      result.handler = currentModal.id();
+    } else if (boundary && boundary->options.mode == DialogMode::MODAL) {
+      result.status = DispatchStatus::HANDLED;
+      result.handler = boundary->root.id();
+    }
+  }
   if (result.status == DispatchStatus::UNHANDLED) {
     trace(DiagnosticEvent::ACTION, hadHandler ? DiagnosticReason::UNHANDLED : DiagnosticReason::UNBOUND_ACTION);
   }
@@ -459,6 +492,9 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
           recorder->note(DiagnosticEvent::ACTION);
         }
 
+        if (next->id().session == 0 && modalRoot() != Node<Widget>{}) {
+          return DispatchResult{modalRoot().id(), {}, DispatchStatus::HANDLED};
+        }
         return DispatchResult{
           next->id(), {}, next->id().session == 0 ? DispatchStatus::NO_TARGET : DispatchStatus::HANDLED};
       }
@@ -471,11 +507,24 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
 
       auto action = keyAction(key->key);
 
-      if (action && key->action != KeyAction::RELEASE) {
-        return route(*target, ActionEvent{*action, key->modifiers, ClickSource::KEYBOARD});
+      if (*target == Node<Widget>{} && modalRoot() != Node<Widget>{}) {
+        *target = modalRoot();
       }
 
-      return route(*target, *key);
+      if (action && key->action != KeyAction::RELEASE) {
+        struct CancelPhase {
+          bool &repeat;
+
+          ~CancelPhase() {
+            repeat = false;
+          }
+        } phase{state_->dialogCancelRepeat};
+
+        state_->dialogCancelRepeat = *action == Action::CANCEL && key->action == KeyAction::REPEAT;
+        return route(*target, ActionEvent{*action, key->modifiers, ClickSource::KEYBOARD}, true);
+      }
+
+      return route(*target, *key, true);
     }
 
     // Mouse targeting uses geometry independently of focus. A left press updates focus on
@@ -507,7 +556,9 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
       }
 
       // Automatic return already performed this event's focus transition.
-      if (!*returned && mouse->button == MouseButton::LEFT && mouse->action == MouseAction::PRESS) {
+      const auto layer = dialogLayer(*target);
+      if (!*returned && (!layer || layer->options.mode == DialogMode::MODAL) && mouse->button == MouseButton::LEFT &&
+          mouse->action == MouseAction::PRESS) {
         auto candidate = *target;
 
         while (candidate.id().session != 0) {
@@ -520,6 +571,9 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
               return std::unexpected(changed.error());
             }
 
+            break;
+          }
+          if (layer && candidate == layer->root) {
             break;
           }
 
@@ -542,11 +596,11 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
 
         if (!eligible || !*eligible) {
           // Preserve the original hit: focus callbacks must not redirect this mouse event.
-          return route(Node<Widget>{}, *mouse);
+          return route(Node<Widget>{}, *mouse, true);
         }
       }
 
-      return route(*target, *mouse);
+      return route(*target, *mouse, true);
     }
 
     if (const auto *text = std::get_if<TextInputEvent>(&event)) {
@@ -556,7 +610,7 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
         return std::unexpected(target.error());
       }
 
-      return route(*target, *text);
+      return route(*target, *text, true);
     }
 
     if (const auto *paste = std::get_if<PasteInputEvent>(&event)) {
@@ -566,7 +620,7 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
         return std::unexpected(target.error());
       }
 
-      return route(*target, *paste);
+      return route(*target, *paste, true);
     }
 
     if (recorder && recorder->enabled()) {

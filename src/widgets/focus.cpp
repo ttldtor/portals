@@ -76,6 +76,11 @@ std::expected<void, TreeError> EventRouter::check() const {
     return std::unexpected(TreeError::WOULD_BLOCK);
   }
 
+  if (auto host = state_->dialogs.lock(); host && host->staging) {
+    // Dialog staging borrows focus ancestry across allocations; public reentry cannot mutate it.
+    return std::unexpected(TreeError::WOULD_BLOCK);
+  }
+
   auto root = state_->tree.root();
 
   if (!root) {
@@ -106,6 +111,8 @@ std::expected<void, TreeError> EventRouter::collect() {
 
     return allowed;
   }
+
+  (void)modalRoot();
 
   for (auto &entry : state_->registrations) {
     auto live = tree().inputEligible(entry->node);
@@ -275,7 +282,8 @@ std::expected<ActionBinding, TreeError> EventRouter::focusScope(Node<Widget> roo
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
-  if (state_->registrations.size() + state_->scopes.size() >= state_->options.max_registrations) {
+  if (state_->registrations.size() + state_->scopes.size() + !state_->dialogs.expired() >=
+      state_->options.max_registrations) {
     return std::unexpected(TreeError::NODE_LIMIT);
   }
 
@@ -357,6 +365,14 @@ std::expected<Node<Widget>, TreeError> EventRouter::enterScope(Node<Widget> root
   if (!scope(root)) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
+  auto modal = modalRoot();
+  if (modal != Node<Widget>{} && !within(modal, root)) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  if (auto layer = dialogLayer(root); layer && !layer->open) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
 
   try {
     auto order = focusOrder();
@@ -392,6 +408,10 @@ std::expected<Node<Widget>, TreeError> EventRouter::enterFocusScope(Node<Widget>
 
   if (!eligible) {
     return std::unexpected(eligible.error());
+  }
+  auto modal = modalRoot();
+  if (modal != Node<Widget>{} && !within(modal, root)) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
   auto *entry = scope(root);
@@ -444,7 +464,8 @@ bool EventRouter::endedFocusScope(std::size_t index) const {
   const auto &saved = *state_->focusReturns[index];
   auto eligible = state_->tree.inputEligible(saved.root);
 
-  return !saved.cancellation->connected.load() || !eligible || !*eligible;
+  const auto layer = saved.dialog ? dialogLayer(saved.root) : nullptr;
+  return !saved.cancellation->connected.load() || !eligible || !*eligible || (saved.dialog && (!layer || !layer->open));
 }
 
 Node<Widget> EventRouter::fallbackFocus(const std::vector<Node<Widget>> &scopes,
@@ -528,7 +549,7 @@ std::expected<bool, TreeError> EventRouter::recoverFocusScopes() {
   return returned ? std::expected<bool, TreeError>(true) : std::unexpected(returned.error());
 }
 
-std::expected<std::vector<Node<Widget>>, TreeError> EventRouter::focusOrder() {
+std::expected<std::vector<Node<Widget>>, TreeError> EventRouter::focusOrder(Node<Widget> reveal, Node<Widget> exclude) {
   std::vector<Node<Widget>> result(0);
   std::vector<Node<Widget>> pending(0);
   auto root = tree().root();
@@ -567,14 +588,19 @@ std::expected<std::vector<Node<Widget>>, TreeError> EventRouter::focusOrder() {
       return std::unexpected(snapshot.error());
     }
 
-    if (!snapshot->visible || !snapshot->enabled) {
+    if ((!snapshot->visible && node != reveal) || !snapshot->enabled || !dialogEligible(node, reveal, exclude)) {
       continue;
     }
 
     const auto id = node.id();
     const auto found = std::ranges::lower_bound(index, std::tuple{id.session, id.slot, id.generation}, {}, identity);
 
-    if (found != index.end() && (*found)->node == node && (*found)->cancellation->connected.load()) {
+    auto modal = modalRoot(exclude);
+    if (auto opening = dialogLayer(reveal); opening && opening->options.mode == DialogMode::MODAL) {
+      modal = reveal;
+    }
+    if (found != index.end() && (*found)->node == node && (*found)->cancellation->connected.load() &&
+        (modal == Node<Widget>{} || within(modal, node))) {
       result.push_back(node);
     }
 
@@ -622,70 +648,90 @@ std::expected<void, TreeError> EventRouter::deliverFocus(Node<Widget> node, bool
   }
 }
 
-std::expected<void, TreeError> EventRouter::changeFocus(Node<Widget> node) {
+std::expected<void, TreeError> EventRouter::stageFocus(Node<Widget> node, detail::FocusChange &change) {
   if (state_->deliveringFocus) {
     return std::unexpected(TreeError::WOULD_BLOCK);
   }
-
-  if (node == state_->focus) {
-    return {};
-  }
-
-  // Prepare scope ancestry and history capacity before publishing any focus state.
-  std::vector<Node<Widget>> ancestry(0);
-
+  change.previous = state_->focus;
+  change.next = node;
   for (auto ancestor = node; ancestor.id().session != 0;) {
     if (scope(ancestor)) {
-      ancestry.push_back(ancestor);
+      change.ancestry.push_back(ancestor);
     }
-
     auto parent = tree().inputParent(ancestor);
-
     if (!parent) {
       return std::unexpected(parent.error());
     }
-
     ancestor = *parent;
   }
-
   state_->history.reserve(state_->history.size() + (node.id().session != 0));
+  auto layer = dialogLayer(node);
+  if (layer && layer->options.mode == DialogMode::NON_MODAL && !within(layer->root, state_->focus) &&
+      !std::ranges::any_of(state_->focusReturns, [&](const auto &entry) {
+        return entry->root == layer->root;
+      })) {
+    auto *registered = scope(layer->root);
+    if (!registered) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+    if (state_->focusReturns.size() >= state_->options.max_registrations) {
+      return std::unexpected(TreeError::NODE_LIMIT);
+    }
+    change.entry = std::make_unique<detail::FocusReturnRegistration>(layer->root, state_->focus, state_->focusScopes,
+                                                                     registered->cancellation, true);
+    state_->focusReturns.reserve(state_->focusReturns.size() + 1);
+  }
+  return {};
+}
 
-  // Allocate history before publishing the new focus.
+void EventRouter::publishFocus(detail::FocusChange &change) noexcept {
+  const auto node = change.next;
+  if (node == state_->focus) {
+    return;
+  }
+  auto previousLayer = dialogLayer(change.previous);
+  auto nextLayer = dialogLayer(node);
+  if (previousLayer && (previousLayer->options.mode == DialogMode::NON_MODAL || !previousLayer->open) &&
+      !within(previousLayer->root, node) && (!nextLayer || nextLayer->options.mode != DialogMode::MODAL)) {
+    std::erase_if(state_->focusReturns, [&](const auto &entry) {
+      return entry->dialog && entry->root == previousLayer->root;
+    });
+  }
+  if (change.entry) {
+    state_->focusReturns.push_back(std::move(change.entry));
+  }
   if (node.id().session != 0) {
     auto found = std::ranges::find(state_->history, node);
-
     if (found != state_->history.end()) {
       state_->history.erase(found);
     }
-
     state_->history.push_back(node);
   }
-
-  const auto previous = state_->focus;
-
   state_->focus = node;
-  state_->focusScopes.swap(ancestry);
-
+  state_->focusScopes.swap(change.ancestry);
   for (auto root : state_->focusScopes) {
     if (auto *entry = scope(root)) {
       entry->last = node;
     }
   }
-
-  // Zero permanently invalidates sequence stamps after unsigned exhaustion; never reuse a stamp.
   if (state_->focusGeneration) {
     ++state_->focusGeneration;
   }
-
   // Publish the optional owning observation before any reentrant focus delivery.
   if (auto observation = state_->focusObservation.lock()) {
     observation->focused = node;
     observation->generation = state_->focusGeneration;
   }
+}
+
+std::expected<void, TreeError> EventRouter::notifyFocus(const detail::FocusChange &change) {
+  if (change.previous == change.next) {
+    return {};
+  }
 
   // Only this actual transition can leave the capture focus subtree. Acquiring from a
   // non-focusable pointer owner does not require changing a pre-existing external focus.
-  if (state_->pointerCapture && !within(state_->pointerCapture->focusRoot, node)) {
+  if (state_->pointerCapture && !within(state_->pointerCapture->focusRoot, change.next)) {
     auto cancelled = retirePointerCapture(false);
 
     if (!cancelled) {
@@ -694,41 +740,46 @@ std::expected<void, TreeError> EventRouter::changeFocus(Node<Widget> node) {
   }
 
   if (auto *recorder = tree().diagnostics(); recorder && recorder->enabled()) {
-    const auto id = node.id();
-
+    const auto id = change.next.id();
     recorder->note(DiagnosticEvent::FOCUS, DiagnosticReason::NONE, {id.session, id.slot, id.generation});
   }
-
-  if (previous.id().session != 0) {
-    auto status = tree().invalidate(previous, Invalidation::PAINT);
-
-    if (!status && status.error() != TreeError::STALE_NODE) {
-      return status;
+  for (auto node : {change.previous, change.next}) {
+    if (node.id().session != 0) {
+      auto status = tree().invalidate(node, Invalidation::PAINT);
+      if (!status && status.error() != TreeError::STALE_NODE && status.error() != TreeError::CLOSED) {
+        return status;
+      }
     }
   }
 
-  if (node.id().session != 0) {
-    auto status = tree().invalidate(node, Invalidation::PAINT);
-
-    if (!status) {
-      return status;
-    }
-  }
-
-  struct FocusGuard {
+  struct Guard {
     bool &active;
 
-    ~FocusGuard() {
+    ~Guard() {
       active = false;
     }
   } guard{state_->deliveringFocus};
 
   state_->deliveringFocus = true;
-
-  auto lost = deliverFocus(previous, false);
-  auto gained = deliverFocus(node, true);
-
+  auto lost = deliverFocus(change.previous, false);
+  auto gained = deliverFocus(change.next, true);
   return lost ? gained : lost;
+}
+
+std::expected<void, TreeError> EventRouter::changeFocus(Node<Widget> node) {
+  if (state_->deliveringFocus) {
+    return std::unexpected(TreeError::WOULD_BLOCK);
+  }
+  if (node == state_->focus) {
+    return {};
+  }
+  detail::FocusChange change;
+  auto staged = stageFocus(node, change);
+  if (!staged) {
+    return std::unexpected(staged.error());
+  }
+  publishFocus(change);
+  return notifyFocus(change);
 }
 
 std::expected<Node<Widget>, TreeError> EventRouter::checkedFocus() {
@@ -747,7 +798,7 @@ std::expected<Node<Widget>, TreeError> EventRouter::checkedFocus() {
   }
 
   // A callback can retire the selected target. Do not start another callback cycle here.
-  return *eligible ? state_->focus : Node<Widget>{};
+  return *eligible && dialogEligible(state_->focus) ? state_->focus : Node<Widget>{};
 }
 
 std::expected<Node<Widget>, TreeError> EventRouter::focused() {
@@ -803,7 +854,9 @@ std::expected<void, TreeError> EventRouter::setFocus(Node<Widget> node) {
 
   auto entry = registration(node);
 
-  if (!*eligible || !entry || !entry->focusable) {
+  auto modal = modalRoot();
+  if (!*eligible || !entry || !entry->focusable || !dialogEligible(node) ||
+      (modal != Node<Widget>{} && !within(modal, node))) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
@@ -885,14 +938,19 @@ std::expected<Node<Widget>, TreeError> EventRouter::hitTest(CellPoint point) {
 
       const auto &geometry = snapshot->geometry;
 
-      if (!snapshot->visible || !snapshot->enabled || !geometry.valid || !geometry.surface.contains(point) ||
-          !geometry.clip.contains(point)) {
+      if (!snapshot->visible || !snapshot->enabled || !dialogEligible(node) || !geometry.valid ||
+          !geometry.surface.contains(point) || !geometry.clip.contains(point)) {
         continue;
       }
 
       // Retaining the last preorder hit gives descendants precedence over their ancestors
       // and later sibling subtrees precedence over earlier ones, matching painting order.
-      hit = node;
+      const auto host = state_->dialogs.lock();
+      auto layer = dialogLayer(node);
+      if ((!host || host->root != node) &&
+          (!layer || layer->root != node || layer->options.mode == DialogMode::MODAL)) {
+        hit = node;
+      }
       pending.insert(pending.end(), snapshot->children.rbegin(), snapshot->children.rend());
     }
 

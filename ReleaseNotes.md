@@ -9,6 +9,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
   internal-state checkboxes and frame-edge scroll bars. Installed-package consumers
   check nested wheel ownership, focus reveal, clipping and capture retirement,
   and compile the same maintained guide.
+- [Added] Retained modal and nonmodal dialogs share the existing tree and runner,
+  with checked opening/dismissal, focus return, capture cancellation and body-anchor
+  placement. A complete native settings guide and installed-consumer checks cover
+  the public composition and error/cleanup boundaries.
 
 - [Tests] Installed-package consumers check live editor words and graphemes in
   the same frame as an external model update, routed input, token identity,

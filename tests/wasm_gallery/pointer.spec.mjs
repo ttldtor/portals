@@ -30,11 +30,12 @@ for (const method of ['mouse', 'touchscreen']) {
     const editor = await controlPoint(page, 'Portals', 'Name :');
     if (method === 'mouse') await page.mouse.click(editor.x, editor.y);
     else await page.touchscreen.tap(editor.x, editor.y);
-    await page.locator('.xterm-helper-textarea').pressSequentially(' pointer');
-    await expect(screen).toContainText('Portals pointer');
     const beforeResize = await page.locator('.xterm-screen').boundingBox();
     await page.setViewportSize({ width: 480, height: 700 });
     await expect.poll(async () => (await page.locator('.xterm-screen').boundingBox()).width).toBeGreaterThan(beforeResize.width);
+    // DOM resize precedes application layout; rendered input acknowledges both before hit testing.
+    await page.locator('.xterm-helper-textarea').pressSequentially(' pointer');
+    await expect(screen).toContainText('Portals pointer');
     await activate('Alerts');
     await expect(screen).toContainText('[ ] Alerts');
     await activate('Run something');

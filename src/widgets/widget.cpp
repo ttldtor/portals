@@ -45,6 +45,7 @@ struct WidgetTree::State {
     UiScope scope;
     NodeGeometry geometry;
     std::uint64_t visibilityRevision{1};
+    std::uint64_t inputRevision{1};
     std::size_t depth{};
 
     bool live{true};
@@ -126,6 +127,11 @@ struct WidgetTree::State {
     }
 
     return slot.record;
+  }
+
+  void changeInputEligibility(Record &record) noexcept {
+    // Share the existing monotonic input clock; an ancestor stamp also revokes descendants.
+    record.inputRevision = inputGeneration ? inputGeneration + 1 : 0;
   }
 
   static void invalidateGeometry(Record &record, const Record *visibilityRoot = nullptr, std::uint64_t revision = 0,
@@ -418,7 +424,7 @@ std::expected<WidgetTree::GeometryObservation, TreeError> WidgetTree::observeGeo
   if (state_->frames) {
     return std::unexpected(TreeError::WOULD_BLOCK);
   }
-  return GeometryObservation{(*value)->geometry, (*value)->visibilityRevision};
+  return GeometryObservation{(*value)->geometry, (*value)->visibilityRevision, State::shown(**value, false)};
 }
 
 std::expected<NodeSnapshot, TreeError> WidgetTree::inspect(Node<Widget> node) const {
@@ -573,6 +579,56 @@ std::expected<void, TreeError> WidgetTree::remove(Node<Widget> node) {
   return {};
 }
 
+std::expected<void, TreeError> WidgetTree::commitOverlay(Node<Widget> host, Node<Widget> body, Node<Widget> layer,
+                                                         std::span<const Node<Widget>> order, bool visible) {
+  auto parent = state_->find(host.id());
+  auto target = state_->find(layer.id());
+
+  if (!parent || !target) {
+    return std::unexpected(parent ? target.error() : parent.error());
+  }
+  auto &children = (*parent)->children;
+  if (static_cast<std::size_t>(std::ranges::count_if(children,
+                                                     [](const auto &child) {
+                                                       return child->live;
+                                                     })) != order.size() + 1 ||
+      children.empty() || children.front()->id != body.id() || (*target)->parent != *parent) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+  for (std::size_t i = 0; i != order.size(); ++i) {
+    auto child = state_->find(order[i].id());
+    if (!child) {
+      return std::unexpected(child.error());
+    }
+    if ((*child)->parent != *parent || order[i] == body ||
+        std::ranges::find(order.first(i), order[i]) != order.first(i).end()) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+  }
+
+  bool changed = (*target)->visible != visible;
+  // All fallible validation precedes pointer rotation. Record addresses and parents stay stable.
+  for (std::size_t i = 0; i != order.size(); ++i) {
+    auto first = children.begin() + static_cast<std::ptrdiff_t>(i + 1);
+    auto found = std::find_if(first, children.end(), [&](const auto &child) {
+      return child->id == order[i].id();
+    });
+    changed |= first != found;
+    std::rotate(first, found, std::next(found));
+  }
+  if ((*target)->visible != visible) {
+    state_->changeInputEligibility(**target);
+  }
+  (*target)->visible = visible;
+  if (changed) {
+    if (state_->inputGeneration) {
+      ++state_->inputGeneration;
+    }
+    state_->invalidate(Invalidation::LAYOUT, *target);
+  }
+  return {};
+}
+
 std::expected<void, TreeError> WidgetTree::close() {
   if (std::this_thread::get_id() != state_->owner) {
     return std::unexpected(TreeError::WRONG_THREAD);
@@ -695,6 +751,7 @@ std::expected<void, TreeError> WidgetTree::setVisible(Node<Widget> node, bool vi
   auto &record = *state_->slots[node.id().slot].record;
 
   if (record.visible != visible) {
+    state_->changeInputEligibility(record);
     record.visible = visible;
 
     if (state_->inputGeneration) {
@@ -717,6 +774,7 @@ std::expected<void, TreeError> WidgetTree::setEnabled(Node<Widget> node, bool en
   auto &record = *state_->slots[node.id().slot].record;
 
   if (record.enabled != enabled) {
+    state_->changeInputEligibility(record);
     record.enabled = enabled;
 
     if (state_->inputGeneration) {
@@ -737,6 +795,34 @@ std::expected<bool, TreeError> WidgetTree::inputEligible(Node<Widget> node) cons
   }
 
   return State::shown(**record, true);
+}
+
+std::expected<std::uint64_t, TreeError> WidgetTree::inputRevision(Node<Widget> node) const {
+  auto record = state_->find(node.id());
+  if (!record) {
+    return std::unexpected(record.error());
+  }
+  std::uint64_t revision{};
+  for (auto *ancestor = *record; ancestor; ancestor = ancestor->parent) {
+    if (!ancestor->inputRevision) {
+      return 0;
+    }
+    revision = std::max(revision, ancestor->inputRevision);
+  }
+  return revision;
+}
+
+std::expected<bool, TreeError> WidgetTree::inputEligible(Node<Widget> node, Node<Widget> reveal) const {
+  auto record = state_->find(node.id());
+  if (!record) {
+    return std::unexpected(record.error());
+  }
+  for (auto *ancestor = *record; ancestor; ancestor = ancestor->parent) {
+    if (!ancestor->enabled || (!ancestor->visible && ancestor->id != reveal.id())) {
+      return false;
+    }
+  }
+  return true;
 }
 
 std::expected<void, TreeError> WidgetTree::invalidate(Node<Widget> node, Invalidation kind) {
