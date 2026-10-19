@@ -216,6 +216,10 @@ ComputedStyle StyleEngine::resolve(const StyleSheet &sheet, const LayerState &st
   return resolveRules<Rank>(
     [&](auto &&apply) {
       for (const auto &layer : state.layers) {
+        if (state.preview && layer.id == state.themeBase) {
+          continue;
+        }
+
         if (layer.sheet.scope && *layer.sheet.scope != node) {
           continue;
         }
@@ -253,8 +257,24 @@ std::expected<void, StyleError> StyleEngine::validateHandle(const StyleLayerHand
 }
 
 detail::StyleThemeLease StyleEngine::themeLease() const noexcept {
-  return {layerState_.enabled, layerState_.epoch, layerState_.enabled ? layerState_.layers[1].id : 0,
-          layerState_.owner};
+  return {layerState_.enabled, layerState_.epoch, layerState_.enabled ? layerState_.themeBase : 0, layerState_.owner};
+}
+
+StyleEngine::PreviewCapture StyleEngine::capturePreview() const noexcept {
+  return {revision_, themeLease(), lifetime_};
+}
+
+std::expected<void, StyleError> StyleEngine::validatePreviewCapture(const PreviewCapture &capture) const {
+  if (capture.lifetime.lock() != lifetime_ || capture.revision != revision_) {
+    return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Theme selection changed during staging"));
+  }
+
+  return validateLease(capture.lease);
+}
+
+bool StyleEngine::ownsPreview(const StyleLayerHandle &value) const noexcept {
+  return value.owner_ == owner_ && value.lifetime_.lock() == lifetime_ && layerState_.enabled &&
+         value.epoch_ == layerState_.epoch && value.id_ && value.id_ == layerState_.preview;
 }
 
 std::expected<void, StyleError> StyleEngine::validateLease(detail::StyleThemeLease lease) const {
@@ -278,7 +298,7 @@ std::expected<StyleLayerHandle, StyleError> StyleEngine::baseLayer(StyleTier tie
   if (!layerState_.enabled || (tier != StyleTier::DEFAULTS && tier != StyleTier::THEME)) {
     return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Requested style base slot is unavailable"));
   }
-  return handle(layerState_.layers[tier == StyleTier::DEFAULTS ? 0 : 1].id, layerState_.epoch);
+  return handle(tier == StyleTier::DEFAULTS ? layerState_.layers[0].id : layerState_.themeBase, layerState_.epoch);
 }
 
 std::expected<Invalidation, StyleError> StyleEngine::enableLayers(StyleLayerOptions options) {
@@ -333,11 +353,19 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
                     const StyleSheet *sheet, std::span<const StyleLayerUpdate> updates,
                     std::span<const StyleRegistration> registrations, StyleLayerHandle *added,
                     const detail::StyleThemeLease *lease, const PssDocument *document,
-                    std::optional<StyleLayerOptions> admissionOptions) {
+                    std::optional<StyleLayerOptions> admissionOptions, const PreviewCapture *previewCapture) {
   auto allowed = checkBoundary();
 
   if (!allowed) {
     return std::unexpected(allowed.error());
+  }
+
+  if (previewCapture) {
+    allowed = validatePreviewCapture(*previewCapture);
+
+    if (!allowed) {
+      return std::unexpected(allowed.error());
+    }
   }
 
   if (lease) {
@@ -349,7 +377,25 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
   }
 
   const bool admitting = mutation == Mutation::ADMIT;
-  const bool enabling = !layerState_.enabled && (mutation == Mutation::ENABLE || admitting);
+  const bool previewing = mutation == Mutation::PREVIEW;
+  const bool promoting = mutation == Mutation::PREVIEW_COMMIT;
+  const bool cancelling = mutation == Mutation::PREVIEW_CANCEL;
+
+  if (((previewing || promoting || cancelling) && (!added || !previewCapture)) || (previewing && !sheet)) {
+    return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Theme preview staging is incomplete"));
+  }
+
+  const bool updatingPreview = previewing && added && added->id_;
+  const bool addingPreview = previewing && !updatingPreview;
+  const bool enabling = !layerState_.enabled && (mutation == Mutation::ENABLE || admitting || addingPreview);
+
+  if (addingPreview && layerState_.preview) {
+    return std::unexpected(error(TreeError::WOULD_BLOCK, "A theme preview is already active"));
+  }
+
+  if ((updatingPreview || promoting || cancelling) && (!added || !ownsPreview(*added))) {
+    return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Theme preview authority is stale"));
+  }
 
   if (mutation == Mutation::ENABLE && layerState_.enabled) {
     if (options != layerState_.options) {
@@ -363,7 +409,7 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
     return bindBatch(registrations);
   }
 
-  if (admitting) {
+  if (admitting || previewing) {
     options = admissionOptions.value_or(layerState_.enabled ? layerState_.options : StyleLayerOptions{});
 
     if (layerState_.enabled && options != layerState_.options) {
@@ -398,6 +444,11 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
 
   const bool adding = mutation == Mutation::ADD || (admitting && !admittedId);
   const bool directReplacement = mutation == Mutation::UPDATE && sheet;
+  const bool baseRemoval = std::ranges::any_of(updates, [&](const StyleLayerUpdate &update) {
+    return !update.sheet && update.handle.id_ == layerState_.themeBase;
+  });
+  const bool externalTheme = mutation == Mutation::THEME || mutation == Mutation::OWNED_THEME || baseRemoval;
+  const auto previewLayer = std::ranges::find(layerState_.layers, layerState_.preview, &Layer::id);
 
   const bool invalidTier = tier != StyleTier::APPLICATION && tier != StyleTier::USER;
   const bool invalidName = name.empty() || name == "DEFAULTS" || name == "THEME";
@@ -445,12 +496,20 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
   }
 
   const auto replacement = [&](const Layer &layer) -> const StyleSheet * {
+    if (layer.id == layerState_.preview && (externalTheme || promoting || cancelling)) {
+      return nullptr;
+    }
+
+    if ((updatingPreview && layer.id == layerState_.preview) || (promoting && layer.id == layerState_.themeBase)) {
+      return promoting ? &previewLayer->sheet : sheet;
+    }
+
     if ((admitting && layer.id == admittedId) || (directReplacement && layer.id == added->id_)) {
       return sheet;
     }
 
     if ((mutation == Mutation::DEFAULTS && layer.tier == StyleTier::DEFAULTS) ||
-        ((mutation == Mutation::THEME || mutation == Mutation::OWNED_THEME) && layer.tier == StyleTier::THEME)) {
+        ((mutation == Mutation::THEME || mutation == Mutation::OWNED_THEME) && layer.id == layerState_.themeBase)) {
       return sheet;
     }
 
@@ -464,13 +523,12 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
   };
 
   const auto removing = [&](const Layer &layer) {
-    return !replacement(layer) && layer.tier != StyleTier::DEFAULTS && layer.tier != StyleTier::THEME;
+    return !replacement(layer) && (layer.id == layerState_.preview ||
+                                   (layer.tier != StyleTier::DEFAULTS && layer.id != layerState_.themeBase));
   };
 
-  const bool handoff = mutation == Mutation::THEME || std::ranges::any_of(updates, [&](const StyleLayerUpdate &update) {
-                         return !update.sheet && update.handle.id_ == layerState_.layers[1].id;
-                       });
-  bool changed = enabling || adding || handoff;
+  const bool handoff = mutation == Mutation::THEME || baseRemoval || addingPreview;
+  bool changed = enabling || adding || handoff || previewing || promoting || cancelling;
   for (const auto &layer : layerState_.layers) {
     const auto next = replacement(layer);
 
@@ -485,7 +543,9 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
 
     if ((directReplacement && layer.id == added->id_) ||
         (mutation == Mutation::DEFAULTS && layer.tier == StyleTier::DEFAULTS) ||
-        ((mutation == Mutation::THEME || mutation == Mutation::OWNED_THEME) && layer.tier == StyleTier::THEME) ||
+        ((mutation == Mutation::THEME || mutation == Mutation::OWNED_THEME || promoting) &&
+         layer.id == layerState_.themeBase) ||
+        (updatingPreview && layer.id == layerState_.preview) ||
         std::ranges::any_of(updates, [&](const StyleLayerUpdate &update) {
           return update.handle.id_ == layer.id;
         })) {
@@ -527,7 +587,7 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
   }
 
   constexpr auto MAX_ID = std::numeric_limits<std::uint64_t>::max();
-  const std::uint64_t identities = (enabling ? 2 : 0) + (adding ? 1 : 0);
+  const std::uint64_t identities = (enabling ? 2 : 0) + (adding ? 1 : 0) + (addingPreview ? 1 : 0);
 
   if ((enabling && layerState_.epoch == MAX_ID) || identities > MAX_ID - layerState_.nextId ||
       identities > MAX_ID - layerState_.nextOrder || (handoff && layerState_.owner == MAX_ID)) {
@@ -606,8 +666,8 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
     }
   }
 
-  if (allowed && adding) {
-    allowed = account(name, sheet);
+  if (allowed && (adding || addingPreview)) {
+    allowed = account(addingPreview ? "PREVIEW" : name, sheet);
   }
 
   if (!allowed) {
@@ -662,6 +722,8 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
     candidate.nextId = layerState_.nextId;
     candidate.nextOrder = layerState_.nextOrder;
     candidate.owner = layerState_.owner + handoff;
+    candidate.themeBase = layerState_.themeBase;
+    candidate.preview = externalTheme || promoting || cancelling ? 0 : layerState_.preview;
     candidate.layers.reserve(layerCount);
 
     const auto append = [&](StyleTier nextTier, std::string_view nextName, const StyleSheet *value, std::uint64_t id,
@@ -678,6 +740,7 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
 
     if (enabling) {
       append(StyleTier::DEFAULTS, "DEFAULTS", nullptr, candidate.nextId++, candidate.nextOrder++);
+      candidate.themeBase = candidate.nextId;
       append(StyleTier::THEME, "THEME", &sheet_, candidate.nextId++, candidate.nextOrder++);
     } else {
       for (const auto &layer : layerState_.layers) {
@@ -691,6 +754,11 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
       admittedId = candidate.nextId++;
 
       append(tier, name, sheet, admittedId, candidate.nextOrder++, admittedDocument);
+    }
+
+    if (addingPreview) {
+      candidate.preview = candidate.nextId++;
+      append(StyleTier::THEME, "PREVIEW", sheet, candidate.preview, candidate.nextOrder++);
     }
 
     std::optional<std::vector<Binding>> bindings;
@@ -709,10 +777,14 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
     }
 
     // A layered table owns all rules; the inactive legacy sheet is released at this commit.
-    auto installed = install({}, std::move(*bindings), &candidate, false, lease);
+    auto installed = install({}, std::move(*bindings), &candidate, false, lease, previewCapture);
 
     if (installed && (adding || admitting)) {
       *added = handle(admittedId, layerState_.epoch);
+    }
+
+    if (installed && previewing) {
+      *added = handle(layerState_.preview, layerState_.epoch);
     }
 
     return installed;
@@ -965,7 +1037,15 @@ std::uint64_t StyleEngine::revision() const noexcept {
 
 std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, std::vector<Binding> &&bindings,
                                                              LayerState *candidate, bool wholeReplace,
-                                                             const detail::StyleThemeLease *lease) {
+                                                             const detail::StyleThemeLease *lease,
+                                                             const PreviewCapture *previewCapture) {
+  if (previewCapture) {
+    auto valid = validatePreviewCapture(*previewCapture);
+
+    if (!valid) {
+      return std::unexpected(valid.error());
+    }
+  }
   if (lease) {
     auto validLease = validateLease(*lease);
     if (!validLease) {
@@ -1061,6 +1141,16 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
         }
       }
 
+      if (previewCapture) {
+        auto valid = validatePreviewCapture(*previewCapture);
+
+        if (!valid) {
+          result = std::unexpected(valid.error());
+
+          return;
+        }
+      }
+
       if (invalidation != Invalidation::NONE) {
         auto requested = tree_.invalidate(*root, invalidation);
 
@@ -1088,10 +1178,14 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
         layerState_.nextId = candidate->nextId;
         layerState_.nextOrder = candidate->nextOrder;
         layerState_.owner = candidate->owner;
+        layerState_.themeBase = candidate->themeBase;
+        layerState_.preview = candidate->preview;
         layerState_.enabled = candidate->enabled;
       } else if (wholeReplace && layerState_.enabled) {
         layerState_.layers.clear();
         layerState_.enabled = false;
+        layerState_.themeBase = 0;
+        layerState_.preview = 0;
         ++layerState_.epoch;
       }
       ++revision_;

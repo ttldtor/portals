@@ -40,12 +40,17 @@ struct NamedAccess;
 struct LayoutAccess;
 struct MessageAccess;
 struct KeyHelpAccess;
+struct ThemeSelectionAccess;
 class SetupFailureTicket;
 } // namespace ui::detail
 
 namespace ui {
 class TextSource;
-}
+class ThemeChoice;
+class ThemeSelectionRef;
+struct ThemeSelectionOptions;
+struct ThemeSelectionSnapshot;
+} // namespace ui
 
 namespace style::ct::detail {
 struct Access;
@@ -64,6 +69,8 @@ struct ToastCandidate;
 struct ToastTimerMarker;
 struct ToastPayload;
 struct KeyHelpRecord;
+struct ThemeSelectionRecord;
+enum class ThemeSelectionCommand;
 template <class T> inline constexpr bool IS_MANAGED_TREE_RESULT = false;
 template <class Value> inline constexpr bool IS_MANAGED_TREE_RESULT<std::expected<Value, TreeError>> = true;
 
@@ -1611,6 +1618,7 @@ private:
   friend struct ui::detail::NotificationAccess;
   friend class ui::NotificationCenter;
   friend struct ui::detail::KeyHelpAccess;
+  friend struct ui::detail::ThemeSelectionAccess;
   friend struct detail::ManagedScrollTestAccess;
 
   struct Entry;
@@ -1959,7 +1967,16 @@ private:
   mutateStyles(StyleEngine::Mutation mutation, StyleLayerOptions options, StyleTier tier, std::string_view name,
                const StyleSheet *sheet, std::span<const StyleLayerUpdate> updates, StyleLayerHandle *added = nullptr,
                const detail::StyleThemeLease *lease = nullptr, const PssDocument *document = nullptr,
-               std::optional<StyleLayerOptions> admissionOptions = std::nullopt);
+               std::optional<StyleLayerOptions> admissionOptions = std::nullopt,
+               const StyleEngine::PreviewCapture *previewCapture = nullptr);
+  std::expected<void, ManagedError> installThemeSelection(const ui::ThemeSelectionRef &reference,
+                                                          const std::vector<ui::ThemeChoice> &choices,
+                                                          const ui::ThemeSelectionOptions &options);
+  std::expected<void, ManagedError> changeThemeSelection(const std::shared_ptr<detail::ThemeSelectionRecord> &record,
+                                                         detail::ThemeSelectionCommand command, std::string_view id,
+                                                         std::source_location origin);
+  std::expected<std::shared_ptr<const ui::ThemeSelectionSnapshot>, ManagedError>
+  readThemeSelection(const std::shared_ptr<detail::ThemeSelectionRecord> &record) const;
   std::expected<void, ManagedError> checkThemeLease(detail::StyleThemeLease lease) const;
   detail::StyleThemeLease captureThemeLease() const noexcept;
   std::expected<detail::StyleThemeLease, ManagedError> attachTheme(const StyleSheet &sheet,
@@ -2004,6 +2021,8 @@ private:
   std::weak_ptr<ui::detail::SceneAnchor> facade_;
   Node<Widget> root_;
   StyleEngine styles_;
+  std::shared_ptr<detail::ThemeSelectionRecord> themeSelection_;
+  bool installingThemeSelection_{};
   std::vector<std::shared_ptr<Entry>> entries_;
   std::shared_ptr<detail::ManagedScrollState> scroll_;
   std::vector<std::shared_ptr<void>> properties_;

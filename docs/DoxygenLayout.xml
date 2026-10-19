@@ -43,6 +43,7 @@
         <tab type="user" title="Grid and Overlay" url="@ref docs/grid.md" />
         <tab type="user" title="Styles and themes" url="@ref docs/styles.md" />
         <tab type="user" title="Style layers" url="@ref docs/style-layers.md" />
+        <tab type="user" title="Checked theme previews" url="@ref docs/theme-selection.md" />
       </tab>
       <tab type="usergroup" title="State and data">
         <tab type="user" title="Properties" url="@ref docs/property.md" />
@@ -152,6 +153,7 @@
       <tab type="user" title="Гайд по темам" url="@ref docs/ru/themes-guide.md" />
       <tab type="user" title="Синтаксис PSS" url="@ref docs/ru/styles.md" />
       <tab type="user" title="Слои стилей" url="@ref docs/ru/style-layers.md" />
+      <tab type="user" title="Предпросмотр тем" url="@ref docs/ru/theme-selection.md" />
       <tab type="user" title="Стили времени компиляции" url="@ref docs/ru/compile-time-styles.md" />
       <tab type="user" title="PSS времени компиляции" url="@ref docs/ru/compile-time-pss.md" />
     </tab>

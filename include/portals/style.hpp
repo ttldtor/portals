@@ -339,7 +339,9 @@ private:
     std::uint64_t epoch{}; ///< Engine identity generation captured at attach.
     std::uint64_t nextId{1};
     std::uint64_t nextOrder{1};
-    std::uint64_t owner{}; ///< Reserved THEME authority generation.
+    std::uint64_t owner{};     ///< Reserved THEME authority generation.
+    std::uint64_t themeBase{}; ///< Permanent THEME identity, distinct from its temporary masked contribution.
+    std::uint64_t preview{};   ///< Private effective THEME contribution; zero exposes the permanent base.
     bool enabled{};
   };
   enum class Mutation {
@@ -349,7 +351,16 @@ private:
     DEFAULTS,
     THEME,
     OWNED_THEME,
-    ADMIT
+    ADMIT,
+    PREVIEW,
+    PREVIEW_COMMIT,
+    PREVIEW_CANCEL
+  };
+
+  struct PreviewCapture {
+    std::uint64_t revision{};
+    detail::StyleThemeLease lease;
+    std::weak_ptr<const void> lifetime;
   };
 
   struct Binding {
@@ -359,7 +370,8 @@ private:
 
   std::expected<Invalidation, StyleError> install(StyleSheet sheet, std::vector<Binding> &&bindings,
                                                   LayerState *candidate = nullptr, bool wholeReplace = false,
-                                                  const detail::StyleThemeLease *lease = nullptr);
+                                                  const detail::StyleThemeLease *lease = nullptr,
+                                                  const PreviewCapture *previewCapture = nullptr);
   std::expected<Invalidation, StyleError> replaceOwnedTheme(const StyleSheet &sheet, detail::StyleThemeLease lease);
   std::expected<void, StyleError> mergeBindings(std::span<const StyleRegistration> registrations,
                                                 std::optional<std::vector<Binding>> &destination);
@@ -367,7 +379,11 @@ private:
   mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier, std::string_view name, const StyleSheet *sheet,
          std::span<const StyleLayerUpdate> updates, std::span<const StyleRegistration> registrations,
          StyleLayerHandle *added = nullptr, const detail::StyleThemeLease *lease = nullptr,
-         const PssDocument *document = nullptr, std::optional<StyleLayerOptions> admissionOptions = std::nullopt);
+         const PssDocument *document = nullptr, std::optional<StyleLayerOptions> admissionOptions = std::nullopt,
+         const PreviewCapture *previewCapture = nullptr);
+  PreviewCapture capturePreview() const noexcept;
+  std::expected<void, StyleError> validatePreviewCapture(const PreviewCapture &capture) const;
+  bool ownsPreview(const StyleLayerHandle &handle) const noexcept;
   std::expected<void, StyleError> validateHandle(const StyleLayerHandle &handle) const;
   std::expected<void, StyleError> validateLease(detail::StyleThemeLease lease) const;
   detail::StyleThemeLease themeLease() const noexcept;

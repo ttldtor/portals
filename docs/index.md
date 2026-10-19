@@ -134,6 +134,7 @@ and the exact runtime boundaries.
 - [Dialogs](dialogs.md): open retained modal panels and anchored nonmodal layers.
 - [Notifications](notifications.md): show bounded messages and actions while editing continues.
 - [Key hints and help](key-help.md): shared command labels, availability and shortcuts.
+- [Checked theme previews](theme-selection.md): preview, apply and cancel a catalog choice while preserving overrides.
 - [First application](first-application.md): build a note form in four steps.
 - [Task guides](guides.md): guides for styles, events, data and other application work.
 - [Documentation contents](reference-map.md): topics and API contracts.

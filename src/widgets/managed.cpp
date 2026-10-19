@@ -2342,7 +2342,8 @@ std::expected<Invalidation, ManagedError>
 ManagedScene::mutateStyles(StyleEngine::Mutation mutation, StyleLayerOptions options, StyleTier tier,
                            std::string_view name, const StyleSheet *sheet, std::span<const StyleLayerUpdate> updates,
                            StyleLayerHandle *added, const detail::StyleThemeLease *lease, const PssDocument *document,
-                           std::optional<StyleLayerOptions> admissionOptions) {
+                           std::optional<StyleLayerOptions> admissionOptions,
+                           const StyleEngine::PreviewCapture *previewCapture) {
   auto allowed = boundary(ManagedPhase::STYLE, root_);
 
   if (!allowed) {
@@ -2419,7 +2420,7 @@ ManagedScene::mutateStyles(StyleEngine::Mutation mutation, StyleLayerOptions opt
   auto installed = styles_.mutate(mutation, options, tier, name, sheet, updates,
                                   registrations ? std::span<const StyleRegistration>(*registrations)
                                                 : std::span<const StyleRegistration>{},
-                                  added, lease, document, admissionOptions);
+                                  added, lease, document, admissionOptions, previewCapture);
 
   if (!installed) {
     ManagedError failure{ManagedPhase::STYLE, root_.id(), installed.error(), {}, {}};
@@ -2480,6 +2481,9 @@ std::expected<std::vector<StyleLayerSource>, ManagedError> ManagedScene::styleSo
     sources.reserve(styles_.layerState_.layers.size());
 
     for (const auto &layer : styles_.layerState_.layers) {
+      if (layer.id == styles_.layerState_.preview) {
+        continue;
+      }
       sources.emplace_back();
 
       auto &source = sources.back();
@@ -3532,6 +3536,7 @@ std::expected<void, ManagedError> ManagedScene::close() {
 
   // Mark closed before retiring captures: their destructors may reenter application code.
   closed_ = true;
+  themeSelection_.reset();
   retireMessages();
   pruneDataStates();
   if (dataStateOwner_) {
