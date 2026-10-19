@@ -7,6 +7,9 @@ cmake_minimum_required(VERSION 3.24)
 
 function(bundleStageConsumer source destination)
   file(COPY "${source}/tests/package_consumer/" DESTINATION "${destination}")
+  # Compile the exact native binding guide against the installed SDK, without source-tree fallbacks.
+  file(COPY "${source}/docs/examples/guide_text_transforms.cpp"
+    DESTINATION "${destination}/docs/examples")
   # Browser development dependencies are not native consumer sources.
   file(COPY "${source}/examples" DESTINATION "${destination}" PATTERN "node_modules" EXCLUDE)
   file(COPY "${source}/tests/examples" "${source}/tests/support" DESTINATION "${destination}/tests")
