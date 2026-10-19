@@ -716,6 +716,7 @@ std::expected<void, ManagedError> ManagedScene::remove(Node<Widget> node) {
   pruneScroll();
   pruneDataStates();
   retireDialogs();
+  retireNotifications();
   stylesDirty_ = true;
 
   return {};
@@ -1681,7 +1682,11 @@ std::expected<void, TreeError> ManagedScene::afterDispatch(Application &app) {
       }
     }
   }
-  return prepareMessages();
+  auto messages = prepareMessages();
+  if (!messages) {
+    return messages;
+  }
+  return prepareNotifications();
 }
 
 bool ManagedScene::hasPendingLayout() const noexcept {
@@ -1744,7 +1749,7 @@ std::expected<void, TreeError> ManagedScene::completedLayout(Application &app) {
       }
     }
     completeScrollFrame();
-    return {};
+    return prepareNotifications(true);
   } catch (const std::bad_alloc &) {
     return std::unexpected(TreeError::NO_MEMORY);
   } catch (...) {
@@ -2324,6 +2329,7 @@ std::expected<void, ManagedError> ManagedScene::flushStyles() {
     return std::unexpected(ManagedError{ManagedPhase::STYLE, root_.id(), installed.error(), {}, {}});
   }
   publishStyleMetadata();
+  (void)invalidateNotificationStyles();
   return {};
 }
 
@@ -2432,8 +2438,12 @@ ManagedScene::mutateStyles(StyleEngine::Mutation mutation, StyleLayerOptions opt
   }
 
   publishStyleMetadata();
+  const auto notifications = invalidateNotificationStyles();
 
-  return *installed;
+  if (*installed == Invalidation::LAYOUT || notifications == Invalidation::NONE) {
+    return *installed;
+  }
+  return notifications;
 }
 
 std::expected<StyleLayerHandle, ManagedError> ManagedScene::styleDocument(StyleTier tier, std::string_view name,
@@ -2608,6 +2618,7 @@ std::expected<void, ManagedError> ManagedScene::applyLegacyTheme(const StyleShee
   if (!installed) {
     return std::unexpected(ManagedError{ManagedPhase::STYLE, root_.id(), installed.error(), {}, {}});
   }
+  (void)invalidateNotificationStyles();
   return {};
 }
 
@@ -2654,7 +2665,7 @@ std::expected<void, ManagedError> ManagedScene::theme(StyleSheet sheet) {
   if (!installed) {
     return std::unexpected(ManagedError{ManagedPhase::STYLE, root_.id(), installed.error(), {}, {}});
   }
-
+  (void)invalidateNotificationStyles();
   return {};
 }
 
@@ -3259,7 +3270,7 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
 
 bool ManagedScene::usesPreparedLayout() const noexcept {
   return usesGeometrySnapshot() || !dataStates_.empty() || static_cast<bool>(dialogs_) ||
-         std::ranges::any_of(entries_, [](const auto &entry) {
+         static_cast<bool>(notifications_) || std::ranges::any_of(entries_, [](const auto &entry) {
            return static_cast<bool>(entry->viewPrepare);
          });
 }
@@ -3292,6 +3303,10 @@ std::expected<void, TreeError> ManagedScene::prepareViews(Application &app, cons
   if (!dialogs) {
     remember(error(ManagedPhase::PREPARE, root_, dialogs.error()));
     return dialogs;
+  }
+  auto notifications = prepareNotifications();
+  if (!notifications) {
+    return notifications;
   }
 
   for (const auto &entry : entries_) {
@@ -3445,6 +3460,7 @@ std::expected<void, ManagedError> ManagedScene::close() {
   }
   dataStateOwner_.reset();
   retireDialogs();
+  retireNotifications();
 
   for (const auto &record : liveText_) {
     record->origin->closed = true;

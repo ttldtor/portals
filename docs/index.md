@@ -119,7 +119,9 @@ For an installed SDK, replace those same lines with
 - Input: shortcut strings, alternatives, sequences and explicit phase selectors.
   Native delivery depends on the backend; Kitty negotiation and standalone modifier keys are not implemented in this version.
 - Errors: live `onError` reactions and a separate final report after cleanup;
-  no built-in diagnostic indicator or panel is provided yet.
+  applications can present explicit [notifications](notifications.md), including
+  persistent messages and optional indicators. Automatic error popups and a
+  diagnostic journal are application policy.
 
 These APIs are evolving. Read [limitations](limitations.md) for qualified
 platforms and the exact runtime boundaries.
@@ -127,6 +129,7 @@ platforms and the exact runtime boundaries.
 ## Continue reading
 
 - [Dialogs](dialogs.md): open retained modal panels and anchored nonmodal layers.
+- [Notifications](notifications.md): show bounded messages and actions while editing continues.
 - [First application](first-application.md): build a note form in four steps.
 - [Task guides](guides.md): choose a guide for styles, events, data or other application work.
 - [Documentation contents](reference-map.md): find a topic or an API contract.

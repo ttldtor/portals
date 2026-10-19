@@ -28,6 +28,7 @@
 | Расширение | [Вложенная scroll-форма](../examples/guide_nested_scroll.cpp), `portals_docs_nested_scroll` | Редактируемые поля, CheckBox с внутренним состоянием и вложенные полосы на рамках; [контракты](scroll-controls.md#nested-scroll-areas-ru). Собирается при включённых тестах. |
 | Расширение | [Modal-настройки](../examples/guide_dialog.cpp), `portals_docs_dialog` | Retained-диалог с редактированием, короткими open/dismiss и штатным cleanup; [контракты](dialogs.md). Собирается с тестами. |
 | Основы | [Modal-выборы](../examples/guide_message_box.cpp), `portals_docs_message_box` | Три готовых набора кнопок, безопасный выбор CANCEL по умолчанию и отложенный callback с `MessageResult`; [контракты](dialogs.md). Собирается с тестами. |
+| Основы | [Уведомления](notifications.md), [полный исходник](../examples/guide_toast.cpp), `portals_docs_toast` | Очередь сообщений приложения, явные действия и время показа без автоматической смены фокуса; без CLI. Собирается при включённых тестах. |
 | Эксперимент | [Стили времени компиляции](compile-time-styles.md) | Необязательные дескрипторы и проверка PSS; для первой формы не требуются. |
 
 F10 завершает интерактивные примеры. Галерея, dashboard и собственный виджет

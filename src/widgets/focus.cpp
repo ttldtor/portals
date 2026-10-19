@@ -282,7 +282,8 @@ std::expected<ActionBinding, TreeError> EventRouter::focusScope(Node<Widget> roo
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
-  if (state_->registrations.size() + state_->scopes.size() + !state_->dialogs.expired() >=
+  if (state_->registrations.size() + state_->scopes.size() + !state_->dialogs.expired() +
+        !state_->notifications.expired() >=
       state_->options.max_registrations) {
     return std::unexpected(TreeError::NODE_LIMIT);
   }
@@ -947,7 +948,9 @@ std::expected<Node<Widget>, TreeError> EventRouter::hitTest(CellPoint point) {
       // and later sibling subtrees precedence over earlier ones, matching painting order.
       const auto host = state_->dialogs.lock();
       auto layer = dialogLayer(node);
-      if ((!host || host->root != node) &&
+      const auto notifications = state_->notifications.lock();
+      if ((!notifications || notifications->retired || !notifications->ready || notifications->root != node) &&
+          (!host || host->root != node) &&
           (!layer || layer->root != node || layer->options.mode == DialogMode::MODAL)) {
         hit = node;
       }

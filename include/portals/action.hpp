@@ -403,6 +403,7 @@ private:
   std::shared_ptr<detail::DialogRecord> dialogLayer(Node<Widget> node) const;
   Node<Widget> modalRoot(Node<Widget> exclude = {}) const;
   bool dialogEligible(Node<Widget> node, Node<Widget> reveal = {}, Node<Widget> exclude = {}) const;
+  bool notificationHit(Node<Widget> node) const;
   std::expected<void, TreeError> stageFocus(Node<Widget> node, detail::FocusChange &change);
   void publishFocus(detail::FocusChange &change) noexcept;
   std::expected<void, TreeError> notifyFocus(const detail::FocusChange &change);

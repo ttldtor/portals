@@ -212,6 +212,37 @@ struct Access {
 
   /// @endcond
 
+  /// @cond INTERNAL
+  static std::expected<void, ManagedError> notifications(ManagedScene &scene, Node<Widget> wrapper, Node<Widget> body,
+                                                         const NotificationCenter &center,
+                                                         const NotificationOptions &options, MountContext &context) {
+    auto reserved = NotificationAccess::reserve(center);
+    if (!reserved) {
+      return reserved;
+    }
+    try {
+      context.release.emplace_back([center] {
+        NotificationAccess::release(center);
+      });
+    } catch (...) {
+      NotificationAccess::release(center);
+      throw;
+    }
+    auto made = scene.makeNotifications(wrapper, body, options, context.nodes);
+    if (!made) {
+      return std::unexpected(made.error());
+    }
+    context.finalize.emplace_back([&scene, record = *made] {
+      return scene.finalizeNotifications(record);
+    });
+    context.publish.emplace_back([center, record = *made] {
+      NotificationAccess::publish(center, record);
+    });
+    return {};
+  }
+
+  /// @endcond
+
   /** @brief Mount a root or child inside the same transaction.
    * @tparam T Public Widget subtype constructed by the
    * recipe.
@@ -3036,6 +3067,35 @@ template <class... Args>
   requires requires(Args &&...args) { column(std::forward<Args>(args)...); }
 auto vbox(Args &&...args) {
   return column(std::forward<Args>(args)...);
+}
+
+/** @brief Compose an application-owned nonmodal notification plane inside ordinary body content.
+ * @tparam Body Consuming body description; only this body contributes intrinsic size.
+ * @param center Copyable UI-affine observer published only after the complete mount succeeds.
+ * @param body Ordinary retained content; dialogs belong outside this composition in overlayHost.
+ * @param options Owning immutable host budgets and explicit text resolver.
+ * @return Consuming overlay recipe with one private zero-intrinsic notification layer.
+ */
+template <detail::DescriptionInput Body>
+Description<Overlay> notifications(NotificationCenter center, Body &&body, NotificationOptions options = {}) {
+  return detail::Access::cold<Overlay>(
+    [center = std::move(center), body = std::forward<Body>(body),
+     options](ManagedScene &scene, Node<Widget> parent,
+              detail::MountContext &context) mutable -> std::expected<Node<Overlay>, ManagedError> {
+      auto wrapper = scene.emplace<Overlay>(parent);
+      if (!wrapper) {
+        return std::unexpected(wrapper.error());
+      }
+      if (context.root == Node<Widget>{}) {
+        context.root = *wrapper;
+      }
+      auto content = detail::Access::mount(std::move(body), scene, *wrapper, context);
+      if (!content) {
+        return std::unexpected(content.error());
+      }
+      auto bound = detail::Access::notifications(scene, *wrapper, *content, center, options, context);
+      return bound ? wrapper : std::unexpected(bound.error());
+    });
 }
 
 /** @brief Compose a retained host with one ordinary body and initially closed dialog layers.

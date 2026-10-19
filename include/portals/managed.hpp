@@ -17,8 +17,10 @@
 #include <portals/style.hpp>
 #include <portals/style_source.hpp>
 #include <portals/text_transform.hpp>
+#include <portals/toast.hpp>
 #include <portals/virtual_preparation.hpp>
 
+#include <array>
 #include <ranges>
 
 namespace portals {
@@ -55,6 +57,10 @@ struct DialogHostRecord;
 struct DialogRecord;
 struct MessageRecord;
 struct MessageRequest;
+struct NotificationRecord;
+struct ToastCandidate;
+struct ToastTimerMarker;
+struct ToastPayload;
 template <class T> inline constexpr bool IS_MANAGED_TREE_RESULT = false;
 template <class Value> inline constexpr bool IS_MANAGED_TREE_RESULT<std::expected<Value, TreeError>> = true;
 
@@ -1487,6 +1493,8 @@ private:
   friend struct ui::detail::NamedAccess;
   friend struct ui::detail::LayoutAccess;
   friend struct ui::detail::MessageAccess;
+  friend struct ui::detail::NotificationAccess;
+  friend class ui::NotificationCenter;
   friend struct detail::ManagedScrollTestAccess;
 
   struct Entry;
@@ -1500,6 +1508,32 @@ private:
                        const std::expected<void, ManagedError> &result, bool opening, bool committed);
   void deliverMessage(const std::shared_ptr<detail::MessageRequest> &request);
   std::shared_ptr<detail::DialogRecord> findDialog(Node<Widget> node) const;
+  std::expected<std::shared_ptr<detail::NotificationRecord>, ManagedError>
+  makeNotifications(Node<Widget> wrapper, Node<Widget> body, const NotificationOptions &options,
+                    std::vector<Node<Widget>> &created);
+  std::expected<void, ManagedError> finalizeNotifications(const std::shared_ptr<detail::NotificationRecord> &record);
+  std::expected<ToastPostReceipt, ManagedError> postToast(const std::shared_ptr<detail::NotificationRecord> &record,
+                                                          const ui::ToastMessage &message);
+  std::expected<void, ManagedError> toastCommand(const std::shared_ptr<detail::NotificationRecord> &record,
+                                                 detail::ToastCommand command, std::optional<ToastId> id, bool flag);
+  std::expected<std::shared_ptr<const NotificationSnapshot>, ManagedError>
+  notificationSnapshot(const std::shared_ptr<detail::NotificationRecord> &record) const;
+  std::expected<void, ManagedError> stageNotifications(const std::shared_ptr<detail::NotificationRecord> &record,
+                                                       detail::ToastCandidate &candidate, ManagedPhase phase,
+                                                       bool firstPresentation = false);
+  std::expected<void, ManagedError> commitNotifications(const std::shared_ptr<detail::NotificationRecord> &record,
+                                                        detail::ToastCandidate &candidate, ManagedPhase phase);
+  std::expected<void, ManagedError> activateToast(const std::shared_ptr<detail::NotificationRecord> &record,
+                                                  ToastId id);
+  std::expected<void, TreeError> prepareNotifications(bool firstPresentation = false);
+  bool notificationEligible(const std::shared_ptr<detail::NotificationRecord> &record, bool geometry) const;
+  void notificationTimer(const std::weak_ptr<detail::NotificationRecord> &record,
+                         const std::shared_ptr<detail::ToastTimerMarker> &marker);
+  void retireNotifications() noexcept;
+  std::array<CellStyle, 5> notificationStyles(const std::shared_ptr<detail::NotificationRecord> &record,
+                                              const detail::ToastPayload &payload, NodeId node,
+                                              bool alert) const noexcept;
+  Invalidation invalidateNotificationStyles() noexcept;
   std::expected<void, TreeError> changeDialog(Node<Widget> node, bool open, DialogDismissReason reason);
   std::expected<void, ManagedError> dialogCommand(Node<Widget> node, bool opening, DialogDismissReason reason);
   std::expected<void, TreeError> prepareDialogs();
@@ -1824,6 +1858,7 @@ private:
   std::vector<std::shared_ptr<detail::MessageRequest>> messageRequests_ =
     std::vector<std::shared_ptr<detail::MessageRequest>>(0);
   bool collectingMessages_{};
+  std::shared_ptr<detail::NotificationRecord> notifications_;
   bool dialogOperation_{};
   bool collectingDialogs_{};
   std::uint64_t layoutRevision_{};
