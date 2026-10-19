@@ -7,10 +7,10 @@ Layers keep application and user declarations installed while a theme is
 replaced or its live parameters change. They opt into the existing retained
 [style engine](styles.md); they do not introduce another resolver or runtime.
 
-## Install independent overrides
+## Independent overrides
 
-Construct owning `StyleSheet` values with typed rules, `parsePss`, or
-[constant descriptions](compile-time-styles.md). Then use the facade:
+Owning `StyleSheet` values can be constructed from typed rules, `parsePss`, or
+[constant descriptions](compile-time-styles.md). The facade installs them like this:
 
 ```cpp
 scene.styleLayers()
@@ -29,21 +29,22 @@ auto styled = std::move(scene)
 
 These fragments assume an existing idle scene and owning sheets. Applying these configuration stages to a named scene preserves that scene
 and returns `Scene&`. The shown `std::move(scene)` chain transfers ownership
-to `styled`; complete that transfer before callbacks capture the facade by address. Before preparation,
+to `styled`; that transfer must finish before callbacks capture the facade by
+address. Before preparation,
 the stages retain their configuration in registration order. Afterwards they use
 the existing managed mutation boundary. Failures enter the scene collector and
 are observed through `checked`, typed `run`, or the `runApp` reporting policy.
 The scene owns the installed layers; the client needs no tokens just to keep
 them installed. Argument and stage construction can throw before checked entry.
 
-Layer configuration is explicit: call `styleLayers` before `styleLayer`.
+Layer configuration is explicit: `styleLayers` must precede `styleLayer`.
 Repeating the same options is a no-op; changing budgets by a repeated opt-in is
-rejected. This API accepts owning sheets, not a new string grammar. Runtime PSS
-remains available through `parsePss`; compile-time PSS literals are already
-available through [compile-time PSS](compile-time-pss.md). Materialize a sheet
-for this API or use the separate source-based `ui::style` frontend.
+rejected. This API accepts owning sheets. Runtime PSS is available through
+`parsePss`; compile-time PSS literals are covered in
+[compile-time PSS](compile-time-pss.md). A materialized sheet is required here;
+source-based styling is also available through `ui::style`.
 
-## Resolve each property
+## How each property is resolved
 
 ```mermaid
 flowchart LR
@@ -67,10 +68,10 @@ removal does not remove controls. Adding through `addLayer` or `styleLayer` reje
 The source-based `ui::style(..., {.name = ...})` frontend instead explicitly
 upserts by tier/name; see the [styling guide](styling-guide.md).
 
-## Change and remove layers explicitly
+## Replacing and removing layers
 
-Use `ManagedScene::addLayer` to obtain a `StyleLayerHandle` when later replacement
-or removal is needed. `replaceLayer`, `removeLayer`, and `updateLayers` return
+`ManagedScene::addLayer` returns a `StyleLayerHandle` for later replacement
+or removal. `replaceLayer`, `removeLayer`, and `updateLayers` return
 typed errors and the effective invalidation. A batch replaces/removes existing
 handles atomically; adding multiple new layers in that same batch is not supported.
 Duplicate handles reject the entire batch. Borrowed inputs are copied on success.
@@ -89,8 +90,8 @@ Its `get`, `set`, and `apply`, including equal updates, report a typed stale
 error instead of silently restoring its old theme. Failed ownership changes
 leave the previous controller usable.
 
-Enabling layers revokes controllers attached in legacy mode. Attach a new
-controller after the opt-in. Until the opt-in, the existing single-sheet behavior
+Enabling layers revokes controllers attached in legacy mode. A new controller
+must be attached after the opt-in. Until layers are enabled, the existing single-sheet behavior
 is preserved. Low-level `StyleEngine::replace` and `replacePss` remain whole-sheet
 replacement: successful replacement exits layered mode and invalidates layer
 identities; failed replacement changes neither mode nor identities.
@@ -144,15 +145,16 @@ The accepted direction loads themes through the style path into existing
 embedded resources are **TBD — M5/U65**; expanded parameters/expressions are
 **TBD — M5/U65/U128**. This does not add a resolver or accumulate irreversible
 computed-style patches. Existing `ui::style(ui::file(...))` defaults to
-`APPLICATION`, not the future theme-loading operation. See [themes](themes-guide.md).
+`APPLICATION`, not the future theme-loading operation. The [themes guide](themes-guide.md)
+describes the current behavior.
 
 <details>
-<summary>Set style-layer limits</summary>
+<summary>Style-layer limits</summary>
 
-Pass `StyleLayerOptions` when enabling layers for the first time. Defaults
+`StyleLayerOptions` is passed when layers are enabled for the first time. Defaults
 are 16 layers, 1024 rules, 6144 declarations and 1 MiB of logically counted
 payload. The two permanent base layers count toward the layer limit.
-Use at least two layer slots and values greater than zero for the other limits.
+At least two layer slots are required; the other limits must be greater than zero.
 
 The example doubles these defaults. `maxOwnedBytes` counts the logical payload
 of installed layers; it is not a limit on the application's total memory.

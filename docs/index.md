@@ -9,19 +9,20 @@ contains the complete topic list and API reading paths.
 
 These Markdown guides describe the current source branch. The [published HTML help](https://ttldtor.github.io/portals/) follows the latest stable release; PR checks also provide an HTML preview artifact.
 
-Follow the [first application](first-application.md): a quick-note form in four steps.
+The [first application tutorial](first-application.md) develops a quick-note form
+in four steps, from a runnable editor to a styled form with save and clear actions.
 
-## Start with the declarative API
+## The declarative API
 
 `<portals/ui.hpp>` provides scenes, recipes and event handlers.
 `<portals/ui_style.hpp>` adds the style operations used in this example.
 
-Declare the control tree, then attach style and event handlers with
-[UI stages](glossary.md#glossary-ui-stage), the objects describing operations after each `|`.
-In the example, `ui::vbox(...)` creates a [recipe](glossary.md#glossary-recipe),
-a description of the controls to construct. `ui::scene(...)` stores it in a
+The example describes a control tree and attaches style and event handlers with
+[UI stages](glossary.md#glossary-ui-stage), which represent operations after each `|`.
+Here, `ui::vbox(...)` creates a [recipe](glossary.md#glossary-recipe): a description
+of the controls to construct. `ui::scene(...)` stores that recipe in a
 [scene](glossary.md#glossary-scene), which manages preparation and running.
-The button appends text to the editor; F10 requests an orderly exit.
+The button appends text to the editor, and F10 requests an orderly exit.
 
 ```cpp
 #include <portals/ui.hpp>
@@ -56,10 +57,11 @@ An explicit `SceneRef` remains available when an action must target a named scen
 [Declarative composition](declarative-ui.md) explains callbacks, setup errors
 and the lower-level typed `run()` result.
 
-## Build your application
+## Connecting the library to an application
 
-Create a directory named `my-app`. Save the complete example above as
-`main.cpp` and the following configuration as `CMakeLists.txt` in that directory:
+For a local application, the complete example above can be saved as `main.cpp`
+in a directory named `my-app`; the following configuration belongs in
+`CMakeLists.txt` in the same directory:
 
 ```cmake
 cmake_minimum_required(VERSION 3.24)
@@ -76,8 +78,8 @@ add_executable(my_app main.cpp)
 target_link_libraries(my_app PRIVATE portals::core)
 ```
 
-Run these commands from `my-app`. CMake downloads the selected Portals revision
-during configuration and builds your `my_app` executable:
+From `my-app`, these commands configure the build, download the selected Portals
+revision and build the `my_app` executable:
 
 ```powershell
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -85,28 +87,29 @@ cmake --build build --target my_app
 ./build/my_app
 ```
 
-On Windows, use an x64 Developer PowerShell for Visual Studio. On Linux,
-use a compatible C++ compiler and standard library. You need Git, CMake 3.24+,
+On Windows, the build environment is an x64 Developer PowerShell for Visual Studio.
+On Linux, a compatible C++ compiler and standard library are required. The build
+uses Git, CMake 3.24+,
 Ninja and a toolchain supporting C99 and C++23, including the C++ library
 headers `<expected>` and `<format>`.
 
-Run `my_app` in a terminal: click **Add Hello** to append text, and press F10
-to exit. On Windows the executable is `build/my_app.exe`; on Linux it is
-`build/my_app`. The commands above use the Ninja single-configuration generator.
+When `my_app` runs in a terminal, **Add Hello** appends text and F10 exits.
+On Windows the executable is `build/my_app.exe`; on Linux it is `build/my_app`.
+The commands above use the Ninja single-configuration generator.
 
-`GIT_TAG` fixes the source revision for this example. Change it when choosing
-a newer Portals version. FetchContent integration is described in the
+`GIT_TAG` fixes the source revision for this example. When choosing a newer
+Portals version, this value can be updated. FetchContent integration is described in the
 [CMake documentation](https://cmake.org/cmake/help/latest/module/FetchContent.html).
 
 ### Use local sources or an installed SDK
 
-If you already have Portals sources in a `portals` subdirectory of your project,
-replace `include(FetchContent)` and both `FetchContent_*` calls with
-`add_subdirectory(portals)`. No download is needed.
+When Portals sources are already in a `portals` subdirectory of the project,
+`include(FetchContent)` and both `FetchContent_*` calls can be replaced with
+`add_subdirectory(portals)`. This uses the local sources without a download.
 
-For an installed SDK, replace those same lines with
-`find_package(Portals CONFIG REQUIRED)` and pass its installation prefix in
-`CMAKE_PREFIX_PATH` when configuring. All variants use
+For an installed SDK, the same lines can be replaced with
+`find_package(Portals CONFIG REQUIRED)`; its installation prefix goes in
+`CMAKE_PREFIX_PATH` during configuration. Every option uses
 `target_link_libraries(my_app PRIVATE portals::core)`. See
 [package setup](package.md) for installation and toolchain compatibility.
 
@@ -123,18 +126,18 @@ For an installed SDK, replace those same lines with
   persistent messages and optional indicators. Automatic error popups and a
   diagnostic journal are application policy.
 
-These APIs are evolving. Read [limitations](limitations.md) for qualified
-platforms and the exact runtime boundaries.
+These APIs are evolving. [Limitations](limitations.md) lists qualified platforms
+and the exact runtime boundaries.
 
 ## Continue reading
 
 - [Dialogs](dialogs.md): open retained modal panels and anchored nonmodal layers.
 - [Notifications](notifications.md): show bounded messages and actions while editing continues.
 - [First application](first-application.md): build a note form in four steps.
-- [Task guides](guides.md): choose a guide for styles, events, data or other application work.
-- [Documentation contents](reference-map.md): find a topic or an API contract.
-- [Glossary](glossary.md): look up scenes, recipes, UI stages and other terms.
-- [Diagnostics](diagnostics.md): find a check and an action for a symptom.
+- [Task guides](guides.md): guides for styles, events, data and other application work.
+- [Documentation contents](reference-map.md): topics and API contracts.
+- [Glossary](glossary.md): definitions of scenes, recipes, UI stages and other terms.
+- [Diagnostics](diagnostics.md): checks and actions for known symptoms.
 
 [Runnable examples](examples.md) link to complete source programs.
 [Release notes](../ReleaseNotes.md) record changes by version.

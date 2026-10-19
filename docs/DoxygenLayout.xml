@@ -1,91 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <doxygenlayout version="2.0">
-  <navindex>
+  <navindex language="en">
     <tab type="mainpage" visible="yes" title="Documentation home" />
-    <tab type="usergroup" title="Language / Язык" url="[none]">
-      <tab type="user" title="English" url="@ref docs/index.md" />
-      <tab type="usergroup" title="Русская документация">
-        <tab type="usergroup" title="Начало работы">
-          <tab type="user" title="Краткое руководство" url="@ref docs/ru/index.md" />
-          <tab type="user" title="Первое приложение" url="@ref docs/ru/first-application.md" />
-          <tab type="user" title="Руководства по задачам" url="@ref docs/ru/guides.md" />
-          <tab type="user" title="Содержание документации" url="@ref docs/ru/reference-map.md" />
-          <tab type="user" title="Глоссарий" url="@ref docs/ru/glossary.md" />
-          <tab type="user" title="Зависимости и лицензии" url="@ref docs/ru/dependencies.md" />
-          <tab type="user" title="Сборка Portals и примеров" url="@ref docs/ru/getting-started.md" />
-          <tab type="usergroup" title="Примеры" url="@ref docs/ru/examples.md">
-            <tab type="user" title="Пример редактора" url="@ref docs/ru/editor-history-demo.md" />
-            <tab type="user" title="Текст и колонки" url="@ref docs/ru/compact-examples.md" />
-        <tab type="user" title="WASM Gallery и Level" url="@ref docs/ru/wasm-gallery.md" />
-            <tab type="user" title="Рамки, индикаторы и размеры" url="@ref docs/ru/compact-primitives.md" />
-          </tab>
-          <tab type="user" title="Подключение пакета" url="@ref docs/ru/package.md" />
-        </tab>
-        <tab type="usergroup" title="API приложения">
-          <tab type="user" title="Декларативный API" url="@ref docs/ru/declarative-ui.md" />
-          <tab type="user" title="Справка по сценам" url="@ref docs/ru/declarative-reference.md" />
-          <tab type="user" title="Загрузка сцен" url="@ref docs/ru/scene-loading-guide.md" />
-          <tab type="user" title="Командная строка" url="@ref docs/ru/cli.md" />
-          <tab type="user" title="Запуск приложения" url="@ref docs/ru/application.md" />
-          <tab type="user" title="Привязки и события" url="@ref docs/ru/bindings-guide.md" />
-          <tab type="user" title="Свойства" url="@ref docs/ru/property.md" />
-          <tab type="user" title="Ссылки на текст" url="@ref docs/ru/text-property.md" />
-          <tab type="user" title="Ввод" url="@ref docs/ru/input.md" />
-          <tab type="user" title="Диагностика" url="@ref docs/ru/diagnostics.md" />
-          <tab type="user" title="Управляемые контролы" url="@ref docs/ru/managed-controls.md" />
-          <tab type="user" title="Диалоги" url="@ref docs/ru/dialogs.md" />
-          <tab type="user" title="Уведомления" url="@ref docs/ru/notifications.md" />
-        </tab>
-        <tab type="usergroup" title="Стили и темы">
-          <tab type="user" title="Гайд по стилям" url="@ref docs/ru/styling-guide.md" />
-          <tab type="user" title="Гайд по темам" url="@ref docs/ru/themes-guide.md" />
-          <tab type="user" title="Синтаксис PSS" url="@ref docs/ru/styles.md" />
-          <tab type="user" title="Слои стилей" url="@ref docs/ru/style-layers.md" />
-          <tab type="user" title="Стили времени компиляции" url="@ref docs/ru/compile-time-styles.md" />
-          <tab type="user" title="PSS времени компиляции" url="@ref docs/ru/compile-time-pss.md" />
-        </tab>
-        <tab type="usergroup" title="Контролы и данные">
-          <tab type="user" title="Основные контролы" url="@ref docs/ru/controls.md" />
-          <tab type="user" title="LineEdit" url="@ref docs/ru/line-edit.md" />
-          <tab type="user" title="История текста" url="@ref docs/ru/text-history.md" />
-          <tab type="user" title="Undo и Redo" url="@ref docs/ru/editor-history.md" />
-          <tab type="user" title="Компоновка" url="@ref docs/ru/layout.md" />
-          <tab type="user" title="Сетка и наложение" url="@ref docs/ru/grid.md" />
-          <tab type="user" title="Фокус" url="@ref docs/ru/focus.md" />
-          <tab type="user" title="Модели" url="@ref docs/ru/model.md" />
-          <tab type="user" title="Запросы" url="@ref docs/ru/model-queries.md" />
-          <tab type="user" title="Подготовка представлений" url="@ref docs/ru/virtual-preparation.md" />
-          <tab type="user" title="Виртуальные списки" url="@ref docs/ru/virtual-list.md" />
-          <tab type="user" title="Виртуальные таблицы" url="@ref docs/ru/virtual-table.md" />
-          <tab type="user" title="Прокрутка" url="@ref docs/ru/scroll.md" />
-          <tab type="user" title="Графики" url="@ref docs/ru/chart.md" />
-          <tab type="user" title="Корутины" url="@ref docs/ru/ui-coroutines.md" />
-        </tab>
-        <tab type="usergroup" title="Устройство библиотеки">
-          <tab type="user" title="Архитектура" url="@ref docs/ru/architecture.md" />
-          <tab type="user" title="Геометрия" url="@ref docs/ru/geometry.md" />
-          <tab type="user" title="Текст и Unicode" url="@ref docs/ru/text.md" />
-          <tab type="user" title="Буфер ячеек" url="@ref docs/ru/cell-buffer.md" />
-          <tab type="user" title="Отрисовка" url="@ref docs/ru/render.md" />
-          <tab type="user" title="Разница кадров" url="@ref docs/ru/diff.md" />
-          <tab type="user" title="Планировщик" url="@ref docs/ru/scheduler.md" />
-          <tab type="user" title="Дерево виджетов" url="@ref docs/ru/widget-tree.md" />
-          <tab type="user" title="Терминал" url="@ref docs/ru/terminal.md" />
-          <tab type="user" title="Проверка терминала" url="@ref docs/ru/terminal-probe.md" />
-          <tab type="user" title="Сцены времени компиляции" url="@ref docs/ru/compile-time-scenes.md" />
-        </tab>
-        <tab type="usergroup" title="Статус и планы">
-          <tab type="user" title="Разработка Portals" url="@ref docs/ru/development.md" />
-          <tab type="usergroup" title="Инструменты разработчика" url="@ref docs/ru/developer-tools.md">
-            <tab type="user" title="Сборка, CI и документация" url="@ref docs/ru/developer-tools-build.md" />
-            <tab type="user" title="Измерения и терминалы" url="@ref docs/ru/developer-tools-measure.md" />
-            <tab type="user" title="Упаковка и релизы" url="@ref docs/ru/developer-tools-release.md" />
-          </tab>
-          <tab type="user" title="Ограничения" url="@ref docs/ru/limitations.md" />
-          <tab type="user" title="Возможности и майлстоуны" url="@ref docs/ru/planned-features.md" />
-        </tab>
-      </tab>
-    </tab>
     <tab type="usergroup" title="1. Start here">
       <tab type="user" title="First application" url="@ref docs/first-application.md" />
       <tab type="user" title="Task guides" url="@ref docs/guides.md" />
@@ -188,6 +104,96 @@
       <tab type="user" title="API performance experiment" url="@ref docs/managed-performance.md" />
       <tab type="user" title="Design scenarios (experimental)" url="@ref docs/api-design.md" />
     </tab>
+    <tab type="pages" visible="no" />
+    <tab type="topics" visible="no" />
+    <tab type="modules" visible="no" />
+    <tab type="interfaces" visible="no" />
+    <tab type="structs" visible="no" />
+    <tab type="exceptions" visible="no" />
+    <tab type="examples" visible="no" />
+  </navindex>
+  <navindex language="ru">
+    <tab type="mainpage" visible="yes" title="Начало документации" />
+    <tab type="usergroup" title="Начало работы">
+      <tab type="user" title="Краткое руководство" url="@ref docs/ru/index.md" />
+      <tab type="user" title="Первое приложение" url="@ref docs/ru/first-application.md" />
+      <tab type="user" title="Руководства по задачам" url="@ref docs/ru/guides.md" />
+      <tab type="user" title="Содержание документации" url="@ref docs/ru/reference-map.md" />
+      <tab type="user" title="Глоссарий" url="@ref docs/ru/glossary.md" />
+      <tab type="user" title="Зависимости и лицензии" url="@ref docs/ru/dependencies.md" />
+      <tab type="user" title="Сборка Portals и примеров" url="@ref docs/ru/getting-started.md" />
+      <tab type="usergroup" title="Примеры" url="@ref docs/ru/examples.md">
+        <tab type="user" title="Пример редактора" url="@ref docs/ru/editor-history-demo.md" />
+        <tab type="user" title="Текст и колонки" url="@ref docs/ru/compact-examples.md" />
+        <tab type="user" title="WASM Gallery и Level" url="@ref docs/ru/wasm-gallery.md" />
+        <tab type="user" title="Рамки, индикаторы и размеры" url="@ref docs/ru/compact-primitives.md" />
+      </tab>
+      <tab type="user" title="Подключение пакета" url="@ref docs/ru/package.md" />
+    </tab>
+    <tab type="usergroup" title="API приложения">
+      <tab type="user" title="Декларативный API" url="@ref docs/ru/declarative-ui.md" />
+      <tab type="user" title="Справка по сценам" url="@ref docs/ru/declarative-reference.md" />
+      <tab type="user" title="Загрузка сцен" url="@ref docs/ru/scene-loading-guide.md" />
+      <tab type="user" title="Командная строка" url="@ref docs/ru/cli.md" />
+      <tab type="user" title="Запуск приложения" url="@ref docs/ru/application.md" />
+      <tab type="user" title="Привязки и события" url="@ref docs/ru/bindings-guide.md" />
+      <tab type="user" title="Свойства" url="@ref docs/ru/property.md" />
+      <tab type="user" title="Ссылки на текст" url="@ref docs/ru/text-property.md" />
+      <tab type="user" title="Ввод" url="@ref docs/ru/input.md" />
+      <tab type="user" title="Диагностика" url="@ref docs/ru/diagnostics.md" />
+      <tab type="user" title="Управляемые контролы" url="@ref docs/ru/managed-controls.md" />
+      <tab type="user" title="Диалоги" url="@ref docs/ru/dialogs.md" />
+      <tab type="user" title="Уведомления" url="@ref docs/ru/notifications.md" />
+    </tab>
+    <tab type="usergroup" title="Стили и темы">
+      <tab type="user" title="Гайд по стилям" url="@ref docs/ru/styling-guide.md" />
+      <tab type="user" title="Гайд по темам" url="@ref docs/ru/themes-guide.md" />
+      <tab type="user" title="Синтаксис PSS" url="@ref docs/ru/styles.md" />
+      <tab type="user" title="Слои стилей" url="@ref docs/ru/style-layers.md" />
+      <tab type="user" title="Стили времени компиляции" url="@ref docs/ru/compile-time-styles.md" />
+      <tab type="user" title="PSS времени компиляции" url="@ref docs/ru/compile-time-pss.md" />
+    </tab>
+    <tab type="usergroup" title="Контролы и данные">
+      <tab type="user" title="Основные контролы" url="@ref docs/ru/controls.md" />
+      <tab type="user" title="LineEdit" url="@ref docs/ru/line-edit.md" />
+      <tab type="user" title="История текста" url="@ref docs/ru/text-history.md" />
+      <tab type="user" title="Undo и Redo" url="@ref docs/ru/editor-history.md" />
+      <tab type="user" title="Компоновка" url="@ref docs/ru/layout.md" />
+      <tab type="user" title="Сетка и наложение" url="@ref docs/ru/grid.md" />
+      <tab type="user" title="Фокус" url="@ref docs/ru/focus.md" />
+      <tab type="user" title="Модели" url="@ref docs/ru/model.md" />
+      <tab type="user" title="Запросы" url="@ref docs/ru/model-queries.md" />
+      <tab type="user" title="Подготовка представлений" url="@ref docs/ru/virtual-preparation.md" />
+      <tab type="user" title="Виртуальные списки" url="@ref docs/ru/virtual-list.md" />
+      <tab type="user" title="Виртуальные таблицы" url="@ref docs/ru/virtual-table.md" />
+      <tab type="user" title="Прокрутка" url="@ref docs/ru/scroll.md" />
+      <tab type="user" title="Графики" url="@ref docs/ru/chart.md" />
+      <tab type="user" title="Корутины" url="@ref docs/ru/ui-coroutines.md" />
+    </tab>
+    <tab type="usergroup" title="Устройство библиотеки">
+      <tab type="user" title="Архитектура" url="@ref docs/ru/architecture.md" />
+      <tab type="user" title="Геометрия" url="@ref docs/ru/geometry.md" />
+      <tab type="user" title="Текст и Unicode" url="@ref docs/ru/text.md" />
+      <tab type="user" title="Буфер ячеек" url="@ref docs/ru/cell-buffer.md" />
+      <tab type="user" title="Отрисовка" url="@ref docs/ru/render.md" />
+      <tab type="user" title="Разница кадров" url="@ref docs/ru/diff.md" />
+      <tab type="user" title="Планировщик" url="@ref docs/ru/scheduler.md" />
+      <tab type="user" title="Дерево виджетов" url="@ref docs/ru/widget-tree.md" />
+      <tab type="user" title="Терминал" url="@ref docs/ru/terminal.md" />
+      <tab type="user" title="Проверка терминала" url="@ref docs/ru/terminal-probe.md" />
+      <tab type="user" title="Сцены времени компиляции" url="@ref docs/ru/compile-time-scenes.md" />
+    </tab>
+    <tab type="usergroup" title="Статус и планы">
+      <tab type="user" title="Разработка Portals" url="@ref docs/ru/development.md" />
+      <tab type="usergroup" title="Инструменты разработчика" url="@ref docs/ru/developer-tools.md">
+        <tab type="user" title="Сборка, CI и документация" url="@ref docs/ru/developer-tools-build.md" />
+        <tab type="user" title="Измерения и терминалы" url="@ref docs/ru/developer-tools-measure.md" />
+        <tab type="user" title="Упаковка и релизы" url="@ref docs/ru/developer-tools-release.md" />
+      </tab>
+      <tab type="user" title="Ограничения" url="@ref docs/ru/limitations.md" />
+      <tab type="user" title="Возможности и майлстоуны" url="@ref docs/ru/planned-features.md" />
+    </tab>
+    <tab type="user" title="C++ API — English" url="../annotated.html" />
     <tab type="pages" visible="no" />
     <tab type="topics" visible="no" />
     <tab type="modules" visible="no" />

@@ -16,6 +16,27 @@ from finalize_html import GuideParser, color_cmake, complete_navigation, complet
 
 
 class GuideTests(unittest.TestCase):
+    def test_existing_parent_api_link_is_not_flattened_into_translated_site(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            localized = root / "ru"
+            localized.mkdir()
+            (root / "index.html").write_text("English")
+            (localized / "index.html").write_text("Russian")
+            link = '<a href="../index.html">English</a>'
+            self.assertEqual(portable_links(link, localized, root, {}), link)
+
+    def test_language_build_defers_markdown_main_page_to_site_mapping(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'docs/ru').mkdir(parents=True)
+            (root / 'docs/index.md').write_text('# English')
+            localized = root / 'html/ru'
+            localized.mkdir(parents=True)
+            (localized / 'index.html').write_text('Russian')
+            link = '<a href="../index.md">English</a>'
+            self.assertEqual(portable_links(link, localized, root, {}, True, True), link)
+
     def test_missing_config_search_fallback_is_guarded_and_idempotent(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -4,14 +4,15 @@
 
 `ui::scene(source)` copies UTF-8 resource text into a lazy
 [scene](glossary.md#glossary-scene), `ui::Scene`. Parsing and construction happen at
-`prepareChecked()` or preparation inside `run`/`runApp`, before a terminal opens. Include
-`<portals/ui.hpp>` or `<portals/ui_scene_resource.hpp>` and link `portals::core`
-(C++23). The loaded controls use the same named references, event handlers,
+`prepareChecked()` or preparation inside `run`/`runApp`, before a terminal opens. The API is available through
+`<portals/ui.hpp>` or `<portals/ui_scene_resource.hpp>`; the application links
+to `portals::core` (C++23). The loaded controls use the same named references, event handlers,
 models, PSS and cleanup as controls declared in C++.
 
 ## A complete form
 
-Build `portals_scene_resource` with `PORTALS_BUILD_EXAMPLES=ON`. Add Hello
+The complete example is available as the `portals_scene_resource` target when
+`PORTALS_BUILD_EXAMPLES=ON`. Add Hello
 appends text; Exit or F10 closes the scene. The native runner restores the
 terminal and reports failures.
 
@@ -21,7 +22,8 @@ Sources: [form definition](../examples/scene_resource/form.hpp) and
 \include{lineno} scene_resource/form.hpp
 \include{lineno} scene_resource/main.cpp
 
-A plain string always means source text. Use an explicit owning file source:
+A plain string always means source text. You can load a file with an explicit
+owning file source:
 
 ```cpp
 auto scene = ui::scene(ui::SceneResourceFile{"form.scene"});

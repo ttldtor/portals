@@ -25,6 +25,7 @@ class ToolHelpTests(unittest.TestCase):
             ("tools/ci/checks.py", ["gate"], ["CI_NEEDS"]),
             ("tools/docs/check_links.py", [], ["html", "anchor"]),
             ("tools/docs/finalize_html.py", [], ["tag_file", "CMake", "in place"]),
+            ("tools/docs/prepare_languages.py", [], ["manifest", "layout", "--output"]),
             ("tools/release/start.py", [], ["--task-id", "--dispatch-merged"]),
             ("tools/release/metadata.py", ["prepare"], ["--source", "--output-dir", "overwritten"]),
             ("tools/release/publish.py", [], ["--directory", "--commit", "SHA256SUMS"]),

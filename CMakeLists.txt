@@ -1224,13 +1224,10 @@ if(PORTALS_BUILD_DOCS)
   set(DOXYGEN_MERMAID_PATH "${portals_mermaid_directory}")
   set(DOXYGEN_MERMAID_CONFIG_FILE "${CMAKE_CURRENT_SOURCE_DIR}/docs/mermaid.json")
   set(DOXYGEN_HTML_EXTRA_STYLESHEET "${CMAKE_CURRENT_SOURCE_DIR}/docs/diagrams.css")
-  set(DOXYGEN_USE_MDFILE_AS_MAINPAGE "${CMAKE_CURRENT_SOURCE_DIR}/docs/index.md")
-  set(DOXYGEN_LAYOUT_FILE "${CMAKE_CURRENT_SOURCE_DIR}/docs/DoxygenLayout.xml")
   # Layout 2.0 intentionally inherits Doxygen's member-page defaults.
   set(DOXYGEN_WARN_LAYOUT_FILE NO)
   set(DOXYGEN_GENERATE_TREEVIEW YES)
   set(DOXYGEN_TOC_INCLUDE_HEADINGS 3)
-  set(DOXYGEN_GENERATE_TAGFILE "${CMAKE_CURRENT_BINARY_DIR}/docs/portals.tag")
   set(DOXYGEN_DISABLE_INDEX YES)
   set(DOXYGEN_FULL_SIDEBAR YES)
   set(DOXYGEN_EXAMPLE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/docs/examples" "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_consumer"
@@ -1243,36 +1240,121 @@ if(PORTALS_BUILD_DOCS)
   set(DOXYGEN_WARN_IF_UNDOC_ENUM_VAL YES)
   set(DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/docs")
 
-  doxygen_add_docs(portals_docs include docs/dialogs.md docs/ru/dialogs.md docs/scroll-controls.md docs/ru/scroll-controls.md docs/wasm-gallery.md docs/ru/wasm-gallery.md docs/first-application.md docs/ru/first-application.md docs/developer-tools.md docs/ru/developer-tools.md docs/developer-tools-build.md docs/ru/developer-tools-build.md docs/developer-tools-measure.md docs/ru/developer-tools-measure.md docs/developer-tools-release.md docs/ru/developer-tools-release.md docs/ru/development.md docs/declarative-reference.md docs/ru/declarative-reference.md docs/ru/compact-examples.md docs/compile-time-pss.md docs/style-layers.md docs/model-queries.md docs/ui-coroutines.md docs/compile-time-styles.md docs/compile-time-scenes.md ReleaseNotes.md docs/index.md docs/reference-map.md docs/guides.md docs/dependencies.md docs/planned-features.md docs/ru/application.md docs/ru/architecture.md docs/ru/bindings-guide.md docs/ru/cell-buffer.md docs/ru/chart.md docs/ru/cli.md docs/ru/compile-time-pss.md docs/ru/compile-time-scenes.md docs/ru/compile-time-styles.md docs/ru/controls.md docs/ru/declarative-ui.md docs/ru/dependencies.md docs/ru/diagnostics.md docs/ru/diff.md docs/ru/editor-history-demo.md docs/ru/editor-history.md docs/ru/examples.md docs/ru/focus.md docs/ru/geometry.md docs/ru/getting-started.md docs/ru/glossary.md docs/ru/grid.md docs/ru/guides.md docs/ru/index.md docs/ru/input.md docs/ru/layout.md docs/ru/limitations.md docs/ru/line-edit.md docs/ru/managed-controls.md docs/ru/model-queries.md docs/ru/model.md docs/ru/package.md docs/ru/planned-features.md docs/ru/property.md docs/ru/reference-map.md docs/ru/render.md docs/ru/scene-loading-guide.md docs/ru/scheduler.md docs/ru/scroll.md docs/ru/style-layers.md docs/ru/styles.md docs/ru/styling-guide.md docs/ru/terminal-probe.md docs/ru/terminal.md docs/ru/text-history.md docs/ru/text-property.md docs/ru/text.md docs/ru/themes-guide.md docs/ru/ui-coroutines.md docs/ru/virtual-list.md docs/ru/virtual-preparation.md docs/ru/virtual-table.md docs/ru/widget-tree.md docs/glossary.md docs/styling-guide.md docs/themes-guide.md docs/bindings-guide.md docs/scene-loading-guide.md docs/development.md docs/releasing.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/scheduler.md docs/widget-tree.md docs/layout.md docs/grid.md docs/property.md docs/diagnostics.md docs/focus.md docs/model.md docs/input.md docs/terminal.md docs/terminal-probe.md docs/controls.md docs/line-edit.md docs/virtual-list.md docs/virtual-table.md docs/scroll.md docs/chart.md
+  set(portals_documentation_inputs include docs/dialogs.md docs/ru/dialogs.md docs/scroll-controls.md docs/ru/scroll-controls.md docs/wasm-gallery.md docs/ru/wasm-gallery.md docs/first-application.md docs/ru/first-application.md docs/developer-tools.md docs/ru/developer-tools.md docs/developer-tools-build.md docs/ru/developer-tools-build.md docs/developer-tools-measure.md docs/ru/developer-tools-measure.md docs/developer-tools-release.md docs/ru/developer-tools-release.md docs/ru/development.md docs/declarative-reference.md docs/ru/declarative-reference.md docs/ru/compact-examples.md docs/compile-time-pss.md docs/style-layers.md docs/model-queries.md docs/ui-coroutines.md docs/compile-time-styles.md docs/compile-time-scenes.md ReleaseNotes.md docs/index.md docs/reference-map.md docs/guides.md docs/dependencies.md docs/planned-features.md docs/ru/application.md docs/ru/architecture.md docs/ru/bindings-guide.md docs/ru/cell-buffer.md docs/ru/chart.md docs/ru/cli.md docs/ru/compile-time-pss.md docs/ru/compile-time-scenes.md docs/ru/compile-time-styles.md docs/ru/controls.md docs/ru/declarative-ui.md docs/ru/dependencies.md docs/ru/diagnostics.md docs/ru/diff.md docs/ru/editor-history-demo.md docs/ru/editor-history.md docs/ru/examples.md docs/ru/focus.md docs/ru/geometry.md docs/ru/getting-started.md docs/ru/glossary.md docs/ru/grid.md docs/ru/guides.md docs/ru/index.md docs/ru/input.md docs/ru/layout.md docs/ru/limitations.md docs/ru/line-edit.md docs/ru/managed-controls.md docs/ru/model-queries.md docs/ru/model.md docs/ru/package.md docs/ru/planned-features.md docs/ru/property.md docs/ru/reference-map.md docs/ru/render.md docs/ru/scene-loading-guide.md docs/ru/scheduler.md docs/ru/scroll.md docs/ru/style-layers.md docs/ru/styles.md docs/ru/styling-guide.md docs/ru/terminal-probe.md docs/ru/terminal.md docs/ru/text-history.md docs/ru/text-property.md docs/ru/text.md docs/ru/themes-guide.md docs/ru/ui-coroutines.md docs/ru/virtual-list.md docs/ru/virtual-preparation.md docs/ru/virtual-table.md docs/ru/widget-tree.md docs/glossary.md docs/styling-guide.md docs/themes-guide.md docs/bindings-guide.md docs/scene-loading-guide.md docs/development.md docs/releasing.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/scheduler.md docs/widget-tree.md docs/layout.md docs/grid.md docs/property.md docs/diagnostics.md docs/focus.md docs/model.md docs/input.md docs/terminal.md docs/terminal-probe.md docs/controls.md docs/line-edit.md docs/virtual-list.md docs/virtual-table.md docs/scroll.md docs/chart.md
     docs/notifications.md docs/ru/notifications.md
     docs/compact-primitives.md docs/ru/compact-primitives.md docs/styles.md docs/legacy.md docs/managed-controls.md docs/declarative-ui.md docs/data-presentation.md docs/ru/data-presentation.md docs/text-property.md docs/text-history.md docs/editor-history.md docs/editor-history-demo.md docs/compact-examples.md docs/compactness.md docs/quality.md tools/compactness/compactness.hpp docs/managed-performance.md docs/package.md docs/application.md docs/virtual-preparation.md docs/examples.md docs/architecture.md docs/getting-started.md docs/limitations.md docs/api-design.md fuzz/README.md
-    tools/benchmarks/README.md vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md vendor/textual/README.md vendor/doctest/README.md vendor/pfr/README.md vendor/lyra/README.md docs/cli.md
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    COMMENT "Generate Portals API documentation"
-  )
-  add_custom_command(TARGET portals_docs POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-      "${CMAKE_CURRENT_SOURCE_DIR}/docs/images" "${CMAKE_CURRENT_BINARY_DIR}/docs/html/images"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-      "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt" "${CMAKE_CURRENT_BINARY_DIR}/docs/html/LICENSE.txt"
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/docs/html/vendor/textual"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-      "${CMAKE_CURRENT_SOURCE_DIR}/vendor/textual/LICENSE" "${CMAKE_CURRENT_BINARY_DIR}/docs/html/vendor/textual/LICENSE"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-      "${CMAKE_CURRENT_SOURCE_DIR}/docs/measurements" "${CMAKE_CURRENT_BINARY_DIR}/docs/html/measurements"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-      "${CMAKE_CURRENT_SOURCE_DIR}/docs/architecture" "${CMAKE_CURRENT_BINARY_DIR}/docs/html/architecture"
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-      "${CMAKE_CURRENT_BINARY_DIR}/docs/html/tests/fixtures/unicode"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-      "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/unicode/Unicode-LICENSE.txt"
-      "${CMAKE_CURRENT_BINARY_DIR}/docs/html/tests/fixtures/unicode/Unicode-LICENSE.txt"
-    COMMAND ${CMAKE_COMMAND} "-DHTML_DIR=${CMAKE_CURRENT_BINARY_DIR}/docs/html"
-      -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FinalizeDocumentation.cmake"
+    tools/benchmarks/README.md vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md vendor/textual/README.md vendor/doctest/README.md vendor/pfr/README.md vendor/lyra/README.md docs/cli.md)
+  set(portals_language_config "${CMAKE_CURRENT_BINARY_DIR}/docs/languages")
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/languages.json"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/DoxygenLayout.xml"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/docs/prepare_languages.py")
+  execute_process(
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/docs/prepare_languages.py"
+      "${CMAKE_CURRENT_SOURCE_DIR}/docs/languages.json"
+      "${CMAKE_CURRENT_SOURCE_DIR}/docs/DoxygenLayout.xml" --output "${portals_language_config}"
+    RESULT_VARIABLE portals_language_result OUTPUT_VARIABLE portals_language_output
+    ERROR_VARIABLE portals_language_error)
+  if(NOT portals_language_result EQUAL 0)
+    message(FATAL_ERROR "Cannot prepare documentation languages: ${portals_language_error}")
+  endif()
+  include("${portals_language_config}/languages.cmake")
+  list(GET portals_doc_languages 0 portals_default_language)
+  set(portals_language_targets)
+  set(portals_language_sites)
+  foreach(language IN LISTS portals_doc_languages)
+    set(locale_source "${portals_doc_${language}_source}")
+    set(locale_directory "${portals_doc_${language}_directory}")
+    set(locale_inputs)
+    if(NOT language STREQUAL portals_default_language)
+      file(GLOB_RECURSE locale_inputs CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/${locale_source}/*.md")
+    endif()
+    foreach(input IN LISTS portals_documentation_inputs)
+      set(include_input FALSE)
+      if(language STREQUAL portals_default_language)
+        set(include_input TRUE)
+        foreach(other_language IN LISTS portals_doc_languages)
+          if(NOT other_language STREQUAL language)
+            string(FIND "${input}" "${portals_doc_${other_language}_source}/" locale_prefix)
+            if(locale_prefix EQUAL 0)
+              set(include_input FALSE)
+            endif()
+          endif()
+        endforeach()
+      else()
+        string(FIND "${input}" "${locale_source}/" locale_prefix)
+        if(locale_prefix EQUAL 0)
+          set(include_input TRUE)
+        endif()
+      endif()
+      if(include_input)
+        list(APPEND locale_inputs "${input}")
+      endif()
+    endforeach()
+    list(REMOVE_DUPLICATES locale_inputs)
+    set(DOXYGEN_USE_MDFILE_AS_MAINPAGE "${CMAKE_CURRENT_SOURCE_DIR}/${portals_doc_${language}_main}")
+    set(DOXYGEN_LAYOUT_FILE "${portals_language_config}/layout-${language}.xml")
+    set(DOXYGEN_OUTPUT_LANGUAGE "${portals_doc_${language}_output_language}")
+    set(DOXYGEN_HTML_OUTPUT "html/${locale_directory}")
+    # Pass the filter command as one Doxygen string with escaped inner quotes.
+    set(locale_filter "\"${Python3_EXECUTABLE}\" \"${CMAKE_CURRENT_SOURCE_DIR}/tools/docs/prepare_languages.py\" \"${CMAKE_CURRENT_SOURCE_DIR}/docs/languages.json\" --filter-language ${language} --source-root \"${CMAKE_CURRENT_SOURCE_DIR}\" --filter-input")
+    if(WIN32)
+      # cmd.exe otherwise strips the leading executable quote when popen appends
+      # a quoted input filename. CALL preserves paths containing spaces.
+      string(PREPEND locale_filter "call ")
+    endif()
+    string(REPLACE "\"" "\\\"" locale_filter "${locale_filter}")
+    set(DOXYGEN_FILTER_PATTERNS "*.md=\"${locale_filter}\"")
+    set(DOXYGEN_VERBATIM_VARS DOXYGEN_FILTER_PATTERNS)
+    if(language STREQUAL portals_default_language)
+      set(locale_tag "${CMAKE_CURRENT_BINARY_DIR}/docs/portals.tag")
+      set(DOXYGEN_TAGFILES "")
+    else()
+      set(locale_tag "${CMAKE_CURRENT_BINARY_DIR}/docs/portals-${language}.tag")
+      # Each translated site imports the shared English C++ reference.
+      file(RELATIVE_PATH api_relative "${CMAKE_CURRENT_BINARY_DIR}/docs/html/${locale_directory}"
+        "${CMAKE_CURRENT_BINARY_DIR}/docs/html")
+      set(DOXYGEN_TAGFILES "${CMAKE_CURRENT_BINARY_DIR}/docs/portals.tag=${api_relative}/")
+      list(APPEND portals_language_sites "${language}=${locale_tag}")
+    endif()
+    set(DOXYGEN_GENERATE_TAGFILE "${locale_tag}")
+    doxygen_add_docs(portals_docs_${language} ${locale_inputs}
+      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+      COMMENT "Generate Portals documentation (${language})")
+    if(NOT language STREQUAL portals_default_language)
+      add_dependencies(portals_docs_${language} portals_docs_${portals_default_language})
+    endif()
+    list(APPEND portals_language_targets portals_docs_${language})
+
+    set(locale_html "${CMAKE_CURRENT_BINARY_DIR}/docs/html/${locale_directory}")
+    add_custom_command(TARGET portals_docs_${language} POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/docs/images" "${locale_html}/images"
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt" "${locale_html}/LICENSE.txt"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${locale_html}/vendor/textual"
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/vendor/textual/LICENSE" "${locale_html}/vendor/textual/LICENSE"
+      COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/docs/measurements" "${locale_html}/measurements"
+      COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/docs/architecture" "${locale_html}/architecture"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${locale_html}/tests/fixtures/unicode"
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/unicode/Unicode-LICENSE.txt"
+        "${locale_html}/tests/fixtures/unicode/Unicode-LICENSE.txt"
+      COMMAND ${CMAKE_COMMAND} "-DHTML_DIR=${locale_html}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FinalizeDocumentation.cmake"
+      COMMENT "Finalize documentation assets (${language})")
+  endforeach()
+  add_custom_target(portals_docs
     COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/docs/finalize_html.py"
       "${CMAKE_CURRENT_BINARY_DIR}/docs/html" "${CMAKE_CURRENT_BINARY_DIR}/docs/portals.tag"
-    COMMENT "Finalize HTML documentation and linked license notices"
-  )
+      --language-sites ${portals_language_sites}
+    DEPENDS ${portals_language_targets}
+    COMMENT "Finalize language navigation and links"
+    VERBATIM)
 endif()
 
 if(WIN32 AND PORTALS_BUILD_TESTS)

@@ -1,9 +1,9 @@
-# Run an application {#application}
+# Running an application {#application}
 
 [Русская версия](ru/application.md)
 
-Use the [scene](glossary.md#glossary-scene) facade in [`<portals/ui.hpp>`](../include/portals/ui.hpp)
-to create controls, attach actions and run a native terminal application.
+The [scene](glossary.md#glossary-scene) facade in [`<portals/ui.hpp>`](../include/portals/ui.hpp)
+lets you create controls, attach actions and run a native terminal application.
 **Apply** changes the label. **Exit** or F10 closes the application.
 
 ```cpp
@@ -27,36 +27,37 @@ int main() {
 }
 ```
 
-Build this complete [source](examples/guide_application.cpp) with `portals::core`;
+This complete [source](examples/guide_application.cpp) links to `portals::core`;
 see [package setup](package.md). The scene mounts its description when run,
 opens the terminal, services input and redraws changed controls. `ui::runApp()`
 attempts terminal restoration and scene cleanup before returning 0 on success
 or 1 on failure. Its default error report goes to stderr after cleanup.
 
-`ui::Ref<Label>` observes the label; the scene owns the control. Capture the
-reference by value in actions, and keep actions on the UI thread. The text
+`ui::Ref<Label>` observes the label; the scene owns the control. The action
+captures the reference by value, and operations on the control run on the UI thread. The text
 assignment uses the normal invalidation path; no explicit repaint is needed.
 See [text properties](text-property.md) for checked operations and [events](input.md)
-for input handling. Choose [coroutines](ui-coroutines.md) for an action that waits
-without blocking input, and [diagnostics](diagnostics.md) to change error reporting.
+for input handling. The [coroutine guide](ui-coroutines.md) explains actions that
+wait without blocking input. [Diagnostics](diagnostics.md) covers custom error reporting.
 
-## Configure the run
+## Run configuration
 
 `ui::applicationOptions(...)` supplies `ApplicationOptions` before application
-creation. Use it for cadence, input/output bounds and native screen policy.
+creation. You can configure cadence, input/output bounds and native screen policy there.
 The native default uses the alternate screen and restores the caller's screen
-on close. Choose `NativeScreenMode::MAIN_SCREEN` explicitly to leave the final
+on close. An explicit `NativeScreenMode::MAIN_SCREEN` setting leaves the final
 frame on the main screen. Window resizing remains under the terminal host's control.
 
-Use `ui::scene(factory)` when building controls requires scene-owned state or
-access to `Application`; use `ui::configure(...)` for work after mounting.
-Register `scene.onStop(...)` before preparation to cancel/join external producers
-and release services borrowing the application before its managed nodes retire.
+`ui::scene(factory)` is available when building controls requires scene-owned state or
+access to `Application`; `ui::configure(...)` runs work after mounting.
+`scene.onStop(...)` must be registered before preparation. The callback must
+cancel and join external producers and release services borrowing the application
+before its managed nodes retire.
 Callbacks must not destroy or reenter the scene or runner.
 
-## Integrate your own scene or transport
+## Custom scenes and transports
 
-Use [`Application`](../include/portals/application.hpp) directly when you need
+Direct access to [`Application`](../include/portals/application.hpp) is available when you need
 `ApplicationScene::input`, `prepare`, custom widget preparation, or your own
 `ApplicationTerminal`. The low-level runner returns `expected<ApplicationStats,
 ApplicationError>`; the caller checks it and reports errors after terminal cleanup.

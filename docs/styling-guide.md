@@ -2,11 +2,11 @@
 
 [Русская версия](ru/styling-guide.md)
 
-Use [PSS](glossary.md), the Portals stylesheet syntax, to set colors,
-text appearance and minimum widths. Declare controls,
-layout and actions through the C++ `ui` API.
+[PSS](glossary.md), Portals' stylesheet syntax, lets an application set colors,
+text appearance and minimum widths. Controls, layout and actions are declared
+through the C++ `ui` API.
 
-## Run a styled scene
+## A styled scene
 
 ```cpp
 #include <portals/ui.hpp>
@@ -29,16 +29,16 @@ int main() {
 ```
 
 The style applies to the button with `.id("save")`. F10 exits the application.
-See [the short guide](index.md) for build requirements and
-[package setup](package.md) for linking a client.
+The [short guide](index.md) describes build requirements, and
+[package setup](package.md) explains how a client links the library.
 The compact runner reports errors and attempts terminal restoration.
-For checked [recipe](glossary.md#glossary-recipe) construction, use the factory overload in
-[declarative UI](declarative-ui.md).
+The factory overload in [declarative UI](declarative-ui.md) provides checked
+[recipe](glossary.md#glossary-recipe) construction.
 
 The setup fragments below assume an open, idle [scene](glossary.md#glossary-scene), `ui::Scene`, named `scene`,
 `using namespace portals;`, and `<portals/ui_style.hpp>`.
 
-## Write a rule
+## A simple style rule
 
 ```cpp
 scene
@@ -83,7 +83,7 @@ States are `normal`, `focused`, `disabled`, `selected`, `header` and `caret`.
 A selector without a state applies to every presentation variant; `:normal`
 applies only to normal presentation. PSS v0 has no `:hover` state.
 
-## Organize replaceable rule groups
+## Replaceable groups of rules
 
 Each `ui::style` installation creates or updates a [style layer](glossary.md).
 Each layer belongs to a [tier](glossary.md), a precedence group;
@@ -105,8 +105,9 @@ The last stage replaces the entire `validation` stylesheet. `layout` and
 `branding` remain installed. The rules become active during installation.
 Validation itself belongs in application code.
 
-**Names are optional.** Use them when a later stage needs to replace a specific
-group of rules. Independently constructed unnamed stages create independent layers.
+**Names are optional.** A name is useful when a later stage needs to replace a
+specific group of rules. Independently constructed unnamed stages create
+independent layers.
 Reusing the same stage checks its existing layer identity.
 
 The layer key is `(tier, name)`. `APPLICATION/validation` and `USER/validation`
@@ -115,7 +116,7 @@ preserves its previous stylesheet. `.id("save")` identifies a control for
 selectors. Lower-level removal and layer handles are covered in
 [the layer reference](style-layers.md).
 
-## Understand precedence
+## How rule precedence works
 
 Each property resolves independently through these tiers:
 
@@ -130,9 +131,10 @@ Replacing a named layer keeps that order.
 
 An omitted property retains its lower-priority value. Explicit `false` can
 override `true`. Properties have no parent-to-child inheritance in PSS v0.
-Install application and user layers before attaching a live theme controller.
+Application and user layers must be installed before a live theme controller
+is attached.
 
-## Load a stylesheet from a file
+## Stylesheet files
 
 ```cpp
 scene
@@ -145,10 +147,10 @@ Plain string arguments contain PSS text. File loading currently has no includes,
 automatic reload or file watcher. `parsePssDocument(bytes, sourceName)` only parses bytes.
 
 Style-source stages accept `APPLICATION` and `USER`, with `APPLICATION` as
-the default. For theme replacement use `ui::theme(StyleSheet)`; see
-[themes](themes-guide.md).
+the default. Theme replacement is available through `ui::theme(StyleSheet)`;
+details are in [the themes guide](themes-guide.md).
 
-## Differences from CSS and QSS
+## How PSS differs from CSS and QSS
 
 PSS v0 supports the selectors, states and properties listed above.
 [QSS](https://doc.qt.io/qt-6/stylesheet-syntax.html) also provides descendant,
@@ -161,25 +163,28 @@ and `var(...)`. Runtime PSS v0 has no variables or functions.
 Existing typed C++ parameters are described separately in
 [compile-time styles](compile-time-styles.md).
 
-## Handle an invalid stylesheet
+## When a stylesheet is invalid
 
-Use `scene.checked()` to inspect setup errors, or the runner's reporting policy.
+Setup errors are available through `scene.checked()` or the runner's reporting
+policy.
 Source diagnostics contain byte offsets and one-based line/byte-column coordinates.
 A rejected update preserves the previous stylesheet and computed styles.
-Apply updates between frames on the UI thread. Stage construction can throw;
-the factory runner's error boundary is described in [declarative UI](declarative-ui.md).
+Updates must be applied between frames on the UI thread. Stage construction can
+throw; the factory runner's error boundary is described in
+[declarative UI](declarative-ui.md).
 
 For example, `Button { color: #ff5555; }` produces `UNKNOWN_PROPERTY`.
-Change `color` to `foreground` and apply the corrected stylesheet. The rejected
-update leaves the previous styles active.
+Replacing `color` with `foreground` and applying the corrected stylesheet
+resolves the error. The rejected update leaves the previous styles active.
 
-To style one control, use `ui::style(ref, source)` or `ui::styleFile(ref, path)`.
-See [reference styles and file loading](declarative-ui.md) for scope and lifetime.
+For one control, `ui::style(ref, source)` or `ui::styleFile(ref, path)` applies
+the style. [Reference styles and file loading](declarative-ui.md) describes
+their scope and lifetime.
 
 ## Planned extensions
 
 <a id="future-style-parameters"></a>
 
 Extended selectors, parameters and expressions are **TBD — M5**.
-See [planned features](planned-features.md#planned-style-parameters) for their
-status, proposed syntax and update rules.
+The [planned features page](planned-features.md#planned-style-parameters)
+lists their status, proposed syntax and update rules.

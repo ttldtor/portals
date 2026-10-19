@@ -201,13 +201,16 @@ def complete_navigation(directory, headings):
     tree_file.write_text(write_variable(text, "NAVTREEINDEX", boundaries), encoding="utf-8")
 
 
-def portable_links(content, directory, source, links, russian=False):
+def portable_links(content, directory, source, links, russian=False, defer_markdown=False):
     """Resolve checkout-relative links and copy source files within the repository."""
     def asset_link(match):
         href = html.unescape(match[2])
         if re.match(r"[a-z]+:", href) or href.startswith(("#", "/")):
             return match[0]
         asset = urlsplit(href)
+        # Imported API and language links may intentionally point to the parent site.
+        if asset.path.endswith(".html") and (directory / asset.path).is_file():
+            return match[0]
         flat_path = re.sub(r"^(?:\.\./)+", "", asset.path)
         destination = (directory / flat_path).resolve()
         if destination.is_relative_to(directory.resolve()) and destination.is_file():
@@ -234,6 +237,8 @@ def portable_links(content, directory, source, links, russian=False):
         if file is None or not file.is_relative_to(source):
             return match[0]
         if file.suffix == ".md":
+            if defer_markdown:
+                return match[0]
             first = file.read_text(encoding="utf-8").splitlines()[0]
             explicit = re.search(r"\{#([^}]+)\}", first)
             relative = file.relative_to(source).as_posix().removesuffix(".md")
@@ -294,9 +299,11 @@ def complete_search(directory):
     script.write_text(text, encoding="utf-8")
 
 
-def finalize(directory, tag_file):
+def finalize(directory, tag_file, language=None, api_tag=None, api_prefix="../"):
     """Rewrite registered guide pages and their navigation after Doxygen finishes."""
-    links = type_links(tag_file)
+    links = type_links(api_tag or tag_file)
+    if api_tag:
+        links = {name: api_prefix + target for name, target in links.items()}
     pages = {"index.html"}
     for compound in ET.parse(tag_file).getroot().findall("compound"):
         if compound.get("kind") == "page":
@@ -308,11 +315,11 @@ def finalize(directory, tag_file):
             continue
         parser = GuideParser(links)
         parser.feed(path.read_text(encoding="utf-8"))
-        russian = name.endswith("-ru.html") or "_2ru_2" in name
+        russian = language == "ru" if language else name.endswith("-ru.html") or "_2ru_2" in name
         content = portable_links("".join(parser.output), directory,
                                  Path(__file__).resolve().parents[2], links,
-                                 russian)
-        content = document_language(content, "ru" if russian else "en")
+                                 russian, defer_markdown=language is not None)
+        content = document_language(content, language or ("ru" if russian else "en"))
         path.write_text(color_cmake(content), encoding="utf-8")
         headings[name] = parser.headings
     complete_navigation(directory, headings)
@@ -324,5 +331,26 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("html", type=Path, help="Existing generated HTML directory, modified in place")
     parser.add_argument("tag_file", type=Path, help="Doxygen XML tag file from the same documentation build")
+    parser.add_argument("--language-sites", nargs="*", default=None, metavar="CODE=TAG",
+                        help="Finalize separate language sites from docs/languages.json after the English build; each value supplies its locale tag file")
     args = parser.parse_args()
-    finalize(args.html, args.tag_file)
+    if args.language_sites is None:
+        finalize(args.html, args.tag_file)
+    else:
+        from language_site import finalize_languages
+        source = Path(__file__).resolve().parents[2]
+        config = json.loads((source / "docs/languages.json").read_text(encoding="utf-8"))
+        tags = {config["default"]: args.tag_file}
+        for value in args.language_sites:
+            code, separator, filename = value.partition("=")
+            if not separator or code in tags:
+                parser.error("Expected a unique CODE=TAG for each additional language")
+            tags[code] = Path(filename)
+        if set(tags) != {locale["code"] for locale in config["languages"]}:
+            parser.error("Supply exactly one CODE=TAG for every additional configured language")
+        for locale in config["languages"]:
+            code = locale["code"]
+            finalize(args.html / locale["directory"], tags[code], code,
+                     args.tag_file if code != config["default"] else None,
+                     "../" * len(Path(locale["directory"]).parts))
+        finalize_languages(args.html, source, tags)

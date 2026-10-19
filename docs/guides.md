@@ -2,9 +2,10 @@
 
 [Русская версия](ru/guides.md) · [Short guide](index.md) · [Documentation contents](reference-map.md) · [Glossary](glossary.md)
 
-Start with a declarative scene, then choose the task you need.
+These guides explain how to build an application with declarative scenes.
+The table below groups them by the task you want to accomplish.
 
-Follow the [first application](first-application.md): a quick-note form in four steps.
+The [first application](first-application.md) develops a quick-note form in four steps.
 
 ## Guides by task
 
