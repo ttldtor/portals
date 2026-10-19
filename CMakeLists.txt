@@ -61,6 +61,7 @@ target_sources(portals_core PRIVATE
   src/widgets/scroll_controls_layout.cpp
   src/widgets/scroll_controls_paint.cpp
   src/widgets/scroll_controls_input.cpp)
+target_sources(portals_core PRIVATE src/widgets/dialog.cpp src/widgets/managed_dialog.cpp)
 if(EMSCRIPTEN)
   target_sources(portals_core PRIVATE src/terminal/unsupported.cpp)
   target_compile_options(portals_core PUBLIC -fwasm-exceptions)
@@ -324,6 +325,9 @@ if(PORTALS_BUILD_TESTS)
   add_executable(portals_docs_nested_scroll docs/examples/guide_nested_scroll.cpp)
   target_link_libraries(portals_docs_nested_scroll PRIVATE portals::core)
   portals_enable_warnings(portals_docs_nested_scroll)
+  add_executable(portals_docs_dialog docs/examples/guide_dialog.cpp)
+  target_link_libraries(portals_docs_dialog PRIVATE portals::core)
+  portals_enable_warnings(portals_docs_dialog)
 
   add_executable(portals_docs_layout_observe docs/examples/guide_layout_observe.cpp)
   target_link_libraries(portals_docs_layout_observe PRIVATE portals::core)
@@ -828,6 +832,38 @@ if(PORTALS_BUILD_TESTS)
   add_test(NAME portals.chart COMMAND portals_chart)
   set_tests_properties(portals.chart PROPERTIES TIMEOUT 15)
 
+  add_executable(portals_dialog_layout tests/dialog_layout.cpp)
+  target_link_libraries(portals_dialog_layout PRIVATE portals::core)
+  portals_enable_warnings(portals_dialog_layout)
+  add_test(NAME portals.dialog-layout COMMAND portals_dialog_layout)
+  add_executable(portals_managed_dialog tests/managed_dialog.cpp)
+  target_link_libraries(portals_managed_dialog PRIVATE portals::core)
+  portals_enable_warnings(portals_managed_dialog)
+  add_test(NAME portals.managed-dialog COMMAND portals_managed_dialog)
+  set_tests_properties(portals.managed-dialog PROPERTIES TIMEOUT 15)
+  add_executable(portals_dialog_oom tests/dialog_oom.cpp)
+  target_link_libraries(portals_dialog_oom PRIVATE portals::core)
+  portals_enable_warnings(portals_dialog_oom)
+  add_test(NAME portals.dialog-oom COMMAND portals_dialog_oom)
+  set_tests_properties(portals.dialog-oom PROPERTIES TIMEOUT 45)
+  add_executable(portals_dialog_lifetime tests/dialog_lifetime.cpp)
+  target_link_libraries(portals_dialog_lifetime PRIVATE portals::core)
+  portals_enable_warnings(portals_dialog_lifetime)
+  add_test(NAME portals.dialog-lifetime COMMAND portals_dialog_lifetime)
+  set_tests_properties(portals.dialog-lifetime PROPERTIES TIMEOUT 15)
+  add_executable(portals_dialog_reentry tests/dialog_reentry.cpp)
+  target_link_libraries(portals_dialog_reentry PRIVATE portals::core)
+  portals_enable_warnings(portals_dialog_reentry)
+  add_test(NAME portals.dialog-reentry COMMAND portals_dialog_reentry)
+  set_tests_properties(portals.dialog-reentry PROPERTIES TIMEOUT 30)
+  set_tests_properties(portals.dialog-layout PROPERTIES TIMEOUT 15)
+
+  add_executable(portals_dialog_data_state tests/dialog_data_state.cpp)
+  target_link_libraries(portals_dialog_data_state PRIVATE portals::core)
+  portals_enable_warnings(portals_dialog_data_state)
+  add_test(NAME portals.dialog-data-state COMMAND portals_dialog_data_state)
+  set_tests_properties(portals.dialog-data-state PROPERTIES TIMEOUT 15)
+
   add_executable(portals_layout_grid tests/layout_grid.cpp tests/support/test_terminal.cpp)
   target_link_libraries(portals_layout_grid PRIVATE portals::core)
   portals_enable_warnings(portals_layout_grid)
@@ -1183,7 +1219,7 @@ if(PORTALS_BUILD_DOCS)
   set(DOXYGEN_WARN_IF_UNDOC_ENUM_VAL YES)
   set(DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/docs")
 
-  doxygen_add_docs(portals_docs include docs/scroll-controls.md docs/ru/scroll-controls.md docs/wasm-gallery.md docs/ru/wasm-gallery.md docs/first-application.md docs/ru/first-application.md docs/developer-tools.md docs/ru/developer-tools.md docs/developer-tools-build.md docs/ru/developer-tools-build.md docs/developer-tools-measure.md docs/ru/developer-tools-measure.md docs/developer-tools-release.md docs/ru/developer-tools-release.md docs/ru/development.md docs/declarative-reference.md docs/ru/declarative-reference.md docs/ru/compact-examples.md docs/compile-time-pss.md docs/style-layers.md docs/model-queries.md docs/ui-coroutines.md docs/compile-time-styles.md docs/compile-time-scenes.md ReleaseNotes.md docs/index.md docs/reference-map.md docs/guides.md docs/dependencies.md docs/planned-features.md docs/ru/application.md docs/ru/architecture.md docs/ru/bindings-guide.md docs/ru/cell-buffer.md docs/ru/chart.md docs/ru/cli.md docs/ru/compile-time-pss.md docs/ru/compile-time-scenes.md docs/ru/compile-time-styles.md docs/ru/controls.md docs/ru/declarative-ui.md docs/ru/dependencies.md docs/ru/diagnostics.md docs/ru/diff.md docs/ru/editor-history-demo.md docs/ru/editor-history.md docs/ru/examples.md docs/ru/focus.md docs/ru/geometry.md docs/ru/getting-started.md docs/ru/glossary.md docs/ru/grid.md docs/ru/guides.md docs/ru/index.md docs/ru/input.md docs/ru/layout.md docs/ru/limitations.md docs/ru/line-edit.md docs/ru/managed-controls.md docs/ru/model-queries.md docs/ru/model.md docs/ru/package.md docs/ru/planned-features.md docs/ru/property.md docs/ru/reference-map.md docs/ru/render.md docs/ru/scene-loading-guide.md docs/ru/scheduler.md docs/ru/scroll.md docs/ru/style-layers.md docs/ru/styles.md docs/ru/styling-guide.md docs/ru/terminal-probe.md docs/ru/terminal.md docs/ru/text-history.md docs/ru/text-property.md docs/ru/text.md docs/ru/themes-guide.md docs/ru/ui-coroutines.md docs/ru/virtual-list.md docs/ru/virtual-preparation.md docs/ru/virtual-table.md docs/ru/widget-tree.md docs/glossary.md docs/styling-guide.md docs/themes-guide.md docs/bindings-guide.md docs/scene-loading-guide.md docs/development.md docs/releasing.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/scheduler.md docs/widget-tree.md docs/layout.md docs/grid.md docs/property.md docs/diagnostics.md docs/focus.md docs/model.md docs/input.md docs/terminal.md docs/terminal-probe.md docs/controls.md docs/line-edit.md docs/virtual-list.md docs/virtual-table.md docs/scroll.md docs/chart.md
+  doxygen_add_docs(portals_docs include docs/dialogs.md docs/ru/dialogs.md docs/scroll-controls.md docs/ru/scroll-controls.md docs/wasm-gallery.md docs/ru/wasm-gallery.md docs/first-application.md docs/ru/first-application.md docs/developer-tools.md docs/ru/developer-tools.md docs/developer-tools-build.md docs/ru/developer-tools-build.md docs/developer-tools-measure.md docs/ru/developer-tools-measure.md docs/developer-tools-release.md docs/ru/developer-tools-release.md docs/ru/development.md docs/declarative-reference.md docs/ru/declarative-reference.md docs/ru/compact-examples.md docs/compile-time-pss.md docs/style-layers.md docs/model-queries.md docs/ui-coroutines.md docs/compile-time-styles.md docs/compile-time-scenes.md ReleaseNotes.md docs/index.md docs/reference-map.md docs/guides.md docs/dependencies.md docs/planned-features.md docs/ru/application.md docs/ru/architecture.md docs/ru/bindings-guide.md docs/ru/cell-buffer.md docs/ru/chart.md docs/ru/cli.md docs/ru/compile-time-pss.md docs/ru/compile-time-scenes.md docs/ru/compile-time-styles.md docs/ru/controls.md docs/ru/declarative-ui.md docs/ru/dependencies.md docs/ru/diagnostics.md docs/ru/diff.md docs/ru/editor-history-demo.md docs/ru/editor-history.md docs/ru/examples.md docs/ru/focus.md docs/ru/geometry.md docs/ru/getting-started.md docs/ru/glossary.md docs/ru/grid.md docs/ru/guides.md docs/ru/index.md docs/ru/input.md docs/ru/layout.md docs/ru/limitations.md docs/ru/line-edit.md docs/ru/managed-controls.md docs/ru/model-queries.md docs/ru/model.md docs/ru/package.md docs/ru/planned-features.md docs/ru/property.md docs/ru/reference-map.md docs/ru/render.md docs/ru/scene-loading-guide.md docs/ru/scheduler.md docs/ru/scroll.md docs/ru/style-layers.md docs/ru/styles.md docs/ru/styling-guide.md docs/ru/terminal-probe.md docs/ru/terminal.md docs/ru/text-history.md docs/ru/text-property.md docs/ru/text.md docs/ru/themes-guide.md docs/ru/ui-coroutines.md docs/ru/virtual-list.md docs/ru/virtual-preparation.md docs/ru/virtual-table.md docs/ru/widget-tree.md docs/glossary.md docs/styling-guide.md docs/themes-guide.md docs/bindings-guide.md docs/scene-loading-guide.md docs/development.md docs/releasing.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/scheduler.md docs/widget-tree.md docs/layout.md docs/grid.md docs/property.md docs/diagnostics.md docs/focus.md docs/model.md docs/input.md docs/terminal.md docs/terminal-probe.md docs/controls.md docs/line-edit.md docs/virtual-list.md docs/virtual-table.md docs/scroll.md docs/chart.md
     docs/compact-primitives.md docs/ru/compact-primitives.md docs/styles.md docs/legacy.md docs/managed-controls.md docs/declarative-ui.md docs/data-presentation.md docs/ru/data-presentation.md docs/text-property.md docs/text-history.md docs/editor-history.md docs/editor-history-demo.md docs/compact-examples.md docs/compactness.md docs/quality.md tools/compactness/compactness.hpp docs/managed-performance.md docs/package.md docs/application.md docs/virtual-preparation.md docs/examples.md docs/architecture.md docs/getting-started.md docs/limitations.md docs/api-design.md fuzz/README.md
     tools/benchmarks/README.md vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md vendor/textual/README.md vendor/doctest/README.md vendor/pfr/README.md vendor/lyra/README.md docs/cli.md
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"

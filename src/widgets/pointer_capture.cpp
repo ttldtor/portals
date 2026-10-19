@@ -133,6 +133,11 @@ std::expected<PointerCapture, TreeError> EventRouter::capturePointer(Node<Widget
   }
 
   auto admitted = state_->admittedAction.lock();
+  const auto admittedByDialog = [&] {
+    const auto modal = modalRoot();
+
+    return dialogEligible(owner) && (modal == Node<Widget>{} || within(modal, owner));
+  };
 
   if (state_->deliveringFocus || !state_->dispatching || !admitted || !state_->admittedMouse ||
       state_->admittedMouse->action != MouseAction::PRESS || state_->admittedMouse->button != MouseButton::LEFT) {
@@ -140,7 +145,8 @@ std::expected<PointerCapture, TreeError> EventRouter::capturePointer(Node<Widget
   }
 
   if (!*eligible || admitted->node != owner || !admitted->cancellation->connected.load() ||
-      registration(owner) != admitted || !state_->pointerCapabilities.motion || !state_->pointerCapabilities.release) {
+      registration(owner) != admitted || !state_->pointerCapabilities.motion || !state_->pointerCapabilities.release ||
+      !admittedByDialog()) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
@@ -185,7 +191,7 @@ std::expected<PointerCapture, TreeError> EventRouter::capturePointer(Node<Widget
 
     if (!*ownerLive || !*rootLive || !within(focusRoot, owner) || !admitted->cancellation->connected.load() ||
         registration(owner) != admitted || !state_->pointerCapabilities.motion ||
-        !state_->pointerCapabilities.release) {
+        !state_->pointerCapabilities.release || !admittedByDialog()) {
       return std::unexpected(TreeError::INVALID_ARGUMENT);
     }
 

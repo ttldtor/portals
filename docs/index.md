@@ -126,6 +126,7 @@ platforms and the exact runtime boundaries.
 
 ## Continue reading
 
+- [Dialogs](dialogs.md): open retained modal panels and anchored nonmodal layers.
 - [First application](first-application.md): build a note form in four steps.
 - [Task guides](guides.md): choose a guide for styles, events, data or other application work.
 - [Documentation contents](reference-map.md): find a topic or an API contract.

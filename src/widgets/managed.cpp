@@ -559,6 +559,29 @@ std::expected<Node<Widget>, TreeError> ManagedScene::repairDataFocus() {
   return focused;
 }
 
+std::expected<void, ManagedError> ManagedScene::openDialog(Node<Widget> node) {
+  auto allowed = boundary(ManagedPhase::INPUT, node);
+  if (!allowed) {
+    return allowed;
+  }
+  return dialogCommand(node, true, DialogDismissReason::PROGRAMMATIC);
+}
+
+std::expected<void, ManagedError> ManagedScene::dismissDialog(Node<Widget> node) {
+  auto allowed = boundary(ManagedPhase::INPUT, node);
+  if (!allowed) {
+    return allowed;
+  }
+  return dialogCommand(node, false, DialogDismissReason::PROGRAMMATIC);
+}
+
+std::expected<void, ManagedError> ManagedScene::dialogCommand(Node<Widget> node, bool opening,
+                                                              DialogDismissReason reason) {
+  FocusReport report(*this);
+  auto result = changeDialog(node, opening, reason);
+  return result ? std::expected<void, ManagedError>{} : std::unexpected(report.failure(node, result.error()));
+}
+
 std::expected<void, ManagedError> ManagedScene::focus(Node<Widget> node) {
   ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
   auto allowed = boundary(ManagedPhase::INPUT, node);
@@ -680,6 +703,7 @@ std::expected<void, ManagedError> ManagedScene::remove(Node<Widget> node) {
   pruneObservers();
   pruneScroll();
   pruneDataStates();
+  retireDialogs();
   stylesDirty_ = true;
 
   return {};
@@ -1074,13 +1098,19 @@ std::optional<std::size_t> ManagedScene::recordError(ManagedError failure,
                                                      std::span<const ManagedDiagnosticContext> contexts,
                                                      std::source_location origin, bool *observerInvoked,
                                                      bool runFailure, const ui::detail::SetupFailureTicket *shortTicket,
-                                                     bool contextUnavailable) noexcept {
+                                                     bool contextUnavailable, bool dialogPrimary) noexcept {
   if (observerInvoked) {
     *observerInvoked = false;
   }
 
   if (contextUnavailable) {
     increment(contextFailures_);
+  }
+
+  if (dialogPrimary) {
+    // Admission owns the first failure even when bounded history cannot retain its entry.
+    dialogPrimaryRecorded_ = true;
+    failureDiagnostic_.reset();
   }
 
   if (errorCount_ == errors_.size()) {
@@ -1117,6 +1147,10 @@ std::optional<std::size_t> ManagedScene::recordError(ManagedError failure,
   diagnostic.error = std::move(failure);
   diagnostic.origin = origin;
   diagnostic.contextUnavailable = contextUnavailable;
+
+  if (dialogPrimary) {
+    failureDiagnostic_ = index;
+  }
 
   try {
     if (contextUnavailable) {
@@ -1201,7 +1235,8 @@ std::expected<void, TreeError> ManagedScene::reportError(ManagedError failure,
 }
 
 void ManagedScene::reportShortError(ManagedError &failure, const char *operation, std::string_view name,
-                                    std::string_view expectedType, std::source_location origin) noexcept {
+                                    std::string_view expectedType, std::source_location origin,
+                                    bool admittedRuntime) noexcept {
   failure.operation = operation;
   failure.operationOrigin = origin;
 
@@ -1214,7 +1249,26 @@ void ManagedScene::reportShortError(ManagedError &failure, const char *operation
   // Admission commits to collector entry. No allocation or user callback precedes this receipt and latch.
   const std::byte attempt{};
   failure.reportReceipt.collector_ = lifetime_;
+  const bool primary = admittedRuntime && !failure_;
+
+  if (primary) {
+    failure_ = failure;
+    app_.requestStop();
+  }
+
   const auto ticket = ui::detail::SetupFailureScope::latch(failure, &attempt);
+
+  if (primary) {
+    // latch may stamp an entered collector's execution; retain the same owning envelope.
+    failure_ = failure;
+    bool invoked{};
+
+    // Optional labels are omitted here: publishing the actual primary slot must allocate nothing.
+    (void)recordError(failure, {}, origin, &invoked, true, &ticket, false, true);
+    failureNotified_ = failureNotified_ || invoked;
+
+    return;
+  }
 
   try {
     const ManagedDiagnosticContext context{
@@ -3192,7 +3246,8 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
 }
 
 bool ManagedScene::usesPreparedLayout() const noexcept {
-  return usesGeometrySnapshot() || !dataStates_.empty() || std::ranges::any_of(entries_, [](const auto &entry) {
+  return usesGeometrySnapshot() || !dataStates_.empty() || static_cast<bool>(dialogs_) ||
+         std::ranges::any_of(entries_, [](const auto &entry) {
            return static_cast<bool>(entry->viewPrepare);
          });
 }
@@ -3220,6 +3275,12 @@ std::expected<void, TreeError> ManagedScene::prepareViews(Application &app, cons
   } guard{preparing_};
 
   preparing_ = true;
+
+  auto dialogs = prepareDialogs();
+  if (!dialogs) {
+    remember(error(ManagedPhase::PREPARE, root_, dialogs.error()));
+    return dialogs;
+  }
 
   for (const auto &entry : entries_) {
     if (!entry->viewPrepare) {
@@ -3289,6 +3350,12 @@ std::expected<bool, TreeError> ManagedScene::input(Application &app, const Input
 
   try {
     // Pin the callback even if it replaces the interceptor or closes its subtree.
+    if (modalDialogInput()) {
+      if (keys_) {
+        resetKeys(*keys_->pending);
+      }
+      return false;
+    }
     auto callback = input_;
 
     if (!callback) {
@@ -3321,8 +3388,8 @@ std::expected<void, ManagedError> ManagedScene::close() {
     return std::unexpected(error(ManagedPhase::CLEANUP, root_, TreeError::WRONG_THREAD));
   }
 
-  if (preparing_ || reporting_ || styling_ || closing_ || recoveringObservers_ || pruningObservers_ ||
-      observerCallbacks_ || (sessionActive_ && !stoppingSession_)) {
+  if (preparing_ || reporting_ || styling_ || closing_ || dialogOperation_ || collectingDialogs_ ||
+      recoveringObservers_ || pruningObservers_ || observerCallbacks_ || (sessionActive_ && !stoppingSession_)) {
     return std::unexpected(error(ManagedPhase::CLEANUP, root_, TreeError::WOULD_BLOCK));
   }
 
@@ -3364,6 +3431,7 @@ std::expected<void, ManagedError> ManagedScene::close() {
     dataStateOwner_->scene = nullptr;
   }
   dataStateOwner_.reset();
+  retireDialogs();
 
   for (const auto &record : liveText_) {
     record->origin->closed = true;
@@ -3453,7 +3521,7 @@ ManagedScene::finish(std::expected<ApplicationStats, ApplicationError> result) {
 
     if (failureDiagnostic_) {
       errors_[*failureDiagnostic_].error = failure;
-    } else {
+    } else if (!dialogPrimaryRecorded_) {
       bool invoked{};
 
       (void)recordError(failure, {}, std::source_location::current(), &invoked, true);

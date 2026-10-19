@@ -26,6 +26,7 @@
 | Расширение | [Собственный виджет](../../examples/custom_widget/main.cpp), [Meter](../../examples/custom_widget/meter.hpp), [фабрика сцены](../../examples/custom_widget/fluent_meter.hpp), `portals_custom_widget` | Final-виджет, подготовленное отображение, управляемая подготовка и функция ленивой сцены. |
 | Основы | [Списки из живого текста](../examples/guide_text_transforms.cpp), `portals_docs_text_transforms` | Черновик редактора → слова/графемы → виртуальные списки; [сборка и контракты](bindings-guide.md#live-text-transforms-ru). |
 | Расширение | [Вложенная scroll-форма](../examples/guide_nested_scroll.cpp), `portals_docs_nested_scroll` | Редактируемые поля, CheckBox с внутренним состоянием и вложенные полосы на рамках; [контракты](scroll-controls.md#nested-scroll-areas-ru). Собирается при включённых тестах. |
+| Расширение | [Modal-настройки](../examples/guide_dialog.cpp), `portals_docs_dialog` | Retained-диалог с редактированием, короткими open/dismiss и штатным cleanup; [контракты](dialogs.md). Собирается с тестами. |
 | Эксперимент | [Стили времени компиляции](compile-time-styles.md) | Необязательные дескрипторы и проверка PSS; для первой формы не требуются. |
 
 F10 завершает интерактивные примеры. Галерея, dashboard и собственный виджет

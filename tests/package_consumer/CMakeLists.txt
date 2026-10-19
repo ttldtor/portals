@@ -715,10 +715,13 @@ endif()
 add_test(NAME consumer.scroll-controls COMMAND portals_scroll_controls_consumer)
 set_tests_properties(consumer.scroll-controls PROPERTIES TIMEOUT 15)
 
-# Finite nested-scroll integration and the exact maintained native guide.
+# Installed-only nested-scroll and dialog composition, including the exact maintained native guides.
 add_executable(portals_nested_scroll_consumer nested_scroll.cpp)
 add_executable(portals_nested_scroll_form_consumer "docs/examples/guide_nested_scroll.cpp")
-foreach(target IN ITEMS portals_nested_scroll_consumer portals_nested_scroll_form_consumer)
+add_executable(portals_dialog_consumer dialog.cpp)
+add_executable(portals_dialog_form_consumer "docs/examples/guide_dialog.cpp")
+foreach(target IN ITEMS portals_nested_scroll_consumer portals_nested_scroll_form_consumer
+    portals_dialog_consumer portals_dialog_form_consumer)
   target_link_libraries(${target} PRIVATE portals::core)
   set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF)
   if(MSVC)
@@ -732,3 +735,5 @@ foreach(target IN ITEMS portals_nested_scroll_consumer portals_nested_scroll_for
 endforeach()
 add_test(NAME consumer.nested-scroll COMMAND portals_nested_scroll_consumer)
 set_tests_properties(consumer.nested-scroll PROPERTIES TIMEOUT 15)
+add_test(NAME consumer.dialog COMMAND portals_dialog_consumer)
+set_tests_properties(consumer.dialog PROPERTIES TIMEOUT 15)

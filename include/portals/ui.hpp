@@ -203,6 +203,14 @@ struct Access {
     return scene.lifetime_;
   }
 
+  /// @cond INTERNAL
+  static std::expected<Node<Widget>, ManagedError> dialogPanel(ManagedScene &scene, Node<Dialog> node,
+                                                               BorderOptions options) {
+    return scene.makeDialogPanel(node, options);
+  }
+
+  /// @endcond
+
   /** @brief Mount a root or child inside the same transaction.
    * @tparam T Public Widget subtype constructed by the
    * recipe.
@@ -668,6 +676,33 @@ public:
     return focusOperation(&ManagedScene::focus, origin);
   }
 
+  /** @param origin Activation call site retained by the existing callback error collector.
+   * @return Checked activation; ignored failures in an admitted short callback remain reported once.
+   */
+  DialogCommandResult open(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, Dialog>
+  {
+    return detail::dialogCommand(target(), true, origin);
+  }
+
+  /** @param origin Dismissal call site retained by the existing callback error collector.
+   * @return Checked dismissal; a closed layer is a no-op and admitted callbacks never replay.
+   */
+  DialogCommandResult dismiss(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, Dialog>
+  {
+    return detail::dialogCommand(target(), false, origin);
+  }
+
+  /** @return Effective activation, or exact affinity/lifetime/identity failure without reporting. */
+  std::expected<bool, ManagedError> opened() const
+    requires std::same_as<T, Dialog>
+  {
+    auto observation = target();
+    auto owner = detail::eventScene(observation);
+    return owner ? (*owner)->dialogOpened(observation->node) : std::unexpected(owner.error());
+  }
+
   /** @param origin Focus-entry call site retained in managed diagnostics.
    * @return Checked focus-only scope entry, saving a return record; no input trap is installed.
    * Published callback errors retain entry and can be followed by leaveFocusScope().
@@ -818,6 +853,7 @@ private:
   friend struct detail::LayoutAccess;
   friend struct detail::NamedAccess;
   friend class DynamicRef;
+  template <class U> friend class Description;
 
   std::expected<void, ManagedError>
   focusOperation(std::expected<void, ManagedError> (ManagedScene::*operation)(Node<Widget>),
@@ -1231,6 +1267,36 @@ public:
     return std::move(*this).storeReference(std::move(reference));
   }
 
+  /** @tparam U Public widget type of the ordinary-body anchor.
+   * @param reference Weak observing slot resolved after the entire cold mount, before publication.
+   * @param placement Preferred ABOVE_START/BELOW_START position; CENTER retains centered placement.
+   * @return Consuming dialog recipe; foreign/dialog-owned/stale anchors fail without partial publication.
+   */
+  template <class U>
+  Description &&anchor(const Ref<U> &reference, DialogPlacement placement = DialogPlacement::BELOW_START) &&
+    requires std::same_as<T, Dialog>
+  {
+    if (state_) {
+      state_->anchor = reference.target();
+      state_->placement = placement;
+      state_->anchorRequested = true;
+    }
+    return std::move(*this);
+  }
+
+  /** @tparam Callback Copyable void or expected<void,TreeError> callback taking DialogDismissReason.
+   * @param callback Owning action admitted once after published dismissal; teardown invokes no action.
+   * @return Consuming dialog recipe using the scene-owned callback lifetime.
+   */
+  template <class Callback>
+  Description &&onDismiss(Callback callback) &&
+    requires std::same_as<T, Dialog>
+  {
+    return std::move(*this).setup([callback = std::move(callback)](ManagedScene &scene, Node<T> node) mutable {
+      return scene.onDismiss(node, std::move(callback));
+    });
+  }
+
   /** @param target Owning style identity, staged through ManagedScene::style.
    * @return This consuming recipe for chaining.
    */
@@ -1459,9 +1525,12 @@ private:
     std::vector<Setup<T>> setup = std::vector<Setup<T>>(0);          ///< Customization actions in modifier order.
     std::vector<Child> children = std::vector<Child>(0);             ///< Consuming child adapters in insertion order.
     std::vector<NodeRef<T>> references = std::vector<NodeRef<T>>(0); ///< Observing slots reserved for this node.
-    bool focusScope{};             ///< Register before setup/children; scene owns its token.
-    bool focusDefault{};           ///< Set the nearest registered scope's default before children.
-    std::optional<std::string> id; ///< Compact recipe identity preserved by later style modifiers.
+    bool focusScope{};                         ///< Register before setup/children; scene owns its token.
+    bool focusDefault{};                       ///< Set the nearest registered scope's default before children.
+    std::optional<std::string> id;             ///< Compact recipe identity preserved by later style modifiers.
+    std::shared_ptr<detail::RefTarget> anchor; ///< Cold same-attempt body anchor, without widget ownership.
+    DialogPlacement placement{DialogPlacement::BELOW_START}; ///< Configured anchor preference.
+    bool anchorRequested{}; ///< Distinguish an absent modifier from an empty moved observing slot.
   };
 
   /** @brief Allocate recipe storage and take ownership of its constructor adapter.
@@ -1606,6 +1675,34 @@ private:
 
       if (!mounted) {
         return std::unexpected(mounted.error());
+      }
+    }
+
+    if constexpr (std::same_as<T, Dialog>) {
+      if (state->anchorRequested) {
+        context.finalize.push_back([&scene, &context, node = *node, target = state->anchor,
+                                    placement = state->placement]() -> std::expected<void, ManagedError> {
+          const auto *resolved = target.get();
+          if (!resolved) {
+            return std::unexpected(detail::error(node, TreeError::CLOSED));
+          }
+          for (const auto &pending : context.pending) {
+            if (pending.identity == target.get()) {
+              resolved = &pending.target;
+              break;
+            }
+          }
+          if (resolved->owner != std::this_thread::get_id()) {
+            return std::unexpected(detail::error(node, TreeError::WRONG_THREAD));
+          }
+          if (resolved->failure) {
+            return std::unexpected(*resolved->failure);
+          }
+          if (resolved->lifetime.expired()) {
+            return std::unexpected(detail::error(node, TreeError::CLOSED));
+          }
+          return scene.dialogAnchor(node, resolved->node, placement);
+        });
       }
     }
 
@@ -2936,6 +3033,173 @@ template <class... Args>
   requires requires(Args &&...args) { column(std::forward<Args>(args)...); }
 auto vbox(Args &&...args) {
   return column(std::forward<Args>(args)...);
+}
+
+/** @brief Compose a retained host with one ordinary body and initially closed dialog layers.
+ * @tparam Body Consuming ordinary-body description.
+ * @tparam Layers Consuming dialog descriptions, registered in declaration order.
+ * @param options Positive owning layer budget, including closed layers.
+ * @param body Ordinary content retained across every open/dismiss cycle.
+ * @param layers Dialog recipes mounted in the same complete transaction.
+ * @return Single-use host recipe; any child/finalization failure retires the whole unpublished subtree.
+ */
+template <detail::DescriptionInput Body, detail::DescriptionInput... Layers>
+  requires(std::same_as<std::remove_cvref_t<Layers>, Description<Dialog>> && ...)
+Description<OverlayHost> overlayHost(OverlayHostOptions options, Body &&body, Layers &&...layers) {
+  return detail::Access::cold<OverlayHost>(
+    [options, body = std::forward<Body>(body), layers = std::tuple(std::forward<Layers>(layers)...)](
+      ManagedScene &scene, Node<Widget> parent,
+      detail::MountContext &context) mutable -> std::expected<Node<OverlayHost>, ManagedError> {
+      auto host = scene.emplace<OverlayHost>(parent, options);
+      if (!host) {
+        return std::unexpected(host.error());
+      }
+      if (context.root == Node<Widget>{}) {
+        context.root = *host;
+      }
+      auto content = detail::Access::mount(std::move(body), scene, *host, context);
+      if (!content) {
+        return std::unexpected(content.error());
+      }
+      auto bound = scene.overlayHost(*host, *content);
+      if (!bound) {
+        return std::unexpected(bound.error());
+      }
+      auto styled = scene.style(*host, StyleTarget{.type = "OverlayHost", .classes = {"overlay-host"}});
+      if (!styled) {
+        return std::unexpected(styled.error());
+      }
+      std::expected<void, ManagedError> result;
+      std::apply(
+        [&](auto &...layer) {
+          const auto mount = [&](auto &recipe) {
+            if (result) {
+              auto child = detail::Access::mount(std::move(recipe), scene, *host, context);
+              if (!child) {
+                result = std::unexpected(child.error());
+              }
+            }
+          };
+          (mount(layer), ...);
+        },
+        layers);
+      return result ? host : std::unexpected(result.error());
+    });
+}
+
+/** @tparam Body Consuming ordinary-body recipe.
+ * @tparam Layers Consuming dialog recipes.
+ * @param body Retained ordinary content.
+ * @param layers Initially closed layers.
+ * @return Host with the default maximum of 32 registered layers.
+ */
+template <detail::DescriptionInput Body, detail::DescriptionInput... Layers>
+  requires(std::same_as<std::remove_cvref_t<Layers>, Description<Dialog>> && ...)
+Description<OverlayHost> overlayHost(Body &&body, Layers &&...layers) {
+  return overlayHost(OverlayHostOptions{}, std::forward<Body>(body), std::forward<Layers>(layers)...);
+}
+
+/** @tparam Body Consuming ordinary-body recipe.
+ * @tparam Layers Consuming dialog recipes.
+ * @param reference Empty host observation published with the complete mount.
+ * @param body Retained ordinary content.
+ * @param layers Initially closed layers.
+ * @return Default host recipe publishing the optional observation.
+ */
+template <detail::DescriptionInput Body, detail::DescriptionInput... Layers>
+  requires(std::same_as<std::remove_cvref_t<Layers>, Description<Dialog>> && ...)
+Description<OverlayHost> overlayHost(Ref<OverlayHost> reference, Body &&body, Layers &&...layers) {
+  return overlayHost(std::forward<Body>(body), std::forward<Layers>(layers)...).reference(std::move(reference));
+}
+
+/** @brief Compose a reusable initially closed dialog with a standard title and opaque panel.
+ * @tparam Body Consuming application content recipe.
+ * @param title Owning text expression resolved once with the scene's complete width policy.
+ * @param body Retained content; opening never remounts it.
+ * @param options Immutable panel geometry/input settings.
+ * @return Single-use layer recipe, requiring an enclosing declared overlayHost.
+ */
+template <detail::DescriptionInput Body>
+Description<Dialog> dialog(TextValue title, Body &&body, DialogOptions options = {}) {
+  auto heading = label(std::move(title)).style(StyleTarget{.type = "Label", .classes = {"dialog-title"}});
+  auto content = column(std::forward<Body>(body)).style(StyleTarget{.type = "Column", .classes = {"dialog-body"}});
+  return detail::Access::cold<Dialog>(
+    [options, heading = std::move(heading),
+     content = std::move(content)](ManagedScene &scene, Node<Widget> parent,
+                                   detail::MountContext &context) mutable -> std::expected<Node<Dialog>, ManagedError> {
+      auto valid = Dialog::validate(options);
+      if (!valid) {
+        return std::unexpected(detail::error(parent, valid.error()));
+      }
+      auto root = scene.emplace<Dialog>(parent, options);
+      if (!root) {
+        return std::unexpected(root.error());
+      }
+      if (context.root == Node<Widget>{}) {
+        context.root = *root;
+      }
+      auto panel = detail::Access::dialogPanel(scene, *root, options.frame);
+      if (!panel) {
+        return std::unexpected(panel.error());
+      }
+      context.nodes.push_back(*panel);
+      auto column = scene.emplace<Column>(*panel);
+      if (!column) {
+        return std::unexpected(column.error());
+      }
+      context.nodes.push_back(*column);
+      auto titleNode = detail::Access::mount(std::move(heading), scene, *column, context);
+      if (!titleNode) {
+        return std::unexpected(titleNode.error());
+      }
+      auto mounted = detail::Access::mount(std::move(content), scene, *column, context);
+      if (!mounted) {
+        return std::unexpected(mounted.error());
+      }
+      auto bound = scene.dialog(*root, *panel, *mounted);
+      if (!bound) {
+        return std::unexpected(bound.error());
+      }
+      auto styled = scene.style(
+        *root,
+        StyleTarget{.type = "Dialog", .classes = {"dialog", options.mode == DialogMode::MODAL ? "modal" : "nonmodal"}});
+      return styled ? root : std::unexpected(styled.error());
+    });
+}
+
+/** @tparam Body Consuming application content recipe.
+ * @param reference Empty weak observation published after complete mount and anchor finalization.
+ * @param title Owning title expression.
+ * @param body Retained panel content.
+ * @param options Immutable panel/input settings.
+ * @return Standard reusable dialog recipe with its optional Ref.
+ */
+template <detail::DescriptionInput Body>
+Description<Dialog> dialog(Ref<Dialog> reference, TextValue title, Body &&body, DialogOptions options = {}) {
+  return dialog(std::move(title), std::forward<Body>(body), options).reference(std::move(reference));
+}
+
+/** @tparam Body Consuming application content recipe.
+ * @param title Literal UTF-8 title copied into an owning expression immediately.
+ * @param body Retained content inside the panel.
+ * @param options Immutable geometry/input settings.
+ * @return Same standard initially closed dialog recipe.
+ */
+template <detail::DescriptionInput Body>
+Description<Dialog> dialog(std::string_view title, Body &&body, DialogOptions options = {}) {
+  return dialog(TextValue(title), std::forward<Body>(body), options);
+}
+
+/** @tparam Body Consuming application content recipe.
+ * @param reference Weak observation published only with a complete mount.
+ * @param title Literal UTF-8 title copied immediately.
+ * @param body Retained content.
+ * @param options Immutable panel/input settings.
+ * @return Same standard dialog recipe with its optional observation.
+ */
+template <detail::DescriptionInput Body>
+Description<Dialog> dialog(Ref<Dialog> reference, std::string_view title, Body &&body, DialogOptions options = {}) {
+  return dialog(std::move(reference), TextValue(title), std::forward<Body>(body), options);
 }
 
 /** @brief Owning compact size stage; uses the same methods and existing solver as ordinary composition. */

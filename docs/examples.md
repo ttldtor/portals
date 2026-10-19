@@ -28,6 +28,7 @@ The categories describe the learning path; the source directories remain stable.
 | Customization | [custom widget](../examples/custom_widget/main.cpp), [meter](../examples/custom_widget/meter.hpp), [scene factory](../examples/custom_widget/fluent_meter.hpp), `portals_custom_widget` | A final widget, retained painting, managed presentation and a function returning a lazy scene. |
 | Basics | [live text lists](examples/guide_text_transforms.cpp), `portals_docs_text_transforms` | Native editor draft → words/graphemes → virtual lists; [build and contracts](bindings-guide.md#live-text-transforms). |
 | Customization | [nested scroll form](examples/guide_nested_scroll.cpp), `portals_docs_nested_scroll` | Editable fields, internal-state checkboxes and nested frame-edge bars; [contracts](scroll-controls.md#nested-scroll-areas). Built with tests enabled. |
+| Customization | [modal settings](examples/guide_dialog.cpp), `portals_docs_dialog` | Retained editable dialog, inline open/dismiss and ordinary cleanup; [contracts](dialogs.md). Built with tests enabled. |
 | Experimental | [compile-time styles](compile-time-styles.md) | Compile-time descriptors and PSS checking: optional advanced material, not prerequisites for a form. |
 
 F10 exits the interactive programs. The gallery, custom widget and dashboard

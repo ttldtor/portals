@@ -511,12 +511,18 @@ private:
   std::expected<Node<Widget>, TreeError> inputParent(Node<Widget> node) const;
   // Allocation-free full identity/visible ancestry admission; disabled nodes remain revealable.
   std::expected<bool, TreeError> revealVisible(Node<Widget> node) const;
+  std::expected<std::uint64_t, TreeError> inputRevision(Node<Widget> node) const;
+  std::expected<bool, TreeError> inputEligible(Node<Widget> node, Node<Widget> reveal) const;
   friend class ManagedScene;
+  // Managed overlay publication only: exact same-parent permutation and one visibility bit.
+  std::expected<void, TreeError> commitOverlay(Node<Widget> host, Node<Widget> body, Node<Widget> layer,
+                                               std::span<const Node<Widget>> order, bool visible);
 
   // Allocation-free owning observation for the managed final-layout bridge; no children or record pointers escape.
   struct GeometryObservation {
     NodeGeometry geometry;
     std::uint64_t visibilityRevision{};
+    bool visible{};
   };
 
   std::expected<GeometryObservation, TreeError> observeGeometry(Node<Widget> node) const;

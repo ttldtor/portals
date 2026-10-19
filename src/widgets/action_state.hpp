@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include "dialog_state.hpp"
 #include "scroll_intent.hpp"
 #include <atomic>
 #include <optional>
@@ -27,6 +28,14 @@ struct FocusReturnRegistration {
   Node<Widget> previous;
   std::vector<Node<Widget>> previousScopes;
   std::shared_ptr<ActionCancellation> cancellation;
+  bool dialog{};
+};
+
+struct FocusChange {
+  Node<Widget> previous;
+  Node<Widget> next;
+  std::vector<Node<Widget>> ancestry = std::vector<Node<Widget>>(0);
+  std::unique_ptr<FocusReturnRegistration> entry;
 };
 
 struct ActionRegistration {
@@ -117,5 +126,7 @@ struct EventRouter::State {
   bool deliveringFocus{};
   bool collecting{};
   bool closing{};
+  bool dialogCancelRepeat{};
+  std::weak_ptr<detail::DialogHostRecord> dialogs;
 };
 } // namespace portals
