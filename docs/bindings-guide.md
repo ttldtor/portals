@@ -67,8 +67,11 @@ auto snapshot = field.text().get();
 
 Both `accepted` and `snapshot` require a success check before their values can be read. `get()` returns owning bytes
 and does not report errors automatically. Mutation preserves typed errors and
-reports through a live scene collector where applicable. A rejected text candidate
-preserves the previous text. `+=` appends to the complete draft/caption rather
+reports through a live scene collector where applicable. A technical rejection
+preserves the previous text. An accepted editor candidate can still fail semantic
+validation or model publication: the new draft remains visible, `.result()` reports
+successful acceptance, and `LineEditResult` reports the validation or publication
+outcome. See [text mutation results](text-property.md). `+=` appends to the complete draft/caption rather
 than replacing the editor selection. The receiving control still validates text
 against its width policy and limits.
 
@@ -218,7 +221,7 @@ still require writable state for their two-way bindings.
 
 [Complete program](examples/docs_derive.cpp): edit the name to update both the label
 and button caption. Click the button or press F10 to close the scene. Build
-`portals_docs_derive` with examples enabled. Setup failures flow through the scene
+`portals_docs_derive` with `PORTALS_BUILD_TESTS=ON`. Setup failures flow through the scene
 factory's `expected` result to the existing runner.
 
 \include{lineno} docs_derive.cpp
@@ -266,8 +269,11 @@ Every output is fresh and read-only, so declared dependency cycles cannot be
 constructed. Arbitrary captured side effects are not tracked; bounded
 nonconvergence returns `WOULD_BLOCK` and does not diagnose a hidden graph cycle.
 `Ref::draftText()`, `captionText()` and `committedText()` are snapshot-only text
-sources and are not reactive derive inputs. Live text and derived-list/model
-adapters remain separate planned work.
+sources and are not reactive derive inputs on their own. `owner.liveText(source)`
+provides a reactive bridge. Text-to-list adapters through `ui::words` and
+`ui::graphemes`, and derived `RowCollection<T>` sources through `owner.model`,
+are also available; see [the examples below](#live-text-transforms).
+General binding expressions remain planned.
 
 ## Event interfaces
 
@@ -342,8 +348,9 @@ For complete programs and failure paths, read
 The [property reference](property.md) specifies ownership, backpressure and
 cancellation; [declarative composition](declarative-ui.md) specifies runner reporting.
 
-**TBD — M2:** derived binding facilities. The future expression
-syntax, dependency graph and cycle policy are not presented as working features.
+**TBD — M2:** general binding expressions. Expression syntax and a generalized
+dependency graph with cycle handling remain planned; the unary `owner.derive`
+API described above is available.
 Typed live theme parameters are already available through explicit UI updates;
 see [themes](themes-guide.md). Their existence does not imply automatic domain
 or string-PSS variable binding.
@@ -419,6 +426,10 @@ recipe, including later siblings, and initializes the private graph before
 publishing references. An initial failure rolls back the attempted mount. The
 scene owns synchronization and cleanup; application code needs no timer,
 subscription token or manual revision counter.
+
+Mounting a cold text-to-list recipe preserves the ID, classes and nonempty type
+assigned through `.id()` or `.style()`. It supplies the default `List` type when
+no type was assigned, so named lookup and selectors can use the retained identity.
 
 A clean editor bound to an externally updated string state synchronizes before
 the live transforms and list models are prepared for that dirty frame. Both

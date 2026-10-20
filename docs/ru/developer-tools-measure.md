@@ -3,7 +3,7 @@
 [Английская версия](../developer-tools-measure.md) · [Каталог инструментов](developer-tools.md)
 
 <a id="tool-change-impact-ru"></a>
-## Измерить includes и rebuild footprint
+## Измерить зависимости заголовков и объём пересборки
 
 `tools/quality/change_impact.py` читает зависимости существующей Ninja-сборки.
 Для каждого `--changed` он показывает наблюдавшиеся затронутые compile outputs,
@@ -206,7 +206,8 @@ MVP `--transport native` открывает терминал; остальные
 
 ### Компактное создание объектов
 
-[compact.cpp](../../tools/benchmarks/compact.cpp) не разбирает аргументы.
+[compact.cpp](../../tools/benchmarks/compact.cpp) поддерживает отдельный `--help`
+или `-h`, но не имеет настроек нагрузки.
 Запустите `./build/tools/portals_compact_benchmark.exe`; JSON поступает в
 стандартный вывод. Программа выполняет три прогревочных запуска и 30
 измерений. Код `0` означает успех, `1` — перехваченную ошибку.

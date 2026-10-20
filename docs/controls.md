@@ -32,7 +32,7 @@ Enter mapped by `EventRouter`, unmodified `TextInputEvent` with scalar `U' '`, o
 left mouse **press**. A release does not activate again. Motion, paste, other text
 and modified gestures are ignored. Native key repeats mapped to separate activate
 events are separate activations; this component does not infer physical key holds.
-There is no persistent pressed/hover state or pointer capture at this stage.
+These basic controls do not maintain persistent pressed/hover state or pointer capture.
 
 Hidden or disabled subtrees are excluded by the real router. Callbacks may remove
 the current widget or its ancestor and may destroy their token. Existing router
@@ -97,8 +97,7 @@ Decorations are rebuilt under the text's complete width policy when text changes
 
 Controls submit **local** commands. The frame owner translates origins/areas and
 clips by `NodeGeometry::surface`, intersects with `NodeGeometry::clip`, and calls
-`renderFullFrame` before leaving `tree.frame`. The example's `SurfaceSink` shows
-that adapter for both text and fills. Borrowed commands/text must not escape the
+`renderFullFrame` before leaving `tree.frame`. Borrowed commands/text must not escape the
 frame; the resulting owning `CellBuffer` may be submitted to `FrameWriter` after it.
 
 ## Run the gallery

@@ -71,7 +71,7 @@ view. `openRange()` remains the existing low-level model consumer.
 
 ## Complete installed consumer
 
-The [installed-package consumer](https://github.com/ttldtor/portals/blob/main/tests/package_consumer/query.cpp) filters
+The [installed-package consumer](../tests/package_consumer/query.cpp) filters
 prices, sorts descending, requests two rows, dispatches the scheduler, checks
 source and projection provenance and full row identities, then closes.
 The same file contains its complete immutable source implementation.

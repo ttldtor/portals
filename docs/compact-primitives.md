@@ -107,8 +107,9 @@ This complete example gives the button owning constructor defaults and an exact-
 application style. `ui::style(ref, pss)` copies its source before deferred mounting;
 its application layer overrides theme declarations and survives theme replacement.
 The `*` selector still matches only the referenced node because the layer has an
-exact node scope. Scoping does not change selector matching: built-in Button style
-metadata uses type `Control`, so `Button` needs explicitly supplied metadata.
+exact node scope. Scoping does not change selector matching: a managed Button
+automatically has type `Button` and also matches `Control` selectors. Explicit
+metadata follows the [style target contract](styles.md).
 An unsuccessful factory publishes neither its refs nor a partial scoped style;
 the same Ref and owning style stage can be used in a fresh scene.
 

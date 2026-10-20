@@ -71,10 +71,57 @@ def relative_url(current, target):
 
 
 def normalized_anchor(anchor, code):
-    if anchor.startswith("autotoc_md"):
+    if anchor.startswith(("autotoc_md", "md_")):
         return None
     anchor = anchor.replace(f"md_docs_2{code}_2", "md_docs_2")
     return anchor.removesuffix("-" + code) if code != "en" else anchor
+
+
+def page_fragment(fragment, page):
+    """Drop only Doxygen's generated whole-page anchor, preserving real sections."""
+    generated = "md_" + page["source"][:-3].replace("/", "_2")
+    return "" if fragment == generated else fragment
+
+
+def navigation_links(content, directory, by_url):
+    """Normalize generated navigation values without rewriting index object keys."""
+    def replace(match):
+        path, fragment = match[2], match[3]
+        destination = by_url.get(posixpath.normpath(posixpath.join(directory, path)))
+        if destination and not page_fragment(fragment, destination):
+            return match[1] + path + match[1]
+        return match[0]
+    return re.sub(r'''(["'])([^"']+\.html)#(md_[^"']+)\1''', replace, content)
+
+
+def public_type_index(directory):
+    """Keep detail namespaces in a separate full index without removing API pages."""
+    index = directory / "annotated.html"
+    if not index.is_file():
+        return
+    content = index.read_text(encoding="utf-8")
+    marker = '<!-- portals-public-types -->'
+    if marker in content:
+        return
+    rows = re.findall(r'<tr\b[^>]*>.*?</tr>', content, flags=re.S)
+    prefixes = []
+    for row in rows:
+        if re.search(r'<span class="icon">N</span>.*?<b>detail</b>', row, flags=re.S):
+            identity = re.search(r'\bid="(row_[^"]+)"', row)
+            if identity:
+                prefixes.append(identity[1])
+    if not prefixes:
+        return
+    full = directory / "annotated-all.html"
+    full.write_text(content, encoding="utf-8")
+    for row in rows:
+        identity = re.search(r'\bid="(row_[^"]+)"', row)
+        if identity and any(identity[1].startswith(prefix) for prefix in prefixes):
+            content = content.replace(row, '')
+    notice = (marker + '<p class="portals-api-index-note">This index omits implementation detail namespaces. '
+              '<a href="annotated-all.html">All types, including implementation details</a>.</p>')
+    content = re.sub(r'(<div class="contents">)', r'\1' + notice, content, count=1)
+    index.write_text(content, encoding="utf-8")
 
 
 def anchor_map(current, target, source_code, target_code):
@@ -119,6 +166,19 @@ def redirect(path, target):
                     + '">Continue / Продолжить</a></body></html>', encoding="utf-8")
 
 
+def development_label(content):
+    """Keep the header compact while exposing the complete build identity."""
+    def compact(match):
+        value = html.unescape(match[1]).strip()
+        label = re.fullmatch(r"(\d+\.\d+\.\d+ · dev) \(([0-9a-f]+) · (\d{4}-\d{2}-\d{2}) UTC\)", value)
+        if not label:
+            return match[0]
+        return (f'<span id="projectnumber" title="{html.escape(value, quote=True)}">'
+                f'<span aria-hidden="true">&#160;{label[1]}</span>'
+                f'<span class="portals-visually-hidden">{html.escape(value)}</span></span>')
+    return re.sub(r'<span id="projectnumber">(.*?)</span>', compact, content)
+
+
 def finalize_languages(root, source, tag_files):
     """Assemble language navigation after all locale builds have completed."""
     config = json.loads((source / "docs/languages.json").read_text(encoding="utf-8"))
@@ -142,6 +202,10 @@ def finalize_languages(root, source, tag_files):
             if code != default:
                 aliases[page["legacy"]] = page
     contents = {url: (root / url).read_text(encoding="utf-8") for url in by_url}
+    public_type_index(root / locales[default]["directory"])
+    api_urls = {compound.findtext("filename")
+                for compound in ET.parse(tag_files[default]).getroot().findall("compound")
+                if compound.get("kind") in {"class", "struct", "concept", "namespace", "file"}}
     for code, locale in locales.items():
         directory = root / locale["directory"]
         (directory / "language-switch.js").write_text(SWITCH_SCRIPT, encoding="utf-8")
@@ -150,6 +214,7 @@ def finalize_languages(root, source, tag_files):
             page = by_url.get(current)
             content = path.read_text(encoding="utf-8")
             content = re.sub(r'<nav class="portals-languages".*?</nav>', '', content, flags=re.S)
+            content = content.replace('<script src="appearance.js"></script>\n', '')
             content = content.replace('<script src="language-switch.js" defer></script>\n', '')
 
             def link(match):
@@ -165,7 +230,8 @@ def finalize_languages(root, source, tag_files):
                 if candidate is None:
                     return match[0]
                 resolved = relative_url(current, candidate["url"])
-                return match[1] + html.escape(urlunsplit(("", "", resolved, url.query, url.fragment)), quote=True) + '"'
+                fragment = page_fragment(url.fragment, candidate)
+                return match[1] + html.escape(urlunsplit(("", "", resolved, url.query, fragment)), quote=True) + '"'
 
             content = re.sub(r'(\bhref=")([^"]+)"', link, content)
             if code != default:
@@ -175,6 +241,13 @@ def finalize_languages(root, source, tag_files):
                         return match[0]
                     url = posixpath.normpath(posixpath.join(locale["directory"], target.path))
                     destination = by_url.get(url)
+                    if url in api_urls:
+                        opening = match[1]
+                        if 'hreflang=' not in opening:
+                            opening = opening[:-1] + ' hreflang="en">'
+                        if 'title=' not in opening:
+                            opening = opening[:-1] + ' title="C++ API reference (English)">'
+                        return opening + match[3] + '</a>'
                     label = html.unescape(re.sub(r'<[^>]*>', '', match[3]))
                     marked = re.search(r'\b(?:English|EN|английск\w*)\b', label, flags=re.I)
                     if not destination or destination["code"] != default or marked:
@@ -186,23 +259,49 @@ def finalize_languages(root, source, tag_files):
             controls = [f'<nav class="portals-languages" aria-label="{label}">']
             for other, alternative in locales.items():
                 name = html.escape(alternative["name"])
+                short_name = html.escape(other.upper())
                 counterpart = pages[other].get(page["topic"]) if page else None
                 if other == code:
-                    controls.append(f'<span lang="{other}" aria-current="page">{name}</span>')
+                    controls.append(f'<a lang="{other}" href="{relative_url(current, current)}" '
+                                    f'aria-current="page" title="{name}" aria-label="{name}">{short_name}</a>')
                 elif counterpart:
                     target = relative_url(current, counterpart["url"])
                     mapping = anchor_map(contents[current], contents[counterpart["url"]], code, other)
-                    controls.append(f'<a lang="{other}" hreflang="{other}" href="{target}" '
+                    controls.append(f'<a lang="{other}" hreflang="{other}" href="{target}" title="{name}" aria-label="{name}" '
                                     f'data-language-page="{target}" data-language-anchors="'
-                                    + html.escape(json.dumps(mapping), quote=True) + f'">{name}</a>')
+                                    + html.escape(json.dumps(mapping), quote=True) + f'">{short_name}</a>')
+                elif page is None and other != default:
+                    target = relative_url(current, posixpath.join(alternative["directory"], "index.html"))
+                    title = f'{alternative["name"]}: guides (this API reference is English-only)'
+                    return_label = f'{alternative["name"]}: guides'
+                    if other == "ru":
+                        title = "Русские руководства; справочник C++ API доступен на английском"
+                        return_label = "Русские руководства"
+                    controls.append(f'<a lang="{other}" hreflang="{other}" href="{target}" '
+                                    f'title="{html.escape(title, quote=True)}" '
+                                    f'aria-label="{html.escape(return_label, quote=True)}">{short_name}</a>')
                 else:
                     missing = "перевода нет" if code == "ru" else "translation unavailable"
-                    controls.append(f'<span lang="{other}">{name} ({missing})</span>')
-            controls.append('</nav>')
+                    controls.append(f'<span lang="{other}" title="{name} ({missing})" aria-label="{name} ({missing})">{short_name}</span>')
+            theme_label = "Цветовая схема" if code == "ru" else "Color scheme"
+            next_label = "Следующая" if code == "ru" else "Next"
+            theme_names = ("Системная", "Светлая", "Тёмная") if code == "ru" else ("System", "Light", "Dark")
+            controls.append(f'<button type="button" class="portals-appearance" hidden '
+                            f'data-label="{theme_label}" data-next-label="{next_label}" '
+                            + " ".join(f'data-{value}="{name}"'
+                                       for value, name in zip(("system", "light", "dark"), theme_names))
+                            + '></button></nav>')
             # The native links work without JavaScript; script only adds mapped hashes.
             content = re.sub(r'(<div id="titlearea">)', r'\1' + "".join(controls), content, count=1)
-            content = content.replace('</head>', '<script src="language-switch.js" defer></script>\n</head>', 1)
-            path.write_text(content, encoding="utf-8")
+            content = content.replace('</head>', '<script src="appearance.js"></script>\n<script src="language-switch.js" defer></script>\n</head>', 1)
+            path.write_text(development_label(content), encoding="utf-8")
+        for path in directory.glob("*.js"):
+            if path.name.startswith("navtreeindex"):
+                continue
+            original = path.read_text(encoding="utf-8")
+            rewritten = navigation_links(original, locale["directory"], by_url)
+            if rewritten != original:
+                path.write_text(rewritten, encoding="utf-8")
     for legacy, page in aliases.items():
         if legacy in by_url:
             raise ValueError("Translated legacy URL conflicts with an English page: " + legacy)

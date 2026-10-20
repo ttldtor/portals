@@ -157,6 +157,9 @@ Description<HelpView> KeyHelpAccess::full(Ref<HelpView> reference, HelpViewOptio
     if (!root) {
       return root;
     }
+    if (context.root == Node<Widget>{}) {
+      context.root = *root;
+    }
     record->root = *root;
     auto scope = scene.focusScope(*root);
     if (!scope) {
@@ -181,7 +184,7 @@ Description<HelpView> KeyHelpAccess::full(Ref<HelpView> reference, HelpViewOptio
         }
         record->body = *body;
         return body;
-      });
+      }).style(StyleTarget{.type = "HelpView", .classes = {"help-body"}});
     auto area = Access::mount(scrollArea(std::move(content)), scene, *root, context);
     if (!area) {
       return std::unexpected(area.error());

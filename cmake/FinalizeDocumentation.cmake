@@ -10,7 +10,7 @@ endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/FinalizeDiagrams.cmake")
 
-foreach(notice IN ITEMS vendor/pfr/LICENSE_1_0.txt vendor/doctest/LICENSE.txt vendor/lyra/LICENSE.txt vendor/lyra/manifest.json tests/fixtures/unicode/manifest.json)
+foreach(notice IN ITEMS vendor/pfr/LICENSE_1_0.txt vendor/doctest/LICENSE.txt vendor/lyra/LICENSE.txt vendor/lyra/manifest.json tests/fixtures/unicode/manifest.json vendor/doxygen-awesome/LICENSE)
   get_filename_component(notice_directory "${notice}" DIRECTORY)
   file(MAKE_DIRECTORY "${HTML_DIR}/${notice_directory}")
   configure_file("${CMAKE_CURRENT_LIST_DIR}/../${notice}" "${HTML_DIR}/${notice}" COPYONLY)

@@ -6,6 +6,9 @@
 /vendor/doctest/doctest.h -text
 /vendor/pfr/** -text
 /vendor/lyra/** -text
+# Preserve checksum-pinned upstream CSS, including its original whitespace.
+/vendor/doxygen-awesome/*.css -text -whitespace
+/vendor/doxygen-awesome/LICENSE -text
 /tests/fixtures/unicode/** -text
 
 # Generated documentation exports use byte-stable UTF-8/LF on every checkout.

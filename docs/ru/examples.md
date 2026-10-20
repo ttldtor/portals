@@ -220,6 +220,12 @@ cmake --build build/guide-examples
 
 Запустите `build/guide-examples/docs_basic.exe` в Windows или `build/guide-examples/docs_basic` в Linux/macOS. F10 закрывает интерактивные программы. Для сценариев редактора см. [демонстрацию истории](editor-history-demo.md).
 
+Обычная сборка из корня также компилирует все полные программы руководств при
+`PORTALS_BUILD_TESTS=ON`. После конфигурации соответствующего preset можно собрать
+только их: `cmake --build build/windows-msvc-debug --target portals_documented_examples`.
+Для другого preset укажите его каталог сборки. Эта цель только компилирует и
+компонует программы; терминальные окна она не открывает.
+
 
 [Руководство по обычной прокрутке](scroll-controls.md) собирается в `guide_scroll_controls`:
 восемь кнопок в области высотой пять строк, wheel/key/drag и выход через Exit/F10.

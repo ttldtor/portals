@@ -20,6 +20,13 @@ through the normal runner. These keys are explicitly chosen by the application;
 neither control installs hidden open, close or quit bindings. The buttons disable
 Save or change its shortcut. The hints and help reflect both changes.
 
+The help body is registered for style resolution as `HelpView.help-body`.
+Its supplied `ControlStyle` provides manual defaults beneath matching theme and
+application rules; without a computed style, painting uses its normal manual
+default. Styling the outer HelpView wrapper does not automatically style the body.
+KeyHints uses the disabled variant when it or an ancestor is disabled, before
+choosing focused or normal appearance.
+
 The compact handlers return the checked result from `help.open()`, `help.close()`
 and binding changes. Their failures then reach the
 existing managed error path. These commands return `std::expected`, not the

@@ -105,11 +105,22 @@ be copyable; move-only captures are not promised by this version.
 
 ## Styles and custom widgets
 
-Standard controls receive the existing `Control` style identity automatically.
+Managed Label, Button, CheckBox, LineEdit and KeyHints receive their natural style
+type names automatically; `ui::plainButton` uses `Button`. Their metadata also enables
+`Control` selector matching through `StyleTarget::control`. This flag adds one
+compatibility match; it does not introduce a type hierarchy. Custom Control
+subclasses retain the default `Control` type unless explicitly styled.
 Custom widgets use `scene.style(node, target)` and read `computedStyle()` while
 painting. Metadata is staged and installed as a batch. `theme(sheet)` uses the
 existing atomic style engine, flushing pending registrations before replacing
 the sheet. Explicit theme selection and initial focus remain application intent.
+
+Explicit `scene.style(node, target)` replaces the target metadata; `control`
+defaults to false for such targets. Set it explicitly to keep the additional
+`Control` match. The recipe `.style(target)` uses the same replacement contract,
+with its existing ID modifier rules; `.id()` preserves the other target fields.
+Completing a cold List, Table or Chart preserves its ID, classes and nonempty
+custom type, assigning the default type only when none was supplied.
 
 One style engine owns a node at a time. Do not bind the same managed node to an
 independent `StyleEngine`. The existing precedence remains widget defaults below

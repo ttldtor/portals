@@ -72,6 +72,17 @@ or contended records. Missing evidence cannot prove that an action did not happe
 See [Application](application.md), [terminal](terminal.md), [diff](diff.md) and
 [diagnostics](diagnostics.md) for the precise contracts.
 
+## Control style boundaries {#known-style-limitations}
+
+Automatic managed metadata supplies natural names for Label, Button, CheckBox,
+LineEdit and KeyHints, with an additional `Control` match. Explicit targets
+replace metadata and opt into this compatibility match with `control = true`.
+No C++ type hierarchy, inherited wrapper style or new PSS cascade is implied.
+See [style targets](styles.md) and [help body styling](key-help.md).
+
+Compilation and successful scene creation alone do not establish that the
+requested appearance was painted.
+
 ## Work after the MVP
 
 The optional [UiAsync adapter](ui-coroutines.md) supports bounded UI coroutines

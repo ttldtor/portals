@@ -17,7 +17,7 @@ identify a released version.
 | Scene text/file loader with allowlisted registry | Available — M1; [syntax and examples](scene-loading-guide.md) |
 | Text sources and shared caption state | Available; [shared state](bindings-guide.md) and [read-only sources](text-property.md) |
 | Managed state observation | Available; [latest-value delivery](bindings-guide.md#managed-observation) |
-| Derived state and binding expressions | Available for [unary managed sources](bindings-guide.md#managed-derivation); live text/list adapters remain planned |
+| Derived state and binding expressions | Available for [unary managed sources](bindings-guide.md#managed-derivation), live text, text-to-list adapters and derived `RowCollection<T>` models; general binding expressions remain planned |
 | PSS v1 selectors, parts and inheritance | **TBD — M5** |
 | Expanded theme tokens and computed dependency graph | **TBD — M5**; current typed LiveTheme parameters already exist |
 | Bounded runtime style expressions | **TBD — M5** |

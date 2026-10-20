@@ -246,7 +246,13 @@ std::expected<Node<W>, ManagedError> ManagedScene::attachView(Node<W> node,
 
     const char *type = std::same_as<W, Chart<T>> ? "Chart" : std::same_as<W, VirtualTable<T>> ? "Table" : "List";
 
-    entry->target = std::make_shared<StyleTarget>(StyleTarget{.type = type});
+    if (!entry->target || entry->target->type.empty()) {
+      auto target = entry->target ? *entry->target : StyleTarget{};
+
+      target.type = type;
+      entry->target = std::make_shared<StyleTarget>(target);
+    }
+
     entry->stylePending = true;
     stylesDirty_ = true;
 

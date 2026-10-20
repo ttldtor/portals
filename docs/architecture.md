@@ -2,6 +2,40 @@
 
 [Русская версия](ru/architecture.md)
 
+Portals is a C++23 retained terminal UI library. Start with the
+[complete application](application.md) for the fluent `ui::Scene` entry point:
+the facade owns the application and managed scene, builds the controls lazily,
+and runs the same scheduler/tree/router described here. [`Application`](../include/portals/application.hpp) owns one UI
+runtime and services its terminal synchronously on the creating thread. The
+scene owns application models, scoped bindings and providers. Workers may
+publish immutable data through bounded scheduler endpoints; they cannot edit
+the widget tree. [Getting started](getting-started.md) links a simple main and
+the runnable examples; [limitations](limitations.md) defines release boundaries.
+
+## Components and boundaries
+
+![Components and data flow](images/components.svg)
+
+| Component | Implemented responsibility |
+|---|---|
+| `Application` | Own scheduler/tree/router; coordinate bounded input, dispatch, preparation, frames, output and orderly cleanup |
+| `ApplicationScene` | Borrow UI services; own domain models/bindings/providers; synchronize and prepare views; stop owned producers |
+| `TerminalSession` / `InputDecoder` | Native bounded I/O and semantic input; Windows events are not decoded twice |
+| `Scheduler` | Separate CONTROL/DATA capacities and dispatch budgets; timers, publication and scoped cancellation |
+| `EventRouter` | Focus, hit testing, action resolution and checked delivery through the existing dispatcher |
+| `WidgetTree` | Own widget storage, identities, geometry and invalidation; expose checked callback borrows |
+| `Property<T>` / `Model<T>` | Immutable value/revision and snapshots; explicit observers, scoped ranges and request receipts |
+| Layout, controls, virtual views, `Chart<T>` | Measure/arrange/paint; prepare coherent bounded presentation before frames |
+| Typed themes / PSS v0 | Resolve styles and apply validated atomic theme updates; no second rendering path |
+| Renderer / `CellBuffer` | Consume clipped borrowed commands into owning desired cells inside the frame |
+| `FrameWriter` | Encode/diff, retain pending output, advance committed state only after consistent acceptance |
+| `Diagnostics` | Optional bounded causal metadata; owning snapshot and export chosen by the application |
+
+The core uses standard-library and native OS interfaces. Grapheme processing
+uses the private vendored utf8proc dependency. Doxygen, fuzzers and test oracles
+are build tools, not runtime dependencies. See [text](text.md), [render](render.md),
+[terminal](terminal.md), [styles](styles.md) and [chart](chart.md).
+
 ## Versioned architecture maps
 
 The [offline architecture viewer](architecture/snapshots/m1-968651a/index.html)
@@ -71,40 +105,6 @@ copy step. Keep previous snapshots unchanged; corrections get a new snapshot ID.
 The publishing commit records the exporter/template version and verification
 evidence. The manifest `revision` identifies runtime source and can precede the
 commit that publishes its documentation.
-
-Portals is a C++23 retained terminal UI library. Start with the
-[complete application](application.md) for the fluent `ui::Scene` entry point:
-the facade owns the application and managed scene, builds the controls lazily,
-and runs the same scheduler/tree/router described here. [`Application`](../include/portals/application.hpp) owns one UI
-runtime and services its terminal synchronously on the creating thread. The
-scene owns application models, scoped bindings and providers. Workers may
-publish immutable data through bounded scheduler endpoints; they cannot edit
-the widget tree. [Getting started](getting-started.md) links a simple main and
-the runnable examples; [limitations](limitations.md) defines release boundaries.
-
-## Components and boundaries
-
-![Components and data flow](images/components.svg)
-
-| Component | Implemented responsibility |
-|---|---|
-| `Application` | Own scheduler/tree/router; coordinate bounded input, dispatch, preparation, frames, output and orderly cleanup |
-| `ApplicationScene` | Borrow UI services; own domain models/bindings/providers; synchronize and prepare views; stop owned producers |
-| `TerminalSession` / `InputDecoder` | Native bounded I/O and semantic input; Windows events are not decoded twice |
-| `Scheduler` | Separate CONTROL/DATA capacities and dispatch budgets; timers, publication and scoped cancellation |
-| `EventRouter` | Focus, hit testing, action resolution and checked delivery through the existing dispatcher |
-| `WidgetTree` | Own widget storage, identities, geometry and invalidation; expose checked callback borrows |
-| `Property<T>` / `Model<T>` | Immutable value/revision and snapshots; explicit observers, scoped ranges and request receipts |
-| Layout, controls, virtual views, `Chart<T>` | Measure/arrange/paint; prepare coherent bounded presentation before frames |
-| Typed themes / PSS v0 | Resolve styles and apply validated atomic theme updates; no second rendering path |
-| Renderer / `CellBuffer` | Consume clipped borrowed commands into owning desired cells inside the frame |
-| `FrameWriter` | Encode/diff, retain pending output, advance committed state only after consistent acceptance |
-| `Diagnostics` | Optional bounded causal metadata; owning snapshot and export chosen by the application |
-
-The core uses standard-library and native OS interfaces. Grapheme processing
-uses the private vendored utf8proc dependency. Doxygen, fuzzers and test oracles
-are build tools, not runtime dependencies. See [text](text.md), [render](render.md),
-[terminal](terminal.md), [styles](styles.md) and [chart](chart.md).
 
 ## One event loop, explicit service bounds
 

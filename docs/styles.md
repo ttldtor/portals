@@ -30,6 +30,20 @@ Binding metadata is explicit. `Button`, `CheckBox`, `LineEdit`, `List`, and
 Custom widgets use the same mechanism. One engine owns a node's theme at a
 time; assigning the same node to several engines is unsupported.
 
+Managed Label, Button, CheckBox, LineEdit and KeyHints use those type names
+automatically; `ui::plainButton` uses `Button`. Their automatic targets set
+`StyleTarget::control = true`, which also lets a `Control` selector match.
+This is an additional selector match, with the selector's ordinary specificity;
+it adds no inheritance or implicit priority. Custom Control subclasses retain
+the default `Control` name rather than an RTTI-derived name.
+
+Explicit low-level `StyleTarget` values default `control` to false. Their type
+matching remains exact unless this flag is enabled; the example above therefore
+matches `Button` rules but does not opt into `Control` rules. Assigning a complete
+target through `scene.style(node, target)` replaces metadata, including the flag.
+Recipe `.style(target)` follows that contract with its existing ID modifier rules;
+`.id()` changes the ID while preserving the other fields.
+
 The low-level `parsePssDocument(bytes, sourceName)` parser performs no file I/O.
 For a native UI scene, `ui::file(path)` creates an owning native-path source;
 `ui::style(ui::file(path))` reads and parses it when that stage is consumed by
