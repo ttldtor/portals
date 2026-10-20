@@ -21,7 +21,7 @@ bool callbackFailure() {
   ui::ThemeSelectorRef selector;
   ui::Ref<Dialog> view;
   std::size_t callbacks{}, reports{};
-  bool closedBeforeQuit{};
+  bool closedBeforeQuit{}, reportPreserved{};
   ManagedError failure{
     ManagedPhase::STYLE, {}, StyleError{.message = "persistence rejected"}, {}, TreeError::STALE_NODE};
   failure.operation = "consumer persistence";
@@ -39,13 +39,16 @@ bool callbackFailure() {
   // clang-format off
   scene
     | ui::themeSelection(themes, {{"nord", "Nord 🙂é界", nordTheme}})
-    | ui::onKey("F10", ui::quit);
+    | ui::onKey("F10", [&] {
+        const auto opened = view.opened();
+        closedBeforeQuit = opened && !*opened;
+        ui::quit();
+      });
   // clang-format on
   scene.onError([&](const ManagedDiagnostic &diagnostic) {
     ++reports;
-    const auto opened = view.opened();
-    closedBeforeQuit = opened && !*opened && diagnostic.error.phase == failure.phase &&
-                       diagnostic.error.cleanup == failure.cleanup && diagnostic.error.operation == failure.operation;
+    reportPreserved = diagnostic.error.phase == failure.phase && diagnostic.error.cleanup == failure.cleanup &&
+                      diagnostic.error.operation == failure.operation;
   });
 
   const auto ran = scene.run(terminal);
@@ -53,8 +56,8 @@ bool callbackFailure() {
   const auto error = applied && *applied ? (*applied)->callbackError : std::optional<ManagedError>{};
   const auto cause = error ? std::get_if<StyleError>(&error->cause) : nullptr;
 
-  return ran && terminal.closed && callbacks == 1 && reports == 1 && closedBeforeQuit && applied && *applied &&
-         (*applied)->committedId == "nord" &&
+  return ran && terminal.closed && callbacks == 1 && reports == 1 && reportPreserved && closedBeforeQuit && applied &&
+         *applied && (*applied)->committedId == "nord" &&
          (*applied)->closeDisposition == ui::ThemeSelectorCloseDisposition::CLOSED && !(*applied)->closeError &&
          error && error->phase == failure.phase && error->cleanup == failure.cleanup &&
          error->operation == failure.operation && cause && cause->message == "persistence rejected" && !selector.open();

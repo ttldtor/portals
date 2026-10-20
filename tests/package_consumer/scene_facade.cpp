@@ -2,11 +2,16 @@
 // SPDX-License-Identifier: BSL-1.0
 #include "tests/support/examples/replay/terminal.hpp"
 #include <portals/ui.hpp>
+#include <algorithm>
+#include <iostream>
+#include <cstddef>
+#include <string>
 
 #include "tests/support/custom_widget_fluent.hpp"
 #include "tests/support/examples/custom_widget/meter.hpp"
 #include "tests/support/examples/gallery/form.hpp"
 #include "tests/support/gallery_fluent.hpp"
+#include "tests/support/vt_oracle.hpp"
 
 namespace {
 bool installedExampleEquivalence() {
@@ -44,7 +49,28 @@ bool installedExampleEquivalence() {
         auto result = after.run(terminal);
 
         if (!result || !terminal.closed || after.calls != beforeForm.calls ||
-            result->frames != beforeFormStats->frames || terminal.output != beforeFormTerminal.output) {
+            result->inputs != beforeFormStats->inputs || result->frames != beforeFormStats->frames) {
+          std::cerr << "Installed gallery input/actions/cleanup differ\n";
+          return false;
+        }
+        test_support::VtOracle before(80, 24), current(80, 24);
+        before.feed(beforeFormTerminal.output);
+        current.feed(terminal.output);
+        const auto baseline = before.snapshot();
+        const auto updated = current.snapshot();
+        constexpr std::size_t WIDTH = 80;
+        constexpr std::size_t COMMON_ROWS = 6;
+        // Themes is appended after Quit; all existing editor/action cells remain identical.
+        if (!std::equal(baseline.cells.begin(), baseline.cells.begin() + COMMON_ROWS * WIDTH, updated.cells.begin())) {
+          std::cerr << "Installed gallery changed an existing editor/action row\n";
+          return false;
+        }
+        std::string themeRow;
+        for (std::size_t column = 0; column < WIDTH; ++column) {
+          themeRow += updated.cells[COMMON_ROWS * WIDTH + column].glyph;
+        }
+        if (themeRow.find("Themes") == std::string::npos) {
+          std::cerr << "Installed gallery lost its appended theme action\n";
           return false;
         }
       }
@@ -116,5 +142,9 @@ int main() {
                           }) |
                 ui::run(terminal);
 
-  return result && terminal.closed && !field.text().get() && installedExampleEquivalence() ? 0 : 2;
+  if (!result || !terminal.closed || field.text().get()) {
+    std::cerr << "Installed scene runner or reference cleanup failed\n";
+    return 2;
+  }
+  return installedExampleEquivalence() ? 0 : 2;
 }
