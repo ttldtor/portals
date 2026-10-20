@@ -51,9 +51,13 @@ private:
             return recipe(owner, app, readOptions());
           },
           runtime)) {
-    scene_.theme(modernTheme())
+    // clang-format off
+    scene_
+      | ui::themeSelection(themes_, {{"modern", "Modern", modernTheme}, {"turbo", "Turbo", turboTheme}});
+    // clang-format on
+    scene_
       .configure([this](ManagedScene &owner, Application &app) {
-        configure(owner, app);
+        return configure(owner, app);
       })
       .onStop([this] {
         if (provider_) {
@@ -71,17 +75,26 @@ public:
   FluentScene &operator=(FluentScene &&) = delete;
 
 private:
-  ui::Description<Column> recipe(ManagedScene &owner, Application &app, Options options) {
+  ui::Description<OverlayHost> recipe(ManagedScene &owner, Application &app, Options options) {
     app_ = &app;
     provider_ = std::make_unique<Provider>(app, options);
     name_ = take(owner.state<std::string>("Market note"));
     model_ = take(owner.model<Quote>(provider_->initialSnapshot()));
 
-    const auto inspect = [this] {
-      return name_.snapshot().and_then([this](const auto &value) {
-        return name_.set(value->value).transform([](const auto &) {
-        });
-      });
+    const auto inspect = [this]() -> std::expected<void, TreeError> {
+      const auto value = name_.snapshot();
+
+      if (!value) {
+        return std::unexpected(value.error());
+      }
+
+      const auto updated = name_.set((*value)->value);
+
+      if (!updated) {
+        return std::unexpected(updated.error());
+      }
+
+      return {};
     };
 
     const auto priceText = cellFormat<double>("{:.2f}", app.widthPolicy());
@@ -130,36 +143,66 @@ private:
           return chartPrepared(pin, work);
         }};
 
-    return ui::vbox(LinearOptions{.padding = {.left = 1, .right = 1}},
-                    ui::label(title_, "Portals market | F2 theme | F10 quit"),
-                    ui::hbox(LinearOptions{.gap = 2}, ui::lineEdit(editor_, name_).flexX(),
-                             ui::button(inspectButton_, "Inspect", inspect)),
-                    ui::label(status_, "Starting market"),
-                    ui::virtualTable(table_, model_, columns, tableConfig).flexY(2),
-                    ui::vbox().height(1),
-                    ui::vbox(ui::chart(chart_, model_, &Quote::prices, chartConfig)).flexY());
+    ui::ThemeSelectorOptions selectorOptions;
+    selectorOptions.onCommitted = [this](std::string_view id) -> std::expected<void, ManagedError> {
+      turbo_ = id == "turbo";
+      return {};
+    };
+
+    // clang-format off
+    auto body = ui::vbox(LinearOptions{.padding = {.left = 1, .right = 1}},
+      ui::label(title_, "Portals market | F2 theme | F10 quit"),
+      ui::hbox(LinearOptions{.gap = 2}, ui::lineEdit(editor_, name_).flexX(),
+               ui::button(inspectButton_, "Inspect", inspect),
+               ui::button("Themes", [selector = selector_] { return selector.open(); })),
+      ui::label(status_, "Starting market"),
+      ui::virtualTable(table_, model_, columns, tableConfig).flexY(2),
+      ui::vbox().height(1),
+      ui::vbox(ui::chart(chart_, model_, &Quote::prices, chartConfig)).flexY());
+    // clang-format on
+
+    return ui::overlayHost(std::move(body), ui::themeSelector(selector_, themes_, selectorOptions));
   }
 
-  void configure(ManagedScene &owner, Application &app) {
+  std::expected<void, ManagedError> configure(ManagedScene &owner, Application &app) {
+    auto initialized = themes_.preview("modern").and_then([this] {
+      return themes_.commit();
+    });
+
+    if (!initialized) {
+      return initialized;
+    }
     take(app.router().setFocus(table_.node()));
 
-    take(owner.onInput([this, &owner](const InputEvent &event) -> std::expected<bool, ManagedError> {
+    take(owner.onInput([this](const InputEvent &event) -> std::expected<bool, ManagedError> {
       if (!keyPressed(event, InputKey::F2, {})) {
         return false;
       }
 
       const auto next = !turbo_;
 
-      return owner.theme(next ? turboTheme() : modernTheme()).transform([this, next] {
-        turbo_ = next;
+      auto previewed = themes_.preview(next ? "turbo" : "modern");
 
-        return true;
-      });
+      if (!previewed) {
+        return std::unexpected(previewed.error());
+      }
+
+      auto committed = themes_.commit();
+
+      if (!committed) {
+        return std::unexpected(committed.error());
+      }
+
+      turbo_ = next;
+
+      return true;
     }));
     take(owner.onKey(ui::press("F10 | Ctrl+C"), [] {
       ui::quit();
     }));
     provider_->start(model_);
+
+    return {};
   }
 
   std::expected<void, TreeError> tablePrepared(const ModelFrame<Quote> &pin,
@@ -179,14 +222,16 @@ private:
     provider_->chartPrepared(work);
 
     // Ref::text mutation is disallowed during managed preparation; this is the existing view callback.
-    const auto caption = std::format("{} | {} ticks | {}", turbo_ ? "Turbo" : "Modern", provider_->tickCount(),
-                                     pendingVisible_ ? "Loading" : "Live");
+    const auto caption = std::format("Committed {} | {} ticks | {}", turbo_ ? "Turbo" : "Modern",
+                                     provider_->tickCount(), pendingVisible_ ? "Loading" : "Live");
 
     return setControlText(app_->tree(), status_.node(), example::text(caption, app_->widthPolicy()));
   }
 
   Application *app_{};
   std::unique_ptr<Provider> provider_;
+  ui::ThemeSelectionRef themes_;
+  ui::ThemeSelectorRef selector_;
   ui::Ref<Label> title_, status_;
   ui::Ref<LineEdit> editor_;
   ui::Ref<Button> inspectButton_;

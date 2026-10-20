@@ -1050,6 +1050,13 @@ private:
 namespace detail {
 /** @brief Internal bridge from consuming recipes to one stable facade owner. */
 struct SceneAccess {
+  /** @param owner Prepared managed owner whose configurations have completed.
+   * @return Checked attachment of its optional ready theme-selector view.
+   */
+  static std::expected<void, ManagedError> attachThemeSelector(ManagedScene &owner) {
+    return owner.attachThemeSelector();
+  }
+
   /** @param owner UI-admitted managed owner borrowed by an internal synchronous bridge.
    * @return Its existing application; no new runner or ownership is created.
    */

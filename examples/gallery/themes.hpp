@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <portals/style.hpp>
+#include <portals/ui.hpp>
 #include <stdexcept>
 #include <string_view>
 
@@ -33,5 +34,15 @@ inline std::size_t themeIndex(std::string_view name) {
   }
 
   return static_cast<std::size_t>(preset - THEME_PRESETS.begin());
+}
+
+/** @param selection Scene-owned model observation to publish after catalog normalization.
+ * @return Owning setup stage using the same names, factories and order as the CLI presets.
+ */
+inline auto themeCatalog(portals::ui::ThemeSelectionRef selection) {
+  return [&]<std::size_t... I>(std::index_sequence<I...>) {
+    return portals::ui::themeSelection(selection,
+                                       {{THEME_PRESETS[I].name, THEME_PRESETS[I].name, THEME_PRESETS[I].make}...});
+  }(std::make_index_sequence<THEME_PRESETS.size()>{});
 }
 } // namespace example

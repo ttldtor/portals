@@ -199,13 +199,64 @@ void owningFormEquivalence() {
         {
           const auto after = fluentForm(script, SIZE, theme, colors);
 
-          if (!terminal.closed || terminal.output != after.bytes || stats.frames != after.stats.frames ||
-              before.calls != after.calls) {
-            throw std::runtime_error("Owning form changed focus, output, frames, actions or cleanup");
+          if (!terminal.closed || stats.inputs != after.stats.inputs || before.calls != after.calls ||
+              after.bytes.empty()) {
+            throw std::runtime_error("Owning form changed input, actions or cleanup");
+          }
+          const bool resized = std::ranges::any_of(script, [](const auto &input) {
+            return input.resize.has_value();
+          });
+
+          if (!resized) {
+            test_support::VtOracle oracle(SIZE.width, SIZE.height);
+            oracle.feed(after.bytes);
+
+            std::string visible;
+            for (const auto &cell : oracle.snapshot().cells) {
+              if (!cell.tail) {
+                visible += cell.glyph;
+              }
+            }
+            for (const auto caption :
+                 {"Portals gallery", "Name", "Alerts", "Run (no model change)", "Quit", "Themes"}) {
+              if (visible.find(caption) == std::string::npos) {
+                throw std::runtime_error("Public gallery lost a required control");
+              }
+            }
+            if (script.empty() && after.stats.frames != 1) {
+              throw std::runtime_error("Idle public gallery redraws without a change");
+            }
           }
         }
       }
     }
+  }
+}
+
+void publicThemeSelector() {
+  constexpr CellSize SIZE{80, 24};
+  const auto expected = fluentForm({{100, "\x1bOQ", {}}, {200, "\x1bOQ", {}}, {330, "Z\r", {}}, {400, "\x1b[21~", {}}},
+                                   SIZE, 0, ColorMode::TRUE_COLOR);
+  // Apply Turbo, preview Modern then cancel back to Turbo; F2 must continue to Nord.
+  const auto actual = fluentForm({{10, "\x0b", {}},
+                                  {20, "\x14", {}},
+                                  {40, "\x1b[B", {}},
+                                  {60, "\x1b[B", {}},
+                                  {80, "\r", {}},
+                                  {120, "\x0b", {}},
+                                  {140, "\x14", {}},
+                                  {160, "\x1b[B", {}},
+                                  {180, "\x1b", {}},
+                                  {300, "\x1bOQ", {}},
+                                  {330, "Z\r", {}},
+                                  {400, "\x1b[21~", {}}},
+                                 SIZE, 0, ColorMode::TRUE_COLOR);
+  test_support::VtOracle before(SIZE.width, SIZE.height), after(SIZE.width, SIZE.height);
+  before.feed(expected.bytes);
+  after.feed(actual.bytes);
+
+  if (before.snapshot().cells != after.snapshot().cells || actual.calls != 0) {
+    throw std::runtime_error("Public gallery selector commit/cancel/F2/focus restoration changed final state");
   }
 }
 
@@ -323,6 +374,7 @@ int main() {
     diagnosticFailures();
     owningFormEquivalence();
     exactGalleryQuit();
+    publicThemeSelector();
     owningMeterEquivalence();
 
     const auto idle = runForm<gallery::Form>({}, {80, 24});

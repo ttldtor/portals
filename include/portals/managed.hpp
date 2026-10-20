@@ -41,6 +41,7 @@ struct LayoutAccess;
 struct MessageAccess;
 struct KeyHelpAccess;
 struct ThemeSelectionAccess;
+struct ThemeSelectorAccess;
 class SetupFailureTicket;
 } // namespace ui::detail
 
@@ -70,6 +71,8 @@ struct ToastTimerMarker;
 struct ToastPayload;
 struct KeyHelpRecord;
 struct ThemeSelectionRecord;
+struct ThemeSelectorRecord;
+enum class ThemeSelectorCommand;
 enum class ThemeSelectionCommand;
 template <class T> inline constexpr bool IS_MANAGED_TREE_RESULT = false;
 template <class Value> inline constexpr bool IS_MANAGED_TREE_RESULT<std::expected<Value, TreeError>> = true;
@@ -1619,6 +1622,7 @@ private:
   friend class ui::NotificationCenter;
   friend struct ui::detail::KeyHelpAccess;
   friend struct ui::detail::ThemeSelectionAccess;
+  friend struct ui::detail::ThemeSelectorAccess;
   friend struct detail::ManagedScrollTestAccess;
 
   struct Entry;
@@ -1974,7 +1978,14 @@ private:
                                                           const ui::ThemeSelectionOptions &options);
   std::expected<void, ManagedError> changeThemeSelection(const std::shared_ptr<detail::ThemeSelectionRecord> &record,
                                                          detail::ThemeSelectionCommand command, std::string_view id,
-                                                         std::source_location origin);
+                                                         std::source_location origin,
+                                                         std::optional<std::string_view> expectedId = std::nullopt);
+  std::expected<void, ManagedError> attachThemeSelector();
+  std::expected<void, ManagedError> prepareThemeSelector();
+  void retireThemeSelector() noexcept;
+  std::expected<void, ManagedError> changeThemeSelector(const std::shared_ptr<detail::ThemeSelectorRecord> &record,
+                                                        detail::ThemeSelectorCommand command, std::size_t index,
+                                                        std::source_location origin);
   std::expected<std::shared_ptr<const ui::ThemeSelectionSnapshot>, ManagedError>
   readThemeSelection(const std::shared_ptr<detail::ThemeSelectionRecord> &record) const;
   std::expected<void, ManagedError> checkThemeLease(detail::StyleThemeLease lease) const;
@@ -2022,6 +2033,7 @@ private:
   Node<Widget> root_;
   StyleEngine styles_;
   std::shared_ptr<detail::ThemeSelectionRecord> themeSelection_;
+  std::shared_ptr<detail::ThemeSelectorRecord> themeSelector_;
   bool installingThemeSelection_{};
   std::vector<std::shared_ptr<Entry>> entries_;
   std::shared_ptr<detail::ManagedScrollState> scroll_;

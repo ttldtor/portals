@@ -135,6 +135,7 @@ and the exact runtime boundaries.
 - [Notifications](notifications.md): show bounded messages and actions while editing continues.
 - [Key hints and help](key-help.md): shared command labels, availability and shortcuts.
 - [Checked theme previews](theme-selection.md): preview, apply and cancel a catalog choice while preserving overrides.
+- [Theme selector](theme-selector.md): add a ready-made modal catalog with preview and recovery actions.
 - [First application](first-application.md): build a note form in four steps.
 - [Task guides](guides.md): guides for styles, events, data and other application work.
 - [Documentation contents](reference-map.md): topics and API contracts.

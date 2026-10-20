@@ -4,15 +4,15 @@
 
 The theme-selection model lets an application preview a catalog choice, commit it,
 or restore the previous theme. It uses the existing style engine and preserves
-application and user overrides. This page covers the checked model API; a ready-made
-ThemeSelector with its own list and navigation is a later, separate control.
+application and user overrides. This page covers the checked model API. For a
+ready-made list and navigation, use the [theme selector](theme-selector.md).
 
 ## Complete native example
 
 The maintained example provides explicit preview, apply and cancel buttons.
 Apply requires a successful preview. Its handlers return checked results to the
 ordinary runner, so an unhandled failure follows the application's error policy.
-This is a customization example, not the finished selector UI.
+Use this customization example when the application supplies its own controls.
 
 \include{lineno} examples/guide_theme_selection.cpp
 
@@ -73,7 +73,7 @@ controller. Cancellation restores the earlier appearance; it does not resurrect
 an expired controller or its old engine mode. This distinction matters when an
 application mixes preview with [LiveTheme and style layers](style-layers.md).
 
-## Errors, limits and later UI
+## Errors and limits
 
 Commands return exact `std::expected<..., ManagedError>` results. Calling a checked
 command alone does not invoke the scene error collector or stop the runtime.
@@ -89,7 +89,7 @@ process memory budget. Existing style-layer limits also apply; the model does no
 silently enlarge a caller's budget.
 
 The model performs no configuration-file I/O and invokes no persistence callback.
-A future selector owns its list, focus, recovery UI and optional post-commit
-notification. In particular, that view must observe an external equal-theme
-authority change without depending on a future unrelated frame. General theme
-importers and a universal reactive system are not part of this API.
+The [theme selector](theme-selector.md) owns its list, focus, recovery UI and
+optional post-commit notification. Its open view observes external equal-theme
+authority changes through existing invalidation. General theme importers and a
+universal reactive system are not part of this API.

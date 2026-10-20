@@ -1369,6 +1369,12 @@ std::expected<void, ManagedError> Scene::prepareChecked(std::source_location ori
                 break;
               }
             }
+            if (!state.failure) {
+              auto attached = detail::SceneAccess::attachThemeSelector(*state.managed);
+              if (!attached) {
+                state.fail(attached.error(), "scene.themeSelector", origin);
+              }
+            }
           }
         }
       }

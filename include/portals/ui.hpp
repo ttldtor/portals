@@ -9,6 +9,7 @@
 #include <portals/managed.hpp>
 #include <portals/message_box.hpp>
 #include <portals/theme_selection.hpp>
+#include <portals/theme_selector.hpp>
 #include <portals/ui_ref.hpp>
 #include <portals/ui_scene.hpp>
 

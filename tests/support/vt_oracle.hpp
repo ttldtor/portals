@@ -290,7 +290,7 @@ private:
       return;
     }
 
-    if (!((scalar >= 0x20 && scalar <= 0x7e) || scalar == 0x2501 || scalar == 0x2502 || scalar == 0x2588 ||
+    if (!((scalar >= 0x20 && scalar <= 0x7e) || (scalar >= 0x2500 && scalar <= 0x257f) || scalar == 0x2588 ||
           (scalar >= 0x4e00 && scalar <= 0x9fff) || (scalar >= 0x1f300 && scalar <= 0x1faff))) {
       throw std::runtime_error("oracle: scalar outside fixture alphabet");
     }
