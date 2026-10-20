@@ -24,7 +24,7 @@ struct SceneReport {
   std::optional<ManagedError> failure; ///< Exact primary plus independent runner/restoration/cleanup errors.
   std::source_location origin{};       ///< Primary failure call site, or final run call site for a summary.
   std::size_t retainedErrors{};        ///< Successful-run retained recoverable count; details remain in diagnostics().
-  std::size_t droppedErrors{};         ///< Successful-run overflow count; not an additional failure.
+  std::size_t droppedErrors{}; ///< Diagnostic overflow, including additional abandoned factory cleanup failures.
   std::optional<CommandLineError> commandLineFailure{}; ///< Owning preflight failure, before any terminal open.
 };
 
@@ -172,13 +172,44 @@ template <class Callback> void commandOrigin(Callback &callback, std::source_loc
 
 /** @brief Checked factory/setup/run policies. */
 struct RunAppOptions {
-  SceneOptions scene{};            ///< Existing facade/application/managed policies.
-  SceneReportHandler report{};     ///< Owning optional final sink, available before factory invocation.
+  SceneOptions scene{};            ///< Policies for Description factories; an owning Scene retains its policies.
+  SceneReportHandler report{};     ///< Pre-factory sink; nonempty overrides a returned Scene sink, empty preserves it.
   ApplicationTerminal *terminal{}; ///< Borrowed through synchronous run; null selects native.
   std::stop_token stop{};          ///< Existing optional cancellation.
 };
 
 namespace detail {
+/** @brief Allocation-free diagnostics from local scenes abandoned during one factory invocation. */
+struct FactoryCleanup {
+  std::optional<ManagedError> failure; ///< First exact destructor cleanup failure, in destruction order.
+  std::size_t droppedErrors{};         ///< Saturating count of later abandoned cleanup failures.
+
+  /** @param primary Existing factory failure whose typed cause and occupied cleanup slot are preserved.
+   * @return Saturating number of cleanup failures that could not fit the final envelope.
+   */
+  std::size_t attach(ManagedError &primary) const noexcept;
+};
+
+/** @brief Stack-only synchronous factory cleanup publication; empty nested scopes suspend attribution. */
+class FactoryCleanupScope {
+public:
+  /** @param collector Stack-local record valid through this scope; null masks an outer factory. */
+  explicit FactoryCleanupScope(FactoryCleanup *collector = nullptr) noexcept;
+  FactoryCleanupScope(const FactoryCleanupScope &) = delete;
+  FactoryCleanupScope &operator=(const FactoryCleanupScope &) = delete;
+  ~FactoryCleanupScope();
+
+  /** @param failure Actual destructor cleanup failure; no scene pointer or user callback is retained. */
+  static void retain(const ManagedError &failure) noexcept;
+
+  /** @return Whether this thread is currently inside the exact user factory invocation. */
+  static bool capturing() noexcept;
+
+private:
+  FactoryCleanup *previous_;
+  static thread_local FactoryCleanup *current_;
+};
+
 /** @brief Stable weak facade publication; mutable fields are accessed only after UI admission. */
 struct SceneAnchor {
   const std::thread::id owner = std::this_thread::get_id(); ///< Immutable UI identity.
@@ -1039,7 +1070,13 @@ private:
   void shortcutConfigurationFailure(ShortcutError cause, std::source_location origin);
   std::expected<ApplicationStats, ManagedError> runImpl(ApplicationTerminal *terminal, std::stop_token stop,
                                                         std::source_location origin);
-  int runAppImpl(ApplicationTerminal *terminal, std::stop_token stop, std::source_location origin);
+  int runAppImpl(ApplicationTerminal *terminal, std::stop_token stop, std::source_location origin,
+                 std::size_t droppedErrors = 0);
+  std::expected<void, ManagedError> factoryResultChecked() const;
+  std::size_t applyFactoryCleanup(const detail::FactoryCleanup &cleanup, std::source_location origin);
+  bool deliverFactoryReport(const SceneReport &report, std::shared_ptr<SceneReportHandler> sink);
+  int runAppReported(const RunAppOptions &options, std::shared_ptr<SceneReportHandler> sink,
+                     std::source_location origin, std::size_t droppedErrors);
   int runAppPreflight(ApplicationTerminal *terminal, int argc, const char *const *argv, CommandLineParser &parser,
                       std::stop_token stop, std::source_location origin);
 
@@ -1050,6 +1087,44 @@ private:
 namespace detail {
 /** @brief Internal bridge from consuming recipes to one stable facade owner. */
 struct SceneAccess {
+  /** @param owner Returned owning facade, admitted only when cold or prepared but not yet completed.
+   * @return Exact retained failure for a retired failed facade, CLOSED for retired/empty, or WOULD_BLOCK if active.
+   * Existing eager entry points retain their own repeated-run policy.
+   */
+  static std::expected<void, ManagedError> factoryResultChecked(const Scene &owner) {
+    return owner.factoryResultChecked();
+  }
+
+  /** @param owner Stationary returned facade, whose primary error is preserved through cleanup.
+   * @param cleanup First exact abandoned-local cleanup failure and bounded overflow.
+   * @param origin Upper invocation site.
+   * @return Saturating count of failures that do not fit the existing primary/cleanup envelope.
+   */
+  static std::size_t applyFactoryCleanup(Scene &owner, const FactoryCleanup &cleanup, std::source_location origin) {
+    return owner.applyFactoryCleanup(cleanup, origin);
+  }
+
+  /** @param owner Rejected returned facade, already given its existing close attempt.
+   * @param report Complete owning rejection diagnostic, borrowed only through guarded delivery.
+   * @param sink Optional pinned explicit override; empty preserves an available configured Scene sink.
+   * @return True after guarded delivery; false when the moved-from/foreign facade has no admitted state.
+   */
+  static bool deliverFactoryReport(Scene &owner, const SceneReport &report, std::shared_ptr<SceneReportHandler> sink) {
+    return owner.deliverFactoryReport(report, std::move(sink));
+  }
+
+  /** @param owner Stationary facade retained through synchronous final reporting.
+   * @param options Borrowed upper transport and cancellation policies.
+   * @param sink Owning upper sink prepared before factory invocation; empty preserves the configured Scene sink.
+   * @param origin Upper runner invocation site.
+   * @param droppedErrors Overflow from abandoned local factory cleanup, retained in the final report.
+   * @return The existing final runner status, with terminal restoration and cleanup before reporting.
+   */
+  static int runApp(Scene &owner, const RunAppOptions &options, std::shared_ptr<SceneReportHandler> sink,
+                    std::source_location origin, std::size_t droppedErrors) {
+    return owner.runAppReported(options, std::move(sink), origin, droppedErrors);
+  }
+
   /** @param owner Prepared managed owner whose configurations have completed.
    * @return Checked attachment of its optional ready theme-selector view.
    */

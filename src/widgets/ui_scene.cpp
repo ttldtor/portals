@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdio>
+#include <limits>
 
 namespace portals::ui {
 
@@ -399,6 +400,12 @@ TreeError cleanupCause(const ManagedError &failure) {
   return TreeError::CALLBACK_FAILED;
 }
 
+std::size_t saturatingCount(std::size_t first, std::size_t second) noexcept {
+  constexpr auto MAX_COUNT = std::numeric_limits<std::size_t>::max();
+
+  return second > MAX_COUNT - first ? MAX_COUNT : first + second;
+}
+
 void reportTerminal(const TerminalError &cause) noexcept {
   std::fprintf(stderr, "TerminalError(kind=%s, native=%d, restoration=%d)", categoryName(cause.kind), cause.native_code,
                cause.restoration_code);
@@ -428,7 +435,7 @@ void reportApplication(const ApplicationError &cause) noexcept {
   }
 }
 
-void reportFailure(const ManagedError &failure, std::source_location origin) noexcept {
+void reportFailure(const ManagedError &failure, std::source_location origin, std::size_t droppedErrors) noexcept {
   std::fprintf(stderr, "Portals: scene failed (phase=%s) at %s:%u: ", phaseName(failure.phase), origin.file_name(),
                origin.line());
   if (failure.operation) {
@@ -517,9 +524,68 @@ void reportFailure(const ManagedError &failure, std::source_location origin) noe
                  failure.shortcut->offset);
   }
 
+  if (droppedErrors) {
+    std::fprintf(stderr, " dropped=%zu", droppedErrors);
+  }
+
   std::fputc('\n', stderr);
 }
 } // namespace
+
+thread_local detail::FactoryCleanup *detail::FactoryCleanupScope::current_{};
+
+detail::FactoryCleanupScope::FactoryCleanupScope(FactoryCleanup *collector) noexcept : previous_(current_) {
+  current_ = collector;
+}
+
+detail::FactoryCleanupScope::~FactoryCleanupScope() {
+  current_ = previous_;
+}
+
+void detail::FactoryCleanupScope::retain(const ManagedError &failure) noexcept {
+  if (!current_) {
+    return;
+  }
+
+  if (!current_->failure) {
+    current_->failure = failure;
+  } else {
+    current_->droppedErrors = saturatingCount(current_->droppedErrors, 1);
+  }
+}
+
+bool detail::FactoryCleanupScope::capturing() noexcept {
+  return current_ != nullptr;
+}
+
+std::size_t detail::FactoryCleanup::attach(ManagedError &primary) const noexcept {
+  auto dropped = droppedErrors;
+
+  if (!failure) {
+    return dropped;
+  }
+
+  if (!primary.cleanup) {
+    primary.cleanup = cleanupCause(*failure);
+  } else {
+    dropped = saturatingCount(dropped, 1);
+  }
+
+  // The primary and one cleanup cause fit the established envelope; count any further independent cause.
+  if (failure->cleanup) {
+    dropped = saturatingCount(dropped, 1);
+  }
+
+  if (!primary.application) {
+    if (failure->application) {
+      primary.application = failure->application;
+    } else if (const auto *application = std::get_if<ApplicationError>(&failure->cause)) {
+      primary.application = *application;
+    }
+  }
+
+  return dropped;
+}
 
 void reportToStderr(const SceneReport &report) noexcept {
   if (report.commandLineFailure) {
@@ -543,7 +609,7 @@ void reportToStderr(const SceneReport &report) noexcept {
   }
 
   if (report.failure) {
-    reportFailure(*report.failure, report.origin);
+    reportFailure(*report.failure, report.origin, report.droppedErrors);
   } else if (!report.commandLineFailure) {
     std::fprintf(stderr, "Portals: recoverable diagnostics: retained=%zu, dropped=%zu; inspect diagnostics()\n",
                  report.retainedErrors, report.droppedErrors);
@@ -664,9 +730,9 @@ struct Scene::State {
   std::vector<StyleBinding> styles = std::vector<StyleBinding>(0);
   std::vector<std::shared_ptr<detail::LiveBinding>> live = std::vector<std::shared_ptr<detail::LiveBinding>>(0);
 
-  void deliverReport(const SceneReport &report) noexcept {
+  void deliverReport(const SceneReport &report, std::shared_ptr<SceneReportHandler> overrideSink = {}) noexcept {
     Guard guard(*this, Operation::REPORT);
-    auto sink = reportSink;
+    auto sink = overrideSink ? std::move(overrideSink) : reportSink;
 
     try {
       if (sink) {
@@ -1129,36 +1195,51 @@ Scene::~Scene() {
     std::terminate();
   }
 
-  detail::SetupFailureScope lifecycleScope({}, nullptr, nullptr);
-
-  if (state_->sessionActive) {
-    State::Guard guard(*state_, State::Operation::RUN);
-    detail::CurrentSceneScope current(state_->anchor);
-
-    state_->application->requestStop();
-    (void)state_->finishStep(state_->managed->step(), std::source_location::current());
-  }
+  const bool collectCleanup = detail::FactoryCleanupScope::capturing();
+  std::optional<ManagedError> abandonedFailure;
 
   {
-    State::Guard guard(*state_, State::Operation::CLOSE);
+    detail::FactoryCleanupScope cleanupMask;
+    detail::SetupFailureScope lifecycleScope({}, nullptr, nullptr);
 
-    (void)state_->cleanup(std::source_location::current());
-    state_->observer.reset();
-    state_->reportSink.reset();
+    if (state_->sessionActive) {
+      State::Guard guard(*state_, State::Operation::RUN);
+      detail::CurrentSceneScope current(state_->anchor);
 
-    // Detach each public-facing owner before its user captures retire, while all State fields live.
-    auto managed = std::move(state_->managed);
+      state_->application->requestStop();
+      (void)state_->finishStep(state_->managed->step(), std::source_location::current());
+    }
 
-    managed.reset();
+    {
+      State::Guard guard(*state_, State::Operation::CLOSE);
 
-    auto application = std::move(state_->application);
+      const auto cleanup = state_->cleanup(std::source_location::current());
 
-    application.reset();
-    state_->options.application.scheduler.diagnostics.reset();
+      if (collectCleanup && !cleanup && !state_->finalReported) {
+        abandonedFailure = cleanup.error();
+      }
+
+      state_->observer.reset();
+      state_->reportSink.reset();
+
+      // Detach each public-facing owner before its user captures retire, while all State fields live.
+      auto managed = std::move(state_->managed);
+
+      managed.reset();
+
+      auto application = std::move(state_->application);
+
+      application.reset();
+      state_->options.application.scheduler.diagnostics.reset();
+    }
+
+    // Retire passive diagnostic identities under the same mask, after guarded user services are gone.
+    state_.reset();
   }
 
-  // Retire passive diagnostic identities under the same mask, after guarded user services are gone.
-  state_.reset();
+  if (abandonedFailure) {
+    detail::FactoryCleanupScope::retain(*abandonedFailure);
+  }
 }
 
 std::expected<void, ManagedError> Scene::checked() const {
@@ -1171,6 +1252,70 @@ std::expected<void, ManagedError> Scene::checked() const {
   }
 
   return state_->failure ? std::unexpected(*state_->failure) : std::expected<void, ManagedError>{};
+}
+
+std::expected<void, ManagedError> Scene::factoryResultChecked() const {
+  if (owner_ != std::this_thread::get_id()) {
+    return std::unexpected(error(ManagedPhase::PREPARE, TreeError::WRONG_THREAD));
+  }
+
+  if (!state_) {
+    return std::unexpected(error(ManagedPhase::PREPARE, TreeError::CLOSED));
+  }
+
+  if (state_->active != State::Operation::NONE || state_->sessionActive) {
+    return std::unexpected(error(ManagedPhase::PREPARE, TreeError::WOULD_BLOCK));
+  }
+
+  if (state_->completed || state_->finalReported) {
+    return std::unexpected(state_->failure.value_or(error(ManagedPhase::PREPARE, TreeError::CLOSED)));
+  }
+
+  return {};
+}
+
+std::size_t Scene::applyFactoryCleanup(const detail::FactoryCleanup &cleanup, std::source_location origin) {
+  if (!cleanup.failure || owner_ != std::this_thread::get_id() || !state_) {
+    return cleanup.droppedErrors;
+  }
+
+  auto &state = *state_;
+  auto dropped = cleanup.droppedErrors;
+
+  if (state.failure) {
+    dropped = cleanup.attach(*state.failure);
+  } else {
+    state.fail(*cleanup.failure, "scene.factory", origin);
+  }
+
+  // Preserve the whole first envelope, not just its cause: normal cleanup may fill or overwrite its slot.
+  auto retained = *state.failure;
+
+  if (state.active == State::Operation::NONE && !state.completed) {
+    State::Guard guard(state, State::Operation::CONFIGURE);
+    const auto closed = state.cleanup(origin);
+
+    if (!closed) {
+      detail::FactoryCleanup closing;
+
+      closing.failure = closed.error();
+      dropped = saturatingCount(dropped, closing.attach(retained));
+    }
+
+    state.failure = std::move(retained);
+  }
+
+  return dropped;
+}
+
+bool Scene::deliverFactoryReport(const SceneReport &report, std::shared_ptr<SceneReportHandler> sink) {
+  if (owner_ != std::this_thread::get_id() || !state_ || state_->active != State::Operation::NONE) {
+    return false;
+  }
+
+  state_->deliverReport(report, std::move(sink));
+
+  return true;
 }
 
 std::expected<std::reference_wrapper<ManagedScene>, ManagedError> Scene::managed() const {
@@ -1930,16 +2075,28 @@ Scene &Scene::applicationOptions(std::function<ApplicationOptions()> provider, s
 
 int Scene::runApp(int argc, const char *const *argv, CommandLineParser parser, std::stop_token stop,
                   std::source_location origin) {
-  return runAppPreflight(nullptr, argc, argv, parser, stop, origin);
+  detail::FactoryCleanupScope factoryMask;
+  const auto status = runAppPreflight(nullptr, argc, argv, parser, stop, origin);
+
+  parser = nullptr;
+
+  return status;
 }
 
 int Scene::runApp(ApplicationTerminal &terminal, int argc, const char *const *argv, CommandLineParser parser,
                   std::stop_token stop, std::source_location origin) {
-  return runAppPreflight(&terminal, argc, argv, parser, stop, origin);
+  detail::FactoryCleanupScope factoryMask;
+  const auto status = runAppPreflight(&terminal, argc, argv, parser, stop, origin);
+
+  parser = nullptr;
+
+  return status;
 }
 
 int Scene::runAppPreflight(ApplicationTerminal *terminal, int argc, const char *const *argv, CommandLineParser &parser,
                            std::stop_token stop, std::source_location origin) {
+  detail::FactoryCleanupScope factoryMask;
+
   if (owner_ != std::this_thread::get_id() || !state_) {
     return 1;
   }
@@ -1961,26 +2118,7 @@ int Scene::runAppPreflight(ApplicationTerminal *terminal, int argc, const char *
     detail::SetupFailureScope lifecycleScope({}, nullptr, nullptr);
     detail::CurrentSceneScope currentMask;
 
-    try {
-      const auto initialized = app::initialize(argc, argv);
-
-      if (!initialized) {
-        const auto code = initialized.error() == app::ProcessContextError::NO_MEMORY
-                            ? CommandLineErrorCode::NO_MEMORY
-                            : CommandLineErrorCode::PROCESS_CONTEXT;
-
-        action = std::unexpected(CommandLineError{code, {}, initialized.error()});
-      } else if (parser) {
-        action = parser(*app::args());
-      }
-    } catch (const std::bad_alloc &) {
-      action = std::unexpected(CommandLineError{CommandLineErrorCode::NO_MEMORY, {}});
-    } catch (...) {
-      action = std::unexpected(CommandLineError{CommandLineErrorCode::CALLBACK_FAILED, {}});
-    }
-
-    // Parser captures may call back into the facade from their destructors.
-    parser = nullptr;
+    action = detail::commandLinePreflight(argc, argv, parser);
   }
 
   // A failed CLI result remains primary even if capture retirement independently failed.
@@ -2033,7 +2171,25 @@ int Scene::runApp(ApplicationTerminal &terminal, std::stop_token stop, std::sour
   return runAppImpl(&terminal, stop, origin);
 }
 
-int Scene::runAppImpl(ApplicationTerminal *terminal, std::stop_token stop, std::source_location origin) {
+int Scene::runAppReported(const RunAppOptions &options, std::shared_ptr<SceneReportHandler> sink,
+                          std::source_location origin, std::size_t droppedErrors) {
+  if (owner_ == std::this_thread::get_id() && state_ && state_->active == State::Operation::NONE &&
+      !state_->sessionActive && sink) {
+    State::Guard guard(*state_, State::Operation::CONFIGURE);
+
+    // The upper callable was pinned before factory entry. Transfer it without allocating; replaced
+    // captures retire under admission, and the new sink stays owned through final Scene destruction.
+    state_->reportSink.swap(sink);
+    sink.reset();
+  }
+
+  return runAppImpl(options.terminal, options.stop, origin, droppedErrors);
+}
+
+int Scene::runAppImpl(ApplicationTerminal *terminal, std::stop_token stop, std::source_location origin,
+                      std::size_t droppedErrors) {
+  detail::FactoryCleanupScope factoryMask;
+
   // An unadmitted facade cannot prove that another owner's terminal has been restored.
   if (owner_ != std::this_thread::get_id() || !state_) {
     return 1;
@@ -2074,6 +2230,8 @@ int Scene::runAppImpl(ApplicationTerminal *terminal, std::stop_token stop, std::
     report.droppedErrors = dropped;
   }
 
+  report.droppedErrors = saturatingCount(report.droppedErrors, droppedErrors);
+
   if (report.failure || report.retainedErrors || report.droppedErrors) {
     // Keep the callable alive and forbid facade mutation/destruction throughout delivery and fallback.
     state.deliverReport(report);
@@ -2089,6 +2247,8 @@ std::expected<ApplicationStats, ManagedError> Scene::run(ApplicationTerminal &te
 
 std::expected<ApplicationStats, ManagedError> Scene::runImpl(ApplicationTerminal *terminal, std::stop_token stop,
                                                              std::source_location origin) {
+  detail::FactoryCleanupScope factoryMask;
+
   if (owner_ == std::this_thread::get_id() && state_ && state_->sessionActive) {
     return std::unexpected(error(ManagedPhase::RUN, TreeError::WOULD_BLOCK, state_->node()));
   }

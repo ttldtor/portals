@@ -302,4 +302,16 @@ struct LaunchAction {
 /** @brief Owning lazy parser; borrowed bound options must outlive its synchronous invocation. */
 using CommandLineParser =
   portals::detail::MoveOnlyFunction<std::expected<LaunchAction, CommandLineError>(const app::Arguments &)>;
+
+namespace detail {
+/** @brief Shared command-line evaluation without creating a scene or acquiring a terminal.
+ * @param argc Input argument count, including the program name.
+ * @param argv Borrowed arguments copied into the immutable process context.
+ * @param parser Owning parser, retired before returning, including on failure.
+ * @return Exact launch decision or typed initialization/parser failure; never throws.
+ * The caller supplies lifecycle admission and masks current-scene/setup publication.
+ */
+std::expected<LaunchAction, CommandLineError> commandLinePreflight(int argc, const char *const *argv,
+                                                                   CommandLineParser &parser) noexcept;
+} // namespace detail
 } // namespace portals::ui

@@ -14,6 +14,7 @@
 #include <portals/ui_scene.hpp>
 
 #include <algorithm>
+#include <cstdio>
 #include <ranges>
 #include <tuple>
 #include <typeinfo>
@@ -3660,6 +3661,44 @@ template <class T> struct IsSceneRecipe : IsDescription<T> {};
  */
 template <class T> struct IsSceneRecipe<std::expected<Description<T>, ManagedError>> : std::true_type {};
 
+/** @brief Admit owning app results without widening managed root-recipe factories.
+ * @tparam T Exact normalized no-argument factory result.
+ */
+template <class T> struct IsAppResult : IsSceneRecipe<T> {};
+
+/** @brief An already configured owning facade is a complete app result. */
+template <> struct IsAppResult<Scene> : std::true_type {};
+
+/** @brief Preserve an exact managed failure before an owning facade exists. */
+template <> struct IsAppResult<std::expected<Scene, ManagedError>> : std::true_type {};
+
+/** @brief Admit only no-argument factories returning owning supported app results.
+ * @tparam Factory Callable borrowed only through the synchronous upper runner boundary.
+ */
+template <class Factory>
+concept AppFactory = std::invocable<Factory &> && !std::is_reference_v<std::invoke_result_t<Factory &>> &&
+                     IsAppResult<std::remove_cvref_t<std::invoke_result_t<Factory &>>>::value;
+
+/** @brief Deliver a completed pre-owner report without recursively invoking the sink.
+ * @param sink Borrowed final sink, available before factory invocation.
+ * @param report Owning diagnostic retained through delivery and stderr fallback.
+ */
+inline void deliverFactoryReport(const SceneReportHandler &sink, const SceneReport &report) noexcept {
+  FactoryCleanupScope factoryMask;
+  SetupFailureScope reportingScope({}, nullptr, nullptr);
+  CurrentSceneScope currentMask;
+
+  try {
+    if (sink) {
+      sink(report);
+    } else {
+      reportToStderr(report);
+    }
+  } catch (...) {
+    reportToStderr(report);
+  }
+}
+
 /** @brief Select the legacy factory signature before considering an Application borrow.
  * @tparam Factory Owning scene factory returning an owning description or exact checked description.
  */
@@ -3671,14 +3710,14 @@ concept SceneFactory =
    !std::is_reference_v<std::invoke_result_t<Factory &, ManagedScene &, Application &>> &&
    IsSceneRecipe<std::remove_cvref_t<std::invoke_result_t<Factory &, ManagedScene &, Application &>>>::value);
 
-/** @brief Deliver a pre-owner factory failure through the already available final sink.
- * @param sink Owning handler borrowed for this synchronous call; no copy is required on the error path.
+/** @brief Build one owning final factory diagnostic without allocating.
  * @param failure Original typed cause, independent of terminal/widget lifetime.
  * @param origin Factory/setup invocation site.
+ * @param cleanup Bounded diagnostics from actual abandoned factory-local destructors, merged without replacing primary.
+ * @return Stamped primary and independent cleanup failure with exact bounded overflow.
  */
-inline void reportFactoryFailure(const SceneReportHandler &sink, ManagedError failure,
-                                 std::source_location origin) noexcept {
-  SetupFailureScope reportingScope({}, nullptr, nullptr);
+inline SceneReport factoryFailureReport(ManagedError failure, std::source_location origin,
+                                        const FactoryCleanup &cleanup = {}) noexcept {
   SceneReport report;
 
   if (!failure.operation) {
@@ -3690,16 +3729,22 @@ inline void reportFactoryFailure(const SceneReportHandler &sink, ManagedError fa
 
   report.failure = std::move(failure);
   report.origin = report.failure->operationOrigin.value_or(origin);
+  report.droppedErrors = cleanup.attach(*report.failure);
 
-  try {
-    if (sink) {
-      sink(report);
-    } else {
-      reportToStderr(report);
-    }
-  } catch (...) {
-    reportToStderr(report);
-  }
+  return report;
+}
+
+/** @brief Deliver a pre-owner factory failure through the already available final sink.
+ * @param sink Pinned handler borrowed for this synchronous call; empty selects stderr.
+ * @param failure Original typed cause, independent of terminal/widget lifetime.
+ * @param origin Factory/setup invocation site.
+ * @param cleanup Bounded actual destructor cleanup diagnostics.
+ */
+inline void reportFactoryFailure(const SceneReportHandler &sink, ManagedError failure, std::source_location origin,
+                                 const FactoryCleanup &cleanup = {}) noexcept {
+  const auto report = factoryFailureReport(std::move(failure), origin, cleanup);
+
+  deliverFactoryReport(sink, report);
 }
 
 /** @brief Admit exact stationary setup results.
@@ -3845,12 +3890,17 @@ struct RunAppStage {
   ApplicationTerminal *terminal; ///< Borrowed transport, or null for native terminal ownership.
   std::stop_token stop;          ///< Optional worker-safe cancellation.
   std::source_location origin;   ///< Final stage call site.
+  RunAppOptions options{};       ///< Upper factory policies; callable construction precedes consumption.
 
   /** @param owner Borrowed lvalue scene or live temporary; it is never moved by this stage.
    * @param stage Transport/cancellation selection.
    * @return Same zero/one status and final diagnostic delivery as Scene::runApp.
    */
   friend int operator|(Scene &owner, RunAppStage stage) {
+    if (stage.options.report) {
+      owner.reportOnError(std::move(stage.options.report), stage.origin);
+    }
+
     return stage.terminal ? owner.runApp(*stage.terminal, stage.stop, stage.origin)
                           : owner.runApp(stage.stop, stage.origin);
   }
@@ -3872,12 +3922,17 @@ struct CommandLineRunStage {
   ApplicationTerminal *terminal{}; ///< Optional borrowed custom transport.
   std::stop_token stop;            ///< Optional worker-safe cancellation.
   std::source_location origin;     ///< Final stage call site.
+  RunAppOptions options{};         ///< Pre-factory policies; returned Scene policies remain its own.
 
   /** @param owner Existing UI-affine lazy scene.
    * @param stage Single-use command-line stage.
    * @return Zero for success/help, two for launch errors, one for runtime failure.
    */
   friend int operator|(Scene &owner, CommandLineRunStage stage) {
+    if (stage.options.report) {
+      owner.reportOnError(std::move(stage.options.report), stage.origin);
+    }
+
     return stage.terminal
              ? owner.runApp(*stage.terminal, stage.argc, stage.argv, std::move(stage.parser), stage.stop, stage.origin)
              : owner.runApp(stage.argc, stage.argv, std::move(stage.parser), stage.stop, stage.origin);
@@ -4262,39 +4317,63 @@ auto onLayout(Ref<T> reference, Callback callback, std::source_location origin =
   }};
 }
 
-/** @tparam Factory No-argument callable returning Description<T> or exact expected<Description<T>,ManagedError>.
- * @tparam Setup Callable taking the stationary Scene&, returning void or exact expected<void,ManagedError>.
- * @param factory Invoked inside the checked construction boundary, after final sink availability.
- * @param setup Invoked on one stationary facade; capture SceneRef for later callbacks across facade moves.
- * @param options Existing scene/runner policies, borrowed terminal, owning final sink and cancellation.
- * @param origin Upper runner invocation site retained in typed failures.
- * @return Zero after successful run, one for factory/construction/setup/run failure after cleanup.
- * Callable and argument construction before actual invocation can throw outside this boundary.
- * Factory must not return Scene. Setup exceptions map to NO_MEMORY or CALLBACK_FAILED.
- * A rejected short mutation inside setup latches its original typed cause before observers; the current void
- * callback finishes, while later setup/run is skipped. Unbound targets can be attributed to this entered scope.
+namespace detail {
+/** @param sink Optional upper callable copied before any user factory/parser executes.
+ * @return Pinned owning sink, empty for default delivery, or exact allocation/copy failure.
  */
-template <class Factory, detail::AppSetup Setup>
-  requires std::invocable<Factory &> && (!std::is_reference_v<std::invoke_result_t<Factory &>>) &&
-           detail::IsSceneRecipe<std::remove_cvref_t<std::invoke_result_t<Factory &>>>::value
-int runApp(Factory &&factory, Setup &&setup, const RunAppOptions &options = {},
-           std::source_location origin = std::source_location::current()) {
-  detail::SetupFailureScope invocationScope({}, nullptr, nullptr);
+inline std::expected<std::shared_ptr<SceneReportHandler>, ManagedError> pinAppSink(const SceneReportHandler &sink) {
+  try {
+    return sink ? std::make_shared<SceneReportHandler>(sink) : nullptr;
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(ManagedError{ManagedPhase::MOUNT, {}, TreeError::NO_MEMORY, {}, {}});
+  } catch (...) {
+    return std::unexpected(ManagedError{ManagedPhase::MOUNT, {}, TreeError::CALLBACK_FAILED, {}, {}});
+  }
+}
+
+/** @tparam Factory Owning-result factory admitted by the public upper boundary.
+ * @tparam Setup Stationary setup callback, returning void or exact managed expected.
+ * @param factory Synchronously invoked factory.
+ * @param setup Callback running against one stationary facade.
+ * @param options Borrowed Description construction and runner policies.
+ * @param finalSink Optional owning upper sink, already pinned before user code executes.
+ * @param origin Upper invocation site.
+ * @return Existing zero/one runtime status with final diagnostics after cleanup.
+ */
+template <AppFactory Factory, AppSetup Setup>
+int runAppFactory(Factory &&factory, Setup &&setup, const RunAppOptions &options,
+                  std::shared_ptr<SceneReportHandler> finalSink, std::source_location origin) {
+  FactoryCleanupScope factoryMask;
+  SetupFailureScope invocationScope({}, nullptr, nullptr);
+  CurrentSceneScope currentMask;
+  SceneReportHandler fallbackSink;
+  FactoryCleanup cleanup;
 
   try {
-    auto description = std::invoke(factory);
+    auto description = [&] {
+      FactoryCleanupScope factoryScope(&cleanup);
+
+      return std::invoke(factory);
+    }();
+
+    using Result = std::remove_cvref_t<decltype(description)>;
+    constexpr bool DIRECT_RESULT = IsDescription<Result>::value || std::same_as<Result, Scene>;
 
     auto create = [&]() {
-      if constexpr (detail::IsDescription<std::remove_cvref_t<decltype(description)>>::value) {
+      if constexpr (std::same_as<Result, Scene>) {
+        return std::move(description);
+      } else if constexpr (std::same_as<Result, std::expected<Scene, ManagedError>>) {
+        return std::move(*description);
+      } else if constexpr (IsDescription<Result>::value) {
         return scene(std::move(description), options.scene, origin);
       } else {
         return scene(std::move(*description), options.scene, origin);
       }
     };
 
-    if constexpr (!detail::IsDescription<std::remove_cvref_t<decltype(description)>>::value) {
+    if constexpr (!DIRECT_RESULT) {
       if (!description) {
-        detail::reportFactoryFailure(options.report, description.error(), origin);
+        reportFactoryFailure(finalSink ? *finalSink : fallbackSink, description.error(), origin, cleanup);
 
         return 1;
       }
@@ -4302,15 +4381,33 @@ int runApp(Factory &&factory, Setup &&setup, const RunAppOptions &options = {},
 
     // This owner stays stationary during setup and run; callbacks observe stable State through SceneRef.
     auto owner = create();
+    auto admitted = SceneAccess::factoryResultChecked(owner);
 
-    owner.reportOnError(options.report, origin);
+    if (!admitted) {
+      auto failure = admitted.error();
+      const auto closed = owner.close(origin);
+
+      if (!closed && !failure.cleanup && closed.error().cleanup) {
+        failure.cleanup = closed.error().cleanup;
+      }
+
+      const auto report = factoryFailureReport(std::move(failure), origin, cleanup);
+
+      if (!SceneAccess::deliverFactoryReport(owner, report, finalSink)) {
+        deliverFactoryReport(finalSink ? *finalSink : fallbackSink, report);
+      }
+
+      return 1;
+    }
+
+    const auto droppedErrors = SceneAccess::applyFactoryCleanup(owner, cleanup, origin);
 
     if (owner.checked()) {
       std::optional<ManagedError> setupFailure;
 
       {
-        auto setupScope = detail::SceneAccess::setupScope(owner);
-        auto currentScope = detail::SceneAccess::currentScope(owner);
+        auto setupScope = SceneAccess::setupScope(owner);
+        auto currentScope = SceneAccess::currentScope(owner);
 
         try {
           if constexpr (std::same_as<std::invoke_result_t<Setup &, Scene &>, void>) {
@@ -4331,32 +4428,66 @@ int runApp(Factory &&factory, Setup &&setup, const RunAppOptions &options = {},
 
       // Finalize the short-error scope before cleanup can revoke its weak delivery publication.
       if (setupFailure) {
-        detail::SceneAccess::setupFailure(owner, *setupFailure, origin);
+        SceneAccess::setupFailure(owner, *setupFailure, origin);
       }
     }
 
-    return options.terminal ? owner.runApp(*options.terminal, options.stop, origin)
-                            : owner.runApp(options.stop, origin);
+    return SceneAccess::runApp(owner, options, std::move(finalSink), origin, droppedErrors);
   } catch (const std::bad_alloc &) {
-    detail::reportFactoryFailure(options.report, ManagedError{ManagedPhase::MOUNT, {}, TreeError::NO_MEMORY, {}, {}},
-                                 origin);
+    reportFactoryFailure(finalSink ? *finalSink : fallbackSink,
+                         ManagedError{ManagedPhase::MOUNT, {}, TreeError::NO_MEMORY, {}, {}}, origin, cleanup);
   } catch (...) {
-    detail::reportFactoryFailure(options.report,
-                                 ManagedError{ManagedPhase::MOUNT, {}, TreeError::CALLBACK_FAILED, {}, {}}, origin);
+    reportFactoryFailure(finalSink ? *finalSink : fallbackSink,
+                         ManagedError{ManagedPhase::MOUNT, {}, TreeError::CALLBACK_FAILED, {}, {}}, origin, cleanup);
   }
 
   return 1;
 }
+} // namespace detail
 
-/** @tparam Factory No-argument checked owning description factory, never a Scene factory.
+/** @tparam Factory No-argument callable returning owning Scene, Description<T>, or their exact expected with
+ * ManagedError.
+ * @tparam Setup Callable taking the stationary Scene&, returning void or exact expected<void,ManagedError>.
+ * @param factory Invoked inside the checked construction boundary, after final sink availability.
+ * @param setup Invoked on one stationary facade; capture SceneRef for later callbacks across facade moves.
+ * @param options Description construction policies, borrowed terminal, upper final sink and cancellation.
+ * A returned Scene retains its own policies and final sink unless options.report is nonempty.
+ * The explicit sink is pinned before invoking the factory; if pinning fails, stderr receives the typed failure.
+ * @param origin Upper runner invocation site retained in typed failures.
+ * @return Zero after successful run, one for factory/construction/setup/run failure after cleanup.
+ * Callable and argument construction before actual invocation can throw outside this boundary.
+ * Factory/setup exceptions map to NO_MEMORY or CALLBACK_FAILED. A factory returning Scene must retain
+ * callback data by ownership or SceneRef; references to its local facade do not survive the return move.
+ * Cold and prepared, unrun scenes are admitted; completed, closed and moved-from results fail before terminal access.
+ * Abandoned local cleanup retains its first typed error; further failures increment report.droppedErrors.
+ * A rejected short mutation inside setup latches its original typed cause before observers; the current void
+ * callback finishes, while later setup/run is skipped. Unbound targets can be attributed to this entered scope.
+ */
+template <detail::AppFactory Factory, detail::AppSetup Setup>
+int runApp(Factory &&factory, Setup &&setup, const RunAppOptions &options = {},
+           std::source_location origin = std::source_location::current()) {
+  detail::FactoryCleanupScope factoryMask;
+  detail::SetupFailureScope invocationScope({}, nullptr, nullptr);
+  detail::CurrentSceneScope currentMask;
+  auto sink = detail::pinAppSink(options.report);
+
+  if (!sink) {
+    detail::reportFactoryFailure({}, sink.error(), origin);
+
+    return 1;
+  }
+
+  return detail::runAppFactory(std::forward<Factory>(factory), std::forward<Setup>(setup), options, std::move(*sink),
+                               origin);
+}
+
+/** @tparam Factory No-argument factory returning owning Scene, Description<T>, or their exact managed expected.
  * @param factory Invoked inside the checked upper construction boundary.
  * @param options Existing runtime policies and final sink, available before factory invocation.
  * @param origin Upper invocation site.
  * @return Same zero/one status and cleanup as the stationary setup overload with no setup action.
  */
-template <class Factory>
-  requires std::invocable<Factory &> && (!std::is_reference_v<std::invoke_result_t<Factory &>>) &&
-           detail::IsSceneRecipe<std::remove_cvref_t<std::invoke_result_t<Factory &>>>::value
+template <detail::AppFactory Factory>
 int runApp(Factory &&factory, const RunAppOptions &options = {},
            std::source_location origin = std::source_location::current()) {
   return runApp(
@@ -4365,6 +4496,87 @@ int runApp(Factory &&factory, const RunAppOptions &options = {},
     },
     options, origin);
 }
+
+/** @tparam Factory No-argument owning Scene/Description factory, optionally returning exact managed expected.
+ * @param factory Invoked once only after successful command-line preflight; captures must outlive this call.
+ * @param argc Input argument count, including the program name.
+ * @param argv Borrowed argument array, copied before parser invocation.
+ * @param parser Owning parser, retired before factory invocation, including on help/failure.
+ * @param options Description policies, optional explicit final sink, borrowed terminal and cancellation.
+ * A returned Scene keeps its policies and configured sink unless the upper sink is nonempty.
+ * @param origin Upper launch call site retained in diagnostics.
+ * @return Zero on success/help, two on command-line failure, one on factory/runtime failure after cleanup.
+ * Callable/argument construction before invocation remains outside this checked boundary.
+ */
+template <detail::AppFactory Factory>
+int runApp(Factory &&factory, int argc, const char *const *argv, CommandLineParser parser,
+           const RunAppOptions &options = {}, std::source_location origin = std::source_location::current()) {
+  detail::FactoryCleanupScope factoryMask;
+  detail::SetupFailureScope invocationScope({}, nullptr, nullptr);
+  detail::CurrentSceneScope currentMask;
+  auto sink = detail::pinAppSink(options.report);
+
+  if (!sink) {
+    parser = nullptr;
+    detail::reportFactoryFailure({}, sink.error(), origin);
+
+    return 1;
+  }
+
+  auto action = detail::commandLinePreflight(argc, argv, parser);
+
+  if (!action) {
+    SceneReport report;
+    SceneReportHandler fallbackSink;
+
+    report.origin = origin;
+    report.commandLineFailure = std::move(action.error());
+    detail::deliverFactoryReport(*sink ? **sink : fallbackSink, report);
+
+    return 2;
+  }
+
+  if (action->disposition == LaunchDisposition::FINISH) {
+    if (!action->output.empty()) {
+      std::fwrite(action->output.data(), 1, action->output.size(), stdout);
+    }
+
+    return 0;
+  }
+
+  return detail::runAppFactory(
+    std::forward<Factory>(factory),
+    [](Scene &) {
+    },
+    options, std::move(*sink), origin);
+}
+
+namespace detail {
+/** @tparam Factory Owning-result factory borrowed through synchronous stage consumption.
+ * @param factory Callable evaluated inside the existing checked upper boundary.
+ * @param stage Upper policies, final sink and optional borrowed transport.
+ * @return Same zero/one result as the function form.
+ */
+template <AppFactory Factory> int operator|(Factory &&factory, RunAppStage stage) {
+  stage.options.terminal = stage.terminal;
+  stage.options.stop = stage.stop;
+
+  return ui::runApp(std::forward<Factory>(factory), stage.options, stage.origin);
+}
+
+/** @tparam Factory Owning-result factory borrowed through synchronous command-line launch.
+ * @param factory Callable evaluated only after successful preflight.
+ * @param stage Owning parser, upper sink and optional borrowed transport.
+ * @return Same zero/two/one result as the command-line function form.
+ */
+template <AppFactory Factory> int operator|(Factory &&factory, CommandLineRunStage stage) {
+  stage.options.terminal = stage.terminal;
+  stage.options.stop = stage.stop;
+
+  return ui::runApp(std::forward<Factory>(factory), stage.argc, stage.argv, std::move(stage.parser), stage.options,
+                    stage.origin);
+}
+} // namespace detail
 
 /** @param stop Optional existing runner cancellation.
  * @param origin Stage registration call site.
@@ -4402,6 +4614,18 @@ inline auto runApp(ApplicationTerminal &terminal, std::stop_token stop = {},
   return detail::RunAppStage{&terminal, stop, origin};
 }
 
+/** @tparam AppOptions Exact RunAppOptions type; deduction keeps legacy braced stop-token calls unambiguous.
+ * @param options Upper factory policies and explicit final sink, copied into the consuming stage.
+ * The optional terminal remains borrowed through synchronous consumption; Scene policies remain its own.
+ * @param origin Final stage registration site.
+ * @return Checked final stage accepting an owning-result factory or an existing Scene.
+ */
+template <class AppOptions>
+  requires std::same_as<std::remove_cvref_t<AppOptions>, RunAppOptions>
+inline auto runApp(AppOptions &&options, std::source_location origin = std::source_location::current()) {
+  return detail::RunAppStage{options.terminal, options.stop, origin, options};
+}
+
 /** @param callback Owning settings factory, evaluated after CLI success and before Application creation.
  * @param origin Registration call site.
  * @return Lazy application policy modifier; borrowed option storage must outlive run.
@@ -4434,6 +4658,21 @@ inline auto runApp(int argc, const char *const *argv, CommandLineParser parser,
 inline auto runApp(ApplicationTerminal &terminal, int argc, const char *const *argv, CommandLineParser parser,
                    std::source_location origin = std::source_location::current()) {
   return detail::CommandLineRunStage{argc, argv, std::move(parser), &terminal, {}, origin};
+}
+
+/** @tparam AppOptions Exact RunAppOptions type; braced legacy origin arguments do not deduce this overload.
+ * @param argc Input argument count, including the program name.
+ * @param argv Borrowed input array copied at consumption.
+ * @param parser Owning parser retired before invoking a factory or opening a terminal.
+ * @param options Upper factory policies, explicit final sink, borrowed terminal and cancellation.
+ * @param origin Final launch stage registration site.
+ * @return Command-line stage with the same zero/two/one result as the function form.
+ */
+template <class AppOptions>
+  requires std::same_as<std::remove_cvref_t<AppOptions>, RunAppOptions>
+inline auto runApp(int argc, const char *const *argv, CommandLineParser parser, AppOptions &&options,
+                   std::source_location origin = std::source_location::current()) {
+  return detail::CommandLineRunStage{argc, argv, std::move(parser), options.terminal, options.stop, origin, options};
 }
 } // namespace portals::ui
 

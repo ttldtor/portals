@@ -290,7 +290,7 @@ static_assert(!ui::detail::SceneConfiguration<WrongConfiguration>);
 static_assert(!ui::detail::SceneConfiguration<WrongLegacyComposition>);
 static_assert(!ui::detail::SceneFactory<WrongLegacyComposition>);
 static_assert(!ui::detail::SceneFactory<BorrowedComposition>);
-static_assert(!ProgramEntry<SceneFactory>);
+static_assert(ProgramEntry<SceneFactory>);
 static_assert(!ProgramEntry<WrongProgram>);
 static_assert(!std::is_move_assignable_v<ui::Scene>);
 static_assert(!std::is_copy_constructible_v<ui::Scene>);
@@ -4929,4 +4929,103 @@ TEST_CASE("CLI preflight sustained OOM reports before terminal acquisition") {
   CHECK(treeCause(*retained->failure, TreeError::WOULD_BLOCK));
   CHECK(terminal.queries == 0);
   CHECK_FALSE(terminal.closed);
+}
+
+TEST_CASE("app factory sink pinning failure reports to stderr before invoking the factory") {
+  StderrCapture capture;
+  ui::RunAppOptions options;
+  int factories{}, reports{};
+
+  options.report = [&](const ui::SceneReport &) {
+    ++reports;
+  };
+  allocationsBeforeFailure = 0;
+  const int status = ui::runApp(
+    [&] {
+      ++factories;
+
+      return ui::scene(ui::label("unreachable"));
+    },
+    options);
+  allocationsBeforeFailure = -1;
+
+  CHECK(status == 1);
+  CHECK(factories == 0);
+  CHECK(reports == 0);
+
+  const auto output = capture.contents();
+
+  CHECK(output.find("NO_MEMORY") != std::string::npos);
+  CHECK(std::count(output.begin(), output.end(), '\n') == 1);
+}
+
+TEST_CASE("app factory owns cold reference allocation failure and pins the pre-owner sink") {
+  for (const bool pipe : {false, true}) {
+    ui::RunAppOptions options;
+    int factories{}, reports{};
+    bool memoryFailure{}, pinned{};
+    auto capture = std::make_shared<int>(42);
+    auto weak = std::weak_ptr(capture);
+
+    options.report = [&, capture](const ui::SceneReport &report) {
+      allocationsBeforeFailure = -1;
+      ++reports;
+      options.report = {};
+      pinned = !weak.expired() && *capture == 42;
+      memoryFailure = report.failure && treeCause(*report.failure, TreeError::NO_MEMORY) &&
+                      report.failure->phase == ManagedPhase::MOUNT;
+    };
+    capture.reset();
+
+    auto factory = [&]() -> ui::Scene {
+      ++factories;
+      allocationsBeforeFailure = 0;
+
+      ui::Ref<Button> button;
+
+      return ui::scene(ui::button(button, "unreachable"));
+    };
+    const int status = pipe ? (factory | ui::runApp(options)) : ui::runApp(factory, options);
+    allocationsBeforeFailure = -1;
+
+    CHECK(status == 1);
+    CHECK(factories == 1);
+    CHECK(reports == 1);
+    CHECK(memoryFailure);
+    CHECK(pinned);
+    CHECK(weak.expired());
+  }
+}
+
+TEST_CASE("abandoned factory cleanup remains reportable while allocations are rejected") {
+  ui::RunAppOptions options;
+  int stopped{}, reports{};
+  bool retained{};
+
+  options.report = [&](const ui::SceneReport &report) {
+    allocationsBeforeFailure = -1;
+    ++reports;
+    retained = report.failure && treeCause(*report.failure, TreeError::NO_MEMORY) &&
+               report.failure->cleanup == TreeError::NODE_LIMIT && report.droppedErrors == 0;
+  };
+  const int status = ui::runApp(
+    [&]() -> ui::Scene {
+      auto local = ui::scene(ui::label("partial factory owner"));
+
+      local.onStop([&]() -> std::expected<void, ManagedError> {
+        ++stopped;
+
+        return std::unexpected(ManagedError{ManagedPhase::CLEANUP, {}, TreeError::NODE_LIMIT, {}, {}});
+      });
+      allocationsBeforeFailure = 0;
+
+      throw std::bad_alloc();
+    },
+    options);
+  allocationsBeforeFailure = -1;
+
+  CHECK(status == 1);
+  CHECK(stopped == 1);
+  CHECK(reports == 1);
+  CHECK(retained);
 }

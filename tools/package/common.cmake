@@ -9,6 +9,7 @@ function(bundleStageConsumer source destination)
   file(COPY "${source}/tests/package_consumer/" DESTINATION "${destination}")
   # Compile the exact native guides against the installed SDK, without source-tree fallbacks.
   file(COPY "${source}/docs/examples/guide_text_transforms.cpp"
+    "${source}/docs/examples/guide_application_factory.cpp"
     "${source}/docs/examples/guide_nested_scroll.cpp"
     "${source}/docs/examples/guide_dialog.cpp"
     "${source}/docs/examples/guide_message_box.cpp"

@@ -5,6 +5,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+### Added
+
+- `ui::runApp` accepts a factory returning an owning scene or a checked scene result,
+  including pipe and command-line forms. Command-line help and errors are handled
+  before invoking the factory or opening the terminal.
+
 ### Changed
 
 - Online documentation now follows `main` independently of releases, with a development marker, source revision and UTC build date. Release HTML archives retain their versioned documentation.
