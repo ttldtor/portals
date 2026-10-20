@@ -6,6 +6,29 @@
 #include <portals/ui.hpp>
 
 namespace gallery {
+/** @param themes Same-scene logical theme selection; historical superseded IDs do not identify a live theme.
+ * @return Checked F2 preview and commit, preserving the complete managed error.
+ */
+inline std::expected<void, portals::ManagedError> cycleTheme(portals::ui::ThemeSelectionRef themes) {
+  using namespace portals;
+  const auto observed = themes.snapshot();
+
+  if (!observed) {
+    return std::unexpected(observed.error());
+  }
+
+  const auto &snapshot = **observed;
+  const auto &current =
+    snapshot.status == ui::ThemeSelectionStatus::ACTIVE ? snapshot.previewedId : snapshot.lastCommittedId;
+  const bool currentIsMeaningful = snapshot.status != ui::ThemeSelectionStatus::SUPERSEDED;
+  const auto next =
+    currentIsMeaningful && current ? (example::themeIndex(*current) + 1) % example::THEME_PRESETS.size() : 0;
+
+  return themes.preview(example::THEME_PRESETS[next].name).and_then([themes] {
+    return themes.commit();
+  });
+}
+
 /** @param options Borrowed settings, read after command-line parsing.
  * @param themes Scene-owned catalog/model observation shared with the selector.
  * @return Lazy initial commit and F2 cycling, preserving complete managed failures.
@@ -22,30 +45,8 @@ inline auto onTheme(portals::ui::OptionsRef<example::Options> options, portals::
       return initialized;
     }
 
-    return owner.onKey(ui::press("F2"), [themes]() -> std::expected<void, ManagedError> {
-      const auto observed = themes.snapshot();
-
-      if (!observed) {
-        return std::unexpected(observed.error());
-      }
-
-      const auto &snapshot = **observed;
-      std::optional<std::string> current;
-
-      if (snapshot.status == ui::ThemeSelectionStatus::ACTIVE) {
-        current = snapshot.previewedId;
-      } else if (snapshot.status == ui::ThemeSelectionStatus::IDLE) {
-        current = snapshot.lastCommittedId;
-      }
-
-      const auto next = current ? (example::themeIndex(*current) + 1) % example::THEME_PRESETS.size() : 0;
-      auto previewed = themes.preview(example::THEME_PRESETS[next].name);
-
-      if (!previewed) {
-        return previewed;
-      }
-
-      return themes.commit();
+    return owner.onKey(ui::press("F2"), [themes] {
+      return cycleTheme(themes);
     });
   });
 }
