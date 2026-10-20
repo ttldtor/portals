@@ -5,6 +5,8 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+## v0.5.0 (2026-10-20)
+
 - [Examples] The gallery and dashboard include the ready-made theme selector,
   with live previews, Apply and Cancel, while preserving their existing F2 shortcuts.
 
