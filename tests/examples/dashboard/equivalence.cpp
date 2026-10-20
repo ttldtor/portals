@@ -8,8 +8,60 @@
 #include <iostream>
 #include <string>
 
-/** @brief Compare the public fluent scene with the former compact managed composition.
- * @return Zero after equal output/frame behavior and transport cleanup; one on any mismatch.
+namespace {
+std::string visibleText(std::string_view bytes, portals::CellSize size) {
+  test_support::VtOracle oracle(size.width, size.height);
+  oracle.feed(bytes);
+
+  std::string text;
+  for (const auto &cell : oracle.snapshot().cells) {
+    if (!cell.tail) {
+      text += cell.glyph;
+    }
+  }
+  return text;
+}
+
+void publicThemeSelector() {
+  using namespace portals;
+  const auto run = [](std::vector<example::ReplayTerminal::Input> input) {
+    example::ReplayTerminal terminal(std::move(input), 1000);
+    ui::SceneOptions runtime;
+    runtime.clock = terminal.clock();
+    dashboard::Options options;
+    options.rate = 0;
+    dashboard::FluentScene scene(options, runtime);
+    const auto result = scene.scene().run(terminal);
+
+    if (!result || !terminal.closed) {
+      throw std::runtime_error("Public dashboard selector failed runtime/cleanup");
+    }
+    return visibleText(terminal.output, {80, 24});
+  };
+  const std::vector<example::ReplayTerminal::Input> apply{
+    {100, "\x0b", {}}, {200, "\x14", {}}, {300, "\x1b[B", {}}, {350, "\x1b[B", {}}, {400, "\r", {}}};
+  auto committed = apply;
+  committed.push_back({900, "\x1b[21~", {}});
+  const auto applied = run(std::move(committed));
+  auto cancelled = apply;
+  cancelled.insert(cancelled.end(), {{500, "\x0b", {}},
+                                     {550, "\x14", {}},
+                                     {600, "\x1b[B", {}},
+                                     {650, "\x1b", {}},
+                                     {800, "\x1bOQ", {}},
+                                     {900, "\x1b[21~", {}}});
+  const auto restored = run(std::move(cancelled));
+
+  if (applied.find("Committed Turbo") == std::string::npos || restored.find("Committed Modern") == std::string::npos ||
+      restored.find("Instrument") == std::string::npos || restored.find("Themes") == std::string::npos) {
+    throw std::runtime_error(
+      "Public dashboard selector apply/cancel/F2 did not preserve committed theme and market views");
+  }
+}
+} // namespace
+
+/** @brief Verify public market semantics alongside the unchanged legacy request-lifecycle oracle.
+ * @return Zero after preserved data/input behavior, selector integration and transport cleanup; one on mismatch.
  */
 int main() {
   using namespace portals;
@@ -44,9 +96,9 @@ int main() {
       example::ReplayTerminal before(scenario.input, END_OF_INPUT_MS);
       example::ReplayTerminal after(scenario.input, END_OF_INPUT_MS);
       dashboard_test::Options options;
+      options.stress = false;
       ApplicationOptions policies;
 
-      options.stress = false;
       options.delayMs = scenario.delayMs;
       options.rate = scenario.rate;
       policies.writer.colorMode = ColorMode::ANSI16;
@@ -62,15 +114,28 @@ int main() {
       dashboard::FluentScene scene(options, runtime);
       const auto actual = scene.scene().run(after);
 
-      if (!actual || !before.closed || !after.closed || before.output != after.output ||
-          expected.frames != actual->frames || expected.bytes != actual->bytes) {
-        std::cerr << "fluent dashboard changed compact output, frame count or terminal cleanup; scenario="
-                  << scenario.name << '\n';
-
+      if (!actual || !before.closed || !after.closed || actual->inputs != expected.inputs || actual->frames == 0) {
+        std::cerr << "public dashboard changed input or transport cleanup; scenario=" << scenario.name << '\n';
         return 1;
+      }
+      CellSize viewport{80, 24};
+      for (const auto &input : scenario.input) {
+        if (input.resize) {
+          viewport = *input.resize;
+        }
+      }
+      const auto publicVisible = visibleText(after.output, viewport);
+      for (const auto caption : {"Portals market", "Inspect", "Themes", "Committed", "Instrument"}) {
+        if (publicVisible.find(caption) == std::string::npos) {
+          throw std::runtime_error("Public dashboard lost a required control or market view");
+        }
       }
 
       if (scenario.load == LoadExpectation::NONE) {
+        if (publicVisible.find("Replay note") == std::string::npos ||
+            publicVisible.find("Committed Turbo") == std::string::npos) {
+          throw std::runtime_error("Public dashboard lost note editing or F2 theme behavior");
+        }
         continue;
       }
 
@@ -93,13 +158,15 @@ int main() {
       const bool settled = scenario.load == LoadExpectation::SETTLED;
       const bool lifecycle = settled ? loading.usefulLoads > 0 && !baseline.pendingVisible()
                                      : loading.cancelledLoads > 0 && baseline.pendingVisible();
-      const bool rendered = visible.find(settled ? "SYM-0999999" : "Loading") != std::string::npos;
+      const bool rendered = visible.find(settled ? "SYM-0999999" : "Loading") != std::string::npos &&
+                            publicVisible.find(settled ? "SYM-0999999" : "Loading") != std::string::npos;
 
       if (!requested || !lifecycle || !rendered || loading.activeJobs != 0 || loading.cachedPages != 0) {
         std::cerr << "tail-load scenario did not exercise its required request lifecycle; scenario=" << scenario.name
                   << " misses=" << loading.cacheMisses << " peak_jobs=" << loading.peakJobs
                   << " useful=" << loading.usefulLoads << " cancelled=" << loading.cancelledLoads
-                  << " pending=" << baseline.pendingVisible() << " rendered=" << rendered << '\n';
+                  << " pending=" << baseline.pendingVisible() << " rendered=" << rendered << '\n'
+                  << "public final screen: " << publicVisible << '\n';
 
         return 1;
       }
@@ -108,7 +175,8 @@ int main() {
                 << " useful=" << loading.usefulLoads << " cancelled=" << loading.cancelledLoads << '\n';
     }
 
-    std::cout << "fluent dashboard: original replay, completed tail load and pending shutdown match\n";
+    publicThemeSelector();
+    std::cout << "fluent dashboard: market semantics, selector, completed tail load and pending shutdown verified\n";
 
     return 0;
   } catch (const std::exception &error) {

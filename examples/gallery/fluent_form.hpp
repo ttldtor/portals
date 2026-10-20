@@ -7,29 +7,45 @@
 
 namespace gallery {
 /** @param options Borrowed settings, read after command-line parsing.
- * @return Lazy theme stage; theme failures leave the current index unchanged.
+ * @param themes Scene-owned catalog/model observation shared with the selector.
+ * @return Lazy initial commit and F2 cycling, preserving complete managed failures.
  */
-inline auto onTheme(portals::ui::OptionsRef<example::Options> options) {
+inline auto onTheme(portals::ui::OptionsRef<example::Options> options, portals::ui::ThemeSelectionRef themes) {
   using namespace portals;
 
-  return ui::configure([options](ManagedScene &owner) {
-    const auto theme = example::themeIndex(options.get().theme);
+  return ui::configure([options, themes](ManagedScene &owner) -> std::expected<void, ManagedError> {
+    auto initialized = themes.preview(options.get().theme).and_then([themes] {
+      return themes.commit();
+    });
 
-    return owner.theme(example::THEME_PRESETS[theme].make()).and_then([&owner, theme] {
-      return owner.onKey(KeyEvent{.key = InputKey::F2}, [&owner, theme = theme]() mutable {
-        const auto next = (theme + 1) % example::THEME_PRESETS.size();
+    if (!initialized) {
+      return initialized;
+    }
 
-        return owner.theme(example::THEME_PRESETS[next].make())
-          .transform_error([&owner](const ManagedError &error) {
-            static_cast<void>(owner.reportError(error));
-            const auto *cause = std::get_if<TreeError>(&error.cause);
+    return owner.onKey(ui::press("F2"), [themes]() -> std::expected<void, ManagedError> {
+      const auto observed = themes.snapshot();
 
-            return cause ? *cause : TreeError::CALLBACK_FAILED;
-          })
-          .transform([&theme, next] {
-            theme = next;
-          });
-      });
+      if (!observed) {
+        return std::unexpected(observed.error());
+      }
+
+      const auto &snapshot = **observed;
+      std::optional<std::string> current;
+
+      if (snapshot.status == ui::ThemeSelectionStatus::ACTIVE) {
+        current = snapshot.previewedId;
+      } else if (snapshot.status == ui::ThemeSelectionStatus::IDLE) {
+        current = snapshot.lastCommittedId;
+      }
+
+      const auto next = current ? (example::themeIndex(*current) + 1) % example::THEME_PRESETS.size() : 0;
+      auto previewed = themes.preview(example::THEME_PRESETS[next].name);
+
+      if (!previewed) {
+        return previewed;
+      }
+
+      return themes.commit();
     });
   });
 }
@@ -43,27 +59,32 @@ inline portals::ui::Scene form(portals::ui::OptionsRef<example::Options> options
                                portals::ui::SceneOptions policies = {}) {
   using namespace portals;
 
-  return ui::scene(ui::vbox(ui::label("Portals gallery | F2 theme | F10 quit"),
-                            ui::label("Name (Enter commits; Tab changes focus):"),
-                            ui::lineEdit("Portals", {.options = {.editMode = EditMode::EXPLICIT}}),
-                            ui::checkbox("Alerts"),
-                            ui::button("Run (no model change)",
-                                       [run = std::move(run)] {
-                                         if (run) {
-                                           run();
-                                         }
-                                       }),
-                            ui::button("Quit",
-                                       [] {
-                                         ui::quit();
-                                       })),
-                   policies)
+  ui::ThemeSelectionRef themes;
+  ui::ThemeSelectorRef selector;
+
+  // clang-format off
+  auto body = ui::vbox(
+    ui::label("Portals gallery | F2 theme | F10 quit"),
+    ui::label("Name (Enter commits; Tab changes focus):"),
+    ui::lineEdit("Portals", {.options = {.editMode = EditMode::EXPLICIT}}),
+    ui::checkbox("Alerts"),
+    ui::button("Run (no model change)", [run = std::move(run)] {
+      if (run) {
+        run();
+      }
+    }),
+    ui::button("Quit", [] { ui::quit(); }),
+    ui::button("Themes", [selector] { return selector.open(); }));
+
+  return ui::scene(ui::overlayHost(std::move(body), ui::themeSelector(selector, themes)), policies)
     | ui::applicationOptions([options, result = policies.application]() mutable {
            result.writer.colorMode = options.get().ansi16 ? ColorMode::ANSI16 : ColorMode::TRUE_COLOR;
 
            return result;
          })
     | ui::onKey("F10 | Ctrl+C", ui::quit)
-    | onTheme(options);
+    | example::themeCatalog(themes)
+    | onTheme(options, themes);
+  // clang-format on
 }
 } // namespace gallery

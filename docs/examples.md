@@ -86,6 +86,10 @@ Refs observe controls and do not prolong their lifetime. See
 
 Public examples use the standard runner and default style-layer metadata. Explicit source labels, trace export, replay clocks and transport assertions belong to diagnostics material and test harnesses; they are not prerequisites for a form.
 
+The gallery and dashboard include a **Themes** button and the default
+`Ctrl+K, Ctrl+T` shortcut. The selector previews choices; Apply commits and
+Cancel restores the previous theme. F2 remains a quick theme switch.
+
 The gallery and custom widget accept `--theme NAME` and `--ansi16`; F2 cycles
 `modern`, `turbo`, `nord`, `gruvbox`, `tokyo-night`, and `catppuccin-latte`.
 The latter four adapt Textual palettes, not its complete widget design.
