@@ -37,7 +37,8 @@ StyleError error(TreeError cause, std::string_view message) {
 }
 
 bool matches(const StyleSelector &selector, const StyleTarget &target, StyleState state) {
-  return (selector.type.empty() || selector.type == "*" || selector.type == target.type) &&
+  return (selector.type.empty() || selector.type == "*" || selector.type == target.type ||
+          (target.control && selector.type == "Control")) &&
          (selector.id.empty() || selector.id == target.id) &&
          (selector.state == StyleState::ANY || selector.state == state) &&
          std::ranges::all_of(selector.classes, [&](const auto &name) {

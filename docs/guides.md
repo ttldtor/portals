@@ -26,15 +26,21 @@ The [first application](first-application.md) develops a quick-note form in four
 | Undo and redo edits | [Undo and redo](editor-history.md) |
 | Create shared state | [Properties](property.md) |
 | Supply view data | [Models](model.md) |
+| Present loading, empty and error states | [Data presentation](data-presentation.md) |
 | Display a large list | [Virtual lists](virtual-list.md) |
 | Display a large table | [Virtual tables](virtual-table.md) |
-| Control scrolling | [Scrolling](scroll.md) |
+| Scroll ordinary retained content | [Scroll controls](scroll-controls.md) |
+| Scroll virtual data | [Scrolling](scroll.md) |
 | Plot values | [Charts](chart.md) |
 | Handle keyboard input | [Input](input.md) |
 | Report errors | [Diagnostics](diagnostics.md) |
 | Wait without blocking the UI | [UI coroutines](ui-coroutines.md) |
 | Integrate frame rendering | [Rendering](render.md) |
 | Connect a CMake package | [Package setup](package.md) |
+
+## Common interaction patterns
+
+[Dialogs](dialogs.md) · [Notifications](notifications.md) · [Keyboard help](key-help.md) · [Theme preview](theme-selection.md) · [Theme selector](theme-selector.md)
 
 ## Examples
 

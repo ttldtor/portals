@@ -732,11 +732,12 @@ add_executable(portals_theme_selection_consumer theme_selection.cpp)
 add_executable(portals_theme_selection_form_consumer "docs/examples/guide_theme_selection.cpp")
 add_executable(portals_theme_selector_consumer theme_selector.cpp)
 add_executable(portals_theme_selector_form_consumer "docs/examples/guide_theme_selector.cpp")
+add_executable(portals_style_contracts_consumer style_contracts.cpp)
 foreach(target IN ITEMS portals_nested_scroll_consumer portals_nested_scroll_form_consumer
     portals_dialog_consumer portals_dialog_form_consumer portals_message_box_consumer portals_message_box_form_consumer
     portals_toast_consumer portals_toast_form_consumer portals_key_help_consumer portals_key_help_form_consumer
     portals_key_help_headers portals_theme_selection_consumer portals_theme_selection_form_consumer
-    portals_theme_selector_consumer portals_theme_selector_form_consumer)
+    portals_theme_selector_consumer portals_theme_selector_form_consumer portals_style_contracts_consumer)
   target_link_libraries(${target} PRIVATE portals::core)
   set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF)
   if(MSVC)
@@ -762,3 +763,5 @@ add_test(NAME consumer.theme-selection COMMAND portals_theme_selection_consumer)
 set_tests_properties(consumer.theme-selection PROPERTIES TIMEOUT 15)
 add_test(NAME consumer.theme-selector COMMAND portals_theme_selector_consumer)
 set_tests_properties(consumer.theme-selector PROPERTIES TIMEOUT 15)
+add_test(NAME consumer.style-contracts COMMAND portals_style_contracts_consumer)
+set_tests_properties(consumer.style-contracts PROPERTIES TIMEOUT 15)

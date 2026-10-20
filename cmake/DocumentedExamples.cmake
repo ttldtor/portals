@@ -1,0 +1,30 @@
+# Called by the root CMakeLists after defining test targets. Compile every complete
+# documentation program without starting interactive terminals. Existing guide
+# targets are reused; adding a guide source automatically extends the build check.
+get_property(portals_documentation_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+set(portals_registered_documentation_sources)
+set(portals_documented_programs)
+foreach(target IN LISTS portals_documentation_targets)
+  get_target_property(target_sources ${target} SOURCES)
+  foreach(source IN LISTS target_sources)
+    if(source MATCHES "^docs/examples/.*\\.cpp$")
+      list(APPEND portals_registered_documentation_sources "${CMAKE_CURRENT_SOURCE_DIR}/${source}")
+      list(APPEND portals_documented_programs ${target})
+    endif()
+  endforeach()
+endforeach()
+
+file(GLOB portals_documentation_sources CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/docs/examples/*.cpp")
+foreach(source IN LISTS portals_documentation_sources)
+  if(NOT source IN_LIST portals_registered_documentation_sources)
+    get_filename_component(stem "${source}" NAME_WE)
+    set(target "portals_docs_example_${stem}")
+    add_executable(${target} "${source}")
+    target_link_libraries(${target} PRIVATE portals::core)
+    portals_enable_warnings(${target})
+    list(APPEND portals_documented_programs ${target})
+  endif()
+endforeach()
+list(REMOVE_DUPLICATES portals_documented_programs)
+add_custom_target(portals_documented_examples DEPENDS ${portals_documented_programs})

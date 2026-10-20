@@ -195,7 +195,8 @@ timing; partial-error cleanup and clock overhead are included.
 
 ### Compact construction
 
-[compact.cpp](../tools/benchmarks/compact.cpp) has no parsed arguments. Run
+[compact.cpp](../tools/benchmarks/compact.cpp) supports standalone `--help` or `-h`
+and has no workload options. Run
 `./build/tools/portals_compact_benchmark.exe`; JSON goes to stdout. It uses three
 warmups and 30 samples. Exit 0 means success, exit 1 means a caught failure.
 It measures fixed scene and column cases; it does not inspect your application's

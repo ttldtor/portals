@@ -63,7 +63,7 @@ is an exception to that restriction. See [GitHub token event rules](https://docs
 
 The release workflow verifies Windows/Linux builds and package consumers before
 publication. RC releases are prereleases and never become `latest`. A qualifying
-stable release also updates documentation through Actions Pages.
+release includes a versioned HTML archive. The live documentation site updates independently from main through Actions Pages.
 
 ## Existing tags and manual recovery
 
@@ -198,32 +198,34 @@ than automatic replacement. Retain the original verified Actions artifacts.
 
 ## GitHub Pages through Actions
 
-The documentation site is deployed by `docs.yml` through an Actions artifact
-and the `github-pages` environment; no `gh-pages` branch is used. Set the
-repository's **Settings → Pages → Build and deployment → Source** to
-**GitHub Actions**, and allow the release tag refs in the environment's deployment
-policy if it restricts refs. This setup is an administrator action, not something
-the workflow changes itself.
+The documentation site follows `main`. `docs.yml` builds and deploys it on each
+push to `main`, or on a manual run from `main`; a release is not required.
+Deployment uses an Actions artifact and the `github-pages` environment, without
+a `gh-pages` branch. Set **Settings → Pages → Build and deployment → Source** to
+**GitHub Actions**, and allow `main` in the environment's deployment policy if
+it restricts refs. The workflow does not change these administrator settings.
 
-After a stable release becomes or remains current latest, `release.yml` calls
-the reusable documentation workflow with the already verified Linux HTML artifact
-and exact release commit. RC and older stable patch releases do not deploy.
-The workflow checks current latest before preparing Pages and again immediately
-before deployment. The deployment job alone receives `pages: write` and
-`id-token: write` and targets `github-pages`.
+The site identifies its source as `VERSION · dev (COMMIT · DATE UTC)`.
+The header shows the compact `VERSION · dev` label; its tooltip and text for
+assistive technology contain the complete build identity.
+`VERSION` is the project version, `COMMIT` is the first 12 characters of the
+checked-out revision, and `DATE` is the UTC configuration date. The `dev` marker
+means the site may describe changes not yet released. The label does not change
+the library version. Local documentation has the plain project version unless
+configured with `-DPORTALS_DOCS_DEVELOPMENT=ON`; that option requires Git metadata.
 
-To restore documentation, manually run `docs.yml` with the explicit stable tag
-that is currently latest. It checks the tag and main ancestry, rebuilds the same
-commit with the pinned tools, validates local links, and deploys via Actions:
+Release HTML archives retain the plain project version and exact tagged source.
+Publishing a release does not replace the development site. Download the HTML
+archive from the corresponding release to read documentation for that version.
+
+Only the deploy job receives `pages: write` and `id-token: write`. Runs are
+serialized, and deployment checks that the built commit still matches `main`.
+If `main` changes during a build, the stale run fails before deployment; the run
+for the newer push publishes the current site. To rebuild or retry manually:
 
 ```powershell
-gh workflow run docs.yml --ref main -f tag=v0.2.0
+gh workflow run docs.yml --ref main
 ```
-
-The release uses a reusable workflow because events created with `GITHUB_TOKEN`
-do not start another release-triggered workflow. A successful GitHub release
-can therefore remain published even when a later Pages deployment fails; retry
-documentation separately after resolving the Pages environment or site settings.
 
 References:
 [manual workflows](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow),

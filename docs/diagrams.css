@@ -25,6 +25,7 @@ html.dark-mode .contents :is(img[src$="ownership.svg"], object[data$="ownership.
 }
 
 @media (prefers-color-scheme: dark) {
+  html:not(.light-mode) { --primary-color: #58a6ff; }
   html:not(.light-mode) .mermaidgraph img,
   html:not(.light-mode) .contents :is(img[src$="components.svg"], object[data$="components.svg"]),
   html:not(.light-mode) .contents :is(img[src$="event-flow.svg"], object[data$="event-flow.svg"]),
@@ -34,6 +35,8 @@ html.dark-mode .contents :is(img[src$="ownership.svg"], object[data$="ownership.
   }
 }
 
+html.dark-mode { --primary-color: #58a6ff; }
+
 .contents .image object[type="image/svg+xml"] {
   max-width: 100%;
   height: auto;
@@ -42,18 +45,147 @@ html.dark-mode .contents :is(img[src$="ownership.svg"], object[data$="ownership.
 .portals-languages {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  justify-content: flex-start;
   align-items: center;
-  gap: 0.8rem;
-  padding: 0.45rem 1rem;
+  gap: 0.25rem;
+  padding: 0;
+  margin-bottom: 0.4rem;
   font-size: 0.9rem;
 }
 .portals-languages [aria-current="page"] { font-weight: bold; }
 .portals-languages a:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+
+/* Put compact utilities beside the project name, leaving search its own row. */
+html {
+  --top-height: 112px;
+  --side-nav-arrow-opacity: 0.7;
+  --side-nav-arrow-hover-opacity: 1;
+}
+
+#titlearea { position: relative; }
+#projectname { padding-right: 7rem; }
+.portals-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+#titlearea .portals-languages {
+  position: absolute;
+  top: 0.75rem;
+  right: 1rem;
+  flex-wrap: nowrap;
+  margin: 0;
+}
+
+.portals-languages > :is(a, span) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  min-height: 1.75rem;
+  border-radius: var(--border-radius-small);
+}
+
+.portals-languages [aria-current="page"] {
+  background: var(--code-background);
+}
+
+.portals-appearance {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  margin-left: auto;
+  padding: 0;
+  color: var(--page-foreground-color);
+  background: transparent;
+  border: 1px solid var(--separator-color);
+  border-radius: var(--border-radius-small);
+  cursor: pointer;
+}
+
+.portals-appearance[hidden] { display: none; }
+.portals-appearance svg { width: 1rem; height: 1rem; }
+.portals-appearance:hover { background: var(--code-background); }
+.portals-appearance:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
+/* Reserve space for the fixed synchronization control below the tree. */
+#nav-tree-contents { padding-bottom: 3rem; }
+
+/* Give the rotating chevron a stable box independent of the text baseline. */
+#nav-tree .arrow {
+  display: inline-flex;
+  align-items: center;
+  height: var(--tree-item-height);
+  padding-right: 0.4rem;
+  vertical-align: top;
+}
+
+#nav-tree .item > a[role="button"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+}
+
+#nav-tree .item > a:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: -2px;
+  border-radius: 3px;
+}
+
+/* Replace the border-square rotation with two static disclosure shapes. */
+span.arrowhead,
+span.arrowhead.opened,
+.selected span.arrowhead {
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  border: 0;
+  transform: none;
+  transition: none;
+  vertical-align: middle;
+}
+
+#nav-tree span.arrowhead { margin: 0; }
+span.arrowhead::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--primary-color);
+  clip-path: polygon(35% 20%, 75% 50%, 35% 80%);
+}
+
+span.arrowhead.opened::before {
+  clip-path: polygon(20% 35%, 80% 35%, 50% 75%);
+}
+
+@media screen and (min-width: 768px) {
+  #doc-content { padding-top: 0; }
+  #nav-sync { left: calc(var(--side-nav-fixed-width) - 40px); }
+  /* Doxygen 1.18's ID selector otherwise restores the fixed sidebar's handle. */
+  #splitbar { display: none; }
+}
 
 /* Markdown screenshots and animations fit the reading column. */
 #doc-content img.inline,
 #doc-content .image img {
   max-width: 100%;
   height: auto;
+}
+
+/* Inline commands are prose; wide code blocks retain their own scrolling. */
+.contents :is(p, li) :is(code, .tt) {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }

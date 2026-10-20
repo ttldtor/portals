@@ -1,0 +1,12 @@
+# Verify the pinned documentation theme without network access.
+file(READ "${CMAKE_CURRENT_LIST_DIR}/manifest.json" awesome_manifest)
+string(JSON awesome_count LENGTH "${awesome_manifest}" files)
+math(EXPR awesome_last "${awesome_count} - 1")
+foreach(index RANGE 0 ${awesome_last})
+  string(JSON path MEMBER "${awesome_manifest}" files ${index})
+  string(JSON expected GET "${awesome_manifest}" files "${path}")
+  file(SHA256 "${CMAKE_CURRENT_LIST_DIR}/${path}" actual)
+  if(NOT actual STREQUAL expected)
+    message(FATAL_ERROR "Pinned documentation theme changed: vendor/doxygen-awesome/${path}")
+  endif()
+endforeach()

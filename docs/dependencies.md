@@ -37,6 +37,14 @@ CMake verifies their file hashes when the corresponding build components are con
 
 ## Documentation tools
 
+HTML styling uses [Doxygen Awesome 2.5.0](https://github.com/jothepro/doxygen-awesome-css).
+The pinned CSS is stored with the source tree under the [MIT license](../vendor/doxygen-awesome/LICENSE).
+Theme assets and the license are included in generated HTML for offline use.
+The color-scheme button cycles through System, Light and Dark; its tooltip
+names the current and next scheme. The choice is saved in browser storage when
+available. Compact EN/RU links switch languages; tooltips show their full names. Navigation synchronization is switched at the
+bottom of the sidebar.
+
 Generating the HTML reference requires Doxygen 1.18 or newer and Mermaid CLI.
 Node.js 24 LTS and Mermaid CLI 12 are the verified diagram toolchain.
 These tools are not required to build an ordinary Portals application or read

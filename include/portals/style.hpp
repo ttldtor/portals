@@ -41,6 +41,7 @@ struct StyleTarget {
   std::string id{""};   ///< Optional case-sensitive application identity, independent of NodeId.
   std::vector<std::string> classes =
     std::vector<std::string>(0); ///< Case-sensitive class names; all selector classes must match.
+  bool control{false}; ///< Also match Control selectors; explicit targets opt in independently of their type name.
 };
 
 /** @brief Owned metadata for one checked target in an atomic binding batch. */

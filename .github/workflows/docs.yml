@@ -1,23 +1,9 @@
 name: Documentation Pages
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: Existing stable tag that is the current GitHub latest release
-        required: true
-        type: string
-  workflow_call:
-    inputs:
-      tag:
-        required: true
-        type: string
-      commit:
-        required: true
-        type: string
-      artifact:
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -43,73 +29,28 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    if: github.ref == 'refs/heads/main'
     outputs:
-      tag: ${{ steps.select.outputs.tag }}
+      commit: ${{ github.sha }}
     steps:
-      - name: Validate stable tag before checkout
-        id: select
-        env:
-          RELEASE_TAG: ${{ inputs.tag }}
-        run: |
-          python3 - <<'PY'
-          import os, re
-          tag = os.environ['RELEASE_TAG']
-          if not re.fullmatch(r'v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', tag):
-              raise SystemExit('Pages requires an explicit stable tag')
-          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
-              output.write(f'tag={tag}\n')
-          PY
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Resolve tag, main ancestry and current stable latest
-        id: resolve
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.select.outputs.tag }}
-          EXPECTED_COMMIT: ${{ inputs.commit }}
-        run: |
-          python3 - <<'PY'
-          import json, os, subprocess
-          tag = os.environ['RELEASE_TAG']
-          latest = json.loads(subprocess.check_output(['gh', 'api', f'repos/{os.environ["GITHUB_REPOSITORY"]}/releases/latest'], text=True))
-          if latest['tag_name'] != tag or latest['prerelease'] or latest['draft']:
-              raise SystemExit('Only the current stable latest release can deploy Pages')
-          commit = subprocess.check_output(['git', 'rev-parse', '--verify', '--end-of-options', f'refs/tags/{tag}^{{commit}}'], text=True).strip()
-          subprocess.run(['git', 'merge-base', '--is-ancestor', commit, 'refs/remotes/origin/main'], check=True)
-          if os.environ['EXPECTED_COMMIT'] and commit != os.environ['EXPECTED_COMMIT']:
-              raise SystemExit('Release tag moved after publication')
-          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
-              output.write(f'commit={commit}\n')
-          PY
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        if: inputs.artifact != ''
-        with:
-          name: ${{ inputs.artifact }}
-          path: ${{ runner.temp }}/site
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: inputs.artifact == ''
-        with:
-          ref: ${{ steps.resolve.outputs.commit }}
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        if: inputs.artifact == ''
         with:
           node-version: ${{ env.NODE_VERSION }}
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Install the explicit documentation toolchain
-        if: inputs.artifact == ''
         shell: pwsh
         run: |
           sudo apt-get update
           sudo apt-get install -y ($env:TOOLCHAIN_PACKAGES.Split(' '))
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Install checksum-pinned Doxygen
-        if: inputs.artifact == ''
         shell: pwsh
         run: |
           $archiveName = "doxygen-$env:DOXYGEN_VERSION.$env:DOXYGEN_ARCHIVE_SUFFIX"
@@ -130,13 +71,11 @@ jobs:
           if ($LASTEXITCODE -or -not $version.StartsWith($env:DOXYGEN_VERSION)) { throw 'Unexpected Doxygen version' }
           $binaries[0].DirectoryName >> $env:GITHUB_PATH
       - name: Install pinned Mermaid
-        if: inputs.artifact == ''
         shell: pwsh
         run: |
           npm install --global "@mermaid-js/mermaid-cli@$env:MERMAID_VERSION"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Configure Mermaid Chromium only for this renderer
-        if: inputs.artifact == ''
         shell: pwsh
         run: |
           $rendererDirectory = "$env:RUNNER_TEMP/mermaid-renderer"
@@ -149,8 +88,7 @@ jobs:
           chmod +x "$rendererDirectory/mmdc"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $rendererDirectory >> $env:GITHUB_PATH
-      - name: Configure documentation from the explicit release commit
-        if: inputs.artifact == ''
+      - name: Configure development documentation from the exact main commit
         shell: pwsh
         run: >-
           cmake -S "$env:GITHUB_WORKSPACE" -B "$env:RUNNER_TEMP/documentation"
@@ -158,12 +96,11 @@ jobs:
           "-DCMAKE_C_COMPILER=$env:C_COMPILER" "-DCMAKE_CXX_COMPILER=$env:CXX_COMPILER"
           -DPORTALS_BUILD_TESTS=OFF -DPORTALS_BUILD_EXAMPLES=OFF -DPORTALS_BUILD_TOOLS=OFF
           -DPORTALS_BUILD_DOCS=ON -DPORTALS_BUILD_FUZZERS=OFF
+          -DPORTALS_DOCS_DEVELOPMENT=ON
       - name: Build documentation
-        if: inputs.artifact == ''
         shell: pwsh
         run: cmake --build "$env:RUNNER_TEMP/documentation" --config $env:BUILD_CONFIGURATION --target portals_docs --parallel $env:CMAKE_BUILD_PARALLEL_LEVEL
       - name: Stage the complete HTML and Mermaid SVG for Pages
-        if: inputs.artifact == ''
         shell: pwsh
         run: |
           $html = "$env:RUNNER_TEMP/documentation/docs/html"
@@ -188,16 +125,15 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Recheck latest immediately before deployment
+      - name: Refuse to replace newer main documentation
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          DOCUMENTATION_COMMIT: ${{ needs.build.outputs.commit }}
         run: |
-          python3 - <<'PY'
-          import json, os, subprocess
-          latest = json.loads(subprocess.check_output(['gh', 'api', f'repos/{os.environ["GITHUB_REPOSITORY"]}/releases/latest'], text=True))
-          if latest['tag_name'] != os.environ['RELEASE_TAG'] or latest['prerelease'] or latest['draft']:
-              raise SystemExit('Stable latest changed; refusing stale Pages deployment')
-          PY
+          current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          test "$current" = "$DOCUMENTATION_COMMIT" || {
+            echo 'Main changed during the build; rerun Documentation Pages from main.' >&2
+            exit 1
+          }
       - uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
         id: deployment

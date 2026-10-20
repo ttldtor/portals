@@ -2,7 +2,7 @@
 
 [Русская версия](ru/getting-started.md)
 
-Portals provides a C++23 static library and five runnable terminal examples.
+Portals provides a C++23 static library and runnable terminal examples.
 Start with the gallery, then use the dashboard or custom widget to explore the
 same [Application runner](application.md). The [architecture](architecture.md)
 explains ownership and data flow; [limitations](limitations.md) defines the
@@ -109,8 +109,8 @@ the caller-owned options through the final `ui::runApp(argc, argv, parser)` stag
 The options must outlive the synchronous call. See [CLI startup](cli.md) for
 `ui::lyra::cli`, typed errors, help/version and read-only process snapshots.
 [Managed controls](managed-controls.md) explains custom presentation adapters.
-For explicit low-level ownership, [Application](application.md) shows a small
-button program with an `ApplicationScene` and a retained scoped binding.
+The [Application guide](application.md) shows a complete button program using
+`ui::scene` and describes the lower-level runner hooks.
 Derive `ApplicationScene` when managing commands and preparation yourself. In
 `prepare`, synchronize bindings, pin each model once, prepare its sibling
 views at their final extents, then handle returned provider requests outside

@@ -15,6 +15,9 @@
 
 \include guide_toast.cpp
 
+[Полный исходный файл](../examples/guide_toast.cpp) доступен по Markdown-ссылке
+и на GitHub, где include-команда Doxygen не разворачивается.
+
 Подключение установленной библиотеки описано в [руководстве по пакету](package.md).
 Исходник собирается как обычное приложение с `portals::core`. В дереве Portals
 ему соответствует цель `portals_docs_toast` при `PORTALS_BUILD_TESTS=ON`.

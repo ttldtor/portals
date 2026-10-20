@@ -36,7 +36,11 @@ Use style layers when palette changes must preserve application and user overrid
 - [Basic controls](controls.md), [LineEdit](line-edit.md), [text history](text-history.md), [editor undo and redo](editor-history.md).
 - [Layout](layout.md), [grid and overlay](grid.md), [scrolling](scroll.md), [charts](chart.md).
 - [Immutable models](model.md), [bounded queries](model-queries.md), [layout-driven view preparation](virtual-preparation.md).
+- [Data presentation](data-presentation.md) describes loading, empty, error and offline states around content.
 - [Virtual lists](virtual-list.md), [virtual tables](virtual-table.md).
+- [Retained-content scrolling](scroll-controls.md), [virtual-data scrolling](scroll.md).
+- [Dialogs](dialogs.md), [notifications](notifications.md), [keyboard help](key-help.md).
+- [Theme preview](theme-selection.md), [theme selector](theme-selector.md).
 - [UI coroutines](ui-coroutines.md), [scheduler](scheduler.md).
 
 ## Library internals

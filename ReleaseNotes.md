@@ -5,6 +5,24 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+### Changed
+
+- Online documentation now follows `main` independently of releases, with a development marker, source revision and UTC build date. Release HTML archives retain their versioned documentation.
+
+### Fixed
+
+- Standard managed text controls now match their natural type selectors while preserving existing `Control` rules; explicit low-level targets retain exact matching unless they opt in. Rebuild the SDK and consumers together because `StyleTarget` gains a compatibility flag.
+- Cold text lists retain their IDs, classes and custom type during preparation, including named references resolved before startup.
+- HelpView content participates in managed styles and respects manual defaults; KeyHints paints its effective disabled appearance.
+- Failed standalone HelpView mounting removes the entire partially constructed subtree.
+
+### Documentation
+
+- Refresh the HTML reference with an offline Doxygen Awesome theme, a light/dark appearance selector, and aligned language and sidebar navigation.
+- Correct guide contracts and build instructions, synchronize English and Russian reading paths, and bundle complete example sources for offline use.
+- Compile every complete documentation program in the ordinary test build, reusing existing guide targets without launching interactive terminals.
+
+
 ## v0.5.0 (2026-10-20)
 
 - [Examples] The gallery and dashboard include the ready-made theme selector,

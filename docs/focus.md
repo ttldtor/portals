@@ -96,7 +96,9 @@ coordinates. Every ancestor must have fresh geometry and be visible/enabled.
 Reverse paint order wins: a later sibling's subtree is above an earlier one, and a
 child is above its parent. A hit can be an unregistered child; left-button press
 focuses its nearest focusable ancestor and then bubbles the unchanged mouse event.
-There is no pointer capture, implicit mouse activation or synthetic click.
+Ordinary hit testing does not create pointer capture, implicit mouse activation
+or a synthetic click. Scrollbar dragging can explicitly capture the pointer;
+see [scroll controls](scroll-controls.md) for capability checks and cancellation.
 
 Layout invalidation makes mouse geometry unusable until the actual layout owner
 arranges it again. A miss returns an empty node. Stale geometry does not exclude

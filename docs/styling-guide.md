@@ -28,7 +28,10 @@ int main() {
 }
 ```
 
-The style applies to the button with `.id("save")`. F10 exits the application.
+The rules target the button with `.id("save")`. F10 exits the application.
+Managed buttons automatically have the `Button` style type, so this rule needs
+no explicit metadata registration. Their automatic targets also match `Control`
+selectors; [the style reference](styles.md) describes explicit target replacement.
 The [short guide](index.md) describes build requirements, and
 [package setup](package.md) explains how a client links the library.
 The compact runner reports errors and attempts terminal restoration.

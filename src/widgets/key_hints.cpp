@@ -244,7 +244,8 @@ std::expected<void, TreeError> KeyHints::paint(PaintContext &context) {
   if (bounds_.empty()) {
     return {};
   }
-  const auto style = computedStyle() ? (focused() ? computedStyle()->focused : computedStyle()->normal) : CellStyle{};
+  const auto resolved = computedStyle() ? *computedStyle() : Control::styleDefaults();
+  const auto style = !enabled() ? resolved.disabled : focused() ? resolved.focused : resolved.normal;
   const RenderCommand command = TextCommand{{}, *caption(*presentation_), bounds_, style};
   return context.submit(std::span(&command, 1));
 }
@@ -274,7 +275,7 @@ std::expected<void, TreeError> HelpBody::paint(PaintContext &context) {
   if (bounds_.empty()) {
     return {};
   }
-  const auto style = computedStyle() ? computedStyle()->normal : CellStyle{};
+  const auto style = computedStyle() ? computedStyle()->normal : styleDefaults().normal;
   if (!presentation_->current || !presentation_->text) {
     const RenderCommand command = TextCommand{{}, presentation_->unavailable, bounds_, style};
     return context.submit(std::span(&command, 1));

@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: BSL-1.0
 #include "../src/widgets/key_help_state.hpp"
 #include "support/managed_text_fixture.hpp"
+#include <algorithm>
 #include <portals/key_hints.hpp>
+#include <portals/style.hpp>
 
 namespace portals::detail {
 struct ManagedScrollTestAccess {
@@ -38,6 +40,149 @@ void prepareHelp(Fixture &f, CellSize size) {
     }
   }
   take(f.scene->completedLayout(*f.app));
+}
+
+struct StyleSink final : PaintContext {
+  std::vector<CellStyle> text;
+
+  std::expected<void, TreeError> submit(std::span<const RenderCommand> commands) override {
+    for (const auto &command : commands) {
+      if (const auto *value = std::get_if<TextCommand>(&command)) {
+        text.push_back(value->style);
+      }
+    }
+    return {};
+  }
+};
+
+void checkPaintStyle(Fixture &f, Node<Widget> node, CellStyle expected,
+                     std::source_location where = std::source_location::current()) {
+  StyleSink sink;
+  take(f.app->tree().frame([&] {
+    take(f.app->tree().paint(node, sink));
+  }));
+  check(!sink.text.empty(), "styled key help emits text", where);
+  check(std::ranges::all_of(sink.text,
+                            [&](const CellStyle &style) {
+                              return style == expected;
+                            }),
+        "every key help text command uses the expected style", where);
+}
+
+void helpBodyStyles() {
+  ControlStyle manual;
+  manual.normal.foreground = RgbColor{1, 2, 3};
+  manual.normal.bold = true;
+  {
+    Fixture f;
+    auto presentation = std::make_shared<portals::detail::KeyHelpPresentation>(take(GraphemeText::from("Unavailable")));
+    auto body = take(f.scene->emplace<portals::detail::HelpBody>(f.scene->root(), presentation, manual));
+    take(f.app->tree().read(body, [&](const Widget &widget) {
+      check(!widget.computedStyle(), "unregistered help body exercises manual fallback");
+    }));
+    take(f.app->tree().frame([&] {
+      const auto bounds = take(CellRect::from({}, {30, 8}));
+      take(layoutTree(f.app->tree(), f.app->root(), bounds, bounds));
+    }));
+    checkPaintStyle(f, body, manual.normal);
+  }
+  {
+    Fixture f;
+    ui::Ref<HelpView> help;
+    take(ui::mount(*f.scene, ui::helpView(help, {.initiallyOpen = true}, manual)));
+    prepareHelp(f, {30, 8});
+    const auto body = portals::detail::ManagedScrollTestAccess::record(*f.scene, help.node())->body;
+    take(f.app->tree().read(body, [&](const Widget &widget) {
+      check(widget.computedStyle() && widget.computedStyle()->normal == manual.normal,
+            "managed help body registers its manual defaults without a theme");
+    }));
+    checkPaintStyle(f, body, manual.normal);
+    for (const auto source :
+         {"* { foreground: #123456; bold: false; }", "HelpView.help-body { foreground: #123456; bold: false; }"}) {
+      take(f.scene->theme(take(parsePss(source))));
+      prepareHelp(f, {30, 8});
+      auto expected = manual.normal;
+      expected.foreground = RgbColor{0x12, 0x34, 0x56};
+      expected.bold = false;
+      take(f.app->tree().read(body, [&](const Widget &widget) {
+        check(widget.computedStyle() && widget.computedStyle()->normal == expected,
+              "wildcard and typed help-body themes resolve through managed styles");
+      }));
+      checkPaintStyle(f, body, expected);
+    }
+  }
+}
+
+void helpBodyMountRollback() {
+  Fixture f;
+  ui::Ref<HelpView> help;
+  Node<Widget> retiredBody;
+  const auto previous = take(f.app->tree().inspect(f.scene->root())).children;
+  auto failed = ui::mount(
+    *f.scene,
+    ui::helpView(help).setup([&](ManagedScene &scene, Node<HelpView> node) -> std::expected<void, ManagedError> {
+      retiredBody = portals::detail::ManagedScrollTestAccess::record(scene, node)->body;
+      return std::unexpected(ManagedError{ManagedPhase::BIND, node.id(), TreeError::CALLBACK_FAILED, {}, {}});
+    }));
+  check(!failed && treeCause(failed.error(), TreeError::CALLBACK_FAILED) && !failed.error().cleanup,
+        "failure after body style registration preserves the original mount error");
+  check(help.node() == Node<HelpView>{}, "failed help mount publishes no reference");
+  check(take(f.app->tree().inspect(f.scene->root())).children == previous,
+        "failed help mount restores the earlier scene children");
+  check(!f.app->tree().inspect(retiredBody), "failed help mount retires the styled body");
+  take(f.scene->theme(take(parsePss("HelpView.help-body { bold: true; }"))));
+  take(ui::mount(*f.scene, ui::helpView(help, {.initiallyOpen = true})));
+  prepareHelp(f, {30, 8});
+  const auto body = portals::detail::ManagedScrollTestAccess::record(*f.scene, help.node())->body;
+  CellStyle expected;
+  expected.bold = true;
+  checkPaintStyle(f, body, expected);
+}
+
+void disabledHintsStyles() {
+  for (const bool themed : {false, true}) {
+    Fixture f;
+    ui::Ref<HelpView> help;
+    ui::Ref<KeyHints> hints;
+    ui::Ref<Column> ancestor;
+    ControlStyle manual;
+    manual.normal.foreground = RgbColor{1, 2, 3};
+    manual.focused.foreground = RgbColor{4, 5, 6};
+    manual.disabled.foreground = RgbColor{7, 8, 9};
+    take(ui::mount(*f.scene, ui::column(ui::column(ui::keyHints(help, {}, manual).reference(hints)).reference(ancestor),
+                                        ui::helpView(help))));
+    for (const auto key : {"A", "B", "C", "D", "E", "F", "G", "H"}) {
+      take(f.scene->onKey(ui::press(key), KeyInfo(TextValue("A long named action")), [] {
+      }));
+    }
+    if (themed) {
+      take(f.scene->theme(take(parsePss("KeyHints { bold: false; } KeyHints:disabled { bold: true; }"))));
+    }
+    prepareHelp(f, {1, 6});
+    const auto record = portals::detail::ManagedScrollTestAccess::record(*f.scene, hints.node());
+    check(record->presentation->text->overflow && take(f.app->tree().inspect(hints.node())).enabled,
+          "overflow strip has a locally enabled action before ancestor disabling");
+    take(f.scene->focus(hints.node()));
+    prepareHelp(f, {1, 6});
+    auto focusedStyle = manual.focused;
+    if (themed) {
+      focusedStyle.bold = false;
+    }
+    checkPaintStyle(f, hints.node(), focusedStyle);
+    take(f.app->tree().setEnabled(ancestor.node(), false));
+    prepareHelp(f, {1, 6});
+    auto expected = manual.disabled;
+    expected.bold = themed;
+    take(f.app->tree().read(hints.node(), [&](const KeyHints &widget) {
+      check(!widget.enabled() && widget.computedStyle() && widget.computedStyle()->disabled == expected,
+            "disabled ancestor synchronizes effective eligibility and disabled style");
+    }));
+    check(take(f.app->tree().inspect(hints.node())).enabled && record->presentation->text->overflow,
+          "ancestor disabling preserves local overflow action state");
+    checkPaintStyle(f, hints.node(), expected);
+    take(f.app->router().dispatch(KeyEvent{InputKey::ENTER}));
+    check(!take(f.app->tree().inspect(help.node())).visible, "disabled overflow cannot open help");
+  }
 }
 
 void lifecycle() {
@@ -337,12 +482,15 @@ void receiptGuardAndFocusErrors() {
 }
 } // namespace
 int main() try {
+  helpBodyStyles();
+  helpBodyMountRollback();
+  disabledHintsStyles();
   lifecycle();
   exhaustion();
   overflowAndRetry();
   retainedProjectionBudget();
   receiptGuardAndFocusErrors();
-  std::cout << "key-help: tiny/Unicode/open/close/return/activation-ABA/exhaustion PASS\n";
+  std::cout << "key-help: styles/disabled/tiny/Unicode/open/close/return/activation-ABA/exhaustion PASS\n";
 } catch (const std::exception &error) {
   allocationTest::remaining = -1;
   allocationTest::hook = nullptr;

@@ -237,7 +237,8 @@ Primary references: [XTest](https://xorg.freedesktop.org/archive/X11R7.6/doc/lib
 
 ## Documentation checks
 
-Build `portals_docs`, then run `python tools/docs/check_links.py build/docs/html`.
+With the `build/docs` build directory from [the build guide](getting-started.md),
+build `portals_docs`, then run `python tools/docs/check_links.py build/docs/docs/html`.
 Run `python -m unittest discover -s tools/docs -p test_*.py -v` for the HTML-processing regressions.
 Build the public guide programs with `cmake -S docs/examples -B build/guide-examples -G Ninja -DCMAKE_BUILD_TYPE=Release` and `cmake --build build/guide-examples`.
 

@@ -3,6 +3,8 @@
 #pragma once
 
 namespace portals {
+class KeyHints;
+
 template <class T, class... Args>
   requires std::derived_from<T, Widget>
 std::expected<Node<T>, ManagedError> ManagedScene::emplaceConfigured(Node<Widget> parent,
@@ -36,7 +38,17 @@ std::expected<Node<T>, ManagedError> ManagedScene::emplaceConfigured(Node<Widget
                   std::same_as<T, Gauge> || std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>) {
       const char *type = "Control";
 
-      if constexpr (std::same_as<T, Border>) {
+      if constexpr (std::same_as<T, Label>) {
+        type = "Label";
+      } else if constexpr (std::same_as<T, Button>) {
+        type = "Button";
+      } else if constexpr (std::same_as<T, CheckBox>) {
+        type = "CheckBox";
+      } else if constexpr (std::same_as<T, LineEdit>) {
+        type = "LineEdit";
+      } else if constexpr (std::same_as<T, KeyHints>) {
+        type = "KeyHints";
+      } else if constexpr (std::same_as<T, Border>) {
         type = "Border";
       } else if constexpr (std::same_as<T, Gauge>) {
         type = "Gauge";
@@ -46,7 +58,8 @@ std::expected<Node<T>, ManagedError> ManagedScene::emplaceConfigured(Node<Widget
         type = "ScrollBar";
       }
 
-      entry->target = std::make_shared<StyleTarget>(StyleTarget{.type = type});
+      entry->target = std::make_shared<StyleTarget>(
+        StyleTarget{.type = type, .control = std::derived_from<T, Control> || std::same_as<T, LineEdit>});
       entry->stylePending = true;
       stylesDirty_ = true;
     }
