@@ -27,6 +27,7 @@ namespace portals::ui {
  * @tparam T Public Widget subtype constructed by the recipe, including final types.
  */
 template <class T> class Description;
+class GridSection;
 
 namespace detail {
 /** @brief Recognize an owning recipe after cv/ref normalization.
@@ -46,6 +47,11 @@ template <class T> struct IsDescription<Description<T>> : std::true_type {};
  */
 template <class T>
 concept DescriptionInput = IsDescription<std::remove_cvref_t<T>>::value && !std::is_lvalue_reference_v<T>;
+
+/** @brief Consuming real grid child or semantic section. @tparam T Forwarded construction argument. */
+template <class T>
+concept GridInput =
+  DescriptionInput<T> || (std::same_as<std::remove_cvref_t<T>, GridSection> && !std::is_lvalue_reference_v<T>);
 
 /** @brief Admit a declared dialog layer or an erased recipe checked after its existing factory runs.
  * @tparam T Consuming Description<Dialog> or Description<Widget>; other typed widgets are ordinary body content.
@@ -156,6 +162,200 @@ struct SizeChange {
   std::uint32_t weight{1}; ///< Positive flex weight for FLEX operations.
 };
 
+/** @brief Grid-only sparse configuration, released with its construction transaction. */
+struct GridRecipeControl {
+  ControlSettings arguments; ///< Positional grid literals retained for fallback-schema resolution.
+  ControlSettings patch;     ///< Sparse instance overrides applied after positional literals.
+  std::optional<std::string> variant; ///< Optional named fallback type checked during preflight.
+  std::unique_ptr<ResolvedControl> resolved; ///< Owning settings resolved before control construction.
+  bool prepared{};           ///< Settings were already resolved and validated.
+  bool materialized{};       ///< Resource properties already supplied materialized grid settings.
+  bool settingsRequested{};  ///< Explicit settings or variant modifiers were requested.
+  std::uint32_t materializedSettings{}; ///< Resource fields already counted against the mount budget.
+};
+
+/** @brief Cold layout values only; released with the single-use construction transaction. */
+struct RecipeLayout {
+  GridItemOptions item;   ///< Parent-child placement, never inherited from control defaults.
+  bool itemRequested{};   ///< Distinguish ordinary defaults from an explicitly requested relationship.
+  bool gridContainer{};   ///< True only for the standard grid recipe.
+  bool validated{};       ///< This cold graph has completed its parent-aware preflight.
+  bool validRecipe{true}; ///< An empty consuming child fails before any mount effects.
+  bool hasDeclaredGrid{}; ///< Cold composition contains an explicitly configured standard Grid.
+  std::optional<DeclarativeGridOptions> grid; ///< Present only after declarative opt-in.
+  std::unique_ptr<GridPlacementPlan> plan;    ///< Origins established before any constructor or setup.
+  std::vector<std::shared_ptr<RecipeLayout>> children = std::vector<std::shared_ptr<RecipeLayout>>(0); ///< Cold child metadata in insertion order.
+  std::vector<NodeId> mounted = std::vector<NodeId>(0); ///< Full identities collected during child mount.
+  std::size_t headerSections{}; ///< Number of structural header sections.
+  std::size_t bodySections{};   ///< Number of structural body sections.
+  std::size_t directItems{};    ///< Number of children outside structural sections.
+  bool stickyHeader{};          ///< Header sticky setting copied from its section.
+  bool validSections{true};     ///< Whether section placement modifiers are valid.
+  GridPresentation presentation; ///< Owning grid background and paint-budget settings.
+  std::optional<CellStyle> headerStyle; ///< Optional header-section background.
+  std::optional<CellStyle> bodyStyle;   ///< Optional body-section background.
+  std::optional<GridRowStyles> rowStyles; ///< Optional alternating body-row backgrounds.
+  std::optional<GridScrollOptions> scroll; ///< Optional owning scroll settings.
+  std::unique_ptr<GridRecipeControl> control; ///< Deferred grid control settings.
+  std::unique_ptr<std::vector<AxisSize>> columnSizes; ///< Cold owning shared-column policies, absent by default.
+  std::unique_ptr<std::vector<AxisSize>> rowSizes;    ///< Cold owning body-row policies; header stays independent.
+};
+
+/** @param root Cold metadata borrowed for this synchronous validation.
+ * @return Complete parent-aware placement validation, without factories or tree access.
+ */
+inline std::expected<void, TreeError> preflightLayout(const std::shared_ptr<RecipeLayout> &root) {
+  if (!root || root->validated) {
+    return {};
+  }
+
+  struct Visit {
+    std::shared_ptr<RecipeLayout> layout;
+    bool gridChild{};
+  };
+
+  std::vector<Visit> pending(0);
+  std::vector<std::shared_ptr<RecipeLayout>> checked(0);
+
+  pending.push_back({root, false});
+
+  while (!pending.empty()) {
+    auto visit = std::move(pending.back());
+
+    pending.pop_back();
+
+    auto &layout = *visit.layout;
+
+    if (!layout.validRecipe || (layout.itemRequested && !visit.gridChild) || (layout.grid && !layout.gridContainer)) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+
+    if (layout.gridContainer && layout.presentation.maxPaintCells == 0) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+
+    const bool declarative = layout.gridContainer && layout.grid.has_value();
+
+    if (declarative) {
+      if (!layout.validSections || layout.headerSections > 1 || layout.bodySections > 1 ||
+          ((layout.grid->regions || layout.headerSections || layout.bodySections) && layout.directItems != 0)) {
+        return std::unexpected(TreeError::INVALID_ARGUMENT);
+      }
+
+      if (layout.headerSections || layout.bodySections) {
+        layout.grid->regions = true;
+        layout.grid->stickyHeader = layout.stickyHeader;
+      }
+
+      if (layout.scroll) {
+        auto valid = validateScrollOptions(layout.scroll->area);
+
+        if (!valid) {
+          return std::unexpected(valid.error());
+        }
+      }
+
+      std::vector<GridItemOptions> items(0);
+
+      items.reserve(layout.children.size());
+
+      for (const auto &child : layout.children) {
+        items.push_back(child->item);
+      }
+
+      auto resolved = resolveGridPlacements(*layout.grid, items);
+
+      if (!resolved) {
+        return std::unexpected(resolved.error());
+      }
+
+      for (const auto &[policies, count] :
+           {std::pair{layout.columnSizes.get(), resolved->columns}, std::pair{layout.rowSizes.get(), resolved->rows}}) {
+        if (!policies) {
+          continue;
+        }
+
+        if (policies->size() != count) {
+          return std::unexpected(TreeError::INVALID_ARGUMENT);
+        }
+
+        auto valid = portals::detail::validateGridTrackSizes(*policies);
+
+        if (!valid) {
+          return std::unexpected(valid.error());
+        }
+      }
+
+      layout.plan = std::make_unique<GridPlacementPlan>(*resolved);
+      layout.mounted.reserve(items.size());
+    }
+
+    for (const auto &child : layout.children) {
+      pending.push_back({child, declarative});
+    }
+
+    checked.push_back(std::move(visit.layout));
+  }
+
+  for (const auto &layout : checked) {
+    layout->validated = true;
+  }
+
+  return {};
+}
+
+/** @param layout Validated cold grid metadata, borrowed only for this owning materialization.
+ * @return Resolved options, with identities only after all children have mounted.
+ */
+inline GridOptions resolvedGridOptions(const RecipeLayout &layout) {
+  GridOptions result;
+  const auto &settings = *layout.grid;
+  const auto &plan = *layout.plan;
+
+  result.columns.resize(plan.columns);
+  result.rows.resize(plan.rows);
+  result.header_rows.resize(plan.headerRows);
+
+  if (layout.columnSizes) {
+    result.columns = *layout.columnSizes;
+  }
+
+  if (layout.rowSizes) {
+    result.rows = *layout.rowSizes;
+  }
+  result.regions = settings.regions;
+  result.sticky_header = settings.stickyHeader;
+  result.presentation = layout.presentation;
+
+  if (layout.headerStyle) {
+    result.presentation.header = layout.headerStyle;
+  }
+
+  if (layout.bodyStyle) {
+    result.presentation.body = layout.bodyStyle;
+  }
+
+  if (layout.rowStyles) {
+    result.presentation.rows = *layout.rowStyles;
+  }
+  result.column_gap = settings.columnGap;
+  result.row_gap = settings.rowGap;
+  result.padding = settings.padding;
+  result.max_tracks_per_axis = settings.maxTracksPerAxis;
+  result.max_placements = settings.maxPlacements;
+  result.cells.reserve(layout.mounted.size());
+
+  for (std::size_t index = 0; index < layout.mounted.size(); ++index) {
+    const auto &item = layout.children[index]->item;
+    const auto position = plan.positions[index];
+
+    result.cells.push_back({layout.mounted[index], position.row, position.column, item.rowSpan, item.columnSpan,
+                            item.horizontal, item.vertical, item.region});
+  }
+
+  return GridOptions(result);
+}
+
 /** @brief Stack-owned transaction bookkeeping, discarded after one description mount. */
 struct MountContext {
   ControlContext controls{};   ///< Immutable owning defaults for this mount transaction.
@@ -210,6 +410,13 @@ struct MountContext {
 };
 
 /** @brief Internal bridge to existing managed validation and private consuming recipes. */
+/** @param root Cold layout metadata. @param context Whole transaction accounting and immutable controls.
+ * @param parent Checked error attribution parent. @return Grid-only preflight with owning typed diagnostics.
+ */
+std::expected<void, ManagedError> prepareGridLayouts(const std::shared_ptr<RecipeLayout> &root, MountContext &context,
+                                                     Node<Widget> parent);
+
+/** @brief Internal bridge for checked access to managed scene and recipe state. */
 struct Access {
   /** @param scene Owner of the nested mount transaction entered on this thread. */
   static void beginMount(ManagedScene &scene) noexcept {
@@ -286,6 +493,19 @@ struct Access {
   template <class T>
   static std::expected<Node<T>, ManagedError> mount(Description<T> &&description, ManagedScene &scene,
                                                     Node<Widget> parent, MountContext &context);
+  /** @tparam T Root widget type. @param description Unmounted root borrowed for bounded opt-in detection.
+   * @return Whether an explicitly configured standard Grid needs the local fallback schema.
+   */
+  template <class T> static bool needsGridContext(const Description<T> &description);
+
+  /** @param description Root resource transaction validating its effective graph after local declarations.
+   * @return Consuming description; native ancestor callbacks keep their existing ordering.
+   */
+  static Description<Widget> deferControlValidation(Description<Widget> description);
+  /** @param description Root recipe borrowed before any factory effects.
+   * @return Whether the resource parser owns complete effective-context validation before its effects.
+   */
+  template <class T> static bool defersControlValidation(const Description<T> &description);
 
   /** @brief Wrap a checked managed factory without exposing recipe construction publicly.
    * @tparam T Widget subtype returned by the factory.
@@ -323,6 +543,40 @@ struct Access {
    * @return Recipe whose later instance settings retain highest priority.
    */
   template <class T> static Description<T> controlArguments(Description<T> description, ControlSettings arguments);
+  /** @tparam Parent Parent widget type. @tparam Child Child widget type.
+   * @param parent Receiving cold recipe. @param child Consumed child recipe, inspected before transfer.
+   * @param structural Retain every child relationship, including default placements.
+   */
+  template <class Parent, class Child>
+  static void layoutChild(Description<Parent> &parent, Description<Child> &child, bool structural = false);
+  /** @tparam Children Consuming description types inspected before their constructor captures are transferred.
+   * @param children Ordinary child recipes, without invoking their factories.
+   * @return Optional owning layout-only metadata for a composition whose children mount inside its factory.
+   */
+  template <class... Children> static std::shared_ptr<RecipeLayout> captureLayouts(Children &...children);
+  /** @tparam T Parent widget type. @param description Cold composition retaining normal transaction behavior.
+   * @param layout Previously captured owning layout metadata.
+   * @return Same consuming composition with its children included in preflight.
+   */
+  template <class T> static Description<T> withLayout(Description<T> description, std::shared_ptr<RecipeLayout> layout);
+  /** @tparam Child Consuming real child recipe. @param parent Receiving standard grid recipe.
+   * @param child Single-use real child. @param region Present only for a structural section.
+   */
+  template <class Child>
+  static void gridChild(Description<Grid> &parent, Child &&child, std::optional<GridRegion> region = {});
+  /** @param parent Receiving standard grid recipe. @param section Consumed header/body group, without a Widget. */
+  static void gridSection(Description<Grid> &parent, GridSection section);
+
+  /** @param scene Live managed owner. @param node Declarative grid receiving complete identities.
+   * @param options Resolved settings borrowed during checked replacement.
+   * @return Existing typed configuration result, attributed to this grid.
+   */
+  static std::expected<void, ManagedError> gridOptions(ManagedScene &scene, Node<Grid> node,
+                                                       const GridOptions &options) {
+    auto result = setDeclarativeGridOptions(scene.app_.tree(), node, options);
+
+    return result ? std::expected<void, ManagedError>{} : std::unexpected(error(node, result.error()));
+  }
   /** @brief Attach binding setup after node creation within the mount transaction.
    * @tparam T Concrete widget subtype retained by the recipe.
    * @tparam Callback Synchronous checked setup callable for scene, node and settings.
@@ -382,6 +636,19 @@ struct Access {
     apply(base.history.maxBytes, patch.history.maxBytes);
     apply(base.history.groupTyping, patch.history.groupTyping);
     apply(base.history.groupDeletion, patch.history.groupDeletion);
+    apply(base.grid.columns, patch.grid.columns);
+    apply(base.grid.rows, patch.grid.rows);
+    apply(base.grid.flow, patch.grid.flow);
+    apply(base.grid.columnGap, patch.grid.columnGap);
+    apply(base.grid.rowGap, patch.grid.rowGap);
+    apply(base.grid.paddingLeft, patch.grid.paddingLeft);
+    apply(base.grid.paddingTop, patch.grid.paddingTop);
+    apply(base.grid.paddingRight, patch.grid.paddingRight);
+    apply(base.grid.paddingBottom, patch.grid.paddingBottom);
+    apply(base.grid.maxTracksPerAxis, patch.grid.maxTracksPerAxis);
+    apply(base.grid.maxPlacements, patch.grid.maxPlacements);
+    apply(base.grid.maxPlacementWork, patch.grid.maxPlacementWork);
+    apply(base.grid.scroll, patch.grid.scroll);
     base.origin = patch.origin;
     base.origins = patch.origins;
     return base;
@@ -1765,6 +2032,14 @@ public:
     if (state_) {
       state_->controlPatch = std::move(patch);
       state_->settingsRequested = true;
+
+      if constexpr (std::same_as<T, Grid>) {
+        if (state_->layout && state_->layout->gridContainer) {
+          gridControl().patch = state_->controlPatch;
+          gridControl().settingsRequested = true;
+          declarativeOptions();
+        }
+      }
     }
     return std::move(*this);
   }
@@ -1776,6 +2051,13 @@ public:
   Description &&variant(std::string_view type) && {
     if (state_) {
       state_->controlVariant.emplace(type);
+
+      if constexpr (std::same_as<T, Grid>) {
+        if (state_->layout && state_->layout->gridContainer) {
+          gridControl().variant.emplace(type);
+          declarativeOptions();
+        }
+      }
     }
     return std::move(*this);
   }
@@ -1954,6 +2236,250 @@ public:
     return std::move(*this).resize({detail::SizeDimension::HEIGHT, cells});
   }
 
+  /** @param count Positive fixed column count; row-major flow grows rows within the configured budget.
+   * @return Consuming standard grid recipe; invalid relationships fail before mount effects.
+   */
+  Description &&columns(std::size_t count) &&
+    requires std::same_as<T, Grid>
+  {
+    if (state_) {
+      declarativeOptions().columns = count;
+      gridControl().arguments.grid.columns = count;
+    }
+
+    return std::move(*this);
+  }
+
+  /** @param count Positive fixed row count; column-major flow grows columns within the configured budget.
+   * @return Consuming standard grid recipe; explicit trailing rows remain present.
+   */
+  Description &&rows(std::size_t count) &&
+    requires std::same_as<T, Grid>
+  {
+    if (state_) {
+      declarativeOptions().rows = count;
+      gridControl().arguments.grid.rows = count;
+    }
+
+    return std::move(*this);
+  }
+
+  /** @param value Forward placement direction; COLUMN_MAJOR requires rows.
+   * @return Consuming standard grid recipe; unknown directions fail during preflight.
+   */
+  Description &&flow(GridFlow value) &&
+    requires std::same_as<T, Grid>
+  {
+    if (state_) {
+      declarativeOptions().flow = value;
+      gridControl().arguments.grid.flow = value;
+    }
+
+    return std::move(*this);
+  }
+
+  /** @param cells Nonnegative terminal cells between columns.
+   * @return Consuming standard grid recipe; a column or row count is still required.
+   */
+  Description &&columnGap(std::int32_t cells) &&
+    requires std::same_as<T, Grid>
+  {
+    if (state_) {
+      declarativeOptions().columnGap = cells;
+      gridControl().arguments.grid.columnGap = cells;
+    }
+
+    return std::move(*this);
+  }
+
+  /** @param cells Nonnegative terminal cells between rows.
+   * @return Consuming standard grid recipe, with spanning gaps included inside its cells.
+   */
+  Description &&rowGap(std::int32_t cells) &&
+    requires std::same_as<T, Grid>
+  {
+    if (state_) {
+      declarativeOptions().rowGap = cells;
+      gridControl().arguments.grid.rowGap = cells;
+    }
+
+    return std::move(*this);
+  }
+
+  /** @param options Complete owning declaration, including finite work budgets; replaces prior grid modifiers.
+   * @return Consuming standard grid recipe; relationships remain independent from control defaults.
+   */
+  Description &&gridOptions(DeclarativeGridOptions options) &&
+    requires std::same_as<T, Grid>
+  {
+    if (state_) {
+      declarativeOptions() = options;
+      auto &arguments = gridControl().arguments.grid;
+
+      arguments.columns = options.columns;
+      arguments.rows = options.rows;
+      arguments.flow = options.flow;
+      arguments.columnGap = options.columnGap;
+      arguments.rowGap = options.rowGap;
+      arguments.paddingLeft = options.padding.left;
+      arguments.paddingTop = options.padding.top;
+      arguments.paddingRight = options.padding.right;
+      arguments.paddingBottom = options.padding.bottom;
+      arguments.maxTracksPerAxis = options.maxTracksPerAxis;
+      arguments.maxPlacements = options.maxPlacements;
+      arguments.maxPlacementWork = options.maxPlacementWork;
+    }
+
+    return std::move(*this);
+  }
+
+  /** @param presentation Owning region/row backgrounds and finite paint budget.
+   * @return Consuming standard grid recipe; backgrounds never inherit into child control state styles.
+   */
+  Description &&presentation(GridPresentation presentation) &&
+    requires std::same_as<T, Grid>
+  {
+    if (state_) {
+      layoutMetadata().presentation = presentation;
+    }
+
+    return std::move(*this);
+  }
+
+  /** @param policies Track policies copied now; length must equal the resolved shared column count.
+   * @return Consuming declarative grid recipe; invalid policies/counts fail before mount effects.
+   */
+  Description &&columnSizes(const std::vector<AxisSize> &policies) &&
+    requires std::same_as<T, Grid>
+  {
+    if (state_) {
+      declarativeOptions();
+      layoutMetadata().columnSizes = std::make_unique<std::vector<AxisSize>>(policies);
+    }
+
+    return std::move(*this);
+  }
+
+  /** @param policies Track policies copied now; length must equal the resolved BODY row count.
+   * @return Consuming declarative recipe. Header rows keep independent inferred policies.
+   * Invalid policies/counts fail before mount effects; this method does not set the row count.
+   */
+  Description &&rowSizes(const std::vector<AxisSize> &policies) &&
+    requires std::same_as<T, Grid>
+  {
+    if (state_) {
+      declarativeOptions();
+      layoutMetadata().rowSizes = std::make_unique<std::vector<AxisSize>>(policies);
+    }
+
+    return std::move(*this);
+  }
+
+  /** @param controller Shared owning values; empty uses an independent default controller.
+   * @return Consuming standard grid, enabling one scroll owner before mount without a new Widget or Tab stop.
+   */
+  Description &&scroll(std::shared_ptr<ScrollController> controller = {}) &&
+    requires std::same_as<T, Grid>
+  {
+    if (state_) {
+      declarativeOptions();
+      auto &layout = layoutMetadata();
+
+      if (!layout.scroll) {
+        layout.scroll.emplace();
+      }
+
+      if (controller) {
+        layout.scroll->controller = std::move(controller);
+      }
+
+      gridControl().arguments.grid.scroll = true;
+    }
+
+    return std::move(*this);
+  }
+
+  /** @param options Complete existing ScrollArea settings; focusable=true explicitly adds a focus stop.
+   * @return Consuming standard grid with scrolling enabled before mount; retains a supplied controller.
+   */
+  Description &&scrollOptions(ScrollAreaOptions options) &&
+    requires std::same_as<T, Grid>
+  {
+    if (state_) {
+      declarativeOptions();
+      auto &layout = layoutMetadata();
+
+      if (!layout.scroll) {
+        layout.scroll.emplace();
+      }
+
+      layout.scroll->area = options;
+      gridControl().arguments.grid.scroll = true;
+    }
+
+    return std::move(*this);
+  }
+
+  /** @param options Complete parent-child placement; replaces prior relationship modifiers.
+   * @return Consuming recipe; only an immediate declarative Grid parent accepts this relationship.
+   */
+  Description &&gridItem(GridItemOptions options) && {
+    if (state_) {
+      layoutMetadata().item = options;
+      state_->layout->itemRequested = true;
+    }
+
+    return std::move(*this);
+  }
+
+  /** @param index Zero-based local row; column must also be explicit.
+   * @return Consuming child recipe; a partial coordinate fails before mount effects.
+   */
+  Description &&row(std::size_t index) && {
+    if (state_) {
+      layoutMetadata().item.row = index;
+      state_->layout->itemRequested = true;
+    }
+
+    return std::move(*this);
+  }
+
+  /** @param index Zero-based local column; row must also be explicit.
+   * @return Consuming child recipe; this does not alter an ordinary row container.
+   */
+  Description &&column(std::size_t index) && {
+    if (state_) {
+      layoutMetadata().item.column = index;
+      state_->layout->itemRequested = true;
+    }
+
+    return std::move(*this);
+  }
+
+  /** @param count Positive number of occupied rows, including intervening gaps.
+   * @return Consuming child recipe; hidden children retain the same structural span.
+   */
+  Description &&rowSpan(std::size_t count) && {
+    if (state_) {
+      layoutMetadata().item.rowSpan = count;
+      state_->layout->itemRequested = true;
+    }
+
+    return std::move(*this);
+  }
+
+  /** @param count Positive number of occupied columns, including intervening gaps.
+   * @return Consuming child recipe; overlap is rejected in declarative Grid mode.
+   */
+  Description &&columnSpan(std::size_t count) && {
+    if (state_) {
+      layoutMetadata().item.columnSpan = count;
+      state_->layout->itemRequested = true;
+    }
+
+    return std::move(*this);
+  }
+
   /** @param weight Positive horizontal flex weight; zero preferred basis, existing bounds and vertical axis are
    * preserved.
    * @return Consuming recipe; zero weight fails at checked mount.
@@ -2029,7 +2555,7 @@ private:
   template <class U> friend Description<U> control(std::string_view, ControlStyle, SizePolicy);
   template <class U, detail::DescriptionInput... Children> friend Description<U> linear(LinearOptions, Children &&...);
   template <class U, detail::DescriptionRange R> friend Description<U> linear(LinearOptions, R &&);
-  template <detail::DescriptionInput... Children> friend Description<Grid> grid(Children &&...);
+  template <detail::GridInput... Children> friend Description<Grid> grid(Children &&...);
   friend Description<LineEdit> lineEdit(ManagedState<std::string>, LineEditConfig);
 
   /** @brief Owning constructor adapter using the existing checked managed mount. */
@@ -2045,14 +2571,16 @@ private:
     std::vector<Setup<T>> setup = std::vector<Setup<T>>(0);          ///< Customization actions in modifier order.
     std::vector<Child> children = std::vector<Child>(0);             ///< Consuming child adapters in insertion order.
     std::vector<NodeRef<T>> references = std::vector<NodeRef<T>>(0); ///< Observing slots reserved for this node.
-    bool focusScope{};                         ///< Register before setup/children; scene owns its token.
-    bool focusDefault{};                       ///< Set the nearest registered scope's default before children.
-    std::optional<std::string> id;             ///< Compact recipe identity preserved by later style modifiers.
-    std::shared_ptr<detail::RefTarget> anchor; ///< Cold same-attempt body anchor, without widget ownership.
+    std::shared_ptr<detail::RecipeLayout> layout; ///< Optional cold relationship metadata; never mounted state.
+    bool focusScope{};                            ///< Register before setup/children; scene owns its token.
+    bool focusDefault{};                          ///< Set the nearest registered scope's default before children.
+    std::optional<std::string> id;                ///< Compact recipe identity preserved by later style modifiers.
+    std::shared_ptr<detail::RefTarget> anchor;    ///< Cold same-attempt body anchor, without widget ownership.
     DialogPlacement placement{DialogPlacement::BELOW_START}; ///< Configured anchor preference.
     bool anchorRequested{};                    ///< Distinguish an absent modifier from an empty moved observing slot.
     std::optional<StyleTarget> intrinsicStyle; ///< Owning natural type names, finalized after ordinary setup.
     bool controlPrepared{};                 ///< Resource settings were validated and materialized before construction.
+    bool deferredControlValidation{};       ///< Root resource parser validates after CONFIG, before document effects.
     std::uint32_t materializedSettings{};   ///< Resource properties already reserved in the aggregate leaf budget.
     std::optional<std::string> controlType; ///< Supported concrete factory; absent on arbitrary custom widgets.
     std::optional<std::string> controlVariant; ///< Requested runtime name, checked against the concrete type.
@@ -2079,6 +2607,40 @@ private:
                                                   detail::MountContext &) mutable {
       return create(scene, parent);
     };
+  }
+
+  detail::RecipeLayout &layoutMetadata() {
+    if (!state_->layout) {
+      state_->layout = std::make_shared<detail::RecipeLayout>();
+    }
+
+    return *state_->layout;
+  }
+
+  detail::GridRecipeControl &gridControl()
+    requires std::same_as<T, Grid>
+  {
+    auto &layout = layoutMetadata();
+
+    if (!layout.control) {
+      layout.control = std::make_unique<detail::GridRecipeControl>();
+    }
+
+    return *layout.control;
+  }
+
+  DeclarativeGridOptions &declarativeOptions()
+    requires std::same_as<T, Grid>
+  {
+    auto &layout = layoutMetadata();
+
+    if (!layout.grid) {
+      layout.grid.emplace();
+    }
+
+    layout.hasDeclaredGrid = true;
+
+    return *layout.grid;
   }
 
   /** @param change Owning policy operation applied in setup/modifier order.
@@ -2113,6 +2675,19 @@ private:
    */
   static std::expected<void, ManagedError> prepareControl(State &state, Node<Widget> parent,
                                                           detail::MountContext &context) {
+    if constexpr (std::same_as<T, Grid>) {
+      if (state.layout && state.layout->gridContainer && state.layout->control && state.layout->control->prepared) {
+        state.resolvedControl = std::move(state.layout->control->resolved);
+
+        if (state.controlVariant && state.resolvedControl) {
+          state.intrinsicStyle =
+            StyleTarget{.type = state.resolvedControl->type, .baseTypes = state.resolvedControl->lineage};
+        }
+
+        return {};
+      }
+    }
+
     if ((state.settingsRequested || state.controlVariant) && !state.controlType) {
       return std::unexpected(detail::controlContextError({ControlContextErrorCode::UNSUPPORTED_PROPERTY, {}}, parent));
     }
@@ -2188,6 +2763,18 @@ private:
 
     if (!state || !state->create) {
       return std::unexpected(detail::error(parent, TreeError::INVALID_ARGUMENT));
+    }
+
+    auto gridPrepared = detail::prepareGridLayouts(state->layout, context, parent);
+
+    if (!gridPrepared) {
+      return std::unexpected(gridPrepared.error());
+    }
+
+    auto layoutChecked = detail::preflightLayout(state->layout);
+
+    if (!layoutChecked) {
+      return std::unexpected(detail::error(parent, layoutChecked.error()));
     }
 
     auto prepared = prepareControl(*state, parent, context);
@@ -2342,6 +2929,20 @@ private:
       }
     }
 
+    if constexpr (std::same_as<T, Grid>) {
+      if (state->layout && state->layout->grid) {
+        if (state->layout->mounted.size() != state->layout->children.size()) {
+          return std::unexpected(detail::error(*node, TreeError::INVALID_ARGUMENT));
+        }
+
+        auto configured = detail::Access::gridOptions(scene, *node, detail::resolvedGridOptions(*state->layout));
+
+        if (!configured) {
+          return std::unexpected(configured.error());
+        }
+      }
+    }
+
     if constexpr (std::same_as<T, Dialog>) {
       if (state->anchorRequested) {
         context.finalize.push_back([&scene, &context, node = *node, target = state->anchor,
@@ -2376,11 +2977,341 @@ private:
   std::unique_ptr<State> state_;
 };
 
+/** @brief Single-use semantic Grid section; owns recipes and never mounts a placeholder Widget. */
+class GridSection {
+public:
+  /** @param other Owning source consumed into this group; checked-STL transfers may allocate. */
+  GridSection(GridSection &&other)
+      : region_(other.region_), sticky_(other.sticky_), valid_(other.valid_), style_(other.style_), rows_(other.rows_) {
+    children_.swap(other.children_);
+    other.valid_ = false;
+  }
+
+  /** @param other Owning source replacing these unmounted children. @return This section. */
+  GridSection &operator=(GridSection &&other) {
+    if (this == &other) {
+      return *this;
+    }
+
+    children_.swap(other.children_);
+    region_ = other.region_;
+    sticky_ = other.sticky_;
+    valid_ = other.valid_;
+    style_ = other.style_;
+    rows_ = other.rows_;
+    other.valid_ = false;
+
+    return *this;
+  }
+
+  GridSection(const GridSection &) = delete;
+  GridSection &operator=(const GridSection &) = delete;
+
+  /** @param value Whether this header remains fixed vertically when Grid owns scrolling.
+   * @return Consuming header; using sticky on body fails preflight.
+   */
+  GridSection &&sticky(bool value = true) && {
+    sticky_ = value;
+    valid_ = valid_ && region_ == GridRegion::HEADER;
+
+    return std::move(*this);
+  }
+
+  /** @param value Owning region background; does not inherit into child controls.
+   * @return Consuming section with this regional background.
+   */
+  GridSection &&style(CellStyle value) && {
+    style_ = value;
+
+    return std::move(*this);
+  }
+
+  /** @param value Owning logical odd/even body backgrounds, below real controls.
+   * @return Consuming body; row styles on header fail preflight.
+   */
+  GridSection &&rowStyles(GridRowStyles value) && {
+    rows_ = value;
+    valid_ = valid_ && region_ == GridRegion::BODY;
+
+    return std::move(*this);
+  }
+
+private:
+  friend struct detail::Access;
+  template <detail::DescriptionInput... Children> friend GridSection header(Children &&...);
+  template <detail::DescriptionInput... Children> friend GridSection body(Children &&...);
+
+  explicit GridSection(GridRegion region) : region_(region) {
+  }
+
+  GridRegion region_;
+  bool sticky_{};
+  bool valid_{true};
+  std::optional<CellStyle> style_;
+  std::optional<GridRowStyles> rows_;
+  std::vector<Description<Widget>> children_ = std::vector<Description<Widget>>(0);
+};
+
 namespace detail {
+inline std::expected<void, ManagedError> prepareGridLayouts(const std::shared_ptr<RecipeLayout> &root,
+                                                            MountContext &context, Node<Widget> parent) {
+  if (!root || root->validated) {
+    return {};
+  }
+
+  std::vector<std::shared_ptr<RecipeLayout>> pending(0);
+  std::size_t addedLeaves{};
+  const auto limit = context.controls.limits().maxMaterializedLeaves;
+
+  pending.push_back(root);
+
+  while (!pending.empty()) {
+    auto layout = std::move(pending.back());
+
+    pending.pop_back();
+
+    for (const auto &child : layout->children) {
+      pending.push_back(child);
+    }
+
+    if (!layout->gridContainer || !layout->grid) {
+      continue;
+    }
+
+    if (!layout->control) {
+      layout->control = std::make_unique<GridRecipeControl>();
+    }
+
+    auto &control = *layout->control;
+
+    if (control.prepared) {
+      continue;
+    }
+
+    auto identityControls = context.controls;
+    auto installed = ControlContextAccess::installFallbackSchema(identityControls);
+
+    if (!installed) {
+      return std::unexpected(controlContextError(installed.error(), parent));
+    }
+
+    auto identity = identityControls.resolve(control.variant ? std::string_view(*control.variant) : "Grid");
+
+    if (!identity) {
+      return std::unexpected(controlContextError(identity.error(), parent));
+    }
+
+    if (identity->factoryKind != ControlFactoryKind::DECLARATIVE_GRID_FALLBACK) {
+      return std::unexpected(controlContextError({ControlContextErrorCode::INVALID_VALUE, {}}, parent));
+    }
+
+    if (control.materialized && !control.settingsRequested && !control.variant) {
+      control.prepared = true;
+
+      continue;
+    }
+
+    auto controls =
+      control.materialized && !control.variant ? ControlContext(context.controls.limits()) : identityControls;
+    installed = ControlContextAccess::installFallbackSchema(controls);
+
+    if (!installed) {
+      return std::unexpected(controlContextError(installed.error(), parent));
+    }
+
+    auto effective = controls.resolve(control.variant ? std::string_view(*control.variant) : "Grid",
+                                      Access::mergeControlSettings(control.arguments, control.patch));
+
+    if (!effective) {
+      return std::unexpected(controlContextError(effective.error(), parent));
+    }
+
+    const auto leaves = control.materialized
+                          ? static_cast<std::size_t>(std::popcount(controlSettingsPresence(effective->settings) &
+                                                                   ~control.materializedSettings))
+                          : effective->materializedLeaves;
+
+    if (context.controlLeaves > limit || addedLeaves > limit - context.controlLeaves ||
+        leaves > limit - context.controlLeaves - addedLeaves) {
+      return std::unexpected(controlContextError({ControlContextErrorCode::MATERIALIZED_LEAF_LIMIT, {}}, parent));
+    }
+
+    addedLeaves += leaves;
+
+    const auto &grid = effective->settings.grid;
+    auto &options = *layout->grid;
+    const auto apply = [](auto &target, const auto &source) {
+      if (source) {
+        target = *source;
+      }
+    };
+
+    apply(options.columns, grid.columns);
+    apply(options.rows, grid.rows);
+    apply(options.flow, grid.flow);
+    apply(options.columnGap, grid.columnGap);
+    apply(options.rowGap, grid.rowGap);
+    apply(options.padding.left, grid.paddingLeft);
+    apply(options.padding.top, grid.paddingTop);
+    apply(options.padding.right, grid.paddingRight);
+    apply(options.padding.bottom, grid.paddingBottom);
+    apply(options.maxTracksPerAxis, grid.maxTracksPerAxis);
+    apply(options.maxPlacements, grid.maxPlacements);
+    apply(options.maxPlacementWork, grid.maxPlacementWork);
+
+    if (grid.scroll) {
+      if (*grid.scroll && !layout->scroll) {
+        layout->scroll.emplace();
+      } else if (!*grid.scroll) {
+        layout->scroll.reset();
+      }
+    }
+
+    control.resolved = std::make_unique<ResolvedControl>(std::move(*effective));
+    control.prepared = true;
+  }
+
+  context.controlLeaves += addedLeaves;
+
+  return {};
+}
+
+template <class T> bool Access::needsGridContext(const Description<T> &description) {
+  return description.state_ && description.state_->layout && description.state_->layout->hasDeclaredGrid;
+}
+
+inline Description<Widget> Access::deferControlValidation(Description<Widget> description) {
+  if (description.state_) {
+    description.state_->deferredControlValidation = true;
+  }
+
+  return description;
+}
+
+template <class T> bool Access::defersControlValidation(const Description<T> &description) {
+  return description.state_ && description.state_->deferredControlValidation;
+}
+
+template <class Child>
+void Access::gridChild(Description<Grid> &parent, Child &&child, std::optional<GridRegion> region) {
+  layoutChild(parent, child, true);
+
+  if (region && child.state_) {
+    child.state_->layout->item.region = *region;
+  }
+
+  auto layout = parent.state_->layout;
+
+  parent.state_->children.push_back(
+    [layout, child = std::forward<Child>(child)](ManagedScene &scene, Node<Widget> owner,
+                                                 MountContext &context) mutable -> std::expected<void, ManagedError> {
+      auto mounted = Access::mount(std::move(child), scene, owner, context);
+
+      if (!mounted) {
+        return std::unexpected(mounted.error());
+      }
+
+      if (layout->grid) {
+        layout->mounted.push_back(mounted->id());
+      }
+
+      return {};
+    });
+}
+
+inline void Access::gridSection(Description<Grid> &parent, GridSection section) {
+  auto &layout = parent.layoutMetadata();
+
+  parent.declarativeOptions();
+  layout.validSections = layout.validSections && section.valid_;
+
+  if (section.region_ == GridRegion::HEADER) {
+    ++layout.headerSections;
+    layout.stickyHeader = section.sticky_;
+    layout.headerStyle = section.style_;
+  } else {
+    ++layout.bodySections;
+    layout.bodyStyle = section.style_;
+    layout.rowStyles = section.rows_;
+  }
+
+  for (auto &child : section.children_) {
+    gridChild(parent, std::move(child), section.region_);
+  }
+}
+
+template <class... Children> std::shared_ptr<RecipeLayout> Access::captureLayouts(Children &...children) {
+  std::shared_ptr<RecipeLayout> layout;
+  const auto append = [&](auto &child) {
+    if (!child.state_ || child.state_->layout) {
+      if (!layout) {
+        layout = std::make_shared<RecipeLayout>();
+      }
+
+      if (child.state_) {
+        layout->children.push_back(child.state_->layout);
+        layout->hasDeclaredGrid = layout->hasDeclaredGrid || child.state_->layout->hasDeclaredGrid;
+      } else {
+        auto empty = std::make_shared<RecipeLayout>();
+
+        empty->validRecipe = false;
+        layout->children.push_back(std::move(empty));
+      }
+    }
+  };
+
+  (append(children), ...);
+
+  return layout;
+}
+
+template <class T> Description<T> Access::withLayout(Description<T> description, std::shared_ptr<RecipeLayout> layout) {
+  if (description.state_) {
+    description.state_->layout = std::move(layout);
+  }
+
+  return description;
+}
+
+template <class Parent, class Child>
+void Access::layoutChild(Description<Parent> &parent, Description<Child> &child, bool structural) {
+  if (!parent.state_) {
+    return;
+  }
+
+  if (!child.state_) {
+    auto empty = std::make_shared<RecipeLayout>();
+
+    empty->validRecipe = false;
+    parent.layoutMetadata().children.push_back(std::move(empty));
+
+    return;
+  }
+
+  if (structural) {
+    child.layoutMetadata();
+  }
+
+  if (child.state_->layout) {
+    parent.layoutMetadata().children.push_back(child.state_->layout);
+    parent.state_->layout->hasDeclaredGrid =
+      parent.state_->layout->hasDeclaredGrid || child.state_->layout->hasDeclaredGrid;
+  }
+}
+
 template <class T> void Access::preparedControl(Description<T> &description, std::uint32_t alreadyMaterialized) {
   if (description.state_) {
     description.state_->controlPrepared = true;
     description.state_->materializedSettings = alreadyMaterialized;
+
+    if constexpr (std::same_as<T, Grid>) {
+      if (description.state_->layout && description.state_->layout->gridContainer && description.state_->layout->grid) {
+        auto &control = description.gridControl();
+
+        control.materialized = true;
+        control.materializedSettings = alreadyMaterialized;
+      }
+    }
   }
 }
 
@@ -2442,6 +3373,9 @@ template <class T> Description<Widget> Access::erase(Description<T> description)
   Description<Widget> erased;
 
   erased.state_ = std::make_unique<Description<Widget>::State>();
+  if (description.state_) {
+    erased.state_->layout = description.state_->layout;
+  }
   erased.state_->create =
     [description = std::move(description)](ManagedScene &scene, Node<Widget> parent,
                                            MountContext &context) mutable -> std::expected<Node<Widget>, ManagedError> {
@@ -2543,6 +3477,7 @@ Description<DataStateView> detail::Access::dataState(Initial initial, Descriptio
         return scene.beginBoundDataState(parent, initial, std::move(config));
       }
     });
+  layoutChild(result, content);
   result.state_->children.push_back(
     [content = std::move(content), automatic](ManagedScene &scene, Node<Widget> parent,
                                               MountContext &context) mutable -> std::expected<void, ManagedError> {
@@ -3431,6 +4366,8 @@ Description<T> linear(LinearOptions options, Children &&...children) {
     }),
     detail::Access::controlType<T>());
 
+  (detail::Access::layoutChild(description, children), ...);
+
   (description.state_->children.push_back(
      [child =
         std::forward<Children>(children)](ManagedScene &scene, Node<Widget> parent,
@@ -3468,6 +4405,7 @@ template <class T, detail::DescriptionRange R> Description<T> linear(LinearOptio
     detail::Access::controlType<T>());
 
   for (auto &&child : children) {
+    detail::Access::layoutChild(description, child);
     description.state_->children.push_back(
       [child = std::move(child)](ManagedScene &scene, Node<Widget> parent,
                                  detail::MountContext &context) mutable -> std::expected<void, ManagedError> {
@@ -3523,26 +4461,68 @@ template <detail::DescriptionInput... Children> Description<Row> row(LinearOptio
   return linear<Row>(options, std::forward<Children>(children)...);
 }
 
-/** @brief Compose an explicit grid using the existing managed mount transaction.
+/** @brief Describe a semantic header with independent local rows and shared grid columns.
+ * @tparam Children Consuming real child descriptions. @param children Real controls in structural order.
+ * @return Owning section; no Widget, focus stop or separate tree is introduced.
+ */
+template <detail::DescriptionInput... Children> GridSection header(Children &&...children) {
+  GridSection section(GridRegion::HEADER);
+
+  (section.children_.push_back(detail::Access::erase(std::forward<Children>(children))), ...);
+
+  return section;
+}
+
+/** @brief Describe semantic body rows, sharing their parent's columns with its header.
+ * @tparam Children Consuming real child descriptions. @param children Real controls in body structural order.
+ * @return Owning section; spans cannot cross the header/body boundary.
+ */
+template <detail::DescriptionInput... Children> GridSection body(Children &&...children) {
+  GridSection section(GridRegion::BODY);
+
+  (section.children_.push_back(detail::Access::erase(std::forward<Children>(children))), ...);
+
+  return section;
+}
+
+/** @brief Compose a grid using the existing managed mount transaction.
  * @tparam Children Consuming child Description types, including custom final widgets.
  * @param children Owning recipes mounted in sibling order; no placement is inferred.
  * @return Single-use grid recipe; failed child mount rolls back the whole subtree.
- * Configure tracks and identity-based placements with setGridOptions after successful
- * mount, before running the scene. Published NodeRef observers supply those identities.
+ * columns/rows opt into automatic placement, checked before factories or setup. Without
+ * these modifiers, setGridOptions retains the existing explicit full-identity contract.
  * Construction may allocate; mounting retains the existing typed error and cleanup rules.
  */
-template <detail::DescriptionInput... Children> Description<Grid> grid(Children &&...children) {
-  auto description = custom<Grid>();
+template <detail::GridInput... Children> Description<Grid> grid(Children &&...children) {
+  auto layout = std::make_shared<detail::RecipeLayout>();
 
-  (description.state_->children.push_back(
-     [child =
-        std::forward<Children>(children)](ManagedScene &scene, Node<Widget> parent,
-                                          detail::MountContext &context) mutable -> std::expected<void, ManagedError> {
-       auto mounted = detail::Access::mount(std::move(child), scene, parent, context);
+  layout->gridContainer = true;
 
-       return mounted ? std::expected<void, ManagedError>{} : std::unexpected(mounted.error());
-     }),
-   ...);
+  auto description =
+    detail::Access::cold<Grid>([layout](ManagedScene &scene, Node<Widget> parent, detail::MountContext &) {
+      if (layout->grid) {
+        return scene.emplace<Grid>(parent, detail::resolvedGridOptions(*layout), GridPlacementMode::DECLARATIVE,
+                                   SizePolicy{}, layout->scroll, scene.widthPolicy());
+      }
+
+      GridOptions options;
+
+      options.presentation = layout->presentation;
+
+      return scene.emplace<Grid>(parent, options);
+    });
+
+  description.state_->layout = layout;
+  const auto append = [&](auto &&child) {
+    if constexpr (std::same_as<std::remove_cvref_t<decltype(child)>, GridSection>) {
+      detail::Access::gridSection(description, std::forward<decltype(child)>(child));
+    } else {
+      ++layout->directItems;
+      detail::Access::gridChild(description, std::forward<decltype(child)>(child));
+    }
+  };
+
+  (append(std::forward<Children>(children)), ...);
 
   return description;
 }
@@ -3805,7 +4785,7 @@ template <detail::DescriptionInput... Children> Description<Row> row(Ref<Row> re
  * @param children Owning child recipes; placement remains explicit after mount.
  * @return Existing grid recipe with one additional observation.
  */
-template <detail::DescriptionInput... Children> Description<Grid> grid(Ref<Grid> reference, Children &&...children) {
+template <detail::GridInput... Children> Description<Grid> grid(Ref<Grid> reference, Children &&...children) {
   return grid(std::forward<Children>(children)...).reference(std::move(reference));
 }
 
@@ -3957,7 +4937,19 @@ std::expected<Node<T>, ManagedError> mount(ManagedScene &scene, Description<T> &
     auto consumed = std::move(description);
     return std::unexpected(admitted.error());
   }
-  auto prepared = controls.prepared();
+
+  if (detail::Access::needsGridContext(description)) {
+    auto installed = detail::ControlContextAccess::installFallbackSchema(controls);
+
+    if (!installed) {
+      auto consumed = std::move(description);
+      return std::unexpected(detail::controlContextError(installed.error(), scene.root()));
+    }
+  }
+
+  auto prepared = detail::Access::defersControlValidation(description)
+                    ? std::expected<ControlContext, ControlContextError>(controls)
+                    : controls.prepared();
   if (!prepared) {
     auto consumed = std::move(description);
     return std::unexpected(detail::controlContextError(prepared.error(), scene.root()));
@@ -4069,7 +5061,8 @@ auto vbox(Args &&...args) {
  */
 template <detail::DescriptionInput Body>
 Description<Overlay> notifications(NotificationCenter center, Body &&body, NotificationOptions options = {}) {
-  return detail::Access::cold<Overlay>(
+  auto layout = detail::Access::captureLayouts(body);
+  auto description = detail::Access::cold<Overlay>(
     [center = std::move(center), body = std::forward<Body>(body),
      options](ManagedScene &scene, Node<Widget> parent,
               detail::MountContext &context) mutable -> std::expected<Node<Overlay>, ManagedError> {
@@ -4087,6 +5080,8 @@ Description<Overlay> notifications(NotificationCenter center, Body &&body, Notif
       auto bound = detail::Access::notifications(scene, *wrapper, *content, center, options, context);
       return bound ? wrapper : std::unexpected(bound.error());
     });
+
+  return detail::Access::withLayout(std::move(description), std::move(layout));
 }
 
 /** @brief Observe the real notification-plane Overlay while keeping its service handle separate.
@@ -4114,7 +5109,8 @@ Description<Overlay> notifications(Ref<Overlay> reference, NotificationCenter ce
 template <detail::DescriptionInput Body, detail::DescriptionInput... Layers>
   requires(std::same_as<std::remove_cvref_t<Layers>, Description<Dialog>> && ...)
 Description<OverlayHost> overlayHost(OverlayHostOptions options, Body &&body, Layers &&...layers) {
-  return detail::Access::cold<OverlayHost>(
+  auto layout = detail::Access::captureLayouts(body, layers...);
+  auto description = detail::Access::cold<OverlayHost>(
     [options, body = std::forward<Body>(body), layers = std::tuple(std::forward<Layers>(layers)...)](
       ManagedScene &scene, Node<Widget> parent,
       detail::MountContext &context) mutable -> std::expected<Node<OverlayHost>, ManagedError> {
@@ -4153,6 +5149,8 @@ Description<OverlayHost> overlayHost(OverlayHostOptions options, Body &&body, La
         layers);
       return result ? host : std::unexpected(result.error());
     });
+
+  return detail::Access::withLayout(std::move(description), std::move(layout));
 }
 
 /** @tparam Body Consuming ordinary-body recipe.
@@ -4191,9 +5189,10 @@ template <detail::DescriptionInput Body>
 Description<Dialog> dialog(TextValue title, Body &&body, DialogOptions options = {}) {
   auto heading = label(std::move(title)).style(StyleTarget{.type = "Label", .classes = {"dialog-title"}});
   auto content = column(std::forward<Body>(body)).style(StyleTarget{.type = "Column", .classes = {"dialog-body"}});
-  return detail::Access::cold<Dialog>(
-    [options, heading = std::move(heading),
-     content = std::move(content)](ManagedScene &scene, Node<Widget> parent,
+  auto layout = detail::Access::captureLayouts(heading, content);
+  auto description =
+    detail::Access::cold<Dialog>([options, heading = std::move(heading), content = std::move(content)](
+                                   ManagedScene &scene, Node<Widget> parent,
                                    detail::MountContext &context) mutable -> std::expected<Node<Dialog>, ManagedError> {
       auto valid = Dialog::validate(options);
       if (!valid) {
@@ -4233,6 +5232,8 @@ Description<Dialog> dialog(TextValue title, Body &&body, DialogOptions options =
         StyleTarget{.type = "Dialog", .classes = {"dialog", options.mode == DialogMode::MODAL ? "modal" : "nonmodal"}});
       return styled ? root : std::unexpected(styled.error());
     });
+
+  return detail::Access::withLayout(std::move(description), std::move(layout));
 }
 
 /** @tparam Body Consuming application content recipe.
@@ -4363,6 +5364,7 @@ Description<ScrollArea> scrollArea(Child &&child, ScrollAreaOptions options,
     [options, controller = std::move(controller), style](ManagedScene &scene, Node<Widget> parent) {
       return scene.emplace<ScrollArea>(parent, controller, scene.widthPolicy(), options, style);
     });
+  detail::Access::layoutChild(description, child);
   description.state_->children.push_back(
     [child = std::forward<Child>(child)](ManagedScene &scene, Node<Widget> parent,
                                          detail::MountContext &context) mutable -> std::expected<void, ManagedError> {
@@ -4453,6 +5455,7 @@ Description<Border> border(Child &&child, BorderOptions options, ControlStyle st
     return scene.emplace<Border>(parent, scene.widthPolicy(), options, style);
   });
 
+  detail::Access::layoutChild(description, child);
   description.state_->children.push_back(
     [child = std::forward<Child>(child)](ManagedScene &scene, Node<Widget> parent,
                                          detail::MountContext &context) mutable -> std::expected<void, ManagedError> {
@@ -4646,41 +5649,45 @@ template <DescriptionInput Body, SceneLayer... Layers> Description<Widget> layer
     }
   }();
 
-  return Access::transaction([hosted = std::move(hosted), layers = std::tuple(std::forward<Layers>(layers)...)](
-                               ManagedScene &owner, Node<Widget> parent,
-                               MountContext &context) mutable -> std::expected<Node<Widget>, ManagedError> {
-    auto root = Access::mount(std::move(hosted), owner, parent, context);
+  auto layout = Access::captureLayouts(hosted, layers...);
+  auto description =
+    Access::transaction([hosted = std::move(hosted), layers = std::tuple(std::forward<Layers>(layers)...)](
+                          ManagedScene &owner, Node<Widget> parent,
+                          MountContext &context) mutable -> std::expected<Node<Widget>, ManagedError> {
+      auto root = Access::mount(std::move(hosted), owner, parent, context);
 
-    if (!root) {
-      return std::unexpected(root.error());
-    }
+      if (!root) {
+        return std::unexpected(root.error());
+      }
 
-    auto host = Access::layerHost(owner, *root);
+      auto host = Access::layerHost(owner, *root);
 
-    if (!host) {
-      return std::unexpected(host.error());
-    }
+      if (!host) {
+        return std::unexpected(host.error());
+      }
 
-    std::expected<void, ManagedError> result;
+      std::expected<void, ManagedError> result;
 
-    std::apply(
-      [&](auto &...layer) {
-        const auto mountLayer = [&](auto &recipe) {
-          if (!result) {
-            return;
-          }
+      std::apply(
+        [&](auto &...layer) {
+          const auto mountLayer = [&](auto &recipe) {
+            if (!result) {
+              return;
+            }
 
-          auto mounted = Access::mount(std::move(recipe), owner, *host, context);
+            auto mounted = Access::mount(std::move(recipe), owner, *host, context);
 
-          result = mounted ? Access::checkLayer(owner, *mounted) : std::unexpected(mounted.error());
-        };
+            result = mounted ? Access::checkLayer(owner, *mounted) : std::unexpected(mounted.error());
+          };
 
-        (mountLayer(layer), ...);
-      },
-      layers);
+          (mountLayer(layer), ...);
+        },
+        layers);
 
-    return result ? std::expected<Node<Widget>, ManagedError>(*root) : std::unexpected(result.error());
-  });
+      return result ? std::expected<Node<Widget>, ManagedError>(*root) : std::unexpected(result.error());
+    });
+
+  return Access::withLayout(std::move(description), std::move(layout));
 }
 
 /** @brief Build one owning final factory diagnostic without allocating.
@@ -4768,7 +5775,14 @@ Scene scene(Factory factory, SceneOptions options = {}, std::source_location ori
   return detail::SceneAccess::create(
     [factory = std::move(factory),
      controls = options.controls](ManagedScene &owner) mutable -> std::expected<void, ManagedError> {
-      auto prepared = controls.prepared();
+      auto effectiveControls = controls;
+      auto installed = detail::ControlContextAccess::installFallbackSchema(effectiveControls);
+
+      if (!installed) {
+        return std::unexpected(detail::controlContextError(installed.error(), owner.root()));
+      }
+
+      auto prepared = effectiveControls.prepared();
       if (!prepared) {
         return std::unexpected(detail::controlContextError(prepared.error(), owner.root()));
       }

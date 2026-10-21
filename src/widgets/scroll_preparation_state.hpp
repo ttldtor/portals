@@ -60,6 +60,9 @@ struct ManagedScrollState {
 std::expected<std::shared_ptr<ScrollPreparationPlan>, TreeError>
 planScrollAreas(WidgetTree &tree, std::span<const Node<ScrollArea>> areas, const LayoutSnapshot &snapshot,
                 std::optional<ScrollRevealTarget> reveal);
+std::expected<std::shared_ptr<ScrollPreparationPlan>, TreeError>
+planScrollAreas(WidgetTree &tree, std::span<const Node<Widget>> areas, const LayoutSnapshot &snapshot,
+                std::optional<ScrollRevealTarget> reveal);
 std::expected<ScrollSnapshotAdmission, TreeError> admitScrollPlan(WidgetTree &tree, const ScrollPreparationPlan &plan);
 std::expected<ScrollSnapshotAdmission, TreeError> refreshScrollPlans(WidgetTree &tree, ScrollPreparationPlan &plan,
                                                                      bool reveal);

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include <portals/grid.hpp>
 #include <portals/line_edit.hpp>
 #include <portals/text_value.hpp>
 
@@ -14,6 +15,16 @@
 #include <vector>
 
 namespace portals::ui {
+namespace detail {
+struct ControlContextAccess;
+
+/** @brief Terminal factory provenance retained through named aliases. */
+enum class ControlFactoryKind {
+  USER,                     ///< Explicit caller schema and registry binding.
+  EXISTING_BUILTIN,         ///< One of the seven existing global controls.
+  DECLARATIVE_GRID_FALLBACK ///< Loader-local standard Grid selected after caller declarations.
+};
+} // namespace detail
 
 /** @brief Owning source coordinates; offsets and columns are UTF-8 bytes, lines/columns are one-based. */
 struct ControlSourceOrigin {
@@ -44,6 +55,23 @@ struct ControlHistorySettings {
   std::optional<bool> groupDeletion{};        ///< Group adjacent ordinary deletion operations.
 };
 
+/** @brief Sparse Grid container literals; child placement is deliberately separate. */
+struct ControlGridSettings {
+  std::optional<std::size_t> columns{};          ///< Positive horizontal track count.
+  std::optional<std::size_t> rows{};             ///< Positive vertical track count.
+  std::optional<GridFlow> flow{};                ///< Automatic placement order.
+  std::optional<std::int32_t> columnGap{};       ///< Nonnegative horizontal cell gap.
+  std::optional<std::int32_t> rowGap{};          ///< Nonnegative vertical cell gap.
+  std::optional<std::int32_t> paddingLeft{};     ///< Nonnegative left inset.
+  std::optional<std::int32_t> paddingTop{};      ///< Nonnegative top inset.
+  std::optional<std::int32_t> paddingRight{};    ///< Nonnegative right inset.
+  std::optional<std::int32_t> paddingBottom{};   ///< Nonnegative bottom inset.
+  std::optional<std::size_t> maxTracksPerAxis{}; ///< Positive track budget.
+  std::optional<std::size_t> maxPlacements{};    ///< Positive structural child budget.
+  std::optional<std::size_t> maxPlacementWork{}; ///< Positive occupancy work budget.
+  std::optional<bool> scroll{};                  ///< Construct with Grid scrolling; explicit false overrides defaults.
+};
+
 /** @brief Owning sparse literals only; never contains IDs, models, handlers or live history. */
 struct ControlSettings {
   ~ControlSettings() = default;
@@ -63,6 +91,7 @@ struct ControlSettings {
   ControlHistorySettings history{};                       ///< Structural merge, never a whole-history reset.
   std::shared_ptr<const ControlSourceOrigin> origin{};    ///< Fallback location for present properties.
   std::vector<ControlPropertyOrigin> origins = std::vector<ControlPropertyOrigin>(0); ///< Per-property overrides.
+  ControlGridSettings grid{}; ///< Sparse container settings, supported only by a matching schema.
 };
 
 /** @brief Finite context bounds, checked before publication/materialization beyond each bound. */
@@ -140,6 +169,7 @@ struct ResolvedControl {
   std::vector<std::string> lineage = std::vector<std::string>(0); ///< Immediate-to-distant ancestors; excludes type.
   ControlSettings settings;                                       ///< Merged sparse settings with winning origins.
   std::size_t materializedLeaves{}; ///< Present scalar leaves; caller aggregates per mount.
+  detail::ControlFactoryKind factoryKind{detail::ControlFactoryKind::USER}; ///< Actual terminal schema provenance.
 };
 
 /** @brief Cheap owning immutable snapshot of named definitions and defaults.
@@ -248,6 +278,7 @@ public:
   ControlContextLimits limits() const noexcept;
 
 private:
+  friend struct detail::ControlContextAccess;
   struct Data;
   std::shared_ptr<const Data> data_{};
   ControlContextLimits limits_;

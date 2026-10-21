@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <new>
 #include <numeric>
+#include <portals/detail/layout_traversal.hpp>
 #include <portals/layout.hpp>
 
 namespace portals {
@@ -240,9 +241,12 @@ public:
   }
 
   std::expected<void, TreeError> arrange(std::size_t index, CellRect local, CellRect viewport,
-                                         std::optional<CellRect> contentClip = {}) {
-    auto result = contentClip ? tree_.arrange(entries_[index].node, local, viewport, *contentClip)
-                              : tree_.arrange(entries_[index].node, local, viewport);
+                                         std::optional<CellRect> contentClip = {},
+                                         const ParentLayoutEdge *parentEdge = nullptr) {
+    auto result = parentEdge ? detail::LayoutTraversalAccess::arrange(tree_, entries_[index].node, local, viewport,
+                                                                      *parentEdge)
+                            : contentClip ? tree_.arrange(entries_[index].node, local, viewport, *contentClip)
+                                          : tree_.arrange(entries_[index].node, local, viewport);
 
     if (!result) {
       return result;
@@ -251,12 +255,45 @@ public:
     auto children = childInputs(index);
     std::expected<CellRect, TreeError> clip = *CellRect::from({}, local.size());
     std::expected<std::vector<CellRect>, TreeError> placements(std::in_place, 0);
+    std::vector<std::pair<std::size_t, LayoutChildPolicy>> specialized(0);
+    std::expected<void, TreeError> policies;
     auto read = tree_.read(entries_[index].node, [&](const Widget &widget) {
       if (auto layout = dynamic_cast<const Layout *>(&widget)) {
         clip = layout->childClip(local.size());
 
         if (clip) {
           placements = layout->arrangeChildren(children, local.size());
+        }
+
+        if (clip && placements && placements->size() == children.size()) {
+          const auto bounds = CellRect::from({}, local.size());
+
+          for (std::size_t i = 0; i < children.size(); ++i) {
+            auto policy = layout->childLayoutFor(children[i].node, local.size());
+
+            if (!policy) {
+              policies = std::unexpected(policy.error());
+              return;
+            }
+
+            if (!bounds || !bounds->contains(policy->localClip) ||
+                (policy->revealAxes != RevealAxes::BOTH && policy->revealAxes != RevealAxes::HORIZONTAL_ONLY) ||
+                (policy->proposedInput != RegionalInput::UNCHANGED && policy->proposedInput != RegionalInput::OPEN &&
+                 policy->proposedInput != RegionalInput::CLOSED)) {
+              policies = std::unexpected(TreeError::INVALID_GEOMETRY);
+              return;
+            }
+
+            if (policy->localClip != *clip || policy->revealAxes != RevealAxes::BOTH ||
+                policy->proposedInput != RegionalInput::UNCHANGED) {
+              try {
+                specialized.emplace_back(i, *policy);
+              } catch (const std::bad_alloc &) {
+                policies = std::unexpected(TreeError::NO_MEMORY);
+                return;
+              }
+            }
+          }
         }
       } else if (!children.empty()) {
         auto rect = CellRect::from({}, local.size());
@@ -277,6 +314,10 @@ public:
       return std::unexpected(read ? placements.error() : read.error());
     }
 
+    if (!policies) {
+      return policies;
+    }
+
     if (!clip) {
       return std::unexpected(clip.error());
     }
@@ -288,14 +329,17 @@ public:
     }
 
     std::optional<CellRect> childContentClip;
+    CellPoint parentOrigin;
 
     // Existing layouts keep their full clip without extra tree snapshots or allocations.
-    if (clip->origin() != CellPoint{} || clip->size() != local.size()) {
+    if (clip->origin() != CellPoint{} || clip->size() != local.size() || !specialized.empty()) {
       const auto snapshot = tree_.inspect(entries_[index].node);
 
       if (!snapshot) {
         return std::unexpected(snapshot.error());
       }
+
+      parentOrigin = snapshot->geometry.surface.origin();
 
       const auto surfaceClip = clip->translated(snapshot->geometry.surface.origin());
 
@@ -310,8 +354,25 @@ public:
       return std::unexpected(TreeError::INVALID_ARGUMENT);
     }
 
+    std::size_t specialIndex{};
+
     for (std::size_t i = 0; i < placements->size(); ++i) {
-      auto child_result = arrange(entries_[index].children[i], (*placements)[i], viewport, childContentClip);
+      std::optional<ParentLayoutEdge> edge;
+
+      if (specialIndex < specialized.size() && specialized[specialIndex].first == i) {
+        const auto &policy = specialized[specialIndex++].second;
+        const auto surfaceClip = policy.localClip.translated(parentOrigin);
+
+        if (!surfaceClip) {
+          return std::unexpected(TreeError::INVALID_GEOMETRY);
+        }
+
+        edge = ParentLayoutEdge{entries_[index].node.id(), children[i].node, *surfaceClip, policy.revealAxes,
+                                policy.proposedInput, 0};
+      }
+
+      auto child_result = arrange(entries_[index].children[i], (*placements)[i], viewport, childContentClip,
+                                  edge ? &*edge : nullptr);
 
       if (!child_result) {
         return child_result;
@@ -344,6 +405,16 @@ std::expected<CellRect, TreeError> Layout::childClip(CellSize available) const {
   const auto result = CellRect::from({}, available);
 
   return result ? std::expected<CellRect, TreeError>(*result) : std::unexpected(TreeError::INVALID_GEOMETRY);
+}
+
+std::expected<LayoutChildPolicy, TreeError> Layout::childLayoutFor(NodeId, CellSize available) const {
+  const auto clip = childClip(available);
+
+  if (!clip) {
+    return std::unexpected(clip.error());
+  }
+
+  return LayoutChildPolicy{*clip};
 }
 
 SizedWidget::SizedWidget(SizePolicy policy) : policy_(policy) {

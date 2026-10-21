@@ -2,130 +2,94 @@
 
 [Русская версия](ru/grid.md)
 
-Use [Grid](../include/portals/grid.hpp). This complete program puts a label and its value side by side. Press F10 to close.
-
-The current API requires low-level GridOptions configuration through setGridOptions after node creation; automatic cell placement is not available.
+Use [Grid](../include/portals/grid.hpp) when controls need shared columns or independent rows. `ui::grid` assigns cells in child order. Add `.columns(2)` to make a two-column grid; `.columnGap(2)` leaves two terminal cells between columns. The complete program below shows a name and value side by side. Press F10 to close.
 
 ```cpp
 #include <portals/ui.hpp>
+#include <utility>
 
 int main() {
   using namespace portals;
 
-  ui::Ref<Grid> grid;
-  ui::Ref<Label> name;
-  ui::Ref<Label> value;
+  // clang-format off
+  return [] {
+    auto scene = ui::scene(
+      ui::grid(ui::label("Name"), ui::label("Ada"))
+        .columns(2)
+        .columnGap(2));
 
-  auto scene = ui::scene(ui::grid(grid,
-    ui::label("Name").reference(name),
-    ui::label("Ada").reference(value)));
-
-  return scene
-    | ui::configure([=](ManagedScene &, Application &app) -> std::expected<void, ManagedError> {
-        GridOptions options;
-
-        options.columns = {AxisSize{}, AxisSize{}};
-        options.rows = {AxisSize{}};
-        options.column_gap = 2;
-        options.cells = {
-          {name.node().id(), 0, 0},
-          {value.node().id(), 0, 1}
-        };
-
-        auto configured = setGridOptions(app.tree(), grid.node(), options);
-
-        if (!configured) {
-          return std::unexpected(
-            ManagedError{ManagedPhase::BIND, grid.node().id(), configured.error(), {}, {}});
-        }
-
-        return {};
-      })
-    | ui::onKey("F10", ui::quit)
+    return std::move(scene)
+      | ui::onKey("F10", ui::quit);
+  }
     | ui::runApp();
+  // clang-format on
 }
 ```
 
-[Example source](examples/guide_grid.cpp). Add the source to a C++23 project and link it with the portals::core target ([build instructions](getting-started.md)). Run the program in a terminal.
+[Example source](examples/guide_grid.cpp). Add it to a C++23 project and link it with `portals::core` ([build instructions](getting-started.md)).
 
-Set tracks and full NodeId placements after mount and before running. ui::grid does not infer them. Overlay shares one content rectangle among children; use ui::custom<Overlay> for its recipe.
+The declarative grid assigns cells automatically as children are added. Set `.row(...)` and `.column(...)` together when a control needs a specific position; `.rowSpan(...)` and `.columnSpan(...)` occupy multiple cells. Explicit and automatic placement can be combined. Placement is checked before controls are mounted, and overlapping rectangles are rejected. Hidden controls still reserve their declared cells.
 
-Terms: [recipe](glossary.md#glossary-recipe), [frame](glossary.md#glossary-frame), [ownership](glossary.md#glossary-ownership).
+## Header, body, and scrolling
 
-<details>
-<summary>API reference and constraints</summary>
+Use `ui::header(...)` and `ui::body(...)` to create structural regions. They do not add wrapper controls: their children remain direct children of the grid. The regions share the same columns and column sizing, while each has its own row numbering and row sizing. Put all grid controls inside these sections when using regions.
 
-`<portals/grid.hpp>` adds sparse `Grid` and `Overlay` containers to the existing
-`Layout` / `SizedWidget` contracts. Run `layoutTree` inside the same tree frame
-that paints and renders. These classes perform no tree traversal, I/O, model
-mutation, or hit testing. Input spans are borrowed only during each method call.
+Call `.sticky()` on the header to keep it at the top while the grid scrolls. Enable the grid's scroll owner with `.scroll()` and choose a fixed outer extent with `.height(...)` or `.width(...)` as needed. In the program below, the complete grid occupies three terminal rows; the header and any scroll chrome use part of that extent. Use the mouse wheel over the grid to scroll its body. F10 closes it.
 
-**Tracks and placement**
+```cpp
+#include <portals/ui.hpp>
+#include <utility>
 
-`GridOptions` owns explicit, nonempty `columns` and `rows`, each using `AxisSize`.
-Every visible child needs one `GridCell` keyed by its complete `NodeId`.
-Placement order does not reorder children. Hidden or removed node entries remain
-stored, never rebind to another identity, and contribute no intrinsic demand.
-Remove stale entries when changing the configuration to reclaim placement budget.
-A replacement node needs its own placement, even when it reuses a registry slot.
+int main() {
+  using namespace portals;
 
-All configured spans are validated, including hidden/stale entries: spans must be
-positive and wholly inside the explicit axes. Duplicate identities are invalid.
-Overlap is allowed; later siblings paint above earlier siblings when the frame
-owner paints in tree order, matching EventRouter's reverse-sibling hit testing.
-There is no dense rows-times-columns allocation or automatic track creation.
-`max_tracks_per_axis` and `max_placements` are positive configurable work budgets
-(default 4096 each); exceeding them returns `NODE_LIMIT`. Inactive placements
-count toward the budget. Track counts must fit the cell representation.
+  // clang-format off
+  return [] {
+    auto scene = ui::scene(
+      ui::grid(
+        ui::header(ui::label("Name"), ui::label("Role")).sticky(),
+        ui::body(
+          ui::label("Ada"), ui::label("Programmer"),
+          ui::label("Grace"), ui::label("Admiral"),
+          ui::label("Margaret"), ui::label("Engineer")))
+        .columns(2)
+        .columnGap(2)
+        .scroll()
+        .height(3));
 
-Each track starts at its preferred size (or zero for intrinsic), clamped to
-min/max. Intrinsic nonfixed tracks absorb child demand: single-track children
-first, then spanning children in sibling order. A span includes its internal
-gaps. Unmet demand is divided equally among eligible tracks, with remainder
-cells assigned in track order; capped tracks yield remaining demand to others.
-Explicit preferred and fixed tracks do not absorb intrinsic demand. This is a
-deterministic bounded policy, not CSS Grid or a global constraint solver.
+    return std::move(scene)
+      | ui::onKey("F10", ui::quit);
+  }
+    | ui::runApp();
+  // clang-format on
+}
+```
 
-After measurement, each axis uses the existing Row allocator: flex weights
-share spare space with stable remainders and caps, later automatic/flex tracks
-shrink first under shortage, and minimum/fixed sizes survive. Spanning children
-use the rectangle from their first track to the end of their last track.
+[Complete regions example](examples/guide_grid_regions.cpp). A fixed height limits the visible scroll area; it does not virtualize rows. Grid children are materialized controls, including children outside the current viewport.
 
-**Alignment, clipping and stacking**
+## Track sizes and presentation
 
-Each GridCell has horizontal and vertical `LayoutAlign`. Overlay supplies the
-same two alignments for every child in one shared padded content rectangle.
-Overlay measures the maximum requested child width and height plus padding.
-Centering assigns `floor(free / 2)` before the child and the remainder after it.
-Stretch fills the slot subject to child min/max; fixed child extents remain fixed.
-A flex child fills available space even with nonstretch alignment, consistently
-with Row/Column cross-axis policies. Negative free space gives zero offset.
+Use `.columnSizes(...)` to set policies for all resolved shared columns. Use `.rowSizes(...)` for body rows; header rows keep their own inferred policies. Each policy list must match its resolved track count. `.rows(...)` sets the body row count in column-major flow; `.rowSizes(...)` only sets sizes and does not set that count.
 
-Minimum/fixed children can exceed their cell. Cells are allocation regions, not
-extra clipping ancestors: overflow may overlap adjacent cells and is clipped by
-the actual widget ancestors and viewport. The arranged NodeGeometry is the one
-source for paint clipping and EventRouter. A frame owner must translate paint
-commands into surface coordinates, intersect their clips with NodeGeometry.clip,
-paint siblings in tree order, and render borrowed text before leaving the frame.
-Explicit command z values remain the frame owner's responsibility.
+The C++ API can set header, body, and alternating body-row backgrounds through `GridPresentation`, for example with `.presentation(...)`. Backgrounds are painted below real controls and do not become control styles. Controls with opaque backgrounds can cover them. The scene-resource format supports structural `header` and `body` sections and their placement properties, but does not currently express `CellStyle` presentation values.
 
-**Mutation and errors**
+## Scene resources
 
-Constructors own their configuration. Invalid constructor settings are reported
-by layout methods. Use `setGridOptions` and `setOverlayOptions` on the UI
-owner between frames; successful changes invalidate layout and paint. The grid
-setter prepares a full copy before replacement, so failed validation/allocation
-preserves the old settings. A visible child without a placement is an error at
-layout time; future/hidden identities may already have stored placements.
-`options()` returns an owning copy on UI and can throw `bad_alloc` for Grid.
+Loaded grids use the same checked automatic placement and region rules. This fragment shows the supported `Grid` properties and section structure:
 
-Malformed policies, alignments, identities and spans return `INVALID_ARGUMENT`.
-Coordinate/extent overflow returns `INVALID_GEOMETRY`, work budget overflow
-returns `NODE_LIMIT`, and layout allocation failure returns `NO_MEMORY`.
-Tree operations additionally preserve their owner-thread and lifetime errors.
-No callback retains the child spans or attempts tree/model mutation.
+```text
+Grid#grid { columns=2
+  header { sticky=true Label#heading { text="Heading" columnSpan=2 } Label#sub { text="Sub" } }
+  body { Label#first { text="a" } Label#second { text="b" row=0 column=1 } }
+}
+```
 
-See also [linear layouts](layout.md), [geometry](geometry.md), and
-[the frame ownership contract](widget-tree.md).
+The `header` and `body` sections are structural; their children are ordinary controls. Resource properties do not provide the C++ `GridPresentation`/`CellStyle` API.
 
-</details>
+## Explicit low-level configuration
+
+`GridOptions` remains available when a caller needs exact low-level placement. It owns nonempty `columns` and `rows` policies plus `GridCell` entries keyed by each child's full `NodeId`. Call `setGridOptions` after the nodes exist and before the next layout. This explicit mode does not infer tracks or placements and continues to allow overlapping cells in sibling order. The declarative `ui::grid` API is additive; it does not change this contract. `Overlay` remains available when every child should share one content rectangle.
+
+Declarative placement defaults to at most 4096 tracks per axis, 4096 structural children, and 65536 units of placement work. Adjust these limits with `.gridOptions(DeclarativeGridOptions{...})`. C++ `GridPresentation` has a separate positive `maxPaintCells` budget for backgrounds and scroll chrome, defaulting to 16384. Invalid placement or track settings return `INVALID_ARGUMENT`; exhausted placement limits return `NODE_LIMIT`; coordinate overflow returns `INVALID_GEOMETRY`; allocation failure returns `NO_MEMORY`. Painting above `maxPaintCells` returns `WOULD_BLOCK` before submitting commands.
+
+See [linear layouts](layout.md), [geometry](geometry.md), and [the frame ownership contract](widget-tree.md).

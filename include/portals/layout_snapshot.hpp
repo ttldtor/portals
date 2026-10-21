@@ -31,6 +31,8 @@ struct LayoutGeometrySnapshot {
   CellRect descendantClip;                            ///< Pure childClip translated to surface coordinates.
   bool visible{};                                     ///< Effective visibility; visible zero differs from hidden.
   std::optional<ScrollAreaLayoutSnapshot> scrollArea; ///< Copied derived values for an initialized area.
+  std::optional<ParentLayoutEdge> parentLayoutEdge;   ///< Specialized edge, before ancestor intersection.
+  std::optional<std::uint64_t> geometryEpoch;         ///< Nonreused stamp of this child's arrangement.
 };
 
 /** @brief Owning immutable identities and local sizes from one completed layout pass.
@@ -79,6 +81,7 @@ public:
   [[nodiscard]] std::expected<std::uint64_t, TreeError> geometryRevision() const noexcept;
 
 private:
+  friend struct detail::LayoutTraversalAccess;
   friend struct detail::ScrollSnapshotAccess;
   friend struct detail::ScrollSnapshotTestAccess;
   std::expected<detail::ScrollSnapshotAdmission, TreeError> admitScrollSnapshot(WidgetTree &tree) const;

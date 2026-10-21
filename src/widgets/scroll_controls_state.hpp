@@ -64,9 +64,13 @@ struct ScrollWidgetAccess {
   static ScrollWidgetState *state(Widget &widget);
   static const ScrollWidgetState *state(const Widget &widget);
 
-  static std::expected<ScrollAreaLayoutSnapshot, TreeError> snapshot(const ScrollArea &widget, NodeId node,
+  static std::expected<ScrollAreaLayoutSnapshot, TreeError> snapshot(const Widget &widget, NodeId node,
                                                                      NodeGeometry geometry, bool visible) {
-    const auto &value = state(widget);
+    const auto *source = state(widget);
+    if (!source || !source->isArea) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+    const auto &value = *source;
     if (!value.lease || value.retired || value.node != node) {
       return std::unexpected(TreeError::INVALID_ARGUMENT);
     }
@@ -87,6 +91,7 @@ struct ScrollWidgetAccess {
 std::expected<void, TreeError> validateScrollWidget(const ScrollWidgetState &state);
 std::expected<bool, TreeError> initializeScrollWidget(WidgetTree &tree, Node<Widget> node, bool writer);
 std::expected<void, TreeError> releaseScrollInitialization(WidgetTree &tree, Node<Widget> node);
+std::expected<ActionBinding, TreeError> bindScrollOwner(EventRouter &router, WidgetTree &tree, Node<Widget> node);
 enum class ScrollPublication {
   POSITION,
   PREPARATION

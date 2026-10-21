@@ -274,6 +274,14 @@ std::expected<LayoutSnapshot, TreeError> LayoutSnapshot::capture(WidgetTree &tre
         return std::unexpected(TreeError::INVALID_GEOMETRY);
       }
       LayoutGeometrySnapshot captured{value->parent, value->geometry, {}, visible, {}};
+      captured.geometryEpoch = value->geometryEpoch;
+      captured.parentLayoutEdge = value->parentLayoutEdge;
+      if (captured.parentLayoutEdge &&
+          (!visible || !captured.geometryEpoch || captured.parentLayoutEdge->parent != value->parent.id() ||
+           captured.parentLayoutEdge->child != current.id() ||
+           captured.parentLayoutEdge->geometryEpoch != *captured.geometryEpoch)) {
+        return std::unexpected(TreeError::INVALID_GEOMETRY);
+      }
       std::expected<void, TreeError> status;
       auto read = tree.read(current, [&](const Widget &widget) {
         if (visible) {
@@ -304,8 +312,8 @@ std::expected<LayoutSnapshot, TreeError> LayoutSnapshot::capture(WidgetTree &tre
         } else {
           captured.geometry.valid = false;
         }
-        if (const auto *area = dynamic_cast<const ScrollArea *>(&widget)) {
-          auto observation = detail::ScrollWidgetAccess::snapshot(*area, current.id(), captured.geometry, visible);
+        if (const auto *state = detail::ScrollWidgetAccess::state(widget); state && state->isArea) {
+          auto observation = detail::ScrollWidgetAccess::snapshot(widget, current.id(), captured.geometry, visible);
           if (!observation) {
             status = std::unexpected(observation.error());
             return;

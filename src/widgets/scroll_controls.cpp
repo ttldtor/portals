@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include "scroll_controls_state.hpp"
+#include <portals/grid.hpp>
 
 namespace portals {
 namespace {
@@ -47,6 +48,9 @@ ScrollWidgetState *ScrollWidgetAccess::state(Widget &widget) {
   if (auto *bar = dynamic_cast<ScrollBar *>(&widget)) {
     return &state(*bar);
   }
+  if (auto *grid = dynamic_cast<Grid *>(&widget)) {
+    return grid->scroll_.get();
+  }
   return nullptr;
 }
 
@@ -56,6 +60,9 @@ const ScrollWidgetState *ScrollWidgetAccess::state(const Widget &widget) {
   }
   if (const auto *bar = dynamic_cast<const ScrollBar *>(&widget)) {
     return &state(*bar);
+  }
+  if (const auto *grid = dynamic_cast<const Grid *>(&widget)) {
+    return grid->scroll_.get();
   }
   return nullptr;
 }
