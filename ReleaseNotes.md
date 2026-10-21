@@ -7,6 +7,9 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Declarative grids support automatic placement, spans, shared header/body columns
+  and sticky scrolling through the existing managed lifecycle. C++ recipes and
+  loaded scenes retain the explicit low-level grid API.
 - Named control variants and shared initial defaults through an owning
   `ui::ControlContext`, sparse instance settings and explicit resource
   definitions/defaults/scene blocks. Editor instances retain independent text
@@ -64,6 +67,7 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Documentation
 
+- Grid guides now cover automatic placement, header and body regions, sticky scrolling, and declarative and explicit configuration examples.
 - Offline HTML documentation retains links to GitHub workflow source files in packaged Pages artifacts.
 - Refresh the HTML reference with an offline Doxygen Awesome theme, a light/dark appearance selector, and aligned language and sidebar navigation.
 - Correct guide contracts and build instructions, synchronize English and Russian reading paths, and bundle complete example sources for offline use.

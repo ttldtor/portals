@@ -594,7 +594,8 @@ std::expected<std::vector<Node<Widget>>, TreeError> EventRouter::focusOrder(Node
       return std::unexpected(snapshot.error());
     }
 
-    if ((!snapshot->visible && node != reveal) || !snapshot->enabled || !dialogEligible(node, reveal, exclude)) {
+    if ((!snapshot->visible && node != reveal) || !snapshot->enabled || !snapshot->regionalInputOpen ||
+        !dialogEligible(node, reveal, exclude)) {
       continue;
     }
 

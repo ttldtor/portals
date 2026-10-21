@@ -91,6 +91,14 @@ public:
    */
   virtual std::expected<CellRect, TreeError> childClip(CellSize available) const;
 
+  /** @brief Describe one child's clip and reveal policy after arrangeChildren.
+   * @param child Exact identity of a measured direct child.
+   * @param available Allocated normalized parent extent.
+   * @return Owning policy; the default forwards the existing virtual childClip.
+   * The same pure-callback restrictions apply. No tree operation or input mutation is permitted.
+   */
+  virtual std::expected<LayoutChildPolicy, TreeError> childLayoutFor(NodeId child, CellSize available) const;
+
   /** @brief Own aggregate.
    * @param children Borrowed visible children in sibling order, including stable identities and copied policies.
    * @return The owning aggregate intrinsic extent, or a layout error.

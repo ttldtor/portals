@@ -11,7 +11,7 @@ namespace detail {
 using detail::ScrollControllerAccess;
 
 struct AreaPlan {
-  Node<ScrollArea> node;
+  Node<Widget> node;
   ScrollAreaLayoutSnapshot layout;
   detail::ScrollControllerPlan values;
   ScrollControllerSnapshot before;
@@ -173,79 +173,104 @@ std::expected<void, TreeError> copyRevealChain(ScrollPreparationPlan &plan, cons
   return {};
 }
 
-std::expected<bool, TreeError> planReveal(ScrollPreparationPlan &plan) {
-  const auto &target = plan.target;
-  auto &plans = plan.areas;
+std::expected<CellRect, TreeError> revealBounds(Node<Widget> node, const LayoutGeometrySnapshot &ancestor,
+                                                const ParentLayoutEdge *edge) {
+  if (edge) {
+    if (edge->parent != node.id()) {
+      return std::unexpected(TreeError::INVALID_GEOMETRY);
+    }
+    return edge->surfaceClip;
+  }
+  return ancestor.scrollArea ? viewport(*ancestor.scrollArea)
+                             : std::expected<CellRect, TreeError>(ancestor.descendantClip);
+}
+
+std::expected<bool, TreeError> planReveal(ScrollPreparationPlan &request) {
+  const auto &target = request.target;
+  auto &plans = request.areas;
   if (!target || !target->visible || !target->geometry.valid || target->geometry.surface.empty()) {
     return false;
   }
-  for (const auto &[node, ancestor] : plan.chain) {
-    if (!ancestor.visible || (ancestor.scrollArea && (ancestor.scrollArea->placement.viewport.width == 0 ||
-                                                      ancestor.scrollArea->placement.viewport.height == 0))) {
+  const ParentLayoutEdge *edge = target->parentLayoutEdge ? &*target->parentLayoutEdge : nullptr;
+
+  // Validate every participating region before changing even a local offset
+  // plan. Sticky header admission is horizontal-only at its own parent edge.
+  for (const auto &[node, ancestor] : request.chain) {
+    const auto bounds = revealBounds(node, ancestor, edge);
+
+    if (!bounds) {
+      return std::unexpected(bounds.error());
+    }
+
+    const bool horizontalOnly = edge && edge->revealAxes == RevealAxes::HORIZONTAL_ONLY;
+
+    if (!ancestor.visible || ((ancestor.scrollArea || edge) &&
+                             (bounds->size().width == 0 || (!horizontalOnly && bounds->size().height == 0)))) {
       return false;
     }
-    if (const auto *plan = findPlan(plans, node);
-        plan && (plan->layout.placement.viewport.width == 0 || plan->layout.placement.viewport.height == 0)) {
-      return false;
-    }
+
+    edge = ancestor.parentLayoutEdge ? &*ancestor.parentLayoutEdge : nullptr;
   }
   WideRect rectangle(target->geometry.surface);
   bool moved{};
-  for (const auto &[node, ancestor] : plan.chain) {
-    if (auto *plan = findPlan(plans, node)) {
-      auto bounds = viewport(plan->layout);
-      if (!bounds) {
-        return std::unexpected(bounds.error());
-      }
+  edge = target->parentLayoutEdge ? &*target->parentLayoutEdge : nullptr;
+
+  for (const auto &[node, ancestor] : request.chain) {
+    const auto bounds = revealBounds(node, ancestor, edge);
+
+    if (!bounds) {
+      return std::unexpected(bounds.error());
+    }
+
+    const bool horizontalOnly = edge && edge->revealAxes == RevealAxes::HORIZONTAL_ONLY;
+
+    if (auto *area = findPlan(plans, node)) {
       auto horizontal =
         revealAxis(rectangle.left, rectangle.right, bounds->origin().x, bounds->size().width,
-                   plan->layout.horizontalOffset.raster, plan->values.horizontal, plan->values.horizontalMetrics);
-      auto vertical =
-        revealAxis(rectangle.top, rectangle.bottom, bounds->origin().y, bounds->size().height,
-                   plan->layout.verticalOffset.raster, plan->values.vertical, plan->values.verticalMetrics);
+                   area->layout.horizontalOffset.raster, area->values.horizontal, area->values.horizontalMetrics);
+      const auto vertical = horizontalOnly
+                              ? std::expected<std::uint64_t, TreeError>(area->values.vertical.rasterOffset())
+                              : revealAxis(rectangle.top, rectangle.bottom, bounds->origin().y, bounds->size().height,
+                                           area->layout.verticalOffset.raster, area->values.vertical,
+                                           area->values.verticalMetrics);
       if (!horizontal || !vertical) {
         return std::unexpected(horizontal ? vertical.error() : horizontal.error());
       }
-      if (*horizontal != plan->values.horizontal.rasterOffset()) {
-        auto changed = ScrollControllerAccess::offset(plan->values, ScrollAxis::HORIZONTAL, {*horizontal, 0});
+      if (*horizontal != area->values.horizontal.rasterOffset()) {
+        auto changed = ScrollControllerAccess::offset(area->values, ScrollAxis::HORIZONTAL, {*horizontal, 0});
         if (!changed) {
           return std::unexpected(changed.error());
         }
         moved = true;
       }
-      if (*vertical != plan->values.vertical.rasterOffset()) {
-        auto changed = ScrollControllerAccess::offset(plan->values, ScrollAxis::VERTICAL, {*vertical, 0});
+      if (*vertical != area->values.vertical.rasterOffset()) {
+        auto changed = ScrollControllerAccess::offset(area->values, ScrollAxis::VERTICAL, {*vertical, 0});
         if (!changed) {
           return std::unexpected(changed.error());
         }
         moved = true;
       }
       auto translated = rectangle.translate(
-        static_cast<std::int64_t>(plan->layout.horizontalOffset.raster) - static_cast<std::int64_t>(*horizontal),
-        static_cast<std::int64_t>(plan->layout.verticalOffset.raster) - static_cast<std::int64_t>(*vertical));
+        static_cast<std::int64_t>(area->layout.horizontalOffset.raster) - static_cast<std::int64_t>(*horizontal),
+        horizontalOnly ? 0 : static_cast<std::int64_t>(area->layout.verticalOffset.raster) -
+                               static_cast<std::int64_t>(*vertical));
       if (!translated) {
         return std::unexpected(translated.error());
       }
-      rectangle.intersect(*bounds);
-    } else if (ancestor.scrollArea) {
-      auto bounds = viewport(*ancestor.scrollArea);
-      if (!bounds) {
-        return std::unexpected(bounds.error());
-      }
-      rectangle.intersect(*bounds);
-    } else {
-      rectangle.intersect(ancestor.descendantClip);
     }
+    rectangle.intersect(*bounds);
+
     if (rectangle.empty()) {
       break;
     }
+    edge = ancestor.parentLayoutEdge ? &*ancestor.parentLayoutEdge : nullptr;
   }
   return moved;
 }
 } // namespace
 
-std::expected<std::shared_ptr<ScrollPreparationPlan>, TreeError>
-planScrollAreas(WidgetTree &tree, std::span<const Node<ScrollArea>> areas, const LayoutSnapshot &snapshot,
+template <class T> std::expected<std::shared_ptr<ScrollPreparationPlan>, TreeError>
+planScrollAreasImpl(std::span<const Node<T>> areas, const LayoutSnapshot &snapshot,
                 std::optional<ScrollRevealTarget> reveal) {
   auto stamp = snapshot.geometryRevision();
   if (!stamp) {
@@ -286,6 +311,18 @@ planScrollAreas(WidgetTree &tree, std::span<const Node<ScrollArea>> areas, const
   }
 }
 
+std::expected<std::shared_ptr<ScrollPreparationPlan>, TreeError>
+planScrollAreas(WidgetTree &, std::span<const Node<ScrollArea>> areas, const LayoutSnapshot &snapshot,
+                std::optional<ScrollRevealTarget> reveal) {
+  return planScrollAreasImpl(areas, snapshot, reveal);
+}
+
+std::expected<std::shared_ptr<ScrollPreparationPlan>, TreeError>
+planScrollAreas(WidgetTree &, std::span<const Node<Widget>> areas, const LayoutSnapshot &snapshot,
+                std::optional<ScrollRevealTarget> reveal) {
+  return planScrollAreasImpl(areas, snapshot, reveal);
+}
+
 std::expected<ScrollSnapshotAdmission, TreeError> admitScrollPlan(WidgetTree &tree, const ScrollPreparationPlan &plan) {
   return ScrollSnapshotAccess::admit(tree, plan.snapshot);
 }
@@ -299,8 +336,12 @@ std::expected<ScrollSnapshotAdmission, TreeError> refreshScrollPlans(WidgetTree 
   owned.result = {};
   for (auto &plan : owned.areas) {
     std::expected<ScrollControllerPlan, TreeError> staged{std::unexpected(TreeError::INVALID_ARGUMENT)};
-    auto read = tree.read(plan.node, [&](const ScrollArea &widget) {
-      const auto &state = ScrollWidgetAccess::state(widget);
+    auto read = tree.read(plan.node, [&](const Widget &widget) {
+      const auto *source = ScrollWidgetAccess::state(widget);
+      if (!source || !source->isArea) {
+        return;
+      }
+      const auto &state = *source;
       if (!state.lease || state.retired) {
         return;
       }
@@ -350,8 +391,13 @@ std::expected<ScrollPreparationAdoption, TreeError> adoptScrollAreas(WidgetTree 
   // Every fallible allocation is complete. Validate all capabilities/revisions before publishing any plan.
   for (const auto &plan : owned.areas) {
     std::expected<void, TreeError> valid;
-    auto read = tree.read(plan.node, [&](const ScrollArea &widget) {
-      const auto &state = detail::ScrollWidgetAccess::state(widget);
+    auto read = tree.read(plan.node, [&](const Widget &widget) {
+      const auto *source = detail::ScrollWidgetAccess::state(widget);
+      if (!source || !source->isArea) {
+        valid = std::unexpected(TreeError::INVALID_ARGUMENT);
+        return;
+      }
+      const auto &state = *source;
       if (!state.lease || state.retired) {
         valid = std::unexpected(TreeError::STALE_NODE);
         return;
@@ -379,8 +425,13 @@ std::expected<ScrollPreparationAdoption, TreeError> adoptScrollAreas(WidgetTree 
       continue;
     }
     std::expected<detail::ScrollControllerChange, TreeError> changed{std::unexpected(TreeError::STALE_NODE)};
-    auto edited = tree.edit(plan.node, [&](ScrollArea &widget) {
-      auto &state = detail::ScrollWidgetAccess::state(widget);
+    auto edited = tree.edit(plan.node, [&](Widget &widget) {
+      auto *source = detail::ScrollWidgetAccess::state(widget);
+      if (!source || !source->isArea) {
+        changed = std::unexpected(TreeError::INVALID_ARGUMENT);
+        return;
+      }
+      auto &state = *source;
       const auto &placement = plan.layout.placement;
       const bool trackChanged = !state.adoptedGeometry || !state.adoptedSurface ||
                                 *state.adoptedSurface != plan.layout.geometry.surface.origin() ||

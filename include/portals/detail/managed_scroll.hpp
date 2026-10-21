@@ -35,7 +35,8 @@ std::expected<Node<T>, ManagedError> ManagedScene::emplaceConfigured(Node<Widget
     entry->node = *node;
 
     if constexpr (std::derived_from<T, Control> || std::same_as<T, LineEdit> || std::same_as<T, Border> ||
-                  std::same_as<T, Gauge> || std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>) {
+                  std::same_as<T, Gauge> || std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar> ||
+                  std::same_as<T, Grid>) {
       const char *type = "Control";
 
       if constexpr (std::same_as<T, Label>) {
@@ -56,6 +57,8 @@ std::expected<Node<T>, ManagedError> ManagedScene::emplaceConfigured(Node<Widget
         type = "ScrollArea";
       } else if constexpr (std::same_as<T, ScrollBar>) {
         type = "ScrollBar";
+      } else if constexpr (std::same_as<T, Grid>) {
+        type = "Grid";
       }
 
       entry->target = std::make_shared<StyleTarget>(
@@ -80,6 +83,11 @@ std::expected<Node<T>, ManagedError> ManagedScene::emplaceConfigured(Node<Widget
 
     if constexpr (std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>) {
       auto configured = attachScroll(entry, *node, scrollWriter.value_or(true));
+      if (!configured) {
+        return rollback(*node, configured.error());
+      }
+    } else if constexpr (std::same_as<T, Grid>) {
+      auto configured = attachScroll(entry, Node<Widget>(*node), true);
       if (!configured) {
         return rollback(*node, configured.error());
       }

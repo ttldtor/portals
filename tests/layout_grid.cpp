@@ -661,6 +661,31 @@ void allocationFailures() {
     return overlay.arrangeChildren(children, {8, 3});
   });
 
+  auto regionalOptions = options;
+
+  regionalOptions.regions = true;
+  regionalOptions.presentation.body = CellStyle{};
+
+  Grid regional(regionalOptions, GridPlacementMode::DECLARATIVE);
+
+  sweep([&] {
+    return regional.measureChildren(children);
+  });
+
+  sweep([&] {
+    return regional.arrangeChildren(children, {8, 3});
+  });
+
+  struct Discard : PaintContext {
+    std::expected<void, TreeError> submit(std::span<const RenderCommand>) override {
+      return {};
+    }
+  } discard;
+
+  sweep([&] {
+    return regional.paint(discard);
+  });
+
   auto scheduler = take(Scheduler::create());
   auto tree = take(WidgetTree::create(*scheduler));
   auto root = take(tree->root());
@@ -685,6 +710,280 @@ void allocationFailures() {
     check(value.options().column_gap == 2, "atomic configuration replacement survives failpoints");
   }));
 }
+
+void declarativePlacementContracts() {
+  DeclarativeGridOptions options;
+
+  options.columns = 3;
+
+  std::array<GridItemOptions, 3> items;
+
+  items[0].columnSpan = 2;
+  items[1].columnSpan = 2;
+
+  auto plan = take(resolveGridPlacements(options, items));
+
+  check(plan.columns == 3 && plan.rows == 2, "automatic placement grows only the unbounded axis");
+  check(plan.positions[0].row == 0 && plan.positions[0].column == 0, "first span uses the first origin");
+  check(plan.positions[1].row == 1 && plan.positions[1].column == 0, "wide span skips a narrow hole");
+  check(plan.positions[2].row == 1 && plan.positions[2].column == 2, "cursor never returns to skipped row-zero hole");
+
+  items = {};
+  items[2].row = 0;
+  items[2].column = 0;
+  plan = take(resolveGridPlacements(options, items));
+  check(plan.positions[0].column == 1 && plan.positions[1].column == 2,
+        "future explicit placements reserve before earlier automatic recipes");
+
+  options.columns = 2;
+  items = {};
+  items[0].rowSpan = 2;
+  plan = take(resolveGridPlacements(options, items));
+  check(plan.positions[1].row == 0 && plan.positions[1].column == 1 && plan.positions[2].row == 1 &&
+          plan.positions[2].column == 1,
+        "row spans reserve every occupied cell");
+
+  options.columns.reset();
+  options.rows = 3;
+  options.flow = GridFlow::COLUMN_MAJOR;
+  items = {};
+  items[0].rowSpan = 2;
+  items[1].rowSpan = 2;
+  plan = take(resolveGridPlacements(options, items));
+  check(plan.columns == 2 && plan.rows == 3 && plan.positions[1].column == 1 && plan.positions[2].row == 2 &&
+          plan.positions[2].column == 1,
+        "column-major placement has the same forward-only cursor contract");
+
+  options = {};
+  options.columns = 2;
+  options.rows = 1;
+  items = {};
+  auto rejected = resolveGridPlacements(options, items);
+  check(!rejected && rejected.error() == TreeError::INVALID_ARGUMENT, "fully bounded grids reject overflow");
+
+  options.rows = 5;
+  plan = take(resolveGridPlacements(options, items));
+  check(plan.rows == 5, "explicit trailing rows remain structural tracks");
+
+  items[0].row = 0;
+  rejected = resolveGridPlacements(options, items);
+  check(!rejected && rejected.error() == TreeError::INVALID_ARGUMENT, "partial explicit coordinates are rejected");
+  items[0].column = 0;
+  items[1].row = 0;
+  items[1].column = 0;
+  rejected = resolveGridPlacements(options, items);
+  check(!rejected && rejected.error() == TreeError::INVALID_ARGUMENT, "declarative overlap is rejected");
+
+  items = {};
+  items[0].rowSpan = 0;
+  rejected = resolveGridPlacements(options, items);
+  check(!rejected && rejected.error() == TreeError::INVALID_ARGUMENT, "zero spans are rejected");
+  items[0].rowSpan = 1;
+  items[0].row = std::numeric_limits<std::size_t>::max();
+  items[0].column = 0;
+  rejected = resolveGridPlacements(options, items);
+  check(!rejected && rejected.error() == TreeError::INVALID_GEOMETRY, "coordinate addition is checked before use");
+
+  items = {};
+  options.rows.reset();
+  options.columns = 0;
+  rejected = resolveGridPlacements(options, items);
+  check(!rejected && rejected.error() == TreeError::INVALID_ARGUMENT, "zero track counts are rejected");
+  options.columns = 2;
+  options.flow = GridFlow::COLUMN_MAJOR;
+  rejected = resolveGridPlacements(options, items);
+  check(!rejected && rejected.error() == TreeError::INVALID_ARGUMENT, "column-major flow requires rows");
+
+  options.flow = GridFlow::ROW_MAJOR;
+  options.columns = 3;
+  options.columnGap = std::numeric_limits<std::int32_t>::max();
+  rejected = resolveGridPlacements(options, items);
+  check(!rejected && rejected.error() == TreeError::INVALID_GEOMETRY,
+        "mandatory gaps cannot overflow before child measurement");
+
+  options.columns = 2;
+  options.columnGap = 0;
+  options.maxTracksPerAxis = 1;
+  rejected = resolveGridPlacements(options, items);
+  check(!rejected && rejected.error() == TreeError::NODE_LIMIT, "explicit track counts obey the finite budget");
+}
+
+void declarativeBudgetsAndMode() {
+  DeclarativeGridOptions options;
+  std::array<GridItemOptions, 1> items;
+
+  options.columns = 1;
+  options.maxPlacementWork = 2;
+
+  auto rejected = resolveGridPlacements(options, items);
+
+  check(!rejected && rejected.error() == TreeError::NODE_LIMIT, "automatic reservation is included in work budget");
+  options.maxPlacementWork = 3;
+  check(resolveGridPlacements(options, items).has_value(), "exact candidate-probe-reservation boundary succeeds");
+
+  options.maxPlacementWork = 1;
+  items[0].row = 0;
+  items[0].column = 0;
+  check(resolveGridPlacements(options, items).has_value(), "explicit placement spends its reservation work once");
+
+  options.columns = 4096;
+  options.maxPlacementWork = 4;
+  items[0].columnSpan = 4096;
+  rejected = resolveGridPlacements(options, items);
+  check(!rejected && rejected.error() == TreeError::NODE_LIMIT, "large reservations stop before exceeding work");
+
+  options.columns = 1;
+  options.maxPlacementWork = 3;
+  items = {};
+  allocation_test::remaining = 0;
+  rejected = resolveGridPlacements(options, items);
+  allocation_test::remaining = -1;
+  check(!rejected && rejected.error() == TreeError::NO_MEMORY, "placement allocation failure is typed");
+
+  auto scheduler = take(Scheduler::create());
+  auto tree = take(WidgetTree::create(*scheduler));
+  const auto root = take(tree->root());
+  const auto explicitGrid = take(tree->emplaceChecked<Grid>(root));
+  const auto declarativeGrid = take(tree->emplaceChecked<Grid>(root, GridOptions{}, GridPlacementMode::DECLARATIVE));
+  auto wrong = setGridOptions(*tree, declarativeGrid, {});
+
+  check(!wrong && wrong.error() == TreeError::INVALID_ARGUMENT, "explicit setter cannot change declarative mode");
+  wrong = setDeclarativeGridOptions(*tree, explicitGrid, {});
+  check(!wrong && wrong.error() == TreeError::INVALID_ARGUMENT, "declarative setter cannot change explicit mode");
+
+  GridOptions overlapping;
+
+  overlapping.cells = {{{1, 0, 1}, 0, 0}, {{1, 1, 1}, 0, 0}};
+  wrong = setDeclarativeGridOptions(*tree, declarativeGrid, overlapping);
+  check(!wrong && wrong.error() == TreeError::INVALID_ARGUMENT, "checked declarative replacement rejects overlap");
+  check(setGridOptions(*tree, explicitGrid, overlapping).has_value(), "explicit low-level overlap remains permitted");
+}
+
+void independentRegionsAndScrolling() {
+  const NodeId heading{7, 1, 1}, first{7, 9, 1}, second{7, 17, 1};
+  const std::array children{MeasuredChild{{11, 2}, {}, heading}, MeasuredChild{{6, 2}, {}, first},
+                            MeasuredChild{{4, 2}, {}, second}};
+  GridOptions options;
+
+  options.columns = {fixed(4), fixed(6)};
+  options.column_gap = 1;
+  options.header_rows = {fixed(2)};
+  options.rows = {fixed(2), fixed(2)};
+  options.regions = true;
+  options.cells = {{heading, 0, 0, 1, 2, LayoutAlign::STRETCH, LayoutAlign::STRETCH, GridRegion::HEADER},
+                   {first, 0, 1},
+                   {second, 1, 0}};
+
+  for (const bool sticky : {false, true}) {
+    options.sticky_header = sticky;
+
+    GridScrollOptions scrolling;
+    scrolling.area.horizontal = ScrollBarPolicy::NEVER;
+    scrolling.area.vertical = ScrollBarPolicy::NEVER;
+    scrolling.controller = take(ScrollController::create({{{20, 7}, {2, 0}}, {{20, 4}, {1, 0}}}));
+    Grid grid(options, GridPlacementMode::DECLARATIVE, {}, scrolling);
+
+    check(take(grid.measureChildren(children)) == CellSize{11, 6}, "regional measurement shares columns and adds rows");
+
+    auto placed = take(grid.arrangeChildren(children, {7, 4}));
+    const auto headerPolicy = take(grid.childLayoutFor(heading, {7, 4}));
+    const auto bodyPolicy = take(grid.childLayoutFor(first, {7, 4}));
+
+    check(placed[0] == rect(-2, sticky ? 0 : -1, 11, 2), "both regions share horizontal scrolling");
+    check(placed[1] == rect(3, 1, 6, 2), "body rows scroll independently of sticky header");
+    check(headerPolicy.revealAxes == (sticky ? RevealAxes::HORIZONTAL_ONLY : RevealAxes::BOTH),
+          "only sticky header suppresses vertical reveal");
+    check(headerPolicy.localClip == rect(0, 0, 7, sticky ? 2 : 4), "header clip follows sticky mode");
+    check(bodyPolicy.localClip == rect(0, sticky ? 2 : 0, 7, sticky ? 2 : 4), "body owns its regional viewport");
+    check(bodyPolicy.proposedInput == RegionalInput::OPEN, "nonempty body remains input eligible");
+
+    const auto stale = grid.childLayoutFor({7, 9, 2}, {7, 4});
+
+    check(!stale && stale.error() == TreeError::INVALID_ARGUMENT,
+          "colliding policy entries still require the complete child identity");
+
+    placed = take(grid.arrangeChildren(children, {7, 1}));
+
+    check(take(grid.childLayoutFor(first, {7, 1})).proposedInput ==
+            (sticky ? RegionalInput::CLOSED : RegionalInput::OPEN),
+          "only an empty own body viewport closes input");
+    check(take(grid.childLayoutFor(heading, {7, 1})).localClip == rect(0, 0, 7, 1),
+          "tiny viewports preserve the visible header fragment");
+  }
+
+  options.sticky_header = true;
+  Grid ordinary(options, GridPlacementMode::DECLARATIVE);
+
+  take(ordinary.arrangeChildren(children, {7, 1}));
+  check(take(ordinary.childLayoutFor(first, {7, 1})).proposedInput == RegionalInput::CLOSED,
+        "regional eligibility also works without scrolling");
+  check(take(ordinary.childLayoutFor(heading, {7, 1})).revealAxes == RevealAxes::BOTH,
+        "a non-scrolling region does not change reveal axes");
+
+  GridOptions intrinsic;
+  intrinsic.regions = true;
+  intrinsic.cells = {{first, 0, 0}};
+  Grid reusable(intrinsic, GridPlacementMode::DECLARATIVE);
+  std::array changing{MeasuredChild{{2, 1}, {}, first}};
+
+  check(take(reusable.arrangeChildren(changing, {10, 2}))[0].size().width == 2,
+        "pure regional arrangement accepts an initial intrinsic demand");
+  changing[0].desired.width = 7;
+  check(take(reusable.arrangeChildren(changing, {10, 2}))[0].size().width == 7,
+        "same allocation with changed pure inputs does not reuse stale tracks");
+}
+
+void regionalPlacementAndPaintBudgets() {
+  DeclarativeGridOptions config;
+  config.columns = 2;
+  config.regions = true;
+  const std::array items{GridItemOptions{.columnSpan = 2, .region = GridRegion::HEADER}, GridItemOptions{},
+                         GridItemOptions{.rowSpan = 2}, GridItemOptions{}};
+  const auto plan = take(resolveGridPlacements(config, items));
+
+  check(plan.headerRows == 1 && plan.rows == 2 && plan.positions[0].row == 0 && plan.positions[1].row == 0,
+        "header and body reserve independent row coordinates");
+
+  struct BatchSink : PaintContext {
+    std::size_t calls{};
+    std::vector<RenderCommand> commands = std::vector<RenderCommand>(std::initializer_list<RenderCommand>{});
+
+    std::expected<void, TreeError> submit(std::span<const RenderCommand> values) override {
+      ++calls;
+      for (const auto &value : values) {
+        commands.push_back(value);
+      }
+      return {};
+    }
+  } sink;
+
+  const NodeId heading{8, 1, 1}, body{8, 2, 1};
+  const std::array children{MeasuredChild{{4, 1}, {}, heading}, MeasuredChild{{4, 1}, {}, body}};
+  GridOptions options;
+  options.regions = true;
+  options.header_rows = {fixed(1)};
+  options.columns = {fixed(4)};
+  options.rows = {fixed(1)};
+  options.cells = {{heading, 0, 0, 1, 1, LayoutAlign::STRETCH, LayoutAlign::STRETCH, GridRegion::HEADER}, {body, 0, 0}};
+  options.presentation.header = CellStyle{};
+  options.presentation.body = CellStyle{};
+  options.presentation.rows.even = CellStyle{};
+  options.presentation.maxPaintCells = 11;
+
+  Grid grid(options, GridPlacementMode::DECLARATIVE);
+  take(grid.arrangeChildren(children, {4, 2}));
+
+  const auto rejected = grid.paint(sink);
+
+  check(!rejected && rejected.error() == TreeError::WOULD_BLOCK && sink.calls == 0,
+        "paint budget rejects the complete background batch before the sink");
+  options.presentation.maxPaintCells = 12;
+
+  Grid accepted(options, GridPlacementMode::DECLARATIVE);
+  take(accepted.arrangeChildren(children, {4, 2}));
+  take(accepted.paint(sink));
+  check(sink.calls == 1 && sink.commands.size() == 3, "whole background batch submits once at exact budget");
+}
 } // namespace
 
 int main() {
@@ -696,6 +995,10 @@ int main() {
   verticalSpanAndWeightedTracks();
   cappedSpanRemainders();
   allocationFailures();
+  declarativePlacementContracts();
+  declarativeBudgetsAndMode();
+  independentRegionsAndScrolling();
+  regionalPlacementAndPaintBudgets();
 
   return failures ? EXIT_FAILURE : EXIT_SUCCESS;
 }

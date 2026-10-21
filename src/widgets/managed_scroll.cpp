@@ -4,6 +4,8 @@
 #include "scroll_controls_state.hpp"
 #include "scroll_preparation_state.hpp"
 #include <portals/managed.hpp>
+#include <portals/detail/layout_traversal.hpp>
+#include <portals/grid.hpp>
 
 #include <limits>
 
@@ -34,6 +36,33 @@ std::expected<void, TreeError> ManagedScene::attachScroll(const std::shared_ptr<
     return std::unexpected(bound.error());
   }
   entry->binding.emplace<ActionBinding>(std::move(*bound));
+  return attachScrollValues(entry);
+}
+
+std::expected<void, TreeError> ManagedScene::attachScroll(const std::shared_ptr<Entry> &entry, Node<Widget> node,
+                                                          bool) {
+  bool present{};
+  const auto read = app_.tree().read(node, [&](const Widget &widget) {
+    if (const auto *grid = dynamic_cast<const Grid *>(&widget)) {
+      entry->regionalLayoutOwner = grid->usesRegions() || detail::ScrollWidgetAccess::state(widget);
+    }
+    if (const auto *state = detail::ScrollWidgetAccess::state(widget)) {
+      present = state->isArea;
+    }
+  });
+  if (!read) {
+    return read;
+  }
+  if (!present) {
+    return {};
+  }
+
+  auto bound = detail::bindScrollOwner(app_.router(), app_.tree(), node);
+  if (!bound) {
+    return std::unexpected(bound.error());
+  }
+  entry->binding.emplace<ActionBinding>(std::move(*bound));
+  entry->scrollArea = node;
   return attachScrollValues(entry);
 }
 
@@ -89,11 +118,8 @@ void ManagedScene::pruneScroll() noexcept {
 }
 
 bool ManagedScene::usesGeometrySnapshot() const noexcept {
-  if (!scroll_) {
-    return false;
-  }
   return std::ranges::any_of(entries_, [](const auto &entry) {
-    return !entry->removed && entry->scrollArea != Node<ScrollArea>{};
+    return !entry->removed && (entry->regionalLayoutOwner || entry->scrollArea != Node<Widget>{});
   });
 }
 
@@ -134,7 +160,7 @@ std::expected<void, ManagedError> ManagedScene::setScrollMetrics(Node<ScrollBar>
 
 bool ManagedScene::scrollIntentIntersects(const Entry &entry, std::span<const Node<Widget>> chain) const noexcept {
   return std::ranges::any_of(entries_, [&](const auto &area) {
-    return !area->removed && area->scrollArea != Node<ScrollArea>{} &&
+    return !area->removed && area->scrollArea != Node<Widget>{} &&
            area->scrollController == entry.scrollController &&
            std::ranges::find(chain, Node<Widget>(area->scrollArea)) != chain.end();
   });
@@ -205,7 +231,7 @@ std::expected<void, TreeError> ManagedScene::queueScrollReveal(Node<Widget> node
       ancestor = value->parent;
     }
     const bool inArea = std::ranges::any_of(entries_, [&](const auto &entry) {
-      return entry->scrollArea != Node<ScrollArea>{} && entry->node != node &&
+      return entry->scrollArea != Node<Widget>{} && entry->node != node &&
              std::ranges::find(request.chain, entry->node) != request.chain.end();
     });
     if (!inArea) {
@@ -324,20 +350,191 @@ std::expected<void, TreeError> ManagedScene::sampleScrollFocus() {
   return {};
 }
 
+std::expected<bool, TreeError> ManagedScene::prepareRegionalInput(const LayoutSnapshot &snapshot) {
+  if (!std::ranges::any_of(entries_, [](const auto &entry) {
+        return !entry->removed && entry->regionalLayoutOwner;
+      })) {
+    return false;
+  }
+
+  struct Owner {
+    ~Owner() = default;
+    Node<Widget> node;
+    std::vector<detail::RegionalInputProposal> children = std::vector<detail::RegionalInputProposal>(0);
+  };
+
+  std::vector<Owner> staged(0);
+
+  for (const auto &entry : entries_) {
+    if (entry->removed || !entry->regionalLayoutOwner) {
+      continue;
+    }
+
+    const auto live = app_.tree().read(entry->node, [](const Widget &) {});
+
+    if (!live && live.error() == TreeError::STALE_NODE) {
+      entry->removed = true;
+      entry->scrollIntent.reset();
+      entry->scrollOwner.reset();
+      entry->scrollController.reset();
+      stylesDirty_ = true;
+      continue;
+    }
+
+    if (!live) {
+      return std::unexpected(live.error());
+    }
+
+    const auto captured = snapshot.geometry(entry->node);
+
+    if (!captured) {
+      return std::unexpected(captured.error());
+    }
+
+    if (!captured->visible) {
+      continue;
+    }
+
+    auto owner = app_.tree().inspect(entry->node);
+
+    if (!owner) {
+      return std::unexpected(owner.error());
+    }
+
+    staged.emplace_back();
+    auto &next = staged.back();
+    next.node = entry->node;
+
+    for (const auto child : owner->children) {
+      const auto geometry = snapshot.geometry(child);
+
+      if (!geometry) {
+        return std::unexpected(geometry.error());
+      }
+
+      if (!geometry->visible || !geometry->parentLayoutEdge ||
+          geometry->parentLayoutEdge->proposedInput == RegionalInput::UNCHANGED) {
+        continue;
+      }
+
+      const auto &edge = *geometry->parentLayoutEdge;
+      next.children.push_back({child.id(), edge.proposedInput == RegionalInput::OPEN, edge.geometryEpoch});
+    }
+  }
+
+  pruneScroll();
+
+  if (staged.empty()) {
+    return false;
+  }
+
+  std::vector<detail::RegionalInputOwnerProposal> owners(0);
+  owners.reserve(staged.size());
+
+  for (const auto &owner : staged) {
+    owners.push_back({owner.node, owner.children});
+  }
+
+  return detail::LayoutTraversalAccess::adoptRegionalInput(app_.tree(), snapshot, owners);
+}
+
+std::expected<void, TreeError> ManagedScene::syncRegionalPresentation(Node<Widget> focused) {
+  for (const auto &entry : entries_) {
+    if (entry->removed) {
+      continue;
+    }
+
+    bool editor{};
+    const auto live = app_.tree().read(entry->node, [&](const Widget &widget) {
+      editor = dynamic_cast<const LineEdit *>(&widget) != nullptr;
+    });
+
+    if (!live && live.error() == TreeError::STALE_NODE) {
+      entry->removed = true;
+      stylesDirty_ = true;
+      continue;
+    }
+
+    if (!live) {
+      return live;
+    }
+
+    if (editor) {
+      const auto eligible = app_.tree().inputEligible(entry->node);
+
+      if (!eligible) {
+        return std::unexpected(eligible.error());
+      }
+
+      std::expected<void, TreeError> status;
+      const auto edited = app_.tree().edit(entry->node, [&](Widget &widget) {
+        auto &edit = static_cast<LineEdit &>(widget);
+        const bool hasFocus = *eligible && focused == entry->node;
+
+        if (edit.focused_ != hasFocus || edit.enabled_ != *eligible) {
+          status = app_.tree().invalidate(entry->node, Invalidation::PAINT);
+
+          if (status) {
+            edit.focused_ = hasFocus;
+            edit.enabled_ = *eligible;
+          }
+        }
+      });
+
+      if (!edited || !status) {
+        return edited ? status : edited;
+      }
+    }
+
+    if (entry->sync) {
+      const auto synced = entry->sync(focused);
+
+      if (!synced) {
+        return synced;
+      }
+    }
+  }
+
+  pruneScroll();
+  return {};
+}
+
 std::expected<void, TreeError> ManagedScene::prepareScrollFrame(const LayoutSnapshot &snapshot) {
-  if (!usesGeometrySnapshot() || !scroll_) {
+  if (!usesGeometrySnapshot()) {
     return {};
   }
   try {
+    auto regional = prepareRegionalInput(snapshot);
+
+    if (!regional) {
+      if (regional.error() == TreeError::WOULD_BLOCK) {
+        return app_.tree().invalidate(root_, Invalidation::LAYOUT);
+      }
+
+      return std::unexpected(regional.error());
+    }
+
+    if (*regional) {
+      // Gate publication invalidates this snapshot. Recover focus through the
+      // existing router, then let the bounded preparation loop lay out again.
+      const auto focused = app_.router().focused();
+
+      return focused ? syncRegionalPresentation(*focused) : std::unexpected(focused.error());
+    }
+
+    if (!scroll_) {
+      return {};
+    }
+
     auto sampled = sampleScrollFocus();
     if (!sampled) {
       return sampled;
     }
     const auto owner = scroll_;
-    std::vector<Node<ScrollArea>> areas(0);
+    std::vector<Node<Widget>> areas(0);
     areas.reserve(entries_.size());
     for (const auto &entry : entries_) {
-      if (!entry->removed && entry->scrollArea != Node<ScrollArea>{}) {
+      if (!entry->removed && entry->scrollArea != Node<Widget>{}) {
         auto live = app_.tree().read(entry->node, [](const Widget &) {
         });
         if (!live && (live.error() == TreeError::STALE_NODE || live.error() == TreeError::CLOSED)) {

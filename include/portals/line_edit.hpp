@@ -238,6 +238,7 @@ public:
 
 private:
   friend class LineEditBinding;
+  friend class ManagedScene;
   friend struct ui::detail::RefAccess;
   void revealCursor();
   std::int32_t cellAt(std::size_t byte) const;

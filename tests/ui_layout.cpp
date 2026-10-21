@@ -54,6 +54,397 @@ struct Fixture {
 };
 } // namespace
 
+TEST_CASE("declarative grid mounts compact columns without client identities") {
+  Fixture fixture;
+  ui::Ref<Grid> grid;
+  ui::Ref<Label> name;
+  ui::Ref<Label> value;
+
+  take(ui::mount(*fixture.scene,
+                 ui::grid(ui::label(name, "Name"), ui::label(value, "Ada")).columns(2).columnGap(2).reference(grid)));
+  fixture.layout();
+
+  CHECK(take(name.geometry()).local.origin() == CellPoint{0, 0});
+  CHECK(take(value.geometry()).local.origin() == CellPoint{6, 0});
+  take(fixture.app->tree().read(grid.node(), [&](const Grid &widget) {
+    const auto options = widget.options();
+
+    REQUIRE(options.cells.size() == 2);
+    CHECK(options.columns.size() == 2);
+    CHECK(options.rows.size() == 1);
+    CHECK(options.cells[0].node == name.node().id());
+    CHECK(options.cells[1].node == value.node().id());
+  }));
+}
+
+TEST_CASE("grid sections flatten controls and share horizontal tracks") {
+  Fixture fixture;
+  ui::Ref<Grid> grid;
+  ui::Ref<Label> heading, value, name;
+
+  take(ui::mount(*fixture.scene, ui::grid(ui::header(ui::label(heading, "Names").columnSpan(2)).sticky(),
+                                          ui::body(ui::label(name, "Name"), ui::label(value, "Ada")))
+                                   .columns(2)
+                                   .columnGap(2)
+                                   .reference(grid)));
+  fixture.layout();
+
+  CHECK(take(heading.geometry()).local == take(CellRect::from({}, {9, 1})));
+  CHECK(take(name.geometry()).local.origin() == CellPoint{0, 1});
+  CHECK(take(value.geometry()).local.origin() == CellPoint{6, 1});
+  CHECK(take(fixture.app->tree().inspect(grid.node())).children.size() == 3);
+  take(fixture.app->tree().read(grid.node(), [&](const Grid &widget) {
+    const auto options = widget.options();
+
+    CHECK(widget.usesRegions());
+    CHECK(options.header_rows.size() == 1);
+    CHECK(options.rows.size() == 1);
+    CHECK(options.cells[0].row == 0);
+    CHECK(options.cells[1].row == 0);
+    CHECK(options.cells[0].region == GridRegion::HEADER);
+    CHECK(options.cells[1].region == GridRegion::BODY);
+  }));
+}
+
+TEST_CASE("grid section validation happens before ancestor setup") {
+  Fixture fixture;
+  int effects{};
+  auto checked = [&](auto recipe) {
+    const auto failed = ui::mount(
+      *fixture.scene,
+      ui::column(std::move(recipe)).setup([&](ManagedScene &, Node<Column>) -> std::expected<void, ManagedError> {
+        ++effects;
+        return {};
+      }));
+
+    REQUIRE_FALSE(failed);
+    CHECK(cause(failed.error(), TreeError::INVALID_ARGUMENT));
+    CHECK(effects == 0);
+  };
+
+  checked(ui::grid(ui::header(ui::label("a")), ui::header(ui::label("b"))).columns(1));
+  checked(ui::grid(ui::body(ui::label("a")), ui::label("direct")).columns(1));
+  checked(ui::grid(ui::header(ui::label("requires columns"))));
+  checked(ui::grid(ui::body(ui::label("invalid sticky")).sticky()).columns(1));
+
+  auto source = ui::header(ui::label("consumed"));
+  auto consumed = std::move(source);
+
+  checked(ui::grid(std::move(source)).columns(1));
+}
+
+TEST_CASE("advanced grid track policies are owning and row policies apply only to body") {
+  Fixture fixture;
+  ui::Ref<Label> heading, cell;
+  std::vector<AxisSize> columns{{6, 6, 6, SizeMode::FIXED}};
+  std::vector<AxisSize> rows{{3, 3, 3, SizeMode::FIXED}};
+  auto recipe = ui::grid(ui::header(ui::label(heading, "head")), ui::body(ui::label(cell, "body")))
+                  .columns(1)
+                  .columnSizes(columns)
+                  .rowSizes(rows);
+
+  columns[0] = {10, 10, 10, SizeMode::FIXED};
+  rows[0] = {8, 8, 8, SizeMode::FIXED};
+  take(ui::mount(*fixture.scene, std::move(recipe)));
+  fixture.layout();
+
+  CHECK(take(heading.geometry()).local.size() == CellSize{6, 1});
+  CHECK(take(cell.geometry()).local == take(CellRect::from({0, 1}, {6, 3})));
+}
+
+TEST_CASE("advanced grid track errors are rejected before ancestor setup") {
+  Fixture fixture;
+  int effects{};
+  const auto checked = [&](auto recipe) {
+    const auto failed = ui::mount(
+      *fixture.scene,
+      ui::column(std::move(recipe)).setup([&](ManagedScene &, Node<Column>) -> std::expected<void, ManagedError> {
+        ++effects;
+        return {};
+      }));
+
+    REQUIRE_FALSE(failed);
+    CHECK(cause(failed.error(), TreeError::INVALID_ARGUMENT));
+    CHECK(effects == 0);
+  };
+
+  checked(ui::grid(ui::label("wrong column count")).columns(2).columnSizes({AxisSize{}}));
+  checked(ui::grid(ui::label("wrong body row count")).columns(1).rowSizes({AxisSize{}, AxisSize{}}));
+  checked(ui::grid(ui::label("invalid track")).columns(1).columnSizes({AxisSize{.minimum = -1}}));
+}
+
+TEST_CASE("declarative grid settings preserve sparse defaults and explicit false") {
+  Fixture fixture;
+  ui::ControlContext controls;
+  controls.defaults("Grid", {.grid = {.columns = 2, .columnGap = 4, .rowGap = 3, .scroll = true}})
+    .define("NamedGrid", "Grid", {.grid = {.columnGap = 2}});
+  ui::Ref<Grid> grid;
+  int childEffects{};
+  take(
+    ui::mount(*fixture.scene,
+              ui::grid(ui::label("left").setup([&](ManagedScene &, Node<Label>) -> std::expected<void, ManagedError> {
+                ++childEffects;
+                return {};
+              }),
+                       ui::label("right"))
+                .variant("NamedGrid")
+                .settings({.grid = {.rowGap = 0, .scroll = false}})
+                .reference(grid),
+              controls));
+  take(fixture.app->tree().read(grid.node(), [](const Grid &widget) {
+    const auto options = widget.options();
+
+    CHECK(options.columns.size() == 2);
+    CHECK(options.column_gap == 2);
+    CHECK(options.row_gap == 0);
+  }));
+  CHECK(childEffects == 1);
+  const auto noScroll = setScrollOffset(fixture.app->tree(), grid.node(), ScrollAxis::VERTICAL, {1, 0});
+  CHECK_FALSE(noScroll);
+  CHECK(noScroll.error() == TreeError::INVALID_ARGUMENT);
+  CHECK_FALSE(controls.resolve("Grid"));
+}
+
+TEST_CASE("scene factories validate the effective Grid graph before calling user code") {
+  ui::ControlContext controls;
+  controls.define("NamedGrid", "Grid", {.grid = {.columns = 2, .columnGap = 3}});
+  int calls{};
+  ui::Ref<Grid> grid;
+  auto owner = ui::scene(
+    [&](ManagedScene &) {
+      ++calls;
+      return ui::grid(ui::label("Name"), ui::label("Ada"))
+        .variant("NamedGrid")
+        .settings({.grid = {.columnGap = 2}})
+        .reference(grid);
+    },
+    {.controls = controls});
+  take(owner.prepareChecked());
+  CHECK(calls == 1);
+  auto managed = take(owner.managed());
+  auto &application = ui::detail::SceneAccess::application(managed.get());
+  take(application.tree().read(grid.node(), [](const Grid &widget) {
+    CHECK(widget.options().columns.size() == 2);
+    CHECK(widget.options().column_gap == 2);
+  }));
+  CHECK_FALSE(controls.resolve("NamedGrid"));
+  take(owner.close());
+
+  controls.define("Broken", "Absent");
+  auto failed = ui::scene(
+    [&](ManagedScene &) {
+      ++calls;
+      return ui::grid(ui::label("unreachable")).columns(1);
+    },
+    {.controls = controls});
+  CHECK_FALSE(failed.prepareChecked());
+  CHECK(calls == 1);
+}
+
+TEST_CASE("real declarative Grid rejects a custom terminal before child construction") {
+  Fixture fixture;
+  ui::ControlContext controls;
+  controls.define("Grid", "Label");
+  int effects{};
+  const auto failed = ui::mount(
+    *fixture.scene,
+    ui::grid(ui::label("not mounted").setup([&](ManagedScene &, Node<Label>) -> std::expected<void, ManagedError> {
+      ++effects;
+      return {};
+    }))
+      .columns(1),
+    controls);
+
+  REQUIRE_FALSE(failed);
+  CHECK(failed.error().sceneResource);
+  CHECK(effects == 0);
+  CHECK(take(controls.resolve("Grid")).base == "Label");
+}
+
+TEST_CASE("grid preflight rejects nested conflicts before ancestor setup and child factories") {
+  Fixture fixture;
+  ui::Ref<Grid> grid;
+  ui::Ref<Label> first;
+  int effects{};
+
+  auto result =
+    ui::mount(*fixture.scene,
+              ui::column(ui::grid(ui::label(first, "first").row(0).column(0).setup([&](ManagedScene &, Node<Label>) {
+                           ++effects;
+
+                           return std::expected<void, ManagedError>{};
+                         }),
+                                  ui::label("conflict").row(0).column(0))
+                           .columns(2)
+                           .reference(grid))
+                .setup([&](ManagedScene &, Node<Column>) {
+                  ++effects;
+
+                  return std::expected<void, ManagedError>{};
+                }));
+
+  REQUIRE_FALSE(result);
+  CHECK(cause(result.error(), TreeError::INVALID_ARGUMENT));
+  CHECK(effects == 0);
+  CHECK(grid.node() == Node<Grid>{});
+  CHECK(first.node() == Node<Label>{});
+  CHECK(take(fixture.app->tree().inspect(fixture.scene->root())).children.empty());
+}
+
+TEST_CASE("grid relationship modifiers require an immediate declarative grid parent") {
+  Fixture fixture;
+  int effects{};
+
+  auto misplaced =
+    ui::mount(*fixture.scene, ui::row(ui::label("misplaced").columnSpan(2)).setup([&](ManagedScene &, Node<Row>) {
+      ++effects;
+
+      return std::expected<void, ManagedError>{};
+    }));
+
+  REQUIRE_FALSE(misplaced);
+  CHECK(cause(misplaced.error(), TreeError::INVALID_ARGUMENT));
+  CHECK(effects == 0);
+
+  auto partial = ui::mount(*fixture.scene, ui::grid(ui::label("partial").row(0)).columns(2));
+
+  REQUIRE_FALSE(partial);
+  CHECK(cause(partial.error(), TreeError::INVALID_ARGUMENT));
+
+  auto overflow = ui::mount(*fixture.scene, ui::grid(ui::label("gap overflow"))
+                                              .columns(3)
+                                              .columnGap(std::numeric_limits<std::int32_t>::max())
+                                              .setup([&](ManagedScene &, Node<Grid>) {
+                                                ++effects;
+
+                                                return std::expected<void, ManagedError>{};
+                                              }));
+
+  REQUIRE_FALSE(overflow);
+  CHECK(cause(overflow.error(), TreeError::INVALID_GEOMETRY));
+  CHECK(effects == 0);
+
+  auto legacy = ui::mount(*fixture.scene, ui::grid(ui::label("explicit parent").columnSpan(2)));
+
+  REQUIRE_FALSE(legacy);
+  CHECK(cause(legacy.error(), TreeError::INVALID_ARGUMENT));
+}
+
+TEST_CASE("grid column-major flow and future explicit spans preserve structural order") {
+  Fixture fixture;
+  ui::Ref<Grid> grid;
+  ui::Ref<Label> first;
+  ui::Ref<Label> second;
+  ui::Ref<Label> explicitCell;
+
+  take(ui::mount(*fixture.scene, ui::grid(ui::label(first, "a").rowSpan(2), ui::label(second, "b"),
+                                          ui::label(explicitCell, "c").row(0).column(0))
+                                   .rows(3)
+                                   .flow(GridFlow::COLUMN_MAJOR)
+                                   .rowGap(1)
+                                   .reference(grid)));
+  take(fixture.app->tree().read(grid.node(), [&](const Grid &widget) {
+    const auto options = widget.options();
+
+    REQUIRE(options.cells.size() == 3);
+    CHECK(options.rows.size() == 3);
+    CHECK(options.columns.size() == 2);
+    CHECK(options.row_gap == 1);
+    CHECK(options.cells[0].row == 1);
+    CHECK(options.cells[0].column == 0);
+    CHECK(options.cells[1].row == 0);
+    CHECK(options.cells[1].column == 1);
+    CHECK(options.cells[2].node == explicitCell.node().id());
+  }));
+  fixture.layout();
+}
+
+TEST_CASE("grid hidden cells keep occupancy and removed identities never bind replacements") {
+  Fixture fixture;
+  ui::Ref<Grid> grid;
+  ui::Ref<Label> first;
+  ui::Ref<Label> second;
+
+  take(ui::mount(*fixture.scene, ui::grid(ui::label(first, "hidden").setup([&](ManagedScene &, Node<Label> node) {
+                                   auto result = fixture.app->tree().setVisible(node, false);
+
+                                   return result ? std::expected<void, ManagedError>{}
+                                                 : std::unexpected(ui::detail::error(node, result.error()));
+                                 }),
+                                          ui::label(second, "visible"))
+                                   .columns(2)
+                                   .reference(grid)));
+  fixture.layout();
+  take(fixture.app->tree().read(grid.node(), [&](const Grid &widget) {
+    const auto options = widget.options();
+
+    CHECK(options.cells[0].node == first.node().id());
+    CHECK(options.cells[1].row == 0);
+    CHECK(options.cells[1].column == 1);
+  }));
+  take(fixture.app->tree().setVisible(first.node(), true));
+  fixture.layout();
+  CHECK(take(second.geometry()).local.origin().x > 0);
+
+  const auto old = first.node();
+
+  take(fixture.scene->remove(old));
+
+  const auto text = take(GraphemeText::from("replacement", fixture.scene->widthPolicy()));
+  const auto replacement = take(fixture.scene->emplace<Label>(grid.node(), text));
+
+  CHECK(replacement.id() != old.id());
+
+  const auto bounds = take(CellRect::from({}, {30, 6}));
+  std::expected<void, TreeError> arranged;
+
+  take(fixture.app->tree().frame([&] {
+    arranged = layoutTree(fixture.app->tree(), fixture.app->root(), bounds, bounds);
+  }));
+
+  REQUIRE_FALSE(arranged);
+  CHECK(arranged.error() == TreeError::INVALID_ARGUMENT);
+}
+
+TEST_CASE("grid work exhaustion and child mount failure leave refs unpublished") {
+  Fixture fixture;
+  ui::Ref<Grid> grid;
+  ui::Ref<Label> first;
+  int effects{};
+  DeclarativeGridOptions options;
+
+  options.columns = 1;
+  options.maxPlacementWork = 2;
+
+  auto limited = ui::mount(*fixture.scene, ui::grid(ui::label(first, "limited").setup([&](ManagedScene &, Node<Label>) {
+                                             ++effects;
+
+                                             return std::expected<void, ManagedError>{};
+                                           }))
+                                             .gridOptions(options)
+                                             .reference(grid));
+
+  REQUIRE_FALSE(limited);
+  CHECK(cause(limited.error(), TreeError::NODE_LIMIT));
+  CHECK(effects == 0);
+  CHECK(grid.node() == Node<Grid>{});
+  CHECK(first.node() == Node<Label>{});
+
+  auto failed = ui::mount(
+    *fixture.scene,
+    ui::grid(ui::label(first, "reserved"), ui::label("failed").setup([](ManagedScene &, Node<Label> node) {
+      return std::expected<void, ManagedError>(std::unexpected(ui::detail::error(node, TreeError::CALLBACK_FAILED)));
+    }))
+      .columns(2)
+      .reference(grid));
+
+  REQUIRE_FALSE(failed);
+  CHECK(cause(failed.error(), TreeError::CALLBACK_FAILED));
+  CHECK(grid.node() == Node<Grid>{});
+  CHECK(first.node() == Node<Label>{});
+  CHECK(take(fixture.app->tree().inspect(fixture.scene->root())).children.empty());
+}
+
 TEST_CASE("checked Ref geometry is an owning final value and never performs layout") {
   ui::Ref<Label> label;
   REQUIRE_FALSE(label.geometry());

@@ -1,6 +1,8 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include <portals/widget.hpp>
+#include <portals/detail/layout_traversal.hpp>
+#include <portals/layout_snapshot.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -35,6 +37,13 @@ static_assert(nextGeneration(std::numeric_limits<std::uint64_t>::max() - 1) ==
 } // namespace
 
 struct WidgetTree::State {
+  struct RegionalInputGate {
+    NodeId owner;
+    NodeId child;
+    bool open{};
+    std::uint64_t admittedGeometryEpoch{};
+  };
+
   struct Record {
     NodeId id;
 
@@ -44,6 +53,10 @@ struct WidgetTree::State {
     std::unique_ptr<Widget> widget;
     UiScope scope;
     NodeGeometry geometry;
+    std::uint64_t geometryEpochCounter{};
+    std::optional<std::uint64_t> currentGeometryEpoch;
+    std::unique_ptr<ParentLayoutEdge> parentLayoutEdge;
+    std::unique_ptr<RegionalInputGate> regionalInputGate;
     std::uint64_t visibilityRevision{1};
     std::uint64_t inputRevision{1};
     std::size_t depth{};
@@ -137,6 +150,8 @@ struct WidgetTree::State {
   static void invalidateGeometry(Record &record, const Record *visibilityRoot = nullptr, std::uint64_t revision = 0,
                                  bool inheritedVisibility = false) noexcept {
     record.geometry.valid = false;
+    record.currentGeometryEpoch.reset();
+    record.parentLayoutEdge.reset();
     const bool visibilityChanged = inheritedVisibility || &record == visibilityRoot;
     if (visibilityChanged) {
       record.visibilityRevision = revision;
@@ -191,6 +206,8 @@ struct WidgetTree::State {
   static void markDead(Record &record) noexcept {
     record.live = false;
     record.geometry.valid = false;
+    record.currentGeometryEpoch.reset();
+    record.parentLayoutEdge.reset();
 
     for (auto &child : record.children) {
       if (child) {
@@ -211,7 +228,8 @@ struct WidgetTree::State {
 
   static bool shown(const Record &record, bool input) noexcept {
     for (auto current = &record; current; current = current->parent) {
-      if (!current->visible || (input && !current->enabled)) {
+      if (!current->visible ||
+          (input && (!current->enabled || (current->regionalInputGate && !current->regionalInputGate->open)))) {
         return false;
       }
     }
@@ -444,6 +462,11 @@ std::expected<NodeSnapshot, TreeError> WidgetTree::inspect(Node<Widget> node) co
     }
 
     result.geometry = record.geometry;
+    result.geometryEpoch = record.currentGeometryEpoch;
+    result.regionalInputOpen = !record.regionalInputGate || record.regionalInputGate->open;
+    if (record.parentLayoutEdge) {
+      result.parentLayoutEdge = *record.parentLayoutEdge;
+    }
     result.visible = record.visible;
     result.enabled = record.enabled;
     result.children.reserve(record.children.size());
@@ -818,11 +841,202 @@ std::expected<bool, TreeError> WidgetTree::inputEligible(Node<Widget> node, Node
     return std::unexpected(record.error());
   }
   for (auto *ancestor = *record; ancestor; ancestor = ancestor->parent) {
-    if (!ancestor->enabled || (!ancestor->visible && ancestor->id != reveal.id())) {
+    if (!ancestor->enabled || (!ancestor->visible && ancestor->id != reveal.id()) ||
+        (ancestor->regionalInputGate && !ancestor->regionalInputGate->open)) {
       return false;
     }
   }
   return true;
+}
+
+std::expected<bool, TreeError>
+detail::LayoutTraversalAccess::adoptRegionalInput(WidgetTree &tree, const LayoutSnapshot &snapshot,
+                                                 std::span<const RegionalInputOwnerProposal> owners) {
+  if (auto checked = tree.state_->check(); !checked) {
+    return std::unexpected(checked.error());
+  }
+
+  if (tree.state_->frames || tree.state_->extension) {
+    return std::unexpected(TreeError::WOULD_BLOCK);
+  }
+
+  if (!snapshot.geometry_) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  if (snapshot.session_ != tree.state_->session) {
+    return std::unexpected(TreeError::WRONG_SESSION);
+  }
+
+  if (!snapshot.geometryRevision_ || !tree.state_->geometryRevision || !snapshot.inputGeneration_ ||
+      !tree.state_->inputGeneration) {
+    return std::unexpected(TreeError::IDENTITY_EXHAUSTED);
+  }
+
+  if (snapshot.geometryRevision_ != tree.state_->geometryRevision ||
+      snapshot.inputGeneration_ != tree.state_->inputGeneration) {
+    return std::unexpected(TreeError::WOULD_BLOCK);
+  }
+
+  // The existing frame/reentry guards protect staging from user allocation
+  // hooks. No layout traversal, user callback or scheduler dispatch is added.
+  WidgetTree::Borrow guard(tree, true);
+  tree.state_->extension = true;
+  struct RestoreExtension {
+    bool &extension;
+    ~RestoreExtension() { extension = false; }
+  } restore{tree.state_->extension};
+
+  using Record = WidgetTree::State::Record;
+  using Gate = WidgetTree::State::RegionalInputGate;
+  struct Change {
+    Record *record;
+    std::unique_ptr<Gate> next;
+  };
+
+  try {
+    std::vector<Change> changes(0);
+    std::vector<const RegionalInputOwnerProposal *> orderedOwners(0);
+
+    if (owners.size() > tree.state_->options.max_nodes) {
+      return std::unexpected(TreeError::NODE_LIMIT);
+    }
+
+    std::size_t proposalCount{};
+    orderedOwners.reserve(owners.size());
+
+    for (const auto &owner : owners) {
+      if (owner.children.size() > tree.state_->options.max_nodes - proposalCount) {
+        return std::unexpected(TreeError::NODE_LIMIT);
+      }
+
+      proposalCount += owner.children.size();
+      orderedOwners.push_back(&owner);
+    }
+
+    std::ranges::sort(orderedOwners, {}, [](const RegionalInputOwnerProposal *value) { return value->owner.id().slot; });
+
+    for (std::size_t i = 1; i < orderedOwners.size(); ++i) {
+      if (orderedOwners[i - 1]->owner == orderedOwners[i]->owner) {
+        return std::unexpected(TreeError::INVALID_ARGUMENT);
+      }
+    }
+
+    for (const auto *batchPointer : orderedOwners) {
+      const auto &batch = *batchPointer;
+      auto owner = tree.state_->find(batch.owner.id());
+
+      if (!owner) {
+        return std::unexpected(owner.error());
+      }
+
+      const auto capturedOwner = snapshot.geometry(batch.owner);
+
+      if (!capturedOwner) {
+        return std::unexpected(capturedOwner.error());
+      }
+
+      if (!capturedOwner->visible || !(*owner)->geometry.valid || !capturedOwner->geometryEpoch ||
+          capturedOwner->geometryEpoch != (*owner)->currentGeometryEpoch) {
+        return std::unexpected(TreeError::INVALID_GEOMETRY);
+      }
+
+      std::vector<const RegionalInputProposal *> index(0);
+      index.reserve(batch.children.size());
+
+      for (const auto &proposal : batch.children) {
+        auto child = tree.state_->find(proposal.child);
+
+        if (!child) {
+          return std::unexpected(child.error());
+        }
+
+        if ((*child)->parent != *owner || !(*child)->geometry.valid ||
+            (*child)->currentGeometryEpoch != proposal.geometryEpoch || !(*child)->parentLayoutEdge) {
+          return std::unexpected(TreeError::INVALID_GEOMETRY);
+        }
+
+        const auto &edge = *(*child)->parentLayoutEdge;
+        const auto expectedInput = proposal.open ? RegionalInput::OPEN : RegionalInput::CLOSED;
+
+        if (edge.parent != batch.owner.id() || edge.child != proposal.child ||
+            edge.geometryEpoch != proposal.geometryEpoch || edge.proposedInput != expectedInput) {
+          return std::unexpected(TreeError::INVALID_GEOMETRY);
+        }
+
+        index.push_back(&proposal);
+      }
+
+      const auto slot = [](const RegionalInputProposal *value) { return value->child.slot; };
+
+      std::ranges::sort(index, {}, slot);
+
+      for (std::size_t i = 1; i < index.size(); ++i) {
+        if (index[i - 1]->child == index[i]->child) {
+          return std::unexpected(TreeError::INVALID_ARGUMENT);
+        }
+      }
+
+      for (auto &child : (*owner)->children) {
+        if (!child || !child->live) {
+          continue;
+        }
+
+        const auto found = std::ranges::lower_bound(index, child->id.slot, {}, slot);
+        const auto *desired = found != index.end() && (*found)->child == child->id ? *found : nullptr;
+        const auto *current = child->regionalInputGate.get();
+
+        if (child->visible && !child->geometry.valid) {
+          return std::unexpected(TreeError::INVALID_GEOMETRY);
+        }
+
+        if (!desired && child->geometry.valid && child->parentLayoutEdge &&
+            child->parentLayoutEdge->proposedInput != RegionalInput::UNCHANGED) {
+          return std::unexpected(TreeError::INVALID_GEOMETRY);
+        }
+
+        if (current && current->owner != batch.owner.id()) {
+          return std::unexpected(TreeError::INVALID_ARGUMENT);
+        }
+
+        // Epoch is an audit stamp, never semantic gate state. A fresh layout
+        // with the same admission must not request another preparation pass.
+        if ((!current && !desired) ||
+            (current && desired && current->child == desired->child && current->open == desired->open)) {
+          continue;
+        }
+
+        std::unique_ptr<Gate> next;
+
+        if (desired) {
+          next = std::make_unique<Gate>(batch.owner.id(), desired->child, desired->open, desired->geometryEpoch);
+        }
+
+        changes.push_back({child.get(), std::move(next)});
+      }
+    }
+
+    if (changes.empty()) {
+      return false;
+    }
+
+    if (!tree.state_->inputGeneration ||
+        tree.state_->inputGeneration == std::numeric_limits<std::uint64_t>::max()) {
+      return std::unexpected(TreeError::IDENTITY_EXHAUSTED);
+    }
+
+    for (auto &change : changes) {
+      change.record->regionalInputGate = std::move(change.next);
+      tree.state_->changeInputEligibility(*change.record);
+    }
+
+    ++tree.state_->inputGeneration;
+    tree.state_->invalidate(Invalidation::LAYOUT);
+
+    return true;
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(TreeError::NO_MEMORY);
+  }
 }
 
 std::expected<void, TreeError> WidgetTree::invalidate(Node<Widget> node, Invalidation kind) {
@@ -936,7 +1150,8 @@ std::expected<void, TreeError> WidgetTree::arrange(Node<Widget> node, CellRect l
 }
 
 std::expected<void, TreeError> WidgetTree::arrangeImpl(Node<Widget> node, CellRect local, CellRect viewport,
-                                                       std::optional<CellRect> contentClip) {
+                                                       std::optional<CellRect> contentClip,
+                                                       const ParentLayoutEdge *parentEdge) {
   auto record = state_->find(node.id());
 
   if (!record) {
@@ -956,6 +1171,28 @@ std::expected<void, TreeError> WidgetTree::arrangeImpl(Node<Widget> node, CellRe
 
   if (!State::shown(value, false)) {
     return {};
+  }
+
+  if (value.geometryEpochCounter == std::numeric_limits<std::uint64_t>::max()) {
+    return std::unexpected(TreeError::IDENTITY_EXHAUSTED);
+  }
+
+  std::unique_ptr<ParentLayoutEdge> ownedEdge;
+  if (parentEdge) {
+    if (!value.parent || parentEdge->parent != value.parent->id || parentEdge->child != value.id ||
+        (parentEdge->revealAxes != RevealAxes::BOTH && parentEdge->revealAxes != RevealAxes::HORIZONTAL_ONLY) ||
+        (parentEdge->proposedInput != RegionalInput::UNCHANGED && parentEdge->proposedInput != RegionalInput::OPEN &&
+         parentEdge->proposedInput != RegionalInput::CLOSED)) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+
+    try {
+      ownedEdge = std::make_unique<ParentLayoutEdge>(*parentEdge);
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(TreeError::NO_MEMORY);
+    }
+
+    ownedEdge->geometryEpoch = value.geometryEpochCounter + 1;
   }
 
   CellRect surface = local;
@@ -1001,6 +1238,8 @@ std::expected<void, TreeError> WidgetTree::arrangeImpl(Node<Widget> node, CellRe
   }
 
   value.geometry = {local, surface, surface.intersection(clip), true};
+  value.currentGeometryEpoch = ++value.geometryEpochCounter;
+  value.parentLayoutEdge = std::move(ownedEdge);
   state_->invalidate(Invalidation::PAINT);
 
   return {};
