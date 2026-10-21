@@ -6,6 +6,7 @@
 /vendor/doctest/doctest.h -text
 /vendor/pfr/** -text
 /vendor/lyra/** -text
+/vendor/monocypher/** -text
 # Preserve checksum-pinned upstream CSS, including its original whitespace.
 /vendor/doxygen-awesome/*.css -text -whitespace
 /vendor/doxygen-awesome/LICENSE -text

@@ -21,7 +21,7 @@ int main() {
   auto native = SecureString::create("sample");
 
 #if (defined(_WIN32) || defined(__linux__)) && !defined(__EMSCRIPTEN__)
-  if (!native || !native->capabilities().guardPages || !native->close()) {
+  if (!native || !native->capabilities().guardPages || !native->capabilities().encryptedWhileIdle || !native->close()) {
     return 1;
   }
 #else
@@ -32,6 +32,7 @@ int main() {
 
   SecureStringOptions options;
   options.storage = SecureStringStorage::WIPE_ONLY;
+  options.encryptWhileIdle = false;
   options.maxBytes = 16;
 
   auto secret = SecureString::create("sample", options);

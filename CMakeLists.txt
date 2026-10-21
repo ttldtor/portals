@@ -37,6 +37,16 @@ add_library(portals_core STATIC src/version.cpp src/geometry.cpp src/text.cpp sr
 target_sources(portals_core PRIVATE src/terminal/legacy.cpp)
 target_sources(portals_core PRIVATE src/text_history.cpp src/text_transform.cpp)
 target_sources(portals_core PRIVATE src/secure_string.cpp)
+include("${CMAKE_CURRENT_SOURCE_DIR}/vendor/monocypher/verify.cmake")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT EMSCRIPTEN)
+  include("${CMAKE_CURRENT_SOURCE_DIR}/vendor/monocypher/symbols.cmake")
+  target_sources(portals_core PRIVATE vendor/monocypher/monocypher.c)
+  target_include_directories(portals_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/monocypher")
+  set_target_properties(portals_core PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED YES C_EXTENSIONS OFF)
+  # Namespace unmodified upstream functions in both definitions and private call sites.
+  set_source_files_properties(src/secure_string.cpp vendor/monocypher/monocypher.c
+    PROPERTIES COMPILE_DEFINITIONS "${portals_monocypher_symbols}")
+endif()
 if(WIN32 AND NOT EMSCRIPTEN)
   target_link_libraries(portals_core PRIVATE Crypt32)
 endif()
@@ -143,6 +153,10 @@ install(FILES vendor/pfr/manifest.json DESTINATION "${CMAKE_INSTALL_DATADIR}/Por
 install(DIRECTORY vendor/lyra/include/ DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/Portals/lyra")
 install(FILES vendor/lyra/LICENSE.txt DESTINATION "${CMAKE_INSTALL_DATADIR}/Portals/licenses" RENAME lyra-LICENSE.txt)
 install(FILES vendor/lyra/manifest.json vendor/lyra/README.md DESTINATION "${CMAKE_INSTALL_DATADIR}/Portals/lyra")
+install(FILES vendor/monocypher/LICENCE.md
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/Portals/licenses" RENAME monocypher-LICENCE.md)
+install(FILES vendor/monocypher/manifest.json vendor/monocypher/README.md
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/Portals/monocypher")
 install(EXPORT PortalsTargets FILE PortalsTargets.cmake NAMESPACE portals::
   DESTINATION "${PORTALS_INSTALL_CMAKEDIR}"
 )
@@ -661,6 +675,10 @@ if(PORTALS_BUILD_TESTS)
   target_include_directories(portals_secure_string SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
   if(WIN32 AND NOT EMSCRIPTEN)
     target_link_libraries(portals_secure_string PRIVATE Crypt32)
+  elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT EMSCRIPTEN)
+    target_sources(portals_secure_string PRIVATE vendor/monocypher/monocypher.c)
+    target_include_directories(portals_secure_string PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/monocypher")
+    set_target_properties(portals_secure_string PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED YES C_EXTENSIONS OFF)
   elseif(EMSCRIPTEN)
     target_compile_options(portals_secure_string PRIVATE -fwasm-exceptions)
     target_link_options(portals_secure_string PRIVATE -fwasm-exceptions)

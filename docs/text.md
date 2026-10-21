@@ -123,12 +123,18 @@ int main() {
 }
 ```
 
-By default, Windows and Linux use dedicated pages with an always-writable payload
-and two inaccessible exterior guard pages. Without requested Windows idle encryption,
-the live payload contains plaintext between callbacks. Wiping covers its entire
-accessible capacity, including padding and unused tails. The independently requested
-options are mandatory: unsupported guarantees return `UNSUPPORTED`; native setup
-failure returns a typed error without silently weakening the policy.
+By default, Windows and Linux encrypt the entire payload capacity between scoped
+plaintext callbacks. Windows uses `CryptProtectMemory` with `SAME_PROCESS`; Linux
+uses Monocypher XChaCha20-Poly1305 and checks its authentication tag before exposing
+plaintext. Windows does not provide that Linux AEAD integrity contract.
+
+The native payload remains writable and is surrounded by inaccessible guard pages.
+Encrypted Linux storage keeps its key, nonce and tag on a separate writable page
+inside the same guarded reservation. This adds two pages to the reservation; it
+does not reduce the logical `maxBytes` limit. Requested page locking and dump exclusion
+cover both the key page and payload. Wiping covers their full accessible capacities,
+including padding and unused tails. Protection failures return typed errors without
+silently retaining unencrypted data or reducing the requested policy.
 
 | Guarantee | Default | Windows | Linux | WASM / other unsupported platforms |
 | --- | --- | --- | --- | --- |
@@ -136,15 +142,24 @@ failure returns a typed error without silently weakening the policy.
 | Exterior guard pages | Required by `NATIVE_GUARDED` | Applied | Applied | Unsupported |
 | `lockPages` | `false` | Native page lock | Native page lock | Unsupported |
 | `excludeFromDumps` | `false` | Unsupported | Linux core-dump exclusion | Unsupported |
-| `encryptWhileIdle` | `false` | `CryptProtectMemory`, `SAME_PROCESS` | Unsupported | Unsupported |
+| `encryptWhileIdle` | `true` | `CryptProtectMemory`, `SAME_PROCESS` | Monocypher XChaCha20-Poly1305 | Unsupported |
 
 On WASM, default creation returns `UNSUPPORTED`, including for empty input. To accept
 wiping alone explicitly, pass `SecureStringOptions` with
-`storage = SecureStringStorage::WIPE_ONLY` to `create`; this policy uses heap or
-linear-memory storage and rejects lock, dump and encryption requests on every platform.
+`storage = SecureStringStorage::WIPE_ONLY` and `encryptWhileIdle = false` to `create`;
+this policy uses heap or linear-memory storage and rejects lock, dump and encryption
+requests on every platform. Setting `encryptWhileIdle = false` with native storage
+also explicitly selects weaker plaintext-at-rest storage.
 `capabilities()` reports guarantees actually applied. These mechanisms do not protect
 against a debugger or ArtMoney with process access, hostile code in the process,
 the terminal host, keyloggers, live plaintext access or external copies. Length remains visible.
+
+Linux obtains keys and fresh nonces from the operating system using nonblocking
+`getrandom`, with bounded retries. Unavailable entropy is an error, never a reason
+to use a predictable key, reuse a nonce or continue without encryption. The small
+vendored dependency is compiled into `portals::core`; an installed consumer needs
+no extra crypto headers, library installation or network access. Its BSD license
+and pinned provenance accompany the SDK.
 
 `withPlaintext` owns a copy or move of its callable and holds storage alive through
 the callback. A `SecretView` exposes explicit `data()` and `size()`; it expires when
