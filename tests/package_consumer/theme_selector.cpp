@@ -18,7 +18,7 @@ bool callbackFailure() {
   ui::SceneOptions runner;
   runner.clock = terminal.clock();
   ui::ThemeSelectionRef themes;
-  ui::ThemeSelectorRef selector;
+  ui::Ref<ThemeSelector> selector;
   ui::Ref<Dialog> view;
   std::size_t callbacks{}, reports{};
   bool closedBeforeQuit{}, reportPreserved{};
@@ -78,8 +78,7 @@ int main() try {
                                    2000, {80, 24});
   ui::SceneOptions runner;
   runner.clock = terminal.clock();
-  ui::ThemeSelectionRef themes;
-  ui::ThemeSelectorRef selector;
+  ui::Ref<ThemeSelector> selector;
   std::size_t factories{};
   std::size_t callbacks{};
   ui::ThemeSelectorOptions options;
@@ -90,26 +89,25 @@ int main() try {
     ++callbacks;
     return {};
   };
-  auto scene = ui::scene(ui::overlayHost(ui::button("Themes",
-                                                    [selector] {
-                                                      return selector.open();
-                                                    }),
-                                         ui::themeSelector(selector, themes, options)),
-                         runner);
-  // clang-format off
-  scene
-    | ui::themeSelection(themes, {{"nord", "Nord 🙂é界",
-                                 [&] {
-                                   ++factories;
-                                   return nordTheme();
-                                 }},
-                                {"latte", "Latte", catppuccinLatteTheme}})
-    | ui::onKey("F10", ui::quit);
-  // clang-format on
-  const auto ran = scene.run(terminal);
+  const auto result = [&] {
+    return ui::scene(runner,
+                     ui::button("Themes",
+                                [selector] {
+                                  return selector.open();
+                                }),
+                     ui::themeSelector(selector,
+                                       {{"nord", "Nord 🙂é界",
+                                         [&] {
+                                           ++factories;
+                                           return nordTheme();
+                                         }},
+                                        {"latte", "Latte", catppuccinLatteTheme}},
+                                       options)) |
+           ui::onKey("F10", ui::quit);
+  } | ui::runApp(terminal);
   const auto applied = selector.lastApply();
   const auto closed = selector.open();
-  if (!ran || !terminal.closed || factories != 2 || callbacks != 1 || !applied || !*applied ||
+  if (result != 0 || !terminal.closed || factories != 2 || callbacks != 1 || !applied || !*applied ||
       (*applied)->committedId != "nord" || (*applied)->callbackError || (*applied)->closeError ||
       (*applied)->closeDisposition != ui::ThemeSelectorCloseDisposition::CLOSED || closed) {
     std::cerr << "installed theme selector routing/result/cleanup contract failed\n";

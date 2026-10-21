@@ -601,10 +601,42 @@ rejected. Removing the mounted widget leaves a stale checked identity, not a
 live owning pointer. `Application`, `ManagedScene` and mutable widget operations
 keep their UI-thread contracts.
 
-`ui::Ref<T>` shares the same publication transaction and low-level `node()`
+For widgets, `ui::Ref<T>` shares the same publication transaction and low-level `node()`
 observation. It adds [fluent text properties](text-property.md) for control
 captions and LineEdit drafts, including owning read-only concatenation. The
 `NodeRef<T>` interface remains available for other checked tree access.
+
+Composite views use the same declaration syntax, while keeping their existing
+commands rather than inventing widget operations:
+
+| Role | Declaration | Bind with | Commands |
+|---|---|---|---|
+| Button / editor | `ui::Ref<Button>`, `ui::Ref<LineEdit>` | `ui::button`, `ui::lineEdit` | Text, focus and the control's operations |
+| Dialog | `ui::Ref<Dialog>` | `ui::dialog` | `open()`, `dismiss()` |
+| Help view | `ui::Ref<HelpView>` | `ui::helpView` | Checked `open()`, `close()` |
+| Choice dialog | `ui::Ref<MessageDialog>` | `ui::messageBox`, `ui::confirmDialog`, `ui::unsavedChangesDialog` | `open(callback)`, `cancel()`, `lastResult()`, `receive(context)` |
+| Theme selector | `ui::Ref<ThemeSelector>` | `ui::themeSelector` | Checked `open()`, `apply()`, `cancel()`, `closeKeepingPreview()`, `lastApply()` |
+| Notification surface | `ui::Ref<Overlay>` | `ui::notifications` | Observe the actual surface node |
+
+The names above assume `using namespace portals`. Pass the reference as the first
+factory argument. `MessageDialog` and `ThemeSelector` name the existing composite
+facades: the new references share their observations and add no second slot or
+owner. Their old handles, `ui::MessageBox` and `ui::ThemeSelectorRef`, remain
+supported. Copies observe the same identity; moving transfers the observation.
+Creation has the same fallible cold-handle allocation as before.
+`MessageDialog` avoids the Win32 `MessageBox` macro; including Windows headers
+does not change the underlying facade's class name.
+
+The `MessageDialog` and `ThemeSelector` references do not provide `node()`,
+`text()` or `focus()`. For explicit access to their actual dialog widget, attach a separate `ui::Ref<Dialog>` with
+the recipe's `.reference(view)`. Existing checked commands remain checked:
+return a selector's result from an action to propagate its failure through the
+normal runner boundary. `lastApply()` retains its documented owning result after
+view retirement; it does not keep a scene alive.
+
+`ThemeSelectionRef` observes a theme model, and `NotificationCenter` is a posting
+service. They retain their distinct roles. `ToastMessage` describes one message;
+posting returns its existing receipt, not a widget reference.
 
 ## Provider integration
 
@@ -769,7 +801,7 @@ See the [text and column guide](compact-examples.md) for checked column construc
 
 ## Compact references, identities and actions
 
-A `ui::Ref<T>` can be the first factory argument. It shares the same complete-mount
+A widget `ui::Ref<T>` can be the first factory argument. It shares the same complete-mount
 publication as `.reference(ref)`. Built-in controls, `custom`, row/column/grid and
 virtual view factories support this form, including positional options
 and named view configurations. References still observe objects owned by the

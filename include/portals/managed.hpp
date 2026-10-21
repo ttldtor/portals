@@ -1980,7 +1980,7 @@ private:
                                                          detail::ThemeSelectionCommand command, std::string_view id,
                                                          std::source_location origin,
                                                          std::optional<std::string_view> expectedId = std::nullopt);
-  std::expected<void, ManagedError> attachThemeSelector();
+  std::expected<void, ManagedError> attachThemeSelector(const std::optional<ManagedError> *setupFailure = nullptr);
   std::expected<void, ManagedError> prepareThemeSelector();
   void retireThemeSelector() noexcept;
   std::expected<void, ManagedError> changeThemeSelector(const std::shared_ptr<detail::ThemeSelectorRecord> &record,

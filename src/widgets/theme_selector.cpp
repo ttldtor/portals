@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
-#include "theme_selector_state.hpp"
 #include "action_state.hpp"
+#include "theme_selector_state.hpp"
 
 #include <portals/ui.hpp>
 
@@ -50,9 +50,8 @@ template <class F> struct OnExit {
 } // namespace
 
 namespace ui::detail {
-std::expected<void, ManagedError> ThemeSelectorAccess::command(const std::shared_ptr<ThemeSelectorTarget> &target,
-                                                               SelectorCommand command, std::size_t index,
-                                                               std::source_location origin) {
+std::expected<std::shared_ptr<portals::detail::ThemeSelectorRecord>, ManagedError>
+ThemeSelectorAccess::enter(const std::shared_ptr<ThemeSelectorTarget> &target, std::source_location origin) {
   if (!target) {
     return std::unexpected(selectorError({}, TreeError::CLOSED, origin));
   }
@@ -81,7 +80,19 @@ std::expected<void, ManagedError> ThemeSelectorAccess::command(const std::shared
   if (!allowed) {
     return std::unexpected(allowed.error());
   }
-  return scene.changeThemeSelector(record, command, index, origin);
+  return record;
+}
+
+std::expected<void, ManagedError> ThemeSelectorAccess::command(const std::shared_ptr<ThemeSelectorTarget> &target,
+                                                               SelectorCommand command, std::size_t index,
+                                                               std::source_location origin) {
+  auto record = enter(target, origin);
+
+  if (!record) {
+    return std::unexpected(record.error());
+  }
+
+  return target->scene->changeThemeSelector(*record, command, index, origin);
 }
 
 void ThemeSelectorAccess::interactive(const std::shared_ptr<ThemeSelectorTarget> &target, SelectorCommand command,
@@ -331,6 +342,75 @@ Description<Dialog> ThemeSelectorAccess::describe(ThemeSelectorRef reference, Th
     return mounted;
   });
 }
+
+Description<Dialog> ThemeSelectorAccess::describeDefault(ThemeSelectorRef reference,
+                                                         std::span<const ThemeChoice> choices,
+                                                         const ThemeSelectionOptions &selection,
+                                                         const std::optional<std::string> &initialId,
+                                                         ThemeSelectorOptions options) {
+  auto catalog = std::make_shared<ThemeSelectorCatalog>();
+
+  catalog->choices.assign(choices.begin(), choices.end());
+  catalog->selection = selection;
+  catalog->initialId = initialId;
+
+  return Access::cold<Dialog>([reference = std::move(reference), catalog = std::move(catalog),
+                               options](ManagedScene &scene, Node<Widget> parent,
+                                        MountContext &context) mutable -> std::expected<Node<Dialog>, ManagedError> {
+    const auto origin = std::source_location::current();
+    const auto target = reference.target_;
+
+    if (!target) {
+      return std::unexpected(selectorError(parent.id(), TreeError::CLOSED, origin));
+    }
+    if (target->owner != std::this_thread::get_id()) {
+      return std::unexpected(selectorError(parent.id(), TreeError::WRONG_THREAD, origin));
+    }
+
+    scene.retireThemeSelector();
+
+    if (target->published || scene.themeSelector_) {
+      return std::unexpected(selectorError(parent.id(), TreeError::INVALID_ARGUMENT, origin));
+    }
+
+    ThemeSelectionRef model;
+    auto installed = scene.installThemeSelection(model, catalog->choices, catalog->selection);
+
+    if (!installed) {
+      return std::unexpected(installed.error());
+    }
+
+    const auto lifetime = std::weak_ptr<const void>(scene.lifetime_);
+    const auto ownedModel = scene.themeSelection_;
+    const auto releaseModel = [&scene, lifetime, ownedModel] {
+      // This synchronous transaction owns only the just-installed, still-unpreviewed model.
+      if (!lifetime.expired() && scene.themeSelection_ == ownedModel) {
+        scene.themeSelection_.reset();
+      }
+    };
+    OnExit admission{releaseModel};
+
+    context.rollback.emplace_back(releaseModel);
+    admission.enabled = false;
+
+    auto recipe = describe(reference, model, options);
+    auto mounted = Access::mount(std::move(recipe), scene, parent, context);
+
+    if (!mounted) {
+      return mounted;
+    }
+
+    scene.themeSelector_->initialId = catalog->initialId;
+
+    return mounted;
+  });
+}
+
+Description<Dialog> defaultThemeSelector(ThemeSelectorRef reference, std::span<const ThemeChoice> choices,
+                                         const ThemeSelectionOptions &selection,
+                                         const std::optional<std::string> &initialId, ThemeSelectorOptions options) {
+  return ThemeSelectorAccess::describeDefault(std::move(reference), choices, selection, initialId, std::move(options));
+}
 } // namespace ui::detail
 
 void ManagedScene::retireThemeSelector() noexcept {
@@ -357,7 +437,7 @@ void ManagedScene::retireThemeSelector() noexcept {
   record->callback.reset();
 }
 
-std::expected<void, ManagedError> ManagedScene::attachThemeSelector() {
+std::expected<void, ManagedError> ManagedScene::attachThemeSelector(const std::optional<ManagedError> *setupFailure) {
   retireThemeSelector();
   const auto record = themeSelector_;
   if (!record || record->attached) {
@@ -374,6 +454,51 @@ std::expected<void, ManagedError> ManagedScene::attachThemeSelector() {
       record->target->published || !themeSelection_ ||
       (themeSelection_->selector.lock() && !themeSelection_->selector.lock()->retired)) {
     return std::unexpected(selectorError(record->dialog->root.id(), TreeError::INVALID_ARGUMENT, origin));
+  }
+  if (record->initialId) {
+    // Catalog normalization precedes mounting; the first theme factory follows all Scene configuration.
+    const auto validateOwner = [&]() -> std::expected<void, ManagedError> {
+      if (setupFailure && *setupFailure) {
+        return std::unexpected(**setupFailure);
+      }
+      if (lifetime.expired()) {
+        return std::unexpected(selectorError(record->dialog->root.id(), TreeError::CLOSED, origin));
+      }
+
+      auto live = boundary(ManagedPhase::BIND, record->dialog->root);
+
+      if (!live || themeSelector_ != record || record->target->published ||
+          themeSelection_ != modelTarget->record.lock()) {
+        return !live ? live
+                     : std::unexpected(selectorError(record->dialog->root.id(), TreeError::INVALID_ARGUMENT, origin));
+      }
+
+      return {};
+    };
+    auto previewed = record->model.preview(*record->initialId, origin);
+
+    if (!previewed) {
+      return previewed;
+    }
+    auto live = validateOwner();
+
+    if (!live) {
+      return live;
+    }
+
+    auto committed = record->model.commit(origin);
+
+    if (!committed) {
+      return committed;
+    }
+
+    live = validateOwner();
+
+    if (!live) {
+      return live;
+    }
+
+    record->initialId.reset();
   }
   try {
     const auto model = themeSelection_;
@@ -449,6 +574,9 @@ std::expected<void, ManagedError> ManagedScene::attachThemeSelector() {
     }
     allowed = boundary(ManagedPhase::BIND, record->dialog->root);
     const auto other = model->selector.lock();
+    if (setupFailure && *setupFailure) {
+      return std::unexpected(**setupFailure);
+    }
     if (!allowed || themeSelector_ != record || record->target->published || modelTarget->scene != this ||
         modelTarget->record.lock() != model || themeSelection_ != model || (other && !other->retired)) {
       return !allowed ? allowed
@@ -690,6 +818,36 @@ ThemeSelectorRef::ThemeSelectorRef() : target_(std::make_shared<detail::ThemeSel
 
 std::expected<void, ManagedError> ThemeSelectorRef::open(std::source_location origin) const {
   return detail::ThemeSelectorAccess::command(target_, portals::detail::ThemeSelectorCommand::OPEN, 0, origin);
+}
+
+std::expected<void, ManagedError> ThemeSelectorRef::preview(std::string_view id, std::source_location origin) const {
+  auto record = detail::ThemeSelectorAccess::enter(target_, origin);
+
+  if (!record) {
+    return std::unexpected(record.error());
+  }
+
+  return (*record)->model.preview(id, origin);
+}
+
+std::expected<void, ManagedError> ThemeSelectorRef::commit(std::source_location origin) const {
+  auto record = detail::ThemeSelectorAccess::enter(target_, origin);
+
+  if (!record) {
+    return std::unexpected(record.error());
+  }
+
+  return (*record)->model.commit(origin);
+}
+
+std::expected<std::shared_ptr<const ThemeSelectionSnapshot>, ManagedError> ThemeSelectorRef::snapshot() const {
+  auto record = detail::ThemeSelectorAccess::enter(target_, std::source_location::current());
+
+  if (!record) {
+    return std::unexpected(record.error());
+  }
+
+  return (*record)->model.snapshot();
 }
 
 std::expected<void, ManagedError> ThemeSelectorRef::apply(std::source_location origin) const {

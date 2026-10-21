@@ -5,11 +5,36 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+### Added
+
+- Theme selectors accept a catalog directly and own their existing selection model;
+  an optional initial choice is applied after scene configuration. The same
+  reference provides checked programmatic preview, commit and snapshot access.
+
+- Scenes can declare dialog layers beside their ordinary body and create one overlay
+  host automatically, while retaining explicit host configuration.
+
+- Composite message dialogs and theme selectors support the canonical `ui::Ref<T>`
+  syntax while retaining their existing handles, commands and observation lifetimes.
+- Notification surfaces accept an observing `ui::Ref<Overlay>` as the first factory argument.
+
+- `ui::runApp` accepts a factory returning an owning scene or a checked scene result,
+  including pipe and command-line forms. Command-line help and errors are handled
+  before invoking the factory or opening the terminal.
+
 ### Changed
+
+- Native gallery, dashboard and custom-widget examples create their scenes inside
+  the application error boundary after command-line parsing. Gallery and dashboard
+  use the selector's owned model and automatic dialog host; dashboard callbacks
+  retain their presentation data when the scene is moved out of its helper.
 
 - Online documentation now follows `main` independently of releases, with a development marker, source revision and UTC build date. Release HTML archives retain their versioned documentation.
 
 ### Fixed
+
+- Message-dialog declarations preserve the caller's Win32 `MessageBox` macro and use consistent class names regardless of Windows header order.
+- Unicode glyph declarations preserve the caller's Win32 `UNICODE` macro.
 
 - Standard managed text controls now match their natural type selectors while preserving existing `Control` rules; explicit low-level targets retain exact matching unless they opt in. Rebuild the SDK and consumers together because `StyleTarget` gains a compatibility flag.
 - Cold text lists retain their IDs, classes and custom type during preparation, including named references resolved before startup.

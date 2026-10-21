@@ -127,6 +127,43 @@ static_assert(HasText<ui::Ref<Button>>);
 static_assert(HasText<ui::Ref<CheckBox>>);
 static_assert(HasText<ui::Ref<LineEdit>>);
 static_assert(!HasText<ui::Ref<Widget>>);
+static_assert(!HasText<ui::Ref<MessageDialog>>);
+static_assert(!HasText<ui::Ref<ThemeSelector>>);
+
+template <class T>
+concept HasNode = requires(T reference) { reference.node(); };
+
+template <class T>
+concept HasFocus = requires(T reference) { reference.focus(); };
+
+template <class T>
+concept MessageOwner = requires(ui::Ref<MessageDialog> box, T owner) {
+  box.open(owner, [] {
+  });
+};
+
+static_assert(!HasNode<ui::Ref<MessageDialog>>);
+static_assert(!HasNode<ui::Ref<ThemeSelector>>);
+static_assert(!HasFocus<ui::Ref<MessageDialog>>);
+static_assert(!HasFocus<ui::Ref<ThemeSelector>>);
+static_assert(MessageOwner<ui::Ref<Dialog>>);
+static_assert(MessageOwner<ui::Ref<Button>>);
+static_assert(!MessageOwner<ui::Ref<MessageDialog>>);
+static_assert(!MessageOwner<ui::Ref<ThemeSelector>>);
+static_assert(std::is_nothrow_constructible_v<ui::Ref<MessageDialog>, ui::MessageBox>);
+static_assert(std::is_nothrow_constructible_v<ui::Ref<ThemeSelector>, ui::ThemeSelectorRef>);
+static_assert(!std::is_convertible_v<ui::MessageBox, ui::Ref<MessageDialog>>);
+static_assert(!std::is_convertible_v<ui::ThemeSelectorRef, ui::Ref<ThemeSelector>>);
+
+namespace namespaceCompatibility {
+using namespace portals;
+using namespace portals::ui;
+
+static_assert(std::same_as<MessageDialog, portals::ui::MessageBox>);
+static_assert(std::same_as<ThemeSelector, portals::ui::ThemeSelectorRef>);
+static_assert(std::same_as<Ref<MessageDialog>, portals::ui::Ref<portals::MessageDialog>>);
+} // namespace namespaceCompatibility
+
 static_assert(std::same_as<decltype(std::declval<ui::TextProperty>() += "x"), ui::TextProperty>);
 } // namespace
 

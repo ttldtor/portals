@@ -8,6 +8,18 @@ receive the language requirement and complete static link chain. No network
 download or system utf8proc installation is needed. On UNIX the package finds
 its platform Threads dependency.
 
+## Windows header interoperation
+
+Portals does not require Windows headers in application code. If your application
+also includes `windows.h`, define `NOMINMAX` before that include. Message-dialog
+and glyph declarations preserve the caller's `MessageBox` and `UNICODE` macros.
+Use `ui::Ref<MessageDialog>` for the portable composite reference; legacy qualified
+`ui::MessageBox` remains available with either Windows character mode.
+
+The legacy explicit spelling `PrimitiveGlyphs::UNICODE` still conflicts with an
+active Win32 `UNICODE` macro at the call site. Default glyph options already
+select Unicode with the documented ASCII fallback.
+
 ## Release with Ninja
 
 Run from an x64 MSVC developer PowerShell on Windows. On Linux, use the same

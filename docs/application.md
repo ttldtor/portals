@@ -6,26 +6,7 @@ The [scene](glossary.md#glossary-scene) facade in [`<portals/ui.hpp>`](../includ
 lets you create controls, attach actions and run a native terminal application.
 **Apply** changes the label. **Exit** or F10 closes the application.
 
-```cpp
-#include <portals/ui.hpp>
-
-int main() {
-  using namespace portals;
-
-  ui::Ref<Label> status;
-  ui::Ref<Button> exit;
-
-  return ui::scene(ui::vbox(
-    ui::label(status, "Ready"),
-    ui::button("Apply", [status] {
-      status.text() = "Applied";
-    }),
-    ui::button(exit, "Exit")))
-    | ui::onClick(exit, ui::quit)
-    | ui::onKey("F10", ui::quit)
-    | ui::runApp();
-}
-```
+\include{lineno} guide_application.cpp
 
 This complete [source](examples/guide_application.cpp) links to `portals::core`;
 see [package setup](package.md). The scene mounts its description when run,
@@ -42,6 +23,49 @@ wait without blocking input. [Diagnostics](diagnostics.md) covers custom error r
 
 ## Run configuration
 
+### Include scene construction in the error boundary
+
+Pass a factory to `ui::runApp` when creating references, application data or the
+scene can fail. The factory returns an owning scene; its local references are
+captured by value in actions. This complete program needs no outer `try`/`catch`:
+
+\include{lineno} guide_application_factory.cpp
+
+Full [source](examples/guide_application_factory.cpp). The equivalent function
+form is `ui::runApp(factory)`. The factory runs once inside the checked boundary;
+it may also return `std::expected<ui::Scene, ManagedError>`. Existing factories
+returning a description remain supported. Allocation failures become `NO_MEMORY`,
+and other factory exceptions become `CALLBACK_FAILED`.
+
+Return a new cold scene on the current UI thread. An already prepared, unrun
+scene is also accepted and reuses its preparation. Completed, closed and
+moved-from results are rejected before terminal access; a retained prior failure
+is preserved, otherwise the rejection is `CLOSED`. Existing move restrictions
+for active or foreign-thread scenes still apply.
+
+If a factory abandons a local scene whose shutdown fails, the runner retains
+a cleanup cause in the existing error envelope. A thrown or returned primary error keeps its cleanup cause;
+additional causes beyond the single cleanup slot are counted in the final
+report. An otherwise successful factory with a failed abandoned scene does not
+open the terminal.
+
+A scene returned by the factory keeps its own policies and error reporter.
+An explicit `RunAppOptions::report` overrides that reporter and also receives
+failures before a scene exists. The runner first takes an owning copy of this
+explicit reporter; if that copy fails, stderr receives the failure and the factory
+does not run. Cleanup precedes the final runtime report. Arguments and lambda
+captures constructed before entering `runApp` remain outside its boundary.
+
+For command-line applications, use
+`factory | ui::runApp(argc, argv, ui::lyra::cli(lyraCli))` with
+[`<portals/ui_lyra.hpp>`](../include/portals/ui_lyra.hpp). Parsing happens first:
+help returns 0 and invalid arguments return 2 without invoking the factory or
+opening the terminal. A construction or runtime failure returns 1. Keep option
+storage alive until this synchronous call returns; construct controls from the
+parsed options inside the factory. See [command-line parsing](cli.md).
+
+### Application policies
+
 `ui::applicationOptions(...)` supplies `ApplicationOptions` before application
 creation. You can configure cadence, input/output bounds and native screen policy there.
 The native default uses the alternate screen and restores the caller's screen
@@ -53,6 +77,13 @@ access to `Application`; `ui::configure(...)` runs work after mounting.
 `scene.onStop(...)` must be registered before preparation. The callback must
 cancel and join external producers and release services borrowing the application
 before its managed nodes retire.
+Data borrowed by control callbacks must remain alive until those controls retire.
+An installed callback can retain a shared owner, or the application can keep an
+owner outside the scene. A capture in the scene recipe alone is insufficient:
+successful preparation releases the recipe and pending configuration callbacks.
+Capturing an owner only in `onStop` is also insufficient because that callback
+finishes before the managed nodes are destroyed. Avoid owning cycles between
+presentation data and external producers.
 Callbacks must not destroy or reenter the scene or runner.
 
 ## Custom scenes and transports

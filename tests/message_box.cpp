@@ -4,9 +4,68 @@
 #include "support/message_fixture.hpp"
 
 namespace {
+void canonicalReferences() {
+  ui::MessageBox legacy;
+  const auto before = allocationTest::count;
+  ui::Ref<MessageDialog> reference(legacy);
+  auto copied = reference;
+  auto moved = std::move(copied);
+  ui::MessageBox oldCopy = reference;
+
+  check(allocationTest::count == before, "canonical adapters reuse the legacy slot without allocating");
+  check(treeCause(copied.lastResult().error(), TreeError::CLOSED), "moved-from composite reference is cold");
+  check(treeCause(moved.lastResult().error(), TreeError::CLOSED), "copied cold references remain unpublished");
+
+  Fixture f;
+  ui::Ref<Dialog> view;
+  ui::MessageOptions invalid;
+
+  invalid.maxBodyLines = 0;
+
+  const auto rejected = ui::mount(
+    *f.scene,
+    ui::overlayHost(ui::label("Body"), ui::confirmDialog(reference, "Confirm", "Retry after rejected mount", invalid)));
+
+  check(!rejected && treeCause(rejected.error(), TreeError::INVALID_ARGUMENT), "partial canonical mount rejected");
+  check(treeCause(reference.lastResult().error(), TreeError::CLOSED), "failed mount never publishes adapter identity");
+  take(ui::mount(*f.scene,
+                 ui::overlayHost(ui::label("Body"),
+                                 ui::confirmDialog(reference, "Confirm", "Shared legacy identity").reference(view))));
+
+  std::optional<ManagedError> foreign;
+  std::thread worker([&] {
+    const auto result = moved.lastResult();
+
+    if (!result) {
+      foreign = result.error();
+    }
+  });
+
+  worker.join();
+  check(foreign && treeCause(*foreign, TreeError::WRONG_THREAD), "canonical operations retain immutable UI affinity");
+
+  int delivered{};
+
+  command(legacy.open([&, reference](const MessageResult &result) {
+    ++delivered;
+    check(result && *result == MessageChoice::CONFIRM, "canonical callback keeps its exact owning domain result");
+    take(f.scene->remove(view.node()));
+    check(treeCause(reference.lastResult().error(), TreeError::STALE_NODE), "callback self-removal retires the facade");
+  }));
+  choose(f, view.node(), "Continue");
+
+  const auto result = answer(moved, MessageChoice::CONFIRM);
+
+  check(take(oldCopy.lastResult()) == result, "legacy and canonical copies observe the same result identity");
+  flushMessages(f);
+  check(delivered == 1 && result->has_value() && **result == MessageChoice::CONFIRM,
+        "callback captures and immutable result survive self-removal without duplicate delivery");
+  check(treeCause(reference.lastResult().error(), TreeError::STALE_NODE), "retired adapter never retargets");
+}
+
 void presets() {
   Fixture f;
-  ui::MessageBox information, confirm, unsaved;
+  ui::Ref<MessageDialog> information, confirm, unsaved;
   ui::Ref<Dialog> one, two, three;
   ui::Ref<Button> opener;
   take(ui::mount(*f.scene, ui::overlayHost(
@@ -57,6 +116,32 @@ void presets() {
   command(information.cancel());
   check(take(information.lastResult()) == cancelled, "cancel cannot overwrite latch");
   flushMessages(f);
+}
+
+void automaticScenePartialMount() {
+  ui::Ref<Label> body;
+  ui::Ref<MessageDialog> first, second;
+  ui::Ref<Dialog> firstView, secondView;
+  ui::MessageOptions invalid;
+  int stopped{};
+
+  invalid.maxBodyLines = 0;
+
+  auto owner = ui::scene(ui::label(body, "Body"), ui::confirmDialog(first, "First", "Ready").reference(firstView),
+                         ui::confirmDialog(second, "Second", "Rejected", invalid).reference(secondView));
+
+  owner.onStop([&] {
+    ++stopped;
+  });
+
+  const auto result = owner.prepareChecked();
+
+  check(!result && treeCause(result.error(), TreeError::INVALID_ARGUMENT), "automatic message mount preserves failure");
+  check(body.node() == Node<Label>{} && firstView.node() == Node<Dialog>{} && secondView.node() == Node<Dialog>{},
+        "later message failure publishes no earlier body or view references");
+  check(treeCause(first.lastResult().error(), TreeError::CLOSED) &&
+          treeCause(second.lastResult().error(), TreeError::CLOSED) && stopped == 1,
+        "partial automatic message mount retires both unpublished facades before one scene stop completes");
 }
 
 void validation() {
@@ -149,26 +234,26 @@ void nativeRunner(bool failure) {
   example::ReplayTerminal terminal({{10, "\r", {}}, {100, "\r", {}}}, 1000, {20, 8});
   ui::SceneOptions options;
   options.clock = terminal.clock();
-  ui::MessageBox box;
+  ui::Ref<MessageDialog> box;
   int callbacks{}, notifications{}, reports{}, dismissals{};
-  auto scene =
-    ui::scene(ui::overlayHost(ui::button("Open",
-                                         [box, &callbacks] {
-                                           box.open([&callbacks](const MessageResult &result) {
-                                             check(result && *result == MessageChoice::CANCEL,
-                                                   "native safe default is actual focused Cancel");
-                                             ++callbacks;
-                                             ui::quit();
-                                           });
-                                         }),
-                              ui::confirmDialog(box, "Confirm", "Complete native runner")
-                                .onDismiss([&](DialogDismissReason) -> std::expected<void, TreeError> {
-                                  ++dismissals;
-                                  return failure
-                                           ? std::expected<void, TreeError>(std::unexpected(TreeError::CALLBACK_FAILED))
-                                           : std::expected<void, TreeError>{};
-                                })),
-              options);
+  std::shared_ptr<const MessageResult> retained;
+  auto scene = ui::scene(
+    options,
+    ui::button("Open",
+               [box, &callbacks, &retained] {
+                 box.open([&callbacks, box, &retained](const MessageResult &result) {
+                   check(result && *result == MessageChoice::CANCEL, "native safe default is actual focused Cancel");
+                   retained = answer(box, MessageChoice::CANCEL);
+                   ++callbacks;
+                   ui::quit();
+                 });
+               }),
+    ui::confirmDialog(box, "Confirm", "Complete native runner")
+      .onDismiss([&](DialogDismissReason) -> std::expected<void, TreeError> {
+        ++dismissals;
+        return failure ? std::expected<void, TreeError>(std::unexpected(TreeError::CALLBACK_FAILED))
+                       : std::expected<void, TreeError>{};
+      }));
   scene.onError([&](const ManagedDiagnostic &diagnostic) {
     check(failure && treeCause(diagnostic.error, TreeError::CALLBACK_FAILED), "native exact technical failure");
     ++notifications;
@@ -182,6 +267,8 @@ void nativeRunner(bool failure) {
   check(terminal.closed && !terminal.output.empty() && dismissals == 1, "native paint and exact one dismissal");
   check(callbacks == (failure ? 0 : 1) && notifications == (failure ? 1 : 0) && reports == (failure ? 1 : 0),
         "technical failure is diagnosed once before callback admission and uses STOP");
+  check(failure ? !retained : retained && retained->has_value() && **retained == MessageChoice::CANCEL,
+        "automatic scene callback observes exact owning lastResult which survives shutdown");
 }
 
 struct MessagePaintSink : PaintContext {
@@ -294,6 +381,8 @@ void smallScreens() {
 } // namespace
 
 int main() try {
+  canonicalReferences();
+  automaticScenePartialMount();
   presets();
   validation();
   wrapping();

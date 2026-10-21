@@ -5,6 +5,10 @@
 #include <portals/async.hpp>
 #include <portals/ui_ref.hpp>
 
+// Keep the exported facade name stable regardless of Windows header order, then restore the caller's macro.
+#pragma push_macro("MessageBox")
+#undef MessageBox
+
 namespace portals {
 /** @brief A requested application action; SAVE does not confirm that data was written. */
 enum class MessageChoice {
@@ -103,7 +107,7 @@ public:
    * @param origin Public command site. @return Checked admission, preserving old result on failure.
    */
   template <class T, class Callback>
-    requires portals::detail::ManagedAction<Callback, MessageResult>
+    requires std::derived_from<T, Widget> && portals::detail::ManagedAction<Callback, MessageResult>
   DialogCommandResult open(const Ref<T> &owner, Callback callback,
                            std::source_location origin = std::source_location::current()) const {
     return openTarget(detail::MessageAccess::target(owner), std::move(callback), origin);
@@ -127,6 +131,7 @@ public:
    * @return Checked owning reservation; owner removal can deliver a full error to an independent receiver.
    */
   template <class T>
+    requires std::derived_from<T, Widget>
   std::expected<AsyncReceive<MessageResult>, ManagedError> receive(const UiAsyncContext &context,
                                                                    const Ref<T> &owner) const {
     return receiveTarget(context, detail::MessageAccess::target(owner));
@@ -174,6 +179,30 @@ private:
   std::shared_ptr<detail::MessageTarget> target_;
 };
 
+#ifdef _WIN32
+/** @brief Preserve qualified legacy ui::MessageBox use when Win32 selects its ANSI spelling. */
+using MessageBoxA = MessageBox;
+/** @brief Preserve qualified legacy ui::MessageBox use when Win32 selects its Unicode spelling. */
+using MessageBoxW = MessageBox;
+#endif
+
+/** @brief Canonical typed observation of the existing reusable message-dialog facade.
+ * Copies and moves share/transfer the legacy weak identity without adding a slot or retaining the scene.
+ * All commands preserve MessageBox's checked results and report-once provenance. This composite reference
+ * has no generic node(), text() or focus(); bind a separate Ref<Dialog> to observe its real view.
+ */
+template <> class Ref<MessageBox> : public MessageBox {
+public:
+  /** @brief Create the existing cold observing slot; construction may throw std::bad_alloc. */
+  Ref() = default;
+
+  /** @param reference Existing weak facade, copied from lvalues or moved from rvalues without allocating.
+   * The new observation retains the same original identity and affinity, including after retirement.
+   */
+  explicit Ref(MessageBox reference) noexcept : MessageBox(std::move(reference)) {
+  }
+};
+
 /** @param handle Cold observing handle. @param title Owning localizable heading.
  * @param explanation Owning immutable wrapped explanation. @param options Modal settings.
  * @return Exact initially hidden Dialog description with ACKNOWLEDGE.
@@ -205,4 +234,11 @@ Description<Dialog> confirmDialog(MessageBox handle, std::string_view title, std
 Description<Dialog> unsavedChangesDialog(MessageBox handle, std::string_view title, std::string_view explanation,
                                          MessageOptions options = {});
 } // namespace ui
+
+/** @brief Canonical composite type for ui::Ref<MessageDialog>; exactly the existing ui::MessageBox facade.
+ * The name avoids the Win32 MessageBox macro. Existing qualified handles and factory signatures remain valid.
+ */
+using MessageDialog = ui::MessageBox;
 } // namespace portals
+
+#pragma pop_macro("MessageBox")

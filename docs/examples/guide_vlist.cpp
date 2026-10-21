@@ -1,6 +1,7 @@
-#include <portals/ui.hpp>
 #include <array>
+#include <portals/ui.hpp>
 #include <stdexcept>
+#include <utility>
 
 using namespace portals;
 
@@ -10,14 +11,11 @@ public:
   }
 
   ModelRows<std::string> read(RowRange range) const override {
-    return {RangeState::READY,
-            std::span(rows_).subspan(static_cast<std::size_t>(range.first), range.count), {}};
+    return {RangeState::READY, std::span(rows_).subspan(static_cast<std::size_t>(range.first), range.count), {}};
   }
 
 private:
-  const std::array<ModelRow<std::string>, 3> rows_{{
-    {{1, 1}, "Ada"}, {{2, 1}, "Grace"}, {{3, 1}, "Margaret"}
-  }};
+  const std::array<ModelRow<std::string>, 3> rows_{{{{1, 1}, "Ada"}, {{2, 1}, "Grace"}, {{3, 1}, "Margaret"}}};
 };
 
 GraphemeText displayText(std::string_view value) {
@@ -31,15 +29,21 @@ GraphemeText displayText(std::string_view value) {
 }
 
 int main() {
-  auto scene = ui::scene([](ManagedScene &owner) {
-    return owner.model<std::string>(std::make_shared<Names>()).transform([](auto model) {
-      return ui::virtualList(model, [](const ModelRow<std::string> &row) {
-        return displayText(row.value);
+  using namespace portals;
+
+  // clang-format off
+  return [] {
+    auto scene = ui::scene([](ManagedScene &owner) {
+      return owner.model<std::string>(std::make_shared<Names>()).transform([](auto model) {
+        return ui::virtualList(model, [](const ModelRow<std::string> &row) {
+          return displayText(row.value);
+        });
       });
     });
-  });
 
-  return scene
-    | ui::onKey("F10", ui::quit)
+    return std::move(scene)
+      | ui::onKey("F10", ui::quit);
+  }
     | ui::runApp();
+  // clang-format on
 }

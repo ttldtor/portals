@@ -24,6 +24,30 @@ modal. A child may consume Escape. The background F10 handler and main Exit butt
 are unavailable while the modal is open. Use Close or an unhandled Escape first;
 F10 exits from the main form through the standard runner and terminal cleanup.
 
+You can declare the ordinary body and its initially closed dialogs together with
+`ui::scene(body, layers...)`. The scene creates one overlay host for those layers.
+An ordinary `ui::scene(body)` keeps its existing composition; it does not add a
+host. Opening and closing reuse the mounted host and dialog controls.
+
+Use `ui::overlayHost(body, layers...)` when you need explicit host options or a
+host reference. Passing that host as the scene body keeps the explicit host;
+additional scene layers use it as well. Dialogs belong in layer arguments rather
+than inside a `ui::vbox` or another ordinary layout.
+
+The same form accepts a lazy body factory taking `ManagedScene&`, optionally
+followed by `Application&`. For advanced runtime settings, put `SceneOptions`
+first: `ui::scene(options, body, layers...)`. The original single-body options
+overloads remain available. The explicit-origin form
+`ui::scene(options, origin, body, layers...)` retains a supplied construction
+site for diagnostics; convenience layer adapters otherwise record their adapter site.
+
+You can pass an existing `ui::resource(...)` recipe in a layer argument when its
+registered factory returns a dialog. The erased root is checked before reference
+publication; an ordinary control in that position fails with `INVALID_ARGUMENT`
+and the attempted composition is retired. Factory side effects retain their
+existing contract. An explicit host hidden inside an erased resource body is not
+the typed root-host override and cannot be combined with extra scene layers.
+
 `ui::overlayHost(body, layers...)` takes one ordinary body and dialog recipes.
 `ui::dialog(reference, title, body, options)` creates one initially closed layer.
 Titles use existing owning text/resource conversion. This C++ composition does

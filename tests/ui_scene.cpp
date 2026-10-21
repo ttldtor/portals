@@ -290,7 +290,7 @@ static_assert(!ui::detail::SceneConfiguration<WrongConfiguration>);
 static_assert(!ui::detail::SceneConfiguration<WrongLegacyComposition>);
 static_assert(!ui::detail::SceneFactory<WrongLegacyComposition>);
 static_assert(!ui::detail::SceneFactory<BorrowedComposition>);
-static_assert(!ProgramEntry<SceneFactory>);
+static_assert(ProgramEntry<SceneFactory>);
 static_assert(!ProgramEntry<WrongProgram>);
 static_assert(!std::is_move_assignable_v<ui::Scene>);
 static_assert(!std::is_copy_constructible_v<ui::Scene>);
@@ -316,6 +316,15 @@ static_assert(PipeExpression<ui::Scene &, RunAppStage>);
 static_assert(PipeExpression<ui::Scene, RunAppStage>);
 static_assert(std::same_as<decltype(std::declval<ui::Scene &>() | std::declval<PrepareStage &>()), ui::Scene &>);
 static_assert(std::same_as<decltype(std::declval<ui::Scene>() | std::declval<PrepareStage>()), ui::Scene>);
+
+template <class Layer>
+concept SceneLayerRecipe = requires(Layer &&layer) { ui::scene(ui::label("Body"), std::forward<Layer>(layer)); };
+
+static_assert(SceneLayerRecipe<ui::Description<Dialog>>);
+static_assert(SceneLayerRecipe<ui::Description<Widget>>);
+static_assert(!SceneLayerRecipe<ui::Description<Label>>);
+static_assert(!SceneLayerRecipe<ui::Description<OverlayHost>>);
+static_assert(!SceneLayerRecipe<ui::Description<Dialog> &>);
 } // namespace
 
 TEST_CASE("lazy scene prepares an ordinary form once without terminal I/O") {
@@ -4929,4 +4938,439 @@ TEST_CASE("CLI preflight sustained OOM reports before terminal acquisition") {
   CHECK(treeCause(*retained->failure, TreeError::WOULD_BLOCK));
   CHECK(terminal.queries == 0);
   CHECK_FALSE(terminal.closed);
+}
+
+TEST_CASE("app factory sink pinning failure reports to stderr before invoking the factory") {
+  StderrCapture capture;
+  ui::RunAppOptions options;
+  int factories{}, reports{};
+
+  options.report = [&](const ui::SceneReport &) {
+    ++reports;
+  };
+  allocationsBeforeFailure = 0;
+  const int status = ui::runApp(
+    [&] {
+      ++factories;
+
+      return ui::scene(ui::label("unreachable"));
+    },
+    options);
+  allocationsBeforeFailure = -1;
+
+  CHECK(status == 1);
+  CHECK(factories == 0);
+  CHECK(reports == 0);
+
+  const auto output = capture.contents();
+
+  CHECK(output.find("NO_MEMORY") != std::string::npos);
+  CHECK(std::count(output.begin(), output.end(), '\n') == 1);
+}
+
+TEST_CASE("app factory owns cold reference allocation failure and pins the pre-owner sink") {
+  for (const bool pipe : {false, true}) {
+    ui::RunAppOptions options;
+    int factories{}, reports{};
+    bool memoryFailure{}, pinned{};
+    auto capture = std::make_shared<int>(42);
+    auto weak = std::weak_ptr(capture);
+
+    options.report = [&, capture](const ui::SceneReport &report) {
+      allocationsBeforeFailure = -1;
+      ++reports;
+      options.report = {};
+      pinned = !weak.expired() && *capture == 42;
+      memoryFailure = report.failure && treeCause(*report.failure, TreeError::NO_MEMORY) &&
+                      report.failure->phase == ManagedPhase::MOUNT;
+    };
+    capture.reset();
+
+    auto factory = [&]() -> ui::Scene {
+      ++factories;
+      allocationsBeforeFailure = 0;
+
+      ui::Ref<Button> button;
+
+      return ui::scene(ui::button(button, "unreachable"));
+    };
+    const int status = pipe ? (factory | ui::runApp(options)) : ui::runApp(factory, options);
+    allocationsBeforeFailure = -1;
+
+    CHECK(status == 1);
+    CHECK(factories == 1);
+    CHECK(reports == 1);
+    CHECK(memoryFailure);
+    CHECK(pinned);
+    CHECK(weak.expired());
+  }
+}
+
+TEST_CASE("abandoned factory cleanup remains reportable while allocations are rejected") {
+  ui::RunAppOptions options;
+  int stopped{}, reports{};
+  bool retained{};
+
+  options.report = [&](const ui::SceneReport &report) {
+    allocationsBeforeFailure = -1;
+    ++reports;
+    retained = report.failure && treeCause(*report.failure, TreeError::NO_MEMORY) &&
+               report.failure->cleanup == TreeError::NODE_LIMIT && report.droppedErrors == 0;
+  };
+  const int status = ui::runApp(
+    [&]() -> ui::Scene {
+      auto local = ui::scene(ui::label("partial factory owner"));
+
+      local.onStop([&]() -> std::expected<void, ManagedError> {
+        ++stopped;
+
+        return std::unexpected(ManagedError{ManagedPhase::CLEANUP, {}, TreeError::NODE_LIMIT, {}, {}});
+      });
+      allocationsBeforeFailure = 0;
+
+      throw std::bad_alloc();
+    },
+    options);
+  allocationsBeforeFailure = -1;
+
+  CHECK(status == 1);
+  CHECK(stopped == 1);
+  CHECK(reports == 1);
+  CHECK(retained);
+}
+
+TEST_CASE("declared scene layers share one retained host and existing modal viewport routing") {
+  bool explicitHost{};
+
+  SUBCASE("automatic host") {
+  }
+  SUBCASE("explicit root host") {
+    explicitHost = true;
+  }
+
+  ui::Ref<OverlayHost> host;
+  ui::Ref<Dialog> first, second;
+  ui::Ref<Button> opener, inside, nested;
+  Application *application{};
+  auto body = ui::button(opener, "Open").onClick([] {
+  });
+  auto firstRecipe = ui::dialog(first, "First", ui::button(inside, "Inside").onClick([] {
+  }));
+  auto secondRecipe = ui::dialog(second, "Nested", ui::button(nested, "Nested").onClick([] {
+  }));
+  auto owner = explicitHost
+                 ? ui::scene(ui::overlayHost(host, std::move(body)), std::move(firstRecipe), std::move(secondRecipe))
+                 : ui::scene(std::move(body), std::move(firstRecipe), std::move(secondRecipe));
+
+  owner.configure([&](ManagedScene &, Application &app) {
+    application = &app;
+  });
+  take(owner.prepareChecked());
+
+  auto &managed = take(owner.managed()).get();
+  const auto selected = take(application->tree().inspect(first.node())).parent;
+  const auto retainedPanel = take(application->tree().inspect(first.node())).children.front();
+  const auto originalChildren = take(application->tree().inspect(selected)).children;
+
+  CHECK(take(application->tree().inspect(managed.root())).children == std::vector<Node<Widget>>{selected});
+  CHECK(originalChildren == std::vector<Node<Widget>>{opener.node(), first.node(), second.node()});
+  CHECK(take(application->tree().inspect(second.node())).parent == selected);
+  CHECK((explicitHost ? host.node() == selected : host.node() == Node<OverlayHost>{}));
+  CHECK_FALSE(take(first.opened()));
+
+  const auto layout = [&](CellSize viewport) {
+    take(managed.prepare(*application, viewport));
+
+    for (int pass = 0; pass != 3; ++pass) {
+      std::optional<LayoutSnapshot> snapshot;
+
+      take(application->tree().frame([&] {
+        const auto bounds = take(CellRect::from({}, viewport));
+
+        take(layoutTree(application->tree(), application->root(), bounds, bounds));
+        snapshot.emplace(take(LayoutSnapshot::capture(
+          application->tree(), managed.root(),
+          managed.usesGeometrySnapshot() ? LayoutSnapshotProfile::GEOMETRY : LayoutSnapshotProfile::DIMENSIONS)));
+      }));
+      (void)take(application->tree().consumeFrameRequest());
+      take(managed.prepareViews(*application, *snapshot));
+
+      if (take(application->tree().consumeFrameRequest()) != Invalidation::LAYOUT) {
+        return;
+      }
+    }
+
+    FAIL("existing overlay preparation failed to converge within three passes");
+  };
+
+  layout({40, 12});
+  take(opener.focus());
+  take(first.open().result());
+  CHECK(take(application->router().focused()) == inside.node());
+  CHECK_FALSE(application->router().setFocus(opener.node()));
+  take(application->router().traverse());
+  CHECK(take(application->router().focused()) == inside.node());
+
+  for (const auto viewport : {CellSize{}, CellSize{1, 1}, CellSize{12, 6}, CellSize{40, 12}}) {
+    layout(viewport);
+
+    const auto geometry = take(application->tree().inspect(retainedPanel)).geometry;
+    const auto bounds = take(CellRect::from({}, viewport));
+
+    CHECK(geometry.clip.intersection(bounds) == geometry.clip);
+    CHECK(take(application->tree().inspect(first.node())).parent == selected);
+  }
+
+  (void)take(application->tree().consumeFrameRequest());
+  take(first.open().result());
+  CHECK(take(application->tree().consumeFrameRequest()) == Invalidation::NONE);
+  take(second.open().result());
+  CHECK(take(application->router().focused()) == nested.node());
+  CHECK_FALSE(first.dismiss());
+  take(application->router().dispatch(KeyEvent{InputKey::ESCAPE}));
+  take(application->router().dispatch(KeyEvent{.key = InputKey::ESCAPE, .action = KeyAction::REPEAT}));
+  take(application->router().dispatch(KeyEvent{.key = InputKey::ESCAPE, .action = KeyAction::RELEASE}));
+  CHECK_FALSE(take(second.opened()));
+  CHECK(take(first.opened()));
+  CHECK(take(application->router().focused()) == inside.node());
+  take(first.dismiss().result());
+  CHECK(take(application->router().focused()) == opener.node());
+  take(first.open().result());
+
+  const auto reopenedChildren = take(application->tree().inspect(selected)).children;
+
+  CHECK(std::ranges::is_permutation(reopenedChildren, originalChildren));
+  CHECK(reopenedChildren.front() == opener.node());
+  CHECK(take(application->tree().inspect(first.node())).children.front() == retainedPanel);
+  take(application->tree().setVisible(first.node(), false));
+  take(application->tree().setVisible(first.node(), true));
+  CHECK_FALSE(take(first.opened()));
+  take(first.open().result());
+  take(application->tree().setEnabled(first.node(), false));
+  CHECK_FALSE(take(first.opened()));
+  take(application->tree().setEnabled(first.node(), true));
+  CHECK_FALSE(take(first.opened()));
+  take(first.open().result());
+  take(managed.remove(first.node()));
+  CHECK(treeCause(first.open().error(), TreeError::STALE_NODE));
+  CHECK(take(application->router().focused()) == opener.node());
+  take(owner.close());
+}
+
+TEST_CASE("scene layering preserves options factories explicit host budgets and structural rejection") {
+  SUBCASE("unchanged ordinary scene has its exact original layout root") {
+    ui::Ref<Row> body;
+    ui::Ref<Button> button;
+    Application *application{};
+    auto owner = ui::scene(ui::row(body, ui::button(button, "Button")), {}, {});
+
+    owner.configure([&](ManagedScene &, Application &app) {
+      application = &app;
+    });
+    take(owner.prepareChecked());
+
+    const auto root = take(owner.managed()).get().root();
+
+    CHECK(take(application->tree().inspect(root)).children == std::vector<Node<Widget>>{body.node()});
+    CHECK(take(application->tree().inspect(button.node())).parent == body.node());
+    take(owner.close());
+  }
+
+  SUBCASE("explicit host options constrain appended layers without a second host") {
+    ui::Ref<OverlayHost> host;
+    ui::Ref<Dialog> first, second;
+    OverlayHostOptions options;
+
+    options.maxLayers = 1;
+
+    auto owner = ui::scene(
+      ui::overlayHost(options, ui::label("Body"), ui::dialog(first, "First", ui::label("Panel"))).reference(host),
+      ui::dialog(second, "Second", ui::label("Panel")));
+    const auto result = owner.prepareChecked();
+
+    REQUIRE_FALSE(result);
+    CHECK(treeCause(result.error(), TreeError::NODE_LIMIT));
+    CHECK(host.node() == Node<OverlayHost>{});
+    CHECK(first.node() == Node<Dialog>{});
+    CHECK(second.node() == Node<Dialog>{});
+  }
+
+  SUBCASE("duplicate nested and erased hidden hosts remain unpublished structural errors") {
+    for (const bool erased : {false, true}) {
+      ui::Ref<OverlayHost> hidden;
+      ui::Ref<Dialog> layer;
+      auto explicitRecipe = ui::overlayHost(hidden, ui::label("Body"));
+      auto body = erased ? ui::detail::Access::erase(std::move(explicitRecipe))
+                         : ui::detail::Access::erase(ui::column(std::move(explicitRecipe)));
+      auto owner = ui::scene(std::move(body), ui::dialog(layer, "Layer", ui::label("Panel")));
+      const auto result = owner.prepareChecked();
+
+      REQUIRE_FALSE(result);
+      CHECK(treeCause(result.error(), TreeError::INVALID_ARGUMENT));
+      CHECK(hidden.node() == Node<OverlayHost>{});
+      CHECK(layer.node() == Node<Dialog>{});
+    }
+  }
+
+  SUBCASE("ordinary layout children are not automatically hoisted") {
+    ui::Ref<Dialog> hidden;
+    auto owner = ui::scene(ui::column(ui::label("Body"), ui::dialog(hidden, "Misplaced", ui::label("Panel"))));
+    const auto result = owner.prepareChecked();
+
+    REQUIRE_FALSE(result);
+    CHECK(treeCause(result.error(), TreeError::INVALID_ARGUMENT));
+    CHECK(hidden.node() == Node<Dialog>{});
+  }
+
+  SUBCASE("unbound exact Dialog widget is not accepted as a ready layer") {
+    ui::Ref<Dialog> layer;
+    auto owner = ui::scene(ui::label("Body"), ui::custom<Dialog>().reference(layer));
+    const auto result = owner.prepareChecked();
+
+    REQUIRE_FALSE(result);
+    CHECK(treeCause(result.error(), TreeError::INVALID_ARGUMENT));
+    CHECK(layer.node() == Node<Dialog>{});
+  }
+
+  SUBCASE("legacy generic factory signature and options-first form remain available") {
+    ui::Ref<Dialog> layer;
+    int invoked{};
+    auto owner = ui::scene(
+      ui::SceneOptions{},
+      [&](auto &, auto &...extra) {
+        static_assert(sizeof...(extra) == 0);
+        ++invoked;
+
+        return ui::label("Body");
+      },
+      ui::dialog(layer, "Layer", ui::label("Panel")));
+
+    CHECK(invoked == 0);
+    take(owner.prepareChecked());
+    take(owner.prepareChecked());
+    CHECK(invoked == 1);
+    CHECK_FALSE(take(layer.opened()));
+    take(owner.close());
+  }
+
+  SUBCASE("checked application factory keeps its error and explicit construction origin") {
+    const auto origin = std::source_location::current();
+    auto owner = ui::scene(
+      ui::SceneOptions{}, origin,
+      [](ManagedScene &, Application &) -> std::expected<ui::Description<Label>, ManagedError> {
+        return std::unexpected(ManagedError{ManagedPhase::STATE, {}, TreeError::NODE_LIMIT, {}, {}});
+      },
+      ui::dialog("Layer", ui::label("Panel")));
+    const auto result = owner.prepareChecked();
+
+    REQUIRE_FALSE(result);
+    CHECK(treeCause(result.error(), TreeError::NODE_LIMIT));
+    CHECK(result.error().phase == ManagedPhase::STATE);
+  }
+}
+
+TEST_CASE("declared layer failure retires the complete unpublished scene and retains independent cleanup") {
+  ui::Ref<Mounted> body;
+  ui::Ref<Dialog> first, second;
+  int alive{}, stopped{};
+  auto owner = ui::scene(
+    ui::custom<Mounted>(std::ref(alive)).reference(body), ui::dialog(first, "First", ui::label("Panel")),
+    ui::dialog(second, "Second", ui::label("Panel"))
+      .setup([](ManagedScene &, Node<Dialog> node) -> std::expected<void, ManagedError> {
+        return std::unexpected(ManagedError{ManagedPhase::MOUNT, node.id(), TreeError::CALLBACK_FAILED, {}, {}});
+      }));
+
+  owner.onStop([&]() -> std::expected<void, ManagedError> {
+    ++stopped;
+
+    return std::unexpected(ManagedError{ManagedPhase::CLEANUP, {}, TreeError::INVALID_ARGUMENT, {}, {}});
+  });
+
+  const auto result = owner.prepareChecked();
+
+  REQUIRE_FALSE(result);
+  CHECK(treeCause(result.error(), TreeError::CALLBACK_FAILED));
+  CHECK(result.error().cleanup == TreeError::INVALID_ARGUMENT);
+  CHECK(alive == 0);
+  CHECK(stopped == 1);
+  CHECK(body.node() == Node<Mounted>{});
+  CHECK(first.node() == Node<Dialog>{});
+  CHECK(second.node() == Node<Dialog>{});
+}
+
+TEST_CASE("automatic overlay allocation failures never publish body or layers") {
+  constexpr std::ptrdiff_t MAX_OVERLAY_ALLOCATION_BUDGET = 1024;
+  std::size_t failures{}, successes{};
+
+  for (std::ptrdiff_t budget = 0; budget <= MAX_OVERLAY_ALLOCATION_BUDGET; ++budget) {
+    ui::Ref<Mounted> body;
+    ui::Ref<Dialog> layer;
+    int alive{};
+    auto owner =
+      ui::scene(ui::custom<Mounted>(std::ref(alive)).reference(body).setup([&](ManagedScene &, Node<Mounted>) {
+        allocationsBeforeFailure = budget;
+
+        return std::expected<void, ManagedError>{};
+      }),
+                ui::dialog(layer, "Layer", ui::label("Panel")));
+    const auto previousTerminate = std::set_terminate(oomTerminate);
+    const auto result = owner.prepareChecked();
+
+    allocationsBeforeFailure = -1;
+    std::set_terminate(previousTerminate);
+
+    if (!result) {
+      ++failures;
+      CHECK(treeCause(result.error(), TreeError::NO_MEMORY));
+      CHECK(body.node() == Node<Mounted>{});
+      CHECK(layer.node() == Node<Dialog>{});
+    } else {
+      ++successes;
+      CHECK(alive == 1);
+      CHECK(body.node() != Node<Mounted>{});
+      CHECK(layer.node() != Node<Dialog>{});
+      take(owner.close());
+    }
+
+    CHECK(alive == 0);
+
+    if (result) {
+      std::fprintf(stderr, "automatic overlay OOM failures=%zu first-success-budget=%td\n", failures, budget);
+
+      break;
+    }
+  }
+
+  CHECK(failures > 0);
+  CHECK(successes > 0);
+}
+
+TEST_CASE("owning application factory accepts a declared-layer scene through the existing boundary") {
+  int factories{}, reports{}, stopped{};
+  ui::RunAppOptions options;
+
+  options.report = [&](const ui::SceneReport &report) {
+    ++reports;
+    REQUIRE(report.failure);
+    CHECK(treeCause(*report.failure, TreeError::INVALID_ARGUMENT));
+  };
+
+  const auto result = ui::runApp(
+    [&] {
+      ++factories;
+
+      auto owner = ui::scene(ui::label("Body"), ui::detail::Access::erase(ui::label("Not a Dialog")));
+
+      owner.onStop([&] {
+        ++stopped;
+      });
+
+      return owner;
+    },
+    options);
+
+  CHECK(result == 1);
+  CHECK(factories == 1);
+  CHECK(reports == 1);
+  CHECK(stopped == 1);
 }

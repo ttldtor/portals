@@ -9,20 +9,22 @@ int main() {
   using namespace portals;
 
   // clang-format off
-  return ui::scene(ui::vbox(
-    ui::label("Choose a section; use the wheel or drag the thumb."),
-    ui::scrollArea(ui::vbox(
-      ui::button("Overview"),
-      ui::button("Accounts"),
-      ui::button("Orders"),
-      ui::button("Positions"),
-      ui::button("History"),
-      ui::button("Connections"),
-      ui::button("Preferences"),
-      ui::button("About")))
-      | ui::height(5),
-    ui::button("Exit", [] { ui::quit(); })))
-    | ui::onKey("F10", ui::quit)
+  return [] {
+    return ui::scene(ui::vbox(
+      ui::label("Choose a section; use the wheel or drag the thumb."),
+      ui::scrollArea(ui::vbox(
+        ui::button("Overview"),
+        ui::button("Accounts"),
+        ui::button("Orders"),
+        ui::button("Positions"),
+        ui::button("History"),
+        ui::button("Connections"),
+        ui::button("Preferences"),
+        ui::button("About")))
+        | ui::height(5),
+      ui::button("Exit", [] { ui::quit(); })))
+      | ui::onKey("F10", ui::quit);
+  }
     | ui::runApp();
   // clang-format on
 }

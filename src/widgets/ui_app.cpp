@@ -19,6 +19,36 @@
 extern char **environ;
 #endif
 
+namespace portals::ui::detail {
+std::expected<LaunchAction, CommandLineError> commandLinePreflight(int argc, const char *const *argv,
+                                                                   CommandLineParser &parser) noexcept {
+  std::expected<LaunchAction, CommandLineError> action;
+
+  try {
+    const auto initialized = app::initialize(argc, argv);
+
+    if (!initialized) {
+      const auto code = initialized.error() == app::ProcessContextError::NO_MEMORY
+                          ? CommandLineErrorCode::NO_MEMORY
+                          : CommandLineErrorCode::PROCESS_CONTEXT;
+
+      action = std::unexpected(CommandLineError{code, {}, initialized.error()});
+    } else if (parser) {
+      action = parser(*app::args());
+    }
+  } catch (const std::bad_alloc &) {
+    action = std::unexpected(CommandLineError{CommandLineErrorCode::NO_MEMORY, {}});
+  } catch (...) {
+    action = std::unexpected(CommandLineError{CommandLineErrorCode::CALLBACK_FAILED, {}});
+  }
+
+  // Captures retire while the caller still excludes lifecycle reentry.
+  parser = nullptr;
+
+  return action;
+}
+} // namespace portals::ui::detail
+
 namespace portals::ui::app {
 struct Arguments::Data {
   // Explicit count construction keeps Debug iterator-proxy allocation inside the checked boundary.
