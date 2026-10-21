@@ -87,7 +87,7 @@ function page(saved, unavailable = false) {
   const button = {
     hidden: true,
     attributes: {},
-    dataset: { label: "Color scheme", nextLabel: "Next", system: "System", light: "Light", dark: "Dark" },
+    dataset: { label: "Color scheme", nextLabel: "Next", system: "System", light: "Light", dark: "Dark", turbo: "Turbo Vision" },
     addEventListener: (name, fn) => listeners[name] = fn,
     setAttribute(name, value) { this.attributes[name] = value; }
   };
@@ -121,13 +121,25 @@ light.listeners.click();
 assert(light.classes.has("dark-mode"));
 assert(!light.classes.has("light-mode"));
 assert.equal(light.button.dataset.scheme, "dark");
-assert.equal(light.button.title, "Color scheme: Dark. Next: System.");
+assert.equal(light.button.title, "Color scheme: Dark. Next: Turbo Vision.");
 assert.deepEqual(light.writes, [["portals-color-scheme", "dark"]]);
 light.media.matches = false;
 light.listeners.system();
 assert(light.classes.has("dark-mode"));
 light.listeners.click();
+assert.equal(light.button.dataset.scheme, "turbo");
+assert(light.classes.has("turbo-mode"));
+assert(light.classes.has("light-mode"));
+assert(!light.classes.has("dark-mode"));
+assert.equal(light.button.title, "Color scheme: Turbo Vision. Next: System.");
+light.media.matches = true;
+light.listeners.system();
+assert(light.classes.has("turbo-mode"));
+assert(!light.classes.has("dark-mode"));
+light.media.matches = false;
+light.listeners.click();
 assert.equal(light.button.dataset.scheme, "system");
+assert(!light.classes.has("turbo-mode"));
 assert(light.classes.has("light-mode"));
 light.listeners.click();
 assert.equal(light.button.dataset.scheme, "light");
@@ -136,6 +148,10 @@ blocked.listeners.click();
 assert(blocked.classes.has("light-mode"));
 assert.equal(blocked.button.dataset.scheme, "light");
 assert.equal(page("invalid").button.dataset.scheme, "system");
+const restored = page("turbo");
+assert(restored.classes.has("turbo-mode"));
+assert.equal(restored.button.dataset.scheme, "turbo");
+assert(restored.button.innerHTML.includes('<path d="M2 3h16'));
 console.log("appearance scenarios passed");
 '''
         result = subprocess.run([NODE, "-e", fixture, str(SCRIPT)], capture_output=True,

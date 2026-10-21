@@ -5,11 +5,12 @@
  */
 (() => {
   const storageKey = "portals-color-scheme";
-  const schemes = ["system", "light", "dark"];
+  const schemes = ["system", "light", "dark", "turbo"];
   const icons = {
     system: '<circle cx="10" cy="10" r="7"/><path d="M10 3a7 7 0 0 0 0 14Z" fill="currentColor"/>',
     light: '<circle cx="10" cy="10" r="4"/><path d="M10 0v3m0 14v3M0 10h3m14 0h3M3 3l2 2m10 10 2 2M3 17l2-2M15 5l2-2"/>',
-    dark: '<path d="M15 15A7 7 0 0 1 5 5a7 7 0 1 0 10 10Z"/>'
+    dark: '<path d="M15 15A7 7 0 0 1 5 5a7 7 0 1 0 10 10Z"/>',
+    turbo: '<path d="M2 3h16v12H2zM6 18h8M10 15v3M5 7l3 2-3 2M10 11h4"/>'
   };
   const system = window.matchMedia("(prefers-color-scheme: dark)");
   let selected = "system";
@@ -25,11 +26,23 @@
     const dark = selected === "dark" || (selected === "system" && system.matches);
     document.documentElement.classList.toggle("dark-mode", dark);
     document.documentElement.classList.toggle("light-mode", !dark);
+    document.documentElement.classList.toggle("turbo-mode", selected === "turbo");
   };
 
   apply();
   system.addEventListener("change", apply);
   document.addEventListener("DOMContentLoaded", () => {
+    // Doxygen resizes the tree itself. Keep the header and fixed footer aligned
+    // with its content width without changing the stock schemes' geometry.
+    const sideNav = document.querySelector("#side-nav");
+    if (sideNav && typeof ResizeObserver !== "undefined") {
+      new ResizeObserver(entries => {
+        const width = entries[0].contentRect.width;
+        if (width > 0) {
+          document.documentElement.style.setProperty("--turbo-sidebar-width", `${width}px`);
+        }
+      }).observe(sideNav);
+    }
     // Doxygen creates disclosure links lazily. Keep its expansion mechanism,
     // adding the accessible state and Space activation to each current link.
     const tree = document.querySelector("#nav-tree");

@@ -1,0 +1,166 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="888" viewBox="0 0 760 888" role="img" aria-label="Input, model preparation and output">
+  <title>Input, model preparation and output</title>
+  <desc>Directed arrows retain the original architecture flow. Dashed frames and arrows identify optional observations.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#55ffff" />
+    </marker>
+  </defs>
+  <style>text{font-family:"Cascadia Mono","DejaVu Sans Mono",Consolas,"Liberation Mono",monospace;font-size:16px;fill:#ffffdf}.title,.label,.group{font-weight:bold;fill:#ffff55}.edge{fill:none;stroke:#55ffff;stroke-width:2;marker-end:url(#arrow)}</style>
+  <rect width="760" height="888" fill="#000080" />
+  <text x="20" y="36" class="title">
+    <tspan x="20" dy="0">Input, model preparation and output</tspan>
+  </text>
+  <text x="20" y="72" class="detail">
+    <tspan x="20" dy="0">Preparation is outside the frame; terminal output is outside layout and</tspan>
+    <tspan x="20" dy="24">paint.</tspan>
+  </text>
+  <rect x="12" y="500" width="488" height="228" fill="none" stroke="#55ffff" stroke-dasharray="4 4" />
+  <text x="24" y="520" class="group">
+    <tspan x="24" dy="0">Optional observations across the earlier stages</tspan>
+  </text>
+  <g id="node-0">
+    <rect x="20" y="128" width="224" height="152" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="30" y="152" class="label">
+      <tspan x="30" dy="0">Admit input</tspan>
+    </text>
+    <text x="30" y="184" class="detail">
+      <tspan x="30" dy="0">Decode POSIX / use</tspan>
+      <tspan x="30" dy="24">native events</tspan>
+    </text>
+    <text x="30" y="232" class="detail">
+      <tspan x="30" dy="0">Retain rejected</tspan>
+      <tspan x="30" dy="24">CONTROL owner</tspan>
+    </text>
+  </g>
+  <g id="node-1">
+    <rect x="268" y="128" width="224" height="152" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="278" y="152" class="label">
+      <tspan x="278" dy="0">Dispatch once</tspan>
+    </text>
+    <text x="278" y="184" class="detail">
+      <tspan x="278" dy="0">scene.input then</tspan>
+      <tspan x="278" dy="24">EventRouter</tspan>
+    </text>
+    <text x="278" y="232" class="detail">
+      <tspan x="278" dy="0">Focus / target /</tspan>
+      <tspan x="278" dy="24">action / handler</tspan>
+    </text>
+  </g>
+  <g id="node-2">
+    <rect x="516" y="128" width="224" height="152" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="526" y="152" class="label">
+      <tspan x="526" dy="0">Observe domain result</tspan>
+    </text>
+    <text x="526" y="184" class="detail">
+      <tspan x="526" dy="0">Property equality or</tspan>
+      <tspan x="526" dy="24">commit</tspan>
+    </text>
+    <text x="526" y="232" class="detail">
+      <tspan x="526" dy="0">Changed value</tspan>
+      <tspan x="526" dy="24">invalidates tree</tspan>
+    </text>
+  </g>
+  <g id="node-3">
+    <rect x="20" y="304" width="224" height="176" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="30" y="328" class="label">
+      <tspan x="30" dy="0">Prepare when dirty</tspan>
+      <tspan x="30" dy="24">and ready</tspan>
+    </text>
+    <text x="30" y="384" class="detail">
+      <tspan x="30" dy="0">Pin each model once;</tspan>
+      <tspan x="30" dy="24">prepare siblings</tspan>
+    </text>
+    <text x="30" y="432" class="detail">
+      <tspan x="30" dy="0">Handle provider work</tspan>
+      <tspan x="30" dy="24">outside paint</tspan>
+    </text>
+  </g>
+  <g id="node-4">
+    <rect x="268" y="304" width="224" height="176" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="278" y="328" class="label">
+      <tspan x="278" dy="0">Build inside</tspan>
+      <tspan x="278" dy="24">tree.frame</tspan>
+    </text>
+    <text x="278" y="384" class="detail">
+      <tspan x="278" dy="0">Layout and clipped</tspan>
+      <tspan x="278" dy="24">borrowed paint</tspan>
+    </text>
+    <text x="278" y="432" class="detail">
+      <tspan x="278" dy="0">Consume into owning</tspan>
+      <tspan x="278" dy="24">CellBuffer</tspan>
+    </text>
+  </g>
+  <g id="node-5">
+    <rect x="516" y="304" width="224" height="176" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="526" y="328" class="label">
+      <tspan x="526" dy="0">Submit and flush</tspan>
+    </text>
+    <text x="526" y="360" class="detail">
+      <tspan x="526" dy="0">At most one each per</tspan>
+      <tspan x="526" dy="24">cycle</tspan>
+    </text>
+    <text x="526" y="408" class="detail">
+      <tspan x="526" dy="0">Pending output blocks</tspan>
+      <tspan x="526" dy="24">next frame</tspan>
+    </text>
+  </g>
+  <g id="node-6">
+    <rect x="20" y="544" width="224" height="176" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="30" y="568" class="label">
+      <tspan x="30" dy="0">Trace causal stages</tspan>
+    </text>
+    <text x="30" y="600" class="detail">
+      <tspan x="30" dy="0">Input / queue /</tspan>
+      <tspan x="30" dy="24">handler / Property</tspan>
+    </text>
+    <text x="30" y="648" class="detail">
+      <tspan x="30" dy="0">Handler return alone</tspan>
+      <tspan x="30" dy="24">is insufficient</tspan>
+    </text>
+  </g>
+  <g id="node-7">
+    <rect x="268" y="544" width="224" height="176" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="278" y="568" class="label">
+      <tspan x="278" dy="0">Trace actual</tspan>
+      <tspan x="278" dy="24">frame/output</tspan>
+    </text>
+    <text x="278" y="624" class="detail">
+      <tspan x="278" dy="0">Frame ID / diff_empty</tspan>
+      <tspan x="278" dy="24">/ output result</tspan>
+    </text>
+    <text x="278" y="672" class="detail">
+      <tspan x="278" dy="0">Acceptance does not</tspan>
+      <tspan x="278" dy="24">prove display</tspan>
+    </text>
+  </g>
+  <g id="node-8">
+    <rect x="516" y="544" width="224" height="176" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="526" y="568" class="label">
+      <tspan x="526" dy="0">Cleanup then export</tspan>
+    </text>
+    <text x="526" y="600" class="detail">
+      <tspan x="526" dy="0">Scheduler stop; scene</tspan>
+      <tspan x="526" dy="24">stop; close</tspan>
+    </text>
+    <text x="526" y="648" class="detail">
+      <tspan x="526" dy="0">First error plus</tspan>
+      <tspan x="526" dy="24">restoration error</tspan>
+    </text>
+  </g>
+  <path class="edge" d="M244,204 H268" data-source="0" data-target="1" />
+  <path class="edge" d="M492,204 H516" data-source="1" data-target="2" />
+  <path class="edge" d="M628,280 V292 H132 V304" data-source="2" data-target="3" />
+  <path class="edge" d="M244,392 H268" data-source="3" data-target="4" />
+  <path class="edge" d="M492,392 H516" data-source="4" data-target="5" />
+  <path class="edge" d="M628,480 V544" data-source="5" data-target="8" />
+  <path class="edge" d="M244,632 H268" data-source="6" data-target="7" stroke-dasharray="4 4" />
+  <text x="20" y="748" class="detail">
+    <tspan x="20" dy="0">EOF drains admitted CONTROL and submitted output; it does not wait for</tspan>
+    <tspan x="20" dy="24">future repaint/timer/DATA.</tspan>
+  </text>
+  <text x="20" y="808" class="detail">
+    <tspan x="20" dy="0">Trace rows show observations, not extra scheduling; missing/lost records</tspan>
+    <tspan x="20" dy="24">leave incomplete chains.</tspan>
+  </text>
+</svg>

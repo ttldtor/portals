@@ -6,14 +6,16 @@ Unittest prints results and returns nonzero on failure. This is a test module,
 not a production command; unittest owns its help and selection options.
 """
 
+import html
 import json
+import re
 from pathlib import Path
 from html.parser import HTMLParser
 import subprocess
 import tempfile
 import unittest
 
-from finalize_html import GuideParser, color_cmake, complete_navigation, complete_search, document_language, finalize, portable_links, read_variable, type_links
+from finalize_html import GuideParser, color_cmake, color_shell, color_template_strings, complete_navigation, complete_search, document_language, finalize, navigation_text, portable_links, read_variable, type_links
 
 
 class GuideTests(unittest.TestCase):
@@ -78,9 +80,11 @@ class GuideTests(unittest.TestCase):
                 for name in names) + '</tagfile>', encoding="utf-8")
             (root / "navtreedata.js").write_text(
                 'var NAVTREE = [["Project", "index.html", []]];\nvar NAVTREEINDEX = [];\n')
+            (root / "navtree.js").write_text('ahref.textContent = escapeHtml(name);')
             for name in names:
                 (root / name).write_text('<html lang="en-US"><body>Guide</body></html>')
             finalize(root, tag)
+            self.assertEqual((root / "navtree.js").read_text(), 'ahref.textContent = name;')
             for name in names:
                 language = "en" if name == "index.html" else "ru"
                 self.assertIn(f'lang="{language}"', (root / name).read_text())
@@ -210,6 +214,65 @@ class GuideTests(unittest.TestCase):
             links = type_links(path)
             self.assertNotIn("Item", links)
             self.assertEqual(links["a::Item"], "a.html")
+
+    def test_shell_colors_preserve_commands_and_existing_markup(self):
+        text = ('<div class="fragment"><div class="line">cmake -S . -B build -G &quot;Ninja&quot;</div>\n'
+                '<div class="line">./build/my_app --name &quot;a &amp; b&quot;</div>\n</div>')
+        rendered = color_shell(text)
+        self.assertIn('class="fragment shell-colors"', rendered)
+        self.assertIn('<span class="keyword">cmake</span>', rendered)
+        self.assertIn('<span class="preprocessor">-S</span>', rendered)
+        self.assertIn('<span class="keyword">./build/my_app</span>', rendered)
+        self.assertEqual(color_shell(rendered), rendered)
+        self.assertEqual(re.sub('<[^>]+>', '', text), re.sub('<[^>]+>', '', rendered))
+        for protected in ('<div class="fragment"><div class="line">{"key": 1}</div></div>',
+                          '<div class="fragment"><div class="line">cmake <a href="x">help</a></div></div>',
+                          '<div class="fragment"><div class="line"><span class="keyword">git</span> status</div></div>'):
+            self.assertEqual(color_shell(protected), protected)
+
+    def test_powershell_assignment_keywords_and_commands_preserve_text(self):
+        text = ('<div class="fragment"><div class="line">$env:CI_NEEDS = \'{&quot;mode&quot;:&quot;docs&quot;}\'</div>\n'
+                '<div class="line">try {</div>\n'
+                '<div class="line">  python tools/ci/checks.py gate</div>\n'
+                '<div class="line">} finally {</div>\n'
+                '<div class="line">  Remove-Item Env:CI_NEEDS # cleanup</div>\n'
+                '<div class="line">}</div></div>')
+        result = color_shell(text)
+        for token, kind in (("$env:CI_NEEDS", "preprocessor"), ("try", "keyword"),
+                            ("finally", "keyword"), ("# cleanup", "comment")):
+            self.assertIn(f'<span class="{kind}">{token}</span>', result)
+        self.assertIn('Remove-Item</span>', result)
+        self.assertEqual(color_shell(result), result)
+        self.assertEqual(html.unescape(re.sub('<[^>]+>', '', text)),
+                         html.unescape(re.sub('<[^>]+>', '', result)))
+        protected = text.replace('$env:CI_NEEDS', '<a href="x">$env:CI_NEEDS</a>', 1)
+        self.assertEqual(color_shell(protected), protected)
+
+    def test_template_strings_only_fill_uncolored_fragment_text(self):
+        text = ('<p>column&lt;&quot;outside&quot;&gt;</p><div class="fragment">'
+                '<div class="line">ui::column&lt;&quot;form&quot;&gt;(</div>\n'
+                '<div class="line"><span class="comment">// column&lt;&quot;comment&quot;&gt;</span></div>\n'
+                '<div class="line"><a href="name">column&lt;&quot;linked&quot;&gt;</a></div>\n'
+                '<div class="line">ui::label(<span class="stringliteral">&quot;existing&quot;</span>);</div>\n</div>')
+        result = color_template_strings(text)
+        self.assertIn('&lt;<span class="stringliteral">&quot;form&quot;</span>&gt;', result)
+        self.assertEqual(result.count('class="stringliteral"'), 2)
+        self.assertEqual(re.sub('<[^>]+>', '', text), re.sub('<[^>]+>', '', result))
+        self.assertEqual(color_template_strings(result), result)
+
+    def test_numeric_heading_entities_and_page_outline_text(self):
+        parser = GuideParser({})
+        parser.feed('<h2 id="equal">operator&#x3D;&#61; &amp; details</h2>')
+        self.assertEqual(parser.headings, [(2, "equal", "operator== & details")])
+        self.assertIn('operator&#x3D;&#61;', ''.join(parser.output))
+        script = ('ahref.textContent = escapeHtml(text);\n'
+                  'ahref.textContent = escapeHtml(name);\n'
+                  'ahref.innerHTML = escapeHtml(text);')
+        result = navigation_text(script)
+        self.assertIn('ahref.textContent = text;', result)
+        self.assertIn('ahref.textContent = name;', result)
+        self.assertIn('ahref.innerHTML = escapeHtml(text);', result)
+        self.assertEqual(navigation_text(result), result)
 
     def test_cmake_colors_do_not_change_the_example(self):
         text = '<div class="fragment"><div class="line">project(App LANGUAGES CXX)</div>\n<div class="line"># note</div>\n</div>'

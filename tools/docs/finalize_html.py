@@ -1,4 +1,4 @@
-"""Finalize Doxygen HTML: API links, CMake highlighting, navigation, search and language.
+"""Finalize Doxygen HTML: API links, CMake and command highlighting, navigation and language.
 
 Run automatically through the portals_docs target. For diagnosis, pass the
 existing HTML directory and Doxygen XML tag file from the same build. This
@@ -98,6 +98,8 @@ class GuideParser(HTMLParser):
 
     def handle_charref(self, name):
         self.emit(f"&#{name};")
+        if self.heading:
+            self.heading["text"].append(html.unescape(f"&#{name};"))
 
     def handle_comment(self, data):
         self.emit(f"<!--{data}-->")
@@ -140,6 +142,85 @@ def color_cmake(content):
         return block.replace('class="fragment"', 'class="fragment cmake-colors"', 1)
 
     return re.sub(r'<div class="fragment">.*?</div>\s*</div>', fragment, content, flags=re.S)
+
+
+def color_shell(content):
+    """Color plain command examples without changing their displayed text.
+
+    Called by finalize after CMake coloring. Recognizes command-led fragments
+    and PowerShell environment assignments,
+    not shell grammar or command output. Existing markup/highlighting is kept;
+    unrecognized blocks pass through. Returns HTML and performs no I/O.
+    """
+    def fragment(match):
+        body = match[1]
+        if re.search(r"<(?:span|a)\b", body):
+            return match[0]
+        plain = html.unescape(re.sub(r"<[^>]+>", "", body)).lstrip()
+        powershell = bool(re.match(
+            r"(?:\$env:[A-Za-z_]\w*\s*=|(?:Get|Set|Remove|New|Write|Read|Test|Invoke|Import|Export|Start|Stop|Copy|Move)-[A-Za-z]+\b)",
+            plain, flags=re.I))
+        if not powershell and not re.match(r"(?:cmake|ctest|git|ninja|python3?|pwsh|powershell)(?:\s|$)", plain):
+            return match[0]
+
+        def line(match):
+            value = html.unescape(match[1])
+            tokens = re.compile(r'''\#[^\n]*|"(?:[`\\].|[^"`\\])*"|'(?:''|[^'])*'|\$(?:env:)?[A-Za-z_]\w*|\b(?:try|catch|finally|if|else|foreach|throw|return)\b|(?<!\S)--?[A-Za-z][\w=.+:/\\-]*|^\s*(?:\./[\w./-]+|\.\\[\w.\\-]+|[\w.+-]+)''')
+            parts, previous = [], 0
+            for token in tokens.finditer(value):
+                parts.append(html.escape(value[previous:token.start()]))
+                text = token[0]
+                kind = ("comment" if text.startswith("#") else
+                        "stringliteral" if text.startswith(('"', "'")) else
+                        "preprocessor" if text.startswith(("-", "$")) else "keyword")
+                parts.append(f'<span class="{kind}">{html.escape(text)}</span>')
+                previous = token.end()
+            parts.append(html.escape(value[previous:]))
+            return '<div class="line">' + "".join(parts) + '</div>'
+
+        body = re.sub(r'<div class="line">([^<]*)</div>', line, body)
+        return '<div class="fragment shell-colors">' + body + '</div>'
+
+    return re.sub(r'<div class="fragment">((?:<div class="line">[^\n]*</div>\s*)+)</div>',
+                  fragment, content)
+
+
+def color_template_strings(content):
+    """Fill Doxygen's missing string color in quoted C++ template arguments.
+
+    Only plain text immediately after an escaped opening angle is considered.
+    Existing spans and anchors are protected; this does not infer C++ types.
+    Returns HTML without I/O and is safe to run on already finalized fragments.
+    """
+    def fragment(match):
+        parts = re.split(r"(<[^>]*>)", match[0])
+        protected = 0
+        for index, part in enumerate(parts):
+            if part.startswith("<"):
+                if re.match(r"<(?:span|a)\b", part):
+                    protected += 1
+                elif re.match(r"</(?:span|a)\s*>", part):
+                    protected = max(0, protected - 1)
+            elif not protected:
+                parts[index] = re.sub(
+                    r'(&lt;\s*)(&quot;(?:(?!&quot;).)*?&quot;)(?=\s*(?:&gt;|,))',
+                    r'\1<span class="stringliteral">\2</span>', part)
+        return "".join(parts)
+
+    return re.sub(r'<div class="fragment(?: [^"]*)?">.*?</div>\s*</div>',
+                  fragment, content, flags=re.S)
+
+
+def navigation_text(script):
+    """Avoid Doxygen 1.18's double escaping in two page-outline text sinks.
+
+    textContent already renders literal text safely. Keep all HTML sinks and
+    other escaping intact; unknown generator versions pass through unchanged.
+    """
+    for value in ("text", "name"):
+        script = script.replace(f"ahref.textContent = escapeHtml({value});",
+                                f"ahref.textContent = {value};")
+    return script
 
 
 def read_variable(text, name):
@@ -327,10 +408,14 @@ def finalize(directory, tag_file, language=None, api_tag=None, api_prefix="../")
                                  Path(__file__).resolve().parents[2], links,
                                  russian, defer_markdown=language is not None)
         content = document_language(content, language or ("ru" if russian else "en"))
-        path.write_text(color_cmake(content), encoding="utf-8")
+        path.write_text(color_template_strings(color_shell(color_cmake(content))), encoding="utf-8")
         headings[name] = parser.headings
     complete_navigation(directory, headings)
     complete_search(directory)
+    navigation = directory / "navtree.js"
+    if navigation.is_file():
+        navigation.write_text(navigation_text(navigation.read_text(encoding="utf-8")),
+                              encoding="utf-8")
     print(json.dumps({"guide_pages": len(headings), "unambiguous_types": len(links)}))
 
 

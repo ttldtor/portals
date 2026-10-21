@@ -213,6 +213,18 @@ def finalize_languages(root, source, tag_files):
             current = path.relative_to(root).as_posix()
             page = by_url.get(current)
             content = path.read_text(encoding="utf-8")
+            content = re.sub(r'<li class="footer">.*?</li>', '', content, flags=re.S)
+            def turbo_diagram(match):
+                name = match[1]
+                asset = path.parent / 'images' / 'turbo' / name
+                if not asset.is_file():
+                    return match[0]
+                title = ET.parse(asset).getroot().findtext('{http://www.w3.org/2000/svg}title')
+                return (match[0].replace('<object ', '<object class="standard-diagram" ', 1)
+                        + f'<img class="turbo-diagram" src="images/turbo/{name}" '
+                          f'alt="{html.escape(title or name, quote=True)}" width="760"/>')
+            content = re.sub(r'<object type="image/svg\+xml" data="(components\.svg|event-flow\.svg|ownership\.svg)"[^>]*></object>',
+                             turbo_diagram, content)
             content = re.sub(r'<nav class="portals-languages".*?</nav>', '', content, flags=re.S)
             content = content.replace('<script src="appearance.js"></script>\n', '')
             content = content.replace('<script src="language-switch.js" defer></script>\n', '')
@@ -285,11 +297,11 @@ def finalize_languages(root, source, tag_files):
                     controls.append(f'<span lang="{other}" title="{name} ({missing})" aria-label="{name} ({missing})">{short_name}</span>')
             theme_label = "Цветовая схема" if code == "ru" else "Color scheme"
             next_label = "Следующая" if code == "ru" else "Next"
-            theme_names = ("Системная", "Светлая", "Тёмная") if code == "ru" else ("System", "Light", "Dark")
+            theme_names = ("Системная", "Светлая", "Тёмная", "Turbo Vision") if code == "ru" else ("System", "Light", "Dark", "Turbo Vision")
             controls.append(f'<button type="button" class="portals-appearance" hidden '
                             f'data-label="{theme_label}" data-next-label="{next_label}" '
                             + " ".join(f'data-{value}="{name}"'
-                                       for value, name in zip(("system", "light", "dark"), theme_names))
+                                       for value, name in zip(("system", "light", "dark", "turbo"), theme_names))
                             + '></button></nav>')
             # The native links work without JavaScript; script only adds mapped hashes.
             content = re.sub(r'(<div id="titlearea">)', r'\1' + "".join(controls), content, count=1)
