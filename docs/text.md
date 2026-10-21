@@ -78,3 +78,96 @@ Headless tests cover semantic widths, UTF-8 failures, controls, ownership, limit
 cursor/clip boundaries and the complete official Unicode 18 GraphemeBreakTest
 corpus, with no filtering. Vendored file and fixture hashes are checked without
 network access. Width fixtures test this policy rather than any physical terminal.
+
+## Secret bytes with SecureString {#text-secure-string}
+
+[`SecureString` and `SecretView`](../include/portals/secure_string.hpp) provide
+move-only byte storage and synchronous plaintext access through `<portals/secure_string.hpp>`.
+Link the [installed package](package.md) target `portals::core`. `SecureString`
+preserves application bytes, including embedded NUL, without Unicode validation,
+normalization, SSO or an implicit conversion to ordinary text.
+
+`create`, `assign` and `append` copy a borrowed `std::string_view` during the call;
+keep its input buffer valid until that call returns. Use `std::string_view(data, size)`
+for bytes containing NUL. Caller-owned input and copies made by external APIs remain
+outside this storage guarantee. `maxBytes` defaults to 4096 bytes and accepts
+0 through 1048576; zero permits only empty values. When new storage is needed, a
+mutation prepares an allocation for its final logical length, rounded to payload
+pages for native storage.
+
+This complete example uses an ASCII sample value, reads only its length and closes
+the storage explicitly. It produces no output and opens no terminal:
+
+```cpp
+#include <portals/secure_string.hpp>
+
+#include <cstddef>
+
+int main() {
+  auto secret = portals::SecureString::create("sample");
+
+  if (!secret || !secret->append("-bytes")) {
+    return 1;
+  }
+
+  std::size_t byteCount{};
+  auto accessed = secret->withPlaintext([&](portals::SecretView view) {
+    byteCount = view.size();
+  });
+
+  if (!accessed || byteCount != 12 || !secret->clear()) {
+    return 2;
+  }
+
+  return secret->close() ? 0 : 3;
+}
+```
+
+By default, Windows and Linux use dedicated pages with an always-writable payload
+and two inaccessible exterior guard pages. Without requested Windows idle encryption,
+the live payload contains plaintext between callbacks. Wiping covers its entire
+accessible capacity, including padding and unused tails. The independently requested
+options are mandatory: unsupported guarantees return `UNSUPPORTED`; native setup
+failure returns a typed error without silently weakening the policy.
+
+| Guarantee | Default | Windows | Linux | WASM / other unsupported platforms |
+| --- | --- | --- | --- | --- |
+| Capacity wiping | Required | Applied | Applied | Applied with explicit `WIPE_ONLY` |
+| Exterior guard pages | Required by `NATIVE_GUARDED` | Applied | Applied | Unsupported |
+| `lockPages` | `false` | Native page lock | Native page lock | Unsupported |
+| `excludeFromDumps` | `false` | Unsupported | Linux core-dump exclusion | Unsupported |
+| `encryptWhileIdle` | `false` | `CryptProtectMemory`, `SAME_PROCESS` | Unsupported | Unsupported |
+
+On WASM, default creation returns `UNSUPPORTED`, including for empty input. To accept
+wiping alone explicitly, pass `SecureStringOptions` with
+`storage = SecureStringStorage::WIPE_ONLY` to `create`; this policy uses heap or
+linear-memory storage and rejects lock, dump and encryption requests on every platform.
+`capabilities()` reports guarantees actually applied. These mechanisms do not protect
+against a debugger or ArtMoney with process access, hostile code in the process,
+the terminal host, keyloggers, live plaintext access or external copies. Length remains visible.
+
+`withPlaintext` owns a copy or move of its callable and holds storage alive through
+the callback. A `SecretView` exposes explicit `data()` and `size()`; it expires when
+the callback returns. Do not retain its pointer or a view made from it. C++ cannot
+prevent a callback from saving that pointer or copying the bytes; those escaped
+values remain the caller's responsibility. Callbacks return
+`void` or `std::expected<void, E>` with an owning, nothrow-movable error; direct borrowed
+errors and coroutine/task results are rejected. Custom error wrappers and referenced
+callable captures retain their caller-managed lifetime obligations.
+
+Moving or destroying the outside owner during the callback preserves the active view.
+The moved handle retains the same busy state: nested access and checked mutations,
+including empty append, clear and close, fail with `BUSY`. Operations, moves and
+destruction require external synchronization; concurrent mutable use is unsupported.
+
+Allocation/capability preparation failure preserves the old value. Ambiguous crypto
+failure wipes the affected payload and makes it unavailable; a replacement that has
+retired old storage never restores old bytes. Library diagnostics contain only operation,
+category and native code. Callback errors or exceptions remain separate from cleanup
+failures; opaque `callbackError` is never logged by the library. `cleanup` retains its
+first four errors in order and counts further errors in `omittedCleanupCount`.
+
+`clear()` leaves a valid empty value under the same policy. `close()` wipes and releases;
+it is idempotent after success. A release failure leaves the value unavailable and keeps
+the zeroed allocation metadata for a checked `close()` retry. Destruction makes at most
+two release attempts without throwing; persistent OS failure can leak zeroed storage.

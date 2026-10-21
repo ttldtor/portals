@@ -7,6 +7,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- `SecureString` provides bounded move-only byte storage, scoped plaintext access,
+  full-capacity wiping and native guard pages. Page locking, Linux core-dump
+  exclusion and Windows idle encryption are separately requested guarantees;
+  unsupported platforms require explicit `WIPE_ONLY` storage.
 - Declarative grids support automatic placement, spans, shared header/body columns
   and sticky scrolling through the existing managed lifecycle. C++ recipes and
   loaded scenes retain the explicit low-level grid API.
