@@ -1556,8 +1556,11 @@ std::expected<void, ManagedError> Scene::prepareChecked(std::source_location ori
               }
             }
             if (!state.failure) {
-              auto attached = detail::SceneAccess::attachThemeSelector(*state.managed);
-              if (!attached) {
+              detail::SetupFailureScope setup(state.anchor, State::setupEvent, "scene.themeSelector");
+              detail::CurrentSceneScope current(state.anchor);
+              auto attached = detail::SceneAccess::attachThemeSelector(*state.managed, &state.failure);
+
+              if (!state.failure && !attached) {
                 state.fail(attached.error(), "scene.themeSelector", origin);
               }
             }

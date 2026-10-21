@@ -1126,10 +1126,13 @@ struct SceneAccess {
   }
 
   /** @param owner Prepared managed owner whose configurations have completed.
+   * @param setupFailure Optional stable facade failure slot, borrowed only through this synchronous call.
+   * The initial factory may latch it through the existing setup collector; it is never retained by the view.
    * @return Checked attachment of its optional ready theme-selector view.
    */
-  static std::expected<void, ManagedError> attachThemeSelector(ManagedScene &owner) {
-    return owner.attachThemeSelector();
+  static std::expected<void, ManagedError>
+  attachThemeSelector(ManagedScene &owner, const std::optional<ManagedError> *setupFailure = nullptr) {
+    return owner.attachThemeSelector(setupFailure);
   }
 
   /** @param owner UI-admitted managed owner borrowed by an internal synchronous bridge.

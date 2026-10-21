@@ -21,12 +21,28 @@ consumer. Its main function contains no replay transport or terminal emulator.
 
 ## Composition and commands
 
-Place the selector inside an `ui::overlayHost`. Install its model with the
-ordinary `ui::themeSelection` scene stage. Attachment happens after scene
-configuration, so the view can refer to that model in its description. A model
-and its view must belong to the same scene; only one view attaches to a model.
+Declare the selector as a scene layer with `ui::scene(body, selectorRecipe)` and
+pass its choices directly to `ui::themeSelector(reference, choices)`. The scene
+owns the model and view. No separate model reference or installation stage is
+required. A second model installation is rejected with a typed setup error.
 
-`ui::ThemeSelectorRef` observes the scene-owned view. Copying it does not keep
+For catalog limits, text resolution or an initial choice, pass an owning
+`ui::ThemeSelectorCatalog`. Its `choices` field contains the same entries;
+`selection` uses the existing `ThemeSelectionOptions`. Optional `initialId`
+previews and commits that choice after scene configuration and before selector
+publication. Startup selection does not invoke `onCommitted`. A failed initial
+choice follows the normal setup-error and cleanup path before terminal entry.
+With `ui::Scene`, the initial factory runs in that scene's preparation context. A collected short
+command failure prevents committing the initial choice and publishing the
+selector. Already completed application actions are not rolled back.
+
+The explicit `ui::ThemeSelectionRef` overload and `ui::themeSelection` stage
+remain available for applications supplying their own model or controls. Model
+and view must belong to the same scene. Attachment follows scene configuration;
+mixing a default catalog with a second explicit installation is an error.
+
+`ui::Ref<ThemeSelector>` observes the scene-owned view; the legacy
+`ui::ThemeSelectorRef` remains supported. Copying either reference does not keep
 the scene or controls alive. Its checked commands return
 `std::expected<void, ManagedError>`:
 
@@ -36,6 +52,14 @@ the scene or controls alive. Its checked commands return
 | `apply()` | Commits the selected active preview, invokes the optional callback once, then attempts to close. |
 | `cancel()` | Restores the saved theme before attempting to close. |
 | `closeKeepingPreview()` | Hides the view without applying or restoring the preview. |
+
+The same reference provides checked `preview(id)` and `commit()` for programmatic
+theme changes through its existing model. `commit()` promotes an active preview;
+it does not invoke `onCommitted`, close the view or replace `lastApply()`.
+Use `apply()` for the selected UI choice and its callback/close outcome.
+`snapshot()` returns the model's owning immutable catalog and authority snapshot.
+These operations require an attached live view. Snapshots already returned remain
+readable after retirement; the reference does not keep the model alive.
 
 Escape and an outside click use checked cancellation. A restoration failure
 keeps the view usable. **Close (keep preview)** is an explicit recovery action

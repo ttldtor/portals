@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include "../styles/theme_receiver.hpp"
 #include "dialog_state.hpp"
 #include "theme_selection_state.hpp"
-#include "../styles/theme_receiver.hpp"
 
-#include <portals/theme_selector.hpp>
 #include <portals/key_binding.hpp>
 #include <portals/scroll_controls.hpp>
+#include <portals/theme_selector.hpp>
 
 namespace portals::detail {
 enum class ThemeSelectorCommand {
@@ -27,6 +27,7 @@ struct ThemeSelectorRecord {
   std::shared_ptr<StyleThemeReceiver> receiver;
   std::shared_ptr<std::function<std::expected<void, ManagedError>(std::string_view)>> callback;
   std::optional<std::string> shortcut;
+  std::optional<std::string> initialId;
   KeyBinding opening;
   std::shared_ptr<ActionCancellation> openingLifetime;
   Node<Column> rows;
@@ -63,6 +64,11 @@ struct ThemeSelectorTarget {
 struct ThemeSelectorAccess {
   static Description<Dialog> describe(ThemeSelectorRef reference, ThemeSelectionRef model,
                                       ThemeSelectorOptions options);
+  static Description<Dialog> describeDefault(ThemeSelectorRef reference, std::span<const ThemeChoice> choices,
+                                             const ThemeSelectionOptions &selection,
+                                             const std::optional<std::string> &initialId, ThemeSelectorOptions options);
+  static std::expected<std::shared_ptr<portals::detail::ThemeSelectorRecord>, ManagedError>
+  enter(const std::shared_ptr<ThemeSelectorTarget> &target, std::source_location origin);
   static std::expected<void, ManagedError> command(const std::shared_ptr<ThemeSelectorTarget> &target,
                                                    portals::detail::ThemeSelectorCommand command, std::size_t index,
                                                    std::source_location origin);

@@ -3407,6 +3407,29 @@ Description<Dialog> dialog(Ref<Dialog> reference, std::string_view title, Body &
   return dialog(std::move(reference), TextValue(title), std::forward<Body>(body), options);
 }
 
+/// @cond INTERNAL
+namespace detail {
+Description<Dialog> defaultThemeSelector(ThemeSelectorRef reference, std::span<const ThemeChoice> choices,
+                                         const ThemeSelectionOptions &selection,
+                                         const std::optional<std::string> &initialId, ThemeSelectorOptions options);
+} // namespace detail
+
+template <std::size_t N>
+  requires(N > 0)
+Description<Dialog> themeSelector(ThemeSelectorRef reference, const ThemeChoice (&choices)[N],
+                                  ThemeSelectorOptions options) {
+  return detail::defaultThemeSelector(std::move(reference), choices, ThemeSelectionOptions{}, {}, std::move(options));
+}
+
+template <class Catalog>
+  requires std::same_as<std::remove_cvref_t<Catalog>, ThemeSelectorCatalog>
+Description<Dialog> themeSelector(ThemeSelectorRef reference, Catalog &&catalog, ThemeSelectorOptions options) {
+  return detail::defaultThemeSelector(std::move(reference), catalog.choices, catalog.selection, catalog.initialId,
+                                      std::move(options));
+}
+
+/// @endcond
+
 /** @brief Owning compact size stage; uses the same methods and existing solver as ordinary composition. */
 struct SizeModifier {
   detail::SizeChange change; ///< Owning checked policy operation; no scene/widget borrow.

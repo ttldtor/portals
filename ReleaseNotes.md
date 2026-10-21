@@ -7,6 +7,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Theme selectors accept a catalog directly and own their existing selection model;
+  an optional initial choice is applied after scene configuration. The same
+  reference provides checked programmatic preview, commit and snapshot access.
+
 - Scenes can declare dialog layers beside their ordinary body and create one overlay
   host automatically, while retaining explicit host configuration.
 
