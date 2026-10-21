@@ -319,10 +319,11 @@ std::expected<std::unique_ptr<ManagedScene>, ManagedError> ManagedScene::create(
 
   if (!options.maxNodes || !options.maxStates || !options.maxModels || !options.maxKeyHandlers ||
       !options.maxClickHandlers || !options.maxClickHandlersPerNode || !options.keySequenceTimeout ||
-      !options.maxMessageRequests || !options.maxKeyLabelBytes || !options.maxKeyDescriptionBytes ||
-      !options.maxKeyProjectionBytes || !options.maxLayoutHandlers || !options.maxLayoutPublicationRetries ||
-      !options.maxObservers || !options.maxObserversPerNode || !options.maxObserverRecoveryPasses ||
-      !diagnostics.maxErrors || !diagnostics.maxContexts || !diagnostics.maxContextBytes ||
+      !options.maxEditingHandlers || !options.maxEditingHandlersPerNode || !options.maxMessageRequests ||
+      !options.maxKeyLabelBytes || !options.maxKeyDescriptionBytes || !options.maxKeyProjectionBytes ||
+      !options.maxLayoutHandlers || !options.maxLayoutPublicationRetries || !options.maxObservers ||
+      !options.maxObserversPerNode || !options.maxObserverRecoveryPasses || !diagnostics.maxErrors ||
+      !diagnostics.maxContexts || !diagnostics.maxContextBytes ||
       diagnostics.maxErrors > maxElementCount<ManagedDiagnostic>() ||
       diagnostics.maxContexts > maxElementCount<ManagedDiagnosticContext>() ||
       diagnostics.maxContextBytes > static_cast<std::size_t>(std::numeric_limits<std::ptrdiff_t>::max())) {
@@ -683,6 +684,7 @@ std::expected<void, ManagedError> ManagedScene::remove(Node<Widget> node) {
 
     if (!live && retired(live.error())) {
       retireClicks(*entry);
+      retireEditing(*entry);
       retireLayouts(*entry);
 
       return true;
@@ -1508,6 +1510,99 @@ void ManagedScene::retireClicks(Entry &entry) noexcept {
   entry.clicks->records.clear();
 }
 
+void ManagedScene::retireEditing(Entry &entry) noexcept {
+  if (!entry.editing || entry.editing->retired) {
+    return;
+  }
+
+  entry.editing->retired = true;
+  editingHandlers_ -= entry.editing->records.size();
+  entry.editing->records.clear();
+}
+
+std::expected<void, ManagedError> ManagedScene::registerEditing(Node<LineEdit> node, EditorEventRecord record) {
+  auto allowed = boundary(ManagedPhase::BIND, node);
+
+  if (!allowed) {
+    return allowed;
+  }
+
+  auto entry = find(node);
+
+  if (!entry || !entry->editing || entry->editing->retired ||
+      !std::visit(
+        [](const auto &action) {
+          return static_cast<bool>(action);
+        },
+        record.action)) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
+  }
+
+  if (editingHandlers_ >= options_.maxEditingHandlers ||
+      entry->editing->records.size() >= options_.maxEditingHandlersPerNode) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NODE_LIMIT));
+  }
+
+  try {
+    entry->editing->records.push_back(std::make_shared<EditorEventRecord>(std::move(record)));
+    ++editingHandlers_;
+
+    return {};
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
+  }
+}
+
+template <class Event>
+void ManagedScene::dispatchEditing(Node<LineEdit> node, const std::shared_ptr<EditorEventChain> &chain,
+                                   const std::weak_ptr<const void> &lifetime, const Event &event) {
+  if (lifetime.expired() || chain->retired || closed_) {
+    return;
+  }
+
+  const auto count = chain->records.size();
+  auto origin = std::source_location::current();
+
+  try {
+    for (std::size_t index = 0; index < count; ++index) {
+      if (lifetime.expired() || chain->retired) {
+        return;
+      }
+
+      if (closed_ || !app_.tree().inspect(node)) {
+        return;
+      }
+
+      // Appending may reallocate and removal may clear the registry during this call.
+      const auto record = chain->records[index];
+      const auto *action = std::get_if<std::function<EditorCommandResult(const Event &)>>(&record->action);
+
+      if (!action) {
+        continue;
+      }
+
+      origin = record->origin;
+      const auto result = (*action)(event);
+
+      if (!result) {
+        if (!lifetime.expired() && !commandReported(result, lifetime)) {
+          remember(error(ManagedPhase::INPUT, node, result.result_.error()), origin);
+        }
+
+        return;
+      }
+    }
+  } catch (const std::bad_alloc &) {
+    if (!lifetime.expired()) {
+      remember(error(ManagedPhase::INPUT, node, TreeError::NO_MEMORY), origin);
+    }
+  } catch (...) {
+    if (!lifetime.expired()) {
+      remember(error(ManagedPhase::INPUT, node, TreeError::CALLBACK_FAILED), origin);
+    }
+  }
+}
+
 namespace {
 bool sameGeometry(const NodeGeometry &left, const NodeGeometry &right) noexcept {
   return left.local == right.local && left.surface == right.surface && left.clip == right.clip;
@@ -2119,16 +2214,18 @@ ManagedScene::bind(Node<LineEdit> node, ManagedState<std::string> model,
 
   std::shared_ptr<detail::EditorCommandFeedback> feedback;
   std::unique_ptr<ManagedState<std::string>> incomingModel;
+  std::shared_ptr<EditorEventChain> editing;
 
   try {
     incomingModel = std::make_unique<ManagedState<std::string>>(model);
     feedback = std::make_shared<detail::EditorCommandFeedback>();
+    editing = std::make_shared<EditorEventChain>();
   } catch (const std::bad_alloc &) {
     return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
   }
 
   try {
-    auto bound = bindLineEdit(
+    auto bound = bindLineEditWithEvents(
       app_.tree(), app_.router(), node, *property,
       [this, node, lifetime = std::weak_ptr(lifetime_), feedback,
        result = ui::detail::currentSceneCallback(facadeContext(), std::move(incomingResult))](LineEditResult receipt) {
@@ -2200,7 +2297,18 @@ ManagedScene::bind(Node<LineEdit> node, ManagedState<std::string> model,
       std::move(clipboard),
       incomingValidate ? std::function<bool(std::string_view)>{ui::detail::currentSceneCallback(
                            facadeContext(), std::move(incomingValidate))}
-                       : std::function<bool(std::string_view)>{});
+                       : std::function<bool(std::string_view)>{},
+      LineEditEvents{
+        [this, node, editing, lifetime = std::weak_ptr<const void>(lifetime_)](const TextEditedEvent &event) {
+          if (!lifetime.expired()) {
+            dispatchEditing(node, editing, lifetime, event);
+          }
+        },
+        [this, node, editing, lifetime = std::weak_ptr<const void>(lifetime_)](const EditingFinishedEvent &event) {
+          if (!lifetime.expired()) {
+            dispatchEditing(node, editing, lifetime, event);
+          }
+        }});
 
     if (!bound) {
       return std::unexpected(error(ManagedPhase::BIND, node, bound.error()));
@@ -2208,6 +2316,7 @@ ManagedScene::bind(Node<LineEdit> node, ManagedState<std::string> model,
 
     bound->commandFeedback(std::move(feedback));
     (*entry)->binding.emplace<LineEditBinding>(std::move(*bound));
+    (*entry)->editing = std::move(editing);
     (*entry)->textModel = std::move(incomingModel);
 
     return {};
@@ -3126,6 +3235,7 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
         std::erase_if(scene.entries_, [&](const auto &entry) {
           if (entry->removed) {
             scene.retireClicks(*entry);
+            scene.retireEditing(*entry);
             scene.retireLayouts(*entry);
           }
 
@@ -3569,6 +3679,7 @@ std::expected<void, ManagedError> ManagedScene::close() {
 
   for (auto &entry : entries_) {
     retireClicks(*entry);
+    retireEditing(*entry);
     retireLayouts(*entry);
   }
 

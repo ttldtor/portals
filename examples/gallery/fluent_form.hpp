@@ -39,12 +39,14 @@ inline portals::ui::Scene form(portals::ui::OptionsRef<example::Options> options
   using namespace portals;
 
   ui::Ref<ThemeSelector> selector;
+  ui::Ref<LineEdit> name;
 
   // clang-format off
   auto body = ui::vbox(
     ui::label("Portals gallery | F2 theme | F10 quit"),
-    ui::label("Name (Enter commits; Tab changes focus):"),
-    ui::lineEdit("Portals", {.options = {.editMode = EditMode::EXPLICIT}}),
+    ui::label("Name (live preview below; Enter commits; Tab changes focus):"),
+    ui::lineEdit(name, "Portals", {.options = {.editMode = EditMode::EXPLICIT}}),
+    ui::label(name.text()),
     ui::checkbox("Alerts"),
     ui::button("Run (no model change)", [run = std::move(run)] {
       if (run) {

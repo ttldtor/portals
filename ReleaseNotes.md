@@ -7,6 +7,13 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Label and button captions can observe a text field's visible draft or accepted
+  value directly, including references declared later in the scene. Text-property
+  assignment remains a one-time copy.
+- Declarative `ui::onTextEdited` and `ui::onEditingFinished` handlers expose actual
+  user edits and the existing Enter/focus-loss publication outcome without manual
+  subscriptions or repeated validation.
+
 - Theme selectors accept a catalog directly and own their existing selection model;
   an optional initial choice is applied after scene configuration. The same
   reference provides checked programmatic preview, commit and snapshot access.
@@ -32,6 +39,9 @@ planned work is not included. An **Unreleased** heading has no publication date.
 - Online documentation now follows `main` independently of releases, with a development marker, source revision and UTC build date. Release HTML archives retain their versioned documentation.
 
 ### Fixed
+
+- Managed action adapters check scene lifetime before restoring admission state or
+  recording callback results after defensive teardown during manual event routing.
 
 - Message-dialog declarations preserve the caller's Win32 `MessageBox` macro and use consistent class names regardless of Windows header order.
 - Unicode glyph declarations preserve the caller's Win32 `UNICODE` macro.

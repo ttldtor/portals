@@ -1432,6 +1432,153 @@ TEST_CASE("draft and committed sources preserve all editor confirmation modes an
   }
 }
 
+TEST_CASE("live captions resolve pending fields and preserve draft versus committed text") {
+  for (const auto mode : {EditMode::IMMEDIATE, EditMode::ON_COMPLETION, EditMode::EXPLICIT}) {
+    Fixture fixture;
+    auto model = take(fixture.scene->state(std::string("initial")));
+    ui::Ref<LineEdit> field;
+    ui::Ref<Label> preview, accepted, independent;
+    ui::Ref<Button> button;
+    ui::LineEditConfig config;
+    config.options.editMode = mode;
+    config.validate = [](std::string_view value) {
+      return value != "invalid";
+    };
+    take(
+      ui::mount(*fixture.scene, ui::vbox(ui::label(preview, field.text()), ui::button(button, field.draftText()),
+                                         ui::lineEdit(field, model, config), ui::label(accepted, field.committedText()),
+                                         ui::label(independent, "copy"))));
+    CHECK(take(preview.text().get()) == "initial");
+    CHECK(take(button.text().get()) == "initial");
+    take((independent.text() = field.text()).result());
+    take((field.text() = "invalid").result());
+    take(fixture.scene->prepare(*fixture.app, {40, 10}));
+    CHECK(take(preview.text().get()) == "invalid");
+    CHECK(take(button.text().get()) == "invalid");
+    CHECK(take(accepted.text().get()) == "initial");
+    CHECK(take(independent.text().get()) == "initial");
+    take((field.text() = "changed").result());
+    take(fixture.scene->prepare(*fixture.app, {40, 10}));
+    CHECK(take(accepted.text().get()) == (mode == EditMode::IMMEDIATE ? "changed" : "initial"));
+    take((field.text() = "e\u0301 \u754c").result());
+    take(fixture.scene->prepare(*fixture.app, {40, 10}));
+    CHECK(take(preview.captionText().snapshot()).graphemes().size() == 3);
+    CHECK(take(button.text().get()) == "e\u0301 \u754c");
+    take(fixture.app->tree().consumeFrameRequest());
+    take(fixture.scene->prepare(*fixture.app, {40, 10}));
+    CHECK(take(fixture.app->tree().consumeFrameRequest()) == Invalidation::NONE);
+  }
+}
+
+TEST_CASE("live caption chains initialize source-first and reject cycles transactionally") {
+  Fixture fixture;
+  ui::Ref<Label> first, second, third;
+  take(ui::mount(*fixture.scene, ui::vbox(ui::label(third, second.text()), ui::label(second, first.text()),
+                                          ui::label(first, "source"))));
+  CHECK(take(third.text().get()) == "source");
+  take((first.text() = "next").result());
+  take(fixture.scene->prepare(*fixture.app, {40, 10}));
+  CHECK(take(third.text().get()) == "next");
+  take(fixture.scene->remove(first.node()));
+  take(fixture.scene->prepare(*fixture.app, {40, 10}));
+  CHECK(take(third.text().get()) == "next");
+
+  ui::Ref<Label> left, right;
+  auto cyclic = ui::mount(*fixture.scene, ui::vbox(ui::label(left, right.text()), ui::label(right, left.text())));
+  REQUIRE_FALSE(cyclic);
+  CHECK(hasCause(cyclic.error(), TreeError::INVALID_ARGUMENT));
+  CHECK(left.node() == Node<Label>{});
+  CHECK(right.node() == Node<Label>{});
+  take(ui::mount(*fixture.scene, ui::label(left, "retry")));
+  CHECK(take(left.text().get()) == "retry");
+}
+
+TEST_CASE("live captions reject absent foreign and wrong-thread sources without publishing receivers") {
+  Fixture fixture;
+  Fixture foreign;
+  ui::Ref<Label> missing, receiver, remote;
+  auto absent = ui::mount(*fixture.scene, ui::label(receiver, missing.text()));
+  REQUIRE_FALSE(absent);
+  CHECK(hasCause(absent.error(), TreeError::CLOSED));
+  CHECK(receiver.node() == Node<Label>{});
+  take(ui::mount(*foreign.scene, ui::label(remote, "foreign")));
+  auto differentScene = ui::mount(*fixture.scene, ui::label(receiver, remote.text()));
+  REQUIRE_FALSE(differentScene);
+  CHECK(hasCause(differentScene.error(), TreeError::INVALID_ARGUMENT));
+  std::optional<ui::TextSource> wrongThread;
+  std::thread worker([&] {
+    ui::Ref<Label> local;
+    wrongThread.emplace(local.captionText());
+  });
+  worker.join();
+  auto wrong = ui::mount(*fixture.scene, ui::label(receiver, *wrongThread));
+  REQUIRE_FALSE(wrong);
+  CHECK(hasCause(wrong.error(), TreeError::WRONG_THREAD));
+  take(ui::mount(*fixture.scene, ui::label(receiver, "retry")));
+  CHECK(take(receiver.text().get()) == "retry");
+}
+
+TEST_CASE("last live caption receiver releases its private capture budget") {
+  auto app = take(Application::create());
+  ManagedOptions options;
+  options.maxStates = 1;
+  auto scene = take(ManagedScene::create(*app, options));
+  ui::Ref<Label> source, first, second;
+  take(ui::mount(
+    *scene, ui::vbox(ui::label(source, "source"), ui::label(first, source.text()), ui::label(second, source.text()))));
+  CHECK(take(second.text().get()) == "source");
+  take(scene->remove(first.node()));
+  take((source.text() = "retained").result());
+  take(scene->prepare(*app, {40, 10}));
+  CHECK(take(second.text().get()) == "retained");
+  take(scene->remove(second.node()));
+  take(scene->prepare(*app, {40, 10}));
+  auto released = scene->state(std::string("budget available"));
+  REQUIRE(released);
+}
+
+TEST_CASE("new live caption reads a fresh source despite an older shared capture") {
+  Fixture fixture;
+  ui::Ref<Label> source, first, second;
+  take(ui::mount(*fixture.scene, ui::vbox(ui::label(source, "old"), ui::label(first, source.text()))));
+  take((source.text() = "new").result());
+  take(ui::mount(*fixture.scene, ui::label(second, source.text())));
+  CHECK(take(second.text().get()) == "new");
+  take(fixture.scene->prepare(*fixture.app, {40, 10}));
+  CHECK(take(first.text().get()) == "new");
+  CHECK(take(second.text().get()) == "new");
+}
+
+TEST_CASE("standalone live caption allocation failure rolls back the node and private observation") {
+  constexpr auto UNLIMITED = std::numeric_limits<std::ptrdiff_t>::max();
+  std::ptrdiff_t allocationCount{};
+  for (std::ptrdiff_t budget = -1; budget <= allocationCount; ++budget) {
+    auto app = take(Application::create());
+    ManagedOptions options;
+    options.maxStates = 1;
+    auto scene = take(ManagedScene::create(*app, options));
+    ui::Ref<Label> source, receiver;
+    take(ui::mount(*scene, ui::label(source, "source")));
+    auto description = ui::label(receiver, source.text());
+    allocationsBeforeFailure = budget < 0 ? UNLIMITED : budget;
+    auto mounted = ui::mount(*scene, std::move(description));
+    if (budget < 0) {
+      allocationCount = UNLIMITED - allocationsBeforeFailure.load();
+    }
+    allocationsBeforeFailure = -1;
+    if (budget < 0) {
+      REQUIRE(mounted);
+      REQUIRE(allocationCount > 0);
+    } else if (!mounted) {
+      CHECK(hasCause(mounted.error(), TreeError::NO_MEMORY));
+      CHECK(receiver.node() == Node<Label>{});
+      CHECK(take(app->tree().inspect(scene->root())).children.size() == 1);
+      take(ui::mount(*scene, ui::label(receiver, source.text())));
+    }
+    CHECK(take(receiver.text().get()) == "source");
+  }
+}
+
 TEST_CASE("text source acquisition is lazy and snapshots own bytes across removal close and threads") {
   Fixture fixture;
   ui::Ref<Label> label;
@@ -1636,8 +1783,11 @@ TEST_CASE("rejected editor notifications recover shared captions from the latest
   ui::Ref<Label> label;
   ui::Ref<Button> button;
   ui::Ref<LineEdit> editor;
+  ui::Ref<Label> liveDraft, liveAccepted;
 
-  take(ui::mount(*scene, ui::column(ui::label(label, model), ui::button(button, model), ui::lineEdit(editor, model))));
+  take(ui::mount(*scene,
+                 ui::column(ui::label(label, model), ui::button(button, model), ui::lineEdit(editor, model),
+                            ui::label(liveDraft, editor.text()), ui::label(liveAccepted, editor.committedText()))));
   take(scene->prepare(*app, {40, 10}));
   take(app->tree().consumeFrameRequest());
   take(model.set("queued"));
@@ -1652,6 +1802,8 @@ TEST_CASE("rejected editor notifications recover shared captions from the latest
   CHECK(take(label.text().get()) == "latest");
   CHECK(take(button.text().get()) == "latest");
   CHECK(take(editor.text().get()) == "latest");
+  CHECK(take(liveDraft.text().get()) == "latest");
+  CHECK(take(liveAccepted.text().get()) == "latest");
   take(app->scheduler().dispatch());
   take(scene->prepare(*app, {40, 10}));
   CHECK(take(label.text().get()) == "latest");

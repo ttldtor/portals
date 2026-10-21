@@ -197,7 +197,14 @@ void owningFormEquivalence() {
         const auto stats = take(before.run(terminal));
 
         {
-          const auto after = fluentForm(script, SIZE, theme, colors);
+          auto fluentScript = script;
+          for (auto &input : fluentScript) {
+            // The public form's live draft preview places Run one row below the historical fixture.
+            if (input.bytes == "\x1b[<0;2;5M\x1b[<0;2;5m") {
+              input.bytes = "\x1b[<0;2;6M\x1b[<0;2;6m";
+            }
+          }
+          const auto after = fluentForm(fluentScript, SIZE, theme, colors);
 
           if (!terminal.closed || stats.inputs != after.stats.inputs || before.calls != after.calls ||
               after.bytes.empty()) {

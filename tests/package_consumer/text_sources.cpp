@@ -74,6 +74,39 @@ int main() {
   }
 
   checked(app->router().invoke(button.node(), {Action::ACTIVATE}));
+
+  ui::Ref<LineEdit> draft;
+  ui::Ref<Label> preview, accepted;
+  ui::LineEditConfig config;
+  config.options.editMode = EditMode::EXPLICIT;
+  config.validate = [](std::string_view value) {
+    return value != "invalid";
+  };
+  checked(ui::mount(*owner, ui::vbox(ui::label(preview, draft.text()), ui::lineEdit(draft, "base", config),
+                                     ui::label(accepted, draft.committedText()))));
+  int edited{}, finished{};
+  bool rejected{};
+  checked(owner->onTextEdited(draft.node(), [&] {
+    ++edited;
+  }));
+  checked(owner->onEditingFinished(draft.node(), [&](const EditingFinishedEvent &event) {
+    ++finished;
+    rejected = event.outcome == EditingFinishedOutcome::VALIDATION_REJECTED;
+  }));
+  checked((draft.text() = "invalid").result());
+  checked(app->router().setFocus(draft.node()));
+  checked(app->router().dispatch(KeyEvent{InputKey::ENTER}));
+  checked(owner->prepare(*app, {40, 12}));
+  if (edited != 0 || finished != 1 || !rejected || checked(preview.text().get()) != "invalid" ||
+      checked(accepted.text().get()) != "base") {
+    return 7;
+  }
+  checked(app->router().dispatch(TextInputEvent{U'!'}));
+  checked(app->router().dispatch(KeyEvent{InputKey::ENTER}));
+  checked(owner->prepare(*app, {40, 12}));
+  if (edited != 1 || finished != 2 || rejected || checked(accepted.text().get()) != "invalid!") {
+    return 8;
+  }
   checked(owner->close());
 
   return calls == 1 && !committed.snapshot() && retained.bytes() == "external" ? 0 : 6;

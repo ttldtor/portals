@@ -958,6 +958,52 @@ TEST_CASE("compact Undo button survives scene destruction in validator and resul
   }
 }
 
+TEST_CASE("checked action adapters tolerate defensive manual-router teardown") {
+  enum class Outcome {
+    SUCCESS,
+    FAILURE,
+    THROW
+  };
+
+  for (const bool composed : {false, true}) {
+    for (const auto outcome : {Outcome::SUCCESS, Outcome::FAILURE, Outcome::THROW}) {
+      Fixture fixture;
+      ui::Ref<Button> button;
+
+      take(ui::mount(*fixture.scene, ui::button(button, "teardown")));
+
+      const auto node = button.node();
+      auto action = [&]() -> std::expected<void, ManagedError> {
+        fixture.scene.reset();
+
+        if (outcome == Outcome::THROW) {
+          throw std::runtime_error("after teardown");
+        }
+
+        if (outcome == Outcome::FAILURE) {
+          return std::unexpected(ManagedError{ManagedPhase::INPUT, node.id(), TreeError::CALLBACK_FAILED, {}, {}});
+        }
+
+        return {};
+      };
+
+      if (composed) {
+        take(ui::detail::ClickAccess::attach(*fixture.scene, button, action, std::source_location::current()));
+      } else {
+        take(fixture.scene->onClick(node, action));
+      }
+
+      // The application/router stay alive; this does not admit teardown during Scene::run or prepare.
+      take(fixture.app->router().invoke(node, {Action::ACTIVATE}));
+      CHECK_FALSE(fixture.scene);
+      const auto observation = button.text().get();
+
+      REQUIRE_FALSE(observation);
+      CHECK(std::get<TreeError>(observation.error().cause) == TreeError::CLOSED);
+    }
+  }
+}
+
 TEST_CASE("programmatic history override remains owning across concatenation resource resolution and Ref destruction") {
   Fixture fixture;
   ui::Ref<Label> suffix;

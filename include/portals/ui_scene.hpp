@@ -1203,6 +1203,16 @@ struct SceneAccess {
     owner.onEventImpl(callback, origin);
   }
 
+  /** @tparam Callback Owning checked editor event registration against the existing scene.
+   * @param owner Facade receiving the deferred or runtime registration.
+   * @param callback Configuration transferred only after UI admission.
+   * @param origin Original pipe registration site retained in diagnostics.
+   */
+  template <SceneConfiguration Callback>
+  static void onEditing(Scene &owner, Callback &callback, std::source_location origin) {
+    owner.onEventImpl(callback, origin);
+  }
+
   /** @tparam Callback Owning checked layout registration against the existing managed scene.
    * @param owner Facade receiving the deferred or runtime registration.
    * @param callback Owning configuration transferred only after UI admission.

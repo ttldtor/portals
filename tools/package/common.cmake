@@ -7,17 +7,9 @@ cmake_minimum_required(VERSION 3.24)
 
 function(bundleStageConsumer source destination)
   file(COPY "${source}/tests/package_consumer/" DESTINATION "${destination}")
-  # Compile the exact native guides against the installed SDK, without source-tree fallbacks.
-  file(COPY "${source}/docs/examples/guide_text_transforms.cpp"
-    "${source}/docs/examples/guide_application_factory.cpp"
-    "${source}/docs/examples/guide_nested_scroll.cpp"
-    "${source}/docs/examples/guide_dialog.cpp"
-    "${source}/docs/examples/guide_message_box.cpp"
-    "${source}/docs/examples/guide_toast.cpp"
-    "${source}/docs/examples/guide_key_help.cpp"
-    "${source}/docs/examples/guide_theme_selection.cpp"
-    "${source}/docs/examples/guide_theme_selector.cpp"
-    DESTINATION "${destination}/docs/examples")
+  # Keep complete guide sources beside the consumer targets without a second file list to maintain.
+  file(COPY "${source}/docs/examples/" DESTINATION "${destination}/docs/examples"
+    PATTERN "CMakeLists.txt" EXCLUDE)
   # Browser development dependencies are not native consumer sources.
   file(COPY "${source}/examples" DESTINATION "${destination}" PATTERN "node_modules" EXCLUDE)
   file(COPY "${source}/tests/examples" "${source}/tests/support" DESTINATION "${destination}/tests")

@@ -36,6 +36,7 @@ struct Access;
 struct RefAccess;
 struct SceneAccess;
 struct ClickAccess;
+struct EditorEventAccess;
 struct NamedAccess;
 struct LayoutAccess;
 struct MessageAccess;
@@ -215,6 +216,8 @@ struct ManagedOptions {
   std::size_t maxKeyDescriptionBytes{2048};   ///< Positive input and resolved description byte cap.
   std::size_t maxKeyProjectionBytes{1048576}; ///< Positive aggregate logical projection payload budget.
   KeyCapabilities keyCapabilities{};          ///< Explicit native phase knowledge; UNKNOWN remains routable.
+  std::size_t maxEditingHandlers{256};        ///< Positive maximum retained callbacks across both editor event kinds.
+  std::size_t maxEditingHandlersPerNode{64};  ///< Positive combined callback maximum for one editor.
 };
 
 /** @brief Weak UI handle to a scene-owned Property, never an owning alias.
@@ -860,6 +863,46 @@ public:
                                          std::function<std::expected<void, TreeError>(LineEditResult)> result = {},
                                          std::shared_ptr<Clipboard> clipboard = {},
                                          std::function<bool(std::string_view)> validate = {});
+
+  /** @tparam Callback Owning managed action accepting TextEditedEvent or no arguments.
+   * @param node Editor whose existing binding supplies accepted user text changes.
+   * @param callback FIFO action; retained by the scene, including during self-removal.
+   * @param origin Registration site retained for diagnostics.
+   * @return Checked registration or affinity, identity, finite budget or allocation error.
+   */
+  template <class Callback>
+    requires detail::ManagedAction<Callback, TextEditedEvent>
+  std::expected<void, ManagedError> onTextEdited(Node<LineEdit> node, Callback callback,
+                                                 std::source_location origin = std::source_location::current()) {
+    try {
+      return registerEditing(node,
+                             EditorEventRecord{actionAdapter<TextEditedEvent>(std::move(callback), origin), origin});
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
+    } catch (...) {
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CALLBACK_FAILED));
+    }
+  }
+
+  /** @tparam Callback Owning managed action accepting EditingFinishedEvent or no arguments.
+   * @param node Editor whose existing binding supplies Enter and focus-loss boundaries.
+   * @param callback FIFO action; return checked failures through the existing diagnostics.
+   * @param origin Registration site retained for diagnostics.
+   * @return Checked registration or affinity, identity, finite budget or allocation error.
+   */
+  template <class Callback>
+    requires detail::ManagedAction<Callback, EditingFinishedEvent>
+  std::expected<void, ManagedError> onEditingFinished(Node<LineEdit> node, Callback callback,
+                                                      std::source_location origin = std::source_location::current()) {
+    try {
+      return registerEditing(
+        node, EditorEventRecord{actionAdapter<EditingFinishedEvent>(std::move(callback), origin), origin});
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
+    } catch (...) {
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CALLBACK_FAILED));
+    }
+  }
 
   /** @brief Observe accepted text as a one-way caption, independently of the control's action.
    * @param node Live managed control without an existing caption binding.
@@ -1615,6 +1658,7 @@ private:
   friend struct ui::detail::RefAccess;
   friend struct ui::detail::SceneAccess;
   friend struct ui::detail::ClickAccess;
+  friend struct ui::detail::EditorEventAccess;
   friend struct ui::detail::NamedAccess;
   friend struct ui::detail::LayoutAccess;
   friend struct ui::detail::MessageAccess;
@@ -1707,6 +1751,24 @@ private:
     bool retired{};
   };
 
+  struct EditorEventRecord {
+    std::variant<std::function<EditorCommandResult(const TextEditedEvent &)>,
+                 std::function<EditorCommandResult(const EditingFinishedEvent &)>>
+      action;
+    std::source_location origin;
+  };
+
+  struct EditorEventChain {
+    std::vector<std::shared_ptr<EditorEventRecord>> records = std::vector<std::shared_ptr<EditorEventRecord>>(0);
+    bool retired{};
+  };
+
+  std::expected<void, ManagedError> registerEditing(Node<LineEdit> node, EditorEventRecord record);
+  void retireEditing(Entry &entry) noexcept;
+  template <class Event>
+  void dispatchEditing(Node<LineEdit> node, const std::shared_ptr<EditorEventChain> &chain,
+                       const std::weak_ptr<const void> &lifetime, const Event &event);
+
   struct CaptionBinding {
     Node<Control> node;
     ManagedState<std::string> model;
@@ -1749,6 +1811,7 @@ private:
     bool stylePending{};
     bool removed{};
     std::shared_ptr<ClickChain> clicks;
+    std::shared_ptr<EditorEventChain> editing;
     std::shared_ptr<detail::ScrollIntentRecord> scrollIntent;
     std::shared_ptr<detail::ManagedScrollState> scrollOwner;
     std::shared_ptr<ScrollController> scrollController;
@@ -1810,14 +1873,18 @@ private:
 
   struct ActionAdmission {
     ManagedScene &scene;
+    std::weak_ptr<const void> lifetime;
     bool previous;
 
-    explicit ActionAdmission(ManagedScene &owner) noexcept : scene(owner), previous(owner.actionAdmitted_) {
+    explicit ActionAdmission(ManagedScene &owner) noexcept
+        : scene(owner), lifetime(owner.lifetime_), previous(owner.actionAdmitted_) {
       scene.actionAdmitted_ = true;
     }
 
     ~ActionAdmission() {
-      scene.actionAdmitted_ = previous;
+      if (!lifetime.expired()) {
+        scene.actionAdmitted_ = previous;
+      }
     }
   };
 
@@ -1848,7 +1915,7 @@ private:
                   } || (!std::invocable<Callback &, ui::ClickParams &> && requires(Callback &callback) {
                     { callback() } -> std::same_as<std::expected<void, ManagedError>>;
                   })) {
-      return clickAdapter([this, action = std::move(action),
+      return clickAdapter([this, lifetime = std::weak_ptr<const void>(lifetime_), action = std::move(action),
                            origin]([[maybe_unused]] ui::ClickParams &params) mutable -> EditorCommandResult {
         auto result = [&] {
           if constexpr (std::invocable<Callback &, ui::ClickParams &>) {
@@ -1857,6 +1924,9 @@ private:
             return action();
           }
         }();
+        if (lifetime.expired()) {
+          return EditorCommandResult(std::unexpected(TreeError::CLOSED), {}, false);
+        }
         if (!result && !result.error().registrationOrigin) {
           result.error().registrationOrigin = origin;
         }
@@ -1913,20 +1983,23 @@ private:
                   } || (!std::invocable<Callback &, const Event &> && requires(Callback &callback) {
                     { callback() } -> std::same_as<std::expected<void, ManagedError>>;
                   })) {
-      return actionAdapter<Event>(
-        [this, action = std::move(action), origin]([[maybe_unused]] const Event &event) mutable -> EditorCommandResult {
-          auto result = [&] {
-            if constexpr (std::invocable<Callback &, const Event &>) {
-              return action(event);
-            } else {
-              return action();
-            }
-          }();
-          if (!result && !result.error().registrationOrigin) {
-            result.error().registrationOrigin = origin;
+      return actionAdapter<Event>([this, lifetime = std::weak_ptr<const void>(lifetime_), action = std::move(action),
+                                   origin]([[maybe_unused]] const Event &event) mutable -> EditorCommandResult {
+        auto result = [&] {
+          if constexpr (std::invocable<Callback &, const Event &>) {
+            return action(event);
+          } else {
+            return action();
           }
-          return admitActionResult(std::move(result));
-        });
+        }();
+        if (lifetime.expired()) {
+          return EditorCommandResult(std::unexpected(TreeError::CLOSED), {}, false);
+        }
+        if (!result && !result.error().registrationOrigin) {
+          result.error().registrationOrigin = origin;
+        }
+        return admitActionResult(std::move(result));
+      });
     } else {
       return ui::detail::currentSceneCallback(
         facadeContext(),
@@ -2054,6 +2127,7 @@ private:
   std::size_t keyProjectionBytes_{};
   std::size_t keyHandlers_{};
   std::size_t clickHandlers_{};
+  std::size_t editingHandlers_{};
   std::vector<std::shared_ptr<LayoutRecord>> layouts_ = std::vector<std::shared_ptr<LayoutRecord>>(0);
   std::shared_ptr<detail::DialogHostRecord> dialogs_;
   std::vector<std::shared_ptr<detail::MessageRecord>> messages_ =

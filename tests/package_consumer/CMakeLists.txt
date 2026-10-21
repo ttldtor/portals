@@ -585,6 +585,14 @@ if(WIN32)
   target_sources(portals_text_sources_form_consumer PRIVATE no_dialogs.cpp)
 endif()
 
+# Compile the complete editing-event guide against the installed SDK; do not launch its native terminal.
+add_executable(portals_editor_events_form_consumer "docs/examples/guide_editor_events.cpp")
+target_link_libraries(portals_editor_events_form_consumer PRIVATE portals::core)
+set_target_properties(portals_editor_events_form_consumer PROPERTIES CXX_EXTENSIONS OFF)
+if(WIN32)
+  target_sources(portals_editor_events_form_consumer PRIVATE no_dialogs.cpp)
+endif()
+
 # Managed observation is available from relocated public headers and libraries.
 add_executable(portals_managed_observe_consumer managed_observe.cpp)
 target_link_libraries(portals_managed_observe_consumer PRIVATE portals::core)
