@@ -12,9 +12,11 @@ int main() {
   using namespace portals;
 
   auto scene = ui::scene([](ManagedScene &owner) {
-    return owner.state(std::string("Portals")).transform([](auto model) {
-      return ui::vbox(ui::lineEdit(model), ui::lineEdit(model));
-    });
+    return owner.state(std::string("Portals"))
+      .transform([](auto model) {
+        return ui::vbox(ui::lineEdit(model),
+          ui::lineEdit(model));
+      });
   });
 
   return scene
@@ -55,7 +57,10 @@ int main() {
     return 1;
   }
 
-  auto count = Property<int>::create(**tree, *root, 0, Invalidation::PAINT);
+  auto count = Property<int>::create(**tree,
+    *root,
+    0,
+    Invalidation::PAINT);
 
   if (!count) {
     return 1;
@@ -72,7 +77,8 @@ int main() {
     return 1;
   }
 
-  std::cout << (*before)->value << " -> " << update->snapshot->value << '\n';
+  std::cout << (*before)->value << " -> "
+            << update->snapshot->value << '\n';
 }
 ```
 

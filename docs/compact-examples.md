@@ -69,8 +69,9 @@ Formatting runs immediately; UTF-8 validation and width measurement run during
 using namespace portals;
 const auto amount = text("{:.2f}", 123.0);
 const auto unit = i18n("currency");
-const auto translated = unit.resolve(
-  WidthPolicy{}, [](std::string_view key) -> std::expected<std::string, TextResourceError> {
+const auto translated = unit.resolve(WidthPolicy{},
+  [](std::string_view key)
+    -> std::expected<std::string, TextResourceError> {
     if (key == "currency") {
       return "USD";
     }

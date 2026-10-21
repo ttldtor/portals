@@ -14,13 +14,15 @@ int main() {
 
     return ui::scene(
       ui::column(
-        ui::label("Ctrl+K, Ctrl+T opens Themes. F10 exits from the main form."),
-        ui::button("Themes", [selector] { return selector.open(); })),
+        ui::label("Ctrl+K, Ctrl+T opens Themes. "
+                  "F10 exits from the main form."),
+        ui::button("Themes", [selector] {
+          return selector.open();
+        })),
       ui::themeSelector(selector, {
         {"nord", "Nord", nordTheme},
         {"latte", "Latte", catppuccinLatteTheme}}))
       | ui::onKey("F10", ui::quit);
-  }
-    | ui::runApp();
+  } | ui::runApp();
   // clang-format on
 }

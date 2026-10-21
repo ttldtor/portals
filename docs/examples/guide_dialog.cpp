@@ -21,7 +21,6 @@ int main() {
         ui::checkbox("Reconnect automatically", true),
         ui::button("Close", [details] { details.dismiss(); }))))
       | ui::onKey("F10", ui::quit);
-  }
-    | ui::runApp();
+  } | ui::runApp();
   // clang-format on
 }

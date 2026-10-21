@@ -97,12 +97,14 @@ int main() {
   using namespace portals;
 
   auto scene = ui::scene([](ManagedScene &owner) {
-    return owner.state(std::string("Portals")).transform([](auto model) {
-      return ui::vbox(
-        ui::lineEdit(model),
-        ui::label(model),
-        ui::button(model, [] { ui::quit(); }));
-    });
+    return owner.state(std::string("Portals"))
+      .transform([](auto model) {
+        return ui::vbox(ui::lineEdit(model),
+          ui::label(model),
+          ui::button(model, [] {
+            ui::quit();
+          }));
+      });
   });
 
   return scene
@@ -152,16 +154,20 @@ int main() {
   using namespace portals;
 
   auto scene = ui::scene([](ManagedScene &owner) {
-    return owner.state(std::string("Portals")).transform([](auto model) {
-      ui::Ref<Label> summary;
+    return owner.state(std::string("Portals"))
+      .transform([](auto model) {
+        ui::Ref<Label> summary;
 
-      return ui::vbox(
-        ui::lineEdit(model),
-        ui::label(summary, "").observe(model, [summary](const std::string &value) {
-          summary.text() = text("Accepted: {}", value);
-        }),
-        ui::button("Quit", [] { ui::quit(); }));
-    });
+        return ui::vbox(ui::lineEdit(model),
+          ui::label(summary, "")
+            .observe(model,
+              [summary](const std::string &value) {
+                summary.text() = text("Accepted: {}", value);
+              }),
+          ui::button("Quit", [] {
+            ui::quit();
+          }));
+      });
   });
 
   return scene
@@ -473,17 +479,23 @@ scene
 // SPDX-License-Identifier: BSL-1.0
 #include <portals/ui.hpp>
 
-/** @brief Show whitespace-delimited words and extended graphemes from the live editor draft. */
+/**
+ * @brief Show whitespace-delimited words and extended graphemes
+ * from the live editor draft.
+ */
 int main() {
   using namespace portals;
 
   ui::Ref<LineEdit> input;
-  auto scene = ui::scene(ui::vbox(ui::lineEdit(input, "Hello, Portals!"), ui::label("Words"),
-                                  ui::virtualList(ui::words(input.draftText())).height(4),
-                                  ui::label("Graphemes (including spaces)"),
-                                  ui::virtualList(ui::graphemes(input.draftText())).height(4), ui::button("Quit", [] {
-                                    ui::quit();
-                                  })));
+  auto scene = ui::scene(ui::vbox(
+    ui::lineEdit(input, "Hello, Portals!"),
+    ui::label("Words"),
+    ui::virtualList(ui::words(input.draftText())).height(4),
+    ui::label("Graphemes (including spaces)"),
+    ui::virtualList(ui::graphemes(input.draftText())).height(4),
+    ui::button("Quit", [] {
+      ui::quit();
+    })));
 
   // clang-format off
   return scene

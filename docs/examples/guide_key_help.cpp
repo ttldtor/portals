@@ -26,7 +26,6 @@ int main() {
       | ui::onKey("F1", ui::keyInfo("Help"), [help] { return help.open(); })
       | ui::onKey("Escape", ui::keyInfo("Close help").scope(help), [help] { return help.close(); })
       | ui::onKey("F10", ui::keyInfo("Quit"), ui::quit);
-  }
-    | ui::runApp();
+  } | ui::runApp();
   // clang-format on
 }

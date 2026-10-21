@@ -14,6 +14,8 @@ import re
 import xml.etree.ElementTree as ET
 from urllib.parse import unquote, urlsplit, urlunsplit
 
+from turbo_diagrams import prepare_diagrams, rewrite_diagrams
+
 
 def page_filename(source, relative):
     """Return the existing Doxygen filename convention for a Markdown source."""
@@ -206,6 +208,7 @@ def finalize_languages(root, source, tag_files):
     api_urls = {compound.findtext("filename")
                 for compound in ET.parse(tag_files[default]).getroot().findall("compound")
                 if compound.get("kind") in {"class", "struct", "concept", "namespace", "file"}}
+    diagram_catalog = prepare_diagrams(root, source, tag_files)
     for code, locale in locales.items():
         directory = root / locale["directory"]
         (directory / "language-switch.js").write_text(SWITCH_SCRIPT, encoding="utf-8")
@@ -213,20 +216,17 @@ def finalize_languages(root, source, tag_files):
             current = path.relative_to(root).as_posix()
             page = by_url.get(current)
             content = path.read_text(encoding="utf-8")
+            # Doxygen adds a global folding button to the first numbered line
+            # even on included examples with no foldable source regions.
+            content = content.replace(
+                "document.addEventListener('DOMContentLoaded', codefold.init);",
+                "document.addEventListener('DOMContentLoaded', () => { "
+                "if (document.querySelector('div.foldopen')) codefold.init(); });")
             content = re.sub(r'<li class="footer">.*?</li>', '', content, flags=re.S)
-            def turbo_diagram(match):
-                name = match[1]
-                asset = path.parent / 'images' / 'turbo' / name
-                if not asset.is_file():
-                    return match[0]
-                title = ET.parse(asset).getroot().findtext('{http://www.w3.org/2000/svg}title')
-                return (match[0].replace('<object ', '<object class="standard-diagram" ', 1)
-                        + f'<img class="turbo-diagram" src="images/turbo/{name}" '
-                          f'alt="{html.escape(title or name, quote=True)}" width="760"/>')
-            content = re.sub(r'<object type="image/svg\+xml" data="(components\.svg|event-flow\.svg|ownership\.svg)"[^>]*></object>',
-                             turbo_diagram, content)
+            content = rewrite_diagrams(content, path, diagram_catalog)
             content = re.sub(r'<nav class="portals-languages".*?</nav>', '', content, flags=re.S)
             content = content.replace('<script src="appearance.js"></script>\n', '')
+            content = content.replace('<script src="turbo-scrollbars.js" defer></script>\n', '')
             content = content.replace('<script src="language-switch.js" defer></script>\n', '')
 
             def link(match):
@@ -297,15 +297,15 @@ def finalize_languages(root, source, tag_files):
                     controls.append(f'<span lang="{other}" title="{name} ({missing})" aria-label="{name} ({missing})">{short_name}</span>')
             theme_label = "Цветовая схема" if code == "ru" else "Color scheme"
             next_label = "Следующая" if code == "ru" else "Next"
-            theme_names = ("Системная", "Светлая", "Тёмная", "Turbo Vision") if code == "ru" else ("System", "Light", "Dark", "Turbo Vision")
+            theme_names = ("Системная", "Светлая", "Тёмная", "Turbo Vision", "Turbo2") if code == "ru" else ("System", "Light", "Dark", "Turbo Vision", "Turbo2")
             controls.append(f'<button type="button" class="portals-appearance" hidden '
                             f'data-label="{theme_label}" data-next-label="{next_label}" '
                             + " ".join(f'data-{value}="{name}"'
-                                       for value, name in zip(("system", "light", "dark", "turbo"), theme_names))
+                                       for value, name in zip(("system", "light", "dark", "turbo", "turbo2"), theme_names))
                             + '></button></nav>')
             # The native links work without JavaScript; script only adds mapped hashes.
             content = re.sub(r'(<div id="titlearea">)', r'\1' + "".join(controls), content, count=1)
-            content = content.replace('</head>', '<script src="appearance.js"></script>\n<script src="language-switch.js" defer></script>\n</head>', 1)
+            content = content.replace('</head>', '<script src="appearance.js"></script>\n<script src="turbo-scrollbars.js" defer></script>\n<script src="language-switch.js" defer></script>\n</head>', 1)
             path.write_text(development_label(content), encoding="utf-8")
         for path in directory.glob("*.js"):
             if path.name.startswith("navtreeindex"):

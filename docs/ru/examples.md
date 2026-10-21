@@ -61,8 +61,10 @@ F10 завершает интерактивные примеры. Галерея
 #include <portals/ui.hpp>
 
 /** @brief Run a minimal lazy scene with a late click handler.
- * @return Zero on success, one on a typed setup/runtime failure after library cleanup/reporting.
- * Click Add Hello to append one undoable text change; F10 quits. This minimal program defines no CLI options.
+ * @return Zero on success, one on a typed setup/runtime failure
+ * after library cleanup/reporting.
+ * Click Add Hello to append one undoable text change; F10
+ * quits. This minimal program defines no CLI options.
  * The standard runner owns terminal restoration.
  */
 int main() {
@@ -71,7 +73,8 @@ int main() {
   ui::Ref<LineEdit> message;
   ui::Ref<Button> add;
 
-  auto scene = ui::scene(ui::vbox(ui::lineEdit(message, ""), ui::button(add, "Add Hello")));
+  auto scene = ui::scene(ui::vbox(ui::lineEdit(message, ""),
+    ui::button(add, "Add Hello")));
 
   return scene
     | ui::onClick(add,

@@ -125,6 +125,17 @@ html {
 /* Reserve space for the fixed synchronization control below the tree. */
 #nav-tree-contents { padding-bottom: 3rem; }
 
+/* Keep the native link target over the complete row, including its indent. */
+#nav-tree .item { position: relative; }
+#nav-tree .item > .label > a::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+/* Disclosure buttons retain their own hit area above the row's link. */
+#nav-tree .item > a[role="button"] { position: relative; z-index: 1; }
+#nav-tree .selected::after { pointer-events: none; }
+
 /* Give the rotating chevron a stable box independent of the text baseline. */
 #nav-tree .arrow {
   display: inline-flex;

@@ -19,6 +19,48 @@ from finalize_html import GuideParser, color_cmake, color_shell, color_template_
 
 
 class GuideTests(unittest.TestCase):
+    def test_search_navigation_cancels_extra_scroll_without_trapping_tab_or_enter(self):
+        original = """function setKeyActions(elem,action) {
+    elem.addEventListener('keydown', action);
+    elem.addEventListener('keypress', action);
+    elem.addEventListener('keyup', action);
+  }
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'search').mkdir()
+            script = root / 'search/search.js'
+            script.write_text(original)
+            complete_search(root)
+            rendered = script.read_text()
+            complete_search(root)
+            self.assertEqual(script.read_text(), rendered)
+            probe = rendered + """
+const assert = require('node:assert/strict');
+const listeners = {};
+let calls = 0;
+setKeyActions({addEventListener(type, handler) { listeners[type] = handler; }},
+  event => { calls++; return event.keyCode === 13; });
+for (const type of ['keydown', 'keypress', 'keyup']) {
+  for (const keyCode of [27, 37, 38, 39, 40, 9, 13, 65]) {
+    let cancelled = false;
+    listeners[type]({keyCode, preventDefault() { cancelled = true; }});
+    assert.equal(cancelled, [27, 37, 38, 39, 40].includes(keyCode),
+      `${type} key ${keyCode}: browser scroll must follow navigation ownership`);
+  }
+}
+assert.equal(calls, 24, 'every event must still reach the Doxygen action once');
+for (const modifier of ['altKey', 'ctrlKey', 'metaKey', 'shiftKey']) {
+  listeners.keydown({keyCode: 37, [modifier]: true,
+    preventDefault() { assert.fail(`${modifier}: native browser shortcut cancelled`); }});
+}
+const allowed = {};
+setKeyActions({addEventListener(type, handler) { allowed[type] = handler; }}, () => true);
+allowed.keydown({keyCode: 40, preventDefault() { assert.fail('unhandled key cancelled'); }});
+"""
+            result = subprocess.run(['node', '-e', probe], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_existing_parent_api_link_is_not_flattened_into_translated_site(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

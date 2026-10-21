@@ -35,9 +35,10 @@ Pass a same-scene `ManagedState<DataPresentation>` or a read-only
 a scene factory with a `ManagedScene &owner`:
 
 ```cpp
-return owner.state(DataPresentation{DataPhase::LOADING}).transform([](auto state) {
-  return ui::dataStateView(state, ui::label("Results"));
-});
+return owner.state(DataPresentation{DataPhase::LOADING})
+  .transform([](auto state) {
+    return ui::dataStateView(state, ui::label("Results"));
+  });
 ```
 
 The producer changes its state through its existing checked `set` operation.
@@ -58,9 +59,10 @@ follow its prepared viewport range. Given the `model` and formatter from
 [the virtual list guide](virtual-list.md), replace its returned recipe with:
 
 ```cpp
-return ui::dataStateView(ui::virtualList(model, [](const ModelRow<std::string> &row) {
-  return displayText(row.value);
-}));
+return ui::dataStateView(
+  ui::virtualList(model, [](const ModelRow<std::string> &row) {
+    return displayText(row.value);
+  }));
 ```
 
 The wrapper reads owning status facts from the body's same successful preparation.

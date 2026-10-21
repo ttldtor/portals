@@ -96,12 +96,14 @@ the default is `APPLICATION`. A name identifies a layer within its tier:
 scene
   | ui::style("Button { min-width: 12; }", {.name = "layout"});
 scene
-  | ui::style("LineEdit { foreground: #ff5555; }", {.name = "validation"});
+  | ui::style("LineEdit { foreground: #ff5555; }",
+    {.name = "validation"});
 scene
   | ui::style("Button { background: #181c24; }", {.name = "branding"});
 
 scene
-  | ui::style("LineEdit { foreground: #55ff55; }", {.name = "validation"});
+  | ui::style("LineEdit { foreground: #55ff55; }",
+    {.name = "validation"});
 ```
 
 The last stage replaces the entire `validation` stylesheet. `layout` and

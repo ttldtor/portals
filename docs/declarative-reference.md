@@ -130,9 +130,11 @@ order nor clearing an observer changes reporting priority:
 
 ```cpp
 scene.onError([](const ManagedDiagnostic &diagnostic) {
-  // React to the operation failure without terminal output during the live run.
+  // React to the operation failure without terminal output
+  // during the live run.
 }).reportOnError([](const ui::SceneReport &report) {
-  // Forward the final structured report to an application logger after cleanup.
+  // Forward the final structured report to an application
+  // logger after cleanup.
   ui::reportToStderr(report);
 });
 ```
@@ -748,8 +750,11 @@ struct PriceRow {
 auto closeColumns(portals::WidthPolicy policy = {}) {
   using namespace portals;
 
-  return tableColumns(policy, tableColumn("Close", &PriceRow::close,
-                                         cellFormat<double>("{:.0f}", policy), 9));
+  return tableColumns(policy,
+    tableColumn("Close",
+      &PriceRow::close,
+      cellFormat<double>("{:.0f}", policy),
+      9));
 }
 ```
 

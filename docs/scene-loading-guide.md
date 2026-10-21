@@ -90,7 +90,8 @@ resource.resolver = [](std::string_view key)
   }
   return std::unexpected(TextResourceError::MISSING_RESOURCE);
 };
-auto scene = ui::scene("Button#add{i18n(\"add\")}", std::move(resource));
+auto scene =
+  ui::scene("Button#add{i18n(\"add\")}", std::move(resource));
 ```
 
 There is no implicit global locale or automatic translation refresh. Missing
@@ -104,11 +105,13 @@ copyable factory returning `Description<T>` or exactly
 ```cpp
 ui::SceneResourceOptions resource;
 
-resource.control<Meter>("Meter", [](ui::SceneResourceArguments arguments) {
-  return ui::custom<Meter>(std::move(arguments.text));
-});
+resource.control<Meter>("Meter",
+  [](ui::SceneResourceArguments arguments) {
+    return ui::custom<Meter>(std::move(arguments.text));
+  });
 
-auto scene = ui::scene("Meter#level{\"CPU\" width=20}", std::move(resource));
+auto scene = ui::scene("Meter#level{\"CPU\" width=20}",
+  std::move(resource));
 ```
 
 Here `Meter` is an application-defined `SizedWidget` constructible from an owning

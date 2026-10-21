@@ -17,8 +17,7 @@ int main() {
         })
       | ui::onClick(exit, ui::quit)
       | ui::onKey("F10", ui::quit);
-  }
-    | ui::runApp();
+  } | ui::runApp();
   // clang-format on
 
   if (finalReport) {

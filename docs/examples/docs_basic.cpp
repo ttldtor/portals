@@ -17,7 +17,6 @@ int main() {
       | ui::onClick(add, [message] { message.text() += "Hello!"; })
       | ui::onClick(exit, ui::quit)
       | ui::onKey(key::F10, ui::quit);
-  }
-    | ui::runApp();
+  } | ui::runApp();
   // clang-format on
 }

@@ -36,9 +36,10 @@
 внутри фабрики сцены с параметром `ManagedScene &owner`:
 
 ```cpp
-return owner.state(DataPresentation{DataPhase::LOADING}).transform([](auto state) {
-  return ui::dataStateView(state, ui::label("Results"));
-});
+return owner.state(DataPresentation{DataPhase::LOADING})
+  .transform([](auto state) {
+    return ui::dataStateView(state, ui::label("Results"));
+  });
 ```
 
 Производитель меняет состояние существующей проверяемой операцией `set`.
@@ -61,9 +62,10 @@ return owner.state(DataPresentation{DataPhase::LOADING}).transform([](auto state
 возвращаемый рецепт следующим:
 
 ```cpp
-return ui::dataStateView(ui::virtualList(model, [](const ModelRow<std::string> &row) {
-  return displayText(row.value);
-}));
+return ui::dataStateView(
+  ui::virtualList(model, [](const ModelRow<std::string> &row) {
+    return displayText(row.value);
+  }));
 ```
 
 Обёртка читает владеющие факты состояния из той же успешной подготовки тела.

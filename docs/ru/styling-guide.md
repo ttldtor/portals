@@ -95,12 +95,14 @@ ID чувствительны к регистру. Каждое объявлен
 scene
   | ui::style("Button { min-width: 12; }", {.name = "layout"});
 scene
-  | ui::style("LineEdit { foreground: #ff5555; }", {.name = "validation"});
+  | ui::style("LineEdit { foreground: #ff5555; }",
+    {.name = "validation"});
 scene
   | ui::style("Button { background: #181c24; }", {.name = "branding"});
 
 scene
-  | ui::style("LineEdit { foreground: #55ff55; }", {.name = "validation"});
+  | ui::style("LineEdit { foreground: #55ff55; }",
+    {.name = "validation"});
 ```
 
 Последняя стадия заменяет всю таблицу `validation`. Слои `layout` и `branding`

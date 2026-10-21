@@ -13,9 +13,11 @@ int main() {
   ui::Ref<LineEdit> name;
   ui::Ref<Label> greeting;
 
-  auto scene = ui::scene(ui::vbox(
-    ui::lineEdit(name, "Ada", {.options = {.editMode = EditMode::EXPLICIT}}),
-    ui::label(greeting, "Press F2 to read the draft")));
+  auto scene = ui::scene(
+    ui::vbox(ui::lineEdit(name,
+               "Ada",
+               {.options = {.editMode = EditMode::EXPLICIT}}),
+      ui::label(greeting, "Press F2 to read the draft")));
 
   return scene
     | ui::onKey("F2",
@@ -47,12 +49,13 @@ int main() {
   ui::Ref<LineEdit> password;
 
   return ui::scene(ui::vbox(
-           ui::lineEdit(password, "",
-                        {.options = {.displayMode = LineEditDisplayMode::PASSWORD, .placeholder = "Password"}}),
-           ui::button("Clear",
-                      [password] {
-                        return password.clear();
-                      })))
+    ui::lineEdit(password, "", {
+      .options = {
+        .displayMode = LineEditDisplayMode::PASSWORD,
+        .placeholder = "Password"}}),
+    ui::button("Clear", [password] {
+      return password.clear();
+    })))
     | ui::onKey(key::F10, ui::quit)
     | ui::runApp();
 }

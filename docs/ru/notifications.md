@@ -26,7 +26,8 @@
 поместите обёртку уведомлений в основное содержимое host:
 
 ```cpp
-auto content = ui::notifications(notices, ui::column(ui::lineEdit("Draft")));
+auto content =
+  ui::notifications(notices, ui::column(ui::lineEdit("Draft")));
 auto layout = ui::overlayHost(std::move(content),
   ui::dialog(details, "Details", ui::label("Request details")));
 ```

@@ -9,15 +9,18 @@
 ```cpp
 int main() {
   auto scene = ui::scene([](ManagedScene &owner) {
-    return owner.model<std::string>(std::make_shared<Names>()).transform([](auto model) {
-      const std::array<TableColumn<std::string>, 1> columns{{
-        {{1, 1}, displayText("Name"), 18, [](const std::string &name) {
-          return displayText(name);
-        }}
-      }};
+    return owner.model<std::string>(std::make_shared<Names>())
+      .transform([](auto model) {
+        const std::array<TableColumn<std::string>, 1> columns{
+          {{{1, 1},
+            displayText("Name"),
+            18,
+            [](const std::string &name) {
+              return displayText(name);
+            }}}};
 
-      return ui::virtualTable(model, columns);
-    });
+        return ui::virtualTable(model, columns);
+      });
   });
 
   return scene
@@ -43,7 +46,10 @@ public:
 
   ModelRows<std::string> read(RowRange range) const override {
     return {RangeState::READY,
-            std::span(rows_).subspan(static_cast<std::size_t>(range.first), range.count), {}};
+      std::span(rows_).subspan(
+        static_cast<std::size_t>(range.first),
+        range.count),
+      {}};
   }
 
 private:
@@ -64,15 +70,18 @@ GraphemeText displayText(std::string_view value) {
 
 int main() {
   auto scene = ui::scene([](ManagedScene &owner) {
-    return owner.model<std::string>(std::make_shared<Names>()).transform([](auto model) {
-      const std::array<TableColumn<std::string>, 1> columns{{
-        {{1, 1}, displayText("Name"), 18, [](const std::string &name) {
-          return displayText(name);
-        }}
-      }};
+    return owner.model<std::string>(std::make_shared<Names>())
+      .transform([](auto model) {
+        const std::array<TableColumn<std::string>, 1> columns{
+          {{{1, 1},
+            displayText("Name"),
+            18,
+            [](const std::string &name) {
+              return displayText(name);
+            }}}};
 
-      return ui::virtualTable(model, columns);
-    });
+        return ui::virtualTable(model, columns);
+      });
   });
 
   return scene
@@ -114,7 +123,8 @@ for (const auto &name : *rows) {
   bytes += name.size();
 }
 
-summary.text() = std::format("Строк: {}, байтов UTF-8: {}", rows->size(), bytes);
+summary.text() = std::format("Строк: {}, байтов UTF-8: {}",
+  rows->size(), bytes);
 ```
 
 Фрагмент предполагает, что `summary` — смонтированная `ui::Ref<Label>`, а тип

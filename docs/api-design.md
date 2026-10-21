@@ -72,18 +72,21 @@ before it. No snippet is submitted to a compiler as a fake API implementation.
 ```cpp
 auto form = TRY(app.root().emplace<Column>(ColumnOptions{}));
 auto name = TRY(form.emplace<LineEdit>(LineEditOptions{.text = ""}));
-auto hint = TRY(form.emplace<Label>(LabelOptions{.text = "Enter your name"}));
+auto hint = TRY(
+  form.emplace<Label>(LabelOptions{.text = "Enter your name"}));
 auto submit = TRY(form.emplace<Button>(ButtonOptions{.text = "Save"}));
 auto scope = TRY(app.ui().makeScope());
 
-auto clicked = TRY(app.ui().connect(scope, submit.clicked(), [&, name, hint] {
-  auto text = TRY(app.ui().read_text_copy(name));
-  auto validation = validate_name(text);
-  if (!validation) {
-    return app.ui().set_text(hint, validation.message());
-  }
-  return save(text); // Application-owned operation, not paint or layout.
-}));
+auto clicked = TRY(
+  app.ui().connect(scope, submit.clicked(), [&, name, hint] {
+    auto text = TRY(app.ui().read_text_copy(name));
+    auto validation = validate_name(text);
+    if (!validation) {
+      return app.ui().set_text(hint, validation.message());
+    }
+    return save(
+      text); // Application-owned operation, not paint or layout.
+  }));
 ```
 
 The root owns `form` and all children; handles are observing. `read_text_copy`
@@ -102,10 +105,13 @@ callback self-removal, grapheme edits and failure with unchanged widget state.
 
 ```cpp
 auto model = TRY(QuoteModel::create(initial_snapshot));
-auto table = TRY(app.root().emplace<TableView>(TableOptions{.model = model}));
-auto candles = TRY(app.root().emplace<CandleChart>(ChartOptions{.model = model}));
+auto table = TRY(
+  app.root().emplace<TableView>(TableOptions{.model = model}));
+auto candles = TRY(app.root().emplace<CandleChart>(
+  ChartOptions{.model = model}));
 
-// Between frames, on the UI owner. Both views read the same pinned revision.
+// Between frames, on the UI owner. Both views read the same
+// pinned revision.
 TRY(app.ui().apply(model, next_snapshot));
 ```
 
@@ -144,9 +150,11 @@ auto applied = TRY(app.ui().connect(scope, channel.receiver(),
     return app.ui().apply_if_current(model, publication);
   }));
 
-// Worker owns aggregator, sender, request identity and a stop token.
+// Worker owns aggregator, sender, request identity and a
+// stop token.
 auto worker = start_feed(channel.sender(), request, stop_token);
-// Feed aggregates every accepted tick before publishing an immutable snapshot.
+// Feed aggregates every accepted tick before publishing an
+// immutable snapshot.
 ```
 
 Each producer owns its aggregator/storage and builds immutable snapshots off the
@@ -179,10 +187,12 @@ public:
   Result<DesiredSize> measure(const MeasureContext&) const override;
   Result<void> arrange(const ArrangeContext&) override;
   Result<void> paint(PaintContext&) const override;
-  Result<EventReply> handle_event(const EventContext&, const Event&) override;
+  Result<EventReply> handle_event(const EventContext &,
+    const Event &) override;
 };
 
-auto meter = TRY(app.root().emplace<Meter>(MeterOptions{.range = range}));
+auto meter =
+  TRY(app.root().emplace<Meter>(MeterOptions{.range = range}));
 TRY(app.ui().edit(meter,
                   [](Meter& value) {
                     return value.set_level(0.6);
@@ -224,10 +234,11 @@ auto input = TRY(app.ui().connect(scope, canvas.actions(),
     TRY(game->apply(action));
     return app.ui().invalidate(canvas, Invalidation::PAINT);
   }));
-auto timer = TRY(app.clock().every(scope, config.step_period, [&, game, canvas] {
-  TRY(game->advance_fixed_step());
-  return app.ui().invalidate(canvas, Invalidation::PAINT);
-}));
+auto timer = TRY(app.clock().every(scope, config.step_period,
+  [&, game, canvas] {
+    TRY(game->advance_fixed_step());
+    return app.ui().invalidate(canvas, Invalidation::PAINT);
+  }));
 ```
 
 The tree owns Canvas; callback captures own game state. The controller owns the

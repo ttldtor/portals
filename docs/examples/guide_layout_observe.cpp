@@ -19,7 +19,6 @@ int main() {
           dimensions.text() = text("{} columns, {} rows", size.width, size.height);
         })
       | ui::onKey("F10 | Ctrl+C", ui::quit);
-  }
-    | ui::runApp();
+  } | ui::runApp();
   // clang-format on
 }

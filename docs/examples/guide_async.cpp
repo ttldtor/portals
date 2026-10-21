@@ -92,8 +92,7 @@ int main() {
         })
       | ui::onClick(exit, ui::quit)
       | ui::onKey("F10", ui::quit);
-  }
-    | ui::runApp();
+  } | ui::runApp();
   // clang-format on
 
   return result != 0 || (action && action->error) ? 1 : 0;

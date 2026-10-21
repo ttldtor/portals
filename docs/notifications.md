@@ -26,7 +26,8 @@ Notifications work without a dialog host. When the application also has dialogs,
 put the notification wrapper inside the host body:
 
 ```cpp
-auto content = ui::notifications(notices, ui::column(ui::lineEdit("Draft")));
+auto content =
+  ui::notifications(notices, ui::column(ui::lineEdit("Draft")));
 auto layout = ui::overlayHost(std::move(content),
   ui::dialog(details, "Details", ui::label("Request details")));
 ```

@@ -100,7 +100,8 @@ auto saved = message2.text() + " " + text("{}", 123.0);
 
 ```cpp
 auto localized = message.text(
-  [](std::string_view key) -> std::expected<std::string, TextResourceError> {
+  [](std::string_view key)
+    -> std::expected<std::string, TextResourceError> {
     if (key == "currency") {
       return "USD";
     }

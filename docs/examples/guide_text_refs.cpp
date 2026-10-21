@@ -19,7 +19,6 @@ int main() {
                       message.text() = "Hello!";
                     })
       | ui::onKey("F10", ui::quit);
-  }
-    | ui::runApp();
+  } | ui::runApp();
   // clang-format on
 }

@@ -15,8 +15,13 @@ Enter, Space и левый клик. F10 также завершает прил�
 int main() {
   using namespace portals;
 
-  auto content = ui::vbox(ui::label("Transfer"), ui::gauge(.65).width(24), ui::plainButton("Exit", [] { ui::quit(); }));
-  auto scene = ui::scene(ui::hbox(ui::border(std::move(content)).width(30).height(7)));
+  auto content = ui::vbox(ui::label("Transfer"),
+    ui::gauge(.65).width(24),
+    ui::plainButton("Exit", [] {
+      ui::quit();
+    }));
+  auto scene = ui::scene(ui::hbox(
+    ui::border(std::move(content)).width(30).height(7)));
 
   scene.onKey(key::F10, ui::quit);
 
@@ -32,11 +37,16 @@ int main() {
 int main() {
   using namespace portals;
 
-  auto scene = ui::scene(ui::hbox(ui::vbox(ui::label("Transfer"), ui::gauge(.65).width(24),
-                                        ui::plainButton("Exit", [] { ui::quit(); }))
-                                  | ui::border()
-                                  | ui::width(30)
-                                  | ui::height(7)));
+  auto scene = ui::scene(ui::hbox(
+    ui::vbox(
+      ui::label("Transfer"),
+      ui::gauge(.65).width(24),
+      ui::plainButton("Exit", [] {
+        ui::quit();
+      }))
+      | ui::border()
+      | ui::width(30)
+      | ui::height(7)));
 
   return scene
     | ui::onKey(key::F10, ui::quit)
@@ -137,11 +147,19 @@ int main() {
   ControlStyle defaults;
   defaults.normal.foreground = RgbColor{180, 180, 180};
 
-  auto scene = ui::scene(ui::border(ui::vbox(
-    ui::gauge(.65).width(24), ui::plainButton("Exit", [] { ui::quit(); }, defaults).reference(exit))));
+  auto scene =
+    ui::scene(ui::border(ui::vbox(ui::gauge(.65).width(24),
+      ui::plainButton(
+        "Exit",
+        [] {
+          ui::quit();
+        },
+        defaults)
+        .reference(exit))));
 
   scene
-    | ui::style(exit, "* { foreground: #ffffff; background: #203040; }");
+    | ui::style(exit,
+      "* { foreground: #ffffff; background: #203040; }");
 
   return scene
     | ui::onKey(key::F10, ui::quit)

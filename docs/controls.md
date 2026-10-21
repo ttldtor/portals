@@ -9,12 +9,12 @@ can allocate a larger rectangle. No control performs terminal I/O. Control bytes
 in text remain data and render as the text subsystem's placeholders.
 
 ```cpp
-const auto run = tree.emplace<portals::Button>(parent, std::move(caption));
+const auto run =
+  tree.emplace<portals::Button>(parent, std::move(caption));
 // Check each expected result in application code.
-auto action = portals::bindButton(router, *run,
-                                  [&] {
-                                    start_job();
-                                  });
+auto action = portals::bindButton(router, *run, [&] {
+  start_job();
+});
 ```
 
 The tree exclusively owns each widget. `Node` observes it. The application owns

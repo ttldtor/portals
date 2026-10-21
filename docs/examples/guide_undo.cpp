@@ -21,7 +21,6 @@ int main() {
 
     return std::move(scene)
       | ui::onKey("F10", ui::quit);
-  }
-    | ui::runApp();
+  } | ui::runApp();
   // clang-format on
 }

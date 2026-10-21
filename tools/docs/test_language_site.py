@@ -74,7 +74,10 @@ class LanguageSiteTests(unittest.TestCase):
                 (root / directory).mkdir(parents=True, exist_ok=True)
                 images = root / directory / 'images/turbo'
                 images.mkdir(parents=True)
-                (images / 'components.svg').write_text('<svg xmlns="http://www.w3.org/2000/svg"><title>Components &amp; flow</title></svg>')
+                svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 200"><title>Components &amp; flow</title></svg>'
+                (root / directory / 'components.svg').write_text(svg)
+                (source / 'docs/images/turbo').mkdir(parents=True, exist_ok=True)
+                (source / 'docs/images/turbo/components.svg').write_text(svg)
                 locales.append(dict(code=code, name=name, directory=directory,
                                     source=prefix, main=prefix + '/index.md'))
                 pages = [('index', 'index.html')]
@@ -117,7 +120,9 @@ class LanguageSiteTests(unittest.TestCase):
                 self.assertNotIn('Создано системой', rendered)
                 self.assertIn('<li>Keep navigation</li>', rendered)
                 self.assertEqual(rendered.count('class="turbo-diagram"'), 1)
-                self.assertIn('src="images/turbo/components.svg" alt="Components &amp; flow"', rendered)
+                self.assertIn('class="turbo2-diagram"', rendered)
+                self.assertIn('theme-diagrams/turbo/', rendered)
+                self.assertIn('aria-label="Components &amp; flow"', rendered)
                 self.assertIn('<object class="standard-diagram"', rendered)
             self.assertIn('href="ru/topic-ru.html"', english)
             self.assertIn('href="../topic.html"', russian)
@@ -128,6 +133,9 @@ class LanguageSiteTests(unittest.TestCase):
             self.assertIn('data-system="Системная"', russian)
             self.assertIn('data-turbo="Turbo Vision"', russian)
             self.assertIn('data-turbo="Turbo Vision"', english)
+            self.assertIn('data-turbo2="Turbo2"', russian)
+            self.assertIn('data-turbo2="Turbo2"', english)
+            self.assertEqual(english.count('<script src="turbo-scrollbars.js" defer></script>'), 1)
             self.assertIn('<button type="button" class="portals-appearance" hidden ', english)
             self.assertNotIn('<select', english)
             self.assertEqual(english.count('<script src="appearance.js"></script>'), 1)
