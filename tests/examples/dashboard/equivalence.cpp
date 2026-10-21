@@ -7,6 +7,8 @@
 #include <array>
 #include <iostream>
 #include <string>
+#include <utility>
+#include <variant>
 
 namespace {
 std::string visibleText(std::string_view bytes, portals::CellSize size) {
@@ -30,8 +32,12 @@ void publicThemeSelector() {
     runtime.clock = terminal.clock();
     dashboard::Options options;
     options.rate = 0;
-    dashboard::FluentScene scene(options, runtime);
-    const auto result = scene.scene().run(terminal);
+    auto scene = [&] {
+      dashboard::FluentScene wrapper(options, runtime);
+
+      return std::move(wrapper.scene());
+    }();
+    const auto result = scene.run(terminal);
 
     if (!result || !terminal.closed) {
       throw std::runtime_error("Public dashboard selector failed runtime/cleanup");
@@ -56,6 +62,31 @@ void publicThemeSelector() {
       restored.find("Instrument") == std::string::npos || restored.find("Themes") == std::string::npos) {
     throw std::runtime_error(
       "Public dashboard selector apply/cancel/F2 did not preserve committed theme and market views");
+  }
+}
+
+/** @brief Provider work started during setup must stop even after the wrapper has been destroyed. */
+void movedSceneSetupFailure() {
+  using namespace portals;
+  example::ReplayTerminal terminal({}, 1000);
+  ui::SceneOptions runtime;
+  runtime.clock = terminal.clock();
+  auto scene = [&] {
+    dashboard::Options options;
+    options.delayMs = 250;
+    dashboard::FluentScene wrapper(options, runtime);
+
+    return std::move(wrapper.scene());
+  }();
+  scene.configure([](ManagedScene &) -> std::expected<void, ManagedError> {
+    return std::unexpected(ManagedError{ManagedPhase::BIND, {}, TreeError::INVALID_ARGUMENT, {}, {}});
+  });
+  const auto result = scene.run(terminal);
+
+  const auto cause = result ? nullptr : std::get_if<TreeError>(&result.error().cause);
+
+  if (result || terminal.closed || !terminal.output.empty() || !cause || *cause != TreeError::INVALID_ARGUMENT) {
+    throw std::runtime_error("Moved dashboard Scene did not preserve partial-setup failure before terminal entry");
   }
 }
 } // namespace
@@ -111,8 +142,12 @@ int main() {
       runtime.application = policies;
       runtime.clock = after.clock();
 
-      dashboard::FluentScene scene(options, runtime);
-      const auto actual = scene.scene().run(after);
+      auto scene = [&] {
+        dashboard::FluentScene wrapper(options, runtime);
+
+        return std::move(wrapper.scene());
+      }();
+      const auto actual = scene.run(after);
 
       if (!actual || !before.closed || !after.closed || actual->inputs != expected.inputs || actual->frames == 0) {
         std::cerr << "public dashboard changed input or transport cleanup; scenario=" << scenario.name << '\n';
@@ -176,6 +211,7 @@ int main() {
     }
 
     publicThemeSelector();
+    movedSceneSetupFailure();
     std::cout << "fluent dashboard: market semantics, selector, completed tail load and pending shutdown verified\n";
 
     return 0;

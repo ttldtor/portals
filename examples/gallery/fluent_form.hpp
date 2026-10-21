@@ -6,10 +6,10 @@
 #include <portals/ui.hpp>
 
 namespace gallery {
-/** @param themes Same-scene logical theme selection; historical superseded IDs do not identify a live theme.
+/** @param themes Same-scene selector model; historical superseded IDs do not identify a live theme.
  * @return Checked F2 preview and commit, preserving the complete managed error.
  */
-inline std::expected<void, portals::ManagedError> cycleTheme(portals::ui::ThemeSelectionRef themes) {
+inline std::expected<void, portals::ManagedError> cycleTheme(portals::ui::Ref<portals::ThemeSelector> themes) {
   using namespace portals;
   const auto observed = themes.snapshot();
 
@@ -29,28 +29,6 @@ inline std::expected<void, portals::ManagedError> cycleTheme(portals::ui::ThemeS
   });
 }
 
-/** @param options Borrowed settings, read after command-line parsing.
- * @param themes Scene-owned catalog/model observation shared with the selector.
- * @return Lazy initial commit and F2 cycling, preserving complete managed failures.
- */
-inline auto onTheme(portals::ui::OptionsRef<example::Options> options, portals::ui::ThemeSelectionRef themes) {
-  using namespace portals;
-
-  return ui::configure([options, themes](ManagedScene &owner) -> std::expected<void, ManagedError> {
-    auto initialized = themes.preview(options.get().theme).and_then([themes] {
-      return themes.commit();
-    });
-
-    if (!initialized) {
-      return initialized;
-    }
-
-    return owner.onKey(ui::press("F2"), [themes] {
-      return cycleTheme(themes);
-    });
-  });
-}
-
 /** @param options Caller-owned settings, read after successful command-line parsing.
  * @param run Optional application action; by default Run leaves field models unchanged.
  * @param policies Existing scene policies for embedding and custom clocks.
@@ -60,8 +38,7 @@ inline portals::ui::Scene form(portals::ui::OptionsRef<example::Options> options
                                portals::ui::SceneOptions policies = {}) {
   using namespace portals;
 
-  ui::ThemeSelectionRef themes;
-  ui::ThemeSelectorRef selector;
+  ui::Ref<ThemeSelector> selector;
 
   // clang-format off
   auto body = ui::vbox(
@@ -77,15 +54,15 @@ inline portals::ui::Scene form(portals::ui::OptionsRef<example::Options> options
     ui::button("Quit", [] { ui::quit(); }),
     ui::button("Themes", [selector] { return selector.open(); }));
 
-  return ui::scene(ui::overlayHost(std::move(body), ui::themeSelector(selector, themes)), policies)
+  return ui::scene(policies, std::move(body),
+                   ui::themeSelector(selector, example::themeCatalog(options.get().theme)))
     | ui::applicationOptions([options, result = policies.application]() mutable {
            result.writer.colorMode = options.get().ansi16 ? ColorMode::ANSI16 : ColorMode::TRUE_COLOR;
 
            return result;
          })
     | ui::onKey("F10 | Ctrl+C", ui::quit)
-    | example::themeCatalog(themes)
-    | onTheme(options, themes);
+    | ui::onKey("F2", [selector] { return cycleTheme(selector); });
   // clang-format on
 }
 } // namespace gallery

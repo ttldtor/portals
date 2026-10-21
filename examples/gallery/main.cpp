@@ -10,7 +10,10 @@ int main(int argc, char **argv) {
   example::Options options;
   auto lyraCli = example::commandLine(options);
 
-  return gallery::form(ui::opts(options))
-    | ui::reportOnError()
+  // clang-format off
+  return [&] {
+    return gallery::form(ui::opts(options));
+  }
     | ui::runApp(argc, argv, ui::lyra::cli(lyraCli));
+  // clang-format on
 }

@@ -8,17 +8,18 @@
 int main() {
   using namespace portals;
 
-  ui::Ref<LineEdit> password;
-
   // clang-format off
-  return ui::scene(ui::vbox(
-           ui::lineEdit(password, "",
-                        {.options = {.displayMode = LineEditDisplayMode::PASSWORD, .placeholder = "Password"}}),
-           ui::button("Clear",
-                      [password] {
-                        return password.clear();
-                      })))
-    | ui::onKey(key::F10, ui::quit)
+  return [] {
+    ui::Ref<LineEdit> password;
+    return ui::scene(ui::vbox(
+             ui::lineEdit(password, "",
+                          {.options = {.displayMode = LineEditDisplayMode::PASSWORD, .placeholder = "Password"}}),
+             ui::button("Clear",
+                        [password] {
+                          return password.clear();
+                        })))
+      | ui::onKey(key::F10, ui::quit);
+  }
     | ui::runApp();
   // clang-format on
 }

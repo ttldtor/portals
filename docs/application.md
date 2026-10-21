@@ -6,26 +6,7 @@ The [scene](glossary.md#glossary-scene) facade in [`<portals/ui.hpp>`](../includ
 lets you create controls, attach actions and run a native terminal application.
 **Apply** changes the label. **Exit** or F10 closes the application.
 
-```cpp
-#include <portals/ui.hpp>
-
-int main() {
-  using namespace portals;
-
-  ui::Ref<Label> status;
-  ui::Ref<Button> exit;
-
-  return ui::scene(ui::vbox(
-    ui::label(status, "Ready"),
-    ui::button("Apply", [status] {
-      status.text() = "Applied";
-    }),
-    ui::button(exit, "Exit")))
-    | ui::onClick(exit, ui::quit)
-    | ui::onKey("F10", ui::quit)
-    | ui::runApp();
-}
-```
+\include{lineno} guide_application.cpp
 
 This complete [source](examples/guide_application.cpp) links to `portals::core`;
 see [package setup](package.md). The scene mounts its description when run,
@@ -96,6 +77,13 @@ access to `Application`; `ui::configure(...)` runs work after mounting.
 `scene.onStop(...)` must be registered before preparation. The callback must
 cancel and join external producers and release services borrowing the application
 before its managed nodes retire.
+Data borrowed by control callbacks must remain alive until those controls retire.
+An installed callback can retain a shared owner, or the application can keep an
+owner outside the scene. A capture in the scene recipe alone is insufficient:
+successful preparation releases the recipe and pending configuration callbacks.
+Capturing an owner only in `onStop` is also insufficient because that callback
+finishes before the managed nodes are destroyed. Avoid owning cycles between
+presentation data and external producers.
 Callbacks must not destroy or reenter the scene or runner.
 
 ## Custom scenes and transports

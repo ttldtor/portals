@@ -3,6 +3,7 @@
 #pragma once
 #include "provider.hpp"
 #include <format>
+#include <memory>
 #include <portals/input_match.hpp>
 #include <portals/table_column.hpp>
 #include <portals/text_format.hpp>
@@ -12,70 +13,10 @@ namespace dashboard {
 using namespace portals;
 using example::take;
 
-/** @brief Compact market scene with bounded provider loading and one owning fluent runtime.
- * The stationary object outlives callbacks borrowing it. Provider cancellation precedes model retirement.
- */
-class FluentScene {
-public:
-  /** @param options Provider and display settings retained for this run.
-   * @param runtime Existing runner policies and optional borrowed replay clock.
-   */
-  explicit FluentScene(Options options = {}, ui::SceneOptions runtime = {})
-      : FluentScene(
-          [options] {
-            return options;
-          },
-          runtime) {
-  }
-
-  /** @param options Caller-owned settings read after command-line preflight.
-   * @param runtime Existing runner policies for embedding.
-   */
-  explicit FluentScene(ui::OptionsRef<Options> options, ui::SceneOptions runtime = {})
-      : FluentScene(
-          [options] {
-            return options.get();
-          },
-          runtime) {
-  }
-
-  /** @return The owning scene for application options, handlers and the standard runner. */
-  ui::Scene &scene() noexcept {
-    return scene_;
-  }
-
-private:
-  FluentScene(std::function<Options()> readOptions, ui::SceneOptions runtime)
-      : scene_(ui::scene(
-          [this, readOptions = std::move(readOptions)](ManagedScene &owner, Application &app) {
-            return recipe(owner, app, readOptions());
-          },
-          runtime)) {
-    // clang-format off
-    scene_
-      | ui::themeSelection(themes_, {{"modern", "Modern", modernTheme}, {"turbo", "Turbo", turboTheme}});
-    // clang-format on
-    scene_
-      .configure([this](ManagedScene &owner, Application &app) {
-        return configure(owner, app);
-      })
-      .onStop([this] {
-        if (provider_) {
-          auto provider = std::move(provider_);
-
-          provider->stop();
-        }
-      });
-  }
-
-public:
-  FluentScene(const FluentScene &) = delete;
-  FluentScene &operator=(const FluentScene &) = delete;
-  FluentScene(FluentScene &&) = delete;
-  FluentScene &operator=(FluentScene &&) = delete;
-
-private:
-  ui::Description<OverlayHost> recipe(ManagedScene &owner, Application &app, Options options) {
+namespace detail {
+/** @brief Presentation state retained by the owning Scene through UI cleanup. */
+struct Presentation {
+  ui::Description<Column> recipe(ManagedScene &owner, Application &app, Options options) {
     app_ = &app;
     provider_ = std::make_unique<Provider>(app, options);
     name_ = take(owner.state<std::string>("Market note"));
@@ -143,12 +84,6 @@ private:
           return chartPrepared(pin, work);
         }};
 
-    ui::ThemeSelectorOptions selectorOptions;
-    selectorOptions.onCommitted = [this](std::string_view id) -> std::expected<void, ManagedError> {
-      turbo_ = id == "turbo";
-      return {};
-    };
-
     // clang-format off
     auto body = ui::vbox(LinearOptions{.padding = {.left = 1, .right = 1}},
       ui::label(title_, "Portals market | F2 theme | F10 quit"),
@@ -161,17 +96,10 @@ private:
       ui::vbox(ui::chart(chart_, model_, &Quote::prices, chartConfig)).flexY());
     // clang-format on
 
-    return ui::overlayHost(std::move(body), ui::themeSelector(selector_, themes_, selectorOptions));
+    return body;
   }
 
   std::expected<void, ManagedError> configure(ManagedScene &owner, Application &app) {
-    auto initialized = themes_.preview("modern").and_then([this] {
-      return themes_.commit();
-    });
-
-    if (!initialized) {
-      return initialized;
-    }
     take(app.router().setFocus(table_.node()));
 
     take(owner.onInput([this](const InputEvent &event) -> std::expected<bool, ManagedError> {
@@ -181,13 +109,13 @@ private:
 
       const auto next = !turbo_;
 
-      auto previewed = themes_.preview(next ? "turbo" : "modern");
+      auto previewed = selector_.preview(next ? "turbo" : "modern");
 
       if (!previewed) {
         return std::unexpected(previewed.error());
       }
 
-      auto committed = themes_.commit();
+      auto committed = selector_.commit();
 
       if (!committed) {
         return std::unexpected(committed.error());
@@ -230,8 +158,7 @@ private:
 
   Application *app_{};
   std::unique_ptr<Provider> provider_;
-  ui::ThemeSelectionRef themes_;
-  ui::ThemeSelectorRef selector_;
+  ui::Ref<ThemeSelector> selector_;
   ui::Ref<Label> title_, status_;
   ui::Ref<LineEdit> editor_;
   ui::Ref<Button> inspectButton_;
@@ -241,6 +168,79 @@ private:
   ManagedModel<Quote> model_;
   std::uint64_t firstRow_{};
   bool pendingVisible_{}, turbo_{};
+};
+} // namespace detail
+
+/** @brief One owning market Scene; its retained presentation state outlives borrowed callbacks.
+ * Provider cancellation precedes managed model retirement, including partial setup failure.
+ */
+class FluentScene {
+public:
+  /** @param options Provider settings retained for this run.
+   * @param runtime Existing runner policies and optional borrowed replay clock.
+   */
+  explicit FluentScene(Options options = {}, ui::SceneOptions runtime = {})
+      : FluentScene([options] {
+          return options;
+        },
+                    runtime) {
+  }
+
+  /** @param options Caller-owned settings read during scene preparation.
+   * @param runtime Existing runner policies for embedding.
+   */
+  explicit FluentScene(ui::OptionsRef<Options> options, ui::SceneOptions runtime = {})
+      : FluentScene([options] {
+          return options.get();
+        },
+                    runtime) {
+  }
+
+  /** @return The owning Scene, which may be moved out without retaining this wrapper. */
+  ui::Scene &scene() noexcept {
+    return scene_;
+  }
+
+  FluentScene(const FluentScene &) = delete;
+  FluentScene &operator=(const FluentScene &) = delete;
+  FluentScene(FluentScene &&) = delete;
+  FluentScene &operator=(FluentScene &&) = delete;
+
+private:
+  FluentScene(std::function<Options()> readOptions, ui::SceneOptions runtime)
+      : scene_(makeScene(std::move(readOptions), runtime)) {
+  }
+
+  static ui::Scene makeScene(std::function<Options()> readOptions, ui::SceneOptions runtime) {
+    auto state = std::make_shared<detail::Presentation>();
+    ui::ThemeSelectorCatalog catalog{
+      .choices = {{"modern", "Modern", modernTheme}, {"turbo", "Turbo", turboTheme}},
+      .initialId = "modern"};
+    ui::ThemeSelectorOptions selectorOptions;
+    selectorOptions.onCommitted = [state](std::string_view id) -> std::expected<void, ManagedError> {
+      state->turbo_ = id == "turbo";
+
+      return {};
+    };
+
+    auto scene = ui::scene(runtime, [state, readOptions = std::move(readOptions)](ManagedScene &owner, Application &app) {
+      return state->recipe(owner, app, readOptions());
+    },
+                           ui::themeSelector(state->selector_, catalog, selectorOptions));
+    scene.configure([state](ManagedScene &owner, Application &app) {
+      return state->configure(owner, app);
+    });
+    scene.onStop([state] {
+      if (state->provider_) {
+        auto provider = std::move(state->provider_);
+
+        provider->stop();
+      }
+    });
+
+    return scene;
+  }
+
   ui::Scene scene_;
 };
 } // namespace dashboard

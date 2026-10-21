@@ -79,7 +79,9 @@ The default dialog is centered, modal, 60 by 20 cells with a one-cell margin.
 The default opening shortcut is `Ctrl+K, Ctrl+T`; `std::nullopt` disables it.
 Retiring the view retires its shortcut, including an unfinished sequence.
 
-Opening requires attachment and a valid viewport. The available panel must be
+Opening requires attachment, a completed layout pass and a valid arranged host
+viewport. `prepareChecked()` alone does not perform that layout pass.
+The available panel must be
 at least 4 by 9 cells after the dialog's margin and maximum-size constraints.
 Smaller geometry returns a checked error. The list reserves space for its
 scroll bars so a narrow window does not lose its last content cell to a gutter.

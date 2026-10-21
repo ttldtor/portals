@@ -8,18 +8,25 @@ int main(int argc, char **argv) {
   dashboard::Options data;
   dashboard::DisplayOptions display;
   auto lyraCli = dashboard::commandLine(data, display);
-  dashboard::FluentScene dashboard(ui::opts(data));
 
-  return dashboard.scene()
-    | ui::applicationOptions([&] {
-           data.replay = display.mode == "replay";
-           ApplicationOptions options;
+  // clang-format off
+  return [&] {
+    dashboard::FluentScene dashboard(ui::opts(data));
 
-           options.framesPerSecond = display.framesPerSecond;
-           options.writer.colorMode = display.ansi16 ? ColorMode::ANSI16 : ColorMode::TRUE_COLOR;
+    auto scene = std::move(dashboard.scene());
+    scene
+      | ui::applicationOptions([&data, &display] {
+          data.replay = display.mode == "replay";
+          ApplicationOptions options;
 
-           return options;
-         })
-    | ui::reportOnError()
+          options.framesPerSecond = display.framesPerSecond;
+          options.writer.colorMode = display.ansi16 ? ColorMode::ANSI16 : ColorMode::TRUE_COLOR;
+
+          return options;
+        });
+
+    return scene;
+  }
     | ui::runApp(argc, argv, ui::lyra::cli(lyraCli));
+  // clang-format on
 }

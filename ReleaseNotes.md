@@ -24,6 +24,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- Native gallery, dashboard and custom-widget examples create their scenes inside
+  the application error boundary after command-line parsing. Gallery and dashboard
+  use the selector's owned model and automatic dialog host; dashboard callbacks
+  retain their presentation data when the scene is moved out of its helper.
+
 - Online documentation now follows `main` independently of releases, with a development marker, source revision and UTC build date. Release HTML archives retain their versioned documentation.
 
 ### Fixed
