@@ -201,8 +201,8 @@ TEST_CASE("Grid remains available to custom factories definitions and derived al
       if (configured) {
         options.format = ui::SceneResourceFormat::CONFIGURATION;
         options.controls.emplace();
-        constexpr std::string_view paths[]{"text", "width", "height", "flex"};
-        options.controls->registerType("Grid", paths).define("Alias", "Grid");
+        constexpr std::string_view PATHS[]{"text", "width", "height", "flex"};
+        options.controls->registerType("Grid", PATHS).define("Alias", "Grid");
       }
       take(options.registry.add<Label>(
         "Grid",
@@ -240,10 +240,10 @@ TEST_CASE("Grid remains available to custom factories definitions and derived al
   take(owner.close());
 
   ui::SceneResourceOptions schemaOnly;
-  constexpr std::string_view paths[]{"text", "width", "height", "flex"};
+  constexpr std::string_view PATHS[]{"text", "width", "height", "flex"};
 
   schemaOnly.controls.emplace();
-  schemaOnly.controls->registerType("Grid", paths);
+  schemaOnly.controls->registerType("Grid", PATHS);
 
   const auto missingFactory = rejected("Grid{}", schemaOnly);
 
@@ -330,9 +330,9 @@ TEST_CASE("legacy allowlists above custom schema default budget remain supported
   configured[0].define("Alias", "Label");
   configured[1].defaults("Label", defaults);
 
-  constexpr std::string_view paths[]{"text"};
+  constexpr std::string_view PATHS[]{"text"};
 
-  configured[2].registerType("UserOnly", paths);
+  configured[2].registerType("UserOnly", PATHS);
 
   for (const auto &controls : configured) {
     int sceneFactories{};
