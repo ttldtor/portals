@@ -8,6 +8,26 @@
 
 namespace portals::ui::detail {
 
+/** @brief Loader-only bounded schema installation in an effective context copy. */
+struct ControlContextAccess {
+  /** @param context Immutable snapshot borrowed for this check.
+   * @param name Exact schema or definition name.
+   * @return Whether a user declaration owns the name, without resolving its base.
+   */
+  static bool hasDeclaredType(const ControlContext &context, std::string_view name) noexcept;
+  /** @param context Immutable snapshot borrowed for the legacy loader's mode selection.
+   * @return Whether definitions, defaults, schemas, nondefault limits or a sticky failure require typed
+   * validation. The single loader-internal fallback is excluded; public empty() keeps its meaning.
+   */
+  static bool hasUserConfiguration(const ControlContext &context) noexcept;
+  /** @param context Effective loader snapshot; caller-owned snapshots remain unchanged.
+   * @return Success after installing the single Grid fallback, or the original typed error.
+   */
+  static std::expected<void, ControlContextError> installFallbackSchema(ControlContext &context) noexcept;
+  /** @return Static Grid-only descriptors; this does not make Grid a global builtin. */
+  static std::span<const ControlPropertyDescriptor> gridSchema() noexcept;
+};
+
 /** @param settings Sparse configuration already counted by the resource preparation pass.
  * @return Allocation-free canonical leaf presence; used to count a factory's additional overrides once.
  */

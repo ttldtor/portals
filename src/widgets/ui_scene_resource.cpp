@@ -88,6 +88,9 @@ SceneResourceRegistry::SceneResourceRegistry() {
   (void)add<ThreeState>("ThreeState", [](SceneResourceArguments arguments) {
     return threeState(arguments.text, arguments.settings.state.value_or(CheckState::UNCHECKED));
   });
+  for (auto &entry : entries_) {
+    entry.factoryKind = detail::ControlFactoryKind::EXISTING_BUILTIN;
+  }
 }
 
 namespace detail {
@@ -111,6 +114,31 @@ struct ResourceAccess {
         return index;
       }
     }
+
+    return {};
+  }
+
+  /** @brief Append the bounded default only after caller declarations have claimed their names. */
+  static std::expected<void, ControlContextError> installGrid(SceneResourceRegistry &registry, ControlContext &controls,
+                                                              bool typed) {
+    if (find(registry, "Grid") || ControlContextAccess::hasDeclaredType(controls, "Grid")) {
+      return {};
+    }
+
+    if (typed) {
+      auto installed = ControlContextAccess::installFallbackSchema(controls);
+      if (!installed) {
+        return installed;
+      }
+    }
+
+    SceneResourceRegistry::Entry entry;
+    entry.name = "Grid";
+    entry.children = true;
+    entry.sized = true;
+    entry.text = false;
+    entry.factoryKind = ControlFactoryKind::DECLARATIVE_GRID_FALLBACK;
+    registry.entries_.push_back(entry);
 
     return {};
   }
@@ -149,7 +177,23 @@ struct ResourceNode {
   // Suppress noexcept string/vector moves on the checked MSVC standard library.
   ~ResourceNode() = default;
 
+  struct FactoryIdentity {
+    detail::ControlFactoryKind kind{detail::ControlFactoryKind::USER};
+    std::size_t index{};
+  } factory;
+
   std::size_t type{};
+  GridItemOptions gridItem;
+  bool itemRequested{};
+  bool regions{};
+  bool headerDeclared{};
+  bool bodyDeclared{};
+  bool directChildren{};
+  bool stickyHeader{};
+  std::optional<GridPlacementPlan> gridPlan;
+  DeclarativeGridOptions gridOptions;
+  std::shared_ptr<Node<Grid>> gridNode;
+  std::vector<std::size_t> gridChildren = std::vector<std::size_t>(0);
   std::size_t offset{};
   std::size_t textOffset{};
   bool resourceText{};
@@ -232,7 +276,7 @@ struct ResourceDocument {
 
 class Parser {
 public:
-  Parser(ResourceDocument &document, const SceneResourceOptions &options, ControlContext &controls, bool typed)
+  Parser(ResourceDocument &document, SceneResourceOptions &options, ControlContext &controls, bool typed)
       : document_(document), options_(options), controls_(controls), typed_(typed) {
   }
 
@@ -278,6 +322,11 @@ public:
 
       position_ = configured->first;
       sceneEnd = configured->second;
+    }
+
+    auto fallback = detail::ResourceAccess::installGrid(options_.registry, controls_, typed_);
+    if (!fallback) {
+      return std::unexpected(contextFailure(fallback.error(), 0));
     }
 
     auto prepared = controls_.prepared();
@@ -562,7 +611,9 @@ private:
       }
     }
 
-    return nullptr;
+    const auto grid = detail::ControlContextAccess::gridSchema();
+    const auto found = std::ranges::find(grid, path, &ControlPropertyDescriptor::path);
+    return found == grid.end() ? nullptr : &*found;
   }
 
   std::expected<void, ManagedError> setting(ControlSettings &settings, std::string_view type, std::string_view path,
@@ -607,7 +658,9 @@ private:
 
       const bool enabled = value == "true";
 
-      if (path == "readOnly") {
+      if (path == "scroll") {
+        settings.grid.scroll = enabled;
+      } else if (path == "readOnly") {
         settings.readOnly = enabled;
       } else if (path == "history.enabled") {
         settings.history.enabled = enabled;
@@ -638,6 +691,8 @@ private:
         settings.editMode = static_cast<EditMode>(index);
       } else if (path == "programmaticChange") {
         settings.programmaticChange = static_cast<ProgrammaticChange>(index);
+      } else if (path == "flow") {
+        settings.grid.flow = static_cast<GridFlow>(index);
       } else {
         settings.displayMode = static_cast<LineEditDisplayMode>(index);
       }
@@ -667,8 +722,30 @@ private:
       settings.flex = static_cast<std::uint32_t>(*value);
     } else if (path == "history.maxOperations") {
       settings.history.maxOperations = *value;
-    } else {
+    } else if (path == "history.maxBytes") {
       settings.history.maxBytes = *value;
+    } else if (path == "columns") {
+      settings.grid.columns = *value;
+    } else if (path == "rows") {
+      settings.grid.rows = *value;
+    } else if (path == "columnGap") {
+      settings.grid.columnGap = static_cast<std::int32_t>(*value);
+    } else if (path == "rowGap") {
+      settings.grid.rowGap = static_cast<std::int32_t>(*value);
+    } else if (path == "padding.left") {
+      settings.grid.paddingLeft = static_cast<std::int32_t>(*value);
+    } else if (path == "padding.top") {
+      settings.grid.paddingTop = static_cast<std::int32_t>(*value);
+    } else if (path == "padding.right") {
+      settings.grid.paddingRight = static_cast<std::int32_t>(*value);
+    } else if (path == "padding.bottom") {
+      settings.grid.paddingBottom = static_cast<std::int32_t>(*value);
+    } else if (path == "maxTracksPerAxis") {
+      settings.grid.maxTracksPerAxis = *value;
+    } else if (path == "maxPlacements") {
+      settings.grid.maxPlacements = *value;
+    } else if (path == "maxPlacementWork") {
+      settings.grid.maxPlacementWork = *value;
     }
 
     return {};
@@ -708,7 +785,7 @@ private:
       const bool assigned = take('=') || take(':');
 
       if (take('{')) {
-        if (path != "history") {
+        if (path != "history" && path != "padding") {
           return std::unexpected(document_.propertyFailure(Code::UNKNOWN_PROPERTY, begin, type, path));
         }
 
@@ -866,6 +943,10 @@ private:
   std::expected<void, ManagedError> property(ResourceNode &target, std::string_view key, std::size_t offset) {
     const auto &schema = detail::ResourceAccess::entry(options_.registry, target.type);
 
+    if (schema.factoryKind == detail::ControlFactoryKind::DECLARATIVE_GRID_FALLBACK) {
+      return setting(target.arguments.settings, target.name, key, offset);
+    }
+
     if (key == "text" && schema.text) {
       auto parsed = text(target);
 
@@ -919,6 +1000,99 @@ private:
     return {};
   }
 
+  std::expected<void, ManagedError> itemProperty(ResourceNode &target, std::string_view key, std::size_t offset) {
+    target.itemRequested = true;
+    if (key == "horizontal" || key == "vertical") {
+      constexpr std::array<std::string_view, 4> ALIGN_NAMES{"START", "CENTER", "END", "STRETCH"};
+      const auto value = name();
+      const auto found = std::ranges::find(ALIGN_NAMES, value);
+      if (found == ALIGN_NAMES.end()) {
+        return std::unexpected(document_.propertyFailure(Code::INVALID_VALUE, offset, target.name, key));
+      }
+
+      auto &alignment = key == "horizontal" ? target.gridItem.horizontal : target.gridItem.vertical;
+      alignment = static_cast<LayoutAlign>(found - ALIGN_NAMES.begin());
+
+      return {};
+    }
+
+    auto value = capacity();
+    if (!value) {
+      return std::unexpected(withProperty(value.error(), target.name, key));
+    }
+
+    if (key == "row") {
+      target.gridItem.row = *value;
+    } else if (key == "column") {
+      target.gridItem.column = *value;
+    } else if (key == "rowSpan") {
+      target.gridItem.rowSpan = *value;
+    } else {
+      target.gridItem.columnSpan = *value;
+    }
+
+    return {};
+  }
+
+  std::expected<void, ManagedError> region(std::size_t parent, GridRegion kind, std::size_t depth, std::size_t offset) {
+    const bool declared =
+      kind == GridRegion::HEADER ? document_.nodes[parent].headerDeclared : document_.nodes[parent].bodyDeclared;
+    if (declared || document_.nodes[parent].directChildren) {
+      return std::unexpected(document_.failure(Code::INVALID_VALUE, offset));
+    }
+
+    if (kind == GridRegion::HEADER) {
+      document_.nodes[parent].headerDeclared = true;
+    } else {
+      document_.nodes[parent].bodyDeclared = true;
+    }
+
+    document_.nodes[parent].regions = true;
+    if (!take('{')) {
+      return std::unexpected(document_.failure(Code::SYNTAX, position_));
+    }
+
+    bool stickyDeclared{};
+    while (!take('}')) {
+      skip();
+      const auto begin = position_;
+      const auto token = name();
+      const bool assigned = take(':') || take('=');
+      if (assigned) {
+        if (kind != GridRegion::HEADER || token != "sticky") {
+          return std::unexpected(
+            document_.propertyFailure(Code::UNKNOWN_PROPERTY, begin, document_.nodes[parent].name, token));
+        }
+
+        if (stickyDeclared) {
+          return std::unexpected(
+            document_.propertyFailure(Code::DUPLICATE_PROPERTY, begin, document_.nodes[parent].name, "header.sticky"));
+        }
+
+        stickyDeclared = true;
+        const auto value = name();
+        if (value != "true" && value != "false") {
+          return std::unexpected(
+            document_.propertyFailure(Code::INVALID_VALUE, begin, document_.nodes[parent].name, "header.sticky"));
+        }
+
+        document_.nodes[parent].stickyHeader = value == "true";
+      } else {
+        position_ = begin;
+        // Structural groups do not consume a widget-node depth or identity.
+        auto child = node(depth);
+        if (!child) {
+          return std::unexpected(child.error());
+        }
+
+        document_.nodes[*child].parent = parent;
+        document_.nodes[*child].gridItem.region = kind;
+      }
+    }
+
+    return {};
+  }
+
   std::expected<void, ManagedError> resolveType(std::string_view type, std::size_t offset,
                                                 std::optional<std::size_t> &registered) {
     const auto resolved = controls_.resolve(type);
@@ -932,7 +1106,55 @@ private:
     return {};
   }
 
-  std::expected<std::size_t, ManagedError> node(std::size_t depth) {
+  // Header/property error temporaries must not remain in every bounded recursive node frame.
+  std::expected<void, ManagedError> nodeProperty(std::size_t index, std::string_view token, bool positional,
+                                                 std::size_t begin, std::vector<std::string_view> &properties) {
+    auto &target = document_.nodes[index];
+    const auto type = std::string_view(target.name);
+    const auto key = positional ? std::string_view("text") : token;
+
+    if (properties.size() == options_.limits.maxProperties) {
+      return std::unexpected(document_.failure(Code::PROPERTY_LIMIT, begin));
+    }
+
+    if (std::ranges::find(properties, key) != properties.end()) {
+      return std::unexpected(document_.propertyFailure(Code::DUPLICATE_PROPERTY, begin, type, key));
+    }
+
+    properties.push_back(key);
+
+    if (positional) {
+      position_ = begin;
+    }
+
+    if (key == "row" || key == "column" || key == "rowSpan" || key == "columnSpan" || key == "horizontal" ||
+        key == "vertical") {
+      return itemProperty(target, key, begin);
+    }
+
+    if (key == "padding" && take('{')) {
+      return settingsBody(target.arguments.settings, type, "padding", 2);
+    }
+
+    if (options_.format != SceneResourceFormat::CONFIGURATION) {
+      auto parsed = property(target, key, begin);
+
+      if (parsed && typed_ && target.factory.kind != detail::ControlFactoryKind::DECLARATIVE_GRID_FALLBACK) {
+        target.arguments.settings.origins.push_back(
+          {std::string(key == "checked" ? "state" : key), document_.origin(begin)});
+      }
+
+      return parsed;
+    }
+
+    if (key == "history" && take('{')) {
+      return settingsBody(target.arguments.settings, type, "history", 2);
+    }
+
+    return setting(target.arguments.settings, type, key, begin);
+  }
+
+  std::expected<std::size_t, ManagedError> beginNode(std::size_t depth) {
     skip();
 
     const auto offset = position_;
@@ -968,6 +1190,7 @@ private:
       auto &target = document_.nodes[index];
 
       target.type = *registered;
+      target.factory = {detail::ResourceAccess::entry(options_.registry, *registered).factoryKind, *registered};
       target.offset = offset;
       target.name = type;
 
@@ -994,6 +1217,18 @@ private:
       }
     }
 
+    return index;
+  }
+
+  std::expected<std::size_t, ManagedError> node(std::size_t depth) {
+    auto begun = beginNode(depth);
+
+    if (!begun) {
+      return std::unexpected(begun.error());
+    }
+
+    const auto index = *begun;
+
     std::vector<std::string_view> properties(0);
 
     while (true) {
@@ -1014,53 +1249,33 @@ private:
       const bool named = take(':') || take('=');
       const bool positional = !named && (token.empty() || token == "i18n");
       const bool structured =
-        options_.format == SceneResourceFormat::CONFIGURATION && token == "history" && peek() == '{';
+        (options_.format == SceneResourceFormat::CONFIGURATION && token == "history" && peek() == '{') ||
+        (document_.nodes[index].factory.kind == detail::ControlFactoryKind::DECLARATIVE_GRID_FALLBACK &&
+         token == "padding" && peek() == '{');
 
       if (named || positional || structured) {
-        // Recursive children may reallocate nodes; borrow only while applying this node's properties.
-        auto &target = document_.nodes[index];
-        const auto key = positional ? std::string_view("text") : token;
-
-        if (properties.size() == options_.limits.maxProperties) {
-          return std::unexpected(document_.failure(Code::PROPERTY_LIMIT, begin));
-        }
-
-        if (std::ranges::find(properties, key) != properties.end()) {
-          return std::unexpected(document_.propertyFailure(Code::DUPLICATE_PROPERTY, begin, type, key));
-        }
-
-        properties.push_back(key);
-
-        if (positional) {
-          position_ = begin;
-        }
-
-        auto applied = [&]() -> std::expected<void, ManagedError> {
-          if (options_.format != SceneResourceFormat::CONFIGURATION) {
-            auto parsed = property(target, key, begin);
-
-            if (parsed && typed_) {
-              target.arguments.settings.origins.push_back(
-                {std::string(key == "checked" ? "state" : key), document_.origin(begin)});
-            }
-
-            return parsed;
-          }
-
-          if (key == "history" && take('{')) {
-            return settingsBody(target.arguments.settings, type, "history", 2);
-          }
-
-          return setting(target.arguments.settings, type, key, begin);
-        }();
+        auto applied = nodeProperty(index, token, positional, begin, properties);
 
         if (!applied) {
           return std::unexpected(applied.error());
         }
       } else {
+        const bool standardGrid =
+          document_.nodes[index].factory.kind == detail::ControlFactoryKind::DECLARATIVE_GRID_FALLBACK;
+        if (standardGrid && (token == "header" || token == "body")) {
+          auto parsed = region(index, token == "header" ? GridRegion::HEADER : GridRegion::BODY, depth + 1, begin);
+          if (!parsed) {
+            return std::unexpected(parsed.error());
+          }
+          continue;
+        }
+        if (standardGrid && document_.nodes[index].regions) {
+          return std::unexpected(document_.failure(Code::INVALID_VALUE, begin));
+        }
         if (!detail::ResourceAccess::entry(options_.registry, document_.nodes[index].type).children) {
           return std::unexpected(document_.failure(Code::CHILDREN_FORBIDDEN, begin));
         }
+        document_.nodes[index].directChildren = true;
 
         position_ = begin;
 
@@ -1076,7 +1291,7 @@ private:
   }
 
   ResourceDocument &document_;
-  const SceneResourceOptions &options_;
+  SceneResourceOptions &options_;
   ControlContext &controls_;
   bool typed_{};
   std::size_t position_{};
@@ -1154,6 +1369,145 @@ std::expected<void, ManagedError> prepareNodes(ResourceDocument &document, const
   context.controlLeaves += leaves;
 
   return {};
+}
+
+DeclarativeGridOptions gridSettings(const ControlGridSettings &settings) {
+  DeclarativeGridOptions result;
+  result.columns = settings.columns;
+  result.rows = settings.rows;
+  result.flow = settings.flow.value_or(result.flow);
+  result.columnGap = settings.columnGap.value_or(result.columnGap);
+  result.rowGap = settings.rowGap.value_or(result.rowGap);
+  result.padding = {settings.paddingLeft.value_or(0), settings.paddingTop.value_or(0),
+                    settings.paddingRight.value_or(0), settings.paddingBottom.value_or(0)};
+  result.maxTracksPerAxis = settings.maxTracksPerAxis.value_or(result.maxTracksPerAxis);
+  result.maxPlacements = settings.maxPlacements.value_or(result.maxPlacements);
+  result.maxPlacementWork = settings.maxPlacementWork.value_or(result.maxPlacementWork);
+
+  return result;
+}
+
+std::expected<void, ManagedError> prepareGrids(ResourceDocument &document, bool typed) {
+  ControlContext fallback;
+  if (!typed) {
+    auto installed = detail::ControlContextAccess::installFallbackSchema(fallback);
+    if (!installed) {
+      return std::unexpected(detail::controlContextError(installed.error()));
+    }
+  }
+
+  for (std::size_t index = 0; index < document.nodes.size(); ++index) {
+    auto &node = document.nodes[index];
+    if (node.parent &&
+        document.nodes[*node.parent].factory.kind == detail::ControlFactoryKind::DECLARATIVE_GRID_FALLBACK) {
+      document.nodes[*node.parent].gridChildren.push_back(index);
+    }
+
+    if (node.itemRequested && (!node.parent || document.nodes[*node.parent].factory.kind !=
+                                                 detail::ControlFactoryKind::DECLARATIVE_GRID_FALLBACK)) {
+      return std::unexpected(document.propertyFailure(Code::INVALID_VALUE, node.offset, node.name, "row"));
+    }
+  }
+
+  for (auto &node : document.nodes) {
+    if (node.factory.kind != detail::ControlFactoryKind::DECLARATIVE_GRID_FALLBACK) {
+      continue;
+    }
+
+    if (!typed) {
+      auto checked = fallback.resolve("Grid", node.arguments.settings);
+      if (!checked) {
+        return std::unexpected(detail::controlContextError(checked.error()));
+      }
+
+      node.arguments.width = node.arguments.settings.width;
+      node.arguments.height = node.arguments.settings.height;
+      node.arguments.flex = node.arguments.settings.flex;
+    }
+
+    node.gridOptions = gridSettings(node.arguments.settings.grid);
+    node.gridOptions.regions = node.regions;
+    node.gridOptions.stickyHeader = node.stickyHeader;
+    std::vector<GridItemOptions> items(0);
+    items.reserve(node.gridChildren.size());
+    for (const auto child : node.gridChildren) {
+      items.push_back(document.nodes[child].gridItem);
+    }
+
+    auto resolved = resolveGridPlacements(node.gridOptions, items);
+    if (!resolved) {
+      auto failure = document.failure(resolved.error() == TreeError::NODE_LIMIT  ? Code::NODE_LIMIT
+                                      : resolved.error() == TreeError::NO_MEMORY ? Code::NO_MEMORY
+                                                                                 : Code::INVALID_VALUE,
+                                      node.offset);
+      failure.cause = resolved.error();
+
+      return std::unexpected(std::move(failure));
+    }
+
+    node.gridPlan = *resolved;
+    node.gridNode = std::make_shared<Node<Grid>>();
+  }
+
+  return {};
+}
+
+GridOptions boundGridOptions(const ResourceDocument &document, const ResourceNode &node,
+                             const std::vector<Node<Widget>> &mounted) {
+  GridOptions result;
+  result.columns.resize(node.gridPlan->columns);
+  result.rows.resize(node.gridPlan->rows);
+  result.header_rows.resize(node.gridPlan->headerRows);
+  result.sticky_header = node.gridOptions.stickyHeader;
+  result.regions = node.gridOptions.regions;
+  result.column_gap = node.gridOptions.columnGap;
+  result.row_gap = node.gridOptions.rowGap;
+  result.padding = node.gridOptions.padding;
+  result.max_tracks_per_axis = node.gridOptions.maxTracksPerAxis;
+  result.max_placements = node.gridOptions.maxPlacements;
+  result.cells.reserve(node.gridChildren.size());
+  for (std::size_t index = 0; index < node.gridChildren.size(); ++index) {
+    const auto child = node.gridChildren[index];
+    const auto &item = document.nodes[child].gridItem;
+    const auto position = node.gridPlan->positions[index];
+    result.cells.push_back({mounted[child].id(), position.row, position.column, item.rowSpan, item.columnSpan,
+                            item.horizontal, item.vertical, item.region});
+  }
+
+  return result;
+}
+
+std::expected<Description<Widget>, ManagedError> gridRecipe(ResourceNode &node) {
+  auto recipe = grid()
+                  .gridOptions(node.gridOptions)
+                  .setup([slot = node.gridNode](ManagedScene &, Node<Grid> node) -> std::expected<void, ManagedError> {
+                    *slot = node;
+
+                    return {};
+                  });
+  if (node.arguments.settings.grid.scroll.value_or(false)) {
+    (void)std::move(recipe).scroll();
+  }
+
+  if (!node.arguments.id.empty()) {
+    (void)std::move(recipe).id(node.arguments.id);
+  }
+
+  if (node.arguments.width) {
+    (void)std::move(recipe).width(*node.arguments.width);
+  }
+
+  if (node.arguments.height) {
+    (void)std::move(recipe).height(*node.arguments.height);
+  }
+
+  if (node.arguments.flex) {
+    (void)std::move(recipe).flex(*node.arguments.flex);
+  }
+
+  detail::Access::preparedControl(recipe, detail::controlSettingsPresence(node.arguments.settings));
+
+  return detail::Access::erase(std::move(recipe));
 }
 
 ManagedError textFailure(ResourceDocument &document, const ResourceNode &node, std::string_view path,
@@ -1278,8 +1632,10 @@ ManagedError attributed(ResourceDocument &document, std::size_t index, ManagedEr
 std::expected<Node<Widget>, ManagedError> compile(ManagedScene &owner, ResourceDocument &document,
                                                   const SceneResourceOptions &options, Node<Widget> parent,
                                                   detail::MountContext &context) try {
+  auto effectiveOptions = options;
   auto controls = options.controls.value_or(context.controls);
-  const bool typed = options.format == SceneResourceFormat::CONFIGURATION || !controls.empty();
+  const bool typed = options.format == SceneResourceFormat::CONFIGURATION ||
+                     detail::ControlContextAccess::hasUserConfiguration(controls);
 
   if (typed) {
     auto registered = registerSchemas(controls, options);
@@ -1289,7 +1645,7 @@ std::expected<Node<Widget>, ManagedError> compile(ManagedScene &owner, ResourceD
     }
   }
 
-  auto parsed = Parser(document, options, controls, typed).parse();
+  auto parsed = Parser(document, effectiveOptions, controls, typed).parse();
 
   if (!parsed) {
     return std::unexpected(parsed.error());
@@ -1301,6 +1657,12 @@ std::expected<Node<Widget>, ManagedError> compile(ManagedScene &owner, ResourceD
     if (!prepared) {
       return std::unexpected(prepared.error());
     }
+  }
+
+  auto placements = prepareGrids(document, typed);
+
+  if (!placements) {
+    return std::unexpected(placements.error());
   }
 
   auto resolved =
@@ -1319,7 +1681,10 @@ std::expected<Node<Widget>, ManagedError> compile(ManagedScene &owner, ResourceD
     auto &node = document.nodes[index];
 
     try {
-      auto recipe = detail::ResourceAccess::entry(options.registry, node.type).create(std::move(node.arguments));
+      auto recipe = node.factory.kind == detail::ControlFactoryKind::DECLARATIVE_GRID_FALLBACK
+                      ? gridRecipe(node)
+                      : detail::ResourceAccess::entry(effectiveOptions.registry, node.factory.index)
+                          .create(std::move(node.arguments));
 
       if (!recipe) {
         return std::unexpected(attributed(document, index, recipe.error()));
@@ -1372,6 +1737,16 @@ std::expected<Node<Widget>, ManagedError> compile(ManagedScene &owner, ResourceD
     }
   }
 
+  for (std::size_t index = 0; index < document.nodes.size(); ++index) {
+    auto &node = document.nodes[index];
+    if (node.gridPlan) {
+      auto configured = detail::Access::gridOptions(owner, *node.gridNode, boundGridOptions(document, node, mounted));
+      if (!configured) {
+        return std::unexpected(attributed(document, index, configured.error()));
+      }
+    }
+  }
+
   for (std::size_t index = existingNodes; index < context.nodes.size(); ++index) {
     auto checked = detail::Access::check(owner, context.nodes[index]);
 
@@ -1399,10 +1774,10 @@ std::expected<Node<Widget>, ManagedError> compile(ManagedScene &owner, ResourceD
 Description<Widget> resource(std::string_view source, SceneResourceOptions options) {
   auto identity = std::make_shared<const std::string>(source);
 
-  return detail::Access::transaction(
-    [identity = std::move(identity),
-     options = std::move(options)](ManagedScene &owner, Node<Widget> parent,
-                                   detail::MountContext &context) mutable -> std::expected<Node<Widget>, ManagedError> {
+  return detail::Access::deferControlValidation(
+    detail::Access::transaction([identity = std::move(identity), options = std::move(options)](
+                                  ManagedScene &owner, Node<Widget> parent,
+                                  detail::MountContext &context) mutable -> std::expected<Node<Widget>, ManagedError> {
       ResourceDocument document{identity};
 
       try {
@@ -1432,7 +1807,7 @@ Description<Widget> resource(std::string_view source, SceneResourceOptions optio
 
         return std::unexpected(std::move(failure));
       }
-    });
+    }));
 }
 
 Description<Widget> resource(SceneResourceFile source, SceneResourceOptions options) {
@@ -1440,7 +1815,7 @@ Description<Widget> resource(SceneResourceFile source, SceneResourceOptions opti
   auto identity =
     std::make_shared<const std::string>(reinterpret_cast<const char *>(pathBytes.data()), pathBytes.size());
 
-  return detail::Access::transaction(
+  return detail::Access::deferControlValidation(detail::Access::transaction(
     [source = std::move(source), identity = std::move(identity),
      options = std::move(options)](ManagedScene &owner, Node<Widget> parent,
                                    detail::MountContext &context) mutable -> std::expected<Node<Widget>, ManagedError> {
@@ -1494,7 +1869,7 @@ Description<Widget> resource(SceneResourceFile source, SceneResourceOptions opti
       } catch (const std::filesystem::filesystem_error &failure) {
         return std::unexpected(document.failure(Code::FILE_IO, 0, failure.code()));
       }
-    });
+    }));
 }
 
 Scene scene(std::string_view source, SceneResourceOptions resourceOptions, SceneOptions options,

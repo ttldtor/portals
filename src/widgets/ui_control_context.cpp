@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include <portals/detail/control_context.hpp>
 #include <portals/style.hpp>
-#include <portals/ui_control_context.hpp>
 
 #include <algorithm>
 #include <array>
@@ -14,12 +14,14 @@ namespace {
 using Code = ControlContextErrorCode;
 using Kind = ControlPropertyKind;
 using Mask = std::uint32_t;
+constexpr std::size_t GRID_PROPERTY_BEGIN = 17;
 constexpr std::array<std::string_view, 3> STATE_NAMES{"UNCHECKED", "CHECKED", "MIXED"};
 constexpr std::array<std::string_view, 2> CYCLE_NAMES{"TWO_STATE", "THREE_STATE"};
 constexpr std::array<std::string_view, 3> MODE_NAMES{"IMMEDIATE", "ON_COMPLETION", "EXPLICIT"};
 constexpr std::array<std::string_view, 2> CHANGE_NAMES{"RECORD", "RESET_BASELINE"};
 constexpr std::array<std::string_view, 3> DISPLAY_NAMES{"NORMAL", "PASSWORD", "NO_ECHO"};
-constexpr std::array<ControlPropertyDescriptor, 17> PROPERTIES{
+constexpr std::array<std::string_view, 2> FLOW_NAMES{"ROW_MAJOR", "COLUMN_MAJOR"};
+constexpr std::array<ControlPropertyDescriptor, 30> PROPERTIES{
   {{"text", Kind::TEXT, 1, {}},
    {"width", Kind::SIGNED_INTEGER, 1, {}},
    {"height", Kind::SIGNED_INTEGER, 1, {}},
@@ -36,13 +38,27 @@ constexpr std::array<ControlPropertyDescriptor, 17> PROPERTIES{
    {"history.maxOperations", Kind::UNSIGNED_INTEGER, 2, {}},
    {"history.maxBytes", Kind::UNSIGNED_INTEGER, 2, {}},
    {"history.groupTyping", Kind::BOOLEAN, 2, {}},
-   {"history.groupDeletion", Kind::BOOLEAN, 2, {}}}};
+   {"history.groupDeletion", Kind::BOOLEAN, 2, {}},
+   {"columns", Kind::UNSIGNED_INTEGER, 1, {}},
+   {"rows", Kind::UNSIGNED_INTEGER, 1, {}},
+   {"flow", Kind::ENUMERATION, 1, FLOW_NAMES},
+   {"columnGap", Kind::SIGNED_INTEGER, 1, {}},
+   {"rowGap", Kind::SIGNED_INTEGER, 1, {}},
+   {"padding.left", Kind::SIGNED_INTEGER, 2, {}},
+   {"padding.top", Kind::SIGNED_INTEGER, 2, {}},
+   {"padding.right", Kind::SIGNED_INTEGER, 2, {}},
+   {"padding.bottom", Kind::SIGNED_INTEGER, 2, {}},
+   {"maxTracksPerAxis", Kind::UNSIGNED_INTEGER, 1, {}},
+   {"maxPlacements", Kind::UNSIGNED_INTEGER, 1, {}},
+   {"maxPlacementWork", Kind::UNSIGNED_INTEGER, 1, {}},
+   {"scroll", Kind::BOOLEAN, 1, {}}}};
 constexpr Mask SIZE_MASK = (1U << 1) | (1U << 2) | (1U << 3);
 constexpr Mask TEXT_MASK = 1U;
 constexpr Mask CHECK_MASK = SIZE_MASK | TEXT_MASK | (1U << 5) | (1U << 6);
 constexpr Mask LAYOUT_MASK = SIZE_MASK | (1U << 4);
 constexpr Mask EDIT_MASK = SIZE_MASK | TEXT_MASK | (((1U << 17) - 1) & ~((1U << 7) - 1));
-constexpr Mask ALL_MASK = (1U << 17) - 1;
+constexpr Mask ALL_MASK = (1U << PROPERTIES.size()) - 1;
+constexpr Mask GRID_MASK = SIZE_MASK | (ALL_MASK & ~((1U << GRID_PROPERTY_BEGIN) - 1));
 constexpr std::size_t BUILTIN_COUNT = 7;
 constexpr auto SIZE_SCHEMA = std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[4]});
 constexpr auto TEXT_SCHEMA = std::to_array({PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3]});
@@ -152,7 +168,20 @@ ControlContextError exceptionError() noexcept {
   X(history.maxOperations, 13)                                                                                         \
   X(history.maxBytes, 14)                                                                                              \
   X(history.groupTyping, 15)                                                                                           \
-  X(history.groupDeletion, 16)
+  X(history.groupDeletion, 16)                                                                                         \
+  X(grid.columns, 17)                                                                                                  \
+  X(grid.rows, 18)                                                                                                     \
+  X(grid.flow, 19)                                                                                                     \
+  X(grid.columnGap, 20)                                                                                                \
+  X(grid.rowGap, 21)                                                                                                   \
+  X(grid.paddingLeft, 22)                                                                                              \
+  X(grid.paddingTop, 23)                                                                                               \
+  X(grid.paddingRight, 24)                                                                                             \
+  X(grid.paddingBottom, 25)                                                                                            \
+  X(grid.maxTracksPerAxis, 26)                                                                                         \
+  X(grid.maxPlacements, 27)                                                                                            \
+  X(grid.maxPlacementWork, 28)                                                                                         \
+  X(grid.scroll, 29)
 
 template <class Visitor> void visitLeaves(const ControlSettings &settings, Visitor &&visitor) {
 #define VISIT(field, index) visitor(index, settings.field);
@@ -202,7 +231,11 @@ template <class T> bool validValue(const T &value, std::size_t index) noexcept {
   if constexpr (std::same_as<T, std::int32_t>) {
     return value >= 0;
   } else if constexpr (std::same_as<T, std::uint32_t>) {
-    return index != 3 || value > 0;
+    return value > 0 || (index != 3 && index < GRID_PROPERTY_BEGIN);
+  } else if constexpr (std::same_as<T, std::size_t>) {
+    return index < GRID_PROPERTY_BEGIN || value > 0;
+  } else if constexpr (std::same_as<T, GridFlow>) {
+    return value == GridFlow::ROW_MAJOR || value == GridFlow::COLUMN_MAJOR;
   } else if constexpr (std::same_as<T, CheckState>) {
     return value == CheckState::UNCHECKED || value == CheckState::CHECKED || value == CheckState::MIXED;
   } else if constexpr (std::same_as<T, CheckCycle>) {
@@ -303,8 +336,10 @@ struct ControlContext::Data {
 
     std::string name = std::string(0, '\0');
     Mask mask{};
+    detail::ControlFactoryKind factoryKind{detail::ControlFactoryKind::USER};
   };
 
+  std::optional<Schema> fallback;
   std::vector<Entry> definitions = std::vector<Entry>(0);
   std::vector<Entry> defaults = std::vector<Entry>(0);
   std::vector<Schema> schemas = std::vector<Schema>(0);
@@ -318,6 +353,7 @@ struct Chain {
   std::string_view base;
   Mask mask{};
   bool fixedCycle{};
+  detail::ControlFactoryKind factoryKind{detail::ControlFactoryKind::USER};
 };
 
 template <class Data> auto definition(const Data &data, std::string_view name) {
@@ -345,6 +381,7 @@ std::expected<Chain, ControlContextError> chainFor(const Data &data, std::string
 
     if (builtin(current)) {
       chain.base = current;
+      chain.factoryKind = detail::ControlFactoryKind::EXISTING_BUILTIN;
       chain.mask = builtinMask(current);
       chain.fixedCycle = current == "ThreeState";
 
@@ -371,6 +408,12 @@ std::expected<Chain, ControlContextError> chainFor(const Data &data, std::string
     const auto found = definition(data, current);
 
     if (found == data.definitions.end()) {
+      if (data.fallback && data.fallback->name == current) {
+        chain.base = data.fallback->name;
+        chain.mask = data.fallback->mask;
+        chain.factoryKind = data.fallback->factoryKind;
+        return chain;
+      }
       return std::unexpected(error(Code::UNKNOWN_TYPE, declaration, property, origin));
     }
 
@@ -394,6 +437,7 @@ resolveData(const Data &data, std::string_view name, const ControlSettings &inst
   ResolvedControl result;
   result.type = name;
   result.base = chain->base;
+  result.factoryKind = chain->factoryKind;
 
   for (std::size_t index = 1; index < chain->names.size(); ++index) {
     result.lineage.emplace_back(chain->names[index]);
@@ -496,6 +540,55 @@ std::span<const ControlPropertyDescriptor> controlPropertySchema(std::string_vie
 
   return {};
 }
+
+namespace detail {
+bool ControlContextAccess::hasDeclaredType(const ControlContext &context, std::string_view name) noexcept {
+  return context.data_ && (definition(*context.data_, name) != context.data_->definitions.end() ||
+                           std::ranges::find(context.data_->schemas, name, &ControlContext::Data::Schema::name) !=
+                             context.data_->schemas.end());
+}
+
+bool ControlContextAccess::hasUserConfiguration(const ControlContext &context) noexcept {
+  const ControlContextLimits defaults;
+
+  return context.failure_ || context.limits_.maxDefinitions != defaults.maxDefinitions ||
+         context.limits_.maxInheritance != defaults.maxInheritance ||
+         context.limits_.maxStructDepth != defaults.maxStructDepth ||
+         context.limits_.maxMaterializedLeaves != defaults.maxMaterializedLeaves ||
+         (context.data_ &&
+          (!context.data_->definitions.empty() || !context.data_->defaults.empty() || !context.data_->schemas.empty()));
+}
+
+std::span<const ControlPropertyDescriptor> ControlContextAccess::gridSchema() noexcept {
+  return std::span(PROPERTIES).subspan(GRID_PROPERTY_BEGIN);
+}
+
+std::expected<void, ControlContextError> ControlContextAccess::installFallbackSchema(ControlContext &context) noexcept {
+  if (context.failure_) {
+    return std::unexpected(*context.failure_);
+  }
+
+  if (hasDeclaredType(context, "Grid") || (context.data_ && context.data_->fallback)) {
+    return {};
+  }
+
+  try {
+    auto next =
+      context.data_ ? std::make_shared<ControlContext::Data>(*context.data_) : std::make_shared<ControlContext::Data>();
+    ControlContext::Data::Schema schema;
+    schema.name = "Grid";
+    schema.mask = GRID_MASK;
+    schema.factoryKind = ControlFactoryKind::DECLARATIVE_GRID_FALLBACK;
+    next->fallback = schema;
+    context.data_ = std::move(next);
+    context.prepared_ = false;
+
+    return {};
+  } catch (...) {
+    return std::unexpected(exceptionError());
+  }
+}
+} // namespace detail
 
 ControlContext::ControlContext(ControlContextLimits limits) noexcept : limits_(limits) {
   if (!limits.maxDefinitions || !limits.maxInheritance || limits.maxInheritance > MAX_STYLE_BASE_TYPES ||

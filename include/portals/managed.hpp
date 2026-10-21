@@ -27,6 +27,7 @@
 namespace portals {
 
 class ManagedScene;
+class Grid;
 
 /** @brief Exact scene access failure or owning table preparation/provider failure. */
 using VisibleModelError = std::variant<ManagedError, VisibleModelReadError>;
@@ -1815,7 +1816,8 @@ private:
     std::shared_ptr<detail::ScrollIntentRecord> scrollIntent;
     std::shared_ptr<detail::ManagedScrollState> scrollOwner;
     std::shared_ptr<ScrollController> scrollController;
-    Node<ScrollArea> scrollArea;
+    Node<Widget> scrollArea;
+    bool regionalLayoutOwner{};
   };
 
   template <class T, class... Args>
@@ -1824,12 +1826,15 @@ private:
                                                          Args &&...args);
   std::expected<void, TreeError> attachScroll(const std::shared_ptr<Entry> &entry, Node<ScrollArea> node, bool writer);
   std::expected<void, TreeError> attachScroll(const std::shared_ptr<Entry> &entry, Node<ScrollBar> node, bool writer);
+  std::expected<void, TreeError> attachScroll(const std::shared_ptr<Entry> &entry, Node<Widget> node, bool writer);
   std::expected<void, TreeError> attachScrollValues(const std::shared_ptr<Entry> &entry);
   void publishScroll(const std::shared_ptr<Entry> &entry) noexcept;
   void pruneScroll() noexcept;
   std::expected<void, TreeError> sampleScrollFocus();
   std::expected<void, TreeError> queueScrollReveal(Node<Widget> node, Node<Widget> root, bool explicitRequest);
   bool scrollIntentIntersects(const Entry &entry, std::span<const Node<Widget>> chain) const noexcept;
+  std::expected<bool, TreeError> prepareRegionalInput(const LayoutSnapshot &snapshot);
+  std::expected<void, TreeError> syncRegionalPresentation(Node<Widget> focused);
   std::expected<void, TreeError> prepareScrollFrame(const LayoutSnapshot &snapshot);
   void completeScrollFrame() noexcept;
 

@@ -264,19 +264,28 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
 template <class T>
 std::expected<ActionBinding, TreeError> bindScroll(EventRouter &router, WidgetTree &tree, Node<T> node, bool writer) {
   bool focusable{};
+  bool recognized{};
   auto read = tree.read(node, [&](const T &widget) {
-    const auto &state = detail::ScrollWidgetAccess::state(widget);
-    focusable = state.isArea ? state.area.focusable : state.bar.focusable;
+    const auto *state = detail::ScrollWidgetAccess::state(static_cast<const Widget &>(widget));
+    if (state) {
+      recognized = true;
+      focusable = state->isArea ? state->area.focusable : state->bar.focusable;
+    }
   });
   if (!read) {
     return std::unexpected(read.error());
+  }
+  if (!recognized) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
   // Allocate the registration first. Initialization failure only disconnects this local token;
   // it cannot strand a writer lease or roll back another caller's existing initialization.
   auto binding = detail::EventRouterAccess::bindChecked(
     router, node,
     [&router, &tree, node](T &widget, const RoutedEvent &event) {
-      return detail::scrollInput(router, tree, node, detail::ScrollWidgetAccess::state(widget), event);
+      auto *state = detail::ScrollWidgetAccess::state(static_cast<Widget &>(widget));
+      return state ? detail::scrollInput(router, tree, node, *state, event)
+                   : std::unexpected(TreeError::INVALID_ARGUMENT);
     },
     focusable);
   if (!binding) {
@@ -288,6 +297,10 @@ std::expected<ActionBinding, TreeError> bindScroll(EventRouter &router, WidgetTr
 } // namespace
 
 namespace detail {
+std::expected<ActionBinding, TreeError> bindScrollOwner(EventRouter &router, WidgetTree &tree, Node<Widget> node) {
+  return bindScroll(router, tree, node, true);
+}
+
 std::expected<EventReply, TreeError> scrollInput(EventRouter &router, WidgetTree &tree, Node<Widget> node,
                                                  ScrollWidgetState &state, const RoutedEvent &event) {
   if (!state.lease || state.retired) {

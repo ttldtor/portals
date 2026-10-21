@@ -64,6 +64,7 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Documentation
 
+- Grid guides now cover automatic placement, header and body regions, sticky scrolling, and declarative and explicit configuration examples.
 - Refresh the HTML reference with an offline Doxygen Awesome theme, a light/dark appearance selector, and aligned language and sidebar navigation.
 - Correct guide contracts and build instructions, synchronize English and Russian reading paths, and bundle complete example sources for offline use.
 - Compile every complete documentation program in the ordinary test build, reusing existing guide targets without launching interactive terminals.

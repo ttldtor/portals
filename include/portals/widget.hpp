@@ -17,6 +17,9 @@ namespace portals {
 namespace ui::detail {
 struct NamedAccess;
 }
+namespace detail {
+struct LayoutTraversalAccess;
+}
 class WidgetTree;
 class StyleEngine;
 
@@ -112,6 +115,36 @@ private:
   NodeId id_{};
 };
 
+/** @brief Axes an ancestor layout may move when revealing this child. */
+enum class RevealAxes {
+  BOTH,           ///< Reveal horizontally and vertically.
+  HORIZONTAL_ONLY ///< Keep a sticky region's vertical position.
+};
+
+/** @brief Proposed input admission for a layout region, independent of visibility. */
+enum class RegionalInput {
+  UNCHANGED, ///< Use ordinary visible/enabled ancestry.
+  OPEN,      ///< Admit input in this owner's nonempty region.
+  CLOSED     ///< Exclude the region while its own viewport is empty.
+};
+
+/** @brief Owning pure layout result for one direct child. */
+struct LayoutChildPolicy {
+  CellRect localClip;                                ///< Clip in the parent's local cell coordinates.
+  RevealAxes revealAxes{RevealAxes::BOTH};           ///< Allowed movement of this particular ancestor.
+  RegionalInput proposedInput{RegionalInput::UNCHANGED}; ///< Admission to stage outside the layout frame.
+};
+
+/** @brief Owning arranged edge before intersection with any ancestor's clip. */
+struct ParentLayoutEdge {
+  NodeId parent;                                      ///< Exact owner identity.
+  NodeId child;                                       ///< Exact direct child identity.
+  CellRect surfaceClip;                               ///< Owner clip in surface coordinates, before intersection.
+  RevealAxes revealAxes{RevealAxes::BOTH};            ///< Reveal axes for this edge only.
+  RegionalInput proposedInput{RegionalInput::UNCHANGED}; ///< Pure proposal, not a mutation of input state.
+  std::uint64_t geometryEpoch{};                      ///< Child's nonreused successful arrangement stamp.
+};
+
 /** @brief Owning snapshot of a live node; handles remain checked after subsequent mutations. */
 struct NodeSnapshot {
   Node<Widget> parent; ///< Empty only for the root.
@@ -120,6 +153,9 @@ struct NodeSnapshot {
   NodeGeometry geometry; ///< Owning geometry snapshot.
   bool visible{true};    ///< Hidden subtrees do not participate in layout, paint or input.
   bool enabled{true};    ///< Disabled subtrees retain layout/paint but do not receive input.
+  std::optional<ParentLayoutEdge> parentLayoutEdge; ///< Optional specialized parent policy, copied by value.
+  std::optional<std::uint64_t> geometryEpoch;       ///< Successful arrangement stamp, absent after invalidation.
+  bool regionalInputOpen{true};                   ///< Committed direct-edge admission, independent of user flags.
 };
 
 /** @brief Exclusive parent/child ownership on Scheduler's UI thread.
@@ -505,6 +541,7 @@ public:
   }
 
 private:
+  friend struct detail::LayoutTraversalAccess;
   friend class EventRouter;
   friend class LayoutSnapshot;
   // Allocation-free ancestry for the existing router; no record pointer escapes.
@@ -573,7 +610,8 @@ private:
   }
 
   std::expected<void, TreeError> arrangeImpl(Node<Widget> node, CellRect local, CellRect viewport,
-                                             std::optional<CellRect> contentClip);
+                                             std::optional<CellRect> contentClip,
+                                             const ParentLayoutEdge *parentEdge = nullptr);
   std::expected<void, TreeError> beginFrame() const;
   const UiScope &scope(NodeId id) const;
   Scheduler &scheduler() const;

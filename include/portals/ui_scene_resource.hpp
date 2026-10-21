@@ -148,6 +148,7 @@ private:
     bool text{true};
     bool gap{};
     bool checked{};
+    detail::ControlFactoryKind factoryKind{detail::ControlFactoryKind::USER};
     std::function<std::expected<Description<Widget>, ManagedError>(SceneResourceArguments)> create;
   };
 
