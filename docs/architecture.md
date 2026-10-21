@@ -42,6 +42,12 @@ are build tools, not runtime dependencies. See [text](text.md), [render](render.
 
 ## Versioned architecture maps
 
+The archived maps below describe the M1 source revision `968651a`.
+The current architecture is described by the other diagrams and sections on this page.
+
+<details>
+<summary>Historical M1 snapshot (revision 968651a)</summary>
+
 The [offline architecture viewer](architecture/snapshots/m1-968651a/index.html)
 contains ownership, lifecycle, frame, errors and milestone maps. All data is
 embedded; it needs no server, CDN or additional installation. Choose English or
@@ -50,10 +56,9 @@ Enter operate the controls. Each map exports an independent SVG. Source links
 open GitHub and require a connection.
 
 This snapshot describes source revision
-`968651a90b6a1542fd3ab2cec159b457e548681f`. **M1 remains in progress.**
-It excludes later uncommitted work and does not assert milestone acceptance.
-An updated architecture map for the current M1 working tree is pending source
-revision pinning and publication; this historical snapshot remains unchanged.
+`968651a90b6a1542fd3ab2cec159b457e548681f`. **M1 was in progress at that revision.**
+It excludes later changes and does not assert milestone acceptance.
+The status belongs to this historical snapshot; it does not describe the current project status.
 The comparison baseline is `849dc6285d7ef863206e8248810ee0650413b0a2`.
 Baseline integration was published as [PR #36](https://github.com/ttldtor/portals/pull/36),
 whose [CI run](https://github.com/ttldtor/portals/actions/runs/38799649714)
@@ -82,6 +87,8 @@ cards work coordination, red cards error boundaries, and ochre cards status and
 limits. Text also names each role. Lifecycle and frame arrows show the normal
 successful path; the error map explains failure exits. Other card order is a
 reading path; ownership relations are explicit in each node's details.
+
+</details>
 
 ### Maintaining snapshots
 

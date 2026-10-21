@@ -1,0 +1,173 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="984" viewBox="0 0 760 984" role="img" aria-label="Components and shared data flow">
+  <title>Components and shared data flow</title>
+  <desc>Directed arrows retain the original architecture flow. Dashed frames and arrows identify optional observations.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#55ffff" />
+    </marker>
+  </defs>
+  <style>text{font-family:"Cascadia Mono","DejaVu Sans Mono",Consolas,"Liberation Mono",monospace;font-size:16px;fill:#ffffdf}.title,.label,.group{font-weight:bold;fill:#ffff55}.edge{fill:none;stroke:#55ffff;stroke-width:2;marker-end:url(#arrow)}</style>
+  <rect width="760" height="984" fill="#000080" />
+  <text x="20" y="36" class="title">
+    <tspan x="20" dy="0">Components and shared data flow</tspan>
+  </text>
+  <text x="20" y="72" class="detail">
+    <tspan x="20" dy="0">One UI runtime; scene-owned domain state; one rendering and output path.</tspan>
+  </text>
+  <rect x="12" y="548" width="736" height="276" fill="none" stroke="#55ffff" stroke-dasharray="4 4" />
+  <text x="24" y="568" class="group">
+    <tspan x="24" dy="0">Optional causal metadata observations across the runtime and</tspan>
+    <tspan x="24" dy="24">presentation flow</tspan>
+  </text>
+  <g id="node-0">
+    <rect x="20" y="104" width="224" height="200" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="30" y="128" class="label">
+      <tspan x="30" dy="0">Application</tspan>
+    </text>
+    <text x="30" y="160" class="detail">
+      <tspan x="30" dy="0">UI owner: one</tspan>
+      <tspan x="30" dy="24">scheduler/tree/router</tspan>
+    </text>
+    <text x="30" y="208" class="detail">
+      <tspan x="30" dy="0">Single-use</tspan>
+      <tspan x="30" dy="24">synchronous terminal</tspan>
+      <tspan x="30" dy="24">run</tspan>
+    </text>
+  </g>
+  <g id="node-1">
+    <rect x="268" y="104" width="224" height="200" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="278" y="128" class="label">
+      <tspan x="278" dy="0">Input and Scheduler</tspan>
+    </text>
+    <text x="278" y="160" class="detail">
+      <tspan x="278" dy="0">Owning CONTROL /</tspan>
+      <tspan x="278" dy="24">immutable DATA</tspan>
+    </text>
+    <text x="278" y="208" class="detail">
+      <tspan x="278" dy="0">Bounded admission and</tspan>
+      <tspan x="278" dy="24">dispatch</tspan>
+    </text>
+  </g>
+  <g id="node-2">
+    <rect x="516" y="104" width="224" height="200" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="526" y="128" class="label">
+      <tspan x="526" dy="0">Scene and domain</tspan>
+      <tspan x="526" dy="24">models</tspan>
+    </text>
+    <text x="526" y="184" class="detail">
+      <tspan x="526" dy="0">Bindings, providers,</tspan>
+      <tspan x="526" dy="24">coherent pins</tspan>
+    </text>
+    <text x="526" y="232" class="detail">
+      <tspan x="526" dy="0">Explicit</tspan>
+      <tspan x="526" dy="24">prepare/input/stop</tspan>
+      <tspan x="526" dy="24">hooks</tspan>
+    </text>
+  </g>
+  <g id="node-3">
+    <rect x="20" y="328" width="224" height="200" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="30" y="352" class="label">
+      <tspan x="30" dy="0">Tree, layout and</tspan>
+      <tspan x="30" dy="24">styles</tspan>
+    </text>
+    <text x="30" y="408" class="detail">
+      <tspan x="30" dy="0">Checked nodes,</tspan>
+      <tspan x="30" dy="24">geometry,</tspan>
+      <tspan x="30" dy="24">invalidation</tspan>
+    </text>
+    <text x="30" y="480" class="detail">
+      <tspan x="30" dy="0">Controls / virtual</tspan>
+      <tspan x="30" dy="24">views / Chart</tspan>
+    </text>
+  </g>
+  <g id="node-4">
+    <rect x="268" y="328" width="224" height="200" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="278" y="352" class="label">
+      <tspan x="278" dy="0">Renderer and</tspan>
+      <tspan x="278" dy="24">CellBuffer</tspan>
+    </text>
+    <text x="278" y="408" class="detail">
+      <tspan x="278" dy="0">Consume borrowed text</tspan>
+      <tspan x="278" dy="24">in tree.frame</tspan>
+    </text>
+    <text x="278" y="456" class="detail">
+      <tspan x="278" dy="0">Own desired cells</tspan>
+      <tspan x="278" dy="24">before frame ends</tspan>
+    </text>
+  </g>
+  <g id="node-5">
+    <rect x="516" y="328" width="224" height="200" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="526" y="352" class="label">
+      <tspan x="526" dy="0">FrameWriter and</tspan>
+      <tspan x="526" dy="24">terminal</tspan>
+    </text>
+    <text x="526" y="408" class="detail">
+      <tspan x="526" dy="0">Diff/encode, owned</tspan>
+      <tspan x="526" dy="24">pending output</tspan>
+    </text>
+    <text x="526" y="456" class="detail">
+      <tspan x="526" dy="0">Commit only</tspan>
+      <tspan x="526" dy="24">consistent acceptance</tspan>
+    </text>
+  </g>
+  <g id="node-6">
+    <rect x="20" y="616" width="224" height="200" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="30" y="640" class="label">
+      <tspan x="30" dy="0">Diagnostics input</tspan>
+      <tspan x="30" dy="24">token</tspan>
+    </text>
+    <text x="30" y="696" class="detail">
+      <tspan x="30" dy="0">Admission, queues,</tspan>
+      <tspan x="30" dy="24">target and action</tspan>
+    </text>
+    <text x="30" y="744" class="detail">
+      <tspan x="30" dy="0">Optional bounded</tspan>
+      <tspan x="30" dy="24">metadata</tspan>
+    </text>
+  </g>
+  <g id="node-7">
+    <rect x="268" y="616" width="224" height="200" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="278" y="640" class="label">
+      <tspan x="278" dy="0">Property and frame</tspan>
+      <tspan x="278" dy="24">causes</tspan>
+    </text>
+    <text x="278" y="696" class="detail">
+      <tspan x="278" dy="0">Equality, commit,</tspan>
+      <tspan x="278" dy="24">invalidation, frame</tspan>
+      <tspan x="278" dy="24">ID</tspan>
+    </text>
+    <text x="278" y="768" class="detail">
+      <tspan x="278" dy="0">Coalesced causes stay</tspan>
+      <tspan x="278" dy="24">observable</tspan>
+    </text>
+  </g>
+  <g id="node-8">
+    <rect x="516" y="616" width="224" height="200" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="526" y="640" class="label">
+      <tspan x="526" dy="0">Post-close export</tspan>
+    </text>
+    <text x="526" y="672" class="detail">
+      <tspan x="526" dy="0">Actual diff/flush and</tspan>
+      <tspan x="526" dy="24">loss status</tspan>
+    </text>
+    <text x="526" y="720" class="detail">
+      <tspan x="526" dy="0">Application owns file</tspan>
+      <tspan x="526" dy="24">I/O and errors</tspan>
+    </text>
+  </g>
+  <path class="edge" d="M244,204 H268" data-source="0" data-target="1" />
+  <path class="edge" d="M492,204 H516" data-source="1" data-target="2" />
+  <path class="edge" d="M628,304 V316 H132 V328" data-source="2" data-target="3" />
+  <path class="edge" d="M244,428 H268" data-source="3" data-target="4" />
+  <path class="edge" d="M492,428 H516" data-source="4" data-target="5" />
+  <path class="edge" d="M244,716 H268" data-source="6" data-target="7" stroke-dasharray="4 4" />
+  <path class="edge" d="M492,716 H516" data-source="7" data-target="8" stroke-dasharray="4 4" />
+  <text x="20" y="844" class="detail">
+    <tspan x="20" dy="0">Top two rows: runtime/presentation flow. Bottom row: causal observations</tspan>
+    <tspan x="20" dy="24">of that same flow.</tspan>
+  </text>
+  <text x="20" y="904" class="detail">
+    <tspan x="20" dy="0">Themes and charts use existing boundaries; no second dispatcher or hidden</tspan>
+    <tspan x="20" dy="24">provider worker.</tspan>
+  </text>
+</svg>
