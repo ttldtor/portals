@@ -7,6 +7,7 @@
 
 namespace portals::ui {
 template <class T> class Description;
+template <class T> class Ref;
 
 namespace detail {
 struct ThemeSelectorTarget;
@@ -89,6 +90,23 @@ private:
   std::shared_ptr<detail::ThemeSelectorTarget> target_;
 };
 
+/** @brief Canonical typed observation of the existing scene-owned selector facade.
+ * Copies and moves share/transfer the legacy weak identity without adding a slot or retaining a view/model.
+ * Commands remain checked-only; lastApply retains its owning metadata under the existing retirement policy.
+ * No generic node(), text() or focus() is exposed; use a separate Ref<Dialog> for the real view when needed.
+ */
+template <> class Ref<ThemeSelectorRef> : public ThemeSelectorRef {
+public:
+  /** @brief Create the existing cold selector identity; construction may throw std::bad_alloc. */
+  Ref() = default;
+
+  /** @param reference Existing weak facade, copied from lvalues or moved from rvalues without allocating.
+   * The observation preserves the original identity, affinity and completed Apply metadata.
+   */
+  explicit Ref(ThemeSelectorRef reference) noexcept : ThemeSelectorRef(std::move(reference)) {
+  }
+};
+
 /** @param reference Cold identity, published after post-configuration attachment succeeds.
  * @param model Same-scene P26 model, installed through ordinary scene configuration.
  * @param options Owning captions, modal geometry, canonical opening command and optional delivery.
@@ -98,3 +116,10 @@ private:
 Description<Dialog> themeSelector(ThemeSelectorRef reference, ThemeSelectionRef model,
                                   ThemeSelectorOptions options = {});
 } // namespace portals::ui
+
+namespace portals {
+/** @brief Canonical composite facade type for ui::Ref<ThemeSelector>; exactly the legacy ui::ThemeSelectorRef.
+ * The facade observes a view and its owning Apply metadata; it does not become a Widget or theme-selection model.
+ */
+using ThemeSelector = ui::ThemeSelectorRef;
+} // namespace portals

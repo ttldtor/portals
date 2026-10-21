@@ -553,8 +553,9 @@ private:
   std::shared_ptr<Slot> slot_;
 };
 
-/** @brief Additive typed observation with fluent caption/draft access, sharing NodeRef publication.
- * @tparam T Public Widget subtype; text() is available for Control subtypes and exactly LineEdit.
+/** @brief Typed Widget observation; explicit composite specializations reuse their existing weak facades.
+ * @tparam T Public Widget subtype, or a supported composite facade specialization for MessageDialog/ThemeSelector.
+ * This primary template provides Widget capabilities; text() is available for Control subtypes and exactly LineEdit.
  * Construct on the receiving UI thread. Publish with Description::reference only after successful mount.
  * Copies share the observation and never own the scene/widget. Copy/destruction may occur on other
  * threads after publication, but operations reject them before reading mutable scene/slot state.
@@ -3204,6 +3205,20 @@ Description<Overlay> notifications(NotificationCenter center, Body &&body, Notif
       auto bound = detail::Access::notifications(scene, *wrapper, *content, center, options, context);
       return bound ? wrapper : std::unexpected(bound.error());
     });
+}
+
+/** @brief Observe the real notification-plane Overlay while keeping its service handle separate.
+ * @tparam Body Consuming ordinary-body description, following the existing notification composition contract.
+ * @param reference Empty visual observing slot, published only after the complete mount succeeds.
+ * @param center Existing weak notification service; post() still returns its exact ToastPostReceipt.
+ * @param body Ordinary retained content contributing the host's intrinsic size.
+ * @param options Existing owning notification budgets and localization settings.
+ * @return The existing notification recipe with one visual reference; no new runtime or service is created.
+ */
+template <detail::DescriptionInput Body>
+Description<Overlay> notifications(Ref<Overlay> reference, NotificationCenter center, Body &&body,
+                                   NotificationOptions options = {}) {
+  return notifications(std::move(center), std::forward<Body>(body), std::move(options)).reference(std::move(reference));
 }
 
 /** @brief Compose a retained host with one ordinary body and initially closed dialog layers.

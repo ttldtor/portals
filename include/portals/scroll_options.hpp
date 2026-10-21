@@ -6,6 +6,10 @@
 #include <portals/primitives.hpp>
 #include <portals/scroll_geometry.hpp>
 
+// Keep the existing glyph defaults available under native Unicode headers, then restore their macro.
+#pragma push_macro("UNICODE")
+#undef UNICODE
+
 namespace portals {
 /** @brief Owning standalone bar settings, validated before mounting or replacement.
  * No callbacks, tree identity, borrowed storage, timers or terminal resources are retained.
@@ -54,3 +58,5 @@ struct ScrollAreaOptions {
  */
 [[nodiscard]] std::expected<void, TreeError> validateScrollOptions(const ScrollAreaOptions &options) noexcept;
 } // namespace portals
+
+#pragma pop_macro("UNICODE")

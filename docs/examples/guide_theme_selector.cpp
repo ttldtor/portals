@@ -11,7 +11,7 @@
 int main() try {
   using namespace portals;
   ui::ThemeSelectionRef themes;
-  ui::ThemeSelectorRef selector;
+  ui::Ref<ThemeSelector> selector;
 
   // clang-format off
   return ui::scene(ui::overlayHost(

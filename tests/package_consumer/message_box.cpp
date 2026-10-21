@@ -5,6 +5,7 @@
 
 int main() {
   using namespace portals;
+  using namespace portals::ui;
   auto app = Application::create();
   if (!app) {
     return 1;
@@ -13,7 +14,7 @@ int main() {
   if (!scene) {
     return 2;
   }
-  ui::MessageBox box;
+  ui::Ref<MessageDialog> box;
   ui::Ref<Column> owner;
   auto mounted = ui::mount(**scene, ui::overlayHost(ui::column(ui::label("Document")).reference(owner),
                                                     ui::unsavedChangesDialog(box, "Unsaved", "Save before closing?")));

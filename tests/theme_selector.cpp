@@ -15,7 +15,7 @@ StyleSheet theme() {
 
 struct SelectorFixture {
   ui::ThemeSelectionRef model;
-  ui::ThemeSelectorRef selector;
+  ui::Ref<ThemeSelector> selector;
   ui::Ref<Dialog> view;
   ui::Ref<Button> opener;
   ManagedScene *managed{};
@@ -101,6 +101,58 @@ struct SelectorFixture {
     return take(app->tree().inspect(view.node())).visible;
   }
 };
+
+void canonicalReferences() {
+  ui::Ref<ThemeSelector> cold;
+  auto coldCopy = cold;
+  auto coldMoved = std::move(coldCopy);
+
+  check(treeCause(coldCopy.open().error(), TreeError::CLOSED), "moved-from selector reference remains closed");
+  check(treeCause(coldMoved.open().error(), TreeError::CLOSED) && !take(coldMoved.lastApply()),
+        "canonical cold selector preserves checked commands and empty owning metadata");
+
+  {
+    ui::ThemeSelectionRef missingModel;
+    auto failed = ui::scene(ui::overlayHost(ui::label("Body"), ui::themeSelector(cold, missingModel)));
+
+    check(!failed.prepareChecked(), "selector without installed model fails its existing attachment contract");
+  }
+
+  check(treeCause(cold.open().error(), TreeError::CLOSED) && !take(cold.lastApply()),
+        "failed attachment publishes no canonical selector identity");
+
+  SelectorFixture f;
+  ui::ThemeSelectorRef legacy = f.selector;
+  const auto before = allocationTest::count;
+  ui::Ref<ThemeSelector> adapted(legacy);
+  auto copied = adapted;
+  auto moved = std::move(copied);
+
+  check(allocationTest::count == before, "selector adaptation and reference copies add no identity allocation");
+
+  std::optional<ManagedError> foreign;
+  std::thread worker([&] {
+    const auto result = moved.lastApply();
+
+    if (!result) {
+      foreign = result.error();
+    }
+  });
+
+  worker.join();
+  check(foreign && treeCause(*foreign, TreeError::WRONG_THREAD), "canonical selector rejects foreign metadata access");
+  take(moved.open());
+  f.choose("Red 🙂é界");
+  take(adapted.apply());
+
+  const auto outcome = take(legacy.lastApply());
+
+  check(outcome && take(f.selector.lastApply()) == outcome && take(moved.lastApply()) == outcome,
+        "legacy and canonical handles share one completed Apply identity");
+  take(f.scene.close());
+  check(take(moved.lastApply()) == outcome && !moved.open(),
+        "retired canonical selector retains owning metadata without reviving the view");
+}
 
 void lifecycleAndAdmission() {
   ui::ThemeSelectorRef cold;
@@ -425,6 +477,7 @@ void externalFactoryCannotApply() {
 } // namespace
 
 int main() try {
+  canonicalReferences();
   lifecycleAndAdmission();
   routedCancelAndSupersession();
   callbackAndCloseOutcome();

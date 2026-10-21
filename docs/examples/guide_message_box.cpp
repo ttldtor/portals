@@ -10,7 +10,7 @@
  */
 int main() try {
   using namespace portals;
-  ui::MessageBox unsaved;
+  ui::Ref<MessageDialog> unsaved;
   ui::Ref<Column> form;
   ui::Ref<Label> status;
   ui::Ref<Button> close;

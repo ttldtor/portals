@@ -6,6 +6,10 @@
 
 #include <array>
 
+// Spell the existing decoration enum without changing the caller's native Unicode-selection macro.
+#pragma push_macro("UNICODE")
+#undef UNICODE
+
 namespace portals {
 /** @brief One-cell decoration selection under the complete receiving WidthPolicy. */
 enum class PrimitiveGlyphs {
@@ -165,3 +169,5 @@ std::expected<void, TreeError> syncBorder(WidgetTree &tree, Node<Border> node);
  */
 std::expected<void, TreeError> syncGauge(WidgetTree &tree, Node<Gauge> node);
 } // namespace portals
+
+#pragma pop_macro("UNICODE")

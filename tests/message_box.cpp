@@ -4,9 +4,68 @@
 #include "support/message_fixture.hpp"
 
 namespace {
+void canonicalReferences() {
+  ui::MessageBox legacy;
+  const auto before = allocationTest::count;
+  ui::Ref<MessageDialog> reference(legacy);
+  auto copied = reference;
+  auto moved = std::move(copied);
+  ui::MessageBox oldCopy = reference;
+
+  check(allocationTest::count == before, "canonical adapters reuse the legacy slot without allocating");
+  check(treeCause(copied.lastResult().error(), TreeError::CLOSED), "moved-from composite reference is cold");
+  check(treeCause(moved.lastResult().error(), TreeError::CLOSED), "copied cold references remain unpublished");
+
+  Fixture f;
+  ui::Ref<Dialog> view;
+  ui::MessageOptions invalid;
+
+  invalid.maxBodyLines = 0;
+
+  const auto rejected = ui::mount(
+    *f.scene,
+    ui::overlayHost(ui::label("Body"), ui::confirmDialog(reference, "Confirm", "Retry after rejected mount", invalid)));
+
+  check(!rejected && treeCause(rejected.error(), TreeError::INVALID_ARGUMENT), "partial canonical mount rejected");
+  check(treeCause(reference.lastResult().error(), TreeError::CLOSED), "failed mount never publishes adapter identity");
+  take(ui::mount(*f.scene,
+                 ui::overlayHost(ui::label("Body"),
+                                 ui::confirmDialog(reference, "Confirm", "Shared legacy identity").reference(view))));
+
+  std::optional<ManagedError> foreign;
+  std::thread worker([&] {
+    const auto result = moved.lastResult();
+
+    if (!result) {
+      foreign = result.error();
+    }
+  });
+
+  worker.join();
+  check(foreign && treeCause(*foreign, TreeError::WRONG_THREAD), "canonical operations retain immutable UI affinity");
+
+  int delivered{};
+
+  command(legacy.open([&, reference](const MessageResult &result) {
+    ++delivered;
+    check(result && *result == MessageChoice::CONFIRM, "canonical callback keeps its exact owning domain result");
+    take(f.scene->remove(view.node()));
+    check(treeCause(reference.lastResult().error(), TreeError::STALE_NODE), "callback self-removal retires the facade");
+  }));
+  choose(f, view.node(), "Continue");
+
+  const auto result = answer(moved, MessageChoice::CONFIRM);
+
+  check(take(oldCopy.lastResult()) == result, "legacy and canonical copies observe the same result identity");
+  flushMessages(f);
+  check(delivered == 1 && result->has_value() && **result == MessageChoice::CONFIRM,
+        "callback captures and immutable result survive self-removal without duplicate delivery");
+  check(treeCause(reference.lastResult().error(), TreeError::STALE_NODE), "retired adapter never retargets");
+}
+
 void presets() {
   Fixture f;
-  ui::MessageBox information, confirm, unsaved;
+  ui::Ref<MessageDialog> information, confirm, unsaved;
   ui::Ref<Dialog> one, two, three;
   ui::Ref<Button> opener;
   take(ui::mount(*f.scene, ui::overlayHost(
@@ -294,6 +353,7 @@ void smallScreens() {
 } // namespace
 
 int main() try {
+  canonicalReferences();
   presets();
   validation();
   wrapping();

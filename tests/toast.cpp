@@ -1,12 +1,30 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
-#include "support/toast_fixture.hpp"
 #include "../src/widgets/toast_state.hpp"
+#include "support/toast_fixture.hpp"
 
 #include <thread>
 
 namespace {
 using namespace toastTest;
+
+void visualReference() {
+  Fixture f;
+  ui::Ref<Overlay> view;
+  auto copy = view;
+
+  take(ui::mount(*f.scene, ui::notifications(view, f.center, ui::label("Body"))));
+  check(view.node() != Node<Overlay>{} && copy.node() == view.node(), "ref-first notification view publishes once");
+
+  const auto receipt = take(f.center.post(ui::toast("Owning message", {.duration = std::nullopt})));
+
+  check(receipt.status == ToastPostStatus::ACCEPTED_VISIBLE && receipt.id,
+        "visual reference leaves exact service post receipt available");
+  take(f.scene->remove(view.node()));
+  check(treeCause(copy.geometry().error(), TreeError::STALE_NODE), "removed real Overlay observation stays stale");
+  check(treeCause(f.center.snapshot().error(), TreeError::STALE_NODE) && receipt.id,
+        "service retires with its layer while owning post identity survives");
+}
 
 void boundedQueue() {
   Fixture f;
@@ -155,6 +173,7 @@ void themeOnlySubjectRequestsPaint() {
 } // namespace
 
 int main() try {
+  visualReference();
   boundedQueue();
   dedupAndValidation();
   affinityAndIdentity();
