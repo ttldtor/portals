@@ -1297,6 +1297,7 @@ if(PORTALS_BUILD_DOCS)
     docs/notifications.md docs/ru/notifications.md
     docs/compact-primitives.md docs/ru/compact-primitives.md docs/styles.md docs/legacy.md docs/managed-controls.md docs/declarative-ui.md docs/data-presentation.md docs/ru/data-presentation.md docs/text-property.md docs/text-history.md docs/editor-history.md docs/editor-history-demo.md docs/compact-examples.md docs/compactness.md docs/quality.md tools/compactness/compactness.hpp docs/managed-performance.md docs/package.md docs/application.md docs/virtual-preparation.md docs/examples.md docs/architecture.md docs/getting-started.md docs/limitations.md docs/api-design.md fuzz/README.md
     tools/benchmarks/README.md vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md vendor/textual/README.md vendor/doctest/README.md vendor/pfr/README.md vendor/lyra/README.md docs/cli.md)
+  list(APPEND portals_documentation_inputs docs/editor-contracts.md docs/ru/editor-contracts.md)
   set(portals_language_config "${CMAKE_CURRENT_BINARY_DIR}/docs/languages")
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/languages.json"
