@@ -31,6 +31,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- Architecture reference now separates planned multiline editor contracts from
+  implemented text fields and documents the syntax-provider evaluation and its
+  limits. No multiline editor API or parser dependency is introduced.
+
 - Native gallery, dashboard and custom-widget examples create their scenes inside
   the application error boundary after command-line parsing. Gallery and dashboard
   use the selector's owned model and automatic dialog host; dashboard callbacks

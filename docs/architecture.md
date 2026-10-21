@@ -14,6 +14,10 @@ the runnable examples; [limitations](limitations.md) defines release boundaries.
 
 ## Components and boundaries
 
+[Planned multiline editor contracts](editor-contracts.md) describe a future
+document/view extension and its language-provider boundaries. They do not change
+the implemented components below.
+
 ![Components and data flow](images/components.svg)
 
 | Component | Implemented responsibility |

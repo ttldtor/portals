@@ -46,6 +46,7 @@ Use style layers when palette changes must preserve application and user overrid
 ## Library internals
 
 - [Architecture and event-flow diagrams](architecture.md), [widget ownership](widget-tree.md), [geometry](geometry.md).
+- [Planned multiline editor contracts](editor-contracts.md): document/view ownership, shared history, language-provider boundaries and the initial syntax-engine decision; no implemented editor API.
 - [UTF-8 and cell width](text.md), [cell buffer](cell-buffer.md), [rendering](render.md), [frame diff and output](diff.md).
 - [Terminal session](terminal.md), [terminal probe and observed capabilities](terminal-probe.md).
 - [Legacy compatibility](legacy.md): the supported path for the existing streaming MarketDepthModelSample.
