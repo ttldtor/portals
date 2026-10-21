@@ -8,9 +8,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 ### Added
 
 - `SecureString` provides bounded move-only byte storage, scoped plaintext access,
-  full-capacity wiping and native guard pages. Page locking, Linux core-dump
-  exclusion and Windows idle encryption are separately requested guarantees;
-  unsupported platforms require explicit `WIPE_ONLY` storage.
+  full-capacity wiping and native guard pages. Windows and Linux encrypt contents
+  between scoped plaintext access by default. Page locking and Linux core-dump
+  exclusion remain separately requested guarantees; unsupported platforms require
+  explicit `WIPE_ONLY` storage with encryption disabled.
 - Declarative grids support automatic placement, spans, shared header/body columns
   and sticky scrolling through the existing managed lifecycle. C++ recipes and
   loaded scenes retain the explicit low-level grid API.
@@ -44,6 +45,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
   before invoking the factory or opening the terminal.
 
 ### Changed
+
+- `SecureString` enables idle encryption by default on Windows and Linux. Linux uses
+  bundled Monocypher authenticated encryption with nonblocking operating-system
+  entropy and guarded key storage; protection failures never downgrade to plaintext.
+  Explicit wipe-only storage now also requires `encryptWhileIdle = false`.
 
 - Architecture reference now separates planned multiline editor contracts from
   implemented text fields and documents the syntax-provider evaluation and its

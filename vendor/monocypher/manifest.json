@@ -1,0 +1,26 @@
+{
+  "upstream": "https://github.com/LoupVaillant/Monocypher",
+  "tag": "4.0.3",
+  "commit": "ab2b16dd619ad5f6979a4fbe69cfa324a6fcc35f",
+  "archive_url": "https://github.com/LoupVaillant/Monocypher/releases/download/4.0.3/monocypher-4.0.3.tar.gz",
+  "archive_sha256": "8cc9bc341a66249016db9bd70e9142d8d0aef9945973744b1ac05dbc55d8ee66",
+  "retrieved_on": "2026-10-22",
+  "license": "BSD-2-Clause OR CC0-1.0; distributed under BSD-2-Clause with complete upstream notices",
+  "files": [
+    {
+      "name": "monocypher.c",
+      "bytes": 102580,
+      "sha256": "57eb914fc88136119bd41655cccb8c250048bf54d470540625186f8ab16f64be"
+    },
+    {
+      "name": "monocypher.h",
+      "bytes": 12175,
+      "sha256": "c494da712122da7ff679fdcf318a5317e84972b6c950fe9d896212947797facd"
+    },
+    {
+      "name": "LICENCE.md",
+      "bytes": 9085,
+      "sha256": "5f8360e4c06ddcc584bdb4b210c6af824c4bb301e6a9a521869b6d90795ca4b3"
+    }
+  ]
+}

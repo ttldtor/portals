@@ -171,6 +171,7 @@ file(COPY "${source}/LICENSE.txt" "${source}/vendor/utf8proc/LICENSE.md"
   "${source}/tests/fixtures/unicode/Unicode-LICENSE.txt" DESTINATION "${payload}/licenses")
 configure_file("${source}/vendor/textual/LICENSE" "${payload}/licenses/textual-LICENSE.txt" COPYONLY)
 configure_file("${source}/vendor/lyra/LICENSE.txt" "${payload}/licenses/lyra-LICENSE.txt" COPYONLY)
+configure_file("${source}/vendor/monocypher/LICENCE.md" "${payload}/licenses/monocypher-LICENCE.md" COPYONLY)
 file(COPY "${source}/docs/limitations.md" DESTINATION "${payload}/docs")
 file(COPY "${source}/tools/package/GETTING-STARTED.md" DESTINATION "${payload}")
 file(COPY "${source}/tools/package/run.ps1" "${source}/tools/package/run.sh" DESTINATION "${payload}")
@@ -254,7 +255,7 @@ string(JSON manifest SET "${manifest}" examples "${examples}")
 string(JSON manifest SET "${manifest}" limitations
   "[\"Native terminal acceptance is a separate gate; installed consumer fixtures are headless.\",\"Static SDK requires a matching compiler, architecture, standard library and CRT.\",\"Linux dynamic libraries/libc must match the recorded tuple; no universal portability claim.\",\"Themes and market data are examples; executable defaults are compiled in.\",\"Payload hashes detect accidental corruption; manifest.json is not a signed trust assertion.\"]")
 string(JSON manifest SET "${manifest}" licenses
-  "[\"licenses/LICENSE.txt\",\"licenses/LICENSE.md\",\"licenses/Unicode-LICENSE.txt\",\"licenses/textual-LICENSE.txt\",\"licenses/lyra-LICENSE.txt\"]")
+  "[\"licenses/LICENSE.txt\",\"licenses/LICENSE.md\",\"licenses/Unicode-LICENSE.txt\",\"licenses/textual-LICENSE.txt\",\"licenses/lyra-LICENSE.txt\",\"licenses/monocypher-LICENCE.md\"]")
 bundleWriteHashes("${payload}" hashes)
 string(JSON manifest SET "${manifest}" files "${hashes}")
 file(WRITE "${payload}/manifest.json" "${manifest}\n")

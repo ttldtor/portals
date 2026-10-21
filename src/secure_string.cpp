@@ -21,13 +21,21 @@
 #  include <dpapi.h>
 #elif defined(__linux__) && !defined(__EMSCRIPTEN__)
 #  include <cerrno>
+#  include <monocypher.h>
 #  include <sys/mman.h>
+#  include <sys/random.h>
 #  include <unistd.h>
 #endif
 
 namespace portals::detail {
 namespace {
 constexpr unsigned DESTRUCTOR_RELEASE_ATTEMPTS = 2;
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+constexpr std::size_t KEY_BYTES = 32;
+constexpr std::size_t NONCE_BYTES = 24;
+constexpr std::size_t TAG_BYTES = 16;
+constexpr unsigned MAX_ENTROPY_CALLS = 64;
+#endif
 
 using Operation = SecureStringOperation;
 using Code = SecureStringErrorCode;
@@ -79,6 +87,9 @@ struct Mapping {
   std::size_t capacity{};
   bool heap{};
   bool wiped{};
+  char *keyPage{};
+  std::size_t keyCapacity{};
+  bool keyWiped{};
 #if defined(PORTALS_SECURE_STRING_TESTING)
   SecureStringTestHooks *hooks{};
 #endif
@@ -113,12 +124,30 @@ struct Mapping {
     std::swap(capacity, other.capacity);
     std::swap(heap, other.heap);
     std::swap(wiped, other.wiped);
+    std::swap(keyPage, other.keyPage);
+    std::swap(keyCapacity, other.keyCapacity);
+    std::swap(keyWiped, other.keyWiped);
 #if defined(PORTALS_SECURE_STRING_TESTING)
     std::swap(hooks, other.hooks);
 #endif
   }
 
   void wipe() noexcept {
+    // Key retirement is independent of payload setup and payload wipe state.
+    if (keyPage && !keyWiped) {
+      wipeBytes(keyPage, keyCapacity);
+      keyWiped = true;
+#if defined(PORTALS_SECURE_STRING_TESTING)
+      if (hooks) {
+        ++hooks->keyWipes;
+        hooks->lastWipedKeyCapacity = keyCapacity;
+        hooks->lastKeyWipeWasZero = std::all_of(keyPage, keyPage + keyCapacity, [](char byte) {
+          return byte == 0;
+        });
+      }
+#endif
+    }
+
     if (!payload || wiped) {
       return;
     }
@@ -169,6 +198,8 @@ struct Mapping {
     payload = nullptr;
     reservationBytes = 0;
     capacity = 0;
+    keyPage = nullptr;
+    keyCapacity = 0;
 
     return {};
   }
@@ -193,9 +224,6 @@ std::optional<SecureStringError> validate(const SecureStringOptions &options) no
     return error(Operation::DUMP, Code::UNSUPPORTED);
   }
 #elif defined(__linux__) && !defined(__EMSCRIPTEN__)
-  if (options.encryptWhileIdle) {
-    return error(Operation::ENCRYPT, Code::UNSUPPORTED);
-  }
 #  if !defined(MADV_DONTDUMP)
   if (options.excludeFromDumps) {
     return error(Operation::DUMP, Code::UNSUPPORTED);
@@ -232,6 +260,71 @@ std::expected<void, Failure> preparationFailure(Mapping &mapping, SecureStringEr
 
   return std::unexpected(Failure{primary, mapping.release()});
 }
+
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+std::optional<SecureStringError> fillEntropy(Mapping &mapping, unsigned char *destination, std::size_t bytes,
+                                             bool key) noexcept {
+#  if defined(PORTALS_SECURE_STRING_TESTING)
+  if (injected(mapping.hooks, SecureStringTestStep::ENTROPY) ||
+      injected(mapping.hooks, key ? SecureStringTestStep::KEY_ENTROPY : SecureStringTestStep::NONCE_ENTROPY)) {
+    return error(Operation::ENTROPY, Code::SECURITY_FAILURE, TEST_NATIVE_FAILURE);
+  }
+#  else
+  (void)mapping;
+  (void)key;
+#  endif
+
+  std::size_t filled = 0;
+
+  for (unsigned attempt = 0; attempt < MAX_ENTROPY_CALLS && filled < bytes; ++attempt) {
+    auto requested = bytes - filled;
+#  if defined(PORTALS_SECURE_STRING_TESTING)
+    if (mapping.hooks) {
+      ++mapping.hooks->entropyCalls;
+
+      if (mapping.hooks->entropyResultIndex < mapping.hooks->entropyResultCount) {
+        const auto scripted = mapping.hooks->entropyResults[mapping.hooks->entropyResultIndex++];
+
+        if (scripted.bytes <= 0) {
+          if (scripted.bytes < 0 && scripted.error == EINTR) {
+            continue;
+          }
+
+          return error(Operation::ENTROPY, Code::SECURITY_FAILURE,
+                       static_cast<std::uint32_t>(scripted.bytes == 0 ? EIO : scripted.error));
+        }
+
+        requested = std::min(requested, static_cast<std::size_t>(scripted.bytes));
+      }
+    }
+#  endif
+
+    const auto received = getrandom(destination + filled, requested, GRND_NONBLOCK);
+
+    if (received > 0) {
+      filled += static_cast<std::size_t>(received);
+    } else if (received == 0 || errno != EINTR) {
+      return error(Operation::ENTROPY, Code::SECURITY_FAILURE, static_cast<std::uint32_t>(received == 0 ? EIO : errno));
+    }
+  }
+
+  if (filled != bytes) {
+    return error(Operation::ENTROPY, Code::SECURITY_FAILURE, static_cast<std::uint32_t>(EINTR));
+  }
+
+#  if defined(PORTALS_SECURE_STRING_TESTING)
+  if (mapping.hooks) {
+    if (key) {
+      ++mapping.hooks->keyGenerations;
+    } else {
+      ++mapping.hooks->nonceGenerations;
+    }
+  }
+#  endif
+
+  return {};
+}
+#endif
 
 std::expected<void, Failure> allocate(Mapping &mapping, std::size_t length,
                                       const SecureStringOptions &options) noexcept {
@@ -276,11 +369,22 @@ std::expected<void, Failure> allocate(Mapping &mapping, std::size_t length,
 
   const auto capacity = ((required + *page - 1) / *page) * *page;
 
-  if (*page > SIZE_LIMIT / 2 || capacity > SIZE_LIMIT - 2 * *page) {
+  std::size_t overheadPages = 2;
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+  if (options.encryptWhileIdle) {
+    if (*page < KEY_BYTES + NONCE_BYTES + TAG_BYTES) {
+      return std::unexpected(Failure{error(Operation::ALLOCATE, Code::UNSUPPORTED), {}});
+    }
+
+    overheadPages = 4; // One key page and three guards.
+  }
+#endif
+
+  if (*page > SIZE_LIMIT / overheadPages || capacity > SIZE_LIMIT - overheadPages * *page) {
     return std::unexpected(Failure{error(Operation::ALLOCATE, Code::TOO_LARGE), {}});
   }
 
-  const auto reservationBytes = capacity + 2 * *page;
+  const auto reservationBytes = capacity + overheadPages * *page;
 
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
   if (options.encryptWhileIdle &&
@@ -320,14 +424,28 @@ std::expected<void, Failure> allocate(Mapping &mapping, std::size_t length,
   mapping.reservationBytes = reservationBytes;
   mapping.capacity = capacity;
 
+  if (options.encryptWhileIdle) {
+    mapping.keyPage = mapping.base + *page;
+    mapping.keyCapacity = *page;
+    mapping.payload = mapping.base + 3 * *page;
+  }
+
 #  if defined(PORTALS_SECURE_STRING_TESTING)
   if (injected(mapping.hooks, SecureStringTestStep::COMMIT)) {
     return preparationFailure(mapping, error(Operation::ALLOCATE, Code::SECURITY_FAILURE, TEST_NATIVE_FAILURE));
   }
 #  endif
 
-  // Only the two exterior pages change permissions; payload remains RW until wiping.
-  if (mprotect(mapping.base, *page, PROT_NONE) != 0 || mprotect(mapping.payload + capacity, *page, PROT_NONE) != 0) {
+  // Record every accessible region before any fallible guard setup; both stay RW for wiping.
+#  if defined(PORTALS_SECURE_STRING_TESTING)
+  if (mapping.keyPage && injected(mapping.hooks, SecureStringTestStep::KEY_COMMIT)) {
+    return preparationFailure(mapping, error(Operation::ALLOCATE, Code::SECURITY_FAILURE, TEST_NATIVE_FAILURE));
+  }
+#  endif
+
+  if (mprotect(mapping.base, *page, PROT_NONE) != 0 ||
+      (mapping.keyPage && mprotect(mapping.keyPage + *page, *page, PROT_NONE) != 0) ||
+      mprotect(mapping.payload + capacity, *page, PROT_NONE) != 0) {
     return preparationFailure(mapping,
                               error(Operation::ALLOCATE, Code::SECURITY_FAILURE, static_cast<std::uint32_t>(errno)));
   }
@@ -338,7 +456,7 @@ std::expected<void, Failure> allocate(Mapping &mapping, std::size_t length,
   mapping.capacity = capacity;
 
   if (options.lockPages) {
-#if defined(PORTALS_SECURE_STRING_TESTING)
+#if defined(PORTALS_SECURE_STRING_TESTING) && (!defined(__linux__) || defined(__EMSCRIPTEN__))
     if (injected(mapping.hooks, SecureStringTestStep::LOCK)) {
       return preparationFailure(mapping, error(Operation::LOCK, Code::SECURITY_FAILURE, TEST_NATIVE_FAILURE));
     }
@@ -348,26 +466,90 @@ std::expected<void, Failure> allocate(Mapping &mapping, std::size_t length,
       return preparationFailure(mapping, error(Operation::LOCK, Code::SECURITY_FAILURE, GetLastError()));
     }
 #elif defined(__linux__) && !defined(__EMSCRIPTEN__)
+    if (mapping.keyPage) {
+#  if defined(PORTALS_SECURE_STRING_TESTING)
+      if (injected(mapping.hooks, SecureStringTestStep::KEY_LOCK)) {
+        return preparationFailure(mapping, error(Operation::LOCK, Code::SECURITY_FAILURE, TEST_NATIVE_FAILURE));
+      }
+#  endif
+      if (mlock(mapping.keyPage, mapping.keyCapacity) != 0) {
+        return preparationFailure(mapping,
+                                  error(Operation::LOCK, Code::SECURITY_FAILURE, static_cast<std::uint32_t>(errno)));
+      }
+#  if defined(PORTALS_SECURE_STRING_TESTING)
+      if (mapping.hooks) {
+        ++mapping.hooks->keyLocks;
+      }
+#  endif
+    }
+
+#  if defined(PORTALS_SECURE_STRING_TESTING)
+    if (injected(mapping.hooks, SecureStringTestStep::LOCK)) {
+      return preparationFailure(mapping, error(Operation::LOCK, Code::SECURITY_FAILURE, TEST_NATIVE_FAILURE));
+    }
+#  endif
+
     if (mlock(mapping.payload, capacity) != 0) {
       return preparationFailure(mapping,
                                 error(Operation::LOCK, Code::SECURITY_FAILURE, static_cast<std::uint32_t>(errno)));
     }
+#  if defined(PORTALS_SECURE_STRING_TESTING)
+    if (mapping.hooks) {
+      ++mapping.hooks->payloadLocks;
+    }
+#  endif
 #endif
   }
 
   if (options.excludeFromDumps) {
-#if defined(PORTALS_SECURE_STRING_TESTING)
+#if defined(PORTALS_SECURE_STRING_TESTING) && (!defined(__linux__) || defined(__EMSCRIPTEN__))
     if (injected(mapping.hooks, SecureStringTestStep::DUMP)) {
       return preparationFailure(mapping, error(Operation::DUMP, Code::SECURITY_FAILURE, TEST_NATIVE_FAILURE));
     }
 #endif
 #if defined(__linux__) && !defined(__EMSCRIPTEN__) && defined(MADV_DONTDUMP)
+    if (mapping.keyPage) {
+#  if defined(PORTALS_SECURE_STRING_TESTING)
+      if (injected(mapping.hooks, SecureStringTestStep::KEY_DUMP)) {
+        return preparationFailure(mapping, error(Operation::DUMP, Code::SECURITY_FAILURE, TEST_NATIVE_FAILURE));
+      }
+#  endif
+      if (madvise(mapping.keyPage, mapping.keyCapacity, MADV_DONTDUMP) != 0) {
+        return preparationFailure(mapping,
+                                  error(Operation::DUMP, Code::SECURITY_FAILURE, static_cast<std::uint32_t>(errno)));
+      }
+#  if defined(PORTALS_SECURE_STRING_TESTING)
+      if (mapping.hooks) {
+        ++mapping.hooks->keyDumpExclusions;
+      }
+#  endif
+    }
+
+#  if defined(PORTALS_SECURE_STRING_TESTING)
+    if (injected(mapping.hooks, SecureStringTestStep::DUMP)) {
+      return preparationFailure(mapping, error(Operation::DUMP, Code::SECURITY_FAILURE, TEST_NATIVE_FAILURE));
+    }
+#  endif
+
     if (madvise(mapping.payload, capacity, MADV_DONTDUMP) != 0) {
       return preparationFailure(mapping,
                                 error(Operation::DUMP, Code::SECURITY_FAILURE, static_cast<std::uint32_t>(errno)));
     }
+#  if defined(PORTALS_SECURE_STRING_TESTING)
+    if (mapping.hooks) {
+      ++mapping.hooks->payloadDumpExclusions;
+    }
+#  endif
 #endif
   }
+
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+  if (mapping.keyPage) {
+    if (auto failure = fillEntropy(mapping, reinterpret_cast<unsigned char *>(mapping.keyPage), KEY_BYTES, true)) {
+      return preparationFailure(mapping, *failure);
+    }
+  }
+#endif
 
   return {};
 }
@@ -393,6 +575,23 @@ std::optional<SecureStringError> crypt(Mapping &mapping, bool encrypt) noexcept 
 
   if (!success) {
     return error(operation, Code::SECURITY_FAILURE, GetLastError());
+  }
+
+  return {};
+#elif defined(__linux__) && !defined(__EMSCRIPTEN__)
+  auto *key = reinterpret_cast<unsigned char *>(mapping.keyPage);
+  auto *nonce = key + KEY_BYTES;
+  auto *tag = nonce + NONCE_BYTES;
+  auto *payload = reinterpret_cast<unsigned char *>(mapping.payload);
+
+  if (encrypt) {
+    if (auto failure = fillEntropy(mapping, nonce, NONCE_BYTES, false)) {
+      return failure;
+    }
+
+    crypto_aead_lock(payload, tag, key, nonce, nullptr, 0, payload, mapping.capacity);
+  } else if (crypto_aead_unlock(payload, tag, key, nonce, nullptr, 0, payload, mapping.capacity) != 0) {
+    return error(operation, Code::SECURITY_FAILURE);
   }
 
   return {};
@@ -753,7 +952,21 @@ SecureStringTestProbe SecureStringTestAccess::probe(const SecureString &value) n
 
   const auto &mapping = value.state_->mapping;
 
-  return {mapping.base, mapping.payload, mapping.reservationBytes, mapping.capacity, value.state_->encrypted};
+  SecureStringTestProbe result{mapping.base,
+                               mapping.payload,
+                               mapping.reservationBytes,
+                               mapping.capacity,
+                               value.state_->encrypted,
+                               mapping.keyPage,
+                               mapping.keyCapacity,
+                               {}};
+#  if defined(__linux__) && !defined(__EMSCRIPTEN__)
+  if (mapping.keyPage) {
+    std::memcpy(result.nonce.data(), mapping.keyPage + KEY_BYTES, NONCE_BYTES);
+  }
+#  endif
+
+  return result;
 }
 } // namespace portals::detail
 #endif

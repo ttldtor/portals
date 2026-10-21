@@ -40,17 +40,17 @@ struct SecureStringOptions {
   std::size_t maxBytes{DEFAULT_MAX_SECRET_BYTES};
   /** @brief Mandatory allocation policy; no implicit platform fallback. */
   SecureStringStorage storage{SecureStringStorage::NATIVE_GUARDED};
-  /** @brief Require native resident page locking before input is copied. */
+  /** @brief Require native resident page locking for payload and any key page before copying input. */
   bool lockPages{};
-  /** @brief Require Linux core-dump exclusion; unsupported on Windows/WASM. */
+  /** @brief Require Linux core-dump exclusion for payload and any key page; unsupported on Windows/WASM. */
   bool excludeFromDumps{};
-  /** @brief Require Windows SAME_PROCESS idle encryption; unsupported on Linux/WASM. */
-  bool encryptWhileIdle{};
+  /** @brief Require native idle encryption; true by default, unsupported with WIPE_ONLY or on WASM. */
+  bool encryptWhileIdle{true};
 };
 
 /** @brief Applied guarantees, rather than potential platform features. */
 struct SecureStringCapabilities {
-  /** @brief Entire accessible capacity is explicitly wiped before release. */
+  /** @brief Entire accessible payload and key capacity is explicitly wiped before release. */
   bool wiping{};
   /** @brief Two inaccessible exterior pages surround the RW payload. */
   bool guardPages{};
@@ -58,7 +58,7 @@ struct SecureStringCapabilities {
   bool lockedPages{};
   /** @brief Linux core-dump exclusion was requested and applied. */
   bool excludedFromDumps{};
-  /** @brief Windows encryption is applied between plaintext borrows. */
+  /** @brief Native encryption is applied between plaintext borrows. */
   bool encryptedWhileIdle{};
 };
 
@@ -87,7 +87,9 @@ enum class SecureStringOperation {
   /** @brief Decrypt payload bytes before scoped access or copying. */
   DECRYPT,
   /** @brief Release an already-wiped allocation to its backend. */
-  RELEASE
+  RELEASE,
+  /** @brief Obtain native cryptographic entropy for a key or fresh nonce. */
+  ENTROPY
 };
 
 /** @brief Technical failure categories independent of UI/tree errors. */
@@ -268,8 +270,10 @@ concept SecretCallback =
 /** @brief Move-only bounded secret storage with checked synchronous plaintext access.
  *
  * Native storage has adjacent inaccessible guard pages and an always-RW payload.
- * Windows can additionally lock pages and encrypt idle bytes with SAME_PROCESS;
- * Linux can lock pages and exclude them from core dumps. WIPE_ONLY uses heap
+ * Windows and Linux encrypt idle bytes by default. Windows uses SAME_PROCESS;
+ * Linux uses authenticated encryption and a separate guarded key page. Optional
+ * page locking and Linux dump exclusion cover both key and payload pages.
+ * WIPE_ONLY requires explicit encryption opt-out, uses heap
  * storage and rejects lock/dump/encryption requests. Unsupported mandatory
  * guarantees fail without a downgrade, including on WASM. Full accessible
  * capacity is wiped before release; a failed release retains zeroed metadata for

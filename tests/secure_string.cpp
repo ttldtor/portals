@@ -16,6 +16,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <vector>
 
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
 #  ifndef NOMINMAX
@@ -23,6 +24,7 @@
 #  endif
 #  include <windows.h>
 #elif defined(__linux__) && !defined(__EMSCRIPTEN__)
+#  include <cerrno>
 #  include <fstream>
 #  include <sstream>
 #  include <sys/mman.h>
@@ -68,6 +70,7 @@ static_assert(std::is_nothrow_move_assignable_v<SecureString>);
 SecureStringOptions portableOptions() {
   SecureStringOptions options;
   options.storage = SecureStringStorage::WIPE_ONLY;
+  options.encryptWhileIdle = false;
 
   return options;
 }
@@ -77,7 +80,9 @@ void checkBytes(SecureString &value, std::string_view expected) {
   auto result = value.withPlaintext([&](SecretView view) {
     ++calls;
     CHECK(view.size() == expected.size());
-    CHECK(std::string_view(view.data(), view.size()) == expected);
+    const bool matches = std::string_view(view.data(), view.size()) == expected;
+
+    CHECK(matches);
   });
 
   CHECK(result.has_value());
@@ -166,6 +171,18 @@ TEST_CASE("bounds are checked before allocations and empty creation establishes 
   auto unsupported = SecureString::create({}, options);
   REQUIRE_FALSE(unsupported);
   CHECK(unsupported.error().primary.code == Code::UNSUPPORTED);
+}
+
+TEST_CASE("wipe-only storage requires explicit idle-encryption opt-out even for empty values") {
+  SecureStringOptions options;
+  options.storage = SecureStringStorage::WIPE_ONLY;
+  auto implicit = SecureString::create({}, options);
+  REQUIRE_FALSE(implicit);
+  CHECK(implicit.error().primary.code == Code::UNSUPPORTED);
+  options.encryptWhileIdle = false;
+  auto explicitPolicy = SecureString::create({}, options);
+  REQUIRE(explicitPolicy);
+  CHECK_FALSE(explicitPolicy->capabilities().encryptedWhileIdle);
 }
 
 TEST_CASE("empty no-op mutations and nested borrow reject an active lease") {
@@ -401,10 +418,21 @@ TEST_CASE("destructor makes only two release attempts and leaves zeroes on persi
 }
 
 #if (defined(_WIN32) || defined(__linux__)) && !defined(__EMSCRIPTEN__)
+TEST_CASE("default native empty creation establishes idle encryption") {
+  auto value = SecureString::create();
+  REQUIRE(value);
+  CHECK(value->available());
+  CHECK(value->empty());
+  CHECK(value->capabilities().encryptedWhileIdle);
+  CHECK(SecureStringTestAccess::probe(*value).encrypted);
+  checkBytes(*value, {});
+}
+
 TEST_CASE("native capacity is page rounded and the tail is wiped before release") {
   SecureStringTestHooks hooks;
   SecureStringOptions options;
   options.maxBytes = MAX_SECRET_BYTES;
+  options.encryptWhileIdle = false;
   auto value = SecureStringTestAccess::create("secret", options, hooks);
   REQUIRE(value);
   const auto initial = SecureStringTestAccess::probe(*value);
@@ -452,12 +480,17 @@ TEST_CASE("native capability preparation and cleanup failures occur before secre
 }
 
 TEST_CASE("requested native page locking either applies or returns a typed failure") {
+  SecureStringTestHooks hooks;
   SecureStringOptions options;
   options.lockPages = true;
-  auto value = SecureString::create("secret", options);
+  auto value = SecureStringTestAccess::create("secret", options, hooks);
 
   if (value) {
     CHECK(value->capabilities().lockedPages);
+#  if defined(__linux__)
+    CHECK(hooks.keyLocks == 1);
+    CHECK(hooks.payloadLocks == 1);
+#  endif
     checkBytes(*value, "secret");
     CHECK(value->close());
   } else {
@@ -486,16 +519,17 @@ TEST_CASE("Windows native pages have two inaccessible exterior guards and an RW 
   CHECK(trailing.AllocationBase == payload.AllocationBase);
 }
 
-TEST_CASE("Windows idle encryption decrypts only for scoped access and wipes ambiguous failures") {
+#endif
+
+#if (defined(_WIN32) || defined(__linux__)) && !defined(__EMSCRIPTEN__)
+TEST_CASE("native default idle encryption decrypts only for scoped access and wipes ambiguous failures") {
   SecureStringTestHooks hooks;
   SecureStringOptions options;
-  options.encryptWhileIdle = true;
   auto value = SecureStringTestAccess::create("secret", options, hooks);
   REQUIRE(value);
   CHECK(value->capabilities().encryptedWhileIdle);
   auto probe = SecureStringTestAccess::probe(*value);
   CHECK(probe.encrypted);
-  CHECK(probe.capacity % 16 == 0);
   CHECK(std::memcmp(probe.payload, "secret", 6) != 0);
   checkBytes(*value, "secret");
   REQUIRE(value->append("s"));
@@ -528,7 +562,9 @@ TEST_CASE("Windows idle encryption decrypts only for scoped access and wipes amb
   CHECK_FALSE(decrypt->available());
   CHECK(hooks.lastWipeWasZero);
 }
+#endif
 
+#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
 TEST_CASE("Windows unsupported dump exclusion is mandatory even for empty values") {
   SecureStringOptions options;
   options.excludeFromDumps = true;
@@ -536,8 +572,10 @@ TEST_CASE("Windows unsupported dump exclusion is mandatory even for empty values
   REQUIRE_FALSE(result);
   CHECK(result.error().primary.code == Code::UNSUPPORTED);
 }
+#endif
 
-TEST_CASE("Windows candidate and restoration failures preserve ordered cleanup diagnostics") {
+#if (defined(_WIN32) || defined(__linux__)) && !defined(__EMSCRIPTEN__)
+TEST_CASE("native candidate and restoration failures preserve ordered cleanup diagnostics") {
   SecureStringTestHooks hooks;
   SecureStringOptions options;
   options.encryptWhileIdle = true;
@@ -569,7 +607,77 @@ TEST_CASE("Windows candidate and restoration failures preserve ordered cleanup d
   CHECK(preserved->available());
   checkBytes(*preserved, "old");
 }
-#elif defined(__linux__) && !defined(__EMSCRIPTEN__)
+
+TEST_CASE("default encrypted lease retains storage through owner destruction without reprotection") {
+  SecureStringTestHooks hooks;
+  auto value = SecureStringTestAccess::create("secret", {}, hooks);
+  REQUIRE(value);
+  std::optional<SecureString> owner(std::move(*value));
+  const auto initial = SecureStringTestAccess::probe(*owner);
+  auto result = owner->withPlaintext([&](SecretView view) {
+    auto moved = std::move(*owner);
+    CHECK(moved.close().error().primary.code == Code::BUSY);
+    owner.reset();
+    CHECK(view.size() == 6);
+    CHECK(hooks.wipes == 0);
+  });
+
+  REQUIRE(result);
+  CHECK(hooks.wipes == 1);
+  CHECK(hooks.lastWipeWasZero);
+  CHECK(hooks.releases == 1);
+#  if defined(__linux__)
+  CHECK(initial.keyPage != nullptr);
+  CHECK(hooks.keyWipes == 1);
+  CHECK(hooks.lastKeyWipeWasZero);
+  CHECK(hooks.nonceGenerations == 1);
+#  else
+  CHECK(initial.keyPage == nullptr);
+#  endif
+}
+
+TEST_CASE("owned callable destruction detaches encrypted storage before checked lease finish") {
+  struct DetachOnDestruction {
+    std::optional<SecureString> *owner;
+
+    explicit DetachOnDestruction(std::optional<SecureString> &target) : owner(&target) {
+    }
+
+    DetachOnDestruction(const DetachOnDestruction &) = delete;
+
+    DetachOnDestruction(DetachOnDestruction &&other) noexcept : owner(std::exchange(other.owner, nullptr)) {
+    }
+
+    ~DetachOnDestruction() noexcept {
+      if (owner) {
+        owner->reset();
+      }
+    }
+
+    void operator()(SecretView view) {
+      CHECK(view.size() == 6);
+    }
+  };
+
+  SecureStringTestHooks hooks;
+  auto value = SecureStringTestAccess::create("secret", {}, hooks);
+  REQUIRE(value);
+  std::optional<SecureString> owner(std::move(*value));
+  auto result = owner->withPlaintext(DetachOnDestruction(owner));
+
+  REQUIRE(result);
+  CHECK_FALSE(owner);
+  CHECK(hooks.wipes == 1);
+  CHECK(hooks.releases == 1);
+#  if defined(__linux__)
+  CHECK(hooks.keyWipes == 1);
+  CHECK(hooks.lastKeyWipeWasZero);
+  CHECK(hooks.nonceGenerations == 1);
+#  endif
+}
+#endif
+
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
 TEST_CASE("Linux native permissions remain RW between inaccessible exterior guards") {
   auto value = SecureString::create("secret");
   REQUIRE(value);
@@ -597,25 +705,272 @@ TEST_CASE("Linux native permissions remain RW between inaccessible exterior guar
   };
 
   CHECK(permissions(probe.reservation).starts_with("---"));
+  REQUIRE(probe.keyPage);
+  CHECK(permissions(probe.keyPage).starts_with("rw-"));
+  CHECK(permissions(probe.keyPage + probe.keyCapacity).starts_with("---"));
   CHECK(permissions(probe.payload).starts_with("rw-"));
   CHECK(permissions(probe.payload + probe.capacity).starts_with("---"));
+  CHECK(probe.reservationBytes == probe.capacity + 4 * probe.keyCapacity);
 }
 
-TEST_CASE("Linux rejects idle encryption but can apply explicit dump exclusion") {
-  SecureStringOptions options;
-  options.encryptWhileIdle = true;
-  auto unsupported = SecureString::create({}, options);
-  REQUIRE_FALSE(unsupported);
-  CHECK(unsupported.error().primary.code == Code::UNSUPPORTED);
+TEST_CASE("Linux applies explicit dump exclusion to encrypted key and payload pages") {
 #  if defined(MADV_DONTDUMP)
-  options.encryptWhileIdle = false;
+  SecureStringTestHooks hooks;
+  SecureStringOptions options;
   options.excludeFromDumps = true;
-  auto excluded = SecureString::create("secret", options);
+  auto excluded = SecureStringTestAccess::create("secret", options, hooks);
   REQUIRE(excluded);
   CHECK(excluded->capabilities().excludedFromDumps);
+  CHECK(excluded->capabilities().encryptedWhileIdle);
+  CHECK(hooks.keyDumpExclusions == 1);
+  CHECK(hooks.payloadDumpExclusions == 1);
+  checkBytes(*excluded, "secret");
 #  endif
 }
-#else
+
+TEST_CASE("Linux encrypts full capacity with a stable key and fresh nonce for every protection") {
+  SecureStringTestHooks hooks;
+  auto value = SecureStringTestAccess::create("idle-marker", {}, hooks);
+  REQUIRE(value);
+  const auto initial = SecureStringTestAccess::probe(*value);
+  const std::vector<char> ciphertext(initial.payload, initial.payload + initial.capacity);
+  const std::string_view marker = "idle-marker";
+  const bool containsMarker =
+    std::search(ciphertext.begin(), ciphertext.end(), marker.begin(), marker.end()) != ciphertext.end();
+  const bool zeroTail = std::all_of(initial.payload + marker.size(), initial.payload + initial.capacity, [](char byte) {
+    return byte == 0;
+  });
+
+  CHECK_FALSE(containsMarker);
+  CHECK_FALSE(zeroTail);
+  CHECK(hooks.keyGenerations == 1);
+  CHECK(hooks.nonceGenerations == 1);
+  REQUIRE(value->withPlaintext([&](SecretView view) {
+    CHECK(view.size() == marker.size());
+    const bool tailCleared =
+      std::all_of(initial.payload + view.size(), initial.payload + initial.capacity, [](char byte) {
+        return byte == 0;
+      });
+
+    CHECK(tailCleared);
+  }));
+
+  const auto restored = SecureStringTestAccess::probe(*value);
+  const bool sameCiphertext = std::memcmp(restored.payload, ciphertext.data(), restored.capacity) == 0;
+  const bool sameNonce = restored.nonce == initial.nonce;
+
+  CHECK_FALSE(sameCiphertext);
+  CHECK_FALSE(sameNonce);
+  CHECK(restored.keyPage == initial.keyPage);
+  CHECK(hooks.keyGenerations == 1);
+  CHECK(hooks.nonceGenerations == 2);
+  auto moved = std::move(*value);
+  CHECK(SecureStringTestAccess::probe(moved).keyPage == initial.keyPage);
+  checkBytes(moved, marker);
+  REQUIRE(moved.append("-suffix"));
+  CHECK(hooks.keyGenerations == 2);
+  CHECK(hooks.keyWipes == 1);
+  CHECK(hooks.lastKeyWipeWasZero);
+  checkBytes(moved, "idle-marker-suffix");
+  REQUIRE(moved.clear());
+  CHECK(moved.available());
+  CHECK(moved.capabilities().encryptedWhileIdle);
+  checkBytes(moved, {});
+}
+
+TEST_CASE("Linux authenticates logical bytes and encrypted tail before invoking a callback") {
+  for (const bool tamperTail : {false, true}) {
+    SecureStringTestHooks hooks;
+    auto value = SecureStringTestAccess::create("secret", {}, hooks);
+    REQUIRE(value);
+    const auto probe = SecureStringTestAccess::probe(*value);
+    auto *payload = const_cast<char *>(probe.payload);
+
+    payload[tamperTail ? probe.capacity - 1 : 0] ^= 1;
+    hooks.fail(Step::RELEASE);
+    bool called = false;
+    auto result = value->withPlaintext([&](SecretView) {
+      called = true;
+    });
+
+    REQUIRE_FALSE(result);
+    REQUIRE(result.error().primary);
+    CHECK(result.error().primary->operation == Operation::DECRYPT);
+    CHECK(result.error().primary->code == Code::SECURITY_FAILURE);
+    REQUIRE(result.error().cleanup.count == 1);
+    CHECK(result.error().cleanup.errors[0].operation == Operation::RELEASE);
+    CHECK_FALSE(called);
+    CHECK_FALSE(value->available());
+    CHECK(hooks.lastWipeWasZero);
+    CHECK(hooks.lastKeyWipeWasZero);
+    const bool keyZeroed = std::all_of(probe.keyPage, probe.keyPage + probe.keyCapacity, [](char byte) {
+      return byte == 0;
+    });
+
+    CHECK(keyZeroed);
+    CHECK(value->close());
+  }
+}
+
+TEST_CASE("Linux key-page preparation and entropy failures wipe both regions before release retry") {
+  for (const auto step : {Step::COMMIT, Step::KEY_COMMIT, Step::KEY_ENTROPY, Step::NONCE_ENTROPY, Step::ENCRYPT}) {
+    SecureStringTestHooks hooks;
+
+    hooks.fail(step);
+    hooks.fail(Step::RELEASE);
+    auto result = SecureStringTestAccess::create("secret", {}, hooks);
+    REQUIRE_FALSE(result);
+    CHECK(result.error().primary.code == Code::SECURITY_FAILURE);
+    REQUIRE(result.error().cleanup.count == 1);
+    CHECK(result.error().cleanup.errors[0].operation == Operation::RELEASE);
+    CHECK(hooks.keyWipes == 1);
+    CHECK(hooks.lastWipedKeyCapacity > 0);
+    CHECK(hooks.lastKeyWipeWasZero);
+    CHECK(hooks.lastWipeWasZero);
+    CHECK(hooks.releases == 2);
+  }
+
+  SecureStringTestHooks noAllocation;
+
+  noAllocation.fail(Step::ALLOCATE);
+  CHECK_FALSE(SecureStringTestAccess::create("secret", {}, noAllocation));
+  CHECK(noAllocation.keyGenerations == 0);
+  CHECK(noAllocation.keyWipes == 0);
+}
+
+TEST_CASE("Linux mandatory key lock and dump failures precede entropy and secret copying") {
+  for (const auto step : {Step::KEY_LOCK, Step::KEY_DUMP, Step::DUMP}) {
+#  if !defined(MADV_DONTDUMP)
+    if (step != Step::KEY_LOCK) {
+      continue;
+    }
+#  endif
+    SecureStringOptions options;
+    SecureStringTestHooks hooks;
+
+    options.lockPages = step == Step::KEY_LOCK;
+    options.excludeFromDumps = !options.lockPages;
+    hooks.fail(step);
+    auto result = SecureStringTestAccess::create("secret", options, hooks);
+    REQUIRE_FALSE(result);
+    CHECK(result.error().primary.operation == (options.lockPages ? Operation::LOCK : Operation::DUMP));
+    CHECK(hooks.keyGenerations == 0);
+    CHECK(hooks.entropyCalls == 0);
+    CHECK(hooks.lastKeyWipeWasZero);
+    CHECK(hooks.lastWipeWasZero);
+  }
+}
+
+TEST_CASE("Linux entropy accumulates partial reads and bounds interrupted calls") {
+  SecureStringTestHooks partial;
+
+  partial.entropyResults[0] = {3, 0};
+  partial.entropyResults[1] = {-1, EINTR};
+  partial.entropyResults[2] = {5, 0};
+  partial.entropyResults[3] = {24, 0};
+  partial.entropyResultCount = 4;
+  auto value = SecureStringTestAccess::create("secret", {}, partial);
+  REQUIRE(value);
+  CHECK(partial.entropyResultIndex == 4);
+  CHECK(partial.entropyCalls == 5);
+  checkBytes(*value, "secret");
+
+  SecureStringTestHooks interrupted;
+
+  interrupted.entropyResults.fill({-1, EINTR});
+  interrupted.entropyResultCount = interrupted.entropyResults.size();
+  auto exhausted = SecureStringTestAccess::create("secret", {}, interrupted);
+  REQUIRE_FALSE(exhausted);
+  CHECK(exhausted.error().primary.operation == Operation::ENTROPY);
+  CHECK(exhausted.error().primary.nativeCode == EINTR);
+  CHECK(interrupted.entropyCalls == 64);
+  CHECK(interrupted.lastKeyWipeWasZero);
+  CHECK(interrupted.lastWipeWasZero);
+}
+
+TEST_CASE("Linux zero entropy and unavailable nonblocking entropy fail without fallback") {
+  for (const int nativeError : {0, EAGAIN, ENOSYS, EIO}) {
+    SecureStringTestHooks hooks;
+
+    hooks.entropyResults[0] = {nativeError == 0 ? 0 : -1, nativeError};
+    hooks.entropyResultCount = 1;
+    auto result = SecureStringTestAccess::create("secret", {}, hooks);
+    REQUIRE_FALSE(result);
+    CHECK(result.error().primary.operation == Operation::ENTROPY);
+    CHECK(result.error().primary.code == Code::SECURITY_FAILURE);
+    CHECK(result.error().primary.nativeCode == static_cast<std::uint32_t>(nativeError == 0 ? EIO : nativeError));
+    CHECK(hooks.entropyCalls == 1);
+    CHECK(hooks.keyGenerations == 0);
+    CHECK(hooks.nonceGenerations == 0);
+    CHECK(hooks.lastKeyWipeWasZero);
+  }
+}
+
+TEST_CASE("Linux candidate key failure preserves old ciphertext and nonce before append decryption") {
+  SecureStringTestHooks hooks;
+  auto value = SecureStringTestAccess::create("old", {}, hooks);
+  REQUIRE(value);
+  const auto initial = SecureStringTestAccess::probe(*value);
+  const std::vector<char> ciphertext(initial.payload, initial.payload + initial.capacity);
+
+  hooks.fail(Step::KEY_ENTROPY);
+  auto failed = value->append("suffix");
+  REQUIRE_FALSE(failed);
+  CHECK(failed.error().primary.operation == Operation::ENTROPY);
+  CHECK(value->available());
+  const auto preserved = SecureStringTestAccess::probe(*value);
+  const bool sameCiphertext = std::memcmp(preserved.payload, ciphertext.data(), preserved.capacity) == 0;
+  const bool sameNonce = preserved.nonce == initial.nonce;
+
+  CHECK(sameCiphertext);
+  CHECK(sameNonce);
+  CHECK(preserved.encrypted);
+  checkBytes(*value, "old");
+}
+
+TEST_CASE("Linux nonce failures preserve state-specific append and borrow cleanup guarantees") {
+  SecureStringTestHooks hooks;
+  auto value = SecureStringTestAccess::create("old", {}, hooks);
+  REQUIRE(value);
+
+  hooks.fail(Step::NONCE_ENTROPY);
+  auto restored = value->append("suffix");
+  REQUIRE_FALSE(restored);
+  CHECK(restored.error().primary.operation == Operation::ENTROPY);
+  CHECK(restored.error().cleanup.empty());
+  CHECK(value->available());
+  checkBytes(*value, "old");
+
+  hooks.fail(Step::NONCE_ENTROPY, 2);
+  hooks.fail(Step::RELEASE, 2);
+  auto retired = value->append("suffix");
+  REQUIRE_FALSE(retired);
+  CHECK(retired.error().primary.operation == Operation::ENTROPY);
+  REQUIRE(retired.error().cleanup.count == 3);
+  CHECK(retired.error().cleanup.errors[0].operation == Operation::RELEASE);
+  CHECK(retired.error().cleanup.errors[1].operation == Operation::ENTROPY);
+  CHECK(retired.error().cleanup.errors[2].operation == Operation::RELEASE);
+  CHECK_FALSE(value->available());
+  CHECK(hooks.lastKeyWipeWasZero);
+  REQUIRE(value->close());
+
+  auto borrowed = SecureStringTestAccess::create("secret", {}, hooks);
+  REQUIRE(borrowed);
+  hooks.fail(Step::NONCE_ENTROPY);
+  hooks.fail(Step::RELEASE);
+  auto callback = borrowed->withPlaintext([](SecretView) -> std::expected<void, int> {
+    return std::unexpected(91);
+  });
+  REQUIRE_FALSE(callback);
+  CHECK(*callback.error().callbackError == 91);
+  REQUIRE(callback.error().cleanup.count == 2);
+  CHECK(callback.error().cleanup.errors[0].operation == Operation::ENTROPY);
+  CHECK(callback.error().cleanup.errors[1].operation == Operation::RELEASE);
+  CHECK_FALSE(borrowed->available());
+  CHECK(hooks.lastKeyWipeWasZero);
+  CHECK(borrowed->close());
+}
+#elif !defined(_WIN32) || defined(__EMSCRIPTEN__)
 TEST_CASE("unsupported platforms require explicit wipe-only including for empty creation") {
   auto unsupported = SecureString::create();
   REQUIRE_FALSE(unsupported);
