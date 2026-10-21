@@ -133,18 +133,18 @@ void schemasAndValues() {
   take(context.resolve("VBox", {.width = 0, .height = 0, .gap = 0}));
   take(context.resolve("LineEdit", {.history = {.enabled = false, .maxOperations = 0, .maxBytes = 0}}));
 
-  constexpr std::array<std::string_view, 4> paths{"text", "width", "height", "flex"};
-  context.registerType("Custom", paths).define("CustomAlias", "Custom", {.text = i18n("caption")});
+  constexpr std::array<std::string_view, 4> PATHS{"text", "width", "height", "flex"};
+  context.registerType("Custom", PATHS).define("CustomAlias", "Custom", {.text = i18n("caption")});
   const auto custom = take(context.resolve("CustomAlias"));
   check(custom.base == "Custom" && custom.settings.text->resourceKey() == "caption", "explicit custom schema");
   fails(context.resolve("CustomAlias", {.readOnly = true}), Code::UNSUPPORTED_PROPERTY);
-  constexpr std::array<std::string_view, 1> unknown{"notKnown"};
+  constexpr std::array<std::string_view, 1> UNKNOWN{"notKnown"};
   ControlContext unknownSchema;
-  unknownSchema.registerType("Custom", unknown);
+  unknownSchema.registerType("Custom", UNKNOWN);
   fails(unknownSchema.validate(), Code::UNKNOWN_PROPERTY);
-  constexpr std::array<std::string_view, 2> repeated{"text", "text"};
+  constexpr std::array<std::string_view, 2> REPEATED{"text", "text"};
   ControlContext duplicateSchema;
-  duplicateSchema.registerType("Custom", repeated);
+  duplicateSchema.registerType("Custom", REPEATED);
   fails(duplicateSchema.validate(), Code::DUPLICATE_PROPERTY);
 }
 
