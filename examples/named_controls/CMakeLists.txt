@@ -1,0 +1,9 @@
+add_executable(portals_named_controls main.cpp)
+
+target_link_libraries(portals_named_controls PRIVATE portals::core)
+portals_enable_warnings(portals_named_controls)
+
+add_executable(portals_named_controls_resource resource.cpp)
+
+target_link_libraries(portals_named_controls_resource PRIVATE portals::core)
+portals_enable_warnings(portals_named_controls_resource)

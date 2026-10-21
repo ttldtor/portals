@@ -198,6 +198,12 @@ updates already bypass business callbacks. The helper and the native program
 are [complete source files](../examples/check_state/main.cpp), with
 [group policy source](../examples/check_state/group.hpp).
 
+For a ready-made three-state control, use `ui::threeState("Selection", CheckState::MIXED)`.
+It returns a `Description<ThreeState>` and accepts `ui::Ref<ThreeState>` first.
+`ThreeState` reuses CheckBox behavior with a fixed three-state cycle; both
+`ThreeState` and `CheckBox` type selectors match it. Each instance owns its state
+unless an existing shared managed state is supplied explicitly.
+
 Use `ui::checkbox(text, CheckState::MIXED,
 CheckBoxOptions{.cycle = CheckCycle::THREE_STATE})` for explicit input configuration.
 The same options-first form accepts a shared `ManagedState<CheckState>`; an

@@ -296,6 +296,15 @@ private:
   CheckState state_{CheckState::UNCHECKED};
 };
 
+/** @brief Named checkbox presentation using the existing CheckBox runtime.
+ * ui::threeState binds the fixed three-state activation cycle. Direct low-level
+ * construction remains unbound and follows the explicit base binding contract.
+ */
+class ThreeState : public CheckBox {
+public:
+  using CheckBox::CheckBox;
+};
+
 /** @brief Replace owning text between frames; equal bytes/policy are a no-op, changes invalidate layout.
  * @param tree Borrowed UI owner containing node; used only during this call.
  * @param node Observing handle to the control whose text is replaced.

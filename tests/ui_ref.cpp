@@ -125,6 +125,10 @@ concept HasText = requires(T ref) { ref.text(); };
 static_assert(HasText<ui::Ref<Label>>);
 static_assert(HasText<ui::Ref<Button>>);
 static_assert(HasText<ui::Ref<CheckBox>>);
+static_assert(HasText<ui::Ref<ThreeState>>);
+static_assert(std::derived_from<ThreeState, CheckBox>);
+static_assert(!std::same_as<ThreeState, CheckBox>);
+static_assert(std::is_convertible_v<Node<ThreeState>, Node<CheckBox>>);
 static_assert(HasText<ui::Ref<LineEdit>>);
 static_assert(!HasText<ui::Ref<Widget>>);
 static_assert(!HasText<ui::Ref<MessageDialog>>);
@@ -1314,6 +1318,181 @@ TEST_CASE("legacy empty caption braces remain literal overloads with and without
   CHECK(take(button.text().get()).empty());
   take(fixture.app->router().invoke(button.node(), {Action::ACTIVATE}));
   CHECK(clicks == 1);
+}
+
+TEST_CASE("threeState factories share the existing checkbox binding and fixed cycle") {
+  Fixture fixture;
+  ui::Ref<ThreeState> internal;
+  ui::Ref<ThreeState> shared;
+  ui::Ref<ThreeState> quiet;
+  ui::Ref<CheckBox> legacy;
+  const auto model = take(fixture.scene->state(CheckState::MIXED));
+  const auto boolean = take(fixture.scene->state(false));
+  std::vector<CheckState> observed;
+
+  take(
+    ui::mount(*fixture.scene,
+              ui::column(ui::threeState(internal, "internal", CheckState::UNCHECKED,
+                                        [&](CheckStateResult result) -> std::expected<void, TreeError> {
+                                          REQUIRE(result);
+                                          observed.push_back(result->snapshot->value);
+
+                                          return {};
+                                        }),
+                         ui::threeState(shared, "shared", model), ui::threeState(quiet, "quiet", CheckState::CHECKED),
+                         ui::threeState("unreferenced"), ui::checkbox(legacy, "legacy", boolean))));
+
+  for (const auto expected : {CheckState::CHECKED, CheckState::MIXED, CheckState::UNCHECKED}) {
+    take(fixture.app->router().invoke(internal.node(), {Action::ACTIVATE}));
+    take(fixture.app->tree().read(internal.node(), [&](const ThreeState &widget) {
+      CHECK(widget.checkState() == expected);
+      CHECK(widget.checked() == (expected == CheckState::CHECKED));
+    }));
+  }
+
+  CHECK(observed == std::vector{CheckState::CHECKED, CheckState::MIXED, CheckState::UNCHECKED});
+
+  Node<CheckBox> base = shared.node();
+
+  take(fixture.app->router().invoke(base, {Action::ACTIVATE}));
+  CHECK(take(model.snapshot())->value == CheckState::UNCHECKED);
+  take(model.set(CheckState::MIXED));
+  take(fixture.scene->prepare(*fixture.app, {50, 12}));
+  take(fixture.app->tree().read(shared.node(), [](const CheckBox &widget) {
+    CHECK(widget.checkState() == CheckState::MIXED);
+  }));
+  take(fixture.app->router().invoke(quiet.node(), {Action::ACTIVATE}));
+  take(fixture.app->tree().read(quiet.node(), [](const ThreeState &widget) {
+    CHECK(widget.checkState() == CheckState::MIXED);
+  }));
+
+  for (const auto expected : {true, false, true}) {
+    take(fixture.app->router().invoke(legacy.node(), {Action::ACTIVATE}));
+    CHECK(take(boolean.snapshot())->value == expected);
+  }
+}
+
+TEST_CASE("threeState natural style identity survives class-only style and explicit rename") {
+  Fixture fixture;
+  ui::Ref<ThreeState> natural;
+  ui::Ref<ThreeState> renamed;
+
+  take(ui::mount(*fixture.scene,
+                 ui::column(ui::threeState(natural, "natural").style(StyleTarget{.classes = {"accent"}}).id("natural"),
+                            ui::threeState(renamed, "renamed")
+                              .id("renamed")
+                              .style(StyleTarget{.type = "CustomFlag", .classes = {"accent"}}))));
+  take(fixture.scene->theme(take(parsePss("Control { background: #010203; }"
+                                          "ThreeState { italic: true; foreground: #000001; }"
+                                          "CheckBox.accent { bold: true; foreground: #000002; }"
+                                          "CustomFlag { underline: true; }"
+                                          "#natural { foreground: #000003; }"))));
+  take(fixture.scene->prepare(*fixture.app, {50, 12}));
+  take(fixture.app->tree().read(natural.node(), [](const ThreeState &widget) {
+    REQUIRE(widget.computedStyle());
+
+    const auto &style = widget.computedStyle()->normal;
+
+    CHECK(style.background == RgbColor{1, 2, 3});
+    CHECK(style.foreground == RgbColor{0, 0, 3});
+    CHECK(style.bold);
+    CHECK(style.italic);
+    CHECK_FALSE(style.underline);
+  }));
+  take(fixture.app->tree().read(renamed.node(), [](const ThreeState &widget) {
+    REQUIRE(widget.computedStyle());
+
+    const auto &style = widget.computedStyle()->normal;
+
+    CHECK(style.foreground == RgbColor{0, 0, 2});
+    CHECK(style.background == RgbColor{1, 2, 3});
+    CHECK(style.bold);
+    CHECK(style.italic);
+    CHECK(style.underline);
+  }));
+}
+
+TEST_CASE("threeState named lookup distinguishes the derived view and preserves base access") {
+  auto owner = ui::scene(ui::column(ui::threeState("named").id("derived"), ui::checkbox("base").id("base")));
+  auto derived = owner.get<ThreeState>("derived");
+  auto base = owner.get<CheckBox>("derived");
+
+  REQUIRE(owner.prepareChecked());
+  CHECK(Node<CheckBox>{derived.node()} == base.node());
+  CHECK(take(derived.text().get()) == "named");
+
+  auto wrong = owner.get<ThreeState>("base");
+  auto unavailable = wrong.text().get();
+
+  REQUIRE_FALSE(unavailable);
+  CHECK(hasCause(unavailable.error(), TreeError::INVALID_ARGUMENT));
+  REQUIRE(owner.close());
+
+  auto closed = derived.text().get();
+
+  REQUIRE_FALSE(closed);
+  CHECK(hasCause(closed.error(), TreeError::CLOSED));
+}
+
+TEST_CASE("threeState invalid model and lineage leave references unpublished") {
+  Fixture fixture;
+  Fixture foreign;
+  ui::Ref<ThreeState> reference;
+  const auto foreignModel = take(foreign.scene->state(CheckState::UNCHECKED));
+  auto wrongOwner = ui::mount(*fixture.scene, ui::threeState(reference, "foreign", foreignModel));
+
+  REQUIRE_FALSE(wrongOwner);
+  CHECK(hasCause(wrongOwner.error(), TreeError::INVALID_ARGUMENT));
+  CHECK(reference.node() == Node<ThreeState>{});
+
+  auto invalid = ui::mount(*fixture.scene, ui::threeState(reference, "invalid", static_cast<CheckState>(99)));
+
+  REQUIRE_FALSE(invalid);
+  CHECK(hasCause(invalid.error(), TreeError::INVALID_ARGUMENT));
+  CHECK(reference.node() == Node<ThreeState>{});
+
+  auto malformed = ui::mount(
+    *fixture.scene, ui::threeState(reference, "bad lineage").style(StyleTarget{.baseTypes = {"CheckBox", "CheckBox"}}));
+
+  REQUIRE_FALSE(malformed);
+  CHECK(std::get<StyleError>(malformed.error().cause).cause == TreeError::INVALID_ARGUMENT);
+  CHECK(reference.node() == Node<ThreeState>{});
+  CHECK(take(fixture.app->tree().inspect(fixture.scene->root())).children.empty());
+  take(ui::mount(*fixture.scene, ui::threeState(reference, "retry")));
+  CHECK(reference.node() != Node<ThreeState>{});
+}
+
+TEST_CASE("threeState callback retains captures through self-removal and refs remain observing") {
+  Fixture fixture;
+  ui::Ref<ThreeState> reference;
+  const auto model = take(fixture.scene->state(CheckState::UNCHECKED));
+  auto retained = std::make_shared<int>(42);
+  std::weak_ptr<int> weak = retained;
+  int calls{};
+
+  take(
+    ui::mount(*fixture.scene, ui::threeState(reference, "remove", model,
+                                             [&, retained](CheckStateResult result) -> std::expected<void, TreeError> {
+                                               REQUIRE(result);
+                                               CHECK(result->snapshot->value == CheckState::CHECKED);
+                                               CHECK(take(model.snapshot())->value == CheckState::CHECKED);
+                                               ++calls;
+                                               take(fixture.scene->remove(reference.node()));
+                                               CHECK_FALSE(weak.expired());
+                                               CHECK(*retained == 42);
+
+                                               return {};
+                                             })));
+  retained.reset();
+  take(fixture.app->router().invoke(reference.node(), {Action::ACTIVATE}));
+  take(fixture.app->router().focused());
+  CHECK(calls == 1);
+  CHECK(weak.expired());
+
+  auto stale = reference.text().get();
+
+  REQUIRE_FALSE(stale);
+  CHECK(hasCause(stale.error(), TreeError::STALE_NODE));
 }
 
 TEST_CASE("caption expressions own bytes and resolve localization once at mount") {

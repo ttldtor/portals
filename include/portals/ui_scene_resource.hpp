@@ -9,6 +9,12 @@
 namespace portals::ui {
 struct SceneResourceOptions;
 
+/** @brief Explicit grammar selection; registered node names never select a format implicitly. */
+enum class SceneResourceFormat {
+  LEGACY,       ///< Existing single-root resource document.
+  CONFIGURATION ///< Explicit definitions/defaults/scene blocks and nested typed settings.
+};
+
 /** @brief Finite parser budgets, checked before calling any registered factory. */
 struct SceneResourceLimits {
   std::size_t maxSourceBytes{1024 * 1024}; ///< Positive maximum UTF-8 source bytes.
@@ -30,6 +36,7 @@ struct SceneResourceArguments {
   std::optional<std::uint32_t> flex;       ///< Positive existing flex weight, applied after width/height.
   std::int32_t gap{};                      ///< Nonnegative layout gap; resource syntax admits this only on VBox/HBox.
   bool checked{};                          ///< Initial checkbox state; resource syntax admits this only on CheckBox.
+  ControlSettings settings{};              ///< Validated effective sparse settings; no IDs, models or handlers.
 };
 
 namespace detail {
@@ -58,13 +65,13 @@ concept ResourceFactory =
   };
 } // namespace detail
 
-/** @brief Explicit owning allowlist; builtins are VBox/HBox/Label/LineEdit/Button/CheckBox.
+/** @brief Explicit owning allowlist; builtins are VBox/HBox/Label/LineEdit/Button/CheckBox/ThreeState.
  * Construction and copying may allocate. Captured services remain explicit borrows and must
  * outlive prepare; registry callbacks are released with the consumed scene recipe.
  */
 class SceneResourceRegistry {
 public:
-  /** @brief Register the six safe builtin recipe adapters without mounting anything. */
+  /** @brief Register the seven safe builtin recipe adapters without mounting anything. */
   SceneResourceRegistry();
 
   /** @brief Release owning adapters; copying remains fallible instead of a noexcept debug-vector move. */
@@ -95,12 +102,15 @@ public:
       const auto width = arguments.width;
       const auto height = arguments.height;
       const auto flex = arguments.flex;
+      const auto materialized = detail::controlSettingsPresence(arguments.settings);
       auto id = arguments.id;
       auto recipe = std::expected<Description<T>, ManagedError>(std::invoke(factory, std::move(arguments)));
 
       if (!recipe) {
         return std::unexpected(recipe.error());
       }
+
+      detail::Access::preparedControl(*recipe, materialized);
 
       if (!id.empty()) {
         (void)std::move(*recipe).id(id);
@@ -155,6 +165,9 @@ struct SceneResourceOptions {
   TextResolver resolver{};                          ///< Existing owning synchronous i18n adapter, used only at prepare.
   SceneResourceLimits limits{};                     ///< Finite parser bounds, independent of managed/tree limits.
   detail::ResourceRegistrationState registration{}; ///< Internal sticky failure; not a configuration/reset API.
+  SceneResourceFormat format{
+    SceneResourceFormat::LEGACY};           ///< Explicit grammar; ordinary resources retain their syntax.
+  std::optional<ControlContext> controls{}; ///< Local immutable snapshot; absent inherits the containing scene context.
 
   /** @brief Register a typed resource control and retain the first failure for checked prepare/runApp.
    * @tparam T Public Widget subtype returned by the factory, including final types.

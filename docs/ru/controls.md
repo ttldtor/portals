@@ -151,7 +151,13 @@ helper пытается обновить каждого ребёнка по по
 [Полная программа](../../examples/check_state/main.cpp) и
 [политика группы](../../examples/check_state/group.hpp) поставляются исходниками.
 
-Явный цикл задаётся без позиционных заглушек:
+Готовый вариант с тремя состояниями: `ui::threeState("Selection", CheckState::MIXED)`.
+Он возвращает `Description<ThreeState>`; первым аргументом можно передать
+`ui::Ref<ThreeState>`. Тип `ThreeState` использует поведение CheckBox с фиксированным
+циклом из трёх состояний. К нему применяются селекторы типов `ThreeState` и
+`CheckBox`. Состояния экземпляров независимы, если явно не передать общий managed state.
+
+Явный цикл CheckBox задаётся без позиционных заглушек:
 `ui::checkbox(text, CheckState::MIXED,
 CheckBoxOptions{.cycle = CheckCycle::THREE_STATE})`.
 Та же форма принимает общий `ManagedState<CheckState>`; необязательный callback

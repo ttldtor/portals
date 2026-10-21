@@ -40,6 +40,8 @@ set(example_sources
   examples/dashboard/main.cpp
   tests/package_consumer/check_state_explicit.cpp
   examples/check_state/main.cpp
+  examples/named_controls/main.cpp
+  examples/named_controls/resource.cpp
   examples/check_state/group.hpp
   examples/click_handlers/main.cpp
   examples/gallery/fluent_form.hpp

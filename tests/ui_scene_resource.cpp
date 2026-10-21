@@ -172,6 +172,448 @@ TEST_CASE("runtime resource retains temporary source and publishes typed named r
   CHECK_FALSE(add.text().get());
 }
 
+TEST_CASE("configured resources resolve forward definitions and preserve independent sparse history") {
+  constexpr std::string_view SOURCE = R"(
+    scene { VBox {
+      MyEdit#first { text = "" }
+      MyEdit#second { text = "" }
+      MyEdit#disabled { history = { maxOperations = 0 } }
+      MyEdit#explicit { history { maxOperations = 128, enabled = true } }
+    } }
+    defaults { LineEdit { history { enabled = false, maxBytes = 4096 } } }
+    definitions {
+      MyEdit = Later { history { maxOperations = 2 } }
+      Later = LineEdit { history { enabled = true } }
+    }
+  )";
+
+  for (const bool fromFile : {false, true}) {
+    TemporaryFile file;
+
+    file.write(SOURCE);
+
+    ui::SceneResourceOptions options;
+
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+
+    auto owner = fromFile ? ui::scene(ui::SceneResourceFile{file.path}, options) : ui::scene(SOURCE, options);
+    auto first = owner.get<LineEdit>("first");
+    auto second = owner.get<LineEdit>("second");
+    auto disabled = owner.get<LineEdit>("disabled");
+    auto explicitValue = owner.get<LineEdit>("explicit");
+
+    REQUIRE(owner.prepareChecked());
+
+    for (const auto value : {"a", "b", "c"}) {
+      REQUIRE((first.text() = value).result());
+      REQUIRE((disabled.text() = value).result());
+      REQUIRE((explicitValue.text() = value).result());
+    }
+
+    REQUIRE((second.text() = "independent").result());
+    REQUIRE(first.undo().result());
+    CHECK(*first.text().get() == "b");
+    REQUIRE(first.undo().result());
+    CHECK(*first.text().get() == "a");
+    REQUIRE(first.undo().result());
+    CHECK(*first.text().get() == "a");
+    CHECK(*second.text().get() == "independent");
+    REQUIRE(disabled.undo().result());
+    CHECK(*disabled.text().get() == "c");
+
+    for (int index = 0; index < 3; ++index) {
+      REQUIRE(explicitValue.undo().result());
+    }
+
+    CHECK(*explicitValue.text().get() == "");
+    REQUIRE(owner.close());
+    CHECK_FALSE(first.text().get());
+  }
+}
+
+TEST_CASE("configured resources validate every layer before resolvers or factories") {
+  struct Scenario {
+    std::string_view source;
+    Code code;
+    std::string_view path;
+  };
+
+  const Scenario scenarios[]{
+    {"definitions { A = B {} B = A {} } scene { Probe{} }", Code::CYCLIC_TYPE, {}},
+    {"definitions { A = Missing {} } scene { Probe{} }", Code::UNKNOWN_TYPE, {}},
+    {"definitions { LineEdit = Button {} } scene { Probe{} }", Code::DUPLICATE_TYPE, {}},
+    {"defaults { LineEdit{} LineEdit{} } scene { Probe{} }", Code::DUPLICATE_PROPERTY, {}},
+    {"definitions { A = LineEdit { missing=1 } } scene { Probe{} }", Code::UNKNOWN_PROPERTY, "A.missing"},
+    {"definitions { A = Label { readOnly=true } } scene { Probe{} }", Code::UNKNOWN_PROPERTY, "A.readOnly"},
+    {"defaults { LineEdit { editMode=UNKNOWN } } scene { Probe{} }", Code::INVALID_VALUE, "LineEdit.editMode"},
+    {"scene { VBox { Probe{} LineEdit { history { maxBytes=1 maxBytes=2 } } } }", Code::DUPLICATE_PROPERTY,
+     "LineEdit.history.maxBytes"},
+    {"scene { VBox { Probe{} LineEdit { history{} history={} } } }", Code::DUPLICATE_PROPERTY, "LineEdit.history"},
+    {"scene { VBox { Probe{} LineEdit { history { maxBytes=$budget } } } }", Code::INVALID_VALUE, {}},
+    {"scene { VBox { Probe{} ThreeState { cycle=TWO_STATE } } }", Code::INVALID_VALUE, "ThreeState.cycle"},
+    {"defaults { Label { readOnly=true } } scene { VBox { Probe{} Label { text=\"override\" } } }",
+     Code::UNKNOWN_PROPERTY, "Label.readOnly"},
+  };
+
+  for (const auto &scenario : scenarios) {
+    CAPTURE(scenario.source);
+
+    int factories{}, resolutions{};
+    ui::SceneResourceOptions options;
+
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    options.resolver = [&](std::string_view) -> std::expected<std::string, TextResourceError> {
+      ++resolutions;
+
+      return "resolved";
+    };
+    REQUIRE(options.registry.add<Custom>("Probe", [&](ui::SceneResourceArguments) {
+      ++factories;
+
+      return ui::custom<Custom>("probe");
+    }));
+
+    const auto failure = rejected(scenario.source, options);
+
+    CHECK(failure.sceneResource->code == scenario.code);
+
+    if (!scenario.path.empty()) {
+      REQUIRE(failure.sceneResource->propertyPath);
+      CHECK(*failure.sceneResource->propertyPath == scenario.path);
+    }
+
+    CHECK(factories == 0);
+    CHECK(resolutions == 0);
+    CHECK(Custom::alive == 0);
+  }
+}
+
+TEST_CASE("configured resource budgets cover declarations structure and all effective node leaves") {
+  ui::SceneResourceOptions options;
+
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  options.controls.emplace(ui::ControlContextLimits{.maxDefinitions = 1});
+  CHECK(rejected("definitions { A=LineEdit{} B=LineEdit{} } scene { Label{} }", options).sceneResource->code ==
+        Code::TYPE_LIMIT);
+  options.controls.emplace(ui::ControlContextLimits{.maxInheritance = 1});
+  CHECK(rejected("definitions { A=B{} B=LineEdit{} } scene { Label{} }", options).sceneResource->code ==
+        Code::DEPTH_LIMIT);
+  options.controls.emplace(ui::ControlContextLimits{.maxStructDepth = 1});
+  CHECK(rejected("scene { LineEdit { history { maxOperations=1 } } }", options).sceneResource->code ==
+        Code::DEPTH_LIMIT);
+  options.controls.emplace(ui::ControlContextLimits{.maxMaterializedLeaves = 3});
+
+  int factories{}, resolutions{};
+
+  REQUIRE(options.registry.add<Custom>("Probe", [&](ui::SceneResourceArguments) {
+    ++factories;
+
+    return ui::custom<Custom>("probe");
+  }));
+  options.resolver = [&](std::string_view) -> std::expected<std::string, TextResourceError> {
+    ++resolutions;
+
+    return "value";
+  };
+
+  const auto failure = rejected(
+    "defaults { Label { text=i18n(\"caption\"), width=1 } } scene { VBox { Probe{} Label{} Label{} } }", options);
+
+  CHECK(failure.sceneResource->code == Code::MATERIALIZATION_LIMIT);
+  CHECK(factories == 0);
+  CHECK(resolutions == 0);
+}
+
+TEST_CASE("legacy resource names and large custom registries remain independent of configuration syntax") {
+  ui::SceneResourceOptions options;
+  int calls{};
+
+  for (const auto name : {"definitions", "defaults", "scene"}) {
+    REQUIRE(options.registry.add<Custom>(name, [&](ui::SceneResourceArguments arguments) {
+      ++calls;
+
+      return ui::custom<Custom>(arguments.text);
+    }));
+  }
+
+  for (int index = 0; index < 70; ++index) {
+    REQUIRE(options.registry.add<Custom>("Custom" + std::to_string(index), [](ui::SceneResourceArguments) {
+      return ui::custom<Custom>("custom");
+    }));
+  }
+
+  for (const auto name : {"definitions", "defaults", "scene"}) {
+    auto owner = ui::scene(std::string(name) + "{\"ordinary\"}", options);
+
+    REQUIRE(owner.prepareChecked());
+    REQUIRE(owner.close());
+  }
+
+  CHECK(calls == 3);
+  CHECK(Custom::alive == 0);
+}
+
+TEST_CASE("configured text and placeholder failures retain inherited file origin after destruction") {
+  for (const auto property : {"text", "placeholder"}) {
+    TemporaryFile file;
+    const auto source =
+      std::string("definitions {\n  MyEdit = LineEdit { ") + property + "=i18n(\"absent\") }\n}\nscene { MyEdit{} }";
+
+    file.write(source);
+
+    ManagedError failure;
+
+    {
+      ui::SceneResourceOptions options;
+
+      options.format = ui::SceneResourceFormat::CONFIGURATION;
+
+      auto owner = ui::scene(ui::SceneResourceFile{file.path}, options);
+      const auto prepared = owner.prepareChecked();
+
+      REQUIRE_FALSE(prepared);
+      failure = prepared.error();
+    }
+
+    REQUIRE(failure.resource);
+    CHECK(*failure.resource == TextResourceError::RESOLVER_REQUIRED);
+    REQUIRE(failure.sceneResource);
+    CHECK(failure.sceneResource->code == Code::TEXT);
+    REQUIRE(failure.sceneResource->propertyPath);
+    CHECK(*failure.sceneResource->propertyPath == std::string("MyEdit.") + property);
+    REQUIRE(failure.sceneResource->source);
+    CHECK(*failure.sceneResource->source == file.path.generic_string());
+    CHECK(failure.sceneResource->line == 2);
+    CHECK(failure.sceneResource->offset == source.find(std::string(property) + "="));
+  }
+}
+
+TEST_CASE("configured custom aliases reuse owning factories and checked rollback") {
+  ui::SceneResourceOptions options;
+  ui::Ref<Custom> reference;
+  int calls{};
+
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  REQUIRE(options.registry.add<Custom>("Probe", [&, reference](ui::SceneResourceArguments arguments) {
+    ++calls;
+    CHECK(arguments.text == "inherited");
+    CHECK(arguments.width == 7);
+
+    return ui::custom<Custom>(reference, arguments.text);
+  }));
+
+  auto owner = ui::scene("definitions { Alias=Probe{text=\"inherited\", width=7} } scene { Alias#alias{} }", options);
+
+  REQUIRE(owner.prepareChecked());
+  CHECK(calls == 1);
+  CHECK(reference.node() != Node<Custom>{});
+  REQUIRE(owner.close());
+  CHECK(Custom::alive == 0);
+
+  ui::Ref<Custom> unpublished;
+
+  REQUIRE(options.registry.add<Custom>("Fail", [unpublished](ui::SceneResourceArguments) {
+    return ui::custom<Custom>(unpublished, "failure")
+      .setup([](ManagedScene &, Node<Custom>) -> std::expected<void, ManagedError> {
+        return std::unexpected(ManagedError{ManagedPhase::BIND, {}, TreeError::WOULD_BLOCK});
+      });
+  }));
+
+  auto failed = ui::scene("scene { VBox { Fail{} Label{} } }", options);
+  const auto result = failed.prepareChecked();
+
+  REQUIRE_FALSE(result);
+  CHECK(cause(result.error(), TreeError::WOULD_BLOCK));
+  CHECK(unpublished.node() == Node<Custom>{});
+  CHECK(Custom::alive == 0);
+}
+
+TEST_CASE("configured ThreeState retains fixed cycle and base derived id selectors") {
+  ui::SceneResourceOptions options;
+
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+
+  auto owner =
+    ui::scene("definitions { Flag=ThreeState{} } scene { Flag#choice { text=\"flag\", state=MIXED } }", options) |
+    ui::style("CheckBox { bold:true; foreground:#000001; } Flag { italic:true; foreground:#000002; } "
+              "ThreeState { underline:true; } #choice { foreground:#000003; }");
+  auto choice = owner.get<ThreeState>("choice");
+  auto base = owner.get<CheckBox>("choice");
+  Application *application{};
+  ManagedScene *managed{};
+
+  owner.configure([&](ManagedScene &scene, Application &app) {
+    managed = &scene;
+    application = &app;
+  });
+
+  REQUIRE(owner.prepareChecked());
+  REQUIRE(application);
+  REQUIRE(managed);
+  CHECK(Node<CheckBox>{choice.node()} == base.node());
+  REQUIRE(managed->prepare(*application, {40, 8}));
+  REQUIRE(application->tree().read(choice.node(), [](const ThreeState &widget) {
+    CHECK(widget.checkState() == CheckState::MIXED);
+    REQUIRE(widget.computedStyle());
+
+    const auto &style = widget.computedStyle()->normal;
+
+    CHECK(style.bold);
+    CHECK(style.italic);
+    CHECK(style.underline);
+    CHECK(style.foreground == RgbColor{0, 0, 3});
+  }));
+
+  for (const auto expected : {CheckState::UNCHECKED, CheckState::CHECKED, CheckState::MIXED}) {
+    REQUIRE(application->router().invoke(base.node(), {Action::ACTIVATE}));
+    REQUIRE(application->tree().read(choice.node(), [&](const ThreeState &widget) {
+      CHECK(widget.checkState() == expected);
+    }));
+  }
+
+  REQUIRE(owner.close());
+}
+
+TEST_CASE("configured aliases preserve custom factory classes and id style metadata") {
+  ui::SceneResourceOptions options;
+
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  REQUIRE(options.registry.add<Button>("CustomButton", [](ui::SceneResourceArguments arguments) {
+    return ui::button(arguments.text).style(StyleTarget{.type = "Button", .classes = {"accent"}, .control = true});
+  }));
+
+  auto owner = ui::scene("definitions { Alias=CustomButton{} } scene { Alias#named{} }", options) |
+               ui::style("Button.accent { bold:true; } Alias { italic:true; } #named { underline:true; }");
+  auto button = owner.get<Button>("named");
+  Application *application{};
+  ManagedScene *managed{};
+
+  owner.configure([&](ManagedScene &scene, Application &app) {
+    managed = &scene;
+    application = &app;
+  });
+
+  REQUIRE(owner.prepareChecked());
+  REQUIRE(managed->prepare(*application, {40, 8}));
+  REQUIRE(application->tree().read(button.node(), [](const Button &widget) {
+    REQUIRE(widget.computedStyle());
+    CHECK(widget.computedStyle()->normal.bold);
+    CHECK(widget.computedStyle()->normal.italic);
+    CHECK(widget.computedStyle()->normal.underline);
+  }));
+  REQUIRE(owner.close());
+}
+
+TEST_CASE("configured resource text resolves before factories and rejects multiline placeholders") {
+  ui::SceneResourceOptions options;
+  int resolved{}, factories{};
+
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  options.resolver = [&](std::string_view key) -> std::expected<std::string, TextResourceError> {
+    ++resolved;
+
+    return std::string(key);
+  };
+  REQUIRE(options.registry.add<Custom>("Probe", [&](ui::SceneResourceArguments) {
+    ++factories;
+    CHECK(resolved == 2);
+
+    return ui::custom<Custom>("probe");
+  }));
+
+  auto owner = ui::scene(
+    "defaults { LineEdit { text=i18n(\"value\"), placeholder=i18n(\"hint\") } } scene { VBox{ Probe{} LineEdit{} } }",
+    options);
+
+  REQUIRE(owner.prepareChecked());
+  CHECK(resolved == 2);
+  CHECK(factories == 1);
+  REQUIRE(owner.close());
+
+  const auto failure = rejected("scene { VBox{ Probe{} LineEdit{ placeholder=\"line\\nseparator\" } } }", options);
+
+  CHECK(failure.sceneResource->code == Code::TEXT);
+  REQUIRE(failure.sceneResource->propertyPath);
+  CHECK(*failure.sceneResource->propertyPath == "LineEdit.placeholder");
+  CHECK(factories == 1);
+}
+
+TEST_CASE("resource contexts inherit immutable app definitions and keep local defaults in their subtree") {
+  ui::ControlSettings definition;
+
+  definition.history.maxOperations = 1;
+
+  ui::SceneOptions sceneOptions;
+
+  sceneOptions.controls.define("AppEdit", "LineEdit").defaults("AppEdit", definition);
+
+  ui::SceneResourceOptions options;
+
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+
+  auto owner = ui::scene(
+    ui::column(ui::resource("defaults { AppEdit { history { maxOperations=2 } } } scene { AppEdit#local{} }", options),
+               ui::resource("scene { AppEdit#inherited{} }", options)),
+    sceneOptions);
+  auto local = owner.get<LineEdit>("local");
+  auto inherited = owner.get<LineEdit>("inherited");
+
+  REQUIRE(owner.prepareChecked());
+
+  for (const auto value : {"a", "b"}) {
+    REQUIRE((local.text() = value).result());
+    REQUIRE((inherited.text() = value).result());
+  }
+
+  REQUIRE(local.undo().result());
+  REQUIRE(local.undo().result());
+  CHECK(*local.text().get() == "");
+  REQUIRE(inherited.undo().result());
+  REQUIRE(inherited.undo().result());
+  CHECK(*inherited.text().get() == "a");
+  REQUIRE(owner.close());
+
+  options.controls.emplace();
+  const auto failure = [&] {
+    auto isolated = ui::scene("scene { AppEdit{} }", options, sceneOptions);
+    const auto prepared = isolated.prepareChecked();
+
+    REQUIRE_FALSE(prepared);
+
+    return prepared.error();
+  }();
+
+  REQUIRE(failure.sceneResource);
+  CHECK(failure.sceneResource->code == Code::UNKNOWN_TYPE);
+}
+
+TEST_CASE("custom resource schemas must exactly match the explicit factory allowlist") {
+  ui::SceneResourceOptions options;
+
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  options.controls.emplace();
+
+  const std::string_view partial[]{"text"};
+
+  options.controls->registerType("Probe", partial);
+  REQUIRE(options.registry.add<Custom>("Probe", [](ui::SceneResourceArguments arguments) {
+    return ui::custom<Custom>(arguments.text);
+  }));
+
+  CHECK(rejected("scene { Probe{} }", options).sceneResource->code == Code::DUPLICATE_TYPE);
+
+  const std::string_view exact[]{"text", "width", "height", "flex"};
+
+  options.controls.emplace();
+  options.controls->registerType("Probe", exact);
+
+  auto owner = ui::scene("scene { Probe{} }", options);
+
+  REQUIRE(owner.prepareChecked());
+  REQUIRE(owner.close());
+  CHECK(Custom::alive == 0);
+}
+
 TEST_CASE("resource properties use existing controls layout and PSS through named refs") {
   auto owner = ui::scene(R"(VBox#root{ gap = 1; width: 32
     Label#caption{ text = "Hello" }
@@ -652,12 +1094,16 @@ TEST_CASE("resource composes with a late managed model and the enclosing C++ tra
 
 TEST_CASE("resource preparation allocation failures remain checked and retire partial ownership") {
   constexpr std::ptrdiff_t MAX_BUDGET = 2048;
-  for (const bool localized : {false, true}) {
+  for (const int mode : {0, 1, 2}) {
+    const bool localized = mode == 1;
+    const bool configured = mode == 2;
     std::size_t failed{}, succeeded{};
 
     for (std::ptrdiff_t budget = 0; budget <= MAX_BUDGET; ++budget) {
       ui::Ref<Custom> reference;
       ui::SceneResourceOptions options;
+
+      options.format = configured ? ui::SceneResourceFormat::CONFIGURATION : ui::SceneResourceFormat::LEGACY;
 
       options.resolver = [](std::string_view) -> std::expected<std::string, TextResourceError> {
         return "translated";
@@ -668,7 +1114,11 @@ TEST_CASE("resource preparation allocation failures remain checked and retire pa
       }));
 
       const auto source =
-        localized
+        configured
+          ? "definitions{Short=LineEdit{history{maxOperations=2}}} "
+            "defaults{LineEdit{history{groupTyping=false}}} "
+            "scene{VBox{Custom{text=\"owned\"} Short#field{text=i18n(\"initial\")} ThreeState{text=\"check\"}}}"
+        : localized
           ? "VBox{Custom{i18n(\"own\")} LineEdit#field{i18n(\"initial\")} HBox{Label#caption{i18n(\"caption\")} "
             "Button#button{i18n(\"button\")} CheckBox#check{i18n(\"check\") checked=true}}}"
           : "VBox{Custom{\"owning temporary\"} LineEdit#field{\"initial\"} HBox{Label#caption{\"label\"} "
@@ -719,9 +1169,39 @@ TEST_CASE("resource preparation allocation failures remain checked and retire pa
 
     CHECK(failed > 0);
     CHECK(succeeded == 1);
-    std::fprintf(stderr, "resource OOM sweep localized=%d failures=%zu first-success-budget=%td\n", localized, failed,
+    std::fprintf(stderr, "resource OOM sweep mode=%d failures=%zu first-success-budget=%td\n", mode, failed,
                  activeBudget);
   }
+}
+
+TEST_CASE("resource text errors survive allocation rejection during optional provenance enrichment") {
+  bool resolved{};
+  ui::SceneResourceOptions options;
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  options.resolver = [&](std::string_view) -> std::expected<std::string, TextResourceError> {
+    resolved = true;
+    allocationsBeforeFailure = 0;
+
+    return std::unexpected(TextResourceError::MISSING_RESOURCE);
+  };
+
+  auto owner = ui::scene("scene { LineEdit { text=i18n(\"missing\") } }", options);
+  std::expected<void, ManagedError> result;
+  bool escaped{};
+
+  try {
+    result = owner.prepareChecked();
+  } catch (...) {
+    escaped = true;
+  }
+
+  allocationsBeforeFailure = -1;
+  REQUIRE_FALSE(escaped);
+  REQUIRE(resolved);
+  REQUIRE_FALSE(result);
+  REQUIRE(result.error().resource);
+  CHECK(*result.error().resource == TextResourceError::MISSING_RESOURCE);
+  REQUIRE(owner.close());
 }
 
 TEST_CASE("custom recipe preserves nonstring move-only arguments with and without owning text") {

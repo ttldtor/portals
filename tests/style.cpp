@@ -862,6 +862,117 @@ void ansiOutput() {
   check(output.terminal.snapshot() == fullOracle.snapshot(),
         "partial output reaches the same independently observed screen");
 }
+
+void typeLineageMatchingAndValidation() {
+  const StyleTarget legacy{"CheckBox", "flag", {"accent"}, true};
+
+  check(legacy.baseTypes.empty(), "legacy aggregate prefix leaves the additive lineage empty");
+
+  StyleTarget target{
+    .type = "ThreeState", .id = "flag", .classes = {"accent"}, .control = true, .baseTypes = {"CheckBox"}};
+  const auto sheet = take(parsePss("Control { background: #010203; }"
+                                   "ThreeState { foreground: #010000; italic: true; }"
+                                   "CheckBox { foreground: #020000; bold: true; }"
+                                   "#flag { underline: true; }"));
+  const auto resolved = resolveStyle(sheet, target);
+
+  check(resolved.normal.background == RgbColor{1, 2, 3} && resolved.normal.foreground == RgbColor{2, 0, 0} &&
+          resolved.normal.bold && resolved.normal.italic && resolved.normal.underline,
+        "base, derived, generic Control and id selectors combine with ordinary source order");
+  const auto reversed = take(parsePss("CheckBox { foreground: #020000; } ThreeState { foreground: #010000; }"));
+
+  check(resolveStyle(reversed, target).normal.foreground == RgbColor{1, 0, 0},
+        "derived and base type selectors have equal specificity in either source order");
+  target.type = "CustomFlag";
+  target.baseTypes = {"ThreeState", "CheckBox"};
+  check(resolveStyle(sheet, target) == resolved, "an owning named variant keeps its complete natural ancestry");
+
+  StyleTarget deepest{.type = "Derived"};
+
+  for (std::size_t index = 0; index < MAX_STYLE_BASE_TYPES; ++index) {
+    deepest.baseTypes.push_back("Base" + std::to_string(index));
+  }
+
+  check(validateStyleTarget(deepest).has_value(), "the exact maximum ancestor depth is valid");
+  check(resolveStyle(take(parsePss("Base31 { bold: true; }")), deepest).normal.bold,
+        "the last permitted ancestor participates in ordinary type matching");
+  deepest.baseTypes.push_back("OneTooMany");
+
+  const ComputedStyle defaults{.minWidth = 7};
+
+  check(!validateStyleTarget(deepest) && resolveStyle(sheet, deepest, defaults) == defaults,
+        "excess depth has a typed validator failure and leaves metadata preview defaults intact");
+
+  for (const auto &invalid :
+       std::array{StyleTarget{.type = "Derived", .baseTypes = {""}}, StyleTarget{.type = "Derived", .baseTypes = {"*"}},
+                  StyleTarget{.type = "Derived", .baseTypes = {"Derived"}},
+                  StyleTarget{.type = "Derived", .baseTypes = {"Base", "Base"}}, StyleTarget{.baseTypes = {"Base"}},
+                  StyleTarget{.type = "*", .baseTypes = {"Base"}}}) {
+    auto checked = validateStyleTarget(invalid);
+
+    check(!checked && checked.error().cause == TreeError::INVALID_ARGUMENT,
+          "empty, wildcard, duplicate, self and nonconcrete lineage metadata are rejected");
+  }
+}
+
+void typeLineageAdmissionAndOwnership() {
+  Fixture fixture;
+  const auto node = take(fixture.tree->emplace<Label>(fixture.root, take(GraphemeText::from("lineage"))));
+  auto target = StyleTarget{.type = "ThreeState", .baseTypes = {"CheckBox"}};
+
+  take(fixture.styles.replace(take(parsePss("CheckBox { bold: true; } Label { italic: true; }"))));
+  take(fixture.styles.bind(node, target));
+  target.type = "Changed";
+  target.baseTypes.front() = "ChangedBase";
+  take(fixture.styles.replace(take(parsePss("CheckBox { bold: true; }"))));
+  check(readStyle(fixture, node).normal.bold, "style bindings retain owning ancestor strings independently of input");
+  take(fixture.tree->consumeFrameRequest());
+
+  const auto before = readStyle(fixture, node);
+  const auto revision = fixture.styles.revision();
+  const std::array batch{StyleRegistration{node, {.type = "Label"}},
+                         StyleRegistration{fixture.root, {.type = "Bad", .baseTypes = {"Base", "Base"}}}};
+  auto rejected = fixture.styles.bindBatch(batch);
+
+  check(!rejected && rejected.error().cause == TreeError::INVALID_ARGUMENT,
+        "one invalid ancestor chain rejects the entire style registration batch");
+  check(readStyle(fixture, node) == before && fixture.styles.revision() == revision &&
+          take(fixture.tree->consumeFrameRequest()) == Invalidation::NONE,
+        "invalid lineage preserves computed styles, bindings, revision and frame requests");
+
+  allocation_test::remaining = 0;
+  rejected = fixture.styles.bindBatch(batch);
+  allocation_test::remaining = -1;
+
+  check(!rejected && rejected.error().cause == TreeError::INVALID_ARGUMENT,
+        "allocation pressure does not mask a later invalid ancestor argument");
+
+  const std::array replacement{StyleRegistration{
+    node,
+    {.type = "NamedLongVariantWhoseTypeIsOwned", .baseTypes = {"CheckBox", "LongOwnedAncestorWhoseCopyAllocates"}}}};
+  bool committed{};
+  int failuresSeen{};
+
+  for (std::ptrdiff_t budget = 0; budget < 160 && !committed; ++budget) {
+    allocation_test::remaining = budget;
+    auto result = fixture.styles.bindBatch(replacement);
+    allocation_test::remaining = -1;
+
+    if (result) {
+      committed = true;
+
+      continue;
+    }
+
+    ++failuresSeen;
+    check(result.error().cause == TreeError::NO_MEMORY && fixture.styles.revision() == revision &&
+            readStyle(fixture, node) == before && take(fixture.tree->consumeFrameRequest()) == Invalidation::NONE,
+          "ancestor-copy allocation rejection preserves the original transaction state");
+  }
+
+  check(committed && failuresSeen > 0 && readStyle(fixture, node).normal.bold,
+        "owning lineage admits after all staged allocation points succeed");
+}
 } // namespace
 
 int main(int argc, char **argv) {
@@ -875,6 +986,8 @@ int main(int argc, char **argv) {
   batchTransactions();
   batchIdentityAndOrder();
   batchBudgetAndAllocation();
+  typeLineageMatchingAndValidation();
+  typeLineageAdmissionAndOwnership();
   paintUsesSnapshot();
   viewsAndEditor();
   adaptedPaletteVariants();

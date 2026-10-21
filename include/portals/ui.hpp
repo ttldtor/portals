@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include <portals/detail/control_context.hpp>
 #include <portals/detail/line_edit_text.hpp>
 #include <portals/detail/move_only_function.hpp>
 #include <portals/grid.hpp>
@@ -14,6 +15,7 @@
 #include <portals/ui_scene.hpp>
 
 #include <algorithm>
+#include <bit>
 #include <cstdio>
 #include <ranges>
 #include <tuple>
@@ -156,7 +158,11 @@ struct SizeChange {
 
 /** @brief Stack-owned transaction bookkeeping, discarded after one description mount. */
 struct MountContext {
-  Node<Widget> root; ///< First created node; identifies the subtree to retire on failure.
+  ControlContext controls{};   ///< Immutable owning defaults for this mount transaction.
+  std::size_t controlLeaves{}; ///< Effective settings counted across the complete transaction.
+  bool controlPrepared{};      ///< Only the current constructor received already resolved resource settings.
+  const ControlSettings *controlSettings{}; ///< Constructor-only borrowed settings; restored before setup/children.
+  Node<Widget> root;                        ///< First created node; identifies the subtree to retire on failure.
   std::vector<Node<Widget>> nodes =
     std::vector<Node<Widget>>(0); ///< Created observers checked for liveness before publication.
   std::vector<portals::detail::MoveOnlyFunction<void()>> publish =
@@ -288,6 +294,174 @@ struct Access {
    * @return Single-use description with the existing transaction semantics.
    */
   template <class T, class Factory> static Description<T> describe(Factory factory);
+
+  /** @tparam T Concrete widget created by the recipe.
+   * @param description Owning recipe receiving intrinsic style names.
+   * @param identity Owning natural type and required ancestors, finalized after setup modifiers.
+   * @return Consuming recipe retaining the existing mount/ref transaction.
+   */
+  template <class T> static Description<T> intrinsicStyle(Description<T> description, StyleTarget identity);
+  /** @brief Mark resource-resolved settings without budgeting the same fields twice.
+   * @tparam T Concrete widget subtype retained by the recipe.
+   * @param description Owning recipe updated before mounting.
+   * @param alreadyMaterialized Presence mask already included in the resource mount budget.
+   */
+  template <class T> static void preparedControl(Description<T> &description, std::uint32_t alreadyMaterialized = 0);
+  /** @brief Attach a builtin configuration identity to an owning recipe.
+   * @tparam T Concrete widget subtype retained by the recipe.
+   * @param description Single-use recipe receiving configuration metadata.
+   * @param type Canonical builtin name copied into the recipe.
+   * @param inherit Whether omitted constructor properties inherit context defaults.
+   * @return Recipe retaining its existing construction and cleanup behavior.
+   */
+  template <class T>
+  static Description<T> configuredControl(Description<T> description, std::string_view type, bool inherit = true);
+  /** @brief Retain explicit constructor properties above inherited defaults.
+   * @tparam T Concrete widget subtype retained by the recipe.
+   * @param description Single-use recipe receiving constructor metadata.
+   * @param arguments Owning sparse properties supplied by the factory call.
+   * @return Recipe whose later instance settings retain highest priority.
+   */
+  template <class T> static Description<T> controlArguments(Description<T> description, ControlSettings arguments);
+  /** @brief Attach binding setup after node creation within the mount transaction.
+   * @tparam T Concrete widget subtype retained by the recipe.
+   * @tparam Callback Synchronous checked setup callable for scene, node and settings.
+   * @param description Single-use recipe retaining normal failure cleanup.
+   * @param callback Owning setup callable retained until mount.
+   * @return Recipe publishing references only after setup and finalization succeed.
+   */
+  template <class T, class Callback> static Description<T> controlSetup(Description<T> description, Callback callback);
+
+  /** @brief Identify builtin recipe types without allocating runtime metadata.
+   * @tparam T Concrete widget subtype to classify.
+   * @return Canonical builtin configuration name, or an empty view for custom types.
+   */
+  template <class T> static constexpr std::string_view controlType() {
+    if constexpr (std::same_as<T, Label>) {
+      return "Label";
+    } else if constexpr (std::same_as<T, Button>) {
+      return "Button";
+    } else if constexpr (std::same_as<T, CheckBox>) {
+      return "CheckBox";
+    } else if constexpr (std::same_as<T, ThreeState>) {
+      return "ThreeState";
+    } else if constexpr (std::same_as<T, LineEdit>) {
+      return "LineEdit";
+    } else if constexpr (std::same_as<T, Row>) {
+      return "HBox";
+    } else if constexpr (std::same_as<T, Column>) {
+      return "VBox";
+    } else
+      return {};
+  }
+
+  /** @param base Owning lower-priority constructor arguments.
+   * @param patch Final explicit sparse instance properties.
+   * @return Owning structural merge, retaining explicit false/zero and winning property provenance.
+   */
+  static ControlSettings mergeControlSettings(ControlSettings base, const ControlSettings &patch) {
+    const auto apply = [](auto &target, const auto &source) {
+      if (source) {
+        target = source;
+      }
+    };
+    apply(base.text, patch.text);
+    apply(base.width, patch.width);
+    apply(base.height, patch.height);
+    apply(base.flex, patch.flex);
+    apply(base.gap, patch.gap);
+    apply(base.state, patch.state);
+    apply(base.cycle, patch.cycle);
+    apply(base.editMode, patch.editMode);
+    apply(base.readOnly, patch.readOnly);
+    apply(base.programmaticChange, patch.programmaticChange);
+    apply(base.displayMode, patch.displayMode);
+    apply(base.placeholder, patch.placeholder);
+    apply(base.history.enabled, patch.history.enabled);
+    apply(base.history.maxOperations, patch.history.maxOperations);
+    apply(base.history.maxBytes, patch.history.maxBytes);
+    apply(base.history.groupTyping, patch.history.groupTyping);
+    apply(base.history.groupDeletion, patch.history.groupDeletion);
+    base.origin = patch.origin;
+    base.origins = patch.origins;
+    return base;
+  }
+
+  /** @param scene Existing UI owner; checked before reading mutable metadata.
+   * @param node Live managed node whose latest target is retained during preparation.
+   * @param identity Owned natural type/ancestors retained by the mounting recipe.
+   * @return Checked style admission; metadata copies and new ancestors are prepared before publication.
+   */
+  static std::expected<void, ManagedError> finalizeStyleIdentity(ManagedScene &scene, Node<Widget> node,
+                                                                 const StyleTarget &identity) {
+    auto allowed = scene.boundary(ManagedPhase::STYLE, node);
+
+    if (!allowed) {
+      return allowed;
+    }
+
+    auto entry = scene.find(node);
+
+    if (!entry) {
+      return std::unexpected(ManagedError{ManagedPhase::STYLE, node.id(), TreeError::INVALID_ARGUMENT, {}, {}});
+    }
+
+    try {
+      // Retain the exact metadata owner across allocation and possible nested mutation.
+      const auto current = entry->target;
+
+      if (current && current->baseTypes.size() > MAX_STYLE_BASE_TYPES) {
+        return std::unexpected(
+          ManagedError{ManagedPhase::STYLE, node.id(), validateStyleTarget(*current).error(), {}, {}});
+      }
+
+      if (current && !current->type.empty() && (!identity.control || current->control)) {
+        const auto containsName = [&](const std::string &name) {
+          return name == current->type || std::ranges::find(current->baseTypes, name) != current->baseTypes.end();
+        };
+
+        if (containsName(identity.type) && std::ranges::all_of(identity.baseTypes, containsName)) {
+          auto valid = validateStyleTarget(*current);
+
+          if (!valid) {
+            return std::unexpected(ManagedError{ManagedPhase::STYLE, node.id(), valid.error(), {}, {}});
+          }
+
+          return {};
+        }
+      }
+
+      auto target = current ? *current : StyleTarget{};
+
+      if (target.type.empty()) {
+        target.type = identity.type;
+      }
+
+      const auto retainName = [&](const std::string &name) {
+        if (name != target.type && std::ranges::find(target.baseTypes, name) == target.baseTypes.end()) {
+          target.baseTypes.push_back(name);
+        }
+      };
+
+      retainName(identity.type);
+
+      for (const auto &name : identity.baseTypes) {
+        retainName(name);
+      }
+
+      target.control = target.control || identity.control;
+
+      auto valid = validateStyleTarget(target);
+
+      if (!valid) {
+        return std::unexpected(ManagedError{ManagedPhase::STYLE, node.id(), valid.error(), {}, {}});
+      }
+
+      return scene.style(node, std::move(target));
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(ManagedError{ManagedPhase::STYLE, node.id(), TreeError::NO_MEMORY, {}, {}});
+    }
+  }
 
   /// @cond INTERNAL
   template <class T, class Factory> static Description<T> cold(Factory factory);
@@ -928,11 +1102,12 @@ public:
     requires(std::derived_from<T, Control> || std::same_as<T, LineEdit>)
   {
     auto target = this->slot_ ? std::shared_ptr<detail::RefTarget>(this->slot_, &this->slot_->target) : nullptr;
-    constexpr std::string_view TYPE = std::same_as<T, LineEdit>   ? "LineEdit"
-                                      : std::same_as<T, Label>    ? "Label"
-                                      : std::same_as<T, Button>   ? "Button"
-                                      : std::same_as<T, CheckBox> ? "CheckBox"
-                                                                  : "Control";
+    constexpr std::string_view TYPE = std::same_as<T, LineEdit>     ? "LineEdit"
+                                      : std::same_as<T, Label>      ? "Label"
+                                      : std::same_as<T, Button>     ? "Button"
+                                      : std::same_as<T, CheckBox>   ? "CheckBox"
+                                      : std::same_as<T, ThreeState> ? "ThreeState"
+                                                                    : "Control";
 
     return TextProperty(std::move(target), std::move(resolver), TYPE, origin);
   }
@@ -1582,6 +1757,29 @@ public:
 
   Description &operator=(const Description &) = delete;
 
+  /** @param patch Owning sparse instance overrides; false, zero and builtin-equal values remain explicit.
+   * @return This consuming recipe. A later settings call replaces the previous instance patch.
+   * Supported standard factories validate the patch before their constructor or resolver runs.
+   */
+  Description &&settings(ControlSettings patch) && {
+    if (state_) {
+      state_->controlPatch = std::move(patch);
+      state_->settingsRequested = true;
+    }
+    return std::move(*this);
+  }
+
+  /** @param type Owning name resolved from the explicitly supplied immutable mount context.
+   * @return This consuming typed recipe; a different concrete base rejects mount before construction.
+   * Runtime names preserve the existing C++ type and do not synthesize a new widget class.
+   */
+  Description &&variant(std::string_view type) && {
+    if (state_) {
+      state_->controlVariant.emplace(type);
+    }
+    return std::move(*this);
+  }
+
   /** @param reference Empty observing slot; duplicate slots in one mount are rejected.
    * @return This consuming recipe for chaining. The slot remains empty on mount failure.
    */
@@ -1852,7 +2050,20 @@ private:
     std::optional<std::string> id;             ///< Compact recipe identity preserved by later style modifiers.
     std::shared_ptr<detail::RefTarget> anchor; ///< Cold same-attempt body anchor, without widget ownership.
     DialogPlacement placement{DialogPlacement::BELOW_START}; ///< Configured anchor preference.
-    bool anchorRequested{}; ///< Distinguish an absent modifier from an empty moved observing slot.
+    bool anchorRequested{};                    ///< Distinguish an absent modifier from an empty moved observing slot.
+    std::optional<StyleTarget> intrinsicStyle; ///< Owning natural type names, finalized after ordinary setup.
+    bool controlPrepared{};                 ///< Resource settings were validated and materialized before construction.
+    std::uint32_t materializedSettings{};   ///< Resource properties already reserved in the aggregate leaf budget.
+    std::optional<std::string> controlType; ///< Supported concrete factory; absent on arbitrary custom widgets.
+    std::optional<std::string> controlVariant; ///< Requested runtime name, checked against the concrete type.
+    ControlSettings controlPatch;              ///< Owning final sparse instance overrides.
+    ControlSettings controlArguments;          ///< Explicit positional literals, below the final sparse patch.
+    bool settingsRequested{};          ///< Reject unsupported custom recipes rather than silently ignoring a patch.
+    bool inheritControlSettings{true}; ///< Explicit legacy full configuration bypasses context defaults.
+    std::unique_ptr<ResolvedControl> resolvedControl; ///< Mount-only owning settings, absent on the builtin fast path.
+    portals::detail::MoveOnlyFunction<std::expected<void, ManagedError>(ManagedScene &, Node<T>,
+                                                                        const ControlSettings &)>
+      controlSetup; ///< Standard binding, after root tracking and before ordinary user setup.
   };
 
   /** @brief Allocate recipe storage and take ownership of its constructor adapter.
@@ -1894,6 +2105,74 @@ private:
     return std::move(*this);
   }
 
+  /** @brief Finish fallible owning configuration before entering recursive construction/children.
+   * @param state Consumed recipe storage, retaining any resolved properties until setup completes.
+   * @param parent Existing checked parent used for failure attribution.
+   * @param context Whole-mount immutable snapshot and aggregate leaf accounting.
+   * @return Typed validation/budget result; allocation exceptions stay inside the outer mount boundary.
+   */
+  static std::expected<void, ManagedError> prepareControl(State &state, Node<Widget> parent,
+                                                          detail::MountContext &context) {
+    if ((state.settingsRequested || state.controlVariant) && !state.controlType) {
+      return std::unexpected(detail::controlContextError({ControlContextErrorCode::UNSUPPORTED_PROPERTY, {}}, parent));
+    }
+    const bool builtinOnly = context.controls.empty() && !state.settingsRequested && !state.controlVariant;
+    if (state.controlType && (!state.controlPrepared || state.settingsRequested || state.controlVariant) &&
+        !builtinOnly) {
+      const auto controls = !state.inheritControlSettings || (state.controlPrepared && !state.controlVariant)
+                              ? ControlContext(context.controls.limits())
+                              : context.controls;
+      const auto type = state.inheritControlSettings && state.controlVariant ? std::string_view(*state.controlVariant)
+                                                                             : std::string_view(*state.controlType);
+      auto effective = state.inheritControlSettings
+                         ? controls.resolve(type, detail::Access::mergeControlSettings(
+                                                    std::move(state.controlArguments), state.controlPatch))
+                         : controls.resolve(type, state.controlPatch);
+      if (!effective) {
+        return std::unexpected(detail::controlContextError(effective.error(), parent));
+      }
+      if (!state.inheritControlSettings && state.controlVariant) {
+        const auto identity = context.controls.resolve(*state.controlVariant);
+
+        if (!identity) {
+          return std::unexpected(detail::controlContextError(identity.error(), parent));
+        }
+
+        effective->type = identity->type;
+        effective->base = identity->base;
+        effective->lineage = identity->lineage;
+      }
+      if (effective->base != *state.controlType) {
+        return std::unexpected(detail::controlContextError({ControlContextErrorCode::INVALID_VALUE, {}}, parent));
+      }
+      const auto addedLeaves =
+        state.controlPrepared ? static_cast<std::size_t>(std::popcount(
+                                  detail::controlSettingsPresence(effective->settings) & ~state.materializedSettings))
+                              : effective->materializedLeaves;
+      const auto limit = context.controls.limits().maxMaterializedLeaves;
+      if (context.controlLeaves > limit || addedLeaves > limit - context.controlLeaves) {
+        return std::unexpected(
+          detail::controlContextError({ControlContextErrorCode::MATERIALIZED_LEAF_LIMIT, {}}, parent));
+      }
+      context.controlLeaves += addedLeaves;
+      if (state.controlVariant) {
+        state.intrinsicStyle = StyleTarget{.type = effective->type,
+                                           .control = std::derived_from<T, Control> || std::same_as<T, LineEdit>,
+                                           .baseTypes = effective->lineage};
+        if constexpr (std::same_as<T, Row> || std::same_as<T, Column>) {
+          constexpr std::string_view NATURAL = std::same_as<T, Row> ? "Row" : "Column";
+          if (state.intrinsicStyle->type != NATURAL &&
+              std::ranges::find(state.intrinsicStyle->baseTypes, NATURAL) == state.intrinsicStyle->baseTypes.end()) {
+            state.intrinsicStyle->baseTypes.emplace_back(NATURAL);
+          }
+        }
+      }
+      state.resolvedControl = std::make_unique<ResolvedControl>(std::move(*effective));
+    }
+
+    return {};
+  }
+
   /** @brief Consume this recipe into one existing managed transaction.
    * @param scene Borrowed UI owner receiving
    * the new subtree.
@@ -1911,7 +2190,28 @@ private:
       return std::unexpected(detail::error(parent, TreeError::INVALID_ARGUMENT));
     }
 
-    auto node = state->create(scene, parent, context);
+    auto prepared = prepareControl(*state, parent, context);
+    if (!prepared) {
+      return std::unexpected(prepared.error());
+    }
+    const auto *resolved = state->resolvedControl.get();
+
+    auto node = [&] {
+      struct Restore {
+        detail::MountContext &context;
+        bool previous;
+        const ControlSettings *settings;
+        ~Restore() {
+          context.controlPrepared = previous;
+          context.controlSettings = settings;
+        }
+      } restore{context, context.controlPrepared, context.controlSettings};
+
+      context.controlPrepared = state->controlPrepared;
+      context.controlSettings = resolved ? &resolved->settings : &state->controlArguments;
+
+      return state->create(scene, parent, context);
+    }();
 
     if (!node) {
       return node;
@@ -1922,6 +2222,40 @@ private:
     }
 
     context.nodes.push_back(*node);
+
+    if (state->intrinsicStyle) {
+      auto styled = scene.style(*node, *state->intrinsicStyle);
+      if (!styled) {
+        return std::unexpected(styled.error());
+      }
+    }
+
+    if (state->controlSetup) {
+      auto configured = state->controlSetup(scene, *node, resolved ? resolved->settings : state->controlArguments);
+      if (!configured) {
+        return std::unexpected(configured.error());
+      }
+    }
+
+    if constexpr (std::derived_from<T, SizedWidget>) {
+      if (resolved) {
+        const auto &settings = resolved->settings;
+        for (const auto &change :
+             {settings.width ? std::optional(detail::SizeChange{detail::SizeDimension::WIDTH, *settings.width})
+                             : std::nullopt,
+              settings.height ? std::optional(detail::SizeChange{detail::SizeDimension::HEIGHT, *settings.height})
+                              : std::nullopt,
+              settings.flex ? std::optional(detail::SizeChange{detail::SizeDimension::FLEX, 0, *settings.flex})
+                            : std::nullopt}) {
+          if (change) {
+            auto resized = detail::Access::resize(scene, *node, *change);
+            if (!resized) {
+              return std::unexpected(resized.error());
+            }
+          }
+        }
+      }
+    }
 
     for (auto &reference : state->references) {
       auto slot = reference.slot_;
@@ -1992,6 +2326,14 @@ private:
       }
     }
 
+    if (state->intrinsicStyle) {
+      auto styled = detail::Access::finalizeStyleIdentity(scene, *node, *state->intrinsicStyle);
+
+      if (!styled) {
+        return std::unexpected(styled.error());
+      }
+    }
+
     for (auto &child : state->children) {
       auto mounted = child(scene, *node, context);
 
@@ -2035,8 +2377,46 @@ private:
 };
 
 namespace detail {
+template <class T> void Access::preparedControl(Description<T> &description, std::uint32_t alreadyMaterialized) {
+  if (description.state_) {
+    description.state_->controlPrepared = true;
+    description.state_->materializedSettings = alreadyMaterialized;
+  }
+}
+
+template <class T>
+Description<T> Access::configuredControl(Description<T> description, std::string_view type, bool inherit) {
+  if (description.state_ && !type.empty()) {
+    description.state_->controlType.emplace(type);
+    description.state_->inheritControlSettings = inherit;
+  }
+  return description;
+}
+
+template <class T> Description<T> Access::controlArguments(Description<T> description, ControlSettings arguments) {
+  if (description.state_) {
+    description.state_->controlArguments = std::move(arguments);
+  }
+  return description;
+}
+
+template <class T, class Callback> Description<T> Access::controlSetup(Description<T> description, Callback callback) {
+  if (description.state_) {
+    description.state_->controlSetup = std::move(callback);
+  }
+  return description;
+}
+
 template <class T, class Factory> Description<T> Access::describe(Factory factory) {
   return Description<T>(std::move(factory));
+}
+
+template <class T> Description<T> Access::intrinsicStyle(Description<T> description, StyleTarget identity) {
+  if (description.state_) {
+    description.state_->intrinsicStyle.emplace(std::move(identity));
+  }
+
+  return description;
 }
 
 /// @cond INTERNAL
@@ -2236,17 +2616,26 @@ Description<DataStateView> dataStateView(Description<View> content, DataStateCon
  * @return Single-use owning recipe; allocation while copying may throw.
  */
 template <class T> Description<T> control(std::string_view text, ControlStyle style, SizePolicy policy) {
-  return Description<T>([text = detail::captureText(text), style, policy](ManagedScene &scene, Node<Widget> parent) {
-    auto value = GraphemeText::from(detail::captionView(text), scene.widthPolicy());
+  auto description =
+    detail::Access::cold<T>([style, policy](ManagedScene &scene, Node<Widget> parent, detail::MountContext &context) {
+      auto value = context.controlSettings->text->resolve(scene.widthPolicy());
 
-    if (!value) {
-      auto failure = detail::textError(parent, value.error());
+      if (!value) {
+        auto failure = detail::error(parent, TreeError::INVALID_ARGUMENT);
+        if (const auto *textError = std::get_if<TextError>(&value.error())) {
+          failure = detail::textError(parent, *textError);
+        } else {
+          failure.resource = std::get<TextResourceError>(value.error());
+        }
 
-      return std::expected<Node<T>, ManagedError>(std::unexpected(failure));
-    }
+        return std::expected<Node<T>, ManagedError>(std::unexpected(failure));
+      }
 
-    return scene.emplace<T>(parent, std::move(*value), style, policy);
-  });
+      return scene.emplace<T>(parent, std::move(*value), style, policy);
+    });
+  return detail::Access::controlArguments(
+    detail::Access::configuredControl(std::move(description), detail::Access::controlType<T>()),
+    ControlSettings{.text = TextValue(text)});
 }
 
 /** @param text UTF-8 copied immediately, validated at mount under the scene's width policy.
@@ -2269,24 +2658,29 @@ namespace detail {
  */
 template <class T>
 Description<T> textControl(TextValue text, ControlStyle style, SizePolicy policy, TextResolver resolver) {
-  return Access::describe<T>([text = std::move(text), style, policy, resolver = std::move(resolver)](
-                               ManagedScene &scene, Node<Widget> parent) -> std::expected<Node<T>, ManagedError> {
-    auto value = resolver ? text.resolve(scene.widthPolicy(), resolver) : text.resolve(scene.widthPolicy());
+  auto arguments = ControlSettings{.text = std::move(text)};
+  auto description = Access::cold<T>(
+    [style, policy, resolver = std::move(resolver)](ManagedScene &scene, Node<Widget> parent,
+                                                    MountContext &context) -> std::expected<Node<T>, ManagedError> {
+      const auto &caption = *context.controlSettings->text;
+      auto value = resolver ? caption.resolve(scene.widthPolicy(), resolver) : caption.resolve(scene.widthPolicy());
 
-    if (!value) {
-      if (const auto *failure = std::get_if<TextError>(&value.error())) {
-        return std::unexpected(textError(parent, *failure));
+      if (!value) {
+        if (const auto *failure = std::get_if<TextError>(&value.error())) {
+          return std::unexpected(textError(parent, *failure));
+        }
+
+        auto failure = error(parent, TreeError::INVALID_ARGUMENT);
+
+        failure.resource = std::get<TextResourceError>(value.error());
+
+        return std::unexpected(failure);
       }
 
-      auto failure = error(parent, TreeError::INVALID_ARGUMENT);
-
-      failure.resource = std::get<TextResourceError>(value.error());
-
-      return std::unexpected(failure);
-    }
-
-    return scene.emplace<T>(parent, std::move(*value), style, policy);
-  });
+      return scene.emplace<T>(parent, std::move(*value), style, policy);
+    });
+  return Access::controlArguments(Access::configuredControl(std::move(description), Access::controlType<T>()),
+                                  std::move(arguments));
 }
 /** @brief Exact deferred caption inputs; literals and bare braces keep their existing overloads. */
 template <class T>
@@ -2294,7 +2688,7 @@ concept CaptionSource =
   std::same_as<std::remove_cvref_t<T>, TextSource> || std::same_as<std::remove_cvref_t<T>, TextProperty>;
 
 template <class T> Description<T> liveCaption(TextSource source, ControlStyle style, SizePolicy policy) {
-  return Access::cold<T>(
+  auto description = Access::cold<T>(
     [source = std::move(source), style, policy](ManagedScene &scene, Node<Widget> parent,
                                                 MountContext &context) -> std::expected<Node<T>, ManagedError> {
       auto admitted = Access::check(scene, parent);
@@ -2328,6 +2722,7 @@ template <class T> Description<T> liveCaption(TextSource source, ControlStyle st
       });
       return node;
     });
+  return Access::configuredControl(std::move(description), Access::controlType<T>());
 }
 
 template <CaptionSource Source> TextSource captionSource(Source &&source) {
@@ -2471,7 +2866,8 @@ inline Description<Button> button(std::string_view text, Callback action, Contro
 inline Description<CheckBox> checkbox(std::string_view text, ManagedState<bool> model,
                                       std::function<std::expected<void, TreeError>(CheckBoxResult)> changed = {},
                                       ControlStyle style = {}, SizePolicy policy = {}) {
-  return control<CheckBox>(text, style, policy)
+  return detail::Access::controlArguments(control<CheckBox>(text, style, policy),
+                                          {.text = TextValue(text), .cycle = CheckCycle::TWO_STATE})
     .setup([model, changed = std::move(changed)](ManagedScene &scene, Node<CheckBox> node) mutable {
       return scene.bind(node, model, std::move(changed));
     });
@@ -2484,14 +2880,24 @@ inline Description<CheckBox> checkbox(std::string_view text, ManagedState<bool> 
  * @param policy Owning layout constraints.
  * @return Checkbox recipe with internal managed state; no binding token escapes.
  */
-inline Description<CheckBox> checkbox(std::string_view text, bool initial = false,
+inline Description<CheckBox> checkbox(std::string_view text, bool initial,
                                       std::function<std::expected<void, TreeError>(CheckBoxResult)> changed = {},
                                       ControlStyle style = {}, SizePolicy policy = {}) {
-  return control<CheckBox>(text, style, policy)
-    .setup([initial, changed = std::move(changed)](ManagedScene &scene, Node<CheckBox> node) mutable {
-      return scene.state(initial).and_then([&scene, node, &changed](ManagedState<bool> model) {
-        return scene.bind(node, model, std::move(changed));
-      });
+  return detail::Access::controlSetup(
+    detail::Access::controlArguments(control<CheckBox>(text, style, policy),
+                                     {.text = TextValue(text),
+                                      .state = initial ? CheckState::CHECKED : CheckState::UNCHECKED,
+                                      .cycle = CheckCycle::TWO_STATE}),
+    [initial, changed = std::move(changed)](ManagedScene &scene, Node<CheckBox> node,
+                                            const ControlSettings &settings) mutable {
+      if (settings.state == CheckState::MIXED || settings.cycle == CheckCycle::THREE_STATE) {
+        return std::expected<void, ManagedError>(std::unexpected(detail::error(node, TreeError::INVALID_ARGUMENT)));
+      }
+      return scene
+        .state(settings.state.value_or(initial ? CheckState::CHECKED : CheckState::UNCHECKED) == CheckState::CHECKED)
+        .and_then([&scene, node, &changed](ManagedState<bool> model) {
+          return scene.bind(node, model, std::move(changed));
+        });
     });
 }
 
@@ -2506,8 +2912,11 @@ inline Description<CheckBox> checkbox(std::string_view text, bool initial = fals
 inline Description<CheckBox> checkbox(std::string_view text, ManagedState<CheckState> model,
                                       std::function<std::expected<void, TreeError>(CheckStateResult)> changed = {},
                                       ControlStyle style = {}, SizePolicy policy = {}, CheckBoxOptions options = {}) {
-  return control<CheckBox>(text, style, policy)
-    .setup([model, changed = std::move(changed), options](ManagedScene &scene, Node<CheckBox> node) mutable {
+  return detail::Access::controlSetup(
+    control<CheckBox>(text, style, policy),
+    [model, changed = std::move(changed), options](ManagedScene &scene, Node<CheckBox> node,
+                                                   const ControlSettings &settings) mutable {
+      options.cycle = settings.cycle.value_or(options.cycle);
       return scene.bind(node, model, std::move(changed), options);
     });
 }
@@ -2523,12 +2932,72 @@ inline Description<CheckBox> checkbox(std::string_view text, ManagedState<CheckS
 inline Description<CheckBox> checkbox(std::string_view text, CheckState initial,
                                       std::function<std::expected<void, TreeError>(CheckStateResult)> changed = {},
                                       ControlStyle style = {}, SizePolicy policy = {}, CheckBoxOptions options = {}) {
-  return control<CheckBox>(text, style, policy)
-    .setup([initial, changed = std::move(changed), options](ManagedScene &scene, Node<CheckBox> node) mutable {
-      return scene.state(initial).and_then([&scene, node, &changed, options](ManagedState<CheckState> model) {
-        return scene.bind(node, model, std::move(changed), options);
-      });
+  return detail::Access::controlSetup(
+    detail::Access::controlArguments(control<CheckBox>(text, style, policy),
+                                     {.text = TextValue(text), .state = initial}),
+    [initial, changed = std::move(changed), options](ManagedScene &scene, Node<CheckBox> node,
+                                                     const ControlSettings &settings) mutable {
+      options.cycle = settings.cycle.value_or(options.cycle);
+      return scene.state(settings.state.value_or(initial))
+        .and_then([&scene, node, &changed, options](ManagedState<CheckState> model) {
+          return scene.bind(node, model, std::move(changed), options);
+        });
     });
+}
+
+/** @brief Construct a named checkbox with the fixed three-state activation cycle.
+ * @param text UTF-8 caption copied now and validated under the receiving scene's width policy.
+ * @param model Observing explicit state owned by the receiving scene.
+ * @param changed Optional owning callback after the standard commit; cannot undo that commit.
+ * @param style Owning manual appearances below selector declarations.
+ * @param policy Owning layout constraints.
+ * @return Single-use ThreeState recipe using the existing CheckBox binding and checked errors.
+ */
+inline Description<ThreeState> threeState(std::string_view text, ManagedState<CheckState> model,
+                                          std::function<std::expected<void, TreeError>(CheckStateResult)> changed = {},
+                                          ControlStyle style = {}, SizePolicy policy = {}) {
+  return detail::Access::intrinsicStyle(control<ThreeState>(text, style, policy),
+                                        StyleTarget{.type = "ThreeState", .control = true, .baseTypes = {"CheckBox"}})
+    .setup([model, changed = std::move(changed)](ManagedScene &scene, Node<ThreeState> node) mutable {
+      return scene.bind(Node<CheckBox>{node}, model, std::move(changed),
+                        CheckBoxOptions{.cycle = CheckCycle::THREE_STATE});
+    });
+}
+
+/** @brief Construct a ThreeState with scene-owned state and inherited checkbox presentation.
+ * @param text UTF-8 caption copied now and validated at mount.
+ * @param initial Initial explicit state, UNCHECKED by default; invalid values fail at binding.
+ * @param changed Optional owning callback after each standard commit.
+ * @param style Owning manual appearances.
+ * @param policy Owning layout constraints.
+ * @return Single-use recipe with natural ThreeState/CheckBox style names and the fixed three-state cycle.
+ */
+inline Description<ThreeState> threeState(std::string_view text, CheckState initial,
+                                          std::function<std::expected<void, TreeError>(CheckStateResult)> changed = {},
+                                          ControlStyle style = {}, SizePolicy policy = {}) {
+  return detail::Access::controlSetup(
+    detail::Access::controlArguments(
+      detail::Access::intrinsicStyle(control<ThreeState>(text, style, policy),
+                                     StyleTarget{.type = "ThreeState", .control = true, .baseTypes = {"CheckBox"}}),
+      {.text = TextValue(text), .state = initial}),
+    [initial, changed = std::move(changed)](ManagedScene &scene, Node<ThreeState> node,
+                                            const ControlSettings &settings) mutable {
+      return scene.state(settings.state.value_or(initial))
+        .and_then([&scene, node, &changed](ManagedState<CheckState> model) {
+          return scene.bind(Node<CheckBox>{node}, model, std::move(changed),
+                            CheckBoxOptions{.cycle = CheckCycle::THREE_STATE});
+        });
+    });
+}
+
+/** @param text Explicit caption. @return Checkbox with context-provided initial state and cycle. */
+inline Description<CheckBox> checkbox(std::string_view text) {
+  return detail::Access::controlArguments(checkbox(text, CheckState::UNCHECKED), {.text = TextValue(text)});
+}
+
+/** @param text Explicit caption. @return ThreeState with context-provided initial state and fixed cycle. */
+inline Description<ThreeState> threeState(std::string_view text) {
+  return detail::Access::controlArguments(threeState(text, CheckState::UNCHECKED), {.text = TextValue(text)});
 }
 
 /** @brief Configure an explicit checkbox value without positional callback/style placeholders.
@@ -2546,7 +3015,9 @@ template <class Options>
 inline Description<CheckBox> checkbox(std::string_view text, CheckState initial, Options &&options,
                                       std::function<std::expected<void, TreeError>(CheckStateResult)> changed = {},
                                       ControlStyle style = {}, SizePolicy policy = {}) {
-  return checkbox(text, initial, std::move(changed), style, policy, std::forward<Options>(options));
+  return detail::Access::controlArguments(
+    checkbox(text, initial, std::move(changed), style, policy, std::forward<Options>(options)),
+    {.text = TextValue(text), .state = initial, .cycle = options.cycle});
 }
 
 /** @brief Configure shared checkbox state without positional callback/style placeholders.
@@ -2564,107 +3035,180 @@ template <class Options>
 inline Description<CheckBox> checkbox(std::string_view text, ManagedState<CheckState> model, Options &&options,
                                       std::function<std::expected<void, TreeError>(CheckStateResult)> changed = {},
                                       ControlStyle style = {}, SizePolicy policy = {}) {
-  return checkbox(text, model, std::move(changed), style, policy, std::forward<Options>(options));
+  return detail::Access::controlArguments(
+    checkbox(text, model, std::move(changed), style, policy, std::forward<Options>(options)),
+    {.text = TextValue(text), .cycle = options.cycle});
 }
 
-/** @param model Observing scene-owned text; existing draft/commit/conflict semantics are retained.
- * @param config Owning optional callbacks, limits, appearances, layout and clipboard service.
- * @return Single-use bound editor recipe; width policy always follows the scene.
+namespace detail {
+/** @brief One editor constructor path; context settings never replace an explicit shared model.
+ * @param external Explicit observing model, or absent for independent internal state.
+ * @param initial Owned fallback text; an explicit positional literal is also an instance override.
+ * @param config Legacy full options/services, retained by value until mount.
+ * @param inherit Whether omitted options inherit the immutable context.
+ * @param resolver Owning synchronous text adapter; no callback survives its normal binding lifetime.
+ * @return Existing editor/binding recipe with constructor-only settings access.
  */
-inline Description<LineEdit> lineEdit(ManagedState<std::string> model, LineEditConfig config = {}) {
-  auto description = detail::Access::describe<LineEdit>(
-    [options = config.options, policy = config.policy](
-      ManagedScene &scene, Node<Widget> parent) mutable -> std::expected<Node<LineEdit>, ManagedError> {
-      options.widthPolicy = scene.widthPolicy();
-      auto placeholder = detail::lineEditPlaceholder(options, parent);
+inline Description<LineEdit> lineEditRecipe(std::optional<ManagedState<std::string>> external, TextValue initial,
+                                            LineEditConfig config, bool inherit, TextResolver resolver = {}) {
+  auto model = std::make_shared<ManagedState<std::string>>(external.value_or(ManagedState<std::string>{}));
+  auto description =
+    Access::cold<LineEdit>([initial = std::move(initial), options = config.options, policy = config.policy,
+                            resolver = std::move(resolver), model, external = external.has_value()](
+                             ManagedScene &scene, Node<Widget> parent,
+                             MountContext &context) mutable -> std::expected<Node<LineEdit>, ManagedError> {
+      const ControlSettings empty;
+      const auto &settings = context.controlSettings ? *context.controlSettings : empty;
+      auto effective = controlLineEditOptions(settings, options, scene.widthPolicy(), resolver, parent);
+      if (!effective) {
+        return std::unexpected(effective.error());
+      }
+      auto placeholder = lineEditPlaceholder(*effective, parent);
       if (!placeholder) {
         return std::unexpected(placeholder.error());
       }
-
-      return scene.emplace<LineEdit>(parent, std::move(options), policy, std::move(*placeholder));
-    });
-
-  return std::move(description)
-    .setup([model, result = std::move(config.result), clipboard = std::move(config.clipboard),
-            validate = std::move(config.validate)](ManagedScene &scene, Node<LineEdit> node) mutable {
-      return scene.bind(node, model, std::move(result), std::move(clipboard), std::move(validate));
-    });
-}
-
-/** @param initial Owning initial text expression, resolved under the receiving scene's width policy at mount.
- * @param config Existing editor settings, including confirmation mode, history, validation and clipboard.
- * @param resolver Optional owning synchronous resource adapter; borrowed services must outlive mount.
- * @return Single-use editor recipe with an internal scene-owned text state; construction may throw.
- */
-inline Description<LineEdit> lineEdit(TextValue initial, LineEditConfig config = {}, TextResolver resolver = {}) {
-  auto model = std::make_shared<ManagedState<std::string>>();
-  auto description = detail::Access::describe<LineEdit>(
-    [initial = std::move(initial), options = config.options, policy = config.policy, resolver = std::move(resolver),
-     model](ManagedScene &scene, Node<Widget> parent) mutable -> std::expected<Node<LineEdit>, ManagedError> {
-      auto resolved = resolver ? initial.resolve(scene.widthPolicy(), resolver) : initial.resolve(scene.widthPolicy());
-
-      if (!resolved) {
-        auto failure = detail::error(parent, TreeError::INVALID_ARGUMENT);
-
-        if (const auto *text = std::get_if<TextError>(&resolved.error())) {
-          failure.text = *text;
-        } else {
-          failure.resource = std::get<TextResourceError>(resolved.error());
+      if (!external) {
+        const auto &text = settings.text ? *settings.text : initial;
+        auto resolved = resolver ? text.resolve(scene.widthPolicy(), resolver) : text.resolve(scene.widthPolicy());
+        if (!resolved) {
+          auto failure = error(parent, TreeError::INVALID_ARGUMENT);
+          if (const auto *textError = std::get_if<TextError>(&resolved.error())) {
+            failure.text = *textError;
+          } else {
+            failure.resource = std::get<TextResourceError>(resolved.error());
+          }
+          return std::unexpected(failure);
         }
-
-        return std::unexpected(failure);
+        auto state = scene.state(std::string(resolved->bytes()));
+        if (!state) {
+          return std::unexpected(state.error());
+        }
+        *model = *state;
       }
-
-      options.widthPolicy = scene.widthPolicy();
-      auto placeholder = detail::lineEditPlaceholder(options, parent);
-      if (!placeholder) {
-        return std::unexpected(placeholder.error());
-      }
-
-      auto state = scene.state(std::string(resolved->bytes()));
-
-      if (!state) {
-        return std::unexpected(state.error());
-      }
-
-      *model = *state;
-
-      return scene.emplace<LineEdit>(parent, std::move(options), policy, std::move(*placeholder));
+      return scene.emplace<LineEdit>(parent, *effective, policy, std::move(*placeholder));
     });
-
-  return std::move(description)
-    .setup([model, result = std::move(config.result), clipboard = std::move(config.clipboard),
-            validate = std::move(config.validate)](ManagedScene &scene, Node<LineEdit> node) mutable {
+  return Access::controlSetup(
+    Access::configuredControl(std::move(description), "LineEdit", inherit),
+    [model, result = std::move(config.result), clipboard = std::move(config.clipboard),
+     validate = std::move(config.validate)](ManagedScene &scene, Node<LineEdit> node, const ControlSettings &) mutable {
       return scene.bind(node, *model, std::move(result), std::move(clipboard), std::move(validate));
     });
 }
+} // namespace detail
 
-/** @param initial UTF-8 bytes copied immediately; validated at mount under the scene width policy.
- * @param config Existing editor settings and owned callbacks.
- * @return Single-use editor recipe with internal managed state; no caller state boilerplate is needed.
+/** @param model Explicit scene-owned model. @param config Full legacy options, bypassing context defaults.
+ * @return Bound editor; an additional settings modifier explicitly overrides those options.
  */
-inline Description<LineEdit> lineEdit(std::string_view initial, LineEditConfig config = {}) {
+inline Description<LineEdit> lineEdit(ManagedState<std::string> model, LineEditConfig config) {
+  return detail::lineEditRecipe(model, TextValue(""), std::move(config), false);
+}
+
+/** @param model Explicit scene-owned model. @return Editor inheriting sparse context options. */
+inline Description<LineEdit> lineEdit(ManagedState<std::string> model) {
+  return detail::lineEditRecipe(model, TextValue(""), {}, true);
+}
+
+/** @param initial Owned explicit initial text. @param config Full legacy editor options.
+ * @param resolver Optional synchronous text adapter. @return Independent editor preserving full-config semantics.
+ */
+inline Description<LineEdit> lineEdit(TextValue initial, LineEditConfig config, TextResolver resolver = {}) {
+  return detail::lineEditRecipe(std::nullopt, std::move(initial), std::move(config), false, std::move(resolver));
+}
+
+/** @param initial Explicit initial expression. @return Independent editor inheriting context options. */
+inline Description<LineEdit> lineEdit(TextValue initial) {
+  auto arguments = ControlSettings{.text = initial};
+  return detail::Access::controlArguments(detail::lineEditRecipe(std::nullopt, std::move(initial), {}, true),
+                                          std::move(arguments));
+}
+
+/** @param initial UTF-8 copied immediately. @param config Full legacy editor options.
+ * @return Independent editor preserving the explicit full configuration.
+ */
+inline Description<LineEdit> lineEdit(std::string_view initial, LineEditConfig config) {
   return lineEdit(TextValue(initial), std::move(config));
 }
 
-/** @param reference Empty typed observation published after the complete form mounts.
- * @param initial Owning initial expression.
- * @param config Existing editor settings.
- * @param resolver Optional synchronous resource adapter.
- * @return Existing internal-state editor recipe with additive Ref publication.
+/** @param initial UTF-8 copied immediately. @return Independent editor inheriting context options. */
+inline Description<LineEdit> lineEdit(std::string_view initial) {
+  return lineEdit(TextValue(initial));
+}
+
+/** @return Independent editor whose initial text and options may come from context defaults. */
+inline Description<LineEdit> lineEdit() {
+  return detail::lineEditRecipe(std::nullopt, TextValue(""), {}, true);
+}
+
+/** @tparam Settings Exactly ControlSettings; bare braces keep the legacy full-config overload.
+ * @tparam Initial Explicit text expression, string or scene-owned model accepted by lineEdit.
+ * @param initial Explicit initial value/model. @param patch Owning sparse final overrides.
+ * @return Context-aware editor with only present fields overridden.
  */
-inline Description<LineEdit> lineEdit(Ref<LineEdit> reference, TextValue initial, LineEditConfig config = {},
+template <class Initial, class Settings>
+  requires std::same_as<std::remove_cvref_t<Settings>, ControlSettings> &&
+           requires(Initial &&initial) { lineEdit(std::forward<Initial>(initial)); }
+inline Description<LineEdit> lineEdit(Initial &&initial, Settings &&patch) {
+  return lineEdit(std::forward<Initial>(initial)).settings(std::forward<Settings>(patch));
+}
+
+/** @tparam Settings Exactly ControlSettings. @param initial Owning explicit expression.
+ * @param patch Sparse final overrides. @param resolver Synchronous text adapter.
+ * @return Context-aware editor supporting localized text and placeholders.
+ */
+template <class Settings>
+  requires std::same_as<std::remove_cvref_t<Settings>, ControlSettings>
+inline Description<LineEdit> lineEdit(TextValue initial, Settings &&patch, TextResolver resolver) {
+  auto arguments = ControlSettings{.text = initial};
+  return detail::Access::controlArguments(
+           detail::lineEditRecipe(std::nullopt, std::move(initial), {}, true, std::move(resolver)),
+           std::move(arguments))
+    .settings(std::forward<Settings>(patch));
+}
+
+/** @param reference Empty observing slot. @param initial Explicit text expression.
+ * @param config Full legacy options. @param resolver Optional synchronous text adapter.
+ * @return Independent editor with deferred Ref publication.
+ */
+inline Description<LineEdit> lineEdit(Ref<LineEdit> reference, TextValue initial, LineEditConfig config,
                                       TextResolver resolver = {}) {
   return lineEdit(std::move(initial), std::move(config), std::move(resolver)).reference(std::move(reference));
 }
 
-/** @param reference Empty typed observation.
- * @param initial UTF-8 bytes copied immediately.
- * @param config Existing editor settings.
- * @return Internal-state editor recipe with Ref publication after complete mount.
+/** @param reference Empty observing slot. @param initial Explicit text expression.
+ * @return Context-aware editor with deferred Ref publication.
  */
-inline Description<LineEdit> lineEdit(Ref<LineEdit> reference, std::string_view initial, LineEditConfig config = {}) {
+inline Description<LineEdit> lineEdit(Ref<LineEdit> reference, TextValue initial) {
+  return lineEdit(std::move(initial)).reference(std::move(reference));
+}
+
+/** @param reference Empty observing slot. @param initial UTF-8 copied now. @param config Full legacy options.
+ * @return Independent editor preserving the complete explicit configuration.
+ */
+inline Description<LineEdit> lineEdit(Ref<LineEdit> reference, std::string_view initial, LineEditConfig config) {
   return lineEdit(initial, std::move(config)).reference(std::move(reference));
+}
+
+/** @param reference Empty observing slot. @param initial UTF-8 copied now.
+ * @return Context-aware editor with deferred Ref publication.
+ */
+inline Description<LineEdit> lineEdit(Ref<LineEdit> reference, std::string_view initial) {
+  return lineEdit(initial).reference(std::move(reference));
+}
+
+/** @param reference Empty observing slot. @return Editor inheriting initial text and options from context. */
+inline Description<LineEdit> lineEdit(Ref<LineEdit> reference) {
+  return lineEdit().reference(std::move(reference));
+}
+
+/** @tparam Settings Exactly ControlSettings. @tparam Initial Existing text/model initial input.
+ * @param reference Empty observing slot. @param initial Explicit value/model. @param patch Sparse overrides.
+ * @return Context-aware typed editor with deferred publication.
+ */
+template <class Initial, class Settings>
+  requires std::same_as<std::remove_cvref_t<Settings>, ControlSettings> &&
+           requires(Initial &&initial) { lineEdit(std::forward<Initial>(initial)); }
+inline Description<LineEdit> lineEdit(Ref<LineEdit> reference, Initial &&initial, Settings &&patch) {
+  return lineEdit(std::forward<Initial>(initial), std::forward<Settings>(patch)).reference(std::move(reference));
 }
 
 /// @brief Describe a managed virtual table without opening a range until mount.
@@ -2878,7 +3422,14 @@ Description<Chart<T>> chart(ManagedModel<T> model, std::type_identity_t<ManagedC
  */
 template <class T, detail::DescriptionInput... Children>
 Description<T> linear(LinearOptions options, Children &&...children) {
-  auto description = custom<T>(options);
+  auto description = detail::Access::configuredControl(
+    detail::Access::cold<T>([options](ManagedScene &scene, Node<Widget> parent, detail::MountContext &context) mutable {
+      if (context.controlSettings && context.controlSettings->gap) {
+        options.gap = *context.controlSettings->gap;
+      }
+      return scene.emplace<T>(parent, options);
+    }),
+    detail::Access::controlType<T>());
 
   (description.state_->children.push_back(
      [child =
@@ -2890,7 +3441,7 @@ Description<T> linear(LinearOptions options, Children &&...children) {
      }),
    ...);
 
-  return description;
+  return detail::Access::controlArguments(std::move(description), {.gap = options.gap});
 }
 
 /** @brief Immediately consume a range into the existing linear-layout mount transaction.
@@ -2907,7 +3458,14 @@ Description<T> linear(LinearOptions options, Children &&...children) {
  * Mount preserves the original child error, subtree rollback and deferred reference publication.
  */
 template <class T, detail::DescriptionRange R> Description<T> linear(LinearOptions options, R &&children) {
-  auto description = custom<T>(options);
+  auto description = detail::Access::configuredControl(
+    detail::Access::cold<T>([options](ManagedScene &scene, Node<Widget> parent, detail::MountContext &context) mutable {
+      if (context.controlSettings && context.controlSettings->gap) {
+        options.gap = *context.controlSettings->gap;
+      }
+      return scene.emplace<T>(parent, options);
+    }),
+    detail::Access::controlType<T>());
 
   for (auto &&child : children) {
     description.state_->children.push_back(
@@ -2919,7 +3477,7 @@ template <class T, detail::DescriptionRange R> Description<T> linear(LinearOptio
       });
   }
 
-  return description;
+  return detail::Access::controlArguments(std::move(description), {.gap = options.gap});
 }
 
 /** @tparam R Immediately consumable range of one Description type, as required by linear.
@@ -2936,7 +3494,7 @@ template <detail::DescriptionRange R> Description<Row> row(LinearOptions options
  * @return Owning row recipe with default settings and transactional child mounting.
  */
 template <detail::DescriptionRange R> Description<Row> row(R &&children) {
-  return linear<Row>({}, std::forward<R>(children));
+  return detail::Access::controlArguments(linear<Row>({}, std::forward<R>(children)), {});
 }
 
 /** @tparam R Immediately consumable range of one Description type, as required by linear.
@@ -2953,7 +3511,7 @@ template <detail::DescriptionRange R> Description<Column> column(LinearOptions o
  * @return Owning column recipe with default settings and transactional child mounting.
  */
 template <detail::DescriptionRange R> Description<Column> column(R &&children) {
-  return linear<Column>({}, std::forward<R>(children));
+  return detail::Access::controlArguments(linear<Column>({}, std::forward<R>(children)), {});
 }
 
 /** @tparam Children Rvalue Description types.
@@ -2994,7 +3552,7 @@ template <detail::DescriptionInput... Children> Description<Grid> grid(Children 
  * @return Single-use row recipe with default layout settings.
  */
 template <detail::DescriptionInput... Children> Description<Row> row(Children &&...children) {
-  return linear<Row>({}, std::forward<Children>(children)...);
+  return detail::Access::controlArguments(linear<Row>({}, std::forward<Children>(children)...), {});
 }
 
 /** @tparam Children Rvalue Description types.
@@ -3012,7 +3570,7 @@ Description<Column> column(LinearOptions options, Children &&...children) {
  * @return Single-use column recipe with default layout settings.
  */
 template <detail::DescriptionInput... Children> Description<Column> column(Children &&...children) {
-  return linear<Column>({}, std::forward<Children>(children)...);
+  return detail::Access::controlArguments(linear<Column>({}, std::forward<Children>(children)...), {});
 }
 
 /** @param value Semantic non-character key; raw input is matched before router normalization.
@@ -3154,14 +3712,63 @@ inline Description<CheckBox> checkbox(Ref<CheckBox> reference, std::string_view 
   return checkbox(text, model, std::move(changed), style, policy, options).reference(std::move(reference));
 }
 
+/** @param reference Empty observing slot published only after complete mount.
+ * @param text UTF-8 caption copied now.
+ * @param initial Initial scene-owned state, UNCHECKED by default.
+ * @param changed Optional owning receipt callback after standard commit.
+ * @param style Owning manual appearances.
+ * @param policy Owning layout constraints.
+ * @return Named three-state recipe with checked reference publication and fixed activation cycle.
+ */
+inline Description<ThreeState> threeState(Ref<ThreeState> reference, std::string_view text, CheckState initial,
+                                          std::function<std::expected<void, TreeError>(CheckStateResult)> changed = {},
+                                          ControlStyle style = {}, SizePolicy policy = {}) {
+  return threeState(text, initial, std::move(changed), style, policy).reference(std::move(reference));
+}
+
+/** @param reference Empty observing slot. @param text Explicit caption.
+ * @return ThreeState inheriting its initial state from the immutable context.
+ */
+inline Description<ThreeState> threeState(Ref<ThreeState> reference, std::string_view text) {
+  return threeState(text).reference(std::move(reference));
+}
+
+/** @param reference Empty observing slot. @param text Explicit caption.
+ * @return Checkbox inheriting its initial state and activation cycle from context.
+ */
+inline Description<CheckBox> checkbox(Ref<CheckBox> reference, std::string_view text) {
+  return checkbox(text).reference(std::move(reference));
+}
+
+/** @param reference Empty observing slot published only after complete mount.
+ * @param text UTF-8 caption copied now.
+ * @param model Explicit state owned by the receiving scene.
+ * @param changed Optional owning receipt callback after standard commit.
+ * @param style Owning manual appearances.
+ * @param policy Owning layout constraints.
+ * @return Named recipe reusing the original checkbox binding and typed failures.
+ */
+inline Description<ThreeState> threeState(Ref<ThreeState> reference, std::string_view text,
+                                          ManagedState<CheckState> model,
+                                          std::function<std::expected<void, TreeError>(CheckStateResult)> changed = {},
+                                          ControlStyle style = {}, SizePolicy policy = {}) {
+  return threeState(text, model, std::move(changed), style, policy).reference(std::move(reference));
+}
+
 /** @param reference Empty observing editor slot published after complete mount.
  * @param model Existing managed text state.
  * @param config Owning editor callbacks/options; existing EditMode/history behavior is retained.
  * @return Bound editor recipe using the original factory and reference transaction.
  */
-inline Description<LineEdit> lineEdit(Ref<LineEdit> reference, ManagedState<std::string> model,
-                                      LineEditConfig config = {}) {
+inline Description<LineEdit> lineEdit(Ref<LineEdit> reference, ManagedState<std::string> model, LineEditConfig config) {
   return lineEdit(model, std::move(config)).reference(std::move(reference));
+}
+
+/** @param reference Empty observing slot. @param model Explicit scene-owned model.
+ * @return Editor inheriting context options while preserving the explicit shared model.
+ */
+inline Description<LineEdit> lineEdit(Ref<LineEdit> reference, ManagedState<std::string> model) {
+  return lineEdit(model).reference(std::move(reference));
 }
 
 /** @tparam T Public widget subtype compatible with the forwarded constructor arguments.
@@ -3337,11 +3944,25 @@ Description<Chart<T>> chart(Ref<Chart<T>> reference, ManagedModel<T> model,
  * @tparam T Concrete root Widget type constructed by the recipe.
  * @param scene Existing UI-affine owner, outliving all mounted widgets.
  * @param description Owning rvalue recipe, consumed even when mounting fails.
+ * @param controls Owning immutable defaults snapshot validated before construction.
  * @return Observing root or original typed failure plus independent cleanup error. Earlier
  * scene nodes and states survive. Reusing an empty/moved/consumed recipe returns INVALID_ARGUMENT.
  * References publish only after all nodes remain live. External callback effects are not undone.
  */
-template <class T> std::expected<Node<T>, ManagedError> mount(ManagedScene &scene, Description<T> &&description) try {
+template <class T>
+std::expected<Node<T>, ManagedError> mount(ManagedScene &scene, Description<T> &&description,
+                                           ControlContext controls) try {
+  auto admitted = detail::Access::check(scene, scene.root());
+  if (!admitted) {
+    auto consumed = std::move(description);
+    return std::unexpected(admitted.error());
+  }
+  auto prepared = controls.prepared();
+  if (!prepared) {
+    auto consumed = std::move(description);
+    return std::unexpected(detail::controlContextError(prepared.error(), scene.root()));
+  }
+
   struct Mounting {
     ManagedScene &scene;
 
@@ -3352,6 +3973,7 @@ template <class T> std::expected<Node<T>, ManagedError> mount(ManagedScene &scen
 
   detail::Access::beginMount(scene);
   detail::MountContext context;
+  context.controls = std::move(*prepared);
   std::expected<Node<T>, ManagedError> result =
     std::unexpected(detail::error(scene.root(), TreeError::INVALID_ARGUMENT));
 
@@ -3409,6 +4031,13 @@ template <class T> std::expected<Node<T>, ManagedError> mount(ManagedScene &scen
   auto consumed = std::move(description);
 
   return std::unexpected(detail::error(scene.root(), TreeError::NO_MEMORY));
+}
+
+/** @param scene Existing UI owner. @param description Consuming recipe using builtin settings only.
+ * @return Existing checked mount result; explicit contexts use the three-argument overload.
+ */
+template <class T> std::expected<Node<T>, ManagedError> mount(ManagedScene &scene, Description<T> &&description) {
+  return mount(scene, std::move(description), ControlContext{});
 }
 
 /** @tparam Args Arguments accepted by an existing row overload, including references and layout options.
@@ -4113,8 +4742,9 @@ template <class T>
 Scene scene(Description<T> &&description, SceneOptions options = {},
             std::source_location origin = std::source_location::current()) {
   return detail::SceneAccess::create(
-    [description = std::move(description)](ManagedScene &owner) mutable -> std::expected<void, ManagedError> {
-      auto mounted = mount(owner, std::move(description));
+    [description = std::move(description),
+     controls = options.controls](ManagedScene &owner) mutable -> std::expected<void, ManagedError> {
+      auto mounted = mount(owner, std::move(description), controls);
 
       return mounted ? std::expected<void, ManagedError>{} : std::unexpected(mounted.error());
     },
@@ -4136,7 +4766,12 @@ Scene scene(Description<T> &&description, SceneOptions options = {},
 template <detail::SceneFactory Factory>
 Scene scene(Factory factory, SceneOptions options = {}, std::source_location origin = std::source_location::current()) {
   return detail::SceneAccess::create(
-    [factory = std::move(factory)](ManagedScene &owner) mutable -> std::expected<void, ManagedError> {
+    [factory = std::move(factory),
+     controls = options.controls](ManagedScene &owner) mutable -> std::expected<void, ManagedError> {
+      auto prepared = controls.prepared();
+      if (!prepared) {
+        return std::unexpected(detail::controlContextError(prepared.error(), owner.root()));
+      }
       auto recipe = [&] {
         if constexpr (std::invocable<Factory &, ManagedScene &>) {
           return std::invoke(factory, owner);
@@ -4146,7 +4781,7 @@ Scene scene(Factory factory, SceneOptions options = {}, std::source_location ori
       }();
 
       if constexpr (detail::IsDescription<decltype(recipe)>::value) {
-        auto mounted = mount(owner, std::move(recipe));
+        auto mounted = mount(owner, std::move(recipe), *prepared);
 
         return mounted ? std::expected<void, ManagedError>{} : std::unexpected(mounted.error());
       } else {
@@ -4154,7 +4789,7 @@ Scene scene(Factory factory, SceneOptions options = {}, std::source_location ori
           return std::unexpected(recipe.error());
         }
 
-        auto mounted = mount(owner, std::move(*recipe));
+        auto mounted = mount(owner, std::move(*recipe), *prepared);
 
         return mounted ? std::expected<void, ManagedError>{} : std::unexpected(mounted.error());
       }
