@@ -9,6 +9,7 @@ not a production command; unittest owns its help and selection options.
 import json
 from pathlib import Path
 from html.parser import HTMLParser
+import subprocess
 import tempfile
 import unittest
 
@@ -104,6 +105,66 @@ class GuideTests(unittest.TestCase):
             self.assertIn('href="source/docs/examples/demo.cpp"', result)
             self.assertIn('href="guide.html#section"', result)
             self.assertEqual((output / "source/docs/examples/demo.cpp").read_text(), "int main() {}")
+            (source / "docs/examples/demo.cpp").write_text("int main() { return 0; }")
+            refreshed = portable_links(text, output, source, {"WidgetTree": "type.html"})
+            self.assertIn('href="source/docs/examples/demo.cpp"', refreshed)
+            self.assertEqual((output / "source/docs/examples/demo.cpp").read_text(), "int main() { return 0; }")
+
+    def test_github_workflow_links_survive_pages_archive_exclusions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "checkout"
+            workflow = source / ".github/workflows/ci.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow_bytes = b"name: CI\n# preserve exact bytes\n"
+            workflow.write_bytes(workflow_bytes)
+
+            for language in ("en", "ru"):
+                output = root / "html" / language
+                output.mkdir(parents=True)
+                link = '<a href="../.github/workflows/ci.yml#L12">CI workflow</a>'
+                rendered = portable_links(link, output, source, {}, russian=language == "ru")
+                relative_copy = "source/github/workflows/ci.yml"
+                self.assertIn(f'href="{relative_copy}#L12"', rendered)
+                self.assertEqual((output / relative_copy).read_bytes(), workflow_bytes)
+            updated_workflow_bytes = b"name: Updated CI\n# refreshed bytes\n"
+            workflow.write_bytes(updated_workflow_bytes)
+            for language in ("en", "ru"):
+                output = root / "html" / language
+                rendered = portable_links(link, output, source, {}, russian=language == "ru")
+                self.assertIn(f'href="{relative_copy}#L12"', rendered)
+                self.assertEqual((output / relative_copy).read_bytes(), updated_workflow_bytes)
+                (output / "index.html").write_text(rendered, encoding="utf-8")
+
+            archive = root / "site.tar"
+            extracted = root / "unpacked"
+            extracted.mkdir()
+            subprocess.run(["tar", "--exclude=.git", "--exclude=.github", "-cf", str(archive),
+                            "-C", str(root / "html"), "."], check=True)
+            subprocess.run(["tar", "-xf", str(archive), "-C", str(extracted)], check=True)
+            for language in ("en", "ru"):
+                page = (extracted / language / "index.html").read_text(encoding="utf-8")
+                copied_workflow = extracted / language / "source/github/workflows/ci.yml"
+                self.assertIn('href="source/github/workflows/ci.yml#L12"', page)
+                self.assertEqual(copied_workflow.read_bytes(), updated_workflow_bytes)
+
+    def test_conflicting_workflow_copy_path_is_reported_without_overwrite(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, output = root / "checkout", root / "html"
+            workflow = source / ".github/workflows/ci.yml"
+            conflicting = source / "github/workflows/ci.yml"
+            workflow.parent.mkdir(parents=True)
+            conflicting.parent.mkdir(parents=True)
+            output.mkdir()
+            workflow.write_bytes(b"workflow")
+            conflicting.write_bytes(b"existing source")
+
+            with self.assertRaisesRegex(ValueError, "Conflicting source files"):
+                portable_links('<a href="../.github/workflows/ci.yml">Workflow</a>',
+                               output, source, {})
+
+            self.assertEqual(conflicting.read_bytes(), b"existing source")
 
     def test_flat_assets_preserve_query_fragment_attributes_and_idempotence(self):
         with tempfile.TemporaryDirectory() as directory:
