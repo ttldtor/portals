@@ -25,11 +25,11 @@ struct SelectorFixture {
   ui::Scene scene;
 
   explicit SelectorFixture(ui::ThemeSelectorOptions options = {})
-      : scene(ui::scene(ui::overlayHost(ui::button(opener, "Open",
-                                                   [reference = selector] {
-                                                     return reference.open();
-                                                   }),
-                                        ui::themeSelector(selector, model, options).reference(view)))) {
+      : scene(ui::scene(ui::button(opener, "Open",
+                                   [reference = selector] {
+                                     return reference.open();
+                                   }),
+                        ui::themeSelector(selector, model, options).reference(view))) {
     scene.configure([this](ManagedScene &owner, Application &application) {
       managed = &owner;
       app = &application;

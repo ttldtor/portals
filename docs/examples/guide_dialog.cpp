@@ -11,7 +11,7 @@ int main() {
   ui::Ref<Dialog> details;
 
   // clang-format off
-  return ui::scene(ui::overlayHost(
+  return ui::scene(
     ui::vbox(
       ui::label("Unhandled Esc closes Details; F10 exits from the main form."),
       ui::button("Details", [details] { details.open(); }),
@@ -19,7 +19,7 @@ int main() {
     ui::dialog(details, "Connection settings", ui::vbox(
       ui::lineEdit("Primary feed"),
       ui::checkbox("Reconnect automatically", true),
-      ui::button("Close", [details] { details.dismiss(); })))))
+      ui::button("Close", [details] { details.dismiss(); }))))
     | ui::onKey("F10", ui::quit)
     | ui::runApp();
   // clang-format on

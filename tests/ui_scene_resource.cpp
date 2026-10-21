@@ -1037,3 +1037,126 @@ TEST_CASE("fluent registration allocation rejection retains an allocation-free f
   CHECK(failures > 0);
   CHECK(succeeded);
 }
+
+TEST_CASE("registered resource Dialog layers use the same selected scene host and exact owning refs") {
+  for (const bool explicitHost : {false, true}) {
+    ui::Ref<OverlayHost> host;
+    ui::Ref<Dialog> dialog;
+    ui::Ref<Button> opener, inside;
+    ui::SceneResourceOptions options;
+    Application *application{};
+    int factories{};
+
+    REQUIRE(options.registry.add<Dialog>("Confirm", [&, dialog, inside](ui::SceneResourceArguments arguments) {
+      ++factories;
+
+      return ui::dialog(dialog, arguments.text, ui::button(inside, "Accept").onClick([] {
+      }));
+    }));
+
+    auto body = ui::button(opener, "Open").onClick([] {
+    });
+    auto layer = ui::resource("Confirm{\"Resource confirmation\"}", std::move(options));
+    auto owner = explicitHost ? ui::scene(ui::overlayHost(host, std::move(body)), std::move(layer))
+                              : ui::scene(std::move(body), std::move(layer));
+
+    owner.configure([&](ManagedScene &, Application &app) {
+      application = &app;
+    });
+    CHECK(factories == 0);
+    REQUIRE(owner.prepareChecked());
+    REQUIRE(owner.prepareChecked());
+    CHECK(factories == 1);
+
+    const auto parent = application->tree().inspect(dialog.node());
+
+    REQUIRE(parent);
+
+    const auto selected = parent->parent;
+    const auto hostSnapshot = application->tree().inspect(selected);
+
+    REQUIRE(hostSnapshot);
+
+    CHECK(hostSnapshot->children == std::vector<Node<Widget>>{opener.node(), dialog.node()});
+    CHECK((explicitHost ? host.node() == selected : host.node() == Node<OverlayHost>{}));
+    REQUIRE(opener.focus());
+    REQUIRE(dialog.open().result());
+    const auto entered = application->router().focused();
+
+    REQUIRE(entered);
+    CHECK(*entered == inside.node());
+    REQUIRE(dialog.dismiss().result());
+
+    const auto returned = application->router().focused();
+
+    REQUIRE(returned);
+    CHECK(*returned == opener.node());
+    REQUIRE(dialog.open().result());
+
+    const auto reopened = application->tree().inspect(selected);
+
+    REQUIRE(reopened);
+    CHECK(reopened->children == hostSnapshot->children);
+    REQUIRE(owner.close());
+  }
+}
+
+TEST_CASE("resource layer rejection retires the unpublished body and preserves source diagnostics") {
+  SUBCASE("ordinary erased root is not a Dialog layer") {
+    ui::Ref<Custom> body;
+    auto owner = ui::scene(ui::custom<Custom>("alive").reference(body), ui::resource("Label{\"Not a Dialog\"}"));
+    const auto result = owner.prepareChecked();
+
+    REQUIRE_FALSE(result);
+    CHECK(cause(result.error(), TreeError::INVALID_ARGUMENT));
+    CHECK(Custom::alive == 0);
+    CHECK(body.node() == Node<Custom>{});
+  }
+
+  SUBCASE("checked custom layer setup error retains original resource attribution") {
+    ui::Ref<Label> body;
+    ui::Ref<Dialog> layer;
+    ui::SceneResourceOptions options;
+    int factories{};
+
+    REQUIRE(options.registry.add<Dialog>("Fail", [&, layer](ui::SceneResourceArguments) {
+      ++factories;
+
+      return ui::dialog(layer, "Failure", ui::label("Panel"))
+        .setup([](ManagedScene &, Node<Dialog>) -> std::expected<void, ManagedError> {
+          return std::unexpected(ManagedError{ManagedPhase::BIND, {}, TreeError::WOULD_BLOCK});
+        });
+    }));
+
+    auto owner = ui::scene(ui::label(body, "Body"), ui::resource("\nFail{}", std::move(options)));
+    const auto result = owner.prepareChecked();
+
+    REQUIRE_FALSE(result);
+    CHECK(cause(result.error(), TreeError::WOULD_BLOCK));
+    CHECK(result.error().phase == ManagedPhase::BIND);
+    REQUIRE(result.error().sceneResource);
+    CHECK(result.error().sceneResource->line == 2);
+    CHECK(result.error().sceneResource->column == 1);
+    CHECK(factories == 1);
+    CHECK(body.node() == Node<Label>{});
+    CHECK(layer.node() == Node<Dialog>{});
+  }
+
+  SUBCASE("resource body hiding a host is not an explicit typed root override") {
+    ui::Ref<OverlayHost> host;
+    ui::Ref<Dialog> layer;
+    ui::SceneResourceOptions options;
+
+    REQUIRE(options.registry.add<OverlayHost>("Host", [host](ui::SceneResourceArguments) {
+      return ui::overlayHost(host, ui::label("Body"));
+    }));
+
+    auto owner = ui::scene(ui::resource("Host{}", std::move(options)), ui::dialog(layer, "Layer", ui::label("Panel")));
+    const auto result = owner.prepareChecked();
+
+    REQUIRE_FALSE(result);
+    CHECK(cause(result.error(), TreeError::INVALID_ARGUMENT));
+    CHECK(host.node() == Node<OverlayHost>{});
+    CHECK(layer.node() == Node<Dialog>{});
+  }
+}

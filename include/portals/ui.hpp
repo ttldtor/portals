@@ -45,6 +45,13 @@ template <class T> struct IsDescription<Description<T>> : std::true_type {};
 template <class T>
 concept DescriptionInput = IsDescription<std::remove_cvref_t<T>>::value && !std::is_lvalue_reference_v<T>;
 
+/** @brief Admit a declared dialog layer or an erased recipe checked after its existing factory runs.
+ * @tparam T Consuming Description<Dialog> or Description<Widget>; other typed widgets are ordinary body content.
+ */
+template <class T>
+concept SceneLayer = DescriptionInput<T> && (std::same_as<std::remove_cvref_t<T>, Description<Dialog>> ||
+                                             std::same_as<std::remove_cvref_t<T>, Description<Widget>>);
+
 /** @brief Admit immediately consumable recipes without draining borrowed lvalue elements.
  * @tparam R Input range producing Description values, explicit rvalue references, or an rvalue owning container.
  */
@@ -497,6 +504,18 @@ struct Access {
   static std::expected<void, ManagedError> check(ManagedScene &scene, Node<Widget> node) {
     return scene.boundary(ManagedPhase::MOUNT, node);
   }
+
+  /** @param scene Existing owner with a completely mounted explicit or automatic host.
+   * @param root Exact recipe root which must be that owner's registered host.
+   * @return The existing typed host or INVALID_ARGUMENT; never creates a second host.
+   */
+  static std::expected<Node<OverlayHost>, ManagedError> layerHost(ManagedScene &scene, Node<Widget> root);
+
+  /** @param scene Existing owner of the selected host and unpublished layer.
+   * @param node Mounted recipe root; erased recipes must produce an exact bound Dialog.
+   * @return Success for an existing registered Dialog or typed INVALID_ARGUMENT.
+   */
+  static std::expected<void, ManagedError> checkLayer(ManagedScene &scene, Node<Widget> node);
 };
 } // namespace detail
 
@@ -3725,6 +3744,59 @@ concept SceneFactory =
    !std::is_reference_v<std::invoke_result_t<Factory &, ManagedScene &, Application &>> &&
    IsSceneRecipe<std::remove_cvref_t<std::invoke_result_t<Factory &, ManagedScene &, Application &>>>::value);
 
+/** @brief Compose declared layers through the existing host and one ordinary mount transaction.
+ * @tparam Body Consuming ordinary body or exact explicit OverlayHost recipe.
+ * @tparam Layers Consuming typed dialogs or erased recipes checked before publication.
+ * @param body Existing ordinary content; an exact typed host takes priority over automatic wrapping.
+ * @param layers Initially closed layers, appended in declaration order to that same host.
+ * @return Owning erased recipe; every node/reference remains subject to the original transaction rollback.
+ */
+template <DescriptionInput Body, SceneLayer... Layers> Description<Widget> layered(Body &&body, Layers &&...layers) {
+  auto hosted = [&] {
+    if constexpr (std::same_as<std::remove_cvref_t<Body>, Description<OverlayHost>>) {
+      return std::forward<Body>(body);
+    } else {
+      return overlayHost(std::forward<Body>(body));
+    }
+  }();
+
+  return Access::transaction([hosted = std::move(hosted), layers = std::tuple(std::forward<Layers>(layers)...)](
+                               ManagedScene &owner, Node<Widget> parent,
+                               MountContext &context) mutable -> std::expected<Node<Widget>, ManagedError> {
+    auto root = Access::mount(std::move(hosted), owner, parent, context);
+
+    if (!root) {
+      return std::unexpected(root.error());
+    }
+
+    auto host = Access::layerHost(owner, *root);
+
+    if (!host) {
+      return std::unexpected(host.error());
+    }
+
+    std::expected<void, ManagedError> result;
+
+    std::apply(
+      [&](auto &...layer) {
+        const auto mountLayer = [&](auto &recipe) {
+          if (!result) {
+            return;
+          }
+
+          auto mounted = Access::mount(std::move(recipe), owner, *host, context);
+
+          result = mounted ? Access::checkLayer(owner, *mounted) : std::unexpected(mounted.error());
+        };
+
+        (mountLayer(layer), ...);
+      },
+      layers);
+
+    return result ? std::expected<Node<Widget>, ManagedError>(*root) : std::unexpected(result.error());
+  });
+}
+
 /** @brief Build one owning final factory diagnostic without allocating.
  * @param failure Original typed cause, independent of terminal/widget lifetime.
  * @param origin Factory/setup invocation site.
@@ -3831,6 +3903,93 @@ Scene scene(Factory factory, SceneOptions options = {}, std::source_location ori
       }
     },
     options, origin);
+}
+
+/** @brief Declare scene layers without manually composing an OverlayHost.
+ * @tparam Body Consuming body recipe, or the existing owning SceneFactory signature.
+ * @tparam First First typed Dialog or erased resource layer; at least one layer is required.
+ * @tparam Layers Further consuming layers of the same admitted kinds.
+ * @param options Existing scene/runtime policies; ordinary scene(body,options,origin) remains unchanged.
+ * @param origin Explicit construction site retained in mount diagnostics.
+ * @param body Ordinary content, or its factory; an exact typed root OverlayHost is reused.
+ * @param first Initially closed layer; erased roots must produce an exact bound Dialog.
+ * @param layers Further initially closed layers, appended in declaration order.
+ * @return Lazy owner of one existing host and one mount transaction. Failed composition publishes no refs.
+ * Dialogs inside ordinary layout children are not hoisted. An erased body hiding a host is not a typed override.
+ * Registered resource factory effects retain their existing contract and are not rolled back.
+ */
+template <class Body, detail::SceneLayer First, detail::SceneLayer... Layers>
+  requires(detail::DescriptionInput<Body> || detail::SceneFactory<std::remove_cvref_t<Body>>)
+Scene scene(SceneOptions options, std::source_location origin, Body &&body, First &&first, Layers &&...layers) {
+  if constexpr (detail::DescriptionInput<Body>) {
+    return scene(detail::layered(std::forward<Body>(body), std::forward<First>(first), std::forward<Layers>(layers)...),
+                 options, origin);
+  } else {
+    return scene(
+      [factory = std::forward<Body>(body),
+       layers = std::tuple(std::forward<First>(first), std::forward<Layers>(layers)...)](
+        ManagedScene &owner) mutable -> std::expected<Description<Widget>, ManagedError> {
+        auto recipe = [&] {
+          if constexpr (std::invocable<decltype(factory) &, ManagedScene &>) {
+            return std::invoke(factory, owner);
+          } else {
+            return std::invoke(factory, owner, detail::SceneAccess::application(owner));
+          }
+        }();
+
+        const auto compose = [&](auto &&content) {
+          return std::apply(
+            [&](auto &...layer) {
+              return detail::layered(std::move(content), std::move(layer)...);
+            },
+            layers);
+        };
+
+        if constexpr (detail::IsDescription<decltype(recipe)>::value) {
+          return compose(std::move(recipe));
+        } else {
+          if (!recipe) {
+            return std::unexpected(recipe.error());
+          }
+
+          return compose(std::move(*recipe));
+        }
+      },
+      options, origin);
+  }
+}
+
+/** @brief Declare layers with explicit existing scene policies.
+ * @tparam Body Consuming body recipe or existing SceneFactory.
+ * @tparam First Consuming typed Dialog or erased recipe checked as an exact bound Dialog.
+ * @tparam Layers Further consuming dialog layers.
+ * @param options Existing scene/runtime policies.
+ * @param body Ordinary content or its factory; a typed root OverlayHost is reused.
+ * @param first First initially closed layer.
+ * @param layers Further initially closed layers in declaration order.
+ * @return The same lazy scene composition; use the explicit-origin overload for diagnostic attribution.
+ */
+template <class Body, detail::SceneLayer First, detail::SceneLayer... Layers>
+  requires(detail::DescriptionInput<Body> || detail::SceneFactory<std::remove_cvref_t<Body>>)
+Scene scene(SceneOptions options, Body &&body, First &&first, Layers &&...layers) {
+  return scene(options, std::source_location::current(), std::forward<Body>(body), std::forward<First>(first),
+               std::forward<Layers>(layers)...);
+}
+
+/** @brief Declare initially closed layers with the existing default scene policies.
+ * @tparam Body Consuming body recipe or existing SceneFactory.
+ * @tparam First Consuming typed Dialog or erased recipe checked as an exact bound Dialog.
+ * @tparam Layers Further consuming dialog layers.
+ * @param body Ordinary content or its factory; a typed root OverlayHost is reused.
+ * @param first First initially closed layer.
+ * @param layers Further initially closed layers in declaration order.
+ * @return The same lazy scene composition; a scene without declared layers retains its original path.
+ */
+template <class Body, detail::SceneLayer First, detail::SceneLayer... Layers>
+  requires(detail::DescriptionInput<Body> || detail::SceneFactory<std::remove_cvref_t<Body>>)
+Scene scene(Body &&body, First &&first, Layers &&...layers) {
+  return scene(SceneOptions{}, std::source_location::current(), std::forward<Body>(body), std::forward<First>(first),
+               std::forward<Layers>(layers)...);
 }
 
 namespace detail {

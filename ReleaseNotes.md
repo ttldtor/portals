@@ -7,6 +7,9 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Scenes can declare dialog layers beside their ordinary body and create one overlay
+  host automatically, while retaining explicit host configuration.
+
 - Composite message dialogs and theme selectors support the canonical `ui::Ref<T>`
   syntax while retaining their existing handles, commands and observation lifetimes.
 - Notification surfaces accept an observing `ui::Ref<Overlay>` as the first factory argument.

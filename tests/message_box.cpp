@@ -118,6 +118,32 @@ void presets() {
   flushMessages(f);
 }
 
+void automaticScenePartialMount() {
+  ui::Ref<Label> body;
+  ui::Ref<MessageDialog> first, second;
+  ui::Ref<Dialog> firstView, secondView;
+  ui::MessageOptions invalid;
+  int stopped{};
+
+  invalid.maxBodyLines = 0;
+
+  auto owner = ui::scene(ui::label(body, "Body"), ui::confirmDialog(first, "First", "Ready").reference(firstView),
+                         ui::confirmDialog(second, "Second", "Rejected", invalid).reference(secondView));
+
+  owner.onStop([&] {
+    ++stopped;
+  });
+
+  const auto result = owner.prepareChecked();
+
+  check(!result && treeCause(result.error(), TreeError::INVALID_ARGUMENT), "automatic message mount preserves failure");
+  check(body.node() == Node<Label>{} && firstView.node() == Node<Dialog>{} && secondView.node() == Node<Dialog>{},
+        "later message failure publishes no earlier body or view references");
+  check(treeCause(first.lastResult().error(), TreeError::CLOSED) &&
+          treeCause(second.lastResult().error(), TreeError::CLOSED) && stopped == 1,
+        "partial automatic message mount retires both unpublished facades before one scene stop completes");
+}
+
 void validation() {
   Fixture f;
   ui::MessageBox box;
@@ -208,26 +234,26 @@ void nativeRunner(bool failure) {
   example::ReplayTerminal terminal({{10, "\r", {}}, {100, "\r", {}}}, 1000, {20, 8});
   ui::SceneOptions options;
   options.clock = terminal.clock();
-  ui::MessageBox box;
+  ui::Ref<MessageDialog> box;
   int callbacks{}, notifications{}, reports{}, dismissals{};
-  auto scene =
-    ui::scene(ui::overlayHost(ui::button("Open",
-                                         [box, &callbacks] {
-                                           box.open([&callbacks](const MessageResult &result) {
-                                             check(result && *result == MessageChoice::CANCEL,
-                                                   "native safe default is actual focused Cancel");
-                                             ++callbacks;
-                                             ui::quit();
-                                           });
-                                         }),
-                              ui::confirmDialog(box, "Confirm", "Complete native runner")
-                                .onDismiss([&](DialogDismissReason) -> std::expected<void, TreeError> {
-                                  ++dismissals;
-                                  return failure
-                                           ? std::expected<void, TreeError>(std::unexpected(TreeError::CALLBACK_FAILED))
-                                           : std::expected<void, TreeError>{};
-                                })),
-              options);
+  std::shared_ptr<const MessageResult> retained;
+  auto scene = ui::scene(
+    options,
+    ui::button("Open",
+               [box, &callbacks, &retained] {
+                 box.open([&callbacks, box, &retained](const MessageResult &result) {
+                   check(result && *result == MessageChoice::CANCEL, "native safe default is actual focused Cancel");
+                   retained = answer(box, MessageChoice::CANCEL);
+                   ++callbacks;
+                   ui::quit();
+                 });
+               }),
+    ui::confirmDialog(box, "Confirm", "Complete native runner")
+      .onDismiss([&](DialogDismissReason) -> std::expected<void, TreeError> {
+        ++dismissals;
+        return failure ? std::expected<void, TreeError>(std::unexpected(TreeError::CALLBACK_FAILED))
+                       : std::expected<void, TreeError>{};
+      }));
   scene.onError([&](const ManagedDiagnostic &diagnostic) {
     check(failure && treeCause(diagnostic.error, TreeError::CALLBACK_FAILED), "native exact technical failure");
     ++notifications;
@@ -241,6 +267,8 @@ void nativeRunner(bool failure) {
   check(terminal.closed && !terminal.output.empty() && dismissals == 1, "native paint and exact one dismissal");
   check(callbacks == (failure ? 0 : 1) && notifications == (failure ? 1 : 0) && reports == (failure ? 1 : 0),
         "technical failure is diagnosed once before callback admission and uses STOP");
+  check(failure ? !retained : retained && retained->has_value() && **retained == MessageChoice::CANCEL,
+        "automatic scene callback observes exact owning lastResult which survives shutdown");
 }
 
 struct MessagePaintSink : PaintContext {
@@ -354,6 +382,7 @@ void smallScreens() {
 
 int main() try {
   canonicalReferences();
+  automaticScenePartialMount();
   presets();
   validation();
   wrapping();

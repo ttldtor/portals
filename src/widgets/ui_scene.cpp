@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: BSL-1.0
 #include <portals/ui_style.hpp>
 
+#include "dialog_state.hpp"
+
 #include <array>
 #include <cstdio>
 #include <limits>
@@ -1103,6 +1105,45 @@ struct Scene::State {
 
 Application &Scene::admittedApplication(ManagedScene &scene) noexcept {
   return detail::SceneAccess::application(scene);
+}
+
+std::expected<Node<OverlayHost>, ManagedError> detail::Access::layerHost(ManagedScene &scene, Node<Widget> root) {
+  auto allowed = check(scene, root);
+
+  if (!allowed) {
+    return std::unexpected(allowed.error());
+  }
+
+  const auto &host = scene.dialogs_;
+
+  if (!host || host->retired || !host->ready || host->root != root) {
+    return std::unexpected(detail::error(root, TreeError::INVALID_ARGUMENT));
+  }
+
+  return host->root;
+}
+
+std::expected<void, ManagedError> detail::Access::checkLayer(ManagedScene &scene, Node<Widget> node) {
+  auto allowed = check(scene, node);
+
+  if (!allowed) {
+    return allowed;
+  }
+
+  bool exact{};
+  auto read = scene.app_.tree().read(node, [&](const Widget &widget) {
+    exact = typeid(widget) == typeid(Dialog);
+  });
+
+  if (!read) {
+    return std::unexpected(detail::error(node, read.error()));
+  }
+
+  if (!exact || !scene.findDialog(node)) {
+    return std::unexpected(detail::error(node, TreeError::INVALID_ARGUMENT));
+  }
+
+  return {};
 }
 
 detail::SetupFailureScope Scene::setupScope(const char *execution) noexcept {
