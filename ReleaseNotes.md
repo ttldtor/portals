@@ -7,6 +7,13 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Named control variants and shared initial defaults through an owning
+  `ui::ControlContext`, sparse instance settings and explicit resource
+  definitions/defaults/scene blocks. Editor instances retain independent text
+  and undo histories; variant and ancestor type selectors share normal specificity.
+- `ThreeState` and `ui::threeState` provide a ready-made three-state checkbox
+  through the existing managed binding. Native examples show named editor
+  variants in C++ and resource form without manual history management.
 - Label and button captions can observe a text field's visible draft or accepted
   value directly, including references declared later in the scene. Text-property
   assignment remains a one-time copy.
@@ -30,6 +37,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
   before invoking the factory or opening the terminal.
 
 ### Changed
+
+- Architecture reference now separates planned multiline editor contracts from
+  implemented text fields and documents the syntax-provider evaluation and its
+  limits. No multiline editor API or parser dependency is introduced.
 
 - Native gallery, dashboard and custom-widget examples create their scenes inside
   the application error boundary after command-line parsing. Gallery and dashboard

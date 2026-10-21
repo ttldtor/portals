@@ -23,6 +23,7 @@ The categories describe the learning path; the source directories remain stable.
 | Basics | [protected editor](examples/guide_editor_display.cpp), `portals_docs_editor_display` | Internal editor state, owning placeholder, password display and checked undoable Clear; no CLI. Built with tests enabled. |
 | Basics | [data presentation](data-presentation.md), [complete source](examples/guide_data_state.cpp), `portals_docs_data_state` | Explicit loading, ready, empty, failed, offline and refreshing states around ordinary content; no CLI. Built with tests enabled. |
 | Basics | [resource form](../examples/scene_resource/main.cpp), `portals_scene_resource` | Runtime scene text, named references and existing managed actions; see [scene loading](scene-loading-guide.md). |
+| Basics | [named controls](../examples/named_controls/main.cpp), `portals_named_controls` | Shared initial editor settings, independent histories, a sparse instance override and a three-state checkbox. |
 | Basics | [gallery](../examples/gallery/main.cpp), [form](../examples/gallery/fluent_form.hpp), `portals_gallery` | A function returning a lazy scene, internal editor/checkbox state, buttons, six themes and CLI preflight. |
 | Showcase | [editor history](../examples/editor_history/main.cpp), `portals_editor_history` | Immediate, editing-finished and explicit model application; Undo/Redo; draft and published values. |
 | Showcase | [dashboard](../examples/dashboard/main.cpp), [composition](../examples/dashboard/dashboard.hpp), `portals_dashboard` | A table and chart sharing an immutable model, delayed pages and bounded provider work. |
@@ -282,6 +283,8 @@ It uses editable fields and internal-state checkboxes with two `ON_FRAME` areas.
 
 [Gallery and Level in WebAssembly](wasm-gallery.md) are opt-in experimental browser scenes. They use xterm.js and the incremental runner; building native examples does not build this target.
 
-The [CheckBox with three states example](../examples/check_state/main.cpp) uses
-an explicit input cycle and the standard terminal runner. Its optional
+## Three-state checkbox
+
+The [ThreeState example](../examples/check_state/main.cpp) uses
+`ui::threeState()` with its fixed input cycle and the standard terminal runner. Its optional
 [group update helper](../examples/check_state/group.hpp) preserves partial failures.

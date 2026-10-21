@@ -187,3 +187,81 @@ scene on its UI thread. A nested lifecycle operation returns `WOULD_BLOCK`.
 Mounted callbacks and named refs retain
 their existing checked lifetime rules. See [text properties](text-property.md),
 [style layers](style-layers.md) and [managed controls](managed-controls.md).
+
+## Named variants and initial defaults {#named-control-defaults}
+
+Use an owning `ui::ControlContext` to share initial settings without sharing live
+text, cursor, undo history, models or handlers. A named variant keeps its concrete
+C++ type: `ShortEdit = LineEdit` is observed with `ui::Ref<LineEdit>`.
+
+The [complete native program](../examples/named_controls/main.cpp) declares the
+context once, applies a variant to two editors and overrides one history limit:
+
+\include named_controls/main.cpp
+
+`Description::settings(ControlSettings)` is a sparse instance patch.
+Omitted fields inherit; explicit `false`, `0` and values equal to built-in
+defaults still override. The ordinary no-config `ui::lineEdit` overload inherits
+context settings. An explicitly supplied legacy `LineEditConfig` retains its
+complete options semantics; it is not guessed to be a sparse patch.
+When an editor binds an existing managed model, that model supplies the initial
+text; a context default does not overwrite its value. Caption factories with an
+explicit text argument treat that argument as an instance override.
+
+Resolution follows the concrete base towards the requested variant:
+built-in settings, base defaults, variant definition, variant defaults, then
+instance settings. `defaults(type, patch)` accepts one block per type.
+`overlayDefaults(type, patch)` explicitly merges local defaults with inherited
+ones; it creates a new snapshot. Earlier contexts and already prepared scenes do
+not change. These are initial settings, not live theme or history reconfiguration.
+
+### The same configuration in a resource
+
+The original single-root grammar remains the default. Select
+`SceneResourceFormat::CONFIGURATION` explicitly for definitions/defaults/scene
+blocks. Block order and forward references do not affect resolution:
+
+\include named_controls/resource.cpp
+
+Pass `ui::SceneResourceFile{"form.scene"}` in place of the source string to read
+the same document from a file at preparation. A nested resource inherits the
+scene's context. Its local definitions/defaults affect only that resource's
+subtree; `SceneResourceOptions::controls` can explicitly replace the inherited
+snapshot. Duplicate defaults blocks in one document remain errors.
+
+### Supported literals and boundaries
+
+| Controls | Additional initial properties |
+|---|---|
+| Label, Button | `text` |
+| LineEdit | `text`, `placeholder`, `editMode`, `readOnly`, `programmaticChange`, `displayMode`, `history` |
+| CheckBox, ThreeState | `text`, `state`, `cycle` |
+| VBox, HBox | `gap` |
+| Sized controls | `width`, `height`, `flex` |
+
+History accepts `enabled`, `maxOperations`, `maxBytes`, `groupTyping` and
+`groupDeletion`. Text accepts strings and existing `i18n(...)` expressions.
+Enums use the names documented by the C++ API. `ThreeState` fixes
+`cycle = THREE_STATE`; an attempted downgrade is an error. IDs, classes, models,
+callbacks and live undo entries are not inherited from a definition.
+
+Type selectors match the requested name and its ancestors with ordinary type
+specificity. Depth adds no priority; IDs, classes, layer ordering and source order
+keep their existing meaning.
+
+`ControlContextLimits` defaults to 64 custom schemas/definitions, 32 ancestors
+(including intrinsic `CheckBox`, `Column` or `Row` identities),
+8 structural levels and 65,536 effective scalar properties across a mount.
+The inheritance limit cannot exceed the style system's hard ceiling of 32.
+An explicit style type rename shares that ancestor budget; if it adds another
+identity beyond the ceiling, mounting fails with a typed style error and rolls
+back the mounted subtree.
+Resource source/node/string/property limits still apply. Unknown bases, cycles,
+built-in shadowing, invalid properties and invalid enum values are checked before
+resource resolvers or factories run. Diagnostics retain the winning declaration's
+source position and `type.property` path, including inherited values. Allocation
+failure may omit diagnostic context while preserving the typed error.
+
+This grammar does not evaluate C++, import other resources, watch files or bind
+`$parameters`. Custom control constructors remain explicitly allowlisted through
+the resource registry.

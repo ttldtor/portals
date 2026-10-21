@@ -6,6 +6,7 @@
 #include <portals/detail/setup_failure.hpp>
 #include <portals/managed.hpp>
 #include <portals/ui_app.hpp>
+#include <portals/ui_control_context.hpp>
 #include <portals/ui_ref.hpp>
 
 namespace portals::ui {
@@ -16,7 +17,8 @@ struct SceneOptions {
   ManagedOptions managed{};         ///< Existing managed ownership and diagnostic budgets.
   SchedulerClock clock{};           ///< Optional borrowed replay clock; must outlive run.
   std::size_t maxConfigurations{
-    64}; ///< Positive per-queue maximum for deferred configuration callbacks and named lookups.
+    64};                     ///< Positive per-queue maximum for deferred configuration callbacks and named lookups.
+  ControlContext controls{}; ///< Immutable named-control/defaults snapshot; applied only to this scene's mount.
 };
 
 /** @brief Final owning error envelope or bounded successful-run summary; no live widget references. */

@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include "theme_receiver.hpp"
 #include <portals/detail/pss_data.hpp>
 #include <portals/style.hpp>
-#include "theme_receiver.hpp"
 
 #include <algorithm>
 #include <array>
@@ -37,8 +37,10 @@ StyleError error(TreeError cause, std::string_view message) {
 }
 
 bool matches(const StyleSelector &selector, const StyleTarget &target, StyleState state) {
+  const auto bases = std::span(target.baseTypes).first(std::min(target.baseTypes.size(), MAX_STYLE_BASE_TYPES));
+
   return (selector.type.empty() || selector.type == "*" || selector.type == target.type ||
-          (target.control && selector.type == "Control")) &&
+          std::ranges::find(bases, selector.type) != bases.end() || (target.control && selector.type == "Control")) &&
          (selector.id.empty() || selector.id == target.id) &&
          (selector.state == StyleState::ANY || selector.state == state) &&
          std::ranges::all_of(selector.classes, [&](const auto &name) {
@@ -119,7 +121,37 @@ std::expected<void, StyleError> validate(const StyleSheet &sheet) {
 }
 } // namespace
 
+std::expected<void, StyleError> validateStyleTarget(const StyleTarget &target) noexcept {
+  if (target.baseTypes.size() > MAX_STYLE_BASE_TYPES) {
+    return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Style type lineage is too deep"));
+  }
+
+  if (!target.baseTypes.empty() && (target.type.empty() || target.type == "*")) {
+    return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Style lineage requires a concrete type"));
+  }
+
+  for (std::size_t index = 0; index < target.baseTypes.size(); ++index) {
+    const auto &name = target.baseTypes[index];
+
+    if (name.empty() || name == "*" || name == target.type) {
+      return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Invalid style ancestor name"));
+    }
+
+    const auto preceding = std::span(target.baseTypes).first(index);
+
+    if (std::ranges::find(preceding, name) != preceding.end()) {
+      return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Duplicate style ancestor name"));
+    }
+  }
+
+  return {};
+}
+
 ComputedStyle resolveStyle(const StyleSheet &sheet, const StyleTarget &target, ComputedStyle defaults) noexcept {
+  if (!validateStyleTarget(target)) {
+    return defaults;
+  }
+
   return resolveRules<Specificity>(
     [&](auto &&apply) {
       // Source order resolves specificity ties through >=; legacy needs no layer rank fields.
@@ -828,6 +860,12 @@ std::expected<Invalidation, StyleError> StyleEngine::bind(Node<Widget> node, Sty
     return std::unexpected(error(access.error(), "Style target is unavailable"));
   }
 
+  auto valid = validateStyleTarget(target);
+
+  if (!valid) {
+    return std::unexpected(valid.error());
+  }
+
   LayerMutationGuard guard(stagingLayers_, true);
 
   try {
@@ -900,6 +938,12 @@ std::expected<void, StyleError> StyleEngine::mergeBindings(std::span<const Style
       if (!positions.try_emplace(node.id().slot, std::nullopt).second) {
         return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Duplicate target in style batch"));
       }
+
+      auto valid = validateStyleTarget(registration.target);
+
+      if (!valid) {
+        return std::unexpected(valid.error());
+      }
     }
 
     identitiesValidated = true;
@@ -955,6 +999,12 @@ std::expected<void, StyleError> StyleEngine::mergeBindings(std::span<const Style
 
         if (std::ranges::find(preceding, node, &StyleRegistration::node) != preceding.end()) {
           return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Duplicate target in style batch"));
+        }
+
+        auto valid = validateStyleTarget(registrations[index].target);
+
+        if (!valid) {
+          return std::unexpected(valid.error());
         }
       }
     }

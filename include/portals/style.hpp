@@ -30,6 +30,9 @@ enum class StyleState {
   CARET     ///< Editor software caret.
 };
 
+/** @brief Maximum owned ancestor names per style target, excluding its immediate type. */
+inline constexpr std::size_t MAX_STYLE_BASE_TYPES = 32;
+
 /** @brief Owned subject metadata, supplied explicitly for built-in or custom widget types. */
 struct StyleTarget {
   /** @brief Destroy owned values. Deliberately suppress implicit noexcept moves: checked MSVC
@@ -42,6 +45,8 @@ struct StyleTarget {
   std::vector<std::string> classes =
     std::vector<std::string>(0); ///< Case-sensitive class names; all selector classes must match.
   bool control{false}; ///< Also match Control selectors; explicit targets opt in independently of their type name.
+  std::vector<std::string> baseTypes = std::vector<std::string>(
+    0); ///< Nearest-base-first owning names, at most MAX_STYLE_BASE_TYPES; no empty, wildcard, duplicate or self names.
 };
 
 /** @brief Owned metadata for one checked target in an atomic binding batch. */
@@ -176,6 +181,12 @@ struct StyleError {
   std::string_view message;                     ///< Static diagnostic; never borrows source input.
 };
 
+/** @brief Validate bounded ancestor metadata without allocation or retaining input.
+ * @param target Stable owning metadata; a nonempty lineage requires a concrete immediate type.
+ * @return Success or INVALID_ARGUMENT for excessive depth, empty/wildcard, duplicate or self ancestors.
+ */
+std::expected<void, StyleError> validateStyleTarget(const StyleTarget &target) noexcept;
+
 /** @brief Parse strict PSS v0 without I/O or mutation, on any thread.
  * @param source Borrowed UTF-8 source; identifiers and grammar are ASCII, copied on success.
  * @return Complete owned sheet or precise error; no partial sheet escapes. Allocation failure is NO_MEMORY.
@@ -187,7 +198,8 @@ std::expected<StyleSheet, StyleError> parsePss(std::string_view source);
  * This metadata-only preview ignores a sheet node scope; the owning engine checks scope against live NodeId.
  * @param target Borrowed matching metadata; no data are retained.
  * @param defaults Owning built-in/custom widget defaults beneath all matching declarations.
- * @return Complete owning style. No allocation, I/O or thread affinity; caller owns input stability.
+ * @return Complete owning style, or unchanged defaults for invalid ancestor metadata.
+ * No allocation, I/O or thread affinity; caller owns input stability. validateStyleTarget provides typed diagnostics.
  */
 ComputedStyle resolveStyle(const StyleSheet &sheet, const StyleTarget &target, ComputedStyle defaults = {}) noexcept;
 
