@@ -253,6 +253,13 @@ def portable_links(content, directory, source, links, russian=False, defer_markd
             url = links.get(name)
             if url is None:
                 relative = file.relative_to(source)
+                if relative.parts[:2] == (".github", "workflows"):
+                    relative = Path("github", *relative.parts[1:])
+                    conflicting_source = source / relative
+                    if (conflicting_source.is_file()
+                            and conflicting_source.read_bytes() != file.read_bytes()):
+                        raise ValueError(
+                            f"Conflicting source files map to the same packaged path: {relative}")
                 destination = directory / "source" / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(file, destination)
