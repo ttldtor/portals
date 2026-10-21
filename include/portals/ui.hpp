@@ -171,6 +171,17 @@ struct MountContext {
   };
 
   std::vector<PendingRef> pending = std::vector<PendingRef>(0); ///< Private same-attempt reservations.
+
+  /** @brief Transaction-local dependency; it never survives mount or schedules runtime work. */
+  struct CaptionFinalizer {
+    Node<Control> receiver;            ///< Newly created caption receiving this transaction's initial value.
+    std::shared_ptr<RefTarget> source; ///< Original weak observation, resolved after every sibling has mounted.
+    bool completed{}; ///< True after source-first initial synchronization and observation registration succeed.
+    portals::detail::MoveOnlyFunction<std::expected<void, ManagedError>()> complete; ///< Owning mount-only action.
+  };
+
+  std::vector<CaptionFinalizer> captions =
+    std::vector<CaptionFinalizer>(0); ///< Fallible checked-STL construction stays inside mount's error boundary.
   std::vector<portals::detail::MoveOnlyFunction<std::expected<void, ManagedError>()>> finalize =
     std::vector<portals::detail::MoveOnlyFunction<std::expected<void, ManagedError>()>>(
       0); ///< Pure cold graph completion.
@@ -323,6 +334,121 @@ struct Access {
       }
     }
   };
+
+  static std::shared_ptr<RefTarget> captionIdentity(const TextSource &source) {
+    return source.target_;
+  }
+
+  static std::shared_ptr<RefTarget> captionTarget(std::shared_ptr<RefTarget> target, MountContext &context) {
+    for (const auto &pending : context.pending) {
+      if (pending.identity == target.get()) {
+        return std::make_shared<RefTarget>(pending.target);
+      }
+    }
+    return target;
+  }
+
+  static std::expected<void, ManagedError> finishCaptions(MountContext &context) {
+    if (std::ranges::all_of(context.captions, &MountContext::CaptionFinalizer::completed)) {
+      return {};
+    }
+    // Resolve dependencies once; iterative completion never consumes one stack frame per control.
+    std::vector<std::optional<std::size_t>> dependencies(context.captions.size());
+    for (std::size_t index = 0; index < context.captions.size(); ++index) {
+      auto target = captionTarget(context.captions[index].source, context);
+      if (!target) {
+        return std::unexpected(error(context.captions[index].receiver, TreeError::CLOSED));
+      }
+      if (target->owner != std::this_thread::get_id()) {
+        return std::unexpected(error(context.captions[index].receiver, TreeError::WRONG_THREAD));
+      }
+      for (std::size_t source = 0; source < context.captions.size(); ++source) {
+        if (context.captions[source].receiver == target->node) {
+          dependencies[index] = source;
+          break;
+        }
+      }
+    }
+    auto remaining = std::ranges::count(context.captions, false, &MountContext::CaptionFinalizer::completed);
+    while (remaining) {
+      bool progressed{};
+      for (std::size_t index = 0; index < context.captions.size(); ++index) {
+        auto &caption = context.captions[index];
+        if (caption.completed || (dependencies[index] && !context.captions[*dependencies[index]].completed)) {
+          continue;
+        }
+        auto completed = caption.complete();
+        if (!completed) {
+          return completed;
+        }
+        caption.completed = true;
+        --remaining;
+        progressed = true;
+      }
+      if (!progressed) {
+        const auto cycle = std::ranges::find(context.captions, false, &MountContext::CaptionFinalizer::completed);
+        return std::unexpected(error(cycle->receiver, TreeError::INVALID_ARGUMENT));
+      }
+    }
+    return {};
+  }
+
+  static std::expected<void, ManagedError> completeCaption(ManagedScene &scene, Node<Control> node,
+                                                           const TextSource &source, MountContext &context,
+                                                           const std::shared_ptr<ColdGraph> &graph) {
+    auto target = captionTarget(source.target_, context);
+    if (!target) {
+      return std::unexpected(error(node, TreeError::CLOSED));
+    }
+    if (target->owner != std::this_thread::get_id()) {
+      return std::unexpected(error(node, TreeError::WRONG_THREAD));
+    }
+    auto owner = eventScene(target);
+    if (!owner) {
+      return std::unexpected(owner.error());
+    }
+    if (*owner != &scene) {
+      return std::unexpected(error(node, TreeError::INVALID_ARGUMENT));
+    }
+    const bool existed = std::ranges::any_of(scene.liveText_, [&](const auto &record) {
+      return record->origin->node == target->node && record->kind == static_cast<int>(source.kind_);
+    });
+    auto live =
+      scene.attachLiveText(TextSource(target, source.kind_), PropertyOptions{}, std::source_location::current(), false);
+    if (!live) {
+      return std::unexpected(live.error());
+    }
+    if (!existed) {
+      const auto created = std::ranges::find_if(scene.liveText_, [&](const auto &record) {
+        return record->origin == live->state_.origin_;
+      });
+      if (created != scene.liveText_.end()) {
+        graph->live = *created;
+      }
+    }
+    // A shared capture can precede this mount; read the original identity for a fresh initial caption.
+    auto initial = TextSource(target, source.kind_).snapshot();
+    if (!initial) {
+      return std::unexpected(initial.error());
+    }
+    auto applied = setControlText(scene.app_.tree(), node, std::move(*initial));
+    if (!applied) {
+      return std::unexpected(error(node, applied.error()));
+    }
+    auto observed = scene.observe(node, *live, [&scene, node](const GraphemeText &text) {
+      return setControlText(scene.app_.tree(), node, text);
+    });
+    if (!observed) {
+      return observed;
+    }
+    graph->observer = scene.observers_.back();
+    graph->observer->operation = "text.caption";
+    if (graph->pending) {
+      --scene.coldMountPending_;
+      graph->pending = false;
+    }
+    return {};
+  }
 
   static std::expected<void, ManagedError> completeTextList(ManagedScene &scene, Node<VirtualList<TextSegment>> node,
                                                             const TextSource &source, bool splitWords,
@@ -922,6 +1048,7 @@ public:
 
 private:
   friend struct detail::ClickAccess;
+  friend struct detail::EditorEventAccess;
   friend class KeyInfo;
   friend struct detail::KeyHelpAccess;
   friend struct detail::LayoutAccess;
@@ -1367,6 +1494,39 @@ struct ClickAccess {
     } catch (...) {
       return std::unexpected(
         ManagedError{ManagedPhase::BIND, reference.node().id(), TreeError::CALLBACK_FAILED, {}, {}});
+    }
+  }
+};
+
+/** @brief Checked registration bridge to the editor's existing managed-owned binding. */
+struct EditorEventAccess {
+  /** @tparam Event TextEditedEvent or EditingFinishedEvent.
+   * @tparam Callback Owning managed action receiving the event or no arguments.
+   * @param scene Existing scene in which the editor reference was published.
+   * @param reference Observing identity; no widget or scene ownership is retained.
+   * @param callback Owning callable transferred to the combined finite editor registry.
+   * @param origin Original registration site retained in failure diagnostics.
+   * @return Exact affinity, identity, budget or checked allocation error.
+   */
+  template <class Event, class Callback>
+  static std::expected<void, ManagedError> attach(ManagedScene &scene, const Ref<LineEdit> &reference,
+                                                  Callback callback, std::source_location origin) {
+    commandOrigin(callback, origin);
+    auto owner = eventScene(reference.target());
+
+    if (!owner) {
+      return std::unexpected(owner.error());
+    }
+
+    if (*owner != &scene) {
+      return std::unexpected(
+        ManagedError{ManagedPhase::BIND, reference.node().id(), TreeError::INVALID_ARGUMENT, {}, {}});
+    }
+
+    if constexpr (std::same_as<Event, TextEditedEvent>) {
+      return scene.onTextEdited(reference.node(), std::move(callback), origin);
+    } else {
+      return scene.onEditingFinished(reference.node(), std::move(callback), origin);
     }
   }
 };
@@ -2128,7 +2288,78 @@ Description<T> textControl(TextValue text, ControlStyle style, SizePolicy policy
     return scene.emplace<T>(parent, std::move(*value), style, policy);
   });
 }
+/** @brief Exact deferred caption inputs; literals and bare braces keep their existing overloads. */
+template <class T>
+concept CaptionSource =
+  std::same_as<std::remove_cvref_t<T>, TextSource> || std::same_as<std::remove_cvref_t<T>, TextProperty>;
+
+template <class T> Description<T> liveCaption(TextSource source, ControlStyle style, SizePolicy policy) {
+  return Access::cold<T>(
+    [source = std::move(source), style, policy](ManagedScene &scene, Node<Widget> parent,
+                                                MountContext &context) -> std::expected<Node<T>, ManagedError> {
+      auto admitted = Access::check(scene, parent);
+      if (!admitted) {
+        return std::unexpected(admitted.error());
+      }
+      auto graph = std::make_shared<Access::ColdGraph>();
+      graph->scene = &scene;
+      context.rollback.push_back([graph] {
+        graph->retire();
+      });
+      graph->pending = true;
+      Access::beginCold(scene);
+      auto empty = GraphemeText::from("", scene.widthPolicy());
+      if (!empty) {
+        return std::unexpected(textError(parent, empty.error()));
+      }
+      auto node = scene.emplace<T>(parent, std::move(*empty), style, policy);
+      if (!node) {
+        return node;
+      }
+      if (context.root == Node<Widget>{}) {
+        context.root = *node;
+      }
+      context.captions.push_back(
+        {*node, Access::captionIdentity(source), false, [&scene, &context, node = *node, source, graph] {
+           return Access::completeCaption(scene, node, source, context, graph);
+         }});
+      context.finalize.push_back([&context] {
+        return Access::finishCaptions(context);
+      });
+      return node;
+    });
+}
+
+template <CaptionSource Source> TextSource captionSource(Source &&source) {
+  if constexpr (std::same_as<std::remove_cvref_t<Source>, TextProperty>) {
+    return source.source();
+  } else {
+    return std::forward<Source>(source);
+  }
+}
 } // namespace detail
+
+/** @tparam Source Exact TextSource or TextProperty observation, read after the complete mount.
+ * @param source Visible caption/draft or accepted model identity; never retains a widget.
+ * @param style Manual appearances.
+ * @param policy Layout constraints.
+ * @return Live one-way label recipe; cycles reject mount and removed sources never retarget.
+ */
+template <detail::CaptionSource Source>
+Description<Label> label(Source &&source, ControlStyle style = {}, SizePolicy policy = {}) {
+  return detail::liveCaption<Label>(detail::captionSource(std::forward<Source>(source)), style, policy);
+}
+
+/** @tparam Source Exact TextSource or TextProperty, including an unpublished sibling reference.
+ * @param source Visible caption/draft or accepted model identity.
+ * @param style Manual appearances.
+ * @param policy Layout constraints.
+ * @return Live one-way button caption; action attachment remains independent.
+ */
+template <detail::CaptionSource Source>
+Description<Button> button(Source &&source, ControlStyle style = {}, SizePolicy policy = {}) {
+  return detail::liveCaption<Button>(detail::captionSource(std::forward<Source>(source)), style, policy);
+}
 
 /** @param text Owning literal, format result or localization key, resolved once at mount.
  * @param style Manual appearances.
@@ -2193,7 +2424,7 @@ inline Description<Button> button(State &&model, ControlStyle style = {}, SizePo
 template <class Caption, class Callback>
   requires((std::same_as<std::remove_cvref_t<Caption>, TextValue> ||
             std::same_as<std::remove_cvref_t<Caption>, ManagedState<std::string>> ||
-            std::same_as<std::remove_cvref_t<Caption>, ManagedSource<std::string>>) &&
+            std::same_as<std::remove_cvref_t<Caption>, ManagedSource<std::string>> || detail::CaptionSource<Caption>) &&
            portals::detail::ManagedAction<Callback, ClickEvent>)
 inline Description<Button> button(Caption &&text, Callback action, ControlStyle style = {}, SizePolicy policy = {}) {
   return button(std::forward<Caption>(text), style, policy).onClick(std::move(action));
@@ -2838,7 +3069,8 @@ inline Description<Button> button(Ref<Button> reference, std::string_view text, 
  */
 template <class Caption>
   requires(std::same_as<std::remove_cvref_t<Caption>, TextValue> ||
-           std::same_as<std::remove_cvref_t<Caption>, ManagedState<std::string>>)
+           std::same_as<std::remove_cvref_t<Caption>, ManagedState<std::string>> ||
+           std::same_as<std::remove_cvref_t<Caption>, ManagedSource<std::string>> || detail::CaptionSource<Caption>)
 inline Description<Label> label(Ref<Label> reference, Caption &&text, ControlStyle style = {}, SizePolicy policy = {}) {
   return label(std::forward<Caption>(text), style, policy).reference(std::move(reference));
 }
@@ -2852,7 +3084,8 @@ inline Description<Label> label(Ref<Label> reference, Caption &&text, ControlSty
  */
 template <class Caption>
   requires(std::same_as<std::remove_cvref_t<Caption>, TextValue> ||
-           std::same_as<std::remove_cvref_t<Caption>, ManagedState<std::string>>)
+           std::same_as<std::remove_cvref_t<Caption>, ManagedState<std::string>> ||
+           std::same_as<std::remove_cvref_t<Caption>, ManagedSource<std::string>> || detail::CaptionSource<Caption>)
 inline Description<Button> button(Ref<Button> reference, Caption &&text, ControlStyle style = {},
                                   SizePolicy policy = {}) {
   return button(std::forward<Caption>(text), style, policy).reference(std::move(reference));
@@ -2869,7 +3102,8 @@ inline Description<Button> button(Ref<Button> reference, Caption &&text, Control
  */
 template <class Caption, class Callback>
   requires((std::same_as<std::remove_cvref_t<Caption>, TextValue> ||
-            std::same_as<std::remove_cvref_t<Caption>, ManagedState<std::string>>) &&
+            std::same_as<std::remove_cvref_t<Caption>, ManagedState<std::string>> ||
+            std::same_as<std::remove_cvref_t<Caption>, ManagedSource<std::string>> || detail::CaptionSource<Caption>) &&
            portals::detail::ManagedAction<Callback, ClickEvent>)
 inline Description<Button> button(Ref<Button> reference, Caption &&text, Callback action, ControlStyle style = {},
                                   SizePolicy policy = {}) {
@@ -4491,6 +4725,49 @@ auto onClick(Ref<Button> reference, Callback callback, std::source_location orig
   },
                              origin](Scene &owner) mutable {
     detail::SceneAccess::onClick(owner, registration, origin);
+  }};
+}
+
+/** @tparam Callback Owning managed action taking TextEditedEvent or no arguments.
+ * @param reference Editor published by this scene's recipe.
+ * @param callback FIFO callback for actual accepted user byte changes, including Undo/Redo and clear.
+ * @param origin Registration site retained through deferred mounting and input diagnostics.
+ * @return Pipe stage over the existing editor binding, with no extra subscription or manual token.
+ * Cursor/selection changes, fluent writes, model synchronization and failed edits without a delta do not notify.
+ * The legacy result runs first; node/scene removal suppresses subsequent typed delivery. Callback errors stop
+ * this event's remaining chain and use existing diagnostics. Appending during delivery affects the next event.
+ */
+template <class Callback>
+  requires portals::detail::ManagedAction<Callback, TextEditedEvent>
+auto onTextEdited(Ref<LineEdit> reference, Callback callback,
+                  std::source_location origin = std::source_location::current()) {
+  return detail::SceneStage{[registration = [reference = std::move(reference), callback = std::move(callback),
+                                             origin](ManagedScene &scene) mutable -> std::expected<void, ManagedError> {
+    return detail::EditorEventAccess::attach<TextEditedEvent>(scene, reference, std::move(callback), origin);
+  },
+                             origin](Scene &owner) mutable {
+    detail::SceneAccess::onEditing(owner, registration, origin);
+  }};
+}
+
+/** @tparam Callback Owning managed action taking EditingFinishedEvent or no arguments.
+ * @param reference Editor published by this scene's recipe.
+ * @param callback FIFO observation of Enter or focus loss in every edit mode, including rejected attempts.
+ * @param origin Registration site retained through deferred mounting and input diagnostics.
+ * @return Pipe stage reusing the existing commit result; no second validator or model update runs.
+ * Deferred/clean blur has no result receipt. Events own their values; the callback borrows them synchronously.
+ * Legacy-result removal suppresses delivery; reentrant focus from that attempt does not duplicate completion.
+ */
+template <class Callback>
+  requires portals::detail::ManagedAction<Callback, EditingFinishedEvent>
+auto onEditingFinished(Ref<LineEdit> reference, Callback callback,
+                       std::source_location origin = std::source_location::current()) {
+  return detail::SceneStage{[registration = [reference = std::move(reference), callback = std::move(callback),
+                                             origin](ManagedScene &scene) mutable -> std::expected<void, ManagedError> {
+    return detail::EditorEventAccess::attach<EditingFinishedEvent>(scene, reference, std::move(callback), origin);
+  },
+                             origin](Scene &owner) mutable {
+    detail::SceneAccess::onEditing(owner, registration, origin);
   }};
 }
 

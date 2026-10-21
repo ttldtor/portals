@@ -268,12 +268,71 @@ determines capacity. `derive` accepts the existing optional output invalidation
 Every output is fresh and read-only, so declared dependency cycles cannot be
 constructed. Arbitrary captured side effects are not tracked; bounded
 nonconvergence returns `WOULD_BLOCK` and does not diagnose a hidden graph cycle.
-`Ref::draftText()`, `captionText()` and `committedText()` are snapshot-only text
-sources and are not reactive derive inputs on their own. `owner.liveText(source)`
-provides a reactive bridge. Text-to-list adapters through `ui::words` and
+`Ref::draftText()`, `captionText()` and `committedText()` describe text identities.
+Their `snapshot()` method copies once. Caption factories attach a live observation:
+`ui::label(field.text())`, `ui::label(field.draftText())` and
+`ui::button(field.committedText())`. Outside those factories, sources are not
+reactive derive inputs on their own; `owner.liveText(source)` provides that bridge.
+Text-to-list adapters through `ui::words` and
 `ui::graphemes`, and derived `RowCollection<T>` sources through `owner.model`,
 are also available; see [the examples below](#live-text-transforms).
 General binding expressions remain planned.
+
+## Live editor captions and editing events {#live-editor-captions}
+
+This complete application shows the visible draft beside the accepted value.
+For just the caption binding, start with the [smaller complete program](examples/guide_live_captions.cpp).
+Type `invalid` and press Enter: validation rejects publication while preserving the
+draft. Tab moves focus without accepting it in `EXPLICIT` mode. Escape adopts the
+latest model value. The button appends an undoable programmatic edit; both live
+captions follow their sources, but the edit is not reported as user input.
+
+[Complete source](examples/guide_editor_events.cpp)
+\include{lineno} guide_editor_events.cpp
+
+`field.text()` passed to a caption factory observes the visible draft. The explicit
+`draftText()` source has the same meaning; `committedText()` reads the latest accepted
+model, including external updates while a draft conflicts. Passing ordinary text
+creates an independent caption. `destination.text() = source.text()` still copies
+once. Call `snapshot()` to obtain an independent owning text value.
+
+Bindings initialize after all controls mount, even when a caption precedes its
+source. Self-bindings and declared caption cycles reject the mount with
+`INVALID_ARGUMENT`; failed mounts publish no references. Observations retain no
+widgets, do not retarget reused references and disconnect when receivers disappear.
+Removing a source leaves its last successfully applied caption. Existing observer
+budgets apply. Runtime chains use the bounded recovery passes (16 by default);
+nonconvergence returns `WOULD_BLOCK` rather than redrawing indefinitely.
+
+`ui::onTextEdited(field, callback)` reports actual user text changes, including paste,
+cut and Undo/Redo. Cursor movement, selection, equal replacements, programmatic writes
+and rejected operations that change no text do not emit it. Validation rejection
+after accepting a draft still counts as a text edit. Escape emits an edit only when
+successful cancellation actually changes the visible text; it emits no completion.
+The callback accepts no arguments
+or `const TextEditedEvent&`; its `result` owns the existing editor receipt.
+
+`ui::onEditingFinished(field, callback)` accepts no arguments or
+`const EditingFinishedEvent&`. `reason` distinguishes `ENTER` from `FOCUS_LOST`;
+`outcome` is `APPLIED`, `UNCHANGED`, `DEFERRED`, `VALIDATION_REJECTED`, `CONFLICT` or
+`FAILED`. `result` preserves the exact attempted operation, including notification
+rejection; it is absent when focus loss makes no publication attempt.
+
+| Boundary | IMMEDIATE | ON_COMPLETION | EXPLICIT |
+| --- | --- | --- | --- |
+| User text change | Accept draft, attempt publication | Retain draft | Retain draft |
+| Enter | Attempt publication | Attempt publication | Attempt publication |
+| Focus loss, dirty draft | Retain draft, `DEFERRED` | Attempt publication | Retain draft, `DEFERRED` |
+| Focus loss, clean draft | `UNCHANGED`, no attempt | `UNCHANGED`, no attempt | `UNCHANGED`, no attempt |
+
+Enter does not move focus. Completion observers reuse the existing attempt; they do
+not run validation twice. Focus changes made while delivering that attempt do not
+repeat its commit or completion event. An independent later focus loss is distinct.
+The legacy result callback runs first; removal stops remaining event delivery.
+Pipe handlers run in registration order and may return the existing checked action
+results. Handler errors use normal application diagnostics. Combined defaults are
+256 editing handlers per scene and 64 per field, configurable through
+`ManagedOptions::maxEditingHandlers` and `maxEditingHandlersPerNode`.
 
 ## Event interfaces
 

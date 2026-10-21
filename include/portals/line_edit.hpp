@@ -95,6 +95,43 @@ struct LineEditResult {
   LineEditTrigger trigger{LineEditTrigger::INPUT}; ///< Entry path; independent of the confirmation status.
 };
 
+/** @brief Accepted user text delta, including history commands; owns the exact existing operation result. */
+struct TextEditedEvent {
+  LineEditResult result; ///< Original result, including semantic rejection after accepting a draft.
+};
+
+/** @brief Boundary at which the user finishes an editing operation. */
+enum class EditingFinishedReason {
+  ENTER,     ///< Enter or the equivalent Action::ACTIVATE command.
+  FOCUS_LOST ///< Synchronous loss of this editor's focus.
+};
+
+/** @brief Outcome of the existing publication policy at an editing boundary. */
+enum class EditingFinishedOutcome {
+  APPLIED,             ///< Property::set changed the committed model value.
+  UNCHANGED,           ///< An equal set succeeded, or a clean editor lost focus without attempting publication.
+  DEFERRED,            ///< Focus loss retained a dirty draft without attempting publication in this mode.
+  VALIDATION_REJECTED, ///< The existing validator rejected the retained draft.
+  CONFLICT,            ///< The model revision changed before publication.
+  FAILED               ///< Technical failure; inspect the original result's error.
+};
+
+/** @brief Owning completion observation; does not perform another validation or model update. */
+struct EditingFinishedEvent {
+  EditingFinishedReason reason{EditingFinishedReason::ENTER};        ///< Independent completion boundary.
+  EditingFinishedOutcome outcome{EditingFinishedOutcome::UNCHANGED}; ///< Publication policy outcome.
+  std::optional<LineEditResult> result; ///< Exact attempted operation, absent when blur performed no attempt.
+};
+
+/** @brief Optional owning UI callbacks delivered after the legacy result, while the node remains live.
+ * Callbacks may remove the node or binding. Node removal stops subsequent delivery. Reentrant focus changes
+ * publish presentation without repeating this operation's completion or commit.
+ */
+struct LineEditEvents {
+  std::function<void(const TextEditedEvent &)> textEdited;           ///< Actual accepted user byte changes only.
+  std::function<void(const EditingFinishedEvent &)> editingFinished; ///< Enter and focus-loss boundaries in every mode.
+};
+
 /** @brief Injected UI clipboard boundary; called only from input handling, never from a frame.
  * The binding shares ownership. Implementations must return promptly and may reenter UI code.
  * Bytes remain data; no terminal escapes are interpreted. Exceptions become FAILED results.
@@ -293,8 +330,9 @@ private:
   std::pair<std::expected<void, TreeError>, bool> editorCommand(bool redo, bool clear, std::source_location origin);
   struct State;
   friend std::expected<LineEditBinding, TreeError>
-  bindLineEdit(WidgetTree &, EventRouter &, Node<LineEdit>, std::shared_ptr<Property<std::string>>,
-               std::function<void(LineEditResult)>, std::shared_ptr<Clipboard>, std::function<bool(std::string_view)>);
+  bindLineEditWithEvents(WidgetTree &, EventRouter &, Node<LineEdit>, std::shared_ptr<Property<std::string>>,
+                         std::function<void(LineEditResult)>, std::shared_ptr<Clipboard>,
+                         std::function<bool(std::string_view)>, LineEditEvents);
   LineEditBinding(std::shared_ptr<State> state, ActionBinding action, Subscription subscription);
   std::shared_ptr<State> state_;
   ActionBinding action_;
@@ -306,7 +344,7 @@ private:
  * @param router Borrowed router for this tree, outliving binding.
  * @param node Observing editor handle; one action registration is allowed per node.
  * @param model Required shared model owner. External values must satisfy editor text limits.
- * @param result Required owning callback, invoked last for editing/confirmation operations; may remove
+ * @param result Required owning callback, invoked before typed events for editing/confirmation operations; may remove
  * node/ancestors or destroy the binding. Successful commits stay committed if this callback throws.
  * @param clipboard Optional shared UI service for Ctrl+C/X/V; absence reports CLIPBOARD_FAILED.
  * @param validate Optional publication predicate borrowing an owned candidate only during its call.
@@ -331,4 +369,13 @@ std::expected<LineEditBinding, TreeError> bindLineEdit(WidgetTree &tree, EventRo
                                                        std::function<void(LineEditResult)> result,
                                                        std::shared_ptr<Clipboard> clipboard = {},
                                                        std::function<bool(std::string_view)> validate = {});
+
+/** @copydoc bindLineEdit
+ * @param events Typed observations delivered after the legacy result; no borrowed widget text survives callbacks.
+ */
+std::expected<LineEditBinding, TreeError>
+bindLineEditWithEvents(WidgetTree &tree, EventRouter &router, Node<LineEdit> node,
+                       std::shared_ptr<Property<std::string>> model, std::function<void(LineEditResult)> result,
+                       std::shared_ptr<Clipboard> clipboard, std::function<bool(std::string_view)> validate,
+                       LineEditEvents events);
 } // namespace portals

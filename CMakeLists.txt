@@ -889,7 +889,7 @@ if(PORTALS_BUILD_TESTS)
   add_test(NAME portals.dialog-layout COMMAND portals_dialog_layout)
   add_executable(portals_managed_dialog tests/managed_dialog.cpp)
   foreach(variant IN ITEMS message_box message_box_oom message_box_lifetime message_box_async message_box_reentry
-      key_binding key_binding_lifetime key_binding_oom key_help managed_rich_action)
+      key_binding key_binding_lifetime key_binding_oom key_help managed_rich_action editor_events)
     add_executable(portals_${variant} tests/${variant}.cpp)
     target_link_libraries(portals_${variant} PRIVATE portals::core)
     portals_enable_warnings(portals_${variant})

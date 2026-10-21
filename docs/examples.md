@@ -18,6 +18,7 @@ The categories describe the learning path; the source directories remain stable.
 | Category | Program and complete source | What it demonstrates |
 | --- | --- | --- |
 | Basics | [click handlers](../examples/click_handlers/main.cpp), `portals_click_handlers` | Observing refs, late click handlers and short quit. No CLI. |
+| Basics | [live captions](examples/guide_live_captions.cpp), [editing events](examples/guide_editor_events.cpp), [guide](bindings-guide.md#live-editor-captions) | Draft versus accepted text, user edits and Enter/focus-loss outcomes without manual subscriptions. Built with tests enabled. |
 | Basics | [compact framed form](../examples/compact/main.cpp), `portals_compact_form` | Ready-made border and gauge, fixed sizing, a plain button and exact-ref styling; no custom widget or CLI. |
 | Basics | [protected editor](examples/guide_editor_display.cpp), `portals_docs_editor_display` | Internal editor state, owning placeholder, password display and checked undoable Clear; no CLI. Built with tests enabled. |
 | Basics | [data presentation](data-presentation.md), [complete source](examples/guide_data_state.cpp), `portals_docs_data_state` | Explicit loading, ready, empty, failed, offline and refreshing states around ordinary content; no CLI. Built with tests enabled. |

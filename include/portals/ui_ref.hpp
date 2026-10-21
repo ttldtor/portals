@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
-#include <portals/managed.hpp>
 #include <portals/detail/dialog_command_result.hpp>
+#include <portals/managed.hpp>
 #include <portals/text_value.hpp>
 
 namespace portals::ui {
@@ -133,7 +133,7 @@ using TextResolver = std::function<std::expected<std::string, TextResourceError>
 /** @brief Copyable read-only source observing one caption, visible draft or accepted editor model.
  * Construction and copying do not read, subscribe or retain the scene/widget. Operations are UI-affine;
  * an unpublished source returns CLOSED, and removal preserves the original stale node identity.
- * There is no automatic binding or remount retargeting. Returned text owns its storage independently.
+ * Caption factories can attach a live observation; snapshot() remains independent. No remount retargeting occurs.
  */
 class TextSource {
 public:
@@ -147,6 +147,7 @@ private:
   template <class T> friend class Ref;
   friend class portals::ManagedScene;
   friend struct detail::Access;
+  friend class TextProperty;
   enum class Kind {
     CAPTION,
     DRAFT,
@@ -250,6 +251,13 @@ private:
  */
 class TextProperty {
 public:
+  /** @return Deferred visible-text identity for a caption factory; does not read or subscribe.
+   * Assignment between TextProperty values still copies once rather than creating a binding.
+   */
+  TextSource source() const {
+    return TextSource(target_, expectedType_ == "LineEdit" ? TextSource::Kind::DRAFT : TextSource::Kind::CAPTION);
+  }
+
   /** @param other Observing proxy copied without reading or changing a widget; errors/resolver are copied too. */
   TextProperty(const TextProperty &other) = default;
 

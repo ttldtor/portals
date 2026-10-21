@@ -59,15 +59,36 @@ bool installedExampleEquivalence() {
         const auto baseline = before.snapshot();
         const auto updated = current.snapshot();
         constexpr std::size_t WIDTH = 80;
-        constexpr std::size_t COMMON_ROWS = 6;
-        // Themes is appended after Quit; all existing editor/action cells remain identical.
-        if (!std::equal(baseline.cells.begin(), baseline.cells.begin() + COMMON_ROWS * WIDTH, updated.cells.begin())) {
-          std::cerr << "Installed gallery changed an existing editor/action row\n";
+        constexpr std::size_t THEMES_ROW = 7;
+        // Live preview inserts row 3; compare every unchanged editor/action cell at its new row.
+        for (std::size_t row = 0; row < 6; ++row) {
+          if (row == 1) {
+            continue;
+          }
+
+          const auto currentRow = row >= 3 ? row + 1 : row;
+
+          if (!std::equal(baseline.cells.begin() + row * WIDTH, baseline.cells.begin() + (row + 1) * WIDTH,
+                          updated.cells.begin() + currentRow * WIDTH)) {
+            std::cerr << "Installed gallery changed an existing editor/action row\n";
+            return false;
+          }
+        }
+
+        std::string preview;
+
+        for (std::size_t column = 0; column < WIDTH; ++column) {
+          preview += updated.cells[3 * WIDTH + column].glyph;
+        }
+
+        if (!preview.starts_with("Ada")) {
+          std::cerr << "Installed gallery lost its live editor preview\n";
           return false;
         }
+
         std::string themeRow;
         for (std::size_t column = 0; column < WIDTH; ++column) {
-          themeRow += updated.cells[COMMON_ROWS * WIDTH + column].glyph;
+          themeRow += updated.cells[THEMES_ROW * WIDTH + column].glyph;
         }
         if (themeRow.find("Themes") == std::string::npos) {
           std::cerr << "Installed gallery lost its appended theme action\n";

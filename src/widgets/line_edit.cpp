@@ -337,16 +337,51 @@ struct LineEditBinding::State {
   std::uint64_t revision{};
   bool initialized{};
   bool busy{};
+  LineEditEvents events{};
+  bool userTextChanged{};
+  bool delivering{};
+  bool completionDelivery{};
+
+  static EditingFinishedOutcome finishOutcome(const LineEditResult &result) {
+    switch (result.status) {
+    case LineEditStatus::COMMITTED:
+      return result.commit && result.commit->changed ? EditingFinishedOutcome::APPLIED
+                                                     : EditingFinishedOutcome::UNCHANGED;
+    case LineEditStatus::VALIDATION_FAILED:
+      return EditingFinishedOutcome::VALIDATION_REJECTED;
+    case LineEditStatus::CONFLICT:
+      return EditingFinishedOutcome::CONFLICT;
+    default:
+      return EditingFinishedOutcome::FAILED;
+    }
+  }
+
+  void deliver(const LineEditResult &result, bool finish = false) {
+    BusyGuard delivery(delivering);
+    BusyGuard completion(completionDelivery, finish);
+
+    // Preserve the legacy callback boundary and never borrow the widget across extension code.
+    onResult(result);
+
+    if (userTextChanged && events.textEdited && alive()) {
+      events.textEdited(TextEditedEvent{result});
+    }
+
+    if (finish && events.editingFinished && alive()) {
+      events.editingFinished({EditingFinishedReason::ENTER, finishOutcome(result), result});
+    }
+  }
 
   struct BusyGuard {
     bool &active;
+    bool previous;
 
-    explicit BusyGuard(bool &value) : active(value) {
-      active = true;
+    explicit BusyGuard(bool &value, bool next = true) : active(value), previous(value) {
+      active = next;
     }
 
     ~BusyGuard() {
-      active = false;
+      active = previous;
     }
   };
 
@@ -564,6 +599,7 @@ struct LineEditBinding::State {
     }
 
     edit.dirty_ = changed || edit.dirty_;
+    userTextChanged = changed || userTextChanged;
 
     return changed && edit.options_.editMode == EditMode::IMMEDIATE ? commit(edit, false)
                                                                     : LineEditResult{LineEditStatus::EDITED};
@@ -644,7 +680,9 @@ struct LineEditBinding::State {
 
     if (event.action == Action::CANCEL) {
       auto snapshot = model->snapshot();
+      const bool changed = snapshot && edit.text_.bytes() != (*snapshot)->value;
       auto status = snapshot ? adopt(edit, **snapshot) : std::unexpected(snapshot.error());
+      userTextChanged = status && changed;
 
       return status ? LineEditResult{LineEditStatus::CANCELLED} : failed(status.error());
     }
@@ -832,6 +870,7 @@ struct LineEditBinding::State {
     }
 
     edit.dirty_ = true;
+    userTextChanged = true;
     auto outcome =
       edit.options_.editMode == EditMode::IMMEDIATE ? commit(edit, false) : LineEditResult{LineEditStatus::EDITED};
     return {outcome.error ? std::expected<void, TreeError>(std::unexpected(*outcome.error))
@@ -876,13 +915,15 @@ struct LineEditBinding::State {
       return {std::unexpected(historyError(prepared.error())), {}};
     }
 
-    auto applied = accept(edit, *prepared, true);
+    const bool changed = prepared->text() && edit.text_.bytes() != prepared->text()->bytes();
+    auto applied = accept(edit, *prepared, changed);
 
     if (!applied) {
       return {applied, {}};
     }
 
     edit.dirty_ = true;
+    userTextChanged = changed;
     auto outcome =
       edit.options_.editMode == EditMode::IMMEDIATE ? commit(edit, false) : LineEditResult{LineEditStatus::EDITED};
 
@@ -950,6 +991,7 @@ struct LineEditBinding::State {
     }
 
     BusyGuard guard(busy);
+    userTextChanged = false;
 
     const auto shortcut = shortcutCharacter(std::get_if<KeyEvent>(&event));
     if (edit.options_.displayMode != LineEditDisplayMode::NORMAL && (shortcut == U'c' || shortcut == U'x')) {
@@ -965,15 +1007,21 @@ struct LineEditBinding::State {
 
     if (outcome) {
       // Last widget access occurred in compute; result may remove the node or binding.
-      onResult(*outcome);
+      const auto *command = std::get_if<ActionEvent>(&event);
+
+      deliver(*outcome, command && command->action == Action::ACTIVATE);
     }
 
     return outcome || historyShortcut ? EventReply::HANDLED : EventReply::IGNORED;
   }
 
   std::expected<void, TreeError> focus(bool focused) {
-    if (busy) {
-      return std::unexpected(TreeError::WOULD_BLOCK);
+    if (busy && (!delivering || completionDelivery)) {
+      // Focus publication can reenter from an admitted callback. Keep its presentation in sync,
+      // but do not turn the same operation into another commit or completion observation.
+      return tree.edit(node, [&](LineEdit &edit) {
+        edit.focused_ = focused;
+      });
     }
 
     BusyGuard guard(busy);
@@ -983,8 +1031,13 @@ struct LineEditBinding::State {
     }
 
     std::optional<LineEditResult> outcome;
+    EditingFinishedOutcome completion = EditingFinishedOutcome::UNCHANGED;
     auto edited = tree.edit(node, [&](LineEdit &edit) {
       edit.focused_ = focused;
+
+      if (!focused && edit.dirty_) {
+        completion = EditingFinishedOutcome::DEFERRED;
+      }
 
       if (!focused && edit.dirty_ && edit.options_.editMode == EditMode::ON_COMPLETION) {
         try {
@@ -1003,7 +1056,18 @@ struct LineEditBinding::State {
 
     if (outcome) {
       outcome->trigger = LineEditTrigger::BLUR;
+      BusyGuard delivery(delivering);
+      BusyGuard completionGuard(completionDelivery);
+
       onResult(*outcome);
+      completion = finishOutcome(*outcome);
+    }
+
+    if (!focused && events.editingFinished && alive()) {
+      BusyGuard delivery(delivering);
+      BusyGuard completionGuard(completionDelivery);
+
+      events.editingFinished({EditingFinishedReason::FOCUS_LOST, completion, outcome});
     }
 
     return outcome && outcome->error ? std::expected<void, TreeError>(std::unexpected(*outcome->error))
@@ -1084,6 +1148,7 @@ std::expected<void, TreeError> LineEditBinding::setDraft(GraphemeText text, std:
   }
 
   State::BusyGuard guard(state->busy);
+  state->userTextChanged = false;
   std::expected<void, TreeError> updated;
   std::optional<LineEditResult> outcome;
 
@@ -1196,6 +1261,7 @@ std::pair<std::expected<void, TreeError>, bool> LineEditBinding::editorCommand(b
   }
 
   State::BusyGuard guard(state->busy);
+  state->userTextChanged = false;
   auto feedback = state->feedback;
 
   if (feedback) {
@@ -1233,7 +1299,7 @@ std::pair<std::expected<void, TreeError>, bool> LineEditBinding::editorCommand(b
   if (operation.outcome) {
     operation.outcome->trigger = LineEditTrigger::FLUENT;
     try {
-      state->onResult(*operation.outcome);
+      state->deliver(*operation.outcome);
     } catch (const std::bad_alloc &) {
       return {std::unexpected(TreeError::NO_MEMORY), false};
     } catch (...) {
@@ -1335,6 +1401,15 @@ std::expected<LineEditBinding, TreeError> bindLineEdit(WidgetTree &tree, EventRo
                                                        std::function<void(LineEditResult)> result,
                                                        std::shared_ptr<Clipboard> clipboard,
                                                        std::function<bool(std::string_view)> validate) {
+  return bindLineEditWithEvents(tree, router, node, std::move(model), std::move(result), std::move(clipboard),
+                                std::move(validate), {});
+}
+
+std::expected<LineEditBinding, TreeError>
+bindLineEditWithEvents(WidgetTree &tree, EventRouter &router, Node<LineEdit> node,
+                       std::shared_ptr<Property<std::string>> model, std::function<void(LineEditResult)> result,
+                       std::shared_ptr<Clipboard> clipboard, std::function<bool(std::string_view)> validate,
+                       LineEditEvents events) {
   if (!model || !result) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
@@ -1357,6 +1432,7 @@ std::expected<LineEditBinding, TreeError> bindLineEdit(WidgetTree &tree, EventRo
       LineEditBinding::State{tree, node, std::move(model), std::move(clipboard), std::move(validate), std::move(result),
 
                              std::make_unique<TextHistory>(options.history, options.widthPolicy, options.limits)});
+    state->events = std::move(events);
 
     auto subscription = state->model->observe(node, [state](LineEdit &, auto) {
       // Read latest rather than replaying a potentially obsolete delivered snapshot.
