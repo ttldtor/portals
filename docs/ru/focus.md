@@ -164,10 +164,16 @@ ON_COMPLETION и EXPLICIT сохраняются: отказ валидации 
 ui::Ref<Column> panel;
 ui::Ref<Button> accept;
 auto recipe = ui::column(
-    ui::column(panel,
-        ui::button(accept, "Accept", [] {}).focusDefault()).focusScope(),
-    ui::button("Open", [panel] { (void)panel.enterFocusScope(); }),
-    ui::button("Back", [panel] { (void)panel.leaveFocusScope(); }));
+  ui::column(panel,
+    ui::button(accept, "Accept", [] {
+    }).focusDefault()).focusScope(),
+  ui::button("Open",
+    [panel] {
+      (void)panel.enterFocusScope();
+    }),
+  ui::button("Back", [panel] {
+    (void)panel.leaveFocusScope();
+  }));
 auto mounted = ui::mount(scene, std::move(recipe));
 if (!mounted) {
   return std::unexpected(mounted.error());

@@ -36,7 +36,6 @@ int main() {
           return {};
         })
       | ui::onKey("F10", ui::quit);
-  }
-    | ui::runApp();
+  } | ui::runApp();
   // clang-format on
 }

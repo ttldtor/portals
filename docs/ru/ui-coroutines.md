@@ -26,10 +26,12 @@ UiTask finishLater(UiAsyncContext context, SchedulerTime deadline,
   co_return waited;
 }
 
-// Inside the UI configuration callback, after successful owner creation.
+// Inside the UI configuration callback, after successful
+// owner creation.
 return start.onClick([&owner, &app, status] {
-  auto started = owner.start(
-    finishLater(owner.context(), app.now() + delayMilliseconds, status));
+  auto started = owner.start(finishLater(owner.context(),
+    app.now() + delayMilliseconds,
+    status));
 
   if (!started && started.error() != AsyncError::WOULD_BLOCK) {
     status.text() = "Start failed";
@@ -61,10 +63,11 @@ struct AsyncAction {
   std::optional<portals::AsyncError> error;
 };
 
-portals::UiTask finishLater(portals::UiAsyncContext context,
-                           portals::SchedulerTime deadline,
-                           portals::ui::Ref<portals::Label> status,
-                           std::shared_ptr<AsyncAction> action) {
+portals::UiTask finishLater(
+  portals::UiAsyncContext context,
+  portals::SchedulerTime deadline,
+  portals::ui::Ref<portals::Label> status,
+  std::shared_ptr<AsyncAction> action) {
   status.text() = "Waiting";
 
   auto waited = co_await context.until(deadline);
@@ -109,8 +112,11 @@ int main() {
   });
 
   const int result = scene
-    | ui::configure([action, status](ManagedScene &, Application &app) {
-        auto created = UiAsync::create(app.scheduler(), app.tree(), app.root());
+    | ui::configure(
+      [action, status](ManagedScene &, Application &app) {
+        auto created = UiAsync::create(app.scheduler(),
+          app.tree(),
+          app.root());
 
         if (!created) {
           action->error = created.error();
@@ -121,14 +127,18 @@ int main() {
 
         action->owner = std::move(*created);
       })
-    | ui::configure([action, status, start](ManagedScene &, Application &app) {
+    | ui::configure(
+      [action, status, start](ManagedScene &, Application &app) {
         auto bound = start.onClick([action, status, &app] {
           if (!action->owner) {
             return;
           }
 
           auto started = action->owner->start(
-            finishLater(action->owner->context(), app.now() + delayMilliseconds, status, action));
+            finishLater(action->owner->context(),
+              app.now() + delayMilliseconds,
+              status,
+              action));
 
           if (!started && started.error() != AsyncError::WOULD_BLOCK) {
             action->error = started.error();

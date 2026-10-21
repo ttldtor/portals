@@ -12,13 +12,14 @@ int main() {
 
   ui::Ref<Label> help;
 
-  auto scene = ui::scene(ui::label(help, "F1: Help; F10: Exit"));
+  auto scene = ui::scene(
+    ui::label(help, "F1: Help; F10: Exit"));
 
   return scene
-    | ui::onKey("F1",
-                [help] {
-                  help.text() = "Use Tab to move focus and Enter to activate a control";
-                })
+    | ui::onKey("F1", [help] {
+        help.text() = "Use Tab to move focus and Enter "
+                      "to activate a control";
+      })
     | ui::onKey("F10", ui::quit)
     | ui::runApp();
 }
@@ -40,9 +41,11 @@ scene.onKey(ui::repeat("W"), move);      // Native REPEAT only.
 scene.onKey(ui::release("W"), stop);     // Native RELEASE only.
 scene.onKey(ui::pressRepeat("W"), move); // PRESS or native REPEAT.
 scene.onKey(ui::release({key::F10, key::ALT + key::Q}), stop);
-scene.onKey(ui::repeat({key::UP, key::DOWN, key::LEFT, key::RIGHT}), move);
+scene.onKey(ui::repeat({key::UP, key::DOWN, key::LEFT,
+  key::RIGHT}), move);
 scene
-  | ui::onKey(ui::keyActions("W", {KeyAction::PRESS, KeyAction::RELEASE}), action);
+  | ui::onKey(ui::keyActions("W", {KeyAction::PRESS,
+    KeyAction::RELEASE}), action);
 ```
 
 `ui::press(source)` selects exact PRESS. All helpers accept text, a typed chord,

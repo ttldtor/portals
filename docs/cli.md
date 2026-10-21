@@ -36,24 +36,34 @@ struct Options {
 int main(int argc, char **argv) {
   namespace ui = portals::ui;
   Options options;
+
   auto parser = ::lyra::cli()
-    | ::lyra::opt(options.width, "columns")["-w"]["--width"]("Requested columns.")
-    | ::lyra::opt(options.theme, "theme")["-t"]["--theme"]("Palette.").choices("modern", "classic")
-    | ::lyra::opt(options.ansi16)["--ansi16"]("Use 16 ANSI colors.");
+    | ::lyra::opt(options.width, "columns")["-w"]["--width"](
+        "Requested columns.")
+    | ::lyra::opt(options.theme, "theme")["-t"]["--theme"](
+        "Palette.").choices("modern", "classic")
+    | ::lyra::opt(options.ansi16)["--ansi16"](
+        "Use 16 ANSI colors.");
 
   return ui::scene([&](portals::ManagedScene &) {
-           return ui::vbox(ui::label(options.theme), ui::label(std::to_string(options.width)));
-         })
+    return ui::vbox(
+      ui::label(options.theme),
+      ui::label(std::to_string(options.width)));
+  })
     | ui::applicationOptions([&] {
-           portals::ApplicationOptions settings;
+        portals::ApplicationOptions settings;
 
-           settings.writer.colorMode = options.ansi16 ? portals::ColorMode::ANSI16 : portals::ColorMode::TRUE_COLOR;
+        settings.writer.colorMode = options.ansi16
+          ? portals::ColorMode::ANSI16
+          : portals::ColorMode::TRUE_COLOR;
 
-           return settings;
-         })
+        return settings;
+      })
     | ui::onKey(portals::key::F10, ui::quit)
     | ui::reportOnError()
-    | ui::runApp(argc, argv, ui::lyra::cli(parser, {.version = "my_application 1.0"}));
+    | ui::runApp(argc, argv,
+        ui::lyra::cli(parser,
+          {.version = "my_application 1.0"}));
 }
 ```
 

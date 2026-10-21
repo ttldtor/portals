@@ -27,7 +27,6 @@ int main() {
       | ui::onKey("F8", [notices] { notices.activateLatest(); })
       | ui::onKey("F9", [notices] { notices.dismissLatest(); })
       | ui::onKey("F10", ui::quit);
-  }
-    | ui::runApp();
+  } | ui::runApp();
   // clang-format on
 }

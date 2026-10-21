@@ -246,18 +246,29 @@ if (!created) {
 }
 
 auto scene = std::move(*created);
-auto registered = scene->onError([](const ManagedDiagnostic &diagnostic) {
-  // Inspect typed fields here; the reference is borrowed for this call only.
-  // Presentation/output remains application policy.
-});
+auto registered =
+  scene->onError([](const ManagedDiagnostic &diagnostic) {
+    // Inspect typed fields here; the reference is
+    // borrowed for this call only.
+    // Presentation/output remains application policy.
+  });
 if (!registered) {
   return std::unexpected(registered.error());
 }
 
-std::array contexts{ManagedDiagnosticContext{
-  "lookup", "message", "form", "LineEdit", std::source_location::current()}};
+std::array contexts{ManagedDiagnosticContext{"lookup",
+  "message",
+  "form",
+  "LineEdit",
+  std::source_location::current()}};
 auto reported = scene->reportError(
-  ManagedError{ManagedPhase::STATE, {}, TreeError::INVALID_ARGUMENT, {}, {}}, contexts);
+  ManagedError{
+    ManagedPhase::STATE,
+    {},
+    TreeError::INVALID_ARGUMENT,
+    {},
+    {}},
+  contexts);
 if (!reported) {
   // Handle WRONG_THREAD or CLOSED explicitly.
 }

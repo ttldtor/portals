@@ -49,7 +49,8 @@ Start/center/end используют те же правила. При нехв�
 
 ```cpp
 // Between frames, after a viewport change:
-auto invalidation = tree.invalidate(root, portals::Invalidation::LAYOUT);
+auto invalidation =
+  tree.invalidate(root, portals::Invalidation::LAYOUT);
 if (!invalidation) {
   return invalidation;
 }
@@ -62,7 +63,8 @@ auto frame = tree.frame([&] {
     return;
   }
 
-  // Paint the arranged tree and render borrowed commands before returning.
+  // Paint the arranged tree and render borrowed commands
+  // before returning.
 });
 ```
 

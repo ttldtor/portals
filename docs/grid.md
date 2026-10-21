@@ -21,7 +21,9 @@ int main() {
     ui::label("Ada").reference(value)));
 
   return scene
-    | ui::configure([=](ManagedScene &, Application &app) -> std::expected<void, ManagedError> {
+    | ui::configure(
+      [=](ManagedScene &,
+        Application &app) -> std::expected<void, ManagedError> {
         GridOptions options;
 
         options.columns = {AxisSize{}, AxisSize{}};
@@ -32,11 +34,16 @@ int main() {
           {value.node().id(), 0, 1}
         };
 
-        auto configured = setGridOptions(app.tree(), grid.node(), options);
+        auto configured =
+          setGridOptions(app.tree(), grid.node(), options);
 
         if (!configured) {
           return std::unexpected(
-            ManagedError{ManagedPhase::BIND, grid.node().id(), configured.error(), {}, {}});
+            ManagedError{ManagedPhase::BIND,
+              grid.node().id(),
+              configured.error(),
+              {},
+              {}});
         }
 
         return {};

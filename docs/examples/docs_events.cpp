@@ -30,7 +30,6 @@ int main() {
                     status.text() = "F2";
                   })
       | ui::onKey("F10", ui::quit);
-  }
-    | ui::runApp();
+  } | ui::runApp();
   // clang-format on
 }

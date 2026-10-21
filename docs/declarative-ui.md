@@ -209,12 +209,14 @@ int main() {
   using namespace portals;
 
   auto scene = ui::scene([](ManagedScene &owner) {
-    return owner.state(std::string("Portals")).transform([](auto model) {
-      return ui::vbox(
-        ui::lineEdit(model),
-        ui::label(model),
-        ui::button(model, [] { ui::quit(); }));
-    });
+    return owner.state(std::string("Portals"))
+      .transform([](auto model) {
+        return ui::vbox(ui::lineEdit(model),
+          ui::label(model),
+          ui::button(model, [] {
+            ui::quit();
+          }));
+      });
   });
 
   return scene
@@ -369,10 +371,13 @@ produced recipes. The range is never used during mount.
 int main() {
   using namespace portals;
 
-  const std::array<std::string_view, 3> captions{"Mercury", "Venus", "Earth"};
-  auto scene = ui::scene(ui::vbox(captions | std::views::transform([](std::string_view text) {
-                                  return ui::label(text);
-                                })));
+  const std::array<std::string_view, 3> captions{"Mercury",
+    "Venus",
+    "Earth"};
+  auto scene = ui::scene(ui::vbox(
+    captions | std::views::transform([](std::string_view text) {
+      return ui::label(text);
+    })));
 
   scene.onKey(key::F10, ui::quit);
 
@@ -389,12 +394,17 @@ The same scene with pipe stages:
 int main() {
   using namespace portals;
 
-  const std::array<std::string_view, 3> captions{"Mercury", "Venus", "Earth"};
-  auto scene = ui::scene(ui::vbox(captions | std::views::transform([](std::string_view text) {
-                                  return ui::label(text);
-                                })));
+  const std::array<std::string_view, 3> captions{"Mercury",
+    "Venus",
+    "Earth"};
+  auto scene = ui::scene(ui::vbox(
+    captions | std::views::transform([](std::string_view text) {
+      return ui::label(text);
+    })));
 
-  return scene | ui::onKey(key::F10, ui::quit) | ui::runApp();
+  return scene
+    | ui::onKey(key::F10, ui::quit)
+    | ui::runApp();
 }
 ```
 

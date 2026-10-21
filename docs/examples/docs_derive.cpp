@@ -26,7 +26,6 @@ int main() {
     });
     return std::move(window)
       | ui::onKey("F10", ui::quit);
-  }
-    | ui::runApp();
+  } | ui::runApp();
   // clang-format on
 }

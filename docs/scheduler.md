@@ -28,19 +28,24 @@ int main() {
   }
 
   constexpr auto DELAY = seconds(1);
-  const auto deadline = duration_cast<milliseconds>(steady_clock::now().time_since_epoch() + DELAY);
+  const auto deadline = duration_cast<milliseconds>(
+    steady_clock::now().time_since_epoch() + DELAY);
   bool ready = false;
-  auto timer = (*scheduler)->at(*scope, static_cast<SchedulerTime>(deadline.count()),
-                               [&ready] {
-                                 ready = true;
-                               });
+  auto timer = (*scheduler)->at(
+    *scope,
+    static_cast<SchedulerTime>(deadline.count()),
+    [&ready] {
+      ready = true;
+    });
 
   if (!timer) {
     return 1;
   }
 
   while (!ready) {
-    if (!(*scheduler)->waitFor(duration_cast<milliseconds>(DELAY)) || !(*scheduler)->dispatch()) {
+    if (!(*scheduler)
+          ->waitFor(duration_cast<milliseconds>(DELAY))
+      || !(*scheduler)->dispatch()) {
       return 1;
     }
   }

@@ -9,11 +9,16 @@
 ```cpp
 int main() {
   auto scene = ui::scene([](ManagedScene &owner) {
-    return owner.model<Ohlc>(std::make_shared<Prices>()).transform([](auto model) {
-      return ui::chart(model, [](const Ohlc &price) {
-        return std::optional{price};
-      }, ui::ChartConfig<Ohlc>{.options = {.mode = ChartMode::LINE}});
-    });
+    return owner.model<Ohlc>(std::make_shared<Prices>())
+      .transform([](auto model) {
+        return ui::chart(
+          model,
+          [](const Ohlc &price) {
+            return std::optional{price};
+          },
+          ui::ChartConfig<Ohlc>{
+            .options = {.mode = ChartMode::LINE}});
+      });
   });
 
   return scene
@@ -38,7 +43,10 @@ public:
 
   ModelRows<Ohlc> read(RowRange range) const override {
     return {RangeState::READY,
-            std::span(rows_).subspan(static_cast<std::size_t>(range.first), range.count), {}};
+      std::span(rows_).subspan(
+        static_cast<std::size_t>(range.first),
+        range.count),
+      {}};
   }
 
 private:
@@ -50,11 +58,16 @@ private:
 
 int main() {
   auto scene = ui::scene([](ManagedScene &owner) {
-    return owner.model<Ohlc>(std::make_shared<Prices>()).transform([](auto model) {
-      return ui::chart(model, [](const Ohlc &price) {
-        return std::optional{price};
-      }, ui::ChartConfig<Ohlc>{.options = {.mode = ChartMode::LINE}});
-    });
+    return owner.model<Ohlc>(std::make_shared<Prices>())
+      .transform([](auto model) {
+        return ui::chart(
+          model,
+          [](const Ohlc &price) {
+            return std::optional{price};
+          },
+          ui::ChartConfig<Ohlc>{
+            .options = {.mode = ChartMode::LINE}});
+      });
   });
 
   return scene

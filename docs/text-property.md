@@ -113,7 +113,8 @@ the source's cause and node identity; the receiving collector also records the
 
 ```cpp
 auto localized = message.text(
-  [](std::string_view key) -> std::expected<std::string, TextResourceError> {
+  [](std::string_view key)
+    -> std::expected<std::string, TextResourceError> {
     if (key == "currency") {
       return "USD";
     }

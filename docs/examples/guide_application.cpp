@@ -16,7 +16,6 @@ int main() {
       ui::button(exit, "Exit")))
       | ui::onClick(exit, ui::quit)
       | ui::onKey("F10", ui::quit);
-  }
-    | ui::runApp();
+  } | ui::runApp();
   // clang-format on
 }

@@ -14,8 +14,9 @@ Owning `StyleSheet` values can be constructed from typed rules, `parsePss`, or
 
 ```cpp
 scene.styleLayers()
-     .styleLayer(StyleTier::APPLICATION, "application", applicationStyles)
-     .styleLayer(StyleTier::USER, "contrast", userStyles);
+  .styleLayer(StyleTier::APPLICATION, "application",
+    applicationStyles)
+  .styleLayer(StyleTier::USER, "contrast", userStyles);
 ```
 
 The equivalent stages are:
@@ -23,7 +24,8 @@ The equivalent stages are:
 ```cpp
 auto styled = std::move(scene)
   | ui::styleLayers()
-  | ui::styleLayer(StyleTier::APPLICATION, "application", applicationStyles)
+  | ui::styleLayer(StyleTier::APPLICATION, "application",
+    applicationStyles)
   | ui::styleLayer(StyleTier::USER, "contrast", userStyles);
 ```
 

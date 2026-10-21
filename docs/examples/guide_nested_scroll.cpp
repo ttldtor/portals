@@ -31,7 +31,6 @@ int main() {
         | ui::height(9),
       ui::button("Exit", [] { ui::quit(); })))
       | ui::onKey("F10", ui::quit);
-  }
-    | ui::runApp();
+  } | ui::runApp();
   // clang-format on
 }

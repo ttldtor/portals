@@ -220,10 +220,16 @@ observing Ref in ordinary void callbacks:
 ui::Ref<Column> panel;
 ui::Ref<Button> accept;
 auto recipe = ui::column(
-    ui::column(panel,
-        ui::button(accept, "Accept", [] {}).focusDefault()).focusScope(),
-    ui::button("Open", [panel] { (void)panel.enterFocusScope(); }),
-    ui::button("Back", [panel] { (void)panel.leaveFocusScope(); }));
+  ui::column(panel,
+    ui::button(accept, "Accept", [] {
+    }).focusDefault()).focusScope(),
+  ui::button("Open",
+    [panel] {
+      (void)panel.enterFocusScope();
+    }),
+  ui::button("Back", [panel] {
+    (void)panel.leaveFocusScope();
+  }));
 auto mounted = ui::mount(scene, std::move(recipe));
 if (!mounted) {
   return std::unexpected(mounted.error());
@@ -296,17 +302,20 @@ if (!created) {
 }
 
 auto router = std::move(*created);
-auto connected = router->bind(button, [](MyButton &widget, const portals::RoutedEvent &event) {
-  const auto *action = std::get_if<portals::ActionEvent>(&event);
+auto connected = router->bind(button,
+  [](MyButton &widget, const portals::RoutedEvent &event) {
+    const auto *action =
+      std::get_if<portals::ActionEvent>(&event);
 
-  if (!action || action->action != portals::Action::ACTIVATE) {
-    return portals::EventReply::IGNORED;
-  }
+    if (!action
+      || action->action != portals::Action::ACTIVATE) {
+      return portals::EventReply::IGNORED;
+    }
 
-  widget.activate();
+    widget.activate();
 
-  return portals::EventReply::HANDLED;
-});
+    return portals::EventReply::HANDLED;
+  });
 
 if (!connected) {
   return std::unexpected(connected.error());

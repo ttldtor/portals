@@ -160,7 +160,8 @@ captureless provider returning an explicit-length `string_view`:
 
 ```cpp
 using namespace std::literals;
-// Intentionally invalid: an unknown property at offset 4, line 1, column 5.
+// Intentionally invalid: an unknown property at offset 4,
+// line 1, column 5.
 constexpr auto INVALID = sc::pss([] {
   return "* { missing: true; }"sv;
 });

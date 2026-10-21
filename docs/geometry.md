@@ -50,9 +50,11 @@ checks its origin; translating a nonempty rectangle checks its ends as well.
 const auto local = portals::CellRect::from({-2, 1}, {8, 3});
 const auto viewport = portals::CellRect::from({0, 0}, {80, 24});
 if (local && viewport) {
-  const auto visible = local->intersection(*viewport); // (0, 1), size (6, 3)
+  const auto visible =
+    local->intersection(*viewport); // (0, 1), size (6, 3)
   const auto surface = visible.translated({4, 2});
-  // Check surface before using its value; translation can overflow.
+  // Check surface before using its value; translation can
+  // overflow.
 }
 ```
 

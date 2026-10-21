@@ -12,11 +12,13 @@
 ```cpp
 int main() {
   auto scene = ui::scene([](ManagedScene &owner) {
-    return owner.model<std::string>(std::make_shared<Names>()).transform([](auto model) {
-      return ui::virtualList(model, [](const ModelRow<std::string> &row) {
-        return displayText(row.value);
+    return owner.model<std::string>(std::make_shared<Names>())
+      .transform([](auto model) {
+        return ui::virtualList(model,
+          [](const ModelRow<std::string> &row) {
+            return displayText(row.value);
+          });
       });
-    });
   });
 
   return scene
@@ -42,7 +44,10 @@ public:
 
   ModelRows<std::string> read(RowRange range) const override {
     return {RangeState::READY,
-            std::span(rows_).subspan(static_cast<std::size_t>(range.first), range.count), {}};
+      std::span(rows_).subspan(
+        static_cast<std::size_t>(range.first),
+        range.count),
+      {}};
   }
 
 private:
@@ -63,11 +68,13 @@ GraphemeText displayText(std::string_view value) {
 
 int main() {
   auto scene = ui::scene([](ManagedScene &owner) {
-    return owner.model<std::string>(std::make_shared<Names>()).transform([](auto model) {
-      return ui::virtualList(model, [](const ModelRow<std::string> &row) {
-        return displayText(row.value);
+    return owner.model<std::string>(std::make_shared<Names>())
+      .transform([](auto model) {
+        return ui::virtualList(model,
+          [](const ModelRow<std::string> &row) {
+            return displayText(row.value);
+          });
       });
-    });
   });
 
   return scene

@@ -89,7 +89,8 @@ int main() {
 
   ui::Ref<LineEdit> message;
   ui::Ref<Button> add;
-  auto scene = ui::scene(ui::vbox(ui::lineEdit(message, ""), ui::button(add, "Add Hello")));
+  auto scene = ui::scene(ui::vbox(ui::lineEdit(message, ""),
+    ui::button(add, "Add Hello")));
 
   return scene
     | ui::onClick(add, [message] {

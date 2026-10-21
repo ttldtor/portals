@@ -33,7 +33,6 @@ int main() {
       | ui::onKey("F2", saveNote)
       | ui::onKey("F3", clearDraft)
       | ui::onKey("F10", ui::quit);
-  }
-    | ui::runApp();
+  } | ui::runApp();
   // clang-format on
 }

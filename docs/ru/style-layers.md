@@ -14,8 +14,9 @@
 
 ```cpp
 scene.styleLayers()
-     .styleLayer(StyleTier::APPLICATION, "application", applicationStyles)
-     .styleLayer(StyleTier::USER, "contrast", userStyles);
+  .styleLayer(StyleTier::APPLICATION, "application",
+    applicationStyles)
+  .styleLayer(StyleTier::USER, "contrast", userStyles);
 ```
 
 Эквивалентные стадии:
@@ -23,7 +24,8 @@ scene.styleLayers()
 ```cpp
 auto styled = std::move(scene)
   | ui::styleLayers()
-  | ui::styleLayer(StyleTier::APPLICATION, "application", applicationStyles)
+  | ui::styleLayer(StyleTier::APPLICATION, "application",
+    applicationStyles)
   | ui::styleLayer(StyleTier::USER, "contrast", userStyles);
 ```
 

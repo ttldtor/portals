@@ -94,9 +94,11 @@ reportOnError выбирает обработчик заключительног
 
 ```cpp
 scene.onError([](const ManagedDiagnostic &diagnostic) {
-  // React to the operation failure without terminal output during the live run.
+  // React to the operation failure without terminal output
+  // during the live run.
 }).reportOnError([](const ui::SceneReport &report) {
-  // Forward the final structured report to an application logger after cleanup.
+  // Forward the final structured report to an application
+  // logger after cleanup.
   ui::reportToStderr(report);
 });
 ```

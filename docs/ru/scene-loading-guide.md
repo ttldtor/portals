@@ -97,7 +97,8 @@ resource.resolver = [](std::string_view key)
   }
   return std::unexpected(TextResourceError::MISSING_RESOURCE);
 };
-auto scene = ui::scene("Button#add{i18n(\"add\")}", std::move(resource));
+auto scene =
+  ui::scene("Button#add{i18n(\"add\")}", std::move(resource));
 ```
 
 Глобальная локаль не задаётся автоматически, а переводы не обновляются сами.
@@ -112,11 +113,13 @@ auto scene = ui::scene("Button#add{i18n(\"add\")}", std::move(resource));
 ```cpp
 ui::SceneResourceOptions resource;
 
-resource.control<Meter>("Meter", [](ui::SceneResourceArguments arguments) {
-  return ui::custom<Meter>(std::move(arguments.text));
-});
+resource.control<Meter>("Meter",
+  [](ui::SceneResourceArguments arguments) {
+    return ui::custom<Meter>(std::move(arguments.text));
+  });
 
-auto scene = ui::scene("Meter#level{\"CPU\" width=20}", std::move(resource));
+auto scene = ui::scene("Meter#level{\"CPU\" width=20}",
+  std::move(resource));
 ```
 
 Здесь `Meter` — определённый приложением `SizedWidget`, который принимает строку
