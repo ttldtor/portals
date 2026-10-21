@@ -12,6 +12,10 @@ html.turbo-mode {
   --tv-yellow: #ffff55;
   --tv-cyan: #55ffff;
   --tv-shadow: #00002c;
+  --tv-scroll-track: var(--tv-paper);
+  --tv-scroll-thumb: var(--tv-blue);
+  --tv-scroll-arrow: var(--tv-paper);
+  --tv-scroll-ink: var(--tv-ink);
   --primary-color: var(--tv-cyan);
   --primary-dark-color: var(--tv-yellow);
   --primary-light-color: var(--tv-cyan);
@@ -141,7 +145,17 @@ html.turbo-mode #nav-tree .selected {
   border: 0;
 }
 html.turbo-mode #nav-tree :is(.selected, .item:hover) a { color: var(--tv-ink) !important; }
-html.turbo-mode #nav-tree span.arrowhead::before { background: var(--tv-blue); }
+/* Pixel-stepped triangles share a fixed cell and never use a fallback glyph. */
+html.turbo-mode span.arrowhead::before {
+  background: var(--tv-ink);
+  clip-path: none;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 1h2v2h2v2h2v2H7v2H5v2H3Z'/%3E%3C/svg%3E") center / 12px 12px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 1h2v2h2v2h2v2H7v2H5v2H3Z'/%3E%3C/svg%3E") center / 12px 12px no-repeat;
+}
+html.turbo-mode span.arrowhead.opened::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M1 3h10v2H9v2H7v2H5V7H3V5H1Z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M1 3h10v2H9v2H7v2H5V7H3V5H1Z'/%3E%3C/svg%3E");
+}
 html.turbo-mode #nav-tree .item:hover { background: #dddddd; }
 html.turbo-mode #nav-sync { background: var(--tv-paper); border: 0; border-radius: 0; }
 html.turbo-mode #nav-sync .nav-sync-icon {
@@ -225,6 +239,96 @@ html.turbo-mode #MSearchBox {
   box-shadow: none;
 }
 html.turbo-mode #MSearchBox:focus-within { outline: 2px solid var(--tv-yellow); }
+/* Keep both search controls on a shared terminal cell, including the filter arrow. */
+html.turbo-mode #MSearchBox {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+html.turbo-mode #MSearchBox .left {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+}
+html.turbo-mode #MSearchBox .right {
+  position: static;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  margin-right: 2px;
+}
+html.turbo-mode :is(#MSearchSelect, #MSearchSelectExt, #MSearchClose) {
+  box-sizing: border-box;
+  position: relative;
+  top: 0;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--tv-ink);
+  border-radius: 0;
+  background: var(--tv-button, var(--tv-paper));
+  color: var(--tv-ink);
+  cursor: pointer;
+}
+html.turbo-mode #MSearchBox :is(#MSearchSelect, #MSearchSelectExt) { margin-left: 2px; }
+html.turbo-mode #MSearchField { flex: 1; min-width: 0; margin-inline: 6px 0; }
+html.turbo-mode :is(#MSearchSelect, #MSearchSelectExt, #MSearchClose):is(:hover, :focus-visible) {
+  background: var(--tv-button-hover, var(--tv-cyan));
+  outline: 2px solid var(--tv-yellow);
+  outline-offset: -2px;
+}
+html.turbo-mode :is(#MSearchSelect, #MSearchSelectExt)::before {
+  width: 7px;
+  height: 7px;
+  top: 5px;
+  left: 4px;
+  border: 2px solid currentColor;
+  border-radius: 0;
+  background: none;
+}
+html.turbo-mode :is(#MSearchSelect, #MSearchSelectExt)::after {
+  width: 5px;
+  height: 2px;
+  top: 13px;
+  left: 11px;
+  border: 0;
+  border-radius: 0;
+  background: currentColor;
+  transform: rotate(45deg);
+  transform-origin: left center;
+}
+html.turbo-mode .search-icon-dropdown {
+  top: 5px;
+  left: 16px;
+  width: 0;
+  height: 0;
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+  border-top: 4px solid currentColor;
+  transform: none;
+}
+html.turbo-mode #MSearchCloseImg {
+  position: absolute;
+  inset: 4px;
+  width: auto;
+  height: auto;
+  margin: 0;
+  border-radius: 0;
+  background: none;
+}
+html.turbo-mode #MSearchCloseImg::before,
+html.turbo-mode #MSearchCloseImg::after {
+  width: 14px;
+  height: 2px;
+  background: currentColor;
+}
+
 html.turbo-mode #MSearchField { color: var(--tv-white); font-family: var(--font-family); font-size: 16px; line-height: 24px; }
 html.turbo-mode #MSearchField::placeholder { color: #d0d0ff; opacity: 1; }
 html.turbo-mode :is(#MSearchResultsWindow, #MSearchSelectWindow) {
@@ -272,6 +376,12 @@ html.turbo-mode #MSearchResults a:focus-visible { outline-offset: 0; }
 
 /* Source, API signatures, disclosure controls and reference tables. */
 html.turbo-mode div.fragment { border: 3px double var(--tv-paper); box-shadow: 4px 4px 0 var(--tv-shadow); }
+html.turbo-mode span.fold:is(.plus, .minus) {
+  background: var(--tv-button, var(--tv-paper));
+  border-color: var(--tv-ink);
+}
+html.turbo-mode span.fold:is(.plus, .minus)::before,
+html.turbo-mode span.fold.plus::after { background: var(--tv-ink); }
 html.turbo-mode h2.memtitle {
   float: none;
   display: block;
@@ -291,6 +401,8 @@ html.turbo-mode div.memproto {
   margin: 0;
 }
 html.turbo-mode div.memdoc { border: 1px solid var(--tv-paper); border-top: 0; padding: 12px; }
+html.turbo-mode :is(.memdoc, .textblock) { overflow-wrap: anywhere; }
+html.turbo-mode .contents :is(p, li, .memdoc, .textblock) a { overflow-wrap: anywhere; }
 html.turbo-mode :is(.memproto, .memdoc, .memname, .memtemplate, .permalink, .mlabels, .mlabel) {
   font-family: var(--font-family);
   font-size: 16px;
@@ -299,6 +411,72 @@ html.turbo-mode :is(.memproto, .memdoc, .memname, .memtemplate, .permalink, .mla
 html.turbo-mode .memname :is(td, th),
 html.turbo-mode .memdoc :is(td, th) { line-height: 24px; }
 html.turbo-mode span.mlabel { display: inline-block; padding: 0 8px; margin: 4px 8px 0 0; }
+/* Doxygen's signature columns must reflow as code, rather than set a table's minimum width. */
+html.turbo-mode .memproto table.memname,
+html.turbo-mode .memproto table.memname > tbody,
+html.turbo-mode .memproto table.memname > tbody > tr {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  margin: 0;
+}
+html.turbo-mode .memproto table.memname td {
+  display: inline;
+  padding: 0;
+  margin: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+html.turbo-mode .memproto table.memname td.paramtype { padding-right: 0.5ch; }
+html.turbo-mode .memproto :is(.memtemplate, .paramname, .paramdefval),
+html.turbo-mode h2.memtitle {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+html.turbo-mode .memproto .mlabels-left {
+  display: block;
+  flex: 1 1 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+html.turbo-mode .memproto .mlabels-right {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+}
+html.turbo-mode .memproto span.mlabels {
+  display: flex;
+  flex-wrap: wrap;
+  white-space: normal;
+}
+/* Bound both columns so long return types cannot push declarations beyond the panel. */
+html.turbo-mode table.memberdecls { width: 100%; table-layout: fixed; }
+html.turbo-mode table.memberdecls td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+html.turbo-mode table.memberdecls :is(.memItemLeft, .mdescLeft) { width: 32%; }
+html.turbo-mode table.memberdecls :is(.memItemRight, .mdescRight) { width: auto; }
+@media screen and (max-width: 767px) {
+  html.turbo-mode table.memberdecls,
+  html.turbo-mode table.memberdecls > tbody,
+  html.turbo-mode table.memberdecls > tbody > tr,
+  html.turbo-mode table.memberdecls > tbody > tr > td {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+  }
+  html.turbo-mode table.memberdecls > tbody > tr[class] {
+    width: 100%;
+    max-width: 100%;
+  }
+  html.turbo-mode table.memberdecls :is(.memItemLeft, .memItemRight, .mdescLeft, .mdescRight,
+      .memTemplItemLeft, .memTemplItemRight) {
+    width: 100%;
+  }
+  html.turbo-mode table.memberdecls .memItemLeft { text-align: left; }
+}
+
 html.turbo-mode .contents dl.section { padding: 8px 12px; }
 html.turbo-mode .contents :is(dl, dt, dd, table, td, th) { line-height: 24px; }
 html.turbo-mode .contents dl.section > dd { margin: 0; }
@@ -322,7 +500,15 @@ html.turbo-mode #doc-content table.directory > tbody { display: table-row-group;
 html.turbo-mode #doc-content .directory td { white-space: normal; overflow-wrap: anywhere; vertical-align: top; line-height: 24px; }
 html.turbo-mode #doc-content .directory td.entry { width: 45%; }
 html.turbo-mode #doc-content .directory td.desc { width: 55%; }
-html.turbo-mode .contents details { margin: 1.25rem 0; border: 1px solid var(--tv-paper); }
+html.turbo-mode .contents details {
+  margin: 1.25rem 0;
+  border: 1px solid var(--tv-paper);
+  padding: 0 1rem;
+}
+html.turbo-mode .contents details[open] { padding-bottom: 1rem; }
+html.turbo-mode .contents details > summary { margin-inline: -1rem; }
+html.turbo-mode .contents details > :nth-child(2) { margin-top: 1rem; }
+html.turbo-mode .contents details > :last-child:not(summary) { margin-bottom: 0; }
 html.turbo-mode .contents summary {
   display: flex;
   align-items: center;
@@ -351,7 +537,7 @@ html.turbo-mode .contents details[open] > summary::before {
   clip-path: polygon(10% 25%, 90% 25%, 50% 85%);
 }
 html.turbo-mode .contents details[open] > summary { background: var(--tv-cyan); }
-html.turbo-mode .contents details > div.fragment { margin: 0; border: 0; box-shadow: none; }
+html.turbo-mode .contents details > div.fragment { margin: 1rem 0 0; border: 0; box-shadow: none; }
 html.turbo-mode :is(table.markdownTable, table.fieldtable) { border: 3px double var(--tv-paper); }
 html.turbo-mode :is(.markdownTable, .fieldtable) th { background: var(--tv-cyan); color: var(--tv-ink); }
 html.turbo-mode :is(.markdownTable, .fieldtable) :is(td, th) { border-color: #8585c2; }
@@ -405,14 +591,15 @@ html.turbo-mode a.qindex { font-size: 16px; line-height: 24px; }
     border-left: 0;
   }
   html.turbo-mode #nav-path { left: calc(var(--turbo-sidebar-width, 335px) + 6px); }
-  html.turbo-mode #nav-sync { left: calc(var(--turbo-sidebar-width, 335px) - 36px); width: 34px; }
+  /* Leave the 16px scrollbar gutter beside the 34px control and its 2px edge gap. */
+  html.turbo-mode #nav-sync { left: calc(var(--turbo-sidebar-width, 335px) - 36px - 16px); width: 34px; }
   html.turbo-mode #MSearchBox { width: calc(var(--turbo-sidebar-width, 335px) - 20px); }
   html.turbo-mode #MSearchField { width: calc(var(--turbo-sidebar-width, 335px) - 85px); }
 }
 
 /* Keep Doxygen's mobile menu and touch interactions, with the same controls. */
 @media screen and (max-width: 767px) {
-  html.turbo-mode #projectname { padding-right: 9rem; }
+  html.turbo-mode #projectname { padding-right: 9rem; white-space: normal; }
   html.turbo-mode #titlearea .portals-languages { top: 0.35rem; right: 0.5rem; gap: 0.35rem; }
   html.turbo-mode #titlearea :is(.portals-languages > a, .portals-appearance) {
     width: 44px;
@@ -425,7 +612,33 @@ html.turbo-mode a.qindex { font-size: 16px; line-height: 24px; }
   html.turbo-mode .contents { margin: 1rem 0.75rem; }
   html.turbo-mode .sm-dox { background: var(--tv-paper); color: var(--tv-ink); }
   html.turbo-mode .sm-dox a { color: var(--tv-ink); min-height: 44px; box-sizing: border-box; }
-  html.turbo-mode .main-menu-btn { border: 1px solid var(--tv-ink); background: var(--tv-paper); }
+  html.turbo-mode .main-menu-btn {
+    box-sizing: border-box;
+    width: 44px;
+    height: 44px;
+    text-indent: 100%;
+    vertical-align: top;
+    border: 1px solid var(--tv-ink);
+    background: var(--tv-paper);
+  }
+  /* Override the legacy 3px search offset independently of text baselines. */
+  html.turbo-mode label.main-menu-btn ~ #searchBoxPos1 {
+    top: 0 !important;
+    left: 60px;
+    height: 44px;
+  }
+  html.turbo-mode label.main-menu-btn ~ #searchBoxPos1 > #MSearchBox {
+    display: flex;
+    align-items: center;
+    height: 44px;
+    min-width: 0;
+  }
+  html.turbo-mode #MSearchBox .left { display: flex; align-items: center; flex: 1; min-width: 0; height: auto; }
+  html.turbo-mode #MSearchField { flex: 1; min-width: 0; height: 24px; }
+  html.turbo-mode :is(#MSearchSelect, #MSearchSelectExt) { top: 0; }
+  html.turbo-mode #MSearchBox .right { position: static; flex: none; width: 24px; height: 24px; padding-top: 0; }
+  html.turbo-mode #MSearchClose { width: 24px; min-height: 24px; padding: 0; line-height: 24px; }
+  html.turbo-mode .main-menu-btn-icon { top: 20px; left: 9px; }
   html.turbo-mode .main-menu-btn-icon,
   html.turbo-mode .main-menu-btn-icon::before,
   html.turbo-mode .main-menu-btn-icon::after { background: var(--tv-ink); }
@@ -433,6 +646,12 @@ html.turbo-mode a.qindex { font-size: 16px; line-height: 24px; }
 }
 
 /* Keep native scrolling and hit testing; richer parts are progressive detail. */
+/* Firefox and no-script fallback: Doxygen sets thin widths per container. */
+html.turbo-mode, html.turbo-mode * {
+  scrollbar-width: auto !important;
+  scrollbar-color: var(--tv-blue) var(--tv-paper) !important;
+}
+
 @supports selector(::-webkit-scrollbar) {
   /* Doxygen also sets thin widths on individual scrolling containers. */
   html.turbo-mode, html.turbo-mode * { scrollbar-color: auto !important; scrollbar-width: auto !important; }
@@ -495,6 +714,59 @@ html.turbo-mode a.qindex { font-size: 16px; line-height: 24px; }
   html.turbo-mode #nav-tree::-webkit-scrollbar-corner,
   html.turbo-mode *::-webkit-scrollbar-corner { background: var(--tv-paper); }
 }
+
+/* Turbo2 follows the grey dialogs, green controls and cyan scroll tracks of
+ * the Turbo Vision 2.0 reference. Shared typography and geometry stay intact. */
+html.turbo-mode.turbo2-mode {
+  --tv-blue: #1616aa;
+  --tv-paper: #b0b0b0;
+  --tv-ink: #000000;
+  --tv-white: #ffffdf;
+  --tv-shadow: #000000;
+  --tv-button: #00b000;
+  --tv-button-hover: #00cf00;
+  --tv-scroll-track: #00aaaa;
+  --tv-scroll-thumb: #55ff55;
+  --tv-scroll-arrow: #00b000;
+  --tv-scroll-ink: #000000;
+  --fragment-background: var(--tv-blue);
+  --code-background: var(--tv-blue);
+  --section-code-background: var(--tv-blue);
+  --odd-color: #10108d;
+  --box-shadow: 8px 8px 0 var(--tv-shadow);
+}
+html.turbo2-mode :is(.portals-appearance, .portals-languages > a, .contents button,
+    .contents input[type="button"], .contents input[type="submit"], .main-menu-btn) {
+  --link-color: var(--tv-ink);
+  background: var(--tv-button);
+  color: var(--tv-ink);
+  border-color: transparent;
+  box-shadow: 5px 4px 0 var(--tv-shadow);
+}
+html.turbo2-mode :is(.portals-appearance, .portals-languages > a, .contents button):hover {
+  background: var(--tv-button-hover);
+}
+html.turbo2-mode .portals-languages [aria-current="page"] {
+  background: #55ff55;
+  outline: 1px solid var(--tv-ink);
+  outline-offset: -3px;
+}
+html.turbo2-mode .portals-languages [aria-current="page"]:focus-visible {
+  outline: 2px dashed var(--tv-ink);
+  outline-offset: 3px;
+}
+html.turbo2-mode :is(.portals-appearance, .portals-languages > a, .contents button):active {
+  transform: translate(3px, 2px);
+  box-shadow: 2px 2px 0 var(--tv-shadow);
+}
+html.turbo2-mode :is(button, input):disabled {
+  background: var(--tv-paper);
+  color: #454545;
+  box-shadow: none;
+}
+html.turbo2-mode div.fragment { background: var(--tv-blue); }
+html.turbo2-mode #MSearchBox { border-color: var(--tv-white); }
+html.turbo2-mode #doc-content { border-color: var(--tv-white); }
 
 @media print {
   html.turbo-mode { color-scheme: light; --page-background-color: white; --page-foreground-color: black; --link-color: #000080; }

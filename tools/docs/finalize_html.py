@@ -18,6 +18,8 @@ import shutil
 import xml.etree.ElementTree as ET
 from urllib.parse import urlsplit, urlunsplit
 
+from pss_highlight import color_pss
+
 
 def type_links(tag_file):
     """Map only unambiguous documented type names to their generated API pages."""
@@ -366,17 +368,36 @@ def document_language(content, language):
     return re.sub(r"<html\b[^>]*>", root, content, count=1)
 
 
+def search_navigation_text(text):
+    """Preserve Doxygen focus navigation without a second native arrow scroll."""
+    original = """    elem.addEventListener('keydown', action);
+    elem.addEventListener('keypress', action);
+    elem.addEventListener('keyup', action);"""
+    replacement = """    // Event listeners ignore returned false; cancel only owned navigation keys.
+    const onKey = event => {
+      const handled = action(event) === false;
+      const modified = event.altKey || event.ctrlKey || event.metaKey || event.shiftKey;
+      if (handled && !modified && [27, 37, 38, 39, 40].includes(event.keyCode)) {
+        event.preventDefault();
+      }
+    };
+    elem.addEventListener('keydown', onKey);
+    elem.addEventListener('keypress', onKey);
+    elem.addEventListener('keyup', onKey);"""
+    return text.replace(original, replacement, 1)
+
+
 def complete_search(directory):
     """Initialize shared local search when generated HTML lacks Doxygen config."""
     script = directory / "search" / "search.js"
     if not script.is_file():
         return
-    text = script.read_text(encoding="utf-8")
+    original = script.read_text(encoding="utf-8")
+    text = search_navigation_text(original)
     marker = "// Portals search initialization for layouts without doxygen-config."
     config_gate = "const configElem = document.getElementById('doxygen-config');"
-    if marker in text or config_gate not in text:
-        return
-    text += "\n" + marker + "\n" + """document.addEventListener('DOMContentLoaded', () => {
+    if marker not in text and config_gate in text:
+        text += "\n" + marker + "\n" + """document.addEventListener('DOMContentLoaded', () => {
   if (!document.getElementById('doxygen-config') &&
       document.getElementById('MSearchField') &&
       typeof searchBox !== 'undefined') {
@@ -384,7 +405,8 @@ def complete_search(directory):
   }
 });
 """
-    script.write_text(text, encoding="utf-8")
+    if text != original:
+        script.write_text(text, encoding="utf-8")
 
 
 def finalize(directory, tag_file, language=None, api_tag=None, api_prefix="../"):
@@ -408,7 +430,7 @@ def finalize(directory, tag_file, language=None, api_tag=None, api_prefix="../")
                                  Path(__file__).resolve().parents[2], links,
                                  russian, defer_markdown=language is not None)
         content = document_language(content, language or ("ru" if russian else "en"))
-        path.write_text(color_template_strings(color_shell(color_cmake(content))), encoding="utf-8")
+        path.write_text(color_template_strings(color_pss(color_shell(color_cmake(content)))), encoding="utf-8")
         headings[name] = parser.headings
     complete_navigation(directory, headings)
     complete_search(directory)

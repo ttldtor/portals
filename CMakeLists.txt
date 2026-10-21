@@ -1288,8 +1288,11 @@ if(PORTALS_BUILD_DOCS)
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doxygen-awesome/doxygen-awesome.css"
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doxygen-awesome/doxygen-awesome-sidebar-only.css"
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/diagrams.css"
-    "${CMAKE_CURRENT_SOURCE_DIR}/docs/turbo.css")
-  set(DOXYGEN_HTML_EXTRA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/docs/appearance.js")
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/turbo.css"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/turbo-scrollbars.css"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/turbo-diagrams.css")
+  set(DOXYGEN_HTML_EXTRA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/docs/appearance.js"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/turbo-scrollbars.js")
   # Doxygen Awesome owns the color scheme and sidebar layout.
   set(DOXYGEN_HTML_COLORSTYLE LIGHT)
   set(DOXYGEN_TREEVIEW_WIDTH 335)

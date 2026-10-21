@@ -74,6 +74,44 @@ assert.equal(observed.options.attributeFilter.join(","), "class");
                                 text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_search_labels_preserve_existing_controls_and_handlers(self):
+        fixture = r'''
+const { readFileSync } = require("node:fs");
+const vm = require("node:vm");
+const assert = require("node:assert/strict");
+for (const lang of ["en", "ru"]) {
+  let ready;
+  let closed = false;
+  const close = {
+    attributes: {},
+    onclick() { closed = true; },
+    setAttribute(name, value) { this.attributes[name] = value; }
+  };
+  const category = { attributes: {}, setAttribute(name, value) { this.attributes[name] = value; } };
+  const controls = {"#MSearchSelect": category, "#MSearchClose": close};
+  const originalClose = close.onclick;
+  const document = {
+    documentElement: { lang, classList: { toggle() {} } },
+    querySelector: selector => controls[selector] || null,
+    addEventListener: (_, fn) => ready = fn
+  };
+  const window = { matchMedia: () => ({matches:false, addEventListener(){}}),
+                   localStorage: {getItem(){return null;}} };
+  vm.runInNewContext(readFileSync(process.argv[1], "utf8"), {document, window});
+  ready();
+  assert.equal(category.attributes["aria-label"], lang === "ru" ? "Категория поиска" : "Search category");
+  assert.equal(close.attributes["aria-label"], lang === "ru" ? "Закрыть результаты поиска" : "Close search results");
+  assert.equal(category.title, category.attributes["aria-label"]);
+  assert.equal(close.title, close.attributes["aria-label"]);
+  assert.equal(close.onclick, originalClose);
+  close.onclick();
+  assert(closed);
+}
+'''
+        result = subprocess.run([NODE, "-e", fixture, str(SCRIPT)], capture_output=True,
+                                text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_button_cycle_storage_failure_labels_and_system_preference(self):
         fixture = r'''
 const { readFileSync } = require("node:fs");
@@ -87,7 +125,7 @@ function page(saved, unavailable = false) {
   const button = {
     hidden: true,
     attributes: {},
-    dataset: { label: "Color scheme", nextLabel: "Next", system: "System", light: "Light", dark: "Dark", turbo: "Turbo Vision" },
+    dataset: { label: "Color scheme", nextLabel: "Next", system: "System", light: "Light", dark: "Dark", turbo: "Turbo Vision", turbo2: "Turbo2" },
     addEventListener: (name, fn) => listeners[name] = fn,
     setAttribute(name, value) { this.attributes[name] = value; }
   };
@@ -131,15 +169,22 @@ assert.equal(light.button.dataset.scheme, "turbo");
 assert(light.classes.has("turbo-mode"));
 assert(light.classes.has("light-mode"));
 assert(!light.classes.has("dark-mode"));
-assert.equal(light.button.title, "Color scheme: Turbo Vision. Next: System.");
+assert.equal(light.button.title, "Color scheme: Turbo Vision. Next: Turbo2.");
 light.media.matches = true;
 light.listeners.system();
 assert(light.classes.has("turbo-mode"));
 assert(!light.classes.has("dark-mode"));
 light.media.matches = false;
 light.listeners.click();
+assert.equal(light.button.dataset.scheme, "turbo2");
+assert(light.classes.has("turbo-mode"));
+assert(light.classes.has("turbo2-mode"));
+assert(!light.classes.has("dark-mode"));
+assert.equal(light.button.title, "Color scheme: Turbo2. Next: System.");
+light.listeners.click();
 assert.equal(light.button.dataset.scheme, "system");
 assert(!light.classes.has("turbo-mode"));
+assert(!light.classes.has("turbo2-mode"));
 assert(light.classes.has("light-mode"));
 light.listeners.click();
 assert.equal(light.button.dataset.scheme, "light");
@@ -152,6 +197,10 @@ const restored = page("turbo");
 assert(restored.classes.has("turbo-mode"));
 assert.equal(restored.button.dataset.scheme, "turbo");
 assert(restored.button.innerHTML.includes('<path d="M2 3h16'));
+const second = page("turbo2");
+assert(second.classes.has("turbo-mode"));
+assert(second.classes.has("turbo2-mode"));
+assert.equal(second.button.dataset.scheme, "turbo2");
 console.log("appearance scenarios passed");
 '''
         result = subprocess.run([NODE, "-e", fixture, str(SCRIPT)], capture_output=True,

@@ -1,0 +1,21 @@
+/* Copyright (c) 2026 ttldtor.
+ * SPDX-License-Identifier: BSL-1.0
+ * Variant SVGs retain their intrinsic text size inside a scrollable viewport.
+ */
+.diagram-variants { display: block; }
+.diagram-variants > :is(.turbo-diagram, .turbo2-diagram) { display: none; }
+html.turbo-mode .diagram-variants {
+  --diagram-width: min(var(--turbo-diagram-width, 760px), var(--turbo-diagram-available-width, 100%));
+  width: var(--diagram-width);
+  margin-left: calc((100% - var(--diagram-width)) / 2);
+  overflow-x: auto;
+  text-align: left;
+}
+html.turbo-mode .diagram-variants > .standard-diagram { display: none; }
+html.turbo-mode:not(.turbo2-mode) .diagram-variants > .turbo-diagram,
+html.turbo2-mode .diagram-variants > .turbo2-diagram {
+  display: block;
+  max-width: none;
+  margin: 0;
+  filter: none;
+}
