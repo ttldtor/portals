@@ -1,0 +1,167 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="896" viewBox="0 0 760 896" role="img" aria-label="Ownership, borrows and orderly shutdown">
+  <title>Ownership, borrows and orderly shutdown</title>
+  <desc>Directed arrows retain the original architecture flow. Dashed frames and arrows identify optional observations.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#55ffff" />
+    </marker>
+  </defs>
+  <style>text{font-family:"Cascadia Mono","DejaVu Sans Mono",Consolas,"Liberation Mono",monospace;font-size:16px;fill:#ffffdf}.title,.label,.group{font-weight:bold;fill:#ffff55}.edge{fill:none;stroke:#55ffff;stroke-width:2;marker-end:url(#arrow)}</style>
+  <rect width="760" height="896" fill="#000080" />
+  <text x="20" y="36" class="title">
+    <tspan x="20" dy="0">Ownership, borrows and orderly shutdown</tspan>
+  </text>
+  <text x="20" y="72" class="detail">
+    <tspan x="20" dy="0">Arrows describe creation, retained-data flow and shutdown order; they are</tspan>
+    <tspan x="20" dy="24">not owning pointers.</tspan>
+  </text>
+  <g id="node-0">
+    <rect x="20" y="128" width="224" height="176" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="30" y="152" class="label">
+      <tspan x="30" dy="0">Caller creates</tspan>
+      <tspan x="30" dy="24">Application</tspan>
+    </text>
+    <text x="30" y="208" class="detail">
+      <tspan x="30" dy="0">Owns scheduler, tree</tspan>
+      <tspan x="30" dy="24">and router</tspan>
+    </text>
+    <text x="30" y="256" class="detail">
+      <tspan x="30" dy="0">Creating UI thread</tspan>
+      <tspan x="30" dy="24">owns lifecycle</tspan>
+    </text>
+  </g>
+  <g id="node-1">
+    <rect x="268" y="128" width="224" height="176" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="278" y="152" class="label">
+      <tspan x="278" dy="0">Caller creates scene</tspan>
+      <tspan x="278" dy="24">next</tspan>
+    </text>
+    <text x="278" y="208" class="detail">
+      <tspan x="278" dy="0">Owns bindings, models</tspan>
+      <tspan x="278" dy="24">and providers</tspan>
+    </text>
+    <text x="278" y="256" class="detail">
+      <tspan x="278" dy="0">Borrows Application</tspan>
+      <tspan x="278" dy="24">through run</tspan>
+    </text>
+  </g>
+  <g id="node-2">
+    <rect x="516" y="128" width="224" height="176" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="526" y="152" class="label">
+      <tspan x="526" dy="0">Run borrows terminal</tspan>
+    </text>
+    <text x="526" y="184" class="detail">
+      <tspan x="526" dy="0">Native owned session</tspan>
+      <tspan x="526" dy="24">/ custom borrow</tspan>
+    </text>
+    <text x="526" y="232" class="detail">
+      <tspan x="526" dy="0">Exclusive I/O until</tspan>
+      <tspan x="526" dy="24">close</tspan>
+    </text>
+  </g>
+  <g id="node-3">
+    <rect x="20" y="328" width="224" height="176" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="30" y="352" class="label">
+      <tspan x="30" dy="0">WidgetTree owns</tspan>
+      <tspan x="30" dy="24">widgets</tspan>
+    </text>
+    <text x="30" y="408" class="detail">
+      <tspan x="30" dy="0">Node&lt;T&gt; observes</tspan>
+      <tspan x="30" dy="24">identity only</tspan>
+    </text>
+    <text x="30" y="456" class="detail">
+      <tspan x="30" dy="0">read/edit borrows end</tspan>
+      <tspan x="30" dy="24">at callback</tspan>
+    </text>
+  </g>
+  <g id="node-4">
+    <rect x="268" y="328" width="224" height="176" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="278" y="352" class="label">
+      <tspan x="278" dy="0">Scene prepares</tspan>
+      <tspan x="278" dy="24">immutable pins</tspan>
+    </text>
+    <text x="278" y="408" class="detail">
+      <tspan x="278" dy="0">Views retain</tspan>
+      <tspan x="278" dy="24">snapshots and data</tspan>
+    </text>
+    <text x="278" y="456" class="detail">
+      <tspan x="278" dy="0">Payload destruction</tspan>
+      <tspan x="278" dy="24">contract applies</tspan>
+    </text>
+  </g>
+  <g id="node-5">
+    <rect x="516" y="328" width="224" height="176" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="526" y="352" class="label">
+      <tspan x="526" dy="0">Frame consumes text</tspan>
+      <tspan x="526" dy="24">borrows</tspan>
+    </text>
+    <text x="526" y="408" class="detail">
+      <tspan x="526" dy="0">Owning CellBuffer</tspan>
+      <tspan x="526" dy="24">goes to writer</tspan>
+    </text>
+    <text x="526" y="456" class="detail">
+      <tspan x="526" dy="0">Pending bytes stay</tspan>
+      <tspan x="526" dy="24">owned</tspan>
+    </text>
+  </g>
+  <g id="node-6">
+    <rect x="20" y="528" width="224" height="200" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="30" y="552" class="label">
+      <tspan x="30" dy="0">Stop scheduler first</tspan>
+    </text>
+    <text x="30" y="584" class="detail">
+      <tspan x="30" dy="0">Close queues; no</tspan>
+      <tspan x="30" dy="24">future callbacks</tspan>
+    </text>
+    <text x="30" y="632" class="detail">
+      <tspan x="30" dy="0">Active callback is</tspan>
+      <tspan x="30" dy="24">not unwound</tspan>
+    </text>
+  </g>
+  <g id="node-7">
+    <rect x="268" y="528" width="224" height="200" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="278" y="552" class="label">
+      <tspan x="278" dy="0">scene.stop then</tspan>
+      <tspan x="278" dy="24">terminal.close</tspan>
+    </text>
+    <text x="278" y="608" class="detail">
+      <tspan x="278" dy="0">Cancel/join</tspan>
+      <tspan x="278" dy="24">scene-owned producers</tspan>
+    </text>
+    <text x="278" y="656" class="detail">
+      <tspan x="278" dy="0">Restore before</tspan>
+      <tspan x="278" dy="24">errors/export</tspan>
+    </text>
+  </g>
+  <g id="node-8">
+    <rect x="516" y="528" width="224" height="200" fill="#00005c" stroke="#c0c0c0" stroke-width="2" />
+    <text x="526" y="552" class="label">
+      <tspan x="526" dy="0">Destroy scene before</tspan>
+      <tspan x="526" dy="24">app</tspan>
+    </text>
+    <text x="526" y="608" class="detail">
+      <tspan x="526" dy="0">Release</tspan>
+      <tspan x="526" dy="24">bindings/models/</tspan><tspan x="526" dy="24">providers</tspan>
+    </text>
+    <text x="526" y="680" class="detail">
+      <tspan x="526" dy="0">App releases</tspan>
+      <tspan x="526" dy="24">router/tree/scheduler</tspan>
+    </text>
+  </g>
+  <path class="edge" d="M244,216 H268" data-source="0" data-target="1" />
+  <path class="edge" d="M492,216 H516" data-source="1" data-target="2" />
+  <path class="edge" d="M628,304 V316 H132 V328" data-source="2" data-target="3" />
+  <path class="edge" d="M244,416 H268" data-source="3" data-target="4" />
+  <path class="edge" d="M492,416 H516" data-source="4" data-target="5" />
+  <path class="edge" d="M628,504 V516 H132 V528" data-source="5" data-target="6" />
+  <path class="edge" d="M244,628 H268" data-source="6" data-target="7" />
+  <path class="edge" d="M492,628 H516" data-source="7" data-target="8" />
+  <text x="20" y="756" class="detail">
+    <tspan x="20" dy="0">Model snapshots may outlive views; Node handles never prolong widget</tspan>
+    <tspan x="20" dy="24">lifetime.</tspan>
+  </text>
+  <text x="20" y="816" class="detail">
+    <tspan x="20" dy="0">No hard native close deadline; abrupt process termination is outside</tspan>
+    <tspan x="20" dy="24">orderly restoration guarantees.</tspan>
+  </text>
+</svg>

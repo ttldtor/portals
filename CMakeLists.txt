@@ -1308,7 +1308,8 @@ if(PORTALS_BUILD_DOCS)
   set(DOXYGEN_HTML_EXTRA_STYLESHEET
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doxygen-awesome/doxygen-awesome.css"
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doxygen-awesome/doxygen-awesome-sidebar-only.css"
-    "${CMAKE_CURRENT_SOURCE_DIR}/docs/diagrams.css")
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/diagrams.css"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/turbo.css")
   set(DOXYGEN_HTML_EXTRA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/docs/appearance.js")
   # Doxygen Awesome owns the color scheme and sidebar layout.
   set(DOXYGEN_HTML_COLORSTYLE LIGHT)
