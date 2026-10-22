@@ -38,6 +38,15 @@ does not add intrinsic size to its content. Removing an ordinary content child
 keeps application notifications alive; removing their wrapper or closing the
 scene closes the center.
 
+## Message severity
+
+Choose presentation directly on an owning message: `ui::toast("Saved").success()`.
+The `.info()`, `.success()`, `.warning()` and `.error()` methods select the existing
+INFO, SUCCESS, WARNING and FAILURE styles. The pipe forms are equivalent:
+`ui::toast("Saved") | ui::success()`. The last severity modifier wins and preserves
+the message's other options and actions. `.error()` requests failure presentation;
+it does not report an application error or change diagnostic policy.
+
 ## Queue and expiry
 
 | Setting | Default and meaning |

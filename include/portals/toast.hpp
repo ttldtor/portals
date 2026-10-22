@@ -166,6 +166,34 @@ public:
   explicit ToastMessage(TextValue text, ToastOptions options = {}) : text_(std::move(text)), options_(options) {
   }
 
+  /** @return Consuming request with INFO presentation; other options and actions are retained. */
+  ToastMessage &&info() && {
+    options_.severity = ToastSeverity::INFO;
+
+    return std::move(*this);
+  }
+
+  /** @return Consuming request with SUCCESS presentation; the last severity modifier wins. */
+  ToastMessage &&success() && {
+    options_.severity = ToastSeverity::SUCCESS;
+
+    return std::move(*this);
+  }
+
+  /** @return Consuming request with WARNING presentation, without changing queue policy. */
+  ToastMessage &&warning() && {
+    options_.severity = ToastSeverity::WARNING;
+
+    return std::move(*this);
+  }
+
+  /** @return Consuming request with FAILURE presentation; this does not cause a runtime failure. */
+  ToastMessage &&error() && {
+    options_.severity = ToastSeverity::FAILURE;
+
+    return std::move(*this);
+  }
+
   /** @tparam Callback Copyable callable accepting const ToastActionEvent& or no argument, returning void or
    * expected<void,TreeError>.
    * @param label Owning nonempty action caption. @param callback UI-owned callable; never transferred to workers.
@@ -230,6 +258,47 @@ inline ToastMessage toast(TextValue text, ToastOptions options = {}) {
 /** @param text Bytes copied immediately. @param options Owning policy. @return Owning UI request builder. */
 inline ToastMessage toast(std::string_view text, ToastOptions options = {}) {
   return toast(TextValue(text), options);
+}
+
+/** @brief Presentation-only severity stage; retains all other owning request policy. */
+struct ToastSeverityModifier {
+  ToastSeverity severity; ///< Existing presentation role.
+
+  /** @param message Consumed request. @param modifier Last severity selection. @return Owning request. */
+  friend ToastMessage operator|(ToastMessage &&message, ToastSeverityModifier modifier) {
+    switch (modifier.severity) {
+    case ToastSeverity::INFO:
+      return std::move(message).info();
+    case ToastSeverity::SUCCESS:
+      return std::move(message).success();
+    case ToastSeverity::WARNING:
+      return std::move(message).warning();
+    case ToastSeverity::FAILURE:
+      return std::move(message).error();
+    }
+
+    return std::move(message);
+  }
+};
+
+/** @return INFO presentation stage, equivalent to ToastMessage::info(). */
+inline ToastSeverityModifier info() {
+  return {ToastSeverity::INFO};
+}
+
+/** @return SUCCESS presentation stage, equivalent to ToastMessage::success(). */
+inline ToastSeverityModifier success() {
+  return {ToastSeverity::SUCCESS};
+}
+
+/** @return WARNING presentation stage, equivalent to ToastMessage::warning(). */
+inline ToastSeverityModifier warning() {
+  return {ToastSeverity::WARNING};
+}
+
+/** @return FAILURE presentation stage, equivalent to ToastMessage::error(). */
+inline ToastSeverityModifier error() {
+  return {ToastSeverity::FAILURE};
 }
 
 /** @brief Copyable weak UI-affine semantic handle; the scene owns all queue, action and timer storage.

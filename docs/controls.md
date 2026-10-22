@@ -353,6 +353,41 @@ constraint keeps those braced calls unambiguous.
 `cancelledNotifications` separately. `reportGroupUpdate(result, output)` prints
 these counters while the caller retains every receipt and the aggregate result.
 
+### Compose change handlers
+
+Use `.threeState()` or `| ui::threeState()` to give an ordinary CheckBox the
+three-state cycle. Its type and Ref stay unchanged. A checkbox bound to a boolean
+model cannot represent mixed state: incompatible settings fail during preparation
+instead of converting the model.
+
+`ui::onChange(ref, callback)` adds a handler without managing binding tokens.
+This complete application displays each newly committed state:
+
+\include guide_check_change.cpp
+
+The [complete source](examples/guide_check_change.cpp) builds as
+`portals_docs_check_change` with tests enabled, or as an ordinary installed-package
+application linked to `portals::core`.
+
+Use a `bool` parameter for a boolean-backed checkbox, or `CheckState` for a
+three-state-backed checkbox. An incompatible typed handler fails preparation.
+An advanced handler can accept `const PropertyUpdate<bool>&` or
+`const PropertyUpdate<CheckState>&` to inspect the owning commit receipt,
+including rejected notifications. A generic value handler must support both
+backing types.
+
+The existing factory callback runs first, followed by added handlers in
+registration order. Registrations made during dispatch start with the next
+activation. Failed and unchanged updates do not invoke the added handlers;
+external model writes do not invoke them either. Removing the control or closing
+the scene stops the remaining handlers. A handler error follows the existing
+typed diagnostics path and does not roll back the committed value.
+
+`ManagedOptions::maxChangeHandlers` defaults to 256 retained handlers and
+`maxChangeHandlersPerNode` to 64. Both limits must be positive; admission beyond
+a limit returns `NODE_LIMIT`. Allocation failures return `NO_MEMORY` without
+retaining a partial registration. These limits are independent of editor handlers.
+
 ## Frames and outer dimensions {#control-frames}
 
 A frame paints selected one-cell edges around content. Add `.framed()` to an

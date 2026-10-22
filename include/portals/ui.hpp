@@ -1981,6 +1981,7 @@ public:
 private:
   friend struct detail::ClickAccess;
   friend struct detail::EditorEventAccess;
+  friend struct detail::ChangeAccess;
   friend class KeyInfo;
   friend struct detail::KeyHelpAccess;
   friend struct detail::LayoutAccess;
@@ -2468,6 +2469,33 @@ struct EditorEventAccess {
   }
 };
 
+/** @brief Checked registration bridge to the checkbox's sole managed binding. */
+struct ChangeAccess {
+  /** @tparam T Checkbox view type. @tparam Callback Owning value or receipt action.
+   * @param scene Existing receiving owner. @param reference Observing checkbox identity.
+   * @param callback Action transferred after affinity admission. @param origin Original registration site.
+   * @return Exact checked liveness, affinity, backing-model or registration failure.
+   */
+  template <class T, class Callback>
+  static std::expected<void, ManagedError> attach(ManagedScene &scene, const Ref<T> &reference, Callback callback,
+                                                  std::source_location origin) {
+    commandOrigin(callback, origin);
+
+    auto owner = eventScene(reference.target());
+
+    if (!owner) {
+      return std::unexpected(owner.error());
+    }
+
+    if (*owner != &scene) {
+      return std::unexpected(
+        ManagedError{ManagedPhase::BIND, reference.node().id(), TreeError::INVALID_ARGUMENT, {}, {}});
+    }
+
+    return scene.onChange(Node<CheckBox>{reference.node()}, std::move(callback), origin);
+  }
+};
+
 /** @brief Admit callbacks borrowing the mutable chain context, or ordinary no-argument callbacks.
  * @tparam Callback Copyable callable whose result is void, checked TreeError or an editor receipt.
  */
@@ -2537,6 +2565,15 @@ public:
       }
     }
     return std::move(*this);
+  }
+
+  /** @return Consuming checkbox recipe selecting THREE_STATE without changing its model type.
+   * Explicit bool models reject this setting at mount with INVALID_ARGUMENT.
+   */
+  Description &&threeState() &&
+    requires std::same_as<T, CheckBox>
+  {
+    return std::move(*this).scalarSettings({.cycle = CheckCycle::THREE_STATE});
   }
 
   /** @param value Button decoration, checked before caption resolution or construction.
@@ -5748,9 +5785,16 @@ inline Description<Button> button(std::string_view text, Callback action, Contro
 inline Description<CheckBox> checkbox(std::string_view text, ManagedState<bool> model,
                                       std::function<std::expected<void, TreeError>(CheckBoxResult)> changed = {},
                                       ControlStyle style = {}, SizePolicy policy = {}) {
-  return detail::Access::controlArguments(control<CheckBox>(text, style, policy),
-                                          {.text = TextValue(text), .cycle = CheckCycle::TWO_STATE})
-    .setup([model, changed = std::move(changed)](ManagedScene &scene, Node<CheckBox> node) mutable {
+  return detail::Access::controlSetup(
+    detail::Access::controlArguments(control<CheckBox>(text, style, policy),
+                                     {.text = TextValue(text), .cycle = CheckCycle::TWO_STATE}),
+    [model,
+     changed = std::move(changed)](ManagedScene &scene, Node<CheckBox> node,
+                                   const ControlSettings &settings) mutable -> std::expected<void, ManagedError> {
+      if (settings.state == CheckState::MIXED || settings.cycle == CheckCycle::THREE_STATE) {
+        return std::unexpected(ManagedError{ManagedPhase::BIND, node.id(), TreeError::INVALID_ARGUMENT, {}, {}});
+      }
+
       return scene.bind(node, model, std::move(changed));
     });
 }
@@ -9717,6 +9761,44 @@ auto onClick(Ref<Button> reference, Callback callback, std::source_location orig
   },
                              origin](Scene &owner) mutable {
     detail::SceneAccess::onClick(owner, registration, origin);
+  }};
+}
+
+/** @brief Sparse checkbox cycle stage preserving the factory's backing model. */
+struct ThreeStateModifier {
+  /** @param description Consumed checkbox recipe. @return Recipe with THREE_STATE selected. */
+  friend Description<CheckBox> operator|(Description<CheckBox> &&description, ThreeStateModifier) {
+    return std::move(description).threeState();
+  }
+};
+
+/** @return Checkbox cycle stage equivalent to the consuming threeState() method. */
+inline ThreeStateModifier threeState() {
+  return {};
+}
+
+/** @tparam T CheckBox or its ThreeState derived view.
+ * @tparam Callback Copyable action taking the actual bool/CheckState value or its const PropertyUpdate reference.
+ * @param reference Published checkbox whose existing binding supplies activation changes.
+ * @param callback FIFO post-commit notification; errors cannot veto the committed model value.
+ * @param origin Registration site retained in diagnostics.
+ * @return Scene stage with checked affinity, liveness, model-type and bounded-storage admission.
+ * Value invocation wins over receipt invocation. Generic value bodies must compile for both bool and CheckState;
+ * invalid generic bodies can produce hard compiler errors. Use a concrete parameter for a single model type.
+ * Failed/no-op updates and external model writes do not notify; rejected observer publication still commits.
+ * Legacy handlers run first. Appending during either legacy or late delivery affects the next activation.
+ * Removal stops remaining delivery; captures and exact receipt snapshots survive the executing callback.
+ */
+template <class T, class Callback>
+  requires(std::derived_from<T, CheckBox> && std::copy_constructible<Callback> &&
+           (portals::detail::ChangeAction<Callback, bool> || portals::detail::ChangeAction<Callback, CheckState>))
+auto onChange(Ref<T> reference, Callback callback, std::source_location origin = std::source_location::current()) {
+  return detail::SceneStage{[registration = [reference = std::move(reference), callback = std::move(callback),
+                                             origin](ManagedScene &scene) mutable -> std::expected<void, ManagedError> {
+    return detail::ChangeAccess::attach(scene, reference, std::move(callback), origin);
+  },
+                             origin](Scene &owner) mutable {
+    detail::SceneAccess::onEditing(owner, registration, origin);
   }};
 }
 

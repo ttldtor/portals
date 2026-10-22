@@ -13,6 +13,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
   places a styled close control on the dialog frame; loaded resources expose
   the same action and close settings.
 
+- CheckBox recipes support `.threeState()` and `ui::threeState()` cycle modifiers.
+  `ui::onChange` composes typed value or commit-receipt handlers for CheckBox and
+  ThreeState without manual binding tokens. Toast messages support compact
+  severity methods and equivalent pipe modifiers, preserving their actions and
+  other options.
+
 - Sized recipes support `.framed()` and `ui::framed()` with built-in patterns,
   partial sides, owning titles and custom one-cell glyphs. Typed child references
   are preserved; dimensions address the outer frame. Loaded scenes accept the

@@ -363,12 +363,12 @@ std::expected<std::unique_ptr<ManagedScene>, ManagedError> ManagedScene::create(
 
   if (!options.maxNodes || !options.maxStates || !options.maxModels || !options.maxKeyHandlers ||
       !options.maxClickHandlers || !options.maxClickHandlersPerNode || !options.keySequenceTimeout ||
-      !options.maxEditingHandlers || !options.maxEditingHandlersPerNode || !options.maxMessageRequests ||
-      !options.maxKeyLabelBytes || !options.maxKeyDescriptionBytes || !options.maxKeyProjectionBytes ||
-      !options.maxLayoutHandlers || !options.maxLayoutPublicationRetries || !options.maxObservers ||
-      !options.maxObserversPerNode || !options.maxObserverRecoveryPasses || !diagnostics.maxErrors ||
-      !diagnostics.maxContexts || !diagnostics.maxContextBytes ||
-      diagnostics.maxErrors > maxElementCount<ManagedDiagnostic>() ||
+      !options.maxEditingHandlers || !options.maxEditingHandlersPerNode || !options.maxChangeHandlers ||
+      !options.maxChangeHandlersPerNode || !options.maxMessageRequests || !options.maxKeyLabelBytes ||
+      !options.maxKeyDescriptionBytes || !options.maxKeyProjectionBytes || !options.maxLayoutHandlers ||
+      !options.maxLayoutPublicationRetries || !options.maxObservers || !options.maxObserversPerNode ||
+      !options.maxObserverRecoveryPasses || !diagnostics.maxErrors || !diagnostics.maxContexts ||
+      !diagnostics.maxContextBytes || diagnostics.maxErrors > maxElementCount<ManagedDiagnostic>() ||
       diagnostics.maxContexts > maxElementCount<ManagedDiagnosticContext>() ||
       diagnostics.maxContextBytes > static_cast<std::size_t>(std::numeric_limits<std::ptrdiff_t>::max())) {
     return std::unexpected(error(ManagedPhase::MOUNT, app.root(), TreeError::INVALID_ARGUMENT));
@@ -729,6 +729,7 @@ std::expected<void, ManagedError> ManagedScene::remove(Node<Widget> node) {
     if (!live && retired(live.error())) {
       retireClicks(*entry);
       retireEditing(*entry);
+      retireChanges(*entry);
       retireLayouts(*entry);
 
       return true;
@@ -1564,6 +1565,221 @@ void ManagedScene::retireEditing(Entry &entry) noexcept {
   entry.editing->records.clear();
 }
 
+void ManagedScene::retireChanges(Entry &entry) noexcept {
+  if (!entry.changes || entry.changes->retired) {
+    return;
+  }
+
+  entry.changes->retired = true;
+  changeHandlers_ -= entry.changes->records.size();
+  entry.changes->records.clear();
+}
+
+std::expected<bool, ManagedError> ManagedScene::changeModel(Node<CheckBox> node) {
+  auto allowed = boundary(ManagedPhase::BIND, node);
+
+  if (!allowed) {
+    return std::unexpected(allowed.error());
+  }
+
+  auto entry = find(node);
+
+  if (!entry || !entry->changes || entry->changes->retired) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
+  }
+
+  return entry->changes->boolean;
+}
+
+std::expected<void, ManagedError> ManagedScene::registerChange(Node<CheckBox> node, ChangeRecord record) {
+  auto model = changeModel(node);
+
+  if (!model) {
+    return std::unexpected(model.error());
+  }
+
+  auto chain = find(node)->changes;
+  const bool callable = std::visit(
+    [](const auto &action) {
+      return static_cast<bool>(action);
+    },
+    record.action);
+
+  if (record.action.index() != (*model ? 0U : 1U) || !callable) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
+  }
+
+  if (changeHandlers_ >= options_.maxChangeHandlers || chain->records.size() >= options_.maxChangeHandlersPerNode) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NODE_LIMIT));
+  }
+
+  const auto lifetime = std::weak_ptr<const void>(lifetime_);
+  const auto perNodeLimit = options_.maxChangeHandlersPerNode;
+
+  try {
+    auto admitted = std::make_shared<ChangeRecord>(std::move(record));
+
+    if (lifetime.expired()) {
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CLOSED));
+    }
+
+    // Allocate local capacity before final admission: allocator reentry may mutate or destroy the scene.
+    // The count constructor keeps debug iterator-proxy allocation inside this throwing boundary.
+    std::vector<std::shared_ptr<ChangeRecord>> grown(0);
+
+    if (lifetime.expired()) {
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CLOSED));
+    }
+
+    if (chain->records.size() == chain->records.capacity()) {
+      const auto capacity = chain->records.capacity();
+      const auto nextCapacity = capacity ? capacity + std::min(capacity, perNodeLimit - capacity) : 1;
+
+      grown.reserve(nextCapacity);
+
+      if (lifetime.expired()) {
+        return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CLOSED));
+      }
+    }
+
+    model = changeModel(node);
+
+    if (!model) {
+      return std::unexpected(model.error());
+    }
+
+    chain = find(node)->changes;
+
+    if (admitted->action.index() != (*model ? 0U : 1U)) {
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
+    }
+
+    if (changeHandlers_ >= options_.maxChangeHandlers || chain->records.size() >= options_.maxChangeHandlersPerNode) {
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NODE_LIMIT));
+    }
+
+    // Publication copies only owning pointers and cannot allocate or release the last capture.
+    if (chain->records.size() == chain->records.capacity()) {
+      if (chain->records.size() >= grown.capacity()) {
+        return std::unexpected(error(ManagedPhase::BIND, node, TreeError::WOULD_BLOCK));
+      }
+
+      for (const auto &existing : chain->records) {
+        grown.push_back(existing);
+      }
+
+      chain->records.swap(grown);
+    }
+
+    chain->records.push_back(std::move(admitted));
+    ++changeHandlers_;
+
+    return {};
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
+  }
+}
+
+template <class T>
+void ManagedScene::dispatchChange(Node<CheckBox> node, const std::shared_ptr<ChangeChain> &chain,
+                                  const std::weak_ptr<const void> &lifetime, const PropertyUpdate<T> &receipt,
+                                  std::size_t count) {
+  auto origin = std::source_location::current();
+
+  try {
+    for (std::size_t index = 0; index < count; ++index) {
+      if (lifetime.expired() || chain->retired) {
+        return;
+      }
+
+      if (closed_ || !app_.tree().inspect(node)) {
+        return;
+      }
+
+      // Pin the record: appending can reallocate, while removal clears the registry.
+      const auto record = chain->records[index];
+      const auto &action = std::get<std::function<EditorCommandResult(const PropertyUpdate<T> &)>>(record->action);
+
+      origin = record->origin;
+
+      const auto result = action(receipt);
+
+      if (!result) {
+        if (!lifetime.expired() && !commandReported(result, lifetime)) {
+          remember(error(ManagedPhase::INPUT, node, result.result_.error()), origin);
+        }
+
+        return;
+      }
+    }
+  } catch (const std::bad_alloc &) {
+    if (!lifetime.expired()) {
+      remember(error(ManagedPhase::INPUT, node, TreeError::NO_MEMORY), origin);
+    }
+  } catch (...) {
+    if (!lifetime.expired()) {
+      remember(error(ManagedPhase::INPUT, node, TreeError::CALLBACK_FAILED), origin);
+    }
+  }
+}
+
+template <class T>
+std::function<void(std::expected<PropertyUpdate<T>, TreeError>)> ManagedScene::checkboxCallback(
+  Node<CheckBox> node, std::shared_ptr<ChangeChain> chain,
+  std::function<std::expected<void, TreeError>(std::expected<PropertyUpdate<T>, TreeError>)> changed) {
+  return [this, node, chain = std::move(chain), lifetime = std::weak_ptr<const void>(lifetime_),
+          changed = ui::detail::currentSceneCallback(facadeContext(), std::move(changed))](
+           std::expected<PropertyUpdate<T>, TreeError> receipt) {
+    // Both survive legacy reentry. The exact original snapshot is copied in O(1), without allocation.
+    static_assert(std::is_nothrow_copy_constructible_v<PropertyUpdate<T>>);
+
+    const auto delivery = chain;
+    const auto live = lifetime;
+    const auto count = delivery->records.size();
+    const auto original = receipt;
+
+    if (live.expired()) {
+      return;
+    }
+
+    try {
+      if (!receipt) {
+        remember(error(ManagedPhase::INPUT, node, receipt.error()));
+      }
+
+      if (live.expired()) {
+        return;
+      }
+
+      if (changed) {
+        auto result = changed(std::move(receipt));
+
+        if (live.expired()) {
+          return;
+        }
+
+        if (!result) {
+          remember(error(ManagedPhase::INPUT, node, result.error()));
+
+          return;
+        }
+      }
+
+      if (!live.expired() && !delivery->retired && original && original->changed) {
+        dispatchChange(node, delivery, live, *original, count);
+      }
+    } catch (const std::bad_alloc &) {
+      if (!live.expired()) {
+        remember(error(ManagedPhase::INPUT, node, TreeError::NO_MEMORY));
+      }
+    } catch (...) {
+      if (!live.expired()) {
+        remember(error(ManagedPhase::INPUT, node, TreeError::CALLBACK_FAILED));
+      }
+    }
+  };
+}
+
 std::expected<void, ManagedError> ManagedScene::registerEditing(Node<LineEdit> node, EditorEventRecord record) {
   auto allowed = boundary(ManagedPhase::BIND, node);
 
@@ -2044,34 +2260,19 @@ ManagedScene::bind(Node<CheckBox> node, ManagedState<bool> model,
   }
 
   try {
-    auto bound = bindCheckbox(
-      app_.tree(), app_.router(), node, *property,
-      [this, node, changed = ui::detail::currentSceneCallback(facadeContext(), std::move(incomingChanged))](
-        CheckBoxResult receipt) {
-        try {
-          if (!receipt) {
-            remember(error(ManagedPhase::INPUT, node, receipt.error()));
-          }
+    auto changes = std::make_shared<ChangeChain>();
 
-          if (changed) {
-            auto result = changed(std::move(receipt));
+    changes->boolean = true;
 
-            if (!result) {
-              remember(error(ManagedPhase::INPUT, node, result.error()));
-            }
-          }
-        } catch (const std::bad_alloc &) {
-          remember(error(ManagedPhase::INPUT, node, TreeError::NO_MEMORY));
-        } catch (...) {
-          remember(error(ManagedPhase::INPUT, node, TreeError::CALLBACK_FAILED));
-        }
-      });
+    auto bound = bindCheckbox(app_.tree(), app_.router(), node, *property,
+                              checkboxCallback<bool>(node, changes, std::move(incomingChanged)));
 
     if (!bound) {
       return std::unexpected(error(ManagedPhase::BIND, node, bound.error()));
     }
 
     (*entry)->binding.emplace<CheckBoxBinding>(std::move(*bound));
+    (*entry)->changes = std::move(changes);
 
     return {};
   } catch (const std::bad_alloc &) {
@@ -2102,35 +2303,19 @@ ManagedScene::bind(Node<CheckBox> node, ManagedState<CheckState> model,
   }
 
   try {
-    auto bound = bindCheckbox(
-      app_.tree(), app_.router(), node, *property,
-      [this, node, changed = ui::detail::currentSceneCallback(facadeContext(), std::move(incomingChanged))](
-        CheckStateResult receipt) {
-        try {
-          if (!receipt) {
-            remember(error(ManagedPhase::INPUT, node, receipt.error()));
-          }
+    auto changes = std::make_shared<ChangeChain>();
 
-          if (changed) {
-            auto result = changed(std::move(receipt));
+    changes->boolean = false;
 
-            if (!result) {
-              remember(error(ManagedPhase::INPUT, node, result.error()));
-            }
-          }
-        } catch (const std::bad_alloc &) {
-          remember(error(ManagedPhase::INPUT, node, TreeError::NO_MEMORY));
-        } catch (...) {
-          remember(error(ManagedPhase::INPUT, node, TreeError::CALLBACK_FAILED));
-        }
-      },
-      options);
+    auto bound = bindCheckbox(app_.tree(), app_.router(), node, *property,
+                              checkboxCallback<CheckState>(node, changes, std::move(incomingChanged)), options);
 
     if (!bound) {
       return std::unexpected(error(ManagedPhase::BIND, node, bound.error()));
     }
 
     (*entry)->binding.emplace<CheckStateBinding>(std::move(*bound));
+    (*entry)->changes = std::move(changes);
 
     return {};
   } catch (const std::bad_alloc &) {
@@ -3479,6 +3664,7 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
           if (entry->removed) {
             scene.retireClicks(*entry);
             scene.retireEditing(*entry);
+            scene.retireChanges(*entry);
             scene.retireLayouts(*entry);
           }
 
@@ -3933,6 +4119,7 @@ std::expected<void, ManagedError> ManagedScene::close() {
   for (auto &entry : entries_) {
     retireClicks(*entry);
     retireEditing(*entry);
+    retireChanges(*entry);
     retireLayouts(*entry);
   }
 
