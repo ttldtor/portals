@@ -791,7 +791,7 @@ Omitted catalog settings preserve captured options, choices and callbacks. Start
 
 ### Resource support by current control family
 
-The built-in resource registry supplies seven ordinary factories. Grid, Border, Gauge, ScrollArea, ScrollBar, Overlay, HelpView, KeyHints, DataStateView, OverlayHost and Dialog also have scoped `CONFIGURATION` fallbacks; they do not reserve names against an explicit registration or change the legacy registry. The table records current resource support and omissions; an omitted scalar or declarative option is not thereby a permanent C++-only contract. Applications can register additional C++ factories, while callbacks, models, providers and captured behavior remain code-owned.
+The built-in resource registry supplies eight ordinary factories. Grid, Border, Gauge, ScrollArea, ScrollBar, Overlay, HelpView, KeyHints, DataStateView, OverlayHost and Dialog also have scoped `CONFIGURATION` fallbacks; they do not reserve names against an explicit registration or change the legacy registry. The table records current resource support and omissions; an omitted scalar or declarative option is not thereby a permanent C++-only contract. Applications can register additional C++ factories, while callbacks, models, providers and captured behavior remain code-owned.
 
 | Current family and C++ entry points | Built-in scene-resource properties | Not currently accepted by the resource loader |
 |---|---|---|
@@ -800,6 +800,7 @@ The built-in resource registry supplies seven ordinary factories. Grid, Border, 
 | Button/plain button: `button`, `plainButton` | `text`, `width`, `height`, `flex`, `chrome`. | Click callbacks, models and action captures. |
 | CheckBox/ThreeState: `checkbox`, `threeState` | `text`, `width`, `height`, `flex`, `state`, `cycle`. | Managed state and changed callback; Legacy retains its existing `checked` spelling. |
 | LineEdit: `lineEdit` | Shared size/text leaves, `editMode`, `readOnly`, `programmaticChange`, `displayMode`, `placeholder`, `history.*`, `limits.*`. | Clipboard, validator, history shortcuts, styles, models, resolver and result callback. |
+| Password: `password` | Empty `text`, public `placeholder`, size, `editMode`, `readOnly`, `displayMode` (`PASSWORD`, `NO_ECHO`), `limits.*`, `securePolicy.*`, `pastePolicy`. | Protected values/providers/models, validation and result callbacks remain C++; no text getter, history or outbound clipboard. |
 | Grid: `grid`, `GridSection` | Loader-local fallback: shared size leaves, `columns`, `rows`, `flow`, gaps, `padding.*`, placement budgets and `scroll`; child row/column/span/alignment and header/body regions. | Track policies, presentation styles, controller and child providers. |
 | Overlay layout: `overlay` | Scoped `Overlay` fallback: shared size leaves, `padding.*`, `horizontalAlign`, `verticalAlign` and ordinary child recipes in stacking order. | Service and event behavior remain code-owned. |
 | ScrollArea/ScrollBar: `scrollArea`, `scrollBar` | Scoped fallbacks: shared size leaves, wheel/key/page/thumb/focus/read-only/glyph/work settings; area policies, placement and frame; bar axis. Area requires one content root; bar is a leaf. | `ScrollController`, model/provider and callbacks remain code-owned. |

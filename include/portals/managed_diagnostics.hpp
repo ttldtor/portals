@@ -4,6 +4,7 @@
 
 #include <portals/application.hpp>
 #include <portals/detail/pss_data.hpp>
+#include <portals/password.hpp>
 #include <portals/pss_file_error.hpp>
 #include <portals/scene_resource_error.hpp>
 #include <portals/shortcut.hpp>
@@ -81,7 +82,19 @@ struct ManagedError {
   /// @brief Shared immutable runtime scene source, category and position; copies allocate no memory.
   /// Context attachment is best-effort: allocation failure leaves this empty and preserves the original typed cause.
   std::shared_ptr<const SceneResourceError> sceneResource{};
+  /// @brief Allocation-free protected editor cause, including independent security and cleanup failures.
+  std::optional<PasswordFailure> password{};
 };
+
+namespace detail {
+/** @brief Preserve the complete allocation-free protected cause with a low-level tree bridge.
+ * @param phase Managed operation boundary.
+ * @param node Original observing target identity.
+ * @param failure Owning technical/editor failure, never containing secret bytes.
+ * @return Managed error retaining every protected primary, callback and cleanup cause.
+ */
+ManagedError passwordError(ManagedPhase phase, NodeId node, PasswordFailure failure);
+} // namespace detail
 
 /** @brief Finite error-history and causal-context budgets. All limits must be positive. */
 struct ManagedDiagnosticOptions {

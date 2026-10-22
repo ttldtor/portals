@@ -825,3 +825,15 @@ foreach(target IN ITEMS portals_declarative_grid_consumer portals_grid_form_cons
 endforeach()
 add_test(NAME consumer.declarative-grid COMMAND portals_declarative_grid_consumer)
 set_tests_properties(consumer.declarative-grid PROPERTIES TIMEOUT 15)
+
+# Password requires a native guarded and encrypted secret backend.
+if((WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux") AND NOT EMSCRIPTEN)
+  add_executable(portals_password_consumer password.cpp)
+  target_link_libraries(portals_password_consumer PRIVATE portals::core)
+  set_target_properties(portals_password_consumer PROPERTIES CXX_EXTENSIONS OFF)
+  if(WIN32)
+    target_sources(portals_password_consumer PRIVATE no_dialogs.cpp)
+  endif()
+  add_test(NAME consumer.password COMMAND portals_password_consumer)
+  set_tests_properties(consumer.password PROPERTIES TIMEOUT 15)
+endif()

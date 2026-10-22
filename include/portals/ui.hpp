@@ -740,6 +740,8 @@ struct Access {
       return "ThreeState";
     } else if constexpr (std::same_as<T, LineEdit>) {
       return "LineEdit";
+    } else if constexpr (std::same_as<T, Password>) {
+      return "Password";
     } else if constexpr (std::same_as<T, Row>) {
       return "HBox";
     } else if constexpr (std::same_as<T, Column>) {
@@ -795,6 +797,12 @@ struct Access {
     apply(base.readOnly, patch.readOnly);
     apply(base.programmaticChange, patch.programmaticChange);
     apply(base.displayMode, patch.displayMode);
+    apply(base.securePolicy.maxBytes, patch.securePolicy.maxBytes);
+    apply(base.securePolicy.storage, patch.securePolicy.storage);
+    apply(base.securePolicy.lockPages, patch.securePolicy.lockPages);
+    apply(base.securePolicy.excludeFromDumps, patch.securePolicy.excludeFromDumps);
+    apply(base.securePolicy.encryptWhileIdle, patch.securePolicy.encryptWhileIdle);
+    apply(base.pastePolicy, patch.pastePolicy);
     apply(base.placeholder, patch.placeholder);
     apply(base.history.enabled, patch.history.enabled);
     apply(base.history.maxOperations, patch.history.maxOperations);
@@ -1498,6 +1506,56 @@ public:
     this->slot_->fluent = true;
   }
 
+  /** @param origin Original access call site.
+   * @return Owning protected draft identity; plaintext requires an explicit synchronous borrow.
+   */
+  std::expected<PasswordValue, ManagedError> value(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, Password>
+  {
+    return detail::passwordValue(target(), origin);
+  }
+
+  /** @param value Protected candidate, edited under this field's ordinary publication mode.
+   * @param origin Original mutation call site. @return Checked change, automatically collected on failure.
+   */
+  std::expected<void, ManagedError> value(PasswordValue value,
+                                          std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, Password>
+  {
+    return detail::setPasswordValue(target(), std::move(value), origin);
+  }
+
+  /** @tparam F Owned synchronous callable returning void and accepting a scoped SecretView.
+   * @param callback Plaintext consumer; views and caller-created copies remain its responsibility.
+   * @param origin Original access site. @return Checked secure access, with failures collected once.
+   * The borrowed value survives removal of the Ref, widget or scene during the callback.
+   */
+  template <class F>
+    requires(std::same_as<T, Password> && portals::detail::SecretCallback<F> &&
+             std::same_as<std::invoke_result_t<std::decay_t<F> &, SecretView>, void>)
+  std::expected<void, ManagedError> withPlaintext(F &&callback,
+                                                  std::source_location origin = std::source_location::current()) const {
+    auto observation = target();
+    auto selected = detail::passwordValue(observation, origin);
+
+    if (!selected) {
+      return std::unexpected(selected.error());
+    }
+
+    auto accessed = portals::detail::PasswordValueAccess::borrowOwned(std::move(*selected), std::forward<F>(callback));
+
+    if (!accessed) {
+      auto failure =
+        portals::detail::passwordError(ManagedPhase::TEXT, observation->node.id(), std::move(accessed.error()));
+
+      detail::reportPasswordError(observation, failure, origin);
+
+      return std::unexpected(std::move(failure));
+    }
+
+    return {};
+  }
+
   /** @param origin Operation site. @return Pure checked scope entry; already open is a no-op. */
   std::expected<void, ManagedError> open(std::source_location origin = std::source_location::current()) const
     requires std::same_as<T, HelpView>
@@ -2064,6 +2122,7 @@ struct NamedAccess {
     bool compatible{};
     Node<Control> caption;
     Node<LineEdit> draft;
+    Node<Password> secret;
     auto checked = scene.app_.tree().read(node, [&](const Widget &widget) {
       if constexpr (std::same_as<T, Widget>) {
         compatible = true;
@@ -2078,6 +2137,9 @@ struct NamedAccess {
       if (dynamic_cast<const LineEdit *>(&widget)) {
         draft = Node<LineEdit>(node.id());
       }
+      if (dynamic_cast<const Password *>(&widget)) {
+        secret = Node<Password>(node.id());
+      }
     });
 
     if (!checked || !compatible) {
@@ -2091,6 +2153,7 @@ struct NamedAccess {
     slot.target.node = node;
     slot.target.caption = caption;
     slot.target.draft = draft;
+    slot.target.secret = secret;
 
     return {};
   }
@@ -2509,9 +2572,45 @@ public:
    * @return Consuming LineEdit or native area/bar recipe using its existing read-only policy.
    */
   Description &&readOnly(bool value = true) &&
-    requires(std::same_as<T, LineEdit> || std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+    requires(std::same_as<T, LineEdit> || std::same_as<T, Password> || std::same_as<T, ScrollArea> ||
+             std::same_as<T, ScrollBar>)
   {
     return std::move(*this).scalarSettings({.readOnly = value});
+  }
+
+  /** @param enabled Hide all value glyphs and use a fixed-origin caret; false restores the type's normal presentation.
+   * @return Consuming editor recipe; ordinary LineEdit storage remains plaintext.
+   */
+  Description &&noEcho(bool enabled = true) &&
+    requires(std::same_as<T, LineEdit> || std::same_as<T, Password>)
+  {
+    const auto mode = enabled                     ? LineEditDisplayMode::NO_ECHO
+                      : std::same_as<T, Password> ? LineEditDisplayMode::PASSWORD
+                                                  : LineEditDisplayMode::NORMAL;
+
+    return std::move(*this).scalarSettings({.displayMode = mode});
+  }
+
+  /** @param value Publication mode shared by input and fluent changes. @return Consuming editor recipe. */
+  Description &&editMode(EditMode value) &&
+    requires(std::same_as<T, LineEdit> || std::same_as<T, Password>)
+  {
+    return std::move(*this).scalarSettings({.editMode = value});
+  }
+
+  /** @param value Public placeholder expression; never used as protected model data. @return Consuming editor recipe.
+   */
+  Description &&placeholder(TextValue value) &&
+    requires(std::same_as<T, LineEdit> || std::same_as<T, Password>)
+  {
+    return std::move(*this).scalarSettings({.placeholder = std::move(value)});
+  }
+
+  /** @param value Public placeholder bytes copied now. @return Consuming editor recipe. */
+  Description &&placeholder(std::string_view value) &&
+    requires(std::same_as<T, LineEdit> || std::same_as<T, Password>)
+  {
+    return std::move(*this).placeholder(TextValue(value));
   }
 
   /** @param policy Horizontal bar presence policy.
@@ -4056,7 +4155,8 @@ private:
         const auto &identity = notificationStyle ? *notificationStyle : *effective;
 
         state.intrinsicStyle = StyleTarget{.type = identity.type,
-                                           .control = std::derived_from<T, Control> || std::same_as<T, LineEdit>,
+                                           .control = std::derived_from<T, Control> || std::same_as<T, LineEdit> ||
+                                                      std::same_as<T, Password>,
                                            .baseTypes = identity.lineage};
         if constexpr (std::same_as<T, Row> || std::same_as<T, Column>) {
           constexpr std::string_view NATURAL = std::same_as<T, Row> ? "Row" : "Column";
@@ -4223,6 +4323,8 @@ private:
           slot->target.caption = value;
         } else if constexpr (std::same_as<T, LineEdit>) {
           slot->target.draft = value;
+        } else if constexpr (std::same_as<T, Password>) {
+          slot->target.secret = value;
         }
       });
       detail::RefTarget pending;
@@ -4233,6 +4335,8 @@ private:
         pending.caption = *node;
       } else if constexpr (std::same_as<T, LineEdit>) {
         pending.draft = *node;
+      } else if constexpr (std::same_as<T, Password>) {
+        pending.secret = *node;
       }
       context.pending.push_back({&slot->target, std::move(pending)});
       slot->pending = true;
@@ -7701,7 +7805,8 @@ struct ReadOnlyModifier {
    * @return Recipe staging its existing readOnly property.
    */
   template <class T>
-    requires(std::same_as<T, LineEdit> || std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+    requires(std::same_as<T, LineEdit> || std::same_as<T, Password> || std::same_as<T, ScrollArea> ||
+             std::same_as<T, ScrollBar>)
   friend Description<T> operator|(Description<T> &&description, ReadOnlyModifier modifier) {
     return std::move(description).readOnly(modifier.enabled);
   }
@@ -9480,4 +9585,5 @@ inline auto runApp(int argc, const char *const *argv, CommandLineParser parser, 
 }
 } // namespace portals::ui
 
+#include <portals/ui_password.hpp>
 #include <portals/ui_scene_resource.hpp>

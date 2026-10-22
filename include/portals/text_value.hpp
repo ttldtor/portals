@@ -96,6 +96,11 @@ public:
     return resource_ ? std::string_view(bytes_) : std::string_view{};
   }
 
+  /** @return Whether this expression is exactly an empty literal, without resolution or allocation. */
+  [[nodiscard]] constexpr bool isEmptyLiteral() const noexcept {
+    return !resource_ && bytes_.empty();
+  }
+
   /**
    * @brief Resolve literal bytes without requiring a resource resolver.
    * @param policy Owning display policy captured by the resulting text.

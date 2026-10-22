@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: BSL-1.0
 #include <portals/detail/line_edit_text.hpp>
 #include <portals/detail/setup_failure.hpp>
-#include <portals/ui_ref.hpp>
 #include <portals/message_box.hpp>
+#include <portals/ui_ref.hpp>
 
 namespace portals::ui {
 namespace detail {
@@ -462,6 +462,42 @@ void reportEventError(const std::shared_ptr<RefTarget> &target, const ManagedErr
   if (scene && !RefAccess::eventReported(**scene, error)) {
     (void)(*scene)->reportError(error, {}, origin);
   }
+}
+
+void reportPasswordError(const std::shared_ptr<RefTarget> &target, ManagedError &failure, std::source_location origin) {
+  auto scene = eventScene(target);
+
+  if (scene && RefAccess::eventReported(**scene, failure)) {
+    return;
+  }
+
+  RefAccess::report(failure, target, "password.value", {}, "Password", origin);
+}
+
+std::expected<PasswordValue, ManagedError> passwordValue(std::shared_ptr<RefTarget> target,
+                                                         std::source_location origin) {
+  auto scene = eventScene(target);
+  auto result = scene ? (*scene)->passwordValue(target->secret)
+                      : std::expected<PasswordValue, ManagedError>(std::unexpected(scene.error()));
+
+  if (!result) {
+    reportPasswordError(target, result.error(), origin);
+  }
+
+  return result;
+}
+
+std::expected<void, ManagedError> setPasswordValue(std::shared_ptr<RefTarget> target, PasswordValue value,
+                                                   std::source_location origin) {
+  auto scene = eventScene(target);
+  auto result = scene ? (*scene)->setPasswordValue(target->secret, std::move(value))
+                      : std::expected<void, ManagedError>(std::unexpected(scene.error()));
+
+  if (!result) {
+    reportPasswordError(target, result.error(), origin);
+  }
+
+  return result;
 }
 
 void reportFocusError(const std::shared_ptr<RefTarget> &target, const ManagedError &error,

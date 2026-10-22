@@ -2350,14 +2350,14 @@ TEST_CASE("complete schema and duplicate validation precede custom factories") {
   }
 }
 
-TEST_CASE("resource failures own exact source and byte based position after owner destruction") {
+TEST_CASE("resource failures own safe source identity and byte based position after owner destruction") {
   std::string source = "VBox{\n  Label{\"Привет\"}\n  Unknown{}\n}";
   const auto expected = source;
   const auto failure = rejected(source);
 
   source.assign("replaced");
   REQUIRE(failure.sceneResource->source);
-  CHECK(*failure.sceneResource->source == expected);
+  CHECK(*failure.sceneResource->source == "<string resource>");
   CHECK(failure.sceneResource->offset == expected.find("Unknown"));
   CHECK(failure.sceneResource->line == 3);
   CHECK(failure.sceneResource->column == 3);
@@ -2457,6 +2457,37 @@ TEST_CASE("resource depth limits include exact default and configured boundaries
 
   overlong.append(256, '}');
   CHECK(rejected(overlong).sceneResource->code == Code::DEPTH_LIMIT);
+}
+
+TEST_CASE("deep structural regions retain small parser frames and exact deepest failures") {
+  constexpr std::size_t DEPTH = 64;
+  std::string prefix;
+
+  for (std::size_t index = 1; index < DEPTH; ++index) {
+    prefix += index % 2 ? "Grid{columns=1 header{" : "Grid{columns=1 body{";
+  }
+
+  const std::string suffix((DEPTH - 1) * 2, '}');
+  auto owner = ui::scene(prefix + "Label{\"Deep\"}" + suffix);
+
+  REQUIRE(owner.prepareChecked());
+  CHECK(owner.close());
+
+  auto unknown = rejected(prefix + "Unknown{}" + suffix);
+
+  REQUIRE(unknown.sceneResource);
+  CHECK(unknown.sceneResource->code == Code::UNKNOWN_TYPE);
+  CHECK(unknown.sceneResource->offset == prefix.size());
+  REQUIRE(unknown.sceneResource->source);
+  CHECK(*unknown.sceneResource->source == "<string resource>");
+
+  auto malformed = rejected(prefix + "Label{\"bad\\q\"}" + suffix);
+
+  REQUIRE(malformed.sceneResource);
+  CHECK(malformed.sceneResource->code == Code::SYNTAX);
+  CHECK(malformed.sceneResource->offset >= prefix.size());
+  REQUIRE(malformed.sceneResource->source);
+  CHECK(*malformed.sceneResource->source == "<string resource>");
 }
 
 TEST_CASE("resource files are explicit lazy bounded and retain file identity on failure") {

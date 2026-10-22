@@ -34,9 +34,9 @@ std::expected<Node<T>, ManagedError> ManagedScene::emplaceConfigured(Node<Widget
 
     entry->node = *node;
 
-    if constexpr (std::derived_from<T, Control> || std::same_as<T, LineEdit> || std::same_as<T, Border> ||
-                  std::same_as<T, Gauge> || std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar> ||
-                  std::same_as<T, Grid>) {
+    if constexpr (std::derived_from<T, Control> || std::same_as<T, LineEdit> || std::same_as<T, Password> ||
+                  std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, ScrollArea> ||
+                  std::same_as<T, ScrollBar> || std::same_as<T, Grid>) {
       const char *type = "Control";
 
       if constexpr (std::same_as<T, Label>) {
@@ -47,6 +47,8 @@ std::expected<Node<T>, ManagedError> ManagedScene::emplaceConfigured(Node<Widget
         type = "CheckBox";
       } else if constexpr (std::same_as<T, LineEdit>) {
         type = "LineEdit";
+      } else if constexpr (std::same_as<T, Password>) {
+        type = "Password";
       } else if constexpr (std::same_as<T, KeyHints>) {
         type = "KeyHints";
       } else if constexpr (std::same_as<T, Border>) {
@@ -61,8 +63,9 @@ std::expected<Node<T>, ManagedError> ManagedScene::emplaceConfigured(Node<Widget
         type = "Grid";
       }
 
-      entry->target = std::make_shared<StyleTarget>(
-        StyleTarget{.type = type, .control = std::derived_from<T, Control> || std::same_as<T, LineEdit>});
+      entry->target = std::make_shared<StyleTarget>(StyleTarget{
+        .type = type,
+        .control = std::derived_from<T, Control> || std::same_as<T, LineEdit> || std::same_as<T, Password>});
       entry->stylePending = true;
       stylesDirty_ = true;
     }

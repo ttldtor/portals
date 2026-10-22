@@ -13,6 +13,7 @@
 #include <portals/line_edit.hpp>
 #include <portals/managed_diagnostics.hpp>
 #include <portals/managed_model.hpp>
+#include <portals/password.hpp>
 #include <portals/primitives.hpp>
 #include <portals/scroll_controls.hpp>
 #include <portals/style.hpp>
@@ -864,6 +865,28 @@ public:
                                          std::function<std::expected<void, TreeError>(LineEditResult)> result = {},
                                          std::shared_ptr<Clipboard> clipboard = {},
                                          std::function<bool(std::string_view)> validate = {});
+
+  /** @param node Managed protected editor without an existing action binding.
+   * @param model Protected state created by this scene; no plaintext snapshots are retained.
+   * @param result Optional owning result handler after native editing semantics.
+   * @param clipboard Optional service used only by an explicitly enabled paste policy.
+   * @param validate Scoped plaintext predicate; false retains the protected draft.
+   * @return Checked registration or complete typed protected failure.
+   */
+  std::expected<void, ManagedError> bind(Node<Password> node, ManagedState<PasswordValue> model,
+                                         std::function<std::expected<void, TreeError>(PasswordResult)> result = {},
+                                         std::shared_ptr<Clipboard> clipboard = {},
+                                         std::function<bool(SecretView)> validate = {});
+
+  /** @param node Live protected editor.
+   * @return Owning protected draft identity or checked scene/tree error; no plaintext is borrowed.
+   */
+  std::expected<PasswordValue, ManagedError> passwordValue(Node<Password> node) const;
+  /** @param node Live protected editor with a native binding.
+   * @param value Protected candidate subject to the editor's ordinary publication/validation mode.
+   * @return Checked operation, retaining collector provenance if its callback already reported a failure.
+   */
+  std::expected<void, ManagedError> setPasswordValue(Node<Password> node, PasswordValue value);
 
   /** @tparam Callback Owning managed action accepting TextEditedEvent or no arguments.
    * @param node Editor whose existing binding supplies accepted user text changes.
@@ -1805,10 +1828,17 @@ private:
     std::vector<std::shared_ptr<detail::DataStateRecord>>(0);
   std::shared_ptr<detail::DataStateOwner> dataStateOwner_;
 
+  struct PasswordFeedback {
+    bool active{};
+    std::optional<ManagedError> reported;
+  };
+
   struct Entry {
     Node<Widget> node;
     std::shared_ptr<StyleTarget> target;
-    std::variant<std::monostate, ActionBinding, CheckBoxBinding, CheckStateBinding, LineEditBinding> binding;
+    std::variant<std::monostate, ActionBinding, CheckBoxBinding, CheckStateBinding, LineEditBinding, PasswordBinding>
+      binding;
+    std::shared_ptr<PasswordFeedback> passwordFeedback;
     std::unique_ptr<CaptionBinding> caption;
     std::unique_ptr<ManagedState<std::string>> textModel;
     ActionBinding focusScope;

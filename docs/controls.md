@@ -25,6 +25,143 @@ and frame errors. Equal text/style/value synchronization is a no-op; changed tex
 or width policy invalidates layout, while style, focus and checked state invalidate
 paint. `GraphemeText::from` reports text errors before widget construction.
 
+## Protected password input {#password-control}
+
+`Password` is a separate `SizedWidget` for a protected single-line value. Include
+`<portals/ui_password.hpp>` for the managed recipe and `ui::PasswordRef`, an alias
+of `ui::Ref<Password>`. The scene owns the field, model and binding; the Ref observes
+them and becomes usable after the complete recipe has mounted. See
+[managed ownership](managed-controls.md).
+
+This complete program reports whether a value was supplied. F10 exits. The
+callback receives a `SecretView` only for its synchronous invocation; it does not
+copy the password into the label.
+
+```cpp
+#include <portals/ui_password.hpp>
+
+int main() {
+  using namespace portals;
+
+  ui::PasswordRef password;
+  ui::Ref<Button> check;
+  ui::Ref<Label> status;
+
+  return ui::scene(ui::vbox(
+    ui::password(password).placeholder("Password"),
+    ui::button(check, "Check"),
+    ui::label(status, "Enter a password")))
+    | ui::onClick(check, [password, status] {
+        return password.withPlaintext([status](SecretView value) {
+          status.text() = value.empty() ? "Empty" : "Supplied";
+        });
+      })
+    | ui::onKey("F10", ui::quit)
+    | ui::runApp();
+}
+```
+
+The checked Ref operation collects failures in the scene once. Its returned
+result passes through the click adapter to `runApp` without duplicate reporting. Application code can instead
+inspect its `expected<void, ManagedError>`. `ManagedError::password` retains the
+typed `PasswordFailure`, including independent protected-access, callback and
+cleanup causes, without formatting secret bytes. Use the view only with a
+synchronous consumer. Retaining its pointers or making plaintext copies makes
+their lifetime and erasure the application's responsibility.
+
+`password.value()` returns a checked owning `PasswordValue` identity for the
+current protected draft. `password.value(value)` applies a protected candidate
+under the field's editing policy. Both run on the UI owner between frames.
+`PasswordValue::create(bytes, options)` is checked; a default-constructed value
+is unavailable, whereas checked creation can produce a valid empty value. Copies
+share immutable protected bytes and compare identities, without comparing or
+decrypting their contents. Snapshots can retain old encrypted values after a
+replacement until their last owner releases them. Plaintext borrows remain
+restricted to the creating thread.
+
+There is no password text/draft/caption getter, formatter, Undo/Redo history,
+outbound copy or cut. `.readOnly()` blocks user mutation while the explicit
+protected setter remains available. `ui::password(ref, config)` accepts
+`PasswordConfig`; its optional `initial` provider returns
+`expected<PasswordValue, PasswordFailure>` once during mount. Its `validate`
+predicate borrows a `SecretView` synchronously; `false` retains the protected
+draft without publishing it. To share a committed
+model, create a `ManagedState<PasswordValue>` in the receiving scene and pass it
+to `ui::password(ref, state)`. An external state and an initial provider cannot
+be combined.
+
+### Editing, presentation and limits
+
+The default `EditMode::IMMEDIATE` publishes each accepted, semantically valid
+change. `.editMode(EditMode::ON_COMPLETION)` keeps a protected draft until Enter,
+programmatic activation or focus loss. `EXPLICIT` commits on Enter or activation
+and keeps the draft on focus loss. Invalid UTF-8, line separators and whole-value
+limit failures preserve the previous draft. Semantic rejection retains the new
+protected draft. An external revision cannot overwrite a dirty deferred draft;
+confirmation reports `CONFLICT`, and Escape securely adopts the latest model.
+Escape cannot undo an edit already published in immediate mode.
+
+A successful `PasswordResult::commit` owns the exact
+`PropertyUpdate<PasswordValue>` receipt. Rejected observer notifications do not
+undo the commit; inspect the delivery counts separately. Result callback failure
+also cannot undo it. Managed scenes recover the latest clean snapshot before
+frames even when a notification was rejected.
+
+The default display uses one ASCII `*` per extended grapheme and reveals its
+count. `.noEcho()` and the leading pipe `| ui::noEcho()` hide value, placeholder
+and selection glyphs, measure one cell and fix the caret at the origin. Passing
+`false` restores the mask. Layout and paint use prepared numeric metadata and
+public mask/placeholder text without decrypting a value. A placeholder is public
+text, never a place to supply a secret.
+
+`PasswordOptions::limits` and `securePolicy.maxBytes` both default to 4096 input
+bytes; both bounds apply. Larger explicit bounds remain limited by
+`MAX_SECRET_BYTES`, 1 MiB. Whole edits fail instead of truncating a value. The
+`securePolicy` fields are `maxBytes`, `storage`, `lockPages`,
+`excludeFromDumps` and `encryptWhileIdle`. Password requires native guarded
+storage and idle encryption on Windows or Linux. It rejects `WIPE_ONLY`, disabled
+encryption and unsupported guarantees, including the native policy on WASM;
+there is no automatic downgrade. Page locking is optional; dump exclusion is an
+optional Linux guarantee and is unsupported on Windows.
+
+Paste is disabled by default. Explicitly set
+`PasswordOptions::pastePolicy = PasswordPastePolicy::ENABLED` to admit routed
+paste or an injected `Clipboard` service. Owned service payload bytes and scalar
+encoding temporaries are wiped after use. The system clipboard, decoder input,
+service internals and caller buffers remain outside protected storage.
+
+Guard pages, wiping and idle encryption do not promise protection against a
+debugger or memory inspection tool such as ArtMoney with access to the process.
+Plaintext exists during an admitted borrow. Ordinary
+[LineEdit](line-edit.md) `PASSWORD` display and `noEcho()` continue to use plaintext
+models, getters and history; their masking is a presentation option.
+
+### Resources and explicit ownership
+
+A resource can declare `Password#password { text = "", placeHolder = "Password" }`
+or omit `text`. Nonempty text literals and text-resource expressions are rejected,
+including inherited settings. Supply secret values through typed C++ state,
+a checked provider or a captured `ManagedState<PasswordValue>` in a registered factory. Resource settings
+expose every `securePolicy` field and `pastePolicy`; they do not accept secret
+document text as protected storage. See [scene resources](scene-loading-guide.md).
+
+String-resource diagnostics now identify their source as the fixed public label
+`<string resource>`, including parse and limit failures. They no longer retain the
+whole input document in that diagnostic field. Code that displayed or matched
+that payload must account for this compatibility change. File-resource
+diagnostics continue to identify the file path. The caller's source buffer or file
+is not erased by rejecting a literal.
+
+For explicit low-level ownership, include `<portals/password.hpp>`, create
+`Password` in the tree and pass a shared `Property<PasswordValue>` to
+`bindPassword(tree, router, node, model, onResult, clipboard, validate)`. Keep the
+returned `PasswordBinding` on UI; the tree, router and scheduler must outlive it
+and its model. Call `binding.sync(routerFocus)` before frames after model/input
+changes. Its checked `setValue`, `confirm` and `cancel` operations retain typed
+failures. Admitted callbacks survive removal of the field or its ancestor and
+destruction of the binding. The [managed API](managed-controls.md) owns these
+registrations and performs synchronization for ordinary application code.
+
 ## Input and focus
 
 A button invokes its callback for each unmodified `Action::ACTIVATE`, including
@@ -40,7 +177,7 @@ and tree borrows keep the admitted callback and widget alive until return.
 Exceptions become `CALLBACK_FAILED`; completed user effects are not rolled back.
 
 `EventRouter` remains the sole focus owner. Before a frame, recover focus once and
-copy that presentation snapshot into every control, including labels:
+copy that presentation snapshot into every basic control, including labels:
 
 ```cpp
 auto focused = router.focused();

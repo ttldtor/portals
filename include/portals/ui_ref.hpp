@@ -47,6 +47,7 @@ struct RefTarget {
   Node<Control> caption;                                    ///< Typed caption identity, empty for other widgets.
   std::shared_ptr<const ManagedError> failure; ///< Owning failure, allocated only for a rejected named request.
   Node<LineEdit> draft;                        ///< Typed editor identity, empty for other widgets.
+  Node<Password> secret;                       ///< Protected editor identity; never grants plaintext access.
 };
 
 struct RefAccess;
@@ -84,6 +85,21 @@ std::expected<HistoryAvailability, TreeError> editorAvailability(std::shared_ptr
  * @return Live managed scene or typed BIND error; never reads mutable target fields from a foreign thread.
  */
 std::expected<ManagedScene *, ManagedError> eventScene(const std::shared_ptr<RefTarget> &target);
+
+/** @param target Checked weak protected-editor observation. @param origin Original call site.
+ * @return Owning protected draft identity, with short failures collected once.
+ */
+std::expected<PasswordValue, ManagedError> passwordValue(std::shared_ptr<RefTarget> target,
+                                                         std::source_location origin);
+/** @param target Checked weak protected-editor observation. @param value Protected candidate.
+ * @param origin Original call site. @return Checked native edit under the field's publication mode.
+ */
+std::expected<void, ManagedError> setPasswordValue(std::shared_ptr<RefTarget> target, PasswordValue value,
+                                                   std::source_location origin);
+/** @param target Weak original observation. @param failure Owning original protected failure.
+ * @param origin Original call site. Report through the existing collector without duplicate receipts.
+ */
+void reportPasswordError(const std::shared_ptr<RefTarget> &target, ManagedError &failure, std::source_location origin);
 
 /** @param target Observation checked for immutable affinity before mutable owner access.
  * @return Owning final arranged geometry or exact checked failure; never performs layout or reports.

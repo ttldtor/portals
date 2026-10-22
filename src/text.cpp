@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 
+#include <portals/detail/text_metadata.hpp>
 #include <portals/text.hpp>
 
 #include <utf8proc.h>
@@ -108,8 +109,8 @@ GraphemeText &GraphemeText::operator=(GraphemeText &&other) noexcept {
   return *this;
 }
 
-std::expected<GraphemeText, TextError> GraphemeText::from(std::string_view bytes, WidthPolicy policy,
-                                                          TextLimits limits) {
+namespace {
+std::expected<void, TextError> validateInput(std::string_view bytes, WidthPolicy policy, TextLimits limits) {
   if ((policy.ambiguous != AmbiguousWidth::NARROW && policy.ambiguous != AmbiguousWidth::WIDE) ||
       (policy.emoji != EmojiWidth::ONE && policy.emoji != EmojiWidth::TWO)) {
     return std::unexpected(TextError{TextErrorKind::INVALID_POLICY, 0});
@@ -119,9 +120,23 @@ std::expected<GraphemeText, TextError> GraphemeText::from(std::string_view bytes
     return std::unexpected(TextError{TextErrorKind::INPUT_LIMIT, 0});
   }
 
-  GraphemeText result;
+  return {};
+}
+} // namespace
 
-  result.policy_ = policy;
+std::expected<std::int32_t, TextError> detail::scanTextMetadataInto(std::string_view bytes, WidthPolicy policy,
+                                                                    TextLimits limits, std::vector<Grapheme> &graphemes,
+                                                                    std::vector<std::size_t> *wordStarts,
+                                                                    bool *lineSeparator) {
+  auto valid = validateInput(bytes, policy, limits);
+
+  if (!valid) {
+    return std::unexpected(valid.error());
+  }
+
+  std::int32_t cells = 0;
+  bool previousWord = false;
+  bool clusterWord = false;
 
   const auto max_cells = std::min(limits.max_cells, static_cast<std::size_t>(INT32_MAX));
   std::size_t begin = 0;
@@ -133,18 +148,24 @@ std::expected<GraphemeText, TextError> GraphemeText::from(std::string_view bytes
   // Commit metadata only for a complete cluster. The result stays local until all input
   // is validated, so a later decoding or limit error never exposes a partial text value.
   const auto append = [&](std::size_t end) -> std::expected<void, TextError> {
-    if (result.graphemes_.size() >= limits.max_graphemes) {
+    if (graphemes.size() >= limits.max_graphemes) {
       return std::unexpected(TextError{TextErrorKind::GRAPHEME_LIMIT, begin});
     }
 
     const auto grapheme = cluster.finish(begin, end, policy);
 
-    if (grapheme.cells > max_cells - static_cast<std::size_t>(result.cells_)) {
+    if (grapheme.cells > max_cells - static_cast<std::size_t>(cells)) {
       return std::unexpected(TextError{TextErrorKind::CELL_LIMIT, begin});
     }
 
-    result.graphemes_.push_back(grapheme);
-    result.cells_ += grapheme.cells;
+    graphemes.push_back(grapheme);
+
+    if (wordStarts && clusterWord && !previousWord) {
+      wordStarts->push_back(begin);
+    }
+
+    previousWord = clusterWord;
+    cells += grapheme.cells;
 
     return {};
   };
@@ -167,12 +188,24 @@ std::expected<GraphemeText, TextError> GraphemeText::from(std::string_view bytes
 
       begin = offset;
       cluster = {};
+      clusterWord = false;
     }
 
     const auto next = offset + static_cast<std::size_t>(length);
 
     if (next - begin > limits.max_cluster_bytes) {
       return std::unexpected(TextError{TextErrorKind::CLUSTER_LIMIT, begin});
+    }
+
+    if (wordStarts) {
+      const auto category = utf8proc_category(cp);
+
+      clusterWord = clusterWord || (category >= UTF8PROC_CATEGORY_LU && category <= UTF8PROC_CATEGORY_NO) ||
+                    category == UTF8PROC_CATEGORY_PC;
+    }
+
+    if (lineSeparator) {
+      *lineSeparator = *lineSeparator || cp == '\r' || cp == '\n' || cp == 0x2028 || cp == 0x2029;
     }
 
     cluster.add(cp, policy, offset == begin);
@@ -188,6 +221,45 @@ std::expected<GraphemeText, TextError> GraphemeText::from(std::string_view bytes
     }
   }
 
+  return cells;
+}
+
+std::expected<detail::TextMetadata, TextError> detail::scanTextMetadata(std::string_view bytes, WidthPolicy policy,
+                                                                        TextLimits limits, bool collectWordStarts) {
+  TextMetadata metadata;
+  auto cells = scanTextMetadataInto(bytes, policy, limits, metadata.graphemes,
+                                    collectWordStarts ? &metadata.wordStarts : nullptr, &metadata.lineSeparator);
+
+  if (!cells) {
+    return std::unexpected(cells.error());
+  }
+
+  metadata.cells = *cells;
+
+  return metadata;
+}
+
+std::expected<GraphemeText, TextError> GraphemeText::from(std::string_view bytes, WidthPolicy policy,
+                                                          TextLimits limits) {
+  // Keep policy/input rejection ahead of container construction, as before the
+  // metadata-only scanner extraction. Ordinary text needs no extra vector/proxy.
+  auto valid = validateInput(bytes, policy, limits);
+
+  if (!valid) {
+    return std::unexpected(valid.error());
+  }
+
+  GraphemeText result;
+
+  result.policy_ = policy;
+
+  auto cells = detail::scanTextMetadataInto(bytes, policy, limits, result.graphemes_);
+
+  if (!cells) {
+    return std::unexpected(cells.error());
+  }
+
+  result.cells_ = *cells;
   result.bytes_ = std::string(bytes);
 
   return result;
