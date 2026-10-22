@@ -1136,6 +1136,14 @@ public:
    */
   std::expected<void, ManagedError> id(Node<Widget> node, std::string_view value);
 
+  /** @param node Live scene-owned node whose style classes are changed.
+   * @param values Owning ordered class names; duplicates are preserved and empty clears classes.
+   * @return Atomic STYLE metadata update or typed boundary/liveness/allocation error.
+   * Existing type, id, control identity and base types are preserved; no new subscription is retained.
+   * Argument construction or transfer may throw before entry, as with style().
+   */
+  std::expected<void, ManagedError> classes(Node<Widget> node, std::vector<std::string> values);
+
   /** @param sheet Owning stylesheet installed with the existing atomic style engine.
    * @return Success or original StyleError. Layered mode updates reserved THEME with pending metadata
    * atomically and revokes its prior controller; legacy mode flushes registrations before whole replacement.

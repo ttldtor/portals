@@ -351,6 +351,272 @@ Space и нажатие мыши сохраняют тип. Отпускание
 Пользовательские аргументы и захваты следуют владению C++; заимствованные
 объекты должны оставаться живыми.
 
+Настоящий default-catalog constructor также принимает `.themeCatalogSettings({...})` и `ui::themeCatalogSettings({...})`. Фабрика ресурса явно открывает эти свойства через `ui::controlPropertySchema("ThemeSelectorCatalog")`. Selector существующей модели отклоняет catalog-only свойства; метаданные не превращают его в owning catalog.
+
+Для настоящего каталога порядок начальных настроек: defaults `ThemeSelector`, defaults `ThemeSelectorCatalog`, цепочка именованного варианта, явные значения экземпляра. Прежние view-derived варианты и ресурсные регистрации `ThemeSelector` совместимы. Старые метаданные вида по-прежнему отклоняют явный `themeCatalog.*` до вызова фабрики. Если фабрика возвращает настоящий каталог, его defaults вычисляются из исходного разреженного ввода с сохранением источников. Дополнительный бюджет проверяется после возврата фабрики, до установки модели; уже выполненные пользовательской фабрикой эффекты не откатываются.
+
+Незаданные настройки сохраняют захваченные options, варианты и callbacks. Начальный выбор использует существующие preview/commit и не вызывает `onCommitted`. Необязательные бюджеты слоёв проверяет штатный engine при preview: несовпадение с уже установленными бюджетами даёт `INVALID_ARGUMENT`. Это начальные настройки, а не перенастройка смонтированного selector или перебазирование внешней модели.
+
+### Начальные свойства контролов и загрузка ресурсов {#initial-control-properties-ru}
+
+[ControlContext](../../include/portals/ui_control_context.hpp) и загруженная сцена хранят разреженные начальные значения. Если значение не задано, используется значение фабрики; явные `false` и `0` сохраняются и переопределяют наследованную настройку. Эти значения не перенастраивают уже смонтированный виджет. Для runtime-изменений используйте существующие типизированные API виджетов.
+
+#### Канонические скалярные свойства
+
+Схема конкретного контрола определяет, какие канонические листья [`ControlSettings`](../../include/portals/ui_control_context.hpp) он принимает. В формате `CONFIGURATION` используются точные пути ниже с учётом регистра. Счётчики задаются десятичными литералами без знака, размеры в ячейках — неотрицательными целыми числами. Значения Gauge и шаг колеса принимают конечные числа с плавающей точкой; произвольные выражения не вычисляются.
+
+| Путь свойства | Тип C++, единицы и проверка | Значение при отсутствии настройки |
+|---|---|---|
+| `text`, `placeholder` | `TextValue`, владеющий текст или выражение ресурса. `placeholder` проверяется по лимитам текста и ширины редактора. | `text` использует начальный текст фабрики (пустая строка, если он не задан); `placeholder` отсутствует. |
+| `width`, `height`, `flex` | `optional<int32_t>` — ячейки, неотрицательное значение; `optional<uint32_t>` — положительный вес flex. | Размер не переопределяется, применяется `SizePolicy` фабрики. |
+| `gap` | `optional<int32_t>`, неотрицательное число терминальных ячеек. | `LinearOptions::gap`: 0. |
+| `state`, `cycle` | `CheckState`: `UNCHECKED`, `CHECKED`, `MIXED`; `CheckCycle`: `TWO_STATE`, `THREE_STATE`. Недопустимое значение отклоняется при подготовке. `ThreeState` фиксирует `THREE_STATE`. | Для `CheckBox`: `UNCHECKED` и `TWO_STATE`; `ThreeState` сохраняет фиксированный цикл. |
+| `editMode`, `readOnly`, `programmaticChange`, `displayMode` | `EditMode` (`IMMEDIATE`, `ON_COMPLETION`, `EXPLICIT`); `bool`; `ProgrammaticChange` (`RECORD`, `RESET_BASELINE`); `LineEditDisplayMode` (`NORMAL`, `PASSWORD`, `NO_ECHO`). | `IMMEDIATE`, `false`, `RECORD`, `NORMAL`. |
+| `history.enabled`, `history.maxOperations`, `history.maxBytes`, `history.groupTyping`, `history.groupDeletion` | `bool`, `size_t` операций, `size_t` сохранённых байтов, `bool`, `bool`. Нулевой лимит операций или байтов отключает хранение. | `TextHistoryOptions`: `true`, 128 операций, 1 МиБ, `true`, `true`. |
+| `columns`, `rows`, `flow`, `columnGap`, `rowGap`, `padding.left/top/right/bottom`, `maxTracksPerAxis`, `maxPlacements`, `maxPlacementWork`, `scroll` | Число треков и бюджеты — положительный `size_t`; `flow` — `ROW_MAJOR` или `COLUMN_MAJOR`; интервалы и отступы — неотрицательные ячейки `int32_t`; `scroll` — `bool`. | Не переопределяет значения фабрики Grid; интервалы/отступы — 0, автопоток — `ROW_MAJOR`, бюджеты — 4096 треков, 4096 размещений и 65536 единиц работы, прокрутка выключена. |
+| `padding.left/top/right/bottom`, `mainAlign`, `crossAlign`, `overflow` | Отступы — неотрицательные ячейки `int32_t`. Выравнивание — `LayoutAlign`: `START`, `CENTER`, `END`, `STRETCH`. `overflow` — `LayoutOverflow`; поддерживается только `CLIP`. Недопустимые значения отклоняются. | `LayoutPadding{}` (каждая сторона 0), главная ось `START`, поперечная `STRETCH`, `CLIP`. Эти пути доступны схемам VBox/HBox. |
+| `limits.maxInputBytes`, `limits.maxClusterBytes`, `limits.maxGraphemes`, `limits.maxCells` | `size_t`: байты ввода, байты в кластере-графеме, число графем и терминальные ячейки. Нулевое значение допустимо и ограничивает соответствующее свойство нулём; пустая строка остаётся допустимой. | `LineEditOptions::limits`: 4096 байт, 4096 байт, 4096 графем, 8192 ячейки. |
+| `chrome` | `ButtonChrome`: `BRACKETS`, `NONE`. Применяется к подписи и действиям Button. | Оформление принимающей фабрики; `plainButton` сохраняет `NONE`. |
+| `glyphs`, `maxPaintCells` | `PrimitiveGlyphs`: `UNICODE`, `ASCII`; положительный `size_t` — бюджет работы отрисовки. Принимается Border, Gauge и контролами прокрутки. | `UNICODE`, 16384; конкретный контрол определяет, учитывается периметр, площадь или дорожка. |
+| `value`, `minimum`, `maximum`, `preferredWidth` | Конечные `double` для Gauge; `maximum > minimum`, значение внутри включительного диапазона; неотрицательная внутренняя ширина `int32_t` в ячейках. | Значение фабрики Gauge; диапазон 0–1, предпочтительная ширина 10. |
+| `wheelStep`, `keyStep`, `pageOverlap`, `minimumThumb`, `focusable` | Контролы прокрутки: положительный конечный `double` — логические ячейки на колесо; положительный `uint64_t` — шаг клавиши; `uint64_t`, включая ноль, — общая часть страниц; положительный `int32_t` — ячейки ползунка; `bool`. | 3, 1, 1, 1, `true`. Также принимается `readOnly`, по умолчанию `false`; проверяемые программные команды прокрутки доступны. |
+| `horizontal`, `vertical`, `placement` | Политики ScrollArea: `NEVER`, `AUTO`, `ALWAYS`; размещение `RESERVED`, `OVERLAY`, `ON_FRAME`. Для `ON_FRAME` нужна действующая рамка. | Обе политики `AUTO`, размещение `RESERVED`. |
+| `axis` | Отдельный ScrollBar: `HORIZONTAL`, `VERTICAL`. | `VERTICAL`, если принимающая фабрика не задала другую ось. |
+| `frame.enabled`, `frame.glyphs`, `frame.maxPaintCells` | Необязательная существующая одноклеточная рамка ScrollArea. Явное `false` удаляет её; glyph/budget требуют включённой рамки. Символы и положительный бюджет следуют `BorderOptions`. | Рамки нет. Явное `true` создаёт параметры по умолчанию, только если рамка отсутствовала. |
+| `horizontalAlign`, `verticalAlign` | Overlay: `LayoutAlign` (`START`, `CENTER`, `END`, `STRETCH`); также применяются `padding.*`. Это не выравнивание размещения в родительском Grid. | Обе оси `STRETCH`, отступы нулевые. Явные параметры фабрики остаются исходными значениями. |
+| `initiallyOpen` | HelpView: boolean, с существующим возвратом фокуса. | `false`. |
+| `format.maxBytesPerBinding`, `format.strokeSeparator`, `format.alternativeSeparator`, `format.repeatMarker`, `format.releaseMarker`, `format.unknownMarker` | HelpView/KeyHints: положительный лимит байтов всей строки и владеющие литералы UTF-8. `.format({...})` и `ui::format({...})` применяют разреженные переопределения. | `8192`; `" then "`, `" / "`, `" [repeat]"`, `" [release]"`, `" [?]"`. Пропущенные листья сохраняют фактические параметры фабрики. |
+| `emptyText`, `unavailableText` | HelpView/KeyHints: владеющие литералы UTF-8, без вычисления выражений или i18n-разрешения. | HelpView: `"No key bindings"`, `"Help unavailable"`; KeyHints: пустая строка, `"?"`. Сохраняются штатные бюджеты представления. |
+| `entrySeparator`, `overflowMarker` | KeyHints: литералы UTF-8; маркер переполнения непустой. | Два пробела, `"+"`. |
+| `rowHeight`, `overscanRows` | VirtualList/VirtualTable: положительная высота строки в ячейках; неотрицательное число дополнительных запрашиваемых строк с каждой стороны. Нулевой overscan допустим. | `1`, `2`. Отсутствующие листья сохраняют реальные настройки фабрики. |
+| `maxColumns`, `maxPreparedCells`, `maxPreparedTextBytes` | VirtualTable: положительные ограничения колонок, подготовленных ячеек тела и UTF-8 заголовков/тела. | `64`, `16384`, `1048576`. |
+| `mode`, `chartGlyphSet`, `candleGap` | Chart: `LINE`/`CANDLES`, `ASCII`/`BOX_DRAWING` и неотрицательный промежуток в колонках ячеек. | `LINE`, `ASCII`, `0`. Отсутствующие листья сохраняют реальные настройки фабрики. |
+| `yRange.enabled`, `yRange.minimum`, `yRange.maximum` | Chart: необязательная фиксированная шкала Y с конечными границами; равные границы допустимы. `false` убирает её; изменение только границ требует существующего фиксированного диапазона. | Автоматическая шкала видимого диапазона; включение без границ начинает с native `(0, 0)`. |
+| `showStatus`, `statusRows`, `contentPolicy`, `spinnerInterval` | DataStateView: наличие строки состояния, её положительная высота `int32_t`, `KEEP_BODY`/`REPLACE` и положительный интервал `uint64_t` в миллисекундах. | `true`, `1`, `KEEP_BODY`, `100`; пропущенные настройки сохраняют фактическую конфигурацию фабрики. |
+| `labels.loading/empty/error/offline/refreshing/retry` | Владеющие текстовые выражения; `.labels({...})` и `ui::labels({...})` меняют только заданные подписи. | `Loading...`, `No data`, `Unable to load data`, `Offline`, `Refreshing...`, `Retry`. |
+| `maxLayers` | OverlayHost: положительный `size_t`, число зарегистрированных слоёв, включая скрытые. | `32`. |
+| `title`, `dialog.mode`, `dialog.placement` | Владеющий заголовок Dialog; режим `MODAL`/`NON_MODAL`; размещение `CENTER`/`BELOW_START`/`ABOVE_START`. | Заголовок принимающей фабрики; `MODAL`, `CENTER`. Локальная ресурсная фабрика требует явно заданного эффективного заголовка; пустая строка допустима. |
+| `dialog.maximumPanelSize.width/height`, `dialog.viewportMargin`, `dialog.anchorGap` | Положительные пределы панели `int32_t` и неотрицательные отступ/зазор, в ячейках. Размеры не сужают структурный корень Dialog. | `60×20`, `1`, `1`. |
+| `dialog.closeOnEscape`, `dialog.frame.glyphs/maxPaintCells` | Разрешение отмены через Esc; символы `UNICODE`/`ASCII` и положительный бюджет непрозрачной панели. Рамка остаётся обязательной. | `true`, `UNICODE`, `16384`. |
+| `body` | Владеющее пояснение MessageBox; `.body(...)` / `ui::body(...)` применяются к настоящему native message recipe. | Фактическое пояснение захваченной фабрики. |
+| `message.labels.acknowledge/confirm/save/discard/cancel` | Владеющие текстовые выражения. Разрешаются только действия фактического вида диалога; активные подписи должны быть непустыми и однострочными. | `OK`, `Continue`, `Save`, `Discard`, `Cancel`. |
+| `message.defaultChoice.enabled/value`, `message.allowDestructiveDefault` | Необязательный `ACKNOWLEDGE`/`CONFIRM`/`SAVE`/`DISCARD`/`CANCEL`; принадлежность виду диалога и разрешение опасного выбора проверяет native-фабрика. Заданное значение включает выбор; явное `false` очищает его. Некорректный enum отвергается даже в неактивном поле. | Без значения — `ACKNOWLEDGE` для информации, иначе безопасный `CANCEL`; разрешение `false`. Включение без значения сохраняет захваченный выбор либо использует безопасный выбор вида диалога. |
+| `message.textLimits.maxInputBytes/maxClusterBytes/maxGraphemes/maxCells`, `message.maxBodyLines` | Положительные лимиты UTF-8/кластера/графем/ячеек одного выражения и строк перенесённого пояснения. `.messageSettings({...})` / `ui::messageSettings({...})` меняют только заданные листья. | `16384`, `4096`, `16384`, `32768`; `4096` строк. |
+| `notification.capacity/maxVisible` | Положительные лимиты удерживаемых/видимых уведомлений; видимый лимит не больше фактической capacity. | `32`, `3`. |
+| `notification.placement/maximumWidth/margin/gap` | `BOTTOM_END`/`TOP_END`/`BOTTOM_START`/`TOP_START`; положительный предел ширины, неотрицательные отступ и промежуток в ячейках. | `BOTTOM_END`, `48`, `1`, `1`. |
+| `notification.overflow/refreshDeduplicated/reducedMotion` | `DROP_OLDEST_PENDING`/`REJECT_NEW`; обновление срока существующего временного уведомления; отключение чередования индикатора. | `DROP_OLDEST_PENDING`, `false`, `false`. |
+| `notification.textLimits.maxInputBytes/maxClusterBytes/maxGraphemes/maxCells` | Положительные лимиты проверки одного разрешённого сообщения. | `16384`, `4096`, `16384`, `32768`. |
+| `notification.actionLabelBytes/dedupKeyBytes/maxPaintCells` | Положительные пределы байтов подписи действия/ключа дедупликации и площади отрисовки карточки. | `256`, `128`, `16384`. |
+| `themeSelector.labels.apply/cancel/closeKeepingPreview/emptyStatus/errorStatus/conflictStatus` | Владеющие подписи и статусы вида; native `.themeSelectorSettings({...})` и `ui::themeSelectorSettings({...})` меняют заданные листья. | `Apply`, `Cancel`, `Close (keep preview)`, `Choose a theme to preview`, `Theme action failed; retry or close keeping preview`, `Theme changed elsewhere; preview again or close keeping preview`. |
+| `themeSelector.textLimits.maxInputBytes/maxClusterBytes/maxGraphemes/maxCells` | Положительные лимиты проверки одной разрешённой подписи или статуса. | `4096`, `4096`, `4096`, `8192`. |
+| `themeSelector.openingShortcut.enabled/value` | Необязательная строка существующего key-binding parser. Заданное значение включает сочетание, `false` очищает; `true` без значения сохраняет захваченное сочетание либо восстанавливает native-default. Неверный заданный синтаксис отвергается даже при отключении. | `Ctrl+K, Ctrl+T`. |
+| `themeCatalog.maxChoices/maxIdBytes/maxLabelBytes/maxDescriptionBytes/maxTextBytes` | Положительные лимиты нормализации: число вариантов, байты ID, разрешённых подписей/описаний и суммарного логического текста. | `64`, `128`, `512`, `2048`, `1048576`. |
+| `themeCatalog.textLimits.maxInputBytes/maxClusterBytes/maxGraphemes/maxCells` | Положительные лимиты проверки одного текстового значения. | `2048`, `4096`, `16384`, `32768`. |
+| `themeCatalog.initialId.enabled/value` | Владеющий ID варианта, не локализованная подпись. Значение включает начальные preview+commit; `false` очищает его. `true` без значения сохраняет захваченный ID либо возвращает `INVALID_ARGUMENT`, если ID нет. | Начального подтверждённого варианта нет. |
+| `themeCatalog.layers.enabled/maxLayers/maxRules/maxDeclarations/maxOwnedBytes` | Необязательные лимиты слоёв первого preview. Числовые поля включают захваченные/default options, если нет явного отключения; заданные лимиты положительны. Активный набор требует минимум два слоя. `false` очищает optional. | Нет значения: установленные бюджеты engine либо defaults `16`, `1024`, `6144`, `1048576`. |
+
+Настройки экземпляра `id`, владеющий список разделённых пробелами `classes`, `visible` и `enabled` хранятся отдельно от скалярных `ControlSettings`. Их методы и pipe-модификаторы сохраняют настоящий тип контрола. Видимость и отключение следуют существующим правилам дерева и ввода.
+
+У встроенного ScrollArea `horizontal` и `vertical` означают политики прокрутки. Выравнивание его размещения в родительском Grid задаётся отдельно существующим `.gridItem(...)`. Зарегистрированные пользователем типы сохраняют собственную схему и прежний синтаксис размещения Grid. Применимый `frame{...}` является группой свойств, пока имя `frame` не занято зарегистрированным дочерним типом; при совпадении `frame{...}` остаётся ребёнком, а `frame={...}` явно выбирает группу свойств.
+
+У отступов один канонический путь для каждой стороны; Grid и VBox/HBox используют ту же запись. В `CONFIGURATION` имя `placeHolder` является алиасом `placeholder` и нормализуется до проверки дубликатов; нового свойства оно не добавляет. Первые четыре поля агрегата `ControlPropertyDescriptor` сохраняют порядок `path`, `kind`, `depth`, `enumNames`; необязательный список алиасов идёт после них. В `SceneResourceArguments` существующий aggregate prefix `text`, `id`, `width`, `height`, `flex`, `gap`, `checked` также сохранён; `settings`, `visible` и `enabled` добавлены после него. Схема `ControlContext::registerType` выбирает подмножество этих канонических свойств, а не добавляет произвольные имена. См. объявления [`TextLimits`](../../include/portals/text.hpp), [`LineEditOptions`](../../include/portals/line_edit.hpp), [`LinearOptions`](../../include/portals/layout.hpp) и [`GridOptions`](../../include/portals/grid.hpp): именно они задают значения по умолчанию и контракты получателей.
+
+Message-диалоги сохраняют native-правила: обязательны `MODAL` и отмена через Esc. Проверенная внутренняя панель не наследует обычные defaults `Dialog` повторно. Обычный `Dialog` не принимает message-настройки.
+
+Ресурсная привязка требует настоящий захваченный message facade. Существующий fluent-коллектор регистрации принимает каноническую семантическую схему; ошибки сохраняются для `prepareChecked()` / `runApp()`, без ручной проверки регистрации:
+
+```cpp
+ui::Ref<MessageDialog> question;
+ui::SceneResourceOptions options;
+options.format = ui::SceneResourceFormat::CONFIGURATION;
+options.control<Dialog>("Prompt", [question](ui::SceneResourceArguments) {
+  return ui::confirmDialog(question, "Continue?", "Apply these settings?");
+}, ui::controlPropertySchema("MessageBox"));
+```
+
+Реестр читает метаданные схемы только при регистрации и сохраняет собственный конечный выбор. Неполная или чужая схема отвергается. Фабрика должна вернуть настоящий native message recipe, в том числе после стирания типа; обычный Dialog отвергается при проверяемой подготовке. Ресурс `Prompt` может заменить захваченные title/body и настройки; callbacks и `question.open(...)` остаются в коде. Явная локализация фабрики приоритетна; resolver ресурса — только синхронный fallback конструктора для этой явной привязки.
+
+Уведомления используют `.notificationSettings({...})` или `ui::notificationSettings({...})`; незаданные листья сохраняют захваченные `NotificationOptions`. Явные defaults `Notifications` действуют на эту семантическую композицию. Посторонние обычные defaults `Overlay` её по-прежнему не переопределяют. Размеры и раскладка Overlay сохраняют identity настоящей поверхности и приоритет ресурса над фабрикой.
+
+Существующий явный native-вариант `.variant("MyOverlay")`, производный от `Overlay`, остаётся способом задать только стилевую identity: сохраняются исходная визуальная identity и локальные настройки фабрики, без наследования настроек этого варианта, обычных defaults `Overlay` или новых defaults `Notifications`. Для наследования настроек конструктора используется семантический вариант, производный от `Notifications`.
+
+Ресурсная фабрика захватывает настоящий центр и полное тело и явно выбирает `ui::controlPropertySchema("Notifications")`. Это не добавляет несвязанный ресурсный конструктор и не сериализует отдельные команды toast. Resolver ресурса заимствуется только при подготовке сцены и не сохраняется центром; для будущих публикаций явно задаётся `NotificationOptions::textResolver`.
+
+`ToastOptions` относится к запросу во время работы: severity по умолчанию `INFO`, duration — 5000 миллисекунд (`nullopt` означает постоянное уведомление), ключ дедупликации пуст, `dismissOnAction=true`. Необязательный индикатор по умолчанию выключен: glyph `!`, без чередования фона, белый передний план, красный сигнальный фон, период 500 миллисекунд. Это настройки существующего C++ API публикации.
+
+Семантическая схема `ThemeSelector` настраивает настоящий вид как для существующей модели той же сцены, так и для существующего default-catalog constructor. По умолчанию `title=Themes`; незаданные листья сохраняют фактические захваченные options. Вид остаётся модальным и отключает немедленное закрытие через Esc. Внутренний Dialog не наследует обычные defaults Dialog повторно; default-catalog constructor применяет настройки вида один раз перед внутренним делегированием.
+
+Зарегистрированная фабрика предоставляет настоящий selector facade и модель/каталог и явно выбирает `ui::controlPropertySchema("ThemeSelector")`; обычный Dialog не получает эту capability из метаданных. Ресурсный узел не принимает внешних дочерних тел: choices, status и actions создаёт native-вид. Собственная локализация приоритетна; resolver ресурса — только синхронный fallback подготовки, который не сохраняется в будущих callbacks. `onCommitted`, фабрики вариантов и identity модели/engine остаются в коде.
+
+#### Поддержка ресурсов для 19 текущих семейств
+
+`KeyHints{help="guide"}` связывается с экземпляром HelpView с ID `guide` в том же ресурсе; ссылка может указывать вперёд. Без `help` нужен ровно один объявленный экземпляр с возможностями HelpView. Для фабрик со стёртым типом `Widget` требуется явный ID; фактическую цель проверяет существующий финализатор создания. Отсутствующая, неоднозначная или неверная цель даёт typed setup error с откатом ожидающих ссылок. `help` — метаданные привязки экземпляра, не скаляр `ControlSettings`. Эти ресурсные контролы используют те же канонические регистрации клавиш, что и штатные C++-фабрики.
+
+Встроенный реестр ресурсов содержит семь обычных фабрик. Для Grid, Border, Gauge, ScrollArea, ScrollBar, Overlay, HelpView, KeyHints, DataStateView, OverlayHost и Dialog также предусмотрены локальные fallback-фабрики `CONFIGURATION`: они не резервируют имена вопреки явной регистрации и не меняют legacy-реестр. Таблица фиксирует текущую поддержку и пропуски загрузчика; отсутствие скалярного или декларативного свойства не означает постоянный контракт «только C++». Приложение может зарегистрировать дополнительную фабрику на C++; callbacks, модели, providers и захваченное поведение остаются в коде.
+
+| Текущее семейство и C++ API | Свойства встроенного ресурса | Пока не принимается загрузчиком ресурса |
+|---|---|---|
+| Линейные контейнеры: `row`, `column`, `linear` | `VBox`/`HBox`: `width`, `height`, `flex`, `gap`, `padding.*`, `mainAlign`, `crossAlign`, `overflow`. | Дочерние элементы остаются вложенными узлами ресурса. |
+| Label: `label` | `text`, `width`, `height`, `flex`. | Стиль, модель и resolver. |
+| Button/plain button: `button`, `plainButton` | `text`, `width`, `height`, `flex`, `chrome`. | Click callbacks, модели и action captures. |
+| CheckBox/ThreeState: `checkbox`, `threeState` | `text`, `width`, `height`, `flex`, `state`, `cycle`. | Managed state и callback изменения; Legacy сохраняет старое имя `checked`. |
+| LineEdit: `lineEdit` | Общие листья текста/размера, `editMode`, `readOnly`, `programmaticChange`, `displayMode`, `placeholder`, `history.*`, `limits.*`. | Clipboard, validator, history shortcuts, стили, модели, resolver и result callback. |
+| Grid: `grid`, `GridSection` | Fallback загрузчика: общие листья размера, `columns`, `rows`, `flow`, интервалы, `padding.*`, бюджеты размещения и `scroll`; row/column/span/выравнивание детей и регионы header/body. | Политики треков, стили presentation, controller и child providers. |
+| Overlay layout: `overlay` | Локальная фабрика `Overlay`: общие листья размера, `padding.*`, `horizontalAlign`, `verticalAlign` и обычные дочерние рецепты в порядке наложения. | Сервисы и поведение обработчиков остаются в коде. |
+| ScrollArea/ScrollBar: `scrollArea`, `scrollBar` | Локальные fallback-фабрики: общие листья размера и настройки wheel/key/page/thumb/focus/read-only/glyph/work; политики, размещение и рамка области; ось полосы. У области один корень содержимого, у полосы детей нет. | `ScrollController`, модель/provider и callbacks остаются в коде. |
+| Border/frame: `border`, `frame` | Локальная фабрика `Border`: общие листья размера, `glyphs`, `maxPaintCells` и ровно один корень содержимого. | Ручные стили остаются в коде или задаются PSS. Расширенные рамки — отдельная возможность. |
+| Gauge: `gauge` | Локальная фабрика `Gauge`: общие листья размера, конечное `value`, диапазон, `preferredWidth`, `glyphs`, `maxPaintCells`; детей нет. | Ручные стили остаются в коде или задаются PSS. |
+| Dialog/overlay host: `dialog`, `OverlayHost`, `overlayHost` | Локальные фабрики `CONFIGURATION`: `maxLayers` у host; `title`, `dialog.*` у Dialog; один body host, затем слои Dialog; у Dialog один полный body. | Открытие, закрытие, anchor и обработчики результата остаются в коде. Dialog из ресурса изначально закрыт. |
+| MessageBox: `messageBox`, `confirmDialog`, `unsavedChangesDialog` | Явная семантическая регистрация настоящей native-фабрики: `title`, `body`, `dialog.*`, `message.*`; листовой узел с внутренними native-действиями. | Настоящий message facade, вид фабрики, маршрутизация результата и callbacks остаются в коде. Несвязанный ресурсный builtin не создаётся. |
+| Toast/NotificationCenter: `toast`, `notifications` | Явная семантическая регистрация `Notifications` настоящего центра и полного тела: общие размеры, раскладка Overlay и `notification.*`; ресурсный узел — лист. | Запросы публикации, действия, identity центра и runtime-resolver остаются в коде. |
+| DataStateView: `dataStateView` | Локальная фабрика `CONFIGURATION`: общие размеры, `showStatus`, `statusRows`, `contentPolicy`, `spinnerInterval`, `labels.*` и ровно один полный дочерний рецепт. | Встроенная фабрика использует явное состояние READY с generation1; модель, состояние provider и retry action привязываются в коде. |
+| HelpView/KeyHints | Локальные фабрики-листья: общие размеры, `format.*`, `emptyText`, `unavailableText`; HelpView `initiallyOpen`; KeyHints `entrySeparator`, `overflowMarker` и локальная привязка `help="id"`. | Регистрация клавиш остаётся в коде; оба контрола отображают существующий канонический набор регистраций. |
+| Выбор темы/selector | Явная семантическая регистрация `ThemeSelector` настоящего вида: `title`, `dialog.*`, `themeSelector.*`. `ThemeSelectorCatalog` дополнительно открывает `themeCatalog.*` настоящего owning constructor. Ресурсный узел — лист. | Существующая модель, фабрики каталога, сервис слоёв и commit-callbacks остаются связями из кода. Внешняя модель не получает catalog capability. |
+| VirtualList/VirtualTable | Зарегистрированные фабрики точного типа: общие размеры, `rowHeight`, `overscanRows`; у VirtualTable также `maxColumns`, `maxPreparedCells`, `maxPreparedTextBytes`. | Фабрика предоставляет реальную модель, formatter, колонки и prepared provider; встроенной фабрики без привязки к данным нет. |
+| Chart | Зарегистрированные фабрики точного типа: `mode`, `chartGlyphSet`, `candleGap`, `yRange.*`. | Фабрика предоставляет реальную модель, accessor, origin и prepared provider. Chart — обычный `Widget`, поэтому схема не добавляет свойства размера SizedWidget. |
+| Canvas/custom controls | По умолчанию нет. | Рисование и захваты пользовательской фабрики задаются в коде; поддержка ресурса зависит от зарегистрированной фабрики. |
+| Styles/theme layers | Нет скалярной схемы свойств контролов. | PSS и настройки темы/stylesheet используют отдельные API; это не скалярные свойства контрола, загружаемые здесь. |
+
+У регистрации точного типа `add<VirtualList<T>>` или `add<VirtualTable<T>>`
+схема по умолчанию включает соответствующие листья. Существующая обёртка
+автоматически применяет эти значения ресурса; фабрике не нужно вручную
+передавать `arguments.settings`. Явно заданная прежняя узкая схема остаётся
+узкой и отклоняет новые листья. Произвольные пользовательские подклассы
+эту схему не наследуют. Методы и pipes, например `.rowHeight(2).overscanRows(0)`
+и `ui::rowHeight(2)`, сохраняют модель, formatter, policy и provider.
+
+Настройки Dialog/OverlayHost применяются при создании. Методы и pipes, например
+`.maximumPanelSize({42, 9})` и `ui::maxLayers(2)`, сохраняют фактические параметры
+фабрики, не заданные переопределением. `.frame(BorderOptions{...})` меняет рамку
+самой панели Dialog; для pipe используйте `ui::dialogSettings({.frame={...}})`.
+Существующий `ui::frame(...)` по-прежнему оборачивает рецепт в Border.
+
+Ресурсный OverlayHost принимает один обычный body, затем ноль или больше слоёв
+Dialog. Каждый Dialog принимает один полный body; заголовок берётся из `title`
+экземпляра/defaults/definition. Host сначала привязывает body, затем регистрирует
+слои. Загруженный Dialog открывается через существующий `ui::Ref<Dialog>::open()`;
+`opened()` и `dismiss()` сохраняют обычный управляемый жизненный цикл. Фабрика слоя
+из кода должна создавать настоящий managed Dialog: один `custom<Dialog>` без
+регистрации диалога не становится таким слоем автоматически.
+
+Группы `dialog { maximumPanelSize { width=42, height=9 } }` и `dialog.frame { ... }`
+различаются с Chart mode и размещением ScrollArea. Если имя группы принадлежит
+зарегистрированному дочернему типу, используйте явную форму `dialog={...}`.
+
+Фабрика точного типа `add<DataStateView>` автоматически применяет настройки к
+реальной конфигурации, сохраняя её модель, retry и resolver. При `showStatus=false`
+подписи не разрешаются, строка состояния и её таймер не создаются. При включённом
+статусе `labels.retry` используется только при наличии retry action. Остальные
+скалярные настройки проверяются и при отключённом статусе. В C++ необязательные
+подписи задаются выражениями: `.labels({.loading = text("Fetching...")})`.
+
+Локальная ресурсная фабрика DataStateView принимает один полный body, в том числе
+вложенный layout/Grid. Например: `DataStateView { showStatus=false Label{"body"} }`.
+Группа `labels { loading=i18n("loading") }` сохраняет выражение до создания
+контрола; неиспользуемые подписи не вызывают resolver. Если зарегистрированный
+дочерний тип называется `labels`, группу свойств выбирает запись `labels={...}`.
+Ресурсный resolver применяется только при создании встроенного DataStateView;
+явно заданный resolver фабрики имеет приоритет.
+
+Регистрация точного типа `add<Chart<T>>` также автоматически применяет шесть
+листьев Chart. Прежняя явная узкая схема — `{text}`; расширенная добавляет эти
+шесть листьев. Текст остаётся метаданными фабрики из кода, а не подписью Chart.
+Метод `.yRange(ChartRange{90, 120})` и `ui::yRange(...)` задают обе границы;
+`.yRange(std::nullopt)` убирает фиксированный диапазон. В ресурсе это
+`yRange { enabled=true, minimum=90, maximum=120 }`. Если имя `yRange` принадлежит
+зарегистрированному дочернему контролу, явно выберите группу свойств через
+`yRange={...}`.
+
+`ControlContext` независимо проверяет каждое объявление defaults/definition.
+Объявление с обратными границами и отсутствующим `enabled` или значением `true`
+недопустимо, даже если последующий экземпляр отключил бы его. Чтобы сохранить неактивные конечные границы, укажите
+`enabled=false` в самом объявлении. Переданные неконечные границы всегда
+недопустимы. Повторный явный запрос подготовки может снова вычислить строки
+Chart, как и native API; простаивающий event loop не запрашивает дополнительной
+подготовки или перерисовки только из-за наличия этих настроек.
+
+`ui::overlay` принимает обычные дочерние рецепты, необязательные `OverlayOptions`/`SizePolicy` и форму с Ref первым аргументом. Методы и pipes используют те же начальные настройки layout. Существующая композиция `ui::notifications` также принимает эти локальные модификаторы Overlay, сохраняя прежнюю обёртку без наследования контекста. Поэтому несвязанное пользовательское объявление `Overlay` не переопределяет и не ломает композицию уведомлений. Настройки самого сервиса уведомлений остаются отдельными.
+
+#### Идентичность и состояние экземпляра
+
+`#id` идентифицирует один узел ресурса. ID не является настройкой типа и не наследуется. Булевы свойства экземпляра `visible` и `enabled` также находятся вне скалярных листьев `ControlSettings`: по умолчанию оба равны `true`, они применяются локально после фабрики. Скрытый узел исключается из layout, paint и input; отключённый сохраняет layout/paint, но меняет input/style поведение. Состояние предков ограничивает дочерние узлы. `visible` и `enabled` недопустимы в definitions и defaults.
+
+C++-рецепт задаёт это начальное состояние через `.visible(bool)` и `.enabled(bool)` или pipe-этапы `ui::visible(...)` и `ui::enabled(...)`. Для runtime-чтения и изменения используйте существующие API `WidgetTree`. Текст, callbacks, модели, resolver, providers и захваты фабрик остаются в C++; неизвестные свойства ресурса отклоняются до вызова text resolver или фабрики.
+
+#### Эквивалентный C++ и загружаемый ресурс
+
+Этот C++-пример задаёт разреженные значения по умолчанию для VBox и варианта редактора, а отдельной кнопке задаёт начальное состояние disabled:
+
+```cpp
+#include <portals/ui.hpp>
+
+int main() {
+  using namespace portals;
+
+  ui::ControlContext controls;
+  controls.defaults("VBox", {
+      .gap = 1,
+      .grid = {.paddingLeft = 1, .paddingRight = 1},
+      .linear = {.mainAlign = LayoutAlign::CENTER}})
+    .defaults("LineEdit", {
+      .limits = {.maxInputBytes = 64, .maxClusterBytes = 16,
+                 .maxGraphemes = 48, .maxCells = 48}})
+    .define("CompactEdit", "LineEdit", {
+      .limits = {.maxGraphemes = 32}});
+
+  auto scene = ui::scene(
+    ui::vbox(ui::label("Search"),
+             ui::lineEdit("").variant("CompactEdit"),
+             ui::button("Find").enabled(false)),
+    {.controls = controls});
+  return scene | ui::runApp();
+}
+```
+
+Тот же ресурс использует существующую грамматику `CONFIGURATION`. Вложенный `scene` содержит один корневой узел; настройки типа находятся в `definitions` или `defaults`, а `enabled` — у конкретного экземпляра:
+
+```cpp
+#include <portals/ui.hpp>
+
+int main() {
+  using namespace portals;
+
+  ui::SceneResourceOptions resource;
+  resource.format = ui::SceneResourceFormat::CONFIGURATION;
+  auto scene = ui::scene(R"(
+definitions {
+  CompactEdit = LineEdit { limits { maxGraphemes = 32 } }
+}
+defaults {
+  VBox {
+    gap = 1
+    padding { left = 1; right = 1 }
+    mainAlign = CENTER
+  }
+  LineEdit {
+    limits {
+      maxInputBytes = 64
+      maxClusterBytes = 16
+      maxGraphemes = 48
+      maxCells = 48
+    }
+  }
+}
+scene {
+  VBox {
+    Label { text = "Search" }
+    CompactEdit#query { text = "" }
+    Button#find { text = "Find"; enabled = false }
+  }
+}
+)", resource);
+  return scene | ui::runApp();
+}
+```
+
+`CONFIGURATION` нужно выбрать явно; формат `LEGACY` по умолчанию сохраняет старую грамматику с одним корневым узлом. Новые вложенные свойства линейных контейнеров (`padding`, alignment/overflow) и LineEdit `limits` доступны в `CONFIGURATION`; `visible` и `enabled` принимаются у экземпляров узлов в обоих форматах.
+
+Пример настраивает только начальные значения. Он не сериализует все поля `LinearOptions`, `LineEditOptions` или других публичных options structs. Храните callbacks, модели и providers в C++; синтаксиса ресурса для них нет. [`SceneResourceOptions`](../../include/portals/ui_scene_resource.hpp) задаёт формат, контекст и явный реестр фабрик.
 scene.model<T>(snapshot) создаёт общую модель. Передайте слабую ссылку на модель потока UI
 virtualList/virtualTable/chart этой сцены. Таблица сразу копирует колонки,
 заголовки и объекты форматирования; диапазон открывается при монтаже. Сцена владеет обработчиками;

@@ -166,69 +166,92 @@ std::expected<GraphemeText, ManagedError> resolve(const TextValue &value, const 
 
 Description<Dialog> MessageAccess::describe(MessageBox box, TextValue title, TextValue body, MessageOptions options,
                                             int kind) {
-  return Access::cold<Dialog>([box = std::move(box), title = std::move(title), body = std::move(body),
-                               options = std::move(options),
-                               kind](ManagedScene &scene, Node<Widget> parent,
-                                     MountContext &context) mutable -> std::expected<Node<Dialog>, ManagedError> {
-    if (!box.target_ || box.target_->owner != std::this_thread::get_id()) {
-      return std::unexpected(error(parent, TreeError::WRONG_THREAD));
-    }
-    if (scene.collectingMessages_ || box.target_->pending || box.target_->node != Node<Widget>{} ||
-        !options.maxBodyLines || !options.textLimits.max_input_bytes || !options.textLimits.max_cluster_bytes ||
-        !options.textLimits.max_graphemes || !options.textLimits.max_cells ||
-        options.dialog.mode != DialogMode::MODAL || !options.dialog.closeOnEscape) {
-      return std::unexpected(error(parent, TreeError::INVALID_ARGUMENT));
-    }
-    context.release.push_back([target = box.target_] {
-      target->pending = false;
-    });
-    if (box.target_->pending || box.target_->node != Node<Widget>{}) {
-      return std::unexpected(error(parent, TreeError::INVALID_ARGUMENT));
-    }
-    box.target_->pending = true;
-    const std::array<MessageChoice, 3> choices =
-      kind == 0   ? std::array{MessageChoice::ACKNOWLEDGE, MessageChoice::CANCEL, MessageChoice::CANCEL}
-      : kind == 1 ? std::array{MessageChoice::CONFIRM, MessageChoice::CANCEL, MessageChoice::CANCEL}
-                  : std::array{MessageChoice::SAVE, MessageChoice::DISCARD, MessageChoice::CANCEL};
-    const std::size_t count = static_cast<std::size_t>(kind + 1);
-    const auto selected =
-      options.defaultChoice.value_or(kind == 0 ? MessageChoice::ACKNOWLEDGE : MessageChoice::CANCEL);
-    if (!std::ranges::contains(std::span(choices).first(count), selected) ||
-        ((selected == MessageChoice::CONFIRM || selected == MessageChoice::DISCARD) &&
-         !options.allowDestructiveDefault)) {
-      return std::unexpected(error(parent, TreeError::INVALID_ARGUMENT));
-    }
-    auto heading = resolve(title, options, scene, parent);
-    if (!heading) {
-      return std::unexpected(heading.error());
-    }
-    auto paragraph = resolve(body, options, scene, parent);
-    if (!paragraph) {
-      return std::unexpected(paragraph.error());
-    }
-    std::array<std::optional<GraphemeText>, 3> labels;
-    for (std::size_t i = 0; i < count; ++i) {
-      const auto choice = choices[i];
-      const auto &expression = choice == MessageChoice::ACKNOWLEDGE ? options.labels.acknowledge
-                               : choice == MessageChoice::CONFIRM   ? options.labels.confirm
-                               : choice == MessageChoice::SAVE      ? options.labels.save
-                               : choice == MessageChoice::DISCARD   ? options.labels.discard
-                                                                    : options.labels.cancel;
-      auto text = resolve(expression, options, scene, parent);
-      if (!text) {
-        return std::unexpected(text.error());
+  auto description = Access::cold<Dialog>(
+    [box = std::move(box), title = std::move(title), body = std::move(body), options = std::move(options),
+     kind](ManagedScene &scene, Node<Widget> parent,
+           MountContext &context) mutable -> std::expected<Node<Dialog>, ManagedError> {
+      const auto *settings = context.controlSettings;
+
+      if (settings) {
+        options = controlMessageOptions(*settings, std::move(options), kind);
+        if (settings->title) {
+          title = *settings->title;
+        }
+        if (settings->body) {
+          body = *settings->body;
+        }
       }
-      if (text->bytes().empty() || text->bytes().find_first_of("\r\n") != std::string_view::npos) {
+      if (!options.resolver && context.messageResolver) {
+        options.resolver = *context.messageResolver;
+      }
+      struct RestoreResolver {
+        MountContext &context;
+        const TextResolver *previous;
+
+        ~RestoreResolver() {
+          context.messageResolver = previous;
+        }
+      } restore{context, std::exchange(context.messageResolver, nullptr)};
+
+      if (!box.target_ || box.target_->owner != std::this_thread::get_id()) {
+        return std::unexpected(error(parent, TreeError::WRONG_THREAD));
+      }
+      if (scene.collectingMessages_ || box.target_->pending || box.target_->node != Node<Widget>{} ||
+          !options.maxBodyLines || !options.textLimits.max_input_bytes || !options.textLimits.max_cluster_bytes ||
+          !options.textLimits.max_graphemes || !options.textLimits.max_cells ||
+          options.dialog.mode != DialogMode::MODAL || !options.dialog.closeOnEscape) {
         return std::unexpected(error(parent, TreeError::INVALID_ARGUMENT));
       }
-      labels[i] = std::move(*text);
-    }
-    auto record = std::make_shared<portals::detail::MessageRecord>();
-    record->count = count;
-    auto content = Access::cold<Column>(
-      [paragraph = std::move(*paragraph), labels = labels, record, choices, selected,
-       maximum = options.maxBodyLines](ManagedScene &owner, Node<Widget> into,
-                                       MountContext &mount) mutable -> std::expected<Node<Column>, ManagedError> {
+      context.release.push_back([target = box.target_] {
+        target->pending = false;
+      });
+      if (box.target_->pending || box.target_->node != Node<Widget>{}) {
+        return std::unexpected(error(parent, TreeError::INVALID_ARGUMENT));
+      }
+      box.target_->pending = true;
+      const std::array<MessageChoice, 3> choices =
+        kind == 0   ? std::array{MessageChoice::ACKNOWLEDGE, MessageChoice::CANCEL, MessageChoice::CANCEL}
+        : kind == 1 ? std::array{MessageChoice::CONFIRM, MessageChoice::CANCEL, MessageChoice::CANCEL}
+                    : std::array{MessageChoice::SAVE, MessageChoice::DISCARD, MessageChoice::CANCEL};
+      const std::size_t count = static_cast<std::size_t>(kind + 1);
+      const auto selected =
+        options.defaultChoice.value_or(kind == 0 ? MessageChoice::ACKNOWLEDGE : MessageChoice::CANCEL);
+      if (!std::ranges::contains(std::span(choices).first(count), selected) ||
+          ((selected == MessageChoice::CONFIRM || selected == MessageChoice::DISCARD) &&
+           !options.allowDestructiveDefault)) {
+        return std::unexpected(error(parent, TreeError::INVALID_ARGUMENT));
+      }
+      auto heading = resolve(title, options, scene, parent);
+      if (!heading) {
+        return std::unexpected(heading.error());
+      }
+      auto paragraph = resolve(body, options, scene, parent);
+      if (!paragraph) {
+        return std::unexpected(paragraph.error());
+      }
+      std::array<std::optional<GraphemeText>, 3> labels;
+      for (std::size_t i = 0; i < count; ++i) {
+        const auto choice = choices[i];
+        const auto &expression = choice == MessageChoice::ACKNOWLEDGE ? options.labels.acknowledge
+                                 : choice == MessageChoice::CONFIRM   ? options.labels.confirm
+                                 : choice == MessageChoice::SAVE      ? options.labels.save
+                                 : choice == MessageChoice::DISCARD   ? options.labels.discard
+                                                                      : options.labels.cancel;
+        auto text = resolve(expression, options, scene, parent);
+        if (!text) {
+          return std::unexpected(text.error());
+        }
+        if (text->bytes().empty() || text->bytes().find_first_of("\r\n") != std::string_view::npos) {
+          return std::unexpected(error(parent, TreeError::INVALID_ARGUMENT));
+        }
+        labels[i] = std::move(*text);
+      }
+      auto record = std::make_shared<portals::detail::MessageRecord>();
+      record->count = count;
+      auto content = Access::cold<Column>([paragraph = std::move(*paragraph), labels = labels, record, choices,
+                                           selected, maximum = options.maxBodyLines](
+                                            ManagedScene &owner, Node<Widget> into,
+                                            MountContext &mount) mutable -> std::expected<Node<Column>, ManagedError> {
         auto column = owner.emplace<Column>(into);
         if (!column) {
           return std::unexpected(column.error());
@@ -308,43 +331,48 @@ Description<Dialog> MessageAccess::describe(MessageBox box, TextValue title, Tex
         }
         return *column;
       });
-    ScrollAreaOptions scroll;
-    // Preserve the entire tiny viewport for wrapped content and actions. The existing
-    // area still owns wheel/keyboard scrolling and focus reveal, without bar gutters.
-    scroll.horizontal = ScrollBarPolicy::NEVER;
-    scroll.vertical = ScrollBarPolicy::NEVER;
-    auto recipe = ui::dialog(TextValue(heading->bytes()), ui::scrollArea(std::move(content), scroll), options.dialog);
-    auto mounted = Access::mount(std::move(recipe), scene, parent, context);
-    if (!mounted) {
-      return mounted;
-    }
-    record->dialog = scene.findDialog(*mounted);
-    if (!record->dialog) {
-      return std::unexpected(error(*mounted, TreeError::STALE_NODE));
-    }
-    record->dialog->message = record;
-    for (std::size_t i = 0; i < count; ++i) {
-      if (choices[i] == selected) {
-        record->dialog->initialFocus = record->buttons[i];
+      ScrollAreaOptions scroll;
+      // Preserve the entire tiny viewport for wrapped content and actions. The existing
+      // area still owns wheel/keyboard scrolling and focus reveal, without bar gutters.
+      scroll.horizontal = ScrollBarPolicy::NEVER;
+      scroll.vertical = ScrollBarPolicy::NEVER;
+      const TextValue resolvedTitle(heading->bytes());
+      auto recipe =
+        Access::internalDialog(ui::dialog(resolvedTitle, ui::scrollArea(std::move(content), scroll), options.dialog),
+                               context.controlPrepared && settings && settings->title ? &resolvedTitle : nullptr);
+      auto mounted = Access::mount(std::move(recipe), scene, parent, context);
+      if (!mounted) {
+        return mounted;
       }
-    }
-    scene.messages_.reserve(scene.messages_.size() + 1);
-    auto styled = scene.style(*mounted, StyleTarget{.type = "Dialog",
-                                                    .classes = {"dialog", "modal", "message-box",
-                                                                kind == 0   ? "information"
-                                                                : kind == 1 ? "confirm"
-                                                                            : "unsaved"}});
-    if (!styled) {
-      return std::unexpected(styled.error());
-    }
-    context.publish.push_back([target = box.target_, record, &scene] {
-      target->scene = &scene;
-      target->lifetime = Access::lifetime(scene);
-      target->node = record->dialog->root;
+      record->dialog = scene.findDialog(*mounted);
+      if (!record->dialog) {
+        return std::unexpected(error(*mounted, TreeError::STALE_NODE));
+      }
+      record->dialog->message = record;
+      for (std::size_t i = 0; i < count; ++i) {
+        if (choices[i] == selected) {
+          record->dialog->initialFocus = record->buttons[i];
+        }
+      }
+      scene.messages_.reserve(scene.messages_.size() + 1);
+      auto styled = scene.style(*mounted, StyleTarget{.type = "Dialog",
+                                                      .classes = {"dialog", "modal", "message-box",
+                                                                  kind == 0   ? "information"
+                                                                  : kind == 1 ? "confirm"
+                                                                              : "unsaved"}});
+      if (!styled) {
+        return std::unexpected(styled.error());
+      }
+      context.publish.push_back([target = box.target_, record, &scene] {
+        target->scene = &scene;
+        target->lifetime = Access::lifetime(scene);
+        target->node = record->dialog->root;
+      });
+      scene.messages_.push_back(record);
+      return mounted;
     });
-    scene.messages_.push_back(record);
-    return mounted;
-  });
+
+  return Access::messageControl(std::move(description));
 }
 } // namespace detail
 

@@ -2,9 +2,17 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include <portals/chart.hpp>
+#include <portals/data_presentation.hpp>
+#include <portals/dialog.hpp>
 #include <portals/grid.hpp>
 #include <portals/line_edit.hpp>
+#include <portals/message_box.hpp>
+#include <portals/primitives.hpp>
+#include <portals/scroll_options.hpp>
 #include <portals/text_value.hpp>
+#include <portals/theme_selector.hpp>
+#include <portals/toast.hpp>
 
 #include <expected>
 #include <memory>
@@ -20,9 +28,20 @@ struct ControlContextAccess;
 
 /** @brief Terminal factory provenance retained through named aliases. */
 enum class ControlFactoryKind {
-  USER,                     ///< Explicit caller schema and registry binding.
-  EXISTING_BUILTIN,         ///< One of the seven existing global controls.
-  DECLARATIVE_GRID_FALLBACK ///< Loader-local standard Grid selected after caller declarations.
+  USER,                      ///< Explicit caller schema and registry binding.
+  EXISTING_BUILTIN,          ///< One of the seven existing global controls.
+  DECLARATIVE_GRID_FALLBACK, ///< Loader-local standard Grid selected after caller declarations.
+  PRIMITIVE_FALLBACK,        ///< Scoped native Border/Gauge selected only when callers have not declared the name.
+  SCROLL_FALLBACK,           ///< Scoped native ScrollArea/ScrollBar, preserving caller declarations and writer roles.
+  OVERLAY_FALLBACK,          ///< Scoped ordinary Overlay, preserving caller declarations and OverlayHost policy.
+  KEY_HELP_FALLBACK,         ///< Scoped native HelpView/KeyHints, preserving caller declarations.
+  VIRTUAL_VIEW_FALLBACK,  ///< Scoped native provider-bound list/table/chart schema; no resource provider is supplied.
+  DATA_STATE_FALLBACK,    ///< Scoped native one-body DataStateView; explicit READY with generation1.
+  DIALOG_FALLBACK,        ///< Scoped native OverlayHost/Dialog, preserving managed body/layer registration.
+  MESSAGE_BINDING,        ///< Explicit code-bound native MessageBox semantic schema.
+  NOTIFICATION_BINDING,   ///< Explicit code-bound native notifications semantic schema.
+  THEME_SELECTOR_BINDING, ///< Explicit code-bound native ThemeSelector view schema.
+  THEME_CATALOG_BINDING   ///< Explicit owning default-catalog constructor schema.
 };
 } // namespace detail
 
@@ -55,21 +74,195 @@ struct ControlHistorySettings {
   std::optional<bool> groupDeletion{};        ///< Group adjacent ordinary deletion operations.
 };
 
-/** @brief Sparse Grid container literals; child placement is deliberately separate. */
+/** @brief Sparse container literals; padding is shared by Grid/VBox/HBox/Overlay, other fields are Grid-only. */
 struct ControlGridSettings {
-  std::optional<std::size_t> columns{};          ///< Positive horizontal track count.
-  std::optional<std::size_t> rows{};             ///< Positive vertical track count.
-  std::optional<GridFlow> flow{};                ///< Automatic placement order.
-  std::optional<std::int32_t> columnGap{};       ///< Nonnegative horizontal cell gap.
-  std::optional<std::int32_t> rowGap{};          ///< Nonnegative vertical cell gap.
-  std::optional<std::int32_t> paddingLeft{};     ///< Nonnegative left inset.
-  std::optional<std::int32_t> paddingTop{};      ///< Nonnegative top inset.
-  std::optional<std::int32_t> paddingRight{};    ///< Nonnegative right inset.
-  std::optional<std::int32_t> paddingBottom{};   ///< Nonnegative bottom inset.
+  std::optional<std::size_t> columns{};        ///< Positive horizontal track count.
+  std::optional<std::size_t> rows{};           ///< Positive vertical track count.
+  std::optional<GridFlow> flow{};              ///< Automatic placement order.
+  std::optional<std::int32_t> columnGap{};     ///< Nonnegative horizontal cell gap.
+  std::optional<std::int32_t> rowGap{};        ///< Nonnegative vertical cell gap.
+  std::optional<std::int32_t> paddingLeft{};   ///< Canonical padding.left; nonnegative Grid/VBox/HBox/Overlay inset.
+  std::optional<std::int32_t> paddingTop{};    ///< Canonical padding.top; nonnegative Grid/VBox/HBox/Overlay inset.
+  std::optional<std::int32_t> paddingRight{};  ///< Canonical padding.right; nonnegative Grid/VBox/HBox/Overlay inset.
+  std::optional<std::int32_t> paddingBottom{}; ///< Canonical padding.bottom; nonnegative Grid/VBox/HBox/Overlay inset.
   std::optional<std::size_t> maxTracksPerAxis{}; ///< Positive track budget.
   std::optional<std::size_t> maxPlacements{};    ///< Positive structural child budget.
   std::optional<std::size_t> maxPlacementWork{}; ///< Positive occupancy work budget.
   std::optional<bool> scroll{};                  ///< Construct with Grid scrolling; explicit false overrides defaults.
+};
+
+/** @brief Sparse VBox/HBox alignment and overflow options; canonical padding lives in ControlGridSettings. */
+struct ControlLinearSettings {
+  std::optional<LayoutAlign> mainAlign{};   ///< Group alignment; STRETCH acts as START on the main axis.
+  std::optional<LayoutAlign> crossAlign{};  ///< Child alignment across the container's main axis.
+  std::optional<LayoutOverflow> overflow{}; ///< Shortage policy; only CLIP is supported.
+};
+
+/** @brief Sparse LineEdit text bounds; explicit zero retains the low-level TextLimits semantics. */
+struct ControlTextLimitSettings {
+  std::optional<std::size_t> maxInputBytes{};   ///< Maximum UTF-8 input bytes, including initial text and placeholder.
+  std::optional<std::size_t> maxClusterBytes{}; ///< Maximum UTF-8 bytes in one grapheme cluster.
+  std::optional<std::size_t> maxGraphemes{};    ///< Maximum number of grapheme clusters.
+  std::optional<std::size_t> maxCells{};        ///< Maximum display width in terminal cells.
+};
+
+/** @brief Sparse existing one-cell ScrollArea frame options; this is not an extended frame style. */
+struct ControlScrollFrameSettings {
+  std::optional<bool> enabled{}; ///< Explicit true creates missing default BorderOptions; false removes the frame.
+  std::optional<PrimitiveGlyphs> glyphs{};    ///< Glyph selection; requires an effective enabled frame.
+  std::optional<std::size_t> maxPaintCells{}; ///< Positive existing frame paint cap; requires an effective frame.
+};
+
+/** @brief Sparse owning literal formatter settings; omitted strings preserve the receiving options. */
+struct ControlKeyFormatSettings {
+  ~ControlKeyFormatSettings() = default;
+
+  std::optional<std::size_t> maxBytesPerBinding{};   ///< Positive whole formatted row cap.
+  std::optional<std::string> strokeSeparator{};      ///< Literal text between sequence strokes.
+  std::optional<std::string> alternativeSeparator{}; ///< Literal text between alternatives.
+  std::optional<std::string> repeatMarker{};         ///< Literal repeat-phase marker.
+  std::optional<std::string> releaseMarker{};        ///< Literal release-phase marker.
+  std::optional<std::string> unknownMarker{};        ///< Literal unknown-support marker.
+};
+
+/** @brief Sparse explicit chart scale; disabling leaves inherited bounds inactive. */
+struct ControlChartRangeSettings {
+  std::optional<bool> enabled{};   ///< Create/preserve an explicit range, or clear it with false.
+  std::optional<double> minimum{}; ///< Finite lower endpoint; requires an effective explicit range.
+  std::optional<double> maximum{}; ///< Finite upper endpoint; active ranges must not be reversed.
+};
+
+/** @brief Sparse owning status expressions; unused labels remain native construction concerns. */
+struct ControlDataStateLabelSettings {
+  ~ControlDataStateLabelSettings() = default;
+
+  std::optional<TextValue> loading{};    ///< Initial/range pending message.
+  std::optional<TextValue> empty{};      ///< Successful empty presentation.
+  std::optional<TextValue> error{};      ///< Domain failure message.
+  std::optional<TextValue> offline{};    ///< Explicit offline message.
+  std::optional<TextValue> refreshing{}; ///< Pending work with last-good content.
+  std::optional<TextValue> retry{};      ///< Used only when status and an explicit retry action are enabled.
+};
+
+/** @brief Sparse independent panel caps; these never size the full-host Dialog root. */
+struct ControlDialogSizeSettings {
+  std::optional<std::int32_t> width{};  ///< Positive maximum panel width in cells.
+  std::optional<std::int32_t> height{}; ///< Positive maximum panel height in cells.
+};
+
+/** @brief Sparse mandatory dialog border; independent from optional ScrollArea frames. */
+struct ControlDialogFrameSettings {
+  std::optional<PrimitiveGlyphs> glyphs{};    ///< Existing UNICODE/ASCII border glyph domain.
+  std::optional<std::size_t> maxPaintCells{}; ///< Positive allocated opaque-panel paint cap.
+};
+
+/** @brief Sparse active-action captions; unused expressions retain native lazy resolution. */
+struct ControlMessageLabelSettings {
+  ~ControlMessageLabelSettings() = default;
+
+  std::optional<TextValue> acknowledge{}; ///< Information acknowledgement.
+  std::optional<TextValue> confirm{};     ///< Confirmation action.
+  std::optional<TextValue> save{};        ///< Save request.
+  std::optional<TextValue> discard{};     ///< Destructive discard request.
+  std::optional<TextValue> cancel{};      ///< Safe cancellation action.
+};
+
+/** @brief Sparse optional initial choice; a supplied value alone enables it. */
+struct ControlMessageChoiceSettings {
+  std::optional<bool> enabled{}; ///< False clears a captured choice; true preserves it or selects the safe choice.
+  std::optional<MessageChoice> value{}; ///< Always a valid enum, including while disabled.
+};
+
+/** @brief Sparse native MessageBox options, preserving captured values and kind-specific checks. */
+struct ControlMessageSettings {
+  ControlMessageLabelSettings labels{};          ///< Owning active-action expressions.
+  ControlMessageChoiceSettings defaultChoice{};  ///< Optional initial-choice overlay.
+  std::optional<bool> allowDestructiveDefault{}; ///< Explicit permission for CONFIRM/DISCARD initial focus.
+  ControlTextLimitSettings textLimits{};     ///< Positive per-expression limits, unlike low-level editor zero limits.
+  std::optional<std::size_t> maxBodyLines{}; ///< Positive wrapped paragraph line cap.
+};
+
+/** @brief Owning ThemeSelector captions, resolved only during native view construction. */
+struct ControlThemeSelectorLabelSettings {
+  ~ControlThemeSelectorLabelSettings() = default;
+
+  std::optional<TextValue> apply{};               ///< Sparse native apply caption.
+  std::optional<TextValue> cancel{};              ///< Sparse native cancel caption.
+  std::optional<TextValue> closeKeepingPreview{}; ///< Sparse native closeKeepingPreview caption.
+  std::optional<TextValue> emptyStatus{};         ///< Sparse native emptyStatus caption.
+  std::optional<TextValue> errorStatus{};         ///< Sparse native errorStatus caption.
+  std::optional<TextValue> conflictStatus{};      ///< Sparse native conflictStatus caption.
+};
+
+/** @brief Sparse optional opening shortcut; supplied values are always syntax checked. */
+struct ControlThemeSelectorShortcutSettings {
+  ~ControlThemeSelectorShortcutSettings() = default;
+
+  std::optional<bool> enabled{};      ///< False clears; true preserves captured or enables the native default.
+  std::optional<std::string> value{}; ///< Owning shortcut syntax; a value alone enables it.
+};
+
+/** @brief Sparse owning initial catalog selection; absence preserves captured input. */
+struct ControlThemeCatalogInitialSettings {
+  ~ControlThemeCatalogInitialSettings() = default;
+  std::optional<bool> enabled;      ///< False clears the captured initial ID.
+  std::optional<std::string> value; ///< Literal stable choice ID, never localized.
+};
+
+/** @brief Sparse admission budgets for the existing style-layer engine. */
+struct ControlThemeCatalogLayerSettings {
+  std::optional<bool> enabled;                ///< False clears explicit layer options.
+  std::optional<std::size_t> maxLayers;       ///< At least two layers when supplied.
+  std::optional<std::size_t> maxRules;        ///< Positive rule budget.
+  std::optional<std::size_t> maxDeclarations; ///< Positive declaration budget.
+  std::optional<std::size_t> maxOwnedBytes;   ///< Positive logical owned-byte budget.
+};
+
+/** @brief Constructor-only scalars for a real owning default catalog recipe. */
+struct ControlThemeCatalogSettings {
+  std::optional<std::size_t> maxChoices;          ///< Positive choice admission budget.
+  std::optional<std::size_t> maxIdBytes;          ///< Positive ID byte budget.
+  std::optional<std::size_t> maxLabelBytes;       ///< Positive label byte budget.
+  std::optional<std::size_t> maxDescriptionBytes; ///< Positive description byte budget.
+  std::optional<std::size_t> maxTextBytes;        ///< Positive combined text budget.
+  ControlTextLimitSettings textLimits;            ///< Positive selection-model text limits.
+  ControlThemeCatalogInitialSettings initialId;   ///< Optional startup preview/commit.
+  ControlThemeCatalogLayerSettings layers;        ///< Optional existing engine admission options.
+};
+
+/** @brief Native ThemeSelector view settings, independent of model/catalog construction. */
+struct ControlThemeSelectorSettings {
+  ControlThemeSelectorLabelSettings labels{};             ///< Native action and status captions.
+  ControlTextLimitSettings textLimits{};                  ///< Positive limits for each resolved view expression.
+  ControlThemeSelectorShortcutSettings openingShortcut{}; ///< Optional canonical opening binding.
+};
+
+/** @brief Sparse immutable notification-center construction options; runtime posts stay code-owned. */
+struct ControlNotificationSettings {
+  std::optional<std::size_t> capacity{};         ///< Positive total retained-record cap.
+  std::optional<std::size_t> maxVisible{};       ///< Positive selected-record cap, no greater than effective capacity.
+  std::optional<ToastPlacement> placement{};     ///< Existing corner of the ordinary body viewport.
+  std::optional<std::int32_t> maximumWidth{};    ///< Positive card width cap in cells.
+  std::optional<std::int32_t> margin{};          ///< Nonnegative viewport inset in cells.
+  std::optional<std::int32_t> gap{};             ///< Nonnegative gap between cards in cells.
+  std::optional<ToastOverflowPolicy> overflow{}; ///< Existing bounded queue admission policy.
+  std::optional<bool> refreshDeduplicated{};     ///< Refresh presented transient deadlines on deduplication.
+  std::optional<bool> reducedMotion{};           ///< Disable alternating indicators without changing static content.
+  ControlTextLimitSettings textLimits{};         ///< Positive full resolved runtime message bounds.
+  std::optional<std::size_t> actionLabelBytes{}; ///< Positive runtime action-caption byte cap.
+  std::optional<std::size_t> dedupKeyBytes{};    ///< Positive exact runtime dedup-key byte cap.
+  std::optional<std::size_t> maxPaintCells{};    ///< Positive allocated card paint-area cap.
+};
+
+/** @brief Sparse native dialog geometry/input options, merged per leaf. */
+struct ControlDialogSettings {
+  std::optional<DialogMode> mode{};             ///< MODAL or NON_MODAL input policy.
+  std::optional<DialogPlacement> placement{};   ///< CENTER/BELOW_START/ABOVE_START positioning.
+  ControlDialogSizeSettings maximumPanelSize{}; ///< Independent positive panel caps.
+  std::optional<std::int32_t> viewportMargin{}; ///< Nonnegative viewport inset in cells.
+  std::optional<std::int32_t> anchorGap{};      ///< Nonnegative distance from the body anchor.
+  std::optional<bool> closeOnEscape{};          ///< Existing managed cancellation policy.
+  ControlDialogFrameSettings frame{};           ///< Mandatory one-cell opaque panel border.
 };
 
 /** @brief Owning sparse literals only; never contains IDs, models, handlers or live history. */
@@ -84,21 +277,70 @@ struct ControlSettings {
   std::optional<CheckState> state{};                      ///< CheckBox/ThreeState initial state.
   std::optional<CheckCycle> cycle{};                      ///< CheckBox cycle; ThreeState is fixed THREE_STATE.
   std::optional<EditMode> editMode{};                     ///< LineEdit publication mode.
-  std::optional<bool> readOnly{};                         ///< LineEdit writable policy.
+  std::optional<bool> readOnly{};                         ///< LineEdit/scroll user-mutation policy.
   std::optional<ProgrammaticChange> programmaticChange{}; ///< LineEdit initial programmatic history policy.
   std::optional<LineEditDisplayMode> displayMode{};       ///< LineEdit immutable presentation.
   std::optional<TextValue> placeholder{};                 ///< LineEdit placeholder expression.
   ControlHistorySettings history{};                       ///< Structural merge, never a whole-history reset.
   std::shared_ptr<const ControlSourceOrigin> origin{};    ///< Fallback location for present properties.
   std::vector<ControlPropertyOrigin> origins = std::vector<ControlPropertyOrigin>(0); ///< Per-property overrides.
-  ControlGridSettings grid{}; ///< Sparse container settings, supported only by a matching schema.
+  ControlGridSettings grid{};                 ///< Sparse container settings, supported only by a matching schema.
+  ControlLinearSettings linear{};             ///< Sparse VBox/HBox alignment and overflow settings.
+  ControlTextLimitSettings limits{};          ///< Sparse LineEdit limits, merged one bound at a time.
+  std::optional<ButtonChrome> chrome{};       ///< Button decoration; absence preserves the receiving factory's chrome.
+  std::optional<PrimitiveGlyphs> glyphs{};    ///< Border/Gauge/scroll one-cell decoration selection.
+  std::optional<std::size_t> maxPaintCells{}; ///< Positive Border/Gauge/scroll paint-work cap in allocated cells.
+  std::optional<double> value{};   ///< Finite Gauge initial value, checked against its effective range at construction.
+  std::optional<double> minimum{}; ///< Finite Gauge lower bound; effective maximum must be greater.
+  std::optional<double> maximum{}; ///< Finite Gauge upper bound with a finite positive span.
+  std::optional<std::int32_t> preferredWidth{}; ///< Nonnegative Gauge intrinsic width in terminal cells.
+  std::optional<double> wheelStep{};            ///< Positive finite logical scroll cells per decoded wheel event.
+  std::optional<std::uint64_t> keyStep{}; ///< Positive integral logical cells per arrow event, retaining all 64 bits.
+  std::optional<std::uint64_t> pageOverlap{}; ///< Shared logical cells between pages; explicit zero is supported.
+  std::optional<std::int32_t> minimumThumb{}; ///< Positive minimum thumb cells, capped by the actual track.
+  std::optional<bool> focusable{}; ///< Whether the owning area/standalone bar participates in focus traversal.
+  std::optional<ScrollBarPolicy> horizontal{}; ///< ScrollArea horizontal bar presence policy.
+  std::optional<ScrollBarPolicy> vertical{};   ///< ScrollArea vertical bar presence policy.
+  std::optional<ScrollPlacement> placement{};  ///< ScrollArea gutter/overlay/frame relationship.
+  std::optional<ScrollAxis> axis{};            ///< ScrollBar projection axis, applied without changing its writer role.
+  ControlScrollFrameSettings frame{};          ///< Sparse optional one-cell ScrollArea frame configuration.
+  std::optional<LayoutAlign> horizontalAlign{}; ///< Ordinary Overlay child alignment across columns.
+  std::optional<LayoutAlign> verticalAlign{};   ///< Ordinary Overlay child alignment across rows.
+  std::optional<bool> initiallyOpen{};    ///< HelpView initial open state, using its existing focus-return lifecycle.
+  ControlKeyFormatSettings format{};      ///< Sparse literal formatter shared by HelpView and KeyHints.
+  std::optional<std::string> emptyText{}; ///< Literal empty-projection presentation.
+  std::optional<std::string> unavailableText{};  ///< Literal failed-projection presentation.
+  std::optional<std::string> entrySeparator{};   ///< KeyHints separator between complete entries.
+  std::optional<std::string> overflowMarker{};   ///< Nonempty KeyHints overflow marker.
+  std::optional<std::int32_t> rowHeight{};       ///< Positive VirtualList/VirtualTable cell rows per logical row.
+  std::optional<std::size_t> overscanRows{};     ///< Additional requested rows per side; explicit zero is supported.
+  std::optional<std::size_t> maxColumns{};       ///< Positive VirtualTable configured-column cap.
+  std::optional<std::size_t> maxPreparedCells{}; ///< Positive VirtualTable visible body-cell cap.
+  std::optional<std::size_t> maxPreparedTextBytes{}; ///< Positive VirtualTable header/body UTF-8 cap.
+  std::optional<ChartMode> mode{};                   ///< Chart line/candle presentation.
+  std::optional<ChartGlyphSet> chartGlyphSet{};      ///< Chart-only candle glyph domain.
+  std::optional<std::int32_t> candleGap{};           ///< Nonnegative empty columns between candles.
+  ControlChartRangeSettings yRange{};                ///< Sparse optional chart scale, merged per leaf.
+  std::optional<bool> showStatus{};                  ///< Native status subtree visibility at construction.
+  std::optional<std::int32_t> statusRows{};          ///< Positive fixed status strip height in cell rows.
+  std::optional<DataContentPolicy> contentPolicy{};  ///< Existing KEEP_BODY/REPLACE behavior.
+  std::optional<SchedulerTime> spinnerInterval{};    ///< Positive uint64 monotonic milliseconds.
+  ControlDataStateLabelSettings labels{};            ///< Owning native expressions, merged one label at a time.
+  std::optional<std::size_t> maxLayers{}; ///< Positive OverlayHost layer-registration cap, including closed layers.
+  std::optional<TextValue> title{};       ///< Owning Dialog caption expression; unspecified keeps the actual caption.
+  ControlDialogSettings dialog{};         ///< Native Dialog-only options, merged per leaf.
+  std::optional<TextValue> body{};        ///< Owning native MessageBox paragraph expression.
+  ControlMessageSettings message{};       ///< Native MessageBox-only sparse options.
+  ControlNotificationSettings notification{};   ///< Explicit code-bound native notifications options.
+  ControlThemeSelectorSettings themeSelector{}; ///< Explicit code-bound native selector view settings.
+  ControlThemeCatalogSettings themeCatalog{};   ///< Constructor-only real owning catalog scalars.
 };
 
 /** @brief Finite context bounds, checked before publication/materialization beyond each bound. */
 struct ControlContextLimits {
   std::size_t maxDefinitions{64};           ///< User definitions; builtin types do not consume this budget.
   std::size_t maxInheritance{32};           ///< Ancestor identities, excluding the requested type; at most 32.
-  std::size_t maxStructDepth{8};            ///< Property depth: scalar one, history member two.
+  std::size_t maxStructDepth{8};            ///< Property depth: scalar one, history/padding/limits member two.
   std::size_t maxMaterializedLeaves{65536}; ///< Leaves per resolve; mount must also aggregate across all nodes.
 };
 
@@ -143,7 +385,9 @@ enum class ControlPropertyKind {
   BOOLEAN,          ///< Explicit true or false.
   SIGNED_INTEGER,   ///< Signed cell extent.
   UNSIGNED_INTEGER, ///< Nonnegative capacity or positive weight.
-  ENUMERATION       ///< One of the descriptor's symbolic enum names.
+  ENUMERATION,      ///< One of the descriptor's symbolic enum names.
+  FLOATING_POINT,   ///< Finite decimal/exponent scalar, without expressions or units.
+  LITERAL_STRING    ///< Owning UTF-8 string; never evaluated or resolved as TextValue.
 };
 
 /** @brief Static canonical property descriptor; returned views have process lifetime. */
@@ -152,11 +396,15 @@ struct ControlPropertyDescriptor {
   ControlPropertyKind kind;                    ///< Literal kind; enum names follow the existing public enumerators.
   std::size_t depth;                           ///< Structural path depth.
   std::span<const std::string_view> enumNames; ///< Allowed symbolic enum names, empty for other kinds.
+  /** @brief Accepted alternative spellings; canonical schema paths remain unchanged. */
+  std::span<const std::string_view> aliases{};
 };
 
-/** @brief Return the canonical schema for a builtin concrete type; unknown types have an empty schema.
- * @param builtin One of VBox/HBox/Label/Button/CheckBox/LineEdit/ThreeState.
+/** @brief Return a static concrete factory schema; unknown types have an empty schema.
+ * @param builtin VBox/HBox/Label/Button/CheckBox/LineEdit/ThreeState or scoped
+ * Border/Gauge/ScrollArea/ScrollBar/Overlay.
  * @return Static descriptors only; named definitions are resolved to their concrete base first.
+ * Returning a native primitive schema does not register or reserve that name in a context.
  */
 std::span<const ControlPropertyDescriptor> controlPropertySchema(std::string_view builtin) noexcept;
 

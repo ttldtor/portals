@@ -6,6 +6,7 @@
 #include "support/examples/replay/terminal.hpp"
 #include <portals/ui.hpp>
 
+#include <array>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -3090,22 +3091,52 @@ TEST_CASE("idle facade does not poll or continuously redraw") {
 
 TEST_CASE("low-level owning editor binding failure rolls back its attempted node") {
   SUBCASE("ordinary initial draft rejection preserves an earlier sibling") {
+    struct InitialDraftCase {
+      TextLimits limits;
+      std::string_view text;
+      TextErrorKind kind;
+    };
+
+    const std::array cases{InitialDraftCase{{.max_input_bytes = 1}, "too long", TextErrorKind::INPUT_LIMIT},
+                           InitialDraftCase{{.max_cluster_bytes = 1}, "e\xcc\x81", TextErrorKind::CLUSTER_LIMIT},
+                           InitialDraftCase{{.max_graphemes = 1}, "ab", TextErrorKind::GRAPHEME_LIMIT},
+                           InitialDraftCase{{.max_cells = 1}, "ab", TextErrorKind::CELL_LIMIT}};
+
+    for (const auto &sample : cases) {
+      auto app = take(Application::create());
+      auto owner = take(ManagedScene::create(*app));
+      const auto sibling = take(ui::mount(*owner, ui::label("earlier")));
+      ui::Ref<LineEdit> field;
+      ui::LineEditConfig config;
+
+      config.options.limits = sample.limits;
+
+      const auto result = ui::mount(*owner, ui::lineEdit(field, sample.text, config));
+
+      REQUIRE_FALSE(result);
+      CHECK(result.error().phase == ManagedPhase::BIND);
+      REQUIRE(result.error().text);
+      CHECK(result.error().text->kind == sample.kind);
+      CHECK(field.node() == Node<LineEdit>{});
+      CHECK(take(app->tree().inspect(owner->root())).children.size() == 1);
+      CHECK(app->tree().inspect(sibling));
+      take(ui::mount(*owner, ui::lineEdit("retry")));
+    }
+  }
+
+  SUBCASE("malformed initial text remains a creation failure") {
     auto app = take(Application::create());
     auto owner = take(ManagedScene::create(*app));
-    const auto sibling = take(ui::mount(*owner, ui::label("earlier")));
     ui::Ref<LineEdit> field;
-    ui::LineEditConfig config;
 
-    config.options.limits.max_input_bytes = 1;
-
-    const auto result = ui::mount(*owner, ui::lineEdit(field, "too long", config));
+    const auto result = ui::mount(*owner, ui::lineEdit(field, std::string_view("\xff", 1)));
 
     REQUIRE_FALSE(result);
-    CHECK(result.error().phase == ManagedPhase::BIND);
+    CHECK(result.error().phase == ManagedPhase::MOUNT);
+    REQUIRE(result.error().text);
+    CHECK(result.error().text->kind == TextErrorKind::INVALID_UTF8);
     CHECK(field.node() == Node<LineEdit>{});
-    CHECK(take(app->tree().inspect(owner->root())).children.size() == 1);
-    CHECK(app->tree().inspect(sibling));
-    take(ui::mount(*owner, ui::lineEdit("retry")));
+    CHECK(take(app->tree().inspect(owner->root())).children.empty());
   }
 
   SUBCASE("allocation failures at mount and bind never strand an unpublished editor") {

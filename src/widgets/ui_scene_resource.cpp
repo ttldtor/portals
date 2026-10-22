@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include "key_help_state.hpp"
 #include <portals/detail/control_context.hpp>
 #include <portals/ui_scene_resource.hpp>
 
@@ -9,6 +10,7 @@
 #include <array>
 #include <cerrno>
 #include <charconv>
+#include <cmath>
 #include <fstream>
 #include <limits>
 
@@ -39,6 +41,28 @@ std::expected<void, SceneResourceErrorCode> SceneResourceRegistry::insert(Entry 
   }
 
   entries_.push_back(std::move(entry));
+
+  return {};
+}
+
+std::optional<detail::ControlFactoryKind>
+SceneResourceRegistry::semanticSchema(std::span<const ControlPropertyDescriptor> schema) noexcept {
+  for (const auto kind :
+       {detail::ControlFactoryKind::MESSAGE_BINDING, detail::ControlFactoryKind::NOTIFICATION_BINDING,
+        detail::ControlFactoryKind::THEME_SELECTOR_BINDING, detail::ControlFactoryKind::THEME_CATALOG_BINDING}) {
+    const auto canonical =
+      controlPropertySchema(kind == detail::ControlFactoryKind::MESSAGE_BINDING         ? "MessageBox"
+                            : kind == detail::ControlFactoryKind::NOTIFICATION_BINDING  ? "Notifications"
+                            : kind == detail::ControlFactoryKind::THEME_CATALOG_BINDING ? "ThemeSelectorCatalog"
+                                                                                        : "ThemeSelector");
+
+    if (!schema.empty() && std::ranges::equal(schema, canonical, [](const auto &left, const auto &right) {
+          return left.path == right.path && left.kind == right.kind && left.depth == right.depth &&
+                 std::ranges::equal(left.enumNames, right.enumNames) && std::ranges::equal(left.aliases, right.aliases);
+        })) {
+      return kind;
+    }
+  }
 
   return {};
 }
@@ -76,7 +100,8 @@ SceneResourceRegistry::SceneResourceRegistry() {
       lineEdit(arguments.text, LineEditConfig{.options = std::move(*options)}));
   });
   (void)add<Button>("Button", [](SceneResourceArguments arguments) {
-    return button(arguments.text);
+    return detail::textControl<Button>(TextValue(arguments.text), {}, {}, {},
+                                       arguments.settings.chrome.value_or(ButtonChrome::BRACKETS));
   });
   (void)add<CheckBox>("CheckBox", [](SceneResourceArguments arguments) {
     return checkbox(arguments.text,
@@ -143,6 +168,380 @@ struct ResourceAccess {
     return {};
   }
 
+  /** @brief Install CONFIGURATION-only native primitives after caller declarations and registrations. */
+  static std::expected<void, ControlContextError> installPrimitives(SceneResourceRegistry &registry,
+                                                                    ControlContext &controls) {
+    for (const auto name : {"Border", "Gauge"}) {
+      if (find(registry, name) || ControlContextAccess::hasDeclaredType(controls, name)) {
+        continue;
+      }
+
+      auto installed = ControlContextAccess::installPrimitiveSchema(controls, name);
+
+      if (!installed) {
+        return installed;
+      }
+
+      if (std::string_view(name) == "Border") {
+        const auto added = registry.add<Border>(
+          name,
+          [](SceneResourceArguments arguments) {
+            return Access::borderControl(controlBorderOptions(arguments.settings, {}), {});
+          },
+          true);
+
+        if (!added) {
+          return std::unexpected(ControlContextError{ControlContextErrorCode::DUPLICATE_TYPE, {}});
+        }
+      } else {
+        const auto added = registry.add<Gauge>(name, [](SceneResourceArguments arguments) {
+          return gauge(arguments.settings.value.value_or(0), controlGaugeOptions(arguments.settings, {}));
+        });
+
+        if (!added) {
+          return std::unexpected(ControlContextError{ControlContextErrorCode::DUPLICATE_TYPE, {}});
+        }
+      }
+
+      registry.entries_.back().text = false;
+      registry.entries_.back().factoryKind = ControlFactoryKind::PRIMITIVE_FALLBACK;
+    }
+
+    return {};
+  }
+
+  /** @brief Install scoped CONFIGURATION scroll adapters without replacing caller names or writer roles. */
+  static std::expected<void, ControlContextError> installScrolls(SceneResourceRegistry &registry,
+                                                                 ControlContext &controls) {
+    for (const auto name : {"ScrollArea", "ScrollBar"}) {
+      if (find(registry, name) || ControlContextAccess::hasDeclaredType(controls, name)) {
+        continue;
+      }
+
+      auto installed = ControlContextAccess::installScrollSchema(controls, name);
+
+      if (!installed) {
+        return installed;
+      }
+
+      if (std::string_view(name) == "ScrollArea") {
+        const auto added = registry.add<ScrollArea>(
+          name,
+          [](SceneResourceArguments arguments) -> std::expected<Description<ScrollArea>, ManagedError> {
+            auto options = controlScrollAreaOptions(arguments.settings, {});
+
+            if (!options) {
+              return std::unexpected(error({}, options.error()));
+            }
+
+            return Access::scrollAreaControl(*options, {}, {});
+          },
+          true);
+
+        if (!added) {
+          return std::unexpected(ControlContextError{ControlContextErrorCode::DUPLICATE_TYPE, {}});
+        }
+      } else {
+        const auto added = registry.add<ScrollBar>(
+          name, [](SceneResourceArguments arguments) -> std::expected<Description<ScrollBar>, ManagedError> {
+            auto options = controlScrollBarOptions(arguments.settings, {});
+
+            if (!options) {
+              return std::unexpected(error({}, options.error()));
+            }
+
+            return scrollBar(arguments.settings.axis.value_or(ScrollAxis::VERTICAL), *options);
+          });
+
+        if (!added) {
+          return std::unexpected(ControlContextError{ControlContextErrorCode::DUPLICATE_TYPE, {}});
+        }
+      }
+
+      registry.entries_.back().text = false;
+      registry.entries_.back().factoryKind = ControlFactoryKind::SCROLL_FALLBACK;
+    }
+
+    return {};
+  }
+
+  /** @brief Install scoped ordinary Overlay only after caller names have claimed their registry/schema entries. */
+  static std::expected<void, ControlContextError> installOverlay(SceneResourceRegistry &registry,
+                                                                 ControlContext &controls) {
+    constexpr std::string_view NAME = "Overlay";
+    if (find(registry, NAME) || ControlContextAccess::hasDeclaredType(controls, NAME)) {
+      return {};
+    }
+    auto installed = ControlContextAccess::installOverlaySchema(controls);
+    if (!installed) {
+      return installed;
+    }
+    const auto added = registry.add<Overlay>(
+      NAME,
+      [](SceneResourceArguments arguments) -> std::expected<Description<Overlay>, ManagedError> {
+        auto options = controlOverlayOptions(arguments.settings, {});
+        if (!options) {
+          return std::unexpected(error({}, options.error()));
+        }
+        return overlay(*options);
+      },
+      true);
+    if (!added) {
+      return std::unexpected(ControlContextError{ControlContextErrorCode::DUPLICATE_TYPE, {}});
+    }
+    registry.entries_.back().text = false;
+    registry.entries_.back().factoryKind = ControlFactoryKind::OVERLAY_FALLBACK;
+    return {};
+  }
+
+  static std::expected<void, ControlContextError> installKeyHelp(SceneResourceRegistry &registry,
+                                                                 ControlContext &controls) {
+    for (const auto name : {"HelpView", "KeyHints"}) {
+      if (find(registry, name) || ControlContextAccess::hasDeclaredType(controls, name)) {
+        continue;
+      }
+      auto installed = ControlContextAccess::installKeyHelpSchema(controls, name);
+      if (!installed) {
+        return installed;
+      }
+      if (std::string_view(name) == "HelpView") {
+        auto entry = SceneResourceRegistry::makeEntry<HelpView>(name, [](SceneResourceArguments arguments) {
+          return helpView(Ref<HelpView>{}, controlHelpViewOptions(arguments.settings, {}));
+        });
+        entry.text = false;
+        entry.factoryKind = ControlFactoryKind::KEY_HELP_FALLBACK;
+        registry.entries_.push_back(std::move(entry));
+      } else {
+        SceneResourceRegistry::Entry entry;
+        entry.name = name;
+        entry.sized = true;
+        entry.text = false;
+        entry.factoryKind = ControlFactoryKind::KEY_HELP_FALLBACK;
+        registry.entries_.push_back(std::move(entry));
+      }
+    }
+    return {};
+  }
+
+  /** @brief CFG-only one-body native entry; public custom registrations retain their old adapters. */
+  static std::expected<void, ControlContextError> installDataState(SceneResourceRegistry &registry,
+                                                                   ControlContext &controls) {
+    constexpr std::string_view NAME = "DataStateView";
+
+    if (find(registry, NAME) || ControlContextAccess::hasDeclaredType(controls, NAME)) {
+      return {};
+    }
+
+    auto installed = ControlContextAccess::installDataStateSchema(controls);
+
+    if (!installed) {
+      return installed;
+    }
+
+    SceneResourceRegistry::Entry entry;
+
+    entry.name = NAME;
+    entry.children = true;
+    entry.sized = true;
+    entry.text = false;
+    entry.factoryKind = ControlFactoryKind::DATA_STATE_FALLBACK;
+    registry.entries_.push_back(std::move(entry));
+
+    return {};
+  }
+
+  /** @brief CFG-only managed host/layer entries; caller names and old adapters retain priority. */
+  static std::expected<void, ControlContextError> installDialogs(SceneResourceRegistry &registry,
+                                                                 ControlContext &controls) {
+    for (const auto name : {"OverlayHost", "Dialog"}) {
+      if (find(registry, name) || ControlContextAccess::hasDeclaredType(controls, name)) {
+        continue;
+      }
+
+      auto installed = ControlContextAccess::installDialogSchema(controls, name);
+
+      if (!installed) {
+        return installed;
+      }
+
+      SceneResourceRegistry::Entry entry;
+
+      entry.name = name;
+      entry.children = true;
+      entry.sized = name == std::string_view("OverlayHost");
+      entry.text = false;
+      entry.declaredDialog = name == std::string_view("Dialog");
+      entry.declaredHost = name == std::string_view("OverlayHost");
+      entry.factoryKind = ControlFactoryKind::DIALOG_FALLBACK;
+      registry.entries_.push_back(std::move(entry));
+    }
+
+    return {};
+  }
+
+  // Mutate the existing source recipe storage, without adding transaction/erasure layers per descendant.
+  template <class Wrapper> static void sourceCreate(Description<Widget> &recipe, Wrapper wrapper) {
+    auto original = std::move(recipe.state_->create);
+
+    recipe.state_->create = [original = std::move(original), wrapper = std::move(wrapper)](
+                              ManagedScene &scene, Node<Widget> parent, MountContext &context) mutable {
+      return wrapper(original, scene, parent, context);
+    };
+  }
+
+  static void sourceChild(Description<Widget> &parent, Description<Widget> child,
+                          std::shared_ptr<const SceneResourceError> diagnostic, bool requireDialog = false) {
+    parent.state_->children.push_back(
+      [child = std::move(child), diagnostic = std::move(diagnostic), requireDialog](
+        ManagedScene &scene, Node<Widget> parent, MountContext &context) mutable -> std::expected<void, ManagedError> {
+        auto result = Access::mount(std::move(child), scene, parent, context);
+
+        if (!result) {
+          if (!result.error().sceneResource) {
+            result.error().sceneResource = diagnostic;
+          }
+
+          return std::unexpected(result.error());
+        }
+
+        if (requireDialog) {
+          auto opened = scene.dialogOpened(*result);
+
+          if (!opened) {
+            auto failure = opened.error();
+
+            if (!failure.sceneResource) {
+              failure.sceneResource = diagnostic;
+            }
+
+            return std::unexpected(std::move(failure));
+          }
+        }
+
+        return {};
+      });
+  }
+
+  static void fallbackMessageResolver(Description<Widget> &recipe, const TextResolver &resolver,
+                                      std::shared_ptr<const SceneResourceError> diagnostic) {
+    auto original = std::move(recipe.state_->create);
+
+    // This pointer is captured only by a recipe consumed synchronously by compile, never a retained record.
+    recipe.state_->create = [original = std::move(original), resolver = &resolver, diagnostic = std::move(diagnostic)](
+                              ManagedScene &scene, Node<Widget> parent,
+                              MountContext &context) mutable -> std::expected<Node<Widget>, ManagedError> {
+      struct Restore {
+        MountContext &context;
+        const TextResolver *previous;
+
+        ~Restore() {
+          context.messageResolver = previous;
+        }
+      } restore{context, context.messageResolver};
+
+      context.messageResolver = resolver;
+
+      try {
+        return original(scene, parent, context);
+      } catch (const std::bad_alloc &) {
+        auto failure = error(parent, TreeError::NO_MEMORY);
+
+        failure.sceneResource = diagnostic;
+
+        return std::unexpected(std::move(failure));
+      } catch (...) {
+        auto failure = error(parent, TreeError::CALLBACK_FAILED);
+
+        failure.sceneResource = diagnostic;
+
+        return std::unexpected(std::move(failure));
+      }
+    };
+  }
+
+  static void fallbackThemeSelectorResolver(Description<Widget> &recipe, const TextResolver &resolver,
+                                            std::shared_ptr<const SceneResourceError> diagnostic) {
+    auto original = std::move(recipe.state_->create);
+
+    // This pointer is captured only by a recipe consumed synchronously by compile, never a retained record.
+    recipe.state_->create = [original = std::move(original), resolver = &resolver, diagnostic = std::move(diagnostic)](
+                              ManagedScene &scene, Node<Widget> parent,
+                              MountContext &context) mutable -> std::expected<Node<Widget>, ManagedError> {
+      struct Restore {
+        MountContext &context;
+        const TextResolver *previous;
+
+        ~Restore() {
+          context.themeSelectorResolver = previous;
+        }
+      } restore{context, context.themeSelectorResolver};
+
+      context.themeSelectorResolver = resolver;
+
+      try {
+        return original(scene, parent, context);
+      } catch (const std::bad_alloc &) {
+        auto failure = error(parent, TreeError::NO_MEMORY);
+
+        failure.sceneResource = diagnostic;
+
+        return std::unexpected(std::move(failure));
+      } catch (...) {
+        auto failure = error(parent, TreeError::CALLBACK_FAILED);
+
+        failure.sceneResource = diagnostic;
+
+        return std::unexpected(std::move(failure));
+      }
+    };
+  }
+
+  static void fallbackDataStateResolver(Description<DataStateView> &recipe, const TextResolver &resolver,
+                                        std::shared_ptr<const SceneResourceError> diagnostic) {
+    auto original = std::move(recipe.state_->create);
+
+    // This pointer is captured only by a recipe consumed synchronously by compile, never a retained record.
+    recipe.state_->create = [original = std::move(original), resolver = &resolver, diagnostic = std::move(diagnostic)](
+                              ManagedScene &scene, Node<Widget> parent,
+                              MountContext &context) mutable -> std::expected<Node<DataStateView>, ManagedError> {
+      struct Restore {
+        MountContext &context;
+        const TextResolver *previous;
+
+        ~Restore() {
+          context.dataStateResolver = previous;
+        }
+      } restore{context, context.dataStateResolver};
+
+      context.dataStateResolver = resolver;
+
+      try {
+        return original(scene, parent, context);
+      } catch (const std::bad_alloc &) {
+        auto failure = error(parent, TreeError::NO_MEMORY);
+
+        failure.sceneResource = diagnostic;
+
+        return std::unexpected(std::move(failure));
+      } catch (...) {
+        auto failure = error(parent, TreeError::CALLBACK_FAILED);
+
+        failure.sceneResource = diagnostic;
+
+        return std::unexpected(std::move(failure));
+      }
+    };
+  }
+
+  static std::expected<Description<Widget>, ManagedError> keyHintsRecipe(SceneResourceArguments arguments,
+                                                                         Ref<Widget> help) {
+    // This transient adapter owns the same cold observer as the native recipe; no resource map escapes mount.
+    auto entry = SceneResourceRegistry::makeEntry<KeyHints>("KeyHints", [help](SceneResourceArguments values) {
+      return KeyHelpAccess::hints(help, controlKeyHintsOptions(values.settings, {}), {});
+    });
+    return entry.create(std::move(arguments));
+  }
+
   /** @param registry Owning allowlist, unchanged during prepare.
    * @param index Index previously validated by find.
    * @return Immutable schema/factory borrowed only for the current synchronous operation.
@@ -189,6 +588,7 @@ struct ResourceNode {
   bool headerDeclared{};
   bool bodyDeclared{};
   bool directChildren{};
+  std::size_t directChildCount{};
   bool stickyHeader{};
   std::optional<GridPlacementPlan> gridPlan;
   DeclarativeGridOptions gridOptions;
@@ -198,10 +598,22 @@ struct ResourceNode {
   std::size_t textOffset{};
   bool resourceText{};
   bool hasText{};
+
+  struct ThemeSource {
+    ~ThemeSource() = default;
+    ControlSettings instance;
+    detail::ControlPropertyPresence supplied;
+    detail::ControlPropertyPresence materialized;
+  };
+
+  std::optional<ThemeSource> themeSource;
   SceneResourceArguments arguments;
   std::string name = std::string(0, '\0');
   std::vector<std::string> lineage = std::vector<std::string>(0);
   std::optional<std::size_t> parent;
+  std::optional<std::string> helpId;
+  std::size_t helpOffset{};
+  std::optional<std::size_t> helpTarget;
 };
 
 // Source ownership is shared with failures, so reporting never borrows parser buffers.
@@ -327,6 +739,38 @@ public:
     auto fallback = detail::ResourceAccess::installGrid(options_.registry, controls_, typed_);
     if (!fallback) {
       return std::unexpected(contextFailure(fallback.error(), 0));
+    }
+
+    if (options_.format == SceneResourceFormat::CONFIGURATION) {
+      auto primitives = detail::ResourceAccess::installPrimitives(options_.registry, controls_);
+
+      if (!primitives) {
+        return std::unexpected(contextFailure(primitives.error(), 0));
+      }
+
+      auto scrolls = detail::ResourceAccess::installScrolls(options_.registry, controls_);
+
+      if (!scrolls) {
+        return std::unexpected(contextFailure(scrolls.error(), 0));
+      }
+      auto keyHelp = detail::ResourceAccess::installKeyHelp(options_.registry, controls_);
+      if (!keyHelp) {
+        return std::unexpected(contextFailure(keyHelp.error(), 0));
+      }
+      auto dialogs = detail::ResourceAccess::installDialogs(options_.registry, controls_);
+
+      if (!dialogs) {
+        return std::unexpected(contextFailure(dialogs.error(), 0));
+      }
+
+      auto dataState = detail::ResourceAccess::installDataState(options_.registry, controls_);
+      if (!dataState) {
+        return std::unexpected(contextFailure(dataState.error(), 0));
+      }
+      auto overlay = detail::ResourceAccess::installOverlay(options_.registry, controls_);
+      if (!overlay) {
+        return std::unexpected(contextFailure(overlay.error(), 0));
+      }
     }
 
     auto prepared = controls_.prepared();
@@ -573,7 +1017,7 @@ private:
     return value;
   }
 
-  std::expected<std::size_t, ManagedError> capacity() {
+  template <class Unsigned = std::size_t> std::expected<Unsigned, ManagedError> capacity() {
     skip();
 
     const auto begin = position_;
@@ -582,7 +1026,7 @@ private:
       ++position_;
     }
 
-    std::size_t value{};
+    Unsigned value{};
     const auto *first = document_.bytes.data() + begin;
     const auto *last = document_.bytes.data() + position_;
     const auto parsed = std::from_chars(first, last, value);
@@ -601,8 +1045,40 @@ private:
     return value;
   }
 
+  std::expected<double, ManagedError> floating() {
+    skip();
+
+    const auto begin = position_;
+
+    while (peek() != '\0' && peek() != ' ' && peek() != '\t' && peek() != '\r' && peek() != '\n' && peek() != ',' &&
+           peek() != ';' && peek() != '}') {
+      ++position_;
+    }
+
+    const auto *first = document_.bytes.data() + begin;
+    const auto *last = document_.bytes.data() + position_;
+    double value{};
+    const auto parsed = std::from_chars(first, last, value, std::chars_format::general);
+
+    if (parsed.ec != std::errc{} || first == last || !std::isfinite(value)) {
+      return std::unexpected(document_.failure(Code::INVALID_VALUE, begin));
+    }
+
+    if (parsed.ptr != last) {
+      return std::unexpected(document_.failure(Code::SYNTAX, begin + static_cast<std::size_t>(parsed.ptr - first)));
+    }
+
+    return value;
+  }
+
   const ControlPropertyDescriptor *descriptor(std::string_view path) const {
-    for (const auto type : {"LineEdit", "CheckBox", "VBox"}) {
+    for (const auto type : {"LineEdit",      "CheckBox",      "VBox",
+                            "Button",        "Border",        "Gauge",
+                            "ScrollArea",    "ScrollBar",     "Overlay",
+                            "HelpView",      "KeyHints",      "VirtualList",
+                            "VirtualTable",  "Chart",         "DataStateView",
+                            "OverlayHost",   "Dialog",        "MessageBox",
+                            "Notifications", "ThemeSelector", "ThemeSelectorCatalog"}) {
       const auto schema = controlPropertySchema(type);
       const auto found = std::ranges::find(schema, path, &ControlPropertyDescriptor::path);
 
@@ -642,10 +1118,84 @@ private:
 
       if (path == "text") {
         settings.text = std::move(value);
-      } else {
+      } else if (path == "placeholder") {
         settings.placeholder = std::move(value);
+      } else if (path == "title") {
+        settings.title = std::move(value);
+      } else if (path == "body") {
+        settings.body = std::move(value);
+      } else if (path == "themeSelector.labels.apply") {
+        settings.themeSelector.labels.apply = std::move(value);
+      } else if (path == "themeSelector.labels.cancel") {
+        settings.themeSelector.labels.cancel = std::move(value);
+      } else if (path == "themeSelector.labels.closeKeepingPreview") {
+        settings.themeSelector.labels.closeKeepingPreview = std::move(value);
+      } else if (path == "themeSelector.labels.emptyStatus") {
+        settings.themeSelector.labels.emptyStatus = std::move(value);
+      } else if (path == "themeSelector.labels.errorStatus") {
+        settings.themeSelector.labels.errorStatus = std::move(value);
+      } else if (path == "themeSelector.labels.conflictStatus") {
+        settings.themeSelector.labels.conflictStatus = std::move(value);
+      } else if (path == "message.labels.acknowledge") {
+        settings.message.labels.acknowledge = std::move(value);
+      } else if (path == "message.labels.confirm") {
+        settings.message.labels.confirm = std::move(value);
+      } else if (path == "message.labels.save") {
+        settings.message.labels.save = std::move(value);
+      } else if (path == "message.labels.discard") {
+        settings.message.labels.discard = std::move(value);
+      } else if (path == "message.labels.cancel") {
+        settings.message.labels.cancel = std::move(value);
+      } else if (path == "labels.loading") {
+        settings.labels.loading = std::move(value);
+      } else if (path == "labels.empty") {
+        settings.labels.empty = std::move(value);
+      } else if (path == "labels.error") {
+        settings.labels.error = std::move(value);
+      } else if (path == "labels.offline") {
+        settings.labels.offline = std::move(value);
+      } else if (path == "labels.refreshing") {
+        settings.labels.refreshing = std::move(value);
+      } else if (path == "labels.retry") {
+        settings.labels.retry = std::move(value);
+      } else {
+        return std::unexpected(document_.propertyFailure(Code::UNKNOWN_PROPERTY, offset, type, path));
       }
 
+      return {};
+    }
+
+    if (schema->kind == ControlPropertyKind::LITERAL_STRING) {
+      std::string value;
+      auto parsed = string(value);
+      if (!parsed) {
+        return std::unexpected(withProperty(parsed.error(), type, path));
+      }
+      if (path == "themeCatalog.initialId.value") {
+        settings.themeCatalog.initialId.value = std::move(value);
+      } else if (path == "themeSelector.openingShortcut.value") {
+        settings.themeSelector.openingShortcut.value = std::move(value);
+      } else if (path == "format.strokeSeparator") {
+        settings.format.strokeSeparator = std::move(value);
+      } else if (path == "format.alternativeSeparator") {
+        settings.format.alternativeSeparator = std::move(value);
+      } else if (path == "format.repeatMarker") {
+        settings.format.repeatMarker = std::move(value);
+      } else if (path == "format.releaseMarker") {
+        settings.format.releaseMarker = std::move(value);
+      } else if (path == "format.unknownMarker") {
+        settings.format.unknownMarker = std::move(value);
+      } else if (path == "emptyText") {
+        settings.emptyText = std::move(value);
+      } else if (path == "unavailableText") {
+        settings.unavailableText = std::move(value);
+      } else if (path == "entrySeparator") {
+        settings.entrySeparator = std::move(value);
+      } else if (path == "overflowMarker") {
+        settings.overflowMarker = std::move(value);
+      } else {
+        return std::unexpected(document_.propertyFailure(Code::UNKNOWN_PROPERTY, offset, type, path));
+      }
       return {};
     }
 
@@ -658,16 +1208,44 @@ private:
 
       const bool enabled = value == "true";
 
-      if (path == "scroll") {
+      if (path == "themeCatalog.initialId.enabled") {
+        settings.themeCatalog.initialId.enabled = enabled;
+      } else if (path == "themeCatalog.layers.enabled") {
+        settings.themeCatalog.layers.enabled = enabled;
+      } else if (path == "themeSelector.openingShortcut.enabled") {
+        settings.themeSelector.openingShortcut.enabled = enabled;
+      } else if (path == "notification.refreshDeduplicated") {
+        settings.notification.refreshDeduplicated = enabled;
+      } else if (path == "notification.reducedMotion") {
+        settings.notification.reducedMotion = enabled;
+      } else if (path == "message.defaultChoice.enabled") {
+        settings.message.defaultChoice.enabled = enabled;
+      } else if (path == "message.allowDestructiveDefault") {
+        settings.message.allowDestructiveDefault = enabled;
+      } else if (path == "showStatus") {
+        settings.showStatus = enabled;
+      } else if (path == "initiallyOpen") {
+        settings.initiallyOpen = enabled;
+      } else if (path == "scroll") {
         settings.grid.scroll = enabled;
       } else if (path == "readOnly") {
         settings.readOnly = enabled;
+      } else if (path == "focusable") {
+        settings.focusable = enabled;
+      } else if (path == "frame.enabled") {
+        settings.frame.enabled = enabled;
+      } else if (path == "yRange.enabled") {
+        settings.yRange.enabled = enabled;
       } else if (path == "history.enabled") {
         settings.history.enabled = enabled;
       } else if (path == "history.groupTyping") {
         settings.history.groupTyping = enabled;
-      } else {
+      } else if (path == "history.groupDeletion") {
         settings.history.groupDeletion = enabled;
+      } else if (path == "dialog.closeOnEscape") {
+        settings.dialog.closeOnEscape = enabled;
+      } else {
+        return std::unexpected(document_.propertyFailure(Code::UNKNOWN_PROPERTY, offset, type, path));
       }
 
       return {};
@@ -693,8 +1271,96 @@ private:
         settings.programmaticChange = static_cast<ProgrammaticChange>(index);
       } else if (path == "flow") {
         settings.grid.flow = static_cast<GridFlow>(index);
-      } else {
+      } else if (path == "mainAlign") {
+        settings.linear.mainAlign = static_cast<LayoutAlign>(index);
+      } else if (path == "crossAlign") {
+        settings.linear.crossAlign = static_cast<LayoutAlign>(index);
+      } else if (path == "overflow") {
+        settings.linear.overflow = static_cast<LayoutOverflow>(index);
+      } else if (path == "chrome") {
+        settings.chrome = static_cast<ButtonChrome>(index);
+      } else if (path == "glyphs") {
+        settings.glyphs = static_cast<PrimitiveGlyphs>(index);
+      } else if (path == "frame.glyphs") {
+        settings.frame.glyphs = static_cast<PrimitiveGlyphs>(index);
+      } else if (path == "horizontal") {
+        settings.horizontal = static_cast<ScrollBarPolicy>(index);
+      } else if (path == "vertical") {
+        settings.vertical = static_cast<ScrollBarPolicy>(index);
+      } else if (path == "placement") {
+        settings.placement = static_cast<ScrollPlacement>(index);
+      } else if (path == "axis") {
+        settings.axis = static_cast<ScrollAxis>(index);
+      } else if (path == "horizontalAlign") {
+        settings.horizontalAlign = static_cast<LayoutAlign>(index);
+      } else if (path == "verticalAlign") {
+        settings.verticalAlign = static_cast<LayoutAlign>(index);
+      } else if (path == "contentPolicy") {
+        settings.contentPolicy = static_cast<DataContentPolicy>(index);
+      } else if (path == "mode") {
+        settings.mode = static_cast<ChartMode>(index);
+      } else if (path == "notification.placement") {
+        settings.notification.placement = static_cast<ToastPlacement>(index);
+      } else if (path == "notification.overflow") {
+        settings.notification.overflow = static_cast<ToastOverflowPolicy>(index);
+      } else if (path == "message.defaultChoice.value") {
+        settings.message.defaultChoice.value = static_cast<MessageChoice>(index);
+      } else if (path == "dialog.mode") {
+        settings.dialog.mode = static_cast<DialogMode>(index);
+      } else if (path == "dialog.placement") {
+        settings.dialog.placement = static_cast<DialogPlacement>(index);
+      } else if (path == "dialog.frame.glyphs") {
+        settings.dialog.frame.glyphs = static_cast<PrimitiveGlyphs>(index);
+      } else if (path == "chartGlyphSet") {
+        settings.chartGlyphSet = static_cast<ChartGlyphSet>(index);
+      } else if (path == "displayMode") {
         settings.displayMode = static_cast<LineEditDisplayMode>(index);
+      } else {
+        return std::unexpected(document_.propertyFailure(Code::UNKNOWN_PROPERTY, offset, type, path));
+      }
+
+      return {};
+    }
+
+    if (schema->kind == ControlPropertyKind::FLOATING_POINT) {
+      auto value = floating();
+
+      if (!value) {
+        return std::unexpected(withProperty(value.error(), type, path));
+      }
+
+      if (path == "value") {
+        settings.value = *value;
+      } else if (path == "minimum") {
+        settings.minimum = *value;
+      } else if (path == "maximum") {
+        settings.maximum = *value;
+      } else if (path == "yRange.minimum") {
+        settings.yRange.minimum = *value;
+      } else if (path == "yRange.maximum") {
+        settings.yRange.maximum = *value;
+      } else if (path == "wheelStep") {
+        settings.wheelStep = *value;
+      } else {
+        return std::unexpected(document_.propertyFailure(Code::UNKNOWN_PROPERTY, offset, type, path));
+      }
+
+      return {};
+    }
+
+    if (path == "keyStep" || path == "pageOverlap" || path == "spinnerInterval") {
+      const auto value = capacity<std::uint64_t>();
+
+      if (!value) {
+        return std::unexpected(withProperty(value.error(), type, path));
+      }
+
+      if (path == "spinnerInterval") {
+        settings.spinnerInterval = *value;
+      } else if (path == "keyStep") {
+        settings.keyStep = *value;
+      } else {
+        settings.pageOverlap = *value;
       }
 
       return {};
@@ -712,7 +1378,19 @@ private:
       return std::unexpected(document_.propertyFailure(Code::INVALID_VALUE, offset, type, path));
     }
 
-    if (path == "width") {
+    if (path == "maxLayers") {
+      settings.maxLayers = *value;
+    } else if (path == "dialog.maximumPanelSize.width") {
+      settings.dialog.maximumPanelSize.width = static_cast<std::int32_t>(*value);
+    } else if (path == "dialog.maximumPanelSize.height") {
+      settings.dialog.maximumPanelSize.height = static_cast<std::int32_t>(*value);
+    } else if (path == "dialog.viewportMargin") {
+      settings.dialog.viewportMargin = static_cast<std::int32_t>(*value);
+    } else if (path == "dialog.anchorGap") {
+      settings.dialog.anchorGap = static_cast<std::int32_t>(*value);
+    } else if (path == "dialog.frame.maxPaintCells") {
+      settings.dialog.frame.maxPaintCells = *value;
+    } else if (path == "width") {
       settings.width = static_cast<std::int32_t>(*value);
     } else if (path == "height") {
       settings.height = static_cast<std::int32_t>(*value);
@@ -720,10 +1398,110 @@ private:
       settings.gap = static_cast<std::int32_t>(*value);
     } else if (path == "flex") {
       settings.flex = static_cast<std::uint32_t>(*value);
+    } else if (path == "format.maxBytesPerBinding") {
+      settings.format.maxBytesPerBinding = *value;
+    } else if (path == "rowHeight") {
+      settings.rowHeight = static_cast<std::int32_t>(*value);
+    } else if (path == "statusRows") {
+      settings.statusRows = static_cast<std::int32_t>(*value);
+    } else if (path == "candleGap") {
+      settings.candleGap = static_cast<std::int32_t>(*value);
+    } else if (path == "overscanRows") {
+      settings.overscanRows = *value;
+    } else if (path == "maxColumns") {
+      settings.maxColumns = *value;
+    } else if (path == "maxPreparedCells") {
+      settings.maxPreparedCells = *value;
+    } else if (path == "maxPreparedTextBytes") {
+      settings.maxPreparedTextBytes = *value;
+    } else if (path == "notification.capacity") {
+      settings.notification.capacity = *value;
+    } else if (path == "notification.maxVisible") {
+      settings.notification.maxVisible = *value;
+    } else if (path == "notification.maximumWidth") {
+      settings.notification.maximumWidth = static_cast<std::int32_t>(*value);
+    } else if (path == "notification.margin") {
+      settings.notification.margin = static_cast<std::int32_t>(*value);
+    } else if (path == "notification.gap") {
+      settings.notification.gap = static_cast<std::int32_t>(*value);
+    } else if (path == "themeCatalog.maxChoices") {
+      settings.themeCatalog.maxChoices = *value;
+    } else if (path == "themeCatalog.maxIdBytes") {
+      settings.themeCatalog.maxIdBytes = *value;
+    } else if (path == "themeCatalog.maxLabelBytes") {
+      settings.themeCatalog.maxLabelBytes = *value;
+    } else if (path == "themeCatalog.maxDescriptionBytes") {
+      settings.themeCatalog.maxDescriptionBytes = *value;
+    } else if (path == "themeCatalog.maxTextBytes") {
+      settings.themeCatalog.maxTextBytes = *value;
+    } else if (path == "themeCatalog.textLimits.maxInputBytes") {
+      settings.themeCatalog.textLimits.maxInputBytes = *value;
+    } else if (path == "themeCatalog.textLimits.maxClusterBytes") {
+      settings.themeCatalog.textLimits.maxClusterBytes = *value;
+    } else if (path == "themeCatalog.textLimits.maxGraphemes") {
+      settings.themeCatalog.textLimits.maxGraphemes = *value;
+    } else if (path == "themeCatalog.textLimits.maxCells") {
+      settings.themeCatalog.textLimits.maxCells = *value;
+    } else if (path == "themeCatalog.layers.maxLayers") {
+      settings.themeCatalog.layers.maxLayers = *value;
+    } else if (path == "themeCatalog.layers.maxRules") {
+      settings.themeCatalog.layers.maxRules = *value;
+    } else if (path == "themeCatalog.layers.maxDeclarations") {
+      settings.themeCatalog.layers.maxDeclarations = *value;
+    } else if (path == "themeCatalog.layers.maxOwnedBytes") {
+      settings.themeCatalog.layers.maxOwnedBytes = *value;
+    } else if (path == "themeSelector.textLimits.maxInputBytes") {
+      settings.themeSelector.textLimits.maxInputBytes = *value;
+    } else if (path == "themeSelector.textLimits.maxClusterBytes") {
+      settings.themeSelector.textLimits.maxClusterBytes = *value;
+    } else if (path == "themeSelector.textLimits.maxGraphemes") {
+      settings.themeSelector.textLimits.maxGraphemes = *value;
+    } else if (path == "themeSelector.textLimits.maxCells") {
+      settings.themeSelector.textLimits.maxCells = *value;
+    } else if (path == "notification.textLimits.maxInputBytes") {
+      settings.notification.textLimits.maxInputBytes = *value;
+    } else if (path == "notification.textLimits.maxClusterBytes") {
+      settings.notification.textLimits.maxClusterBytes = *value;
+    } else if (path == "notification.textLimits.maxGraphemes") {
+      settings.notification.textLimits.maxGraphemes = *value;
+    } else if (path == "notification.textLimits.maxCells") {
+      settings.notification.textLimits.maxCells = *value;
+    } else if (path == "notification.actionLabelBytes") {
+      settings.notification.actionLabelBytes = *value;
+    } else if (path == "notification.dedupKeyBytes") {
+      settings.notification.dedupKeyBytes = *value;
+    } else if (path == "notification.maxPaintCells") {
+      settings.notification.maxPaintCells = *value;
+    } else if (path == "message.maxBodyLines") {
+      settings.message.maxBodyLines = *value;
+    } else if (path == "message.textLimits.maxInputBytes") {
+      settings.message.textLimits.maxInputBytes = *value;
+    } else if (path == "message.textLimits.maxClusterBytes") {
+      settings.message.textLimits.maxClusterBytes = *value;
+    } else if (path == "message.textLimits.maxGraphemes") {
+      settings.message.textLimits.maxGraphemes = *value;
+    } else if (path == "message.textLimits.maxCells") {
+      settings.message.textLimits.maxCells = *value;
     } else if (path == "history.maxOperations") {
       settings.history.maxOperations = *value;
     } else if (path == "history.maxBytes") {
       settings.history.maxBytes = *value;
+    } else if (path == "limits.maxInputBytes") {
+      settings.limits.maxInputBytes = *value;
+    } else if (path == "limits.maxClusterBytes") {
+      settings.limits.maxClusterBytes = *value;
+    } else if (path == "limits.maxGraphemes") {
+      settings.limits.maxGraphemes = *value;
+    } else if (path == "limits.maxCells") {
+      settings.limits.maxCells = *value;
+    } else if (path == "maxPaintCells") {
+      settings.maxPaintCells = *value;
+    } else if (path == "preferredWidth") {
+      settings.preferredWidth = static_cast<std::int32_t>(*value);
+    } else if (path == "minimumThumb") {
+      settings.minimumThumb = static_cast<std::int32_t>(*value);
+    } else if (path == "frame.maxPaintCells") {
+      settings.frame.maxPaintCells = *value;
     } else if (path == "columns") {
       settings.grid.columns = *value;
     } else if (path == "rows") {
@@ -746,6 +1524,8 @@ private:
       settings.grid.maxPlacements = *value;
     } else if (path == "maxPlacementWork") {
       settings.grid.maxPlacementWork = *value;
+    } else {
+      return std::unexpected(document_.propertyFailure(Code::UNKNOWN_PROPERTY, offset, type, path));
     }
 
     return {};
@@ -764,9 +1544,10 @@ private:
 
       const auto begin = position_;
       const auto key = name();
+      const auto canonicalKey = detail::ControlContextAccess::canonicalProperty(key);
       std::string path(0, '\0');
 
-      propertyPath(path, prefix, key);
+      propertyPath(path, prefix, canonicalKey);
 
       if (key.empty()) {
         return std::unexpected(document_.propertyFailure(Code::SYNTAX, begin, type, path));
@@ -776,16 +1557,26 @@ private:
         return std::unexpected(document_.propertyFailure(Code::PROPERTY_LIMIT, begin, type, path));
       }
 
-      if (std::ranges::find(properties, key) != properties.end()) {
+      if (std::ranges::find(properties, canonicalKey) != properties.end()) {
         return std::unexpected(document_.propertyFailure(Code::DUPLICATE_PROPERTY, begin, type, path));
       }
 
-      properties.push_back(key);
+      properties.push_back(canonicalKey);
 
       const bool assigned = take('=') || take(':');
 
       if (take('{')) {
-        if (path != "history" && path != "padding") {
+        const bool configurationStruct =
+          options_.format == SceneResourceFormat::CONFIGURATION &&
+          (path == "limits" || path == "frame" || path == "format" || path == "yRange" || path == "labels" ||
+           path == "dialog" || path == "dialog.frame" || path == "dialog.maximumPanelSize" || path == "message" ||
+           path == "message.labels" || path == "message.defaultChoice" || path == "message.textLimits" ||
+           path == "notification" || path == "notification.textLimits" || path == "themeSelector" ||
+           path == "themeSelector.labels" || path == "themeSelector.textLimits" ||
+           path == "themeSelector.openingShortcut" || path == "themeCatalog" || path == "themeCatalog.textLimits" ||
+           path == "themeCatalog.initialId" || path == "themeCatalog.layers");
+
+        if (path != "history" && path != "padding" && !configurationStruct) {
           return std::unexpected(document_.propertyFailure(Code::UNKNOWN_PROPERTY, begin, type, path));
         }
 
@@ -808,6 +1599,26 @@ private:
     }
 
     return {};
+  }
+
+  // Locate structural braces without decoding or allocating string values. The typed
+  // property parser owns string validation and budgets, with the original property path.
+  std::expected<void, ManagedError> skipQuotedRange() {
+    const auto begin = position_++;
+
+    while (position_ < document_.bytes.size()) {
+      const auto value = document_.bytes[position_++];
+
+      if (value == '"') {
+        return {};
+      }
+
+      if (value == '\\' && position_ < document_.bytes.size()) {
+        ++position_;
+      }
+    }
+
+    return std::unexpected(document_.failure(Code::SYNTAX, begin));
   }
 
   std::expected<std::pair<std::size_t, std::size_t>, ManagedError> configuration() {
@@ -846,8 +1657,7 @@ private:
         }
 
         if (peek() == '"') {
-          std::string ignored(0, '\0');
-          auto parsed = string(ignored);
+          auto parsed = skipQuotedRange();
 
           if (!parsed) {
             return std::unexpected(parsed.error());
@@ -1106,12 +1916,50 @@ private:
     return {};
   }
 
+  bool acceptsNativeProperty(const ResourceNode &target, detail::ControlFactoryKind kind, std::string_view path) const {
+    if (options_.format != SceneResourceFormat::CONFIGURATION ||
+        (target.factory.kind != kind && !(kind == detail::ControlFactoryKind::THEME_SELECTOR_BINDING &&
+                                          target.factory.kind == detail::ControlFactoryKind::THEME_CATALOG_BINDING))) {
+      return false;
+    }
+
+    // beginNode has already resolved aliases to this concrete factory; caller-owned names never enter this branch.
+    const auto &concrete = detail::ResourceAccess::entry(options_.registry, target.factory.index);
+    const auto semantic =
+      concrete.factoryKind == detail::ControlFactoryKind::MESSAGE_BINDING          ? "MessageBox"
+      : concrete.factoryKind == detail::ControlFactoryKind::NOTIFICATION_BINDING   ? "Notifications"
+      : concrete.factoryKind == detail::ControlFactoryKind::THEME_CATALOG_BINDING  ? "ThemeSelectorCatalog"
+      : concrete.factoryKind == detail::ControlFactoryKind::THEME_SELECTOR_BINDING ? "ThemeSelector"
+                                                                                   : std::string_view(concrete.name);
+    const auto schema = controlPropertySchema(semantic);
+
+    return std::ranges::any_of(schema, [path](const auto &property) {
+      return property.path == path;
+    });
+  }
+
+  bool acceptsChartRange(const ResourceNode &target) const {
+    if (options_.format != SceneResourceFormat::CONFIGURATION) {
+      return false;
+    }
+
+    const auto &concrete = detail::ResourceAccess::entry(options_.registry, target.factory.index);
+    constexpr std::string_view narrow[]{"text"};
+
+    // Exact code-bound charts opt in through their expanded schema; old explicit allowlists stay narrow.
+    return concrete.virtualView == "Chart" && !controls_.matchesRegisteredType(concrete.name, narrow);
+  }
+
   // Header/property error temporaries must not remain in every bounded recursive node frame.
   std::expected<void, ManagedError> nodeProperty(std::size_t index, std::string_view token, bool positional,
                                                  std::size_t begin, std::vector<std::string_view> &properties) {
     auto &target = document_.nodes[index];
     const auto type = std::string_view(target.name);
-    const auto key = positional ? std::string_view("text") : token;
+    auto key = positional ? std::string_view("text") : token;
+
+    if (options_.format == SceneResourceFormat::CONFIGURATION) {
+      key = detail::ControlContextAccess::canonicalProperty(key);
+    }
 
     if (properties.size() == options_.limits.maxProperties) {
       return std::unexpected(document_.failure(Code::PROPERTY_LIMIT, begin));
@@ -1127,13 +1975,73 @@ private:
       position_ = begin;
     }
 
+    if (key == "help" &&
+        acceptsNativeProperty(target, detail::ControlFactoryKind::KEY_HELP_FALLBACK, "entrySeparator")) {
+      std::string id;
+      auto parsed = string(id);
+      if (!parsed) {
+        return std::unexpected(withProperty(parsed.error(), type, key));
+      }
+      target.helpId = std::move(id);
+      target.helpOffset = begin;
+      return {};
+    }
+
+    if (key == "classes") {
+      std::string value(0, '\0');
+      auto parsed = string(value);
+
+      if (!parsed) {
+        return std::unexpected(withProperty(parsed.error(), type, key));
+      }
+
+      target.arguments.classes = std::move(value);
+
+      return {};
+    }
+
+    if (key == "visible" || key == "enabled") {
+      const auto value = name();
+
+      if (value != "true" && value != "false") {
+        return std::unexpected(document_.propertyFailure(Code::INVALID_VALUE, begin, type, key));
+      }
+
+      auto &flag = key == "visible" ? target.arguments.visible : target.arguments.enabled;
+
+      flag = value == "true";
+
+      return {};
+    }
+
+    if ((key == "horizontal" || key == "vertical") &&
+        acceptsNativeProperty(target, detail::ControlFactoryKind::SCROLL_FALLBACK, key)) {
+      return setting(target.arguments.settings, type, key, begin);
+    }
+
     if (key == "row" || key == "column" || key == "rowSpan" || key == "columnSpan" || key == "horizontal" ||
         key == "vertical") {
       return itemProperty(target, key, begin);
     }
 
     if (key == "padding" && take('{')) {
-      return settingsBody(target.arguments.settings, type, "padding", 2);
+      const auto firstOrigin = target.arguments.settings.origins.size();
+      auto parsed = settingsBody(target.arguments.settings, type, "padding", 2);
+
+      if (parsed && typed_ && options_.format != SceneResourceFormat::CONFIGURATION &&
+          target.factory.kind == detail::ControlFactoryKind::EXISTING_BUILTIN &&
+          target.arguments.settings.origins.size() != firstOrigin) {
+        const auto &concrete = detail::ResourceAccess::entry(options_.registry, target.factory.index).name;
+
+        if (concrete == "VBox" || concrete == "HBox") {
+          const auto &origin = target.arguments.settings.origins[firstOrigin];
+
+          return std::unexpected(
+            document_.propertyFailure(Code::UNKNOWN_PROPERTY, origin.source->byteOffset, type, origin.path));
+        }
+      }
+
+      return parsed;
     }
 
     if (options_.format != SceneResourceFormat::CONFIGURATION) {
@@ -1147,8 +2055,27 @@ private:
       return parsed;
     }
 
-    if (key == "history" && take('{')) {
-      return settingsBody(target.arguments.settings, type, "history", 2);
+    if ((key == "history" || key == "limits" ||
+         (key == "format" &&
+          acceptsNativeProperty(target, detail::ControlFactoryKind::KEY_HELP_FALLBACK, "format.maxBytesPerBinding")) ||
+         (key == "frame" &&
+          acceptsNativeProperty(target, detail::ControlFactoryKind::SCROLL_FALLBACK, "frame.enabled")) ||
+         (key == "yRange" && acceptsChartRange(target)) ||
+         (key == "labels" &&
+          acceptsNativeProperty(target, detail::ControlFactoryKind::DATA_STATE_FALLBACK, "labels.loading")) ||
+         (key == "themeCatalog" && acceptsNativeProperty(target, detail::ControlFactoryKind::THEME_CATALOG_BINDING,
+                                                         "themeCatalog.maxChoices")) ||
+         (key == "themeSelector" && acceptsNativeProperty(target, detail::ControlFactoryKind::THEME_SELECTOR_BINDING,
+                                                          "themeSelector.labels.apply")) ||
+         (key == "notification" &&
+          acceptsNativeProperty(target, detail::ControlFactoryKind::NOTIFICATION_BINDING, "notification.capacity")) ||
+         (key == "message" && acceptsNativeProperty(target, detail::ControlFactoryKind::MESSAGE_BINDING, "body")) ||
+         (key == "dialog" &&
+          (acceptsNativeProperty(target, detail::ControlFactoryKind::DIALOG_FALLBACK, "dialog.mode") ||
+           acceptsNativeProperty(target, detail::ControlFactoryKind::MESSAGE_BINDING, "dialog.mode") ||
+           acceptsNativeProperty(target, detail::ControlFactoryKind::THEME_SELECTOR_BINDING, "dialog.mode")))) &&
+        take('{')) {
+      return settingsBody(target.arguments.settings, type, key, 2);
     }
 
     return setting(target.arguments.settings, type, key, begin);
@@ -1248,8 +2175,67 @@ private:
       const auto token = peek() == '"' ? std::string_view{} : name();
       const bool named = take(':') || take('=');
       const bool positional = !named && (token.empty() || token == "i18n");
+      // A caller-owned child name wins the bare spelling; frame={...} remains an explicit native property.
+      const bool frameGroup =
+        token == "frame" &&
+        acceptsNativeProperty(document_.nodes[index], detail::ControlFactoryKind::SCROLL_FALLBACK, "frame.enabled") &&
+        !detail::ResourceAccess::find(options_.registry, token);
+      const bool formatGroup =
+        token == "format" &&
+        acceptsNativeProperty(document_.nodes[index], detail::ControlFactoryKind::KEY_HELP_FALLBACK,
+                              "format.maxBytesPerBinding") &&
+        !detail::ResourceAccess::find(options_.registry, token) &&
+        !detail::ControlContextAccess::hasDeclaredType(controls_, token);
+      const bool chartRangeGroup = token == "yRange" && acceptsChartRange(document_.nodes[index]) &&
+                                   !detail::ResourceAccess::find(options_.registry, token) &&
+                                   !detail::ControlContextAccess::hasDeclaredType(controls_, token);
+      const bool labelsGroup =
+        token == "labels" &&
+        acceptsNativeProperty(document_.nodes[index], detail::ControlFactoryKind::DATA_STATE_FALLBACK,
+                              "labels.loading") &&
+        !detail::ResourceAccess::find(options_.registry, token) &&
+        !detail::ControlContextAccess::hasDeclaredType(controls_, token);
+      const bool dialogGroup =
+        token == "dialog" &&
+        (acceptsNativeProperty(document_.nodes[index], detail::ControlFactoryKind::DIALOG_FALLBACK, "dialog.mode") ||
+         acceptsNativeProperty(document_.nodes[index], detail::ControlFactoryKind::MESSAGE_BINDING, "dialog.mode") ||
+         acceptsNativeProperty(document_.nodes[index], detail::ControlFactoryKind::THEME_SELECTOR_BINDING,
+                               "dialog.mode")) &&
+        !detail::ResourceAccess::find(options_.registry, token) &&
+        !detail::ControlContextAccess::hasDeclaredType(controls_, token);
+      const bool messageGroup =
+        token == "message" &&
+        acceptsNativeProperty(document_.nodes[index], detail::ControlFactoryKind::MESSAGE_BINDING, "body") &&
+        !detail::ResourceAccess::find(options_.registry, token) &&
+        !detail::ControlContextAccess::hasDeclaredType(controls_, token);
+      const bool catalogGroup =
+        token == "themeCatalog" &&
+        acceptsNativeProperty(document_.nodes[index], detail::ControlFactoryKind::THEME_CATALOG_BINDING,
+                              "themeCatalog.maxChoices") &&
+        !detail::ResourceAccess::find(options_.registry, token) &&
+        !detail::ControlContextAccess::hasDeclaredType(controls_, token);
+      const bool selectorGroup =
+        token == "themeSelector" &&
+        acceptsNativeProperty(document_.nodes[index], detail::ControlFactoryKind::THEME_SELECTOR_BINDING,
+                              "themeSelector.labels.apply") &&
+        !detail::ResourceAccess::find(options_.registry, token) &&
+        !detail::ControlContextAccess::hasDeclaredType(controls_, token);
+      const bool notificationGroup =
+        token == "notification" &&
+        acceptsNativeProperty(document_.nodes[index], detail::ControlFactoryKind::NOTIFICATION_BINDING,
+                              "notification.capacity") &&
+        !detail::ResourceAccess::find(options_.registry, token) &&
+        !detail::ControlContextAccess::hasDeclaredType(controls_, token);
+      const bool overlayPaddingChild =
+        token == "padding" && document_.nodes[index].factory.kind == detail::ControlFactoryKind::OVERLAY_FALLBACK &&
+        (detail::ResourceAccess::find(options_.registry, token) ||
+         detail::ControlContextAccess::hasDeclaredType(controls_, token));
       const bool structured =
-        (options_.format == SceneResourceFormat::CONFIGURATION && token == "history" && peek() == '{') ||
+        (options_.format == SceneResourceFormat::CONFIGURATION &&
+         (token == "history" || token == "limits" || (token == "padding" && !overlayPaddingChild) || frameGroup ||
+          formatGroup || chartRangeGroup || labelsGroup || dialogGroup || messageGroup || notificationGroup ||
+          selectorGroup || catalogGroup) &&
+         peek() == '{') ||
         (document_.nodes[index].factory.kind == detail::ControlFactoryKind::DECLARATIVE_GRID_FALLBACK &&
          token == "padding" && peek() == '{');
 
@@ -1286,6 +2272,7 @@ private:
         }
 
         document_.nodes[*child].parent = index;
+        ++document_.nodes[index].directChildCount;
       }
     }
   }
@@ -1302,8 +2289,13 @@ private:
 };
 
 std::expected<void, ManagedError> registerSchemas(ControlContext &controls, const SceneResourceOptions &options) {
+  auto catalog = detail::ControlContextAccess::installThemeCatalogSchema(controls);
+  if (!catalog) {
+    return std::unexpected(detail::controlContextError(catalog.error()));
+  }
+
   for (const auto &entry : detail::ResourceAccess::entries(options.registry)) {
-    if (!controlPropertySchema(entry.name).empty()) {
+    if (entry.factoryKind == detail::ControlFactoryKind::EXISTING_BUILTIN) {
       continue;
     }
 
@@ -1325,6 +2317,35 @@ std::expected<void, ManagedError> registerSchemas(ControlContext &controls, cons
       paths.insert(paths.end(), {"state", "cycle"});
     }
 
+    if (!entry.virtualView.empty()) {
+      // An explicit old narrow allowlist remains an exact compatibility path.
+      if (controls.hasRegisteredType(entry.name) && controls.matchesRegisteredType(entry.name, paths)) {
+        continue;
+      }
+
+      for (const auto &property : controlPropertySchema(entry.virtualView)) {
+        if (std::ranges::find(paths, property.path) == paths.end()) {
+          paths.push_back(property.path);
+        }
+      }
+    }
+
+    if (entry.factoryKind == detail::ControlFactoryKind::MESSAGE_BINDING ||
+        entry.factoryKind == detail::ControlFactoryKind::NOTIFICATION_BINDING ||
+        entry.factoryKind == detail::ControlFactoryKind::THEME_SELECTOR_BINDING ||
+        entry.factoryKind == detail::ControlFactoryKind::THEME_CATALOG_BINDING) {
+      paths.clear();
+      const auto schema = controlPropertySchema(
+        entry.factoryKind == detail::ControlFactoryKind::MESSAGE_BINDING         ? "MessageBox"
+        : entry.factoryKind == detail::ControlFactoryKind::NOTIFICATION_BINDING  ? "Notifications"
+        : entry.factoryKind == detail::ControlFactoryKind::THEME_CATALOG_BINDING ? "ThemeSelectorCatalog"
+                                                                                 : "ThemeSelector");
+
+      for (const auto &property : schema) {
+        paths.push_back(property.path);
+      }
+    }
+
     if (controls.hasRegisteredType(entry.name)) {
       if (!controls.matchesRegisteredType(entry.name, paths)) {
         return std::unexpected(detail::controlContextError({ControlContextErrorCode::DUPLICATE_TYPE, {}}));
@@ -1332,21 +2353,190 @@ std::expected<void, ManagedError> registerSchemas(ControlContext &controls, cons
     } else {
       controls.registerType(entry.name, paths);
     }
+    if (entry.factoryKind == detail::ControlFactoryKind::THEME_SELECTOR_BINDING ||
+        entry.factoryKind == detail::ControlFactoryKind::THEME_CATALOG_BINDING) {
+      auto marked = detail::ControlContextAccess::themeFamilySchema(controls, entry.name, entry.factoryKind);
+      if (!marked) {
+        return std::unexpected(detail::controlContextError(marked.error()));
+      }
+    }
   }
 
   return {};
 }
 
+ManagedError primitiveValueFailure(const ResolvedControl &resolved, std::string_view property) {
+  auto diagnostic = std::make_shared<ControlContextDiagnostic>();
+  diagnostic->path = resolved.type + '.' + std::string(property);
+  diagnostic->origin = resolved.settings.origin;
+
+  for (const auto &origin : resolved.settings.origins) {
+    if (origin.path == property) {
+      diagnostic->origin = origin.source;
+
+      break;
+    }
+  }
+
+  return detail::controlContextError({ControlContextErrorCode::INVALID_VALUE, std::move(diagnostic)});
+}
+
 std::expected<void, ManagedError> prepareNodes(ResourceDocument &document, const ControlContext &controls,
-                                               detail::MountContext &context) {
+                                               detail::MountContext &context, ManagedScene &owner,
+                                               const SceneResourceRegistry &registry) {
   std::size_t leaves{};
   const auto limit = controls.limits().maxMaterializedLeaves;
+  std::vector<std::vector<std::size_t>> children(document.nodes.size(), std::vector<std::size_t>(0));
 
-  for (auto &node : document.nodes) {
+  for (std::size_t index = 0; index < document.nodes.size(); ++index) {
+    if (document.nodes[index].parent) {
+      children[*document.nodes[index].parent].push_back(index);
+    }
+  }
+
+  for (std::size_t index = 0; index < document.nodes.size(); ++index) {
+    auto &node = document.nodes[index];
+    if (node.factory.kind == detail::ControlFactoryKind::THEME_SELECTOR_BINDING ||
+        node.factory.kind == detail::ControlFactoryKind::THEME_CATALOG_BINDING) {
+      node.themeSource.emplace();
+      node.themeSource->instance = node.arguments.settings;
+      node.themeSource->supplied = detail::controlSettingsPresenceSet(node.arguments.settings);
+    }
     auto resolved = controls.resolve(node.name, node.arguments.settings);
 
     if (!resolved) {
       return std::unexpected(detail::controlContextError(resolved.error()));
+    }
+
+    if (node.factory.kind == detail::ControlFactoryKind::DATA_STATE_FALLBACK && node.directChildCount != 1) {
+      return std::unexpected(document.propertyFailure(Code::INVALID_VALUE, node.offset, node.name, "children"));
+    }
+
+    if (node.factory.kind == detail::ControlFactoryKind::DIALOG_FALLBACK) {
+      const auto &concrete = detail::ResourceAccess::entry(registry, node.factory.index);
+
+      if (concrete.declaredHost) {
+        if (children[index].empty()) {
+          return std::unexpected(document.propertyFailure(Code::INVALID_VALUE, node.offset, node.name, "children"));
+        }
+
+        const auto &body = document.nodes[children[index].front()];
+        const auto &bodyEntry = detail::ResourceAccess::entry(registry, body.factory.index);
+
+        if (bodyEntry.declaredDialog) {
+          return std::unexpected(document.propertyFailure(Code::INVALID_VALUE, body.offset, node.name, "children"));
+        }
+
+        for (std::size_t layer = 1; layer < children[index].size(); ++layer) {
+          const auto &source = document.nodes[children[index][layer]];
+          const auto &entry = detail::ResourceAccess::entry(registry, source.factory.index);
+
+          if (!entry.declaredDialog && !entry.unknownDialog) {
+            return std::unexpected(document.propertyFailure(Code::INVALID_VALUE, source.offset, node.name, "children"));
+          }
+        }
+
+        const auto maximum = detail::controlOverlayHostOptions(resolved->settings, {}).maxLayers;
+
+        if (children[index].size() - 1 > maximum) {
+          auto failure = document.propertyFailure(Code::NODE_LIMIT, node.offset, node.name, "maxLayers");
+
+          failure.cause = TreeError::NODE_LIMIT;
+
+          return std::unexpected(std::move(failure));
+        }
+      } else {
+        if (children[index].size() != 1) {
+          return std::unexpected(document.propertyFailure(Code::INVALID_VALUE, node.offset, node.name, "children"));
+        }
+
+        if (!resolved->settings.title) {
+          return std::unexpected(document.propertyFailure(Code::INVALID_VALUE, node.offset, node.name, "title"));
+        }
+
+        if (!node.parent) {
+          return std::unexpected(document.propertyFailure(Code::INVALID_VALUE, node.offset, node.name, "parent"));
+        }
+
+        const auto &sourceParent = document.nodes[*node.parent];
+        const auto &parentEntry = detail::ResourceAccess::entry(registry, sourceParent.factory.index);
+
+        if (!parentEntry.declaredHost && !parentEntry.unknownDialog) {
+          return std::unexpected(document.propertyFailure(Code::INVALID_VALUE, node.offset, node.name, "parent"));
+        }
+
+        if (!Dialog::validate(detail::controlDialogOptions(resolved->settings, {}))) {
+          return std::unexpected(document.propertyFailure(Code::INVALID_VALUE, node.offset, node.name, "dialog"));
+        }
+      }
+    }
+
+    if (node.factory.kind == detail::ControlFactoryKind::PRIMITIVE_FALLBACK) {
+      const auto &settings = resolved->settings;
+
+      if (resolved->base == "Border") {
+        if (node.directChildCount != 1) {
+          return std::unexpected(document.propertyFailure(Code::INVALID_VALUE, node.offset, node.name, "children"));
+        }
+
+        if (!Border::validate(detail::controlBorderOptions(settings, {}))) {
+          return std::unexpected(primitiveValueFailure(*resolved, "maxPaintCells"));
+        }
+      } else {
+        const auto options = detail::controlGaugeOptions(settings, {});
+        const auto value = settings.value.value_or(0);
+
+        if (!Gauge::validate(value, options)) {
+          std::string_view property = "value";
+
+          if (options.minimum >= options.maximum || !std::isfinite(options.maximum - options.minimum)) {
+            property = settings.maximum ? "maximum" : "minimum";
+          } else if (!settings.value) {
+            property = value < options.minimum ? "minimum" : "maximum";
+          }
+
+          return std::unexpected(primitiveValueFailure(*resolved, property));
+        }
+      }
+    }
+
+    if (node.factory.kind == detail::ControlFactoryKind::SCROLL_FALLBACK) {
+      const auto &settings = resolved->settings;
+
+      if (resolved->base == "ScrollArea") {
+        if (node.directChildCount != 1) {
+          return std::unexpected(document.propertyFailure(Code::INVALID_VALUE, node.offset, node.name, "children"));
+        }
+
+        if (!detail::controlScrollAreaOptions(settings, {})) {
+          std::string_view property = "placement";
+          const bool frameEnabled = settings.frame.enabled.value_or(false);
+
+          if (!frameEnabled && (settings.frame.glyphs || settings.frame.maxPaintCells)) {
+            property = settings.frame.glyphs ? "frame.glyphs" : "frame.maxPaintCells";
+          } else if (settings.frame.enabled == false) {
+            property = "frame.enabled";
+          }
+
+          return std::unexpected(primitiveValueFailure(*resolved, property));
+        }
+      } else if (!detail::controlScrollBarOptions(settings, {})) {
+        return std::unexpected(primitiveValueFailure(*resolved, "wheelStep"));
+      }
+    }
+
+    if (node.factory.kind == detail::ControlFactoryKind::KEY_HELP_FALLBACK) {
+      std::string_view property;
+      auto validated = resolved->base == "HelpView"
+                         ? detail::KeyHelpAccess::validate(
+                             owner, detail::controlHelpViewOptions(resolved->settings, {}), {}, &property)
+                         : detail::KeyHelpAccess::validate(
+                             owner, detail::controlKeyHintsOptions(resolved->settings, {}), {}, &property);
+      if (!validated) {
+        auto failure = validated.error();
+        failure.sceneResource = primitiveValueFailure(*resolved, property).sceneResource;
+        return std::unexpected(std::move(failure));
+      }
     }
 
     if (context.controlLeaves > limit || leaves > limit - context.controlLeaves ||
@@ -1354,6 +2544,9 @@ std::expected<void, ManagedError> prepareNodes(ResourceDocument &document, const
       return std::unexpected(document.failure(Code::MATERIALIZATION_LIMIT, node.offset));
     }
 
+    if (node.themeSource) {
+      node.themeSource->materialized = detail::controlSettingsPresenceSet(resolved->settings);
+    }
     leaves += resolved->materializedLeaves;
     node.lineage = std::move(resolved->lineage);
     node.arguments.settings = std::move(resolved->settings);
@@ -1368,6 +2561,55 @@ std::expected<void, ManagedError> prepareNodes(ResourceDocument &document, const
   // transaction owns rollback; sibling resources share this same aggregate counter.
   context.controlLeaves += leaves;
 
+  return {};
+}
+
+std::expected<void, ManagedError> prepareHelpReferences(ResourceDocument &document,
+                                                        const SceneResourceRegistry &registry) {
+  std::optional<std::size_t> singleHelp;
+  bool ambiguous{};
+  for (std::size_t index = 0; index < document.nodes.size(); ++index) {
+    const auto &node = document.nodes[index];
+    if (detail::ResourceAccess::entry(registry, node.factory.index).declaredHelp) {
+      if (singleHelp) {
+        ambiguous = true;
+      } else {
+        singleHelp = index;
+      }
+    }
+  }
+  for (auto &node : document.nodes) {
+    const auto &entry = detail::ResourceAccess::entry(registry, node.factory.index);
+    if (node.factory.kind != detail::ControlFactoryKind::KEY_HELP_FALLBACK || entry.name != "KeyHints") {
+      continue;
+    }
+    const auto failure = [&] {
+      return document.propertyFailure(Code::INVALID_VALUE, node.helpId ? node.helpOffset : node.offset, node.name,
+                                      "help");
+    };
+    if (!node.helpId) {
+      if (!singleHelp || ambiguous) {
+        return std::unexpected(failure());
+      }
+      node.helpTarget = *singleHelp;
+      continue;
+    }
+    if (node.helpId->empty()) {
+      return std::unexpected(failure());
+    }
+    const auto target =
+      std::ranges::find(document.nodes, *node.helpId, [](const ResourceNode &candidate) -> const std::string & {
+        return candidate.arguments.id;
+      });
+    if (target == document.nodes.end()) {
+      return std::unexpected(failure());
+    }
+    const auto &targetEntry = detail::ResourceAccess::entry(registry, target->factory.index);
+    if (!targetEntry.declaredHelp && !targetEntry.unknownHelp) {
+      return std::unexpected(failure());
+    }
+    node.helpTarget = static_cast<std::size_t>(target - document.nodes.begin());
+  }
   return {};
 }
 
@@ -1485,6 +2727,18 @@ std::expected<Description<Widget>, ManagedError> gridRecipe(ResourceNode &node) 
 
                     return {};
                   });
+  if (node.arguments.classes) {
+    (void)std::move(recipe).classes(*node.arguments.classes);
+  }
+
+  if (node.arguments.visible) {
+    (void)std::move(recipe).visible(*node.arguments.visible);
+  }
+
+  if (node.arguments.enabled) {
+    (void)std::move(recipe).enabled(*node.arguments.enabled);
+  }
+
   if (node.arguments.settings.grid.scroll.value_or(false)) {
     (void)std::move(recipe).scroll();
   }
@@ -1505,7 +2759,7 @@ std::expected<Description<Widget>, ManagedError> gridRecipe(ResourceNode &node) 
     (void)std::move(recipe).flex(*node.arguments.flex);
   }
 
-  detail::Access::preparedControl(recipe, detail::controlSettingsPresence(node.arguments.settings));
+  detail::Access::preparedControlPresence(recipe, detail::controlSettingsPresenceSet(node.arguments.settings));
 
   return detail::Access::erase(std::move(recipe));
 }
@@ -1546,13 +2800,27 @@ ManagedError textFailure(ResourceDocument &document, const ResourceNode &node, s
 
 std::expected<void, ManagedError> resolveSettings(ResourceDocument &document, const SceneResourceOptions &options,
                                                   WidthPolicy policy) {
-  TextLimits limits;
+  TextLimits resourceLimits;
 
-  limits.max_input_bytes = options.limits.maxStringBytes;
+  resourceLimits.max_input_bytes = options.limits.maxStringBytes;
 
   for (auto &node : document.nodes) {
-    for (const auto path : {std::string_view("text"), std::string_view("placeholder")}) {
-      auto &setting = path == "text" ? node.arguments.settings.text : node.arguments.settings.placeholder;
+    const bool lineEdit = node.factory.kind == detail::ControlFactoryKind::EXISTING_BUILTIN &&
+                          detail::ResourceAccess::entry(options.registry, node.factory.index).name == "LineEdit";
+    auto limits =
+      lineEdit ? detail::controlTextLimits(node.arguments.settings, LineEditOptions{}.limits) : resourceLimits;
+
+    // Resource budgets still bound resolver output, independently of a control's own text limits.
+    limits.max_input_bytes = std::min(limits.max_input_bytes, resourceLimits.max_input_bytes);
+
+    for (const auto path : {std::string_view("text"), std::string_view("placeholder"), std::string_view("title")}) {
+      if (path == "title" && node.factory.kind != detail::ControlFactoryKind::DIALOG_FALLBACK) {
+        continue;
+      }
+
+      auto &setting = path == "text"          ? node.arguments.settings.text
+                      : path == "placeholder" ? node.arguments.settings.placeholder
+                                              : node.arguments.settings.title;
 
       if (!setting) {
         continue;
@@ -1621,6 +2889,94 @@ std::expected<void, ManagedError> resolve(ResourceDocument &document, const Scen
   return {};
 }
 
+// Configuration-only adapter. Match the registry's common-property and leaf-accounting contract before erasure.
+template <class T> Description<Widget> linearRecipe(const ResourceNode &node) {
+  auto recipe =
+    linear<T>(detail::controlLinearOptions(node.arguments.settings, LinearOptions{.gap = node.arguments.gap}));
+
+  detail::Access::preparedControlPresence(recipe, detail::controlSettingsPresenceSet(node.arguments.settings));
+
+  if (node.arguments.classes) {
+    (void)std::move(recipe).classes(*node.arguments.classes);
+  }
+
+  if (node.arguments.visible) {
+    (void)std::move(recipe).visible(*node.arguments.visible);
+  }
+
+  if (node.arguments.enabled) {
+    (void)std::move(recipe).enabled(*node.arguments.enabled);
+  }
+
+  if (!node.arguments.id.empty()) {
+    (void)std::move(recipe).id(node.arguments.id);
+  }
+
+  if (node.arguments.width) {
+    (void)std::move(recipe).width(*node.arguments.width);
+  }
+
+  if (node.arguments.height) {
+    (void)std::move(recipe).height(*node.arguments.height);
+  }
+
+  if (node.arguments.flex) {
+    (void)std::move(recipe).flex(*node.arguments.flex);
+  }
+
+  return detail::Access::erase(std::move(recipe));
+}
+
+Description<Widget> dataStateRecipe(const ResourceNode &node, Description<Widget> body, const TextResolver &resolver,
+                                    std::shared_ptr<const SceneResourceError> diagnostic) {
+  auto recipe = ui::dataStateView(DataPresentation{}, std::move(body)).settings(node.arguments.settings);
+
+  detail::Access::preparedControlPresence(recipe, detail::controlSettingsPresenceSet(node.arguments.settings));
+  detail::ResourceAccess::fallbackDataStateResolver(recipe, resolver, std::move(diagnostic));
+  if (!node.arguments.id.empty()) {
+    (void)std::move(recipe).id(node.arguments.id);
+  }
+  if (node.arguments.visible) {
+    (void)std::move(recipe).visible(*node.arguments.visible);
+  }
+  if (node.arguments.enabled) {
+    (void)std::move(recipe).enabled(*node.arguments.enabled);
+  }
+  if (node.arguments.classes) {
+    (void)std::move(recipe).classes(*node.arguments.classes);
+  }
+
+  return detail::Access::erase(std::move(recipe));
+}
+
+/** @tparam T Exact native OverlayHost or Dialog.
+ * @param node Owning source metadata borrowed during synchronous materialization only.
+ * @param recipe Native recipe whose complete body has already been composed.
+ * @return Erased cold recipe with the existing source presence and instance flags retained.
+ */
+template <class T> Description<Widget> preparedDialogRecipe(const ResourceNode &node, Description<T> recipe) {
+  (void)std::move(recipe).settings(node.arguments.settings);
+  detail::Access::preparedControlPresence(recipe, detail::controlSettingsPresenceSet(node.arguments.settings));
+
+  if (!node.arguments.id.empty()) {
+    (void)std::move(recipe).id(node.arguments.id);
+  }
+
+  if (node.arguments.visible) {
+    (void)std::move(recipe).visible(*node.arguments.visible);
+  }
+
+  if (node.arguments.enabled) {
+    (void)std::move(recipe).enabled(*node.arguments.enabled);
+  }
+
+  if (node.arguments.classes) {
+    (void)std::move(recipe).classes(*node.arguments.classes);
+  }
+
+  return detail::Access::erase(std::move(recipe));
+}
+
 ManagedError attributed(ResourceDocument &document, std::size_t index, ManagedError failure) {
   if (!failure.sceneResource) {
     failure.sceneResource = document.failure(Code::FACTORY, document.nodes[index].offset).sceneResource;
@@ -1652,11 +3008,16 @@ std::expected<Node<Widget>, ManagedError> compile(ManagedScene &owner, ResourceD
   }
 
   if (typed) {
-    auto prepared = prepareNodes(document, controls, context);
+    auto prepared = prepareNodes(document, controls, context, owner, effectiveOptions.registry);
 
     if (!prepared) {
       return std::unexpected(prepared.error());
     }
+  }
+
+  auto references = prepareHelpReferences(document, effectiveOptions.registry);
+  if (!references) {
+    return std::unexpected(references.error());
   }
 
   auto placements = prepareGrids(document, typed);
@@ -1672,6 +3033,32 @@ std::expected<Node<Widget>, ManagedError> compile(ManagedScene &owner, ResourceD
     return std::unexpected(resolved.error());
   }
 
+  std::vector<std::optional<Ref<Widget>>> helpObservers(document.nodes.size());
+  for (const auto &node : document.nodes) {
+    if (node.helpTarget && !helpObservers[*node.helpTarget]) {
+      helpObservers[*node.helpTarget].emplace();
+    }
+  }
+
+  const auto existingNodes = context.nodes.size();
+  std::vector<Node<Widget>> mounted(document.nodes.size());
+  std::vector<bool> insideComposite(document.nodes.size());
+  std::vector<std::vector<std::size_t>> children(document.nodes.size(), std::vector<std::size_t>(0));
+
+  for (std::size_t index = 0; index < document.nodes.size(); ++index) {
+    const auto sourceParent = document.nodes[index].parent;
+
+    if (sourceParent) {
+      children[*sourceParent].push_back(index);
+
+      const auto parentKind = document.nodes[*sourceParent].factory.kind;
+
+      insideComposite[index] = insideComposite[*sourceParent] ||
+                               parentKind == detail::ControlFactoryKind::DATA_STATE_FALLBACK ||
+                               parentKind == detail::ControlFactoryKind::DIALOG_FALLBACK;
+    }
+  }
+
   std::vector<Description<Widget>> recipes(document.nodes.size());
 
   // Materialize source postorder, but keep every resource edge as an index. The existing
@@ -1681,22 +3068,185 @@ std::expected<Node<Widget>, ManagedError> compile(ManagedScene &owner, ResourceD
     auto &node = document.nodes[index];
 
     try {
-      auto recipe = node.factory.kind == detail::ControlFactoryKind::DECLARATIVE_GRID_FALLBACK
-                      ? gridRecipe(node)
-                      : detail::ResourceAccess::entry(effectiveOptions.registry, node.factory.index)
-                          .create(std::move(node.arguments));
+      auto recipe = [&]() -> std::expected<Description<Widget>, ManagedError> {
+        if (node.factory.kind == detail::ControlFactoryKind::DATA_STATE_FALLBACK) {
+          return dataStateRecipe(node, std::move(recipes[children[index].front()]), effectiveOptions.resolver,
+                                 document.failure(Code::FACTORY, node.offset).sceneResource);
+        }
+        if (node.factory.kind == detail::ControlFactoryKind::DIALOG_FALLBACK) {
+          auto body = std::move(recipes[children[index].front()]);
+          const auto &entry = detail::ResourceAccess::entry(effectiveOptions.registry, node.factory.index);
+
+          if (entry.declaredHost) {
+            auto host = preparedDialogRecipe(node, ui::overlayHost(std::move(body)));
+
+            for (std::size_t layer = 1; layer < children[index].size(); ++layer) {
+              const auto child = children[index][layer];
+
+              detail::ResourceAccess::sourceChild(
+                host, std::move(recipes[child]),
+                document.failure(Code::FACTORY, document.nodes[child].offset).sceneResource, true);
+            }
+
+            return host;
+          }
+
+          return preparedDialogRecipe(node, ui::dialog(*node.arguments.settings.title, std::move(body)));
+        }
+
+        if (node.factory.kind == detail::ControlFactoryKind::DECLARATIVE_GRID_FALLBACK) {
+          return gridRecipe(node);
+        }
+
+        const auto &entry = detail::ResourceAccess::entry(effectiveOptions.registry, node.factory.index);
+
+        if (node.helpTarget) {
+          return detail::ResourceAccess::keyHintsRecipe(std::move(node.arguments), *helpObservers[*node.helpTarget]);
+        }
+
+        // Legacy adapters retain their original gap-only behavior; caller factories keep all arguments.
+        if (options.format == SceneResourceFormat::CONFIGURATION &&
+            node.factory.kind == detail::ControlFactoryKind::EXISTING_BUILTIN) {
+          if (entry.name == "VBox") {
+            return linearRecipe<Column>(node);
+          }
+
+          if (entry.name == "HBox") {
+            return linearRecipe<Row>(node);
+          }
+        }
+
+        auto result = entry.create(std::move(node.arguments));
+
+        if (result && node.themeSource && detail::Access::themeCatalogRecipient(*result)) {
+          auto recipient = controls;
+          auto installed = detail::ControlContextAccess::installThemeCatalogSchema(recipient, true);
+          if (!installed) {
+            return std::unexpected(detail::controlContextError(installed.error()));
+          }
+          auto combined = recipient.resolve(node.name, node.themeSource->instance);
+          if (!combined) {
+            return std::unexpected(detail::controlContextError(combined.error()));
+          }
+          const auto oldCount = node.themeSource->materialized.count();
+          const auto newPresence = detail::controlSettingsPresenceSet(combined->settings);
+          const auto newCount = newPresence.count();
+          const auto limit = controls.limits().maxMaterializedLeaves;
+          if (oldCount > context.controlLeaves || context.controlLeaves - oldCount > limit ||
+              newCount > limit - (context.controlLeaves - oldCount)) {
+            return std::unexpected(document.failure(Code::MATERIALIZATION_LIMIT, node.offset));
+          }
+          auto prepared = detail::Access::messageSource(*result, combined->settings, newPresence,
+                                                        detail::ControlFactoryKind::THEME_CATALOG_BINDING);
+          if (!prepared) {
+            return std::unexpected(prepared.error());
+          }
+          detail::Access::preparedControlPresence(*result, newPresence);
+          node.lineage = std::move(combined->lineage);
+          node.themeSource->materialized = newPresence;
+          // Commit only after all fallible resolution and packet copies have succeeded.
+          context.controlLeaves = context.controlLeaves - oldCount + newCount;
+        }
+
+        if (result && entry.factoryKind == detail::ControlFactoryKind::MESSAGE_BINDING) {
+          detail::ResourceAccess::fallbackMessageResolver(*result, effectiveOptions.resolver,
+                                                          document.failure(Code::FACTORY, node.offset).sceneResource);
+        }
+
+        if (result && (entry.factoryKind == detail::ControlFactoryKind::THEME_SELECTOR_BINDING ||
+                       entry.factoryKind == detail::ControlFactoryKind::THEME_CATALOG_BINDING)) {
+          detail::ResourceAccess::fallbackThemeSelectorResolver(
+            *result, effectiveOptions.resolver, document.failure(Code::FACTORY, node.offset).sceneResource);
+        }
+
+        return result;
+      }();
 
       if (!recipe) {
         return std::unexpected(attributed(document, index, recipe.error()));
       }
 
-      if (typed) {
+      if (helpObservers[index]) {
+        *recipe = std::move(*recipe).reference(*helpObservers[index]);
+      }
+
+      if (typed && insideComposite[index]) {
+        *recipe = std::move(*recipe).setup([identity = StyleTarget{.type = node.name, .baseTypes = node.lineage},
+                                            diagnostic = document.failure(Code::FACTORY, node.offset).sceneResource](
+                                             ManagedScene &scene, Node<Widget> node) {
+          auto result = detail::Access::finalizeStyleIdentity(scene, node, identity);
+
+          if (!result && !result.error().sceneResource) {
+            result.error().sceneResource = diagnostic;
+          }
+
+          return result;
+        });
+      }
+
+      if (typed && !insideComposite[index]) {
         *recipe = std::move(*recipe).setup([identity = StyleTarget{.type = node.name, .baseTypes = node.lineage}](
                                              ManagedScene &scene, Node<Widget> node) {
           return detail::Access::finalizeStyleIdentity(scene, node, identity);
         });
       }
 
+      if (insideComposite[index] && node.factory.kind != detail::ControlFactoryKind::DATA_STATE_FALLBACK &&
+          node.factory.kind != detail::ControlFactoryKind::DIALOG_FALLBACK) {
+        for (auto child : children[index]) {
+          detail::ResourceAccess::sourceChild(
+            *recipe, std::move(recipes[child]),
+            document.failure(Code::FACTORY, document.nodes[child].offset).sceneResource);
+        }
+      }
+
+      if (insideComposite[index]) {
+        detail::ResourceAccess::sourceCreate(
+          *recipe,
+          [&, index](auto &create, ManagedScene &scene, Node<Widget> parent,
+                     detail::MountContext &mount) -> std::expected<Node<Widget>, ManagedError> {
+            const auto finalizersBefore = mount.finalize.size();
+            auto result = create(scene, parent, mount);
+
+            if (!result) {
+              return std::unexpected(attributed(document, index, result.error()));
+            }
+
+            const auto &sourceNode = document.nodes[index];
+
+            if (sourceNode.helpTarget) {
+              auto diagnostic =
+                document
+                  .propertyFailure(Code::INVALID_VALUE, sourceNode.helpId ? sourceNode.helpOffset : sourceNode.offset,
+                                   sourceNode.name, "help")
+                  .sceneResource;
+
+              for (auto item = finalizersBefore; item < mount.finalize.size(); ++item) {
+                auto original = std::move(mount.finalize[item]);
+
+                mount.finalize[item] = [original = std::move(original),
+                                        diagnostic]() mutable -> std::expected<void, ManagedError> {
+                  auto finalized = original();
+
+                  if (!finalized && !finalized.error().sceneResource) {
+                    finalized.error().sceneResource = diagnostic;
+                  }
+
+                  return finalized;
+                };
+              }
+            }
+
+            mounted[index] = *result;
+            auto checked = detail::Access::check(scene, *result);
+
+            if (!checked) {
+              return std::unexpected(attributed(document, index, checked.error()));
+            }
+
+            return result;
+          });
+      }
       recipes[index] = std::move(*recipe);
     } catch (const std::bad_alloc &) {
       return std::unexpected(attributed(document, index, detail::error({}, TreeError::NO_MEMORY)));
@@ -1705,8 +3255,6 @@ std::expected<Node<Widget>, ManagedError> compile(ManagedScene &owner, ResourceD
     }
   }
 
-  const auto existingNodes = context.nodes.size();
-  std::vector<Node<Widget>> mounted(document.nodes.size());
   const auto inherited = context.controls;
 
   struct RestoreContext {
@@ -1721,11 +3269,36 @@ std::expected<Node<Widget>, ManagedError> compile(ManagedScene &owner, ResourceD
   context.controls = controls;
 
   for (std::size_t index = 0; index < recipes.size(); ++index) {
+    if (insideComposite[index]) {
+      continue;
+    }
+
     const auto target = document.nodes[index].parent ? mounted[*document.nodes[index].parent] : parent;
+    const auto finalizersBefore = context.finalize.size();
     auto node = detail::Access::mount(std::move(recipes[index]), owner, target, context);
 
     if (!node) {
       return std::unexpected(attributed(document, index, node.error()));
+    }
+
+    const auto &sourceNode = document.nodes[index];
+    if (sourceNode.helpTarget) {
+      auto diagnostic =
+        document
+          .propertyFailure(Code::INVALID_VALUE, sourceNode.helpId ? sourceNode.helpOffset : sourceNode.offset,
+                           sourceNode.name, "help")
+          .sceneResource;
+      for (auto item = finalizersBefore; item < context.finalize.size(); ++item) {
+        auto original = std::move(context.finalize[item]);
+        context.finalize[item] = [original = std::move(original),
+                                  diagnostic]() mutable -> std::expected<void, ManagedError> {
+          auto result = original();
+          if (!result && !result.error().sceneResource) {
+            result.error().sceneResource = diagnostic;
+          }
+          return result;
+        };
+      }
     }
 
     mounted[index] = *node;

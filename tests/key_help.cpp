@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <portals/key_hints.hpp>
 #include <portals/style.hpp>
+#include <portals/ui_scene_resource.hpp>
 
 namespace portals::detail {
 struct ManagedScrollTestAccess {
@@ -67,6 +68,301 @@ void checkPaintStyle(Fixture &f, Node<Widget> node, CellStyle expected,
                               return style == expected;
                             }),
         "every key help text command uses the expected style", where);
+}
+
+void scalarPresentationParity() {
+  std::string baseline;
+  std::optional<CellRect> baselineHints, baselineHelp;
+  for (int mode{}; mode < 4; ++mode) {
+    Fixture f;
+    ui::Ref<HelpView> help;
+    ui::Ref<KeyHints> hints;
+    Node<Widget> helpNode, hintsNode;
+    KeyFormatOptions formatter;
+    formatter.strokeSeparator = " -> ";
+    formatter.alternativeSeparator = " | ";
+    formatter.unknownMarker = " [unknown]";
+    if (mode == 0) {
+      take(ui::mount(*f.scene, ui::column(ui::keyHints(help, {.format = formatter,
+                                                              .entrySeparator = " / ",
+                                                              .overflowMarker = "!",
+                                                              .emptyText = "none",
+                                                              .unavailableText = "lost"})
+                                            .reference(hints),
+                                          ui::helpView(help, {.initiallyOpen = true,
+                                                              .format = formatter,
+                                                              .emptyText = "none",
+                                                              .unavailableText = "lost"}))));
+    } else if (mode == 1) {
+      take(ui::mount(
+        *f.scene,
+        ui::column(ui::keyHints(help)
+                     .format({.strokeSeparator = " -> ", .alternativeSeparator = " | ", .unknownMarker = " [unknown]"})
+                     .entrySeparator(" / ")
+                     .overflowMarker("!")
+                     .emptyText("none")
+                     .unavailableText("lost")
+                     .reference(hints),
+                   ui::helpView(help)
+                     .initiallyOpen()
+                     .format({.strokeSeparator = " -> ", .alternativeSeparator = " | ", .unknownMarker = " [unknown]"})
+                     .emptyText("none")
+                     .unavailableText("lost"))));
+    } else if (mode == 2) {
+      auto full =
+        ui::helpView(help) | ui::initiallyOpen() |
+        ui::format({.strokeSeparator = " -> ", .alternativeSeparator = " | ", .unknownMarker = " [unknown]"}) |
+        ui::emptyText("none") | ui::unavailableText("lost");
+      auto compact =
+        ui::keyHints(help) |
+        ui::format({.strokeSeparator = " -> ", .alternativeSeparator = " | ", .unknownMarker = " [unknown]"}) |
+        ui::entrySeparator(" / ") | ui::overflowMarker("!") | ui::emptyText("none") | ui::unavailableText("lost");
+      take(ui::mount(*f.scene, ui::column(std::move(compact).reference(hints), std::move(full))));
+    } else {
+      auto root = take(ui::mount(*f.scene, ui::resource(R"(
+        defaults{ HelpView{format{strokeSeparator=" -> " alternativeSeparator=" | " unknownMarker=" [unknown]"}
+          emptyText="none" unavailableText="lost"} KeyHints{format{strokeSeparator=" -> " alternativeSeparator=" | " unknownMarker=" [unknown]"}
+          emptyText="none" unavailableText="lost" entrySeparator=" / " overflowMarker="!"} }
+        definitions{Guide=HelpView{initiallyOpen=true}}
+        scene{VBox{KeyHints{help="guide"} Guide#guide{}}}
+      )",
+                                                        {.format = ui::SceneResourceFormat::CONFIGURATION})));
+      const auto children = take(f.app->tree().inspect(root)).children;
+      check(children.size() == 2, "resource key-help nodes remain leaves in their source parent");
+      hintsNode = children[0];
+      helpNode = children[1];
+    }
+    if (mode != 3) {
+      helpNode = help.node();
+      hintsNode = hints.node();
+    }
+    auto full = portals::detail::ManagedScrollTestAccess::record(*f.scene, helpNode);
+    auto compact = portals::detail::ManagedScrollTestAccess::record(*f.scene, hintsNode);
+    check(full && full->full && compact && compact->hints && compact->help == helpNode,
+          "all input paths retain native full and compact records and the exact target");
+    check(full->full->initiallyOpen && take(f.app->tree().inspect(helpNode)).visible,
+          "initial-open passes through the native finalizer");
+    take(f.scene->onKey(ui::press("Ctrl+K, C"), KeyInfo(TextValue("Comment")), [] {
+    }));
+    take(f.scene->onKey(ui::press("F2"), KeyInfo(TextValue("Rename")), [] {
+    }));
+    prepareHelp(f, {100, 12});
+    check(compact->presentation->current && compact->presentation->text && compact->presentation->text->caption,
+          "configured compact view builds a real canonical binding projection");
+    const auto caption = std::string(compact->presentation->text->caption->bytes());
+    check(caption.find(" -> ") != std::string::npos && caption.find(" / ") != std::string::npos,
+          "owning formatter and entry separator reach rendered projection");
+    if (!mode) {
+      baseline = caption;
+    } else {
+      check(caption == baseline, "options methods pipes and CFG project the same caption");
+    }
+    take(f.app->tree().frame([&] {
+      auto layout = take(LayoutSnapshot::capture(f.app->tree(), f.scene->root(), LayoutSnapshotProfile::GEOMETRY));
+      const auto hintsBounds = take(layout.geometry(hintsNode)).geometry.local;
+      const auto helpBounds = take(layout.geometry(helpNode)).geometry.local;
+      if (!mode) {
+        baselineHints = hintsBounds;
+        baselineHelp = helpBounds;
+      } else {
+        check(hintsBounds == *baselineHints && helpBounds == *baselineHelp,
+              "options methods pipes and CFG retain the same actual native layout rectangles");
+      }
+    }));
+    auto text = compact->presentation->text;
+    auto projection = compact->presentation->projection;
+    prepareHelp(f, {100, 12});
+    check(compact->presentation->text == text && compact->presentation->projection == projection,
+          "unchanged configured views retain their checked projection without idle formatting");
+    check(full->full->emptyText == "none" && compact->hints->overflowMarker == "!",
+          "configured options remain owning native settings");
+  }
+}
+
+void scalarDefaultsAndLimits() {
+  {
+    Fixture f;
+    ui::Ref<HelpView> help;
+    ui::Ref<KeyHints> hints;
+    ui::ControlContext controls;
+    controls.defaults("HelpView", {.format = {.strokeSeparator = "context"}})
+      .defaults("KeyHints", {.format = {.strokeSeparator = "context"}})
+      .define("Guide", "HelpView", {.initiallyOpen = false});
+    take(ui::mount(*f.scene,
+                   ui::column(ui::keyHints(help, {.entrySeparator = "actual"}).reference(hints),
+                              ui::helpView(help, {.format = {.maxBytesPerBinding = 123}}).variant("Guide")),
+                   controls));
+    auto full = portals::detail::ManagedScrollTestAccess::record(*f.scene, help.node());
+    auto compact = portals::detail::ManagedScrollTestAccess::record(*f.scene, hints.node());
+    check(full->full->emptyText == "No key bindings" && full->full->unavailableText == "Help unavailable" &&
+            compact->hints->emptyText.empty() && compact->hints->unavailableText == "?",
+          "omitted labels retain distinct native defaults");
+    check(full->full->format.maxBytesPerBinding == 123 && compact->hints->entrySeparator == "actual" &&
+            full->full->format.strokeSeparator == "context",
+          "sparse defaults overlay actual receiving constructor options");
+  }
+  for (int mode{}; mode < 3; ++mode) {
+    Fixture f({.maxKeyProjectionBytes = 8});
+    ui::Ref<HelpView> help;
+    const auto before = take(f.app->tree().inspect(f.scene->root())).children;
+    auto recipe = mode == 0   ? ui::helpView(help, {.emptyText = "ninebytes"})
+                  : mode == 1 ? ui::helpView(help).emptyText("ninebytes")
+                              : ui::helpView(help) | ui::emptyText("ninebytes");
+    auto result = ui::mount(*f.scene, std::move(recipe));
+    check(!result && treeCause(result.error(), TreeError::NODE_LIMIT) && help.node() == Node<HelpView>{} &&
+            take(f.app->tree().inspect(f.scene->root())).children == before,
+          "native cap rejects before retaining nodes or publishing refs");
+  }
+  for (const bool compact : {false, true}) {
+    Fixture f;
+    ui::Ref<HelpView> help;
+    auto invalid = std::string(1, static_cast<char>(0xff));
+    auto result =
+      compact
+        ? ui::mount(*f.scene, ui::detail::Access::erase(ui::keyHints(help, {.format = {.unknownMarker = invalid}})))
+        : ui::mount(*f.scene, ui::detail::Access::erase(ui::helpView(help, {.format = {.unknownMarker = invalid}})));
+    check(!result && treeCause(result.error(), TreeError::INVALID_ARGUMENT) && help.node() == Node<HelpView>{},
+          "native owning formatter literals validate UTF-8 before retained allocation");
+  }
+  {
+    Fixture f;
+    ui::Ref<HelpView> help;
+    auto result = ui::mount(*f.scene, ui::helpView(help, {.unavailableText = std::string(1, static_cast<char>(0xff))}));
+    check(!result && result.error().text && help.node() == Node<HelpView>{},
+          "direct HelpView invalid unavailable marker retains its original low-level text cause");
+  }
+}
+
+void formatterCapRemainsNative() {
+  Fixture f;
+  ui::Ref<HelpView> help;
+  ui::Ref<KeyHints> hints;
+  take(ui::mount(
+    *f.scene, ui::column(ui::keyHints(help).format({.maxBytesPerBinding = 1}).reference(hints), ui::helpView(help))));
+  take(f.scene->onKey(ui::press("Ctrl+S"), KeyInfo(TextValue("Save")), [] {
+  }));
+  int diagnostics{};
+  take(f.scene->onError([&](const ManagedDiagnostic &) {
+    ++diagnostics;
+  }));
+  prepareHelp(f, {40, 8});
+  auto record = portals::detail::ManagedScrollTestAccess::record(*f.scene, hints.node());
+  check(!record->presentation->current && record->presentation->unavailable.bytes() == "?" && diagnostics == 1,
+        "positive row cap is enforced by the native formatter and existing unavailable presentation");
+  prepareHelp(f, {40, 8});
+  check(diagnostics == 1, "unchanged row-cap failure does not repeat idle diagnostics");
+}
+
+void materializedHelpHandoff() {
+  for (const std::size_t budget : {2U, 3U}) {
+    for (const bool addLeaf : {false, true}) {
+      Fixture f;
+      ui::Ref<HelpView> help;
+      ui::ControlSettings source{.format = {.strokeSeparator = "precharged"}, .emptyText = "source"};
+      auto staged = ui::detail::Access::cold<Widget>(
+        [=](ManagedScene &scene, Node<Widget> parent,
+            ui::detail::MountContext &context) mutable -> std::expected<Node<Widget>, ManagedError> {
+          context.controlLeaves += 2;
+          auto patch = source;
+          if (addLeaf) {
+            patch.unavailableText = "added";
+          }
+          auto recipe = ui::helpView(help).settings(std::move(patch));
+          ui::detail::Access::preparedControlPresence(recipe, ui::detail::controlSettingsPresenceSet(source));
+          auto result = ui::detail::Access::mount(std::move(recipe), scene, parent, context);
+          if (!result) {
+            return std::unexpected(result.error());
+          }
+          return Node<Widget>(*result);
+        });
+      const auto before = take(f.app->tree().inspect(f.scene->root())).children;
+      auto result = ui::mount(*f.scene, std::move(staged), ui::ControlContext({.maxMaterializedLeaves = budget}));
+      if (addLeaf && budget == 2) {
+        check(!result && result.error().sceneResource &&
+                result.error().sceneResource->code == SceneResourceErrorCode::MATERIALIZATION_LIMIT,
+              "a genuinely new high-word leaf exhausts the precharged aggregate budget");
+        check(help.node() == Node<HelpView>{} && take(f.app->tree().inspect(f.scene->root())).children == before,
+              "failed high-word handoff publishes no reference and retains no subtree");
+      } else {
+        take(std::move(result));
+        auto record = portals::detail::ManagedScrollTestAccess::record(*f.scene, help.node());
+        check(record->full->emptyText == "source" && record->full->format.strokeSeparator == "precharged" &&
+                record->full->unavailableText == (addLeaf ? "added" : "Help unavailable"),
+              "materialized leaves in both words are consumed once while a new leaf is applied");
+      }
+    }
+  }
+}
+
+void localHelpReferences() {
+  for (const bool good : {false, true}) {
+    Fixture f;
+    ui::Ref<HelpView> help;
+    ui::Ref<Label> label;
+    ui::SceneResourceOptions options;
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    int callbacks{};
+    take(options.registry.add<Widget>("Erased", [&](ui::SceneResourceArguments) {
+      ++callbacks;
+      if (good) {
+        return ui::detail::Access::erase(ui::helpView(help));
+      }
+      return ui::detail::Access::erase(ui::label(label, "wrong"));
+    }));
+    const auto before = take(f.app->tree().inspect(f.scene->root())).children;
+    const std::string source = "scene{VBox{KeyHints{help=\"target\"} Erased#target{}}}";
+    auto result = ui::mount(*f.scene, ui::resource(source, options));
+    check(callbacks == 1, "explicit unknown target executes exactly one real code factory");
+    if (good) {
+      auto children = take(f.app->tree().inspect(take(std::move(result)))).children;
+      auto hints = portals::detail::ManagedScrollTestAccess::record(*f.scene, children[0]);
+      check(help.node() != Node<HelpView>{} && hints->help == help.node(),
+            "erased help target succeeds through the native checked-record finalizer");
+    } else {
+      check(!result && treeCause(result.error(), TreeError::INVALID_ARGUMENT) && result.error().sceneResource &&
+              result.error().sceneResource->propertyPath &&
+              *result.error().sceneResource->propertyPath == "KeyHints.help" &&
+              result.error().sceneResource->offset == source.find("help=") && !result.error().cleanup,
+            "late wrong-capability failure retains owning help source and its primary error");
+      check(label.node() == Node<Label>{} && take(f.app->tree().inspect(f.scene->root())).children == before,
+            "late target failure rolls back all actual nodes and pending typed observations");
+      take(ui::mount(*f.scene, ui::label(label, "reused")));
+      check(label.node() != Node<Label>{}, "rolled-back observer can be reused immediately");
+    }
+  }
+  {
+    Fixture f;
+    ui::Ref<Button> stable;
+    ui::Ref<Label> unpublished;
+    take(ui::mount(*f.scene, ui::button(stable, "Existing", [] {
+    })));
+    take(f.scene->focus(stable.node()));
+    const auto before = take(f.app->tree().inspect(f.scene->root())).children;
+    ui::SceneResourceOptions options;
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    take(options.registry.add<Widget>("Wrong", [unpublished](ui::SceneResourceArguments) {
+      return ui::detail::Access::erase(ui::label(unpublished, "wrong"));
+    }));
+    auto result = ui::mount(
+      *f.scene,
+      ui::resource("scene{VBox{HelpView{initiallyOpen=true} KeyHints{help=\"wrong\"} Wrong#wrong{}}}", options));
+    check(!result && result.error().sceneResource && !result.error().cleanup && unpublished.node() == Node<Label>{} &&
+            take(f.app->tree().inspect(f.scene->root())).children == before &&
+            take(f.app->router().focused()) == stable.node(),
+          "late target rejection after initial-open unwinds the help focus scope and preserves the earlier invoker");
+  }
+  {
+    Fixture f;
+    ui::SceneResourceOptions options;
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    take(options.registry.add<Widget>("Unknown", [](ui::SceneResourceArguments) {
+      return ui::detail::Access::erase(ui::label("ordinary"));
+    }));
+    auto root = take(ui::mount(*f.scene, ui::resource("scene{VBox{KeyHints{} Unknown{} HelpView{}}}", options)));
+    auto children = take(f.app->tree().inspect(root)).children;
+    check(portals::detail::ManagedScrollTestAccess::record(*f.scene, children[0])->help == children[2],
+          "one declared help plus an unknown factory is not implicit ambiguity");
+  }
 }
 
 void helpBodyStyles() {
@@ -482,6 +778,11 @@ void receiptGuardAndFocusErrors() {
 }
 } // namespace
 int main() try {
+  scalarPresentationParity();
+  scalarDefaultsAndLimits();
+  formatterCapRemainsNative();
+  materializedHelpHandoff();
+  localHelpReferences();
   helpBodyStyles();
   helpBodyMountRollback();
   disabledHintsStyles();

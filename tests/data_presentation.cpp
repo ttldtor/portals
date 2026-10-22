@@ -4,6 +4,7 @@
 #include <iostream>
 #include <new>
 #include <portals/ui.hpp>
+#include <portals/ui_scene_resource.hpp>
 #include <source_location>
 #include <stdexcept>
 #include <thread>
@@ -937,10 +938,616 @@ void bodyRemovalAtomicity() {
   std::cout << "body-removal materialization points=" << allocations << '\n';
 }
 
+Node<DataStateView> checkedDataState(Fixture &f, Node<Widget> node) {
+  ui::Ref<DataStateView> reference;
+
+  take(ui::detail::NamedAccess::publish(reference, *f.scene, node));
+
+  return reference.node();
+}
+
+std::string statusCaption(Fixture &f, Node<DataStateView> node) {
+  const auto strip = take(f.app->tree().inspect(node)).children.front();
+  const auto message = take(f.app->tree().inspect(strip)).children[1];
+  std::string result;
+
+  take(f.app->tree().read(message, [&](const Widget &widget) {
+    result = dynamic_cast<const Label &>(widget).text().bytes();
+  }));
+
+  return result;
+}
+
+void scalarAndLabelParity() {
+  for (int path = 0; path < 5; ++path) {
+    Fixture f;
+    ui::Ref<Label> body;
+    Node<DataStateView> root;
+    int resolutions{};
+    DataStateConfig actual;
+    const ui::TextResolver resolver = [&](std::string_view key) -> std::expected<std::string, TextResourceError> {
+      ++resolutions;
+      if (key == "busy") {
+        return "Working";
+      }
+      if (key == "failure") {
+        return "Oops";
+      }
+      throw std::runtime_error("unused retry label was resolved");
+    };
+    const ui::ControlDataStateLabelSettings labels{.loading = i18n("busy"),
+                                                   .empty = text("Nada"),
+                                                   .error = i18n("failure"),
+                                                   .offline = text("Disconnected"),
+                                                   .refreshing = text("Again"),
+                                                   .retry = i18n("unused retry")};
+    ui::ControlSettings patch{.showStatus = true,
+                              .statusRows = 2,
+                              .contentPolicy = DataContentPolicy::REPLACE,
+                              .spinnerInterval = 200,
+                              .labels = labels};
+
+    actual.resolver = resolver;
+    actual.statusRows = 3;
+    actual.spinnerInterval = 999;
+    if (path == 0) {
+      actual.showStatus = true;
+      actual.statusRows = 2;
+      actual.contentPolicy = DataContentPolicy::REPLACE;
+      actual.spinnerInterval = 200;
+      actual.labels = {.loading = i18n("busy"),
+                       .empty = text("Nada"),
+                       .error = i18n("failure"),
+                       .offline = text("Disconnected"),
+                       .refreshing = text("Again"),
+                       .retry = i18n("unused retry")};
+      root =
+        take(ui::mount(*f.scene, ui::dataStateView(DataPresentation{}, ui::label("body").reference(body), actual)));
+    } else if (path == 1) {
+      root = take(ui::mount(*f.scene, ui::dataStateView(DataPresentation{}, ui::label("body").reference(body), actual)
+                                        .showStatus()
+                                        .statusRows(2)
+                                        .contentPolicy(DataContentPolicy::REPLACE)
+                                        .spinnerInterval(200)
+                                        .labels(labels)));
+    } else if (path == 2) {
+      root = take(ui::mount(*f.scene, ui::dataStateView(DataPresentation{}, ui::label("body").reference(body), actual) |
+                                        ui::showStatus() | ui::statusRows(2) |
+                                        ui::contentPolicy(DataContentPolicy::REPLACE) | ui::spinnerInterval(200) |
+                                        ui::labels(labels)));
+    } else if (path == 3) {
+      ui::ControlContext context;
+
+      context.defaults("DataStateView", patch).define("Result", "DataStateView");
+      root = take(ui::mount(
+        *f.scene, ui::dataStateView(DataPresentation{}, ui::label("body").reference(body), actual).variant("Result"),
+        context));
+    } else {
+      ui::SceneResourceOptions options;
+
+      options.format = ui::SceneResourceFormat::CONFIGURATION;
+      options.resolver = resolver;
+      take(options.registry.add<Label>("Body", [&](ui::SceneResourceArguments) {
+        return ui::label("body").reference(body);
+      }));
+      const auto mounted = take(ui::mount(*f.scene, ui::resource(R"(
+        definitions{Result=DataStateView{showStatus=true contentPolicy=REPLACE labels{loading=i18n("busy") error=i18n("failure")}}}
+        defaults{DataStateView{statusRows=2 spinnerInterval=200 labels{empty="Nada" offline="Disconnected" refreshing="Again" retry=i18n("unused retry")}}}
+        scene{Result{labels={refreshing="Again"} Body{}}}
+      )",
+                                                                 options)));
+
+      root = checkedDataState(f, mounted);
+    }
+    check(f.value(root) == DataPresentation{},
+          "resource fallback must use explicit READY/generation1 without inference");
+    check(resolutions == 2, "sparse label expressions were duplicated or unused retry caption was resolved");
+    take(setDataStateView(f.app->tree(), root, {DataPhase::LOADING}));
+    f.prepare();
+    const auto strip = take(f.app->tree().inspect(root)).children.front();
+
+    check(statusCaption(f, root) == "Working", "loading label did not match receiving native configuration");
+    check(take(f.scene->geometry(strip)).local.size().height == 2, "statusRows did not reach real strip geometry");
+    check(!take(f.app->tree().inspect(body.node())).visible,
+          "REPLACE policy failed to hide the independently owned body");
+    check(f.advance(199).timers == 0 && f.advance(200).timers == 1, "spinnerInterval did not retain native cadence");
+    for (const auto &[phase, text] :
+         std::array<std::pair<DataPhase, std::string_view>, 4>{{{DataPhase::EMPTY, "Nada"},
+                                                                {DataPhase::FAILED, "Oops"},
+                                                                {DataPhase::OFFLINE, "Disconnected"},
+                                                                {DataPhase::REFRESHING, "Again"}}}) {
+      take(setDataStateView(f.app->tree(), root, {phase}));
+      f.prepare();
+      check(statusCaption(f, root) == text, "sparse status label paths diverged from native options");
+    }
+    take(f.app->tree().setVisible(root, false));
+    take(f.app->tree().consumeFrameRequest());
+    f.advance(600);
+    check(f.advance(1000).timers == 0 && take(f.app->tree().consumeFrameRequest()) == Invalidation::NONE,
+          "hidden scalar status retained timer/redraw work");
+    take(f.app->tree().setVisible(root, true));
+    f.prepare();
+    check(f.advance(1200).timers == 1, "reshown scalar status lost native timer cadence");
+    take(setDataStateView(f.app->tree(), root, {DataPhase::READY}));
+    f.prepare();
+    check(f.advance(2000).timers == 0, "READY data-state scalar view retained spinner work");
+    check(take(f.app->tree().consumeFrameRequest()) == Invalidation::NONE, "READY data-state view redraws while idle");
+    check(resolutions == 2, "display changes re-resolved construction-only label expressions");
+  }
+}
+
+void unusedLabelsAndActualServices() {
+  for (int mode = 0; mode < 4; ++mode) {
+    Fixture f;
+    ui::SceneResourceOptions options;
+    int calls{};
+
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    options.resolver = [&](std::string_view) -> std::expected<std::string, TextResourceError> {
+      ++calls;
+      if (mode == 1) {
+        throw std::runtime_error("unused resolver");
+      }
+      if (mode == 2) {
+        return std::string(1, static_cast<char>(0xff));
+      }
+
+      return std::unexpected(TextResourceError::MISSING_RESOURCE);
+    };
+    const auto mounted =
+      take(ui::mount(*f.scene, ui::resource("scene{DataStateView{showStatus=false labels{loading=i18n(\"unused\") "
+                                            "retry=i18n(\"unused retry\")} Label{\"body\"}}}",
+                                            options)));
+    const auto root = checkedDataState(f, mounted);
+
+    take(setDataStateView(f.app->tree(), root, {DataPhase::LOADING}));
+    f.prepare();
+    check(calls == 0, "disabled status resolved an unused label or retry expression");
+    check(take(f.app->tree().inspect(root)).children.size() == 1, "disabled status mounted status widgets");
+    check(f.advance(1000).timers == 0, "disabled status allocated/armed spinner work");
+    check(take(f.app->tree().consumeFrameRequest()) == Invalidation::NONE, "disabled status redraws while idle");
+  }
+  {
+    Fixture f;
+    DataStateConfig actual;
+    int local{}, fallback{}, retries{};
+
+    actual.statusRows = 2;
+    actual.labels.loading = i18n("local");
+    actual.labels.retry = i18n("retry");
+    actual.messageStyle.normal.bold = true;
+    actual.resolver = [&](std::string_view key) -> std::expected<std::string, TextResourceError> {
+      ++local;
+
+      return key == "retry" ? "Try again" : "Local";
+    };
+    actual.retry = [&]() -> std::expected<void, TreeError> {
+      ++retries;
+      return {};
+    };
+    ui::SceneResourceOptions options;
+
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    options.resolver = [&](std::string_view) -> std::expected<std::string, TextResourceError> {
+      ++fallback;
+      throw std::runtime_error("custom factory resolver must win");
+    };
+    ui::Ref<DataStateView> reference;
+
+    take(options.registry.add<DataStateView>("Custom", [&](ui::SceneResourceArguments) {
+      return ui::dataStateView(DataPresentation{DataPhase::FAILED}, ui::label("body"), actual)
+        .labels({.empty = text("Patched")})
+        .reference(reference);
+    }));
+    take(ui::mount(*f.scene, ui::resource("scene{Custom{}}", options)));
+    f.prepare();
+    check(local == 2 && fallback == 0, "actual factory resolver/retry services were replaced or eagerly duplicated");
+    const auto strip = take(f.app->tree().inspect(reference.node())).children.front();
+    const auto widgets = take(f.app->tree().inspect(strip)).children;
+
+    check(widgets.size() == 3, "sparse label patch dropped explicit retry service");
+    take(f.app->tree().read(widgets[1], [](const Widget &widget) {
+      check(dynamic_cast<const Label &>(widget).styleDefaults().normal.bold,
+            "sparse labels replaced the actual native message style");
+    }));
+    take(f.app->router().invoke(widgets.back(), {Action::ACTIVATE}));
+    check(retries == 1, "actual factory retry action was not retained");
+  }
+  {
+    Fixture f;
+    ui::SceneResourceOptions options;
+
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    const auto node = checkedDataState(
+      f, take(ui::mount(*f.scene,
+                        ui::resource("scene{DataStateView{spinnerInterval=4294967396 Label{\"body\"}}}", options))));
+
+    take(setDataStateView(f.app->tree(), node, {DataPhase::LOADING}));
+    f.prepare();
+    check(f.advance(100).timers == 0, "full uint64 interval was narrowed to size_t/uint32");
+  }
+}
+
+struct ResolverCopyState {
+  bool armed{};
+  int copies{};
+  int calls{};
+};
+
+struct CopySensitiveResolver {
+  std::shared_ptr<ResolverCopyState> state;
+  std::shared_ptr<int> lifetime;
+
+  CopySensitiveResolver(std::shared_ptr<ResolverCopyState> value, std::shared_ptr<int> token)
+      : state(std::move(value)), lifetime(std::move(token)) {
+  }
+
+  CopySensitiveResolver(const CopySensitiveResolver &other) : state(other.state), lifetime(other.lifetime) {
+    ++state->copies;
+    if (state->armed) {
+      throw std::bad_alloc();
+    }
+  }
+
+  std::expected<std::string, TextResourceError> operator()(std::string_view) const {
+    ++state->calls;
+
+    return "Translated";
+  }
+};
+
+void resolverCopyAndBorrowLifetime() {
+  for (const bool showStatus : {false, true}) {
+    Fixture f;
+    ui::SceneResourceOptions options;
+    ui::Ref<Widget> reference;
+    auto state = std::make_shared<ResolverCopyState>();
+    std::weak_ptr<int> lifetime;
+    bool armInFactory = true;
+    int bodyMounts{}, restored{};
+
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    {
+      auto token = std::make_shared<int>(1);
+
+      lifetime = token;
+      options.resolver = CopySensitiveResolver(state, std::move(token));
+    }
+    take(options.registry.add<Label>("Body", [&](ui::SceneResourceArguments) {
+      // Arm after resource options have been copied: only the new constructor-only fallback copy is targeted.
+      state->armed = armInFactory;
+
+      return ui::detail::Access::cold<Label>(
+        [&](ManagedScene &scene, Node<Widget> parent,
+            ui::detail::MountContext &context) -> std::expected<Node<Label>, ManagedError> {
+          check(context.dataStateResolver == nullptr, "constructor resolver borrow leaked into body creation");
+          ++bodyMounts;
+
+          return ui::detail::Access::mount(ui::label("body"), scene, parent, context);
+        });
+    }));
+    const auto source = std::string("scene{DataStateView{showStatus=") + (showStatus ? "true" : "false") +
+                        " labels{loading=i18n(\"work\")} Body{}}}";
+    const auto mount = [&]() {
+      auto recipe = ui::resource(source, options).reference(reference);
+      auto guarded = ui::detail::Access::cold<Widget>(
+        [&, recipe = std::move(recipe)](
+          ManagedScene &scene, Node<Widget> parent,
+          ui::detail::MountContext &context) mutable -> std::expected<Node<Widget>, ManagedError> {
+          try {
+            auto result = ui::detail::Access::mount(std::move(recipe), scene, parent, context);
+
+            check(context.dataStateResolver == nullptr, "checked constructor exit retained borrowed resolver");
+            ++restored;
+
+            return result;
+          } catch (...) {
+            check(context.dataStateResolver == nullptr, "throwing constructor exit retained borrowed resolver");
+            ++restored;
+            throw;
+          }
+        });
+
+      return ui::mount(*f.scene, std::move(guarded));
+    };
+    const auto copiesBefore = state->copies;
+    auto result = mount();
+
+    check(state->copies > copiesBefore && restored == 1, "targeted resolver copy/restore path was not reached");
+    if (showStatus) {
+      const auto *cause = result ? nullptr : std::get_if<TreeError>(&result.error().cause);
+
+      check(!result && cause && *cause == TreeError::NO_MEMORY && bodyMounts == 0 && state->calls == 0,
+            "fallback resolver copy failure did not preserve the checked allocation boundary");
+      check(result.error().sceneResource && !result.error().sceneResource->propertyPath &&
+              result.error().sceneResource->offset == source.find("DataStateView"),
+            "fallback resolver copy failure lost its owning source-node attribution");
+      check(reference.node() == Node<Widget>{} && take(f.app->tree().inspect(f.scene->root())).children.empty(),
+            "fallback resolver copy failure published partial nodes/references");
+      state->armed = false;
+      armInFactory = false;
+      result = mount();
+      check(result.has_value() && restored == 2 && state->calls == 1,
+            "constructor copy failure poisoned retry or duplicated label resolution");
+    } else {
+      check(result.has_value() && state->calls == 0,
+            "disabled status copied or called the armed constructor fallback resolver");
+    }
+    check(bodyMounts == 1, "body was not mounted exactly once after constructor resolver restoration");
+    options.resolver = {};
+    check(lifetime.expired(), "mounted data-state records retained the resource resolver service");
+    f.prepare();
+    check(f.advance(1000).timers == 0, "READY/disabled constructor fallback created timer work");
+  }
+  {
+    Fixture f;
+    ui::SceneResourceOptions options;
+    int body{}, status{};
+
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    options.resolver = [&](std::string_view key) -> std::expected<std::string, TextResourceError> {
+      key == "body" ? ++body : ++status;
+
+      return "Body translated";
+    };
+    take(ui::mount(*f.scene, ui::resource("scene{DataStateView{showStatus=false labels{loading=i18n(\"unused\")} "
+                                          "Label{text=i18n(\"body\")}}}",
+                                          options)));
+    check(body == 1 && status == 0, "status suppression changed existing eager body text resolution");
+  }
+}
+
+void boundAndInferredScalarPaths() {
+  {
+    Fixture f;
+    auto state = take(f.scene->state(DataPresentation{DataPhase::LOADING}));
+    const auto node = take(ui::mount(*f.scene, ui::dataStateView(state, ui::label("body"))
+                                                 .statusRows(2)
+                                                 .spinnerInterval(200)
+                                                 .labels({.loading = text("Bound")})));
+
+    f.prepare();
+    check(statusCaption(f, node) == "Bound", "bound factory did not consume local sparse labels");
+    check(f.advance(199).timers == 0 && f.advance(200).timers == 1, "bound factory lost declarative spinner interval");
+    take(state.set({DataPhase::READY, 2}));
+    f.prepare();
+    check(f.value(node).phase == DataPhase::READY && f.advance(1000).timers == 0,
+          "bound factory lost native phase writer or timer retirement");
+  }
+  {
+    Fixture f;
+    auto model = take(f.scene->model<int>(std::make_shared<Page>(RangeState::READY)));
+    const auto node = take(ui::mount(
+      *f.scene, ui::dataStateView(ui::virtualList(model,
+                                                  [](const ModelRow<int> &row) {
+                                                    return take(GraphemeText::from(std::to_string(row.value)));
+                                                  })) |
+                  ui::statusRows(2) | ui::spinnerInterval(200) | ui::labels({.empty = text("No rows")})));
+
+    f.prepare();
+    check(f.value(node).phase == DataPhase::READY && f.advance(200).timers == 0,
+          "inferred scalar factory replaced the real model presentation or started polling");
+  }
+}
+
+void resourceResolverReentryRetiresParent() {
+  Fixture f;
+  ui::SceneResourceOptions options;
+  ui::Ref<Widget> reference;
+  int resolutions{};
+
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  options.resolver = [&](std::string_view) -> std::expected<std::string, TextResourceError> {
+    ++resolutions;
+    const auto children = take(f.app->tree().inspect(f.scene->root())).children;
+
+    check(children.size() == 1, "reentry fixture did not reach a real unpublished source parent");
+    take(f.scene->remove(children.front()));
+
+    return "Reentered";
+  };
+  const auto result = ui::mount(
+    *f.scene, ui::resource("scene{VBox{DataStateView{labels{loading=i18n(\"reenter\")} Label{\"body\"}}}}", options)
+                .reference(reference));
+  const auto *cause = result ? nullptr : std::get_if<TreeError>(&result.error().cause);
+
+  check(!result && resolutions == 1 && cause && (*cause == TreeError::STALE_NODE || *cause == TreeError::CLOSED),
+        "resource constructor callback ignored the native post-resolver lifetime recheck");
+  check(result.error().sceneResource && !result.error().sceneResource->propertyPath &&
+          reference.node() == Node<Widget>{} && take(f.app->tree().inspect(f.scene->root())).children.empty(),
+        "reentrant resource construction retained a partial body/reference or lost source-node attribution");
+  check(f.advance(1000).timers == 0, "reentrant failed construction retained spinner work");
+}
+
+void completeResourceBodyAndOverrideOrder() {
+  Fixture f;
+  ui::SceneResourceOptions options;
+  ui::Ref<Label> one, two, three;
+  ui::Ref<Column> box;
+  std::vector<std::string> factories, mounts;
+
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  take(options.registry.add<Label>("Mark", [&](ui::SceneResourceArguments arguments) {
+    factories.push_back(arguments.id);
+    const auto id = arguments.id;
+    const auto reference = id == "one" ? one : id == "two" ? two : three;
+
+    return ui::label(arguments.text)
+      .reference(reference)
+      .setup([&, id](ManagedScene &, Node<Label>) -> std::expected<void, ManagedError> {
+        mounts.push_back(id);
+
+        return {};
+      });
+  }));
+  take(options.registry.add<Column>(
+    "Box",
+    [&](ui::SceneResourceArguments) {
+      factories.push_back("box");
+
+      return ui::column().reference(box).setup([&](ManagedScene &, Node<Column>) -> std::expected<void, ManagedError> {
+        mounts.push_back("box");
+
+        return {};
+      });
+    },
+    true));
+  const auto root = take(ui::mount(*f.scene, ui::resource(R"(
+    scene{DataStateView{showStatus=false Grid#grid{columns=2 Mark#one{"one"} Box{Mark#two{"two"} DataStateView{showStatus=false Mark#three{"three"}}}}}}
+  )",
+                                                          options)));
+
+  check(factories == std::vector<std::string>{"one", "two", "three", "box"},
+        "resource code factories lost exact postorder invocation");
+  check(mounts == std::vector<std::string>{"one", "box", "two", "three"},
+        "complete data-state body mounted descendants out of order or more than once");
+  check(one.node() != Node<Label>{} && two.node() != Node<Label>{} && three.node() != Node<Label>{},
+        "nested body references were not published");
+  f.prepare();
+  const auto left = take(f.scene->geometry(one.node())).local;
+  const auto right = take(f.scene->geometry(box.node())).local;
+
+  check(right.origin().x >= left.right(), "late Grid binding lost composed source-index child placements");
+  take(f.scene->remove(root));
+  check(f.advance(1000).timers == 0, "removed complete body retained presentation work");
+  factories.clear();
+  mounts.clear();
+  ui::SceneResourceOptions overridden;
+
+  overridden.format = ui::SceneResourceFormat::CONFIGURATION;
+  take(overridden.registry.add<Label>("Mark", [&](ui::SceneResourceArguments arguments) {
+    factories.push_back(arguments.text);
+
+    return ui::label(arguments.text);
+  }));
+  take(overridden.registry.add<Column>(
+    "DataStateView",
+    [&](ui::SceneResourceArguments) {
+      factories.push_back("override");
+
+      return ui::column();
+    },
+    true));
+  take(ui::mount(*f.scene, ui::resource("scene{DataStateView{Mark{\"first\"} Mark{\"second\"}}}", overridden)));
+  check(factories == std::vector<std::string>{"first", "second", "override"},
+        "caller override inherited fallback one-body or factory order behavior");
+}
+
+void labelsChildNameScope() {
+  for (int spelling = 0; spelling < 3; ++spelling) {
+    Fixture f;
+    ui::SceneResourceOptions options;
+    int labelsChildren{};
+
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    if (spelling) {
+      take(options.registry.add<Label>("labels", [&](ui::SceneResourceArguments) {
+        ++labelsChildren;
+
+        return ui::label("child");
+      }));
+    }
+    const std::string contents = spelling == 1   ? "labels{}"
+                                 : spelling == 2 ? "labels={loading=\"Waiting\"} Label{\"body\"}"
+                                                 : "labels{loading=\"Waiting\"} Label{\"body\"}";
+    const auto root = take(ui::mount(*f.scene, ui::resource("scene{DataStateView{" + contents + "}}", options)));
+
+    check(labelsChildren == (spelling == 1 ? 1 : 0),
+          "native labels group stole or swallowed a registered empty body child");
+    check(take(f.app->tree().inspect(root)).children.size() == 2, "scoped labels spelling lost the one real body");
+    if (spelling) {
+      take(ui::mount(*f.scene, ui::resource("scene{VBox{labels{}}}", options)));
+      check(labelsChildren == (spelling == 1 ? 2 : 1), "labels became globally reserved beneath unrelated VBox");
+    }
+  }
+}
+
+void lateLabelFailureAndFinalizerRollback() {
+  Fixture f;
+  ui::Ref<Widget> root;
+  ui::Ref<Label> body;
+  ui::SceneResourceOptions options;
+  int calls{};
+  bool repaired{};
+
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  take(options.registry.add<Label>("Body", [&](ui::SceneResourceArguments) {
+    return ui::label("body").reference(body);
+  }));
+  options.resolver = [&](std::string_view) -> std::expected<std::string, TextResourceError> {
+    ++calls;
+    if (!repaired) {
+      return std::unexpected(TextResourceError::MISSING_RESOURCE);
+    }
+
+    return "Repaired";
+  };
+  const auto source = "scene{DataStateView{labels{loading=i18n(\"secret key\")} Body{}}}";
+  auto result = ui::mount(*f.scene, ui::resource(source, options).reference(root));
+
+  check(!result && result.error().resource == TextResourceError::MISSING_RESOURCE && calls == 1,
+        "late label failure lost its original typed resource cause or repeated resolution");
+  check(result.error().sceneResource && !result.error().sceneResource->propertyPath &&
+          result.error().sceneResource->offset == std::string_view(source).find("DataStateView"),
+        "native label failure invented a leaf or lost owning source-node attribution");
+  check(root.node() == Node<Widget>{} && body.node() == Node<Label>{} &&
+          take(f.app->tree().inspect(f.scene->root())).children.empty(),
+        "late label failure published partial references/nodes");
+  repaired = true;
+  take(ui::mount(*f.scene, ui::resource(source, options).reference(root)));
+  check(body.node() != Node<Label>{}, "late label failure poisoned retry of pending references");
+  take(f.scene->remove(root.node()));
+  options.resolver = [](std::string_view) -> std::expected<std::string, TextResourceError> {
+    return std::string(1, static_cast<char>(0xff));
+  };
+  const auto invalidText = ui::mount(*f.scene, ui::resource(source, options));
+  const auto nativeTextError = GraphemeText::from(std::string(1, static_cast<char>(0xff))).error();
+
+  check(!invalidText && invalidText.error().text && invalidText.error().text->kind == nativeTextError.kind &&
+          invalidText.error().sceneResource && !invalidText.error().sceneResource->propertyPath,
+        "late label failure lost the native typed text error or invented a leaf");
+  check(take(f.app->tree().inspect(f.scene->root())).children.empty(),
+        "late invalid label text retained a partial native body");
+  ui::Ref<Widget> composite;
+  ui::Ref<Label> first;
+  bool actualHelp{};
+  ui::SceneResourceOptions late;
+
+  late.format = ui::SceneResourceFormat::CONFIGURATION;
+  take(late.registry.add<Label>("Mark", [&](ui::SceneResourceArguments) {
+    return ui::label("first").reference(first);
+  }));
+  take(late.registry.add<Widget>("Support", [&](ui::SceneResourceArguments) {
+    return actualHelp ? ui::detail::Access::erase(ui::helpView(ui::Ref<HelpView>{}))
+                      : ui::detail::Access::erase(ui::label("wrong capability"));
+  }));
+  const auto nested =
+    "scene{DataStateView{showStatus=false Grid{columns=2 Mark{} KeyHints{help=\"support\"} Support#support{}}}}";
+  auto failed = ui::mount(*f.scene, ui::resource(nested, late).reference(composite));
+
+  check(!failed && failed.error().sceneResource && failed.error().sceneResource->propertyPath &&
+          *failed.error().sceneResource->propertyPath == "KeyHints.help",
+        "composed child finalizer lost its owning help source");
+  check(first.node() == Node<Label>{} && composite.node() == Node<Widget>{} &&
+          take(f.app->tree().inspect(f.scene->root())).children.empty(),
+        "late composed finalizer did not roll back Grid/body pending references");
+  actualHelp = true;
+  take(ui::mount(*f.scene, ui::resource(nested, late).reference(composite)));
+  f.prepare();
+  check(first.node() != Node<Label>{}, "failed composed finalizer poisoned real Grid-body retry");
+}
 } // namespace
 
 int main() {
   try {
+    scalarAndLabelParity();
+    unusedLabelsAndActualServices();
+    resolverCopyAndBorrowLifetime();
+    boundAndInferredScalarPaths();
+    resourceResolverReentryRetiresParent();
+    completeResourceBodyAndOverrideOrder();
+    labelsChildNameScope();
+    lateLabelFailureAndFinalizerRollback();
     mapping();
     ownedTimerAndLifecycle();
     affinityAndBinding();

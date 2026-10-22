@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: BSL-1.0
 #include <portals/detail/control_context.hpp>
 
+#include <cmath>
+#include <limits>
+#include <utf8proc.h>
+
 namespace portals::ui::detail {
 namespace {
 template <class T> void applySetting(T &target, const std::optional<T> &setting) {
@@ -48,6 +52,376 @@ constexpr SceneResourceErrorCode resourceCode(ControlContextErrorCode code) noex
 }
 } // namespace
 
+LinearOptions controlLinearOptions(const ControlSettings &settings, LinearOptions options) noexcept {
+  applySetting(options.gap, settings.gap);
+  applySetting(options.padding.left, settings.grid.paddingLeft);
+  applySetting(options.padding.top, settings.grid.paddingTop);
+  applySetting(options.padding.right, settings.grid.paddingRight);
+  applySetting(options.padding.bottom, settings.grid.paddingBottom);
+  applySetting(options.main_align, settings.linear.mainAlign);
+  applySetting(options.cross_align, settings.linear.crossAlign);
+  applySetting(options.overflow, settings.linear.overflow);
+
+  return options;
+}
+
+TextLimits controlTextLimits(const ControlSettings &settings, TextLimits limits) noexcept {
+  applySetting(limits.max_input_bytes, settings.limits.maxInputBytes);
+  applySetting(limits.max_cluster_bytes, settings.limits.maxClusterBytes);
+  applySetting(limits.max_graphemes, settings.limits.maxGraphemes);
+  applySetting(limits.max_cells, settings.limits.maxCells);
+
+  return limits;
+}
+
+std::expected<OverlayOptions, TreeError> controlOverlayOptions(const ControlSettings &settings,
+                                                               OverlayOptions options) noexcept {
+  applySetting(options.padding.left, settings.grid.paddingLeft);
+  applySetting(options.padding.top, settings.grid.paddingTop);
+  applySetting(options.padding.right, settings.grid.paddingRight);
+  applySetting(options.padding.bottom, settings.grid.paddingBottom);
+  applySetting(options.horizontal, settings.horizontalAlign);
+  applySetting(options.vertical, settings.verticalAlign);
+  const auto validAlign = [](LayoutAlign align) {
+    return align == LayoutAlign::START || align == LayoutAlign::CENTER || align == LayoutAlign::END ||
+           align == LayoutAlign::STRETCH;
+  };
+  if (options.padding.left < 0 || options.padding.top < 0 || options.padding.right < 0 || options.padding.bottom < 0 ||
+      !validAlign(options.horizontal) || !validAlign(options.vertical)) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+  return options;
+}
+
+BorderOptions controlBorderOptions(const ControlSettings &settings, BorderOptions options) noexcept {
+  applySetting(options.glyphs, settings.glyphs);
+  applySetting(options.maxPaintCells, settings.maxPaintCells);
+
+  return options;
+}
+
+GaugeOptions controlGaugeOptions(const ControlSettings &settings, GaugeOptions options) noexcept {
+  applySetting(options.glyphs, settings.glyphs);
+  applySetting(options.maxPaintCells, settings.maxPaintCells);
+  applySetting(options.minimum, settings.minimum);
+  applySetting(options.maximum, settings.maximum);
+  applySetting(options.preferredWidth, settings.preferredWidth);
+
+  return options;
+}
+
+namespace {
+template <class Options> void applyScrollSettings(const ControlSettings &settings, Options &options) noexcept {
+  applySetting(options.wheelStep, settings.wheelStep);
+  applySetting(options.keyStep, settings.keyStep);
+  applySetting(options.pageOverlap, settings.pageOverlap);
+  applySetting(options.minimumThumb, settings.minimumThumb);
+  applySetting(options.focusable, settings.focusable);
+  applySetting(options.readOnly, settings.readOnly);
+  applySetting(options.glyphs, settings.glyphs);
+  applySetting(options.maxPaintCells, settings.maxPaintCells);
+}
+} // namespace
+
+std::expected<ScrollAreaOptions, TreeError> controlScrollAreaOptions(const ControlSettings &settings,
+                                                                     ScrollAreaOptions options) noexcept {
+  applyScrollSettings(settings, options);
+  applySetting(options.horizontal, settings.horizontal);
+  applySetting(options.vertical, settings.vertical);
+  applySetting(options.placement, settings.placement);
+
+  if (settings.frame.enabled) {
+    if (*settings.frame.enabled) {
+      if (!options.frame) {
+        options.frame.emplace();
+      }
+    } else {
+      options.frame.reset();
+    }
+  }
+
+  if (settings.frame.glyphs || settings.frame.maxPaintCells) {
+    if (!options.frame) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+
+    applySetting(options.frame->glyphs, settings.frame.glyphs);
+    applySetting(options.frame->maxPaintCells, settings.frame.maxPaintCells);
+  }
+
+  const auto checked = validateScrollOptions(options);
+
+  if (!checked) {
+    return std::unexpected(checked.error());
+  }
+
+  return options;
+}
+
+std::expected<ScrollBarOptions, TreeError> controlScrollBarOptions(const ControlSettings &settings,
+                                                                   ScrollBarOptions options) noexcept {
+  applyScrollSettings(settings, options);
+
+  const auto checked = validateScrollOptions(options);
+
+  if (!checked) {
+    return std::unexpected(checked.error());
+  }
+
+  return options;
+}
+
+bool validControlLiteral(std::string_view value) noexcept {
+  if (value.size() > static_cast<std::size_t>(std::numeric_limits<utf8proc_ssize_t>::max())) {
+    return false;
+  }
+  auto bytes = reinterpret_cast<const utf8proc_uint8_t *>(value.data());
+  auto remaining = static_cast<utf8proc_ssize_t>(value.size());
+  while (remaining) {
+    utf8proc_int32_t codepoint{};
+    const auto consumed = utf8proc_iterate(bytes, remaining, &codepoint);
+    if (consumed <= 0) {
+      return false;
+    }
+    bytes += consumed;
+    remaining -= consumed;
+  }
+  return true;
+}
+
+namespace {
+template <class Options> void applyKeyHelpSettings(const ControlSettings &settings, Options &options) {
+  applySetting(options.format.maxBytesPerBinding, settings.format.maxBytesPerBinding);
+  applySetting(options.format.strokeSeparator, settings.format.strokeSeparator);
+  applySetting(options.format.alternativeSeparator, settings.format.alternativeSeparator);
+  applySetting(options.format.repeatMarker, settings.format.repeatMarker);
+  applySetting(options.format.releaseMarker, settings.format.releaseMarker);
+  applySetting(options.format.unknownMarker, settings.format.unknownMarker);
+  applySetting(options.emptyText, settings.emptyText);
+  applySetting(options.unavailableText, settings.unavailableText);
+}
+} // namespace
+
+HelpViewOptions controlHelpViewOptions(const ControlSettings &settings, HelpViewOptions options) {
+  applyKeyHelpSettings(settings, options);
+  applySetting(options.initiallyOpen, settings.initiallyOpen);
+  return options;
+}
+
+KeyHintsOptions controlKeyHintsOptions(const ControlSettings &settings, KeyHintsOptions options) {
+  applyKeyHelpSettings(settings, options);
+  applySetting(options.entrySeparator, settings.entrySeparator);
+  applySetting(options.overflowMarker, settings.overflowMarker);
+  return options;
+}
+
+VirtualListOptions controlVirtualListOptions(const ControlSettings &settings, VirtualListOptions options) noexcept {
+  applySetting(options.row_height, settings.rowHeight);
+  applySetting(options.overscan_rows, settings.overscanRows);
+
+  return options;
+}
+
+VirtualTableOptions controlVirtualTableOptions(const ControlSettings &settings, VirtualTableOptions options) noexcept {
+  applySetting(options.row_height, settings.rowHeight);
+  applySetting(options.overscan_rows, settings.overscanRows);
+  applySetting(options.max_columns, settings.maxColumns);
+  applySetting(options.max_prepared_cells, settings.maxPreparedCells);
+  applySetting(options.max_prepared_text_bytes, settings.maxPreparedTextBytes);
+
+  return options;
+}
+
+std::expected<ChartOptions, TreeError> controlChartOptions(const ControlSettings &settings,
+                                                           ChartOptions options) noexcept {
+  applySetting(options.mode, settings.mode);
+  applySetting(options.glyph_set, settings.chartGlyphSet);
+  applySetting(options.candle_gap, settings.candleGap);
+
+  const auto &range = settings.yRange;
+
+  if (range.enabled) {
+    if (*range.enabled) {
+      if (!options.y_range) {
+        options.y_range.emplace();
+      }
+    } else {
+      options.y_range.reset();
+    }
+  }
+
+  // Disabled bounds remain sparse inherited data; clearing a range must not reactivate them.
+  if (range.enabled != false && (range.minimum || range.maximum)) {
+    if (!options.y_range) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+
+    applySetting(options.y_range->minimum, range.minimum);
+    applySetting(options.y_range->maximum, range.maximum);
+  }
+
+  if ((range.enabled || range.minimum || range.maximum) && options.y_range &&
+      (!std::isfinite(options.y_range->minimum) || !std::isfinite(options.y_range->maximum) ||
+       options.y_range->minimum > options.y_range->maximum)) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  return options;
+}
+
+DataStateConfig controlDataStateConfig(const ControlSettings &settings, DataStateConfig config) {
+  applySetting(config.showStatus, settings.showStatus);
+  applySetting(config.statusRows, settings.statusRows);
+  applySetting(config.contentPolicy, settings.contentPolicy);
+  applySetting(config.spinnerInterval, settings.spinnerInterval);
+  applySetting(config.labels.loading, settings.labels.loading);
+  applySetting(config.labels.empty, settings.labels.empty);
+  applySetting(config.labels.error, settings.labels.error);
+  applySetting(config.labels.offline, settings.labels.offline);
+  applySetting(config.labels.refreshing, settings.labels.refreshing);
+  applySetting(config.labels.retry, settings.labels.retry);
+
+  return config;
+}
+
+OverlayHostOptions controlOverlayHostOptions(const ControlSettings &settings, OverlayHostOptions options) noexcept {
+  applySetting(options.maxLayers, settings.maxLayers);
+
+  return options;
+}
+
+DialogOptions controlDialogOptions(const ControlSettings &settings, DialogOptions options) noexcept {
+  const auto &dialog = settings.dialog;
+
+  applySetting(options.mode, dialog.mode);
+  applySetting(options.placement, dialog.placement);
+  applySetting(options.maximumPanelSize.width, dialog.maximumPanelSize.width);
+  applySetting(options.maximumPanelSize.height, dialog.maximumPanelSize.height);
+  applySetting(options.viewportMargin, dialog.viewportMargin);
+  applySetting(options.anchorGap, dialog.anchorGap);
+  applySetting(options.closeOnEscape, dialog.closeOnEscape);
+  applySetting(options.frame.glyphs, dialog.frame.glyphs);
+  applySetting(options.frame.maxPaintCells, dialog.frame.maxPaintCells);
+
+  return options;
+}
+
+MessageOptions controlMessageOptions(const ControlSettings &settings, MessageOptions options, int kind) {
+  options.dialog = controlDialogOptions(settings, options.dialog);
+  const auto &message = settings.message;
+
+  applySetting(options.labels.acknowledge, message.labels.acknowledge);
+  applySetting(options.labels.confirm, message.labels.confirm);
+  applySetting(options.labels.save, message.labels.save);
+  applySetting(options.labels.discard, message.labels.discard);
+  applySetting(options.labels.cancel, message.labels.cancel);
+  applySetting(options.allowDestructiveDefault, message.allowDestructiveDefault);
+  applySetting(options.textLimits.max_input_bytes, message.textLimits.maxInputBytes);
+  applySetting(options.textLimits.max_cluster_bytes, message.textLimits.maxClusterBytes);
+  applySetting(options.textLimits.max_graphemes, message.textLimits.maxGraphemes);
+  applySetting(options.textLimits.max_cells, message.textLimits.maxCells);
+  applySetting(options.maxBodyLines, message.maxBodyLines);
+
+  if (message.defaultChoice.enabled == false) {
+    options.defaultChoice.reset();
+  } else if (message.defaultChoice.value) {
+    options.defaultChoice = *message.defaultChoice.value;
+  } else if (message.defaultChoice.enabled == true && !options.defaultChoice) {
+    options.defaultChoice = kind == 0 ? MessageChoice::ACKNOWLEDGE : MessageChoice::CANCEL;
+  }
+
+  return options;
+}
+
+NotificationOptions controlNotificationOptions(const ControlSettings &settings, NotificationOptions options) {
+  const auto &notification = settings.notification;
+
+  applySetting(options.capacity, notification.capacity);
+  applySetting(options.maxVisible, notification.maxVisible);
+  applySetting(options.placement, notification.placement);
+  applySetting(options.maximumWidth, notification.maximumWidth);
+  applySetting(options.margin, notification.margin);
+  applySetting(options.gap, notification.gap);
+  applySetting(options.overflow, notification.overflow);
+  applySetting(options.refreshDeduplicated, notification.refreshDeduplicated);
+  applySetting(options.reducedMotion, notification.reducedMotion);
+  applySetting(options.actionLabelBytes, notification.actionLabelBytes);
+  applySetting(options.dedupKeyBytes, notification.dedupKeyBytes);
+  applySetting(options.maxPaintCells, notification.maxPaintCells);
+  applySetting(options.textLimits.max_input_bytes, notification.textLimits.maxInputBytes);
+  applySetting(options.textLimits.max_cluster_bytes, notification.textLimits.maxClusterBytes);
+  applySetting(options.textLimits.max_graphemes, notification.textLimits.maxGraphemes);
+  applySetting(options.textLimits.max_cells, notification.textLimits.maxCells);
+
+  return options;
+}
+
+ThemeSelectorOptions controlThemeSelectorOptions(const ControlSettings &settings, ThemeSelectorOptions options) {
+  options.dialog = controlDialogOptions(settings, options.dialog);
+  applySetting(options.title, settings.title);
+  const auto &selector = settings.themeSelector;
+
+  applySetting(options.apply, selector.labels.apply);
+  applySetting(options.cancel, selector.labels.cancel);
+  applySetting(options.closeKeepingPreview, selector.labels.closeKeepingPreview);
+  applySetting(options.emptyStatus, selector.labels.emptyStatus);
+  applySetting(options.errorStatus, selector.labels.errorStatus);
+  applySetting(options.conflictStatus, selector.labels.conflictStatus);
+  applySetting(options.textLimits.max_input_bytes, selector.textLimits.maxInputBytes);
+  applySetting(options.textLimits.max_cluster_bytes, selector.textLimits.maxClusterBytes);
+  applySetting(options.textLimits.max_graphemes, selector.textLimits.maxGraphemes);
+  applySetting(options.textLimits.max_cells, selector.textLimits.maxCells);
+
+  if (selector.openingShortcut.enabled == false) {
+    options.openingShortcut.reset();
+  } else if (selector.openingShortcut.value) {
+    options.openingShortcut = *selector.openingShortcut.value;
+  } else if (selector.openingShortcut.enabled == true && !options.openingShortcut) {
+    options.openingShortcut.emplace("Ctrl+K, Ctrl+T");
+  }
+
+  return options;
+}
+
+std::expected<void, TreeError> controlThemeCatalogOptions(const ControlSettings &settings,
+                                                          ThemeSelectionOptions &options,
+                                                          std::optional<std::string> &initialId) {
+  const auto &catalog = settings.themeCatalog;
+  applySetting(options.maxChoices, catalog.maxChoices);
+  applySetting(options.maxIdBytes, catalog.maxIdBytes);
+  applySetting(options.maxLabelBytes, catalog.maxLabelBytes);
+  applySetting(options.maxDescriptionBytes, catalog.maxDescriptionBytes);
+  applySetting(options.maxTextBytes, catalog.maxTextBytes);
+  applySetting(options.textLimits.max_input_bytes, catalog.textLimits.maxInputBytes);
+  applySetting(options.textLimits.max_cluster_bytes, catalog.textLimits.maxClusterBytes);
+  applySetting(options.textLimits.max_graphemes, catalog.textLimits.maxGraphemes);
+  applySetting(options.textLimits.max_cells, catalog.textLimits.maxCells);
+
+  if (catalog.initialId.enabled == false) {
+    initialId.reset();
+  } else if (catalog.initialId.value) {
+    initialId = *catalog.initialId.value;
+  } else if (catalog.initialId.enabled == true && !initialId) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  const auto &layers = catalog.layers;
+  if (layers.enabled == false) {
+    options.layers.reset();
+  } else if (layers.enabled == true || layers.maxLayers || layers.maxRules || layers.maxDeclarations ||
+             layers.maxOwnedBytes) {
+    if (!options.layers) {
+      options.layers.emplace();
+    }
+    applySetting(options.layers->maxLayers, layers.maxLayers);
+    applySetting(options.layers->maxRules, layers.maxRules);
+    applySetting(options.layers->maxDeclarations, layers.maxDeclarations);
+    applySetting(options.layers->maxOwnedBytes, layers.maxOwnedBytes);
+  }
+
+  return {};
+}
+
 ManagedError controlContextError(const ControlContextError &failure, Node<Widget> node) {
   const auto cause = failure.code == ControlContextErrorCode::NO_MEMORY              ? TreeError::NO_MEMORY
                      : failure.code == ControlContextErrorCode::CONFIGURATION_FAILED ? TreeError::CALLBACK_FAILED
@@ -81,6 +455,7 @@ std::expected<LineEditOptions, ManagedError> controlLineEditOptions(const Contro
                                                                     const TextResolver &resolver,
                                                                     Node<Widget> node) try {
   LineEditOptions options = base;
+  options.limits = controlTextLimits(settings, options.limits);
   applySetting(options.editMode, settings.editMode);
   applySetting(options.readOnly, settings.readOnly);
   applySetting(options.programmaticChange, settings.programmaticChange);

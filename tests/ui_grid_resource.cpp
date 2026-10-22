@@ -3,18 +3,37 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest.h>
 #include <portals/ui.hpp>
+#include <portals/ui_style.hpp>
+
+#include "../src/widgets/scroll_controls_state.hpp"
 
 #include <array>
 #include <atomic>
 #include <fstream>
 #include <limits>
+#include <source_location>
+#include <string_view>
 
 using namespace portals;
 
 namespace {
 using Code = SceneResourceErrorCode;
 
-template <class T, class E> T take(std::expected<T, E> result) {
+template <class T, class E>
+T take(std::expected<T, E> result, std::source_location origin = std::source_location::current()) {
+  if (!result) {
+    MESSAGE(std::string_view{origin.file_name()} << ':' << origin.line());
+    if constexpr (std::same_as<E, TreeError>) {
+      MESSAGE("TreeError code: ", static_cast<int>(result.error()));
+    }
+  }
+  if constexpr (std::same_as<E, ManagedError>) {
+    if (!result) {
+      ui::SceneReport report;
+      report.failure = result.error();
+      ui::reportToStderr(report);
+    }
+  }
   REQUIRE(result);
   if constexpr (!std::is_void_v<T>) {
     return std::move(*result);
@@ -127,6 +146,146 @@ TEST_CASE("loaded Grid matches C++ placement in legacy configuration string and 
       CHECK(actual.options.cells[1].column_span == 2);
       CHECK(actual.options.cells[2].column == 2);
     }
+  }
+}
+
+TEST_CASE("native scroll policies use their resolved schema alongside explicit Grid item alignment") {
+  for (int mode = 0; mode != 3; ++mode) {
+    INFO("scope mode: ", mode);
+    ui::SceneResourceOptions options;
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    ui::SceneOptions sceneOptions;
+    std::string source;
+    if (mode == 0) {
+      source = "scene{ScrollArea#viewport{horizontal=ALWAYS vertical=NEVER frame{enabled=true} Label{}}}";
+    } else if (mode == 1) {
+      source = "definitions{Viewport=ScrollArea{horizontal=NEVER frame{enabled=true}}} "
+               "defaults{Viewport{horizontal=ALWAYS}} "
+               "scene{Viewport#viewport{vertical=NEVER Label{}}}";
+    } else {
+      sceneOptions.controls.defaults("ScrollArea", {.horizontal = ScrollBarPolicy::ALWAYS, .frame = {.enabled = true}})
+        .define("Viewport", "ScrollArea");
+      source = "defaults{Viewport{vertical=NEVER}} scene{Viewport#viewport{Label{}}}";
+    }
+    auto owner = ui::scene(
+      ui::grid(
+        ui::resource(source, options).gridItem({.horizontal = LayoutAlign::END, .vertical = LayoutAlign::CENTER}))
+        .columns(1)
+        .id("grid"),
+      sceneOptions);
+    auto grid = owner.get<Grid>("grid");
+    auto viewport = owner.get<ScrollArea>("viewport");
+    owner.configure([&](ManagedScene &, Application &app) {
+      take(app.tree().read(grid.node(), [&](const Grid &widget) {
+        const auto gridOptions = widget.options();
+        REQUIRE(gridOptions.cells.size() == 1);
+        const auto &cell = gridOptions.cells.front();
+        CHECK(cell.node == viewport.node().id());
+        CHECK(cell.horizontal == LayoutAlign::END);
+        CHECK(cell.vertical == LayoutAlign::CENTER);
+      }));
+      take(app.tree().read(viewport.node(), [](const ScrollArea &widget) {
+        const auto &options = detail::ScrollWidgetAccess::state(widget).area;
+        CHECK(options.horizontal == ScrollBarPolicy::ALWAYS);
+        CHECK(options.vertical == ScrollBarPolicy::NEVER);
+        CHECK(options.frame.has_value());
+      }));
+    });
+    take(owner.prepareChecked());
+    take(owner.close());
+  }
+}
+
+TEST_CASE("caller registered ScrollArea keeps generic Grid alignment in both resource grammars") {
+  for (const bool configured : {false, true}) {
+    ui::SceneResourceOptions options;
+    options.format = configured ? ui::SceneResourceFormat::CONFIGURATION : ui::SceneResourceFormat::LEGACY;
+    int factories{};
+    take(options.registry.add<Label>("ScrollArea", [&](ui::SceneResourceArguments arguments) {
+      ++factories;
+      return ui::label(arguments.text);
+    }));
+    const std::string body = "Grid#grid{columns=1 ScrollArea#caller{text=\"caller\" horizontal=END vertical=CENTER}}";
+    auto owner = ui::scene(configured ? "scene{" + body + "}" : body, options);
+    auto grid = owner.get<Grid>("grid");
+    auto caller = owner.get<Label>("caller");
+    owner.configure([&](ManagedScene &, Application &app) {
+      take(app.tree().read(grid.node(), [&](const Grid &widget) {
+        const auto gridOptions = widget.options();
+        REQUIRE(gridOptions.cells.size() == 1);
+        const auto &cell = gridOptions.cells.front();
+        CHECK(cell.node == caller.node().id());
+        CHECK(cell.horizontal == LayoutAlign::END);
+        CHECK(cell.vertical == LayoutAlign::CENTER);
+      }));
+    });
+    take(owner.prepareChecked());
+    CHECK(take(caller.text().get()) == "caller");
+    CHECK(factories == 1);
+    take(owner.close());
+  }
+}
+
+TEST_CASE("Overlay own alignment coexists with containing Grid placement through named and ambient defaults") {
+  for (int mode = 0; mode != 3; ++mode) {
+    INFO("default scope: ", mode);
+    ui::SceneResourceOptions options;
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    ui::SceneOptions sceneOptions;
+    const std::string prefix =
+      mode == 1 ? "definitions{Layer=Overlay{horizontalAlign=CENTER padding{left=1 top=1 right=1 bottom=1}}} "
+                  "defaults{Layer{horizontalAlign=START}} "
+                : "";
+    if (mode == 2) {
+      sceneOptions.controls
+        .defaults("Overlay", {.grid = {.paddingLeft = 1, .paddingTop = 1, .paddingRight = 1, .paddingBottom = 1},
+                              .horizontalAlign = LayoutAlign::START})
+        .define("Layer", "Overlay");
+    }
+    const auto source = prefix + "scene{Grid#grid{columns=1 " + (mode == 0 ? "Overlay" : "Layer") +
+                        "#overlay{classes=\"accent\" visible=true enabled=false horizontal=END vertical=CENTER "
+                        "width=10 height=6 verticalAlign=END " +
+                        (mode == 0 ? "horizontalAlign=START padding{left=1 top=1 right=1 bottom=1} " : "") +
+                        "Label#content{text=\"abc\"}}}}";
+    auto owner = ui::scene(ui::resource(source, options), sceneOptions) |
+                 ui::style("Overlay.accent{bold:true;} #overlay{italic:true;} Layer{underline:true;}");
+    auto grid = owner.get<Grid>("grid");
+    auto overlay = owner.get<Overlay>("overlay");
+    auto content = owner.get<Label>("content");
+    Application *app{};
+    ManagedScene *scene{};
+    owner.configure([&](ManagedScene &managed, Application &application) {
+      scene = &managed;
+      app = &application;
+      take(app->tree().read(grid.node(), [&](const Grid &widget) {
+        REQUIRE(widget.options().cells.size() == 1);
+        CHECK(widget.options().cells.front().node == overlay.node().id());
+        CHECK(widget.options().cells.front().horizontal == LayoutAlign::END);
+        CHECK(widget.options().cells.front().vertical == LayoutAlign::CENTER);
+      }));
+      take(app->tree().read(overlay.node(), [](const Overlay &widget) {
+        CHECK(widget.options().horizontal == LayoutAlign::START);
+        CHECK(widget.options().vertical == LayoutAlign::END);
+        CHECK(widget.options().padding.left == 1);
+      }));
+    });
+    take(owner.prepareChecked());
+    take(scene->prepare(*app, {20, 10}));
+    const auto bounds = take(CellRect::from({}, {20, 10}));
+    take(app->tree().frame([&] {
+      take(layoutTree(app->tree(), app->root(), bounds, bounds));
+    }));
+    take(scene->completedLayout(*app));
+    CHECK(take(content.geometry()).local == take(CellRect::from({1, 4}, {3, 1})));
+    CHECK(take(app->tree().inspect(overlay.node())).visible);
+    CHECK_FALSE(take(app->tree().inspect(overlay.node())).enabled);
+    take(app->tree().read(overlay.node(), [&](const Overlay &widget) {
+      REQUIRE(widget.computedStyle());
+      CHECK(widget.computedStyle()->normal.bold);
+      CHECK(widget.computedStyle()->normal.italic);
+      CHECK(widget.computedStyle()->normal.underline == (mode != 0));
+    }));
+    take(owner.close());
   }
 }
 
