@@ -262,6 +262,9 @@ html:not(.turbo-mode) .memproto :is(.memtemplate, .paramname, .paramdefval) {
   overflow-wrap: anywhere;
 }
 html:not(.turbo-mode) table.memberdecls { width: 100%; }
+html:not(.turbo-mode) table.memberdecls :is(.memItemLeft, .memTemplItemLeft, .mdescLeft) {
+  width: 32%;
+}
 html:not(.turbo-mode) table.memberdecls td { overflow-wrap: anywhere; white-space: normal; }
 
 @media screen and (max-width: 767px) {
