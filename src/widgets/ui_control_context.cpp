@@ -1394,9 +1394,9 @@ ControlContextAccess::installNotificationSchema(ControlContext &context) noexcep
     return std::unexpected(*context.failure_);
   }
 
-  constexpr std::string_view name = "Notifications";
+  constexpr std::string_view NAME = "Notifications";
 
-  if (hasDeclaredType(context, name) || (context.data_ && fallbackFor(*context.data_, name))) {
+  if (hasDeclaredType(context, NAME) || (context.data_ && fallbackFor(*context.data_, NAME))) {
     return {};
   }
 
@@ -1405,7 +1405,7 @@ ControlContextAccess::installNotificationSchema(ControlContext &context) noexcep
       context.data_ ? std::make_shared<ControlContext::Data>(*context.data_) : std::make_shared<ControlContext::Data>();
     ControlContext::Data::Schema schema;
 
-    schema.name = name;
+    schema.name = NAME;
     schema.mask = NOTIFICATION_MASK;
     schema.factoryKind = ControlFactoryKind::NOTIFICATION_BINDING;
     next->notificationFallback = schema;
@@ -1479,9 +1479,9 @@ ControlContextAccess::installThemeSelectorSchema(ControlContext &context) noexce
     return std::unexpected(*context.failure_);
   }
 
-  constexpr std::string_view name = "ThemeSelector";
+  constexpr std::string_view NAME = "ThemeSelector";
 
-  if (hasDeclaredType(context, name) || (context.data_ && fallbackFor(*context.data_, name))) {
+  if (hasDeclaredType(context, NAME) || (context.data_ && fallbackFor(*context.data_, NAME))) {
     return {};
   }
 
@@ -1490,7 +1490,7 @@ ControlContextAccess::installThemeSelectorSchema(ControlContext &context) noexce
       context.data_ ? std::make_shared<ControlContext::Data>(*context.data_) : std::make_shared<ControlContext::Data>();
     ControlContext::Data::Schema schema;
 
-    schema.name = name;
+    schema.name = NAME;
     schema.mask = THEME_SELECTOR_MASK;
     schema.factoryKind = ControlFactoryKind::THEME_SELECTOR_BINDING;
     next->selectorFallback = schema;
@@ -1508,9 +1508,9 @@ std::expected<void, ControlContextError> ControlContextAccess::installMessageSch
     return std::unexpected(*context.failure_);
   }
 
-  constexpr std::string_view name = "MessageBox";
+  constexpr std::string_view NAME = "MessageBox";
 
-  if (hasDeclaredType(context, name) || (context.data_ && fallbackFor(*context.data_, name))) {
+  if (hasDeclaredType(context, NAME) || (context.data_ && fallbackFor(*context.data_, NAME))) {
     return {};
   }
 
@@ -1519,7 +1519,7 @@ std::expected<void, ControlContextError> ControlContextAccess::installMessageSch
       context.data_ ? std::make_shared<ControlContext::Data>(*context.data_) : std::make_shared<ControlContext::Data>();
     ControlContext::Data::Schema schema;
 
-    schema.name = name;
+    schema.name = NAME;
     schema.mask = MESSAGE_MASK;
     schema.factoryKind = ControlFactoryKind::MESSAGE_BINDING;
     next->messageFallback = schema;
@@ -1610,11 +1610,11 @@ ControlContextAccess::installVirtualViewSchema(ControlContext &context, std::str
       context.data_ ? std::make_shared<ControlContext::Data>(*context.data_) : std::make_shared<ControlContext::Data>();
     ControlContext::Data::Schema schema;
 
-    constexpr std::array masks{VIRTUAL_LIST_MASK, VIRTUAL_TABLE_MASK, CHART_MASK};
+    constexpr std::array MASKS{VIRTUAL_LIST_MASK, VIRTUAL_TABLE_MASK, CHART_MASK};
     const auto slot = name == "VirtualList" ? 0U : name == "VirtualTable" ? 1U : 2U;
 
     schema.name = name;
-    schema.mask = masks[slot];
+    schema.mask = MASKS[slot];
     schema.factoryKind = ControlFactoryKind::VIRTUAL_VIEW_FALLBACK;
     next->virtualViewFallbacks[slot] = std::move(schema);
     context.data_ = std::move(next);

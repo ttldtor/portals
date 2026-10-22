@@ -1944,10 +1944,10 @@ private:
     }
 
     const auto &concrete = detail::ResourceAccess::entry(options_.registry, target.factory.index);
-    constexpr std::string_view narrow[]{"text"};
+    constexpr std::string_view NARROW[]{"text"};
 
     // Exact code-bound charts opt in through their expanded schema; old explicit allowlists stay narrow.
-    return concrete.virtualView == "Chart" && !controls_.matchesRegisteredType(concrete.name, narrow);
+    return concrete.virtualView == "Chart" && !controls_.matchesRegisteredType(concrete.name, NARROW);
   }
 
   // Header/property error temporaries must not remain in every bounded recursive node frame.

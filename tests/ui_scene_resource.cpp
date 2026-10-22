@@ -3729,9 +3729,9 @@ TEST_CASE("chart resource old narrow and nonexact bindings keep their existing a
     options.format = ui::SceneResourceFormat::CONFIGURATION;
     options.controls.emplace();
     if (!subclass) {
-      constexpr std::string_view narrow[]{"text"};
+      constexpr std::string_view NARROW[]{"text"};
 
-      options.controls->registerType("Bound", narrow);
+      options.controls->registerType("Bound", NARROW);
       REQUIRE(options.registry.add<Chart<int>>("Bound", [&](ui::SceneResourceArguments) {
         ++factories;
 
@@ -3760,11 +3760,11 @@ TEST_CASE("chart resource old narrow and nonexact bindings keep their existing a
     CHECK(resolutions == 0);
   }
   ui::SceneResourceOptions incompatible;
-  constexpr std::string_view partial[]{"text", "mode"};
+  constexpr std::string_view PARTIAL[]{"text", "mode"};
 
   incompatible.format = ui::SceneResourceFormat::CONFIGURATION;
   incompatible.controls.emplace();
-  incompatible.controls->registerType("Bound", partial);
+  incompatible.controls->registerType("Bound", PARTIAL);
   REQUIRE(incompatible.registry.add<Chart<int>>("Bound", [](ui::SceneResourceArguments) {
     return ui::Description<Chart<int>>{};
   }));

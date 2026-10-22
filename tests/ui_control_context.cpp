@@ -775,9 +775,9 @@ TEST_CASE("Primitive scalar schemas remain scoped and retain finite values zero 
   fails(effective.resolve("Label", {.chrome = ButtonChrome::NONE}), Code::UNSUPPORTED_PROPERTY);
   take(effective.resolve("Button", {.chrome = ButtonChrome::NONE}));
 
-  constexpr std::string_view scalarPaths[]{"value", "minimum", "maximum", "preferredWidth"};
+  constexpr std::string_view SCALAR_PATHS[]{"value", "minimum", "maximum", "preferredWidth"};
   ControlContext custom;
-  custom.registerType("CustomScalar", scalarPaths);
+  custom.registerType("CustomScalar", SCALAR_PATHS);
   take(custom.resolve("CustomScalar", {.value = 0.5, .minimum = -2, .maximum = 4, .preferredWidth = 0}));
 
   ControlContext named;
