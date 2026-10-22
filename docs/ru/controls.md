@@ -216,7 +216,7 @@ Button добавляет `[ ` и ` ]`, CheckBox — `[ ] ` или `[x] `.
 См. также [фокус](focus.md), [свойства](property.md), [компоновку](layout.md)
 и [рисование](render.md).
 
-## CheckBox с тремя состояниями
+## CheckBox с тремя состояниями {#check-box-with-three-states-ru}
 
 `CheckState::UNCHECKED`, `CHECKED` и `MIXED` — явные значения модели.
 `checkState()` возвращает последнее корректное представление, а прежний
@@ -287,8 +287,7 @@ helper пытается обновить каждого ребёнка по по
 не удерживает; borrowed captures callback приложения должны переживать
 допущенный вызов. Не связывай parent/child business callbacks рекурсивно:
 внешние Property updates уже обходят business callback.
-[Полная программа](../../examples/check_state/main.cpp) и
-[политика группы](../../examples/check_state/group.hpp) поставляются исходниками.
+Оба исходника показаны выше полностью.
 
 Готовый вариант с тремя состояниями: `ui::threeState("Selection", CheckState::MIXED)`.
 Он возвращает `Description<ThreeState>`; первым аргументом можно передать

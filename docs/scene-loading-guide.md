@@ -9,7 +9,7 @@
 to `portals::core` (C++23). The loaded controls use the same named references, event handlers,
 models, PSS and cleanup as controls declared in C++.
 
-## A complete form
+## A complete form {#a-complete-form}
 
 The complete example is available as the `portals_scene_resource` target when
 `PORTALS_BUILD_EXAMPLES=ON`. Add Hello
@@ -200,8 +200,8 @@ Use an owning `ui::ControlContext` to share initial settings without sharing liv
 text, cursor, undo history, models or handlers. A named variant keeps its concrete
 C++ type: `ShortEdit = LineEdit` is observed with `ui::Ref<LineEdit>`.
 
-The [complete native program](../examples/named_controls/main.cpp) declares the
-context once, applies a variant to two editors and overrides one history limit:
+The complete native program declares the context once, applies a variant to two
+editors and overrides one history limit:
 
 \include named_controls/main.cpp
 

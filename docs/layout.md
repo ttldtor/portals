@@ -106,8 +106,6 @@ subsequent scheduler dispatch, after the successful final layout, paint and owni
 render have left the tree frame. Preliminary view-preparation passes do not notify.
 This event identifies arranged geometry; terminal output may still be pending.
 
-[Example source](examples/guide_layout_observe.cpp).
-
 \include guide_layout_observe.cpp
 
 `geometry.local` is parent-relative; `surface` includes ancestor translations;

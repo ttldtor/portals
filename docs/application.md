@@ -8,7 +8,7 @@ lets you create controls, attach actions and run a native terminal application.
 
 \include{lineno} guide_application.cpp
 
-This complete [source](examples/guide_application.cpp) links to `portals::core`;
+This complete program links to `portals::core`;
 see [package setup](package.md). The scene mounts its description when run,
 opens the terminal, services input and redraws changed controls. `ui::runApp()`
 attempts terminal restoration and scene cleanup before returning 0 on success
@@ -31,7 +31,7 @@ captured by value in actions. This complete program needs no outer `try`/`catch`
 
 \include{lineno} guide_application_factory.cpp
 
-Full [source](examples/guide_application_factory.cpp). The equivalent function
+The equivalent function
 form is `ui::runApp(factory)`. The factory runs once inside the checked boundary;
 it may also return `std::expected<ui::Scene, ManagedError>`. Existing factories
 returning a description remain supported. Allocation failures become `NO_MEMORY`,

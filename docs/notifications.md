@@ -15,9 +15,6 @@ and F10 exits. These keys are explicit application bindings.
 
 \include guide_toast.cpp
 
-The [complete source](examples/guide_toast.cpp) is also available as a Markdown
-link for readers on GitHub, where the Doxygen include is not expanded.
-
 Use the [installed-package setup](package.md) to build this source as an ordinary
 application linked to `portals::core`. The source-tree target is
 `portals_docs_toast`, available with `PORTALS_BUILD_TESTS=ON`.

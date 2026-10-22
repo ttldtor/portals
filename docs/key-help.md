@@ -10,7 +10,7 @@ without maintaining a separate list of shortcuts.
 
 \include guide_key_help.cpp
 
-[Complete source](examples/guide_key_help.cpp). The example links `portals::core`; see
+The example links `portals::core`; see
 [package setup](package.md). The [standalone guide project](examples.md) builds
 `guide_key_help`. This is a native application without a replay mode. Its Save
 command changes a status label; it does not write a file or implement persistence.

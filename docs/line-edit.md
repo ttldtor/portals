@@ -61,7 +61,7 @@ int main() {
 }
 ```
 
-[Complete source](examples/guide_editor_display.cpp); [installed-package build](package.md).
+[Installed-package build](package.md).
 The same form is compiled as an installed consumer. No clipboard service is installed by
 default; an application can supply one through `LineEditConfig::clipboard`.
 

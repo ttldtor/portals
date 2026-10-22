@@ -17,7 +17,7 @@
 
 \include{lineno} examples/guide_theme_selector.cpp
 
-[Полный исходник](../examples/guide_theme_selector.cpp) собирается как
+Программа собирается как
 `portals_docs_theme_selector` и включён в потребитель установленного пакета.
 В его main нет транспорта воспроизведения или эмулятора терминала.
 

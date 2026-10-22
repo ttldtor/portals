@@ -15,28 +15,29 @@ replay terminals, finite checks and stress workloads live under `tests/` and
 
 The categories describe the learning path; the source directories remain stable.
 
-| Category | Program and complete source | What it demonstrates |
+| Category | Program and guide | What it demonstrates |
 | --- | --- | --- |
-| Basics | [click handlers](../examples/click_handlers/main.cpp), `portals_click_handlers` | Observing refs, late click handlers and short quit. No CLI. |
-| Basics | [live captions](examples/guide_live_captions.cpp), [editing events](examples/guide_editor_events.cpp), [guide](bindings-guide.md#live-editor-captions) | Draft versus accepted text, user edits and Enter/focus-loss outcomes without manual subscriptions. Built with tests enabled. |
-| Basics | [compact framed form](../examples/compact/main.cpp), `portals_compact_form` | Ready-made border and gauge, fixed sizing, a plain button and exact-ref styling; no custom widget or CLI. |
-| Basics | [protected editor](examples/guide_editor_display.cpp), `portals_docs_editor_display` | Internal editor state, owning placeholder, password display and checked undoable Clear; no CLI. Built with tests enabled. |
-| Basics | [data presentation](data-presentation.md), [complete source](examples/guide_data_state.cpp), `portals_docs_data_state` | Explicit loading, ready, empty, failed, offline and refreshing states around ordinary content; no CLI. Built with tests enabled. |
-| Basics | [resource form](../examples/scene_resource/main.cpp), `portals_scene_resource` | Runtime scene text, named references and existing managed actions; see [scene loading](scene-loading-guide.md). |
-| Basics | [named controls](../examples/named_controls/main.cpp), `portals_named_controls` | Shared initial editor settings, independent histories, a sparse instance override and a three-state checkbox. |
-| Basics | [gallery](../examples/gallery/main.cpp), [form](../examples/gallery/fluent_form.hpp), `portals_gallery` | A function returning a lazy scene, internal editor/checkbox state, buttons, six themes and CLI preflight. |
-| Showcase | [editor history](../examples/editor_history/main.cpp), `portals_editor_history` | Immediate, editing-finished and explicit model application; Undo/Redo; draft and published values. |
-| Showcase | [dashboard](../examples/dashboard/main.cpp), [composition](../examples/dashboard/dashboard.hpp), `portals_dashboard` | A table and chart sharing an immutable model, delayed pages and bounded provider work. |
-| Customization | [custom widget](../examples/custom_widget/main.cpp), [meter](../examples/custom_widget/meter.hpp), [scene factory](../examples/custom_widget/fluent_meter.hpp), `portals_custom_widget` | A final widget, retained painting, managed presentation and a function returning a lazy scene. |
-| Basics | [live text lists](examples/guide_text_transforms.cpp), `portals_docs_text_transforms` | Native editor draft → words/graphemes → virtual lists; [build and contracts](bindings-guide.md#live-text-transforms). |
-| Customization | [nested scroll form](examples/guide_nested_scroll.cpp), `portals_docs_nested_scroll` | Editable fields, internal-state checkboxes and nested frame-edge bars; [contracts](scroll-controls.md#nested-scroll-areas). Built with tests enabled. |
-| Customization | [modal settings](examples/guide_dialog.cpp), `portals_docs_dialog` | Retained editable dialog, inline open/dismiss and ordinary cleanup; [contracts](dialogs.md). Built with tests enabled. |
-| Basics | [modal choices](examples/guide_message_box.cpp), `portals_docs_message_box` | Three ready-made modal choice sets, safe cancellation defaults and a deferred `MessageResult` callback; [contracts](dialogs.md). Built with tests enabled. |
-| Customization | [custom choice dialog](examples/guide_dialog_actions.cpp), `portals_docs_dialog_actions` | Own body controls, a standard YES/NO set and optional frame close; [contracts](dialogs.md). Built with tests enabled. |
-| Basics | [notifications](notifications.md), [complete source](examples/guide_toast.cpp), `portals_docs_toast` | Application-owned bounded messages, explicit actions and expiry without automatic focus changes; no CLI. Built with tests enabled. |
-| Basics | [key hints and help](key-help.md), [complete source](examples/guide_key_help.cpp), `portals_docs_key_help` | Annotated commands, shared hints/help, enable and rebind controls; no terminal emulator or CLI. Built with tests enabled. |
-| User | [theme selector](theme-selector.md), [complete source](examples/guide_theme_selector.cpp), `portals_docs_theme_selector` | Add a modal theme catalog with previews, Apply, Cancel and explicit recovery. Built with tests enabled. |
-| Customization | [checked theme previews](theme-selection.md), [complete source](examples/guide_theme_selection.cpp), `portals_docs_theme_selection` | Compose custom preview, apply and cancel actions with checked results and preserved overrides. Built with tests enabled. |
+| Basics | [click handlers](#complete-first-program), `portals_click_handlers` | Observing refs, late click handlers and short quit. No CLI. |
+| Basics | [live captions and editing events](bindings-guide.md#live-editor-captions) | Draft versus accepted text, user edits and Enter/focus-loss outcomes without manual subscriptions. Built with tests enabled. |
+| Basics | [compact framed form](#compact-framed-form), `portals_compact_form` | Ready-made border and gauge, fixed sizing, a plain button and exact-ref styling; no custom widget or CLI. |
+| Basics | [protected editor](line-edit.md), `portals_docs_editor_display` | Internal editor state, owning placeholder, password display and checked undoable Clear; no CLI. Built with tests enabled. |
+| Basics | [data presentation](data-presentation.md), `portals_docs_data_state` | Explicit loading, ready, empty, failed, offline and refreshing states around ordinary content; no CLI. Built with tests enabled. |
+| Basics | [resource form](scene-loading-guide.md#a-complete-form), `portals_scene_resource` | Runtime scene text, named references and existing managed actions; see [scene loading](scene-loading-guide.md). |
+| Basics | [named controls](scene-loading-guide.md#named-control-defaults), `portals_named_controls` | Shared initial editor settings, independent histories, a sparse instance override and a three-state checkbox. |
+| Basics | [gallery guide](controls.md#run-the-gallery), [sources](#gallery-sources), `portals_gallery` | A function returning a lazy scene, internal editor/checkbox state, buttons, six themes and CLI preflight. |
+| Showcase | [editor history](editor-history-demo.md), [source](#editor-history-source), `portals_editor_history` | Immediate, editing-finished and explicit model application; Undo/Redo; draft and published values. |
+| Showcase | [dashboard guide](chart.md), [sources](#dashboard-sources), `portals_dashboard` | A table and chart sharing an immutable model, delayed pages and bounded provider work. |
+| Customization | [custom widget guide](getting-started.md#your-own-main), [sources](#custom-widget-sources), `portals_custom_widget` | A final widget, retained painting, managed presentation and a function returning a lazy scene. |
+| Basics | [live text lists](bindings-guide.md#live-text-transforms), `portals_docs_text_transforms` | Native editor draft → words/graphemes → virtual lists; [build and contracts](bindings-guide.md#live-text-transforms). |
+| Customization | [nested scroll form](scroll-controls.md#nested-scroll-areas), `portals_docs_nested_scroll` | Editable fields, internal-state checkboxes and nested frame-edge bars; [contracts](scroll-controls.md#nested-scroll-areas). Built with tests enabled. |
+| Customization | [modal settings](dialogs.md), `portals_docs_dialog` | Retained editable dialog, inline open/dismiss and ordinary cleanup; [contracts](dialogs.md). Built with tests enabled. |
+| Basics | [nonmodal help panel](dialogs.md), `portals_docs_nonmodal_dialog` | Open and close a help panel while the main input remains usable; [guide](dialogs.md). Built with tests enabled. |
+| Basics | [modal choices](dialogs.md), `portals_docs_message_box` | Three ready-made modal choice sets, safe cancellation defaults and a deferred `MessageResult` callback; [contracts](dialogs.md). Built with tests enabled. |
+| Customization | [custom choice dialog](dialogs.md), `portals_docs_dialog_actions` | Own body controls, a standard YES/NO set and optional frame close; [contracts](dialogs.md). Built with tests enabled. |
+| Basics | [notifications](notifications.md), `portals_docs_toast` | Application-owned bounded messages, explicit actions and expiry without automatic focus changes; no CLI. Built with tests enabled. |
+| Basics | [key hints and help](key-help.md), `portals_docs_key_help` | Annotated commands, shared hints/help, enable and rebind controls; no terminal emulator or CLI. Built with tests enabled. |
+| User | [theme selector](theme-selector.md), `portals_docs_theme_selector` | Add a modal theme catalog with previews, Apply, Cancel and explicit recovery. Built with tests enabled. |
+| Customization | [checked theme previews](theme-selection.md), `portals_docs_theme_selection` | Compose custom preview, apply and cancel actions with checked results and preserved overrides. Built with tests enabled. |
 | Experimental | [compile-time styles](compile-time-styles.md) | Compile-time descriptors and PSS checking: optional advanced material, not prerequisites for a form. |
 
 F10 exits the interactive programs. The gallery, custom widget and dashboard
@@ -45,12 +46,12 @@ modified quit chords do not inherit the older modifier-insensitive matching.
 Mouse routing depends on the active terminal protocol.
 No example promises restoration after forced process termination.
 
-## Complete first program
+## Complete first program {#complete-first-program}
 
 This is the complete current source, including its entry point. It has no private
 helpers, manual binding tokens, stop source or presentation-sync loop.
 
-[Open the source](../examples/click_handlers/main.cpp).
+
 
 ```cpp
 // Copyright (c) 2026 ttldtor.
@@ -102,7 +103,7 @@ The latter four adapt Textual palettes, not its complete widget design.
 `--ansi16` maps emitted colors to the terminal's configured sixteen-color palette.
 
 The gallery is the ordinary `gallery::form(ui::opts(options))` function; there
-is no stationary gallery class to manage. Its [native Lyra schema](../examples/gallery/options.hpp)
+is no stationary gallery class to manage. Its [native Lyra schema](#gallery-sources)
 binds `-t`/`--theme` and `--ansi16` to caller-owned options. The final
 `ui::runApp(argc, argv, ui::lyra::cli(lyraCli))` parses before application settings,
 mounting or terminal acquisition. `--help` returns zero; invalid options return
@@ -130,7 +131,7 @@ shadow engine and arbitrary border styles are not supplied by this catalogue.
 
 ## Compact controls
 
-[The framed form](../examples/compact/main.cpp) combines `ui::border`, `ui::gauge`,
+[The framed form](#compact-framed-form) combines `ui::border`, `ui::gauge`,
 `ui::plainButton` and `.width(24)`. Its late click handler appends an undoable
 text change; the exact-ref stylesheet affects only its Add button. F10 or Ctrl+C
 requests ordinary runner cleanup. It has no parser, transport emulator or local
@@ -149,8 +150,8 @@ portals_dashboard --rate 0 --delay-ms 250 --ansi16 --ascii
 portals_dashboard --mode replay --duration-ms 5000
 ```
 
-Read [the UI composition](../examples/dashboard/dashboard.hpp) separately from
-[the provider](../examples/dashboard/provider.hpp). A recorded price source is
+Read [the UI composition](#dashboard-sources) separately from
+[the provider](#dashboard-sources). A recorded price source is
 an ordinary provider mode; it is not a replay terminal or another event loop.
 The provider owns bounded page requests, retry and cancellation. Its shutdown
 runs before the scene retires the model. Virtual tables and charts share managed
@@ -226,7 +227,7 @@ The gallery and custom widget entry points use scoped `ui::quit()` and `ui::runA
 The runner reports typed setup and runtime failures after attempting terminal cleanup.
 Their scene objects also provide typed `run()` for headless replay.
 
-## Customize a final widget
+## Customize a final widget {#custom-widget-entry-point}
 
 The custom-widget entry point uses the same application pipeline as the gallery.
 `meter_example::meter(ui::opts(options))` returns an owning scene. The implementation
@@ -269,11 +270,11 @@ cmake --build build/guide-examples
 
 Run `build/guide-examples/docs_basic.exe` on Windows or `build/guide-examples/docs_basic` on Linux/macOS. F10 closes interactive programs. See the [editor history demonstration](editor-history-demo.md) for editing scenarios.
 
-The ordinary root build also compiles every complete guide program when
-`PORTALS_BUILD_TESTS=ON`. You can build just those programs with
-`cmake --build build/windows-msvc-debug --target portals_documented_examples`
-after configuring that preset, or use your corresponding build directory.
-This target only compiles and links the programs; it does not open terminals.
+Selected guide programs have named targets in the root build when
+`PORTALS_BUILD_TESTS=ON`. For example, after configuring that preset, build the
+nonmodal dialog example with
+`cmake --build build/windows-msvc-debug --target portals_docs_nonmodal_dialog`.
+Other guide examples can be built with the standalone guide project above.
 
 
 The [ordinary scroll guide](scroll-controls.md) builds as `guide_scroll_controls`: eight
@@ -289,6 +290,88 @@ It uses editable fields and internal-state checkboxes with two `ON_FRAME` areas.
 
 ## Three-state checkbox
 
-The [ThreeState example](../examples/check_state/main.cpp) uses
-`ui::threeState()` with its fixed input cycle and the standard terminal runner. Its optional
-[group update helper](../examples/check_state/group.hpp) preserves partial failures.
+The [`ThreeState`](controls.md#check-box-with-three-states) example uses
+`ui::threeState()` with a fixed input cycle and exits through `ui::runApp()`. Its
+[complete source](controls.md#check-box-with-three-states) is included in the guide; the optional [group update helper](controls.md#check-box-with-three-states) preserves partial failures.
+
+## Gallery sources {#gallery-sources}
+
+<details>
+<summary>gallery/main.cpp</summary>
+
+\include gallery/main.cpp
+
+</details>
+
+<details>
+<summary>gallery/fluent_form.hpp</summary>
+
+\include gallery/fluent_form.hpp
+
+</details>
+
+<details>
+<summary>gallery/options.hpp</summary>
+
+\include gallery/options.hpp
+
+</details>
+
+## Editor history source {#editor-history-source}
+
+<details>
+<summary>editor_history/main.cpp</summary>
+
+\include editor_history/main.cpp
+
+</details>
+
+## Dashboard sources {#dashboard-sources}
+
+<details>
+<summary>dashboard/main.cpp</summary>
+
+\include dashboard/main.cpp
+
+</details>
+
+<details>
+<summary>dashboard/dashboard.hpp</summary>
+
+\include dashboard/dashboard.hpp
+
+</details>
+
+<details>
+<summary>dashboard/provider.hpp</summary>
+
+\include dashboard/provider.hpp
+
+</details>
+
+## Custom widget sources {#custom-widget-sources}
+
+The complete entry point appears in [Customize a final widget](#custom-widget-entry-point).
+
+<details>
+<summary>custom_widget/meter.hpp</summary>
+
+\include custom_widget/meter.hpp
+
+</details>
+
+<details>
+<summary>custom_widget/fluent_meter.hpp</summary>
+
+\include custom_widget/fluent_meter.hpp
+
+</details>
+
+## Compact framed form {#compact-framed-form}
+
+<details>
+<summary>Complete source</summary>
+
+\include compact/main.cpp
+
+</details>

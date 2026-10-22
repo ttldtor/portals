@@ -17,31 +17,31 @@
 
 ## Выбор примера
 
-Именованные варианты показаны в [полной программе](../../examples/named_controls/main.cpp),
-цель `portals_named_controls`: общие начальные настройки редакторов, независимые
+Именованные варианты показаны в [руководстве по загрузке сцен](scene-loading-guide.md#named-control-defaults-ru), цель `portals_named_controls`: общие начальные настройки редакторов, независимые
 истории, точечное переопределение экземпляра и флажок с тремя состояниями.
 
-| Категория | Программа и полные исходники | Что показывает |
+| Категория | Программа и руководство | Что показывает |
 | --- | --- | --- |
-| Основы | [Обработчики нажатия](../../examples/click_handlers/main.cpp), `portals_click_handlers` | Наблюдающие ссылки, обработчики через цепочку, строковые стили, выход. CLI отсутствует. |
-| Основы | [Живые подписи](../examples/guide_live_captions.cpp), [события редактирования](../examples/guide_editor_events.cpp), [руководство](bindings-guide.md#live-editor-captions-ru) | Черновик и принятое значение, пользовательский ввод и результаты Enter/ухода фокуса без ручных подписок. Собирается с тестами. |
-| Основы | [Форма с рамкой](../../examples/compact/main.cpp), `portals_compact_form` | Готовые рамка и индикатор, фиксированный размер, кнопка без скобок и стиль по Ref; без собственного виджета и CLI. |
-| Основы | [Защищённое отображение редактора](../examples/guide_editor_display.cpp), `portals_docs_editor_display` | Внутреннее состояние, владеющая подсказка, режим пароля и проверяемый отменяемый Clear; без CLI. Собирается при включённых тестах. |
-| Основы | [Представление данных](data-presentation.md), [полный исходник](../examples/guide_data_state.cpp), `portals_docs_data_state` | Явные состояния загрузки, готовности, пустого результата, ошибки, отсутствия связи и обновления вокруг обычного содержимого; без CLI. Собирается при включённых тестах. |
-| Основы | [Форма из ресурса](../../examples/scene_resource/main.cpp), `portals_scene_resource` | Runtime текст сцены, именованные ссылки и существующие managed действия; см. [загрузку сцен](scene-loading-guide.md). |
-| Основы | [Галерея](../../examples/gallery/main.cpp), [функция формы](../../examples/gallery/fluent_form.hpp), `portals_gallery` | Функция, возвращающая ленивую сцену, внутренние состояния редактора и CheckBox, кнопки, шесть тем и разбор CLI до монтажа. |
-| Демонстрация | [История редактора](../../examples/editor_history/main.cpp), `portals_editor_history` | Немедленное подтверждение, подтверждение по окончании редактирования и явное применение; Undo/Redo, черновик и опубликованное значение. |
-| Демонстрация | [Dashboard](../../examples/dashboard/main.cpp), [композиция](../../examples/dashboard/dashboard.hpp), `portals_dashboard` | Таблица и график общей неизменяемой модели, отложенные страницы и ограниченная работа поставщика. |
-| Расширение | [Собственный виджет](../../examples/custom_widget/main.cpp), [Meter](../../examples/custom_widget/meter.hpp), [фабрика сцены](../../examples/custom_widget/fluent_meter.hpp), `portals_custom_widget` | Final-виджет, подготовленное отображение, управляемая подготовка и функция ленивой сцены. |
-| Основы | [Списки из живого текста](../examples/guide_text_transforms.cpp), `portals_docs_text_transforms` | Черновик редактора → слова/графемы → виртуальные списки; [сборка и контракты](bindings-guide.md#live-text-transforms-ru). |
-| Расширение | [Вложенная scroll-форма](../examples/guide_nested_scroll.cpp), `portals_docs_nested_scroll` | Редактируемые поля, CheckBox с внутренним состоянием и вложенные полосы на рамках; [контракты](scroll-controls.md#nested-scroll-areas-ru). Собирается при включённых тестах. |
-| Расширение | [Modal-настройки](../examples/guide_dialog.cpp), `portals_docs_dialog` | Retained-диалог с редактированием, короткими open/dismiss и штатным cleanup; [контракты](dialogs.md). Собирается с тестами. |
-| Основы | [Modal-выборы](../examples/guide_message_box.cpp), `portals_docs_message_box` | Три готовых набора кнопок, безопасный выбор CANCEL по умолчанию и отложенный callback с `MessageResult`; [контракты](dialogs.md). Собирается с тестами. |
-| Расширение | [Диалог со своим содержимым](../examples/guide_dialog_actions.cpp), `portals_docs_dialog_actions` | Свои контролы, стандартный набор YES/NO и необязательное закрытие на рамке; [контракты](dialogs.md). Собирается с тестами. |
-| Основы | [Уведомления](notifications.md), [полный исходник](../examples/guide_toast.cpp), `portals_docs_toast` | Очередь сообщений приложения, явные действия и время показа без автоматической смены фокуса; без CLI. Собирается при включённых тестах. |
-| Основы | [Подсказки клавиш и справка](key-help.md), [полный исходник](../examples/guide_key_help.cpp), `portals_docs_key_help` | Аннотированные команды, общие подсказки и справка, переключение доступности и сочетаний; без эмулятора терминала и CLI. Собирается при включённых тестах. |
-| Пользователь | [Выбор темы](theme-selector.md), [полный исходник](../examples/guide_theme_selector.cpp), `portals_docs_theme_selector` | Готовый модальный каталог с предпросмотром, Apply, Cancel и явным восстановлением. Собирается с тестами. |
-| Расширение | [Предпросмотр тем](theme-selection.md), [полный исходник](../examples/guide_theme_selection.cpp), `portals_docs_theme_selection` | Собственные действия предпросмотра, применения и отмены с проверяемыми результатами и сохранением переопределений. Собирается с тестами. |
+| Основы | [Обработчики нажатия](#first-complete-program-ru), `portals_click_handlers` | Наблюдающие ссылки, обработчики через цепочку, строковые стили, выход. CLI отсутствует. |
+| Основы | [Живые подписи и события редактирования](bindings-guide.md#live-editor-captions-ru) | Черновик и принятое значение, пользовательский ввод и результаты Enter/ухода фокуса без ручных подписок. Собирается с тестами. |
+| Основы | [Форма с рамкой](#compact-framed-form-ru), `portals_compact_form` | Готовые рамка и индикатор, фиксированный размер, кнопка без скобок и стиль по Ref; без собственного виджета и CLI. |
+| Основы | [Защищённое отображение редактора](line-edit.md), `portals_docs_editor_display` | Внутреннее состояние, подсказка с собственным текстом, отображение пароля и проверяемая отмена действия Clear; без аргументов командной строки. Собирается при включённых тестах. |
+| Основы | [Представление данных](data-presentation.md), `portals_docs_data_state` | Явные состояния загрузки, готовности, пустого результата, ошибки, отсутствия связи и обновления вокруг обычного содержимого; без CLI. Собирается при включённых тестах. |
+| Основы | [Форма из ресурса](scene-loading-guide.md#complete-form-ru), `portals_scene_resource` | Текстовое описание сцены, загружаемое во время выполнения, именованные ссылки и управляемые действия; см. [загрузку сцен](scene-loading-guide.md). |
+| Основы | [руководство по галерее](../controls.md#run-the-gallery), [исходники](#gallery-sources-ru), `portals_gallery` | Функция возвращает ленивую сцену; пример показывает внутренние состояния редактора и `CheckBox`, кнопки, шесть тем и разбор аргументов командной строки до монтажа сцены. |
+| Демонстрация | [История редактора](editor-history-demo.md), [исходник](#editor-history-source-ru), `portals_editor_history` | Немедленное подтверждение, подтверждение после редактирования и явное применение; отмена и повтор, черновик и опубликованное значение. |
+| Демонстрация | [руководство по Dashboard](../chart.md), [исходники](#dashboard-sources-ru), `portals_dashboard` | Таблица и график общей неизменяемой модели, отложенные страницы и ограниченная работа поставщика. |
+| Расширение | [руководство по собственному виджету](getting-started.md#your-own-main-ru), [исходники](#custom-widget-sources-ru), `portals_custom_widget` | Виджет с ключевым словом `final`, подготовка и управляемое отображение; функция возвращает ленивую сцену. |
+| Основы | [Списки из живого текста](bindings-guide.md#live-text-transforms-ru), `portals_docs_text_transforms` | Черновик редактора → слова/графемы → виртуальные списки; [сборка и контракты](bindings-guide.md#live-text-transforms-ru). |
+| Расширение | [Вложенная форма с прокруткой](scroll-controls.md#nested-scroll-areas-ru), `portals_docs_nested_scroll` | Редактируемые поля, `CheckBox` с внутренним состоянием и вложенные полосы прокрутки на рамках; [контракты](scroll-controls.md#nested-scroll-areas-ru). Собирается при включённых тестах. |
+| Расширение | [Модальные настройки](dialogs.md), `portals_docs_dialog` | Диалог остаётся частью сцены и позволяет редактировать поля; открыть и закрыть его можно одной стадией; завершение сцены штатное. См. [контракты](dialogs.md). Собирается с тестами. |
+| Основы | [Немодальная панель справки](dialogs.md), `portals_docs_nonmodal_dialog` | Открытие и закрытие панели, пока основное поле остаётся доступным; [руководство](dialogs.md). Собирается с тестами. |
+| Основы | [Диалог выбора](dialogs.md), `portals_docs_message_box` | Три готовых набора кнопок, безопасный выбор `CANCEL` по умолчанию и отложенный обработчик с результатом `MessageResult`; [контракты](dialogs.md). Собирается с тестами. |
+| Расширение | [Диалог с собственным содержимым](dialogs.md), `portals_docs_dialog_actions` | Собственные контролы, стандартный выбор `YES`/`NO` и необязательное закрытие по рамке; [контракты](dialogs.md). Собирается с тестами. |
+| Основы | [Уведомления](notifications.md), `portals_docs_toast` | Очередь сообщений приложения, явные действия и время показа без автоматической смены фокуса; без CLI. Собирается при включённых тестах. |
+| Основы | [Подсказки клавиш и справка](key-help.md), `portals_docs_key_help` | Аннотированные команды, общие подсказки и справка, переключение доступности и сочетаний; без эмулятора терминала и CLI. Собирается при включённых тестах. |
+| Пользователь | [Выбор темы](theme-selector.md), `portals_docs_theme_selector` | Готовый модальный каталог с предпросмотром, Apply, Cancel и явным восстановлением. Собирается с тестами. |
+| Расширение | [Предпросмотр тем](theme-selection.md), `portals_docs_theme_selection` | Собственные действия предпросмотра, применения и отмены с проверяемыми результатами и сохранением переопределений. Собирается с тестами. |
 | Эксперимент | [Стили времени компиляции](compile-time-styles.md) | Необязательные дескрипторы и проверка PSS; для первой формы не требуются. |
 
 F10 завершает интерактивные примеры. Галерея, dashboard и собственный виджет
@@ -49,9 +49,9 @@ F10 завершает интерактивные примеры. Галерея
 прежнее сопоставление без учёта модификаторов. Мышь зависит от протокола терминала.
 Принудительное завершение процесса находится вне гарантий восстановления.
 
-## Первая полная программа
+## Первая полная программа {#first-complete-program-ru}
 
-[click_handlers/main.cpp](../../examples/click_handlers/main.cpp) содержит всю
+Полная программа обработчиков нажатия содержит всю
 программу: Add Hello добавляет отменяемое изменение, F10 запрашивает выход.
 В ней нет частных вспомогательных файлов, ручных токенов привязки, stop_source
 или цикла синхронизации отображения.
@@ -104,7 +104,7 @@ Textual, а не полное оформление его виджетов. ANSI
 из шестнадцати цветов, внешний вид которой задаётся терминалом.
 
 Галерея — функция `gallery::form(ui::opts(options))`; стационарный класс формы
-не требуется. [Объявление Lyra](../../examples/gallery/options.hpp) связывает
+не требуется. [Объявление Lyra](#gallery-sources-ru) связывает
 `-t`/`--theme` и `--ansi16` с настройками вызывающего кода. Заключительный этап
 `ui::runApp(argc, argv, ui::lyra::cli(lyraCli))` разбирает аргументы до настроек
 приложения, монтажа и захвата терминала. Справка возвращает 0, неверные аргументы —
@@ -129,7 +129,7 @@ portals_gallery --help
 
 ## Компактные контролы
 
-[Форма с рамкой](../../examples/compact/main.cpp) сочетает `ui::border`,
+[Форма с рамкой](#compact-framed-form-ru) сочетает `ui::border`,
 `ui::gauge`, `ui::plainButton` и `.width(24)`. Обработчик добавляет отменяемое
 изменение текста; стиль по Ref действует только на кнопку Add. F10 и Ctrl+C
 запрашивают штатное завершение. В примере нет парсера, эмулятора терминала
@@ -149,8 +149,8 @@ portals_dashboard --rate 0 --delay-ms 250 --ansi16 --ascii
 portals_dashboard --mode replay --duration-ms 5000
 ```
 
-[Композиция UI](../../examples/dashboard/dashboard.hpp) отделена от
-[поставщика](../../examples/dashboard/provider.hpp). Записанная лента — режим
+[Композиция UI](#dashboard-sources-ru) отделена от
+[поставщика](#dashboard-sources-ru). Записанная лента — режим
 данных поставщика; терминал воспроизведения и отдельный цикл событий не нужны.
 Поставщик владеет ограниченными запросами страниц, повторами и отменой;
 его остановка выполняется до удаления модели сценой. Размеры таблицы и графика
@@ -229,11 +229,11 @@ cmake --build build/guide-examples
 
 Запустите `build/guide-examples/docs_basic.exe` в Windows или `build/guide-examples/docs_basic` в Linux/macOS. F10 закрывает интерактивные программы. Для сценариев редактора см. [демонстрацию истории](editor-history-demo.md).
 
-Обычная сборка из корня также компилирует все полные программы руководств при
-`PORTALS_BUILD_TESTS=ON`. После конфигурации соответствующего preset можно собрать
-только их: `cmake --build build/windows-msvc-debug --target portals_documented_examples`.
-Для другого preset укажите его каталог сборки. Эта цель только компилирует и
-компонует программы; терминальные окна она не открывает.
+Некоторые программы руководств имеют отдельные цели корневой сборки при
+`PORTALS_BUILD_TESTS=ON`. Например, после конфигурации preset соберите пример
+немодального диалога командой
+`cmake --build build/windows-msvc-debug --target portals_docs_nonmodal_dialog`.
+Остальные примеры можно собрать отдельным проектом руководств выше.
 
 
 [Руководство по обычной прокрутке](scroll-controls.md) собирается в `guide_scroll_controls`:
@@ -249,6 +249,94 @@ cmake --build build/guide-examples
 
 ## Флажок с тремя состояниями
 
-[Пример ThreeState](../../examples/check_state/main.cpp) использует
-`ui::threeState()` с фиксированным циклом переключения и штатный runner; дополнительный
-[helper группы](../../examples/check_state/group.hpp) сохраняет частичные отказы.
+Пример [`ThreeState`](controls.md#check-box-with-three-states-ru) использует
+`ui::threeState()` с фиксированным циклом переключения и завершает работу через
+`ui::runApp()`. [Полный исходник](controls.md#check-box-with-three-states-ru) приведён в руководстве; необязательный
+[помощник группового обновления](controls.md#check-box-with-three-states-ru) сохраняет сведения о частичных отказах.
+
+## Исходники галереи {#gallery-sources-ru}
+
+<details>
+<summary>gallery/main.cpp</summary>
+
+\include gallery/main.cpp
+
+</details>
+
+<details>
+<summary>gallery/fluent_form.hpp</summary>
+
+\include gallery/fluent_form.hpp
+
+</details>
+
+<details>
+<summary>gallery/options.hpp</summary>
+
+\include gallery/options.hpp
+
+</details>
+
+## Исходник истории редактора {#editor-history-source-ru}
+
+<details>
+<summary>editor_history/main.cpp</summary>
+
+\include editor_history/main.cpp
+
+</details>
+
+## Исходники Dashboard {#dashboard-sources-ru}
+
+<details>
+<summary>dashboard/main.cpp</summary>
+
+\include dashboard/main.cpp
+
+</details>
+
+<details>
+<summary>dashboard/dashboard.hpp</summary>
+
+\include dashboard/dashboard.hpp
+
+</details>
+
+<details>
+<summary>dashboard/provider.hpp</summary>
+
+\include dashboard/provider.hpp
+
+</details>
+
+## Исходники собственного виджета {#custom-widget-sources-ru}
+
+<details>
+<summary>custom_widget/main.cpp</summary>
+
+\include custom_widget/main.cpp
+
+</details>
+
+<details>
+<summary>custom_widget/meter.hpp</summary>
+
+\include custom_widget/meter.hpp
+
+</details>
+
+<details>
+<summary>custom_widget/fluent_meter.hpp</summary>
+
+\include custom_widget/fluent_meter.hpp
+
+</details>
+
+## Форма с рамкой {#compact-framed-form-ru}
+
+<details>
+<summary>Полный исходный код</summary>
+
+\include compact/main.cpp
+
+</details>

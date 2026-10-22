@@ -11,7 +11,6 @@
 
 \include guide_scroll_controls.cpp
 
-[Полный исходник](../examples/guide_scroll_controls.cpp).
 Свяжите приложение с `portals::core`; см. [подключение пакета](package.md).
 В [каталоге примеров](examples.md) приведена отдельная сборка через CMake.
 Её программа `guide_scroll_controls` открывает нативный терминал.
@@ -54,7 +53,7 @@ Exit или F10 завершает штатный runner. Значения жи�
 
 \include guide_nested_scroll.cpp
 
-[Полный исходник](../examples/guide_nested_scroll.cpp). Соберите `guide_nested_scroll`
+Соберите `guide_nested_scroll`
 через [отдельный проект руководств](examples.md) или `portals_docs_nested_scroll`
 с `PORTALS_BUILD_TESTS=ON`. Installed-package consumer компилирует этот же исходник;
 интерактивная программа не запускается как автоматический тест.

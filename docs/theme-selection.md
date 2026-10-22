@@ -16,7 +16,7 @@ Use this customization example when the application supplies its own controls.
 
 \include{lineno} examples/guide_theme_selection.cpp
 
-The same [complete source](examples/guide_theme_selection.cpp) is registered for
+The program is registered for
 the native `portals_docs_theme_selection` target and the installed-package consumer. Replay transport
 and failure injection belong to the tests, not this native application.
 

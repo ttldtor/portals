@@ -15,7 +15,7 @@ from the main form. The modal dialog handles its own cancellation keys.
 
 \include{lineno} examples/guide_theme_selector.cpp
 
-The [complete source](examples/guide_theme_selector.cpp) builds as
+The program builds as
 `portals_docs_theme_selector` and is also included in the installed-package
 consumer. Its main function contains no replay transport or terminal emulator.
 
