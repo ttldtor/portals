@@ -352,3 +352,71 @@ constraint keeps those braced calls unambiguous.
 `GroupUpdate` exposes `committed`, `unchanged`, `failed`, `rejectedNotifications` and
 `cancelledNotifications` separately. `reportGroupUpdate(result, output)` prints
 these counters while the caller retains every receipt and the aggregate result.
+
+## Frames and outer dimensions {#control-frames}
+
+A frame paints selected one-cell edges around content. Add `.framed()` to an
+ordinary sized recipe, or use `| ui::framed()`. The recipe keeps its original type,
+Ref and handlers. This complete program closes through the button, F10 or Ctrl+C:
+
+```cpp
+#include <portals/ui_style.hpp>
+
+int main() {
+  using namespace portals;
+
+  ui::Ref<Button> exit;
+  auto scene = ui::scene(ui::vbox(ui::button(exit, "Exit").framed("rounded").width(18).height(3)));
+
+  return scene
+    | ui::style("Border:focused { foreground: #62b4d7; }")
+    | ui::onClick(exit, ui::quit)
+    | ui::onKey("F10 | Ctrl+C", ui::quit)
+    | ui::runApp();
+}
+
+```
+
+`single` (also `plain`), `rounded`, `double`, `heavy` and `ascii` select built-in
+patterns. Unknown names produce a typed `frame.pattern` error during preparation.
+The terminal width policy is checked when glyphs are prepared; built-in symbols
+that do not occupy one cell fall back to ASCII. A custom source must contain six
+printable, single-grapheme, single-cell glyphs, each at most 64 UTF-8 bytes.
+
+The ordinary recipe gains a passive `Border` parent. Width, height, flex,
+visibility and enabled modifiers on the cold recipe address that outer frame,
+regardless of whether they precede or follow `.framed()`. Existing custom setup
+callbacks still receive the original widget. To observe or remove the wrapper,
+declare `ui::Ref<Border> outer` and use `.framed(outer, "rounded")`.
+Runtime tree operations on the original child remain local: removing it leaves
+the frame; removing the outer frame retires the entire subtree. A child Ref does
+not implicitly retarget its parent.
+
+For example, `.height(6)` requests six **outer terminal rows**. With top and bottom
+edges the content clip has at most four rows. It does not mean six child controls;
+children retain their own layout policies and may have different extents. Parents
+can constrain the allocation. Titles do not increase intrinsic width.
+
+For advanced construction use `FrameOptions`. `sides` controls each edge and its
+inset; `title` is an owning UTF-8 top-edge title; `titleAlignment` selects START,
+CENTER or END. The default title limit is 4096 bytes. `customGlyphs` supplies
+corners and horizontal/vertical edges. `border.maxPaintCells` defaults to 16384;
+title work includes the complete submitted title's bytes and graphemes, including
+a clipped tail. Invalid preparation submits no frame commands. Painting retains
+no external text references and performs no allocation itself.
+
+`ScrollArea.framed(...)` configures its own frame, without a second Border or a
+double inset. For `ScrollPlacement::ON_FRAME`, a potentially visible horizontal
+track requires the bottom side, and a vertical track requires the right side.
+Track cells take precedence over frame and title cells. The explicit outer-Ref
+overload is unavailable for ScrollArea because it creates no wrapper node.
+
+Colors, boldness and focused/disabled appearances use the existing stylesheet
+layers. The wrapper's type is `Border`; the child's type, ID and classes remain
+unchanged. Focused descendants select the frame's focused appearance, while
+ancestor disabled state takes precedence. Geometry and glyph patterns remain
+construction settings; they are not new PSS properties. Legacy `BorderOptions`,
+`ScrollAreaOptions`, `ui::border` and `ui::frame` remain available.
+
+See [loaded frame properties](scene-loading-guide.md#loaded-frames) for the same
+construction settings in scene resources.

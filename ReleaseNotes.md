@@ -7,6 +7,13 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Sized recipes support `.framed()` and `ui::framed()` with built-in patterns,
+  partial sides, owning titles and custom one-cell glyphs. Typed child references
+  are preserved; dimensions address the outer frame. Loaded scenes accept the
+  same settings and compact `frame="rounded"` presets. Scroll areas reuse their
+  own frame, including tracks placed on its edges. Existing low-level options
+  and APIs remain available.
+
 - `Password`, `PasswordValue` and Ref-first `ui::password` provide protected
   single-line editing with native guarded storage and idle encryption on Windows
   and Linux. Values use scoped plaintext access; masks and `noEcho()` are prepared

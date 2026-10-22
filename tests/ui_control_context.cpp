@@ -82,6 +82,13 @@ T take(std::expected<T, ControlContextError> result, std::source_location locati
 }
 
 template <class T>
+T take(std::expected<T, ManagedError> result, std::source_location location = std::source_location::current()) {
+  check(result.has_value(), "expected managed success", location);
+
+  return std::move(*result);
+}
+
+template <class T>
 void fails(std::expected<T, ControlContextError> result, Code code,
            std::source_location location = std::source_location::current()) {
   check(!result && result.error().code == code, "expected exact typed failure", location);
@@ -710,7 +717,7 @@ TEST_CASE("Scroll scalar schemas retain full logical widths sparse frame leaves 
   fails(context.resolve("ScrollArea", {.placement = static_cast<ScrollPlacement>(9)}), Code::INVALID_VALUE);
   fails(context.resolve("ScrollArea", {.frame = {.maxPaintCells = 0}}), Code::INVALID_VALUE);
   fails(context.resolve("ScrollBar", {.axis = static_cast<ScrollAxis>(9)}), Code::INVALID_VALUE);
-  fails(context.resolve("ScrollBar", {.frame = {.enabled = false}}), Code::UNSUPPORTED_PROPERTY);
+  take(context.resolve("ScrollBar", {.frame = {.enabled = false}}));
   fails(context.resolve("ScrollArea", {.axis = ScrollAxis::HORIZONTAL}), Code::UNSUPPORTED_PROPERTY);
   take(context.resolve("LineEdit", {.readOnly = false}));
   ControlContext named;
@@ -1509,4 +1516,152 @@ TEST_CASE("actual catalog fixed ancestry retains sparse precedence origins and u
   CHECK(explicitValue.materializedLeaves == 2);
   controls.define("TooDeep", "Picker");
   fails(controls.validate(), Code::INHERITANCE_LIMIT);
+}
+
+TEST_CASE("Shared frame schema appends stable leaves within three presence words") {
+  static_assert(ui::detail::CONTROL_PROPERTY_COUNT == 180);
+  static_assert((ui::detail::CONTROL_PRESENCE_BITS + 63) / 64 == 3);
+  ControlSettings patch;
+  patch.frame.enabled = true;
+  patch.frame.glyphs = PrimitiveGlyphs::ASCII;
+  patch.frame.maxPaintCells = 1024;
+  patch.frame.pattern = FramePattern::ROUNDED;
+  patch.frame.sides = {false, true, false, true};
+  patch.frame.title = text("Title");
+  patch.frame.titleAlignment = FrameTitleAlignment::CENTER;
+  patch.frame.maxTitleBytes = 100;
+  patch.frame.customGlyphs = {true, "+", "+", "+", "+", "-", "|"};
+  const auto presence = ui::detail::controlSettingsPresenceSet(patch);
+
+  CHECK(presence.count() == 18);
+  CHECK(presence.test(53));
+  CHECK(presence.test(54));
+  CHECK(presence.test(55));
+
+  for (std::size_t index = 165; index < 180; ++index) {
+    CHECK(presence.test(index));
+  }
+
+  CHECK(ui::detail::controlSettingsPresence(patch) == 0);
+
+  for (const auto type :
+       {"Button",   "Label",       "CheckBox",     "ThreeState",    "LineEdit",    "Password",      "VBox",
+        "HBox",     "Border",      "Gauge",        "ScrollArea",    "ScrollBar",   "Overlay",       "HelpView",
+        "KeyHints", "VirtualList", "VirtualTable", "DataStateView", "OverlayHost", "Notifications", "Grid"}) {
+    const auto schema =
+      type == std::string_view("Grid") ? ui::detail::ControlContextAccess::gridSchema() : controlPropertySchema(type);
+    REQUIRE_FALSE(schema.empty());
+
+    for (const auto &descriptor : schema) {
+      CHECK(std::ranges::count(schema, descriptor.path, &ControlPropertyDescriptor::path) == 1);
+    }
+
+    CHECK(std::ranges::count(schema, "frame.enabled", &ControlPropertyDescriptor::path) == 1);
+    CHECK(std::ranges::count(schema, "frame.customGlyphs.vertical", &ControlPropertyDescriptor::path) == 1);
+    ControlContext context;
+    std::vector<std::string_view> paths;
+
+    for (const auto &descriptor : schema) {
+      paths.push_back(descriptor.path);
+    }
+
+    context.registerType("FrameReceiver", paths);
+    CHECK(take(context.resolve("FrameReceiver", patch)).materializedLeaves == 18);
+  }
+
+  for (const auto type : {"Dialog", "MessageBox", "ThemeSelector", "ThemeSelectorCatalog", "Chart"}) {
+    CHECK(std::ranges::count(controlPropertySchema(type), "frame.enabled", &ControlPropertyDescriptor::path) == 0);
+  }
+
+  const auto schema = controlPropertySchema("Button");
+  const auto pattern = std::ranges::find(schema, "frame.pattern", &ControlPropertyDescriptor::path);
+  REQUIRE(pattern != schema.end());
+  CHECK(pattern->enumNames.size() == 6);
+  CHECK(std::ranges::find(pattern->enumNames, "PLAIN") != pattern->enumNames.end());
+  CHECK(ui::detail::ControlContextAccess::canonicalProperty("placeHolder") == "placeholder");
+  for (const auto value : {FramePattern::SINGLE, FramePattern::PLAIN, FramePattern::ROUNDED, FramePattern::DOUBLE,
+                           FramePattern::HEAVY, FramePattern::ASCII}) {
+    take(ControlContext{}.resolve("Button", {.frame = {.pattern = value}}));
+  }
+
+  fails(ControlContext{}.resolve("Button", {.frame = {.pattern = static_cast<FramePattern>(99)}}), Code::INVALID_VALUE);
+  fails(ControlContext{}.resolve("Button", {.frame = {.titleAlignment = static_cast<FrameTitleAlignment>(99)}}),
+        Code::INVALID_VALUE);
+  fails(ControlContext{}.resolve("Button", {.frame = {.maxTitleBytes = 0}}), Code::INVALID_VALUE);
+  fails(ControlContext{}.resolve("Button", {.frame = {.customGlyphs = {.topLeft = std::string(65, '+')}}}),
+        Code::INVALID_VALUE);
+}
+
+TEST_CASE("Frame leaves merge independently with winning origins") {
+  ControlSettings defaults;
+  defaults.frame.enabled = true;
+  defaults.frame.pattern = FramePattern::DOUBLE;
+  defaults.frame.sides.left = true;
+  defaults.frame.title = text("Default");
+  defaults.frame.customGlyphs.enabled = false;
+  ControlContext context;
+  context.defaults("Button", defaults)
+    .define("Framed", "Button", {.frame = {.sides = {.top = false}, .maxTitleBytes = 20}});
+  auto source = std::make_shared<ControlSourceOrigin>();
+  source->sourceIdentity = "frame.scene";
+  const auto resolved = take(context.resolve(
+    "Framed", {.origin = source, .frame = {.pattern = FramePattern::ASCII, .title = text("Instance")}}));
+
+  CHECK(resolved.materializedLeaves == 7);
+  CHECK(resolved.settings.frame.pattern == FramePattern::ASCII);
+  CHECK(resolved.settings.frame.sides.left == true);
+  CHECK(resolved.settings.frame.sides.top == false);
+  const auto origin = std::ranges::find(resolved.settings.origins, "frame.title", &ControlPropertyOrigin::path);
+  REQUIRE(origin != resolved.settings.origins.end());
+  CHECK(origin->source == source);
+  const auto options = take(ui::detail::controlFrameOptions(resolved.settings, {}, {}));
+  REQUIRE(options);
+  CHECK(options->title == "Instance");
+  CHECK(options->maxTitleBytes == 20);
+}
+
+TEST_CASE("Frame helper preserves bases and checks enablement custom sources and titles") {
+  using ui::detail::controlFrameOptions;
+  CHECK_FALSE(take(controlFrameOptions({}, {}, {})));
+  auto options = take(controlFrameOptions({.frame = {.enabled = true}}, {}, {}));
+  REQUIRE(options);
+  CHECK(options->maxTitleBytes == 4096);
+  CHECK(options->pattern == FramePattern::SINGLE);
+  CHECK_FALSE(take(controlFrameOptions({.frame = {.enabled = false}}, options, {})));
+  CHECK_FALSE(controlFrameOptions({.frame = {.pattern = FramePattern::ROUNDED}}, {}, {}));
+  CHECK_FALSE(controlFrameOptions({.frame = {.enabled = false, .title = text("Title")}}, options, {}));
+  options->title = "Base";
+  options->sides.right = false;
+  options = take(controlFrameOptions({.frame = {.glyphs = PrimitiveGlyphs::ASCII}}, options, {}));
+  REQUIRE(options);
+  CHECK(options->title == "Base");
+  CHECK_FALSE(options->sides.right);
+  CHECK(options->border.glyphs == PrimitiveGlyphs::ASCII);
+  CHECK_FALSE(controlFrameOptions({.frame = {.maxTitleBytes = 0}}, options, {}));
+  CHECK_FALSE(controlFrameOptions({.frame = {.maxTitleBytes = 2}}, options, {}));
+  CHECK_FALSE(controlFrameOptions({.frame = {.customGlyphs = {.enabled = true}}}, options, {}));
+  CHECK_FALSE(controlFrameOptions({.frame = {.customGlyphs = {.topLeft = "+"}}}, options, {}));
+  options = take(controlFrameOptions({.frame = {.customGlyphs = {true, "+", "+", "+", "+", "-", "|"}}}, options, {}));
+  REQUIRE(options);
+  REQUIRE(options->customGlyphs);
+  CHECK(options->customGlyphs->horizontal == "-");
+  options = take(controlFrameOptions({.frame = {.customGlyphs = {.horizontal = "="}}}, options, {}));
+  CHECK(options->customGlyphs->horizontal == "=");
+  CHECK(options->customGlyphs->topLeft == "+");
+  CHECK_FALSE(controlFrameOptions({.frame = {.customGlyphs = {.enabled = false, .vertical = "|"}}}, options, {}));
+  CHECK_FALSE(controlFrameOptions({.frame = {.customGlyphs = {.vertical = std::string(65, '|')}}}, options, {}));
+  options = take(controlFrameOptions({.frame = {.customGlyphs = {.enabled = false}}}, options, {}));
+  CHECK_FALSE(options->customGlyphs);
+  const auto invalid = controlFrameOptions({.frame = {.title = text(std::string_view("\xff", 1))}}, options, {});
+  REQUIRE_FALSE(invalid);
+  CHECK(std::get<TreeError>(invalid.error().cause) == TreeError::INVALID_ARGUMENT);
+  REQUIRE(invalid.error().text);
+  CHECK(invalid.error().text->kind == TextErrorKind::INVALID_UTF8);
+  REQUIRE(invalid.error().sceneResource);
+  REQUIRE(invalid.error().sceneResource->propertyPath);
+  CHECK(*invalid.error().sceneResource->propertyPath == "frame.title");
+  const auto oversized = controlFrameOptions({.frame = {.title = text("12345"), .maxTitleBytes = 4}}, options, {});
+  REQUIRE_FALSE(oversized);
+  REQUIRE(oversized.error().text);
+  CHECK(oversized.error().text->kind == TextErrorKind::INPUT_LIMIT);
 }

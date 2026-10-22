@@ -75,8 +75,8 @@ std::expected<Node<T>, ManagedError> ManagedScene::emplaceConfigured(Node<Widget
         return syncControl(app_.tree(), node, focused);
       };
     } else if constexpr (std::same_as<T, Border>) {
-      entry->sync = [this, node = *node](Node<Widget>) {
-        return syncBorder(app_.tree(), node);
+      entry->sync = [this, node = *node](Node<Widget> focused) {
+        return syncBorder(app_.tree(), node, focused);
       };
     } else if constexpr (std::same_as<T, Gauge>) {
       entry->sync = [this, node = *node](Node<Widget>) {

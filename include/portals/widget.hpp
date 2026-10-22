@@ -17,6 +17,7 @@ namespace portals {
 namespace ui::detail {
 struct NamedAccess;
 }
+
 namespace detail {
 struct LayoutTraversalAccess;
 }
@@ -130,19 +131,19 @@ enum class RegionalInput {
 
 /** @brief Owning pure layout result for one direct child. */
 struct LayoutChildPolicy {
-  CellRect localClip;                                ///< Clip in the parent's local cell coordinates.
-  RevealAxes revealAxes{RevealAxes::BOTH};           ///< Allowed movement of this particular ancestor.
+  CellRect localClip;                                    ///< Clip in the parent's local cell coordinates.
+  RevealAxes revealAxes{RevealAxes::BOTH};               ///< Allowed movement of this particular ancestor.
   RegionalInput proposedInput{RegionalInput::UNCHANGED}; ///< Admission to stage outside the layout frame.
 };
 
 /** @brief Owning arranged edge before intersection with any ancestor's clip. */
 struct ParentLayoutEdge {
-  NodeId parent;                                      ///< Exact owner identity.
-  NodeId child;                                       ///< Exact direct child identity.
-  CellRect surfaceClip;                               ///< Owner clip in surface coordinates, before intersection.
-  RevealAxes revealAxes{RevealAxes::BOTH};            ///< Reveal axes for this edge only.
+  NodeId parent;                                         ///< Exact owner identity.
+  NodeId child;                                          ///< Exact direct child identity.
+  CellRect surfaceClip;                                  ///< Owner clip in surface coordinates, before intersection.
+  RevealAxes revealAxes{RevealAxes::BOTH};               ///< Reveal axes for this edge only.
   RegionalInput proposedInput{RegionalInput::UNCHANGED}; ///< Pure proposal, not a mutation of input state.
-  std::uint64_t geometryEpoch{};                      ///< Child's nonreused successful arrangement stamp.
+  std::uint64_t geometryEpoch{};                         ///< Child's nonreused successful arrangement stamp.
 };
 
 /** @brief Owning snapshot of a live node; handles remain checked after subsequent mutations. */
@@ -150,12 +151,12 @@ struct NodeSnapshot {
   Node<Widget> parent; ///< Empty only for the root.
   /** @brief Live children in insertion order. */
   std::vector<Node<Widget>> children = std::vector<Node<Widget>>(0);
-  NodeGeometry geometry; ///< Owning geometry snapshot.
-  bool visible{true};    ///< Hidden subtrees do not participate in layout, paint or input.
-  bool enabled{true};    ///< Disabled subtrees retain layout/paint but do not receive input.
+  NodeGeometry geometry;                            ///< Owning geometry snapshot.
+  bool visible{true};                               ///< Hidden subtrees do not participate in layout, paint or input.
+  bool enabled{true};                               ///< Disabled subtrees retain layout/paint but do not receive input.
   std::optional<ParentLayoutEdge> parentLayoutEdge; ///< Optional specialized parent policy, copied by value.
   std::optional<std::uint64_t> geometryEpoch;       ///< Successful arrangement stamp, absent after invalidation.
-  bool regionalInputOpen{true};                   ///< Committed direct-edge admission, independent of user flags.
+  bool regionalInputOpen{true};                     ///< Committed direct-edge admission, independent of user flags.
 };
 
 /** @brief Exclusive parent/child ownership on Scheduler's UI thread.
@@ -192,6 +193,13 @@ public:
    * @return Owning snapshot of children, parent, flags and geometry; tree validation errors or NO_MEMORY on failure.
    */
   std::expected<NodeSnapshot, TreeError> inspect(Node<Widget> node) const;
+  /** @brief Test inclusive ancestry without allocating or invoking callbacks.
+   * @param ancestor Live candidate ancestor in this tree.
+   * @param node Live candidate descendant in this tree.
+   * @return True for the same node or a descendant, false otherwise; tree validation errors on invalid handles.
+   * UI-affine and permitted during a frame. Work is proportional to the descendant's depth.
+   */
+  std::expected<bool, TreeError> contains(Node<Widget> ancestor, Node<Widget> node) const;
   /** @brief Invalidate subtree/scopes now, reclaim at safe point.
    * @param node Root of the subtree to invalidate and eventually destroy.
    * @return Success after logical removal and layout invalidation; tree validation errors, or WOULD_BLOCK during a

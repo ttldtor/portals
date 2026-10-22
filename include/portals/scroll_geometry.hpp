@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <expected>
+#include <portals/frame.hpp>
 #include <portals/widget_types.hpp>
 
 namespace portals {
@@ -206,6 +207,7 @@ struct ScrollLayoutOptions {
   ScrollBarPolicy vertical{ScrollBarPolicy::AUTO};      ///< Vertical presence policy.
   ScrollPlacement placement{ScrollPlacement::RESERVED}; ///< Explicit bar placement.
   bool frame{};                                         ///< One-cell frame inset; ON_FRAME requires true.
+  FrameSides frameSides{};                              ///< Present frame sides; ignored when frame is false.
 };
 
 /** @brief Owning local one-cell track; axis determines whether length is rows or columns. */
@@ -234,7 +236,8 @@ struct ScrollAreaGeometry {
  * @param allocation Signed local allocation, normalized to nonnegative cell extents.
  * @param extent Fixed logical intrinsic content size; independent of gutters and offsets.
  * @param options Owning policies and optional one-cell frame selection.
- * @return Placement, or INVALID_ARGUMENT for unknown policies/placement or ON_FRAME without frame.
+ * @return Placement, or INVALID_ARGUMENT for unknown policies/placement, ON_FRAME without a frame,
+ * or a possible ON_FRAME bar whose bottom/right side is absent.
  * @note Reserved AUTO uses a monotone least fixed point with at most two additions. Any thread;
  * constexpr, no allocation, callbacks, tree operations, mutation or invalidation.
  */
@@ -247,17 +250,20 @@ solveScrollLayout(CellSize allocation, ScrollExtent extent, ScrollLayoutOptions 
   if (!validPolicy(options.horizontal) || !validPolicy(options.vertical) ||
       (options.placement != ScrollPlacement::RESERVED && options.placement != ScrollPlacement::OVERLAY &&
        options.placement != ScrollPlacement::ON_FRAME) ||
-      (options.placement == ScrollPlacement::ON_FRAME && !options.frame)) {
+      (options.placement == ScrollPlacement::ON_FRAME &&
+       (!options.frame || (options.horizontal != ScrollBarPolicy::NEVER && !options.frameSides.bottom) ||
+        (options.vertical != ScrollBarPolicy::NEVER && !options.frameSides.right)))) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
   const auto width = std::max(allocation.width, 0);
   const auto height = std::max(allocation.height, 0);
-  const auto innerWidth = options.frame ? std::max(width - 2, 0) : width;
-  const auto innerHeight = options.frame ? std::max(height - 2, 0) : height;
+  const auto padding = options.frame ? options.frameSides.insets() : LayoutPadding{};
+  const auto innerWidth = std::max(width - padding.left - padding.right, 0);
+  const auto innerHeight = std::max(height - padding.top - padding.bottom, 0);
   ScrollAreaGeometry result;
 
-  result.viewportOrigin = options.frame ? CellPoint{std::min(width, 1), std::min(height, 1)} : CellPoint{};
+  result.viewportOrigin = {std::min(width, padding.left), std::min(height, padding.top)};
   result.horizontalBar = options.horizontal == ScrollBarPolicy::ALWAYS;
   result.verticalBar = options.vertical == ScrollBarPolicy::ALWAYS;
 
@@ -281,14 +287,14 @@ solveScrollLayout(CellSize allocation, ScrollExtent extent, ScrollLayoutOptions 
   result.childClipSize = options.placement == ScrollPlacement::ON_FRAME ? result.viewport : viewport();
 
   if (options.placement == ScrollPlacement::ON_FRAME) {
-    if (width >= 2 && height >= 2) {
-      if (result.horizontalBar && innerWidth != 0) {
-        result.horizontal = {{1, height - 1}, innerWidth};
-      }
+    // Opposite sides sharing a collapsed row/column retain the legacy empty-track behavior.
+    // A single bottom or right side can still own that physical row or column.
+    if (result.horizontalBar && innerWidth != 0 && height > padding.top) {
+      result.horizontal = {{padding.left, height - 1}, innerWidth};
+    }
 
-      if (result.verticalBar && innerHeight != 0) {
-        result.vertical = {{width - 1, 1}, innerHeight};
-      }
+    if (result.verticalBar && innerHeight != 0 && width > padding.left) {
+      result.vertical = {{width - 1, padding.top}, innerHeight};
     }
 
     return result;

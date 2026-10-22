@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include "../src/widgets/frame_text.hpp"
 #include "support/examples/gallery/gallery.hpp"
 #include "support/examples/replay/terminal.hpp"
 #include <portals/ui_style.hpp>
@@ -86,6 +87,11 @@ using namespace portals;
 std::uint_least32_t failureLine{};
 constexpr BorderOptions ASCII_BORDER{PrimitiveGlyphs::ASCII, 16384};
 constexpr GaugeOptions ASCII_GAUGE{0, 1, 10, PrimitiveGlyphs::ASCII, 16384};
+static_assert(std::is_aggregate_v<FrameOptions> && std::is_aggregate_v<FrameGlyphs>);
+static_assert(!std::is_nothrow_default_constructible_v<FrameOptions> &&
+              !std::is_nothrow_default_constructible_v<FrameGlyphs>);
+static_assert(!std::is_nothrow_move_constructible_v<FrameOptions> &&
+              !std::is_nothrow_move_constructible_v<FrameGlyphs>);
 static_assert(std::derived_from<Border, SizedWidget> && std::derived_from<Border, Layout>);
 static_assert(!std::derived_from<Border, LinearLayout>);
 static_assert(ui::width(7).change.extent == 7);
@@ -230,6 +236,243 @@ struct CountingSink final : PaintContext {
     return {};
   }
 };
+
+struct FrameCommands final : PaintContext {
+  std::vector<RenderCommand> commands;
+
+  std::expected<void, TreeError> submit(std::span<const RenderCommand> values) override {
+    for (const auto &value : values) {
+      commands.emplace_back(value);
+    }
+
+    return {};
+  }
+};
+
+CellBuffer renderBorder(Border &border, CellSize size, WidthPolicy policy = {}) {
+  FrameCommands sink;
+
+  take(border.arrange(take(CellRect::from({}, size))));
+  take(border.paint(sink));
+
+  return take(renderFullFrame(size, sink.commands, policy));
+}
+
+void framePatternsAndOwnedText() {
+  const std::array patterns{FramePattern::SINGLE, FramePattern::ROUNDED, FramePattern::DOUBLE, FramePattern::HEAVY,
+                            FramePattern::ASCII};
+  const std::array expected{std::string("\xe2\x94\x8c\xe2\x94\x80\xe2\x94\x90"),
+                            std::string("\xe2\x95\xad\xe2\x94\x80\xe2\x95\xae"),
+                            std::string("\xe2\x95\x94\xe2\x95\x90\xe2\x95\x97"),
+                            std::string("\xe2\x94\x8f\xe2\x94\x81\xe2\x94\x93"), std::string("+-+")};
+
+  for (std::size_t index = 0; index < patterns.size(); ++index) {
+    FrameOptions options;
+
+    options.pattern = patterns[index];
+
+    Border border({}, options, {}, {}, std::in_place);
+
+    take(border.preparation());
+    check(row(renderBorder(border, {3, 3}), 0) == expected[index],
+          "each built-in frame pattern paints its chosen lines");
+  }
+
+  WidthPolicy wide;
+
+  wide.ambiguous = AmbiguousWidth::WIDE;
+
+  FrameOptions fallback;
+
+  fallback.pattern = FramePattern::DOUBLE;
+
+  Border wideBorder(wide, fallback, {}, {}, std::in_place);
+
+  check(row(renderBorder(wideBorder, {3, 3}, wide), 0) == "+-+",
+        "built-in ambiguous-wide lines fall back to one-cell ASCII");
+
+  std::unique_ptr<Border> retained;
+
+  {
+    FrameOptions source;
+
+    source.customGlyphs = FrameGlyphs{"a", "b", "c", "d", "=", "!"};
+    source.title = "Owned";
+    retained = std::make_unique<Border>(WidthPolicy{}, source, ControlStyle{}, SizePolicy{}, std::in_place);
+    source.title.assign("mutated");
+    source.customGlyphs->topLeft = "z";
+  }
+
+  check(row(renderBorder(*retained, {9, 3}), 0) == "aOwned==b",
+        "retained frame glyphs and title survive source mutation and destruction");
+}
+
+void frameValidationAndGeometry() {
+  FrameOptions options;
+
+  options.customGlyphs = FrameGlyphs{"a", "b", "c", "d", "-", "|"};
+
+  for (const auto &bad : {std::string{}, std::string(65, 'x'), std::string("ab"), std::string("\xff", 1),
+                          std::string("\xe7\x95\x8c"), std::string("\n")}) {
+    options.customGlyphs->horizontal = bad;
+
+    Border border({}, options, {}, {}, std::in_place);
+
+    check(border.preparation() == std::unexpected(TreeError::INVALID_ARGUMENT),
+          "invalid custom glyphs retain a typed construction error");
+    CountingSink sink;
+
+    take(border.arrange(take(CellRect::from({}, {5, 3}))));
+    check(border.paint(sink) == std::unexpected(TreeError::INVALID_ARGUMENT) && sink.commands == 0,
+          "invalid compiled glyphs cannot reach the paint sink");
+  }
+
+  options.customGlyphs->horizontal = "e\xcc\x81";
+
+  Border combining({}, options, {}, {}, std::in_place);
+
+  take(combining.preparation());
+  check(take(renderBorder(combining, {3, 3}).at({1, 0})).glyph == "e\xcc\x81",
+        "one-cell custom graphemes may own multiple UTF-8 scalars");
+
+  options.customGlyphs.reset();
+  options.title.assign(options.maxTitleBytes + 1, 'x');
+  allocation_test::remaining = 0;
+  const auto invalid = Border::validateFrame(options);
+  allocation_test::remaining = -1;
+  check(invalid == std::unexpected(TreeError::INVALID_ARGUMENT), "borrowed scalar validation never allocates");
+
+  for (unsigned mask = 0; mask != 16; ++mask) {
+    FrameOptions partial;
+
+    partial.border = ASCII_BORDER;
+    partial.sides = {(mask & 1) != 0, (mask & 2) != 0, (mask & 4) != 0, (mask & 8) != 0};
+
+    Border border({}, partial, {}, {}, std::in_place);
+
+    for (int width = 0; width <= 3; ++width) {
+      for (int height = 0; height <= 3; ++height) {
+        const CellSize size{width, height};
+        const auto inner = take(border.childAvailable(size));
+        const auto clip = take(border.childClip(size));
+
+        check(inner.width == std::max(0, width - int(partial.sides.left) - int(partial.sides.right)) &&
+                inner.height == std::max(0, height - int(partial.sides.top) - int(partial.sides.bottom)) &&
+                clip.size() == inner &&
+                clip.origin() ==
+                  CellPoint{std::min(width, int(partial.sides.left)), std::min(height, int(partial.sides.top))},
+              "all side masks reserve only their own insets at zero through three cells");
+        FrameCommands sink;
+
+        take(border.arrange(take(CellRect::from({}, size))));
+        take(border.paint(sink));
+
+        std::array<unsigned, 9> visits{};
+
+        for (const auto &command : sink.commands) {
+          const auto &text = std::get<TextCommand>(command);
+
+          ++visits[static_cast<std::size_t>(text.origin.y * 3 + text.origin.x)];
+        }
+
+        for (int y = 0; y < height; ++y) {
+          for (int x = 0; x < width; ++x) {
+            const bool edge = (partial.sides.top && y == 0) || (partial.sides.bottom && y == height - 1) ||
+                              (partial.sides.left && x == 0) || (partial.sides.right && x == width - 1);
+
+            check(visits[static_cast<std::size_t>(y * 3 + x)] == unsigned(edge),
+                  "each physical partial-frame cell has exactly one owner, including collapsed sides");
+          }
+        }
+      }
+    }
+  }
+}
+
+void frameTitlesAndBudgets() {
+  const std::array alignments{FrameTitleAlignment::START, FrameTitleAlignment::CENTER, FrameTitleAlignment::END};
+  const std::array expected{std::string("+Hi------+"), std::string("+---Hi---+"), std::string("+------Hi+")};
+
+  for (std::size_t index = 0; index < alignments.size(); ++index) {
+    FrameOptions options;
+
+    options.border = ASCII_BORDER;
+    options.title = "Hi";
+    options.titleAlignment = alignments[index];
+
+    Border border({}, options, {}, {}, std::in_place);
+
+    check(take(border.measure({100, 100})) == CellSize{2, 2},
+          "a title never forces its full width into intrinsic layout");
+    check(row(renderBorder(border, {10, 3}), 0) == expected[index], "title alignment uses the fitting visible prefix");
+  }
+
+  FrameOptions wide;
+
+  wide.border = ASCII_BORDER;
+  wide.title = "A\xe7\x95\x8c"
+               "B";
+
+  Border wideBorder({}, wide, {}, {}, std::in_place);
+  const auto image = renderBorder(wideBorder, {5, 3});
+
+  check(take(image.at({1, 0})).glyph == "A" && take(image.at({2, 0})).glyph == "\xe7\x95\x8c" &&
+          take(image.at({4, 0})).glyph == "+",
+        "wide title clipping preserves whole clusters and the trailing corner");
+
+  FrameOptions limited;
+
+  limited.border = {PrimitiveGlyphs::ASCII, 27};
+  limited.title = "abcdefghij";
+
+  Border rejected({}, limited, {}, {}, std::in_place);
+  CountingSink sink;
+
+  take(rejected.arrange(take(CellRect::from({}, {4, 3}))));
+  check(rejected.paint(sink) == std::unexpected(TreeError::WOULD_BLOCK) && sink.commands == 0,
+        "entire submitted title bytes and graphemes count before the first sink call, including clipped tail");
+  limited.border.maxPaintCells = 28;
+
+  Border accepted({}, limited, {}, {}, std::in_place);
+
+  take(accepted.arrange(take(CellRect::from({}, {4, 3}))));
+  allocation_test::remaining = 0;
+  const auto painted = accepted.paint(sink);
+  allocation_test::remaining = -1;
+  check(painted && sink.firstText && sink.firstText->bytes() == limited.title,
+        "title paint allocates nothing and retains the complete widget-owned source");
+
+  const auto prepared = take(detail::prepareFrameText({}, limited));
+  const std::array tracks{take(CellRect::from({1, 0}, {2, 1}))};
+  FrameCommands excluded;
+
+  take(detail::paintFrame(excluded, prepared, limited, take(CellRect::from({}, {4, 1})), {}, tracks));
+  check(excluded.commands.size() == 2, "collapsed bottom track owns the top title cells and leaves only corners");
+
+  FrameOptions huge;
+
+  huge.sides = {true, false, false, false};
+  huge.border.maxPaintCells = 1;
+
+  const auto hugeText = take(detail::prepareFrameText({}, huge));
+  const auto extent = take(CellRect::from({}, {std::numeric_limits<std::int32_t>::max(), 1}));
+  const std::array fullTrack{extent};
+  CountingSink hidden;
+
+  check(detail::framePaintWork(hugeText, huge, extent.size(), fullTrack) == 0,
+        "huge excluded line has no frame work before any extent-sized loop");
+  take(detail::paintFrame(hidden, hugeText, huge, extent, {}, fullTrack));
+  check(hidden.commands == 0, "painting jumps across a wholly excluded huge track");
+
+  struct FailedSink final : PaintContext {
+    std::expected<void, TreeError> submit(std::span<const RenderCommand>) override {
+      return std::unexpected(TreeError::CLOSED);
+    }
+  } failed;
+
+  check(accepted.paint(failed) == std::unexpected(TreeError::CLOSED),
+        "frame painting preserves the exact sink failure");
+}
 
 void borderContentAndInputClip() {
   Fixture fixture;
@@ -645,6 +888,97 @@ void themeAndManualStyle() {
         "equal disabled snapshots do not schedule more frames");
 }
 
+void borderFocusProjection() {
+  Fixture fixture;
+  ui::Ref<Border> border;
+  ui::Ref<Button> child;
+  ui::Ref<Label> unrelated;
+  ControlStyle style;
+
+  style.normal.foreground = RgbColor{1, 2, 3};
+  style.focused.foreground = RgbColor{4, 5, 6};
+  style.disabled.foreground = RgbColor{7, 8, 9};
+  take(ui::mount(*fixture.scene,
+                 ui::vbox(ui::border(ui::plainButton("Child").reference(child), ASCII_BORDER, style).reference(border),
+                          ui::label("Elsewhere").reference(unrelated))));
+  fixture.render({12, 5});
+
+  auto &tree = fixture.app->tree();
+  const auto viewport = take(CellRect::from({}, {12, 5}));
+  auto color = [&] {
+    CountingSink sink;
+
+    take(tree.frame([&] {
+      take(tree.paint(border.node(), sink));
+    }));
+    check(sink.textStyle.has_value(), "focused frame submits its resolved style");
+
+    return sink.textStyle->foreground;
+  };
+
+  take(syncBorder(tree, border.node(), child.node()));
+  check(take(tree.consumeFrameRequest()) == Invalidation::PAINT && color() == style.focused.foreground,
+        "a focused descendant projects the frame's focused style without moving focus identity");
+
+  allocation_test::remaining = 0;
+  const auto equal = syncBorder(tree, border.node(), child.node());
+  allocation_test::remaining = -1;
+  check(equal.has_value(), "equal descendant projection succeeds without allocation");
+  check(take(tree.consumeFrameRequest()) == Invalidation::NONE, "equal descendant projection schedules no idle frame");
+  take(syncBorder(tree, border.node(), border.node()));
+  check(take(tree.consumeFrameRequest()) == Invalidation::NONE && color() == style.focused.foreground,
+        "inclusive direct focus keeps the same focused presentation");
+  take(syncBorder(tree, border.node(), unrelated.node()));
+  check(take(tree.consumeFrameRequest()) == Invalidation::PAINT && color() == style.normal.foreground,
+        "an unrelated live focus observer restores normal presentation");
+  take(syncBorder(tree, border.node(), child.node()));
+  take(tree.consumeFrameRequest());
+  take(syncBorder(tree, border.node()));
+  check(take(tree.consumeFrameRequest()) == Invalidation::PAINT && color() == style.normal.foreground,
+        "the existing two-argument overload retains its explicit no-focus projection");
+
+  take(tree.setEnabled(border.node(), false));
+  take(tree.consumeFrameRequest());
+  take(syncBorder(tree, border.node(), child.node()));
+  check(take(tree.consumeFrameRequest()) == Invalidation::PAINT && color() == style.disabled.foreground,
+        "disabled frame presentation takes precedence over descendant focus");
+  take(syncBorder(tree, border.node(), unrelated.node()));
+  check(take(tree.consumeFrameRequest()) == Invalidation::NONE && color() == style.disabled.foreground,
+        "focus changes under a disabled frame do not request an unchanged paint");
+
+  take(tree.setEnabled(border.node(), true));
+  take(tree.consumeFrameRequest());
+  take(syncBorder(tree, border.node(), child.node()));
+  take(tree.consumeFrameRequest());
+
+  Fixture foreign;
+  const auto foreignFocus = take(foreign.app->tree().root());
+  const auto foreignExpected = tree.contains(border.node(), foreignFocus);
+  const auto invalidForeign = syncBorder(tree, border.node(), foreignFocus);
+
+  check(!foreignExpected && invalidForeign == std::unexpected(foreignExpected.error()) &&
+          take(tree.consumeFrameRequest()) == Invalidation::NONE && color() == style.focused.foreground,
+        "foreign focus fails checked before mutating the previous frame presentation");
+
+  const auto stale = child.node();
+
+  take(tree.remove(stale));
+  take(tree.frame([&] {
+    take(layoutTree(tree, take(tree.root()), viewport, viewport));
+  }));
+  take(tree.consumeFrameRequest());
+
+  const auto staleExpected = tree.contains(border.node(), stale);
+  const auto invalidStale = syncBorder(tree, border.node(), stale);
+
+  check(!staleExpected && invalidStale == std::unexpected(staleExpected.error()) &&
+          take(tree.consumeFrameRequest()) == Invalidation::NONE && color() == style.focused.foreground,
+        "removed descendant focus returns its identity error without partial appearance mutation");
+  take(syncBorder(tree, border.node(), {}));
+  check(take(tree.consumeFrameRequest()) == Invalidation::PAINT && color() == style.normal.foreground,
+        "clearing focus after descendant removal restores normal presentation");
+}
+
 void scopedPrimitiveStyles() {
   ui::Ref<Border> border;
   ui::Ref<Gauge> gauge;
@@ -796,6 +1130,50 @@ void paintBudgetAndAllocation() {
   check(sink.firstText && sink.firstText->bytes() == "#", "retained command text belongs to live widget after paint");
 }
 
+void frameModifierConstructionFailures() {
+  constexpr std::ptrdiff_t MAX_MODIFIER_ALLOCATION_ATTEMPTS = 32;
+  static_assert(std::is_aggregate_v<ui::FramedModifier> && std::is_aggregate_v<ui::ObservedFramedModifier>);
+  static_assert(!std::is_nothrow_move_constructible_v<ui::FramedModifier>);
+  static_assert(!std::is_nothrow_move_constructible_v<ui::ObservedFramedModifier>);
+
+  for (const bool observed : {false, true}) {
+    ui::Ref<Border> outer;
+    bool completed{};
+
+    for (std::ptrdiff_t budget = 0; budget < MAX_MODIFIER_ALLOCATION_ATTEMPTS; ++budget) {
+      auto source = ui::label("content");
+
+      try {
+        allocation_test::remaining = budget;
+
+        if (observed) {
+          auto stage = ui::framed(outer, "rounded");
+          auto transferred = std::move(stage);
+          auto recipe = std::move(source) | std::move(transferred);
+
+          allocation_test::remaining = -1;
+          (void)recipe;
+        } else {
+          auto stage = ui::framed("rounded");
+          auto transferred = std::move(stage);
+          auto recipe = std::move(source) | std::move(transferred);
+
+          allocation_test::remaining = -1;
+          (void)recipe;
+        }
+
+        completed = true;
+        break;
+      } catch (const std::bad_alloc &) {
+        allocation_test::remaining = -1;
+      }
+    }
+
+    check(completed && outer.node() == Node<Border>{},
+          "cold compact frame construction and named pipe transfers remain fallible without publishing refs");
+  }
+}
+
 void allocationRollback() {
   bool succeeded{};
 
@@ -872,6 +1250,9 @@ void invalidCustomClip() {
 int main() {
   try {
     nothrowAllocationContracts();
+    framePatternsAndOwnedText();
+    frameValidationAndGeometry();
+    frameTitlesAndBudgets();
     borderContentAndInputClip();
     collapsedExtentsAndWidths();
     unicodePlainButton();
@@ -883,10 +1264,12 @@ int main() {
     chromeAcrossCaptionFactories();
     primitiveScopedNamesAndRollback();
     themeAndManualStyle();
+    borderFocusProjection();
     scopedPrimitiveStyles();
     scopedStyleFactoryRollback();
     scopedPrimitiveIdle();
     paintBudgetAndAllocation();
+    frameModifierConstructionFailures();
     allocationRollback();
     lowLevelClipCompatibility();
     invalidCustomClip();

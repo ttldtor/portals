@@ -110,12 +110,6 @@ bool sameInputs(std::span<const MeasuredChild> left, std::span<const MeasuredChi
          });
 }
 
-GraphemeText frameGlyph(std::string_view unicode, std::string_view ascii, WidthPolicy width, PrimitiveGlyphs mode) {
-  auto text = GraphemeText::from(mode == PrimitiveGlyphs::UNICODE ? unicode : ascii, width).value();
-
-  return text.measure() == 1 ? text : GraphemeText::from(ascii, width).value();
-}
-
 bool within(std::size_t first, std::size_t count, std::size_t bound) {
   return count > 0 && first < bound && count <= bound - first;
 }
@@ -878,13 +872,14 @@ Grid::Grid(const GridOptions &options, GridPlacementMode mode, SizePolicy policy
     scroll_->area = scroll->area;
 
     if (scroll_->area.frame) {
-      constexpr std::array<std::string_view, 6> FRAME_UNICODE{"\xe2\x94\x8c", "\xe2\x94\x90", "\xe2\x94\x94",
-                                                              "\xe2\x94\x98", "\xe2\x94\x80", "\xe2\x94\x82"};
-      constexpr std::array<std::string_view, 6> FRAME_ASCII{"+", "+", "+", "+", "-", "|"};
+      scroll_->legacyFrameOptions.border = *scroll_->area.frame;
 
-      for (std::size_t index = 0; index < FRAME_UNICODE.size(); ++index) {
-        scroll_->glyphs[index] =
-          frameGlyph(FRAME_UNICODE[index], FRAME_ASCII[index], width, scroll_->area.frame->glyphs);
+      auto prepared = detail::prepareFrameText(width, scroll_->legacyFrameOptions);
+
+      if (prepared) {
+        scroll_->legacyFrameText = std::move(*prepared);
+      } else {
+        scroll_->frameError = prepared.error();
       }
     }
   }

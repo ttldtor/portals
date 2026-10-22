@@ -91,7 +91,8 @@ void thumbs() {
           const auto travel = track - length;
           const auto start = range.maximum == 0 ? 0 : std::min(offset, range.maximum) * travel / range.maximum;
 
-          check(result.length == length && result.travel == travel && result.start == start,
+          check(result.length == length && result.travel == travel && result.start >= 0 &&
+                  static_cast<std::uint64_t>(result.start) == start,
                 "small-range thumb differs from independent exact product oracle");
         }
       }
@@ -242,6 +243,102 @@ void placement() {
         "maximum allocation frame arithmetic stays representable");
 }
 
+void partialFrames() {
+  constexpr std::array POLICIES{ScrollBarPolicy::NEVER, ScrollBarPolicy::AUTO, ScrollBarPolicy::ALWAYS};
+  constexpr std::array PLACEMENTS{ScrollPlacement::RESERVED, ScrollPlacement::OVERLAY, ScrollPlacement::ON_FRAME};
+  constexpr ScrollLayoutOptions LEGACY{ScrollBarPolicy::AUTO, ScrollBarPolicy::AUTO, ScrollPlacement::ON_FRAME, true};
+
+  static_assert(LEGACY.frameSides.top && LEGACY.frameSides.right && LEGACY.frameSides.bottom && LEGACY.frameSides.left);
+  static_assert(
+    solveScrollLayout(
+      {5, 1}, {20, 20},
+      {ScrollBarPolicy::ALWAYS, ScrollBarPolicy::NEVER, ScrollPlacement::ON_FRAME, true, {false, false, true, false}})
+      ->horizontal.length == 5);
+
+  for (int mask = 0; mask < 16; ++mask) {
+    const FrameSides sides{(mask & 1) != 0, (mask & 2) != 0, (mask & 4) != 0, (mask & 8) != 0};
+
+    for (const int width : {0, 1, 2, 3, 9}) {
+      for (const int height : {0, 1, 2, 3, 7}) {
+        const CellSize size{width, height};
+
+        for (const auto horizontal : POLICIES) {
+          for (const auto vertical : POLICIES) {
+            for (const auto placement : PLACEMENTS) {
+              for (const bool frame : {false, true}) {
+                const ScrollLayoutOptions options{horizontal, vertical, placement, frame, sides};
+                const auto result = solveScrollLayout(size, {20, 30}, options);
+                const bool requiresMissingEdge = placement == ScrollPlacement::ON_FRAME &&
+                                                 (!frame || (horizontal != ScrollBarPolicy::NEVER && !sides.bottom) ||
+                                                  (vertical != ScrollBarPolicy::NEVER && !sides.right));
+
+                check(result.has_value() != requiresMissingEdge, "ON_FRAME admits exactly its possible bar sides");
+
+                if (!result) {
+                  continue;
+                }
+
+                const auto expectedOrigin =
+                  frame ? CellPoint{std::min(size.width, sides.left ? 1 : 0), std::min(size.height, sides.top ? 1 : 0)}
+                        : CellPoint{};
+
+                check(result->viewportOrigin == expectedOrigin, "partial frame origin reserves only present sides");
+                check(result->viewportOrigin.x + result->viewport.width <= size.width &&
+                        result->viewportOrigin.y + result->viewport.height <= size.height,
+                      "partial viewport stays in allocation");
+
+                if (!frame) {
+                  const auto plain = take(solveScrollLayout(size, {20, 30}, {horizontal, vertical, placement, false}));
+
+                  check(result->viewport == plain.viewport && result->childClipSize == plain.childClipSize &&
+                          result->horizontal.length == plain.horizontal.length &&
+                          result->vertical.length == plain.vertical.length,
+                        "disabled frame ignores its side descriptor");
+                }
+
+                for (int y = 0; y < size.height; ++y) {
+                  for (int x = 0; x < size.width; ++x) {
+                    const bool h = trackContains(result->horizontal, true, x, y);
+                    const bool v = trackContains(result->vertical, false, x, y);
+                    const bool content = x >= result->viewportOrigin.x && y >= result->viewportOrigin.y &&
+                                         x - result->viewportOrigin.x < result->childClipSize.width &&
+                                         y - result->viewportOrigin.y < result->childClipSize.height;
+
+                    check(!(h && v) && !(content && (h || v)), "partial frame track/content ownership is disjoint");
+
+                    if (placement == ScrollPlacement::ON_FRAME) {
+                      const bool corner = ((y == 0 && sides.top) || (y == size.height - 1 && sides.bottom)) &&
+                                          ((x == 0 && sides.left) || (x == size.width - 1 && sides.right));
+                      const bool expectedH = result->horizontalBar && sides.bottom && y == size.height - 1 && !corner &&
+                                             !(size.height == 1 && sides.top);
+                      const bool expectedV = result->verticalBar && sides.right && x == size.width - 1 && !corner &&
+                                             !(size.width == 1 && sides.left);
+
+                      check(h == expectedH && v == expectedV, "ON_FRAME owns each present non-corner track cell once");
+                    }
+                  }
+                }
+
+                for (const auto track : {result->horizontal, result->vertical}) {
+                  const auto thumb = take(scrollThumb({MAXIMUM, 1}, MAXIMUM, track.length));
+
+                  check(thumb.length <= track.length && thumb.start + thumb.length <= track.length,
+                        "partial frame thumb stays in its track");
+
+                  if (thumb.travel != 0) {
+                    check(take(scrollOffsetForThumb(thumb.travel, thumb.travel, MAXIMUM - 1)) == MAXIMUM - 1,
+                          "partial frame input mapping preserves the exact logical endpoint");
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 void options() {
   ScrollAreaOptions area;
   ScrollBarOptions bar;
@@ -304,6 +401,7 @@ void options() {
 int main() {
   thumbs();
   placement();
+  partialFrames();
   options();
 
   if (failures != 0) {

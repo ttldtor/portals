@@ -3,6 +3,7 @@
 #pragma once
 
 #include "../views/scroll_controller_state.hpp"
+#include "frame_text.hpp"
 #include "scroll_intent.hpp"
 #include <array>
 #include <portals/scroll_controls.hpp>
@@ -17,12 +18,21 @@ struct ScrollDrag {
   ScrollAxisMetrics metrics;
 };
 
+struct PreparedScrollFrame {
+  FrameOptions options;
+  PreparedFrameText text;
+};
+
 struct ScrollWidgetState {
   ScrollWidgetState(std::shared_ptr<ScrollController> controller, WidthPolicy width, PrimitiveGlyphs mode);
   std::shared_ptr<ScrollController> controller;
   std::optional<ScrollControllerLease> lease;
   NodeId node;
   ScrollAreaOptions area;
+  FrameOptions legacyFrameOptions;
+  std::optional<PreparedFrameText> legacyFrameText;
+  std::unique_ptr<PreparedScrollFrame> advancedFrame;
+  std::optional<TreeError> frameError;
   ScrollBarOptions bar;
   ControlStyle style;
   ScrollAxis axis{ScrollAxis::VERTICAL};
@@ -43,6 +53,23 @@ struct ScrollWidgetState {
   std::weak_ptr<ScrollIntentRecord> intent;
   std::array<GraphemeText, 8> glyphs;
 };
+
+inline const FrameOptions *scrollFrameOptions(const ScrollWidgetState &state) noexcept {
+  return state.advancedFrame ? &state.advancedFrame->options : state.area.frame ? &state.legacyFrameOptions : nullptr;
+}
+
+inline LayoutPadding scrollFrameInsets(const ScrollWidgetState &state) noexcept {
+  const auto *frame = scrollFrameOptions(state);
+
+  return frame ? frame->sides.insets() : LayoutPadding{};
+}
+
+inline ScrollLayoutOptions scrollLayoutOptions(const ScrollWidgetState &state) noexcept {
+  const auto *frame = scrollFrameOptions(state);
+
+  return {state.area.horizontal, state.area.vertical, state.area.placement, frame != nullptr,
+          frame ? frame->sides : FrameSides{}};
+}
 
 struct ScrollWidgetAccess {
   static ScrollWidgetState &state(ScrollArea &widget) {

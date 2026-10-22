@@ -11,7 +11,7 @@
 
 namespace portals::ui::detail {
 
-inline constexpr std::size_t CONTROL_PROPERTY_COUNT = 165; ///< Complete canonical scalar vocabulary size.
+inline constexpr std::size_t CONTROL_PROPERTY_COUNT = 180; ///< Complete canonical scalar vocabulary size.
 inline constexpr std::size_t CONTROL_PRESENCE_BITS =
   CONTROL_PROPERTY_COUNT < 32 ? 32 : CONTROL_PROPERTY_COUNT;        ///< Retain all legacy mask bits.
 using ControlPropertyPresence = std::bitset<CONTROL_PRESENCE_BITS>; ///< Allocation-free internal leaf presence.
@@ -137,6 +137,14 @@ std::expected<OverlayOptions, TreeError> controlOverlayOptions(const ControlSett
  * @return Owning effective text limits.
  */
 TextLimits controlTextLimits(const ControlSettings &settings, TextLimits limits) noexcept;
+
+/** @param settings Sparse frame patch; omitted leaves preserve the receiving values.
+ * @param base Owning effective frame, or empty for a control without a frame.
+ * @param policy Complete width policy used to resolve the owning title.
+ * @return Effective optional frame, or typed structural/text/allocation failure. No runtime state is created.
+ */
+std::expected<std::optional<FrameOptions>, ManagedError>
+controlFrameOptions(const ControlSettings &settings, std::optional<FrameOptions> base, WidthPolicy policy);
 
 /** @param settings Validated sparse Border settings.
  * @param options Actual receiving constructor options; absent leaves retain these values.

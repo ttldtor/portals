@@ -912,6 +912,32 @@ private:
     return std::string_view(document_.bytes).substr(begin, position_ - begin);
   }
 
+  std::string_view propertyName() {
+    const auto first = name();
+
+    if (first.empty()) {
+      return first;
+    }
+
+    const auto begin = position_ - first.size();
+
+    while (peek() == '.') {
+      ++position_;
+
+      if (!identifierStart(peek())) {
+        return {};
+      }
+
+      ++position_;
+
+      while (identifierPart(peek())) {
+        ++position_;
+      }
+    }
+
+    return std::string_view(document_.bytes).substr(begin, position_ - begin);
+  }
+
   std::expected<void, ManagedError> string(std::string &result) {
     skip();
 
@@ -1102,6 +1128,52 @@ private:
     return found == grid.end() ? nullptr : &*found;
   }
 
+  std::expected<void, ManagedError> compactFrame(ControlSettings &settings, std::string_view type, std::size_t offset,
+                                                 std::vector<std::string_view> &properties) {
+    constexpr std::array<std::string_view, 2> LEAVES{"frame.enabled", "frame.pattern"};
+
+    for (const auto path : LEAVES) {
+      if (std::ranges::find(settings.origins, path, &ControlPropertyOrigin::path) != settings.origins.end()) {
+        return std::unexpected(document_.propertyFailure(Code::DUPLICATE_PROPERTY, offset, type, path));
+      }
+
+      const auto *schema = descriptor(path);
+
+      if (!schema || schema->depth > controls_.limits().maxStructDepth) {
+        return std::unexpected(document_.propertyFailure(Code::DEPTH_LIMIT, offset, type, path));
+      }
+    }
+
+    // The compact spelling consumes the same two canonical leaves as explicit assignments.
+    if (properties.size() > options_.limits.maxProperties ||
+        LEAVES.size() > options_.limits.maxProperties - properties.size()) {
+      return std::unexpected(document_.propertyFailure(Code::PROPERTY_LIMIT, offset, type, "frame.pattern"));
+    }
+
+    std::string source;
+    auto parsed = string(source);
+
+    if (!parsed) {
+      return std::unexpected(withProperty(parsed.error(), type, "frame.pattern"));
+    }
+
+    const auto pattern = detail::framePattern(source);
+
+    if (!pattern) {
+      return std::unexpected(document_.propertyFailure(Code::INVALID_VALUE, offset, type, "frame.pattern"));
+    }
+
+    for (const auto path : LEAVES) {
+      properties.push_back(path);
+      settings.origins.push_back({std::string(path), document_.origin(offset)});
+    }
+
+    settings.frame.enabled = true;
+    settings.frame.pattern = *pattern;
+
+    return {};
+  }
+
   std::expected<void, ManagedError> setting(ControlSettings &settings, std::string_view type, std::string_view path,
                                             std::size_t offset) {
     const auto *schema = descriptor(path);
@@ -1112,6 +1184,11 @@ private:
 
     if (schema->depth > controls_.limits().maxStructDepth) {
       return std::unexpected(document_.propertyFailure(Code::DEPTH_LIMIT, offset, type, path));
+    }
+
+    if (path.starts_with("frame.") &&
+        std::ranges::find(settings.origins, path, &ControlPropertyOrigin::path) != settings.origins.end()) {
+      return std::unexpected(document_.propertyFailure(Code::DUPLICATE_PROPERTY, offset, type, path));
     }
 
     settings.origins.push_back({std::string(path), document_.origin(offset)});
@@ -1132,6 +1209,8 @@ private:
         settings.placeholder = std::move(value);
       } else if (path == "title") {
         settings.title = std::move(value);
+      } else if (path == "frame.title") {
+        settings.frame.title = std::move(value);
       } else if (path == "body") {
         settings.body = std::move(value);
       } else if (path == "themeSelector.labels.apply") {
@@ -1195,6 +1274,18 @@ private:
         settings.format.releaseMarker = std::move(value);
       } else if (path == "format.unknownMarker") {
         settings.format.unknownMarker = std::move(value);
+      } else if (path == "frame.customGlyphs.topLeft") {
+        settings.frame.customGlyphs.topLeft = std::move(value);
+      } else if (path == "frame.customGlyphs.topRight") {
+        settings.frame.customGlyphs.topRight = std::move(value);
+      } else if (path == "frame.customGlyphs.bottomLeft") {
+        settings.frame.customGlyphs.bottomLeft = std::move(value);
+      } else if (path == "frame.customGlyphs.bottomRight") {
+        settings.frame.customGlyphs.bottomRight = std::move(value);
+      } else if (path == "frame.customGlyphs.horizontal") {
+        settings.frame.customGlyphs.horizontal = std::move(value);
+      } else if (path == "frame.customGlyphs.vertical") {
+        settings.frame.customGlyphs.vertical = std::move(value);
       } else if (path == "emptyText") {
         settings.emptyText = std::move(value);
       } else if (path == "unavailableText") {
@@ -1250,6 +1341,16 @@ private:
         settings.focusable = enabled;
       } else if (path == "frame.enabled") {
         settings.frame.enabled = enabled;
+      } else if (path == "frame.sides.top") {
+        settings.frame.sides.top = enabled;
+      } else if (path == "frame.sides.right") {
+        settings.frame.sides.right = enabled;
+      } else if (path == "frame.sides.bottom") {
+        settings.frame.sides.bottom = enabled;
+      } else if (path == "frame.sides.left") {
+        settings.frame.sides.left = enabled;
+      } else if (path == "frame.customGlyphs.enabled") {
+        settings.frame.customGlyphs.enabled = enabled;
       } else if (path == "yRange.enabled") {
         settings.yRange.enabled = enabled;
       } else if (path == "history.enabled") {
@@ -1303,6 +1404,13 @@ private:
         settings.glyphs = static_cast<PrimitiveGlyphs>(index);
       } else if (path == "frame.glyphs") {
         settings.frame.glyphs = static_cast<PrimitiveGlyphs>(index);
+      } else if (path == "frame.pattern") {
+        constexpr std::array PATTERNS{FramePattern::SINGLE, FramePattern::SINGLE, FramePattern::ROUNDED,
+                                      FramePattern::DOUBLE, FramePattern::HEAVY,  FramePattern::ASCII};
+
+        settings.frame.pattern = PATTERNS[static_cast<std::size_t>(index)];
+      } else if (path == "frame.titleAlignment") {
+        settings.frame.titleAlignment = static_cast<FrameTitleAlignment>(index);
       } else if (path == "horizontal") {
         settings.horizontal = static_cast<ScrollBarPolicy>(index);
       } else if (path == "vertical") {
@@ -1524,6 +1632,8 @@ private:
       settings.minimumThumb = static_cast<std::int32_t>(*value);
     } else if (path == "frame.maxPaintCells") {
       settings.frame.maxPaintCells = *value;
+    } else if (path == "frame.maxTitleBytes") {
+      settings.frame.maxTitleBytes = *value;
     } else if (path == "columns") {
       settings.grid.columns = *value;
     } else if (path == "rows") {
@@ -1565,7 +1675,7 @@ private:
       skip();
 
       const auto begin = position_;
-      const auto key = name();
+      const auto key = propertyName();
       const auto canonicalKey = detail::ControlContextAccess::canonicalProperty(key);
       std::string path(0, '\0');
 
@@ -1573,6 +1683,20 @@ private:
 
       if (key.empty()) {
         return std::unexpected(document_.propertyFailure(Code::SYNTAX, begin, type, path));
+      }
+
+      const bool assigned = take('=') || take(':');
+
+      skip();
+
+      if (path == "frame" && options_.format == SceneResourceFormat::CONFIGURATION && assigned && peek() != '{') {
+        auto parsed = compactFrame(settings, type, begin, properties);
+
+        if (!parsed) {
+          return parsed;
+        }
+
+        continue;
       }
 
       if (properties.size() == options_.limits.maxProperties) {
@@ -1585,16 +1709,15 @@ private:
 
       properties.push_back(canonicalKey);
 
-      const bool assigned = take('=') || take(':');
-
       if (take('{')) {
         const bool configurationStruct =
           options_.format == SceneResourceFormat::CONFIGURATION &&
-          (path == "securePolicy" || path == "limits" || path == "frame" || path == "format" || path == "yRange" ||
-           path == "labels" || path == "dialog" || path == "dialog.frame" || path == "dialog.maximumPanelSize" ||
-           path == "message" || path == "message.labels" || path == "message.defaultChoice" ||
-           path == "message.textLimits" || path == "notification" || path == "notification.textLimits" ||
-           path == "themeSelector" || path == "themeSelector.labels" || path == "themeSelector.textLimits" ||
+          (path == "securePolicy" || path == "limits" || path == "frame" || path == "frame.sides" ||
+           path == "frame.customGlyphs" || path == "format" || path == "yRange" || path == "labels" ||
+           path == "dialog" || path == "dialog.frame" || path == "dialog.maximumPanelSize" || path == "message" ||
+           path == "message.labels" || path == "message.defaultChoice" || path == "message.textLimits" ||
+           path == "notification" || path == "notification.textLimits" || path == "themeSelector" ||
+           path == "themeSelector.labels" || path == "themeSelector.textLimits" ||
            path == "themeSelector.openingShortcut" || path == "themeCatalog" || path == "themeCatalog.textLimits" ||
            path == "themeCatalog.initialId" || path == "themeCatalog.layers");
 
@@ -1957,6 +2080,11 @@ private:
     });
   }
 
+  bool acceptsFrameSettings(const ResourceNode &target) const {
+    return options_.format == SceneResourceFormat::CONFIGURATION &&
+           detail::ResourceAccess::entry(options_.registry, target.factory.index).sized;
+  }
+
   bool acceptsChartRange(const ResourceNode &target) const {
     if (options_.format != SceneResourceFormat::CONFIGURATION) {
       return false;
@@ -1982,6 +2110,12 @@ private:
 
     if (options_.format == SceneResourceFormat::CONFIGURATION || protectedEditor) {
       key = detail::ControlContextAccess::canonicalProperty(key);
+    }
+
+    skip();
+
+    if (key == "frame" && options_.format == SceneResourceFormat::CONFIGURATION && peek() != '{') {
+      return compactFrame(target.arguments.settings, type, begin, properties);
     }
 
     if (properties.size() == options_.limits.maxProperties) {
@@ -2105,9 +2239,7 @@ private:
     if ((key == "history" || key == "limits" ||
          (key == "format" &&
           acceptsNativeProperty(target, detail::ControlFactoryKind::KEY_HELP_FALLBACK, "format.maxBytesPerBinding")) ||
-         (key == "frame" &&
-          acceptsNativeProperty(target, detail::ControlFactoryKind::SCROLL_FALLBACK, "frame.enabled")) ||
-         (key == "yRange" && acceptsChartRange(target)) ||
+         (key == "frame" && acceptsFrameSettings(target)) || (key == "yRange" && acceptsChartRange(target)) ||
          (key == "labels" &&
           acceptsNativeProperty(target, detail::ControlFactoryKind::DATA_STATE_FALLBACK, "labels.loading")) ||
          (key == "themeCatalog" && acceptsNativeProperty(target, detail::ControlFactoryKind::THEME_CATALOG_BINDING,
@@ -2255,14 +2387,12 @@ private:
       }
 
       const auto begin = position_;
-      const auto token = peek() == '"' ? std::string_view{} : name();
+      const auto token = peek() == '"' ? std::string_view{} : propertyName();
       const bool named = take(':') || take('=');
       const bool positional = !named && (token.empty() || token == "i18n");
       // A caller-owned child name wins the bare spelling; frame={...} remains an explicit native property.
-      const bool frameGroup =
-        token == "frame" &&
-        acceptsNativeProperty(document_.nodes[index], detail::ControlFactoryKind::SCROLL_FALLBACK, "frame.enabled") &&
-        !detail::ResourceAccess::find(options_.registry, token);
+      const bool frameGroup = token == "frame" && acceptsFrameSettings(document_.nodes[index]) &&
+                              !detail::ResourceAccess::find(options_.registry, token);
       const bool formatGroup =
         token == "format" &&
         acceptsNativeProperty(document_.nodes[index], detail::ControlFactoryKind::KEY_HELP_FALLBACK,
@@ -2415,7 +2545,16 @@ std::expected<void, ManagedError> registerSchemas(ControlContext &controls, cons
       }
 
       for (const auto &property : controlPropertySchema(entry.virtualView)) {
-        if (std::ranges::find(paths, property.path) == paths.end()) {
+        if (!property.path.starts_with("frame.") && std::ranges::find(paths, property.path) == paths.end()) {
+          paths.push_back(property.path);
+        }
+      }
+    }
+
+    if (entry.sized && !(controls.hasRegisteredType(entry.name) && controls.matchesRegisteredType(entry.name, paths))) {
+      // An existing exact allowlist stays narrow; only the default sized registration gains frame leaves.
+      for (const auto &property : controlPropertySchema("Button")) {
+        if (property.path.starts_with("frame.") && std::ranges::find(paths, property.path) == paths.end()) {
           paths.push_back(property.path);
         }
       }
@@ -2850,6 +2989,7 @@ std::expected<Description<Widget>, ManagedError> gridRecipe(ResourceNode &node) 
     (void)std::move(recipe).flex(*node.arguments.flex);
   }
 
+  detail::Access::frameSettings(recipe, node.arguments.settings);
   detail::Access::preparedControlPresence(recipe, detail::controlSettingsPresenceSet(node.arguments.settings));
 
   return detail::Access::erase(std::move(recipe));
@@ -2909,21 +3049,32 @@ std::expected<void, ManagedError> resolveSettings(ResourceDocument &document, co
     // Resource budgets still bound resolver output, independently of a control's own text limits.
     limits.max_input_bytes = std::min(limits.max_input_bytes, resourceLimits.max_input_bytes);
 
-    for (const auto path : {std::string_view("text"), std::string_view("placeholder"), std::string_view("title")}) {
+    for (const auto path : {std::string_view("text"), std::string_view("placeholder"), std::string_view("title"),
+                            std::string_view("frame.title")}) {
       if (path == "title" && node.factory.kind != detail::ControlFactoryKind::DIALOG_FALLBACK) {
         continue;
       }
 
       auto &setting = path == "text"          ? node.arguments.settings.text
                       : path == "placeholder" ? node.arguments.settings.placeholder
+                      : path == "frame.title" ? node.arguments.settings.frame.title
                                               : node.arguments.settings.title;
 
       if (!setting) {
         continue;
       }
 
-      auto value =
-        options.resolver ? setting->resolve(policy, options.resolver, limits) : setting->resolve(policy, limits);
+      auto effectiveLimits = limits;
+
+      if (path == "frame.title") {
+        effectiveLimits = resourceLimits;
+        effectiveLimits.max_input_bytes =
+          std::min(resourceLimits.max_input_bytes,
+                   node.arguments.settings.frame.maxTitleBytes.value_or(FrameOptions{}.maxTitleBytes));
+      }
+
+      auto value = options.resolver ? setting->resolve(policy, options.resolver, effectiveLimits)
+                                    : setting->resolve(policy, effectiveLimits);
 
       if (!value) {
         return std::unexpected(textFailure(document, node, path, &value.error()));
@@ -2990,6 +3141,7 @@ template <class T> Description<Widget> linearRecipe(const ResourceNode &node) {
   auto recipe =
     linear<T>(detail::controlLinearOptions(node.arguments.settings, LinearOptions{.gap = node.arguments.gap}));
 
+  detail::Access::frameSettings(recipe, node.arguments.settings);
   detail::Access::preparedControlPresence(recipe, detail::controlSettingsPresenceSet(node.arguments.settings));
 
   if (node.arguments.classes) {
@@ -3190,6 +3342,23 @@ std::expected<Node<Widget>, ManagedError> compile(ManagedScene &owner, ResourceD
 
   const auto existingNodes = context.nodes.size();
   std::vector<Node<Widget>> mounted(document.nodes.size());
+  std::vector<Node<Widget>> layoutRoots(0);
+  const auto rememberMounted = [&](std::size_t index, Node<Widget> source, Node<Widget> outer) {
+    mounted[index] = source;
+
+    if (outer == Node<Widget>{}) {
+      outer = source;
+    }
+
+    if (layoutRoots.empty() && outer != source) {
+      // Keep source lookup allocation-free until a real wrapper creates a distinct layout root.
+      layoutRoots = mounted;
+    }
+
+    if (!layoutRoots.empty()) {
+      layoutRoots[index] = outer;
+    }
+  };
   std::vector<bool> insideComposite(document.nodes.size());
   std::vector<std::vector<std::size_t>> children(document.nodes.size(), std::vector<std::size_t>(0));
 
@@ -3385,7 +3554,8 @@ std::expected<Node<Widget>, ManagedError> compile(ManagedScene &owner, ResourceD
               }
             }
 
-            mounted[index] = *result;
+            rememberMounted(index, *result, mount.mountedOuter);
+
             auto checked = detail::Access::check(scene, *result);
 
             if (!checked) {
@@ -3449,7 +3619,7 @@ std::expected<Node<Widget>, ManagedError> compile(ManagedScene &owner, ResourceD
       }
     }
 
-    mounted[index] = *node;
+    rememberMounted(index, *node, context.mountedOuter);
 
     auto checked = detail::Access::check(owner, *node);
 
@@ -3461,7 +3631,8 @@ std::expected<Node<Widget>, ManagedError> compile(ManagedScene &owner, ResourceD
   for (std::size_t index = 0; index < document.nodes.size(); ++index) {
     auto &node = document.nodes[index];
     if (node.gridPlan) {
-      auto configured = detail::Access::gridOptions(owner, *node.gridNode, boundGridOptions(document, node, mounted));
+      auto configured = detail::Access::gridOptions(
+        owner, *node.gridNode, boundGridOptions(document, node, layoutRoots.empty() ? mounted : layoutRoots));
       if (!configured) {
         return std::unexpected(attributed(document, index, configured.error()));
       }
@@ -3475,6 +3646,8 @@ std::expected<Node<Widget>, ManagedError> compile(ManagedScene &owner, ResourceD
       return std::unexpected(attributed(document, 0, checked.error()));
     }
   }
+
+  context.mountedOuter = layoutRoots.empty() ? mounted.front() : layoutRoots.front();
 
   return mounted.front();
 } catch (const std::bad_alloc &) {
@@ -3496,7 +3669,7 @@ Description<Widget> resource(std::string_view source, SceneResourceOptions optio
   auto input = std::make_shared<const std::string>(source);
   auto identity = std::make_shared<const std::string>("<string resource>");
 
-  return detail::Access::deferControlValidation(detail::Access::transaction(
+  return detail::Access::deferControlValidation(detail::Access::forwardOuter(detail::Access::transaction(
     [input = std::move(input), identity = std::move(identity),
      options = std::move(options)](ManagedScene &owner, Node<Widget> parent,
                                    detail::MountContext &context) mutable -> std::expected<Node<Widget>, ManagedError> {
@@ -3529,7 +3702,7 @@ Description<Widget> resource(std::string_view source, SceneResourceOptions optio
 
         return std::unexpected(std::move(failure));
       }
-    }));
+    })));
 }
 
 Description<Widget> resource(SceneResourceFile source, SceneResourceOptions options) {
@@ -3537,7 +3710,7 @@ Description<Widget> resource(SceneResourceFile source, SceneResourceOptions opti
   auto identity =
     std::make_shared<const std::string>(reinterpret_cast<const char *>(pathBytes.data()), pathBytes.size());
 
-  return detail::Access::deferControlValidation(detail::Access::transaction(
+  return detail::Access::deferControlValidation(detail::Access::forwardOuter(detail::Access::transaction(
     [source = std::move(source), identity = std::move(identity),
      options = std::move(options)](ManagedScene &owner, Node<Widget> parent,
                                    detail::MountContext &context) mutable -> std::expected<Node<Widget>, ManagedError> {
@@ -3591,7 +3764,7 @@ Description<Widget> resource(SceneResourceFile source, SceneResourceOptions opti
       } catch (const std::filesystem::filesystem_error &failure) {
         return std::unexpected(document.failure(Code::FILE_IO, 0, failure.code()));
       }
-    }));
+    })));
 }
 
 Scene scene(std::string_view source, SceneResourceOptions resourceOptions, SceneOptions options,

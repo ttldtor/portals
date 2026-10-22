@@ -11,11 +11,12 @@ int main() {
   ui::Ref<LineEdit> message;
   ui::Ref<Button> add;
 
-  auto scene = ui::scene(ui::border(ui::vbox(
+  // clang-format off
+  auto scene = ui::scene(ui::vbox(
     ui::label("Portals | F10 quit"),
     ui::lineEdit(message, ""),
     ui::gauge(0.65).width(24),
-    ui::hbox(ui::button(add, "Add Hello"), ui::plainButton("Quit", [] { ui::quit(); })))));
+    ui::hbox(ui::button(add, "Add Hello"), ui::plainButton("Quit", [] { ui::quit(); }))).framed());
 
   return scene
     | ui::style(add, "*:focused { bold: true; }")
@@ -24,4 +25,5 @@ int main() {
          })
     | ui::onKey("F10 | Ctrl+C", ui::quit)
     | ui::runApp();
+  // clang-format on
 }
