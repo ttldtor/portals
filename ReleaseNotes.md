@@ -74,6 +74,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- The Linux naming check reuses authenticated Debian package downloads when a
+  matching cache is available. Signed repository metadata is refreshed and all
+  naming checks still run on every selected pull request.
+
 - String scene-resource diagnostics identify their source as `<string resource>`
   instead of retaining the complete input document, including parse and limit
   failures. File-resource diagnostics retain the file path. Password resources

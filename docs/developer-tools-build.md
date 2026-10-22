@@ -7,6 +7,27 @@ Run the PowerShell commands from the repository root. Use Python 3.10 or newer;
 these Python tools use the standard library. Paths below are examples and may
 be replaced with your build directories.
 
+## APT download cache {#tool-apt-cache}
+
+`tools/ci/apt_cache.py DIRECTORY` validates disposable `.deb` downloads for the
+Ubuntu naming job. It requires `apt-cache` and freshly updated, signed APT indices.
+It removes archives with missing metadata, mismatched package/version/architecture
+or incorrect SHA256. It does not install packages or change process environment.
+Only regular matching archives are retained; symbolic links are removed without
+following them. Unrelated files are preserved. Run before installation, while
+the cache directory has no concurrent writer.
+
+```powershell
+python tools/ci/apt_cache.py --help
+python -m unittest discover -s tools/ci -p test_apt_cache.py -v
+```
+
+`DIRECTORY` is required and must exist; there is no default directory. The command
+prints verified/discarded counts. Exit codes: 0 scan completed, 1 I/O or tool failure,
+2 invalid arguments. `--help` needs no cache directory or APT. Cache contents are
+untrusted until checked against APT metadata; they do not replace signed repository
+verification. This helper is for disposable CI download directories.
+
 <a id="tool-architecture"></a>
 ## Architecture snapshot exports
 
