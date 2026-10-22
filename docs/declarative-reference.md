@@ -849,6 +849,10 @@ narrow and rejects the new leaves. Arbitrary custom subclasses do not inherit
 this schema. Native methods and pipes, such as `.rowHeight(2).overscanRows(0)`
 and `ui::rowHeight(2)`, retain the existing model, formatter, policy and provider.
 
+`.nonModal()` and `| ui::nonModal()` select `DialogMode::NON_MODAL` on a
+Dialog recipe without changing other options. They are shorthand for
+`.mode(DialogMode::NON_MODAL)`; the last mode setting wins in declaration order.
+
 Dialog/OverlayHost settings apply during construction. Methods and pipes such
 as `.maximumPanelSize({42, 9})` and `ui::maxLayers(2)` retain unspecified actual
 factory options. `.frame(BorderOptions{...})` changes the Dialog panel's own

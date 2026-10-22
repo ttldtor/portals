@@ -2936,6 +2936,17 @@ public:
     return std::move(*this).scalarSettings({.dialog = {.mode = value}});
   }
 
+  /** @brief Keep the main form available while this dialog is open.
+   * @return This consuming exact native Dialog recipe with NON_MODAL input policy.
+   * @details Equivalent to mode(DialogMode::NON_MODAL); preserves all other settings.
+   * Later mode settings override this choice in declaration order.
+   */
+  Description &&nonModal() &&
+    requires std::same_as<T, Dialog>
+  {
+    return std::move(*this).mode(DialogMode::NON_MODAL);
+  }
+
   /** @param value Native CENTER/BELOW_START/ABOVE_START placement.
    * @return This consuming exact native Dialog recipe.
    */
@@ -7891,6 +7902,15 @@ inline DialogModifier title(std::string_view value) {
 /** @param value Native dialog input policy. @return Exact native Dialog stage. */
 inline DialogModifier mode(DialogMode value) {
   return {{.dialog = {.mode = value}}};
+}
+
+/** @brief Keep the main form available while the dialog is open.
+ * @return Exact native Dialog stage selecting NON_MODAL input policy.
+ * @details Equivalent to mode(DialogMode::NON_MODAL); preserves all other settings.
+ * Later mode settings override this choice in declaration order.
+ */
+inline DialogModifier nonModal() {
+  return mode(DialogMode::NON_MODAL);
 }
 
 /** @param value Native dialog placement. @return Exact native Dialog stage. */

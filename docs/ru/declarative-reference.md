@@ -509,6 +509,11 @@ Message-схема также принимает `message.buttons` (`OK`, `OK_CA
 эту схему не наследуют. Методы и pipes, например `.rowHeight(2).overscanRows(0)`
 и `ui::rowHeight(2)`, сохраняют модель, formatter, policy и provider.
 
+`.nonModal()` и `| ui::nonModal()` выбирают `DialogMode::NON_MODAL` для рецепта
+диалога, сохраняя остальные параметры. Это краткая запись
+`.mode(DialogMode::NON_MODAL)`; при повторном указании режима действует последнее
+значение в порядке объявления.
+
 Настройки Dialog/OverlayHost применяются при создании. Методы и pipes, например
 `.maximumPanelSize({42, 9})` и `ui::maxLayers(2)`, сохраняют фактические параметры
 фабрики, не заданные переопределением. `.frame(BorderOptions{...})` меняет рамку
