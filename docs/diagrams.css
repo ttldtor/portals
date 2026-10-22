@@ -203,3 +203,34 @@ span.arrowhead.opened::before {
   white-space: normal;
   overflow-wrap: anywhere;
 }
+
+/* Keep guide and reference gutters stable beside either navigation panel. */
+html:not(.turbo-mode) {
+  --content-maxwidth: 100%;
+  --portals-content-gutter: 16px;
+}
+
+html:not(.turbo-mode) div.contents {
+  margin-inline: var(--portals-content-gutter);
+  padding-inline: 0;
+}
+
+html:not(.turbo-mode) div.header .title {
+  margin-inline: 0;
+  padding-inline: var(--portals-content-gutter);
+}
+
+/* A wide child must not force the reading column beyond its flex container. */
+html:not(.turbo-mode) div.contents .textblock { min-width: 0; }
+
+/* Vendor full-bleed code margins assume padding on the reading column. */
+html:not(.turbo-mode) .contents :is(div.fragment, pre.fragment) {
+  margin-inline: 0;
+}
+
+/* Wrap the displayed source without changing the text copied from it. */
+html:not(.turbo-mode) .contents div.fragment div.line {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
