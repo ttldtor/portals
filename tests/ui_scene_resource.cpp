@@ -4345,7 +4345,8 @@ TEST_CASE("MessageBox semantic schema rejects whole reachable invalid documents 
     {R"(scene{VBox{Label{i18n("early")} Notice{dialog{mode=NON_MODAL}}}})", Code::INVALID_VALUE},
     {R"(scene{VBox{Label{i18n("early")} Notice{dialog{closeOnEscape=false}}}})", Code::INVALID_VALUE},
     {R"(scene{VBox{Label{i18n("early")} Notice{message{unknown=1}}}})", Code::UNKNOWN_PROPERTY},
-    {R"(scene{VBox{Label{i18n("early")} Notice{Label{"external child"}}}})", Code::CHILDREN_FORBIDDEN}};
+    {R"(scene{VBox{Label{i18n("early")} Notice{Label{"first body"} Label{"second body"}}}})",
+     Code::CHILDREN_FORBIDDEN}};
 
   for (const auto &item : cases) {
     INFO(item.source);
@@ -5267,7 +5268,7 @@ TEST_CASE("ThemeSelector canonical binding keeps old registrations and rejects w
   };
   const auto canonical = ui::controlPropertySchema("ThemeSelector");
 
-  REQUIRE(canonical.size() == 22);
+  REQUIRE(canonical.size() == 25);
   REQUIRE(registry.add<Dialog>("Old", plain, {}));
   REQUIRE(registry.add<Dialog>("Selected", plain, canonical));
   std::vector<ui::ControlPropertyDescriptor> copy(canonical.begin(), canonical.end());

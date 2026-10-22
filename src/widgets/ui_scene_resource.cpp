@@ -56,9 +56,19 @@ SceneResourceRegistry::semanticSchema(std::span<const ControlPropertyDescriptor>
                             : kind == detail::ControlFactoryKind::THEME_CATALOG_BINDING ? "ThemeSelectorCatalog"
                                                                                         : "ThemeSelector");
 
-    if (!schema.empty() && std::ranges::equal(schema, canonical, [](const auto &left, const auto &right) {
+    const auto oldSize = kind == detail::ControlFactoryKind::MESSAGE_BINDING          ? std::size_t{24}
+                         : kind == detail::ControlFactoryKind::THEME_SELECTOR_BINDING ? std::size_t{22}
+                         : kind == detail::ControlFactoryKind::THEME_CATALOG_BINDING  ? std::size_t{38}
+                                                                                      : canonical.size();
+    const auto legacy = schema.size() == oldSize && oldSize != canonical.size();
+    const auto candidate = legacy ? canonical.first(oldSize) : canonical;
+
+    if (!schema.empty() && std::ranges::equal(schema, candidate, [legacy](const auto &left, const auto &right) {
           return left.path == right.path && left.kind == right.kind && left.depth == right.depth &&
-                 std::ranges::equal(left.enumNames, right.enumNames) && std::ranges::equal(left.aliases, right.aliases);
+                 (std::ranges::equal(left.enumNames, right.enumNames) ||
+                  (legacy && left.path == "message.defaultChoice.value" && left.enumNames.size() == 5 &&
+                   std::ranges::equal(left.enumNames, right.enumNames.first(5)))) &&
+                 std::ranges::equal(left.aliases, right.aliases);
         })) {
       return kind;
     }
@@ -1233,6 +1243,10 @@ private:
         settings.message.labels.save = std::move(value);
       } else if (path == "message.labels.discard") {
         settings.message.labels.discard = std::move(value);
+      } else if (path == "message.labels.yes") {
+        settings.message.labels.yes = std::move(value);
+      } else if (path == "message.labels.no") {
+        settings.message.labels.no = std::move(value);
       } else if (path == "message.labels.cancel") {
         settings.message.labels.cancel = std::move(value);
       } else if (path == "labels.loading") {
@@ -1359,6 +1373,10 @@ private:
         settings.history.groupTyping = enabled;
       } else if (path == "history.groupDeletion") {
         settings.history.groupDeletion = enabled;
+      } else if (path == "dialog.closeButton.enabled") {
+        settings.dialog.closeButton.enabled = enabled;
+      } else if (path == "dialog.closeButton.focusable") {
+        settings.dialog.closeButton.focusable = enabled;
       } else if (path == "dialog.closeOnEscape") {
         settings.dialog.closeOnEscape = enabled;
       } else {
@@ -1431,6 +1449,16 @@ private:
         settings.notification.placement = static_cast<ToastPlacement>(index);
       } else if (path == "notification.overflow") {
         settings.notification.overflow = static_cast<ToastOverflowPolicy>(index);
+      } else if (path == "message.buttons") {
+        settings.message.buttons = static_cast<DialogButtons>(index);
+      } else if (path == "message.order.first") {
+        settings.message.order.first = static_cast<MessageChoice>(index);
+      } else if (path == "message.order.second") {
+        settings.message.order.second = static_cast<MessageChoice>(index);
+      } else if (path == "message.order.third") {
+        settings.message.order.third = static_cast<MessageChoice>(index);
+      } else if (path == "dialog.closeButton.placement") {
+        settings.dialog.closeButton.placement = static_cast<DialogClosePlacement>(index);
       } else if (path == "message.defaultChoice.value") {
         settings.message.defaultChoice.value = static_cast<MessageChoice>(index);
       } else if (path == "dialog.mode") {
@@ -1714,7 +1742,8 @@ private:
           options_.format == SceneResourceFormat::CONFIGURATION &&
           (path == "securePolicy" || path == "limits" || path == "frame" || path == "frame.sides" ||
            path == "frame.customGlyphs" || path == "format" || path == "yRange" || path == "labels" ||
-           path == "dialog" || path == "dialog.frame" || path == "dialog.maximumPanelSize" || path == "message" ||
+           path == "dialog" || path == "dialog.closeButton" || path == "dialog.frame" ||
+           path == "dialog.maximumPanelSize" || path == "message" || path == "message.order" ||
            path == "message.labels" || path == "message.defaultChoice" || path == "message.textLimits" ||
            path == "notification" || path == "notification.textLimits" || path == "themeSelector" ||
            path == "themeSelector.labels" || path == "themeSelector.textLimits" ||
@@ -2478,7 +2507,8 @@ private:
         if (standardGrid && document_.nodes[index].regions) {
           return parseFailure(Code::INVALID_VALUE, begin);
         }
-        if (!detail::ResourceAccess::entry(options_.registry, document_.nodes[index].type).children) {
+        if (!detail::ResourceAccess::entry(options_.registry, document_.nodes[index].type).children &&
+            document_.nodes[index].factory.kind != detail::ControlFactoryKind::MESSAGE_BINDING) {
           return parseFailure(Code::CHILDREN_FORBIDDEN, begin);
         }
         document_.nodes[index].directChildren = true;
@@ -2571,12 +2601,24 @@ std::expected<void, ManagedError> registerSchemas(ControlContext &controls, cons
         : entry.factoryKind == detail::ControlFactoryKind::THEME_CATALOG_BINDING ? "ThemeSelectorCatalog"
                                                                                  : "ThemeSelector");
 
-      for (const auto &property : schema) {
+      for (const auto &property : schema.first(entry.semanticPropertyCount.value_or(schema.size()))) {
         paths.push_back(property.path);
       }
     }
 
     if (controls.hasRegisteredType(entry.name)) {
+      if (entry.factoryKind == detail::ControlFactoryKind::MESSAGE_BINDING ||
+          entry.factoryKind == detail::ControlFactoryKind::THEME_SELECTOR_BINDING ||
+          entry.factoryKind == detail::ControlFactoryKind::THEME_CATALOG_BINDING) {
+        const auto oldCount = entry.factoryKind == detail::ControlFactoryKind::MESSAGE_BINDING          ? 24u
+                              : entry.factoryKind == detail::ControlFactoryKind::THEME_SELECTOR_BINDING ? 22u
+                                                                                                        : 38u;
+
+        if (controls.matchesRegisteredType(entry.name, std::span(paths).first(oldCount))) {
+          paths.resize(oldCount);
+        }
+      }
+
       if (!controls.matchesRegisteredType(entry.name, paths)) {
         return std::unexpected(detail::controlContextError({ControlContextErrorCode::DUPLICATE_TYPE, {}}));
       }
@@ -2636,6 +2678,31 @@ std::expected<void, ManagedError> prepareNodes(ResourceDocument &document, const
 
     if (!resolved) {
       return std::unexpected(detail::controlContextError(resolved.error()));
+    }
+
+    if (node.factory.kind == detail::ControlFactoryKind::MESSAGE_BINDING) {
+      const auto &entry = detail::ResourceAccess::entry(registry, node.factory.index);
+      const auto choice = resolved->settings.message.defaultChoice.value;
+
+      // Definitions may name a not-yet-registered alias while parsing their body. Only
+      // the resolved concrete schema can validate its effective enum domain completely.
+      // Captured C++ MessageOptions are not source settings and remain factory-owned.
+      if (choice && entry.messageChoiceCount && static_cast<std::size_t>(*choice) >= entry.messageChoiceCount) {
+        constexpr std::string_view PATH = "message.defaultChoice.value";
+        const auto origin = std::ranges::find(resolved->settings.origins, PATH, &ControlPropertyOrigin::path);
+        const auto offset =
+          origin != resolved->settings.origins.end() && origin->source ? origin->source->byteOffset : node.offset;
+
+        return std::unexpected(document.propertyFailure(Code::INVALID_VALUE, offset, node.name, PATH));
+      }
+
+      if (node.directChildCount > 1) {
+        return std::unexpected(document.propertyFailure(Code::CHILDREN_FORBIDDEN, node.offset, node.name, "children"));
+      }
+
+      if (node.directChildCount && resolved->settings.body) {
+        return std::unexpected(document.propertyFailure(Code::INVALID_VALUE, node.offset, node.name, "body"));
+      }
     }
 
     if (node.factory.kind == detail::ControlFactoryKind::DATA_STATE_FALLBACK && node.directChildCount != 1) {
@@ -3372,7 +3439,8 @@ std::expected<Node<Widget>, ManagedError> compile(ManagedScene &owner, ResourceD
 
       insideComposite[index] = insideComposite[*sourceParent] ||
                                parentKind == detail::ControlFactoryKind::DATA_STATE_FALLBACK ||
-                               parentKind == detail::ControlFactoryKind::DIALOG_FALLBACK;
+                               parentKind == detail::ControlFactoryKind::DIALOG_FALLBACK ||
+                               parentKind == detail::ControlFactoryKind::MESSAGE_BINDING;
     }
   }
 
@@ -3466,6 +3534,18 @@ std::expected<Node<Widget>, ManagedError> compile(ManagedScene &owner, ResourceD
         }
 
         if (result && entry.factoryKind == detail::ControlFactoryKind::MESSAGE_BINDING) {
+          if (!children[index].empty()) {
+            if (children[index].size() != 1 || node.arguments.settings.body) {
+              return std::unexpected(document.propertyFailure(Code::INVALID_VALUE, node.offset, node.name, "body"));
+            }
+
+            auto body = detail::Access::messageBody(*result, std::move(recipes[children[index].front()]));
+
+            if (!body) {
+              return std::unexpected(body.error());
+            }
+          }
+
           detail::ResourceAccess::fallbackMessageResolver(*result, effectiveOptions.resolver,
                                                           document.failure(Code::FACTORY, node.offset).sceneResource);
         }
@@ -3509,7 +3589,8 @@ std::expected<Node<Widget>, ManagedError> compile(ManagedScene &owner, ResourceD
       }
 
       if (insideComposite[index] && node.factory.kind != detail::ControlFactoryKind::DATA_STATE_FALLBACK &&
-          node.factory.kind != detail::ControlFactoryKind::DIALOG_FALLBACK) {
+          node.factory.kind != detail::ControlFactoryKind::DIALOG_FALLBACK &&
+          node.factory.kind != detail::ControlFactoryKind::MESSAGE_BINDING) {
         for (auto child : children[index]) {
           detail::ResourceAccess::sourceChild(
             *recipe, std::move(recipes[child]),

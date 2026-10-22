@@ -517,15 +517,22 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
       }
 
       if (action && key->action != KeyAction::RELEASE) {
-        struct CancelPhase {
-          bool &repeat;
+        struct DialogKeyPhase {
+          EventRouter::State &state;
+          bool cancel;
+          bool enter;
+          bool repeat;
 
-          ~CancelPhase() {
-            repeat = false;
+          ~DialogKeyPhase() {
+            state.dialogCancelRepeat = cancel;
+            state.dialogEnter = enter;
+            state.dialogEnterRepeat = repeat;
           }
-        } phase{state_->dialogCancelRepeat};
+        } phase{*state_, state_->dialogCancelRepeat, state_->dialogEnter, state_->dialogEnterRepeat};
 
         state_->dialogCancelRepeat = *action == Action::CANCEL && key->action == KeyAction::REPEAT;
+        state_->dialogEnter = key->key == InputKey::ENTER;
+        state_->dialogEnterRepeat = state_->dialogEnter && key->action == KeyAction::REPEAT;
         return route(*target, ActionEvent{*action, key->modifiers, ClickSource::KEYBOARD}, true);
       }
 

@@ -141,6 +141,8 @@ struct EventRouter::State {
   bool collecting{};
   bool closing{};
   bool dialogCancelRepeat{};
+  bool dialogEnter{};
+  bool dialogEnterRepeat{};
   std::weak_ptr<detail::DialogHostRecord> dialogs;
   std::weak_ptr<detail::NotificationRecord> notifications;
 };

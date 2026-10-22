@@ -46,7 +46,11 @@ constexpr std::array<std::string_view, 3> PLACEMENT_NAMES{"RESERVED", "OVERLAY",
 constexpr std::array<std::string_view, 2> CONTENT_POLICY_NAMES{"KEEP_BODY", "REPLACE"};
 constexpr std::array<std::string_view, 4> TOAST_PLACEMENT_NAMES{"BOTTOM_END", "TOP_END", "BOTTOM_START", "TOP_START"};
 constexpr std::array<std::string_view, 2> TOAST_OVERFLOW_NAMES{"DROP_OLDEST_PENDING", "REJECT_NEW"};
-constexpr std::array<std::string_view, 5> MESSAGE_CHOICE_NAMES{"ACKNOWLEDGE", "CONFIRM", "SAVE", "DISCARD", "CANCEL"};
+constexpr std::array<std::string_view, 7> MESSAGE_CHOICE_NAMES{"ACKNOWLEDGE", "CONFIRM", "SAVE", "DISCARD",
+                                                               "CANCEL",      "YES",     "NO"};
+constexpr std::array<std::string_view, 6> DIALOG_BUTTON_NAMES{
+  "OK", "OK_CANCEL", "YES_NO", "YES_NO_CANCEL", "CONFIRM_CANCEL", "SAVE_DISCARD_CANCEL"};
+constexpr std::array<std::string_view, 2> CLOSE_PLACEMENT_NAMES{"START", "END"};
 constexpr std::array<std::string_view, 2> DIALOG_MODE_NAMES{"MODAL", "NON_MODAL"};
 constexpr std::array<std::string_view, 3> DIALOG_PLACEMENT_NAMES{"CENTER", "BELOW_START", "ABOVE_START"};
 constexpr std::array<std::string_view, 2> CHART_MODE_NAMES{"LINE", "CANDLES"};
@@ -233,7 +237,16 @@ constexpr std::array<ControlPropertyDescriptor, detail::CONTROL_PROPERTY_COUNT> 
    {"frame.customGlyphs.bottomLeft", Kind::LITERAL_STRING, 3, {}},
    {"frame.customGlyphs.bottomRight", Kind::LITERAL_STRING, 3, {}},
    {"frame.customGlyphs.horizontal", Kind::LITERAL_STRING, 3, {}},
-   {"frame.customGlyphs.vertical", Kind::LITERAL_STRING, 3, {}}}};
+   {"frame.customGlyphs.vertical", Kind::LITERAL_STRING, 3, {}},
+   {"dialog.closeButton.enabled", Kind::BOOLEAN, 3, {}},
+   {"dialog.closeButton.placement", Kind::ENUMERATION, 3, CLOSE_PLACEMENT_NAMES},
+   {"dialog.closeButton.focusable", Kind::BOOLEAN, 3, {}},
+   {"message.labels.yes", Kind::TEXT, 3, {}},
+   {"message.labels.no", Kind::TEXT, 3, {}},
+   {"message.buttons", Kind::ENUMERATION, 2, DIALOG_BUTTON_NAMES},
+   {"message.order.first", Kind::ENUMERATION, 3, MESSAGE_CHOICE_NAMES},
+   {"message.order.second", Kind::ENUMERATION, 3, MESSAGE_CHOICE_NAMES},
+   {"message.order.third", Kind::ENUMERATION, 3, MESSAGE_CHOICE_NAMES}}};
 static_assert(std::ranges::all_of(PROPERTIES, [](const auto &property) {
   return !property.path.empty();
 }));
@@ -267,9 +280,9 @@ constexpr Mask VIRTUAL_TABLE_MASK = VIRTUAL_LIST_MASK | propertyMask(71, 72, 73)
 constexpr Mask CHART_MASK = propertyMask(74, 75, 76, 77, 78, 79);
 constexpr Mask DATA_STATE_MASK = SIZE_MASK | propertyMask(80, 81, 82, 83, 84, 85, 86, 87, 88, 89);
 constexpr Mask OVERLAY_HOST_MASK = SIZE_MASK | propertyMask(90);
-constexpr Mask DIALOG_MASK = propertyMask(91, 92, 93, 94, 95, 96, 97, 98, 99, 100);
-constexpr Mask MESSAGE_MASK =
-  DIALOG_MASK | propertyMask(101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114);
+constexpr Mask DIALOG_MASK = propertyMask(91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 180, 181, 182);
+constexpr Mask MESSAGE_MASK = DIALOG_MASK | propertyMask(101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112,
+                                                         113, 114, 183, 184, 185, 186, 187, 188);
 constexpr Mask NOTIFICATION_MASK =
   OVERLAY_MASK | propertyMask(115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130);
 constexpr Mask THEME_SELECTOR_MASK =
@@ -347,14 +360,16 @@ constexpr auto DATA_STATE_SCHEMA = withFrame(std::to_array(
    PROPERTIES[84], PROPERTIES[85], PROPERTIES[86], PROPERTIES[87], PROPERTIES[88], PROPERTIES[89]}));
 constexpr auto OVERLAY_HOST_SCHEMA =
   withFrame(std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[90]}));
-constexpr auto DIALOG_SCHEMA =
-  std::to_array({PROPERTIES[91], PROPERTIES[92], PROPERTIES[93], PROPERTIES[94], PROPERTIES[95], PROPERTIES[96],
-                 PROPERTIES[97], PROPERTIES[98], PROPERTIES[99], PROPERTIES[100]});
+constexpr auto DIALOG_SCHEMA = std::to_array(
+  {PROPERTIES[91], PROPERTIES[92], PROPERTIES[93], PROPERTIES[94], PROPERTIES[95], PROPERTIES[96], PROPERTIES[97],
+   PROPERTIES[98], PROPERTIES[99], PROPERTIES[100], PROPERTIES[180], PROPERTIES[181], PROPERTIES[182]});
 constexpr auto MESSAGE_SCHEMA =
   std::to_array({PROPERTIES[91],  PROPERTIES[92],  PROPERTIES[93],  PROPERTIES[94],  PROPERTIES[95],  PROPERTIES[96],
                  PROPERTIES[97],  PROPERTIES[98],  PROPERTIES[99],  PROPERTIES[100], PROPERTIES[101], PROPERTIES[102],
                  PROPERTIES[103], PROPERTIES[104], PROPERTIES[105], PROPERTIES[106], PROPERTIES[107], PROPERTIES[108],
-                 PROPERTIES[109], PROPERTIES[110], PROPERTIES[111], PROPERTIES[112], PROPERTIES[113], PROPERTIES[114]});
+                 PROPERTIES[109], PROPERTIES[110], PROPERTIES[111], PROPERTIES[112], PROPERTIES[113], PROPERTIES[114],
+                 PROPERTIES[180], PROPERTIES[181], PROPERTIES[182], PROPERTIES[183], PROPERTIES[184], PROPERTIES[185],
+                 PROPERTIES[186], PROPERTIES[187], PROPERTIES[188]});
 constexpr auto NOTIFICATION_SCHEMA =
   withFrame(std::to_array({PROPERTIES[1],   PROPERTIES[2],   PROPERTIES[3],   PROPERTIES[22],  PROPERTIES[23],
                            PROPERTIES[24],  PROPERTIES[25],  PROPERTIES[56],  PROPERTIES[57],  PROPERTIES[115],
@@ -362,10 +377,11 @@ constexpr auto NOTIFICATION_SCHEMA =
                            PROPERTIES[121], PROPERTIES[122], PROPERTIES[123], PROPERTIES[124], PROPERTIES[125],
                            PROPERTIES[126], PROPERTIES[127], PROPERTIES[128], PROPERTIES[129], PROPERTIES[130]}));
 constexpr auto THEME_SELECTOR_SCHEMA =
-  std::to_array({PROPERTIES[91],  PROPERTIES[92],  PROPERTIES[93],  PROPERTIES[94],  PROPERTIES[95],  PROPERTIES[96],
-                 PROPERTIES[97],  PROPERTIES[98],  PROPERTIES[99],  PROPERTIES[100], PROPERTIES[131], PROPERTIES[132],
-                 PROPERTIES[133], PROPERTIES[134], PROPERTIES[135], PROPERTIES[136], PROPERTIES[137], PROPERTIES[138],
-                 PROPERTIES[139], PROPERTIES[140], PROPERTIES[141], PROPERTIES[142]});
+  std::to_array({PROPERTIES[91],  PROPERTIES[92],  PROPERTIES[93],  PROPERTIES[94],  PROPERTIES[95],
+                 PROPERTIES[96],  PROPERTIES[97],  PROPERTIES[98],  PROPERTIES[99],  PROPERTIES[100],
+                 PROPERTIES[131], PROPERTIES[132], PROPERTIES[133], PROPERTIES[134], PROPERTIES[135],
+                 PROPERTIES[136], PROPERTIES[137], PROPERTIES[138], PROPERTIES[139], PROPERTIES[140],
+                 PROPERTIES[141], PROPERTIES[142], PROPERTIES[180], PROPERTIES[181], PROPERTIES[182]});
 constexpr auto THEME_CATALOG_SCHEMA =
   std::to_array({PROPERTIES[91],  PROPERTIES[92],  PROPERTIES[93],  PROPERTIES[94],  PROPERTIES[95],  PROPERTIES[96],
                  PROPERTIES[97],  PROPERTIES[98],  PROPERTIES[99],  PROPERTIES[100], PROPERTIES[131], PROPERTIES[132],
@@ -373,7 +389,7 @@ constexpr auto THEME_CATALOG_SCHEMA =
                  PROPERTIES[139], PROPERTIES[140], PROPERTIES[141], PROPERTIES[142], PROPERTIES[143], PROPERTIES[144],
                  PROPERTIES[145], PROPERTIES[146], PROPERTIES[147], PROPERTIES[148], PROPERTIES[149], PROPERTIES[150],
                  PROPERTIES[151], PROPERTIES[152], PROPERTIES[153], PROPERTIES[154], PROPERTIES[155], PROPERTIES[156],
-                 PROPERTIES[157], PROPERTIES[158]});
+                 PROPERTIES[157], PROPERTIES[158], PROPERTIES[180], PROPERTIES[181], PROPERTIES[182]});
 constexpr auto EDIT_SCHEMA = withFrame(
   std::to_array({PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[7], PROPERTIES[8],
                  PROPERTIES[9], PROPERTIES[10], PROPERTIES[11], PROPERTIES[12], PROPERTIES[13], PROPERTIES[14],
@@ -714,7 +730,16 @@ ControlContextError exceptionError() noexcept {
   X(frame.customGlyphs.bottomLeft, 176)                                                                                \
   X(frame.customGlyphs.bottomRight, 177)                                                                               \
   X(frame.customGlyphs.horizontal, 178)                                                                                \
-  X(frame.customGlyphs.vertical, 179)
+  X(frame.customGlyphs.vertical, 179)                                                                                  \
+  X(dialog.closeButton.enabled, 180)                                                                                   \
+  X(dialog.closeButton.placement, 181)                                                                                 \
+  X(dialog.closeButton.focusable, 182)                                                                                 \
+  X(message.labels.yes, 183)                                                                                           \
+  X(message.labels.no, 184)                                                                                            \
+  X(message.buttons, 185)                                                                                              \
+  X(message.order.first, 186)                                                                                          \
+  X(message.order.second, 187)                                                                                         \
+  X(message.order.third, 188)
 
 #define LEAF_INDEX(field, index) index,
 constexpr auto LEAF_INDICES = std::to_array<std::size_t>({PORTALS_CONTROL_LEAVES(LEAF_INDEX)});
@@ -788,7 +813,12 @@ template <class T> bool validValue(const T &value, std::size_t index) noexcept {
     return value == ToastOverflowPolicy::DROP_OLDEST_PENDING || value == ToastOverflowPolicy::REJECT_NEW;
   } else if constexpr (std::same_as<T, MessageChoice>) {
     return value == MessageChoice::ACKNOWLEDGE || value == MessageChoice::CONFIRM || value == MessageChoice::SAVE ||
-           value == MessageChoice::DISCARD || value == MessageChoice::CANCEL;
+           value == MessageChoice::DISCARD || value == MessageChoice::CANCEL || value == MessageChoice::YES ||
+           value == MessageChoice::NO;
+  } else if constexpr (std::same_as<T, DialogButtons>) {
+    return detail::dialogButtonPreset(value).has_value();
+  } else if constexpr (std::same_as<T, DialogClosePlacement>) {
+    return value == DialogClosePlacement::START || value == DialogClosePlacement::END;
   } else if constexpr (std::same_as<T, DialogMode>) {
     return value == DialogMode::MODAL || value == DialogMode::NON_MODAL;
   } else if constexpr (std::same_as<T, DialogPlacement>) {

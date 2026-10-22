@@ -11,7 +11,7 @@
 
 namespace portals::ui::detail {
 
-inline constexpr std::size_t CONTROL_PROPERTY_COUNT = 180; ///< Complete canonical scalar vocabulary size.
+inline constexpr std::size_t CONTROL_PROPERTY_COUNT = 189; ///< Complete canonical scalar vocabulary size.
 inline constexpr std::size_t CONTROL_PRESENCE_BITS =
   CONTROL_PROPERTY_COUNT < 32 ? 32 : CONTROL_PROPERTY_COUNT;        ///< Retain all legacy mask bits.
 using ControlPropertyPresence = std::bitset<CONTROL_PRESENCE_BITS>; ///< Allocation-free internal leaf presence.
@@ -226,10 +226,14 @@ OverlayHostOptions controlOverlayHostOptions(const ControlSettings &settings, Ov
 DialogOptions controlDialogOptions(const ControlSettings &settings, DialogOptions options) noexcept;
 
 /** @param settings Sparse message literals. @param options Actual captured native options.
- * @param kind Existing native kind: information, confirmation, or unsaved changes.
- * @return Owning effective options; active labels and kind safety remain native checks.
+ * @param buttons Captured action preset; a settings preset overrides it.
+ * @return Owning effective options; active labels and preset safety remain native checks.
  */
-MessageOptions controlMessageOptions(const ControlSettings &settings, MessageOptions options, int kind);
+MessageOptions controlMessageOptions(const ControlSettings &settings, MessageOptions options, DialogButtons buttons);
+
+inline MessageOptions controlMessageOptions(const ControlSettings &settings, MessageOptions options, int kind) {
+  return controlMessageOptions(settings, std::move(options), legacyDialogButtons(kind));
+}
 
 /** @param settings Sparse immutable notification literals. @param options Actual captured options and own resolver.
  * @return Effective options; native construction retains queue validation and resolver ownership.

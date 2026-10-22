@@ -6,6 +6,11 @@
 #include <portals/dialog.hpp>
 
 namespace portals::detail {
+inline constexpr std::string_view DIALOG_CLOSE_TEXT = "[x]";
+inline constexpr CellSize DIALOG_CLOSE_SIZE{static_cast<std::int32_t>(DIALOG_CLOSE_TEXT.size()), 1};
+inline constexpr std::int32_t DIALOG_CLOSE_CORNER_INSET = 1;
+inline constexpr std::int32_t DIALOG_CLOSE_MIN_PANEL_WIDTH = DIALOG_CLOSE_SIZE.width + DIALOG_CLOSE_CORNER_INSET * 2;
+
 // The managed owner validates affinity, exact ancestry and liveness before this allocation-free assignment.
 struct DialogAccess {
   static bool anchor(Dialog &dialog, std::optional<CellRect> value, DialogPlacement placement) noexcept {
@@ -15,6 +20,10 @@ struct DialogAccess {
     dialog.anchor_ = value;
     dialog.options_.placement = placement;
     return true;
+  }
+
+  static void bindClose(Dialog &dialog, NodeId close) noexcept {
+    dialog.close_ = close;
   }
 
   static void bindBody(OverlayHost &host, NodeId body) noexcept {

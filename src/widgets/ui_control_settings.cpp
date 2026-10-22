@@ -302,11 +302,14 @@ DialogOptions controlDialogOptions(const ControlSettings &settings, DialogOption
   applySetting(options.closeOnEscape, dialog.closeOnEscape);
   applySetting(options.frame.glyphs, dialog.frame.glyphs);
   applySetting(options.frame.maxPaintCells, dialog.frame.maxPaintCells);
+  applySetting(options.closeButton.enabled, dialog.closeButton.enabled);
+  applySetting(options.closeButton.placement, dialog.closeButton.placement);
+  applySetting(options.closeButton.focusable, dialog.closeButton.focusable);
 
   return options;
 }
 
-MessageOptions controlMessageOptions(const ControlSettings &settings, MessageOptions options, int kind) {
+MessageOptions controlMessageOptions(const ControlSettings &settings, MessageOptions options, DialogButtons buttons) {
   options.dialog = controlDialogOptions(settings, options.dialog);
   const auto &message = settings.message;
 
@@ -315,6 +318,8 @@ MessageOptions controlMessageOptions(const ControlSettings &settings, MessageOpt
   applySetting(options.labels.save, message.labels.save);
   applySetting(options.labels.discard, message.labels.discard);
   applySetting(options.labels.cancel, message.labels.cancel);
+  applySetting(options.labels.yes, message.labels.yes);
+  applySetting(options.labels.no, message.labels.no);
   applySetting(options.allowDestructiveDefault, message.allowDestructiveDefault);
   applySetting(options.textLimits.max_input_bytes, message.textLimits.maxInputBytes);
   applySetting(options.textLimits.max_cluster_bytes, message.textLimits.maxClusterBytes);
@@ -322,12 +327,31 @@ MessageOptions controlMessageOptions(const ControlSettings &settings, MessageOpt
   applySetting(options.textLimits.max_cells, message.textLimits.maxCells);
   applySetting(options.maxBodyLines, message.maxBodyLines);
 
+  const auto preset = dialogButtonPreset(message.buttons.value_or(buttons));
+
+  if (preset && (message.order.first || message.order.second || message.order.third)) {
+    if (options.order.empty()) {
+      options.order.assign(preset->choices.begin(), preset->choices.begin() + preset->count);
+    }
+
+    options.order.resize(preset->count, MessageChoice::CANCEL);
+
+    const std::array values{message.order.first, message.order.second, message.order.third};
+
+    for (std::size_t i = 0; i < values.size(); ++i) {
+      if (values[i]) {
+        options.order.resize(std::max(options.order.size(), i + 1), MessageChoice::CANCEL);
+        options.order[i] = *values[i];
+      }
+    }
+  }
+
   if (message.defaultChoice.enabled == false) {
     options.defaultChoice.reset();
   } else if (message.defaultChoice.value) {
     options.defaultChoice = *message.defaultChoice.value;
   } else if (message.defaultChoice.enabled == true && !options.defaultChoice) {
-    options.defaultChoice = kind == 0 ? MessageChoice::ACKNOWLEDGE : MessageChoice::CANCEL;
+    options.defaultChoice = preset ? preset->safeDefault : MessageChoice::CANCEL;
   }
 
   return options;

@@ -7,6 +7,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Choice dialogs accept custom declarative content and six standard button sets
+  through `ui::dialog`, with configurable captions, order and safe defaults.
+  Existing message-box helpers remain available. An optional `.closeButton()`
+  places a styled close control on the dialog frame; loaded resources expose
+  the same action and close settings.
+
 - Sized recipes support `.framed()` and `ui::framed()` with built-in patterns,
   partial sides, owning titles and custom one-cell glyphs. Typed child references
   are preserved; dimensions address the outer frame. Loaded scenes accept the

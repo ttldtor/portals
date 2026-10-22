@@ -777,6 +777,7 @@ add_executable(portals_dialog_consumer dialog.cpp)
 add_executable(portals_dialog_form_consumer "docs/examples/guide_dialog.cpp")
 add_executable(portals_message_box_consumer message_box.cpp)
 add_executable(portals_message_box_form_consumer "docs/examples/guide_message_box.cpp")
+add_executable(portals_dialog_actions_form_consumer "docs/examples/guide_dialog_actions.cpp")
 add_executable(portals_toast_consumer toast.cpp)
 add_executable(portals_toast_form_consumer "docs/examples/guide_toast.cpp")
 add_executable(portals_key_help_consumer key_help.cpp)
@@ -791,6 +792,7 @@ add_executable(portals_application_factory_form_consumer "docs/examples/guide_ap
 add_executable(portals_style_contracts_consumer style_contracts.cpp)
 foreach(target IN ITEMS portals_nested_scroll_consumer portals_nested_scroll_form_consumer
     portals_dialog_consumer portals_dialog_form_consumer portals_message_box_consumer portals_message_box_form_consumer
+    portals_dialog_actions_form_consumer
     portals_toast_consumer portals_toast_form_consumer portals_key_help_consumer portals_key_help_form_consumer
     portals_key_help_headers portals_theme_selection_consumer portals_theme_selection_form_consumer
     portals_theme_selector_consumer portals_theme_selector_form_consumer portals_style_contracts_consumer

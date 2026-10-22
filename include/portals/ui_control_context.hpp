@@ -197,12 +197,21 @@ struct ControlMessageLabelSettings {
   std::optional<TextValue> save{};        ///< Save request.
   std::optional<TextValue> discard{};     ///< Destructive discard request.
   std::optional<TextValue> cancel{};      ///< Safe cancellation action.
+  std::optional<TextValue> yes{};         ///< Affirmative action.
+  std::optional<TextValue> no{};          ///< Negative action.
 };
 
 /** @brief Sparse optional initial choice; a supplied value alone enables it. */
 struct ControlMessageChoiceSettings {
   std::optional<bool> enabled{}; ///< False clears a captured choice; true preserves it or selects the safe choice.
   std::optional<MessageChoice> value{}; ///< Always a valid enum, including while disabled.
+};
+
+/** @brief Sparse bounded ordering of the active preset actions. */
+struct ControlMessageOrderSettings {
+  std::optional<MessageChoice> first{};  ///< Leading active action.
+  std::optional<MessageChoice> second{}; ///< Second active action, when present.
+  std::optional<MessageChoice> third{};  ///< Third active action, when present.
 };
 
 /** @brief Sparse native MessageBox options, preserving captured values and kind-specific checks. */
@@ -212,6 +221,8 @@ struct ControlMessageSettings {
   std::optional<bool> allowDestructiveDefault{}; ///< Explicit permission for CONFIRM/DISCARD initial focus.
   ControlTextLimitSettings textLimits{};     ///< Positive per-expression limits, unlike low-level editor zero limits.
   std::optional<std::size_t> maxBodyLines{}; ///< Positive wrapped paragraph line cap.
+  std::optional<DialogButtons> buttons{};    ///< Standard action preset.
+  ControlMessageOrderSettings order{};       ///< Sparse bounded active-action permutation.
 };
 
 /** @brief Owning ThemeSelector captions, resolved only during native view construction. */
@@ -286,6 +297,13 @@ struct ControlNotificationSettings {
   std::optional<std::size_t> maxPaintCells{};    ///< Positive allocated card paint-area cap.
 };
 
+/** @brief Sparse close affordance settings. */
+struct ControlDialogCloseSettings {
+  std::optional<bool> enabled{};                   ///< Enable or hide close chrome.
+  std::optional<DialogClosePlacement> placement{}; ///< START or END top-frame segment.
+  std::optional<bool> focusable{};                 ///< Include chrome in focus traversal.
+};
+
 /** @brief Sparse native dialog geometry/input options, merged per leaf. */
 struct ControlDialogSettings {
   std::optional<DialogMode> mode{};             ///< MODAL or NON_MODAL input policy.
@@ -295,6 +313,7 @@ struct ControlDialogSettings {
   std::optional<std::int32_t> anchorGap{};      ///< Nonnegative distance from the body anchor.
   std::optional<bool> closeOnEscape{};          ///< Existing managed cancellation policy.
   ControlDialogFrameSettings frame{};           ///< Mandatory one-cell opaque panel border.
+  ControlDialogCloseSettings closeButton{};     ///< Opt-in top-frame close affordance.
 };
 
 /** @brief Sparse mandatory protected-editor policy; unsupported guarantees never downgrade. */
