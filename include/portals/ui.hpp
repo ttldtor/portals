@@ -472,10 +472,11 @@ struct SemanticConstruction {
   ~SemanticConstruction() = default;
 
   ControlFactoryKind kind{
-    ControlFactoryKind::MESSAGE_BINDING}; ///< Actual native producer, independent of C++ widget type.
-  ControlSettings source;                 ///< Owning effective resource inputs for the actual native producer.
-  ControlPropertyPresence materialized{}; ///< Leaves already reserved by resource preparation.
-  bool prepared{};                        ///< Whether the source packet has been installed before construction.
+    ControlFactoryKind::MESSAGE_BINDING};    ///< Actual native producer, independent of C++ widget type.
+  ControlSettings source;                    ///< Owning effective resource inputs for the actual native producer.
+  ControlPropertyPresence materialized{};    ///< Leaves already reserved by resource preparation.
+  bool prepared{};                           ///< Whether the source packet has been installed before construction.
+  std::shared_ptr<Description<Widget>> body; ///< Optional owning resource body, consumed once by native construction.
 };
 
 /** @brief Stack-owned transaction bookkeeping, discarded after one description mount. */
@@ -488,6 +489,7 @@ struct MountContext {
   const TextResolver *messageResolver{};    ///< Opted-in MessageBox constructor-only fallback; cleared before children.
   const TextResolver *dataStateResolver{};  ///< Native fallback constructor-only borrow; never ambient to body/setup.
   const ControlSettings *controlSettings{}; ///< Constructor-only borrowed settings; restored before setup/children.
+  Description<Widget> *messageBody{};       ///< Constructor-scoped owning cold source, never retained after mount.
   const ControlSettings *frameSettings{};   ///< Current source frame patch only; never inherited by children.
   const FrameOptions *frameOptions{}; ///< Current native ScrollArea constructor only; never inherited by children.
   Node<Widget> mountedOuter;          ///< Last synchronous mount's actual layout root, including through type erasure.
@@ -772,6 +774,13 @@ struct Access {
    * @param settings Owning sparse frame patch and diagnostic provenance copied before erasure.
    */
   template <class T> static void frameSettings(Description<T> &description, const ControlSettings &settings);
+  /** @brief Attach an owning custom body to a resultful dialog recipe.
+   * @param description Message-bound recipe retaining its source identity.
+   * @param body Cold content mounted once under the managed message owner.
+   * @return Success, or a typed error when the recipe cannot accept the body.
+   */
+  template <class T>
+  static std::expected<void, ManagedError> messageBody(Description<T> &description, Description<Widget> body);
   /** @param options Actual ordinary Overlay alignment/insets.
    * @param policy Actual parent size policy, preserved when sparse settings are absent.
    * @return Empty native Overlay recipe; children attach as real edges in source order.
@@ -960,6 +969,15 @@ struct Access {
     apply(base.dialog.viewportMargin, patch.dialog.viewportMargin);
     apply(base.dialog.anchorGap, patch.dialog.anchorGap);
     apply(base.dialog.closeOnEscape, patch.dialog.closeOnEscape);
+    apply(base.dialog.closeButton.enabled, patch.dialog.closeButton.enabled);
+    apply(base.dialog.closeButton.placement, patch.dialog.closeButton.placement);
+    apply(base.dialog.closeButton.focusable, patch.dialog.closeButton.focusable);
+    apply(base.message.labels.yes, patch.message.labels.yes);
+    apply(base.message.labels.no, patch.message.labels.no);
+    apply(base.message.buttons, patch.message.buttons);
+    apply(base.message.order.first, patch.message.order.first);
+    apply(base.message.order.second, patch.message.order.second);
+    apply(base.message.order.third, patch.message.order.third);
     apply(base.dialog.frame.glyphs, patch.dialog.frame.glyphs);
     apply(base.dialog.frame.maxPaintCells, patch.dialog.frame.maxPaintCells);
     apply(base.body, patch.body);
@@ -2954,6 +2972,17 @@ public:
     return std::move(*this).scalarSettings({.dialog = {.closeOnEscape = value}});
   }
 
+  /** @param options Top-frame close chrome; calling with defaults enables it.
+   * @return This consuming Dialog recipe; tiny panels hide the affordance completely.
+   */
+  Description &&closeButton(DialogCloseOptions options = {}) &&
+    requires std::same_as<T, Dialog>
+  {
+    return std::move(*this).scalarSettings(
+      {.dialog = {
+         .closeButton = {.enabled = options.enabled, .placement = options.placement, .focusable = options.focusable}}});
+  }
+
   /** @param caps Positive independent width/height caps; never the full-host structural size.
    * @return This consuming exact native Dialog recipe.
    */
@@ -3918,6 +3947,17 @@ private:
           std::pair<std::string_view, bool>{"dialog.viewportMargin", patch.dialog.viewportMargin.has_value()},
           std::pair<std::string_view, bool>{"dialog.anchorGap", patch.dialog.anchorGap.has_value()},
           std::pair<std::string_view, bool>{"dialog.closeOnEscape", patch.dialog.closeOnEscape.has_value()},
+          std::pair<std::string_view, bool>{"dialog.closeButton.enabled", patch.dialog.closeButton.enabled.has_value()},
+          std::pair<std::string_view, bool>{"dialog.closeButton.placement",
+                                            patch.dialog.closeButton.placement.has_value()},
+          std::pair<std::string_view, bool>{"dialog.closeButton.focusable",
+                                            patch.dialog.closeButton.focusable.has_value()},
+          std::pair<std::string_view, bool>{"message.labels.yes", patch.message.labels.yes.has_value()},
+          std::pair<std::string_view, bool>{"message.labels.no", patch.message.labels.no.has_value()},
+          std::pair<std::string_view, bool>{"message.buttons", patch.message.buttons.has_value()},
+          std::pair<std::string_view, bool>{"message.order.first", patch.message.order.first.has_value()},
+          std::pair<std::string_view, bool>{"message.order.second", patch.message.order.second.has_value()},
+          std::pair<std::string_view, bool>{"message.order.third", patch.message.order.third.has_value()},
           std::pair<std::string_view, bool>{"dialog.frame.glyphs", patch.dialog.frame.glyphs.has_value()},
           std::pair<std::string_view, bool>{"dialog.frame.maxPaintCells",
                                             patch.dialog.frame.maxPaintCells.has_value()}};
@@ -4468,19 +4508,28 @@ private:
         const ControlSettings *settings;
         const FrameOptions *frame;
         const ControlSettings *frameSettings;
+        Description<Widget> *body;
         ~Restore() {
           context.controlPrepared = previous;
           context.controlSettings = settings;
           context.frameOptions = frame;
           context.frameSettings = frameSettings;
+          context.messageBody = body;
         }
-      } restore{context, context.controlPrepared, context.controlSettings, context.frameOptions, context.frameSettings};
+      } restore{context,
+                context.controlPrepared,
+                context.controlSettings,
+                context.frameOptions,
+                context.frameSettings,
+                context.messageBody};
 
       context.controlPrepared = state->controlPrepared;
       context.controlSettings = resolved ? &resolved->settings : &state->controlArguments;
       context.frameOptions =
         std::same_as<T, ScrollArea> && state->frame && state->frame->hasOptions ? &state->frame->options : nullptr;
       context.frameSettings = std::same_as<T, ScrollArea> && state->frame ? state->frame->source.get() : nullptr;
+
+      context.messageBody = state->semanticConstruction ? state->semanticConstruction->body.get() : nullptr;
 
       return state->create(scene, mountParent, context);
     }();
@@ -5149,6 +5198,18 @@ std::expected<void, ManagedError> Access::messageSource(Description<T> &descript
   construction.source = settings;
   construction.materialized = materialized;
   construction.prepared = true;
+
+  return {};
+}
+
+template <class T>
+std::expected<void, ManagedError> Access::messageBody(Description<T> &description, Description<Widget> body) {
+  if (!description.state_ || !description.state_->semanticConstruction ||
+      description.state_->semanticConstruction->kind != ControlFactoryKind::MESSAGE_BINDING) {
+    return std::unexpected(error({}, TreeError::INVALID_ARGUMENT));
+  }
+
+  description.state_->semanticConstruction->body = std::make_shared<Description<Widget>>(std::move(body));
 
   return {};
 }
@@ -7380,6 +7441,50 @@ Description<Dialog> dialog(Ref<Dialog> reference, std::string_view title, Body &
   return dialog(std::move(reference), TextValue(title), std::forward<Body>(body), options);
 }
 
+/** @tparam Body Owning single-use content recipe; mounted exactly once.
+ * @param reference Cold result facade published after complete mount.
+ * @param title Owning caption. @param body Retained custom content.
+ * @param buttons Standard action set. @param options Existing bounded modal settings.
+ * @return Initially hidden resultful dialog; Escape and close chrome request CANCEL.
+ */
+template <detail::DescriptionInput Body>
+Description<Dialog> dialog(Ref<MessageDialog> reference, TextValue title, Body &&body, DialogButtons buttons,
+                           MessageOptions options = {}) {
+  auto layout = detail::Access::captureLayouts(body);
+  auto description =
+    detail::MessageAccess::describe(std::move(reference), std::move(title), {},
+                                    detail::Access::erase(std::forward<Body>(body)), std::move(options), buttons);
+
+  return detail::Access::withLayout(std::move(description), std::move(layout));
+}
+
+/** @tparam Body Owning cold content. @param reference Result observation. @param title Copied caption.
+ * @param body Retained content. @param buttons Standard action set. @param options Modal settings.
+ * @return Initially hidden resultful dialog recipe.
+ */
+template <detail::DescriptionInput Body>
+Description<Dialog> dialog(Ref<MessageDialog> reference, std::string_view title, Body &&body, DialogButtons buttons,
+                           MessageOptions options = {}) {
+  return dialog(std::move(reference), TextValue(title), std::forward<Body>(body), buttons, std::move(options));
+}
+
+/** @param reference Cold result observation. @param title Owning caption. @param body Owning wrapped paragraph.
+ * @param buttons Standard action set. @param options Modal settings. @return Resultful paragraph recipe.
+ */
+inline Description<Dialog> dialog(Ref<MessageDialog> reference, TextValue title, TextValue body, DialogButtons buttons,
+                                  MessageOptions options = {}) {
+  return detail::MessageAccess::describe(std::move(reference), std::move(title), std::move(body), {},
+                                         std::move(options), buttons);
+}
+
+/** @param reference Cold result observation. @param title Copied caption. @param body Copied paragraph.
+ * @param buttons Standard action set. @param options Modal settings. @return Resultful paragraph recipe.
+ */
+inline Description<Dialog> dialog(Ref<MessageDialog> reference, std::string_view title, std::string_view body,
+                                  DialogButtons buttons, MessageOptions options = {}) {
+  return dialog(std::move(reference), TextValue(title), TextValue(body), buttons, std::move(options));
+}
+
 /// @cond INTERNAL
 namespace detail {
 Description<Dialog> defaultThemeSelector(ThemeSelectorRef reference, std::span<const ThemeChoice> choices,
@@ -7811,6 +7916,12 @@ inline DialogModifier anchorGap(std::int32_t value) {
 /** @param value Existing Escape cancellation policy. @return Exact native Dialog stage. */
 inline DialogModifier closeOnEscape(bool value = true) {
   return {{.dialog = {.closeOnEscape = value}}};
+}
+
+/** @param options Opt-in top-frame close settings. @return Exact native Dialog stage. */
+inline DialogModifier closeButton(DialogCloseOptions options = {}) {
+  return {{.dialog = {.closeButton = {
+                        .enabled = options.enabled, .placement = options.placement, .focusable = options.focusable}}}};
 }
 
 /** @param value Sparse options, including the mandatory frame. @return Exact native Dialog stage. */

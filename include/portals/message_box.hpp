@@ -16,7 +16,9 @@ enum class MessageChoice {
   CONFIRM,     ///< Proceed with the described operation.
   SAVE,        ///< Request saving before proceeding.
   DISCARD,     ///< Proceed without saving.
-  CANCEL       ///< User/programmatic cancellation, never an owner or task failure.
+  CANCEL,      ///< User/programmatic cancellation, never an owner or task failure.
+  YES,         ///< Affirm the question.
+  NO           ///< Decline the question.
 };
 /** @brief Immutable domain outcome, preserving the complete original managed failure. */
 using MessageResult = std::expected<MessageChoice, ManagedError>;
@@ -26,6 +28,53 @@ template <class T> class Ref;
 template <class T> class Description;
 class MessageBox;
 
+/** @brief Standard bounded action sets for a resultful dialog. */
+enum class DialogButtons {
+  OK,                 ///< ACKNOWLEDGE.
+  OK_CANCEL,          ///< ACKNOWLEDGE and CANCEL.
+  YES_NO,             ///< YES and NO; NO is the safe default.
+  YES_NO_CANCEL,      ///< YES, NO and CANCEL.
+  CONFIRM_CANCEL,     ///< CONFIRM and CANCEL.
+  SAVE_DISCARD_CANCEL ///< SAVE, DISCARD and CANCEL.
+};
+
+namespace detail {
+/// @cond INTERNAL
+struct DialogButtonPreset {
+  std::array<MessageChoice, 3> choices;
+  std::size_t count;
+  MessageChoice safeDefault;
+  std::string_view identity;
+};
+
+constexpr std::optional<DialogButtonPreset> dialogButtonPreset(DialogButtons buttons) noexcept {
+  using enum MessageChoice;
+
+  switch (buttons) {
+  case DialogButtons::OK:
+    return DialogButtonPreset{{ACKNOWLEDGE, CANCEL, CANCEL}, 1, ACKNOWLEDGE, "information"};
+  case DialogButtons::OK_CANCEL:
+    return DialogButtonPreset{{ACKNOWLEDGE, CANCEL, CANCEL}, 2, CANCEL, "ok-cancel"};
+  case DialogButtons::YES_NO:
+    return DialogButtonPreset{{YES, NO, CANCEL}, 2, NO, "yes-no"};
+  case DialogButtons::YES_NO_CANCEL:
+    return DialogButtonPreset{{YES, NO, CANCEL}, 3, CANCEL, "yes-no-cancel"};
+  case DialogButtons::CONFIRM_CANCEL:
+    return DialogButtonPreset{{CONFIRM, CANCEL, CANCEL}, 2, CANCEL, "confirm"};
+  case DialogButtons::SAVE_DISCARD_CANCEL:
+    return DialogButtonPreset{{SAVE, DISCARD, CANCEL}, 3, CANCEL, "unsaved"};
+  }
+
+  return {};
+}
+
+constexpr DialogButtons legacyDialogButtons(int kind) noexcept {
+  return kind == 0 ? DialogButtons::OK : kind == 1 ? DialogButtons::CONFIRM_CANCEL : DialogButtons::SAVE_DISCARD_CANCEL;
+}
+
+/// @endcond
+} // namespace detail
+
 /** @brief Owning localizable button captions, resolved once during complete mount. */
 struct MessageLabels {
   TextValue acknowledge{"OK"};   ///< Information action.
@@ -33,17 +82,24 @@ struct MessageLabels {
   TextValue save{"Save"};        ///< Save request.
   TextValue discard{"Discard"};  ///< Discard request.
   TextValue cancel{"Cancel"};    ///< Safe cancellation action.
+  TextValue yes{"Yes"};          ///< Affirmative answer.
+  TextValue no{"No"};            ///< Negative answer.
 };
 
 /** @brief Immutable settings for a ready-made modal choice dialog. */
 struct MessageOptions {
+  ~MessageOptions() = default;
+
   DialogOptions dialog{};  ///< Existing panel settings; MODAL and closeOnEscape are required.
   MessageLabels labels{};  ///< Owning captions; empty or multiline captions are rejected.
   TextResolver resolver{}; ///< Explicit synchronous localization; never retained by mounted widgets.
-  std::optional<MessageChoice> defaultChoice{};     ///< Absent selects ACKNOWLEDGE or the safe CANCEL action.
+  std::optional<MessageChoice>
+    defaultChoice{}; ///< Absent selects preset safety: ACKNOWLEDGE for OK, NO for YES_NO, otherwise CANCEL.
   bool allowDestructiveDefault{};                   ///< Explicit permission for CONFIRM/DISCARD initial focus.
   TextLimits textLimits{16384, 4096, 16384, 32768}; ///< Positive per-value UTF-8/cluster/grapheme/cell caps.
   std::size_t maxBodyLines{4096};                   ///< Positive wrapped explanation line cap; excess is NODE_LIMIT.
+  std::vector<MessageChoice> order =
+    std::vector<MessageChoice>(0); ///< Empty uses preset order; otherwise all active roles exactly once, at most three.
 };
 
 namespace detail {
@@ -69,6 +125,9 @@ struct MessageAccess {
   receive(ManagedScene &scene, Node<Widget> dialog, Node<Widget> owner, const UiAsyncContext &context);
   static Description<Dialog> describe(MessageBox box, TextValue title, TextValue body, MessageOptions options,
                                       int kind);
+  static Description<Dialog> describe(MessageBox box, TextValue title, std::optional<TextValue> text,
+                                      std::optional<Description<Widget>> body, MessageOptions options,
+                                      DialogButtons buttons);
   static std::expected<void, ManagedError> validate(ManagedScene &scene, Node<Widget> dialog, Node<Widget> owner);
   static std::expected<std::shared_ptr<portals::detail::MessageRequest>, ManagedError>
   reserve(ManagedScene &scene, Node<Widget> dialog, Node<Widget> owner);

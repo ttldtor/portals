@@ -122,7 +122,9 @@ std::expected<void, TreeError> Dialog::validate(DialogOptions options) {
       (options.placement != DialogPlacement::CENTER && options.placement != DialogPlacement::BELOW_START &&
        options.placement != DialogPlacement::ABOVE_START) ||
       options.maximumPanelSize.width <= 0 || options.maximumPanelSize.height <= 0 || options.viewportMargin < 0 ||
-      options.anchorGap < 0) {
+      options.anchorGap < 0 ||
+      (options.closeButton.placement != DialogClosePlacement::START &&
+       options.closeButton.placement != DialogClosePlacement::END)) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
@@ -147,7 +149,10 @@ std::expected<CellSize, TreeError> Dialog::measureChildren(std::span<const Measu
     return std::unexpected(valid.error());
   }
 
-  if (children.size() > 1 || (!children.empty() && !grid_detail::valid(children.front()))) {
+  if (children.size() > (close_.session ? 2u : 1u) ||
+      (!children.empty() &&
+       (!grid_detail::valid(children.front()) || (close_.session && children.front().node == close_))) ||
+      (children.size() == 2 && (children.back().node != close_ || !grid_detail::valid(children.back())))) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
@@ -183,6 +188,26 @@ std::expected<std::vector<CellRect>, TreeError> Dialog::arrangeChildren(std::spa
       }
 
       result.push_back(*panel);
+
+      if (children.size() == 2) {
+        // The chrome is a sibling of the bordered content: it occupies no body column,
+        // and Border retains its inner child clip even for oversized custom content.
+        const auto size = panel->size();
+        const auto origin = panel->origin();
+        const auto visible =
+          options_.closeButton.enabled && size.width >= detail::DIALOG_CLOSE_MIN_PANEL_WIDTH && size.height > 0;
+        const auto x = options_.closeButton.placement == DialogClosePlacement::START
+                         ? origin.x + detail::DIALOG_CLOSE_CORNER_INSET
+                         : origin.x + size.width - detail::DIALOG_CLOSE_SIZE.width - detail::DIALOG_CLOSE_CORNER_INSET;
+        const auto close =
+          CellRect::from(visible ? CellPoint{x, origin.y} : origin, visible ? detail::DIALOG_CLOSE_SIZE : CellSize{});
+
+        if (!close) {
+          return std::unexpected(TreeError::INVALID_GEOMETRY);
+        }
+
+        result.push_back(*close);
+      }
     }
 
     return std::expected<std::vector<CellRect>, TreeError>(std::in_place, result);

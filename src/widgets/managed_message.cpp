@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include "action_state.hpp"
 #include "message_box_state.hpp"
 #include <portals/message_box.hpp>
 
@@ -13,6 +14,36 @@ std::shared_ptr<detail::MessageRecord> ManagedScene::findMessage(Node<Widget> no
       return record;
     }
   }
+  return {};
+}
+
+std::expected<void, TreeError> ManagedScene::chooseMessage(const std::shared_ptr<detail::MessageRecord> &record,
+                                                           MessageChoice choice) {
+  if (app_.router().state_->dialogEnterRepeat) {
+    return {};
+  }
+
+  if (!record || !record->current || record->current->done || record->current->result || record->current->starting) {
+    return std::unexpected(TreeError::CLOSED);
+  }
+
+  auto request = record->current;
+
+  if ((request->async && !detail::asyncInvocationCurrent(request->invocation)) || !messageParent(request->owner)) {
+    return std::unexpected(TreeError::CLOSED);
+  }
+
+  request->choosing = choice;
+
+  auto dismissed = dialogCommand(record->dialog->root, false, DialogDismissReason::PROGRAMMATIC);
+
+  request->choosing.reset();
+
+  if (!dismissed && !focusReported(dismissed.error())) {
+    reportShortError(dismissed.error(), "MessageBox.choose", {}, "Dialog", std::source_location::current(),
+                     actionAdmitted_);
+  }
+
   return {};
 }
 

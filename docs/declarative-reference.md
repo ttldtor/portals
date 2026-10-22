@@ -731,10 +731,12 @@ The type schema determines which canonical [`ControlSettings`](../include/portal
 | `maxLayers` | OverlayHost: positive `size_t` registered-layer cap, including hidden layers. | `32`. |
 | `title`, `dialog.mode`, `dialog.placement` | Owning Dialog caption; `MODAL`/`NON_MODAL`; `CENTER`/`BELOW_START`/`ABOVE_START`. | Actual factory title; `MODAL`, `CENTER`. The scoped resource fallback requires an effective supplied title; an empty string is valid. |
 | `dialog.maximumPanelSize.width/height`, `dialog.viewportMargin`, `dialog.anchorGap` | Independent positive `int32_t` panel caps and nonnegative margin/gap, in cells. Caps never narrow the full-host structural Dialog root. | `60×20`, `1`, `1`. |
+| `dialog.closeButton.enabled/placement/focusable` | Optional three-cell `[x]` on the top frame edge, at `START` or `END`; optional Tab focus. | `false`, `END`, `false`. |
 | `dialog.closeOnEscape`, `dialog.frame.glyphs/maxPaintCells` | Allow Escape cancellation; `UNICODE`/`ASCII` border glyphs and positive opaque-panel work cap. The panel frame remains mandatory. | `true`, `UNICODE`, `16384`. |
 | `body` | Owning MessageBox explanation; `.body(...)` / `ui::body(...)` apply to the actual native message recipe. | Actual captured explanation. |
-| `message.labels.acknowledge/confirm/save/discard/cancel` | Owning text expressions. Only actions belonging to the actual message kind are resolved; active captions must be nonempty and single-line. | `OK`, `Continue`, `Save`, `Discard`, `Cancel`. |
-| `message.defaultChoice.enabled/value`, `message.allowDestructiveDefault` | Optional `ACKNOWLEDGE`/`CONFIRM`/`SAVE`/`DISCARD`/`CANCEL`; choice membership and destructive-default permission remain native checks. A supplied value activates the choice; explicit `false` clears it. Invalid enum values are rejected even when inactive. | Absent chooses `ACKNOWLEDGE` for information, otherwise safe `CANCEL`; permission `false`. Enabling without a value retains a captured choice or uses the safe kind default. |
+| `message.labels.acknowledge/confirm/save/discard/cancel/yes/no` | Owning text expressions. Only active actions are resolved; captions must be nonempty and single-line. | `OK`, `Continue`, `Save`, `Discard`, `Cancel`, `Yes`, `No`. |
+| `message.buttons`, `message.order.first/second/third` | Standard preset and optional positions in an exact permutation of its active choices. | Captured preset and order; see [dialog sets](dialogs.md). |
+| `message.defaultChoice.enabled/value`, `message.allowDestructiveDefault` | Optional `MessageChoice`; active membership and destructive-default permission remain native checks. A supplied value activates the choice; explicit `false` clears it. Invalid enum values are rejected even when inactive. | Safe preset default: `ACKNOWLEDGE` for `OK`, `NO` for `YES_NO`, otherwise `CANCEL`; permission `false`. Enabling without a value retains a captured choice or uses the safe preset default. |
 | `message.textLimits.maxInputBytes/maxClusterBytes/maxGraphemes/maxCells`, `message.maxBodyLines` | Positive per-expression UTF-8/cluster/grapheme/cell limits and wrapped-body line cap. `.messageSettings({...})` / `ui::messageSettings({...})` patch supplied message leaves. | `16384`, `4096`, `16384`, `32768`; `4096` lines. |
 | `notification.capacity/maxVisible` | Positive retained/visible notification caps; visible cap must not exceed effective capacity. | `32`, `3`. |
 | `notification.placement/maximumWidth/margin/gap` | `BOTTOM_END`/`TOP_END`/`BOTTOM_START`/`TOP_START`; positive width cap and nonnegative viewport margin/gap in cells. | `BOTTOM_END`, `48`, `1`, `1`. |
@@ -771,6 +773,27 @@ options.control<Dialog>("Prompt", [question](ui::SceneResourceArguments) {
 ```
 
 The registry reads the schema metadata only during registration and retains an owning finite selection. A partial/foreign schema is rejected. The factory must return the actual native message recipe, including through type erasure; an ordinary Dialog is rejected during checked setup. A `Prompt` resource can override the captured title/body and settings; callbacks and `question.open(...)` remain code. Explicit factory localization takes priority; the resource resolver is only a synchronous constructor fallback for this opt-in binding.
+
+The message schema also accepts `message.buttons` (`OK`, `OK_CANCEL`, `YES_NO`,
+`YES_NO_CANCEL`, `CONFIRM_CANCEL`, `SAVE_DISCARD_CANCEL`), `message.labels.yes/no`,
+and `message.order.first/second/third`. Order entries use the `MessageChoice`
+names. Omitted positions retain the selected preset or captured order; the final
+order must be an exact permutation of the active choices. Setting a default
+without an admissible active choice fails checked preparation. Resetting an
+explicit default selects the safe default of the effective preset, including
+`NO` for `YES_NO`.
+
+`dialog.closeButton.enabled`, `dialog.closeButton.placement` (`START`/`END`) and
+`dialog.closeButton.focusable` configure the same optional native frame button
+as `.closeButton()`. Ordinary Dialogs support these geometry settings without
+acquiring a message-result capability. The native panel keeps its existing
+four-sided `BorderOptions` frame.
+
+An explicitly message-schema-bound factory can receive one resource child as its
+owning custom body. The child replaces its captured paragraph or body recipe.
+Combining that child with an explicit `body` text override is an error. A resource
+never stores an executable result callback; it remains attached through the
+captured facade in C++.
 
 Notifications use `.notificationSettings({...})` or `ui::notificationSettings({...})`; omitted leaves retain the captured `NotificationOptions`. Explicit `Notifications` defaults apply to that semantic composition. Unrelated ordinary `Overlay` defaults still do not reinterpret it. Overlay layout/size settings retain the actual surface identity and source-over-factory priority.
 

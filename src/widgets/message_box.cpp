@@ -166,19 +166,36 @@ std::expected<GraphemeText, ManagedError> resolve(const TextValue &value, const 
 
 Description<Dialog> MessageAccess::describe(MessageBox box, TextValue title, TextValue body, MessageOptions options,
                                             int kind) {
-  auto description = Access::cold<Dialog>(
-    [box = std::move(box), title = std::move(title), body = std::move(body), options = std::move(options),
-     kind](ManagedScene &scene, Node<Widget> parent,
-           MountContext &context) mutable -> std::expected<Node<Dialog>, ManagedError> {
+  return describe(std::move(box), std::move(title), std::move(body), {}, std::move(options), legacyDialogButtons(kind));
+}
+
+Description<Dialog> MessageAccess::describe(MessageBox box, TextValue title, std::optional<TextValue> text,
+                                            std::optional<Description<Widget>> body, MessageOptions options,
+                                            DialogButtons buttons) {
+  auto description =
+    Access::cold<Dialog>([box = std::move(box), title = std::move(title), text = std::move(text),
+                          body = std::move(body), options = std::move(options),
+                          buttons](ManagedScene &scene, Node<Widget> parent,
+                                   MountContext &context) mutable -> std::expected<Node<Dialog>, ManagedError> {
       const auto *settings = context.controlSettings;
 
+      if (context.messageBody) {
+        body = std::move(*context.messageBody);
+        text.reset();
+      }
+
       if (settings) {
-        options = controlMessageOptions(*settings, std::move(options), kind);
+        options = controlMessageOptions(*settings, std::move(options), buttons);
+        buttons = settings->message.buttons.value_or(buttons);
         if (settings->title) {
           title = *settings->title;
         }
         if (settings->body) {
-          body = *settings->body;
+          if (body) {
+            return std::unexpected(error(parent, TreeError::INVALID_ARGUMENT));
+          }
+
+          text = *settings->body;
         }
       }
       if (!options.resolver && context.messageResolver) {
@@ -209,13 +226,32 @@ Description<Dialog> MessageAccess::describe(MessageBox box, TextValue title, Tex
         return std::unexpected(error(parent, TreeError::INVALID_ARGUMENT));
       }
       box.target_->pending = true;
-      const std::array<MessageChoice, 3> choices =
-        kind == 0   ? std::array{MessageChoice::ACKNOWLEDGE, MessageChoice::CANCEL, MessageChoice::CANCEL}
-        : kind == 1 ? std::array{MessageChoice::CONFIRM, MessageChoice::CANCEL, MessageChoice::CANCEL}
-                    : std::array{MessageChoice::SAVE, MessageChoice::DISCARD, MessageChoice::CANCEL};
-      const std::size_t count = static_cast<std::size_t>(kind + 1);
-      const auto selected =
-        options.defaultChoice.value_or(kind == 0 ? MessageChoice::ACKNOWLEDGE : MessageChoice::CANCEL);
+      const auto preset = dialogButtonPreset(buttons);
+
+      if (!preset) {
+        return std::unexpected(error(parent, TreeError::INVALID_ARGUMENT));
+      }
+
+      auto choices = preset->choices;
+      const auto count = preset->count;
+
+      if (!options.order.empty()) {
+        if (options.order.size() != count) {
+          return std::unexpected(error(parent, TreeError::INVALID_ARGUMENT));
+        }
+
+        for (std::size_t i = 0; i < count; ++i) {
+          if (!std::ranges::contains(std::span(preset->choices).first(count), options.order[i]) ||
+              std::ranges::contains(std::span(options.order).first(i), options.order[i])) {
+            return std::unexpected(error(parent, TreeError::INVALID_ARGUMENT));
+          }
+
+          choices[i] = options.order[i];
+        }
+      }
+
+      const auto selected = options.defaultChoice.value_or(preset->safeDefault);
+
       if (!std::ranges::contains(std::span(choices).first(count), selected) ||
           ((selected == MessageChoice::CONFIRM || selected == MessageChoice::DISCARD) &&
            !options.allowDestructiveDefault)) {
@@ -225,9 +261,31 @@ Description<Dialog> MessageAccess::describe(MessageBox box, TextValue title, Tex
       if (!heading) {
         return std::unexpected(heading.error());
       }
-      auto paragraph = resolve(body, options, scene, parent);
-      if (!paragraph) {
-        return std::unexpected(paragraph.error());
+      if (text) {
+        auto paragraph = resolve(*text, options, scene, parent);
+
+        if (!paragraph) {
+          return std::unexpected(paragraph.error());
+        }
+
+        body = Access::erase(Access::cold<portals::detail::MessageParagraph>(
+          [paragraph = std::move(*paragraph), maximum = options.maxBodyLines](
+            ManagedScene &owner, Node<Widget> into,
+            MountContext &) mutable -> std::expected<Node<portals::detail::MessageParagraph>, ManagedError> {
+            auto node = owner.emplace<portals::detail::MessageParagraph>(into, std::move(paragraph), maximum);
+
+            if (!node) {
+              return std::unexpected(node.error());
+            }
+
+            auto styled = owner.style(*node, StyleTarget{.type = "MessageParagraph", .classes = {"message-body"}});
+
+            return styled ? node : std::unexpected(styled.error());
+          }));
+      }
+
+      if (!body) {
+        return std::unexpected(error(parent, TreeError::INVALID_ARGUMENT));
       }
       std::array<std::optional<GraphemeText>, 3> labels;
       for (std::size_t i = 0; i < count; ++i) {
@@ -236,6 +294,8 @@ Description<Dialog> MessageAccess::describe(MessageBox box, TextValue title, Tex
                                  : choice == MessageChoice::CONFIRM   ? options.labels.confirm
                                  : choice == MessageChoice::SAVE      ? options.labels.save
                                  : choice == MessageChoice::DISCARD   ? options.labels.discard
+                                 : choice == MessageChoice::YES       ? options.labels.yes
+                                 : choice == MessageChoice::NO        ? options.labels.no
                                                                       : options.labels.cancel;
         auto text = resolve(expression, options, scene, parent);
         if (!text) {
@@ -248,24 +308,22 @@ Description<Dialog> MessageAccess::describe(MessageBox box, TextValue title, Tex
       }
       auto record = std::make_shared<portals::detail::MessageRecord>();
       record->count = count;
-      auto content = Access::cold<Column>([paragraph = std::move(*paragraph), labels = labels, record, choices,
-                                           selected, maximum = options.maxBodyLines](
+      auto content = Access::cold<Column>([body = std::move(*body), labels = labels, record, choices, selected](
                                             ManagedScene &owner, Node<Widget> into,
                                             MountContext &mount) mutable -> std::expected<Node<Column>, ManagedError> {
         auto column = owner.emplace<Column>(into);
         if (!column) {
           return std::unexpected(column.error());
         }
-        auto explanation = owner.emplace<portals::detail::MessageParagraph>(*column, std::move(paragraph), maximum);
+        auto explanation = Access::mount(std::move(body), owner, *column, mount);
+
         if (!explanation) {
           return std::unexpected(explanation.error());
         }
-        record->paragraph = *explanation;
-        mount.nodes.push_back(*explanation);
-        auto styled = owner.style(*explanation, StyleTarget{.type = "MessageParagraph", .classes = {"message-body"}});
-        if (!styled) {
-          return std::unexpected(styled.error());
-        }
+
+        record->body = *explanation;
+
+        std::expected<void, ManagedError> styled;
         auto actions = owner.emplace<Column>(*column);
         if (!actions) {
           return std::unexpected(actions.error());
@@ -288,6 +346,8 @@ Description<Dialog> MessageAccess::describe(MessageBox box, TextValue title, Tex
                              : choice == MessageChoice::CONFIRM   ? "message-confirm"
                              : choice == MessageChoice::SAVE      ? "message-save"
                              : choice == MessageChoice::DISCARD   ? "message-discard"
+                             : choice == MessageChoice::YES       ? "message-yes"
+                             : choice == MessageChoice::NO        ? "message-no"
                                                                   : "message-cancel";
           StyleTarget style = choice == MessageChoice::CONFIRM || choice == MessageChoice::DISCARD
                                 ? StyleTarget{.type = "Button", .classes = {name, "destructive"}}
@@ -298,31 +358,14 @@ Description<Dialog> MessageAccess::describe(MessageBox box, TextValue title, Tex
           }
           auto bound =
             owner.onClick(*button, [&owner, weak = std::weak_ptr(record), choice]() -> std::expected<void, TreeError> {
-              auto live = weak.lock();
-              if (!live || !live->current || live->current->done || live->current->result || live->current->starting) {
-                return std::unexpected(TreeError::CLOSED);
-              }
-              auto request = live->current;
-              if (request->async && !portals::detail::asyncInvocationCurrent(request->invocation)) {
-                return std::unexpected(TreeError::CLOSED);
-              }
-              auto eligible = owner.messageParent(request->owner);
-              if (!eligible) {
-                return std::unexpected(TreeError::CLOSED);
-              }
-              request->choosing = choice;
-              auto dismissed = owner.dialogCommand(live->dialog->root, false, DialogDismissReason::PROGRAMMATIC);
-              request->choosing.reset();
-              if (!dismissed && !ManagedScene::focusReported(dismissed.error())) {
-                owner.reportShortError(dismissed.error(), "MessageBox.choose", {}, "Dialog",
-                                       std::source_location::current(), owner.actionAdmitted_);
-              }
-              return {};
+              return owner.chooseMessage(weak.lock(), choice);
             });
           if (!bound) {
             return std::unexpected(bound.error());
           }
           if (choice == selected) {
+            record->defaultButton = *button;
+            record->defaultChoice = choice;
             auto focused = owner.focusDefault(*button);
             if (!focused) {
               return std::unexpected(focused.error());
@@ -355,11 +398,9 @@ Description<Dialog> MessageAccess::describe(MessageBox box, TextValue title, Tex
         }
       }
       scene.messages_.reserve(scene.messages_.size() + 1);
-      auto styled = scene.style(*mounted, StyleTarget{.type = "Dialog",
-                                                      .classes = {"dialog", "modal", "message-box",
-                                                                  kind == 0   ? "information"
-                                                                  : kind == 1 ? "confirm"
-                                                                              : "unsaved"}});
+      auto styled = scene.style(
+        *mounted,
+        StyleTarget{.type = "Dialog", .classes = {"dialog", "modal", "message-box", std::string(preset->identity)}});
       if (!styled) {
         return std::unexpected(styled.error());
       }

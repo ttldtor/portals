@@ -5,6 +5,7 @@
 #include "action_state.hpp"
 #include "dialog_detail.hpp"
 #include "message_box_state.hpp"
+#include "theme_selector_state.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -79,6 +80,15 @@ bool EventRouter::dialogEligible(Node<Widget> node, Node<Widget> reveal, Node<Wi
   if (layer && layer->root != reveal && (!layer->open || layer->root == exclude)) {
     return false;
   }
+  if (layer && node == layer->close) {
+    const auto geometry = state_->tree.observeGeometry(node);
+
+    if (!geometry || !geometry->geometry.valid || geometry->geometry.surface.size() != detail::DIALOG_CLOSE_SIZE ||
+        geometry->geometry.clip.intersection(geometry->geometry.surface).size() != detail::DIALOG_CLOSE_SIZE) {
+      return false;
+    }
+  }
+
   auto opening = dialogLayer(reveal);
   if (opening && opening->options.mode == DialogMode::MODAL) {
     modal = reveal;
@@ -235,6 +245,26 @@ std::expected<void, ManagedError> ManagedScene::dialog(Node<Dialog> node, Node<W
       node,
       [this, record, life = std::weak_ptr<const void>(lifetime_)](Dialog &, const RoutedEvent &event) {
         const auto *action = std::get_if<ActionEvent>(&event);
+        if (record->open && action && action->action == Action::ACTIVATE && action->modifiers == InputModifiers{} &&
+            app_.router().state_->dialogEnter && !life.expired()) {
+          if (auto message = record->message.lock()) {
+            if (!app_.router().state_->dialogEnterRepeat) {
+              auto eligible = app_.tree().inputEligible(message->defaultButton);
+              auto geometry = app_.tree().observeGeometry(message->defaultButton);
+
+              if (eligible && *eligible && geometry && geometry->visible) {
+                const auto chosen = chooseMessage(message, message->defaultChoice);
+
+                if (!chosen) {
+                  remember(error(ManagedPhase::INPUT, message->defaultButton, chosen.error()));
+                }
+              }
+            }
+
+            return EventReply::HANDLED;
+          }
+        }
+
         if (!record->open || !action || action->action != Action::CANCEL || !record->options.closeOnEscape ||
             life.expired()) {
           return EventReply::IGNORED;
@@ -259,6 +289,14 @@ std::expected<void, ManagedError> ManagedScene::dialog(Node<Dialog> node, Node<W
     if (!binding) {
       return std::unexpected(error(ManagedPhase::BIND, node, binding.error()));
     }
+    if (record->options.closeButton.enabled) {
+      auto close = installDialogClose(record);
+
+      if (!close) {
+        return close;
+      }
+    }
+
     // The root is cold and unobservable until the containing mount publishes its references.
     std::expected<void, TreeError> committed;
     auto hidden = app_.tree().edit(node, [&](Dialog &) {
@@ -290,6 +328,94 @@ std::expected<void, ManagedError> ManagedScene::dialog(Node<Dialog> node, Node<W
   } catch (const std::bad_alloc &) {
     return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
   }
+}
+
+std::expected<void, ManagedError>
+ManagedScene::installDialogClose(const std::shared_ptr<detail::DialogRecord> &record) {
+  auto text = GraphemeText::from(detail::DIALOG_CLOSE_TEXT, widthPolicy());
+
+  if (!text) {
+    return std::unexpected(error(ManagedPhase::BIND, record->root, TreeError::INVALID_ARGUMENT));
+  }
+
+  auto close = emplace<Button>(record->root, std::move(*text), ControlStyle{}, SizePolicy{}, ButtonChrome::NONE);
+
+  if (!close) {
+    return std::unexpected(close.error());
+  }
+
+  auto styled = style(*close, StyleTarget{.type = "Button", .classes = {"dialog-close"}});
+
+  if (!styled) {
+    return styled;
+  }
+
+  auto closeBinding = app_.router().bind(
+    *close,
+    [this, weak = std::weak_ptr(record), life = std::weak_ptr<const void>(lifetime_)](Button &,
+                                                                                      const RoutedEvent &event) {
+      const auto *action = std::get_if<ActionEvent>(&event);
+      const auto *mouse = std::get_if<MouseInputEvent>(&event);
+      const auto *text = std::get_if<TextInputEvent>(&event);
+      const bool activate = (action && action->action == Action::ACTIVATE && action->modifiers == InputModifiers{}) ||
+                            (mouse && mouse->action == MouseAction::PRESS && mouse->button == MouseButton::LEFT &&
+                             mouse->modifiers == InputModifiers{}) ||
+                            (text && text->scalar == U' ' && text->modifiers == InputModifiers{});
+
+      if (!activate || life.expired()) {
+        return EventReply::IGNORED;
+      }
+
+      auto live = weak.lock();
+
+      if (!live || live->retired || !live->open) {
+        return EventReply::IGNORED;
+      }
+
+      if (app_.router().state_->dialogEnterRepeat) {
+        return EventReply::HANDLED;
+      }
+
+      // The selector owns preview restoration. Keep its record alive across cancellation
+      // callbacks; command admission also rejects reentry before the canonical CANCEL path.
+      const auto selector = themeSelector_;
+      auto dismissed = selector && selector->dialog == live
+                         ? ui::detail::ThemeSelectorAccess::command(
+                             selector->target, detail::ThemeSelectorCommand::CANCEL, 0, std::source_location::current())
+                         : dialogCommand(live->root, false, DialogDismissReason::CANCEL);
+
+      if (!dismissed && !shortReported(dismissed.error())) {
+        auto failure = dismissed.error();
+
+        failure.operation = "Dialog.closeButton";
+        failure.operationOrigin = std::source_location::current();
+
+        if (!failure_) {
+          dialogPrimaryRecorded_ = true;
+        }
+
+        remember(failure, *failure.operationOrigin);
+      }
+
+      return EventReply::HANDLED;
+    },
+    record->options.closeButton.focusable);
+
+  if (!closeBinding) {
+    return std::unexpected(error(ManagedPhase::BIND, *close, closeBinding.error()));
+  }
+
+  find(*close)->binding = std::move(*closeBinding);
+  record->close = *close;
+
+  auto assigned = app_.tree().edit(record->root, [&](Dialog &widget) {
+    detail::DialogAccess::bindClose(widget, close->id());
+  });
+
+  if (!assigned) {
+    return std::unexpected(error(ManagedPhase::BIND, record->root, assigned.error()));
+  }
+  return {};
 }
 
 std::expected<void, ManagedError> ManagedScene::dialogAnchor(Node<Widget> node, Node<Widget> anchor,
@@ -633,7 +759,7 @@ std::expected<void, TreeError> ManagedScene::changeDialog(Node<Widget> node, boo
             committed = std::unexpected(TreeError::CLOSED);
             return;
           }
-          if (!app_.tree().inputParent(message->paragraph) || !app_.tree().inputParent(message->actions)) {
+          if (!app_.tree().inputParent(message->body) || !app_.tree().inputParent(message->actions)) {
             committed = std::unexpected(TreeError::STALE_NODE);
             return;
           }

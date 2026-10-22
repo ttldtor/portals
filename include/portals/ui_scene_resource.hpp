@@ -107,7 +107,8 @@ public:
    * @param schema Complete canonical MessageBox, Notifications, ThemeSelector or ThemeSelectorCatalog descriptors, read
    * only during this call and never retained.
    * @return Checked registration, or INVALID_VALUE for empty/foreign/modified metadata.
-   * A returned ordinary/wrong native recipe is rejected during prepare; semantic resource nodes are leaves.
+   * A returned ordinary/wrong native recipe is rejected during prepare. Message dialogs accept one owning custom-body
+   * child; other semantic nodes remain leaves.
    */
   template <class T, class Factory, class Schema>
     requires detail::ResourceFactory<T, Factory> &&
@@ -124,6 +125,13 @@ public:
     entry.text = false;
     entry.sized = *semantic == detail::ControlFactoryKind::NOTIFICATION_BINDING;
     entry.factoryKind = *semantic;
+    entry.semanticPropertyCount = schema.size();
+
+    if (*semantic == detail::ControlFactoryKind::MESSAGE_BINDING) {
+      const auto choice = std::ranges::find(schema, "message.defaultChoice.value", &ControlPropertyDescriptor::path);
+
+      entry.messageChoiceCount = choice->enumNames.size();
+    }
 
     return insert(std::move(entry));
   }
@@ -150,6 +158,8 @@ private:
     bool declaredHost{};
     bool unknownDialog{};
     std::string_view virtualView{};
+    std::optional<std::size_t> semanticPropertyCount{};
+    std::size_t messageChoiceCount{};
     detail::ControlFactoryKind factoryKind{detail::ControlFactoryKind::USER};
     std::function<std::expected<Description<Widget>, ManagedError>(SceneResourceArguments)> create;
   };

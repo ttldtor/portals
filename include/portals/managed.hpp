@@ -29,6 +29,7 @@ namespace portals {
 
 class ManagedScene;
 class Grid;
+enum class MessageChoice;
 
 /** @brief Exact scene access failure or owning table preparation/provider failure. */
 using VisibleModelError = std::variant<ManagedError, VisibleModelReadError>;
@@ -1703,6 +1704,8 @@ private:
 
   struct Entry;
   std::shared_ptr<detail::MessageRecord> findMessage(Node<Widget> node) const;
+  std::expected<void, TreeError> chooseMessage(const std::shared_ptr<detail::MessageRecord> &record,
+                                               MessageChoice choice);
   bool messageOwner(Node<Widget> owner) const;
   bool messageWithin(Node<Widget> root, Node<Widget> node) const;
   std::expected<Node<Widget>, TreeError> messageParent(Node<Widget> node) const;
@@ -1744,6 +1747,7 @@ private:
   bool modalDialogInput();
   void retireDialogs() noexcept;
   std::expected<Node<Widget>, ManagedError> makeDialogPanel(Node<Dialog> node, BorderOptions options);
+  std::expected<void, ManagedError> installDialogClose(const std::shared_ptr<detail::DialogRecord> &record);
   std::expected<void, ManagedError>
   setDialogDismiss(Node<Dialog> node, std::function<std::expected<void, TreeError>(DialogDismissReason)> callback);
 

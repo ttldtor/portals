@@ -30,6 +30,19 @@ enum class DialogDismissReason {
   CANCEL        ///< Cancellation through the managed input policy.
 };
 
+/** @brief Which top-frame segment owns the close affordance. */
+enum class DialogClosePlacement {
+  START, ///< Immediately after the leading corner.
+  END    ///< Immediately before the trailing corner.
+};
+
+/** @brief Optional finite close chrome settings; the glyph occupies three terminal cells. */
+struct DialogCloseOptions {
+  bool enabled{true};                                        ///< Enable this explicitly requested close affordance.
+  DialogClosePlacement placement{DialogClosePlacement::END}; ///< Top-edge placement.
+  bool focusable{}; ///< Include in focus traversal; initial action focus is unchanged.
+};
+
 /** @brief Owning registration budget for a single scene overlay host. */
 struct OverlayHostOptions {
   std::size_t maxLayers{32}; ///< Positive cap on registered layers, including hidden layers.
@@ -44,6 +57,7 @@ struct DialogOptions {
   std::int32_t anchorGap{1};                          ///< Nonnegative distance from the anchor.
   bool closeOnEscape{true};                           ///< Allow managed cancellation with Escape.
   BorderOptions frame{};                              ///< Frame glyph policy and allocated opaque-area paint cap.
+  DialogCloseOptions closeButton{.enabled = false};   ///< Opt-in close chrome on the top frame edge.
 };
 
 /** @brief Transparent overlay with exact body identity and body-only intrinsic measurement.
@@ -114,5 +128,6 @@ private:
   friend struct detail::DialogAccess;
   DialogOptions options_;
   std::optional<CellRect> anchor_;
+  NodeId close_{};
 };
 } // namespace portals

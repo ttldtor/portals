@@ -1340,7 +1340,7 @@ TEST_CASE("ThemeSelector view literals preserve actual options and optional shor
   ControlContext controls;
 
   take(ui::detail::ControlContextAccess::installThemeSelectorSchema(controls));
-  CHECK(controlPropertySchema("ThemeSelector").size() == 22);
+  CHECK(controlPropertySchema("ThemeSelector").size() == 25);
   const auto native = ui::detail::controlThemeSelectorOptions({}, {});
 
   CHECK(native.title.resolve(WidthPolicy{}).value().bytes() == "Themes");
@@ -1416,8 +1416,8 @@ TEST_CASE("ThemeSelector view literals preserve actual options and optional shor
 TEST_CASE("ThemeSelectorCatalog keeps finite constructor options and optional activation semantics") {
   ControlContext controls;
   take(ui::detail::ControlContextAccess::installThemeCatalogSchema(controls));
-  CHECK(controlPropertySchema("ThemeSelector").size() == 22);
-  CHECK(controlPropertySchema("ThemeSelectorCatalog").size() == 38);
+  CHECK(controlPropertySchema("ThemeSelector").size() == 25);
+  CHECK(controlPropertySchema("ThemeSelectorCatalog").size() == 41);
   const ControlSettings all{
     .themeCatalog = {
       .maxChoices = 3,
@@ -1519,7 +1519,7 @@ TEST_CASE("actual catalog fixed ancestry retains sparse precedence origins and u
 }
 
 TEST_CASE("Shared frame schema appends stable leaves within three presence words") {
-  static_assert(ui::detail::CONTROL_PROPERTY_COUNT == 180);
+  static_assert(ui::detail::CONTROL_PROPERTY_COUNT == 189);
   static_assert((ui::detail::CONTROL_PRESENCE_BITS + 63) / 64 == 3);
   ControlSettings patch;
   patch.frame.enabled = true;

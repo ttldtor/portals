@@ -14,7 +14,9 @@ struct MessageRequest;
 struct MessageRecord {
   std::shared_ptr<DialogRecord> dialog;
   std::array<Node<Button>, 3> buttons{};
-  Node<Widget> paragraph;
+  Node<Widget> body;
+  Node<Button> defaultButton;
+  MessageChoice defaultChoice{};
   Node<Widget> actions;
   std::size_t count{};
   std::uint64_t nextId{};

@@ -50,8 +50,9 @@ the typed root-host override and cannot be combined with extra scene layers.
 
 `ui::overlayHost(body, layers...)` takes one ordinary body and dialog recipes.
 `ui::dialog(reference, title, body, options)` creates one initially closed layer.
-Titles use existing owning text/resource conversion. This C++ composition does
-not register `Dialog` or `OverlayHost` as built-in scene-resource loader tags. Ref copies captured before
+Titles use existing owning text/resource conversion. The configuration resource
+format also provides `Dialog` and `OverlayHost`; see the
+[scene-loading guide](scene-loading-guide.md). Ref copies captured before
 mount share a slot published only after complete successful mounting. Reuse a
 closed dialog by opening it again; do not remount its controls for every opening.
 
@@ -167,9 +168,8 @@ registered layers, including hidden ones. The options-first overload is
 registration; repeated open/close does not register another copy.
 
 Closed and unchanged dialogs need no polling timer or permanent redraw. Scene
-shutdown retires them with other managed resources. MessageBox results,
-save/discard workflows and asynchronous dialog results are application
-compositions, not additional promises of this foundation.
+shutdown retires them with other managed resources. The choice helpers below
+provide results and save/discard workflows through the same host and scheduler.
 
 ## Ready-made modal choices
 
@@ -190,7 +190,8 @@ guide project builds `guide_message_box`; the root build with
 `MessageOptions::defaultChoice` can select another button in that preset.
 `CONFIRM` and `DISCARD` require the explicit `allowDestructiveDefault` opt-in.
 These helpers require a modal `DialogOptions` configuration with Escape enabled;
-use `ui::dialog` for custom layouts, button sets or non-modal panels. Captions
+use the resultful `ui::dialog` overload below for custom content and standard
+button sets, or an ordinary `ui::Ref<Dialog>` for non-modal panels. Captions
 and title/body text are owning and may use the existing synchronous resolver.
 Captions must be non-empty single-line text. `textLimits` defaults to
 16,384 input bytes, 4,096 bytes per cluster, 16,384 graphemes and 32,768 cells;
@@ -219,3 +220,67 @@ limits outstanding/reserved/retired MessageBox requests to 32 by default
 (`ManagedOptions::maxMessageRequests`). Queue exhaustion and teardown can
 still reject or cancel delivery, so an asynchronous result is not a durable
 business record.
+
+## Custom content and standard button sets
+
+You can pass an owning description as the body of a choice dialog. The buttons,
+result delivery and modal focus stay managed by the existing scene. The complete
+[custom-choice example](examples/guide_dialog_actions.cpp) displays the result
+of a YES/NO question:
+
+\include guide_dialog_actions.cpp
+
+Build `guide_dialog_actions` in the standalone guide project, or
+`portals_docs_dialog_actions` in the root test build. No terminal emulator or
+replay driver is part of this application. The sample only displays the requested
+choice; it does not change settings.
+
+| `ui::DialogButtons` | Active choices | Default focus |
+| --- | --- | --- |
+| `OK` | `ACKNOWLEDGE` | `ACKNOWLEDGE` |
+| `OK_CANCEL` | `ACKNOWLEDGE`, `CANCEL` | `CANCEL` |
+| `YES_NO` | `YES`, `NO` | `NO` |
+| `YES_NO_CANCEL` | `YES`, `NO`, `CANCEL` | `CANCEL` |
+| `CONFIRM_CANCEL` | `CONFIRM`, `CANCEL` | `CANCEL` |
+| `SAVE_DISCARD_CANCEL` | `SAVE`, `DISCARD`, `CANCEL` | `CANCEL` |
+
+`ui::dialog(reference, title, body, buttons, options)` accepts an ordinary owning
+text value or a cold control description for `body`. Use `ui::Ref<MessageDialog>`
+when the application needs a choice result. The existing `ui::Ref<Dialog>`
+overload remains suitable for panels with application-owned actions.
+
+For advanced configuration, `MessageOptions::labels` provides owning localizable
+captions, including `yes` and `no`. An empty `order` uses preset order; an explicit
+order must contain every active choice exactly once, with no foreign choices and
+at most three elements. `defaultChoice` must belong to the selected preset.
+Existing destructive-default permission still applies to `CONFIRM` and `DISCARD`.
+
+Unhandled keyboard Enter activates the enabled default action. A child that
+handles Enter keeps it: a text field can commit or validate without also choosing
+a dialog result. Events marked `KeyAction::REPEAT` do not activate a result
+button or the frame close control. If a terminal protocol reports only independent
+presses, the application cannot distinguish a held key from separate presses.
+Unhandled Escape and frame close produce `CANCEL`, including for
+`YES_NO`, whose visible buttons do not include Cancel. A technical failure remains
+an error in `MessageResult`; it is not converted to `NO` or `CANCEL`.
+
+## A close button on the frame
+
+Add `.closeButton()` to an ordinary or resultful dialog, or apply the equivalent
+`| ui::closeButton()` modifier. Existing dialogs do not gain a close button unless
+requested. The default marker is `[x]`, at the end of the top frame edge. It shares
+the existing input and styling machinery through the `dialog-close` class.
+
+`DialogCloseOptions` selects `DialogClosePlacement::START` or `END` and optional
+keyboard focusability. By default the close button is not a Tab stop and does not
+replace initial action focus. It occupies three cells inside the corners without
+subtracting a content column. The dialog title remains in the body below that
+edge. Dialogs retain their four-sided `BorderOptions` frame; the separate advanced
+`FrameOptions` API for sized controls does not change dialog geometry. With fewer
+than five outer cells, the close button has no painted, pointer or focus target.
+Disabled, hidden and retired dialogs cannot activate it.
+
+When a theme selector enables this close control, it follows the selector's
+Cancel operation: the owned preview is cancelled before dismissal. A conflicting
+preview or reentrant command retains the existing typed failure rather than
+silently closing the selector. The close control does not bypass command guards.

@@ -398,10 +398,12 @@ Space и нажатие мыши сохраняют тип. Отпускание
 | `maxLayers` | OverlayHost: положительный `size_t`, число зарегистрированных слоёв, включая скрытые. | `32`. |
 | `title`, `dialog.mode`, `dialog.placement` | Владеющий заголовок Dialog; режим `MODAL`/`NON_MODAL`; размещение `CENTER`/`BELOW_START`/`ABOVE_START`. | Заголовок принимающей фабрики; `MODAL`, `CENTER`. Локальная ресурсная фабрика требует явно заданного эффективного заголовка; пустая строка допустима. |
 | `dialog.maximumPanelSize.width/height`, `dialog.viewportMargin`, `dialog.anchorGap` | Положительные пределы панели `int32_t` и неотрицательные отступ/зазор, в ячейках. Размеры не сужают структурный корень Dialog. | `60×20`, `1`, `1`. |
+| `dialog.closeButton.enabled/placement/focusable` | Необязательный трёхъячеечный `[x]` на верхней границе, `START` или `END`; необязательный фокус через Tab. | `false`, `END`, `false`. |
 | `dialog.closeOnEscape`, `dialog.frame.glyphs/maxPaintCells` | Разрешение отмены через Esc; символы `UNICODE`/`ASCII` и положительный бюджет непрозрачной панели. Рамка остаётся обязательной. | `true`, `UNICODE`, `16384`. |
 | `body` | Владеющее пояснение MessageBox; `.body(...)` / `ui::body(...)` применяются к настоящему native message recipe. | Фактическое пояснение захваченной фабрики. |
-| `message.labels.acknowledge/confirm/save/discard/cancel` | Владеющие текстовые выражения. Разрешаются только действия фактического вида диалога; активные подписи должны быть непустыми и однострочными. | `OK`, `Continue`, `Save`, `Discard`, `Cancel`. |
-| `message.defaultChoice.enabled/value`, `message.allowDestructiveDefault` | Необязательный `ACKNOWLEDGE`/`CONFIRM`/`SAVE`/`DISCARD`/`CANCEL`; принадлежность виду диалога и разрешение опасного выбора проверяет native-фабрика. Заданное значение включает выбор; явное `false` очищает его. Некорректный enum отвергается даже в неактивном поле. | Без значения — `ACKNOWLEDGE` для информации, иначе безопасный `CANCEL`; разрешение `false`. Включение без значения сохраняет захваченный выбор либо использует безопасный выбор вида диалога. |
+| `message.labels.acknowledge/confirm/save/discard/cancel/yes/no` | Владеющие текстовые выражения. Разрешаются только активные действия; подписи должны быть непустыми и однострочными. | `OK`, `Continue`, `Save`, `Discard`, `Cancel`, `Yes`, `No`. |
+| `message.buttons`, `message.order.first/second/third` | Стандартный набор и необязательные позиции в точной перестановке его активных ответов. | Захваченные набор и порядок; см. [наборы диалогов](dialogs.md). |
+| `message.defaultChoice.enabled/value`, `message.allowDestructiveDefault` | Необязательный `MessageChoice`; принадлежность набору и разрешение опасного выбора проверяет native-фабрика. Заданное значение включает выбор; явное `false` очищает его. Некорректный enum отвергается даже в неактивном поле. | Безопасный default набора: `ACKNOWLEDGE` для `OK`, `NO` для `YES_NO`, иначе `CANCEL`; разрешение `false`. Включение без значения сохраняет захваченный выбор либо использует безопасный default набора. |
 | `message.textLimits.maxInputBytes/maxClusterBytes/maxGraphemes/maxCells`, `message.maxBodyLines` | Положительные лимиты UTF-8/кластера/графем/ячеек одного выражения и строк перенесённого пояснения. `.messageSettings({...})` / `ui::messageSettings({...})` меняют только заданные листья. | `16384`, `4096`, `16384`, `32768`; `4096` строк. |
 | `notification.capacity/maxVisible` | Положительные лимиты удерживаемых/видимых уведомлений; видимый лимит не больше фактической capacity. | `32`, `3`. |
 | `notification.placement/maximumWidth/margin/gap` | `BOTTOM_END`/`TOP_END`/`BOTTOM_START`/`TOP_START`; положительный предел ширины, неотрицательные отступ и промежуток в ячейках. | `BOTTOM_END`, `48`, `1`, `1`. |
@@ -434,6 +436,26 @@ options.control<Dialog>("Prompt", [question](ui::SceneResourceArguments) {
   return ui::confirmDialog(question, "Continue?", "Apply these settings?");
 }, ui::controlPropertySchema("MessageBox"));
 ```
+
+Message-схема также принимает `message.buttons` (`OK`, `OK_CANCEL`, `YES_NO`,
+`YES_NO_CANCEL`, `CONFIRM_CANCEL`, `SAVE_DISCARD_CANCEL`), `message.labels.yes/no`
+и `message.order.first/second/third`. Значения порядка — имена `MessageChoice`.
+Пропущенные позиции сохраняют порядок выбранного набора или захваченной фабрики;
+итог должен содержать каждый активный ответ ровно один раз. Недопустимый выбор
+по умолчанию отклоняется при checked-подготовке. Сброс явного выбора возвращает
+безопасный default фактического набора, включая `NO` для `YES_NO`.
+
+`dialog.closeButton.enabled`, `dialog.closeButton.placement` (`START`/`END`) и
+`dialog.closeButton.focusable` задают ту же необязательную кнопку на рамке, что
+и `.closeButton()`. Эти параметры геометрии доступны обычному Dialog, не добавляя
+ему результат выбора. Нативная панель сохраняет прежнюю четырёхстороннюю рамку
+`BorderOptions`.
+
+Фабрика с явной привязкой message-схемы может получить один ресурсный дочерний
+контрол как владеющее содержимое. Он заменяет захваченный абзац или рецепт тела.
+Совместное указание такого контрола и текстового переопределения `body` — ошибка.
+Ресурс не хранит исполняемый обработчик результата: его подключает C++ через
+захваченный facade.
 
 Реестр читает метаданные схемы только при регистрации и сохраняет собственный конечный выбор. Неполная или чужая схема отвергается. Фабрика должна вернуть настоящий native message recipe, в том числе после стирания типа; обычный Dialog отвергается при проверяемой подготовке. Ресурс `Prompt` может заменить захваченные title/body и настройки; callbacks и `question.open(...)` остаются в коде. Явная локализация фабрики приоритетна; resolver ресурса — только синхронный fallback конструктора для этой явной привязки.
 

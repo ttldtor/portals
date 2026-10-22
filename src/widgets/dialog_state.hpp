@@ -12,6 +12,7 @@ struct DialogRecord {
   Node<Dialog> root;
   Node<Widget> panel;
   Node<Widget> body;
+  Node<Button> close;
   Node<Widget> anchor;
   Node<Widget> initialFocus;
   DialogOptions options;
@@ -28,6 +29,7 @@ struct DialogRecord {
 struct DialogHostRecord {
   Node<OverlayHost> root;
   Node<Widget> body;
+  Node<Button> close;
   std::vector<std::shared_ptr<DialogRecord>> layers = std::vector<std::shared_ptr<DialogRecord>>(0);
   std::size_t maximum{};
   bool operating{};
