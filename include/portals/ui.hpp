@@ -216,6 +216,62 @@ struct SizeChange {
   std::uint32_t weight{1}; ///< Positive flex weight for FLEX operations.
 };
 
+/** @param name Compact checked preset name; source bytes are borrowed only during this call.
+ * @return Known built-in pattern, or no match; no allocation or text decoding occurs.
+ */
+constexpr std::optional<FramePattern> framePattern(std::string_view name) noexcept {
+  if (name == "single" || name == "plain") {
+    return FramePattern::SINGLE;
+  }
+
+  if (name == "rounded") {
+    return FramePattern::ROUNDED;
+  }
+
+  if (name == "double") {
+    return FramePattern::DOUBLE;
+  }
+
+  if (name == "heavy") {
+    return FramePattern::HEAVY;
+  }
+
+  if (name == "ascii") {
+    return FramePattern::ASCII;
+  }
+
+  return {};
+}
+
+/** @param frame Sparse frame leaves, borrowed only for the check.
+ * @return Whether decoration was requested; no allocation or traversal of unrelated settings.
+ */
+inline bool hasFrameSettings(const ControlScrollFrameSettings &frame) noexcept {
+  const auto &sides = frame.sides;
+  const auto &glyphs = frame.customGlyphs;
+
+  return frame.enabled || frame.glyphs || frame.maxPaintCells || frame.pattern || sides.top || sides.right ||
+         sides.bottom || sides.left || frame.title || frame.titleAlignment || frame.maxTitleBytes || glyphs.enabled ||
+         glyphs.topLeft || glyphs.topRight || glyphs.bottomLeft || glyphs.bottomRight || glyphs.horizontal ||
+         glyphs.vertical;
+}
+
+/** @param code Frame validation category. @param path Owning diagnostic path to copy.
+ * @param node Existing parent used for mount attribution.
+ * @return Checked frame failure; allocation failure preserves a typed NO_MEMORY fallback.
+ */
+inline ManagedError frameContextError(ControlContextErrorCode code, std::string_view path, Node<Widget> node = {}) {
+  try {
+    auto diagnostic = std::make_shared<ControlContextDiagnostic>();
+
+    diagnostic->path = path;
+
+    return controlContextError({code, std::move(diagnostic)}, node);
+  } catch (const std::bad_alloc &) {
+    return error(node, TreeError::NO_MEMORY);
+  }
+}
+
 /** @brief Grid-only sparse configuration, released with its construction transaction. */
 struct GridRecipeControl {
   ControlSettings arguments;                      ///< Positional grid literals retained for fallback-schema resolution.
@@ -432,7 +488,10 @@ struct MountContext {
   const TextResolver *messageResolver{};    ///< Opted-in MessageBox constructor-only fallback; cleared before children.
   const TextResolver *dataStateResolver{};  ///< Native fallback constructor-only borrow; never ambient to body/setup.
   const ControlSettings *controlSettings{}; ///< Constructor-only borrowed settings; restored before setup/children.
-  Node<Widget> root;                        ///< First created node; identifies the subtree to retire on failure.
+  const ControlSettings *frameSettings{};   ///< Current source frame patch only; never inherited by children.
+  const FrameOptions *frameOptions{}; ///< Current native ScrollArea constructor only; never inherited by children.
+  Node<Widget> mountedOuter;          ///< Last synchronous mount's actual layout root, including through type erasure.
+  Node<Widget> root;                  ///< First created node; identifies the subtree to retire on failure.
   std::vector<Node<Widget>> nodes =
     std::vector<Node<Widget>>(0); ///< Created observers checked for liveness before publication.
   std::vector<portals::detail::MoveOnlyFunction<void()>> publish =
@@ -703,6 +762,16 @@ struct Access {
    * @return Empty native frame recipe; callers attach exactly one real content edge without a wrapper.
    */
   static Description<Border> borderControl(BorderOptions options, ControlStyle style);
+  /** @param options Owning advanced appearance, validated before constructing descendants.
+   * @param style Manual owning appearances beneath the existing stylesheet resolver.
+   * @return Border recipe participating in ordinary mount tracking, rollback and reference publication.
+   */
+  static Description<Border> framedControl(FrameOptions options, ControlStyle style);
+  /** @brief Stage precharged frame settings on the exact typed source recipe.
+   * @param description Recipe retaining its ordinary source identity and callbacks on T.
+   * @param settings Owning sparse frame patch and diagnostic provenance copied before erasure.
+   */
+  template <class T> static void frameSettings(Description<T> &description, const ControlSettings &settings);
   /** @param options Actual ordinary Overlay alignment/insets.
    * @param policy Actual parent size policy, preserved when sparse settings are absent.
    * @return Empty native Overlay recipe; children attach as real edges in source order.
@@ -1328,6 +1397,10 @@ struct Access {
    * @return Single-use recipe sharing rollback and deferred reference publication.
    */
   template <class T> static Description<Widget> erase(Description<T> description);
+  /** @param description Consuming composite recipe whose factory forwards an inner mount's layout root.
+   * @return Same source recipe opting into synchronous outer-root propagation; no retained wrapper is added.
+   */
+  static Description<Widget> forwardOuter(Description<Widget> description);
 
   /** @param scene Existing managed owner receiving a checked policy update.
    * @param node Live sized target created by this mount transaction.
@@ -3267,6 +3340,80 @@ public:
     return std::move(*this);
   }
 
+  /** @param options Owning frame pattern, sides, title and finite limits; validated during mount.
+   * @return Consuming recipe retaining its original typed Ref and handlers. Width/height/flex and
+   * mount-only visibility/enabled flags address the outer frame; custom setup still addresses T.
+   * ScrollArea configures its own frame; ordinary sized widgets gain one passive Border ancestor.
+   */
+  Description &&framed(FrameOptions options = {}) &&
+    requires std::derived_from<T, SizedWidget>
+  {
+    if (state_) {
+      auto &frame = frameRecipe();
+
+      frame.options = std::move(options);
+      frame.hasOptions = true;
+      frame.invalidPattern = false;
+    }
+
+    return std::move(*this);
+  }
+
+  /** @param pattern One of single/plain, rounded, double, heavy or ascii.
+   * @return Consuming frame recipe; unknown names become typed frame.pattern errors at mount.
+   */
+  Description &&framed(std::string_view pattern) &&
+    requires std::derived_from<T, SizedWidget>
+  {
+    if (state_) {
+      auto &frame = frameRecipe();
+      const auto selected = detail::framePattern(pattern);
+
+      frame.options = {};
+      frame.hasOptions = true;
+      frame.invalidPattern = !selected;
+
+      if (selected) {
+        frame.options.pattern = *selected;
+      }
+    }
+
+    return std::move(*this);
+  }
+
+  /** @param outer Empty observer published for the retained Border only after complete mount success.
+   * @param options Owning advanced frame settings.
+   * @return Same typed child recipe; hide/remove outer to affect both frame and content.
+   * Removing or hiding the original child Ref retains the ordinary downward-only tree semantics.
+   */
+  Description &&framed(Ref<Border> outer, FrameOptions options = {}) &&
+    requires(std::derived_from<T, SizedWidget> && !std::same_as<T, ScrollArea>)
+  {
+    (void)std::move(*this).framed(std::move(options));
+
+    if (state_) {
+      frameRecipe().reference = std::move(outer);
+    }
+
+    return std::move(*this);
+  }
+
+  /** @param outer Empty observer for this recipe's new Border ancestor.
+   * @param pattern Checked compact preset name.
+   * @return Same typed child recipe, with the same delayed reference publication as framed(outer, options).
+   */
+  Description &&framed(Ref<Border> outer, std::string_view pattern) &&
+    requires(std::derived_from<T, SizedWidget> && !std::same_as<T, ScrollArea>)
+  {
+    (void)std::move(*this).framed(pattern);
+
+    if (state_) {
+      frameRecipe().reference = std::move(outer);
+    }
+
+    return std::move(*this);
+  }
+
   /** @param cells Nonnegative fixed width; replaces only the horizontal bounds/mode.
    * @return Consuming recipe; invalid cells fail at mount without publishing refs.
    */
@@ -3818,6 +3965,16 @@ private:
   using Child = portals::detail::MoveOnlyFunction<std::expected<void, ManagedError>(ManagedScene &, Node<Widget>,
                                                                                     detail::MountContext &)>;
 
+  /** @brief Optional cold decoration; never retained by mounted callbacks or widgets. */
+  struct FrameRecipe {
+    FrameOptions options;                    ///< Owning advanced pattern and finite work settings.
+    std::unique_ptr<ControlSettings> source; ///< Precharged resource frame leaves and diagnostic provenance.
+    bool hasOptions{};                       ///< Explicit fluent decoration, independent of an inherited sparse patch.
+    std::optional<Ref<Border>> reference;    ///< Optional observer for explicit outer geometry/removal.
+    Node<Border> mounted;                    ///< Mount-only resize target; destroyed with the cold State.
+    bool invalidPattern{};                   ///< Unknown compact spelling, reported at mount rather than ignored.
+  };
+
   /** @brief Unmounted recipe storage, consumed and destroyed during mount. */
   struct State {
     Factory create;                                                  ///< Constructs exactly one managed node.
@@ -3825,12 +3982,14 @@ private:
     std::vector<Child> children = std::vector<Child>(0);             ///< Consuming child adapters in insertion order.
     std::vector<NodeRef<T>> references = std::vector<NodeRef<T>>(0); ///< Observing slots reserved for this node.
     std::shared_ptr<detail::RecipeLayout> layout; ///< Optional cold relationship metadata; never mounted state.
-    bool focusScope{};                            ///< Register before setup/children; scene owns its token.
-    bool focusDefault{};                          ///< Set the nearest registered scope's default before children.
-    std::optional<bool> visible;                  ///< Final mount-only local visibility; absent keeps tree defaults.
-    std::optional<bool> enabled;                  ///< Final mount-only local enabled state; no runtime state source.
-    std::optional<std::string> id;                ///< Compact recipe identity preserved by later style modifiers.
-    std::shared_ptr<detail::RefTarget> anchor;    ///< Cold same-attempt body anchor, without widget ownership.
+    std::unique_ptr<FrameRecipe> frame;           ///< Allocated only for an explicitly framed recipe.
+    bool forwardsOuter{};                      ///< Type-erased factory forwards its inner mount's actual layout root.
+    bool focusScope{};                         ///< Register before setup/children; scene owns its token.
+    bool focusDefault{};                       ///< Set the nearest registered scope's default before children.
+    std::optional<bool> visible;               ///< Final mount-only local visibility; absent keeps tree defaults.
+    std::optional<bool> enabled;               ///< Final mount-only local enabled state; no runtime state source.
+    std::optional<std::string> id;             ///< Compact recipe identity preserved by later style modifiers.
+    std::shared_ptr<detail::RefTarget> anchor; ///< Cold same-attempt body anchor, without widget ownership.
     DialogPlacement placement{DialogPlacement::BELOW_START}; ///< Configured anchor preference.
     bool anchorRequested{};                    ///< Distinguish an absent modifier from an empty moved observing slot.
     std::optional<StyleTarget> intrinsicStyle; ///< Owning natural type names, finalized after ordinary setup.
@@ -3912,9 +4071,26 @@ private:
   Description &&resize(detail::SizeChange change) &&
     requires std::derived_from<T, SizedWidget>
   {
-    return std::move(*this).setup([change](ManagedScene &scene, Node<T> node) {
-      return detail::Access::resize(scene, node, change);
+    auto *state = state_.get();
+
+    // The callback lives in this State and runs synchronously before mountInto releases it.
+    // It must never be exported to publish/finalize/runtime callbacks.
+    return std::move(*this).setup([change, state](ManagedScene &scene, Node<T> node) {
+      const Node<SizedWidget> target = state && state->frame && state->frame->mounted != Node<Border>{}
+                                         ? Node<SizedWidget>(state->frame->mounted)
+                                         : Node<SizedWidget>(node);
+
+      return detail::Access::resize(scene, target, change);
     });
+  }
+
+  /** @return Stable cold frame configuration, allocated only when this recipe opts in. */
+  FrameRecipe &frameRecipe() {
+    if (!state_->frame) {
+      state_->frame = std::make_unique<FrameRecipe>();
+    }
+
+    return *state_->frame;
   }
 
   /** @brief Retain a shared observing slot without publishing it yet.
@@ -4207,26 +4383,116 @@ private:
     }
     const auto *resolved = state->resolvedControl.get();
 
+    auto mountParent = parent;
+
+    if constexpr (std::derived_from<T, SizedWidget> && !std::same_as<T, ScrollArea>) {
+      const auto &settings = resolved ? resolved->settings : state->controlArguments;
+      const bool configuredFrame = detail::hasFrameSettings(settings.frame);
+
+      if (state->frame || configuredFrame) {
+        if (state->frame && state->frame->invalidPattern) {
+          return std::unexpected(
+            detail::frameContextError(ControlContextErrorCode::INVALID_VALUE, "frame.pattern", parent));
+        }
+
+        auto effective = detail::controlFrameOptions(
+          settings, state->frame && state->frame->hasOptions ? std::optional(state->frame->options) : std::nullopt,
+          scene.widthPolicy());
+
+        if (!effective) {
+          return std::unexpected(effective.error());
+        }
+
+        if (state->frame && state->frame->source) {
+          effective = detail::controlFrameOptions(*state->frame->source, std::move(*effective), scene.widthPolicy());
+
+          if (!effective) {
+            return std::unexpected(effective.error());
+          }
+        }
+
+        if (*effective) {
+          if (!state->frame) {
+            state->frame = std::make_unique<FrameRecipe>();
+          }
+
+          state->frame->options = std::move(**effective);
+          state->frame->hasOptions = true;
+        } else {
+          state->frame.reset();
+        }
+      }
+    }
+
+    if (state->frame) {
+      if (state->frame->invalidPattern) {
+        return std::unexpected(
+          detail::frameContextError(ControlContextErrorCode::INVALID_VALUE, "frame.pattern", parent));
+      }
+
+      const auto valid = Border::validateFrame(state->frame->options);
+
+      if (!valid) {
+        return std::unexpected(detail::error(parent, valid.error()));
+      }
+
+      if constexpr (std::same_as<T, ScrollArea>) {
+        // Only the native factory consumes constructor-scoped advanced frame settings.
+        if (!state->controlType || *state->controlType != "ScrollArea") {
+          return std::unexpected(detail::error(parent, TreeError::INVALID_ARGUMENT));
+        }
+      } else {
+        auto frame = detail::Access::framedControl(std::move(state->frame->options), {});
+
+        if (state->frame->reference) {
+          (void)std::move(frame).reference(*state->frame->reference);
+        }
+
+        auto mounted = detail::Access::mount(std::move(frame), scene, parent, context);
+
+        if (!mounted) {
+          return std::unexpected(mounted.error());
+        }
+
+        state->frame->mounted = *mounted;
+        mountParent = *mounted;
+      }
+    }
+
+    context.mountedOuter = {};
+
     auto node = [&] {
       struct Restore {
         detail::MountContext &context;
         bool previous;
         const ControlSettings *settings;
+        const FrameOptions *frame;
+        const ControlSettings *frameSettings;
         ~Restore() {
           context.controlPrepared = previous;
           context.controlSettings = settings;
+          context.frameOptions = frame;
+          context.frameSettings = frameSettings;
         }
-      } restore{context, context.controlPrepared, context.controlSettings};
+      } restore{context, context.controlPrepared, context.controlSettings, context.frameOptions, context.frameSettings};
 
       context.controlPrepared = state->controlPrepared;
       context.controlSettings = resolved ? &resolved->settings : &state->controlArguments;
+      context.frameOptions =
+        std::same_as<T, ScrollArea> && state->frame && state->frame->hasOptions ? &state->frame->options : nullptr;
+      context.frameSettings = std::same_as<T, ScrollArea> && state->frame ? state->frame->source.get() : nullptr;
 
-      return state->create(scene, parent, context);
+      return state->create(scene, mountParent, context);
     }();
 
     if (!node) {
       return node;
     }
+
+    const Node<Widget> outer = state->frame && state->frame->mounted != Node<Border>{}
+                                 ? Node<Widget>(state->frame->mounted)
+                               : state->forwardsOuter && context.mountedOuter != Node<Widget>{} ? context.mountedOuter
+                                                                                                : Node<Widget>(*node);
 
     if (context.root == Node<Widget>{}) {
       context.root = *node;
@@ -4235,7 +4501,7 @@ private:
     context.nodes.push_back(*node);
 
     if (state->visible || state->enabled) {
-      auto configured = detail::Access::instanceState(scene, *node, state->visible, state->enabled);
+      auto configured = detail::Access::instanceState(scene, outer, state->visible, state->enabled);
 
       if (!configured) {
         return std::unexpected(configured.error());
@@ -4288,7 +4554,10 @@ private:
                 ? std::optional(detail::SizeChange{detail::SizeDimension::FLEX, 0, *settings.flex})
                 : std::nullopt}) {
           if (change) {
-            auto resized = detail::Access::resize(scene, *node, *change);
+            const Node<SizedWidget> target = state->frame && state->frame->mounted != Node<Border>{}
+                                               ? Node<SizedWidget>(state->frame->mounted)
+                                               : Node<SizedWidget>(*node);
+            auto resized = detail::Access::resize(scene, target, *change);
             if (!resized) {
               return std::unexpected(resized.error());
             }
@@ -4451,6 +4720,8 @@ private:
         });
       }
     }
+
+    context.mountedOuter = outer;
 
     return node;
   }
@@ -4692,7 +4963,8 @@ void Access::gridChild(Description<Grid> &parent, Child &&child, std::optional<G
       }
 
       if (layout->grid) {
-        layout->mounted.push_back(mounted->id());
+        // A framed source keeps its typed Ref while the Grid places its direct Border child.
+        layout->mounted.push_back(context.mountedOuter.id());
       }
 
       return {};
@@ -4948,10 +5220,19 @@ template <class Factory> Description<Widget> Access::transaction(Factory factory
   return description;
 }
 
+inline Description<Widget> Access::forwardOuter(Description<Widget> description) {
+  if (description.state_) {
+    description.state_->forwardsOuter = true;
+  }
+
+  return description;
+}
+
 template <class T> Description<Widget> Access::erase(Description<T> description) {
   Description<Widget> erased;
 
   erased.state_ = std::make_unique<Description<Widget>::State>();
+  erased.state_->forwardsOuter = true;
   if (description.state_) {
     erased.state_->layout = description.state_->layout;
     erased.state_->semanticConstruction = description.state_->semanticConstruction;
@@ -6237,7 +6518,7 @@ template <detail::GridInput... Children> Description<Grid> grid(Children &&...ch
     });
 
   description.state_->layout = layout;
-  const auto append = [&](auto &&child) {
+  [[maybe_unused]] const auto append = [&](auto &&child) {
     if constexpr (std::same_as<std::remove_cvref_t<decltype(child)>, GridSection>) {
       detail::Access::gridSection(description, std::forward<decltype(child)>(child));
     } else {
@@ -6952,7 +7233,7 @@ Description<OverlayHost> overlayHost(OverlayHostOptions options, Body &&body, La
       std::expected<void, ManagedError> result;
       std::apply(
         [&](auto &...layer) {
-          const auto mount = [&](auto &recipe) {
+          [[maybe_unused]] const auto mount = [&](auto &recipe) {
             if (result) {
               auto child = detail::Access::mount(std::move(recipe), scene, *host, context);
               if (!child) {
@@ -8046,10 +8327,51 @@ inline Description<ScrollArea> detail::Access::scrollAreaControl(ScrollAreaOptio
                                                                  ControlStyle style) {
   auto description = cold<ScrollArea>([options, controller = std::move(controller),
                                        style](ManagedScene &scene, Node<Widget> parent, MountContext &context) {
-    auto effective = controlScrollAreaOptions(*context.controlSettings, options);
+    auto baseOptions = options;
+
+    if (context.frameOptions) {
+      baseOptions.frame = context.frameOptions->border;
+    }
+
+    auto effective = controlScrollAreaOptions(*context.controlSettings, baseOptions);
 
     if (!effective) {
       return std::expected<Node<ScrollArea>, ManagedError>(std::unexpected(error(parent, effective.error())));
+    }
+
+    const bool advanced =
+      context.frameOptions || context.frameSettings || hasFrameSettings(context.controlSettings->frame);
+
+    if (advanced) {
+      std::optional<FrameOptions> base;
+
+      if (context.frameOptions) {
+        base = *context.frameOptions;
+      } else if (effective->frame) {
+        base.emplace();
+        base->border = *effective->frame;
+      }
+
+      auto framed = controlFrameOptions(*context.controlSettings, std::move(base), scene.widthPolicy());
+
+      if (!framed) {
+        return std::expected<Node<ScrollArea>, ManagedError>(std::unexpected(framed.error()));
+      }
+
+      if (context.frameSettings) {
+        framed = controlFrameOptions(*context.frameSettings, std::move(*framed), scene.widthPolicy());
+
+        if (!framed) {
+          return std::expected<Node<ScrollArea>, ManagedError>(std::unexpected(framed.error()));
+        }
+      }
+
+      if (*framed) {
+        return scene.emplace<ScrollArea>(parent, controller, scene.widthPolicy(), *effective, style, SizePolicy{},
+                                         **framed, std::in_place);
+      }
+
+      effective->frame.reset();
     }
 
     return scene.emplace<ScrollArea>(parent, controller, scene.widthPolicy(), *effective, style);
@@ -8159,6 +8481,52 @@ inline Description<ScrollBar> scrollBar(Ref<ScrollBar> reference, std::shared_pt
   return scrollBar(std::move(controller), axis, options, style).reference(std::move(reference));
 }
 
+template <class T> void detail::Access::frameSettings(Description<T> &description, const ControlSettings &settings) {
+  if (!description.state_ || !hasFrameSettings(settings.frame)) {
+    return;
+  }
+
+  auto &frame = description.frameRecipe();
+
+  frame.source = std::make_unique<ControlSettings>();
+  frame.source->frame = settings.frame;
+  frame.source->origin = settings.origin;
+
+  for (const auto &origin : settings.origins) {
+    if (origin.path.starts_with("frame.")) {
+      frame.source->origins.push_back(origin);
+    }
+  }
+}
+
+inline Description<Border> detail::Access::framedControl(FrameOptions options, ControlStyle style) {
+  return cold<Border>([options = std::move(options), style](ManagedScene &scene, Node<Widget> parent, MountContext &) {
+    const auto valid = Border::validateFrame(options);
+
+    if (!valid) {
+      return std::expected<Node<Border>, ManagedError>(std::unexpected(detail::error(parent, valid.error())));
+    }
+
+    auto node = scene.emplace<Border>(parent, scene.widthPolicy(), options, style, SizePolicy{}, std::in_place);
+
+    if (!node) {
+      return node;
+    }
+
+    std::expected<void, TreeError> prepared;
+    const auto inspected = scene.app_.tree().read(*node, [&](const Border &frame) {
+      prepared = frame.preparation();
+    });
+
+    if (!inspected || !prepared) {
+      return std::expected<Node<Border>, ManagedError>(
+        scene.rollback(*node, inspected ? prepared.error() : inspected.error()));
+    }
+
+    return node;
+  });
+}
+
 inline Description<Border> detail::Access::borderControl(BorderOptions options, ControlStyle style) {
   auto description = cold<Border>([options, style](ManagedScene &scene, Node<Widget> parent, MountContext &context) {
     const auto effective = controlBorderOptions(*context.controlSettings, options);
@@ -8230,6 +8598,84 @@ inline BorderModifier border(BorderOptions options = {}, ControlStyle style = {}
  */
 inline BorderModifier frame(BorderOptions options = {}, ControlStyle style = {}) {
   return {options, style};
+}
+
+/** @brief Owning compact decoration stage; all text is retained until checked mount. */
+struct FramedModifier {
+  /** @brief Keep owning transfers fallible on checked standard-library implementations. */
+  ~FramedModifier() = default;
+
+  FrameOptions options;               ///< Advanced owning settings when no compact spelling was supplied.
+  std::optional<std::string> pattern; ///< Owning compact name, checked by the consuming recipe.
+
+  /** @tparam T Sized widget whose source identity remains unchanged.
+   * @param description Consuming child recipe.
+   * @param modifier Owning frame settings.
+   * @return Same typed recipe, with an outer frame or the native ScrollArea frame configured.
+   */
+  template <class T>
+    requires std::derived_from<T, SizedWidget>
+  friend Description<T> operator|(Description<T> &&description, FramedModifier modifier) {
+    if (modifier.pattern) {
+      return std::move(description).framed(*modifier.pattern);
+    }
+
+    return std::move(description).framed(std::move(modifier.options));
+  }
+};
+
+/** @brief Advanced decoration stage with an explicitly observed retained Border owner. */
+struct ObservedFramedModifier {
+  /** @brief Preserve fallible owning transfers alongside the observing reference. */
+  ~ObservedFramedModifier() = default;
+
+  Ref<Border> reference; ///< Empty observer published only when the whole mount succeeds.
+  FramedModifier frame;  ///< Owning compact or advanced frame configuration.
+
+  /** @tparam T Sized source widget other than ScrollArea, which owns its frame directly.
+   * @param description Consuming source recipe; its Ref and handlers continue to identify T.
+   * @param modifier Owning configuration and observing outer slot.
+   * @return Same typed source recipe; the separate Border Ref observes outer geometry and removal.
+   */
+  template <class T>
+    requires(std::derived_from<T, SizedWidget> && !std::same_as<T, ScrollArea>)
+  friend Description<T> operator|(Description<T> &&description, ObservedFramedModifier modifier) {
+    if (modifier.frame.pattern) {
+      return std::move(description).framed(std::move(modifier.reference), *modifier.frame.pattern);
+    }
+
+    return std::move(description).framed(std::move(modifier.reference), std::move(modifier.frame.options));
+  }
+};
+
+/** @param options Owning advanced frame settings; default is a single full outline.
+ * @return Stage preserving the original typed source recipe and checked mount/cleanup boundary.
+ */
+inline FramedModifier framed(FrameOptions options = {}) {
+  return {std::move(options), {}};
+}
+
+/** @param pattern Compact single/plain, rounded, double, heavy or ascii spelling.
+ * @return Owning stage; invalid names are reported by prepare/runApp before this control's setup.
+ */
+inline FramedModifier framed(std::string_view pattern) {
+  return {{}, std::optional<std::string>(std::in_place, pattern)};
+}
+
+/** @param reference Empty observer for explicit outer geometry, visibility and removal.
+ * @param options Owning advanced frame settings.
+ * @return Stage for ordinary sized source recipes; ScrollArea keeps its own existing owner instead.
+ */
+inline ObservedFramedModifier framed(Ref<Border> reference, FrameOptions options = {}) {
+  return {std::move(reference), framed(std::move(options))};
+}
+
+/** @param reference Empty observer for the separate retained Border.
+ * @param pattern Checked compact preset spelling, copied by the returned stage.
+ * @return Stage preserving the source Ref and publishing the outer Ref only after success.
+ */
+inline ObservedFramedModifier framed(Ref<Border> reference, std::string_view pattern) {
+  return {std::move(reference), framed(pattern)};
 }
 
 /** @param value Finite value in the inclusive configured range; checked at mount.

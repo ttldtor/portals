@@ -22,9 +22,7 @@ ScrollOffset effectiveOffset(ScrollOffset offset, ScrollAxisMetrics metrics) {
 
 namespace detail {
 std::expected<ScrollAreaGeometry, TreeError> areaPlacement(const ScrollWidgetState &state, CellSize available) {
-  return solveScrollLayout(
-    available, state.extent,
-    {state.area.horizontal, state.area.vertical, state.area.placement, state.area.frame.has_value()});
+  return solveScrollLayout(available, state.extent, scrollLayoutOptions(state));
 }
 
 std::expected<void, TreeError> arrangeScroll(ScrollWidgetState &state, CellSize allocation) {
@@ -76,7 +74,9 @@ std::expected<CellSize, TreeError> ScrollArea::measure(CellSize) {
   if (!valid) {
     return std::unexpected(valid.error());
   }
-  return state_->area.frame ? CellSize{2, 2} : CellSize{};
+  const auto inset = detail::scrollFrameInsets(*state_);
+
+  return CellSize{inset.left + inset.right, inset.top + inset.bottom};
 }
 
 std::expected<CellSize, TreeError> ScrollArea::childAvailable(CellSize available) const {
@@ -85,8 +85,10 @@ std::expected<CellSize, TreeError> ScrollArea::childAvailable(CellSize available
     return std::unexpected(valid.error());
   }
   available = available.normalized();
-  const auto inset = state_->area.frame ? 2 : 0;
-  return CellSize{std::max(available.width - inset, 0), std::max(available.height - inset, 0)};
+  const auto inset = detail::scrollFrameInsets(*state_);
+
+  return CellSize{std::max(available.width - inset.left - inset.right, 0),
+                  std::max(available.height - inset.top - inset.bottom, 0)};
 }
 
 std::expected<CellSize, TreeError> ScrollArea::measureChildren(std::span<const MeasuredChild> children) const {
@@ -102,13 +104,17 @@ std::expected<CellSize, TreeError> ScrollArea::measureChildren(std::span<const M
     size = {intrinsicAxis(children[0].desired.width, children[0].policy.width),
             intrinsicAxis(children[0].desired.height, children[0].policy.height)};
   }
-  const auto inset = state_->area.frame ? 2 : 0;
-  if (size.width > std::numeric_limits<std::int32_t>::max() - inset ||
-      size.height > std::numeric_limits<std::int32_t>::max() - inset) {
+  const auto inset = detail::scrollFrameInsets(*state_);
+  const auto horizontalInset = inset.left + inset.right;
+  const auto verticalInset = inset.top + inset.bottom;
+
+  if (size.width > std::numeric_limits<std::int32_t>::max() - horizontalInset ||
+      size.height > std::numeric_limits<std::int32_t>::max() - verticalInset) {
     return std::unexpected(TreeError::INVALID_GEOMETRY);
   }
   state_->extent = {static_cast<std::uint64_t>(size.width), static_cast<std::uint64_t>(size.height)};
-  return CellSize{std::max(size.width + inset, computedStyle() ? computedStyle()->minWidth : 0), size.height + inset};
+  return CellSize{std::max(size.width + horizontalInset, computedStyle() ? computedStyle()->minWidth : 0),
+                  size.height + verticalInset};
 }
 
 std::expected<void, TreeError> ScrollArea::arrange(CellRect local) {

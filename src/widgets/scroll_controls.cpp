@@ -68,9 +68,22 @@ const ScrollWidgetState *ScrollWidgetAccess::state(const Widget &widget) {
 }
 
 std::expected<void, TreeError> validateScrollWidget(const ScrollWidgetState &state) {
-  auto valid = state.isArea ? validateScrollOptions(state.area) : validateScrollOptions(state.bar);
+  if (state.frameError) {
+    return std::unexpected(*state.frameError);
+  }
+
+  auto area = state.area;
+
+  if (state.advancedFrame) {
+    area.frame = state.advancedFrame->options.border;
+  }
+
+  auto valid = state.isArea ? validateScrollOptions(area) : validateScrollOptions(state.bar);
   if (!valid) {
     return valid;
+  }
+  if (state.isArea && !solveScrollLayout({}, {}, scrollLayoutOptions(state))) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
   if (state.retired || (!state.isArea && state.axis != ScrollAxis::HORIZONTAL && state.axis != ScrollAxis::VERTICAL)) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
@@ -174,13 +187,36 @@ ScrollArea::ScrollArea(std::shared_ptr<ScrollController> controller, WidthPolicy
   state_->area = std::move(options);
   state_->style = style;
   if (state_->area.frame) {
-    constexpr std::array<std::string_view, 6> UNICODE{"\xe2\x94\x8c", "\xe2\x94\x90", "\xe2\x94\x94",
-                                                      "\xe2\x94\x98", "\xe2\x94\x80", "\xe2\x94\x82"};
-    constexpr std::array<std::string_view, 6> ASCII{"+", "+", "+", "+", "-", "|"};
-    for (std::size_t i = 0; i < UNICODE.size(); ++i) {
-      state_->glyphs[i] = scrollGlyph(UNICODE[i], ASCII[i], width, state_->area.frame->glyphs);
+    state_->legacyFrameOptions.border = *state_->area.frame;
+
+    auto prepared = detail::prepareFrameText(width, state_->legacyFrameOptions);
+
+    if (prepared) {
+      state_->legacyFrameText = std::move(*prepared);
+    } else {
+      state_->frameError = prepared.error();
     }
   }
+}
+
+ScrollArea::ScrollArea(std::shared_ptr<ScrollController> controller, WidthPolicy width, ScrollAreaOptions options,
+                       ControlStyle style, SizePolicy policy, FrameOptions frame, std::in_place_t)
+    : SizedWidget(policy),
+      state_(std::make_unique<detail::ScrollWidgetState>(std::move(controller), width, options.glyphs)) {
+  state_->isArea = true;
+  state_->area = options;
+  state_->style = style;
+
+  auto prepared = detail::prepareFrameText(width, frame);
+
+  if (!prepared) {
+    state_->frameError = prepared.error();
+
+    return;
+  }
+
+  state_->advancedFrame = std::make_unique<detail::PreparedScrollFrame>(std::move(frame), std::move(*prepared));
+  state_->frameError.reset();
 }
 
 ScrollArea::~ScrollArea() = default;
@@ -297,9 +333,7 @@ std::expected<void, TreeError> prepareScrollArea(WidgetTree &tree, Node<ScrollAr
         layout.geometry.local.size() != state.allocation) {
       return std::unexpected(TreeError::INVALID_GEOMETRY);
     }
-    auto placement = solveScrollLayout(
-      layout.geometry.local.size(), layout.extent,
-      {state.area.horizontal, state.area.vertical, state.area.placement, state.area.frame.has_value()});
+    auto placement = solveScrollLayout(layout.geometry.local.size(), layout.extent, detail::scrollLayoutOptions(state));
     if (!placement || placement->viewport != layout.placement.viewport ||
         placement->viewportOrigin != layout.placement.viewportOrigin) {
       return std::unexpected(placement ? TreeError::INVALID_GEOMETRY : placement.error());
@@ -348,11 +382,26 @@ std::expected<void, TreeError> syncScrollControl(WidgetTree &tree, Node<Widget> 
       result = std::unexpected(TreeError::INVALID_ARGUMENT);
       return;
     }
-    const bool hasFocus = focused == node;
+    bool hasFocus = *eligible && focused == node;
+
+    if (*eligible && state->isArea && focused != Node<Widget>{}) {
+      auto inside = tree.contains(node, focused);
+
+      if (!inside) {
+        result = std::unexpected(inside.error());
+        return;
+      }
+
+      hasFocus = *inside;
+    }
+
     if (state->enabled != *eligible || state->focused != hasFocus) {
-      state->enabled = *eligible;
-      state->focused = hasFocus;
       result = tree.invalidate(node, Invalidation::PAINT);
+
+      if (result) {
+        state->enabled = *eligible;
+        state->focused = hasFocus;
+      }
     }
   });
   return edited ? result : edited;

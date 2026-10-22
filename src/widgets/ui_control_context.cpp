@@ -16,6 +16,8 @@ namespace {
 using Code = ControlContextErrorCode;
 using Kind = ControlPropertyKind;
 using Mask = detail::ControlPropertyPresence;
+constexpr std::size_t FRAME_CUSTOM_GLYPH_MAX_BYTES = 64;
+constexpr std::size_t FRAME_FIRST_CUSTOM_GLYPH_PROPERTY = 174;
 constexpr std::size_t PAINT_LIMIT_PROPERTY = 39;
 constexpr std::size_t WHEEL_STEP_PROPERTY = 44;
 constexpr std::size_t MINIMUM_THUMB_PROPERTY = 47;
@@ -25,6 +27,8 @@ constexpr std::size_t DIALOG_WIDTH_PROPERTY = 94;
 constexpr std::size_t DIALOG_HEIGHT_PROPERTY = 95;
 constexpr std::size_t NOTIFICATION_WIDTH_PROPERTY = 118;
 constexpr std::size_t SELECTOR_SHORTCUT_PROPERTY = 142;
+constexpr std::array<std::string_view, 6> FRAME_PATTERN_NAMES{"SINGLE", "PLAIN", "ROUNDED", "DOUBLE", "HEAVY", "ASCII"};
+constexpr std::array<std::string_view, 3> FRAME_TITLE_ALIGNMENT_NAMES{"START", "CENTER", "END"};
 constexpr std::array<std::string_view, 3> STATE_NAMES{"UNCHECKED", "CHECKED", "MIXED"};
 constexpr std::array<std::string_view, 2> CYCLE_NAMES{"TWO_STATE", "THREE_STATE"};
 constexpr std::array<std::string_view, 3> MODE_NAMES{"IMMEDIATE", "ON_COMPLETION", "EXPLICIT"};
@@ -214,7 +218,22 @@ constexpr std::array<ControlPropertyDescriptor, detail::CONTROL_PROPERTY_COUNT> 
    {"securePolicy.lockPages", Kind::BOOLEAN, 2, {}},
    {"securePolicy.excludeFromDumps", Kind::BOOLEAN, 2, {}},
    {"securePolicy.encryptWhileIdle", Kind::BOOLEAN, 2, {}},
-   {"pastePolicy", Kind::ENUMERATION, 1, PASTE_NAMES}}};
+   {"pastePolicy", Kind::ENUMERATION, 1, PASTE_NAMES},
+   {"frame.pattern", Kind::ENUMERATION, 2, FRAME_PATTERN_NAMES},
+   {"frame.sides.top", Kind::BOOLEAN, 3, {}},
+   {"frame.sides.right", Kind::BOOLEAN, 3, {}},
+   {"frame.sides.bottom", Kind::BOOLEAN, 3, {}},
+   {"frame.sides.left", Kind::BOOLEAN, 3, {}},
+   {"frame.title", Kind::TEXT, 2, {}},
+   {"frame.titleAlignment", Kind::ENUMERATION, 2, FRAME_TITLE_ALIGNMENT_NAMES},
+   {"frame.maxTitleBytes", Kind::UNSIGNED_INTEGER, 2, {}},
+   {"frame.customGlyphs.enabled", Kind::BOOLEAN, 3, {}},
+   {"frame.customGlyphs.topLeft", Kind::LITERAL_STRING, 3, {}},
+   {"frame.customGlyphs.topRight", Kind::LITERAL_STRING, 3, {}},
+   {"frame.customGlyphs.bottomLeft", Kind::LITERAL_STRING, 3, {}},
+   {"frame.customGlyphs.bottomRight", Kind::LITERAL_STRING, 3, {}},
+   {"frame.customGlyphs.horizontal", Kind::LITERAL_STRING, 3, {}},
+   {"frame.customGlyphs.vertical", Kind::LITERAL_STRING, 3, {}}}};
 static_assert(std::ranges::all_of(PROPERTIES, [](const auto &property) {
   return !property.path.empty();
 }));
@@ -227,7 +246,9 @@ template <class... Indices> constexpr Mask propertyMask(Indices... indices) {
   return mask;
 }
 
-constexpr Mask SIZE_MASK = propertyMask(1, 2, 3);
+constexpr Mask FRAME_MASK =
+  propertyMask(53, 54, 55, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179);
+constexpr Mask SIZE_MASK = propertyMask(1, 2, 3) | FRAME_MASK;
 constexpr Mask TEXT_MASK = propertyMask(0);
 constexpr Mask PASSWORD_MASK =
   SIZE_MASK | TEXT_MASK | propertyMask(7, 8, 10, 11, 33, 34, 35, 36, 159, 160, 161, 162, 163, 164);
@@ -258,7 +279,7 @@ constexpr Mask THEME_CATALOG_MASK =
 constexpr Mask POSITIVE_UNSIGNED_MASK =
   propertyMask(3, 17, 18, 26, 27, 28, PAINT_LIMIT_PROPERTY, 45, 55, 59, 71, 72, 73, 83, 90, 100, 110, 111, 112, 113,
                114, 115, 116, 124, 125, 126, 127, 128, 129, 130, 137, 138, 139, 140, 143, 144, 145, 146, 147, 148, 149,
-               150, 151, 155, 156, 157, 158);
+               150, 151, 155, 156, 157, 158, 172);
 constexpr Mask CHECK_MASK = SIZE_MASK | TEXT_MASK | propertyMask(5, 6);
 constexpr Mask LAYOUT_MASK = SIZE_MASK | propertyMask(4, 22, 23, 24, 25, 30, 31, 32);
 constexpr Mask EDIT_MASK = SIZE_MASK | TEXT_MASK | propertyMask(7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 33, 34, 35, 36);
@@ -273,45 +294,59 @@ constexpr Mask ALL_MASK = [] {
 }();
 constexpr Mask GRID_MASK = SIZE_MASK | propertyMask(17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29);
 constexpr std::size_t BUILTIN_COUNT = 8;
+constexpr auto FRAME_SCHEMA =
+  std::to_array({PROPERTIES[53], PROPERTIES[54], PROPERTIES[55], PROPERTIES[165], PROPERTIES[166], PROPERTIES[167],
+                 PROPERTIES[168], PROPERTIES[169], PROPERTIES[170], PROPERTIES[171], PROPERTIES[172], PROPERTIES[173],
+                 PROPERTIES[174], PROPERTIES[175], PROPERTIES[176], PROPERTIES[177], PROPERTIES[178], PROPERTIES[179]});
+
+template <std::size_t N> constexpr auto withFrame(const std::array<ControlPropertyDescriptor, N> &base) {
+  std::array<ControlPropertyDescriptor, N + FRAME_SCHEMA.size()> result{};
+  std::ranges::copy(base, result.begin());
+  std::ranges::copy(FRAME_SCHEMA, result.begin() + N);
+
+  return result;
+}
+
 constexpr auto SIZE_SCHEMA =
-  std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[4], PROPERTIES[22], PROPERTIES[23],
-                 PROPERTIES[24], PROPERTIES[25], PROPERTIES[30], PROPERTIES[31], PROPERTIES[32]});
-constexpr auto TEXT_SCHEMA = std::to_array({PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3]});
+  withFrame(std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[4], PROPERTIES[22], PROPERTIES[23],
+                           PROPERTIES[24], PROPERTIES[25], PROPERTIES[30], PROPERTIES[31], PROPERTIES[32]}));
+constexpr auto TEXT_SCHEMA = withFrame(std::to_array({PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3]}));
 constexpr auto BUTTON_SCHEMA =
-  std::to_array({PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[37]});
+  withFrame(std::to_array({PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[37]}));
 constexpr auto BORDER_SCHEMA =
-  std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[38], PROPERTIES[39]});
+  withFrame(std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[38], PROPERTIES[39]}));
 constexpr auto GAUGE_SCHEMA =
-  std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[38], PROPERTIES[39], PROPERTIES[40],
-                 PROPERTIES[41], PROPERTIES[42], PROPERTIES[43]});
+  withFrame(std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[38], PROPERTIES[39], PROPERTIES[40],
+                           PROPERTIES[41], PROPERTIES[42], PROPERTIES[43]}));
 constexpr auto CHECK_SCHEMA =
-  std::to_array({PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[5], PROPERTIES[6]});
-constexpr auto SCROLL_AREA_SCHEMA =
+  withFrame(std::to_array({PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[5], PROPERTIES[6]}));
+constexpr auto SCROLL_AREA_SCHEMA = withFrame(std::to_array(
+  {PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[8], PROPERTIES[38], PROPERTIES[39], PROPERTIES[44],
+   PROPERTIES[45], PROPERTIES[46], PROPERTIES[47], PROPERTIES[48], PROPERTIES[49], PROPERTIES[50], PROPERTIES[51]}));
+constexpr auto SCROLL_BAR_SCHEMA = withFrame(
   std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[8], PROPERTIES[38], PROPERTIES[39],
-                 PROPERTIES[44], PROPERTIES[45], PROPERTIES[46], PROPERTIES[47], PROPERTIES[48], PROPERTIES[49],
-                 PROPERTIES[50], PROPERTIES[51], PROPERTIES[53], PROPERTIES[54], PROPERTIES[55]});
-constexpr auto SCROLL_BAR_SCHEMA =
-  std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[8], PROPERTIES[38], PROPERTIES[39],
-                 PROPERTIES[44], PROPERTIES[45], PROPERTIES[46], PROPERTIES[47], PROPERTIES[48], PROPERTIES[52]});
+                 PROPERTIES[44], PROPERTIES[45], PROPERTIES[46], PROPERTIES[47], PROPERTIES[48], PROPERTIES[52]}));
 constexpr auto OVERLAY_SCHEMA =
-  std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[22], PROPERTIES[23], PROPERTIES[24],
-                 PROPERTIES[25], PROPERTIES[56], PROPERTIES[57]});
-constexpr auto HELP_VIEW_SCHEMA =
+  withFrame(std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[22], PROPERTIES[23], PROPERTIES[24],
+                           PROPERTIES[25], PROPERTIES[56], PROPERTIES[57]}));
+constexpr auto HELP_VIEW_SCHEMA = withFrame(
   std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[58], PROPERTIES[59], PROPERTIES[60],
-                 PROPERTIES[61], PROPERTIES[62], PROPERTIES[63], PROPERTIES[64], PROPERTIES[65], PROPERTIES[66]});
-constexpr auto KEY_HINTS_SCHEMA = std::to_array(
+                 PROPERTIES[61], PROPERTIES[62], PROPERTIES[63], PROPERTIES[64], PROPERTIES[65], PROPERTIES[66]}));
+constexpr auto KEY_HINTS_SCHEMA = withFrame(std::to_array(
   {PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[59], PROPERTIES[60], PROPERTIES[61], PROPERTIES[62],
-   PROPERTIES[63], PROPERTIES[64], PROPERTIES[65], PROPERTIES[66], PROPERTIES[67], PROPERTIES[68]});
+   PROPERTIES[63], PROPERTIES[64], PROPERTIES[65], PROPERTIES[66], PROPERTIES[67], PROPERTIES[68]}));
 constexpr auto VIRTUAL_LIST_SCHEMA =
-  std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[69], PROPERTIES[70]});
-constexpr auto VIRTUAL_TABLE_SCHEMA = std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[69],
-                                                     PROPERTIES[70], PROPERTIES[71], PROPERTIES[72], PROPERTIES[73]});
+  withFrame(std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[69], PROPERTIES[70]}));
+constexpr auto VIRTUAL_TABLE_SCHEMA =
+  withFrame(std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[69], PROPERTIES[70], PROPERTIES[71],
+                           PROPERTIES[72], PROPERTIES[73]}));
 constexpr auto CHART_SCHEMA =
   std::to_array({PROPERTIES[74], PROPERTIES[75], PROPERTIES[76], PROPERTIES[77], PROPERTIES[78], PROPERTIES[79]});
-constexpr auto DATA_STATE_SCHEMA = std::to_array(
+constexpr auto DATA_STATE_SCHEMA = withFrame(std::to_array(
   {PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[80], PROPERTIES[81], PROPERTIES[82], PROPERTIES[83],
-   PROPERTIES[84], PROPERTIES[85], PROPERTIES[86], PROPERTIES[87], PROPERTIES[88], PROPERTIES[89]});
-constexpr auto OVERLAY_HOST_SCHEMA = std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[90]});
+   PROPERTIES[84], PROPERTIES[85], PROPERTIES[86], PROPERTIES[87], PROPERTIES[88], PROPERTIES[89]}));
+constexpr auto OVERLAY_HOST_SCHEMA =
+  withFrame(std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[90]}));
 constexpr auto DIALOG_SCHEMA =
   std::to_array({PROPERTIES[91], PROPERTIES[92], PROPERTIES[93], PROPERTIES[94], PROPERTIES[95], PROPERTIES[96],
                  PROPERTIES[97], PROPERTIES[98], PROPERTIES[99], PROPERTIES[100]});
@@ -321,11 +356,11 @@ constexpr auto MESSAGE_SCHEMA =
                  PROPERTIES[103], PROPERTIES[104], PROPERTIES[105], PROPERTIES[106], PROPERTIES[107], PROPERTIES[108],
                  PROPERTIES[109], PROPERTIES[110], PROPERTIES[111], PROPERTIES[112], PROPERTIES[113], PROPERTIES[114]});
 constexpr auto NOTIFICATION_SCHEMA =
-  std::to_array({PROPERTIES[1],   PROPERTIES[2],   PROPERTIES[3],   PROPERTIES[22],  PROPERTIES[23],
-                 PROPERTIES[24],  PROPERTIES[25],  PROPERTIES[56],  PROPERTIES[57],  PROPERTIES[115],
-                 PROPERTIES[116], PROPERTIES[117], PROPERTIES[118], PROPERTIES[119], PROPERTIES[120],
-                 PROPERTIES[121], PROPERTIES[122], PROPERTIES[123], PROPERTIES[124], PROPERTIES[125],
-                 PROPERTIES[126], PROPERTIES[127], PROPERTIES[128], PROPERTIES[129], PROPERTIES[130]});
+  withFrame(std::to_array({PROPERTIES[1],   PROPERTIES[2],   PROPERTIES[3],   PROPERTIES[22],  PROPERTIES[23],
+                           PROPERTIES[24],  PROPERTIES[25],  PROPERTIES[56],  PROPERTIES[57],  PROPERTIES[115],
+                           PROPERTIES[116], PROPERTIES[117], PROPERTIES[118], PROPERTIES[119], PROPERTIES[120],
+                           PROPERTIES[121], PROPERTIES[122], PROPERTIES[123], PROPERTIES[124], PROPERTIES[125],
+                           PROPERTIES[126], PROPERTIES[127], PROPERTIES[128], PROPERTIES[129], PROPERTIES[130]}));
 constexpr auto THEME_SELECTOR_SCHEMA =
   std::to_array({PROPERTIES[91],  PROPERTIES[92],  PROPERTIES[93],  PROPERTIES[94],  PROPERTIES[95],  PROPERTIES[96],
                  PROPERTIES[97],  PROPERTIES[98],  PROPERTIES[99],  PROPERTIES[100], PROPERTIES[131], PROPERTIES[132],
@@ -339,17 +374,68 @@ constexpr auto THEME_CATALOG_SCHEMA =
                  PROPERTIES[145], PROPERTIES[146], PROPERTIES[147], PROPERTIES[148], PROPERTIES[149], PROPERTIES[150],
                  PROPERTIES[151], PROPERTIES[152], PROPERTIES[153], PROPERTIES[154], PROPERTIES[155], PROPERTIES[156],
                  PROPERTIES[157], PROPERTIES[158]});
-constexpr auto EDIT_SCHEMA =
+constexpr auto EDIT_SCHEMA = withFrame(
   std::to_array({PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[7], PROPERTIES[8],
                  PROPERTIES[9], PROPERTIES[10], PROPERTIES[11], PROPERTIES[12], PROPERTIES[13], PROPERTIES[14],
-                 PROPERTIES[15], PROPERTIES[16], PROPERTIES[33], PROPERTIES[34], PROPERTIES[35], PROPERTIES[36]});
-constexpr auto PASSWORD_SCHEMA =
-  std::to_array({PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[7], PROPERTIES[8],
-                 PROPERTIES[10], PROPERTIES[11], PROPERTIES[33], PROPERTIES[34], PROPERTIES[35], PROPERTIES[36],
-                 PROPERTIES[159], PROPERTIES[160], PROPERTIES[161], PROPERTIES[162], PROPERTIES[163], PROPERTIES[164]});
-constexpr auto GRID_SCHEMA = std::to_array(
-  {PROPERTIES[17], PROPERTIES[18], PROPERTIES[19], PROPERTIES[20], PROPERTIES[21], PROPERTIES[22], PROPERTIES[23],
-   PROPERTIES[24], PROPERTIES[25], PROPERTIES[26], PROPERTIES[27], PROPERTIES[28], PROPERTIES[29]});
+                 PROPERTIES[15], PROPERTIES[16], PROPERTIES[33], PROPERTIES[34], PROPERTIES[35], PROPERTIES[36]}));
+constexpr auto PASSWORD_SCHEMA = withFrame(std::to_array(
+  {PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[7], PROPERTIES[8], PROPERTIES[10],
+   PROPERTIES[11], PROPERTIES[33], PROPERTIES[34], PROPERTIES[35], PROPERTIES[36], PROPERTIES[159], PROPERTIES[160],
+   PROPERTIES[161], PROPERTIES[162], PROPERTIES[163], PROPERTIES[164]}));
+constexpr auto GRID_SCHEMA =
+  withFrame(std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[17], PROPERTIES[18], PROPERTIES[19],
+                           PROPERTIES[20], PROPERTIES[21], PROPERTIES[22], PROPERTIES[23], PROPERTIES[24],
+                           PROPERTIES[25], PROPERTIES[26], PROPERTIES[27], PROPERTIES[28], PROPERTIES[29]}));
+
+// Exported descriptors and accepted leaves must remain the same finite vocabulary.
+template <std::size_t N>
+constexpr bool schemaMatchesMask(const std::array<ControlPropertyDescriptor, N> &schema, Mask expected) {
+  Mask actual;
+
+  for (const auto &descriptor : schema) {
+    const auto found = std::ranges::find(PROPERTIES, descriptor.path, &ControlPropertyDescriptor::path);
+
+    if (found == PROPERTIES.end()) {
+      return false;
+    }
+
+    const auto index = static_cast<std::size_t>(found - PROPERTIES.begin());
+
+    if (actual.test(index)) {
+      return false;
+    }
+
+    actual.set(index);
+  }
+
+  return actual == expected;
+}
+
+static_assert(schemaMatchesMask(FRAME_SCHEMA, FRAME_MASK));
+static_assert(schemaMatchesMask(SIZE_SCHEMA, LAYOUT_MASK));
+static_assert(schemaMatchesMask(TEXT_SCHEMA, TEXT_MASK | SIZE_MASK));
+static_assert(schemaMatchesMask(BUTTON_SCHEMA, BUTTON_MASK));
+static_assert(schemaMatchesMask(BORDER_SCHEMA, BORDER_MASK));
+static_assert(schemaMatchesMask(GAUGE_SCHEMA, GAUGE_MASK));
+static_assert(schemaMatchesMask(CHECK_SCHEMA, CHECK_MASK));
+static_assert(schemaMatchesMask(SCROLL_AREA_SCHEMA, SCROLL_AREA_MASK));
+static_assert(schemaMatchesMask(SCROLL_BAR_SCHEMA, SCROLL_BAR_MASK));
+static_assert(schemaMatchesMask(OVERLAY_SCHEMA, OVERLAY_MASK));
+static_assert(schemaMatchesMask(HELP_VIEW_SCHEMA, HELP_VIEW_MASK));
+static_assert(schemaMatchesMask(KEY_HINTS_SCHEMA, KEY_HINTS_MASK));
+static_assert(schemaMatchesMask(VIRTUAL_LIST_SCHEMA, VIRTUAL_LIST_MASK));
+static_assert(schemaMatchesMask(VIRTUAL_TABLE_SCHEMA, VIRTUAL_TABLE_MASK));
+static_assert(schemaMatchesMask(CHART_SCHEMA, CHART_MASK));
+static_assert(schemaMatchesMask(DATA_STATE_SCHEMA, DATA_STATE_MASK));
+static_assert(schemaMatchesMask(OVERLAY_HOST_SCHEMA, OVERLAY_HOST_MASK));
+static_assert(schemaMatchesMask(DIALOG_SCHEMA, DIALOG_MASK));
+static_assert(schemaMatchesMask(MESSAGE_SCHEMA, MESSAGE_MASK));
+static_assert(schemaMatchesMask(NOTIFICATION_SCHEMA, NOTIFICATION_MASK));
+static_assert(schemaMatchesMask(THEME_SELECTOR_SCHEMA, THEME_SELECTOR_MASK));
+static_assert(schemaMatchesMask(THEME_CATALOG_SCHEMA, THEME_CATALOG_MASK));
+static_assert(schemaMatchesMask(EDIT_SCHEMA, EDIT_MASK));
+static_assert(schemaMatchesMask(PASSWORD_SCHEMA, PASSWORD_MASK));
+static_assert(schemaMatchesMask(GRID_SCHEMA, GRID_MASK));
 
 bool builtin(std::string_view name) noexcept {
   return name == "VBox" || name == "HBox" || name == "Label" || name == "Button" || name == "CheckBox" ||
@@ -613,7 +699,22 @@ ControlContextError exceptionError() noexcept {
   X(securePolicy.lockPages, 161)                                                                                       \
   X(securePolicy.excludeFromDumps, 162)                                                                                \
   X(securePolicy.encryptWhileIdle, 163)                                                                                \
-  X(pastePolicy, 164)
+  X(pastePolicy, 164)                                                                                                  \
+  X(frame.pattern, 165)                                                                                                \
+  X(frame.sides.top, 166)                                                                                              \
+  X(frame.sides.right, 167)                                                                                            \
+  X(frame.sides.bottom, 168)                                                                                           \
+  X(frame.sides.left, 169)                                                                                             \
+  X(frame.title, 170)                                                                                                  \
+  X(frame.titleAlignment, 171)                                                                                         \
+  X(frame.maxTitleBytes, 172)                                                                                          \
+  X(frame.customGlyphs.enabled, 173)                                                                                   \
+  X(frame.customGlyphs.topLeft, 174)                                                                                   \
+  X(frame.customGlyphs.topRight, 175)                                                                                  \
+  X(frame.customGlyphs.bottomLeft, 176)                                                                                \
+  X(frame.customGlyphs.bottomRight, 177)                                                                               \
+  X(frame.customGlyphs.horizontal, 178)                                                                                \
+  X(frame.customGlyphs.vertical, 179)
 
 #define LEAF_INDEX(field, index) index,
 constexpr auto LEAF_INDICES = std::to_array<std::size_t>({PORTALS_CONTROL_LEAVES(LEAF_INDEX)});
@@ -675,7 +776,9 @@ template <class T> bool validValue(const T &value, std::size_t index) noexcept {
   } else if constexpr (std::unsigned_integral<T> && !std::same_as<T, bool>) {
     return index == 155 ? value >= 2 : !POSITIVE_UNSIGNED_MASK.test(index) || value > 0;
   } else if constexpr (std::same_as<T, std::string>) {
-    return detail::validControlLiteral(value) && (index != 68 || !value.empty());
+    return detail::validControlLiteral(value) && (index != 68 || !value.empty()) &&
+           (index < FRAME_FIRST_CUSTOM_GLYPH_PROPERTY ||
+            (value.size() <= FRAME_CUSTOM_GLYPH_MAX_BYTES && !value.empty()));
   } else if constexpr (std::same_as<T, double>) {
     return std::isfinite(value) && (index != WHEEL_STEP_PROPERTY || value > 0);
   } else if constexpr (std::same_as<T, ToastPlacement>) {
@@ -706,6 +809,12 @@ template <class T> bool validValue(const T &value, std::size_t index) noexcept {
            value == ScrollPlacement::ON_FRAME;
   } else if constexpr (std::same_as<T, ButtonChrome>) {
     return value == ButtonChrome::BRACKETS || value == ButtonChrome::NONE;
+  } else if constexpr (std::same_as<T, FramePattern>) {
+    return value == FramePattern::SINGLE || value == FramePattern::ROUNDED || value == FramePattern::DOUBLE ||
+           value == FramePattern::HEAVY || value == FramePattern::ASCII;
+  } else if constexpr (std::same_as<T, FrameTitleAlignment>) {
+    return value == FrameTitleAlignment::START || value == FrameTitleAlignment::CENTER ||
+           value == FrameTitleAlignment::END;
   } else if constexpr (std::same_as<T, PrimitiveGlyphs>) {
     return value == PrimitiveGlyphs{} || value == PrimitiveGlyphs::ASCII;
   } else if constexpr (std::same_as<T, GridFlow>) {
@@ -841,6 +950,148 @@ std::expected<void, ControlContextError> validateSettings(const ControlSettings 
 } // namespace
 
 namespace detail {
+std::expected<std::optional<FrameOptions>, ManagedError>
+controlFrameOptions(const ControlSettings &settings, std::optional<FrameOptions> base, WidthPolicy policy) try {
+  const auto rejected = [&](std::string_view path) {
+    return std::unexpected(controlContextError(error(
+      Code::INVALID_VALUE, "frame", path == "frame" ? std::string_view{} : path.substr(6), sourceFor(settings, path))));
+  };
+  const auto &frame = settings.frame;
+
+  if (frame.enabled == false) {
+    base.reset();
+  } else if (frame.enabled == true && !base) {
+    base.emplace();
+  }
+
+  std::optional<std::string_view> requested;
+  visitLeaves(settings, [&](std::size_t index, const auto &value) {
+    if (value && FRAME_MASK.test(index) && index != 53 && !requested) {
+      requested = PROPERTIES[index].path;
+    }
+  });
+
+  if (!base) {
+    if (requested) {
+      return rejected(*requested);
+    }
+
+    return base;
+  }
+
+  auto &options = *base;
+  const auto apply = [](auto &target, const auto &patch) {
+    if (patch) {
+      target = *patch;
+    }
+  };
+
+  apply(options.border.glyphs, frame.glyphs);
+  apply(options.border.maxPaintCells, frame.maxPaintCells);
+  apply(options.pattern, frame.pattern);
+  apply(options.sides.top, frame.sides.top);
+  apply(options.sides.right, frame.sides.right);
+  apply(options.sides.bottom, frame.sides.bottom);
+  apply(options.sides.left, frame.sides.left);
+  apply(options.titleAlignment, frame.titleAlignment);
+  apply(options.maxTitleBytes, frame.maxTitleBytes);
+
+  if (!options.maxTitleBytes) {
+    return rejected("frame.maxTitleBytes");
+  }
+
+  const auto &glyphs = frame.customGlyphs;
+
+  if (glyphs.enabled == false) {
+    options.customGlyphs.reset();
+  } else if (glyphs.enabled == true && !options.customGlyphs) {
+    options.customGlyphs.emplace();
+  }
+
+  struct GlyphLeaf {
+    std::string FrameGlyphs::*effective;
+    std::optional<std::string> ControlFrameGlyphSettings::*patch;
+    std::string_view path;
+  };
+
+  constexpr std::array GLYPH_LEAVES{
+    GlyphLeaf{&FrameGlyphs::topLeft, &ControlFrameGlyphSettings::topLeft, "frame.customGlyphs.topLeft"},
+    GlyphLeaf{&FrameGlyphs::topRight, &ControlFrameGlyphSettings::topRight, "frame.customGlyphs.topRight"},
+    GlyphLeaf{&FrameGlyphs::bottomLeft, &ControlFrameGlyphSettings::bottomLeft, "frame.customGlyphs.bottomLeft"},
+    GlyphLeaf{&FrameGlyphs::bottomRight, &ControlFrameGlyphSettings::bottomRight, "frame.customGlyphs.bottomRight"},
+    GlyphLeaf{&FrameGlyphs::horizontal, &ControlFrameGlyphSettings::horizontal, "frame.customGlyphs.horizontal"},
+    GlyphLeaf{&FrameGlyphs::vertical, &ControlFrameGlyphSettings::vertical, "frame.customGlyphs.vertical"}};
+
+  for (const auto &leaf : GLYPH_LEAVES) {
+    const auto &patch = glyphs.*leaf.patch;
+
+    if (patch && !options.customGlyphs) {
+      return rejected(leaf.path);
+    }
+
+    if (options.customGlyphs) {
+      auto &effective = (*options.customGlyphs).*leaf.effective;
+
+      apply(effective, patch);
+
+      if (effective.empty() || effective.size() > FRAME_CUSTOM_GLYPH_MAX_BYTES) {
+        return rejected(leaf.path);
+      }
+    }
+  }
+
+  if (frame.title) {
+    TextLimits limits;
+    limits.max_input_bytes = options.maxTitleBytes;
+    auto title = frame.title->resolve(policy, limits);
+
+    if (!title) {
+      auto failure =
+        controlContextError(error(Code::INVALID_VALUE, "frame", "title", sourceFor(settings, "frame.title")));
+
+      if (const auto *text = std::get_if<TextError>(&title.error())) {
+        failure.text = *text;
+      } else {
+        failure.resource = std::get<TextResourceError>(title.error());
+      }
+
+      return std::unexpected(std::move(failure));
+    }
+
+    options.title = title->bytes();
+  }
+
+  if (!validValue(options.border.glyphs, 54)) {
+    return rejected("frame.glyphs");
+  }
+
+  if (!options.border.maxPaintCells) {
+    return rejected("frame.maxPaintCells");
+  }
+
+  if (!validValue(options.pattern, 165)) {
+    return rejected("frame.pattern");
+  }
+
+  if (!validValue(options.titleAlignment, 171)) {
+    return rejected("frame.titleAlignment");
+  }
+
+  if (options.title.size() > options.maxTitleBytes) {
+    return rejected("frame.title");
+  }
+
+  if (auto checked = Border::validateFrame(options); !checked) {
+    return rejected("frame");
+  }
+
+  return base;
+} catch (const std::bad_alloc &) {
+  return std::unexpected(ManagedError{ManagedPhase::MOUNT, {}, TreeError::NO_MEMORY, {}, {}});
+} catch (const std::length_error &) {
+  return std::unexpected(ManagedError{ManagedPhase::MOUNT, {}, TreeError::NO_MEMORY, {}, {}});
+}
+
 std::uint32_t controlSettingsPresence(const ControlSettings &settings) noexcept {
   const auto presence = controlSettingsPresenceSet(settings);
   constexpr ControlPropertyPresence LOW_BITS{0xffffffffULL};

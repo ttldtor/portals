@@ -144,6 +144,45 @@ struct Fixture {
   }
 };
 
+void ancestryQueries() {
+  Fixture f;
+  Fixture foreign;
+  auto parent = take(f.tree->emplace<Widget>(f.root));
+  auto child = take(f.tree->emplace<Widget>(parent));
+  auto sibling = take(f.tree->emplace<Widget>(f.root));
+
+  allocation_test::remaining = 0;
+  const auto self = f.tree->contains(parent, parent);
+  const auto nested = f.tree->contains(parent, child);
+  const auto reverse = f.tree->contains(child, parent);
+  const auto unrelated = f.tree->contains(parent, sibling);
+  allocation_test::remaining = -1;
+
+  check(self && *self && nested && *nested && reverse && !*reverse && unrelated && !*unrelated,
+        "inclusive ancestry walks parents without allocating");
+  check(f.tree
+          ->frame([&] {
+            check(take(f.tree->contains(parent, child)), "ancestry observation works during a frame");
+          })
+          .has_value(),
+        "ancestry frame completes");
+  check(error(f.tree->contains(foreign.root, child), TreeError::WRONG_SESSION) &&
+          error(f.tree->contains(parent, foreign.root), TreeError::WRONG_SESSION),
+        "ancestry rejects foreign identities");
+
+  bool wrongThread{};
+  std::thread worker([&] {
+    wrongThread = error(f.tree->contains(parent, child), TreeError::WRONG_THREAD);
+  });
+
+  worker.join();
+  check(wrongThread, "ancestry is UI-affine");
+  check(f.tree->remove(child).has_value(), "remove ancestry descendant");
+  check(error(f.tree->contains(parent, child), TreeError::STALE_NODE) &&
+          error(f.tree->contains(child, parent), TreeError::STALE_NODE),
+        "ancestry checks both stale identities");
+}
+
 void schedulerLifetime() {
   Life parent_life, child_life;
   Fixture f;
@@ -814,6 +853,7 @@ void allocationAndSequences() {
 } // namespace
 
 int main() {
+  ancestryQueries();
   std::cerr << "scheduler_lifetime\n";
   schedulerLifetime();
   std::cerr << "timer_and_edit_exception\n";

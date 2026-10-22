@@ -2365,7 +2365,7 @@ TEST_CASE("resource failures own safe source identity and byte based position af
 }
 
 TEST_CASE("source UTF8 is checked including comments and escaped text is owning") {
-  for (const std::string invalid : {std::string("Label{\"\xC0\xAF\"}"), std::string("Label{} // \xF4\x90\x80\x80")}) {
+  for (const std::string &invalid : {std::string("Label{\"\xC0\xAF\"}"), std::string("Label{} // \xF4\x90\x80\x80")}) {
     CHECK(rejected(invalid).sceneResource->code == Code::INVALID_UTF8);
   }
 
@@ -4700,7 +4700,34 @@ TEST_CASE("Notifications semantic schema owns canonical metadata and keeps old n
   };
   const auto canonical = ui::controlPropertySchema("Notifications");
 
-  REQUIRE(canonical.size() == 25);
+  constexpr std::array<std::string_view, 18> FRAME_PATHS{"frame.enabled",
+                                                         "frame.glyphs",
+                                                         "frame.maxPaintCells",
+                                                         "frame.pattern",
+                                                         "frame.sides.top",
+                                                         "frame.sides.right",
+                                                         "frame.sides.bottom",
+                                                         "frame.sides.left",
+                                                         "frame.title",
+                                                         "frame.titleAlignment",
+                                                         "frame.maxTitleBytes",
+                                                         "frame.customGlyphs.enabled",
+                                                         "frame.customGlyphs.topLeft",
+                                                         "frame.customGlyphs.topRight",
+                                                         "frame.customGlyphs.bottomLeft",
+                                                         "frame.customGlyphs.bottomRight",
+                                                         "frame.customGlyphs.horizontal",
+                                                         "frame.customGlyphs.vertical"};
+
+  REQUIRE(canonical.size() == 43);
+  CHECK(std::ranges::count_if(canonical, [](const auto &property) {
+          return property.path.starts_with("frame.");
+        }) == static_cast<std::ptrdiff_t>(FRAME_PATHS.size()));
+
+  for (const auto path : FRAME_PATHS) {
+    CHECK(std::ranges::count(canonical, path, &ui::ControlPropertyDescriptor::path) == 1);
+  }
+
   REQUIRE(registry.add<Overlay>("OldBraces", plain, {}));
   REQUIRE(registry.add<Overlay>("OldBool", plain, false));
   REQUIRE(registry.add<Overlay>("Selected", plain, canonical));
@@ -5828,4 +5855,324 @@ TEST_CASE("catalog metadata requires owning capability and view metadata admits 
       CHECK_FALSE(selector.snapshot());
     }
   }
+}
+
+namespace {
+void layoutResourceFrame(ManagedScene &scene, Application &app, CellSize size) {
+  REQUIRE(scene.prepare(app, size));
+
+  const auto viewport = CellRect::from({}, size);
+
+  REQUIRE(viewport);
+  REQUIRE(app.tree().frame([&] {
+    REQUIRE(layoutTree(app.tree(), app.root(), *viewport, *viewport));
+  }));
+  REQUIRE(scene.completedLayout(app));
+}
+
+struct ResourceFramePaint : PaintContext {
+  std::vector<std::string> text;
+
+  std::expected<void, TreeError> submit(std::span<const RenderCommand> commands) override {
+    for (const auto &command : commands) {
+      if (const auto *run = std::get_if<TextCommand>(&command)) {
+        text.emplace_back(run->text.bytes());
+      }
+    }
+
+    return {};
+  }
+};
+} // namespace
+
+TEST_CASE("resource compact nested and dotted frames retain the same typed source and paint") {
+  constexpr std::size_t COMPLETE_FRAME_PROPERTY_COUNT = 19;
+
+  for (const std::string_view pattern : {"rounded", "plain", "custom"}) {
+    const bool advanced = pattern == "custom";
+    std::vector<std::string> expected;
+    std::vector<std::string> spellings;
+
+    if (advanced) {
+      spellings = {
+        R"(frame{enabled=true pattern=PLAIN sides{top=true right=false bottom=false left=true} title="Owned" titleAlignment=CENTER maxTitleBytes=32 customGlyphs{enabled=true topLeft="a" topRight="b" bottomLeft="c" bottomRight="d" horizontal="=" vertical="!"}})",
+        R"(frame.enabled=true frame.pattern=PLAIN frame.sides.top=true frame.sides.right=false frame.sides.bottom=false frame.sides.left=true frame.title="Owned" frame.titleAlignment=CENTER frame.maxTitleBytes=32 frame.customGlyphs.enabled=true frame.customGlyphs.topLeft="a" frame.customGlyphs.topRight="b" frame.customGlyphs.bottomLeft="c" frame.customGlyphs.bottomRight="d" frame.customGlyphs.horizontal="=" frame.customGlyphs.vertical="!")"};
+    } else if (pattern == "rounded") {
+      spellings = {R"(frame="rounded")", R"(frame{enabled=true pattern=ROUNDED})",
+                   R"(frame.enabled=true frame.pattern=ROUNDED)"};
+    } else {
+      spellings = {R"(frame="plain")", R"(frame{enabled=true pattern=SINGLE})",
+                   R"(frame.enabled=true frame.pattern=PLAIN)"};
+    }
+
+    for (const auto &spelling : spellings) {
+      CAPTURE(spelling);
+      ui::SceneResourceOptions options;
+
+      options.format = ui::SceneResourceFormat::CONFIGURATION;
+      options.limits.maxProperties = COMPLETE_FRAME_PROPERTY_COUNT;
+
+      auto owner = ui::scene("scene{Button#save{text=\"Save\" width=12 height=4 " + spelling + "}}", options);
+      auto source = owner.get<Button>("save");
+      ManagedScene *managed{};
+      Application *app{};
+
+      owner.configure([&](ManagedScene &scene, Application &application) {
+        managed = &scene;
+        app = &application;
+      });
+
+      REQUIRE(owner.prepareChecked());
+      REQUIRE(managed);
+      REQUIRE(app);
+      layoutResourceFrame(*managed, *app, {12, 4});
+
+      const auto sourceInfo = app->tree().inspect(source.node());
+
+      REQUIRE(sourceInfo);
+
+      const auto frame = sourceInfo->parent;
+      const auto frameInfo = app->tree().inspect(frame);
+
+      REQUIRE(frameInfo);
+      CHECK(frameInfo->children == std::vector<Node<Widget>>{source.node()});
+      REQUIRE(app->tree().read(frame, [&](const Widget &widget) {
+        const auto *border = dynamic_cast<const Border *>(&widget);
+
+        REQUIRE(border);
+        CHECK(border->childAvailable({12, 4}).value() == (advanced ? CellSize{11, 3} : CellSize{10, 2}));
+      }));
+
+      ResourceFramePaint painted;
+
+      REQUIRE(app->tree().frame([&] {
+        REQUIRE(app->tree().paint(frame, painted));
+      }));
+      REQUIRE_FALSE(painted.text.empty());
+      CHECK(painted.text.front() == (advanced ? "a" : pattern == "rounded" ? "╭" : "┌"));
+
+      if (advanced) {
+        CHECK(std::ranges::find(painted.text, "Owned") != painted.text.end());
+      }
+
+      if (expected.empty()) {
+        expected = painted.text;
+      } else {
+        CHECK(painted.text == expected);
+      }
+
+      REQUIRE(owner.close());
+    }
+  }
+
+  const auto failure = rejected(R"(scene{Button{frame{enabled=true pattern=INVALID}}})",
+                                {.format = ui::SceneResourceFormat::CONFIGURATION});
+
+  CHECK(failure.sceneResource->code == Code::INVALID_VALUE);
+}
+
+TEST_CASE("compact resource frame canonical leaves reject duplicates before factories") {
+  struct Scenario {
+    std::string_view settings;
+    std::string_view path;
+  };
+
+  constexpr Scenario SCENARIOS[]{{R"(frame="rounded" frame.enabled=true)", "frame.enabled"},
+                                 {R"(frame.enabled=true frame="rounded")", "frame.enabled"},
+                                 {R"(frame="rounded" frame.pattern=PLAIN)", "frame.pattern"},
+                                 {R"(frame.pattern=PLAIN frame="rounded")", "frame.pattern"},
+                                 {R"(frame="rounded" frame{pattern=PLAIN})", "frame.pattern"},
+                                 {R"(frame{pattern=PLAIN} frame="rounded")", "frame.pattern"}};
+
+  for (const auto &scenario : SCENARIOS) {
+    CAPTURE(scenario.settings);
+    int factories{};
+    ui::SceneResourceOptions options;
+
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    REQUIRE(options.registry.add<Custom>("Probe", [&](ui::SceneResourceArguments) {
+      ++factories;
+
+      return ui::custom<Custom>("unreached");
+    }));
+
+    const auto source = "scene{VBox{Probe{} Button{" + std::string(scenario.settings) + "}}}";
+    const auto failure = rejected(source, options);
+
+    CHECK(failure.sceneResource->code == Code::DUPLICATE_PROPERTY);
+    REQUIRE(failure.sceneResource->propertyPath);
+    CHECK(*failure.sceneResource->propertyPath == "Button." + std::string(scenario.path));
+    CHECK(factories == 0);
+    CHECK(Custom::alive == 0);
+  }
+}
+
+TEST_CASE("compact resource frame consumes two ordinary property slots before factory effects") {
+  for (const std::size_t budget : {1U, 2U}) {
+    int factories{};
+    ui::SceneResourceOptions options;
+
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    options.limits.maxProperties = budget;
+    REQUIRE(options.registry.add<Custom>("Probe", [&](ui::SceneResourceArguments) {
+      ++factories;
+
+      return ui::custom<Custom>("probe");
+    }));
+
+    auto owner = ui::scene(R"(scene{VBox{Probe{} Button{frame="rounded"}}})", options);
+    const auto result = owner.prepareChecked();
+
+    if (budget == 1) {
+      REQUIRE_FALSE(result);
+      REQUIRE(result.error().sceneResource);
+      CHECK(result.error().sceneResource->code == Code::PROPERTY_LIMIT);
+      REQUIRE(result.error().sceneResource->propertyPath);
+      CHECK(*result.error().sceneResource->propertyPath == "Button.frame.pattern");
+      CHECK(factories == 0);
+    } else {
+      REQUIRE(result);
+      CHECK(factories == 1);
+    }
+
+    REQUIRE(owner.close());
+    CHECK(Custom::alive == 0);
+  }
+}
+
+TEST_CASE("resource frame title resolves once and owns text beyond its resolver") {
+  int calls{};
+  auto lifetime = std::make_shared<int>(1);
+  std::weak_ptr<int> observer = lifetime;
+  auto owner = [&] {
+    ui::SceneResourceOptions options;
+
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    options.resolver = [lifetime, &calls](std::string_view key) -> std::expected<std::string, TextResourceError> {
+      ++calls;
+      CHECK(key == "caption");
+
+      return "Retained title";
+    };
+
+    return ui::scene(R"(scene{Button#save{frame="ascii" frame.title=i18n("caption") width=20 height=4}})",
+                     std::move(options));
+  }();
+  auto button = owner.get<Button>("save");
+  ManagedScene *managed{};
+  Application *app{};
+
+  lifetime.reset();
+  owner.configure([&](ManagedScene &scene, Application &application) {
+    managed = &scene;
+    app = &application;
+  });
+
+  REQUIRE(owner.prepareChecked());
+  CHECK(calls == 1);
+  CHECK(observer.expired());
+  layoutResourceFrame(*managed, *app, {20, 4});
+
+  const auto source = app->tree().inspect(button.node());
+
+  REQUIRE(source);
+
+  ResourceFramePaint paint;
+
+  REQUIRE(app->tree().frame([&] {
+    REQUIRE(app->tree().paint(source->parent, paint));
+  }));
+  CHECK(std::ranges::find(paint.text, "Retained title") != paint.text.end());
+  CHECK(calls == 1);
+  REQUIRE(owner.close());
+}
+
+TEST_CASE("default custom sized resource frame is additive while an explicit old schema stays narrow") {
+  for (const bool narrow : {false, true}) {
+    int factories{};
+    ui::Ref<Custom> source;
+    ui::SceneResourceOptions options;
+
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    REQUIRE(options.registry.add<Custom>("Probe", [&, source](ui::SceneResourceArguments) {
+      ++factories;
+
+      return ui::custom<Custom>(source, "custom");
+    }));
+
+    if (narrow) {
+      options.controls.emplace();
+      constexpr std::array<std::string_view, 4> PROPERTIES{"text", "width", "height", "flex"};
+
+      options.controls->registerType("Probe", PROPERTIES);
+    }
+
+    auto owner = ui::scene(R"(scene{Probe{frame="rounded"}})", options);
+    const auto result = owner.prepareChecked();
+
+    if (narrow) {
+      REQUIRE_FALSE(result);
+      REQUIRE(result.error().sceneResource);
+      CHECK(result.error().sceneResource->code == Code::UNKNOWN_PROPERTY);
+      CHECK(factories == 0);
+      CHECK(source.node() == Node<Custom>{});
+    } else {
+      REQUIRE(result);
+      CHECK(factories == 1);
+      CHECK(source.node() != Node<Custom>{});
+    }
+
+    REQUIRE(owner.close());
+    CHECK(Custom::alive == 0);
+  }
+}
+
+TEST_CASE("resource invalid prepared frame rolls back earlier nodes and every unpublished ref") {
+  auto application = Application::create();
+
+  REQUIRE(application);
+
+  auto managed = ManagedScene::create(**application);
+
+  REQUIRE(managed);
+
+  const auto before = (*application)->tree().inspect((*managed)->root());
+
+  REQUIRE(before);
+
+  ui::Ref<Custom> first;
+  ui::Ref<Button> invalid;
+  ui::SceneResourceOptions options;
+  int setup{};
+
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  REQUIRE(options.registry.add<Custom>("First", [&, first](ui::SceneResourceArguments) {
+    return ui::custom<Custom>(first, "first")
+      .setup([&](ManagedScene &, Node<Custom>) -> std::expected<void, ManagedError> {
+        ++setup;
+
+        return {};
+      });
+  }));
+  REQUIRE(options.registry.add<Button>("Invalid", [invalid](ui::SceneResourceArguments) {
+    return ui::button(invalid, "unmounted");
+  }));
+
+  const auto result = ui::mount(
+    **managed,
+    ui::resource(
+      R"(scene{VBox{First{frame="rounded"} Invalid{frame{enabled=true customGlyphs{enabled=true topLeft="ab" topRight="+" bottomLeft="+" bottomRight="+" horizontal="-" vertical="|"}}}}})",
+      options));
+
+  REQUIRE_FALSE(result);
+  CHECK(cause(result.error(), TreeError::INVALID_ARGUMENT));
+  CHECK(setup == 1);
+  CHECK(Custom::alive == 0);
+  CHECK(first.node() == Node<Custom>{});
+  CHECK(invalid.node() == Node<Button>{});
+
+  const auto after = (*application)->tree().inspect((*managed)->root());
+
+  REQUIRE(after);
+  CHECK(after->children == before->children);
 }

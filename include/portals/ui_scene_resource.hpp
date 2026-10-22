@@ -185,6 +185,18 @@ private:
       const auto enabled = arguments.enabled;
       const auto classes = arguments.classes;
       const auto materialized = detail::controlSettingsPresenceSet(arguments.settings);
+      std::optional<ControlSettings> frameSettings;
+
+      if (detail::hasFrameSettings(arguments.settings.frame)) {
+        if constexpr (!std::derived_from<T, SizedWidget>) {
+          return std::unexpected(detail::frameContextError(ControlContextErrorCode::UNSUPPORTED_PROPERTY, "frame"));
+        } else {
+          frameSettings.emplace();
+          frameSettings->frame = arguments.settings.frame;
+          frameSettings->origin = arguments.settings.origin;
+          frameSettings->origins = arguments.settings.origins;
+        }
+      }
       [[maybe_unused]] const auto rowHeight = arguments.settings.rowHeight;
       [[maybe_unused]] const auto overscanRows = arguments.settings.overscanRows;
       [[maybe_unused]] const auto maxColumns = arguments.settings.maxColumns;
@@ -213,6 +225,10 @@ private:
         if (!staged) {
           return std::unexpected(staged.error());
         }
+      }
+
+      if (frameSettings) {
+        detail::Access::frameSettings(*recipe, *frameSettings);
       }
 
       detail::Access::preparedControlPresence(*recipe, materialized);

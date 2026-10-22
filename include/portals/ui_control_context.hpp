@@ -107,11 +107,42 @@ struct ControlTextLimitSettings {
   std::optional<std::size_t> maxCells{};        ///< Maximum display width in terminal cells.
 };
 
-/** @brief Sparse existing one-cell ScrollArea frame options; this is not an extended frame style. */
+/** @brief Sparse owning custom frame source; omitted glyphs preserve the receiving source. */
+struct ControlFrameGlyphSettings {
+  /** @brief Keep owning transfers fallible on checked standard-library implementations. */
+  ~ControlFrameGlyphSettings() = default;
+
+  std::optional<bool> enabled{};            ///< True creates a source; false removes it.
+  std::optional<std::string> topLeft{};     ///< One-cell top-left corner, at most 64 UTF-8 bytes.
+  std::optional<std::string> topRight{};    ///< One-cell top-right corner, at most 64 UTF-8 bytes.
+  std::optional<std::string> bottomLeft{};  ///< One-cell bottom-left corner, at most 64 UTF-8 bytes.
+  std::optional<std::string> bottomRight{}; ///< One-cell bottom-right corner, at most 64 UTF-8 bytes.
+  std::optional<std::string> horizontal{};  ///< One-cell horizontal edge, at most 64 UTF-8 bytes.
+  std::optional<std::string> vertical{};    ///< One-cell vertical edge, at most 64 UTF-8 bytes.
+};
+
+/** @brief Sparse frame settings; sized controls gain a Border, ScrollArea uses its native frame. */
 struct ControlScrollFrameSettings {
-  std::optional<bool> enabled{}; ///< Explicit true creates missing default BorderOptions; false removes the frame.
+  /** @brief Keep owning transfers fallible; copies are translated at the existing checked boundary. */
+  ~ControlScrollFrameSettings() = default;
+
+  std::optional<bool> enabled{}; ///< Explicit true creates missing default FrameOptions; false removes the frame.
   std::optional<PrimitiveGlyphs> glyphs{};    ///< Glyph selection; requires an effective enabled frame.
   std::optional<std::size_t> maxPaintCells{}; ///< Positive existing frame paint cap; requires an effective frame.
+  std::optional<FramePattern> pattern{};      ///< Built-in line pattern.
+
+  /** @brief Sparse edge presence, preserving omitted receiving insets. */
+  struct Sides {
+    std::optional<bool> top{};    ///< Present top edge.
+    std::optional<bool> right{};  ///< Present right edge.
+    std::optional<bool> bottom{}; ///< Present bottom edge.
+    std::optional<bool> left{};   ///< Present left edge.
+  } sides{};                      ///< Sparse one-cell edge insets.
+
+  std::optional<TextValue> title{};                    ///< Owning title expression, resolved before construction.
+  std::optional<FrameTitleAlignment> titleAlignment{}; ///< Alignment of the fitting title prefix.
+  std::optional<std::size_t> maxTitleBytes{};          ///< Positive complete title byte limit; default 4096.
+  ControlFrameGlyphSettings customGlyphs{};            ///< Optional owning six-glyph source.
 };
 
 /** @brief Sparse owning literal formatter settings; omitted strings preserve the receiving options. */
@@ -313,7 +344,7 @@ struct ControlSettings {
   std::optional<ScrollBarPolicy> vertical{};   ///< ScrollArea vertical bar presence policy.
   std::optional<ScrollPlacement> placement{};  ///< ScrollArea gutter/overlay/frame relationship.
   std::optional<ScrollAxis> axis{};            ///< ScrollBar projection axis, applied without changing its writer role.
-  ControlScrollFrameSettings frame{};          ///< Sparse optional one-cell ScrollArea frame configuration.
+  ControlScrollFrameSettings frame{};          ///< Sparse optional frame configuration for sized controls.
   std::optional<LayoutAlign> horizontalAlign{}; ///< Ordinary Overlay child alignment across columns.
   std::optional<LayoutAlign> verticalAlign{};   ///< Ordinary Overlay child alignment across rows.
   std::optional<bool> initiallyOpen{};    ///< HelpView initial open state, using its existing focus-return lifecycle.

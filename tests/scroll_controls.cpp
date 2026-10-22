@@ -183,6 +183,16 @@ struct AreaFixture : TreeFixture {
     }
   }
 
+  AreaFixture(ScrollAreaOptions options, FrameOptions frame, CellSize extent = {20, 30}, bool initialize = true) {
+    area = take(tree->emplaceChecked<ScrollArea>(root, controller, WidthPolicy{}, options, ControlStyle{}, SizePolicy{},
+                                                 std::move(frame), std::in_place));
+    content = take(tree->emplaceChecked<Content>(area, extent));
+
+    if (initialize) {
+      take(initializeScrollArea(*tree, area));
+    }
+  }
+
   void settle(CellSize size = {10, 6}) {
     layout(size);
     take(prepareScrollArea(*tree, area, take(scrollAreaLayout(*tree, area))));
@@ -689,6 +699,162 @@ void obsoleteAssociationAdmission() {
         "commit validates current controller association before publishing an obsolete lease plan");
 }
 
+void advancedFrames() {
+  constexpr ScrollAreaOptions LITERAL_OPTIONS{};
+
+  static_assert(!LITERAL_OPTIONS.frame && LITERAL_OPTIONS.horizontal == ScrollBarPolicy::AUTO);
+
+  ScrollAreaOptions options;
+  options.placement = ScrollPlacement::ON_FRAME;
+  options.glyphs = PrimitiveGlyphs::ASCII;
+  FrameOptions frame;
+
+  frame.title = "owned";
+  frame.customGlyphs = FrameGlyphs{"a", "b", "c", "d", "=", "!"};
+
+  AreaFixture retained(options, frame);
+
+  frame.title.assign(100, 'z');
+  frame.customGlyphs->topLeft = "z";
+  frame.customGlyphs->horizontal = "z";
+  retained.settle({10, 6});
+
+  const auto painted = retained.paint(retained.area);
+
+  check(painted.cells.at({0, 0}) == "a" && painted.cells.at({1, 0}) == "owned" && painted.cells.at({9, 5}) == "d" &&
+          painted.cells.at({9, 1}) == "#",
+        "advanced frame owns its compiled title/custom glyphs and preserves scrollbar glyphs");
+
+  struct AllocationFreeSink : PaintContext {
+    std::array<unsigned, 60> visits{};
+    bool duplicate{};
+    std::size_t submitted{};
+
+    std::expected<void, TreeError> submit(std::span<const RenderCommand> commands) override {
+      for (const auto &command : commands) {
+        ++submitted;
+
+        if (const auto *text = std::get_if<TextCommand>(&command)) {
+          for (int i = 0; i < text->text.measure(); ++i) {
+            const CellPoint point{text->origin.x + i, text->origin.y};
+
+            if (text->clip.contains(point) && point.x >= 0 && point.x < 10 && point.y >= 0 && point.y < 6) {
+              duplicate |= ++visits[static_cast<std::size_t>(point.y * 10 + point.x)] > 1;
+            }
+          }
+        }
+      }
+
+      return {};
+    }
+  } sink;
+
+  std::expected<void, TreeError> result;
+
+  take(retained.tree->frame([&] {
+    allocation_test::fail = true;
+    result = retained.tree->paint(retained.area, sink);
+    allocation_test::fail = false;
+  }));
+  check(result && sink.submitted != 0 && !sink.duplicate,
+        "compiled frame/title/ON_FRAME tracks paint without allocation or duplicate owned cells");
+
+  FrameOptions partial;
+
+  partial.pattern = FramePattern::ASCII;
+  partial.sides = {false, true, true, false};
+
+  AreaFixture asymmetric(options, partial);
+
+  asymmetric.settle({10, 6});
+
+  const auto layout = take(scrollAreaLayout(*asymmetric.tree, asymmetric.area));
+  const auto child = take(asymmetric.tree->inspect(asymmetric.content));
+
+  check(layout.placement.viewportOrigin == CellPoint{} && layout.placement.viewport == CellSize{9, 5} &&
+          child.geometry.clip.origin() == CellPoint{} && child.geometry.clip.size() == CellSize{9, 5},
+        "partial frame measures, arranges and clips using its independent insets");
+  check(layout.placement.horizontal.origin == CellPoint{0, 5} && layout.placement.horizontal.length == 9 &&
+          layout.placement.vertical.origin == CellPoint{9, 0} && layout.placement.vertical.length == 5,
+        "partial ON_FRAME excludes only its bottom-right corner");
+
+  ScrollAreaOptions horizontalOnly = options;
+
+  horizontalOnly.vertical = ScrollBarPolicy::NEVER;
+  partial.sides = {false, false, true, false};
+
+  AreaFixture collapsed(horizontalOnly, partial);
+
+  collapsed.settle({5, 1});
+
+  const auto tiny = take(scrollAreaLayout(*collapsed.tree, collapsed.area));
+  const auto tinyPaint = collapsed.paint(collapsed.area);
+
+  check(tiny.placement.horizontal.origin == CellPoint{0, 0} && tiny.placement.horizontal.length == 5 &&
+          tinyPaint.submitted == 5 && tinyPaint.cells.size() == 5,
+        "single bottom side owns a collapsed row without a second frame submission");
+
+  for (const bool frameBudget : {false, true}) {
+    FrameOptions bounded;
+    ScrollAreaOptions boundedArea = options;
+
+    bounded.title.assign(100, 'x');
+
+    if (frameBudget) {
+      bounded.border.maxPaintCells = 40;
+    } else {
+      boundedArea.maxPaintCells = 40;
+    }
+
+    AreaFixture limited(boundedArea, bounded);
+
+    limited.settle({10, 6});
+
+    Sink empty;
+
+    take(limited.tree->frame([&] {
+      result = limited.tree->paint(limited.area, empty);
+    }));
+    check(error(result, TreeError::WOULD_BLOCK) && empty.submitted == 0,
+          "complete clipped title work respects frame and whole-area caps before any submission");
+  }
+
+  FrameOptions invalid;
+
+  invalid.sides.bottom = false;
+
+  AreaFixture rejected(options, invalid, {20, 30}, false);
+
+  check(error(initializeScrollArea(*rejected.tree, rejected.area), TreeError::INVALID_ARGUMENT),
+        "possible ON_FRAME horizontal bar rejects a missing bottom before initialization");
+
+  auto replacement = take(rejected.tree->emplaceChecked<ScrollArea>(rejected.root, rejected.controller));
+
+  check(initializeScrollArea(*rejected.tree, replacement).has_value(),
+        "invalid advanced configuration acquires no controller writer lease");
+
+  invalid = {};
+  invalid.customGlyphs = FrameGlyphs{"ab", "+", "+", "+", "-", "|"};
+
+  AreaFixture invalidText({}, invalid, {20, 30}, false);
+
+  check(error(initializeScrollArea(*invalidText.tree, invalidText.area), TreeError::INVALID_ARGUMENT),
+        "invalid custom glyph is retained as a typed preparation failure");
+
+  TreeFixture oom;
+  FrameOptions owning;
+
+  owning.title.assign(100, 'x');
+  allocation_test::fail = true;
+
+  const auto failed =
+    oom.tree->emplaceChecked<ScrollArea>(oom.root, std::shared_ptr<ScrollController>{}, WidthPolicy{},
+                                         ScrollAreaOptions{}, ControlStyle{}, SizePolicy{}, owning, std::in_place);
+
+  allocation_test::fail = false;
+  check(error(failed, TreeError::NO_MEMORY), "advanced owning construction preserves typed NO_MEMORY");
+}
+
 void manualStyleAndAutomaticMetadata() {
   BarFixture f;
   take(syncScrollControl(*f.tree, f.bar, f.bar));
@@ -741,6 +907,7 @@ int main() {
   failureTransactions();
   reentrantWriterAdmission();
   obsoleteAssociationAdmission();
+  advancedFrames();
   manualStyleAndAutomaticMetadata();
   return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

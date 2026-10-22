@@ -55,6 +55,9 @@ endif()
 target_sources(portals_core PRIVATE src/runtime/async.cpp)
 target_sources(portals_core PRIVATE src/widgets/ui_scene.cpp)
 target_sources(portals_core PRIVATE src/widgets/ui_scene_resource.cpp)
+# The typed resource factories can exceed the MSVC object section limit in Debug.
+set_source_files_properties(src/widgets/ui_scene_resource.cpp PROPERTIES
+  COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:MSVC>:/bigobj>")
 target_sources(portals_core PRIVATE src/widgets/ui_control_context.cpp src/widgets/ui_control_settings.cpp)
 target_sources(portals_core PRIVATE src/input_shortcut.cpp)
 
@@ -770,6 +773,13 @@ if(PORTALS_BUILD_TESTS)
   portals_enable_warnings(portals_ui_primitives)
   add_test(NAME portals.ui-primitives COMMAND portals_ui_primitives)
   set_tests_properties(portals.ui-primitives PROPERTIES TIMEOUT 20)
+
+  add_executable(portals_ui_frames tests/ui_frames.cpp)
+  target_include_directories(portals_ui_frames SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  target_link_libraries(portals_ui_frames PRIVATE portals::core)
+  portals_enable_warnings(portals_ui_frames)
+  add_test(NAME portals.ui-frames COMMAND portals_ui_frames)
+  set_tests_properties(portals.ui-frames PROPERTIES TIMEOUT 20)
 
   add_executable(portals_ui_ranges tests/ui_ranges.cpp)
   target_link_libraries(portals_ui_ranges PRIVATE portals::core)

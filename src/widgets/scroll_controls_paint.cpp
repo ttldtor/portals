@@ -17,18 +17,37 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, const Compu
   if (!state.lease || state.retired || !state.arranged) {
     return {};
   }
-  const auto [width, height] = state.allocation;
-  const bool frame = state.isArea && state.area.frame.has_value();
-  const auto perimeter = !frame || width == 0 || height == 0 ? 0ULL
-                         : width == 1 || height == 1         ? static_cast<std::uint64_t>(width) * height
-                                                             : 2ULL * width + 2ULL * height - 4;
-  const auto trackCells = static_cast<std::uint64_t>(state.geometry.horizontal.length) + state.geometry.vertical.length;
+  const auto *frame = state.isArea ? scrollFrameOptions(state) : nullptr;
+  const auto *frameText = state.advancedFrame     ? &state.advancedFrame->text
+                          : state.legacyFrameText ? &*state.legacyFrameText
+                                                  : nullptr;
   const bool onFrame = frame && state.area.placement == ScrollPlacement::ON_FRAME;
-  const auto work = perimeter + (onFrame ? 0 : trackCells) + (state.geometry.hasCorner ? 1 : 0);
+  std::array<CellRect, 2> exclusions;
+  std::size_t exclusionCount{};
+
+  if (onFrame) {
+    if (state.geometry.horizontal.length != 0) {
+      exclusions[exclusionCount++] =
+        *CellRect::from(state.geometry.horizontal.origin, {state.geometry.horizontal.length, 1});
+    }
+
+    if (state.geometry.vertical.length != 0) {
+      exclusions[exclusionCount++] =
+        *CellRect::from(state.geometry.vertical.origin, {1, state.geometry.vertical.length});
+    }
+  }
+
+  const auto excluded = std::span(exclusions.data(), exclusionCount);
+  const auto frameWork = frame && frameText ? framePaintWork(*frameText, *frame, state.allocation, excluded) : 0;
+  const auto fullFrameWork = frame && frameText ? framePaintWork(*frameText, *frame, state.allocation) : 0;
+  const auto trackCells = static_cast<std::uint64_t>(state.geometry.horizontal.length) + state.geometry.vertical.length;
+  const auto work = frameWork + trackCells + (state.geometry.hasCorner ? 1 : 0);
   const auto budget = state.isArea ? state.area.maxPaintCells : state.bar.maxPaintCells;
-  if (work > budget || (frame && perimeter > state.area.frame->maxPaintCells)) {
+
+  if (work > budget || (frame && fullFrameWork > frame->border.maxPaintCells)) {
     return std::unexpected(TreeError::WOULD_BLOCK);
   }
+
   auto horizontal =
     scrollThumb(state.presentation.horizontal.metrics, state.presentation.horizontal.offset.raster,
                 state.geometry.horizontal.length, state.isArea ? state.area.minimumThumb : state.bar.minimumThumb);
@@ -46,46 +65,14 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, const Compu
     const RenderCommand command = TextCommand{point, state.glyphs[glyph], *bounds, style};
     return context.submit(std::span(&command, 1));
   };
-  auto ownedByTrack = [&](CellPoint point) {
-    if (!onFrame) {
-      return false;
-    }
-    const auto &x = state.geometry.horizontal;
-    const auto &y = state.geometry.vertical;
-    return (point.y == x.origin.y && point.x >= x.origin.x &&
-            static_cast<std::int64_t>(point.x) < static_cast<std::int64_t>(x.origin.x) + x.length) ||
-           (point.x == y.origin.x && point.y >= y.origin.y &&
-            static_cast<std::int64_t>(point.y) < static_cast<std::int64_t>(y.origin.y) + y.length);
-  };
-  auto edge = [&](CellPoint point, std::size_t glyph) -> std::expected<void, TreeError> {
-    return ownedByTrack(point) ? std::expected<void, TreeError>{} : draw(point, glyph);
-  };
-  if (frame && width > 0 && height > 0) {
-    for (std::int32_t x = 0; x < width; ++x) {
-      auto result = edge({x, 0}, x == 0 ? 0 : x == width - 1 ? 1 : 4);
-      if (!result) {
-        return result;
-      }
-      if (height > 1) {
-        result = edge({x, height - 1}, x == 0 ? 2 : x == width - 1 ? 3 : 4);
-        if (!result) {
-          return result;
-        }
-      }
-    }
-    for (std::int32_t y = 1; y < height - 1; ++y) {
-      auto result = edge({0, y}, 5);
-      if (!result) {
-        return result;
-      }
-      if (width > 1) {
-        result = edge({width - 1, y}, 5);
-        if (!result) {
-          return result;
-        }
-      }
+  if (frame && frameText) {
+    auto painted = paintFrame(context, *frameText, *frame, *bounds, style, excluded);
+
+    if (!painted) {
+      return painted;
     }
   }
+
   auto track = [&](ScrollTrack cells, ScrollThumb thumb, bool horizontalAxis) -> std::expected<void, TreeError> {
     for (std::int32_t i = 0; i < cells.length; ++i) {
       auto point = cells.origin;

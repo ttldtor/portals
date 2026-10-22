@@ -169,8 +169,8 @@ std::expected<Node<Widget>, ManagedError> ManagedScene::makeDialogPanel(Node<Dia
   try {
     auto entry = find(*panel);
     entry->target = std::make_shared<StyleTarget>(StyleTarget{.type = "Border", .classes = {"dialog-panel"}});
-    entry->sync = [this, node = Node<Border>(*panel)](Node<Widget>) {
-      return syncBorder(app_.tree(), node);
+    entry->sync = [this, node = Node<Border>(*panel)](Node<Widget> focused) {
+      return syncBorder(app_.tree(), node, focused);
     };
     entry->stylePending = true;
     stylesDirty_ = true;

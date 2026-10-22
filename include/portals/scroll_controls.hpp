@@ -45,6 +45,19 @@ public:
    */
   explicit ScrollArea(std::shared_ptr<ScrollController> controller = {}, WidthPolicy width = {},
                       ScrollAreaOptions options = {}, ControlStyle style = {}, SizePolicy policy = {});
+  /** @brief Construct an area with an owning advanced frame, compiled before initialization.
+   * @param controller Owning shared values; empty creates a default controller on this UI thread.
+   * @param width Complete owning text policy for frame and scrollbar glyphs.
+   * @param options Owning placement/input settings; its legacy frame is superseded by frame.
+   * @param style Construction-only defaults beneath the existing theme resolver.
+   * @param policy Owning layout constraints, validated by the layout solver.
+   * @param frame Owning frame settings; retained text is independent of caller storage.
+   * @param advanced Required construction tag keeping legacy brace calls unambiguous.
+   * @throws std::bad_alloc On allocation; tree emplacement translates it to NO_MEMORY.
+   * Semantic frame errors are retained and returned by initialization and measurement before a lease is acquired.
+   */
+  ScrollArea(std::shared_ptr<ScrollController> controller, WidthPolicy width, ScrollAreaOptions options,
+             ControlStyle style, SizePolicy policy, FrameOptions frame, std::in_place_t advanced);
   /** @brief Release owning values; no user callback or terminal operation occurs. */
   ~ScrollArea() override;
   /** @brief Retire this node's lease and pointer token before destruction. */

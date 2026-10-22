@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
-#include <portals/widget.hpp>
 #include <portals/detail/layout_traversal.hpp>
 #include <portals/layout_snapshot.hpp>
+#include <portals/widget.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -445,6 +445,28 @@ std::expected<WidgetTree::GeometryObservation, TreeError> WidgetTree::observeGeo
   return GeometryObservation{(*value)->geometry, (*value)->visibilityRevision, State::shown(**value, false)};
 }
 
+std::expected<bool, TreeError> WidgetTree::contains(Node<Widget> ancestor, Node<Widget> node) const {
+  const auto parent = state_->find(ancestor.id());
+
+  if (!parent) {
+    return std::unexpected(parent.error());
+  }
+
+  const auto child = state_->find(node.id());
+
+  if (!child) {
+    return std::unexpected(child.error());
+  }
+
+  for (auto *record = *child; record; record = record->parent) {
+    if (record == *parent) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 std::expected<NodeSnapshot, TreeError> WidgetTree::inspect(Node<Widget> node) const {
   auto value = state_->find(node.id());
 
@@ -851,7 +873,7 @@ std::expected<bool, TreeError> WidgetTree::inputEligible(Node<Widget> node, Node
 
 std::expected<bool, TreeError>
 detail::LayoutTraversalAccess::adoptRegionalInput(WidgetTree &tree, const LayoutSnapshot &snapshot,
-                                                 std::span<const RegionalInputOwnerProposal> owners) {
+                                                  std::span<const RegionalInputOwnerProposal> owners) {
   if (auto checked = tree.state_->check(); !checked) {
     return std::unexpected(checked.error());
   }
@@ -882,13 +904,18 @@ detail::LayoutTraversalAccess::adoptRegionalInput(WidgetTree &tree, const Layout
   // hooks. No layout traversal, user callback or scheduler dispatch is added.
   WidgetTree::Borrow guard(tree, true);
   tree.state_->extension = true;
+
   struct RestoreExtension {
     bool &extension;
-    ~RestoreExtension() { extension = false; }
+
+    ~RestoreExtension() {
+      extension = false;
+    }
   } restore{tree.state_->extension};
 
   using Record = WidgetTree::State::Record;
   using Gate = WidgetTree::State::RegionalInputGate;
+
   struct Change {
     Record *record;
     std::unique_ptr<Gate> next;
@@ -914,7 +941,9 @@ detail::LayoutTraversalAccess::adoptRegionalInput(WidgetTree &tree, const Layout
       orderedOwners.push_back(&owner);
     }
 
-    std::ranges::sort(orderedOwners, {}, [](const RegionalInputOwnerProposal *value) { return value->owner.id().slot; });
+    std::ranges::sort(orderedOwners, {}, [](const RegionalInputOwnerProposal *value) {
+      return value->owner.id().slot;
+    });
 
     for (std::size_t i = 1; i < orderedOwners.size(); ++i) {
       if (orderedOwners[i - 1]->owner == orderedOwners[i]->owner) {
@@ -967,7 +996,9 @@ detail::LayoutTraversalAccess::adoptRegionalInput(WidgetTree &tree, const Layout
         index.push_back(&proposal);
       }
 
-      const auto slot = [](const RegionalInputProposal *value) { return value->child.slot; };
+      const auto slot = [](const RegionalInputProposal *value) {
+        return value->child.slot;
+      };
 
       std::ranges::sort(index, {}, slot);
 
@@ -1020,8 +1051,7 @@ detail::LayoutTraversalAccess::adoptRegionalInput(WidgetTree &tree, const Layout
       return false;
     }
 
-    if (!tree.state_->inputGeneration ||
-        tree.state_->inputGeneration == std::numeric_limits<std::uint64_t>::max()) {
+    if (!tree.state_->inputGeneration || tree.state_->inputGeneration == std::numeric_limits<std::uint64_t>::max()) {
       return std::unexpected(TreeError::IDENTITY_EXHAUSTED);
     }
 

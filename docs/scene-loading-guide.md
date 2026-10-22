@@ -283,3 +283,50 @@ failure may omit diagnostic context while preserving the typed error.
 This grammar does not evaluate C++, import other resources, watch files or bind
 `$parameters`. Custom control constructors remain explicitly allowlisted through
 the resource registry.
+
+## Loaded frames {#loaded-frames}
+
+Select `ui::SceneResourceOptions{.format = ui::SceneResourceFormat::CONFIGURATION}`
+when passing these resource properties to `ui::scene` or `ui::resource`. Sized
+controls accept an optional decoration using the same frame settings as C++
+recipes. A compact preset expands into `frame.enabled=true` and `frame.pattern`:
+
+```text
+scene {
+  VBox{frame="rounded" frame.title="Actions"
+    LineEdit#message{""}
+    Button#exit{"Exit"}
+  }
+}
+```
+
+`frame="single"`, `"plain"`, `"rounded"`, `"double"`, `"heavy"` and `"ascii"` are
+supported. Compact and expanded assignments cannot duplicate a canonical leaf,
+even when their spelling differs. The compact form consumes two property slots
+in its containing object. Expanded settings retain the existing per-object limit;
+nested groups are checked at their own level, and the resolved-leaf limit still
+bounds the complete settings transaction. `maxProperties` defaults to 16.
+Long dotted custom-frame declarations can exceed this limit; group related
+settings or explicitly raise the resource limit.
+
+Use `frame { enabled=true pattern=DOUBLE sides { left=false right=false } }`
+for grouped settings, or `frame.sides.top=false` for one dotted assignment.
+`frame.title` accepts literal text or `i18n(...)` and resolves through the scene's
+existing text resolver. `frame.titleAlignment` accepts START/CENTER/END;
+`frame.maxTitleBytes` defaults to 4096. `frame.glyphs` and
+`frame.maxPaintCells` retain their existing selection and work-cap semantics.
+A disabled frame cannot also receive frame-specific values.
+
+For an owning custom source set `frame.customGlyphs.enabled=true`, followed by
+`topLeft`, `topRight`, `bottomLeft`, `bottomRight`, `horizontal` and `vertical`
+in that group. Each must be one printable grapheme occupying one cell, at most
+64 bytes. Invalid text, enums, dimensions, conflicts and work limits use the
+existing typed preparation diagnostics and rollback.
+
+The source node keeps its type, ID and classes: `scene.get<Button>("exit")` still
+observes the Button. Layout receives the actual outer frame, including resource
+Grid cells. Common dimensions are outer dimensions. ScrollArea configures its
+own frame. Default schemas for custom registered sized widgets include frame
+properties; an explicit custom property allowlist remains exact and must include
+any frame properties it permits. See [frame geometry](controls.md#control-frames)
+for sizing, removal, focused styling and ON_FRAME scroll tracks.
