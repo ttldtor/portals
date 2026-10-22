@@ -228,9 +228,51 @@ html:not(.turbo-mode) .contents :is(div.fragment, pre.fragment) {
   margin-inline: 0;
 }
 
+html:not(.turbo-mode) .contents :is(center, .center) {
+  width: auto;
+  max-width: 100%;
+  margin-inline: 0;
+}
+
 /* Wrap the displayed source without changing the text copied from it. */
 html:not(.turbo-mode) .contents div.fragment div.line {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: normal;
+}
+
+/* API signatures reflow inside the panel instead of a table's intrinsic width. */
+html:not(.turbo-mode) .memproto table.memname,
+html:not(.turbo-mode) .memproto table.memname > tbody,
+html:not(.turbo-mode) .memproto table.memname > tbody > tr {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  margin: 0;
+}
+html:not(.turbo-mode) .memproto table.memname td {
+  display: inline;
+  padding: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+html:not(.turbo-mode) .memproto table.memname td.paramtype { padding-right: 0.5ch; }
+html:not(.turbo-mode) .memproto :is(.memtemplate, .paramname, .paramdefval) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+html:not(.turbo-mode) table.memberdecls { width: 100%; }
+html:not(.turbo-mode) table.memberdecls td { overflow-wrap: anywhere; white-space: normal; }
+
+@media screen and (max-width: 767px) {
+  html:not(.turbo-mode) .contents table.memberdecls,
+  html:not(.turbo-mode) .contents table.memberdecls > tbody,
+  html:not(.turbo-mode) .contents table.memberdecls > tbody > tr,
+  html:not(.turbo-mode) .contents table.memberdecls > tbody > tr > td {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    margin-inline: 0;
+  }
 }
