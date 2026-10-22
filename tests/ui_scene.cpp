@@ -5405,3 +5405,52 @@ TEST_CASE("owning application factory accepts a declared-layer scene through the
   CHECK(reports == 1);
   CHECK(stopped == 1);
 }
+
+TEST_CASE("default report prints protected primary callback and cleanup categories without secret text") {
+  for (const bool accessFailure : {false, true}) {
+    SecureStringFailure callback{{SecureStringOperation::ENCRYPT, SecureStringErrorCode::SECURITY_FAILURE, 77}, {}};
+    callback.cleanup.add(SecureStringError{SecureStringOperation::RELEASE, SecureStringErrorCode::RELEASE_FAILED, 88});
+    PasswordFailure failure = callback;
+
+    if (accessFailure) {
+      SecureStringAccessFailure<SecureStringFailure> access;
+
+      access.primary = SecureStringError{SecureStringOperation::BORROW, SecureStringErrorCode::UNAVAILABLE, 99};
+      access.callbackError = callback;
+      access.cleanup.add(SecureStringError{SecureStringOperation::RELEASE, SecureStringErrorCode::RELEASE_FAILED, 111});
+      failure = PasswordValueAccessFailure<SecureStringFailure>{TreeError::WRONG_THREAD, access};
+    }
+
+    ui::PasswordConfig config;
+
+    config.initial = [failure]() -> std::expected<PasswordValue, PasswordFailure> {
+      return std::unexpected(failure);
+    };
+    StderrCapture capture;
+
+    CHECK((ui::scene(ui::password(config)) | ui::runApp()) == 1);
+    const auto message = capture.contents();
+
+    REQUIRE(message.find("password=(") != std::string::npos);
+    CHECK(message.find("password=(") == message.rfind("password=("));
+    CHECK(message.find("native=77") != std::string::npos);
+    CHECK(message.find("native=88") != std::string::npos);
+    CHECK(message.find("cleanup-count=1") != std::string::npos);
+    if (accessFailure) {
+      CHECK(message.find("owner=WRONG_THREAD") != std::string::npos);
+      CHECK(message.find("native=99") != std::string::npos);
+      CHECK(message.find("native=111") != std::string::npos);
+      CHECK(message.find("callback-secure=(") != std::string::npos);
+    }
+  }
+}
+
+TEST_CASE("default resource failure reporting never includes rejected password literals") {
+  StderrCapture capture;
+
+  CHECK((ui::scene(R"(Password{text = "PRIVATE_MARKER_MUST_NOT_LEAK"})") | ui::runApp()) == 1);
+  const auto message = capture.contents();
+
+  CHECK(message.find("scene-resource") != std::string::npos);
+  CHECK(message.find("PRIVATE_MARKER_MUST_NOT_LEAK") == std::string::npos);
+}

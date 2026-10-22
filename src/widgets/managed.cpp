@@ -299,6 +299,50 @@ ManagedError ManagedScene::error(ManagedPhase phase, Node<Widget> node, TreeErro
   return {phase, node.id(), cause, {}, {}};
 }
 
+ManagedError detail::passwordError(ManagedPhase phase, NodeId node, PasswordFailure failure) {
+  const auto security = [](const SecureStringError &cause) {
+    return cause.code == SecureStringErrorCode::NO_MEMORY ? TreeError::NO_MEMORY : TreeError::CALLBACK_FAILED;
+  };
+  const auto cause = std::visit(
+    [&](const auto &value) -> TreeError {
+      using T = std::remove_cvref_t<decltype(value)>;
+
+      if constexpr (std::same_as<T, TreeError>) {
+        return value;
+      } else if constexpr (std::same_as<T, TextError> || std::same_as<T, PasswordInputError>) {
+        return TreeError::INVALID_ARGUMENT;
+      } else if constexpr (std::same_as<T, SecureStringFailure>) {
+        return security(value.primary);
+      } else {
+        if (value.ownership) {
+          return *value.ownership;
+        }
+        if (value.access) {
+          if (value.access->primary) {
+            return security(*value.access->primary);
+          }
+          if constexpr (std::same_as<T, PasswordValueAccessFailure<SecureStringFailure>>) {
+            if (value.access->callbackError) {
+              return security(value.access->callbackError->primary);
+            }
+          } else if constexpr (std::same_as<T, PasswordValueAccessFailure<TextError>>) {
+            if (value.access->callbackError) {
+              return TreeError::INVALID_ARGUMENT;
+            }
+          }
+        }
+
+        return TreeError::CALLBACK_FAILED;
+      }
+    },
+    failure);
+  ManagedError result{phase, node, cause, {}, {}};
+
+  result.password.emplace(std::move(failure));
+
+  return result;
+}
+
 std::expected<std::unique_ptr<ManagedScene>, ManagedError> ManagedScene::create(Application &app,
                                                                                 ManagedOptions options) {
   auto allowed = app.tree().withScope(app.root(), [](const UiScope &) {
@@ -2327,6 +2371,170 @@ ManagedScene::bind(Node<LineEdit> node, ManagedState<std::string> model,
   }
 }
 
+std::expected<void, ManagedError>
+ManagedScene::bind(Node<Password> node, ManagedState<PasswordValue> model,
+                   std::function<std::expected<void, TreeError>(PasswordResult)> result,
+                   std::shared_ptr<Clipboard> clipboard, std::function<bool(SecretView)> validate) {
+  ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
+  auto entry = bindingEntry(node);
+
+  if (!entry) {
+    return std::unexpected(entry.error());
+  }
+
+  auto property = model.lock();
+
+  if (!property || model.scene_ != root_.id()) {
+    return std::unexpected(error(ManagedPhase::BIND, node, property ? TreeError::INVALID_ARGUMENT : property.error()));
+  }
+
+  try {
+    auto feedback = std::make_shared<PasswordFeedback>();
+    auto bound = bindPassword(
+      app_.tree(), app_.router(), node, *property,
+      [this, node, lifetime = std::weak_ptr<const void>(lifetime_), feedback,
+       result = ui::detail::currentSceneCallback(facadeContext(), std::move(result))](PasswordResult receipt) {
+        const auto phase = receipt.trigger == LineEditTrigger::FLUENT ? ManagedPhase::TEXT : ManagedPhase::INPUT;
+        const auto report = [&](ManagedError failure, const char *operation = "password.input",
+                                bool commandFailure = false) {
+          if (lifetime.expired()) {
+            return;
+          }
+
+          failure.operation = operation;
+          failure.reportReceipt.collector_ = lifetime_;
+
+          if (commandFailure && receipt.trigger == LineEditTrigger::BLUR) {
+            if (auto *destination = FocusReport::destination(app_); destination && !*destination) {
+              // Preserve this application's typed loss failure through the active focus command.
+              destination->emplace(failure);
+            }
+          }
+
+          if (feedback->active && !feedback->reported) {
+            feedback->reported = failure;
+          }
+
+          remember(std::move(failure));
+        };
+
+        if (receipt.status == PasswordStatus::FAILED && receipt.failure) {
+          report(detail::passwordError(phase, node.id(), *receipt.failure),
+                 receipt.trigger == LineEditTrigger::BLUR     ? "password.blur"
+                 : receipt.trigger == LineEditTrigger::FLUENT ? "password.fluent"
+                                                              : "password.input",
+                 true);
+        }
+
+        if (lifetime.expired() || !result) {
+          return;
+        }
+
+        try {
+          auto delivered = result(std::move(receipt));
+
+          if (!delivered) {
+            report(error(phase, node, delivered.error()), "password.callback");
+          }
+        } catch (const std::bad_alloc &) {
+          report(error(phase, node, TreeError::NO_MEMORY), "password.callback");
+        } catch (...) {
+          report(error(phase, node, TreeError::CALLBACK_FAILED), "password.callback");
+        }
+      },
+      std::move(clipboard),
+      validate ? std::function<bool(SecretView)>{ui::detail::currentSceneCallback(facadeContext(), std::move(validate))}
+               : std::function<bool(SecretView)>{});
+
+    if (!bound) {
+      return std::unexpected(detail::passwordError(ManagedPhase::BIND, node.id(), std::move(bound.error())));
+    }
+
+    (*entry)->passwordFeedback = std::move(feedback);
+    (*entry)->binding.emplace<PasswordBinding>(std::move(*bound));
+
+    return {};
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
+  } catch (...) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CALLBACK_FAILED));
+  }
+}
+
+std::expected<PasswordValue, ManagedError> ManagedScene::passwordValue(Node<Password> node) const {
+  auto allowed = boundary(ManagedPhase::TEXT, node);
+
+  if (!allowed) {
+    return std::unexpected(allowed.error());
+  }
+
+  PasswordValue value;
+  auto read = app_.tree().read(node, [&](const Password &field) {
+    value = field.draft_;
+  });
+
+  if (!read) {
+    return std::unexpected(error(ManagedPhase::TEXT, node, read.error()));
+  }
+  if (!value.available()) {
+    return std::unexpected(detail::passwordError(
+      ManagedPhase::TEXT, node.id(),
+      SecureStringFailure{{SecureStringOperation::BORROW, SecureStringErrorCode::UNAVAILABLE}, {}}));
+  }
+
+  return value;
+}
+
+std::expected<void, ManagedError> ManagedScene::setPasswordValue(Node<Password> node, PasswordValue value) {
+  auto allowed = boundary(ManagedPhase::TEXT, node);
+
+  if (!allowed) {
+    return allowed;
+  }
+
+  auto entry = find(node);
+  auto *binding = entry ? std::get_if<PasswordBinding>(&entry->binding) : nullptr;
+
+  if (!binding || !entry->passwordFeedback) {
+    return std::unexpected(error(ManagedPhase::TEXT, node, TreeError::INVALID_ARGUMENT));
+  }
+
+  auto feedback = entry->passwordFeedback;
+
+  if (feedback->active) {
+    return std::unexpected(error(ManagedPhase::TEXT, node, TreeError::WOULD_BLOCK));
+  }
+
+  struct Reset {
+    std::shared_ptr<PasswordFeedback> feedback;
+
+    ~Reset() {
+      feedback->active = false;
+      feedback->reported.reset();
+    }
+  } reset{feedback};
+
+  feedback->active = true;
+  auto changed = binding->setValue(std::move(value));
+
+  if (!changed) {
+    return std::unexpected(
+      feedback->reported.value_or(detail::passwordError(ManagedPhase::TEXT, node.id(), std::move(changed.error()))));
+  }
+  if (changed->failure) {
+    return std::unexpected(
+      feedback->reported.value_or(detail::passwordError(ManagedPhase::TEXT, node.id(), std::move(*changed->failure))));
+  }
+  if (changed->callbackError) {
+    return std::unexpected(feedback->reported.value_or(error(ManagedPhase::TEXT, node, *changed->callbackError)));
+  }
+  if (feedback->reported) {
+    return std::unexpected(*feedback->reported);
+  }
+
+  return {};
+}
+
 std::expected<void, ManagedError> ManagedScene::style(Node<Widget> node, StyleTarget target) {
   auto allowed = boundary(ManagedPhase::STYLE, node);
 
@@ -3354,6 +3562,16 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
         if (status) {
           if (auto *edit = std::get_if<LineEditBinding>(&entry->binding)) {
             status = edit->sync(*focused);
+          } else if (auto *password = std::get_if<PasswordBinding>(&entry->binding)) {
+            auto synced = password->sync(*focused);
+
+            if (!synced) {
+              auto failure = detail::passwordError(ManagedPhase::PREPARE, entry->node.id(), std::move(synced.error()));
+
+              remember(failure);
+
+              return std::unexpected(bridge(failure));
+            }
           } else if (auto *check = std::get_if<CheckBoxBinding>(&entry->binding)) {
             status = check->sync();
           } else if (auto *typedCheck = std::get_if<CheckStateBinding>(&entry->binding)) {

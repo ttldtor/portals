@@ -99,6 +99,9 @@ SceneResourceRegistry::SceneResourceRegistry() {
     return std::expected<Description<LineEdit>, ManagedError>(
       lineEdit(arguments.text, LineEditConfig{.options = std::move(*options)}));
   });
+  (void)add<Password>("Password", [](SceneResourceArguments arguments) {
+    return password().settings(arguments.settings);
+  });
   (void)add<Button>("Button", [](SceneResourceArguments arguments) {
     return detail::textControl<Button>(TextValue(arguments.text), {}, {}, {},
                                        arguments.settings.chrome.value_or(ButtonChrome::BRACKETS));
@@ -687,6 +690,9 @@ struct ResourceDocument {
 };
 
 class Parser {
+  using NodeStatus = std::expected<std::size_t, const ManagedError *>;
+  using RegionStatus = std::expected<void, const ManagedError *>;
+
 public:
   Parser(ResourceDocument &document, SceneResourceOptions &options, ControlContext &controls, bool typed)
       : document_(document), options_(options), controls_(controls), typed_(typed) {
@@ -784,7 +790,7 @@ public:
     auto root = node(1);
 
     if (!root) {
-      return std::unexpected(root.error());
+      return std::unexpected(*root.error());
     }
 
     skip();
@@ -1072,13 +1078,17 @@ private:
   }
 
   const ControlPropertyDescriptor *descriptor(std::string_view path) const {
-    for (const auto type : {"LineEdit",      "CheckBox",      "VBox",
-                            "Button",        "Border",        "Gauge",
-                            "ScrollArea",    "ScrollBar",     "Overlay",
-                            "HelpView",      "KeyHints",      "VirtualList",
-                            "VirtualTable",  "Chart",         "DataStateView",
-                            "OverlayHost",   "Dialog",        "MessageBox",
-                            "Notifications", "ThemeSelector", "ThemeSelectorCatalog"}) {
+    for (const auto type : {"Password",      "LineEdit",
+                            "CheckBox",      "VBox",
+                            "Button",        "Border",
+                            "Gauge",         "ScrollArea",
+                            "ScrollBar",     "Overlay",
+                            "HelpView",      "KeyHints",
+                            "VirtualList",   "VirtualTable",
+                            "Chart",         "DataStateView",
+                            "OverlayHost",   "Dialog",
+                            "MessageBox",    "Notifications",
+                            "ThemeSelector", "ThemeSelectorCatalog"}) {
       const auto schema = controlPropertySchema(type);
       const auto found = std::ranges::find(schema, path, &ControlPropertyDescriptor::path);
 
@@ -1208,7 +1218,13 @@ private:
 
       const bool enabled = value == "true";
 
-      if (path == "themeCatalog.initialId.enabled") {
+      if (path == "securePolicy.lockPages") {
+        settings.securePolicy.lockPages = enabled;
+      } else if (path == "securePolicy.excludeFromDumps") {
+        settings.securePolicy.excludeFromDumps = enabled;
+      } else if (path == "securePolicy.encryptWhileIdle") {
+        settings.securePolicy.encryptWhileIdle = enabled;
+      } else if (path == "themeCatalog.initialId.enabled") {
         settings.themeCatalog.initialId.enabled = enabled;
       } else if (path == "themeCatalog.layers.enabled") {
         settings.themeCatalog.layers.enabled = enabled;
@@ -1261,7 +1277,11 @@ private:
 
       const auto index = found - schema->enumNames.begin();
 
-      if (path == "state") {
+      if (path == "securePolicy.storage") {
+        settings.securePolicy.storage = static_cast<SecureStringStorage>(index);
+      } else if (path == "pastePolicy") {
+        settings.pastePolicy = static_cast<PasswordPastePolicy>(index);
+      } else if (path == "state") {
         settings.state = static_cast<CheckState>(index);
       } else if (path == "cycle") {
         settings.cycle = static_cast<CheckCycle>(index);
@@ -1378,7 +1398,9 @@ private:
       return std::unexpected(document_.propertyFailure(Code::INVALID_VALUE, offset, type, path));
     }
 
-    if (path == "maxLayers") {
+    if (path == "securePolicy.maxBytes") {
+      settings.securePolicy.maxBytes = *value;
+    } else if (path == "maxLayers") {
       settings.maxLayers = *value;
     } else if (path == "dialog.maximumPanelSize.width") {
       settings.dialog.maximumPanelSize.width = static_cast<std::int32_t>(*value);
@@ -1568,11 +1590,11 @@ private:
       if (take('{')) {
         const bool configurationStruct =
           options_.format == SceneResourceFormat::CONFIGURATION &&
-          (path == "limits" || path == "frame" || path == "format" || path == "yRange" || path == "labels" ||
-           path == "dialog" || path == "dialog.frame" || path == "dialog.maximumPanelSize" || path == "message" ||
-           path == "message.labels" || path == "message.defaultChoice" || path == "message.textLimits" ||
-           path == "notification" || path == "notification.textLimits" || path == "themeSelector" ||
-           path == "themeSelector.labels" || path == "themeSelector.textLimits" ||
+          (path == "securePolicy" || path == "limits" || path == "frame" || path == "format" || path == "yRange" ||
+           path == "labels" || path == "dialog" || path == "dialog.frame" || path == "dialog.maximumPanelSize" ||
+           path == "message" || path == "message.labels" || path == "message.defaultChoice" ||
+           path == "message.textLimits" || path == "notification" || path == "notification.textLimits" ||
+           path == "themeSelector" || path == "themeSelector.labels" || path == "themeSelector.textLimits" ||
            path == "themeSelector.openingShortcut" || path == "themeCatalog" || path == "themeCatalog.textLimits" ||
            path == "themeCatalog.initialId" || path == "themeCatalog.layers");
 
@@ -1844,11 +1866,11 @@ private:
     return {};
   }
 
-  std::expected<void, ManagedError> region(std::size_t parent, GridRegion kind, std::size_t depth, std::size_t offset) {
+  RegionStatus region(std::size_t parent, GridRegion kind, std::size_t depth, std::size_t offset) {
     const bool declared =
       kind == GridRegion::HEADER ? document_.nodes[parent].headerDeclared : document_.nodes[parent].bodyDeclared;
     if (declared || document_.nodes[parent].directChildren) {
-      return std::unexpected(document_.failure(Code::INVALID_VALUE, offset));
+      return parseFailure(Code::INVALID_VALUE, offset);
     }
 
     if (kind == GridRegion::HEADER) {
@@ -1859,7 +1881,7 @@ private:
 
     document_.nodes[parent].regions = true;
     if (!take('{')) {
-      return std::unexpected(document_.failure(Code::SYNTAX, position_));
+      return parseFailure(Code::SYNTAX, position_);
     }
 
     bool stickyDeclared{};
@@ -1870,20 +1892,17 @@ private:
       const bool assigned = take(':') || take('=');
       if (assigned) {
         if (kind != GridRegion::HEADER || token != "sticky") {
-          return std::unexpected(
-            document_.propertyFailure(Code::UNKNOWN_PROPERTY, begin, document_.nodes[parent].name, token));
+          return parseFailure(Code::UNKNOWN_PROPERTY, begin, document_.nodes[parent].name, token);
         }
 
         if (stickyDeclared) {
-          return std::unexpected(
-            document_.propertyFailure(Code::DUPLICATE_PROPERTY, begin, document_.nodes[parent].name, "header.sticky"));
+          return parseFailure(Code::DUPLICATE_PROPERTY, begin, document_.nodes[parent].name, "header.sticky");
         }
 
         stickyDeclared = true;
         const auto value = name();
         if (value != "true" && value != "false") {
-          return std::unexpected(
-            document_.propertyFailure(Code::INVALID_VALUE, begin, document_.nodes[parent].name, "header.sticky"));
+          return parseFailure(Code::INVALID_VALUE, begin, document_.nodes[parent].name, "header.sticky");
         }
 
         document_.nodes[parent].stickyHeader = value == "true";
@@ -1956,8 +1975,12 @@ private:
     auto &target = document_.nodes[index];
     const auto type = std::string_view(target.name);
     auto key = positional ? std::string_view("text") : token;
+    const bool registered = target.factory.kind == detail::ControlFactoryKind::USER ||
+                            target.factory.kind == detail::ControlFactoryKind::EXISTING_BUILTIN;
+    const bool protectedEditor =
+      registered && detail::ResourceAccess::entry(options_.registry, target.factory.index).protectedEditor;
 
-    if (options_.format == SceneResourceFormat::CONFIGURATION) {
+    if (options_.format == SceneResourceFormat::CONFIGURATION || protectedEditor) {
       key = detail::ControlContextAccess::canonicalProperty(key);
     }
 
@@ -1973,6 +1996,30 @@ private:
 
     if (positional) {
       position_ = begin;
+    }
+
+    if (protectedEditor && key == "text") {
+      skip();
+
+      // Admit only an exact empty literal, without decoding or retaining a rejected value.
+      if (document_.bytes.compare(position_, 2, "\"\"") != 0) {
+        return std::unexpected(document_.propertyFailure(Code::SECRET_LITERAL, begin, type, "text"));
+      }
+    }
+
+    if (protectedEditor && (key == "securePolicy" || key == "limits") && take('{')) {
+      return settingsBody(target.arguments.settings, type, key, 2);
+    }
+
+    if (protectedEditor && options_.format != SceneResourceFormat::CONFIGURATION && key != "text" && key != "width" &&
+        key != "height" && key != "flex" && key != "classes" && key != "visible" && key != "enabled") {
+      const auto schema = controlPropertySchema("Password");
+
+      if (std::ranges::find(schema, key, &ControlPropertyDescriptor::path) == schema.end()) {
+        return std::unexpected(document_.propertyFailure(Code::UNKNOWN_PROPERTY, begin, type, key));
+      }
+
+      return setting(target.arguments.settings, type, key, begin);
     }
 
     if (key == "help" &&
@@ -2147,8 +2194,44 @@ private:
     return index;
   }
 
-  std::expected<std::size_t, ManagedError> node(std::size_t depth) {
-    auto begun = beginNode(depth);
+  // Recursive node/region frames retain only small statuses. The parser owns the
+  // first full error until parse() copies it at the public boundary; no heap or
+  // caller-owned pointer is required, even when a new typed cause grows.
+  std::unexpected<const ManagedError *> parseFailure(const ManagedError &failure) {
+    if (!parseFailure_) {
+      parseFailure_.emplace(failure);
+    }
+    return std::unexpected<const ManagedError *>(&*parseFailure_);
+  }
+
+  std::unexpected<const ManagedError *> parseFailure(Code code, std::size_t offset) {
+    return parseFailure(document_.failure(code, offset));
+  }
+
+  std::unexpected<const ManagedError *> parseFailure(Code code, std::size_t offset, std::string_view type,
+                                                     std::string_view path) {
+    return parseFailure(document_.propertyFailure(code, offset, type, path));
+  }
+
+  NodeStatus beginNodeStatus(std::size_t depth) {
+    auto result = beginNode(depth);
+    if (!result) {
+      return parseFailure(result.error());
+    }
+    return *result;
+  }
+
+  RegionStatus nodePropertyStatus(std::size_t index, std::string_view token, bool positional, std::size_t begin,
+                                  std::vector<std::string_view> &properties) {
+    auto result = nodeProperty(index, token, positional, begin, properties);
+    if (!result) {
+      return parseFailure(result.error());
+    }
+    return {};
+  }
+
+  NodeStatus node(std::size_t depth) {
+    auto begun = beginNodeStatus(depth);
 
     if (!begun) {
       return std::unexpected(begun.error());
@@ -2168,7 +2251,7 @@ private:
       }
 
       if (position_ == document_.bytes.size()) {
-        return std::unexpected(document_.failure(Code::SYNTAX, position_));
+        return parseFailure(Code::SYNTAX, position_);
       }
 
       const auto begin = position_;
@@ -2230,7 +2313,14 @@ private:
         token == "padding" && document_.nodes[index].factory.kind == detail::ControlFactoryKind::OVERLAY_FALLBACK &&
         (detail::ResourceAccess::find(options_.registry, token) ||
          detail::ControlContextAccess::hasDeclaredType(controls_, token));
+      const auto kind = document_.nodes[index].factory.kind;
+      const bool protectedGroup =
+        (kind == detail::ControlFactoryKind::USER || kind == detail::ControlFactoryKind::EXISTING_BUILTIN) &&
+        detail::ResourceAccess::entry(options_.registry, document_.nodes[index].factory.index).protectedEditor &&
+        (token == "securePolicy" || token == "limits") && !detail::ResourceAccess::find(options_.registry, token) &&
+        !detail::ControlContextAccess::hasDeclaredType(controls_, token);
       const bool structured =
+        (protectedGroup && peek() == '{') ||
         (options_.format == SceneResourceFormat::CONFIGURATION &&
          (token == "history" || token == "limits" || (token == "padding" && !overlayPaddingChild) || frameGroup ||
           formatGroup || chartRangeGroup || labelsGroup || dialogGroup || messageGroup || notificationGroup ||
@@ -2240,7 +2330,7 @@ private:
          token == "padding" && peek() == '{');
 
       if (named || positional || structured) {
-        auto applied = nodeProperty(index, token, positional, begin, properties);
+        auto applied = nodePropertyStatus(index, token, positional, begin, properties);
 
         if (!applied) {
           return std::unexpected(applied.error());
@@ -2256,10 +2346,10 @@ private:
           continue;
         }
         if (standardGrid && document_.nodes[index].regions) {
-          return std::unexpected(document_.failure(Code::INVALID_VALUE, begin));
+          return parseFailure(Code::INVALID_VALUE, begin);
         }
         if (!detail::ResourceAccess::entry(options_.registry, document_.nodes[index].type).children) {
-          return std::unexpected(document_.failure(Code::CHILDREN_FORBIDDEN, begin));
+          return parseFailure(Code::CHILDREN_FORBIDDEN, begin);
         }
         document_.nodes[index].directChildren = true;
 
@@ -2277,6 +2367,7 @@ private:
     }
   }
 
+  std::optional<ManagedError> parseFailure_{};
   ResourceDocument &document_;
   SceneResourceOptions &options_;
   ControlContext &controls_;
@@ -2805,10 +2896,15 @@ std::expected<void, ManagedError> resolveSettings(ResourceDocument &document, co
   resourceLimits.max_input_bytes = options.limits.maxStringBytes;
 
   for (auto &node : document.nodes) {
-    const bool lineEdit = node.factory.kind == detail::ControlFactoryKind::EXISTING_BUILTIN &&
-                          detail::ResourceAccess::entry(options.registry, node.factory.index).name == "LineEdit";
-    auto limits =
-      lineEdit ? detail::controlTextLimits(node.arguments.settings, LineEditOptions{}.limits) : resourceLimits;
+    const auto *entry = node.factory.kind == detail::ControlFactoryKind::EXISTING_BUILTIN ||
+                            node.factory.kind == detail::ControlFactoryKind::USER
+                          ? &detail::ResourceAccess::entry(options.registry, node.factory.index)
+                          : nullptr;
+    auto limits = entry && entry->protectedEditor
+                    ? detail::controlTextLimits(node.arguments.settings, PasswordOptions{}.limits)
+                  : entry && entry->name == "LineEdit"
+                    ? detail::controlTextLimits(node.arguments.settings, LineEditOptions{}.limits)
+                    : resourceLimits;
 
     // Resource budgets still bound resolver output, independently of a control's own text limits.
     limits.max_input_bytes = std::min(limits.max_input_bytes, resourceLimits.max_input_bytes);
@@ -3012,6 +3108,58 @@ std::expected<Node<Widget>, ManagedError> compile(ManagedScene &owner, ResourceD
 
     if (!prepared) {
       return std::unexpected(prepared.error());
+    }
+  }
+
+  // Check every protected node before invoking any document resolver or factory.
+  for (auto &node : document.nodes) {
+    if (node.factory.kind != detail::ControlFactoryKind::USER &&
+        node.factory.kind != detail::ControlFactoryKind::EXISTING_BUILTIN) {
+      continue;
+    }
+    if (!detail::ResourceAccess::entry(effectiveOptions.registry, node.factory.index).protectedEditor) {
+      continue;
+    }
+    if (node.resourceText || !node.arguments.text.empty() ||
+        (node.arguments.settings.text && !node.arguments.settings.text->isEmptyLiteral())) {
+      return std::unexpected(document.propertyFailure(Code::SECRET_LITERAL, node.textOffset, node.name, "text"));
+    }
+
+    auto checked = controls.resolve("Password", node.arguments.settings);
+
+    if (!checked) {
+      auto failure = detail::controlContextError(checked.error());
+
+      if (!failure.sceneResource) {
+        failure.sceneResource = document.failure(Code::INVALID_VALUE, node.offset).sceneResource;
+      }
+
+      return std::unexpected(std::move(failure));
+    }
+  }
+
+  if (!typed) {
+    for (auto &node : document.nodes) {
+      if ((node.factory.kind != detail::ControlFactoryKind::USER &&
+           node.factory.kind != detail::ControlFactoryKind::EXISTING_BUILTIN) ||
+          !detail::ResourceAccess::entry(effectiveOptions.registry, node.factory.index).protectedEditor ||
+          !node.arguments.settings.placeholder) {
+        continue;
+      }
+
+      auto &placeholder = *node.arguments.settings.placeholder;
+      auto limits = detail::controlTextLimits(node.arguments.settings, PasswordOptions{}.limits);
+
+      limits.max_input_bytes = std::min(limits.max_input_bytes, options.limits.maxStringBytes);
+
+      auto value = options.resolver ? placeholder.resolve(owner.widthPolicy(), options.resolver, limits)
+                                    : placeholder.resolve(owner.widthPolicy(), limits);
+
+      if (!value) {
+        return std::unexpected(textFailure(document, node, "placeholder", &value.error()));
+      }
+
+      placeholder = TextValue(value->bytes());
     }
   }
 
@@ -3345,12 +3493,13 @@ std::expected<Node<Widget>, ManagedError> compile(ManagedScene &owner, ResourceD
 } // namespace
 
 Description<Widget> resource(std::string_view source, SceneResourceOptions options) {
-  auto identity = std::make_shared<const std::string>(source);
+  auto input = std::make_shared<const std::string>(source);
+  auto identity = std::make_shared<const std::string>("<string resource>");
 
-  return detail::Access::deferControlValidation(
-    detail::Access::transaction([identity = std::move(identity), options = std::move(options)](
-                                  ManagedScene &owner, Node<Widget> parent,
-                                  detail::MountContext &context) mutable -> std::expected<Node<Widget>, ManagedError> {
+  return detail::Access::deferControlValidation(detail::Access::transaction(
+    [input = std::move(input), identity = std::move(identity),
+     options = std::move(options)](ManagedScene &owner, Node<Widget> parent,
+                                   detail::MountContext &context) mutable -> std::expected<Node<Widget>, ManagedError> {
       ResourceDocument document{identity};
 
       try {
@@ -3366,11 +3515,11 @@ Description<Widget> resource(std::string_view source, SceneResourceOptions optio
           return std::unexpected(document.failure(Code::INVALID_LIMIT, 0));
         }
 
-        if (identity->size() > options.limits.maxSourceBytes) {
+        if (input->size() > options.limits.maxSourceBytes) {
           return std::unexpected(document.failure(Code::SOURCE_LIMIT, 0));
         }
 
-        document.bytes = *identity;
+        document.bytes = *input;
 
         return compile(owner, document, options, parent, context);
       } catch (const std::bad_alloc &) {

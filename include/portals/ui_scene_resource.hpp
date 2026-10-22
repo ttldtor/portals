@@ -68,13 +68,13 @@ concept ResourceFactory =
   };
 } // namespace detail
 
-/** @brief Explicit owning allowlist; builtins are VBox/HBox/Label/LineEdit/Button/CheckBox/ThreeState.
+/** @brief Explicit owning allowlist; builtins are VBox/HBox/Label/LineEdit/Password/Button/CheckBox/ThreeState.
  * Construction and copying may allocate. Captured services remain explicit borrows and must
  * outlive prepare; registry callbacks are released with the consumed scene recipe.
  */
 class SceneResourceRegistry {
 public:
-  /** @brief Register the seven safe builtin recipe adapters without mounting anything. */
+  /** @brief Register the eight safe builtin recipe adapters without mounting anything. */
   SceneResourceRegistry();
 
   /** @brief Release owning adapters; copying remains fallible instead of a noexcept debug-vector move. */
@@ -143,6 +143,7 @@ private:
     bool text{true};
     bool gap{};
     bool checked{};
+    bool protectedEditor{};
     bool declaredHelp{};
     bool unknownHelp{};
     bool declaredDialog{};
@@ -163,6 +164,7 @@ private:
     entry.name = name;
     entry.children = children;
     entry.sized = std::derived_from<T, SizedWidget>;
+    entry.protectedEditor = std::same_as<T, Password>;
     entry.declaredHelp = std::derived_from<T, HelpView>;
     entry.unknownHelp = std::same_as<T, Widget>;
     entry.declaredDialog = std::derived_from<T, Dialog>;

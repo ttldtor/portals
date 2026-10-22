@@ -30,6 +30,8 @@ constexpr std::array<std::string_view, 2> CYCLE_NAMES{"TWO_STATE", "THREE_STATE"
 constexpr std::array<std::string_view, 3> MODE_NAMES{"IMMEDIATE", "ON_COMPLETION", "EXPLICIT"};
 constexpr std::array<std::string_view, 2> CHANGE_NAMES{"RECORD", "RESET_BASELINE"};
 constexpr std::array<std::string_view, 3> DISPLAY_NAMES{"NORMAL", "PASSWORD", "NO_ECHO"};
+constexpr std::array<std::string_view, 2> SECRET_STORAGE_NAMES{"NATIVE_GUARDED", "WIPE_ONLY"};
+constexpr std::array<std::string_view, 2> PASTE_NAMES{"DISABLED", "ENABLED"};
 constexpr std::array<std::string_view, 2> FLOW_NAMES{"ROW_MAJOR", "COLUMN_MAJOR"};
 constexpr std::array<std::string_view, 4> ALIGN_NAMES{"START", "CENTER", "END", "STRETCH"};
 constexpr std::array<std::string_view, 1> OVERFLOW_NAMES{"CLIP"};
@@ -206,7 +208,13 @@ constexpr std::array<ControlPropertyDescriptor, detail::CONTROL_PROPERTY_COUNT> 
    {"themeCatalog.layers.maxLayers", Kind::UNSIGNED_INTEGER, 3, {}},
    {"themeCatalog.layers.maxRules", Kind::UNSIGNED_INTEGER, 3, {}},
    {"themeCatalog.layers.maxDeclarations", Kind::UNSIGNED_INTEGER, 3, {}},
-   {"themeCatalog.layers.maxOwnedBytes", Kind::UNSIGNED_INTEGER, 3, {}}}};
+   {"themeCatalog.layers.maxOwnedBytes", Kind::UNSIGNED_INTEGER, 3, {}},
+   {"securePolicy.maxBytes", Kind::UNSIGNED_INTEGER, 2, {}},
+   {"securePolicy.storage", Kind::ENUMERATION, 2, SECRET_STORAGE_NAMES},
+   {"securePolicy.lockPages", Kind::BOOLEAN, 2, {}},
+   {"securePolicy.excludeFromDumps", Kind::BOOLEAN, 2, {}},
+   {"securePolicy.encryptWhileIdle", Kind::BOOLEAN, 2, {}},
+   {"pastePolicy", Kind::ENUMERATION, 1, PASTE_NAMES}}};
 static_assert(std::ranges::all_of(PROPERTIES, [](const auto &property) {
   return !property.path.empty();
 }));
@@ -221,6 +229,8 @@ template <class... Indices> constexpr Mask propertyMask(Indices... indices) {
 
 constexpr Mask SIZE_MASK = propertyMask(1, 2, 3);
 constexpr Mask TEXT_MASK = propertyMask(0);
+constexpr Mask PASSWORD_MASK =
+  SIZE_MASK | TEXT_MASK | propertyMask(7, 8, 10, 11, 33, 34, 35, 36, 159, 160, 161, 162, 163, 164);
 constexpr Mask BUTTON_MASK = SIZE_MASK | TEXT_MASK | propertyMask(37);
 constexpr Mask BORDER_MASK = SIZE_MASK | propertyMask(38, 39);
 constexpr Mask GAUGE_MASK = BORDER_MASK | propertyMask(40, 41, 42, 43);
@@ -262,7 +272,7 @@ constexpr Mask ALL_MASK = [] {
   return mask;
 }();
 constexpr Mask GRID_MASK = SIZE_MASK | propertyMask(17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29);
-constexpr std::size_t BUILTIN_COUNT = 7;
+constexpr std::size_t BUILTIN_COUNT = 8;
 constexpr auto SIZE_SCHEMA =
   std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[4], PROPERTIES[22], PROPERTIES[23],
                  PROPERTIES[24], PROPERTIES[25], PROPERTIES[30], PROPERTIES[31], PROPERTIES[32]});
@@ -333,13 +343,17 @@ constexpr auto EDIT_SCHEMA =
   std::to_array({PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[7], PROPERTIES[8],
                  PROPERTIES[9], PROPERTIES[10], PROPERTIES[11], PROPERTIES[12], PROPERTIES[13], PROPERTIES[14],
                  PROPERTIES[15], PROPERTIES[16], PROPERTIES[33], PROPERTIES[34], PROPERTIES[35], PROPERTIES[36]});
+constexpr auto PASSWORD_SCHEMA =
+  std::to_array({PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[7], PROPERTIES[8],
+                 PROPERTIES[10], PROPERTIES[11], PROPERTIES[33], PROPERTIES[34], PROPERTIES[35], PROPERTIES[36],
+                 PROPERTIES[159], PROPERTIES[160], PROPERTIES[161], PROPERTIES[162], PROPERTIES[163], PROPERTIES[164]});
 constexpr auto GRID_SCHEMA = std::to_array(
   {PROPERTIES[17], PROPERTIES[18], PROPERTIES[19], PROPERTIES[20], PROPERTIES[21], PROPERTIES[22], PROPERTIES[23],
    PROPERTIES[24], PROPERTIES[25], PROPERTIES[26], PROPERTIES[27], PROPERTIES[28], PROPERTIES[29]});
 
 bool builtin(std::string_view name) noexcept {
   return name == "VBox" || name == "HBox" || name == "Label" || name == "Button" || name == "CheckBox" ||
-         name == "LineEdit" || name == "ThreeState";
+         name == "LineEdit" || name == "ThreeState" || name == "Password";
 }
 
 Mask builtinMask(std::string_view name) noexcept {
@@ -364,6 +378,9 @@ Mask builtinMask(std::string_view name) noexcept {
 
   if (name == "LineEdit") {
     return EDIT_MASK;
+  }
+  if (name == "Password") {
+    return PASSWORD_MASK;
   }
 
   return TEXT_MASK | SIZE_MASK;
@@ -590,7 +607,13 @@ ControlContextError exceptionError() noexcept {
   X(themeCatalog.layers.maxLayers, 155)                                                                                \
   X(themeCatalog.layers.maxRules, 156)                                                                                 \
   X(themeCatalog.layers.maxDeclarations, 157)                                                                          \
-  X(themeCatalog.layers.maxOwnedBytes, 158)
+  X(themeCatalog.layers.maxOwnedBytes, 158)                                                                            \
+  X(securePolicy.maxBytes, 159)                                                                                        \
+  X(securePolicy.storage, 160)                                                                                         \
+  X(securePolicy.lockPages, 161)                                                                                       \
+  X(securePolicy.excludeFromDumps, 162)                                                                                \
+  X(securePolicy.encryptWhileIdle, 163)                                                                                \
+  X(pastePolicy, 164)
 
 #define LEAF_INDEX(field, index) index,
 constexpr auto LEAF_INDICES = std::to_array<std::size_t>({PORTALS_CONTROL_LEAVES(LEAF_INDEX)});
@@ -703,6 +726,10 @@ template <class T> bool validValue(const T &value, std::size_t index) noexcept {
   } else if constexpr (std::same_as<T, LineEditDisplayMode>) {
     return value == LineEditDisplayMode::NORMAL || value == LineEditDisplayMode::PASSWORD ||
            value == LineEditDisplayMode::NO_ECHO;
+  } else if constexpr (std::same_as<T, SecureStringStorage>) {
+    return value == SecureStringStorage::NATIVE_GUARDED || value == SecureStringStorage::WIPE_ONLY;
+  } else if constexpr (std::same_as<T, PasswordPastePolicy>) {
+    return value == PasswordPastePolicy::DISABLED || value == PasswordPastePolicy::ENABLED;
   } else {
     return true;
   }
@@ -767,6 +794,27 @@ std::expected<void, ControlContextError> validateSettings(const ControlSettings 
 
   if (failure) {
     return std::unexpected(*failure);
+  }
+
+  if (mask == PASSWORD_MASK) {
+    const auto rejected = [&](std::string_view path) {
+      return std::unexpected(error(Code::INVALID_VALUE, type, path, sourceFor(settings, path)));
+    };
+    if (settings.text && !settings.text->isEmptyLiteral()) {
+      return rejected("text");
+    }
+    if (settings.displayMode == LineEditDisplayMode::NORMAL) {
+      return rejected("displayMode");
+    }
+    if (settings.securePolicy.maxBytes && *settings.securePolicy.maxBytes > MAX_SECRET_BYTES) {
+      return rejected("securePolicy.maxBytes");
+    }
+    if (settings.securePolicy.storage == SecureStringStorage::WIPE_ONLY) {
+      return rejected("securePolicy.storage");
+    }
+    if (settings.securePolicy.encryptWhileIdle == false) {
+      return rejected("securePolicy.encryptWhileIdle");
+    }
   }
 
   if (mask == MESSAGE_MASK) {
@@ -1138,6 +1186,9 @@ std::span<const ControlPropertyDescriptor> controlPropertySchema(std::string_vie
 
   if (type == "LineEdit") {
     return EDIT_SCHEMA;
+  }
+  if (type == "Password") {
+    return PASSWORD_SCHEMA;
   }
 
   if (type == "Button") {

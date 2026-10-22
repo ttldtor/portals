@@ -7,6 +7,13 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- `Password`, `PasswordValue` and Ref-first `ui::password` provide protected
+  single-line editing with native guarded storage and idle encryption on Windows
+  and Linux. Values use scoped plaintext access; masks and `noEcho()` are prepared
+  without retaining plaintext text/history. Editing modes, typed secure failures,
+  protected model bindings and explicit opt-in paste use the existing scene
+  lifecycle. Ordinary LineEdit password/no-echo display remains a plaintext editor.
+
 - Initial control properties share typed sparse settings across native recipes,
   method and pipe modifiers, named defaults and loaded scene resources.
   Supported properties cover editor validation/history/display settings,
@@ -53,6 +60,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
   before invoking the factory or opening the terminal.
 
 ### Changed
+
+- String scene-resource diagnostics identify their source as `<string resource>`
+  instead of retaining the complete input document, including parse and limit
+  failures. File-resource diagnostics retain the file path. Password resources
+  reject nonempty literal and text-resource values; secrets enter through typed
+  code bindings or checked providers.
 
 - `SecureString` enables idle encryption by default on Windows and Linux. Linux uses
   bundled Monocypher authenticated encryption with nonblocking operating-system

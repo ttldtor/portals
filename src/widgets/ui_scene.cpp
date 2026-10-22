@@ -437,6 +437,72 @@ void reportApplication(const ApplicationError &cause) noexcept {
   }
 }
 
+// Protected diagnostics contain only library categories and numeric metadata.
+void reportSecureError(const SecureStringError &error) noexcept {
+  std::fprintf(stderr, "operation=%u, code=%u, native=%u", static_cast<unsigned>(error.operation),
+               static_cast<unsigned>(error.code), static_cast<unsigned>(error.nativeCode));
+}
+
+void reportSecureCleanup(const SecureStringCleanupErrors &cleanup) noexcept {
+  std::fprintf(stderr, ", cleanup-count=%zu, cleanup-omitted=%zu", cleanup.count, cleanup.omittedCleanupCount);
+  for (std::size_t index = 0; index < std::min(cleanup.count, cleanup.errors.size()); ++index) {
+    std::fputs(", cleanup=(", stderr);
+    reportSecureError(cleanup.errors[index]);
+    std::fputc(')', stderr);
+  }
+}
+
+void reportSecureFailure(const SecureStringFailure &failure) noexcept {
+  std::fputs("secure=(", stderr);
+  reportSecureError(failure.primary);
+  reportSecureCleanup(failure.cleanup);
+  std::fputc(')', stderr);
+}
+
+void reportPasswordFailure(const PasswordFailure &failure) noexcept {
+  std::fprintf(stderr, " password=(kind=%zu, ", failure.index());
+  std::visit(
+    [](const auto &value) {
+      using T = std::remove_cvref_t<decltype(value)>;
+      if constexpr (std::same_as<T, TreeError>) {
+        std::fprintf(stderr, "tree=%s", treeErrorName(value));
+      } else if constexpr (std::same_as<T, TextError>) {
+        std::fprintf(stderr, "text=%s, offset=%zu", categoryName(value.kind), value.byte_offset);
+      } else if constexpr (std::same_as<T, PasswordInputError>) {
+        std::fprintf(stderr, "input=%u", static_cast<unsigned>(value));
+      } else if constexpr (std::same_as<T, SecureStringFailure>) {
+        reportSecureFailure(value);
+      } else {
+        if (value.ownership) {
+          std::fprintf(stderr, "owner=%s, ", treeErrorName(*value.ownership));
+        }
+        if (value.access) {
+          if (value.access->primary) {
+            std::fputs("primary=(", stderr);
+            reportSecureError(*value.access->primary);
+            std::fputs("), ", stderr);
+          }
+          if constexpr (std::same_as<T, PasswordValueAccessFailure<SecureStringFailure>>) {
+            if (value.access->callbackError) {
+              std::fputs("callback-", stderr);
+              reportSecureFailure(*value.access->callbackError);
+            }
+          } else if constexpr (std::same_as<T, PasswordValueAccessFailure<TextError>>) {
+            if (value.access->callbackError) {
+              std::fprintf(stderr, "callback-text=%s, offset=%zu", categoryName(value.access->callbackError->kind),
+                           value.access->callbackError->byte_offset);
+            }
+          } else if (value.access->callbackError) {
+            std::fputs("callback-error=unit", stderr);
+          }
+          reportSecureCleanup(value.access->cleanup);
+        }
+      }
+    },
+    failure);
+  std::fputc(')', stderr);
+}
+
 void reportFailure(const ManagedError &failure, std::source_location origin, std::size_t droppedErrors) noexcept {
   std::fprintf(stderr, "Portals: scene failed (phase=%s) at %s:%u: ", phaseName(failure.phase), origin.file_name(),
                origin.line());
@@ -475,7 +541,7 @@ void reportFailure(const ManagedError &failure, std::source_location origin, std
   if (failure.sceneResource) {
     const auto &resource = *failure.sceneResource;
 
-    // Source text stays in the owning error; never echo untrusted terminal escape bytes.
+    // The owning source is a safe label/path; never echo document or secret bytes.
     if (resource.line == 0) {
       std::fprintf(stderr, " scene-resource=(code=%u, registration, system=%d)", static_cast<unsigned>(resource.code),
                    resource.system.value());
@@ -519,6 +585,10 @@ void reportFailure(const ManagedError &failure, std::source_location origin, std
 
   if (failure.resource) {
     std::fprintf(stderr, " resource=%s", categoryName(*failure.resource));
+  }
+
+  if (failure.password) {
+    reportPasswordFailure(*failure.password);
   }
 
   if (failure.shortcut) {

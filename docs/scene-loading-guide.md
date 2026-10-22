@@ -173,8 +173,11 @@ created scene state are outside subtree rollback; the failing lazy Scene perform
 its ordinary full cleanup.
 
 `ManagedError::sceneResource` retains a typed category, zero-based byte offset,
-one-based line and byte column. It also retains the source text or file path
-in shared storage, so the diagnostic does not borrow the caller's buffer.
+one-based line and byte column. Its shared `source` retains the safe label
+`<string resource>` for string input, or the file path for file input. It never
+retains the document bytes in diagnostics, including parse and limit failures.
+This replaces the previous string-source payload; offsets still refer to the
+original input, which the caller must retain separately to display an excerpt.
 This immutable shared context is attached best-effort; if its allocation fails,
 the field stays empty and the original typed cause survives. Copying a
 `ManagedError` allocates no memory and remains `noexcept`.
@@ -238,9 +241,21 @@ snapshot. Duplicate defaults blocks in one document remain errors.
 |---|---|
 | Label, Button | `text` |
 | LineEdit | `text`, `placeholder`, `editMode`, `readOnly`, `programmaticChange`, `displayMode`, `history` |
+| Password | Empty `text`, public `placeholder`, `editMode`, `readOnly`, `displayMode`, `limits`, `securePolicy`, `pastePolicy` |
 | CheckBox, ThreeState | `text`, `state`, `cycle` |
 | VBox, HBox | `gap` |
 | Sized controls | `width`, `height`, `flex` |
+
+`Password#psw { text = "", placeHolder = "Password" }` creates an empty protected
+editor. Nonempty text and `i18n(...)` value expressions are rejected before any
+resource resolver or factory runs. Code supplies a protected value through
+`PasswordConfig::initial`, a captured `ManagedState<PasswordValue>`, or checked
+`PasswordRef::value(value)` after preparation. A custom registered Password factory
+can capture that provider or model and apply the resource's public settings.
+`securePolicy` accepts `maxBytes`, `storage`, `lockPages`, `excludeFromDumps` and
+`encryptWhileIdle`; native guarded storage and idle encryption are mandatory.
+`pastePolicy` defaults to `DISABLED`. Password has no ordinary text getter,
+history, copy or cut. See [protected input](controls.md) for access and platform limits.
 
 History accepts `enabled`, `maxOperations`, `maxBytes`, `groupTyping` and
 `groupDeletion`. Text accepts strings and existing `i18n(...)` expressions.

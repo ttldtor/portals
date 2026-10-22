@@ -8,6 +8,7 @@
 #include <portals/grid.hpp>
 #include <portals/line_edit.hpp>
 #include <portals/message_box.hpp>
+#include <portals/password.hpp>
 #include <portals/primitives.hpp>
 #include <portals/scroll_options.hpp>
 #include <portals/text_value.hpp>
@@ -265,6 +266,15 @@ struct ControlDialogSettings {
   ControlDialogFrameSettings frame{};           ///< Mandatory one-cell opaque panel border.
 };
 
+/** @brief Sparse mandatory protected-editor policy; unsupported guarantees never downgrade. */
+struct ControlSecureSettings {
+  std::optional<std::size_t> maxBytes{};        ///< Maximum secret bytes, including explicit zero.
+  std::optional<SecureStringStorage> storage{}; ///< Password accepts only NATIVE_GUARDED.
+  std::optional<bool> lockPages{};              ///< Require native page locking before any secret is copied.
+  std::optional<bool> excludeFromDumps{};       ///< Require native dump exclusion where supported.
+  std::optional<bool> encryptWhileIdle{};       ///< Password requires true; explicit false is rejected.
+};
+
 /** @brief Owning sparse literals only; never contains IDs, models, handlers or live history. */
 struct ControlSettings {
   ~ControlSettings() = default;
@@ -334,6 +344,8 @@ struct ControlSettings {
   ControlNotificationSettings notification{};   ///< Explicit code-bound native notifications options.
   ControlThemeSelectorSettings themeSelector{}; ///< Explicit code-bound native selector view settings.
   ControlThemeCatalogSettings themeCatalog{};   ///< Constructor-only real owning catalog scalars.
+  ControlSecureSettings securePolicy{}; ///< Password native security policy; appended for aggregate compatibility.
+  std::optional<PasswordPastePolicy> pastePolicy{}; ///< Password explicit inbound paste admission.
 };
 
 /** @brief Finite context bounds, checked before publication/materialization beyond each bound. */
