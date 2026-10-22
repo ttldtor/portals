@@ -37,6 +37,9 @@ struct SceneResourceArguments {
   std::int32_t gap{};                      ///< Nonnegative layout gap; resource syntax admits this only on VBox/HBox.
   bool checked{};                          ///< Initial checkbox state; resource syntax admits this only on CheckBox.
   ControlSettings settings{};              ///< Validated effective sparse settings; no IDs, models or handlers.
+  std::optional<bool> visible;             ///< Local visibility applied after the factory's recipe modifiers.
+  std::optional<bool> enabled;             ///< Local enabled state applied after the factory's recipe modifiers.
+  std::optional<std::string> classes; ///< Owning literal class list; absent preserves factory classes, empty clears.
 };
 
 namespace detail {
@@ -84,6 +87,8 @@ public:
    * @param name ASCII identifier copied now; case-sensitive and unique, including builtin names.
    * @param factory Invoked once per node at prepare, after complete syntax/schema/id validation.
    * External side effects are not rolled back; exceptions use the existing checked mount boundary.
+   * In CONFIGURATION, exact VirtualList/VirtualTable/Chart registrations accept their applicable scalar settings;
+   * these are staged after the factory, like common size properties. Models and formatters remain code captures.
    * @param children Whether this custom type accepts child resource nodes; defaults to a leaf.
    * @return Success, UNKNOWN_TYPE for an invalid name, or DUPLICATE_TYPE for a registered name.
    * Allocation/capture construction before and during registration may throw.
@@ -91,53 +96,43 @@ public:
   template <class T, class Factory>
     requires detail::ResourceFactory<T, Factory>
   std::expected<void, SceneResourceErrorCode> add(std::string_view name, Factory factory, bool children = false) {
-    Entry entry;
+    return insert(makeEntry<T>(name, std::move(factory), children));
+  }
 
-    entry.name = name;
-    entry.children = children;
-    entry.sized = std::derived_from<T, SizedWidget>;
-    entry.create = [factory = std::move(factory)](
-                     SceneResourceArguments arguments) mutable -> std::expected<Description<Widget>, ManagedError> {
-      // Common properties remain existing typed recipe operations before erasure.
-      const auto width = arguments.width;
-      const auto height = arguments.height;
-      const auto flex = arguments.flex;
-      const auto materialized = detail::controlSettingsPresence(arguments.settings);
-      auto id = arguments.id;
-      auto recipe = std::expected<Description<T>, ManagedError>(std::invoke(factory, std::move(arguments)));
+  /** @brief Explicitly bind the existing native MessageBox/Notifications/ThemeSelector/ThemeSelectorCatalog semantic
+   * schema to a real code-owned factory.
+   * @tparam T Public Widget result type. @tparam Factory Existing owning resource callable.
+   * @tparam Schema Exactly the metadata span returned by controlPropertySchema; deduction preserves old bool calls.
+   * @param name Unique owning registration name. @param factory Actual code-owned native composite recipe producer.
+   * @param schema Complete canonical MessageBox, Notifications, ThemeSelector or ThemeSelectorCatalog descriptors, read
+   * only during this call and never retained.
+   * @return Checked registration, or INVALID_VALUE for empty/foreign/modified metadata.
+   * A returned ordinary/wrong native recipe is rejected during prepare; semantic resource nodes are leaves.
+   */
+  template <class T, class Factory, class Schema>
+    requires detail::ResourceFactory<T, Factory> &&
+             std::same_as<std::remove_cvref_t<Schema>, std::span<const ControlPropertyDescriptor>>
+  std::expected<void, SceneResourceErrorCode> add(std::string_view name, Factory factory, Schema &&schema) {
+    const auto semantic = semanticSchema(schema);
 
-      if (!recipe) {
-        return std::unexpected(recipe.error());
-      }
+    if (!semantic) {
+      return std::unexpected(SceneResourceErrorCode::INVALID_VALUE);
+    }
 
-      detail::Access::preparedControl(*recipe, materialized);
+    auto entry = makeEntry<T>(name, std::move(factory), false, *semantic);
 
-      if (!id.empty()) {
-        (void)std::move(*recipe).id(id);
-      }
-
-      if constexpr (std::derived_from<T, SizedWidget>) {
-        if (width) {
-          (void)std::move(*recipe).width(*width);
-        }
-
-        if (height) {
-          (void)std::move(*recipe).height(*height);
-        }
-
-        if (flex) {
-          (void)std::move(*recipe).flex(*flex);
-        }
-      }
-
-      return detail::Access::erase(std::move(*recipe));
-    };
+    entry.text = false;
+    entry.sized = *semantic == detail::ControlFactoryKind::NOTIFICATION_BINDING;
+    entry.factoryKind = *semantic;
 
     return insert(std::move(entry));
   }
 
 private:
   friend struct detail::ResourceAccess;
+
+  static std::optional<detail::ControlFactoryKind>
+  semanticSchema(std::span<const ControlPropertyDescriptor> schema) noexcept;
 
   struct Entry {
     ~Entry() = default;
@@ -148,9 +143,146 @@ private:
     bool text{true};
     bool gap{};
     bool checked{};
+    bool declaredHelp{};
+    bool unknownHelp{};
+    bool declaredDialog{};
+    bool declaredHost{};
+    bool unknownDialog{};
+    std::string_view virtualView{};
     detail::ControlFactoryKind factoryKind{detail::ControlFactoryKind::USER};
     std::function<std::expected<Description<Widget>, ManagedError>(SceneResourceArguments)> create;
   };
+
+  // Shared cold adapter construction; public add<T> retains its exact factory and common-property semantics.
+  template <class T, class Factory>
+    requires detail::ResourceFactory<T, std::remove_cvref_t<Factory>>
+  static Entry makeEntry(std::string_view name, Factory &&factory, bool children = false,
+                         detail::ControlFactoryKind semantic = detail::ControlFactoryKind::USER) {
+    Entry entry;
+
+    entry.name = name;
+    entry.children = children;
+    entry.sized = std::derived_from<T, SizedWidget>;
+    entry.declaredHelp = std::derived_from<T, HelpView>;
+    entry.unknownHelp = std::same_as<T, Widget>;
+    entry.declaredDialog = std::derived_from<T, Dialog>;
+    entry.declaredHost = std::derived_from<T, OverlayHost>;
+    entry.unknownDialog = std::same_as<T, Widget>;
+
+    if constexpr (detail::IsVirtualList<T>::value || detail::IsVirtualTable<T>::value || detail::IsChart<T>::value) {
+      entry.virtualView = detail::Access::controlType<T>();
+    }
+
+    entry.create = [factory = std::forward<Factory>(factory), semantic](
+                     SceneResourceArguments arguments) mutable -> std::expected<Description<Widget>, ManagedError> {
+      // Common properties remain existing typed recipe operations before erasure.
+      const auto width = arguments.width;
+      const auto height = arguments.height;
+      const auto flex = arguments.flex;
+      const auto visible = arguments.visible;
+      const auto enabled = arguments.enabled;
+      const auto classes = arguments.classes;
+      const auto materialized = detail::controlSettingsPresenceSet(arguments.settings);
+      [[maybe_unused]] const auto rowHeight = arguments.settings.rowHeight;
+      [[maybe_unused]] const auto overscanRows = arguments.settings.overscanRows;
+      [[maybe_unused]] const auto maxColumns = arguments.settings.maxColumns;
+      [[maybe_unused]] const auto maxPreparedCells = arguments.settings.maxPreparedCells;
+      [[maybe_unused]] const auto maxPreparedTextBytes = arguments.settings.maxPreparedTextBytes;
+      [[maybe_unused]] const auto mode = arguments.settings.mode;
+      [[maybe_unused]] const auto chartGlyphSet = arguments.settings.chartGlyphSet;
+      [[maybe_unused]] const auto candleGap = arguments.settings.candleGap;
+      [[maybe_unused]] const auto yRange = arguments.settings.yRange;
+      std::optional<ControlSettings> semanticSettings;
+
+      if (semantic != detail::ControlFactoryKind::USER) {
+        semanticSettings.emplace(arguments.settings);
+      }
+
+      auto id = arguments.id;
+      auto recipe = std::expected<Description<T>, ManagedError>(std::invoke(factory, std::move(arguments)));
+
+      if (!recipe) {
+        return std::unexpected(recipe.error());
+      }
+
+      if (semanticSettings) {
+        auto staged = detail::Access::messageSource(*recipe, *semanticSettings, materialized, semantic);
+
+        if (!staged) {
+          return std::unexpected(staged.error());
+        }
+      }
+
+      detail::Access::preparedControlPresence(*recipe, materialized);
+
+      // Only exact data families consume these literals; old text metadata remains factory-owned.
+      if constexpr (detail::IsVirtualList<T>::value || detail::IsVirtualTable<T>::value) {
+        if (rowHeight) {
+          (void)std::move(*recipe).rowHeight(*rowHeight);
+        }
+
+        if (overscanRows) {
+          (void)std::move(*recipe).overscanRows(*overscanRows);
+        }
+      }
+
+      if constexpr (detail::IsVirtualTable<T>::value) {
+        if (maxColumns) {
+          (void)std::move(*recipe).maxColumns(*maxColumns);
+        }
+
+        if (maxPreparedCells) {
+          (void)std::move(*recipe).maxPreparedCells(*maxPreparedCells);
+        }
+
+        if (maxPreparedTextBytes) {
+          (void)std::move(*recipe).maxPreparedTextBytes(*maxPreparedTextBytes);
+        }
+      }
+
+      if constexpr (detail::IsChart<T>::value) {
+        detail::Access::chartSettings(
+          *recipe, {.mode = mode, .chartGlyphSet = chartGlyphSet, .candleGap = candleGap, .yRange = yRange});
+      }
+
+      if (visible) {
+        (void)std::move(*recipe).visible(*visible);
+      }
+
+      if (enabled) {
+        (void)std::move(*recipe).enabled(*enabled);
+      }
+
+      if (classes) {
+        (void)std::move(*recipe).classes(*classes);
+      }
+
+      if (!id.empty()) {
+        (void)std::move(*recipe).id(id);
+      }
+
+      if constexpr (std::derived_from<T, SizedWidget>) {
+        // Native semantic Notifications applies these precharged leaves through its actual resolved Overlay once.
+        if (semantic != detail::ControlFactoryKind::NOTIFICATION_BINDING) {
+          if (width) {
+            (void)std::move(*recipe).width(*width);
+          }
+
+          if (height) {
+            (void)std::move(*recipe).height(*height);
+          }
+
+          if (flex) {
+            (void)std::move(*recipe).flex(*flex);
+          }
+        }
+      }
+
+      return detail::Access::erase(std::move(*recipe));
+    };
+
+    return entry;
+  }
 
   std::expected<void, SceneResourceErrorCode> insert(Entry entry);
   std::vector<Entry> entries_ = std::vector<Entry>(0);
@@ -203,6 +335,50 @@ struct SceneResourceOptions {
     }
 
     return *this;
+  }
+
+  /** @brief Select a finite native composite schema and collect registration failure for prepare/runApp.
+   * @tparam T Factory widget result. @tparam Factory Existing owning resource callable.
+   * @tparam Schema Exactly the canonical metadata span; no span is retained.
+   * @param name Unique owning registry name. @param factory Real native MessageBox or Notifications recipe factory.
+   * @param schema Complete canonical native composite vocabulary, checked immediately by content.
+   * @return This configuration; the existing first-error and exception boundary is preserved.
+   */
+  template <class T, class Factory, class Schema>
+    requires detail::ResourceFactory<T, std::decay_t<Factory>> &&
+             std::same_as<std::remove_cvref_t<Schema>, std::span<const ControlPropertyDescriptor>>
+  SceneResourceOptions &control(std::string_view name, Factory &&factory, Schema &&schema) & noexcept {
+    if (registration.failure_) {
+      return *this;
+    }
+
+    try {
+      const auto added = registry.add<T>(name, std::forward<Factory>(factory), std::forward<Schema>(schema));
+
+      if (!added) {
+        registration.failure_ = std::pair{added.error(), TreeError::INVALID_ARGUMENT};
+      }
+    } catch (const std::bad_alloc &) {
+      registration.failure_ = std::pair{SceneResourceErrorCode::NO_MEMORY, TreeError::NO_MEMORY};
+    } catch (...) {
+      registration.failure_ = std::pair{SceneResourceErrorCode::FACTORY, TreeError::CALLBACK_FAILED};
+    }
+
+    return *this;
+  }
+
+  /** @brief Select the finite native composite schema on a temporary without adapter copies.
+   * @tparam T Factory widget result. @tparam Factory Existing resource callable. @tparam Schema Canonical span.
+   * @param name Unique owning name. @param factory Owning actual native composite recipe producer.
+   * @param schema Complete metadata read only now. @return This rvalue, with the same sticky error boundary.
+   */
+  template <class T, class Factory, class Schema>
+    requires detail::ResourceFactory<T, std::decay_t<Factory>> &&
+             std::same_as<std::remove_cvref_t<Schema>, std::span<const ControlPropertyDescriptor>>
+  SceneResourceOptions &&control(std::string_view name, Factory &&factory, Schema &&schema) && noexcept {
+    control<T>(name, std::forward<Factory>(factory), std::forward<Schema>(schema));
+
+    return std::move(*this);
   }
 
   /** @brief Register on a temporary without copying its existing adapters.

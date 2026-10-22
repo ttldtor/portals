@@ -488,6 +488,185 @@ void sharedWidthPolicyAndStandardSemantics() {
         "raw adapter cannot replace standard binding");
 }
 
+void instanceStateModifiers() {
+  Fixture fixture;
+  ui::Ref<Custom> method, pipe, child;
+  ui::Ref<Column> parent;
+  ui::Ref<Button> disabled;
+  int activations{};
+  bool setupObserved{};
+
+  const auto mounted = take(ui::mount(
+    *fixture.scene,
+    ui::column(
+      ui::custom<Custom>("method").reference(method).visible().visible(false).enabled(false).enabled().setup(
+        [&](ManagedScene &, Node<Custom> node) -> std::expected<void, ManagedError> {
+          const auto snapshot = take(fixture.app->tree().inspect(node));
+
+          setupObserved = !snapshot.visible && snapshot.enabled && method.node() == Node<Custom>{};
+
+          return {};
+        }),
+      ui::custom<Custom>("pipe").reference(pipe) | ui::visible() | ui::visible(false) | ui::enabled(false) |
+        ui::enabled(),
+      ui::column(ui::custom<Custom>("child").reference(child).visible().enabled()).reference(parent).visible(false),
+      ui::button(disabled, "Disabled", [&] {
+        ++activations;
+      }).enabled(false))));
+  auto &tree = fixture.app->tree();
+
+  check(setupObserved, "final instance state precedes setup and reference publication");
+  check(!take(tree.inspect(method.node())).visible && take(tree.inspect(method.node())).enabled &&
+          !take(tree.inspect(pipe.node())).visible && take(tree.inspect(pipe.node())).enabled,
+        "method and pipe modifiers agree on final non-sized custom widgets");
+  check(take(tree.inspect(child.node())).visible && take(tree.inspect(child.node())).enabled &&
+          !take(tree.inputEligible(child.node())),
+        "ancestor visibility dominates independent local child flags");
+  check(take(tree.measure(parent.node(), {40, 10})) == CellSize{}, "hidden subtree does not measure");
+  check(take(tree.measure(disabled.node(), {40, 10})).width > 0 && !take(tree.inputEligible(disabled.node())),
+        "disabled control retains layout while input is excluded");
+  take(tree.setVisible(parent.node(), true));
+  check(take(tree.inputEligible(child.node())), "revealing ancestor preserves the child's local flags");
+  take(tree.setEnabled(parent.node(), false));
+  check(take(tree.inspect(child.node())).enabled && !take(tree.inputEligible(child.node())),
+        "disabled ancestor dominates a locally enabled child");
+  fixture.prepare();
+  take(tree.read(disabled.node(), [](const Button &widget) {
+    check(!widget.enabled(), "existing control synchronization selects disabled presentation");
+  }));
+  take(fixture.app->router().invoke(disabled.node(), {Action::ACTIVATE}));
+  check(activations == 0, "disabled standard binding does not invoke its callback");
+  take(tree.consumeFrameRequest());
+  fixture.prepare();
+  check(take(tree.consumeFrameRequest()) == Invalidation::NONE, "instance flags do not create an idle redraw loop");
+  take(fixture.scene->remove(mounted));
+  check(!tree.inspect(method.node()) && !tree.inspect(disabled.node()), "state modifiers retain normal cleanup");
+
+  auto noOp = ui::detail::Access::describe<Custom>([&](ManagedScene &scene, Node<Widget> owner) {
+    auto node = scene.emplace<Custom>(owner, "no-op");
+
+    take(tree.consumeFrameRequest());
+
+    return node;
+  });
+
+  take(ui::mount(*fixture.scene, std::move(noOp).visible(false).visible().enabled(false).enabled().setup(
+                                   [&](ManagedScene &, Node<Custom>) -> std::expected<void, ManagedError> {
+                                     check(take(tree.consumeFrameRequest()) == Invalidation::NONE,
+                                           "only final default flags apply, preserving equal-value no-op");
+
+                                     return {};
+                                   })));
+
+  const auto before = take(tree.inspect(fixture.scene->root())).children.size();
+  ui::Ref<Custom> abandoned;
+  auto failed = ui::mount(*fixture.scene,
+                          ui::column(ui::custom<Custom>("abandoned").reference(abandoned).visible(false).enabled(false),
+                                     ui::custom<MountFailure>()));
+
+  check(!failed && failed.error().phase == ManagedPhase::MOUNT && abandoned.node() == Node<Custom>{} &&
+          take(tree.inspect(fixture.scene->root())).children.size() == before,
+        "partial mount failure removes flagged subtree and publishes no reference");
+
+  ui::Ref<Column> scope;
+  ui::Ref<Button> hiddenDefault, fallback;
+
+  take(ui::mount(*fixture.scene, ui::column(ui::button(hiddenDefault, "Hidden default",
+                                                       [] {
+                                                       })
+                                              .visible(false)
+                                              .focusDefault(),
+                                            ui::button(fallback, "Fallback",
+                                                       [] {
+                                                       }))
+                                   .reference(scope)
+                                   .focusScope()));
+  take(scope.focus());
+  check(take(fixture.app->router().focused()) == fallback.node(),
+        "existing focus-default policy skips an ineligible hidden default");
+}
+
+void instanceClasses() {
+  Fixture fixture;
+  ui::Ref<Custom> method, pipe, replaced, cleared;
+  std::string list = " \taccent\r\naccent\f\vsecondary ";
+  auto description = ui::custom<Custom>("method")
+                       .reference(method)
+                       .style(StyleTarget{.type = "Special", .id = "identity", .control = true, .baseTypes = {"Base"}})
+                       .classes("unused")
+                       .classes(list);
+  auto modifier = ui::classes(list);
+
+  list.assign("changed after capture");
+
+  const auto split = ui::detail::splitClasses(" \taccent\r\naccent\f\vsecondary ");
+
+  check(split.values == std::vector<std::string>{"accent", "accent", "secondary"},
+        "class splitting uses all six ASCII separators and preserves order and duplicates");
+  check(ui::detail::splitClasses("x\xc2\xa0y").values == std::vector<std::string>{"x\xc2\xa0y"},
+        "non-ASCII whitespace stays within the class name");
+  take(ui::mount(*fixture.scene,
+                 ui::column(std::move(description), ui::custom<Custom>("pipe").reference(pipe) | std::move(modifier),
+                            ui::custom<Custom>("replaced")
+                              .reference(replaced)
+                              .classes("accent secondary")
+                              .style(StyleTarget{.type = "Special", .classes = {"replacement"}}),
+                            ui::custom<Custom>("cleared").reference(cleared).classes("accent secondary").classes(""))));
+  take(
+    fixture.scene->theme(take(parsePss("Special.accent { foreground:#010203; } Base.secondary { background:#040506; } "
+                                       "#identity.accent { bold:true; } Control.accent { italic:true; } "
+                                       ".accent.secondary { underline:true; } .replacement { bold:true; }"))));
+  take(fixture.app->tree().read(method.node(), [](const Custom &widget) {
+    check(widget.computedStyle().has_value(), "class metadata participates in theme matching");
+
+    const auto &style = widget.computedStyle()->normal;
+
+    check(style.foreground == RgbColor{1, 2, 3} && style.background == RgbColor{4, 5, 6} && style.bold &&
+            style.italic && style.underline,
+          "class replacement preserves type, id, base type and control identity");
+  }));
+  take(fixture.app->tree().read(pipe.node(), [](const Custom &widget) {
+    check(widget.computedStyle() && widget.computedStyle()->normal.underline,
+          "owning pipe class list matches the method after input destruction");
+  }));
+  take(fixture.app->tree().read(replaced.node(), [](const Custom &widget) {
+    check(widget.computedStyle() && widget.computedStyle()->normal.bold && !widget.computedStyle()->normal.underline,
+          "later style replaces classes in source order");
+  }));
+  take(fixture.app->tree().read(cleared.node(), [](const Custom &widget) {
+    check(widget.computedStyle() && !widget.computedStyle()->normal.underline,
+          "explicit empty classes clear previous values");
+  }));
+
+  bool foreignRejected{};
+
+  std::thread worker([&] {
+    const auto result = fixture.scene->classes(method.node(), {});
+
+    foreignRejected =
+      !result && result.error().phase == ManagedPhase::STYLE && treeCause(result.error(), TreeError::WRONG_THREAD);
+  });
+
+  worker.join();
+  check(foreignRejected, "managed classes preserves thread validation and STYLE phase");
+  take(fixture.app->tree().frame([&] {
+    const auto result = fixture.scene->classes(method.node(), {});
+
+    check(!result && result.error().phase == ManagedPhase::STYLE && treeCause(result.error(), TreeError::WOULD_BLOCK),
+          "managed classes rejects frame mutation without replacing metadata");
+  }));
+
+  ui::Ref<Custom> abandoned;
+  const auto before = take(fixture.app->tree().inspect(fixture.scene->root())).children.size();
+  auto failed =
+    ui::mount(*fixture.scene, ui::column(ui::custom<Custom>("abandoned").reference(abandoned).classes("accent"),
+                                         ui::custom<MountFailure>()));
+
+  check(!failed && abandoned.node() == Node<Custom>{} &&
+          take(fixture.app->tree().inspect(fixture.scene->root())).children.size() == before,
+        "failed class-bearing subtree rolls back without publishing references");
+}
+
 void exceptionsAndForeignMount() {
   Fixture fixture;
   const auto thrown = ui::mount(
@@ -843,6 +1022,8 @@ int main() {
     customAndCallbackLifetime();
     deferredUnmountKeepsCoreSemantics();
     sharedWidthPolicyAndStandardSemantics();
+    instanceStateModifiers();
+    instanceClasses();
     exceptionsAndForeignMount();
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

@@ -3,18 +3,35 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest.h>
 
+#include "support/examples/gallery/gallery.hpp"
 #include "support/examples/replay/terminal.hpp"
 #include <portals/ui.hpp>
 
 #include <memory>
 #include <new>
+#include <source_location>
 #include <stdexcept>
+#include <string_view>
 #include <thread>
 
 using namespace portals;
 
 namespace {
-template <class T, class E> T take(std::expected<T, E> result) {
+template <class T, class E>
+T take(std::expected<T, E> result, std::source_location origin = std::source_location::current()) {
+  if (!result) {
+    MESSAGE(std::string_view{origin.file_name()} << ':' << origin.line());
+    if constexpr (std::same_as<E, TreeError>) {
+      MESSAGE("TreeError code: ", static_cast<int>(result.error()));
+    }
+  }
+  if constexpr (std::same_as<E, ManagedError>) {
+    if (!result) {
+      ui::SceneReport report;
+      report.failure = result.error();
+      ui::reportToStderr(report);
+    }
+  }
   REQUIRE(result);
   if constexpr (!std::is_void_v<T>) {
     return std::move(*result);
@@ -52,7 +69,233 @@ struct Fixture {
     return result;
   }
 };
+
+CellBuffer render(ManagedScene &scene, Application &app, CellSize size) {
+  take(scene.prepare(app, size));
+  take(app.tree().consumeFrameRequest());
+  const auto bounds = take(CellRect::from({}, size));
+  std::optional<CellBuffer> result;
+  take(app.tree().frame([&] {
+    take(layoutTree(app.tree(), app.root(), bounds, bounds));
+    std::vector<RenderCommand> commands;
+    auto collect = [&](auto &self, Node<Widget> node) -> void {
+      const auto info = take(app.tree().inspect(node));
+      if (!info.visible) {
+        return;
+      }
+      gallery::SurfaceSink sink(info.geometry, commands);
+      take(app.tree().paint(node, sink));
+      for (auto child : info.children) {
+        self(self, child);
+      }
+    };
+    collect(collect, scene.root());
+    result.emplace(take(renderFullFrame(size, commands, {})));
+  }));
+  take(scene.completedLayout(app));
+  take(app.tree().consumeFrameRequest());
+  return std::move(*result);
+}
+
+template <class T>
+concept HasOverlayAlignment = requires(T &&recipe) {
+  std::move(recipe).horizontalAlign(LayoutAlign::END);
+  std::move(recipe) | ui::padding(LayoutPadding{});
+};
+static_assert(HasOverlayAlignment<ui::Description<Overlay>>);
+static_assert(!HasOverlayAlignment<ui::Description<OverlayHost>>);
+static_assert(!HasOverlayAlignment<ui::Description<Grid>>);
 } // namespace
+
+TEST_CASE("ordinary Overlay methods pipes and configuration preserve actual layout paint and hit order") {
+  for (int mode = 0; mode != 3; ++mode) {
+    INFO("recipe mode: ", mode);
+    auto recipe = [&]() -> ui::Description<Widget> {
+      if (mode == 0) {
+        return ui::detail::Access::erase(ui::overlay(ui::button("abc").chrome(ButtonChrome::NONE).id("lower"),
+                                                     ui::button("XYZ").chrome(ButtonChrome::NONE).id("upper"))
+                                           .padding({1, 1, 1, 1})
+                                           .horizontalAlign(LayoutAlign::END)
+                                           .verticalAlign(LayoutAlign::CENTER)
+                                           .width(10)
+                                           .height(6)
+                                           .id("overlay"));
+      }
+      if (mode == 1) {
+        auto description = ui::overlay(ui::button("abc").chrome(ButtonChrome::NONE).id("lower"),
+                                       ui::button("XYZ").chrome(ButtonChrome::NONE).id("upper"))
+                             .width(10)
+                             .height(6)
+                             .id("overlay") |
+                           ui::padding({1, 1, 1, 1}) | ui::horizontalAlign(LayoutAlign::END) |
+                           ui::verticalAlign(LayoutAlign::CENTER);
+        return ui::detail::Access::erase(std::move(description));
+      }
+      ui::SceneResourceOptions options;
+      options.format = ui::SceneResourceFormat::CONFIGURATION;
+      return ui::resource("scene{Overlay#overlay{width=10 height=6 padding{left=1 top=1 right=1 bottom=1} "
+                          "horizontalAlign=END verticalAlign=CENTER Button#lower{text=\"abc\" chrome=NONE} "
+                          "Button#upper{text=\"XYZ\" chrome=NONE}}}",
+                          options);
+    }();
+    auto owner = ui::scene(std::move(recipe));
+    auto overlay = owner.get<Overlay>("overlay");
+    auto lower = owner.get<Button>("lower");
+    auto upper = owner.get<Button>("upper");
+    Application *app{};
+    ManagedScene *scene{};
+    owner.configure([&](ManagedScene &managed, Application &application) {
+      scene = &managed;
+      app = &application;
+      take(managed.onClick(lower.node(), [] {
+      }));
+      take(managed.onClick(upper.node(), [] {
+      }));
+    });
+    take(owner.prepareChecked());
+    const auto image = render(*scene, *app, {10, 6});
+    const auto expected = take(CellRect::from({6, 2}, {3, 1}));
+    CHECK(take(lower.geometry()).local == expected);
+    CHECK(take(upper.geometry()).local == expected);
+    const auto children = take(app->tree().inspect(overlay.node())).children;
+    REQUIRE(children.size() == 2);
+    CHECK(children[0].id() == lower.node().id());
+    CHECK(children[1].id() == upper.node().id());
+    CHECK(take(image.at({6, 2})).glyph == "X");
+    CHECK(take(image.at({8, 2})).glyph == "Z");
+    CHECK(take(app->router().hitTest({6, 2})).id() == upper.node().id());
+    take(scene->prepare(*app, {10, 6}));
+    CHECK(take(app->tree().consumeFrameRequest()) == Invalidation::NONE);
+    take(owner.close());
+    CHECK_FALSE(upper.geometry());
+  }
+}
+
+TEST_CASE("ordinary Overlay preserves actual options size policy precedence and shortage insets") {
+  Fixture fixture;
+  ui::Ref<Overlay> overlay;
+  ui::Ref<Label> child;
+  const OverlayOptions options{{2, 1, 1, 1}, LayoutAlign::END, LayoutAlign::END};
+  const SizePolicy policy{{10, 10, 10, SizeMode::FIXED}, {6, 6, 6, SizeMode::FIXED}};
+  ui::ControlContext controls;
+  controls.defaults("Overlay", {.verticalAlign = LayoutAlign::CENTER})
+    .define("Layer", "Overlay", {.horizontalAlign = LayoutAlign::CENTER});
+  take(ui::mount(*fixture.scene,
+                 ui::row(ui::overlay(overlay, options, policy, ui::label(child, "abc"))
+                           .variant("Layer")
+                           .horizontalAlign(LayoutAlign::START)),
+                 controls));
+  fixture.layout({20, 10});
+  CHECK(take(overlay.geometry()).local.size() == CellSize{10, 6});
+  CHECK(take(child.geometry()).local == take(CellRect::from({2, 2}, {3, 1})));
+  take(fixture.app->tree().read(overlay.node(), [&](const Overlay &widget) {
+    CHECK(widget.options().padding.left == 2);
+    CHECK(widget.options().padding.right == 1);
+    CHECK(widget.options().horizontal == LayoutAlign::START);
+    CHECK(widget.options().vertical == LayoutAlign::CENTER);
+    CHECK(widget.sizePolicy().width.maximum == 10);
+  }));
+  ui::Ref<Overlay> small;
+  ui::Ref<Label> clipped;
+  Fixture shortage;
+  take(ui::mount(
+    *shortage.scene,
+    ui::row(ui::overlay(small, OverlayOptions{{3, 2, 4, 3}}, ui::label(clipped, "content")).width(2).height(1))));
+  shortage.layout({20, 10});
+  CHECK(take(clipped.geometry()).local.origin() == CellPoint{3, 2});
+  CHECK(take(clipped.geometry()).local.size() == CellSize{0, 0});
+  for (const auto invalidOptions :
+       {OverlayOptions{{-1, 0, 0, 0}}, OverlayOptions{{}, static_cast<LayoutAlign>(9), LayoutAlign::START},
+        OverlayOptions{{}, LayoutAlign::START, static_cast<LayoutAlign>(9)}}) {
+    ui::Ref<Overlay> unpublished;
+    int effects{};
+    const auto invalid = ui::mount(
+      *fixture.scene,
+      ui::overlay(unpublished, invalidOptions,
+                  ui::label("late").setup([&](ManagedScene &, Node<Label>) -> std::expected<void, ManagedError> {
+                    ++effects;
+                    return {};
+                  })));
+    REQUIRE_FALSE(invalid);
+    CHECK(unpublished.node() == Node<Overlay>{});
+    CHECK(effects == 0);
+  }
+  CHECK_FALSE(ui::mount(*fixture.scene, ui::custom<Overlay>().padding({})));
+  ui::ControlContext caller;
+  caller.define("Overlay", "Label");
+  CHECK_FALSE(ui::mount(*fixture.scene, ui::overlay(), caller));
+}
+
+TEST_CASE("ordinary Overlay child failure rolls back all unpublished parent and sibling refs") {
+  Fixture fixture;
+  ui::Ref<Overlay> parent;
+  ui::Ref<Label> first;
+  const auto count = take(fixture.app->tree().inspect(fixture.scene->root())).children.size();
+  const auto failed = ui::mount(
+    *fixture.scene,
+    ui::overlay(parent, ui::label(first, "early"),
+                ui::label("late").setup([](ManagedScene &, Node<Label> node) -> std::expected<void, ManagedError> {
+                  return std::unexpected(
+                    ManagedError{ManagedPhase::MOUNT, node.id(), TreeError::INVALID_ARGUMENT, {}, {}});
+                })));
+  REQUIRE_FALSE(failed);
+  CHECK(parent.node() == Node<Overlay>{});
+  CHECK(first.node() == Node<Label>{});
+  CHECK(take(fixture.app->tree().inspect(fixture.scene->root())).children.size() == count);
+}
+
+TEST_CASE("notification Overlay consumes ordinary layout modifiers without posting service messages") {
+  Fixture fixture;
+  ui::NotificationCenter center;
+  ui::Ref<Overlay> wrapper;
+  ui::Ref<Label> content;
+  take(ui::mount(*fixture.scene, ui::notifications(wrapper, center, ui::label(content, "body"))
+                                   .padding({2, 1, 1, 1})
+                                   .horizontalAlign(LayoutAlign::END)
+                                   .verticalAlign(LayoutAlign::CENTER)
+                                   .width(10)
+                                   .height(6)));
+  fixture.layout({10, 6});
+  CHECK(take(content.geometry()).local == take(CellRect::from({5, 2}, {4, 1})));
+  take(fixture.app->tree().read(wrapper.node(), [](const Overlay &widget) {
+    CHECK(widget.options().padding.left == 2);
+    CHECK(widget.options().horizontal == LayoutAlign::END);
+    CHECK(widget.options().vertical == LayoutAlign::CENTER);
+  }));
+  const auto snapshot = take(center.snapshot());
+  CHECK(snapshot->items.empty());
+  take(fixture.scene->remove(wrapper.node()));
+  CHECK_FALSE(center.snapshot());
+}
+
+TEST_CASE("existing notification wrapper ignores unrelated caller Overlay declarations while consuming local layout") {
+  for (const bool modified : {false, true}) {
+    Fixture fixture;
+    ui::NotificationCenter center;
+    ui::Ref<Overlay> wrapper;
+    ui::Ref<Label> content;
+    ui::ControlContext caller;
+    caller.define("Overlay", "Label", {.text = text("unrelated")});
+    auto recipe = ui::notifications(wrapper, center, ui::label(content, "body")).width(10).height(6);
+    if (modified) {
+      (void)std::move(recipe)
+        .padding({2, 1, 1, 1})
+        .horizontalAlign(LayoutAlign::END)
+        .verticalAlign(LayoutAlign::CENTER);
+    }
+    take(ui::mount(*fixture.scene, std::move(recipe), caller));
+    fixture.layout({10, 6});
+    CHECK(take(content.geometry()).local ==
+          (modified ? take(CellRect::from({5, 2}, {4, 1})) : take(CellRect::from({0, 0}, {10, 6}))));
+    take(fixture.app->tree().read(wrapper.node(), [&](const Overlay &widget) {
+      CHECK(widget.options().padding.left == (modified ? 2 : 0));
+      CHECK(widget.options().horizontal == (modified ? LayoutAlign::END : LayoutAlign::STRETCH));
+      CHECK(widget.options().vertical == (modified ? LayoutAlign::CENTER : LayoutAlign::STRETCH));
+    }));
+    CHECK(take(content.text().get()) == "body");
+    CHECK(take(center.snapshot())->items.empty());
+  }
+}
 
 TEST_CASE("declarative grid mounts compact columns without client identities") {
   Fixture fixture;

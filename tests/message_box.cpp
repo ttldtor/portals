@@ -378,9 +378,313 @@ void smallScreens() {
           f.app->scheduler().metrics().timer_callbacks == 0,
         "hidden idle message creates no redraw/timer churn");
 }
+
+void sparseMessageParity() {
+  std::optional<CellBuffer> baseline;
+
+  for (int path = 0; path < 5; ++path) {
+    Fixture f;
+    ui::MessageBox box;
+    ui::Ref<Dialog> view;
+    ui::MessageOptions actual;
+    ui::ControlContext controls;
+    int lookups{};
+
+    actual.dialog.maximumPanelSize = {24, 10};
+    actual.dialog.viewportMargin = 0;
+    actual.labels.confirm = TextValue("Factory action");
+    actual.labels.cancel = TextValue("Factory cancel");
+    actual.maxBodyLines = 11;
+    actual.textLimits = {90, 20, 70, 90};
+    actual.resolver = [&](std::string_view key) -> std::expected<std::string, TextResourceError> {
+      ++lookups;
+
+      return key == "action" ? "Proceed" : "Resolved";
+    };
+    controls.defaults("Dialog", {.title = text("Hostile ambient title"),
+                                 .dialog = {.mode = DialogMode::NON_MODAL, .closeOnEscape = false}});
+    controls.defaults("Label", {.width = 9});
+    ui::ControlMessageSettings patch;
+
+    patch.labels.confirm = i18n("action");
+    patch.labels.save = i18n("unused");
+    patch.labels.cancel = text("Back");
+    patch.defaultChoice = {.value = MessageChoice::CONFIRM};
+    patch.allowDestructiveDefault = true;
+    patch.textLimits.maxInputBytes = 80;
+    patch.maxBodyLines = 8;
+
+    if (path == 4) {
+      ui::SceneResourceOptions options;
+
+      options.format = ui::SceneResourceFormat::CONFIGURATION;
+      options.resolver = [](std::string_view) -> std::expected<std::string, TextResourceError> {
+        check(false, "explicit native resolver must win over resource fallback");
+
+        return std::unexpected(TextResourceError::MISSING_RESOURCE);
+      };
+      take(options.registry.add<Dialog>(
+        "Notice",
+        [&, actual](ui::SceneResourceArguments) {
+          return ui::confirmDialog(box, "Factory title", "Factory paragraph", actual)
+            .messageSettings({.maxBodyLines = 6})
+            .reference(view);
+        },
+        ui::controlPropertySchema("MessageBox")));
+      take(ui::mount(*f.scene,
+                     ui::resource(R"(
+        definitions{Inherited=Notice{title="Caption" message{labels{confirm=i18n("action") save=i18n("unused")} defaultChoice{value=CONFIRM} allowDestructiveDefault=true}}}
+        defaults{Notice{message{labels{cancel="Back"} textLimits{maxInputBytes=80} maxBodyLines=8}}}
+        scene{OverlayHost{Label{"Backdrop"} Inherited{body="Paragraph" message={maxBodyLines=8}}}}
+      )",
+                                  options),
+                     controls));
+    } else {
+      auto recipe = [&] {
+        if (path == 0) {
+          auto options = actual;
+
+          options.labels.confirm = *patch.labels.confirm;
+          options.labels.save = *patch.labels.save;
+          options.labels.cancel = *patch.labels.cancel;
+          options.defaultChoice = MessageChoice::CONFIRM;
+          options.allowDestructiveDefault = true;
+          options.textLimits.max_input_bytes = 80;
+          options.maxBodyLines = 8;
+
+          return ui::confirmDialog(box, "Caption", "Paragraph", options);
+        }
+        if (path == 1) {
+          return ui::confirmDialog(box, "Factory title", "Factory paragraph", actual)
+            .title("Caption")
+            .body("Paragraph")
+            .messageSettings(patch);
+        }
+        if (path == 2) {
+          return ui::confirmDialog(box, "Factory title", "Factory paragraph", actual) | ui::title("Caption") |
+                 ui::body("Paragraph") | ui::messageSettings(patch);
+        }
+
+        return ui::confirmDialog(box, "Factory title", "Factory paragraph", actual)
+          .settings({.title = text("Caption"), .body = text("Paragraph"), .message = patch});
+      }();
+
+      take(ui::mount(*f.scene, ui::overlayHost(ui::label("Backdrop"), std::move(recipe).reference(view)), controls));
+    }
+    check(lookups == 1, "only the active action uses the explicit native resolver");
+    take(f.app->tree().read(view.node(), [&](const Dialog &widget) {
+      const auto options = widget.options();
+
+      check(options.mode == DialogMode::MODAL && options.closeOnEscape,
+            "ambient ordinary Dialog defaults must not override already validated message safety");
+      check(options.maximumPanelSize == CellSize{24, 10} && options.viewportMargin == 0,
+            "unspecified actual native panel options survive every sparse path");
+    }));
+    command(box.open([] {
+    }));
+    check(take(f.app->router().focused()) == findButton(f, view.node(), "Proceed"),
+          "explicit value-only default selects the actual active action");
+    auto frame = drawMessages(f, {30, 12});
+
+    if (!baseline) {
+      baseline.emplace(std::move(frame));
+    } else {
+      for (std::int32_t y = 0; y < 12; ++y) {
+        for (std::int32_t x = 0; x < 30; ++x) {
+          check(take(frame.at({x, y})).glyph == take(baseline->at({x, y})).glyph,
+                "native/method/pipe/settings/CFG paint parity uses actual caption and paragraph");
+        }
+      }
+    }
+    choose(f, view.node(), "Back");
+    answer(box, MessageChoice::CANCEL);
+    flushMessages(f);
+    take(f.scene->remove(view.node()));
+    check(!f.app->tree().inspect(view.node()) && treeCause(box.lastResult().error(), TreeError::STALE_NODE),
+          "real facade and view retire together after sparse construction");
+  }
+}
+
+void sparseChoiceAndValidation() {
+  for (int kind = 0; kind < 3; ++kind) {
+    for (int option = 0; option < 3; ++option) {
+      Fixture f;
+      ui::MessageBox box;
+      ui::Ref<Dialog> view;
+      ui::MessageOptions actual;
+      ui::ControlMessageSettings patch;
+
+      actual.defaultChoice = kind == 0   ? MessageChoice::ACKNOWLEDGE
+                             : kind == 1 ? MessageChoice::CONFIRM
+                                         : MessageChoice::DISCARD;
+      actual.allowDestructiveDefault = true;
+      if (option == 0) {
+        patch.defaultChoice = {.enabled = false, .value = MessageChoice::SAVE};
+      } else if (option == 1) {
+        patch.defaultChoice.enabled = true;
+      } else {
+        actual.defaultChoice.reset();
+        patch.defaultChoice.enabled = true;
+      }
+      auto recipe = kind == 0   ? ui::messageBox(box, "Title", "Paragraph", actual)
+                    : kind == 1 ? ui::confirmDialog(box, "Title", "Paragraph", actual)
+                                : ui::unsavedChangesDialog(box, "Title", "Paragraph", actual);
+
+      take(ui::mount(*f.scene,
+                     ui::overlayHost(ui::label("Body"), std::move(recipe).messageSettings(patch).reference(view))));
+      command(box.open([] {
+      }));
+      const auto expected = kind == 0 ? "OK" : option == 1 ? kind == 1 ? "Continue" : "Discard" : "Cancel";
+
+      check(
+        take(f.app->router().focused()) == findButton(f, view.node(), expected),
+        "disabled ignores a valid inactive choice; enabled preserves captured choice or chooses kind-safe fallback");
+      command(box.cancel());
+      flushMessages(f);
+    }
+  }
+  for (int invalid = 0; invalid < 5; ++invalid) {
+    Fixture f;
+    ui::MessageBox box;
+    ui::Ref<Dialog> view;
+    ui::ControlMessageSettings patch;
+
+    if (invalid == 0) {
+      patch.defaultChoice = {.enabled = false, .value = static_cast<MessageChoice>(99)};
+    } else if (invalid == 1) {
+      patch.defaultChoice.value = MessageChoice::CONFIRM;
+    } else if (invalid == 2) {
+      patch.defaultChoice.value = MessageChoice::SAVE;
+    } else if (invalid == 3) {
+      patch.labels.confirm = text("");
+    } else {
+      patch.labels.cancel = text("two\nlines");
+    }
+    auto failed = ui::mount(
+      *f.scene, ui::overlayHost(ui::label("Body"),
+                                ui::confirmDialog(box, "Title", "Paragraph").messageSettings(patch).reference(view)));
+
+    check(!failed && treeCause(failed.error(), TreeError::INVALID_ARGUMENT),
+          "invalid message patch remains a typed setup failure");
+    check(view.node() == Node<Dialog>{} && treeCause(box.lastResult().error(), TreeError::CLOSED),
+          "failed mount publishes neither observer nor facade");
+    check(take(f.app->tree().inspect(f.scene->root())).children.empty(),
+          "failed patch rolls back all internal children");
+    take(ui::mount(*f.scene, ui::overlayHost(ui::label("Body"), ui::confirmDialog(box, "Retry", "Paragraph"))));
+    command(box.open([] {
+    }));
+    command(box.cancel());
+    flushMessages(f);
+  }
+  Fixture f;
+  auto ordinary =
+    ui::mount(*f.scene, ui::overlayHost(ui::label("Body"), ui::dialog("Plain", ui::label("body")).messageSettings({})));
+
+  check(!ordinary && treeCause(ordinary.error(), TreeError::INVALID_ARGUMENT),
+        "even an empty explicit message group must reject ordinary Dialog");
+}
+
+void sparseBodyLimitsAndNativeContext() {
+  for (const bool pipe : {false, true}) {
+    Fixture f;
+    ui::MessageBox box;
+    ui::MessageOptions actual;
+
+    actual.labels.confirm = TextValue("y");
+    actual.labels.cancel = TextValue("n");
+    auto recipe = ui::confirmDialog(box, "T", "x", actual);
+
+    if (pipe) {
+      recipe = std::move(recipe) | ui::body("four") | ui::messageSettings({.textLimits = {.maxInputBytes = 3}});
+    } else {
+      recipe = std::move(recipe).body("four").messageSettings({.textLimits = {.maxInputBytes = 3}});
+    }
+    const auto failed = ui::mount(*f.scene, ui::overlayHost(ui::label("Body"), std::move(recipe)));
+
+    check(!failed && failed.error().text.has_value(),
+          "body and lower text-limit patch use the native typed text error");
+    check(take(f.app->tree().inspect(f.scene->root())).children.empty(),
+          "text limit failure removes all partial internals");
+  }
+  for (const bool lazy : {false, true}) {
+    ui::MessageBox box;
+    ui::Ref<Dialog> view;
+    ui::MessageOptions actual;
+    ui::ControlContext controls;
+    int factoryCalls{};
+
+    actual.labels.confirm = TextValue("y");
+    actual.labels.cancel = TextValue("n");
+    controls.defaults("MessageBox", {.body = text("body"), .message = {.textLimits = {.maxInputBytes = 4}}});
+    controls.define("Ask", "MessageBox",
+                    {.message = {.labels = {.confirm = text("Yes")},
+                                 .defaultChoice = {.value = MessageChoice::CONFIRM},
+                                 .allowDestructiveDefault = true}});
+    auto factory = [&] {
+      ++factoryCalls;
+
+      return ui::overlayHost(ui::label("Body"),
+                             ui::confirmDialog(box, "T", "captured body exceeds the effective limit", actual)
+                               .variant("Ask")
+                               .reference(view));
+    };
+
+    if (lazy) {
+      ui::SceneOptions options;
+      ManagedScene *managed{};
+      Application *application{};
+
+      options.controls = controls;
+      auto owner = ui::scene(
+        [&](ManagedScene &) {
+          return factory();
+        },
+        options);
+
+      owner.configure([&](ManagedScene &scene, Application &app) {
+        managed = &scene;
+        application = &app;
+      });
+      check(factoryCalls == 0, "scene factory stays lazy before control preflight");
+      take(owner.prepareChecked());
+      command(box.open([] {
+      }));
+      check(view.node() != Node<Dialog>{}, "lazy named message reference publishes after inherited defaults resolve");
+      take(application->tree().read(take(application->router().focused()), [&](const Widget &widget) {
+        const auto *button = dynamic_cast<const Button *>(&widget);
+
+        check(button && button->text().bytes() == "Yes", "lazy defaults and named patch choose the real active button");
+      }));
+      command(box.cancel());
+      take(managed->afterDispatch(*application));
+      take(application->scheduler().dispatch());
+      take(owner.close());
+    } else {
+      Fixture f;
+
+      take(ui::mount(*f.scene, factory(), controls));
+      command(box.open([] {
+      }));
+      check(take(f.app->router().focused()) == findButton(f, view.node(), "Yes"),
+            "direct native mount inherits MessageBox defaults and named patch");
+      command(box.cancel());
+      flushMessages(f);
+    }
+    check(factoryCalls == 1, "each direct or lazy factory runs once after successful schema preflight");
+  }
+  Fixture f;
+  auto plain = ui::mount(
+    *f.scene, ui::overlayHost(ui::label("Body"), ui::dialog("Plain", ui::label("body")).body("message-only")));
+
+  check(!plain && treeCause(plain.error(), TreeError::INVALID_ARGUMENT),
+        "body modifier remains message-only even though both recipes return Description<Dialog>");
+}
 } // namespace
 
 int main() try {
+  sparseBodyLimitsAndNativeContext();
+  sparseMessageParity();
+  sparseChoiceAndValidation();
   canonicalReferences();
   automaticScenePartialMount();
   presets();

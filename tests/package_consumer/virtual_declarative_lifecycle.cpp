@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #include "virtual_support.hpp"
 #include <portals/ui.hpp>
+#include <portals/ui_scene_resource.hpp>
 
 namespace {
 using namespace virtualConsumer;
@@ -238,6 +239,72 @@ void pendingViewsAndRejectedCompletion() {
   check(terminal.closed, "Pending composition skipped terminal cleanup");
 }
 
+void scalarResourceBindings() {
+  for (const bool resource : {false, true}) {
+    ReplayTerminal terminal;
+    auto app = take(Application::create({}, terminal.clock()));
+    auto scene = take(ManagedScene::create(*app));
+    const auto model = take(scene->model<Ohlc>(std::make_shared<const Prices>()));
+    ui::Ref<VirtualList<Ohlc>> list;
+    ui::Ref<VirtualTable<Ohlc>> table;
+    const auto format = [](const ModelRow<Ohlc> &) {
+      return virtualConsumer::text("price");
+    };
+
+    if (resource) {
+      ui::SceneResourceOptions options;
+
+      options.format = ui::SceneResourceFormat::CONFIGURATION;
+      take(options.registry.add<VirtualList<Ohlc>>("Prices", [&](ui::SceneResourceArguments) {
+        return ui::virtualList(list, model, format);
+      }));
+      take(options.registry.add<VirtualTable<Ohlc>>("Quotes", [&](ui::SceneResourceArguments) {
+        return ui::virtualTable(table, model, priceColumns());
+      }));
+      take(ui::mount(*scene, ui::resource(R"(
+scene { VBox {
+  Prices { height=4, rowHeight=2, overscanRows=0 }
+  Quotes { height=5, rowHeight=2, overscanRows=0,
+           maxColumns=2, maxPreparedCells=4, maxPreparedTextBytes=1024 }
+} }
+)",
+                                          options)));
+    } else {
+      take(ui::mount(*scene, ui::vbox(ui::virtualList(list, model, format).height(4).rowHeight(2).overscanRows(0),
+                                      ui::virtualTable(table, model, priceColumns())
+                                        .height(5)
+                                        .rowHeight(2)
+                                        .overscanRows(0)
+                                        .maxColumns(2)
+                                        .maxPreparedCells(4)
+                                        .maxPreparedTextBytes(1024))));
+    }
+
+    bool inspected{};
+
+    terminal.checkpoint = [&](std::size_t next, TerminalRead &) {
+      if (next != 0) {
+        return;
+      }
+
+      take(app->tree().read(list.node(), [](const VirtualList<Ohlc> &view) {
+        check(view.visibleRange() == RowRange{0, 2} && view.preparedRange() == RowRange{0, 2},
+              "Installed list scalar settings changed prepared ranges");
+      }));
+      take(app->tree().read(table.node(), [](const VirtualTable<Ohlc> &view) {
+        check(view.visibleRange() == RowRange{0, 2} && view.preparedRange() == RowRange{0, 2},
+              "Installed table scalar settings changed prepared ranges");
+      }));
+      inspected = true;
+    };
+
+    take(scene->run(terminal));
+    check(inspected && terminal.closed, "Installed data scalar scenario skipped presentation or cleanup");
+    check(!app->tree().inspect(list.node()) && !app->tree().inspect(table.node()),
+          "Installed data scalar scenario retained removed controls");
+  }
+}
+
 void missingProviderFailsDuringPreparation() {
   ReplayTerminal terminal;
   auto app = take(Application::create({}, terminal.clock()));
@@ -258,6 +325,7 @@ int main() {
   invalidModelAndDuplicateBinding();
   preparationOrderAndFailure();
   pendingViewsAndRejectedCompletion();
+  scalarResourceBindings();
   missingProviderFailsDuringPreparation();
   std::cout << "declarative virtual lifecycle checks passed\n";
 }

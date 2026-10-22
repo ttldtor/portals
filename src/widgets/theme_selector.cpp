@@ -132,215 +132,259 @@ void ThemeSelectorAccess::interactive(const std::shared_ptr<ThemeSelectorTarget>
 
 Description<Dialog> ThemeSelectorAccess::describe(ThemeSelectorRef reference, ThemeSelectionRef model,
                                                   ThemeSelectorOptions options) {
-  return Access::cold<Dialog>([reference = std::move(reference), model = std::move(model),
-                               options](ManagedScene &scene, Node<Widget> parent,
-                                        MountContext &context) mutable -> std::expected<Node<Dialog>, ManagedError> {
-    const auto target = reference.target_;
-    const auto origin = std::source_location::current();
-    if (!target || target->owner != std::this_thread::get_id()) {
-      return std::unexpected(selectorError(parent.id(), TreeError::WRONG_THREAD, origin));
-    }
-    scene.retireThemeSelector();
-    if (target->published || scene.themeSelector_ || options.dialog.mode != DialogMode::MODAL ||
-        !options.textLimits.max_input_bytes || !options.textLimits.max_cluster_bytes ||
-        !options.textLimits.max_graphemes || !options.textLimits.max_cells) {
-      return std::unexpected(selectorError(parent.id(), TreeError::INVALID_ARGUMENT, origin));
-    }
-    options.dialog.closeOnEscape = false;
-    const auto policy = scene.widthPolicy();
-    const auto lifetime = std::weak_ptr<const void>(scene.lifetime_);
-    const auto resolve = [&](const TextValue &value) -> std::expected<GraphemeText, ManagedError> {
-      auto text = options.textResolver ? value.resolve(policy, options.textResolver, options.textLimits)
-                                       : value.resolve(policy, options.textLimits);
-      if (!text) {
-        auto failure = selectorError(parent.id(), TreeError::INVALID_ARGUMENT, origin);
-        if (const auto *cause = std::get_if<TextError>(&text.error())) {
-          failure.text = *cause;
-        } else {
-          failure.resource = std::get<TextResourceError>(text.error());
+  return Access::themeSelectorControl(
+    describeView(std::move(reference), std::move(model), std::move(options), {}, false));
+}
+
+Description<Dialog> ThemeSelectorAccess::describeView(ThemeSelectorRef reference, ThemeSelectionRef model,
+                                                      ThemeSelectorOptions options, ControlSettings settings,
+                                                      bool resolvedSettings) {
+  return Access::cold<Dialog>(
+    [reference = std::move(reference), model = std::move(model), options, settings = std::move(settings),
+     resolvedSettings](ManagedScene &scene, Node<Widget> parent,
+                       MountContext &context) mutable -> std::expected<Node<Dialog>, ManagedError> {
+      if (!resolvedSettings && context.controlSettings) {
+        settings = *context.controlSettings;
+        options = controlThemeSelectorOptions(settings, std::move(options));
+      }
+
+      if (!options.textResolver && context.themeSelectorResolver) {
+        options.textResolver = *context.themeSelectorResolver;
+      }
+
+      struct RestoreResolver {
+        MountContext &context;
+        const TextResolver *previous;
+
+        ~RestoreResolver() {
+          context.themeSelectorResolver = previous;
         }
-        return std::unexpected(failure);
+      } restore{context, std::exchange(context.themeSelectorResolver, nullptr)};
+
+      const auto target = reference.target_;
+      const auto origin = std::source_location::current();
+      if (!target || target->owner != std::this_thread::get_id()) {
+        return std::unexpected(selectorError(parent.id(), TreeError::WRONG_THREAD, origin));
       }
-      return *text;
-    };
-    const std::array<const TextValue *, 7> expressions{
-      &options.title,       &options.apply,       &options.cancel,        &options.closeKeepingPreview,
-      &options.emptyStatus, &options.errorStatus, &options.conflictStatus};
-    std::array<std::optional<GraphemeText>, 7> captions;
-    for (std::size_t i = 0; i < expressions.size(); ++i) {
-      auto caption = resolve(*expressions[i]);
-      if (!caption) {
-        return std::unexpected(caption.error());
+      scene.retireThemeSelector();
+      if (target->published || scene.themeSelector_ || options.dialog.mode != DialogMode::MODAL ||
+          !options.textLimits.max_input_bytes || !options.textLimits.max_cluster_bytes ||
+          !options.textLimits.max_graphemes || !options.textLimits.max_cells) {
+        return std::unexpected(selectorError(parent.id(), TreeError::INVALID_ARGUMENT, origin));
       }
-      captions[i] = *caption;
+      options.dialog.closeOnEscape = false;
+      const auto policy = scene.widthPolicy();
+      const auto lifetime = std::weak_ptr<const void>(scene.lifetime_);
+      const auto resolve = [&](const TextValue &value) -> std::expected<GraphemeText, ManagedError> {
+        auto text = options.textResolver ? value.resolve(policy, options.textResolver, options.textLimits)
+                                         : value.resolve(policy, options.textLimits);
+        if (!text) {
+          auto failure = selectorError(parent.id(), TreeError::INVALID_ARGUMENT, origin);
+          if (const auto *cause = std::get_if<TextError>(&text.error())) {
+            failure.text = *cause;
+          } else {
+            failure.resource = std::get<TextResourceError>(text.error());
+          }
+          return std::unexpected(failure);
+        }
+        return *text;
+      };
+      const std::array<const TextValue *, 7> expressions{
+        &options.title,       &options.apply,       &options.cancel,        &options.closeKeepingPreview,
+        &options.emptyStatus, &options.errorStatus, &options.conflictStatus};
+      std::array<std::optional<GraphemeText>, 7> captions;
+      for (std::size_t i = 0; i < expressions.size(); ++i) {
+        auto caption = resolve(*expressions[i]);
+        if (!caption) {
+          return std::unexpected(caption.error());
+        }
+        captions[i] = *caption;
+        if (lifetime.expired()) {
+          return std::unexpected(selectorError(parent.id(), TreeError::CLOSED, origin));
+        }
+      }
+      auto record = std::make_shared<portals::detail::ThemeSelectorRecord>(model, target);
+      record->shortcut = options.openingShortcut;
+      record->receiver = std::make_shared<portals::detail::StyleThemeReceiver>();
+      if (options.onCommitted) {
+        record->callback = std::make_shared<decltype(options.onCommitted)>(options.onCommitted);
+      }
       if (lifetime.expired()) {
         return std::unexpected(selectorError(parent.id(), TreeError::CLOSED, origin));
       }
-    }
-    auto record = std::make_shared<portals::detail::ThemeSelectorRecord>(model, target);
-    record->shortcut = options.openingShortcut;
-    record->receiver = std::make_shared<portals::detail::StyleThemeReceiver>();
-    if (options.onCommitted) {
-      record->callback = std::make_shared<decltype(options.onCommitted)>(options.onCommitted);
-    }
-    if (lifetime.expired()) {
-      return std::unexpected(selectorError(parent.id(), TreeError::CLOSED, origin));
-    }
-    auto body = Access::cold<Column>(
-      [record, captions, panelHeight = options.dialog.maximumPanelSize.height](
-        ManagedScene &owner, Node<Widget> into, MountContext &mount) -> std::expected<Node<Column>, ManagedError> {
-        auto body = owner.emplace<Column>(into);
-        if (!body) {
-          return std::unexpected(body.error());
-        }
-        SizePolicy bodyPolicy;
-        bodyPolicy.height.minimum = MINIMUM_SELECTOR_PANEL.height - FRAME_AND_TITLE_HEIGHT;
-        bodyPolicy.height.preferred = std::max(0, panelHeight - FRAME_AND_TITLE_HEIGHT);
-        auto sized = setSizePolicy(owner.app_.tree(), *body, bodyPolicy);
-        if (!sized) {
-          return std::unexpected(selectorError(body->id(), sized.error(), std::source_location::current()));
-        }
-        auto rows = Access::cold<Column>([record](ManagedScene &owner, Node<Widget> into,
-                                                  MountContext &) -> std::expected<Node<Column>, ManagedError> {
-          auto rows = owner.emplace<Column>(into);
-          if (rows) {
-            record->rows = *rows;
+      const std::array<bool, 6> materializedCaptions{settings.themeSelector.labels.apply.has_value(),
+                                                     settings.themeSelector.labels.cancel.has_value(),
+                                                     settings.themeSelector.labels.closeKeepingPreview.has_value(),
+                                                     settings.themeSelector.labels.emptyStatus.has_value(),
+                                                     settings.themeSelector.labels.errorStatus.has_value(),
+                                                     settings.themeSelector.labels.conflictStatus.has_value()};
+      auto body = Access::cold<Column>(
+        [record, captions, materializedCaptions, panelHeight = options.dialog.maximumPanelSize.height](
+          ManagedScene &owner, Node<Widget> into, MountContext &mount) -> std::expected<Node<Column>, ManagedError> {
+          auto body = owner.emplace<Column>(into);
+          if (!body) {
+            return std::unexpected(body.error());
           }
-          return rows;
-        });
-        auto area = ui::scrollArea(std::move(rows), ScrollAreaOptions{.focusable = false});
-        auto mounted = Access::mount(std::move(area), owner, *body, mount);
-        if (!mounted) {
-          return std::unexpected(mounted.error());
-        }
-        record->scroll = *mounted;
-        SizePolicy scrollPolicy;
-        scrollPolicy.width.minimum = MINIMUM_CHOICE_AREA.width;
-        scrollPolicy.height = {.minimum = MINIMUM_CHOICE_AREA.height, .preferred = 0, .mode = SizeMode::FLEX};
-        sized = setSizePolicy(owner.app_.tree(), *mounted, scrollPolicy);
-        if (!sized) {
-          return std::unexpected(selectorError(mounted->id(), sized.error(), std::source_location::current()));
-        }
-        for (std::size_t i = 0; i < record->status.size(); ++i) {
-          auto label = Access::mount(ui::label(TextValue(captions[i + 4]->bytes())), owner, *body, mount);
-          if (!label) {
-            return std::unexpected(label.error());
+          SizePolicy bodyPolicy;
+          bodyPolicy.height.minimum = MINIMUM_SELECTOR_PANEL.height - FRAME_AND_TITLE_HEIGHT;
+          bodyPolicy.height.preferred = std::max(0, panelHeight - FRAME_AND_TITLE_HEIGHT);
+          auto sized = setSizePolicy(owner.app_.tree(), *body, bodyPolicy);
+          if (!sized) {
+            return std::unexpected(selectorError(body->id(), sized.error(), std::source_location::current()));
           }
-          record->status[i] = *label;
-          auto shown = owner.app_.tree().setVisible(*label, i == 0);
-          if (!shown) {
-            return std::unexpected(selectorError(label->id(), shown.error(), std::source_location::current()));
+          auto rows = Access::cold<Column>([record](ManagedScene &owner, Node<Widget> into,
+                                                    MountContext &) -> std::expected<Node<Column>, ManagedError> {
+            auto rows = owner.emplace<Column>(into);
+            if (rows) {
+              record->rows = *rows;
+            }
+            return rows;
+          });
+          auto area = ui::scrollArea(std::move(rows), ScrollAreaOptions{.focusable = false});
+          auto mounted = Access::mount(std::move(area), owner, *body, mount);
+          if (!mounted) {
+            return std::unexpected(mounted.error());
           }
-        }
-        const std::array commands{SelectorCommand::APPLY, SelectorCommand::CANCEL, SelectorCommand::KEEP};
-        for (std::size_t i = 0; i < commands.size(); ++i) {
-          auto button = Access::mount(ui::button(TextValue(captions[i + 1]->bytes()),
-                                                 [target = record->target, command = commands[i]] {
-                                                   ThemeSelectorAccess::interactive(target, command);
-                                                 }),
-                                      owner, *body, mount);
-          if (!button) {
-            return std::unexpected(button.error());
+          record->scroll = *mounted;
+          SizePolicy scrollPolicy;
+          scrollPolicy.width.minimum = MINIMUM_CHOICE_AREA.width;
+          scrollPolicy.height = {.minimum = MINIMUM_CHOICE_AREA.height, .preferred = 0, .mode = SizeMode::FLEX};
+          sized = setSizePolicy(owner.app_.tree(), *mounted, scrollPolicy);
+          if (!sized) {
+            return std::unexpected(selectorError(mounted->id(), sized.error(), std::source_location::current()));
           }
-          if (i == 0) {
-            record->apply = *button;
-            auto enabled = owner.app_.tree().setEnabled(*button, false);
-            if (!enabled) {
-              return std::unexpected(selectorError(button->id(), enabled.error(), std::source_location::current()));
+          for (std::size_t i = 0; i < record->status.size(); ++i) {
+            const TextValue caption(captions[i + 4]->bytes());
+            auto description = ui::label(caption);
+
+            if (materializedCaptions[i + 3]) {
+              Access::preparedThemeSelectorCaption(description, caption);
+            }
+            auto label = Access::mount(std::move(description), owner, *body, mount);
+            if (!label) {
+              return std::unexpected(label.error());
+            }
+            record->status[i] = *label;
+            auto shown = owner.app_.tree().setVisible(*label, i == 0);
+            if (!shown) {
+              return std::unexpected(selectorError(label->id(), shown.error(), std::source_location::current()));
             }
           }
-        }
-        return *body;
-      });
-    auto recipe = ui::dialog(TextValue(captions[0]->bytes()), std::move(body), options.dialog);
-    auto mounted = Access::mount(std::move(recipe), scene, parent, context);
-    if (!mounted) {
-      return mounted;
-    }
-    record->dialog = scene.findDialog(*mounted);
-    if (!record->dialog) {
-      return std::unexpected(selectorError(mounted->id(), TreeError::STALE_NODE, origin));
-    }
+          const std::array commands{SelectorCommand::APPLY, SelectorCommand::CANCEL, SelectorCommand::KEEP};
+          for (std::size_t i = 0; i < commands.size(); ++i) {
+            const TextValue caption(captions[i + 1]->bytes());
+            auto description = ui::button(caption, [target = record->target, command = commands[i]] {
+              ThemeSelectorAccess::interactive(target, command);
+            });
 
-    // This composition owns routed modal input; generic eager Escape is deliberately disabled.
-    auto entry = scene.find(*mounted);
-    entry->binding = std::monostate{};
-    auto routed = [&scene, weak = std::weak_ptr(record), lifetime](Widget &, const RoutedEvent &event) {
-      auto record = weak.lock();
-      if (!record || record->retired || !record->attached || !record->dialog->open || lifetime.expired()) {
-        return EventReply::IGNORED;
+            if (materializedCaptions[i]) {
+              Access::preparedThemeSelectorCaption(description, caption);
+            }
+            auto button = Access::mount(std::move(description), owner, *body, mount);
+            if (!button) {
+              return std::unexpected(button.error());
+            }
+            if (i == 0) {
+              record->apply = *button;
+              auto enabled = owner.app_.tree().setEnabled(*button, false);
+              if (!enabled) {
+                return std::unexpected(selectorError(button->id(), enabled.error(), std::source_location::current()));
+              }
+            }
+          }
+          return *body;
+        });
+      const TextValue title(captions[0]->bytes());
+      auto recipe =
+        Access::internalDialog(ui::dialog(title, std::move(body), options.dialog), settings.title ? &title : nullptr);
+      auto mounted = Access::mount(std::move(recipe), scene, parent, context);
+      if (!mounted) {
+        return mounted;
       }
-      std::optional<SelectorCommand> command;
-      std::optional<std::size_t> next;
-      if (const auto *action = std::get_if<ActionEvent>(&event)) {
-        if (action->action == Action::CANCEL) {
-          command = SelectorCommand::CANCEL;
-        } else if (!record->buttons.empty()) {
+      record->dialog = scene.findDialog(*mounted);
+      if (!record->dialog) {
+        return std::unexpected(selectorError(mounted->id(), TreeError::STALE_NODE, origin));
+      }
+
+      // This composition owns routed modal input; generic eager Escape is deliberately disabled.
+      auto entry = scene.find(*mounted);
+      entry->binding = std::monostate{};
+      auto routed = [&scene, weak = std::weak_ptr(record), lifetime](Widget &, const RoutedEvent &event) {
+        auto record = weak.lock();
+        if (!record || record->retired || !record->attached || !record->dialog->open || lifetime.expired()) {
+          return EventReply::IGNORED;
+        }
+        std::optional<SelectorCommand> command;
+        std::optional<std::size_t> next;
+        if (const auto *action = std::get_if<ActionEvent>(&event)) {
+          if (action->action == Action::CANCEL) {
+            command = SelectorCommand::CANCEL;
+          } else if (!record->buttons.empty()) {
+            const auto current = record->selected.value_or(0);
+            if (action->action == Action::MOVE_DOWN) {
+              next = record->selected ? std::min(current + 1, record->buttons.size() - 1) : 0;
+            }
+            if (action->action == Action::MOVE_UP) {
+              next = record->selected ? (current ? current - 1 : 0) : record->buttons.size() - 1;
+            }
+            if (action->action == Action::MOVE_HOME) {
+              next = 0;
+            }
+            if (action->action == Action::MOVE_END) {
+              next = record->buttons.size() - 1;
+            }
+          }
+        } else if (const auto *key = std::get_if<KeyEvent>(&event);
+                   key && !record->buttons.empty() &&
+                   (key->key == InputKey::PAGE_DOWN || key->key == InputKey::PAGE_UP)) {
+          auto geometry = scene.geometry(record->scroll);
+          const auto page = geometry ? static_cast<std::size_t>(std::max(1, geometry->clip.size().height)) : 1;
           const auto current = record->selected.value_or(0);
-          if (action->action == Action::MOVE_DOWN) {
-            next = record->selected ? std::min(current + 1, record->buttons.size() - 1) : 0;
-          }
-          if (action->action == Action::MOVE_UP) {
-            next = record->selected ? (current ? current - 1 : 0) : record->buttons.size() - 1;
-          }
-          if (action->action == Action::MOVE_HOME) {
-            next = 0;
-          }
-          if (action->action == Action::MOVE_END) {
-            next = record->buttons.size() - 1;
+          next = key->key == InputKey::PAGE_DOWN
+                   ? std::min(current + std::min(page, record->buttons.size() - 1), record->buttons.size() - 1)
+                   : current - std::min(current, page);
+        } else if (const auto *mouse = std::get_if<MouseInputEvent>(&event);
+                   mouse && mouse->button == MouseButton::LEFT && mouse->action == MouseAction::PRESS) {
+          auto panel = scene.geometry(record->dialog->panel);
+          if (panel && !panel->surface.contains({mouse->column, mouse->row})) {
+            command = SelectorCommand::CANCEL;
           }
         }
-      } else if (const auto *key = std::get_if<KeyEvent>(&event);
-                 key && !record->buttons.empty() &&
-                 (key->key == InputKey::PAGE_DOWN || key->key == InputKey::PAGE_UP)) {
-        auto geometry = scene.geometry(record->scroll);
-        const auto page = geometry ? static_cast<std::size_t>(std::max(1, geometry->clip.size().height)) : 1;
-        const auto current = record->selected.value_or(0);
-        next = key->key == InputKey::PAGE_DOWN
-                 ? std::min(current + std::min(page, record->buttons.size() - 1), record->buttons.size() - 1)
-                 : current - std::min(current, page);
-      } else if (const auto *mouse = std::get_if<MouseInputEvent>(&event);
-                 mouse && mouse->button == MouseButton::LEFT && mouse->action == MouseAction::PRESS) {
-        auto panel = scene.geometry(record->dialog->panel);
-        if (panel && !panel->surface.contains({mouse->column, mouse->row})) {
-          command = SelectorCommand::CANCEL;
+        if (next) {
+          ThemeSelectorAccess::interactive(record->target, SelectorCommand::SELECT, *next);
+          return EventReply::HANDLED;
         }
+        if (command) {
+          ThemeSelectorAccess::interactive(record->target, *command);
+          return EventReply::HANDLED;
+        }
+        return EventReply::IGNORED;
+      };
+      auto binding = scene.app_.router().bind(*mounted, routed, false);
+      if (!binding) {
+        return std::unexpected(selectorError(mounted->id(), binding.error(), origin));
       }
-      if (next) {
-        ThemeSelectorAccess::interactive(record->target, SelectorCommand::SELECT, *next);
-        return EventReply::HANDLED;
+      entry->binding = std::move(*binding);
+      // Row navigation must run before the enclosing area's ordinary scroll-key handling.
+      auto rowsBinding = scene.app_.router().bind(record->rows, routed, false);
+      if (!rowsBinding) {
+        return std::unexpected(selectorError(record->rows.id(), rowsBinding.error(), origin));
       }
-      if (command) {
-        ThemeSelectorAccess::interactive(record->target, *command);
-        return EventReply::HANDLED;
+      scene.find(record->rows)->binding = std::move(*rowsBinding);
+      if (lifetime.expired()) {
+        return std::unexpected(selectorError(mounted->id(), TreeError::CLOSED, origin));
       }
-      return EventReply::IGNORED;
-    };
-    auto binding = scene.app_.router().bind(*mounted, routed, false);
-    if (!binding) {
-      return std::unexpected(selectorError(mounted->id(), binding.error(), origin));
-    }
-    entry->binding = std::move(*binding);
-    // Row navigation must run before the enclosing area's ordinary scroll-key handling.
-    auto rowsBinding = scene.app_.router().bind(record->rows, routed, false);
-    if (!rowsBinding) {
-      return std::unexpected(selectorError(record->rows.id(), rowsBinding.error(), origin));
-    }
-    scene.find(record->rows)->binding = std::move(*rowsBinding);
-    if (lifetime.expired()) {
-      return std::unexpected(selectorError(mounted->id(), TreeError::CLOSED, origin));
-    }
-    auto admitted = scene.boundary(ManagedPhase::BIND, *mounted);
-    if (!admitted) {
-      return std::unexpected(admitted.error());
-    }
-    if (target->published || scene.themeSelector_) {
-      return std::unexpected(selectorError(mounted->id(), TreeError::INVALID_ARGUMENT, origin));
-    }
-    record->receiver->node = *mounted;
-    scene.themeSelector_ = record;
-    return mounted;
-  });
+      auto admitted = scene.boundary(ManagedPhase::BIND, *mounted);
+      if (!admitted) {
+        return std::unexpected(admitted.error());
+      }
+      if (target->published || scene.themeSelector_) {
+        return std::unexpected(selectorError(mounted->id(), TreeError::INVALID_ARGUMENT, origin));
+      }
+      record->receiver->node = *mounted;
+      scene.themeSelector_ = record;
+      return mounted;
+    });
 }
 
 Description<Dialog> ThemeSelectorAccess::describeDefault(ThemeSelectorRef reference,
@@ -354,56 +398,69 @@ Description<Dialog> ThemeSelectorAccess::describeDefault(ThemeSelectorRef refere
   catalog->selection = selection;
   catalog->initialId = initialId;
 
-  return Access::cold<Dialog>([reference = std::move(reference), catalog = std::move(catalog),
-                               options](ManagedScene &scene, Node<Widget> parent,
-                                        MountContext &context) mutable -> std::expected<Node<Dialog>, ManagedError> {
-    const auto origin = std::source_location::current();
-    const auto target = reference.target_;
+  auto description =
+    Access::cold<Dialog>([reference = std::move(reference), catalog = std::move(catalog),
+                          options](ManagedScene &scene, Node<Widget> parent,
+                                   MountContext &context) mutable -> std::expected<Node<Dialog>, ManagedError> {
+      const auto origin = std::source_location::current();
+      const auto target = reference.target_;
 
-    if (!target) {
-      return std::unexpected(selectorError(parent.id(), TreeError::CLOSED, origin));
-    }
-    if (target->owner != std::this_thread::get_id()) {
-      return std::unexpected(selectorError(parent.id(), TreeError::WRONG_THREAD, origin));
-    }
-
-    scene.retireThemeSelector();
-
-    if (target->published || scene.themeSelector_) {
-      return std::unexpected(selectorError(parent.id(), TreeError::INVALID_ARGUMENT, origin));
-    }
-
-    ThemeSelectionRef model;
-    auto installed = scene.installThemeSelection(model, catalog->choices, catalog->selection);
-
-    if (!installed) {
-      return std::unexpected(installed.error());
-    }
-
-    const auto lifetime = std::weak_ptr<const void>(scene.lifetime_);
-    const auto ownedModel = scene.themeSelection_;
-    const auto releaseModel = [&scene, lifetime, ownedModel] {
-      // This synchronous transaction owns only the just-installed, still-unpreviewed model.
-      if (!lifetime.expired() && scene.themeSelection_ == ownedModel) {
-        scene.themeSelection_.reset();
+      if (!target) {
+        return std::unexpected(selectorError(parent.id(), TreeError::CLOSED, origin));
       }
-    };
-    OnExit admission{releaseModel};
+      if (target->owner != std::this_thread::get_id()) {
+        return std::unexpected(selectorError(parent.id(), TreeError::WRONG_THREAD, origin));
+      }
 
-    context.rollback.emplace_back(releaseModel);
-    admission.enabled = false;
+      scene.retireThemeSelector();
 
-    auto recipe = describe(reference, model, options);
-    auto mounted = Access::mount(std::move(recipe), scene, parent, context);
+      if (target->published || scene.themeSelector_) {
+        return std::unexpected(selectorError(parent.id(), TreeError::INVALID_ARGUMENT, origin));
+      }
 
-    if (!mounted) {
+      const auto settings = context.controlSettings ? *context.controlSettings : ControlSettings{};
+      auto selection = catalog->selection;
+      auto initialId = catalog->initialId;
+      auto configured = controlThemeCatalogOptions(settings, selection, initialId);
+      if (!configured) {
+        return std::unexpected(selectorError(parent.id(), configured.error(), origin));
+      }
+
+      ThemeSelectionRef model;
+      auto installed = scene.installThemeSelection(model, catalog->choices, selection);
+
+      if (!installed) {
+        return std::unexpected(installed.error());
+      }
+
+      const auto lifetime = std::weak_ptr<const void>(scene.lifetime_);
+      const auto ownedModel = scene.themeSelection_;
+      const auto releaseModel = [&scene, lifetime, ownedModel] {
+        // This synchronous transaction owns only the just-installed, still-unpreviewed model.
+        if (!lifetime.expired() && scene.themeSelection_ == ownedModel) {
+          scene.themeSelection_.reset();
+        }
+      };
+      OnExit admission{releaseModel};
+
+      context.rollback.emplace_back(releaseModel);
+      admission.enabled = false;
+
+      auto effective = controlThemeSelectorOptions(settings, options);
+      auto recipe = describeView(reference, model, std::move(effective), settings, true);
+
+      auto mounted = Access::mount(std::move(recipe), scene, parent, context);
+
+      if (!mounted) {
+        return mounted;
+      }
+
+      scene.themeSelector_->initialId = std::move(initialId);
+
       return mounted;
-    }
+    });
 
-    scene.themeSelector_->initialId = catalog->initialId;
-
-    return mounted;
-  });
+  return Access::themeCatalogControl(std::move(description));
 }
 
 Description<Dialog> defaultThemeSelector(ThemeSelectorRef reference, std::span<const ThemeChoice> choices,

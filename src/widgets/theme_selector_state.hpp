@@ -48,6 +48,10 @@ struct ThemeSelectorRecord {
 };
 } // namespace portals::detail
 
+namespace portals::ui {
+struct ControlSettings;
+}
+
 namespace portals::ui::detail {
 struct ThemeSelectorTarget {
   const std::thread::id owner{std::this_thread::get_id()};
@@ -64,6 +68,10 @@ struct ThemeSelectorTarget {
 struct ThemeSelectorAccess {
   static Description<Dialog> describe(ThemeSelectorRef reference, ThemeSelectionRef model,
                                       ThemeSelectorOptions options);
+  // Only the default-catalog delegation uses already-resolved settings; the cold view owns this copy.
+  static Description<Dialog> describeView(ThemeSelectorRef reference, ThemeSelectionRef model,
+                                          ThemeSelectorOptions options, ControlSettings settings,
+                                          bool resolvedSettings);
   static Description<Dialog> describeDefault(ThemeSelectorRef reference, std::span<const ThemeChoice> choices,
                                              const ThemeSelectionOptions &selection,
                                              const std::optional<std::string> &initialId, ThemeSelectorOptions options);

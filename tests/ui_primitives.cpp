@@ -97,6 +97,17 @@ static_assert(CanSize<ui::Description<Label>>);
 static_assert(!CanSize<ui::Description<Widget>>);
 static_assert(!CanSize<ui::Description<Label> &>);
 
+template <class T>
+concept CanChrome = requires(T &&recipe) { std::forward<T>(recipe).chrome(ButtonChrome::NONE); };
+template <class T>
+concept CanGlyphs = requires(T &&recipe) { std::forward<T>(recipe) | ui::glyphs(PrimitiveGlyphs::ASCII); };
+template <class T>
+concept CanGaugeRange = requires(T &&recipe) { std::forward<T>(recipe) | ui::range(-1, 1); };
+static_assert(CanChrome<ui::Description<Button>> && !CanChrome<ui::Description<Label>>);
+static_assert(CanGlyphs<ui::Description<Border>> && CanGlyphs<ui::Description<Gauge>>);
+static_assert(!CanGlyphs<ui::Description<Button>> && !CanGlyphs<ui::Description<Widget>>);
+static_assert(CanGaugeRange<ui::Description<Gauge>> && !CanGaugeRange<ui::Description<Border>>);
+
 void check(bool condition, std::string_view message) {
   if (!condition) {
     throw std::runtime_error(std::string(message));
@@ -402,6 +413,25 @@ void buttonTextErrorsMatch() {
             take(fixture.app->tree().inspect(fixture.scene->root())).children.empty(),
           "rejected normal and plain captions publish no refs and leave no partial subtree");
   }
+
+  int resolutions{};
+  ui::TextResolver resolver = [&](std::string_view) -> std::expected<std::string, TextResourceError> {
+    ++resolutions;
+
+    return "resolved";
+  };
+  ui::Ref<Button> unpublished;
+  const auto invalidChrome = ui::mount(
+    *fixture.scene,
+    ui::button(i18n("private-caption"), {}, {}, resolver).chrome(static_cast<ButtonChrome>(9)).reference(unpublished));
+  const auto invalidGlyphs =
+    ui::mount(*fixture.scene,
+              ui::border(ui::label(i18n("private-content"), {}, {}, resolver)).glyphs(static_cast<PrimitiveGlyphs>(9)));
+
+  check(!invalidChrome && !invalidGlyphs && resolutions == 0 && unpublished.node() == Node<Button>{},
+        "native scalar enum validation precedes reachable caption resolvers and reference publication");
+  check(take(fixture.app->tree().inspect(fixture.scene->root())).children.empty(),
+        "rejected native primitive settings leave no mounted descendants");
 }
 
 void gaugeValidationAndNoop() {
@@ -436,6 +466,142 @@ void gaugeValidationAndNoop() {
   for (const auto options : {GaugeOptions{1, 1}, GaugeOptions{2, 1},
                              GaugeOptions{-std::numeric_limits<double>::max(), std::numeric_limits<double>::max()}}) {
     check(!ui::mount(*fixture.scene, ui::gauge(1, options)), "invalid or unrepresentable range rejected");
+  }
+}
+
+void primitiveScalarPaintParity() {
+  for (const int mode : {0, 1, 2}) {
+    Fixture fixture;
+    auto recipe = [&]() -> ui::Description<Widget> {
+      if (mode == 0) {
+        return ui::detail::Access::erase(
+          ui::border(
+            ui::gauge(0).range(-1, 1).value(.5).preferredWidth(6).glyphs(PrimitiveGlyphs::ASCII).maxPaintCells(64))
+            .glyphs(PrimitiveGlyphs::ASCII)
+            .maxPaintCells(64));
+      }
+
+      if (mode == 1) {
+        auto progress = ui::gauge(0) | ui::minimum(-1) | ui::maximum(1) | ui::value(.5) | ui::preferredWidth(6) |
+                        ui::glyphs(PrimitiveGlyphs::ASCII) | ui::maxPaintCells(64);
+
+        return ui::detail::Access::erase(ui::border(std::move(progress)) | ui::glyphs(PrimitiveGlyphs::ASCII) |
+                                         ui::maxPaintCells(64));
+      }
+
+      ui::SceneResourceOptions options;
+      options.format = ui::SceneResourceFormat::CONFIGURATION;
+
+      return ui::resource("defaults{Border{glyphs=ASCII maxPaintCells=64} Gauge{glyphs=ASCII maxPaintCells=64}} "
+                          "definitions{Progress=Gauge{minimum=-1e0 maximum=1 preferredWidth=6}} "
+                          "scene{Border{Progress{value=.5}}}",
+                          options);
+    }();
+
+    take(ui::mount(*fixture.scene, std::move(recipe)));
+    const auto image = fixture.render({8, 3});
+
+    check(row(image, 0) == "+------+" && row(image, 1) == "|####  |" && row(image, 2) == "+------+",
+          "method pipe and configured resource share actual primitive paint and one real content edge");
+    take(fixture.scene->prepare(*fixture.app, {8, 3}));
+    check(take(fixture.app->tree().consumeFrameRequest()) == Invalidation::NONE,
+          "unchanged configured primitives do not schedule another frame");
+  }
+
+  Fixture receiving;
+  ui::ControlContext context;
+  context.defaults("Gauge", {.glyphs = PrimitiveGlyphs::ASCII, .minimum = 2, .preferredWidth = 6});
+  ui::Ref<Gauge> gauge;
+  GaugeOptions actual;
+  actual.maximum = 10;
+  take(ui::mount(*receiving.scene, ui::gauge(6, actual).reference(gauge), context));
+  check(row(receiving.render({6, 1}), 0) == "###   ",
+        "partial context bounds validate against actual receiving options instead of guessed constructor defaults");
+  take(receiving.app->tree().read(gauge.node(), [](const Gauge &widget) {
+    check(widget.value() == 6, "explicit constructor value overrides absent context value");
+  }));
+}
+
+void chromeAcrossCaptionFactories() {
+  Fixture fixture;
+  auto model = take(fixture.scene->state(std::string("Go")));
+  ui::Ref<Label> source;
+  std::array<ui::Ref<Button>, 7> refs;
+  std::vector<ui::Description<Button>> buttons;
+  buttons.push_back(ui::button("Go").chrome(ButtonChrome::NONE).reference(refs[0]));
+  buttons.push_back((ui::button(text("Go")) | ui::chrome(ButtonChrome::NONE)).reference(refs[1]));
+  buttons.push_back(ui::plainButton("Go").chrome(ButtonChrome::BRACKETS).reference(refs[2]));
+  buttons.push_back(ui::button(source.text()).chrome(ButtonChrome::NONE).reference(refs[3]));
+  buttons.push_back(ui::button(model).chrome(ButtonChrome::NONE).reference(refs[4]));
+  buttons.push_back(ui::button("Go",
+                               [] {
+                               })
+                      .chrome(ButtonChrome::NONE)
+                      .reference(refs[5]));
+  buttons.push_back(ui::button("Go").variant("Frameless").reference(refs[6]));
+  ui::ControlContext context;
+  context.defaults("Button", {.chrome = ButtonChrome::BRACKETS})
+    .define("Frameless", "Button", {.chrome = ButtonChrome::NONE});
+  take(ui::mount(*fixture.scene, ui::vbox(ui::label(source, "Go"), ui::vbox(std::move(buttons))), context));
+
+  for (std::size_t index = 0; index < refs.size(); ++index) {
+    const auto measured = take(fixture.app->tree().measure(refs[index].node(), {}));
+
+    check(measured == CellSize{index == 2 ? 6 : 2, 1},
+          "ordinary expression plain live state action and named Button factories apply effective chrome");
+  }
+
+  const auto image = fixture.render({6, 8});
+
+  for (std::size_t index = 0; index < refs.size(); ++index) {
+    check(row(image, static_cast<int>(index + 1)) == (index == 2 ? "[ Go ]" : "Go    "),
+          "effective chrome changes the real retained Button paint for every caption factory");
+  }
+}
+
+void primitiveScopedNamesAndRollback() {
+  Fixture fixture;
+  ui::ControlContext context;
+  context.define("Border", "Label").define("Gauge", "Label");
+  int children{};
+  ui::Ref<Border> border;
+  ui::Ref<Label> content;
+  auto failed = ui::mount(
+    *fixture.scene,
+    ui::border(
+      ui::label(content, "hidden").setup([&](ManagedScene &, Node<Label>) -> std::expected<void, ManagedError> {
+        ++children;
+
+        return {};
+      }))
+      .reference(border),
+    context);
+
+  check(!failed && children == 0 && border.node() == Node<Border>{} && content.node() == Node<Label>{},
+        "native Border cannot silently adopt a caller's unrelated Border declaration");
+  check(take(fixture.app->tree().inspect(fixture.scene->root())).children.empty(),
+        "rejected primitive identity leaves no partial mounted subtree");
+  check(!ui::mount(*fixture.scene, ui::gauge(.5), context),
+        "native Gauge cannot silently adopt a caller's unrelated Gauge declaration");
+
+  for (const bool invalidRange : {false, true}) {
+    int effects{};
+    ui::Ref<Label> unpublished;
+    auto child = invalidRange ? ui::gauge(.5).range(1, 1) : ui::gauge(.5).maxPaintCells(0);
+    const auto rejected = ui::mount(
+      *fixture.scene,
+      ui::vbox(
+        ui::label(unpublished, "earlier").setup([&](ManagedScene &, Node<Label>) -> std::expected<void, ManagedError> {
+          ++effects;
+
+          return {};
+        }),
+        std::move(child)));
+
+    check(!rejected && unpublished.node() == Node<Label>{} &&
+            take(fixture.app->tree().inspect(fixture.scene->root())).children.empty(),
+          "later invalid primitive rolls back earlier mounted children and never publishes references");
+    check(effects == 1, "earlier setup follows the existing partial-mount callback order");
   }
 }
 
@@ -713,6 +879,9 @@ int main() {
     zeroBasisFlexWeights();
     buttonTextErrorsMatch();
     gaugeValidationAndNoop();
+    primitiveScalarPaintParity();
+    chromeAcrossCaptionFactories();
+    primitiveScopedNamesAndRollback();
     themeAndManualStyle();
     scopedPrimitiveStyles();
     scopedStyleFactoryRollback();

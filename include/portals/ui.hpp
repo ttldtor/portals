@@ -15,6 +15,7 @@
 #include <portals/ui_scene.hpp>
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cstdio>
 #include <ranges>
@@ -30,6 +31,8 @@ template <class T> class Description;
 class GridSection;
 
 namespace detail {
+struct ResourceAccess;
+
 /** @brief Recognize an owning recipe after cv/ref normalization.
  * @tparam T Type tested for an exact Description
  * specialization.
@@ -40,6 +43,30 @@ template <class T> struct IsDescription : std::false_type {};
  * @tparam T Widget type described by this recipe.
  */
 template <class T> struct IsDescription<Description<T>> : std::true_type {};
+
+/** @brief Recognize exact provider-bound list recipes, excluding arbitrary derived controls.
+ * @tparam T Concrete widget type under test.
+ */
+template <class T> struct IsVirtualList : std::false_type {};
+
+/** @brief Identify a native list specialization. @tparam T Immutable model row type. */
+template <class T> struct IsVirtualList<VirtualList<T>> : std::true_type {};
+
+/** @brief Recognize exact provider-bound table recipes, excluding arbitrary derived controls.
+ * @tparam T Concrete widget type under test.
+ */
+template <class T> struct IsVirtualTable : std::false_type {};
+
+/** @brief Identify a native table specialization. @tparam T Immutable model row type. */
+template <class T> struct IsVirtualTable<VirtualTable<T>> : std::true_type {};
+
+/** @brief Recognize exact native chart recipes without admitting arbitrary subclasses.
+ * @tparam T Concrete widget type under test.
+ */
+template <class T> struct IsChart : std::false_type {};
+
+/** @brief Identify a native chart specialization. @tparam T Immutable model row type. */
+template <class T> struct IsChart<Chart<T>> : std::true_type {};
 
 /** @brief Admit only consuming recipe arguments, rejecting implicit moves from lvalues.
  * @tparam T
@@ -81,6 +108,33 @@ concept DescriptionRange =
  */
 inline ManagedError error(Node<Widget> node, TreeError cause) {
   return {ManagedPhase::MOUNT, node.id(), cause, {}, {}};
+}
+
+/** @brief Owning class names with fallible copies instead of checked-STL container moves. */
+struct ClassNames {
+  /** @brief Suppress implicit noexcept moves of checked containers. */
+  ~ClassNames() = default;
+
+  std::vector<std::string> values = std::vector<std::string>(0); ///< Ordered owning names, including duplicates.
+};
+
+/** @brief Copy class names using only the six ASCII whitespace separators.
+ * @param value Borrowed list copied now; order and duplicate names are preserved.
+ * @return Owning names; an empty or whitespace-only list clears classes. Allocation may throw.
+ */
+inline ClassNames splitClasses(std::string_view value) {
+  ClassNames result;
+  constexpr std::string_view SEPARATORS = " \t\r\n\f\v";
+  auto begin = value.find_first_not_of(SEPARATORS);
+
+  while (begin != std::string_view::npos) {
+    const auto end = value.find_first_of(SEPARATORS, begin);
+
+    result.values.emplace_back(value.substr(begin, end == std::string_view::npos ? end : end - begin));
+    begin = end == std::string_view::npos ? end : value.find_first_not_of(SEPARATORS, end);
+  }
+
+  return result;
 }
 
 /** @brief Preserve the standard text-control error mapping and diagnostic payload.
@@ -164,14 +218,14 @@ struct SizeChange {
 
 /** @brief Grid-only sparse configuration, released with its construction transaction. */
 struct GridRecipeControl {
-  ControlSettings arguments; ///< Positional grid literals retained for fallback-schema resolution.
-  ControlSettings patch;     ///< Sparse instance overrides applied after positional literals.
-  std::optional<std::string> variant; ///< Optional named fallback type checked during preflight.
-  std::unique_ptr<ResolvedControl> resolved; ///< Owning settings resolved before control construction.
-  bool prepared{};           ///< Settings were already resolved and validated.
-  bool materialized{};       ///< Resource properties already supplied materialized grid settings.
-  bool settingsRequested{};  ///< Explicit settings or variant modifiers were requested.
-  std::uint32_t materializedSettings{}; ///< Resource fields already counted against the mount budget.
+  ControlSettings arguments;                      ///< Positional grid literals retained for fallback-schema resolution.
+  ControlSettings patch;                          ///< Sparse instance overrides applied after positional literals.
+  std::optional<std::string> variant;             ///< Optional named fallback type checked during preflight.
+  std::unique_ptr<ResolvedControl> resolved;      ///< Owning settings resolved before control construction.
+  bool prepared{};                                ///< Settings were already resolved and validated.
+  bool materialized{};                            ///< Resource properties already supplied materialized grid settings.
+  bool settingsRequested{};                       ///< Explicit settings or variant modifiers were requested.
+  ControlPropertyPresence materializedSettings{}; ///< Resource fields already counted against the mount budget.
 };
 
 /** @brief Cold layout values only; released with the single-use construction transaction. */
@@ -184,21 +238,22 @@ struct RecipeLayout {
   bool hasDeclaredGrid{}; ///< Cold composition contains an explicitly configured standard Grid.
   std::optional<DeclarativeGridOptions> grid; ///< Present only after declarative opt-in.
   std::unique_ptr<GridPlacementPlan> plan;    ///< Origins established before any constructor or setup.
-  std::vector<std::shared_ptr<RecipeLayout>> children = std::vector<std::shared_ptr<RecipeLayout>>(0); ///< Cold child metadata in insertion order.
+  std::vector<std::shared_ptr<RecipeLayout>> children =
+    std::vector<std::shared_ptr<RecipeLayout>>(0);      ///< Cold child metadata in insertion order.
   std::vector<NodeId> mounted = std::vector<NodeId>(0); ///< Full identities collected during child mount.
-  std::size_t headerSections{}; ///< Number of structural header sections.
-  std::size_t bodySections{};   ///< Number of structural body sections.
-  std::size_t directItems{};    ///< Number of children outside structural sections.
-  bool stickyHeader{};          ///< Header sticky setting copied from its section.
-  bool validSections{true};     ///< Whether section placement modifiers are valid.
-  GridPresentation presentation; ///< Owning grid background and paint-budget settings.
-  std::optional<CellStyle> headerStyle; ///< Optional header-section background.
-  std::optional<CellStyle> bodyStyle;   ///< Optional body-section background.
-  std::optional<GridRowStyles> rowStyles; ///< Optional alternating body-row backgrounds.
-  std::optional<GridScrollOptions> scroll; ///< Optional owning scroll settings.
-  std::unique_ptr<GridRecipeControl> control; ///< Deferred grid control settings.
-  std::unique_ptr<std::vector<AxisSize>> columnSizes; ///< Cold owning shared-column policies, absent by default.
-  std::unique_ptr<std::vector<AxisSize>> rowSizes;    ///< Cold owning body-row policies; header stays independent.
+  std::size_t headerSections{};                         ///< Number of structural header sections.
+  std::size_t bodySections{};                           ///< Number of structural body sections.
+  std::size_t directItems{};                            ///< Number of children outside structural sections.
+  bool stickyHeader{};                                  ///< Header sticky setting copied from its section.
+  bool validSections{true};                             ///< Whether section placement modifiers are valid.
+  GridPresentation presentation;                        ///< Owning grid background and paint-budget settings.
+  std::optional<CellStyle> headerStyle;                 ///< Optional header-section background.
+  std::optional<CellStyle> bodyStyle;                   ///< Optional body-section background.
+  std::optional<GridRowStyles> rowStyles;               ///< Optional alternating body-row backgrounds.
+  std::optional<GridScrollOptions> scroll;              ///< Optional owning scroll settings.
+  std::unique_ptr<GridRecipeControl> control;           ///< Deferred grid control settings.
+  std::unique_ptr<std::vector<AxisSize>> columnSizes;   ///< Cold owning shared-column policies, absent by default.
+  std::unique_ptr<std::vector<AxisSize>> rowSizes;      ///< Cold owning body-row policies; header stays independent.
 };
 
 /** @param root Cold metadata borrowed for this synchronous validation.
@@ -356,11 +411,26 @@ inline GridOptions resolvedGridOptions(const RecipeLayout &layout) {
   return GridOptions(result);
 }
 
+/** @brief Finite native composite capability shared only across cold recipe erasure, never mounted records. */
+struct SemanticConstruction {
+  ~SemanticConstruction() = default;
+
+  ControlFactoryKind kind{
+    ControlFactoryKind::MESSAGE_BINDING}; ///< Actual native producer, independent of C++ widget type.
+  ControlSettings source;                 ///< Owning effective resource inputs for the actual native producer.
+  ControlPropertyPresence materialized{}; ///< Leaves already reserved by resource preparation.
+  bool prepared{};                        ///< Whether the source packet has been installed before construction.
+};
+
 /** @brief Stack-owned transaction bookkeeping, discarded after one description mount. */
 struct MountContext {
   ControlContext controls{};   ///< Immutable owning defaults for this mount transaction.
   std::size_t controlLeaves{}; ///< Effective settings counted across the complete transaction.
   bool controlPrepared{};      ///< Only the current constructor received already resolved resource settings.
+  const TextResolver
+    *themeSelectorResolver{};               ///< Constructor-only selector fallback, cleared before internal children.
+  const TextResolver *messageResolver{};    ///< Opted-in MessageBox constructor-only fallback; cleared before children.
+  const TextResolver *dataStateResolver{};  ///< Native fallback constructor-only borrow; never ambient to body/setup.
   const ControlSettings *controlSettings{}; ///< Constructor-only borrowed settings; restored before setup/children.
   Node<Widget> root;                        ///< First created node; identifies the subtree to retire on failure.
   std::vector<Node<Widget>> nodes =
@@ -527,6 +597,49 @@ struct Access {
    * @param alreadyMaterialized Presence mask already included in the resource mount budget.
    */
   template <class T> static void preparedControl(Description<T> &description, std::uint32_t alreadyMaterialized = 0);
+  /** @brief Mark all resource-resolved fields without truncating the canonical vocabulary.
+   * @tparam T Concrete widget subtype retained by the recipe.
+   * @param description Owning recipe updated before mounting.
+   * @param alreadyMaterialized Complete presence set already included in the resource mount budget.
+   */
+  template <class T>
+  static void preparedControlPresence(Description<T> &description, ControlPropertyPresence alreadyMaterialized);
+  /** @param description Native derived heading, whose source title was already charged.
+   * @param title Owning source expression copied into presence metadata for this cold recipe.
+   * Keep inherited Label defaults checked/charged while excluding the materialized caption leaf.
+   */
+  static void preparedDialogHeading(Description<Label> &description, const TextValue &title);
+  /** @tparam T Native Label or Button. @param description Owning internal caption recipe.
+   * @param caption Already materialized text expression; ordinary child defaults remain checked.
+   */
+  template <class T> static void preparedThemeSelectorCaption(Description<T> &description, const TextValue &caption);
+  /** @param description Owning native view recipe. @return Recipe tagged with actual view capability. */
+  static Description<Dialog> themeSelectorControl(Description<Dialog> description);
+  /** @param description Owning native catalog recipe. @return Recipe tagged with actual catalog capability. */
+  static Description<Dialog> themeCatalogControl(Description<Dialog> description);
+  /** @tparam T Retained widget type. @param description Recipe inspected without mutation.
+   * @return Whether its actual producer owns the catalog construction path.
+   */
+  template <class T> static bool themeCatalogRecipient(const Description<T> &description) noexcept;
+  /** @param description Owning native message recipe. @return Recipe tagged with actual message capability. */
+  static Description<Dialog> messageControl(Description<Dialog> description);
+  /** @param description Owning center/body recipe. @return Recipe tagged with actual notification capability. */
+  static Description<Overlay> notificationControl(Description<Overlay> description);
+  /** @tparam T Retained widget type. @param description Owning native recipient recipe.
+   * @param settings Effective owning resource inputs. @param materialized Already reserved leaves.
+   * @param kind Required semantic capability; actual catalogs also satisfy view requirements.
+   * @return Success after storing the source packet, or a typed capability mismatch.
+   */
+  template <class T>
+  static std::expected<void, ManagedError> messageSource(Description<T> &description, const ControlSettings &settings,
+                                                         ControlPropertyPresence materialized,
+                                                         ControlFactoryKind kind = ControlFactoryKind::MESSAGE_BINDING);
+  /** @param description Composite-owned Dialog recipe with already checked native options.
+   * @param prechargedTitle Borrowed expression copied now when its leaf was already reserved.
+   * @return Internal recipe retaining ordinary child defaults without inheriting Dialog defaults again.
+   */
+  static Description<Dialog> internalDialog(Description<Dialog> description,
+                                            const TextValue *prechargedTitle = nullptr);
   /** @brief Attach a builtin configuration identity to an owning recipe.
    * @tparam T Concrete widget subtype retained by the recipe.
    * @param description Single-use recipe receiving configuration metadata.
@@ -585,6 +698,32 @@ struct Access {
    * @return Recipe publishing references only after setup and finalization succeed.
    */
   template <class T, class Callback> static Description<T> controlSetup(Description<T> description, Callback callback);
+  /** @param options Existing owning native frame options.
+   * @param style Existing owning manual appearances.
+   * @return Empty native frame recipe; callers attach exactly one real content edge without a wrapper.
+   */
+  static Description<Border> borderControl(BorderOptions options, ControlStyle style);
+  /** @param options Actual ordinary Overlay alignment/insets.
+   * @param policy Actual parent size policy, preserved when sparse settings are absent.
+   * @return Empty native Overlay recipe; children attach as real edges in source order.
+   */
+  static Description<Overlay> overlayControl(OverlayOptions options, SizePolicy policy);
+  /** @param options Actual owning placement/input/frame options.
+   * @param controller Optional owning shared values; an empty area controller keeps native default creation.
+   * @param style Owning manual appearances beneath the existing theme.
+   * @return Native area recipe without a synthetic child; caller attaches one real content edge.
+   */
+  static Description<ScrollArea> scrollAreaControl(ScrollAreaOptions options,
+                                                   std::shared_ptr<ScrollController> controller, ControlStyle style);
+  /** @param controller Optional only for a standalone writer; a projection requires an owning shared controller.
+   * @param axis Actual receiving projection axis.
+   * @param options Actual receiving input/paint options.
+   * @param style Owning manual appearances.
+   * @param writer Existing native standalone geometry-writer role; false preserves the shared projection role.
+   * @return Native bar recipe with checked sparse settings and unchanged controller ownership.
+   */
+  static Description<ScrollBar> scrollBarControl(std::shared_ptr<ScrollController> controller, ScrollAxis axis,
+                                                 ScrollBarOptions options, ControlStyle style, bool writer);
 
   /** @brief Identify builtin recipe types without allocating runtime metadata.
    * @tparam T Concrete widget subtype to classify.
@@ -605,6 +744,32 @@ struct Access {
       return "HBox";
     } else if constexpr (std::same_as<T, Column>) {
       return "VBox";
+    } else if constexpr (std::same_as<T, Border>) {
+      return "Border";
+    } else if constexpr (std::same_as<T, Gauge>) {
+      return "Gauge";
+    } else if constexpr (std::same_as<T, ScrollArea>) {
+      return "ScrollArea";
+    } else if constexpr (std::same_as<T, ScrollBar>) {
+      return "ScrollBar";
+    } else if constexpr (std::same_as<T, HelpView>) {
+      return "HelpView";
+    } else if constexpr (std::same_as<T, KeyHints>) {
+      return "KeyHints";
+    } else if constexpr (IsVirtualList<T>::value) {
+      return "VirtualList";
+    } else if constexpr (IsVirtualTable<T>::value) {
+      return "VirtualTable";
+    } else if constexpr (IsChart<T>::value) {
+      return "Chart";
+    } else if constexpr (std::same_as<T, DataStateView>) {
+      return "DataStateView";
+    } else if constexpr (std::same_as<T, OverlayHost>) {
+      return "OverlayHost";
+    } else if constexpr (std::same_as<T, Dialog>) {
+      return "Dialog";
+    } else if constexpr (std::same_as<T, Overlay>) {
+      return "Overlay";
     } else
       return {};
   }
@@ -649,9 +814,149 @@ struct Access {
     apply(base.grid.maxPlacements, patch.grid.maxPlacements);
     apply(base.grid.maxPlacementWork, patch.grid.maxPlacementWork);
     apply(base.grid.scroll, patch.grid.scroll);
+    apply(base.linear.mainAlign, patch.linear.mainAlign);
+    apply(base.linear.crossAlign, patch.linear.crossAlign);
+    apply(base.linear.overflow, patch.linear.overflow);
+    apply(base.limits.maxInputBytes, patch.limits.maxInputBytes);
+    apply(base.limits.maxClusterBytes, patch.limits.maxClusterBytes);
+    apply(base.limits.maxGraphemes, patch.limits.maxGraphemes);
+    apply(base.limits.maxCells, patch.limits.maxCells);
+    apply(base.chrome, patch.chrome);
+    apply(base.glyphs, patch.glyphs);
+    apply(base.maxPaintCells, patch.maxPaintCells);
+    apply(base.value, patch.value);
+    apply(base.minimum, patch.minimum);
+    apply(base.maximum, patch.maximum);
+    apply(base.preferredWidth, patch.preferredWidth);
+    apply(base.wheelStep, patch.wheelStep);
+    apply(base.keyStep, patch.keyStep);
+    apply(base.pageOverlap, patch.pageOverlap);
+    apply(base.minimumThumb, patch.minimumThumb);
+    apply(base.focusable, patch.focusable);
+    apply(base.horizontal, patch.horizontal);
+    apply(base.vertical, patch.vertical);
+    apply(base.placement, patch.placement);
+    apply(base.axis, patch.axis);
+    apply(base.frame.enabled, patch.frame.enabled);
+    apply(base.frame.glyphs, patch.frame.glyphs);
+    apply(base.frame.maxPaintCells, patch.frame.maxPaintCells);
+    apply(base.horizontalAlign, patch.horizontalAlign);
+    apply(base.verticalAlign, patch.verticalAlign);
+    apply(base.initiallyOpen, patch.initiallyOpen);
+    apply(base.format.maxBytesPerBinding, patch.format.maxBytesPerBinding);
+    apply(base.format.strokeSeparator, patch.format.strokeSeparator);
+    apply(base.format.alternativeSeparator, patch.format.alternativeSeparator);
+    apply(base.format.repeatMarker, patch.format.repeatMarker);
+    apply(base.format.releaseMarker, patch.format.releaseMarker);
+    apply(base.format.unknownMarker, patch.format.unknownMarker);
+    apply(base.emptyText, patch.emptyText);
+    apply(base.unavailableText, patch.unavailableText);
+    apply(base.entrySeparator, patch.entrySeparator);
+    apply(base.overflowMarker, patch.overflowMarker);
+    apply(base.rowHeight, patch.rowHeight);
+    apply(base.overscanRows, patch.overscanRows);
+    apply(base.maxColumns, patch.maxColumns);
+    apply(base.maxPreparedCells, patch.maxPreparedCells);
+    apply(base.maxPreparedTextBytes, patch.maxPreparedTextBytes);
+    apply(base.mode, patch.mode);
+    apply(base.chartGlyphSet, patch.chartGlyphSet);
+    apply(base.candleGap, patch.candleGap);
+    apply(base.yRange.enabled, patch.yRange.enabled);
+    apply(base.yRange.minimum, patch.yRange.minimum);
+    apply(base.yRange.maximum, patch.yRange.maximum);
+    apply(base.showStatus, patch.showStatus);
+    apply(base.statusRows, patch.statusRows);
+    apply(base.contentPolicy, patch.contentPolicy);
+    apply(base.spinnerInterval, patch.spinnerInterval);
+    apply(base.labels.loading, patch.labels.loading);
+    apply(base.labels.empty, patch.labels.empty);
+    apply(base.labels.error, patch.labels.error);
+    apply(base.labels.offline, patch.labels.offline);
+    apply(base.labels.refreshing, patch.labels.refreshing);
+    apply(base.labels.retry, patch.labels.retry);
+    apply(base.maxLayers, patch.maxLayers);
+    apply(base.title, patch.title);
+    apply(base.dialog.mode, patch.dialog.mode);
+    apply(base.dialog.placement, patch.dialog.placement);
+    apply(base.dialog.maximumPanelSize.width, patch.dialog.maximumPanelSize.width);
+    apply(base.dialog.maximumPanelSize.height, patch.dialog.maximumPanelSize.height);
+    apply(base.dialog.viewportMargin, patch.dialog.viewportMargin);
+    apply(base.dialog.anchorGap, patch.dialog.anchorGap);
+    apply(base.dialog.closeOnEscape, patch.dialog.closeOnEscape);
+    apply(base.dialog.frame.glyphs, patch.dialog.frame.glyphs);
+    apply(base.dialog.frame.maxPaintCells, patch.dialog.frame.maxPaintCells);
+    apply(base.body, patch.body);
+    apply(base.message.labels.acknowledge, patch.message.labels.acknowledge);
+    apply(base.message.labels.confirm, patch.message.labels.confirm);
+    apply(base.message.labels.save, patch.message.labels.save);
+    apply(base.message.labels.discard, patch.message.labels.discard);
+    apply(base.message.labels.cancel, patch.message.labels.cancel);
+    apply(base.message.defaultChoice.enabled, patch.message.defaultChoice.enabled);
+    apply(base.message.defaultChoice.value, patch.message.defaultChoice.value);
+    apply(base.message.allowDestructiveDefault, patch.message.allowDestructiveDefault);
+    apply(base.message.textLimits.maxInputBytes, patch.message.textLimits.maxInputBytes);
+    apply(base.message.textLimits.maxClusterBytes, patch.message.textLimits.maxClusterBytes);
+    apply(base.message.textLimits.maxGraphemes, patch.message.textLimits.maxGraphemes);
+    apply(base.message.textLimits.maxCells, patch.message.textLimits.maxCells);
+    apply(base.message.maxBodyLines, patch.message.maxBodyLines);
+    apply(base.notification.capacity, patch.notification.capacity);
+    apply(base.notification.maxVisible, patch.notification.maxVisible);
+    apply(base.notification.placement, patch.notification.placement);
+    apply(base.notification.maximumWidth, patch.notification.maximumWidth);
+    apply(base.notification.margin, patch.notification.margin);
+    apply(base.notification.gap, patch.notification.gap);
+    apply(base.notification.overflow, patch.notification.overflow);
+    apply(base.notification.refreshDeduplicated, patch.notification.refreshDeduplicated);
+    apply(base.notification.reducedMotion, patch.notification.reducedMotion);
+    apply(base.notification.textLimits.maxInputBytes, patch.notification.textLimits.maxInputBytes);
+    apply(base.notification.textLimits.maxClusterBytes, patch.notification.textLimits.maxClusterBytes);
+    apply(base.notification.textLimits.maxGraphemes, patch.notification.textLimits.maxGraphemes);
+    apply(base.notification.textLimits.maxCells, patch.notification.textLimits.maxCells);
+    apply(base.notification.actionLabelBytes, patch.notification.actionLabelBytes);
+    apply(base.notification.dedupKeyBytes, patch.notification.dedupKeyBytes);
+    apply(base.notification.maxPaintCells, patch.notification.maxPaintCells);
+    apply(base.themeSelector.labels.apply, patch.themeSelector.labels.apply);
+    apply(base.themeSelector.labels.cancel, patch.themeSelector.labels.cancel);
+    apply(base.themeSelector.labels.closeKeepingPreview, patch.themeSelector.labels.closeKeepingPreview);
+    apply(base.themeSelector.labels.emptyStatus, patch.themeSelector.labels.emptyStatus);
+    apply(base.themeSelector.labels.errorStatus, patch.themeSelector.labels.errorStatus);
+    apply(base.themeSelector.labels.conflictStatus, patch.themeSelector.labels.conflictStatus);
+    apply(base.themeSelector.textLimits.maxInputBytes, patch.themeSelector.textLimits.maxInputBytes);
+    apply(base.themeSelector.textLimits.maxClusterBytes, patch.themeSelector.textLimits.maxClusterBytes);
+    apply(base.themeSelector.textLimits.maxGraphemes, patch.themeSelector.textLimits.maxGraphemes);
+    apply(base.themeSelector.textLimits.maxCells, patch.themeSelector.textLimits.maxCells);
+    apply(base.themeSelector.openingShortcut.enabled, patch.themeSelector.openingShortcut.enabled);
+    apply(base.themeSelector.openingShortcut.value, patch.themeSelector.openingShortcut.value);
+    apply(base.themeCatalog.maxChoices, patch.themeCatalog.maxChoices);
+    apply(base.themeCatalog.maxIdBytes, patch.themeCatalog.maxIdBytes);
+    apply(base.themeCatalog.maxLabelBytes, patch.themeCatalog.maxLabelBytes);
+    apply(base.themeCatalog.maxDescriptionBytes, patch.themeCatalog.maxDescriptionBytes);
+    apply(base.themeCatalog.maxTextBytes, patch.themeCatalog.maxTextBytes);
+    apply(base.themeCatalog.textLimits.maxInputBytes, patch.themeCatalog.textLimits.maxInputBytes);
+    apply(base.themeCatalog.textLimits.maxClusterBytes, patch.themeCatalog.textLimits.maxClusterBytes);
+    apply(base.themeCatalog.textLimits.maxGraphemes, patch.themeCatalog.textLimits.maxGraphemes);
+    apply(base.themeCatalog.textLimits.maxCells, patch.themeCatalog.textLimits.maxCells);
+    apply(base.themeCatalog.initialId.enabled, patch.themeCatalog.initialId.enabled);
+    apply(base.themeCatalog.initialId.value, patch.themeCatalog.initialId.value);
+    apply(base.themeCatalog.layers.enabled, patch.themeCatalog.layers.enabled);
+    apply(base.themeCatalog.layers.maxLayers, patch.themeCatalog.layers.maxLayers);
+    apply(base.themeCatalog.layers.maxRules, patch.themeCatalog.layers.maxRules);
+    apply(base.themeCatalog.layers.maxDeclarations, patch.themeCatalog.layers.maxDeclarations);
+    apply(base.themeCatalog.layers.maxOwnedBytes, patch.themeCatalog.layers.maxOwnedBytes);
+
     base.origin = patch.origin;
     base.origins = patch.origins;
     return base;
+  }
+
+  /** @tparam T Exact native Chart specialization. @param description Factory result before erasure.
+   * @param patch Chart-only scalar patch; old text metadata and services are excluded by the caller.
+   * Stages the same sparse merge and local provenance as native modifiers.
+   */
+  template <class T>
+    requires IsChart<T>::value
+  static void chartSettings(Description<T> &description, ControlSettings patch) {
+    (void)std::move(description).scalarSettings(std::move(patch));
   }
 
   /** @param scene Existing UI owner; checked before reading mutable metadata.
@@ -1059,6 +1364,42 @@ struct Access {
     const auto changed = setSizePolicy(tree, node, policy);
 
     return changed ? std::expected<void, ManagedError>{} : std::unexpected(error(node, changed.error()));
+  }
+
+  /** @brief Apply final local instance flags through the existing managed mount boundary.
+   * @param scene Borrowed managed owner of the current transaction.
+   * @param node Created target; ancestor flags retain their existing tree semantics.
+   * @param visible Optional final local visibility.
+   * @param enabled Optional final local enabled state.
+   * @return Original boundary or tree failure attributed to this node in MOUNT.
+   */
+  static std::expected<void, ManagedError> instanceState(ManagedScene &scene, Node<Widget> node,
+                                                         std::optional<bool> visible, std::optional<bool> enabled) {
+    const auto allowed = scene.boundary(ManagedPhase::MOUNT, node);
+
+    if (!allowed) {
+      return allowed;
+    }
+
+    auto &tree = scene.app_.tree();
+
+    if (visible) {
+      const auto changed = tree.setVisible(node, *visible);
+
+      if (!changed) {
+        return std::unexpected(error(node, changed.error()));
+      }
+    }
+
+    if (enabled) {
+      const auto changed = tree.setEnabled(node, *enabled);
+
+      if (!changed) {
+        return std::unexpected(error(node, changed.error()));
+      }
+    }
+
+    return {};
   }
 
   /** @brief Verify a created node remains accessible before publishing references.
@@ -2044,6 +2385,583 @@ public:
     return std::move(*this);
   }
 
+  /** @param value Button decoration, checked before caption resolution or construction.
+   * @return Consuming standard Button recipe with a sparse final override.
+   */
+  Description &&chrome(ButtonChrome value) &&
+    requires std::same_as<T, Button>
+  {
+    return std::move(*this).scalarSettings({.chrome = value});
+  }
+
+  /** @param value Border/Gauge/scroll one-cell decoration mode.
+   * @return Consuming native primitive recipe; absent settings remain unchanged.
+   */
+  Description &&glyphs(PrimitiveGlyphs value) &&
+    requires(std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, ScrollArea> ||
+             std::same_as<T, ScrollBar>)
+  {
+    return std::move(*this).scalarSettings({.glyphs = value});
+  }
+
+  /** @param cells Positive allocated paint-work cap, checked before construction.
+   * @return Consuming native Border/Gauge/scroll recipe with a sparse final override.
+   */
+  Description &&maxPaintCells(std::size_t cells) &&
+    requires(std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, ScrollArea> ||
+             std::same_as<T, ScrollBar>)
+  {
+    return std::move(*this).scalarSettings({.maxPaintCells = cells});
+  }
+
+  /** @param value Finite initial value in the effective inclusive Gauge range.
+   * @return Consuming native Gauge recipe with a sparse value override.
+   */
+  Description &&value(double value) &&
+    requires std::same_as<T, Gauge>
+  {
+    return std::move(*this).scalarSettings({.value = value});
+  }
+
+  /** @param value Finite inclusive lower bound; validated with the receiving options and value.
+   * @return Consuming native Gauge recipe with a sparse lower-bound override.
+   */
+  Description &&minimum(double value) &&
+    requires std::same_as<T, Gauge>
+  {
+    return std::move(*this).scalarSettings({.minimum = value});
+  }
+
+  /** @param value Finite upper bound greater than the effective minimum, with a finite span.
+   * @return Consuming native Gauge recipe with a sparse upper-bound override.
+   */
+  Description &&maximum(double value) &&
+    requires std::same_as<T, Gauge>
+  {
+    return std::move(*this).scalarSettings({.maximum = value});
+  }
+
+  /** @param minimum Finite inclusive lower bound.
+   * @param maximum Finite inclusive upper bound, greater than minimum with a finite span.
+   * @return Consuming native Gauge recipe staging both bounds together.
+   */
+  Description &&range(double minimum, double maximum) &&
+    requires std::same_as<T, Gauge>
+  {
+    return std::move(*this).scalarSettings({.minimum = minimum, .maximum = maximum});
+  }
+
+  /** @param cells Nonnegative Gauge intrinsic width, independent of fixed width policy.
+   * @return Consuming native Gauge recipe with a sparse preferred-width override.
+   */
+  Description &&preferredWidth(std::int32_t cells) &&
+    requires std::same_as<T, Gauge>
+  {
+    return std::move(*this).scalarSettings({.preferredWidth = cells});
+  }
+
+  /** @param cells Positive finite logical cells per wheel event.
+   * @return Consuming native area/bar recipe with a sparse final input setting.
+   */
+  Description &&wheelStep(double cells) &&
+    requires(std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+  {
+    return std::move(*this).scalarSettings({.wheelStep = cells});
+  }
+
+  /** @param cells Positive exact 64-bit logical cells per arrow event.
+   * @return Consuming native area/bar recipe retaining the full logical step width.
+   */
+  Description &&keyStep(std::uint64_t cells) &&
+    requires(std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+  {
+    return std::move(*this).scalarSettings({.keyStep = cells});
+  }
+
+  /** @param cells Exact 64-bit overlap between pages; zero and values above viewport are supported.
+   * @return Consuming native area/bar recipe with a sparse overlap setting.
+   */
+  Description &&pageOverlap(std::uint64_t cells) &&
+    requires(std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+  {
+    return std::move(*this).scalarSettings({.pageOverlap = cells});
+  }
+
+  /** @param cells Positive minimum thumb length, capped by the actual track.
+   * @return Consuming native area/bar recipe with a checked cell setting.
+   */
+  Description &&minimumThumb(std::int32_t cells) &&
+    requires(std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+  {
+    return std::move(*this).scalarSettings({.minimumThumb = cells});
+  }
+
+  /** @param value Whether the owning area/standalone bar joins focus traversal.
+   * @return Consuming native area/bar recipe; embedded bars still create no extra focus stop.
+   */
+  Description &&focusable(bool value = true) &&
+    requires(std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+  {
+    return std::move(*this).scalarSettings({.focusable = value});
+  }
+
+  /** @param value Block user mutation while preserving existing programmatic editor/scroll commands.
+   * @return Consuming LineEdit or native area/bar recipe using its existing read-only policy.
+   */
+  Description &&readOnly(bool value = true) &&
+    requires(std::same_as<T, LineEdit> || std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+  {
+    return std::move(*this).scalarSettings({.readOnly = value});
+  }
+
+  /** @param policy Horizontal bar presence policy.
+   * @return Consuming native area recipe with a sparse horizontal policy.
+   */
+  Description &&horizontal(ScrollBarPolicy policy) &&
+    requires std::same_as<T, ScrollArea>
+  {
+    return std::move(*this).scalarSettings({.horizontal = policy});
+  }
+
+  /** @param policy Vertical bar presence policy.
+   * @return Consuming native area recipe with a sparse vertical policy.
+   */
+  Description &&vertical(ScrollBarPolicy policy) &&
+    requires std::same_as<T, ScrollArea>
+  {
+    return std::move(*this).scalarSettings({.vertical = policy});
+  }
+
+  /** @param placement Existing gutter/overlay/frame placement; ON_FRAME needs an effective frame.
+   * @return Consuming native area recipe validated against actual constructor options.
+   */
+  Description &&placement(ScrollPlacement placement) &&
+    requires std::same_as<T, ScrollArea>
+  {
+    return std::move(*this).scalarSettings({.placement = placement});
+  }
+
+  /** @param enabled True creates a missing default one-cell frame; false removes the effective frame.
+   * @return Consuming native area recipe; existing frame options survive an explicit true.
+   */
+  Description &&frameEnabled(bool enabled = true) &&
+    requires std::same_as<T, ScrollArea>
+  {
+    return std::move(*this).scalarSettings({.frame = {.enabled = enabled}});
+  }
+
+  /** @param glyphs One-cell glyph mode for an effective enabled frame.
+   * @return Consuming native area recipe; an absent effective frame remains a typed error.
+   */
+  Description &&frameGlyphs(PrimitiveGlyphs glyphs) &&
+    requires std::same_as<T, ScrollArea>
+  {
+    return std::move(*this).scalarSettings({.frame = {.glyphs = glyphs}});
+  }
+
+  /** @param cells Positive paint cap for an effective enabled one-cell frame.
+   * @return Consuming native area recipe; this does not enable a missing frame.
+   */
+  Description &&frameMaxPaintCells(std::size_t cells) &&
+    requires std::same_as<T, ScrollArea>
+  {
+    return std::move(*this).scalarSettings({.frame = {.maxPaintCells = cells}});
+  }
+
+  /** @param axis Effective bar projection axis; standalone/shared writer ownership is unchanged.
+   * @return Consuming native bar recipe with a checked sparse axis override.
+   */
+  Description &&axis(ScrollAxis axis) &&
+    requires std::same_as<T, ScrollBar>
+  {
+    return std::move(*this).scalarSettings({.axis = axis});
+  }
+
+  /** @param value Positive cell rows per logical row.
+   * @return This consuming exact native data-view recipe.
+   */
+  Description &&rowHeight(std::int32_t value) &&
+    requires(detail::IsVirtualList<T>::value || detail::IsVirtualTable<T>::value)
+  {
+    return std::move(*this).scalarSettings({.rowHeight = value});
+  }
+
+  /** @param value Extra requested rows per side, including explicit zero.
+   * @return This consuming exact native data-view recipe.
+   */
+  Description &&overscanRows(std::size_t value) &&
+    requires(detail::IsVirtualList<T>::value || detail::IsVirtualTable<T>::value)
+  {
+    return std::move(*this).scalarSettings({.overscanRows = value});
+  }
+
+  /** @param value Positive table configured-column cap.
+   * @return This consuming exact native data-view recipe.
+   */
+  Description &&maxColumns(std::size_t value) &&
+    requires detail::IsVirtualTable<T>::value
+  {
+    return std::move(*this).scalarSettings({.maxColumns = value});
+  }
+
+  /** @param value Positive table visible body-cell cap.
+   * @return This consuming exact native data-view recipe.
+   */
+  Description &&maxPreparedCells(std::size_t value) &&
+    requires detail::IsVirtualTable<T>::value
+  {
+    return std::move(*this).scalarSettings({.maxPreparedCells = value});
+  }
+
+  /** @param value Positive table header/body UTF-8 cap.
+   * @return This consuming exact native data-view recipe.
+   */
+  Description &&maxPreparedTextBytes(std::size_t value) &&
+    requires detail::IsVirtualTable<T>::value
+  {
+    return std::move(*this).scalarSettings({.maxPreparedTextBytes = value});
+  }
+
+  /** @param value Existing line/candle rendering mode.
+   * @return This consuming exact native chart recipe.
+   */
+  Description &&mode(ChartMode value) &&
+    requires detail::IsChart<T>::value
+  {
+    return std::move(*this).scalarSettings({.mode = value});
+  }
+
+  /** @param value Chart candle glyph set, independent of primitive decorations.
+   * @return This consuming exact native chart recipe.
+   */
+  Description &&chartGlyphSet(ChartGlyphSet value) &&
+    requires detail::IsChart<T>::value
+  {
+    return std::move(*this).scalarSettings({.chartGlyphSet = value});
+  }
+
+  /** @param cells Nonnegative empty columns between candle samples; ignored by LINE mode.
+   * @return This consuming exact native chart recipe.
+   */
+  Description &&candleGap(std::int32_t cells) &&
+    requires detail::IsChart<T>::value
+  {
+    return std::move(*this).scalarSettings({.candleGap = cells});
+  }
+
+  /** @param range Finite increasing or equal explicit endpoints; nullopt restores automatic scale.
+   * @return This consuming exact native chart recipe, preserving its model and reference identity.
+   */
+  Description &&yRange(std::optional<ChartRange> range) &&
+    requires detail::IsChart<T>::value
+  {
+    ControlChartRangeSettings patch{.enabled = range.has_value()};
+
+    if (range) {
+      patch.minimum = range->minimum;
+      patch.maximum = range->maximum;
+    }
+
+    return std::move(*this).scalarSettings({.yRange = patch});
+  }
+
+  /** @param value Whether native status labels/subtree/timer are created.
+   * @return This consuming exact native DataStateView recipe.
+   */
+  Description &&showStatus(bool value = true) &&
+    requires std::same_as<T, DataStateView>
+  {
+    return std::move(*this).scalarSettings({.showStatus = value});
+  }
+
+  /** @param value Positive fixed status strip height in cell rows.
+   * @return This consuming exact native DataStateView recipe.
+   */
+  Description &&statusRows(std::int32_t value) &&
+    requires std::same_as<T, DataStateView>
+  {
+    return std::move(*this).scalarSettings({.statusRows = value});
+  }
+
+  /** @param value Existing body visibility policy; automatic mode requires KEEP_BODY.
+   * @return This consuming exact native DataStateView recipe.
+   */
+  Description &&contentPolicy(DataContentPolicy value) &&
+    requires std::same_as<T, DataStateView>
+  {
+    return std::move(*this).scalarSettings({.contentPolicy = value});
+  }
+
+  /** @param value Positive uint64 monotonic milliseconds per spinner step.
+   * @return This consuming exact native DataStateView recipe.
+   */
+  Description &&spinnerInterval(SchedulerTime value) &&
+    requires std::same_as<T, DataStateView>
+  {
+    return std::move(*this).scalarSettings({.spinnerInterval = value});
+  }
+
+  /** @param values Owning sparse native status expressions; unused expressions remain unresolved.
+   * @return This consuming exact native DataStateView recipe.
+   */
+  Description &&labels(ControlDataStateLabelSettings values) &&
+    requires std::same_as<T, DataStateView>
+  {
+    return std::move(*this).scalarSettings({.labels = std::move(values)});
+  }
+
+  /** @param value Positive host registration cap, including initially closed layers.
+   * @return This consuming exact native OverlayHost recipe.
+   */
+  Description &&maxLayers(std::size_t value) &&
+    requires std::same_as<T, OverlayHost>
+  {
+    return std::move(*this).scalarSettings({.maxLayers = value});
+  }
+
+  /** @param value Owning caption expression; resolved by the actual native heading.
+   * @return This consuming exact native Dialog recipe.
+   */
+  Description &&title(TextValue value) &&
+    requires std::same_as<T, Dialog>
+  {
+    return std::move(*this).scalarSettings({.title = std::move(value)});
+  }
+
+  /** @param value Literal caption bytes, copied into an owning expression.
+   * @return This consuming exact native Dialog recipe.
+   */
+  Description &&title(std::string_view value) &&
+    requires std::same_as<T, Dialog>
+  {
+    return std::move(*this).title(TextValue(value));
+  }
+
+  /** @param value Native MODAL/NON_MODAL input policy.
+   * @return This consuming exact native Dialog recipe.
+   */
+  Description &&mode(DialogMode value) &&
+    requires std::same_as<T, Dialog>
+  {
+    return std::move(*this).scalarSettings({.dialog = {.mode = value}});
+  }
+
+  /** @param value Native CENTER/BELOW_START/ABOVE_START placement.
+   * @return This consuming exact native Dialog recipe.
+   */
+  Description &&placement(DialogPlacement value) &&
+    requires std::same_as<T, Dialog>
+  {
+    return std::move(*this).scalarSettings({.dialog = {.placement = value}});
+  }
+
+  /** @param value Nonnegative viewport inset in cells.
+   * @return This consuming exact native Dialog recipe.
+   */
+  Description &&viewportMargin(std::int32_t value) &&
+    requires std::same_as<T, Dialog>
+  {
+    return std::move(*this).scalarSettings({.dialog = {.viewportMargin = value}});
+  }
+
+  /** @param value Nonnegative distance from an anchor.
+   * @return This consuming exact native Dialog recipe.
+   */
+  Description &&anchorGap(std::int32_t value) &&
+    requires std::same_as<T, Dialog>
+  {
+    return std::move(*this).scalarSettings({.dialog = {.anchorGap = value}});
+  }
+
+  /** @param value Existing Escape cancellation policy.
+   * @return This consuming exact native Dialog recipe.
+   */
+  Description &&closeOnEscape(bool value = true) &&
+    requires std::same_as<T, Dialog>
+  {
+    return std::move(*this).scalarSettings({.dialog = {.closeOnEscape = value}});
+  }
+
+  /** @param caps Positive independent width/height caps; never the full-host structural size.
+   * @return This consuming exact native Dialog recipe.
+   */
+  Description &&maximumPanelSize(CellSize caps) &&
+    requires std::same_as<T, Dialog>
+  {
+    return std::move(*this).scalarSettings(
+      {.dialog = {.maximumPanelSize = {.width = caps.width, .height = caps.height}}});
+  }
+
+  /** @param options Existing mandatory frame glyph/paint options; no optional enabled state.
+   * @return This consuming exact native Dialog recipe.
+   */
+  Description &&frame(BorderOptions options) &&
+    requires std::same_as<T, Dialog>
+  {
+    return std::move(*this).scalarSettings(
+      {.dialog = {.frame = {.glyphs = options.glyphs, .maxPaintCells = options.maxPaintCells}}});
+  }
+
+  /** @param values Sparse independent native options; unspecified actual values survive.
+   * @return This consuming exact native Dialog recipe.
+   */
+  Description &&dialogSettings(ControlDialogSettings values) &&
+    requires std::same_as<T, Dialog>
+  {
+    return std::move(*this).scalarSettings({.dialog = values});
+  }
+
+  /** @param value Owning MessageBox paragraph expression. @return This consuming message recipe.
+   * Ordinary Dialog recipes reject this message-only setting during checked preparation.
+   */
+  Description &&body(TextValue value) &&
+    requires std::same_as<T, Dialog>
+  {
+    return std::move(*this).scalarSettings({.body = std::move(value)});
+  }
+
+  /** @param value Literal paragraph bytes copied immediately. @return This consuming message recipe. */
+  Description &&body(std::string_view value) &&
+    requires std::same_as<T, Dialog>
+  {
+    return std::move(*this).body(TextValue(value));
+  }
+
+  /** @param values Owning sparse native message options. @return This consuming actual MessageBox recipe.
+   * An ordinary Dialog is rejected at checked preparation, including an empty explicit group.
+   */
+  Description &&messageSettings(ControlMessageSettings values) &&
+    requires std::same_as<T, Dialog>
+  {
+    if (state_) {
+      state_->messageSettingsRequested = true;
+    }
+
+    return std::move(*this).scalarSettings({.message = std::move(values)});
+  }
+
+  /** @param values Owning sparse constructor scalars for an actual default-catalog recipe.
+   * @return Consuming recipe; external-model views reject these fields before construction.
+   */
+  Description &&themeCatalogSettings(ControlThemeCatalogSettings values) &&
+    requires std::same_as<T, Dialog>
+  {
+    if (state_) {
+      state_->themeCatalogSettingsRequested = true;
+    }
+    return std::move(*this).scalarSettings({.themeCatalog = std::move(values)});
+  }
+
+  /** @param values Sparse owning native selector view settings. @return Same actual selector recipe.
+   * Ordinary Dialog and other semantic recipes reject even an explicitly empty selector stage.
+   */
+  Description &&themeSelectorSettings(ControlThemeSelectorSettings values) &&
+    requires std::same_as<T, Dialog>
+  {
+    if (state_) {
+      state_->themeSelectorSettingsRequested = true;
+    }
+
+    return std::move(*this).scalarSettings({.themeSelector = std::move(values)});
+  }
+
+  /** @param values Sparse immutable center options; captured resolver/body remain code-owned.
+   * @return This consuming actual native notifications wrapper; ordinary Overlay rejects even an empty group.
+   */
+  Description &&notificationSettings(ControlNotificationSettings values) &&
+    requires std::same_as<T, Overlay>
+  {
+    if (state_) {
+      state_->notificationSettingsRequested = true;
+    }
+
+    return std::move(*this).scalarSettings({.notification = values});
+  }
+
+  /** @param opened Initial HelpView state; opening uses its existing finalizer and focus return.
+   * @return This consuming native help recipe.
+   */
+  Description &&initiallyOpen(bool opened = true) &&
+    requires std::same_as<T, HelpView>
+  {
+    return std::move(*this).scalarSettings({.initiallyOpen = opened});
+  }
+
+  /** @param values Owning sparse literal formatter patch, merged one leaf at a time.
+   * @return This consuming native help presentation recipe.
+   */
+  Description &&format(ControlKeyFormatSettings values) &&
+    requires(std::same_as<T, HelpView> || std::same_as<T, KeyHints>)
+  {
+    return std::move(*this).scalarSettings({.format = std::move(values)});
+  }
+
+  /** @param value Owning literal UTF-8 presentation text, never resolved as an expression.
+   * @return This consuming applicable native help recipe.
+   */
+  Description &&emptyText(std::string value) &&
+    requires(std::same_as<T, HelpView> || std::same_as<T, KeyHints>)
+  {
+    return std::move(*this).scalarSettings({.emptyText = std::move(value)});
+  }
+
+  /** @param value Owning literal UTF-8 presentation text, never resolved as an expression.
+   * @return This consuming applicable native help recipe.
+   */
+  Description &&unavailableText(std::string value) &&
+    requires(std::same_as<T, HelpView> || std::same_as<T, KeyHints>)
+  {
+    return std::move(*this).scalarSettings({.unavailableText = std::move(value)});
+  }
+
+  /** @param value Owning literal UTF-8 presentation text, never resolved as an expression.
+   * @return This consuming applicable native help recipe.
+   */
+  Description &&entrySeparator(std::string value) &&
+    requires std::same_as<T, KeyHints>
+  {
+    return std::move(*this).scalarSettings({.entrySeparator = std::move(value)});
+  }
+
+  /** @param value Owning literal UTF-8 presentation text, never resolved as an expression.
+   * @return This consuming applicable native help recipe.
+   */
+  Description &&overflowMarker(std::string value) &&
+    requires std::same_as<T, KeyHints>
+  {
+    return std::move(*this).scalarSettings({.overflowMarker = std::move(value)});
+  }
+
+  /** @param insets Nonnegative ordinary Overlay content insets.
+   * @return Consuming exact Overlay recipe staging the shared canonical padding leaves.
+   */
+  Description &&padding(LayoutPadding insets) &&
+    requires std::same_as<T, Overlay>
+  {
+    return std::move(*this).scalarSettings({.grid = {.paddingLeft = insets.left,
+                                                     .paddingTop = insets.top,
+                                                     .paddingRight = insets.right,
+                                                     .paddingBottom = insets.bottom}});
+  }
+
+  /** @param align Child alignment across ordinary Overlay columns.
+   * @return Consuming exact Overlay recipe; containing Grid alignment stays independent.
+   */
+  Description &&horizontalAlign(LayoutAlign align) &&
+    requires std::same_as<T, Overlay>
+  {
+    return std::move(*this).scalarSettings({.horizontalAlign = align});
+  }
+
+  /** @param align Child alignment across ordinary Overlay rows.
+   * @return Consuming exact Overlay recipe; OverlayHost policies remain separate.
+   */
+  Description &&verticalAlign(LayoutAlign align) &&
+    requires std::same_as<T, Overlay>
+  {
+    return std::move(*this).scalarSettings({.verticalAlign = align});
+  }
+
   /** @param type Owning name resolved from the explicitly supplied immutable mount context.
    * @return This consuming typed recipe; a different concrete base rejects mount before construction.
    * Runtime names preserve the existing C++ type and do not synthesize a new widget class.
@@ -2127,6 +3045,16 @@ public:
 
     return std::move(*this).setup([value = detail::captureText(value)](ManagedScene &scene, Node<T> node) {
       return scene.id(node, detail::captionView(value));
+    });
+  }
+
+  /** @param value Class names copied now, separated only by ASCII whitespace; empty clears.
+   * @return Consuming recipe; classes replace previous classes in modifier order, preserving other metadata.
+   * A later style replaces the classes with its own complete target; a later classes modifier replaces only classes.
+   */
+  Description &&classes(std::string_view value) && {
+    return std::move(*this).setup([values = detail::splitClasses(value)](ManagedScene &scene, Node<T> node) mutable {
+      return scene.classes(node, values.values);
     });
   }
 
@@ -2216,6 +3144,28 @@ public:
     }
 
     return std::move(*this).onPrepare(std::move(normalized));
+  }
+
+  /** @param value Final local visibility; false excludes this subtree from layout, paint and input.
+   * @return Consuming recipe; repeated calls replace the previous value before mount.
+   */
+  Description &&visible(bool value = true) && {
+    if (state_) {
+      state_->visible = value;
+    }
+
+    return std::move(*this);
+  }
+
+  /** @param value Final local enabled state; false preserves layout/paint and uses existing input/style rules.
+   * @return Consuming recipe; ancestor flags continue to dominate this local value.
+   */
+  Description &&enabled(bool value = true) && {
+    if (state_) {
+      state_->enabled = value;
+    }
+
+    return std::move(*this);
   }
 
   /** @param cells Nonnegative fixed width; replaces only the horizontal bounds/mode.
@@ -2546,7 +3496,209 @@ public:
 
 private:
   friend struct detail::Access;
+  friend struct detail::ResourceAccess;
   template <detail::DescriptionInput Child> friend Description<Border> border(Child &&, BorderOptions, ControlStyle);
+
+  Description &&scalarSettings(ControlSettings patch) && {
+    if (state_) {
+      const auto &previous = state_->controlPatch;
+
+      if (previous.origin || !previous.origins.empty()) {
+        patch.origin = previous.origin;
+        patch.origins = previous.origins;
+
+        const std::array fields{
+          std::pair<std::string_view, bool>{"chrome", patch.chrome.has_value()},
+          std::pair<std::string_view, bool>{"glyphs", patch.glyphs.has_value()},
+          std::pair<std::string_view, bool>{"maxPaintCells", patch.maxPaintCells.has_value()},
+          std::pair<std::string_view, bool>{"value", patch.value.has_value()},
+          std::pair<std::string_view, bool>{"minimum", patch.minimum.has_value()},
+          std::pair<std::string_view, bool>{"maximum", patch.maximum.has_value()},
+          std::pair<std::string_view, bool>{"preferredWidth", patch.preferredWidth.has_value()},
+          std::pair<std::string_view, bool>{"readOnly", patch.readOnly.has_value()},
+          std::pair<std::string_view, bool>{"wheelStep", patch.wheelStep.has_value()},
+          std::pair<std::string_view, bool>{"keyStep", patch.keyStep.has_value()},
+          std::pair<std::string_view, bool>{"pageOverlap", patch.pageOverlap.has_value()},
+          std::pair<std::string_view, bool>{"minimumThumb", patch.minimumThumb.has_value()},
+          std::pair<std::string_view, bool>{"focusable", patch.focusable.has_value()},
+          std::pair<std::string_view, bool>{"horizontal", patch.horizontal.has_value()},
+          std::pair<std::string_view, bool>{"vertical", patch.vertical.has_value()},
+          std::pair<std::string_view, bool>{"placement", patch.placement.has_value()},
+          std::pair<std::string_view, bool>{"axis", patch.axis.has_value()},
+          std::pair<std::string_view, bool>{"frame.enabled", patch.frame.enabled.has_value()},
+          std::pair<std::string_view, bool>{"frame.glyphs", patch.frame.glyphs.has_value()},
+          std::pair<std::string_view, bool>{"frame.maxPaintCells", patch.frame.maxPaintCells.has_value()},
+          std::pair<std::string_view, bool>{"padding.left", patch.grid.paddingLeft.has_value()},
+          std::pair<std::string_view, bool>{"padding.top", patch.grid.paddingTop.has_value()},
+          std::pair<std::string_view, bool>{"padding.right", patch.grid.paddingRight.has_value()},
+          std::pair<std::string_view, bool>{"padding.bottom", patch.grid.paddingBottom.has_value()},
+          std::pair<std::string_view, bool>{"horizontalAlign", patch.horizontalAlign.has_value()},
+          std::pair<std::string_view, bool>{"verticalAlign", patch.verticalAlign.has_value()},
+          std::pair<std::string_view, bool>{"initiallyOpen", patch.initiallyOpen.has_value()},
+          std::pair<std::string_view, bool>{"format.maxBytesPerBinding", patch.format.maxBytesPerBinding.has_value()},
+          std::pair<std::string_view, bool>{"format.strokeSeparator", patch.format.strokeSeparator.has_value()},
+          std::pair<std::string_view, bool>{"format.alternativeSeparator",
+                                            patch.format.alternativeSeparator.has_value()},
+          std::pair<std::string_view, bool>{"format.repeatMarker", patch.format.repeatMarker.has_value()},
+          std::pair<std::string_view, bool>{"format.releaseMarker", patch.format.releaseMarker.has_value()},
+          std::pair<std::string_view, bool>{"format.unknownMarker", patch.format.unknownMarker.has_value()},
+          std::pair<std::string_view, bool>{"emptyText", patch.emptyText.has_value()},
+          std::pair<std::string_view, bool>{"unavailableText", patch.unavailableText.has_value()},
+          std::pair<std::string_view, bool>{"entrySeparator", patch.entrySeparator.has_value()},
+          std::pair<std::string_view, bool>{"overflowMarker", patch.overflowMarker.has_value()},
+          std::pair<std::string_view, bool>{"rowHeight", patch.rowHeight.has_value()},
+          std::pair<std::string_view, bool>{"overscanRows", patch.overscanRows.has_value()},
+          std::pair<std::string_view, bool>{"maxColumns", patch.maxColumns.has_value()},
+          std::pair<std::string_view, bool>{"maxPreparedCells", patch.maxPreparedCells.has_value()},
+          std::pair<std::string_view, bool>{"maxPreparedTextBytes", patch.maxPreparedTextBytes.has_value()},
+          std::pair<std::string_view, bool>{"mode", patch.mode.has_value()},
+          std::pair<std::string_view, bool>{"chartGlyphSet", patch.chartGlyphSet.has_value()},
+          std::pair<std::string_view, bool>{"candleGap", patch.candleGap.has_value()},
+          std::pair<std::string_view, bool>{"yRange.enabled", patch.yRange.enabled.has_value()},
+          std::pair<std::string_view, bool>{"yRange.minimum", patch.yRange.minimum.has_value()},
+          std::pair<std::string_view, bool>{"yRange.maximum", patch.yRange.maximum.has_value()},
+          std::pair<std::string_view, bool>{"showStatus", patch.showStatus.has_value()},
+          std::pair<std::string_view, bool>{"statusRows", patch.statusRows.has_value()},
+          std::pair<std::string_view, bool>{"contentPolicy", patch.contentPolicy.has_value()},
+          std::pair<std::string_view, bool>{"spinnerInterval", patch.spinnerInterval.has_value()},
+          std::pair<std::string_view, bool>{"labels.loading", patch.labels.loading.has_value()},
+          std::pair<std::string_view, bool>{"labels.empty", patch.labels.empty.has_value()},
+          std::pair<std::string_view, bool>{"labels.error", patch.labels.error.has_value()},
+          std::pair<std::string_view, bool>{"labels.offline", patch.labels.offline.has_value()},
+          std::pair<std::string_view, bool>{"labels.refreshing", patch.labels.refreshing.has_value()},
+          std::pair<std::string_view, bool>{"labels.retry", patch.labels.retry.has_value()},
+          std::pair<std::string_view, bool>{"notification.capacity", patch.notification.capacity.has_value()},
+          std::pair<std::string_view, bool>{"notification.maxVisible", patch.notification.maxVisible.has_value()},
+          std::pair<std::string_view, bool>{"notification.placement", patch.notification.placement.has_value()},
+          std::pair<std::string_view, bool>{"notification.maximumWidth", patch.notification.maximumWidth.has_value()},
+          std::pair<std::string_view, bool>{"notification.margin", patch.notification.margin.has_value()},
+          std::pair<std::string_view, bool>{"notification.gap", patch.notification.gap.has_value()},
+          std::pair<std::string_view, bool>{"notification.overflow", patch.notification.overflow.has_value()},
+          std::pair<std::string_view, bool>{"notification.refreshDeduplicated",
+                                            patch.notification.refreshDeduplicated.has_value()},
+          std::pair<std::string_view, bool>{"notification.reducedMotion", patch.notification.reducedMotion.has_value()},
+          std::pair<std::string_view, bool>{"notification.textLimits.maxInputBytes",
+                                            patch.notification.textLimits.maxInputBytes.has_value()},
+          std::pair<std::string_view, bool>{"notification.textLimits.maxClusterBytes",
+                                            patch.notification.textLimits.maxClusterBytes.has_value()},
+          std::pair<std::string_view, bool>{"notification.textLimits.maxGraphemes",
+                                            patch.notification.textLimits.maxGraphemes.has_value()},
+          std::pair<std::string_view, bool>{"notification.textLimits.maxCells",
+                                            patch.notification.textLimits.maxCells.has_value()},
+          std::pair<std::string_view, bool>{"notification.actionLabelBytes",
+                                            patch.notification.actionLabelBytes.has_value()},
+          std::pair<std::string_view, bool>{"notification.dedupKeyBytes", patch.notification.dedupKeyBytes.has_value()},
+          std::pair<std::string_view, bool>{"notification.maxPaintCells", patch.notification.maxPaintCells.has_value()},
+          std::pair<std::string_view, bool>{"themeCatalog.maxChoices", patch.themeCatalog.maxChoices.has_value()},
+          std::pair<std::string_view, bool>{"themeCatalog.maxIdBytes", patch.themeCatalog.maxIdBytes.has_value()},
+          std::pair<std::string_view, bool>{"themeCatalog.maxLabelBytes", patch.themeCatalog.maxLabelBytes.has_value()},
+          std::pair<std::string_view, bool>{"themeCatalog.maxDescriptionBytes",
+                                            patch.themeCatalog.maxDescriptionBytes.has_value()},
+          std::pair<std::string_view, bool>{"themeCatalog.maxTextBytes", patch.themeCatalog.maxTextBytes.has_value()},
+          std::pair<std::string_view, bool>{"themeCatalog.textLimits.maxInputBytes",
+                                            patch.themeCatalog.textLimits.maxInputBytes.has_value()},
+          std::pair<std::string_view, bool>{"themeCatalog.textLimits.maxClusterBytes",
+                                            patch.themeCatalog.textLimits.maxClusterBytes.has_value()},
+          std::pair<std::string_view, bool>{"themeCatalog.textLimits.maxGraphemes",
+                                            patch.themeCatalog.textLimits.maxGraphemes.has_value()},
+          std::pair<std::string_view, bool>{"themeCatalog.textLimits.maxCells",
+                                            patch.themeCatalog.textLimits.maxCells.has_value()},
+          std::pair<std::string_view, bool>{"themeCatalog.initialId.enabled",
+                                            patch.themeCatalog.initialId.enabled.has_value()},
+          std::pair<std::string_view, bool>{"themeCatalog.initialId.value",
+                                            patch.themeCatalog.initialId.value.has_value()},
+          std::pair<std::string_view, bool>{"themeCatalog.layers.enabled",
+                                            patch.themeCatalog.layers.enabled.has_value()},
+          std::pair<std::string_view, bool>{"themeCatalog.layers.maxLayers",
+                                            patch.themeCatalog.layers.maxLayers.has_value()},
+          std::pair<std::string_view, bool>{"themeCatalog.layers.maxRules",
+                                            patch.themeCatalog.layers.maxRules.has_value()},
+          std::pair<std::string_view, bool>{"themeCatalog.layers.maxDeclarations",
+                                            patch.themeCatalog.layers.maxDeclarations.has_value()},
+          std::pair<std::string_view, bool>{"themeCatalog.layers.maxOwnedBytes",
+                                            patch.themeCatalog.layers.maxOwnedBytes.has_value()},
+          std::pair<std::string_view, bool>{"themeSelector.labels.apply", patch.themeSelector.labels.apply.has_value()},
+          std::pair<std::string_view, bool>{"themeSelector.labels.cancel",
+                                            patch.themeSelector.labels.cancel.has_value()},
+          std::pair<std::string_view, bool>{"themeSelector.labels.closeKeepingPreview",
+                                            patch.themeSelector.labels.closeKeepingPreview.has_value()},
+          std::pair<std::string_view, bool>{"themeSelector.labels.emptyStatus",
+                                            patch.themeSelector.labels.emptyStatus.has_value()},
+          std::pair<std::string_view, bool>{"themeSelector.labels.errorStatus",
+                                            patch.themeSelector.labels.errorStatus.has_value()},
+          std::pair<std::string_view, bool>{"themeSelector.labels.conflictStatus",
+                                            patch.themeSelector.labels.conflictStatus.has_value()},
+          std::pair<std::string_view, bool>{"themeSelector.textLimits.maxInputBytes",
+                                            patch.themeSelector.textLimits.maxInputBytes.has_value()},
+          std::pair<std::string_view, bool>{"themeSelector.textLimits.maxClusterBytes",
+                                            patch.themeSelector.textLimits.maxClusterBytes.has_value()},
+          std::pair<std::string_view, bool>{"themeSelector.textLimits.maxGraphemes",
+                                            patch.themeSelector.textLimits.maxGraphemes.has_value()},
+          std::pair<std::string_view, bool>{"themeSelector.textLimits.maxCells",
+                                            patch.themeSelector.textLimits.maxCells.has_value()},
+          std::pair<std::string_view, bool>{"themeSelector.openingShortcut.enabled",
+                                            patch.themeSelector.openingShortcut.enabled.has_value()},
+          std::pair<std::string_view, bool>{"themeSelector.openingShortcut.value",
+                                            patch.themeSelector.openingShortcut.value.has_value()},
+          std::pair<std::string_view, bool>{"body", patch.body.has_value()},
+          std::pair<std::string_view, bool>{"message.labels.acknowledge", patch.message.labels.acknowledge.has_value()},
+          std::pair<std::string_view, bool>{"message.labels.confirm", patch.message.labels.confirm.has_value()},
+          std::pair<std::string_view, bool>{"message.labels.save", patch.message.labels.save.has_value()},
+          std::pair<std::string_view, bool>{"message.labels.discard", patch.message.labels.discard.has_value()},
+          std::pair<std::string_view, bool>{"message.labels.cancel", patch.message.labels.cancel.has_value()},
+          std::pair<std::string_view, bool>{"message.defaultChoice.enabled",
+                                            patch.message.defaultChoice.enabled.has_value()},
+          std::pair<std::string_view, bool>{"message.defaultChoice.value",
+                                            patch.message.defaultChoice.value.has_value()},
+          std::pair<std::string_view, bool>{"message.allowDestructiveDefault",
+                                            patch.message.allowDestructiveDefault.has_value()},
+          std::pair<std::string_view, bool>{"message.textLimits.maxInputBytes",
+                                            patch.message.textLimits.maxInputBytes.has_value()},
+          std::pair<std::string_view, bool>{"message.textLimits.maxClusterBytes",
+                                            patch.message.textLimits.maxClusterBytes.has_value()},
+          std::pair<std::string_view, bool>{"message.textLimits.maxGraphemes",
+                                            patch.message.textLimits.maxGraphemes.has_value()},
+          std::pair<std::string_view, bool>{"message.textLimits.maxCells",
+                                            patch.message.textLimits.maxCells.has_value()},
+          std::pair<std::string_view, bool>{"message.maxBodyLines", patch.message.maxBodyLines.has_value()},
+          std::pair<std::string_view, bool>{"maxLayers", patch.maxLayers.has_value()},
+          std::pair<std::string_view, bool>{"title", patch.title.has_value()},
+          std::pair<std::string_view, bool>{"dialog.mode", patch.dialog.mode.has_value()},
+          std::pair<std::string_view, bool>{"dialog.placement", patch.dialog.placement.has_value()},
+          std::pair<std::string_view, bool>{"dialog.maximumPanelSize.width",
+                                            patch.dialog.maximumPanelSize.width.has_value()},
+          std::pair<std::string_view, bool>{"dialog.maximumPanelSize.height",
+                                            patch.dialog.maximumPanelSize.height.has_value()},
+          std::pair<std::string_view, bool>{"dialog.viewportMargin", patch.dialog.viewportMargin.has_value()},
+          std::pair<std::string_view, bool>{"dialog.anchorGap", patch.dialog.anchorGap.has_value()},
+          std::pair<std::string_view, bool>{"dialog.closeOnEscape", patch.dialog.closeOnEscape.has_value()},
+          std::pair<std::string_view, bool>{"dialog.frame.glyphs", patch.dialog.frame.glyphs.has_value()},
+          std::pair<std::string_view, bool>{"dialog.frame.maxPaintCells",
+                                            patch.dialog.frame.maxPaintCells.has_value()}};
+
+        for (const auto &[path, present] : fields) {
+          if (!present) {
+            continue;
+          }
+
+          auto found = std::ranges::find(patch.origins, path, &ControlPropertyOrigin::path);
+
+          if (found == patch.origins.end()) {
+            patch.origins.push_back({std::string(path), {}});
+          } else {
+            // A new fluent assignment must not inherit the previous resource declaration's location.
+            found->source.reset();
+          }
+        }
+      }
+
+      state_->controlPatch = detail::Access::mergeControlSettings(std::move(state_->controlPatch), patch);
+      state_->settingsRequested = true;
+    }
+
+    return std::move(*this);
+  }
+
   template <detail::DescriptionInput Child>
   friend Description<ScrollArea> scrollArea(Child &&, ScrollAreaOptions, std::shared_ptr<ScrollController>,
                                             ControlStyle);
@@ -2555,6 +3707,8 @@ private:
   template <class U> friend Description<U> control(std::string_view, ControlStyle, SizePolicy);
   template <class U, detail::DescriptionInput... Children> friend Description<U> linear(LinearOptions, Children &&...);
   template <class U, detail::DescriptionRange R> friend Description<U> linear(LinearOptions, R &&);
+  template <detail::DescriptionInput... Children>
+  friend Description<Overlay> overlay(OverlayOptions, SizePolicy, Children &&...);
   template <detail::GridInput... Children> friend Description<Grid> grid(Children &&...);
   friend Description<LineEdit> lineEdit(ManagedState<std::string>, LineEditConfig);
 
@@ -2574,15 +3728,25 @@ private:
     std::shared_ptr<detail::RecipeLayout> layout; ///< Optional cold relationship metadata; never mounted state.
     bool focusScope{};                            ///< Register before setup/children; scene owns its token.
     bool focusDefault{};                          ///< Set the nearest registered scope's default before children.
+    std::optional<bool> visible;                  ///< Final mount-only local visibility; absent keeps tree defaults.
+    std::optional<bool> enabled;                  ///< Final mount-only local enabled state; no runtime state source.
     std::optional<std::string> id;                ///< Compact recipe identity preserved by later style modifiers.
     std::shared_ptr<detail::RefTarget> anchor;    ///< Cold same-attempt body anchor, without widget ownership.
     DialogPlacement placement{DialogPlacement::BELOW_START}; ///< Configured anchor preference.
     bool anchorRequested{};                    ///< Distinguish an absent modifier from an empty moved observing slot.
     std::optional<StyleTarget> intrinsicStyle; ///< Owning natural type names, finalized after ordinary setup.
-    bool controlPrepared{};                 ///< Resource settings were validated and materialized before construction.
-    bool deferredControlValidation{};       ///< Root resource parser validates after CONFIG, before document effects.
-    std::uint32_t materializedSettings{};   ///< Resource properties already reserved in the aggregate leaf budget.
-    std::optional<std::string> controlType; ///< Supported concrete factory; absent on arbitrary custom widgets.
+    std::shared_ptr<detail::SemanticConstruction>
+      semanticConstruction;                ///< Actual native capability, cold owning data only.
+    bool themeCatalogSettingsRequested{};  ///< Requires the actual owning catalog constructor.
+    bool themeSelectorSettingsRequested{}; ///< Explicit view stage requires the actual native selector recipe.
+    bool notificationSettingsRequested{};  ///< Explicit notification group requires the actual native center recipe.
+    bool messageSettingsRequested{};       ///< Explicit message group must never be ignored on ordinary Dialog.
+    bool controlPrepared{};                ///< Resource settings were validated and materialized before construction.
+    bool inheritPreparedDefaults{};        ///< Only derived source-title headings inherit unrelated Label defaults.
+    bool deferredControlValidation{};      ///< Root resource parser validates after CONFIG, before document effects.
+    detail::ControlPropertyPresence
+      materializedSettings{};                  ///< Resource properties already reserved in the aggregate leaf budget.
+    std::optional<std::string> controlType;    ///< Supported concrete factory; absent on arbitrary custom widgets.
     std::optional<std::string> controlVariant; ///< Requested runtime name, checked against the concrete type.
     ControlSettings controlPatch;              ///< Owning final sparse instance overrides.
     ControlSettings controlArguments;          ///< Explicit positional literals, below the final sparse patch.
@@ -2675,6 +3839,43 @@ private:
    */
   static std::expected<void, ManagedError> prepareControl(State &state, Node<Widget> parent,
                                                           detail::MountContext &context) {
+    if constexpr (std::same_as<T, Dialog> || std::same_as<T, Overlay>) {
+      const auto kind =
+        state.semanticConstruction ? state.semanticConstruction->kind : detail::ControlFactoryKind::USER;
+
+      if ((state.messageSettingsRequested && kind != detail::ControlFactoryKind::MESSAGE_BINDING) ||
+          (state.notificationSettingsRequested && kind != detail::ControlFactoryKind::NOTIFICATION_BINDING) ||
+          (state.themeSelectorSettingsRequested && kind != detail::ControlFactoryKind::THEME_SELECTOR_BINDING &&
+           kind != detail::ControlFactoryKind::THEME_CATALOG_BINDING) ||
+          (state.themeCatalogSettingsRequested && kind != detail::ControlFactoryKind::THEME_CATALOG_BINDING)) {
+        return std::unexpected(
+          detail::controlContextError({ControlContextErrorCode::UNSUPPORTED_PROPERTY, {}}, parent));
+      }
+      if (state.semanticConstruction && state.semanticConstruction->prepared) {
+        const auto &source = state.semanticConstruction->source;
+        auto merged = detail::Access::mergeControlSettings(state.controlPatch, source);
+
+        // Resource packets come from ControlContext::resolve, whose origins contain exactly
+        // the present winning leaves. Keep factory provenance for every other retained value.
+        merged.origin = state.controlPatch.origin;
+        merged.origins = state.controlPatch.origins;
+
+        for (const auto &origin : source.origins) {
+          auto found = std::ranges::find(merged.origins, origin.path, &ControlPropertyOrigin::path);
+
+          if (found == merged.origins.end()) {
+            merged.origins.push_back(origin);
+          } else {
+            found->source = origin.source;
+          }
+        }
+
+        state.controlPatch = std::move(merged);
+        state.controlPrepared = true;
+        state.materializedSettings = state.semanticConstruction->materialized;
+        state.settingsRequested = true;
+      }
+    }
     if constexpr (std::same_as<T, Grid>) {
       if (state.layout && state.layout->gridContainer && state.layout->control && state.layout->control->prepared) {
         state.resolvedControl = std::move(state.layout->control->resolved);
@@ -2694,19 +3895,98 @@ private:
     const bool builtinOnly = context.controls.empty() && !state.settingsRequested && !state.controlVariant;
     if (state.controlType && (!state.controlPrepared || state.settingsRequested || state.controlVariant) &&
         !builtinOnly) {
-      const auto controls = !state.inheritControlSettings || (state.controlPrepared && !state.controlVariant)
-                              ? ControlContext(context.controls.limits())
-                              : context.controls;
-      const auto type = state.inheritControlSettings && state.controlVariant ? std::string_view(*state.controlVariant)
-                                                                             : std::string_view(*state.controlType);
-      auto effective = state.inheritControlSettings
+      std::optional<ResolvedControl> notificationStyle;
+
+      if constexpr (std::same_as<T, Overlay>) {
+        if (state.semanticConstruction && state.controlVariant &&
+            state.semanticConstruction->kind == detail::ControlFactoryKind::NOTIFICATION_BINDING) {
+          auto identity = context.controls.resolve(*state.controlVariant);
+
+          if (!identity) {
+            return std::unexpected(detail::controlContextError(identity.error(), parent));
+          }
+
+          if (identity->base == "Overlay" && identity->factoryKind == detail::ControlFactoryKind::OVERLAY_FALLBACK) {
+            // Existing Overlay variants on notifications are visual identities, never inherited service/layout
+            // defaults.
+            notificationStyle.emplace(std::move(*identity));
+          }
+        }
+      }
+
+      const bool inheritControlSettings = state.inheritControlSettings && !notificationStyle;
+      auto controls =
+        !inheritControlSettings || (state.controlPrepared && !state.controlVariant && !state.inheritPreparedDefaults)
+          ? ControlContext(context.controls.limits())
+          : context.controls;
+
+      if constexpr (std::same_as<T, Border> || std::same_as<T, Gauge>) {
+        auto installed = detail::ControlContextAccess::installPrimitiveSchema(controls, *state.controlType);
+
+        if (!installed) {
+          return std::unexpected(detail::controlContextError(installed.error(), parent));
+        }
+      }
+
+      if constexpr (std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>) {
+        auto installed = detail::ControlContextAccess::installScrollSchema(controls, *state.controlType);
+
+        if (!installed) {
+          return std::unexpected(detail::controlContextError(installed.error(), parent));
+        }
+      }
+      if constexpr (std::same_as<T, DataStateView>) {
+        auto installed = detail::ControlContextAccess::installDataStateSchema(controls);
+
+        if (!installed) {
+          return std::unexpected(detail::controlContextError(installed.error(), parent));
+        }
+      }
+      if constexpr (std::same_as<T, OverlayHost> || std::same_as<T, Dialog>) {
+        auto installed = !state.semanticConstruction
+                           ? detail::ControlContextAccess::installDialogSchema(controls, *state.controlType)
+                         : state.semanticConstruction->kind == detail::ControlFactoryKind::THEME_CATALOG_BINDING
+                           ? detail::ControlContextAccess::installThemeCatalogSchema(controls, true)
+                         : state.semanticConstruction->kind == detail::ControlFactoryKind::THEME_SELECTOR_BINDING
+                           ? detail::ControlContextAccess::installThemeSelectorSchema(controls)
+                           : detail::ControlContextAccess::installMessageSchema(controls);
+
+        if (!installed) {
+          return std::unexpected(detail::controlContextError(installed.error(), parent));
+        }
+      }
+
+      if constexpr (std::same_as<T, Overlay>) {
+        auto installed = state.semanticConstruction ? detail::ControlContextAccess::installNotificationSchema(controls)
+                                                    : detail::ControlContextAccess::installOverlaySchema(controls);
+        if (!installed) {
+          return std::unexpected(detail::controlContextError(installed.error(), parent));
+        }
+      }
+      if constexpr (std::same_as<T, HelpView> || std::same_as<T, KeyHints>) {
+        auto installed = detail::ControlContextAccess::installKeyHelpSchema(controls, *state.controlType);
+        if (!installed) {
+          return std::unexpected(detail::controlContextError(installed.error(), parent));
+        }
+      }
+      if constexpr (detail::IsVirtualList<T>::value || detail::IsVirtualTable<T>::value || detail::IsChart<T>::value) {
+        auto installed = detail::ControlContextAccess::installVirtualViewSchema(controls, *state.controlType);
+
+        if (!installed) {
+          return std::unexpected(detail::controlContextError(installed.error(), parent));
+        }
+      }
+
+      const auto type = inheritControlSettings && state.controlVariant ? std::string_view(*state.controlVariant)
+                                                                       : std::string_view(*state.controlType);
+      auto effective = inheritControlSettings
                          ? controls.resolve(type, detail::Access::mergeControlSettings(
                                                     std::move(state.controlArguments), state.controlPatch))
                          : controls.resolve(type, state.controlPatch);
       if (!effective) {
         return std::unexpected(detail::controlContextError(effective.error(), parent));
       }
-      if (!state.inheritControlSettings && state.controlVariant) {
+      if (!inheritControlSettings && state.controlVariant && !notificationStyle) {
         const auto identity = context.controls.resolve(*state.controlVariant);
 
         if (!identity) {
@@ -2720,10 +4000,52 @@ private:
       if (effective->base != *state.controlType) {
         return std::unexpected(detail::controlContextError({ControlContextErrorCode::INVALID_VALUE, {}}, parent));
       }
+      if constexpr (std::same_as<T, Border> || std::same_as<T, Gauge>) {
+        if (effective->factoryKind != detail::ControlFactoryKind::PRIMITIVE_FALLBACK) {
+          return std::unexpected(detail::controlContextError({ControlContextErrorCode::INVALID_VALUE, {}}, parent));
+        }
+      }
+
+      if constexpr (std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>) {
+        if (effective->factoryKind != detail::ControlFactoryKind::SCROLL_FALLBACK) {
+          return std::unexpected(detail::controlContextError({ControlContextErrorCode::INVALID_VALUE, {}}, parent));
+        }
+      }
+      if constexpr (std::same_as<T, DataStateView>) {
+        if (effective->factoryKind != detail::ControlFactoryKind::DATA_STATE_FALLBACK) {
+          return std::unexpected(detail::controlContextError({ControlContextErrorCode::INVALID_VALUE, {}}, parent));
+        }
+      }
+      if constexpr (std::same_as<T, OverlayHost> || std::same_as<T, Dialog>) {
+        const auto expectedKind =
+          state.semanticConstruction ? state.semanticConstruction->kind : detail::ControlFactoryKind::DIALOG_FALLBACK;
+        if (effective->factoryKind != expectedKind) {
+          return std::unexpected(detail::controlContextError({ControlContextErrorCode::INVALID_VALUE, {}}, parent));
+        }
+      }
+
+      if constexpr (std::same_as<T, Overlay>) {
+        const auto expectedKind = state.semanticConstruction ? detail::ControlFactoryKind::NOTIFICATION_BINDING
+                                                             : detail::ControlFactoryKind::OVERLAY_FALLBACK;
+        if (effective->factoryKind != expectedKind) {
+          return std::unexpected(detail::controlContextError({ControlContextErrorCode::INVALID_VALUE, {}}, parent));
+        }
+      }
+      if constexpr (std::same_as<T, HelpView> || std::same_as<T, KeyHints>) {
+        if (effective->factoryKind != detail::ControlFactoryKind::KEY_HELP_FALLBACK) {
+          return std::unexpected(detail::controlContextError({ControlContextErrorCode::INVALID_VALUE, {}}, parent));
+        }
+      }
+      if constexpr (detail::IsVirtualList<T>::value || detail::IsVirtualTable<T>::value || detail::IsChart<T>::value) {
+        if (effective->factoryKind != detail::ControlFactoryKind::VIRTUAL_VIEW_FALLBACK) {
+          return std::unexpected(detail::controlContextError({ControlContextErrorCode::INVALID_VALUE, {}}, parent));
+        }
+      }
+
       const auto addedLeaves =
-        state.controlPrepared ? static_cast<std::size_t>(std::popcount(
-                                  detail::controlSettingsPresence(effective->settings) & ~state.materializedSettings))
-                              : effective->materializedLeaves;
+        state.controlPrepared
+          ? (detail::controlSettingsPresenceSet(effective->settings) & ~state.materializedSettings).count()
+          : effective->materializedLeaves;
       const auto limit = context.controls.limits().maxMaterializedLeaves;
       if (context.controlLeaves > limit || addedLeaves > limit - context.controlLeaves) {
         return std::unexpected(
@@ -2731,9 +4053,11 @@ private:
       }
       context.controlLeaves += addedLeaves;
       if (state.controlVariant) {
-        state.intrinsicStyle = StyleTarget{.type = effective->type,
+        const auto &identity = notificationStyle ? *notificationStyle : *effective;
+
+        state.intrinsicStyle = StyleTarget{.type = identity.type,
                                            .control = std::derived_from<T, Control> || std::same_as<T, LineEdit>,
-                                           .baseTypes = effective->lineage};
+                                           .baseTypes = identity.lineage};
         if constexpr (std::same_as<T, Row> || std::same_as<T, Column>) {
           constexpr std::string_view NATURAL = std::same_as<T, Row> ? "Row" : "Column";
           if (state.intrinsicStyle->type != NATURAL &&
@@ -2810,8 +4134,28 @@ private:
 
     context.nodes.push_back(*node);
 
+    if (state->visible || state->enabled) {
+      auto configured = detail::Access::instanceState(scene, *node, state->visible, state->enabled);
+
+      if (!configured) {
+        return std::unexpected(configured.error());
+      }
+    }
+
     if (state->intrinsicStyle) {
-      auto styled = scene.style(*node, *state->intrinsicStyle);
+      auto styled = [&] {
+        if constexpr (std::same_as<T, Dialog> || std::same_as<T, OverlayHost>) {
+          // These managed factories already supplied their native structural classes.
+          return detail::Access::finalizeStyleIdentity(scene, *node, *state->intrinsicStyle);
+        } else if constexpr (std::same_as<T, Overlay>) {
+          return state->semanticConstruction
+                   ? detail::Access::finalizeStyleIdentity(scene, *node, *state->intrinsicStyle)
+                   : scene.style(*node, *state->intrinsicStyle);
+        } else {
+          return scene.style(*node, *state->intrinsicStyle);
+        }
+      }();
+
       if (!styled) {
         return std::unexpected(styled.error());
       }
@@ -2827,13 +4171,22 @@ private:
     if constexpr (std::derived_from<T, SizedWidget>) {
       if (resolved) {
         const auto &settings = resolved->settings;
+        const auto *sourceSizing =
+          state->semanticConstruction && state->semanticConstruction->prepared &&
+              state->semanticConstruction->kind == detail::ControlFactoryKind::NOTIFICATION_BINDING
+            ? &state->semanticConstruction->source
+            : nullptr;
+
         for (const auto &change :
-             {settings.width ? std::optional(detail::SizeChange{detail::SizeDimension::WIDTH, *settings.width})
-                             : std::nullopt,
-              settings.height ? std::optional(detail::SizeChange{detail::SizeDimension::HEIGHT, *settings.height})
-                              : std::nullopt,
-              settings.flex ? std::optional(detail::SizeChange{detail::SizeDimension::FLEX, 0, *settings.flex})
-                            : std::nullopt}) {
+             {settings.width && !(sourceSizing && sourceSizing->width)
+                ? std::optional(detail::SizeChange{detail::SizeDimension::WIDTH, *settings.width})
+                : std::nullopt,
+              settings.height && !(sourceSizing && sourceSizing->height)
+                ? std::optional(detail::SizeChange{detail::SizeDimension::HEIGHT, *settings.height})
+                : std::nullopt,
+              settings.flex && !(sourceSizing && sourceSizing->flex)
+                ? std::optional(detail::SizeChange{detail::SizeDimension::FLEX, 0, *settings.flex})
+                : std::nullopt}) {
           if (change) {
             auto resized = detail::Access::resize(scene, *node, *change);
             if (!resized) {
@@ -2910,6 +4263,30 @@ private:
 
       if (!configured) {
         return std::unexpected(configured.error());
+      }
+    }
+
+    if constexpr (std::same_as<T, Overlay>) {
+      if (state->semanticConstruction && state->semanticConstruction->prepared &&
+          state->semanticConstruction->kind == detail::ControlFactoryKind::NOTIFICATION_BINDING) {
+        // Resource common sizing follows factory setup, including through erased native recipes.
+        const auto &source = state->semanticConstruction->source;
+
+        for (const auto &change :
+             {source.width ? std::optional(detail::SizeChange{detail::SizeDimension::WIDTH, *source.width})
+                           : std::nullopt,
+              source.height ? std::optional(detail::SizeChange{detail::SizeDimension::HEIGHT, *source.height})
+                            : std::nullopt,
+              source.flex ? std::optional(detail::SizeChange{detail::SizeDimension::FLEX, 0, *source.flex})
+                          : std::nullopt}) {
+          if (change) {
+            auto resized = detail::Access::resize(scene, *node, *change);
+
+            if (!resized) {
+              return std::unexpected(resized.error());
+            }
+          }
+        }
       }
     }
 
@@ -3127,8 +4504,7 @@ inline std::expected<void, ManagedError> prepareGridLayouts(const std::shared_pt
     }
 
     const auto leaves = control.materialized
-                          ? static_cast<std::size_t>(std::popcount(controlSettingsPresence(effective->settings) &
-                                                                   ~control.materializedSettings))
+                          ? (controlSettingsPresenceSet(effective->settings) & ~control.materializedSettings).count()
                           : effective->materializedLeaves;
 
     if (context.controlLeaves > limit || addedLeaves > limit - context.controlLeaves ||
@@ -3300,6 +4676,11 @@ void Access::layoutChild(Description<Parent> &parent, Description<Child> &child,
 }
 
 template <class T> void Access::preparedControl(Description<T> &description, std::uint32_t alreadyMaterialized) {
+  preparedControlPresence(description, ControlPropertyPresence{alreadyMaterialized});
+}
+
+template <class T>
+void Access::preparedControlPresence(Description<T> &description, ControlPropertyPresence alreadyMaterialized) {
   if (description.state_) {
     description.state_->controlPrepared = true;
     description.state_->materializedSettings = alreadyMaterialized;
@@ -3313,6 +4694,100 @@ template <class T> void Access::preparedControl(Description<T> &description, std
       }
     }
   }
+}
+
+inline void Access::preparedDialogHeading(Description<Label> &description, const TextValue &title) {
+  ControlSettings materialized;
+
+  materialized.text = title;
+  preparedControlPresence(description, controlSettingsPresenceSet(materialized));
+
+  if (description.state_) {
+    description.state_->inheritPreparedDefaults = true;
+  }
+}
+
+template <class T> void Access::preparedThemeSelectorCaption(Description<T> &description, const TextValue &caption) {
+  static_assert(std::same_as<T, Label> || std::same_as<T, Button>);
+  ControlSettings settings;
+
+  settings.text = caption;
+  preparedControlPresence(description, controlSettingsPresenceSet(settings));
+
+  if (description.state_) {
+    description.state_->inheritPreparedDefaults = true;
+    description.state_->settingsRequested = true;
+  }
+}
+
+inline Description<Dialog> Access::themeCatalogControl(Description<Dialog> description) {
+  if (description.state_) {
+    description.state_->semanticConstruction = std::make_shared<SemanticConstruction>();
+    description.state_->semanticConstruction->kind = ControlFactoryKind::THEME_CATALOG_BINDING;
+  }
+  return configuredControl(std::move(description), "ThemeSelectorCatalog");
+}
+
+template <class T> bool Access::themeCatalogRecipient(const Description<T> &description) noexcept {
+  return description.state_ && description.state_->semanticConstruction &&
+         description.state_->semanticConstruction->kind == ControlFactoryKind::THEME_CATALOG_BINDING;
+}
+
+inline Description<Dialog> Access::themeSelectorControl(Description<Dialog> description) {
+  if (description.state_) {
+    description.state_->semanticConstruction = std::make_shared<SemanticConstruction>();
+    description.state_->semanticConstruction->kind = ControlFactoryKind::THEME_SELECTOR_BINDING;
+  }
+
+  return configuredControl(std::move(description), "ThemeSelector");
+}
+
+inline Description<Dialog> Access::messageControl(Description<Dialog> description) {
+  if (description.state_) {
+    description.state_->semanticConstruction = std::make_shared<SemanticConstruction>();
+  }
+
+  return configuredControl(std::move(description), "MessageBox");
+}
+
+inline Description<Overlay> Access::notificationControl(Description<Overlay> description) {
+  if (description.state_) {
+    description.state_->semanticConstruction = std::make_shared<SemanticConstruction>();
+    description.state_->semanticConstruction->kind = ControlFactoryKind::NOTIFICATION_BINDING;
+  }
+
+  return configuredControl(std::move(description), "Notifications");
+}
+
+template <class T>
+std::expected<void, ManagedError> Access::messageSource(Description<T> &description, const ControlSettings &settings,
+                                                        ControlPropertyPresence materialized, ControlFactoryKind kind) {
+  if (!description.state_ || !description.state_->semanticConstruction ||
+      (description.state_->semanticConstruction->kind != kind &&
+       !(kind == ControlFactoryKind::THEME_SELECTOR_BINDING && themeCatalogRecipient(description)))) {
+    return std::unexpected(controlContextError({ControlContextErrorCode::INVALID_VALUE, {}}));
+  }
+
+  auto &construction = *description.state_->semanticConstruction;
+
+  construction.source = settings;
+  construction.materialized = materialized;
+  construction.prepared = true;
+
+  return {};
+}
+
+inline Description<Dialog> Access::internalDialog(Description<Dialog> description, const TextValue *prechargedTitle) {
+  // Only this composite's already checked options bypass ambient Dialog defaults; children still inherit normally.
+  if (prechargedTitle) {
+    ControlSettings settings;
+
+    settings.title = *prechargedTitle;
+    preparedControlPresence(description, controlSettingsPresenceSet(settings));
+    (void)std::move(description).settings(std::move(settings));
+  }
+
+  return configuredControl(std::move(description), "Dialog", false);
 }
 
 template <class T>
@@ -3375,6 +4850,7 @@ template <class T> Description<Widget> Access::erase(Description<T> description)
   erased.state_ = std::make_unique<Description<Widget>::State>();
   if (description.state_) {
     erased.state_->layout = description.state_->layout;
+    erased.state_->semanticConstruction = description.state_->semanticConstruction;
   }
   erased.state_->create =
     [description = std::move(description)](ManagedScene &scene, Node<Widget> parent,
@@ -3469,14 +4945,20 @@ template <class T, class... Args> Description<T> custom(Args &&...args) {
 template <class Content, class Initial>
 Description<DataStateView> detail::Access::dataState(Initial initial, Description<Content> content,
                                                      DataStateConfig config, bool automatic) {
-  auto result = describe<DataStateView>(
-    [initial, config = std::move(config), automatic](ManagedScene &scene, Node<Widget> parent) mutable {
-      if constexpr (std::same_as<Initial, DataPresentation>) {
-        return scene.beginDataState(parent, initial, std::move(config), automatic);
-      } else {
-        return scene.beginBoundDataState(parent, initial, std::move(config));
-      }
-    });
+  auto result = cold<DataStateView>([initial, config = std::move(config), automatic](
+                                      ManagedScene &scene, Node<Widget> parent, MountContext &context) mutable {
+    auto effective = controlDataStateConfig(*context.controlSettings, std::move(config));
+
+    if (effective.showStatus && !effective.resolver && context.dataStateResolver) {
+      effective.resolver = *context.dataStateResolver;
+    }
+
+    if constexpr (std::same_as<Initial, DataPresentation>) {
+      return scene.beginDataState(parent, initial, std::move(effective), automatic);
+    } else {
+      return scene.beginBoundDataState(parent, initial, std::move(effective));
+    }
+  });
   layoutChild(result, content);
   result.state_->children.push_back(
     [content = std::move(content), automatic](ManagedScene &scene, Node<Widget> parent,
@@ -3501,7 +4983,7 @@ Description<DataStateView> detail::Access::dataState(Initial initial, Descriptio
 
       return scene.finishDataState(parent, *child, automatic);
     });
-  return result;
+  return configuredControl(std::move(result), "DataStateView");
 }
 
 /** @tparam Content Retained widget type mounted as the one body subtree.
@@ -3566,7 +5048,12 @@ template <class T> Description<T> control(std::string_view text, ControlStyle st
         return std::expected<Node<T>, ManagedError>(std::unexpected(failure));
       }
 
-      return scene.emplace<T>(parent, std::move(*value), style, policy);
+      if constexpr (std::same_as<T, Button>) {
+        return scene.emplace<T>(parent, std::move(*value), style, policy,
+                                context.controlSettings->chrome.value_or(ButtonChrome::BRACKETS));
+      } else {
+        return scene.emplace<T>(parent, std::move(*value), style, policy);
+      }
     });
   return detail::Access::controlArguments(
     detail::Access::configuredControl(std::move(description), detail::Access::controlType<T>()),
@@ -3589,14 +5076,16 @@ namespace detail {
  * @param style Manual appearances copied into the recipe.
  * @param policy Owning layout constraints.
  * @param resolver Owning explicit localization adapter; no locale subscription is created.
+ * @param chrome Button constructor decoration; sparse chrome settings override it for Button only.
  * @return Single-use caption recipe with original text/resource errors.
  */
 template <class T>
-Description<T> textControl(TextValue text, ControlStyle style, SizePolicy policy, TextResolver resolver) {
+Description<T> textControl(TextValue text, ControlStyle style, SizePolicy policy, TextResolver resolver,
+                           ButtonChrome chrome = ButtonChrome::BRACKETS) {
   auto arguments = ControlSettings{.text = std::move(text)};
   auto description = Access::cold<T>(
-    [style, policy, resolver = std::move(resolver)](ManagedScene &scene, Node<Widget> parent,
-                                                    MountContext &context) -> std::expected<Node<T>, ManagedError> {
+    [style, policy, chrome, resolver = std::move(resolver)](
+      ManagedScene &scene, Node<Widget> parent, MountContext &context) -> std::expected<Node<T>, ManagedError> {
       const auto &caption = *context.controlSettings->text;
       auto value = resolver ? caption.resolve(scene.widthPolicy(), resolver) : caption.resolve(scene.widthPolicy());
 
@@ -3612,7 +5101,12 @@ Description<T> textControl(TextValue text, ControlStyle style, SizePolicy policy
         return std::unexpected(failure);
       }
 
-      return scene.emplace<T>(parent, std::move(*value), style, policy);
+      if constexpr (std::same_as<T, Button>) {
+        return scene.emplace<T>(parent, std::move(*value), style, policy,
+                                context.controlSettings->chrome.value_or(chrome));
+      } else {
+        return scene.emplace<T>(parent, std::move(*value), style, policy);
+      }
     });
   return Access::controlArguments(Access::configuredControl(std::move(description), Access::controlType<T>()),
                                   std::move(arguments));
@@ -3641,7 +5135,14 @@ template <class T> Description<T> liveCaption(TextSource source, ControlStyle st
       if (!empty) {
         return std::unexpected(textError(parent, empty.error()));
       }
-      auto node = scene.emplace<T>(parent, std::move(*empty), style, policy);
+      auto node = [&] {
+        if constexpr (std::same_as<T, Button>) {
+          return scene.emplace<T>(parent, std::move(*empty), style, policy,
+                                  context.controlSettings->chrome.value_or(ButtonChrome::BRACKETS));
+        } else {
+          return scene.emplace<T>(parent, std::move(*empty), style, policy);
+        }
+      }();
       if (!node) {
         return node;
       }
@@ -4004,11 +5505,24 @@ inline Description<LineEdit> lineEditRecipe(std::optional<ManagedState<std::stri
       }
       if (!external) {
         const auto &text = settings.text ? *settings.text : initial;
-        auto resolved = resolver ? text.resolve(scene.widthPolicy(), resolver) : text.resolve(scene.widthPolicy());
+        auto resolved = resolver ? text.resolve(scene.widthPolicy(), resolver, effective->limits)
+                                 : text.resolve(scene.widthPolicy(), effective->limits);
         if (!resolved) {
           auto failure = error(parent, TreeError::INVALID_ARGUMENT);
           if (const auto *textError = std::get_if<TextError>(&resolved.error())) {
             failure.text = *textError;
+            // Initial draft admission remains a binding failure when effective
+            // limits reject it before an editor or model has been allocated.
+            switch (textError->kind) {
+            case TextErrorKind::INPUT_LIMIT:
+            case TextErrorKind::CLUSTER_LIMIT:
+            case TextErrorKind::GRAPHEME_LIMIT:
+            case TextErrorKind::CELL_LIMIT:
+              failure.phase = ManagedPhase::BIND;
+              break;
+            default:
+              break;
+            }
           } else {
             failure.resource = std::get<TextResourceError>(resolved.error());
           }
@@ -4165,11 +5679,15 @@ Description<VirtualTable<T>> virtualTable(ManagedModel<T> model,
   // A recipe may outlive the caller's array or vector. Copy before retaining a mount callback.
   auto ownedColumns = std::vector<TableColumn<T>>(columns.begin(), columns.end());
 
-  return detail::Access::describe<VirtualTable<T>>(
+  auto description = detail::Access::cold<VirtualTable<T>>(
     [model, columns = std::move(ownedColumns), options, policy,
-     prepared = std::move(prepared)](ManagedScene &scene, Node<Widget> parent) mutable {
-      return scene.virtualTable(parent, model, columns, options, policy, std::move(prepared));
+     prepared = std::move(prepared)](ManagedScene &scene, Node<Widget> parent, detail::MountContext &context) mutable {
+      auto effective = detail::controlVirtualTableOptions(*context.controlSettings, options);
+
+      return scene.virtualTable(parent, model, columns, effective, policy, std::move(prepared));
     });
+
+  return detail::Access::configuredControl(std::move(description), "VirtualTable");
 }
 
 /// @brief Describe a managed virtual list without opening a range until mount.
@@ -4186,11 +5704,15 @@ template <class T>
 Description<VirtualList<T>> virtualList(ManagedModel<T> model, std::type_identity_t<ManagedListFormatter<T>> delegate,
                                         VirtualListOptions options = {}, SizePolicy policy = {},
                                         std::type_identity_t<ManagedViewHandler<T>> prepared = {}) {
-  return detail::Access::describe<VirtualList<T>>(
+  auto description = detail::Access::cold<VirtualList<T>>(
     [model, delegate = std::move(delegate), options, policy,
-     prepared = std::move(prepared)](ManagedScene &scene, Node<Widget> parent) mutable {
-      return scene.virtualList(parent, model, std::move(delegate), options, policy, std::move(prepared));
+     prepared = std::move(prepared)](ManagedScene &scene, Node<Widget> parent, detail::MountContext &context) mutable {
+      auto effective = detail::controlVirtualListOptions(*context.controlSettings, options);
+
+      return scene.virtualList(parent, model, std::move(delegate), effective, policy, std::move(prepared));
     });
+
+  return detail::Access::configuredControl(std::move(description), "VirtualList");
 }
 
 /// @brief Describe a managed chart using the existing frame preparation order.
@@ -4208,11 +5730,20 @@ template <class T>
 Description<Chart<T>> chart(ManagedModel<T> model, std::type_identity_t<ManagedChartAccessor<T>> accessor,
                             ChartOptions options = {}, ManagedChartOrigin first = {},
                             std::type_identity_t<ManagedViewHandler<T>> prepared = {}) {
-  return detail::Access::describe<Chart<T>>(
-    [model, accessor = std::move(accessor), options, first = std::move(first),
-     prepared = std::move(prepared)](ManagedScene &scene, Node<Widget> parent) mutable {
-      return scene.chart(parent, model, std::move(accessor), options, std::move(first), std::move(prepared));
+  auto description = detail::Access::cold<Chart<T>>(
+    [model, accessor = std::move(accessor), options, first = std::move(first), prepared = std::move(prepared)](
+      ManagedScene &scene, Node<Widget> parent,
+      detail::MountContext &context) mutable -> std::expected<Node<Chart<T>>, ManagedError> {
+      auto effective = detail::controlChartOptions(*context.controlSettings, options);
+
+      if (!effective) {
+        return std::unexpected(detail::error(parent, effective.error()));
+      }
+
+      return scene.chart(parent, model, std::move(accessor), *effective, std::move(first), std::move(prepared));
     });
+
+  return detail::Access::configuredControl(std::move(description), "Chart");
 }
 
 /// @brief Named owning settings for a table recipe; defaults match the positional factory.
@@ -4272,10 +5803,12 @@ inline TextCollectionRecipe graphemes(TextSource source, TextSplitOptions option
  */
 inline Description<VirtualList<TextSegment>> virtualList(TextCollectionRecipe recipe,
                                                          VirtualListConfig<TextSegment> config = {}) {
-  return detail::Access::cold<VirtualList<TextSegment>>(
+  auto description = detail::Access::cold<VirtualList<TextSegment>>(
     [recipe = std::move(recipe), config = std::move(config)](
       ManagedScene &scene, Node<Widget> parent,
       detail::MountContext &context) mutable -> std::expected<Node<VirtualList<TextSegment>>, ManagedError> {
+      config.options = detail::controlVirtualListOptions(*context.controlSettings, config.options);
+
       auto graph = std::make_shared<detail::Access::ColdGraph>();
       graph->scene = &scene;
       context.rollback.push_back([graph] {
@@ -4299,6 +5832,8 @@ inline Description<VirtualList<TextSegment>> virtualList(TextCollectionRecipe re
       });
       return node;
     });
+
+  return detail::Access::configuredControl(std::move(description), "VirtualList");
 }
 
 /// @brief Describe a table using named settings and the same owning mount transaction.
@@ -4347,9 +5882,94 @@ Description<Chart<T>> chart(ManagedModel<T> model, std::type_identity_t<ManagedC
                std::forward<Config>(config).prepared);
 }
 
+inline Description<Overlay> detail::Access::overlayControl(OverlayOptions options, SizePolicy policy) {
+  auto description =
+    cold<Overlay>([options, policy](ManagedScene &scene, Node<Widget> parent,
+                                    MountContext &context) -> std::expected<Node<Overlay>, ManagedError> {
+      auto effective = controlOverlayOptions(*context.controlSettings, options);
+      if (!effective) {
+        return std::unexpected(error(parent, effective.error()));
+      }
+      return scene.emplace<Overlay>(parent, *effective, policy);
+    });
+  return configuredControl(std::move(description), "Overlay");
+}
+
+/** @tparam Children Consuming ordinary child recipes, including an empty pack.
+ * @param options Actual owning ordinary Overlay insets/alignment.
+ * @param policy Actual parent size policy, retained beneath explicit sizing modifiers.
+ * @param children Real children mounted in their original sibling paint/hit order.
+ * @return One native Overlay with transactional cleanup and deferred reference publication.
+ */
+template <detail::DescriptionInput... Children>
+Description<Overlay> overlay(OverlayOptions options, SizePolicy policy, Children &&...children) {
+  auto description = detail::Access::overlayControl(options, policy);
+  (detail::Access::layoutChild(description, children), ...);
+  (description.state_->children.push_back(
+     [child =
+        std::forward<Children>(children)](ManagedScene &scene, Node<Widget> parent,
+                                          detail::MountContext &context) mutable -> std::expected<void, ManagedError> {
+       auto mounted = detail::Access::mount(std::move(child), scene, parent, context);
+       return mounted ? std::expected<void, ManagedError>{} : std::unexpected(mounted.error());
+     }),
+   ...);
+  return description;
+}
+
+/** @tparam Children Consuming ordinary child recipes.
+ * @param options Actual owning Overlay settings; absent sparse fields retain these values.
+ * @param children Real children in original order.
+ * @return Native Overlay recipe using the existing default SizePolicy.
+ */
+template <detail::DescriptionInput... Children>
+Description<Overlay> overlay(OverlayOptions options, Children &&...children) {
+  return overlay(options, SizePolicy{}, std::forward<Children>(children)...);
+}
+
+/** @tparam Children Consuming ordinary child recipes, including none.
+ * @param children Real child edges in original order.
+ * @return Native Overlay with existing default options and size policy.
+ */
+template <detail::DescriptionInput... Children> Description<Overlay> overlay(Children &&...children) {
+  return overlay(OverlayOptions{}, SizePolicy{}, std::forward<Children>(children)...);
+}
+
+/** @tparam Children Consuming ordinary child recipes.
+ * @param reference Empty observing slot published only after complete mount.
+ * @param options Actual owning Overlay layout options.
+ * @param policy Actual parent size policy.
+ * @param children Real child edges in original order.
+ * @return Native Ref-first Overlay recipe using the same checked option path.
+ */
+template <detail::DescriptionInput... Children>
+Description<Overlay> overlay(Ref<Overlay> reference, OverlayOptions options, SizePolicy policy,
+                             Children &&...children) {
+  return overlay(options, policy, std::forward<Children>(children)...).reference(std::move(reference));
+}
+
+/** @tparam Children Consuming ordinary child recipes.
+ * @param reference Empty observing slot.
+ * @param options Actual owning Overlay layout options.
+ * @param children Real child edges in original order.
+ * @return Native Ref-first Overlay using the existing default SizePolicy.
+ */
+template <detail::DescriptionInput... Children>
+Description<Overlay> overlay(Ref<Overlay> reference, OverlayOptions options, Children &&...children) {
+  return overlay(options, std::forward<Children>(children)...).reference(std::move(reference));
+}
+
+/** @tparam Children Consuming ordinary child recipes.
+ * @param reference Empty observing slot.
+ * @param children Real child edges in original order.
+ * @return Native Ref-first Overlay using existing default options and size policy.
+ */
+template <detail::DescriptionInput... Children>
+Description<Overlay> overlay(Ref<Overlay> reference, Children &&...children) {
+  return overlay(std::forward<Children>(children)...).reference(std::move(reference));
+}
+
 /** @brief Compose a retained linear layout with consuming child recipes.
- * @tparam T Existing Row or Column subtype
- * accepting LinearOptions.
+ * @tparam T Existing Row or Column subtype accepting LinearOptions.
  * @tparam Children Description types, passed as rvalues.
  * @param options Owning layout settings, validated by the existing layout engine.
  * @param children Owning recipes, mounted in argument order after the parent setup.
@@ -4359,8 +5979,8 @@ template <class T, detail::DescriptionInput... Children>
 Description<T> linear(LinearOptions options, Children &&...children) {
   auto description = detail::Access::configuredControl(
     detail::Access::cold<T>([options](ManagedScene &scene, Node<Widget> parent, detail::MountContext &context) mutable {
-      if (context.controlSettings && context.controlSettings->gap) {
-        options.gap = *context.controlSettings->gap;
+      if (context.controlSettings) {
+        options = detail::controlLinearOptions(*context.controlSettings, options);
       }
       return scene.emplace<T>(parent, options);
     }),
@@ -4397,8 +6017,8 @@ Description<T> linear(LinearOptions options, Children &&...children) {
 template <class T, detail::DescriptionRange R> Description<T> linear(LinearOptions options, R &&children) {
   auto description = detail::Access::configuredControl(
     detail::Access::cold<T>([options](ManagedScene &scene, Node<Widget> parent, detail::MountContext &context) mutable {
-      if (context.controlSettings && context.controlSettings->gap) {
-        options.gap = *context.controlSettings->gap;
+      if (context.controlSettings) {
+        options = detail::controlLinearOptions(*context.controlSettings, options);
       }
       return scene.emplace<T>(parent, options);
     }),
@@ -4947,6 +6567,90 @@ std::expected<Node<T>, ManagedError> mount(ManagedScene &scene, Description<T> &
     }
   }
 
+  if (detail::ControlContextAccess::hasUserConfiguration(controls)) {
+    for (const auto name : {"Border", "Gauge"}) {
+      auto installed = detail::ControlContextAccess::installPrimitiveSchema(controls, name);
+
+      if (!installed) {
+        auto consumed = std::move(description);
+
+        return std::unexpected(detail::controlContextError(installed.error(), scene.root()));
+      }
+    }
+
+    for (const auto name : {"ScrollArea", "ScrollBar"}) {
+      auto installed = detail::ControlContextAccess::installScrollSchema(controls, name);
+
+      if (!installed) {
+        auto consumed = std::move(description);
+
+        return std::unexpected(detail::controlContextError(installed.error(), scene.root()));
+      }
+    }
+    for (const auto name : {"HelpView", "KeyHints"}) {
+      auto installed = detail::ControlContextAccess::installKeyHelpSchema(controls, name);
+      if (!installed) {
+        auto consumed = std::move(description);
+        return std::unexpected(detail::controlContextError(installed.error(), scene.root()));
+      }
+    }
+    for (const auto name : {"VirtualList", "VirtualTable", "Chart"}) {
+      auto installed = detail::ControlContextAccess::installVirtualViewSchema(controls, name);
+
+      if (!installed) {
+        auto consumed = std::move(description);
+        return std::unexpected(detail::controlContextError(installed.error(), scene.root()));
+      }
+    }
+
+    for (const auto name : {"OverlayHost", "Dialog"}) {
+      auto installed = detail::ControlContextAccess::installDialogSchema(controls, name);
+
+      if (!installed) {
+        auto consumed = std::move(description);
+
+        return std::unexpected(detail::controlContextError(installed.error(), scene.root()));
+      }
+    }
+
+    auto notificationInstalled = detail::ControlContextAccess::installNotificationSchema(controls);
+
+    if (!notificationInstalled) {
+      auto consumed = std::move(description);
+
+      return std::unexpected(detail::controlContextError(notificationInstalled.error(), scene.root()));
+    }
+
+    auto selectorInstalled = detail::ControlContextAccess::installThemeCatalogSchema(controls);
+
+    if (!selectorInstalled) {
+      auto consumed = std::move(description);
+      return std::unexpected(detail::controlContextError(selectorInstalled.error(), scene.root()));
+    }
+
+    auto messageInstalled = detail::ControlContextAccess::installMessageSchema(controls);
+
+    if (!messageInstalled) {
+      auto consumed = std::move(description);
+
+      return std::unexpected(detail::controlContextError(messageInstalled.error(), scene.root()));
+    }
+
+    auto dataStateInstalled = detail::ControlContextAccess::installDataStateSchema(controls);
+
+    if (!dataStateInstalled) {
+      auto consumed = std::move(description);
+
+      return std::unexpected(detail::controlContextError(dataStateInstalled.error(), scene.root()));
+    }
+
+    auto installed = detail::ControlContextAccess::installOverlaySchema(controls);
+    if (!installed) {
+      auto consumed = std::move(description);
+      return std::unexpected(detail::controlContextError(installed.error(), scene.root()));
+    }
+  }
+
   auto prepared = detail::Access::defersControlValidation(description)
                     ? std::expected<ControlContext, ControlContextError>(controls)
                     : controls.prepared();
@@ -5058,6 +6762,7 @@ auto vbox(Args &&...args) {
  * @param body Ordinary retained content; dialogs belong outside this composition in overlayHost.
  * @param options Owning immutable host budgets and explicit text resolver.
  * @return Consuming overlay recipe with one private zero-intrinsic notification layer.
+ * Ordinary Overlay layout modifiers apply locally; only scoped Notifications defaults apply to this wrapper.
  */
 template <detail::DescriptionInput Body>
 Description<Overlay> notifications(NotificationCenter center, Body &&body, NotificationOptions options = {}) {
@@ -5066,7 +6771,11 @@ Description<Overlay> notifications(NotificationCenter center, Body &&body, Notif
     [center = std::move(center), body = std::forward<Body>(body),
      options](ManagedScene &scene, Node<Widget> parent,
               detail::MountContext &context) mutable -> std::expected<Node<Overlay>, ManagedError> {
-      auto wrapper = scene.emplace<Overlay>(parent);
+      auto effective = detail::controlOverlayOptions(*context.controlSettings, {});
+      if (!effective) {
+        return std::unexpected(detail::error(parent, effective.error()));
+      }
+      auto wrapper = scene.emplace<Overlay>(parent, *effective);
       if (!wrapper) {
         return std::unexpected(wrapper.error());
       }
@@ -5077,11 +6786,13 @@ Description<Overlay> notifications(NotificationCenter center, Body &&body, Notif
       if (!content) {
         return std::unexpected(content.error());
       }
-      auto bound = detail::Access::notifications(scene, *wrapper, *content, center, options, context);
+      auto effectiveOptions = detail::controlNotificationOptions(*context.controlSettings, options);
+      auto bound = detail::Access::notifications(scene, *wrapper, *content, center, effectiveOptions, context);
       return bound ? wrapper : std::unexpected(bound.error());
     });
 
-  return detail::Access::withLayout(std::move(description), std::move(layout));
+  // The semantic identity inherits only Notifications defaults, never unrelated ordinary Overlay declarations.
+  return detail::Access::notificationControl(detail::Access::withLayout(std::move(description), std::move(layout)));
 }
 
 /** @brief Observe the real notification-plane Overlay while keeping its service handle separate.
@@ -5114,7 +6825,8 @@ Description<OverlayHost> overlayHost(OverlayHostOptions options, Body &&body, La
     [options, body = std::forward<Body>(body), layers = std::tuple(std::forward<Layers>(layers)...)](
       ManagedScene &scene, Node<Widget> parent,
       detail::MountContext &context) mutable -> std::expected<Node<OverlayHost>, ManagedError> {
-      auto host = scene.emplace<OverlayHost>(parent, options);
+      const auto effective = detail::controlOverlayHostOptions(*context.controlSettings, options);
+      auto host = scene.emplace<OverlayHost>(parent, effective);
       if (!host) {
         return std::unexpected(host.error());
       }
@@ -5150,7 +6862,8 @@ Description<OverlayHost> overlayHost(OverlayHostOptions options, Body &&body, La
       return result ? host : std::unexpected(result.error());
     });
 
-  return detail::Access::withLayout(std::move(description), std::move(layout));
+  return detail::Access::configuredControl(detail::Access::withLayout(std::move(description), std::move(layout)),
+                                           "OverlayHost");
 }
 
 /** @tparam Body Consuming ordinary-body recipe.
@@ -5194,18 +6907,28 @@ Description<Dialog> dialog(TextValue title, Body &&body, DialogOptions options =
     detail::Access::cold<Dialog>([options, heading = std::move(heading), content = std::move(content)](
                                    ManagedScene &scene, Node<Widget> parent,
                                    detail::MountContext &context) mutable -> std::expected<Node<Dialog>, ManagedError> {
-      auto valid = Dialog::validate(options);
+      const auto effective = detail::controlDialogOptions(*context.controlSettings, options);
+
+      if (context.controlSettings->title) {
+        heading = std::move(heading).settings({.text = *context.controlSettings->title});
+
+        if (context.controlPrepared) {
+          detail::Access::preparedDialogHeading(heading, *context.controlSettings->title);
+        }
+      }
+
+      auto valid = Dialog::validate(effective);
       if (!valid) {
         return std::unexpected(detail::error(parent, valid.error()));
       }
-      auto root = scene.emplace<Dialog>(parent, options);
+      auto root = scene.emplace<Dialog>(parent, effective);
       if (!root) {
         return std::unexpected(root.error());
       }
       if (context.root == Node<Widget>{}) {
         context.root = *root;
       }
-      auto panel = detail::Access::dialogPanel(scene, *root, options.frame);
+      auto panel = detail::Access::dialogPanel(scene, *root, effective.frame);
       if (!panel) {
         return std::unexpected(panel.error());
       }
@@ -5228,12 +6951,13 @@ Description<Dialog> dialog(TextValue title, Body &&body, DialogOptions options =
         return std::unexpected(bound.error());
       }
       auto styled = scene.style(
-        *root,
-        StyleTarget{.type = "Dialog", .classes = {"dialog", options.mode == DialogMode::MODAL ? "modal" : "nonmodal"}});
+        *root, StyleTarget{.type = "Dialog",
+                           .classes = {"dialog", effective.mode == DialogMode::MODAL ? "modal" : "nonmodal"}});
       return styled ? root : std::unexpected(styled.error());
     });
 
-  return detail::Access::withLayout(std::move(description), std::move(layout));
+  return detail::Access::configuredControl(detail::Access::withLayout(std::move(description), std::move(layout)),
+                                           "Dialog");
 }
 
 /** @tparam Body Consuming application content recipe.
@@ -5293,6 +7017,861 @@ Description<Dialog> themeSelector(ThemeSelectorRef reference, Catalog &&catalog,
 }
 
 /// @endcond
+
+/** @brief Owning class list stage using the same ordered managed setup as Description::classes. */
+struct ClassesModifier {
+  /** @brief Destroy owning names; checked container transfers remain fallible. */
+  ~ClassesModifier() = default;
+
+  detail::ClassNames values; ///< Owning ordered names, including duplicates; checked transfers remain fallible.
+
+  /** @tparam T Public Widget subtype, including final custom widgets.
+   * @param description Owning recipe consumed by this stage.
+   * @param modifier Names copied when the stage was constructed; empty clears classes.
+   * @return Consuming recipe preserving other metadata and source-order style replacement.
+   */
+  template <class T> friend Description<T> operator|(Description<T> &&description, ClassesModifier modifier) {
+    return std::move(description).setup([values = modifier.values](ManagedScene &scene, Node<T> node) mutable {
+      return scene.classes(node, values.values);
+    });
+  }
+};
+
+/** @param value Class names copied and split now on ASCII whitespace; empty clears classes.
+ * @return Owning consuming stage equivalent to Description::classes, preserving order and duplicates.
+ */
+inline ClassesModifier classes(std::string_view value) {
+  return {detail::splitClasses(value)};
+}
+
+/** @brief Owning local instance-state stage for every widget recipe. */
+struct InstanceStateModifier {
+  bool visibility{}; ///< Select visibility when true, enabled state otherwise.
+  bool value{true};  ///< Final local flag value; no runtime borrow.
+
+  /** @tparam T Widget subtype, including final widgets without a size policy.
+   * @param description Owning recipe consumed by this stage.
+   * @param modifier Local state update; the last modifier for each flag wins.
+   * @return Updated recipe sharing the existing mount transaction.
+   */
+  template <class T> friend Description<T> operator|(Description<T> &&description, InstanceStateModifier modifier) {
+    if (modifier.visibility) {
+      return std::move(description).visible(modifier.value);
+    }
+
+    return std::move(description).enabled(modifier.value);
+  }
+};
+
+/** @param value Local visibility, defaulting to true.
+ * @return Consuming stage equivalent to Description::visible.
+ */
+constexpr InstanceStateModifier visible(bool value = true) {
+  return {true, value};
+}
+
+/** @param value Local enabled state, defaulting to true.
+ * @return Consuming stage equivalent to Description::enabled.
+ */
+constexpr InstanceStateModifier enabled(bool value = true) {
+  return {false, value};
+}
+
+/** @brief Owning Button decoration pipe stage; shares sparse staging with Description::chrome. */
+struct ChromeModifier {
+  ButtonChrome value; ///< Owning checked decoration selection.
+
+  /** @param description Consumed standard Button recipe.
+   * @param modifier Owning decoration override.
+   * @return Recipe staging the same final property as the compact method.
+   */
+  friend Description<Button> operator|(Description<Button> &&description, ChromeModifier modifier) {
+    return std::move(description).chrome(modifier.value);
+  }
+};
+
+/** @param value Checked Button decoration selection.
+ * @return Owning Button-only sparse pipe stage.
+ */
+inline ChromeModifier chrome(ButtonChrome value) {
+  return {value};
+}
+
+/** @brief Owning native Border/Gauge/scroll decoration pipe stage. */
+struct PrimitiveDecorationModifier {
+  std::optional<PrimitiveGlyphs> glyphs;    ///< Present one-cell decoration mode.
+  std::optional<std::size_t> maxPaintCells; ///< Present positive paint-work cap.
+
+  /** @tparam T Exactly the native Border, Gauge, ScrollArea or ScrollBar.
+   * @param description Consumed native primitive recipe.
+   * @param modifier Owning sparse decoration override.
+   * @return Recipe staging the same settings as the supported compact methods.
+   */
+  template <class T>
+    requires(std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, ScrollArea> ||
+             std::same_as<T, ScrollBar>)
+  friend Description<T> operator|(Description<T> &&description, PrimitiveDecorationModifier modifier) {
+    if (modifier.glyphs) {
+      (void)std::move(description).glyphs(*modifier.glyphs);
+    }
+
+    if (modifier.maxPaintCells) {
+      (void)std::move(description).maxPaintCells(*modifier.maxPaintCells);
+    }
+
+    return std::move(description);
+  }
+};
+
+/** @param value One-cell decoration mode, checked before native construction.
+ * @return Owning native Border/Gauge/scroll sparse pipe stage.
+ */
+inline PrimitiveDecorationModifier glyphs(PrimitiveGlyphs value) {
+  return {value, {}};
+}
+
+/** @param cells Positive allocated paint-work cap.
+ * @return Owning native Border/Gauge/scroll sparse pipe stage.
+ */
+inline PrimitiveDecorationModifier maxPaintCells(std::size_t cells) {
+  return {{}, cells};
+}
+
+/** @brief Sparse exact list/table row-layout stage. */
+struct VirtualRowsModifier {
+  std::optional<std::int32_t> height;  ///< Positive row height.
+  std::optional<std::size_t> overscan; ///< Extra requested rows per side; zero is present.
+
+  /** @tparam T Exact native list/table type. @param description Consumed recipe.
+   * @param modifier Sparse row options. @return Recipe staging the same checked leaves as its methods.
+   */
+  template <class T>
+    requires(detail::IsVirtualList<T>::value || detail::IsVirtualTable<T>::value)
+  friend Description<T> operator|(Description<T> &&description, VirtualRowsModifier modifier) {
+    if (modifier.height) {
+      (void)std::move(description).rowHeight(*modifier.height);
+    }
+
+    if (modifier.overscan) {
+      (void)std::move(description).overscanRows(*modifier.overscan);
+    }
+
+    return std::move(description);
+  }
+};
+
+/** @param value Positive logical-row height in cells. @return Exact native list/table stage. */
+inline VirtualRowsModifier rowHeight(std::int32_t value) {
+  return {value, {}};
+}
+
+/** @param value Additional requested rows per side; zero overrides defaults. @return Exact native list/table stage. */
+inline VirtualRowsModifier overscanRows(std::size_t value) {
+  return {{}, value};
+}
+
+/** @brief Sparse exact table preparation-budget stage. */
+struct VirtualTableBudgetModifier {
+  std::optional<std::size_t> columns; ///< Positive configured-column cap.
+  std::optional<std::size_t> cells;   ///< Positive visible body-cell cap.
+  std::optional<std::size_t> bytes;   ///< Positive header/body UTF-8 cap.
+
+  /** @tparam T Exact native table type. @param description Consumed recipe.
+   * @param modifier Sparse table budgets. @return Recipe staging the same checked leaves as its methods.
+   */
+  template <class T>
+    requires detail::IsVirtualTable<T>::value
+  friend Description<T> operator|(Description<T> &&description, VirtualTableBudgetModifier modifier) {
+    if (modifier.columns) {
+      (void)std::move(description).maxColumns(*modifier.columns);
+    }
+
+    if (modifier.cells) {
+      (void)std::move(description).maxPreparedCells(*modifier.cells);
+    }
+
+    if (modifier.bytes) {
+      (void)std::move(description).maxPreparedTextBytes(*modifier.bytes);
+    }
+
+    return std::move(description);
+  }
+};
+
+/** @param value Positive configured-column cap. @return Exact native table stage. */
+inline VirtualTableBudgetModifier maxColumns(std::size_t value) {
+  return {value, {}, {}};
+}
+
+/** @param value Positive visible body-cell cap. @return Exact native table stage. */
+inline VirtualTableBudgetModifier maxPreparedCells(std::size_t value) {
+  return {{}, value, {}};
+}
+
+/** @param value Positive header/body UTF-8 cap. @return Exact native table stage. */
+inline VirtualTableBudgetModifier maxPreparedTextBytes(std::size_t value) {
+  return {{}, {}, value};
+}
+
+/** @brief Sparse exact chart construction stage; callbacks and providers stay in the recipe. */
+struct ChartModifier {
+  ControlSettings patch{}; ///< Only the six chart leaves are staged by the named helpers.
+
+  /** @tparam T Exact native chart type. @param description Consumed recipe.
+   * @param modifier Owning chart literals. @return Same exact recipe with its sparse patch applied.
+   */
+  template <class T>
+    requires detail::IsChart<T>::value
+  friend Description<T> operator|(Description<T> &&description, ChartModifier modifier) {
+    detail::Access::chartSettings(description, std::move(modifier.patch));
+
+    return std::move(description);
+  }
+};
+
+/** @param value Existing native line/candle mode. @return Exact native chart stage. */
+inline ChartModifier mode(ChartMode value) {
+  return {{.mode = value}};
+}
+
+/** @param value Chart-only candle glyph domain. @return Exact native chart stage. */
+inline ChartModifier chartGlyphSet(ChartGlyphSet value) {
+  return {{.chartGlyphSet = value}};
+}
+
+/** @param cells Nonnegative empty columns between candles. @return Exact native chart stage. */
+inline ChartModifier candleGap(std::int32_t cells) {
+  return {{.candleGap = cells}};
+}
+
+/** @param range Finite ordered/equal endpoints, or nullopt for automatic scale. @return Exact native chart stage. */
+inline ChartModifier yRange(std::optional<ChartRange> range) {
+  ControlChartRangeSettings patch{.enabled = range.has_value()};
+
+  if (range) {
+    patch.minimum = range->minimum;
+    patch.maximum = range->maximum;
+  }
+
+  return {{.yRange = patch}};
+}
+
+/** @brief Owning sparse DataStateView construction stage; no expression is resolved here. */
+struct DataStateModifier {
+  ~DataStateModifier() = default;
+
+  ControlSettings patch{}; ///< Only the ten data-state leaves are staged by the named helpers.
+
+  /** @tparam T Exact native DataStateView type. @param description Consumed recipe.
+   * @param modifier Owning status patch. @return Same exact recipe with native checked settings staged.
+   */
+  template <class T>
+    requires std::same_as<T, DataStateView>
+  friend Description<T> operator|(Description<T> &&description, DataStateModifier modifier) {
+    if (modifier.patch.showStatus) {
+      (void)std::move(description).showStatus(*modifier.patch.showStatus);
+    }
+
+    if (modifier.patch.statusRows) {
+      (void)std::move(description).statusRows(*modifier.patch.statusRows);
+    }
+
+    if (modifier.patch.contentPolicy) {
+      (void)std::move(description).contentPolicy(*modifier.patch.contentPolicy);
+    }
+
+    if (modifier.patch.spinnerInterval) {
+      (void)std::move(description).spinnerInterval(*modifier.patch.spinnerInterval);
+    }
+
+    (void)std::move(description).labels(std::move(modifier.patch.labels));
+
+    return std::move(description);
+  }
+};
+
+/** @param value Native status visibility; false suppresses all status-label and timer work. @return Exact native
+ * DataStateView stage. */
+inline DataStateModifier showStatus(bool value = true) {
+  return {{.showStatus = value}};
+}
+
+/** @param value Positive status strip rows. @return Exact native DataStateView stage. */
+inline DataStateModifier statusRows(std::int32_t value) {
+  return {{.statusRows = value}};
+}
+
+/** @param value Existing native body policy. @return Exact native DataStateView stage. */
+inline DataStateModifier contentPolicy(DataContentPolicy value) {
+  return {{.contentPolicy = value}};
+}
+
+/** @param value Positive full-width monotonic milliseconds. @return Exact native DataStateView stage. */
+inline DataStateModifier spinnerInterval(SchedulerTime value) {
+  return {{.spinnerInterval = value}};
+}
+
+/** @param values Owning sparse status expressions. @return Exact native DataStateView stage. */
+inline DataStateModifier labels(ControlDataStateLabelSettings values) {
+  return {{.labels = std::move(values)}};
+}
+
+/** @brief Exact host stage; does not opt into ordinary Overlay layout modifiers. */
+struct OverlayHostModifier {
+  std::size_t value; ///< Positive layer-registration cap, including hidden layers.
+
+  /** @param description Consumed native host. @param modifier Positive registration cap.
+   * @return Same host recipe with sparse checked settings.
+   */
+  friend Description<OverlayHost> operator|(Description<OverlayHost> &&description, OverlayHostModifier modifier) {
+    return std::move(description).maxLayers(modifier.value);
+  }
+};
+
+/** @param value Positive registration cap, including hidden layers. @return Exact native host stage. */
+inline OverlayHostModifier maxLayers(std::size_t value) {
+  return {value};
+}
+
+/** @brief Owning exact Dialog stage; no title resolution occurs while staging. */
+struct DialogModifier {
+  ~DialogModifier() = default;
+
+  ControlSettings patch{}; ///< Only title and the nine dialog leaves are staged by these helpers.
+
+  /** @param description Consumed native dialog. @param modifier Owning sparse caption/options.
+   * @return Same native dialog; ui::frame retains its existing Border-wrapper semantics.
+   */
+  friend Description<Dialog> operator|(Description<Dialog> &&description, DialogModifier modifier) {
+    if (modifier.patch.title) {
+      (void)std::move(description).title(std::move(*modifier.patch.title));
+    }
+
+    return std::move(description).dialogSettings(modifier.patch.dialog);
+  }
+};
+
+/** @brief Owning MessageBox-only stage, checked against actual native capability at preparation. */
+struct MessageModifier {
+  ~MessageModifier() = default;
+
+  ControlSettings patch{}; ///< Owning body and grouped native message options.
+  bool options{};          ///< Distinguish an explicit empty message group from a body stage.
+
+  /** @param description Consumed actual native message. @param modifier Owning sparse stage.
+   * @return Same native recipe; ordinary Dialog is rejected during checked preparation.
+   */
+  friend Description<Dialog> operator|(Description<Dialog> &&description, MessageModifier modifier) {
+    if (modifier.patch.body) {
+      (void)std::move(description).body(std::move(*modifier.patch.body));
+    }
+    if (modifier.options) {
+      (void)std::move(description).messageSettings(std::move(modifier.patch.message));
+    }
+
+    return std::move(description);
+  }
+};
+
+/** @param value Owning paragraph expression. @return Exact native MessageBox stage. */
+inline MessageModifier body(TextValue value) {
+  return {{.body = std::move(value)}, false};
+}
+
+/** @param value Literal paragraph bytes copied immediately. @return Exact native MessageBox stage. */
+inline MessageModifier body(std::string_view value) {
+  return body(TextValue(value));
+}
+
+/** @param value Owning sparse options, merged per leaf. @return Exact native MessageBox stage. */
+inline MessageModifier messageSettings(ControlMessageSettings value) {
+  return {{.message = std::move(value)}, true};
+}
+
+/** @param value Owning caption expression. @return Exact native Dialog stage. */
+inline DialogModifier title(TextValue value) {
+  return {{.title = std::move(value)}};
+}
+
+/** @param value Literal caption bytes, copied immediately. @return Exact native Dialog stage. */
+inline DialogModifier title(std::string_view value) {
+  return title(TextValue(value));
+}
+
+/** @param value Native dialog input policy. @return Exact native Dialog stage. */
+inline DialogModifier mode(DialogMode value) {
+  return {{.dialog = {.mode = value}}};
+}
+
+/** @param value Native dialog placement. @return Exact native Dialog stage. */
+inline DialogModifier placement(DialogPlacement value) {
+  return {{.dialog = {.placement = value}}};
+}
+
+/** @param value Independent positive panel caps. @return Exact native Dialog stage. */
+inline DialogModifier maximumPanelSize(CellSize value) {
+  return {{.dialog = {.maximumPanelSize = {.width = value.width, .height = value.height}}}};
+}
+
+/** @param value Nonnegative viewport inset. @return Exact native Dialog stage. */
+inline DialogModifier viewportMargin(std::int32_t value) {
+  return {{.dialog = {.viewportMargin = value}}};
+}
+
+/** @param value Nonnegative anchor distance. @return Exact native Dialog stage. */
+inline DialogModifier anchorGap(std::int32_t value) {
+  return {{.dialog = {.anchorGap = value}}};
+}
+
+/** @param value Existing Escape cancellation policy. @return Exact native Dialog stage. */
+inline DialogModifier closeOnEscape(bool value = true) {
+  return {{.dialog = {.closeOnEscape = value}}};
+}
+
+/** @param value Sparse options, including the mandatory frame. @return Exact native Dialog stage. */
+inline DialogModifier dialogSettings(ControlDialogSettings value) {
+  return {{.dialog = value}};
+}
+
+/** @brief Owning sparse native help presentation stage. */
+struct KeyHelpModifier {
+  ControlKeyFormatSettings formatter{};     ///< Sparse owning formatter leaves.
+  std::optional<std::string> empty{};       ///< Optional literal empty presentation.
+  std::optional<std::string> unavailable{}; ///< Optional literal unavailable presentation.
+
+  /** @tparam T Exact native help presentation type.
+   * @param description Consumed recipe. @param modifier Owning sparse patch.
+   * @return Recipe staging the same checked leaves as its methods.
+   */
+  template <class T>
+    requires(std::same_as<T, HelpView> || std::same_as<T, KeyHints>)
+  friend Description<T> operator|(Description<T> &&description, KeyHelpModifier modifier) {
+    (void)std::move(description).format(std::move(modifier.formatter));
+    if (modifier.empty) {
+      (void)std::move(description).emptyText(std::move(*modifier.empty));
+    }
+    if (modifier.unavailable) {
+      (void)std::move(description).unavailableText(std::move(*modifier.unavailable));
+    }
+    return std::move(description);
+  }
+};
+
+/** @param values Owning sparse formatter literals. @return Applicable native help stage. */
+inline KeyHelpModifier format(ControlKeyFormatSettings values) {
+  return {std::move(values), {}, {}};
+}
+
+/** @param value Owning literal empty text. @return Applicable native help stage. */
+inline KeyHelpModifier emptyText(std::string value) {
+  return {{}, std::move(value), {}};
+}
+
+/** @param value Owning literal unavailable text. @return Applicable native help stage. */
+inline KeyHelpModifier unavailableText(std::string value) {
+  return {{}, {}, std::move(value)};
+}
+
+/** @brief Owning exact HelpView initial-open stage. */
+struct HelpOpenModifier {
+  bool value; ///< Initial open state.
+
+  /** @param description Consumed help recipe. @param modifier Initial state.
+   * @return Recipe staging its checked initial-open leaf.
+   */
+  friend Description<HelpView> operator|(Description<HelpView> &&description, HelpOpenModifier modifier) {
+    return std::move(description).initiallyOpen(modifier.value);
+  }
+};
+
+/** @param value Initial open state. @return Exact HelpView stage. */
+inline HelpOpenModifier initiallyOpen(bool value = true) {
+  return {value};
+}
+
+/** @brief Owning exact KeyHints literal strip stage. */
+struct KeyHintsModifier {
+  ~KeyHintsModifier() = default;
+
+  std::optional<std::string> separator; ///< Complete-entry separator.
+  std::optional<std::string> overflow;  ///< Nonempty overflow marker.
+
+  /** @param description Consumed hints recipe. @param modifier Owning literal strip patch.
+   * @return Recipe staging its checked strip leaves.
+   */
+  friend Description<KeyHints> operator|(Description<KeyHints> &&description, KeyHintsModifier modifier) {
+    if (modifier.separator) {
+      (void)std::move(description).entrySeparator(std::move(*modifier.separator));
+    }
+    if (modifier.overflow) {
+      (void)std::move(description).overflowMarker(std::move(*modifier.overflow));
+    }
+    return std::move(description);
+  }
+};
+
+/** @param value Literal complete-entry separator. @return Exact KeyHints stage. */
+inline KeyHintsModifier entrySeparator(std::string value) {
+  return {std::move(value), {}};
+}
+
+/** @param value Nonempty literal overflow marker. @return Exact KeyHints stage. */
+inline KeyHintsModifier overflowMarker(std::string value) {
+  return {{}, std::move(value)};
+}
+
+/** @brief Constructor-only stage for a real owning default-catalog selector. */
+struct ThemeCatalogModifier {
+  ~ThemeCatalogModifier() = default;
+  ControlThemeCatalogSettings patch{}; ///< Owning sparse admission and startup inputs.
+
+  /** @param description Actual owning native catalog recipe.
+   * @param modifier Owning constructor patch.
+   * @return Consuming recipe; a view-only recipient fails typed validation.
+   */
+  friend Description<Dialog> operator|(Description<Dialog> &&description, ThemeCatalogModifier modifier) {
+    return std::move(description).themeCatalogSettings(std::move(modifier.patch));
+  }
+};
+
+/** @param values Sparse constructor inputs; absence preserves captured native options.
+ * @return Owning constructor-only modifier, without a model or runtime.
+ */
+inline ThemeCatalogModifier themeCatalogSettings(ControlThemeCatalogSettings values) {
+  return {std::move(values)};
+}
+
+/** @brief Sparse native ThemeSelector view stage; model/catalog inputs remain code-owned. */
+struct ThemeSelectorModifier {
+  ~ThemeSelectorModifier() = default;
+
+  ControlThemeSelectorSettings patch{}; ///< Owning captions, limits and optional shortcut.
+
+  /** @param description Actual code-bound selector. @param modifier Sparse owning view stage.
+   * @return Same dialog recipe; actual semantic capability is checked during prepare.
+   */
+  friend Description<Dialog> operator|(Description<Dialog> &&description, ThemeSelectorModifier modifier) {
+    return std::move(description).themeSelectorSettings(std::move(modifier.patch));
+  }
+};
+
+/** @param values Sparse view options preserving actual captured values. @return Checked native view stage. */
+inline ThemeSelectorModifier themeSelectorSettings(ControlThemeSelectorSettings values) {
+  return {std::move(values)};
+}
+
+/** @brief Sparse immutable native notification-center construction stage. */
+struct NotificationModifier {
+  ControlNotificationSettings patch{}; ///< Numeric/native enum literals only; no runtime resolver is added.
+
+  /** @param description Actual code-owned notifications recipe. @param modifier Sparse owning stage.
+   * @return Same wrapper; wrong native recipes fail during checked preparation.
+   */
+  friend Description<Overlay> operator|(Description<Overlay> &&description, NotificationModifier modifier) {
+    return std::move(description).notificationSettings(modifier.patch);
+  }
+};
+
+/** @param values Sparse native center options; unspecified captured values survive.
+ * @return Actual notifications construction stage, never a runtime post request.
+ */
+inline NotificationModifier notificationSettings(ControlNotificationSettings values) {
+  return {values};
+}
+
+/** @brief Owning exact ordinary Overlay layout stage; derived OverlayHost is deliberately excluded. */
+struct OverlayLayoutModifier {
+  std::optional<LayoutPadding> padding;  ///< Complete nonnegative shared canonical insets.
+  std::optional<LayoutAlign> horizontal; ///< Ordinary Overlay column alignment.
+  std::optional<LayoutAlign> vertical;   ///< Ordinary Overlay row alignment.
+
+  /** @param description Consumed exact Overlay recipe, including notification compositions.
+   * @param modifier Owning sparse ordinary layout values.
+   * @return Recipe staging the same checked leaves as its compact methods.
+   */
+  friend Description<Overlay> operator|(Description<Overlay> &&description, OverlayLayoutModifier modifier) {
+    if (modifier.padding) {
+      (void)std::move(description).padding(*modifier.padding);
+    }
+    if (modifier.horizontal) {
+      (void)std::move(description).horizontalAlign(*modifier.horizontal);
+    }
+    if (modifier.vertical) {
+      (void)std::move(description).verticalAlign(*modifier.vertical);
+    }
+    return std::move(description);
+  }
+};
+
+/** @param insets Nonnegative ordinary Overlay content insets.
+ * @return Owning exact Overlay stage; containing Grid relationships remain independent.
+ */
+inline OverlayLayoutModifier padding(LayoutPadding insets) {
+  return {insets, {}, {}};
+}
+
+/** @param align Ordinary Overlay alignment across columns.
+ * @return Owning exact Overlay stage, checked before native construction.
+ */
+inline OverlayLayoutModifier horizontalAlign(LayoutAlign align) {
+  return {{}, align, {}};
+}
+
+/** @param align Ordinary Overlay alignment across rows.
+ * @return Owning exact Overlay stage; derived OverlayHost policies are unchanged.
+ */
+inline OverlayLayoutModifier verticalAlign(LayoutAlign align) {
+  return {{}, {}, align};
+}
+
+/** @brief Owning common scroll-input pipe stage using the native sparse settings path. */
+struct ScrollInputModifier {
+  ControlSettings settings; ///< Sparse wheel/key/page/thumb/focus overrides; no controller is retained.
+
+  /** @tparam T Exactly native ScrollArea or ScrollBar.
+   * @param description Consumed native recipe.
+   * @param modifier Owning sparse input values.
+   * @return Recipe staging the same checked properties as its compact methods.
+   */
+  template <class T>
+    requires(std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+  friend Description<T> operator|(Description<T> &&description, ScrollInputModifier modifier) {
+    if (modifier.settings.wheelStep) {
+      (void)std::move(description).wheelStep(*modifier.settings.wheelStep);
+    }
+    if (modifier.settings.keyStep) {
+      (void)std::move(description).keyStep(*modifier.settings.keyStep);
+    }
+    if (modifier.settings.pageOverlap) {
+      (void)std::move(description).pageOverlap(*modifier.settings.pageOverlap);
+    }
+    if (modifier.settings.minimumThumb) {
+      (void)std::move(description).minimumThumb(*modifier.settings.minimumThumb);
+    }
+    if (modifier.settings.focusable) {
+      (void)std::move(description).focusable(*modifier.settings.focusable);
+    }
+
+    return std::move(description);
+  }
+};
+
+/** @param cells Positive finite logical wheel step.
+ * @return Owning native area/bar input stage.
+ */
+inline ScrollInputModifier wheelStep(double cells) {
+  return {{.wheelStep = cells}};
+}
+
+/** @param cells Positive exact 64-bit logical key step.
+ * @return Owning native area/bar input stage without platform-size narrowing.
+ */
+inline ScrollInputModifier keyStep(std::uint64_t cells) {
+  return {{.keyStep = cells}};
+}
+
+/** @param cells Exact 64-bit page overlap, including zero.
+ * @return Owning native area/bar input stage.
+ */
+inline ScrollInputModifier pageOverlap(std::uint64_t cells) {
+  return {{.pageOverlap = cells}};
+}
+
+/** @param cells Positive minimum thumb length in cells.
+ * @return Owning native area/bar input stage.
+ */
+inline ScrollInputModifier minimumThumb(std::int32_t cells) {
+  return {{.minimumThumb = cells}};
+}
+
+/** @param enabled Whether the native area/standalone bar participates in focus traversal.
+ * @return Owning native area/bar input stage.
+ */
+inline ScrollInputModifier focusable(bool enabled = true) {
+  return {{.focusable = enabled}};
+}
+
+/** @brief Owning existing LineEdit/scroll read-only policy stage. */
+struct ReadOnlyModifier {
+  bool enabled; ///< User-mutation policy; programmatic commands retain their existing behavior.
+
+  /** @tparam T Exactly LineEdit, ScrollArea or ScrollBar.
+   * @param description Consumed receiving recipe.
+   * @param modifier Owning local policy.
+   * @return Recipe staging its existing readOnly property.
+   */
+  template <class T>
+    requires(std::same_as<T, LineEdit> || std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+  friend Description<T> operator|(Description<T> &&description, ReadOnlyModifier modifier) {
+    return std::move(description).readOnly(modifier.enabled);
+  }
+};
+
+/** @param enabled Block user mutation while preserving existing programmatic commands.
+ * @return Owning LineEdit/native scroll policy stage.
+ */
+inline ReadOnlyModifier readOnly(bool enabled = true) {
+  return {enabled};
+}
+
+/** @brief Owning ScrollArea-only placement/frame pipe stage; frame leaves never enable a frame implicitly. */
+struct ScrollAreaModifier {
+  ControlSettings settings; ///< Sparse native area placement and existing one-cell frame leaves.
+
+  /** @param description Consumed native area recipe.
+   * @param modifier Owning sparse placement/frame values.
+   * @return Recipe staging the same leaves as its compact methods.
+   */
+  friend Description<ScrollArea> operator|(Description<ScrollArea> &&description, ScrollAreaModifier modifier) {
+    if (modifier.settings.horizontal) {
+      (void)std::move(description).horizontal(*modifier.settings.horizontal);
+    }
+    if (modifier.settings.vertical) {
+      (void)std::move(description).vertical(*modifier.settings.vertical);
+    }
+    if (modifier.settings.placement) {
+      (void)std::move(description).placement(*modifier.settings.placement);
+    }
+    if (modifier.settings.frame.enabled) {
+      (void)std::move(description).frameEnabled(*modifier.settings.frame.enabled);
+    }
+    if (modifier.settings.frame.glyphs) {
+      (void)std::move(description).frameGlyphs(*modifier.settings.frame.glyphs);
+    }
+    if (modifier.settings.frame.maxPaintCells) {
+      (void)std::move(description).frameMaxPaintCells(*modifier.settings.frame.maxPaintCells);
+    }
+
+    return std::move(description);
+  }
+};
+
+/** @param policy Horizontal bar presence policy.
+ * @return Owning native area-only stage.
+ */
+inline ScrollAreaModifier horizontal(ScrollBarPolicy policy) {
+  return {{.horizontal = policy}};
+}
+
+/** @param policy Vertical bar presence policy.
+ * @return Owning native area-only stage.
+ */
+inline ScrollAreaModifier vertical(ScrollBarPolicy policy) {
+  return {{.vertical = policy}};
+}
+
+/** @param placement Existing gutter/overlay/frame placement.
+ * @return Owning native area-only stage checked against its actual frame options.
+ */
+inline ScrollAreaModifier placement(ScrollPlacement placement) {
+  return {{.placement = placement}};
+}
+
+/** @param enabled True creates a missing default one-cell frame; false removes it.
+ * @return Owning native area-only stage.
+ */
+inline ScrollAreaModifier frameEnabled(bool enabled = true) {
+  return {{.frame = {.enabled = enabled}}};
+}
+
+/** @param glyphs One-cell glyph mode for an effective enabled frame.
+ * @return Owning native area-only stage, without implicit frame creation.
+ */
+inline ScrollAreaModifier frameGlyphs(PrimitiveGlyphs glyphs) {
+  return {{.frame = {.glyphs = glyphs}}};
+}
+
+/** @param cells Positive paint cap for an effective enabled one-cell frame.
+ * @return Owning native area-only stage, without implicit frame creation.
+ */
+inline ScrollAreaModifier frameMaxPaintCells(std::size_t cells) {
+  return {{.frame = {.maxPaintCells = cells}}};
+}
+
+/** @brief Owning bar-axis stage; projection/writer/controller ownership is not changed. */
+struct ScrollAxisModifier {
+  ScrollAxis value; ///< Effective native bar axis.
+
+  /** @param description Consumed native bar recipe.
+   * @param modifier Owning axis override.
+   * @return Recipe staging its existing projection-axis constructor input.
+   */
+  friend Description<ScrollBar> operator|(Description<ScrollBar> &&description, ScrollAxisModifier modifier) {
+    return std::move(description).axis(modifier.value);
+  }
+};
+
+/** @param axis Effective native bar projection axis.
+ * @return Owning bar-only sparse axis stage.
+ */
+inline ScrollAxisModifier axis(ScrollAxis axis) {
+  return {axis};
+}
+
+/** @brief Owning Gauge-only scalar pipe stage, checked against the receiving constructor options. */
+struct GaugeScalarModifier {
+  ControlSettings settings; ///< Owning sparse value/range/preferred-width override.
+
+  /** @param description Consumed native Gauge recipe.
+   * @param modifier Owning sparse override; no widget/model borrow is retained.
+   * @return Recipe staging the same settings as the supported compact methods.
+   */
+  friend Description<Gauge> operator|(Description<Gauge> &&description, GaugeScalarModifier modifier) {
+    if (modifier.settings.value) {
+      (void)std::move(description).value(*modifier.settings.value);
+    }
+
+    if (modifier.settings.minimum) {
+      (void)std::move(description).minimum(*modifier.settings.minimum);
+    }
+
+    if (modifier.settings.maximum) {
+      (void)std::move(description).maximum(*modifier.settings.maximum);
+    }
+
+    if (modifier.settings.preferredWidth) {
+      (void)std::move(description).preferredWidth(*modifier.settings.preferredWidth);
+    }
+
+    return std::move(description);
+  }
+};
+
+/** @param initial Finite initial Gauge value within the effective range.
+ * @return Owning Gauge-only value stage.
+ */
+inline GaugeScalarModifier value(double initial) {
+  return {{.value = initial}};
+}
+
+/** @param bound Finite inclusive Gauge lower bound.
+ * @return Owning Gauge-only lower-bound stage.
+ */
+inline GaugeScalarModifier minimum(double bound) {
+  return {{.minimum = bound}};
+}
+
+/** @param bound Finite inclusive Gauge upper bound, greater than the effective lower bound.
+ * @return Owning Gauge-only upper-bound stage.
+ */
+inline GaugeScalarModifier maximum(double bound) {
+  return {{.maximum = bound}};
+}
+
+/** @param minimum Finite inclusive Gauge lower bound.
+ * @param maximum Finite inclusive Gauge upper bound with a finite positive span.
+ * @return Owning Gauge-only range stage.
+ */
+inline GaugeScalarModifier range(double minimum, double maximum) {
+  return {{.minimum = minimum, .maximum = maximum}};
+}
+
+/** @param cells Nonnegative intrinsic Gauge width in terminal cells.
+ * @return Owning Gauge-only preferred-width stage.
+ */
+inline GaugeScalarModifier preferredWidth(std::int32_t cells) {
+  return {{.preferredWidth = cells}};
+}
 
 /** @brief Owning compact size stage; uses the same methods and existing solver as ordinary composition. */
 struct SizeModifier {
@@ -5357,13 +7936,54 @@ constexpr SizeModifier flex(std::uint32_t weight = 1) {
   return {{detail::SizeDimension::FLEX, 0, weight}};
 }
 
+inline Description<ScrollArea> detail::Access::scrollAreaControl(ScrollAreaOptions options,
+                                                                 std::shared_ptr<ScrollController> controller,
+                                                                 ControlStyle style) {
+  auto description = cold<ScrollArea>([options, controller = std::move(controller),
+                                       style](ManagedScene &scene, Node<Widget> parent, MountContext &context) {
+    auto effective = controlScrollAreaOptions(*context.controlSettings, options);
+
+    if (!effective) {
+      return std::expected<Node<ScrollArea>, ManagedError>(std::unexpected(error(parent, effective.error())));
+    }
+
+    return scene.emplace<ScrollArea>(parent, controller, scene.widthPolicy(), *effective, style);
+  });
+
+  return configuredControl(std::move(description), "ScrollArea");
+}
+
+inline Description<ScrollBar> detail::Access::scrollBarControl(std::shared_ptr<ScrollController> controller,
+                                                               ScrollAxis axis, ScrollBarOptions options,
+                                                               ControlStyle style, bool writer) {
+  auto description = cold<ScrollBar>([controller = std::move(controller), axis, options, style,
+                                      writer](ManagedScene &scene, Node<Widget> parent,
+                                              MountContext &context) -> std::expected<Node<ScrollBar>, ManagedError> {
+    if (!writer && !controller) {
+      return std::unexpected(error(parent, TreeError::INVALID_ARGUMENT));
+    }
+
+    auto effective = controlScrollBarOptions(*context.controlSettings, options);
+    const auto effectiveAxis = context.controlSettings->axis.value_or(axis);
+
+    if (!effective) {
+      return std::unexpected(error(parent, effective.error()));
+    }
+
+    if (effectiveAxis != ScrollAxis::HORIZONTAL && effectiveAxis != ScrollAxis::VERTICAL) {
+      return std::unexpected(error(parent, TreeError::INVALID_ARGUMENT));
+    }
+
+    return scene.scrollBar(parent, controller, effectiveAxis, *effective, style, writer);
+  });
+
+  return configuredControl(std::move(description), "ScrollBar");
+}
+
 template <detail::DescriptionInput Child>
 Description<ScrollArea> scrollArea(Child &&child, ScrollAreaOptions options,
                                    std::shared_ptr<ScrollController> controller, ControlStyle style) {
-  auto description = detail::Access::describe<ScrollArea>(
-    [options, controller = std::move(controller), style](ManagedScene &scene, Node<Widget> parent) {
-      return scene.emplace<ScrollArea>(parent, controller, scene.widthPolicy(), options, style);
-    });
+  auto description = detail::Access::scrollAreaControl(options, std::move(controller), style);
   detail::Access::layoutChild(description, child);
   description.state_->children.push_back(
     [child = std::forward<Child>(child)](ManagedScene &scene, Node<Widget> parent,
@@ -5395,9 +8015,7 @@ Description<ScrollArea> scrollArea(Ref<ScrollArea> reference, Child &&child, Scr
  */
 inline Description<ScrollBar> scrollBar(ScrollAxis axis = ScrollAxis::VERTICAL, ScrollBarOptions options = {},
                                         ControlStyle style = {}) {
-  return detail::Access::describe<ScrollBar>([axis, options, style](ManagedScene &scene, Node<Widget> parent) {
-    return scene.scrollBar(parent, {}, axis, options, style);
-  });
+  return detail::Access::scrollBarControl({}, axis, options, style, true);
 }
 
 /** @param controller Owning values shared with an area's metrics writer.
@@ -5409,14 +8027,7 @@ inline Description<ScrollBar> scrollBar(ScrollAxis axis = ScrollAxis::VERTICAL, 
 inline Description<ScrollBar> scrollBar(std::shared_ptr<ScrollController> controller,
                                         ScrollAxis axis = ScrollAxis::VERTICAL, ScrollBarOptions options = {},
                                         ControlStyle style = {}) {
-  return detail::Access::describe<ScrollBar>(
-    [controller = std::move(controller), axis, options,
-     style](ManagedScene &scene, Node<Widget> parent) -> std::expected<Node<ScrollBar>, ManagedError> {
-      if (!controller) {
-        return std::unexpected(detail::error(parent, TreeError::INVALID_ARGUMENT));
-      }
-      return scene.scrollBar(parent, controller, axis, options, style, false);
-    });
+  return detail::Access::scrollBarControl(std::move(controller), axis, options, style, false);
 }
 
 /** @param reference Empty bar observer published after successful mount.
@@ -5443,17 +8054,24 @@ inline Description<ScrollBar> scrollBar(Ref<ScrollBar> reference, std::shared_pt
   return scrollBar(std::move(controller), axis, options, style).reference(std::move(reference));
 }
 
-template <detail::DescriptionInput Child>
-Description<Border> border(Child &&child, BorderOptions options, ControlStyle style) {
-  auto description = detail::Access::describe<Border>([options, style](ManagedScene &scene, Node<Widget> parent) {
-    const auto valid = Border::validate(options);
+inline Description<Border> detail::Access::borderControl(BorderOptions options, ControlStyle style) {
+  auto description = cold<Border>([options, style](ManagedScene &scene, Node<Widget> parent, MountContext &context) {
+    const auto effective = controlBorderOptions(*context.controlSettings, options);
+    const auto valid = Border::validate(effective);
 
     if (!valid) {
       return std::expected<Node<Border>, ManagedError>(std::unexpected(detail::error(parent, valid.error())));
     }
 
-    return scene.emplace<Border>(parent, scene.widthPolicy(), options, style);
+    return scene.emplace<Border>(parent, scene.widthPolicy(), effective, style);
   });
+
+  return configuredControl(std::move(description), "Border");
+}
+
+template <detail::DescriptionInput Child>
+Description<Border> border(Child &&child, BorderOptions options, ControlStyle style) {
+  auto description = detail::Access::borderControl(options, style);
 
   detail::Access::layoutChild(description, child);
   description.state_->children.push_back(
@@ -5517,15 +8135,22 @@ inline BorderModifier frame(BorderOptions options = {}, ControlStyle style = {})
  */
 inline Description<Gauge> gauge(double value, GaugeOptions options = {}, ControlStyle style = {},
                                 SizePolicy policy = {}) {
-  return detail::Access::describe<Gauge>([value, options, style, policy](ManagedScene &scene, Node<Widget> parent) {
-    const auto valid = Gauge::validate(value, options);
+  auto description = detail::Access::cold<Gauge>(
+    [value, options, style, policy](ManagedScene &scene, Node<Widget> parent, detail::MountContext &context) {
+      const auto &settings = *context.controlSettings;
+      const auto effective = detail::controlGaugeOptions(settings, options);
+      const auto effectiveValue = settings.value.value_or(value);
+      const auto valid = Gauge::validate(effectiveValue, effective);
 
-    if (!valid) {
-      return std::expected<Node<Gauge>, ManagedError>(std::unexpected(detail::error(parent, valid.error())));
-    }
+      if (!valid) {
+        return std::expected<Node<Gauge>, ManagedError>(std::unexpected(detail::error(parent, valid.error())));
+      }
 
-    return scene.emplace<Gauge>(parent, value, scene.widthPolicy(), options, style, policy);
-  });
+      return scene.emplace<Gauge>(parent, effectiveValue, scene.widthPolicy(), effective, style, policy);
+    });
+
+  return detail::Access::controlArguments(detail::Access::configuredControl(std::move(description), "Gauge"),
+                                          {.value = value});
 }
 
 /** @param text UTF-8 caption copied now and checked at mount under the receiving WidthPolicy.
@@ -5534,18 +8159,7 @@ inline Description<Gauge> gauge(double value, GaugeOptions options = {}, Control
  * @return Existing Button recipe without brackets; activation still uses existing bindings/router.
  */
 inline Description<Button> plainButton(std::string_view text, ControlStyle style = {}, SizePolicy policy = {}) {
-  return detail::Access::describe<Button>(
-    [text = std::string(text), style, policy](ManagedScene &scene, Node<Widget> parent) {
-      auto caption = GraphemeText::from(text, scene.widthPolicy());
-
-      if (!caption) {
-        auto failure = detail::textError(parent, caption.error());
-
-        return std::expected<Node<Button>, ManagedError>(std::unexpected(failure));
-      }
-
-      return scene.emplace<Button>(parent, std::move(*caption), style, policy, ButtonChrome::NONE);
-    });
+  return detail::textControl<Button>(TextValue(text), style, policy, {}, ButtonChrome::NONE);
 }
 
 /** @tparam Callback Existing compact action accepting optionally const ClickEvent&.
@@ -5782,6 +8396,73 @@ Scene scene(Factory factory, SceneOptions options = {}, std::source_location ori
         return std::unexpected(detail::controlContextError(installed.error(), owner.root()));
       }
 
+      if (detail::ControlContextAccess::hasUserConfiguration(effectiveControls)) {
+        for (const auto name : {"Border", "Gauge"}) {
+          installed = detail::ControlContextAccess::installPrimitiveSchema(effectiveControls, name);
+
+          if (!installed) {
+            return std::unexpected(detail::controlContextError(installed.error(), owner.root()));
+          }
+        }
+
+        for (const auto name : {"ScrollArea", "ScrollBar"}) {
+          installed = detail::ControlContextAccess::installScrollSchema(effectiveControls, name);
+
+          if (!installed) {
+            return std::unexpected(detail::controlContextError(installed.error(), owner.root()));
+          }
+        }
+        for (const auto name : {"HelpView", "KeyHints"}) {
+          installed = detail::ControlContextAccess::installKeyHelpSchema(effectiveControls, name);
+          if (!installed) {
+            return std::unexpected(detail::controlContextError(installed.error(), owner.root()));
+          }
+        }
+        for (const auto name : {"VirtualList", "VirtualTable", "Chart"}) {
+          installed = detail::ControlContextAccess::installVirtualViewSchema(effectiveControls, name);
+
+          if (!installed) {
+            return std::unexpected(detail::controlContextError(installed.error(), owner.root()));
+          }
+        }
+
+        for (const auto name : {"OverlayHost", "Dialog"}) {
+          installed = detail::ControlContextAccess::installDialogSchema(effectiveControls, name);
+
+          if (!installed) {
+            return std::unexpected(detail::controlContextError(installed.error(), owner.root()));
+          }
+        }
+
+        installed = detail::ControlContextAccess::installNotificationSchema(effectiveControls);
+
+        if (!installed) {
+          return std::unexpected(detail::controlContextError(installed.error(), owner.root()));
+        }
+
+        installed = detail::ControlContextAccess::installThemeCatalogSchema(effectiveControls);
+
+        if (!installed) {
+          return std::unexpected(detail::controlContextError(installed.error(), owner.root()));
+        }
+
+        installed = detail::ControlContextAccess::installMessageSchema(effectiveControls);
+
+        if (!installed) {
+          return std::unexpected(detail::controlContextError(installed.error(), owner.root()));
+        }
+
+        installed = detail::ControlContextAccess::installDataStateSchema(effectiveControls);
+
+        if (!installed) {
+          return std::unexpected(detail::controlContextError(installed.error(), owner.root()));
+        }
+
+        installed = detail::ControlContextAccess::installOverlaySchema(effectiveControls);
+        if (!installed) {
+          return std::unexpected(detail::controlContextError(installed.error(), owner.root()));
+        }
+      }
       auto prepared = effectiveControls.prepared();
       if (!prepared) {
         return std::unexpected(detail::controlContextError(prepared.error(), owner.root()));

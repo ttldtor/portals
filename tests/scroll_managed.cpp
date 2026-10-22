@@ -234,6 +234,218 @@ struct Fixture {
   }
 };
 
+void scalarRecipesThroughRuntime() {
+  std::string baseline;
+  for (int mode = 0; mode != 3; ++mode) {
+    MotionReplayTerminal terminal({{100, "a", {}}, {200, "b", {}}, {300, "c", {}}}, 1000, {10, 10});
+    auto recipe = [&]() -> ui::Description<Widget> {
+      if (mode == 0) {
+        return ui::detail::Access::erase(ui::scrollArea(ui::custom<Plane>())
+                                           .id("area")
+                                           .wheelStep(2.5)
+                                           .keyStep(4294967297ULL)
+                                           .pageOverlap(0)
+                                           .minimumThumb(2)
+                                           .focusable(false)
+                                           .readOnly(false)
+                                           .glyphs(PrimitiveGlyphs::ASCII)
+                                           .maxPaintCells(128)
+                                           .horizontal(ScrollBarPolicy::ALWAYS)
+                                           .vertical(ScrollBarPolicy::ALWAYS)
+                                           .placement(ScrollPlacement::ON_FRAME)
+                                           .frameEnabled()
+                                           .frameGlyphs(PrimitiveGlyphs::ASCII)
+                                           .frameMaxPaintCells(64));
+      }
+      if (mode == 1) {
+        auto area = ui::scrollArea(ui::custom<Plane>()).id("area") | ui::wheelStep(2.5) | ui::keyStep(4294967297ULL) |
+                    ui::pageOverlap(0) | ui::minimumThumb(2) | ui::focusable(false) | ui::readOnly(false) |
+                    ui::glyphs(PrimitiveGlyphs::ASCII) | ui::maxPaintCells(128) |
+                    ui::horizontal(ScrollBarPolicy::ALWAYS) | ui::vertical(ScrollBarPolicy::ALWAYS) |
+                    ui::placement(ScrollPlacement::ON_FRAME) | ui::frameEnabled() |
+                    ui::frameGlyphs(PrimitiveGlyphs::ASCII) | ui::frameMaxPaintCells(64);
+        return ui::detail::Access::erase(std::move(area));
+      }
+      ui::SceneResourceOptions options;
+      options.format = ui::SceneResourceFormat::CONFIGURATION;
+      take(options.registry.add<Plane>("Plane", [](ui::SceneResourceArguments) {
+        return ui::custom<Plane>();
+      }));
+      return ui::resource(
+        "scene{ScrollArea#area{wheelStep=2.5 keyStep=4294967297 pageOverlap=0 minimumThumb=2 "
+        "focusable=false readOnly=false glyphs=ASCII maxPaintCells=128 horizontal=ALWAYS vertical=ALWAYS "
+        "placement=ON_FRAME frame{enabled=true glyphs=ASCII maxPaintCells=64} Plane{}}}",
+        options);
+    }();
+    ui::SceneOptions options;
+    options.clock = terminal.clock();
+    auto owner = ui::scene(std::move(recipe), options);
+    auto area = owner.get<ScrollArea>("area");
+    std::shared_ptr<ScrollController> controller;
+    int inputs{};
+    owner.configure([&](ManagedScene &scene, Application &app) {
+      take(app.tree().read(area.node(), [&](const ScrollArea &widget) {
+        const auto &state = detail::ScrollWidgetAccess::state(widget);
+        controller = state.controller;
+        check(state.area.wheelStep == 2.5 && state.area.keyStep == 4294967297ULL && state.area.pageOverlap == 0 &&
+                state.area.minimumThumb == 2 && !state.area.focusable && !state.area.readOnly && state.area.frame &&
+                state.area.frame->maxPaintCells == 64,
+              "method pipe and CFG mount identical actual scroll options including wide logical keys");
+      }));
+      take(scene.onInput([&](const InputEvent &) -> std::expected<bool, ManagedError> {
+        if (++inputs == 1) {
+          const auto layout = take(scrollAreaLayout(app.tree(), area.node()));
+          check(layout.placement.viewport == CellSize{8, 8} && layout.placement.viewportOrigin == CellPoint{1, 1} &&
+                  !layout.placement.hasCorner && layout.placement.horizontalBar && layout.placement.verticalBar,
+                "ON_FRAME uses the one existing frame inset and keeps bars on that outline");
+          take(app.router().dispatch(MouseInputEvent{2, 2, MouseButton::WHEEL_DOWN, MouseAction::SCROLL, {}}));
+        } else {
+          const auto position = take(controller->snapshot()).vertical.offset;
+          check(position.raster == 2 && position.fraction == .5,
+                "effective fractional wheel step reaches real controller");
+          take(area.setOffset(ScrollAxis::VERTICAL, position));
+        }
+        return true;
+      }));
+    });
+    auto execution = owner.run(terminal);
+    if (!execution) {
+      ui::SceneReport report;
+      report.failure = execution.error();
+      ui::reportToStderr(report);
+      std::cerr << "scalar recipe mode: " << mode << '\n';
+    }
+    const auto result = take(std::move(execution));
+    check(inputs == 3 && result.frames == 2 && terminal.closed,
+          "equal logical commands settle without idle redraw or extra subscriptions");
+    if (mode == 0) {
+      baseline = terminal.output;
+    } else {
+      check(terminal.output == baseline, "method pipe and CFG produce the same real terminal paint stream");
+    }
+    check(!area.setOffset(ScrollAxis::VERTICAL, {}), "configured scroll refs retire with their scene");
+  }
+}
+
+void scalarFactoryPrecedenceAndWriterRoles() {
+  auto app = take(Application::create());
+  auto scene = take(ManagedScene::create(*app));
+  ui::ControlContext context;
+  context.defaults("ScrollArea", {.wheelStep = 4, .frame = {.glyphs = PrimitiveGlyphs::ASCII}})
+    .defaults("ScrollBar", {.keyStep = std::numeric_limits<std::uint64_t>::max(), .focusable = false});
+  ScrollAreaOptions actual;
+  actual.placement = ScrollPlacement::ON_FRAME;
+  actual.frame = BorderOptions{PrimitiveGlyphs::UNICODE, 97};
+  actual.pageOverlap = 4294967298ULL;
+  ui::Ref<ScrollArea> area;
+  take(ui::mount(*scene, ui::scrollArea(area, ui::custom<Plane>(), actual).wheelStep(5).frameEnabled(), context));
+  std::shared_ptr<ScrollController> controller;
+  take(app->tree().read(area.node(), [&](const ScrollArea &widget) {
+    const auto &state = detail::ScrollWidgetAccess::state(widget);
+    controller = state.controller;
+    check(state.area.wheelStep == 5 && state.area.pageOverlap == 4294967298ULL && state.area.frame &&
+            state.area.frame->maxPaintCells == 97 && state.area.frame->glyphs == PrimitiveGlyphs::ASCII,
+          "instance overrides context while absent settings preserve actual frame budget placement and wide overlap");
+  }));
+  ui::Ref<ScrollBar> projection;
+  take(ui::mount(*scene,
+                 ui::scrollBar(projection, controller, ScrollAxis::VERTICAL).readOnly().axis(ScrollAxis::HORIZONTAL),
+                 context));
+  take(app->tree().read(projection.node(), [&](const ScrollBar &widget) {
+    const auto &state = detail::ScrollWidgetAccess::state(widget);
+    check(state.controller == controller && state.axis == ScrollAxis::HORIZONTAL && state.bar.readOnly &&
+            !state.bar.focusable && state.bar.keyStep == std::numeric_limits<std::uint64_t>::max(),
+          "Ref-first supplied controller path applies settings without replacing its controller or axis override");
+  }));
+  check(!projection.setMetrics({100, 10}), "observing projection cannot acquire the area's metrics writer role");
+  check(!app->router().setFocus(projection.node()), "effective focusable=false rejects actual router focus");
+  ui::Ref<ScrollBar> standalone;
+  take(ui::mount(*scene,
+                 (ui::scrollBar(standalone, ScrollAxis::VERTICAL) | ui::axis(ScrollAxis::HORIZONTAL) | ui::readOnly() |
+                  ui::focusable(false) | ui::wheelStep(7)),
+                 context));
+  take(standalone.setMetrics({std::numeric_limits<std::uint64_t>::max(), 10}));
+  take(standalone.setOffset(ScrollAxis::HORIZONTAL, {4294967299ULL, 0}));
+  take(app->tree().read(standalone.node(), [&](const ScrollBar &widget) {
+    const auto &state = detail::ScrollWidgetAccess::state(widget);
+    check(
+      state.bar.wheelStep == 7 && state.bar.readOnly && !state.bar.focusable &&
+        take(state.controller->snapshot()).horizontal.offset.raster == 4294967299ULL,
+      "standalone Ref-first pipe path retains its metrics writer and allows checked readonly programmatic commands");
+  }));
+  ui::Ref<ScrollBar> unpublished;
+  const auto null = ui::mount(*scene, ui::scrollBar(unpublished, std::shared_ptr<ScrollController>{}).wheelStep(2));
+  check(!null && unpublished.node() == Node<ScrollBar>{},
+        "null supplied controller remains a typed failure with no Ref publication");
+  const auto invalid = ui::mount(*scene, ui::scrollArea(ui::custom<Plane>(), actual).frameEnabled(false));
+  check(!invalid, "disabling actual frame validates actual ON_FRAME placement before native construction");
+  actual.placement = ScrollPlacement::RESERVED;
+  ui::Ref<ScrollArea> unframed;
+  take(ui::mount(*scene, ui::scrollArea(unframed, ui::custom<Plane>(), actual).frameEnabled(false)));
+  take(app->tree().read(unframed.node(), [](const ScrollArea &widget) {
+    check(!detail::ScrollWidgetAccess::state(widget).area.frame,
+          "explicit false removes an existing receiving frame when actual placement permits it");
+  }));
+  ui::Ref<LineEdit> methodEdit, pipeEdit;
+  take(ui::mount(*scene, ui::column(ui::lineEdit(methodEdit, "method").readOnly(),
+                                    ui::lineEdit(pipeEdit, "pipe") | ui::readOnly())));
+  check(methodEdit.clear().result() == std::unexpected(TreeError::WOULD_BLOCK) &&
+          pipeEdit.clear().result() == std::unexpected(TreeError::WOULD_BLOCK),
+        "common compact readOnly methods and pipes preserve existing LineEdit user-command policy");
+  take(methodEdit.text().set("programmatic").result());
+  check(take(methodEdit.text().get()) == "programmatic",
+        "LineEdit readonly still permits existing programmatic text writes");
+  ui::ControlContext caller;
+  caller.define("ScrollBar", "Label");
+  check(!ui::mount(*scene, ui::scrollBar(), caller),
+        "native bar cannot silently consume an unrelated caller declaration");
+}
+
+void scalarBarResourceAndReadOnly() {
+  for (const bool readOnly : {false, true}) {
+    MotionReplayTerminal terminal({{100, "a", {}}, {200, "b", {}}}, 1000, {10, 3});
+    ui::SceneOptions sceneOptions;
+    sceneOptions.clock = terminal.clock();
+    ui::SceneResourceOptions options;
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    const auto source = std::string("scene{ScrollBar#bar{axis=HORIZONTAL wheelStep=7 "
+                                    "keyStep=18446744073709551615 pageOverlap=18446744073709551615 minimumThumb=2 "
+                                    "glyphs=ASCII maxPaintCells=64 focusable=false readOnly=") +
+                        (readOnly ? "true" : "false") + "}}";
+    auto owner = ui::scene(ui::resource(source, options), sceneOptions);
+    auto bar = owner.get<ScrollBar>("bar");
+    std::shared_ptr<ScrollController> controller;
+    int inputs{};
+    owner.configure([&](ManagedScene &scene, Application &app) {
+      take(app.tree().read(bar.node(), [&](const ScrollBar &widget) {
+        const auto &state = detail::ScrollWidgetAccess::state(widget);
+        controller = state.controller;
+        check(state.axis == ScrollAxis::HORIZONTAL && state.bar.readOnly == readOnly && !state.bar.focusable &&
+                state.bar.minimumThumb == 2 && state.bar.keyStep == std::numeric_limits<std::uint64_t>::max() &&
+                state.bar.pageOverlap == std::numeric_limits<std::uint64_t>::max(),
+              "CFG standalone bar preserves full uint64 logical settings and exact input policies");
+      }));
+      take(bar.setMetrics({std::numeric_limits<std::uint64_t>::max(), 10}));
+      take(bar.setOffset(ScrollAxis::HORIZONTAL, {10, 0}));
+      take(scene.onInput([&](const InputEvent &) -> std::expected<bool, ManagedError> {
+        if (++inputs == 1) {
+          take(app.router().dispatch(MouseInputEvent{1, 0, MouseButton::WHEEL_RIGHT, MouseAction::SCROLL, {}}));
+        } else {
+          const auto position = take(controller->snapshot()).horizontal.offset;
+          check(position.raster == (readOnly ? 10U : 17U),
+                "CFG readOnly blocks actual user wheel changes while writable bar uses its configured wheel step");
+          take(bar.setOffset(ScrollAxis::HORIZONTAL, position));
+        }
+        return true;
+      }));
+    });
+    const auto result = take(owner.run(terminal));
+    check(inputs == 2 && result.frames == (readOnly ? 1U : 2U) && terminal.closed,
+          "configured readonly and no-op paths produce no redundant runtime frames");
+    check(!bar.setMetrics({100, 10}), "resource standalone bar Ref retires with owner");
+  }
+}
+
 void runtimeOrderingAndIdle() {
   Fixture fixture({{100, "a", {}}, {200, "b", {}}, {300, "c", {}}, {400, "d", {}}});
   int input{};
@@ -1223,6 +1435,9 @@ void liveTextAndScrollSamePrepare() {
 
 int main() {
   allocatorNothrowRoundtrip();
+  scalarRecipesThroughRuntime();
+  scalarFactoryPrecedenceAndWriterRoles();
+  scalarBarResourceAndReadOnly();
   runtimeOrderingAndIdle();
   commandFocusOrder(true);
   commandFocusOrder(false);

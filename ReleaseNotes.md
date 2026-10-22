@@ -7,6 +7,14 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Initial control properties share typed sparse settings across native recipes,
+  method and pipe modifiers, named defaults and loaded scene resources.
+  Supported properties cover editor validation/history/display settings,
+  layout and scrolling, frames, gauges, virtual lists/tables, charts,
+  data-state views, help, dialogs, notifications and theme selectors.
+  Code-bound models, factories and callbacks retain their existing ownership;
+  unsupported properties fail with typed diagnostics during preparation.
+
 - `SecureString` provides bounded move-only byte storage, scoped plaintext access,
   full-capacity wiping and native guard pages. Windows and Linux encrypt contents
   between scoped plaintext access by default. Page locking and Linux core-dump

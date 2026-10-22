@@ -131,23 +131,136 @@ std::expected<void, ManagedError> helpCommand(const std::shared_ptr<RefTarget> &
   return result;
 }
 
+namespace {
+template <class Options> std::string_view invalidHelpLiteral(const Options &options) noexcept {
+  const auto &format = options.format;
+
+  if (!format.maxBytesPerBinding) {
+    return "format.maxBytesPerBinding";
+  }
+
+  const std::array fields{
+    std::pair<std::string_view, std::string_view>{"format.strokeSeparator", format.strokeSeparator},
+    std::pair<std::string_view, std::string_view>{"format.alternativeSeparator", format.alternativeSeparator},
+    std::pair<std::string_view, std::string_view>{"format.repeatMarker", format.repeatMarker},
+    std::pair<std::string_view, std::string_view>{"format.releaseMarker", format.releaseMarker},
+    std::pair<std::string_view, std::string_view>{"format.unknownMarker", format.unknownMarker},
+    std::pair<std::string_view, std::string_view>{"emptyText", options.emptyText}};
+
+  for (const auto &[path, value] : fields) {
+    if (!validControlLiteral(value)) {
+      return path;
+    }
+  }
+
+  if constexpr (std::same_as<Options, KeyHintsOptions>) {
+    if (!validControlLiteral(options.entrySeparator)) {
+      return "entrySeparator";
+    }
+
+    if (options.overflowMarker.empty() || !validControlLiteral(options.overflowMarker)) {
+      return "overflowMarker";
+    }
+  }
+
+  return {};
+}
+} // namespace
+
+std::expected<GraphemeText, ManagedError> KeyHelpAccess::validate(ManagedScene &scene, const HelpViewOptions &options,
+                                                                  Node<Widget> parent, std::string_view *property) {
+  auto invalid = invalidHelpLiteral(options);
+  auto cause = TreeError::INVALID_ARGUMENT;
+
+  if (invalid.empty()) {
+    if (options.emptyText.size() > scene.options_.maxKeyProjectionBytes) {
+      invalid = "emptyText";
+    } else if (options.unavailableText.size() > scene.options_.maxKeyProjectionBytes) {
+      invalid = "unavailableText";
+    }
+
+    cause = TreeError::NODE_LIMIT;
+  }
+
+  if (!invalid.empty()) {
+    if (property) {
+      *property = invalid;
+    }
+
+    return std::unexpected(error(parent, cause));
+  }
+
+  auto marker = GraphemeText::from(options.unavailableText, scene.widthPolicy());
+
+  if (!marker) {
+    if (property) {
+      *property = "unavailableText";
+    }
+
+    auto failure = error(parent, TreeError::INVALID_ARGUMENT);
+
+    failure.text = marker.error();
+
+    return std::unexpected(failure);
+  }
+
+  return std::move(*marker);
+}
+
+std::expected<GraphemeText, ManagedError> KeyHelpAccess::validate(ManagedScene &scene, const KeyHintsOptions &options,
+                                                                  Node<Widget> parent, std::string_view *property) {
+  auto invalid = invalidHelpLiteral(options);
+  auto cause = TreeError::INVALID_ARGUMENT;
+
+  if (invalid.empty()) {
+    if (options.emptyText.size() > scene.options_.maxKeyProjectionBytes) {
+      invalid = "emptyText";
+    } else if (options.unavailableText.size() > scene.options_.maxKeyProjectionBytes) {
+      invalid = "unavailableText";
+    } else if (options.overflowMarker.size() > scene.options_.maxKeyProjectionBytes) {
+      invalid = "overflowMarker";
+    } else if (options.entrySeparator.size() > scene.options_.maxKeyProjectionBytes) {
+      invalid = "entrySeparator";
+    }
+
+    cause = TreeError::NODE_LIMIT;
+  }
+
+  if (!invalid.empty()) {
+    if (property) {
+      *property = invalid;
+    }
+
+    return std::unexpected(error(parent, cause));
+  }
+
+  auto marker = GraphemeText::from(options.unavailableText, scene.widthPolicy());
+
+  if (!marker) {
+    if (property) {
+      *property = "unavailableText";
+    }
+
+    return std::unexpected(error(parent, TreeError::INVALID_ARGUMENT));
+  }
+
+  return std::move(*marker);
+}
+
 Description<HelpView> KeyHelpAccess::full(Ref<HelpView> reference, HelpViewOptions options, ControlStyle style) {
   auto recipe = Access::cold<HelpView>([options = std::move(options), style](
                                          ManagedScene &scene, Node<Widget> parent,
                                          MountContext &context) mutable -> std::expected<Node<HelpView>, ManagedError> {
-    if (!options.format.maxBytesPerBinding) {
-      return std::unexpected(error(parent, TreeError::INVALID_ARGUMENT));
+    if (context.controlSettings) {
+      options = controlHelpViewOptions(*context.controlSettings, std::move(options));
     }
-    if (options.emptyText.size() > scene.options_.maxKeyProjectionBytes ||
-        options.unavailableText.size() > scene.options_.maxKeyProjectionBytes) {
-      return std::unexpected(error(parent, TreeError::NODE_LIMIT));
-    }
-    auto marker = GraphemeText::from(options.unavailableText, scene.widthPolicy());
+
+    auto marker = validate(scene, options, parent);
+
     if (!marker) {
-      auto failure = error(parent, TreeError::INVALID_ARGUMENT);
-      failure.text = marker.error();
-      return std::unexpected(failure);
+      return std::unexpected(marker.error());
     }
+
     auto record = std::make_shared<portals::detail::KeyHelpRecord>();
     record->full = options;
     record->presentation = std::make_shared<portals::detail::KeyHelpPresentation>(std::move(*marker));
@@ -205,28 +318,38 @@ Description<HelpView> KeyHelpAccess::full(Ref<HelpView> reference, HelpViewOptio
     }
     return root;
   });
-  return std::move(recipe).reference(std::move(reference));
+  return Access::configuredControl(std::move(recipe).reference(std::move(reference)), "HelpView");
 }
 
 Description<KeyHints> KeyHelpAccess::hints(Ref<HelpView> help, KeyHintsOptions options, ControlStyle style) {
-  auto target = help.target();
-  return Access::cold<KeyHints>([target = std::move(target), options = std::move(options),
-                                 style](ManagedScene &scene, Node<Widget> parent,
-                                        MountContext &context) mutable -> std::expected<Node<KeyHints>, ManagedError> {
-    if (!options.format.maxBytesPerBinding || options.overflowMarker.empty()) {
-      return std::unexpected(error(parent, TreeError::INVALID_ARGUMENT));
+  return hintsTarget(help.target(), std::move(options), style);
+}
+
+Description<KeyHints> KeyHelpAccess::hints(Ref<Widget> help, KeyHintsOptions options, ControlStyle style) {
+  return hintsTarget(help.target(), std::move(options), style);
+}
+
+Description<KeyHints> KeyHelpAccess::hintsTarget(std::shared_ptr<const RefTarget> target, KeyHintsOptions options,
+                                                 ControlStyle style) {
+  auto recipe = Access::cold<KeyHints>([target = std::move(target), options = std::move(options), style](
+                                         ManagedScene &scene, Node<Widget> parent,
+                                         MountContext &context) mutable -> std::expected<Node<KeyHints>, ManagedError> {
+    if (context.controlSettings) {
+      options = controlKeyHintsOptions(*context.controlSettings, std::move(options));
     }
-    if (options.emptyText.size() > scene.options_.maxKeyProjectionBytes ||
-        options.unavailableText.size() > scene.options_.maxKeyProjectionBytes ||
-        options.overflowMarker.size() > scene.options_.maxKeyProjectionBytes ||
-        options.entrySeparator.size() > scene.options_.maxKeyProjectionBytes) {
-      return std::unexpected(error(parent, TreeError::NODE_LIMIT));
+
+    auto marker = validate(scene, options, parent);
+
+    if (!marker) {
+      return std::unexpected(marker.error());
     }
-    auto marker = GraphemeText::from(options.unavailableText, scene.widthPolicy());
+
     auto empty = GraphemeText::from("", scene.widthPolicy());
-    if (!marker || !empty) {
+
+    if (!empty) {
       return std::unexpected(error(parent, TreeError::INVALID_ARGUMENT));
     }
+
     auto record = std::make_shared<portals::detail::KeyHelpRecord>();
     record->hints = options;
     record->presentation = std::make_shared<portals::detail::KeyHelpPresentation>(std::move(*marker));
@@ -290,6 +413,8 @@ Description<KeyHints> KeyHelpAccess::hints(Ref<HelpView> help, KeyHintsOptions o
     });
     return root;
   });
+
+  return Access::configuredControl(std::move(recipe), "KeyHints");
 }
 } // namespace portals::ui::detail
 

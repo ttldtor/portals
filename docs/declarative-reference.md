@@ -690,6 +690,269 @@ borrowed pointers or reference wrappers must remain valid for the uses made by
 the custom widget. Consult the `custom` factory reference for argument storage
 and forwarding requirements; reference members in user types remain borrowed.
 
+## Initial control properties and scene resources {#initial-control-properties}
+
+[ControlContext](../include/portals/ui_control_context.hpp) and a loaded scene store sparse initial values. An absent value keeps the receiving factory's default; an explicit `false` or `0` remains a value and overrides an inherited one. These settings do not reconfigure a mounted widget. Runtime changes use the existing typed widget APIs.
+
+### Canonical scalar properties
+
+The type schema determines which canonical [`ControlSettings`](../include/portals/ui_control_context.hpp) leaves each concrete control accepts. `CONFIGURATION` resources use the exact case-sensitive paths below. Counts use unsigned decimal literals; cell extents are nonnegative signed integers. Finite floating-point literals are accepted for gauge values and wheel steps; arbitrary expressions are not evaluated.
+
+| Property path(s) | C++ type, units, validation | Default when omitted |
+|---|---|---|
+| `text`, `placeholder` | `TextValue`; owning text/resource expression. `placeholder` must satisfy the receiving editor's text and width limits. | `text` uses the factory's initial text (empty when omitted); `placeholder` is absent. |
+| `width`, `height`, `flex` | `std::optional<std::int32_t>` cells, nonnegative; `std::optional<std::uint32_t>` flex weight, positive. | No size override; the factory's `SizePolicy` applies. |
+| `gap` | `optional<int32_t>` nonnegative terminal cells. | `LinearOptions::gap`, zero. |
+| `state`, `cycle` | `CheckState`: `UNCHECKED`, `CHECKED`, `MIXED`; `CheckCycle`: `TWO_STATE`, `THREE_STATE`. Invalid values fail preparation; `ThreeState` fixes the cycle to `THREE_STATE`. | Unchecked and `TWO_STATE` for `CheckBox`; `ThreeState` retains its fixed cycle. |
+| `editMode`, `readOnly`, `programmaticChange`, `displayMode` | `EditMode` (`IMMEDIATE`, `ON_COMPLETION`, `EXPLICIT`); `bool`; `ProgrammaticChange` (`RECORD`, `RESET_BASELINE`); `LineEditDisplayMode` (`NORMAL`, `PASSWORD`, `NO_ECHO`). | `IMMEDIATE`, `false`, `RECORD`, `NORMAL`. |
+| `history.enabled`, `history.maxOperations`, `history.maxBytes`, `history.groupTyping`, `history.groupDeletion` | `bool`, `size_t` operations, `size_t` retained bytes, `bool`, `bool`. Zero operation/byte capacity disables retention. | `TextHistoryOptions`: `true`, 128 operations, 1 MiB, `true`, `true`. |
+| `columns`, `rows`, `flow`, `columnGap`, `rowGap`, `padding.left/top/right/bottom`, `maxTracksPerAxis`, `maxPlacements`, `maxPlacementWork`, `scroll` | Grid counts/budgets are `size_t` and positive; `flow` is `ROW_MAJOR` or `COLUMN_MAJOR`; gaps/insets are nonnegative `int32_t` cells; `scroll` is `bool`. | Omission preserves the Grid recipe defaults; gaps/insets are zero, flow is row-major for automatic placement, budgets are 4096 tracks, 4096 placements and 65536 placement-work units, scrolling is off. |
+| `padding.left/top/right/bottom`, `mainAlign`, `crossAlign`, `overflow` | Insets are nonnegative `int32_t` cells. Alignment is `LayoutAlign`: `START`, `CENTER`, `END`, `STRETCH`. `overflow` is `LayoutOverflow`; only `CLIP` is supported. Invalid values fail validation. | `LayoutPadding{}` (zero each side), main `START`, cross `STRETCH`, `CLIP`. These paths belong to VBox/HBox schemas. |
+| `limits.maxInputBytes`, `limits.maxClusterBytes`, `limits.maxGraphemes`, `limits.maxCells` | `size_t` input bytes, per-grapheme-cluster bytes, grapheme count, and terminal cells. Zero is valid and restrictive; each nonempty input must satisfy the corresponding limit. | `LineEditOptions::limits`: 4096 bytes, 4096 bytes, 4096 graphemes, 8192 cells. |
+| `chrome` | `ButtonChrome`: `BRACKETS`, `NONE`. Applies to Button captions and actions. | The receiving factory's chrome; `plainButton` keeps `NONE`. |
+| `glyphs`, `maxPaintCells` | `PrimitiveGlyphs`: `UNICODE`, `ASCII`; positive `size_t` paint-work cap. Border, Gauge and scroll controls accept these leaves. | `UNICODE`, 16384; the existing control defines whether the budget counts perimeter, area or track work. |
+| `value`, `minimum`, `maximum`, `preferredWidth` | Finite `double` gauge values, `maximum > minimum`, inclusive value range; nonnegative `int32_t` intrinsic width in cells. | Gauge factory value; range 0–1 and preferred width 10. |
+| `wheelStep`, `keyStep`, `pageOverlap`, `minimumThumb`, `focusable` | Scroll controls: positive finite `double` logical wheel cells; positive `uint64_t` key cells; `uint64_t` shared page cells including zero; positive `int32_t` thumb cells; `bool`. | 3, 1, 1, 1, `true`. `readOnly` is also accepted, default `false`; checked programmatic scrolling remains available. |
+| `horizontal`, `vertical`, `placement` | ScrollArea policies: `NEVER`, `AUTO`, `ALWAYS`; placement `RESERVED`, `OVERLAY`, `ON_FRAME`. `ON_FRAME` requires an effective frame. | Both `AUTO`, placement `RESERVED`. |
+| `axis` | Standalone ScrollBar: `HORIZONTAL`, `VERTICAL`. | `VERTICAL`, unless its receiving factory supplies another axis. |
+| `frame.enabled`, `frame.glyphs`, `frame.maxPaintCells` | ScrollArea's optional existing one-cell frame. Explicit `false` removes it; frame glyph/budget leaves require an enabled frame. Glyphs and positive work cap follow `BorderOptions`. | No frame. Explicit `true` creates default frame options only when absent. |
+| `horizontalAlign`, `verticalAlign` | Overlay: `LayoutAlign` (`START`, `CENTER`, `END`, `STRETCH`); `padding.*` also applies. These differ from placement alignment in a containing Grid. | Both `STRETCH`; zero padding. Explicit factory options remain the baseline. |
+| `initiallyOpen` | HelpView: boolean, using the existing focus-return lifecycle. | `false`. |
+| `format.maxBytesPerBinding`, `format.strokeSeparator`, `format.alternativeSeparator`, `format.repeatMarker`, `format.releaseMarker`, `format.unknownMarker` | HelpView/KeyHints: positive whole-row byte cap and owning literal UTF-8 strings. `.format({...})` and `ui::format({...})` apply sparse patches. | `8192`; `" then "`, `" / "`, `" [repeat]"`, `" [release]"`, `" [?]"`. Omitted leaves preserve actual factory options. |
+| `emptyText`, `unavailableText` | HelpView/KeyHints: owning literal UTF-8, without expression evaluation or i18n resolution. | HelpView: `"No key bindings"`, `"Help unavailable"`; KeyHints: empty, `"?"`. Native presentation budgets still apply. |
+| `entrySeparator`, `overflowMarker` | KeyHints: literal UTF-8; overflow marker must be nonempty. | Two spaces, `"+"`. |
+| `rowHeight`, `overscanRows` | VirtualList/VirtualTable: positive cell rows per logical row; nonnegative additional requested rows per side. Explicit zero overscan is valid. | `1`, `2`. Omitted leaves preserve actual factory options. |
+| `maxColumns`, `maxPreparedCells`, `maxPreparedTextBytes` | VirtualTable: positive column, prepared body-cell and header/body UTF-8 limits. | `64`, `16384`, `1048576`. |
+| `mode`, `chartGlyphSet`, `candleGap` | Chart: `LINE`/`CANDLES`, `ASCII`/`BOX_DRAWING`, and a nonnegative gap in cell columns. | `LINE`, `ASCII`, `0`. Omitted leaves preserve actual factory options. |
+| `yRange.enabled`, `yRange.minimum`, `yRange.maximum` | Chart: optional explicit Y-scale with finite endpoints; equal endpoints are valid. `false` clears it; bound-only patches require an existing explicit range. | Automatic visible-range scale; enabling without bounds starts with native `(0, 0)`. |
+| `showStatus`, `statusRows`, `contentPolicy`, `spinnerInterval` | DataStateView: status-strip presence, positive `int32_t` row height, `KEEP_BODY`/`REPLACE` and positive `uint64_t` monotonic milliseconds. | `true`, `1`, `KEEP_BODY`, `100`; omitted settings preserve the actual receiving configuration. |
+| `labels.loading/empty/error/offline/refreshing/retry` | Owning text expressions; `.labels({...})` and `ui::labels({...})` patch only supplied captions. | `Loading...`, `No data`, `Unable to load data`, `Offline`, `Refreshing...`, `Retry`. |
+| `maxLayers` | OverlayHost: positive `size_t` registered-layer cap, including hidden layers. | `32`. |
+| `title`, `dialog.mode`, `dialog.placement` | Owning Dialog caption; `MODAL`/`NON_MODAL`; `CENTER`/`BELOW_START`/`ABOVE_START`. | Actual factory title; `MODAL`, `CENTER`. The scoped resource fallback requires an effective supplied title; an empty string is valid. |
+| `dialog.maximumPanelSize.width/height`, `dialog.viewportMargin`, `dialog.anchorGap` | Independent positive `int32_t` panel caps and nonnegative margin/gap, in cells. Caps never narrow the full-host structural Dialog root. | `60×20`, `1`, `1`. |
+| `dialog.closeOnEscape`, `dialog.frame.glyphs/maxPaintCells` | Allow Escape cancellation; `UNICODE`/`ASCII` border glyphs and positive opaque-panel work cap. The panel frame remains mandatory. | `true`, `UNICODE`, `16384`. |
+| `body` | Owning MessageBox explanation; `.body(...)` / `ui::body(...)` apply to the actual native message recipe. | Actual captured explanation. |
+| `message.labels.acknowledge/confirm/save/discard/cancel` | Owning text expressions. Only actions belonging to the actual message kind are resolved; active captions must be nonempty and single-line. | `OK`, `Continue`, `Save`, `Discard`, `Cancel`. |
+| `message.defaultChoice.enabled/value`, `message.allowDestructiveDefault` | Optional `ACKNOWLEDGE`/`CONFIRM`/`SAVE`/`DISCARD`/`CANCEL`; choice membership and destructive-default permission remain native checks. A supplied value activates the choice; explicit `false` clears it. Invalid enum values are rejected even when inactive. | Absent chooses `ACKNOWLEDGE` for information, otherwise safe `CANCEL`; permission `false`. Enabling without a value retains a captured choice or uses the safe kind default. |
+| `message.textLimits.maxInputBytes/maxClusterBytes/maxGraphemes/maxCells`, `message.maxBodyLines` | Positive per-expression UTF-8/cluster/grapheme/cell limits and wrapped-body line cap. `.messageSettings({...})` / `ui::messageSettings({...})` patch supplied message leaves. | `16384`, `4096`, `16384`, `32768`; `4096` lines. |
+| `notification.capacity/maxVisible` | Positive retained/visible notification caps; visible cap must not exceed effective capacity. | `32`, `3`. |
+| `notification.placement/maximumWidth/margin/gap` | `BOTTOM_END`/`TOP_END`/`BOTTOM_START`/`TOP_START`; positive width cap and nonnegative viewport margin/gap in cells. | `BOTTOM_END`, `48`, `1`, `1`. |
+| `notification.overflow/refreshDeduplicated/reducedMotion` | `DROP_OLDEST_PENDING`/`REJECT_NEW`; refresh an existing transient deadline; disable indicator alternation. | `DROP_OLDEST_PENDING`, `false`, `false`. |
+| `notification.textLimits.maxInputBytes/maxClusterBytes/maxGraphemes/maxCells` | Positive validation limits for one resolved message. | `16384`, `4096`, `16384`, `32768`. |
+| `notification.actionLabelBytes/dedupKeyBytes/maxPaintCells` | Positive action-label/deduplication-key byte caps and per-card paint-area cap. | `256`, `128`, `16384`. |
+| `themeSelector.labels.apply/cancel/closeKeepingPreview/emptyStatus/errorStatus/conflictStatus` | Owning view captions/status expressions; native `.themeSelectorSettings({...})` and `ui::themeSelectorSettings({...})` patch supplied leaves. | `Apply`, `Cancel`, `Close (keep preview)`, `Choose a theme to preview`, `Theme action failed; retry or close keeping preview`, `Theme changed elsewhere; preview again or close keeping preview`. |
+| `themeSelector.textLimits.maxInputBytes/maxClusterBytes/maxGraphemes/maxCells` | Positive validation limits for one resolved view caption/status. | `4096`, `4096`, `4096`, `8192`. |
+| `themeSelector.openingShortcut.enabled/value` | Optional existing key-binding text. A value activates it, `false` clears it; `true` without a value retains the captured binding or restores the native default. Invalid supplied syntax is rejected even when disabled. | `Ctrl+K, Ctrl+T`. |
+| `themeCatalog.maxChoices/maxIdBytes/maxLabelBytes/maxDescriptionBytes/maxTextBytes` | Positive catalog normalization caps: entries, ID bytes, resolved label/description bytes, aggregate logical text bytes. | `64`, `128`, `512`, `2048`, `1048576`. |
+| `themeCatalog.textLimits.maxInputBytes/maxClusterBytes/maxGraphemes/maxCells` | Positive per-value text validation limits. | `2048`, `4096`, `16384`, `32768`. |
+| `themeCatalog.initialId.enabled/value` | Owning choice ID, not a localized caption. A value enables startup preview+commit; `false` clears it. `true` without a value retains a captured ID or fails with `INVALID_ARGUMENT` if none exists. | No initial committed choice. |
+| `themeCatalog.layers.enabled/maxLayers/maxRules/maxDeclarations/maxOwnedBytes` | Optional first-preview layer admission. Numeric fields activate captured/default options unless explicitly disabled; supplied caps must be positive. An activated set requires at least two layers. `false` clears the optional. | Absent: established engine budgets or defaults `16`, `1024`, `6144`, `1048576`. |
+
+Instance `id`, owning space-separated `classes`, `visible` and `enabled` are separate from scalar `ControlSettings`. Their native methods and pipes preserve the real control type. Hidden or disabled controls retain the existing tree and input semantics.
+
+For native ScrollArea, `horizontal` and `vertical` are scroll policies. A containing Grid's placement alignment can be set separately with the existing `.gridItem(...)` recipe. Caller-registered types retain their own schema and the existing generic Grid placement syntax. An applicable `frame{...}` is a property group unless a registered child type owns the name `frame`; in that case bare `frame{...}` remains the child and `frame={...}` explicitly selects the property group.
+
+Padding has one canonical path per side, shared by Grid and VBox/HBox. `placeHolder` is accepted as a `CONFIGURATION` alias for `placeholder`; it canonicalizes before duplicate checks. The alias does not add a property. `ControlPropertyDescriptor` keeps the aggregate prefix `path`, `kind`, `depth`, `enumNames`; its optional alias span follows those fields. `SceneResourceArguments` likewise retains its existing aggregate prefix `text`, `id`, `width`, `height`, `flex`, `gap`, `checked`; `settings`, `visible` and `enabled` follow it. `ControlContext::registerType` selects a subset of this canonical vocabulary rather than adding arbitrary property names. See [`TextLimits`](../include/portals/text.hpp), [`LineEditOptions`](../include/portals/line_edit.hpp), [`LinearOptions`](../include/portals/layout.hpp) and [`GridOptions`](../include/portals/grid.hpp) for the receiving defaults and contracts.
+
+`KeyHints{help="guide"}` binds to a HelpView instance with ID `guide` in the same resource; forward references are supported. With no `help`, exactly one declared HelpView-capable instance is required. Erased `Widget` factories require an explicit ID and are checked by the existing mount finalizer. A missing, ambiguous or wrong target produces a typed setup error and rolls back pending references. `help` is instance binding metadata, not a `ControlSettings` scalar. These resource controls use the same canonical key registrations as their native counterparts.
+
+Message dialogs retain their native safety rules: `MODAL` and Escape cancellation are required. Their already validated internal panel does not inherit ordinary `Dialog` defaults a second time. A plain `Dialog` does not accept message-specific settings.
+
+Resource binding requires a real captured message facade. The existing fluent registration collector also accepts the canonical semantic schema; errors are retained for `prepareChecked()` / `runApp()` rather than requiring a manual registration check:
+
+```cpp
+ui::Ref<MessageDialog> question;
+ui::SceneResourceOptions options;
+options.format = ui::SceneResourceFormat::CONFIGURATION;
+options.control<Dialog>("Prompt", [question](ui::SceneResourceArguments) {
+  return ui::confirmDialog(question, "Continue?", "Apply these settings?");
+}, ui::controlPropertySchema("MessageBox"));
+```
+
+The registry reads the schema metadata only during registration and retains an owning finite selection. A partial/foreign schema is rejected. The factory must return the actual native message recipe, including through type erasure; an ordinary Dialog is rejected during checked setup. A `Prompt` resource can override the captured title/body and settings; callbacks and `question.open(...)` remain code. Explicit factory localization takes priority; the resource resolver is only a synchronous constructor fallback for this opt-in binding.
+
+Notifications use `.notificationSettings({...})` or `ui::notificationSettings({...})`; omitted leaves retain the captured `NotificationOptions`. Explicit `Notifications` defaults apply to that semantic composition. Unrelated ordinary `Overlay` defaults still do not reinterpret it. Overlay layout/size settings retain the actual surface identity and source-over-factory priority.
+
+The existing explicit native `.variant("MyOverlay")` with an `Overlay`-derived type remains a style-only path: it preserves the original visual identity and local factory settings without inheriting that variant's construction settings, ordinary `Overlay` defaults or new `Notifications` defaults. Use a `Notifications`-derived semantic variant when construction-setting inheritance is intended.
+
+Resource factories capture an actual center and complete body and opt in with `ui::controlPropertySchema("Notifications")`. This does not add an unbound resource constructor or serialize individual toast commands. The resource resolver is borrowed only during scene preparation and is not retained by the center; provide `NotificationOptions::textResolver` explicitly for later runtime posts.
+
+`ToastOptions` belongs to each runtime request: severity defaults to `INFO`, duration to 5000 milliseconds (`nullopt` is persistent), deduplication key to empty, and `dismissOnAction` to `true`. Its optional indicator defaults to disabled, glyph `!`, no alternating background, white foreground, red alert background and 500-millisecond period. These request settings remain the existing C++ posting API.
+
+The `ThemeSelector` semantic schema configures the real view for either an existing same-scene model or the existing default-catalog constructor. `title` defaults to `Themes`; omitted leaves preserve actual captured options. The view retains native modal behavior and disables eager Escape closure. Its internal Dialog does not inherit ordinary Dialog defaults again, and the default-catalog constructor applies view settings once before delegating internally.
+
+A registered factory supplies the actual selector facade and model/catalog and opts in with `ui::controlPropertySchema("ThemeSelector")`; a plain Dialog cannot acquire this capability from metadata. The resource node owns no external body children: the native view constructs its choices, status and actions. Own localization has priority; the resource resolver is only a synchronous preparation-time fallback and is not retained in future callbacks. `onCommitted`, choice factories and model/engine identities remain code-owned.
+
+The actual default-catalog constructor also accepts `.themeCatalogSettings({...})` and `ui::themeCatalogSettings({...})`. Resource factories expose these properties explicitly with `ui::controlPropertySchema("ThemeSelectorCatalog")`. An existing-model selector rejects catalog-only properties; metadata cannot turn it into an owning catalog.
+
+For an actual catalog, initial settings resolve in this order: `ThemeSelector` defaults, `ThemeSelectorCatalog` defaults, the named variant chain, then explicit instance values. Existing view-derived variants and old `ThemeSelector` resource registrations remain compatible. Old view metadata still rejects explicit `themeCatalog.*` inputs before calling its factory. If that factory returns an actual catalog, catalog defaults apply from the original sparse input, retaining their provenance. Any additional budget reservation is checked after the factory returns, before model installation; effects already performed inside a user factory are not rolled back.
+
+Omitted catalog settings preserve captured options, choices and callbacks. Startup selection uses the existing preview/commit path and does not call `onCommitted`. Optional layer budgets are admitted by the existing engine at preview: unequal already established budgets produce `INVALID_ARGUMENT`. These are initial settings, not a way to reconfigure a mounted selector or rebase an external model.
+
+### Resource support by current control family
+
+The built-in resource registry supplies seven ordinary factories. Grid, Border, Gauge, ScrollArea, ScrollBar, Overlay, HelpView, KeyHints, DataStateView, OverlayHost and Dialog also have scoped `CONFIGURATION` fallbacks; they do not reserve names against an explicit registration or change the legacy registry. The table records current resource support and omissions; an omitted scalar or declarative option is not thereby a permanent C++-only contract. Applications can register additional C++ factories, while callbacks, models, providers and captured behavior remain code-owned.
+
+| Current family and C++ entry points | Built-in scene-resource properties | Not currently accepted by the resource loader |
+|---|---|---|
+| Linear containers: `row`, `column`, `linear` | `VBox`/`HBox`: `width`, `height`, `flex`, `gap`, `padding.*`, `mainAlign`, `crossAlign`, `overflow`. | Children remain nested node recipes. |
+| Label: `label` | `text`, `width`, `height`, `flex`. | Style and model/resolver binding. |
+| Button/plain button: `button`, `plainButton` | `text`, `width`, `height`, `flex`, `chrome`. | Click callbacks, models and action captures. |
+| CheckBox/ThreeState: `checkbox`, `threeState` | `text`, `width`, `height`, `flex`, `state`, `cycle`. | Managed state and changed callback; Legacy retains its existing `checked` spelling. |
+| LineEdit: `lineEdit` | Shared size/text leaves, `editMode`, `readOnly`, `programmaticChange`, `displayMode`, `placeholder`, `history.*`, `limits.*`. | Clipboard, validator, history shortcuts, styles, models, resolver and result callback. |
+| Grid: `grid`, `GridSection` | Loader-local fallback: shared size leaves, `columns`, `rows`, `flow`, gaps, `padding.*`, placement budgets and `scroll`; child row/column/span/alignment and header/body regions. | Track policies, presentation styles, controller and child providers. |
+| Overlay layout: `overlay` | Scoped `Overlay` fallback: shared size leaves, `padding.*`, `horizontalAlign`, `verticalAlign` and ordinary child recipes in stacking order. | Service and event behavior remain code-owned. |
+| ScrollArea/ScrollBar: `scrollArea`, `scrollBar` | Scoped fallbacks: shared size leaves, wheel/key/page/thumb/focus/read-only/glyph/work settings; area policies, placement and frame; bar axis. Area requires one content root; bar is a leaf. | `ScrollController`, model/provider and callbacks remain code-owned. |
+| Border/frame: `border`, `frame` | Scoped `Border` fallback: shared size leaves, `glyphs`, `maxPaintCells` and exactly one content root. | Manual styles remain code-owned or use PSS. Extended frame decorations are separate. |
+| Gauge: `gauge` | Scoped `Gauge` fallback: shared size leaves, finite `value`, range, `preferredWidth`, `glyphs`, `maxPaintCells`; no children. | Manual styles remain code-owned or use PSS. |
+| Dialog/overlay host: `dialog`, `OverlayHost`, `overlayHost` | Scoped `CONFIGURATION` factories: host `maxLayers`; Dialog `title`, `dialog.*`; one host body followed by Dialog layers; one complete body per Dialog. | Opening, dismissal, anchors and result handlers remain code-owned. Resource dialogs begin closed. |
+| MessageBox: `messageBox`, `confirmDialog`, `unsavedChangesDialog` | Explicit semantic registration of a real native factory: `title`, `body`, `dialog.*`, `message.*`; leaf node with native internal actions. | The real message facade, factory kind, result routing and callbacks remain code-owned. No unbound resource builtin is supplied. |
+| Toast/NotificationCenter: `toast`, `notifications` | Explicit `Notifications` semantic registration of the real code-bound center and complete body: shared size/Overlay layout leaves and `notification.*`; resource node is a leaf. | Posting requests, actions, center identity and runtime resolver remain code-owned. |
+| DataStateView: `dataStateView` | Scoped `CONFIGURATION` factory: shared size leaves, `showStatus`, `statusRows`, `contentPolicy`, `spinnerInterval`, `labels.*` and exactly one complete body recipe. | The fallback uses explicit READY with generation1; models, provider state and retry actions remain code bindings. |
+| HelpView/KeyHints | Scoped leaf factories: shared size leaves, `format.*`, `emptyText`, `unavailableText`; HelpView `initiallyOpen`; KeyHints `entrySeparator`, `overflowMarker`, and local `help="id"` binding. | Key registrations remain code-owned; both controls project the existing canonical registrations. |
+| Theme selection/selector | Explicit `ThemeSelector` semantic registration of an actual view: `title`, `dialog.*`, `themeSelector.*`. `ThemeSelectorCatalog` additionally exposes `themeCatalog.*` on the real owning constructor. The resource node is a leaf. | Existing model/catalog factories, layer service and commit callbacks remain code bindings. An external model does not acquire catalog capability. |
+| VirtualList/VirtualTable | Exact typed registered factories: shared size leaves, `rowHeight`, `overscanRows`; VirtualTable also `maxColumns`, `maxPreparedCells`, `maxPreparedTextBytes`. | The factory supplies the real model, formatter, columns and prepared provider; no unbound built-in data factory is supplied. |
+| Chart | Exact typed registered factories: `mode`, `chartGlyphSet`, `candleGap`, `yRange.*`. | The factory supplies the real model, accessor, origin and prepared provider. Chart is a plain `Widget`, so this schema does not add SizedWidget's size leaves. |
+| Canvas/custom controls | None by default. | Drawing and custom factory captures remain code-owned; resource support depends on a registered factory. |
+| Styles/theme layers | No per-control scalar property schema. | PSS and stylesheet/theme configuration use separate APIs and are not loaded as per-control scalar properties. |
+
+For an exact `add<VirtualList<T>>` or `add<VirtualTable<T>>` registration, the
+default schema includes the applicable data-control leaves. The existing wrapper
+stages these resource values automatically; the factory does not need to forward
+`arguments.settings` manually. An explicitly supplied old narrow schema remains
+narrow and rejects the new leaves. Arbitrary custom subclasses do not inherit
+this schema. Native methods and pipes, such as `.rowHeight(2).overscanRows(0)`
+and `ui::rowHeight(2)`, retain the existing model, formatter, policy and provider.
+
+Dialog/OverlayHost settings apply during construction. Methods and pipes such
+as `.maximumPanelSize({42, 9})` and `ui::maxLayers(2)` retain unspecified actual
+factory options. `.frame(BorderOptions{...})` changes the Dialog panel's own
+frame; its grouped pipe is `ui::dialogSettings({.frame={...}})`. The existing
+`ui::frame(...)` still wraps a recipe in Border.
+
+A resource OverlayHost takes one ordinary body followed by zero or more Dialog
+layers. Each Dialog takes one complete body; `title` may come from the instance,
+defaults or a definition. The host binds its body before registering layers.
+Open the loaded Dialog with the existing `ui::Ref<Dialog>::open()`; `opened()`
+and `dismiss()` keep the normal managed lifecycle. A registered layer factory
+must create a real managed Dialog; bare `custom<Dialog>` does not register one.
+
+The groups `dialog { maximumPanelSize { width=42, height=9 } }` and
+`dialog.frame { ... }` are distinct from Chart mode and ScrollArea placement.
+If a registered child owns a group name, use explicit `dialog={...}` syntax.
+
+An exact `add<DataStateView>` registration stages settings over the actual
+configuration, retaining its model, retry and resolver. With `showStatus=false`,
+labels are not resolved and no status strip or animation timer is created. With
+status enabled, `labels.retry` is used only when a retry action exists. Scalar
+validation still applies with status disabled. In C++, supply optional captions
+as expressions: `.labels({.loading = text("Fetching...")})`.
+
+The scoped DataStateView resource factory takes one complete body, including a
+nested layout/Grid. For example: `DataStateView { showStatus=false Label{"body"} }`.
+The group `labels { loading=i18n("loading") }` retains an expression until native
+construction; unused labels do not invoke a resolver. If a registered child type
+owns the name `labels`, use `labels={...}` to select the property group. The
+resource resolver is scoped to native fallback construction; an explicit factory
+resolver takes precedence.
+
+An exact `add<Chart<T>>` likewise stages the six Chart leaves automatically. Its
+old explicit narrow schema is `{text}`; the expanded schema adds the six leaves.
+Text remains metadata for the code factory, rather than a rendered Chart caption.
+Native `.yRange(ChartRange{90, 120})` and `ui::yRange(...)` set both endpoints;
+`.yRange(std::nullopt)` clears the range. The resource spelling is
+`yRange { enabled=true, minimum=90, maximum=120 }`. When a registered child owns
+the name `yRange`, use `yRange={...}` to select the property group explicitly.
+
+`ControlContext` validates every defaults/definition independently. A declaration
+with reversed bounds and `enabled` omitted or `true` is invalid even when a later
+instance would disable it. Put `enabled=false` on that declaration to retain inactive finite bounds.
+Supplied nonfinite endpoints are always invalid. A second explicit preparation
+may reproject Chart rows, as with the native API; an idle event loop does not
+request additional preparation or redraw just because these settings are present.
+
+`ui::overlay` accepts ordinary child recipes, optional `OverlayOptions`/`SizePolicy` and a Ref-first form. Its methods and pipes use the same initial layout settings. The existing `ui::notifications` composition also accepts those local Overlay modifiers; unrelated caller defaults named `Overlay` do not reinterpret it. Explicit semantic `Notifications` defaults and `.notificationSettings(...)` configure the actual center constructor.
+
+### Instance identity and state
+
+Resource `#id` identifies one node. It is not a type default and is not inherited. The instance-only `visible` and `enabled` booleans are also outside the scalar `ControlSettings` vocabulary: their default is `true`, and they apply locally after the factory recipe. Hiding removes a subtree from layout, paint and input; disabling keeps layout and paint while changing input/style behavior. Ancestors still dominate child state. Definitions and defaults reject these instance-only keys.
+
+C++ recipes can set the same initial state with `.visible(bool)` and `.enabled(bool)`, or the `ui::visible(...)` and `ui::enabled(...)` pipe stages. Runtime query and mutation use the existing `WidgetTree` APIs. Text, callback, model, resolver, provider and factory-capture behavior stays in C++; unknown resource properties are rejected before the text resolver or factory is called.
+
+### Equivalent C++ and loaded-scene setup
+
+This C++ scene applies sparse defaults to a linear container and editor variant, then gives one button an instance-only disabled state:
+
+```cpp
+#include <portals/ui.hpp>
+
+int main() {
+  using namespace portals;
+
+  ui::ControlContext controls;
+  controls.defaults("VBox", {
+      .gap = 1,
+      .grid = {.paddingLeft = 1, .paddingRight = 1},
+      .linear = {.mainAlign = LayoutAlign::CENTER}})
+    .defaults("LineEdit", {
+      .limits = {.maxInputBytes = 64, .maxClusterBytes = 16,
+                 .maxGraphemes = 48, .maxCells = 48}})
+    .define("CompactEdit", "LineEdit", {
+      .limits = {.maxGraphemes = 32}});
+
+  auto scene = ui::scene(
+    ui::vbox(ui::label("Search"),
+             ui::lineEdit("").variant("CompactEdit"),
+             ui::button("Find").enabled(false)),
+    {.controls = controls});
+  return scene | ui::runApp();
+}
+```
+
+The equivalent resource uses the existing `CONFIGURATION` grammar. The nested `scene` contains one root node; type settings belong in `definitions` or `defaults`, while `enabled` belongs to the concrete instance:
+
+```cpp
+#include <portals/ui.hpp>
+
+int main() {
+  using namespace portals;
+
+  ui::SceneResourceOptions resource;
+  resource.format = ui::SceneResourceFormat::CONFIGURATION;
+  auto scene = ui::scene(R"(
+definitions {
+  CompactEdit = LineEdit { limits { maxGraphemes = 32 } }
+}
+defaults {
+  VBox {
+    gap = 1
+    padding { left = 1; right = 1 }
+    mainAlign = CENTER
+  }
+  LineEdit {
+    limits {
+      maxInputBytes = 64
+      maxClusterBytes = 16
+      maxGraphemes = 48
+      maxCells = 48
+    }
+  }
+}
+scene {
+  VBox {
+    Label { text = "Search" }
+    CompactEdit#query { text = "" }
+    Button#find { text = "Find"; enabled = false }
+  }
+}
+)", resource);
+  return scene | ui::runApp();
+}
+```
+
+`CONFIGURATION` must be selected explicitly; the default `LEGACY` format remains the historical single-root grammar. The new nested linear `padding`/alignment fields and LineEdit `limits` belong to `CONFIGURATION`; `visible` and `enabled` are accepted on node instances by both formats.
+
+The example customizes initial values only. It does not serialize all fields of `LinearOptions`, `LineEditOptions` or any other public options struct. Keep application callbacks, models and providers in C++; the loader has no syntax for them. [`SceneResourceOptions`](../include/portals/ui_scene_resource.hpp) exposes the format, context and explicit resource-factory registry.
 ## Virtual views
 
 Create a model once with `scene.model<T>(snapshot)` and pass its observing handle

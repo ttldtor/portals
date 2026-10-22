@@ -2395,6 +2395,41 @@ std::expected<void, ManagedError> ManagedScene::id(Node<Widget> node, std::strin
   }
 }
 
+std::expected<void, ManagedError> ManagedScene::classes(Node<Widget> node, std::vector<std::string> values) {
+  auto allowed = boundary(ManagedPhase::STYLE, node);
+
+  if (!allowed) {
+    return allowed;
+  }
+
+  auto entry = find(node);
+
+  if (!entry) {
+    return std::unexpected(error(ManagedPhase::STYLE, node, TreeError::INVALID_ARGUMENT));
+  }
+
+  try {
+    auto target = entry->target ? *entry->target : StyleTarget{};
+
+    target.classes.swap(values);
+
+    auto prepared = std::make_shared<StyleTarget>(target);
+    auto dirty = app_.tree().invalidate(node, Invalidation::PAINT);
+
+    if (!dirty) {
+      return std::unexpected(error(ManagedPhase::STYLE, node, dirty.error()));
+    }
+
+    entry->target = std::move(prepared);
+    entry->stylePending = true;
+    stylesDirty_ = true;
+
+    return {};
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(error(ManagedPhase::STYLE, node, TreeError::NO_MEMORY));
+  }
+}
+
 std::expected<void, ManagedError>
 ManagedScene::pendingStyles(std::optional<std::vector<StyleRegistration>> &destination) {
   try {

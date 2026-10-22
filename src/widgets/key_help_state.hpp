@@ -72,6 +72,16 @@ namespace portals::ui::detail {
 struct KeyHelpAccess {
   static Description<HelpView> full(Ref<HelpView> reference, HelpViewOptions options, ControlStyle style);
   static Description<KeyHints> hints(Ref<HelpView> help, KeyHintsOptions options, ControlStyle style);
+  // Resource-local erased observers still use the native checked-target finalizer.
+  static Description<KeyHints> hints(Ref<Widget> help, KeyHintsOptions options, ControlStyle style);
+  static std::expected<GraphemeText, ManagedError> validate(ManagedScene &scene, const HelpViewOptions &options,
+                                                            Node<Widget> parent = {},
+                                                            std::string_view *property = nullptr);
+  static std::expected<GraphemeText, ManagedError> validate(ManagedScene &scene, const KeyHintsOptions &options,
+                                                            Node<Widget> parent = {},
+                                                            std::string_view *property = nullptr);
+  static Description<KeyHints> hintsTarget(std::shared_ptr<const RefTarget> target, KeyHintsOptions options,
+                                           ControlStyle style);
   static std::expected<void, ManagedError> command(ManagedScene &scene, Node<Widget> node, bool opening);
 };
 } // namespace portals::ui::detail

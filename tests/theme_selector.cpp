@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include <portals/theme_selector.hpp>
+#include <portals/ui_style.hpp>
 
 #include "support/managed_text_fixture.hpp"
 
@@ -11,6 +12,28 @@ StyleSheet theme() {
   StyleRule rule;
   rule.declarations.foreground = RgbColor{220, 10, 10};
   return {.rules = {rule}};
+}
+
+void prepareSelector(ManagedScene &managed, Application &app, CellSize size) {
+  take(managed.prepare(app, size));
+  for (std::size_t pass = 0; pass < ApplicationOptions{}.maxPreparationPasses; ++pass) {
+    std::optional<LayoutSnapshot> layout;
+
+    take(app.tree().frame([&] {
+      const auto bounds = take(CellRect::from({0, 0}, size));
+
+      take(layoutTree(app.tree(), take(app.tree().root()), bounds, bounds));
+      layout = take(LayoutSnapshot::capture(app.tree(), managed.root(), LayoutSnapshotProfile::GEOMETRY));
+    }));
+    take(app.tree().consumeFrameRequest());
+    take(managed.prepareViews(app, *layout));
+    if (take(app.tree().consumeFrameRequest()) != Invalidation::LAYOUT) {
+      take(managed.completedLayout(app));
+
+      return;
+    }
+  }
+  check(false, "selector layout converges within existing runner budget");
 }
 
 struct SelectorFixture {
@@ -57,22 +80,7 @@ struct SelectorFixture {
   }
 
   void prepare(CellSize size = SELECTOR_VIEWPORT) {
-    take(managed->prepare(*app, size));
-    for (std::size_t pass = 0; pass < ApplicationOptions{}.maxPreparationPasses; ++pass) {
-      std::optional<LayoutSnapshot> layout;
-      take(app->tree().frame([&] {
-        const auto bounds = take(CellRect::from({0, 0}, size));
-        take(layoutTree(app->tree(), take(app->tree().root()), bounds, bounds));
-        layout = take(LayoutSnapshot::capture(app->tree(), managed->root(), LayoutSnapshotProfile::GEOMETRY));
-      }));
-      take(app->tree().consumeFrameRequest());
-      take(managed->prepareViews(*app, *layout));
-      if (take(app->tree().consumeFrameRequest()) != Invalidation::LAYOUT) {
-        take(managed->completedLayout(*app));
-        return;
-      }
-    }
-    check(false, "selector layout converges within existing runner budget");
+    prepareSelector(*managed, *app, size);
   }
 
   Node<Widget> button(Node<Widget> root, std::string_view caption) {
@@ -880,9 +888,562 @@ void externalFactoryCannotApply() {
         "rejected nested Apply preserves outer preview, callback, outcome and open view");
   check(nestedAllocations == 0, "busy model admission precedes owning outcome allocation");
 }
+
+void ambientDialogDefaultsDoNotReinterpretSelector() {
+  Fixture f;
+  ui::Ref<ThemeSelector> selector;
+  ui::Ref<Dialog> view;
+  ui::ControlContext controls;
+  int factories{};
+
+  controls.defaults("Dialog", {.title = text("Hostile ambient title"),
+                               .dialog = {.mode = DialogMode::NON_MODAL, .closeOnEscape = true}});
+  controls.defaults("Label", {.width = 7});
+  take(ui::mount(*f.scene,
+                 ui::overlayHost(ui::button("Body",
+                                            [] {
+                                            }),
+                                 ui::themeSelector(selector, ui::ThemeSelectorCatalog{.choices = {{"red", "Red",
+                                                                                                   [&] {
+                                                                                                     ++factories;
+
+                                                                                                     return theme();
+                                                                                                   }}}})
+                                   .reference(view)),
+                 controls));
+  std::optional<DialogOptions> actual;
+  const auto inspected = f.app->tree().read(view.node(), [&](const Dialog &dialog) {
+    actual = dialog.options();
+  });
+
+  if (!inspected) {
+    std::cerr << "selector Dialog read TreeError=" << static_cast<int>(inspected.error()) << '\n';
+  }
+  take(inspected);
+  check(actual && actual->mode == DialogMode::MODAL && !actual->closeOnEscape,
+        "native selector stays modal with eager Escape disabled despite hostile ambient Dialog defaults");
+  // Use the same complete managed/layout/view convergence as ordinary selector fixtures.
+  prepareSelector(*f.scene, *f.app, SELECTOR_VIEWPORT);
+  check(factories == 0, "native selector still delays preview factories until preview");
+  take(selector.open());
+  check(take(f.app->tree().inspect(view.node())).visible, "native selector opens its real registered dialog");
+  take(selector.cancel());
+  check(!take(f.app->tree().inspect(view.node())).visible, "native selector cancellation remains bound");
+}
+
+Node<Widget> viewText(Application &app, Node<Widget> root, std::string_view caption) {
+  Node<Widget> result;
+
+  take(app.tree().read(root, [&](const Widget &widget) {
+    if (const auto *button = dynamic_cast<const Button *>(&widget); button && button->text().bytes() == caption) {
+      result = root;
+    } else if (const auto *label = dynamic_cast<const Label *>(&widget); label && label->text().bytes() == caption) {
+      result = root;
+    }
+  }));
+  if (result != Node<Widget>{}) {
+    return result;
+  }
+  for (const auto child : take(app.tree().inspect(root)).children) {
+    result = viewText(app, child, caption);
+
+    if (result != Node<Widget>{}) {
+      return result;
+    }
+  }
+
+  return {};
+}
+
+void sparseViewConstructionParity() {
+  for (const bool external : {false, true}) {
+    for (int path = 0; path != 5; ++path) {
+      ui::ThemeSelectorRef selector;
+      ui::ThemeSelectionRef model;
+      ui::Ref<Dialog> view;
+      ManagedScene *managed{};
+      Application *app{};
+      int previews{}, commits{}, factories{};
+      const std::vector<ui::ThemeChoice> choices{{"red", "Red",
+                                                  [&] {
+                                                    ++previews;
+
+                                                    return theme();
+                                                  }},
+                                                 {"other", "Other", [&] {
+                                                    ++previews;
+
+                                                    return theme();
+                                                  }}};
+      ui::ThemeSelectorOptions actual;
+
+      actual.title = TextValue("Captured");
+      actual.apply = TextValue("Captured apply");
+      actual.cancel = TextValue("Captured cancel");
+      actual.dialog.maximumPanelSize = {36, 16};
+      actual.dialog.viewportMargin = 1;
+      actual.openingShortcut.reset();
+      actual.onCommitted = [&](std::string_view id) -> std::expected<void, ManagedError> {
+        check(id == "red", "actual selector commits the chosen model ID");
+        ++commits;
+
+        return {};
+      };
+      const ui::ControlThemeSelectorSettings patch{
+        .labels = {.apply = text("Use"),
+                   .cancel = text("Back"),
+                   .closeKeepingPreview = text("Keep"),
+                   .emptyStatus = text("Pick"),
+                   .errorStatus = text("Error"),
+                   .conflictStatus = text("Conflict")},
+        .textLimits = {.maxInputBytes = 128, .maxClusterBytes = 64, .maxGraphemes = 64, .maxCells = 96},
+        .openingShortcut = {.value = "Ctrl+J"}};
+      auto factory = [&] {
+        ++factories;
+        auto options = actual;
+
+        if (path == 0) {
+          options.title = TextValue("Styles");
+          options.apply = TextValue("Use");
+          options.cancel = TextValue("Back");
+          options.closeKeepingPreview = TextValue("Keep");
+          options.emptyStatus = TextValue("Pick");
+          options.errorStatus = TextValue("Error");
+          options.conflictStatus = TextValue("Conflict");
+          options.textLimits = {128, 64, 64, 96};
+          options.openingShortcut = "Ctrl+J";
+        }
+        auto recipe = external ? ui::themeSelector(selector, model, options)
+                               : ui::themeSelector(selector, ui::ThemeSelectorCatalog{.choices = choices}, options);
+
+        if (path == 1) {
+          (void)std::move(recipe).title("Styles").themeSelectorSettings(patch);
+        } else if (path == 2) {
+          recipe = std::move(recipe) | ui::title("Styles") | ui::themeSelectorSettings(patch);
+        } else if (path == 3) {
+          auto sparse = patch;
+
+          sparse.labels.cancel.reset();
+          sparse.openingShortcut = {.enabled = true};
+          (void)std::move(recipe).settings({.themeSelector = sparse}).variant("Picker");
+        } else if (path == 4) {
+          (void)std::move(recipe).themeSelectorSettings({.labels = {.apply = text("Factory loses")}});
+        }
+
+        return std::move(recipe).reference(view);
+      };
+      ui::ControlContext controls;
+
+      controls.defaults("Dialog",
+                        {.title = text("Ambient"), .dialog = {.mode = DialogMode::NON_MODAL, .closeOnEscape = true}});
+      controls.defaults("Label", {.width = 9});
+      controls.defaults("Button", {.width = 11});
+      if (path == 3) {
+        controls.defaults("ThemeSelector", {.themeSelector = {.labels = {.cancel = text("Back")}}});
+        controls.define("Picker", "ThemeSelector", {.title = text("Styles")});
+      }
+      auto owner = [&]() -> ui::Scene {
+        if (path == 4) {
+          ui::SceneResourceOptions options;
+
+          options.format = ui::SceneResourceFormat::CONFIGURATION;
+          options.controls = controls;
+          options.control<Dialog>(
+            "View",
+            [&](ui::SceneResourceArguments) {
+              return factory();
+            },
+            ui::controlPropertySchema("ThemeSelector"));
+
+          return ui::scene(
+            R"(defaults{View{themeSelector{labels{cancel="Back" emptyStatus="Pick"} textLimits{maxInputBytes=128 maxClusterBytes=64 maxGraphemes=64 maxCells=96}}}}
+            definitions{Picker=View{title="Styles" themeSelector{labels{apply="Use" closeKeepingPreview="Keep" errorStatus="Error" conflictStatus="Conflict"}}}}
+            scene{OverlayHost{Button{"Body"} Picker{themeSelector={openingShortcut{value="Ctrl+J"}}}}})",
+            options);
+        }
+        ui::SceneOptions options;
+
+        options.controls = controls;
+
+        if (path == 3) {
+          return ui::scene(
+            [&](ManagedScene &) {
+              return ui::overlayHost(ui::button("Body"), factory());
+            },
+            options);
+        }
+
+        return ui::scene(options, ui::button("Body"), factory());
+      }();
+      owner | ui::style("Dialog.modal { bold:true; }");
+      if (external) {
+        owner | ui::themeSelection(model, {choices[0], choices[1]});
+      }
+      owner.configure([&](ManagedScene &scene, Application &application) {
+        managed = &scene;
+        app = &application;
+      });
+      if (path == 3) {
+        check(factories == 0, "native selector SceneFactory stays lazy before semantic preflight");
+      }
+      take(owner.prepareChecked());
+      prepareSelector(*managed, *app, SELECTOR_VIEWPORT);
+      check(factories == 1 && previews == 0 && commits == 0, "view construction does not preview or commit");
+      std::optional<DialogOptions> options;
+      bool nativeStyle{};
+
+      take(app->tree().read(view.node(), [&](const Dialog &dialog) {
+        options = dialog.options();
+        nativeStyle = dialog.computedStyle() && dialog.computedStyle()->normal.bold;
+      }));
+      check(options && options->mode == DialogMode::MODAL && !options->closeOnEscape &&
+              options->maximumPanelSize == CellSize{36, 16} && options->viewportMargin == 1 && nativeStyle,
+            "captured geometry and native Dialog/modal identity survive all selector schema paths");
+      for (const auto caption : {"Styles", "Use", "Back", "Keep", "Pick", "Error", "Conflict"}) {
+        const auto node = viewText(*app, view.node(), caption);
+
+        check(node != Node<Widget>{}, "effective owning caption appears in the actual selector subtree");
+      }
+      const auto heading = viewText(*app, view.node(), "Styles");
+      const auto apply = viewText(*app, view.node(), "Use");
+      std::int32_t labelWidth{}, buttonWidth{};
+
+      take(app->tree().read(heading, [&](const Widget &widget) {
+        labelWidth = dynamic_cast<const Label &>(widget).sizePolicy().width.preferred;
+      }));
+      take(app->tree().read(apply, [&](const Widget &widget) {
+        buttonWidth = dynamic_cast<const Button &>(widget).sizePolicy().width.preferred;
+      }));
+      check(labelWidth == 9 && buttonWidth == 11, "precharged source captions retain ordinary Label/Button defaults");
+      if (path == 3) {
+        check(take(managed->input(*app, KeyEvent{InputKey::CHARACTER, U'k', {.control = true}})),
+              "enabled without captured shortcut restores the native sequence prefix");
+        check(!take(app->tree().inspect(view.node())).visible, "opening sequence waits for its final stroke");
+        check(take(managed->input(*app, KeyEvent{InputKey::CHARACTER, U't', {.control = true}})),
+              "native default opening sequence completes");
+      } else {
+        check(take(managed->input(*app, KeyEvent{InputKey::CHARACTER, U'j', {.control = true}})),
+              "value-only opening shortcut is routed");
+      }
+      check(take(app->tree().inspect(view.node())).visible && previews == 0, "opening invokes no theme factory");
+      take(app->router().invoke(viewText(*app, view.node(), "Red"), {Action::ACTIVATE}));
+      take(selector.apply());
+      check(previews == 1 && commits == 1 && !take(app->tree().inspect(view.node())).visible,
+            "actual choice preview and Apply preserve once-only callback and close");
+      prepareSelector(*managed, *app, SELECTOR_VIEWPORT);
+      take(selector.open());
+      take(app->router().invoke(viewText(*app, view.node(), "Other"), {Action::ACTIVATE}));
+      take(selector.cancel());
+      check(previews == 2 && commits == 1 && take(selector.snapshot())->lastCommittedId == "red",
+            "Cancel restores the committed native model without redelivery");
+      prepareSelector(*managed, *app, SELECTOR_VIEWPORT);
+      (void)take(app->tree().consumeFrameRequest());
+      (void)take(app->scheduler().dispatch());
+      take(managed->afterDispatch(*app));
+      check(take(app->tree().consumeFrameRequest()) == Invalidation::NONE,
+            "settled closed selector has no idle redraw");
+      take(owner.close());
+      check(!selector.open() && !view.geometry(), "source view and service retire through existing cleanup");
+    }
+  }
+}
+
+void sparseResolverAndDisabledShortcut() {
+  for (const bool ownResolver : {false, true}) {
+    ui::ThemeSelectorRef selector;
+    ui::Ref<Dialog> view;
+    int resourceCalls{}, ownCalls{}, previews{}, commits{};
+    bool repaired{};
+    auto resourceToken = std::make_shared<int>(1);
+    std::weak_ptr<int> borrowed = resourceToken;
+    {
+      ui::ThemeSelectorOptions actual;
+      ui::SceneResourceOptions options;
+
+      actual.openingShortcut = "Ctrl+Q";
+      actual.onCommitted = [&](std::string_view) -> std::expected<void, ManagedError> {
+        ++commits;
+
+        return {};
+      };
+      if (ownResolver) {
+        actual.textResolver = [&](std::string_view) -> std::expected<std::string, TextResourceError> {
+          ++ownCalls;
+
+          return "Use";
+        };
+      }
+      options.format = ui::SceneResourceFormat::CONFIGURATION;
+      options.resolver = [resourceToken, &resourceCalls,
+                          &repaired](std::string_view) -> std::expected<std::string, TextResourceError> {
+        ++resourceCalls;
+        if (!repaired) {
+          return std::unexpected(TextResourceError::MISSING_RESOURCE);
+        }
+
+        return "Use";
+      };
+      options.control<Widget>(
+        "View",
+        [&](ui::SceneResourceArguments) {
+          return ui::detail::Access::erase(ui::themeSelector(selector,
+                                                             ui::ThemeSelectorCatalog{.choices = {{"red", "Red",
+                                                                                                   [&] {
+                                                                                                     ++previews;
+
+                                                                                                     return theme();
+                                                                                                   }}}},
+                                                             actual)
+                                             .reference(view));
+        },
+        ui::controlPropertySchema("ThemeSelector"));
+      const auto source =
+        R"(scene{OverlayHost{Button{"Body"} View{themeSelector{labels{apply=i18n("apply")} openingShortcut{enabled=false value="Ctrl+J"}}}}})";
+
+      resourceToken.reset();
+      if (!ownResolver) {
+        auto failed = ui::scene(source, options);
+        const auto result = failed.prepareChecked();
+
+        check(!result && result.error().resource == TextResourceError::MISSING_RESOURCE &&
+                view.node() == Node<Dialog>{},
+              "constructor-only resource error retains its category and publishes no view");
+        take(failed.close());
+        repaired = true;
+      }
+      ManagedScene *managed{};
+      Application *app{};
+      auto owner = ui::scene(source, options);
+
+      owner.configure([&](ManagedScene &scene, Application &application) {
+        managed = &scene;
+        app = &application;
+      });
+      take(owner.prepareChecked());
+      prepareSelector(*managed, *app, SELECTOR_VIEWPORT);
+      check(take(managed->keyBindings()).bindings.empty(), "enabled=false clears captured and explicit valid shortcut");
+      check(ownCalls == (ownResolver ? 1 : 0) && resourceCalls == (ownResolver ? 0 : 2),
+            "explicit native resolver wins; resource fallback is used only for active constructor expressions");
+      take(selector.open());
+      take(app->router().invoke(viewText(*app, view.node(), "Red"), {Action::ACTIVATE}));
+      take(selector.apply());
+      check(previews == 1 && commits == 1 && ownCalls == (ownResolver ? 1 : 0) &&
+              resourceCalls == (ownResolver ? 0 : 2),
+            "future preview and committed callbacks retain no constructor resolver work");
+      take(owner.close());
+    }
+    check(borrowed.expired(), "prepare-only resolver captures retire without a runtime record borrow");
+  }
+}
+
+void sparseCatalogConstructionParity() {
+  for (int path = 0; path != 5; ++path) {
+    ui::ThemeSelectorRef selector;
+    ui::Ref<Dialog> view;
+    ManagedScene *managed{};
+    Application *app{};
+    int previews{}, commits{}, resolutions{}, constructions{};
+    ui::ThemeSelectorCatalog catalog;
+    catalog.choices = {{"red", i18n("red"),
+                        [&] {
+                          ++previews;
+                          return theme();
+                        },
+                        text("Description")},
+                       {"sky", "Sky", [&] {
+                          ++previews;
+                          return theme();
+                        }}};
+    catalog.selection.maxChoices = 1;
+    catalog.selection.textResolver = [&](std::string_view) -> std::expected<std::string, TextResourceError> {
+      ++resolutions;
+      return "Red界";
+    };
+    catalog.initialId = "sky";
+    const ui::ControlThemeCatalogSettings patch{
+      .maxChoices = 2,
+      .maxIdBytes = 3,
+      .maxLabelBytes = 16,
+      .maxDescriptionBytes = 32,
+      .maxTextBytes = 128,
+      .textLimits = {.maxInputBytes = 64, .maxClusterBytes = 64, .maxGraphemes = 32, .maxCells = 64},
+      .initialId = {.value = "red"},
+      .layers = {.enabled = true, .maxLayers = 4, .maxRules = 8, .maxDeclarations = 16, .maxOwnedBytes = 4096}};
+    ui::ThemeSelectorOptions actual;
+    actual.onCommitted = [&](std::string_view) -> std::expected<void, ManagedError> {
+      ++commits;
+      return {};
+    };
+    auto factory = [&] {
+      ++constructions;
+      auto captured = catalog;
+      if (path == 0) {
+        captured.selection.maxChoices = 2;
+        captured.selection.maxIdBytes = 3;
+        captured.selection.maxLabelBytes = 16;
+        captured.selection.maxDescriptionBytes = 32;
+        captured.selection.maxTextBytes = 128;
+        captured.selection.textLimits = {64, 64, 32, 64};
+        captured.selection.layers = StyleLayerOptions{4, 8, 16, 4096};
+        captured.initialId = "red";
+      }
+      auto recipe = ui::themeSelector(selector, captured, actual).reference(view);
+      if (path == 1) {
+        (void)std::move(recipe).themeCatalogSettings(patch);
+      }
+      if (path == 2) {
+        recipe = std::move(recipe) | ui::themeCatalogSettings(patch);
+      }
+      if (path == 4) {
+        (void)std::move(recipe).variant("Picker");
+      }
+      return recipe;
+    };
+    auto owner = [&]() -> ui::Scene {
+      if (path == 3) {
+        ui::SceneResourceOptions options;
+        options.format = ui::SceneResourceFormat::CONFIGURATION;
+        options.control<Dialog>(
+          "Catalog",
+          [&](ui::SceneResourceArguments) {
+            return factory();
+          },
+          ui::controlPropertySchema("ThemeSelectorCatalog"));
+        return ui::scene(
+          R"(defaults{Catalog{themeCatalog{maxChoices=2 maxIdBytes=3 maxLabelBytes=16 maxDescriptionBytes=32 maxTextBytes=128 textLimits{maxInputBytes=64 maxClusterBytes=64 maxGraphemes=32 maxCells=64}}}}
+          definitions{Picker=Catalog{themeCatalog{initialId{value="red"}}}}
+          scene{OverlayHost{Button{"Body"} Picker{themeCatalog={layers{enabled=true maxLayers=4 maxRules=8 maxDeclarations=16 maxOwnedBytes=4096}}}}})",
+          options);
+      }
+      ui::SceneOptions options;
+      if (path == 4) {
+        options.controls.defaults("ThemeSelectorCatalog", {.themeCatalog = patch});
+        options.controls.define("Picker", "ThemeSelector");
+        return ui::scene(
+          [&](ManagedScene &) {
+            return ui::overlayHost(ui::button("Body"), factory());
+          },
+          options);
+      }
+      return ui::scene(ui::button("Body"), factory());
+    }();
+    owner.styleLayers({4, 8, 16, 4096});
+    owner | ui::style("Dialog.modal { bold:true; }");
+    owner.configure([&](ManagedScene &scene, Application &application) {
+      managed = &scene;
+      app = &application;
+    });
+    if (path == 3 || path == 4) {
+      check(constructions == 0, "catalog recipe factory stays cold before prepare");
+    }
+    const auto prepared = owner.prepareChecked();
+    if (!prepared) {
+      std::cerr << "catalog construction path=" << path << '\n';
+      ui::reportToStderr({.failure = prepared.error()});
+    }
+    take(prepared);
+    prepareSelector(*managed, *app, SELECTOR_VIEWPORT);
+    const auto snapshot = take(selector.snapshot());
+    check(snapshot->catalog->choices.size() == 2 && snapshot->catalog->choices.front()->label.bytes() == "Red界" &&
+            snapshot->lastCommittedId == "red" && previews == 1 && commits == 0 && resolutions == 1 &&
+            constructions == 1,
+          "native/method/pipe/resource catalog normalizes once and performs one startup preview without onCommitted");
+    bool nativeStyle{};
+    take(app->tree().read(view.node(), [&](const Dialog &dialog) {
+      nativeStyle = dialog.options().mode == DialogMode::MODAL && !dialog.options().closeOnEscape &&
+                    dialog.computedStyle() && dialog.computedStyle()->normal.bold;
+    }));
+    check(nativeStyle, "catalog semantic ancestry preserves native Dialog/modal visual identity");
+    take(selector.open());
+    take(selector.cancel());
+    take(owner.close());
+    check(!selector.snapshot() && !view.geometry(), "catalog and managed references retire together");
+  }
+}
+
+void sparseCatalogAdmissionAndClearing() {
+  for (int scenario = 0; scenario != 8; ++scenario) {
+    ui::ThemeSelectorRef selector;
+    ui::Ref<Dialog> view;
+    ui::ThemeSelectorCatalog catalog;
+    int previews{};
+    catalog.choices = {{"red", "Red",
+                        [&] {
+                          ++previews;
+                          return theme();
+                        }},
+                       {"sky", "Sky", theme}};
+    catalog.initialId = "red";
+    ui::ControlThemeCatalogSettings patch;
+    if (scenario == 0) {
+      patch.initialId.enabled = false;
+    }
+    if (scenario == 1) {
+      patch.initialId.enabled = true;
+    }
+    if (scenario == 2) {
+      patch.initialId.value = "missing";
+    }
+    if (scenario == 3) {
+      catalog.initialId.reset();
+      patch.initialId.enabled = true;
+    }
+    if (scenario == 4) {
+      patch.maxChoices = 1;
+    }
+    if (scenario == 5) {
+      patch.maxIdBytes = 2;
+    }
+    if (scenario == 6) {
+      patch.textLimits.maxCells = 1;
+    }
+    if (scenario == 7) {
+      patch.layers = {.enabled = true, .maxLayers = 4};
+    }
+    auto owner =
+      ui::scene(ui::button("Body"), ui::themeSelector(selector, catalog).themeCatalogSettings(patch).reference(view));
+    if (scenario == 7) {
+      owner.styleLayers({.maxLayers = 8});
+    }
+    const auto result = owner.prepareChecked();
+    if (scenario < 2) {
+      take(result);
+      check(take(selector.snapshot())->lastCommittedId ==
+                (scenario == 0 ? std::optional<std::string>{} : std::optional<std::string>{"red"}) &&
+              previews == (scenario == 0 ? 0 : 1),
+            "false clears and true retains the captured initial ID");
+    } else {
+      check(!result, "invalid effective catalog inputs fail preparation");
+      check(modelCause(result.error(), TreeError::INVALID_ARGUMENT),
+            "catalog rejection retains typed INVALID_ARGUMENT");
+      check(!selector.snapshot(), "failed catalog preparation retires its model");
+      // Startup admission can fail after publication; an observing Ref keeps its stale identity.
+      check(!view.geometry(), "failed catalog preparation exposes no usable view");
+      check(previews == (scenario == 7 ? 1 : 0), "only established-layer rejection follows the native preview factory");
+    }
+    take(owner.close());
+  }
+  ui::ThemeSelectionRef model;
+  ui::ThemeSelectorRef selector;
+  const ui::ThemeChoice choices[]{{"red", "Red", theme}};
+  auto owner =
+    ui::scene(ui::button("Body"), ui::themeSelector(selector, model).themeCatalogSettings({.maxChoices = 2}));
+  owner | ui::themeSelection(model, {choices[0]});
+  const auto result = owner.prepareChecked();
+  check(!result && result.error().sceneResource &&
+          result.error().sceneResource->code == SceneResourceErrorCode::UNKNOWN_PROPERTY && !selector.snapshot(),
+        "external-model view cannot acquire catalog capability from a grouped patch");
+  take(owner.close());
+}
+
 } // namespace
 
 int main() try {
+  sparseCatalogConstructionParity();
+  sparseCatalogAdmissionAndClearing();
+  sparseViewConstructionParity();
+  sparseResolverAndDisabledShortcut();
+  ambientDialogDefaultsDoNotReinterpretSelector();
   defaultInitialAndDelegatedCommands();
   defaultInitialOrderingAndFactoryFailure();
   defaultCatalogRejectionAndMountRollback();
