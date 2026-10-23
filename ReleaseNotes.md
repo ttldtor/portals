@@ -109,6 +109,9 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- Separate control preparation into named semantic, schema, identity and settings
+  stages while preserving validation order, materialization limits and mount cleanup.
+
 - Document fluent header families, compiled lifecycle boundaries and contributor
   extension points, with grouped header navigation in the API reference.
 
