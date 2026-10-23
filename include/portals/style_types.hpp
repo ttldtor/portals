@@ -17,6 +17,19 @@ struct FrameAppearance {
   bool operator==(const FrameAppearance &other) const = default;
 };
 
+/** @brief Resolved scrollbar parts; absent values inherit the ordinary control state.
+ * Colors and attributes are shared by both axes; glyphs are orientation-specific.
+ */
+struct ScrollbarAppearance {
+  std::optional<CellStyle> track{};  ///< Track cells outside the thumb.
+  std::optional<CellStyle> thumb{};  ///< Moving thumb cells.
+  std::optional<CellStyle> ends{};   ///< Optional decorative endpoint cells.
+  std::optional<CellStyle> corner{}; ///< Intersecting horizontal and vertical gutters.
+
+  /** @param other Value to compare. @return Whether every part agrees. */
+  bool operator==(const ScrollbarAppearance &other) const = default;
+};
+
 /** @brief Owning resolved presentation; no actions or model state are encoded. */
 struct ComputedStyle {
   CellStyle normal;        ///< Ordinary text and fill.
@@ -26,7 +39,8 @@ struct ComputedStyle {
   CellStyle header;        ///< Fixed table heading.
   CellStyle caret;         ///< Editor software caret.
   std::int32_t minWidth{}; ///< Nonnegative intrinsic minimum in cells; zero leaves measurement unchanged.
-  std::array<FrameAppearance, 6> frame{}; ///< Parts in normal/focused/disabled/selected/header/caret order.
+  std::array<FrameAppearance, 6> frame{};         ///< Parts in normal/focused/disabled/selected/header/caret order.
+  std::array<ScrollbarAppearance, 6> scrollbar{}; ///< Parts in normal/focused/disabled/selected/header/caret order.
   /** @param other Owning value to compare.
    * @return True when every paint value and metric agrees.
    */

@@ -86,15 +86,19 @@ struct StylePaintDeclarations {
 
 /** @brief Typed declarations; absent values preserve less-specific rules or widget defaults. */
 struct StyleDeclarations {
-  std::optional<RgbColor> foreground;   ///< RGB text color.
-  std::optional<RgbColor> background;   ///< RGB fill color.
-  std::optional<bool> bold;             ///< Explicit true/false bold request.
-  std::optional<bool> italic;           ///< Explicit true/false italic request.
-  std::optional<bool> underline;        ///< Explicit true/false underline request.
-  std::optional<std::int32_t> minWidth; ///< Nonnegative cell minimum; allowed only on state-independent selectors.
-  StylePaintDeclarations frameLine{};   ///< Frame perimeter overrides, inheriting the common resolved state.
-  StylePaintDeclarations frameTitle{};  ///< Frame title text overrides.
-  StylePaintDeclarations frameEnds{};   ///< Frame title prefix/suffix overrides.
+  std::optional<RgbColor> foreground;       ///< RGB text color.
+  std::optional<RgbColor> background;       ///< RGB fill color.
+  std::optional<bool> bold;                 ///< Explicit true/false bold request.
+  std::optional<bool> italic;               ///< Explicit true/false italic request.
+  std::optional<bool> underline;            ///< Explicit true/false underline request.
+  std::optional<std::int32_t> minWidth;     ///< Nonnegative cell minimum; allowed only on state-independent selectors.
+  StylePaintDeclarations frameLine{};       ///< Frame perimeter overrides, inheriting the common resolved state.
+  StylePaintDeclarations frameTitle{};      ///< Frame title text overrides.
+  StylePaintDeclarations frameEnds{};       ///< Frame title prefix/suffix overrides.
+  StylePaintDeclarations scrollbarTrack{};  ///< Scrollbar track overrides.
+  StylePaintDeclarations scrollbarThumb{};  ///< Scrollbar thumb overrides.
+  StylePaintDeclarations scrollbarEnds{};   ///< Scrollbar ends overrides.
+  StylePaintDeclarations scrollbarCorner{}; ///< Scrollbar corner overrides.
   /** @param other Owning value to compare.
    * @return Whether all typed fields are equal.
    */

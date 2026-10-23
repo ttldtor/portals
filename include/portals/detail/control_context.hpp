@@ -11,7 +11,7 @@
 
 namespace portals::ui::detail {
 
-inline constexpr std::size_t CONTROL_PROPERTY_COUNT = 204; ///< Complete canonical scalar vocabulary size.
+inline constexpr std::size_t CONTROL_PROPERTY_COUNT = 216; ///< Complete canonical scalar vocabulary size.
 inline constexpr std::size_t CONTROL_PRESENCE_BITS =
   CONTROL_PROPERTY_COUNT < 32 ? 32 : CONTROL_PROPERTY_COUNT;        ///< Retain all legacy mask bits.
 using ControlPropertyPresence = std::bitset<CONTROL_PRESENCE_BITS>; ///< Allocation-free internal leaf presence.
@@ -162,6 +162,11 @@ GaugeOptions controlGaugeOptions(const ControlSettings &settings, GaugeOptions o
  * @return Owning effective configuration; absent leaves preserve the receiving options.
  */
 SpinnerOptions controlSpinnerOptions(const ControlSettings &settings, SpinnerOptions options);
+
+/** @param settings Sparse scrollbar configuration, borrowed for this check.
+ * @return Whether at least one skin leaf is supplied; no allocation or retained reference.
+ */
+bool hasScrollbarSettings(const ControlScrollbarSettings &settings) noexcept;
 
 /** @param settings Validated sparse area literals, including optional one-cell frame leaves.
  * @param options Actual receiving constructor options; absent leaves retain their values.

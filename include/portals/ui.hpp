@@ -244,6 +244,20 @@ constexpr std::optional<FramePattern> framePattern(std::string_view name) noexce
   return {};
 }
 
+/** @param name Borrowed compact skin name. @return Preset or invalid value checked at mount. */
+constexpr ScrollbarPattern scrollbarPattern(std::string_view name) noexcept {
+  if (name == "legacy")
+    return ScrollbarPattern::LEGACY;
+  if (name == "frame")
+    return ScrollbarPattern::FRAME;
+  if (name == "minimal")
+    return ScrollbarPattern::MINIMAL;
+  if (name == "ascii")
+    return ScrollbarPattern::ASCII;
+
+  return static_cast<ScrollbarPattern>(-1);
+}
+
 /** @param name Compact decoration preset. @return Known value, or an invalid value checked at mount. */
 constexpr TitleDecoration titleDecorationPreset(std::string_view name) noexcept {
   if (name == "none")
@@ -804,6 +818,12 @@ struct Access {
    * @return Empty native Overlay recipe; children attach as real edges in source order.
    */
   static Description<Overlay> overlayControl(OverlayOptions options, SizePolicy policy);
+  /** @param scene Owning UI scene. @param node Newly constructed scroll control.
+   * @param settings Effective sparse owning configuration. @return Prepared skin or existing typed error.
+   */
+  static std::expected<void, ManagedError> applyScrollbarSkin(ManagedScene &scene, Node<Widget> node,
+                                                              const ControlSettings &settings);
+
   /** @param options Actual owning placement/input/frame options.
    * @param controller Optional owning shared values; an empty area controller keeps native default creation.
    * @param style Owning manual appearances beneath the existing theme.
@@ -941,6 +961,18 @@ struct Access {
     apply(base.vertical, patch.vertical);
     apply(base.placement, patch.placement);
     apply(base.axis, patch.axis);
+    apply(base.scrollbar.pattern, patch.scrollbar.pattern);
+    apply(base.scrollbar.ends, patch.scrollbar.ends);
+    apply(base.scrollbar.maxGlyphBytes, patch.scrollbar.maxGlyphBytes);
+    apply(base.scrollbar.horizontal.track, patch.scrollbar.horizontal.track);
+    apply(base.scrollbar.horizontal.thumb, patch.scrollbar.horizontal.thumb);
+    apply(base.scrollbar.horizontal.start, patch.scrollbar.horizontal.start);
+    apply(base.scrollbar.horizontal.end, patch.scrollbar.horizontal.end);
+    apply(base.scrollbar.vertical.track, patch.scrollbar.vertical.track);
+    apply(base.scrollbar.vertical.thumb, patch.scrollbar.vertical.thumb);
+    apply(base.scrollbar.vertical.start, patch.scrollbar.vertical.start);
+    apply(base.scrollbar.vertical.end, patch.scrollbar.vertical.end);
+    apply(base.scrollbar.corner, patch.scrollbar.corner);
     apply(base.frame.enabled, patch.frame.enabled);
     apply(base.frame.glyphs, patch.frame.glyphs);
     apply(base.frame.maxPaintCells, patch.frame.maxPaintCells);
@@ -2871,6 +2903,39 @@ public:
     return std::move(*this).placement(ScrollPlacement::ON_FRAME);
   }
 
+  /** @param pattern Compact legacy/frame/minimal/ascii preset, copied as a typed value.
+   * @return Consuming scroll recipe; unknown names fail at mount before first paint.
+   */
+  Description &&scrollbar(std::string_view pattern) &&
+    requires(std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+  {
+    return std::move(*this).scrollbar(detail::scrollbarPattern(pattern));
+  }
+
+  /** @param pattern Typed preset; omitted skin leaves retain context defaults.
+   * @return Consuming scroll recipe; invalid enum values fail before first paint.
+   */
+  Description &&scrollbar(ScrollbarPattern pattern) &&
+    requires(std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+  {
+    return std::move(*this).scalarSettings({.scrollbar = {.pattern = pattern}});
+  }
+
+  /** @param skin Owning source copied into sparse configuration; glyphs are validated at mount.
+   * @return Consuming scroll recipe. Existing geometry, offsets and input actions are preserved.
+   * Construction/capture may throw on allocation, as for other owning recipe settings.
+   */
+  Description &&scrollbar(ScrollbarSkin skin) &&
+    requires(std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+  {
+    return std::move(*this).scalarSettings({.scrollbar = {.pattern = skin.pattern,
+                                                          .ends = skin.ends,
+                                                          .maxGlyphBytes = skin.maxGlyphBytes,
+                                                          .horizontal = skin.horizontal,
+                                                          .vertical = skin.vertical,
+                                                          .corner = skin.corner}});
+  }
+
   /** @param enabled True creates a missing default one-cell frame; false removes the effective frame.
    * @return Consuming native area recipe; existing frame options survive an explicit true.
    */
@@ -4152,6 +4217,18 @@ private:
           std::pair<std::string_view, bool>{"vertical", patch.vertical.has_value()},
           std::pair<std::string_view, bool>{"placement", patch.placement.has_value()},
           std::pair<std::string_view, bool>{"axis", patch.axis.has_value()},
+          std::pair<std::string_view, bool>{"scrollbar.pattern", patch.scrollbar.pattern.has_value()},
+          std::pair<std::string_view, bool>{"scrollbar.ends", patch.scrollbar.ends.has_value()},
+          std::pair<std::string_view, bool>{"scrollbar.maxGlyphBytes", patch.scrollbar.maxGlyphBytes.has_value()},
+          std::pair<std::string_view, bool>{"scrollbar.horizontal.track", patch.scrollbar.horizontal.track.has_value()},
+          std::pair<std::string_view, bool>{"scrollbar.horizontal.thumb", patch.scrollbar.horizontal.thumb.has_value()},
+          std::pair<std::string_view, bool>{"scrollbar.horizontal.start", patch.scrollbar.horizontal.start.has_value()},
+          std::pair<std::string_view, bool>{"scrollbar.horizontal.end", patch.scrollbar.horizontal.end.has_value()},
+          std::pair<std::string_view, bool>{"scrollbar.vertical.track", patch.scrollbar.vertical.track.has_value()},
+          std::pair<std::string_view, bool>{"scrollbar.vertical.thumb", patch.scrollbar.vertical.thumb.has_value()},
+          std::pair<std::string_view, bool>{"scrollbar.vertical.start", patch.scrollbar.vertical.start.has_value()},
+          std::pair<std::string_view, bool>{"scrollbar.vertical.end", patch.scrollbar.vertical.end.has_value()},
+          std::pair<std::string_view, bool>{"scrollbar.corner", patch.scrollbar.corner.has_value()},
           std::pair<std::string_view, bool>{"frame.enabled", patch.frame.enabled.has_value()},
           std::pair<std::string_view, bool>{"frame.glyphs", patch.frame.glyphs.has_value()},
           std::pair<std::string_view, bool>{"frame.maxPaintCells", patch.frame.maxPaintCells.has_value()},
@@ -8623,6 +8700,35 @@ inline ReadOnlyModifier readOnly(bool enabled = true) {
   return {enabled};
 }
 
+/** @brief Owning skin modifier shared by ordinary ScrollArea and ScrollBar. */
+struct ScrollbarModifier {
+  ScrollbarSkin skin;                       ///< Owned glyph and preparation policy.
+  std::optional<ScrollbarPattern> preset{}; ///< Preset-only stage preserves omitted context leaves.
+
+  /** @tparam T Exactly ScrollArea or ScrollBar. @param description Consumed recipe.
+   * @param modifier Owning skin. @return Recipe with equivalent method configuration.
+   */
+  template <class T>
+    requires(std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+  friend Description<T> operator|(Description<T> &&description, ScrollbarModifier modifier) {
+    if (modifier.preset) {
+      return std::move(description).scrollbar(*modifier.preset);
+    }
+
+    return std::move(description).scrollbar(std::move(modifier.skin));
+  }
+};
+
+/** @param pattern Borrowed legacy/frame/minimal/ascii preset. @return Owning scroll skin stage. */
+inline ScrollbarModifier scrollbar(std::string_view pattern) {
+  return {{}, detail::scrollbarPattern(pattern)};
+}
+
+/** @param skin Owning custom glyph source. @return Owning scroll skin stage, checked at mount. */
+inline ScrollbarModifier scrollbar(ScrollbarSkin skin) {
+  return {std::move(skin)};
+}
+
 /** @brief Owning ScrollArea-only placement/frame pipe stage; frame leaves never enable a frame implicitly. */
 struct ScrollAreaModifier {
   ControlSettings settings; ///< Sparse native area placement and existing one-cell frame leaves.
@@ -8850,11 +8956,39 @@ constexpr SizeModifier flex(std::uint32_t weight = 1) {
   return {{detail::SizeDimension::FLEX, 0, weight}};
 }
 
+inline std::expected<void, ManagedError> detail::Access::applyScrollbarSkin(ManagedScene &scene, Node<Widget> node,
+                                                                            const ControlSettings &settings) {
+  if (!hasScrollbarSettings(settings.scrollbar)) {
+    return {};
+  }
+
+  try {
+    const auto &source = settings.scrollbar;
+    ScrollbarSkin skin{.pattern = source.pattern.value_or(ScrollbarPattern::LEGACY),
+                       .ends = source.ends.value_or(false),
+                       .maxGlyphBytes = source.maxGlyphBytes.value_or(DEFAULT_SCROLLBAR_GLYPH_BYTES),
+                       .horizontal = source.horizontal,
+                       .vertical = source.vertical,
+                       .corner = source.corner};
+    auto applied = setScrollbarSkin(scene.app_.tree(), node, skin);
+
+    return applied ? std::expected<void, ManagedError>{} : std::unexpected(error(node, applied.error()));
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(error(node, TreeError::NO_MEMORY));
+  }
+}
+
 inline Description<ScrollArea> detail::Access::scrollAreaControl(ScrollAreaOptions options,
                                                                  std::shared_ptr<ScrollController> controller,
                                                                  ControlStyle style) {
   auto description = cold<ScrollArea>([options, controller = std::move(controller),
                                        style](ManagedScene &scene, Node<Widget> parent, MountContext &context) {
+    const auto finish = [&](std::expected<Node<ScrollArea>, ManagedError> node) {
+      if (!node)
+        return node;
+      auto applied = applyScrollbarSkin(scene, *node, *context.controlSettings);
+      return applied ? node : std::expected<Node<ScrollArea>, ManagedError>(std::unexpected(applied.error()));
+    };
     auto baseOptions = options;
 
     if (context.frameOptions) {
@@ -8895,14 +9029,14 @@ inline Description<ScrollArea> detail::Access::scrollAreaControl(ScrollAreaOptio
       }
 
       if (*framed) {
-        return scene.emplace<ScrollArea>(parent, controller, scene.widthPolicy(), *effective, style, SizePolicy{},
-                                         **framed, std::in_place);
+        return finish(scene.emplace<ScrollArea>(parent, controller, scene.widthPolicy(), *effective, style,
+                                                SizePolicy{}, **framed, std::in_place));
       }
 
       effective->frame.reset();
     }
 
-    return scene.emplace<ScrollArea>(parent, controller, scene.widthPolicy(), *effective, style);
+    return finish(scene.emplace<ScrollArea>(parent, controller, scene.widthPolicy(), *effective, style));
   });
 
   return configuredControl(std::move(description), "ScrollArea");
@@ -8929,7 +9063,14 @@ inline Description<ScrollBar> detail::Access::scrollBarControl(std::shared_ptr<S
       return std::unexpected(error(parent, TreeError::INVALID_ARGUMENT));
     }
 
-    return scene.scrollBar(parent, controller, effectiveAxis, *effective, style, writer);
+    auto node = scene.scrollBar(parent, controller, effectiveAxis, *effective, style, writer);
+
+    if (!node)
+      return node;
+
+    auto applied = applyScrollbarSkin(scene, *node, *context.controlSettings);
+
+    return applied ? node : std::expected<Node<ScrollBar>, ManagedError>(std::unexpected(applied.error()));
   });
 
   return configuredControl(std::move(description), "ScrollBar");

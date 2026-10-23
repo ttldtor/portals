@@ -23,6 +23,12 @@ struct PreparedScrollFrame {
   PreparedFrameText text;
 };
 
+struct PreparedScrollbarSkin {
+  // Horizontal track/thumb/start/end, vertical track/thumb/start/end, optional corner.
+  std::array<std::optional<GraphemeText>, 9> glyphs{};
+  bool ends{};
+};
+
 struct ScrollWidgetState {
   ScrollWidgetState(std::shared_ptr<ScrollController> controller, WidthPolicy width, PrimitiveGlyphs mode);
   std::shared_ptr<ScrollController> controller;
@@ -52,6 +58,8 @@ struct ScrollWidgetState {
   ScrollDrag drag;
   std::weak_ptr<ScrollIntentRecord> intent;
   std::array<GraphemeText, 8> glyphs;
+  std::unique_ptr<PreparedScrollbarSkin> scrollbarSkin;
+  std::uint64_t skinRevision{};
 };
 
 inline const FrameOptions *scrollFrameOptions(const ScrollWidgetState &state) noexcept {

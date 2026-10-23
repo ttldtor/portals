@@ -163,6 +163,12 @@ template <class Options> void applyScrollSettings(const ControlSettings &setting
 }
 } // namespace
 
+bool hasScrollbarSettings(const ControlScrollbarSettings &settings) noexcept {
+  return settings.pattern || settings.ends || settings.maxGlyphBytes || settings.horizontal.track ||
+         settings.horizontal.thumb || settings.horizontal.start || settings.horizontal.end || settings.vertical.track ||
+         settings.vertical.thumb || settings.vertical.start || settings.vertical.end || settings.corner;
+}
+
 std::expected<ScrollAreaOptions, TreeError> controlScrollAreaOptions(const ControlSettings &settings,
                                                                      ScrollAreaOptions options) noexcept {
   applyScrollSettings(settings, options);

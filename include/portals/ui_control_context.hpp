@@ -122,6 +122,21 @@ struct ControlFrameGlyphSettings {
   std::optional<std::string> vertical{};    ///< One-cell vertical edge, at most 64 UTF-8 bytes.
 };
 
+/** @brief Sparse owning scrollbar skin; omitted leaves preserve context defaults.
+ * Glyph colors and supported attributes use the existing style declarations.
+ */
+struct ControlScrollbarSettings {
+  std::optional<ScrollbarPattern> pattern{};  ///< Legacy/frame/minimal/ASCII glyph source.
+  std::optional<bool> ends{};                 ///< Decorative end-cell visibility, without new input actions.
+  std::optional<std::size_t> maxGlyphBytes{}; ///< Positive byte cap per supplied glyph, default 64.
+  ScrollbarAxisGlyphs horizontal{};           ///< Sparse horizontal glyph overrides.
+  ScrollbarAxisGlyphs vertical{};             ///< Sparse vertical glyph overrides.
+  std::optional<std::string> corner{};        ///< Optional one-cell corner; empty restores fill.
+
+  /** @brief Preserve fallible checked-library owning transfers. */
+  ~ControlScrollbarSettings() = default;
+};
+
 /** @brief Sparse frame settings; sized controls gain a Border, ScrollArea uses its native frame. */
 struct ControlScrollFrameSettings {
   /** @brief Keep owning transfers fallible; copies are translated at the existing checked boundary. */
@@ -418,6 +433,7 @@ struct ControlSettings {
   std::optional<std::size_t> spinnerMaxFrames{};      ///< Sparse Spinner maxFrames setting.
   std::optional<std::size_t> spinnerMaxFrameBytes{};  ///< Sparse Spinner maxFrameBytes setting.
   std::optional<std::size_t> spinnerMaxFrameCells{};  ///< Sparse Spinner maxFrameCells setting.
+  ControlScrollbarSettings scrollbar{};               ///< Sparse scrollbar skin; appended for aggregate compatibility.
 };
 
 /** @brief Finite context bounds, checked before publication/materialization beyond each bound. */

@@ -11,31 +11,51 @@
 namespace portals {
 /** @brief PSS v0 declaration identities in metadata and compact descriptions. */
 enum class PssProperty {
-  FOREGROUND,             ///< RGB text color.
-  BACKGROUND,             ///< RGB fill color.
-  BOLD,                   ///< Explicit bold flag.
-  ITALIC,                 ///< Explicit italic flag.
-  UNDERLINE,              ///< Explicit underline flag.
-  MIN_WIDTH,              ///< State-independent cell minimum.
-  FRAME_LINE_FOREGROUND,  ///< Frame part frameLine.foreground.
-  FRAME_LINE_BACKGROUND,  ///< Frame part frameLine.background.
-  FRAME_LINE_BOLD,        ///< Frame part frameLine.bold.
-  FRAME_LINE_ITALIC,      ///< Frame part frameLine.italic.
-  FRAME_LINE_UNDERLINE,   ///< Frame part frameLine.underline.
-  FRAME_TITLE_FOREGROUND, ///< Frame part frameTitle.foreground.
-  FRAME_TITLE_BACKGROUND, ///< Frame part frameTitle.background.
-  FRAME_TITLE_BOLD,       ///< Frame part frameTitle.bold.
-  FRAME_TITLE_ITALIC,     ///< Frame part frameTitle.italic.
-  FRAME_TITLE_UNDERLINE,  ///< Frame part frameTitle.underline.
-  FRAME_ENDS_FOREGROUND,  ///< Frame part frameEnds.foreground.
-  FRAME_ENDS_BACKGROUND,  ///< Frame part frameEnds.background.
-  FRAME_ENDS_BOLD,        ///< Frame part frameEnds.bold.
-  FRAME_ENDS_ITALIC,      ///< Frame part frameEnds.italic.
-  FRAME_ENDS_UNDERLINE,   ///< Frame part frameEnds.underline.
+  FOREGROUND,                  ///< RGB text color.
+  BACKGROUND,                  ///< RGB fill color.
+  BOLD,                        ///< Explicit bold flag.
+  ITALIC,                      ///< Explicit italic flag.
+  UNDERLINE,                   ///< Explicit underline flag.
+  MIN_WIDTH,                   ///< State-independent cell minimum.
+  FRAME_LINE_FOREGROUND,       ///< Frame part frameLine.foreground.
+  FRAME_LINE_BACKGROUND,       ///< Frame part frameLine.background.
+  FRAME_LINE_BOLD,             ///< Frame part frameLine.bold.
+  FRAME_LINE_ITALIC,           ///< Frame part frameLine.italic.
+  FRAME_LINE_UNDERLINE,        ///< Frame part frameLine.underline.
+  FRAME_TITLE_FOREGROUND,      ///< Frame part frameTitle.foreground.
+  FRAME_TITLE_BACKGROUND,      ///< Frame part frameTitle.background.
+  FRAME_TITLE_BOLD,            ///< Frame part frameTitle.bold.
+  FRAME_TITLE_ITALIC,          ///< Frame part frameTitle.italic.
+  FRAME_TITLE_UNDERLINE,       ///< Frame part frameTitle.underline.
+  FRAME_ENDS_FOREGROUND,       ///< Frame part frameEnds.foreground.
+  FRAME_ENDS_BACKGROUND,       ///< Frame part frameEnds.background.
+  FRAME_ENDS_BOLD,             ///< Frame part frameEnds.bold.
+  FRAME_ENDS_ITALIC,           ///< Frame part frameEnds.italic.
+  FRAME_ENDS_UNDERLINE,        ///< Frame part frameEnds.underline.
+  SCROLLBAR_TRACK_FOREGROUND,  ///< Scrollbar track foreground.
+  SCROLLBAR_TRACK_BACKGROUND,  ///< Scrollbar track background.
+  SCROLLBAR_TRACK_BOLD,        ///< Scrollbar track bold.
+  SCROLLBAR_TRACK_ITALIC,      ///< Scrollbar track italic.
+  SCROLLBAR_TRACK_UNDERLINE,   ///< Scrollbar track underline.
+  SCROLLBAR_THUMB_FOREGROUND,  ///< Scrollbar thumb foreground.
+  SCROLLBAR_THUMB_BACKGROUND,  ///< Scrollbar thumb background.
+  SCROLLBAR_THUMB_BOLD,        ///< Scrollbar thumb bold.
+  SCROLLBAR_THUMB_ITALIC,      ///< Scrollbar thumb italic.
+  SCROLLBAR_THUMB_UNDERLINE,   ///< Scrollbar thumb underline.
+  SCROLLBAR_ENDS_FOREGROUND,   ///< Scrollbar ends foreground.
+  SCROLLBAR_ENDS_BACKGROUND,   ///< Scrollbar ends background.
+  SCROLLBAR_ENDS_BOLD,         ///< Scrollbar ends bold.
+  SCROLLBAR_ENDS_ITALIC,       ///< Scrollbar ends italic.
+  SCROLLBAR_ENDS_UNDERLINE,    ///< Scrollbar ends underline.
+  SCROLLBAR_CORNER_FOREGROUND, ///< Scrollbar corner foreground.
+  SCROLLBAR_CORNER_BACKGROUND, ///< Scrollbar corner background.
+  SCROLLBAR_CORNER_BOLD,       ///< Scrollbar corner bold.
+  SCROLLBAR_CORNER_ITALIC,     ///< Scrollbar corner italic.
+  SCROLLBAR_CORNER_UNDERLINE,  ///< Scrollbar corner underline.
 };
 
 /** @brief Number of supported PSS v0 properties. */
-inline constexpr std::size_t PSS_PROPERTY_COUNT = 21;
+inline constexpr std::size_t PSS_PROPERTY_COUNT = 41;
 /** @brief Marker for an absent effective declaration occurrence. */
 inline constexpr std::size_t NO_PSS_DECLARATION = std::numeric_limits<std::size_t>::max();
 /** @brief Maximum owned ASCII bytes retained in an error subject. */

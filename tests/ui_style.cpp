@@ -1663,3 +1663,108 @@ TEST_CASE("frame property range and noncanonical RGB boolean payloads remain typ
     CHECK(treeCause(result.error(), TreeError::INVALID_ARGUMENT));
   }
 }
+
+TEST_CASE("scrollbar PSS all parts reach real preparation run rendering and terminal cleanup") {
+  constexpr char SOURCE[] = R"pss(ScrollArea {
+    scrollbar-track-foreground:#010203; scrollbar-track-background:#040506;
+    scrollbar-track-bold:true; scrollbar-track-italic:false; scrollbar-track-underline:true;
+    scrollbar-thumb-foreground:#070809; scrollbar-thumb-background:#0a0b0c;
+    scrollbar-thumb-bold:false; scrollbar-thumb-italic:true; scrollbar-thumb-underline:false;
+    scrollbar-ends-foreground:#0d0e0f; scrollbar-ends-background:#101112;
+    scrollbar-ends-bold:true; scrollbar-ends-italic:true; scrollbar-ends-underline:false;
+    scrollbar-corner-foreground:#131415; scrollbar-corner-background:#161718;
+    scrollbar-corner-bold:false; scrollbar-corner-italic:false; scrollbar-corner-underline:true;
+  } ScrollArea:disabled {scrollbar-thumb-foreground:#202122;}
+    ScrollArea:focused {scrollbar-track-bold:false;})pss";
+  example::ReplayTerminal terminal({{20, "\x1b[21~", {}}}, 80, {20, 6});
+  ui::SceneOptions options;
+  options.clock = terminal.clock();
+  ui::Ref<ScrollArea> area;
+  auto owner = ui::scene(ui::vbox(ui::scrollArea(ui::label("body").width(40).height(20))
+                                    .reference(area)
+                                    .framed("double", "Title")
+                                    .scrollOnFrame()
+                                    .scrollbar("frame")
+                                    .width(16)
+                                    .height(4)),
+                         options);
+  owner | ui::style(SOURCE);
+  REQUIRE(owner.prepareChecked());
+  const auto sources = owner.managed()->get().styleSources();
+  REQUIRE(sources);
+  REQUIRE(sources->back().document);
+  CHECK(sources->back().document->declarations.size() == 22);
+  bool inspected{};
+  owner.onKey(key::F10, [&] {
+    auto &managed = owner.managed()->get();
+    auto &app = ui::detail::SceneAccess::application(managed);
+    REQUIRE(app.tree().read(area.node(), [&](const ScrollArea &widget) {
+      REQUIRE(widget.computedStyle());
+      const auto &parts = widget.computedStyle()->scrollbar[0];
+      REQUIRE(parts.track);
+      REQUIRE(parts.thumb);
+      REQUIRE(parts.ends);
+      REQUIRE(parts.corner);
+      CHECK(parts.track->foreground == RgbColor{1, 2, 3});
+      CHECK(parts.track->background == RgbColor{4, 5, 6});
+      CHECK(parts.thumb->foreground == RgbColor{7, 8, 9});
+      CHECK(parts.thumb->background == RgbColor{10, 11, 12});
+      CHECK(parts.ends->foreground == RgbColor{13, 14, 15});
+      CHECK(parts.ends->background == RgbColor{16, 17, 18});
+      CHECK(parts.corner->foreground == RgbColor{19, 20, 21});
+      CHECK(parts.corner->background == RgbColor{22, 23, 24});
+      CHECK_FALSE(parts.thumb->bold);
+      CHECK_FALSE(parts.ends->underline);
+      CHECK_FALSE(widget.computedStyle()->scrollbar[1].track->bold);
+      CHECK(widget.computedStyle()->scrollbar[2].thumb->foreground == RgbColor{32, 33, 34});
+      inspected = true;
+    }));
+    CHECK(owner.ref().quit());
+  });
+  const auto result = owner.run(terminal);
+  REQUIRE(result);
+  CHECK(inspected);
+  CHECK(result->frames == 1);
+  CHECK(terminal.closed);
+  CHECK(terminal.output.find("38;2;1;2;3") != std::string::npos);
+}
+
+TEST_CASE("scrollbar document compact and typed sheets retain the appended sentinels") {
+  constexpr auto COMPACT = sc::compactSheet(std::array{sc::flatRule(
+    sc::type<"ScrollArea">(), sc::scrollbarTrackForeground(sc::rgb(1, 2, 3)), sc::scrollbarCornerUnderline(false))});
+  constexpr auto TYPED =
+    sc::sheet(sc::parameters(), sc::rule(sc::type<"ScrollArea">(), sc::scrollbarTrackForeground(sc::rgb(1, 2, 3)),
+                                         sc::scrollbarCornerUnderline(false)));
+  const auto document =
+    parsePssDocument("ScrollArea{scrollbar-track-foreground:#010203;scrollbar-corner-underline:false;}");
+  REQUIRE(document);
+  CHECK(sc::materialize(TYPED) == document->sheet);
+  for (unsigned mode : {0u, 1u}) {
+    auto owner = ui::scene(ui::scrollArea(ui::label("body")).scrollbar("ascii"));
+    if (mode == 0) {
+      owner | ui::style(COMPACT);
+    } else {
+      owner | ui::style(*document);
+    }
+    REQUIRE(owner.prepareChecked());
+    const auto sources = owner.managed()->get().styleSources();
+    REQUIRE(sources);
+    REQUIRE(sources->back().document);
+    CHECK(sources->back().document->sheet == document->sheet);
+    REQUIRE(owner.close());
+  }
+  for (unsigned forgery : {0u, 1u, 2u}) {
+    auto forged = *document;
+    if (forgery == 0)
+      forged.declarations[0].property = static_cast<PssProperty>(PSS_PROPERTY_COUNT);
+    else if (forgery == 1)
+      forged.declarations[0].value.boolean = true;
+    else
+      forged.declarations[1].value.color = {1, 2, 3};
+    auto owner = ui::scene(ui::label("body"));
+    owner | ui::style(forged);
+    const auto result = owner.prepareChecked();
+    REQUIRE_FALSE(result);
+    CHECK(treeCause(result.error(), TreeError::INVALID_ARGUMENT));
+  }
+}

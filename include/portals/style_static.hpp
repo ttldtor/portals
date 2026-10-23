@@ -149,27 +149,47 @@ constexpr RgbColor evaluate(Mix<Left, Right> expression, const P &parameters, co
 
 /** @brief Internal declaration destinations, exactly matching StyleDeclarations. */
 enum class Property {
-  FOREGROUND,             ///< Text color.
-  BACKGROUND,             ///< Fill color.
-  BOLD,                   ///< Bold paint flag.
-  ITALIC,                 ///< Italic paint flag.
-  UNDERLINE,              ///< Underline paint flag.
-  MIN_WIDTH,              ///< State-independent minimum cell width.
-  FRAME_LINE_FOREGROUND,  ///< Frame part frameLine.foreground.
-  FRAME_LINE_BACKGROUND,  ///< Frame part frameLine.background.
-  FRAME_LINE_BOLD,        ///< Frame part frameLine.bold.
-  FRAME_LINE_ITALIC,      ///< Frame part frameLine.italic.
-  FRAME_LINE_UNDERLINE,   ///< Frame part frameLine.underline.
-  FRAME_TITLE_FOREGROUND, ///< Frame part frameTitle.foreground.
-  FRAME_TITLE_BACKGROUND, ///< Frame part frameTitle.background.
-  FRAME_TITLE_BOLD,       ///< Frame part frameTitle.bold.
-  FRAME_TITLE_ITALIC,     ///< Frame part frameTitle.italic.
-  FRAME_TITLE_UNDERLINE,  ///< Frame part frameTitle.underline.
-  FRAME_ENDS_FOREGROUND,  ///< Frame part frameEnds.foreground.
-  FRAME_ENDS_BACKGROUND,  ///< Frame part frameEnds.background.
-  FRAME_ENDS_BOLD,        ///< Frame part frameEnds.bold.
-  FRAME_ENDS_ITALIC,      ///< Frame part frameEnds.italic.
-  FRAME_ENDS_UNDERLINE,   ///< Frame part frameEnds.underline.
+  FOREGROUND,                  ///< Text color.
+  BACKGROUND,                  ///< Fill color.
+  BOLD,                        ///< Bold paint flag.
+  ITALIC,                      ///< Italic paint flag.
+  UNDERLINE,                   ///< Underline paint flag.
+  MIN_WIDTH,                   ///< State-independent minimum cell width.
+  FRAME_LINE_FOREGROUND,       ///< Frame part frameLine.foreground.
+  FRAME_LINE_BACKGROUND,       ///< Frame part frameLine.background.
+  FRAME_LINE_BOLD,             ///< Frame part frameLine.bold.
+  FRAME_LINE_ITALIC,           ///< Frame part frameLine.italic.
+  FRAME_LINE_UNDERLINE,        ///< Frame part frameLine.underline.
+  FRAME_TITLE_FOREGROUND,      ///< Frame part frameTitle.foreground.
+  FRAME_TITLE_BACKGROUND,      ///< Frame part frameTitle.background.
+  FRAME_TITLE_BOLD,            ///< Frame part frameTitle.bold.
+  FRAME_TITLE_ITALIC,          ///< Frame part frameTitle.italic.
+  FRAME_TITLE_UNDERLINE,       ///< Frame part frameTitle.underline.
+  FRAME_ENDS_FOREGROUND,       ///< Frame part frameEnds.foreground.
+  FRAME_ENDS_BACKGROUND,       ///< Frame part frameEnds.background.
+  FRAME_ENDS_BOLD,             ///< Frame part frameEnds.bold.
+  FRAME_ENDS_ITALIC,           ///< Frame part frameEnds.italic.
+  FRAME_ENDS_UNDERLINE,        ///< Frame part frameEnds.underline.
+  SCROLLBAR_TRACK_FOREGROUND,  ///< Scrollbar track foreground.
+  SCROLLBAR_TRACK_BACKGROUND,  ///< Scrollbar track background.
+  SCROLLBAR_TRACK_BOLD,        ///< Scrollbar track bold.
+  SCROLLBAR_TRACK_ITALIC,      ///< Scrollbar track italic.
+  SCROLLBAR_TRACK_UNDERLINE,   ///< Scrollbar track underline.
+  SCROLLBAR_THUMB_FOREGROUND,  ///< Scrollbar thumb foreground.
+  SCROLLBAR_THUMB_BACKGROUND,  ///< Scrollbar thumb background.
+  SCROLLBAR_THUMB_BOLD,        ///< Scrollbar thumb bold.
+  SCROLLBAR_THUMB_ITALIC,      ///< Scrollbar thumb italic.
+  SCROLLBAR_THUMB_UNDERLINE,   ///< Scrollbar thumb underline.
+  SCROLLBAR_ENDS_FOREGROUND,   ///< Scrollbar ends foreground.
+  SCROLLBAR_ENDS_BACKGROUND,   ///< Scrollbar ends background.
+  SCROLLBAR_ENDS_BOLD,         ///< Scrollbar ends bold.
+  SCROLLBAR_ENDS_ITALIC,       ///< Scrollbar ends italic.
+  SCROLLBAR_ENDS_UNDERLINE,    ///< Scrollbar ends underline.
+  SCROLLBAR_CORNER_FOREGROUND, ///< Scrollbar corner foreground.
+  SCROLLBAR_CORNER_BACKGROUND, ///< Scrollbar corner background.
+  SCROLLBAR_CORNER_BOLD,       ///< Scrollbar corner bold.
+  SCROLLBAR_CORNER_ITALIC,     ///< Scrollbar corner italic.
+  SCROLLBAR_CORNER_UNDERLINE,  ///< Scrollbar corner underline.
 };
 
 /** @brief Internal typed owning declaration.
@@ -295,10 +315,15 @@ template <class... D> consteval bool uniqueDeclarations(const std::tuple<D...> &
 template <class D, class P, class V>
 constexpr void assign(const D &declaration, StyleDeclarations &destination, const P &parameters, const V &values) {
   auto value = evaluate(declaration.expression, parameters, values);
-  constexpr bool COLOR = D::KIND == Property::FOREGROUND || D::KIND == Property::BACKGROUND ||
-                         D::KIND == Property::FRAME_LINE_FOREGROUND || D::KIND == Property::FRAME_LINE_BACKGROUND ||
-                         D::KIND == Property::FRAME_TITLE_FOREGROUND || D::KIND == Property::FRAME_TITLE_BACKGROUND ||
-                         D::KIND == Property::FRAME_ENDS_FOREGROUND || D::KIND == Property::FRAME_ENDS_BACKGROUND;
+  constexpr bool COLOR =
+    D::KIND == Property::FOREGROUND || D::KIND == Property::BACKGROUND || D::KIND == Property::FRAME_LINE_FOREGROUND ||
+    D::KIND == Property::FRAME_LINE_BACKGROUND || D::KIND == Property::FRAME_TITLE_FOREGROUND ||
+    D::KIND == Property::FRAME_TITLE_BACKGROUND || D::KIND == Property::FRAME_ENDS_FOREGROUND ||
+    D::KIND == Property::FRAME_ENDS_BACKGROUND || D::KIND == Property::SCROLLBAR_TRACK_FOREGROUND ||
+    D::KIND == Property::SCROLLBAR_TRACK_BACKGROUND || D::KIND == Property::SCROLLBAR_THUMB_FOREGROUND ||
+    D::KIND == Property::SCROLLBAR_THUMB_BACKGROUND || D::KIND == Property::SCROLLBAR_ENDS_FOREGROUND ||
+    D::KIND == Property::SCROLLBAR_ENDS_BACKGROUND || D::KIND == Property::SCROLLBAR_CORNER_FOREGROUND ||
+    D::KIND == Property::SCROLLBAR_CORNER_BACKGROUND;
   constexpr bool METRIC = D::KIND == Property::MIN_WIDTH;
   using Expected = std::conditional_t<COLOR, RgbColor, std::conditional_t<METRIC, std::int32_t, bool>>;
   static_assert(std::same_as<decltype(value), Expected>, "Static style declaration value type mismatch");
@@ -344,6 +369,46 @@ constexpr void assign(const D &declaration, StyleDeclarations &destination, cons
       destination.frameEnds.italic = value;
     } else if constexpr (D::KIND == Property::FRAME_ENDS_UNDERLINE) {
       destination.frameEnds.underline = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_TRACK_FOREGROUND) {
+      destination.scrollbarTrack.foreground = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_TRACK_BACKGROUND) {
+      destination.scrollbarTrack.background = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_TRACK_BOLD) {
+      destination.scrollbarTrack.bold = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_TRACK_ITALIC) {
+      destination.scrollbarTrack.italic = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_TRACK_UNDERLINE) {
+      destination.scrollbarTrack.underline = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_FOREGROUND) {
+      destination.scrollbarThumb.foreground = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_BACKGROUND) {
+      destination.scrollbarThumb.background = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_BOLD) {
+      destination.scrollbarThumb.bold = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_ITALIC) {
+      destination.scrollbarThumb.italic = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_UNDERLINE) {
+      destination.scrollbarThumb.underline = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_ENDS_FOREGROUND) {
+      destination.scrollbarEnds.foreground = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_ENDS_BACKGROUND) {
+      destination.scrollbarEnds.background = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_ENDS_BOLD) {
+      destination.scrollbarEnds.bold = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_ENDS_ITALIC) {
+      destination.scrollbarEnds.italic = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_ENDS_UNDERLINE) {
+      destination.scrollbarEnds.underline = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_CORNER_FOREGROUND) {
+      destination.scrollbarCorner.foreground = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_CORNER_BACKGROUND) {
+      destination.scrollbarCorner.background = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_CORNER_BOLD) {
+      destination.scrollbarCorner.bold = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_CORNER_ITALIC) {
+      destination.scrollbarCorner.italic = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_CORNER_UNDERLINE) {
+      destination.scrollbarCorner.underline = value;
     } else if constexpr (METRIC) {
       destination.minWidth = value;
     }
@@ -786,6 +851,106 @@ template <class E> consteval auto frameEndsItalic(E expression) {
 /** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed frame declaration. */
 template <class E> consteval auto frameEndsUnderline(E expression) {
   return detail::Declaration<detail::Property::FRAME_ENDS_UNDERLINE, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
+template <class E> consteval auto scrollbarTrackForeground(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_TRACK_FOREGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
+template <class E> consteval auto scrollbarTrackBackground(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_TRACK_BACKGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
+template <class E> consteval auto scrollbarTrackBold(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_TRACK_BOLD, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
+template <class E> consteval auto scrollbarTrackItalic(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_TRACK_ITALIC, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
+template <class E> consteval auto scrollbarTrackUnderline(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_TRACK_UNDERLINE, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
+template <class E> consteval auto scrollbarThumbForeground(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_THUMB_FOREGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
+template <class E> consteval auto scrollbarThumbBackground(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_THUMB_BACKGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
+template <class E> consteval auto scrollbarThumbBold(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_THUMB_BOLD, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
+template <class E> consteval auto scrollbarThumbItalic(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_THUMB_ITALIC, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
+template <class E> consteval auto scrollbarThumbUnderline(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_THUMB_UNDERLINE, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
+template <class E> consteval auto scrollbarEndsForeground(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_ENDS_FOREGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
+template <class E> consteval auto scrollbarEndsBackground(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_ENDS_BACKGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
+template <class E> consteval auto scrollbarEndsBold(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_ENDS_BOLD, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
+template <class E> consteval auto scrollbarEndsItalic(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_ENDS_ITALIC, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
+template <class E> consteval auto scrollbarEndsUnderline(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_ENDS_UNDERLINE, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
+template <class E> consteval auto scrollbarCornerForeground(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_CORNER_FOREGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
+template <class E> consteval auto scrollbarCornerBackground(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_CORNER_BACKGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
+template <class E> consteval auto scrollbarCornerBold(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_CORNER_BOLD, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
+template <class E> consteval auto scrollbarCornerItalic(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_CORNER_ITALIC, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
+template <class E> consteval auto scrollbarCornerUnderline(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_CORNER_UNDERLINE, E>{expression};
 }
 
 /** @tparam S Constant selector type returned by selector().

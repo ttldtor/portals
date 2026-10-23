@@ -254,7 +254,13 @@ struct ResourceAccess {
               return std::unexpected(error({}, options.error()));
             }
 
-            return Access::scrollAreaControl(*options, {}, {});
+            auto recipe = Access::scrollAreaControl(*options, {}, {});
+
+            if (hasScrollbarSettings(arguments.settings.scrollbar)) {
+              (void)std::move(recipe).settings({.scrollbar = arguments.settings.scrollbar});
+            }
+
+            return recipe;
           },
           true);
 
@@ -270,7 +276,13 @@ struct ResourceAccess {
               return std::unexpected(error({}, options.error()));
             }
 
-            return scrollBar(arguments.settings.axis.value_or(ScrollAxis::VERTICAL), *options);
+            auto recipe = scrollBar(arguments.settings.axis.value_or(ScrollAxis::VERTICAL), *options);
+
+            if (hasScrollbarSettings(arguments.settings.scrollbar)) {
+              (void)std::move(recipe).settings({.scrollbar = arguments.settings.scrollbar});
+            }
+
+            return recipe;
           });
 
         if (!added) {
@@ -1311,6 +1323,24 @@ private:
         settings.format.releaseMarker = std::move(value);
       } else if (path == "format.unknownMarker") {
         settings.format.unknownMarker = std::move(value);
+      } else if (path == "scrollbar.horizontal.track") {
+        settings.scrollbar.horizontal.track = std::move(value);
+      } else if (path == "scrollbar.horizontal.thumb") {
+        settings.scrollbar.horizontal.thumb = std::move(value);
+      } else if (path == "scrollbar.horizontal.start") {
+        settings.scrollbar.horizontal.start = std::move(value);
+      } else if (path == "scrollbar.horizontal.end") {
+        settings.scrollbar.horizontal.end = std::move(value);
+      } else if (path == "scrollbar.vertical.track") {
+        settings.scrollbar.vertical.track = std::move(value);
+      } else if (path == "scrollbar.vertical.thumb") {
+        settings.scrollbar.vertical.thumb = std::move(value);
+      } else if (path == "scrollbar.vertical.start") {
+        settings.scrollbar.vertical.start = std::move(value);
+      } else if (path == "scrollbar.vertical.end") {
+        settings.scrollbar.vertical.end = std::move(value);
+      } else if (path == "scrollbar.corner") {
+        settings.scrollbar.corner = std::move(value);
       } else if (path == "frame.customTitleDecoration.prefix") {
         settings.frame.customTitleDecoration.prefix = std::move(value);
       } else if (path == "frame.customTitleDecoration.suffix") {
@@ -1394,6 +1424,8 @@ private:
         settings.frame.sides.bottom = enabled;
       } else if (path == "frame.sides.left") {
         settings.frame.sides.left = enabled;
+      } else if (path == "scrollbar.ends") {
+        settings.scrollbar.ends = enabled;
       } else if (path == "frame.customTitleDecoration.enabled") {
         settings.frame.customTitleDecoration.enabled = enabled;
       } else if (path == "frame.customGlyphs.enabled") {
@@ -1466,6 +1498,8 @@ private:
                                       FramePattern::DOUBLE, FramePattern::HEAVY,  FramePattern::ASCII};
 
         settings.frame.pattern = PATTERNS[static_cast<std::size_t>(index)];
+      } else if (path == "scrollbar.pattern") {
+        settings.scrollbar.pattern = static_cast<ScrollbarPattern>(index);
       } else if (path == "frame.titleDecoration") {
         settings.frame.titleDecoration = static_cast<TitleDecoration>(index);
       } else if (path == "frame.titleAlignment") {
@@ -1583,6 +1617,8 @@ private:
       settings.spinnerMaxFrameBytes = *value;
     } else if (path == "maxFrameCells") {
       settings.spinnerMaxFrameCells = *value;
+    } else if (path == "scrollbar.maxGlyphBytes") {
+      settings.scrollbar.maxGlyphBytes = *value;
     } else if (path == "securePolicy.maxBytes") {
       settings.securePolicy.maxBytes = *value;
     } else if (path == "maxLayers") {
@@ -1789,7 +1825,8 @@ private:
       if (take('{')) {
         const bool configurationStruct =
           options_.format == SceneResourceFormat::CONFIGURATION &&
-          (path == "securePolicy" || path == "limits" || path == "frame" || path == "frame.sides" ||
+          (path == "scrollbar" || path == "scrollbar.horizontal" || path == "scrollbar.vertical" ||
+           path == "securePolicy" || path == "limits" || path == "frame" || path == "frame.sides" ||
            path == "frame.customGlyphs" || path == "frame.customTitleDecoration" || path == "format" ||
            path == "yRange" || path == "labels" || path == "dialog" || path == "dialog.closeButton" ||
            path == "dialog.frame" || path == "dialog.maximumPanelSize" || path == "message" ||
@@ -2318,6 +2355,8 @@ private:
          (key == "format" &&
           acceptsNativeProperty(target, detail::ControlFactoryKind::KEY_HELP_FALLBACK, "format.maxBytesPerBinding")) ||
          (key == "frame" && acceptsFrameSettings(target)) || (key == "yRange" && acceptsChartRange(target)) ||
+         (key == "scrollbar" &&
+          acceptsNativeProperty(target, detail::ControlFactoryKind::SCROLL_FALLBACK, "scrollbar.pattern")) ||
          (key == "labels" &&
           acceptsNativeProperty(target, detail::ControlFactoryKind::DATA_STATE_FALLBACK, "labels.loading")) ||
          (key == "themeCatalog" && acceptsNativeProperty(target, detail::ControlFactoryKind::THEME_CATALOG_BINDING,
@@ -2471,6 +2510,12 @@ private:
       // A caller-owned child name wins the bare spelling; frame={...} remains an explicit native property.
       const bool frameGroup = token == "frame" && acceptsFrameSettings(document_.nodes[index]) &&
                               !detail::ResourceAccess::find(options_.registry, token);
+      const bool scrollbarGroup =
+        token == "scrollbar" &&
+        acceptsNativeProperty(document_.nodes[index], detail::ControlFactoryKind::SCROLL_FALLBACK,
+                              "scrollbar.pattern") &&
+        !detail::ResourceAccess::find(options_.registry, token) &&
+        !detail::ControlContextAccess::hasDeclaredType(controls_, token);
       const bool formatGroup =
         token == "format" &&
         acceptsNativeProperty(document_.nodes[index], detail::ControlFactoryKind::KEY_HELP_FALLBACK,
@@ -2531,8 +2576,8 @@ private:
         (protectedGroup && peek() == '{') ||
         (options_.format == SceneResourceFormat::CONFIGURATION &&
          (token == "history" || token == "limits" || (token == "padding" && !overlayPaddingChild) || frameGroup ||
-          formatGroup || chartRangeGroup || labelsGroup || dialogGroup || messageGroup || notificationGroup ||
-          selectorGroup || catalogGroup) &&
+          scrollbarGroup || formatGroup || chartRangeGroup || labelsGroup || dialogGroup || messageGroup ||
+          notificationGroup || selectorGroup || catalogGroup) &&
          peek() == '{') ||
         (document_.nodes[index].factory.kind == detail::ControlFactoryKind::DECLARATIVE_GRID_FALLBACK &&
          token == "padding" && peek() == '{');

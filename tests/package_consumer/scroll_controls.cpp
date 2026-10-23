@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include "tests/support/examples/replay/terminal.hpp"
-#include <portals/ui.hpp>
+#include <portals/ui_style.hpp>
 
 #include <cstdlib>
 #include <iostream>
@@ -111,13 +111,15 @@ int main() {
                      ui::height(5),
                    ui::label("Footer")),
           {}, controller) |
-          ui::width(20) | ui::height(5),
-        ui::scrollBar(projection, controller) | ui::height(5), ui::scrollBar(standalone) | ui::height(8));
+          ui::width(20) | ui::height(5) | ui::scrollbar("frame"),
+        ui::scrollBar(projection, controller) | ui::height(5),
+        ui::scrollBar(standalone).scrollbar("ascii") | ui::height(8));
     },
     sceneOptions);
 
   // clang-format off
   scene
+    | ui::style("ScrollArea{scrollbar-track-foreground:#8090a0;scrollbar-thumb-bold:true;} ScrollBar{scrollbar-corner-underline:false;}")
     | ui::configure([&](ManagedScene &owner) -> std::expected<void, ManagedError> {
         check(owner.requiresPointerMotion(), "Mounted scroll controls did not request the native profile");
         checked(outer.setOffset(ScrollAxis::VERTICAL, {}));

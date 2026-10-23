@@ -855,6 +855,209 @@ void advancedFrames() {
   check(error(failed, TreeError::NO_MEMORY), "advanced owning construction preserves typed NO_MEMORY");
 }
 
+void scrollbarSkins() {
+  for (auto placement : {ScrollPlacement::RESERVED, ScrollPlacement::OVERLAY, ScrollPlacement::ON_FRAME}) {
+    for (auto pattern :
+         {ScrollbarPattern::LEGACY, ScrollbarPattern::FRAME, ScrollbarPattern::MINIMAL, ScrollbarPattern::ASCII}) {
+      ScrollAreaOptions options;
+      options.frame = BorderOptions{};
+      options.placement = placement;
+      FrameOptions frame;
+      frame.pattern = FramePattern::DOUBLE;
+      AreaFixture fixture(options, frame);
+      fixture.settle({10, 6});
+      take(setScrollOffset(*fixture.tree, fixture.area, ScrollAxis::HORIZONTAL, {5, 0}));
+      take(setScrollOffset(*fixture.tree, fixture.area, ScrollAxis::VERTICAL, {8, 0}));
+      fixture.settle({10, 6});
+      const auto before = take(scrollAreaLayout(*fixture.tree, fixture.area));
+      const auto values = fixture.values();
+      ScrollbarSkin skin{.pattern = pattern, .ends = true};
+      take(fixture.tree->consumeFrameRequest());
+      take(setScrollbarSkin(*fixture.tree, fixture.area, skin));
+      check(take(fixture.tree->consumeFrameRequest()) == Invalidation::PAINT,
+            "skin change requests paint without invalidating layout");
+      const auto after = take(scrollAreaLayout(*fixture.tree, fixture.area));
+      const auto afterValues = fixture.values();
+      check(before.layoutRevision == after.layoutRevision && before.geometry.local == after.geometry.local &&
+              before.geometry.surface == after.geometry.surface && before.geometry.clip == after.geometry.clip &&
+              before.geometry.valid == after.geometry.valid && before.placement.viewport == after.placement.viewport &&
+              before.placement.viewportOrigin == after.placement.viewportOrigin &&
+              afterValues.revision == values.revision &&
+              afterValues.horizontal.offset.raster == values.horizontal.offset.raster &&
+              afterValues.horizontal.offset.fraction == values.horizontal.offset.fraction &&
+              afterValues.vertical.offset.raster == values.vertical.offset.raster &&
+              afterValues.vertical.offset.fraction == values.vertical.offset.fraction,
+            "skin preserves geometry, content viewport, controller revision and offsets");
+      const auto painted = fixture.paint(fixture.area);
+      for (const bool horizontal : {true, false}) {
+        const auto track = horizontal ? before.placement.horizontal : before.placement.vertical;
+        const auto value = horizontal ? values.horizontal : values.vertical;
+        const auto thumb = take(scrollThumb(value.metrics, value.offset.raster, track.length, 1));
+        for (int i = 0; i < track.length; ++i) {
+          const bool inThumb = i >= thumb.start && i - thumb.start < thumb.length;
+          const auto point = std::pair{track.origin.x + (horizontal ? i : 0), track.origin.y + (horizontal ? 0 : i)};
+          const auto expected = inThumb                 ? (pattern == ScrollbarPattern::ASCII ? "#" : "\xe2\x96\x88")
+                                : i == 0                ? (horizontal ? "<" : "^")
+                                : i == track.length - 1 ? (horizontal ? ">" : "v")
+                                : pattern == ScrollbarPattern::MINIMAL ? " "
+                                : pattern == ScrollbarPattern::ASCII   ? "."
+                                : pattern == ScrollbarPattern::FRAME   ? (horizontal ? "\xe2\x95\x90" : "\xe2\x95\x91")
+                                                                       : "\xe2\x96\x91";
+          check(painted.cells.at(point) == expected, "oriented preset/ends/thumb paint uses the existing track cells");
+        }
+      }
+      take(fixture.tree->consumeFrameRequest());
+      fixture.paint(fixture.area);
+      check(take(fixture.tree->consumeFrameRequest()) == Invalidation::NONE,
+            "skin paint does not request continuous redraw");
+    }
+  }
+
+  for (const auto axis : {ScrollAxis::HORIZONTAL, ScrollAxis::VERTICAL}) {
+    BarFixture fixture({}, axis);
+    ScrollbarSkin skin{.pattern = ScrollbarPattern::FRAME, .ends = true};
+    take(setScrollbarSkin(*fixture.tree, fixture.bar, skin));
+    auto painted = fixture.paint(fixture.bar);
+    const auto last = axis == ScrollAxis::HORIZONTAL ? std::pair{9, 0} : std::pair{0, 9};
+    check(painted.cells.at(last) == (axis == ScrollAxis::HORIZONTAL ? ">" : "v"),
+          "standalone oriented ends are decorative");
+    take(setScrollMetrics(*fixture.tree, fixture.bar, {10, 10}));
+    fixture.layout(axis == ScrollAxis::HORIZONTAL ? CellSize{10, 1} : CellSize{1, 10});
+    painted = fixture.paint(fixture.bar);
+    check(painted.cells.at(last) == "\xe2\x96\x88", "fitting content thumb covers decorative ends");
+    for (int length : {0, 1, 2}) {
+      fixture.layout(axis == ScrollAxis::HORIZONTAL ? CellSize{length, 1} : CellSize{1, length});
+      check(fixture.paint(fixture.bar).submitted == static_cast<std::size_t>(length),
+            "tiny bar has bounded exact paint work");
+    }
+  }
+
+  FrameOptions frame;
+  frame.customGlyphs = FrameGlyphs{"+", "+", "+", "+", "H", "V"};
+  ScrollAreaOptions options{.placement = ScrollPlacement::ON_FRAME, .frame = BorderOptions{}};
+  AreaFixture fixture(options, frame);
+  fixture.settle();
+  ScrollbarSkin skin{.pattern = ScrollbarPattern::FRAME};
+  skin.horizontal.thumb = "x";
+  skin.vertical.thumb = "y";
+  skin.corner = "@";
+  take(setScrollbarSkin(*fixture.tree, fixture.area, skin));
+  skin.horizontal.thumb = "!";
+  skin.vertical.thumb = "!";
+  skin.corner = "!";
+  const auto painted = fixture.paint(fixture.area);
+  const auto geometry = take(scrollAreaLayout(*fixture.tree, fixture.area)).placement;
+  check(painted.cells.at({geometry.horizontal.origin.x, geometry.horizontal.origin.y}) == "x" &&
+          painted.cells.at({geometry.vertical.origin.x, geometry.vertical.origin.y}) == "y" &&
+          painted.cells.at(
+            {geometry.horizontal.origin.x + geometry.horizontal.length - 1, geometry.horizontal.origin.y}) == "H" &&
+          painted.cells.at({geometry.vertical.origin.x, geometry.vertical.origin.y + geometry.vertical.length - 1}) ==
+            "V" &&
+          !geometry.hasCorner && painted.cells.at({0, 0}) == "+",
+        "custom sources are owned, FRAME matches actual lines and ON_FRAME preserves outline corners");
+  options.placement = ScrollPlacement::RESERVED;
+  AreaFixture corners(options, frame);
+  corners.settle();
+  skin.corner = "@";
+  take(setScrollbarSkin(*corners.tree, corners.area, skin));
+  const auto corner = take(scrollAreaLayout(*corners.tree, corners.area)).placement;
+  check(corner.hasCorner && corners.paint(corners.area).cells.at({corner.corner.x, corner.corner.y}) == "@",
+        "custom corner applies to the existing reserved gutter intersection");
+}
+
+void scrollbarSkinFailures() {
+  TreeFixture widths;
+  const auto wide = take(widths.tree->emplaceChecked<ScrollBar>(
+    widths.root, std::shared_ptr<ScrollController>{}, ScrollAxis::VERTICAL, WidthPolicy{AmbiguousWidth::WIDE}));
+  ScrollbarSkin ambiguous;
+  ambiguous.vertical.track = "\xc2\xb7";
+  check(error(setScrollbarSkin(*widths.tree, wide, ambiguous), TreeError::INVALID_ARGUMENT),
+        "custom glyph admission uses the complete receiving ambiguous-width policy");
+  take(setScrollbarSkin(*widths.tree, wide, ScrollbarSkin{.pattern = ScrollbarPattern::FRAME}));
+  BarFixture fixture;
+  ScrollbarSkin skin{.pattern = ScrollbarPattern::ASCII};
+  take(setScrollbarSkin(*fixture.tree, fixture.bar, skin));
+
+  struct CountingPaint final : PaintContext {
+    std::size_t submitted{};
+
+    std::expected<void, TreeError> submit(std::span<const RenderCommand> commands) override {
+      submitted += commands.size();
+
+      return {};
+    }
+  } allocationFree;
+
+  std::expected<void, TreeError> painted;
+  take(fixture.tree->frame([&] {
+    allocation_test::fail = true;
+    painted = fixture.tree->paint(fixture.bar, allocationFree);
+    allocation_test::fail = false;
+  }));
+  check(painted && allocationFree.submitted == 10, "prepared scrollbar glyphs paint without owning allocation");
+  const auto before = fixture.paint(fixture.bar).cells;
+  for (const std::string &source :
+       {std::string(""), std::string("ab"), std::string("\xe7\x95\x8c"), std::string("\xcc\x81"), std::string("\n"),
+        std::string(1, '\0'), std::string("\xff"), std::string(65, 'x')}) {
+    skin.vertical.track = source;
+    take(fixture.tree->consumeFrameRequest());
+    check(error(setScrollbarSkin(*fixture.tree, fixture.bar, skin), TreeError::INVALID_ARGUMENT),
+          "empty, multiple, wide, zero-width, control, NUL, malformed and over-cap glyphs reject before paint");
+    check(take(fixture.tree->consumeFrameRequest()) == Invalidation::NONE && fixture.paint(fixture.bar).cells == before,
+          "invalid skin preserves old preparation without invalidation");
+  }
+  skin.vertical.track = "e\xcc\x81";
+  skin.maxGlyphBytes = 2;
+  check(error(setScrollbarSkin(*fixture.tree, fixture.bar, skin), TreeError::INVALID_ARGUMENT),
+        "configured per-glyph byte cap applies");
+  skin.maxGlyphBytes = 3;
+  take(setScrollbarSkin(*fixture.tree, fixture.bar, skin));
+  check(fixture.paint(fixture.bar).cells.at({0, 9}) == "e\xcc\x81", "one combining grapheme remains indivisible");
+  skin.vertical.track.reset();
+  skin.maxGlyphBytes = 0;
+  check(error(setScrollbarSkin(*fixture.tree, fixture.bar, skin), TreeError::INVALID_ARGUMENT),
+        "zero glyph cap rejects");
+  skin.maxGlyphBytes = 64;
+  skin.pattern = static_cast<ScrollbarPattern>(-1);
+  check(error(setScrollbarSkin(*fixture.tree, fixture.bar, skin), TreeError::INVALID_ARGUMENT),
+        "unknown native preset rejects");
+  skin.pattern = ScrollbarPattern::ASCII;
+  const auto previous = fixture.paint(fixture.bar).cells;
+  allocation_test::fail = true;
+  const auto failed = setScrollbarSkin(*fixture.tree, fixture.bar, skin);
+  allocation_test::fail = false;
+  check(error(failed, TreeError::NO_MEMORY) && fixture.paint(fixture.bar).cells == previous,
+        "new fallible preparation translates allocation failure and preserves old skin");
+  take(fixture.tree->frame([&] {
+    check(error(setScrollbarSkin(*fixture.tree, fixture.bar, skin), TreeError::WOULD_BLOCK),
+          "skin replacement is forbidden during paint frames");
+  }));
+  std::thread other([&] {
+    check(error(setScrollbarSkin(*fixture.tree, fixture.bar, skin), TreeError::WRONG_THREAD),
+          "skin replacement is UI-affine");
+  });
+  other.join();
+  check(error(setScrollbarSkin(*fixture.tree, fixture.root, skin), TreeError::INVALID_ARGUMENT),
+        "skin rejects unrelated controls");
+  static BarFixture *entered;
+  entered = &fixture;
+  allocation_test::hook = [] {
+    ScrollbarSkin nested{.pattern = ScrollbarPattern::MINIMAL};
+    take(setScrollbarSkin(*entered->tree, entered->bar, nested));
+  };
+  allocation_test::beforeHook = 0;
+  check(error(setScrollbarSkin(*fixture.tree, fixture.bar, skin), TreeError::WOULD_BLOCK),
+        "nested skin publication wins over stale outer preparation");
+  check(fixture.paint(fixture.bar).cells.at({0, 9}) == " ", "newer nested preparation remains installed");
+  allocation_test::hook = [] {
+    take(entered->tree->remove(entered->bar));
+  };
+  allocation_test::beforeHook = 0;
+  check(error(setScrollbarSkin(*fixture.tree, fixture.bar, skin), TreeError::STALE_NODE),
+        "removed owner receives no late preparation");
+  check(error(setScrollbarSkin(*fixture.tree, fixture.bar, skin), TreeError::STALE_NODE), "stale skin target rejects");
+}
+
 void manualStyleAndAutomaticMetadata() {
   BarFixture f;
   take(syncScrollControl(*f.tree, f.bar, f.bar));
@@ -908,6 +1111,8 @@ int main() {
   reentrantWriterAdmission();
   obsoleteAssociationAdmission();
   advancedFrames();
+  scrollbarSkins();
+  scrollbarSkinFailures();
   manualStyleAndAutomaticMetadata();
   return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

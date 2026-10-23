@@ -2382,3 +2382,86 @@ TEST_CASE("focused-only frame declarations keep state scope and independent laye
   take(fixture.engine.removeLayer(focusedLayer));
   CHECK(fixture.read().frame[1].title == user.frame[1].title);
 }
+
+TEST_CASE("scrollbar parts use independent cascade ranks and preserve unused fast path defaults") {
+  const auto source = take(parsePss("*{foreground:#112233;bold:true;}"
+                                    "Widget{scrollbar-track-background:#445566;scrollbar-thumb-bold:false;}"
+                                    "#subject:focused{scrollbar-ends-italic:false;scrollbar-corner-underline:true;}"
+                                    "Widget:disabled{scrollbar-thumb-foreground:#abcdef;}"));
+  const StyleTarget target{.type = "Widget", .id = "subject"};
+  ComputedStyle defaults;
+  defaults.normal.italic = true;
+  auto resolved = resolveStyle(source, target, defaults);
+  REQUIRE(resolved.scrollbar[0].track);
+  REQUIRE(resolved.scrollbar[0].thumb);
+  CHECK(resolved.scrollbar[0].track->foreground == RgbColor{17, 34, 51});
+  CHECK(resolved.scrollbar[0].track->background == RgbColor{68, 85, 102});
+  CHECK(resolved.scrollbar[0].track->italic);
+  CHECK_FALSE(resolved.scrollbar[0].thumb->bold);
+  CHECK_FALSE(resolved.scrollbar[0].ends);
+  REQUIRE(resolved.scrollbar[1].ends);
+  REQUIRE(resolved.scrollbar[1].corner);
+  CHECK_FALSE(resolved.scrollbar[1].ends->italic);
+  CHECK(resolved.scrollbar[1].corner->underline);
+  CHECK(resolved.scrollbar[2].thumb->foreground == RgbColor{171, 205, 239});
+  const auto ordinary = take(parsePss("*{foreground:#112233;bold:true;min-width:5;}"));
+  for (auto &part : defaults.scrollbar) {
+    part.track = CellStyle{};
+    part.track->background = RED;
+    part.thumb = CellStyle{};
+    part.thumb->bold = true;
+    part.ends = CellStyle{};
+    part.ends->italic = false;
+    part.corner = CellStyle{};
+    part.corner->underline = true;
+  }
+  auto forced = ordinary;
+  StyleRule marker;
+  marker.selector.state = StyleState::CARET;
+  marker.declarations.scrollbarCorner.underline = true;
+  forced.rules.push_back(marker);
+  allocation_test::remaining = 0;
+  const auto common = resolveStyle(ordinary, target, defaults);
+  const auto full = resolveStyle(forced, target, defaults);
+  allocation_test::remaining = -1;
+  CHECK(common == full);
+  CHECK(common.scrollbar == defaults.scrollbar);
+  CHECK(common.minWidth == 5);
+}
+
+TEST_CASE("scrollbar declarations count against existing layer budgets") {
+  StyleLayerOptions options;
+  options.maxDeclarations = 1;
+  Fixture fixture;
+  take(fixture.engine.enableLayers(options));
+  const auto two = take(parsePss("*{scrollbar-track-foreground:#112233;scrollbar-thumb-bold:false;}"));
+  const auto revision = fixture.engine.revision();
+  CHECK_FALSE(fixture.engine.addLayer(StyleTier::APPLICATION, "too-many", two));
+  CHECK(fixture.engine.revision() == revision);
+}
+
+TEST_CASE("frame and scrollbar parts coexist with independent ranks and ordinary layer removal") {
+  Fixture fixture;
+  take(fixture.engine.enableLayers());
+  const auto base = take(parsePss("*{bold:true;frame-title-foreground:#010203;"
+                                  "scrollbar-track-background:#040506;scrollbar-thumb-bold:true;}"));
+  take(fixture.engine.defaults(base));
+  const auto application = take(parsePss("#subject:focused{scrollbar-thumb-foreground:#070809;}"));
+  take(fixture.engine.addLayer(StyleTier::APPLICATION, "specific", application));
+  const auto user = take(parsePss("*:focused{scrollbar-thumb-bold:false;frame-title-foreground:#0a0b0c;}"));
+  const auto layer = take(fixture.engine.addLayer(StyleTier::USER, "user", user));
+  const auto result = fixture.read();
+
+  REQUIRE(result.frame[1].title);
+  REQUIRE(result.scrollbar[1].track);
+  REQUIRE(result.scrollbar[1].thumb);
+  CHECK(result.frame[1].title->foreground == RgbColor{10, 11, 12});
+  CHECK(result.scrollbar[1].track->background == RgbColor{4, 5, 6});
+  CHECK(result.scrollbar[1].thumb->foreground == RgbColor{7, 8, 9});
+  CHECK_FALSE(result.scrollbar[1].thumb->bold);
+  CHECK(result.scrollbar[0].thumb->bold);
+  CHECK(result.frame[0].title->foreground == RgbColor{1, 2, 3});
+  take(fixture.engine.removeLayer(layer));
+  CHECK(fixture.read().scrollbar[1].thumb->bold);
+  CHECK(fixture.read().frame[1].title->foreground == RgbColor{1, 2, 3});
+}

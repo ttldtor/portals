@@ -103,6 +103,13 @@ static_assert(sizeof(RICH) < sizeof(DIRECT));
 static_assert(sizeof(sc::pss("*{}")) < 1024);
 static_assert(sizeof(sc::CompactSheet<sc::MAX_CT_PSS_RULES, sc::MAX_CT_PSS_CLASSES, sc::MAX_CT_PSS_DECLARATIONS,
                                       sc::MAX_CT_PSS_TEXT_BYTES>) <= sc::MAX_CT_PSS_DESCRIPTOR_BYTES);
+static_assert(sc::MAX_CT_PSS_RULES == 256 && sc::MAX_CT_PSS_DECLARATIONS == 1536);
+static_assert(sc::MAX_CT_PSS_DESCRIPTOR_BYTES == 192 * 1024);
+static_assert(static_cast<std::size_t>(PssProperty::FRAME_ENDS_UNDERLINE) == 20);
+static_assert(static_cast<std::size_t>(PssProperty::SCROLLBAR_TRACK_FOREGROUND) == 21);
+static_assert(static_cast<std::size_t>(PssProperty::SCROLLBAR_CORNER_UNDERLINE) + 1 == PSS_PROPERTY_COUNT);
+constexpr auto SCROLLBAR_SENTINELS = sc::pss("*{scrollbar-track-foreground:#123456;scrollbar-corner-underline:false;}");
+static_assert(SCROLLBAR_SENTINELS.declarations().size() == 2);
 static_assert(std::is_trivially_copyable_v<decltype(RICH)>);
 static_assert(!sc::detail::PssSourceProvider<decltype([] {
   return "\0bad";

@@ -5,6 +5,7 @@
 #include <portals/action.hpp>
 #include <portals/scroll_controller.hpp>
 #include <portals/scroll_options.hpp>
+#include <portals/scrollbar_skin.hpp>
 
 namespace portals {
 namespace detail {
@@ -207,4 +208,14 @@ std::expected<ActionBinding, TreeError> bindScrollArea(EventRouter &router, Widg
  */
 std::expected<ActionBinding, TreeError> bindScrollBar(EventRouter &router, WidgetTree &tree, Node<ScrollBar> node,
                                                       bool geometryWriter = true);
+/** @brief Atomically prepare owning scrollbar glyphs between frames on the tree UI thread.
+ * @param tree Owning tree, borrowed for the checked mutation.
+ * @param node Live ScrollArea or ScrollBar; no controller/lease/focus identity is replaced.
+ * @param skin Owning source borrowed only for this call; prepared glyphs are copied before publication.
+ * @return Success after PAINT invalidation; INVALID_ARGUMENT for invalid type/preset/glyph/cap,
+ * NO_MEMORY for allocation failure, WOULD_BLOCK during a frame or nested skin replacement,
+ * and existing tree errors. Failure preserves the prior skin. No geometry or offset changes occur.
+ */
+[[nodiscard]] std::expected<void, TreeError> setScrollbarSkin(WidgetTree &tree, Node<Widget> node,
+                                                              const ScrollbarSkin &skin);
 } // namespace portals
