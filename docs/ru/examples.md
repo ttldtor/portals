@@ -238,7 +238,8 @@ cmake --build build/guide-examples
 
 
 [Руководство по обычной прокрутке](scroll-controls.md) собирается в `guide_scroll_controls`:
-восемь кнопок в области высотой пять строк, wheel/key/drag и выход через Exit/F10.
+восемь кнопок в рамке с заголовком и внешним размером 28×6, полосу на рамке,
+wheel/key/drag и выход через Exit/F10.
 
 [Вложенная форма настроек](scroll-controls.md#nested-scroll-areas-ru) собирается как
 `guide_nested_scroll`; корневая сборка с тестами называет её `portals_docs_nested_scroll`.

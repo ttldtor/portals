@@ -356,7 +356,7 @@ int main() {
   using namespace portals;
 
   ui::Ref<Button> exit;
-  auto scene = ui::scene(ui::vbox(ui::button(exit, "Exit").framed("rounded").width(18).height(3)));
+  auto scene = ui::scene(ui::vbox(ui::button(exit, "Exit").framed("rounded", "Action").width(18).height(3)));
 
   return scene
     | ui::style("Border:focused { foreground: #62b4d7; }")
@@ -367,7 +367,13 @@ int main() {
 
 ```
 
-Встроенные варианты: `single` (также `plain`), `rounded`, `double`, `heavy` и
+Встроенные варианты: Второй аргумент задаёт владеющий верхний заголовок: `.framed("rounded", "Action")`
+или `| ui::framed("rounded", "Action")`. Такой вариант есть и у ScrollArea.
+Для полос на собственной рамке добавьте `.scrollOnFrame()` или
+`| ui::scrollOnFrame()`: существующие политики полос сохраняются, отсутствующая
+рамка автоматически не включается.
+
+`single` (также `plain`), `rounded`, `double`, `heavy` и
 `ascii`. Неизвестное имя даёт типизированную ошибку `frame.pattern` при подготовке.
 Символы проверяются по политике ширины терминала; встроенный символ не в одну
 ячейку заменяется ASCII. Собственный набор содержит шесть печатных графем шириной

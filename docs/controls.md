@@ -400,7 +400,7 @@ int main() {
   using namespace portals;
 
   ui::Ref<Button> exit;
-  auto scene = ui::scene(ui::vbox(ui::button(exit, "Exit").framed("rounded").width(18).height(3)));
+  auto scene = ui::scene(ui::vbox(ui::button(exit, "Exit").framed("rounded", "Action").width(18).height(3)));
 
   return scene
     | ui::style("Border:focused { foreground: #62b4d7; }")
@@ -412,7 +412,9 @@ int main() {
 ```
 
 `single` (also `plain`), `rounded`, `double`, `heavy` and `ascii` select built-in
-patterns. Unknown names produce a typed `frame.pattern` error during preparation.
+patterns. The second argument supplies an owning top-edge title: `.framed("rounded", "Action")`,
+or `| ui::framed("rounded", "Action")`. The same overload is available for ScrollArea.
+Unknown names produce a typed `frame.pattern` error during preparation.
 The terminal width policy is checked when glyphs are prepared; built-in symbols
 that do not occupy one cell fall back to ASCII. A custom source must contain six
 printable, single-grapheme, single-cell glyphs, each at most 64 UTF-8 bytes.
@@ -440,7 +442,9 @@ a clipped tail. Invalid preparation submits no frame commands. Painting retains
 no external text references and performs no allocation itself.
 
 `ScrollArea.framed(...)` configures its own frame, without a second Border or a
-double inset. For `ScrollPlacement::ON_FRAME`, a potentially visible horizontal
+double inset. Add `.scrollOnFrame()` or `| ui::scrollOnFrame()` to place its bars
+on that frame; the modifier preserves the existing bar policies and does not
+enable a missing frame. For `ScrollPlacement::ON_FRAME`, a potentially visible horizontal
 track requires the bottom side, and a vertical track requires the right side.
 Track cells take precedence over frame and title cells. The explicit outer-Ref
 overload is unavailable for ScrollArea because it creates no wrapper node.

@@ -21,7 +21,10 @@ int main() {
         ui::button("Connections"),
         ui::button("Preferences"),
         ui::button("About")))
-        | ui::height(5),
+        .framed("rounded", "Sections")
+        .scrollOnFrame()
+        .width(28)
+        .height(6),
       ui::button("Exit", [] { ui::quit(); })))
       | ui::onKey("F10", ui::quit);
   } | ui::runApp();
