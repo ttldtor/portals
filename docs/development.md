@@ -81,6 +81,12 @@ architecture and package policy fingerprint. Cache availability is optional;
 all translation units are checked on both hits and misses. See the
 [APT cache validator](developer-tools-build.md#tool-apt-cache).
 
+`Warm naming package cache` prepares the default-branch cache shared with PRs.
+It runs when its action, workflow or validator changes on `main`, or manually
+through Actions with `main` selected. It installs only the toolchain and does not repeat the project
+test matrix. Use manual dispatch to refresh an evicted cache or changed package
+candidates. A cache created only in a PR is not shared with unrelated PRs.
+
 ### Documentation content
 
 Keep the [short library guide](index.md), [documentation contents](reference-map.md) and `docs/DoxygenLayout.xml` in agreement.
