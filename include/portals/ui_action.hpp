@@ -36,6 +36,7 @@ class ActionRef;
 
 namespace detail {
 /// @cond INTERNAL
+struct QuitCommand;
 struct ActionStore;
 struct ActionRecord;
 
@@ -175,7 +176,7 @@ public:
   /** @param key Unique organizational key. @param caption Shared owning caption copied inside admission.
    * @param callback Compact callback. @return Weak ref with sticky typed failure on rejected admission.
    */
-  template <class Callback>
+  template <class Callback = detail::QuitCommand>
     requires(std::copy_constructible<Callback> && portals::detail::ManagedAction<Callback, ActionInvocation>)
   ActionRef action(std::string_view key, std::string_view caption, Callback callback) {
     try {
@@ -194,7 +195,7 @@ public:
   /** @param key Unique organizational key. @param caption Shared caption.
    * @param callback Compact callback. @return Checked admission without a partial entry.
    */
-  template <class Callback>
+  template <class Callback = detail::QuitCommand>
     requires(std::copy_constructible<Callback> && portals::detail::ManagedAction<Callback, ActionInvocation>)
   std::expected<ActionRef, TreeError> add(std::string_view key, std::string_view caption, Callback callback) {
     try {

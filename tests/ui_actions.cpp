@@ -11,6 +11,11 @@
 #include <optional>
 #include <thread>
 
+static_assert(requires(portals::ui::ActionSet &actions) {
+  actions.action("exit", "Exit", portals::ui::quit);
+  actions.add("exit", "Exit", portals::ui::quit);
+});
+
 namespace {
 std::atomic<std::ptrdiff_t> allocationsBeforeFailure{-1};
 thread_local void (*allocationHook)(){};
@@ -581,4 +586,23 @@ TEST_CASE("action attachment preserves the independently published scene owner")
   CHECK(calls == 1);
   take(inner.scene->close());
   CHECK(action.snapshot().error() == TreeError::CLOSED);
+}
+
+TEST_CASE("bare quit is admitted by shared action declarations") {
+  using namespace portals;
+  example::ReplayTerminal terminal({{10, "\r", {}}}, 1000, {40, 8});
+  ui::SceneOptions options;
+
+  options.clock = terminal.clock();
+
+  const auto status = [&] {
+    ui::ActionSet actions;
+    auto exit = actions.action("exit", "Exit", ui::quit);
+
+    return ui::scene(ui::vbox(ui::button(exit)), options);
+  } | ui::runApp(terminal);
+
+  CHECK(status == 0);
+  CHECK(terminal.closed);
+  CHECK(options.clock.read(options.clock.context) < 1000);
 }
