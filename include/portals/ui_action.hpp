@@ -76,7 +76,7 @@ public:
     requires(std::copy_constructible<CallbackType> && portals::detail::ManagedAction<CallbackType, ActionInvocation>)
   Action(ActionMetadata metadata, CallbackType callback)
       : metadata(std::move(metadata)),
-        callback([callback = std::move(callback)](const ActionInvocation &invocation) mutable -> Result {
+        callback([callback = std::move(callback)]([[maybe_unused]] const ActionInvocation &invocation) mutable -> Result {
           const auto invoke = [&]() -> decltype(auto) {
             if constexpr (std::invocable<CallbackType &, const ActionInvocation &>) {
               return callback(invocation);
