@@ -5,7 +5,9 @@
 Wrap one ordinary content root in `ui::scrollArea`; use `ui::vbox`, `ui::hbox`
 or `ui::grid` to group several controls. The scene creates its controller,
 clips and positions the content, prepares layout, and reveals newly focused
-controls. This complete application has eight buttons inside a five-row area.
+controls. This complete application has eight buttons inside a rounded frame titled Sections. The frame is 28 columns
+wide and six rows high, leaving at most four content rows; the scrollbar uses
+the frame edge.
 Use the wheel, arrows, Page Up/Down, Home/End, or drag a thumb. Exit and F10 close
 through the standard runner and restore the terminal.
 
@@ -36,9 +38,11 @@ and a page with one overlapping cell for Page Up/Down. Home/End select endpoints
 | `OVERLAY` | The nominal viewport and range stay unchanged; the bar obscures edge cells. Reveal guarantees nominal visibility. |
 | `ON_FRAME` | The area's own `frame` supplies the right/bottom track lines, excluding corners, without a second content inset. |
 
-For `ON_FRAME`, supply `options.frame = BorderOptions{}` and
-`options.placement = ScrollPlacement::ON_FRAME`; a separate `ui::border` does
-not supply that frame. Missing frame/invalid options return
+For `ON_FRAME`, use `.framed("rounded", "Sections").scrollOnFrame()`; the pipe
+form is `| ui::framed("rounded", "Sections") | ui::scrollOnFrame()`. Advanced
+options remain available: `options.frame = BorderOptions{}` and
+`options.placement = ScrollPlacement::ON_FRAME`. A separate `ui::border` does
+not supply the area’s own frame. Missing frame/invalid options return
 `TreeError::INVALID_ARGUMENT`. `readOnly` disables user scrolling while keeping
 focus reveal and checked programmatic commands available. Nested ordinary areas
 use the same tree clipping and managed preparation; each owns its own content root.

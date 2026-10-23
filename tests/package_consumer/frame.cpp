@@ -4,7 +4,9 @@
 #include <portals/ui.hpp>
 
 #include <iostream>
+#include <source_location>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
 
 namespace {
@@ -16,9 +18,10 @@ static_assert(LEGACY_BORDER.maxPaintCells == 512 && LEGACY_SCROLL.frame->maxPain
 static_assert(std::is_aggregate_v<BorderOptions> && std::is_aggregate_v<ScrollAreaOptions>);
 static_assert(FramePattern::PLAIN == FramePattern::SINGLE);
 
-template <class T, class E> T checked(std::expected<T, E> result) {
+template <class T, class E>
+T checked(std::expected<T, E> result, std::source_location origin = std::source_location::current()) {
   if (!result) {
-    throw std::runtime_error("Installed frame operation failed");
+    throw std::runtime_error("Installed frame operation failed at line " + std::to_string(origin.line()));
   }
 
   if constexpr (!std::is_void_v<T>) {
@@ -42,11 +45,11 @@ int main() try {
   ui::Ref<LineEdit> editor;
   ui::Ref<Border> saveFrame, editorFrame;
   int clicks{};
-  auto recipe =
-    ui::vbox(ui::button(save, "Save").width(10).framed(saveFrame, "rounded").height(4).onClick([&] {
+  auto recipe = ui::vbox(
+    ui::button(save, "Save").width(10).framed(saveFrame, "rounded", "Actions").height(4).onClick([&] {
       ++clicks;
     }),
-             ui::lineEdit(draft).reference(editor).width(14) | ui::framed(editorFrame, "ascii") | ui::height(4));
+    ui::lineEdit(draft).reference(editor).width(14) | ui::framed(editorFrame, "ascii", "Draft") | ui::height(4));
 
   checked(ui::mount(*scene, std::move(recipe)));
   checked(scene->prepare(*app, {24, 10}));
@@ -74,6 +77,30 @@ int main() try {
   checked(scene->remove(saveFrameNode));
   require(!app->tree().inspect(saveNode) && !app->tree().inspect(saveFrameNode));
   checked(scene->close());
+  auto scrollApp = checked(Application::create());
+  auto scrollScene = checked(ManagedScene::create(*scrollApp));
+  ui::Ref<ScrollArea> area;
+
+  checked(ui::mount(*scrollScene,
+                    ui::vbox(ui::scrollArea(area, ui::label("content").width(30).height(20)) |
+                             ui::framed("rounded", "Sections") | ui::scrollOnFrame() | ui::width(16) | ui::height(6))));
+  checked(scrollScene->prepare(*scrollApp, {24, 16}));
+  const auto scrollViewport = checked(CellRect::from({}, {24, 16}));
+
+  checked(scrollApp->tree().frame([&] {
+    checked(layoutTree(scrollApp->tree(), scrollApp->root(), scrollViewport, scrollViewport));
+  }));
+  checked(scrollScene->completedLayout(*scrollApp));
+  const auto scrollLayout = checked(scrollAreaLayout(scrollApp->tree(), area.node()));
+
+  require(checked(area.geometry()).local.size() == CellSize{16, 6});
+  require(scrollLayout.placement.viewport == CellSize{14, 4});
+  require(scrollLayout.placement.viewportOrigin == CellPoint{1, 1});
+  require(scrollLayout.placement.horizontalBar && scrollLayout.placement.verticalBar);
+  const auto missingFrame = ui::mount(*scrollScene, ui::scrollArea(ui::label("content")).scrollOnFrame());
+
+  require(!missingFrame && std::get<TreeError>(missingFrame.error().cause) == TreeError::INVALID_ARGUMENT);
+  checked(scrollScene->close());
 
   return 0;
 } catch (const std::exception &error) {

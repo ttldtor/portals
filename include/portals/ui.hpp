@@ -2768,6 +2768,15 @@ public:
     return std::move(*this).scalarSettings({.placement = placement});
   }
 
+  /** @return Consuming native area recipe placing scrollbars on its existing frame.
+   * An absent effective frame remains a typed mount error, as for placement(ON_FRAME).
+   */
+  Description &&scrollOnFrame() &&
+    requires std::same_as<T, ScrollArea>
+  {
+    return std::move(*this).placement(ScrollPlacement::ON_FRAME);
+  }
+
   /** @param enabled True creates a missing default one-cell frame; false removes the effective frame.
    * @return Consuming native area recipe; existing frame options survive an explicit true.
    */
@@ -3447,6 +3456,22 @@ public:
     return std::move(*this);
   }
 
+  /** @param pattern Checked compact preset name, with the existing aliases and mount errors.
+   * @param title UTF-8 top-edge title copied now and validated with the existing frame limits at mount.
+   * @return Same typed recipe, retaining its original reference, handlers and outer-size behavior.
+   */
+  Description &&framed(std::string_view pattern, std::string_view title) &&
+    requires std::derived_from<T, SizedWidget>
+  {
+    (void)std::move(*this).framed(pattern);
+
+    if (state_) {
+      frameRecipe().options.title = title;
+    }
+
+    return std::move(*this);
+  }
+
   /** @param outer Empty observer published for the retained Border only after complete mount success.
    * @param options Owning advanced frame settings.
    * @return Same typed child recipe; hide/remove outer to affect both frame and content.
@@ -3475,6 +3500,23 @@ public:
 
     if (state_) {
       frameRecipe().reference = std::move(outer);
+    }
+
+    return std::move(*this);
+  }
+
+  /** @param outer Empty observer published only after complete mount success.
+   * @param pattern Checked compact preset name.
+   * @param title Owning top-edge title, checked at mount with the existing frame limits.
+   * @return Same typed child recipe, with the existing outer Border publication contract.
+   */
+  Description &&framed(Ref<Border> outer, std::string_view pattern, std::string_view title) &&
+    requires(std::derived_from<T, SizedWidget> && !std::same_as<T, ScrollArea>)
+  {
+    (void)std::move(*this).framed(std::move(outer), pattern);
+
+    if (state_) {
+      frameRecipe().options.title = title;
     }
 
     return std::move(*this);
@@ -8308,6 +8350,11 @@ inline ScrollAreaModifier placement(ScrollPlacement placement) {
   return {{.placement = placement}};
 }
 
+/** @return Native area-only stage placing bars on an existing frame; a missing frame stays a typed error. */
+inline ScrollAreaModifier scrollOnFrame() {
+  return placement(ScrollPlacement::ON_FRAME);
+}
+
 /** @param enabled True creates a missing default one-cell frame; false removes it.
  * @return Owning native area-only stage.
  */
@@ -8760,7 +8807,7 @@ struct FramedModifier {
   /** @brief Keep owning transfers fallible on checked standard-library implementations. */
   ~FramedModifier() = default;
 
-  FrameOptions options;               ///< Advanced owning settings when no compact spelling was supplied.
+  FrameOptions options;               ///< Owning settings, including the title for a compact pattern.
   std::optional<std::string> pattern; ///< Owning compact name, checked by the consuming recipe.
 
   /** @tparam T Sized widget whose source identity remains unchanged.
@@ -8772,7 +8819,7 @@ struct FramedModifier {
     requires std::derived_from<T, SizedWidget>
   friend Description<T> operator|(Description<T> &&description, FramedModifier modifier) {
     if (modifier.pattern) {
-      return std::move(description).framed(*modifier.pattern);
+      return std::move(description).framed(*modifier.pattern, modifier.options.title);
     }
 
     return std::move(description).framed(std::move(modifier.options));
@@ -8796,7 +8843,8 @@ struct ObservedFramedModifier {
     requires(std::derived_from<T, SizedWidget> && !std::same_as<T, ScrollArea>)
   friend Description<T> operator|(Description<T> &&description, ObservedFramedModifier modifier) {
     if (modifier.frame.pattern) {
-      return std::move(description).framed(std::move(modifier.reference), *modifier.frame.pattern);
+      return std::move(description)
+        .framed(std::move(modifier.reference), *modifier.frame.pattern, modifier.frame.options.title);
     }
 
     return std::move(description).framed(std::move(modifier.reference), std::move(modifier.frame.options));
@@ -8817,6 +8865,18 @@ inline FramedModifier framed(std::string_view pattern) {
   return {{}, std::optional<std::string>(std::in_place, pattern)};
 }
 
+/** @param pattern Owning compact name, checked at mount.
+ * @param title UTF-8 top-edge title copied now and checked with the existing frame limits at mount.
+ * @return Owning frame stage preserving the source recipe's identity and outer dimensions.
+ */
+inline FramedModifier framed(std::string_view pattern, std::string_view title) {
+  auto modifier = framed(pattern);
+
+  modifier.options.title = title;
+
+  return modifier;
+}
+
 /** @param reference Empty observer for explicit outer geometry, visibility and removal.
  * @param options Owning advanced frame settings.
  * @return Stage for ordinary sized source recipes; ScrollArea keeps its own existing owner instead.
@@ -8831,6 +8891,15 @@ inline ObservedFramedModifier framed(Ref<Border> reference, FrameOptions options
  */
 inline ObservedFramedModifier framed(Ref<Border> reference, std::string_view pattern) {
   return {std::move(reference), framed(pattern)};
+}
+
+/** @param reference Empty observer published only after complete mount success.
+ * @param pattern Checked compact preset name.
+ * @param title Owning top-edge title checked at mount.
+ * @return Frame stage with the existing outer Border publication contract.
+ */
+inline ObservedFramedModifier framed(Ref<Border> reference, std::string_view pattern, std::string_view title) {
+  return {std::move(reference), framed(pattern, title)};
 }
 
 /** @param value Finite value in the inclusive configured range; checked at mount.

@@ -19,6 +19,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
   severity methods and equivalent pipe modifiers, preserving their actions and
   other options.
 
+- Frames accept compact `.framed(pattern, title)` and pipe calls. Scroll areas
+  support `.scrollOnFrame()` and `ui::scrollOnFrame()`, preserving existing
+  options, references and outer dimensions. The ordinary scroll guide shows
+  a titled frame with its scrollbar on the edge.
+
 - Sized recipes support `.framed()` and `ui::framed()` with built-in patterns,
   partial sides, owning titles and custom one-cell glyphs. Typed child references
   are preserved; dimensions address the outer frame. Loaded scenes accept the

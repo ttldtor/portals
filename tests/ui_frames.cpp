@@ -24,6 +24,12 @@ static_assert(CanFrame<ui::Description<Button>> && CanFrame<ui::Description<Line
 static_assert(!CanFrame<ui::Description<Widget>> && !CanFrame<ui::Description<Dialog>>);
 static_assert(!CanFrame<ui::Description<Button> &>);
 
+template <class T>
+concept CanScrollOnFrame = requires(T &&recipe) { std::forward<T>(recipe).scrollOnFrame(); };
+static_assert(CanScrollOnFrame<ui::Description<ScrollArea>>);
+static_assert(!CanScrollOnFrame<ui::Description<Button>> && !CanScrollOnFrame<ui::Description<ScrollArea> &>);
+static_assert(std::same_as<decltype(ui::button("Save").framed("rounded", "Actions")), ui::Description<Button> &&>);
+
 template <class T, class E>
 T take(std::expected<T, E> result, std::source_location origin = std::source_location::current()) {
   INFO("caller: " << std::string_view(origin.file_name()) << ':' << origin.line());
@@ -152,6 +158,128 @@ TEST_CASE("compact presets and pipe spelling paint the selected owning frame") {
 
     CHECK(std::ranges::find(painted.text, corner) != painted.text.end());
     CHECK(take(child.geometry()).local.size() == CellSize{6, 1});
+  }
+}
+
+TEST_CASE("titled compact frames match options while owning strings and retaining hit identity") {
+  for (const auto pattern : {"single", "plain", "double", "heavy", "rounded", "ascii"}) {
+    std::vector<std::string> expectedPaint;
+
+    for (int spelling = 0; spelling != 3; ++spelling) {
+      INFO(std::string_view(pattern) << ": " << spelling);
+      Fixture fixture;
+      ui::Ref<Button> child;
+      ui::Ref<Border> outer;
+      int clicks{};
+      auto recipe = ui::button(child, "Save")
+                      .onClick([&] {
+                        ++clicks;
+                      })
+                      .width(16);
+      std::string title = "Actions";
+      std::string name = pattern;
+
+      if (spelling == 0) {
+        FrameOptions options;
+        options.pattern = *ui::detail::framePattern(name);
+        options.title = title;
+        recipe = std::move(recipe).framed(outer, std::move(options));
+      } else if (spelling == 1) {
+        recipe = std::move(recipe).framed(outer, name, title);
+      } else {
+        auto modifier = ui::framed(outer, name, title);
+
+        name = "unknown";
+        title = "changed";
+        recipe = std::move(recipe) | std::move(modifier);
+      }
+
+      title = "changed again";
+      take(ui::mount(*fixture.scene, ui::vbox(std::move(recipe).height(4))));
+      fixture.arrange();
+      const auto painted = paint(fixture.app->tree(), outer.node());
+
+      if (spelling == 0) {
+        expectedPaint = painted.text;
+      } else {
+        CHECK(painted.text == expectedPaint);
+      }
+
+      CHECK(std::ranges::find(painted.text, "Actions") != painted.text.end());
+      CHECK(take(outer.geometry()).local.size() == CellSize{16, 4});
+      CHECK(take(child.geometry()).local.size() == CellSize{14, 1});
+      CHECK(take(fixture.app->tree().inspect(child.node())).parent == outer.node());
+      take(fixture.app->router().invoke(child.node(), {Action::ACTIVATE}));
+      CHECK(clicks == 1);
+    }
+  }
+}
+
+TEST_CASE("scrollOnFrame matches options without a second frame or inset") {
+  for (int spelling = 0; spelling != 3; ++spelling) {
+    INFO(spelling);
+    Fixture fixture;
+    ui::Ref<ScrollArea> area;
+    ui::Ref<Button> child;
+    auto recipe = ui::scrollArea(area, ui::button(child, "content").width(30).height(20));
+
+    if (spelling == 0) {
+      FrameOptions options;
+      options.pattern = FramePattern::ROUNDED;
+      options.title = "Sections";
+      recipe = std::move(recipe).framed(std::move(options)).placement(ScrollPlacement::ON_FRAME);
+    } else if (spelling == 1) {
+      recipe = std::move(recipe).framed("rounded", "Sections").scrollOnFrame();
+    } else {
+      recipe = std::move(recipe) | ui::framed("rounded", "Sections") | ui::scrollOnFrame();
+    }
+
+    take(ui::mount(*fixture.scene, ui::vbox(std::move(recipe).width(16).height(6))));
+    fixture.arrange();
+    const auto layout = take(scrollAreaLayout(fixture.app->tree(), area.node()));
+    const auto painted = paint(fixture.app->tree(), area.node());
+
+    CHECK(take(area.geometry()).local.size() == CellSize{16, 6});
+    CHECK(layout.placement.viewport == CellSize{14, 4});
+    CHECK(layout.placement.viewportOrigin == CellPoint{1, 1});
+    CHECK(layout.placement.horizontalBar);
+    CHECK(layout.placement.verticalBar);
+    CHECK_FALSE(layout.placement.hasCorner);
+    CHECK(take(fixture.app->tree().inspect(child.node())).parent == area.node());
+    CHECK(std::ranges::find(painted.text, "Sections") != painted.text.end());
+  }
+}
+
+TEST_CASE("compact title and on-frame shortcuts retain typed pre-publication failures") {
+  for (int failure = 0; failure != 6; ++failure) {
+    INFO(failure);
+    Fixture fixture;
+    ui::Ref<ScrollArea> area;
+    ui::Ref<Button> child;
+    auto recipe = ui::scrollArea(area, ui::button(child, "content"));
+
+    if (failure == 0) {
+      recipe = std::move(recipe).framed("unknown", "Sections");
+    } else if (failure == 1) {
+      recipe = std::move(recipe) | ui::framed("unknown", "Sections");
+    } else if (failure == 2) {
+      recipe = std::move(recipe).framed("rounded", std::string_view("\xff", 1));
+    } else if (failure == 3) {
+      recipe = std::move(recipe) | ui::framed("rounded", std::string(FrameOptions{}.maxTitleBytes + 1, 'x'));
+    } else if (failure == 4) {
+      recipe = std::move(recipe).scrollOnFrame();
+    } else {
+      recipe = std::move(recipe) | ui::scrollOnFrame();
+    }
+
+    const auto result = ui::mount(*fixture.scene, std::move(recipe));
+
+    REQUIRE_FALSE(result);
+    CHECK(std::get<TreeError>(result.error().cause) == TreeError::INVALID_ARGUMENT);
+    CHECK_FALSE(result.error().cleanup);
+    CHECK(area.node() == Node<ScrollArea>{});
+    CHECK(child.node() == Node<Button>{});
+    CHECK(take(fixture.app->tree().inspect(fixture.scene->root())).children.empty());
   }
 }
 

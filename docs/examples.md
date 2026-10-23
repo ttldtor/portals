@@ -278,7 +278,8 @@ This target only compiles and links the programs; it does not open terminals.
 
 
 The [ordinary scroll guide](scroll-controls.md) builds as `guide_scroll_controls`: eight
-buttons in a five-row area, wheel/key/drag input, and Exit/F10 cleanup.
+buttons in a titled 28-by-6 outer frame with an on-frame scrollbar, wheel/key/drag
+input, and Exit/F10 cleanup.
 
 The [nested settings form](scroll-controls.md#nested-scroll-areas) builds as
 `guide_nested_scroll`; the root test-enabled build names it `portals_docs_nested_scroll`.
