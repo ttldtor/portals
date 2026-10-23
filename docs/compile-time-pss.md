@@ -144,7 +144,7 @@ BOM; it returns `expected<StyleSheet, StyleError>` unchanged.
 | Declaration occurrences | 1536 | Logical document budget |
 | Shared owning text | 16 KiB | Logical document budget |
 | Source identity | 512 bytes | 4096 bytes |
-| Descriptor/document payload | 128 KiB descriptor bound | 4 MiB logical payload |
+| Descriptor/document payload | 192 KiB descriptor bound | 4 MiB logical payload |
 
 Logical runtime payload includes owned text, rule/class records and all origin
 records. It is not a cap on allocator bookkeeping, vector capacity or transient

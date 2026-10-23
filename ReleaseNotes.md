@@ -7,6 +7,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Scrollbars support frame-matched, minimal, ASCII and owning custom glyph skins,
+  with independently styled track, thumb, ends and corner parts through PSS.
+  Existing geometry and input behavior remain unchanged.
+
 - Frame titles support compact spaced, square, angle and round decorations,
   with owning custom ends and matching loaded-scene properties. Frame lines,
   title text and title ends can be styled independently through the existing
