@@ -21,7 +21,7 @@ synchronous `SecretView` only to update an `Empty`/`Supplied` status. They never
 copy secret bytes into ordinary text. An ordinary `LineEdit` configured with
 `LineEditDisplayMode::PASSWORD` only masks its presentation; it retains the
 ordinary plaintext model and history described in the
-[editor display guide](controls.md#editing-presentation-and-limits).
+[editor display guide](controls.md#editor-presentation-limits).
 
 Resource programs declare controls and public settings in the scene text, then
 bind behavior through typed C++ refs and handlers. Executable callbacks remain

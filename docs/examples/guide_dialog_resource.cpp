@@ -13,7 +13,7 @@ int main() {
     auto scene = ui::scene(R"(scene {
   OverlayHost {
     VBox {
-      Label { "Esc closes Details; F10 exits main form." }
+      Label { "Close button closes Details; F10 exits main form." }
       Button#detailsOpen { "Details" }
       Button#exit { "Exit" }
     }
@@ -21,7 +21,7 @@ int main() {
       title = "Connection settings"
       VBox {
         LineEdit { "Primary feed" }
-        CheckBox { "Reconnect automatically" checked = true }
+        CheckBox { text = "Reconnect automatically"; state = CHECKED }
         Button#close { "Close" }
       }
     }

@@ -13,7 +13,7 @@ int main() {
     ui::Ref<Dialog> details;
     return ui::scene(
       ui::vbox(
-        ui::label("Esc closes Details; F10 exits main form."),
+        ui::label("Close button closes Details; F10 exits main form."),
         ui::button("Details", [details] { details.open(); }),
         ui::button("Exit", [] { ui::quit(); })),
       ui::dialog(details, "Connection settings",

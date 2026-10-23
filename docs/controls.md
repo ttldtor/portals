@@ -101,7 +101,7 @@ model, create a `ManagedState<PasswordValue>` in the receiving scene and pass it
 to `ui::password(ref, state)`. An external state and an initial provider cannot
 be combined.
 
-### Editing, presentation and limits
+### Editing, presentation and limits {#editor-presentation-limits}
 
 The default `EditMode::IMMEDIATE` publishes each accepted, semantically valid
 change. `.editMode(EditMode::ON_COMPLETION)` keeps a protected draft until Enter,
