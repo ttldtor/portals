@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include <portals/frame.hpp>
-#include <portals/ui.hpp>
+#include <portals/ui_style.hpp>
 
 #include <iostream>
 #include <source_location>
@@ -136,6 +136,11 @@ int main() try {
 
   require(!missingFrame && std::get<TreeError>(missingFrame.error().cause) == TreeError::INVALID_ARGUMENT);
   checked(scrollScene->close());
+  auto styled = ui::scene(ui::vbox(ui::label("body").framed("ascii", "Title").titleDecoration("square")));
+  styled | ui::style("Border{frame-line-foreground:#010203;frame-title-background:#040506;"
+                     "frame-ends-bold:false;frame-ends-underline:false;}");
+  checked(styled.prepareChecked());
+  checked(styled.close());
 
   return 0;
 } catch (const std::exception &error) {

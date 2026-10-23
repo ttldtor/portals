@@ -1561,3 +1561,105 @@ TEST_CASE("upper runner reports named lookup allocation failures once after clea
   CHECK(failures > 0);
   CHECK(successes > 0);
 }
+
+TEST_CASE("frame PSS string admission reaches native preparation rendering and terminal cleanup") {
+  constexpr char SOURCE[] = R"pss(ScrollArea {
+    frame-line-foreground:#010203; frame-line-background:#040506;
+    frame-line-bold:true; frame-line-italic:false; frame-line-underline:true;
+    frame-title-foreground:#070809; frame-title-background:#0a0b0c;
+    frame-title-bold:false; frame-title-italic:true; frame-title-underline:false;
+    frame-ends-foreground:#0d0e0f; frame-ends-background:#101112;
+    frame-ends-bold:true; frame-ends-italic:true; frame-ends-underline:false;
+  })pss";
+  example::ReplayTerminal terminal({{20, "\x1b[21~", {}}}, 80, {20, 6});
+  ui::SceneOptions options;
+  options.clock = terminal.clock();
+  ui::Ref<ScrollArea> area;
+  auto owner = ui::scene(ui::vbox(ui::scrollArea(ui::label("body"))
+                                    .reference(area)
+                                    .framed("ascii", "Title")
+                                    .titleDecoration("square")
+                                    .width(16)
+                                    .height(4)),
+                         options);
+  owner | ui::style(SOURCE);
+  REQUIRE(owner.prepareChecked());
+  const auto sources = owner.managed()->get().styleSources();
+  REQUIRE(sources);
+  REQUIRE(sources->back().document);
+  CHECK(sources->back().document->declarations.size() == 15);
+  bool inspected{};
+  owner.onKey(key::F10, [&] {
+    auto &managed = owner.managed()->get();
+    auto &app = ui::detail::SceneAccess::application(managed);
+    REQUIRE(app.tree().read(area.node(), [&](const ScrollArea &widget) {
+      REQUIRE(widget.computedStyle());
+      const auto &parts = widget.computedStyle()->frame[0];
+      REQUIRE(parts.line);
+      REQUIRE(parts.title);
+      REQUIRE(parts.ends);
+      CHECK(parts.line->foreground == RgbColor{1, 2, 3});
+      CHECK(parts.line->background == RgbColor{4, 5, 6});
+      CHECK(parts.title->foreground == RgbColor{7, 8, 9});
+      CHECK(parts.title->background == RgbColor{10, 11, 12});
+      CHECK(parts.ends->foreground == RgbColor{13, 14, 15});
+      CHECK(parts.ends->background == RgbColor{16, 17, 18});
+      CHECK_FALSE(parts.title->bold);
+      CHECK_FALSE(parts.ends->underline);
+      inspected = true;
+    }));
+    CHECK(owner.ref().quit());
+  });
+  const auto result = owner.run(terminal);
+  REQUIRE(result);
+  CHECK(inspected);
+  CHECK(result->frames == 1);
+  CHECK(terminal.closed);
+}
+
+TEST_CASE("frame document and compact sentinel properties share managed admission") {
+  constexpr auto COMPACT_FRAME = sc::compactSheet(std::array{
+    sc::flatRule(sc::type<"ScrollArea">(), sc::frameTitleBackground(sc::rgb(1, 2, 3)), sc::frameEndsUnderline(false))});
+  const auto document = parsePssDocument("ScrollArea{frame-title-background:#010203;frame-ends-underline:false;}");
+  REQUIRE(document);
+
+  for (const bool compact : {false, true}) {
+    auto owner = ui::scene(ui::scrollArea(ui::label("body")).framed("ascii", "Title"));
+
+    if (compact) {
+      owner | ui::style(COMPACT_FRAME);
+    } else {
+      owner | ui::style(*document);
+    }
+
+    REQUIRE(owner.prepareChecked());
+    const auto sources = owner.managed()->get().styleSources();
+    REQUIRE(sources);
+    REQUIRE(sources->back().document);
+    CHECK(sources->back().document->sheet == document->sheet);
+    REQUIRE(owner.close());
+  }
+}
+
+TEST_CASE("frame property range and noncanonical RGB boolean payloads remain typed admission errors") {
+  for (unsigned forgery = 0; forgery < 3; ++forgery) {
+    auto document = parsePssDocument("ScrollArea{frame-title-background:#000000;frame-ends-underline:false;}");
+    REQUIRE(document);
+
+    if (forgery == 0) {
+      document->declarations[0].property = static_cast<PssProperty>(PSS_PROPERTY_COUNT);
+    } else if (forgery == 1) {
+      document->declarations[0].value.boolean = true;
+    } else {
+      document->declarations[1].value.color = {1, 2, 3};
+    }
+
+    auto owner = ui::scene(ui::label("body"));
+    owner | ui::style(*document);
+    const auto result = owner.prepareChecked();
+    REQUIRE_FALSE(result);
+    REQUIRE(result.error().pss);
+    CHECK(result.error().pss->code == PssErrorCode::INVALID_VALUE);
+    CHECK(treeCause(result.error(), TreeError::INVALID_ARGUMENT));
+  }
+}

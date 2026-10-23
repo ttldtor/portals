@@ -143,7 +143,7 @@ std::expected<void, PssError> validateStyleDocument(const PssDocument &document)
       const auto &declaration = document.declarations[index];
 
       if (declaration.ruleIndex != ruleIndex || declaration.property < PssProperty::FOREGROUND ||
-          declaration.property > PssProperty::MIN_WIDTH) {
+          static_cast<std::size_t>(declaration.property) >= PSS_PROPERTY_COUNT) {
         return invalid(declaration.location, "Invalid PSS declaration rule or property index");
       }
 
@@ -178,8 +178,14 @@ std::expected<void, PssError> validateStyleDocument(const PssDocument &document)
       const auto &declaration = document.declarations[index];
       const auto property = static_cast<std::size_t>(declaration.property);
       const auto &value = declaration.value;
-      const bool color =
-        declaration.property == PssProperty::FOREGROUND || declaration.property == PssProperty::BACKGROUND;
+      const bool color = declaration.property == PssProperty::FOREGROUND ||
+                         declaration.property == PssProperty::BACKGROUND ||
+                         declaration.property == PssProperty::FRAME_LINE_FOREGROUND ||
+                         declaration.property == PssProperty::FRAME_LINE_BACKGROUND ||
+                         declaration.property == PssProperty::FRAME_TITLE_FOREGROUND ||
+                         declaration.property == PssProperty::FRAME_TITLE_BACKGROUND ||
+                         declaration.property == PssProperty::FRAME_ENDS_FOREGROUND ||
+                         declaration.property == PssProperty::FRAME_ENDS_BACKGROUND;
       const bool width = declaration.property == PssProperty::MIN_WIDTH;
 
       if ((!color && value.color != RgbColor{}) || ((color || width) && value.boolean) ||

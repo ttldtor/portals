@@ -2285,3 +2285,100 @@ TEST_CASE("frame part attributes share layered admission and preserve computed s
   take(fixture.engine.removeLayer(layer));
   CHECK_FALSE(fixture.read().frame[0].title);
 }
+
+TEST_CASE("ordinary styles preserve default parts and match state-specific frame resolution without allocation") {
+  const auto ordinary = take(parsePss("*{foreground:#123456;bold:true;min-width:7;}"
+                                      "*:focused{italic:false;}*:disabled{underline:false;}"
+                                      "*:selected{background:#456789;}*:header{bold:false;}"
+                                      "*:caret{foreground:#abcdef;}"));
+  const StyleTarget target{.type = "Widget", .id = "subject"};
+
+  for (const bool suppliedParts : {false, true}) {
+    ComputedStyle defaults;
+    defaults.normal.italic = true;
+    defaults.disabled.underline = true;
+    defaults.frame[5].ends = CellStyle{};
+
+    if (suppliedParts) {
+      for (auto &parts : defaults.frame) {
+        parts.line = CellStyle{};
+        parts.line->foreground = RED;
+        parts.line->bold = true;
+        parts.title = CellStyle{};
+        parts.title->background = GREEN;
+        parts.title->italic = true;
+        parts.ends = CellStyle{};
+        parts.ends->foreground = BLUE;
+        parts.ends->underline = true;
+      }
+    }
+
+    auto withPart = ordinary;
+    StyleRule caret;
+    caret.selector.state = StyleState::CARET;
+    caret.declarations.frameEnds.bold = defaults.frame[5].ends->bold;
+    withPart.rules.push_back(caret);
+    allocation_test::remaining = 0;
+    const auto common = resolveStyle(ordinary, target, defaults);
+    const auto resolved = resolveStyle(withPart, target, defaults);
+    allocation_test::remaining = -1;
+    CHECK(common == resolved);
+    CHECK(common.frame == defaults.frame);
+    CHECK(common.minWidth == 7);
+    CHECK_FALSE(common.header.bold);
+    CHECK_FALSE(common.focused.italic);
+    CHECK_FALSE(common.disabled.underline);
+    auto irrelevant = ordinary;
+    caret.selector.type = "Other";
+    irrelevant.rules.push_back(caret);
+    CHECK(resolveStyle(irrelevant, target, defaults) == common);
+  }
+}
+
+TEST_CASE("focused-only frame declarations keep state scope and independent layered field ranks") {
+  Fixture fixture;
+  take(fixture.engine.enableLayers());
+  take(fixture.engine.theme(foreground(RED)));
+  StyleSheet focused;
+  StyleRule title;
+  title.selector.state = StyleState::FOCUSED;
+  title.declarations.frameTitle.bold = false;
+  focused.rules.push_back(title);
+  const auto focusedLayer = take(fixture.engine.addLayer(StyleTier::APPLICATION, "focused", focused));
+  const auto before = fixture.read();
+  REQUIRE(before.frame[1].title);
+  CHECK_FALSE(before.frame[1].title->bold);
+  CHECK(before.frame[1].title->foreground == RED);
+
+  for (const std::size_t state : {0u, 2u, 3u, 4u, 5u}) {
+    CHECK_FALSE(before.frame[state].title);
+  }
+
+  auto scoped = focused;
+  scoped.scope = fixture.root.id();
+  scoped.rules[0].declarations.frameTitle.foreground = GOLD;
+  take(fixture.engine.addLayer(StyleTier::USER, "other-scope", scoped));
+  CHECK(fixture.read() == before);
+  StyleSheet application;
+  title.selector.state = StyleState::ANY;
+  title.selector.id = "subject";
+  title.declarations.frameTitle.foreground = BLUE;
+  title.declarations.frameTitle.bold = true;
+  title.declarations.frameEnds.underline = false;
+  application.rules.push_back(title);
+  take(fixture.engine.addLayer(StyleTier::APPLICATION, "specific", application));
+  const auto specific = fixture.read();
+  REQUIRE(specific.frame[1].title);
+  CHECK(specific.frame[1].title->foreground == BLUE);
+  CHECK(specific.frame[1].title->bold);
+  focused.rules[0].declarations.frameTitle.bold = false;
+  take(fixture.engine.addLayer(StyleTier::USER, "user", focused));
+  const auto user = fixture.read();
+  REQUIRE(user.frame[1].title);
+  CHECK(user.frame[1].title->foreground == BLUE);
+  CHECK_FALSE(user.frame[1].title->bold);
+  REQUIRE(user.frame[0].ends);
+  CHECK_FALSE(user.frame[0].ends->underline);
+  take(fixture.engine.removeLayer(focusedLayer));
+  CHECK(fixture.read().frame[1].title == user.frame[1].title);
+}
