@@ -990,6 +990,18 @@ struct Access {
     apply(base.statusRows, patch.statusRows);
     apply(base.contentPolicy, patch.contentPolicy);
     apply(base.spinnerInterval, patch.spinnerInterval);
+    apply(base.spinnerPreset, patch.spinnerPreset);
+    apply(base.spinnerFrames, patch.spinnerFrames);
+    apply(base.spinnerTick, patch.spinnerTick);
+    apply(base.spinnerDirection, patch.spinnerDirection);
+    apply(base.spinnerAlignment, patch.spinnerAlignment);
+    apply(base.spinnerActive, patch.spinnerActive);
+    apply(base.spinnerReducedMotion, patch.spinnerReducedMotion);
+    apply(base.spinnerLabel, patch.spinnerLabel);
+    apply(base.spinnerMaxFrames, patch.spinnerMaxFrames);
+    apply(base.spinnerMaxFrameBytes, patch.spinnerMaxFrameBytes);
+    apply(base.spinnerMaxFrameCells, patch.spinnerMaxFrameCells);
+
     apply(base.labels.loading, patch.labels.loading);
     apply(base.labels.empty, patch.labels.empty);
     apply(base.labels.error, patch.labels.error);
@@ -1681,6 +1693,51 @@ public:
     }
 
     return {};
+  }
+
+  /** @param origin Public call site retained on failure.
+   * @return Checked start; retains the current frame and arms one fresh interval during ordinary preparation.
+   */
+  std::expected<void, ManagedError> start(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, Spinner>
+  {
+    auto node = this->slot_ ? std::shared_ptr<const Node<T>>(this->slot_, &this->slot_->node) : nullptr;
+    return detail::spinnerActive(target(), std::move(node), true, origin);
+  }
+
+  /** @param origin Public call site retained on failure.
+   * @return Checked immediate token cancellation; failures enter the ordinary scene collector.
+   */
+  std::expected<void, ManagedError> stop(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, Spinner>
+  {
+    auto node = this->slot_ ? std::shared_ptr<const Node<T>>(this->slot_, &this->slot_->node) : nullptr;
+    return detail::spinnerActive(target(), std::move(node), false, origin);
+  }
+
+  /** @param value Literal UTF-8 label bytes copied inside the checked allocation boundary.
+   * @param origin Public command call site.
+   * @return Checked replacement; successful changes reset frame zero and restart its interval.
+   */
+  std::expected<void, ManagedError> label(std::string_view value,
+                                          std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, Spinner>
+  {
+    auto node = this->slot_ ? std::shared_ptr<const Node<T>>(this->slot_, &this->slot_->node) : nullptr;
+    return detail::spinnerLabel(target(), std::move(node), value, origin);
+  }
+
+  /** @param value Owning literal/format/resource expression, borrowed only for this synchronous call.
+   * @param resolver Explicit synchronous resolver, as with Ref::text; no global catalog is introduced.
+   * @param origin Public command call site retained on failure.
+   * @return Checked staged replacement with original resource/text failures collected once.
+   */
+  std::expected<void, ManagedError> label(const TextValue &value, const TextResolver &resolver = {},
+                                          std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, Spinner>
+  {
+    auto node = this->slot_ ? std::shared_ptr<const Node<T>>(this->slot_, &this->slot_->node) : nullptr;
+    return detail::spinnerLabel(target(), std::move(node), value, resolver, origin);
   }
 
   /** @param origin Operation site. @return Pure checked scope entry; already open is a no-op. */
@@ -2625,8 +2682,8 @@ public:
    * @return Consuming native primitive recipe; absent settings remain unchanged.
    */
   Description &&glyphs(PrimitiveGlyphs value) &&
-    requires(std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, ScrollArea> ||
-             std::same_as<T, ScrollBar>)
+    requires(std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, Spinner> ||
+             std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
   {
     return std::move(*this).scalarSettings({.glyphs = value});
   }
@@ -2635,8 +2692,8 @@ public:
    * @return Consuming native Border/Gauge/scroll recipe with a sparse final override.
    */
   Description &&maxPaintCells(std::size_t cells) &&
-    requires(std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, ScrollArea> ||
-             std::same_as<T, ScrollBar>)
+    requires(std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, Spinner> ||
+             std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
   {
     return std::move(*this).scalarSettings({.maxPaintCells = cells});
   }
@@ -3236,6 +3293,114 @@ public:
                                                      .paddingTop = insets.top,
                                                      .paddingRight = insets.right,
                                                      .paddingBottom = insets.bottom}});
+  }
+
+  /** @param value Owning/finite Spinner preset setting, checked at preparation.
+   * @return Consuming exact Spinner recipe; previous unrelated settings are preserved.
+   */
+  Description &&preset(SpinnerPreset value) &&
+    requires std::same_as<T, Spinner>
+  {
+    return std::move(*this).scalarSettings({.spinnerPreset = value});
+  }
+
+  /** @param value Owning/finite Spinner frames setting, checked at preparation.
+   * @return Consuming exact Spinner recipe; previous unrelated settings are preserved.
+   */
+  Description &&frames(std::string_view value) &&
+    requires std::same_as<T, Spinner>
+  {
+    return std::move(*this).scalarSettings({.spinnerFrames = std::string(value)});
+  }
+
+  /** @param value Owning/finite Spinner interval setting, checked at preparation.
+   * @return Consuming exact Spinner recipe; previous unrelated settings are preserved.
+   */
+  Description &&interval(SchedulerTime value) &&
+    requires std::same_as<T, Spinner>
+  {
+    return std::move(*this).scalarSettings({.spinnerTick = value});
+  }
+
+  /** @param value Owning/finite Spinner direction setting, checked at preparation.
+   * @return Consuming exact Spinner recipe; previous unrelated settings are preserved.
+   */
+  Description &&direction(SpinnerDirection value) &&
+    requires std::same_as<T, Spinner>
+  {
+    return std::move(*this).scalarSettings({.spinnerDirection = value});
+  }
+
+  /** @param value Owning/finite Spinner alignment setting, checked at preparation.
+   * @return Consuming exact Spinner recipe; previous unrelated settings are preserved.
+   */
+  Description &&alignment(LayoutAlign value) &&
+    requires std::same_as<T, Spinner>
+  {
+    return std::move(*this).scalarSettings({.spinnerAlignment = value});
+  }
+
+  /** @param value Owning/finite Spinner active setting, checked at preparation.
+   * @return Consuming exact Spinner recipe; previous unrelated settings are preserved.
+   */
+  Description &&active(bool value) &&
+    requires std::same_as<T, Spinner>
+  {
+    return std::move(*this).scalarSettings({.spinnerActive = value});
+  }
+
+  /** @param value Owning/finite Spinner reducedMotion setting, checked at preparation.
+   * @return Consuming exact Spinner recipe; previous unrelated settings are preserved.
+   */
+  Description &&reducedMotion(bool value) &&
+    requires std::same_as<T, Spinner>
+  {
+    return std::move(*this).scalarSettings({.spinnerReducedMotion = value});
+  }
+
+  /** @param value Owning/finite Spinner label setting, checked at preparation.
+   * @return Consuming exact Spinner recipe; previous unrelated settings are preserved.
+   */
+  Description &&label(std::string_view value) &&
+    requires std::same_as<T, Spinner>
+  {
+    return std::move(*this).label(TextValue(value));
+  }
+
+  /** @param value Owning literal/format/resource expression resolved at construction.
+   * @return Consuming exact Spinner recipe with a staged label.
+   */
+  Description &&label(TextValue value) &&
+    requires std::same_as<T, Spinner>
+  {
+    return std::move(*this).scalarSettings({.spinnerLabel = std::move(value)});
+  }
+
+  /** @param value Owning/finite Spinner maxFrames setting, checked at preparation.
+   * @return Consuming exact Spinner recipe; previous unrelated settings are preserved.
+   */
+  Description &&maxFrames(std::size_t value) &&
+    requires std::same_as<T, Spinner>
+  {
+    return std::move(*this).scalarSettings({.spinnerMaxFrames = value});
+  }
+
+  /** @param value Owning/finite Spinner maxFrameBytes setting, checked at preparation.
+   * @return Consuming exact Spinner recipe; previous unrelated settings are preserved.
+   */
+  Description &&maxFrameBytes(std::size_t value) &&
+    requires std::same_as<T, Spinner>
+  {
+    return std::move(*this).scalarSettings({.spinnerMaxFrameBytes = value});
+  }
+
+  /** @param value Owning/finite Spinner maxFrameCells setting, checked at preparation.
+   * @return Consuming exact Spinner recipe; previous unrelated settings are preserved.
+   */
+  Description &&maxFrameCells(std::size_t value) &&
+    requires std::same_as<T, Spinner>
+  {
+    return std::move(*this).scalarSettings({.spinnerMaxFrameCells = value});
   }
 
   /** @param align Child alignment across ordinary Overlay columns.
@@ -3949,6 +4114,17 @@ private:
         patch.origins = previous.origins;
 
         const std::array fields{
+          std::pair<std::string_view, bool>{"preset", patch.spinnerPreset.has_value()},
+          std::pair<std::string_view, bool>{"frames", patch.spinnerFrames.has_value()},
+          std::pair<std::string_view, bool>{"interval", patch.spinnerTick.has_value()},
+          std::pair<std::string_view, bool>{"direction", patch.spinnerDirection.has_value()},
+          std::pair<std::string_view, bool>{"alignment", patch.spinnerAlignment.has_value()},
+          std::pair<std::string_view, bool>{"active", patch.spinnerActive.has_value()},
+          std::pair<std::string_view, bool>{"reducedMotion", patch.spinnerReducedMotion.has_value()},
+          std::pair<std::string_view, bool>{"label", patch.spinnerLabel.has_value()},
+          std::pair<std::string_view, bool>{"maxFrames", patch.spinnerMaxFrames.has_value()},
+          std::pair<std::string_view, bool>{"maxFrameBytes", patch.spinnerMaxFrameBytes.has_value()},
+          std::pair<std::string_view, bool>{"maxFrameCells", patch.spinnerMaxFrameCells.has_value()},
           std::pair<std::string_view, bool>{"chrome", patch.chrome.has_value()},
           std::pair<std::string_view, bool>{"glyphs", patch.glyphs.has_value()},
           std::pair<std::string_view, bool>{"maxPaintCells", patch.maxPaintCells.has_value()},
@@ -4428,7 +4604,7 @@ private:
           ? ControlContext(context.controls.limits())
           : context.controls;
 
-      if constexpr (std::same_as<T, Border> || std::same_as<T, Gauge>) {
+      if constexpr (std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, Spinner>) {
         auto installed = detail::ControlContextAccess::installPrimitiveSchema(controls, *state.controlType);
 
         if (!installed) {
@@ -4508,7 +4684,7 @@ private:
       if (effective->base != *state.controlType) {
         return std::unexpected(detail::controlContextError({ControlContextErrorCode::INVALID_VALUE, {}}, parent));
       }
-      if constexpr (std::same_as<T, Border> || std::same_as<T, Gauge>) {
+      if constexpr (std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, Spinner>) {
         if (effective->factoryKind != detail::ControlFactoryKind::PRIMITIVE_FALLBACK) {
           return std::unexpected(detail::controlContextError({ControlContextErrorCode::INVALID_VALUE, {}}, parent));
         }
@@ -7214,7 +7390,7 @@ std::expected<Node<T>, ManagedError> mount(ManagedScene &scene, Description<T> &
   }
 
   if (detail::ControlContextAccess::hasUserConfiguration(controls)) {
-    for (const auto name : {"Border", "Gauge"}) {
+    for (const auto name : {"Border", "Gauge", "Spinner"}) {
       auto installed = detail::ControlContextAccess::installPrimitiveSchema(controls, name);
 
       if (!installed) {
@@ -7798,8 +7974,8 @@ struct PrimitiveDecorationModifier {
    * @return Recipe staging the same settings as the supported compact methods.
    */
   template <class T>
-    requires(std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, ScrollArea> ||
-             std::same_as<T, ScrollBar>)
+    requires(std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, Spinner> ||
+             std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
   friend Description<T> operator|(Description<T> &&description, PrimitiveDecorationModifier modifier) {
     if (modifier.glyphs) {
       (void)std::move(description).glyphs(*modifier.glyphs);
@@ -9059,6 +9235,164 @@ inline ObservedFramedModifier framed(Ref<Border> reference, std::string_view pat
   return {std::move(reference), framed(pattern, title)};
 }
 
+/** @brief Owning finite Spinner stage; it borrows no widget or scheduler. */
+struct SpinnerModifier {
+  ControlSettings patch; ///< Sparse checked indicator configuration.
+
+  /** @param description Consumed exact Spinner recipe.
+   * @param modifier Owning sparse frame/animation patch.
+   * @return Recipe using the same checked methods as fluent spelling.
+   */
+  friend Description<Spinner> operator|(Description<Spinner> &&description, SpinnerModifier modifier) {
+    if (modifier.patch.spinnerPreset) {
+      (void)std::move(description).preset(*modifier.patch.spinnerPreset);
+    }
+    if (modifier.patch.spinnerFrames) {
+      (void)std::move(description).frames(*modifier.patch.spinnerFrames);
+    }
+    if (modifier.patch.spinnerTick) {
+      (void)std::move(description).interval(*modifier.patch.spinnerTick);
+    }
+    if (modifier.patch.spinnerDirection) {
+      (void)std::move(description).direction(*modifier.patch.spinnerDirection);
+    }
+    if (modifier.patch.spinnerAlignment) {
+      (void)std::move(description).alignment(*modifier.patch.spinnerAlignment);
+    }
+    if (modifier.patch.spinnerActive) {
+      (void)std::move(description).active(*modifier.patch.spinnerActive);
+    }
+    if (modifier.patch.spinnerReducedMotion) {
+      (void)std::move(description).reducedMotion(*modifier.patch.spinnerReducedMotion);
+    }
+    if (modifier.patch.spinnerLabel) {
+      (void)std::move(description).label(*modifier.patch.spinnerLabel);
+    }
+    if (modifier.patch.spinnerMaxFrames) {
+      (void)std::move(description).maxFrames(*modifier.patch.spinnerMaxFrames);
+    }
+    if (modifier.patch.spinnerMaxFrameBytes) {
+      (void)std::move(description).maxFrameBytes(*modifier.patch.spinnerMaxFrameBytes);
+    }
+    if (modifier.patch.spinnerMaxFrameCells) {
+      (void)std::move(description).maxFrameCells(*modifier.patch.spinnerMaxFrameCells);
+    }
+    return std::move(description);
+  }
+};
+
+/** @param value Finite owning Spinner preset setting, checked at preparation.
+ * @return Exact Spinner configuration stage.
+ */
+inline SpinnerModifier preset(SpinnerPreset value) {
+  return {{.spinnerPreset = value}};
+}
+
+/** @param value Finite owning Spinner frames setting, checked at preparation.
+ * @return Exact Spinner configuration stage.
+ */
+inline SpinnerModifier frames(std::string_view value) {
+  return {{.spinnerFrames = std::string(value)}};
+}
+
+/** @param value Finite owning Spinner interval setting, checked at preparation.
+ * @return Exact Spinner configuration stage.
+ */
+inline SpinnerModifier interval(SchedulerTime value) {
+  return {{.spinnerTick = value}};
+}
+
+/** @param value Finite owning Spinner direction setting, checked at preparation.
+ * @return Exact Spinner configuration stage.
+ */
+inline SpinnerModifier direction(SpinnerDirection value) {
+  return {{.spinnerDirection = value}};
+}
+
+/** @param value Finite owning Spinner alignment setting, checked at preparation.
+ * @return Exact Spinner configuration stage.
+ */
+inline SpinnerModifier alignment(LayoutAlign value) {
+  return {{.spinnerAlignment = value}};
+}
+
+/** @param value Finite owning Spinner active setting, checked at preparation.
+ * @return Exact Spinner configuration stage.
+ */
+inline SpinnerModifier active(bool value) {
+  return {{.spinnerActive = value}};
+}
+
+/** @param value Finite owning Spinner reducedMotion setting, checked at preparation.
+ * @return Exact Spinner configuration stage.
+ */
+inline SpinnerModifier reducedMotion(bool value) {
+  return {{.spinnerReducedMotion = value}};
+}
+
+/** @param value Finite owning Spinner label setting, checked at preparation.
+ * @return Exact Spinner configuration stage.
+ */
+inline SpinnerModifier spinnerLabel(TextValue value) {
+  return {{.spinnerLabel = std::move(value)}};
+}
+
+/** @param value UTF-8 label bytes copied by this stage.
+ * @return Exact Spinner label stage; ui::label remains the Label factory.
+ */
+inline SpinnerModifier spinnerLabel(std::string_view value) {
+  return spinnerLabel(TextValue(value));
+}
+
+/** @param value Finite owning Spinner maxFrames setting, checked at preparation.
+ * @return Exact Spinner configuration stage.
+ */
+inline SpinnerModifier maxFrames(std::size_t value) {
+  return {{.spinnerMaxFrames = value}};
+}
+
+/** @param value Finite owning Spinner maxFrameBytes setting, checked at preparation.
+ * @return Exact Spinner configuration stage.
+ */
+inline SpinnerModifier maxFrameBytes(std::size_t value) {
+  return {{.spinnerMaxFrameBytes = value}};
+}
+
+/** @param value Finite owning Spinner maxFrameCells setting, checked at preparation.
+ * @return Exact Spinner configuration stage.
+ */
+inline SpinnerModifier maxFrameCells(std::size_t value) {
+  return {{.spinnerMaxFrameCells = value}};
+}
+
+/** @param options Owning finite single-row frames and animation options.
+ * @param style Manual active/dim appearances beneath themes.
+ * @param policy Existing owning size constraints.
+ * @param resolver Optional synchronous label localization adapter, retained only until mounting.
+ * @return Single-use retained indicator recipe; animation uses the receiving scene's scheduler.
+ */
+inline Description<Spinner> spinner(SpinnerOptions options = {}, ControlStyle style = {}, SizePolicy policy = {},
+                                    TextResolver resolver = {}) {
+  auto description =
+    detail::Access::cold<Spinner>([options = std::move(options), style, policy, resolver = std::move(resolver)](
+                                    ManagedScene &scene, Node<Widget> parent, detail::MountContext &context) {
+      auto effective = detail::controlSpinnerOptions(*context.controlSettings, options);
+      return scene.spinner(parent, std::move(effective), style, policy, resolver);
+    });
+  return detail::Access::configuredControl(std::move(description), "Spinner");
+}
+
+/** @param reference Empty shared observer, published only after complete mount.
+ * @param options Owning finite animation configuration.
+ * @param style Manual active/dim appearances beneath theme rules.
+ * @param policy Existing size constraints.
+ * @return Observed retained indicator recipe using the existing scheduler.
+ */
+inline Description<Spinner> spinner(Ref<Spinner> reference, SpinnerOptions options = {}, ControlStyle style = {},
+                                    SizePolicy policy = {}) {
+  return spinner(std::move(options), style, policy).reference(std::move(reference));
+}
+
 /** @param value Finite value in the inclusive configured range; checked at mount.
  * @param options Owning finite bounds, intrinsic width, glyph mode and allocated-area paint cap.
  * @param style Owning manual appearances beneath theme declarations.
@@ -9329,7 +9663,7 @@ Scene scene(Factory factory, SceneOptions options = {}, std::source_location ori
       }
 
       if (detail::ControlContextAccess::hasUserConfiguration(effectiveControls)) {
-        for (const auto name : {"Border", "Gauge"}) {
+        for (const auto name : {"Border", "Gauge", "Spinner"}) {
           installed = detail::ControlContextAccess::installPrimitiveSchema(effectiveControls, name);
 
           if (!installed) {

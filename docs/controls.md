@@ -25,6 +25,14 @@ and frame errors. Equal text/style/value synchronization is a no-op; changed tex
 or width policy invalidates layout, while style, focus and checked state invalidate
 paint. `GraphemeText::from` reports text errors before widget construction.
 
+## Loading indicators {#spinner-control}
+
+`ui::spinner()` creates an animated, scene-owned `Spinner`. Presets, custom
+frames, an optional label, direction and reduced motion can be set with recipe
+methods or pipe modifiers. `ui::Ref<Spinner>` exposes `start()`, `stop()` and
+`label(...)`; callers do not own timers. See the complete program, resource
+syntax, styling and lifetime rules in [Loading indicators](loading-indicators.md).
+
 ## Protected password input {#password-control}
 
 `Password` is a separate `SizedWidget` for a protected single-line value. Include

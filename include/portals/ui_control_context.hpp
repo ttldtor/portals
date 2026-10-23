@@ -11,6 +11,7 @@
 #include <portals/password.hpp>
 #include <portals/primitives.hpp>
 #include <portals/scroll_options.hpp>
+#include <portals/spinner.hpp>
 #include <portals/text_value.hpp>
 #include <portals/theme_selector.hpp>
 #include <portals/toast.hpp>
@@ -405,7 +406,18 @@ struct ControlSettings {
   ControlThemeSelectorSettings themeSelector{}; ///< Explicit code-bound native selector view settings.
   ControlThemeCatalogSettings themeCatalog{};   ///< Constructor-only real owning catalog scalars.
   ControlSecureSettings securePolicy{}; ///< Password native security policy; appended for aggregate compatibility.
-  std::optional<PasswordPastePolicy> pastePolicy{}; ///< Password explicit inbound paste admission.
+  std::optional<PasswordPastePolicy> pastePolicy{};   ///< Password explicit inbound paste admission.
+  std::optional<SpinnerPreset> spinnerPreset{};       ///< Sparse Spinner preset setting.
+  std::optional<std::string> spinnerFrames{};         ///< Sparse Spinner frames setting.
+  std::optional<SchedulerTime> spinnerTick{};         ///< Sparse Spinner interval setting.
+  std::optional<SpinnerDirection> spinnerDirection{}; ///< Sparse Spinner direction setting.
+  std::optional<LayoutAlign> spinnerAlignment{};      ///< Sparse Spinner alignment setting.
+  std::optional<bool> spinnerActive{};                ///< Sparse Spinner active setting.
+  std::optional<bool> spinnerReducedMotion{};         ///< Sparse Spinner reducedMotion setting.
+  std::optional<TextValue> spinnerLabel{};            ///< Sparse Spinner label setting.
+  std::optional<std::size_t> spinnerMaxFrames{};      ///< Sparse Spinner maxFrames setting.
+  std::optional<std::size_t> spinnerMaxFrameBytes{};  ///< Sparse Spinner maxFrameBytes setting.
+  std::optional<std::size_t> spinnerMaxFrameCells{};  ///< Sparse Spinner maxFrameCells setting.
 };
 
 /** @brief Finite context bounds, checked before publication/materialization beyond each bound. */

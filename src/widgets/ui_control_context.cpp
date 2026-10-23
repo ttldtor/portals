@@ -57,6 +57,9 @@ constexpr std::array<std::string_view, 3> DIALOG_PLACEMENT_NAMES{"CENTER", "BELO
 constexpr std::array<std::string_view, 2> CHART_MODE_NAMES{"LINE", "CANDLES"};
 constexpr std::array<std::string_view, 2> CHART_GLYPH_NAMES{"ASCII", "BOX_DRAWING"};
 constexpr std::array<std::string_view, 2> AXIS_NAMES{"HORIZONTAL", "VERTICAL"};
+constexpr std::array<std::string_view, 4> SPINNER_PRESET_NAMES{"DOTS", "LINE", "BRAILLE", "BAR_BOUNCE"};
+constexpr std::array<std::string_view, 2> SPINNER_DIRECTION_NAMES{"FORWARD", "REVERSE"};
+constexpr std::array<std::string_view, 3> SPINNER_ALIGN_NAMES{"START", "CENTER", "END"};
 constexpr std::array<std::string_view, 1> PLACEHOLDER_ALIASES{"placeHolder"};
 constexpr std::array<ControlPropertyDescriptor, detail::CONTROL_PROPERTY_COUNT> PROPERTIES{
   {{"text", Kind::TEXT, 1, {}},
@@ -251,7 +254,18 @@ constexpr std::array<ControlPropertyDescriptor, detail::CONTROL_PROPERTY_COUNT> 
    {"frame.titleDecoration", Kind::ENUMERATION, 2, TITLE_DECORATION_NAMES},
    {"frame.customTitleDecoration.enabled", Kind::BOOLEAN, 3, {}},
    {"frame.customTitleDecoration.prefix", Kind::LITERAL_STRING, 3, {}},
-   {"frame.customTitleDecoration.suffix", Kind::LITERAL_STRING, 3, {}}}};
+   {"frame.customTitleDecoration.suffix", Kind::LITERAL_STRING, 3, {}},
+   {"preset", Kind::ENUMERATION, 1, SPINNER_PRESET_NAMES},
+   {"frames", Kind::LITERAL_STRING, 1, {}},
+   {"interval", Kind::UNSIGNED_INTEGER, 1, {}},
+   {"direction", Kind::ENUMERATION, 1, SPINNER_DIRECTION_NAMES},
+   {"alignment", Kind::ENUMERATION, 1, SPINNER_ALIGN_NAMES},
+   {"active", Kind::BOOLEAN, 1, {}},
+   {"reducedMotion", Kind::BOOLEAN, 1, {}},
+   {"label", Kind::TEXT, 1, {}},
+   {"maxFrames", Kind::UNSIGNED_INTEGER, 1, {}},
+   {"maxFrameBytes", Kind::UNSIGNED_INTEGER, 1, {}},
+   {"maxFrameCells", Kind::UNSIGNED_INTEGER, 1, {}}}};
 static_assert(std::ranges::all_of(PROPERTIES, [](const auto &property) {
   return !property.path.empty();
 }));
@@ -273,6 +287,7 @@ constexpr Mask PASSWORD_MASK =
 constexpr Mask BUTTON_MASK = SIZE_MASK | TEXT_MASK | propertyMask(37);
 constexpr Mask BORDER_MASK = SIZE_MASK | propertyMask(38, 39);
 constexpr Mask GAUGE_MASK = BORDER_MASK | propertyMask(40, 41, 42, 43);
+constexpr Mask SPINNER_MASK = SIZE_MASK | propertyMask(39, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203);
 constexpr Mask SCROLL_COMMON_MASK = SIZE_MASK | propertyMask(8, 38, 39, 44, 45, 46, 47, 48);
 constexpr Mask SCROLL_AREA_MASK = SCROLL_COMMON_MASK | propertyMask(49, 50, 51, 53, 54, 55);
 constexpr Mask SCROLL_BAR_MASK = SCROLL_COMMON_MASK | propertyMask(52);
@@ -297,7 +312,7 @@ constexpr Mask THEME_CATALOG_MASK =
 constexpr Mask POSITIVE_UNSIGNED_MASK =
   propertyMask(3, 17, 18, 26, 27, 28, PAINT_LIMIT_PROPERTY, 45, 55, 59, 71, 72, 73, 83, 90, 100, 110, 111, 112, 113,
                114, 115, 116, 124, 125, 126, 127, 128, 129, 130, 137, 138, 139, 140, 143, 144, 145, 146, 147, 148, 149,
-               150, 151, 155, 156, 157, 158, 172);
+               150, 151, 155, 156, 157, 158, 172, 195, 201, 202, 203);
 constexpr Mask CHECK_MASK = SIZE_MASK | TEXT_MASK | propertyMask(5, 6);
 constexpr Mask LAYOUT_MASK = SIZE_MASK | propertyMask(4, 22, 23, 24, 25, 30, 31, 32);
 constexpr Mask EDIT_MASK = SIZE_MASK | TEXT_MASK | propertyMask(7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 33, 34, 35, 36);
@@ -337,6 +352,10 @@ constexpr auto BORDER_SCHEMA =
 constexpr auto GAUGE_SCHEMA =
   withFrame(std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[38], PROPERTIES[39], PROPERTIES[40],
                            PROPERTIES[41], PROPERTIES[42], PROPERTIES[43]}));
+constexpr auto SPINNER_SCHEMA =
+  withFrame(std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[39], PROPERTIES[193],
+                           PROPERTIES[194], PROPERTIES[195], PROPERTIES[196], PROPERTIES[197], PROPERTIES[198],
+                           PROPERTIES[199], PROPERTIES[200], PROPERTIES[201], PROPERTIES[202], PROPERTIES[203]}));
 constexpr auto CHECK_SCHEMA =
   withFrame(std::to_array({PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[5], PROPERTIES[6]}));
 constexpr auto SCROLL_AREA_SCHEMA = withFrame(std::to_array(
@@ -439,6 +458,7 @@ static_assert(schemaMatchesMask(TEXT_SCHEMA, TEXT_MASK | SIZE_MASK));
 static_assert(schemaMatchesMask(BUTTON_SCHEMA, BUTTON_MASK));
 static_assert(schemaMatchesMask(BORDER_SCHEMA, BORDER_MASK));
 static_assert(schemaMatchesMask(GAUGE_SCHEMA, GAUGE_MASK));
+static_assert(schemaMatchesMask(SPINNER_SCHEMA, SPINNER_MASK));
 static_assert(schemaMatchesMask(CHECK_SCHEMA, CHECK_MASK));
 static_assert(schemaMatchesMask(SCROLL_AREA_SCHEMA, SCROLL_AREA_MASK));
 static_assert(schemaMatchesMask(SCROLL_BAR_SCHEMA, SCROLL_BAR_MASK));
@@ -749,7 +769,18 @@ ControlContextError exceptionError() noexcept {
   X(frame.titleDecoration, 189)                                                                                        \
   X(frame.customTitleDecoration.enabled, 190)                                                                          \
   X(frame.customTitleDecoration.prefix, 191)                                                                           \
-  X(frame.customTitleDecoration.suffix, 192)
+  X(frame.customTitleDecoration.suffix, 192)                                                                           \
+  X(spinnerPreset, 193)                                                                                                \
+  X(spinnerFrames, 194)                                                                                                \
+  X(spinnerTick, 195)                                                                                                  \
+  X(spinnerDirection, 196)                                                                                             \
+  X(spinnerAlignment, 197)                                                                                             \
+  X(spinnerActive, 198)                                                                                                \
+  X(spinnerReducedMotion, 199)                                                                                         \
+  X(spinnerLabel, 200)                                                                                                 \
+  X(spinnerMaxFrames, 201)                                                                                             \
+  X(spinnerMaxFrameBytes, 202)                                                                                         \
+  X(spinnerMaxFrameCells, 203)
 
 #define LEAF_INDEX(field, index) index,
 constexpr auto LEAF_INDICES = std::to_array<std::size_t>({PORTALS_CONTROL_LEAVES(LEAF_INDEX)});
@@ -850,6 +881,10 @@ template <class T> bool validValue(const T &value, std::size_t index) noexcept {
            value == ScrollPlacement::ON_FRAME;
   } else if constexpr (std::same_as<T, ButtonChrome>) {
     return value == ButtonChrome::BRACKETS || value == ButtonChrome::NONE;
+  } else if constexpr (std::same_as<T, SpinnerPreset>) {
+    return value >= SpinnerPreset::DOTS && value <= SpinnerPreset::BAR_BOUNCE;
+  } else if constexpr (std::same_as<T, SpinnerDirection>) {
+    return value == SpinnerDirection::FORWARD || value == SpinnerDirection::REVERSE;
   } else if constexpr (std::same_as<T, FramePattern>) {
     return value == FramePattern::SINGLE || value == FramePattern::ROUNDED || value == FramePattern::DOUBLE ||
            value == FramePattern::HEAVY || value == FramePattern::ASCII;
@@ -967,6 +1002,10 @@ std::expected<void, ControlContextError> validateSettings(const ControlSettings 
     if (settings.securePolicy.encryptWhileIdle == false) {
       return rejected("securePolicy.encryptWhileIdle");
     }
+  }
+
+  if (mask == SPINNER_MASK && settings.spinnerAlignment == LayoutAlign::STRETCH) {
+    return std::unexpected(error(Code::INVALID_VALUE, type, "alignment", sourceFor(settings, "alignment")));
   }
 
   if (mask == MESSAGE_MASK) {
@@ -1194,7 +1233,7 @@ struct ControlContext::Data {
   };
 
   std::optional<Schema> fallback;
-  std::array<std::optional<Schema>, 2> primitiveFallbacks;
+  std::array<std::optional<Schema>, 3> primitiveFallbacks;
   std::array<std::optional<Schema>, 2> scrollFallbacks;
   std::optional<Schema> overlayFallback;
   std::optional<Schema> dataStateFallback;
@@ -1518,6 +1557,9 @@ std::span<const ControlPropertyDescriptor> controlPropertySchema(std::string_vie
   if (type == "Gauge") {
     return GAUGE_SCHEMA;
   }
+  if (type == "Spinner") {
+    return SPINNER_SCHEMA;
+  }
 
   if (type == "ScrollArea") {
     return SCROLL_AREA_SCHEMA;
@@ -1645,7 +1687,7 @@ std::expected<void, ControlContextError> ControlContextAccess::installPrimitiveS
     return std::unexpected(*context.failure_);
   }
 
-  if (name != "Border" && name != "Gauge") {
+  if (name != "Border" && name != "Gauge" && name != "Spinner") {
     return std::unexpected(ControlContextError{Code::UNKNOWN_TYPE, {}});
   }
 
@@ -1658,9 +1700,9 @@ std::expected<void, ControlContextError> ControlContextAccess::installPrimitiveS
       context.data_ ? std::make_shared<ControlContext::Data>(*context.data_) : std::make_shared<ControlContext::Data>();
     ControlContext::Data::Schema schema;
     schema.name = name;
-    schema.mask = name == "Border" ? BORDER_MASK : GAUGE_MASK;
+    schema.mask = name == "Border" ? BORDER_MASK : name == "Gauge" ? GAUGE_MASK : SPINNER_MASK;
     schema.factoryKind = ControlFactoryKind::PRIMITIVE_FALLBACK;
-    next->primitiveFallbacks[name == "Border" ? 0 : 1] = schema;
+    next->primitiveFallbacks[name == "Border" ? 0 : name == "Gauge" ? 1 : 2] = schema;
     context.data_ = std::move(next);
     context.prepared_ = false;
 

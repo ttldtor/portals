@@ -11,7 +11,7 @@
 
 namespace portals::ui::detail {
 
-inline constexpr std::size_t CONTROL_PROPERTY_COUNT = 193; ///< Complete canonical scalar vocabulary size.
+inline constexpr std::size_t CONTROL_PROPERTY_COUNT = 204; ///< Complete canonical scalar vocabulary size.
 inline constexpr std::size_t CONTROL_PRESENCE_BITS =
   CONTROL_PROPERTY_COUNT < 32 ? 32 : CONTROL_PROPERTY_COUNT;        ///< Retain all legacy mask bits.
 using ControlPropertyPresence = std::bitset<CONTROL_PRESENCE_BITS>; ///< Allocation-free internal leaf presence.
@@ -157,6 +157,11 @@ BorderOptions controlBorderOptions(const ControlSettings &settings, BorderOption
  * @return Owning effective options, checked together with the effective value by Gauge::validate.
  */
 GaugeOptions controlGaugeOptions(const ControlSettings &settings, GaugeOptions options) noexcept;
+/** @param settings Sparse validated indicator leaves.
+ * @param options Actual owning constructor configuration.
+ * @return Owning effective configuration; absent leaves preserve the receiving options.
+ */
+SpinnerOptions controlSpinnerOptions(const ControlSettings &settings, SpinnerOptions options);
 
 /** @param settings Validated sparse area literals, including optional one-cell frame leaves.
  * @param options Actual receiving constructor options; absent leaves retain their values.

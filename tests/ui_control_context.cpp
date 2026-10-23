@@ -1518,8 +1518,8 @@ TEST_CASE("actual catalog fixed ancestry retains sparse precedence origins and u
   fails(controls.validate(), Code::INHERITANCE_LIMIT);
 }
 
-TEST_CASE("Shared frame schema appends stable leaves within four presence words") {
-  static_assert(ui::detail::CONTROL_PROPERTY_COUNT == 193);
+TEST_CASE("Shared frame and Spinner schemas append stable leaves within four presence words") {
+  static_assert(ui::detail::CONTROL_PROPERTY_COUNT == 204);
   static_assert((ui::detail::CONTROL_PRESENCE_BITS + 63) / 64 == 4);
   ControlSettings patch;
   patch.frame.enabled = true;

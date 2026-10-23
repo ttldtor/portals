@@ -13,6 +13,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
   runtime, typed and compile-time stylesheet paths. Existing literal titles
   keep their default appearance.
 
+- `Spinner` and `ui::spinner` provide managed loading indicators with built-in
+  presets, owning custom frames, labels, direction and reduced motion. Ref
+  operations start, stop and relabel an indicator without manual timer ownership.
+  Loaded scenes expose the same settings. Hidden, clipped and disabled indicators
+  stop scheduling frames until they become eligible again.
+
 - Choice dialogs accept custom declarative content and six standard button sets
   through `ui::dialog`, with configurable captions, order and safe defaults.
   Existing message-box helpers remain available. An optional `.closeButton()`

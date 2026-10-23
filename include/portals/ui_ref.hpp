@@ -146,6 +146,37 @@ DialogCommandResult dialogCommand(const std::shared_ptr<RefTarget> &target, bool
 /** @brief Explicit owning synchronous localization adapter; no global locale or resource storage. */
 using TextResolver = std::function<std::expected<std::string, TextResourceError>(std::string_view)>;
 
+namespace detail {
+/** @param target Original weak observation, checked for immutable affinity before mutable slot access.
+ * @param node Aliasing slot owner; node value is read only after affinity admission.
+ * @param active Start or stop selection; no new runtime is created.
+ * @param origin Public command call site.
+ * @return Checked result, with owned failures collected by the existing short-error path.
+ */
+std::expected<void, ManagedError> spinnerActive(std::shared_ptr<RefTarget> target,
+                                                std::shared_ptr<const Node<Spinner>> node, bool active,
+                                                std::source_location origin);
+/** @param target Original weak observation with immutable UI affinity.
+ * @param node Aliasing typed identity, read only after admission.
+ * @param value Borrowed literal bytes copied during the checked call.
+ * @param origin Public command call site retained by the existing collector.
+ * @return Checked label replacement; resets frame zero and restarts one interval on ordinary preparation.
+ */
+std::expected<void, ManagedError> spinnerLabel(std::shared_ptr<RefTarget> target,
+                                               std::shared_ptr<const Node<Spinner>> node, std::string_view value,
+                                               std::source_location origin);
+/** @param target Original weak observation.
+ * @param node Aliasing typed identity, read only after UI affinity admission.
+ * @param value Borrowed owning expression, staged before publication.
+ * @param resolver Explicit synchronous localization adapter, never retained after this call.
+ * @param origin Public command call site retained in diagnostics.
+ * @return Checked staged replacement with original resource/text error; frame zero restarts on success.
+ */
+std::expected<void, ManagedError> spinnerLabel(std::shared_ptr<RefTarget> target,
+                                               std::shared_ptr<const Node<Spinner>> node, const TextValue &value,
+                                               const TextResolver &resolver, std::source_location origin);
+} // namespace detail
+
 /** @brief Copyable read-only source observing one caption, visible draft or accepted editor model.
  * Construction and copying do not read, subscribe or retain the scene/widget. Operations are UI-affine;
  * an unpublished source returns CLOSED, and removal preserves the original stale node identity.

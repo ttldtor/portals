@@ -7,6 +7,46 @@
 #include <utf8proc.h>
 
 namespace portals::ui::detail {
+SpinnerOptions controlSpinnerOptions(const ControlSettings &settings, SpinnerOptions options) {
+  if (settings.spinnerPreset) {
+    options.preset = *settings.spinnerPreset;
+  }
+  if (settings.spinnerFrames) {
+    options.frames = *settings.spinnerFrames;
+  }
+  if (settings.spinnerTick) {
+    options.interval = *settings.spinnerTick;
+  }
+  if (settings.spinnerDirection) {
+    options.direction = *settings.spinnerDirection;
+  }
+  if (settings.spinnerAlignment) {
+    options.alignment = *settings.spinnerAlignment;
+  }
+  if (settings.spinnerActive) {
+    options.active = *settings.spinnerActive;
+  }
+  if (settings.spinnerReducedMotion) {
+    options.reducedMotion = *settings.spinnerReducedMotion;
+  }
+  if (settings.spinnerLabel) {
+    options.label = *settings.spinnerLabel;
+  }
+  if (settings.spinnerMaxFrames) {
+    options.maxFrames = *settings.spinnerMaxFrames;
+  }
+  if (settings.spinnerMaxFrameBytes) {
+    options.maxFrameBytes = *settings.spinnerMaxFrameBytes;
+  }
+  if (settings.spinnerMaxFrameCells) {
+    options.maxFrameCells = *settings.spinnerMaxFrameCells;
+  }
+  if (settings.maxPaintCells) {
+    options.maxPaintCells = *settings.maxPaintCells;
+  }
+  return options;
+}
+
 namespace {
 template <class T> void applySetting(T &target, const std::optional<T> &setting) {
   if (setting) {

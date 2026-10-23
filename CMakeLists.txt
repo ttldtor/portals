@@ -64,7 +64,7 @@ target_sources(portals_core PRIVATE src/input_shortcut.cpp)
 target_sources(portals_core PRIVATE src/widgets/ui_style.cpp)
 target_sources(portals_core PRIVATE src/widgets/ui_app.cpp)
 
-target_sources(portals_core PRIVATE src/widgets/primitives.cpp src/widgets/data_presentation.cpp)
+target_sources(portals_core PRIVATE src/widgets/primitives.cpp src/widgets/data_presentation.cpp src/widgets/spinner.cpp)
 
 target_sources(portals_core PRIVATE src/views/scroll_controller.cpp)
 
@@ -357,6 +357,10 @@ if(PORTALS_BUILD_TESTS)
   add_executable(portals_docs_scroll_controls docs/examples/guide_scroll_controls.cpp)
   target_link_libraries(portals_docs_scroll_controls PRIVATE portals::core)
   portals_enable_warnings(portals_docs_scroll_controls)
+
+  add_executable(portals_docs_loading_indicators docs/examples/guide_loading_indicators.cpp)
+  target_link_libraries(portals_docs_loading_indicators PRIVATE portals::core)
+  portals_enable_warnings(portals_docs_loading_indicators)
   add_executable(portals_docs_nested_scroll docs/examples/guide_nested_scroll.cpp)
   target_link_libraries(portals_docs_nested_scroll PRIVATE portals::core)
   portals_enable_warnings(portals_docs_nested_scroll)
@@ -788,6 +792,13 @@ if(PORTALS_BUILD_TESTS)
   portals_enable_warnings(portals_ui_primitives)
   add_test(NAME portals.ui-primitives COMMAND portals_ui_primitives)
   set_tests_properties(portals.ui-primitives PROPERTIES TIMEOUT 20)
+
+  add_executable(portals_spinner tests/spinner.cpp)
+  target_include_directories(portals_spinner SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  target_link_libraries(portals_spinner PRIVATE portals::core)
+  portals_enable_warnings(portals_spinner)
+  add_test(NAME portals.spinner COMMAND portals_spinner)
+  set_tests_properties(portals.spinner PROPERTIES TIMEOUT 30)
 
   add_executable(portals_ui_frames tests/ui_frames.cpp)
   target_include_directories(portals_ui_frames SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")

@@ -420,6 +420,7 @@ ManagedScene::~ManagedScene() {
     record->retired = true;
     record->timer = {};
   }
+  stopSpinners();
   // Router/scheduler may retain disconnected captures until their next collection.
   // Weak state handles end with this owner even while those internal borrows drain.
   lifetime_.reset();
@@ -3912,7 +3913,7 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
 }
 
 bool ManagedScene::usesPreparedLayout() const noexcept {
-  return usesGeometrySnapshot() || !dataStates_.empty() || static_cast<bool>(dialogs_) ||
+  return usesGeometrySnapshot() || !spinners_.empty() || !dataStates_.empty() || static_cast<bool>(dialogs_) ||
          static_cast<bool>(notifications_) || std::ranges::any_of(entries_, [](const auto &entry) {
            return static_cast<bool>(entry->viewPrepare);
          });
@@ -3992,7 +3993,8 @@ std::expected<void, TreeError> ManagedScene::prepareViews(Application &app, cons
     return scrollPrepared;
   }
 
-  return prepareDataStates(snapshot);
+  auto indicators = prepareSpinners();
+  return indicators ? prepareDataStates(snapshot) : indicators;
 }
 
 std::expected<bool, TreeError> ManagedScene::input(Application &app, const InputEvent &event) {
@@ -4099,6 +4101,7 @@ std::expected<void, ManagedError> ManagedScene::close() {
   retireThemeSelector();
   themeSelection_.reset();
   retireMessages();
+  stopSpinners();
   pruneDataStates();
   if (dataStateOwner_) {
     dataStateOwner_->scene = nullptr;

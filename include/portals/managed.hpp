@@ -16,6 +16,7 @@
 #include <portals/password.hpp>
 #include <portals/primitives.hpp>
 #include <portals/scroll_controls.hpp>
+#include <portals/spinner.hpp>
 #include <portals/style.hpp>
 #include <portals/style_source.hpp>
 #include <portals/text_transform.hpp>
@@ -1444,6 +1445,17 @@ public:
                                                     std::type_identity_t<ManagedViewHandler<T>> prepared = {});
 
   /// @return True while a managed virtual view requires layout-driven preparation.
+  /** @param parent Checked receiving parent in this scene.
+   * @param options Owning finite indicator configuration, validated before publication.
+   * @param style Manual active/dim defaults beneath existing theme rules.
+   * @param policy Existing size constraints.
+   * @param resolver Optional synchronous label localization adapter, never retained after mounting.
+   * @return Live indicator with node-scoped animation, or original typed setup/ownership failure.
+   */
+  std::expected<Node<Spinner>, ManagedError> spinner(Node<Widget> parent, SpinnerOptions options = {},
+                                                     ControlStyle style = {}, SizePolicy policy = {},
+                                                     SpinnerLabelResolver resolver = {});
+
   bool usesPreparedLayout() const noexcept override;
   /** @return True only while this scene owns ordinary scroll areas needing copied geometry. */
   bool usesGeometrySnapshot() const noexcept override;
@@ -1903,6 +1915,13 @@ private:
   template <class Event>
   void dispatchEditing(Node<LineEdit> node, const std::shared_ptr<EditorEventChain> &chain,
                        const std::weak_ptr<const void> &lifetime, const Event &event);
+
+  bool spinnerEligible(Node<Spinner> node) const;
+  std::expected<void, TreeError> prepareSpinners();
+  void stopSpinners() noexcept;
+  std::expected<void, TreeError> armSpinner(const std::shared_ptr<detail::SpinnerState> &record);
+  void tickSpinner(const std::shared_ptr<detail::SpinnerState> &record, std::uint64_t generation);
+  std::vector<std::weak_ptr<detail::SpinnerState>> spinners_ = std::vector<std::weak_ptr<detail::SpinnerState>>(0);
 
   struct CaptionBinding {
     Node<Control> node;

@@ -184,7 +184,7 @@ struct ResourceAccess {
   /** @brief Install CONFIGURATION-only native primitives after caller declarations and registrations. */
   static std::expected<void, ControlContextError> installPrimitives(SceneResourceRegistry &registry,
                                                                     ControlContext &controls) {
-    for (const auto name : {"Border", "Gauge"}) {
+    for (const auto name : {"Border", "Gauge", "Spinner"}) {
       if (find(registry, name) || ControlContextAccess::hasDeclaredType(controls, name)) {
         continue;
       }
@@ -203,6 +203,13 @@ struct ResourceAccess {
           },
           true);
 
+        if (!added) {
+          return std::unexpected(ControlContextError{ControlContextErrorCode::DUPLICATE_TYPE, {}});
+        }
+      } else if (std::string_view(name) == "Spinner") {
+        const auto added = registry.add<Spinner>(name, [](SceneResourceArguments arguments) {
+          return spinner(controlSpinnerOptions(arguments.settings, {}));
+        });
         if (!added) {
           return std::unexpected(ControlContextError{ControlContextErrorCode::DUPLICATE_TYPE, {}});
         }
@@ -1114,17 +1121,29 @@ private:
   }
 
   const ControlPropertyDescriptor *descriptor(std::string_view path) const {
-    for (const auto type : {"Password",      "LineEdit",
-                            "CheckBox",      "VBox",
-                            "Button",        "Border",
-                            "Gauge",         "ScrollArea",
-                            "ScrollBar",     "Overlay",
-                            "HelpView",      "KeyHints",
-                            "VirtualList",   "VirtualTable",
-                            "Chart",         "DataStateView",
-                            "OverlayHost",   "Dialog",
-                            "MessageBox",    "Notifications",
-                            "ThemeSelector", "ThemeSelectorCatalog"}) {
+    for (const auto type : {"Password",
+                            "LineEdit",
+                            "CheckBox",
+                            "VBox",
+                            "Button",
+                            "Border",
+                            "Gauge",
+                            "Spinner",
+                            "ScrollArea",
+                            "ScrollBar",
+                            "Overlay",
+                            "HelpView",
+                            "KeyHints",
+                            "VirtualList",
+                            "VirtualTable",
+                            "Chart",
+                            "DataStateView",
+                            "OverlayHost",
+                            "Dialog",
+                            "MessageBox",
+                            "Notifications",
+                            "ThemeSelector",
+                            "ThemeSelectorCatalog"}) {
       const auto schema = controlPropertySchema(type);
       const auto found = std::ranges::find(schema, path, &ControlPropertyDescriptor::path);
 
@@ -1215,6 +1234,8 @@ private:
 
       if (path == "text") {
         settings.text = std::move(value);
+      } else if (path == "label") {
+        settings.spinnerLabel = std::move(value);
       } else if (path == "placeholder") {
         settings.placeholder = std::move(value);
       } else if (path == "title") {
@@ -1274,7 +1295,9 @@ private:
       if (!parsed) {
         return std::unexpected(withProperty(parsed.error(), type, path));
       }
-      if (path == "themeCatalog.initialId.value") {
+      if (path == "frames") {
+        settings.spinnerFrames = std::move(value);
+      } else if (path == "themeCatalog.initialId.value") {
         settings.themeCatalog.initialId.value = std::move(value);
       } else if (path == "themeSelector.openingShortcut.value") {
         settings.themeSelector.openingShortcut.value = std::move(value);
@@ -1347,6 +1370,10 @@ private:
         settings.message.defaultChoice.enabled = enabled;
       } else if (path == "message.allowDestructiveDefault") {
         settings.message.allowDestructiveDefault = enabled;
+      } else if (path == "active") {
+        settings.spinnerActive = enabled;
+      } else if (path == "reducedMotion") {
+        settings.spinnerReducedMotion = enabled;
       } else if (path == "showStatus") {
         settings.showStatus = enabled;
       } else if (path == "initiallyOpen") {
@@ -1406,6 +1433,12 @@ private:
         settings.securePolicy.storage = static_cast<SecureStringStorage>(index);
       } else if (path == "pastePolicy") {
         settings.pastePolicy = static_cast<PasswordPastePolicy>(index);
+      } else if (path == "preset") {
+        settings.spinnerPreset = static_cast<SpinnerPreset>(index);
+      } else if (path == "direction") {
+        settings.spinnerDirection = static_cast<SpinnerDirection>(index);
+      } else if (path == "alignment") {
+        settings.spinnerAlignment = static_cast<LayoutAlign>(index);
       } else if (path == "state") {
         settings.state = static_cast<CheckState>(index);
       } else if (path == "cycle") {
@@ -1512,14 +1545,16 @@ private:
       return {};
     }
 
-    if (path == "keyStep" || path == "pageOverlap" || path == "spinnerInterval") {
+    if (path == "keyStep" || path == "pageOverlap" || path == "spinnerInterval" || path == "interval") {
       const auto value = capacity<std::uint64_t>();
 
       if (!value) {
         return std::unexpected(withProperty(value.error(), type, path));
       }
 
-      if (path == "spinnerInterval") {
+      if (path == "interval") {
+        settings.spinnerTick = *value;
+      } else if (path == "spinnerInterval") {
         settings.spinnerInterval = *value;
       } else if (path == "keyStep") {
         settings.keyStep = *value;
@@ -1542,7 +1577,13 @@ private:
       return std::unexpected(document_.propertyFailure(Code::INVALID_VALUE, offset, type, path));
     }
 
-    if (path == "securePolicy.maxBytes") {
+    if (path == "maxFrames") {
+      settings.spinnerMaxFrames = *value;
+    } else if (path == "maxFrameBytes") {
+      settings.spinnerMaxFrameBytes = *value;
+    } else if (path == "maxFrameCells") {
+      settings.spinnerMaxFrameCells = *value;
+    } else if (path == "securePolicy.maxBytes") {
       settings.securePolicy.maxBytes = *value;
     } else if (path == "maxLayers") {
       settings.maxLayers = *value;
@@ -2787,6 +2828,14 @@ std::expected<void, ManagedError> prepareNodes(ResourceDocument &document, const
         if (!Border::validate(detail::controlBorderOptions(settings, {}))) {
           return std::unexpected(primitiveValueFailure(*resolved, "maxPaintCells"));
         }
+      } else if (resolved->base == "Spinner") {
+        const auto valid = Spinner::validate(owner.widthPolicy(), detail::controlSpinnerOptions(settings, {}));
+        if (!valid && valid.error() == TreeError::NO_MEMORY) {
+          return std::unexpected(detail::error(owner.root(), TreeError::NO_MEMORY));
+        }
+        if (!valid) {
+          return std::unexpected(primitiveValueFailure(*resolved, "frames"));
+        }
       } else {
         const auto options = detail::controlGaugeOptions(settings, {});
         const auto value = settings.value.value_or(0);
@@ -3125,13 +3174,14 @@ std::expected<void, ManagedError> resolveSettings(ResourceDocument &document, co
     limits.max_input_bytes = std::min(limits.max_input_bytes, resourceLimits.max_input_bytes);
 
     for (const auto path : {std::string_view("text"), std::string_view("placeholder"), std::string_view("title"),
-                            std::string_view("frame.title")}) {
+                            std::string_view("frame.title"), std::string_view("label")}) {
       if (path == "title" && node.factory.kind != detail::ControlFactoryKind::DIALOG_FALLBACK) {
         continue;
       }
 
       auto &setting = path == "text"          ? node.arguments.settings.text
                       : path == "placeholder" ? node.arguments.settings.placeholder
+                      : path == "label"       ? node.arguments.settings.spinnerLabel
                       : path == "frame.title" ? node.arguments.settings.frame.title
                                               : node.arguments.settings.title;
 
