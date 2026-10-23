@@ -45,6 +45,43 @@ are contributor references.
 raw samples and known scaling limits. [Design scenarios](api-design.md) are exploratory material, not the entry
 point for current applications.
 
+## Extend the UI API
+
+For widget construction and layout, start with the public headers
+[`ui_controls.hpp`](../include/portals/ui_controls.hpp),
+[`ui_layout.hpp`](../include/portals/ui_layout.hpp), and
+[`ui_primitives.hpp`](../include/portals/ui_primitives.hpp). Keep each subject
+header independently includable; use [`ui.hpp`](../include/portals/ui.hpp) only
+as the compatibility umbrella for broad application code. The recipes are
+header-dependent, so a changed consumer handler rebuilds its translation unit;
+it does not require rebuilding an installed SDK.
+
+For reference and property behavior, read [`ui_ref.hpp`](../include/portals/ui_ref.hpp)
+and the existing [`property` tests](../tests/property.cpp) and
+[`ui_ref` tests](../tests/ui_ref.cpp). For scene factories and resource behavior,
+start with [`ui_scene_resource.hpp`](../include/portals/ui_scene_resource.hpp),
+then follow the parser and preparation implementation in
+[`ui_scene_resource_parse.cpp`](../src/widgets/ui_scene_resource_parse.cpp) and
+[`ui_scene_resource_prepare.cpp`](../src/widgets/ui_scene_resource_prepare.cpp).
+Keep parsing and preparation within the existing synchronous scene lifecycle.
+
+Control defaults and recipe overrides share the leaf-field map in
+[`ui_control_context.cpp`](../src/widgets/ui_control_context.cpp). Preserve both
+merge contracts when adding a field: control-context merging keeps per-leaf
+provenance, while recipe merging replaces its origin metadata after applying
+engaged values. False and zero remain valid overrides. Keep field visitation
+and potentially throwing copy order stable; extend the existing control-context
+and control-defaults tests.
+
+Extend the focused tests beside the behavior: for example,
+[`ui controls`](../tests/ui_control_defaults.cpp),
+[`ui layout`](../tests/ui_layout.cpp),
+[`ui scene resources`](../tests/ui_scene_resource.cpp), and direct-header
+consumer checks such as [`ui_controls_header.cpp`](../tests/package_consumer/ui_controls_header.cpp),
+[`ui_layout_header.cpp`](../tests/package_consumer/ui_layout_header.cpp), and
+[`ui_scene_pipeline_header.cpp`](../tests/package_consumer/ui_scene_pipeline_header.cpp).
+These verify that supported public headers compile as consumer includes.
+
 ## Maintain the documentation
 
 ### Pull request checks

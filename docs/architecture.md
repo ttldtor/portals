@@ -40,6 +40,53 @@ uses the private vendored utf8proc dependency. Doxygen, fuzzers and test oracles
 are build tools, not runtime dependencies. See [text](text.md), [render](render.md),
 [terminal](terminal.md), [styles](styles.md) and [chart](chart.md).
 
+## Public headers and implementation boundary {#architecture-fluent-boundaries}
+
+The fluent API is split across public headers. [`ui.hpp`](../include/portals/ui.hpp)
+is the supported compatibility umbrella for applications that use the broad UI
+surface. A smaller translation unit may include only the subjects it uses, for
+example:
+
+```cpp
+#include <portals/ui_controls.hpp>
+#include <portals/ui_layout.hpp>
+#include <portals/ui_scene_pipeline.hpp>
+```
+
+Each subject header is self-contained; leaf headers do not include `ui.hpp`.
+Choosing fewer headers can reduce the declarations visible to a translation
+unit, but a shorter include list is not evidence of a faster build. The library
+does not require precompiled headers or C++ modules. Fluent recipes, handlers
+and their templates are header-dependent, so changing a consumer handler rebuilds
+that consumer translation unit. It does not require rebuilding an installed SDK.
+
+The public `ui::Scene` facade owns the application and one managed scene. Its
+prepare and run calls use the existing synchronous lifecycle on one UI runtime;
+they do not create a second runtime. Scene-resource parsing and preparation are
+implemented behind the public resource API in the library sources, while the
+resulting owning recipes join the same scene mount transaction. See
+[`ui_scene_pipeline.hpp`](../include/portals/ui_scene_pipeline.hpp),
+[`ui_scene_resource.hpp`](../include/portals/ui_scene_resource.hpp),
+[`ui_app.cpp`](../src/widgets/ui_app.cpp), and the
+[scene loading guide](scene-loading-guide.md).
+
+The diagram summarizes preparation paths and retained services. The runner
+uses the existing scheduler, tree and router.
+
+```mermaid
+flowchart TB
+  accTitle: Fluent scene preparation and retained services
+  accDescr: C++ recipes and loaded scene resources feed an owning Scene facade. Its application runner uses the existing scheduler, tree and router to dispatch managed scene callbacks.
+  H["C++ recipes and handlers"]:::facade --> S["ui::Scene facade"]:::owner
+  R["Scene text or file"]:::facade --> P["Parse and prepare owning recipes"]:::owner --> S
+  S -->|mount| M["ManagedScene: mount, callbacks, cleanup"]:::owner
+  S -->|run| A["Application: scheduler, tree, router"]:::runtime
+  A -->|dispatch / prepare / frame| M
+  classDef facade fill:#dceeff,stroke:#2473a6,color:#132c40
+  classDef owner fill:#e3f2e7,stroke:#34724d,color:#193825
+  classDef runtime fill:#fff0d9,stroke:#a86b16,color:#453018
+```
+
 ## Versioned architecture maps
 
 The archived maps below describe the M1 source revision `968651a`.

@@ -16,6 +16,13 @@ inline constexpr std::size_t CONTROL_PRESENCE_BITS =
   CONTROL_PROPERTY_COUNT < 32 ? 32 : CONTROL_PROPERTY_COUNT;        ///< Retain all legacy mask bits.
 using ControlPropertyPresence = std::bitset<CONTROL_PRESENCE_BITS>; ///< Allocation-free internal leaf presence.
 
+/** @brief Overlay sparse recipe fields, then replace their provenance wholesale.
+ * @param target Owning lower-priority settings updated in the original recipe assignment order.
+ * @param patch Borrowed explicit settings; engaged false and zero values remain overrides.
+ * Copy and allocation failures propagate without validation or error translation.
+ */
+void mergeRecipeControlSettings(ControlSettings &target, const ControlSettings &patch);
+
 /** @brief Loader-only bounded schema installation in an effective context copy. */
 struct ControlContextAccess {
   /** @param context Immutable snapshot borrowed for this check.

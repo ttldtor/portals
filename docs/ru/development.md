@@ -44,6 +44,42 @@ NOT_RUN. Действующая PR policy и hosted MSVC/GCC/docs gates не и�
 сопоставимые нагрузки, исходные результаты и известные ограничения масштабирования.
 [Сценарии проектирования (на английском)](../api-design.md) содержат исследовательский материал.
 
+## Расширение UI API
+
+Начните с публичных заголовков [`ui_controls.hpp`](../../include/portals/ui_controls.hpp),
+[`ui_layout.hpp`](../../include/portals/ui_layout.hpp) и
+[`ui_primitives.hpp`](../../include/portals/ui_primitives.hpp), если меняете создание
+виджетов или размещение. Каждый тематический заголовок должен подключаться
+самостоятельно. Для приложений, которым нужен широкий UI API, совместимый
+umbrella-заголовок — [`ui.hpp`](../../include/portals/ui.hpp). Рецепты зависят от
+заголовков, поэтому изменение клиентского обработчика пересобирает его единицу
+трансляции; установленный SDK пересобирать не требуется.
+
+Поведение ссылок и свойств сверяйте с [`ui_ref.hpp`](../../include/portals/ui_ref.hpp),
+тестами [`property`](../../tests/property.cpp) и [`ui_ref`](../../tests/ui_ref.cpp).
+Для фабрик сцен и ресурсов начните с [`ui_scene_resource.hpp`](../../include/portals/ui_scene_resource.hpp),
+затем проследите разбор и подготовку в [`ui_scene_resource_parse.cpp`](../../src/widgets/ui_scene_resource_parse.cpp)
+и [`ui_scene_resource_prepare.cpp`](../../src/widgets/ui_scene_resource_prepare.cpp).
+Разбор и подготовка остаются частью существующего синхронного жизненного цикла сцены.
+
+Дефолты контролов и переопределения рецептов используют общий список полей в
+[`ui_control_context.cpp`](../../src/widgets/ui_control_context.cpp). При добавлении
+поля сохраняйте оба контракта: слияние контекста сохраняет provenance отдельных
+полей, а слияние рецепта заменяет метаданные origin после применения заданных
+значений. False и ноль остаются допустимыми переопределениями. Сохраняйте порядок
+обхода и потенциально бросающих копирований; дополняйте существующие тесты
+контекста и дефолтов контролов.
+
+Дополняйте тесты рядом с проверяемым поведением: например,
+[`ui controls`](../../tests/ui_control_defaults.cpp),
+[`ui layout`](../../tests/ui_layout.cpp),
+[`ui scene resources`](../../tests/ui_scene_resource.cpp) и проверки прямого
+подключения заголовков, например [`ui_controls_header.cpp`](../../tests/package_consumer/ui_controls_header.cpp),
+[`ui_layout_header.cpp`](../../tests/package_consumer/ui_layout_header.cpp) и
+[`ui_scene_pipeline_header.cpp`](../../tests/package_consumer/ui_scene_pipeline_header.cpp).
+Эти тесты подтверждают, что публичные заголовки компилируются при использовании
+непосредственно потребителем библиотеки.
+
 ## Сопровождение документации
 
 ### Проверки pull request

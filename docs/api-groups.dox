@@ -1,0 +1,116 @@
+// Copyright (c) 2026 ttldtor.
+// SPDX-License-Identifier: BSL-1.0
+
+/**
+ * @defgroup fluent_ui Declarative UI headers
+ * @brief Public header families for application composition and library extension.
+ *
+ * Use ui.hpp for the complete compatible facade, or include the subject headers
+ * needed by a translation unit. Subject headers are self-contained; a shorter
+ * umbrella file alone does not imply lower client compile cost.
+ * See @ref architecture and @ref development for dependency and ownership rules.
+ */
+
+/** @addtogroup fluent_ui
+ * - @ref ui.hpp "ui.hpp": Compatibility umbrella retaining the complete fluent include surface.
+ */
+
+/**
+ * @defgroup fluent_references Control references
+ * @ingroup fluent_ui
+ * @brief Owning text values and checked, non-owning references to controls.
+ */
+
+/** @addtogroup fluent_references
+ * - @ref ui_ref.hpp "ui_ref.hpp": Typed and dynamic references, commands and text-property operations.
+ */
+
+/**
+ * @defgroup fluent_recipes Control and layout recipes
+ * @ingroup fluent_ui
+ * @brief Lazy descriptions and composition for ordinary, virtual and custom controls.
+ */
+
+/** @addtogroup fluent_recipes
+ * - @ref ui_description.hpp "ui_description.hpp": Description handles and shared recipe options.
+ */
+
+/** @addtogroup fluent_recipes
+ * - @ref ui_construction.hpp "ui_construction.hpp": Custom-widget description construction.
+ */
+
+/** @addtogroup fluent_recipes
+ * - @ref ui_controls.hpp "ui_controls.hpp": Standard control factories.
+ */
+
+/** @addtogroup fluent_recipes
+ * - @ref ui_password_controls.hpp "ui_password_controls.hpp": Password recipes and properties.
+ */
+
+/** @addtogroup fluent_recipes
+ * - @ref ui_layout.hpp "ui_layout.hpp": Row, column, grid, overlay and scrolling composition.
+ */
+
+/** @addtogroup fluent_recipes
+ * - @ref ui_primitives.hpp "ui_primitives.hpp": Frames, gauges and primitive recipe composition.
+ */
+
+/** @addtogroup fluent_recipes
+ * - @ref ui_virtual.hpp "ui_virtual.hpp": Virtual model/view recipes.
+ */
+
+/** @addtogroup fluent_recipes
+ * - @ref ui_modifiers.hpp "ui_modifiers.hpp": Recipe sizing and presentation modifiers.
+ */
+
+/** @addtogroup fluent_recipes
+ * - @ref ui_dialogs.hpp "ui_dialogs.hpp": Dialog recipes and command composition.
+ */
+
+/** @addtogroup fluent_recipes
+ * - @ref ui_scene_recipes.hpp "ui_scene_recipes.hpp": Root recipe and scene construction.
+ */
+
+/**
+ * @defgroup fluent_lifecycle Scene lifecycle and input
+ * @ingroup fluent_ui
+ * @brief The facade prepares and runs the retained application; handlers use the existing routing and error boundaries.
+ */
+
+/** @addtogroup fluent_lifecycle
+ * - @ref ui_scene.hpp "ui_scene.hpp": Owning scene facade and checked scene operations.
+ */
+
+/** @addtogroup fluent_lifecycle
+ * - @ref ui_scene_pipeline.hpp "ui_scene_pipeline.hpp": Scene stages, handlers, error reporting and application runner composition.
+ */
+
+/** @addtogroup fluent_lifecycle
+ * - @ref ui_app.hpp "ui_app.hpp": Process arguments, environment snapshots and application runner support.
+ */
+
+/** @addtogroup fluent_lifecycle
+ * - @ref ui_action.hpp "ui_action.hpp": Shared action declarations and bindings.
+ */
+
+/**
+ * @defgroup fluent_resources Styles and scene resources
+ * @ingroup fluent_ui
+ * @brief Runtime stylesheet and loaded-scene extensions. Compile-time scene construction remains experimental.
+ */
+
+/** @addtogroup fluent_resources
+ * - @ref ui_style.hpp "ui_style.hpp": Runtime style stages and style-layer operations.
+ */
+
+/** @addtogroup fluent_resources
+ * - @ref ui_scene_resource.hpp "ui_scene_resource.hpp": Owning loaded-scene descriptions and preparation options.
+ */
+
+/** @addtogroup fluent_resources
+ * - @ref ui_control_context.hpp "ui_control_context.hpp": Control options shared by recipes and loaded scenes.
+ */
+
+/** @addtogroup fluent_resources
+ * - @ref ui_static.hpp "ui_static.hpp": Experimental compile-time scene construction.
+ */
