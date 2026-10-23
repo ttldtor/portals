@@ -128,6 +128,9 @@ planned work is not included. An **Unreleased** heading has no publication date.
 - Managed observation recovery, diagnostic collection and style updates now live
   in separate implementation files, preserving the existing lifecycle and public API.
 
+- Loaded-scene parsing and validation are separated from materialization, preserving
+  source diagnostics, secret redaction and synchronous recipe capture lifetimes.
+
 - The Linux naming check reuses authenticated Debian package downloads when a
   matching cache is available. Signed repository metadata is refreshed and all
   naming checks still run on every selected pull request.
