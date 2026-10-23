@@ -13,6 +13,7 @@
 #include <portals/theme_selector.hpp>
 #include <portals/ui_ref.hpp>
 #include <portals/ui_scene.hpp>
+#include <portals/ui_action.hpp>
 
 #include <algorithm>
 #include <array>
@@ -3524,6 +3525,15 @@ public:
   template <class Callback = detail::QuitCommand>
     requires(std::same_as<T, Button> && portals::detail::ManagedAction<Callback, ClickEvent>)
   Description &&onClick(Callback callback) && {
+    if constexpr (std::same_as<Callback, ActionRef>) {
+      return std::move(*this).setup([declaration = detail::retainAction(callback), callback = std::move(callback)](
+                                      ManagedScene &scene, Node<T> node) mutable {
+        (void)declaration;
+
+        return scene.onClick(node, std::move(callback));
+      });
+    }
+
     return std::move(*this).setup([callback = std::move(callback)](ManagedScene &scene, Node<T> node) mutable {
       return scene.onClick(node, std::move(callback));
     });
@@ -6105,6 +6115,23 @@ inline Description<Button> button(std::string_view text, Callback action, Contro
     .setup([action = std::move(action)](ManagedScene &scene, Node<Button> node) mutable {
       return scene.onClick(node, std::move(action));
     });
+}
+
+/** @param action Weak shared command; its owner is attached automatically during checked mount.
+ * @param style Manual appearance. @param policy Layout constraints.
+ * @return Ordinary button whose caption/state and callback share the action identity.
+ */
+inline Description<Button> button(ActionRef action, ControlStyle style = {}, SizePolicy policy = {}) {
+  return button(TextValue(""), style, policy).onClick(std::move(action));
+}
+
+/** @param reference Empty observing slot published after the whole mount succeeds.
+ * @param action Shared command. @param style Manual appearance. @param policy Layout constraints.
+ * @return Action button with the existing transactional reference publication.
+ */
+inline Description<Button> button(Ref<Button> reference, ActionRef action, ControlStyle style = {},
+                                  SizePolicy policy = {}) {
+  return button(std::move(action), style, policy).reference(std::move(reference));
 }
 
 /** @param text UTF-8 caption copied immediately.
@@ -10060,7 +10087,8 @@ auto configure(Callback callback, std::source_location origin = std::source_loca
 template <class Callback = detail::QuitCommand>
   requires portals::detail::ManagedAction<Callback, KeyEvent>
 auto onKey(KeyEvent chord, Callback callback, std::source_location origin = std::source_location::current()) {
-  return detail::SceneStage{[chord, callback = std::move(callback), origin](Scene &owner) mutable {
+  return detail::SceneStage{[chord, declaration = detail::retainAction(callback), callback = std::move(callback), origin](Scene &owner) mutable {
+      (void)declaration;
     detail::SceneAccess::onKey(owner, chord, callback, origin);
   }};
 }
@@ -10188,8 +10216,9 @@ template <class Callback = detail::QuitCommand>
   requires portals::detail::ManagedAction<Callback, KeyEvent>
 auto onKey(KeySelection selection, KeyInfo info, Callback callback,
            std::source_location origin = std::source_location::current()) {
-  return detail::SceneStage{[selection = std::move(selection), info = std::move(info), callback = std::move(callback),
+  return detail::SceneStage{[selection = std::move(selection), info = std::move(info), declaration = detail::retainAction(callback), callback = std::move(callback),
                              origin](Scene &owner) mutable {
+      (void)declaration;
     owner.onKey(std::move(selection), std::move(info), std::move(callback), origin);
   }};
 }
@@ -10212,7 +10241,8 @@ template <class Callback = detail::QuitCommand>
   requires portals::detail::ManagedAction<Callback, KeyEvent>
 auto onKey(KeySelection selection, Callback callback, std::source_location origin = std::source_location::current()) {
   return detail::SceneStage{
-    [selection = std::move(selection), callback = std::move(callback), origin](Scene &owner) mutable {
+    [selection = std::move(selection), declaration = detail::retainAction(callback), callback = std::move(callback), origin](Scene &owner) mutable {
+      (void)declaration;
       detail::SceneAccess::onSelection(owner, selection, callback, origin);
     }};
 }
@@ -10235,7 +10265,8 @@ auto onKey(Source &&source, Callback callback, std::source_location origin = std
     portals::detail::retainShortcut(portals::detail::prepareShortcut(std::forward<decltype(source)>(source), {}));
 
   return detail::SceneStage{
-    [shortcut = std::move(shortcut), callback = std::move(callback), origin](Scene &owner) mutable {
+    [shortcut = std::move(shortcut), declaration = detail::retainAction(callback), callback = std::move(callback), origin](Scene &owner) mutable {
+      (void)declaration;
       detail::SceneAccess::onShortcut(owner, shortcut, callback, {}, {}, origin);
     }};
 }
@@ -10257,7 +10288,8 @@ auto onKey(Source &&source, Callback callback, ShortcutBehavior behavior, Shortc
     portals::detail::retainShortcut(portals::detail::prepareShortcut(std::forward<decltype(source)>(source), options));
 
   return detail::SceneStage{
-    [shortcut = std::move(shortcut), callback = std::move(callback), behavior, options, origin](Scene &owner) mutable {
+    [shortcut = std::move(shortcut), declaration = detail::retainAction(callback), callback = std::move(callback), behavior, options, origin](Scene &owner) mutable {
+      (void)declaration;
       detail::SceneAccess::onShortcut(owner, shortcut, callback, behavior, options, origin);
     }};
 }
@@ -10276,7 +10308,8 @@ auto onKey(std::initializer_list<key::Chord> source, Callback callback,
     portals::detail::retainShortcut(portals::detail::prepareShortcut(std::forward<decltype(source)>(source), {}));
 
   return detail::SceneStage{
-    [shortcut = std::move(shortcut), callback = std::move(callback), origin](Scene &owner) mutable {
+    [shortcut = std::move(shortcut), declaration = detail::retainAction(callback), callback = std::move(callback), origin](Scene &owner) mutable {
+      (void)declaration;
       detail::SceneAccess::onShortcut(owner, shortcut, callback, {}, {}, origin);
     }};
 }
@@ -10297,7 +10330,8 @@ auto onKey(std::initializer_list<key::Chord> source, Callback callback, Shortcut
     portals::detail::retainShortcut(portals::detail::prepareShortcut(std::forward<decltype(source)>(source), options));
 
   return detail::SceneStage{
-    [shortcut = std::move(shortcut), callback = std::move(callback), behavior, options, origin](Scene &owner) mutable {
+    [shortcut = std::move(shortcut), declaration = detail::retainAction(callback), callback = std::move(callback), behavior, options, origin](Scene &owner) mutable {
+      (void)declaration;
       detail::SceneAccess::onShortcut(owner, shortcut, callback, behavior, options, origin);
     }};
 }

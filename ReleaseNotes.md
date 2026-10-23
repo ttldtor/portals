@@ -19,6 +19,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
   Loaded scenes expose the same settings. Hidden, clipped and disabled indicators
   stop scheduling frames until they become eligible again.
 
+- `ui::ActionSet` shares owning callbacks and presentation state across buttons
+  and explicit `ui::onKey` bindings; scene attachment owns each set for the
+  session. Shortcut metadata remains display text.
+
 - Choice dialogs accept custom declarative content and six standard button sets
   through `ui::dialog`, with configurable captions, order and safe defaults.
   Existing message-box helpers remain available. An optional `.closeButton()`

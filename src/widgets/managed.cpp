@@ -6,6 +6,7 @@
 #include <portals/detail/pss_parser.hpp>
 #include <portals/detail/setup_failure.hpp>
 #include <portals/managed.hpp>
+#include <portals/ui_action.hpp>
 
 #include <algorithm>
 #include <exception>
@@ -3649,6 +3650,11 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
+  auto actions = ui::detail::ActionAccess::prepare(*this);
+  if (!actions) {
+    return actions;
+  }
+
   auto selector = prepareThemeSelector();
   if (!selector) {
     return std::unexpected(bridge(selector.error()));
@@ -4098,6 +4104,7 @@ std::expected<void, ManagedError> ManagedScene::close() {
 
   // Mark closed before retiring captures: their destructors may reenter application code.
   closed_ = true;
+  ui::detail::ActionAccess::retire(*this);
   retireThemeSelector();
   themeSelection_.reset();
   retireMessages();

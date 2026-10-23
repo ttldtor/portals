@@ -48,16 +48,25 @@ struct MessageAccess;
 struct KeyHelpAccess;
 struct ThemeSelectionAccess;
 struct ThemeSelectorAccess;
+struct ActionAccess;
+struct ActionStore;
+struct ActionRegistry;
 class SetupFailureTicket;
 } // namespace ui::detail
 
 namespace ui {
+class ActionRef;
 class TextSource;
 class ThemeChoice;
 class ThemeSelectionRef;
 struct ThemeSelectionOptions;
 struct ThemeSelectionSnapshot;
 } // namespace ui
+
+namespace ui::detail {
+std::expected<void, ManagedError> attachAction(ManagedScene &, const ActionRef &);
+std::expected<void, ManagedError> attachActionButton(ManagedScene &, Node<Button>, const ActionRef &);
+}
 
 namespace style::ct::detail {
 struct Access;
@@ -700,6 +709,10 @@ public:
   template <class Callback>
     requires detail::ManagedAction<Callback, ClickEvent>
   std::expected<void, ManagedError> onClick(Node<Button> node, Callback action) {
+    if constexpr (std::same_as<Callback, ui::ActionRef>) {
+      return ui::detail::attachActionButton(*this, node, action);
+    }
+
     try {
       return onButtonClick(node, actionAdapter<ClickEvent>(std::move(action)),
                            std::invocable<Callback &, const ClickEvent &>);
@@ -733,6 +746,11 @@ public:
     }
 
     try {
+      auto reusable = prepareReusableAction(action);
+      if (!reusable) {
+        return reusable;
+      }
+
       auto adapter = actionAdapter<KeyEvent>(std::move(action));
 
       if (!adapter) {
@@ -782,6 +800,11 @@ public:
         return std::unexpected(validated.error());
       }
       transaction.owner = info.owner;
+      auto reusable = prepareReusableAction(action);
+      if (!reusable) {
+        return std::unexpected(reusable.error());
+      }
+
       return registerAnnotatedKey(selection, std::move(info), actionAdapter<KeyEvent>(std::move(action), origin),
                                   origin, transaction);
     } catch (const std::bad_alloc &) {
@@ -1684,6 +1707,11 @@ private:
     }
 
     try {
+      auto reusable = prepareReusableAction(action);
+      if (!reusable) {
+        return reusable;
+      }
+
       // Avoid both caller-side transfers and noexcept debug-vector moves before the checked boundary.
       Shortcut owned(std::forward<Value>(shortcut));
       auto adapter = actionAdapter<KeyEvent>(std::move(action), origin);
@@ -1787,6 +1815,7 @@ private:
   friend struct ui::detail::KeyHelpAccess;
   friend struct ui::detail::ThemeSelectionAccess;
   friend struct ui::detail::ThemeSelectorAccess;
+  friend struct ui::detail::ActionAccess;
   friend struct detail::ManagedScrollTestAccess;
 
   struct Entry;
@@ -2066,6 +2095,14 @@ private:
     return root ? std::expected<void, TreeError>{} : std::unexpected(root.error());
   }
 
+  template <class Callback> std::expected<void, ManagedError> prepareReusableAction(const Callback &action) {
+    if constexpr (std::same_as<Callback, ui::ActionRef>) {
+      return ui::detail::attachAction(*this, action);
+    }
+
+    return {};
+  }
+
   template <class Callback>
   std::function<EditorCommandResult(ui::ClickParams &)>
   clickAdapter(Callback action, std::source_location origin = std::source_location::current()) {
@@ -2293,6 +2330,7 @@ private:
   StyleEngine styles_;
   std::shared_ptr<detail::ThemeSelectionRecord> themeSelection_;
   std::shared_ptr<detail::ThemeSelectorRecord> themeSelector_;
+  std::shared_ptr<ui::detail::ActionRegistry> actionSets_;
   bool installingThemeSelection_{};
   std::vector<std::shared_ptr<Entry>> entries_;
   std::shared_ptr<detail::ManagedScrollState> scroll_;

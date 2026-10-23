@@ -32,7 +32,7 @@ GraphemeText decoration(std::string_view text, WidthPolicy policy) {
 Control::Control(GraphemeText text, std::string_view prefix, std::string_view suffix, ControlStyle style,
                  SizePolicy policy)
     : SizedWidget(policy), text_(std::move(text)), prefix_(decoration(prefix, text_.policy())),
-      checked_prefix_(decoration(prefix == "[ ] " ? "[x] " : prefix, text_.policy())),
+      checked_prefix_(decoration(prefix == "[ ] " ? "[x] " : prefix == "[ " ? "[*" : prefix, text_.policy())),
       mixed_prefix_(prefix == "[ ] " ? std::optional(decoration("[-] ", text_.policy())) : std::nullopt),
       suffix_(decoration(suffix, text_.policy())), style_(style) {
 }

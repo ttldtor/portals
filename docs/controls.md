@@ -8,6 +8,9 @@ ordinary fill/text commands. Their intrinsic height is one row; layout policies
 can allocate a larger rectangle. No control performs terminal I/O. Control bytes
 in text remain data and render as the text subsystem's placeholders.
 
+For a command shared by several buttons or explicit key bindings, see
+[shared actions](actions.md).
+
 ```cpp
 const auto run =
   tree.emplace<portals::Button>(parent, std::move(caption));

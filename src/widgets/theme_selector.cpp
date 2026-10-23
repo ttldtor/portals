@@ -317,20 +317,20 @@ Description<Dialog> ThemeSelectorAccess::describeView(ThemeSelectorRef reference
         std::optional<SelectorCommand> command;
         std::optional<std::size_t> next;
         if (const auto *action = std::get_if<ActionEvent>(&event)) {
-          if (action->action == Action::CANCEL) {
+          if (action->action == portals::Action::CANCEL) {
             command = SelectorCommand::CANCEL;
           } else if (!record->buttons.empty()) {
             const auto current = record->selected.value_or(0);
-            if (action->action == Action::MOVE_DOWN) {
+            if (action->action == portals::Action::MOVE_DOWN) {
               next = record->selected ? std::min(current + 1, record->buttons.size() - 1) : 0;
             }
-            if (action->action == Action::MOVE_UP) {
+            if (action->action == portals::Action::MOVE_UP) {
               next = record->selected ? (current ? current - 1 : 0) : record->buttons.size() - 1;
             }
-            if (action->action == Action::MOVE_HOME) {
+            if (action->action == portals::Action::MOVE_HOME) {
               next = 0;
             }
-            if (action->action == Action::MOVE_END) {
+            if (action->action == portals::Action::MOVE_END) {
               next = record->buttons.size() - 1;
             }
           }
