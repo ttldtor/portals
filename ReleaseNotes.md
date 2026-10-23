@@ -5,6 +5,8 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+## v0.6.0 (2026-10-24)
+
 ### Added
 
 - Scrollbars support frame-matched, minimal, ASCII and owning custom glyph skins,
