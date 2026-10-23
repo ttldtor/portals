@@ -11,16 +11,31 @@
 namespace portals {
 /** @brief PSS v0 declaration identities in metadata and compact descriptions. */
 enum class PssProperty {
-  FOREGROUND, ///< RGB text color.
-  BACKGROUND, ///< RGB fill color.
-  BOLD,       ///< Explicit bold flag.
-  ITALIC,     ///< Explicit italic flag.
-  UNDERLINE,  ///< Explicit underline flag.
-  MIN_WIDTH   ///< State-independent cell minimum.
+  FOREGROUND,             ///< RGB text color.
+  BACKGROUND,             ///< RGB fill color.
+  BOLD,                   ///< Explicit bold flag.
+  ITALIC,                 ///< Explicit italic flag.
+  UNDERLINE,              ///< Explicit underline flag.
+  MIN_WIDTH,              ///< State-independent cell minimum.
+  FRAME_LINE_FOREGROUND,  ///< Frame part frameLine.foreground.
+  FRAME_LINE_BACKGROUND,  ///< Frame part frameLine.background.
+  FRAME_LINE_BOLD,        ///< Frame part frameLine.bold.
+  FRAME_LINE_ITALIC,      ///< Frame part frameLine.italic.
+  FRAME_LINE_UNDERLINE,   ///< Frame part frameLine.underline.
+  FRAME_TITLE_FOREGROUND, ///< Frame part frameTitle.foreground.
+  FRAME_TITLE_BACKGROUND, ///< Frame part frameTitle.background.
+  FRAME_TITLE_BOLD,       ///< Frame part frameTitle.bold.
+  FRAME_TITLE_ITALIC,     ///< Frame part frameTitle.italic.
+  FRAME_TITLE_UNDERLINE,  ///< Frame part frameTitle.underline.
+  FRAME_ENDS_FOREGROUND,  ///< Frame part frameEnds.foreground.
+  FRAME_ENDS_BACKGROUND,  ///< Frame part frameEnds.background.
+  FRAME_ENDS_BOLD,        ///< Frame part frameEnds.bold.
+  FRAME_ENDS_ITALIC,      ///< Frame part frameEnds.italic.
+  FRAME_ENDS_UNDERLINE,   ///< Frame part frameEnds.underline.
 };
 
 /** @brief Number of supported PSS v0 properties. */
-inline constexpr std::size_t PSS_PROPERTY_COUNT = 6;
+inline constexpr std::size_t PSS_PROPERTY_COUNT = 21;
 /** @brief Marker for an absent effective declaration occurrence. */
 inline constexpr std::size_t NO_PSS_DECLARATION = std::numeric_limits<std::size_t>::max();
 /** @brief Maximum owned ASCII bytes retained in an error subject. */

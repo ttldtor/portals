@@ -15,5 +15,5 @@ std::uint64_t framePaintWork(const PreparedFrameText &text, const FrameOptions &
                              std::span<const CellRect> exclusions = {}) noexcept;
 std::expected<void, TreeError> paintFrame(PaintContext &context, const PreparedFrameText &text,
                                           const FrameOptions &options, CellRect bounds, CellStyle style,
-                                          std::span<const CellRect> exclusions = {});
+                                          std::span<const CellRect> exclusions = {}, FrameAppearance appearance = {});
 } // namespace portals::detail

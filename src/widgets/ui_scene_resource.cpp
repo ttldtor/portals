@@ -1288,6 +1288,10 @@ private:
         settings.format.releaseMarker = std::move(value);
       } else if (path == "format.unknownMarker") {
         settings.format.unknownMarker = std::move(value);
+      } else if (path == "frame.customTitleDecoration.prefix") {
+        settings.frame.customTitleDecoration.prefix = std::move(value);
+      } else if (path == "frame.customTitleDecoration.suffix") {
+        settings.frame.customTitleDecoration.suffix = std::move(value);
       } else if (path == "frame.customGlyphs.topLeft") {
         settings.frame.customGlyphs.topLeft = std::move(value);
       } else if (path == "frame.customGlyphs.topRight") {
@@ -1363,6 +1367,8 @@ private:
         settings.frame.sides.bottom = enabled;
       } else if (path == "frame.sides.left") {
         settings.frame.sides.left = enabled;
+      } else if (path == "frame.customTitleDecoration.enabled") {
+        settings.frame.customTitleDecoration.enabled = enabled;
       } else if (path == "frame.customGlyphs.enabled") {
         settings.frame.customGlyphs.enabled = enabled;
       } else if (path == "yRange.enabled") {
@@ -1427,6 +1433,8 @@ private:
                                       FramePattern::DOUBLE, FramePattern::HEAVY,  FramePattern::ASCII};
 
         settings.frame.pattern = PATTERNS[static_cast<std::size_t>(index)];
+      } else if (path == "frame.titleDecoration") {
+        settings.frame.titleDecoration = static_cast<TitleDecoration>(index);
       } else if (path == "frame.titleAlignment") {
         settings.frame.titleAlignment = static_cast<FrameTitleAlignment>(index);
       } else if (path == "horizontal") {
@@ -1741,12 +1749,12 @@ private:
         const bool configurationStruct =
           options_.format == SceneResourceFormat::CONFIGURATION &&
           (path == "securePolicy" || path == "limits" || path == "frame" || path == "frame.sides" ||
-           path == "frame.customGlyphs" || path == "format" || path == "yRange" || path == "labels" ||
-           path == "dialog" || path == "dialog.closeButton" || path == "dialog.frame" ||
-           path == "dialog.maximumPanelSize" || path == "message" || path == "message.order" ||
-           path == "message.labels" || path == "message.defaultChoice" || path == "message.textLimits" ||
-           path == "notification" || path == "notification.textLimits" || path == "themeSelector" ||
-           path == "themeSelector.labels" || path == "themeSelector.textLimits" ||
+           path == "frame.customGlyphs" || path == "frame.customTitleDecoration" || path == "format" ||
+           path == "yRange" || path == "labels" || path == "dialog" || path == "dialog.closeButton" ||
+           path == "dialog.frame" || path == "dialog.maximumPanelSize" || path == "message" ||
+           path == "message.order" || path == "message.labels" || path == "message.defaultChoice" ||
+           path == "message.textLimits" || path == "notification" || path == "notification.textLimits" ||
+           path == "themeSelector" || path == "themeSelector.labels" || path == "themeSelector.textLimits" ||
            path == "themeSelector.openingShortcut" || path == "themeCatalog" || path == "themeCatalog.textLimits" ||
            path == "themeCatalog.initialId" || path == "themeCatalog.layers");
 

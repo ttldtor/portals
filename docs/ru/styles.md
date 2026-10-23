@@ -83,6 +83,8 @@ Table:header { foreground: #4bb4dc; bold: true; }
 | `foreground`, `background` | `#RRGGBB` | Отрисовка |
 | `bold`, `italic`, `underline` | `true`, `false` | Отрисовка |
 | `min-width` | 0..INT32_MAX ячеек | Компоновка и отрисовка |
+| `frame-line-foreground`, `frame-title-foreground`, `frame-ends-foreground` (также `-background`) | `#RRGGBB` | Отрисовка части рамки |
+| `frame-line-bold`, `frame-title-bold`, `frame-ends-bold` (также `-italic`, `-underline`) | `true`, `false` | Отрисовка части рамки |
 
 `min-width` разрешён только без состояния. Ноль сохраняет собственное измерение.
 Политики размеров, доступная область и отсечение по-прежнему действуют.

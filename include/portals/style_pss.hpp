@@ -573,7 +573,10 @@ template <class Left, class Right, class P> struct FlatExpressionType<Mix<Left, 
 template <class D, class P> consteval bool flatDeclarationTypeMatches() {
   using Expression = std::remove_cvref_t<decltype(std::declval<D>().expression)>;
   using Actual = typename FlatExpressionType<Expression, P>::Type;
-  constexpr bool COLOR = D::KIND == Property::FOREGROUND || D::KIND == Property::BACKGROUND;
+  constexpr bool COLOR = D::KIND == Property::FOREGROUND || D::KIND == Property::BACKGROUND ||
+                         D::KIND == Property::FRAME_LINE_FOREGROUND || D::KIND == Property::FRAME_LINE_BACKGROUND ||
+                         D::KIND == Property::FRAME_TITLE_FOREGROUND || D::KIND == Property::FRAME_TITLE_BACKGROUND ||
+                         D::KIND == Property::FRAME_ENDS_FOREGROUND || D::KIND == Property::FRAME_ENDS_BACKGROUND;
   constexpr bool METRIC = D::KIND == Property::MIN_WIDTH;
   using Expected = std::conditional_t<COLOR, RgbColor, std::conditional_t<METRIC, std::int32_t, bool>>;
 
@@ -617,6 +620,36 @@ constexpr bool pssPropertyPresent(PssProperty property, const StyleDeclarations 
     return value.italic.has_value();
   case PssProperty::UNDERLINE:
     return value.underline.has_value();
+  case PssProperty::FRAME_LINE_FOREGROUND:
+    return value.frameLine.foreground.has_value();
+  case PssProperty::FRAME_LINE_BACKGROUND:
+    return value.frameLine.background.has_value();
+  case PssProperty::FRAME_LINE_BOLD:
+    return value.frameLine.bold.has_value();
+  case PssProperty::FRAME_LINE_ITALIC:
+    return value.frameLine.italic.has_value();
+  case PssProperty::FRAME_LINE_UNDERLINE:
+    return value.frameLine.underline.has_value();
+  case PssProperty::FRAME_TITLE_FOREGROUND:
+    return value.frameTitle.foreground.has_value();
+  case PssProperty::FRAME_TITLE_BACKGROUND:
+    return value.frameTitle.background.has_value();
+  case PssProperty::FRAME_TITLE_BOLD:
+    return value.frameTitle.bold.has_value();
+  case PssProperty::FRAME_TITLE_ITALIC:
+    return value.frameTitle.italic.has_value();
+  case PssProperty::FRAME_TITLE_UNDERLINE:
+    return value.frameTitle.underline.has_value();
+  case PssProperty::FRAME_ENDS_FOREGROUND:
+    return value.frameEnds.foreground.has_value();
+  case PssProperty::FRAME_ENDS_BACKGROUND:
+    return value.frameEnds.background.has_value();
+  case PssProperty::FRAME_ENDS_BOLD:
+    return value.frameEnds.bold.has_value();
+  case PssProperty::FRAME_ENDS_ITALIC:
+    return value.frameEnds.italic.has_value();
+  case PssProperty::FRAME_ENDS_UNDERLINE:
+    return value.frameEnds.underline.has_value();
   case PssProperty::MIN_WIDTH:
     return value.minWidth.has_value();
   }
@@ -650,6 +683,66 @@ constexpr PssValue pssScalar(PssProperty property, const StyleDeclarations &valu
     break;
   case PssProperty::UNDERLINE:
     result.boolean = *value.underline;
+
+    break;
+  case PssProperty::FRAME_LINE_FOREGROUND:
+    result.color = *value.frameLine.foreground;
+
+    break;
+  case PssProperty::FRAME_LINE_BACKGROUND:
+    result.color = *value.frameLine.background;
+
+    break;
+  case PssProperty::FRAME_LINE_BOLD:
+    result.boolean = *value.frameLine.bold;
+
+    break;
+  case PssProperty::FRAME_LINE_ITALIC:
+    result.boolean = *value.frameLine.italic;
+
+    break;
+  case PssProperty::FRAME_LINE_UNDERLINE:
+    result.boolean = *value.frameLine.underline;
+
+    break;
+  case PssProperty::FRAME_TITLE_FOREGROUND:
+    result.color = *value.frameTitle.foreground;
+
+    break;
+  case PssProperty::FRAME_TITLE_BACKGROUND:
+    result.color = *value.frameTitle.background;
+
+    break;
+  case PssProperty::FRAME_TITLE_BOLD:
+    result.boolean = *value.frameTitle.bold;
+
+    break;
+  case PssProperty::FRAME_TITLE_ITALIC:
+    result.boolean = *value.frameTitle.italic;
+
+    break;
+  case PssProperty::FRAME_TITLE_UNDERLINE:
+    result.boolean = *value.frameTitle.underline;
+
+    break;
+  case PssProperty::FRAME_ENDS_FOREGROUND:
+    result.color = *value.frameEnds.foreground;
+
+    break;
+  case PssProperty::FRAME_ENDS_BACKGROUND:
+    result.color = *value.frameEnds.background;
+
+    break;
+  case PssProperty::FRAME_ENDS_BOLD:
+    result.boolean = *value.frameEnds.bold;
+
+    break;
+  case PssProperty::FRAME_ENDS_ITALIC:
+    result.boolean = *value.frameEnds.italic;
+
+    break;
+  case PssProperty::FRAME_ENDS_UNDERLINE:
+    result.boolean = *value.frameEnds.underline;
 
     break;
   case PssProperty::MIN_WIDTH:

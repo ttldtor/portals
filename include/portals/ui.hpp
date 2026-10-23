@@ -243,6 +243,22 @@ constexpr std::optional<FramePattern> framePattern(std::string_view name) noexce
   return {};
 }
 
+/** @param name Compact decoration preset. @return Known value, or an invalid value checked at mount. */
+constexpr TitleDecoration titleDecorationPreset(std::string_view name) noexcept {
+  if (name == "none")
+    return TitleDecoration::NONE;
+  if (name == "spaced")
+    return TitleDecoration::SPACED;
+  if (name == "square")
+    return TitleDecoration::SQUARE;
+  if (name == "angle")
+    return TitleDecoration::ANGLE;
+  if (name == "round")
+    return TitleDecoration::ROUND;
+
+  return static_cast<TitleDecoration>(-1);
+}
+
 /** @param frame Sparse frame leaves, borrowed only for the check.
  * @return Whether decoration was requested; no allocation or traversal of unrelated settings.
  */
@@ -253,7 +269,8 @@ inline bool hasFrameSettings(const ControlScrollFrameSettings &frame) noexcept {
   return frame.enabled || frame.glyphs || frame.maxPaintCells || frame.pattern || sides.top || sides.right ||
          sides.bottom || sides.left || frame.title || frame.titleAlignment || frame.maxTitleBytes || glyphs.enabled ||
          glyphs.topLeft || glyphs.topRight || glyphs.bottomLeft || glyphs.bottomRight || glyphs.horizontal ||
-         glyphs.vertical;
+         glyphs.vertical || frame.titleDecoration || frame.customTitleDecoration.enabled ||
+         frame.customTitleDecoration.prefix || frame.customTitleDecoration.suffix;
 }
 
 /** @param code Frame validation category. @param path Owning diagnostic path to copy.
@@ -926,6 +943,25 @@ struct Access {
     apply(base.frame.enabled, patch.frame.enabled);
     apply(base.frame.glyphs, patch.frame.glyphs);
     apply(base.frame.maxPaintCells, patch.frame.maxPaintCells);
+    apply(base.frame.pattern, patch.frame.pattern);
+    apply(base.frame.sides.top, patch.frame.sides.top);
+    apply(base.frame.sides.right, patch.frame.sides.right);
+    apply(base.frame.sides.bottom, patch.frame.sides.bottom);
+    apply(base.frame.sides.left, patch.frame.sides.left);
+    apply(base.frame.title, patch.frame.title);
+    apply(base.frame.titleAlignment, patch.frame.titleAlignment);
+    apply(base.frame.maxTitleBytes, patch.frame.maxTitleBytes);
+    apply(base.frame.customGlyphs.enabled, patch.frame.customGlyphs.enabled);
+    apply(base.frame.customGlyphs.topLeft, patch.frame.customGlyphs.topLeft);
+    apply(base.frame.customGlyphs.topRight, patch.frame.customGlyphs.topRight);
+    apply(base.frame.customGlyphs.bottomLeft, patch.frame.customGlyphs.bottomLeft);
+    apply(base.frame.customGlyphs.bottomRight, patch.frame.customGlyphs.bottomRight);
+    apply(base.frame.customGlyphs.horizontal, patch.frame.customGlyphs.horizontal);
+    apply(base.frame.customGlyphs.vertical, patch.frame.customGlyphs.vertical);
+    apply(base.frame.titleDecoration, patch.frame.titleDecoration);
+    apply(base.frame.customTitleDecoration.enabled, patch.frame.customTitleDecoration.enabled);
+    apply(base.frame.customTitleDecoration.prefix, patch.frame.customTitleDecoration.prefix);
+    apply(base.frame.customTitleDecoration.suffix, patch.frame.customTitleDecoration.suffix);
     apply(base.horizontalAlign, patch.horizontalAlign);
     apply(base.verticalAlign, patch.verticalAlign);
     apply(base.initiallyOpen, patch.initiallyOpen);
@@ -3445,6 +3481,46 @@ public:
     return std::move(*this);
   }
 
+  /** @param decoration Opt-in title ends; validated at mount, with no extra height.
+   * @return Consuming recipe retaining source identity and the effective frame.
+   */
+  Description &&titleDecoration(TitleDecoration decoration) &&
+    requires std::derived_from<T, SizedWidget>
+  {
+    if (state_) {
+      auto &frame = frameRecipe();
+      frame.hasOptions = true;
+      frame.options.titleDecoration = decoration;
+      frame.options.customTitleDecoration.reset();
+    }
+
+    return std::move(*this);
+  }
+
+  /** @param name none/spaced/square/angle/round; unknown values fail with INVALID_ARGUMENT at mount.
+   * @return Same consuming recipe as the enum overload.
+   */
+  Description &&titleDecoration(std::string_view name) &&
+    requires std::derived_from<T, SizedWidget>
+  {
+    return std::move(*this).titleDecoration(detail::titleDecorationPreset(name));
+  }
+
+  /** @param decoration Owning prefix/suffix, each at most64 bytes and16 one-cell printable graphemes.
+   * @return Consuming recipe; invalid text fails before publication at mount.
+   */
+  Description &&titleDecoration(CustomTitleDecoration decoration) &&
+    requires std::derived_from<T, SizedWidget>
+  {
+    if (state_) {
+      auto &frame = frameRecipe();
+      frame.hasOptions = true;
+      frame.options.customTitleDecoration = decoration;
+    }
+
+    return std::move(*this);
+  }
+
   /** @param pattern One of single/plain, rounded, double, heavy or ascii.
    * @return Consuming frame recipe; unknown names become typed frame.pattern errors at mount.
    */
@@ -3893,6 +3969,33 @@ private:
           std::pair<std::string_view, bool>{"frame.enabled", patch.frame.enabled.has_value()},
           std::pair<std::string_view, bool>{"frame.glyphs", patch.frame.glyphs.has_value()},
           std::pair<std::string_view, bool>{"frame.maxPaintCells", patch.frame.maxPaintCells.has_value()},
+          std::pair<std::string_view, bool>{"frame.pattern", patch.frame.pattern.has_value()},
+          std::pair<std::string_view, bool>{"frame.sides.top", patch.frame.sides.top.has_value()},
+          std::pair<std::string_view, bool>{"frame.sides.right", patch.frame.sides.right.has_value()},
+          std::pair<std::string_view, bool>{"frame.sides.bottom", patch.frame.sides.bottom.has_value()},
+          std::pair<std::string_view, bool>{"frame.sides.left", patch.frame.sides.left.has_value()},
+          std::pair<std::string_view, bool>{"frame.title", patch.frame.title.has_value()},
+          std::pair<std::string_view, bool>{"frame.titleAlignment", patch.frame.titleAlignment.has_value()},
+          std::pair<std::string_view, bool>{"frame.maxTitleBytes", patch.frame.maxTitleBytes.has_value()},
+          std::pair<std::string_view, bool>{"frame.customGlyphs.enabled", patch.frame.customGlyphs.enabled.has_value()},
+          std::pair<std::string_view, bool>{"frame.customGlyphs.topLeft", patch.frame.customGlyphs.topLeft.has_value()},
+          std::pair<std::string_view, bool>{"frame.customGlyphs.topRight",
+                                            patch.frame.customGlyphs.topRight.has_value()},
+          std::pair<std::string_view, bool>{"frame.customGlyphs.bottomLeft",
+                                            patch.frame.customGlyphs.bottomLeft.has_value()},
+          std::pair<std::string_view, bool>{"frame.customGlyphs.bottomRight",
+                                            patch.frame.customGlyphs.bottomRight.has_value()},
+          std::pair<std::string_view, bool>{"frame.customGlyphs.horizontal",
+                                            patch.frame.customGlyphs.horizontal.has_value()},
+          std::pair<std::string_view, bool>{"frame.customGlyphs.vertical",
+                                            patch.frame.customGlyphs.vertical.has_value()},
+          std::pair<std::string_view, bool>{"frame.titleDecoration", patch.frame.titleDecoration.has_value()},
+          std::pair<std::string_view, bool>{"frame.customTitleDecoration.enabled",
+                                            patch.frame.customTitleDecoration.enabled.has_value()},
+          std::pair<std::string_view, bool>{"frame.customTitleDecoration.prefix",
+                                            patch.frame.customTitleDecoration.prefix.has_value()},
+          std::pair<std::string_view, bool>{"frame.customTitleDecoration.suffix",
+                                            patch.frame.customTitleDecoration.suffix.has_value()},
           std::pair<std::string_view, bool>{"padding.left", patch.grid.paddingLeft.has_value()},
           std::pair<std::string_view, bool>{"padding.top", patch.grid.paddingTop.has_value()},
           std::pair<std::string_view, bool>{"padding.right", patch.grid.paddingRight.has_value()},
@@ -8820,6 +8923,40 @@ inline BorderModifier border(BorderOptions options = {}, ControlStyle style = {}
  */
 inline BorderModifier frame(BorderOptions options = {}, ControlStyle style = {}) {
   return {options, style};
+}
+
+/** @brief Owning title-decoration pipe stage, sharing method validation and lifetime. */
+struct TitleDecorationModifier {
+  TitleDecoration preset{TitleDecoration::NONE}; ///< Checked preset.
+  std::optional<CustomTitleDecoration> custom{}; ///< Optional complete custom ends.
+  /** @brief Preserve fallible owning transfers. */
+  ~TitleDecorationModifier() = default;
+
+  /** @tparam T Sized widget type. @param description Consuming recipe. @param modifier Owning ends.
+   * @return Same recipe as titleDecoration method.
+   */
+  template <class T> friend Description<T> operator|(Description<T> &&description, TitleDecorationModifier modifier) {
+    if (modifier.custom) {
+      return std::move(description).titleDecoration(*modifier.custom);
+    }
+
+    return std::move(description).titleDecoration(modifier.preset);
+  }
+};
+
+/** @param preset Title end preset. @return Owning pipe modifier. */
+inline TitleDecorationModifier titleDecoration(TitleDecoration preset) {
+  return {preset, {}};
+}
+
+/** @param name none/spaced/square/angle/round. @return Pipe modifier; unknown names fail at mount. */
+inline TitleDecorationModifier titleDecoration(std::string_view name) {
+  return {detail::titleDecorationPreset(name), {}};
+}
+
+/** @param custom Owning complete ends. @return Pipe modifier with checked mount validation. */
+inline TitleDecorationModifier titleDecoration(CustomTitleDecoration custom) {
+  return {TitleDecoration::NONE, custom};
 }
 
 /** @brief Owning compact decoration stage; all text is retained until checked mount. */

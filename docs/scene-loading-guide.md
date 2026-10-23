@@ -313,7 +313,13 @@ Use `frame { enabled=true pattern=DOUBLE sides { left=false right=false } }`
 for grouped settings, or `frame.sides.top=false` for one dotted assignment.
 `frame.title` accepts literal text or `i18n(...)` and resolves through the scene's
 existing text resolver. `frame.titleAlignment` accepts START/CENTER/END;
-`frame.maxTitleBytes` defaults to 4096. `frame.glyphs` and
+`frame.titleDecoration` accepts NONE/SPACED/SQUARE/ANGLE/ROUND. For example,
+`frame="rounded" frame.title="Sections" frame.titleDecoration=SQUARE` uses the
+same title opening as the C++ recipe. For owning custom ends use
+`frame.customTitleDecoration { enabled=true prefix="{ " suffix=" }" }`.
+Setting `enabled=false` removes the custom override. Omitted leaves preserve
+the receiver's settings. Custom ends use the same byte/cell limits and typed
+validation as C++. `frame.maxTitleBytes` defaults to 4096. `frame.glyphs` and
 `frame.maxPaintCells` retain their existing selection and work-cap semantics.
 A disabled frame cannot also receive frame-specific values.
 

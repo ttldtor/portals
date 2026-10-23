@@ -157,6 +157,8 @@ browser CSS compatibility promises. A semicolon is required after each value.
 | `foreground`, `background` | `#RRGGBB` | Paint |
 | `bold`, `italic`, `underline` | `true` or `false` | Paint |
 | `min-width` | Integer from 0 to INT32_MAX, in cells | Layout and paint |
+| `frame-line-foreground`, `frame-title-foreground`, `frame-ends-foreground` (also `-background`) | `#RRGGBB` | Frame part paint |
+| `frame-line-bold`, `frame-title-bold`, `frame-ends-bold` (also `-italic`, `-underline`) | `true` or `false` | Frame part paint |
 
 `min-width` is allowed only without a state predicate: changing focus must not
 silently alter geometry. Zero leaves intrinsic measurement unchanged. The

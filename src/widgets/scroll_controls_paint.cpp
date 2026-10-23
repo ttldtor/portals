@@ -66,7 +66,10 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, const Compu
     return context.submit(std::span(&command, 1));
   };
   if (frame && frameText) {
-    auto painted = paintFrame(context, *frameText, *frame, *bounds, style, excluded);
+    auto painted = paintFrame(context, *frameText, *frame, *bounds, style, excluded,
+                              resolved.frame[!state.enabled  ? 2
+                                             : state.focused ? 1
+                                                             : 0]);
 
     if (!painted) {
       return painted;

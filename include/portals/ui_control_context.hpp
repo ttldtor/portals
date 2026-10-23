@@ -143,6 +143,16 @@ struct ControlScrollFrameSettings {
   std::optional<FrameTitleAlignment> titleAlignment{}; ///< Alignment of the fitting title prefix.
   std::optional<std::size_t> maxTitleBytes{};          ///< Positive complete title byte limit; default 4096.
   ControlFrameGlyphSettings customGlyphs{};            ///< Optional owning six-glyph source.
+  std::optional<TitleDecoration> titleDecoration{};    ///< Optional title end preset.
+
+  /** @brief Sparse owning custom title ends. */
+  struct TitleEnds {
+    /** @brief Preserve fallible checked string transfers. */
+    ~TitleEnds() = default;
+    std::optional<bool> enabled{};       ///< True creates ends; false removes them.
+    std::optional<std::string> prefix{}; ///< Up to64 bytes/16 one-cell printable graphemes.
+    std::optional<std::string> suffix{}; ///< Up to64 bytes/16 one-cell printable graphemes.
+  } customTitleDecoration{};             ///< Sparse override of the preset.
 };
 
 /** @brief Sparse owning literal formatter settings; omitted strings preserve the receiving options. */

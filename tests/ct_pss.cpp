@@ -404,3 +404,36 @@ TEST_CASE("shared grammar kernel is allocation-free and runtime wrappers catch e
     return parsePss("LongWidgetTypeName#long-widget-identity.primary{foreground:#123456;bold:false;}");
   });
 }
+
+TEST_CASE("frame part declarations share runtime literal typed compact and state cascades") {
+  static_assert(static_cast<int>(PssProperty::FOREGROUND) == 0);
+  static_assert(static_cast<int>(PssProperty::MIN_WIDTH) == 5);
+  constexpr auto LITERAL =
+    sc::pss("Border{foreground:#010203;frame-line-foreground:#040506;frame-title-bold:false;frame-ends-italic:true;}"
+            "Border:focused{frame-title-foreground:#070809;}");
+  constexpr auto TYPED = sc::compactSheet(
+    std::array{sc::flatRule(sc::type<"Border">(), sc::fg(sc::rgb(1, 2, 3)), sc::frameLineForeground(sc::rgb(4, 5, 6)),
+                            sc::frameTitleBold(false), sc::frameEndsItalic(true)),
+               sc::flatRule(sc::type<"Border">(StyleState::FOCUSED), sc::frameTitleForeground(sc::rgb(7, 8, 9)))});
+  const auto expected = parsePssDocument(
+    "Border{foreground:#010203;frame-line-foreground:#040506;frame-title-bold:false;frame-ends-italic:true;}"
+    "Border:focused{frame-title-foreground:#070809;}");
+  const auto parsed = sc::materializeDocument(LITERAL);
+  const auto materialized = sc::materializeDocument(TYPED);
+  REQUIRE(expected);
+  REQUIRE(parsed);
+  REQUIRE(materialized);
+  CHECK(parsed->sheet == expected->sheet);
+  CHECK(materialized->sheet == expected->sheet);
+  CHECK(parsed->declarations == expected->declarations);
+  const auto resolved = resolveStyle(expected->sheet, StyleTarget{.type = "Border"}, {});
+  REQUIRE(resolved.frame[0].line);
+  REQUIRE(resolved.frame[0].title);
+  REQUIRE(resolved.frame[1].title);
+  REQUIRE(resolved.frame[0].ends);
+  CHECK(resolved.frame[0].line->foreground == RgbColor{4, 5, 6});
+  CHECK(resolved.frame[0].title->foreground == RgbColor{1, 2, 3});
+  CHECK_FALSE(resolved.frame[0].title->bold);
+  CHECK(resolved.frame[1].title->foreground == RgbColor{7, 8, 9});
+  CHECK(resolved.frame[0].ends->italic);
+}

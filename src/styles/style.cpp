@@ -57,10 +57,18 @@ Specificity specificity(const StyleSelector &selector) {
 
 using Rank = std::tuple<StyleTier, Specificity, std::uint64_t, std::size_t>;
 
-template <class CascadeRank, class Visit>
-CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, StyleState state, CellStyle base) {
-  // Each field keeps its own winning rank across the complete rule range.
-  std::array<std::optional<CascadeRank>, 5> ranks;
+bool hasPaintDeclarations(const StylePaintDeclarations &values) noexcept {
+  return values.foreground || values.background || values.bold || values.italic || values.underline;
+}
+
+template <class CascadeRank, bool FrameParts, class Visit>
+CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, StyleState state, CellStyle base,
+                       FrameAppearance &parts) {
+  // Ordinary rules retain the original five ranks; frame ranks exist only in the part specialization.
+  constexpr std::size_t PAINT_ATTRIBUTE_COUNT = 5;
+  constexpr std::size_t FRAME_PART_COUNT = 3;
+  std::array<std::optional<CascadeRank>, PAINT_ATTRIBUTE_COUNT *(FrameParts ? FRAME_PART_COUNT + 1 : 1)> ranks;
+  [[maybe_unused]] std::array<StylePaintDeclarations, FrameParts ? FRAME_PART_COUNT : 0> overrides;
   const auto assign = [&]<class T>(const std::optional<T> &value, auto &destination, std::size_t index,
                                    CascadeRank rank) {
     if (value && (!ranks[index] || rank >= *ranks[index])) {
@@ -72,6 +80,7 @@ CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, StyleState
     if (!matches(rule.selector, target, state)) {
       return;
     }
+
     const CascadeRank rank = makeRank();
     const auto &values = rule.declarations;
     assign(values.foreground, base.foreground, 0, rank);
@@ -79,20 +88,71 @@ CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, StyleState
     assign(values.bold, base.bold, 2, rank);
     assign(values.italic, base.italic, 3, rank);
     assign(values.underline, base.underline, 4, rank);
+
+    if constexpr (FrameParts) {
+      const std::array sources{&values.frameLine, &values.frameTitle, &values.frameEnds};
+
+      for (std::size_t part = 0; part < sources.size(); ++part) {
+        const auto &source = *sources[part];
+
+        if (!hasPaintDeclarations(source)) {
+          continue;
+        }
+
+        auto &destination = overrides[part];
+        const auto offset = PAINT_ATTRIBUTE_COUNT * (part + 1);
+        assign(source.foreground, destination.foreground, offset, rank);
+        assign(source.background, destination.background, offset + 1, rank);
+        assign(source.bold, destination.bold, offset + 2, rank);
+        assign(source.italic, destination.italic, offset + 3, rank);
+        assign(source.underline, destination.underline, offset + 4, rank);
+      }
+    }
   });
+
+  if constexpr (FrameParts) {
+    const std::array destinations{&parts.line, &parts.title, &parts.ends};
+
+    for (std::size_t index = 0; index < overrides.size(); ++index) {
+      const auto &source = overrides[index];
+
+      if (!hasPaintDeclarations(source)) {
+        continue;
+      }
+
+      auto &destination = *destinations[index];
+      auto resolved = destination.value_or(base);
+
+      if (source.foreground) {
+        resolved.foreground = source.foreground;
+      }
+
+      if (source.background) {
+        resolved.background = source.background;
+      }
+
+      resolved.bold = source.bold.value_or(resolved.bold);
+      resolved.italic = source.italic.value_or(resolved.italic);
+      resolved.underline = source.underline.value_or(resolved.underline);
+      destination = resolved;
+    }
+  }
+
   return base;
 }
 
 template <class CascadeRank, class Visit>
 ComputedStyle resolveRules(const Visit &visit, const StyleTarget &target, ComputedStyle defaults) noexcept {
-  defaults.normal = resolvePaint<CascadeRank>(visit, target, StyleState::NORMAL, defaults.normal);
-  defaults.focused = resolvePaint<CascadeRank>(visit, target, StyleState::FOCUSED, defaults.focused);
-  defaults.disabled = resolvePaint<CascadeRank>(visit, target, StyleState::DISABLED, defaults.disabled);
-  defaults.selected = resolvePaint<CascadeRank>(visit, target, StyleState::SELECTED, defaults.selected);
-  defaults.header = resolvePaint<CascadeRank>(visit, target, StyleState::HEADER, defaults.header);
-  defaults.caret = resolvePaint<CascadeRank>(visit, target, StyleState::CARET, defaults.caret);
+  bool frameParts{};
   std::optional<CascadeRank> rank;
   visit([&](const StyleRule &rule, auto &&makeRank) {
+    const auto &values = rule.declarations;
+
+    // Reuse the metric pass; selector states here test applicability, not the current paint state.
+    frameParts = frameParts || ((hasPaintDeclarations(values.frameLine) || hasPaintDeclarations(values.frameTitle) ||
+                                 hasPaintDeclarations(values.frameEnds)) &&
+                                matches(rule.selector, target, rule.selector.state));
+
     if (!rule.declarations.minWidth || !matches(rule.selector, target, StyleState::ANY)) {
       return;
     }
@@ -102,6 +162,28 @@ ComputedStyle resolveRules(const Visit &visit, const StyleTarget &target, Comput
       defaults.minWidth = *rule.declarations.minWidth;
     }
   });
+
+  const auto applyPaintStates = [&]<bool FrameParts>() {
+    defaults.normal =
+      resolvePaint<CascadeRank, FrameParts>(visit, target, StyleState::NORMAL, defaults.normal, defaults.frame[0]);
+    defaults.focused =
+      resolvePaint<CascadeRank, FrameParts>(visit, target, StyleState::FOCUSED, defaults.focused, defaults.frame[1]);
+    defaults.disabled =
+      resolvePaint<CascadeRank, FrameParts>(visit, target, StyleState::DISABLED, defaults.disabled, defaults.frame[2]);
+    defaults.selected =
+      resolvePaint<CascadeRank, FrameParts>(visit, target, StyleState::SELECTED, defaults.selected, defaults.frame[3]);
+    defaults.header =
+      resolvePaint<CascadeRank, FrameParts>(visit, target, StyleState::HEADER, defaults.header, defaults.frame[4]);
+    defaults.caret =
+      resolvePaint<CascadeRank, FrameParts>(visit, target, StyleState::CARET, defaults.caret, defaults.frame[5]);
+  };
+
+  if (frameParts) {
+    applyPaintStates.template operator()<true>();
+  } else {
+    applyPaintStates.template operator()<false>();
+  }
+
   return defaults;
 }
 
@@ -664,7 +746,12 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
 
     for (const auto &rule : value->rules) {
       const auto &d = rule.declarations;
-      const std::size_t count = d.foreground.has_value() + d.background.has_value() + d.bold.has_value() +
+      const auto partCount = [](const StylePaintDeclarations &part) {
+        return part.foreground.has_value() + part.background.has_value() + part.bold.has_value() +
+               part.italic.has_value() + part.underline.has_value();
+      };
+      const std::size_t count = partCount(d.frameLine) + partCount(d.frameTitle) + partCount(d.frameEnds) +
+                                d.foreground.has_value() + d.background.has_value() + d.bold.has_value() +
                                 d.italic.has_value() + d.underline.has_value() + d.minWidth.has_value();
       if (!charge(declarations, count, options.maxDeclarations) ||
           !charge(bytes, sizeof(StyleRule), options.maxOwnedBytes) || !chargeString(rule.selector.type) ||
