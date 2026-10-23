@@ -16,7 +16,7 @@ int main() {
       ui::lineEdit(message, ""),
       ui::button(add),
       ui::button(exit)))
-      | ui::onKey("Ctrl+H", add)
+      | ui::onKey("F2", add)
       | ui::onKey("F10 | Ctrl+C", exit);
   } | ui::runApp();
   // clang-format on

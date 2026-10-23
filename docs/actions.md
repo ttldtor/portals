@@ -48,7 +48,7 @@ The `shortcut` field is presentation text only. It does not register input or
 install a global shortcut, and this API does not automatically add actions to
 `KeyHints`. Bind each chord through the existing `ui::onKey` API so normal
 scope, modal, and key-matching rules continue to apply. The example does this
-explicitly for Ctrl+H, F10, and Ctrl+C.
+explicitly for F2, F10, and Ctrl+C.
 
 Each set has positive admission limits: 256 actions, 1024 button presenters,
 65536 bytes for live keys and current metadata, and 256 bytes per key by
