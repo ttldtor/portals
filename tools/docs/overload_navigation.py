@@ -1,8 +1,10 @@
 """Group Doxygen function siblings after finalize_html completes guide navigation.
 
-The caller supplies JSON variable readers/writers and the matching tag XML.
+Called by finalize_html.py through cmake --build <build> --target portals_docs.
+The caller supplies the HTML directory, JSON readers/writers and matching tag XML.
 Only generated navigation payloads and their index paths are rewritten in place;
 missing or ambiguous function metadata leaves the original entries intact.
+I/O, XML and JSON errors propagate to the documentation build.
 """
 
 import html
