@@ -125,6 +125,9 @@ planned work is not included. An **Unreleased** heading has no publication date.
   separate implementation file. Public scene APIs, diagnostic output and
   callback-lifetime behavior remain unchanged.
 
+- Managed observation recovery, diagnostic collection and style updates now live
+  in separate implementation files, preserving the existing lifecycle and public API.
+
 - The Linux naming check reuses authenticated Debian package downloads when a
   matching cache is available. Signed repository metadata is refreshed and all
   naming checks still run on every selected pull request.
