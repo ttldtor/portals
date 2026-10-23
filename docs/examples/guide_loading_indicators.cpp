@@ -15,8 +15,8 @@ int main() {
     return ui::scene(ui::vbox(
       ui::spinner(loading).preset(SpinnerPreset::BRAILLE).label("Loading quotes").width(30),
       ui::hbox(
-        ui::button("Start", [loading] { loading.start(); }),
-        ui::button("Stop", [loading] { loading.stop(); })),
+        ui::button("Start", [loading] { return loading.start(); }),
+        ui::button("Stop", [loading] { return loading.stop(); })),
       ui::button("Exit", [] { ui::quit(); })))
       | ui::style("Spinner { foreground: #62b4d7; }")
       | ui::onKey("F10 | Ctrl+C", ui::quit);

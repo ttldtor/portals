@@ -28,8 +28,8 @@ int main() {
 
     return std::move(scene)
       | ui::style("Spinner { foreground: #62b4d7; }")
-      | ui::onClick(start, [loading] { loading.start(); })
-      | ui::onClick(stop, [loading] { loading.stop(); })
+      | ui::onClick(start, [loading] { return loading.start(); })
+      | ui::onClick(stop, [loading] { return loading.stop(); })
       | ui::onClick(exit, ui::quit)
       | ui::onKey("F10 | Ctrl+C", ui::quit);
   } | ui::runApp();

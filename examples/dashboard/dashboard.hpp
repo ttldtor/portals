@@ -208,7 +208,7 @@ private:
                            ui::themeSelector(state->selector_, catalog, selectorOptions));
     // clang-format off
     scene
-      | ui::onKey("F2", [state] { return state->cycleTheme(); })
+      | ui::onKey(ui::pressRepeat("F2"), [state] { return state->cycleTheme(); })
       | ui::onKey("F10 | Ctrl+C", ui::quit)
       | ui::configure([state](ManagedScene &, Application &app) {
           return state->configure(app);
