@@ -40,6 +40,7 @@ struct RefAccess;
 struct SceneAccess;
 struct ClickAccess;
 struct EditorEventAccess;
+struct ChangeAccess;
 struct NamedAccess;
 struct LayoutAccess;
 struct MessageAccess;
@@ -128,6 +129,25 @@ concept ManagedAction = requires(Callback &action, const Event &event) {
 } || requires(Callback &action) {
   { action() } -> ManagedActionResult;
 };
+
+/** @brief Recognize a checkbox value invocation with a supported result.
+ * @tparam Callback Copyable action; generic bodies must accept both bool and CheckState.
+ * @tparam T Actual checkbox model value, never converted by the adapter.
+ */
+template <class Callback, class T>
+concept ChangeValueAction = requires(Callback &action, const T &value) {
+  { action(value) } -> ManagedActionResult;
+};
+
+/** @brief Admitted value callbacks take precedence over exact owning commit receipts.
+ * @tparam Callback Copyable value or receipt action.
+ * @tparam T Actual checkbox model value.
+ */
+template <class Callback, class T>
+concept ChangeAction = ChangeValueAction<Callback, T> || (!ChangeValueAction<Callback, T> &&
+                                                          requires(Callback &action, const PropertyUpdate<T> &receipt) {
+                                                            { action(receipt) } -> ManagedActionResult;
+                                                          });
 
 /** @brief Recognize only the supported checked transform result.
  * @tparam T Exact normalized transform result type.
@@ -221,6 +241,8 @@ struct ManagedOptions {
   KeyCapabilities keyCapabilities{};          ///< Explicit native phase knowledge; UNKNOWN remains routable.
   std::size_t maxEditingHandlers{256};        ///< Positive maximum retained callbacks across both editor event kinds.
   std::size_t maxEditingHandlersPerNode{64};  ///< Positive combined callback maximum for one editor.
+  std::size_t maxChangeHandlers{256};         ///< Positive maximum retained checkbox change callbacks.
+  std::size_t maxChangeHandlersPerNode{64};   ///< Positive maximum change callbacks for one checkbox.
 };
 
 /** @brief Weak UI handle to a scene-owned Property, never an owning alias.
@@ -854,6 +876,58 @@ public:
   std::expected<void, ManagedError> bind(Node<CheckBox> node, ManagedState<CheckState> model,
                                          std::function<std::expected<void, TreeError>(CheckStateResult)> changed = {},
                                          CheckBoxOptions options = {});
+
+  /** @tparam Callback Copyable action taking the actual bool/CheckState value or const PropertyUpdate<T>&.
+   * @param node Live checkbox with its existing managed binding.
+   * @param callback FIFO notification of successful changed activation receipts, never a veto.
+   * @param origin Registration site used by checked callback diagnostics.
+   * @return Checked admission; a callback incompatible with the actual model returns INVALID_ARGUMENT.
+   * Generic value bodies must compile for both bool and CheckState; use a concrete parameter for one model.
+   * External writes, failed commits and no-op receipts do not notify. Rejected notifications still commit.
+   */
+  template <class Callback>
+    requires(std::copy_constructible<Callback> &&
+             (detail::ChangeAction<Callback, bool> || detail::ChangeAction<Callback, CheckState>))
+  std::expected<void, ManagedError> onChange(Node<CheckBox> node, Callback callback,
+                                             std::source_location origin = std::source_location::current()) {
+    auto boolean = changeModel(node);
+
+    if (!boolean) {
+      return std::unexpected(boolean.error());
+    }
+
+    const auto lifetime = std::weak_ptr<const void>(lifetime_);
+
+    try {
+      if (*boolean) {
+        if constexpr (detail::ChangeAction<Callback, bool>) {
+          auto action = changeAdapter<bool>(std::move(callback), origin);
+
+          if (lifetime.expired()) {
+            return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CLOSED));
+          }
+
+          return registerChange(node, ChangeRecord{std::move(action), origin});
+        }
+      } else {
+        if constexpr (detail::ChangeAction<Callback, CheckState>) {
+          auto action = changeAdapter<CheckState>(std::move(callback), origin);
+
+          if (lifetime.expired()) {
+            return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CLOSED));
+          }
+
+          return registerChange(node, ChangeRecord{std::move(action), origin});
+        }
+      }
+
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
+    } catch (...) {
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CALLBACK_FAILED));
+    }
+  }
 
   /** @param node Managed editor without a prior event binding.
    * @param model State created by this scene.
@@ -1692,6 +1766,7 @@ private:
   friend struct ui::detail::SceneAccess;
   friend struct ui::detail::ClickAccess;
   friend struct ui::detail::EditorEventAccess;
+  friend struct ui::detail::ChangeAccess;
   friend struct ui::detail::NamedAccess;
   friend struct ui::detail::LayoutAccess;
   friend struct ui::detail::MessageAccess;
@@ -1799,6 +1874,30 @@ private:
     bool retired{};
   };
 
+  struct ChangeRecord {
+    std::variant<std::function<EditorCommandResult(const PropertyUpdate<bool> &)>,
+                 std::function<EditorCommandResult(const PropertyUpdate<CheckState> &)>>
+      action;
+    std::source_location origin;
+  };
+
+  struct ChangeChain {
+    std::vector<std::shared_ptr<ChangeRecord>> records = std::vector<std::shared_ptr<ChangeRecord>>(0);
+    bool boolean{};
+    bool retired{};
+  };
+
+  std::expected<bool, ManagedError> changeModel(Node<CheckBox> node);
+  std::expected<void, ManagedError> registerChange(Node<CheckBox> node, ChangeRecord record);
+  void retireChanges(Entry &entry) noexcept;
+  template <class T>
+  std::function<void(std::expected<PropertyUpdate<T>, TreeError>)>
+  checkboxCallback(Node<CheckBox> node, std::shared_ptr<ChangeChain> chain,
+                   std::function<std::expected<void, TreeError>(std::expected<PropertyUpdate<T>, TreeError>)> changed);
+  template <class T>
+  void dispatchChange(Node<CheckBox> node, const std::shared_ptr<ChangeChain> &chain,
+                      const std::weak_ptr<const void> &lifetime, const PropertyUpdate<T> &receipt, std::size_t count);
+
   std::expected<void, ManagedError> registerEditing(Node<LineEdit> node, EditorEventRecord record);
   void retireEditing(Entry &entry) noexcept;
   template <class Event>
@@ -1855,6 +1954,7 @@ private:
     bool removed{};
     std::shared_ptr<ClickChain> clicks;
     std::shared_ptr<EditorEventChain> editing;
+    std::shared_ptr<ChangeChain> changes;
     std::shared_ptr<detail::ScrollIntentRecord> scrollIntent;
     std::shared_ptr<detail::ManagedScrollState> scrollOwner;
     std::shared_ptr<ScrollController> scrollController;
@@ -2013,6 +2113,26 @@ private:
   static bool commandReported(const EditorCommandResult &command, const std::weak_ptr<const void> &lifetime) {
     return command.reported_ && !lifetime.expired() && !command.collector_.expired() &&
            !lifetime.owner_before(command.collector_) && !command.collector_.owner_before(lifetime);
+  }
+
+  template <class T, class Callback>
+  std::function<EditorCommandResult(const PropertyUpdate<T> &)> changeAdapter(Callback action,
+                                                                              std::source_location origin) {
+    if constexpr (std::is_pointer_v<Callback> || requires { action.operator bool(); }) {
+      if (!static_cast<bool>(action)) {
+        return {};
+      }
+    }
+
+    if constexpr (detail::ChangeValueAction<Callback, T>) {
+      return actionAdapter<PropertyUpdate<T>>(
+        [action = std::move(action)](const PropertyUpdate<T> &receipt) mutable -> decltype(auto) {
+          return action(receipt.snapshot->value);
+        },
+        origin);
+    } else {
+      return actionAdapter<PropertyUpdate<T>>(std::move(action), origin);
+    }
   }
 
   template <class Event, class Callback>
@@ -2175,6 +2295,7 @@ private:
   std::size_t keyHandlers_{};
   std::size_t clickHandlers_{};
   std::size_t editingHandlers_{};
+  std::size_t changeHandlers_{};
   std::vector<std::shared_ptr<LayoutRecord>> layouts_ = std::vector<std::shared_ptr<LayoutRecord>>(0);
   std::shared_ptr<detail::DialogHostRecord> dialogs_;
   std::vector<std::shared_ptr<detail::MessageRecord>> messages_ =
