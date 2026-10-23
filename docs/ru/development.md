@@ -2,6 +2,11 @@
 
 [Английская версия](../development.md)
 
+<!-- translation-source: docs/development.md
+source-revision: fabecc45bcda4ba1c95d4ec899977513696ff653
+status: current
+-->
+
 Эта глава предназначена для разработчиков самой библиотеки. Для создания
 приложения начните с [краткого руководства](index.md).
 
@@ -30,6 +35,61 @@ Task preflight помогает рано найти ошибку, затем с�
 Новые, удалённые, переименованные, неизвестные или непокрытые файлы дают full.
 Обязанности integration/milestone сохраняются; недоступные проверки остаются
 NOT_RUN. Действующая PR policy и hosted MSVC/GCC/docs gates не изменены.
+
+### Итоговая интеграционная проверка
+
+Для итоговой проверки изменений runtime/API настройте и соберите каждый
+нативный профиль на соответствующей платформе, затем запустите полный настроенный
+набор CTest. Четыре профиля: `windows-msvc-debug`, `windows-msvc-release`,
+`linux-gcc-debug` и `linux-gcc-release`:
+
+```powershell
+cmake --preset windows-msvc-debug
+cmake --build --preset windows-msvc-debug
+ctest --preset windows-msvc-debug
+
+cmake --preset windows-msvc-release
+cmake --build --preset windows-msvc-release
+ctest --preset windows-msvc-release
+
+cmake --preset linux-gcc-debug
+cmake --build --preset linux-gcc-debug
+ctest --preset linux-gcc-debug
+
+cmake --preset linux-gcc-release
+cmake --build --preset linux-gcc-release
+ctest --preset linux-gcc-release
+```
+
+Запускайте каждую группу команд на соответствующей платформе. Для MSVC требуется
+настроенная среда разработчика Visual Studio. Не добавляйте
+`-R`, `-E` или другой фильтр к итоговому запуску CTest: `ctest --preset`
+выполняет все тесты, зарегистрированные при настройке, включая тест установленного
+пакета `portals.package-install`, который перемещает SDK и собирает новое приложение-потребитель.
+Выбранный preflight полезен во время работы, но не заменяет полный запуск.
+
+Интеграционная проверка также включает отдельное приложение-потребитель. В Linux
+настройте, соберите и запустите его командами:
+
+```powershell
+cmake -S examples/consumer -B build/consumer -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/consumer
+./build/consumer/portals_consumer
+```
+
+В Windows используйте Ninja и конфигурацию Debug:
+
+```powershell
+cmake -S examples/consumer -B build/consumer -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/consumer
+.\build\consumer\portals_consumer.exe
+```
+
+Остальные интеграционные ожидания — проверки имён и static checks, строгая
+документация на английском и русском со ссылками, применимые проверки sanitizer и
+lifetime — перечислены в [реестре контрактов](../../tools/ci/check_contracts.json).
+Сейчас матрица сборки и тестов PR запускает только Windows/MSVC Debug и Linux/GCC
+Debug. Для Release нужны отдельные запуски: текущая матрица CI их не проверяет.
 
 [Тестирование без терминала (на английском)](../testing.md) описывает обычный
 набор тестов, проверки имён и терминальные фикстуры. [Фаззинг (на английском)](../../fuzz/README.md)
