@@ -109,6 +109,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- Typed and named widget references are available directly from `ui_ref.hpp`;
+  typed scene lookups are complete in `ui_scene.hpp` without including UI recipes.
+  Existing umbrella includes and reference behavior remain unchanged.
+
 - Scene error-report formatting and factory-failure delivery now live in a
   separate implementation file. Public scene APIs, diagnostic output and
   callback-lifetime behavior remain unchanged.

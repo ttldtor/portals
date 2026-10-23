@@ -3,6 +3,7 @@
 #pragma once
 
 #include <portals/detail/move_only_function.hpp>
+#include <portals/detail/quit_command.hpp>
 #include <portals/detail/setup_failure.hpp>
 #include <portals/managed.hpp>
 #include <portals/ui_action.hpp>
@@ -139,39 +140,6 @@ inline QuitAction quit(SceneRef scene, std::source_location origin = std::source
  * SceneRef::quit remains the explicit checked alternative. Untyped &quit needs overload selection.
  */
 void quit(std::source_location origin = std::source_location::current());
-
-namespace detail {
-/** @brief Exact overload-selection target for a bare short command in existing callback templates. */
-struct QuitCommand {
-  /** @brief Source-location-aware short command signature used for exact overload selection. */
-  using Function = void (*)(std::source_location);
-
-  /** @param command Exact short command; no default arguments survive a function pointer.
-   * @param origin Implicit conversion site, replaced by an explicit registration origin when supplied.
-   */
-  QuitCommand(Function command, std::source_location origin = std::source_location::current()) noexcept
-      : command(command), origin(origin) {
-  }
-
-  /** @brief Invoke the selected short command with its retained registration origin. */
-  void operator()() const {
-    command(origin);
-  }
-
-  Function command;            ///< Exact source-location-aware command target.
-  std::source_location origin; ///< Original registration site, never an invocation-internal location.
-};
-
-/** @tparam Callback Existing owning action.
- * @param callback Only the internal bare-command adapter receives a registration origin.
- * @param origin Original registration site, preserved through pipe deferral.
- */
-template <class Callback> void commandOrigin(Callback &callback, std::source_location origin) noexcept {
-  if constexpr (std::same_as<Callback, QuitCommand>) {
-    callback.origin = origin;
-  }
-}
-} // namespace detail
 
 /** @brief Checked factory/setup/run policies. */
 struct RunAppOptions {
@@ -1424,4 +1392,12 @@ inline int runApp(Scene &owner, ApplicationTerminal &terminal, std::stop_token s
                   std::source_location origin = std::source_location::current()) {
   return owner.runApp(terminal, stop, origin);
 }
+
+// The public contract is documented on Scene::get in ui_scene.hpp.
+template <class T>
+  requires std::derived_from<T, Widget>
+Ref<T> Scene::get(std::string_view name, std::source_location origin) {
+  return detail::NamedAccess::request<T>({ref().anchor_, owner_, std::string(name), origin});
+}
+
 } // namespace portals::ui
