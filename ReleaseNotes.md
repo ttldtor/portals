@@ -159,6 +159,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Fixed
 
+- Architecture export validation keeps historical source coordinates independent
+  of current file lengths, so source archives and shallow checkouts remain usable
+  after header refactoring. Pinned-revision anchor checks remain separate.
+
 - Managed action adapters check scene lifetime before restoring admission state or
   recording callback results after defensive teardown during manual event routing.
 
