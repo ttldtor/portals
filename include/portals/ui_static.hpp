@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
-#include <portals/ui.hpp>
+#include <portals/ui_scene_resource.hpp>
 
 #include <array>
 

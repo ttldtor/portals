@@ -109,6 +109,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- The UI umbrella delegates to focused construction, control, layout and scene
+  headers. Existing includes remain supported; consumers can select the subject
+  headers they use without loading the complete factory surface.
+
 - Fluent recipe storage and control-property provenance are separated from
   control-specific construction while preserving existing recipe calls,
   setup order and error propagation.

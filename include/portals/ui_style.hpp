@@ -3,7 +3,7 @@
 #pragma once
 
 #include <portals/style_pss.hpp>
-#include <portals/ui.hpp>
+#include <portals/ui_scene_resource.hpp>
 
 #include <filesystem>
 

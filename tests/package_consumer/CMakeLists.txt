@@ -3,7 +3,10 @@ project(PortalsPackageConsumer LANGUAGES CXX)
 
 find_package(Portals 0.2 CONFIG REQUIRED)
 add_executable(portals_ref_headers_consumer
-  ref_header.cpp scene_header.cpp ref_header_order_before.cpp ref_header_order_after.cpp)
+  ref_header.cpp scene_header.cpp
+  ui_controls_header.cpp ui_layout_header.cpp ui_scene_pipeline_header.cpp
+  ui_static_header.cpp
+  ref_header_order_before.cpp ref_header_order_after.cpp)
 target_link_libraries(portals_ref_headers_consumer PRIVATE portals::core)
 set_target_properties(portals_ref_headers_consumer PROPERTIES CXX_EXTENSIONS OFF)
 if(WIN32)

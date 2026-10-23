@@ -867,6 +867,10 @@ if(PORTALS_BUILD_TESTS)
   add_executable(portals_ref_headers
     tests/package_consumer/ref_header.cpp
     tests/package_consumer/scene_header.cpp
+    tests/package_consumer/ui_controls_header.cpp
+    tests/package_consumer/ui_layout_header.cpp
+    tests/package_consumer/ui_scene_pipeline_header.cpp
+    tests/package_consumer/ui_static_header.cpp
     tests/package_consumer/ref_header_order_before.cpp
     tests/package_consumer/ref_header_order_after.cpp)
   target_link_libraries(portals_ref_headers PRIVATE portals::core)
