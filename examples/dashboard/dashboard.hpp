@@ -4,7 +4,6 @@
 #include "provider.hpp"
 #include <format>
 #include <memory>
-#include <portals/input_match.hpp>
 #include <portals/table_column.hpp>
 #include <portals/text_format.hpp>
 #include <portals/ui.hpp>
@@ -99,38 +98,18 @@ struct Presentation {
     return body;
   }
 
-  std::expected<void, ManagedError> configure(ManagedScene &owner, Application &app) {
+  std::expected<void, ManagedError> configure(Application &app) {
     take(app.router().setFocus(table_.node()));
 
-    take(owner.onInput([this](const InputEvent &event) -> std::expected<bool, ManagedError> {
-      if (!keyPressed(event, InputKey::F2, {})) {
-        return false;
-      }
-
-      const auto next = !turbo_;
-
-      auto previewed = selector_.preview(next ? "turbo" : "modern");
-
-      if (!previewed) {
-        return std::unexpected(previewed.error());
-      }
-
-      auto committed = selector_.commit();
-
-      if (!committed) {
-        return std::unexpected(committed.error());
-      }
-
-      turbo_ = next;
-
-      return true;
-    }));
-    take(owner.onKey(ui::press("F10 | Ctrl+C"), [] {
-      ui::quit();
-    }));
     provider_->start(model_);
 
     return {};
+  }
+
+  std::expected<void, ManagedError> cycleTheme() {
+    return selector_.preview(turbo_ ? "modern" : "turbo").and_then([this] {
+      return selector_.commit();
+    });
   }
 
   std::expected<void, TreeError> tablePrepared(const ModelFrame<Quote> &pin,
@@ -227,9 +206,14 @@ private:
       return state->recipe(owner, app, readOptions());
     },
                            ui::themeSelector(state->selector_, catalog, selectorOptions));
-    scene.configure([state](ManagedScene &owner, Application &app) {
-      return state->configure(owner, app);
-    });
+    // clang-format off
+    scene
+      | ui::onKey("F2", [state] { return state->cycleTheme(); })
+      | ui::onKey("F10 | Ctrl+C", ui::quit)
+      | ui::configure([state](ManagedScene &, Application &app) {
+          return state->configure(app);
+        });
+    // clang-format on
     scene.onStop([state] {
       if (state->provider_) {
         auto provider = std::move(state->provider_);

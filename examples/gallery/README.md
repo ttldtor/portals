@@ -1,7 +1,7 @@
 # Control gallery
 
 [`form`](fluent_form.hpp) is an ordinary function returning a lazy owning scene.
-It describes labels, an explicit-mode text field, a checkbox and two buttons,
+It describes labels, an explicit-mode text field, a checkbox and three buttons,
 then applies styles and handlers through pipe modifiers. It has no test transport,
 statistics, counter or stationary wrapper object. The optional Run callback is an
 application action; by default Run leaves the field models unchanged.
@@ -24,7 +24,7 @@ the runner boundary; user callbacks invoked inside the boundary are checked.
 [`settings.hpp`](settings.hpp) defines the two settings; [`options.hpp`](options.hpp)
 defines their native Lyra schema, with no handwritten argv loop. The separate
 [`themes.hpp`](themes.hpp) preserves the existing preset order and F2 behavior;
-the planned universal theme selector is not implemented here. Enter commits the
+the scene-owned selector previews themes before committing them. Enter commits the
 name, Tab changes focus, F2 changes theme, F10 or Ctrl+C quits.
 
 ```powershell
