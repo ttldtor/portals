@@ -1684,6 +1684,235 @@ private:
     return std::move(*this);
   }
 
+  /** @brief Validate actual semantic capabilities before merging a prepared resource packet.
+   * Allocation failures propagate to the outer mount boundary; retained provenance stays owning.
+   */
+  static std::expected<void, ManagedError> prepareSemanticControl(State &state, Node<Widget> parent) {
+    const auto kind = state.semanticConstruction ? state.semanticConstruction->kind : detail::ControlFactoryKind::USER;
+
+    if ((state.messageSettingsRequested && kind != detail::ControlFactoryKind::MESSAGE_BINDING) ||
+        (state.notificationSettingsRequested && kind != detail::ControlFactoryKind::NOTIFICATION_BINDING) ||
+        (state.themeSelectorSettingsRequested && kind != detail::ControlFactoryKind::THEME_SELECTOR_BINDING &&
+         kind != detail::ControlFactoryKind::THEME_CATALOG_BINDING) ||
+        (state.themeCatalogSettingsRequested && kind != detail::ControlFactoryKind::THEME_CATALOG_BINDING)) {
+      return std::unexpected(detail::controlContextError({ControlContextErrorCode::UNSUPPORTED_PROPERTY, {}}, parent));
+    }
+
+    if (state.semanticConstruction && state.semanticConstruction->prepared) {
+      const auto &source = state.semanticConstruction->source;
+      auto merged = detail::Access::mergeControlSettings(state.controlPatch, source);
+
+      // Resource packets come from ControlContext::resolve, whose origins contain exactly
+      // the present winning leaves. Keep factory provenance for every other retained value.
+      merged.origin = state.controlPatch.origin;
+      merged.origins = state.controlPatch.origins;
+
+      for (const auto &origin : source.origins) {
+        auto found = std::ranges::find(merged.origins, origin.path, &ControlPropertyOrigin::path);
+
+        if (found == merged.origins.end()) {
+          merged.origins.push_back(origin);
+        } else {
+          found->source = origin.source;
+        }
+      }
+
+      state.controlPatch = std::move(merged);
+      state.controlPrepared = true;
+      state.materializedSettings = state.semanticConstruction->materialized;
+      state.settingsRequested = true;
+    }
+
+    return {};
+  }
+
+  /** @brief Install only the concrete recipe's scoped fallback into its effective context. */
+  static std::expected<void, ControlContextError> installControlSchema(const State &state, ControlContext &controls) {
+    if constexpr (std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, Spinner>) {
+      return detail::ControlContextAccess::installPrimitiveSchema(controls, *state.controlType);
+    } else if constexpr (std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>) {
+      return detail::ControlContextAccess::installScrollSchema(controls, *state.controlType);
+    } else if constexpr (std::same_as<T, DataStateView>) {
+      return detail::ControlContextAccess::installDataStateSchema(controls);
+    } else if constexpr (std::same_as<T, OverlayHost> || std::same_as<T, Dialog>) {
+      if (!state.semanticConstruction) {
+        return detail::ControlContextAccess::installDialogSchema(controls, *state.controlType);
+      }
+
+      if (state.semanticConstruction->kind == detail::ControlFactoryKind::THEME_CATALOG_BINDING) {
+        return detail::ControlContextAccess::installThemeCatalogSchema(controls, true);
+      }
+
+      if (state.semanticConstruction->kind == detail::ControlFactoryKind::THEME_SELECTOR_BINDING) {
+        return detail::ControlContextAccess::installThemeSelectorSchema(controls);
+      }
+
+      return detail::ControlContextAccess::installMessageSchema(controls);
+    } else if constexpr (std::same_as<T, Overlay>) {
+      return state.semanticConstruction ? detail::ControlContextAccess::installNotificationSchema(controls)
+                                        : detail::ControlContextAccess::installOverlaySchema(controls);
+    } else if constexpr (std::same_as<T, HelpView> || std::same_as<T, KeyHints>) {
+      return detail::ControlContextAccess::installKeyHelpSchema(controls, *state.controlType);
+    } else if constexpr (detail::IsVirtualList<T>::value || detail::IsVirtualTable<T>::value ||
+                         detail::IsChart<T>::value) {
+      return detail::ControlContextAccess::installVirtualViewSchema(controls, *state.controlType);
+    } else {
+      return {};
+    }
+  }
+
+  /** @brief Check factory capability after resolving the variant's concrete base. */
+  static bool matchesControlFactory(const State &state, const ResolvedControl &effective) {
+    if constexpr (std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, Spinner>) {
+      return effective.factoryKind == detail::ControlFactoryKind::PRIMITIVE_FALLBACK;
+    } else if constexpr (std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>) {
+      return effective.factoryKind == detail::ControlFactoryKind::SCROLL_FALLBACK;
+    } else if constexpr (std::same_as<T, DataStateView>) {
+      return effective.factoryKind == detail::ControlFactoryKind::DATA_STATE_FALLBACK;
+    } else if constexpr (std::same_as<T, OverlayHost> || std::same_as<T, Dialog>) {
+      const auto expectedKind =
+        state.semanticConstruction ? state.semanticConstruction->kind : detail::ControlFactoryKind::DIALOG_FALLBACK;
+
+      return effective.factoryKind == expectedKind;
+    } else if constexpr (std::same_as<T, Overlay>) {
+      const auto expectedKind = state.semanticConstruction ? detail::ControlFactoryKind::NOTIFICATION_BINDING
+                                                           : detail::ControlFactoryKind::OVERLAY_FALLBACK;
+
+      return effective.factoryKind == expectedKind;
+    } else if constexpr (std::same_as<T, HelpView> || std::same_as<T, KeyHints>) {
+      return effective.factoryKind == detail::ControlFactoryKind::KEY_HELP_FALLBACK;
+    } else if constexpr (detail::IsVirtualList<T>::value || detail::IsVirtualTable<T>::value ||
+                         detail::IsChart<T>::value) {
+      return effective.factoryKind == detail::ControlFactoryKind::VIRTUAL_VIEW_FALLBACK;
+    } else {
+      return true;
+    }
+  }
+
+  /** @brief Restore a non-inherited visual identity, then validate its base and factory in that order. */
+  static std::expected<void, ManagedError> validateControlIdentity(const State &state, ResolvedControl &effective,
+                                                                   const ControlContext &controls, Node<Widget> parent,
+                                                                   bool restoreVariant) {
+    if (restoreVariant && state.controlVariant) {
+      const auto identity = controls.resolve(*state.controlVariant);
+
+      if (!identity) {
+        return std::unexpected(detail::controlContextError(identity.error(), parent));
+      }
+
+      effective.type = identity->type;
+      effective.base = identity->base;
+      effective.lineage = identity->lineage;
+    }
+
+    if (effective.base != *state.controlType) {
+      return std::unexpected(detail::controlContextError({ControlContextErrorCode::INVALID_VALUE, {}}, parent));
+    }
+
+    if (!matchesControlFactory(state, effective)) {
+      return std::unexpected(detail::controlContextError({ControlContextErrorCode::INVALID_VALUE, {}}, parent));
+    }
+
+    return {};
+  }
+
+  /** @brief Charge only new leaves before allocating style identity or retained resolved settings.
+   * All inputs are borrowed for this synchronous preparation step; State owns the final copies.
+   */
+  static std::expected<void, ManagedError>
+  retainControlSettings(State &state, ResolvedControl &effective,
+                        const std::optional<ResolvedControl> &notificationStyle, Node<Widget> parent,
+                        detail::MountContext &context) {
+    const auto addedLeaves =
+      state.controlPrepared
+        ? (detail::controlSettingsPresenceSet(effective.settings) & ~state.materializedSettings).count()
+        : effective.materializedLeaves;
+    const auto limit = context.controls.limits().maxMaterializedLeaves;
+
+    if (context.controlLeaves > limit || addedLeaves > limit - context.controlLeaves) {
+      return std::unexpected(
+        detail::controlContextError({ControlContextErrorCode::MATERIALIZED_LEAF_LIMIT, {}}, parent));
+    }
+
+    context.controlLeaves += addedLeaves;
+
+    if (state.controlVariant) {
+      const auto &identity = notificationStyle ? *notificationStyle : effective;
+
+      state.intrinsicStyle =
+        StyleTarget{.type = identity.type,
+                    .control = std::derived_from<T, Control> || std::same_as<T, LineEdit> || std::same_as<T, Password>,
+                    .baseTypes = identity.lineage};
+
+      if constexpr (std::same_as<T, Row> || std::same_as<T, Column>) {
+        constexpr std::string_view NATURAL = std::same_as<T, Row> ? "Row" : "Column";
+
+        if (state.intrinsicStyle->type != NATURAL &&
+            std::ranges::find(state.intrinsicStyle->baseTypes, NATURAL) == state.intrinsicStyle->baseTypes.end()) {
+          state.intrinsicStyle->baseTypes.emplace_back(NATURAL);
+        }
+      }
+    }
+
+    state.resolvedControl = std::make_unique<ResolvedControl>(std::move(effective));
+
+    return {};
+  }
+
+  /** @brief Resolve settings in a local schema snapshot, keeping notification styling independent of defaults. */
+  static std::expected<void, ManagedError> prepareControlSettings(State &state, Node<Widget> parent,
+                                                                  detail::MountContext &context) {
+    std::optional<ResolvedControl> notificationStyle;
+
+    if constexpr (std::same_as<T, Overlay>) {
+      if (state.semanticConstruction && state.controlVariant &&
+          state.semanticConstruction->kind == detail::ControlFactoryKind::NOTIFICATION_BINDING) {
+        auto identity = context.controls.resolve(*state.controlVariant);
+
+        if (!identity) {
+          return std::unexpected(detail::controlContextError(identity.error(), parent));
+        }
+
+        if (identity->base == "Overlay" && identity->factoryKind == detail::ControlFactoryKind::OVERLAY_FALLBACK) {
+          // Existing Overlay variants on notifications are visual identities, never inherited service/layout
+          // defaults.
+          notificationStyle.emplace(std::move(*identity));
+        }
+      }
+    }
+
+    const bool inheritControlSettings = state.inheritControlSettings && !notificationStyle;
+    auto controls =
+      !inheritControlSettings || (state.controlPrepared && !state.controlVariant && !state.inheritPreparedDefaults)
+        ? ControlContext(context.controls.limits())
+        : context.controls;
+    auto installed = installControlSchema(state, controls);
+
+    if (!installed) {
+      return std::unexpected(detail::controlContextError(installed.error(), parent));
+    }
+
+    const auto type = inheritControlSettings && state.controlVariant ? std::string_view(*state.controlVariant)
+                                                                     : std::string_view(*state.controlType);
+    auto effective = inheritControlSettings
+                       ? controls.resolve(type, detail::Access::mergeControlSettings(std::move(state.controlArguments),
+                                                                                     state.controlPatch))
+                       : controls.resolve(type, state.controlPatch);
+
+    if (!effective) {
+      return std::unexpected(detail::controlContextError(effective.error(), parent));
+    }
+
+    auto validated = validateControlIdentity(state, *effective, context.controls, parent,
+                                             !inheritControlSettings && !notificationStyle);
+
+    if (!validated) {
+      return validated;
+    }
+
+    return retainControlSettings(state, *effective, notificationStyle, parent, context);
+  }
+
   /** @brief Finish fallible owning configuration before entering recursive construction/children.
    * @param state Consumed recipe storage, retaining any resolved properties until setup completes.
    * @param parent Existing checked parent used for failure attribution.
@@ -1693,42 +1922,13 @@ private:
   static std::expected<void, ManagedError> prepareControl(State &state, Node<Widget> parent,
                                                           detail::MountContext &context) {
     if constexpr (std::same_as<T, Dialog> || std::same_as<T, Overlay>) {
-      const auto kind =
-        state.semanticConstruction ? state.semanticConstruction->kind : detail::ControlFactoryKind::USER;
+      auto prepared = prepareSemanticControl(state, parent);
 
-      if ((state.messageSettingsRequested && kind != detail::ControlFactoryKind::MESSAGE_BINDING) ||
-          (state.notificationSettingsRequested && kind != detail::ControlFactoryKind::NOTIFICATION_BINDING) ||
-          (state.themeSelectorSettingsRequested && kind != detail::ControlFactoryKind::THEME_SELECTOR_BINDING &&
-           kind != detail::ControlFactoryKind::THEME_CATALOG_BINDING) ||
-          (state.themeCatalogSettingsRequested && kind != detail::ControlFactoryKind::THEME_CATALOG_BINDING)) {
-        return std::unexpected(
-          detail::controlContextError({ControlContextErrorCode::UNSUPPORTED_PROPERTY, {}}, parent));
-      }
-      if (state.semanticConstruction && state.semanticConstruction->prepared) {
-        const auto &source = state.semanticConstruction->source;
-        auto merged = detail::Access::mergeControlSettings(state.controlPatch, source);
-
-        // Resource packets come from ControlContext::resolve, whose origins contain exactly
-        // the present winning leaves. Keep factory provenance for every other retained value.
-        merged.origin = state.controlPatch.origin;
-        merged.origins = state.controlPatch.origins;
-
-        for (const auto &origin : source.origins) {
-          auto found = std::ranges::find(merged.origins, origin.path, &ControlPropertyOrigin::path);
-
-          if (found == merged.origins.end()) {
-            merged.origins.push_back(origin);
-          } else {
-            found->source = origin.source;
-          }
-        }
-
-        state.controlPatch = std::move(merged);
-        state.controlPrepared = true;
-        state.materializedSettings = state.semanticConstruction->materialized;
-        state.settingsRequested = true;
+      if (!prepared) {
+        return prepared;
       }
     }
+
     if constexpr (std::same_as<T, Grid>) {
       if (state.layout && state.layout->gridContainer && state.layout->control && state.layout->control->prepared) {
         state.resolvedControl = std::move(state.layout->control->resolved);
@@ -1745,182 +1945,12 @@ private:
     if ((state.settingsRequested || state.controlVariant) && !state.controlType) {
       return std::unexpected(detail::controlContextError({ControlContextErrorCode::UNSUPPORTED_PROPERTY, {}}, parent));
     }
+
     const bool builtinOnly = context.controls.empty() && !state.settingsRequested && !state.controlVariant;
+
     if (state.controlType && (!state.controlPrepared || state.settingsRequested || state.controlVariant) &&
         !builtinOnly) {
-      std::optional<ResolvedControl> notificationStyle;
-
-      if constexpr (std::same_as<T, Overlay>) {
-        if (state.semanticConstruction && state.controlVariant &&
-            state.semanticConstruction->kind == detail::ControlFactoryKind::NOTIFICATION_BINDING) {
-          auto identity = context.controls.resolve(*state.controlVariant);
-
-          if (!identity) {
-            return std::unexpected(detail::controlContextError(identity.error(), parent));
-          }
-
-          if (identity->base == "Overlay" && identity->factoryKind == detail::ControlFactoryKind::OVERLAY_FALLBACK) {
-            // Existing Overlay variants on notifications are visual identities, never inherited service/layout
-            // defaults.
-            notificationStyle.emplace(std::move(*identity));
-          }
-        }
-      }
-
-      const bool inheritControlSettings = state.inheritControlSettings && !notificationStyle;
-      auto controls =
-        !inheritControlSettings || (state.controlPrepared && !state.controlVariant && !state.inheritPreparedDefaults)
-          ? ControlContext(context.controls.limits())
-          : context.controls;
-
-      if constexpr (std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, Spinner>) {
-        auto installed = detail::ControlContextAccess::installPrimitiveSchema(controls, *state.controlType);
-
-        if (!installed) {
-          return std::unexpected(detail::controlContextError(installed.error(), parent));
-        }
-      }
-
-      if constexpr (std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>) {
-        auto installed = detail::ControlContextAccess::installScrollSchema(controls, *state.controlType);
-
-        if (!installed) {
-          return std::unexpected(detail::controlContextError(installed.error(), parent));
-        }
-      }
-      if constexpr (std::same_as<T, DataStateView>) {
-        auto installed = detail::ControlContextAccess::installDataStateSchema(controls);
-
-        if (!installed) {
-          return std::unexpected(detail::controlContextError(installed.error(), parent));
-        }
-      }
-      if constexpr (std::same_as<T, OverlayHost> || std::same_as<T, Dialog>) {
-        auto installed = !state.semanticConstruction
-                           ? detail::ControlContextAccess::installDialogSchema(controls, *state.controlType)
-                         : state.semanticConstruction->kind == detail::ControlFactoryKind::THEME_CATALOG_BINDING
-                           ? detail::ControlContextAccess::installThemeCatalogSchema(controls, true)
-                         : state.semanticConstruction->kind == detail::ControlFactoryKind::THEME_SELECTOR_BINDING
-                           ? detail::ControlContextAccess::installThemeSelectorSchema(controls)
-                           : detail::ControlContextAccess::installMessageSchema(controls);
-
-        if (!installed) {
-          return std::unexpected(detail::controlContextError(installed.error(), parent));
-        }
-      }
-
-      if constexpr (std::same_as<T, Overlay>) {
-        auto installed = state.semanticConstruction ? detail::ControlContextAccess::installNotificationSchema(controls)
-                                                    : detail::ControlContextAccess::installOverlaySchema(controls);
-        if (!installed) {
-          return std::unexpected(detail::controlContextError(installed.error(), parent));
-        }
-      }
-      if constexpr (std::same_as<T, HelpView> || std::same_as<T, KeyHints>) {
-        auto installed = detail::ControlContextAccess::installKeyHelpSchema(controls, *state.controlType);
-        if (!installed) {
-          return std::unexpected(detail::controlContextError(installed.error(), parent));
-        }
-      }
-      if constexpr (detail::IsVirtualList<T>::value || detail::IsVirtualTable<T>::value || detail::IsChart<T>::value) {
-        auto installed = detail::ControlContextAccess::installVirtualViewSchema(controls, *state.controlType);
-
-        if (!installed) {
-          return std::unexpected(detail::controlContextError(installed.error(), parent));
-        }
-      }
-
-      const auto type = inheritControlSettings && state.controlVariant ? std::string_view(*state.controlVariant)
-                                                                       : std::string_view(*state.controlType);
-      auto effective = inheritControlSettings
-                         ? controls.resolve(type, detail::Access::mergeControlSettings(
-                                                    std::move(state.controlArguments), state.controlPatch))
-                         : controls.resolve(type, state.controlPatch);
-      if (!effective) {
-        return std::unexpected(detail::controlContextError(effective.error(), parent));
-      }
-      if (!inheritControlSettings && state.controlVariant && !notificationStyle) {
-        const auto identity = context.controls.resolve(*state.controlVariant);
-
-        if (!identity) {
-          return std::unexpected(detail::controlContextError(identity.error(), parent));
-        }
-
-        effective->type = identity->type;
-        effective->base = identity->base;
-        effective->lineage = identity->lineage;
-      }
-      if (effective->base != *state.controlType) {
-        return std::unexpected(detail::controlContextError({ControlContextErrorCode::INVALID_VALUE, {}}, parent));
-      }
-      if constexpr (std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, Spinner>) {
-        if (effective->factoryKind != detail::ControlFactoryKind::PRIMITIVE_FALLBACK) {
-          return std::unexpected(detail::controlContextError({ControlContextErrorCode::INVALID_VALUE, {}}, parent));
-        }
-      }
-
-      if constexpr (std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>) {
-        if (effective->factoryKind != detail::ControlFactoryKind::SCROLL_FALLBACK) {
-          return std::unexpected(detail::controlContextError({ControlContextErrorCode::INVALID_VALUE, {}}, parent));
-        }
-      }
-      if constexpr (std::same_as<T, DataStateView>) {
-        if (effective->factoryKind != detail::ControlFactoryKind::DATA_STATE_FALLBACK) {
-          return std::unexpected(detail::controlContextError({ControlContextErrorCode::INVALID_VALUE, {}}, parent));
-        }
-      }
-      if constexpr (std::same_as<T, OverlayHost> || std::same_as<T, Dialog>) {
-        const auto expectedKind =
-          state.semanticConstruction ? state.semanticConstruction->kind : detail::ControlFactoryKind::DIALOG_FALLBACK;
-        if (effective->factoryKind != expectedKind) {
-          return std::unexpected(detail::controlContextError({ControlContextErrorCode::INVALID_VALUE, {}}, parent));
-        }
-      }
-
-      if constexpr (std::same_as<T, Overlay>) {
-        const auto expectedKind = state.semanticConstruction ? detail::ControlFactoryKind::NOTIFICATION_BINDING
-                                                             : detail::ControlFactoryKind::OVERLAY_FALLBACK;
-        if (effective->factoryKind != expectedKind) {
-          return std::unexpected(detail::controlContextError({ControlContextErrorCode::INVALID_VALUE, {}}, parent));
-        }
-      }
-      if constexpr (std::same_as<T, HelpView> || std::same_as<T, KeyHints>) {
-        if (effective->factoryKind != detail::ControlFactoryKind::KEY_HELP_FALLBACK) {
-          return std::unexpected(detail::controlContextError({ControlContextErrorCode::INVALID_VALUE, {}}, parent));
-        }
-      }
-      if constexpr (detail::IsVirtualList<T>::value || detail::IsVirtualTable<T>::value || detail::IsChart<T>::value) {
-        if (effective->factoryKind != detail::ControlFactoryKind::VIRTUAL_VIEW_FALLBACK) {
-          return std::unexpected(detail::controlContextError({ControlContextErrorCode::INVALID_VALUE, {}}, parent));
-        }
-      }
-
-      const auto addedLeaves =
-        state.controlPrepared
-          ? (detail::controlSettingsPresenceSet(effective->settings) & ~state.materializedSettings).count()
-          : effective->materializedLeaves;
-      const auto limit = context.controls.limits().maxMaterializedLeaves;
-      if (context.controlLeaves > limit || addedLeaves > limit - context.controlLeaves) {
-        return std::unexpected(
-          detail::controlContextError({ControlContextErrorCode::MATERIALIZED_LEAF_LIMIT, {}}, parent));
-      }
-      context.controlLeaves += addedLeaves;
-      if (state.controlVariant) {
-        const auto &identity = notificationStyle ? *notificationStyle : *effective;
-
-        state.intrinsicStyle = StyleTarget{.type = identity.type,
-                                           .control = std::derived_from<T, Control> || std::same_as<T, LineEdit> ||
-                                                      std::same_as<T, Password>,
-                                           .baseTypes = identity.lineage};
-        if constexpr (std::same_as<T, Row> || std::same_as<T, Column>) {
-          constexpr std::string_view NATURAL = std::same_as<T, Row> ? "Row" : "Column";
-          if (state.intrinsicStyle->type != NATURAL &&
-              std::ranges::find(state.intrinsicStyle->baseTypes, NATURAL) == state.intrinsicStyle->baseTypes.end()) {
-            state.intrinsicStyle->baseTypes.emplace_back(NATURAL);
-          }
-        }
-      }
-      state.resolvedControl = std::make_unique<ResolvedControl>(std::move(*effective));
+      return prepareControlSettings(state, parent, context);
     }
 
     return {};

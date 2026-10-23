@@ -53,6 +53,9 @@ Use style layers when palette changes must preserve application and user overrid
 
 ## API reference
 
+In generated HTML, @ref fluent_ui "Declarative UI headers" groups references,
+recipes, lifecycle and resource extensions by responsibility.
+
 In generated HTML, use **API reference** to find types, concepts, namespaces,
 members and headers. For example, [ui::Scene](../include/portals/ui_scene.hpp)
 and [WidgetTree](../include/portals/widget.hpp) link to type contracts in HTML

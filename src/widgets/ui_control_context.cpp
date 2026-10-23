@@ -595,223 +595,260 @@ ControlContextError exceptionError() noexcept {
 }
 
 // This finite list is the complete scalar vocabulary; there is no field reflection.
-#define PORTALS_CONTROL_LEAVES(X)                                                                                      \
-  X(text, 0)                                                                                                           \
-  X(width, 1)                                                                                                          \
-  X(height, 2)                                                                                                         \
-  X(flex, 3)                                                                                                           \
-  X(gap, 4)                                                                                                            \
-  X(state, 5)                                                                                                          \
-  X(cycle, 6)                                                                                                          \
-  X(editMode, 7)                                                                                                       \
-  X(readOnly, 8)                                                                                                       \
-  X(programmaticChange, 9)                                                                                             \
-  X(displayMode, 10)                                                                                                   \
-  X(placeholder, 11)                                                                                                   \
-  X(history.enabled, 12)                                                                                               \
-  X(history.maxOperations, 13)                                                                                         \
-  X(history.maxBytes, 14)                                                                                              \
-  X(history.groupTyping, 15)                                                                                           \
-  X(history.groupDeletion, 16)                                                                                         \
-  X(grid.columns, 17)                                                                                                  \
-  X(grid.rows, 18)                                                                                                     \
-  X(grid.flow, 19)                                                                                                     \
-  X(grid.columnGap, 20)                                                                                                \
-  X(grid.rowGap, 21)                                                                                                   \
-  X(grid.paddingLeft, 22)                                                                                              \
-  X(grid.paddingTop, 23)                                                                                               \
-  X(grid.paddingRight, 24)                                                                                             \
-  X(grid.paddingBottom, 25)                                                                                            \
-  X(grid.maxTracksPerAxis, 26)                                                                                         \
-  X(grid.maxPlacements, 27)                                                                                            \
-  X(grid.maxPlacementWork, 28)                                                                                         \
-  X(grid.scroll, 29)                                                                                                   \
-  X(linear.mainAlign, 30)                                                                                              \
-  X(linear.crossAlign, 31)                                                                                             \
-  X(linear.overflow, 32)                                                                                               \
-  X(limits.maxInputBytes, 33)                                                                                          \
-  X(limits.maxClusterBytes, 34)                                                                                        \
-  X(limits.maxGraphemes, 35)                                                                                           \
-  X(limits.maxCells, 36)                                                                                               \
-  X(chrome, 37)                                                                                                        \
-  X(glyphs, 38)                                                                                                        \
-  X(maxPaintCells, 39)                                                                                                 \
-  X(value, 40)                                                                                                         \
-  X(minimum, 41)                                                                                                       \
-  X(maximum, 42)                                                                                                       \
-  X(preferredWidth, 43)                                                                                                \
-  X(wheelStep, 44)                                                                                                     \
-  X(keyStep, 45)                                                                                                       \
-  X(pageOverlap, 46)                                                                                                   \
-  X(minimumThumb, 47)                                                                                                  \
-  X(focusable, 48)                                                                                                     \
-  X(horizontal, 49)                                                                                                    \
-  X(vertical, 50)                                                                                                      \
-  X(placement, 51)                                                                                                     \
-  X(axis, 52)                                                                                                          \
-  X(frame.enabled, 53)                                                                                                 \
-  X(frame.glyphs, 54)                                                                                                  \
-  X(frame.maxPaintCells, 55)                                                                                           \
-  X(horizontalAlign, 56)                                                                                               \
-  X(verticalAlign, 57)                                                                                                 \
-  X(initiallyOpen, 58)                                                                                                 \
-  X(format.maxBytesPerBinding, 59)                                                                                     \
-  X(format.strokeSeparator, 60)                                                                                        \
-  X(format.alternativeSeparator, 61)                                                                                   \
-  X(format.repeatMarker, 62)                                                                                           \
-  X(format.releaseMarker, 63)                                                                                          \
-  X(format.unknownMarker, 64)                                                                                          \
-  X(emptyText, 65)                                                                                                     \
-  X(unavailableText, 66)                                                                                               \
-  X(entrySeparator, 67)                                                                                                \
-  X(overflowMarker, 68)                                                                                                \
-  X(rowHeight, 69)                                                                                                     \
-  X(overscanRows, 70)                                                                                                  \
-  X(maxColumns, 71)                                                                                                    \
-  X(maxPreparedCells, 72)                                                                                              \
-  X(maxPreparedTextBytes, 73)                                                                                          \
-  X(mode, 74)                                                                                                          \
-  X(chartGlyphSet, 75)                                                                                                 \
-  X(candleGap, 76)                                                                                                     \
-  X(yRange.enabled, 77)                                                                                                \
-  X(yRange.minimum, 78)                                                                                                \
-  X(yRange.maximum, 79)                                                                                                \
-  X(showStatus, 80)                                                                                                    \
-  X(statusRows, 81)                                                                                                    \
-  X(contentPolicy, 82)                                                                                                 \
-  X(spinnerInterval, 83)                                                                                               \
-  X(labels.loading, 84)                                                                                                \
-  X(labels.empty, 85)                                                                                                  \
-  X(labels.error, 86)                                                                                                  \
-  X(labels.offline, 87)                                                                                                \
-  X(labels.refreshing, 88)                                                                                             \
-  X(labels.retry, 89)                                                                                                  \
-  X(maxLayers, 90)                                                                                                     \
-  X(title, 91)                                                                                                         \
-  X(dialog.mode, 92)                                                                                                   \
-  X(dialog.placement, 93)                                                                                              \
-  X(dialog.maximumPanelSize.width, 94)                                                                                 \
-  X(dialog.maximumPanelSize.height, 95)                                                                                \
-  X(dialog.viewportMargin, 96)                                                                                         \
-  X(dialog.anchorGap, 97)                                                                                              \
-  X(dialog.closeOnEscape, 98)                                                                                          \
-  X(dialog.frame.glyphs, 99)                                                                                           \
-  X(dialog.frame.maxPaintCells, 100)                                                                                   \
-  X(body, 101)                                                                                                         \
-  X(message.labels.acknowledge, 102)                                                                                   \
-  X(message.labels.confirm, 103)                                                                                       \
-  X(message.labels.save, 104)                                                                                          \
-  X(message.labels.discard, 105)                                                                                       \
-  X(message.labels.cancel, 106)                                                                                        \
-  X(message.defaultChoice.enabled, 107)                                                                                \
-  X(message.defaultChoice.value, 108)                                                                                  \
-  X(message.allowDestructiveDefault, 109)                                                                              \
-  X(message.textLimits.maxInputBytes, 110)                                                                             \
-  X(message.textLimits.maxClusterBytes, 111)                                                                           \
-  X(message.textLimits.maxGraphemes, 112)                                                                              \
-  X(message.textLimits.maxCells, 113)                                                                                  \
-  X(message.maxBodyLines, 114)                                                                                         \
-  X(notification.capacity, 115)                                                                                        \
-  X(notification.maxVisible, 116)                                                                                      \
-  X(notification.placement, 117)                                                                                       \
-  X(notification.maximumWidth, 118)                                                                                    \
-  X(notification.margin, 119)                                                                                          \
-  X(notification.gap, 120)                                                                                             \
-  X(notification.overflow, 121)                                                                                        \
-  X(notification.refreshDeduplicated, 122)                                                                             \
-  X(notification.reducedMotion, 123)                                                                                   \
-  X(notification.textLimits.maxInputBytes, 124)                                                                        \
-  X(notification.textLimits.maxClusterBytes, 125)                                                                      \
-  X(notification.textLimits.maxGraphemes, 126)                                                                         \
-  X(notification.textLimits.maxCells, 127)                                                                             \
-  X(notification.actionLabelBytes, 128)                                                                                \
-  X(notification.dedupKeyBytes, 129)                                                                                   \
-  X(notification.maxPaintCells, 130)                                                                                   \
-  X(themeSelector.labels.apply, 131)                                                                                   \
-  X(themeSelector.labels.cancel, 132)                                                                                  \
-  X(themeSelector.labels.closeKeepingPreview, 133)                                                                     \
-  X(themeSelector.labels.emptyStatus, 134)                                                                             \
-  X(themeSelector.labels.errorStatus, 135)                                                                             \
-  X(themeSelector.labels.conflictStatus, 136)                                                                          \
-  X(themeSelector.textLimits.maxInputBytes, 137)                                                                       \
-  X(themeSelector.textLimits.maxClusterBytes, 138)                                                                     \
-  X(themeSelector.textLimits.maxGraphemes, 139)                                                                        \
-  X(themeSelector.textLimits.maxCells, 140)                                                                            \
-  X(themeSelector.openingShortcut.enabled, 141)                                                                        \
-  X(themeSelector.openingShortcut.value, 142)                                                                          \
-  X(themeCatalog.maxChoices, 143)                                                                                      \
-  X(themeCatalog.maxIdBytes, 144)                                                                                      \
-  X(themeCatalog.maxLabelBytes, 145)                                                                                   \
-  X(themeCatalog.maxDescriptionBytes, 146)                                                                             \
-  X(themeCatalog.maxTextBytes, 147)                                                                                    \
-  X(themeCatalog.textLimits.maxInputBytes, 148)                                                                        \
-  X(themeCatalog.textLimits.maxClusterBytes, 149)                                                                      \
-  X(themeCatalog.textLimits.maxGraphemes, 150)                                                                         \
-  X(themeCatalog.textLimits.maxCells, 151)                                                                             \
-  X(themeCatalog.initialId.enabled, 152)                                                                               \
-  X(themeCatalog.initialId.value, 153)                                                                                 \
-  X(themeCatalog.layers.enabled, 154)                                                                                  \
-  X(themeCatalog.layers.maxLayers, 155)                                                                                \
-  X(themeCatalog.layers.maxRules, 156)                                                                                 \
-  X(themeCatalog.layers.maxDeclarations, 157)                                                                          \
-  X(themeCatalog.layers.maxOwnedBytes, 158)                                                                            \
-  X(securePolicy.maxBytes, 159)                                                                                        \
-  X(securePolicy.storage, 160)                                                                                         \
-  X(securePolicy.lockPages, 161)                                                                                       \
-  X(securePolicy.excludeFromDumps, 162)                                                                                \
-  X(securePolicy.encryptWhileIdle, 163)                                                                                \
-  X(pastePolicy, 164)                                                                                                  \
-  X(frame.pattern, 165)                                                                                                \
-  X(frame.sides.top, 166)                                                                                              \
-  X(frame.sides.right, 167)                                                                                            \
-  X(frame.sides.bottom, 168)                                                                                           \
-  X(frame.sides.left, 169)                                                                                             \
-  X(frame.title, 170)                                                                                                  \
-  X(frame.titleAlignment, 171)                                                                                         \
-  X(frame.maxTitleBytes, 172)                                                                                          \
-  X(frame.customGlyphs.enabled, 173)                                                                                   \
-  X(frame.customGlyphs.topLeft, 174)                                                                                   \
-  X(frame.customGlyphs.topRight, 175)                                                                                  \
-  X(frame.customGlyphs.bottomLeft, 176)                                                                                \
-  X(frame.customGlyphs.bottomRight, 177)                                                                               \
-  X(frame.customGlyphs.horizontal, 178)                                                                                \
-  X(frame.customGlyphs.vertical, 179)                                                                                  \
-  X(dialog.closeButton.enabled, 180)                                                                                   \
-  X(dialog.closeButton.placement, 181)                                                                                 \
-  X(dialog.closeButton.focusable, 182)                                                                                 \
-  X(message.labels.yes, 183)                                                                                           \
-  X(message.labels.no, 184)                                                                                            \
-  X(message.buttons, 185)                                                                                              \
-  X(message.order.first, 186)                                                                                          \
-  X(message.order.second, 187)                                                                                         \
-  X(message.order.third, 188)                                                                                          \
-  X(frame.titleDecoration, 189)                                                                                        \
-  X(frame.customTitleDecoration.enabled, 190)                                                                          \
-  X(frame.customTitleDecoration.prefix, 191)                                                                           \
-  X(frame.customTitleDecoration.suffix, 192)                                                                           \
-  X(spinnerPreset, 193)                                                                                                \
-  X(spinnerFrames, 194)                                                                                                \
-  X(spinnerTick, 195)                                                                                                  \
-  X(spinnerDirection, 196)                                                                                             \
-  X(spinnerAlignment, 197)                                                                                             \
-  X(spinnerActive, 198)                                                                                                \
-  X(spinnerReducedMotion, 199)                                                                                         \
-  X(spinnerLabel, 200)                                                                                                 \
-  X(spinnerMaxFrames, 201)                                                                                             \
-  X(spinnerMaxFrameBytes, 202)                                                                                         \
-  X(spinnerMaxFrameCells, 203)                                                                                         \
-  X(scrollbar.pattern, 204)                                                                                            \
-  X(scrollbar.ends, 205)                                                                                               \
-  X(scrollbar.maxGlyphBytes, 206)                                                                                      \
-  X(scrollbar.horizontal.track, 207)                                                                                   \
-  X(scrollbar.horizontal.thumb, 208)                                                                                   \
-  X(scrollbar.horizontal.start, 209)                                                                                   \
-  X(scrollbar.horizontal.end, 210)                                                                                     \
-  X(scrollbar.vertical.track, 211)                                                                                     \
-  X(scrollbar.vertical.thumb, 212)                                                                                     \
-  X(scrollbar.vertical.start, 213)                                                                                     \
-  X(scrollbar.vertical.end, 214)                                                                                       \
+// Slices preserve both indexed context traversal and the historical recipe copy order.
+#define PORTALS_CONTROL_BASE_LEAVES(X) \
+  X(text, 0) \
+  X(width, 1) \
+  X(height, 2) \
+  X(flex, 3) \
+  X(gap, 4) \
+  X(state, 5) \
+  X(cycle, 6) \
+  X(editMode, 7) \
+  X(readOnly, 8) \
+  X(programmaticChange, 9) \
+  X(displayMode, 10)
+
+#define PORTALS_CONTROL_LAYOUT_LEAVES(X) \
+  X(placeholder, 11) \
+  X(history.enabled, 12) \
+  X(history.maxOperations, 13) \
+  X(history.maxBytes, 14) \
+  X(history.groupTyping, 15) \
+  X(history.groupDeletion, 16) \
+  X(grid.columns, 17) \
+  X(grid.rows, 18) \
+  X(grid.flow, 19) \
+  X(grid.columnGap, 20) \
+  X(grid.rowGap, 21) \
+  X(grid.paddingLeft, 22) \
+  X(grid.paddingTop, 23) \
+  X(grid.paddingRight, 24) \
+  X(grid.paddingBottom, 25) \
+  X(grid.maxTracksPerAxis, 26) \
+  X(grid.maxPlacements, 27) \
+  X(grid.maxPlacementWork, 28) \
+  X(grid.scroll, 29) \
+  X(linear.mainAlign, 30) \
+  X(linear.crossAlign, 31) \
+  X(linear.overflow, 32) \
+  X(limits.maxInputBytes, 33) \
+  X(limits.maxClusterBytes, 34) \
+  X(limits.maxGraphemes, 35) \
+  X(limits.maxCells, 36) \
+  X(chrome, 37) \
+  X(glyphs, 38) \
+  X(maxPaintCells, 39) \
+  X(value, 40) \
+  X(minimum, 41) \
+  X(maximum, 42) \
+  X(preferredWidth, 43) \
+  X(wheelStep, 44) \
+  X(keyStep, 45) \
+  X(pageOverlap, 46) \
+  X(minimumThumb, 47) \
+  X(focusable, 48) \
+  X(horizontal, 49) \
+  X(vertical, 50) \
+  X(placement, 51) \
+  X(axis, 52)
+
+#define PORTALS_CONTROL_FRAME_BASE_LEAVES(X) \
+  X(frame.enabled, 53) \
+  X(frame.glyphs, 54) \
+  X(frame.maxPaintCells, 55)
+
+#define PORTALS_CONTROL_VIEW_LEAVES(X) \
+  X(horizontalAlign, 56) \
+  X(verticalAlign, 57) \
+  X(initiallyOpen, 58) \
+  X(format.maxBytesPerBinding, 59) \
+  X(format.strokeSeparator, 60) \
+  X(format.alternativeSeparator, 61) \
+  X(format.repeatMarker, 62) \
+  X(format.releaseMarker, 63) \
+  X(format.unknownMarker, 64) \
+  X(emptyText, 65) \
+  X(unavailableText, 66) \
+  X(entrySeparator, 67) \
+  X(overflowMarker, 68) \
+  X(rowHeight, 69) \
+  X(overscanRows, 70) \
+  X(maxColumns, 71) \
+  X(maxPreparedCells, 72) \
+  X(maxPreparedTextBytes, 73) \
+  X(mode, 74) \
+  X(chartGlyphSet, 75) \
+  X(candleGap, 76) \
+  X(yRange.enabled, 77) \
+  X(yRange.minimum, 78) \
+  X(yRange.maximum, 79) \
+  X(showStatus, 80) \
+  X(statusRows, 81) \
+  X(contentPolicy, 82) \
+  X(spinnerInterval, 83)
+
+#define PORTALS_CONTROL_DIALOG_BASE_LEAVES(X) \
+  X(labels.loading, 84) \
+  X(labels.empty, 85) \
+  X(labels.error, 86) \
+  X(labels.offline, 87) \
+  X(labels.refreshing, 88) \
+  X(labels.retry, 89) \
+  X(maxLayers, 90) \
+  X(title, 91) \
+  X(dialog.mode, 92) \
+  X(dialog.placement, 93) \
+  X(dialog.maximumPanelSize.width, 94) \
+  X(dialog.maximumPanelSize.height, 95) \
+  X(dialog.viewportMargin, 96) \
+  X(dialog.anchorGap, 97) \
+  X(dialog.closeOnEscape, 98)
+
+#define PORTALS_CONTROL_COMPOSITE_LEAVES(X) \
+  X(dialog.frame.glyphs, 99) \
+  X(dialog.frame.maxPaintCells, 100) \
+  X(body, 101) \
+  X(message.labels.acknowledge, 102) \
+  X(message.labels.confirm, 103) \
+  X(message.labels.save, 104) \
+  X(message.labels.discard, 105) \
+  X(message.labels.cancel, 106) \
+  X(message.defaultChoice.enabled, 107) \
+  X(message.defaultChoice.value, 108) \
+  X(message.allowDestructiveDefault, 109) \
+  X(message.textLimits.maxInputBytes, 110) \
+  X(message.textLimits.maxClusterBytes, 111) \
+  X(message.textLimits.maxGraphemes, 112) \
+  X(message.textLimits.maxCells, 113) \
+  X(message.maxBodyLines, 114) \
+  X(notification.capacity, 115) \
+  X(notification.maxVisible, 116) \
+  X(notification.placement, 117) \
+  X(notification.maximumWidth, 118) \
+  X(notification.margin, 119) \
+  X(notification.gap, 120) \
+  X(notification.overflow, 121) \
+  X(notification.refreshDeduplicated, 122) \
+  X(notification.reducedMotion, 123) \
+  X(notification.textLimits.maxInputBytes, 124) \
+  X(notification.textLimits.maxClusterBytes, 125) \
+  X(notification.textLimits.maxGraphemes, 126) \
+  X(notification.textLimits.maxCells, 127) \
+  X(notification.actionLabelBytes, 128) \
+  X(notification.dedupKeyBytes, 129) \
+  X(notification.maxPaintCells, 130) \
+  X(themeSelector.labels.apply, 131) \
+  X(themeSelector.labels.cancel, 132) \
+  X(themeSelector.labels.closeKeepingPreview, 133) \
+  X(themeSelector.labels.emptyStatus, 134) \
+  X(themeSelector.labels.errorStatus, 135) \
+  X(themeSelector.labels.conflictStatus, 136) \
+  X(themeSelector.textLimits.maxInputBytes, 137) \
+  X(themeSelector.textLimits.maxClusterBytes, 138) \
+  X(themeSelector.textLimits.maxGraphemes, 139) \
+  X(themeSelector.textLimits.maxCells, 140) \
+  X(themeSelector.openingShortcut.enabled, 141) \
+  X(themeSelector.openingShortcut.value, 142) \
+  X(themeCatalog.maxChoices, 143) \
+  X(themeCatalog.maxIdBytes, 144) \
+  X(themeCatalog.maxLabelBytes, 145) \
+  X(themeCatalog.maxDescriptionBytes, 146) \
+  X(themeCatalog.maxTextBytes, 147) \
+  X(themeCatalog.textLimits.maxInputBytes, 148) \
+  X(themeCatalog.textLimits.maxClusterBytes, 149) \
+  X(themeCatalog.textLimits.maxGraphemes, 150) \
+  X(themeCatalog.textLimits.maxCells, 151) \
+  X(themeCatalog.initialId.enabled, 152) \
+  X(themeCatalog.initialId.value, 153) \
+  X(themeCatalog.layers.enabled, 154) \
+  X(themeCatalog.layers.maxLayers, 155) \
+  X(themeCatalog.layers.maxRules, 156) \
+  X(themeCatalog.layers.maxDeclarations, 157) \
+  X(themeCatalog.layers.maxOwnedBytes, 158)
+
+#define PORTALS_CONTROL_SECURE_EDITOR_LEAVES(X) \
+  X(securePolicy.maxBytes, 159) \
+  X(securePolicy.storage, 160) \
+  X(securePolicy.lockPages, 161) \
+  X(securePolicy.excludeFromDumps, 162) \
+  X(securePolicy.encryptWhileIdle, 163) \
+  X(pastePolicy, 164)
+
+#define PORTALS_CONTROL_FRAME_DETAIL_LEAVES(X) \
+  X(frame.pattern, 165) \
+  X(frame.sides.top, 166) \
+  X(frame.sides.right, 167) \
+  X(frame.sides.bottom, 168) \
+  X(frame.sides.left, 169) \
+  X(frame.title, 170) \
+  X(frame.titleAlignment, 171) \
+  X(frame.maxTitleBytes, 172) \
+  X(frame.customGlyphs.enabled, 173) \
+  X(frame.customGlyphs.topLeft, 174) \
+  X(frame.customGlyphs.topRight, 175) \
+  X(frame.customGlyphs.bottomLeft, 176) \
+  X(frame.customGlyphs.bottomRight, 177) \
+  X(frame.customGlyphs.horizontal, 178) \
+  X(frame.customGlyphs.vertical, 179)
+
+#define PORTALS_CONTROL_DIALOG_ACTION_LEAVES(X) \
+  X(dialog.closeButton.enabled, 180) \
+  X(dialog.closeButton.placement, 181) \
+  X(dialog.closeButton.focusable, 182) \
+  X(message.labels.yes, 183) \
+  X(message.labels.no, 184) \
+  X(message.buttons, 185) \
+  X(message.order.first, 186) \
+  X(message.order.second, 187) \
+  X(message.order.third, 188)
+
+#define PORTALS_CONTROL_TITLE_DECORATION_LEAVES(X) \
+  X(frame.titleDecoration, 189) \
+  X(frame.customTitleDecoration.enabled, 190) \
+  X(frame.customTitleDecoration.prefix, 191) \
+  X(frame.customTitleDecoration.suffix, 192)
+
+#define PORTALS_CONTROL_SPINNER_LEAVES(X) \
+  X(spinnerPreset, 193) \
+  X(spinnerFrames, 194) \
+  X(spinnerTick, 195) \
+  X(spinnerDirection, 196) \
+  X(spinnerAlignment, 197) \
+  X(spinnerActive, 198) \
+  X(spinnerReducedMotion, 199) \
+  X(spinnerLabel, 200) \
+  X(spinnerMaxFrames, 201) \
+  X(spinnerMaxFrameBytes, 202) \
+  X(spinnerMaxFrameCells, 203)
+
+#define PORTALS_CONTROL_SCROLLBAR_LEAVES(X) \
+  X(scrollbar.pattern, 204) \
+  X(scrollbar.ends, 205) \
+  X(scrollbar.maxGlyphBytes, 206) \
+  X(scrollbar.horizontal.track, 207) \
+  X(scrollbar.horizontal.thumb, 208) \
+  X(scrollbar.horizontal.start, 209) \
+  X(scrollbar.horizontal.end, 210) \
+  X(scrollbar.vertical.track, 211) \
+  X(scrollbar.vertical.thumb, 212) \
+  X(scrollbar.vertical.start, 213) \
+  X(scrollbar.vertical.end, 214) \
   X(scrollbar.corner, 215)
+
+#define PORTALS_CONTROL_LEAVES(X) \
+  PORTALS_CONTROL_BASE_LEAVES(X) \
+  PORTALS_CONTROL_LAYOUT_LEAVES(X) \
+  PORTALS_CONTROL_FRAME_BASE_LEAVES(X) \
+  PORTALS_CONTROL_VIEW_LEAVES(X) \
+  PORTALS_CONTROL_DIALOG_BASE_LEAVES(X) \
+  PORTALS_CONTROL_COMPOSITE_LEAVES(X) \
+  PORTALS_CONTROL_SECURE_EDITOR_LEAVES(X) \
+  PORTALS_CONTROL_FRAME_DETAIL_LEAVES(X) \
+  PORTALS_CONTROL_DIALOG_ACTION_LEAVES(X) \
+  PORTALS_CONTROL_TITLE_DECORATION_LEAVES(X) \
+  PORTALS_CONTROL_SPINNER_LEAVES(X) \
+  PORTALS_CONTROL_SCROLLBAR_LEAVES(X)
 
 #define LEAF_INDEX(field, index) index,
 constexpr auto LEAF_INDICES = std::to_array<std::size_t>({PORTALS_CONTROL_LEAVES(LEAF_INDEX)});
@@ -1065,6 +1102,44 @@ std::expected<void, ControlContextError> validateSettings(const ControlSettings 
 } // namespace
 
 namespace detail {
+void mergeRecipeControlSettings(ControlSettings &target, const ControlSettings &patch) {
+  const auto apply = [](auto &destination, const auto &source) {
+    if (source) {
+      destination = source;
+    }
+  };
+#define ASSIGN_RECIPE(field, index) apply(target.field, patch.field);
+  PORTALS_CONTROL_BASE_LEAVES(ASSIGN_RECIPE)
+  PORTALS_CONTROL_SECURE_EDITOR_LEAVES(ASSIGN_RECIPE)
+  PORTALS_CONTROL_LAYOUT_LEAVES(ASSIGN_RECIPE)
+  PORTALS_CONTROL_SCROLLBAR_LEAVES(ASSIGN_RECIPE)
+  PORTALS_CONTROL_FRAME_BASE_LEAVES(ASSIGN_RECIPE)
+  PORTALS_CONTROL_FRAME_DETAIL_LEAVES(ASSIGN_RECIPE)
+  PORTALS_CONTROL_TITLE_DECORATION_LEAVES(ASSIGN_RECIPE)
+  PORTALS_CONTROL_VIEW_LEAVES(ASSIGN_RECIPE)
+  PORTALS_CONTROL_SPINNER_LEAVES(ASSIGN_RECIPE)
+  PORTALS_CONTROL_DIALOG_BASE_LEAVES(ASSIGN_RECIPE)
+  PORTALS_CONTROL_DIALOG_ACTION_LEAVES(ASSIGN_RECIPE)
+  PORTALS_CONTROL_COMPOSITE_LEAVES(ASSIGN_RECIPE)
+#undef ASSIGN_RECIPE
+
+  target.origin = patch.origin;
+  target.origins = patch.origins;
+}
+
+#undef PORTALS_CONTROL_BASE_LEAVES
+#undef PORTALS_CONTROL_LAYOUT_LEAVES
+#undef PORTALS_CONTROL_FRAME_BASE_LEAVES
+#undef PORTALS_CONTROL_VIEW_LEAVES
+#undef PORTALS_CONTROL_DIALOG_BASE_LEAVES
+#undef PORTALS_CONTROL_COMPOSITE_LEAVES
+#undef PORTALS_CONTROL_SECURE_EDITOR_LEAVES
+#undef PORTALS_CONTROL_FRAME_DETAIL_LEAVES
+#undef PORTALS_CONTROL_DIALOG_ACTION_LEAVES
+#undef PORTALS_CONTROL_TITLE_DECORATION_LEAVES
+#undef PORTALS_CONTROL_SPINNER_LEAVES
+#undef PORTALS_CONTROL_SCROLLBAR_LEAVES
+
 void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &previous) {
   if (previous.origin || !previous.origins.empty()) {
     patch.origin = previous.origin;

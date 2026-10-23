@@ -74,6 +74,7 @@
       <tab type="user" title="Diff and output" url="@ref docs/diff.md" />
     </tab>
     <tab type="usergroup" title="4. API reference">
+      <tab type="user" title="Declarative UI headers" url="@ref fluent_ui" />
       <tab type="usergroup" title="Experimental APIs">
         <tab type="user" title="Compile-time scenes" url="@ref docs/compile-time-scenes.md" />
         <tab type="user" title="Typed styles" url="@ref docs/compile-time-styles.md" />
@@ -200,6 +201,7 @@
       <tab type="user" title="Возможности и майлстоуны" url="@ref docs/ru/planned-features.md" />
     </tab>
     <tab type="user" title="C++ API — English" url="../annotated.html" />
+    <tab type="user" title="Заголовки декларативного UI — English" url="../group__fluent__ui.html" />
     <tab type="pages" visible="no" />
     <tab type="topics" visible="no" />
     <tab type="modules" visible="no" />
