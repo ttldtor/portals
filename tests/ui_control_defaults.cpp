@@ -321,7 +321,7 @@ TEST_CASE("common defaults reach linear captions checkbox state and fixed ThreeS
   take(fixture.app->tree().read(three.node(), [](const ThreeState &value) {
     CHECK(value.checkState() == CheckState::CHECKED);
   }));
-  take(fixture.app->router().invoke(three.node(), {Action::ACTIVATE}));
+  take(fixture.app->router().invoke(three.node(), {portals::Action::ACTIVATE}));
   take(fixture.app->tree().read(three.node(), [](const ThreeState &value) {
     CHECK(value.checkState() == CheckState::MIXED);
   }));
