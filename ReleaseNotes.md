@@ -115,6 +115,9 @@ planned work is not included. An **Unreleased** heading has no publication date.
 - Document fluent header families, compiled lifecycle boundaries and contributor
   extension points, with grouped header navigation in the API reference.
 
+- Clarify final integration qualification commands, full CTest and relocated
+  package coverage, and the Release configurations that require separate runs.
+
 - Fluent recipe property application shares the maintained control-field map
   without repeating its assignment implementation in public headers. Sparse
   values and property provenance retain their previous behavior.

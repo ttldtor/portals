@@ -31,6 +31,63 @@ deleted, renamed, unknown or uncovered files fall back to full. Integration and
 milestone obligations persist; unavailable checks stay NOT_RUN. The
 existing PR policy and hosted MSVC/GCC/docs gates are unchanged.
 
+### Final integration qualification
+
+For a final runtime/API qualification, configure and build each native preset
+on its matching host, then run its complete configured CTest suite. The four
+presets are `windows-msvc-debug`, `windows-msvc-release`, `linux-gcc-debug` and
+`linux-gcc-release`:
+
+```powershell
+cmake --preset windows-msvc-debug
+cmake --build --preset windows-msvc-debug
+ctest --preset windows-msvc-debug
+
+cmake --preset windows-msvc-release
+cmake --build --preset windows-msvc-release
+ctest --preset windows-msvc-release
+
+cmake --preset linux-gcc-debug
+cmake --build --preset linux-gcc-debug
+ctest --preset linux-gcc-debug
+
+cmake --preset linux-gcc-release
+cmake --build --preset linux-gcc-release
+ctest --preset linux-gcc-release
+```
+
+Run each group on its matching host. The MSVC presets require an initialized
+Visual Studio developer environment.
+Do not pass `-R`, `-E` or another selection to this final CTest run: `ctest
+--preset` runs all tests registered by that configure, including the installed
+`portals.package-install` test that relocates the SDK and builds a fresh consumer.
+A selected preflight is useful for iteration, but it does not replace this full
+run.
+
+The integration expectation also includes the separate standalone consumer.
+On Linux, configure, build and run it with:
+
+```powershell
+cmake -S examples/consumer -B build/consumer -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/consumer
+./build/consumer/portals_consumer
+```
+
+On Windows, use Ninja with the Debug configuration:
+
+```powershell
+cmake -S examples/consumer -B build/consumer -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/consumer
+.\build\consumer\portals_consumer.exe
+```
+
+Check the remaining integration expectations, including naming/static checks, strict
+English and Russian documentation with links, and applicable sanitizer and
+lifetime checks, in the [contract registry](../tools/ci/check_contracts.json).
+The PR workflow currently runs only Windows/MSVC Debug and Linux/GCC Debug in
+its build/test matrix. In particular, Release presets require their own runs;
+the current CI matrix does not qualify Release.
+
 Use [headless testing](testing.md) for the normal test suite, naming checks
 and terminal fixtures. [Fuzzing](../fuzz/README.md) describes the bounded input
 and text targets and sanitizer setup. Automated checks must finish without
