@@ -85,6 +85,82 @@
       });
     }
 
+    if (tree) {
+      // Generated overload labels carry the original signature, including defaults.
+      const overloadTooltip = document.createElement("div");
+      overloadTooltip.className = "portals-overload-tooltip";
+      overloadTooltip.id = "portals-overload-tooltip";
+      overloadTooltip.role = "tooltip";
+      overloadTooltip.hidden = true;
+      document.body.appendChild(overloadTooltip);
+      let tooltipAnchor = null;
+      let focusedLabel = null;
+      let hoveredLabel = null;
+      let dismissed = false;
+      const hideOverload = () => {
+        tooltipAnchor?.removeAttribute("aria-describedby");
+        tooltipAnchor = null;
+        overloadTooltip.hidden = true;
+      };
+      const overloadLabel = target => target?.closest?.("[data-overload-signature]")
+        || target?.querySelector?.("[data-overload-signature]");
+      const showOverload = () => {
+        const label = hoveredLabel || focusedLabel;
+        const anchor = label?.closest("a");
+        hideOverload();
+        if (!anchor || dismissed) return;
+        tooltipAnchor = anchor;
+        overloadTooltip.textContent = label.dataset.overloadSignature;
+        anchor.setAttribute("aria-describedby", overloadTooltip.id);
+        const margin = 8;
+        // Measure from a stable origin, independent of the previous link's indent.
+        overloadTooltip.style.left = `${margin}px`;
+        overloadTooltip.style.top = `${margin}px`;
+        overloadTooltip.hidden = false;
+        const bounds = anchor.getBoundingClientRect();
+        const size = overloadTooltip.getBoundingClientRect();
+        overloadTooltip.style.left = `${Math.max(margin, Math.min(bounds.left, window.innerWidth - size.width - margin))}px`;
+        overloadTooltip.style.top = `${Math.max(margin, Math.min(bounds.bottom + margin, window.innerHeight - size.height - margin))}px`;
+      };
+      const prepareOverloadLabels = () => {
+        document.querySelectorAll("#nav-tree [data-overload-signature]").forEach(label => {
+          const anchor = label.closest("a");
+          anchor.setAttribute("aria-label", label.dataset.overloadSignature);
+          anchor.title = label.dataset.overloadSignature;
+        });
+      };
+      prepareOverloadLabels();
+      new MutationObserver(prepareOverloadLabels).observe(tree, {subtree: true, childList: true});
+      tree.addEventListener("focusin", event => {
+        focusedLabel = overloadLabel(event.target);
+        dismissed = false;
+        showOverload();
+      });
+      tree.addEventListener("focusout", event => {
+        focusedLabel = overloadLabel(event.relatedTarget);
+        showOverload();
+      });
+      tree.addEventListener("mouseover", event => {
+        const label = overloadLabel(event.target);
+        if (label !== hoveredLabel) dismissed = false;
+        hoveredLabel = label;
+        showOverload();
+      });
+      tree.addEventListener("mouseout", event => {
+        hoveredLabel = overloadLabel(event.relatedTarget);
+        showOverload();
+      });
+      const dismissOverload = () => {
+        dismissed = true;
+        hideOverload();
+      };
+      tree.addEventListener("scroll", dismissOverload, true);
+      document.addEventListener("keydown", event => {
+        if (event.key === "Escape") dismissOverload();
+      });
+      window.addEventListener("resize", dismissOverload);
+    }
+
     // These retain Doxygen's filter selector and close/reset handlers.
     const russian = document.documentElement.lang === "ru";
     const searchControls = [

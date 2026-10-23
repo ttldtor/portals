@@ -279,3 +279,39 @@ html:not(.turbo-mode) table.memberdecls td { overflow-wrap: anywhere; white-spac
     margin-inline: 0;
   }
 }
+
+/* Keep full overload signatures readable outside the scrollable navigation. */
+#nav-tree .item:has([data-overload-signature]) {
+  display: flex;
+  align-items: flex-start;
+  height: auto;
+  min-height: var(--tree-item-height);
+  overflow: visible;
+  white-space: normal;
+}
+#nav-tree .item:has([data-overload-signature]) > .arrow { flex: 0 0 auto; }
+#nav-tree .label:has([data-overload-signature]) { min-width: 0; flex: 1; }
+#nav-tree .label:has([data-overload-signature]) a {
+  display: block;
+  padding-block: 4px;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.portals-overload-tooltip {
+  position: fixed;
+  z-index: 10000;
+  box-sizing: border-box;
+  max-width: min(42rem, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  padding: 8px 12px;
+  border: 1px solid var(--separator-color);
+  background: var(--page-background-color);
+  color: var(--page-foreground-color);
+  font-family: var(--font-family-monospace);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
