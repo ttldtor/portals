@@ -11,8 +11,9 @@ planned work is not included. An **Unreleased** heading has no publication date.
   with independently styled track, thumb, ends and corner parts through PSS.
   Existing geometry and input behavior remain unchanged.
 
-- Complete protected-password and loading-indicator examples pair C++ recipes
-  with loaded scenes. Dashboard keyboard bindings use declarative scene modifiers.
+- Complete protected-password, checkbox, dialog, notification and loading-indicator
+  examples pair C++ recipes with loaded scenes. Dashboard keyboard bindings use
+  declarative scene modifiers while preserving key-repeat behavior.
 
 - Frame titles support compact spaced, square, angle and round decorations,
   with owning custom ends and matching loaded-scene properties. Frame lines,
