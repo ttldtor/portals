@@ -1,0 +1,34 @@
+name: Prepare naming toolchain
+description: Reuse verified Ubuntu package downloads without caching check results
+runs:
+  using: composite
+  steps:
+    - name: Refresh signed package metadata
+      id: apt
+      shell: bash
+      env:
+        NAMING_APT_PACKAGES: clang-20 clang-tidy-20 g++-14 ninja-build
+      run: |
+        sudo apt-get update
+        read -r -a packages <<< "$NAMING_APT_PACKAGES"
+        fingerprint=$(apt-cache policy "${packages[@]}" | sha256sum | cut -d ' ' -f 1)
+        echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+        mkdir -p "$RUNNER_TEMP/naming-apt"
+    - name: Restore naming package downloads
+      # A cache outage must not prevent installation from signed repositories.
+      continue-on-error: true
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+      with:
+        path: ${{ runner.temp }}/naming-apt/*.deb
+        key: naming-apt-v1-${{ runner.os }}-24.04-${{ runner.arch }}-${{ steps.apt.outputs.fingerprint }}
+    - name: Install naming checker toolchain
+      shell: bash
+      env:
+        NAMING_APT_PACKAGES: clang-20 clang-tidy-20 g++-14 ninja-build
+      run: |
+        APT_CACHE_DIR="$RUNNER_TEMP/naming-apt"
+        python3 tools/ci/apt_cache.py "$APT_CACHE_DIR"
+        read -r -a packages <<< "$NAMING_APT_PACKAGES"
+        sudo apt-get -o Dir::Cache::archives="$APT_CACHE_DIR" \
+          -o Binary::apt-get::APT::Keep-Downloaded-Packages=true install -y "${packages[@]}"
+        clang-tidy-20 --version
