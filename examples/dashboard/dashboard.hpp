@@ -107,9 +107,15 @@ struct Presentation {
   }
 
   std::expected<void, ManagedError> cycleTheme() {
-    return selector_.preview(turbo_ ? "modern" : "turbo").and_then([this] {
-      return selector_.commit();
-    });
+    const auto next = !turbo_;
+
+    return selector_.preview(next ? "turbo" : "modern")
+      .and_then([this] {
+        return selector_.commit();
+      })
+      .transform([this, next] {
+        turbo_ = next;
+      });
   }
 
   std::expected<void, TreeError> tablePrepared(const ModelFrame<Quote> &pin,
