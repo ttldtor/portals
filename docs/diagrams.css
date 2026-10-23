@@ -203,3 +203,115 @@ span.arrowhead.opened::before {
   white-space: normal;
   overflow-wrap: anywhere;
 }
+
+/* Keep guide and reference gutters stable beside either navigation panel. */
+html:not(.turbo-mode) {
+  --content-maxwidth: 100%;
+  --portals-content-gutter: 16px;
+}
+
+html:not(.turbo-mode) div.contents {
+  margin-inline: var(--portals-content-gutter);
+  padding-inline: 0;
+}
+
+html:not(.turbo-mode) div.header .title {
+  margin-inline: 0;
+  padding-inline: var(--portals-content-gutter);
+}
+
+/* A wide child must not force the reading column beyond its flex container. */
+html:not(.turbo-mode) div.contents .textblock { min-width: 0; }
+
+/* Vendor full-bleed code margins assume padding on the reading column. */
+html:not(.turbo-mode) .contents :is(div.fragment, pre.fragment) {
+  margin-inline: 0;
+}
+
+html:not(.turbo-mode) .contents :is(center, .center) {
+  width: auto;
+  max-width: 100%;
+  margin-inline: 0;
+}
+
+/* Wrap the displayed source without changing the text copied from it. */
+html:not(.turbo-mode) .contents div.fragment div.line {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+/* API signatures reflow inside the panel instead of a table's intrinsic width. */
+html:not(.turbo-mode) .memproto table.memname,
+html:not(.turbo-mode) .memproto table.memname > tbody,
+html:not(.turbo-mode) .memproto table.memname > tbody > tr {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  margin: 0;
+}
+html:not(.turbo-mode) .memproto table.memname td {
+  display: inline;
+  padding: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+html:not(.turbo-mode) .memproto table.memname td.paramtype { padding-right: 0.5ch; }
+html:not(.turbo-mode) .memproto :is(.memtemplate, .paramname, .paramdefval) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+html:not(.turbo-mode) table.memberdecls { width: 100%; }
+html:not(.turbo-mode) table.memberdecls :is(.memItemLeft, .memTemplItemLeft, .mdescLeft) {
+  width: 32%;
+}
+html:not(.turbo-mode) table.memberdecls td { overflow-wrap: anywhere; white-space: normal; }
+
+@media screen and (max-width: 767px) {
+  html:not(.turbo-mode) .contents table.memberdecls,
+  html:not(.turbo-mode) .contents table.memberdecls > tbody,
+  html:not(.turbo-mode) .contents table.memberdecls > tbody > tr,
+  html:not(.turbo-mode) .contents table.memberdecls > tbody > tr > td {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    margin-inline: 0;
+  }
+}
+
+/* Keep full overload signatures readable outside the scrollable navigation. */
+#nav-tree .item:has([data-overload-signature]) {
+  display: flex;
+  align-items: flex-start;
+  height: auto;
+  min-height: var(--tree-item-height);
+  overflow: visible;
+  white-space: normal;
+}
+#nav-tree .item:has([data-overload-signature]) > .arrow { flex: 0 0 auto; }
+#nav-tree .label:has([data-overload-signature]) { min-width: 0; flex: 1; }
+#nav-tree .label:has([data-overload-signature]) a {
+  display: block;
+  padding-block: 4px;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.portals-overload-tooltip {
+  position: fixed;
+  z-index: 10000;
+  box-sizing: border-box;
+  max-width: min(42rem, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  padding: 8px 12px;
+  border: 1px solid var(--separator-color);
+  background: var(--page-background-color);
+  color: var(--page-foreground-color);
+  font-family: var(--font-family-monospace);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}

@@ -225,7 +225,7 @@ immutable `snapshot()` values and has no `set()` or conversion to writable state
 Labels, buttons and managed `.observe` accept it directly. Editors and checkboxes
 still require writable state for their two-way bindings.
 
-[Complete program](examples/docs_derive.cpp): edit the name to update both the label
+Edit the name to update both the label
 and button caption. Click the button or press F10 to close the scene. Build
 `portals_docs_derive` with `PORTALS_BUILD_TESTS=ON`. Setup failures flow through the scene
 factory's `expected` result to the existing runner.
@@ -287,13 +287,19 @@ General binding expressions remain planned.
 ## Live editor captions and editing events {#live-editor-captions}
 
 This complete application shows the visible draft beside the accepted value.
-For just the caption binding, start with the [smaller complete program](examples/guide_live_captions.cpp).
+For just the caption binding, expand the smaller complete program below.
 Type `invalid` and press Enter: validation rejects publication while preserving the
 draft. Tab moves focus without accepting it in `EXPLICIT` mode. Escape adopts the
 latest model value. The button appends an undoable programmatic edit; both live
 captions follow their sources, but the edit is not reported as user input.
 
-[Complete source](examples/guide_editor_events.cpp)
+<details>
+<summary>Smaller complete program</summary>
+
+\include guide_live_captions.cpp
+
+</details>
+
 \include{lineno} guide_editor_events.cpp
 
 `field.text()` passed to a caption factory observes the visible draft. The explicit
@@ -455,8 +461,8 @@ Edit the field; words and graphemes update through the existing dirty-frame
 preparation. Click Quit or press F10 to exit. The standard runner handles typed
 setup/runtime failures and terminal restoration.
 
-[Complete source](examples/guide_text_transforms.cpp). Include `<portals/ui.hpp>`
-and link `portals::core`; see [consumer setup](index.md). To build this source
+Include `<portals/ui.hpp>` and link `portals::core`; see [consumer setup](index.md).
+To build this source
 inside the repository, configure with `PORTALS_BUILD_TESTS=ON`, then build and run
 `portals_docs_text_transforms`. It opens the native terminal and has no CLI options.
 

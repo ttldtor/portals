@@ -82,7 +82,7 @@ On Windows, the executable is `build/quick_note.exe`; it can be run in a termina
 During the first configuration, CMake downloads the pinned Portals revision.
 An existing local checkout can be used by adding
 `-DFETCHCONTENT_SOURCE_DIR_PORTALS="C:/path/to/portals"` to the configure command,
-substituting your path. [Complete step 1 source](examples/tutorial_note_1.cpp).
+substituting your path.
 
 ## 2. Showing the saved text
 
@@ -156,8 +156,6 @@ int main() {
 ```
 
 </details>
-
-[Download the step 2 source](examples/tutorial_note_2.cpp).
 
 The build command from step 1 prepares this version. You can then run it
 with the same `./build/quick_note` command. While the application is
@@ -253,7 +251,7 @@ int main() {
 
 </details>
 
-[Download the step 3 source](examples/tutorial_note_3.cpp).
+
 
 After rebuilding and running, F2 saves the current text and F3 clears the editor.
 The saved line remains visible when the draft is cleared. New text can replace
@@ -328,8 +326,7 @@ int main() {
 
 </details>
 
-[Download the step 4 source](examples/tutorial_note_4.cpp). After building with
-the same command, `./build/quick_note` runs this version with its theme and button styling.
+After building with the same command, `./build/quick_note` runs this version with its theme and button styling.
 
 ## Result
 

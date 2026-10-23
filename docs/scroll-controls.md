@@ -11,7 +11,6 @@ through the standard runner and restore the terminal.
 
 \include guide_scroll_controls.cpp
 
-[Complete source](examples/guide_scroll_controls.cpp).
 Link your application to `portals::core`; see [package setup](package.md).
 The [guide examples](examples.md) describe the standalone CMake build. Its
 `guide_scroll_controls` executable opens a native terminal.
@@ -52,7 +51,7 @@ F10 closes the standard runner. Values live in this scene and are not persisted.
 
 \include guide_nested_scroll.cpp
 
-[Complete source](examples/guide_nested_scroll.cpp). Build `guide_nested_scroll`
+Build `guide_nested_scroll`
 with the [standalone guide project](examples.md), or `portals_docs_nested_scroll`
 with `PORTALS_BUILD_TESTS=ON`. The installed-package consumer compiles this same
 source; it does not run the interactive program as an automated test.

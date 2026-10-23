@@ -775,6 +775,7 @@ add_executable(portals_nested_scroll_consumer nested_scroll.cpp)
 add_executable(portals_nested_scroll_form_consumer "docs/examples/guide_nested_scroll.cpp")
 add_executable(portals_dialog_consumer dialog.cpp)
 add_executable(portals_dialog_form_consumer "docs/examples/guide_dialog.cpp")
+add_executable(portals_nonmodal_dialog_form_consumer "docs/examples/guide_nonmodal_dialog.cpp")
 add_executable(portals_message_box_consumer message_box.cpp)
 add_executable(portals_message_box_form_consumer "docs/examples/guide_message_box.cpp")
 add_executable(portals_dialog_actions_form_consumer "docs/examples/guide_dialog_actions.cpp")
@@ -793,6 +794,7 @@ add_executable(portals_application_factory_form_consumer "docs/examples/guide_ap
 add_executable(portals_style_contracts_consumer style_contracts.cpp)
 foreach(target IN ITEMS portals_nested_scroll_consumer portals_nested_scroll_form_consumer
     portals_dialog_consumer portals_dialog_form_consumer portals_message_box_consumer portals_message_box_form_consumer
+    portals_nonmodal_dialog_form_consumer
     portals_dialog_actions_form_consumer
     portals_toast_consumer portals_toast_form_consumer portals_check_change_form_consumer
     portals_key_help_consumer portals_key_help_form_consumer

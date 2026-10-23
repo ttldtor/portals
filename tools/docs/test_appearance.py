@@ -16,6 +16,123 @@ SCRIPT = Path(__file__).resolve().parents[2] / "docs/appearance.js"
 
 @unittest.skipUnless(NODE, "Node.js is required for documentation JavaScript tests")
 class AppearanceTests(unittest.TestCase):
+    def test_overload_tooltip_focus_hover_escape_and_viewport_bounds(self):
+        fixture = r'''
+const { readFileSync } = require("node:fs");
+const vm = require("node:vm");
+const assert = require("node:assert/strict");
+const events = {}, treeEvents = {}, windowEvents = {};
+const full = "Description<Dialog> ns::dialog(Ref<Dialog> ref, Body &&body, Options options={})";
+const attributes = {};
+let tooltip;
+const anchor = {
+  setAttribute(name, value) { attributes[name] = value; },
+  removeAttribute(name) { delete attributes[name]; },
+  querySelector: () => label,
+  getBoundingClientRect: () => ({left: 290, bottom: 710}),
+  contains: value => value === label
+};
+const label = {dataset: {overloadSignature: full}, closest: selector => selector === "a" ? anchor : label};
+const fullSecond = "Description<Dialog> ns::dialog(TextValue title, Body &&body)";
+const secondAttributes = {};
+const secondAnchor = {
+  setAttribute(name, value) { secondAttributes[name] = value; },
+  removeAttribute(name) { delete secondAttributes[name]; },
+  querySelector: () => secondLabel,
+  getBoundingClientRect: () => ({left: 90, bottom: 500})
+};
+const secondLabel = {
+  dataset: {overloadSignature: fullSecond},
+  closest: selector => selector === "a" ? secondAnchor : secondLabel
+};
+const tree = {
+  querySelectorAll: () => [],
+  addEventListener(name, fn) { treeEvents[name] = fn; }
+};
+const document = {
+  documentElement: {classList: {toggle() {}}},
+  querySelector: selector => selector === "#nav-tree" ? tree : null,
+  querySelectorAll: () => [label, secondLabel],
+  addEventListener(name, fn) { events[name] = fn; },
+  createElement() { return tooltip = {
+    hidden: true, style: {left: "290px"},
+    getBoundingClientRect: () => ({width: tooltip.style.left === "8px" ? 304 : 60, height: 100})
+  }; },
+  body: {appendChild() {}}
+};
+const window = {
+  innerWidth: 320, innerHeight: 720,
+  addEventListener(name, fn) { windowEvents[name] = fn; },
+  localStorage: {getItem() {return null;}},
+  matchMedia: () => ({matches: false, addEventListener() {}})
+};
+class MutationObserver { constructor() {} observe() {} }
+vm.runInNewContext(readFileSync(process.argv[1], "utf8"), {document, window, MutationObserver});
+events.DOMContentLoaded();
+assert.equal(attributes["aria-label"], full);
+treeEvents.focusin({target: anchor});
+assert.equal(tooltip.hidden, false);
+assert.equal(tooltip.textContent, full);
+assert.equal(tooltip.style.left, "8px");
+assert.equal(tooltip.style.top, "612px");
+assert.equal(attributes["aria-describedby"], tooltip.id);
+events.keydown({key: "Escape"});
+assert.equal(tooltip.hidden, true);
+assert.equal(attributes["aria-describedby"], undefined);
+treeEvents.mouseover({target: label});
+assert.equal(tooltip.hidden, false);
+treeEvents.mouseout({relatedTarget: label});
+assert.equal(tooltip.hidden, false);
+treeEvents.mouseout({relatedTarget: null});
+assert.equal(tooltip.hidden, false); // Keyboard focus survives mouse departure.
+treeEvents.focusout({relatedTarget: null});
+assert.equal(tooltip.hidden, true);
+treeEvents.mouseover({target: label});
+treeEvents.focusin({target: anchor});
+treeEvents.focusout({relatedTarget: anchor});
+assert.equal(tooltip.hidden, false); // Moving within the same link retains it.
+treeEvents.focusout({relatedTarget: null});
+assert.equal(tooltip.hidden, false); // Hover survives keyboard focus departure.
+treeEvents.mouseout({relatedTarget: null});
+assert.equal(tooltip.hidden, true);
+treeEvents.focusin({target: anchor});
+treeEvents.mouseover({target: label});
+events.keydown({key: "Escape"});
+assert.equal(tooltip.hidden, true);
+treeEvents.mouseout({relatedTarget: null});
+assert.equal(tooltip.hidden, true); // Mouse departure must not undo Escape.
+treeEvents.focusout({relatedTarget: null});
+assert.equal(tooltip.hidden, true);
+treeEvents.mouseover({target: label});
+assert.equal(tooltip.hidden, false);
+treeEvents.scroll();
+assert.equal(tooltip.hidden, true);
+treeEvents.mouseout({relatedTarget: label});
+assert.equal(tooltip.hidden, true);
+treeEvents.mouseout({relatedTarget: null});
+treeEvents.mouseover({target: label});
+assert.equal(tooltip.hidden, false);
+windowEvents.resize();
+assert.equal(tooltip.hidden, true);
+treeEvents.mouseout({relatedTarget: null});
+treeEvents.focusin({target: anchor});
+assert.equal(tooltip.textContent, full);
+treeEvents.mouseover({target: secondLabel});
+assert.equal(tooltip.textContent, fullSecond); // Hover identifies the pointed overload.
+assert.equal(secondAttributes["aria-describedby"], tooltip.id);
+assert.equal(attributes["aria-describedby"], undefined);
+treeEvents.mouseout({relatedTarget: null});
+assert.equal(tooltip.hidden, false);
+assert.equal(tooltip.textContent, full); // Leaving it restores the focused overload.
+assert.equal(attributes["aria-describedby"], tooltip.id);
+assert.equal(secondAttributes["aria-describedby"], undefined);
+treeEvents.focusout({relatedTarget: null});
+assert.equal(tooltip.hidden, true);
+'''
+        result = subprocess.run([NODE, "-e", fixture, str(SCRIPT)], capture_output=True,
+                                text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_disclosures_track_lazy_nodes_and_space_activation(self):
         fixture = r'''
 const { readFileSync } = require("node:fs");
@@ -38,17 +155,20 @@ function node(label) {
   return {attributes, handlers, toggle};
 }
 const initial = node("Start here");
-const tree = { querySelectorAll: () => nodes };
+const tree = { querySelectorAll: () => nodes, addEventListener() {} };
 const document = {
+  createElement: () => ({}),
+  body: {appendChild() {}},
   documentElement: { classList: { toggle() {} } },
   querySelector: selector => selector === "#nav-tree" ? tree : null,
-  addEventListener: (_, fn) => ready = fn
+  querySelectorAll: () => [],
+  addEventListener: (event, fn) => { if (event === "DOMContentLoaded") ready = fn; }
 };
 class MutationObserver {
-  constructor(fn) { changed = fn; }
-  observe(target, options) { observed = {target,options}; }
+  constructor(fn) { if (!changed) changed = fn; }
+  observe(target, options) { if (!observed) observed = {target,options}; }
 }
-const window = {matchMedia: () => ({matches:false,addEventListener(){}}), localStorage:{getItem(){return null;}}};
+const window = {addEventListener() {}, matchMedia: () => ({matches:false,addEventListener(){}}), localStorage:{getItem(){return null;}}};
 vm.runInNewContext(readFileSync(process.argv[1], "utf8"), {document,window,MutationObserver});
 ready();
 assert.equal(initial.attributes.role, "button");

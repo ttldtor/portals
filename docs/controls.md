@@ -237,7 +237,7 @@ clips by `NodeGeometry::surface`, intersects with `NodeGeometry::clip`, and call
 `renderFullFrame` before leaving `tree.frame`. Borrowed commands/text must not escape the
 frame; the resulting owning `CellBuffer` may be submitted to `FrameWriter` after it.
 
-## Run the gallery
+## Run the gallery {#run-the-gallery}
 
 Configure with `PORTALS_BUILD_EXAMPLES=ON` and build `portals_gallery`.
 Run the executable from a native terminal:
@@ -259,7 +259,7 @@ invalidation, callback removal, subscription cancellation and queue errors.
 For the control contracts, see [focus and events](focus.md),
 [properties](property.md), [layout](layout.md) and [rendering](render.md).
 
-## CheckBox with three states
+## CheckBox with three states {#check-box-with-three-states}
 
 `CheckState::UNCHECKED`, `CHECKED` and `MIXED` are explicit model values.
 `checkState()` reads the last valid presentation; legacy `checked()` is true only
@@ -332,8 +332,7 @@ receipt storage failure occurs before writes. This helper retains no model or
 callback; captures in application callbacks must outlive admitted input.
 Do not wire parent and child business callbacks recursively: external Property
 updates already bypass business callbacks. The helper and the native program
-are [complete source files](../examples/check_state/main.cpp), with
-[group policy source](../examples/check_state/group.hpp).
+are included above as complete source files.
 
 For a ready-made three-state control, use `ui::threeState("Selection", CheckState::MIXED)`.
 It returns a `Description<ThreeState>` and accepts `ui::Ref<ThreeState>` first.
@@ -365,7 +364,7 @@ This complete application displays each newly committed state:
 
 \include guide_check_change.cpp
 
-The [complete source](examples/guide_check_change.cpp) builds as
+The example builds as
 `portals_docs_check_change` with tests enabled, or as an ordinary installed-package
 application linked to `portals::core`.
 

@@ -13,13 +13,16 @@ int main() {
     ui::Ref<Dialog> details;
     return ui::scene(
       ui::vbox(
-        ui::label("Unhandled Esc closes Details; F10 exits from the main form."),
+        ui::label("Esc closes Details; F10 exits main form."),
         ui::button("Details", [details] { details.open(); }),
         ui::button("Exit", [] { ui::quit(); })),
-      ui::dialog(details, "Connection settings", ui::vbox(
-        ui::lineEdit("Primary feed"),
-        ui::checkbox("Reconnect automatically", true),
-        ui::button("Close", [details] { details.dismiss(); }))))
+      ui::dialog(details, "Connection settings",
+        ui::vbox(
+          ui::lineEdit("Primary feed"),
+          ui::checkbox("Reconnect automatically", true),
+          ui::button("Close", [details] {
+            details.dismiss();
+          }))))
       | ui::onKey("F10", ui::quit);
   } | ui::runApp();
   // clang-format on

@@ -11,7 +11,7 @@ their child controls' state.
 
 \include guide_dialog.cpp
 
-[Complete source](examples/guide_dialog.cpp). Link `portals::core`; see
+Link `portals::core`; see
 [package setup](package.md). The [standalone guide project](examples.md) builds
 `guide_dialog`. The root build with `PORTALS_BUILD_TESTS=ON` builds
 `portals_docs_dialog`. Installed consumers compile this exact maintained source.
@@ -114,18 +114,33 @@ is a new command, not an automatically cancelled library notification.
 
 ## Nonmodal panels and anchors
 
-Set `DialogOptions::mode` to `DialogMode::NON_MODAL` to leave the body interactive.
+Use `.nonModal()` on the dialog recipe, or pipe it through `| ui::nonModal()`.
+Both select `DialogMode::NON_MODAL` and leave the body interactive.
 Opening does not steal keyboard focus. Pointer activation does not automatically
 enter a keyboard focus scope; explicit focus or Tab can enter the panel. Dismissal
 returns focus only if the panel still owns the relevant transition, preserving a
 new body selection. Escape closes a nonmodal panel only when cancellation routes
 to that layer; a background Escape is not a global panel-close shortcut.
 
-These options are compiled in the installed consumer:
+The complete example below opens a centered help panel with Help or F1. The
+main input remains usable while the panel is open. Close dismisses the panel;
+F10 exits the application even while the panel is visible.
 
-\snippet dialog.cpp dialog-options
+\include guide_nonmodal_dialog.cpp
 
-Apply them with `ui::dialog(reference, title, body, helpOptions)`. The consuming
+Link `portals::core`, as for the modal example. The standalone guide project
+builds `guide_nonmodal_dialog`; the root build with `PORTALS_BUILD_TESTS=ON`
+builds `portals_docs_nonmodal_dialog`. The installed-package consumer also
+compiles this maintained source.
+
+For an ordinary nonmodal panel, the modifier is enough. You can still use
+`DialogOptions` to set several options together. Both modifier forms preserve
+other settings; if you specify the mode again, the last setting wins.
+
+### Anchor a panel to a control
+
+Use `.nonModal()` to select the nonmodal input policy. Explicit options can
+also be passed to `ui::dialog(reference, title, body, options)`. The consuming
 modifier `.anchor(opener, DialogPlacement::BELOW_START)` resolves a cold body Ref
 at complete mount; `ABOVE_START` prefers the other side. The anchor must be in
 this exact host's ordinary body subtree. Another host or any dialog-owned target
@@ -174,8 +189,8 @@ provide results and save/discard workflows through the same host and scheduler.
 ## Ready-made modal choices
 
 Use `ui::messageBox`, `ui::confirmDialog` or `ui::unsavedChangesDialog` when a
-modal needs one of the maintained button sets. The [complete source](examples/guide_message_box.cpp)
-is included below; link `portals::core` as for the dialog guide. The standalone
+modal needs one of the maintained button sets. Link `portals::core` as for the
+dialog guide. The standalone
 guide project builds `guide_message_box`; the root build with
 `PORTALS_BUILD_TESTS=ON` builds `portals_docs_message_box`.
 
@@ -224,8 +239,7 @@ business record.
 ## Custom content and standard button sets
 
 You can pass an owning description as the body of a choice dialog. The buttons,
-result delivery and modal focus stay managed by the existing scene. The complete
-[custom-choice example](examples/guide_dialog_actions.cpp) displays the result
+result delivery and modal focus stay managed by the existing scene. This example displays the result
 of a YES/NO question:
 
 \include guide_dialog_actions.cpp

@@ -16,7 +16,7 @@ runner: необработанная ошибка следует политик�
 
 \include{lineno} examples/guide_theme_selection.cpp
 
-Тот же [полный исходник](../examples/guide_theme_selection.cpp) подключён к нативной
+Программа подключена к нативной
 цели `portals_docs_theme_selection` и consumer установленного пакета. Тестовый transport и
 инъекции ошибок находятся в тестах, а не в нативном приложении.
 

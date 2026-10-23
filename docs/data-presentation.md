@@ -14,8 +14,6 @@ keeps its label visible in every state and exits with **Exit** or F10. A button'
 checked `display` result reaches the standard `runApp` diagnostics. The scene owns
 the controls; `presentation` is an observing reference.
 
-[Complete source](examples/guide_data_state.cpp).
-
 \include guide_data_state.cpp
 
 To build this guide in the Portals source tree, enable `PORTALS_BUILD_TESTS`, then

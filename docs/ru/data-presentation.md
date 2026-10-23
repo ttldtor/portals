@@ -15,8 +15,6 @@
 стандартную диагностику `runApp`. Контролами владеет сцена, а `presentation`
 наблюдает за контролом.
 
-[Полный исходник](../examples/guide_data_state.cpp).
-
 \include guide_data_state.cpp
 
 Для сборки этого руководства из исходников Portals включите `PORTALS_BUILD_TESTS`,

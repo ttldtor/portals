@@ -74,7 +74,7 @@ Finite checks live in separate test harnesses and the installed-package consumer
 They use an in-memory terminal and logical clock, exit automatically, and verify
 runner behavior without establishing physical display compatibility.
 
-## Your own main
+## Your own main {#your-own-main}
 
 Start with [the complete click-handler program](../examples/click_handlers/main.cpp)
 and [declarative composition](declarative-ui.md). Describe controls, attach handlers,

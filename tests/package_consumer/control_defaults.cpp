@@ -9,6 +9,21 @@
 namespace {
 using namespace portals;
 
+template <class Recipe>
+concept HasNonModalMethod = requires(Recipe &&recipe) { std::move(recipe).nonModal(); };
+
+template <class Recipe>
+concept HasNonModalPipe = requires(Recipe &&recipe) { std::move(recipe) | ui::nonModal(); };
+
+template <class Recipe>
+concept HasLvalueNonModalMethod = requires(Recipe &recipe) { recipe.nonModal(); };
+
+static_assert(!HasLvalueNonModalMethod<ui::Description<Dialog>>);
+static_assert(HasNonModalMethod<ui::Description<Dialog>>);
+static_assert(HasNonModalPipe<ui::Description<Dialog>>);
+static_assert(!HasNonModalMethod<ui::Description<Button>>);
+static_assert(!HasNonModalPipe<ui::Description<Button>>);
+
 constexpr std::string_view SOURCE = R"(
 definitions { Edit = LineEdit { history { maxOperations=2 } } }
 defaults { LineEdit { history { groupTyping=false } } }
@@ -244,7 +259,7 @@ bool verifyThemeSelector(ui::Scene scene, ui::Ref<ThemeSelector> selector, bool 
          (*active)->status == ui::ThemeSelectionStatus::ACTIVE && (*active)->catalog->choices.size() == 2;
 }
 
-bool verifyDialog(ui::Scene scene) {
+bool verifyDialog(ui::Scene scene, DialogMode expectedMode = DialogMode::NON_MODAL) {
   auto host = scene.get<OverlayHost>("host");
   auto details = scene.get<Dialog>("panel");
   auto content = scene.get<Label>("inside");
@@ -268,7 +283,7 @@ bool verifyDialog(ui::Scene scene) {
   const auto dialogRead = application->tree().read(details.node(), [&](const Dialog &view) {
     const auto options = view.options();
 
-    dialogMatches = options.mode == DialogMode::NON_MODAL && options.maximumPanelSize == CellSize{42, 9} &&
+    dialogMatches = options.mode == expectedMode && options.maximumPanelSize == CellSize{42, 9} &&
                     options.viewportMargin == 2 && !options.closeOnEscape;
   });
   const auto initiallyOpen = details.opened();
@@ -420,7 +435,8 @@ scene { DataStateView#state {
         ui::scene(ui::overlayHost(
                     ui::button("body").id("body"),
                     ui::dialog("Connection settings", ui::vbox(ui::label("settings").id("inside"), ui::button("Close")))
-                      .mode(DialogMode::NON_MODAL)
+                      .mode(DialogMode::MODAL)
+                      .nonModal()
                       .maximumPanelSize({42, 9})
                       .viewportMargin(2)
                       .closeOnEscape(false)
@@ -444,6 +460,25 @@ scene { OverlayHost#host {
 )",
                               options))) {
     return 10;
+  }
+
+  for (const auto expectedMode : {DialogMode::NON_MODAL, DialogMode::MODAL}) {
+    auto panel = ui::dialog("Connection settings", ui::vbox(ui::label("settings").id("inside"), ui::button("Close")))
+                   .maximumPanelSize({42, 9})
+                   .viewportMargin(2)
+                   .closeOnEscape(false)
+                   .id("panel");
+
+    auto configured = std::move(panel) | ui::mode(DialogMode::MODAL) | ui::nonModal();
+
+    if (expectedMode == DialogMode::MODAL) {
+      (void)std::move(configured).nonModal().mode(DialogMode::MODAL);
+    }
+
+    if (!verifyDialog(ui::scene(ui::overlayHost(ui::button("body"), std::move(configured)).maxLayers(2).id("host")),
+                      expectedMode)) {
+      return 24;
+    }
   }
 
   ui::Ref<MessageDialog> nativeQuestion;

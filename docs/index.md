@@ -142,7 +142,7 @@ and the exact runtime boundaries.
 - [Glossary](glossary.md): definitions of scenes, recipes, UI stages and other terms.
 - [Diagnostics](diagnostics.md): checks and actions for known symptoms.
 
-[Runnable examples](examples.md) link to complete source programs.
+[Runnable examples](examples.md) link to guides with complete source programs.
 [Release notes](../ReleaseNotes.md) record changes by version.
 
 [Dependencies and licenses](dependencies.md) are listed separately.

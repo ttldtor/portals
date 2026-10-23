@@ -19,6 +19,7 @@ import xml.etree.ElementTree as ET
 from urllib.parse import urlsplit, urlunsplit
 
 from pss_highlight import color_pss
+from overload_navigation import group_overloads
 
 
 def type_links(tag_file):
@@ -433,6 +434,7 @@ def finalize(directory, tag_file, language=None, api_tag=None, api_prefix="../")
         path.write_text(color_template_strings(color_pss(color_shell(color_cmake(content)))), encoding="utf-8")
         headings[name] = parser.headings
     complete_navigation(directory, headings)
+    group_overloads(directory, tag_file, read_variable, write_variable)
     complete_search(directory)
     navigation = directory / "navtree.js"
     if navigation.is_file():
