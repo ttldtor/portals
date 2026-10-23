@@ -408,18 +408,18 @@ TEST_CASE("shared grammar kernel is allocation-free and runtime wrappers catch e
 TEST_CASE("frame part declarations share runtime literal typed compact and state cascades") {
   static_assert(static_cast<int>(PssProperty::FOREGROUND) == 0);
   static_assert(static_cast<int>(PssProperty::MIN_WIDTH) == 5);
-  constexpr auto literal =
+  constexpr auto LITERAL =
     sc::pss("Border{foreground:#010203;frame-line-foreground:#040506;frame-title-bold:false;frame-ends-italic:true;}"
             "Border:focused{frame-title-foreground:#070809;}");
-  constexpr auto typed = sc::compactSheet(
+  constexpr auto TYPED = sc::compactSheet(
     std::array{sc::flatRule(sc::type<"Border">(), sc::fg(sc::rgb(1, 2, 3)), sc::frameLineForeground(sc::rgb(4, 5, 6)),
                             sc::frameTitleBold(false), sc::frameEndsItalic(true)),
                sc::flatRule(sc::type<"Border">(StyleState::FOCUSED), sc::frameTitleForeground(sc::rgb(7, 8, 9)))});
   const auto expected = parsePssDocument(
     "Border{foreground:#010203;frame-line-foreground:#040506;frame-title-bold:false;frame-ends-italic:true;}"
     "Border:focused{frame-title-foreground:#070809;}");
-  const auto parsed = sc::materializeDocument(literal);
-  const auto materialized = sc::materializeDocument(typed);
+  const auto parsed = sc::materializeDocument(LITERAL);
+  const auto materialized = sc::materializeDocument(TYPED);
   REQUIRE(expected);
   REQUIRE(parsed);
   REQUIRE(materialized);

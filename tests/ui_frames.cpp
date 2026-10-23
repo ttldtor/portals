@@ -551,14 +551,14 @@ TEST_CASE("resource compact frame preserves source parents and forwards its actu
 }
 
 TEST_CASE("title decorations share owning method pipe and native scroll frame painting") {
-  constexpr std::array presets{TitleDecoration::SPACED, TitleDecoration::SQUARE, TitleDecoration::ANGLE,
+  constexpr std::array PRESETS{TitleDecoration::SPACED, TitleDecoration::SQUARE, TitleDecoration::ANGLE,
                                TitleDecoration::ROUND};
-  constexpr std::array<std::string_view, 4> names{"spaced", "square", "angle", "round"};
-  constexpr std::array<std::string_view, 4> prefixes{" ", "[ ", "< ", "( "};
-  constexpr std::array<std::string_view, 4> suffixes{" ", " ]", " >", " )"};
+  constexpr std::array<std::string_view, 4> NAMES{"spaced", "square", "angle", "round"};
+  constexpr std::array<std::string_view, 4> PREFIXES{" ", "[ ", "< ", "( "};
+  constexpr std::array<std::string_view, 4> SUFFIXES{" ", " ]", " >", " )"};
 
   for (const auto pattern : {"single", "double", "heavy", "rounded", "ascii"}) {
-    for (std::size_t index = 0; index < presets.size(); ++index) {
+    for (std::size_t index = 0; index < PRESETS.size(); ++index) {
       std::vector<std::string> expected;
 
       for (int spelling = 0; spelling < 3; ++spelling) {
@@ -568,16 +568,16 @@ TEST_CASE("title decorations share owning method pipe and native scroll frame pa
         auto recipe = ui::label("body").framed(outer, pattern, "Title").width(18).height(4);
 
         if (spelling == 0) {
-          (void)std::move(recipe).titleDecoration(presets[index]);
+          (void)std::move(recipe).titleDecoration(PRESETS[index]);
         } else {
-          recipe = std::move(recipe) | ui::titleDecoration(names[index]);
+          recipe = std::move(recipe) | ui::titleDecoration(NAMES[index]);
         }
 
         if (spelling == 2) {
           take(ui::mount(*fixture.scene, ui::vbox(ui::scrollArea(ui::label("body"))
                                                     .reference(scroll)
                                                     .framed(pattern, "Title")
-                                                    .titleDecoration(names[index])
+                                                    .titleDecoration(NAMES[index])
                                                     .scrollOnFrame()
                                                     .width(18)
                                                     .height(4))));
@@ -588,8 +588,8 @@ TEST_CASE("title decorations share owning method pipe and native scroll frame pa
         fixture.arrange();
         const auto painted =
           paint(fixture.app->tree(), spelling == 2 ? Node<Widget>(scroll.node()) : Node<Widget>(outer.node()));
-        CHECK(std::ranges::find(painted.text, prefixes[index]) != painted.text.end());
-        CHECK(std::ranges::find(painted.text, suffixes[index]) != painted.text.end());
+        CHECK(std::ranges::find(painted.text, PREFIXES[index]) != painted.text.end());
+        CHECK(std::ranges::find(painted.text, SUFFIXES[index]) != painted.text.end());
 
         if (spelling == 0) {
           expected = painted.text;
