@@ -838,6 +838,43 @@ struct Scene::State {
     provider = {};
   }
 
+  static std::expected<void, ManagedError> lookupBridge(void *raw, const detail::LookupSource &source,
+                                                        detail::LookupPublisher publish) {
+    auto &state = *static_cast<State *>(raw);
+
+    if (state.failure) {
+      return std::unexpected(*state.failure);
+    }
+
+    if (state.completed || state.active == State::Operation::REPORT || state.active == State::Operation::STOP ||
+        state.active == State::Operation::CLOSE || state.active == State::Operation::NOTIFY ||
+        state.active == State::Operation::PREPARE || state.active == State::Operation::LOOKUP) {
+      return std::unexpected(error(ManagedPhase::BIND, TreeError::WOULD_BLOCK));
+    }
+
+    State::Guard guard(state, State::Operation::LOOKUP);
+
+    try {
+      if (state.prepared) {
+        return state.resolve(source, publish);
+      }
+
+      if (state.lookups.size() >= state.options.maxConfigurations) {
+        state.fail(error(ManagedPhase::BIND, TreeError::NODE_LIMIT), "scene.get", source.origin);
+
+        return std::unexpected(*state.failure);
+      }
+
+      state.lookups.emplace_back(source, publish);
+
+      return {};
+    } catch (const std::bad_alloc &) {
+      state.fail(error(ManagedPhase::BIND, TreeError::NO_MEMORY), "scene.get", source.origin);
+
+      return std::unexpected(*state.failure);
+    }
+  }
+
   std::expected<void, ManagedError> requestQuit() {
     if (active == Operation::NOTIFY || active == Operation::REPORT || active == Operation::STOP ||
         active == Operation::CLOSE) {
@@ -1230,42 +1267,7 @@ Scene::Scene(Configuration recipe, SceneOptions options, std::source_location or
   state_->recipe = std::move(recipe);
   state_->recipeOrigin = origin;
   state_->anchor->state = state_.get();
-  state_->anchor->lookup = [](void *raw, const detail::LookupSource &source,
-                              detail::LookupPublisher publish) -> std::expected<void, ManagedError> {
-    auto &state = *static_cast<State *>(raw);
-
-    if (state.failure) {
-      return std::unexpected(*state.failure);
-    }
-
-    if (state.completed || state.active == State::Operation::REPORT || state.active == State::Operation::STOP ||
-        state.active == State::Operation::CLOSE || state.active == State::Operation::NOTIFY ||
-        state.active == State::Operation::PREPARE || state.active == State::Operation::LOOKUP) {
-      return std::unexpected(error(ManagedPhase::BIND, TreeError::WOULD_BLOCK));
-    }
-
-    State::Guard guard(state, State::Operation::LOOKUP);
-
-    try {
-      if (state.prepared) {
-        return state.resolve(source, publish);
-      }
-
-      if (state.lookups.size() >= state.options.maxConfigurations) {
-        state.fail(error(ManagedPhase::BIND, TreeError::NODE_LIMIT), "scene.get", source.origin);
-
-        return std::unexpected(*state.failure);
-      }
-
-      state.lookups.emplace_back(source, publish);
-
-      return {};
-    } catch (const std::bad_alloc &) {
-      state.fail(error(ManagedPhase::BIND, TreeError::NO_MEMORY), "scene.get", source.origin);
-
-      return std::unexpected(*state.failure);
-    }
-  };
+  state_->anchor->lookup = &State::lookupBridge;
   state_->anchor->quit = [](void *raw, std::source_location) {
     return static_cast<State *>(raw)->requestQuit();
   };

@@ -459,6 +459,25 @@ void declarative() {
   check(!closed && std::get<TreeError>(closed.error().cause) == TreeError::CLOSED,
         "scene cleanup closes reference access with typed CLOSED");
 }
+
+void declarativeChange() {
+  ui::Ref<CheckBox> reference;
+  std::array<CheckState, 2> values{};
+  std::size_t calls{};
+  auto scene =
+    ui::scene(ui::checkbox(reference, "Selection").threeState()) | ui::onChange(reference, [&](CheckState value) {
+      check(calls < values.size(), "one change callback per activation");
+      values[calls++] = value;
+    });
+  take(scene.prepareChecked());
+  auto &owner = take(scene.managed()).get();
+  auto &app = ui::detail::SceneAccess::application(owner);
+  take(app.router().invoke(reference.node(), {Action::ACTIVATE}));
+  take(app.router().invoke(reference.node(), {Action::ACTIVATE}));
+  check(calls == 2 && values[0] == CheckState::CHECKED && values[1] == CheckState::MIXED,
+        "installed change adapter observes the three-state cycle");
+  take(scene.close());
+}
 } // namespace
 
 int main() {
@@ -467,6 +486,7 @@ int main() {
   invalidAndBoolRebind();
   lifetimeAndErrors();
   declarative();
+  declarativeChange();
   optionsFirstFactories();
   managedRecovery();
   failedCommitAndCallback();
