@@ -337,7 +337,13 @@ scene {
 right=false } }`. Для отдельного свойства: `frame.sides.top=false`.
 `frame.title` принимает строку или `i18n(...)` и использует существующий
 резолвер текста сцены. `frame.titleAlignment` принимает START/CENTER/END;
-`frame.maxTitleBytes` по умолчанию равен 4096. `frame.glyphs` и
+`frame.titleDecoration` принимает NONE/SPACED/SQUARE/ANGLE/ROUND. Например,
+`frame="rounded" frame.title="Sections" frame.titleDecoration=SQUARE` задаёт
+такой же разрыв заголовка, как рецепт C++. Собственные края:
+`frame.customTitleDecoration { enabled=true prefix="{ " suffix=" }" }`.
+Значение `enabled=false` убирает собственное переопределение. Пропущенные листья
+сохраняют настройки получателя. Ограничения байтов/ячеек и типизированная проверка
+краёв совпадают с C++. `frame.maxTitleBytes` по умолчанию равен 4096. `frame.glyphs` и
 `frame.maxPaintCells` сохраняют прежнюю семантику набора символов и бюджета.
 Отключённая рамка не может одновременно получать специфические настройки рамки.
 

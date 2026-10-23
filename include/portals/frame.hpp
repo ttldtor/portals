@@ -35,4 +35,13 @@ enum class FrameTitleAlignment {
   END     ///< Place the visible prefix before the trailing corner.
 };
 
+/** @brief Optional top-title break decoration; NONE preserves literal legacy titles. */
+enum class TitleDecoration {
+  NONE,   ///< No additional title cells.
+  SPACED, ///< One space on either side.
+  SQUARE, ///< Square brackets and inner spaces.
+  ANGLE,  ///< Angle brackets and inner spaces.
+  ROUND   ///< Parentheses and inner spaces.
+};
+
 } // namespace portals

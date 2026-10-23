@@ -458,3 +458,49 @@ construction settings; they are not new PSS properties. Legacy `BorderOptions`,
 
 See [loaded frame properties](scene-loading-guide.md#loaded-frames) for the same
 construction settings in scene resources.
+
+
+## Decorate and style a frame title {#frame-title-decoration}
+
+Add `.titleDecoration("square")` after `.framed("rounded", "Sections")`, or use
+`| ui::titleDecoration("square")`. Decorations change the top-edge opening
+without adding a row or changing the content inset:
+
+| Name | Opening |
+| --- | --- |
+| `none` (default) | `─Sections─` |
+| `spaced` | `─ Sections ─` |
+| `square` | `─[ Sections ]─` |
+| `angle` | `─< Sections >─` |
+| `round` | `─( Sections )─` |
+
+These fragments show only the title opening. The selected frame pattern still
+supplies the rest of the perimeter. The default preserves existing title output.
+`TitleDecoration::SQUARE` is the corresponding enum form. For custom ends use
+`.titleDecoration(CustomTitleDecoration{.prefix = "{ ", .suffix = " }"})`.
+The frame owns both strings; each end is limited to 64 UTF-8 bytes and 16 cells.
+Every end grapheme must be printable and occupy one terminal cell under the
+receiving width policy. Invalid names or custom ends produce a typed preparation
+error. An empty title or missing top side leaves the existing frame unchanged.
+If both ends and at least one complete title grapheme do not fit, the complete
+title opening is omitted. Otherwise only the title is clipped, at grapheme
+boundaries. Scroll tracks retain priority over frame cells.
+
+The [complete scroll application](scroll-controls.md) styles its line, title,
+and ends independently through the same stylesheet cascade:
+
+```css
+ScrollArea {
+  frame-line-foreground: #7d8797;
+  frame-title-foreground: #62b4d7;
+  frame-ends-foreground: #62b4d7;
+  frame-title-bold: true;
+}
+```
+
+Each prefix also accepts `background`, `bold`, `italic`, and `underline`.
+Use the `Border` selector for an ordinary framed recipe. Missing part attributes
+inherit the resolved common style of that state; a title-only override does not
+replace the line or background. Focused and disabled rules use the existing
+state selectors and style layers. These are paint attributes; decorations and
+glyph patterns remain construction settings.

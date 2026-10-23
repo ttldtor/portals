@@ -2,9 +2,21 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include <array>
+#include <optional>
 #include <portals/cell_buffer.hpp>
 
 namespace portals {
+/** @brief Resolved frame parts; absent parts inherit the ordinary control state. */
+struct FrameAppearance {
+  std::optional<CellStyle> line{};  ///< Perimeter glyph appearance.
+  std::optional<CellStyle> title{}; ///< Title text appearance.
+  std::optional<CellStyle> ends{};  ///< Prefix/suffix appearance, including their spacing.
+
+  /** @param other Value to compare. @return Whether all parts agree. */
+  bool operator==(const FrameAppearance &other) const = default;
+};
+
 /** @brief Owning resolved presentation; no actions or model state are encoded. */
 struct ComputedStyle {
   CellStyle normal;        ///< Ordinary text and fill.
@@ -14,6 +26,7 @@ struct ComputedStyle {
   CellStyle header;        ///< Fixed table heading.
   CellStyle caret;         ///< Editor software caret.
   std::int32_t minWidth{}; ///< Nonnegative intrinsic minimum in cells; zero leaves measurement unchanged.
+  std::array<FrameAppearance, 6> frame{}; ///< Parts in normal/focused/disabled/selected/header/caret order.
   /** @param other Owning value to compare.
    * @return True when every paint value and metric agrees.
    */

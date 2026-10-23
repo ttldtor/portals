@@ -149,12 +149,27 @@ constexpr RgbColor evaluate(Mix<Left, Right> expression, const P &parameters, co
 
 /** @brief Internal declaration destinations, exactly matching StyleDeclarations. */
 enum class Property {
-  FOREGROUND, ///< Text color.
-  BACKGROUND, ///< Fill color.
-  BOLD,       ///< Bold paint flag.
-  ITALIC,     ///< Italic paint flag.
-  UNDERLINE,  ///< Underline paint flag.
-  MIN_WIDTH   ///< State-independent minimum cell width.
+  FOREGROUND,             ///< Text color.
+  BACKGROUND,             ///< Fill color.
+  BOLD,                   ///< Bold paint flag.
+  ITALIC,                 ///< Italic paint flag.
+  UNDERLINE,              ///< Underline paint flag.
+  MIN_WIDTH,              ///< State-independent minimum cell width.
+  FRAME_LINE_FOREGROUND,  ///< Frame part frameLine.foreground.
+  FRAME_LINE_BACKGROUND,  ///< Frame part frameLine.background.
+  FRAME_LINE_BOLD,        ///< Frame part frameLine.bold.
+  FRAME_LINE_ITALIC,      ///< Frame part frameLine.italic.
+  FRAME_LINE_UNDERLINE,   ///< Frame part frameLine.underline.
+  FRAME_TITLE_FOREGROUND, ///< Frame part frameTitle.foreground.
+  FRAME_TITLE_BACKGROUND, ///< Frame part frameTitle.background.
+  FRAME_TITLE_BOLD,       ///< Frame part frameTitle.bold.
+  FRAME_TITLE_ITALIC,     ///< Frame part frameTitle.italic.
+  FRAME_TITLE_UNDERLINE,  ///< Frame part frameTitle.underline.
+  FRAME_ENDS_FOREGROUND,  ///< Frame part frameEnds.foreground.
+  FRAME_ENDS_BACKGROUND,  ///< Frame part frameEnds.background.
+  FRAME_ENDS_BOLD,        ///< Frame part frameEnds.bold.
+  FRAME_ENDS_ITALIC,      ///< Frame part frameEnds.italic.
+  FRAME_ENDS_UNDERLINE,   ///< Frame part frameEnds.underline.
 };
 
 /** @brief Internal typed owning declaration.
@@ -280,7 +295,10 @@ template <class... D> consteval bool uniqueDeclarations(const std::tuple<D...> &
 template <class D, class P, class V>
 constexpr void assign(const D &declaration, StyleDeclarations &destination, const P &parameters, const V &values) {
   auto value = evaluate(declaration.expression, parameters, values);
-  constexpr bool COLOR = D::KIND == Property::FOREGROUND || D::KIND == Property::BACKGROUND;
+  constexpr bool COLOR = D::KIND == Property::FOREGROUND || D::KIND == Property::BACKGROUND ||
+                         D::KIND == Property::FRAME_LINE_FOREGROUND || D::KIND == Property::FRAME_LINE_BACKGROUND ||
+                         D::KIND == Property::FRAME_TITLE_FOREGROUND || D::KIND == Property::FRAME_TITLE_BACKGROUND ||
+                         D::KIND == Property::FRAME_ENDS_FOREGROUND || D::KIND == Property::FRAME_ENDS_BACKGROUND;
   constexpr bool METRIC = D::KIND == Property::MIN_WIDTH;
   using Expected = std::conditional_t<COLOR, RgbColor, std::conditional_t<METRIC, std::int32_t, bool>>;
   static_assert(std::same_as<decltype(value), Expected>, "Static style declaration value type mismatch");
@@ -296,6 +314,36 @@ constexpr void assign(const D &declaration, StyleDeclarations &destination, cons
       destination.italic = value;
     } else if constexpr (D::KIND == Property::UNDERLINE) {
       destination.underline = value;
+    } else if constexpr (D::KIND == Property::FRAME_LINE_FOREGROUND) {
+      destination.frameLine.foreground = value;
+    } else if constexpr (D::KIND == Property::FRAME_LINE_BACKGROUND) {
+      destination.frameLine.background = value;
+    } else if constexpr (D::KIND == Property::FRAME_LINE_BOLD) {
+      destination.frameLine.bold = value;
+    } else if constexpr (D::KIND == Property::FRAME_LINE_ITALIC) {
+      destination.frameLine.italic = value;
+    } else if constexpr (D::KIND == Property::FRAME_LINE_UNDERLINE) {
+      destination.frameLine.underline = value;
+    } else if constexpr (D::KIND == Property::FRAME_TITLE_FOREGROUND) {
+      destination.frameTitle.foreground = value;
+    } else if constexpr (D::KIND == Property::FRAME_TITLE_BACKGROUND) {
+      destination.frameTitle.background = value;
+    } else if constexpr (D::KIND == Property::FRAME_TITLE_BOLD) {
+      destination.frameTitle.bold = value;
+    } else if constexpr (D::KIND == Property::FRAME_TITLE_ITALIC) {
+      destination.frameTitle.italic = value;
+    } else if constexpr (D::KIND == Property::FRAME_TITLE_UNDERLINE) {
+      destination.frameTitle.underline = value;
+    } else if constexpr (D::KIND == Property::FRAME_ENDS_FOREGROUND) {
+      destination.frameEnds.foreground = value;
+    } else if constexpr (D::KIND == Property::FRAME_ENDS_BACKGROUND) {
+      destination.frameEnds.background = value;
+    } else if constexpr (D::KIND == Property::FRAME_ENDS_BOLD) {
+      destination.frameEnds.bold = value;
+    } else if constexpr (D::KIND == Property::FRAME_ENDS_ITALIC) {
+      destination.frameEnds.italic = value;
+    } else if constexpr (D::KIND == Property::FRAME_ENDS_UNDERLINE) {
+      destination.frameEnds.underline = value;
     } else if constexpr (METRIC) {
       destination.minWidth = value;
     }
@@ -663,6 +711,81 @@ template <class E> consteval auto underline(E expression) {
  */
 template <class E> consteval auto minWidth(E expression) {
   return detail::Declaration<detail::Property::MIN_WIDTH, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed frame declaration. */
+template <class E> consteval auto frameLineForeground(E expression) {
+  return detail::Declaration<detail::Property::FRAME_LINE_FOREGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed frame declaration. */
+template <class E> consteval auto frameLineBackground(E expression) {
+  return detail::Declaration<detail::Property::FRAME_LINE_BACKGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed frame declaration. */
+template <class E> consteval auto frameLineBold(E expression) {
+  return detail::Declaration<detail::Property::FRAME_LINE_BOLD, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed frame declaration. */
+template <class E> consteval auto frameLineItalic(E expression) {
+  return detail::Declaration<detail::Property::FRAME_LINE_ITALIC, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed frame declaration. */
+template <class E> consteval auto frameLineUnderline(E expression) {
+  return detail::Declaration<detail::Property::FRAME_LINE_UNDERLINE, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed frame declaration. */
+template <class E> consteval auto frameTitleForeground(E expression) {
+  return detail::Declaration<detail::Property::FRAME_TITLE_FOREGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed frame declaration. */
+template <class E> consteval auto frameTitleBackground(E expression) {
+  return detail::Declaration<detail::Property::FRAME_TITLE_BACKGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed frame declaration. */
+template <class E> consteval auto frameTitleBold(E expression) {
+  return detail::Declaration<detail::Property::FRAME_TITLE_BOLD, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed frame declaration. */
+template <class E> consteval auto frameTitleItalic(E expression) {
+  return detail::Declaration<detail::Property::FRAME_TITLE_ITALIC, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed frame declaration. */
+template <class E> consteval auto frameTitleUnderline(E expression) {
+  return detail::Declaration<detail::Property::FRAME_TITLE_UNDERLINE, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed frame declaration. */
+template <class E> consteval auto frameEndsForeground(E expression) {
+  return detail::Declaration<detail::Property::FRAME_ENDS_FOREGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed frame declaration. */
+template <class E> consteval auto frameEndsBackground(E expression) {
+  return detail::Declaration<detail::Property::FRAME_ENDS_BACKGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed frame declaration. */
+template <class E> consteval auto frameEndsBold(E expression) {
+  return detail::Declaration<detail::Property::FRAME_ENDS_BOLD, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed frame declaration. */
+template <class E> consteval auto frameEndsItalic(E expression) {
+  return detail::Declaration<detail::Property::FRAME_ENDS_ITALIC, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed frame declaration. */
+template <class E> consteval auto frameEndsUnderline(E expression) {
+  return detail::Declaration<detail::Property::FRAME_ENDS_UNDERLINE, E>{expression};
 }
 
 /** @tparam S Constant selector type returned by selector().

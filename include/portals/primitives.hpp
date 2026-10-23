@@ -42,6 +42,20 @@ struct FrameGlyphs {
   ~FrameGlyphs() = default;
 };
 
+/** @brief Maximum complete UTF-8 source bytes in each title end. */
+inline constexpr std::size_t MAX_FRAME_TITLE_END_BYTES = 64;
+/** @brief Maximum printable one-cell graphemes in each title end. */
+inline constexpr std::int32_t MAX_FRAME_TITLE_END_CELLS = 16;
+
+/** @brief Owning title ends; each holds at most 64 UTF-8 bytes and 16 printable one-cell graphemes. */
+struct CustomTitleDecoration {
+  std::string prefix = std::string(0, '\0'); ///< Complete left end, including desired spacing.
+  std::string suffix = std::string(0, '\0'); ///< Complete right end, including desired spacing.
+
+  /** @brief Preserve fallible checked-library transfers. */
+  ~CustomTitleDecoration() = default;
+};
+
 /** @brief Owning advanced frame settings; legacy BorderOptions remains a literal value type. */
 struct FrameOptions {
   BorderOptions border{};                     ///< Existing glyph selection and paint-work cap.
@@ -51,6 +65,8 @@ struct FrameOptions {
   std::string title = std::string(0, '\0');   ///< Owning UTF-8 top-edge title; does not increase intrinsic width.
   FrameTitleAlignment titleAlignment{FrameTitleAlignment::START}; ///< Alignment of the fitting title prefix.
   std::size_t maxTitleBytes{4096}; ///< Positive maximum complete title source bytes, including clipped text.
+  TitleDecoration titleDecoration{TitleDecoration::NONE};       ///< Opt-in title ends; NONE keeps the literal title.
+  std::optional<CustomTitleDecoration> customTitleDecoration{}; ///< Owning ends overriding the preset.
 
   /** @brief Destroy owned sources; copy construction preserves checked allocation failures in MSVC Debug. */
   ~FrameOptions() = default;
@@ -61,6 +77,8 @@ namespace detail {
 struct PreparedFrameText {
   std::array<GraphemeText, 6> glyphs; ///< Validated corners, horizontal and vertical one-cell glyphs.
   GraphemeText title;                 ///< Complete validated title; clipping never borrows a temporary prefix.
+  GraphemeText prefix;                ///< Complete validated left title end.
+  GraphemeText suffix;                ///< Complete validated right title end.
 };
 } // namespace detail
 

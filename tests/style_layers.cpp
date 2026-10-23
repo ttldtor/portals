@@ -2263,3 +2263,25 @@ TEST_CASE("legacy equal mutation during owning preview staging invalidates the r
   CHECK(fixture.read().normal.foreground == BLUE);
   CHECK_FALSE(StyleLayerTestAccess::layered(fixture.engine));
 }
+
+TEST_CASE("frame part attributes share layered admission and preserve computed state after rejection") {
+  Fixture fixture;
+  take(fixture.engine.enableLayers({.maxDeclarations = 4}));
+  auto sheet = foreground(RED);
+  sheet.rules[0].declarations.frameLine.foreground = GREEN;
+  sheet.rules[0].declarations.frameTitle.foreground = BLUE;
+  sheet.rules[0].declarations.frameEnds.bold = false;
+  const auto layer = take(fixture.engine.addLayer(StyleTier::APPLICATION, "frame", sheet));
+  const auto before = fixture.read();
+  REQUIRE(before.frame[0].line);
+  REQUIRE(before.frame[0].title);
+  REQUIRE(before.frame[0].ends);
+  CHECK(before.frame[0].line->foreground == GREEN);
+  CHECK(before.frame[0].title->foreground == BLUE);
+  CHECK_FALSE(before.frame[0].ends->bold);
+  auto extra = foreground(GOLD);
+  CHECK_FALSE(fixture.engine.addLayer(StyleTier::USER, "exceeds", extra));
+  CHECK(fixture.read() == before);
+  take(fixture.engine.removeLayer(layer));
+  CHECK_FALSE(fixture.read().frame[0].title);
+}

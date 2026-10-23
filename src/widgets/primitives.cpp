@@ -76,6 +76,7 @@ std::expected<void, TreeError> submitGlyph(PaintContext &context, CellPoint orig
 struct TitlePlacement {
   std::int32_t start{};
   std::int32_t width{};
+  std::int32_t titleWidth{};
 };
 
 struct Interval {
@@ -110,9 +111,9 @@ std::array<Interval, 2> horizontalExclusions(std::span<const CellRect> exclusion
   return result;
 }
 
-TitlePlacement titlePlacement(const GraphemeText &title, const FrameOptions &options, CellSize size,
+TitlePlacement titlePlacement(const detail::PreparedFrameText &text, const FrameOptions &options, CellSize size,
                               std::span<const CellRect> exclusions) noexcept {
-  if (!options.sides.top || size.width <= 0 || size.height <= 0 || title.bytes().empty()) {
+  if (!options.sides.top || size.width <= 0 || size.height <= 0 || text.title.bytes().empty()) {
     return {};
   }
 
@@ -138,13 +139,25 @@ TitlePlacement titlePlacement(const GraphemeText &title, const FrameOptions &opt
   }
 
   const auto available = best.end - best.begin;
-  const auto visible = title.clipPrefix(available).cells;
+  const auto ends = text.prefix.measure() + text.suffix.measure();
+
+  if (ends > available) {
+    return {};
+  }
+
+  const auto titleWidth = text.title.clipPrefix(available - ends).cells;
+
+  if (titleWidth == 0) {
+    return {};
+  }
+
+  const auto visible = ends + titleWidth;
   const auto spare = available - visible;
   const auto offset = options.titleAlignment == FrameTitleAlignment::END      ? spare
                       : options.titleAlignment == FrameTitleAlignment::CENTER ? spare / 2
                                                                               : 0;
 
-  return {best.begin + offset, visible};
+  return {best.begin + offset, visible, titleWidth};
 }
 
 std::uint64_t excludedHorizontal(std::int32_t y, Interval extent, std::span<const CellRect> exclusions) noexcept {
@@ -252,9 +265,51 @@ std::expected<PreparedFrameText, TreeError> prepareFrameText(WidthPolicy policy,
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
+  const auto ends = [&]() -> std::array<std::string_view, 2> {
+    if (options.customTitleDecoration) {
+      return {options.customTitleDecoration->prefix, options.customTitleDecoration->suffix};
+    }
+
+    switch (options.titleDecoration) {
+    case TitleDecoration::SPACED:
+      return {" ", " "};
+    case TitleDecoration::SQUARE:
+      return {"[ ", " ]"};
+    case TitleDecoration::ANGLE:
+      return {"< ", " >"};
+    case TitleDecoration::ROUND:
+      return {"( ", " )"};
+    default:
+      return {"", ""};
+    }
+  }();
+  const auto compileEnd = [&](std::string_view source) -> std::expected<GraphemeText, TreeError> {
+    TextLimits endLimits;
+    endLimits.max_input_bytes = MAX_FRAME_TITLE_END_BYTES;
+
+    auto result = GraphemeText::from(source, policy, endLimits);
+
+    if (!result || result->measure() > MAX_FRAME_TITLE_END_CELLS ||
+        !std::ranges::all_of(result->graphemes(), [](const auto &grapheme) {
+          return grapheme.cells == 1 && grapheme.display == TextDisplay::PRINTABLE;
+        })) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+
+    return std::move(*result);
+  };
+  auto prefix = compileEnd(ends[0]);
+  auto suffix = compileEnd(ends[1]);
+
+  if (!prefix || !suffix) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
   return PreparedFrameText{{std::move(*compiled[0]), std::move(*compiled[1]), std::move(*compiled[2]),
                             std::move(*compiled[3]), std::move(*compiled[4]), std::move(*compiled[5])},
-                           std::move(*title)};
+                           std::move(*title),
+                           std::move(*prefix),
+                           std::move(*suffix)};
 }
 
 std::uint64_t framePaintWork(const PreparedFrameText &text, const FrameOptions &options, CellSize size,
@@ -263,7 +318,7 @@ std::uint64_t framePaintWork(const PreparedFrameText &text, const FrameOptions &
     return std::numeric_limits<std::uint64_t>::max();
   }
 
-  const auto placement = titlePlacement(text.title, options, size, exclusions);
+  const auto placement = titlePlacement(text, options, size, exclusions);
   auto work = perimeterCells(options.sides, size, exclusions);
 
   if (placement.width > 0) {
@@ -271,6 +326,8 @@ std::uint64_t framePaintWork(const PreparedFrameText &text, const FrameOptions &
     work -= placement.width;
     work += text.title.bytes().size();
     work += text.title.graphemes().size();
+    work += text.prefix.bytes().size() + text.prefix.graphemes().size();
+    work += text.suffix.bytes().size() + text.suffix.graphemes().size();
   }
 
   return work;
@@ -278,7 +335,7 @@ std::uint64_t framePaintWork(const PreparedFrameText &text, const FrameOptions &
 
 std::expected<void, TreeError> paintFrame(PaintContext &context, const PreparedFrameText &text,
                                           const FrameOptions &options, CellRect bounds, CellStyle style,
-                                          std::span<const CellRect> exclusions) {
+                                          std::span<const CellRect> exclusions, FrameAppearance appearance) {
   const auto [width, height] = bounds.size();
 
   if (bounds.empty()) {
@@ -293,7 +350,7 @@ std::expected<void, TreeError> paintFrame(PaintContext &context, const PreparedF
     return std::unexpected(TreeError::WOULD_BLOCK);
   }
 
-  const auto placement = titlePlacement(text.title, options, bounds.size(), exclusions);
+  const auto placement = titlePlacement(text, options, bounds.size(), exclusions);
   const auto sides = options.sides;
   auto draw = [&](std::int32_t x, std::int32_t y, std::size_t index) {
     for (const auto excluded : exclusions) {
@@ -302,7 +359,7 @@ std::expected<void, TreeError> paintFrame(PaintContext &context, const PreparedF
       }
     }
 
-    return submitGlyph(context, {x, y}, text.glyphs[index], bounds, style);
+    return submitGlyph(context, {x, y}, text.glyphs[index], bounds, appearance.line.value_or(style));
   };
   auto row = [&](std::int32_t y, bool top) -> std::expected<void, TreeError> {
     for (std::int32_t x = 0; x < width;) {
@@ -403,13 +460,32 @@ std::expected<void, TreeError> paintFrame(PaintContext &context, const PreparedF
   }
 
   if (placement.width > 0) {
-    const auto clip = CellRect::from({placement.start, 0}, {placement.width, 1});
+    const auto titleStart = placement.start + text.prefix.measure();
+    const auto clip = CellRect::from({titleStart, 0}, {placement.titleWidth, 1});
 
     if (!clip) {
       return std::unexpected(TreeError::INVALID_GEOMETRY);
     }
 
-    return submitGlyph(context, {placement.start, 0}, text.title, *clip, style);
+    if (!text.prefix.bytes().empty()) {
+      const auto painted =
+        submitGlyph(context, {placement.start, 0}, text.prefix, bounds, appearance.ends.value_or(style));
+
+      if (!painted) {
+        return painted;
+      }
+    }
+
+    const auto painted = submitGlyph(context, {titleStart, 0}, text.title, *clip, appearance.title.value_or(style));
+
+    if (!painted) {
+      return painted;
+    }
+
+    if (!text.suffix.bytes().empty()) {
+      return submitGlyph(context, {titleStart + placement.titleWidth, 0}, text.suffix, bounds,
+                         appearance.ends.value_or(style));
+    }
   }
 
   return {};
@@ -444,7 +520,10 @@ std::expected<void, TreeError> Border::validateFrame(const FrameOptions &options
       options.title.size() > options.maxTitleBytes ||
       (options.titleAlignment != FrameTitleAlignment::START && options.titleAlignment != FrameTitleAlignment::CENTER &&
        options.titleAlignment != FrameTitleAlignment::END) ||
-      patternSources(options.pattern)[0].empty()) {
+      patternSources(options.pattern)[0].empty() || options.titleDecoration < TitleDecoration::NONE ||
+      options.titleDecoration > TitleDecoration::ROUND ||
+      (options.customTitleDecoration && (options.customTitleDecoration->prefix.size() > MAX_FRAME_TITLE_END_BYTES ||
+                                         options.customTitleDecoration->suffix.size() > MAX_FRAME_TITLE_END_BYTES))) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
@@ -523,7 +602,10 @@ std::expected<void, TreeError> Border::paint(PaintContext &context) {
   const auto resolved = computedStyle() ? *computedStyle() : styleDefaults();
   const auto style = !enabled_ ? resolved.disabled : focused_ ? resolved.focused : resolved.normal;
 
-  return detail::paintFrame(context, *text_, options_, bounds_, style);
+  return detail::paintFrame(context, *text_, options_, bounds_, style, {},
+                            resolved.frame[!enabled_  ? 2
+                                           : focused_ ? 1
+                                                      : 0]);
 }
 
 ComputedStyle Border::styleDefaults() const {

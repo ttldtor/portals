@@ -58,9 +58,13 @@ Specificity specificity(const StyleSelector &selector) {
 using Rank = std::tuple<StyleTier, Specificity, std::uint64_t, std::size_t>;
 
 template <class CascadeRank, class Visit>
-CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, StyleState state, CellStyle base) {
-  // Each field keeps its own winning rank across the complete rule range.
-  std::array<std::optional<CascadeRank>, 5> ranks;
+CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, StyleState state, CellStyle base,
+                       FrameAppearance &parts) {
+  // Common attributes and each part retain independent winning ranks in the same traversal.
+  constexpr std::size_t PAINT_ATTRIBUTE_COUNT = 5;
+  constexpr std::size_t FRAME_PART_COUNT = 3;
+  std::array<std::optional<CascadeRank>, PAINT_ATTRIBUTE_COUNT *(FRAME_PART_COUNT + 1)> ranks;
+  std::array<StylePaintDeclarations, FRAME_PART_COUNT> overrides;
   const auto assign = [&]<class T>(const std::optional<T> &value, auto &destination, std::size_t index,
                                    CascadeRank rank) {
     if (value && (!ranks[index] || rank >= *ranks[index])) {
@@ -72,6 +76,7 @@ CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, StyleState
     if (!matches(rule.selector, target, state)) {
       return;
     }
+
     const CascadeRank rank = makeRank();
     const auto &values = rule.declarations;
     assign(values.foreground, base.foreground, 0, rank);
@@ -79,18 +84,60 @@ CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, StyleState
     assign(values.bold, base.bold, 2, rank);
     assign(values.italic, base.italic, 3, rank);
     assign(values.underline, base.underline, 4, rank);
+
+    const std::array sources{&values.frameLine, &values.frameTitle, &values.frameEnds};
+
+    for (std::size_t part = 0; part < sources.size(); ++part) {
+      const auto &source = *sources[part];
+      auto &destination = overrides[part];
+      const auto offset = PAINT_ATTRIBUTE_COUNT * (part + 1);
+      assign(source.foreground, destination.foreground, offset, rank);
+      assign(source.background, destination.background, offset + 1, rank);
+      assign(source.bold, destination.bold, offset + 2, rank);
+      assign(source.italic, destination.italic, offset + 3, rank);
+      assign(source.underline, destination.underline, offset + 4, rank);
+    }
   });
+  const std::array destinations{&parts.line, &parts.title, &parts.ends};
+
+  for (std::size_t index = 0; index < overrides.size(); ++index) {
+    const auto &source = overrides[index];
+
+    if (!source.foreground && !source.background && !source.bold && !source.italic && !source.underline) {
+      continue;
+    }
+
+    auto &destination = *destinations[index];
+    auto resolved = destination.value_or(base);
+
+    if (source.foreground) {
+      resolved.foreground = source.foreground;
+    }
+
+    if (source.background) {
+      resolved.background = source.background;
+    }
+
+    resolved.bold = source.bold.value_or(resolved.bold);
+    resolved.italic = source.italic.value_or(resolved.italic);
+    resolved.underline = source.underline.value_or(resolved.underline);
+    destination = resolved;
+  }
+
   return base;
 }
 
 template <class CascadeRank, class Visit>
 ComputedStyle resolveRules(const Visit &visit, const StyleTarget &target, ComputedStyle defaults) noexcept {
-  defaults.normal = resolvePaint<CascadeRank>(visit, target, StyleState::NORMAL, defaults.normal);
-  defaults.focused = resolvePaint<CascadeRank>(visit, target, StyleState::FOCUSED, defaults.focused);
-  defaults.disabled = resolvePaint<CascadeRank>(visit, target, StyleState::DISABLED, defaults.disabled);
-  defaults.selected = resolvePaint<CascadeRank>(visit, target, StyleState::SELECTED, defaults.selected);
-  defaults.header = resolvePaint<CascadeRank>(visit, target, StyleState::HEADER, defaults.header);
-  defaults.caret = resolvePaint<CascadeRank>(visit, target, StyleState::CARET, defaults.caret);
+  defaults.normal = resolvePaint<CascadeRank>(visit, target, StyleState::NORMAL, defaults.normal, defaults.frame[0]);
+  defaults.focused = resolvePaint<CascadeRank>(visit, target, StyleState::FOCUSED, defaults.focused, defaults.frame[1]);
+  defaults.disabled =
+    resolvePaint<CascadeRank>(visit, target, StyleState::DISABLED, defaults.disabled, defaults.frame[2]);
+  defaults.selected =
+    resolvePaint<CascadeRank>(visit, target, StyleState::SELECTED, defaults.selected, defaults.frame[3]);
+  defaults.header = resolvePaint<CascadeRank>(visit, target, StyleState::HEADER, defaults.header, defaults.frame[4]);
+  defaults.caret = resolvePaint<CascadeRank>(visit, target, StyleState::CARET, defaults.caret, defaults.frame[5]);
+
   std::optional<CascadeRank> rank;
   visit([&](const StyleRule &rule, auto &&makeRank) {
     if (!rule.declarations.minWidth || !matches(rule.selector, target, StyleState::ANY)) {
@@ -664,7 +711,12 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
 
     for (const auto &rule : value->rules) {
       const auto &d = rule.declarations;
-      const std::size_t count = d.foreground.has_value() + d.background.has_value() + d.bold.has_value() +
+      const auto partCount = [](const StylePaintDeclarations &part) {
+        return part.foreground.has_value() + part.background.has_value() + part.bold.has_value() +
+               part.italic.has_value() + part.underline.has_value();
+      };
+      const std::size_t count = partCount(d.frameLine) + partCount(d.frameTitle) + partCount(d.frameEnds) +
+                                d.foreground.has_value() + d.background.has_value() + d.bold.has_value() +
                                 d.italic.has_value() + d.underline.has_value() + d.minWidth.has_value();
       if (!charge(declarations, count, options.maxDeclarations) ||
           !charge(bytes, sizeof(StyleRule), options.maxOwnedBytes) || !chargeString(rule.selector.type) ||

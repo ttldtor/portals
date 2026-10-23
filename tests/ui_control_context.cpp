@@ -1518,9 +1518,9 @@ TEST_CASE("actual catalog fixed ancestry retains sparse precedence origins and u
   fails(controls.validate(), Code::INHERITANCE_LIMIT);
 }
 
-TEST_CASE("Shared frame schema appends stable leaves within three presence words") {
-  static_assert(ui::detail::CONTROL_PROPERTY_COUNT == 189);
-  static_assert((ui::detail::CONTROL_PRESENCE_BITS + 63) / 64 == 3);
+TEST_CASE("Shared frame schema appends stable leaves within four presence words") {
+  static_assert(ui::detail::CONTROL_PROPERTY_COUNT == 193);
+  static_assert((ui::detail::CONTROL_PRESENCE_BITS + 63) / 64 == 4);
   ControlSettings patch;
   patch.frame.enabled = true;
   patch.frame.glyphs = PrimitiveGlyphs::ASCII;
@@ -1664,4 +1664,36 @@ TEST_CASE("Frame helper preserves bases and checks enablement custom sources and
   REQUIRE_FALSE(oversized);
   REQUIRE(oversized.error().text);
   CHECK(oversized.error().text->kind == TextErrorKind::INPUT_LIMIT);
+}
+
+TEST_CASE("title decoration sparse settings preserve ends and share checked enum byte limits") {
+  using ui::detail::controlFrameOptions;
+  FrameOptions base;
+  base.title = "Title";
+  base.titleDecoration = TitleDecoration::ROUND;
+  base.customTitleDecoration = CustomTitleDecoration{"[ ", " ]"};
+  auto inherited = take(controlFrameOptions({}, base, {}));
+  REQUIRE(inherited);
+  CHECK(inherited->titleDecoration == TitleDecoration::ROUND);
+  REQUIRE(inherited->customTitleDecoration);
+  CHECK(inherited->customTitleDecoration->prefix == "[ ");
+  ControlSettings patch;
+  patch.frame.titleDecoration = TitleDecoration::SQUARE;
+  patch.frame.customTitleDecoration.suffix = "!";
+  auto merged = take(controlFrameOptions(patch, inherited, {}));
+  REQUIRE(merged);
+  CHECK(merged->customTitleDecoration->prefix == "[ ");
+  CHECK(merged->customTitleDecoration->suffix == "!");
+  patch.frame.customTitleDecoration = {.enabled = false};
+  CHECK_FALSE(take(controlFrameOptions(patch, inherited, {}))->customTitleDecoration);
+  patch.frame.customTitleDecoration = {.enabled = true, .prefix = "", .suffix = ""};
+  CHECK_FALSE(controlFrameOptions(patch, {}, {}));
+  patch.frame.enabled = true;
+  CHECK(ControlContext{}.resolve("Button", patch));
+  CHECK(take(controlFrameOptions(patch, {}, {}))->customTitleDecoration->prefix.empty());
+  patch.frame.titleDecoration = static_cast<TitleDecoration>(99);
+  CHECK_FALSE(ControlContext{}.resolve("Button", patch));
+  patch.frame.titleDecoration = TitleDecoration::SPACED;
+  patch.frame.customTitleDecoration.prefix = std::string(65, 'a');
+  CHECK_FALSE(ControlContext{}.resolve("Button", patch));
 }

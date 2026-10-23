@@ -21,8 +21,27 @@ struct PssSpan {
 using PssValue = PssScalarValue;
 
 /** @brief Static string views avoid repeated C-string length evaluation in the constexpr hot path. */
-inline constexpr std::array<std::string_view, PSS_PROPERTY_COUNT> PSS_PROPERTY_NAMES{
-  "foreground", "background", "bold", "italic", "underline", "min-width"};
+inline constexpr std::array<std::string_view, PSS_PROPERTY_COUNT> PSS_PROPERTY_NAMES{"foreground",
+                                                                                     "background",
+                                                                                     "bold",
+                                                                                     "italic",
+                                                                                     "underline",
+                                                                                     "min-width",
+                                                                                     "frame-line-foreground",
+                                                                                     "frame-line-background",
+                                                                                     "frame-line-bold",
+                                                                                     "frame-line-italic",
+                                                                                     "frame-line-underline",
+                                                                                     "frame-title-foreground",
+                                                                                     "frame-title-background",
+                                                                                     "frame-title-bold",
+                                                                                     "frame-title-italic",
+                                                                                     "frame-title-underline",
+                                                                                     "frame-ends-foreground",
+                                                                                     "frame-ends-background",
+                                                                                     "frame-ends-bold",
+                                                                                     "frame-ends-italic",
+                                                                                     "frame-ends-underline"};
 /** @brief Pseudo-state names in the existing StyleState order after ANY. */
 inline constexpr std::array<std::string_view, 6> PSS_STATE_NAMES{"normal",   "focused", "disabled",
                                                                  "selected", "header",  "caret"};
@@ -536,7 +555,10 @@ private:
     const auto property = static_cast<PssProperty>(index);
     PssValue declaration;
 
-    if (property == PssProperty::FOREGROUND || property == PssProperty::BACKGROUND) {
+    if (property == PssProperty::FOREGROUND || property == PssProperty::BACKGROUND ||
+        property == PssProperty::FRAME_LINE_FOREGROUND || property == PssProperty::FRAME_LINE_BACKGROUND ||
+        property == PssProperty::FRAME_TITLE_FOREGROUND || property == PssProperty::FRAME_TITLE_BACKGROUND ||
+        property == PssProperty::FRAME_ENDS_FOREGROUND || property == PssProperty::FRAME_ENDS_BACKGROUND) {
       const auto color = parseColor(text);
 
       if (!color) {
@@ -605,6 +627,66 @@ constexpr void assignPssDeclaration(PssProperty property, PssValue value, StyleD
     break;
   case PssProperty::UNDERLINE:
     destination.underline = value.boolean;
+
+    break;
+  case PssProperty::FRAME_LINE_FOREGROUND:
+    destination.frameLine.foreground = value.color;
+
+    break;
+  case PssProperty::FRAME_LINE_BACKGROUND:
+    destination.frameLine.background = value.color;
+
+    break;
+  case PssProperty::FRAME_LINE_BOLD:
+    destination.frameLine.bold = value.boolean;
+
+    break;
+  case PssProperty::FRAME_LINE_ITALIC:
+    destination.frameLine.italic = value.boolean;
+
+    break;
+  case PssProperty::FRAME_LINE_UNDERLINE:
+    destination.frameLine.underline = value.boolean;
+
+    break;
+  case PssProperty::FRAME_TITLE_FOREGROUND:
+    destination.frameTitle.foreground = value.color;
+
+    break;
+  case PssProperty::FRAME_TITLE_BACKGROUND:
+    destination.frameTitle.background = value.color;
+
+    break;
+  case PssProperty::FRAME_TITLE_BOLD:
+    destination.frameTitle.bold = value.boolean;
+
+    break;
+  case PssProperty::FRAME_TITLE_ITALIC:
+    destination.frameTitle.italic = value.boolean;
+
+    break;
+  case PssProperty::FRAME_TITLE_UNDERLINE:
+    destination.frameTitle.underline = value.boolean;
+
+    break;
+  case PssProperty::FRAME_ENDS_FOREGROUND:
+    destination.frameEnds.foreground = value.color;
+
+    break;
+  case PssProperty::FRAME_ENDS_BACKGROUND:
+    destination.frameEnds.background = value.color;
+
+    break;
+  case PssProperty::FRAME_ENDS_BOLD:
+    destination.frameEnds.bold = value.boolean;
+
+    break;
+  case PssProperty::FRAME_ENDS_ITALIC:
+    destination.frameEnds.italic = value.boolean;
+
+    break;
+  case PssProperty::FRAME_ENDS_UNDERLINE:
+    destination.frameEnds.underline = value.boolean;
 
     break;
   case PssProperty::MIN_WIDTH:

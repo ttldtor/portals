@@ -28,6 +28,7 @@ constexpr std::size_t DIALOG_HEIGHT_PROPERTY = 95;
 constexpr std::size_t NOTIFICATION_WIDTH_PROPERTY = 118;
 constexpr std::size_t SELECTOR_SHORTCUT_PROPERTY = 142;
 constexpr std::array<std::string_view, 6> FRAME_PATTERN_NAMES{"SINGLE", "PLAIN", "ROUNDED", "DOUBLE", "HEAVY", "ASCII"};
+constexpr std::array<std::string_view, 5> TITLE_DECORATION_NAMES{"NONE", "SPACED", "SQUARE", "ANGLE", "ROUND"};
 constexpr std::array<std::string_view, 3> FRAME_TITLE_ALIGNMENT_NAMES{"START", "CENTER", "END"};
 constexpr std::array<std::string_view, 3> STATE_NAMES{"UNCHECKED", "CHECKED", "MIXED"};
 constexpr std::array<std::string_view, 2> CYCLE_NAMES{"TWO_STATE", "THREE_STATE"};
@@ -246,7 +247,11 @@ constexpr std::array<ControlPropertyDescriptor, detail::CONTROL_PROPERTY_COUNT> 
    {"message.buttons", Kind::ENUMERATION, 2, DIALOG_BUTTON_NAMES},
    {"message.order.first", Kind::ENUMERATION, 3, MESSAGE_CHOICE_NAMES},
    {"message.order.second", Kind::ENUMERATION, 3, MESSAGE_CHOICE_NAMES},
-   {"message.order.third", Kind::ENUMERATION, 3, MESSAGE_CHOICE_NAMES}}};
+   {"message.order.third", Kind::ENUMERATION, 3, MESSAGE_CHOICE_NAMES},
+   {"frame.titleDecoration", Kind::ENUMERATION, 2, TITLE_DECORATION_NAMES},
+   {"frame.customTitleDecoration.enabled", Kind::BOOLEAN, 3, {}},
+   {"frame.customTitleDecoration.prefix", Kind::LITERAL_STRING, 3, {}},
+   {"frame.customTitleDecoration.suffix", Kind::LITERAL_STRING, 3, {}}}};
 static_assert(std::ranges::all_of(PROPERTIES, [](const auto &property) {
   return !property.path.empty();
 }));
@@ -259,8 +264,8 @@ template <class... Indices> constexpr Mask propertyMask(Indices... indices) {
   return mask;
 }
 
-constexpr Mask FRAME_MASK =
-  propertyMask(53, 54, 55, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179);
+constexpr Mask FRAME_MASK = propertyMask(53, 54, 55, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177,
+                                         178, 179, 189, 190, 191, 192);
 constexpr Mask SIZE_MASK = propertyMask(1, 2, 3) | FRAME_MASK;
 constexpr Mask TEXT_MASK = propertyMask(0);
 constexpr Mask PASSWORD_MASK =
@@ -308,9 +313,10 @@ constexpr Mask ALL_MASK = [] {
 constexpr Mask GRID_MASK = SIZE_MASK | propertyMask(17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29);
 constexpr std::size_t BUILTIN_COUNT = 8;
 constexpr auto FRAME_SCHEMA =
-  std::to_array({PROPERTIES[53], PROPERTIES[54], PROPERTIES[55], PROPERTIES[165], PROPERTIES[166], PROPERTIES[167],
+  std::to_array({PROPERTIES[53],  PROPERTIES[54],  PROPERTIES[55],  PROPERTIES[165], PROPERTIES[166], PROPERTIES[167],
                  PROPERTIES[168], PROPERTIES[169], PROPERTIES[170], PROPERTIES[171], PROPERTIES[172], PROPERTIES[173],
-                 PROPERTIES[174], PROPERTIES[175], PROPERTIES[176], PROPERTIES[177], PROPERTIES[178], PROPERTIES[179]});
+                 PROPERTIES[174], PROPERTIES[175], PROPERTIES[176], PROPERTIES[177], PROPERTIES[178], PROPERTIES[179],
+                 PROPERTIES[189], PROPERTIES[190], PROPERTIES[191], PROPERTIES[192]});
 
 template <std::size_t N> constexpr auto withFrame(const std::array<ControlPropertyDescriptor, N> &base) {
   std::array<ControlPropertyDescriptor, N + FRAME_SCHEMA.size()> result{};
@@ -739,7 +745,11 @@ ControlContextError exceptionError() noexcept {
   X(message.buttons, 185)                                                                                              \
   X(message.order.first, 186)                                                                                          \
   X(message.order.second, 187)                                                                                         \
-  X(message.order.third, 188)
+  X(message.order.third, 188)                                                                                          \
+  X(frame.titleDecoration, 189)                                                                                        \
+  X(frame.customTitleDecoration.enabled, 190)                                                                          \
+  X(frame.customTitleDecoration.prefix, 191)                                                                           \
+  X(frame.customTitleDecoration.suffix, 192)
 
 #define LEAF_INDEX(field, index) index,
 constexpr auto LEAF_INDICES = std::to_array<std::size_t>({PORTALS_CONTROL_LEAVES(LEAF_INDEX)});
@@ -802,8 +812,9 @@ template <class T> bool validValue(const T &value, std::size_t index) noexcept {
     return index == 155 ? value >= 2 : !POSITIVE_UNSIGNED_MASK.test(index) || value > 0;
   } else if constexpr (std::same_as<T, std::string>) {
     return detail::validControlLiteral(value) && (index != 68 || !value.empty()) &&
-           (index < FRAME_FIRST_CUSTOM_GLYPH_PROPERTY ||
-            (value.size() <= FRAME_CUSTOM_GLYPH_MAX_BYTES && !value.empty()));
+           (index < FRAME_FIRST_CUSTOM_GLYPH_PROPERTY || index > 179 ||
+            (value.size() <= FRAME_CUSTOM_GLYPH_MAX_BYTES && !value.empty())) &&
+           ((index != 191 && index != 192) || value.size() <= FRAME_CUSTOM_GLYPH_MAX_BYTES);
   } else if constexpr (std::same_as<T, double>) {
     return std::isfinite(value) && (index != WHEEL_STEP_PROPERTY || value > 0);
   } else if constexpr (std::same_as<T, ToastPlacement>) {
@@ -842,6 +853,8 @@ template <class T> bool validValue(const T &value, std::size_t index) noexcept {
   } else if constexpr (std::same_as<T, FramePattern>) {
     return value == FramePattern::SINGLE || value == FramePattern::ROUNDED || value == FramePattern::DOUBLE ||
            value == FramePattern::HEAVY || value == FramePattern::ASCII;
+  } else if constexpr (std::same_as<T, TitleDecoration>) {
+    return value >= TitleDecoration::NONE && value <= TitleDecoration::ROUND;
   } else if constexpr (std::same_as<T, FrameTitleAlignment>) {
     return value == FrameTitleAlignment::START || value == FrameTitleAlignment::CENTER ||
            value == FrameTitleAlignment::END;
@@ -1025,6 +1038,28 @@ controlFrameOptions(const ControlSettings &settings, std::optional<FrameOptions>
   apply(options.sides.left, frame.sides.left);
   apply(options.titleAlignment, frame.titleAlignment);
   apply(options.maxTitleBytes, frame.maxTitleBytes);
+  apply(options.titleDecoration, frame.titleDecoration);
+
+  const auto &ends = frame.customTitleDecoration;
+
+  if (ends.enabled == false) {
+    options.customTitleDecoration.reset();
+  } else if (ends.enabled == true && !options.customTitleDecoration) {
+    options.customTitleDecoration.emplace();
+  }
+
+  if ((ends.prefix || ends.suffix) && !options.customTitleDecoration) {
+    return rejected(ends.prefix ? "frame.customTitleDecoration.prefix" : "frame.customTitleDecoration.suffix");
+  }
+
+  if (options.customTitleDecoration) {
+    apply(options.customTitleDecoration->prefix, ends.prefix);
+    apply(options.customTitleDecoration->suffix, ends.suffix);
+  }
+
+  if (!validValue(options.titleDecoration, 189)) {
+    return rejected("frame.titleDecoration");
+  }
 
   if (!options.maxTitleBytes) {
     return rejected("frame.maxTitleBytes");

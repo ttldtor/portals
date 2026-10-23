@@ -1174,6 +1174,58 @@ void frameModifierConstructionFailures() {
   }
 }
 
+void titleDecorationPreparationFailures() {
+  static_assert(!std::is_nothrow_move_constructible_v<CustomTitleDecoration>);
+  static_assert(!std::is_nothrow_move_constructible_v<ui::TitleDecorationModifier>);
+  FrameOptions options;
+  options.title = "Title";
+  options.customTitleDecoration = CustomTitleDecoration{std::string(16, '['), std::string(16, ']')};
+  bool completed{};
+  // Checked-library iterator proxies add allocations; use the existing bounded full-frame fixture ceiling.
+  constexpr std::ptrdiff_t MAX_PREPARATION_ALLOCATION_ATTEMPTS = 512;
+
+  for (std::ptrdiff_t budget = 0; budget < MAX_PREPARATION_ALLOCATION_ATTEMPTS && !completed; ++budget) {
+    auto app = take(Application::create());
+    const auto root = take(app->tree().root());
+    allocation_test::remaining = budget;
+    const auto prepared =
+      app->tree().emplace<Border>(root, WidthPolicy{}, options, ControlStyle{}, SizePolicy{}, std::in_place);
+    allocation_test::remaining = -1;
+
+    if (prepared) {
+      take(app->tree().read(*prepared, [&](const Border &frame) {
+        take(frame.preparation());
+      }));
+      completed = true;
+      std::cout << "title-end preparation succeeds at allocation budget " << budget << '\n';
+    } else {
+      check(prepared.error() == TreeError::NO_MEMORY, "owning title-end preparation preserves typed NO_MEMORY");
+      check(take(app->tree().inspect(root)).children.empty(), "failed title-end preparation publishes no child");
+    }
+
+    check(options.customTitleDecoration->prefix == std::string(16, '[') && options.title == "Title",
+          "failed or successful preparation preserves caller-owned sources");
+  }
+
+  check(completed, "bounded title-end preparation failure check reaches success");
+  const auto bounds = take(CellRect::from({}, {40, 3}));
+  const auto text = take(detail::prepareFrameText({}, options));
+  options.border.maxPaintCells = static_cast<std::size_t>(detail::framePaintWork(text, options, bounds.size()));
+  Border frame({}, options, {}, {}, std::in_place);
+  take(frame.arrange(bounds));
+  CountingSink sink;
+  allocation_test::remaining = 0;
+  const auto painted = frame.paint(sink);
+  allocation_test::remaining = -1;
+  check(painted.has_value() && sink.commands != 0, "custom title ends paint without allocations at their exact budget");
+  --options.border.maxPaintCells;
+  Border limited({}, options, {}, {}, std::in_place);
+  take(limited.arrange(bounds));
+  CountingSink rejected;
+  check(limited.paint(rejected) == std::unexpected(TreeError::WOULD_BLOCK) && rejected.commands == 0,
+        "title-end sources participate in the finite pre-submission paint budget");
+}
+
 void allocationRollback() {
   bool succeeded{};
 
@@ -1247,8 +1299,16 @@ void invalidCustomClip() {
 }
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
   try {
+    if (argc == 2 && std::string_view(argv[1]) == "--title-decoration-preparation-only") {
+      titleDecorationPreparationFailures();
+      std::cout << "title decoration preparation contracts passed\n";
+
+      return 0;
+    }
+
+    titleDecorationPreparationFailures();
     nothrowAllocationContracts();
     framePatternsAndOwnedText();
     frameValidationAndGeometry();

@@ -4701,7 +4701,7 @@ TEST_CASE("Notifications semantic schema owns canonical metadata and keeps old n
   };
   const auto canonical = ui::controlPropertySchema("Notifications");
 
-  constexpr std::array<std::string_view, 18> FRAME_PATHS{"frame.enabled",
+  constexpr std::array<std::string_view, 22> FRAME_PATHS{"frame.enabled",
                                                          "frame.glyphs",
                                                          "frame.maxPaintCells",
                                                          "frame.pattern",
@@ -4718,9 +4718,13 @@ TEST_CASE("Notifications semantic schema owns canonical metadata and keeps old n
                                                          "frame.customGlyphs.bottomLeft",
                                                          "frame.customGlyphs.bottomRight",
                                                          "frame.customGlyphs.horizontal",
-                                                         "frame.customGlyphs.vertical"};
+                                                         "frame.customGlyphs.vertical",
+                                                         "frame.titleDecoration",
+                                                         "frame.customTitleDecoration.enabled",
+                                                         "frame.customTitleDecoration.prefix",
+                                                         "frame.customTitleDecoration.suffix"};
 
-  REQUIRE(canonical.size() == 43);
+  REQUIRE(canonical.size() == 47);
   CHECK(std::ranges::count_if(canonical, [](const auto &property) {
           return property.path.starts_with("frame.");
         }) == static_cast<std::ptrdiff_t>(FRAME_PATHS.size()));
@@ -6176,4 +6180,43 @@ TEST_CASE("resource invalid prepared frame rolls back earlier nodes and every un
 
   REQUIRE(after);
   CHECK(after->children == before->children);
+}
+
+TEST_CASE("resource title decoration dotted and grouped forms share owning custom preparation") {
+  for (
+    const std::string_view properties :
+    {R"(frame{enabled=true pattern=ASCII title="Title" titleDecoration=SQUARE customTitleDecoration{enabled=true prefix="< " suffix=" >"}})",
+     R"(frame="ascii" frame.title="Title" frame.titleDecoration=SQUARE frame.customTitleDecoration.enabled=true frame.customTitleDecoration.prefix="< " frame.customTitleDecoration.suffix=" >")"}) {
+    ui::SceneResourceOptions options;
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    auto owner =
+      ui::scene("scene{Button#button{text=\"body\" width=16 height=4 " + std::string(properties) + "}}", options);
+    const auto source = owner.get<Button>("button");
+    REQUIRE(owner.prepareChecked());
+    auto &scene = owner.managed()->get();
+    auto &app = ui::detail::SceneAccess::application(scene);
+    layoutResourceFrame(scene, app, {16, 4});
+    const auto frame = app.tree().inspect(source.node())->parent;
+    ResourceFramePaint sink;
+    REQUIRE(app.tree().frame([&] {
+      REQUIRE(app.tree().paint(frame, sink));
+    }));
+    CHECK(std::ranges::find(sink.text, "< ") != sink.text.end());
+    CHECK(std::ranges::find(sink.text, " >") != sink.text.end());
+    CHECK(std::ranges::find(sink.text, "[ ") == sink.text.end());
+    REQUIRE(owner.close());
+  }
+
+  for (const auto properties :
+       {R"(frame.titleDecoration=UNKNOWN)", R"(frame.customTitleDecoration{enabled=true prefix="界"})",
+        R"(frame.customTitleDecoration{enabled=true prefix="abcdefghijklmnopq"})"}) {
+    ui::SceneResourceOptions options;
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    auto owner = ui::scene("scene{Button#button{text=\"body\" frame=\"ascii\" frame.title=\"Title\" " +
+                             std::string(properties) + "}}",
+                           options);
+    const auto source = owner.get<Button>("button");
+    CHECK_FALSE(owner.prepareChecked());
+    CHECK(source.node() == Node<Button>{});
+  }
 }

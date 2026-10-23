@@ -7,6 +7,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Frame titles support compact spaced, square, angle and round decorations,
+  with owning custom ends and matching loaded-scene properties. Frame lines,
+  title text and title ends can be styled independently through the existing
+  runtime, typed and compile-time stylesheet paths. Existing literal titles
+  keep their default appearance.
+
 - Choice dialogs accept custom declarative content and six standard button sets
   through `ui::dialog`, with configurable captions, order and safe defaults.
   Existing message-box helpers remain available. An optional `.closeButton()`

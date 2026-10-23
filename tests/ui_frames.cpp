@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+#include "../src/widgets/frame_text.hpp"
 #include <doctest.h>
 #include <portals/ui.hpp>
 
@@ -76,11 +77,21 @@ struct FrameSink final : PaintContext {
   std::vector<std::string> text;
   std::optional<CellStyle> style;
 
+  struct Run {
+    std::string text;
+    CellPoint origin;
+    CellRect clip;
+    CellStyle style;
+  };
+
+  std::vector<Run> runs;
+
   std::expected<void, TreeError> submit(std::span<const RenderCommand> commands) override {
     for (const auto &command : commands) {
       if (const auto *run = std::get_if<TextCommand>(&command)) {
         text.emplace_back(run->text.bytes());
         style = run->style;
+        runs.push_back({std::string(run->text.bytes()), run->origin, run->clip, run->style});
       }
     }
 
@@ -537,4 +548,245 @@ TEST_CASE("resource compact frame preserves source parents and forwards its actu
     REQUIRE(widget.options().cells.size() == 1);
     CHECK(widget.options().cells.front().node == children.front().id());
   }));
+}
+
+TEST_CASE("title decorations share owning method pipe and native scroll frame painting") {
+  constexpr std::array presets{TitleDecoration::SPACED, TitleDecoration::SQUARE, TitleDecoration::ANGLE,
+                               TitleDecoration::ROUND};
+  constexpr std::array<std::string_view, 4> names{"spaced", "square", "angle", "round"};
+  constexpr std::array<std::string_view, 4> prefixes{" ", "[ ", "< ", "( "};
+  constexpr std::array<std::string_view, 4> suffixes{" ", " ]", " >", " )"};
+
+  for (const auto pattern : {"single", "double", "heavy", "rounded", "ascii"}) {
+    for (std::size_t index = 0; index < presets.size(); ++index) {
+      std::vector<std::string> expected;
+
+      for (int spelling = 0; spelling < 3; ++spelling) {
+        Fixture fixture;
+        ui::Ref<Border> outer;
+        ui::Ref<ScrollArea> scroll;
+        auto recipe = ui::label("body").framed(outer, pattern, "Title").width(18).height(4);
+
+        if (spelling == 0) {
+          (void)std::move(recipe).titleDecoration(presets[index]);
+        } else {
+          recipe = std::move(recipe) | ui::titleDecoration(names[index]);
+        }
+
+        if (spelling == 2) {
+          take(ui::mount(*fixture.scene, ui::vbox(ui::scrollArea(ui::label("body"))
+                                                    .reference(scroll)
+                                                    .framed(pattern, "Title")
+                                                    .titleDecoration(names[index])
+                                                    .scrollOnFrame()
+                                                    .width(18)
+                                                    .height(4))));
+        } else {
+          take(ui::mount(*fixture.scene, ui::vbox(std::move(recipe))));
+        }
+
+        fixture.arrange();
+        const auto painted =
+          paint(fixture.app->tree(), spelling == 2 ? Node<Widget>(scroll.node()) : Node<Widget>(outer.node()));
+        CHECK(std::ranges::find(painted.text, prefixes[index]) != painted.text.end());
+        CHECK(std::ranges::find(painted.text, suffixes[index]) != painted.text.end());
+
+        if (spelling == 0) {
+          expected = painted.text;
+        } else {
+          CHECK(painted.text == expected);
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("decorated title reserves complete ends and clips only whole title graphemes") {
+  FrameOptions options;
+  options.pattern = FramePattern::ASCII;
+  options.title = "界e\xcc\x81Z";
+  options.titleDecoration = TitleDecoration::SQUARE;
+
+  for (std::int32_t width = 0; width <= 12; ++width) {
+    Border border({}, options, {}, {}, std::in_place);
+    take(border.arrange(take(CellRect::from({}, {width, 3}))));
+    FrameSink sink;
+    take(border.paint(sink));
+    const auto title = std::ranges::find(sink.runs, options.title, &FrameSink::Run::text);
+
+    if (width < 8) {
+      CHECK(title == sink.runs.end());
+      CHECK(std::ranges::find(sink.text, "[ ") == sink.text.end());
+      CHECK(std::ranges::find(sink.text, " ]") == sink.text.end());
+    } else {
+      REQUIRE(title != sink.runs.end());
+      CHECK(title->origin == CellPoint{3, 0});
+      CHECK(title->clip.size().width == std::min(4, width - 6));
+      const auto suffix = std::ranges::find(sink.runs, " ]", &FrameSink::Run::text);
+      REQUIRE(suffix != sink.runs.end());
+      CHECK(suffix->origin.x == title->origin.x + title->clip.size().width);
+    }
+  }
+
+  for (const bool top : {false, true}) {
+    options.sides.top = top;
+    options.title = top ? "" : "hidden";
+    Border border({}, options, {}, {}, std::in_place);
+    take(border.arrange(take(CellRect::from({}, {12, 3}))));
+    FrameSink sink;
+    take(border.paint(sink));
+    CHECK(std::ranges::find(sink.text, "[ ") == sink.text.end());
+    CHECK(std::ranges::find(sink.text, "hidden") == sink.text.end());
+  }
+}
+
+TEST_CASE("custom title ends own their sources and reject invalid byte cell and grapheme bounds") {
+  FrameOptions options;
+  options.title = "Title";
+  options.customTitleDecoration = CustomTitleDecoration{"e\xcc\x81 ", " !"};
+  Border valid({}, options, {}, {}, std::in_place);
+  options.customTitleDecoration->prefix = "changed";
+  take(valid.arrange(take(CellRect::from({}, {16, 3}))));
+  FrameSink sink;
+  take(valid.paint(sink));
+  CHECK(std::ranges::find(sink.text, "e\xcc\x81 ") != sink.text.end());
+
+  for (const auto &invalid :
+       {std::string(65, 'a'), std::string(17, 'a'), std::string("界"), std::string("\n"), std::string("\xff")}) {
+    Fixture fixture;
+    ui::Ref<Label> child;
+    ui::Ref<Border> outer;
+    const auto result = ui::mount(
+      *fixture.scene,
+      ui::label(child, "body").framed(outer, "ascii", "Title").titleDecoration(CustomTitleDecoration{invalid, " ]"}));
+    REQUIRE_FALSE(result);
+    CHECK(std::get<TreeError>(result.error().cause) == TreeError::INVALID_ARGUMENT);
+    CHECK(child.node() == Node<Label>{});
+    CHECK(outer.node() == Node<Border>{});
+    CHECK(take(fixture.app->tree().inspect(fixture.scene->root())).children.empty());
+  }
+
+  Fixture fixture;
+  CHECK_FALSE(ui::mount(*fixture.scene, ui::label("body").framed("ascii", "Title").titleDecoration("unknown")));
+}
+
+TEST_CASE("frame line title and ends follow independent state cascade and theme invalidation") {
+  Fixture fixture;
+  ui::Ref<Button> child, other;
+  ui::Ref<Border> outer;
+  take(ui::mount(*fixture.scene, ui::vbox(ui::button(child, "inside")
+                                            .onClick([] {
+                                            })
+                                            .framed(outer, "ascii", "Title")
+                                            .titleDecoration("square")
+                                            .width(16)
+                                            .height(4),
+                                          ui::button(other, "outside").onClick([] {
+                                          }))));
+  StyleSheet theme;
+
+  for (const auto state : {StyleState::NORMAL, StyleState::FOCUSED, StyleState::DISABLED}) {
+    StyleRule rule;
+    rule.selector.type = "Border";
+    rule.selector.state = state;
+    rule.declarations.foreground = RgbColor{1, 2, 3};
+    rule.declarations.frameLine.foreground = RgbColor{4, 5, 6};
+    rule.declarations.frameTitle.foreground = RgbColor{7, 8, 9};
+    rule.declarations.frameEnds.foreground = RgbColor{10, 11, 12};
+    rule.declarations.frameTitle.bold = state == StyleState::FOCUSED;
+    rule.declarations.frameEnds.italic = state == StyleState::DISABLED;
+    theme.rules.push_back(rule);
+  }
+
+  take(fixture.scene->theme(theme));
+  fixture.arrange();
+  take(other.focus());
+
+  for (int state = 0; state < 3; ++state) {
+    if (state == 1)
+      take(child.focus());
+    if (state == 2)
+      take(fixture.app->tree().setEnabled(outer.node(), false));
+    fixture.arrange();
+    const auto painted = paint(fixture.app->tree(), outer.node());
+    const auto title = std::ranges::find(painted.runs, "Title", &FrameSink::Run::text);
+    const auto ends = std::ranges::find(painted.runs, "[ ", &FrameSink::Run::text);
+    REQUIRE(title != painted.runs.end());
+    REQUIRE(ends != painted.runs.end());
+    CHECK(painted.runs.front().style.foreground == RgbColor{4, 5, 6});
+    CHECK(title->style.foreground == RgbColor{7, 8, 9});
+    CHECK(title->style.bold == (state == 1));
+    CHECK(ends->style.foreground == RgbColor{10, 11, 12});
+    CHECK(ends->style.italic == (state == 2));
+  }
+
+  theme.rules.back().declarations.frameTitle.foreground = RgbColor{20, 21, 22};
+  take(fixture.scene->theme(theme));
+  fixture.arrange();
+  const auto painted = paint(fixture.app->tree(), outer.node());
+  const auto title = std::ranges::find(painted.runs, "Title", &FrameSink::Run::text);
+  REQUIRE(title != painted.runs.end());
+  CHECK(title->style.foreground == RgbColor{20, 21, 22});
+  take(fixture.scene->prepare(*fixture.app, {30, 12}));
+  CHECK(take(fixture.app->tree().consumeFrameRequest()) == Invalidation::NONE);
+}
+
+TEST_CASE("title ends respect top exclusions exact fitting runs and receiving width policies") {
+  FrameOptions options;
+  options.title = "Title";
+  options.titleDecoration = TitleDecoration::SQUARE;
+  const auto text = take(detail::prepareFrameText({}, options));
+
+  for (const std::int32_t run : {4, 5}) {
+    const auto bounds = take(CellRect::from({}, {12, 3}));
+    const std::array exclusions{take(CellRect::from({run + 1, 0}, {4, 1}))};
+    FrameSink sink;
+    take(detail::paintFrame(sink, text, options, bounds, {}, exclusions));
+    const auto title = std::ranges::find(sink.runs, "Title", &FrameSink::Run::text);
+
+    if (run == 4) {
+      CHECK(title == sink.runs.end());
+    } else {
+      REQUIRE(title != sink.runs.end());
+      CHECK(title->clip.size().width == 1);
+      const auto suffix = std::ranges::find(sink.runs, " ]", &FrameSink::Run::text);
+      REQUIRE(suffix != sink.runs.end());
+      CHECK(suffix->origin.x + 2 <= exclusions.front().origin().x);
+    }
+  }
+
+  options.customTitleDecoration = CustomTitleDecoration{"·", ""};
+  CHECK(detail::prepareFrameText({}, options));
+  CHECK_FALSE(detail::prepareFrameText({AmbiguousWidth::WIDE}, options));
+  options.customTitleDecoration.reset();
+  CHECK(detail::prepareFrameText({AmbiguousWidth::WIDE}, options));
+}
+
+TEST_CASE("native scroll frame chooses the same prepared disabled title part styles") {
+  Fixture fixture;
+  ui::Ref<ScrollArea> scroll;
+  take(ui::mount(*fixture.scene, ui::vbox(ui::scrollArea(ui::label("body"))
+                                            .reference(scroll)
+                                            .framed("ascii", "Title")
+                                            .titleDecoration("angle")
+                                            .scrollOnFrame()
+                                            .width(16)
+                                            .height(4)
+                                            .enabled(false))));
+  StyleRule rule;
+  rule.selector.type = "ScrollArea";
+  rule.selector.state = StyleState::DISABLED;
+  rule.declarations.frameLine.foreground = RgbColor{1, 2, 3};
+  rule.declarations.frameTitle.foreground = RgbColor{4, 5, 6};
+  rule.declarations.frameEnds.foreground = RgbColor{7, 8, 9};
+  take(fixture.scene->theme(StyleSheet{{rule}}));
+  fixture.arrange();
+  const auto painted = paint(fixture.app->tree(), scroll.node());
+  const auto title = std::ranges::find(painted.runs, "Title", &FrameSink::Run::text);
+  const auto prefix = std::ranges::find(painted.runs, "< ", &FrameSink::Run::text);
+  REQUIRE(title != painted.runs.end());
+  REQUIRE(prefix != painted.runs.end());
+  CHECK(painted.runs.front().style.foreground == RgbColor{1, 2, 3});
+  CHECK(title->style.foreground == RgbColor{4, 5, 6});
+  CHECK(prefix->style.foreground == RgbColor{7, 8, 9});
 }
