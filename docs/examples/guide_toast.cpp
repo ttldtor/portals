@@ -21,7 +21,7 @@ int main() {
         ui::label("F8 notification action; F9 dismiss; F10 exit"))))
       | ui::onClick(save, [notices, status] {
           status.text() = "Save requested";
-          notices.show(ui::toast("Save requested", {.severity = ToastSeverity::SUCCESS})
+          notices.show(ui::toast("Save requested").success()
             .action("Undo", [status] { status.text() = "Undo requested"; }));
         })
       | ui::onKey("F8", [notices] { notices.activateLatest(); })

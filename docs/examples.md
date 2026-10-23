@@ -34,6 +34,7 @@ The categories describe the learning path; the source directories remain stable.
 | Basics | [nonmodal help panel](dialogs.md), `portals_docs_nonmodal_dialog` | Open and close a help panel while the main input remains usable; [guide](dialogs.md). Built with tests enabled. |
 | Basics | [modal choices](dialogs.md), `portals_docs_message_box` | Three ready-made modal choice sets, safe cancellation defaults and a deferred `MessageResult` callback; [contracts](dialogs.md). Built with tests enabled. |
 | Customization | [custom choice dialog](dialogs.md), `portals_docs_dialog_actions` | Own body controls, a standard YES/NO set and optional frame close; [contracts](dialogs.md). Built with tests enabled. |
+| Basics | [checkbox change handlers](controls.md), `portals_docs_check_change` | Three-state cycle and a typed change handler without manual bindings; no CLI. Built with tests enabled. |
 | Basics | [notifications](notifications.md), `portals_docs_toast` | Application-owned bounded messages, explicit actions and expiry without automatic focus changes; no CLI. Built with tests enabled. |
 | Basics | [key hints and help](key-help.md), `portals_docs_key_help` | Annotated commands, shared hints/help, enable and rebind controls; no terminal emulator or CLI. Built with tests enabled. |
 | User | [theme selector](theme-selector.md), `portals_docs_theme_selector` | Add a modal theme catalog with previews, Apply, Cancel and explicit recovery. Built with tests enabled. |
