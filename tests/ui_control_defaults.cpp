@@ -102,6 +102,51 @@ void emptyRoot(Fixture &fixture) {
 }
 } // namespace
 
+TEST_CASE("recipe structural settings merge replaces provenance wholesale without changing sparse input") {
+  const auto inheritedSource = std::make_shared<ControlSourceOrigin>();
+  const auto patchSource = std::make_shared<ControlSourceOrigin>();
+  ControlSettings base;
+  base.text = i18n("retained.caption");
+  base.width = 8;
+  base.readOnly = true;
+  base.origin = inheritedSource;
+  base.origins.push_back({.path = "text", .source = inheritedSource});
+
+  const auto cleared = ui::detail::Access::mergeControlSettings(base, {});
+  REQUIRE(cleared.text);
+  CHECK(cleared.text->resourceKey() == "retained.caption");
+  CHECK(cleared.width == 8);
+  CHECK(cleared.readOnly == true);
+  CHECK_FALSE(cleared.origin);
+  CHECK(cleared.origins.empty());
+
+  ControlSettings patch;
+  patch.width = 0;
+  patch.readOnly = false;
+  patch.origin = patchSource;
+  patch.origins.push_back({.path = "readOnly", .source = patchSource});
+  const auto merged = ui::detail::Access::mergeControlSettings(base, patch);
+
+  REQUIRE(merged.text);
+  CHECK(merged.text->resourceKey() == "retained.caption");
+  CHECK(merged.width == 0);
+  CHECK(merged.readOnly == false);
+  CHECK(merged.origin == patchSource);
+  REQUIRE(merged.origins.size() == 1);
+  CHECK(merged.origins.front().path == "readOnly");
+  CHECK(merged.origins.front().source == patchSource);
+  CHECK_FALSE(patch.text);
+  CHECK(patch.width == 0);
+  CHECK(patch.readOnly == false);
+  CHECK(patch.origin == patchSource);
+  REQUIRE(patch.origins.size() == 1);
+  CHECK(patch.origins.front().path == "readOnly");
+  CHECK(patch.origins.front().source == patchSource);
+  CHECK(base.origin == inheritedSource);
+  REQUIRE(base.origins.size() == 1);
+  CHECK(base.origins.front().path == "text");
+}
+
 TEST_CASE("context defaults and sparse false zero builtin-equal overrides preserve full-config semantics") {
   Fixture fixture;
   ControlContext controls;

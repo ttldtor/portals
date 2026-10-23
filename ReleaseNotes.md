@@ -109,6 +109,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- Fluent recipe property application shares the maintained control-field map
+  without repeating its assignment implementation in public headers. Sparse
+  values and property provenance retain their previous behavior.
+
 - The UI umbrella delegates to focused construction, control, layout and scene
   headers. Existing includes remain supported; consumers can select the subject
   headers they use without loading the complete factory surface.
