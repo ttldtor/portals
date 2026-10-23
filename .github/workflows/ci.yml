@@ -35,7 +35,6 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       NAMING_APT_PACKAGES: clang-20 clang-tidy-20 g++-14 ninja-build
-      APT_CACHE_DIR: ${{ runner.temp }}/naming-apt
     steps:
       - uses: actions/checkout@v7
       - name: Test APT cache validation
@@ -47,16 +46,17 @@ jobs:
           read -r -a packages <<< "$NAMING_APT_PACKAGES"
           fingerprint=$(apt-cache policy "${packages[@]}" | sha256sum | cut -d ' ' -f 1)
           echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
-          mkdir -p "$APT_CACHE_DIR"
+          mkdir -p "$RUNNER_TEMP/naming-apt"
       - name: Restore naming package downloads
         # A cache outage must not prevent installation from signed repositories.
         continue-on-error: true
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
-          path: ${{ env.APT_CACHE_DIR }}/*.deb
+          path: ${{ runner.temp }}/naming-apt/*.deb
           key: naming-apt-v1-${{ runner.os }}-24.04-${{ runner.arch }}-${{ steps.apt.outputs.fingerprint }}
       - name: Install naming checker toolchain
         run: |
+          APT_CACHE_DIR="$RUNNER_TEMP/naming-apt"
           python3 tools/ci/apt_cache.py "$APT_CACHE_DIR"
           read -r -a packages <<< "$NAMING_APT_PACKAGES"
           sudo apt-get -o Dir::Cache::archives="$APT_CACHE_DIR" \
