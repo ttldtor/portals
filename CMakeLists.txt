@@ -61,6 +61,8 @@ target_sources(portals_core PRIVATE src/runtime/async.cpp)
 target_sources(portals_core PRIVATE src/widgets/ui_scene.cpp src/widgets/ui_scene_report.cpp)
 target_sources(portals_core PRIVATE src/widgets/ui_action.cpp)
 target_sources(portals_core PRIVATE src/widgets/ui_scene_resource.cpp)
+target_sources(portals_core PRIVATE src/widgets/ui_scene_resource_parse.cpp
+                                    src/widgets/ui_scene_resource_prepare.cpp)
 # The typed resource factories can exceed the MSVC object section limit in Debug.
 set_source_files_properties(src/widgets/ui_scene_resource.cpp PROPERTIES
   COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:MSVC>:/bigobj>")
@@ -872,6 +874,10 @@ if(PORTALS_BUILD_TESTS)
   add_executable(portals_ref_headers
     tests/package_consumer/ref_header.cpp
     tests/package_consumer/scene_header.cpp
+    tests/package_consumer/ui_controls_header.cpp
+    tests/package_consumer/ui_layout_header.cpp
+    tests/package_consumer/ui_scene_pipeline_header.cpp
+    tests/package_consumer/ui_static_header.cpp
     tests/package_consumer/ref_header_order_before.cpp
     tests/package_consumer/ref_header_order_after.cpp)
   target_link_libraries(portals_ref_headers PRIVATE portals::core)

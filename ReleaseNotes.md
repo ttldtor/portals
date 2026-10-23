@@ -109,6 +109,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- The UI umbrella delegates to focused construction, control, layout and scene
+  headers. Existing includes remain supported; consumers can select the subject
+  headers they use without loading the complete factory surface.
+
 - Fluent recipe storage and control-property provenance are separated from
   control-specific construction while preserving existing recipe calls,
   setup order and error propagation.
@@ -123,6 +127,9 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 - Managed observation recovery, diagnostic collection and style updates now live
   in separate implementation files, preserving the existing lifecycle and public API.
+
+- Loaded-scene parsing and validation are separated from materialization, preserving
+  source diagnostics, secret redaction and synchronous recipe capture lifetimes.
 
 - The Linux naming check reuses authenticated Debian package downloads when a
   matching cache is available. Signed repository metadata is refreshed and all
@@ -151,6 +158,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 - Online documentation now follows `main` independently of releases, with a development marker, source revision and UTC build date. Release HTML archives retain their versioned documentation.
 
 ### Fixed
+
+- Architecture export validation keeps historical source coordinates independent
+  of current file lengths, so source archives and shallow checkouts remain usable
+  after header refactoring. Pinned-revision anchor checks remain separate.
 
 - Managed action adapters check scene lifetime before restoring admission state or
   recording callback results after defensive teardown during manual event routing.

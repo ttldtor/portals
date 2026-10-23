@@ -50,7 +50,10 @@ python tools/docs/architecture_test.py
 regardless of the working directory. Generation replaces only generated
 `<map>-<language>.svg` and `index.html` beside that manifest. Preserve frozen
 snapshots by creating a new directory before changing the data. `--check`
-validates source paths, line bounds and exact export bytes without writing.
+validates public repository path syntax, positive integer line numbers and exact
+export bytes without writing. Historical line bounds and anchors are checked
+against their pinned Git revisions when those revisions are available; source
+archives do not compare historical coordinates with current files.
 There are no units or workload parameters. Exit status is 0 for success,
 1 for invalid data, I/O failure or stale exports, and 2 for invalid CLI syntax.
 `--help`/`-h` needs no manifest and performs no workload or writes. The exporter

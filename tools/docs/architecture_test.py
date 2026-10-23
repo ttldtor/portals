@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import xml.etree.ElementTree as ET
 
 sys.dont_write_bytecode = True
@@ -72,6 +73,17 @@ class ArchitectureTests(unittest.TestCase):
         invalid["maps"][0]["nodes"][0]["source"]["path"] = "../private.txt"
         with self.assertRaisesRegex(ValueError, "public repository path"):
             architecture.validate(invalid)
+
+        for line in (0, -1, True, "1"):
+            invalid = copy.deepcopy(DATA)
+            invalid["maps"][0]["nodes"][0]["source"]["line"] = line
+            with self.subTest(line=line):
+                with self.assertRaisesRegex(ValueError, "invalid source line"):
+                    architecture.validate(invalid)
+
+        # Historical coordinates belong to pinned revisions, not today's files.
+        with mock.patch.object(Path, "read_text", side_effect=AssertionError("current source read")):
+            architecture.validate(DATA)
 
     def test_duplicate_map_cannot_overwrite_an_export(self):
         invalid = copy.deepcopy(DATA)
