@@ -107,6 +107,13 @@ struct ControlContextAccess {
   static std::span<const ControlPropertyDescriptor> gridSchema() noexcept;
 };
 
+/** @brief Keep untouched resource provenance while marking newly assigned fluent leaves.
+ * @param patch Owning sparse fluent patch, updated before merging into the recipe.
+ * @param previous Existing recipe patch, borrowed without mutation.
+ * Copies and per-leaf origin insertion may throw; no exception translation is performed.
+ */
+void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &previous);
+
 /** @param settings Sparse configuration already counted by the resource preparation pass.
  * @return Safe low 32-bit compatibility view; higher canonical leaves are omitted.
  */

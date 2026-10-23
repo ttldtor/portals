@@ -109,6 +109,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- Fluent recipe storage and control-property provenance are separated from
+  control-specific construction while preserving existing recipe calls,
+  setup order and error propagation.
+
 - Typed and named widget references are available directly from `ui_ref.hpp`;
   typed scene lookups are complete in `ui_scene.hpp` without including UI recipes.
   Existing umbrella includes and reference behavior remain unchanged.
