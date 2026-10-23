@@ -864,6 +864,16 @@ if(PORTALS_BUILD_TESTS)
   portals_enable_warnings(portals_ui_named)
   add_test(NAME portals.ui-named COMMAND portals_ui_named)
 
+  add_executable(portals_ref_headers
+    tests/package_consumer/ref_header.cpp
+    tests/package_consumer/scene_header.cpp
+    tests/package_consumer/ref_header_order_before.cpp
+    tests/package_consumer/ref_header_order_after.cpp)
+  target_link_libraries(portals_ref_headers PRIVATE portals::core)
+  portals_enable_warnings(portals_ref_headers)
+  add_test(NAME portals.ref-headers COMMAND portals_ref_headers)
+  set_tests_properties(portals.ref-headers PROPERTIES TIMEOUT 20)
+
   add_executable(portals_table_column tests/table_column.cpp)
   target_link_libraries(portals_table_column PRIVATE portals::core)
   portals_enable_warnings(portals_table_column)

@@ -2,6 +2,16 @@ cmake_minimum_required(VERSION 3.24)
 project(PortalsPackageConsumer LANGUAGES CXX)
 
 find_package(Portals 0.2 CONFIG REQUIRED)
+add_executable(portals_ref_headers_consumer
+  ref_header.cpp scene_header.cpp ref_header_order_before.cpp ref_header_order_after.cpp)
+target_link_libraries(portals_ref_headers_consumer PRIVATE portals::core)
+set_target_properties(portals_ref_headers_consumer PROPERTIES CXX_EXTENSIONS OFF)
+if(WIN32)
+  target_sources(portals_ref_headers_consumer PRIVATE no_dialogs.cpp)
+endif()
+add_test(NAME consumer.ref-headers COMMAND portals_ref_headers_consumer)
+set_tests_properties(consumer.ref-headers PROPERTIES TIMEOUT 20)
+
 add_executable(portals_application_actions_consumer application_actions.cpp)
 target_link_libraries(portals_application_actions_consumer PRIVATE portals::core)
 set_target_properties(portals_application_actions_consumer PROPERTIES CXX_EXTENSIONS OFF)
