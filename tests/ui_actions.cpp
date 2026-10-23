@@ -190,6 +190,35 @@ TEST_CASE("one action owns callback and synchronizes all button presentations") 
   CHECK_FALSE(take(fixture.app->tree().inputEligible(first)));
 }
 
+TEST_CASE("action button factories accept mutable const and temporary references alongside braced captions") {
+  auto app = take(Application::create());
+  auto scene = take(ManagedScene::create(*app));
+  ui::ActionSet actions;
+  int calls = 0;
+  auto action = actions.action("shared", "Shared", [&] {
+    ++calls;
+  });
+  const auto constant = action;
+  ui::Ref<Button> mutableButton;
+  ui::Ref<Button> constButton;
+  ui::Ref<Button> temporaryButton;
+  ui::Ref<Button> emptyButton;
+
+  take(ui::mount(*scene, ui::column(ui::button(action), ui::button(constant), ui::button(ui::ActionRef(action)),
+                                    ui::button(mutableButton, action), ui::button(constButton, constant),
+                                    ui::button(temporaryButton, ui::ActionRef(action)), ui::button({}),
+                                    ui::button(emptyButton, {}))));
+  take(scene->prepare(*app, {40, 12}));
+
+  for (const auto &button : {mutableButton, constButton, temporaryButton}) {
+    CHECK(take(button.text().get()) == "Shared");
+    take(app->router().invoke(button.node(), {Action::ACTIVATE}));
+  }
+
+  CHECK(calls == 3);
+  CHECK(take(emptyButton.text().get()).empty());
+}
+
 TEST_CASE("self rebind and removal preserve the entered callback capture") {
   Fixture fixture;
   ui::ActionSet actions;

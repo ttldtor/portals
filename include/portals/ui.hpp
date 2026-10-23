@@ -6194,19 +6194,25 @@ inline Description<Button> button(std::string_view text, Callback action, Contro
     });
 }
 
-/** @param action Weak shared command; its owner is attached automatically during checked mount.
+/** @tparam Action Deduced shared command reference; braced captions use the text overloads.
+ * @param action Weak shared command; its owner is attached automatically during checked mount.
  * @param style Manual appearance. @param policy Layout constraints.
  * @return Ordinary button whose caption/state and callback share the action identity.
  */
-inline Description<Button> button(ActionRef action, ControlStyle style = {}, SizePolicy policy = {}) {
+template <class Action>
+  requires std::same_as<Action, ActionRef>
+inline Description<Button> button(Action action, ControlStyle style = {}, SizePolicy policy = {}) {
   return button(TextValue(""), style, policy).onClick(std::move(action));
 }
 
-/** @param reference Empty observing slot published after the whole mount succeeds.
+/** @tparam Action Deduced shared command reference; braced captions use the text overloads.
+ * @param reference Empty observing slot published after the whole mount succeeds.
  * @param action Shared command. @param style Manual appearance. @param policy Layout constraints.
  * @return Action button with the existing transactional reference publication.
  */
-inline Description<Button> button(Ref<Button> reference, ActionRef action, ControlStyle style = {},
+template <class Action>
+  requires std::same_as<Action, ActionRef>
+inline Description<Button> button(Ref<Button> reference, Action action, ControlStyle style = {},
                                   SizePolicy policy = {}) {
   return button(std::move(action), style, policy).reference(std::move(reference));
 }
