@@ -213,6 +213,30 @@ private:
   static thread_local FactoryCleanup *current_;
 };
 
+/** @brief Deliver a completed pre-owner report without recursively invoking the sink.
+ * @param sink Borrowed final sink, available before factory invocation.
+ * @param report Owning diagnostic retained through delivery and stderr fallback.
+ */
+void deliverFactoryReport(const SceneReportHandler &sink, const SceneReport &report) noexcept;
+
+/** @brief Build one owning final factory diagnostic without allocating.
+ * @param failure Original typed cause, independent of terminal/widget lifetime.
+ * @param origin Factory/setup invocation site.
+ * @param cleanup Bounded diagnostics from actual abandoned factory-local destructors, merged without replacing primary.
+ * @return Stamped primary and independent cleanup failure with exact bounded overflow.
+ */
+SceneReport factoryFailureReport(ManagedError failure, std::source_location origin,
+                                 const FactoryCleanup &cleanup = {}) noexcept;
+
+/** @brief Deliver a pre-owner factory failure through the already available final sink.
+ * @param sink Pinned handler borrowed for this synchronous call; empty selects stderr.
+ * @param failure Original typed cause, independent of terminal/widget lifetime.
+ * @param origin Factory/setup invocation site.
+ * @param cleanup Bounded actual destructor cleanup diagnostics.
+ */
+void reportFactoryFailure(const SceneReportHandler &sink, ManagedError failure, std::source_location origin,
+                          const FactoryCleanup &cleanup = {}) noexcept;
+
 /** @brief Stable weak facade publication; mutable fields are accessed only after UI admission. */
 struct SceneAnchor {
   const std::thread::id owner = std::this_thread::get_id(); ///< Immutable UI identity.

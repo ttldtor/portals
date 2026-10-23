@@ -53,7 +53,7 @@ if(WIN32 AND NOT EMSCRIPTEN)
 endif()
 
 target_sources(portals_core PRIVATE src/runtime/async.cpp)
-target_sources(portals_core PRIVATE src/widgets/ui_scene.cpp)
+target_sources(portals_core PRIVATE src/widgets/ui_scene.cpp src/widgets/ui_scene_report.cpp)
 target_sources(portals_core PRIVATE src/widgets/ui_action.cpp)
 target_sources(portals_core PRIVATE src/widgets/ui_scene_resource.cpp)
 # The typed resource factories can exceed the MSVC object section limit in Debug.
