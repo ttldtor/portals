@@ -109,6 +109,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- Scene error-report formatting and factory-failure delivery now live in a
+  separate implementation file. Public scene APIs, diagnostic output and
+  callback-lifetime behavior remain unchanged.
+
 - The Linux naming check reuses authenticated Debian package downloads when a
   matching cache is available. Signed repository metadata is refreshed and all
   naming checks still run on every selected pull request.

@@ -9656,26 +9656,6 @@ template <class Factory>
 concept AppFactory = std::invocable<Factory &> && !std::is_reference_v<std::invoke_result_t<Factory &>> &&
                      IsAppResult<std::remove_cvref_t<std::invoke_result_t<Factory &>>>::value;
 
-/** @brief Deliver a completed pre-owner report without recursively invoking the sink.
- * @param sink Borrowed final sink, available before factory invocation.
- * @param report Owning diagnostic retained through delivery and stderr fallback.
- */
-inline void deliverFactoryReport(const SceneReportHandler &sink, const SceneReport &report) noexcept {
-  FactoryCleanupScope factoryMask;
-  SetupFailureScope reportingScope({}, nullptr, nullptr);
-  CurrentSceneScope currentMask;
-
-  try {
-    if (sink) {
-      sink(report);
-    } else {
-      reportToStderr(report);
-    }
-  } catch (...) {
-    reportToStderr(report);
-  }
-}
-
 /** @brief Select the legacy factory signature before considering an Application borrow.
  * @tparam Factory Owning scene factory returning an owning description or exact checked description.
  */
@@ -9742,43 +9722,6 @@ template <DescriptionInput Body, SceneLayer... Layers> Description<Widget> layer
     });
 
   return Access::withLayout(std::move(description), std::move(layout));
-}
-
-/** @brief Build one owning final factory diagnostic without allocating.
- * @param failure Original typed cause, independent of terminal/widget lifetime.
- * @param origin Factory/setup invocation site.
- * @param cleanup Bounded diagnostics from actual abandoned factory-local destructors, merged without replacing primary.
- * @return Stamped primary and independent cleanup failure with exact bounded overflow.
- */
-inline SceneReport factoryFailureReport(ManagedError failure, std::source_location origin,
-                                        const FactoryCleanup &cleanup = {}) noexcept {
-  SceneReport report;
-
-  if (!failure.operation) {
-    failure.operation = "scene.factory";
-    failure.operationOrigin = origin;
-  }
-
-  failure.execution = "scene.factory";
-
-  report.failure = std::move(failure);
-  report.origin = report.failure->operationOrigin.value_or(origin);
-  report.droppedErrors = cleanup.attach(*report.failure);
-
-  return report;
-}
-
-/** @brief Deliver a pre-owner factory failure through the already available final sink.
- * @param sink Pinned handler borrowed for this synchronous call; empty selects stderr.
- * @param failure Original typed cause, independent of terminal/widget lifetime.
- * @param origin Factory/setup invocation site.
- * @param cleanup Bounded actual destructor cleanup diagnostics.
- */
-inline void reportFactoryFailure(const SceneReportHandler &sink, ManagedError failure, std::source_location origin,
-                                 const FactoryCleanup &cleanup = {}) noexcept {
-  const auto report = factoryFailureReport(std::move(failure), origin, cleanup);
-
-  deliverFactoryReport(sink, report);
 }
 
 /** @brief Admit exact stationary setup results.
