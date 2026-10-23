@@ -184,7 +184,7 @@ struct ResourceAccess {
   /** @brief Install CONFIGURATION-only native primitives after caller declarations and registrations. */
   static std::expected<void, ControlContextError> installPrimitives(SceneResourceRegistry &registry,
                                                                     ControlContext &controls) {
-    for (const auto name : {"Border", "Gauge"}) {
+    for (const auto name : {"Border", "Gauge", "Spinner"}) {
       if (find(registry, name) || ControlContextAccess::hasDeclaredType(controls, name)) {
         continue;
       }
@@ -203,6 +203,13 @@ struct ResourceAccess {
           },
           true);
 
+        if (!added) {
+          return std::unexpected(ControlContextError{ControlContextErrorCode::DUPLICATE_TYPE, {}});
+        }
+      } else if (std::string_view(name) == "Spinner") {
+        const auto added = registry.add<Spinner>(name, [](SceneResourceArguments arguments) {
+          return spinner(controlSpinnerOptions(arguments.settings, {}));
+        });
         if (!added) {
           return std::unexpected(ControlContextError{ControlContextErrorCode::DUPLICATE_TYPE, {}});
         }
@@ -247,7 +254,13 @@ struct ResourceAccess {
               return std::unexpected(error({}, options.error()));
             }
 
-            return Access::scrollAreaControl(*options, {}, {});
+            auto recipe = Access::scrollAreaControl(*options, {}, {});
+
+            if (hasScrollbarSettings(arguments.settings.scrollbar)) {
+              (void)std::move(recipe).settings({.scrollbar = arguments.settings.scrollbar});
+            }
+
+            return recipe;
           },
           true);
 
@@ -263,7 +276,13 @@ struct ResourceAccess {
               return std::unexpected(error({}, options.error()));
             }
 
-            return scrollBar(arguments.settings.axis.value_or(ScrollAxis::VERTICAL), *options);
+            auto recipe = scrollBar(arguments.settings.axis.value_or(ScrollAxis::VERTICAL), *options);
+
+            if (hasScrollbarSettings(arguments.settings.scrollbar)) {
+              (void)std::move(recipe).settings({.scrollbar = arguments.settings.scrollbar});
+            }
+
+            return recipe;
           });
 
         if (!added) {
@@ -1114,17 +1133,29 @@ private:
   }
 
   const ControlPropertyDescriptor *descriptor(std::string_view path) const {
-    for (const auto type : {"Password",      "LineEdit",
-                            "CheckBox",      "VBox",
-                            "Button",        "Border",
-                            "Gauge",         "ScrollArea",
-                            "ScrollBar",     "Overlay",
-                            "HelpView",      "KeyHints",
-                            "VirtualList",   "VirtualTable",
-                            "Chart",         "DataStateView",
-                            "OverlayHost",   "Dialog",
-                            "MessageBox",    "Notifications",
-                            "ThemeSelector", "ThemeSelectorCatalog"}) {
+    for (const auto type : {"Password",
+                            "LineEdit",
+                            "CheckBox",
+                            "VBox",
+                            "Button",
+                            "Border",
+                            "Gauge",
+                            "Spinner",
+                            "ScrollArea",
+                            "ScrollBar",
+                            "Overlay",
+                            "HelpView",
+                            "KeyHints",
+                            "VirtualList",
+                            "VirtualTable",
+                            "Chart",
+                            "DataStateView",
+                            "OverlayHost",
+                            "Dialog",
+                            "MessageBox",
+                            "Notifications",
+                            "ThemeSelector",
+                            "ThemeSelectorCatalog"}) {
       const auto schema = controlPropertySchema(type);
       const auto found = std::ranges::find(schema, path, &ControlPropertyDescriptor::path);
 
@@ -1215,6 +1246,8 @@ private:
 
       if (path == "text") {
         settings.text = std::move(value);
+      } else if (path == "label") {
+        settings.spinnerLabel = std::move(value);
       } else if (path == "placeholder") {
         settings.placeholder = std::move(value);
       } else if (path == "title") {
@@ -1274,7 +1307,9 @@ private:
       if (!parsed) {
         return std::unexpected(withProperty(parsed.error(), type, path));
       }
-      if (path == "themeCatalog.initialId.value") {
+      if (path == "frames") {
+        settings.spinnerFrames = std::move(value);
+      } else if (path == "themeCatalog.initialId.value") {
         settings.themeCatalog.initialId.value = std::move(value);
       } else if (path == "themeSelector.openingShortcut.value") {
         settings.themeSelector.openingShortcut.value = std::move(value);
@@ -1288,6 +1323,24 @@ private:
         settings.format.releaseMarker = std::move(value);
       } else if (path == "format.unknownMarker") {
         settings.format.unknownMarker = std::move(value);
+      } else if (path == "scrollbar.horizontal.track") {
+        settings.scrollbar.horizontal.track = std::move(value);
+      } else if (path == "scrollbar.horizontal.thumb") {
+        settings.scrollbar.horizontal.thumb = std::move(value);
+      } else if (path == "scrollbar.horizontal.start") {
+        settings.scrollbar.horizontal.start = std::move(value);
+      } else if (path == "scrollbar.horizontal.end") {
+        settings.scrollbar.horizontal.end = std::move(value);
+      } else if (path == "scrollbar.vertical.track") {
+        settings.scrollbar.vertical.track = std::move(value);
+      } else if (path == "scrollbar.vertical.thumb") {
+        settings.scrollbar.vertical.thumb = std::move(value);
+      } else if (path == "scrollbar.vertical.start") {
+        settings.scrollbar.vertical.start = std::move(value);
+      } else if (path == "scrollbar.vertical.end") {
+        settings.scrollbar.vertical.end = std::move(value);
+      } else if (path == "scrollbar.corner") {
+        settings.scrollbar.corner = std::move(value);
       } else if (path == "frame.customTitleDecoration.prefix") {
         settings.frame.customTitleDecoration.prefix = std::move(value);
       } else if (path == "frame.customTitleDecoration.suffix") {
@@ -1347,6 +1400,10 @@ private:
         settings.message.defaultChoice.enabled = enabled;
       } else if (path == "message.allowDestructiveDefault") {
         settings.message.allowDestructiveDefault = enabled;
+      } else if (path == "active") {
+        settings.spinnerActive = enabled;
+      } else if (path == "reducedMotion") {
+        settings.spinnerReducedMotion = enabled;
       } else if (path == "showStatus") {
         settings.showStatus = enabled;
       } else if (path == "initiallyOpen") {
@@ -1367,6 +1424,8 @@ private:
         settings.frame.sides.bottom = enabled;
       } else if (path == "frame.sides.left") {
         settings.frame.sides.left = enabled;
+      } else if (path == "scrollbar.ends") {
+        settings.scrollbar.ends = enabled;
       } else if (path == "frame.customTitleDecoration.enabled") {
         settings.frame.customTitleDecoration.enabled = enabled;
       } else if (path == "frame.customGlyphs.enabled") {
@@ -1406,6 +1465,12 @@ private:
         settings.securePolicy.storage = static_cast<SecureStringStorage>(index);
       } else if (path == "pastePolicy") {
         settings.pastePolicy = static_cast<PasswordPastePolicy>(index);
+      } else if (path == "preset") {
+        settings.spinnerPreset = static_cast<SpinnerPreset>(index);
+      } else if (path == "direction") {
+        settings.spinnerDirection = static_cast<SpinnerDirection>(index);
+      } else if (path == "alignment") {
+        settings.spinnerAlignment = static_cast<LayoutAlign>(index);
       } else if (path == "state") {
         settings.state = static_cast<CheckState>(index);
       } else if (path == "cycle") {
@@ -1433,6 +1498,8 @@ private:
                                       FramePattern::DOUBLE, FramePattern::HEAVY,  FramePattern::ASCII};
 
         settings.frame.pattern = PATTERNS[static_cast<std::size_t>(index)];
+      } else if (path == "scrollbar.pattern") {
+        settings.scrollbar.pattern = static_cast<ScrollbarPattern>(index);
       } else if (path == "frame.titleDecoration") {
         settings.frame.titleDecoration = static_cast<TitleDecoration>(index);
       } else if (path == "frame.titleAlignment") {
@@ -1512,14 +1579,16 @@ private:
       return {};
     }
 
-    if (path == "keyStep" || path == "pageOverlap" || path == "spinnerInterval") {
+    if (path == "keyStep" || path == "pageOverlap" || path == "spinnerInterval" || path == "interval") {
       const auto value = capacity<std::uint64_t>();
 
       if (!value) {
         return std::unexpected(withProperty(value.error(), type, path));
       }
 
-      if (path == "spinnerInterval") {
+      if (path == "interval") {
+        settings.spinnerTick = *value;
+      } else if (path == "spinnerInterval") {
         settings.spinnerInterval = *value;
       } else if (path == "keyStep") {
         settings.keyStep = *value;
@@ -1542,7 +1611,15 @@ private:
       return std::unexpected(document_.propertyFailure(Code::INVALID_VALUE, offset, type, path));
     }
 
-    if (path == "securePolicy.maxBytes") {
+    if (path == "maxFrames") {
+      settings.spinnerMaxFrames = *value;
+    } else if (path == "maxFrameBytes") {
+      settings.spinnerMaxFrameBytes = *value;
+    } else if (path == "maxFrameCells") {
+      settings.spinnerMaxFrameCells = *value;
+    } else if (path == "scrollbar.maxGlyphBytes") {
+      settings.scrollbar.maxGlyphBytes = *value;
+    } else if (path == "securePolicy.maxBytes") {
       settings.securePolicy.maxBytes = *value;
     } else if (path == "maxLayers") {
       settings.maxLayers = *value;
@@ -1748,7 +1825,8 @@ private:
       if (take('{')) {
         const bool configurationStruct =
           options_.format == SceneResourceFormat::CONFIGURATION &&
-          (path == "securePolicy" || path == "limits" || path == "frame" || path == "frame.sides" ||
+          (path == "scrollbar" || path == "scrollbar.horizontal" || path == "scrollbar.vertical" ||
+           path == "securePolicy" || path == "limits" || path == "frame" || path == "frame.sides" ||
            path == "frame.customGlyphs" || path == "frame.customTitleDecoration" || path == "format" ||
            path == "yRange" || path == "labels" || path == "dialog" || path == "dialog.closeButton" ||
            path == "dialog.frame" || path == "dialog.maximumPanelSize" || path == "message" ||
@@ -2277,6 +2355,8 @@ private:
          (key == "format" &&
           acceptsNativeProperty(target, detail::ControlFactoryKind::KEY_HELP_FALLBACK, "format.maxBytesPerBinding")) ||
          (key == "frame" && acceptsFrameSettings(target)) || (key == "yRange" && acceptsChartRange(target)) ||
+         (key == "scrollbar" &&
+          acceptsNativeProperty(target, detail::ControlFactoryKind::SCROLL_FALLBACK, "scrollbar.pattern")) ||
          (key == "labels" &&
           acceptsNativeProperty(target, detail::ControlFactoryKind::DATA_STATE_FALLBACK, "labels.loading")) ||
          (key == "themeCatalog" && acceptsNativeProperty(target, detail::ControlFactoryKind::THEME_CATALOG_BINDING,
@@ -2430,6 +2510,12 @@ private:
       // A caller-owned child name wins the bare spelling; frame={...} remains an explicit native property.
       const bool frameGroup = token == "frame" && acceptsFrameSettings(document_.nodes[index]) &&
                               !detail::ResourceAccess::find(options_.registry, token);
+      const bool scrollbarGroup =
+        token == "scrollbar" &&
+        acceptsNativeProperty(document_.nodes[index], detail::ControlFactoryKind::SCROLL_FALLBACK,
+                              "scrollbar.pattern") &&
+        !detail::ResourceAccess::find(options_.registry, token) &&
+        !detail::ControlContextAccess::hasDeclaredType(controls_, token);
       const bool formatGroup =
         token == "format" &&
         acceptsNativeProperty(document_.nodes[index], detail::ControlFactoryKind::KEY_HELP_FALLBACK,
@@ -2490,8 +2576,8 @@ private:
         (protectedGroup && peek() == '{') ||
         (options_.format == SceneResourceFormat::CONFIGURATION &&
          (token == "history" || token == "limits" || (token == "padding" && !overlayPaddingChild) || frameGroup ||
-          formatGroup || chartRangeGroup || labelsGroup || dialogGroup || messageGroup || notificationGroup ||
-          selectorGroup || catalogGroup) &&
+          scrollbarGroup || formatGroup || chartRangeGroup || labelsGroup || dialogGroup || messageGroup ||
+          notificationGroup || selectorGroup || catalogGroup) &&
          peek() == '{') ||
         (document_.nodes[index].factory.kind == detail::ControlFactoryKind::DECLARATIVE_GRID_FALLBACK &&
          token == "padding" && peek() == '{');
@@ -2786,6 +2872,14 @@ std::expected<void, ManagedError> prepareNodes(ResourceDocument &document, const
 
         if (!Border::validate(detail::controlBorderOptions(settings, {}))) {
           return std::unexpected(primitiveValueFailure(*resolved, "maxPaintCells"));
+        }
+      } else if (resolved->base == "Spinner") {
+        const auto valid = Spinner::validate(owner.widthPolicy(), detail::controlSpinnerOptions(settings, {}));
+        if (!valid && valid.error() == TreeError::NO_MEMORY) {
+          return std::unexpected(detail::error(owner.root(), TreeError::NO_MEMORY));
+        }
+        if (!valid) {
+          return std::unexpected(primitiveValueFailure(*resolved, "frames"));
         }
       } else {
         const auto options = detail::controlGaugeOptions(settings, {});
@@ -3125,13 +3219,14 @@ std::expected<void, ManagedError> resolveSettings(ResourceDocument &document, co
     limits.max_input_bytes = std::min(limits.max_input_bytes, resourceLimits.max_input_bytes);
 
     for (const auto path : {std::string_view("text"), std::string_view("placeholder"), std::string_view("title"),
-                            std::string_view("frame.title")}) {
+                            std::string_view("frame.title"), std::string_view("label")}) {
       if (path == "title" && node.factory.kind != detail::ControlFactoryKind::DIALOG_FALLBACK) {
         continue;
       }
 
       auto &setting = path == "text"          ? node.arguments.settings.text
                       : path == "placeholder" ? node.arguments.settings.placeholder
+                      : path == "label"       ? node.arguments.settings.spinnerLabel
                       : path == "frame.title" ? node.arguments.settings.frame.title
                                               : node.arguments.settings.title;
 

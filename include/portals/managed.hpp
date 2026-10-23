@@ -16,6 +16,7 @@
 #include <portals/password.hpp>
 #include <portals/primitives.hpp>
 #include <portals/scroll_controls.hpp>
+#include <portals/spinner.hpp>
 #include <portals/style.hpp>
 #include <portals/style_source.hpp>
 #include <portals/text_transform.hpp>
@@ -47,16 +48,25 @@ struct MessageAccess;
 struct KeyHelpAccess;
 struct ThemeSelectionAccess;
 struct ThemeSelectorAccess;
+struct ActionAccess;
+struct ActionStore;
+struct ActionRegistry;
 class SetupFailureTicket;
 } // namespace ui::detail
 
 namespace ui {
+class ActionRef;
 class TextSource;
 class ThemeChoice;
 class ThemeSelectionRef;
 struct ThemeSelectionOptions;
 struct ThemeSelectionSnapshot;
 } // namespace ui
+
+namespace ui::detail {
+std::expected<void, ManagedError> attachAction(ManagedScene &, const ActionRef &);
+std::expected<void, ManagedError> attachActionButton(ManagedScene &, Node<Button>, const ActionRef &);
+}
 
 namespace style::ct::detail {
 struct Access;
@@ -699,6 +709,10 @@ public:
   template <class Callback>
     requires detail::ManagedAction<Callback, ClickEvent>
   std::expected<void, ManagedError> onClick(Node<Button> node, Callback action) {
+    if constexpr (std::same_as<Callback, ui::ActionRef>) {
+      return ui::detail::attachActionButton(*this, node, action);
+    }
+
     try {
       return onButtonClick(node, actionAdapter<ClickEvent>(std::move(action)),
                            std::invocable<Callback &, const ClickEvent &>);
@@ -732,6 +746,11 @@ public:
     }
 
     try {
+      auto reusable = prepareReusableAction(action);
+      if (!reusable) {
+        return reusable;
+      }
+
       auto adapter = actionAdapter<KeyEvent>(std::move(action));
 
       if (!adapter) {
@@ -781,6 +800,11 @@ public:
         return std::unexpected(validated.error());
       }
       transaction.owner = info.owner;
+      auto reusable = prepareReusableAction(action);
+      if (!reusable) {
+        return std::unexpected(reusable.error());
+      }
+
       return registerAnnotatedKey(selection, std::move(info), actionAdapter<KeyEvent>(std::move(action), origin),
                                   origin, transaction);
     } catch (const std::bad_alloc &) {
@@ -1444,6 +1468,17 @@ public:
                                                     std::type_identity_t<ManagedViewHandler<T>> prepared = {});
 
   /// @return True while a managed virtual view requires layout-driven preparation.
+  /** @param parent Checked receiving parent in this scene.
+   * @param options Owning finite indicator configuration, validated before publication.
+   * @param style Manual active/dim defaults beneath existing theme rules.
+   * @param policy Existing size constraints.
+   * @param resolver Optional synchronous label localization adapter, never retained after mounting.
+   * @return Live indicator with node-scoped animation, or original typed setup/ownership failure.
+   */
+  std::expected<Node<Spinner>, ManagedError> spinner(Node<Widget> parent, SpinnerOptions options = {},
+                                                     ControlStyle style = {}, SizePolicy policy = {},
+                                                     SpinnerLabelResolver resolver = {});
+
   bool usesPreparedLayout() const noexcept override;
   /** @return True only while this scene owns ordinary scroll areas needing copied geometry. */
   bool usesGeometrySnapshot() const noexcept override;
@@ -1672,6 +1707,11 @@ private:
     }
 
     try {
+      auto reusable = prepareReusableAction(action);
+      if (!reusable) {
+        return reusable;
+      }
+
       // Avoid both caller-side transfers and noexcept debug-vector moves before the checked boundary.
       Shortcut owned(std::forward<Value>(shortcut));
       auto adapter = actionAdapter<KeyEvent>(std::move(action), origin);
@@ -1775,6 +1815,7 @@ private:
   friend struct ui::detail::KeyHelpAccess;
   friend struct ui::detail::ThemeSelectionAccess;
   friend struct ui::detail::ThemeSelectorAccess;
+  friend struct ui::detail::ActionAccess;
   friend struct detail::ManagedScrollTestAccess;
 
   struct Entry;
@@ -1903,6 +1944,13 @@ private:
   template <class Event>
   void dispatchEditing(Node<LineEdit> node, const std::shared_ptr<EditorEventChain> &chain,
                        const std::weak_ptr<const void> &lifetime, const Event &event);
+
+  bool spinnerEligible(Node<Spinner> node) const;
+  std::expected<void, TreeError> prepareSpinners();
+  void stopSpinners() noexcept;
+  std::expected<void, TreeError> armSpinner(const std::shared_ptr<detail::SpinnerState> &record);
+  void tickSpinner(const std::shared_ptr<detail::SpinnerState> &record, std::uint64_t generation);
+  std::vector<std::weak_ptr<detail::SpinnerState>> spinners_ = std::vector<std::weak_ptr<detail::SpinnerState>>(0);
 
   struct CaptionBinding {
     Node<Control> node;
@@ -2045,6 +2093,14 @@ private:
     auto root = app_.tree().root();
 
     return root ? std::expected<void, TreeError>{} : std::unexpected(root.error());
+  }
+
+  template <class Callback> std::expected<void, ManagedError> prepareReusableAction(const Callback &action) {
+    if constexpr (std::same_as<Callback, ui::ActionRef>) {
+      return ui::detail::attachAction(*this, action);
+    }
+
+    return {};
   }
 
   template <class Callback>
@@ -2274,6 +2330,7 @@ private:
   StyleEngine styles_;
   std::shared_ptr<detail::ThemeSelectionRecord> themeSelection_;
   std::shared_ptr<detail::ThemeSelectorRecord> themeSelector_;
+  std::shared_ptr<ui::detail::ActionRegistry> actionSets_;
   bool installingThemeSelection_{};
   std::vector<std::shared_ptr<Entry>> entries_;
   std::shared_ptr<detail::ManagedScrollState> scroll_;

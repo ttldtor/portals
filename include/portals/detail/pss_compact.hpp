@@ -19,7 +19,7 @@ inline constexpr std::size_t MAX_CT_PSS_TEXT_BYTES = 16 * 1024;
 /** @brief Maximum caller-supplied compile-time UTF-8 source identity bytes. */
 inline constexpr std::size_t MAX_CT_PSS_SOURCE_NAME_BYTES = 512;
 /** @brief Maximum complete compact descriptor object size. */
-inline constexpr std::size_t MAX_CT_PSS_DESCRIPTOR_BYTES = 128 * 1024;
+inline constexpr std::size_t MAX_CT_PSS_DESCRIPTOR_BYTES = 192 * 1024;
 
 namespace detail {
 using portals::detail::pssError;

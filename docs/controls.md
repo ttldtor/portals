@@ -8,6 +8,9 @@ ordinary fill/text commands. Their intrinsic height is one row; layout policies
 can allocate a larger rectangle. No control performs terminal I/O. Control bytes
 in text remain data and render as the text subsystem's placeholders.
 
+For a command shared by several buttons or explicit key bindings, see
+[shared actions](actions.md).
+
 ```cpp
 const auto run =
   tree.emplace<portals::Button>(parent, std::move(caption));
@@ -24,6 +27,14 @@ owner between frames. `TreeError` propagates checked lifetime, session, affinity
 and frame errors. Equal text/style/value synchronization is a no-op; changed text
 or width policy invalidates layout, while style, focus and checked state invalidate
 paint. `GraphemeText::from` reports text errors before widget construction.
+
+## Loading indicators {#spinner-control}
+
+`ui::spinner()` creates an animated, scene-owned `Spinner`. Presets, custom
+frames, an optional label, direction and reduced motion can be set with recipe
+methods or pipe modifiers. `ui::Ref<Spinner>` exposes `start()`, `stop()` and
+`label(...)`; callers do not own timers. See the complete program, resource
+syntax, styling and lifetime rules in [Loading indicators](loading-indicators.md).
 
 ## Protected password input {#password-control}
 
@@ -90,7 +101,7 @@ model, create a `ManagedState<PasswordValue>` in the receiving scene and pass it
 to `ui::password(ref, state)`. An external state and an initial provider cannot
 be combined.
 
-### Editing, presentation and limits
+### Editing, presentation and limits {#editor-presentation-limits}
 
 The default `EditMode::IMMEDIATE` publishes each accepted, semantically valid
 change. `.editMode(EditMode::ON_COMPLETION)` keeps a protected draft until Enter,

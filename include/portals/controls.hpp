@@ -10,6 +10,9 @@
 #include <span>
 
 namespace portals {
+namespace ui::detail {
+struct ActionAccess;
+}
 /** @brief Owning paint values; no theme engine or behavior is encoded here. */
 struct ControlStyle {
   CellStyle normal{};                                                  ///< Ordinary appearance.
@@ -95,6 +98,7 @@ protected:
   void showMixed(bool mixed);
 
 private:
+  friend struct ui::detail::ActionAccess;
   friend class ManagedScene;
   friend std::expected<void, TreeError> setControlText(WidgetTree &, Node<Control>, GraphemeText);
   friend std::expected<void, TreeError> setControlStyle(WidgetTree &, Node<Control>, ControlStyle);
@@ -153,6 +157,11 @@ public:
    * @return Caption/decorations size, INVALID_ARGUMENT for invalid chrome, or Control measurement failure.
    */
   std::expected<CellSize, TreeError> measure(CellSize available) override;
+
+  /** @return Shared action selection presentation, false for an ordinary button. */
+  bool checked() const {
+    return shownChecked();
+  }
 
 private:
   ButtonChrome chrome_;

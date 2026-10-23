@@ -5,6 +5,7 @@
 #include <portals/detail/move_only_function.hpp>
 #include <portals/detail/setup_failure.hpp>
 #include <portals/managed.hpp>
+#include <portals/ui_action.hpp>
 #include <portals/ui_app.hpp>
 #include <portals/ui_control_context.hpp>
 #include <portals/ui_ref.hpp>
@@ -935,7 +936,8 @@ private:
 
     try {
       addConfiguration(
-        [chord, callback = std::move(callback)](ManagedScene &scene) mutable {
+        [chord, declaration = detail::retainAction(callback), callback = std::move(callback)](ManagedScene &scene) mutable {
+          (void)declaration;
           return scene.onKey(chord, std::move(callback));
         },
         true, origin);
@@ -954,8 +956,9 @@ private:
     }
     try {
       addConfiguration(
-        [selection, info = std::move(info), callback = std::move(callback),
+        [selection, info = std::move(info), declaration = detail::retainAction(callback), callback = std::move(callback),
          origin](ManagedScene &scene) mutable -> std::expected<void, ManagedError> {
+          (void)declaration;
           auto metadata = info.resolve(scene);
           if (!metadata) {
             return std::unexpected(metadata.error());
@@ -989,7 +992,8 @@ private:
 
     try {
       addConfiguration(
-        [selection, callback = std::move(callback), origin](ManagedScene &scene) mutable {
+        [selection, declaration = detail::retainAction(callback), callback = std::move(callback), origin](ManagedScene &scene) mutable {
+          (void)declaration;
           return scene.onKey(selection, std::move(callback), origin);
         },
         true, origin);
@@ -1034,8 +1038,9 @@ private:
 
     try {
       addConfiguration(
-        [shortcut = std::move(*shortcut), callback = std::move(callback), behavior, options,
+        [shortcut = std::move(*shortcut), declaration = detail::retainAction(callback), callback = std::move(callback), behavior, options,
          origin](ManagedScene &scene) mutable {
+          (void)declaration;
           return scene.onKey(std::move(shortcut), std::move(callback), behavior, options, origin);
         },
         true, origin);

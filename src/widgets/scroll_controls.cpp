@@ -3,6 +3,9 @@
 #include "scroll_controls_state.hpp"
 #include <portals/grid.hpp>
 
+#include <limits>
+#include <stdexcept>
+
 namespace portals {
 namespace {
 GraphemeText scrollGlyph(std::string_view unicode, std::string_view ascii, WidthPolicy width, PrimitiveGlyphs mode) {
@@ -404,6 +407,135 @@ std::expected<void, TreeError> syncScrollControl(WidgetTree &tree, Node<Widget> 
       }
     }
   });
+  return edited ? result : edited;
+}
+
+namespace {
+std::expected<std::unique_ptr<detail::PreparedScrollbarSkin>, TreeError>
+prepareScrollbarSkin(const detail::ScrollWidgetState &state, const ScrollbarSkin &skin) {
+  if (skin.pattern < ScrollbarPattern::LEGACY || skin.pattern > ScrollbarPattern::ASCII || !skin.maxGlyphBytes) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  const std::array sources{&skin.horizontal.track, &skin.horizontal.thumb, &skin.horizontal.start,
+                           &skin.horizontal.end,   &skin.vertical.track,   &skin.vertical.thumb,
+                           &skin.vertical.start,   &skin.vertical.end,     &skin.corner};
+
+  for (std::size_t index = 0; index < sources.size(); ++index) {
+    if (*sources[index] && ((*sources[index])->size() > skin.maxGlyphBytes ||
+                            ((index % 4 < 2 && index < 8) && (*sources[index])->empty()))) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+  }
+
+  auto result = std::make_unique<detail::PreparedScrollbarSkin>();
+  const auto policy = state.glyphs[6].policy();
+  const auto *frame = state.advancedFrame     ? &state.advancedFrame->text
+                      : state.legacyFrameText ? &*state.legacyFrameText
+                                              : nullptr;
+
+  for (std::size_t axis = 0; axis < 2; ++axis) {
+    const auto first = axis * 4;
+    result->glyphs[first] = skin.pattern == ScrollbarPattern::FRAME
+                              ? (frame ? frame->glyphs[4 + axis] : state.glyphs[4 + axis])
+                              : state.glyphs[6];
+    result->glyphs[first + 1] = state.glyphs[7];
+
+    if (skin.pattern == ScrollbarPattern::MINIMAL || skin.pattern == ScrollbarPattern::ASCII) {
+      result->glyphs[first] = GraphemeText::from(skin.pattern == ScrollbarPattern::ASCII ? "." : " ", policy).value();
+    }
+
+    if (skin.pattern == ScrollbarPattern::ASCII) {
+      result->glyphs[first + 1] = GraphemeText::from("#", policy).value();
+    }
+
+    result->glyphs[first + 2] = GraphemeText::from(axis == 0 ? "<" : "^", policy).value();
+    result->glyphs[first + 3] = GraphemeText::from(axis == 0 ? ">" : "v", policy).value();
+  }
+
+  for (std::size_t index = 0; index < sources.size(); ++index) {
+    if (!*sources[index]) {
+      continue;
+    }
+
+    const auto &source = **sources[index];
+
+    if (source.empty()) {
+      result->glyphs[index].reset();
+
+      continue;
+    }
+
+    auto text = GraphemeText::from(source, policy,
+                                   {.max_input_bytes = skin.maxGlyphBytes,
+                                    .max_cluster_bytes = skin.maxGlyphBytes,
+                                    .max_graphemes = 1,
+                                    .max_cells = 1});
+
+    if (!text || text->graphemes().size() != 1 || text->measure() != 1 ||
+        text->graphemes().front().display != TextDisplay::PRINTABLE) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+
+    result->glyphs[index] = std::move(*text);
+  }
+
+  result->ends = skin.ends;
+
+  return result;
+}
+} // namespace
+
+std::expected<void, TreeError> setScrollbarSkin(WidgetTree &tree, Node<Widget> node, const ScrollbarSkin &skin) {
+  std::expected<void, TreeError> result;
+  auto edited = tree.edit(node, [&](Widget &widget) {
+    // Grid's internal scrolling retains its existing options; this API targets ordinary controls only.
+    if (!dynamic_cast<ScrollArea *>(&widget) && !dynamic_cast<ScrollBar *>(&widget)) {
+      result = std::unexpected(TreeError::INVALID_ARGUMENT);
+
+      return;
+    }
+
+    auto &state = *detail::ScrollWidgetAccess::state(widget);
+    const auto revision = state.skinRevision;
+
+    if (state.retired || revision == std::numeric_limits<std::uint64_t>::max()) {
+      result = std::unexpected(state.retired ? TreeError::STALE_NODE : TreeError::IDENTITY_EXHAUSTED);
+
+      return;
+    }
+
+    try {
+      auto prepared = prepareScrollbarSkin(state, skin);
+
+      if (!prepared) {
+        result = std::unexpected(prepared.error());
+
+        return;
+      }
+
+      // Allocator reentrancy can retire this owner or install a newer skin during preparation.
+      auto live = tree.inspect(node);
+
+      if (!live || state.retired || state.skinRevision != revision) {
+        result = std::unexpected(!live ? live.error() : state.retired ? TreeError::STALE_NODE : TreeError::WOULD_BLOCK);
+
+        return;
+      }
+
+      result = tree.invalidate(node, Invalidation::PAINT);
+
+      if (result) {
+        state.scrollbarSkin = std::move(*prepared);
+        ++state.skinRevision;
+      }
+    } catch (const std::bad_alloc &) {
+      result = std::unexpected(TreeError::NO_MEMORY);
+    } catch (const std::length_error &) {
+      result = std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+  });
+
   return edited ? result : edited;
 }
 } // namespace portals

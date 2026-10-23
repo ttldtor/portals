@@ -573,10 +573,15 @@ template <class Left, class Right, class P> struct FlatExpressionType<Mix<Left, 
 template <class D, class P> consteval bool flatDeclarationTypeMatches() {
   using Expression = std::remove_cvref_t<decltype(std::declval<D>().expression)>;
   using Actual = typename FlatExpressionType<Expression, P>::Type;
-  constexpr bool COLOR = D::KIND == Property::FOREGROUND || D::KIND == Property::BACKGROUND ||
-                         D::KIND == Property::FRAME_LINE_FOREGROUND || D::KIND == Property::FRAME_LINE_BACKGROUND ||
-                         D::KIND == Property::FRAME_TITLE_FOREGROUND || D::KIND == Property::FRAME_TITLE_BACKGROUND ||
-                         D::KIND == Property::FRAME_ENDS_FOREGROUND || D::KIND == Property::FRAME_ENDS_BACKGROUND;
+  constexpr bool COLOR =
+    D::KIND == Property::FOREGROUND || D::KIND == Property::BACKGROUND || D::KIND == Property::FRAME_LINE_FOREGROUND ||
+    D::KIND == Property::FRAME_LINE_BACKGROUND || D::KIND == Property::FRAME_TITLE_FOREGROUND ||
+    D::KIND == Property::FRAME_TITLE_BACKGROUND || D::KIND == Property::FRAME_ENDS_FOREGROUND ||
+    D::KIND == Property::FRAME_ENDS_BACKGROUND || D::KIND == Property::SCROLLBAR_TRACK_FOREGROUND ||
+    D::KIND == Property::SCROLLBAR_TRACK_BACKGROUND || D::KIND == Property::SCROLLBAR_THUMB_FOREGROUND ||
+    D::KIND == Property::SCROLLBAR_THUMB_BACKGROUND || D::KIND == Property::SCROLLBAR_ENDS_FOREGROUND ||
+    D::KIND == Property::SCROLLBAR_ENDS_BACKGROUND || D::KIND == Property::SCROLLBAR_CORNER_FOREGROUND ||
+    D::KIND == Property::SCROLLBAR_CORNER_BACKGROUND;
   constexpr bool METRIC = D::KIND == Property::MIN_WIDTH;
   using Expected = std::conditional_t<COLOR, RgbColor, std::conditional_t<METRIC, std::int32_t, bool>>;
 
@@ -650,6 +655,46 @@ constexpr bool pssPropertyPresent(PssProperty property, const StyleDeclarations 
     return value.frameEnds.italic.has_value();
   case PssProperty::FRAME_ENDS_UNDERLINE:
     return value.frameEnds.underline.has_value();
+  case PssProperty::SCROLLBAR_TRACK_FOREGROUND:
+    return value.scrollbarTrack.foreground.has_value();
+  case PssProperty::SCROLLBAR_TRACK_BACKGROUND:
+    return value.scrollbarTrack.background.has_value();
+  case PssProperty::SCROLLBAR_TRACK_BOLD:
+    return value.scrollbarTrack.bold.has_value();
+  case PssProperty::SCROLLBAR_TRACK_ITALIC:
+    return value.scrollbarTrack.italic.has_value();
+  case PssProperty::SCROLLBAR_TRACK_UNDERLINE:
+    return value.scrollbarTrack.underline.has_value();
+  case PssProperty::SCROLLBAR_THUMB_FOREGROUND:
+    return value.scrollbarThumb.foreground.has_value();
+  case PssProperty::SCROLLBAR_THUMB_BACKGROUND:
+    return value.scrollbarThumb.background.has_value();
+  case PssProperty::SCROLLBAR_THUMB_BOLD:
+    return value.scrollbarThumb.bold.has_value();
+  case PssProperty::SCROLLBAR_THUMB_ITALIC:
+    return value.scrollbarThumb.italic.has_value();
+  case PssProperty::SCROLLBAR_THUMB_UNDERLINE:
+    return value.scrollbarThumb.underline.has_value();
+  case PssProperty::SCROLLBAR_ENDS_FOREGROUND:
+    return value.scrollbarEnds.foreground.has_value();
+  case PssProperty::SCROLLBAR_ENDS_BACKGROUND:
+    return value.scrollbarEnds.background.has_value();
+  case PssProperty::SCROLLBAR_ENDS_BOLD:
+    return value.scrollbarEnds.bold.has_value();
+  case PssProperty::SCROLLBAR_ENDS_ITALIC:
+    return value.scrollbarEnds.italic.has_value();
+  case PssProperty::SCROLLBAR_ENDS_UNDERLINE:
+    return value.scrollbarEnds.underline.has_value();
+  case PssProperty::SCROLLBAR_CORNER_FOREGROUND:
+    return value.scrollbarCorner.foreground.has_value();
+  case PssProperty::SCROLLBAR_CORNER_BACKGROUND:
+    return value.scrollbarCorner.background.has_value();
+  case PssProperty::SCROLLBAR_CORNER_BOLD:
+    return value.scrollbarCorner.bold.has_value();
+  case PssProperty::SCROLLBAR_CORNER_ITALIC:
+    return value.scrollbarCorner.italic.has_value();
+  case PssProperty::SCROLLBAR_CORNER_UNDERLINE:
+    return value.scrollbarCorner.underline.has_value();
   case PssProperty::MIN_WIDTH:
     return value.minWidth.has_value();
   }
@@ -743,6 +788,86 @@ constexpr PssValue pssScalar(PssProperty property, const StyleDeclarations &valu
     break;
   case PssProperty::FRAME_ENDS_UNDERLINE:
     result.boolean = *value.frameEnds.underline;
+
+    break;
+  case PssProperty::SCROLLBAR_TRACK_FOREGROUND:
+    result.color = *value.scrollbarTrack.foreground;
+
+    break;
+  case PssProperty::SCROLLBAR_TRACK_BACKGROUND:
+    result.color = *value.scrollbarTrack.background;
+
+    break;
+  case PssProperty::SCROLLBAR_TRACK_BOLD:
+    result.boolean = *value.scrollbarTrack.bold;
+
+    break;
+  case PssProperty::SCROLLBAR_TRACK_ITALIC:
+    result.boolean = *value.scrollbarTrack.italic;
+
+    break;
+  case PssProperty::SCROLLBAR_TRACK_UNDERLINE:
+    result.boolean = *value.scrollbarTrack.underline;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_FOREGROUND:
+    result.color = *value.scrollbarThumb.foreground;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_BACKGROUND:
+    result.color = *value.scrollbarThumb.background;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_BOLD:
+    result.boolean = *value.scrollbarThumb.bold;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_ITALIC:
+    result.boolean = *value.scrollbarThumb.italic;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_UNDERLINE:
+    result.boolean = *value.scrollbarThumb.underline;
+
+    break;
+  case PssProperty::SCROLLBAR_ENDS_FOREGROUND:
+    result.color = *value.scrollbarEnds.foreground;
+
+    break;
+  case PssProperty::SCROLLBAR_ENDS_BACKGROUND:
+    result.color = *value.scrollbarEnds.background;
+
+    break;
+  case PssProperty::SCROLLBAR_ENDS_BOLD:
+    result.boolean = *value.scrollbarEnds.bold;
+
+    break;
+  case PssProperty::SCROLLBAR_ENDS_ITALIC:
+    result.boolean = *value.scrollbarEnds.italic;
+
+    break;
+  case PssProperty::SCROLLBAR_ENDS_UNDERLINE:
+    result.boolean = *value.scrollbarEnds.underline;
+
+    break;
+  case PssProperty::SCROLLBAR_CORNER_FOREGROUND:
+    result.color = *value.scrollbarCorner.foreground;
+
+    break;
+  case PssProperty::SCROLLBAR_CORNER_BACKGROUND:
+    result.color = *value.scrollbarCorner.background;
+
+    break;
+  case PssProperty::SCROLLBAR_CORNER_BOLD:
+    result.boolean = *value.scrollbarCorner.bold;
+
+    break;
+  case PssProperty::SCROLLBAR_CORNER_ITALIC:
+    result.boolean = *value.scrollbarCorner.italic;
+
+    break;
+  case PssProperty::SCROLLBAR_CORNER_UNDERLINE:
+    result.boolean = *value.scrollbarCorner.underline;
 
     break;
   case PssProperty::MIN_WIDTH:

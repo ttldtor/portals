@@ -1518,9 +1518,18 @@ TEST_CASE("actual catalog fixed ancestry retains sparse precedence origins and u
   fails(controls.validate(), Code::INHERITANCE_LIMIT);
 }
 
-TEST_CASE("Shared frame schema appends stable leaves within four presence words") {
-  static_assert(ui::detail::CONTROL_PROPERTY_COUNT == 193);
+TEST_CASE("Shared frame, Spinner and scrollbar schemas append stable leaves within four presence words") {
+  static_assert(ui::detail::CONTROL_PROPERTY_COUNT == 216);
   static_assert((ui::detail::CONTROL_PRESENCE_BITS + 63) / 64 == 4);
+  ControlSettings appended;
+  appended.spinnerPreset = SpinnerPreset::LINE;
+  appended.scrollbar.pattern = ScrollbarPattern::ASCII;
+  const auto appendedPresence = ui::detail::controlSettingsPresenceSet(appended);
+
+  CHECK(appendedPresence.count() == 2);
+  CHECK(appendedPresence.test(193));
+  CHECK(appendedPresence.test(204));
+
   ControlSettings patch;
   patch.frame.enabled = true;
   patch.frame.glyphs = PrimitiveGlyphs::ASCII;
@@ -1696,4 +1705,30 @@ TEST_CASE("title decoration sparse settings preserve ends and share checked enum
   patch.frame.titleDecoration = TitleDecoration::SPACED;
   patch.frame.customTitleDecoration.prefix = std::string(65, 'a');
   CHECK_FALSE(ControlContext{}.resolve("Button", patch));
+}
+
+TEST_CASE("scrollbar scalar vocabulary appends old identities and merges only supplied leaves") {
+  ui::ControlContext controls;
+  take(ui::detail::ControlContextAccess::installScrollSchema(controls, "ScrollArea"));
+  ControlSettings base;
+  base.scrollbar.pattern = ScrollbarPattern::FRAME;
+  base.scrollbar.ends = true;
+  base.scrollbar.horizontal.track = "H";
+  base.scrollbar.vertical.thumb = "Y";
+  controls.defaults("ScrollArea", base);
+  ControlSettings patch;
+  patch.scrollbar.ends = false;
+  patch.scrollbar.horizontal.thumb = "X";
+  const auto result = take(controls.resolve("ScrollArea", patch));
+  CHECK(result.settings.scrollbar.pattern == ScrollbarPattern::FRAME);
+  CHECK(result.settings.scrollbar.ends == false);
+  CHECK(result.settings.scrollbar.horizontal.track == "H");
+  CHECK(result.settings.scrollbar.horizontal.thumb == "X");
+  CHECK(result.settings.scrollbar.vertical.thumb == "Y");
+  CHECK_FALSE(controls.resolve("Button", patch));
+  patch.scrollbar.pattern = static_cast<ScrollbarPattern>(99);
+  CHECK_FALSE(controls.resolve("ScrollArea", patch));
+  patch.scrollbar.pattern = ScrollbarPattern::ASCII;
+  patch.scrollbar.maxGlyphBytes = 0;
+  CHECK_FALSE(controls.resolve("ScrollArea", patch));
 }

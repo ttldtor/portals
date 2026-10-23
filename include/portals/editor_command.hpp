@@ -11,6 +11,7 @@ class ManagedScene;
 
 namespace ui::detail {
 struct RefAccess;
+struct ActionAccess;
 }
 
 /** @brief Owning checked editor command, preserving exactly its collector reporting receipt.
@@ -32,6 +33,7 @@ public:
 private:
   friend class ManagedScene;
   friend struct ui::detail::RefAccess;
+  friend struct ui::detail::ActionAccess;
 
   EditorCommandResult(std::expected<void, TreeError> result, std::weak_ptr<const void> collector, bool reported)
       : result_(result), collector_(std::move(collector)), reported_(reported) {

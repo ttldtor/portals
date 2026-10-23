@@ -68,6 +68,39 @@ struct RefAccess {
     return setDataStateView(scene.app_.tree(), (*found)->node, value);
   }
 
+  static std::expected<void, TreeError> spinnerActive(ManagedScene &scene, Node<Spinner> node, bool active) {
+    return setSpinnerActive(scene.app_.tree(), node, active);
+  }
+
+  static std::expected<void, ManagedError> spinnerLabel(ManagedScene &scene, Node<Spinner> node, const TextValue &value,
+                                                        const TextResolver &resolver) try {
+    auto &tree = scene.app_.tree();
+    const auto width = scene.widthPolicy();
+    std::optional<SpinnerOptions> options;
+    std::expected<void, TreeError> copied;
+    auto checked = tree.edit(node, [&](Spinner &spinner) {
+      try {
+        options.emplace(spinner.options());
+      } catch (const std::bad_alloc &) {
+        copied = std::unexpected(TreeError::NO_MEMORY);
+      }
+    });
+    if (!checked || !copied) {
+      return std::unexpected(failure(node, checked ? copied.error() : checked.error()));
+    }
+    auto label = resolver ? value.resolve(width, resolver) : value.resolve(width);
+    if (!label) {
+      return std::unexpected(textFailure(node, label.error()));
+    }
+    options->label = TextValue(label->bytes());
+    auto applied = setSpinner(tree, node, *options);
+    return applied ? std::expected<void, ManagedError>{} : std::unexpected(failure(node, applied.error()));
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(failure(node, TreeError::NO_MEMORY));
+  } catch (...) {
+    return std::unexpected(failure(node, TreeError::CALLBACK_FAILED));
+  }
+
   static DialogCommandResult dialogResult(std::expected<void, ManagedError> result) {
     return DialogCommandResult(std::move(result));
   }
@@ -461,6 +494,57 @@ void reportEventError(const std::shared_ptr<RefTarget> &target, const ManagedErr
 
   if (scene && !RefAccess::eventReported(**scene, error)) {
     (void)(*scene)->reportError(error, {}, origin);
+  }
+}
+
+std::expected<void, ManagedError> spinnerActive(std::shared_ptr<RefTarget> target,
+                                                std::shared_ptr<const Node<Spinner>> node, bool active,
+                                                std::source_location origin) {
+  auto owner = eventScene(target);
+  std::expected<void, ManagedError> result;
+  if (!owner) {
+    result = std::unexpected(owner.error());
+  } else {
+    auto applied = RefAccess::spinnerActive(**owner, node ? *node : Node<Spinner>{}, active);
+    if (!applied) {
+      result = std::unexpected(failure(target->node, applied.error()));
+    }
+  }
+  if (!result) {
+    RefAccess::report(result.error(), target, active ? "spinner.start" : "spinner.stop", {}, "Spinner", origin);
+  }
+  return result;
+}
+
+std::expected<void, ManagedError> spinnerLabel(std::shared_ptr<RefTarget> target,
+                                               std::shared_ptr<const Node<Spinner>> node, const TextValue &value,
+                                               const TextResolver &resolver, std::source_location origin) {
+  auto owner = eventScene(target);
+  auto result = owner ? RefAccess::spinnerLabel(**owner, node ? *node : Node<Spinner>{}, value, resolver)
+                      : std::expected<void, ManagedError>(std::unexpected(owner.error()));
+  if (!result) {
+    RefAccess::report(result.error(), target, "spinner.label", {}, "Spinner", origin);
+  }
+  return result;
+}
+
+std::expected<void, ManagedError> spinnerLabel(std::shared_ptr<RefTarget> target,
+                                               std::shared_ptr<const Node<Spinner>> node, std::string_view value,
+                                               std::source_location origin) {
+  auto owner = eventScene(target);
+  if (!owner) {
+    auto result = owner.error();
+    RefAccess::report(result, target, "spinner.label", {}, "Spinner", origin);
+    return std::unexpected(result);
+  }
+  try {
+    // Construct inside the checked boundary, then reacquire the weak scene after allocation.
+    TextValue staged(value);
+    return spinnerLabel(target, std::move(node), staged, {}, origin);
+  } catch (const std::bad_alloc &) {
+    auto result = failure(node ? Node<Widget>(*node) : Node<Widget>{}, TreeError::NO_MEMORY);
+    RefAccess::report(result, target, "spinner.label", {}, "Spinner", origin);
+    return std::unexpected(result);
   }
 }
 

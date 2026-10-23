@@ -61,8 +61,9 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, const Compu
                                        : TreeError::INVALID_GEOMETRY);
   }
   const auto style = !state.enabled ? resolved.disabled : state.focused ? resolved.focused : resolved.normal;
-  auto draw = [&](CellPoint point, std::size_t glyph) {
-    const RenderCommand command = TextCommand{point, state.glyphs[glyph], *bounds, style};
+  const auto &parts = resolved.scrollbar[!state.enabled ? 2 : state.focused ? 1 : 0];
+  auto draw = [&](CellPoint point, const GraphemeText &glyph, const std::optional<CellStyle> &part) {
+    const RenderCommand command = TextCommand{point, glyph, *bounds, part.value_or(style)};
     return context.submit(std::span(&command, 1));
   };
   if (frame && frameText) {
@@ -84,7 +85,22 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, const Compu
       } else {
         point.y += i;
       }
-      auto result = draw(point, i >= thumb.start && i - thumb.start < thumb.length ? 7 : 6);
+      const bool inThumb = i >= thumb.start && i - thumb.start < thumb.length;
+      const auto first = horizontalAxis ? 0 : 4;
+      const auto *skin = state.scrollbarSkin.get();
+      const auto *glyph = skin ? &*skin->glyphs[first + (inThumb ? 1 : 0)] : &state.glyphs[inThumb ? 7 : 6];
+      const auto *part = inThumb ? &parts.thumb : &parts.track;
+
+      if (skin && skin->ends && !inThumb) {
+        const auto end = i == 0 ? first + 2 : i == cells.length - 1 ? first + 3 : -1;
+
+        if (end >= 0 && skin->glyphs[end]) {
+          glyph = &*skin->glyphs[end];
+          part = &parts.ends;
+        }
+      }
+
+      auto result = draw(point, *glyph, *part);
       if (!result) {
         return result;
       }
@@ -103,7 +119,11 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, const Compu
   if (!corner) {
     return std::unexpected(TreeError::INVALID_GEOMETRY);
   }
-  const RenderCommand command = FillCommand{*corner, *bounds, style};
+  if (state.scrollbarSkin && state.scrollbarSkin->glyphs[8]) {
+    return draw(state.geometry.corner, *state.scrollbarSkin->glyphs[8], parts.corner);
+  }
+
+  const RenderCommand command = FillCommand{*corner, *bounds, parts.corner.value_or(style)};
   return context.submit(std::span(&command, 1));
 }
 } // namespace detail

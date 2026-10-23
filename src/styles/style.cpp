@@ -61,14 +61,16 @@ bool hasPaintDeclarations(const StylePaintDeclarations &values) noexcept {
   return values.foreground || values.background || values.bold || values.italic || values.underline;
 }
 
-template <class CascadeRank, bool FrameParts, class Visit>
+template <class CascadeRank, bool FrameParts, bool ScrollbarParts, class Visit>
 CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, StyleState state, CellStyle base,
-                       FrameAppearance &parts) {
+                       FrameAppearance &parts, ScrollbarAppearance &scrollbar) {
   // Ordinary rules retain the original five ranks; frame ranks exist only in the part specialization.
   constexpr std::size_t PAINT_ATTRIBUTE_COUNT = 5;
-  constexpr std::size_t FRAME_PART_COUNT = 3;
-  std::array<std::optional<CascadeRank>, PAINT_ATTRIBUTE_COUNT *(FrameParts ? FRAME_PART_COUNT + 1 : 1)> ranks;
-  [[maybe_unused]] std::array<StylePaintDeclarations, FrameParts ? FRAME_PART_COUNT : 0> overrides;
+  constexpr std::size_t FRAME_PART_COUNT = FrameParts ? 3 : 0;
+  constexpr std::size_t SCROLLBAR_PART_COUNT = ScrollbarParts ? 4 : 0;
+  constexpr std::size_t PART_COUNT = FRAME_PART_COUNT + SCROLLBAR_PART_COUNT;
+  std::array<std::optional<CascadeRank>, PAINT_ATTRIBUTE_COUNT *(PART_COUNT + 1)> ranks;
+  [[maybe_unused]] std::array<StylePaintDeclarations, PART_COUNT> overrides;
   const auto assign = [&]<class T>(const std::optional<T> &value, auto &destination, std::size_t index,
                                    CascadeRank rank) {
     if (value && (!ranks[index] || rank >= *ranks[index])) {
@@ -89,9 +91,7 @@ CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, StyleState
     assign(values.italic, base.italic, 3, rank);
     assign(values.underline, base.underline, 4, rank);
 
-    if constexpr (FrameParts) {
-      const std::array sources{&values.frameLine, &values.frameTitle, &values.frameEnds};
-
+    const auto applyParts = [&](const auto &sources, std::size_t first) {
       for (std::size_t part = 0; part < sources.size(); ++part) {
         const auto &source = *sources[part];
 
@@ -99,22 +99,30 @@ CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, StyleState
           continue;
         }
 
-        auto &destination = overrides[part];
-        const auto offset = PAINT_ATTRIBUTE_COUNT * (part + 1);
+        auto &destination = overrides[first + part];
+        const auto offset = PAINT_ATTRIBUTE_COUNT * (first + part + 1);
         assign(source.foreground, destination.foreground, offset, rank);
         assign(source.background, destination.background, offset + 1, rank);
         assign(source.bold, destination.bold, offset + 2, rank);
         assign(source.italic, destination.italic, offset + 3, rank);
         assign(source.underline, destination.underline, offset + 4, rank);
       }
+    };
+
+    if constexpr (FrameParts) {
+      applyParts(std::array{&values.frameLine, &values.frameTitle, &values.frameEnds}, 0);
+    }
+
+    if constexpr (ScrollbarParts) {
+      applyParts(
+        std::array{&values.scrollbarTrack, &values.scrollbarThumb, &values.scrollbarEnds, &values.scrollbarCorner},
+        FRAME_PART_COUNT);
     }
   });
 
-  if constexpr (FrameParts) {
-    const std::array destinations{&parts.line, &parts.title, &parts.ends};
-
-    for (std::size_t index = 0; index < overrides.size(); ++index) {
-      const auto &source = overrides[index];
+  const auto finishParts = [&](const auto &destinations, std::size_t first) {
+    for (std::size_t index = 0; index < destinations.size(); ++index) {
+      const auto &source = overrides[first + index];
 
       if (!hasPaintDeclarations(source)) {
         continue;
@@ -136,6 +144,14 @@ CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, StyleState
       resolved.underline = source.underline.value_or(resolved.underline);
       destination = resolved;
     }
+  };
+
+  if constexpr (FrameParts) {
+    finishParts(std::array{&parts.line, &parts.title, &parts.ends}, 0);
+  }
+
+  if constexpr (ScrollbarParts) {
+    finishParts(std::array{&scrollbar.track, &scrollbar.thumb, &scrollbar.ends, &scrollbar.corner}, FRAME_PART_COUNT);
   }
 
   return base;
@@ -144,6 +160,7 @@ CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, StyleState
 template <class CascadeRank, class Visit>
 ComputedStyle resolveRules(const Visit &visit, const StyleTarget &target, ComputedStyle defaults) noexcept {
   bool frameParts{};
+  bool scrollbarParts{};
   std::optional<CascadeRank> rank;
   visit([&](const StyleRule &rule, auto &&makeRank) {
     const auto &values = rule.declarations;
@@ -152,6 +169,11 @@ ComputedStyle resolveRules(const Visit &visit, const StyleTarget &target, Comput
     frameParts = frameParts || ((hasPaintDeclarations(values.frameLine) || hasPaintDeclarations(values.frameTitle) ||
                                  hasPaintDeclarations(values.frameEnds)) &&
                                 matches(rule.selector, target, rule.selector.state));
+
+    scrollbarParts =
+      scrollbarParts || ((hasPaintDeclarations(values.scrollbarTrack) || hasPaintDeclarations(values.scrollbarThumb) ||
+                          hasPaintDeclarations(values.scrollbarEnds) || hasPaintDeclarations(values.scrollbarCorner)) &&
+                         matches(rule.selector, target, rule.selector.state));
 
     if (!rule.declarations.minWidth || !matches(rule.selector, target, StyleState::ANY)) {
       return;
@@ -163,25 +185,33 @@ ComputedStyle resolveRules(const Visit &visit, const StyleTarget &target, Comput
     }
   });
 
-  const auto applyPaintStates = [&]<bool FrameParts>() {
-    defaults.normal =
-      resolvePaint<CascadeRank, FrameParts>(visit, target, StyleState::NORMAL, defaults.normal, defaults.frame[0]);
-    defaults.focused =
-      resolvePaint<CascadeRank, FrameParts>(visit, target, StyleState::FOCUSED, defaults.focused, defaults.frame[1]);
-    defaults.disabled =
-      resolvePaint<CascadeRank, FrameParts>(visit, target, StyleState::DISABLED, defaults.disabled, defaults.frame[2]);
-    defaults.selected =
-      resolvePaint<CascadeRank, FrameParts>(visit, target, StyleState::SELECTED, defaults.selected, defaults.frame[3]);
-    defaults.header =
-      resolvePaint<CascadeRank, FrameParts>(visit, target, StyleState::HEADER, defaults.header, defaults.frame[4]);
-    defaults.caret =
-      resolvePaint<CascadeRank, FrameParts>(visit, target, StyleState::CARET, defaults.caret, defaults.frame[5]);
+  const auto applyPaintStates = [&]<bool FrameParts, bool ScrollbarParts>() {
+    defaults.normal = resolvePaint<CascadeRank, FrameParts, ScrollbarParts>(
+      visit, target, StyleState::NORMAL, defaults.normal, defaults.frame[0], defaults.scrollbar[0]);
+    defaults.focused = resolvePaint<CascadeRank, FrameParts, ScrollbarParts>(
+      visit, target, StyleState::FOCUSED, defaults.focused, defaults.frame[1], defaults.scrollbar[1]);
+    defaults.disabled = resolvePaint<CascadeRank, FrameParts, ScrollbarParts>(
+      visit, target, StyleState::DISABLED, defaults.disabled, defaults.frame[2], defaults.scrollbar[2]);
+    defaults.selected = resolvePaint<CascadeRank, FrameParts, ScrollbarParts>(
+      visit, target, StyleState::SELECTED, defaults.selected, defaults.frame[3], defaults.scrollbar[3]);
+    defaults.header = resolvePaint<CascadeRank, FrameParts, ScrollbarParts>(
+      visit, target, StyleState::HEADER, defaults.header, defaults.frame[4], defaults.scrollbar[4]);
+    defaults.caret = resolvePaint<CascadeRank, FrameParts, ScrollbarParts>(
+      visit, target, StyleState::CARET, defaults.caret, defaults.frame[5], defaults.scrollbar[5]);
   };
 
   if (frameParts) {
-    applyPaintStates.template operator()<true>();
+    if (scrollbarParts) {
+      applyPaintStates.template operator()<true, true>();
+    } else {
+      applyPaintStates.template operator()<true, false>();
+    }
   } else {
-    applyPaintStates.template operator()<false>();
+    if (scrollbarParts) {
+      applyPaintStates.template operator()<false, true>();
+    } else {
+      applyPaintStates.template operator()<false, false>();
+    }
   }
 
   return defaults;
@@ -751,8 +781,10 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
                part.italic.has_value() + part.underline.has_value();
       };
       const std::size_t count = partCount(d.frameLine) + partCount(d.frameTitle) + partCount(d.frameEnds) +
-                                d.foreground.has_value() + d.background.has_value() + d.bold.has_value() +
-                                d.italic.has_value() + d.underline.has_value() + d.minWidth.has_value();
+                                partCount(d.scrollbarTrack) + partCount(d.scrollbarThumb) + partCount(d.scrollbarEnds) +
+                                partCount(d.scrollbarCorner) + d.foreground.has_value() + d.background.has_value() +
+                                d.bold.has_value() + d.italic.has_value() + d.underline.has_value() +
+                                d.minWidth.has_value();
       if (!charge(declarations, count, options.maxDeclarations) ||
           !charge(bytes, sizeof(StyleRule), options.maxOwnedBytes) || !chargeString(rule.selector.type) ||
           !chargeString(rule.selector.id)) {

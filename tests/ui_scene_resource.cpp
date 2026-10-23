@@ -6220,3 +6220,73 @@ TEST_CASE("resource title decoration dotted and grouped forms share owning custo
     CHECK(source.node() == Node<Button>{});
   }
 }
+
+TEST_CASE("scrollbar resource dotted grouped defaults and per-axis overrides share native preparation") {
+  for (
+    const std::string_view properties :
+    {R"(scrollbar{pattern=FRAME ends=true maxGlyphBytes=4 horizontal{track="H" thumb="X" start="<" end=">"} vertical{track="V" thumb="Y" start="^" end="v"} corner="@"})",
+     R"(scrollbar.pattern=FRAME scrollbar.ends=true scrollbar.maxGlyphBytes=4 scrollbar.horizontal.track="H" scrollbar.horizontal.thumb="X" scrollbar.horizontal.start="<" scrollbar.horizontal.end=">" scrollbar.vertical.track="V" scrollbar.vertical.thumb="Y" scrollbar.vertical.start="^" scrollbar.vertical.end="v" scrollbar.corner="@")"}) {
+    ui::SceneResourceOptions options;
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    options.limits.maxProperties = 32;
+    auto owner = ui::scene("scene{ScrollArea#area{width=12 height=6 frame=\"double\" placement=RESERVED " +
+                             std::string(properties) + " Label{text=\"body\" width=40 height=30}}}",
+                           options);
+    auto area = owner.get<ScrollArea>("area");
+    const auto prepared = owner.prepareChecked();
+    if (!prepared) {
+      ui::SceneReport report;
+      report.failure = prepared.error();
+      ui::reportToStderr(report);
+    }
+    REQUIRE(prepared);
+    auto &managed = owner.managed()->get();
+    auto &app = ui::detail::SceneAccess::application(managed);
+    layoutResourceFrame(managed, app, {12, 6});
+    layoutResourceFrame(managed, app, {12, 6});
+    ResourceFramePaint sink;
+    REQUIRE(app.tree().frame([&] {
+      REQUIRE(app.tree().paint(area.node(), sink));
+    }));
+    for (auto glyph : {"H", "X", "V", "Y", ">", "v", "@"})
+      CHECK(std::ranges::find(sink.text, glyph) != sink.text.end());
+    REQUIRE(owner.close());
+  }
+  ui::SceneResourceOptions options;
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  for (const auto property :
+       {R"(scrollbar.pattern=UNKNOWN)", R"(scrollbar.maxGlyphBytes=0)", R"(scrollbar.horizontal.track="ab")",
+        R"(scrollbar.vertical.thumb="界")", R"(scrollbar{maxGlyphBytes=1 corner="é"})", R"(scrollbar.corner="\n")"}) {
+    auto owner = ui::scene("scene{ScrollArea#area{" + std::string(property) + " Label{text=\"body\"}}}", options);
+    auto area = owner.get<ScrollArea>("area");
+    CHECK_FALSE(owner.prepareChecked());
+    CHECK(area.node() == Node<ScrollArea>{});
+  }
+  auto duplicate = ui::scene(R"(scene{ScrollBar{scrollbar.pattern=ASCII scrollbar{pattern=MINIMAL}}})", options);
+  const auto rejected = duplicate.prepareChecked();
+  REQUIRE_FALSE(rejected);
+  REQUIRE(rejected.error().sceneResource);
+  CHECK(rejected.error().sceneResource->code == SceneResourceErrorCode::DUPLICATE_PROPERTY);
+
+  ui::ControlContext controls;
+  controls.defaults(
+    "ScrollArea",
+    {.scrollbar = {.pattern = ScrollbarPattern::ASCII, .horizontal = {.track = "H"}, .vertical = {.thumb = "Y"}}});
+  options.controls = controls;
+  auto owner = ui::scene(
+    R"(scene{ScrollArea#area{width=12 height=6 scrollbar.horizontal.thumb="X" Label{text="body" width=40 height=30}}})",
+    options);
+  auto area = owner.get<ScrollArea>("area");
+  REQUIRE(owner.prepareChecked());
+  auto &managed = owner.managed()->get();
+  auto &app = ui::detail::SceneAccess::application(managed);
+  layoutResourceFrame(managed, app, {12, 6});
+  layoutResourceFrame(managed, app, {12, 6});
+  ResourceFramePaint sink;
+  REQUIRE(app.tree().frame([&] {
+    REQUIRE(app.tree().paint(area.node(), sink));
+  }));
+  for (auto glyph : {"H", "X", "Y", "."})
+    CHECK(std::ranges::find(sink.text, glyph) != sink.text.end());
+  REQUIRE(owner.close());
+}

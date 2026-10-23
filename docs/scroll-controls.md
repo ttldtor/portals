@@ -154,3 +154,50 @@ before returning its exit code. Native setup failures remain explicit errors;
 capability becomes observable only after successful setup. The xterm
 [DECRQM and button-event tracking specification](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html)
 describes modes 1002 and 1006; a syntactically valid reply cannot authenticate a host.
+
+## Style scrollbar parts {#scrollbar-skins}
+
+Use `.scrollbar("frame")` after `.scrollOnFrame()` to match the scrollbar track
+to the prepared frame, including custom frame lines. An unframed control uses
+single lines for this preset. The equivalent pipe is `| ui::scrollbar("frame")`.
+
+[Complete C++ source](examples/guide_scrollbar_skin.cpp) and
+[complete loaded-scene source](examples/guide_scrollbar_resource.cpp) show the
+same form. Build `portals_docs_scrollbar_skin` or `portals_docs_scrollbar_resource`
+with tests enabled; both run interactively through `runApp`.
+
+\include guide_scrollbar_skin.cpp
+
+| Preset | Track | Thumb |
+| --- | --- | --- |
+| `legacy` (default) | Existing shaded track | Existing block |
+| `frame` | Prepared oriented frame line | Block |
+| `minimal` | Blank | Block |
+| `ascii` | Dot | Hash |
+
+`ScrollbarSkin` supplies owning sparse horizontal and vertical glyph overrides,
+optional decorative ends and a corner glyph. Each supplied glyph is validated
+under the receiving width policy: one printable one-cell grapheme, at most
+`maxGlyphBytes` UTF-8 bytes (default 64). Track and thumb cannot be empty; empty
+ends suppress their decoration, and an omitted or empty corner retains the fill.
+Invalid settings return typed errors before changing the prepared skin.
+
+Ends are disabled by default. Enabling them paints in existing track cells;
+the thumb has priority. This does not reserve cells, create arrow buttons or
+change clicking, range, dragging, focus or offsets. `ON_FRAME` keeps the frame's
+existing corners; the independent corner glyph applies only where the existing
+geometry exposes a scrollbar intersection.
+
+PSS prefixes `scrollbar-track-`, `scrollbar-thumb-`, `scrollbar-ends-` and
+`scrollbar-corner-` accept `foreground`, `background`, `bold`, `italic` and
+`underline`. They use the ordinary state, selector and layer rules and retain
+explicit `false` overrides. Colors and text attributes are shared by both axes;
+glyph overrides are axis-specific. Runtime, typed and compile-time sheets use
+the same declarations. Existing common styles remain the fallback.
+
+Loaded configuration uses `scrollbar { pattern=FRAME ends=true }`, with optional
+`maxGlyphBytes`, `horizontal { track="-" thumb="#" start="<" end=">" }`,
+`vertical { track="|" thumb="#" start="^" end="v" }` and `corner="+"`.
+Dotted leaves such as `scrollbar.vertical.thumb` are equivalent. A skin never
+enables a frame or chooses its placement implicitly. Low-level callers can use
+`setScrollbarSkin(tree, node, skin)` for a checked atomic replacement.

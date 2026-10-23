@@ -790,3 +790,111 @@ TEST_CASE("native scroll frame chooses the same prepared disabled title part sty
   CHECK(title->style.foreground == RgbColor{4, 5, 6});
   CHECK(prefix->style.foreground == RgbColor{7, 8, 9});
 }
+
+template <class T>
+concept CanSkinScrollbar = requires(T &&recipe) { std::forward<T>(recipe).scrollbar("frame"); };
+static_assert(CanSkinScrollbar<ui::Description<ScrollArea>> && CanSkinScrollbar<ui::Description<ScrollBar>>);
+static_assert(!CanSkinScrollbar<ui::Description<Button>> && !CanSkinScrollbar<ui::Description<ScrollArea> &>);
+
+TEST_CASE("scrollbar compact method pipe and owning settings share geometry and part paint states") {
+  for (const bool pipe : {false, true}) {
+    Fixture fixture;
+    ui::Ref<ScrollArea> area;
+    ui::Ref<Button> outside;
+    ScrollbarSkin skin{.pattern = ScrollbarPattern::ASCII, .ends = true};
+    skin.corner = "@";
+    auto recipe =
+      ui::scrollArea(area, ui::label("body").width(40).height(30)).framed("double", "Title").width(12).height(6);
+    if (pipe)
+      recipe = std::move(recipe) | ui::scrollbar(skin);
+    else
+      recipe = std::move(recipe).scrollbar(skin);
+    take(ui::mount(*fixture.scene, ui::vbox(std::move(recipe), ui::button(outside, "outside").onClick([] {
+    }))));
+    skin.corner = "!";
+    StyleSheet theme;
+    for (auto state : {StyleState::NORMAL, StyleState::FOCUSED, StyleState::DISABLED}) {
+      StyleRule rule;
+      rule.selector.type = "ScrollArea";
+      rule.selector.state = state;
+      rule.declarations.scrollbarTrack.foreground = RgbColor{1, 2, 3};
+      rule.declarations.scrollbarThumb.foreground = RgbColor{4, 5, 6};
+      rule.declarations.scrollbarEnds.foreground = RgbColor{7, 8, 9};
+      rule.declarations.scrollbarCorner.foreground = RgbColor{10, 11, 12};
+      rule.declarations.scrollbarThumb.bold = state == StyleState::FOCUSED;
+      rule.declarations.scrollbarEnds.italic = state == StyleState::DISABLED;
+      theme.rules.push_back(rule);
+    }
+    take(fixture.scene->theme(theme));
+    fixture.arrange();
+    fixture.arrange();
+    take(outside.focus());
+    for (int state : {0, 1, 2}) {
+      INFO("pipe=" << pipe << " state=" << state);
+      if (state == 1)
+        take(area.focus());
+      if (state == 2)
+        take(fixture.app->tree().setEnabled(area.node(), false));
+      fixture.arrange();
+      const auto rendered = paint(fixture.app->tree(), area.node());
+      const auto find = [&](std::string_view text) {
+        return std::ranges::find(rendered.runs, text, &FrameSink::Run::text);
+      };
+      auto track = find(".");
+      auto thumb = find("#");
+      auto ends = find("v");
+      auto corner = find("@");
+      std::string paintedGlyphs;
+      for (const auto &run : rendered.runs) {
+        paintedGlyphs += run.text;
+      }
+      INFO("painted glyphs=" << paintedGlyphs);
+      REQUIRE(track != rendered.runs.end());
+      REQUIRE(thumb != rendered.runs.end());
+      REQUIRE(ends != rendered.runs.end());
+      REQUIRE(corner != rendered.runs.end());
+      CHECK(track->style.foreground == RgbColor{1, 2, 3});
+      CHECK(thumb->style.foreground == RgbColor{4, 5, 6});
+      CHECK(ends->style.foreground == RgbColor{7, 8, 9});
+      CHECK(corner->style.foreground == RgbColor{10, 11, 12});
+      CHECK(thumb->style.bold == (state == 1));
+      CHECK(ends->style.italic == (state == 2));
+    }
+    take(fixture.scene->close());
+  }
+  for (const auto name : {"legacy", "frame", "minimal", "ascii"}) {
+    Fixture fixture;
+    take(ui::mount(*fixture.scene,
+                   ui::vbox(ui::scrollArea(ui::label("body")).scrollbar(name), ui::scrollBar() | ui::scrollbar(name))));
+  }
+  Fixture fixture;
+  CHECK_FALSE(ui::mount(*fixture.scene, ui::scrollArea(ui::label("body")).scrollbar("missing")));
+  CHECK_FALSE(ui::mount(*fixture.scene, ui::scrollBar() | ui::scrollbar("missing")));
+}
+
+TEST_CASE("scrollbar preset method and pipe retain sparse context glyphs ends and byte caps") {
+  for (const bool pipe : {false, true}) {
+    Fixture fixture;
+    ui::ControlContext controls;
+    controls.defaults(
+      "ScrollArea",
+      {.scrollbar = {.ends = true, .maxGlyphBytes = 1, .horizontal = {.track = "H"}, .vertical = {.thumb = "Y"}}});
+    ui::Ref<ScrollArea> area;
+    auto recipe = ui::scrollArea(area, ui::label("body").width(40).height(30)).width(12).height(6);
+
+    if (pipe) {
+      recipe = std::move(recipe) | ui::scrollbar("ascii");
+    } else {
+      recipe = std::move(recipe).scrollbar("ascii");
+    }
+
+    take(ui::mount(*fixture.scene, ui::vbox(std::move(recipe)), controls));
+    fixture.arrange();
+    fixture.arrange();
+    const auto rendered = paint(fixture.app->tree(), area.node());
+
+    for (const auto glyph : {"H", "Y", "v"}) {
+      CHECK(std::ranges::find(rendered.text, glyph) != rendered.text.end());
+    }
+  }
+}

@@ -1,5 +1,7 @@
 # Runnable examples {#examples}
 
+[Control examples](control-examples.md) pair protected-password and loading-indicator programs with complete scene-resource variants.
+
 [Русская версия](ru/examples.md)
 
 Start with **click handlers**, then the **gallery**. Both use the owning declarative

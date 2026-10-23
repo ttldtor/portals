@@ -13,6 +13,7 @@
 #include <portals/theme_selector.hpp>
 #include <portals/ui_ref.hpp>
 #include <portals/ui_scene.hpp>
+#include <portals/ui_action.hpp>
 
 #include <algorithm>
 #include <array>
@@ -241,6 +242,20 @@ constexpr std::optional<FramePattern> framePattern(std::string_view name) noexce
   }
 
   return {};
+}
+
+/** @param name Borrowed compact skin name. @return Preset or invalid value checked at mount. */
+constexpr ScrollbarPattern scrollbarPattern(std::string_view name) noexcept {
+  if (name == "legacy")
+    return ScrollbarPattern::LEGACY;
+  if (name == "frame")
+    return ScrollbarPattern::FRAME;
+  if (name == "minimal")
+    return ScrollbarPattern::MINIMAL;
+  if (name == "ascii")
+    return ScrollbarPattern::ASCII;
+
+  return static_cast<ScrollbarPattern>(-1);
 }
 
 /** @param name Compact decoration preset. @return Known value, or an invalid value checked at mount. */
@@ -803,6 +818,12 @@ struct Access {
    * @return Empty native Overlay recipe; children attach as real edges in source order.
    */
   static Description<Overlay> overlayControl(OverlayOptions options, SizePolicy policy);
+  /** @param scene Owning UI scene. @param node Newly constructed scroll control.
+   * @param settings Effective sparse owning configuration. @return Prepared skin or existing typed error.
+   */
+  static std::expected<void, ManagedError> applyScrollbarSkin(ManagedScene &scene, Node<Widget> node,
+                                                              const ControlSettings &settings);
+
   /** @param options Actual owning placement/input/frame options.
    * @param controller Optional owning shared values; an empty area controller keeps native default creation.
    * @param style Owning manual appearances beneath the existing theme.
@@ -940,6 +961,18 @@ struct Access {
     apply(base.vertical, patch.vertical);
     apply(base.placement, patch.placement);
     apply(base.axis, patch.axis);
+    apply(base.scrollbar.pattern, patch.scrollbar.pattern);
+    apply(base.scrollbar.ends, patch.scrollbar.ends);
+    apply(base.scrollbar.maxGlyphBytes, patch.scrollbar.maxGlyphBytes);
+    apply(base.scrollbar.horizontal.track, patch.scrollbar.horizontal.track);
+    apply(base.scrollbar.horizontal.thumb, patch.scrollbar.horizontal.thumb);
+    apply(base.scrollbar.horizontal.start, patch.scrollbar.horizontal.start);
+    apply(base.scrollbar.horizontal.end, patch.scrollbar.horizontal.end);
+    apply(base.scrollbar.vertical.track, patch.scrollbar.vertical.track);
+    apply(base.scrollbar.vertical.thumb, patch.scrollbar.vertical.thumb);
+    apply(base.scrollbar.vertical.start, patch.scrollbar.vertical.start);
+    apply(base.scrollbar.vertical.end, patch.scrollbar.vertical.end);
+    apply(base.scrollbar.corner, patch.scrollbar.corner);
     apply(base.frame.enabled, patch.frame.enabled);
     apply(base.frame.glyphs, patch.frame.glyphs);
     apply(base.frame.maxPaintCells, patch.frame.maxPaintCells);
@@ -990,6 +1023,18 @@ struct Access {
     apply(base.statusRows, patch.statusRows);
     apply(base.contentPolicy, patch.contentPolicy);
     apply(base.spinnerInterval, patch.spinnerInterval);
+    apply(base.spinnerPreset, patch.spinnerPreset);
+    apply(base.spinnerFrames, patch.spinnerFrames);
+    apply(base.spinnerTick, patch.spinnerTick);
+    apply(base.spinnerDirection, patch.spinnerDirection);
+    apply(base.spinnerAlignment, patch.spinnerAlignment);
+    apply(base.spinnerActive, patch.spinnerActive);
+    apply(base.spinnerReducedMotion, patch.spinnerReducedMotion);
+    apply(base.spinnerLabel, patch.spinnerLabel);
+    apply(base.spinnerMaxFrames, patch.spinnerMaxFrames);
+    apply(base.spinnerMaxFrameBytes, patch.spinnerMaxFrameBytes);
+    apply(base.spinnerMaxFrameCells, patch.spinnerMaxFrameCells);
+
     apply(base.labels.loading, patch.labels.loading);
     apply(base.labels.empty, patch.labels.empty);
     apply(base.labels.error, patch.labels.error);
@@ -1681,6 +1726,51 @@ public:
     }
 
     return {};
+  }
+
+  /** @param origin Public call site retained on failure.
+   * @return Checked start; retains the current frame and arms one fresh interval during ordinary preparation.
+   */
+  std::expected<void, ManagedError> start(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, Spinner>
+  {
+    auto node = this->slot_ ? std::shared_ptr<const Node<T>>(this->slot_, &this->slot_->node) : nullptr;
+    return detail::spinnerActive(target(), std::move(node), true, origin);
+  }
+
+  /** @param origin Public call site retained on failure.
+   * @return Checked immediate token cancellation; failures enter the ordinary scene collector.
+   */
+  std::expected<void, ManagedError> stop(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, Spinner>
+  {
+    auto node = this->slot_ ? std::shared_ptr<const Node<T>>(this->slot_, &this->slot_->node) : nullptr;
+    return detail::spinnerActive(target(), std::move(node), false, origin);
+  }
+
+  /** @param value Literal UTF-8 label bytes copied inside the checked allocation boundary.
+   * @param origin Public command call site.
+   * @return Checked replacement; successful changes reset frame zero and restart its interval.
+   */
+  std::expected<void, ManagedError> label(std::string_view value,
+                                          std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, Spinner>
+  {
+    auto node = this->slot_ ? std::shared_ptr<const Node<T>>(this->slot_, &this->slot_->node) : nullptr;
+    return detail::spinnerLabel(target(), std::move(node), value, origin);
+  }
+
+  /** @param value Owning literal/format/resource expression, borrowed only for this synchronous call.
+   * @param resolver Explicit synchronous resolver, as with Ref::text; no global catalog is introduced.
+   * @param origin Public command call site retained on failure.
+   * @return Checked staged replacement with original resource/text failures collected once.
+   */
+  std::expected<void, ManagedError> label(const TextValue &value, const TextResolver &resolver = {},
+                                          std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, Spinner>
+  {
+    auto node = this->slot_ ? std::shared_ptr<const Node<T>>(this->slot_, &this->slot_->node) : nullptr;
+    return detail::spinnerLabel(target(), std::move(node), value, resolver, origin);
   }
 
   /** @param origin Operation site. @return Pure checked scope entry; already open is a no-op. */
@@ -2625,8 +2715,8 @@ public:
    * @return Consuming native primitive recipe; absent settings remain unchanged.
    */
   Description &&glyphs(PrimitiveGlyphs value) &&
-    requires(std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, ScrollArea> ||
-             std::same_as<T, ScrollBar>)
+    requires(std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, Spinner> ||
+             std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
   {
     return std::move(*this).scalarSettings({.glyphs = value});
   }
@@ -2635,8 +2725,8 @@ public:
    * @return Consuming native Border/Gauge/scroll recipe with a sparse final override.
    */
   Description &&maxPaintCells(std::size_t cells) &&
-    requires(std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, ScrollArea> ||
-             std::same_as<T, ScrollBar>)
+    requires(std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, Spinner> ||
+             std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
   {
     return std::move(*this).scalarSettings({.maxPaintCells = cells});
   }
@@ -2811,6 +2901,39 @@ public:
     requires std::same_as<T, ScrollArea>
   {
     return std::move(*this).placement(ScrollPlacement::ON_FRAME);
+  }
+
+  /** @param pattern Compact legacy/frame/minimal/ascii preset, copied as a typed value.
+   * @return Consuming scroll recipe; unknown names fail at mount before first paint.
+   */
+  Description &&scrollbar(std::string_view pattern) &&
+    requires(std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+  {
+    return std::move(*this).scrollbar(detail::scrollbarPattern(pattern));
+  }
+
+  /** @param pattern Typed preset; omitted skin leaves retain context defaults.
+   * @return Consuming scroll recipe; invalid enum values fail before first paint.
+   */
+  Description &&scrollbar(ScrollbarPattern pattern) &&
+    requires(std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+  {
+    return std::move(*this).scalarSettings({.scrollbar = {.pattern = pattern}});
+  }
+
+  /** @param skin Owning source copied into sparse configuration; glyphs are validated at mount.
+   * @return Consuming scroll recipe. Existing geometry, offsets and input actions are preserved.
+   * Construction/capture may throw on allocation, as for other owning recipe settings.
+   */
+  Description &&scrollbar(ScrollbarSkin skin) &&
+    requires(std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+  {
+    return std::move(*this).scalarSettings({.scrollbar = {.pattern = skin.pattern,
+                                                          .ends = skin.ends,
+                                                          .maxGlyphBytes = skin.maxGlyphBytes,
+                                                          .horizontal = skin.horizontal,
+                                                          .vertical = skin.vertical,
+                                                          .corner = skin.corner}});
   }
 
   /** @param enabled True creates a missing default one-cell frame; false removes the effective frame.
@@ -3238,6 +3361,114 @@ public:
                                                      .paddingBottom = insets.bottom}});
   }
 
+  /** @param value Owning/finite Spinner preset setting, checked at preparation.
+   * @return Consuming exact Spinner recipe; previous unrelated settings are preserved.
+   */
+  Description &&preset(SpinnerPreset value) &&
+    requires std::same_as<T, Spinner>
+  {
+    return std::move(*this).scalarSettings({.spinnerPreset = value});
+  }
+
+  /** @param value Owning/finite Spinner frames setting, checked at preparation.
+   * @return Consuming exact Spinner recipe; previous unrelated settings are preserved.
+   */
+  Description &&frames(std::string_view value) &&
+    requires std::same_as<T, Spinner>
+  {
+    return std::move(*this).scalarSettings({.spinnerFrames = std::string(value)});
+  }
+
+  /** @param value Owning/finite Spinner interval setting, checked at preparation.
+   * @return Consuming exact Spinner recipe; previous unrelated settings are preserved.
+   */
+  Description &&interval(SchedulerTime value) &&
+    requires std::same_as<T, Spinner>
+  {
+    return std::move(*this).scalarSettings({.spinnerTick = value});
+  }
+
+  /** @param value Owning/finite Spinner direction setting, checked at preparation.
+   * @return Consuming exact Spinner recipe; previous unrelated settings are preserved.
+   */
+  Description &&direction(SpinnerDirection value) &&
+    requires std::same_as<T, Spinner>
+  {
+    return std::move(*this).scalarSettings({.spinnerDirection = value});
+  }
+
+  /** @param value Owning/finite Spinner alignment setting, checked at preparation.
+   * @return Consuming exact Spinner recipe; previous unrelated settings are preserved.
+   */
+  Description &&alignment(LayoutAlign value) &&
+    requires std::same_as<T, Spinner>
+  {
+    return std::move(*this).scalarSettings({.spinnerAlignment = value});
+  }
+
+  /** @param value Owning/finite Spinner active setting, checked at preparation.
+   * @return Consuming exact Spinner recipe; previous unrelated settings are preserved.
+   */
+  Description &&active(bool value) &&
+    requires std::same_as<T, Spinner>
+  {
+    return std::move(*this).scalarSettings({.spinnerActive = value});
+  }
+
+  /** @param value Owning/finite Spinner reducedMotion setting, checked at preparation.
+   * @return Consuming exact Spinner recipe; previous unrelated settings are preserved.
+   */
+  Description &&reducedMotion(bool value) &&
+    requires std::same_as<T, Spinner>
+  {
+    return std::move(*this).scalarSettings({.spinnerReducedMotion = value});
+  }
+
+  /** @param value Owning/finite Spinner label setting, checked at preparation.
+   * @return Consuming exact Spinner recipe; previous unrelated settings are preserved.
+   */
+  Description &&label(std::string_view value) &&
+    requires std::same_as<T, Spinner>
+  {
+    return std::move(*this).label(TextValue(value));
+  }
+
+  /** @param value Owning literal/format/resource expression resolved at construction.
+   * @return Consuming exact Spinner recipe with a staged label.
+   */
+  Description &&label(TextValue value) &&
+    requires std::same_as<T, Spinner>
+  {
+    return std::move(*this).scalarSettings({.spinnerLabel = std::move(value)});
+  }
+
+  /** @param value Owning/finite Spinner maxFrames setting, checked at preparation.
+   * @return Consuming exact Spinner recipe; previous unrelated settings are preserved.
+   */
+  Description &&maxFrames(std::size_t value) &&
+    requires std::same_as<T, Spinner>
+  {
+    return std::move(*this).scalarSettings({.spinnerMaxFrames = value});
+  }
+
+  /** @param value Owning/finite Spinner maxFrameBytes setting, checked at preparation.
+   * @return Consuming exact Spinner recipe; previous unrelated settings are preserved.
+   */
+  Description &&maxFrameBytes(std::size_t value) &&
+    requires std::same_as<T, Spinner>
+  {
+    return std::move(*this).scalarSettings({.spinnerMaxFrameBytes = value});
+  }
+
+  /** @param value Owning/finite Spinner maxFrameCells setting, checked at preparation.
+   * @return Consuming exact Spinner recipe; previous unrelated settings are preserved.
+   */
+  Description &&maxFrameCells(std::size_t value) &&
+    requires std::same_as<T, Spinner>
+  {
+    return std::move(*this).scalarSettings({.spinnerMaxFrameCells = value});
+  }
+
   /** @param align Child alignment across ordinary Overlay columns.
    * @return Consuming exact Overlay recipe; containing Grid alignment stays independent.
    */
@@ -3359,6 +3590,15 @@ public:
   template <class Callback = detail::QuitCommand>
     requires(std::same_as<T, Button> && portals::detail::ManagedAction<Callback, ClickEvent>)
   Description &&onClick(Callback callback) && {
+    if constexpr (std::same_as<Callback, ActionRef>) {
+      return std::move(*this).setup([declaration = detail::retainAction(callback), callback = std::move(callback)](
+                                      ManagedScene &scene, Node<T> node) mutable {
+        (void)declaration;
+
+        return scene.onClick(node, std::move(callback));
+      });
+    }
+
     return std::move(*this).setup([callback = std::move(callback)](ManagedScene &scene, Node<T> node) mutable {
       return scene.onClick(node, std::move(callback));
     });
@@ -3949,6 +4189,17 @@ private:
         patch.origins = previous.origins;
 
         const std::array fields{
+          std::pair<std::string_view, bool>{"preset", patch.spinnerPreset.has_value()},
+          std::pair<std::string_view, bool>{"frames", patch.spinnerFrames.has_value()},
+          std::pair<std::string_view, bool>{"interval", patch.spinnerTick.has_value()},
+          std::pair<std::string_view, bool>{"direction", patch.spinnerDirection.has_value()},
+          std::pair<std::string_view, bool>{"alignment", patch.spinnerAlignment.has_value()},
+          std::pair<std::string_view, bool>{"active", patch.spinnerActive.has_value()},
+          std::pair<std::string_view, bool>{"reducedMotion", patch.spinnerReducedMotion.has_value()},
+          std::pair<std::string_view, bool>{"label", patch.spinnerLabel.has_value()},
+          std::pair<std::string_view, bool>{"maxFrames", patch.spinnerMaxFrames.has_value()},
+          std::pair<std::string_view, bool>{"maxFrameBytes", patch.spinnerMaxFrameBytes.has_value()},
+          std::pair<std::string_view, bool>{"maxFrameCells", patch.spinnerMaxFrameCells.has_value()},
           std::pair<std::string_view, bool>{"chrome", patch.chrome.has_value()},
           std::pair<std::string_view, bool>{"glyphs", patch.glyphs.has_value()},
           std::pair<std::string_view, bool>{"maxPaintCells", patch.maxPaintCells.has_value()},
@@ -3966,6 +4217,18 @@ private:
           std::pair<std::string_view, bool>{"vertical", patch.vertical.has_value()},
           std::pair<std::string_view, bool>{"placement", patch.placement.has_value()},
           std::pair<std::string_view, bool>{"axis", patch.axis.has_value()},
+          std::pair<std::string_view, bool>{"scrollbar.pattern", patch.scrollbar.pattern.has_value()},
+          std::pair<std::string_view, bool>{"scrollbar.ends", patch.scrollbar.ends.has_value()},
+          std::pair<std::string_view, bool>{"scrollbar.maxGlyphBytes", patch.scrollbar.maxGlyphBytes.has_value()},
+          std::pair<std::string_view, bool>{"scrollbar.horizontal.track", patch.scrollbar.horizontal.track.has_value()},
+          std::pair<std::string_view, bool>{"scrollbar.horizontal.thumb", patch.scrollbar.horizontal.thumb.has_value()},
+          std::pair<std::string_view, bool>{"scrollbar.horizontal.start", patch.scrollbar.horizontal.start.has_value()},
+          std::pair<std::string_view, bool>{"scrollbar.horizontal.end", patch.scrollbar.horizontal.end.has_value()},
+          std::pair<std::string_view, bool>{"scrollbar.vertical.track", patch.scrollbar.vertical.track.has_value()},
+          std::pair<std::string_view, bool>{"scrollbar.vertical.thumb", patch.scrollbar.vertical.thumb.has_value()},
+          std::pair<std::string_view, bool>{"scrollbar.vertical.start", patch.scrollbar.vertical.start.has_value()},
+          std::pair<std::string_view, bool>{"scrollbar.vertical.end", patch.scrollbar.vertical.end.has_value()},
+          std::pair<std::string_view, bool>{"scrollbar.corner", patch.scrollbar.corner.has_value()},
           std::pair<std::string_view, bool>{"frame.enabled", patch.frame.enabled.has_value()},
           std::pair<std::string_view, bool>{"frame.glyphs", patch.frame.glyphs.has_value()},
           std::pair<std::string_view, bool>{"frame.maxPaintCells", patch.frame.maxPaintCells.has_value()},
@@ -4428,7 +4691,7 @@ private:
           ? ControlContext(context.controls.limits())
           : context.controls;
 
-      if constexpr (std::same_as<T, Border> || std::same_as<T, Gauge>) {
+      if constexpr (std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, Spinner>) {
         auto installed = detail::ControlContextAccess::installPrimitiveSchema(controls, *state.controlType);
 
         if (!installed) {
@@ -4508,7 +4771,7 @@ private:
       if (effective->base != *state.controlType) {
         return std::unexpected(detail::controlContextError({ControlContextErrorCode::INVALID_VALUE, {}}, parent));
       }
-      if constexpr (std::same_as<T, Border> || std::same_as<T, Gauge>) {
+      if constexpr (std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, Spinner>) {
         if (effective->factoryKind != detail::ControlFactoryKind::PRIMITIVE_FALLBACK) {
           return std::unexpected(detail::controlContextError({ControlContextErrorCode::INVALID_VALUE, {}}, parent));
         }
@@ -5931,6 +6194,29 @@ inline Description<Button> button(std::string_view text, Callback action, Contro
     });
 }
 
+/** @tparam Action Deduced shared command reference; braced captions use the text overloads.
+ * @param action Weak shared command; its owner is attached automatically during checked mount.
+ * @param style Manual appearance. @param policy Layout constraints.
+ * @return Ordinary button whose caption/state and callback share the action identity.
+ */
+template <class Action>
+  requires std::same_as<Action, ActionRef>
+inline Description<Button> button(Action action, ControlStyle style = {}, SizePolicy policy = {}) {
+  return button(TextValue(""), style, policy).onClick(std::move(action));
+}
+
+/** @tparam Action Deduced shared command reference; braced captions use the text overloads.
+ * @param reference Empty observing slot published after the whole mount succeeds.
+ * @param action Shared command. @param style Manual appearance. @param policy Layout constraints.
+ * @return Action button with the existing transactional reference publication.
+ */
+template <class Action>
+  requires std::same_as<Action, ActionRef>
+inline Description<Button> button(Ref<Button> reference, Action action, ControlStyle style = {},
+                                  SizePolicy policy = {}) {
+  return button(std::move(action), style, policy).reference(std::move(reference));
+}
+
 /** @param text UTF-8 caption copied immediately.
  * @param model Observing managed state from the scene receiving this recipe.
  * @param changed Optional callback after the standard commit; cannot undo the commit.
@@ -7214,7 +7500,7 @@ std::expected<Node<T>, ManagedError> mount(ManagedScene &scene, Description<T> &
   }
 
   if (detail::ControlContextAccess::hasUserConfiguration(controls)) {
-    for (const auto name : {"Border", "Gauge"}) {
+    for (const auto name : {"Border", "Gauge", "Spinner"}) {
       auto installed = detail::ControlContextAccess::installPrimitiveSchema(controls, name);
 
       if (!installed) {
@@ -7798,8 +8084,8 @@ struct PrimitiveDecorationModifier {
    * @return Recipe staging the same settings as the supported compact methods.
    */
   template <class T>
-    requires(std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, ScrollArea> ||
-             std::same_as<T, ScrollBar>)
+    requires(std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, Spinner> ||
+             std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
   friend Description<T> operator|(Description<T> &&description, PrimitiveDecorationModifier modifier) {
     if (modifier.glyphs) {
       (void)std::move(description).glyphs(*modifier.glyphs);
@@ -8420,6 +8706,35 @@ inline ReadOnlyModifier readOnly(bool enabled = true) {
   return {enabled};
 }
 
+/** @brief Owning skin modifier shared by ordinary ScrollArea and ScrollBar. */
+struct ScrollbarModifier {
+  ScrollbarSkin skin;                       ///< Owned glyph and preparation policy.
+  std::optional<ScrollbarPattern> preset{}; ///< Preset-only stage preserves omitted context leaves.
+
+  /** @tparam T Exactly ScrollArea or ScrollBar. @param description Consumed recipe.
+   * @param modifier Owning skin. @return Recipe with equivalent method configuration.
+   */
+  template <class T>
+    requires(std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+  friend Description<T> operator|(Description<T> &&description, ScrollbarModifier modifier) {
+    if (modifier.preset) {
+      return std::move(description).scrollbar(*modifier.preset);
+    }
+
+    return std::move(description).scrollbar(std::move(modifier.skin));
+  }
+};
+
+/** @param pattern Borrowed legacy/frame/minimal/ascii preset. @return Owning scroll skin stage. */
+inline ScrollbarModifier scrollbar(std::string_view pattern) {
+  return {{}, detail::scrollbarPattern(pattern)};
+}
+
+/** @param skin Owning custom glyph source. @return Owning scroll skin stage, checked at mount. */
+inline ScrollbarModifier scrollbar(ScrollbarSkin skin) {
+  return {std::move(skin)};
+}
+
 /** @brief Owning ScrollArea-only placement/frame pipe stage; frame leaves never enable a frame implicitly. */
 struct ScrollAreaModifier {
   ControlSettings settings; ///< Sparse native area placement and existing one-cell frame leaves.
@@ -8647,11 +8962,39 @@ constexpr SizeModifier flex(std::uint32_t weight = 1) {
   return {{detail::SizeDimension::FLEX, 0, weight}};
 }
 
+inline std::expected<void, ManagedError> detail::Access::applyScrollbarSkin(ManagedScene &scene, Node<Widget> node,
+                                                                            const ControlSettings &settings) {
+  if (!hasScrollbarSettings(settings.scrollbar)) {
+    return {};
+  }
+
+  try {
+    const auto &source = settings.scrollbar;
+    ScrollbarSkin skin{.pattern = source.pattern.value_or(ScrollbarPattern::LEGACY),
+                       .ends = source.ends.value_or(false),
+                       .maxGlyphBytes = source.maxGlyphBytes.value_or(DEFAULT_SCROLLBAR_GLYPH_BYTES),
+                       .horizontal = source.horizontal,
+                       .vertical = source.vertical,
+                       .corner = source.corner};
+    auto applied = setScrollbarSkin(scene.app_.tree(), node, skin);
+
+    return applied ? std::expected<void, ManagedError>{} : std::unexpected(error(node, applied.error()));
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(error(node, TreeError::NO_MEMORY));
+  }
+}
+
 inline Description<ScrollArea> detail::Access::scrollAreaControl(ScrollAreaOptions options,
                                                                  std::shared_ptr<ScrollController> controller,
                                                                  ControlStyle style) {
   auto description = cold<ScrollArea>([options, controller = std::move(controller),
                                        style](ManagedScene &scene, Node<Widget> parent, MountContext &context) {
+    const auto finish = [&](std::expected<Node<ScrollArea>, ManagedError> node) {
+      if (!node)
+        return node;
+      auto applied = applyScrollbarSkin(scene, *node, *context.controlSettings);
+      return applied ? node : std::expected<Node<ScrollArea>, ManagedError>(std::unexpected(applied.error()));
+    };
     auto baseOptions = options;
 
     if (context.frameOptions) {
@@ -8692,14 +9035,14 @@ inline Description<ScrollArea> detail::Access::scrollAreaControl(ScrollAreaOptio
       }
 
       if (*framed) {
-        return scene.emplace<ScrollArea>(parent, controller, scene.widthPolicy(), *effective, style, SizePolicy{},
-                                         **framed, std::in_place);
+        return finish(scene.emplace<ScrollArea>(parent, controller, scene.widthPolicy(), *effective, style,
+                                                SizePolicy{}, **framed, std::in_place));
       }
 
       effective->frame.reset();
     }
 
-    return scene.emplace<ScrollArea>(parent, controller, scene.widthPolicy(), *effective, style);
+    return finish(scene.emplace<ScrollArea>(parent, controller, scene.widthPolicy(), *effective, style));
   });
 
   return configuredControl(std::move(description), "ScrollArea");
@@ -8726,7 +9069,14 @@ inline Description<ScrollBar> detail::Access::scrollBarControl(std::shared_ptr<S
       return std::unexpected(error(parent, TreeError::INVALID_ARGUMENT));
     }
 
-    return scene.scrollBar(parent, controller, effectiveAxis, *effective, style, writer);
+    auto node = scene.scrollBar(parent, controller, effectiveAxis, *effective, style, writer);
+
+    if (!node)
+      return node;
+
+    auto applied = applyScrollbarSkin(scene, *node, *context.controlSettings);
+
+    return applied ? node : std::expected<Node<ScrollBar>, ManagedError>(std::unexpected(applied.error()));
   });
 
   return configuredControl(std::move(description), "ScrollBar");
@@ -9059,6 +9409,164 @@ inline ObservedFramedModifier framed(Ref<Border> reference, std::string_view pat
   return {std::move(reference), framed(pattern, title)};
 }
 
+/** @brief Owning finite Spinner stage; it borrows no widget or scheduler. */
+struct SpinnerModifier {
+  ControlSettings patch; ///< Sparse checked indicator configuration.
+
+  /** @param description Consumed exact Spinner recipe.
+   * @param modifier Owning sparse frame/animation patch.
+   * @return Recipe using the same checked methods as fluent spelling.
+   */
+  friend Description<Spinner> operator|(Description<Spinner> &&description, SpinnerModifier modifier) {
+    if (modifier.patch.spinnerPreset) {
+      (void)std::move(description).preset(*modifier.patch.spinnerPreset);
+    }
+    if (modifier.patch.spinnerFrames) {
+      (void)std::move(description).frames(*modifier.patch.spinnerFrames);
+    }
+    if (modifier.patch.spinnerTick) {
+      (void)std::move(description).interval(*modifier.patch.spinnerTick);
+    }
+    if (modifier.patch.spinnerDirection) {
+      (void)std::move(description).direction(*modifier.patch.spinnerDirection);
+    }
+    if (modifier.patch.spinnerAlignment) {
+      (void)std::move(description).alignment(*modifier.patch.spinnerAlignment);
+    }
+    if (modifier.patch.spinnerActive) {
+      (void)std::move(description).active(*modifier.patch.spinnerActive);
+    }
+    if (modifier.patch.spinnerReducedMotion) {
+      (void)std::move(description).reducedMotion(*modifier.patch.spinnerReducedMotion);
+    }
+    if (modifier.patch.spinnerLabel) {
+      (void)std::move(description).label(*modifier.patch.spinnerLabel);
+    }
+    if (modifier.patch.spinnerMaxFrames) {
+      (void)std::move(description).maxFrames(*modifier.patch.spinnerMaxFrames);
+    }
+    if (modifier.patch.spinnerMaxFrameBytes) {
+      (void)std::move(description).maxFrameBytes(*modifier.patch.spinnerMaxFrameBytes);
+    }
+    if (modifier.patch.spinnerMaxFrameCells) {
+      (void)std::move(description).maxFrameCells(*modifier.patch.spinnerMaxFrameCells);
+    }
+    return std::move(description);
+  }
+};
+
+/** @param value Finite owning Spinner preset setting, checked at preparation.
+ * @return Exact Spinner configuration stage.
+ */
+inline SpinnerModifier preset(SpinnerPreset value) {
+  return {{.spinnerPreset = value}};
+}
+
+/** @param value Finite owning Spinner frames setting, checked at preparation.
+ * @return Exact Spinner configuration stage.
+ */
+inline SpinnerModifier frames(std::string_view value) {
+  return {{.spinnerFrames = std::string(value)}};
+}
+
+/** @param value Finite owning Spinner interval setting, checked at preparation.
+ * @return Exact Spinner configuration stage.
+ */
+inline SpinnerModifier interval(SchedulerTime value) {
+  return {{.spinnerTick = value}};
+}
+
+/** @param value Finite owning Spinner direction setting, checked at preparation.
+ * @return Exact Spinner configuration stage.
+ */
+inline SpinnerModifier direction(SpinnerDirection value) {
+  return {{.spinnerDirection = value}};
+}
+
+/** @param value Finite owning Spinner alignment setting, checked at preparation.
+ * @return Exact Spinner configuration stage.
+ */
+inline SpinnerModifier alignment(LayoutAlign value) {
+  return {{.spinnerAlignment = value}};
+}
+
+/** @param value Finite owning Spinner active setting, checked at preparation.
+ * @return Exact Spinner configuration stage.
+ */
+inline SpinnerModifier active(bool value) {
+  return {{.spinnerActive = value}};
+}
+
+/** @param value Finite owning Spinner reducedMotion setting, checked at preparation.
+ * @return Exact Spinner configuration stage.
+ */
+inline SpinnerModifier reducedMotion(bool value) {
+  return {{.spinnerReducedMotion = value}};
+}
+
+/** @param value Finite owning Spinner label setting, checked at preparation.
+ * @return Exact Spinner configuration stage.
+ */
+inline SpinnerModifier spinnerLabel(TextValue value) {
+  return {{.spinnerLabel = std::move(value)}};
+}
+
+/** @param value UTF-8 label bytes copied by this stage.
+ * @return Exact Spinner label stage; ui::label remains the Label factory.
+ */
+inline SpinnerModifier spinnerLabel(std::string_view value) {
+  return spinnerLabel(TextValue(value));
+}
+
+/** @param value Finite owning Spinner maxFrames setting, checked at preparation.
+ * @return Exact Spinner configuration stage.
+ */
+inline SpinnerModifier maxFrames(std::size_t value) {
+  return {{.spinnerMaxFrames = value}};
+}
+
+/** @param value Finite owning Spinner maxFrameBytes setting, checked at preparation.
+ * @return Exact Spinner configuration stage.
+ */
+inline SpinnerModifier maxFrameBytes(std::size_t value) {
+  return {{.spinnerMaxFrameBytes = value}};
+}
+
+/** @param value Finite owning Spinner maxFrameCells setting, checked at preparation.
+ * @return Exact Spinner configuration stage.
+ */
+inline SpinnerModifier maxFrameCells(std::size_t value) {
+  return {{.spinnerMaxFrameCells = value}};
+}
+
+/** @param options Owning finite single-row frames and animation options.
+ * @param style Manual active/dim appearances beneath themes.
+ * @param policy Existing owning size constraints.
+ * @param resolver Optional synchronous label localization adapter, retained only until mounting.
+ * @return Single-use retained indicator recipe; animation uses the receiving scene's scheduler.
+ */
+inline Description<Spinner> spinner(SpinnerOptions options = {}, ControlStyle style = {}, SizePolicy policy = {},
+                                    TextResolver resolver = {}) {
+  auto description =
+    detail::Access::cold<Spinner>([options = std::move(options), style, policy, resolver = std::move(resolver)](
+                                    ManagedScene &scene, Node<Widget> parent, detail::MountContext &context) {
+      auto effective = detail::controlSpinnerOptions(*context.controlSettings, options);
+      return scene.spinner(parent, std::move(effective), style, policy, resolver);
+    });
+  return detail::Access::configuredControl(std::move(description), "Spinner");
+}
+
+/** @param reference Empty shared observer, published only after complete mount.
+ * @param options Owning finite animation configuration.
+ * @param style Manual active/dim appearances beneath theme rules.
+ * @param policy Existing size constraints.
+ * @return Observed retained indicator recipe using the existing scheduler.
+ */
+inline Description<Spinner> spinner(Ref<Spinner> reference, SpinnerOptions options = {}, ControlStyle style = {},
+                                    SizePolicy policy = {}) {
+  return spinner(std::move(options), style, policy).reference(std::move(reference));
+}
+
 /** @param value Finite value in the inclusive configured range; checked at mount.
  * @param options Owning finite bounds, intrinsic width, glyph mode and allocated-area paint cap.
  * @param style Owning manual appearances beneath theme declarations.
@@ -9329,7 +9837,7 @@ Scene scene(Factory factory, SceneOptions options = {}, std::source_location ori
       }
 
       if (detail::ControlContextAccess::hasUserConfiguration(effectiveControls)) {
-        for (const auto name : {"Border", "Gauge"}) {
+        for (const auto name : {"Border", "Gauge", "Spinner"}) {
           installed = detail::ControlContextAccess::installPrimitiveSchema(effectiveControls, name);
 
           if (!installed) {
@@ -9726,7 +10234,8 @@ auto configure(Callback callback, std::source_location origin = std::source_loca
 template <class Callback = detail::QuitCommand>
   requires portals::detail::ManagedAction<Callback, KeyEvent>
 auto onKey(KeyEvent chord, Callback callback, std::source_location origin = std::source_location::current()) {
-  return detail::SceneStage{[chord, callback = std::move(callback), origin](Scene &owner) mutable {
+  return detail::SceneStage{[chord, declaration = detail::retainAction(callback), callback = std::move(callback), origin](Scene &owner) mutable {
+      (void)declaration;
     detail::SceneAccess::onKey(owner, chord, callback, origin);
   }};
 }
@@ -9854,8 +10363,9 @@ template <class Callback = detail::QuitCommand>
   requires portals::detail::ManagedAction<Callback, KeyEvent>
 auto onKey(KeySelection selection, KeyInfo info, Callback callback,
            std::source_location origin = std::source_location::current()) {
-  return detail::SceneStage{[selection = std::move(selection), info = std::move(info), callback = std::move(callback),
+  return detail::SceneStage{[selection = std::move(selection), info = std::move(info), declaration = detail::retainAction(callback), callback = std::move(callback),
                              origin](Scene &owner) mutable {
+      (void)declaration;
     owner.onKey(std::move(selection), std::move(info), std::move(callback), origin);
   }};
 }
@@ -9878,7 +10388,8 @@ template <class Callback = detail::QuitCommand>
   requires portals::detail::ManagedAction<Callback, KeyEvent>
 auto onKey(KeySelection selection, Callback callback, std::source_location origin = std::source_location::current()) {
   return detail::SceneStage{
-    [selection = std::move(selection), callback = std::move(callback), origin](Scene &owner) mutable {
+    [selection = std::move(selection), declaration = detail::retainAction(callback), callback = std::move(callback), origin](Scene &owner) mutable {
+      (void)declaration;
       detail::SceneAccess::onSelection(owner, selection, callback, origin);
     }};
 }
@@ -9901,7 +10412,8 @@ auto onKey(Source &&source, Callback callback, std::source_location origin = std
     portals::detail::retainShortcut(portals::detail::prepareShortcut(std::forward<decltype(source)>(source), {}));
 
   return detail::SceneStage{
-    [shortcut = std::move(shortcut), callback = std::move(callback), origin](Scene &owner) mutable {
+    [shortcut = std::move(shortcut), declaration = detail::retainAction(callback), callback = std::move(callback), origin](Scene &owner) mutable {
+      (void)declaration;
       detail::SceneAccess::onShortcut(owner, shortcut, callback, {}, {}, origin);
     }};
 }
@@ -9923,7 +10435,8 @@ auto onKey(Source &&source, Callback callback, ShortcutBehavior behavior, Shortc
     portals::detail::retainShortcut(portals::detail::prepareShortcut(std::forward<decltype(source)>(source), options));
 
   return detail::SceneStage{
-    [shortcut = std::move(shortcut), callback = std::move(callback), behavior, options, origin](Scene &owner) mutable {
+    [shortcut = std::move(shortcut), declaration = detail::retainAction(callback), callback = std::move(callback), behavior, options, origin](Scene &owner) mutable {
+      (void)declaration;
       detail::SceneAccess::onShortcut(owner, shortcut, callback, behavior, options, origin);
     }};
 }
@@ -9942,7 +10455,8 @@ auto onKey(std::initializer_list<key::Chord> source, Callback callback,
     portals::detail::retainShortcut(portals::detail::prepareShortcut(std::forward<decltype(source)>(source), {}));
 
   return detail::SceneStage{
-    [shortcut = std::move(shortcut), callback = std::move(callback), origin](Scene &owner) mutable {
+    [shortcut = std::move(shortcut), declaration = detail::retainAction(callback), callback = std::move(callback), origin](Scene &owner) mutable {
+      (void)declaration;
       detail::SceneAccess::onShortcut(owner, shortcut, callback, {}, {}, origin);
     }};
 }
@@ -9963,7 +10477,8 @@ auto onKey(std::initializer_list<key::Chord> source, Callback callback, Shortcut
     portals::detail::retainShortcut(portals::detail::prepareShortcut(std::forward<decltype(source)>(source), options));
 
   return detail::SceneStage{
-    [shortcut = std::move(shortcut), callback = std::move(callback), behavior, options, origin](Scene &owner) mutable {
+    [shortcut = std::move(shortcut), declaration = detail::retainAction(callback), callback = std::move(callback), behavior, options, origin](Scene &owner) mutable {
+      (void)declaration;
       detail::SceneAccess::onShortcut(owner, shortcut, callback, behavior, options, origin);
     }};
 }

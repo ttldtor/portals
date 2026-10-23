@@ -41,7 +41,27 @@ inline constexpr std::array<std::string_view, PSS_PROPERTY_COUNT> PSS_PROPERTY_N
                                                                                      "frame-ends-background",
                                                                                      "frame-ends-bold",
                                                                                      "frame-ends-italic",
-                                                                                     "frame-ends-underline"};
+                                                                                     "frame-ends-underline",
+                                                                                     "scrollbar-track-foreground",
+                                                                                     "scrollbar-track-background",
+                                                                                     "scrollbar-track-bold",
+                                                                                     "scrollbar-track-italic",
+                                                                                     "scrollbar-track-underline",
+                                                                                     "scrollbar-thumb-foreground",
+                                                                                     "scrollbar-thumb-background",
+                                                                                     "scrollbar-thumb-bold",
+                                                                                     "scrollbar-thumb-italic",
+                                                                                     "scrollbar-thumb-underline",
+                                                                                     "scrollbar-ends-foreground",
+                                                                                     "scrollbar-ends-background",
+                                                                                     "scrollbar-ends-bold",
+                                                                                     "scrollbar-ends-italic",
+                                                                                     "scrollbar-ends-underline",
+                                                                                     "scrollbar-corner-foreground",
+                                                                                     "scrollbar-corner-background",
+                                                                                     "scrollbar-corner-bold",
+                                                                                     "scrollbar-corner-italic",
+                                                                                     "scrollbar-corner-underline"};
 /** @brief Pseudo-state names in the existing StyleState order after ANY. */
 inline constexpr std::array<std::string_view, 6> PSS_STATE_NAMES{"normal",   "focused", "disabled",
                                                                  "selected", "header",  "caret"};
@@ -558,7 +578,11 @@ private:
     if (property == PssProperty::FOREGROUND || property == PssProperty::BACKGROUND ||
         property == PssProperty::FRAME_LINE_FOREGROUND || property == PssProperty::FRAME_LINE_BACKGROUND ||
         property == PssProperty::FRAME_TITLE_FOREGROUND || property == PssProperty::FRAME_TITLE_BACKGROUND ||
-        property == PssProperty::FRAME_ENDS_FOREGROUND || property == PssProperty::FRAME_ENDS_BACKGROUND) {
+        property == PssProperty::FRAME_ENDS_FOREGROUND || property == PssProperty::FRAME_ENDS_BACKGROUND ||
+        property == PssProperty::SCROLLBAR_TRACK_FOREGROUND || property == PssProperty::SCROLLBAR_TRACK_BACKGROUND ||
+        property == PssProperty::SCROLLBAR_THUMB_FOREGROUND || property == PssProperty::SCROLLBAR_THUMB_BACKGROUND ||
+        property == PssProperty::SCROLLBAR_ENDS_FOREGROUND || property == PssProperty::SCROLLBAR_ENDS_BACKGROUND ||
+        property == PssProperty::SCROLLBAR_CORNER_FOREGROUND || property == PssProperty::SCROLLBAR_CORNER_BACKGROUND) {
       const auto color = parseColor(text);
 
       if (!color) {
@@ -687,6 +711,86 @@ constexpr void assignPssDeclaration(PssProperty property, PssValue value, StyleD
     break;
   case PssProperty::FRAME_ENDS_UNDERLINE:
     destination.frameEnds.underline = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_TRACK_FOREGROUND:
+    destination.scrollbarTrack.foreground = value.color;
+
+    break;
+  case PssProperty::SCROLLBAR_TRACK_BACKGROUND:
+    destination.scrollbarTrack.background = value.color;
+
+    break;
+  case PssProperty::SCROLLBAR_TRACK_BOLD:
+    destination.scrollbarTrack.bold = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_TRACK_ITALIC:
+    destination.scrollbarTrack.italic = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_TRACK_UNDERLINE:
+    destination.scrollbarTrack.underline = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_FOREGROUND:
+    destination.scrollbarThumb.foreground = value.color;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_BACKGROUND:
+    destination.scrollbarThumb.background = value.color;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_BOLD:
+    destination.scrollbarThumb.bold = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_ITALIC:
+    destination.scrollbarThumb.italic = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_UNDERLINE:
+    destination.scrollbarThumb.underline = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_ENDS_FOREGROUND:
+    destination.scrollbarEnds.foreground = value.color;
+
+    break;
+  case PssProperty::SCROLLBAR_ENDS_BACKGROUND:
+    destination.scrollbarEnds.background = value.color;
+
+    break;
+  case PssProperty::SCROLLBAR_ENDS_BOLD:
+    destination.scrollbarEnds.bold = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_ENDS_ITALIC:
+    destination.scrollbarEnds.italic = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_ENDS_UNDERLINE:
+    destination.scrollbarEnds.underline = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_CORNER_FOREGROUND:
+    destination.scrollbarCorner.foreground = value.color;
+
+    break;
+  case PssProperty::SCROLLBAR_CORNER_BACKGROUND:
+    destination.scrollbarCorner.background = value.color;
+
+    break;
+  case PssProperty::SCROLLBAR_CORNER_BOLD:
+    destination.scrollbarCorner.bold = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_CORNER_ITALIC:
+    destination.scrollbarCorner.italic = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_CORNER_UNDERLINE:
+    destination.scrollbarCorner.underline = value.boolean;
 
     break;
   case PssProperty::MIN_WIDTH:

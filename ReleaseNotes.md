@@ -7,11 +7,29 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Scrollbars support frame-matched, minimal, ASCII and owning custom glyph skins,
+  with independently styled track, thumb, ends and corner parts through PSS.
+  Existing geometry and input behavior remain unchanged.
+
+- Complete protected-password, checkbox, dialog, notification and loading-indicator
+  examples pair C++ recipes with loaded scenes. Dashboard keyboard bindings use
+  declarative scene modifiers while preserving key-repeat behavior.
+
 - Frame titles support compact spaced, square, angle and round decorations,
   with owning custom ends and matching loaded-scene properties. Frame lines,
   title text and title ends can be styled independently through the existing
   runtime, typed and compile-time stylesheet paths. Existing literal titles
   keep their default appearance.
+
+- `Spinner` and `ui::spinner` provide managed loading indicators with built-in
+  presets, owning custom frames, labels, direction and reduced motion. Ref
+  operations start, stop and relabel an indicator without manual timer ownership.
+  Loaded scenes expose the same settings. Hidden, clipped and disabled indicators
+  stop scheduling frames until they become eligible again.
+
+- `ui::ActionSet` shares owning callbacks and presentation state across buttons
+  and explicit `ui::onKey` bindings; scene attachment owns each set for the
+  session. Shortcut metadata remains display text.
 
 - Choice dialogs accept custom declarative content and six standard button sets
   through `ui::dialog`, with configurable captions, order and safe defaults.
