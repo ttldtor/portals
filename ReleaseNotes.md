@@ -5,6 +5,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+### Added
+
+- Added retained `FormField` composition with labels, help text, required-field checks and synchronous validation messages. Typed refs expose text, validation and focus; custom editors and loaded scene fields use the same composition.
+- Added complete account-settings and scene-resource examples for form fields, including editing-policy boundaries, invalid drafts and first-invalid-field focus. Pending validation is an explicit presentation state; asynchronous validation is not included.
+
 ## v0.6.0 (2026-10-24)
 
 ### Added

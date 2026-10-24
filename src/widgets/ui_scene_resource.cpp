@@ -98,6 +98,9 @@ SceneResourceRegistry::SceneResourceRegistry() {
     return std::expected<Description<LineEdit>, ManagedError>(
       lineEdit(arguments.text, LineEditConfig{.options = std::move(*options)}));
   });
+  (void)add<FormField>("FormField", [](SceneResourceArguments arguments) {
+    return formField("", arguments.text).settings(arguments.settings);
+  });
   (void)add<Password>("Password", [](SceneResourceArguments arguments) {
     return password().settings(arguments.settings);
   });
@@ -546,13 +549,13 @@ std::expected<Description<Widget>, ManagedError> ResourceAccess::keyHintsRecipe(
 
 namespace {
 using Code = SceneResourceErrorCode;
-using detail::resource::ResourceDocument;
-using detail::resource::ResourceNode;
 using detail::resource::parseResourceDocument;
 using detail::resource::prepareGrids;
 using detail::resource::prepareHelpReferences;
 using detail::resource::prepareNodes;
 using detail::resource::registerSchemas;
+using detail::resource::ResourceDocument;
+using detail::resource::ResourceNode;
 using detail::resource::valid;
 
 GridOptions boundGridOptions(const ResourceDocument &document, const ResourceNode &node,
@@ -681,16 +684,19 @@ std::expected<void, ManagedError> resolveSettings(ResourceDocument &document, co
     limits.max_input_bytes = std::min(limits.max_input_bytes, resourceLimits.max_input_bytes);
 
     for (const auto path : {std::string_view("text"), std::string_view("placeholder"), std::string_view("title"),
-                            std::string_view("frame.title"), std::string_view("label")}) {
+                            std::string_view("frame.title"), std::string_view("label"), std::string_view("help"),
+                            std::string_view("requiredMessage")}) {
       if (path == "title" && node.factory.kind != detail::ControlFactoryKind::DIALOG_FALLBACK) {
         continue;
       }
 
-      auto &setting = path == "text"          ? node.arguments.settings.text
-                      : path == "placeholder" ? node.arguments.settings.placeholder
-                      : path == "label"       ? node.arguments.settings.spinnerLabel
-                      : path == "frame.title" ? node.arguments.settings.frame.title
-                                              : node.arguments.settings.title;
+      auto &setting = path == "text"              ? node.arguments.settings.text
+                      : path == "placeholder"     ? node.arguments.settings.placeholder
+                      : path == "label"           ? node.arguments.settings.spinnerLabel
+                      : path == "help"            ? node.arguments.settings.fieldHelp
+                      : path == "requiredMessage" ? node.arguments.settings.fieldRequiredMessage
+                      : path == "frame.title"     ? node.arguments.settings.frame.title
+                                                  : node.arguments.settings.title;
 
       if (!setting) {
         continue;

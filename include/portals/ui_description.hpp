@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
-#include <portals/detail/ui_recipe_access.hpp>
 #include <portals/detail/ui_event_access.hpp>
+#include <portals/detail/ui_recipe_access.hpp>
 #include <portals/ui_key_info.hpp>
 
 namespace portals::ui {
@@ -977,8 +977,8 @@ public:
     requires(std::same_as<T, Button> && portals::detail::ManagedAction<Callback, ClickEvent>)
   Description &&onClick(Callback callback) && {
     if constexpr (std::same_as<Callback, ActionRef>) {
-      return std::move(*this).setup([declaration = detail::retainAction(callback), callback = std::move(callback)](
-                                      ManagedScene &scene, Node<T> node) mutable {
+      return std::move(*this).setup([declaration = detail::retainAction(callback),
+                                     callback = std::move(callback)](ManagedScene &scene, Node<T> node) mutable {
         (void)declaration;
 
         return scene.onClick(node, std::move(callback));
@@ -2183,6 +2183,18 @@ private:
       }
     }
 
+    Node<LineEdit> fieldDraft;
+
+    if constexpr (std::same_as<T, FormField>) {
+      auto editor = detail::NamedAccess::fieldDraft(scene, *node);
+
+      if (!editor) {
+        return std::unexpected(editor.error());
+      }
+
+      fieldDraft = *editor;
+    }
+
     for (auto &reference : state->references) {
       auto slot = reference.slot_;
 
@@ -2199,20 +2211,23 @@ private:
       context.release.push_back([slot] {
         slot->pending = false;
       });
-      context.publish.push_back([slot, value = *node, owner = &scene, lifetime = detail::Access::lifetime(scene)] {
-        slot->node = value;
-        slot->target.node = value;
-        slot->target.scene = owner;
-        slot->target.lifetime = lifetime;
+      context.publish.push_back(
+        [slot, value = *node, owner = &scene, lifetime = detail::Access::lifetime(scene), fieldDraft] {
+          slot->node = value;
+          slot->target.node = value;
+          slot->target.scene = owner;
+          slot->target.lifetime = lifetime;
 
-        if constexpr (std::derived_from<T, Control>) {
-          slot->target.caption = value;
-        } else if constexpr (std::same_as<T, LineEdit>) {
-          slot->target.draft = value;
-        } else if constexpr (std::same_as<T, Password>) {
-          slot->target.secret = value;
-        }
-      });
+          if constexpr (std::derived_from<T, Control>) {
+            slot->target.caption = value;
+          } else if constexpr (std::same_as<T, LineEdit>) {
+            slot->target.draft = value;
+          } else if constexpr (std::same_as<T, FormField>) {
+            slot->target.draft = fieldDraft;
+          } else if constexpr (std::same_as<T, Password>) {
+            slot->target.secret = value;
+          }
+        });
       detail::RefTarget pending;
       pending.node = *node;
       pending.scene = &scene;
@@ -2221,6 +2236,8 @@ private:
         pending.caption = *node;
       } else if constexpr (std::same_as<T, LineEdit>) {
         pending.draft = *node;
+      } else if constexpr (std::same_as<T, FormField>) {
+        pending.draft = fieldDraft;
       } else if constexpr (std::same_as<T, Password>) {
         pending.secret = *node;
       }

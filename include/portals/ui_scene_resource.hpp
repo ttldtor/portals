@@ -3,13 +3,14 @@
 #pragma once
 
 #include <portals/ui_controls.hpp>
-#include <portals/ui_virtual.hpp>
-#include <portals/ui_layout.hpp>
-#include <portals/ui_primitives.hpp>
-#include <portals/ui_modifiers.hpp>
 #include <portals/ui_dialogs.hpp>
-#include <portals/ui_scene_pipeline.hpp>
+#include <portals/ui_form_field.hpp>
+#include <portals/ui_layout.hpp>
+#include <portals/ui_modifiers.hpp>
 #include <portals/ui_password_controls.hpp>
+#include <portals/ui_primitives.hpp>
+#include <portals/ui_scene_pipeline.hpp>
+#include <portals/ui_virtual.hpp>
 
 #include <filesystem>
 
@@ -75,13 +76,14 @@ concept ResourceFactory =
   };
 } // namespace detail
 
-/** @brief Explicit owning allowlist; builtins are VBox/HBox/Label/LineEdit/Password/Button/CheckBox/ThreeState.
- * Construction and copying may allocate. Captured services remain explicit borrows and must
- * outlive prepare; registry callbacks are released with the consumed scene recipe.
+/** @brief Explicit owning allowlist; builtins include
+ * VBox/HBox/Label/LineEdit/FormField/Password/Button/CheckBox/ThreeState. Construction and copying may allocate.
+ * Captured services remain explicit borrows and must outlive prepare; registry callbacks are released with the consumed
+ * scene recipe.
  */
 class SceneResourceRegistry {
 public:
-  /** @brief Register the eight safe builtin recipe adapters without mounting anything. */
+  /** @brief Register the safe builtin recipe adapters without mounting anything. */
   SceneResourceRegistry();
 
   /** @brief Release owning adapters; copying remains fallible instead of a noexcept debug-vector move. */

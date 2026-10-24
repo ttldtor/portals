@@ -4,6 +4,7 @@
 
 #include <portals/detail/dialog_command_result.hpp>
 #include <portals/detail/quit_command.hpp>
+#include <portals/form_field.hpp>
 #include <portals/help_view.hpp>
 #include <portals/managed.hpp>
 #include <portals/text_value.hpp>
@@ -12,6 +13,7 @@
 
 namespace portals::ui {
 template <class T> class Description;
+template <class T> class Ref;
 class DynamicRef;
 class StyleStage;
 class DialogCommandResult;
@@ -58,6 +60,10 @@ struct RefTarget {
 };
 
 struct RefAccess;
+std::expected<FieldValidation, ManagedError> fieldValidation(const std::shared_ptr<RefTarget> &target);
+Ref<LineEdit> fieldEditor(const std::shared_ptr<RefTarget> &target);
+std::expected<bool, ManagedError> validateField(const std::shared_ptr<RefTarget> &target);
+std::expected<void, ManagedError> displayField(const std::shared_ptr<RefTarget> &target, FieldValidation value);
 struct MessageAccess;
 template <class> struct TableRowType;
 
@@ -309,7 +315,9 @@ public:
    * Assignment between TextProperty values still copies once rather than creating a binding.
    */
   TextSource source() const {
-    return TextSource(target_, expectedType_ == "LineEdit" ? TextSource::Kind::DRAFT : TextSource::Kind::CAPTION);
+    return TextSource(target_, (expectedType_ == "LineEdit" || expectedType_ == "FormField")
+                                 ? TextSource::Kind::DRAFT
+                                 : TextSource::Kind::CAPTION);
   }
 
   /** @param other Observing proxy copied without reading or changing a widget; errors/resolver are copied too. */
@@ -801,6 +809,79 @@ public:
     return TextProperty(std::move(target), std::move(resolver), TYPE, origin);
   }
 
+  /** @return Standard text editor observation; failure remains in its checked slot.
+   * Obtain only after mount;
+   * custom non-LineEdit roots reject with INVALID_ARGUMENT.
+   */
+  Ref<LineEdit> editor() const
+    requires std::same_as<T, FormField>
+  {
+    return detail::fieldEditor(target());
+  }
+
+  /** @param resolver Optional owning localization adapter. @param origin Text mutation call site.
+   * @return Existing
+   * text proxy forwarding to this field's standard editor; no model ownership is added.
+   */
+  TextProperty text(TextResolver resolver = {}, std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, FormField>
+  {
+    return TextProperty(target(), std::move(resolver), "FormField", origin);
+  }
+
+  /** @return Most recent validation presentation, or exact checked affinity/liveness error.
+   * Deferred-mode dirty
+   * drafts preserve the last message until their next validation boundary.
+   */
+  std::expected<FieldValidation, ManagedError> validation() const
+    requires std::same_as<T, FormField>
+  {
+    return detail::fieldValidation(target());
+  }
+
+  /** @return True when the current standard editor draft passes the synchronous field rules.
+   * This explicit check
+   * updates presentation without committing a model or adding an Undo operation.
+   * Reentry returns WOULD_BLOCK;
+   * custom editor roots return INVALID_ARGUMENT.
+   */
+  std::expected<bool, ManagedError> validate() const
+    requires std::same_as<T, FormField>
+  {
+    return detail::validateField(target());
+  }
+
+  /** @return True after the current draft passes its synchronous rules.
+   * @param origin Validation call site
+   * retained by the existing diagnostic collector.
+   * Short callback convenience: runs rules and updates
+   * presentation; technical failures use the scene error channel.
+   * Use validate() to inspect the original checked
+   * failure explicitly.
+   */
+  bool valid(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, FormField>
+  {
+    auto observation = target();
+    auto result = detail::validateField(observation);
+
+    if (!result) {
+      detail::reportEventError(observation, result.error(), origin);
+    }
+
+    return result && *result;
+  }
+
+  /** @param value Owning explicit presentation, without asynchronous completion admission.
+   * @return Exact checked
+   * update. Pending never disables the editor or schedules work.
+   */
+  std::expected<void, ManagedError> display(FieldValidation value) const
+    requires std::same_as<T, FormField>
+  {
+    return detail::displayField(target(), std::move(value));
+  }
+
   /** @param change Owning policy override for every mutation of this proxy; does not change editor options.
    * @param resolver Optional owning synchronous resource adapter.
    * @param origin Property acquisition call site retained in diagnostics.
@@ -1046,6 +1127,33 @@ struct NamedAccess {
     return found;
   }
 
+  /** @param scene Existing managed owner. @param node Field identity to inspect.
+   * @return Exact standard editor identity, empty for a custom root, or the original tree error.
+   */
+  static std::expected<Node<LineEdit>, ManagedError> fieldDraft(ManagedScene &scene, Node<Widget> node) {
+    Node<Widget> editor;
+    auto checked = scene.app_.tree().read(node, [&](const Widget &widget) {
+      if (const auto *field = dynamic_cast<const FormField *>(&widget)) {
+        editor = field->editor();
+      }
+    });
+
+    if (!checked) {
+      return std::unexpected(ManagedError{ManagedPhase::BIND, node.id(), checked.error(), {}, {}});
+    }
+
+    Node<LineEdit> result;
+
+    checked = scene.app_.tree().read(editor, [&](const Widget &widget) {
+      if (dynamic_cast<const LineEdit *>(&widget)) {
+        result = Node<LineEdit>(editor.id());
+      }
+    });
+
+    return checked ? std::expected<Node<LineEdit>, ManagedError>(result)
+                   : std::unexpected(ManagedError{ManagedPhase::BIND, node.id(), checked.error(), {}, {}});
+  }
+
   /** @tparam T Public Widget subtype checked with RTTI before constructing its observer.
    * @param reference Empty shared observing slot to publish.
    * @param scene Existing owner, borrowed only during checked validation.
@@ -1081,6 +1189,16 @@ struct NamedAccess {
     if (!checked || !compatible) {
       return std::unexpected(
         ManagedError{ManagedPhase::BIND, node.id(), checked ? TreeError::INVALID_ARGUMENT : checked.error(), {}, {}});
+    }
+
+    if constexpr (std::same_as<T, FormField>) {
+      auto editor = fieldDraft(scene, node);
+
+      if (!editor) {
+        return std::unexpected(editor.error());
+      }
+
+      draft = *editor;
     }
 
     slot.node = Node<T>(node.id());

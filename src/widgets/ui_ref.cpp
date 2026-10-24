@@ -214,7 +214,7 @@ struct RefAccess {
     }
 
     if (value.draft) {
-      auto entry = scene.find(target.node);
+      auto entry = scene.find(target.draft != Node<LineEdit>{} ? Node<Widget>(target.draft) : target.node);
       auto *binding = entry ? std::get_if<LineEditBinding>(&entry->binding) : nullptr;
       auto revision = binding ? binding->draftRevision() : std::unexpected(TreeError::INVALID_ARGUMENT);
 
@@ -239,7 +239,7 @@ struct RefAccess {
     std::expected<void, TreeError> updated;
 
     if (target.draft != Node<LineEdit>{}) {
-      auto entry = scene.find(target.node);
+      auto entry = scene.find(target.draft != Node<LineEdit>{} ? Node<Widget>(target.draft) : target.node);
       auto *binding = entry ? std::get_if<LineEditBinding>(&entry->binding) : nullptr;
 
       if (!binding) {
@@ -255,7 +255,7 @@ struct RefAccess {
   }
 
   static std::expected<GraphemeText, ManagedError> committedSnapshot(ManagedScene &scene, const RefTarget &target) {
-    auto entry = scene.find(target.node);
+    auto entry = scene.find(target.draft != Node<LineEdit>{} ? Node<Widget>(target.draft) : target.node);
 
     if (!entry || !entry->textModel || !std::holds_alternative<LineEditBinding>(entry->binding)) {
       return std::unexpected(failure(target.node, TreeError::INVALID_ARGUMENT));
@@ -296,7 +296,7 @@ struct RefAccess {
   capture(ManagedScene &scene, const RefTarget &target, bool committed, const GraphemeText *previous) {
     std::shared_ptr<const PropertyChange<std::string>> model;
     if (committed) {
-      auto entry = scene.find(target.node);
+      auto entry = scene.find(target.draft != Node<LineEdit>{} ? Node<Widget>(target.draft) : target.node);
       if (!entry || !entry->textModel) {
         return std::unexpected(failure(target.node, TreeError::INVALID_ARGUMENT));
       }
@@ -306,7 +306,7 @@ struct RefAccess {
       }
       model = *value;
     } else if (target.draft != Node<LineEdit>{}) {
-      auto entry = scene.find(target.node);
+      auto entry = scene.find(target.draft != Node<LineEdit>{} ? Node<Widget>(target.draft) : target.node);
       auto *binding = entry ? std::get_if<LineEditBinding>(&entry->binding) : nullptr;
       auto revision = binding ? binding->draftRevision() : std::unexpected(TreeError::INVALID_ARGUMENT);
       if (!revision) {

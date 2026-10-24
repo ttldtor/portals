@@ -278,7 +278,10 @@ constexpr std::array<ControlPropertyDescriptor, detail::CONTROL_PROPERTY_COUNT> 
    {"scrollbar.vertical.thumb", Kind::LITERAL_STRING, 3, {}},
    {"scrollbar.vertical.start", Kind::LITERAL_STRING, 3, {}},
    {"scrollbar.vertical.end", Kind::LITERAL_STRING, 3, {}},
-   {"scrollbar.corner", Kind::LITERAL_STRING, 2, {}}}};
+   {"scrollbar.corner", Kind::LITERAL_STRING, 2, {}},
+   {"help", Kind::TEXT, 1, {}},
+   {"required", Kind::BOOLEAN, 1, {}},
+   {"requiredMessage", Kind::TEXT, 1, {}}}};
 static_assert(std::ranges::all_of(PROPERTIES, [](const auto &property) {
   return !property.path.empty();
 }));
@@ -330,6 +333,7 @@ constexpr Mask POSITIVE_UNSIGNED_MASK =
 constexpr Mask CHECK_MASK = SIZE_MASK | TEXT_MASK | propertyMask(5, 6);
 constexpr Mask LAYOUT_MASK = SIZE_MASK | propertyMask(4, 22, 23, 24, 25, 30, 31, 32);
 constexpr Mask EDIT_MASK = SIZE_MASK | TEXT_MASK | propertyMask(7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 33, 34, 35, 36);
+constexpr Mask FORM_FIELD_MASK = EDIT_MASK | LAYOUT_MASK | propertyMask(200, 216, 217, 218);
 constexpr Mask ALL_MASK = [] {
   Mask mask;
 
@@ -438,6 +442,12 @@ constexpr auto EDIT_SCHEMA = withFrame(
   std::to_array({PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[7], PROPERTIES[8],
                  PROPERTIES[9], PROPERTIES[10], PROPERTIES[11], PROPERTIES[12], PROPERTIES[13], PROPERTIES[14],
                  PROPERTIES[15], PROPERTIES[16], PROPERTIES[33], PROPERTIES[34], PROPERTIES[35], PROPERTIES[36]}));
+constexpr auto FORM_FIELD_SCHEMA = withFrame(
+  std::to_array({PROPERTIES[0],  PROPERTIES[1],  PROPERTIES[2],   PROPERTIES[3],   PROPERTIES[4],   PROPERTIES[7],
+                 PROPERTIES[8],  PROPERTIES[9],  PROPERTIES[10],  PROPERTIES[11],  PROPERTIES[12],  PROPERTIES[13],
+                 PROPERTIES[14], PROPERTIES[15], PROPERTIES[16],  PROPERTIES[22],  PROPERTIES[23],  PROPERTIES[24],
+                 PROPERTIES[25], PROPERTIES[30], PROPERTIES[31],  PROPERTIES[32],  PROPERTIES[33],  PROPERTIES[34],
+                 PROPERTIES[35], PROPERTIES[36], PROPERTIES[200], PROPERTIES[216], PROPERTIES[217], PROPERTIES[218]}));
 constexpr auto PASSWORD_SCHEMA = withFrame(std::to_array(
   {PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[7], PROPERTIES[8], PROPERTIES[10],
    PROPERTIES[11], PROPERTIES[33], PROPERTIES[34], PROPERTIES[35], PROPERTIES[36], PROPERTIES[159], PROPERTIES[160],
@@ -495,12 +505,13 @@ static_assert(schemaMatchesMask(NOTIFICATION_SCHEMA, NOTIFICATION_MASK));
 static_assert(schemaMatchesMask(THEME_SELECTOR_SCHEMA, THEME_SELECTOR_MASK));
 static_assert(schemaMatchesMask(THEME_CATALOG_SCHEMA, THEME_CATALOG_MASK));
 static_assert(schemaMatchesMask(EDIT_SCHEMA, EDIT_MASK));
+static_assert(schemaMatchesMask(FORM_FIELD_SCHEMA, FORM_FIELD_MASK));
 static_assert(schemaMatchesMask(PASSWORD_SCHEMA, PASSWORD_MASK));
 static_assert(schemaMatchesMask(GRID_SCHEMA, GRID_MASK));
 
 bool builtin(std::string_view name) noexcept {
   return name == "VBox" || name == "HBox" || name == "Label" || name == "Button" || name == "CheckBox" ||
-         name == "LineEdit" || name == "ThreeState" || name == "Password";
+         name == "LineEdit" || name == "ThreeState" || name == "Password" || name == "FormField";
 }
 
 Mask builtinMask(std::string_view name) noexcept {
@@ -521,6 +532,10 @@ Mask builtinMask(std::string_view name) noexcept {
 
   if (name == "CheckBox" || name == "ThreeState") {
     return CHECK_MASK;
+  }
+
+  if (name == "FormField") {
+    return FORM_FIELD_MASK;
   }
 
   if (name == "LineEdit") {
@@ -834,7 +849,10 @@ ControlContextError exceptionError() noexcept {
   X(scrollbar.vertical.thumb, 212) \
   X(scrollbar.vertical.start, 213) \
   X(scrollbar.vertical.end, 214) \
-  X(scrollbar.corner, 215)
+  X(scrollbar.corner, 215)                                                                                             \
+  X(fieldHelp, 216)                                                                                                    \
+  X(fieldRequired, 217)                                                                                                \
+  X(fieldRequiredMessage, 218)
 
 #define PORTALS_CONTROL_LEAVES(X) \
   PORTALS_CONTROL_BASE_LEAVES(X) \
@@ -1154,6 +1172,9 @@ void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &pr
       std::pair<std::string_view, bool>{"active", patch.spinnerActive.has_value()},
       std::pair<std::string_view, bool>{"reducedMotion", patch.spinnerReducedMotion.has_value()},
       std::pair<std::string_view, bool>{"label", patch.spinnerLabel.has_value()},
+      std::pair<std::string_view, bool>{"help", patch.fieldHelp.has_value()},
+      std::pair<std::string_view, bool>{"required", patch.fieldRequired.has_value()},
+      std::pair<std::string_view, bool>{"requiredMessage", patch.fieldRequiredMessage.has_value()},
       std::pair<std::string_view, bool>{"maxFrames", patch.spinnerMaxFrames.has_value()},
       std::pair<std::string_view, bool>{"maxFrameBytes", patch.spinnerMaxFrameBytes.has_value()},
       std::pair<std::string_view, bool>{"maxFrameCells", patch.spinnerMaxFrameCells.has_value()},
@@ -1199,16 +1220,14 @@ void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &pr
       std::pair<std::string_view, bool>{"frame.maxTitleBytes", patch.frame.maxTitleBytes.has_value()},
       std::pair<std::string_view, bool>{"frame.customGlyphs.enabled", patch.frame.customGlyphs.enabled.has_value()},
       std::pair<std::string_view, bool>{"frame.customGlyphs.topLeft", patch.frame.customGlyphs.topLeft.has_value()},
-      std::pair<std::string_view, bool>{"frame.customGlyphs.topRight",
-                                        patch.frame.customGlyphs.topRight.has_value()},
+      std::pair<std::string_view, bool>{"frame.customGlyphs.topRight", patch.frame.customGlyphs.topRight.has_value()},
       std::pair<std::string_view, bool>{"frame.customGlyphs.bottomLeft",
                                         patch.frame.customGlyphs.bottomLeft.has_value()},
       std::pair<std::string_view, bool>{"frame.customGlyphs.bottomRight",
                                         patch.frame.customGlyphs.bottomRight.has_value()},
       std::pair<std::string_view, bool>{"frame.customGlyphs.horizontal",
                                         patch.frame.customGlyphs.horizontal.has_value()},
-      std::pair<std::string_view, bool>{"frame.customGlyphs.vertical",
-                                        patch.frame.customGlyphs.vertical.has_value()},
+      std::pair<std::string_view, bool>{"frame.customGlyphs.vertical", patch.frame.customGlyphs.vertical.has_value()},
       std::pair<std::string_view, bool>{"frame.titleDecoration", patch.frame.titleDecoration.has_value()},
       std::pair<std::string_view, bool>{"frame.customTitleDecoration.enabled",
                                         patch.frame.customTitleDecoration.enabled.has_value()},
@@ -1225,8 +1244,7 @@ void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &pr
       std::pair<std::string_view, bool>{"initiallyOpen", patch.initiallyOpen.has_value()},
       std::pair<std::string_view, bool>{"format.maxBytesPerBinding", patch.format.maxBytesPerBinding.has_value()},
       std::pair<std::string_view, bool>{"format.strokeSeparator", patch.format.strokeSeparator.has_value()},
-      std::pair<std::string_view, bool>{"format.alternativeSeparator",
-                                        patch.format.alternativeSeparator.has_value()},
+      std::pair<std::string_view, bool>{"format.alternativeSeparator", patch.format.alternativeSeparator.has_value()},
       std::pair<std::string_view, bool>{"format.repeatMarker", patch.format.repeatMarker.has_value()},
       std::pair<std::string_view, bool>{"format.releaseMarker", patch.format.releaseMarker.has_value()},
       std::pair<std::string_view, bool>{"format.unknownMarker", patch.format.unknownMarker.has_value()},
@@ -1293,21 +1311,17 @@ void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &pr
                                         patch.themeCatalog.textLimits.maxCells.has_value()},
       std::pair<std::string_view, bool>{"themeCatalog.initialId.enabled",
                                         patch.themeCatalog.initialId.enabled.has_value()},
-      std::pair<std::string_view, bool>{"themeCatalog.initialId.value",
-                                        patch.themeCatalog.initialId.value.has_value()},
-      std::pair<std::string_view, bool>{"themeCatalog.layers.enabled",
-                                        patch.themeCatalog.layers.enabled.has_value()},
+      std::pair<std::string_view, bool>{"themeCatalog.initialId.value", patch.themeCatalog.initialId.value.has_value()},
+      std::pair<std::string_view, bool>{"themeCatalog.layers.enabled", patch.themeCatalog.layers.enabled.has_value()},
       std::pair<std::string_view, bool>{"themeCatalog.layers.maxLayers",
                                         patch.themeCatalog.layers.maxLayers.has_value()},
-      std::pair<std::string_view, bool>{"themeCatalog.layers.maxRules",
-                                        patch.themeCatalog.layers.maxRules.has_value()},
+      std::pair<std::string_view, bool>{"themeCatalog.layers.maxRules", patch.themeCatalog.layers.maxRules.has_value()},
       std::pair<std::string_view, bool>{"themeCatalog.layers.maxDeclarations",
                                         patch.themeCatalog.layers.maxDeclarations.has_value()},
       std::pair<std::string_view, bool>{"themeCatalog.layers.maxOwnedBytes",
                                         patch.themeCatalog.layers.maxOwnedBytes.has_value()},
       std::pair<std::string_view, bool>{"themeSelector.labels.apply", patch.themeSelector.labels.apply.has_value()},
-      std::pair<std::string_view, bool>{"themeSelector.labels.cancel",
-                                        patch.themeSelector.labels.cancel.has_value()},
+      std::pair<std::string_view, bool>{"themeSelector.labels.cancel", patch.themeSelector.labels.cancel.has_value()},
       std::pair<std::string_view, bool>{"themeSelector.labels.closeKeepingPreview",
                                         patch.themeSelector.labels.closeKeepingPreview.has_value()},
       std::pair<std::string_view, bool>{"themeSelector.labels.emptyStatus",
@@ -1336,8 +1350,7 @@ void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &pr
       std::pair<std::string_view, bool>{"message.labels.cancel", patch.message.labels.cancel.has_value()},
       std::pair<std::string_view, bool>{"message.defaultChoice.enabled",
                                         patch.message.defaultChoice.enabled.has_value()},
-      std::pair<std::string_view, bool>{"message.defaultChoice.value",
-                                        patch.message.defaultChoice.value.has_value()},
+      std::pair<std::string_view, bool>{"message.defaultChoice.value", patch.message.defaultChoice.value.has_value()},
       std::pair<std::string_view, bool>{"message.allowDestructiveDefault",
                                         patch.message.allowDestructiveDefault.has_value()},
       std::pair<std::string_view, bool>{"message.textLimits.maxInputBytes",
@@ -1346,8 +1359,7 @@ void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &pr
                                         patch.message.textLimits.maxClusterBytes.has_value()},
       std::pair<std::string_view, bool>{"message.textLimits.maxGraphemes",
                                         patch.message.textLimits.maxGraphemes.has_value()},
-      std::pair<std::string_view, bool>{"message.textLimits.maxCells",
-                                        patch.message.textLimits.maxCells.has_value()},
+      std::pair<std::string_view, bool>{"message.textLimits.maxCells", patch.message.textLimits.maxCells.has_value()},
       std::pair<std::string_view, bool>{"message.maxBodyLines", patch.message.maxBodyLines.has_value()},
       std::pair<std::string_view, bool>{"maxLayers", patch.maxLayers.has_value()},
       std::pair<std::string_view, bool>{"title", patch.title.has_value()},
@@ -1361,10 +1373,8 @@ void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &pr
       std::pair<std::string_view, bool>{"dialog.anchorGap", patch.dialog.anchorGap.has_value()},
       std::pair<std::string_view, bool>{"dialog.closeOnEscape", patch.dialog.closeOnEscape.has_value()},
       std::pair<std::string_view, bool>{"dialog.closeButton.enabled", patch.dialog.closeButton.enabled.has_value()},
-      std::pair<std::string_view, bool>{"dialog.closeButton.placement",
-                                        patch.dialog.closeButton.placement.has_value()},
-      std::pair<std::string_view, bool>{"dialog.closeButton.focusable",
-                                        patch.dialog.closeButton.focusable.has_value()},
+      std::pair<std::string_view, bool>{"dialog.closeButton.placement", patch.dialog.closeButton.placement.has_value()},
+      std::pair<std::string_view, bool>{"dialog.closeButton.focusable", patch.dialog.closeButton.focusable.has_value()},
       std::pair<std::string_view, bool>{"message.labels.yes", patch.message.labels.yes.has_value()},
       std::pair<std::string_view, bool>{"message.labels.no", patch.message.labels.no.has_value()},
       std::pair<std::string_view, bool>{"message.buttons", patch.message.buttons.has_value()},
@@ -1372,8 +1382,7 @@ void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &pr
       std::pair<std::string_view, bool>{"message.order.second", patch.message.order.second.has_value()},
       std::pair<std::string_view, bool>{"message.order.third", patch.message.order.third.has_value()},
       std::pair<std::string_view, bool>{"dialog.frame.glyphs", patch.dialog.frame.glyphs.has_value()},
-      std::pair<std::string_view, bool>{"dialog.frame.maxPaintCells",
-                                        patch.dialog.frame.maxPaintCells.has_value()}};
+      std::pair<std::string_view, bool>{"dialog.frame.maxPaintCells", patch.dialog.frame.maxPaintCells.has_value()}};
 
     for (const auto &[path, present] : fields) {
       if (!present) {
@@ -1897,6 +1906,10 @@ std::span<const ControlPropertyDescriptor> controlPropertySchema(std::string_vie
 
   if (type == "CheckBox" || type == "ThreeState") {
     return CHECK_SCHEMA;
+  }
+
+  if (type == "FormField") {
+    return FORM_FIELD_SCHEMA;
   }
 
   if (type == "LineEdit") {

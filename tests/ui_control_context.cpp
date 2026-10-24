@@ -1519,7 +1519,7 @@ TEST_CASE("actual catalog fixed ancestry retains sparse precedence origins and u
 }
 
 TEST_CASE("Shared frame, Spinner and scrollbar schemas append stable leaves within four presence words") {
-  static_assert(ui::detail::CONTROL_PROPERTY_COUNT == 216);
+  static_assert(ui::detail::CONTROL_PROPERTY_COUNT == 219);
   static_assert((ui::detail::CONTROL_PRESENCE_BITS + 63) / 64 == 4);
   ControlSettings appended;
   appended.spinnerPreset = SpinnerPreset::LINE;
