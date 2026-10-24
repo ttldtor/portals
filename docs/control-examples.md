@@ -8,6 +8,7 @@ a fragment; they are not complete applications.
 
 | Topic | Complete C++ program | Resource program or reference |
 |---|---|---|
+| Search journal composition | [main.cpp](../examples/search_journal/main.cpp): operator field, two troubleshooting notes, selected-match summary and bounded journal | [FormField](form-fields.md), [FindBar](find-bar.md), [LogView](log-view.md) contracts |
 | Literal search | [FindBar guide](find-bar.md), [main.cpp](../examples/find_bar/main.cpp) | [guide_find_bar_resource.cpp](examples/guide_find_bar_resource.cpp) |
 | Labeled fields and validation | [Account settings](form-fields.md), [main.cpp](../examples/form_field/main.cpp) | [guide_form_field_resource.cpp](examples/guide_form_field_resource.cpp) |
 | Protected password | [guide_password.cpp](examples/guide_password.cpp) | [guide_password_resource.cpp](examples/guide_password_resource.cpp) |
