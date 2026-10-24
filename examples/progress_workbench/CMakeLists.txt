@@ -1,0 +1,3 @@
+add_executable(portals_progress_workbench main.cpp)
+target_link_libraries(portals_progress_workbench PRIVATE portals::core)
+portals_enable_warnings(portals_progress_workbench)

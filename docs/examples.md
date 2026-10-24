@@ -19,6 +19,7 @@ The categories describe the learning path; the source directories remain stable.
 
 | Category | Program and guide | What it demonstrates |
 | --- | --- | --- |
+| Showcase | [Progress workbench](../examples/progress_workbench/main.cpp), `portals_progress_workbench` | Name a work item, adjust fractional progress, reset or complete it, and record accepted actions in a bounded log. [Gauge command contracts](compact-primitives.md#gauge-ref-commands) explain range errors; F10 exits. |
 | Showcase | [Search journal](../examples/search_journal/main.cpp), `portals_search_journal_example` | Edit the operator name, search two Unicode troubleshooting notes and record selected matches in a bounded log. F3/Shift+F3 navigate; buttons switch notes, clear the journal or return to its tail. |
 | Basics | [click handlers](#complete-first-program), `portals_click_handlers` | Observing refs, late click handlers and short quit. No CLI. |
 | Basics | [live captions and editing events](bindings-guide.md#live-editor-captions) | Draft versus accepted text, user edits and Enter/focus-loss outcomes without manual subscriptions. Built with tests enabled. |

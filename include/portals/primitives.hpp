@@ -223,6 +223,7 @@ public:
 
 private:
   friend std::expected<void, TreeError> setGaugeValue(WidgetTree &, Node<Gauge>, double);
+  friend std::expected<void, TreeError> adjustGaugeValue(WidgetTree &, Node<Gauge>, double);
   friend std::expected<void, TreeError> syncGauge(WidgetTree &, Node<Gauge>);
   double value_;
   GaugeOptions options_;
@@ -238,6 +239,13 @@ private:
  * @return Checked boundary/value error, or success; equal values request no redraw, other changes invalidate PAINT.
  */
 std::expected<void, TreeError> setGaugeValue(WidgetTree &tree, Node<Gauge> node, double value);
+/** @param tree Borrowed UI owner; mutation is allowed only between frames.
+ * @param node Live gauge belonging to tree.
+ * @param delta Finite amount added to the current value without clamping.
+ * @return Checked boundary/value error, or success. Nonfinite/out-of-range results preserve state;
+ * unchanged results request no redraw, other changes invalidate PAINT before publication.
+ */
+std::expected<void, TreeError> adjustGaugeValue(WidgetTree &tree, Node<Gauge> node, double delta);
 /** @param tree Borrowed UI owner, between frames.
  * @param node Live frame whose input eligibility is copied for disabled presentation; focus projection is cleared.
  * @return Tree boundary error or success; unchanged presentation requests no redraw.
