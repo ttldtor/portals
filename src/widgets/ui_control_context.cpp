@@ -282,6 +282,12 @@ constexpr std::array<ControlPropertyDescriptor, detail::CONTROL_PROPERTY_COUNT> 
    {"help", Kind::TEXT, 1, {}},
    {"required", Kind::BOOLEAN, 1, {}},
    {"requiredMessage", Kind::TEXT, 1, {}},
+   {"document", Kind::TEXT, 1, {}},
+   {"maxDocumentBytes", Kind::UNSIGNED_INTEGER, 1, {}},
+   {"maxMatches", Kind::UNSIGNED_INTEGER, 1, {}},
+   {"previousLabel", Kind::TEXT, 1, {}},
+   {"nextLabel", Kind::TEXT, 1, {}},
+   {"clearLabel", Kind::TEXT, 1, {}},
    {"maxLines", Kind::UNSIGNED_INTEGER, 1, {}},
    {"maxBytes", Kind::UNSIGNED_INTEGER, 1, {}},
    {"maxBatchBytes", Kind::UNSIGNED_INTEGER, 1, {}},
@@ -313,7 +319,7 @@ constexpr Mask SCROLLBAR_MASK = propertyMask(204, 205, 206, 207, 208, 209, 210, 
 constexpr Mask SCROLL_COMMON_MASK = SIZE_MASK | SCROLLBAR_MASK | propertyMask(8, 38, 39, 44, 45, 46, 47, 48);
 constexpr Mask SCROLL_AREA_MASK = SCROLL_COMMON_MASK | propertyMask(49, 50, 51, 53, 54, 55);
 constexpr Mask SCROLL_BAR_MASK = SCROLL_COMMON_MASK | propertyMask(52);
-constexpr Mask LOG_VIEW_MASK = SIZE_MASK | TEXT_MASK | propertyMask(8, 219, 220, 221, 222, 223);
+constexpr Mask LOG_VIEW_MASK = SIZE_MASK | TEXT_MASK | propertyMask(8, 225, 226, 227, 228, 229);
 constexpr Mask OVERLAY_MASK = SIZE_MASK | propertyMask(22, 23, 24, 25, 56, 57);
 constexpr Mask KEY_HELP_COMMON_MASK = SIZE_MASK | propertyMask(59, 60, 61, 62, 63, 64, 65, 66);
 constexpr Mask HELP_VIEW_MASK = KEY_HELP_COMMON_MASK | propertyMask(58);
@@ -335,11 +341,12 @@ constexpr Mask THEME_CATALOG_MASK =
 constexpr Mask POSITIVE_UNSIGNED_MASK =
   propertyMask(3, 17, 18, 26, 27, 28, PAINT_LIMIT_PROPERTY, 45, 55, 59, 71, 72, 73, 83, 90, 100, 110, 111, 112, 113,
                114, 115, 116, 124, 125, 126, 127, 128, 129, 130, 137, 138, 139, 140, 143, 144, 145, 146, 147, 148, 149,
-               150, 151, 155, 156, 157, 158, 172, 195, 201, 202, 203, 206, 219, 220, 221, 222);
+               150, 151, 155, 156, 157, 158, 172, 195, 201, 202, 203, 206, 221, 225, 226, 227, 228);
 constexpr Mask CHECK_MASK = SIZE_MASK | TEXT_MASK | propertyMask(5, 6);
 constexpr Mask LAYOUT_MASK = SIZE_MASK | propertyMask(4, 22, 23, 24, 25, 30, 31, 32);
 constexpr Mask EDIT_MASK = SIZE_MASK | TEXT_MASK | propertyMask(7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 33, 34, 35, 36);
 constexpr Mask FORM_FIELD_MASK = EDIT_MASK | LAYOUT_MASK | propertyMask(200, 216, 217, 218);
+constexpr Mask FIND_BAR_MASK = EDIT_MASK | LAYOUT_MASK | propertyMask(219, 220, 221, 222, 223, 224);
 constexpr Mask ALL_MASK = [] {
   Mask mask;
 
@@ -394,8 +401,8 @@ constexpr auto SCROLL_BAR_SCHEMA = withFrame(std::to_array(
    PROPERTIES[204], PROPERTIES[205], PROPERTIES[206], PROPERTIES[207], PROPERTIES[208], PROPERTIES[209],
    PROPERTIES[210], PROPERTIES[211], PROPERTIES[212], PROPERTIES[213], PROPERTIES[214], PROPERTIES[215]}));
 constexpr auto LOG_VIEW_SCHEMA = withFrame(std::to_array(
-  {PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[8], PROPERTIES[219], PROPERTIES[220],
-   PROPERTIES[221], PROPERTIES[222], PROPERTIES[223]}));
+  {PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[8], PROPERTIES[225], PROPERTIES[226],
+   PROPERTIES[227], PROPERTIES[228], PROPERTIES[229]}));
 constexpr auto OVERLAY_SCHEMA =
   withFrame(std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[22], PROPERTIES[23], PROPERTIES[24],
                            PROPERTIES[25], PROPERTIES[56], PROPERTIES[57]}));
@@ -457,6 +464,12 @@ constexpr auto FORM_FIELD_SCHEMA = withFrame(
                  PROPERTIES[14], PROPERTIES[15], PROPERTIES[16],  PROPERTIES[22],  PROPERTIES[23],  PROPERTIES[24],
                  PROPERTIES[25], PROPERTIES[30], PROPERTIES[31],  PROPERTIES[32],  PROPERTIES[33],  PROPERTIES[34],
                  PROPERTIES[35], PROPERTIES[36], PROPERTIES[200], PROPERTIES[216], PROPERTIES[217], PROPERTIES[218]}));
+constexpr auto FIND_BAR_SCHEMA = withFrame(std::to_array(
+  {PROPERTIES[0],   PROPERTIES[1],   PROPERTIES[2],   PROPERTIES[3],  PROPERTIES[4],  PROPERTIES[7],   PROPERTIES[8],
+   PROPERTIES[9],   PROPERTIES[10],  PROPERTIES[11],  PROPERTIES[12], PROPERTIES[13], PROPERTIES[14],  PROPERTIES[15],
+   PROPERTIES[16],  PROPERTIES[22],  PROPERTIES[23],  PROPERTIES[24], PROPERTIES[25], PROPERTIES[30],  PROPERTIES[31],
+   PROPERTIES[32],  PROPERTIES[33],  PROPERTIES[34],  PROPERTIES[35], PROPERTIES[36], PROPERTIES[219], PROPERTIES[220],
+   PROPERTIES[221], PROPERTIES[222], PROPERTIES[223], PROPERTIES[224]}));
 constexpr auto PASSWORD_SCHEMA = withFrame(std::to_array(
   {PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[7], PROPERTIES[8], PROPERTIES[10],
    PROPERTIES[11], PROPERTIES[33], PROPERTIES[34], PROPERTIES[35], PROPERTIES[36], PROPERTIES[159], PROPERTIES[160],
@@ -516,12 +529,13 @@ static_assert(schemaMatchesMask(THEME_SELECTOR_SCHEMA, THEME_SELECTOR_MASK));
 static_assert(schemaMatchesMask(THEME_CATALOG_SCHEMA, THEME_CATALOG_MASK));
 static_assert(schemaMatchesMask(EDIT_SCHEMA, EDIT_MASK));
 static_assert(schemaMatchesMask(FORM_FIELD_SCHEMA, FORM_FIELD_MASK));
+static_assert(schemaMatchesMask(FIND_BAR_SCHEMA, FIND_BAR_MASK));
 static_assert(schemaMatchesMask(PASSWORD_SCHEMA, PASSWORD_MASK));
 static_assert(schemaMatchesMask(GRID_SCHEMA, GRID_MASK));
 
 bool builtin(std::string_view name) noexcept {
   return name == "VBox" || name == "HBox" || name == "Label" || name == "Button" || name == "CheckBox" ||
-         name == "LineEdit" || name == "ThreeState" || name == "Password" || name == "FormField";
+         name == "LineEdit" || name == "ThreeState" || name == "Password" || name == "FormField" || name == "FindBar";
 }
 
 Mask builtinMask(std::string_view name) noexcept {
@@ -542,6 +556,10 @@ Mask builtinMask(std::string_view name) noexcept {
 
   if (name == "CheckBox" || name == "ThreeState") {
     return CHECK_MASK;
+  }
+
+  if (name == "FindBar") {
+    return FIND_BAR_MASK;
   }
 
   if (name == "FormField") {
@@ -863,11 +881,17 @@ ControlContextError exceptionError() noexcept {
   X(fieldHelp, 216)                                                                                                    \
   X(fieldRequired, 217)                                                                                                \
   X(fieldRequiredMessage, 218) \
-  X(maxLines, 219) \
-  X(maxBytes, 220) \
-  X(maxBatchBytes, 221) \
-  X(maxRecordBytes, 222) \
-  X(followTail, 223)
+  X(findDocument, 219) \
+  X(findMaxDocumentBytes, 220) \
+  X(findMaxMatches, 221) \
+  X(findPreviousLabel, 222) \
+  X(findNextLabel, 223) \
+  X(findClearLabel, 224) \
+  X(maxLines, 225) \
+  X(maxBytes, 226) \
+  X(maxBatchBytes, 227) \
+  X(maxRecordBytes, 228) \
+  X(followTail, 229)
 
 #define PORTALS_CONTROL_LEAVES(X) \
   PORTALS_CONTROL_BASE_LEAVES(X) \
@@ -1187,6 +1211,12 @@ void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &pr
       std::pair<std::string_view, bool>{"active", patch.spinnerActive.has_value()},
       std::pair<std::string_view, bool>{"reducedMotion", patch.spinnerReducedMotion.has_value()},
       std::pair<std::string_view, bool>{"label", patch.spinnerLabel.has_value()},
+      std::pair<std::string_view, bool>{"document", patch.findDocument.has_value()},
+      std::pair<std::string_view, bool>{"maxDocumentBytes", patch.findMaxDocumentBytes.has_value()},
+      std::pair<std::string_view, bool>{"maxMatches", patch.findMaxMatches.has_value()},
+      std::pair<std::string_view, bool>{"previousLabel", patch.findPreviousLabel.has_value()},
+      std::pair<std::string_view, bool>{"nextLabel", patch.findNextLabel.has_value()},
+      std::pair<std::string_view, bool>{"clearLabel", patch.findClearLabel.has_value()},
       std::pair<std::string_view, bool>{"help", patch.fieldHelp.has_value()},
       std::pair<std::string_view, bool>{"required", patch.fieldRequired.has_value()},
       std::pair<std::string_view, bool>{"requiredMessage", patch.fieldRequiredMessage.has_value()},
@@ -1926,6 +1956,10 @@ std::span<const ControlPropertyDescriptor> controlPropertySchema(std::string_vie
 
   if (type == "CheckBox" || type == "ThreeState") {
     return CHECK_SCHEMA;
+  }
+
+  if (type == "FindBar") {
+    return FIND_BAR_SCHEMA;
   }
 
   if (type == "FormField") {

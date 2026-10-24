@@ -3,6 +3,7 @@
 #include <portals/detail/line_edit_text.hpp>
 #include <portals/detail/setup_failure.hpp>
 #include <portals/message_box.hpp>
+#include <portals/ui_controls.hpp>
 #include <portals/ui_ref.hpp>
 
 namespace portals::ui {
@@ -486,7 +487,36 @@ struct RefAccess {
 
     return property;
   }
+
+  static std::pair<std::expected<void, TreeError>, bool> clearFindEditor(ManagedScene &scene, Node<Widget> node,
+                                                                         std::source_location origin) {
+    auto entry = scene.find(node);
+    auto *binding = entry ? std::get_if<LineEditBinding>(&entry->binding) : nullptr;
+    return binding ? binding->clearCommand(origin)
+                   : std::pair<std::expected<void, TreeError>, bool>{std::unexpected(TreeError::STALE_NODE), false};
+  }
+
+  static EditorCommandResult clearFind(std::shared_ptr<RefTarget> target, std::source_location origin) {
+    auto owner = scene(target);
+    auto outcome = owner ? Access::findClear(**owner, target->node, origin)
+                         : std::pair<std::expected<void, TreeError>, bool>{
+                             std::unexpected(std::get<TreeError>(owner.error().cause)), false};
+    if (!outcome.first && !outcome.second && target && target->owner == std::this_thread::get_id() &&
+        !target->lifetime.expired()) {
+      outcome.second = target->scene->reportError(failure(target->node, outcome.first.error()), {}, origin).has_value();
+    }
+    return EditorCommandResult(outcome.first, target ? target->lifetime : std::weak_ptr<const void>{}, outcome.second);
+  }
 };
+
+EditorCommandResult findClear(const std::shared_ptr<RefTarget> &target, std::source_location origin) {
+  return RefAccess::clearFind(target, origin);
+}
+
+std::pair<std::expected<void, TreeError>, bool> clearFindEditor(ManagedScene &scene, Node<Widget> node,
+                                                                std::source_location origin) {
+  return RefAccess::clearFindEditor(scene, node, origin);
+}
 
 void reportEventError(const std::shared_ptr<RefTarget> &target, const ManagedError &error,
                       std::source_location origin) {

@@ -917,6 +917,24 @@ endif()
 add_test(NAME consumer.form-field COMMAND portals_form_field_consumer)
 set_tests_properties(consumer.form-field PROPERTIES TIMEOUT 20)
 
+# Compile both complete interactive programs against the relocated installed SDK.
+add_executable(portals_find_bar_resource_consumer "docs/examples/guide_find_bar_resource.cpp")
+add_executable(portals_find_bar_example_consumer "examples/find_bar/main.cpp")
+add_executable(portals_find_bar_consumer find_bar.cpp)
+add_library(portals_find_bar_headers OBJECT find_bar_header.cpp ui_find_bar_header.cpp)
+foreach(target IN ITEMS portals_find_bar_resource_consumer portals_find_bar_example_consumer
+                        portals_find_bar_consumer portals_find_bar_headers)
+  target_link_libraries(${target} PRIVATE portals::core)
+  set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF)
+endforeach()
+if(WIN32)
+  foreach(target IN ITEMS portals_find_bar_resource_consumer portals_find_bar_example_consumer portals_find_bar_consumer)
+    target_sources(${target} PRIVATE no_dialogs.cpp)
+  endforeach()
+endif()
+add_test(NAME consumer.find-bar COMMAND portals_find_bar_consumer)
+set_tests_properties(consumer.find-bar PROPERTIES TIMEOUT 20)
+
 # Compile complete ordinary clients and native/facade headers against a relocated installed SDK.
 add_executable(portals_log_view_example_consumer "examples/log_view/main.cpp")
 add_executable(portals_log_view_resource_consumer "docs/examples/guide_log_view_resource.cpp")

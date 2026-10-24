@@ -99,6 +99,10 @@ SceneResourceRegistry::SceneResourceRegistry() {
     return std::expected<Description<LineEdit>, ManagedError>(
       lineEdit(arguments.text, LineEditConfig{.options = std::move(*options)}));
   });
+  (void)add<FindBar>("FindBar", [](SceneResourceArguments arguments) {
+    // Resource-owned text is admitted at mount with the resolved instance limits.
+    return detail::Access::findBar("", std::move(arguments.text), {}).settings(arguments.settings);
+  });
   (void)add<FormField>("FormField", [](SceneResourceArguments arguments) {
     return formField("", arguments.text).settings(arguments.settings);
   });
@@ -692,9 +696,11 @@ std::expected<void, ManagedError> resolveSettings(ResourceDocument &document, co
     // Resource budgets still bound resolver output, independently of a control's own text limits.
     limits.max_input_bytes = std::min(limits.max_input_bytes, resourceLimits.max_input_bytes);
 
-    for (const auto path : {std::string_view("text"), std::string_view("placeholder"), std::string_view("title"),
-                            std::string_view("frame.title"), std::string_view("label"), std::string_view("help"),
-                            std::string_view("requiredMessage")}) {
+    for (const auto path :
+         {std::string_view("text"), std::string_view("placeholder"), std::string_view("title"),
+          std::string_view("frame.title"), std::string_view("label"), std::string_view("help"),
+          std::string_view("requiredMessage"), std::string_view("document"), std::string_view("previousLabel"),
+          std::string_view("nextLabel"), std::string_view("clearLabel")}) {
       if (path == "title" && node.factory.kind != detail::ControlFactoryKind::DIALOG_FALLBACK) {
         continue;
       }
@@ -702,6 +708,10 @@ std::expected<void, ManagedError> resolveSettings(ResourceDocument &document, co
       auto &setting = path == "text"              ? node.arguments.settings.text
                       : path == "placeholder"     ? node.arguments.settings.placeholder
                       : path == "label"           ? node.arguments.settings.spinnerLabel
+                      : path == "document"        ? node.arguments.settings.findDocument
+                      : path == "previousLabel"   ? node.arguments.settings.findPreviousLabel
+                      : path == "nextLabel"       ? node.arguments.settings.findNextLabel
+                      : path == "clearLabel"      ? node.arguments.settings.findClearLabel
                       : path == "help"            ? node.arguments.settings.fieldHelp
                       : path == "requiredMessage" ? node.arguments.settings.fieldRequiredMessage
                       : path == "frame.title"     ? node.arguments.settings.frame.title

@@ -8,11 +8,24 @@
 
 namespace portals::ui {
 struct FormFieldConfig;
+struct FindBarConfig;
 
 namespace detail {
 /** @brief Internal bridge for checked access to managed scene and recipe state. */
 struct Access {
   /// @cond INTERNAL
+  static Description<FindBar> findBar(std::string document, std::string query, FindBarConfig config);
+  static std::expected<std::size_t, ManagedError> findPreparedQueries(ManagedScene &scene, Node<Widget> node);
+  static std::expected<std::shared_ptr<portals::detail::FindRecord>, ManagedError> findRecord(ManagedScene &scene,
+                                                                                              Node<Widget> node);
+  static std::expected<FindMatch, ManagedError> findNavigate(ManagedScene &scene, Node<Widget> node,
+                                                             FindDirection direction);
+  static std::expected<FindMatch, ManagedError> findMatch(ManagedScene &scene, Node<Widget> node);
+  static std::expected<bool, ManagedError> findCurrent(ManagedScene &scene, Node<Widget> node, const FindMatch &match);
+  static std::expected<void, ManagedError> findDocument(ManagedScene &scene, Node<Widget> node,
+                                                        std::string_view document);
+  static std::pair<std::expected<void, TreeError>, bool> findClear(ManagedScene &scene, Node<Widget> node,
+                                                                   std::source_location origin);
   static Description<FormField> formFieldComposition(
     std::string caption,
     portals::detail::MoveOnlyFunction<std::expected<Description<Widget>, ManagedError>(const ControlSettings &)> editor,
@@ -302,6 +315,8 @@ struct Access {
       return "ThreeState";
     } else if constexpr (std::same_as<T, FormField>) {
       return "FormField";
+    } else if constexpr (std::same_as<T, FindBar>) {
+      return "FindBar";
     } else if constexpr (std::same_as<T, LineEdit>) {
       return "LineEdit";
     } else if constexpr (std::same_as<T, Password>) {

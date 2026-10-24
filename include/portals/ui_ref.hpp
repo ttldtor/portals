@@ -4,6 +4,7 @@
 
 #include <portals/detail/dialog_command_result.hpp>
 #include <portals/detail/quit_command.hpp>
+#include <portals/find_bar.hpp>
 #include <portals/form_field.hpp>
 #include <portals/help_view.hpp>
 #include <portals/managed.hpp>
@@ -64,6 +65,14 @@ std::expected<FieldValidation, ManagedError> fieldValidation(const std::shared_p
 Ref<LineEdit> fieldEditor(const std::shared_ptr<RefTarget> &target);
 std::expected<bool, ManagedError> validateField(const std::shared_ptr<RefTarget> &target);
 std::expected<void, ManagedError> displayField(const std::shared_ptr<RefTarget> &target, FieldValidation value);
+Ref<LineEdit> findEditor(const std::shared_ptr<RefTarget> &target);
+std::expected<FindMatch, ManagedError> findNavigate(const std::shared_ptr<RefTarget> &target, FindDirection direction);
+std::expected<FindMatch, ManagedError> findMatch(const std::shared_ptr<RefTarget> &target);
+std::expected<bool, ManagedError> findCurrent(const std::shared_ptr<RefTarget> &target, const FindMatch &match);
+std::expected<void, ManagedError> findDocument(const std::shared_ptr<RefTarget> &target, std::string_view document);
+EditorCommandResult findClear(const std::shared_ptr<RefTarget> &target, std::source_location origin);
+std::pair<std::expected<void, TreeError>, bool> clearFindEditor(ManagedScene &scene, Node<Widget> node,
+                                                                std::source_location origin);
 struct MessageAccess;
 template <class> struct TableRowType;
 
@@ -315,9 +324,10 @@ public:
    * Assignment between TextProperty values still copies once rather than creating a binding.
    */
   TextSource source() const {
-    return TextSource(target_, (expectedType_ == "LineEdit" || expectedType_ == "FormField")
-                                 ? TextSource::Kind::DRAFT
-                                 : TextSource::Kind::CAPTION);
+    return TextSource(target_,
+                      (expectedType_ == "LineEdit" || expectedType_ == "FormField" || expectedType_ == "FindBar")
+                        ? TextSource::Kind::DRAFT
+                        : TextSource::Kind::CAPTION);
   }
 
   /** @param other Observing proxy copied without reading or changing a widget; errors/resolver are copied too. */
@@ -920,6 +930,122 @@ public:
     return TextProperty(std::move(target), std::move(resolver), TYPE, origin);
   }
 
+  /** @return Query editor observation; acquire after successful mount. */
+  Ref<LineEdit> editor() const
+    requires std::same_as<T, FindBar>
+  {
+    return detail::findEditor(target());
+  }
+
+  /** @param resolver Optional owning text resolver. @param origin Call site retained for mutations.
+   * @return Lazy
+   * ordinary query draft proxy, including when acquired before mount.
+   */
+  TextProperty text(TextResolver resolver = {}, std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, FindBar>
+  {
+    return TextProperty(target(), std::move(resolver), "FindBar", origin);
+  }
+
+  /** @param direction Checked stored-prefix direction. @return Selected owning range or exact technical failure.
+   *
+   * Empty/no-match is an empty successful handle. Same-index navigation makes no callback or invalidation.
+   * A
+   * selected callback runs after publication; its failure does not roll back the selected range.
+   */
+  std::expected<FindMatch, ManagedError> navigate(FindDirection direction) const
+    requires std::same_as<T, FindBar>
+  {
+    return detail::findNavigate(target(), direction);
+  }
+
+  /** @param origin Original call site. @return True when a stored match exists; technical errors report once. */
+  bool next(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, FindBar>
+  {
+    auto observation = target();
+    auto result = detail::findNavigate(observation, FindDirection::NEXT);
+    if (!result) {
+      detail::reportEventError(observation, result.error(), origin);
+    }
+    return result && static_cast<bool>(*result);
+  }
+
+  /** @param origin Original call site. @return True when a stored match exists; technical errors report once. */
+  bool previous(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, FindBar>
+  {
+    auto observation = target();
+    auto result = detail::findNavigate(observation, FindDirection::PREVIOUS);
+    if (!result) {
+      detail::reportEventError(observation, result.error(), origin);
+    }
+    return result && static_cast<bool>(*result);
+  }
+
+  /** @return Current owning range or empty handle; never reports, scans or changes selection. */
+  std::expected<FindMatch, ManagedError> match() const
+    requires std::same_as<T, FindBar>
+  {
+    return detail::findMatch(target());
+  }
+
+  /** @param value Previously retained match. @return True for membership in the current result set,
+   * independently
+   * of the selected ordinal; false for empty/stale sets, or an affinity/liveness error.
+   */
+  std::expected<bool, ManagedError> current(const FindMatch &value) const
+    requires std::same_as<T, FindBar>
+  {
+    return detail::findCurrent(target(), value);
+  }
+
+  /** @param bytes New bounded UTF-8 source, borrowed only during this call.
+   * @return Checked replacement; creates
+   * new identity even for equal bytes, including while disabled/hidden.
+   * Rejected input/preparation allocation
+   * preserves the previous source/results/selection and original TextError. The selected callback runs after
+   * publication; its failure does not roll back the accepted source.
+   */
+  std::expected<void, ManagedError> replaceDocument(std::string_view bytes) const
+    requires std::same_as<T, FindBar>
+  {
+    return detail::findDocument(target(), bytes);
+  }
+
+  /** @param bytes New owning source candidate. @param origin Original call site retained in diagnostics.
+   * @return
+   * True after coherent replacement; false after reporting the original technical failure once.
+   */
+  bool document(std::string_view bytes, std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, FindBar>
+  {
+    auto observation = target();
+    auto result = detail::findDocument(observation, bytes);
+    if (!result) {
+      detail::reportEventError(observation, result.error(), origin);
+    }
+    return result.has_value();
+  }
+
+  /** @param origin Original call site for the ordinary editor diagnostic receipt.
+   * @return Explicit clear receipt; one editor history operation, confirmed in every mode.
+   * Technical failures are reported once automatically. Keep the opaque receipt to preserve
+   * diagnostic provenance; result() extracts only its checked TreeError observation.
+   */
+  EditorCommandResult clearQuery(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, FindBar>
+  {
+    return detail::findClear(target(), origin);
+  }
+
+  /** @param origin Original call site. @return True after clear/no-op; technical failure is reported once. */
+  bool clear(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, FindBar>
+  {
+    return static_cast<bool>(detail::findClear(target(), origin));
+  }
+
   /** @return Standard text editor observation; failure remains in its checked slot.
    * Obtain only after mount;
    * custom non-LineEdit roots reject with INVALID_ARGUMENT.
@@ -1246,6 +1372,8 @@ struct NamedAccess {
     auto checked = scene.app_.tree().read(node, [&](const Widget &widget) {
       if (const auto *field = dynamic_cast<const FormField *>(&widget)) {
         editor = field->editor();
+      } else if (const auto *find = dynamic_cast<const FindBar *>(&widget)) {
+        editor = find->editor();
       }
     });
 
@@ -1302,7 +1430,7 @@ struct NamedAccess {
         ManagedError{ManagedPhase::BIND, node.id(), checked ? TreeError::INVALID_ARGUMENT : checked.error(), {}, {}});
     }
 
-    if constexpr (std::same_as<T, FormField>) {
+    if constexpr (std::same_as<T, FormField> || std::same_as<T, FindBar>) {
       auto editor = fieldDraft(scene, node);
 
       if (!editor) {
