@@ -437,11 +437,11 @@ private:
   }
 
   const ControlPropertyDescriptor *descriptor(std::string_view path) const {
-    for (const auto type :
-         {"FormField",   "Password", "LineEdit",    "CheckBox",      "VBox",          "Button",
-          "Border",      "Gauge",    "Spinner",     "ScrollArea",    "ScrollBar",     "Overlay",
-          "HelpView",    "KeyHints", "VirtualList", "VirtualTable",  "Chart",         "DataStateView",
-          "OverlayHost", "Dialog",   "MessageBox",  "Notifications", "ThemeSelector", "ThemeSelectorCatalog"}) {
+    for (const auto type : {"FindBar",     "FormField",    "Password",      "LineEdit",      "CheckBox",
+                            "VBox",        "Button",       "Border",        "Gauge",         "Spinner",
+                            "ScrollArea",  "ScrollBar",    "Overlay",       "HelpView",      "KeyHints",
+                            "VirtualList", "VirtualTable", "Chart",         "DataStateView", "OverlayHost",
+                            "Dialog",      "MessageBox",   "Notifications", "ThemeSelector", "ThemeSelectorCatalog"}) {
       const auto schema = controlPropertySchema(type);
       const auto found = std::ranges::find(schema, path, &ControlPropertyDescriptor::path);
 
@@ -532,6 +532,14 @@ private:
 
       if (path == "text") {
         settings.text = std::move(value);
+      } else if (path == "document") {
+        settings.findDocument = std::move(value);
+      } else if (path == "previousLabel") {
+        settings.findPreviousLabel = std::move(value);
+      } else if (path == "nextLabel") {
+        settings.findNextLabel = std::move(value);
+      } else if (path == "clearLabel") {
+        settings.findClearLabel = std::move(value);
       } else if (path == "help") {
         settings.fieldHelp = std::move(value);
       } else if (path == "requiredMessage") {
@@ -907,6 +915,10 @@ private:
       settings.spinnerMaxFrames = *value;
     } else if (path == "maxFrameBytes") {
       settings.spinnerMaxFrameBytes = *value;
+    } else if (path == "maxDocumentBytes") {
+      settings.findMaxDocumentBytes = *value;
+    } else if (path == "maxMatches") {
+      settings.findMaxMatches = *value;
     } else if (path == "maxFrameCells") {
       settings.spinnerMaxFrameCells = *value;
     } else if (path == "scrollbar.maxGlyphBytes") {

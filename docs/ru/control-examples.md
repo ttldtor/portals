@@ -8,6 +8,7 @@
 
 | Тема | Полная программа на C++ | Программа ресурса или справка |
 |---|---|---|
+| Буквальный поиск | [Руководство FindBar](find-bar.md), [main.cpp](../../examples/find_bar/main.cpp) | [guide_find_bar_resource.cpp](../examples/guide_find_bar_resource.cpp) |
 | Поля с подписями и валидация | [Настройки учётной записи](form-fields.md), [main.cpp](../../examples/form_field/main.cpp) | [guide_form_field_resource.cpp](../examples/guide_form_field_resource.cpp) |
 | Защищённое поле пароля | [guide_password.cpp](../examples/guide_password.cpp) | [guide_password_resource.cpp](../examples/guide_password_resource.cpp) |
 | Рамки и прокрутка | [guide_scrollbar_skin.cpp](../examples/guide_scrollbar_skin.cpp) | [guide_scrollbar_resource.cpp](../examples/guide_scrollbar_resource.cpp) |

@@ -10,6 +10,10 @@
 #include <span>
 
 namespace portals {
+namespace detail {
+struct FindAccess;
+}
+
 namespace ui::detail {
 struct ActionAccess;
 }
@@ -98,6 +102,7 @@ protected:
   void showMixed(bool mixed);
 
 private:
+  friend struct detail::FindAccess;
   friend struct ui::detail::ActionAccess;
   friend class ManagedScene;
   friend std::expected<void, TreeError> setControlText(WidgetTree &, Node<Control>, GraphemeText);

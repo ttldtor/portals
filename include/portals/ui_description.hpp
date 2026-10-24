@@ -2185,7 +2185,7 @@ private:
 
     Node<LineEdit> fieldDraft;
 
-    if constexpr (std::same_as<T, FormField>) {
+    if constexpr (std::same_as<T, FormField> || std::same_as<T, FindBar>) {
       auto editor = detail::NamedAccess::fieldDraft(scene, *node);
 
       if (!editor) {
@@ -2222,7 +2222,7 @@ private:
             slot->target.caption = value;
           } else if constexpr (std::same_as<T, LineEdit>) {
             slot->target.draft = value;
-          } else if constexpr (std::same_as<T, FormField>) {
+          } else if constexpr (std::same_as<T, FormField> || std::same_as<T, FindBar>) {
             slot->target.draft = fieldDraft;
           } else if constexpr (std::same_as<T, Password>) {
             slot->target.secret = value;
@@ -2236,7 +2236,7 @@ private:
         pending.caption = *node;
       } else if constexpr (std::same_as<T, LineEdit>) {
         pending.draft = *node;
-      } else if constexpr (std::same_as<T, FormField>) {
+      } else if constexpr (std::same_as<T, FormField> || std::same_as<T, FindBar>) {
         pending.draft = fieldDraft;
       } else if constexpr (std::same_as<T, Password>) {
         pending.secret = *node;

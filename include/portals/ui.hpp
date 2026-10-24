@@ -4,6 +4,7 @@
 
 #include <portals/ui_controls.hpp>
 #include <portals/ui_dialogs.hpp>
+#include <portals/ui_find_bar.hpp>
 #include <portals/ui_form_field.hpp>
 #include <portals/ui_layout.hpp>
 #include <portals/ui_modifiers.hpp>

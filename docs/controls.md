@@ -34,6 +34,12 @@ paint. `GraphemeText::from` reports text errors before widget construction.
 message. See [Form fields](form-fields.md) for the complete settings form,
 explicit checks, editing modes and custom editors.
 
+## Literal search
+
+`ui::findBar(...)` provides a bounded query editor, wrapping navigation and a
+summary. See the [FindBar guide](find-bar.md) for complete ordinary and loaded
+scene programs, result limits and ownership rules.
+
 ## Loading indicators {#spinner-control}
 
 `ui::spinner()` creates an animated, scene-owned `Spinner`. Presets, custom
