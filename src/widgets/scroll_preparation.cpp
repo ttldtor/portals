@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #include "scroll_controls_state.hpp"
 #include "scroll_preparation_state.hpp"
+#include "log_view_state.hpp"
 #include <portals/scroll_preparation.hpp>
 
 #include <limits>
@@ -357,6 +358,16 @@ std::expected<ScrollSnapshotAdmission, TreeError> refreshScrollPlans(WidgetTree 
           {plan.layout.extent.height, static_cast<std::uint64_t>(plan.layout.placement.viewport.height)});
         if (!metrics) {
           staged = std::unexpected(metrics.error());
+        }
+
+        if (staged) {
+          if (const auto *log = dynamic_cast<const LogView *>(&widget)) {
+            const auto positioned = stageLogViewOffset(*log, *staged, plan.layout);
+
+            if (!positioned) {
+              staged = std::unexpected(positioned.error());
+            }
+          }
         }
       }
     });

@@ -44,7 +44,7 @@ std::expected<Node<T>, ManagedError> mount(ManagedScene &scene, Description<T> &
       }
     }
 
-    for (const auto name : {"ScrollArea", "ScrollBar"}) {
+    for (const auto name : {"ScrollArea", "ScrollBar", "LogView"}) {
       auto installed = detail::ControlContextAccess::installScrollSchema(controls, name);
 
       if (!installed) {

@@ -40,6 +40,14 @@ explicit checks, editing modes and custom editors.
 summary. See the [FindBar guide](find-bar.md) for complete ordinary and loaded
 scene programs, result limits and ownership rules.
 
+## Bounded log output
+
+`ui::logView(...)` displays recent plain-text records in a bounded, scene-owned
+journal. It wraps by grapheme, retains the newest records within explicit line
+and byte limits, and keeps the reading position stable when new records arrive.
+See [LogView](log-view.md) for complete C++ and loaded-resource programs, limits,
+append and clear behavior, and follow-tail navigation.
+
 ## Loading indicators {#spinner-control}
 
 `ui::spinner()` creates an animated, scene-owned `Spinner`. Presets, custom

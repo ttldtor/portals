@@ -11,6 +11,7 @@
 #include <portals/editor_command.hpp>
 #include <portals/key_binding.hpp>
 #include <portals/line_edit.hpp>
+#include <portals/log_view.hpp>
 #include <portals/managed_diagnostics.hpp>
 #include <portals/managed_model.hpp>
 #include <portals/password.hpp>
@@ -447,6 +448,27 @@ public:
   std::expected<Node<T>, ManagedError> emplace(Node<Widget> parent, Args &&...args) {
     return emplaceConfigured<T>(parent, {}, std::forward<Args>(args)...);
   }
+
+  /** @param parent Live managed parent. @param initial Complete UTF-8 batch, copied before return.
+   * @param config Positive bounded storage and navigation settings.
+   * @param style Manual appearances. @param policy Existing layout constraints.
+   * @param frame Optional owning native frame customization.
+   * @return Initialized native log or exact typed failure; partial initial admission rolls back the child.
+   */
+  std::expected<Node<LogView>, ManagedError> logView(Node<Widget> parent, std::string_view initial = {},
+                                                     LogViewConfig config = {}, ControlStyle style = {},
+                                                     SizePolicy policy = DEFAULT_LOG_VIEW_POLICY,
+                                                     std::optional<FrameOptions> frame = {});
+  /** @param node Live log. @param bytes Complete borrowed batch.
+   * @return Atomic receipt or exact typed error; never automatically reports a checked failure.
+   */
+  std::expected<LogAppendReceipt, ManagedError> appendLogBatch(Node<LogView> node, std::string_view bytes);
+  /** @param node Live log. @return Resume-following result without automatic reporting. */
+  std::expected<void, ManagedError> followLogTail(Node<LogView> node);
+  /** @param node Live log. @return Clear result preserving ID history, without automatic reporting. */
+  std::expected<void, ManagedError> clearLog(Node<LogView> node);
+  /** @param node Live log. @return Owning counters or exact admission failure, without reporting. */
+  std::expected<LogStatus, ManagedError> logStatus(Node<LogView> node);
 
   /** @param parent Live managed parent.
    * @param controller Owning shared values; empty creates standalone values.
@@ -2025,6 +2047,7 @@ private:
   bool scrollIntentIntersects(const Entry &entry, std::span<const Node<Widget>> chain) const noexcept;
   std::expected<bool, TreeError> prepareRegionalInput(const LayoutSnapshot &snapshot);
   std::expected<void, TreeError> syncRegionalPresentation(Node<Widget> focused);
+  std::expected<bool, TreeError> prepareLogViews(const LayoutSnapshot &snapshot);
   std::expected<void, TreeError> prepareScrollFrame(const LayoutSnapshot &snapshot);
   void completeScrollFrame() noexcept;
 

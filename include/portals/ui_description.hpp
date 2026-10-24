@@ -1191,7 +1191,7 @@ public:
    * Removing or hiding the original child Ref retains the ordinary downward-only tree semantics.
    */
   Description &&framed(Ref<Border> outer, FrameOptions options = {}) &&
-    requires(std::derived_from<T, SizedWidget> && !std::same_as<T, ScrollArea>)
+    requires(std::derived_from<T, SizedWidget> && !std::derived_from<T, ScrollArea>)
   {
     (void)std::move(*this).framed(std::move(options));
 
@@ -1207,7 +1207,7 @@ public:
    * @return Same typed child recipe, with the same delayed reference publication as framed(outer, options).
    */
   Description &&framed(Ref<Border> outer, std::string_view pattern) &&
-    requires(std::derived_from<T, SizedWidget> && !std::same_as<T, ScrollArea>)
+    requires(std::derived_from<T, SizedWidget> && !std::derived_from<T, ScrollArea>)
   {
     (void)std::move(*this).framed(pattern);
 
@@ -1224,7 +1224,7 @@ public:
    * @return Same typed child recipe, with the existing outer Border publication contract.
    */
   Description &&framed(Ref<Border> outer, std::string_view pattern, std::string_view title) &&
-    requires(std::derived_from<T, SizedWidget> && !std::same_as<T, ScrollArea>)
+    requires(std::derived_from<T, SizedWidget> && !std::derived_from<T, ScrollArea>)
   {
     (void)std::move(*this).framed(std::move(outer), pattern);
 
@@ -1730,7 +1730,7 @@ private:
   static std::expected<void, ControlContextError> installControlSchema(const State &state, ControlContext &controls) {
     if constexpr (std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, Spinner>) {
       return detail::ControlContextAccess::installPrimitiveSchema(controls, *state.controlType);
-    } else if constexpr (std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>) {
+    } else if constexpr (std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar> || std::same_as<T, LogView>) {
       return detail::ControlContextAccess::installScrollSchema(controls, *state.controlType);
     } else if constexpr (std::same_as<T, DataStateView>) {
       return detail::ControlContextAccess::installDataStateSchema(controls);
@@ -1765,7 +1765,7 @@ private:
   static bool matchesControlFactory(const State &state, const ResolvedControl &effective) {
     if constexpr (std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, Spinner>) {
       return effective.factoryKind == detail::ControlFactoryKind::PRIMITIVE_FALLBACK;
-    } else if constexpr (std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>) {
+    } else if constexpr (std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar> || std::same_as<T, LogView>) {
       return effective.factoryKind == detail::ControlFactoryKind::SCROLL_FALLBACK;
     } else if constexpr (std::same_as<T, DataStateView>) {
       return effective.factoryKind == detail::ControlFactoryKind::DATA_STATE_FALLBACK;
@@ -1993,7 +1993,7 @@ private:
 
     auto mountParent = parent;
 
-    if constexpr (std::derived_from<T, SizedWidget> && !std::same_as<T, ScrollArea>) {
+    if constexpr (std::derived_from<T, SizedWidget> && !std::derived_from<T, ScrollArea>) {
       const auto &settings = resolved ? resolved->settings : state->controlArguments;
       const bool configuredFrame = detail::hasFrameSettings(settings.frame);
 
@@ -2044,9 +2044,9 @@ private:
         return std::unexpected(detail::error(parent, valid.error()));
       }
 
-      if constexpr (std::same_as<T, ScrollArea>) {
+      if constexpr (std::derived_from<T, ScrollArea>) {
         // Only the native factory consumes constructor-scoped advanced frame settings.
-        if (!state->controlType || *state->controlType != "ScrollArea") {
+        if (!state->controlType || (*state->controlType != "ScrollArea" && *state->controlType != "LogView")) {
           return std::unexpected(detail::error(parent, TreeError::INVALID_ARGUMENT));
         }
       } else {
@@ -2094,8 +2094,8 @@ private:
       context.controlPrepared = state->controlPrepared;
       context.controlSettings = resolved ? &resolved->settings : &state->controlArguments;
       context.frameOptions =
-        std::same_as<T, ScrollArea> && state->frame && state->frame->hasOptions ? &state->frame->options : nullptr;
-      context.frameSettings = std::same_as<T, ScrollArea> && state->frame ? state->frame->source.get() : nullptr;
+        std::derived_from<T, ScrollArea> && state->frame && state->frame->hasOptions ? &state->frame->options : nullptr;
+      context.frameSettings = std::derived_from<T, ScrollArea> && state->frame ? state->frame->source.get() : nullptr;
 
       context.messageBody = state->semanticConstruction ? state->semanticConstruction->body.get() : nullptr;
 

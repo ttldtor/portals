@@ -279,7 +279,11 @@ std::expected<void, ManagedError> prepareNodes(ResourceDocument &document, const
     if (node.factory.kind == detail::ControlFactoryKind::SCROLL_FALLBACK) {
       const auto &settings = resolved->settings;
 
-      if (resolved->base == "ScrollArea") {
+      if (resolved->base == "LogView") {
+        if (node.directChildCount || !validateLogLimits(detail::controlLogViewConfig(settings, {}).limits)) {
+          return std::unexpected(primitiveValueFailure(*resolved, node.directChildCount ? "children" : "maxLines"));
+        }
+      } else if (resolved->base == "ScrollArea") {
         if (node.directChildCount != 1) {
           return std::unexpected(document.propertyFailure(Code::INVALID_VALUE, node.offset, node.name, "children"));
         }

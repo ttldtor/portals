@@ -618,9 +618,120 @@ public:
    */
   std::expected<void, ManagedError> setOffset(ScrollAxis axis, ScrollOffset offset,
                                               std::source_location origin = std::source_location::current()) const
-    requires(std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+    requires(std::derived_from<T, ScrollArea> || std::same_as<T, ScrollBar>)
   {
     return detail::scrollOffset(target(), axis, offset, origin);
+  }
+
+  /** @param bytes Complete UTF-8 batch, borrowed only during synchronous admission.
+   * @param origin Original command site. @return Atomic owning receipt; checked failures are never auto-reported.
+   */
+  std::expected<LogAppendReceipt, ManagedError> appendBatch(
+    std::string_view bytes, std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, LogView>
+  {
+    const auto observation = target();
+    const auto owner = detail::eventScene(observation);
+
+    if (!owner) {
+      return std::unexpected(owner.error());
+    }
+
+    auto result = (*owner)->appendLogBatch(this->node(), bytes);
+
+    if (!result) {
+      result.error().registrationOrigin = origin;
+    }
+
+    return result;
+  }
+
+  /** @param bytes Complete batch. @param origin Call site.
+   * @return Success; false reports the exact native failure once through the existing scene collector.
+   */
+  bool append(std::string_view bytes, std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, LogView>
+  {
+    const auto result = appendBatch(bytes, origin);
+
+    if (!result) {
+      detail::reportEventError(target(), result.error(), origin);
+    }
+
+    return result.has_value();
+  }
+
+  /** @param origin Original call site. @return Pure checked resume-following result, without reporting. */
+  std::expected<void, ManagedError> followTail(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, LogView>
+  {
+    const auto owner = detail::eventScene(target());
+
+    if (!owner) {
+      return std::unexpected(owner.error());
+    }
+
+    auto result = (*owner)->followLogTail(this->node());
+
+    if (!result) {
+      result.error().registrationOrigin = origin;
+    }
+
+    return result;
+  }
+
+  /** @param origin Call site. @return Resume success; false records the original cause once. */
+  bool tail(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, LogView>
+  {
+    const auto result = followTail(origin);
+
+    if (!result) {
+      detail::reportEventError(target(), result.error(), origin);
+    }
+
+    return result.has_value();
+  }
+
+  /** @param origin Original call site. @return Checked clear result preserving IDs; never auto-reports. */
+  std::expected<void, ManagedError> clearLog(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, LogView>
+  {
+    const auto owner = detail::eventScene(target());
+
+    if (!owner) {
+      return std::unexpected(owner.error());
+    }
+
+    auto result = (*owner)->clearLog(this->node());
+
+    if (!result) {
+      result.error().registrationOrigin = origin;
+    }
+
+    return result;
+  }
+
+  /** @param origin Call site. @return Clear success; false records the original failure once. */
+  bool clear(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, LogView>
+  {
+    const auto result = clearLog(origin);
+
+    if (!result) {
+      detail::reportEventError(target(), result.error(), origin);
+    }
+
+    return result.has_value();
+  }
+
+  /** @return Owning counters/flags or exact UI/lifetime/frame error; never reports or retains records. */
+  std::expected<LogStatus, ManagedError> status() const
+    requires std::same_as<T, LogView>
+  {
+    const auto owner = detail::eventScene(target());
+
+    return owner ? (*owner)->logStatus(this->node()) : std::unexpected(owner.error());
   }
 
   /** @param metrics Exact standalone extent and viewport.

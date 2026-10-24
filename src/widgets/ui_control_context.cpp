@@ -287,7 +287,12 @@ constexpr std::array<ControlPropertyDescriptor, detail::CONTROL_PROPERTY_COUNT> 
    {"maxMatches", Kind::UNSIGNED_INTEGER, 1, {}},
    {"previousLabel", Kind::TEXT, 1, {}},
    {"nextLabel", Kind::TEXT, 1, {}},
-   {"clearLabel", Kind::TEXT, 1, {}}}};
+   {"clearLabel", Kind::TEXT, 1, {}},
+   {"maxLines", Kind::UNSIGNED_INTEGER, 1, {}},
+   {"maxBytes", Kind::UNSIGNED_INTEGER, 1, {}},
+   {"maxBatchBytes", Kind::UNSIGNED_INTEGER, 1, {}},
+   {"maxRecordBytes", Kind::UNSIGNED_INTEGER, 1, {}},
+   {"followTail", Kind::BOOLEAN, 1, {}}}};
 static_assert(std::ranges::all_of(PROPERTIES, [](const auto &property) {
   return !property.path.empty();
 }));
@@ -314,6 +319,7 @@ constexpr Mask SCROLLBAR_MASK = propertyMask(204, 205, 206, 207, 208, 209, 210, 
 constexpr Mask SCROLL_COMMON_MASK = SIZE_MASK | SCROLLBAR_MASK | propertyMask(8, 38, 39, 44, 45, 46, 47, 48);
 constexpr Mask SCROLL_AREA_MASK = SCROLL_COMMON_MASK | propertyMask(49, 50, 51, 53, 54, 55);
 constexpr Mask SCROLL_BAR_MASK = SCROLL_COMMON_MASK | propertyMask(52);
+constexpr Mask LOG_VIEW_MASK = SIZE_MASK | TEXT_MASK | propertyMask(8, 225, 226, 227, 228, 229);
 constexpr Mask OVERLAY_MASK = SIZE_MASK | propertyMask(22, 23, 24, 25, 56, 57);
 constexpr Mask KEY_HELP_COMMON_MASK = SIZE_MASK | propertyMask(59, 60, 61, 62, 63, 64, 65, 66);
 constexpr Mask HELP_VIEW_MASK = KEY_HELP_COMMON_MASK | propertyMask(58);
@@ -335,7 +341,7 @@ constexpr Mask THEME_CATALOG_MASK =
 constexpr Mask POSITIVE_UNSIGNED_MASK =
   propertyMask(3, 17, 18, 26, 27, 28, PAINT_LIMIT_PROPERTY, 45, 55, 59, 71, 72, 73, 83, 90, 100, 110, 111, 112, 113,
                114, 115, 116, 124, 125, 126, 127, 128, 129, 130, 137, 138, 139, 140, 143, 144, 145, 146, 147, 148, 149,
-               150, 151, 155, 156, 157, 158, 172, 195, 201, 202, 203, 206, 221);
+               150, 151, 155, 156, 157, 158, 172, 195, 201, 202, 203, 206, 221, 225, 226, 227, 228);
 constexpr Mask CHECK_MASK = SIZE_MASK | TEXT_MASK | propertyMask(5, 6);
 constexpr Mask LAYOUT_MASK = SIZE_MASK | propertyMask(4, 22, 23, 24, 25, 30, 31, 32);
 constexpr Mask EDIT_MASK = SIZE_MASK | TEXT_MASK | propertyMask(7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 33, 34, 35, 36);
@@ -394,6 +400,9 @@ constexpr auto SCROLL_BAR_SCHEMA = withFrame(std::to_array(
    PROPERTIES[44],  PROPERTIES[45],  PROPERTIES[46],  PROPERTIES[47],  PROPERTIES[48],  PROPERTIES[52],
    PROPERTIES[204], PROPERTIES[205], PROPERTIES[206], PROPERTIES[207], PROPERTIES[208], PROPERTIES[209],
    PROPERTIES[210], PROPERTIES[211], PROPERTIES[212], PROPERTIES[213], PROPERTIES[214], PROPERTIES[215]}));
+constexpr auto LOG_VIEW_SCHEMA = withFrame(std::to_array(
+  {PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[8], PROPERTIES[225], PROPERTIES[226],
+   PROPERTIES[227], PROPERTIES[228], PROPERTIES[229]}));
 constexpr auto OVERLAY_SCHEMA =
   withFrame(std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[22], PROPERTIES[23], PROPERTIES[24],
                            PROPERTIES[25], PROPERTIES[56], PROPERTIES[57]}));
@@ -504,6 +513,7 @@ static_assert(schemaMatchesMask(SPINNER_SCHEMA, SPINNER_MASK));
 static_assert(schemaMatchesMask(CHECK_SCHEMA, CHECK_MASK));
 static_assert(schemaMatchesMask(SCROLL_AREA_SCHEMA, SCROLL_AREA_MASK));
 static_assert(schemaMatchesMask(SCROLL_BAR_SCHEMA, SCROLL_BAR_MASK));
+static_assert(schemaMatchesMask(LOG_VIEW_SCHEMA, LOG_VIEW_MASK));
 static_assert(schemaMatchesMask(OVERLAY_SCHEMA, OVERLAY_MASK));
 static_assert(schemaMatchesMask(HELP_VIEW_SCHEMA, HELP_VIEW_MASK));
 static_assert(schemaMatchesMask(KEY_HINTS_SCHEMA, KEY_HINTS_MASK));
@@ -876,7 +886,12 @@ ControlContextError exceptionError() noexcept {
   X(findMaxMatches, 221) \
   X(findPreviousLabel, 222) \
   X(findNextLabel, 223) \
-  X(findClearLabel, 224)
+  X(findClearLabel, 224) \
+  X(maxLines, 225) \
+  X(maxBytes, 226) \
+  X(maxBatchBytes, 227) \
+  X(maxRecordBytes, 228) \
+  X(followTail, 229)
 
 #define PORTALS_CONTROL_LEAVES(X) \
   PORTALS_CONTROL_BASE_LEAVES(X) \
@@ -1272,6 +1287,11 @@ void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &pr
       std::pair<std::string_view, bool>{"horizontalAlign", patch.horizontalAlign.has_value()},
       std::pair<std::string_view, bool>{"verticalAlign", patch.verticalAlign.has_value()},
       std::pair<std::string_view, bool>{"initiallyOpen", patch.initiallyOpen.has_value()},
+      std::pair<std::string_view, bool>{"maxLines", patch.maxLines.has_value()},
+      std::pair<std::string_view, bool>{"maxBytes", patch.maxBytes.has_value()},
+      std::pair<std::string_view, bool>{"maxBatchBytes", patch.maxBatchBytes.has_value()},
+      std::pair<std::string_view, bool>{"maxRecordBytes", patch.maxRecordBytes.has_value()},
+      std::pair<std::string_view, bool>{"followTail", patch.followTail.has_value()},
       std::pair<std::string_view, bool>{"format.maxBytesPerBinding", patch.format.maxBytesPerBinding.has_value()},
       std::pair<std::string_view, bool>{"format.strokeSeparator", patch.format.strokeSeparator.has_value()},
       std::pair<std::string_view, bool>{"format.alternativeSeparator", patch.format.alternativeSeparator.has_value()},
@@ -1633,7 +1653,7 @@ struct ControlContext::Data {
 
   std::optional<Schema> fallback;
   std::array<std::optional<Schema>, 3> primitiveFallbacks;
-  std::array<std::optional<Schema>, 2> scrollFallbacks;
+  std::array<std::optional<Schema>, 3> scrollFallbacks;
   std::optional<Schema> overlayFallback;
   std::optional<Schema> dataStateFallback;
   std::optional<Schema> messageFallback;
@@ -1976,6 +1996,10 @@ std::span<const ControlPropertyDescriptor> controlPropertySchema(std::string_vie
     return SCROLL_BAR_SCHEMA;
   }
 
+  if (type == "LogView") {
+    return LOG_VIEW_SCHEMA;
+  }
+
   if (type == "Overlay") {
     return OVERLAY_SCHEMA;
   }
@@ -2125,7 +2149,7 @@ std::expected<void, ControlContextError> ControlContextAccess::installScrollSche
     return std::unexpected(*context.failure_);
   }
 
-  if (name != "ScrollArea" && name != "ScrollBar") {
+  if (name != "ScrollArea" && name != "ScrollBar" && name != "LogView") {
     return std::unexpected(ControlContextError{Code::UNKNOWN_TYPE, {}});
   }
 
@@ -2138,9 +2162,9 @@ std::expected<void, ControlContextError> ControlContextAccess::installScrollSche
       context.data_ ? std::make_shared<ControlContext::Data>(*context.data_) : std::make_shared<ControlContext::Data>();
     ControlContext::Data::Schema schema;
     schema.name = name;
-    schema.mask = name == "ScrollArea" ? SCROLL_AREA_MASK : SCROLL_BAR_MASK;
+    schema.mask = name == "ScrollArea" ? SCROLL_AREA_MASK : name == "LogView" ? LOG_VIEW_MASK : SCROLL_BAR_MASK;
     schema.factoryKind = ControlFactoryKind::SCROLL_FALLBACK;
-    next->scrollFallbacks[name == "ScrollArea" ? 0 : 1] = schema;
+    next->scrollFallbacks[name == "ScrollArea" ? 0 : name == "LogView" ? 2 : 1] = schema;
     context.data_ = std::move(next);
     context.prepared_ = false;
 

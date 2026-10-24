@@ -111,7 +111,7 @@ Scene scene(Factory factory, SceneOptions options = {}, std::source_location ori
           }
         }
 
-        for (const auto name : {"ScrollArea", "ScrollBar"}) {
+        for (const auto name : {"ScrollArea", "ScrollBar", "LogView"}) {
           installed = detail::ControlContextAccess::installScrollSchema(effectiveControls, name);
 
           if (!installed) {
