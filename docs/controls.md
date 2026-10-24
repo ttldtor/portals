@@ -28,6 +28,12 @@ and frame errors. Equal text/style/value synchronization is a no-op; changed tex
 or width policy invalidates layout, while style, focus and checked state invalidate
 paint. `GraphemeText::from` reports text errors before widget construction.
 
+## Form fields
+
+`ui::formField(...)` groups an editor with a label, help and a validation
+message. See [Form fields](form-fields.md) for the complete settings form,
+explicit checks, editing modes and custom editors.
+
 ## Loading indicators {#spinner-control}
 
 `ui::spinner()` creates an animated, scene-owned `Spinner`. Presets, custom

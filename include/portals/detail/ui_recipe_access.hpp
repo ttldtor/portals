@@ -2,14 +2,31 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
-#include <portals/detail/ui_recipe_context.hpp>
 #include <portals/detail/recipe_state.hpp>
+#include <portals/detail/ui_recipe_context.hpp>
 #include <portals/ui_action.hpp>
 
 namespace portals::ui {
+struct FormFieldConfig;
+
 namespace detail {
 /** @brief Internal bridge for checked access to managed scene and recipe state. */
 struct Access {
+  /// @cond INTERNAL
+  static Description<FormField> formFieldComposition(
+    std::string caption,
+    portals::detail::MoveOnlyFunction<std::expected<Description<Widget>, ManagedError>(const ControlSettings &)> editor,
+    FormFieldOptions options, std::shared_ptr<RecipeLayout> layout = {},
+    std::shared_ptr<std::weak_ptr<portals::detail::FormFieldRecord>> bridge = {});
+  static Description<FormField> formField(std::string caption, std::string initial, FormFieldConfig config);
+  static Description<FormField> formField(std::string caption, Description<Widget> editor, FormFieldOptions options);
+  static std::expected<std::shared_ptr<portals::detail::FormFieldRecord>, ManagedError> fieldRecord(ManagedScene &scene,
+                                                                                                    Node<Widget> node);
+  static std::expected<FieldValidation, ManagedError> fieldValidation(ManagedScene &scene, Node<Widget> node);
+  static std::expected<bool, ManagedError> validateField(ManagedScene &scene, Node<Widget> node);
+  static std::expected<void, ManagedError> displayField(ManagedScene &scene, Node<Widget> node, FieldValidation value);
+
+  /// @endcond
   /** @param scene Owner of the nested mount transaction entered on this thread. */
   static void beginMount(ManagedScene &scene) noexcept {
     if (scene.owner_ == std::this_thread::get_id()) {
@@ -283,6 +300,8 @@ struct Access {
       return "CheckBox";
     } else if constexpr (std::same_as<T, ThreeState>) {
       return "ThreeState";
+    } else if constexpr (std::same_as<T, FormField>) {
+      return "FormField";
     } else if constexpr (std::same_as<T, LineEdit>) {
       return "LineEdit";
     } else if constexpr (std::same_as<T, Password>) {

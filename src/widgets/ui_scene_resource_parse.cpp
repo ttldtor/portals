@@ -437,29 +437,11 @@ private:
   }
 
   const ControlPropertyDescriptor *descriptor(std::string_view path) const {
-    for (const auto type : {"Password",
-                            "LineEdit",
-                            "CheckBox",
-                            "VBox",
-                            "Button",
-                            "Border",
-                            "Gauge",
-                            "Spinner",
-                            "ScrollArea",
-                            "ScrollBar",
-                            "Overlay",
-                            "HelpView",
-                            "KeyHints",
-                            "VirtualList",
-                            "VirtualTable",
-                            "Chart",
-                            "DataStateView",
-                            "OverlayHost",
-                            "Dialog",
-                            "MessageBox",
-                            "Notifications",
-                            "ThemeSelector",
-                            "ThemeSelectorCatalog"}) {
+    for (const auto type :
+         {"FormField",   "Password", "LineEdit",    "CheckBox",      "VBox",          "Button",
+          "Border",      "Gauge",    "Spinner",     "ScrollArea",    "ScrollBar",     "Overlay",
+          "HelpView",    "KeyHints", "VirtualList", "VirtualTable",  "Chart",         "DataStateView",
+          "OverlayHost", "Dialog",   "MessageBox",  "Notifications", "ThemeSelector", "ThemeSelectorCatalog"}) {
       const auto schema = controlPropertySchema(type);
       const auto found = std::ranges::find(schema, path, &ControlPropertyDescriptor::path);
 
@@ -550,6 +532,10 @@ private:
 
       if (path == "text") {
         settings.text = std::move(value);
+      } else if (path == "help") {
+        settings.fieldHelp = std::move(value);
+      } else if (path == "requiredMessage") {
+        settings.fieldRequiredMessage = std::move(value);
       } else if (path == "label") {
         settings.spinnerLabel = std::move(value);
       } else if (path == "placeholder") {
@@ -714,6 +700,8 @@ private:
         settings.initiallyOpen = enabled;
       } else if (path == "scroll") {
         settings.grid.scroll = enabled;
+      } else if (path == "required") {
+        settings.fieldRequired = enabled;
       } else if (path == "readOnly") {
         settings.readOnly = enabled;
       } else if (path == "focusable") {

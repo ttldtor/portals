@@ -434,6 +434,9 @@ struct ControlSettings {
   std::optional<std::size_t> spinnerMaxFrameBytes{};  ///< Sparse Spinner maxFrameBytes setting.
   std::optional<std::size_t> spinnerMaxFrameCells{};  ///< Sparse Spinner maxFrameCells setting.
   ControlScrollbarSettings scrollbar{};               ///< Sparse scrollbar skin; appended for aggregate compatibility.
+  std::optional<TextValue> fieldHelp{};               ///< FormField explanatory text below its editor.
+  std::optional<bool> fieldRequired{};                ///< FormField required marker and standard text rule.
+  std::optional<TextValue> fieldRequiredMessage{};    ///< FormField empty-candidate explanation.
 };
 
 /** @brief Finite context bounds, checked before publication/materialization beyond each bound. */

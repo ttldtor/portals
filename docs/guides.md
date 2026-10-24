@@ -23,6 +23,7 @@ The [first application](first-application.md) develops a quick-note form in four
 | Place controls in cells | [Grid and overlay](grid.md) |
 | Change a control through a reference | [Control references](text-property.md) |
 | Edit text | [LineEdit](line-edit.md) |
+| Validate a labeled editor | [Form fields](form-fields.md) |
 | Undo and redo edits | [Undo and redo](editor-history.md) |
 | Create shared state | [Properties](property.md) |
 | Supply view data | [Models](model.md) |
