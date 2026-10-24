@@ -5,6 +5,14 @@
 int main() {
   using namespace portals;
 
+  static_assert(std::same_as<decltype(ui::gauge({}, {})), ui::Description<Gauge>>);
+  static_assert(std::same_as<decltype(ui::gauge(.25)), ui::Description<Gauge>>);
+  static_assert(std::same_as<decltype(ui::gauge({}, {}, {}, {})), ui::Description<Gauge>>);
+  static_assert(std::same_as<decltype(ui::gauge(.25, GaugeOptions{}, ControlStyle{}, SizePolicy{})),
+                             ui::Description<Gauge>>);
+  static_assert(std::same_as<decltype(ui::gauge(std::declval<ui::Ref<Gauge> &>(), .25)), ui::Description<Gauge>>);
+  static_assert(std::same_as<decltype(ui::gauge(std::declval<ui::Ref<Gauge>>(), .25)), ui::Description<Gauge>>);
+
   auto app = Application::create();
 
   if (!app) {
@@ -20,7 +28,7 @@ int main() {
   ui::Ref<Gauge> load;
   ui::Ref<Button> exit;
   auto recipe = ui::hbox(
-    ui::vbox(ui::label("Transfer"), ui::gauge(.65).reference(load) | ui::width(10), ui::plainButton(exit, "!")) |
+    ui::vbox(ui::label("Transfer"), ui::gauge(load, .65) | ui::width(10), ui::plainButton(exit, "!")) |
     ui::border({PrimitiveGlyphs::ASCII, 16384}) | ui::width(14) | ui::height(5));
   const auto mounted = ui::mount(**scene, std::move(recipe));
 
@@ -48,7 +56,7 @@ int main() {
                            ++calls;
                          }) ||
       !(*app)->router().invoke(exit.node(), {Action::ACTIVATE}) || calls != 1 ||
-      !setGaugeValue((*app)->tree(), load.node(), .75)) {
+      !load.value(.75) || !load.adjust(-.25)) {
     return 5;
   }
 

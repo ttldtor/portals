@@ -729,6 +729,26 @@ std::expected<void, TreeError> setGaugeValue(WidgetTree &tree, Node<Gauge> node,
   return edited ? result : edited;
 }
 
+std::expected<void, TreeError> adjustGaugeValue(WidgetTree &tree, Node<Gauge> node, double delta) {
+  std::expected<void, TreeError> result;
+  const auto edited = tree.edit(node, [&](Gauge &gauge) {
+    const auto value = gauge.value_ + delta;
+    result = Gauge::validate(value, gauge.options_);
+
+    if (!result || gauge.value_ == value) {
+      return;
+    }
+
+    result = tree.invalidate(node, Invalidation::PAINT);
+
+    if (result) {
+      gauge.value_ = value;
+    }
+  });
+
+  return edited ? result : edited;
+}
+
 std::expected<void, TreeError> syncBorder(WidgetTree &tree, Node<Border> node) {
   return syncBorder(tree, node, {});
 }

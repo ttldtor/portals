@@ -315,4 +315,18 @@ inline Description<Gauge> gauge(double value, GaugeOptions options = {}, Control
                                           {.value = value});
 }
 
+/** @tparam R Exactly a Gauge Ref, deduced so empty braces retain the value-first overload.
+ * @param reference Shared weak observer, published only after complete mount.
+ * @param value Initial finite value in the inclusive configured range.
+ * @param options Owning bounds, width, glyph mode and paint cap.
+ * @param style Owning manual appearances beneath theme declarations. @param policy Owning layout constraints.
+ * @return Observed determinate gauge recipe; preserves the ordinary gauge's validation and resource settings.
+ */
+template <class R>
+  requires std::same_as<std::remove_cvref_t<R>, Ref<Gauge>>
+inline Description<Gauge> gauge(R &&reference, double value, GaugeOptions options = {}, ControlStyle style = {},
+                                SizePolicy policy = {}) {
+  return gauge(value, options, style, policy).reference(std::forward<R>(reference));
+}
+
 } // namespace portals::ui

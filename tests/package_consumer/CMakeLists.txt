@@ -959,3 +959,10 @@ set_target_properties(portals_search_journal_example_consumer PROPERTIES CXX_EXT
 if(WIN32)
   target_sources(portals_search_journal_example_consumer PRIVATE no_dialogs.cpp)
 endif()
+
+add_executable(portals_progress_workbench_example_consumer "examples/progress_workbench/main.cpp")
+target_link_libraries(portals_progress_workbench_example_consumer PRIVATE portals::core)
+set_target_properties(portals_progress_workbench_example_consumer PROPERTIES CXX_EXTENSIONS OFF)
+if(WIN32)
+  target_sources(portals_progress_workbench_example_consumer PRIVATE no_dialogs.cpp)
+endif()

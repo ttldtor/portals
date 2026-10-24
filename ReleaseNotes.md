@@ -7,6 +7,8 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Gauge refs accept checked finite value replacements and relative adjustments, with a reference-first recipe and a complete manual progress-workbench example. Fractional ranges, out-of-range rejection and loaded-scene compatibility are preserved.
+
 - Added a complete search-journal example combining an operator field, two Unicode troubleshooting notes, selected-match summaries and a bounded event log.
 
 - Added retained `FindBar` with bounded literal Unicode search, match navigation, context previews and document replacement. C++ recipes and loaded scenes share the query editor's editing modes, Undo/Redo and typed error reporting; match handles retain their source text and detect stale result sets.

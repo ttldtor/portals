@@ -120,6 +120,184 @@ bool hasCause(const ManagedError &error, TreeError expected) {
   return cause && *cause == expected;
 }
 
+TEST_CASE("gauge refs preserve fractional values no-op invalidation and programmatic presentation writes") {
+  Fixture fixture;
+  ui::Ref<Gauge> gauge;
+
+  take(ui::mount(*fixture.scene, ui::gauge(gauge, .25).enabled(false)));
+  take(fixture.app->tree().consumeFrameRequest());
+  take(gauge.value(.25));
+  take(gauge.adjust(0));
+  CHECK(take(fixture.app->tree().consumeFrameRequest()) == Invalidation::NONE);
+  take(gauge.adjust(.125));
+  CHECK(take(fixture.app->tree().consumeFrameRequest()) == Invalidation::PAINT);
+  take(fixture.app->tree().read(gauge.node(), [](const Gauge &view) {
+    CHECK(view.value() == .375);
+  }));
+
+  for (const double delta : {1., -1., std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity(),
+                             std::numeric_limits<double>::quiet_NaN()}) {
+    const auto result = gauge.adjust(delta);
+
+    REQUIRE_FALSE(result);
+    CHECK(hasCause(result.error(), TreeError::INVALID_ARGUMENT));
+    CHECK(result.error().operation == std::string_view("gauge.adjust"));
+    CHECK(take(fixture.app->tree().consumeFrameRequest()) == Invalidation::NONE);
+  }
+
+  take(fixture.app->tree().read(gauge.node(), [](const Gauge &view) {
+    CHECK(view.value() == .375);
+  }));
+  CHECK(take(fixture.scene->diagnostics()).errors.size() == 5);
+  take(gauge.value(0));
+  take(gauge.adjust(1));
+  take(fixture.app->tree().read(gauge.node(), [](const Gauge &view) {
+    CHECK(view.value() == 1);
+  }));
+}
+
+TEST_CASE("gauge refs reject unmounted moved stale destroyed and foreign thread observations") {
+  Fixture fixture;
+  ui::Ref<Gauge> empty;
+
+  CHECK(hasCause(empty.value(.5).error(), TreeError::CLOSED));
+  CHECK(hasCause(empty.adjust(.5).error(), TreeError::CLOSED));
+
+  ui::Ref<Gauge> original;
+  auto gauge = std::move(original);
+
+  CHECK(hasCause(original.adjust(.5).error(), TreeError::CLOSED));
+  take(ui::mount(*fixture.scene, ui::gauge(gauge, .25)));
+
+  std::optional<ManagedError> foreign;
+  std::thread worker([&] {
+    foreign = gauge.adjust(.25).error();
+  });
+
+  worker.join();
+  REQUIRE(foreign);
+  CHECK(hasCause(*foreign, TreeError::WRONG_THREAD));
+  CHECK(take(fixture.scene->diagnostics()).errors.empty());
+  take(fixture.scene->remove(gauge.node()));
+  CHECK(hasCause(gauge.value(.5).error(), TreeError::STALE_NODE));
+  CHECK(take(fixture.scene->diagnostics()).errors.size() == 1);
+  fixture.scene.reset();
+  CHECK(hasCause(gauge.adjust(.5).error(), TreeError::CLOSED));
+}
+
+TEST_CASE("gauge ref frame reentry rejects before mutation") {
+  Fixture fixture;
+  ui::Ref<Gauge> gauge;
+
+  take(ui::mount(*fixture.scene, ui::gauge(gauge, .25)));
+  take(fixture.app->tree().consumeFrameRequest());
+  take(fixture.app->tree().frame([&] {
+    CHECK(hasCause(gauge.adjust(.25).error(), TreeError::WOULD_BLOCK));
+    CHECK(hasCause(gauge.value(.5).error(), TreeError::WOULD_BLOCK));
+  }));
+  take(fixture.app->tree().read(gauge.node(), [](const Gauge &view) {
+    CHECK(view.value() == .25);
+  }));
+  CHECK(take(fixture.app->tree().consumeFrameRequest()) == Invalidation::NONE);
+  CHECK(take(fixture.scene->diagnostics()).errors.size() == 2);
+}
+
+TEST_CASE("gauge commands collect once in returned callback and configuration failures") {
+  Fixture fixture;
+  ui::Ref<Gauge> gauge;
+  ui::Ref<Button> button;
+
+  take(ui::mount(*fixture.scene, ui::vbox(ui::gauge(gauge, .25), ui::button(button, "Advance").onClick([=] {
+    return gauge.adjust(1);
+  }))));
+  (void)fixture.app->router().invoke(button.node(), {Action::ACTIVATE});
+
+  const auto diagnostics = take(fixture.scene->diagnostics());
+
+  REQUIRE(diagnostics.errors.size() == 1);
+  CHECK(hasCause(diagnostics.errors.front().error, TreeError::INVALID_ARGUMENT));
+  CHECK(diagnostics.errors.front().error.operation == std::string_view("gauge.adjust"));
+
+  ui::Ref<Gauge> configured;
+  auto owner = ui::scene(ui::gauge(configured, .25));
+
+  owner.configure([=](ManagedScene &) {
+    return configured.value(2);
+  });
+  CHECK_FALSE(owner.prepareChecked());
+
+  const auto report = owner.diagnostics();
+
+  REQUIRE(report);
+  CHECK(report->errors.size() == 1);
+}
+
+TEST_CASE("gauge ignored configuration failure stops the scene once and preserves its value") {
+  ui::Ref<Gauge> gauge;
+  auto owner = ui::scene(ui::gauge(gauge, .25));
+  double observed{};
+  bool continued{};
+
+  owner.configure([&](ManagedScene &, Application &app) {
+    (void)gauge.adjust(1);
+    take(app.tree().read(gauge.node(), [&](const Gauge &view) {
+      observed = view.value();
+    }));
+  });
+  owner.configure([&](ManagedScene &) {
+    continued = true;
+  });
+  CHECK_FALSE(owner.prepareChecked());
+
+  const auto diagnostics = take(owner.diagnostics());
+
+  REQUIRE(diagnostics.errors.size() == 1);
+  CHECK(hasCause(diagnostics.errors.front().error, TreeError::INVALID_ARGUMENT));
+  CHECK(diagnostics.errors.front().error.operation == std::string_view("gauge.adjust"));
+  CHECK(diagnostics.errors.front().error.setupStopped);
+  CHECK(observed == .25);
+  CHECK_FALSE(continued);
+}
+
+TEST_CASE("gauge ignored void action failure is collected without failing dispatch") {
+  Fixture fixture;
+  ui::Ref<Gauge> gauge;
+  ui::Ref<Button> button;
+
+  take(ui::mount(*fixture.scene, ui::vbox(ui::gauge(gauge, .25), ui::button(button, "Advance").onClick([=] {
+    (void)gauge.adjust(1);
+  }))));
+
+  const auto invoked = fixture.app->router().invoke(button.node(), {Action::ACTIVATE});
+  const auto diagnostics = take(fixture.scene->diagnostics());
+
+  REQUIRE(invoked);
+  REQUIRE(diagnostics.errors.size() == 1);
+  CHECK(hasCause(diagnostics.errors.front().error, TreeError::INVALID_ARGUMENT));
+  CHECK(diagnostics.errors.front().error.operation == std::string_view("gauge.adjust"));
+  CHECK_FALSE(diagnostics.errors.front().error.setupStopped);
+  take(fixture.app->tree().read(gauge.node(), [](const Gauge &view) {
+    CHECK(view.value() == .25);
+  }));
+}
+
+TEST_CASE("loaded fractional gauge accepts the same ref commands") {
+  auto owner = ui::scene("scene{Gauge#progress{minimum=-1e0 maximum=1 value=.25}}",
+                         {.format = ui::SceneResourceFormat::CONFIGURATION});
+  auto gauge = owner.get<Gauge>("progress");
+  double observed{};
+
+  owner.configure([&](ManagedScene &, Application &app) {
+    take(gauge.adjust(-.75));
+    take(app.tree().read(gauge.node(), [&](const Gauge &view) {
+      observed = view.value();
+    }));
+  });
+  take(owner.prepareChecked());
+  CHECK(observed == -.5);
+  take(gauge.value(1));
+}
+
 template <class T>
 concept HasText = requires(T ref) { ref.text(); };
 static_assert(HasText<ui::Ref<Label>>);

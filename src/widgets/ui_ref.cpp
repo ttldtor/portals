@@ -59,6 +59,12 @@ ManagedError textFailure(Node<Widget> node, TextValueError cause) {
 
 /** @brief Checked bridge to existing scene ownership and standard retained setters. */
 struct RefAccess {
+  static std::expected<void, TreeError> gaugeValue(ManagedScene &scene, Node<Gauge> node, double value, bool relative) {
+    auto &tree = scene.app_.tree();
+
+    return relative ? adjustGaugeValue(tree, node, value) : setGaugeValue(tree, node, value);
+  }
+
   static std::expected<void, TreeError> display(ManagedScene &scene, Node<Widget> target, DataPresentation value) {
     auto found = std::ranges::find_if(scene.dataStates_, [&](const auto &record) {
       return record->node == target;
@@ -525,6 +531,28 @@ void reportEventError(const std::shared_ptr<RefTarget> &target, const ManagedErr
   if (scene && !RefAccess::eventReported(**scene, error)) {
     (void)(*scene)->reportError(error, {}, origin);
   }
+}
+
+std::expected<void, ManagedError> gaugeValue(std::shared_ptr<RefTarget> target, std::shared_ptr<const Node<Gauge>> node,
+                                             double value, bool relative, std::source_location origin) {
+  const auto owner = eventScene(target);
+  std::expected<void, ManagedError> result;
+
+  if (!owner) {
+    result = std::unexpected(owner.error());
+  } else {
+    const auto applied = RefAccess::gaugeValue(**owner, node ? *node : Node<Gauge>{}, value, relative);
+
+    if (!applied) {
+      result = std::unexpected(failure(target->node, applied.error()));
+    }
+  }
+
+  if (!result) {
+    RefAccess::report(result.error(), target, relative ? "gauge.adjust" : "gauge.value", {}, "Gauge", origin);
+  }
+
+  return result;
 }
 
 std::expected<void, ManagedError> spinnerActive(std::shared_ptr<RefTarget> target,

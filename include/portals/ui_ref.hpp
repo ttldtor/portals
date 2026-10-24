@@ -61,6 +61,13 @@ struct RefTarget {
 };
 
 struct RefAccess;
+/** @param target Weak observation checked for UI affinity and scene lifetime.
+ * @param node Shared typed slot, borrowed only after the affinity check.
+ * @param value Finite replacement or delta. @param relative Add to the current value without clamping.
+ * @param origin Original command site. @return Checked mutation; failures enter the existing collector once.
+ */
+std::expected<void, ManagedError> gaugeValue(std::shared_ptr<RefTarget> target, std::shared_ptr<const Node<Gauge>> node,
+                                             double value, bool relative, std::source_location origin);
 std::expected<FieldValidation, ManagedError> fieldValidation(const std::shared_ptr<RefTarget> &target);
 Ref<LineEdit> fieldEditor(const std::shared_ptr<RefTarget> &target);
 std::expected<bool, ManagedError> validateField(const std::shared_ptr<RefTarget> &target);
@@ -500,6 +507,34 @@ public:
   /** @brief Allocate an empty observing slot on the UI thread; may throw std::bad_alloc. */
   Ref() {
     this->slot_->fluent = true;
+  }
+
+  /** @param value Finite replacement in the inclusive configured range; no clamping.
+   * @param origin Public command site retained on failure.
+   * @return Checked programmatic change, automatically collected on failure; equal values request no redraw.
+   * Requires a live mounted Ref on its UI thread, between frames. Disabled presentation does not block writes.
+   */
+  std::expected<void, ManagedError> value(double value,
+                                          std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, Gauge>
+  {
+    auto node = this->slot_ ? std::shared_ptr<const Node<T>>(this->slot_, &this->slot_->node) : nullptr;
+
+    return detail::gaugeValue(target(), std::move(node), value, false, origin);
+  }
+
+  /** @param delta Finite amount added to the current value; nonfinite/out-of-range results reject without mutation.
+   * @param origin Public command site retained on failure.
+   * @return Checked programmatic change, automatically collected on failure; unchanged results request no redraw.
+   * Uses the same UI-thread, lifetime and between-frame contract as value(double); never clamps.
+   */
+  std::expected<void, ManagedError> adjust(double delta,
+                                           std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, Gauge>
+  {
+    auto node = this->slot_ ? std::shared_ptr<const Node<T>>(this->slot_, &this->slot_->node) : nullptr;
+
+    return detail::gaugeValue(target(), std::move(node), delta, true, origin);
   }
 
   /** @param origin Original access call site.

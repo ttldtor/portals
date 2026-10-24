@@ -69,6 +69,38 @@ the application root itself receives the viewport extent.
 
 ## Frame and gauge contracts
 
+### Update a retained gauge {#gauge-ref-commands}
+
+Use `ui::gauge(progress, .25)` with `ui::Ref<Gauge> progress` to observe the
+mounted gauge. In a button callback or scene configuration after mounting,
+`progress.value(.5)` replaces its value and `progress.adjust(.125)` adds to it.
+Both return `std::expected<void, ManagedError>` and also collect failures once
+through the existing scene error path. Ignoring a failure in a void action
+callback records diagnostics but does not end the run. Return the checked result
+from the callback to propagate failure through the action adapter: the default
+`runApp` policy then reports it and ends the run without collecting it twice.
+During scene configuration, ignored short-command failures stop preparation
+through the existing setup scope. Check a successful result before publishing
+related client state.
+
+The complete [progress workbench](../examples/progress_workbench/main.cpp)
+combines a named work item, fractional steps, reset/complete buttons, a status
+label and a bounded event log. Build `portals_progress_workbench` with examples
+enabled and run it in a terminal; F10 exits through the ordinary runner cleanup.
+The gauge owns its value; the example does not maintain a second numeric model.
+
+Commands require a live mounted reference on its construction UI thread, between
+frames. A missing/destroyed scene yields `CLOSED`, a removed node `STALE_NODE`, a
+foreign thread `WRONG_THREAD`, and a frame/lease conflict `WOULD_BLOCK`. Gauge is
+presentation-only; disabled state still permits these programmatic writes. NaN/infinity,
+addition overflow and any result outside the inclusive range yield
+`INVALID_ARGUMENT` without mutation or invalidation; adjustments never clamp.
+Equal replacements and unchanged sums, including zero deltas, request no redraw.
+There is no new property subscription, timer or owner. Existing resource-created
+Gauge nodes use the same commands after resolving a typed `Ref<Gauge>`.
+
+### Rendering and low-level operations
+
 `border(child, options, style)` and its `frame` alias own one consuming child
 recipe. They mount within the same transaction, including nested refs and child
 errors. A one-cell inset is measured and placed by the existing LinearLayout.
@@ -84,7 +116,8 @@ must be finite and inside the inclusive range. Invalid values, NaN/infinity,
 negative preferred widths and zero paint caps fail with `INVALID_ARGUMENT`.
 The fill covers `floor(width * fraction)` columns across the allocated height.
 
-Use `setGaugeValue(tree, node, value)` between frames: it validates before changing
+Use `setGaugeValue(tree, node, value)` or `adjustGaugeValue(tree, node, delta)`
+between frames: each validates before changing
 state, requests only paint, and requests no redraw for an equal value. Inside an
 already dirty `onPrepare` callback, `Gauge::display(value)` updates the snapshot
 without requesting another frame. Neither operation creates a timer or animation.

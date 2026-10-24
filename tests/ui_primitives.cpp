@@ -678,6 +678,17 @@ void buttonTextErrorsMatch() {
 }
 
 void gaugeValidationAndNoop() {
+  static_assert(std::same_as<decltype(ui::gauge({}, {})), ui::Description<Gauge>>);
+  static_assert(std::same_as<decltype(ui::gauge(.25)), ui::Description<Gauge>>);
+  static_assert(std::same_as<decltype(ui::gauge({}, {}, {}, {})), ui::Description<Gauge>>);
+  static_assert(std::same_as<decltype(ui::gauge(.25, GaugeOptions{}, ControlStyle{}, SizePolicy{})),
+                             ui::Description<Gauge>>);
+  static_assert(std::same_as<decltype(ui::gauge(std::declval<ui::Ref<Gauge> &>(), .25)), ui::Description<Gauge>>);
+  static_assert(std::same_as<decltype(ui::gauge(std::declval<ui::Ref<Gauge>>(), .25)), ui::Description<Gauge>>);
+  static_assert(std::same_as<decltype(ui::gauge(std::declval<ui::Ref<Gauge> &>(), .25, GaugeOptions{}, ControlStyle{},
+                                              SizePolicy{})),
+                             ui::Description<Gauge>>);
+
   Fixture fixture;
   ui::Ref<Gauge> gauge;
 
@@ -687,6 +698,12 @@ void gaugeValidationAndNoop() {
 
   check(row(image, 0) == "##  ", "determinate gauge fills floor(width*fraction) cells");
   check(take(fixture.app->tree().consumeFrameRequest()) == Invalidation::NONE, "static gauge is idle");
+  take(adjustGaugeValue(fixture.app->tree(), gauge.node(), 0));
+  check(take(fixture.app->tree().consumeFrameRequest()) == Invalidation::NONE, "zero adjustment requests no redraw");
+  take(adjustGaugeValue(fixture.app->tree(), gauge.node(), .125));
+  check(take(fixture.app->tree().consumeFrameRequest()) == Invalidation::PAINT, "fractional adjustment requests paint");
+  take(setGaugeValue(fixture.app->tree(), gauge.node(), .5));
+  take(fixture.app->tree().consumeFrameRequest());
   take(setGaugeValue(fixture.app->tree(), gauge.node(), .5));
   check(take(fixture.app->tree().consumeFrameRequest()) == Invalidation::NONE, "equal gauge setter requests no redraw");
   check(!setGaugeValue(fixture.app->tree(), gauge.node(), std::numeric_limits<double>::quiet_NaN()),
@@ -697,6 +714,20 @@ void gaugeValidationAndNoop() {
   check(row(fixture.render({4, 1}), 0) == "####", "maximum fills the gauge exactly");
   take(setGaugeValue(fixture.app->tree(), gauge.node(), 0));
   check(row(fixture.render({4, 1}), 0) == "    ", "minimum clears all previous fill");
+
+  ui::Ref<Gauge> large;
+  constexpr double MAXIMUM = std::numeric_limits<double>::max();
+
+  take(ui::mount(*fixture.scene, ui::gauge(large, MAXIMUM, {.minimum = 0, .maximum = MAXIMUM})));
+  take(fixture.app->tree().consumeFrameRequest());
+
+  const auto overflow = adjustGaugeValue(fixture.app->tree(), large.node(), MAXIMUM);
+
+  check(!overflow && overflow.error() == TreeError::INVALID_ARGUMENT, "finite addition overflow is rejected");
+  check(take(fixture.app->tree().consumeFrameRequest()) == Invalidation::NONE, "overflow requests no redraw");
+  take(fixture.app->tree().read(large.node(), [](const Gauge &view) {
+    check(view.value() == std::numeric_limits<double>::max(), "overflow preserves the original value");
+  }));
 
   for (const auto value :
        {-1.0, 2.0, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
