@@ -3,6 +3,7 @@
 #include "action_state.hpp"
 #include "scroll_controls_state.hpp"
 #include "scroll_preparation_state.hpp"
+#include "log_view_state.hpp"
 #include <portals/managed.hpp>
 #include <portals/detail/layout_traversal.hpp>
 #include <portals/grid.hpp>
@@ -20,6 +21,17 @@ std::expected<Node<ScrollBar>, ManagedError> ManagedScene::scrollBar(Node<Widget
 
 std::expected<void, TreeError> ManagedScene::attachScroll(const std::shared_ptr<Entry> &entry, Node<ScrollArea> node,
                                                           bool) {
+  std::expected<void, TreeError> valid;
+  const auto read = app_.tree().read(node, [&](const ScrollArea &area) {
+    if (const auto *log = dynamic_cast<const LogView *>(&area)) {
+      valid = detail::validateLogViewState(detail::LogViewAccess::state(*log), detail::ScrollWidgetAccess::state(area));
+    }
+  });
+
+  if (!read || !valid) {
+    return read ? valid : read;
+  }
+
   auto bound = bindScrollArea(app_.router(), app_.tree(), node);
   if (!bound) {
     return std::unexpected(bound.error());
@@ -499,6 +511,47 @@ std::expected<void, TreeError> ManagedScene::syncRegionalPresentation(Node<Widge
   return {};
 }
 
+std::expected<bool, TreeError> ManagedScene::prepareLogViews(const LayoutSnapshot &snapshot) {
+  bool changed{};
+
+  for (const auto &entry : entries_) {
+    if (entry->removed || entry->scrollArea == Node<Widget>{}) {
+      continue;
+    }
+
+    std::expected<bool, TreeError> prepared{false};
+    const auto edited = app_.tree().edit(entry->node, [&](Widget &widget) {
+      auto *log = dynamic_cast<LogView *>(&widget);
+
+      if (!log) {
+        return;
+      }
+
+      const auto layout = snapshot.geometry(entry->node);
+
+      if (!layout || !layout->scrollArea) {
+        prepared = std::unexpected(layout ? TreeError::INVALID_ARGUMENT : layout.error());
+
+        return;
+      }
+
+      prepared = detail::prepareLogView(app_.tree(), entry->node, *log, *layout->scrollArea);
+    });
+
+    if (!edited && (edited.error() == TreeError::STALE_NODE || edited.error() == TreeError::CLOSED)) {
+      continue;
+    }
+
+    if (!edited || !prepared) {
+      return std::unexpected(edited ? prepared.error() : edited.error());
+    }
+
+    changed |= *prepared;
+  }
+
+  return changed;
+}
+
 std::expected<void, TreeError> ManagedScene::prepareScrollFrame(const LayoutSnapshot &snapshot) {
   if (!usesGeometrySnapshot()) {
     return {};
@@ -524,6 +577,12 @@ std::expected<void, TreeError> ManagedScene::prepareScrollFrame(const LayoutSnap
 
     if (!scroll_) {
       return {};
+    }
+
+    const auto logs = prepareLogViews(snapshot);
+
+    if (!logs || *logs) {
+      return logs ? std::expected<void, TreeError>{} : std::unexpected(logs.error());
     }
 
     auto sampled = sampleScrollFocus();

@@ -11,7 +11,7 @@
 
 namespace portals::ui::detail {
 
-inline constexpr std::size_t CONTROL_PROPERTY_COUNT = 219; ///< Complete canonical scalar vocabulary size.
+inline constexpr std::size_t CONTROL_PROPERTY_COUNT = 224; ///< Complete canonical scalar vocabulary size.
 inline constexpr std::size_t CONTROL_PRESENCE_BITS =
   CONTROL_PROPERTY_COUNT < 32 ? 32 : CONTROL_PROPERTY_COUNT;        ///< Retain all legacy mask bits.
 using ControlPropertyPresence = std::bitset<CONTROL_PRESENCE_BITS>; ///< Allocation-free internal leaf presence.
@@ -50,7 +50,7 @@ struct ControlContextAccess {
   static std::expected<void, ControlContextError> installPrimitiveSchema(ControlContext &context,
                                                                          std::string_view name) noexcept;
   /** @param context Effective native/loader snapshot; caller declarations retain their priority.
-   * @param name Exactly ScrollArea or ScrollBar; neither name is globally reserved.
+   * @param name Exactly ScrollArea, ScrollBar or LogView; these names are not globally reserved.
    * @return Success after installing the scoped schema, or the original typed preparation error.
    */
   static std::expected<void, ControlContextError> installScrollSchema(ControlContext &context,
@@ -151,6 +151,11 @@ std::expected<OverlayOptions, TreeError> controlOverlayOptions(const ControlSett
  * @return Owning effective text limits.
  */
 TextLimits controlTextLimits(const ControlSettings &settings, TextLimits limits) noexcept;
+
+/** @param settings Sparse native log properties. @param config Captured constructor values.
+ * @return Effective owning values; validateLogLimits checks cross-field constraints before mounting.
+ */
+LogViewConfig controlLogViewConfig(const ControlSettings &settings, LogViewConfig config) noexcept;
 
 /** @param settings Sparse frame patch; omitted leaves preserve the receiving values.
  * @param base Owning effective frame, or empty for a control without a frame.

@@ -316,6 +316,8 @@ struct Access {
       return "Gauge";
     } else if constexpr (std::same_as<T, ScrollArea>) {
       return "ScrollArea";
+    } else if constexpr (std::same_as<T, LogView>) {
+      return "LogView";
     } else if constexpr (std::same_as<T, ScrollBar>) {
       return "ScrollBar";
     } else if constexpr (std::same_as<T, HelpView>) {

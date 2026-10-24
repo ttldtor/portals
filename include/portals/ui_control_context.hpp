@@ -437,6 +437,11 @@ struct ControlSettings {
   std::optional<TextValue> fieldHelp{};               ///< FormField explanatory text below its editor.
   std::optional<bool> fieldRequired{};                ///< FormField required marker and standard text rule.
   std::optional<TextValue> fieldRequiredMessage{};    ///< FormField empty-candidate explanation.
+  std::optional<std::size_t> maxLines{};       ///< Positive LogView retained-record cap.
+  std::optional<std::size_t> maxBytes{};       ///< Positive LogView retained UTF-8 payload cap.
+  std::optional<std::size_t> maxBatchBytes{};  ///< Positive LogView complete input-batch byte cap.
+  std::optional<std::size_t> maxRecordBytes{}; ///< Positive LogView individual record byte cap.
+  std::optional<bool> followTail{};            ///< LogView initial follow-tail mode.
 };
 
 /** @brief Finite context bounds, checked before publication/materialization beyond each bound. */

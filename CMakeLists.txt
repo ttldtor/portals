@@ -81,6 +81,9 @@ target_sources(portals_core PRIVATE
   src/widgets/scroll_intent.cpp
   src/widgets/scroll_preparation.cpp
   src/widgets/managed_scroll.cpp
+  src/widgets/log_view.cpp
+  src/widgets/managed_log_view.cpp
+  src/widgets/ui_log_view.cpp
   src/widgets/ui_scroll.cpp)
 
 target_sources(portals_core PRIVATE
@@ -254,6 +257,7 @@ if(PORTALS_BUILD_EXAMPLES)
   add_subdirectory(examples/consumer)
   add_subdirectory(examples/gallery)
   add_subdirectory(examples/editor_history)
+  add_subdirectory(examples/log_view)
   add_subdirectory(examples/form_field)
   add_subdirectory(examples/check_state)
   add_subdirectory(examples/named_controls)
@@ -396,6 +400,9 @@ if(PORTALS_BUILD_TESTS)
   add_executable(portals_docs_scroll_controls docs/examples/guide_scroll_controls.cpp)
   target_link_libraries(portals_docs_scroll_controls PRIVATE portals::core)
   portals_enable_warnings(portals_docs_scroll_controls)
+  add_executable(portals_docs_log_view_resource docs/examples/guide_log_view_resource.cpp)
+  target_link_libraries(portals_docs_log_view_resource PRIVATE portals::core)
+  portals_enable_warnings(portals_docs_log_view_resource)
 
   add_executable(portals_docs_loading_indicators docs/examples/guide_loading_indicators.cpp)
   target_link_libraries(portals_docs_loading_indicators PRIVATE portals::core)
@@ -1359,6 +1366,11 @@ if(PORTALS_BUILD_TESTS)
   portals_enable_warnings(portals_scroll_controls)
   add_test(NAME portals.scroll-controls COMMAND portals_scroll_controls)
   set_tests_properties(portals.scroll-controls PROPERTIES TIMEOUT 15)
+  add_executable(portals_log_view tests/log_view.cpp)
+  target_link_libraries(portals_log_view PRIVATE portals::core)
+  portals_enable_warnings(portals_log_view)
+  add_test(NAME portals.log-view COMMAND portals_log_view)
+  set_tests_properties(portals.log-view PROPERTIES TIMEOUT 30)
   foreach(scroll_test IN ITEMS snapshot managed reveal)
     add_executable(portals_scroll_${scroll_test} tests/scroll_${scroll_test}.cpp)
     target_link_libraries(portals_scroll_${scroll_test} PRIVATE portals::core)
@@ -1538,6 +1550,7 @@ if(PORTALS_BUILD_DOCS)
     docs/compact-primitives.md docs/ru/compact-primitives.md docs/styles.md docs/legacy.md docs/managed-controls.md docs/declarative-ui.md docs/data-presentation.md docs/ru/data-presentation.md docs/text-property.md docs/text-history.md docs/editor-history.md docs/editor-history-demo.md docs/compact-examples.md docs/compactness.md docs/quality.md tools/compactness/compactness.hpp docs/managed-performance.md docs/package.md docs/application.md docs/virtual-preparation.md docs/examples.md docs/architecture.md docs/getting-started.md docs/limitations.md docs/api-design.md fuzz/README.md
     tools/benchmarks/README.md vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md vendor/textual/README.md vendor/doctest/README.md vendor/pfr/README.md vendor/lyra/README.md docs/cli.md)
   list(APPEND portals_documentation_inputs docs/editor-contracts.md docs/ru/editor-contracts.md)
+  list(APPEND portals_documentation_inputs docs/log-view.md docs/ru/log-view.md)
   list(APPEND portals_documentation_inputs docs/api-groups.dox)
   set(portals_language_config "${CMAKE_CURRENT_BINARY_DIR}/docs/languages")
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS

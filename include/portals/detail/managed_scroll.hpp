@@ -36,7 +36,7 @@ std::expected<Node<T>, ManagedError> ManagedScene::emplaceConfigured(Node<Widget
 
     if constexpr (std::derived_from<T, Control> || std::same_as<T, LineEdit> || std::same_as<T, Password> ||
                   std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, ScrollArea> ||
-                  std::same_as<T, ScrollBar> || std::same_as<T, Grid>) {
+                  std::same_as<T, ScrollBar> || std::same_as<T, Grid> || std::derived_from<T, ScrollArea>) {
       const char *type = "Control";
 
       if constexpr (std::same_as<T, Label>) {
@@ -55,7 +55,9 @@ std::expected<Node<T>, ManagedError> ManagedScene::emplaceConfigured(Node<Widget
         type = "Border";
       } else if constexpr (std::same_as<T, Gauge>) {
         type = "Gauge";
-      } else if constexpr (std::same_as<T, ScrollArea>) {
+      } else if constexpr (std::same_as<T, LogView>) {
+        type = "LogView";
+      } else if constexpr (std::derived_from<T, ScrollArea>) {
         type = "ScrollArea";
       } else if constexpr (std::same_as<T, ScrollBar>) {
         type = "ScrollBar";
@@ -84,8 +86,14 @@ std::expected<Node<T>, ManagedError> ManagedScene::emplaceConfigured(Node<Widget
       };
     }
 
-    if constexpr (std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>) {
-      auto configured = attachScroll(entry, *node, scrollWriter.value_or(true));
+    if constexpr (std::derived_from<T, ScrollArea> || std::same_as<T, ScrollBar>) {
+      auto configured = [&] {
+        if constexpr (std::derived_from<T, ScrollArea>) {
+          return attachScroll(entry, Node<ScrollArea>(*node), scrollWriter.value_or(true));
+        } else {
+          return attachScroll(entry, *node, scrollWriter.value_or(true));
+        }
+      }();
       if (!configured) {
         return rollback(*node, configured.error());
       }

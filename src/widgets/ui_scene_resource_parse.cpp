@@ -439,7 +439,7 @@ private:
   const ControlPropertyDescriptor *descriptor(std::string_view path) const {
     for (const auto type :
          {"FormField",   "Password", "LineEdit",    "CheckBox",      "VBox",          "Button",
-          "Border",      "Gauge",    "Spinner",     "ScrollArea",    "ScrollBar",     "Overlay",
+          "Border",      "Gauge",    "Spinner",     "ScrollArea",    "ScrollBar",     "LogView", "Overlay",
           "HelpView",    "KeyHints", "VirtualList", "VirtualTable",  "Chart",         "DataStateView",
           "OverlayHost", "Dialog",   "MessageBox",  "Notifications", "ThemeSelector", "ThemeSelectorCatalog"}) {
       const auto schema = controlPropertySchema(type);
@@ -698,6 +698,8 @@ private:
         settings.showStatus = enabled;
       } else if (path == "initiallyOpen") {
         settings.initiallyOpen = enabled;
+      } else if (path == "followTail") {
+        settings.followTail = enabled;
       } else if (path == "scroll") {
         settings.grid.scroll = enabled;
       } else if (path == "required") {
@@ -949,6 +951,14 @@ private:
       settings.maxPreparedCells = *value;
     } else if (path == "maxPreparedTextBytes") {
       settings.maxPreparedTextBytes = *value;
+    } else if (path == "maxLines") {
+      settings.maxLines = *value;
+    } else if (path == "maxBytes") {
+      settings.maxBytes = *value;
+    } else if (path == "maxBatchBytes") {
+      settings.maxBatchBytes = *value;
+    } else if (path == "maxRecordBytes") {
+      settings.maxRecordBytes = *value;
     } else if (path == "notification.capacity") {
       settings.notification.capacity = *value;
     } else if (path == "notification.maxVisible") {

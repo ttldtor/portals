@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #include "key_help_state.hpp"
 #include "ui_scene_resource_internal.hpp"
+#include <portals/ui_log_view.hpp>
 
 #include <algorithm>
 #include <array>
@@ -208,7 +209,7 @@ std::expected<void, ControlContextError> ResourceAccess::installPrimitives(Scene
 
 std::expected<void, ControlContextError> ResourceAccess::installScrolls(SceneResourceRegistry &registry,
                                                                         ControlContext &controls) {
-  for (const auto name : {"ScrollArea", "ScrollBar"}) {
+  for (const auto name : {"ScrollArea", "ScrollBar", "LogView"}) {
     if (find(registry, name) || ControlContextAccess::hasDeclaredType(controls, name)) {
       continue;
     }
@@ -219,7 +220,15 @@ std::expected<void, ControlContextError> ResourceAccess::installScrolls(SceneRes
       return installed;
     }
 
-    if (std::string_view(name) == "ScrollArea") {
+    if (std::string_view(name) == "LogView") {
+      const auto added = registry.add<LogView>(name, [](SceneResourceArguments arguments) {
+        return logView(arguments.text, controlLogViewConfig(arguments.settings, {}));
+      });
+
+      if (!added) {
+        return std::unexpected(ControlContextError{ControlContextErrorCode::DUPLICATE_TYPE, {}});
+      }
+    } else if (std::string_view(name) == "ScrollArea") {
       const auto added = registry.add<ScrollArea>(
         name,
         [](SceneResourceArguments arguments) -> std::expected<Description<ScrollArea>, ManagedError> {
@@ -265,7 +274,7 @@ std::expected<void, ControlContextError> ResourceAccess::installScrolls(SceneRes
       }
     }
 
-    registry.entries_.back().text = false;
+    registry.entries_.back().text = std::string_view(name) == "LogView";
     registry.entries_.back().factoryKind = ControlFactoryKind::SCROLL_FALLBACK;
   }
 

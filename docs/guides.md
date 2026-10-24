@@ -31,6 +31,7 @@ The [first application](first-application.md) develops a quick-note form in four
 | Display a large list | [Virtual lists](virtual-list.md) |
 | Display a large table | [Virtual tables](virtual-table.md) |
 | Scroll ordinary retained content | [Scroll controls](scroll-controls.md) |
+| Display a bounded plain-text log | [LogView](log-view.md) |
 | Scroll virtual data | [Scrolling](scroll.md) |
 | Plot values | [Charts](chart.md) |
 | Handle keyboard input | [Input](input.md) |

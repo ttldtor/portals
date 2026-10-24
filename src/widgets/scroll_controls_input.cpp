@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #include "action_state.hpp"
 #include "scroll_controls_state.hpp"
+#include "log_view_state.hpp"
 
 namespace portals {
 namespace {
@@ -283,6 +284,14 @@ std::expected<ActionBinding, TreeError> bindScroll(EventRouter &router, WidgetTr
   auto binding = detail::EventRouterAccess::bindChecked(
     router, node,
     [&router, &tree, node](T &widget, const RoutedEvent &event) {
+      if (auto *log = dynamic_cast<LogView *>(&widget)) {
+        const auto reply = detail::logViewInput(tree, node, *log, event);
+
+        if (!reply || *reply != EventReply::IGNORED) {
+          return reply;
+        }
+      }
+
       auto *state = detail::ScrollWidgetAccess::state(static_cast<Widget &>(widget));
       return state ? detail::scrollInput(router, tree, node, *state, event)
                    : std::unexpected(TreeError::INVALID_ARGUMENT);
