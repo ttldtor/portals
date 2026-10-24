@@ -206,6 +206,7 @@ jobs:
           "-DCMAKE_MSVC_RUNTIME_LIBRARY=$env:MSVC_RUNTIME_LIBRARY"
           -DPORTALS_BUILD_TESTS=ON -DPORTALS_BUILD_EXAMPLES=ON
           -DPORTALS_BUILD_TOOLS=ON -DPORTALS_BUILD_DOCS=OFF -DPORTALS_BUILD_FUZZERS=OFF
+          -DPORTALS_PACKAGE_TEST_TIMEOUT=1200
       - name: Build
         run: cmake --build "$env:RUNNER_TEMP/validation-build" --config $env:BUILD_CONFIGURATION --parallel $env:CMAKE_BUILD_PARALLEL_LEVEL
       - name: Run the full headless suite and installed consumers
