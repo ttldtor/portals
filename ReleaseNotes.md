@@ -7,6 +7,8 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Added a complete search-journal example combining an operator field, two Unicode troubleshooting notes, selected-match summaries and a bounded event log.
+
 - Added retained `FindBar` with bounded literal Unicode search, match navigation, context previews and document replacement. C++ recipes and loaded scenes share the query editor's editing modes, Undo/Redo and typed error reporting; match handles retain their source text and detect stale result sets.
 - Added complete document-search examples with keyboard navigation and source switching. Search is case-sensitive, preserves grapheme boundaries and reports truncated match counts; regular expressions, replacement and asynchronous sources are not included.
 
