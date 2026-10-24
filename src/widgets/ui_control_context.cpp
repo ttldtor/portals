@@ -281,7 +281,13 @@ constexpr std::array<ControlPropertyDescriptor, detail::CONTROL_PROPERTY_COUNT> 
    {"scrollbar.corner", Kind::LITERAL_STRING, 2, {}},
    {"help", Kind::TEXT, 1, {}},
    {"required", Kind::BOOLEAN, 1, {}},
-   {"requiredMessage", Kind::TEXT, 1, {}}}};
+   {"requiredMessage", Kind::TEXT, 1, {}},
+   {"document", Kind::TEXT, 1, {}},
+   {"maxDocumentBytes", Kind::UNSIGNED_INTEGER, 1, {}},
+   {"maxMatches", Kind::UNSIGNED_INTEGER, 1, {}},
+   {"previousLabel", Kind::TEXT, 1, {}},
+   {"nextLabel", Kind::TEXT, 1, {}},
+   {"clearLabel", Kind::TEXT, 1, {}}}};
 static_assert(std::ranges::all_of(PROPERTIES, [](const auto &property) {
   return !property.path.empty();
 }));
@@ -329,11 +335,12 @@ constexpr Mask THEME_CATALOG_MASK =
 constexpr Mask POSITIVE_UNSIGNED_MASK =
   propertyMask(3, 17, 18, 26, 27, 28, PAINT_LIMIT_PROPERTY, 45, 55, 59, 71, 72, 73, 83, 90, 100, 110, 111, 112, 113,
                114, 115, 116, 124, 125, 126, 127, 128, 129, 130, 137, 138, 139, 140, 143, 144, 145, 146, 147, 148, 149,
-               150, 151, 155, 156, 157, 158, 172, 195, 201, 202, 203, 206);
+               150, 151, 155, 156, 157, 158, 172, 195, 201, 202, 203, 206, 221);
 constexpr Mask CHECK_MASK = SIZE_MASK | TEXT_MASK | propertyMask(5, 6);
 constexpr Mask LAYOUT_MASK = SIZE_MASK | propertyMask(4, 22, 23, 24, 25, 30, 31, 32);
 constexpr Mask EDIT_MASK = SIZE_MASK | TEXT_MASK | propertyMask(7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 33, 34, 35, 36);
 constexpr Mask FORM_FIELD_MASK = EDIT_MASK | LAYOUT_MASK | propertyMask(200, 216, 217, 218);
+constexpr Mask FIND_BAR_MASK = EDIT_MASK | LAYOUT_MASK | propertyMask(219, 220, 221, 222, 223, 224);
 constexpr Mask ALL_MASK = [] {
   Mask mask;
 
@@ -448,6 +455,12 @@ constexpr auto FORM_FIELD_SCHEMA = withFrame(
                  PROPERTIES[14], PROPERTIES[15], PROPERTIES[16],  PROPERTIES[22],  PROPERTIES[23],  PROPERTIES[24],
                  PROPERTIES[25], PROPERTIES[30], PROPERTIES[31],  PROPERTIES[32],  PROPERTIES[33],  PROPERTIES[34],
                  PROPERTIES[35], PROPERTIES[36], PROPERTIES[200], PROPERTIES[216], PROPERTIES[217], PROPERTIES[218]}));
+constexpr auto FIND_BAR_SCHEMA = withFrame(std::to_array(
+  {PROPERTIES[0],   PROPERTIES[1],   PROPERTIES[2],   PROPERTIES[3],  PROPERTIES[4],  PROPERTIES[7],   PROPERTIES[8],
+   PROPERTIES[9],   PROPERTIES[10],  PROPERTIES[11],  PROPERTIES[12], PROPERTIES[13], PROPERTIES[14],  PROPERTIES[15],
+   PROPERTIES[16],  PROPERTIES[22],  PROPERTIES[23],  PROPERTIES[24], PROPERTIES[25], PROPERTIES[30],  PROPERTIES[31],
+   PROPERTIES[32],  PROPERTIES[33],  PROPERTIES[34],  PROPERTIES[35], PROPERTIES[36], PROPERTIES[219], PROPERTIES[220],
+   PROPERTIES[221], PROPERTIES[222], PROPERTIES[223], PROPERTIES[224]}));
 constexpr auto PASSWORD_SCHEMA = withFrame(std::to_array(
   {PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[7], PROPERTIES[8], PROPERTIES[10],
    PROPERTIES[11], PROPERTIES[33], PROPERTIES[34], PROPERTIES[35], PROPERTIES[36], PROPERTIES[159], PROPERTIES[160],
@@ -506,12 +519,13 @@ static_assert(schemaMatchesMask(THEME_SELECTOR_SCHEMA, THEME_SELECTOR_MASK));
 static_assert(schemaMatchesMask(THEME_CATALOG_SCHEMA, THEME_CATALOG_MASK));
 static_assert(schemaMatchesMask(EDIT_SCHEMA, EDIT_MASK));
 static_assert(schemaMatchesMask(FORM_FIELD_SCHEMA, FORM_FIELD_MASK));
+static_assert(schemaMatchesMask(FIND_BAR_SCHEMA, FIND_BAR_MASK));
 static_assert(schemaMatchesMask(PASSWORD_SCHEMA, PASSWORD_MASK));
 static_assert(schemaMatchesMask(GRID_SCHEMA, GRID_MASK));
 
 bool builtin(std::string_view name) noexcept {
   return name == "VBox" || name == "HBox" || name == "Label" || name == "Button" || name == "CheckBox" ||
-         name == "LineEdit" || name == "ThreeState" || name == "Password" || name == "FormField";
+         name == "LineEdit" || name == "ThreeState" || name == "Password" || name == "FormField" || name == "FindBar";
 }
 
 Mask builtinMask(std::string_view name) noexcept {
@@ -532,6 +546,10 @@ Mask builtinMask(std::string_view name) noexcept {
 
   if (name == "CheckBox" || name == "ThreeState") {
     return CHECK_MASK;
+  }
+
+  if (name == "FindBar") {
+    return FIND_BAR_MASK;
   }
 
   if (name == "FormField") {
@@ -852,7 +870,13 @@ ControlContextError exceptionError() noexcept {
   X(scrollbar.corner, 215)                                                                                             \
   X(fieldHelp, 216)                                                                                                    \
   X(fieldRequired, 217)                                                                                                \
-  X(fieldRequiredMessage, 218)
+  X(fieldRequiredMessage, 218) \
+  X(findDocument, 219) \
+  X(findMaxDocumentBytes, 220) \
+  X(findMaxMatches, 221) \
+  X(findPreviousLabel, 222) \
+  X(findNextLabel, 223) \
+  X(findClearLabel, 224)
 
 #define PORTALS_CONTROL_LEAVES(X) \
   PORTALS_CONTROL_BASE_LEAVES(X) \
@@ -1172,6 +1196,12 @@ void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &pr
       std::pair<std::string_view, bool>{"active", patch.spinnerActive.has_value()},
       std::pair<std::string_view, bool>{"reducedMotion", patch.spinnerReducedMotion.has_value()},
       std::pair<std::string_view, bool>{"label", patch.spinnerLabel.has_value()},
+      std::pair<std::string_view, bool>{"document", patch.findDocument.has_value()},
+      std::pair<std::string_view, bool>{"maxDocumentBytes", patch.findMaxDocumentBytes.has_value()},
+      std::pair<std::string_view, bool>{"maxMatches", patch.findMaxMatches.has_value()},
+      std::pair<std::string_view, bool>{"previousLabel", patch.findPreviousLabel.has_value()},
+      std::pair<std::string_view, bool>{"nextLabel", patch.findNextLabel.has_value()},
+      std::pair<std::string_view, bool>{"clearLabel", patch.findClearLabel.has_value()},
       std::pair<std::string_view, bool>{"help", patch.fieldHelp.has_value()},
       std::pair<std::string_view, bool>{"required", patch.fieldRequired.has_value()},
       std::pair<std::string_view, bool>{"requiredMessage", patch.fieldRequiredMessage.has_value()},
@@ -1906,6 +1936,10 @@ std::span<const ControlPropertyDescriptor> controlPropertySchema(std::string_vie
 
   if (type == "CheckBox" || type == "ThreeState") {
     return CHECK_SCHEMA;
+  }
+
+  if (type == "FindBar") {
+    return FIND_BAR_SCHEMA;
   }
 
   if (type == "FormField") {

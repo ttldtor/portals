@@ -437,6 +437,12 @@ struct ControlSettings {
   std::optional<TextValue> fieldHelp{};               ///< FormField explanatory text below its editor.
   std::optional<bool> fieldRequired{};                ///< FormField required marker and standard text rule.
   std::optional<TextValue> fieldRequiredMessage{};    ///< FormField empty-candidate explanation.
+  std::optional<TextValue> findDocument{};            ///< FindBar owning bounded source text.
+  std::optional<std::size_t> findMaxDocumentBytes{};  ///< FindBar synchronous source byte admission cap.
+  std::optional<std::size_t> findMaxMatches{};        ///< FindBar positive stored-prefix range cap.
+  std::optional<TextValue> findPreviousLabel{};       ///< FindBar previous-match caption.
+  std::optional<TextValue> findNextLabel{};           ///< FindBar next-match caption.
+  std::optional<TextValue> findClearLabel{};          ///< FindBar explicit clear caption.
 };
 
 /** @brief Finite context bounds, checked before publication/materialization beyond each bound. */
