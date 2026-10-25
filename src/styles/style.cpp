@@ -295,8 +295,17 @@ StyleSheet themeFromTokens(ThemeTokens tokens) {
   };
 
   stateRule(StyleState::FOCUSED, tokens.background, tokens.accent, true);
+  // Focused frames use the theme accent without applying an action fill to their lines.
+  auto &focused = sheet.rules.back().declarations;
+  const StylePaintDeclarations frame{.foreground = tokens.accent, .background = tokens.background, .bold = true};
+
+  focused.frameLine = frame;
+  focused.frameTitle = frame;
+  focused.frameEnds = frame;
+
   stateRule(StyleState::DISABLED, tokens.muted, tokens.background, false);
   stateRule(StyleState::SELECTED, tokens.foreground, tokens.selection, true);
+  sheet.rules.back().declarations.italic = false;
   stateRule(StyleState::HEADER, tokens.heading, tokens.background, true);
   // Reverse the focused field palette so the caret remains visible over any glyph.
   stateRule(StyleState::CARET, tokens.accent, tokens.background, false);

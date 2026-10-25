@@ -644,6 +644,11 @@ void adaptedPaletteVariants() {
     check(style.header == CellStyle{colors.heading, colors.background, true}, "palette header uses source accent");
     check(style.caret == CellStyle{colors.accent, colors.background}, "palette caret reverses focused field");
     check(style.minWidth == 0, "palette replacement does not introduce a layout metric");
+    const auto &frame = style.frame[static_cast<std::size_t>(StyleState::FOCUSED) - 1];
+    const CellStyle frameStyle{colors.accent, colors.background, true};
+
+    check(frame.line == frameStyle && frame.title == frameStyle && frame.ends == frameStyle,
+          "focused frame parts use this palette's accent and background without action fill");
 
     if (failures != failuresBefore) {
       std::cerr << "Palette: " << palette.name << '\n';
@@ -735,10 +740,35 @@ void viewsAndEditor() {
         "real virtual list paints selected state without model reformatting");
   check(take(editorBuffer.at({0, 0})).style == readStyle(fixture, editor).normal,
         "real editor paints theme without changing draft");
+  check(!take(tableBuffer.at({0, 1})).style.italic && !take(listBuffer.at({0, 0})).style.italic,
+        "themed table and list selection do not inherit the neutral italic fallback");
+
+  take(router->setFocus(editor));
+  take(router->invoke(editor, {Action::MOVE_HOME}));
+  take(router->invoke(editor, {Action::MOVE_RIGHT, {.shift = true}}));
+  take(router->invoke(editor, {Action::MOVE_RIGHT, {.shift = true}}));
+  take(editorBinding.sync(take(router->focused())));
+  editorBuffer = paint(fixture, editor);
+  check(!take(editorBuffer.at({0, 0})).style.italic &&
+          take(editorBuffer.at({0, 0})).style == readStyle(fixture, editor).selected,
+        "themed editor selected non-caret text is upright");
+
   take(fixture.styles.replace(modernTheme()));
   tableBuffer = paint(fixture, table);
   check(take(tableBuffer.at({0, 0})).style == readStyle(fixture, table).header,
         "paint-only theme update needs no new table model preparation");
+  check(!take(tableBuffer.at({0, 1})).style.italic, "selection remains upright after switching themes");
+
+  take(fixture.styles.enableLayers());
+  const auto overrides = take(parsePss(":selected { italic: true; }"));
+
+  take(fixture.styles.addLayer(StyleTier::APPLICATION, "selected-italic", overrides));
+  tableBuffer = paint(fixture, table);
+  listBuffer = paint(fixture, list);
+  editorBuffer = paint(fixture, editor);
+  check(take(tableBuffer.at({0, 1})).style.italic && take(listBuffer.at({0, 0})).style.italic &&
+          take(editorBuffer.at({0, 0})).style.italic,
+        "explicit higher-priority PSS can opt selected table, list and editor text into italic");
 }
 
 class PartialOutput : public FrameOutput {

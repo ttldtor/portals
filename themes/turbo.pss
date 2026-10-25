@@ -1,7 +1,20 @@
 /* Turbo-like palette, encoded as ANSI16 when selected by the output owner. */
 * { foreground: #ffff55; background: #0000aa; }
-:focused { foreground: #0000aa; background: #00aaaa; bold: true; }
+:focused {
+  foreground: #0000aa;
+  background: #00aaaa;
+  bold: true;
+  frame-line-foreground: #00aaaa;
+  frame-line-background: #0000aa;
+  frame-line-bold: true;
+  frame-title-foreground: #00aaaa;
+  frame-title-background: #0000aa;
+  frame-title-bold: true;
+  frame-ends-foreground: #00aaaa;
+  frame-ends-background: #0000aa;
+  frame-ends-bold: true;
+}
 :disabled { foreground: #aaaaaa; background: #0000aa; bold: false; }
-:selected { foreground: #ffff55; background: #aa0000; bold: true; }
+:selected { foreground: #ffff55; background: #aa0000; bold: true; italic: false; }
 :header { foreground: #ffffff; background: #0000aa; bold: true; }
 :caret { foreground: #00aaaa; background: #0000aa; bold: false; }

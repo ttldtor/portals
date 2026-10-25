@@ -1,7 +1,20 @@
 /* Modern terminal palette. No font-dependent decorations. */
 * { foreground: #dce1e8; background: #181c24; }
-:focused { foreground: #181c24; background: #4bb4dc; bold: true; }
+:focused {
+  foreground: #181c24;
+  background: #4bb4dc;
+  bold: true;
+  frame-line-foreground: #4bb4dc;
+  frame-line-background: #181c24;
+  frame-line-bold: true;
+  frame-title-foreground: #4bb4dc;
+  frame-title-background: #181c24;
+  frame-title-bold: true;
+  frame-ends-foreground: #4bb4dc;
+  frame-ends-background: #181c24;
+  frame-ends-bold: true;
+}
 :disabled { foreground: #7d828c; background: #181c24; bold: false; }
-:selected { foreground: #dce1e8; background: #2d4b6e; bold: true; }
+:selected { foreground: #dce1e8; background: #2d4b6e; bold: true; italic: false; }
 :header { foreground: #4bb4dc; background: #181c24; bold: true; }
 :caret { foreground: #4bb4dc; background: #181c24; bold: false; }

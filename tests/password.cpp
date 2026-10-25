@@ -4,6 +4,8 @@
 #include <doctest.h>
 
 #include <portals/password.hpp>
+#include <portals/render.hpp>
+#include <portals/style.hpp>
 
 #include <thread>
 #include <type_traits>
@@ -515,4 +517,71 @@ TEST_CASE("Password frames contain only constant masks and no-echo has fixed geo
     CHECK(intrinsic.width == (display == PasswordDisplayMode::NO_ECHO ? 1 : 3));
     CHECK((sink.textCommands == 0) == (display == PasswordDisplayMode::NO_ECHO));
   }
+}
+
+TEST_CASE("unthemed focused Password selection remains visible beyond the caret") {
+  struct Sink : PaintContext {
+    std::vector<RenderCommand> commands;
+
+    std::expected<void, TreeError> submit(std::span<const RenderCommand> input) override {
+      for (const auto &command : input) {
+        commands.push_back(command);
+      }
+
+      return {};
+    }
+  };
+
+  Fixture fixture("abcdef");
+
+  fixture.action(Action::MOVE_HOME);
+  fixture.action(Action::MOVE_RIGHT, {.shift = true});
+  fixture.action(Action::MOVE_RIGHT, {.shift = true});
+  take(fixture.binding->sync(take(fixture.router->focused())));
+
+  const CellSize size{8, 1};
+  const auto rectangle = take(CellRect::from({}, size));
+  auto render = [&] {
+    std::optional<CellBuffer> buffer;
+
+    take(fixture.tree->frame([&] {
+      take(layoutTree(*fixture.tree, fixture.root, rectangle, rectangle));
+
+      Sink sink;
+
+      take(fixture.tree->paint(fixture.node, sink));
+      buffer.emplace(take(renderFullFrame(size, sink.commands)));
+    }));
+
+    return std::move(*buffer);
+  };
+  auto buffer = render();
+  const auto selected = take(buffer.at({0, 0}));
+  const auto unselected = take(buffer.at({4, 0}));
+
+  CHECK(selected.glyph == "*");
+  CHECK(unselected.glyph == "*");
+  CHECK(selected.style != unselected.style);
+  CHECK(selected.style.bold);
+  CHECK(selected.style.italic);
+  CHECK_FALSE(unselected.style.italic);
+  CHECK_FALSE(selected.style.underline);
+  CHECK_FALSE(selected.style.foreground);
+  CHECK_FALSE(selected.style.background);
+
+  StyleEngine styles(*fixture.tree);
+
+  take(styles.bind(fixture.node, {.type = "Password"}));
+  take(styles.replace(turboTheme()));
+  buffer = render();
+  CHECK_FALSE(take(buffer.at({0, 0})).style.italic);
+  CHECK(take(buffer.at({0, 0})).style.background ==
+        resolveStyle(turboTheme(), {.type = "Password"}).selected.background);
+
+  take(styles.enableLayers());
+  const auto overrides = take(parsePss("Password:selected { italic: true; }"));
+
+  take(styles.addLayer(StyleTier::APPLICATION, "password-selection", overrides));
+  buffer = render();
+  CHECK(take(buffer.at({0, 0})).style.italic);
 }

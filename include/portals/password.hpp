@@ -20,13 +20,13 @@ enum class PasswordPastePolicy {
 
 /** @brief Owning protected-editor policy; no plaintext history, copying or cutting exists. */
 struct PasswordOptions {
-  TextLimits limits{4096, 4096, 4096, 8192}; ///< Whole UTF-8 value bounds; edits are never truncated.
-  WidthPolicy widthPolicy{};                 ///< Unicode measurement policy; masks always use ASCII '*'.
-  ControlStyle style{};                      ///< Normal, focused and disabled appearance.
-  CellStyle selection{RgbColor{0, 0, 0}, RgbColor{180, 200, 255}}; ///< Selected mask appearance.
-  CellStyle cursor{{}, {}, true, false, true};                     ///< Software caret appearance.
-  EditMode editMode{EditMode::IMMEDIATE}; ///< Publication boundary shared by input and setValue.
-  bool readOnly{};                        ///< Block user edits; explicit setValue remains available.
+  TextLimits limits{4096, 4096, 4096, 8192};   ///< Whole UTF-8 value bounds; edits are never truncated.
+  WidthPolicy widthPolicy{};                   ///< Unicode measurement policy; masks always use ASCII '*'.
+  ControlStyle style{};                        ///< Normal, focused and disabled appearance.
+  CellStyle selection{{}, {}, true, true};     ///< Selected mask appearance.
+  CellStyle cursor{{}, {}, true, false, true}; ///< Software caret appearance.
+  EditMode editMode{EditMode::IMMEDIATE};      ///< Publication boundary shared by input and setValue.
+  bool readOnly{};                             ///< Block user edits; explicit setValue remains available.
   PasswordPastePolicy pastePolicy{PasswordPastePolicy::DISABLED}; ///< Clipboard paste requires explicit opt-in.
   PasswordDisplayMode displayMode{PasswordDisplayMode::PASSWORD}; ///< NO_ECHO reveals no count through layout.
   std::optional<std::string> placeholder; ///< Public, nonsecret placeholder; never populated from a secret.

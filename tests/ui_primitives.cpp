@@ -504,8 +504,8 @@ void borderContentAndInputClip() {
 
   const auto disabled = fixture.render({4, 3});
 
-  check(take(disabled.at({0, 0})).style.foreground == RgbColor{128, 128, 128} &&
-          take(disabled.at({1, 1})).style.foreground == RgbColor{128, 128, 128},
+  check(take(disabled.at({0, 0})).style == ControlStyle{}.disabled &&
+          take(disabled.at({1, 1})).style == ControlStyle{}.disabled,
         "disabled ancestor updates both border and existing button presentation");
   take(fixture.app->router().invoke(button.node(), {Action::ACTIVATE}));
   check(calls == 2, "disabled plain button remains ineligible");
@@ -681,12 +681,12 @@ void gaugeValidationAndNoop() {
   static_assert(std::same_as<decltype(ui::gauge({}, {})), ui::Description<Gauge>>);
   static_assert(std::same_as<decltype(ui::gauge(.25)), ui::Description<Gauge>>);
   static_assert(std::same_as<decltype(ui::gauge({}, {}, {}, {})), ui::Description<Gauge>>);
-  static_assert(std::same_as<decltype(ui::gauge(.25, GaugeOptions{}, ControlStyle{}, SizePolicy{})),
-                             ui::Description<Gauge>>);
+  static_assert(
+    std::same_as<decltype(ui::gauge(.25, GaugeOptions{}, ControlStyle{}, SizePolicy{})), ui::Description<Gauge>>);
   static_assert(std::same_as<decltype(ui::gauge(std::declval<ui::Ref<Gauge> &>(), .25)), ui::Description<Gauge>>);
   static_assert(std::same_as<decltype(ui::gauge(std::declval<ui::Ref<Gauge>>(), .25)), ui::Description<Gauge>>);
   static_assert(std::same_as<decltype(ui::gauge(std::declval<ui::Ref<Gauge> &>(), .25, GaugeOptions{}, ControlStyle{},
-                                              SizePolicy{})),
+                                                SizePolicy{})),
                              ui::Description<Gauge>>);
 
   Fixture fixture;
@@ -917,6 +917,72 @@ void themeAndManualStyle() {
   take(syncGauge(fixture.app->tree(), gauge.node()));
   check(take(fixture.app->tree().consumeFrameRequest()) == Invalidation::NONE,
         "equal disabled snapshots do not schedule more frames");
+}
+
+void themedDefaultFramePaint() {
+  for (const auto &theme : {modernTheme(), turboTheme(), nordTheme(), catppuccinLatteTheme()}) {
+    Fixture fixture;
+    ui::Ref<Border> border;
+    ui::Ref<Button> child;
+
+    take(ui::mount(
+      *fixture.scene,
+      ui::plainButton(child, "Child").framed(border, "double", "Title").titleDecoration(TitleDecoration::SQUARE)));
+    take(fixture.scene->theme(theme));
+    fixture.render({20, 4});
+    take(syncBorder(fixture.app->tree(), border.node(), child.node()));
+
+    FrameCommands sink;
+
+    take(fixture.app->tree().frame([&] {
+      take(fixture.app->tree().paint(border.node(), sink));
+    }));
+
+    const auto expected = resolveStyle(theme, {.type = "Border"}).frame[1];
+    bool painted{};
+
+    for (const auto &command : sink.commands) {
+      if (const auto *text = std::get_if<TextCommand>(&command)) {
+        painted = true;
+        check(text->style == *expected.line && !text->style.underline,
+              "focused frame glyphs, title and ends use the active theme's frame palette");
+      }
+    }
+
+    check(painted, "focused frame submits actual glyphs");
+  }
+
+  Fixture fixture;
+  ui::Ref<Border> border;
+  ui::Ref<Button> child;
+  ControlStyle manual;
+
+  manual.focused.underline = true;
+  take(ui::mount(*fixture.scene, ui::border(ui::plainButton(child, "Child"), ASCII_BORDER, manual).reference(border)));
+
+  auto theme = turboTheme();
+  const auto manualResolved = resolveStyle(theme, {.type = "Border"}, {.focused = manual.focused});
+
+  check(manualResolved.frame[1].line && manualResolved.frame[1].line->underline,
+        "the theme preserves explicit manual underline when no declaration overrides it");
+
+  auto overrides = take(parsePss("Border:focused { frame-line-foreground: #010203; frame-line-underline: true; }"));
+
+  for (const auto &rule : overrides.rules) {
+    theme.rules.push_back(rule);
+  }
+
+  take(fixture.scene->theme(theme));
+  fixture.render({12, 4});
+  take(syncBorder(fixture.app->tree(), border.node(), child.node()));
+
+  CountingSink sink;
+
+  take(fixture.app->tree().frame([&] {
+    take(fixture.app->tree().paint(border.node(), sink));
+  }));
+  check(sink.textStyle && sink.textStyle->foreground == RgbColor{1, 2, 3} && sink.textStyle->underline,
+        "explicit PSS frame-part color and underline retain normal cascade precedence");
 }
 
 void borderFocusProjection() {
@@ -1355,6 +1421,7 @@ int main(int argc, char **argv) {
     chromeAcrossCaptionFactories();
     primitiveScopedNamesAndRollback();
     themeAndManualStyle();
+    themedDefaultFramePaint();
     borderFocusProjection();
     scopedPrimitiveStyles();
     scopedStyleFactoryRollback();
