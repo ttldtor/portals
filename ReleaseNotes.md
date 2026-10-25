@@ -37,6 +37,8 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- Documented complete UI client compilation measurements, separating compile/link and handler-edit observations from include-graph size and runtime benchmarks.
+
 - LogView reuses wrapped rows when appending at the same width; retained row descriptors are still copied, while resizing rebuilds wrapping.
 
 ## v0.6.0 (2026-10-24)

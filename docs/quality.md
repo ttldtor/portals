@@ -96,6 +96,48 @@ the output directory. An unavailable compiler or check cannot produce a passing
 zero-issue report. Lexical brace nesting from the compactness scanner is a
 different diagnostic and is never labeled cognitive complexity.
 
+## Client compile and include cost
+
+Measure the complete client translation unit, including its handlers, helpers,
+error handling and cleanup. Keep `#include <portals/ui.hpp>` and the ordinary
+runner in a representative UI client; the umbrella also makes `ui::async`
+available. Removing an API from an include experiment changes the workload.
+
+Prepare the SDK separately from the timed client work. Record the library and
+header revisions, compiler version, configuration, full compile/link commands,
+source hashes and any local patch. An older installed SDK is a historical
+baseline even when a newer checkout uses the same compiler. Verify the library
+and headers belong to the intended revision before reusing build artifacts.
+
+Use the generated client commands to observe these phases separately:
+
+1. Compile the unchanged full client translation unit and link its executable.
+2. Change only a handler body, then compile that translation unit and link again.
+3. Repeat with matched compiler flags and inputs for both variants, alternating
+   their order over at least three independent pairs. Keep preparation and any
+   warmup outside the reported pairs, and avoid overlapping your own builds.
+
+Retain each process's exit status, raw output, start/end times and elapsed time.
+Report individual pairs, medians and ranges; distinguish direct compiler/linker
+process timing from a whole build command's scheduling and startup overhead.
+Document cache conditions and background load when known. Repeated commands
+under ordinary OS caching do not establish cold-build performance.
+
+MSVC's [/showIncludes](https://learn.microsoft.com/en-us/cpp/build/reference/showincludes-list-include-files?view=msvc-170)
+records nested includes. Deduplicate resolved paths before reporting header
+counts or source bytes. These describe dependency size; they do not attribute
+compiler CPU time or template instantiation cost. Use the existing
+[change-impact tool](developer-tools-measure.md#tool-change-impact) to inspect
+which recorded compile outputs depend on a changed header.
+
+A temporary include exclusion can probe the effect of an API's additional
+includes in that client. Treat it as a diagnostic comparison: it cannot justify
+shipping the exclusion when the API must remain available. Overlapping timing ranges,
+inconsistent pair deltas or a large spread require more cautious attribution;
+moving declarations between headers alone does not establish a speedup.
+Keep compile/link observations as build evidence: the runtime benchmark
+adapters below do not accept compile-time records.
+
 ## Performance history
 
 `tools/quality/performance.cmake` archives and compares existing benchmark JSON.
