@@ -2790,7 +2790,8 @@ TEST_CASE("resource composes with a late managed model and the enclosing C++ tra
 }
 
 TEST_CASE("resource preparation allocation failures remain checked and retire partial ownership") {
-  constexpr std::ptrdiff_t MAX_BUDGET = 2048;
+  // Bound a broken sweep, not the scene's allocation count: Debug iterator proxies need more headroom.
+  constexpr std::ptrdiff_t MAX_BUDGET = 4096;
   for (const int mode : {0, 1, 2}) {
     const bool localized = mode == 1;
     const bool configured = mode == 2;
@@ -2867,7 +2868,7 @@ TEST_CASE("resource preparation allocation failures remain checked and retire pa
     CHECK(failed > 0);
     CHECK(succeeded == 1);
     std::fprintf(stderr, "resource OOM sweep mode=%d failures=%zu first-success-budget=%td\n", mode, failed,
-                 activeBudget);
+                 succeeded ? activeBudget : -1);
   }
 }
 
