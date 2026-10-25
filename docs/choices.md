@@ -71,8 +71,8 @@ positions.
 
 For startup selection, set `ComboBoxConfig::initial`. A programmatic `select()`
 over a managed model requires the first ordinary preparation cycle to have pinned
-that model. `runApp` performs this cycle before input callbacks; low-level hosts
-call `ManagedScene::prepare` themselves. `Scene::prepareChecked()` mounts the scene
+that model. `runApp` drives the normal preparation cycles; low-level hosts call
+`ManagedScene::prepare` themselves. `Scene::prepareChecked()` mounts the scene
 but does not perform this runtime model preparation.
 
 A projection can also return an owning `std::string`, for example from
