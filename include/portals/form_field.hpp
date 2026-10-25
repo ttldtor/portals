@@ -17,7 +17,8 @@ enum class FieldStatus {
   UNCHECKED, ///< No validation has been requested; required is still shown in the label.
   VALID,     ///< The checked candidate satisfied all configured synchronous rules.
   INVALID,   ///< The checked candidate was rejected; the editor retains its draft.
-  PENDING    ///< Explicit presentation only; does not disable editing or schedule work.
+  PENDING,   ///< Checking an asynchronous intent, or explicit presentation; editing remains enabled.
+  TECHNICAL_ERROR ///< A technical validation failure; distinct from invalid business data.
 };
 
 /** @brief Owning validation presentation; messages remain meaningful without color. */
@@ -36,6 +37,9 @@ struct FieldValidation {
 
   /** @param message Optional explanation of in-progress work. @return Explicit pending presentation. */
   static FieldValidation pending(std::string message = {});
+
+  /** @param message Readable technical failure explanation. @return Owning failure presentation. */
+  static FieldValidation error(std::string message = {});
 };
 
 /** @brief Manual style/layout defaults; semantic field rules are configured separately. */

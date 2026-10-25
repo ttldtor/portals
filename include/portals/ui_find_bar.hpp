@@ -12,7 +12,7 @@ struct FindBarConfig {
   /** @brief Keep aggregate transfers fallible on checked standard-library implementations. */
   ~FindBarConfig() = default;
 
-  FindLimits limits{}; ///< Source/range caps, checked against FindLimits hard ceilings.
+  FindLimits limits{}; ///< Legacy document/range caps; the model overload uses search instead.
   LineEditConfig editor{
     .options = {.limits = {1024, 1024, 1024, 2048}}}; ///< Query options; automatic width shares toolbar space.
   TextValue previousLabel{"Previous"};                ///< Owning previous-match button caption.
@@ -20,7 +20,9 @@ struct FindBarConfig {
   TextValue clearLabel{"Clear"};                      ///< Owning clear-query button caption.
   FindBarAppearance appearance{}; ///< Layout/manual style defaults; callbacks never run during styling.
   std::function<void(FindMatch)>
-    selected{}; ///< Owning callback after publication; no initial delivery or rollback on failure.
+    selected{};               ///< Owning UI callback after publication; no mount-time delivery or rollback on failure.
+  FindSearchOptions search{}; ///< Worker scan/result budgets used only by the model-backed overload.
+  std::function<void(FindSearchError)> searchFailed{}; ///< UI callback for the newest model query's domain failure.
 };
 
 /** @param document Source copied only after its configured byte cap is checked; invalid UTF-8 fails mount.

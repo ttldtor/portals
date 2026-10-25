@@ -10,6 +10,13 @@ flexible, so it uses the available vertical space; an explicit size policy can
 change that. It has no child widget per record and does not perform terminal I/O,
 file I/O or background work.
 
+At an unchanged width, append reuses the existing wrap ranges and wraps only
+newly retained records. It still copies the bounded row descriptors; total append
+cost is not independent of the retained row count. A width change rebuilds the
+wrap ranges. Hiding the view does not discard its retained data or make append a
+background operation. Send expensive data acquisition or transformations through
+an appropriate provider before applying a short UI update.
+
 ## Ordinary C++ program
 
 Build the `portals_log_view_example` example with `PORTALS_BUILD_EXAMPLES=ON`,

@@ -52,6 +52,19 @@ struct ThemeSelectorAccess;
 struct ActionAccess;
 struct ActionStore;
 struct ActionRegistry;
+struct AsyncAccess;
+
+/// @cond INTERNAL
+struct SceneActivity {
+  virtual ~SceneActivity() = default;
+  virtual bool active() const noexcept = 0;
+  virtual void service() noexcept = 0;
+  virtual void prepared() noexcept {
+  }
+
+  virtual void cancel() noexcept = 0;
+};
+/// @endcond
 class SetupFailureTicket;
 } // namespace ui::detail
 
@@ -1568,6 +1581,11 @@ public:
    */
   std::expected<void, TreeError> prepareViews(Application &app, const LayoutSnapshot &snapshot) override;
 
+  /** @return True when a fluent asynchronous binding requires the existing background service. */
+  bool requiresBackgroundExecutor() const noexcept override {
+    return asyncEnabled_;
+  }
+
   /** @param stop Optional cooperative cancellation.
    * @return Runner statistics or complete managed, runner/restoration and cleanup error.
    */
@@ -1838,6 +1856,7 @@ private:
   friend struct ui::detail::ThemeSelectionAccess;
   friend struct ui::detail::ThemeSelectorAccess;
   friend struct ui::detail::ActionAccess;
+  friend struct ui::detail::AsyncAccess;
   friend struct detail::ManagedScrollTestAccess;
 
   struct Entry;
@@ -2006,6 +2025,11 @@ private:
     std::optional<ManagedError> reported;
   };
 
+  struct DeliveryRegistration {
+    Subscription subscription;
+    std::weak_ptr<const void> liveness;
+  };
+
   struct Entry {
     Node<Widget> node;
     std::shared_ptr<StyleTarget> target;
@@ -2025,6 +2049,7 @@ private:
     std::shared_ptr<ClickChain> clicks;
     std::shared_ptr<EditorEventChain> editing;
     std::shared_ptr<ChangeChain> changes;
+    std::vector<DeliveryRegistration> deliveries = std::vector<DeliveryRegistration>(0);
     std::shared_ptr<detail::ScrollIntentRecord> scrollIntent;
     std::shared_ptr<detail::ManagedScrollState> scrollOwner;
     std::shared_ptr<ScrollController> scrollController;
@@ -2348,6 +2373,12 @@ private:
   std::thread::id owner_;
   ManagedOptions options_;
   std::shared_ptr<const void> lifetime_;
+  std::expected<void, ManagedError> admitActivity(std::shared_ptr<ui::detail::SceneActivity> activity);
+  std::expected<void, TreeError> visitActivities(bool prepared);
+
+  std::vector<std::weak_ptr<ui::detail::SceneActivity>> asyncActivities_;
+  bool servicingActivities_{};
+  bool asyncEnabled_{};
   std::weak_ptr<ui::detail::SceneAnchor> facade_;
   Node<Widget> root_;
   StyleEngine styles_;

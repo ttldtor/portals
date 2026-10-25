@@ -2,190 +2,69 @@
 
 [Английская версия](../ui-coroutines.md)
 
-Необязательный экспериментальный адаптер [`UiAsync`](../../include/portals/async.hpp)
-позволяет действию кнопки приостановиться, пока существующий [планировщик](scheduler.md)
-продолжает обслуживать ввод. Программа меняет **Ready → Waiting → Completed**
-после секундного таймера. **Exit** и F10 работают во время ожидания.
-Повторный **Start** получает `WOULD_BLOCK`, пока прежний вызов ещё выполняется.
+Обработчик `ui::async` может приостановиться, пока существующий планировщик
+обслуживает ввод. Программа меняет **Ready → Waiting → Completed** через секунду.
+**Exit** и F10 работают во время ожидания. Повторный **Start** получает
+`AsyncError::WOULD_BLOCK`, сохраняя уже выполняющийся вызов.
 
-Фрагмент ниже предполагает `using namespace portals`, созданный `UiAsync &owner`,
-`Application &app`, опубликованные `ui::Ref<Button> start` и `ui::Ref<Label> status`,
-а также `delayMilliseconds = 1000`. Привязка выполняется внутри `ui::configure`;
-её проверяемый результат возвращается в сцену. Создание владельца и очистка показаны
-в полной программе ниже.
+[Полный исходник](../examples/guide_async.cpp), библиотека `portals::core`:
 
-```cpp
-UiTask finishLater(UiAsyncContext context, SchedulerTime deadline,
-                   ui::Ref<Label> status) {
-  status.text() = "Waiting";
+\include{lineno} guide_async.cpp
 
-  auto waited = co_await context.until(deadline);
+Фабрика выполняется внутри границы обработки setup-ошибок `runApp`. Сцена хранит
+обработчик, отмену и владельца корутины; отдельный binding token не нужен.
+Захват `status` по значению сохраняет слабую ссылку на контрол. Удаление кнопки
+или закрытие сцены отменяет приостановленную задачу. Coroutine frame уничтожается
+раньше удержанной лямбды и её аргументов.
 
-  status.text() = waited ? "Completed" : "Wait failed";
+## Выбор контекста выполнения
 
-  co_return waited;
-}
+Код корутины до и после `co_await` выполняется на UI. Само ожидание не переносит
+тяжёлые вычисления в другой поток. Используйте `context.background<Result>(input, work)`:
+`input` владеет неизменяемыми данными, а отдельный worker-safe callable `work`
+принимает `const Input&` и `std::stop_token`. Результат — `shared_ptr<const Result>`
+или `expected<shared_ptr<const Result>, AsyncError>`. Сам `Result` может быть
+`expected<Value, DomainError>`: транспортная ошибка не подменяет предметную.
 
-// Inside the UI configuration callback, after successful
-// owner creation.
-return start.onClick([&owner, &app, status] {
-  auto started = owner.start(finishLater(owner.context(),
-    app.now() + delayMilliseconds,
-    status));
+Fluent async-привязка включает [фоновый сервис](application.md#application-background-ru)
+для сцены, в том числе для обработчиков только с таймером. Синхронный runner
+по умолчанию запускает два worker-потока с шестнадцатью местами ожидающей очереди.
+Обычные синхронные сцены не запускают потоки. Пошаговая сессия требует executor
+хоста. Готовый результат доставляет существующий scheduler; worker не возобновляет
+frame и не меняет контролы.
 
-  if (!started && started.error() != AsyncError::WOULD_BLOCK) {
-    status.text() = "Start failed";
-  }
-});
-```
+## Владение, ошибки и повторные действия
 
-Фрагмент показывает ожидание и смену надписи. Полная программа также сохраняет
-типизированные ошибки, проверяет создание адаптера и освобождает его при остановке.
-Захваченные по ссылке `owner` и `app` должны жить до отключения обработчика;
-`Ref` наблюдает контрол и не продлевает его жизнь. Короткий fluent-адаптер
-`ui::async` остаётся **TBD — M6**.
+Поддерживаются корутинные лямбды с захватами и обычные корутинные функции.
+`ui::async(function, owningArguments...)` копирует прототип для каждого принятого
+вызова. Ссылочные захваты и указатели остаются заимствованиями вызывающей стороны.
+`ui::async(UiTaskRestart::CANCEL_PREVIOUS, function, arguments...)` явно заменяет
+приостановленный вызов. Выполняющийся вызов по-прежнему отвергает reentry.
+Кооперативная отмена не откатывает уже выполненные изменения UI.
 
-<details>
-<summary>Полная программа</summary>
+Каждое UI-возобновление входит в собственный контекст текущей сцены и выходит
+до suspension или возврата. Поэтому `ui::quit()` адресует сцену обработчика
+и после ожидания. Между возобновлениями сцена не остаётся текущей.
 
-[Собираемый исходник](../examples/guide_async.cpp), подключение — `portals::core`.
+`context.after(duration)` отвергает отрицательную задержку и переполнение срока;
+`context.until(deadline)` принимает абсолютные миллисекунды scheduler. Нулевая
+задержка и уже наступивший срок всё равно требуют dispatch. Для собственной
+интеграции с хостом остаётся `context.receive<T>(start)` с проверяемым endpoint.
 
-```cpp
-#include <portals/async.hpp>
-#include <portals/ui.hpp>
+Неуспешный запуск и результат задачи сохраняют `ManagedError::async` в диагностике.
+Окончательный отказ фонового запуска один раз записывается как `ui.async.background`
+с точным `ManagedError::background`, если executor вернул такую причину. Если задача
+возвращает эту ошибку, её завершение дополнительно записывается как `ui.async` без
+унаследованной фоновой причины. Немедленная передача ошибки даёт две записи о двух
+границах одной ошибки, а не о двух независимых сбоях. Обработка результата ожидания
+не стирает запись об отказе запуска. Более поздняя ошибка задачи не получает чужую
+причину. Временный отказ приёма `WOULD_BLOCK` сохраняется для повторной попытки и
+не записывается как окончательная ошибка.
 
-#include <memory>
-#include <optional>
-
-namespace {
-struct AsyncAction {
-  std::unique_ptr<portals::UiAsync> owner;
-  std::optional<portals::AsyncError> error;
-};
-
-portals::UiTask finishLater(
-  portals::UiAsyncContext context,
-  portals::SchedulerTime deadline,
-  portals::ui::Ref<portals::Label> status,
-  std::shared_ptr<AsyncAction> action) {
-  status.text() = "Waiting";
-
-  auto waited = co_await context.until(deadline);
-
-  if (!waited) {
-    action->error = waited.error();
-    status.text() = "Wait failed";
-
-    co_return std::unexpected(waited.error());
-  }
-
-  status.text() = "Completed";
-
-  co_return std::expected<void, portals::AsyncError>{};
-}
-} // namespace
-
-int main() {
-  using namespace portals;
-
-  constexpr SchedulerTime delayMilliseconds = 1000;
-  auto action = std::make_shared<AsyncAction>();
-  ui::Ref<Label> status;
-  ui::Ref<Button> start;
-  ui::Ref<Button> exit;
-
-  auto scene = ui::scene(ui::vbox(
-    ui::label(status, "Ready"),
-    ui::button(start, "Start"),
-    ui::button(exit, "Exit")));
-
-  scene.onStop([action] {
-    if (action->owner) {
-      auto closed = action->owner->close();
-
-      if (!closed) {
-        action->error = closed.error();
-      }
-
-      action->owner.reset();
-    }
-  });
-
-  const int result = scene
-    | ui::configure(
-      [action, status](ManagedScene &, Application &app) {
-        auto created = UiAsync::create(app.scheduler(),
-          app.tree(),
-          app.root());
-
-        if (!created) {
-          action->error = created.error();
-          status.text() = "Async setup failed";
-
-          return;
-        }
-
-        action->owner = std::move(*created);
-      })
-    | ui::configure(
-      [action, status, start](ManagedScene &, Application &app) {
-        auto bound = start.onClick([action, status, &app] {
-          if (!action->owner) {
-            return;
-          }
-
-          auto started = action->owner->start(
-            finishLater(action->owner->context(),
-              app.now() + delayMilliseconds,
-              status,
-              action));
-
-          if (!started && started.error() != AsyncError::WOULD_BLOCK) {
-            action->error = started.error();
-            status.text() = "Start failed";
-          }
-        });
-
-        return bound;
-      })
-    | ui::onClick(exit, ui::quit)
-    | ui::onKey("F10", ui::quit)
-    | ui::runApp();
-
-  return result != 0 || action->error ? 1 : 0;
-}
-```
-
-</details>
-
-Соберите полный [исходник](../examples/guide_async.cpp) с `portals::core` по
-[руководству пакета](package.md). `Application::now()` использует те же монотонные
-миллисекунды, что и таймер. Ожидание приостанавливает корутину без блокирующего sleep.
-Это конкурентное выполнение корутин в UI-потоке; фоновые вычисления, I/O и новые
-потоки здесь не запускаются. Долгое вычисление внутри корутины всё ещё блокирует ввод.
-
-`scene.onStop` закрывает и уничтожает адаптер до освобождения приложения сцены.
-Закрытие приостановленного адаптера уничтожает кадр корутины; тело не возобновляется
-для вывода **Completed**. Свободная функция-корутина принимает владеющие параметры;
-её `Ref` наблюдает надпись и не владеет виджетом. Изменения текста используют обычный
-путь managed-диагностики и перерисовки. Ошибки запуска и таймера сохраняются в
-`AsyncAction::error`; программа возвращает 1 после очистки. Корутина возвращает типизированный результат ожидания: ошибка устанавливает
-исход адаптера `FAILED`, успешный возврат — `SUCCEEDED`.
-
-## Ожидание результата настоящего источника
-
-`co_await context.receive<T>(start)` ждёт неизменяемый результат источника.
-UI вызывает `start` с пригодным для рабочего потока `AsyncReply<T>`; собственный
-поток приложения публикует `shared_ptr<const T>` через `reply.complete(...)`
-или типизированную ошибку через `reply.fail(...)`. Запуск, отмену и ожидание потока
-организует приложение. При отказе приёма очередью сохраняйте точные reply и результат
-для повторной попытки; принятие не означает возобновления корутины. Не вызывайте
-вложенный dispatch из `start` и не изменяйте контролы из рабочего потока.
-Точные контракты приёма и владения приведены ниже.
-
-Fluent-адаптер `ui::async` для функций и корутинных лямбд — **TBD — M6** в
-[плане возможностей](planned-features.md). Текущий API использует явного владельца,
-как в примере. Сторонние awaiter и бесконечные генераторы не поддерживаются.
+Runner по умолчанию сообщает восстанавливаемые ошибки после очистки. Такая ошибка
+действия сама по себе не меняет успешный код завершения на 1. Setup-ошибки и
+фатальные ошибки runner сохраняют ненулевой код. Низкоуровневый `UiAsync` доступен
+для явного управления владением и политикой результата.
 
 <details>
 <summary>Справка корутин: владение, приём, ошибки и отмена</summary>
@@ -194,9 +73,15 @@ Fluent-адаптер `ui::async` для функций и корутинных 
 
 `UiAsync::create(scheduler, tree, contextNode)` возвращает `expected<unique_ptr<UiAsync>, AsyncError>`. Область действия узла должна принадлежать переданному планировщику, иначе возвращается `INVALID_ARGUMENT`. Дерево и планировщик живут дольше адаптера. Удаление контекстного узла закрывает адаптер и отменяет ожидание.
 
-Используйте свободную или статическую корутину с владеющими параметрами, как `finishLater` в полной программе выше. `UiTask` начинает тело после принятия адаптером. До этого кадром корутины владеет перемещаемая задача, после — адаптер UI. Создание, возобновление и уничтожение выполняются на потоке создания; уничтожение задачи или адаптера на другом потоке завершает процесс.
+Используйте свободную или статическую корутину с владеющими параметрами, в низкоуровневом API. `UiTask` начинает тело после принятия адаптером. До этого кадром корутины владеет перемещаемая задача, после — адаптер UI. Создание, возобновление и уничтожение выполняются на потоке создания; уничтожение задачи или адаптера на другом потоке завершает процесс.
 
-Параметры функции принадлежат кадру корутины. Замыкание корутинной лямбды автоматически не удерживается. Заимствованные ссылки на виджеты и представления нельзя переносить через приостановку. В полной программе кадр владеет копиями `context`, `deadline`, `status` и `action`. `shared_ptr<AsyncAction>` удерживает состояние действия; `status` — наблюдающий `Ref<Label>`, а `context` слабо наблюдает за адаптером. Они не продлевают жизнь дерева и планировщика. `scene.onStop` закрывает и уничтожает адаптер, пока эти сервисы ещё живы.
+В низкоуровневом API параметры функции принадлежат кадру корутины, но замыкание
+корутинной лямбды автоматически не удерживается. Заимствованные ссылки на виджеты
+и представления нельзя переносить через приостановку. В полном fluent-примере
+вызов владеет замыканием с наблюдающим `status`, а кадр — параметром `context`.
+Они не продлевают жизнь дерева и планировщика. Fluent binding уничтожает кадр
+перед освобождением замыкания. Для низкоуровневого API вызывающий код сам закрывает
+и уничтожает адаптер, пока его дерево и планировщик ещё живы.
 
 `owner.context()` возвращает объект доступа к ожиданиям адаптера. Он слабо наблюдает за адаптером и не продлевает его жизнь. Поддерживаются только его точные типы ожидания `AsyncTimer` и `AsyncReceive<T>`.
 

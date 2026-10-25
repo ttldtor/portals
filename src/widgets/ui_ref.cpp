@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include "managed_error_helpers.hpp"
 #include <portals/detail/line_edit_text.hpp>
 #include <portals/detail/setup_failure.hpp>
 #include <portals/message_box.hpp>
@@ -59,6 +60,122 @@ ManagedError textFailure(Node<Widget> node, TextValueError cause) {
 
 /** @brief Checked bridge to existing scene ownership and standard retained setters. */
 struct RefAccess {
+  static EditorCommandResult activate(const std::shared_ptr<RefTarget> &target, std::source_location origin) {
+    auto scene = eventScene(target);
+    std::optional<ManagedError> failure;
+    auto collector =
+      target && target->owner == std::this_thread::get_id() ? target->lifetime : std::weak_ptr<const void>{};
+    if (!scene) {
+      failure = scene.error();
+    } else {
+      auto result = (*scene)->app_.router().invoke(target->node, {portals::Action::ACTIVATE});
+      if (!result) {
+        failure = ManagedError{ManagedPhase::INPUT, target->node.id(), result.error(), {}, {}};
+      }
+    }
+
+    if (!failure) {
+      return EditorCommandResult({}, {}, false);
+    }
+
+    report(*failure, target, "button.activate", {}, "Button", origin);
+    return EditorCommandResult(std::unexpected(bridge(*failure)), std::move(collector),
+                               ManagedScene::focusReported(*failure));
+  }
+
+  static std::expected<Publisher<portals::detail::UiDeliveryEnvelope>, ManagedError>
+  connectDelivery(ManagedScene &scene, const std::shared_ptr<RefTarget> &target, DeliveryCallback callback,
+                  std::source_location origin) {
+    const auto node = target->node;
+    auto allowed = scene.boundary(ManagedPhase::BIND, node);
+    if (!allowed) {
+      return std::unexpected(allowed.error());
+    }
+
+    auto entry = scene.find(node);
+    if (!entry) {
+      return std::unexpected(ManagedError{ManagedPhase::BIND, node.id(), TreeError::STALE_NODE, {}, {}});
+    }
+
+    // Throwing callbacks are disconnected by Scheduler. Keep their node-owned token storage
+    // bounded as registrations are replaced, without putting UI liveness into worker endpoints.
+    std::erase_if(entry->deliveries, [](const auto &registration) {
+      return registration.liveness.expired();
+    });
+    auto liveness = std::make_shared<const std::byte>();
+
+    std::expected<SchedulerConnection<portals::detail::UiDeliveryEnvelope>, SchedulerError> connected =
+      std::unexpected(SchedulerError::CLOSED);
+    auto scoped = scene.app_.tree().withScope(node, [&](const UiScope &scope) {
+      connected = scene.app_.scheduler().connect<portals::detail::UiDeliveryEnvelope>(
+        scope,
+        currentSceneCallback(
+          scene.facadeContext(),
+          [target, callback = std::move(callback), origin, liveness](auto envelope) mutable {
+            (void)liveness;
+            auto owner = eventScene(target);
+            if (!owner) {
+              envelope->complete(std::unexpected(TreeError::CLOSED));
+              return;
+            }
+
+            auto allowed = (*owner)->actionBoundary();
+            if (!allowed) {
+              envelope->complete(allowed);
+              reportEventError(target, ManagedError{ManagedPhase::INPUT, target->node.id(), allowed.error(), {}, {}},
+                               origin);
+              return;
+            }
+
+            ManagedScene::ActionAdmission admission(**owner);
+            try {
+              auto result = callback(envelope->payload);
+              envelope->complete(result);
+              if (!result) {
+                reportEventError(target, ManagedError{ManagedPhase::INPUT, target->node.id(), result.error(), {}, {}},
+                                 origin);
+              }
+            } catch (...) {
+              envelope->complete(std::unexpected(TreeError::CALLBACK_FAILED));
+              reportEventError(target,
+                               ManagedError{ManagedPhase::INPUT, target->node.id(), TreeError::CALLBACK_FAILED, {}, {}},
+                               origin);
+              throw;
+            }
+          }),
+        SchedulerLane::CONTROL, SchedulerOverflow::REJECT);
+    });
+    if (!scoped) {
+      return std::unexpected(ManagedError{ManagedPhase::BIND, node.id(), scoped.error(), {}, {}});
+    }
+    if (!connected) {
+      auto cause = TreeError::CLOSED;
+      switch (connected.error()) {
+      case SchedulerError::NO_MEMORY:
+        cause = TreeError::NO_MEMORY;
+        break;
+      case SchedulerError::WOULD_BLOCK:
+        cause = TreeError::WOULD_BLOCK;
+        break;
+      case SchedulerError::WRONG_THREAD:
+        cause = TreeError::WRONG_THREAD;
+        break;
+      case SchedulerError::IDENTITY_EXHAUSTED:
+        cause = TreeError::IDENTITY_EXHAUSTED;
+        break;
+      case SchedulerError::INVALID_ARGUMENT:
+        cause = TreeError::INVALID_ARGUMENT;
+        break;
+      default:
+        break;
+      }
+      return std::unexpected(ManagedError{ManagedPhase::BIND, node.id(), cause, {}, {}});
+    }
+
+    entry->deliveries.push_back({std::move(connected->subscription), liveness});
+    return std::move(connected->publisher);
+  }
+
   static std::expected<void, TreeError> gaugeValue(ManagedScene &scene, Node<Gauge> node, double value, bool relative) {
     auto &tree = scene.app_.tree();
 
@@ -531,6 +648,20 @@ void reportEventError(const std::shared_ptr<RefTarget> &target, const ManagedErr
   if (scene && !RefAccess::eventReported(**scene, error)) {
     (void)(*scene)->reportError(error, {}, origin);
   }
+}
+
+std::expected<Publisher<portals::detail::UiDeliveryEnvelope>, ManagedError>
+connectDelivery(const std::shared_ptr<RefTarget> &target, DeliveryCallback callback, std::source_location origin) {
+  auto scene = eventScene(target);
+  if (!scene) {
+    return std::unexpected(scene.error());
+  }
+
+  return RefAccess::connectDelivery(**scene, target, std::move(callback), origin);
+}
+
+EditorCommandResult activateButton(const std::shared_ptr<RefTarget> &target, std::source_location origin) {
+  return RefAccess::activate(target, origin);
 }
 
 std::expected<void, ManagedError> gaugeValue(std::shared_ptr<RefTarget> target, std::shared_ptr<const Node<Gauge>> node,

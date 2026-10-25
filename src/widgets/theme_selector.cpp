@@ -543,7 +543,13 @@ std::expected<void, ManagedError> ManagedScene::attachThemeSelector(const std::o
       return live;
     }
 
-    auto committed = record->model.commit(origin);
+    auto model = modelTarget->record.lock();
+    const bool pending = model && model->snapshot->preparing;
+    auto committed = pending ? std::expected<void, ManagedError>{} : record->model.commit(origin);
+
+    if (pending) {
+      model->commitWhenPrepared = true;
+    }
 
     if (!committed) {
       return committed;
@@ -685,7 +691,8 @@ std::expected<void, ManagedError> ManagedScene::prepareThemeSelector() {
   const bool active =
     model->snapshot->status == ui::ThemeSelectionStatus::ACTIVE && styles_.ownsPreview(model->preview);
   const bool superseded = model->snapshot->status == ui::ThemeSelectionStatus::ACTIVE && !active;
-  record->applyEnabled = active && record->selected && *record->selected < model->snapshot->catalog->choices.size() &&
+  record->applyEnabled = active && !model->snapshot->preparing && !model->snapshot->preparationError &&
+                         record->selected && *record->selected < model->snapshot->catalog->choices.size() &&
                          model->snapshot->previewedId == model->snapshot->catalog->choices[*record->selected]->id;
   const auto status = superseded ? 2u : record->failed ? 1u : 0u;
   auto enabled = app_.tree().setEnabled(record->apply, record->applyEnabled);

@@ -183,8 +183,9 @@ std::unique_ptr<detail::LogData> copyValues(const detail::LogData &source) {
   return result;
 }
 
-template <class Consume> void visitRows(const detail::LogData &data, std::int32_t width, Consume consume) {
-  for (std::size_t record = 0; record < data.records.size(); ++record) {
+template <class Consume>
+void visitRows(const detail::LogData &data, std::int32_t width, std::size_t firstRecord, Consume consume) {
+  for (std::size_t record = firstRecord; record < data.records.size(); ++record) {
     const auto &text = data.records[record]->text;
     const auto clusters = text.graphemes();
     std::size_t begin{};
@@ -219,12 +220,37 @@ void wrapRows(detail::LogData &data, std::int32_t width) {
 
   std::size_t count{};
 
-  visitRows(data, width, [&](auto, auto, auto) {
+  visitRows(data, width, 0, [&](auto, auto, auto) {
     ++count;
   });
   data.rows.reserve(count);
-  visitRows(data, width, [&](std::size_t record, std::size_t begin, std::size_t end) {
+  visitRows(data, width, 0, [&](std::size_t record, std::size_t begin, std::size_t end) {
     data.rows.push_back({record, begin, end});
+  });
+}
+
+void appendRows(detail::LogData &candidate, const detail::LogData &source, std::size_t droppedLines) {
+  if (source.width <= 0) {
+    return;
+  }
+
+  const auto droppedRecords = std::min(droppedLines, source.records.size());
+  const auto retainedRecords = source.records.size() - droppedRecords;
+  const auto first = std::ranges::lower_bound(source.rows, droppedRecords, {}, &detail::LogRow::record);
+  std::size_t count = static_cast<std::size_t>(source.rows.end() - first);
+
+  // Old records retain their validated wrap at this width; only the new suffix visits graphemes.
+  visitRows(candidate, source.width, retainedRecords, [&](auto, auto, auto) {
+    ++count;
+  });
+  candidate.rows.reserve(count);
+
+  for (auto row = first; row != source.rows.end(); ++row) {
+    candidate.rows.push_back({row->record - droppedRecords, row->byteBegin, row->byteEnd});
+  }
+
+  visitRows(candidate, source.width, retainedRecords, [&](std::size_t record, std::size_t begin, std::size_t end) {
+    candidate.rows.push_back({record, begin, end});
   });
 }
 
@@ -641,7 +667,7 @@ std::expected<LogAppendReceipt, LogError> appendLogBatch(WidgetTree &tree, Node<
         return;
       }
 
-      wrapRows(*candidate, state.data->width);
+      appendRows(*candidate, *state.data, result->droppedLines);
 
       if (!candidate->status.followTail && std::ranges::none_of(candidate->records, [&](const auto &record) {
             return record->id == candidate->anchor.record;

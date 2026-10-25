@@ -12,6 +12,12 @@ if(PORTALS_BUILD_TESTS AND
     (NOT PORTALS_PACKAGE_TEST_TIMEOUT MATCHES "^[1-9][0-9]*$" OR PORTALS_PACKAGE_TEST_TIMEOUT GREATER 86400))
   message(FATAL_ERROR "PORTALS_PACKAGE_TEST_TIMEOUT must be a positive integer <= 86400 seconds")
 endif()
+set(PORTALS_BUNDLE_SCRIPT_TEST_TIMEOUT 30 CACHE STRING
+  "Seconds allowed for the bundle script test")
+if(PORTALS_BUILD_TESTS AND
+    (NOT PORTALS_BUNDLE_SCRIPT_TEST_TIMEOUT MATCHES "^[1-9][0-9]*$" OR PORTALS_BUNDLE_SCRIPT_TEST_TIMEOUT GREATER 86400))
+  message(FATAL_ERROR "PORTALS_BUNDLE_SCRIPT_TEST_TIMEOUT must be a positive integer <= 86400 seconds")
+endif()
 set(PORTALS_RELEASE_START_TEST_TIMEOUT 600 CACHE STRING
   "Seconds allowed for offline release-start Git and PowerShell fixtures")
 if(PORTALS_BUILD_TESTS AND
@@ -37,6 +43,14 @@ add_library(portals_core STATIC src/version.cpp src/geometry.cpp src/text.cpp sr
 target_sources(portals_core PRIVATE src/terminal/legacy.cpp)
 
 target_sources(portals_core PRIVATE
+  src/widgets/ui_async.cpp
+  src/widgets/model_find.cpp
+  src/runtime/background.cpp
+  src/runtime/worker_storage.cpp
+  src/widgets/search_index.cpp
+  src/widgets/suggestions.cpp
+  src/widgets/form_field_async.cpp
+  src/runtime/ui_delivery.cpp
   src/widgets/managed_diagnostics.cpp
   src/widgets/managed_observers.cpp
   src/widgets/managed_styles.cpp)
@@ -260,6 +274,8 @@ if(PORTALS_BUILD_EXAMPLES)
   add_subdirectory(examples/log_view)
   add_subdirectory(examples/form_field)
   add_subdirectory(examples/find_bar)
+  add_subdirectory(examples/suggestions)
+  add_subdirectory(examples/async_validation)
   add_subdirectory(examples/search_journal)
   add_subdirectory(examples/check_state)
   add_subdirectory(examples/named_controls)
@@ -620,6 +636,15 @@ if(PORTALS_BUILD_TESTS)
   add_test(NAME portals.find-bar COMMAND portals_find_bar)
   set_tests_properties(portals.find-bar PROPERTIES TIMEOUT 20)
 
+  add_executable(portals_form_field_async_tests tests/form_field_async.cpp)
+  target_include_directories(portals_form_field_async_tests SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  target_link_libraries(portals_form_field_async_tests PRIVATE portals::core)
+  portals_enable_warnings(portals_form_field_async_tests)
+  add_test(NAME portals.form-field-async COMMAND portals_form_field_async_tests)
+  set_tests_properties(portals.form-field-async PROPERTIES TIMEOUT 60)
+  add_executable(portals_form_field_async_consumer tests/package_consumer/form_field_async.cpp)
+  target_link_libraries(portals_form_field_async_consumer PRIVATE portals::core)
+  portals_enable_warnings(portals_form_field_async_consumer)
   add_executable(portals_form_field tests/form_field.cpp)
   target_include_directories(portals_form_field SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
   target_link_libraries(portals_form_field PRIVATE portals::core)
@@ -692,6 +717,11 @@ if(PORTALS_BUILD_TESTS)
   portals_enable_warnings(portals_style_identity)
   add_test(NAME portals.style-identity COMMAND portals_style_identity)
   set_tests_properties(portals.style-identity PROPERTIES TIMEOUT 20)
+  add_executable(portals_theme_preparation tests/theme_preparation.cpp)
+  target_link_libraries(portals_theme_preparation PRIVATE portals::core)
+  portals_enable_warnings(portals_theme_preparation)
+  add_test(NAME portals.theme-preparation COMMAND portals_theme_preparation)
+  set_tests_properties(portals.theme-preparation PROPERTIES TIMEOUT 60)
   add_executable(portals_theme_selection tests/theme_selection.cpp)
   target_link_libraries(portals_theme_selection PRIVATE portals::core)
   portals_enable_warnings(portals_theme_selection)
@@ -1059,7 +1089,8 @@ if(PORTALS_BUILD_TESTS)
   add_test(NAME portals.bundle-scripts COMMAND "${CMAKE_COMMAND}"
     "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}" "-DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/bundle_script_test.cmake")
-  set_tests_properties(portals.bundle-scripts PROPERTIES TIMEOUT 30 LABELS "package")
+  set_tests_properties(portals.bundle-scripts PROPERTIES
+    TIMEOUT "${PORTALS_BUNDLE_SCRIPT_TEST_TIMEOUT}" LABELS "package")
   # Preserve runtime generator expressions until the relocated consumer selects its configuration.
   # Passing the expression directly through add_test would evaluate it for the outer CTest config.
   set(portals_package_runtime_file "${CMAKE_CURRENT_BINARY_DIR}/package-runtime-library.txt")
@@ -1071,6 +1102,10 @@ if(PORTALS_BUILD_TESTS)
     "-DGENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}" "-DGENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
     "-DCXX_COMPILER=${CMAKE_CXX_COMPILER}" "-DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
     "-DMSVC_RUNTIME_LIBRARY_FILE=${portals_package_runtime_file}")
+  if(DEFINED CMAKE_LINK_DEPENDS_USE_LINKER)
+    list(APPEND portals_package_test_command
+      "-DLINK_DEPENDS_USE_LINKER=${CMAKE_LINK_DEPENDS_USE_LINKER}")
+  endif()
   add_test(NAME portals.package-install COMMAND ${portals_package_test_command}
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_install.cmake")
   if("Debug" IN_LIST CMAKE_CONFIGURATION_TYPES AND "Release" IN_LIST CMAKE_CONFIGURATION_TYPES)
@@ -1330,7 +1365,62 @@ if(PORTALS_BUILD_TESTS)
   add_test(NAME portals.model-query COMMAND portals_model_query)
   set_tests_properties(portals.model-query PROPERTIES TIMEOUT 15)
 
+  add_executable(portals_worker_storage_tests tests/worker_storage.cpp)
+  target_link_libraries(portals_worker_storage_tests PRIVATE portals::core)
+  target_include_directories(portals_worker_storage_tests SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  portals_enable_warnings(portals_worker_storage_tests)
+  add_test(NAME portals.worker-storage COMMAND portals_worker_storage_tests)
+  set_tests_properties(portals.worker-storage PROPERTIES TIMEOUT 60)
+  add_executable(portals_suggestions_tests tests/suggestions.cpp)
+  target_link_libraries(portals_suggestions_tests PRIVATE portals::core)
+  target_include_directories(portals_suggestions_tests SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  portals_enable_warnings(portals_suggestions_tests)
+  add_test(NAME portals.suggestions COMMAND portals_suggestions_tests)
+  set_tests_properties(portals.suggestions PROPERTIES TIMEOUT 60)
+  add_executable(portals_suggestions_consumer tests/package_consumer/suggestions.cpp)
+  target_link_libraries(portals_suggestions_consumer PRIVATE portals::core)
+  portals_enable_warnings(portals_suggestions_consumer)
+  add_executable(portals_model_find tests/model_find.cpp)
+  target_link_libraries(portals_model_find PRIVATE portals::core)
+  target_include_directories(portals_model_find SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  portals_enable_warnings(portals_model_find)
+  add_test(NAME portals.model-find COMMAND portals_model_find)
+  set_tests_properties(portals.model-find PROPERTIES TIMEOUT 60)
   add_executable(portals_async tests/async.cpp)
+  foreach(guide IN ITEMS model_find prepared_theme)
+    add_executable(portals_docs_${guide} docs/examples/guide_${guide}.cpp)
+    target_link_libraries(portals_docs_${guide} PRIVATE portals::core)
+    portals_enable_warnings(portals_docs_${guide})
+  endforeach()
+  add_executable(portals_docs_async docs/examples/guide_async.cpp)
+  target_link_libraries(portals_docs_async PRIVATE portals::core)
+  portals_enable_warnings(portals_docs_async)
+  add_executable(portals_ui_async tests/ui_async.cpp)
+  target_link_libraries(portals_ui_async PRIVATE portals::core)
+  target_include_directories(portals_ui_async SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  portals_enable_warnings(portals_ui_async)
+  add_test(NAME portals.ui-async COMMAND portals_ui_async)
+  set_tests_properties(portals.ui-async PROPERTIES TIMEOUT 30)
+  add_executable(portals_ui_async_consumer tests/package_consumer/ui_async.cpp)
+  target_link_libraries(portals_ui_async_consumer PRIVATE portals::core)
+  portals_enable_warnings(portals_ui_async_consumer)
+  add_executable(portals_background tests/background.cpp)
+  target_link_libraries(portals_background PRIVATE portals::core)
+  target_include_directories(portals_background SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  portals_enable_warnings(portals_background)
+  add_test(NAME portals.background COMMAND portals_background)
+  set_tests_properties(portals.background PROPERTIES TIMEOUT 30)
+  add_executable(portals_ui_delivery tests/ui_delivery.cpp)
+  target_link_libraries(portals_ui_delivery PRIVATE portals::core)
+  target_include_directories(portals_ui_delivery SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  portals_enable_warnings(portals_ui_delivery)
+  add_test(NAME portals.ui-delivery COMMAND portals_ui_delivery)
+  set_tests_properties(portals.ui-delivery PROPERTIES TIMEOUT 15)
+  add_executable(portals_ui_delivery_consumer tests/package_consumer/ui_delivery.cpp)
+  target_link_libraries(portals_ui_delivery_consumer PRIVATE portals::core)
+  portals_enable_warnings(portals_ui_delivery_consumer)
+  add_test(NAME portals.ui-delivery-consumer COMMAND portals_ui_delivery_consumer)
+  set_tests_properties(portals.ui-delivery-consumer PROPERTIES TIMEOUT 15)
   target_link_libraries(portals_async PRIVATE portals::core)
   target_include_directories(portals_async SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
   portals_enable_warnings(portals_async)
@@ -1558,7 +1648,7 @@ if(PORTALS_BUILD_DOCS)
   set(DOXYGEN_WARN_IF_UNDOC_ENUM_VAL YES)
   set(DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/docs")
 
-  set(portals_documentation_inputs include docs/form-fields.md docs/ru/form-fields.md docs/find-bar.md docs/ru/find-bar.md docs/control-examples.md docs/ru/control-examples.md docs/actions.md docs/ru/actions.md docs/loading-indicators.md docs/ru/loading-indicators.md docs/theme-selector.md docs/ru/theme-selector.md docs/theme-selection.md docs/ru/theme-selection.md docs/key-help.md docs/ru/key-help.md docs/dialogs.md docs/ru/dialogs.md docs/scroll-controls.md docs/ru/scroll-controls.md docs/wasm-gallery.md docs/ru/wasm-gallery.md docs/first-application.md docs/ru/first-application.md docs/developer-tools.md docs/ru/developer-tools.md docs/developer-tools-build.md docs/ru/developer-tools-build.md docs/developer-tools-measure.md docs/ru/developer-tools-measure.md docs/developer-tools-release.md docs/ru/developer-tools-release.md docs/ru/development.md docs/declarative-reference.md docs/ru/declarative-reference.md docs/ru/compact-examples.md docs/compile-time-pss.md docs/style-layers.md docs/model-queries.md docs/ui-coroutines.md docs/compile-time-styles.md docs/compile-time-scenes.md ReleaseNotes.md docs/index.md docs/reference-map.md docs/guides.md docs/dependencies.md docs/planned-features.md docs/ru/application.md docs/ru/architecture.md docs/ru/bindings-guide.md docs/ru/cell-buffer.md docs/ru/chart.md docs/ru/cli.md docs/ru/compile-time-pss.md docs/ru/compile-time-scenes.md docs/ru/compile-time-styles.md docs/ru/controls.md docs/ru/declarative-ui.md docs/ru/dependencies.md docs/ru/diagnostics.md docs/ru/diff.md docs/ru/editor-history-demo.md docs/ru/editor-history.md docs/ru/examples.md docs/ru/focus.md docs/ru/geometry.md docs/ru/getting-started.md docs/ru/glossary.md docs/ru/grid.md docs/ru/guides.md docs/ru/index.md docs/ru/input.md docs/ru/layout.md docs/ru/limitations.md docs/ru/line-edit.md docs/ru/managed-controls.md docs/ru/model-queries.md docs/ru/model.md docs/ru/package.md docs/ru/planned-features.md docs/ru/property.md docs/ru/reference-map.md docs/ru/render.md docs/ru/scene-loading-guide.md docs/ru/scheduler.md docs/ru/scroll.md docs/ru/style-layers.md docs/ru/styles.md docs/ru/styling-guide.md docs/ru/terminal-probe.md docs/ru/terminal.md docs/ru/text-history.md docs/ru/text-property.md docs/ru/text.md docs/ru/themes-guide.md docs/ru/ui-coroutines.md docs/ru/virtual-list.md docs/ru/virtual-preparation.md docs/ru/virtual-table.md docs/ru/widget-tree.md docs/glossary.md docs/styling-guide.md docs/themes-guide.md docs/bindings-guide.md docs/scene-loading-guide.md docs/development.md docs/releasing.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/scheduler.md docs/widget-tree.md docs/layout.md docs/grid.md docs/property.md docs/diagnostics.md docs/focus.md docs/model.md docs/input.md docs/terminal.md docs/terminal-probe.md docs/controls.md docs/line-edit.md docs/virtual-list.md docs/virtual-table.md docs/scroll.md docs/chart.md
+  set(portals_documentation_inputs include docs/live-search.md docs/ru/live-search.md docs/form-fields.md docs/ru/form-fields.md docs/find-bar.md docs/ru/find-bar.md docs/control-examples.md docs/ru/control-examples.md docs/actions.md docs/ru/actions.md docs/loading-indicators.md docs/ru/loading-indicators.md docs/theme-selector.md docs/ru/theme-selector.md docs/theme-selection.md docs/ru/theme-selection.md docs/key-help.md docs/ru/key-help.md docs/dialogs.md docs/ru/dialogs.md docs/scroll-controls.md docs/ru/scroll-controls.md docs/wasm-gallery.md docs/ru/wasm-gallery.md docs/first-application.md docs/ru/first-application.md docs/developer-tools.md docs/ru/developer-tools.md docs/developer-tools-build.md docs/ru/developer-tools-build.md docs/developer-tools-measure.md docs/ru/developer-tools-measure.md docs/developer-tools-release.md docs/ru/developer-tools-release.md docs/ru/development.md docs/declarative-reference.md docs/ru/declarative-reference.md docs/ru/compact-examples.md docs/compile-time-pss.md docs/style-layers.md docs/model-queries.md docs/ui-coroutines.md docs/compile-time-styles.md docs/compile-time-scenes.md ReleaseNotes.md docs/index.md docs/reference-map.md docs/guides.md docs/dependencies.md docs/planned-features.md docs/ru/application.md docs/ru/architecture.md docs/ru/bindings-guide.md docs/ru/cell-buffer.md docs/ru/chart.md docs/ru/cli.md docs/ru/compile-time-pss.md docs/ru/compile-time-scenes.md docs/ru/compile-time-styles.md docs/ru/controls.md docs/ru/declarative-ui.md docs/ru/dependencies.md docs/ru/diagnostics.md docs/ru/diff.md docs/ru/editor-history-demo.md docs/ru/editor-history.md docs/ru/examples.md docs/ru/focus.md docs/ru/geometry.md docs/ru/getting-started.md docs/ru/glossary.md docs/ru/grid.md docs/ru/guides.md docs/ru/index.md docs/ru/input.md docs/ru/layout.md docs/ru/limitations.md docs/ru/line-edit.md docs/ru/managed-controls.md docs/ru/model-queries.md docs/ru/model.md docs/ru/package.md docs/ru/planned-features.md docs/ru/property.md docs/ru/reference-map.md docs/ru/render.md docs/ru/scene-loading-guide.md docs/ru/scheduler.md docs/ru/scroll.md docs/ru/style-layers.md docs/ru/styles.md docs/ru/styling-guide.md docs/ru/terminal-probe.md docs/ru/terminal.md docs/ru/text-history.md docs/ru/text-property.md docs/ru/text.md docs/ru/themes-guide.md docs/ru/ui-coroutines.md docs/ru/virtual-list.md docs/ru/virtual-preparation.md docs/ru/virtual-table.md docs/ru/widget-tree.md docs/glossary.md docs/styling-guide.md docs/themes-guide.md docs/bindings-guide.md docs/scene-loading-guide.md docs/development.md docs/releasing.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/scheduler.md docs/widget-tree.md docs/layout.md docs/grid.md docs/property.md docs/diagnostics.md docs/focus.md docs/model.md docs/input.md docs/terminal.md docs/terminal-probe.md docs/controls.md docs/line-edit.md docs/virtual-list.md docs/virtual-table.md docs/scroll.md docs/chart.md
     docs/notifications.md docs/ru/notifications.md
     docs/compact-primitives.md docs/ru/compact-primitives.md docs/styles.md docs/legacy.md docs/managed-controls.md docs/declarative-ui.md docs/data-presentation.md docs/ru/data-presentation.md docs/text-property.md docs/text-history.md docs/editor-history.md docs/editor-history-demo.md docs/compact-examples.md docs/compactness.md docs/quality.md tools/compactness/compactness.hpp docs/managed-performance.md docs/package.md docs/application.md docs/virtual-preparation.md docs/examples.md docs/architecture.md docs/getting-started.md docs/limitations.md docs/api-design.md fuzz/README.md
     tools/benchmarks/README.md vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md vendor/textual/README.md vendor/doctest/README.md vendor/pfr/README.md vendor/lyra/README.md docs/cli.md)

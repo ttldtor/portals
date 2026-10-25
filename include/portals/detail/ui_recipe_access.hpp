@@ -6,15 +6,27 @@
 #include <portals/detail/ui_recipe_context.hpp>
 #include <portals/ui_action.hpp>
 
+namespace portals { struct SearchItem; }
+
 namespace portals::ui {
 struct FormFieldConfig;
 struct FindBarConfig;
+struct SuggestionsConfig;
 
 namespace detail {
 /** @brief Internal bridge for checked access to managed scene and recipe state. */
 struct Access {
   /// @cond INTERNAL
-  static Description<FindBar> findBar(std::string document, std::string query, FindBarConfig config);
+  static Description<VirtualList<SearchItem>> suggestions(TextSource source,
+      std::shared_ptr<portals::detail::FindModelSource> model, SuggestionsConfig config);
+  static std::expected<TextSource, ManagedError> resolveSearchText(ManagedScene &, const TextSource &, MountContext &);
+  static std::expected<bool, ManagedError> readSearchText(ManagedScene &, const TextSource &, std::size_t,
+                                                         std::string &, bool &);
+  static std::expected<void, ManagedError> configureSearchList(ManagedScene &, Node<VirtualList<SearchItem>>,
+      std::shared_ptr<void>, std::function<void(RowId)>, CellStyle);
+  static std::expected<void, ManagedError> suppressSearchList(ManagedScene &, Node<VirtualList<SearchItem>>, bool);
+  static Description<FindBar> findBar(std::string document, std::string query, FindBarConfig config,
+                                    std::shared_ptr<portals::detail::FindModelSource> source = {});
   static std::expected<std::size_t, ManagedError> findPreparedQueries(ManagedScene &scene, Node<Widget> node);
   static std::expected<std::shared_ptr<portals::detail::FindRecord>, ManagedError> findRecord(ManagedScene &scene,
                                                                                               Node<Widget> node);

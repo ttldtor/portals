@@ -8,6 +8,7 @@
 
 #include <initializer_list>
 #include <source_location>
+#include <stop_token>
 
 namespace portals {
 class ManagedScene;
@@ -24,6 +25,7 @@ struct ThemeSelectionTarget;
 struct ThemeSelectionAccess;
 struct ThemeSelectorAccess;
 struct ThemeSelectionDescription;
+struct PreparedThemeAccess;
 } // namespace detail
 
 /** @brief Logical selection session, separate from historical application choices. */
@@ -66,6 +68,9 @@ struct ThemeSelectionSnapshot {
   ThemeSelectionStatus status{ThemeSelectionStatus::IDLE}; ///< Current preview authority status.
   std::optional<std::string> previewedId;     ///< Installed choice when ACTIVE; historical choice when SUPERSEDED.
   std::optional<std::string> lastCommittedId; ///< Historical successful application choice; absent initially.
+  std::optional<std::string> requestedId; ///< Latest explicit prepared intent, independent of the installed preview.
+  bool preparing{};                       ///< Current prepared intent is waiting for admission, work or UI delivery.
+  std::optional<ManagedError> preparationError; ///< Exact latest preparation/install failure; absent on success.
 };
 
 /** @brief Finite normalization budgets and optional first-preview layer admission. */
@@ -82,9 +87,10 @@ struct ThemeSelectionOptions {
   std::optional<StyleLayerOptions> layers; ///< Absent preserves established budgets or uses engine defaults.
 };
 
-/** @brief Owning catalog input; factories run synchronously once per explicit preview attempt on UI.
- * Factories must not block. Acquisition on workers remains application work. Borrowed captures must outlive
- * their use; the library owns its callable copy and never moves UI captures to a worker.
+/** @brief Owning catalog input; legacy factories run synchronously once per explicit preview attempt on UI.
+ * Legacy factories must not block. The preparedTheme factory explicitly opts into worker preparation;
+ * captured input, closure copying and deletion must then be worker-safe. Borrowed captures must outlive
+ * their use, including eventual worker return after cancellation. UI captures are never moved implicitly.
  */
 class ThemeChoice {
 public:
@@ -122,11 +128,91 @@ public:
 
 private:
   friend class portals::ManagedScene;
+  friend struct detail::PreparedThemeAccess;
+
+  struct PreparedThemeTag {};
+
+  /** @tparam Factory Copyable worker-safe callable accepting stop_token and returning StyleSheet or
+   * exactly expected<StyleSheet, StyleError>. All transitively owned captures and deleters must be safe
+   * on a worker; borrowed captures must survive cancellation and the eventual worker return.
+   * @param id Owning catalog ID.
+   * @param label Owning display expression. @param factory Stop-aware producer invoked once per admitted intent.
+   * @param description Optional owning explanation. Cancellation never joins or interrupts arbitrary blocking code.
+   * StyleError::message must refer to static storage, as required by the existing StyleError contract.
+   */
+  template <class Factory>
+    requires std::copy_constructible<Factory> && std::invocable<Factory &, std::stop_token> &&
+               (std::same_as<std::invoke_result_t<Factory &, std::stop_token>, StyleSheet> ||
+                std::same_as<std::invoke_result_t<Factory &, std::stop_token>, std::expected<StyleSheet, StyleError>>)
+  ThemeChoice(PreparedThemeTag, std::string_view id, TextValue label, Factory factory,
+              std::optional<TextValue> description = {})
+      : id_(id), label_(std::move(label)), description_(std::move(description)),
+        preparedFactory_(std::make_shared<PreparedFactory>(
+          [factory = std::move(factory)](std::stop_token stop) mutable -> std::expected<StyleSheet, StyleError> {
+            return std::invoke(factory, stop);
+          })) {
+  }
+
+  using PreparedFactory = std::function<std::expected<StyleSheet, StyleError>(std::stop_token)>;
   std::string id_;
   TextValue label_;
   std::optional<TextValue> description_;
   std::function<std::expected<StyleSheet, StyleError>()> factory_;
+  std::shared_ptr<const PreparedFactory> preparedFactory_;
 };
+
+namespace detail {
+/// @cond INTERNAL
+struct PreparedThemeAccess {
+  template <class Factory>
+  static ThemeChoice make(std::string_view id, TextValue label, Factory factory, std::optional<TextValue> description) {
+    return ThemeChoice(ThemeChoice::PreparedThemeTag{}, id, std::move(label), std::move(factory),
+                       std::move(description));
+  }
+};
+
+/// @endcond
+} // namespace detail
+
+/** @brief Explicitly prepare a theme on the existing background executor.
+ * @tparam Factory Copyable worker-safe
+ * callable taking stop_token and returning StyleSheet or exactly
+ * expected<StyleSheet, StyleError>. Capture copying,
+ * invocation and deletion must be worker-safe;
+ * borrowed input must survive cancellation and the eventual worker
+ * return. No UI capture is moved implicitly.
+ * @param id Copied catalog ID. @param label Owning display expression
+ * resolved on UI during setup.
+ * @param factory Owning producer invoked once per admitted intent, with closure copying
+ * on the worker.
+ * @param description Optional owning explanation. Cancellation never joins or interrupts arbitrary
+ * blocking code.
+ * @return Owning catalog choice. Construction can allocate; StyleError messages retain their
+ * static-storage contract.
+ */
+template <class Factory>
+  requires std::copy_constructible<Factory> && std::invocable<Factory &, std::stop_token> &&
+           (std::same_as<std::invoke_result_t<Factory &, std::stop_token>, StyleSheet> ||
+            std::same_as<std::invoke_result_t<Factory &, std::stop_token>, std::expected<StyleSheet, StyleError>>)
+ThemeChoice preparedTheme(std::string_view id, TextValue label, Factory factory,
+                          std::optional<TextValue> description = {}) {
+  return detail::PreparedThemeAccess::make(id, std::move(label), std::move(factory), std::move(description));
+}
+
+/** @brief Literal-label counterpart of preparedTheme's owning-text overload.
+ * @param id Copied ID. @param label
+ * Copied literal label. @param factory Explicit worker-safe producer.
+ * @param description Optional owning
+ * explanation. @return Owning prepared choice; construction may allocate.
+ */
+template <class Factory>
+  requires std::copy_constructible<Factory> && std::invocable<Factory &, std::stop_token> &&
+           (std::same_as<std::invoke_result_t<Factory &, std::stop_token>, StyleSheet> ||
+            std::same_as<std::invoke_result_t<Factory &, std::stop_token>, std::expected<StyleSheet, StyleError>>)
+ThemeChoice preparedTheme(std::string_view id, std::string_view label, Factory factory,
+                          std::optional<TextValue> description = {}) {
+  return preparedTheme(id, TextValue(label), std::move(factory), std::move(description));
+}
 
 /** @brief Weak UI-affine observation of the one scene-owned catalog/model.
  * Copying/destroying observations never cancels a preview. The first successful preview explicitly revokes
@@ -141,14 +227,18 @@ public:
   ThemeSelectionRef();
   /** @param id Exact application catalog ID, borrowed for this synchronous operation.
    * @param origin Original command site retained in full managed errors.
-   * @return Success installing one candidate or a typed error preserving the previous candidate.
+   * @return Synchronous candidate installation, or acceptance of one latest prepared intent, or a typed error.
+   * A prepared intent remains observable through requestedId/preparing/preparationError until completion.
+   * Factory invocation/build/parse runs on the existing background executor; installation, copying,
+   * resolution and layout still occur on UI under the existing finite style budgets.
    * Explicit preview after SUPERSEDED starts a fresh session from the current external theme.
    */
   std::expected<void, ManagedError> preview(std::string_view id,
                                             std::source_location origin = std::source_location::current()) const;
   /** @param origin Original command site.
    * @return Success only after promoting an ACTIVE installed candidate; IDLE/SUPERSEDED returns
-   * STYLE/StyleError/INVALID_ARGUMENT and produces no new committed result. No persistence callback runs.
+   * STYLE/StyleError/INVALID_ARGUMENT and produces no new committed result. A pending/failed newer
+   * intent returns WOULD_BLOCK instead of committing the older installed preview. No persistence callback runs.
    */
   std::expected<void, ManagedError> commit(std::source_location origin = std::source_location::current()) const;
   /** @param origin Original command site.

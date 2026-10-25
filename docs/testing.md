@@ -17,6 +17,17 @@ This build-and-test limit does not change the shorter deadlines of individual
 runtime tests. A timeout is a failed check; increasing the budget still requires
 a complete successful run.
 
+When set to a nonempty value, `CMAKE_LINK_DEPENDS_USE_LINKER` is forwarded to the
+installed consumer build. For linker-generated dependency path issues, configure
+with `-DCMAKE_LINK_DEPENDS_USE_LINKER=OFF` as a workaround; this does not skip
+assertions or change the exported SDK setting.
+
+`PORTALS_BUNDLE_SCRIPT_TEST_TIMEOUT` controls the bundle script test's CTest
+limit in seconds (default 30, positive integer up to 86400). Override it at
+configure time on a slower filesystem, for example with
+`-DPORTALS_BUNDLE_SCRIPT_TEST_TIMEOUT=60`. A timeout is a failed check; a complete
+successful run remains required.
+
 `tests/support/test_terminal.hpp` is private test support, not an installed Portals
 API. `TestTerminal` implements `FrameOutput`, owns an independent VT oracle and
 input decoder, and borrows a `FakeClock`. One executor owns all calls. The clock

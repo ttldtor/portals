@@ -215,3 +215,40 @@ Platform failures of standard synchronization primitives follow their standard
 exception/termination contracts; Portals does not emulate a failed OS mutex.
 
 </details>
+
+
+## Scoped delivery to a mounted control {#scoped-ui-delivery}
+
+A mounted `ui::Ref<T>` can register `delivery<Value>(callback)` and return a
+checked `UiEndpoint<Value>`. The scene retains the node-scoped subscription;
+application code does not store another cancellation token. The callback is
+registered on UI and must perform only short UI work. It accepts an immutable
+`shared_ptr<const Value>` and may return `void` or `expected<void, TreeError>`.
+The endpoint retains no scene, widget, coroutine frame or callback captures.
+
+On a producer thread, `endpoint.post(snapshot)` always queues delivery through
+the existing CONTROL lane with REJECT. It never calls the callback inline.
+Default capacity/budget are the existing SchedulerOptions values (32/32), not
+an independent queue. Commands are not replaced or coalesced. Null input,
+allocation failure, a full queue and a closed endpoint are explicit failures;
+callers retain data needed for an application-specific retry. Referenced data
+must be transitively immutable, and final payload destruction may run on UI or
+a producer. Expensive payload destruction can therefore affect UI latency.
+
+`postAcknowledged(snapshot)` additionally returns a thread-safe nonblocking
+receipt. `poll()` distinguishes PENDING, APPLIED, CANCELLED and FAILED. APPLIED
+means that the admitted callback returned success, not that its external effects
+were transactional or that every ignored nested command succeeded. Typed callback
+failures are also recorded in diagnostics while their scene remains live. Do not busy-wait
+on a receipt from UI. Accepted enqueue is separate from successful execution.
+
+Removing the target or closing its scene cancels queued delivery. An already
+admitted callback retains the ordinary self-removal guarantees. Creating a
+delivery before mount or from a foreign thread is rejected. This checked API is
+useful for custom host integrations; it neither starts a worker nor makes heavy
+callback work asynchronous.
+
+A button reference also supports semantic `activate()` on UI through the
+existing router. This preserves target eligibility, modal and reentrancy rules;
+it does not manufacture physical mouse input or move focus. Shared application
+commands can instead use the existing ActionRef invocation path.

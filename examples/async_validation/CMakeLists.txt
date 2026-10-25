@@ -1,0 +1,3 @@
+add_executable(portals_async_validation_example main.cpp)
+target_link_libraries(portals_async_validation_example PRIVATE portals::core)
+portals_enable_warnings(portals_async_validation_example)

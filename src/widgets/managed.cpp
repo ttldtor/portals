@@ -45,7 +45,7 @@ template <class T> std::size_t maxElementCount() noexcept {
 
 ManagedScene::ManagedScene(Application &app, ManagedOptions options)
     : app_(app), owner_(std::this_thread::get_id()), options_(options), lifetime_(std::make_shared<const bool>(true)),
-      styles_(app.tree(), options.maxNodes), entries_(0), properties_(0), models_(0),
+      asyncActivities_(0), styles_(app.tree(), options.maxNodes), entries_(0), properties_(0), models_(0),
       errors_(options.diagnostics.maxErrors) {
 }
 
@@ -197,7 +197,7 @@ std::expected<void, ManagedError> ManagedScene::boundary(ManagedPhase phase, Nod
   }
 
   if ((phase == ManagedPhase::PREPARE || phase == ManagedPhase::RUN) &&
-      (recoveringObservers_ || observerCallbacks_ || observerMountPending())) {
+      (recoveringObservers_ || observerCallbacks_ || observerMountPending() || servicingActivities_)) {
     return std::unexpected(error(phase, node, TreeError::WOULD_BLOCK));
   }
 
@@ -1050,14 +1050,90 @@ void ManagedScene::deliverLayout(const std::shared_ptr<LayoutRecord> &record,
   }
 }
 
+std::expected<void, ManagedError> ManagedScene::admitActivity(std::shared_ptr<ui::detail::SceneActivity> activity) {
+  auto allowed = boundary(ManagedPhase::BIND, root_);
+
+  if (!allowed) {
+    return allowed;
+  }
+
+  if (!activity) {
+    return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::INVALID_ARGUMENT));
+  }
+
+  if (servicingActivities_) {
+    return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::WOULD_BLOCK));
+  }
+
+  std::erase_if(asyncActivities_, [](const auto &weak) {
+    const auto current = weak.lock();
+
+    return !current || !current->active();
+  });
+
+  if (asyncActivities_.size() >= options_.maxNodes) {
+    return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::WOULD_BLOCK));
+  }
+
+  try {
+    asyncActivities_.push_back(std::move(activity));
+
+    return {};
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::NO_MEMORY));
+  }
+}
+
+std::expected<void, TreeError> ManagedScene::visitActivities(bool prepared) {
+  if (closed_) {
+    return {};
+  }
+  if (servicingActivities_) {
+    return std::unexpected(TreeError::WOULD_BLOCK);
+  }
+  // Only admitted active invocations are visited; idle bindings and controls add no cycle scan.
+  const auto activeCount = asyncActivities_.size();
+  servicingActivities_ = true;
+
+  for (std::size_t index = 0; index < activeCount && !closed_; ++index) {
+    auto activity = asyncActivities_[index].lock();
+
+    if (activity && activity->active()) {
+      if (prepared) {
+        activity->prepared();
+      } else {
+        activity->service();
+      }
+    }
+  }
+
+  servicingActivities_ = false;
+
+  std::erase_if(asyncActivities_, [](const auto &weak) {
+    const auto activity = weak.lock();
+
+    return !activity || !activity->active();
+  });
+
+  return {};
+}
+
 std::expected<void, TreeError> ManagedScene::afterDispatch(Application &app) {
   if (&app != &app_ || owner_ != std::this_thread::get_id()) {
     return std::unexpected(owner_ != std::this_thread::get_id() ? TreeError::WRONG_THREAD
                                                                 : TreeError::INVALID_ARGUMENT);
   }
+
+  auto activities = visitActivities(false);
+
+  if (!activities) {
+    return activities;
+  }
+
   if (closed_) {
     return {};
   }
+
   for (const auto &record : layouts_) {
     if (record->pending && !record->queued) {
       auto current = geometry(record->node);
@@ -1486,8 +1562,8 @@ ManagedScene::bind(Node<LineEdit> node, ManagedState<std::string> model,
       app_.tree(), app_.router(), node, *property,
       [this, node, lifetime = std::weak_ptr(lifetime_), feedback,
        result = ui::detail::currentSceneCallback(facadeContext(), std::move(incomingResult))](LineEditResult receipt) {
-        const auto report = [this, node, &lifetime, feedback, trigger = receipt.trigger](TreeError cause,
-                                                                                         bool commandFailure = false) {
+        const auto report = [this, node, &lifetime, feedback, &receipt, trigger = receipt.trigger](TreeError cause,
+                                                                                                   bool commandFailure = false) {
           if (lifetime.expired()) {
             return;
           }
@@ -1504,6 +1580,17 @@ ManagedScene::bind(Node<LineEdit> node, ManagedState<std::string> model,
           auto failure = error(phase, node, cause);
 
           failure.operation = trigger == LineEditTrigger::BLUR ? "lineEdit.blur" : nullptr;
+
+          if (commandFailure) {
+            failure.async = receipt.async;
+            failure.background = receipt.background;
+            failure.text = receipt.text;
+
+            if (receipt.operation) {
+              failure.operation = receipt.operation;
+            }
+          }
+
           failure.operationOrigin = origin;
           failure.reportReceipt.collector_ = lifetime_;
 
@@ -1515,20 +1602,32 @@ ManagedScene::bind(Node<LineEdit> node, ManagedState<std::string> model,
             destination->emplace(failure);
           }
 
+          const bool recoverableValidation = commandFailure && receipt.recoverable;
+          const auto recordFailure = [&](std::span<const ManagedDiagnosticContext> contexts = {}) {
+            if (recoverableValidation) {
+              (void)reportError(failure, contexts, origin);
+            } else {
+              remember(failure, origin, contexts);
+            }
+          };
+
           try {
             const ManagedDiagnosticContext context{std::string(operation), std::string(0, '\0'), std::string(0, '\0'),
                                                    std::string("LineEdit"), origin};
 
-            remember(failure, origin, std::span(&context, 1));
+            recordFailure(std::span(&context, 1));
           } catch (const std::bad_alloc &) {
-            remember(failure, origin);
+            recordFailure();
           } catch (const std::length_error &) {
-            remember(failure, origin);
+            recordFailure();
           }
         };
 
         try {
-          if (receipt.status == LineEditStatus::FAILED && receipt.error) {
+          const bool commandFailure = receipt.error &&
+                                      (receipt.status == LineEditStatus::FAILED || receipt.recoverable);
+
+          if (commandFailure) {
             const bool canReport = !lifetime.expired();
 
             report(*receipt.error, true);
@@ -2409,18 +2508,34 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
       ~Pinning() {
         flag = false;
       }
-    } pinning{preparing_};
+    };
 
-    preparing_ = true;
-    for (const auto &source : models_) {
-      auto pinned = source->pin();
+    {
+      Pinning pinning{preparing_};
 
-      if (!pinned) {
-        remember(error(ManagedPhase::PREPARE, root_, pinned.error()));
+      preparing_ = true;
 
-        return pinned;
+      for (const auto &source : models_) {
+        auto pinned = source->pin();
+
+        if (!pinned) {
+          remember(error(ManagedPhase::PREPARE, root_, pinned.error()));
+
+          return pinned;
+        }
       }
     }
+
+    // These bounded adapters observe the just-pinned model revision without repinning or scanning data.
+    auto activities = visitActivities(true);
+
+    if (!activities || closed_) {
+      return activities ? std::unexpected(TreeError::CLOSED) : activities;
+    }
+
+    Pinning styling{preparing_};
+
+    preparing_ = true;
 
     auto styled = flushStyles();
 
@@ -2628,6 +2743,19 @@ std::expected<void, ManagedError> ManagedScene::close() {
 
   // Mark closed before retiring captures: their destructors may reenter application code.
   closed_ = true;
+
+  // Retire in place: even moving an empty vector may allocate an MSVC Debug iterator proxy.
+  // Closed admission prevents additions; pop before cancellation so recursive close cannot revisit this record.
+  while (!asyncActivities_.empty()) {
+    auto activity = asyncActivities_.back().lock();
+
+    asyncActivities_.pop_back();
+
+    if (activity) {
+      activity->cancel();
+    }
+  }
+
   ui::detail::ActionAccess::retire(*this);
   retireThemeSelector();
   themeSelection_.reset();

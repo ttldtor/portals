@@ -53,12 +53,34 @@ std::expected<void, TreeError> paintList(PaintContext &context, CellSize viewpor
     }
 
     const auto style = selected && rows[i].id == selected ? options.selected : options.normal;
-    const std::array<RenderCommand, 2> commands{FillCommand{*area, *bounds, style},
-                                                TextCommand{area->origin(), rows[i].text, *area, style}};
-    auto result = context.submit(commands);
+    const std::array<RenderCommand, 1> fill{FillCommand{*area, *bounds, style}};
+    auto result = context.submit(fill);
 
     if (!result) {
       return result;
+    }
+    if (rows[i].prepared) {
+      for (const auto &run : rows[i].prepared->runs) {
+        auto runStyle = style;
+
+        if (run.highlighted) {
+          if (options.highlight.foreground) { runStyle.foreground = options.highlight.foreground; }
+          if (options.highlight.background) { runStyle.background = options.highlight.background; }
+          runStyle.bold = runStyle.bold || options.highlight.bold;
+          runStyle.italic = runStyle.italic || options.highlight.italic;
+          runStyle.underline = runStyle.underline || options.highlight.underline;
+        }
+        const std::array<RenderCommand, 1> command{
+          TextCommand{{run.column, area->origin().y}, run.text, *area, runStyle}};
+        result = context.submit(command);
+
+        if (!result) { return result; }
+      }
+    } else if (rows[i].text) {
+      const std::array<RenderCommand, 1> command{TextCommand{area->origin(), *rows[i].text, *area, style}};
+      result = context.submit(command);
+
+      if (!result) { return result; }
     }
   }
 

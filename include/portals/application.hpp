@@ -3,6 +3,7 @@
 #pragma once
 
 #include <portals/action.hpp>
+#include <portals/background_options.hpp>
 #include <portals/diff.hpp>
 #include <portals/layout.hpp>
 #include <portals/layout_snapshot.hpp>
@@ -27,13 +28,14 @@ enum class ApplicationPhase {
 
 /** @brief Failures introduced by the runner itself. */
 enum class ApplicationFailure {
-  INVALID_OPTIONS,    ///< Runner options are invalid, or a native run was requested with an injected clock.
-  ALREADY_RUN,        ///< This application has already entered its single permitted run.
-  NO_MEMORY,          ///< Allocation failed at a runner exception boundary.
-  CALLBACK_FAILED,    ///< A non-allocation exception escaped into a runner callback boundary.
-  OBSERVER_FAILED,    ///< The optional measurement observer threw an exception.
-  NOT_STARTED,        ///< A step was requested before an accepted start.
-  REENTRANT_OPERATION ///< A lifecycle operation was requested from an active operation or callback.
+  INVALID_OPTIONS,     ///< Runner options are invalid, or a native run was requested with an injected clock.
+  ALREADY_RUN,         ///< This application has already entered its single permitted run.
+  NO_MEMORY,           ///< Allocation failed at a runner exception boundary.
+  CALLBACK_FAILED,     ///< A non-allocation exception escaped into a runner callback boundary.
+  OBSERVER_FAILED,     ///< The optional measurement observer threw an exception.
+  NOT_STARTED,         ///< A step was requested before an accepted start.
+  REENTRANT_OPERATION, ///< A lifecycle operation was requested from an active operation or callback.
+  BACKGROUND_FAILED    ///< Background startup/admission failed; ApplicationError::background retains the cause.
 };
 
 /** @brief Original component error; no formatted text or borrowed exception is retained. */
@@ -42,9 +44,10 @@ using ApplicationCause =
 
 /** @brief Failure after orderly shutdown, including a separate restoration failure. */
 struct ApplicationError {
-  ApplicationPhase phase{};                 ///< Operation which first failed.
-  ApplicationCause cause{};                 ///< Original failure, or explicit callback/allocation classification.
-  std::optional<TerminalError> restoration; ///< Close failure retained even when an earlier operation failed.
+  ApplicationPhase phase{};                    ///< Operation which first failed.
+  ApplicationCause cause{};                    ///< Original failure, or explicit callback/allocation classification.
+  std::optional<TerminalError> restoration;    ///< Close failure retained even when an earlier operation failed.
+  std::optional<BackgroundError> background{}; ///< Typed executor cause when failure is BACKGROUND_FAILED.
 };
 
 /** @brief Optional synchronous measurement sink; disabled by default.
@@ -86,6 +89,8 @@ struct ApplicationOptions {
   std::chrono::milliseconds outputSlice{2000}; ///< Positive flush budget; Windows timeout can be uncertain.
   ApplicationObserver observer{};              ///< Optional borrowed measurement callback.
   std::size_t maxPreparationPasses{3};         ///< Positive layout/view preparation budget for opt-in scenes per frame.
+  BackgroundExecutor *backgroundExecutor{};    ///< Optional borrowed host executor; must outlive session cleanup.
+  BackgroundOptions background{}; ///< Default synchronous-session worker limits; used only by opt-in scenes.
 };
 
 /** @brief Owning cumulative totals from a run or session, without samples or terminal data. */
@@ -262,6 +267,11 @@ public:
    * ApplicationOptions::nativeMouseReporting=false or dynamically change an already opened transport.
    */
   virtual bool requiresPointerMotion() const noexcept;
+  /** @return True when the scene requires background work; default false.
+   * Synchronous run creates a default pool before native open. A ready host must inject its own
+   * executor. The requirement is sampled before scene callbacks and does not change mid-session.
+   */
+  virtual bool requiresBackgroundExecutor() const noexcept;
   /// @brief Prepare views from one owning layout snapshot; default is a no-op.
   /// Called only for opt-in scenes, on UI outside tree.frame, after prepare has
   /// pinned models once. Use those same pins for all views and repeated passes;
@@ -326,6 +336,11 @@ public:
   SchedulerTime now() const noexcept;
   /** @return Shared width policy for text created by the scene. */
   WidthPolicy widthPolicy() const noexcept;
+  /** @return Borrowed executor for this session, or null when no background service was requested.
+   * UI-only. Never own or join the returned executor in a scene or callback. A borrowed host executor
+   * outlives cleanup; a default executor is available only during a synchronous run.
+   */
+  BackgroundExecutor *background() noexcept;
   /** @brief Worker-safe while this owner lives; wakes scheduler and cancels terminal waits. */
   void requestStop() noexcept;
   /** @brief Start the single permitted ready-only session, without waiting or running a frame.
@@ -354,6 +369,8 @@ public:
    * @param scene Borrowed scene which must outlive this call.
    * @param stop Optional caller cancellation signal.
    * @return Owning totals or detailed first failure and separate restoration error.
+   * Opt-in background workers start before native terminal open. After stop, coroutine retirement
+   * and terminal close attempt, a final explicit join may wait for cooperative user work.
    */
   std::expected<ApplicationStats, ApplicationError> run(ApplicationScene &scene, std::stop_token stop = {});
   /** @brief Run against a borrowed custom terminal; always close before returning once accepted.
@@ -363,6 +380,8 @@ public:
    * @param terminal Exclusive transport borrowed through cleanup; no ownership transfer.
    * @param stop Optional caller cancellation signal.
    * @return Owning totals or detailed first failure and separate restoration error.
+   * The caller has already opened this terminal: default background startup occurs before scene
+   * callbacks, not before that external open. Final owned join follows the terminal close attempt.
    */
   std::expected<ApplicationStats, ApplicationError> run(ApplicationScene &scene, ApplicationTerminal &terminal,
                                                         std::stop_token stop = {});
@@ -370,6 +389,8 @@ public:
 private:
   struct State;
   explicit Application(std::unique_ptr<State> state);
+  void prepareBackground(const ApplicationScene &scene, bool hosted);
+  void finishBackground() noexcept;
   void finishSession() noexcept;
   std::unique_ptr<State> state_;
 };

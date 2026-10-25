@@ -3,6 +3,7 @@
 #include "../widgets/scroll_controls_state.hpp"
 #include "../widgets/scroll_preparation_state.hpp"
 #include <portals/application.hpp>
+#include <portals/background.hpp>
 
 #include <algorithm>
 #include <thread>
@@ -15,11 +16,16 @@ namespace portals {
 namespace {
 struct Failure {
   ApplicationCause cause;
+  std::optional<BackgroundError> background{};
 };
 
 template <class T, class E> T require(std::expected<T, E> value) {
   if (!value) {
-    throw Failure{value.error()};
+    if constexpr (std::same_as<E, BackgroundError>) {
+      throw Failure{ApplicationFailure::BACKGROUND_FAILED, value.error()};
+    } else {
+      throw Failure{value.error(), {}};
+    }
   }
 
   if constexpr (!std::is_void_v<T>) {
@@ -35,7 +41,7 @@ void captureFailure(ApplicationPhase phase, std::optional<ApplicationError> &err
   try {
     throw;
   } catch (const Failure &failure) {
-    error.emplace(ApplicationError{phase, failure.cause, {}});
+    error.emplace(ApplicationError{phase, failure.cause, {}, failure.background});
   } catch (const std::bad_alloc &) {
     error.emplace(ApplicationError{phase, ApplicationFailure::NO_MEMORY, {}});
   } catch (...) {
@@ -426,6 +432,9 @@ struct Application::State {
   ApplicationTerminal *legacy{};
   ApplicationReadyTerminal *ready{};
   std::unique_ptr<Run> run;
+  UiScope backgroundScope;
+  SchedulerConnection<int> backgroundWake;
+  std::unique_ptr<BackgroundPool> ownedBackground;
 
   struct Cancel {
     Application *app;
@@ -686,6 +695,10 @@ struct Application::State::Run {
     }
 
     if (!dispatched.stopped && !state.stop.stop_requested()) {
+      if (auto *executor = app.background()) {
+        executor->service();
+      }
+
       require(scene.afterDispatch(app));
     }
 
@@ -911,6 +924,10 @@ std::expected<void, TreeError> ApplicationScene::afterDispatch(Application &) {
   return {};
 }
 
+bool ApplicationScene::requiresBackgroundExecutor() const noexcept {
+  return false;
+}
+
 bool ApplicationScene::hasPendingLayout() const noexcept {
   return false;
 }
@@ -929,6 +946,38 @@ Application::State::State(ApplicationOptions policy, SchedulerClock time) : opti
 }
 
 Application::State::~State() = default;
+
+BackgroundExecutor *Application::background() noexcept {
+  return state_->options.backgroundExecutor ? state_->options.backgroundExecutor : state_->ownedBackground.get();
+}
+
+void Application::prepareBackground(const ApplicationScene &scene, bool hosted) {
+  if (!scene.requiresBackgroundExecutor() || background()) {
+    return;
+  }
+
+  if (hosted) {
+    throw Failure{ApplicationFailure::BACKGROUND_FAILED, BackgroundError::UNAVAILABLE};
+  }
+
+  state_->backgroundScope = require(scheduler().makeScope());
+  state_->backgroundWake = require(scheduler().connect<int>(state_->backgroundScope, [](auto) {
+  }));
+  state_->ownedBackground =
+    require(BackgroundPool::create(state_->options.background, state_->backgroundWake.publisher));
+}
+
+void Application::finishBackground() noexcept {
+  if (state_->ownedBackground) {
+    // This is the synchronous run's final boundary, after finishSession has
+    // attempted terminal restoration. No UI acknowledgement is needed to join.
+    state_->ownedBackground->join();
+    state_->ownedBackground.reset();
+  }
+
+  state_->backgroundWake = {};
+  state_->backgroundScope = {};
+}
 
 Application::~Application() {
   if (state_->scene && !state_->complete) {
@@ -1011,6 +1060,7 @@ std::expected<ApplicationStats, ApplicationError> Application::run(ApplicationSc
   }
 
   try {
+    prepareBackground(scene, false);
 #ifdef _WIN32
     NativeTerminalHandles handles{reinterpret_cast<std::intptr_t>(GetStdHandle(STD_INPUT_HANDLE)),
                                   reinterpret_cast<std::intptr_t>(GetStdHandle(STD_OUTPUT_HANDLE))};
@@ -1024,15 +1074,18 @@ std::expected<ApplicationStats, ApplicationError> Application::run(ApplicationSc
 
     if (!opened) {
       state_->ran = true;
+      finishBackground();
 
       return std::unexpected(ApplicationError{ApplicationPhase::OPEN, opened.error(), {}});
     }
 
     return run(scene, **opened, stop);
-  } catch (const std::bad_alloc &) {
+  } catch (...) {
     state_->ran = true;
+    captureFailure(ApplicationPhase::OPEN, state_->error);
+    finishBackground();
 
-    return std::unexpected(ApplicationError{ApplicationPhase::OPEN, ApplicationFailure::NO_MEMORY, {}});
+    return std::unexpected(*state_->error);
   }
 }
 
@@ -1055,6 +1108,7 @@ std::expected<void, ApplicationError> Application::start(ApplicationScene &scene
   state_->ready = &terminal;
 
   try {
+    prepareBackground(scene, true);
     // The ready host never waits: sampling its retained token avoids destroying
     // a stop_callback that could join a concurrently executing external callback.
     state_->readyStop = externalStop;
@@ -1147,6 +1201,10 @@ void Application::finishSession() noexcept {
     return;
   }
 
+  if (state_->ownedBackground) {
+    state_->ownedBackground->requestStop();
+  }
+
   // Disconnect callbacks that capture Run before stopping producers or the scene.
   // All progress and errors remain in State after the engine storage is released.
   state_->run.reset();
@@ -1215,6 +1273,7 @@ Application::run(ApplicationScene &scene, ApplicationTerminal &terminal, std::st
   state_->legacy = &terminal;
 
   try {
+    prepareBackground(scene, false);
     const auto capabilities = terminal.pointerCaptureCapabilities();
 
     require(router().setPointerCaptureCapabilities(capabilities));
@@ -1245,6 +1304,7 @@ Application::run(ApplicationScene &scene, ApplicationTerminal &terminal, std::st
   }
 
   finishSession();
+  finishBackground();
   state_->operating = false;
 
   if (state_->error) {

@@ -5454,3 +5454,58 @@ TEST_CASE("default resource failure reporting never includes rejected password l
   CHECK(message.find("scene-resource") != std::string::npos);
   CHECK(message.find("PRIVATE_MARKER_MUST_NOT_LEAK") == std::string::npos);
 }
+
+TEST_CASE("final report keeps exact async and background causes") {
+  StderrCapture capture;
+  ManagedError failure{ManagedPhase::INPUT, {}, TreeError::WOULD_BLOCK, {}, {}};
+
+  failure.async = AsyncError::WOULD_BLOCK;
+  failure.background = BackgroundError::UNAVAILABLE;
+  failure.application = ApplicationError{ApplicationPhase::INPUT, ApplicationFailure::BACKGROUND_FAILED, {},
+                                         BackgroundError::START_FAILED};
+
+  ui::reportToStderr(ui::SceneReport{.failure = failure});
+
+  const auto output = capture.contents();
+
+  CHECK(output.find("async=AsyncError(WOULD_BLOCK)") != std::string::npos);
+  CHECK(output.find("background=BackgroundError(UNAVAILABLE)") != std::string::npos);
+  CHECK(output.find("background=BackgroundError(START_FAILED)") != std::string::npos);
+}
+
+#if defined(_MSC_VER) && _ITERATOR_DEBUG_LEVEL == 2
+TEST_CASE("managed construction preserves typed allocation failure") {
+  auto app = take(Application::create());
+  const auto previousTerminate = std::set_terminate(oomTerminate);
+
+  // Exercise a bounded constructor failure; its exact allocation stage is toolchain-dependent.
+  constexpr std::ptrdiff_t CONSTRUCTION_FAILURE_BUDGET = 2;
+
+  allocationsBeforeFailure = CONSTRUCTION_FAILURE_BUDGET;
+
+  auto result = ManagedScene::create(*app);
+
+  allocationsBeforeFailure = -1;
+  std::set_terminate(previousTerminate);
+
+  REQUIRE_FALSE(result);
+  CHECK(treeCause(result.error(), TreeError::NO_MEMORY));
+}
+#endif
+
+TEST_CASE("final report names worker storage errors without losing their exact category") {
+  for (const auto &[error, name] :
+       std::array{std::pair{BackgroundError::WRONG_THREAD, "WRONG_THREAD"},
+                  std::pair{BackgroundError::LIMIT_EXCEEDED, "LIMIT_EXCEEDED"},
+                  std::pair{BackgroundError::CALLBACK_FAILED, "CALLBACK_FAILED"}}) {
+    StderrCapture capture;
+    ManagedError failure{ManagedPhase::INPUT, {}, TreeError::INVALID_ARGUMENT, {}, {}};
+
+    failure.background = error;
+    ui::reportToStderr(ui::SceneReport{.failure = failure});
+
+    const auto output = capture.contents();
+
+    CHECK(output.find(std::string("background=BackgroundError(") + name + ")") != std::string::npos);
+  }
+}

@@ -21,6 +21,7 @@ struct AsyncControl {
   Publisher<int> scopeWake;
   std::weak_ptr<AsyncScopeLifetime> scopeLifetime;
   UiTaskOutcome outcome;
+  AsyncHooks hooks;
   std::uint64_t generation{};
   bool alive{true};
   bool running{};
@@ -187,6 +188,7 @@ void AsyncControl::stop(AsyncError error, bool close) noexcept {
   auto retiredWait = wait.lock();
   wait.reset();
   auto retiredFrame = running ? std::coroutine_handle<UiTask::promise_type>{} : std::exchange(frame, {});
+  auto retiredHooks = running ? hooks : std::exchange(hooks, {});
   Subscription retiredSentinel;
 
   if (close) {
@@ -198,6 +200,10 @@ void AsyncControl::stop(AsyncError error, bool close) noexcept {
     retiredSentinel = std::move(sentinel);
   }
 
+  if (retiredHooks.cancel) {
+    retiredHooks.cancel(retiredHooks.owner.get());
+  }
+
   if (retiredWait) {
     retiredWait->cancel(error);
   }
@@ -207,6 +213,7 @@ void AsyncControl::stop(AsyncError error, bool close) noexcept {
   if (retiredFrame) {
     retiredFrame.destroy();
   }
+  // In particular, captured coroutine lambdas outlive every frame parameter destructor.
 }
 
 void asyncResume(const std::shared_ptr<AsyncControl> &state, std::uint64_t generation) {
@@ -216,8 +223,15 @@ void asyncResume(const std::shared_ptr<AsyncControl> &state, std::uint64_t gener
 
   auto frame = state->frame;
   state->running = true;
-  frame.resume();
+  const bool entered =
+    state->hooks.resume ? state->hooks.resume(state->hooks.owner.get(), frame) : (frame.resume(), true);
   state->running = false;
+
+  if (!entered) {
+    state->stop(AsyncError::CLOSED, true);
+
+    return;
+  }
 
   if (state->frame != frame) {
     std::terminate();
@@ -235,8 +249,14 @@ void asyncResume(const std::shared_ptr<AsyncControl> &state, std::uint64_t gener
   }
 
   state->frame = {};
+  auto retiredHooks = std::exchange(state->hooks, {});
+  const auto outcome = state->outcome;
   auto retiredWait = state->wait.lock();
   state->wait.reset();
+
+  if (retiredHooks.cancel) {
+    retiredHooks.cancel(retiredHooks.owner.get());
+  }
 
   if (retiredWait) {
     retiredWait->cancel(AsyncError::CANCELLED);
@@ -244,6 +264,10 @@ void asyncResume(const std::shared_ptr<AsyncControl> &state, std::uint64_t gener
 
   // No mutable state writes after destruction: a parameter destructor may start a newer task.
   frame.destroy();
+
+  if (outcome.status == UiTaskStatus::FAILED && retiredHooks.complete) {
+    retiredHooks.complete(retiredHooks.owner.get(), outcome);
+  }
 }
 } // namespace detail
 
@@ -308,6 +332,10 @@ struct AsyncTimer::Wait final : detail::AsyncWait {
 };
 
 bool AsyncTimer::await_suspend(std::coroutine_handle<UiTask::promise_type> frame) {
+  if (rejected_) {
+    return false;
+  }
+
   auto state = control_.lock();
   auto checked = detail::asyncCheck(state);
 
@@ -434,6 +462,10 @@ UiAsyncContext UiAsync::context() const {
 }
 
 std::expected<void, AsyncError> UiAsync::start(UiTask &&task, UiTaskRestart restart) {
+  return startOwned(std::move(task), restart, {});
+}
+
+std::expected<void, AsyncError> UiAsync::startOwned(UiTask &&task, UiTaskRestart restart, detail::AsyncHooks hooks) {
   auto state = state_;
   auto allowed = detail::asyncCheck(state);
 
@@ -491,6 +523,7 @@ std::expected<void, AsyncError> UiAsync::start(UiTask &&task, UiTaskRestart rest
   frame.promise().control = state;
   frame.promise().generation = generation;
   state->frame = frame;
+  state->hooks = std::move(hooks);
   state->outcome = {UiTaskStatus::RUNNING, {}, generation};
   detail::asyncResume(state, generation);
 

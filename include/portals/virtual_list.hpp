@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 #include <portals/data_presentation.hpp>
+#include <portals/detail/list_text.hpp>
 
 #include <portals/action.hpp>
 #include <portals/layout.hpp>
@@ -20,6 +21,7 @@ struct VirtualListOptions {
   WidthPolicy width_policy;     ///< Required policy for delegate and placeholder text.
   CellStyle normal;             ///< Unselected row fill and text.
   CellStyle selected;           ///< Selected row fill and text.
+  CellStyle highlight{.bold = true}; ///< Prepared match emphasis over normal/selected appearance.
 };
 
 /// @cond INTERNAL
@@ -34,7 +36,8 @@ std::expected<ListWindow, TreeError> listWindow(std::uint64_t count, std::uint64
 
 struct ListRow {
   std::optional<RowId> id;
-  GraphemeText text;
+  std::optional<GraphemeText> text;
+  std::shared_ptr<const PreparedListText> prepared;
 };
 
 std::expected<void, TreeError> paintList(PaintContext &context, CellSize viewport, VirtualListOptions options,
@@ -211,6 +214,15 @@ public:
    * @note UI frame only; no I/O, model reads, delegate calls or invalidation.
    */
   std::expected<void, TreeError> paint(PaintContext &context) override {
+    if (preparedSuppressed_) {
+      auto bounds = CellRect::from({}, arranged_);
+
+      if (!bounds) { return std::unexpected(TreeError::INVALID_GEOMETRY); }
+      const auto style = computedStyle() ? computedStyle()->normal : options_.normal;
+      const std::array<RenderCommand, 1> commands{FillCommand{*bounds, *bounds, style}};
+
+      return context.submit(commands);
+    }
     if (!prepared_ || dirty_) {
       return std::unexpected(TreeError::WOULD_BLOCK);
     }
@@ -372,13 +384,24 @@ private:
 
         if (range->state() == RangeState::READY) {
           const auto &row = range->rows()[static_cast<std::size_t>(index - window->requested.first)];
-          auto text = delegate_(row);
-
-          if (text.policy() != options_.width_policy || row.id.value == 0 || row.id.generation == 0) {
+          if (row.id.value == 0 || row.id.generation == 0) {
             return std::unexpected(TreeError::INVALID_ARGUMENT);
           }
+          if (preparedDelegate_) {
+            auto text = preparedDelegate_(row);
 
-          next->rows.push_back({row.id, std::move(text)});
+            if (!text || text->text.policy() != options_.width_policy) {
+              return std::unexpected(TreeError::INVALID_ARGUMENT);
+            }
+            next->rows.push_back({row.id, {}, std::move(text)});
+          } else {
+            auto text = delegate_(row);
+
+            if (text.policy() != options_.width_policy) {
+              return std::unexpected(TreeError::INVALID_ARGUMENT);
+            }
+            next->rows.push_back({row.id, std::move(text), {}});
+          }
 
           if (apply_intent && index == *intent_) {
             selection = row.id;
@@ -572,6 +595,10 @@ private:
 
   ModelConsumer<T> consumer_;
   std::function<GraphemeText(const ModelRow<T> &)> delegate_;
+  std::function<std::shared_ptr<const detail::PreparedListText>(const ModelRow<T> &)> preparedDelegate_;
+  std::function<void(RowId)> activation_;
+  std::shared_ptr<void> service_;
+  bool preparedSuppressed_{};
   VirtualListOptions options_;
   std::unique_ptr<Prepared> prepared_;
   ModelRequest<T> request_;
@@ -692,6 +719,10 @@ std::expected<ActionBinding, TreeError> bindVirtualList(EventRouter &router, Wid
 
     if (const auto *action = std::get_if<ActionEvent>(&event)) {
       reply = view.action(action->action);
+      if (action->action == Action::ACTIVATE && view.activation_ && view.selected_ && !view.preparedSuppressed_) {
+        view.activation_(*view.selected_);
+        reply = EventReply::HANDLED;
+      }
     } else if (const auto *mouse = std::get_if<MouseInputEvent>(&event); mouse && view.prepared_) {
       auto snapshot = tree.inspect(node);
 

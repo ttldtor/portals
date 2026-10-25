@@ -9,6 +9,7 @@
 #include <portals/help_view.hpp>
 #include <portals/managed.hpp>
 #include <portals/text_value.hpp>
+#include <portals/ui_delivery.hpp>
 
 #include <typeinfo>
 
@@ -61,6 +62,10 @@ struct RefTarget {
 };
 
 struct RefAccess;
+using DeliveryCallback = std::function<std::expected<void, TreeError>(std::shared_ptr<const void>)>;
+std::expected<Publisher<portals::detail::UiDeliveryEnvelope>, ManagedError>
+connectDelivery(const std::shared_ptr<RefTarget> &target, DeliveryCallback callback, std::source_location origin);
+EditorCommandResult activateButton(const std::shared_ptr<RefTarget> &target, std::source_location origin);
 /** @param target Weak observation checked for UI affinity and scene lifetime.
  * @param node Shared typed slot, borrowed only after the affinity check.
  * @param value Finite replacement or delta. @param relative Add to the current value without clamping.
@@ -509,6 +514,68 @@ public:
     this->slot_->fluent = true;
   }
 
+  /** @brief Register a checked, node-scoped worker-to-UI delivery endpoint.
+   * @tparam Value Transitively immutable owning payload, safe to destroy on UI or a producer thread.
+   * @tparam Callback Copy-constructible callback taking shared_ptr<const Value>, returning void or
+   * expected<void,TreeError>.
+   * @param callback UI-owned short action; captures are never transferred to producers. Borrowed captures remain the
+   * caller's responsibility.
+   * @param origin Registration origin retained by recoverable execution diagnostics.
+   * @return Worker-safe endpoint or exact checked registration failure, also collected by the live scene.
+   * Always deferred through existing CONTROL/REJECT. Node/scene removal closes delivery without joining.
+   * Typed execution errors are collected recoverably; exceptions also disconnect through Scheduler.
+   * Callback argument construction before entry may throw; transfers inside this boundary are checked.
+   */
+  template <class Value, class Callback>
+    requires std::copy_constructible<Callback> &&
+             (std::same_as<std::invoke_result_t<Callback &, std::shared_ptr<const Value>>, void> ||
+              std::same_as<std::invoke_result_t<Callback &, std::shared_ptr<const Value>>,
+                           std::expected<void, TreeError>>)
+  std::expected<UiEndpoint<Value>, ManagedError>
+  delivery(Callback callback, std::source_location origin = std::source_location::current()) const {
+    auto observation = target();
+    try {
+      auto connected = detail::connectDelivery(
+        observation,
+        [callback =
+           std::move(callback)](std::shared_ptr<const void> payload) mutable -> std::expected<void, TreeError> {
+          if constexpr (std::same_as<std::invoke_result_t<Callback &, std::shared_ptr<const Value>>, void>) {
+            std::invoke(callback, std::static_pointer_cast<const Value>(std::move(payload)));
+            return {};
+          } else {
+            return std::invoke(callback, std::static_pointer_cast<const Value>(std::move(payload)));
+          }
+        },
+        origin);
+      if (!connected) {
+        detail::reportEventError(observation, connected.error(), origin);
+        return std::unexpected(connected.error());
+      }
+
+      return UiEndpoint<Value>(std::move(*connected));
+    } catch (const std::bad_alloc &) {
+      ManagedError failure{ManagedPhase::BIND, {}, TreeError::NO_MEMORY, {}, {}};
+      detail::reportEventError(observation, failure, origin);
+      return std::unexpected(failure);
+    } catch (...) {
+      ManagedError failure{ManagedPhase::BIND, {}, TreeError::CALLBACK_FAILED, {}, {}};
+      detail::reportEventError(observation, failure, origin);
+      return std::unexpected(failure);
+    }
+  }
+
+  /** @brief Invoke the existing semantic button route synchronously on UI; focus is unchanged.
+   * @param origin Command origin retained by recoverable diagnostics.
+   * @return Checked command preserving its recoverable reporting receipt; return it unchanged from managed handlers.
+   * Disabled/hidden or unhandled targets are successful no-ops; use router.invoke for detailed routing status.
+   * Nested router invocation yields WOULD_BLOCK. Extracting result() deliberately loses reporting provenance.
+   */
+  EditorCommandResult activate(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, Button>
+  {
+    return detail::activateButton(target(), origin);
+  }
+
   /** @param value Finite replacement in the inclusive configured range; no clamping.
    * @param origin Public command site retained on failure.
    * @return Checked programmatic change, automatically collected on failure; equal values request no redraw.
@@ -661,8 +728,8 @@ public:
   /** @param bytes Complete UTF-8 batch, borrowed only during synchronous admission.
    * @param origin Original command site. @return Atomic owning receipt; checked failures are never auto-reported.
    */
-  std::expected<LogAppendReceipt, ManagedError> appendBatch(
-    std::string_view bytes, std::source_location origin = std::source_location::current()) const
+  std::expected<LogAppendReceipt, ManagedError>
+  appendBatch(std::string_view bytes, std::source_location origin = std::source_location::current()) const
     requires std::same_as<T, LogView>
   {
     const auto observation = target();
@@ -1116,6 +1183,7 @@ public:
    * updates presentation without committing a model or adding an Undo operation.
    * Reentry returns WOULD_BLOCK;
    * custom editor roots return INVALID_ARGUMENT.
+   * Async-configured fields reject this synchronous observation with INVALID_ARGUMENT.
    */
   std::expected<bool, ManagedError> validate() const
     requires std::same_as<T, FormField>
@@ -1265,6 +1333,7 @@ public:
 
 private:
   friend struct detail::ClickAccess;
+  friend struct detail::AsyncAccess;
   friend struct detail::EditorEventAccess;
   friend struct detail::ChangeAccess;
   friend class KeyInfo;

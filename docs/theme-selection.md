@@ -93,3 +93,39 @@ The [theme selector](theme-selector.md) owns its list, focus, recovery UI and
 optional post-commit notification. Its open view observes external equal-theme
 authority changes through existing invalidation. General theme importers and a
 universal reactive system are not part of this API.
+
+## Prepare expensive choices on a worker {#prepared-theme-worker}
+
+Use `ui::preparedTheme(id, label, factory)` for parsing or other expensive preparation.
+The factory accepts `std::stop_token` and returns `StyleSheet` or exactly
+`expected<StyleSheet, StyleError>`. Its closure, copies, reachable data and destruction
+must be worker-safe: capture immutable domain input, never a UI ref or scene.
+Ordinary `ThemeChoice` nullary factories continue running synchronously on UI and
+must remain short. The explicit prepared path uses the application's existing
+background executor; a hosted session must supply one.
+
+[Complete native source](examples/guide_prepared_theme.cpp):
+
+\include{lineno} guide_prepared_theme.cpp
+
+`preview(id)` accepts the newest intent; it does not promise installation before
+return. `snapshot()` exposes `preparing`, `requestedId` and `preparationError` in
+an immutable point-in-time value. While the newest request is pending, `commit()`
+returns `WOULD_BLOCK` and Apply is disabled. A failed new request cannot commit an
+older visible preview. Cancel revokes pending work and restores the saved preview.
+A full executor queue retains the latest request and retries without another key;
+a rejected completion retries the same prepared sheet without rerunning its factory.
+
+Only the current intent, source and THEME authority lease may install. Changing
+USER/APPLICATION overrides during preparation is preserved; replacing THEME
+elsewhere supersedes the old request. Existing style-layer limits still apply to
+the final UI installation. Engine staging, rule resolution and layout remain UI
+work; preparation does not make those costs disappear. StyleError message strings
+retain their existing static-storage requirement.
+
+For a prepared `ThemeSelectorCatalog.initialId`, setup retains the intent until
+an executor is available; successful preparation commits without `onCommitted`.
+Its failure is a recoverable runtime preparation diagnostic, rather than a
+synchronous pre-terminal setup failure. The old synchronous initial-choice path
+keeps its existing setup behavior. No control is remounted and no polling timer
+is introduced.

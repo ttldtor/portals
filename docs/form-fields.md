@@ -59,8 +59,9 @@ custom editor has string validation semantics. Standard text operations require
 a text editor; inappropriate operations report a checked error.
 
 Callbacks remain C++ declarations when a field is loaded from a scene resource.
-Asynchronous validation, stale-completion admission and transactional submit/reset
-are outside this implementation. They are not implied by a pending message.
+The standard text-editor overload also supports the explicit asynchronous rule
+below. Custom-editor validation and transactional whole-form submit/reset are
+separate features; a manually displayed pending message launches no work.
 
 ## Loaded scene
 
@@ -72,3 +73,50 @@ This program demonstrates required checks, not the email rule in the C++ form.
 [Complete resource program](examples/guide_form_field_resource.cpp)
 
 \include guide_form_field_resource.cpp
+
+## Validate a text field on a worker {#form-field-async}
+
+Set `FormFieldConfig.validateAsync` for an expensive semantic rule. The complete
+account-name program keeps the ordinary editor, checkbox and exit button usable
+while a reserved-name check runs on the application's bounded executor:
+
+[Complete native source](../examples/async_validation/main.cpp)
+
+\include async_validation/main.cpp
+
+The worker receives the candidate's UTF-8 bytes, borrowed for that invocation,
+and a cooperative stop token. Its captures must own immutable, worker-safe data;
+do not capture a scene, UI reference, mutable model or editor storage. Return
+`FieldValidation::valid(...)`, `FieldValidation::invalid(...)`, or an exact
+`TreeError`. Other presentation statuses are not final worker results.
+Required checks and ordinary synchronous rules run first and must stay short.
+
+Editing modes still determine when publication is requested. `IMMEDIATE` checks
+accepted edits; `ON_COMPLETION` checks Enter or focus loss; `EXPLICIT` checks only
+explicit confirmation. Pending work writes no model value. A valid completion
+uses the normal editor publication path, including a fresh external-model check.
+Undo/Redo and fluent text changes use that same gate; a successful completion
+does not create another edit or clear history. Enter while already pending shares
+the current request. An obsolete result cannot replace a newer draft, even when
+the text changed away and back to the same bytes.
+
+Escape, a new baseline, removal or scene close retires the intent without joining
+a worker. Cancellation is cooperative: a rule must not perform unbounded blocking
+work. External model changes retain the draft and report a conflict instead of
+silently accepting an old result. Read-only or disabled editors cannot publish
+an asynchronous completion.
+
+`validation()` exposes `PENDING`, `VALID`, `INVALID` or `TECHNICAL_ERROR`.
+Invalid business data keeps the draft. Transport, allocation and worker failures
+also keep it and use existing typed scene diagnostics; they do not masquerade as
+an invalid account name. A new publication request can retry a failed check.
+The synchronous `validate()`/`valid()` command cannot await this rule and reports
+`INVALID_ARGUMENT` before starting work. Use the editor's normal publication
+commands instead.
+
+`validationLimits` defaults to 16 KiB per candidate and 4 KiB per result message.
+These positive byte budgets are configurable and separate from editor limits;
+there is no silent truncation. An oversized draft remains visible and undoable.
+This worker path supports the standard normal-display text editor. Password and
+no-echo configurations reject asynchronous attachment during checked mount;
+custom editors keep their existing explicit presentation contract.
