@@ -28,13 +28,16 @@ required. A second model installation is rejected with a typed setup error.
 
 For catalog limits, text resolution or an initial choice, pass an owning
 `ui::ThemeSelectorCatalog`. Its `choices` field contains the same entries;
-`selection` uses the existing `ThemeSelectionOptions`. Optional `initialId`
+`selection` uses the existing `ThemeSelectionOptions`. For a synchronous factory, optional `initialId`
 previews and commits that choice after scene configuration and before selector
 publication. Startup selection does not invoke `onCommitted`. A failed initial
 choice follows the normal setup-error and cleanup path before terminal entry.
 With `ui::Scene`, the initial factory runs in that scene's preparation context. A collected short
 command failure prevents committing the initial choice and publishing the
 selector. Already completed application actions are not rolled back.
+Prepared worker factories defer the initial choice until the executor is ready;
+see [prepared themes](theme-selection.md#prepared-theme-worker). Their startup
+errors use runtime diagnostics and leave the previous theme active.
 
 The explicit `ui::ThemeSelectionRef` overload and `ui::themeSelection` stage
 remain available for applications supplying their own model or controls. Model
@@ -115,6 +118,7 @@ view while preserving the current appearance.
 
 Catalog and style budgets come from the model and style engine. The selector
 does not create a second catalog, polling timer, theme registry or scheduler.
-Factories and persistence callbacks must remain synchronous and nonblocking.
+Ordinary nullary factories and persistence callbacks run synchronously on the UI
+thread and must remain nonblocking. Use `ui::preparedTheme` for expensive factory work.
 Theme importers and automatic configuration-file persistence are separate
 features.

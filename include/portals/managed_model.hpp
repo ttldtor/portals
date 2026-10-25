@@ -23,6 +23,8 @@ using ManagedViewHandler =
 
 /// @cond INTERNAL
 namespace detail {
+struct ManagedModelAccess;
+
 struct ManagedModelSource {
   virtual ~ManagedModelSource() = default;
   virtual std::expected<void, TreeError> pin() = 0;
@@ -127,6 +129,7 @@ public:
 private:
   friend class ManagedScene;
   friend struct ui::detail::Access;
+  friend struct detail::ManagedModelAccess;
 
   std::expected<std::shared_ptr<detail::ManagedModelSourceOf<T>>, TreeError> lock() const {
     if (owner_ != std::thread::id{} && owner_ != std::this_thread::get_id()) {
@@ -151,6 +154,48 @@ private:
   std::weak_ptr<detail::ManagedModelSourceOf<T>> source_;
   std::thread::id owner_{};
 };
+
+/// @cond INTERNAL
+namespace detail {
+struct ManagedModelAccess {
+  template <class T>
+  static std::expected<void, TreeError> validate(const ManagedModel<T> &model, NodeId scene) {
+    auto source = model.lock();
+
+    if (!source) {
+      return std::unexpected(source.error());
+    }
+
+    if ((*source)->retired || !(*source)->model) {
+      return std::unexpected(TreeError::CLOSED);
+    }
+
+    return (*source)->scene == scene ? std::expected<void, TreeError>{}
+                                    : std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  template <class T>
+  static std::expected<std::shared_ptr<const ModelSnapshot<T>>, TreeError>
+  snapshot(const ManagedModel<T> &model, NodeId scene) {
+    auto source = model.lock();
+
+    if (!source) {
+      return std::unexpected(source.error());
+    }
+
+    if ((*source)->retired || !(*source)->model) {
+      return std::unexpected(TreeError::CLOSED);
+    }
+
+    if ((*source)->scene != scene || !(*source)->frame) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+
+    return (*source)->frame->snapshot();
+  }
+};
+} // namespace detail
+/// @endcond
 
 /** @brief Owning formatter of a borrowed visible list row into owning text.
  * The callback runs during preparation on UI and must not retain the borrowed row.

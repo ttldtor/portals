@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include "line_edit_validation.hpp"
 #include <portals/detail/line_edit_text.hpp>
 #include <portals/line_edit.hpp>
 
@@ -12,6 +13,14 @@ namespace portals {
 namespace {
 LineEditResult failed(TreeError error) {
   return {LineEditStatus::FAILED, {}, error};
+}
+
+LineEditResult validationGateFailed(TreeError error) {
+  auto result = failed(error);
+
+  result.recoverable = true;
+
+  return result;
 }
 
 LineEditStatus textStatus(TextError error) {
@@ -325,6 +334,12 @@ bool LineEdit::dirty() const {
   return dirty_;
 }
 
+LineEdit::~LineEdit() {
+  if (auto gate = validationGate_.lock()) {
+    gate->close();
+  }
+}
+
 struct LineEditBinding::State {
   WidgetTree &tree;
   Node<LineEdit> node;
@@ -341,6 +356,25 @@ struct LineEditBinding::State {
   bool userTextChanged{};
   bool delivering{};
   bool completionDelivery{};
+  std::uint64_t draftGeneration{};
+  std::shared_ptr<detail::LineEditValidationGate> validationGate;
+
+  struct ValidationFlush {
+    State &state;
+    bool afterBorrow;
+
+    explicit ValidationFlush(State &owner, bool after = true) : state(owner), afterBorrow(after) {
+      if (state.validationGate) {
+        state.validationGate->hold();
+      }
+    }
+
+    ~ValidationFlush() {
+      if (state.validationGate && !state.busy) {
+        state.validationGate->flush(afterBorrow);
+      }
+    }
+  };
 
   static EditingFinishedOutcome finishOutcome(const LineEditResult &result) {
     switch (result.status) {
@@ -351,24 +385,32 @@ struct LineEditBinding::State {
       return EditingFinishedOutcome::VALIDATION_REJECTED;
     case LineEditStatus::CONFLICT:
       return EditingFinishedOutcome::CONFLICT;
+    case LineEditStatus::PENDING:
+      return EditingFinishedOutcome::PENDING;
     default:
       return EditingFinishedOutcome::FAILED;
     }
   }
 
   void deliver(const LineEditResult &result, bool finish = false) {
+    auto decorated = result;
+
+    if (validationGate) {
+      validationGate->finished(decorated);
+    }
+
     BusyGuard delivery(delivering);
     BusyGuard completion(completionDelivery, finish);
 
     // Preserve the legacy callback boundary and never borrow the widget across extension code.
-    onResult(result);
+    onResult(decorated);
 
     if (userTextChanged && events.textEdited && alive()) {
-      events.textEdited(TextEditedEvent{result});
+      events.textEdited(TextEditedEvent{decorated});
     }
 
     if (finish && events.editingFinished && alive()) {
-      events.editingFinished({EditingFinishedReason::ENTER, finishOutcome(result), result});
+      events.editingFinished({EditingFinishedReason::ENTER, finishOutcome(decorated), decorated});
     }
   }
 
@@ -404,7 +446,12 @@ struct LineEditBinding::State {
     return {std::string(edit.text_.bytes()), edit.cursor_, edit.anchor_};
   }
 
-  std::expected<void, TreeError> accept(LineEdit &edit, PreparedTextHistory &prepared, bool changed) {
+  std::expected<void, TreeError> accept(LineEdit &edit, PreparedTextHistory &prepared, bool changed,
+                                        bool retireBaseline = false) {
+    if ((changed || retireBaseline) && draftGeneration == std::numeric_limits<std::uint64_t>::max()) {
+      return std::unexpected(TreeError::IDENTITY_EXHAUSTED);
+    }
+
     // Build the complete mask before invalidation or local/history publication. Pointer transfer below cannot allocate.
     std::unique_ptr<GraphemeText> mask;
     if (edit.options_.displayMode == LineEditDisplayMode::PASSWORD) {
@@ -454,6 +501,14 @@ struct LineEditBinding::State {
     edit.scroll_ = 0;
     edit.revealCursor();
 
+    if (changed || retireBaseline) {
+      ++draftGeneration;
+
+      if (validationGate) {
+        validationGate->retire();
+      }
+    }
+
     return {};
   }
 
@@ -469,7 +524,7 @@ struct LineEditBinding::State {
       return std::unexpected(historyError(prepared.error()));
     }
 
-    auto applied = accept(edit, *prepared, edit.text_.bytes() != snapshot.value);
+    auto applied = accept(edit, *prepared, edit.text_.bytes() != snapshot.value, true);
 
     if (!applied) {
       return applied;
@@ -497,6 +552,7 @@ struct LineEditBinding::State {
   }
 
   std::expected<void, TreeError> sync(std::optional<Node<Widget>> focused) {
+    ValidationFlush flush{*this, false};
     auto allowed = alive();
 
     if (!allowed) {
@@ -628,6 +684,16 @@ struct LineEditBinding::State {
       return {LineEditStatus::CONFLICT};
     }
 
+    const detail::EditorValidationIdentity identity{draftGeneration, revision};
+
+    if (validationGate) {
+      auto eligible = tree.inputEligible(node);
+
+      if (!eligible || !*eligible || edit.options_.readOnly) {
+        return failed(eligible ? TreeError::WOULD_BLOCK : eligible.error());
+      }
+    }
+
     // The predicate may reenter or remove the node. Own the candidate and revalidate
     // both node and model before committing; never borrow widget text across user code.
     std::string candidate(edit.text_.bytes());
@@ -650,6 +716,40 @@ struct LineEditBinding::State {
 
     if (revision != (*snapshot)->revision) {
       return {LineEditStatus::CONFLICT};
+    }
+
+    if (validationGate) {
+      auto eligible = tree.inputEligible(node);
+
+      if (!eligible || !*eligible || edit.options_.readOnly) {
+        return failed(eligible ? TreeError::WOULD_BLOCK : eligible.error());
+      }
+
+      if (identity != detail::EditorValidationIdentity{draftGeneration, revision}) {
+        return {LineEditStatus::CONFLICT};
+      }
+
+      std::expected<detail::EditorValidationDecision, TreeError> decision;
+
+      try {
+        decision = validationGate->check(candidate, identity);
+      } catch (const std::bad_alloc &) {
+        return validationGateFailed(TreeError::NO_MEMORY);
+      } catch (...) {
+        return validationGateFailed(TreeError::CALLBACK_FAILED);
+      }
+
+      if (!decision) {
+        return validationGateFailed(decision.error());
+      }
+
+      if (*decision == detail::EditorValidationDecision::PENDING) {
+        return {LineEditStatus::PENDING};
+      }
+
+      if (*decision == detail::EditorValidationDecision::REJECT) {
+        return {LineEditStatus::VALIDATION_FAILED};
+      }
     }
 
     auto updated = model->set(candidate);
@@ -990,6 +1090,7 @@ struct LineEditBinding::State {
       return EventReply::HANDLED;
     }
 
+    ValidationFlush flush{*this, false};
     BusyGuard guard(busy);
     userTextChanged = false;
 
@@ -1016,6 +1117,7 @@ struct LineEditBinding::State {
   }
 
   std::expected<void, TreeError> focus(bool focused) {
+    ValidationFlush flush{*this, false};
     if (busy && (!delivering || completionDelivery)) {
       // Focus publication can reenter from an admitted callback. Keep its presentation in sync,
       // but do not turn the same operation into another commit or completion observation.
@@ -1056,6 +1158,9 @@ struct LineEditBinding::State {
 
     if (outcome) {
       outcome->trigger = LineEditTrigger::BLUR;
+      if (validationGate) {
+        validationGate->finished(*outcome);
+      }
       BusyGuard delivery(delivering);
       BusyGuard completionGuard(completionDelivery);
 
@@ -1073,7 +1178,94 @@ struct LineEditBinding::State {
     return outcome && outcome->error ? std::expected<void, TreeError>(std::unexpected(*outcome->error))
                                      : std::expected<void, TreeError>{};
   }
+
+  std::expected<std::optional<LineEditResult>, TreeError>
+  completeValidation(detail::EditorValidationIdentity identity, bool valid, std::optional<TreeError> error) {
+    if (busy) {
+      return std::unexpected(TreeError::WOULD_BLOCK);
+    }
+
+    if (!alive() || identity != detail::EditorValidationIdentity{draftGeneration, revision}) {
+      return {};
+    }
+
+    ValidationFlush flush{*this};
+    BusyGuard guard(busy);
+    std::optional<LineEditResult> outcome;
+    bool workerFailure{};
+    auto edited = tree.edit(node, [&](LineEdit &edit) {
+      auto latest = model->snapshot();
+      auto eligible = tree.inputEligible(node);
+
+      if (!latest) {
+        outcome = validationGateFailed(latest.error());
+      } else if (revision != (*latest)->revision) {
+        outcome = LineEditResult{LineEditStatus::CONFLICT};
+      } else if (!eligible || !*eligible || edit.options_.readOnly) {
+        outcome = validationGateFailed(eligible ? TreeError::WOULD_BLOCK : eligible.error());
+      } else if (error) {
+        outcome = validationGateFailed(*error);
+        workerFailure = true;
+      } else {
+        try {
+          outcome = valid ? commit(edit, false) : LineEditResult{LineEditStatus::VALIDATION_FAILED};
+        } catch (const std::bad_alloc &) {
+          outcome = failed(TreeError::NO_MEMORY);
+        } catch (...) {
+          outcome = failed(TreeError::CALLBACK_FAILED);
+        }
+      }
+    });
+
+    if (!edited || !outcome) {
+      return {};
+    }
+
+    outcome->trigger = LineEditTrigger::ASYNC_VALIDATION;
+    validationGate->finished(*outcome, workerFailure);
+    onResult(*outcome);
+
+    return outcome;
+  }
 };
+
+std::expected<detail::EditorValidationComplete, TreeError>
+detail::LineEditValidationAccess::attach(LineEditBinding &binding, std::shared_ptr<LineEditValidationGate> gate) {
+  auto state = binding.state_;
+
+  if (!state || !gate || state->validationGate) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  bool supported{};
+  auto checked = state->tree.read(state->node, [&](const LineEdit &edit) {
+    supported = LineEditBinding::State::options(edit).displayMode == LineEditDisplayMode::NORMAL;
+  });
+
+  if (!checked || !supported) {
+    return std::unexpected(checked ? TreeError::INVALID_ARGUMENT : checked.error());
+  }
+
+  EditorValidationComplete complete = [weak = std::weak_ptr(state)](EditorValidationIdentity identity, bool valid,
+                                                                    std::optional<TreeError> error) {
+    auto owner = weak.lock();
+
+    return owner ? owner->completeValidation(identity, valid, error)
+                 : std::expected<std::optional<LineEditResult>, TreeError>{};
+  };
+
+  auto installed = state->tree.edit(state->node, [&](LineEdit &edit) {
+    edit.validationGate_ = gate;
+  });
+
+  if (!installed) {
+    return std::unexpected(installed.error());
+  }
+
+  state->validationGate = std::move(gate);
+
+  return complete;
+}
 
 LineEditBinding::LineEditBinding(std::shared_ptr<State> state, ActionBinding action, Subscription subscription)
     : state_(std::move(state)), action_(std::move(action)), subscription_(std::move(subscription)) {
@@ -1147,6 +1339,7 @@ std::expected<void, TreeError> LineEditBinding::setDraft(GraphemeText text, std:
     return std::unexpected(TreeError::WOULD_BLOCK);
   }
 
+  State::ValidationFlush flush{*state};
   State::BusyGuard guard(state->busy);
   state->userTextChanged = false;
   std::expected<void, TreeError> updated;
@@ -1189,7 +1382,7 @@ std::expected<void, TreeError> LineEditBinding::setDraft(GraphemeText text, std:
         return;
       }
 
-      updated = state->accept(edit, *prepared, changed);
+      updated = state->accept(edit, *prepared, changed, policy == ProgrammaticChange::RESET_BASELINE);
 
       if (!updated) {
         return;
@@ -1223,6 +1416,9 @@ std::expected<void, TreeError> LineEditBinding::setDraft(GraphemeText text, std:
 
   if (edited && updated && outcome) {
     outcome->trigger = LineEditTrigger::FLUENT;
+    if (state->validationGate) {
+      state->validationGate->finished(*outcome);
+    }
     state->onResult(*outcome);
   }
 
@@ -1260,6 +1456,7 @@ std::pair<std::expected<void, TreeError>, bool> LineEditBinding::editorCommand(b
     return {std::unexpected(TreeError::WOULD_BLOCK), false};
   }
 
+  State::ValidationFlush flush{*state};
   State::BusyGuard guard(state->busy);
   state->userTextChanged = false;
   auto feedback = state->feedback;

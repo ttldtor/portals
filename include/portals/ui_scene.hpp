@@ -1086,6 +1086,28 @@ private:
 namespace detail {
 /** @brief Internal bridge from consuming recipes to one stable facade owner. */
 struct SceneAccess {
+  /** @param owner UI-affine managed owner before entering its application session.
+   * @return Checked opt-in to the existing native-owned or host-borrowed executor.
+   */
+  static std::expected<void, ManagedError> requireBackground(ManagedScene &owner) {
+    auto allowed = owner.boundary(ManagedPhase::BIND, owner.root_);
+
+    if (allowed) {
+      owner.asyncEnabled_ = true;
+    }
+
+    return allowed;
+  }
+
+  /** @param owner Existing UI-affine managed owner.
+   * @param activity Weakly retained active-cycle work, bounded by the existing node budget.
+   * @return Checked admission; inactive records are pruned without scanning idle controls.
+   */
+  static std::expected<void, ManagedError> admitActivity(ManagedScene &owner,
+                                                         std::shared_ptr<SceneActivity> activity) {
+    return owner.admitActivity(std::move(activity));
+  }
+
   /** @param owner Returned owning facade, admitted only when cold or prepared but not yet completed.
    * @return Exact retained failure for a retired failed facade, CLOSED for retired/empty, or WOULD_BLOCK if active.
    * Existing eager entry points retain their own repeated-run policy.

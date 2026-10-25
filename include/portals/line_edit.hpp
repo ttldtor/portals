@@ -8,6 +8,14 @@
 #include <source_location>
 
 namespace portals {
+enum class AsyncError;
+enum class BackgroundError;
+
+namespace detail {
+struct LineEditValidationAccess;
+struct LineEditValidationGate;
+} // namespace detail
+
 namespace ui::detail {
 struct RefAccess;
 }
@@ -77,14 +85,16 @@ enum class LineEditStatus {
   LIMIT_EXCEEDED,    ///< Input, cluster, grapheme or cell limit rejected the whole edit.
   VALIDATION_FAILED, ///< The commit validator rejected the complete draft.
   CLIPBOARD_FAILED,  ///< The injected service was absent or rejected the operation.
-  FAILED             ///< A tree, allocation or callback failure; inspect error.
+  FAILED,            ///< A tree, allocation or callback failure; inspect error.
+  PENDING            ///< The accepted draft awaits asynchronous semantic validation; no model write occurred.
 };
 
 /** @brief Entry path that produced an editing or confirmation outcome. */
 enum class LineEditTrigger {
   INPUT,  ///< Routed input or programmatic activation.
   FLUENT, ///< Accepted fluent text mutation.
-  BLUR    ///< Confirmation on synchronous focus loss.
+  BLUR,   ///< Confirmation on synchronous focus loss.
+  ASYNC_VALIDATION ///< Final result of an earlier asynchronous publication intent; no synthetic input event.
 };
 
 /** @brief Exact editing or confirmation result delivered on the UI thread. */
@@ -93,6 +103,11 @@ struct LineEditResult {
   std::optional<PropertyUpdate<std::string>> commit{}; ///< Exact successful set receipt, including notification loss.
   std::optional<TreeError> error{}; ///< Underlying tree, allocation, callback or clipboard service failure.
   LineEditTrigger trigger{LineEditTrigger::INPUT}; ///< Entry path; independent of the confirmation status.
+  std::optional<AsyncError> async{};               ///< Exact asynchronous transport/worker failure, when present.
+  std::optional<BackgroundError> background{};     ///< Exact background admission failure, when present.
+  std::optional<TextError> text{};                 ///< Original candidate/result text error, when present.
+  const char *operation{}; ///< Static library operation label; never borrows user message storage.
+  bool recoverable{}; ///< Report an asynchronous gate's technical failure without stopping the managed application.
 };
 
 /** @brief Accepted user text delta, including history commands; owns the exact existing operation result. */
@@ -113,7 +128,8 @@ enum class EditingFinishedOutcome {
   DEFERRED,            ///< Focus loss retained a dirty draft without attempting publication in this mode.
   VALIDATION_REJECTED, ///< The existing validator rejected the retained draft.
   CONFLICT,            ///< The model revision changed before publication.
-  FAILED               ///< Technical failure; inspect the original result's error.
+  FAILED,              ///< Technical failure; inspect the original result's error.
+  PENDING              ///< This boundary retained an exact asynchronous publication intent.
 };
 
 /** @brief Owning completion observation; does not perform another validation or model update. */
@@ -185,6 +201,16 @@ struct LineEditPlaceholder {
  */
 class LineEdit : public SizedWidget {
 public:
+  /** @brief Notify an optional weak validation gate after widget borrows drain; cancellation never joins. */
+  ~LineEdit() override;
+  /** @brief Preserve owning movement before attachment; attached widgets remain stationary.
+   * @param other Owning editor data transferred into this unattached object.
+   */
+  LineEdit(LineEdit &&other) = default;
+  /** @param other Owning editor data transferred before attachment.
+   * @return This editor after the owning data transfer.
+   */
+  LineEdit &operator=(LineEdit &&other) = default;
   /** @brief Construct an empty editor; binding adopts its initial model snapshot.
    * @param options Owning immutable limits, width policy and styles.
    * @param policy Owning layout size policy validated by layout.
@@ -238,11 +264,13 @@ public:
 
 private:
   friend class LineEditBinding;
+  friend struct detail::LineEditValidationAccess;
   friend class ManagedScene;
   friend struct ui::detail::RefAccess;
   void revealCursor();
   std::int32_t cellAt(std::size_t byte) const;
   LineEditOptions options_;
+  std::weak_ptr<detail::LineEditValidationGate> validationGate_;
   GraphemeText text_;
   std::unique_ptr<GraphemeText> placeholder_;
   std::unique_ptr<GraphemeText> masked_;
@@ -316,6 +344,7 @@ public:
   bool canRedo() const;
 
 private:
+  friend struct detail::LineEditValidationAccess;
   friend struct ui::detail::RefAccess;
   std::expected<std::uint64_t, TreeError> draftRevision() const;
 

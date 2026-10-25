@@ -275,3 +275,45 @@ close perform separate protocol I/O. Include them in lifecycle timing, not
 rendered-frame throughput.
 
 </details>
+
+
+## Background work and shutdown {#application-background}
+
+Include `<portals/background.hpp>` to use the optional bounded worker service.
+`Application::background()` returns the borrowed service for the current session.
+A custom scene requests it by overriding `requiresBackgroundExecutor()`. Ordinary
+scenes start no worker threads. Synchronous `run` creates a pool only for a scene
+that requests one and has no supplied `ApplicationOptions::backgroundExecutor`.
+The defaults are two workers and sixteen pending jobs. Running jobs and prepared
+results waiting for publication occupy worker reservations, outside that pending
+count. These are count bounds; providers must also bound input and result bytes.
+
+Native `Application::run(scene)` prepares the pool before opening its terminal.
+With `run(scene, terminal)`, the caller has already provided the transport.
+Hosted `start`/`step` requires a borrowed executor for an opting-in scene and
+returns `ApplicationFailure::BACKGROUND_FAILED` with
+`ApplicationError::background == BackgroundError::UNAVAILABLE` if none is supplied.
+The host keeps its executor alive through session cleanup and schedules steps
+while work can complete. The application never stops or joins that borrowed pool.
+
+Each existing application cycle dispatches the scheduler and calls the service's
+nonblocking `service()`. Worker readiness wakes the scheduler condition; it does
+not interrupt a native terminal read. `inputSlice` therefore still bounds the
+configured read deadline, subject to the transport's own guarantees. A foreign
+event loop must arrange its next application step.
+
+Shutdown first stops admission and requests cooperative cancellation of owned
+work. It retires UI callbacks and attempts terminal restoration before explicitly
+joining owned workers. This final synchronous join may wait for user work that
+ignores cancellation. Stop callbacks execute synchronously and must be short.
+`BackgroundPool` destruction also joins as a safety net: never put an owning pool
+in a widget, scene callback or coroutine frame. A scene owns cancellation tickets
+for its jobs, not the worker pool. An earlier application failure and a separate
+terminal restoration failure remain available alongside a typed background cause.
+
+`BackgroundLatest` retains at most one unadmitted intent per source and cancels
+the preceding ticket when replaced. Call its `service()` from the source's
+existing UI service stage to retry after a capacity change. No self-post loop or
+additional scheduler is created. Immutable result publication retries retain the
+same prepared value; they do not repeat the worker computation. Input, result
+and callable destruction must be safe on a worker or the owning host thread.

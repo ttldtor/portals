@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include <portals/async.hpp>
 #include <portals/ui_scene.hpp>
 
 #include <algorithm>
@@ -112,6 +113,56 @@ constexpr const char *categoryName(ApplicationFailure value) noexcept {
     return "CALLBACK_FAILED";
   case ApplicationFailure::OBSERVER_FAILED:
     return "OBSERVER_FAILED";
+  case ApplicationFailure::BACKGROUND_FAILED:
+    return "BACKGROUND_FAILED";
+  }
+
+  return "UNKNOWN";
+}
+
+constexpr const char *categoryName(AsyncError value) noexcept {
+  switch (value) {
+  case AsyncError::INVALID_ARGUMENT:
+    return "INVALID_ARGUMENT";
+  case AsyncError::WRONG_THREAD:
+    return "WRONG_THREAD";
+  case AsyncError::CLOSED:
+    return "CLOSED";
+  case AsyncError::CANCELLED:
+    return "CANCELLED";
+  case AsyncError::WOULD_BLOCK:
+    return "WOULD_BLOCK";
+  case AsyncError::NO_MEMORY:
+    return "NO_MEMORY";
+  case AsyncError::CALLBACK_FAILED:
+    return "CALLBACK_FAILED";
+  case AsyncError::IDENTITY_EXHAUSTED:
+    return "IDENTITY_EXHAUSTED";
+  }
+
+  return "UNKNOWN";
+}
+
+constexpr const char *categoryName(BackgroundError value) noexcept {
+  switch (value) {
+  case BackgroundError::INVALID_ARGUMENT:
+    return "INVALID_ARGUMENT";
+  case BackgroundError::UNAVAILABLE:
+    return "UNAVAILABLE";
+  case BackgroundError::CLOSED:
+    return "CLOSED";
+  case BackgroundError::WOULD_BLOCK:
+    return "WOULD_BLOCK";
+  case BackgroundError::NO_MEMORY:
+    return "NO_MEMORY";
+  case BackgroundError::START_FAILED:
+    return "START_FAILED";
+  case BackgroundError::WRONG_THREAD:
+    return "WRONG_THREAD";
+  case BackgroundError::LIMIT_EXCEEDED:
+    return "LIMIT_EXCEEDED";
+  case BackgroundError::CALLBACK_FAILED:
+    return "CALLBACK_FAILED";
   }
 
   return "UNKNOWN";
@@ -409,6 +460,10 @@ void reportApplication(const ApplicationError &cause) noexcept {
       }
     },
     cause.cause);
+  if (cause.background) {
+    std::fprintf(stderr, ", background=BackgroundError(%s)", categoryName(*cause.background));
+  }
+
   std::fputc(')', stderr);
 
   if (cause.restoration) {
@@ -565,6 +620,14 @@ void reportFailure(const ManagedError &failure, std::source_location origin, std
 
   if (failure.resource) {
     std::fprintf(stderr, " resource=%s", categoryName(*failure.resource));
+  }
+
+  if (failure.async) {
+    std::fprintf(stderr, " async=AsyncError(%s)", categoryName(*failure.async));
+  }
+
+  if (failure.background) {
+    std::fprintf(stderr, " background=BackgroundError(%s)", categoryName(*failure.background));
   }
 
   if (failure.password) {

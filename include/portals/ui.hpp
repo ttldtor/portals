@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include <portals/ui_async.hpp>
 #include <portals/ui_controls.hpp>
 #include <portals/ui_dialogs.hpp>
 #include <portals/ui_find_bar.hpp>

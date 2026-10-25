@@ -2,190 +2,69 @@
 
 [Русская версия](ru/ui-coroutines.md)
 
-The optional experimental [`UiAsync`](../include/portals/async.hpp) adapter lets
-a button action suspend while the existing [scheduler](scheduler.md) continues
-servicing input. This program changes **Ready → Waiting → Completed** after a
-one-second timer. **Exit** and F10 work while it waits. Repeated **Start** actions
-are rejected with `WOULD_BLOCK` while the earlier invocation is running.
+A `ui::async` handler can suspend while the existing scheduler continues servicing
+input. This program changes **Ready → Waiting → Completed** after one second.
+**Exit** and F10 remain usable during the wait. Repeated **Start** receives
+`AsyncError::WOULD_BLOCK` and preserves the running invocation.
 
-This fragment assumes `using namespace portals`, a successfully created
-`UiAsync &owner`, `Application &app`, published `ui::Ref<Button> start` and
-`ui::Ref<Label> status`, and `delayMilliseconds = 1000`. Register the handler
-inside `ui::configure`, returning its checked result to the scene. Owner setup
-and cleanup appear in the complete program below.
+[Complete source](examples/guide_async.cpp), linked with `portals::core`:
 
-```cpp
-UiTask finishLater(UiAsyncContext context, SchedulerTime deadline,
-                   ui::Ref<Label> status) {
-  status.text() = "Waiting";
+\include{lineno} guide_async.cpp
 
-  auto waited = co_await context.until(deadline);
+The factory runs inside `runApp`'s setup error boundary. The scene retains the
+handler, cancellation and coroutine owner; the program stores no binding token.
+Capturing `status` by value retains a weak control observation. Removing the
+button or closing its scene cancels its suspended task. The coroutine frame is
+destroyed before the retained lambda closure and arguments.
 
-  status.text() = waited ? "Completed" : "Wait failed";
+## Choose the execution context
 
-  co_return waited;
-}
+Coroutine statements before and after `co_await` run on UI. Waiting itself does
+not move expensive work to a worker. Use `context.background<Result>(input, work)`
+for a computation: `input` is owning immutable data, and `work` is a separate
+worker-safe callable accepting `const Input&` and `std::stop_token`. It returns
+`shared_ptr<const Result>` or `expected<shared_ptr<const Result>, AsyncError>`.
+A result may itself be `expected<Value, DomainError>`; transport failures do not
+replace that domain error.
 
-// Inside the UI configuration callback, after successful
-// owner creation.
-return start.onClick([&owner, &app, status] {
-  auto started = owner.start(finishLater(owner.context(),
-    app.now() + delayMilliseconds,
-    status));
+A fluent async binding opts its scene into the [background service](application.md#application-background),
+including timer-only handlers: the default synchronous runner starts two workers
+with sixteen pending slots. Ordinary synchronous scenes start no workers.
+Hosted sessions require a borrowed executor. Prepared completions wait for the
+existing scheduler; workers never resume frames or mutate controls.
 
-  if (!started && started.error() != AsyncError::WOULD_BLOCK) {
-    status.text() = "Start failed";
-  }
-});
-```
+## Ownership, errors and repeated actions
 
-The fragment focuses on waiting and updating the label. The complete program also
-retains typed failures, checks owner creation and releases the owner at shutdown.
-The borrowed `owner` and `app` must outlive the registered handler; `Ref` observes
-the control and does not extend its lifetime. The shorter fluent `ui::async`
-adapter remains **TBD — M6**.
+Both capturing coroutine lambdas and ordinary coroutine functions are supported.
+`ui::async(function, owningArguments...)` copies its prototype for each admitted
+invocation. Reference captures and pointers remain caller-owned borrows.
+`ui::async(UiTaskRestart::CANCEL_PREVIOUS, function, arguments...)` explicitly
+replaces a suspended invocation. An executing invocation still rejects reentry.
+Cancellation is cooperative and does not roll back previous UI effects.
 
-<details>
-<summary>Complete program</summary>
+Every UI resume enters its own current-scene scope and leaves it before
+suspension or return. `ui::quit()` therefore addresses that handler's scene,
+including after a wait; no scene remains entered between resumes.
 
-[Buildable source](examples/guide_async.cpp), linked with `portals::core`.
+`context.after(duration)` rejects negative delays and deadline overflow;
+`context.until(deadline)` uses absolute scheduler milliseconds. Zero delay and
+already-due timers still wait for scheduler dispatch. `context.receive<T>(start)`
+keeps the checked low-level provider endpoint for custom host integration.
 
-```cpp
-#include <portals/async.hpp>
-#include <portals/ui.hpp>
+Failed starts and task outcomes retain `ManagedError::async` in existing diagnostics.
+A terminal background admission failure is observed once at `ui.async.background`,
+with its exact `ManagedError::background` when the executor supplied one. A task
+that returns that failure also produces its own `ui.async` completion diagnostic,
+without inheriting a background cause. Immediate propagation therefore records two
+boundaries of one failure; it does not mean two independent failures. Handling the
+await result does not erase the admission diagnostic. A later unrelated task error
+never inherits that earlier cause. Temporary `WOULD_BLOCK` admission is retained
+for retry and is not reported as a terminal failure.
 
-#include <memory>
-#include <optional>
-
-namespace {
-struct AsyncAction {
-  std::unique_ptr<portals::UiAsync> owner;
-  std::optional<portals::AsyncError> error;
-};
-
-portals::UiTask finishLater(
-  portals::UiAsyncContext context,
-  portals::SchedulerTime deadline,
-  portals::ui::Ref<portals::Label> status,
-  std::shared_ptr<AsyncAction> action) {
-  status.text() = "Waiting";
-
-  auto waited = co_await context.until(deadline);
-
-  if (!waited) {
-    action->error = waited.error();
-    status.text() = "Wait failed";
-
-    co_return std::unexpected(waited.error());
-  }
-
-  status.text() = "Completed";
-
-  co_return std::expected<void, portals::AsyncError>{};
-}
-} // namespace
-
-int main() {
-  using namespace portals;
-
-  constexpr SchedulerTime delayMilliseconds = 1000;
-  auto action = std::make_shared<AsyncAction>();
-  ui::Ref<Label> status;
-  ui::Ref<Button> start;
-  ui::Ref<Button> exit;
-
-  auto scene = ui::scene(ui::vbox(
-    ui::label(status, "Ready"),
-    ui::button(start, "Start"),
-    ui::button(exit, "Exit")));
-
-  scene.onStop([action] {
-    if (action->owner) {
-      auto closed = action->owner->close();
-
-      if (!closed) {
-        action->error = closed.error();
-      }
-
-      action->owner.reset();
-    }
-  });
-
-  const int result = scene
-    | ui::configure(
-      [action, status](ManagedScene &, Application &app) {
-        auto created = UiAsync::create(app.scheduler(),
-          app.tree(),
-          app.root());
-
-        if (!created) {
-          action->error = created.error();
-          status.text() = "Async setup failed";
-
-          return;
-        }
-
-        action->owner = std::move(*created);
-      })
-    | ui::configure(
-      [action, status, start](ManagedScene &, Application &app) {
-        auto bound = start.onClick([action, status, &app] {
-          if (!action->owner) {
-            return;
-          }
-
-          auto started = action->owner->start(
-            finishLater(action->owner->context(),
-              app.now() + delayMilliseconds,
-              status,
-              action));
-
-          if (!started && started.error() != AsyncError::WOULD_BLOCK) {
-            action->error = started.error();
-            status.text() = "Start failed";
-          }
-        });
-
-        return bound;
-      })
-    | ui::onClick(exit, ui::quit)
-    | ui::onKey("F10", ui::quit)
-    | ui::runApp();
-
-  return result != 0 || action->error ? 1 : 0;
-}
-```
-
-</details>
-
-Build the complete [source](examples/guide_async.cpp) with `portals::core` as in
-[package setup](package.md). `Application::now()` supplies the same monotonic
-millisecond clock as the timer. The wait suspends; it performs no blocking sleep.
-This is coroutine concurrency on the UI thread. It starts no background computation
-or I/O and creates no thread. Long computation in the coroutine still blocks input.
-
-`scene.onStop` closes and destroys the async owner before the scene releases its
-application. Closing while suspended destroys the frame; the body does not resume
-to display **Completed**. The coroutine is a free function with owning parameters;
-its `Ref` observes the label and does not own the widget. Text mutations use the
-ordinary managed reporting and redraw path. The application retains timer/start
-failures in `AsyncAction::error` and returns 1 after cleanup. The coroutine returns the typed wait result: a failed wait sets the adapter's
-outcome to `FAILED`, while a successful return sets it to `SUCCEEDED`.
-
-## Wait for an actual provider result
-
-`co_await context.receive<T>(start)` waits for an immutable provider result.
-The UI invokes `start` with a worker-safe `AsyncReply<T>` endpoint; an application-owned
-worker can publish `shared_ptr<const T>` through `reply.complete(...)` or a typed
-failure through `reply.fail(...)`. The application starts, cancels and joins that
-worker. Retain the exact reply and result and retry if queue admission is rejected;
-acceptance does not mean the coroutine has resumed. Do not dispatch recursively
-inside `start`, or mutate controls from a worker. Detailed admission and lifetime
-contracts follow below.
-
-A fluent `ui::async` adapter for functions/coroutine lambdas is **TBD — M6** in
-[planned features](planned-features.md). Use the explicit owner above with the
-current API. Foreign awaiters and infinite generators are outside this adapter.
+The default runner reports recoverable diagnostics after cleanup. A recoverable action
+failure alone does not change a successful runner exit to 1. Setup and fatal
+runner errors retain their existing nonzero exit policy. Low-level `UiAsync`
+remains available when the caller needs explicit ownership and outcome policy.
 
 <details>
 <summary>Coroutine reference: ownership, admission, errors and cancellation</summary>
@@ -198,18 +77,18 @@ the node's scope; a different scheduler is `INVALID_ARGUMENT`. The tree and
 scheduler must outlive the owner. Removing the context node closes the owner
 and cancels pending work.
 
-Use a free or static coroutine function with owning parameters, as in
-`finishLater` in the complete program above. `UiTask` is lazy: its body starts only after adoption.
+For this low-level API, use a free or static coroutine function with owning parameters.
+The fluent `ui::async` wrapper additionally owns a captured coroutine lambda. `UiTask` is lazy: its body starts only after adoption.
 Before adoption the move-only task owns the frame; after adoption the UI owner
 does. Creation, resume and destruction belong to the creating UI thread.
 Destroying a task or owner on another thread terminates. A task owns its
 function parameters, but does not automatically own a captured coroutine
 lambda's closure. Do not keep borrowed widget or view references across
-suspension. In the complete program, the frame owns copies of `context`,
-`deadline`, `status` and `action`. The `shared_ptr<AsyncAction>` retains application
-action state; `status` is an observing `Ref<Label>`, and `context` observes the
-async owner weakly. Neither extends the tree or scheduler lifetime.
-`scene.onStop` closes and destroys the async owner while those services remain alive.
+suspension. In the complete fluent program, the invocation owns the lambda
+closure containing the observing `status` reference, and its frame owns `context`.
+Neither extends the tree or scheduler lifetime. The fluent binding retires the
+frame before releasing the closure. With the low-level API, the caller must close
+and destroy the async owner while its tree and scheduler remain alive.
 
 `owner.context()` returns a weak context, suitable as a value parameter. It
 does not extend owner lifetime. Only the adapter's exact `AsyncTimer` and

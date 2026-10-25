@@ -721,6 +721,83 @@ void positionDuringAppendStaging() {
   });
 }
 
+void incrementalRowsAndRewrap() {
+  Fixture fixture({.limits = {.maxLines = 4, .maxBytes = 32, .maxBatchBytes = 128, .maxRecordBytes = 32}});
+
+  take(appendLogBatch(fixture.app->tree(), fixture.log, "ab界é\n\nx"));
+  fixture.prepare({5, 6});
+  take(appendLogBatch(fixture.app->tree(), fixture.log, "y"));
+  fixture.read([&](const auto &data) {
+    check(data.width == 3 && data.rows.size() == 5, "unchanged width retains wrapped and empty old records");
+    check(data.rows[0].record == 0 && data.rows[0].byteBegin == 0 && data.rows[0].byteEnd == 2 &&
+            data.rows[1].record == 0 && data.rows[1].byteBegin == 2 && data.rows[1].byteEnd == 8 &&
+            data.rows[2].record == 1 && data.rows[2].byteBegin == 0 && data.rows[2].byteEnd == 0 &&
+            data.rows.back().record == 3,
+          "incremental Unicode rows retain complete wide and combining clusters and internal blank");
+  });
+
+  const auto compareRebuild = [&] {
+    std::vector<detail::LogRow> expected;
+
+    fixture.read([&](const auto &data) {
+      expected = data.rows;
+    });
+    fixture.prepare({6, 6});
+    fixture.prepare({5, 6});
+    fixture.read([&](const auto &data) {
+      check(std::ranges::equal(expected, data.rows,
+                               [](const auto &left, const auto &right) {
+                                 return left.record == right.record && left.byteBegin == right.byteBegin &&
+                                        left.byteEnd == right.byteEnd;
+                               }),
+            "incremental rows equal a width-change full rebuild");
+    });
+  };
+
+  compareRebuild();
+  take(appendLogBatch(fixture.app->tree(), fixture.log, "z"));
+  fixture.read([&](const auto &data) {
+    check(data.rows.size() == 4 && data.rows.front().record == 0 && data.rows.front().byteEnd == 0 &&
+            data.records.front()->text.bytes().empty() && data.records.back()->text.bytes() == "z",
+          "head eviction removes every wrapped row of an old record and rebases survivors");
+  });
+  compareRebuild();
+  take(appendLogBatch(fixture.app->tree(), fixture.log, "one\ntwo\nthree\nfour\nfive\nsix"));
+  fixture.read([&](const auto &data) {
+    check(data.records.front()->text.bytes() == "three" && data.records.back()->text.bytes() == "six" &&
+            data.rows.front().record == 0 && data.rows.back().record == 3,
+          "batch larger than retention wraps only its retained suffix with valid record indices");
+  });
+  compareRebuild();
+  take(appendLogBatch(fixture.app->tree(), fixture.log, std::string(32, 'a')));
+  fixture.read([&](const auto &data) {
+    check(data.records.size() == 1 && data.rows.size() == 11 && data.rows.back().byteEnd == 32,
+          "byte cap can evict all prior records while the appended record keeps complete wrapping");
+  });
+  compareRebuild();
+  fixture.prepare({0, 0});
+  take(appendLogBatch(fixture.app->tree(), fixture.log, "界"));
+  fixture.prepare({3, 6});
+  fixture.read([&](const auto &data) {
+    check(data.width == 1 && data.rows.size() == 1 && data.rows.front().byteEnd == 3,
+          "zero viewport append and reopening rebuild preserve a clipped too-wide cluster");
+  });
+
+  Fixture paused({.limits = {.maxLines = 4}});
+
+  take(appendLogBatch(paused.app->tree(), paused.log, "old\nab界é\ntail\nlast"));
+  paused.prepare({5, 4});
+  take(paused.scene->setScrollOffset(paused.log, ScrollAxis::VERTICAL, {2, 0.25}));
+  paused.prepare({5, 4});
+  take(appendLogBatch(paused.app->tree(), paused.log, "new"));
+  paused.prepare({5, 4});
+  paused.read([&](const auto &data) {
+    check(!data.status.followTail && data.anchor.record == 2 && data.anchor.byte == 2 && data.anchor.fraction == 0.25 &&
+            data.status.newWhilePaused == 1 && take(paused.controller->snapshot()).vertical.offset.raster == 1,
+          "eviction before a surviving Unicode anchor preserves its source byte and fractional position");
+  });
+}
+
 void publicationFaultBudget() {
   constexpr std::string_view BATCH = "second\nthird\nfourth";
   Fixture measured;
@@ -802,6 +879,7 @@ int main() {
   nativeStyleAndFrame();
   facadeAndLoadedDefaults();
   positionDuringAppendStaging();
+  incrementalRowsAndRewrap();
   publicationFaultBudget();
 
   std::cout << "checks=" << checks << " failures=" << failures << '\n';

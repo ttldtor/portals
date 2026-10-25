@@ -25,7 +25,7 @@ identify a released version.
 | Import external theme formats into PSS | **TBD**; separate slice and schedule not assigned |
 | Code-provided `$name`, checked assignment and localized `this.text` sizing | **TBD — M5** |
 | `onLayout` and checked arranged-geometry reads through Ref | Available — M1; [layout observation](layout.md) |
-| `ui::async` for functions and coroutine lambdas with `co_await` | **TBD — M6** |
+| `ui::async` for functions and coroutine lambdas with `co_await` | [Implemented; ownership and examples](ui-coroutines.md) |
 | Game viewport/camera and bounded surface snapshot publication | **TBD — M6** |
 | Screen-space HUD, free placement and manual/auto switching | **TBD**; overlay foundation M2, surface M6; separate slice not assigned |
 | UI state persistence across application runs | **TBD — M6** |

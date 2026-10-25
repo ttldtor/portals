@@ -16,7 +16,8 @@
 namespace portals {
 namespace ui::detail {
 struct MessageAccess;
-}
+struct AsyncAccess;
+} // namespace ui::detail
 class AsyncTimer;
 template <class T> class AsyncReceive;
 
@@ -55,6 +56,16 @@ struct UiTaskOutcome {
 namespace detail {
 struct AsyncControl;
 struct AsyncWait;
+
+/// @cond INTERNAL
+// An optional UI-only fluent owner. Retirement releases this only after frame.destroy().
+struct AsyncHooks {
+  std::shared_ptr<void> owner;
+  bool (*resume)(void *, std::coroutine_handle<>) noexcept {};
+  void (*cancel)(void *) noexcept {};
+  void (*complete)(void *, const UiTaskOutcome &) noexcept {};
+};
+/// @endcond
 
 /// @cond INTERNAL
 struct AsyncInvocation {
@@ -122,8 +133,9 @@ template <class T> struct AsyncCompletion {
 } // namespace detail
 
 /** @brief Lazy move-only coroutine frame, created and released on its creating UI thread.
- * The task owns its function parameters, never a captured coroutine lambda's closure. Use a
- * free/static coroutine function with owning parameters. Allocation in the calling expression
+ * The task owns its function parameters, never a captured coroutine lambda's closure. Direct
+ * low-level use requires a free/static coroutine function with owning parameters; ui::async
+ * separately retains its callable until the entire frame is destroyed. Allocation in the calling expression
  * can throw before start(); no work runs until successful adoption. Only this adapter's awaiters
  * are supported. A suspended task must not retain widget/view borrows.
  */
@@ -429,16 +441,21 @@ public:
 
 private:
   friend class UiAsyncContext;
+  friend struct ui::detail::AsyncAccess;
   struct Wait;
 
   AsyncTimer(std::weak_ptr<detail::AsyncControl> control, SchedulerTime deadline)
       : control_(std::move(control)), deadline_(deadline) {
   }
 
+  explicit AsyncTimer(AsyncError error) : fallback_(error), rejected_(true) {
+  }
+
   std::weak_ptr<detail::AsyncControl> control_;
   std::shared_ptr<Wait> wait_;
   SchedulerTime deadline_{};
   AsyncError fallback_{AsyncError::CLOSED};
+  bool rejected_{};
 };
 
 /** @brief Weak context copied into owning coroutine parameters; never extends the UI owner's life. */
@@ -517,6 +534,10 @@ public:
   std::expected<UiTaskOutcome, AsyncError> outcome() const;
 
 private:
+  friend struct ui::detail::AsyncAccess;
+
+  std::expected<void, AsyncError> startOwned(UiTask &&task, UiTaskRestart restart, detail::AsyncHooks hooks);
+
   explicit UiAsync(std::shared_ptr<detail::AsyncControl> state) : state_(std::move(state)) {
   }
 

@@ -2,14 +2,19 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include <portals/background.hpp>
 #include <portals/theme_selection.hpp>
 
 #include <thread>
 
 namespace portals::detail {
 struct ThemeSelectorRecord;
+struct ThemePreparation;
+struct PreparedThemeIntent;
+struct PreparedThemeResult;
 enum class ThemeSelectionCommand {
   PREVIEW,
+  PREPARED_PREVIEW,
   COMMIT,
   CANCEL
 };
@@ -17,6 +22,7 @@ enum class ThemeSelectionCommand {
 struct ThemeSelectionChoice {
   std::shared_ptr<const ui::ThemeChoiceData> data;
   std::function<std::expected<StyleSheet, StyleError>()> factory;
+  std::shared_ptr<const std::function<std::expected<StyleSheet, StyleError>(std::stop_token)>> preparedFactory;
 };
 
 struct ThemeSelectionRecord {
@@ -26,6 +32,12 @@ struct ThemeSelectionRecord {
 
   std::optional<StyleLayerOptions> layers;
   StyleLayerHandle preview;
+  std::shared_ptr<ThemePreparation> preparation;
+  std::shared_ptr<const PreparedThemeIntent> intent;
+  std::shared_ptr<const PreparedThemeResult> prepared;
+  std::shared_ptr<ui::ThemeSelectionSnapshot> completionSnapshot;
+  std::shared_ptr<const ui::ThemeSelectionSnapshot> priorSnapshot;
+  bool commitWhenPrepared{};
   bool busy{};
 
   // Every caller checks this before owning staging and again before the model guard is acquired.

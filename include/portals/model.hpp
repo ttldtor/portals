@@ -88,6 +88,8 @@ struct RowLookup {
  * Implement read as bounded in-memory access, without I/O, waiting or domain mutation.
  * Every ready range of one data revision must agree, including overlapping ranges from
  * different snapshot objects. Shared ownership does not make mutable aliases safe.
+ * Opting this source into a background model adapter requires worker-safe read access,
+ * including concurrent reads of the same immutable storage; no UI frame or thread-affine cache may be used.
  * Snapshots and transitively owned T values must support destruction on the last owner's
  * thread; UI reentry from a destructor requires a still-live UI context.
  * @tparam T Domain row value type; snapshot-owned reachable data must remain immutable and support destruction
@@ -425,6 +427,15 @@ public:
    */
   std::uint64_t dataRevision() const noexcept {
     return data_->snapshot->revision();
+  }
+
+  /** @brief Retain the immutable base source without reading rows or transferring this UI frame.
+   * @return Shared base snapshot owner; range-readiness overlays are not included.
+   * A worker may use ModelRange<T>::read with its own finite bounds. The provider snapshot,
+   * its reachable storage and final-owner destruction must satisfy ModelSnapshot<T>'s contract.
+   */
+  std::shared_ptr<const ModelSnapshot<T>> snapshot() const noexcept {
+    return data_->snapshot;
   }
 
   /** @brief Logical rows.

@@ -23,6 +23,7 @@
 namespace portals {
 
 class ManagedScene;
+enum class AsyncError;
 
 namespace detail {
 /** @brief Default-empty internal evidence that a short error entered one live collector.
@@ -84,6 +85,8 @@ struct ManagedError {
   std::shared_ptr<const SceneResourceError> sceneResource{};
   /// @brief Allocation-free protected editor cause, including independent security and cleanup failures.
   std::optional<PasswordFailure> password{};
+  std::optional<AsyncError> async{}; ///< Exact coroutine/admission failure, independent of its tree bridge.
+  std::optional<BackgroundError> background{}; ///< Exact executor admission cause when an async request fails.
 };
 
 namespace detail {

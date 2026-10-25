@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include "form_field_async.hpp"
 #include <portals/ui_form_field.hpp>
 
 namespace portals {
@@ -18,6 +19,7 @@ struct FormFieldRecord {
   std::string requiredMessage;
   bool active{true};
   bool validating{};
+  bool asynchronous{};
 };
 } // namespace detail
 
@@ -43,6 +45,15 @@ FieldValidation FieldValidation::pending(std::string message) {
   FieldValidation value;
 
   value.status = FieldStatus::PENDING;
+  value.message.swap(message);
+
+  return value;
+}
+
+FieldValidation FieldValidation::error(std::string message) {
+  FieldValidation value;
+
+  value.status = FieldStatus::TECHNICAL_ERROR;
   value.message.swap(message);
 
   return value;
@@ -75,6 +86,8 @@ std::expected<std::string, TreeError> presentationText(const FieldValidation &va
     return value.message.empty() ? std::string("Error: Invalid value") : "Error: " + value.message;
   case FieldStatus::PENDING:
     return value.message.empty() ? std::string("Checking...") : "Checking: " + value.message;
+  case FieldStatus::TECHNICAL_ERROR:
+    return value.message.empty() ? std::string("Validation unavailable") : "Validation unavailable: " + value.message;
   }
 
   return std::unexpected(TreeError::INVALID_ARGUMENT);
@@ -92,6 +105,10 @@ std::expected<void, TreeError> setFormFieldValidation(WidgetTree &tree, Node<For
   }
 
   try {
+    if (record->presentation->status == value.status && record->presentation->message == value.message) {
+      return {};
+    }
+
     auto bytes = presentationText(value);
 
     if (!bytes) {
@@ -204,6 +221,10 @@ std::expected<bool, ManagedError> detail::Access::validateField(ManagedScene &sc
   }
 
   auto record = *found;
+
+  if (record->asynchronous) {
+    return std::unexpected(fieldError(node, TreeError::INVALID_ARGUMENT));
+  }
 
   auto admitted = scene.app_.tree().edit(record->field, [](FormField &) {
   });
@@ -468,6 +489,8 @@ Description<FormField> detail::Access::formField(std::string caption, Descriptio
 }
 
 Description<FormField> detail::Access::formField(std::string caption, std::string initial, FormFieldConfig config) {
+  auto async = std::move(config.validateAsync);
+  const auto limits = config.validationLimits;
   auto bridge = std::make_shared<std::weak_ptr<portals::detail::FormFieldRecord>>();
   auto rule = std::make_shared<std::function<FieldValidation(std::string_view)>>(
     [validate = std::move(config.validate),
@@ -547,7 +570,8 @@ Description<FormField> detail::Access::formField(std::string caption, std::strin
   auto recipe = formFieldComposition(std::move(caption), std::move(factory), std::move(options), {}, bridge);
 
   // Parent setup runs after the composition has mounted its real children, before Ref publication.
-  return std::move(recipe).setup([bridge, rule = std::move(rule)](ManagedScene &scene, Node<FormField> field) mutable {
+  return std::move(recipe).setup([bridge, rule = std::move(rule), async = std::move(async),
+                                  limits](ManagedScene &scene, Node<FormField> field) mutable {
     auto record = fieldRecord(scene, field);
 
     if (!record) {
@@ -556,6 +580,33 @@ Description<FormField> detail::Access::formField(std::string caption, std::strin
 
     (*record)->rule = std::move(rule);
     *bridge = *record;
+
+    if (async) {
+      auto entry = scene.find((*record)->editor);
+
+      if (!entry) {
+        return std::expected<void, ManagedError>(std::unexpected(fieldError(field, TreeError::STALE_NODE)));
+      }
+
+      auto *binding = std::get_if<LineEditBinding>(&entry->binding);
+
+      if (!binding) {
+        return std::expected<void, ManagedError>(std::unexpected(fieldError(field, TreeError::INVALID_ARGUMENT)));
+      }
+
+      auto attached = attachAsyncField(scene, field, (*record)->editor, *binding, std::move(async), limits,
+                                       [weak = std::weak_ptr(*record)](std::shared_ptr<const FieldValidation> value) {
+                                         if (auto current = weak.lock(); current && current->active) {
+                                           current->pending = std::move(value);
+                                         }
+                                       });
+
+      if (!attached) {
+        return attached;
+      }
+
+      (*record)->asynchronous = true;
+    }
 
     return std::expected<void, ManagedError>{};
   });

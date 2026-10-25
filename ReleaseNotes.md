@@ -7,17 +7,37 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Added a configurable bundle-script test timeout for slow development filesystems, preserving its existing default and all checks.
+
+- Added indexed live suggestions by composing text sources with ordinary virtual lists. Immutable worker-built indexes provide bounded Unicode prefix/fuzzy top-K results, stable row selections and grapheme-safe bold/underlined highlights that remain distinct on selected rows; worker-owned index storage keeps large cache retirement off the UI path.
+
+- FormField supports opt-in worker validation with pending/error presentation, exact draft/model fencing and the existing editing modes and Undo/Redo. Candidate and result-message budgets are configurable; ordinary synchronous validators keep their existing error policy.
+
+- Added worker-prepared theme choices with retained latest preview requests, source/authority fencing and recoverable preparation errors. Existing synchronous choices remain available for small bounded factories.
+
+- FindBar can search immutable scene models, snapshots and owning collections in the background, preserving exact source/query identities and grapheme-aligned owning match handles. Literal document search keeps its existing bounded synchronous path.
+
+- Added fluent asynchronous button/key handlers with owning coroutine closures, relative timer waits and immutable background transformations. Scoped scene context is restored on every UI resume; recoverable start failures preserve an existing invocation.
+
+- Added an optional bounded background executor with immutable typed result delivery, cooperative per-job cancellation, retained latest-intent admission, and an explicit terminal-restoration-before-join shutdown boundary. Hosted sessions borrow their executor.
+
+- Added node-scoped UI delivery endpoints with separate queue admission and execution receipts, plus semantic button activation through typed refs. Worker endpoints retain no UI callback or scene ownership.
+
 - Gauge refs accept checked finite value replacements and relative adjustments, with a reference-first recipe and a complete manual progress-workbench example. Fractional ranges, out-of-range rejection and loaded-scene compatibility are preserved.
 
 - Added a complete search-journal example combining an operator field, two Unicode troubleshooting notes, selected-match summaries and a bounded event log.
 
 - Added retained `FindBar` with bounded literal Unicode search, match navigation, context previews and document replacement. C++ recipes and loaded scenes share the query editor's editing modes, Undo/Redo and typed error reporting; match handles retain their source text and detect stale result sets.
-- Added complete document-search examples with keyboard navigation and source switching. Search is case-sensitive, preserves grapheme boundaries and reports truncated match counts; regular expressions, replacement and asynchronous sources are not included.
+- Added complete document-search examples with keyboard navigation and source switching. Search is case-sensitive, preserves grapheme boundaries and reports truncated match counts; regular expressions and replacement are not included.
 
 - Added retained `FormField` composition with labels, help text, required-field checks and synchronous validation messages. Typed refs expose text, validation and focus; custom editors and loaded scene fields use the same composition.
-- Added complete account-settings and scene-resource examples for form fields, including editing-policy boundaries, invalid drafts and first-invalid-field focus. Pending validation is an explicit presentation state; asynchronous validation is not included.
+- Added complete account-settings and scene-resource examples for form fields, including editing-policy boundaries, invalid drafts and first-invalid-field focus. Manually displayed pending validation remains a presentation-only state; the explicit worker-validator option starts asynchronous checks.
 - Added a bounded retained `LogView` with Unicode wrapping, drop-oldest limits, manual reading anchors, follow-tail recovery and a visible status footer. Declarative refs and loaded scenes use the same append, clear and return-to-tail commands.
 - Added complete native and loaded-scene log examples. Prepared numeric row indexes retain only visible owning text; selection, filtering, file tailing and asynchronous ingestion remain follow-up work.
+
+### Changed
+
+- LogView reuses wrapped rows when appending at the same width; retained row descriptors are still copied, while resizing rebuilds wrapping.
 
 ## v0.6.0 (2026-10-24)
 

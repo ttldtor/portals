@@ -6,7 +6,21 @@
 #include <portals/ui_controls.hpp>
 #include <portals/ui_layout.hpp>
 
+#include <stop_token>
+
 namespace portals::ui {
+
+/** @brief Byte budgets for an asynchronous field request and its final message; no silent truncation. */
+struct FieldValidationLimits {
+  std::size_t maxCandidateBytes{16 * 1024}; ///< Positive UTF-8 request byte limit; editor limits remain independent.
+  std::size_t maxMessageBytes{4 * 1024};    ///< Positive complete result-message byte limit.
+};
+
+/** @brief Owning worker-safe rule. Captures and their deleters must be thread-safe and transitively immutable.
+ * The candidate view expires on return; only VALID/INVALID are successful final results. Do not capture UI refs,
+ * mutable models, scene owners or coroutine storage. Cooperative stop callbacks must be short and nonthrowing.
+ */
+using AsyncFieldValidator = std::function<std::expected<FieldValidation, TreeError>(std::string_view, std::stop_token)>;
 
 /** @brief Standard text editor configuration; validation observes the normal publication boundaries. */
 struct FormFieldConfig {
@@ -19,7 +33,9 @@ struct FormFieldConfig {
     validate; ///< Synchronous owning rule; borrowed candidate expires on return.
   std::string requiredMessage{"A value is required"}; ///< Explanation of an empty required candidate.
   LineEditConfig editor{}; ///< Optional ordinary editor configuration, including EditMode/history/display policy.
-  FormFieldAppearance appearance{}; ///< Manual composition style/layout defaults; contains no validation policy.
+  FormFieldAppearance appearance{};    ///< Manual composition style/layout defaults; contains no validation policy.
+  AsyncFieldValidator validateAsync{}; ///< Optional worker rule after synchronous checks; never called during paint.
+  FieldValidationLimits validationLimits{}; ///< Independent positive worker request/result byte bounds.
 };
 
 namespace detail {
@@ -49,7 +65,9 @@ std::expected<void, ManagedError> displayField(const std::shared_ptr<RefTarget> 
  * @param initial Initial UTF-8 draft copied now, validated by the ordinary editor mount.
  * @param config Owning rules/options. Required rejects empty text before custom rules; then the editor's optional
  * bool validator runs. Rules may throw/remove the field; existing editor callback/error/lifetime policy applies.
- * Validation starts on the first normal editor publication or explicit Ref.validate(), never during construction,
+ * Synchronous validation starts on normal editor publication or explicit Ref.validate(). For validateAsync,
+ * only publication starts work; the synchronous Ref.validate() command rejects that configuration.
+ * Rules never run during construction,
  * measure, paint or theme resolution. Deferred-mode dirty drafts keep the last validation message until checked.
  * @return Owning field recipe; the complete subtree rolls back on a mount failure.
  */

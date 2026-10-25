@@ -190,6 +190,51 @@ struct SurfaceSink : PaintContext {
   }
 };
 
+void selectedMatchEmphasis() {
+  VirtualListOptions options;
+  const RowId id{1, 1};
+  auto prepared = std::make_shared<detail::PreparedListText>(take(GraphemeText::from("\xe7\x95\x8c" "x")));
+
+  prepared->runs.push_back({take(GraphemeText::from("\xe7\x95\x8c")), 0, true});
+  prepared->runs.push_back({take(GraphemeText::from("x")), 2, false});
+
+  const std::array rows{detail::ListRow{id, {}, prepared}};
+  const auto bounds = take(CellRect::from({}, {3, 1}));
+  const auto draw = [&](VirtualListOptions appearance, std::optional<RowId> selected) {
+    std::vector<RenderCommand> commands;
+    SurfaceSink sink(NodeGeometry{.surface = bounds, .clip = bounds}, commands);
+
+    take(detail::paintList(sink, {3, 1}, appearance, rows, selected));
+
+    return take(renderFullFrame({3, 1}, commands));
+  };
+  auto frame = draw(options, id);
+  const auto lead = take(frame.at({0, 0}));
+  const auto continuation = take(frame.at({1, 0}));
+  const auto suffix = take(frame.at({2, 0}));
+
+  check(lead.cell.kind == CellKind::LEAD && lead.cell.columns == 2 &&
+          continuation.cell.kind == CellKind::CONTINUATION,
+        "selected match retains the whole wide grapheme");
+  check(lead.glyph == continuation.glyph && lead.style == continuation.style,
+        "selected wide match paints both cells with the same glyph and style");
+  check(lead.style.bold && lead.style.italic && lead.style.underline,
+        "default match emphasis adds underline to the selected row style");
+  check(suffix.style == options.selected && !suffix.style.underline && lead.style != suffix.style,
+        "default selected match remains distinct from its unhighlighted suffix");
+
+  options.highlight = {};
+
+  for (const auto selected : {std::optional<RowId>{id}, std::optional<RowId>{}}) {
+    auto plain = draw(options, selected);
+    const auto expected = selected ? options.selected : options.normal;
+
+    check(take(plain.at({0, 0})).style == expected && take(plain.at({1, 0})).style == expected &&
+            take(plain.at({2, 0})).style == expected,
+          "an explicit empty highlight opts out for selected and unselected rows");
+  }
+}
+
 struct Screen {
   test_support::FakeClock clock;
   test_support::TestTerminal terminal{clock, {8, 3}};
@@ -752,6 +797,7 @@ void singleBudgetRetryAndAffinity() {
 } // namespace
 
 int main() {
+  selectedMatchEmphasis();
   prefetchedCompletionNavigation();
   singleBudgetRetryAndAffinity();
   allocationTransactionAndIdle();

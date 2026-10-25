@@ -3,9 +3,10 @@
 [Русская версия](ru/find-bar.md) · [LineEdit](line-edit.md) · [Control examples](control-examples.md)
 
 `FindBar` combines a one-line query editor, Previous/Next/Clear buttons and a
-summary of the accepted query's results. It owns one bounded UTF-8 document and
-searches it synchronously. The ordinary program below demonstrates the full
-client API; a second program loads the same built-in control from scene text.
+summary of the accepted query's results. The document overload owns one bounded
+UTF-8 document and searches it synchronously. The [model-backed overload](#find-bar-model)
+searches an immutable model snapshot on a worker. The first program below uses
+the document overload; a second loads that control from scene text.
 
 ## Ordinary C++ program
 
@@ -75,9 +76,9 @@ Source bytes are admitted before `FindBar` copies them. A scene resource parser
 or external text resolver may already have allocated its input before the
 control can apply its own limits. Invalid UTF-8, an input-limit violation and
 invalid configuration are reported as errors; empty and no-match results are
-not errors. Search is synchronous and bounded by these limits. The control does
-not provide asynchronous search, providers, regex, replacement, file loading or
-large-file indexing.
+not errors. The document-backed form is synchronous and bounded by these limits.
+For worker search over a model, use the overload below. Neither path provides
+regex, replacement, automatic file loading or large-file indexing.
 
 ## Accepted queries and editing modes
 
@@ -145,5 +146,47 @@ callback exception is surfaced as `CALLBACK_FAILED` but does not undo the
 published search state. A presentation failure after publication likewise keeps
 the accepted query and results; its original typed error is retained and the
 selected callback is not invoked. Failures before publication keep the last-good
-accepted results. Asynchronous search, provider callbacks, replacement editing
-and persistent storage are outside this control's contract.
+accepted results. Replacement editing and persistent storage remain outside this control's contract.
+The following model-backed path has its own asynchronous preparation and failures.
+
+## Search an immutable model in the background {#find-bar-model}
+
+Include `<portals/ui_model_find.hpp>` for the additive model-backed overload.
+Pass the scene's `ManagedModel<T>`, a shared immutable `ModelSnapshot<T>`, or an
+owning checked `RowCollection<T>`, followed by a worker-only projection returning
+`string_view` borrowed from `const T&`. The ordinary collection adapter creates its
+model during checked mount; callers do not need to store jobs or binding tokens.
+
+[Complete native source](examples/guide_model_find.cpp):
+
+\include{lineno} guide_model_find.cpp
+
+Search runs on the existing background executor, with no synchronous UI fallback.
+The projection, provider reads and reachable captures must be transitively safe for
+worker access and deletion. Do not capture a UI ref, scene, mutable model or
+`ModelFrame`. An immutable source pin owns rows for the worker; the same shared
+prepare pin is used by the scene's views. A matching completion is installed only
+after current pins are known, so a source change in the same dispatch cannot admit
+an old result. Query changes revoke the old identity even when the queue is full;
+the newest intent retries without another key. Deferred editing modes retain their
+ordinary confirmation boundary.
+
+Defaults in `FindBarConfig::search` are 100,000 source rows, 32 MiB of projected
+UTF-8, 1 MiB per row, 16 KiB per query and 4,096 retained matches. The editor's own
+query limits also apply. Limits are configurable, distinct from the document-only
+`FindLimits`. Literal matching stays case-sensitive and grapheme-aligned, without
+normalization or fuzzy matching. Several matches may belong to one model row;
+`FindMatch::rowId()`, `sourceRevision()` and `queryGeneration()` identify their
+source and request. Retained match handles own their text, not a control.
+
+An empty query starts no worker job. While a query is pending the bar says
+**Searching...**. `searchFailed` receives the current `FindSearchError`; stale
+successes and errors cannot replace a newer result. Backend/transport failures use
+the existing typed managed diagnostics. `document()` is invalid for this overload:
+publish a new immutable model snapshot instead. Loaded scene FindBar remains the
+bounded document form; arbitrary model projection is supplied in C++.
+
+Preparation does not promise constant-time UI reclamation: releasing the last
+source/result owner can destroy its domain payload on UI. The byte caps cover
+projected/result data, not arbitrary transitive storage inside `T`. Use immutable
+provider ownership with a suitable release policy for large domain payloads.
