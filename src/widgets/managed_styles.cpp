@@ -333,7 +333,12 @@ ManagedScene::pendingStyles(std::optional<std::vector<StyleRegistration>> &desti
     }
     destination.emplace(0);
     auto &registrations = *destination;
-    registrations.reserve(entries_.size());
+    if (entries_.size() >= registrations.max_size()) {
+      return std::unexpected(error(ManagedPhase::STYLE, root_, TreeError::NODE_LIMIT));
+    }
+    registrations.reserve(entries_.size() + 1);
+    // Infrastructure participates in the same atomic cascade without consuming a user entry.
+    registrations.push_back({root_, StyleTarget{.type = "Scene"}});
     for (const auto &entry : entries_) {
       auto live = app_.tree().read(entry->node, [](const Widget &) {
       });

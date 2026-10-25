@@ -19,6 +19,7 @@ The categories describe the learning path; the source directories remain stable.
 
 | Category | Program and guide | What it demonstrates |
 | --- | --- | --- |
+| Showcase | [Shipping desk](choices.md), `portals_choices_example` | Editable city choice, full-source popup browsing, delivery selection and dark/light palette changes. No CLI. |
 | Showcase | [Unicode panels](../examples/unicode_panels/main.cpp), `portals_unicode_panels` | Two synthetic file tables with Cyrillic, CJK, emoji and combining text, framed panels and an anchored popup. No filesystem access. See [Unicode qualification](#unicode-panels). |
 | Showcase | [Progress workbench](../examples/progress_workbench/main.cpp), `portals_progress_workbench` | Name a work item, adjust fractional progress, reset or complete it, and record accepted actions in a bounded log. [Gauge command contracts](compact-primitives.md#gauge-ref-commands) explain range errors; F10 exits. |
 | Showcase | [Search journal](../examples/search_journal/main.cpp), `portals_search_journal_example` | Edit the operator name, search two Unicode troubleshooting notes and record selected matches in a bounded log. F3/Shift+F3 navigate; buttons switch notes, clear the journal or return to its tail. |
@@ -220,6 +221,7 @@ provider page availability.
 
 | Loading option | Default | Meaning |
 | --- | --- | --- |
+| Showcase | [Shipping desk](choices.md), `portals_choices_example` | Editable city choice, full-source popup browsing, delivery selection and dark/light palette changes. No CLI. |
 | `--page-rows N` | 256 | Logical rows per fixed page. |
 | `--cache-pages N` | 8 | Maximum availability records, including the initial page and queued work. |
 | `--cache-bytes N` | 262144 | Charged row payload budget for one generated snapshot, in bytes. |

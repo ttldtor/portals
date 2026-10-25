@@ -7,6 +7,8 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Added model-backed `ComboBox` and `DropDown` with compact declarative factories, accepted-selection callbacks and worker-prepared popup rows. Editable drafts preserve ordinary LineEdit modes and Undo; source identities fence stale selections, and dismissed popups release their transient resources.
+
 - Added a configurable bundle-script test timeout for slow development filesystems, preserving its existing default and all checks.
 
 - Added indexed live suggestions by composing text sources with ordinary virtual lists. Immutable worker-built indexes provide bounded Unicode prefix/fuzzy top-K results, stable row selections and grapheme-safe bold/underlined highlights that remain distinct on selected rows; worker-owned index storage keeps large cache retirement off the UI path.
@@ -36,6 +38,8 @@ planned work is not included. An **Unreleased** heading has no publication date.
 - Added complete native and loaded-scene log examples. Prepared numeric row indexes retain only visible owning text; selection, filtering, file tailing and asynchronous ingestion remain follow-up work.
 
 ### Changed
+
+- Managed scenes apply their resolved background across the terminal viewport, including layout gaps and unused space. Theme changes update the surface automatically; application `Scene` style overrides remain effective.
 
 - Documented complete UI client compilation measurements, separating compile/link and handler-edit observations from include-graph size and runtime benchmarks.
 

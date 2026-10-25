@@ -315,6 +315,10 @@ struct RecipeLayout {
   bool validated{};       ///< This cold graph has completed its parent-aware preflight.
   bool validRecipe{true}; ///< An empty consuming child fails before any mount effects.
   bool hasDeclaredGrid{}; ///< Cold composition contains an explicitly configured standard Grid.
+  bool needsChoiceHost{}; ///< A choice popup needs the existing scene-level overlay owner.
+  bool hasOverlayHost{};  ///< A declared overlay owner already exists in this cold graph.
+  std::function<std::expected<std::pair<bool, bool>, ManagedError>(ControlContext)>
+    choiceProbe; ///< Owning cold metadata probe; never mounts nodes or invokes application factories.
   std::optional<DeclarativeGridOptions> grid; ///< Present only after declarative opt-in.
   std::unique_ptr<GridPlacementPlan> plan;    ///< Origins established before any constructor or setup.
   std::vector<std::shared_ptr<RecipeLayout>> children =

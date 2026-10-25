@@ -621,6 +621,13 @@ void boundedOptionsAndRejectedForeignCalls() {
 
   auto scene = take(ManagedScene::create(*app, ManagedOptions{1, 1}));
   const auto first = take(scene->emplace<Label>(scene->root(), text("first")));
+  take(scene->style(first, StyleTarget{.type = "Label", .control = true}));
+  take(scene->theme(nordTheme()));
+  take(scene->prepare(*app, VIEWPORT));
+  take(app->tree().read(scene->root(), [](const Widget &root) {
+    check(root.computedStyle() && root.computedStyle()->normal.background.has_value(),
+          "scene backdrop shares style publication without consuming the one user entry budget");
+  }));
   const auto model = take(scene->state(false));
   const auto excessNode = scene->emplace<Widget>(scene->root());
   const auto excessState = scene->state(2);
@@ -654,6 +661,21 @@ void boundedOptionsAndRejectedForeignCalls() {
 
   check(result.frames == 1 && terminal.closed, "rejected foreign calls do not latch failure or stop valid UI run");
 }
+
+void genericWidgetRemainsTransparent() {
+  struct Sink final : PaintContext {
+    std::size_t commands{};
+
+    std::expected<void, TreeError> submit(std::span<const RenderCommand> values) override {
+      commands += values.size();
+      return {};
+    }
+  } sink;
+
+  Widget generic;
+  take(generic.paint(sink));
+  check(sink.commands == 0, "the managed scene backdrop does not change generic Widget transparency");
+}
 } // namespace
 
 int main() {
@@ -671,6 +693,7 @@ int main() {
     sceneInterceptorStateAndReplacement();
     sceneInterceptorPreventsActivation();
     boundedOptionsAndRejectedForeignCalls();
+    genericWidgetRemainsTransparent();
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
 

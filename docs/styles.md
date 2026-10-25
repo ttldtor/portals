@@ -16,6 +16,13 @@ bold without underline; disabled controls request italic without a fixed gray.
 This fallback does not install a theme or guess the terminal palette. Explicit
 manual colors and underline remain available through the existing style options.
 
+A managed scene paints its resolved normal style behind its controls across the
+terminal viewport. Theme backgrounds therefore cover layout gaps and unused
+space automatically. Use a `Scene` selector to override the scene surface through
+the ordinary stylesheet layers. Without theme or style declarations, the surface
+keeps terminal-default colors. Ordinary widgets and layouts remain transparent
+unless their own painting fills an area.
+
 Built-in themes derive presentation from their `ThemeTokens`:
 
 | Role | Controls | Theme mapping |

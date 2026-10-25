@@ -37,6 +37,7 @@
       <tab type="usergroup" title="Controls and layout">
         <tab type="user" title="Basic controls" url="@ref docs/controls.md" />
         <tab type="user" title="LineEdit" url="@ref docs/line-edit.md" />
+        <tab type="user" title="ComboBox and DropDown" url="@ref docs/choices.md" />
         <tab type="user" title="Text history" url="@ref docs/text-history.md" />
         <tab type="user" title="Editor Undo and Redo" url="@ref docs/editor-history.md" />
         <tab type="user" title="Row and Column" url="@ref docs/layout.md" />
@@ -163,6 +164,7 @@
     <tab type="usergroup" title="Контролы и данные">
       <tab type="user" title="Основные контролы" url="@ref docs/ru/controls.md" />
       <tab type="user" title="LineEdit" url="@ref docs/ru/line-edit.md" />
+      <tab type="user" title="ComboBox и DropDown" url="@ref docs/ru/choices.md" />
       <tab type="user" title="История текста" url="@ref docs/ru/text-history.md" />
       <tab type="user" title="Undo и Redo" url="@ref docs/ru/editor-history.md" />
       <tab type="user" title="Компоновка" url="@ref docs/ru/layout.md" />

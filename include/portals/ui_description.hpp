@@ -2185,7 +2185,7 @@ private:
 
     Node<LineEdit> fieldDraft;
 
-    if constexpr (std::same_as<T, FormField> || std::same_as<T, FindBar>) {
+    if constexpr (std::same_as<T, FormField> || std::same_as<T, FindBar> || std::derived_from<T, ComboBox>) {
       auto editor = detail::NamedAccess::fieldDraft(scene, *node);
 
       if (!editor) {
@@ -2222,7 +2222,8 @@ private:
             slot->target.caption = value;
           } else if constexpr (std::same_as<T, LineEdit>) {
             slot->target.draft = value;
-          } else if constexpr (std::same_as<T, FormField> || std::same_as<T, FindBar>) {
+          } else if constexpr (std::same_as<T, FormField> || std::same_as<T, FindBar> ||
+                               std::derived_from<T, ComboBox>) {
             slot->target.draft = fieldDraft;
           } else if constexpr (std::same_as<T, Password>) {
             slot->target.secret = value;
@@ -2236,7 +2237,7 @@ private:
         pending.caption = *node;
       } else if constexpr (std::same_as<T, LineEdit>) {
         pending.draft = *node;
-      } else if constexpr (std::same_as<T, FormField> || std::same_as<T, FindBar>) {
+      } else if constexpr (std::same_as<T, FormField> || std::same_as<T, FindBar> || std::derived_from<T, ComboBox>) {
         pending.draft = fieldDraft;
       } else if constexpr (std::same_as<T, Password>) {
         pending.secret = *node;
@@ -2565,6 +2566,57 @@ template <class T> bool Access::needsGridContext(const Description<T> &descripti
   return description.state_ && description.state_->layout && description.state_->layout->hasDeclaredGrid;
 }
 
+/// @cond INTERNAL
+template <class T> bool Access::needsChoiceHost(const Description<T> &description) {
+  const auto *layout = description.state_ ? description.state_->layout.get() : nullptr;
+
+  return layout && layout->needsChoiceHost && !layout->hasOverlayHost;
+}
+
+template <class T, class Probe> Description<T> Access::choiceProbe(Description<T> description, Probe probe) {
+  description.layoutMetadata().choiceProbe = std::move(probe);
+  return description;
+}
+
+template <class T>
+std::expected<bool, ManagedError> Access::prepareChoiceHost(Description<T> &description, ControlContext controls) {
+  auto root = description.state_ ? description.state_->layout : nullptr;
+  if (!root) {
+    return false;
+  }
+  std::vector<std::shared_ptr<RecipeLayout>> pending(0);
+  pending.push_back(root);
+  bool needed = root->needsChoiceHost, hosted = root->hasOverlayHost;
+  for (std::size_t index = 0; index < pending.size(); ++index) {
+    const auto layout = pending[index];
+    if (!layout) {
+      continue;
+    }
+    needed = needed || layout->needsChoiceHost;
+    hosted = hosted || layout->hasOverlayHost;
+    if (layout->choiceProbe) {
+      auto result = layout->choiceProbe(controls);
+      if (!result) {
+        return std::unexpected(result.error());
+      }
+      needed = needed || result->first;
+      hosted = hosted || result->second;
+    }
+    pending.insert(pending.end(), layout->children.begin(), layout->children.end());
+  }
+  return needed && !hosted;
+}
+
+template <class T> Description<T> Access::choiceHost(Description<T> description, bool explicitHost) {
+  auto &layout = description.layoutMetadata();
+  layout.needsChoiceHost = !explicitHost;
+  layout.hasOverlayHost = explicitHost;
+
+  return description;
+}
+
+/// @endcond
+
 inline Description<Widget> Access::deferControlValidation(Description<Widget> description) {
   if (description.state_) {
     description.state_->deferredControlValidation = true;
@@ -2637,6 +2689,8 @@ template <class... Children> std::shared_ptr<RecipeLayout> Access::captureLayout
       if (child.state_) {
         layout->children.push_back(child.state_->layout);
         layout->hasDeclaredGrid = layout->hasDeclaredGrid || child.state_->layout->hasDeclaredGrid;
+        layout->needsChoiceHost = layout->needsChoiceHost || child.state_->layout->needsChoiceHost;
+        layout->hasOverlayHost = layout->hasOverlayHost || child.state_->layout->hasOverlayHost;
       } else {
         auto empty = std::make_shared<RecipeLayout>();
 
@@ -2682,6 +2736,10 @@ void Access::layoutChild(Description<Parent> &parent, Description<Child> &child,
     parent.layoutMetadata().children.push_back(child.state_->layout);
     parent.state_->layout->hasDeclaredGrid =
       parent.state_->layout->hasDeclaredGrid || child.state_->layout->hasDeclaredGrid;
+    parent.state_->layout->needsChoiceHost =
+      parent.state_->layout->needsChoiceHost || child.state_->layout->needsChoiceHost;
+    parent.state_->layout->hasOverlayHost =
+      parent.state_->layout->hasOverlayHost || child.state_->layout->hasOverlayHost;
   }
 }
 

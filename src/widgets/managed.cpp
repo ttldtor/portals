@@ -34,6 +34,37 @@ void retireSceneCallback(void *storage, void (*reset)(void *) noexcept) noexcept
 
 namespace portals {
 namespace {
+class ManagedRoot final : public Widget {
+public:
+  std::expected<void, TreeError> arrange(CellRect local) override {
+    auto bounds = CellRect::from({}, local.size());
+    if (!bounds) {
+      return std::unexpected(TreeError::INVALID_GEOMETRY);
+    }
+    bounds_ = *bounds;
+    return {};
+  }
+
+  std::expected<void, TreeError> paint(PaintContext &context) override {
+    const auto style = computedStyle() ? computedStyle()->normal : CellStyle{};
+    if (bounds_.empty() || style == CellStyle{}) {
+      return {};
+    }
+    // The scene surface precedes all children, including custom commands with negative z.
+    const RenderCommand fill = FillCommand{bounds_, bounds_, style, std::numeric_limits<std::int32_t>::min()};
+    return context.submit(std::span(&fill, 1));
+  }
+
+private:
+  CellRect bounds_;
+};
+
+std::size_t managedStyleCapacity(std::size_t nodes) noexcept {
+  constexpr std::size_t ROOT_STYLE_BINDINGS = 1;
+  const auto maximum = std::numeric_limits<std::size_t>::max();
+  return nodes > maximum - ROOT_STYLE_BINDINGS ? maximum : nodes + ROOT_STYLE_BINDINGS;
+}
+
 template <class T> std::size_t maxElementCount() noexcept {
   const auto differenceLimit = static_cast<std::size_t>(std::numeric_limits<std::ptrdiff_t>::max()) / sizeof(T);
   const auto allocatorLimit = std::allocator_traits<std::allocator<T>>::max_size(std::allocator<T>{});
@@ -41,12 +72,29 @@ template <class T> std::size_t maxElementCount() noexcept {
   return std::min(differenceLimit, allocatorLimit);
 }
 
+// Call only under the existing service guard: retiring a popup releases arbitrary captures.
+// A later activity callback can retire an earlier one, so retirement precedes every compaction.
+void retireInactiveActivities(std::vector<std::weak_ptr<ui::detail::SceneActivity>> &activities,
+                              const bool &closed) noexcept {
+  const auto count = activities.size();
+  for (std::size_t index = 0; index < count && index < activities.size() && !closed; ++index) {
+    auto current = activities[index].lock();
+    if (current && !current->active() && current->tryRetire() && index < activities.size() &&
+        activities[index].lock() == current) {
+      activities[index].reset();
+    }
+  }
+  std::erase_if(activities, [](const auto &weak) {
+    return weak.expired();
+  });
+}
+
 } // namespace
 
 ManagedScene::ManagedScene(Application &app, ManagedOptions options)
     : app_(app), owner_(std::this_thread::get_id()), options_(options), lifetime_(std::make_shared<const bool>(true)),
-      asyncActivities_(0), styles_(app.tree(), options.maxNodes), entries_(0), properties_(0), models_(0),
-      errors_(options.diagnostics.maxErrors) {
+      asyncActivities_(0), styles_(app.tree(), managedStyleCapacity(options.maxNodes)), entries_(0), properties_(0),
+      models_(0), errors_(options.diagnostics.maxErrors) {
 }
 
 ManagedError ManagedScene::error(ManagedPhase phase, Node<Widget> node, TreeError cause) {
@@ -130,7 +178,7 @@ std::expected<std::unique_ptr<ManagedScene>, ManagedError> ManagedScene::create(
 
   try {
     auto scene = std::unique_ptr<ManagedScene>(new ManagedScene(app, options));
-    auto root = app.tree().emplaceChecked<Widget>(app.root());
+    auto root = app.tree().emplaceChecked<ManagedRoot>(app.root());
 
     if (!root) {
       scene->closed_ = true;
@@ -139,6 +187,7 @@ std::expected<std::unique_ptr<ManagedScene>, ManagedError> ManagedScene::create(
     }
 
     scene->root_ = *root;
+    scene->stylesDirty_ = true;
 
     return scene;
   } catch (const std::bad_alloc &) {
@@ -467,6 +516,17 @@ std::expected<void, ManagedError> ManagedScene::remove(Node<Widget> node) {
   } guard{preparing_};
 
   preparing_ = true;
+
+  for (const auto &entry : entries_) {
+    if (entry->companion != Node<Widget>{} && app_.router().within(node, entry->node) &&
+        !app_.router().within(node, entry->companion)) {
+      auto companion = app_.tree().remove(entry->companion);
+
+      if (!companion && !retired(companion.error())) {
+        return std::unexpected(error(ManagedPhase::CLEANUP, entry->companion, companion.error()));
+      }
+    }
+  }
 
   auto removed = app_.tree().remove(node);
 
@@ -1065,11 +1125,20 @@ std::expected<void, ManagedError> ManagedScene::admitActivity(std::shared_ptr<ui
     return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::WOULD_BLOCK));
   }
 
-  std::erase_if(asyncActivities_, [](const auto &weak) {
-    const auto current = weak.lock();
+  if (activityRevision_ == std::numeric_limits<std::uint64_t>::max()) {
+    return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::IDENTITY_EXHAUSTED));
+  }
+  ++activityRevision_;
 
-    return !current || !current->active();
-  });
+  // Retire popup leases before dropping their only registry observation. Retirement may
+  // release arbitrary captures, so use the existing service guard across callbacks and compaction.
+  servicingActivities_ = true;
+  retireInactiveActivities(asyncActivities_, closed_);
+  servicingActivities_ = false;
+
+  if (closed_) {
+    return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::CLOSED));
+  }
 
   if (asyncActivities_.size() >= options_.maxNodes) {
     return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::WOULD_BLOCK));
@@ -1095,7 +1164,7 @@ std::expected<void, TreeError> ManagedScene::visitActivities(bool prepared) {
   const auto activeCount = asyncActivities_.size();
   servicingActivities_ = true;
 
-  for (std::size_t index = 0; index < activeCount && !closed_; ++index) {
+  for (std::size_t index = 0; index < activeCount && index < asyncActivities_.size() && !closed_; ++index) {
     auto activity = asyncActivities_[index].lock();
 
     if (activity && activity->active()) {
@@ -1107,15 +1176,14 @@ std::expected<void, TreeError> ManagedScene::visitActivities(bool prepared) {
     }
   }
 
+  retireInactiveActivities(asyncActivities_, closed_);
   servicingActivities_ = false;
 
-  std::erase_if(asyncActivities_, [](const auto &weak) {
-    const auto activity = weak.lock();
-
-    return !activity || !activity->active();
-  });
-
   return {};
+}
+
+bool ManagedScene::choiceWithin(Node<Widget> root, Node<Widget> node) const {
+  return app_.router().within(root, node);
 }
 
 std::expected<void, TreeError> ManagedScene::afterDispatch(Application &app) {
@@ -1132,6 +1200,14 @@ std::expected<void, TreeError> ManagedScene::afterDispatch(Application &app) {
 
   if (closed_) {
     return {};
+  }
+
+  if (auto choice = choiceIntent_.lock(); choice && choice->active()) {
+    auto committed = choice->commitPopup();
+
+    if (!committed) {
+      (void)reportError(committed.error());
+    }
   }
 
   for (const auto &record : layouts_) {
@@ -1179,6 +1255,9 @@ std::expected<void, TreeError> ManagedScene::completedLayout(Application &app) {
   // The final stamp is constant work without observers. Checked Ref reads inspect only
   // their own node on demand; copying a complete tree here would tax unrelated clients.
   layoutRevision_ = *revision;
+  if (auto choice = choiceIntent_.lock()) {
+    choice->wakePopup();
+  }
   try {
     for (const auto &record : layouts_) {
       auto snapshot = app_.tree().observeGeometry(record->node);
@@ -2667,6 +2746,24 @@ std::expected<bool, TreeError> ManagedScene::input(Application &app, const Input
 
   try {
     // Pin the callback even if it replaces the interceptor or closes its subtree.
+    const auto activityCount = asyncActivities_.size();
+    const auto activityRevision = activityRevision_;
+
+    for (std::size_t index = 0; index < activityCount && index < asyncActivities_.size() && !closed_; ++index) {
+      auto activity = asyncActivities_[index].lock();
+
+      if (activity && activity->active()) {
+        auto handled = activity->input(event);
+
+        if (!handled || *handled) {
+          return handled;
+        }
+        if (activityRevision_ != activityRevision) {
+          break;
+        }
+      }
+    }
+
     if (modalDialogInput()) {
       if (keys_) {
         resetKeys(*keys_->pending);

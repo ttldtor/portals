@@ -18,6 +18,7 @@ struct LineEditValidationGate;
 
 namespace ui::detail {
 struct RefAccess;
+struct Access;
 }
 
 /** @brief When an accepted editing candidate is validated and published to its model. */
@@ -346,6 +347,7 @@ public:
 private:
   friend struct detail::LineEditValidationAccess;
   friend struct ui::detail::RefAccess;
+  friend struct ui::detail::Access;
   std::expected<std::uint64_t, TreeError> draftRevision() const;
 
   friend class ManagedScene;

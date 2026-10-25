@@ -7,6 +7,18 @@
 #include <array>
 
 namespace portals::detail {
+void SearchMemory::chargeExternal(std::size_t bytes) {
+  if (bytes > cap_ - used_) {
+    throw SearchBudgetExceeded{};
+  }
+  used_ += bytes;
+  peak_ = std::max(peak_, used_);
+}
+
+void SearchMemory::releaseExternal(std::size_t bytes) noexcept {
+  used_ -= bytes;
+}
+
 void *SearchMemory::do_allocate(std::size_t bytes, std::size_t alignment) {
   if (bytes > cap_ - used_) {
     throw SearchBudgetExceeded{};
@@ -256,7 +268,7 @@ std::expected<std::unique_ptr<SearchIndex>, SearchError> buildSearchIndex(const 
   }
   try {
     auto index = std::make_unique<SearchIndex>(std::move(identity), options);
-    SearchMemory scratch(options.maxBuildScratchBytes - BATCH_STORAGE_BYTES);
+    SearchMemory scratch(options.maxBuildScratchBytes);
     WorkCounter work{stop};
     std::vector<FindRowView> batch(0);
     std::pmr::vector<std::pair<RowId, std::size_t>> identities(0, &scratch);
@@ -266,11 +278,12 @@ std::expected<std::unique_ptr<SearchIndex>, SearchError> buildSearchIndex(const 
     if (batch.capacity() * sizeof(FindRowView) > options.maxBuildScratchBytes) {
       return std::unexpected(SearchError::LIMIT_EXCEEDED);
     }
+    scratch.chargeExternal(batch.capacity() * sizeof(FindRowView));
     index->rows.reserve(static_cast<std::size_t>(source.rowCount));
 
     for (std::uint64_t first = 0; first < source.rowCount;) {
       const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(ROW_READ_BATCH, source.rowCount - first));
-      auto read = source.read({first, count}, batch);
+      auto read = source.read({first, count}, batch, &scratch);
 
       if (!read) {
         return std::unexpected(sourceError(read.error()));

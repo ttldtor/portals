@@ -4,6 +4,10 @@
 
 #include <portals/dialog.hpp>
 
+namespace portals::ui::detail {
+struct SceneActivity;
+}
+
 namespace portals::detail {
 struct DialogHostRecord;
 struct MessageRecord;
@@ -36,5 +40,6 @@ struct DialogHostRecord {
   bool staging{};
   bool ready{};
   bool retired{};
+  std::weak_ptr<ui::detail::SceneActivity> choiceOwner;
 };
 } // namespace portals::detail

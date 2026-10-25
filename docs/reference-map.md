@@ -38,6 +38,7 @@ Use style layers when palette changes must preserve application and user overrid
 - [Immutable models](model.md), [bounded queries](model-queries.md), [layout-driven view preparation](virtual-preparation.md).
 - [Data presentation](data-presentation.md) describes loading, empty, error and offline states around content.
 - [Indexed live suggestions](live-search.md), [field validation](form-fields.md).
+- [Model-backed choices](choices.md): ComboBox and DropDown.
 - [Virtual lists](virtual-list.md), [virtual tables](virtual-table.md).
 - [Retained-content scrolling](scroll-controls.md), [virtual-data scrolling](scroll.md).
 - [Dialogs](dialogs.md), [notifications](notifications.md), [keyboard help](key-help.md).

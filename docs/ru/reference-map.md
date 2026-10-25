@@ -38,6 +38,7 @@
 - [Неизменяемые модели](model.md), [ограниченные запросы](model-queries.md), [подготовка представлений по компоновке](virtual-preparation.md).
 - [Представление данных](data-presentation.md): состояния загрузки, пустого результата, ошибки и отсутствия сети.
 - [Индексированные подсказки](live-search.md), [валидация полей](form-fields.md).
+- [Выбор из модели](choices.md): ComboBox и DropDown.
 - [Виртуальные списки](virtual-list.md), [виртуальные таблицы](virtual-table.md).
 - [Прокрутка обычного содержимого](scroll-controls.md), [виртуальных данных](scroll.md).
 - [Диалоги](dialogs.md), [уведомления](notifications.md), [подсказки клавиш](key-help.md).

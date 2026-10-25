@@ -24,6 +24,11 @@ public:
     return result_->rows[position_].value.text().bytes();
   }
 
+  /** @return Zero-based original source ordinal, independent of result ranking. */
+  std::uint64_t index() const noexcept {
+    return result_->rows[position_].value.rank.sourceOrdinal;
+  }
+
   /** @return Exact weak source identity that produced this selection. */
   const SearchSourceIdentity &sourceIdentity() const noexcept {
     return result_->source;
@@ -56,6 +61,9 @@ struct SuggestionsConfig {
   Ref<Label> status;            ///< Optional weak label; empty means no status label.
   std::function<void(SearchSelection)> activated; ///< UI-only callback after exact-current list-focused activation.
   std::function<void(SearchError)> failed;        ///< UI-only newest provider failure; draft is preserved.
+  std::function<bool()> enabled; ///< Optional internal UI admission predicate; false cancels pending work.
+  std::optional<ManagedModel<SearchItem>>
+    resultModel; ///< Internal scoped popup output; absent creates an ordinary model.
 };
 
 /** @brief Cold index/source recipe consumed by virtualList; contains no mounted widget or worker. */
