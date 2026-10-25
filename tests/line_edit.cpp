@@ -399,9 +399,28 @@ void pasteAndRendering() {
 
   const auto selected = unicode.render({8, 1});
 
-  check(take(selected.at({0, 0})).glyph == COMBINING &&
-          take(selected.at({0, 0})).style.background == RgbColor{180, 200, 255},
+  check(take(selected.at({0, 0})).glyph == COMBINING && take(selected.at({0, 0})).style == LineEditOptions{}.selection,
         "selection paint includes the complete combining grapheme");
+}
+
+void neutralSelectionIsVisible() {
+  Fixture fixture("abcdef");
+
+  take(fixture.router->setFocus(fixture.node));
+  fixture.command(Action::MOVE_HOME);
+  fixture.command(Action::MOVE_RIGHT, true);
+  fixture.command(Action::MOVE_RIGHT, true);
+
+  const auto buffer = fixture.render({8, 1});
+  const auto selected = take(buffer.at({0, 0}));
+  const auto unselected = take(buffer.at({4, 0}));
+
+  check(selected.glyph == "a" && unselected.glyph == "e", "selection preserves actual draft glyphs");
+  check(selected.style != unselected.style && selected.style.bold && selected.style.italic &&
+          !unselected.style.italic && !selected.style.underline,
+        "neutral selected non-caret cell differs from focused unselected text");
+  check(!selected.style.foreground && !selected.style.background,
+        "selection distinction does not introduce a fixed color palette");
 }
 
 void callbackLifetimes() {
@@ -905,6 +924,7 @@ int main(int argc, char **argv) {
   conflictAndOverflow();
   clipboardAndValidation();
   pasteAndRendering();
+  neutralSelectionIsVisible();
   callbackLifetimes();
   captureReentry();
   allocationFailures();

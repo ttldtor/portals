@@ -17,11 +17,12 @@ struct FindAccess;
 namespace ui::detail {
 struct ActionAccess;
 }
+
 /** @brief Owning paint values; no theme engine or behavior is encoded here. */
 struct ControlStyle {
-  CellStyle normal{};                                                  ///< Ordinary appearance.
-  CellStyle focused{{}, {}, true, false, true};                        ///< Keyboard or mouse focus appearance.
-  CellStyle disabled{RgbColor{128, 128, 128}, {}, false, true, false}; ///< Ineligible subtree appearance.
+  CellStyle normal{};                             ///< Ordinary appearance.
+  CellStyle focused{{}, {}, true, false, false};  ///< Keyboard or mouse focus appearance.
+  CellStyle disabled{{}, {}, false, true, false}; ///< Ineligible subtree appearance.
   /** @brief Compare every appearance with the unnamed other style argument.
    * @return True when normal, focused and disabled styles all compare equal.
    */

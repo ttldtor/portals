@@ -47,6 +47,10 @@ static_assert(ui::ct::button<"styled">("", ROUND_TRIP_STYLE).style() == ROUND_TR
 static_assert(ui::ct::lineEdit("", EditMode::EXPLICIT, ROUND_TRIP_STYLE).style() == ROUND_TRIP_STYLE);
 static_assert(ui::ct::label("", ABSENT_STYLE).style() == ABSENT_STYLE);
 static_assert(ui::ct::label("").style() == ControlStyle{});
+static_assert(!ui::ct::button("").style().focused.underline);
+static_assert(ui::ct::button("").style().focused.bold);
+static_assert(ui::ct::lineEdit("").style() == ControlStyle{});
+
 static_assert(ui::ct::label("", ROUND_TRIP_STYLE).style().normal.foreground == RgbColor{});
 static_assert(!ui::ct::label("", ROUND_TRIP_STYLE).style().normal.background);
 
@@ -350,4 +354,42 @@ TEST_CASE("static facade callbacks and refs follow close and wrong-thread contra
 
   // Explicit close retires the tree; final Application destruction also releases router captures.
   CHECK(destroyed);
+}
+
+TEST_CASE("unthemed controls use neutral focus without changing explicit appearances") {
+  const auto text = take(GraphemeText::from("Caption"));
+  const Button raw(text);
+  const Border frame;
+  const auto focus = raw.styleDefaults().focused;
+
+  CHECK(focus.bold);
+  CHECK_FALSE(focus.underline);
+  CHECK_FALSE(focus.foreground);
+  CHECK_FALSE(focus.background);
+  CHECK(frame.styleDefaults().focused == focus);
+  CHECK_FALSE(ControlStyle{}.disabled.foreground);
+  CHECK(ControlStyle{}.disabled.italic);
+  CHECK(LineEditOptions{}.selection == CellStyle{{}, {}, true, true});
+  CHECK(PasswordOptions{}.selection == CellStyle{{}, {}, true, true});
+  CHECK(VirtualListOptions{}.selected == CellStyle{{}, {}, true, true});
+  CHECK(VirtualTableOptions{}.selected == CellStyle{{}, {}, true, true});
+  CHECK(VirtualListOptions{.selected = {}}.selected == CellStyle{});
+  CHECK(LineEditOptions{}.cursor.underline);
+  CHECK(PasswordOptions{}.cursor.underline);
+
+  Fixture fixture;
+  ui::Ref<Button> button;
+  ui::Ref<Button> explicitStyle;
+  ControlStyle underlined;
+
+  underlined.focused.underline = true;
+  take(ui::mount(*fixture.owner,
+                 ui::vbox(ui::button(button, "Button"), ui::button(explicitStyle, "Explicit", underlined))));
+
+  take(fixture.app->tree().read(button.node(), [&](const Button &widget) {
+    CHECK(widget.styleDefaults().focused == focus);
+  }));
+  take(fixture.app->tree().read(explicitStyle.node(), [&](const Button &widget) {
+    CHECK(widget.styleDefaults().focused == underlined.focused);
+  }));
 }

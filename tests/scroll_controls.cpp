@@ -1062,7 +1062,8 @@ void manualStyleAndAutomaticMetadata() {
   BarFixture f;
   take(syncScrollControl(*f.tree, f.bar, f.bar));
   auto focused = f.paint(f.bar);
-  check(!focused.styles.empty() && focused.styles[0].underline, "focus presentation uses existing defaults");
+  check(!focused.styles.empty() && focused.styles[0].bold && !focused.styles[0].underline,
+        "focus presentation uses neutral bold without underline");
   take(f.tree->setEnabled(f.bar, false));
   take(syncScrollControl(*f.tree, f.bar, f.bar));
   f.layout({1, 10});
