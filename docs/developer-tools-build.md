@@ -212,6 +212,8 @@ python tools/check_naming.py build/naming --clang-tidy clang-tidy
 |---|---|---|
 | `build` | Required positional path | Directory containing `compile_commands.json`; resolved from the current directory |
 | `--clang-tidy EXE` | `clang-tidy` | Executable name on `PATH` or path to the executable |
+| `--jobs N` | `1` | Positive maximum number of concurrent clang-tidy processes |
+| `--timings JSON` | No report | Overwrite a JSON report at this path; its parent directory must exist |
 | `-h`, `--help` | Optional | Print usage and exit |
 
 The script selects unique translation units under `src`, `tests`, `tools`,
@@ -222,9 +224,13 @@ Only translation units present in the database are checked.
 
 For each file, it invokes clang-tidy with `-p <build>`, `--quiet` and the
 repository `.clang-tidy` as `--config-file`, using the repository root as its
-working directory. There is no `--fix` option. Diagnostics go to the console;
-the final line reports checked and failed translation units. No report file
-is created. The script reads no dedicated environment variables; executable
+working directory. There is no `--fix` option. Diagnostics are grouped by
+translation unit in sorted source order, with stdout and stderr retained on
+their respective console streams. Output is spooled to temporary files for at
+most `--jobs` units, replayed without loading the whole output into memory, and
+removed on exit. A slow earlier unit can delay displaying later diagnostics
+and starting the next unit. The final line reports checked and failed units.
+The script reads no dedicated environment variables; executable
 lookup and compiler discovery still depend on the process environment.
 
 Exit codes: `0` if every invocation succeeds, `1` if any clang-tidy invocation
@@ -232,6 +238,25 @@ fails, `2` for invalid arguments or a database with no selected sources.
 Unreadable or malformed JSON and process-launch errors terminate unsuccessfully
 with a Python diagnostic. The script continues after a clang-tidy nonzero exit
 to check the remaining files.
+
+Use `--jobs 2` to allow two checks at once; the CI and release naming jobs use
+this setting while retaining the complete selection. With `--timings timings.json`,
+the report contains `jobs`, `total_seconds` and a sorted `translation_units`
+array of `source` (checkout-relative path), `seconds` and `returncode`.
+Times use a monotonic wall clock: per-unit time covers process launch through
+completion; total time includes database loading, scheduling and console replay,
+but excludes writing the report. Timings are written after all checks finish,
+including nonzero tool exits; input or process-launch errors produce no report.
+Report-write failures terminate unsuccessfully with a Python diagnostic.
+No tool version probe is run. Record toolchain and workload separately when
+comparing measurements.
+
+CI and release jobs save this report as the `naming-timings` artifact for 14 days.
+An artifact-upload outage does not change the naming check result.
+
+Run `python -m unittest tools.test_check_naming -v` to test selection,
+ordering, failures, bounded concurrency, timings and temporary-file cleanup
+with real Python subprocesses; no clang-tidy installation is needed.
 
 <a id="tool-ci"></a>
 

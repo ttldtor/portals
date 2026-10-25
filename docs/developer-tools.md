@@ -65,6 +65,7 @@ are in the linked reference.
 | [tools/benchmarks/check.cmake](../tools/benchmarks/check.cmake) | [Measurements](developer-tools-measure.md) |
 | [tools/benchmarks/check_managed.cmake](../tools/benchmarks/check_managed.cmake) | [Measurements](developer-tools-measure.md) |
 | [tools/check_naming.py](../tools/check_naming.py) | [Build and checks](developer-tools-build.md) |
+| [tools/test_check_naming.py](../tools/test_check_naming.py) | [Naming runner regression tests](developer-tools-build.md#tool-naming) |
 | [tools/ci/checks.py](../tools/ci/checks.py) | [Build and checks](developer-tools-build.md) |
 | [tools/ci/check_plan.py](../tools/ci/check_plan.py) | [Local contract check plans](developer-tools-build.md#tool-check-plan) |
 | [tools/ci/test_check_plan.py](../tools/ci/test_check_plan.py) | [Regression test](developer-tools-build.md#tool-check-plan) |

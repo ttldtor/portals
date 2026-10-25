@@ -66,6 +66,7 @@ cmake -DHELP=ON -P tools/quality/performance.cmake
 | [tools/benchmarks/check.cmake](../../tools/benchmarks/check.cmake) | [Измерения](developer-tools-measure.md) |
 | [tools/benchmarks/check_managed.cmake](../../tools/benchmarks/check_managed.cmake) | [Измерения](developer-tools-measure.md) |
 | [tools/check_naming.py](../../tools/check_naming.py) | [Сборка и проверки](developer-tools-build.md) |
+| [tools/test_check_naming.py](../../tools/test_check_naming.py) | [Регрессионные тесты запуска naming](developer-tools-build.md#tool-naming-ru) |
 | [tools/ci/checks.py](../../tools/ci/checks.py) | [Сборка и проверки](developer-tools-build.md) |
 | [tools/ci/check_plan.py](../../tools/ci/check_plan.py) | [Локальный contract check plan](developer-tools-build.md#tool-check-plan-ru) |
 | [tools/ci/test_check_plan.py](../../tools/ci/test_check_plan.py) | [Регрессионная проверка](developer-tools-build.md#tool-check-plan-ru) |

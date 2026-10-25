@@ -41,6 +41,8 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 - LogView reuses wrapped rows when appending at the same width; retained row descriptors are still copied, while resizing rebuilds wrapping.
 
+- The C++ naming checker supports bounded parallel analysis, grouped diagnostics and optional timing reports. CI and release checks use two workers while retaining the full translation-unit selection.
+
 ## v0.6.0 (2026-10-24)
 
 ### Added
