@@ -76,7 +76,7 @@ struct StyleId {
 enum class CellKind {
   /** @brief Default-style ASCII space, occupying one cell. */
   BLANK,
-  /** @brief First cell of a written one- or two-cell grapheme. */
+  /** @brief First cell of a one- or two-cell grapheme, including a styled cleanup space. */
   LEAD,
   /** @brief Second cell of the immediately preceding two-cell lead. */
   CONTINUATION
@@ -258,6 +258,8 @@ public:
    * @return Success or coordinate/index/policy/edge/pool error; failure changes nothing.
    * @note No allocation. Unsupported text displays ASCII '?'. Touching an old
    * continuation clears its lead too, even outside the new glyph's footprint.
+   * Cleared cells outside that footprint retain their old style as ASCII spaces;
+   * styled spaces are narrow leads, while default-style spaces are blanks.
    */
   [[nodiscard]] std::expected<void, CellBufferError> put(CellPoint position, const GraphemeText &text,
                                                          std::size_t grapheme_index, CellStyle style = {}) noexcept;

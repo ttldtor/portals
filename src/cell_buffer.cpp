@@ -155,14 +155,16 @@ std::expected<CellView, CellBufferError> CellBuffer::at(CellPoint position) cons
 }
 
 // Replacing either half removes the complete old glyph, even if its other half lies
-// outside the new write. A continuation must never survive without its matching lead.
+// outside the new write. Preserve that uncovered cell's paint as an interned space;
+// a continuation must never survive without its matching lead.
 void CellBuffer::clearGlyph(std::size_t cell_index) noexcept {
   const auto old = cells_[cell_index];
+  const Cell cleared{GlyphId{}, old.style, old.style.value == 0 ? CellKind::BLANK : CellKind::LEAD, 1};
 
   if (old.kind == CellKind::CONTINUATION) {
-    cells_[cell_index - 1] = {};
+    cells_[cell_index - 1] = cleared;
   } else if (old.columns == 2) {
-    cells_[cell_index + 1] = {};
+    cells_[cell_index + 1] = cleared;
   }
 
   cells_[cell_index] = {};

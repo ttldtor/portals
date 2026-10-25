@@ -190,8 +190,7 @@ void overwriteAndLifetime() {
   check(lead->glyph == utf8(u8"界") && lead->style == colored && lead->cell.columns == 2,
         "wide semantic bytes and style are stored");
   check(buffer.put({1, 0}, narrow, 0).has_value(), "write over second half succeeds");
-  check(buffer.at({0, 0})->glyph == " " && buffer.at({0, 0})->cell.kind == CellKind::BLANK &&
-          buffer.at({1, 0})->glyph == "x",
+  check(buffer.at({0, 0})->glyph == " " && buffer.at({0, 0})->style == colored && buffer.at({1, 0})->glyph == "x",
         "overwriting continuation clears the entire older glyph");
   check(buffer.put({0, 0}, wide, 0, colored) && buffer.put({2, 0}, wide, 0, colored) && buffer.put({1, 0}, wide, 0),
         "wide write can intersect two older wide clusters");
@@ -235,6 +234,104 @@ void overwriteAndLifetime() {
   buffer.clear();
   invariant(buffer);
   check(buffer.resize({3, 2}).has_value(), "resize after empty succeeds");
+  invariant(buffer);
+}
+
+void partialOverwritePreservesStyle() {
+  const auto wide = makeText(utf8(u8"界"));
+  const auto narrow = makeText("x");
+  CellStyle original;
+  CellStyle overlay;
+
+  original.foreground = RgbColor{10, 20, 30};
+  original.background = RgbColor{0, 0, 100};
+  original.bold = true;
+  original.italic = true;
+  original.underline = true;
+  overlay.background = RgbColor{100, 0, 0};
+
+  for (const auto style : {CellStyle{}, original}) {
+    for (std::int32_t row = 0; row < 2; ++row) {
+      for (std::int32_t start = 0; start < 3; ++start) {
+        for (std::int32_t half = 0; half < 2; ++half) {
+          auto buffer = makeBuffer({4, 2});
+
+          check(buffer.put({start, row}, wide, 0, style).has_value(), "seed wide glyph at each row boundary");
+
+          const auto old_style = buffer.at({start, row})->cell.style;
+
+          check(buffer.put({start + half, row}, narrow, 0, overlay).has_value(), "replace either half of wide glyph");
+
+          const auto companion = buffer.at({start + 1 - half, row});
+          const auto replacement = buffer.at({start + half, row});
+
+          check(companion->glyph == " " && companion->cell.glyph == GlyphId{} && companion->cell.columns == 1,
+                "uncovered companion becomes one complete ASCII space");
+          check(companion->style == style && companion->cell.style == old_style,
+                "uncovered companion preserves original paint and interned style ID");
+          check(companion->cell.kind == (style == CellStyle{} ? CellKind::BLANK : CellKind::LEAD),
+                "only default-style spaces use the blank role");
+          check(replacement->glyph == "x" && replacement->style == overlay, "new glyph alone receives overlay paint");
+          check(buffer.at({0, 1 - row})->cell == Cell{} && buffer.at({3, 1 - row})->cell == Cell{},
+                "whole-glyph cleanup never crosses row boundaries");
+          invariant(buffer);
+        }
+      }
+    }
+  }
+}
+
+void overlapWithFullPools() {
+  const auto wide = makeText(utf8(u8"界"));
+  auto limits = smallLimits();
+  CellStyle left;
+  CellStyle right;
+
+  left.background = RgbColor{0, 0, 100};
+  right.background = RgbColor{0, 100, 0};
+  limits.max_glyphs = 2;
+  limits.max_glyph_bytes = 1 + wide.bytes().size();
+  limits.max_styles = 3;
+
+  auto buffer = makeBuffer({4, 1}, limits);
+
+  check(buffer.put({0, 0}, wide, 0, left) && buffer.put({2, 0}, wide, 0, right),
+        "two adjacent wide glyphs fill glyph, byte and style pools exactly");
+
+  const auto before = snapshot(buffer);
+  const auto memory = buffer.memory();
+  const auto rejected = buffer.put({1, 0}, makeText("x"), 0);
+
+  check(!rejected && rejected.error() == CellBufferError::GLYPH_LIMIT && snapshot(buffer) == before &&
+          buffer.memory() == memory,
+        "failed overlay preserves both complete old glyphs and their paint");
+
+  CellStyle extra_style;
+
+  extra_style.bold = true;
+
+  const auto rejected_style = buffer.put({1, 0}, wide, 0, extra_style);
+
+  check(!rejected_style && rejected_style.error() == CellBufferError::STYLE_LIMIT && snapshot(buffer) == before &&
+          buffer.memory() == memory,
+        "style-pool failure also preserves both old glyph footprints and paint");
+
+  array_failure_countdown = 0;
+
+  const auto result = buffer.put({1, 0}, wide, 0);
+  const auto no_allocation = array_failure_countdown == 0;
+
+  array_failure_countdown = -1;
+  check(result.has_value() && no_allocation && buffer.memory() == memory,
+        "interned overlay and companion cleanup allocate nothing with full pools");
+  check(buffer.at({0, 0})->glyph == " " && buffer.at({0, 0})->style == left && buffer.at({3, 0})->glyph == " " &&
+          buffer.at({3, 0})->style == right,
+        "overlap of two old glyphs preserves each uncovered companion's own paint");
+  check(buffer.at({1, 0})->cell.columns == 2 && buffer.at({2, 0})->cell.kind == CellKind::CONTINUATION &&
+          buffer.at({1, 0})->style == CellStyle{},
+        "new wide glyph retains a coherent two-cell footprint with its requested paint");
+  invariant(buffer);
+  buffer.clear();
   invariant(buffer);
 }
 
@@ -542,7 +639,9 @@ void boundedProperty() {
 
           if (i < end && start < old_end) {
             for (auto erased = i; erased < old_end; ++erased) {
-              oracle[erased] = {};
+              const auto paint = old[erased].style;
+
+              oracle[erased] = {" ", paint, paint == CellStyle{} ? CellKind::BLANK : CellKind::LEAD, 1};
             }
           }
         }
@@ -577,6 +676,8 @@ void boundedProperty() {
 
 int main() {
   overwriteAndLifetime();
+  partialOverwritePreservesStyle();
+  overlapWithFullPools();
   failuresAreAtomic();
   poolLimits();
   configurationAndMoves();
