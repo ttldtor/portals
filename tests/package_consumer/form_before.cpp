@@ -1,15 +1,55 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include "form_replay.hpp"
+#include <limits>
 
 namespace {
 using namespace consumer;
+
+// Keep the low-level oracle's surface equal to the managed scene's themed backdrop.
+class FormSurface final : public Column {
+public:
+  std::expected<void, TreeError> arrange(CellRect local) override {
+    auto arranged = Column::arrange(local);
+
+    if (!arranged) {
+      return arranged;
+    }
+
+    auto bounds = CellRect::from({}, local.size());
+
+    if (!bounds) {
+      return std::unexpected(TreeError::INVALID_GEOMETRY);
+    }
+
+    bounds_ = *bounds;
+
+    return {};
+  }
+
+  std::expected<void, TreeError> paint(PaintContext &context) override {
+    const auto style = computedStyle() ? computedStyle()->normal : CellStyle{};
+
+    if (bounds_.empty() || style == CellStyle{}) {
+      return {};
+    }
+
+    const RenderCommand fill = FillCommand{bounds_, bounds_, style, std::numeric_limits<std::int32_t>::min()};
+
+    return context.submit(std::span(&fill, 1));
+  }
+
+private:
+  CellRect bounds_;
+};
 
 class Form final : public ApplicationScene {
 public:
   explicit Form(Application &app) : app_(app), styles_(app.tree()) {
     auto &tree = app.tree();
-    const auto column = take(tree.emplace<Column>(app.root()));
+    const auto column = take(tree.emplace<FormSurface>(app.root()));
+
+    take(styles_.bind(column, {.type = "Scene"}));
 
     nodes.title = take(tree.emplace<Label>(column, consumer::text("Name: Enter saves | F2 theme | F10 quit")));
     nodes.editor = take(tree.emplace<LineEdit>(column, LineEditOptions{.editMode = EditMode::EXPLICIT}));
