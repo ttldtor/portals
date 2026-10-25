@@ -39,6 +39,8 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- MSVC applications linking `portals::core` inherit `/bigobj`, including through installed packages, so large declarative Debug translation units do not exceed the standard COFF section limit.
+
 - Managed scenes apply their resolved background across the terminal viewport, including layout gaps and unused space. Theme changes update the surface automatically; application `Scene` style overrides remain effective.
 
 - Documented complete UI client compilation measurements, separating compile/link and handler-edit observations from include-graph size and runtime benchmarks.

@@ -130,6 +130,9 @@ target_include_directories(portals_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/ven
 target_compile_definitions(portals_core PRIVATE UTF8PROC_STATIC)
 add_library(portals::core ALIAS portals_core)
 target_compile_features(portals_core PUBLIC cxx_std_23)
+# Declarative clients can exceed the standard COFF section count in MSVC Debug builds.
+# Export the format option so installed-package consumers inherit it as well.
+target_compile_options(portals_core INTERFACE "$<$<CXX_COMPILER_ID:MSVC>:/bigobj>")
 set_target_properties(portals_core PROPERTIES CXX_EXTENSIONS OFF EXPORT_NAME core)
 set_target_properties(portals_utf8proc PROPERTIES EXPORT_NAME utf8proc)
 target_include_directories(portals_core PUBLIC
