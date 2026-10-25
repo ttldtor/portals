@@ -25,6 +25,9 @@ The source may be a managed model, an immutable owning snapshot or a
 `RowCollection<T>` (including its checked construction result). Stable row IDs
 identify domain rows, rather than positions in a changing result list.
 
+Default match emphasis is bold and underlined, so it remains distinct on a selected row.
+Set `VirtualListOptions::highlight` to customize it; an empty style disables the emphasis.
+
 ## Worker preparation and ownership
 
 The projection returns a `std::string_view` borrowed from the immutable row.

@@ -19,6 +19,7 @@ The categories describe the learning path; the source directories remain stable.
 
 | Category | Program and guide | What it demonstrates |
 | --- | --- | --- |
+| Showcase | [Unicode panels](../examples/unicode_panels/main.cpp), `portals_unicode_panels` | Two synthetic file tables with Cyrillic, CJK, emoji and combining text, framed panels and an anchored popup. No filesystem access. See [Unicode qualification](#unicode-panels). |
 | Showcase | [Progress workbench](../examples/progress_workbench/main.cpp), `portals_progress_workbench` | Name a work item, adjust fractional progress, reset or complete it, and record accepted actions in a bounded log. [Gauge command contracts](compact-primitives.md#gauge-ref-commands) explain range errors; F10 exits. |
 | Showcase | [Search journal](../examples/search_journal/main.cpp), `portals_search_journal_example` | Edit the operator name, search two Unicode troubleshooting notes and record selected matches in a bounded log. F3/Shift+F3 navigate; buttons switch notes, clear the journal or return to its tail. |
 | Basics | [click handlers](#complete-first-program), `portals_click_handlers` | Observing refs, late click handlers and short quit. No CLI. |
@@ -53,6 +54,44 @@ also bind the exact Ctrl+C shortcut. Their F10 quit bindings are unmodified;
 modified quit chords do not inherit the older modifier-insensitive matching.
 Mouse routing depends on the active terminal protocol.
 No example promises restoration after forced process termination.
+
+## Unicode panels {#unicode-panels}
+
+Run `portals_unicode_panels` to compare a two-panel interface in your terminal.
+The names are built-in fixtures; the program never reads or changes files.
+Tab and Shift+Tab move focus, arrows select rows, F9 or the top buttons open
+the anchored panel, and Escape closes it. Clicking outside or moving keyboard
+focus out of the panel also closes it. F10 exits and restores the terminal.
+The top row mimics a menu using ordinary buttons; it is not a menu framework.
+The popup choices update the footer to confirm activation; they do not change
+the fixed qualification column widths.
+
+The fixtures include Japanese and Chinese names, Cyrillic, simple emoji, ZWJ
+sequences, a family, a flag, skin tone, text/emoji variation selectors, combining
+accents, a keycap and ambiguous-width characters. Long names deliberately meet
+the clipping edge. Resize the terminal, open and close the popup, and check that
+the following columns and panel borders remain aligned.
+
+`--emoji-width 1` selects the existing one-cell emoji policy; the default is
+`--emoji-width 2`. `--help` prints the options without opening the interface.
+The scene uses the built-in Modern theme for tables, selection, buttons and frames;
+its client code does not assign a separate RGB palette.
+
+No dependencies beyond those of the native examples are required. Success and
+help exit with code 0; invalid CLI exits with code 2, and setup or runtime failure
+exits with code 1 and a diagnostic.
+
+Portals measures grapheme clusters using its explicit width policy. The terminal
+and font independently decide their display width and glyph availability.
+Missing glyphs, unsupported emoji composition and a mismatched terminal width
+policy can therefore remain visible even when clipping and cell invariants pass.
+A fallback font can also draw a glyph beyond its assigned cells even when the
+terminal and application agree on width. Portals clips complete graphemes to cell
+rectangles; this does not set a pixel clip inside the terminal renderer. The
+qualification corpus keeps its original variation selectors and combining marks
+so that these host/font limitations remain visible.
+This program makes that distinction inspectable; it does not promise universal
+emoji rendering. See [text contracts](text.md) for the supported width policy.
 
 ## Complete first program {#complete-first-program}
 

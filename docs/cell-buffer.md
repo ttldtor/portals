@@ -34,9 +34,11 @@ style for either half; `cells()` borrows row-major metadata.
 
 Writing onto either half removes the entire older glyph. Writing a wide glyph
 can remove two intersected old glyphs, including their halves outside the new
-footprint. This matters to overlay clipping: callers must place new glyphs
-wholly inside their clip, but cleanup can remove an older lead outside it when
-its continuation was touched. Wide glyphs at the last column are rejected
+footprint. Cleared cells outside the new footprint retain their old style as
+ASCII spaces. A styled cleanup space is a narrow lead, so only default-style
+spaces use the blank role. This matters to overlay clipping: callers must place
+new glyphs wholly inside their clip, but cleanup can remove an older lead outside
+it when its continuation was touched. Wide glyphs at the last column are rejected
 atomically. Nothing is clipped, truncated or repaired by the buffer.
 
 Only the text adapter decides segmentation and width. The buffer requires

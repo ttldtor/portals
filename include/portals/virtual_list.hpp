@@ -16,12 +16,12 @@ struct Access;
 
 /** @brief Owning fixed-row presentation settings; invalid heights are rejected at preparation. */
 struct VirtualListOptions {
-  std::int32_t row_height{1};   ///< Positive cell rows per logical row.
-  std::size_t overscan_rows{2}; ///< Extra requested rows on each side, never formatted while invisible.
-  WidthPolicy width_policy;     ///< Required policy for delegate and placeholder text.
-  CellStyle normal;             ///< Unselected row fill and text.
-  CellStyle selected;           ///< Selected row fill and text.
-  CellStyle highlight{.bold = true}; ///< Prepared match emphasis over normal/selected appearance.
+  std::int32_t row_height{1};             ///< Positive cell rows per logical row.
+  std::size_t overscan_rows{2};           ///< Extra requested rows on each side, never formatted while invisible.
+  WidthPolicy width_policy;              ///< Required policy for delegate and placeholder text.
+  CellStyle normal;                      ///< Unselected row fill and text.
+  CellStyle selected{{}, {}, true, true}; ///< Selected row fill and text.
+  CellStyle highlight{.bold = true, .underline = true};      ///< Prepared match emphasis over normal/selected appearance.
 };
 
 /// @cond INTERNAL

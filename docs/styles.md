@@ -9,6 +9,45 @@ All strings and rules are owned. Parsing and standalone resolution perform no I/
 on that tree's UI owner thread. The engine's metadata registry observes checked
 node identities; removing a widget does not keep it alive.
 
+## Default appearances and theme roles
+
+Manual defaults use terminal-default foreground and background. Focus requests
+bold without underline; disabled controls request italic without a fixed gray.
+This fallback does not install a theme or guess the terminal palette. Explicit
+manual colors and underline remain available through the existing style options.
+
+Built-in themes derive presentation from their `ThemeTokens`:
+
+| Role | Controls | Theme mapping |
+| --- | --- | --- |
+| Focused action or input | Button, CheckBox, ThreeState, LineEdit, Password, ScrollBar, KeyHints action, FindBar navigation | Theme background as foreground; accent as fill; bold |
+| Focused frame line, title, title ends | Border, framed ancestors, dialog panels, ScrollArea/LogView built-in frames | Accent as foreground; theme background as fill; bold |
+| Selected row or range | VirtualList, VirtualTable, LineEdit, Password | Foreground on selection fill; bold |
+| Disabled | Controls with disabled presentation | Muted foreground on theme background |
+| Header | Table headings | Heading foreground on theme background; bold |
+
+Passive labels and indicators do not become focus targets because a focus style
+exists. Frame-part rules affect frame glyphs without imposing a separate palette
+on the control content. Changing the active theme changes the frame colors too.
+The Modern and Turbo PSS files provide the same rules as their typed factories.
+`style::ct::themeFromTokens` also derives frame parts from its live `accent` and
+`background` parameters, matching the runtime factory.
+
+Selection is independent of keyboard focus. Without a theme, its fallback is
+bold and italic with terminal-default colors, distinct from bold focused text;
+an explicitly empty selected style stays
+empty. Built-in themes explicitly select upright text (`italic: false`) for selected
+rows and ranges, overriding this unthemed fallback through the ordinary cascade.
+An application/user PSS layer can explicitly request `italic: true` again.
+The host terminal and font determine how those decorations appear.
+The editor software caret retains its intentional underline independently
+of control focus. Chart and search-specific highlights keep their semantic roles.
+
+Raw constructors, fluent factories and compile-time descriptions use the same
+manual defaults. Theme and application/user PSS precedence is unchanged. Built-in
+themes do not force underline off: an explicit manual underline survives unless
+a higher-priority declaration overrides it.
+
 ## Typical use
 
 ```cpp

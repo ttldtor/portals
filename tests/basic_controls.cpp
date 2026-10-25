@@ -125,7 +125,7 @@ void galleryReplay() {
   check(row(initial, 4) == "Disabled label" && row(initial, 5) == "[ Disabled button ]" &&
           row(initial, 6) == "[ ] Disabled check",
         "disabled group snapshot");
-  check(initial.cells.at(60).style.bold && initial.cells.at(60).style.underline, "initial button focus painted");
+  check(initial.cells.at(60).style.bold && !initial.cells.at(60).style.underline, "initial button focus painted");
   check(initial.cells.at(120).style.italic && initial.cells.at(150).style.italic && initial.cells.at(180).style.italic,
         "disabled ancestor affects label, button and checkbox paint");
   check(take(scene.tree->measure(scene.label, {})).width == 13, "label measures Unicode cells rather than bytes");

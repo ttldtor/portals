@@ -200,10 +200,32 @@ TEST_CASE("constant standard theme reproduces existing ThemeTokens helper for al
   const auto after = sc::materialize(STANDARD);
   CHECK(resolveStyle(after, {"Button", "", {}}) == resolveStyle(before, {"Button", "", {}}));
   CHECK(resolveStyle(after, {"LineEdit", "", {}}) == resolveStyle(before, {"LineEdit", "", {}}));
+  CHECK(resolveStyle(after, {"Border", "", {}}) == resolveStyle(before, {"Border", "", {}}));
+  const ComputedStyle italicFallback{.selected = {.bold = true, .italic = true}};
+
+  CHECK_FALSE(resolveStyle(after, {"Table", "", {}}, italicFallback).selected.italic);
+  CHECK(resolveStyle(after, {"Table", "", {}}, italicFallback) ==
+        resolveStyle(before, {"Table", "", {}}, italicFallback));
+
+  const CellStyle expectedFrame{TOKENS.accent, TOKENS.background, true};
+  const auto initialFrame = resolveStyle(after, {"Border", "", {}}).frame[1];
+
+  CHECK(initialFrame.line == expectedFrame);
+  CHECK(initialFrame.title == expectedFrame);
+  CHECK(initialFrame.ends == expectedFrame);
+
   Fixture fixture;
   auto live = take(sc::live(*fixture.owner, STANDARD));
   CHECK(take(live.set<"selection">(RgbColor{70, 80, 90})));
   CHECK(fixture.read().selected.background == RgbColor{70, 80, 90});
+  CHECK(take(live.set<"accent">(RgbColor{20, 30, 40})));
+  const auto updatedFrame = fixture.read().frame[1];
+
+  REQUIRE(updatedFrame.line);
+  CHECK(updatedFrame.line->foreground == RgbColor{20, 30, 40});
+  CHECK(updatedFrame.line->background == TOKENS.background);
+  CHECK(updatedFrame.title == updatedFrame.line);
+  CHECK(updatedFrame.ends == updatedFrame.line);
 }
 
 TEST_CASE("live scalar changes use existing paint layout invalidation and equal no-op") {

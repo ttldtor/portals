@@ -9,7 +9,7 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 - Added a configurable bundle-script test timeout for slow development filesystems, preserving its existing default and all checks.
 
-- Added indexed live suggestions by composing text sources with ordinary virtual lists. Immutable worker-built indexes provide bounded Unicode prefix/fuzzy top-K results, stable row selections and grapheme-safe highlights; worker-owned index storage keeps large cache retirement off the UI path.
+- Added indexed live suggestions by composing text sources with ordinary virtual lists. Immutable worker-built indexes provide bounded Unicode prefix/fuzzy top-K results, stable row selections and grapheme-safe bold/underlined highlights that remain distinct on selected rows; worker-owned index storage keeps large cache retirement off the UI path.
 
 - FormField supports opt-in worker validation with pending/error presentation, exact draft/model fencing and the existing editing modes and Undo/Redo. Candidate and result-message budgets are configurable; ordinary synchronous validators keep their existing error policy.
 

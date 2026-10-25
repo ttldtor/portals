@@ -170,10 +170,10 @@ public:
 
 /** @brief Owning bounds and appearances for a one-line editor. */
 struct LineEditOptions {
-  TextLimits limits{4096, 4096, 4096, 8192};                       ///< Whole draft limits, never silent truncation.
-  WidthPolicy widthPolicy{};                                       ///< Immutable cell-width policy for this editor.
-  ControlStyle style{};                                            ///< Normal, focused and disabled appearance.
-  CellStyle selection{RgbColor{0, 0, 0}, RgbColor{180, 200, 255}}; ///< Whole selected grapheme appearance.
+  TextLimits limits{4096, 4096, 4096, 8192};   ///< Whole draft limits, never silent truncation.
+  WidthPolicy widthPolicy{};                   ///< Immutable cell-width policy for this editor.
+  ControlStyle style{};                        ///< Normal, focused and disabled appearance.
+  CellStyle selection{{}, {}, true, true};     ///< Whole selected grapheme appearance.
   CellStyle cursor{{}, {}, true, false, true}; ///< Software caret cell; whole wide glyph when it fits.
   EditMode editMode{EditMode::IMMEDIATE};      ///< Confirmation policy shared by input, paste and fluent text edits.
   TextHistoryOptions history{};                ///< Enabled by default: 128 combined groups, 1 MiB retained snapshots.
