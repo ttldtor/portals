@@ -213,6 +213,7 @@ python tools/check_naming.py build/naming --clang-tidy clang-tidy
 | `build` | Required positional path | Directory containing `compile_commands.json`; resolved from the current directory |
 | `--clang-tidy EXE` | `clang-tidy` | Executable name on `PATH` or path to the executable |
 | `--jobs N` | `1` | Positive maximum number of concurrent clang-tidy processes |
+| `--base REV`, `--head REV` | Omitted together | Select affected translation units from the complete `base...head` diff; `head` must match the clean checked-out revision |
 | `--timings JSON` | No report | Overwrite a JSON report at this path; its parent directory must exist |
 | `-h`, `--help` | Optional | Print usage and exit |
 
@@ -221,6 +222,37 @@ The script selects unique translation units under `src`, `tests`, `tools`,
 are skipped. The deliberately invalid `static_scene`, `static_styles` and
 `ct_pss` fixtures named `tests/fixtures/<fixture>/invalid.cpp` are also skipped.
 Only translation units present in the database are checked.
+
+For a clean Git checkout and a POSIX Clang compilation database, pass both
+`--base` and `--head` to select affected sources. The checker scans fresh
+preprocessor dependencies for every eligible compilation command, including
+different commands for the same source. It selects sources that include a
+modified project C++ file directly or transitively. Conditional includes use
+the macros and include paths in that command. No previous dependency cache or
+previous successful naming result is reused.
+
+```sh
+python tools/check_naming.py build/naming --jobs 2 --base origin/main --head HEAD --timings build/naming/timings.json
+```
+
+The selector supports modifications to existing project C++ sources and headers.
+Added, deleted or renamed files, changes to build/tooling configuration, unknown
+paths, missing Git history, a dirty tracked checkout, unsupported compiler
+commands or a dependency-scan failure request the full check instead. The console
+reports the mode, selected/total source counts and reason. A valid selection may
+contain zero sources when no eligible command depends on the changed file.
+Selection is limited to the configured compilation database; it does not prove
+coverage of other platforms or macro configurations.
+Untracked or ignored inputs under the project source roots also request a full
+check; ordinary Python bytecode and build artifacts outside those roots do not.
+
+The PR naming job fetches the history and uses the target revision plus the
+checked-out merge candidate as the diff endpoints. Running without these options,
+including in the release workflow, always checks the complete eligible set.
+The **Full naming check** workflow also runs the complete check every Monday at
+03:17 UTC and supports manual dispatch from GitHub Actions.
+The scan itself takes time; compare total scan-plus-analysis time with a full
+check rather than comparing source counts alone.
 
 For each file, it invokes clang-tidy with `-p <build>`, `--quiet` and the
 repository `.clang-tidy` as `--config-file`, using the repository root as its
@@ -240,9 +272,11 @@ with a Python diagnostic. The script continues after a clang-tidy nonzero exit
 to check the remaining files.
 
 Use `--jobs 2` to allow two checks at once; the CI and release naming jobs use
-this setting while retaining the complete selection. With `--timings timings.json`,
+this setting. With `--timings timings.json`,
 the report contains `jobs`, `total_seconds` and a sorted `translation_units`
 array of `source` (checkout-relative path), `seconds` and `returncode`.
+The `selection` object records `mode`, `reason`, `changed_paths`, selected source
+paths/counts, the total eligible count, dependency-scan seconds and command count.
 Times use a monotonic wall clock: per-unit time covers process launch through
 completion; total time includes database loading, scheduling and console replay,
 but excludes writing the report. Timings are written after all checks finish,
@@ -254,9 +288,11 @@ comparing measurements.
 CI and release jobs save this report as the `naming-timings` artifact for 14 days.
 An artifact-upload outage does not change the naming check result.
 
-Run `python -m unittest tools.test_check_naming -v` to test selection,
+Run `python -m unittest tools.test_check_naming tools.ci.test_naming_selection -v` to test selection,
 ordering, failures, bounded concurrency, timings and temporary-file cleanup
 with real Python subprocesses; no clang-tidy installation is needed.
+Dependency-selection integration tests additionally use Git and the Clang POSIX
+driver on `PATH`; compiler-dependent cases are skipped when Clang is absent.
 
 <a id="tool-ci"></a>
 

@@ -35,6 +35,10 @@ class NamingRunnerTests(unittest.TestCase):
         self.root = self.base / "project with spaces"
         (self.root / "tools").mkdir(parents=True)
         shutil.copyfile(RUNNER, self.root / "tools/check_naming.py")
+        selector = RUNNER.parent / "ci/naming_selection.py"
+        if selector.exists():
+            (self.root / "tools/ci").mkdir()
+            shutil.copyfile(selector, self.root / "tools/ci/naming_selection.py")
         self.build = self.base / "build with spaces"
         self.build.mkdir()
         self.events = self.base / "events"
@@ -64,6 +68,39 @@ class NamingRunnerTests(unittest.TestCase):
 
     def records(self):
         return [json.loads(path.read_text()) for path in self.events.glob("*.json")]
+
+    def test_affected_mode_falls_back_to_full_without_git_history(self):
+        self.database(["src/a.cpp", "tests/b.cpp"])
+        report = self.base / "timings.json"
+        result = self.run_checker("--base", "missing-base", "--head", "HEAD",
+                                  "--timings", str(report))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.records()), 2)
+        selection = json.loads(report.read_text())["selection"]
+        self.assertEqual(selection["mode"], "full")
+        self.assertEqual(selection["selected_count"], 2)
+        self.assertTrue(selection["reason"])
+
+    def test_affected_revisions_must_be_paired(self):
+        self.database(["src/a.cpp"])
+        for arguments in (("--base", "HEAD"), ("--head", "HEAD")):
+            result = self.run_checker(*arguments)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn("together", result.stderr)
+        self.assertFalse(self.records())
+
+    def test_valid_empty_selection_reports_success_without_analyzer_launch(self):
+        self.database(["src/a.cpp"])
+        selector = self.root / "tools/ci/naming_selection.py"
+        selector.write_text('def select_sources(*args):\n'
+                            '    return dict(mode="affected", reason="unused header", changed_paths=[], '
+                            'selected_sources=set(), scan_seconds=0.1, scan_commands=1)\n')
+        report = self.base / "empty.json"
+        result = self.run_checker("--base", "base", "--head", "HEAD", "--timings", str(report))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self.records())
+        self.assertIn("Checked 0 translation units; 0 failed.", result.stdout)
+        self.assertEqual(json.loads(report.read_text())["selection"]["selected_count"], 0)
 
     def test_selection_and_invocation_contract(self):
         selected = [f"{folder}/unit_{folder}.cpp" for folder in

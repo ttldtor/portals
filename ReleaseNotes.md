@@ -7,6 +7,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Pull-request naming checks can select translation units from fresh compiler
+  dependencies and the complete PR diff. Unsupported changes or incomplete
+  dependency information retain the full check; release checks remain complete.
+
 - Added a configurable bundle-script test timeout for slow development filesystems, preserving its existing default and all checks.
 
 - Added indexed live suggestions by composing text sources with ordinary virtual lists. Immutable worker-built indexes provide bounded Unicode prefix/fuzzy top-K results, stable row selections and grapheme-safe bold/underlined highlights that remain distinct on selected rows; worker-owned index storage keeps large cache retirement off the UI path.
