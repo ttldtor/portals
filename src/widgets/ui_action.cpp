@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
-#include <portals/ui_action.hpp>
+#include "ui_action_state.hpp"
+#include <portals/ui_menu.hpp>
 
 #include <algorithm>
 #include <limits>
@@ -22,39 +23,6 @@ struct ActionCallback {
   }
 
   Action::Callback callback;
-};
-
-struct ActionRecord {
-  std::string key = std::string(0, '\0');
-  std::shared_ptr<const ActionMetadata> metadata;
-  std::shared_ptr<ActionCallback> callback;
-  bool retired{};
-  bool invoking{};
-};
-
-struct ActionPresenter {
-  Node<Button> node;
-  std::shared_ptr<ActionRecord> record;
-  std::weak_ptr<const ActionMetadata> rendered;
-};
-
-struct ActionStore {
-  explicit ActionStore(ActionSetOptions options) : options(options) {
-  }
-
-  const std::thread::id owner = std::this_thread::get_id();
-  ActionSetOptions options;
-  std::vector<std::shared_ptr<ActionRecord>> records = std::vector<std::shared_ptr<ActionRecord>>(0);
-  std::vector<ActionPresenter> presenters = std::vector<ActionPresenter>(0);
-  ManagedScene *scene{};
-  std::weak_ptr<const void> lifetime;
-  bool attached{};
-  bool closed{};
-  bool changing{};
-};
-
-struct ActionRegistry {
-  std::vector<std::shared_ptr<ActionStore>> sets = std::vector<std::shared_ptr<ActionStore>>(0);
 };
 
 std::expected<void, TreeError> ActionAccess::live(const ActionStore &store) {
@@ -92,7 +60,13 @@ std::expected<void, TreeError> ActionAccess::dirty(const ActionStore &store) {
     return {};
   }
 
-  return store.scene->app_.tree().invalidate(store.scene->root_, Invalidation::LAYOUT);
+  auto invalidated = store.scene->app_.tree().invalidate(store.scene->root_, Invalidation::LAYOUT);
+
+  if (invalidated) {
+    store.menusDirty = true;
+  }
+
+  return invalidated;
 }
 
 std::expected<void, TreeError> ActionAccess::write(const ActionStore &store) {
@@ -162,6 +136,7 @@ std::expected<void, ManagedError> ActionAccess::attach(ManagedScene &scene, cons
 
     if (previous) {
       incoming->sets = previous->sets;
+      incoming->menus = previous->menus;
     }
 
     incoming->sets.push_back(store);
@@ -225,7 +200,18 @@ std::expected<void, ManagedError> ActionAccess::button(ManagedScene &scene, Node
     });
   });
 
-  if (store->presenters.size() >= store->options.maxPresenters) {
+  std::erase_if(store->menus, [&](const MenuPresenter &presenter) {
+    return !tree.read(presenter.node, [](const Menu &) {
+    });
+  });
+
+  std::size_t menuEntries{};
+
+  for (const auto &presenter : store->menus) {
+    menuEntries += presenter.entries;
+  }
+
+  if (store->presenters.size() + menuEntries >= store->options.maxPresenters) {
     return std::unexpected(ManagedScene::error(ManagedPhase::BIND, node, TreeError::NODE_LIMIT));
   }
 
@@ -340,7 +326,7 @@ std::expected<void, TreeError> ActionAccess::prepare(ManagedScene &scene) {
     });
   }
 
-  return {};
+  return scene.prepareActionMenus();
 }
 
 void ActionAccess::retire(ManagedScene &scene) noexcept {
@@ -360,6 +346,7 @@ void ActionAccess::retire(ManagedScene &scene) noexcept {
     }
 
     store->presenters.clear();
+    store->menus.clear();
     store->records.clear();
   }
 }

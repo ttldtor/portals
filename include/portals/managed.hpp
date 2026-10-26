@@ -2412,6 +2412,7 @@ private:
   std::shared_ptr<detail::ThemeSelectionRecord> themeSelection_;
   std::shared_ptr<detail::ThemeSelectorRecord> themeSelector_;
   std::shared_ptr<ui::detail::ActionRegistry> actionSets_;
+  std::expected<void, TreeError> prepareActionMenus();
   bool installingThemeSelection_{};
   std::vector<std::shared_ptr<Entry>> entries_;
   std::shared_ptr<detail::ManagedScrollState> scroll_;

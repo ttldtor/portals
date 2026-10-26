@@ -7,6 +7,8 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Added an action-backed retained `Menu` with compact declarative factories, keyboard and mouse selection, shared command captions and availability, Unicode rows and checked-state presentation. Menus reuse the same actions as buttons and explicit shortcuts; popup menus and command palettes remain separate features.
+
 - Added model-backed `ComboBox` and `DropDown` with compact declarative factories, accepted-selection callbacks and worker-prepared popup rows. Editable drafts preserve ordinary LineEdit modes and Undo; source identities fence stale selections, and dismissed popups release their transient resources.
 
 - Pull-request naming checks can select translation units from fresh compiler

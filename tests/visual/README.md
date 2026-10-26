@@ -3,6 +3,18 @@
 Public examples remain ordinary applications. Terminal automation and recorded
 interaction sequences belong here.
 
+`commands.tape` records `portals_commands_example`: menu selection remains visible
+before Enter, Save copies the current editor value, and Clear leaves the saved
+caption unchanged. With the same tools and preset described below:
+
+```powershell
+vhs validate tests/visual/commands.tape
+vhs tests/visual/commands.tape
+```
+
+It writes `build/commands.gif` and `build/commands-frames/`, then checks that F10
+exits successfully. The public application contains no recording or replay code.
+
 `choices.tape` records the choices example on Windows using optional VHS, ttyd
 and FFmpeg tools. Build `portals_choices_example` with the
 `windows-msvc-release` preset, put the recording tools on the calling process's
