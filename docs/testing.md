@@ -166,8 +166,15 @@ Linux configuration. Run each platform's database to cover conditional native
 code. The script checks project translation units and their project headers,
 excludes vendored sources, returns a nonzero status on errors, and never applies
 fixes. It can also check a separately configured module experiment database.
+Use `--jobs 2` for up to two concurrent clang-tidy processes with diagnostics
+grouped in source order. The default remains one process. Optional
+`--timings timings.json` records total/per-unit wall time and exit codes; see
+the [naming checker reference](developer-tools-build.md#tool-naming).
+Run `python -m unittest tools.test_check_naming -v` for the subprocess runner's
+toolchain-independent regression tests.
 The Linux CI naming job uses Clang/clang-tidy 20 and GCC 14's standard library;
-it installs the toolchain from Ubuntu 24.04's updated package repositories.
+it uses two workers and installs the toolchain from Ubuntu 24.04's updated
+package repositories.
 Dependent template references and inactive preprocessor branches still require
 the normal build/test matrix; a naming pass alone is not a compilation guarantee.
 

@@ -9,6 +9,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 - Added model-backed `ComboBox` and `DropDown` with compact declarative factories, accepted-selection callbacks and worker-prepared popup rows. Editable drafts preserve ordinary LineEdit modes and Undo; source identities fence stale selections, and dismissed popups release their transient resources.
 
+- Pull-request naming checks can select translation units from fresh compiler
+  dependencies and the complete PR diff. Unsupported changes or incomplete
+  dependency information retain the full check; release checks remain complete.
+
 - Added a configurable bundle-script test timeout for slow development filesystems, preserving its existing default and all checks.
 
 - Added indexed live suggestions by composing text sources with ordinary virtual lists. Immutable worker-built indexes provide bounded Unicode prefix/fuzzy top-K results, stable row selections and grapheme-safe bold/underlined highlights that remain distinct on selected rows; worker-owned index storage keeps large cache retirement off the UI path.
@@ -46,6 +50,8 @@ planned work is not included. An **Unreleased** heading has no publication date.
 - Documented complete UI client compilation measurements, separating compile/link and handler-edit observations from include-graph size and runtime benchmarks.
 
 - LogView reuses wrapped rows when appending at the same width; retained row descriptors are still copied, while resizing rebuilds wrapping.
+
+- The C++ naming checker supports bounded parallel analysis, grouped diagnostics and optional timing reports. CI and release checks use two workers while retaining the full translation-unit selection.
 
 ## v0.6.0 (2026-10-24)
 
