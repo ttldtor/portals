@@ -35,11 +35,14 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - name: Test naming runner
-        run: python3 -m unittest tools.test_check_naming -v
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - name: Test APT cache validation
         run: python3 -m unittest discover -s tools/ci -p test_apt_cache.py -v
       - uses: ./.github/actions/naming-toolchain
+      - name: Test naming runner and dependency selection
+        run: python3 -m unittest tools.test_check_naming tools.ci.test_naming_selection -v
       - name: Configure compilation database
         run: >-
           cmake -S . -B build/naming -G Ninja
@@ -51,7 +54,14 @@ jobs:
           -DPORTALS_BUILD_TESTS=ON
           -DPORTALS_BUILD_EXAMPLES=ON
       - name: Check project names
-        run: python3 tools/check_naming.py build/naming --clang-tidy clang-tidy-20 --jobs 2 --timings build/naming/timings.json
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        # Analyze the checked-out merge candidate, including the entire PR.
+        run: >-
+          python3 tools/check_naming.py build/naming --clang-tidy clang-tidy-20
+          --jobs 2 --base "$BASE_SHA" --head "$HEAD_SHA"
+          --timings build/naming/timings.json
       - name: Save naming timings
         if: ${{ always() && hashFiles('build/naming/timings.json') != '' }}
         continue-on-error: true

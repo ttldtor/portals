@@ -45,8 +45,12 @@ def main():
     parser.add_argument("build", type=Path, help="Directory containing compile_commands.json")
     parser.add_argument("--clang-tidy", default="clang-tidy", help="Executable name on PATH or full path (default: clang-tidy)")
     parser.add_argument("--jobs", type=positive_jobs, default=1, help="Maximum concurrent clang-tidy processes, positive integer (default: 1)")
+    parser.add_argument("--base", help="Base Git revision for affected-file selection; use together with --head (default: check all sources)")
+    parser.add_argument("--head", help="Checked-out Git revision for the complete base...head diff; unsafe selection falls back to all sources")
     parser.add_argument("--timings", type=Path, help="Overwrite this JSON file with total/per-TU wall seconds, return codes and jobs (default: no report; parent directory must exist)")
     args = parser.parse_args()
+    if bool(args.base) != bool(args.head):
+        parser.error("--base and --head must be supplied together")
     started = perf_counter()
     root = Path(__file__).resolve().parents[1]
     build = args.build.resolve()
@@ -72,6 +76,18 @@ def main():
             files.add(source)
     if not files:
         parser.error("The compilation database contains no project C++ sources")
+    total_sources = len(files)
+    selection = dict(mode="full", reason="Full check requested", changed_paths=[],
+                     scan_seconds=0.0, scan_commands=0)
+    if args.base:
+        from ci.naming_selection import select_sources
+
+        selection = select_sources(root, entries, files, args.base, args.head, args.jobs)
+        files = selection.pop("selected_sources")
+    selection.update(total_count=total_sources, selected_count=len(files),
+                     sources=[str(source.relative_to(root).as_posix()) for source in sorted(files)])
+    print(f"Naming selection: {selection['mode']}; {len(files)}/{total_sources} translation units; "
+          f"{selection['reason']}", flush=True)
     failed = []
     timings = []
     sources = iter(enumerate(sorted(files)))
@@ -107,6 +123,7 @@ def main():
     if args.timings:
         args.timings.write_text(json.dumps(dict(jobs=args.jobs,
                                                total_seconds=perf_counter() - started,
+                                               selection=selection,
                                                translation_units=timings), indent=2) + "\n",
                                 encoding="utf-8")
     return bool(failed)
