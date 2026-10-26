@@ -359,6 +359,10 @@ public:
       return;
     }
     try {
+      if (config_.enabled && !config_.enabled()) {
+        pause();
+        return;
+      }
       publishPending();
       const auto executor = SceneAccess::application(scene_).background();
       const bool searchable = !query_.empty() && !oversized_ && !(failedBuild_ && settled_ == generation_);
@@ -390,6 +394,10 @@ public:
       return;
     }
     try {
+      if (config_.enabled && !config_.enabled()) {
+        pause();
+        return;
+      }
       auto source = binding_->capture(scene_);
 
       if (!source) {
@@ -618,7 +626,31 @@ public:
   }
 
 private:
+  void pause() noexcept {
+    if (paused_) {
+      return;
+    }
+    paused_ = true;
+    if (buildLatest_) {
+      buildLatest_->cancel();
+    }
+    if (queryLatest_) {
+      queryLatest_->cancel();
+    }
+    building_ = false;
+    scheduled_ = settled_ = 0;
+    buildCompletion_.reset();
+    queryCompletion_.reset();
+    buildPublication_.reset();
+    queryPublication_.reset();
+    pendingSnapshot_.reset();
+    pendingTransport_.reset();
+    ready_.reset();
+    activation_.reset();
+  }
+
   bool serviceLatest() {
+    paused_ = false;
     for (const auto &publication : {buildPublication_, queryPublication_}) {
       if (publication) {
         if (auto error = publication->take()) {
@@ -777,7 +809,7 @@ private:
   std::shared_ptr<const SearchResult> ready_;
   std::optional<std::pair<std::uint64_t, RowId>> activation_;
   bool oversized_{}, registerBlocked_{}, building_{}, cached_{}, buildBlocked_{}, failedBuild_{}, cancelled_{},
-    readinessRequested_{};
+    readinessRequested_{}, paused_{};
 };
 
 std::expected<TextSource, ManagedError> Access::resolveSearchText(ManagedScene &scene, const TextSource &source,
@@ -918,7 +950,8 @@ Description<VirtualList<SearchItem>> Access::suggestions(TextSource query,
         return std::unexpected(attached.error());
       }
       auto empty = std::make_shared<const SearchResult>();
-      auto model = scene.model<SearchItem>(std::make_shared<const SearchSnapshot>(1, empty));
+      auto model = config.resultModel ? std::expected<ManagedModel<SearchItem>, ManagedError>(*config.resultModel)
+                                      : scene.model<SearchItem>(std::make_shared<const SearchSnapshot>(1, empty));
       if (!model) {
         return std::unexpected(model.error());
       }

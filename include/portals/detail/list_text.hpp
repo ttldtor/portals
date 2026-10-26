@@ -18,6 +18,8 @@ struct PreparedListText {
   }
 
   GraphemeText text;
+  // The prepared delegate paints owning runs; text alone is only the logical value.
+  // Every nonempty display therefore needs at least one prepared paint run.
   std::vector<PreparedListRun> runs = std::vector<PreparedListRun>(std::initializer_list<PreparedListRun>{});
 };
 

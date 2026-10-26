@@ -14,7 +14,7 @@ namespace portals::detail {
 struct SearchBudgetExceeded {};
 
 // Count BEFORE upstream allocation, including simultaneous old/new vector capacities.
-class SearchMemory final : public std::pmr::memory_resource {
+class SearchMemory final : public ProjectionMemory {
 public:
   explicit SearchMemory(std::size_t cap) : cap_(cap) {
   }
@@ -26,6 +26,9 @@ public:
   std::size_t peak() const noexcept {
     return peak_;
   }
+
+  void chargeExternal(std::size_t bytes) override;
+  void releaseExternal(std::size_t bytes) noexcept override;
 
 private:
   void *do_allocate(std::size_t bytes, std::size_t alignment) override;

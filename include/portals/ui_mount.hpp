@@ -5,6 +5,10 @@
 #include <portals/ui_layout.hpp>
 
 namespace portals::ui {
+namespace detail {
+template <class T>
+std::expected<Node<T>, ManagedError> mountAt(ManagedScene &, Node<Widget>, Description<T> &&, ControlContext);
+}
 
 /** @brief Consume a recipe into the existing managed subtree, with failure cleanup.
  * @tparam T Concrete root Widget type constructed by the recipe.
@@ -16,9 +20,9 @@ namespace portals::ui {
  * References publish only after all nodes remain live. External callback effects are not undone.
  */
 template <class T>
-std::expected<Node<T>, ManagedError> mount(ManagedScene &scene, Description<T> &&description,
-                                           ControlContext controls) try {
-  auto admitted = detail::Access::check(scene, scene.root());
+std::expected<Node<T>, ManagedError> detail::mountAt(ManagedScene &scene, Node<Widget> mountParent,
+                                                     Description<T> &&description, ControlContext controls) try {
+  auto admitted = detail::Access::check(scene, mountParent);
   if (!admitted) {
     auto consumed = std::move(description);
     return std::unexpected(admitted.error());
@@ -140,7 +144,34 @@ std::expected<Node<T>, ManagedError> mount(ManagedScene &scene, Description<T> &
     std::unexpected(detail::error(scene.root(), TreeError::INVALID_ARGUMENT));
 
   try {
-    result = detail::Access::mount(std::move(description), scene, scene.root(), context);
+    Node<OverlayHost> automaticHost;
+
+    auto needsHost = detail::Access::prepareChoiceHost(description, context.controls);
+    if (!needsHost) {
+      result = std::unexpected(needsHost.error());
+    } else if (*needsHost) {
+      const AxisSize fill{.preferred = 0, .mode = SizeMode::FLEX};
+      auto host = scene.emplace<OverlayHost>(mountParent, OverlayHostOptions{}, SizePolicy{fill, fill});
+
+      if (!host) {
+        result = std::unexpected(host.error());
+      } else {
+        automaticHost = *host;
+        context.root = *host;
+        result = detail::Access::mount(std::move(description), scene, *host, context);
+
+        if (result) {
+          const auto body = context.mountedOuter != Node<Widget>{} ? context.mountedOuter : Node<Widget>(*result);
+          auto bound = scene.overlayHost(*host, body);
+
+          if (!bound) {
+            result = std::unexpected(bound.error());
+          }
+        }
+      }
+    } else {
+      result = detail::Access::mount(std::move(description), scene, mountParent, context);
+    }
 
     if (result) {
       for (auto &finalize : context.finalize) {
@@ -193,6 +224,11 @@ std::expected<Node<T>, ManagedError> mount(ManagedScene &scene, Description<T> &
   auto consumed = std::move(description);
 
   return std::unexpected(detail::error(scene.root(), TreeError::NO_MEMORY));
+}
+
+template <class T>
+std::expected<Node<T>, ManagedError> mount(ManagedScene &scene, Description<T> &&description, ControlContext controls) {
+  return detail::mountAt(scene, scene.root(), std::move(description), std::move(controls));
 }
 
 /** @param scene Existing UI owner. @param description Consuming recipe using builtin settings only.

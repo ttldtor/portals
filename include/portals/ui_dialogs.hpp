@@ -89,7 +89,8 @@ Description<OverlayHost> overlayHost(OverlayHostOptions options, Body &&body, La
       if (!content) {
         return std::unexpected(content.error());
       }
-      auto bound = scene.overlayHost(*host, *content);
+      const auto bodyRoot = context.mountedOuter != Node<Widget>{} ? context.mountedOuter : Node<Widget>(*content);
+      auto bound = scene.overlayHost(*host, bodyRoot);
       if (!bound) {
         return std::unexpected(bound.error());
       }
@@ -114,8 +115,9 @@ Description<OverlayHost> overlayHost(OverlayHostOptions options, Body &&body, La
       return result ? host : std::unexpected(result.error());
     });
 
-  return detail::Access::configuredControl(detail::Access::withLayout(std::move(description), std::move(layout)),
-                                           "OverlayHost");
+  return detail::Access::configuredControl(
+    detail::Access::choiceHost(detail::Access::withLayout(std::move(description), std::move(layout)), true),
+    "OverlayHost");
 }
 
 /** @tparam Body Consuming ordinary-body recipe.

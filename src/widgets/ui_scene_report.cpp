@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include <portals/async.hpp>
+#include <portals/search.hpp>
 #include <portals/ui_scene.hpp>
 
 #include <algorithm>
@@ -10,6 +11,30 @@
 namespace portals::ui {
 
 namespace {
+constexpr const char *searchErrorName(SearchError error) noexcept {
+  switch (error) {
+  case SearchError::INVALID_ARGUMENT:
+    return "INVALID_ARGUMENT";
+  case SearchError::INVALID_TEXT:
+    return "INVALID_TEXT";
+  case SearchError::NOT_READY:
+    return "NOT_READY";
+  case SearchError::LIMIT_EXCEEDED:
+    return "LIMIT_EXCEEDED";
+  case SearchError::STALE_SOURCE:
+    return "STALE_SOURCE";
+  case SearchError::CANCELLED:
+    return "CANCELLED";
+  case SearchError::NO_MEMORY:
+    return "NO_MEMORY";
+  case SearchError::CALLBACK_FAILED:
+    return "CALLBACK_FAILED";
+  case SearchError::UNAVAILABLE:
+    return "UNAVAILABLE";
+  }
+  return "UNKNOWN";
+}
+
 constexpr const char *phaseName(ManagedPhase phase) noexcept {
   switch (phase) {
   case ManagedPhase::MOUNT:
@@ -628,6 +653,9 @@ void reportFailure(const ManagedError &failure, std::source_location origin, std
 
   if (failure.background) {
     std::fprintf(stderr, " background=BackgroundError(%s)", categoryName(*failure.background));
+  }
+  if (failure.search) {
+    std::fprintf(stderr, " search=SearchError(%s)", searchErrorName(*failure.search));
   }
 
   if (failure.password) {

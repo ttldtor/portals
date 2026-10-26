@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include <portals/combo_box.hpp>
 #include <portals/detail/dialog_command_result.hpp>
 #include <portals/detail/quit_command.hpp>
 #include <portals/find_bar.hpp>
@@ -78,6 +79,14 @@ Ref<LineEdit> fieldEditor(const std::shared_ptr<RefTarget> &target);
 std::expected<bool, ManagedError> validateField(const std::shared_ptr<RefTarget> &target);
 std::expected<void, ManagedError> displayField(const std::shared_ptr<RefTarget> &target, FieldValidation value);
 Ref<LineEdit> findEditor(const std::shared_ptr<RefTarget> &target);
+Ref<LineEdit> choiceEditor(const std::shared_ptr<RefTarget> &target);
+std::expected<ChoiceSelection, ManagedError> choiceSelection(const std::shared_ptr<RefTarget> &target);
+std::expected<bool, ManagedError> choiceOpened(const std::shared_ptr<RefTarget> &target);
+std::expected<void, ManagedError> choiceOpen(const std::shared_ptr<RefTarget> &, bool, std::source_location);
+std::expected<void, ManagedError> choiceSelect(const std::shared_ptr<RefTarget> &, std::uint64_t, std::source_location);
+std::expected<void, ManagedError> choiceSelect(const std::shared_ptr<RefTarget> &, ChoiceSelection,
+                                               std::source_location);
+std::expected<void, ManagedError> choiceClear(const std::shared_ptr<RefTarget> &, std::source_location);
 std::expected<FindMatch, ManagedError> findNavigate(const std::shared_ptr<RefTarget> &target, FindDirection direction);
 std::expected<FindMatch, ManagedError> findMatch(const std::shared_ptr<RefTarget> &target);
 std::expected<bool, ManagedError> findCurrent(const std::shared_ptr<RefTarget> &target, const FindMatch &match);
@@ -336,10 +345,10 @@ public:
    * Assignment between TextProperty values still copies once rather than creating a binding.
    */
   TextSource source() const {
-    return TextSource(target_,
-                      (expectedType_ == "LineEdit" || expectedType_ == "FormField" || expectedType_ == "FindBar")
-                        ? TextSource::Kind::DRAFT
-                        : TextSource::Kind::CAPTION);
+    return TextSource(target_, (expectedType_ == "LineEdit" || expectedType_ == "FormField" ||
+                                expectedType_ == "FindBar" || expectedType_ == "ComboBox")
+                                 ? TextSource::Kind::DRAFT
+                                 : TextSource::Kind::CAPTION);
   }
 
   /** @param other Observing proxy copied without reading or changing a widget; errors/resolver are copied too. */
@@ -1034,9 +1043,80 @@ public:
 
   /** @return Query editor observation; acquire after successful mount. */
   Ref<LineEdit> editor() const
-    requires std::same_as<T, FindBar>
+    requires(std::same_as<T, FindBar> || std::derived_from<T, ComboBox>)
   {
-    return detail::findEditor(target());
+    if constexpr (std::derived_from<T, ComboBox>) {
+      return detail::choiceEditor(target());
+    } else {
+      return detail::findEditor(target());
+    }
+  }
+
+  /** @param resolver Optional text resolver. @param origin Mutation call site.
+   * @return Standard editable draft proxy; selection remains independent.
+   */
+  TextProperty text(TextResolver resolver = {}, std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, ComboBox>
+  {
+    return TextProperty(target(), std::move(resolver), "ComboBox", origin);
+  }
+
+  /** @return Owning accepted row, independent of current editable draft. */
+  std::expected<ChoiceSelection, ManagedError> selection() const
+    requires std::derived_from<T, ComboBox>
+  {
+    return detail::choiceSelection(target());
+  }
+
+  /** @return Effective popup activation or exact affinity/lifetime error. */
+  std::expected<bool, ManagedError> opened() const
+    requires std::derived_from<T, ComboBox>
+  {
+    return detail::choiceOpened(target());
+  }
+
+  /** @param origin Command site. @return Checked existing-dialog popup opening. */
+  std::expected<void, ManagedError> open(std::source_location origin = std::source_location::current()) const
+    requires std::derived_from<T, ComboBox>
+  {
+    return detail::choiceOpen(target(), true, origin);
+  }
+
+  /** @param origin Command site. @return Checked popup dismissal preserving editor history. */
+  std::expected<void, ManagedError> dismiss(std::source_location origin = std::source_location::current()) const
+    requires std::derived_from<T, ComboBox>
+  {
+    return detail::choiceOpen(target(), false, origin);
+  }
+
+  /** @param index Zero-based source ordinal captured now. @param origin Command site.
+   * @return Worker queue admission; eventual selection or typed provider error arrives asynchronously.
+   * A managed-model source requires its first ordinary prepare cycle. For startup selection,
+   * use ui::ComboBoxConfig::initial; prepareChecked alone does not pin runtime models.
+   */
+  std::expected<void, ManagedError> select(std::uint64_t index,
+                                           std::source_location origin = std::source_location::current()) const
+    requires std::derived_from<T, ComboBox>
+  {
+    return detail::choiceSelect(target(), index, origin);
+  }
+
+  /** @param value Owning exact-current source row. @param origin Command site.
+   * @return UI admission; acceptance and exact eventual errors use the existing scene delivery.
+   * Stale sources reject immediately. A later edit, clear or source replacement cancels the intent.
+   */
+  std::expected<void, ManagedError> select(ChoiceSelection value,
+                                           std::source_location origin = std::source_location::current()) const
+    requires std::derived_from<T, ComboBox>
+  {
+    return detail::choiceSelect(target(), std::move(value), origin);
+  }
+
+  /** @param origin Command site. @return Clear accepted selection, preserving the ordinary editor draft. */
+  std::expected<void, ManagedError> clearSelection(std::source_location origin = std::source_location::current()) const
+    requires std::derived_from<T, ComboBox>
+  {
+    return detail::choiceClear(target(), origin);
   }
 
   /** @param resolver Optional owning text resolver. @param origin Call site retained for mutations.
@@ -1478,6 +1558,8 @@ struct NamedAccess {
         editor = field->editor();
       } else if (const auto *find = dynamic_cast<const FindBar *>(&widget)) {
         editor = find->editor();
+      } else if (const auto *choice = dynamic_cast<const ComboBox *>(&widget)) {
+        editor = choice->editor();
       }
     });
 
@@ -1534,7 +1616,7 @@ struct NamedAccess {
         ManagedError{ManagedPhase::BIND, node.id(), checked ? TreeError::INVALID_ARGUMENT : checked.error(), {}, {}});
     }
 
-    if constexpr (std::same_as<T, FormField> || std::same_as<T, FindBar>) {
+    if constexpr (std::same_as<T, FormField> || std::same_as<T, FindBar> || std::derived_from<T, ComboBox>) {
       auto editor = fieldDraft(scene, node);
 
       if (!editor) {

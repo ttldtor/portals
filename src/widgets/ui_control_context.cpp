@@ -535,7 +535,8 @@ static_assert(schemaMatchesMask(GRID_SCHEMA, GRID_MASK));
 
 bool builtin(std::string_view name) noexcept {
   return name == "VBox" || name == "HBox" || name == "Label" || name == "Button" || name == "CheckBox" ||
-         name == "LineEdit" || name == "ThreeState" || name == "Password" || name == "FormField" || name == "FindBar";
+         name == "LineEdit" || name == "ThreeState" || name == "Password" || name == "FormField" || name == "FindBar" ||
+         name == "ComboBox" || name == "DropDown";
 }
 
 Mask builtinMask(std::string_view name) noexcept {
@@ -566,7 +567,7 @@ Mask builtinMask(std::string_view name) noexcept {
     return FORM_FIELD_MASK;
   }
 
-  if (name == "LineEdit") {
+  if (name == "LineEdit" || name == "ComboBox" || name == "DropDown") {
     return EDIT_MASK;
   }
   if (name == "Password") {
@@ -1966,7 +1967,7 @@ std::span<const ControlPropertyDescriptor> controlPropertySchema(std::string_vie
     return FORM_FIELD_SCHEMA;
   }
 
-  if (type == "LineEdit") {
+  if (type == "LineEdit" || type == "ComboBox" || type == "DropDown") {
     return EDIT_SCHEMA;
   }
   if (type == "Password") {

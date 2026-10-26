@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #include "key_help_state.hpp"
 #include "ui_scene_resource_internal.hpp"
+#include <portals/ui_combo_box.hpp>
 #include <portals/ui_log_view.hpp>
 
 #include <algorithm>
@@ -98,6 +99,12 @@ SceneResourceRegistry::SceneResourceRegistry() {
 
     return std::expected<Description<LineEdit>, ManagedError>(
       lineEdit(arguments.text, LineEditConfig{.options = std::move(*options)}));
+  });
+  (void)add<ComboBox>("ComboBox", [](SceneResourceArguments arguments) {
+    return comboBox(std::initializer_list<std::string_view>{}).settings(arguments.settings);
+  });
+  (void)add<DropDown>("DropDown", [](SceneResourceArguments arguments) {
+    return dropDown(std::initializer_list<std::string_view>{}).settings(arguments.settings);
   });
   (void)add<FindBar>("FindBar", [](SceneResourceArguments arguments) {
     // Resource-owned text is admitted at mount with the resolved instance limits.
@@ -1336,106 +1343,131 @@ std::expected<Node<Widget>, ManagedError> compile(ManagedScene &owner, ResourceD
 }
 } // namespace
 
-Description<Widget> resource(std::string_view source, SceneResourceOptions options) {
-  auto input = std::make_shared<const std::string>(source);
-  auto identity = std::make_shared<const std::string>("<string resource>");
+namespace {
+struct ChoiceResourceInput {
+  std::shared_ptr<const std::string> identity;
+  std::optional<SceneResourceFile> file;
+  std::string bytes;
+  bool loaded{};
 
-  return detail::Access::deferControlValidation(detail::Access::forwardOuter(detail::Access::transaction(
-    [input = std::move(input), identity = std::move(identity),
-     options = std::move(options)](ManagedScene &owner, Node<Widget> parent,
-                                   detail::MountContext &context) mutable -> std::expected<Node<Widget>, ManagedError> {
-      ResourceDocument document{identity};
+  std::expected<void, ManagedError> load(const SceneResourceOptions &options) {
+    ResourceDocument document{identity};
+    if (!valid(options.limits)) {
+      return std::unexpected(document.failure(Code::INVALID_LIMIT, 0));
+    }
+    if (loaded) {
+      return {};
+    }
+    errno = 0;
+    std::ifstream input(file->path, std::ios::binary);
+    if (!input) {
+      return std::unexpected(
+        document.failure(Code::FILE_IO, 0, std::error_code(errno ? errno : EIO, std::generic_category())));
+    }
+    std::array<char, 4096> buffer{};
+    while (input && bytes.size() <= options.limits.maxSourceBytes) {
+      const auto remaining = options.limits.maxSourceBytes - bytes.size();
+      const auto count = remaining < buffer.size() ? remaining + 1 : buffer.size();
+      input.read(buffer.data(), static_cast<std::streamsize>(count));
+      bytes.append(buffer.data(), static_cast<std::size_t>(input.gcount()));
+    }
+    if (input.bad() || (input.fail() && !input.eof())) {
+      return std::unexpected(
+        document.failure(Code::FILE_IO, bytes.size(), std::error_code(errno ? errno : EIO, std::generic_category())));
+    }
+    loaded = true;
+    return {};
+  }
+};
 
+Description<Widget> choiceResource(std::shared_ptr<ChoiceResourceInput> input, SceneResourceOptions options) {
+  auto settings = std::make_shared<const SceneResourceOptions>(std::move(options));
+  auto recipe = detail::Access::deferControlValidation(detail::Access::forwardOuter(detail::Access::transaction(
+    [input, settings](ManagedScene &owner, Node<Widget> parent,
+                      detail::MountContext &context) -> std::expected<Node<Widget>, ManagedError> {
+      ResourceDocument document{input->identity};
       try {
-        if (const auto &registration = detail::ResourceAccess::registrationFailure(options); registration) {
-          auto failure = document.failure(registration->first, 0, {}, false);
-
-          failure.cause = registration->second;
-
-          return std::unexpected(std::move(failure));
+        auto loaded = input->load(*settings);
+        if (!loaded) {
+          return std::unexpected(loaded.error());
         }
-
-        if (!valid(options.limits)) {
-          return std::unexpected(document.failure(Code::INVALID_LIMIT, 0));
-        }
-
-        if (input->size() > options.limits.maxSourceBytes) {
-          return std::unexpected(document.failure(Code::SOURCE_LIMIT, 0));
-        }
-
-        document.bytes = *input;
-
-        return compile(owner, document, options, parent, context);
+        document.bytes = input->bytes;
+        return compile(owner, document, *settings, parent, context);
       } catch (const std::bad_alloc &) {
         auto failure = document.failure(Code::NO_MEMORY, 0);
-
         failure.cause = TreeError::NO_MEMORY;
-
-        return std::unexpected(std::move(failure));
-      }
-    })));
-}
-
-Description<Widget> resource(SceneResourceFile source, SceneResourceOptions options) {
-  const auto pathBytes = source.path.generic_u8string();
-  auto identity =
-    std::make_shared<const std::string>(reinterpret_cast<const char *>(pathBytes.data()), pathBytes.size());
-
-  return detail::Access::deferControlValidation(detail::Access::forwardOuter(detail::Access::transaction(
-    [source = std::move(source), identity = std::move(identity),
-     options = std::move(options)](ManagedScene &owner, Node<Widget> parent,
-                                   detail::MountContext &context) mutable -> std::expected<Node<Widget>, ManagedError> {
-      ResourceDocument document{identity};
-
-      try {
-        if (const auto &registration = detail::ResourceAccess::registrationFailure(options); registration) {
-          auto failure = document.failure(registration->first, 0, {}, false);
-
-          failure.cause = registration->second;
-
-          return std::unexpected(std::move(failure));
-        }
-
-        if (!valid(options.limits)) {
-          return std::unexpected(document.failure(Code::INVALID_LIMIT, 0));
-        }
-
-        errno = 0;
-
-        std::ifstream input(source.path, std::ios::binary);
-
-        if (!input) {
-          return std::unexpected(
-            document.failure(Code::FILE_IO, 0, std::error_code(errno ? errno : EIO, std::generic_category())));
-        }
-
-        // Read a bounded extra byte to distinguish an exact cap from a truncated resource.
-        std::array<char, 4096> buffer{};
-
-        while (input && document.bytes.size() <= options.limits.maxSourceBytes) {
-          const auto remaining = options.limits.maxSourceBytes - document.bytes.size();
-          const auto count = remaining < buffer.size() ? remaining + 1 : buffer.size();
-
-          input.read(buffer.data(), static_cast<std::streamsize>(count));
-          document.bytes.append(buffer.data(), static_cast<std::size_t>(input.gcount()));
-        }
-
-        if (input.bad() || (input.fail() && !input.eof())) {
-          return std::unexpected(document.failure(Code::FILE_IO, document.bytes.size(),
-                                                  std::error_code(errno ? errno : EIO, std::generic_category())));
-        }
-
-        return compile(owner, document, options, parent, context);
-      } catch (const std::bad_alloc &) {
-        auto failure = document.failure(Code::NO_MEMORY, 0);
-
-        failure.cause = TreeError::NO_MEMORY;
-
         return std::unexpected(std::move(failure));
       } catch (const std::filesystem::filesystem_error &failure) {
         return std::unexpected(document.failure(Code::FILE_IO, 0, failure.code()));
       }
     })));
+  return detail::Access::choiceProbe(
+    std::move(recipe),
+    [input, settings](ControlContext inherited) -> std::expected<std::pair<bool, bool>, ManagedError> {
+      ResourceDocument document{input->identity};
+      try {
+        if (const auto &registration = detail::ResourceAccess::registrationFailure(*settings); registration) {
+          auto failure = document.failure(registration->first, 0, {}, false);
+          failure.cause = registration->second;
+          return std::unexpected(std::move(failure));
+        }
+        auto loaded = input->load(*settings);
+        if (!loaded) {
+          return std::unexpected(loaded.error());
+        }
+        document.bytes = input->bytes;
+        auto effective = *settings;
+        auto controls = settings->controls.value_or(inherited);
+        const bool typed = settings->format == SceneResourceFormat::CONFIGURATION ||
+                           detail::ControlContextAccess::hasUserConfiguration(controls);
+        if (typed) {
+          auto registered = registerSchemas(controls, *settings);
+          if (!registered) {
+            return std::unexpected(registered.error());
+          }
+        }
+        auto parsed = parseResourceDocument(document, effective, controls, typed);
+        if (!parsed) {
+          return std::unexpected(parsed.error());
+        }
+        bool choice{}, host{};
+        for (const auto &node : document.nodes) {
+          if (node.factory.kind == detail::ControlFactoryKind::USER ||
+              node.factory.kind == detail::ControlFactoryKind::EXISTING_BUILTIN) {
+            const auto &entry = detail::ResourceAccess::entry(effective.registry, node.factory.index);
+            choice = choice || entry.declaredChoice;
+            host = host || entry.declaredHost;
+          }
+          choice = choice || node.name == "ComboBox" || node.name == "DropDown" ||
+                   std::ranges::contains(node.lineage, "ComboBox") || std::ranges::contains(node.lineage, "DropDown");
+          host = host || node.name == "OverlayHost" || std::ranges::contains(node.lineage, "OverlayHost");
+        }
+        return std::pair(choice, host);
+      } catch (const std::bad_alloc &) {
+        auto failure = document.failure(Code::NO_MEMORY, 0);
+        failure.cause = TreeError::NO_MEMORY;
+        return std::unexpected(std::move(failure));
+      } catch (const std::filesystem::filesystem_error &failure) {
+        return std::unexpected(document.failure(Code::FILE_IO, 0, failure.code()));
+      }
+    });
+}
+} // namespace
+
+Description<Widget> resource(std::string_view source, SceneResourceOptions options) {
+  auto input = std::make_shared<ChoiceResourceInput>();
+  input->identity = std::make_shared<const std::string>("<string resource>");
+  input->bytes = source;
+  input->loaded = true;
+  return choiceResource(std::move(input), std::move(options));
+}
+
+Description<Widget> resource(SceneResourceFile source, SceneResourceOptions options) {
+  auto input = std::make_shared<ChoiceResourceInput>();
+  const auto bytes = source.path.generic_u8string();
+  input->identity = std::make_shared<const std::string>(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+  input->file = std::move(source);
+  return choiceResource(std::move(input), std::move(options));
 }
 
 Scene scene(std::string_view source, SceneResourceOptions resourceOptions, SceneOptions options,

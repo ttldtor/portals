@@ -597,6 +597,7 @@ private:
   std::function<GraphemeText(const ModelRow<T> &)> delegate_;
   std::function<std::shared_ptr<const detail::PreparedListText>(const ModelRow<T> &)> preparedDelegate_;
   std::function<void(RowId)> activation_;
+  bool clickActivates_{};
   std::shared_ptr<void> service_;
   bool preparedSuppressed_{};
   VirtualListOptions options_;
@@ -736,7 +737,12 @@ std::expected<ActionBinding, TreeError> bindVirtualList(EventRouter &router, Wid
         const auto offset = static_cast<std::uint64_t>(y / view.options_.row_height);
 
         if (offset < view.prepared_->window.visible.count) {
+          const auto clicked = view.prepared_->rows[static_cast<std::size_t>(offset)].id;
           view.choose(view.prepared_->window.visible.first + offset);
+          if (view.clickActivates_ && view.activation_ && clicked) {
+            view.selected_ = clicked;
+            view.activation_(*clicked);
+          }
           reply = EventReply::HANDLED;
         }
       } else if (mouse->action == MouseAction::SCROLL &&

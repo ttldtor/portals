@@ -49,6 +49,7 @@ target_sources(portals_core PRIVATE
   src/runtime/worker_storage.cpp
   src/widgets/search_index.cpp
   src/widgets/suggestions.cpp
+  src/widgets/combo_box.cpp
   src/widgets/form_field_async.cpp
   src/runtime/ui_delivery.cpp
   src/widgets/managed_diagnostics.cpp
@@ -129,6 +130,9 @@ target_include_directories(portals_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/ven
 target_compile_definitions(portals_core PRIVATE UTF8PROC_STATIC)
 add_library(portals::core ALIAS portals_core)
 target_compile_features(portals_core PUBLIC cxx_std_23)
+# Declarative clients can exceed the standard COFF section count in MSVC Debug builds.
+# Export the format option so installed-package consumers inherit it as well.
+target_compile_options(portals_core INTERFACE "$<$<CXX_COMPILER_ID:MSVC>:/bigobj>")
 set_target_properties(portals_core PROPERTIES CXX_EXTENSIONS OFF EXPORT_NAME core)
 set_target_properties(portals_utf8proc PROPERTIES EXPORT_NAME utf8proc)
 target_include_directories(portals_core PUBLIC
@@ -275,6 +279,7 @@ if(PORTALS_BUILD_EXAMPLES)
   add_subdirectory(examples/form_field)
   add_subdirectory(examples/find_bar)
   add_subdirectory(examples/suggestions)
+  add_subdirectory(examples/choices)
   add_subdirectory(examples/async_validation)
   add_subdirectory(examples/search_journal)
   add_subdirectory(examples/check_state)
@@ -1388,6 +1393,18 @@ if(PORTALS_BUILD_TESTS)
   portals_enable_warnings(portals_suggestions_tests)
   add_test(NAME portals.suggestions COMMAND portals_suggestions_tests)
   set_tests_properties(portals.suggestions PROPERTIES TIMEOUT 60)
+  add_executable(portals_combo_box_tests tests/combo_box.cpp)
+  target_link_libraries(portals_combo_box_tests PRIVATE portals::core)
+  target_include_directories(portals_combo_box_tests SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  portals_enable_warnings(portals_combo_box_tests)
+  add_test(NAME portals.combo-box COMMAND portals_combo_box_tests)
+  set_tests_properties(portals.combo-box PROPERTIES TIMEOUT 60)
+  add_executable(portals_combo_box_example_tests tests/combo_box_example.cpp)
+  target_link_libraries(portals_combo_box_example_tests PRIVATE portals::core)
+  target_include_directories(portals_combo_box_example_tests SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  portals_enable_warnings(portals_combo_box_example_tests)
+  add_test(NAME portals.combo-box-example COMMAND portals_combo_box_example_tests)
+  set_tests_properties(portals.combo-box-example PROPERTIES TIMEOUT 30)
   add_executable(portals_suggestions_consumer tests/package_consumer/suggestions.cpp)
   target_link_libraries(portals_suggestions_consumer PRIVATE portals::core)
   portals_enable_warnings(portals_suggestions_consumer)
@@ -1398,7 +1415,7 @@ if(PORTALS_BUILD_TESTS)
   add_test(NAME portals.model-find COMMAND portals_model_find)
   set_tests_properties(portals.model-find PROPERTIES TIMEOUT 60)
   add_executable(portals_async tests/async.cpp)
-  foreach(guide IN ITEMS model_find prepared_theme)
+  foreach(guide IN ITEMS model_find prepared_theme choices)
     add_executable(portals_docs_${guide} docs/examples/guide_${guide}.cpp)
     target_link_libraries(portals_docs_${guide} PRIVATE portals::core)
     portals_enable_warnings(portals_docs_${guide})
@@ -1665,6 +1682,7 @@ if(PORTALS_BUILD_DOCS)
     tools/benchmarks/README.md vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md vendor/textual/README.md vendor/doctest/README.md vendor/pfr/README.md vendor/lyra/README.md docs/cli.md)
   list(APPEND portals_documentation_inputs docs/editor-contracts.md docs/ru/editor-contracts.md)
   list(APPEND portals_documentation_inputs docs/log-view.md docs/ru/log-view.md)
+  list(APPEND portals_documentation_inputs docs/choices.md docs/ru/choices.md)
   list(APPEND portals_documentation_inputs docs/api-groups.dox)
   set(portals_language_config "${CMAKE_CURRENT_BINARY_DIR}/docs/languages")
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS

@@ -2,10 +2,43 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 #include "../../examples/gallery/common.hpp"
+#include <limits>
 #include <portals/line_edit.hpp>
 #include <portals/style.hpp>
 
 namespace gallery_before {
+// Preserve the historical layout while matching the managed scene's themed surface.
+class FormSurface final : public portals::Column {
+public:
+  std::expected<void, portals::TreeError> arrange(portals::CellRect local) override {
+    auto bounds = portals::CellRect::from({}, local.size());
+
+    if (!bounds) {
+      return std::unexpected(portals::TreeError::INVALID_GEOMETRY);
+    }
+
+    bounds_ = *bounds;
+
+    return {};
+  }
+
+  std::expected<void, portals::TreeError> paint(portals::PaintContext &context) override {
+    const auto style = computedStyle() ? computedStyle()->normal : portals::CellStyle{};
+
+    if (bounds_.empty() || style == portals::CellStyle{}) {
+      return {};
+    }
+
+    const portals::RenderCommand fill =
+      portals::FillCommand{bounds_, bounds_, style, std::numeric_limits<std::int32_t>::min()};
+
+    return context.submit(std::span(&fill, 1));
+  }
+
+private:
+  portals::CellRect bounds_;
+};
+
 // Lifetime is visible: Application owns UI services; this scene owns their bindings and models.
 class Form : public portals::ApplicationScene {
 public:
@@ -14,7 +47,7 @@ public:
     using example::take;
     using example::text;
     auto &tree = app.tree();
-    const auto column = take(tree.emplace<Column>(app.root()));
+    const auto column = take(tree.emplace<FormSurface>(app.root()));
     title_ = take(tree.emplace<Label>(column, text("Portals gallery | F2 theme | F10 quit")));
     label_ = take(tree.emplace<Label>(column, text("Name (Enter commits; Tab changes focus):")));
     editor_ = take(tree.emplace<LineEdit>(column, LineEditOptions{.editMode = EditMode::EXPLICIT}));
@@ -41,6 +74,7 @@ public:
       take(styles_.bind(node, {.type = "Control"}));
     }
 
+    take(styles_.bind(column, {.type = "Scene"}));
     take(styles_.replace(modernTheme()));
   }
 

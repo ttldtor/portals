@@ -23,6 +23,7 @@ The [first application](first-application.md) develops a quick-note form in four
 | Place controls in cells | [Grid and overlay](grid.md) |
 | Change a control through a reference | [Control references](text-property.md) |
 | Edit text | [LineEdit](line-edit.md) |
+| Choose a source row | [ComboBox and DropDown](choices.md) |
 | Validate a labeled editor | [Form fields](form-fields.md) |
 | Choose a command while typing | [Indexed live suggestions](live-search.md) |
 | Search a bounded document | [FindBar](find-bar.md) |

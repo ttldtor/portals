@@ -7,6 +7,8 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Added model-backed `ComboBox` and `DropDown` with compact declarative factories, accepted-selection callbacks and worker-prepared popup rows. Editable drafts preserve ordinary LineEdit modes and Undo; source identities fence stale selections, and dismissed popups release their transient resources.
+
 - Pull-request naming checks can select translation units from fresh compiler
   dependencies and the complete PR diff. Unsupported changes or incomplete
   dependency information retain the full check; release checks remain complete.
@@ -40,6 +42,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 - Added complete native and loaded-scene log examples. Prepared numeric row indexes retain only visible owning text; selection, filtering, file tailing and asynchronous ingestion remain follow-up work.
 
 ### Changed
+
+- MSVC applications linking `portals::core` inherit `/bigobj`, including through installed packages, so large declarative Debug translation units do not exceed the standard COFF section limit.
+
+- Managed scenes apply their resolved background across the terminal viewport, including layout gaps and unused space. Theme changes update the surface automatically; application `Scene` style overrides remain effective.
 
 - Documented complete UI client compilation measurements, separating compile/link and handler-edit observations from include-graph size and runtime benchmarks.
 

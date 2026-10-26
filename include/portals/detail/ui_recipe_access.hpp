@@ -6,7 +6,9 @@
 #include <portals/detail/ui_recipe_context.hpp>
 #include <portals/ui_action.hpp>
 
-namespace portals { struct SearchItem; }
+namespace portals {
+struct SearchItem;
+}
 
 namespace portals::ui {
 struct FormFieldConfig;
@@ -17,16 +19,100 @@ namespace detail {
 /** @brief Internal bridge for checked access to managed scene and recipe state. */
 struct Access {
   /// @cond INTERNAL
-  static Description<VirtualList<SearchItem>> suggestions(TextSource source,
-      std::shared_ptr<portals::detail::FindModelSource> model, SuggestionsConfig config);
+  static Description<VirtualList<SearchItem>>
+  suggestions(TextSource source, std::shared_ptr<portals::detail::FindModelSource> model, SuggestionsConfig config);
   static std::expected<TextSource, ManagedError> resolveSearchText(ManagedScene &, const TextSource &, MountContext &);
   static std::expected<bool, ManagedError> readSearchText(ManagedScene &, const TextSource &, std::size_t,
-                                                         std::string &, bool &);
+                                                          std::string &, bool &);
   static std::expected<void, ManagedError> configureSearchList(ManagedScene &, Node<VirtualList<SearchItem>>,
-      std::shared_ptr<void>, std::function<void(RowId)>, CellStyle);
+                                                               std::shared_ptr<void>, std::function<void(RowId)>,
+                                                               CellStyle);
   static std::expected<void, ManagedError> suppressSearchList(ManagedScene &, Node<VirtualList<SearchItem>>, bool);
+  static std::expected<void, ManagedError> configureChoiceList(ManagedScene &, Node<VirtualList<SearchItem>>,
+                                                               std::shared_ptr<void>, std::function<void(RowId)>);
+  static std::expected<std::optional<ModelRow<SearchItem>>, ManagedError>
+  choiceRow(ManagedScene &, Node<VirtualList<SearchItem>>, RowId);
+  static std::expected<std::optional<RowId>, ManagedError> choiceFirstRow(ManagedScene &,
+                                                                          Node<VirtualList<SearchItem>>);
+  static std::expected<std::optional<RowId>, ManagedError>
+  choiceNavigationRow(ManagedScene &, Node<VirtualList<SearchItem>>, std::uint64_t, bool, std::int64_t);
+  static std::expected<std::optional<std::uint64_t>, ManagedError>
+  choiceMoveNavigation(ManagedScene &, Node<VirtualList<SearchItem>>, portals::Action, int pageDirection = 0);
+  static std::expected<void, ManagedError> choiceClickActivation(ManagedScene &, Node<VirtualList<SearchItem>>);
+  static std::expected<std::uint64_t, ManagedError> choiceDraftRevision(ManagedScene &, Node<LineEdit>);
+  static std::expected<void, ManagedError> bindChoiceTrigger(ManagedScene &, Node<Button>,
+                                                             std::function<std::expected<void, ManagedError>()>);
+  static std::expected<Node<OverlayHost>, ManagedError> choiceLayerHost(ManagedScene &, Node<Widget>);
+  static std::expected<void, ManagedError> claimChoicePopup(ManagedScene &, std::shared_ptr<SceneActivity>);
+  static bool choicePopupOpened(ManagedScene &, Node<Dialog>);
+
+  static void requestChoicePopup(ManagedScene &scene, std::shared_ptr<SceneActivity> activity) {
+    scene.choiceIntent_ = std::move(activity);
+  }
+
+  static void cancelChoicePopup(ManagedScene &scene, const SceneActivity *activity) {
+    if (auto pending = scene.choiceIntent_.lock(); pending.get() == activity) {
+      scene.choiceIntent_.reset();
+    }
+  }
+
+  template <class T> static void retireChoiceModel(ManagedScene &scene, ManagedModel<T> &model) noexcept {
+    auto source = model.lock();
+    if (!source) {
+      return;
+    }
+    (*source)->retire();
+    std::erase(scene.models_, *source);
+    model = {};
+  }
+
+  template <class T> static void retireChoiceState(ManagedScene &scene, ManagedState<T> &state) noexcept {
+    auto property = state.model_.lock();
+    if (property) {
+      std::erase(scene.properties_, std::shared_ptr<void>(std::move(property)));
+    }
+    state = {};
+  }
+
+  static bool choiceWithin(ManagedScene &scene, Node<Widget> root, Node<Widget> node) {
+    return scene.choiceWithin(root, node);
+  }
+
+  template <class Callback>
+  static std::function<void(ChoiceSelection)> choiceHandler(ManagedScene &scene, Node<Widget> node, Callback callback,
+                                                            std::source_location origin) {
+    return [&scene, node, lifetime = lifetime(scene),
+            adapter = scene.actionAdapter<ChoiceSelection>(std::move(callback), origin),
+            origin](ChoiceSelection value) mutable {
+      auto result = adapter(value);
+      if (!result && !lifetime.expired() && !scene.commandReported(result, lifetime)) {
+        scene.remember(ManagedError{ManagedPhase::INPUT, node.id(), result.result().error(), {}, {}}, origin);
+      }
+    };
+  }
+
+  static void choiceModels(ManagedScene &scene, MountContext &context) {
+    const auto count = scene.models_.size();
+    context.rollback.push_back([&scene, count] {
+      while (scene.models_.size() > count) {
+        scene.models_.back()->retire();
+        scene.models_.pop_back();
+      }
+    });
+  }
+
+  static std::expected<void, ManagedError> choiceCompanion(ManagedScene &scene, Node<Widget> owner,
+                                                           Node<Widget> popup) {
+    auto entry = scene.find(owner);
+    if (!entry) {
+      return std::unexpected(error(owner, TreeError::STALE_NODE));
+    }
+    entry->companion = popup;
+    return {};
+  }
+
   static Description<FindBar> findBar(std::string document, std::string query, FindBarConfig config,
-                                    std::shared_ptr<portals::detail::FindModelSource> source = {});
+                                      std::shared_ptr<portals::detail::FindModelSource> source = {});
   static std::expected<std::size_t, ManagedError> findPreparedQueries(ManagedScene &scene, Node<Widget> node);
   static std::expected<std::shared_ptr<portals::detail::FindRecord>, ManagedError> findRecord(ManagedScene &scene,
                                                                                               Node<Widget> node);
@@ -131,6 +217,12 @@ struct Access {
    * @return Whether an explicitly configured standard Grid needs the local fallback schema.
    */
   template <class T> static bool needsGridContext(const Description<T> &description);
+  /// @cond INTERNAL
+  template <class T> static bool needsChoiceHost(const Description<T> &description);
+  template <class T> static std::expected<bool, ManagedError> prepareChoiceHost(Description<T> &, ControlContext);
+  template <class T, class Probe> static Description<T> choiceProbe(Description<T>, Probe);
+  template <class T> static Description<T> choiceHost(Description<T> description, bool explicitHost = false);
+  /// @endcond
 
   /** @param description Root resource transaction validating its effective graph after local declarations.
    * @return Consuming description; native ancestor callbacks keep their existing ordering.

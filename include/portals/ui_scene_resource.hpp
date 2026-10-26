@@ -166,6 +166,7 @@ private:
     bool unknownHelp{};
     bool declaredDialog{};
     bool declaredHost{};
+    bool declaredChoice{};
     bool unknownDialog{};
     std::string_view virtualView{};
     std::optional<std::size_t> semanticPropertyCount{};
@@ -189,6 +190,7 @@ private:
     entry.unknownHelp = std::same_as<T, Widget>;
     entry.declaredDialog = std::derived_from<T, Dialog>;
     entry.declaredHost = std::derived_from<T, OverlayHost>;
+    entry.declaredChoice = std::derived_from<T, ComboBox>;
     entry.unknownDialog = std::same_as<T, Widget>;
 
     if constexpr (detail::IsVirtualList<T>::value || detail::IsVirtualTable<T>::value || detail::IsChart<T>::value) {

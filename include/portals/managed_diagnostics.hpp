@@ -24,6 +24,7 @@ namespace portals {
 
 class ManagedScene;
 enum class AsyncError;
+enum class SearchError;
 
 namespace detail {
 /** @brief Default-empty internal evidence that a short error entered one live collector.
@@ -87,6 +88,7 @@ struct ManagedError {
   std::optional<PasswordFailure> password{};
   std::optional<AsyncError> async{}; ///< Exact coroutine/admission failure, independent of its tree bridge.
   std::optional<BackgroundError> background{}; ///< Exact executor admission cause when an async request fails.
+  std::optional<SearchError> search{};         ///< Exact bounded choice/search provider failure.
 };
 
 namespace detail {

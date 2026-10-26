@@ -62,6 +62,29 @@ struct SceneActivity {
   virtual void prepared() noexcept {
   }
 
+  virtual std::expected<bool, TreeError> input(const InputEvent &) {
+    return false;
+  }
+
+  virtual std::expected<void, ManagedError> commitPopup() {
+    return {};
+  }
+
+  virtual std::expected<void, ManagedError> dismissPopup() {
+    return {};
+  }
+
+  virtual void retire() noexcept {
+  }
+
+  virtual bool tryRetire() noexcept {
+    retire();
+    return true;
+  }
+
+  virtual void wakePopup() noexcept {
+  }
+
   virtual void cancel() noexcept = 0;
 };
 /// @endcond
@@ -2031,6 +2054,7 @@ private:
   };
 
   struct Entry {
+    Node<Widget> companion; ///< Attempt-owned external popup, retired with this logical owner.
     Node<Widget> node;
     std::shared_ptr<StyleTarget> target;
     std::variant<std::monostate, ActionBinding, CheckBoxBinding, CheckStateBinding, LineEditBinding, PasswordBinding>
@@ -2375,6 +2399,9 @@ private:
   std::shared_ptr<const void> lifetime_;
   std::expected<void, ManagedError> admitActivity(std::shared_ptr<ui::detail::SceneActivity> activity);
   std::expected<void, TreeError> visitActivities(bool prepared);
+  bool choiceWithin(Node<Widget> root, Node<Widget> node) const;
+  std::weak_ptr<ui::detail::SceneActivity> choiceIntent_;
+  std::uint64_t activityRevision_{};
 
   std::vector<std::weak_ptr<ui::detail::SceneActivity>> asyncActivities_;
   bool servicingActivities_{};
