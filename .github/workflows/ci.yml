@@ -35,6 +35,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+      - name: Test naming runner
+        run: python3 -m unittest tools.test_check_naming -v
       - name: Test APT cache validation
         run: python3 -m unittest discover -s tools/ci -p test_apt_cache.py -v
       - uses: ./.github/actions/naming-toolchain
@@ -49,7 +51,16 @@ jobs:
           -DPORTALS_BUILD_TESTS=ON
           -DPORTALS_BUILD_EXAMPLES=ON
       - name: Check project names
-        run: python3 tools/check_naming.py build/naming --clang-tidy clang-tidy-20
+        run: python3 tools/check_naming.py build/naming --clang-tidy clang-tidy-20 --jobs 2 --timings build/naming/timings.json
+      - name: Save naming timings
+        if: ${{ always() && hashFiles('build/naming/timings.json') != '' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: naming-timings
+          path: build/naming/timings.json
+          if-no-files-found: error
+          retention-days: 14
 
   smoke:
     needs: changes
