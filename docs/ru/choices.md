@@ -32,6 +32,46 @@
 тестах. Цель `portals_choices_example` при включённых примерах собирает полную
 форму. Нативные presets описаны в [руководстве по сборке](getting-started.md).
 
+## Поиск по префиксу и нечёткий поиск
+
+`ComboBox` и `DropDown` по умолчанию используют `SearchStrategy::PREFIX`:
+сопоставление нормализованной подписи или слова после пробела не учитывает
+регистр и диакритику. В каталоге ниже запрос `Pra` показывает только Prague;
+Bratislava, Paris и São Paulo исключены. У `Pr2` нет точного совпадения префикса.
+
+Добавьте `.fuzzy()`, когда приложению нужна допустимость одной вставки, удаления
+или замены начиная с трёх нормализованных графем запроса. Этот полный пример
+также показывает Bratislava для `Pra`:
+
+```cpp
+#include <portals/ui.hpp>
+
+int main() {
+  using namespace portals;
+  auto scene = ui::scene(ui::comboBox({"Prague", "Bratislava", "Paris", "São Paulo"}).fuzzy());
+  return scene | ui::onKey(key::F10, ui::quit) | ui::runApp();
+}
+```
+
+Вызов `.prefix()` возвращает строгий поиск после нечёткой настройки:
+
+```cpp
+#include <portals/ui.hpp>
+
+int main() {
+  using namespace portals;
+  auto scene = ui::scene(ui::comboBox({"Prague", "Bratislava", "Paris", "São Paulo"}).fuzzy().prefix());
+  return scene | ui::onKey(key::F10, ui::quit) | ui::runApp();
+}
+```
+
+Pipe-формы — `recipe | ui::fuzzy()` и `recipe | ui::prefix()`;
+`.fuzzy(false)` также выбирает PREFIX. Модификаторы меняют только стратегию,
+сохраняя все настроенные бюджеты worker. Явная настройка через
+`ComboBoxConfig::search.strategy` остаётся доступной. Sparse-патчи `.settings()`
+и fluent-модификаторы следуют существующему правилу последнего значения одного
+листа. Общий `SearchOptions` и живые подсказки сохраняют default FUZZY_PREFIX.
+
 ## Черновик и принятый выбор
 
 Основное поле и принятый выбор представляют разное состояние:
@@ -152,7 +192,8 @@ LineEdit, Button, VirtualList и Dialog; поштучная регистраци
 ## Загружаемые сцены
 
 Реестр ресурсов распознаёт `ComboBox`, `DropDown` и обычные настройки контролов,
-включая `text` и `placeholder`. Модели источников и обработчики задаются в C++.
+включая `text`, `placeholder` и
+`searchStrategy=PREFIX` или `searchStrategy=FUZZY_PREFIX`. Модели источников и обработчики задаются в C++.
 Чтобы передать каталог загружаемому контролу, зарегистрируйте типизированную
 фабрику через `SceneResourceOptions::control<ComboBox>` или
 `control<DropDown>` и верните соответствующий рецепт с

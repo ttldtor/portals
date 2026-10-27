@@ -31,6 +31,46 @@ Build `portals_docs_choices` with tests enabled, or build
 `portals_choices_example` with examples enabled for the larger form.
 The [build guide](getting-started.md) describes the native presets.
 
+## Prefix and fuzzy matching
+
+`ComboBox` and `DropDown` use `SearchStrategy::PREFIX` by default: matching is
+case-insensitive and accent-insensitive over the normalized label or a whitespace
+token. With the catalog below, `Pra` shows only Prague; Bratislava, Paris and
+São Paulo are excluded. `Pr2` has no exact prefix match.
+
+Use `.fuzzy()` when an application should tolerate one insertion, deletion or
+substitution from three normalized query graphemes. This complete example also
+shows Bratislava for `Pra`:
+
+```cpp
+#include <portals/ui.hpp>
+
+int main() {
+  using namespace portals;
+  auto scene = ui::scene(ui::comboBox({"Prague", "Bratislava", "Paris", "São Paulo"}).fuzzy());
+  return scene | ui::onKey(key::F10, ui::quit) | ui::runApp();
+}
+```
+
+Use `.prefix()` to restore strict matching after a fuzzy setting:
+
+```cpp
+#include <portals/ui.hpp>
+
+int main() {
+  using namespace portals;
+  auto scene = ui::scene(ui::comboBox({"Prague", "Bratislava", "Paris", "São Paulo"}).fuzzy().prefix());
+  return scene | ui::onKey(key::F10, ui::quit) | ui::runApp();
+}
+```
+
+The pipe forms are `recipe | ui::fuzzy()` and `recipe | ui::prefix()`;
+`.fuzzy(false)` also selects PREFIX. These modifiers override only the strategy,
+retaining every configured worker budget. `ComboBoxConfig::search.strategy`
+remains available for explicit configuration. Sparse `.settings()` patches and
+fluent modifiers follow the existing last-value rule for the same leaf.
+General `SearchOptions` and live suggestions retain their FUZZY_PREFIX default.
+
 ## Draft and accepted selection
 
 The main editor and accepted selection represent different state:
@@ -119,7 +159,7 @@ remains in effect when the theme changes.
 
 `ComboBoxConfig` separates the visible popup height, width, visible-range budget
 and search limits. Defaults include eight visible rows, a 60-cell maximum popup
-width, a 32-row browse-request bound and the existing indexed-search defaults.
+width, a 32-row browse-request bound and the existing indexed-search budgets with PREFIX matching.
 Tune these only when the application needs different limits; invalid settings
 report checked errors.
 
@@ -143,7 +183,8 @@ default styles supply the skin; no per-control registration is needed.
 ## Loaded scenes
 
 The resource registry recognizes `ComboBox` and `DropDown` and their ordinary
-control settings, including `text` and `placeholder`. Source models and callbacks
+control settings, including `text`, `placeholder` and
+`searchStrategy=PREFIX` or `searchStrategy=FUZZY_PREFIX`. Source models and callbacks
 remain C++ declarations. To supply a catalog from a resource, register a typed
 factory with `SceneResourceOptions::control<ComboBox>` or
 `control<DropDown>` and return the corresponding recipe with

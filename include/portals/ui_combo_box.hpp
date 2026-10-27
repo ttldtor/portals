@@ -12,17 +12,43 @@ struct ComboBoxConfig {
   ~ComboBoxConfig() = default;
   LineEditConfig editor{
     .options = {.limits = {4096, 4096, 4096,
-                           8192}}};     ///< Normal editor modes, validation and history; protected display is rejected.
-  SearchOptions search{};               ///< Existing bounded worker index/query settings.
-  std::size_t pageRows{32};             ///< Positive browse page cap, at most256.
-  std::int32_t popupRows{8};            ///< Positive visible list height in terminal rows.
-  std::int32_t popupWidth{60};          ///< Positive maximum panel width in terminal cells.
-  bool searchable{true};                ///< DropDown popup offers a separate ordinary query editor.
-  std::optional<std::uint64_t> initial; ///< Optional source ordinal resolved asynchronously after mount.
+                           8192}}}; ///< Normal editor modes, validation and history; protected display is rejected.
+  SearchOptions search{.strategy = SearchStrategy::PREFIX}; ///< Finite search budgets; PREFIX by default.
+  std::size_t pageRows{32};                                 ///< Positive browse page cap, at most256.
+  std::int32_t popupRows{8};                                ///< Positive visible list height in terminal rows.
+  std::int32_t popupWidth{60};                              ///< Positive maximum panel width in terminal cells.
+  bool searchable{true};                                    ///< DropDown popup offers a separate ordinary query editor.
+  std::optional<std::uint64_t> initial;    ///< Optional source ordinal resolved asynchronously after mount.
   std::function<void(SearchError)> failed; ///< Newest provider failure; draft and accepted value survive.
   std::size_t browseScratchBytes{8 * 1024 *
                                  1024}; ///< Transient projection pins/range metadata; output has row/text caps.
 };
+
+/** @brief Owning choice matching stage, preserving every worker budget. */
+struct ChoiceSearchModifier {
+  bool enabled; ///< True selects FUZZY_PREFIX; false selects PREFIX.
+
+  /** @tparam T ComboBox-derived control type, including DropDown.
+   * @param description Consumed choice recipe. @param modifier Matching policy.
+   * @return Recipe with only its matching strategy overridden.
+   */
+  template <std::derived_from<ComboBox> T>
+  friend Description<T> operator|(Description<T> &&description, ChoiceSearchModifier modifier) {
+    return std::move(description).fuzzy(modifier.enabled);
+  }
+};
+
+/** @param enabled Allow one-edit prefix matching; false restores exact normalized prefixes.
+ * @return Owning choice strategy stage, retaining all search budgets.
+ */
+inline ChoiceSearchModifier fuzzy(bool enabled = true) {
+  return {enabled};
+}
+
+/** @return Owning choice stage selecting exact normalized label/token prefixes. */
+inline ChoiceSearchModifier prefix() {
+  return {false};
+}
 
 namespace detail {
 /// @cond INTERNAL

@@ -5,6 +5,7 @@
 #include <doctest.h>
 #include <portals/ui.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <format>
 #include <thread>
@@ -204,6 +205,164 @@ struct Fixture {
     return result.node();
   }
 };
+
+static_assert(SearchOptions{}.strategy == SearchStrategy::FUZZY_PREFIX);
+
+template <class T> void checkChoiceStrategy(bool fuzzy, unsigned syntax, std::size_t topK = 32) {
+  auto pool = take(BackgroundPool::create());
+  ui::Ref<T> choice;
+  ui::ComboBoxConfig config;
+  config.search.topK = topK;
+  // The constructor strategy must yield to a later sparse fluent or loaded leaf.
+  if (syntax != 0) {
+    config.search.strategy = fuzzy ? SearchStrategy::PREFIX : SearchStrategy::FUZZY_PREFIX;
+  }
+  auto factory = [&](ui::ComboBoxConfig options) {
+    if constexpr (std::same_as<T, DropDown>) {
+      return ui::dropDown(choice, {"Prague", "Bratislava", "Paris", "São Paulo"}, std::move(options));
+    } else {
+      return ui::comboBox(choice, {"Prague", "Bratislava", "Paris", "São Paulo"}, std::move(options));
+    }
+  };
+  auto recipe = [&] {
+    if (syntax == 1) {
+      return fuzzy ? factory(config).prefix().fuzzy() : factory(config).fuzzy().prefix();
+    }
+    if (syntax == 2) {
+      return factory(config) | ui::fuzzy(!fuzzy) | (fuzzy ? ui::fuzzy() : ui::prefix());
+    }
+    if (syntax == 3) {
+      return factory(config)
+        .settings({.searchStrategy = fuzzy ? SearchStrategy::PREFIX : SearchStrategy::FUZZY_PREFIX})
+        .fuzzy(fuzzy);
+    }
+    if (syntax == 4) {
+      return factory(config).fuzzy(!fuzzy).settings(
+        {.searchStrategy = fuzzy ? SearchStrategy::FUZZY_PREFIX : SearchStrategy::PREFIX});
+    }
+    if (fuzzy) {
+      config.search.strategy = SearchStrategy::FUZZY_PREFIX;
+    }
+    return factory(config);
+  };
+  ui::SceneResourceOptions resourceOptions;
+  resourceOptions.format = ui::SceneResourceFormat::CONFIGURATION;
+  resourceOptions.control<T>("CityChoice", [&](ui::SceneResourceArguments args) {
+    return factory(config).settings(args.settings);
+  });
+  auto scene = syntax == 5 ? ui::scene(ui::resource(fuzzy ? "scene { CityChoice { searchStrategy=FUZZY_PREFIX } }"
+                                                          : "scene { CityChoice { searchStrategy=PREFIX } }",
+                                                    resourceOptions))
+                           : ui::scene(recipe());
+  scene.applicationOptions([&] {
+    return ApplicationOptions{.backgroundExecutor = pool.get()};
+  });
+  take(scene.prepareChecked());
+  auto &managed = take(scene.managed()).get();
+  auto &app = ui::detail::SceneAccess::application(managed);
+  const auto pump = [&] {
+    choice_test::pump(app, managed, *pool, {80, 20});
+  };
+  const auto until = [&](auto predicate) {
+    const auto deadline = std::chrono::steady_clock::now() + 5s;
+    do {
+      pump();
+      if (predicate()) {
+        return true;
+      }
+      std::this_thread::sleep_for(1ms);
+    } while (std::chrono::steady_clock::now() < deadline);
+    return predicate();
+  };
+  pump();
+  take(choice.open());
+  REQUIRE(until([&] {
+    return take(choice.opened());
+  }));
+  Node<Dialog> popup;
+  take(app.tree().read(choice.node(), [&](const ComboBox &widget) {
+    popup = widget.popup();
+  }));
+  auto panel = take(app.tree().inspect(popup)).children.front();
+  auto body = take(app.tree().inspect(panel)).children.front();
+  auto children = take(app.tree().inspect(body)).children;
+  ui::Ref<LineEdit> query;
+  if constexpr (std::same_as<T, DropDown>) {
+    take(ui::detail::NamedAccess::publish(query, managed, children[0]));
+  } else {
+    query = choice.editor();
+  }
+  ui::Ref<VirtualList<SearchItem>> results;
+  take(ui::detail::NamedAccess::publish(results, managed, children[2]));
+  const auto list = results.node();
+  const auto ready = [&](std::size_t count) {
+    bool result{};
+    take(app.tree().read(list, [&](const auto &view) {
+      const auto status = view.dataStatus();
+      result = status.prepared && status.rowCount == count && (count == 0 || status.state == RangeState::READY);
+    }));
+    return result;
+  };
+  take(query.text().set("Pra").result());
+  REQUIRE(until([&] {
+    return ready(fuzzy ? std::min(topK, std::size_t{4}) : 1);
+  }));
+  auto frame = choice_test::text(choice_test::paint(app, {80, 20}));
+  CHECK(frame.contains("Prague"));
+  CHECK(frame.contains("Bratislava") == (fuzzy && topK > 1));
+  if (!fuzzy || topK == 1) {
+    CHECK_FALSE(frame.contains("Paris"));
+    CHECK_FALSE(frame.contains("São Paulo"));
+  }
+  take(query.text().set("Pr2").result());
+  REQUIRE(until([&] {
+    return ready(fuzzy ? 1 : 0);
+  }));
+  CHECK(take(managed.diagnostics()).errors.empty());
+  take(scene.close());
+  pool->requestStop();
+  pool->join();
+}
+
+TEST_CASE("choice family defaults to strict prefixes and supports compact sparse strategy overrides") {
+  CHECK(ui::ComboBoxConfig{}.search.strategy == SearchStrategy::PREFIX);
+  for (unsigned syntax = 0; syntax != 6; ++syntax) {
+    CAPTURE(syntax);
+    for (bool fuzzy : {false, true}) {
+      CAPTURE(fuzzy);
+      checkChoiceStrategy<ComboBox>(fuzzy, syntax);
+      checkChoiceStrategy<DropDown>(fuzzy, syntax);
+    }
+  }
+  checkChoiceStrategy<ComboBox>(true, 1, 1);
+  checkChoiceStrategy<DropDown>(true, 5, 1);
+}
+
+TEST_CASE("loaded choice strategies reject invalid values and preserve exact old narrow allowlists") {
+  for (bool narrow : {false, true}) {
+    int factories{};
+    ui::SceneResourceOptions options;
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    options.control<ComboBox>("CityChoice", [&](ui::SceneResourceArguments args) {
+      ++factories;
+      return ui::comboBox({"Prague", "Bratislava"}).settings(args.settings);
+    });
+    if (narrow) {
+      constexpr std::string_view NARROW[]{"text", "width", "height", "flex"};
+      options.controls.emplace();
+      options.controls->registerType("CityChoice", NARROW);
+    }
+    auto scene = ui::scene(ui::resource(narrow ? "scene { CityChoice { searchStrategy=PREFIX } }"
+                                               : "scene { CityChoice { searchStrategy=APPROXIMATE } }",
+                                        options));
+    auto result = scene.prepareChecked();
+    REQUIRE_FALSE(result);
+    REQUIRE(result.error().sceneResource);
+    CHECK(result.error().sceneResource->code ==
+          (narrow ? SceneResourceErrorCode::UNKNOWN_PROPERTY : SceneResourceErrorCode::INVALID_VALUE));
+    CHECK(factories == 0);
+  }
+}
 
 TEST_CASE("closed model choices read no rows and keep draft separate from selection") {
   Fixture f;

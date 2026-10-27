@@ -11,7 +11,7 @@
 
 namespace portals::ui::detail {
 
-inline constexpr std::size_t CONTROL_PROPERTY_COUNT = 230; ///< Complete canonical scalar vocabulary size.
+inline constexpr std::size_t CONTROL_PROPERTY_COUNT = 231; ///< Complete canonical scalar vocabulary size.
 inline constexpr std::size_t CONTROL_PRESENCE_BITS =
   CONTROL_PROPERTY_COUNT < 32 ? 32 : CONTROL_PROPERTY_COUNT;        ///< Retain all legacy mask bits.
 using ControlPropertyPresence = std::bitset<CONTROL_PRESENCE_BITS>; ///< Allocation-free internal leaf presence.

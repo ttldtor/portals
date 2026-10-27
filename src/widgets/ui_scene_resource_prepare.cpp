@@ -58,6 +58,12 @@ std::expected<void, ManagedError> registerSchemas(ControlContext &controls, cons
       }
     }
 
+    if (entry.declaredChoice &&
+        !(controls.hasRegisteredType(entry.name) && controls.matchesRegisteredType(entry.name, paths))) {
+      // Preserve exact old allowlists; new typed choices also expose the matching strategy.
+      paths.push_back("searchStrategy");
+    }
+
     if (entry.factoryKind == detail::ControlFactoryKind::MESSAGE_BINDING ||
         entry.factoryKind == detail::ControlFactoryKind::NOTIFICATION_BINDING ||
         entry.factoryKind == detail::ControlFactoryKind::THEME_SELECTOR_BINDING ||
