@@ -13,7 +13,8 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Documentation
 
-- Add complete declarative frame/title and on-frame scrollbar galleries with native GIF and PNG previews in English and Russian. Document the existing focused scrollbar contrast limitation in the Nord theme.
+- Add complete declarative frame/title and on-frame scrollbar galleries with
+  native GIF and PNG previews in English and Russian.
 
 ### Added
 
