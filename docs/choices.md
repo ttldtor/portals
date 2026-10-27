@@ -69,6 +69,9 @@ The pipe forms are `recipe | ui::fuzzy()` and `recipe | ui::prefix()`;
 retaining every configured worker budget. `ComboBoxConfig::search.strategy`
 remains available for explicit configuration. Sparse `.settings()` patches and
 fluent modifiers follow the existing last-value rule for the same leaf.
+
+An explicit `ComboBoxConfig::search` aggregate uses `SearchOptions` defaults.
+When supplying only a budget there, append `.prefix()` to keep strict matching.
 General `SearchOptions` and live suggestions retain their FUZZY_PREFIX default.
 
 ## Draft and accepted selection
