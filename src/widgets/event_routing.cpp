@@ -533,7 +533,7 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
         state_->dialogCancelRepeat = *action == Action::CANCEL && key->action == KeyAction::REPEAT;
         state_->dialogEnter = key->key == InputKey::ENTER;
         state_->dialogEnterRepeat = state_->dialogEnter && key->action == KeyAction::REPEAT;
-        return route(*target, ActionEvent{*action, key->modifiers, ClickSource::KEYBOARD}, true);
+        return route(*target, ActionEvent{*action, key->modifiers, ClickSource::KEYBOARD, key->action}, true);
       }
 
       return route(*target, *key, true);

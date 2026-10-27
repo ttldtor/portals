@@ -32,10 +32,11 @@ struct ActionEvent {
   Action action{};                               ///< Command identity.
   InputModifiers modifiers{};                    ///< Selection and other modifier intent.
   ClickSource source{ClickSource::PROGRAMMATIC}; ///< Preserved origin when translating keyboard input.
+  KeyAction keyAction{KeyAction::PRESS};         ///< Observed keyboard phase; independent of semantic action equality.
 
   /** @brief Compare semantic command intent, preserving the original equality contract.
    * @param other Command and modifier value to compare; source annotation is inspected separately.
-   * @return True when action and modifiers are equal, regardless of observed source.
+   * @return True when action and modifiers are equal, regardless of observed source or keyboard phase.
    */
   constexpr bool operator==(const ActionEvent &other) const noexcept {
     return action == other.action && modifiers == other.modifiers;

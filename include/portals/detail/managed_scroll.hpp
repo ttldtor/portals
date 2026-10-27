@@ -43,6 +43,8 @@ std::expected<Node<T>, ManagedError> ManagedScene::emplaceConfigured(Node<Widget
         type = "Label";
       } else if constexpr (std::same_as<T, Button>) {
         type = "Button";
+      } else if constexpr (std::same_as<T, Menu>) {
+        type = "Menu";
       } else if constexpr (std::same_as<T, CheckBox>) {
         type = "CheckBox";
       } else if constexpr (std::same_as<T, LineEdit>) {

@@ -19,6 +19,7 @@ The categories describe the learning path; the source directories remain stable.
 
 | Category | Program and guide | What it demonstrates |
 | --- | --- | --- |
+| Basics | [Command desk](menus.md), `portals_commands_example` | One Save command in a menu, a button and a shortcut; an editable draft and a saved caption. No CLI. |
 | Showcase | [Shipping desk](choices.md), `portals_choices_example` | Editable city choice, full-source popup browsing, delivery selection and dark/light palette changes. No CLI. |
 | Showcase | [Unicode panels](../examples/unicode_panels/main.cpp), `portals_unicode_panels` | Two synthetic file tables with Cyrillic, CJK, emoji and combining text, framed panels and an anchored popup. No filesystem access. See [Unicode qualification](#unicode-panels). |
 | Showcase | [Progress workbench](../examples/progress_workbench/main.cpp), `portals_progress_workbench` | Name a work item, adjust fractional progress, reset or complete it, and record accepted actions in a bounded log. [Gauge command contracts](compact-primitives.md#gauge-ref-commands) explain range errors; F10 exits. |

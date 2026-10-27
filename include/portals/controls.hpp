@@ -10,6 +10,7 @@
 #include <span>
 
 namespace portals {
+class Menu;
 namespace detail {
 struct FindAccess;
 }

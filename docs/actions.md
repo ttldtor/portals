@@ -5,6 +5,7 @@
 Use `ui::ActionSet` when one command needs the same callback and presentation in
 more than one place, such as a button and an explicitly bound key chord. For a
 single button with no shared state, pass its callback directly to `ui::button`.
+An ordinary [menu](menus.md) can present those same actions.
 
 ## A complete application
 

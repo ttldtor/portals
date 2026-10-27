@@ -21,7 +21,7 @@ struct ActionMetadata {
 /** @brief Positive finite admission budgets for one owning set. */
 struct ActionSetOptions {
   std::size_t maxActions{256};         ///< Live action count.
-  std::size_t maxPresenters{1024};     ///< Live button projections.
+  std::size_t maxPresenters{1024};     ///< Live button projections and menu entries, including duplicates.
   std::size_t maxMetadataBytes{65536}; ///< Live keys/current metadata; external snapshots are independent.
   std::size_t maxKeyBytes{256};        ///< Per-action key byte limit.
 };
@@ -39,6 +39,8 @@ namespace detail {
 struct QuitCommand;
 struct ActionStore;
 struct ActionRecord;
+struct MountContext;
+struct MenuRegistration;
 
 /** @brief Internal bridge to existing managed admission, routing and error receipts. */
 struct ActionAccess {
@@ -47,6 +49,11 @@ struct ActionAccess {
   static EditorCommandResult finish(ManagedScene &, EditorCommandResult);
   static std::expected<void, ManagedError> attach(ManagedScene &, const ActionRef &);
   static std::expected<void, ManagedError> button(ManagedScene &, Node<Button>, const ActionRef &);
+  static std::expected<void, ManagedError> menu(ManagedScene &, Node<Menu>, MountContext &);
+  static std::expected<void, ManagedError> stageMenu(ManagedScene &, MenuRegistration &);
+  static std::expected<void, ManagedError> validateMenu(ManagedScene &, const MenuRegistration &);
+  static void rollbackMenu(ManagedScene &, const MenuRegistration &);
+  static EventReply routeMenu(ManagedScene &, Node<Menu>, Menu &, const RoutedEvent &);
   static std::expected<void, TreeError> prepare(ManagedScene &);
   static void retire(ManagedScene &) noexcept;
   static EditorCommandResult invoke(const ActionRef &, ActionInvocation, std::source_location);
@@ -145,7 +152,7 @@ private:
   std::optional<TreeError> failure_;
 };
 
-/** @brief Cold owning declarations, transferred to one managed scene on first button/key binding.
+/** @brief Cold owning declarations, transferred to one managed scene on first button/menu/key binding.
  * UI-affine. Cold recipes and key stages retain declarations until managed attachment.
  * Scene close clears callbacks and invalidates refs even when this descriptor survives.
  * Construction may throw; no router, scheduler, resource executable or binding token is created here.
