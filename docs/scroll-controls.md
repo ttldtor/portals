@@ -28,10 +28,9 @@ frame, minimal or ASCII. The frame inset leaves a 28-by-4 content viewport
 before any other layout gutters. The ordinary eight-row content is not
 virtualized. Tab focuses an area, arrow keys scroll it, and F10 quits.
 
-Current limitation: with the default Nord part colors, a focused `legacy`,
-`frame` or `minimal` full-block thumb can blend into the content background
-while the track is highlighted.
-The recording shows this behavior; focus does not change the scrolling range.
+The default themes highlight focused scrollbar parts with accent foreground
+on the surface background. Focus does not invert the background or change the
+scrolling range. Application styles can override each part independently.
 
 ![Native terminal recording comparing on-frame scrollbar skins](images/scrollbar-gallery.gif)
 [Static PNG frame](images/scrollbar-gallery.png)

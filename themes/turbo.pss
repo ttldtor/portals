@@ -13,6 +13,18 @@
   frame-ends-foreground: #00aaaa;
   frame-ends-background: #0000aa;
   frame-ends-bold: true;
+  scrollbar-track-foreground: #00aaaa;
+  scrollbar-track-background: #0000aa;
+  scrollbar-track-bold: true;
+  scrollbar-thumb-foreground: #00aaaa;
+  scrollbar-thumb-background: #0000aa;
+  scrollbar-thumb-bold: true;
+  scrollbar-ends-foreground: #00aaaa;
+  scrollbar-ends-background: #0000aa;
+  scrollbar-ends-bold: true;
+  scrollbar-corner-foreground: #00aaaa;
+  scrollbar-corner-background: #0000aa;
+  scrollbar-corner-bold: true;
 }
 :disabled { foreground: #aaaaaa; background: #0000aa; bold: false; }
 :selected { foreground: #ffff55; background: #aa0000; bold: true; italic: false; }
