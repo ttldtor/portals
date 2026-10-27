@@ -135,6 +135,43 @@ void owningLocalizationAndClipping() {
         "snapshot survives clear and clipping changes");
 }
 
+void cappedToastMinimum() {
+  Fixture f;
+  NotificationOptions options;
+
+  options.margin = 0;
+  options.maximumWidth = 8;
+
+  f.mount(options);
+  (void)take(f.center.post(ui::toast("Minimum", {.duration = std::nullopt})));
+  f.frame();
+
+  const auto record = take(ui::detail::NotificationAccess::lock(f.center));
+  detail::ToastLayer layer(record);
+  MeasuredChild child{{7, 1}, {}, record->slots.front()->node.id()};
+
+  child.policy.width.minimum = 9;
+
+  const auto cap = layer.arrangeChildren(std::span(&child, 1), {30, 5});
+
+  check(!cap && cap.error() == TreeError::INVALID_GEOMETRY, "toast rejects minimum above configured width cap");
+  child.policy.width.minimum = 4;
+
+  const auto viewport = layer.arrangeChildren(std::span(&child, 1), {3, 5});
+
+  check(!viewport && viewport.error() == TreeError::INVALID_GEOMETRY,
+        "toast rejects minimum above usable viewport width");
+  child.policy.width.minimum = 0;
+  child.policy.height.minimum = 2;
+
+  const auto height = layer.arrangeChildren(std::span(&child, 1), {30, 5});
+
+  check(!height && height.error() == TreeError::INVALID_GEOMETRY, "toast row height cannot violate a hard minimum");
+  child.policy.height.minimum = 0;
+  check(take(layer.arrangeChildren(std::span(&child, 1), {0, 0})).front().empty(),
+        "default zero minima retain tiny toast clipping");
+}
+
 void contentRemovalDoesNotOwnNotifications() {
   Fixture f;
   ui::Ref<Label> body;
@@ -419,6 +456,7 @@ int main() try {
   dedupAndValidation();
   affinityAndIdentity();
   owningLocalizationAndClipping();
+  cappedToastMinimum();
   contentRemovalDoesNotOwnNotifications();
   themeOnlySubjectRequestsPaint();
   return 0;

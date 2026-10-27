@@ -21,7 +21,8 @@ inline bool valid(LayoutPadding padding) {
 inline bool valid(AxisSize policy) {
   return policy.minimum >= 0 && policy.maximum >= policy.minimum && policy.preferred >= INTRINSIC_EXTENT &&
          policy.weight > 0 &&
-         (policy.mode == SizeMode::AUTOMATIC || policy.mode == SizeMode::FIXED || policy.mode == SizeMode::FLEX);
+         (policy.mode == SizeMode::AUTOMATIC || policy.mode == SizeMode::FIXED || policy.mode == SizeMode::FLEX ||
+          policy.mode == SizeMode::CONTENT);
 }
 
 inline bool valid(const MeasuredChild &child) {
@@ -30,8 +31,9 @@ inline bool valid(const MeasuredChild &child) {
 }
 
 inline Wide requested(AxisSize policy, std::int32_t intrinsic) {
-  return std::clamp<Wide>(policy.preferred == INTRINSIC_EXTENT ? intrinsic : policy.preferred, policy.minimum,
-                          policy.maximum);
+  return std::clamp<Wide>(policy.mode == SizeMode::CONTENT || policy.preferred == INTRINSIC_EXTENT ? intrinsic
+                                                                                                   : policy.preferred,
+                          policy.minimum, policy.maximum);
 }
 
 inline std::expected<CellSize, TreeError> size(Wide width, Wide height) {
@@ -65,7 +67,9 @@ inline Wide extent(AxisSize policy, std::int32_t intrinsic, std::int32_t availab
   }
 
   return std::clamp<Wide>(
-    (align == LayoutAlign::STRETCH || policy.mode == SizeMode::FLEX) ? available : std::min<Wide>(wanted, available),
+    ((align == LayoutAlign::STRETCH && policy.mode != SizeMode::CONTENT) || policy.mode == SizeMode::FLEX)
+      ? available
+      : std::min<Wide>(wanted, available),
     policy.minimum, policy.maximum);
 }
 

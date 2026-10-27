@@ -5,6 +5,10 @@
 #include <portals/ui_action.hpp>
 
 namespace portals {
+/** @brief Natural menu extent on both axes; callers may supply an ordinary explicit SizePolicy. */
+inline constexpr SizePolicy DEFAULT_MENU_POLICY{.width = {.mode = SizeMode::CONTENT},
+                                                .height = {.mode = SizeMode::CONTENT}};
+
 /** @brief Finite admission limit for an ordinary retained command list. */
 struct MenuOptions {
   std::size_t maxEntries{256}; ///< Positive entry bound, at most INT32_MAX; duplicates count separately.
@@ -24,7 +28,7 @@ public:
    * Construction may allocate inside the existing checked tree emplacement boundary.
    */
   Menu(GraphemeText empty, const std::vector<ui::ActionRef> &actions, MenuOptions options = {}, ControlStyle style = {},
-       SizePolicy policy = {});
+       SizePolicy policy = DEFAULT_MENU_POLICY);
   ~Menu() override;
 
   /** @param available Offered extent. @return Maximum prepared row width and visible row count. */

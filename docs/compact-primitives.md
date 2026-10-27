@@ -67,6 +67,25 @@ is removed and references remain unpublished. The same operations are available
 as consuming methods and pipe stages. Parent layouts apply these policies;
 the application root itself receives the viewport extent.
 
+`fitWidth()` and `fitHeight()` select `SizeMode::CONTENT`: the widget prefers
+its intrinsic extent, can shrink to its hard minimum when space is scarce, and
+does not grow to consume spare cells. `minWidth(cells)`, `maxWidth(cells)`,
+`minHeight(cells)` and `maxHeight(cells)` change only the corresponding leaf
+bound; the same operations are available as `ui::fitWidth()`, `ui::fitHeight()`,
+`ui::minWidth(cells)`, `ui::maxWidth(cells)`, `ui::minHeight(cells)` and
+`ui::maxHeight(cells)` pipe stages. These constraints are applied after the
+recipe's ordinary setup. Thus `.width(20).fitWidth()` remains exactly 20 cells,
+while `.fitWidth().minWidth(8)` prefers intrinsic width but never allocates less
+than eight. A framed sized widget keeps its content/flex preference; these
+modifiers constrain the outer frame. Numeric inner bounds are not copied to it.
+
+Menus default to content sizing on both axes. Other widget families keep their
+existing defaults. Content sizing prefers intrinsic dimensions without using
+spare space and can shrink only as far as its hard minimum.
+Hard minima remain in force when a viewport is clipped. A minimum above a
+configured maximum is invalid; dialog or toast caps that conflict with a hard
+minimum fail typed layout. Their default small-viewport clamp remains in place.
+
 ## Frame and gauge contracts
 
 ### Update a retained gauge {#gauge-ref-commands}

@@ -338,7 +338,10 @@ ManagedScene::installDialogClose(const std::shared_ptr<detail::DialogRecord> &re
     return std::unexpected(error(ManagedPhase::BIND, record->root, TreeError::INVALID_ARGUMENT));
   }
 
-  auto close = emplace<Button>(record->root, std::move(*text), ControlStyle{}, SizePolicy{}, ButtonChrome::NONE);
+  const auto size = detail::DIALOG_CLOSE_SIZE;
+  const SizePolicy policy{{size.width, size.width, size.width, SizeMode::FIXED},
+                          {size.height, size.height, size.height, SizeMode::FIXED}};
+  auto close = emplace<Button>(record->root, std::move(*text), ControlStyle{}, policy, ButtonChrome::NONE);
 
   if (!close) {
     return std::unexpected(close.error());

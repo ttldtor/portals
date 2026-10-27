@@ -79,8 +79,11 @@ IDs are case-sensitive. Every declaration ends with a semicolon.
 | `bold`, `italic`, `underline` | `true` or `false` | Repaint |
 | `min-width` | Integer from 0 to `INT32_MAX`, in terminal cells | Layout and repaint |
 
-`min-width` requires a selector without a state predicate. Zero keeps the
-control's intrinsic measurement. Layout policies and clipping still apply.
+`min-width` requires a selector without a state predicate and sets a hard
+allocation minimum. Zero adds no minimum. A clipped viewport does not reduce
+allocation below this bound. If a fixed recipe width of 20 conflicts with a
+styled minimum of 30, typed style application fails before publishing that
+style update; an invalid final policy in a cold recipe fails mount.
 
 States are `normal`, `focused`, `disabled`, `selected`, `header` and `caret`.
 A selector without a state applies to every presentation variant; `:normal`

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include "theme_receiver.hpp"
+#include <portals/detail/layout_traversal.hpp>
 #include <portals/detail/pss_data.hpp>
 #include <portals/style.hpp>
 
@@ -1282,6 +1283,15 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
 
           if (next.minWidth < 0) {
             result = std::unexpected(error(TreeError::INVALID_ARGUMENT, "Widget default minimum width is negative"));
+
+            return;
+          }
+
+          const auto policy = detail::effectiveSizePolicy(**widget, next.minWidth);
+
+          if (!policy) {
+            result = std::unexpected(
+              error(policy.error(), "Style min-width conflicts with widget SizePolicy bounds (including exact width)"));
 
             return;
           }

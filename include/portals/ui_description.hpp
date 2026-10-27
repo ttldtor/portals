@@ -1253,6 +1253,56 @@ public:
     return std::move(*this).resize({detail::SizeDimension::HEIGHT, cells});
   }
 
+  /** @return Content-preferred width, shrinkable within existing bounds; checked after setup. */
+  Description &&fitWidth() &&
+    requires std::derived_from<T, SizedWidget>
+  {
+    return std::move(*this).constrainSize({detail::SizeDimension::FIT_WIDTH});
+  }
+
+  /** @return Content-preferred height, shrinkable within existing bounds; checked after setup. */
+  Description &&fitHeight() &&
+    requires std::derived_from<T, SizedWidget>
+  {
+    return std::move(*this).constrainSize({detail::SizeDimension::FIT_HEIGHT});
+  }
+
+  /** @param cells Nonnegative hard minimum width; does not change the axis mode.
+   * @return Consuming recipe; final incompatible bounds fail mount with a typed error.
+   */
+  Description &&minWidth(std::int32_t cells) &&
+    requires std::derived_from<T, SizedWidget>
+  {
+    return std::move(*this).constrainSize({detail::SizeDimension::MIN_WIDTH, cells});
+  }
+
+  /** @param cells Nonnegative hard maximum width; does not change the axis mode.
+   * @return Consuming recipe; final incompatible bounds fail mount with a typed error.
+   */
+  Description &&maxWidth(std::int32_t cells) &&
+    requires std::derived_from<T, SizedWidget>
+  {
+    return std::move(*this).constrainSize({detail::SizeDimension::MAX_WIDTH, cells});
+  }
+
+  /** @param cells Nonnegative hard minimum height; does not change the axis mode.
+   * @return Consuming recipe; final incompatible bounds fail mount with a typed error.
+   */
+  Description &&minHeight(std::int32_t cells) &&
+    requires std::derived_from<T, SizedWidget>
+  {
+    return std::move(*this).constrainSize({detail::SizeDimension::MIN_HEIGHT, cells});
+  }
+
+  /** @param cells Nonnegative hard maximum height; does not change the axis mode.
+   * @return Consuming recipe; final incompatible bounds fail mount with a typed error.
+   */
+  Description &&maxHeight(std::int32_t cells) &&
+    requires std::derived_from<T, SizedWidget>
+  {
+    return std::move(*this).constrainSize({detail::SizeDimension::MAX_HEIGHT, cells});
+  }
+
   /** @param count Positive fixed column count; row-major flow grows rows within the configured budget.
    * @return Consuming standard grid recipe; invalid relationships fail before mount effects.
    */
@@ -1651,6 +1701,10 @@ private:
   {
     auto *state = state_.get();
 
+    if (state && state->sizing) {
+      state->sizing->stage(change, false);
+    }
+
     // The callback lives in this State and runs synchronously before mountInto releases it.
     // It must never be exported to publish/finalize/runtime callbacks.
     return std::move(*this).setup([change, state](ManagedScene &scene, Node<T> node) {
@@ -1660,6 +1714,21 @@ private:
 
       return detail::Access::resize(scene, target, change);
     });
+  }
+
+  /** @brief Retain sparse bounds until the entire cold recipe has completed setup. */
+  Description &&constrainSize(detail::SizeChange change) &&
+    requires std::derived_from<T, SizedWidget>
+  {
+    if (state_) {
+      if (!state_->sizing) {
+        state_->sizing = std::make_unique<detail::RecipeSizing>();
+      }
+
+      state_->sizing->stage(change, true);
+    }
+
+    return std::move(*this);
   }
 
   /** @return Stable cold frame configuration, allocated only when this recipe opts in. */
@@ -2211,24 +2280,23 @@ private:
       context.release.push_back([slot] {
         slot->pending = false;
       });
-      context.publish.push_back(
-        [slot, value = *node, owner = &scene, lifetime = detail::Access::lifetime(scene), fieldDraft] {
-          slot->node = value;
-          slot->target.node = value;
-          slot->target.scene = owner;
-          slot->target.lifetime = lifetime;
+      context.publish.push_back([slot, value = *node, owner = &scene, lifetime = detail::Access::lifetime(scene),
+                                 fieldDraft] {
+        slot->node = value;
+        slot->target.node = value;
+        slot->target.scene = owner;
+        slot->target.lifetime = lifetime;
 
-          if constexpr (std::derived_from<T, Control>) {
-            slot->target.caption = value;
-          } else if constexpr (std::same_as<T, LineEdit>) {
-            slot->target.draft = value;
-          } else if constexpr (std::same_as<T, FormField> || std::same_as<T, FindBar> ||
-                               std::derived_from<T, ComboBox>) {
-            slot->target.draft = fieldDraft;
-          } else if constexpr (std::same_as<T, Password>) {
-            slot->target.secret = value;
-          }
-        });
+        if constexpr (std::derived_from<T, Control>) {
+          slot->target.caption = value;
+        } else if constexpr (std::same_as<T, LineEdit>) {
+          slot->target.draft = value;
+        } else if constexpr (std::same_as<T, FormField> || std::same_as<T, FindBar> || std::derived_from<T, ComboBox>) {
+          slot->target.draft = fieldDraft;
+        } else if constexpr (std::same_as<T, Password>) {
+          slot->target.secret = value;
+        }
+      });
       detail::RefTarget pending;
       pending.node = *node;
       pending.scene = &scene;
@@ -2294,6 +2362,19 @@ private:
               return std::unexpected(resized.error());
             }
           }
+        }
+      }
+    }
+
+    if constexpr (std::derived_from<T, SizedWidget>) {
+      if (state->sizing || (state->frame && state->frame->mounted != Node<Border>{})) {
+        const auto target = state->frame && state->frame->mounted != Node<Border>{}
+                              ? Node<SizedWidget>(state->frame->mounted)
+                              : Node<SizedWidget>(*node);
+        auto sized = detail::Access::finishSizing(scene, *node, target, state->sizing.get());
+
+        if (!sized) {
+          return std::unexpected(sized.error());
         }
       }
     }

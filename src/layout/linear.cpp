@@ -15,7 +15,8 @@ thread_local bool layout_active{};
 bool valid(AxisSize policy) {
   return policy.minimum >= 0 && policy.maximum >= policy.minimum && policy.preferred >= INTRINSIC_EXTENT &&
          policy.weight > 0 &&
-         (policy.mode == SizeMode::AUTOMATIC || policy.mode == SizeMode::FIXED || policy.mode == SizeMode::FLEX);
+         (policy.mode == SizeMode::AUTOMATIC || policy.mode == SizeMode::FIXED || policy.mode == SizeMode::FLEX ||
+          policy.mode == SizeMode::CONTENT);
 }
 
 bool valid(SizePolicy policy) {
@@ -42,9 +43,19 @@ std::expected<std::int32_t, TreeError> cells(Wide value) {
 }
 
 Wide requested(AxisSize policy, std::int32_t intrinsic) {
-  auto preferred = policy.preferred == INTRINSIC_EXTENT ? intrinsic : policy.preferred;
+  auto preferred =
+    policy.mode == SizeMode::CONTENT || policy.preferred == INTRINSIC_EXTENT ? intrinsic : policy.preferred;
 
   return std::clamp<Wide>(preferred, policy.minimum, policy.maximum);
+}
+
+std::int32_t passthroughExtent(AxisSize policy, std::int32_t intrinsic, std::int32_t offered) {
+  const auto wanted = requested(policy, intrinsic);
+  const auto extent = policy.mode == SizeMode::FIXED     ? wanted
+                      : policy.mode == SizeMode::CONTENT ? std::min<Wide>(wanted, offered)
+                                                         : offered;
+
+  return static_cast<std::int32_t>(std::clamp<Wide>(extent, policy.minimum, policy.maximum));
 }
 
 Wide aligned(Wide spare, LayoutAlign align) {
@@ -165,9 +176,15 @@ public:
     entries_[index].measured.node = node.id();
 
     auto read = tree_.read(node, [&](const Widget &widget) {
-      if (auto item = dynamic_cast<const LayoutItem *>(&widget)) {
-        entries_[index].measured.policy = item->sizePolicy();
+      const auto policy = detail::effectiveSizePolicy(widget);
+
+      if (!policy) {
+        status = std::unexpected(policy.error());
+
+        return;
       }
+
+      entries_[index].measured.policy = *policy;
 
       if (auto layout = dynamic_cast<const Layout *>(&widget)) {
         auto result = layout->childAvailable(available);
@@ -243,10 +260,10 @@ public:
   std::expected<void, TreeError> arrange(std::size_t index, CellRect local, CellRect viewport,
                                          std::optional<CellRect> contentClip = {},
                                          const ParentLayoutEdge *parentEdge = nullptr) {
-    auto result = parentEdge ? detail::LayoutTraversalAccess::arrange(tree_, entries_[index].node, local, viewport,
-                                                                      *parentEdge)
-                            : contentClip ? tree_.arrange(entries_[index].node, local, viewport, *contentClip)
-                                          : tree_.arrange(entries_[index].node, local, viewport);
+    auto result = parentEdge
+                    ? detail::LayoutTraversalAccess::arrange(tree_, entries_[index].node, local, viewport, *parentEdge)
+                  : contentClip ? tree_.arrange(entries_[index].node, local, viewport, *contentClip)
+                                : tree_.arrange(entries_[index].node, local, viewport);
 
     if (!result) {
       return result;
@@ -296,7 +313,10 @@ public:
           }
         }
       } else if (!children.empty()) {
-        auto rect = CellRect::from({}, local.size());
+        const auto &child = children.front();
+        const CellSize size{passthroughExtent(child.policy.width, child.desired.width, local.size().width),
+                            passthroughExtent(child.policy.height, child.desired.height, local.size().height)};
+        auto rect = CellRect::from({}, size);
 
         if (rect) {
           try {
@@ -367,12 +387,12 @@ public:
           return std::unexpected(TreeError::INVALID_GEOMETRY);
         }
 
-        edge = ParentLayoutEdge{entries_[index].node.id(), children[i].node, *surfaceClip, policy.revealAxes,
-                                policy.proposedInput, 0};
+        edge = ParentLayoutEdge{entries_[index].node.id(), children[i].node,     *surfaceClip,
+                                policy.revealAxes,         policy.proposedInput, 0};
       }
 
-      auto child_result = arrange(entries_[index].children[i], (*placements)[i], viewport, childContentClip,
-                                  edge ? &*edge : nullptr);
+      auto child_result =
+        arrange(entries_[index].children[i], (*placements)[i], viewport, childContentClip, edge ? &*edge : nullptr);
 
       if (!child_result) {
         return child_result;
@@ -511,7 +531,7 @@ std::expected<std::vector<CellRect>, TreeError> LinearLayout::arrangeChildren(st
 
     Wide deficit = std::max<Wide>(0, total - main_space);
 
-    // Later auto/flex children yield preferred space first; fixed and minimum survive.
+    // Later shrinkable children yield preferred space first; fixed and minimum survive.
     for (std::size_t i = children.size(); i > 0 && deficit > 0; --i) {
       auto policy = mainPolicy(children[i - 1], horizontal_);
 
@@ -538,7 +558,8 @@ std::expected<std::vector<CellRect>, TreeError> LinearLayout::arrangeChildren(st
       Wide cross = crossDesired(children[i], horizontal_);
 
       if (policy.mode != SizeMode::FIXED) {
-        cross = std::clamp<Wide>((options_.cross_align == LayoutAlign::STRETCH || policy.mode == SizeMode::FLEX)
+        cross = std::clamp<Wide>(((options_.cross_align == LayoutAlign::STRETCH && policy.mode != SizeMode::CONTENT) ||
+                                  policy.mode == SizeMode::FLEX)
                                    ? cross_space
                                    : std::min(cross, cross_space),
                                  policy.minimum, policy.maximum);
@@ -577,12 +598,27 @@ std::expected<void, TreeError> setSizePolicy(WidgetTree &tree, Node<SizedWidget>
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
+  bool changed{};
+  std::expected<void, TreeError> bounds;
   auto result = tree.edit(node, [&](SizedWidget &widget) {
-    widget.policy_ = policy;
+    if (widget.computedStyle() && widget.computedStyle()->minWidth > policy.width.maximum) {
+      bounds = std::unexpected(TreeError::INVALID_ARGUMENT);
+
+      return;
+    }
+
+    if (widget.policy_ != policy) {
+      widget.policy_ = policy;
+      changed = true;
+    }
   });
 
-  if (!result) {
-    return result;
+  if (!result || !bounds) {
+    return result ? bounds : result;
+  }
+
+  if (!changed) {
+    return {};
   }
 
   return tree.invalidate(node, Invalidation::LAYOUT);

@@ -87,6 +87,18 @@ struct SizeModifier {
       return std::move(description).flexY(modifier.change.weight);
     case detail::SizeDimension::FLEX:
       return std::move(description).flex(modifier.change.weight);
+    case detail::SizeDimension::MIN_WIDTH:
+      return std::move(description).minWidth(modifier.change.extent);
+    case detail::SizeDimension::MAX_WIDTH:
+      return std::move(description).maxWidth(modifier.change.extent);
+    case detail::SizeDimension::MIN_HEIGHT:
+      return std::move(description).minHeight(modifier.change.extent);
+    case detail::SizeDimension::MAX_HEIGHT:
+      return std::move(description).maxHeight(modifier.change.extent);
+    case detail::SizeDimension::FIT_WIDTH:
+      return std::move(description).fitWidth();
+    case detail::SizeDimension::FIT_HEIGHT:
+      return std::move(description).fitHeight();
     }
 
     return std::move(description).flex(0);
@@ -126,6 +138,44 @@ constexpr SizeModifier flexY(std::uint32_t weight = 1) {
  */
 constexpr SizeModifier flex(std::uint32_t weight = 1) {
   return {{detail::SizeDimension::FLEX, 0, weight}};
+}
+
+/** @return Shrinkable intrinsic horizontal sizing, preserving existing hard bounds. */
+constexpr SizeModifier fitWidth() {
+  return {{detail::SizeDimension::FIT_WIDTH}};
+}
+
+/** @return Shrinkable intrinsic vertical sizing, preserving existing hard bounds. */
+constexpr SizeModifier fitHeight() {
+  return {{detail::SizeDimension::FIT_HEIGHT}};
+}
+
+/** @param cells Nonnegative hard horizontal minimum, checked after cold setup.
+ * @return Sparse size stage preserving mode and other bounds.
+ */
+constexpr SizeModifier minWidth(std::int32_t cells) {
+  return {{detail::SizeDimension::MIN_WIDTH, cells}};
+}
+
+/** @param cells Nonnegative hard horizontal maximum, checked after cold setup.
+ * @return Sparse size stage preserving mode and other bounds.
+ */
+constexpr SizeModifier maxWidth(std::int32_t cells) {
+  return {{detail::SizeDimension::MAX_WIDTH, cells}};
+}
+
+/** @param cells Nonnegative hard vertical minimum, checked after cold setup.
+ * @return Sparse size stage preserving mode and other bounds.
+ */
+constexpr SizeModifier minHeight(std::int32_t cells) {
+  return {{detail::SizeDimension::MIN_HEIGHT, cells}};
+}
+
+/** @param cells Nonnegative hard vertical maximum, checked after cold setup.
+ * @return Sparse size stage preserving mode and other bounds.
+ */
+constexpr SizeModifier maxHeight(std::int32_t cells) {
+  return {{detail::SizeDimension::MAX_HEIGHT, cells}};
 }
 
 } // namespace portals::ui

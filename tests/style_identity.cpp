@@ -170,7 +170,7 @@ TEST_CASE("cold text lists preserve names classes and explicit types through fin
 TEST_CASE("resource text controls expose natural selectors and retain Control compatibility") {
   for (bool control : {false, true}) {
     auto scene = ui::scene(ui::resource(R"(VBox#root{width=32 gap=1
-      Label#caption{"Text" width=0} HBox#row{height=2
+      Label#caption{"Text" width=12} HBox#row{height=2
       Button#save{"Save" flex=2} CheckBox#choice{"Yes" checked=true}}
       LineEdit#message{"initial" height=1}})"));
     const auto caption = scene.get<Label>("caption");
@@ -189,7 +189,7 @@ TEST_CASE("resource text controls expose natural selectors and retain Control co
     scene.configure([&](ManagedScene &, Application &app) {
       REQUIRE(app.tree().read(caption.node(), [](const Label &widget) {
         CHECK(widget.sizePolicy().width.mode == SizeMode::FIXED);
-        CHECK(widget.sizePolicy().width.preferred == 0);
+        CHECK(widget.sizePolicy().width.preferred == 12);
       }));
       REQUIRE(app.tree().read(save.node(), [](const Button &widget) {
         CHECK(widget.sizePolicy().width.mode == SizeMode::FLEX);
@@ -198,4 +198,51 @@ TEST_CASE("resource text controls expose natural selectors and retain Control co
     });
     REQUIRE(scene.checked());
   }
+}
+
+TEST_CASE("resource zero width remains exact and rejects conflicting style minima atomically") {
+  auto scene = ui::scene(ui::resource(R"(Label#caption{"Text" width=0})"));
+  const auto caption = scene.get<Label>("caption");
+
+  scene | ui::style("Label#caption { min-width:0; }");
+  REQUIRE(scene.prepareChecked());
+  CHECK(computed(scene, caption).minWidth == 0);
+
+  const auto conflicting = parsePssDocument("Label#caption { min-width:12; }");
+
+  REQUIRE(conflicting);
+  scene.configure([&](ManagedScene &managed, Application &app) {
+    const auto rejected = managed.styleDocument(StyleTier::APPLICATION, "conflicting", *conflicting);
+
+    REQUIRE_FALSE(rejected);
+    CHECK(rejected.error().phase == ManagedPhase::STYLE);
+
+    const auto *style = std::get_if<StyleError>(&rejected.error().cause);
+
+    REQUIRE(style);
+    CHECK(style->cause == TreeError::INVALID_ARGUMENT);
+    REQUIRE(app.tree().read(caption.node(), [](const Label &widget) {
+      CHECK(widget.sizePolicy().width.mode == SizeMode::FIXED);
+      CHECK(widget.sizePolicy().width.minimum == 0);
+      CHECK(widget.sizePolicy().width.preferred == 0);
+      CHECK(widget.sizePolicy().width.maximum == 0);
+      REQUIRE(widget.computedStyle());
+      CHECK(widget.computedStyle()->minWidth == 0);
+    }));
+  });
+  REQUIRE(scene.checked());
+
+  auto cold = ui::scene(ui::resource(R"(Label#caption{"Text" width=0})"));
+
+  cold | ui::style("Label#caption { min-width:12; }");
+
+  const auto rejected = cold.prepareChecked();
+
+  REQUIRE_FALSE(rejected);
+  CHECK(rejected.error().phase == ManagedPhase::STYLE);
+
+  const auto *style = std::get_if<StyleError>(&rejected.error().cause);
+
+  REQUIRE(style);
+  CHECK(style->cause == TreeError::INVALID_ARGUMENT);
 }

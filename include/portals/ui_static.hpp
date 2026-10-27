@@ -99,7 +99,8 @@ void staticSceneInvalidEditMode();
  */
 constexpr bool validAxis(AxisSize axis) {
   return axis.minimum >= 0 && axis.maximum >= axis.minimum && axis.preferred >= INTRINSIC_EXTENT && axis.weight > 0 &&
-         (axis.mode == SizeMode::AUTOMATIC || axis.mode == SizeMode::FIXED || axis.mode == SizeMode::FLEX);
+         (axis.mode == SizeMode::AUTOMATIC || axis.mode == SizeMode::FIXED || axis.mode == SizeMode::FLEX ||
+          axis.mode == SizeMode::CONTENT);
 }
 
 /** @param alignment Existing linear alignment value.

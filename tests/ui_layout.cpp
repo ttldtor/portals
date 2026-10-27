@@ -107,6 +107,164 @@ static_assert(!HasOverlayAlignment<ui::Description<OverlayHost>>);
 static_assert(!HasOverlayAlignment<ui::Description<Grid>>);
 } // namespace
 
+TEST_CASE("fit and independent bounds agree between methods and pipe modifiers") {
+  for (const auto pipes : {false, true}) {
+    Fixture fixture;
+    ui::Ref<Label> child;
+    auto recipe = ui::label(child, "abcdefgh");
+
+    if (pipes) {
+      recipe = std::move(recipe) | ui::fitWidth() | ui::fitHeight() | ui::minWidth(3) | ui::maxWidth(6) |
+               ui::minHeight(2) | ui::maxHeight(4);
+    } else {
+      recipe = std::move(recipe).fitWidth().fitHeight().minWidth(3).maxWidth(6).minHeight(2).maxHeight(4);
+    }
+
+    take(ui::mount(*fixture.scene, ui::vbox(std::move(recipe))));
+    fixture.layout({20, 10});
+    CHECK(take(child.geometry()).local.size() == CellSize{6, 2});
+    fixture.layout({2, 1});
+    CHECK(take(child.geometry()).local.size() == CellSize{3, 2});
+    CHECK(take(child.geometry()).clip.size() == CellSize{2, 1});
+    take(fixture.app->tree().read(child.node(), [](const Label &widget) {
+      const auto policy = widget.sizePolicy();
+
+      CHECK(policy.width.mode == SizeMode::CONTENT);
+      CHECK(policy.height.mode == SizeMode::CONTENT);
+    }));
+  }
+}
+
+TEST_CASE("cold sizing order preserves exact bounds and validates the final sparse result") {
+  for (int order = 0; order != 5; ++order) {
+    CAPTURE(order);
+    Fixture fixture;
+    ui::Ref<Label> child;
+    auto recipe = ui::label(child, "abcdefgh").height(3);
+
+    if (order == 0) {
+      recipe = std::move(recipe).width(20).fitWidth();
+    } else if (order == 1) {
+      recipe = std::move(recipe).width(20).minWidth(12).maxWidth(32).fitWidth();
+    } else if (order == 2) {
+      recipe = std::move(recipe).fitWidth().width(20);
+    } else if (order == 3) {
+      recipe = std::move(recipe).minWidth(24).maxWidth(12).maxWidth(32).fitWidth();
+    } else {
+      recipe = std::move(recipe).width(20).fitWidth().width(6);
+    }
+
+    take(ui::mount(*fixture.scene, ui::vbox(std::move(recipe))));
+    fixture.layout({40, 8});
+
+    const auto expectedWidth = order == 1 ? 12 : order == 3 ? 24 : order == 4 ? 6 : 20;
+
+    CHECK(take(child.geometry()).local.size() == CellSize{expectedWidth, 3});
+    take(fixture.app->tree().read(child.node(), [&](const Label &widget) {
+      const auto policy = widget.sizePolicy();
+
+      CHECK(policy.width.mode == (order == 2 || order == 4 ? SizeMode::FIXED : SizeMode::CONTENT));
+      CHECK(policy.height.minimum == 3);
+      CHECK(policy.height.maximum == 3);
+      CHECK(policy.height.mode == SizeMode::FIXED);
+    }));
+  }
+}
+
+TEST_CASE("framed menu keeps intrinsic preference and targets outer constraints in either recipe order") {
+  for (int order = 0; order != 4; ++order) {
+    CAPTURE(order);
+    Fixture fixture;
+    ui::ActionSet actions;
+    const auto open = actions.action("open", "Open", [](const ui::ActionInvocation &) {
+    });
+    const auto close = actions.action("close", "Close", [](const ui::ActionInvocation &) {
+    });
+    ui::Ref<Menu> menu;
+    ui::Ref<Border> outer;
+    auto recipe = ui::menu(menu, {open, close});
+
+    if (order == 1) {
+      recipe = std::move(recipe).fitWidth().fitHeight().minWidth(14).maxWidth(18).maxHeight(4).framed(outer, "ascii");
+    } else if (order == 2) {
+      recipe = std::move(recipe).framed(outer, "ascii").fitWidth().fitHeight().minWidth(14).maxWidth(18).maxHeight(4);
+    } else if (order == 3) {
+      recipe = std::move(recipe).framed(outer, "ascii").width(16).height(6);
+    } else {
+      recipe = std::move(recipe).framed(outer, "ascii");
+    }
+
+    take(ui::mount(*fixture.scene, ui::vbox(std::move(recipe))));
+    fixture.layout({30, 10});
+
+    const auto expected = order == 0 ? CellSize{11, 4} : order == 3 ? CellSize{16, 6} : CellSize{14, 4};
+
+    CHECK(take(outer.geometry()).local.size() == expected);
+    CHECK(take(menu.geometry()).local.origin() == CellPoint{1, 1});
+    CHECK(take(menu.geometry()).local.size() == CellSize{9, 2});
+    CHECK(take(fixture.app->tree().inspect(menu.node())).parent == outer.node());
+    take(fixture.app->tree().read(menu.node(), [](const Menu &widget) {
+      const auto policy = widget.sizePolicy();
+
+      CHECK(policy.width.minimum == 0);
+      CHECK(policy.height.minimum == 0);
+      CHECK(policy.width.mode == SizeMode::CONTENT);
+      CHECK(policy.height.mode == SizeMode::CONTENT);
+    }));
+    take(fixture.app->tree().read(outer.node(), [&](const Border &widget) {
+      const auto policy = widget.sizePolicy();
+
+      CHECK(policy.width.mode == (order == 3 ? SizeMode::FIXED : SizeMode::CONTENT));
+      CHECK(policy.height.mode == (order == 3 ? SizeMode::FIXED : SizeMode::CONTENT));
+    }));
+  }
+}
+
+TEST_CASE("invalid final cold sizing rolls back framed descendants and unpublished references") {
+  Fixture fixture;
+  ui::Ref<Label> retained;
+
+  take(ui::mount(*fixture.scene, ui::label(retained, "retained")));
+
+  const auto before = take(fixture.app->tree().inspect(fixture.scene->root())).children.size();
+  ui::Ref<Column> parent;
+  ui::Ref<Label> early;
+  ui::Ref<Label> invalid;
+  ui::Ref<Border> outer;
+  auto capture = std::make_shared<int>(7);
+  const std::weak_ptr<int> lifetime = capture;
+  auto recipe = ui::vbox(ui::label(early, "early"),
+                         ui::label(invalid, "invalid")
+                           .framed(outer, "ascii")
+                           .width(20)
+                           .minWidth(24)
+                           .setup([keep = capture](ManagedScene &, Node<Label>) -> std::expected<void, ManagedError> {
+                             CHECK(*keep == 7);
+
+                             return {};
+                           }))
+                  .reference(parent);
+
+  capture.reset();
+
+  const auto failed = ui::mount(*fixture.scene, std::move(recipe));
+
+  REQUIRE_FALSE(failed);
+  CHECK(cause(failed.error(), TreeError::INVALID_ARGUMENT));
+  CHECK(parent.node() == Node<Column>{});
+  CHECK(early.node() == Node<Label>{});
+  CHECK(invalid.node() == Node<Label>{});
+  CHECK(outer.node() == Node<Border>{});
+  CHECK(lifetime.expired());
+  CHECK(take(fixture.app->tree().inspect(fixture.scene->root())).children.size() == before);
+  CHECK(take(retained.text().get()) == "retained");
+
+  ui::Ref<Label> recovered;
+
+  take(ui::mount(*fixture.scene, ui::label(recovered, "valid").fitWidth().minWidth(2).maxWidth(8)));
+  CHECK(recovered.node() != Node<Label>{});
+}
+
 TEST_CASE("ordinary Overlay methods pipes and configuration preserve actual layout paint and hit order") {
   for (int mode = 0; mode != 3; ++mode) {
     INFO("recipe mode: ", mode);
@@ -1177,4 +1335,81 @@ TEST_CASE("onLayout exceptions map through the runner and release owned callback
     CHECK_FALSE(label.geometry());
     CHECK(ui::detail::CurrentSceneScope::snapshot().expired());
   }
+}
+
+TEST_CASE("cold final sizing is intersected with theme bounds at managed preparation") {
+  for (const bool fitFirst : {false, true}) {
+    CAPTURE(fitFirst);
+    Fixture fixture;
+    ui::Ref<Label> child;
+
+    take(fixture.scene->theme(take(parsePss("Label { min-width: 30; }"))));
+
+    auto recipe = ui::label(child, "small");
+
+    if (fitFirst) {
+      recipe = std::move(recipe).fitWidth().width(20).maxWidth(40);
+    } else {
+      recipe = std::move(recipe).width(20).minWidth(12).maxWidth(32).fitWidth();
+    }
+
+    take(ui::mount(*fixture.scene, ui::vbox(std::move(recipe))));
+    fixture.layout({80, 8});
+    CHECK(take(child.geometry()).local.size().width == 30);
+  }
+
+  Fixture fixture;
+  ui::Ref<Label> invalid;
+
+  take(fixture.scene->theme(take(parsePss("Label { min-width: 30; }"))));
+
+  take(ui::mount(*fixture.scene, ui::label(invalid, "small").maxWidth(40).fitWidth().width(20)));
+
+  const auto failed = fixture.scene->prepare(*fixture.app, {80, 8});
+
+  REQUIRE_FALSE(failed);
+  CHECK(failed.error() == TreeError::INVALID_ARGUMENT);
+  const auto diagnostics = take(fixture.scene->diagnostics());
+
+  REQUIRE_FALSE(diagnostics.errors.empty());
+  const auto *style = std::get_if<StyleError>(&diagnostics.errors.back().error.cause);
+
+  REQUIRE(style);
+  CHECK(style->cause == TreeError::INVALID_ARGUMENT);
+  bool installed = true;
+
+  take(fixture.app->tree().read(invalid.node(), [&](const Label &widget) {
+    installed = widget.computedStyle().has_value();
+  }));
+  CHECK_FALSE(installed);
+}
+
+TEST_CASE("framed content menu follows caption changes up to its cap and stays idle afterwards") {
+  Fixture fixture;
+  ui::Ref<Menu> menu;
+  ui::Ref<Border> outer;
+  ui::ActionSet actions;
+  auto save = actions.action("save", "Save", [] {
+  });
+
+  take(ui::mount(*fixture.scene,
+                 ui::vbox(ui::menu(menu, {save}).fitWidth().minWidth(10).maxWidth(16).framed(outer, "rounded"))));
+  fixture.layout({60, 10});
+  const auto initial = take(outer.geometry()).local.size();
+
+  CHECK(initial.width == 10);
+  auto metadata = *take(save.snapshot());
+
+  metadata.caption = "A much longer caption";
+  REQUIRE(save.set(metadata));
+  fixture.layout({60, 10});
+  CHECK(take(outer.geometry()).local.size().width == 16);
+  CHECK(take(menu.geometry()).clip.size().width == 14);
+
+  metadata.caption = "Save";
+  REQUIRE(save.set(metadata));
+  fixture.layout({60, 10});
+  CHECK(take(outer.geometry()).local.size() == initial);
+  take(fixture.scene->prepare(*fixture.app, {60, 10}));
+  CHECK(take(fixture.app->tree().consumeFrameRequest()) == Invalidation::NONE);
 }

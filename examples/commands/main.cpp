@@ -25,11 +25,11 @@ int main() {
     ui::label("One command, several ways to use it").id("heading"),
     ui::lineEdit(draft, "Remember the milk").width(56),
     ui::hbox(
-      ui::menu({save, clear, exit}).width(28).framed("rounded", "Commands"),
+      ui::menu({save, clear, exit}).fitWidth().minWidth(18).maxWidth(28).framed("rounded", "Commands"),
       ui::vbox(
         ui::label("Saved note"),
         ui::label(saved, "Nothing saved yet").width(28),
-        ui::button(save))),
+        ui::button(save).fitWidth())),
     ui::label("Tab: focus   Up/Down: menu   Enter: select   F10: quit")
   ).width(64).framed("rounded", "Command desk"));
 
