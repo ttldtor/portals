@@ -11,11 +11,35 @@ the frame edge.
 Use the wheel, arrows, Page Up/Down, Home/End, or drag a thumb. Exit and F10 close
 through the standard runner and restore the terminal.
 
+[Complete source](examples/guide_scroll_controls.cpp):
+
 \include guide_scroll_controls.cpp
 
 Link your application to `portals::core`; see [package setup](package.md).
 The [guide examples](examples.md) describe the standalone CMake build. Its
 `guide_scroll_controls` executable opens a native terminal.
+
+## Compare on-frame scrollbar skins
+
+This keyboard-only gallery places the same eight-label content root, 40 cells
+wide, in four 30-by-6 outer areas arranged 2 by 2. Each area uses `ON_FRAME`,
+with tracks on its right and bottom frame edges, and one of four skins: legacy,
+frame, minimal or ASCII. The frame inset leaves a 28-by-4 content viewport
+before any other layout gutters. The ordinary eight-row content is not
+virtualized. Tab focuses an area, arrow keys scroll it, and F10 quits.
+
+Current limitation: with the default Nord part colors, a focused `legacy`,
+`frame` or `minimal` full-block thumb can blend into the content background
+while the track is highlighted.
+The recording shows this behavior; focus does not change the scrolling range.
+
+![Native terminal recording comparing on-frame scrollbar skins](images/scrollbar-gallery.gif)
+[Static PNG frame](images/scrollbar-gallery.png)
+
+Build `guide_scrollbar_gallery` with the [standalone guide project](examples.md).
+The [complete source](examples/guide_scrollbar_gallery.cpp) is included below.
+
+\include guide_scrollbar_gallery.cpp
 
 ## Choose content and bar placement
 

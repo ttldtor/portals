@@ -14,7 +14,8 @@ a fragment; they are not complete applications.
 | Literal search | [FindBar guide](find-bar.md), [main.cpp](../examples/find_bar/main.cpp) | [guide_find_bar_resource.cpp](examples/guide_find_bar_resource.cpp) |
 | Labeled fields and validation | [Account settings](form-fields.md), [main.cpp](../examples/form_field/main.cpp) | [guide_form_field_resource.cpp](examples/guide_form_field_resource.cpp) |
 | Protected password | [guide_password.cpp](examples/guide_password.cpp) | [guide_password_resource.cpp](examples/guide_password_resource.cpp) |
-| Frames and scrolling | [guide_scrollbar_skin.cpp](examples/guide_scrollbar_skin.cpp) | [guide_scrollbar_resource.cpp](examples/guide_scrollbar_resource.cpp) |
+| Frames and titles | [guide_frame_styles.cpp](examples/guide_frame_styles.cpp), [recording and guide](compact-primitives.md) | [Frame properties](compact-primitives.md) reference |
+| On-frame scrollbar styles | [guide_scrollbar_gallery.cpp](examples/guide_scrollbar_gallery.cpp), [recording and guide](scroll-controls.md) | [guide_scrollbar_resource.cpp](examples/guide_scrollbar_resource.cpp) |
 | Bounded plain-text log | [LogView](log-view.md), [main.cpp](../examples/log_view/main.cpp) | [guide_log_view_resource.cpp](examples/guide_log_view_resource.cpp) |
 | Dialogs | [guide_dialog.cpp](examples/guide_dialog.cpp), [guide_dialog_actions.cpp](examples/guide_dialog_actions.cpp) | [guide_dialog_resource.cpp](examples/guide_dialog_resource.cpp) |
 | CheckBox changes | [guide_check_change.cpp](examples/guide_check_change.cpp) | [guide_check_resource.cpp](examples/guide_check_resource.cpp) |

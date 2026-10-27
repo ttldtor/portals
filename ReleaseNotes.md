@@ -5,6 +5,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+### Documentation
+
+- Add complete declarative frame/title and on-frame scrollbar galleries with native GIF and PNG previews in English and Russian. Document the existing focused scrollbar contrast limitation in the Nord theme.
+
 ### Added
 
 - Added `SizeMode::CONTENT` and fluent `fitWidth`/`fitHeight` plus per-axis
