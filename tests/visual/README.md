@@ -34,6 +34,31 @@ filtered selection, delivery choices and palette
 changes, then waits for the shell to report application exit code zero after F10. A recording failure is not proof of
 an application defect; retain the command output and check the native behavior.
 
+`frame-styles.tape` and `scrollbar-gallery.tape` record the frame-style and
+on-frame scrollbar guide applications. Build `portals_docs_frame_styles` and
+`portals_docs_scrollbar_gallery` with the `windows-msvc-release` preset, then
+run from the repository root:
+
+```powershell
+vhs validate tests/visual/frame-styles.tape
+vhs tests/visual/frame-styles.tape
+vhs validate tests/visual/scrollbar-gallery.tape
+vhs tests/visual/scrollbar-gallery.tape
+```
+
+The tapes use `build/windows-msvc-release/portals_docs_frame_styles.exe` and
+`build/windows-msvc-release/portals_docs_scrollbar_gallery.exe`. They write
+`build/frame-styles.gif` with PNG frames in `build/frame-styles-frames/`, and
+`build/scrollbar-gallery.gif` with PNG frames in
+`build/scrollbar-gallery-frames/`. Review the native captures before copying a
+GIF and selected static PNG frame to `docs/images/frame-styles.gif`,
+`docs/images/frame-styles.png`, `docs/images/scrollbar-gallery.gif` and
+`docs/images/scrollbar-gallery.png`.
+
+The frame-style tape focuses each example with Tab and exits with F10. The
+scrollbar tape uses Tab and arrow keys to move through each area, then exits
+with F10; it does not demonstrate mouse input.
+
 Some Windows VHS versions can save frames without producing the final GIF.
 FFmpeg can assemble those actual frames when needed:
 

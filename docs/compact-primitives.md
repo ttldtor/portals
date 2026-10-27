@@ -6,6 +6,23 @@ Build a small retained scene with standard widgets. The button uses the existing
 Button/action/router path with caption-only chrome; Enter, Space and a left press
 activate it. F10 also exits. No client widget subclass or polling loop is needed.
 
+## Frame patterns and title decorations
+
+Frame patterns are independent of title decoration. The built-in patterns are
+`single`, `rounded`, `double`, `heavy` and `ascii`; title decoration can be
+`none`, `spaced`, `square`, `angle` or `round`. A `plainButton` body can be used
+inside a frame.
+
+![Native terminal recording of the frame patterns and title decorations](images/frame-styles.gif)
+[Static PNG frame](images/frame-styles.png)
+
+In the recording, Tab moves focus, Enter selects a frame and updates the
+caption below, and F10 quits. Build `guide_frame_styles` with the
+[standalone guide project](examples.md). The
+[complete source](examples/guide_frame_styles.cpp) is included below.
+
+\include guide_frame_styles.cpp
+
 ## Ordinary composition
 
 ```cpp

@@ -2465,3 +2465,30 @@ TEST_CASE("frame and scrollbar parts coexist with independent ranks and ordinary
   CHECK(fixture.read().scrollbar[1].thumb->bold);
   CHECK(fixture.read().frame[1].title->foreground == RgbColor{1, 2, 3});
 }
+
+TEST_CASE("theme scrollbar focus colors retain independent application overrides") {
+  Fixture fixture;
+  take(fixture.engine.enableLayers());
+  take(fixture.engine.defaults(nordTheme()));
+  const auto before = fixture.read();
+
+  REQUIRE(before.scrollbar[1].thumb);
+  CHECK(before.scrollbar[1].thumb->foreground == RgbColor{0x88, 0xc0, 0xd0});
+  CHECK(before.scrollbar[1].thumb->background == RgbColor{0x2e, 0x34, 0x40});
+  const auto application = take(parsePss("#subject:focused{scrollbar-thumb-foreground:#010203;"
+                                         "scrollbar-track-background:#040506;scrollbar-ends-bold:false;}"));
+  const auto layer = take(fixture.engine.addLayer(StyleTier::APPLICATION, "parts", application));
+  const auto changed = fixture.read();
+
+  REQUIRE(changed.scrollbar[1].track);
+  REQUIRE(changed.scrollbar[1].thumb);
+  REQUIRE(changed.scrollbar[1].ends);
+  CHECK(changed.scrollbar[1].thumb->foreground == RgbColor{1, 2, 3});
+  CHECK(changed.scrollbar[1].thumb->background == before.scrollbar[1].thumb->background);
+  CHECK(changed.scrollbar[1].track->background == RgbColor{4, 5, 6});
+  CHECK_FALSE(changed.scrollbar[1].ends->bold);
+  CHECK(changed.normal == before.normal);
+  CHECK(changed.disabled == before.disabled);
+  take(fixture.engine.removeLayer(layer));
+  CHECK(fixture.read() == before);
+}

@@ -5,6 +5,17 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+### Fixed
+
+- Keep focused scrollbar tracks, thumbs, decorative ends and corners in the
+  theme accent on the surface background. Block thumbs remain visible in dark
+  and light themes; application and user part overrides keep their priority.
+
+### Documentation
+
+- Add complete declarative frame/title and on-frame scrollbar galleries with
+  native GIF and PNG previews in English and Russian.
+
 ### Changed
 
 - `ComboBox` and `DropDown` now default to exact normalized label/token prefix
