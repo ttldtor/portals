@@ -12,8 +12,8 @@ int main() {
 
   // clang-format off
   return ui::scene(ui::vbox(
-    ui::menu({save, exit}).framed("rounded", "File"),
-    ui::button(save),
+    ui::menu({save, exit}).fitWidth().minWidth(12).maxWidth(32).framed("rounded", "File"),
+    ui::button(save).fitWidth(),
     ui::label(status, "Ready")))
     | ui::onKey("Ctrl+S", save)
     | ui::onKey(key::F10, exit)

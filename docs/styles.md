@@ -207,8 +207,10 @@ browser CSS compatibility promises. A semicolon is required after each value.
 | `frame-line-bold`, `frame-title-bold`, `frame-ends-bold` (also `-italic`, `-underline`) | `true` or `false` | Frame part paint |
 
 `min-width` is allowed only without a state predicate: changing focus must not
-silently alter geometry. Zero leaves intrinsic measurement unchanged. The
-layout owner's size policy, offered space, and clipping still apply. Font size,
+silently alter geometry. It sets a hard allocation minimum; zero adds no
+minimum. A clipped viewport does not shrink allocation below the bound. If the
+minimum conflicts with a widget's size policy, typed style staging rejects the
+update and preserves the last valid style. Font size,
 text width policy, border glyph selection and row heights are not PSS v0 tokens.
 
 States are `normal`, `focused`, `disabled`, `selected`, `header`, and `caret`.
@@ -239,6 +241,11 @@ Typed invalid metrics/states, exhausted rule/registry budgets, stale explicit
 targets and allocation failures return `StyleError` with a `TreeError` cause.
 By-value argument construction and theme factory allocation can throw before
 entry. No partial sheet or partial widget update is published.
+
+For example, applying `min-width: 30` to a widget with exact recipe width 20
+fails during typed style staging and preserves its last valid style. This claim
+describes that checked style-update path; it does not promise that every error
+in a hierarchical style setup is detected before publication.
 
 Custom `styleDefaults()` hooks run during staging under a tree frame borrow.
 They must not perform I/O, mutate domain state, retain references, destroy the

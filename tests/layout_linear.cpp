@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdlib>
 #include <iostream>
@@ -161,6 +162,44 @@ SizePolicy widthPolicy(SizeMode mode, int minimum, int preferred, int maximum) {
   result.width = {minimum, preferred, maximum, mode, 1};
 
   return result;
+}
+
+void contentAllocation() {
+  SizePolicy content;
+
+  content.width = {2, 40, 8, SizeMode::CONTENT};
+  content.height = {1, INTRINSIC_EXTENT, 3, SizeMode::CONTENT};
+
+  SizePolicy fixed = content;
+
+  fixed.width = {0, 4, 4, SizeMode::FIXED};
+
+  const std::array children{MeasuredChild{{6, 2}, content, {}}, MeasuredChild{{4, 2}, fixed, {}}};
+  Row row;
+
+  auto placed = take(row.arrangeChildren(children, {20, 8}));
+
+  check(placed[0].size() == CellSize{6, 2}, "content uses intrinsic preference and ignores cross stretch");
+  check(placed[1].origin().x == 6, "content does not claim spare main-axis cells");
+  placed = take(row.arrangeChildren(children, {7, 1}));
+  check(placed[0].size() == CellSize{3, 1} && placed[1].size().width == 4,
+        "content yields shortage while fixed retains its allocation");
+  placed = take(row.arrangeChildren(children, {1, 0}));
+  check(placed[0].size() == CellSize{2, 1}, "content hard minima survive an undersized parent");
+
+  for (const auto align : {LayoutAlign::START, LayoutAlign::CENTER, LayoutAlign::END, LayoutAlign::STRETCH}) {
+    LinearOptions options;
+
+    options.cross_align = align;
+
+    Column column(options);
+    const std::array child{MeasuredChild{{12, 6}, content, {}}};
+    const auto bounds = take(column.arrangeChildren(child, {15, 10})).front();
+    const auto expectedX = align == LayoutAlign::CENTER ? 3 : align == LayoutAlign::END ? 7 : 0;
+
+    check(bounds.size() == CellSize{8, 3} && bounds.origin().x == expectedX,
+          "content respects maxima and cross alignment without growth");
+  }
 }
 
 void cappedAndMixed() {
@@ -424,6 +463,7 @@ void allocationFailures() {
 
 int main() {
   oddFlex();
+  contentAllocation();
   cappedAndMixed();
   underflowAndCenter();
   nestingAndSnapshots();

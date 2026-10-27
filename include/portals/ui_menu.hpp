@@ -25,7 +25,7 @@ Description<Menu> menuRecipe(std::span<const ActionRef>, MenuOptions, ControlSty
  * metadata, not implicit global bindings. Only caption, checked state and shortcut are drawn.
  */
 inline Description<Menu> menu(std::initializer_list<ActionRef> actions, MenuOptions options = {},
-                              ControlStyle style = {}, SizePolicy policy = {}) {
+                              ControlStyle style = {}, SizePolicy policy = DEFAULT_MENU_POLICY) {
   return detail::menuRecipe(std::span(actions.begin(), actions.size()), options, style, policy);
 }
 
@@ -36,7 +36,8 @@ inline Description<Menu> menu(std::initializer_list<ActionRef> actions, MenuOpti
  */
 template <std::ranges::input_range Range>
   requires std::same_as<std::ranges::range_value_t<Range>, ActionRef>
-Description<Menu> menu(Range &&actions, MenuOptions options = {}, ControlStyle style = {}, SizePolicy policy = {}) {
+Description<Menu> menu(Range &&actions, MenuOptions options = {}, ControlStyle style = {},
+                       SizePolicy policy = DEFAULT_MENU_POLICY) {
   std::vector<ActionRef> entries(0);
 
   if (options.maxEntries > 0 &&
@@ -59,7 +60,7 @@ Description<Menu> menu(Range &&actions, MenuOptions options = {}, ControlStyle s
  * @return Reference-first command list recipe.
  */
 inline Description<Menu> menu(Ref<Menu> reference, std::initializer_list<ActionRef> actions, MenuOptions options = {},
-                              ControlStyle style = {}, SizePolicy policy = {}) {
+                              ControlStyle style = {}, SizePolicy policy = DEFAULT_MENU_POLICY) {
   return menu(actions, options, style, policy).reference(std::move(reference));
 }
 
@@ -67,7 +68,7 @@ inline Description<Menu> menu(Ref<Menu> reference, std::initializer_list<ActionR
 template <std::ranges::input_range Range>
   requires std::same_as<std::ranges::range_value_t<Range>, ActionRef>
 Description<Menu> menu(Ref<Menu> reference, Range &&actions, MenuOptions options = {}, ControlStyle style = {},
-                       SizePolicy policy = {}) {
+                       SizePolicy policy = DEFAULT_MENU_POLICY) {
   return menu(std::forward<Range>(actions), options, style, policy).reference(std::move(reference));
 }
 } // namespace portals::ui

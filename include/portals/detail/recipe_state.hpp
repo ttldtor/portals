@@ -4,6 +4,7 @@
 
 #include <portals/detail/control_context.hpp>
 #include <portals/detail/move_only_function.hpp>
+#include <portals/detail/recipe_sizing.hpp>
 #include <portals/ui_ref.hpp>
 
 #include <memory>
@@ -51,13 +52,14 @@ template <class T> struct RecipeState {
   std::vector<NodeRef<T>> references = std::vector<NodeRef<T>>(0); ///< Observing slots reserved for this node.
   std::shared_ptr<detail::RecipeLayout> layout; ///< Optional cold relationship metadata; never mounted state.
   std::unique_ptr<FrameRecipe> frame;           ///< Allocated only for an explicitly framed recipe.
-  bool forwardsOuter{};                      ///< Type-erased factory forwards its inner mount's actual layout root.
-  bool focusScope{};                         ///< Register before setup/children; scene owns its token.
-  bool focusDefault{};                       ///< Set the nearest registered scope's default before children.
-  std::optional<bool> visible;               ///< Final mount-only local visibility; absent keeps tree defaults.
-  std::optional<bool> enabled;               ///< Final mount-only local enabled state; no runtime state source.
-  std::optional<std::string> id;             ///< Compact recipe identity preserved by later style modifiers.
-  std::shared_ptr<detail::RefTarget> anchor; ///< Cold same-attempt body anchor, without widget ownership.
+  std::unique_ptr<RecipeSizing> sizing;         ///< Final cold bounds; absent on the legacy sizing path.
+  bool forwardsOuter{};                         ///< Type-erased factory forwards its inner mount's actual layout root.
+  bool focusScope{};                            ///< Register before setup/children; scene owns its token.
+  bool focusDefault{};                          ///< Set the nearest registered scope's default before children.
+  std::optional<bool> visible;                  ///< Final mount-only local visibility; absent keeps tree defaults.
+  std::optional<bool> enabled;                  ///< Final mount-only local enabled state; no runtime state source.
+  std::optional<std::string> id;                ///< Compact recipe identity preserved by later style modifiers.
+  std::shared_ptr<detail::RefTarget> anchor;    ///< Cold same-attempt body anchor, without widget ownership.
   DialogPlacement placement{DialogPlacement::BELOW_START}; ///< Configured anchor preference.
   bool anchorRequested{};                    ///< Distinguish an absent modifier from an empty moved observing slot.
   std::optional<StyleTarget> intrinsicStyle; ///< Owning natural type names, finalized after ordinary setup.

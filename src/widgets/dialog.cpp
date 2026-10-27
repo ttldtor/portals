@@ -162,6 +162,22 @@ std::expected<CellSize, TreeError> Dialog::measureChildren(std::span<const Measu
 
   const auto &panel = children.front();
 
+  if (panel.policy.width.minimum > options_.maximumPanelSize.width ||
+      panel.policy.height.minimum > options_.maximumPanelSize.height) {
+    return std::unexpected(TreeError::INVALID_GEOMETRY);
+  }
+
+  if (children.size() == 2 && options_.closeButton.enabled) {
+    const auto &close = children.back().policy;
+    const auto size = detail::DIALOG_CLOSE_SIZE;
+
+    // Bounds describe the visible chrome. Tiny panels still deliberately hide it with an empty rectangle.
+    if (close.width.minimum > size.width || close.width.maximum < size.width || close.height.minimum > size.height ||
+        close.height.maximum < size.height) {
+      return std::unexpected(TreeError::INVALID_GEOMETRY);
+    }
+  }
+
   return grid_detail::size(
     std::min<Wide>(grid_detail::requested(panel.policy.width, panel.desired.width), options_.maximumPanelSize.width),
     std::min<Wide>(grid_detail::requested(panel.policy.height, panel.desired.height),
@@ -227,6 +243,11 @@ std::expected<CellRect, TreeError> placeDialogPanel(DialogOptions options, CellS
 
   if (!grid_detail::valid(panel)) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  if (panel.policy.width.minimum > std::min(options.maximumPanelSize.width, viewport->size().width) ||
+      panel.policy.height.minimum > std::min(options.maximumPanelSize.height, viewport->size().height)) {
+    return std::unexpected(TreeError::INVALID_GEOMETRY);
   }
 
   const auto width = std::min({grid_detail::requested(panel.policy.width, panel.desired.width),

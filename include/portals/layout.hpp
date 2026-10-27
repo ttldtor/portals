@@ -8,29 +8,36 @@
 
 namespace portals {
 
-/** @brief Main-axis allocation policy, in integer terminal cells. */
+/** @brief Independent axis allocation policy, in integer terminal cells. */
 enum class SizeMode {
   AUTOMATIC, ///< Use the preferred/intrinsic extent; shrink towards minimum when space is scarce.
   FIXED,     ///< Keep the bounded preferred/intrinsic extent even when it overflows the available space.
-  FLEX       ///< Share spare main-axis cells by weight; allow shrinking towards minimum.
+  FLEX,      ///< Share spare main-axis cells by weight; allow shrinking towards minimum.
+  CONTENT    ///< Prefer intrinsic size, shrink towards minimum, and never grow to consume spare cells.
 };
 
 /** @brief Sentinel requesting the widget's intrinsic measurement. */
 inline constexpr std::int32_t INTRINSIC_EXTENT = -1;
 
-/** @brief Owning per-axis bounds; preferred=-1 uses intrinsic measurement. */
+/** @brief Owning per-axis bounds; preferred=-1 or CONTENT uses intrinsic measurement. */
 struct AxisSize {
   std::int32_t minimum{};                                         ///< Nonnegative hard minimum.
   std::int32_t preferred{INTRINSIC_EXTENT};                       ///< Intrinsic when -1, otherwise requested size.
   std::int32_t maximum{std::numeric_limits<std::int32_t>::max()}; ///< Inclusive cap.
   SizeMode mode{SizeMode::AUTOMATIC};                             ///< Fixed does not shrink; flex shares spare cells.
   std::uint32_t weight{1};                                        ///< Positive flex weight.
+
+  /** @param other Owning axis value to compare. @return Whether every bound and allocation setting agrees. */
+  constexpr bool operator==(const AxisSize &other) const = default;
 };
 
 /** @brief Owning independent policies for width and height. */
 struct SizePolicy {
   AxisSize width;  ///< Horizontal policy.
   AxisSize height; ///< Vertical policy.
+
+  /** @param other Owning policy to compare. @return Whether both independent axes agree. */
+  constexpr bool operator==(const SizePolicy &other) const = default;
 };
 
 /** @brief Optional const sizing interface, read only within tree.read. */
@@ -207,7 +214,9 @@ public:
   explicit Column(LinearOptions options = {}, SizePolicy policy = {});
 };
 
-/** @brief Validate, edit and invalidate layout between frames on the tree's UI owner; tree errors propagate.
+/** @brief Validate and edit policies between frames on the tree's UI owner; tree errors propagate.
+ * Changed policies invalidate layout; equal policies preserve geometry. The installed style minimum
+ * is a hard bound and a conflicting maximum rejects the update without changing the previous policy.
  * @param tree Owning UI tree, borrowed for this call.
  * @param node Checked observer of the SizedWidget to update.
  * @param policy Replacement width/height constraints; invalid values are rejected before mutation.

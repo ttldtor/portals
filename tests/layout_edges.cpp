@@ -3,7 +3,9 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest.h>
 #include <portals/detail/layout_traversal.hpp>
+#include <portals/grid.hpp>
 #include <portals/layout_snapshot.hpp>
+#include <portals/style.hpp>
 
 #include <algorithm>
 #include <array>
@@ -34,11 +36,25 @@ void *operator new(std::size_t size) {
   throw std::bad_alloc();
 }
 
-void operator delete(void *value) noexcept { std::free(value); }
-void operator delete(void *value, std::size_t) noexcept { std::free(value); }
-void *operator new[](std::size_t size) { return ::operator new(size); }
-void operator delete[](void *value) noexcept { std::free(value); }
-void operator delete[](void *value, std::size_t) noexcept { std::free(value); }
+void operator delete(void *value) noexcept {
+  std::free(value);
+}
+
+void operator delete(void *value, std::size_t) noexcept {
+  std::free(value);
+}
+
+void *operator new[](std::size_t size) {
+  return ::operator new(size);
+}
+
+void operator delete[](void *value) noexcept {
+  std::free(value);
+}
+
+void operator delete[](void *value, std::size_t) noexcept {
+  std::free(value);
+}
 
 namespace {
 using namespace portals;
@@ -71,7 +87,7 @@ struct RegionLayout final : Widget, Layout {
   }
 
   std::expected<std::vector<CellRect>, TreeError> arrangeChildren(std::span<const MeasuredChild> children,
-                                                               CellSize available) const override {
+                                                                  CellSize available) const override {
     try {
       std::vector<CellRect> result(0);
 
@@ -106,10 +122,10 @@ struct RegionLayout final : Widget, Layout {
 
     const auto height = std::max(0, available.height - 1);
 
-    return LayoutChildPolicy{rectangle({0, std::min(1, available.height)}, {available.width, height}),
-                             RevealAxes::BOTH,
-                             !admission ? RegionalInput::UNCHANGED
-                                        : height == 0 ? RegionalInput::CLOSED : RegionalInput::OPEN};
+    return LayoutChildPolicy{rectangle({0, std::min(1, available.height)}, {available.width, height}), RevealAxes::BOTH,
+                             !admission    ? RegionalInput::UNCHANGED
+                             : height == 0 ? RegionalInput::CLOSED
+                                           : RegionalInput::OPEN};
   }
 };
 
@@ -126,6 +142,14 @@ private:
   std::size_t &arranged_;
 };
 
+struct IntrinsicLeaf final : SizedWidget {
+  using SizedWidget::SizedWidget;
+
+  std::expected<CellSize, TreeError> measure(CellSize) override {
+    return CellSize{8, 4};
+  }
+};
+
 struct Fixture {
   std::unique_ptr<Scheduler> scheduler = take(Scheduler::create());
   std::unique_ptr<WidgetTree> tree = take(WidgetTree::create(*scheduler));
@@ -136,12 +160,16 @@ struct Fixture {
   Node<Child> body = take(tree->emplaceChecked<Child>(region, arranged));
 
   Fixture() {
-    take(tree->edit(region, [&](RegionLayout &value) { value.heading = heading.id(); }));
+    take(tree->edit(region, [&](RegionLayout &value) {
+      value.heading = heading.id();
+    }));
   }
 
   std::expected<void, TreeError> layout(CellRect bounds, CellRect viewport) {
     std::expected<void, TreeError> result;
-    auto frame = tree->frame([&] { result = layoutTree(*tree, root, bounds, viewport); });
+    auto frame = tree->frame([&] {
+      result = layoutTree(*tree, root, bounds, viewport);
+    });
     return frame ? result : frame;
   }
 };
@@ -169,6 +197,160 @@ void tryMutationFromAllocation() {
   record(4, probe.tree->close());
 }
 } // namespace
+
+TEST_CASE("root and plain wrappers honor explicit policy while defaults fill the offer") {
+  for (const auto wrapped : {false, true}) {
+    for (const auto mode : {SizeMode::AUTOMATIC, SizeMode::FLEX, SizeMode::CONTENT, SizeMode::FIXED}) {
+      auto scheduler = take(Scheduler::create());
+      auto tree = take(WidgetTree::create(*scheduler));
+      auto root = take(tree->root());
+      auto parent = wrapped ? take(tree->emplaceChecked<Widget>(root)) : root;
+      SizePolicy policy;
+
+      policy.width.mode = mode;
+      policy.height.mode = mode;
+
+      if (mode == SizeMode::CONTENT) {
+        policy.width.maximum = 5;
+        policy.height.maximum = 3;
+      }
+
+      const auto child = take(tree->emplaceChecked<IntrinsicLeaf>(parent, policy));
+      const auto viewport = rectangle({}, {12, 8});
+      std::expected<void, TreeError> result;
+
+      take(tree->frame([&] {
+        result = layoutTree(*tree, root, viewport, viewport);
+      }));
+      REQUIRE(result.has_value());
+
+      const auto expected = mode == SizeMode::CONTENT ? CellSize{5, 3}
+                            : mode == SizeMode::FIXED ? CellSize{8, 4}
+                                                      : CellSize{12, 8};
+
+      CHECK(take(tree->inspect(child)).geometry.local.size() == expected);
+      policy.width.minimum = 20;
+      policy.width.maximum = 20;
+
+      take(setSizePolicy(*tree, child, policy));
+      take(tree->frame([&] {
+        result = layoutTree(*tree, root, viewport, viewport);
+      }));
+      REQUIRE(result.has_value());
+      CHECK(take(tree->inspect(child)).geometry.local.size().width == 20);
+      CHECK(take(tree->inspect(child)).geometry.clip.size().width == 12);
+    }
+  }
+}
+
+TEST_CASE("PSS minimum is a hard allocation bound across layout solvers") {
+  for (const auto kind : {0, 1, 2}) {
+    auto scheduler = take(Scheduler::create());
+    auto tree = take(WidgetTree::create(*scheduler));
+    auto root = take(tree->root());
+    Node<Widget> layout;
+    Node<Grid> grid;
+
+    if (kind == 0) {
+      layout = take(tree->emplaceChecked<Row>(root));
+    } else if (kind == 1) {
+      layout = take(tree->emplaceChecked<Overlay>(root));
+    } else {
+      GridOptions options;
+
+      options.columns = {{.preferred = 0, .mode = SizeMode::FLEX}};
+      options.rows = {{.preferred = 0, .mode = SizeMode::FLEX}};
+      grid = take(tree->emplaceChecked<Grid>(root, options));
+      layout = grid;
+    }
+
+    const auto child = take(tree->emplaceChecked<Widget>(layout));
+    StyleEngine styles(*tree);
+
+    if (kind == 2) {
+      GridOptions options;
+
+      options.columns = {{.preferred = 0, .mode = SizeMode::FLEX}};
+      options.rows = {{.preferred = 0, .mode = SizeMode::FLEX}};
+      options.cells = {{child.id(), 0, 0}};
+
+      take(setGridOptions(*tree, grid, options));
+    }
+
+    take(styles.bind(child, {.type = "Probe"}));
+    take(styles.replacePss("Probe { min-width: 7; }"));
+
+    const auto viewport = rectangle({}, {3, 2});
+    std::expected<void, TreeError> result;
+
+    take(tree->frame([&] {
+      result = layoutTree(*tree, root, viewport, viewport);
+    }));
+    REQUIRE(result.has_value());
+
+    const auto geometry = take(tree->inspect(child)).geometry;
+
+    CHECK(geometry.local.size().width == 7);
+    CHECK(geometry.clip.size().width == 3);
+  }
+}
+
+TEST_CASE("effective style bounds intersect policy and equal policy updates retain geometry") {
+  auto scheduler = take(Scheduler::create());
+  auto tree = take(WidgetTree::create(*scheduler));
+  auto root = take(tree->root());
+  auto row = take(tree->emplaceChecked<Row>(root));
+  SizePolicy policy;
+
+  policy.width = {2, INTRINSIC_EXTENT, 12, SizeMode::CONTENT};
+
+  auto child = take(tree->emplaceChecked<SizedWidget>(row, policy));
+  StyleEngine styles(*tree);
+
+  take(styles.bind(child, {.type = "Probe"}));
+  take(styles.replacePss("Probe { min-width: 7; }"));
+  take(tree->read(child, [&](const Widget &widget) {
+    const auto effective = take(detail::effectiveSizePolicy(widget));
+
+    CHECK(effective.width.minimum == 7);
+    CHECK(effective.width.maximum == 12);
+    CHECK(effective.width.mode == SizeMode::CONTENT);
+  }));
+
+  const auto viewport = rectangle({}, {3, 2});
+  std::expected<void, TreeError> result;
+
+  take(tree->frame([&] {
+    result = layoutTree(*tree, root, viewport, viewport);
+  }));
+  REQUIRE(result.has_value());
+
+  const auto before = take(tree->inspect(child)).geometryEpoch;
+
+  CHECK(take(tree->inspect(child)).geometry.local.size().width == 7);
+
+  const auto revision = styles.revision();
+  const auto conflictingStyle = styles.replacePss("Probe { min-width: 13; }");
+
+  REQUIRE_FALSE(conflictingStyle.has_value());
+  CHECK(conflictingStyle.error().cause == TreeError::INVALID_ARGUMENT);
+  CHECK(styles.revision() == revision);
+  CHECK(take(tree->inspect(child)).geometryEpoch == before);
+  take(tree->read(child, [&](const Widget &widget) {
+    CHECK(widget.computedStyle()->minWidth == 7);
+  }));
+
+  take(setSizePolicy(*tree, child, policy));
+  CHECK(take(tree->inspect(child)).geometryEpoch == before);
+
+  policy.width.maximum = 6;
+
+  CHECK(setSizePolicy(*tree, child, policy) == std::unexpected(TreeError::INVALID_ARGUMENT));
+  CHECK(take(tree->inspect(child)).geometryEpoch == before);
+  take(tree->read(child, [&](const SizedWidget &widget) {
+    CHECK(widget.sizePolicy().width.maximum == 12);
+  }));
+}
 
 TEST_CASE("specialized edge keeps its owner clip outside the ancestor viewport") {
   Fixture fixture;
@@ -206,7 +388,9 @@ TEST_CASE("all child policies are validated before any descendant is arranged") 
   Fixture fixture;
   const auto bounds = rectangle({}, {8, 6});
 
-  take(fixture.tree->edit(fixture.region, [](RegionLayout &value) { value.invalidClip = true; }));
+  take(fixture.tree->edit(fixture.region, [](RegionLayout &value) {
+    value.invalidClip = true;
+  }));
   CHECK(fixture.layout(bounds, bounds) == std::unexpected(TreeError::INVALID_GEOMETRY));
   CHECK(fixture.arranged == 0);
   CHECK_FALSE(take(fixture.tree->inspect(fixture.body)).geometry.valid);
@@ -232,7 +416,9 @@ TEST_CASE("public direct arrange clears specialized policy without reviving an e
 
   take(fixture.layout(bounds, bounds));
   const auto before = take(fixture.tree->inspect(fixture.body));
-  take(fixture.tree->frame([&] { take(fixture.tree->arrange(fixture.body, before.geometry.local, bounds)); }));
+  take(fixture.tree->frame([&] {
+    take(fixture.tree->arrange(fixture.body, before.geometry.local, bounds));
+  }));
   const auto after = take(fixture.tree->inspect(fixture.body));
 
   CHECK(after.geometry.valid);
@@ -290,7 +476,9 @@ TEST_CASE("regional admission converges independently of fresh geometry epochs")
   take(fixture.layout(bounds, bounds));
   CHECK(take(apply(true)));
   CHECK(take(fixture.tree->inputEligible(fixture.body)));
-  take(fixture.tree->edit(fixture.region, [](RegionLayout &value) { value.admission = false; }));
+  take(fixture.tree->edit(fixture.region, [](RegionLayout &value) {
+    value.admission = false;
+  }));
   take(fixture.layout(bounds, bounds));
   const std::array owners{RegionalInputOwnerProposal{fixture.region, {}}};
   const auto geometry = take(LayoutSnapshot::capture(*fixture.tree, fixture.root, LayoutSnapshotProfile::GEOMETRY));
@@ -308,7 +496,7 @@ TEST_CASE("regional publication validates every owner and freshness before chang
   const auto snapshot = take(fixture.tree->inspect(fixture.body));
   const std::array proposals{RegionalInputProposal{fixture.body.id(), false, *snapshot.geometryEpoch}};
   const std::array invalidOwners{RegionalInputOwnerProposal{fixture.region, proposals},
-                                  RegionalInputOwnerProposal{fixture.heading, proposals}};
+                                 RegionalInputOwnerProposal{fixture.heading, proposals}};
   const auto geometry = take(LayoutSnapshot::capture(*fixture.tree, fixture.root, LayoutSnapshotProfile::GEOMETRY));
 
   CHECK(LayoutTraversalAccess::adoptRegionalInput(*fixture.tree, geometry, invalidOwners) ==
@@ -322,7 +510,8 @@ TEST_CASE("regional publication validates every owner and freshness before chang
         std::unexpected(TreeError::INVALID_GEOMETRY));
   CHECK(take(fixture.tree->inputEligible(fixture.body)));
   take(fixture.tree->frame([&] {
-    CHECK(LayoutTraversalAccess::adoptRegionalInput(*fixture.tree, fresh, {}) == std::unexpected(TreeError::WOULD_BLOCK));
+    CHECK(LayoutTraversalAccess::adoptRegionalInput(*fixture.tree, fresh, {}) ==
+          std::unexpected(TreeError::WOULD_BLOCK));
   }));
 }
 

@@ -63,6 +63,11 @@ std::expected<std::vector<CellRect>, TreeError> ToastLayer::arrangeChildren(std:
         continue;
       }
       const auto height = (*found)->picture->payload->action ? 2 : 1;
+
+      if (children[i].policy.width.minimum > width || children[i].policy.height.minimum > height) {
+        return std::unexpected(TreeError::INVALID_GEOMETRY);
+      }
+
       if (y > std::numeric_limits<std::int32_t>::max() - height) {
         return std::unexpected(TreeError::INVALID_GEOMETRY);
       }

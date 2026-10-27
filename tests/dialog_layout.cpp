@@ -164,8 +164,25 @@ void pureGeometry() {
   fixed.policy.width = {100, 100, 100, SizeMode::FIXED};
   fixed.policy.height = fixed.policy.width;
 
+  const auto impossible = detail::placeDialogPanel({}, {8, 5}, fixed);
+
+  check(!impossible && impossible.error() == TreeError::INVALID_GEOMETRY,
+        "panel rejects a minimum exceeding the configured cap");
+
+  const std::array oversized{fixed};
+  const auto impossibleMeasure = dialog.measureChildren(oversized);
+
+  check(!impossibleMeasure && impossibleMeasure.error() == TreeError::INVALID_GEOMETRY,
+        "panel measurement rejects a minimum exceeding the configured cap");
+  fixed.policy.width = {5, INTRINSIC_EXTENT, 100, SizeMode::CONTENT};
+  fixed.policy.height = {2, INTRINSIC_EXTENT, 100, SizeMode::CONTENT};
   check(take(detail::placeDialogPanel({}, {8, 5}, fixed)) == rect(1, 1, 6, 3),
-        "panel caps fixed and minimum sizes rather than narrowing the root");
+        "panel still caps content preference above a satisfiable minimum");
+
+  const auto impossibleResize = detail::placeDialogPanel({}, {6, 3}, fixed);
+
+  check(!impossibleResize && impossibleResize.error() == TreeError::INVALID_GEOMETRY,
+        "panel resize rejects a minimum exceeding usable viewport");
   check(take(dialog.arrangeChildren(panel, {-1, -20})).front().empty(), "negative offered extents normalize to zero");
 
   DialogOptions anchored;
@@ -186,6 +203,51 @@ void pureGeometry() {
                                       panel.front()))
             .size() == CellSize{10, 4},
         "maximum viewport centers without arithmetic overflow");
+}
+
+void closePolicyBounds() {
+  DialogOptions options;
+
+  options.closeButton.enabled = true;
+
+  Dialog dialog(options);
+  const NodeId closeId{1, 3, 1};
+
+  detail::DialogAccess::bindClose(dialog, closeId);
+
+  SizePolicy exact;
+
+  exact.width = {3, 3, 3, SizeMode::FIXED};
+  exact.height = {1, 1, 1, SizeMode::FIXED};
+
+  std::array children{MeasuredChild{{10, 4}, {}, {1, 2, 1}}, MeasuredChild{{3, 1}, exact, closeId}};
+
+  check(take(dialog.arrangeChildren(children, {20, 10})).back().size() == detail::DIALOG_CLOSE_SIZE,
+        "compatible close policy keeps its fixed chrome extent");
+  check(take(dialog.arrangeChildren(children, {4, 4})).back().empty(),
+        "tiny viewport intentionally hides exact-policy close chrome");
+
+  for (int constraint = 0; constraint != 4; ++constraint) {
+    children.back().policy = exact;
+
+    if (constraint == 0) {
+      children.back().policy.width = {7, INTRINSIC_EXTENT, 20, SizeMode::AUTOMATIC};
+    } else if (constraint == 1) {
+      children.back().policy.width = {0, INTRINSIC_EXTENT, 2, SizeMode::AUTOMATIC};
+    } else if (constraint == 2) {
+      children.back().policy.height = {2, INTRINSIC_EXTENT, 3, SizeMode::AUTOMATIC};
+    } else {
+      children.back().policy.height = {0, INTRINSIC_EXTENT, 0, SizeMode::AUTOMATIC};
+    }
+
+    const auto measured = dialog.measureChildren(children);
+    const auto arranged = dialog.arrangeChildren(children, {20, 10});
+
+    check(!measured && measured.error() == TreeError::INVALID_GEOMETRY,
+          "close measurement rejects bounds that exclude fixed chrome size");
+    check(!arranged && arranged.error() == TreeError::INVALID_GEOMETRY,
+          "visible close placement never violates hard bounds");
+  }
 }
 
 void validationAndHostIdentity() {
@@ -443,6 +505,7 @@ void paintBudgetAndWidthPolicy() {
 
 int main() {
   pureGeometry();
+  closePolicyBounds();
   validationAndHostIdentity();
   retainedTreePainting();
   paintBudgetAndWidthPolicy();

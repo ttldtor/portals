@@ -7,6 +7,15 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Added `SizeMode::CONTENT` and fluent `fitWidth`/`fitHeight` plus per-axis
+  minimum and maximum modifiers for sized widget recipes. Menus now prefer
+  content size on both axes. PSS `min-width` now enforces a hard allocation
+  minimum; combinations that violate it fail checked style updates or cold
+  mounts. Existing applications that relied on `min-width` as a preferred-size
+  floor or on menus filling spare space may see different layout or typed errors.
+  Dialog and toast caps that conflict with hard minima now fail typed layout;
+  their default small-viewport clamp remains in place.
+
 - Added an action-backed retained `Menu` with compact declarative factories, keyboard and mouse selection, shared command captions and availability, Unicode rows and checked-state presentation. Menus reuse the same actions as buttons and explicit shortcuts; popup menus and command palettes remain separate features.
 
 - Added model-backed `ComboBox` and `DropDown` with compact declarative factories, accepted-selection callbacks and worker-prepared popup rows. Editable drafts preserve ordinary LineEdit modes and Undo; source identities fence stale selections, and dismissed popups release their transient resources.

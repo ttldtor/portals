@@ -7,7 +7,9 @@
 namespace portals {
 namespace {
 std::int32_t intrinsicAxis(std::int32_t measured, AxisSize policy) {
-  return std::clamp(policy.preferred == INTRINSIC_EXTENT ? measured : policy.preferred, policy.minimum, policy.maximum);
+  return std::clamp(policy.mode == SizeMode::CONTENT || policy.preferred == INTRINSIC_EXTENT ? measured
+                                                                                             : policy.preferred,
+                    policy.minimum, policy.maximum);
 }
 
 ScrollOffset effectiveOffset(ScrollOffset offset, ScrollAxisMetrics metrics) {

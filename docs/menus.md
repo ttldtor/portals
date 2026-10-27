@@ -6,7 +6,7 @@ A menu lets the user choose an application command with the arrow keys or the
 mouse. Pass the same action to a menu, a button and an explicit shortcut to share
 their callback, caption and availability.
 
-![Command desk with the Save command selected and the saved note visible](images/commands.png)
+![Command desk with Clear selected and the previously saved note visible](images/commands.png)
 
 [Watch keyboard selection and command execution](images/commands.gif).
 
@@ -20,7 +20,12 @@ selection; Enter runs its action. The Save button and Ctrl+S run the same action
 F10 exits through the normal application cleanup.
 
 The menu is an ordinary retained control in the scene. Its frame and width use
-the same [layout modifiers](layout.md) as other controls. It starts visible and
+the same [layout modifiers](layout.md) as other controls. Both axes prefer the
+prepared content by default; the menu does not consume spare space. In the
+example, `minWidth(12)` and `maxWidth(32)` bound the complete framed block,
+including its border. Short captions stay compact; longer captions grow the block
+up to its cap. See [sizing modes and bounds](compact-primitives.md).
+It starts visible and
 does not open a popup. A menu bar, nested menus and a searchable command palette
 are outside this API.
 

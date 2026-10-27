@@ -27,8 +27,11 @@ int main() {
 
   options.clock = terminal.clock();
 
-  auto scene = ui::scene(ui::vbox(ui::menu(menu, entries).framed("rounded", "Commands"), ui::button(save)), options) |
-               ui::onKey("Ctrl+S", save) | ui::onKey("Ctrl+Q", ui::quit);
+  auto scene =
+    ui::scene(ui::vbox(ui::menu(menu, entries).fitWidth().minWidth(12).maxWidth(24).framed("rounded", "Commands"),
+                       ui::button(save)),
+              options) |
+    ui::onKey("Ctrl+S", save) | ui::onKey("Ctrl+Q", ui::quit);
   const auto result = scene.run(terminal);
 
   if (!result || !terminal.closed || first != 2 || second != 1 || save.snapshot()) {

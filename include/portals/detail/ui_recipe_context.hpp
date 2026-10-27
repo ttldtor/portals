@@ -5,6 +5,7 @@
 #include <portals/detail/control_context.hpp>
 #include <portals/detail/line_edit_text.hpp>
 #include <portals/detail/move_only_function.hpp>
+#include <portals/detail/recipe_sizing.hpp>
 #include <portals/grid.hpp>
 #include <portals/ui_ref.hpp>
 
@@ -191,22 +192,6 @@ template <class T> std::string_view captionView(const T &value) {
     return *value;
   }
 }
-
-/** @brief One existing size-policy update, retained until checked mount. */
-enum class SizeDimension {
-  WIDTH,
-  HEIGHT,
-  FLEX_X,
-  FLEX_Y,
-  FLEX
-};
-
-/** @brief Owning compact size operation; validation remains in setSizePolicy. */
-struct SizeChange {
-  SizeDimension dimension; ///< Axis or axes receiving the change.
-  std::int32_t extent{};   ///< Fixed cells for WIDTH/HEIGHT.
-  std::uint32_t weight{1}; ///< Positive flex weight for FLEX operations.
-};
 
 /** @param name Compact checked preset name; source bytes are borrowed only during this call.
  * @return Known built-in pattern, or no match; no allocation or text decoding occurs.

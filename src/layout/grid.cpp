@@ -326,6 +326,10 @@ const GridCell *placement(const GridOptions &options, NodeId node) {
   return found == options.cells.end() ? nullptr : &*found;
 }
 
+bool absorbsDemand(AxisSize policy) {
+  return policy.mode != SizeMode::FIXED && (policy.mode == SizeMode::CONTENT || policy.preferred == INTRINSIC_EXTENT);
+}
+
 // Only intrinsic, nonfixed tracks absorb demand; explicit preferences remain authoritative.
 void absorb(std::span<MeasuredChild> tracks, Wide demand, std::int32_t gap) {
   Wide total = Wide{gap} * static_cast<Wide>(tracks.size() - 1);
@@ -340,8 +344,7 @@ void absorb(std::span<MeasuredChild> tracks, Wide demand, std::int32_t gap) {
     Wide eligible{};
 
     for (const auto &track : tracks) {
-      if (track.policy.width.mode != SizeMode::FIXED && track.policy.width.preferred == INTRINSIC_EXTENT &&
-          track.desired.width < track.policy.width.maximum) {
+      if (absorbsDemand(track.policy.width) && track.desired.width < track.policy.width.maximum) {
         ++eligible;
       }
     }
@@ -355,8 +358,7 @@ void absorb(std::span<MeasuredChild> tracks, Wide demand, std::int32_t gap) {
 
     // Saturate capped tracks before assigning remainder cells to the remaining tracks.
     for (auto &track : tracks) {
-      if (track.policy.width.mode == SizeMode::FIXED || track.policy.width.preferred != INTRINSIC_EXTENT ||
-          track.desired.width == track.policy.width.maximum) {
+      if (!absorbsDemand(track.policy.width) || track.desired.width == track.policy.width.maximum) {
         continue;
       }
 
@@ -378,8 +380,7 @@ void absorb(std::span<MeasuredChild> tracks, Wide demand, std::int32_t gap) {
     Wide remainder = deficit % eligible;
 
     for (auto &track : tracks) {
-      if (track.policy.width.mode == SizeMode::FIXED || track.policy.width.preferred != INTRINSIC_EXTENT ||
-          track.desired.width == track.policy.width.maximum) {
+      if (!absorbsDemand(track.policy.width) || track.desired.width == track.policy.width.maximum) {
         continue;
       }
 

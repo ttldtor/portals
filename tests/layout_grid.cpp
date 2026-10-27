@@ -241,6 +241,49 @@ void tracksBoundsAndErrors() {
   check(!failure && failure.error() == TreeError::INVALID_ARGUMENT, "span overflow rejected before addition");
 }
 
+void contentTracksAndOverlay() {
+  const NodeId id{1, 1, 1};
+  SizePolicy content;
+
+  content.width = {2, INTRINSIC_EXTENT, 7, SizeMode::CONTENT};
+  content.height = {1, INTRINSIC_EXTENT, 3, SizeMode::CONTENT};
+
+  const std::array child{MeasuredChild{{5, 2}, content, id}};
+  GridOptions options;
+
+  options.columns = {content.width};
+  options.rows = {content.height};
+  options.cells = {{id, 0, 0}};
+
+  Grid grid(options);
+
+  check(take(grid.measureChildren(child)) == CellSize{5, 2}, "content grid tracks absorb intrinsic child demand");
+  check(take(grid.arrangeChildren(child, {20, 8})).front() == rect(0, 0, 5, 2),
+        "content grid tracks and children reject spare cells");
+  check(take(grid.arrangeChildren(child, {1, 0})).front() == rect(0, 0, 2, 1),
+        "content grid tracks preserve hard minima under shortage");
+
+  for (const auto align : {LayoutAlign::START, LayoutAlign::CENTER, LayoutAlign::END, LayoutAlign::STRETCH}) {
+    OverlayOptions overlayOptions;
+
+    overlayOptions.horizontal = align;
+    overlayOptions.vertical = align;
+
+    Overlay overlay(overlayOptions);
+    const auto placed = take(overlay.arrangeChildren(child, {11, 8})).front();
+    const auto offset = align == LayoutAlign::CENTER ? 3 : align == LayoutAlign::END ? 6 : 0;
+
+    check(placed == rect(offset, offset, 5, 2), "overlay positions content without stretch growth");
+    check(take(overlay.arrangeChildren(child, {1, 0})).front() == rect(0, 0, 2, 1),
+          "overlay content preserves hard minima");
+  }
+
+  options.columns = {fixed(11)};
+  options.rows = {fixed(8)};
+  check(take(Grid(options).arrangeChildren(child, {11, 8})).front() == rect(0, 0, 5, 2),
+        "content child does not fill fixed grid slot under default stretch");
+}
+
 void alignmentAndOverlay() {
   const NodeId id{1, 1, 1};
 
@@ -989,6 +1032,7 @@ void regionalPlacementAndPaintBudgets() {
 int main() {
   nestedIdentityAndSpans();
   tracksBoundsAndErrors();
+  contentTracksAndOverlay();
   alignmentAndOverlay();
   renderedClippingAndHitOrder();
   stalePlacementsAndPureMeasure();

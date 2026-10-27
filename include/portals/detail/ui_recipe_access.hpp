@@ -891,6 +891,54 @@ struct Access {
     return changed ? std::expected<void, ManagedError>{} : std::unexpected(error(node, changed.error()));
   }
 
+  /** @brief Commit final cold bounds and transparent frame preferences in one checked update.
+   * @param scene UI-affine mount owner. @param source Concrete sized content.
+   * @param target Outer frame when present, otherwise source itself.
+   * @param sizing Optional final sparse instance geometry; borrowed only for this call.
+   * @return Unchanged typed read, lifetime, policy or invalidation failure.
+   */
+  static std::expected<void, ManagedError> finishSizing(ManagedScene &scene, Node<SizedWidget> source,
+                                                        Node<SizedWidget> target, const RecipeSizing *sizing) {
+    SizePolicy policy;
+    auto &tree = scene.app_.tree();
+    const auto read = tree.read(target, [&](const SizedWidget &widget) {
+      policy = widget.sizePolicy();
+    });
+
+    if (!read) {
+      return std::unexpected(error(target, read.error()));
+    }
+
+    if (source != target) {
+      SizePolicy content;
+      const auto inspected = tree.read(source, [&](const SizedWidget &widget) {
+        content = widget.sizePolicy();
+      });
+
+      if (!inspected) {
+        return std::unexpected(error(source, inspected.error()));
+      }
+
+      const auto inherit = [](AxisSize &outer, AxisSize inner) {
+        if (outer == AxisSize{} && (inner.mode == SizeMode::CONTENT || inner.mode == SizeMode::FLEX)) {
+          // Numeric content bounds describe another box; only its layout preference crosses the frame.
+          outer.mode = inner.mode;
+          outer.preferred = inner.preferred;
+          outer.weight = inner.weight;
+        }
+      };
+      inherit(policy.width, content.width);
+      inherit(policy.height, content.height);
+    }
+
+    if (sizing) {
+      policy = sizing->apply(policy);
+    }
+
+    const auto changed = setSizePolicy(tree, target, policy);
+    return changed ? std::expected<void, ManagedError>{} : std::unexpected(error(target, changed.error()));
+  }
+
   /** @brief Apply final local instance flags through the existing managed mount boundary.
    * @param scene Borrowed managed owner of the current transaction.
    * @param node Created target; ancestor flags retain their existing tree semantics.

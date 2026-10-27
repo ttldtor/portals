@@ -258,6 +258,56 @@ TEST_CASE("close chrome occupies symmetric top-edge cells and cancels without a 
   }
 }
 
+TEST_CASE("close chrome rejects a conflicting hot style before publishing any new values") {
+  Fixture fixture;
+  ui::Ref<Dialog> view;
+
+  take(ui::mount(*fixture.scene,
+                 ui::overlayHost(ui::label("Backdrop"), ui::dialog(view, "Title", ui::label("Body")).closeButton())));
+  command(view.open());
+  layout(fixture);
+
+  const auto close = findButton(fixture, view.node(), "[x]");
+
+  REQUIRE(close != Node<Widget>{});
+
+  StyleSheet valid;
+
+  valid.rules.push_back(
+    {.selector = {.classes = {"dialog-close"}}, .declarations = {.foreground = RgbColor{10, 20, 30}, .minWidth = 3}});
+  take(fixture.scene->theme(valid));
+  layout(fixture);
+
+  ComputedStyle before;
+  std::uint64_t revision{};
+  const auto geometry = take(fixture.app->tree().inspect(close));
+
+  take(fixture.app->tree().read(close, [&](const Widget &widget) {
+    before = *widget.computedStyle();
+    revision = widget.styleRevision();
+  }));
+
+  valid.rules.front().declarations.minWidth = 7;
+  valid.rules.front().declarations.foreground = RgbColor{90, 80, 70};
+
+  const auto rejected = fixture.scene->theme(valid);
+
+  REQUIRE_FALSE(rejected);
+
+  const auto *error = std::get_if<StyleError>(&rejected.error().cause);
+
+  REQUIRE(error);
+  CHECK(error->cause == TreeError::INVALID_ARGUMENT);
+  CHECK(take(fixture.app->tree().inspect(close)).geometryEpoch == geometry.geometryEpoch);
+  take(fixture.app->tree().read(close, [&](const Widget &widget) {
+    CHECK(widget.styleRevision() == revision);
+    REQUIRE(widget.computedStyle());
+    CHECK(*widget.computedStyle() == before);
+  }));
+  CHECK(take(fixture.app->tree().inspect(close)).geometry.surface.size() == CellSize{3, 1});
+  CHECK(take(view.opened()));
+}
+
 TEST_CASE("tiny close chrome has no hit focus or explicit activation target") {
   Fixture fixture;
   ui::Ref<MessageDialog> result;
