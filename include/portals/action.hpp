@@ -115,6 +115,7 @@ public:
 private:
   friend class EventRouter;
   explicit ActionBinding(std::weak_ptr<detail::ActionCancellation> registration);
+  friend struct detail::EventRouterAccess;
   std::weak_ptr<detail::ActionCancellation> registration_;
 };
 

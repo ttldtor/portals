@@ -48,12 +48,12 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, const Compu
     return std::unexpected(TreeError::WOULD_BLOCK);
   }
 
-  auto horizontal =
-    scrollThumb(state.presentation.horizontal.metrics, state.presentation.horizontal.offset.raster,
-                state.geometry.horizontal.length, state.isArea ? state.area.minimumThumb : state.bar.minimumThumb);
-  auto vertical =
-    scrollThumb(state.presentation.vertical.metrics, state.presentation.vertical.offset.raster,
-                state.geometry.vertical.length, state.isArea ? state.area.minimumThumb : state.bar.minimumThumb);
+  auto horizontal = scrollThumb(state.presentation.horizontal.metrics, state.presentation.horizontal.offset.raster,
+                                scrollThumbTrack(state, state.geometry.horizontal, ScrollAxis::HORIZONTAL).length,
+                                state.isArea ? state.area.minimumThumb : state.bar.minimumThumb);
+  auto vertical = scrollThumb(state.presentation.vertical.metrics, state.presentation.vertical.offset.raster,
+                              scrollThumbTrack(state, state.geometry.vertical, ScrollAxis::VERTICAL).length,
+                              state.isArea ? state.area.minimumThumb : state.bar.minimumThumb);
   auto bounds = CellRect::from({}, state.allocation);
   if (!horizontal || !vertical || !bounds) {
     return std::unexpected(!horizontal ? horizontal.error()
@@ -78,6 +78,7 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, const Compu
   }
 
   auto track = [&](ScrollTrack cells, ScrollThumb thumb, bool horizontalAxis) -> std::expected<void, TreeError> {
+    const bool arrows = scrollArrows(state, cells);
     for (std::int32_t i = 0; i < cells.length; ++i) {
       auto point = cells.origin;
       if (horizontalAxis) {
@@ -85,19 +86,26 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, const Compu
       } else {
         point.y += i;
       }
-      const bool inThumb = i >= thumb.start && i - thumb.start < thumb.length;
+      const auto position = i - (arrows ? 1 : 0);
+      const bool inThumb = position >= thumb.start && position - thumb.start < thumb.length;
       const auto first = horizontalAxis ? 0 : 4;
       const auto *skin = state.scrollbarSkin.get();
       const auto *glyph = skin ? &*skin->glyphs[first + (inThumb ? 1 : 0)] : &state.glyphs[inThumb ? 7 : 6];
       const auto *part = inThumb ? &parts.thumb : &parts.track;
 
-      if (skin && skin->ends && !inThumb) {
+      if (skin && skin->ends && !inThumb && !arrows) {
         const auto end = i == 0 ? first + 2 : i == cells.length - 1 ? first + 3 : -1;
 
         if (end >= 0 && skin->glyphs[end]) {
           glyph = &*skin->glyphs[end];
           part = &parts.ends;
         }
+      }
+
+      if (arrows && (i == 0 || i == cells.length - 1)) {
+        const auto arrow = (horizontalAxis ? 0 : 2) + (i == 0 ? 0 : 1);
+        glyph = skin && skin->arrows[arrow] ? &*skin->arrows[arrow] : &(*state.arrowGlyphs)[arrow];
+        part = &parts.arrows;
       }
 
       auto result = draw(point, *glyph, *part);

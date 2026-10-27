@@ -639,6 +639,14 @@ private:
         settings.scrollbar.vertical.start = std::move(value);
       } else if (path == "scrollbar.vertical.end") {
         settings.scrollbar.vertical.end = std::move(value);
+      } else if (path == "scrollbar.horizontal.backward") {
+        settings.scrollbar.horizontal.backward = std::move(value);
+      } else if (path == "scrollbar.horizontal.forward") {
+        settings.scrollbar.horizontal.forward = std::move(value);
+      } else if (path == "scrollbar.vertical.backward") {
+        settings.scrollbar.vertical.backward = std::move(value);
+      } else if (path == "scrollbar.vertical.forward") {
+        settings.scrollbar.vertical.forward = std::move(value);
       } else if (path == "scrollbar.corner") {
         settings.scrollbar.corner = std::move(value);
       } else if (path == "frame.customTitleDecoration.prefix") {
@@ -728,6 +736,8 @@ private:
         settings.frame.sides.bottom = enabled;
       } else if (path == "frame.sides.left") {
         settings.frame.sides.left = enabled;
+      } else if (path == "arrows") {
+        settings.arrows = enabled;
       } else if (path == "scrollbar.ends") {
         settings.scrollbar.ends = enabled;
       } else if (path == "frame.customTitleDecoration.enabled") {
@@ -1059,6 +1069,10 @@ private:
       settings.maxPaintCells = *value;
     } else if (path == "preferredWidth") {
       settings.preferredWidth = static_cast<std::int32_t>(*value);
+    } else if (path == "arrowDelay") {
+      settings.arrowDelay = *value;
+    } else if (path == "arrowRepeat") {
+      settings.arrowRepeat = *value;
     } else if (path == "minimumThumb") {
       settings.minimumThumb = static_cast<std::int32_t>(*value);
     } else if (path == "frame.maxPaintCells") {

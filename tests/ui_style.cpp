@@ -1672,6 +1672,8 @@ TEST_CASE("scrollbar PSS all parts reach real preparation run rendering and term
     scrollbar-thumb-bold:false; scrollbar-thumb-italic:true; scrollbar-thumb-underline:false;
     scrollbar-ends-foreground:#0d0e0f; scrollbar-ends-background:#101112;
     scrollbar-ends-bold:true; scrollbar-ends-italic:true; scrollbar-ends-underline:false;
+    scrollbar-arrows-foreground:#232425; scrollbar-arrows-background:#262728;
+    scrollbar-arrows-bold:false; scrollbar-arrows-italic:true; scrollbar-arrows-underline:true;
     scrollbar-corner-foreground:#131415; scrollbar-corner-background:#161718;
     scrollbar-corner-bold:false; scrollbar-corner-italic:false; scrollbar-corner-underline:true;
   } ScrollArea:disabled {scrollbar-thumb-foreground:#202122;}
@@ -1684,6 +1686,7 @@ TEST_CASE("scrollbar PSS all parts reach real preparation run rendering and term
                                     .reference(area)
                                     .framed("double", "Title")
                                     .scrollOnFrame()
+                                    .arrows()
                                     .scrollbar("frame")
                                     .width(16)
                                     .height(4)),
@@ -1693,7 +1696,7 @@ TEST_CASE("scrollbar PSS all parts reach real preparation run rendering and term
   const auto sources = owner.managed()->get().styleSources();
   REQUIRE(sources);
   REQUIRE(sources->back().document);
-  CHECK(sources->back().document->declarations.size() == 22);
+  CHECK(sources->back().document->declarations.size() == 27);
   bool inspected{};
   owner.onKey(key::F10, [&] {
     auto &managed = owner.managed()->get();
@@ -1705,6 +1708,9 @@ TEST_CASE("scrollbar PSS all parts reach real preparation run rendering and term
       REQUIRE(parts.thumb);
       REQUIRE(parts.ends);
       REQUIRE(parts.corner);
+      REQUIRE(parts.arrows);
+      CHECK(parts.arrows->foreground == RgbColor{35, 36, 37});
+      CHECK(parts.arrows->background == RgbColor{38, 39, 40});
       CHECK(parts.track->foreground == RgbColor{1, 2, 3});
       CHECK(parts.track->background == RgbColor{4, 5, 6});
       CHECK(parts.thumb->foreground == RgbColor{7, 8, 9});
@@ -1730,19 +1736,21 @@ TEST_CASE("scrollbar PSS all parts reach real preparation run rendering and term
 }
 
 TEST_CASE("scrollbar document compact and typed sheets retain the appended sentinels") {
-  constexpr auto COMPACT = sc::compactSheet(std::array{sc::flatRule(
-    sc::type<"ScrollArea">(), sc::scrollbarTrackForeground(sc::rgb(1, 2, 3)), sc::scrollbarCornerUnderline(false))});
-  constexpr auto TYPED =
-    sc::sheet(sc::parameters(), sc::rule(sc::type<"ScrollArea">(), sc::scrollbarTrackForeground(sc::rgb(1, 2, 3)),
-                                         sc::scrollbarCornerUnderline(false)));
-  const auto document =
-    parsePssDocument("ScrollArea{scrollbar-track-foreground:#010203;scrollbar-corner-underline:false;}");
+  constexpr auto SCROLLBAR_COMPACT = sc::compactSheet(std::array{sc::flatRule(
+    sc::type<"ScrollArea">(), sc::scrollbarTrackForeground(sc::rgb(1, 2, 3)), sc::scrollbarCornerUnderline(false),
+    sc::scrollbarArrowsForeground(sc::rgb(3, 4, 5)), sc::scrollbarArrowsItalic(true))});
+  constexpr auto TYPED = sc::sheet(
+    sc::parameters(), sc::rule(sc::type<"ScrollArea">(), sc::scrollbarTrackForeground(sc::rgb(1, 2, 3)),
+                               sc::scrollbarCornerUnderline(false), sc::scrollbarArrowsForeground(sc::rgb(3, 4, 5)),
+                               sc::scrollbarArrowsItalic(true)));
+  const auto document = parsePssDocument("ScrollArea{scrollbar-track-foreground:#010203;scrollbar-corner-underline:"
+                                         "false;scrollbar-arrows-foreground:#030405;scrollbar-arrows-italic:true;}");
   REQUIRE(document);
   CHECK(sc::materialize(TYPED) == document->sheet);
   for (unsigned mode : {0u, 1u}) {
     auto owner = ui::scene(ui::scrollArea(ui::label("body")).scrollbar("ascii"));
     if (mode == 0) {
-      owner | ui::style(COMPACT);
+      owner | ui::style(SCROLLBAR_COMPACT);
     } else {
       owner | ui::style(*document);
     }

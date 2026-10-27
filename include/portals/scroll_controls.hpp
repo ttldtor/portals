@@ -2,12 +2,23 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include <functional>
 #include <portals/action.hpp>
+#include <portals/scheduler.hpp>
 #include <portals/scroll_controller.hpp>
 #include <portals/scroll_options.hpp>
 #include <portals/scrollbar_skin.hpp>
 
 namespace portals {
+/** @brief Existing low-level scheduler services for held-arrow input; no new clock is created.
+ * Tree and borrowed callback captures must outlive the binding, node and admitted calls.
+ * The node's existing UiScope owns timer lifetime. now may throw; exceptions become CALLBACK_FAILED.
+ */
+struct ScrollRepeatServices {
+  std::function<SchedulerTime()> now;     ///< Existing scheduler-clock milliseconds; required.
+  std::function<void(TreeError)> onError; ///< Required sink for asynchronous typed failures after cancellation.
+};
+
 namespace detail {
 struct ScrollWidgetState;
 struct ScrollWidgetAccess;
@@ -200,6 +211,12 @@ std::expected<void, TreeError> syncScrollControl(WidgetTree &tree, Node<Widget> 
  * lease acquired by this call. No native capability or mouse mode is enabled.
  */
 std::expected<ActionBinding, TreeError> bindScrollArea(EventRouter &router, WidgetTree &tree, Node<ScrollArea> node);
+/** @param router Existing input owner. @param tree Same UI tree. @param node Live area.
+ * @param services Existing scheduler/clock/error services, retained until node retirement.
+ * @return Scoped binding with automatic arrow hold, or typed admission error; old overload is click-only.
+ */
+std::expected<ActionBinding, TreeError> bindScrollArea(EventRouter &router, WidgetTree &tree, Node<ScrollArea> node,
+                                                       ScrollRepeatServices services);
 /** @param router Existing router, outliving the binding/admitted calls.
  * @param tree Same UI tree as router.
  * @param node Live standalone bar.
@@ -208,6 +225,12 @@ std::expected<ActionBinding, TreeError> bindScrollArea(EventRouter &router, Widg
  */
 std::expected<ActionBinding, TreeError> bindScrollBar(EventRouter &router, WidgetTree &tree, Node<ScrollBar> node,
                                                       bool geometryWriter = true);
+/** @param router Existing input owner. @param tree Same UI tree. @param node Live bar.
+ * @param services Existing scheduler/clock/error services. @param geometryWriter Existing metrics role.
+ * @return Scoped binding supporting held arrows, or typed error; old overload is click-only.
+ */
+std::expected<ActionBinding, TreeError> bindScrollBar(EventRouter &router, WidgetTree &tree, Node<ScrollBar> node,
+                                                      ScrollRepeatServices services, bool geometryWriter = true);
 /** @brief Atomically prepare owning scrollbar glyphs between frames on the tree UI thread.
  * @param tree Owning tree, borrowed for the checked mutation.
  * @param node Live ScrollArea or ScrollBar; no controller/lease/focus identity is replaced.

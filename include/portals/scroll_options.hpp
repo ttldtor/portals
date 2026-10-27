@@ -22,7 +22,10 @@ struct ScrollBarOptions {
   PrimitiveGlyphs glyphs{PrimitiveGlyphs::UNICODE}; ///< One-cell glyph mode with existing ASCII fallback.
   std::size_t maxPaintCells{16384};                 ///< Positive total track paint-work limit.
   bool focusable{true};                             ///< Whether the standalone bar participates in Tab traversal.
-  bool readOnly{}; ///< Reject user offset changes; checked programmatic commands remain possible.
+  bool readOnly{};               ///< Reject user offset changes; checked programmatic commands remain possible.
+  bool arrows{};                 ///< Reserve functional end buttons when the actual channel has at least three cells.
+  std::uint64_t arrowDelay{350}; ///< Positive milliseconds before the first held-arrow repeat.
+  std::uint64_t arrowRepeat{60}; ///< Positive milliseconds between held-arrow steps; no catch-up burst.
 };
 
 /** @brief Owning ordinary-area settings; content is retained rather than automatically virtualized.
@@ -41,7 +44,10 @@ struct ScrollAreaOptions {
   PrimitiveGlyphs glyphs{PrimitiveGlyphs::UNICODE}; ///< Existing one-cell Unicode/ASCII glyph policy.
   std::size_t maxPaintCells{16384};                 ///< Positive total outline-plus-track paint-work limit.
   bool focusable{true};                             ///< Whether the owning area participates in Tab traversal.
-  bool readOnly{}; ///< Reject user scrolling while permitting focus reveal/programmatic commands.
+  bool readOnly{};               ///< Reject user scrolling while permitting focus reveal/programmatic commands.
+  bool arrows{};                 ///< Reserve functional end buttons on channels of at least three cells.
+  std::uint64_t arrowDelay{350}; ///< Positive milliseconds before the first held-arrow repeat.
+  std::uint64_t arrowRepeat{60}; ///< Positive milliseconds between held-arrow steps; no catch-up burst.
 };
 
 /** @brief Validate standalone bar settings without mutation, allocation or callbacks.

@@ -156,6 +156,9 @@ template <class Options> void applyScrollSettings(const ControlSettings &setting
   applySetting(options.keyStep, settings.keyStep);
   applySetting(options.pageOverlap, settings.pageOverlap);
   applySetting(options.minimumThumb, settings.minimumThumb);
+  applySetting(options.arrows, settings.arrows);
+  applySetting(options.arrowDelay, settings.arrowDelay);
+  applySetting(options.arrowRepeat, settings.arrowRepeat);
   applySetting(options.focusable, settings.focusable);
   applySetting(options.readOnly, settings.readOnly);
   applySetting(options.glyphs, settings.glyphs);
@@ -166,7 +169,9 @@ template <class Options> void applyScrollSettings(const ControlSettings &setting
 bool hasScrollbarSettings(const ControlScrollbarSettings &settings) noexcept {
   return settings.pattern || settings.ends || settings.maxGlyphBytes || settings.horizontal.track ||
          settings.horizontal.thumb || settings.horizontal.start || settings.horizontal.end || settings.vertical.track ||
-         settings.vertical.thumb || settings.vertical.start || settings.vertical.end || settings.corner;
+         settings.vertical.thumb || settings.vertical.start || settings.vertical.end || settings.corner ||
+         settings.horizontal.backward || settings.horizontal.forward || settings.vertical.backward ||
+         settings.vertical.forward;
 }
 
 std::expected<ScrollAreaOptions, TreeError> controlScrollAreaOptions(const ControlSettings &settings,

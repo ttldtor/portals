@@ -190,6 +190,15 @@ public:
     return std::move(*this).scalarSettings({.pageOverlap = cells});
   }
 
+  /** @param enabled Reserve functional end buttons on channels of at least three cells.
+   * @return Consuming native scroll recipe; managed scenes automatically supply held-arrow services.
+   */
+  Description &&arrows(bool enabled = true) &&
+    requires(std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+  {
+    return std::move(*this).scalarSettings({.arrows = enabled});
+  }
+
   /** @param cells Positive minimum thumb length, capped by the actual track.
    * @return Consuming native area/bar recipe with a checked cell setting.
    */

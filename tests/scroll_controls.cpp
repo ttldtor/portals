@@ -141,7 +141,11 @@ struct Sink : PaintContext {
 };
 
 struct TreeFixture {
-  std::unique_ptr<Scheduler> scheduler = take(Scheduler::create());
+  SchedulerTime now{};
+  std::unique_ptr<Scheduler> scheduler = take(Scheduler::create({}, {[](void *context) noexcept {
+                                                                       return *static_cast<SchedulerTime *>(context);
+                                                                     },
+                                                                     &now}));
   std::unique_ptr<WidgetTree> tree = take(WidgetTree::create(*scheduler));
   Node<Widget> root = take(tree->root());
   std::unique_ptr<EventRouter> router = take(EventRouter::create(*tree));
@@ -1098,9 +1102,327 @@ void manualStyleAndAutomaticMetadata() {
           "standalone ScrollBar auto metadata resolves type-specific theme");
   }));
 }
+
+void functionalArrowGeometry() {
+  for (auto axis : {ScrollAxis::VERTICAL, ScrollAxis::HORIZONTAL}) {
+    BarFixture f({.keyStep = 2, .glyphs = PrimitiveGlyphs::ASCII, .arrows = true}, axis);
+    auto binding = take(bindScrollBar(*f.router, *f.tree, f.bar));
+    auto paint = f.paint(f.bar);
+    const auto cell = [&](int offset) {
+      return axis == ScrollAxis::VERTICAL ? std::pair{0, offset} : std::pair{offset, 0};
+    };
+    check(paint.cells.at(cell(0)) == (axis == ScrollAxis::VERTICAL ? "^" : "<") &&
+            paint.cells.at(cell(9)) == (axis == ScrollAxis::VERTICAL ? "v" : ">"),
+          "arrows reserve separate end cells");
+    check(paint.cells.at(cell(1)) == "#", "thumb begins after decrement button");
+    f.mouse(MouseAction::PRESS, MouseButton::LEFT, cell(9).first, cell(9).second);
+    const auto values = f.values();
+    check((axis == ScrollAxis::VERTICAL ? values.vertical.offset.raster : values.horizontal.offset.raster) == 2,
+          "old binding arrow click uses keyStep without timer services");
+    for (int length = 0; length <= 3; ++length) {
+      f.layout(axis == ScrollAxis::VERTICAL ? CellSize{1, length} : CellSize{length, 1});
+      const auto small = f.paint(f.bar);
+      check(small.submitted == static_cast<std::size_t>(length), "short channels keep their exact paint budget");
+      if (length > 0) {
+        check((small.cells.at(cell(0)) == (axis == ScrollAxis::VERTICAL ? "^" : "<")) == (length == 3),
+              "functional arrow buttons collapse below three cells");
+      }
+    }
+  }
+  BarFixture readonly({.glyphs = PrimitiveGlyphs::ASCII, .readOnly = true, .arrows = true});
+  auto binding = take(bindScrollBar(*readonly.router, *readonly.tree, readonly.bar));
+  readonly.mouse(MouseAction::PRESS, MouseButton::LEFT, 0, 9);
+  check(readonly.values().vertical.offset.raster == 0, "readonly arrow cannot change offset");
+  take(setScrollOffset(*readonly.tree, readonly.bar, ScrollAxis::VERTICAL, {7, 0}));
+  check(readonly.values().vertical.offset.raster == 7, "readonly checked commands stay available");
+}
+
+void heldArrows() {
+  int errors{};
+  BarFixture f({.keyStep = 2, .glyphs = PrimitiveGlyphs::ASCII, .arrows = true});
+  auto binding = take(bindScrollBar(*f.router, *f.tree, f.bar,
+                                    {[&] {
+                                       return f.now;
+                                     },
+                                     [&](TreeError) {
+                                       ++errors;
+                                     }}));
+  take(f.router->setPointerCaptureCapabilities({true, true, true}));
+  f.mouse(MouseAction::PRESS, MouseButton::LEFT, 0, 9);
+  check(f.values().vertical.offset.raster == 2, "arrow press takes one immediate step");
+  f.now = 349;
+  check(take(f.scheduler->dispatch()).timers == 0 && f.values().vertical.offset.raster == 2,
+        "hold waits full initial delay");
+  f.now = 350;
+  check(take(f.scheduler->dispatch()).timers == 1 && f.values().vertical.offset.raster == 4,
+        "hold repeats at initial deadline");
+  f.now = 410;
+  check(take(f.scheduler->dispatch()).timers == 1 && f.values().vertical.offset.raster == 6,
+        "hold repeats at configured interval");
+  f.now = 1000;
+  check(take(f.scheduler->dispatch()).timers == 1 && f.values().vertical.offset.raster == 8,
+        "delayed dispatch has no catch-up burst");
+  f.mouse(MouseAction::RELEASE, MouseButton::LEFT, 0, 9);
+  f.now = 2000;
+  check(take(f.scheduler->dispatch()).timers == 0 && f.values().vertical.offset.raster == 8,
+        "release cancels pending repeat");
+  take(setScrollOffset(*f.tree, f.bar, ScrollAxis::VERTICAL, {89, 0}));
+  f.layout({1, 10});
+  f.mouse(MouseAction::PRESS, MouseButton::LEFT, 0, 9);
+  check(f.values().vertical.offset.raster == 90, "final arrow step clamps exactly");
+  f.layout({1, 10});
+  take(f.tree->consumeFrameRequest());
+  const auto revision = f.values().revision;
+  f.mouse(MouseAction::PRESS, MouseButton::LEFT, 0, 9);
+  f.now = 3000;
+  check(take(f.scheduler->dispatch()).timers == 0 && f.values().revision == revision &&
+          take(f.tree->consumeFrameRequest()) == Invalidation::NONE,
+        "bound arrow adds no timer, publication or redraw");
+  take(setScrollOffset(*f.tree, f.bar, ScrollAxis::VERTICAL, {87, 0}));
+  f.layout({1, 10});
+  f.mouse(MouseAction::PRESS, MouseButton::LEFT, 0, 9);
+  f.now = 3350;
+  check(take(f.scheduler->dispatch()).timers == 1 && f.values().vertical.offset.raster == 90,
+        "held arrow stops as soon as a repeat reaches the bound");
+  f.now = 4000;
+  check(take(f.scheduler->dispatch()).timers == 0, "reaching the bound never schedules another repeat");
+  check(errors == 0, "ordinary arrow hold has no asynchronous errors");
+
+  BarFixture horizontal({.arrows = true}, ScrollAxis::HORIZONTAL);
+  auto horizontalBinding = take(bindScrollBar(*horizontal.router, *horizontal.tree, horizontal.bar,
+                                              {[&] {
+                                                 return horizontal.now;
+                                               },
+                                               [](TreeError) {
+                                               }}));
+  take(horizontal.router->setPointerCaptureCapabilities({true, true, true}));
+  horizontal.mouse(MouseAction::PRESS, MouseButton::LEFT, 9, 0);
+  horizontal.now = 350;
+  take(horizontal.scheduler->dispatch());
+  check(horizontal.values().horizontal.offset.raster == 2,
+        "horizontal held arrow uses horizontal metrics and position");
+  horizontal.mouse(MouseAction::RELEASE, MouseButton::LEFT, 9, 0);
+
+  BarFixture clickOnly({.arrows = true});
+  auto clickBinding = take(bindScrollBar(*clickOnly.router, *clickOnly.tree, clickOnly.bar,
+                                         {[&] {
+                                            return clickOnly.now;
+                                          },
+                                          [](TreeError) {
+                                          }}));
+  clickOnly.mouse(MouseAction::PRESS, MouseButton::LEFT, 0, 9);
+  clickOnly.now = 1000;
+  check(take(clickOnly.scheduler->dispatch()).timers == 0 && clickOnly.values().vertical.offset.raster == 1,
+        "missing host capture support preserves one click without timer admission");
+}
+
+void arrowCancellationAndLifetime() {
+  for (int mode = 0; mode < 7; ++mode) {
+    int errors{};
+    BarFixture f({.arrows = true});
+    auto binding = take(bindScrollBar(*f.router, *f.tree, f.bar,
+                                      {[&] {
+                                         return f.now;
+                                       },
+                                       [&](TreeError) {
+                                         ++errors;
+                                       }}));
+    take(f.router->setPointerCaptureCapabilities({true, true, true}));
+    f.mouse(MouseAction::PRESS, MouseButton::LEFT, 0, 9);
+    if (mode == 0)
+      take(f.router->cancelPointerCapture());
+    if (mode == 1)
+      take(f.tree->setVisible(f.bar, false));
+    if (mode == 2)
+      take(f.tree->setEnabled(f.bar, false));
+    if (mode == 3)
+      take(f.tree->remove(f.bar));
+    if (mode == 4)
+      f.layout({1, 8});
+    if (mode == 5)
+      f.mouse(MouseAction::MOVE, MouseButton::LEFT, 0, 8);
+    if (mode == 6)
+      binding.disconnect();
+    f.now = 350;
+    take(f.scheduler->dispatch());
+    check(f.values().vertical.offset.raster == 1 && errors == 0,
+          "capture loss, eligibility, removal and resize stop hold");
+    f.now = 1000;
+    check(take(f.scheduler->dispatch()).timers == 0, "cancelled hold never rearms");
+  }
+  BarFixture removed({.arrows = true});
+  auto binding = take(bindScrollBar(*removed.router, *removed.tree, removed.bar,
+                                    {[&] {
+                                       take(removed.tree->remove(removed.bar));
+                                       return removed.now;
+                                     },
+                                     [](TreeError) {
+                                     }}));
+  take(removed.router->setPointerCaptureCapabilities({true, true, true}));
+  removed.mouse(MouseAction::PRESS, MouseButton::LEFT, 0, 9);
+  check(removed.values().vertical.offset.raster == 0, "reentrant removal from now prevents late initial publication");
+  removed.now = 1000;
+  check(take(removed.scheduler->dispatch()).timers == 0, "reentrant removal leaves no scheduled widget callback");
+  check(error(validateScrollOptions(ScrollBarOptions{.arrowDelay = 0}), TreeError::INVALID_ARGUMENT) &&
+          error(validateScrollOptions(ScrollAreaOptions{.arrowRepeat = 0}), TreeError::INVALID_ARGUMENT),
+        "zero timing rejects");
+}
+
+void rebindHeldArrowServices() {
+  for (bool pending : {false, true}) {
+    for (bool replacementServices : {false, true}) {
+      int firstClock{};
+      int replacementClock{};
+      BarFixture f({.arrows = true});
+      auto first = take(bindScrollBar(*f.router, *f.tree, f.bar,
+                                      {[&] {
+                                         ++firstClock;
+                                         return f.now;
+                                       },
+                                       [](TreeError) {
+                                       }}));
+      take(f.router->setPointerCaptureCapabilities({true, true, true}));
+      if (pending) {
+        f.mouse(MouseAction::PRESS, MouseButton::LEFT, 0, 9);
+        f.layout({1, 10});
+      }
+      std::thread disconnect([&] {
+        first.disconnect();
+      });
+      disconnect.join();
+      const auto oldClockCalls = firstClock;
+      auto replacement = replacementServices ? bindScrollBar(*f.router, *f.tree, f.bar,
+                                                             ScrollRepeatServices{[&] {
+                                                                                    ++replacementClock;
+                                                                                    return f.now;
+                                                                                  },
+                                                                                  [](TreeError) {
+                                                                                  }})
+                                             : bindScrollBar(*f.router, *f.tree, f.bar);
+      check(replacement.has_value(), "disconnected arrow services binding permits replacement");
+      if (!replacement) {
+        continue;
+      }
+      f.mouse(MouseAction::PRESS, MouseButton::LEFT, 0, 9);
+      const auto pressedOffset = f.values().vertical.offset.raster;
+      f.now = 350;
+      take(f.scheduler->dispatch());
+      check(firstClock == oldClockCalls, "rebound input never invokes retired services A");
+      check(f.values().vertical.offset.raster == pressedOffset + (replacementServices ? 1 : 0),
+            "only replacement services B repeat; old overload remains click-only");
+      check(replacementClock == (replacementServices ? 2 : 0),
+            "replacement clock exclusively owns initial and rearm admission");
+      f.mouse(MouseAction::RELEASE, MouseButton::LEFT, 0, 9);
+      f.now = 1000;
+      check(take(f.scheduler->dispatch()).timers == 0, "pending services A timer cannot drive a later binding");
+    }
+  }
+}
+
+void activeArrowBindingRejectsReplacementTransactionally() {
+  int firstClock{};
+  int rejectedClock{};
+  BarFixture f({.arrows = true});
+  auto first = take(bindScrollBar(*f.router, *f.tree, f.bar,
+                                  {[&] {
+                                     ++firstClock;
+                                     return f.now;
+                                   },
+                                   [](TreeError) {
+                                   }}));
+  take(f.router->setPointerCaptureCapabilities({true, true, true}));
+  f.mouse(MouseAction::PRESS, MouseButton::LEFT, 0, 9);
+  const auto rejected = bindScrollBar(*f.router, *f.tree, f.bar,
+                                      ScrollRepeatServices{[&] {
+                                                             ++rejectedClock;
+                                                             return f.now;
+                                                           },
+                                                           [](TreeError) {
+                                                           }});
+  check(error(rejected, TreeError::INVALID_ARGUMENT), "active binding exclusivity rejects replacement");
+  f.now = 350;
+  take(f.scheduler->dispatch());
+  check(f.values().vertical.offset.raster == 2 && firstClock == 2 && rejectedClock == 0,
+        "failed replacement preserves admitted binding A and never publishes B services");
+  f.mouse(MouseAction::RELEASE, MouseButton::LEFT, 0, 9);
+
+  BarFixture exact({.keyStep = std::numeric_limits<std::uint64_t>::max(), .arrows = true});
+  take(setScrollMetrics(*exact.tree, exact.bar, {std::numeric_limits<std::uint64_t>::max(), 1}));
+  exact.layout({1, 10});
+  auto exactBinding = take(bindScrollBar(*exact.router, *exact.tree, exact.bar));
+  exact.mouse(MouseAction::PRESS, MouseButton::LEFT, 0, 9);
+  check(exact.values().vertical.offset.raster == std::numeric_limits<std::uint64_t>::max() - 1,
+        "functional arrow preserves exact uint64 endpoint without narrowing or overflow");
+  exact.layout({1, 10});
+  exact.mouse(MouseAction::PRESS, MouseButton::LEFT, 0, 0);
+  check(exact.values().vertical.offset.raster == 0, "maximal decrement clamps at exact zero");
+}
+
+void arrowAdmissionErrors() {
+  for (int mode = 0; mode < 3; ++mode) {
+    int calls{};
+    std::optional<TreeError> asynchronous;
+    BarFixture f({.arrows = true});
+    auto binding = take(bindScrollBar(*f.router, *f.tree, f.bar,
+                                      {[&]() -> SchedulerTime {
+                                         ++calls;
+                                         if (mode == 0 || (mode == 2 && calls == 2)) {
+                                           throw TreeError::INVALID_ARGUMENT;
+                                         }
+                                         return mode == 1 ? std::numeric_limits<SchedulerTime>::max() - 100 : f.now;
+                                       },
+                                       [&](TreeError failure) {
+                                         asynchronous = failure;
+                                       }}));
+    take(f.router->setPointerCaptureCapabilities({true, true, true}));
+    const auto pressed = f.router->dispatch(MouseInputEvent{0, 9, MouseButton::LEFT, MouseAction::PRESS, {}});
+    if (mode < 2) {
+      check(error(pressed, mode == 0 ? TreeError::CALLBACK_FAILED : TreeError::INVALID_ARGUMENT) &&
+              f.values().vertical.offset.raster == 0,
+            "failed clock or deadline admission preserves initial offset");
+    } else {
+      take(pressed);
+      f.now = 350;
+      take(f.scheduler->dispatch());
+      check(asynchronous == TreeError::CALLBACK_FAILED && f.values().vertical.offset.raster == 2,
+            "late clock exception stops repeat and reaches typed error sink");
+    }
+    f.now = 1000;
+    check(take(f.scheduler->dispatch()).timers == 0, "failed hold admission leaves no late repeat");
+  }
+}
+
+void arrowGlyphPreparation() {
+  BarFixture f({.glyphs = PrimitiveGlyphs::ASCII, .arrows = true});
+  ScrollbarSkin skin;
+  skin.vertical.backward = "U";
+  skin.vertical.forward = "D";
+  skin.vertical.start = "A";
+  skin.vertical.end = "Z";
+  skin.ends = true;
+  take(setScrollbarSkin(*f.tree, f.bar, skin));
+  auto painted = f.paint(f.bar);
+  check(painted.cells.at({0, 0}) == "U" && painted.cells.at({0, 9}) == "D",
+        "functional glyphs are independent of decorative ends");
+  skin.vertical.backward = "";
+  check(error(setScrollbarSkin(*f.tree, f.bar, skin), TreeError::INVALID_ARGUMENT),
+        "empty functional arrow glyph rejects");
+  skin.vertical.backward = "界";
+  check(error(setScrollbarSkin(*f.tree, f.bar, skin), TreeError::INVALID_ARGUMENT),
+        "wide arrow glyph rejects before painting");
+  check(f.paint(f.bar).cells == painted.cells, "failed arrow preparation preserves installed skin");
+}
+
 } // namespace
 
 int main() {
+  functionalArrowGeometry();
+  heldArrows();
+  arrowAdmissionErrors();
+  rebindHeldArrowServices();
+  activeArrowBindingRejectsReplacementTransactionally();
+  arrowCancellationAndLifetime();
+  arrowGlyphPreparation();
   initializationAndLifetime();
   placementPaintAndHits();
   wheelKeysAndBoundary();

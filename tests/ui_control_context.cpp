@@ -1519,7 +1519,7 @@ TEST_CASE("actual catalog fixed ancestry retains sparse precedence origins and u
 }
 
 TEST_CASE("Shared frame, Spinner and scrollbar schemas append stable leaves within four presence words") {
-  static_assert(ui::detail::CONTROL_PROPERTY_COUNT == 231);
+  static_assert(ui::detail::CONTROL_PROPERTY_COUNT == 238);
   static_assert((ui::detail::CONTROL_PRESENCE_BITS + 63) / 64 == 4);
   ControlSettings appended;
   appended.spinnerPreset = SpinnerPreset::LINE;
@@ -1742,4 +1742,21 @@ TEST_CASE("choice strategy is a typed sparse leaf restricted to the choice famil
   CHECK(drop.settings.searchStrategy == SearchStrategy::FUZZY_PREFIX);
   fails(context.resolve("LineEdit", {.searchStrategy = SearchStrategy::PREFIX}), Code::UNSUPPORTED_PROPERTY);
   fails(context.resolve("ComboBox", {.searchStrategy = static_cast<SearchStrategy>(99)}), Code::INVALID_VALUE);
+}
+
+TEST_CASE("functional arrow options preserve sparse false and appended identities") {
+  ControlContext controls;
+  take(ui::detail::ControlContextAccess::installScrollSchema(controls, "ScrollArea"));
+  controls.defaults("ScrollArea", {.arrows = true, .arrowDelay = 450, .arrowRepeat = 70});
+  const auto configured = take(controls.resolve("ScrollArea", {.arrows = false, .arrowRepeat = 90}));
+  CHECK(configured.settings.arrows == false);
+  CHECK(configured.settings.arrowDelay == 450);
+  CHECK(configured.settings.arrowRepeat == 90);
+  const auto presence = ui::detail::controlSettingsPresenceSet({.arrows = false, .arrowDelay = 350, .arrowRepeat = 60});
+  CHECK(presence.test(231));
+  CHECK(presence.test(232));
+  CHECK(presence.test(233));
+  CHECK_FALSE(controls.resolve("ScrollArea", {.arrowDelay = 0}));
+  CHECK_FALSE(controls.resolve("ScrollArea", {.arrowRepeat = 0}));
+  CHECK_FALSE(controls.resolve("Button", {.arrows = true}));
 }

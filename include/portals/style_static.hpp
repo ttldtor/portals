@@ -185,6 +185,11 @@ enum class Property {
   SCROLLBAR_ENDS_BOLD,         ///< Scrollbar ends bold.
   SCROLLBAR_ENDS_ITALIC,       ///< Scrollbar ends italic.
   SCROLLBAR_ENDS_UNDERLINE,    ///< Scrollbar ends underline.
+  SCROLLBAR_ARROWS_FOREGROUND, ///< Scrollbar arrows foreground.
+  SCROLLBAR_ARROWS_BACKGROUND, ///< Scrollbar arrows background.
+  SCROLLBAR_ARROWS_BOLD,       ///< Scrollbar arrows bold.
+  SCROLLBAR_ARROWS_ITALIC,     ///< Scrollbar arrows italic.
+  SCROLLBAR_ARROWS_UNDERLINE,  ///< Scrollbar arrows underline.
   SCROLLBAR_CORNER_FOREGROUND, ///< Scrollbar corner foreground.
   SCROLLBAR_CORNER_BACKGROUND, ///< Scrollbar corner background.
   SCROLLBAR_CORNER_BOLD,       ///< Scrollbar corner bold.
@@ -322,7 +327,8 @@ constexpr void assign(const D &declaration, StyleDeclarations &destination, cons
     D::KIND == Property::FRAME_ENDS_BACKGROUND || D::KIND == Property::SCROLLBAR_TRACK_FOREGROUND ||
     D::KIND == Property::SCROLLBAR_TRACK_BACKGROUND || D::KIND == Property::SCROLLBAR_THUMB_FOREGROUND ||
     D::KIND == Property::SCROLLBAR_THUMB_BACKGROUND || D::KIND == Property::SCROLLBAR_ENDS_FOREGROUND ||
-    D::KIND == Property::SCROLLBAR_ENDS_BACKGROUND || D::KIND == Property::SCROLLBAR_CORNER_FOREGROUND ||
+    D::KIND == Property::SCROLLBAR_ENDS_BACKGROUND || D::KIND == Property::SCROLLBAR_ARROWS_FOREGROUND ||
+    D::KIND == Property::SCROLLBAR_ARROWS_BACKGROUND || D::KIND == Property::SCROLLBAR_CORNER_FOREGROUND ||
     D::KIND == Property::SCROLLBAR_CORNER_BACKGROUND;
   constexpr bool METRIC = D::KIND == Property::MIN_WIDTH;
   using Expected = std::conditional_t<COLOR, RgbColor, std::conditional_t<METRIC, std::int32_t, bool>>;
@@ -399,6 +405,16 @@ constexpr void assign(const D &declaration, StyleDeclarations &destination, cons
       destination.scrollbarEnds.italic = value;
     } else if constexpr (D::KIND == Property::SCROLLBAR_ENDS_UNDERLINE) {
       destination.scrollbarEnds.underline = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_ARROWS_FOREGROUND) {
+      destination.scrollbarArrows.foreground = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_ARROWS_BACKGROUND) {
+      destination.scrollbarArrows.background = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_ARROWS_BOLD) {
+      destination.scrollbarArrows.bold = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_ARROWS_ITALIC) {
+      destination.scrollbarArrows.italic = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_ARROWS_UNDERLINE) {
+      destination.scrollbarArrows.underline = value;
     } else if constexpr (D::KIND == Property::SCROLLBAR_CORNER_FOREGROUND) {
       destination.scrollbarCorner.foreground = value;
     } else if constexpr (D::KIND == Property::SCROLLBAR_CORNER_BACKGROUND) {
@@ -929,6 +945,31 @@ template <class E> consteval auto scrollbarEndsUnderline(E expression) {
 }
 
 /** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
+template <class E> consteval auto scrollbarArrowsForeground(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_ARROWS_FOREGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
+template <class E> consteval auto scrollbarArrowsBackground(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_ARROWS_BACKGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
+template <class E> consteval auto scrollbarArrowsBold(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_ARROWS_BOLD, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
+template <class E> consteval auto scrollbarArrowsItalic(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_ARROWS_ITALIC, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
+template <class E> consteval auto scrollbarArrowsUnderline(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_ARROWS_UNDERLINE, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
 template <class E> consteval auto scrollbarCornerForeground(E expression) {
   return detail::Declaration<detail::Property::SCROLLBAR_CORNER_FOREGROUND, E>{expression};
 }
@@ -1010,8 +1051,10 @@ consteval auto themeFromTokens(ThemeTokens defaults, detail::Parameters<P...> ex
          scrollbarTrackBold(true), scrollbarThumbForeground(token<"accent">()),
          scrollbarThumbBackground(token<"background">()), scrollbarThumbBold(true),
          scrollbarEndsForeground(token<"accent">()), scrollbarEndsBackground(token<"background">()),
-         scrollbarEndsBold(true), scrollbarCornerForeground(token<"accent">()),
-         scrollbarCornerBackground(token<"background">()), scrollbarCornerBold(true)),
+         scrollbarEndsBold(true), scrollbarArrowsForeground(token<"accent">()),
+         scrollbarArrowsBackground(token<"background">()), scrollbarArrowsBold(true),
+         scrollbarCornerForeground(token<"accent">()), scrollbarCornerBackground(token<"background">()),
+         scrollbarCornerBold(true)),
     rule(selector(StyleState::DISABLED), foreground(token<"muted">()), background(token<"background">()), bold(false)),
     rule(selector(StyleState::SELECTED), foreground(token<"foreground">()), background(token<"selection">()),
          bold(true), italic(false)),

@@ -5,6 +5,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+### Added
+
+- ScrollArea and ScrollBar gain opt-in functional arrow buttons with key-step clicks,
+  cancellable scheduler-based hold, separate glyphs and `scrollbar-arrows-*` styling.
+  Existing decorative scrollbar ends and default behavior remain compatible.
+
 ### Fixed
 
 - Keep focused scrollbar tracks, thumbs, decorative ends and corners in the

@@ -294,7 +294,14 @@ constexpr std::array<ControlPropertyDescriptor, detail::CONTROL_PROPERTY_COUNT> 
    {"maxBatchBytes", Kind::UNSIGNED_INTEGER, 1, {}},
    {"maxRecordBytes", Kind::UNSIGNED_INTEGER, 1, {}},
    {"followTail", Kind::BOOLEAN, 1, {}},
-   {"searchStrategy", Kind::ENUMERATION, 1, SEARCH_STRATEGY_NAMES}}};
+   {"searchStrategy", Kind::ENUMERATION, 1, SEARCH_STRATEGY_NAMES},
+   {"arrows", Kind::BOOLEAN, 1, {}},
+   {"arrowDelay", Kind::UNSIGNED_INTEGER, 1, {}},
+   {"arrowRepeat", Kind::UNSIGNED_INTEGER, 1, {}},
+   {"scrollbar.horizontal.backward", Kind::LITERAL_STRING, 3, {}},
+   {"scrollbar.horizontal.forward", Kind::LITERAL_STRING, 3, {}},
+   {"scrollbar.vertical.backward", Kind::LITERAL_STRING, 3, {}},
+   {"scrollbar.vertical.forward", Kind::LITERAL_STRING, 3, {}}}};
 static_assert(std::ranges::all_of(PROPERTIES, [](const auto &property) {
   return !property.path.empty();
 }));
@@ -317,8 +324,10 @@ constexpr Mask BUTTON_MASK = SIZE_MASK | TEXT_MASK | propertyMask(37);
 constexpr Mask BORDER_MASK = SIZE_MASK | propertyMask(38, 39);
 constexpr Mask GAUGE_MASK = BORDER_MASK | propertyMask(40, 41, 42, 43);
 constexpr Mask SPINNER_MASK = SIZE_MASK | propertyMask(39, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203);
-constexpr Mask SCROLLBAR_MASK = propertyMask(204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215);
-constexpr Mask SCROLL_COMMON_MASK = SIZE_MASK | SCROLLBAR_MASK | propertyMask(8, 38, 39, 44, 45, 46, 47, 48);
+constexpr Mask SCROLLBAR_MASK =
+  propertyMask(204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 234, 235, 236, 237);
+constexpr Mask SCROLL_COMMON_MASK =
+  SIZE_MASK | SCROLLBAR_MASK | propertyMask(8, 38, 39, 44, 45, 46, 47, 48, 231, 232, 233);
 constexpr Mask SCROLL_AREA_MASK = SCROLL_COMMON_MASK | propertyMask(49, 50, 51, 53, 54, 55);
 constexpr Mask SCROLL_BAR_MASK = SCROLL_COMMON_MASK | propertyMask(52);
 constexpr Mask LOG_VIEW_MASK = SIZE_MASK | TEXT_MASK | propertyMask(8, 225, 226, 227, 228, 229);
@@ -343,7 +352,7 @@ constexpr Mask THEME_CATALOG_MASK =
 constexpr Mask POSITIVE_UNSIGNED_MASK =
   propertyMask(3, 17, 18, 26, 27, 28, PAINT_LIMIT_PROPERTY, 45, 55, 59, 71, 72, 73, 83, 90, 100, 110, 111, 112, 113,
                114, 115, 116, 124, 125, 126, 127, 128, 129, 130, 137, 138, 139, 140, 143, 144, 145, 146, 147, 148, 149,
-               150, 151, 155, 156, 157, 158, 172, 195, 201, 202, 203, 206, 221, 225, 226, 227, 228);
+               150, 151, 155, 156, 157, 158, 172, 195, 201, 202, 203, 206, 221, 225, 226, 227, 228, 232, 233);
 constexpr Mask CHECK_MASK = SIZE_MASK | TEXT_MASK | propertyMask(5, 6);
 constexpr Mask LAYOUT_MASK = SIZE_MASK | propertyMask(4, 22, 23, 24, 25, 30, 31, 32);
 constexpr Mask EDIT_MASK = SIZE_MASK | TEXT_MASK | propertyMask(7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 33, 34, 35, 36);
@@ -397,12 +406,15 @@ constexpr auto SCROLL_AREA_SCHEMA = withFrame(
                  PROPERTIES[44],  PROPERTIES[45],  PROPERTIES[46],  PROPERTIES[47],  PROPERTIES[48],  PROPERTIES[49],
                  PROPERTIES[50],  PROPERTIES[51],  PROPERTIES[204], PROPERTIES[205], PROPERTIES[206], PROPERTIES[207],
                  PROPERTIES[208], PROPERTIES[209], PROPERTIES[210], PROPERTIES[211], PROPERTIES[212], PROPERTIES[213],
-                 PROPERTIES[214], PROPERTIES[215]}));
-constexpr auto SCROLL_BAR_SCHEMA = withFrame(std::to_array(
-  {PROPERTIES[1],   PROPERTIES[2],   PROPERTIES[3],   PROPERTIES[8],   PROPERTIES[38],  PROPERTIES[39],
-   PROPERTIES[44],  PROPERTIES[45],  PROPERTIES[46],  PROPERTIES[47],  PROPERTIES[48],  PROPERTIES[52],
-   PROPERTIES[204], PROPERTIES[205], PROPERTIES[206], PROPERTIES[207], PROPERTIES[208], PROPERTIES[209],
-   PROPERTIES[210], PROPERTIES[211], PROPERTIES[212], PROPERTIES[213], PROPERTIES[214], PROPERTIES[215]}));
+                 PROPERTIES[214], PROPERTIES[215], PROPERTIES[231], PROPERTIES[232], PROPERTIES[233], PROPERTIES[234],
+                 PROPERTIES[235], PROPERTIES[236], PROPERTIES[237]}));
+constexpr auto SCROLL_BAR_SCHEMA = withFrame(
+  std::to_array({PROPERTIES[1],   PROPERTIES[2],   PROPERTIES[3],   PROPERTIES[8],   PROPERTIES[38],  PROPERTIES[39],
+                 PROPERTIES[44],  PROPERTIES[45],  PROPERTIES[46],  PROPERTIES[47],  PROPERTIES[48],  PROPERTIES[52],
+                 PROPERTIES[204], PROPERTIES[205], PROPERTIES[206], PROPERTIES[207], PROPERTIES[208], PROPERTIES[209],
+                 PROPERTIES[210], PROPERTIES[211], PROPERTIES[212], PROPERTIES[213], PROPERTIES[214], PROPERTIES[215],
+                 PROPERTIES[231], PROPERTIES[232], PROPERTIES[233], PROPERTIES[234], PROPERTIES[235], PROPERTIES[236],
+                 PROPERTIES[237]}));
 constexpr auto LOG_VIEW_SCHEMA =
   withFrame(std::to_array({PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[8], PROPERTIES[225],
                            PROPERTIES[226], PROPERTIES[227], PROPERTIES[228], PROPERTIES[229]}));
@@ -895,19 +907,26 @@ ControlContextError exceptionError() noexcept {
   X(scrollbar.corner, 215)                                                                                             \
   X(fieldHelp, 216)                                                                                                    \
   X(fieldRequired, 217)                                                                                                \
-  X(fieldRequiredMessage, 218) \
-  X(findDocument, 219) \
-  X(findMaxDocumentBytes, 220) \
-  X(findMaxMatches, 221) \
-  X(findPreviousLabel, 222) \
-  X(findNextLabel, 223) \
-  X(findClearLabel, 224) \
-  X(maxLines, 225) \
-  X(maxBytes, 226) \
-  X(maxBatchBytes, 227) \
-  X(maxRecordBytes, 228) \
-  X(followTail, 229) \
-  X(searchStrategy, 230)
+  X(fieldRequiredMessage, 218)                                                                                         \
+  X(findDocument, 219)                                                                                                 \
+  X(findMaxDocumentBytes, 220)                                                                                         \
+  X(findMaxMatches, 221)                                                                                               \
+  X(findPreviousLabel, 222)                                                                                            \
+  X(findNextLabel, 223)                                                                                                \
+  X(findClearLabel, 224)                                                                                               \
+  X(maxLines, 225)                                                                                                     \
+  X(maxBytes, 226)                                                                                                     \
+  X(maxBatchBytes, 227)                                                                                                \
+  X(maxRecordBytes, 228)                                                                                               \
+  X(followTail, 229)                                                                                                   \
+  X(searchStrategy, 230)                                                                                               \
+  X(arrows, 231)                                                                                                       \
+  X(arrowDelay, 232)                                                                                                   \
+  X(arrowRepeat, 233)                                                                                                  \
+  X(scrollbar.horizontal.backward, 234)                                                                                \
+  X(scrollbar.horizontal.forward, 235)                                                                                 \
+  X(scrollbar.vertical.backward, 236)                                                                                  \
+  X(scrollbar.vertical.forward, 237)
 
 #define PORTALS_CONTROL_LEAVES(X) \
   PORTALS_CONTROL_BASE_LEAVES(X) \
@@ -1254,6 +1273,14 @@ void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &pr
       std::pair<std::string_view, bool>{"keyStep", patch.keyStep.has_value()},
       std::pair<std::string_view, bool>{"pageOverlap", patch.pageOverlap.has_value()},
       std::pair<std::string_view, bool>{"minimumThumb", patch.minimumThumb.has_value()},
+      std::pair<std::string_view, bool>{"arrows", patch.arrows.has_value()},
+      std::pair<std::string_view, bool>{"arrowDelay", patch.arrowDelay.has_value()},
+      std::pair<std::string_view, bool>{"arrowRepeat", patch.arrowRepeat.has_value()},
+      std::pair<std::string_view, bool>{"scrollbar.horizontal.backward",
+                                        patch.scrollbar.horizontal.backward.has_value()},
+      std::pair<std::string_view, bool>{"scrollbar.horizontal.forward", patch.scrollbar.horizontal.forward.has_value()},
+      std::pair<std::string_view, bool>{"scrollbar.vertical.backward", patch.scrollbar.vertical.backward.has_value()},
+      std::pair<std::string_view, bool>{"scrollbar.vertical.forward", patch.scrollbar.vertical.forward.has_value()},
       std::pair<std::string_view, bool>{"focusable", patch.focusable.has_value()},
       std::pair<std::string_view, bool>{"horizontal", patch.horizontal.has_value()},
       std::pair<std::string_view, bool>{"vertical", patch.vertical.has_value()},

@@ -1,13 +1,193 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include "action_state.hpp"
-#include "scroll_controls_state.hpp"
 #include "log_view_state.hpp"
+#include "scroll_controls_state.hpp"
+#include <limits>
 
 namespace portals {
 namespace {
 using detail::ScrollControllerAccess;
+using detail::ScrollRepeatState;
 using detail::ScrollWidgetState;
+
+void repeatScroll(const std::shared_ptr<ScrollRepeatState> &repeat);
+
+bool repeatConnected(const ScrollRepeatState &repeat) noexcept {
+  const auto binding = repeat.binding.lock();
+  return binding && binding->connected.load();
+}
+
+std::expected<void, TreeError> armScrollRepeat(const std::shared_ptr<ScrollRepeatState> &repeat,
+                                               std::uint64_t interval) {
+  if (!repeatConnected(*repeat)) {
+    repeat->cancel();
+    return {};
+  }
+  const auto generation = repeat->generation;
+  SchedulerTime now{};
+  try {
+    now = repeat->services.now();
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(TreeError::NO_MEMORY);
+  } catch (...) {
+    return std::unexpected(TreeError::CALLBACK_FAILED);
+  }
+  if (!repeat->held || repeat->generation != generation) {
+    return {};
+  }
+  if (interval > std::numeric_limits<SchedulerTime>::max() - now) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+  auto eligible = repeat->tree.inputEligible(repeat->node);
+  if (!eligible || !*eligible) {
+    repeat->cancel();
+    return {};
+  }
+  auto timer = repeat->tree.at(repeat->node, now + interval, [weak = std::weak_ptr(repeat), generation](Widget &) {
+    if (auto current = weak.lock(); current && current->held && current->generation == generation) {
+      repeatScroll(current);
+    }
+  });
+  if (!timer) {
+    return std::unexpected(timer.error());
+  }
+  if (repeat->held && repeat->generation == generation) {
+    repeat->timer = std::move(*timer);
+  }
+  return {};
+}
+
+bool scrollAtEnd(const detail::ScrollControllerPlan &plan, ScrollAxis axis, bool towardEnd) {
+  const auto &position = axis == ScrollAxis::HORIZONTAL ? plan.horizontal : plan.vertical;
+  const auto metrics = axis == ScrollAxis::HORIZONTAL ? plan.horizontalMetrics : plan.verticalMetrics;
+  return towardEnd ? position.rasterOffset() == scrollRange(metrics).maximum
+                   : position.rasterOffset() == 0 && position.fraction() == 0;
+}
+
+void repeatScroll(const std::shared_ptr<ScrollRepeatState> &repeat) {
+  repeat->timer = {};
+  std::expected<void, TreeError> result;
+  auto edited = repeat->tree.edit(repeat->node, [&](Widget &widget) {
+    auto *state = detail::ScrollWidgetAccess::state(widget);
+    auto eligible = repeat->tree.inputEligible(repeat->node);
+    if (!repeatConnected(*repeat) || !state || state->repeat != repeat || state->retired || !state->lease ||
+        !eligible || !*eligible || !state->capture.connected() ||
+        (state->isArea ? state->area.readOnly : state->bar.readOnly) || state->lease->session->writer.expired()) {
+      repeat->cancel();
+      return;
+    }
+    auto plan = ScrollControllerAccess::stage(*state->lease);
+    if (!plan) {
+      result = std::unexpected(plan.error());
+      return;
+    }
+    const auto metrics = repeat->axis == ScrollAxis::HORIZONTAL ? plan->horizontalMetrics : plan->verticalMetrics;
+    auto live = repeat->tree.inspect(repeat->node);
+    const auto channel = repeat->axis == ScrollAxis::HORIZONTAL ? state->geometry.horizontal : state->geometry.vertical;
+    auto button = channel.origin;
+    if (repeat->towardEnd && repeat->axis == ScrollAxis::HORIZONTAL) {
+      button.x += channel.length - 1;
+    } else if (repeat->towardEnd) {
+      button.y += channel.length - 1;
+    }
+    if (live) {
+      button.x += live->geometry.surface.origin().x;
+      button.y += live->geometry.surface.origin().y;
+    }
+    if (!live || !detail::scrollArrows(*state, channel) || button != repeat->surface ||
+        metrics.extent != repeat->metrics.extent || metrics.viewport != repeat->metrics.viewport) {
+      repeat->cancel();
+      state->capture.disconnect();
+      return;
+    }
+    if (scrollAtEnd(*plan, repeat->axis, repeat->towardEnd)) {
+      repeat->cancel();
+      state->capture.disconnect();
+      return;
+    }
+    auto stepped = ScrollControllerAccess::step(
+      *plan, repeat->axis, state->isArea ? state->area.keyStep : state->bar.keyStep, repeat->towardEnd);
+    if (!stepped) {
+      result = std::unexpected(stepped.error());
+      return;
+    }
+    const bool end = scrollAtEnd(*plan, repeat->axis, repeat->towardEnd);
+    auto changed = detail::commitScroll(repeat->tree, repeat->node, *state, std::move(*plan));
+    if (!changed) {
+      result = std::unexpected(changed.error());
+      return;
+    }
+    if (end) {
+      repeat->cancel();
+      state->capture.disconnect();
+    } else if (repeat->held && !state->retired && state->capture.connected()) {
+      result = armScrollRepeat(repeat, state->isArea ? state->area.arrowRepeat : state->bar.arrowRepeat);
+    }
+  });
+  if (!edited) {
+    result = edited;
+  }
+  if (!result && repeat->held) {
+    repeat->cancel();
+    repeat->services.onError(result.error());
+  }
+}
+
+std::expected<EventReply, TreeError> arrowScroll(EventRouter &router, WidgetTree &tree, Node<Widget> node,
+                                                 ScrollWidgetState &state, detail::ScrollControllerPlan plan,
+                                                 ScrollAxis axis, bool towardEnd, CellPoint surface) {
+  if (scrollAtEnd(plan, axis, towardEnd)) {
+    return EventReply::HANDLED;
+  }
+  auto stepped =
+    ScrollControllerAccess::step(plan, axis, state.isArea ? state.area.keyStep : state.bar.keyStep, towardEnd);
+  if (!stepped) {
+    return std::unexpected(stepped.error());
+  }
+  auto repeat = state.repeat;
+  if (repeat && !scrollAtEnd(plan, axis, towardEnd)) {
+    if (repeat->generation == std::numeric_limits<std::uint64_t>::max()) {
+      return std::unexpected(TreeError::IDENTITY_EXHAUSTED);
+    }
+    auto capture = router.capturePointer(node);
+    if (!capture && capture.error() != TreeError::INVALID_ARGUMENT) {
+      return std::unexpected(capture.error());
+    }
+    if (capture) {
+      state.capture = std::move(*capture);
+      repeat->axis = axis;
+      repeat->towardEnd = towardEnd;
+      repeat->surface = surface;
+      repeat->metrics = axis == ScrollAxis::HORIZONTAL ? plan.horizontalMetrics : plan.verticalMetrics;
+      ++repeat->generation;
+      repeat->held = true;
+      auto armed = armScrollRepeat(repeat, state.isArea ? state.area.arrowDelay : state.bar.arrowDelay);
+      if (!armed) {
+        repeat->cancel();
+        state.capture.disconnect();
+        return std::unexpected(armed.error());
+      }
+      if (!repeat->held || state.retired || !state.lease) {
+        return EventReply::HANDLED;
+      }
+    }
+  }
+  auto eligible = tree.inputEligible(node);
+  if (!eligible || !*eligible || state.retired || !state.lease) {
+    if (repeat) {
+      repeat->cancel();
+    }
+    state.capture.disconnect();
+    return EventReply::HANDLED;
+  }
+  auto changed = detail::commitScroll(tree, node, state, std::move(plan));
+  if (!changed && repeat) {
+    repeat->cancel();
+    state.capture.disconnect();
+  }
+  return changed ? std::expected<EventReply, TreeError>(EventReply::HANDLED) : std::unexpected(changed.error());
+}
 
 std::uint64_t pageStep(ScrollAxisMetrics metrics, std::uint64_t overlap) {
   return metrics.viewport == 0 ? 0 : metrics.viewport > overlap ? metrics.viewport - overlap : 1;
@@ -128,11 +308,19 @@ std::expected<EventReply, TreeError> wheelScroll(WidgetTree &tree, Node<Widget> 
 std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTree &tree, Node<Widget> node,
                                                    ScrollWidgetState &state, const MouseInputEvent &mouse) {
   if (mouse.action == MouseAction::RELEASE) {
+    detail::cancelScrollRepeat(state);
     state.capture.disconnect();
     state.drag = {};
     return EventReply::IGNORED;
   }
   if (mouse.action == MouseAction::MOVE) {
+    if (state.repeat && state.repeat->held) {
+      if (!state.capture.connected() || state.repeat->surface != CellPoint{mouse.column, mouse.row}) {
+        state.repeat->cancel();
+        state.capture.disconnect();
+      }
+      return EventReply::HANDLED;
+    }
     if (!state.capture.connected()) {
       return EventReply::IGNORED;
     }
@@ -160,8 +348,9 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
       return std::unexpected(TreeError::STALE_NODE);
     }
     if (geometry->geometry.valid) {
-      const auto track =
-        state.drag.axis == ScrollAxis::HORIZONTAL ? state.geometry.horizontal : state.geometry.vertical;
+      const auto track = detail::scrollThumbTrack(
+        state, state.drag.axis == ScrollAxis::HORIZONTAL ? state.geometry.horizontal : state.geometry.vertical,
+        state.drag.axis);
       const auto start = state.drag.axis == ScrollAxis::HORIZONTAL
                            ? static_cast<std::int64_t>(geometry->geometry.surface.origin().x) + track.origin.x
                            : static_cast<std::int64_t>(geometry->geometry.surface.origin().y) + track.origin.y;
@@ -218,6 +407,8 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
       return EventReply::IGNORED;
     }
   }
+  detail::cancelScrollRepeat(state);
+  state.capture.disconnect();
   auto plan = ScrollControllerAccess::stage(*state.lease);
   if (!plan) {
     return std::unexpected(plan.error());
@@ -225,6 +416,11 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
   const auto metrics = axis == ScrollAxis::HORIZONTAL ? plan->horizontalMetrics : plan->verticalMetrics;
   const auto position =
     axis == ScrollAxis::HORIZONTAL ? plan->horizontal.rasterOffset() : plan->vertical.rasterOffset();
+  const auto channelPoint = axis == ScrollAxis::HORIZONTAL ? localX - track.origin.x : localY - track.origin.y;
+  if (detail::scrollArrows(state, track) && (channelPoint == 0 || channelPoint == track.length - 1)) {
+    return arrowScroll(router, tree, node, state, std::move(*plan), axis, channelPoint != 0, {mouse.column, mouse.row});
+  }
+  track = detail::scrollThumbTrack(state, track, axis);
   auto thumb =
     scrollThumb(metrics, position, track.length, state.isArea ? state.area.minimumThumb : state.bar.minimumThumb);
   if (!thumb) {
@@ -262,8 +458,33 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
   return EventReply::HANDLED;
 }
 
+std::expected<std::shared_ptr<ScrollRepeatState>, TreeError> prepareScrollRepeat(WidgetTree &tree, Node<Widget> node,
+                                                                                 ScrollRepeatServices services) {
+  if (!services.now || !services.onError) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+  bool enabled{};
+  auto read = tree.read(node, [&](const Widget &widget) {
+    if (const auto *state = detail::ScrollWidgetAccess::state(widget)) {
+      enabled = state->isArea ? state->area.arrows : state->bar.arrows;
+    }
+  });
+  if (!read) {
+    return std::unexpected(read.error());
+  }
+  if (!enabled) {
+    return std::shared_ptr<ScrollRepeatState>{};
+  }
+  try {
+    return std::make_shared<ScrollRepeatState>(tree, node, std::move(services));
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(TreeError::NO_MEMORY);
+  }
+}
+
 template <class T>
-std::expected<ActionBinding, TreeError> bindScroll(EventRouter &router, WidgetTree &tree, Node<T> node, bool writer) {
+std::expected<ActionBinding, TreeError> bindScroll(EventRouter &router, WidgetTree &tree, Node<T> node, bool writer,
+                                                   std::shared_ptr<ScrollRepeatState> repeat = {}) {
   bool focusable{};
   bool recognized{};
   auto read = tree.read(node, [&](const T &widget) {
@@ -279,19 +500,17 @@ std::expected<ActionBinding, TreeError> bindScroll(EventRouter &router, WidgetTr
   if (!recognized) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
-  // Allocate the registration first. Initialization failure only disconnects this local token;
-  // it cannot strand a writer lease or roll back another caller's existing initialization.
+  // Prepare repeat services before registration. Existing bindings are exclusive per node;
+  // publish their replacement only after registration and same-role lease admission succeed.
   auto binding = detail::EventRouterAccess::bindChecked(
     router, node,
     [&router, &tree, node](T &widget, const RoutedEvent &event) {
       if (auto *log = dynamic_cast<LogView *>(&widget)) {
         const auto reply = detail::logViewInput(tree, node, *log, event);
-
         if (!reply || *reply != EventReply::IGNORED) {
           return reply;
         }
       }
-
       auto *state = detail::ScrollWidgetAccess::state(static_cast<Widget &>(widget));
       return state ? detail::scrollInput(router, tree, node, *state, event)
                    : std::unexpected(TreeError::INVALID_ARGUMENT);
@@ -301,11 +520,76 @@ std::expected<ActionBinding, TreeError> bindScroll(EventRouter &router, WidgetTr
     return std::unexpected(binding.error());
   }
   auto initialized = detail::initializeScrollWidget(tree, node, writer);
-  return initialized ? std::move(binding) : std::unexpected(initialized.error());
+  if (!initialized) {
+    return std::unexpected(initialized.error());
+  }
+  const auto cancellation = detail::EventRouterAccess::bindingCancellation(*binding);
+  std::expected<void, TreeError> status;
+  auto edited = tree.edit(node, [&](T &widget) {
+    auto *state = detail::ScrollWidgetAccess::state(static_cast<Widget &>(widget));
+    if (!state || state->retired || !state->lease) {
+      status = std::unexpected(TreeError::STALE_NODE);
+      return;
+    }
+    auto previous = std::move(state->repeat);
+    state->repeat = std::move(repeat);
+    if (state->repeat) {
+      state->repeat->binding = cancellation;
+    }
+    state->capture.disconnect();
+    if (previous) {
+      previous->cancel();
+    }
+  });
+  if (!edited || !status) {
+    if (*initialized) {
+      (void)detail::releaseScrollInitialization(tree, node);
+    }
+    return std::unexpected(edited ? status.error() : edited.error());
+  }
+  return binding;
+}
+
+template <class T>
+std::expected<ActionBinding, TreeError> bindScrollRepeat(EventRouter &router, WidgetTree &tree, Node<T> node,
+                                                         ScrollRepeatServices services, bool writer) {
+  auto repeat = prepareScrollRepeat(tree, node, std::move(services));
+  if (!repeat) {
+    return std::unexpected(repeat.error());
+  }
+  return bindScroll(router, tree, node, writer, std::move(*repeat));
 }
 } // namespace
 
 namespace detail {
+std::expected<void, TreeError> configureScrollRepeat(WidgetTree &tree, Node<Widget> node, ScrollRepeatServices services,
+                                                     const ActionBinding &binding) {
+  auto repeat = prepareScrollRepeat(tree, node, std::move(services));
+  if (!repeat) {
+    return std::unexpected(repeat.error());
+  }
+  const auto cancellation = EventRouterAccess::bindingCancellation(binding);
+  std::expected<void, TreeError> status;
+  auto edited = tree.edit(node, [&](Widget &widget) {
+    auto *state = ScrollWidgetAccess::state(widget);
+    const auto owner = cancellation.lock();
+    if (!state || state->retired || !state->lease || !owner || !owner->connected.load()) {
+      status = std::unexpected(TreeError::INVALID_ARGUMENT);
+      return;
+    }
+    auto previous = std::move(state->repeat);
+    state->repeat = std::move(*repeat);
+    if (state->repeat) {
+      state->repeat->binding = cancellation;
+    }
+    state->capture.disconnect();
+    if (previous) {
+      previous->cancel();
+    }
+  });
+  return edited ? status : edited;
+}
+
 std::expected<ActionBinding, TreeError> bindScrollOwner(EventRouter &router, WidgetTree &tree, Node<Widget> node) {
   return bindScroll(router, tree, node, true);
 }
@@ -316,6 +600,8 @@ std::expected<EventReply, TreeError> scrollInput(EventRouter &router, WidgetTree
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
   if (state.isArea ? state.area.readOnly : state.bar.readOnly) {
+    cancelScrollRepeat(state);
+    state.capture.disconnect();
     return EventReply::IGNORED;
   }
   if (const auto *mouse = std::get_if<MouseInputEvent>(&event)) {
@@ -330,8 +616,18 @@ std::expected<ActionBinding, TreeError> bindScrollArea(EventRouter &router, Widg
   return bindScroll(router, tree, node, true);
 }
 
+std::expected<ActionBinding, TreeError> bindScrollArea(EventRouter &router, WidgetTree &tree, Node<ScrollArea> node,
+                                                       ScrollRepeatServices services) {
+  return bindScrollRepeat(router, tree, node, std::move(services), true);
+}
+
 std::expected<ActionBinding, TreeError> bindScrollBar(EventRouter &router, WidgetTree &tree, Node<ScrollBar> node,
                                                       bool geometryWriter) {
   return bindScroll(router, tree, node, geometryWriter);
+}
+
+std::expected<ActionBinding, TreeError> bindScrollBar(EventRouter &router, WidgetTree &tree, Node<ScrollBar> node,
+                                                      ScrollRepeatServices services, bool geometryWriter) {
+  return bindScrollRepeat(router, tree, node, std::move(services), geometryWriter);
 }
 } // namespace portals

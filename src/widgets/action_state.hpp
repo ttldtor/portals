@@ -73,6 +73,10 @@ struct PointerCaptureRecord {
 // Internal checked adapter for native installers and contract tests. It keeps the same tree.edit
 // admission/pin as public bind; the checked reply uses the router's existing erased callback type.
 struct EventRouterAccess {
+  static std::weak_ptr<ActionCancellation> bindingCancellation(const ActionBinding &binding) noexcept {
+    return binding.registration_;
+  }
+
   static std::expected<std::shared_ptr<const FocusObservation>, TreeError> observeFocus(EventRouter &router);
   static void exhaustFocusReturnSerial(EventRouter &router) noexcept;
   static Node<Widget> requiredFocusReceipt(const EventRouter &router) noexcept;

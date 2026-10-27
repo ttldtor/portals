@@ -24,6 +24,7 @@ int main() {
         .framed("rounded", "Sections")
         .titleDecoration("square")
         .scrollOnFrame()
+        .arrows()
         .width(28)
         .height(6),
       ui::button("Exit", [] { ui::quit(); })))

@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include "log_view_state.hpp"
 #include "scroll_controls_state.hpp"
 #include "scroll_preparation_state.hpp"
-#include "log_view_state.hpp"
 #include <portals/scroll_preparation.hpp>
 
 #include <limits>
@@ -452,6 +452,7 @@ std::expected<ScrollPreparationAdoption, TreeError> adoptScrollAreas(WidgetTree 
                                 state.adoptedGeometry->vertical.length != placement.vertical.length;
       if (trackChanged) {
         state.capture.disconnect();
+        detail::cancelScrollRepeat(state);
       }
       changed =
         detail::commitScroll(tree, plan.node, state, std::move(plan.values), detail::ScrollPublication::PREPARATION);

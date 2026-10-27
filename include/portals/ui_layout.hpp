@@ -433,6 +433,9 @@ struct ScrollInputModifier {
     if (modifier.settings.pageOverlap) {
       (void)std::move(description).pageOverlap(*modifier.settings.pageOverlap);
     }
+    if (modifier.settings.arrows) {
+      (void)std::move(description).arrows(*modifier.settings.arrows);
+    }
     if (modifier.settings.minimumThumb) {
       (void)std::move(description).minimumThumb(*modifier.settings.minimumThumb);
     }
@@ -463,6 +466,13 @@ inline ScrollInputModifier keyStep(std::uint64_t cells) {
  */
 inline ScrollInputModifier pageOverlap(std::uint64_t cells) {
   return {{.pageOverlap = cells}};
+}
+
+/** @param enabled Reserve functional arrow buttons when the actual channel fits.
+ * @return Owning native area/bar stage with automatic managed hold support.
+ */
+inline ScrollInputModifier arrows(bool enabled = true) {
+  return {{.arrows = enabled}};
 }
 
 /** @param cells Positive minimum thumb length in cells.

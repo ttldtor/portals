@@ -57,6 +57,11 @@ inline constexpr std::array<std::string_view, PSS_PROPERTY_COUNT> PSS_PROPERTY_N
                                                                                      "scrollbar-ends-bold",
                                                                                      "scrollbar-ends-italic",
                                                                                      "scrollbar-ends-underline",
+                                                                                     "scrollbar-arrows-foreground",
+                                                                                     "scrollbar-arrows-background",
+                                                                                     "scrollbar-arrows-bold",
+                                                                                     "scrollbar-arrows-italic",
+                                                                                     "scrollbar-arrows-underline",
                                                                                      "scrollbar-corner-foreground",
                                                                                      "scrollbar-corner-background",
                                                                                      "scrollbar-corner-bold",
@@ -582,6 +587,7 @@ private:
         property == PssProperty::SCROLLBAR_TRACK_FOREGROUND || property == PssProperty::SCROLLBAR_TRACK_BACKGROUND ||
         property == PssProperty::SCROLLBAR_THUMB_FOREGROUND || property == PssProperty::SCROLLBAR_THUMB_BACKGROUND ||
         property == PssProperty::SCROLLBAR_ENDS_FOREGROUND || property == PssProperty::SCROLLBAR_ENDS_BACKGROUND ||
+        property == PssProperty::SCROLLBAR_ARROWS_FOREGROUND || property == PssProperty::SCROLLBAR_ARROWS_BACKGROUND ||
         property == PssProperty::SCROLLBAR_CORNER_FOREGROUND || property == PssProperty::SCROLLBAR_CORNER_BACKGROUND) {
       const auto color = parseColor(text);
 
@@ -771,6 +777,26 @@ constexpr void assignPssDeclaration(PssProperty property, PssValue value, StyleD
     break;
   case PssProperty::SCROLLBAR_ENDS_UNDERLINE:
     destination.scrollbarEnds.underline = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_ARROWS_FOREGROUND:
+    destination.scrollbarArrows.foreground = value.color;
+
+    break;
+  case PssProperty::SCROLLBAR_ARROWS_BACKGROUND:
+    destination.scrollbarArrows.background = value.color;
+
+    break;
+  case PssProperty::SCROLLBAR_ARROWS_BOLD:
+    destination.scrollbarArrows.bold = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_ARROWS_ITALIC:
+    destination.scrollbarArrows.italic = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_ARROWS_UNDERLINE:
+    destination.scrollbarArrows.underline = value.boolean;
 
     break;
   case PssProperty::SCROLLBAR_CORNER_FOREGROUND:

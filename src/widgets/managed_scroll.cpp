@@ -1,12 +1,12 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include "action_state.hpp"
+#include "log_view_state.hpp"
 #include "scroll_controls_state.hpp"
 #include "scroll_preparation_state.hpp"
-#include "log_view_state.hpp"
-#include <portals/managed.hpp>
 #include <portals/detail/layout_traversal.hpp>
 #include <portals/grid.hpp>
+#include <portals/managed.hpp>
 
 #include <limits>
 
@@ -89,17 +89,32 @@ std::expected<void, TreeError> ManagedScene::attachScrollValues(const std::share
     return syncScrollControl(app_.tree(), node, focused);
   };
   std::expected<void, TreeError> status{std::unexpected(TreeError::INVALID_ARGUMENT)};
+  bool arrows{};
   auto edited = app_.tree().edit(entry->node, [&](Widget &widget) {
     auto *state = detail::ScrollWidgetAccess::state(widget);
     if (!state || !state->lease || state->retired || state->node != entry->node.id()) {
       return;
     }
+    arrows = state->isArea ? state->area.arrows : state->bar.arrows;
     state->intent = intent;
     entry->scrollController = state->controller;
     status = {};
   });
   if (!edited || !status) {
     return edited ? status : edited;
+  }
+  if (arrows) {
+    auto repeat = detail::configureScrollRepeat(app_.tree(), entry->node,
+                                                {[this] {
+                                                   return app_.now();
+                                                 },
+                                                 [this, node = entry->node](TreeError failure) {
+                                                   (void)reportError(error(ManagedPhase::INPUT, node, failure));
+                                                 }},
+                                                std::get<ActionBinding>(entry->binding));
+    if (!repeat) {
+      return repeat;
+    }
   }
   // No allocation follows publication into this entry. emplace publishes the scene owner only
   // after its checked entry insertion; a failing insertion destroys this scoped candidate.
@@ -172,8 +187,7 @@ std::expected<void, ManagedError> ManagedScene::setScrollMetrics(Node<ScrollBar>
 
 bool ManagedScene::scrollIntentIntersects(const Entry &entry, std::span<const Node<Widget>> chain) const noexcept {
   return std::ranges::any_of(entries_, [&](const auto &area) {
-    return !area->removed && area->scrollArea != Node<Widget>{} &&
-           area->scrollController == entry.scrollController &&
+    return !area->removed && area->scrollArea != Node<Widget>{} && area->scrollController == entry.scrollController &&
            std::ranges::find(chain, Node<Widget>(area->scrollArea)) != chain.end();
   });
 }
@@ -382,7 +396,8 @@ std::expected<bool, TreeError> ManagedScene::prepareRegionalInput(const LayoutSn
       continue;
     }
 
-    const auto live = app_.tree().read(entry->node, [](const Widget &) {});
+    const auto live = app_.tree().read(entry->node, [](const Widget &) {
+    });
 
     if (!live && live.error() == TreeError::STALE_NODE) {
       entry->removed = true;

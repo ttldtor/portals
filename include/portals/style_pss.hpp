@@ -580,7 +580,8 @@ template <class D, class P> consteval bool flatDeclarationTypeMatches() {
     D::KIND == Property::FRAME_ENDS_BACKGROUND || D::KIND == Property::SCROLLBAR_TRACK_FOREGROUND ||
     D::KIND == Property::SCROLLBAR_TRACK_BACKGROUND || D::KIND == Property::SCROLLBAR_THUMB_FOREGROUND ||
     D::KIND == Property::SCROLLBAR_THUMB_BACKGROUND || D::KIND == Property::SCROLLBAR_ENDS_FOREGROUND ||
-    D::KIND == Property::SCROLLBAR_ENDS_BACKGROUND || D::KIND == Property::SCROLLBAR_CORNER_FOREGROUND ||
+    D::KIND == Property::SCROLLBAR_ENDS_BACKGROUND || D::KIND == Property::SCROLLBAR_ARROWS_FOREGROUND ||
+    D::KIND == Property::SCROLLBAR_ARROWS_BACKGROUND || D::KIND == Property::SCROLLBAR_CORNER_FOREGROUND ||
     D::KIND == Property::SCROLLBAR_CORNER_BACKGROUND;
   constexpr bool METRIC = D::KIND == Property::MIN_WIDTH;
   using Expected = std::conditional_t<COLOR, RgbColor, std::conditional_t<METRIC, std::int32_t, bool>>;
@@ -685,6 +686,16 @@ constexpr bool pssPropertyPresent(PssProperty property, const StyleDeclarations 
     return value.scrollbarEnds.italic.has_value();
   case PssProperty::SCROLLBAR_ENDS_UNDERLINE:
     return value.scrollbarEnds.underline.has_value();
+  case PssProperty::SCROLLBAR_ARROWS_FOREGROUND:
+    return value.scrollbarArrows.foreground.has_value();
+  case PssProperty::SCROLLBAR_ARROWS_BACKGROUND:
+    return value.scrollbarArrows.background.has_value();
+  case PssProperty::SCROLLBAR_ARROWS_BOLD:
+    return value.scrollbarArrows.bold.has_value();
+  case PssProperty::SCROLLBAR_ARROWS_ITALIC:
+    return value.scrollbarArrows.italic.has_value();
+  case PssProperty::SCROLLBAR_ARROWS_UNDERLINE:
+    return value.scrollbarArrows.underline.has_value();
   case PssProperty::SCROLLBAR_CORNER_FOREGROUND:
     return value.scrollbarCorner.foreground.has_value();
   case PssProperty::SCROLLBAR_CORNER_BACKGROUND:
@@ -848,6 +859,26 @@ constexpr PssValue pssScalar(PssProperty property, const StyleDeclarations &valu
     break;
   case PssProperty::SCROLLBAR_ENDS_UNDERLINE:
     result.boolean = *value.scrollbarEnds.underline;
+
+    break;
+  case PssProperty::SCROLLBAR_ARROWS_FOREGROUND:
+    result.color = *value.scrollbarArrows.foreground;
+
+    break;
+  case PssProperty::SCROLLBAR_ARROWS_BACKGROUND:
+    result.color = *value.scrollbarArrows.background;
+
+    break;
+  case PssProperty::SCROLLBAR_ARROWS_BOLD:
+    result.boolean = *value.scrollbarArrows.bold;
+
+    break;
+  case PssProperty::SCROLLBAR_ARROWS_ITALIC:
+    result.boolean = *value.scrollbarArrows.italic;
+
+    break;
+  case PssProperty::SCROLLBAR_ARROWS_UNDERLINE:
+    result.boolean = *value.scrollbarArrows.underline;
 
     break;
   case PssProperty::SCROLLBAR_CORNER_FOREGROUND:

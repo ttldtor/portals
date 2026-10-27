@@ -68,7 +68,7 @@ CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, StyleState
   // Ordinary rules retain the original five ranks; frame ranks exist only in the part specialization.
   constexpr std::size_t PAINT_ATTRIBUTE_COUNT = 5;
   constexpr std::size_t FRAME_PART_COUNT = FrameParts ? 3 : 0;
-  constexpr std::size_t SCROLLBAR_PART_COUNT = ScrollbarParts ? 4 : 0;
+  constexpr std::size_t SCROLLBAR_PART_COUNT = ScrollbarParts ? 5 : 0;
   constexpr std::size_t PART_COUNT = FRAME_PART_COUNT + SCROLLBAR_PART_COUNT;
   std::array<std::optional<CascadeRank>, PAINT_ATTRIBUTE_COUNT *(PART_COUNT + 1)> ranks;
   [[maybe_unused]] std::array<StylePaintDeclarations, PART_COUNT> overrides;
@@ -115,9 +115,9 @@ CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, StyleState
     }
 
     if constexpr (ScrollbarParts) {
-      applyParts(
-        std::array{&values.scrollbarTrack, &values.scrollbarThumb, &values.scrollbarEnds, &values.scrollbarCorner},
-        FRAME_PART_COUNT);
+      applyParts(std::array{&values.scrollbarTrack, &values.scrollbarThumb, &values.scrollbarEnds,
+                            &values.scrollbarArrows, &values.scrollbarCorner},
+                 FRAME_PART_COUNT);
     }
   });
 
@@ -152,7 +152,8 @@ CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, StyleState
   }
 
   if constexpr (ScrollbarParts) {
-    finishParts(std::array{&scrollbar.track, &scrollbar.thumb, &scrollbar.ends, &scrollbar.corner}, FRAME_PART_COUNT);
+    finishParts(std::array{&scrollbar.track, &scrollbar.thumb, &scrollbar.ends, &scrollbar.arrows, &scrollbar.corner},
+                FRAME_PART_COUNT);
   }
 
   return base;
@@ -173,7 +174,8 @@ ComputedStyle resolveRules(const Visit &visit, const StyleTarget &target, Comput
 
     scrollbarParts =
       scrollbarParts || ((hasPaintDeclarations(values.scrollbarTrack) || hasPaintDeclarations(values.scrollbarThumb) ||
-                          hasPaintDeclarations(values.scrollbarEnds) || hasPaintDeclarations(values.scrollbarCorner)) &&
+                          hasPaintDeclarations(values.scrollbarEnds) || hasPaintDeclarations(values.scrollbarArrows) ||
+                          hasPaintDeclarations(values.scrollbarCorner)) &&
                          matches(rule.selector, target, rule.selector.state));
 
     if (!rule.declarations.minWidth || !matches(rule.selector, target, StyleState::ANY)) {
@@ -308,6 +310,7 @@ StyleSheet themeFromTokens(ThemeTokens tokens) {
   focused.scrollbarTrack = accentOnSurface;
   focused.scrollbarThumb = accentOnSurface;
   focused.scrollbarEnds = accentOnSurface;
+  focused.scrollbarArrows = accentOnSurface;
   focused.scrollbarCorner = accentOnSurface;
 
   stateRule(StyleState::DISABLED, tokens.muted, tokens.background, false);
@@ -798,9 +801,9 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
       };
       const std::size_t count = partCount(d.frameLine) + partCount(d.frameTitle) + partCount(d.frameEnds) +
                                 partCount(d.scrollbarTrack) + partCount(d.scrollbarThumb) + partCount(d.scrollbarEnds) +
-                                partCount(d.scrollbarCorner) + d.foreground.has_value() + d.background.has_value() +
-                                d.bold.has_value() + d.italic.has_value() + d.underline.has_value() +
-                                d.minWidth.has_value();
+                                partCount(d.scrollbarArrows) + partCount(d.scrollbarCorner) + d.foreground.has_value() +
+                                d.background.has_value() + d.bold.has_value() + d.italic.has_value() +
+                                d.underline.has_value() + d.minWidth.has_value();
       if (!charge(declarations, count, options.maxDeclarations) ||
           !charge(bytes, sizeof(StyleRule), options.maxOwnedBytes) || !chargeString(rule.selector.type) ||
           !chargeString(rule.selector.id)) {

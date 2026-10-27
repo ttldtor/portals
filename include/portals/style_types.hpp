@@ -25,6 +25,7 @@ struct ScrollbarAppearance {
   std::optional<CellStyle> thumb{};  ///< Moving thumb cells.
   std::optional<CellStyle> ends{};   ///< Optional decorative endpoint cells.
   std::optional<CellStyle> corner{}; ///< Intersecting horizontal and vertical gutters.
+  std::optional<CellStyle> arrows{}; ///< Functional end buttons, independent of decorative ends.
 
   /** @param other Value to compare. @return Whether every part agrees. */
   bool operator==(const ScrollbarAppearance &other) const = default;

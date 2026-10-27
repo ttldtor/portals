@@ -22,6 +22,9 @@
   scrollbar-ends-foreground: #00aaaa;
   scrollbar-ends-background: #0000aa;
   scrollbar-ends-bold: true;
+  scrollbar-arrows-foreground: #00aaaa;
+  scrollbar-arrows-background: #0000aa;
+  scrollbar-arrows-bold: true;
   scrollbar-corner-foreground: #00aaaa;
   scrollbar-corner-background: #0000aa;
   scrollbar-corner-bold: true;
