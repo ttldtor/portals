@@ -23,6 +23,7 @@ template <class T, class E> T take(std::expected<T, E> value) {
 struct Record {
   std::promise<std::thread::id> destroyed;
   std::function<void()> onDestroy;
+  std::function<void()> afterDestroyNotification;
 };
 
 struct Value final : WorkerStorageValue {
@@ -34,6 +35,10 @@ struct Value final : WorkerStorageValue {
       record->onDestroy();
     }
     record->destroyed.set_value(std::this_thread::get_id());
+
+    if (record->afterDestroyNotification) {
+      record->afterDestroyNotification();
+    }
   }
 
   std::shared_ptr<Record> record;
@@ -170,10 +175,17 @@ TEST_CASE("light wake closes retirement after a false predicate before wait regi
 
 TEST_CASE("idle worker reclaims lease retirement without a later submission or service") {
   auto pool = take(BackgroundPool::create({1, 1, 1, 128}));
+  // On assertion failure this promise releases the owned future before pool teardown joins the worker.
+  std::promise<void> finishDestruction;
   auto storage = pool->workerStorage();
   auto lease = take(storage->registerSlot());
   auto record = std::make_shared<Record>();
   auto destroyed = record->destroyed.get_future();
+
+  record->afterDestroyNotification = [released = finishDestruction.get_future().share()] {
+    released.wait();
+  };
+
   auto installed = call(*pool, [&, id = lease.id()] {
     install(*storage, id, record);
   });
@@ -181,6 +193,16 @@ TEST_CASE("idle worker reclaims lease retirement without a later submission or s
   lease.retire();
   REQUIRE(destroyed.wait_for(5s) == std::future_status::ready);
   CHECK(destroyed.get() != std::this_thread::get_id());
+  // The notification precedes destructor completion and retirement accounting.
+  CHECK(storage->stats().chargedBytes == 32);
+  finishDestruction.set_value();
+
+  const auto deadline = std::chrono::steady_clock::now() + 5s;
+
+  while (storage->stats().chargedBytes != 0 && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::yield();
+  }
+
   CHECK(storage->stats().chargedBytes == 0);
 }
 
