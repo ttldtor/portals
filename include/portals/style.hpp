@@ -66,6 +66,7 @@ struct StyleSelector {
   std::string id{""};                                             ///< Empty means any identity.
   std::vector<std::string> classes = std::vector<std::string>(0); ///< Every named class is required.
   StyleState state{StyleState::ANY};                              ///< Optional presentation-state predicate.
+
   /** @param other Owning value to compare.
    * @return Whether all typed fields are equal.
    */
@@ -100,6 +101,10 @@ struct StyleDeclarations {
   StylePaintDeclarations scrollbarEnds{};   ///< Scrollbar ends overrides.
   StylePaintDeclarations scrollbarCorner{}; ///< Scrollbar corner overrides.
   StylePaintDeclarations scrollbarArrows{}; ///< Functional arrow button overrides.
+  std::optional<ScrollbarPattern> scrollbarTrackPattern{};      ///< Independent scrollbar source.
+  std::optional<ScrollbarThumbPattern> scrollbarThumbPattern{}; ///< Independent scrollbar source.
+  std::optional<ScrollbarArrowPattern> scrollbarArrowPattern{}; ///< Independent scrollbar source.
+
   /** @param other Owning value to compare.
    * @return Whether all typed fields are equal.
    */
@@ -115,6 +120,7 @@ struct StyleRule {
 
   StyleSelector selector;         ///< Matching and specificity criteria.
   StyleDeclarations declarations; ///< Values overriding less-specific rules.
+
   /** @param other Owning value to compare.
    * @return Whether all typed fields are equal.
    */
@@ -132,6 +138,7 @@ struct StyleSheet {
     std::vector<StyleRule>(0); ///< Source-order rules, at most MAX_STYLE_RULES when installed.
   std::optional<NodeId>
     scope{}; ///< Optional exact node restriction; preserves selector specificity and source metadata.
+
   /** @param other Owning value to compare.
    * @return Whether all typed fields are equal.
    */
@@ -152,6 +159,7 @@ struct StyleLayerOptions {
   std::size_t maxRules{1024};             ///< Rules summed across the complete resident table.
   std::size_t maxDeclarations{6144};      ///< Present optional fields, including explicit false values.
   std::size_t maxOwnedBytes{1024 * 1024}; ///< Logical payload charge; not a whole-heap allocator cap.
+
   /** @param other Owning value to compare.
    * @return Whether all typed fields are equal.
    */

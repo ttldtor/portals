@@ -134,6 +134,10 @@ struct ControlScrollbarSettings {
   ScrollbarAxisGlyphs vertical{};             ///< Sparse vertical glyph overrides.
   std::optional<std::string> corner{};        ///< Optional one-cell corner; empty restores fill.
 
+  std::optional<ScrollbarPattern> trackPattern{};      ///< Independent track preset.
+  std::optional<ScrollbarThumbPattern> thumbPattern{}; ///< Independent thumb preset.
+  std::optional<ScrollbarArrowPattern> arrowPattern{}; ///< Independent functional-arrow preset.
+
   /** @brief Preserve fallible checked-library owning transfers. */
   ~ControlScrollbarSettings() = default;
 };

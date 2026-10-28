@@ -584,7 +584,12 @@ template <class D, class P> consteval bool flatDeclarationTypeMatches() {
     D::KIND == Property::SCROLLBAR_ARROWS_BACKGROUND || D::KIND == Property::SCROLLBAR_CORNER_FOREGROUND ||
     D::KIND == Property::SCROLLBAR_CORNER_BACKGROUND;
   constexpr bool METRIC = D::KIND == Property::MIN_WIDTH;
-  using Expected = std::conditional_t<COLOR, RgbColor, std::conditional_t<METRIC, std::int32_t, bool>>;
+  using Expected = std::conditional_t<
+    D::KIND == Property::SCROLLBAR_TRACK_PATTERN, ScrollbarPattern,
+    std::conditional_t<
+      D::KIND == Property::SCROLLBAR_THUMB_PATTERN, ScrollbarThumbPattern,
+      std::conditional_t<D::KIND == Property::SCROLLBAR_ARROW_PATTERN, ScrollbarArrowPattern,
+                         std::conditional_t<COLOR, RgbColor, std::conditional_t<METRIC, std::int32_t, bool>>>>>;
 
   return std::same_as<Actual, Expected>;
 }
@@ -706,6 +711,12 @@ constexpr bool pssPropertyPresent(PssProperty property, const StyleDeclarations 
     return value.scrollbarCorner.italic.has_value();
   case PssProperty::SCROLLBAR_CORNER_UNDERLINE:
     return value.scrollbarCorner.underline.has_value();
+  case PssProperty::SCROLLBAR_TRACK_PATTERN:
+    return value.scrollbarTrackPattern.has_value();
+  case PssProperty::SCROLLBAR_THUMB_PATTERN:
+    return value.scrollbarThumbPattern.has_value();
+  case PssProperty::SCROLLBAR_ARROW_PATTERN:
+    return value.scrollbarArrowPattern.has_value();
   case PssProperty::MIN_WIDTH:
     return value.minWidth.has_value();
   }
@@ -899,6 +910,18 @@ constexpr PssValue pssScalar(PssProperty property, const StyleDeclarations &valu
     break;
   case PssProperty::SCROLLBAR_CORNER_UNDERLINE:
     result.boolean = *value.scrollbarCorner.underline;
+
+    break;
+  case PssProperty::SCROLLBAR_TRACK_PATTERN:
+    result.pattern = static_cast<std::int32_t>(*value.scrollbarTrackPattern);
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_PATTERN:
+    result.pattern = static_cast<std::int32_t>(*value.scrollbarThumbPattern);
+
+    break;
+  case PssProperty::SCROLLBAR_ARROW_PATTERN:
+    result.pattern = static_cast<std::int32_t>(*value.scrollbarArrowPattern);
 
     break;
   case PssProperty::MIN_WIDTH:

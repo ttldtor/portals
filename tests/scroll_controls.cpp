@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include "../src/views/scroll_controller_state.hpp"
+#include "../src/widgets/scroll_controls_state.hpp"
 #include <portals/managed.hpp>
 #include <portals/scroll_controls.hpp>
 
@@ -14,11 +15,13 @@
 
 namespace allocation_test {
 thread_local bool fail{};
+thread_local std::size_t allocations{};
 thread_local void (*hook)(){};
 thread_local int beforeHook{};
 } // namespace allocation_test
 
 void *operator new(std::size_t size) {
+  ++allocation_test::allocations;
   if (allocation_test::fail) {
     throw std::bad_alloc();
   }
@@ -224,6 +227,83 @@ struct BarFixture : TreeFixture {
     return take(controller->snapshot());
   }
 };
+
+void sharedScrollbarPresetLifetime() {
+  TreeFixture fixture;
+  const WidthPolicy original{AmbiguousWidth::NARROW, EmojiWidth::TWO, 9981};
+  auto controller = take(ScrollController::create());
+  const auto area = take(fixture.tree->emplaceChecked<ScrollArea>(fixture.root, controller, original));
+  const auto bar =
+    take(fixture.tree->emplaceChecked<ScrollBar>(fixture.root, controller, ScrollAxis::VERTICAL, original));
+  std::weak_ptr<const detail::ScrollbarPresetGlyphs> first;
+  std::weak_ptr<const detail::ScrollbarPresetGlyphs> same;
+
+  take(fixture.tree->read(area, [&](const ScrollArea &widget) {
+    first = detail::ScrollWidgetAccess::state(widget).presetGlyphs;
+  }));
+  take(fixture.tree->read(bar, [&](const ScrollBar &widget) {
+    same = detail::ScrollWidgetAccess::state(widget).presetGlyphs;
+  }));
+  check(first.lock() == same.lock(), "same-policy area and bar share the immutable prepared palette");
+
+  const auto beforeReuse = allocation_test::allocations;
+  {
+    detail::ScrollWidgetState reuse(controller, original, PrimitiveGlyphs::ASCII);
+  }
+  const auto reuseAllocations = allocation_test::allocations - beforeReuse;
+  allocation_test::beforeHook = static_cast<int>(reuseAllocations);
+  allocation_test::hook = [] {
+    allocation_test::fail = true;
+  };
+  bool preparationFailed{};
+
+  try {
+    detail::ScrollWidgetState failed(controller, {original.ambiguous, original.emoji, original.revision + 1},
+                                     PrimitiveGlyphs::ASCII);
+  } catch (const std::bad_alloc &) {
+    preparationFailed = true;
+  }
+
+  allocation_test::fail = false;
+  allocation_test::hook = nullptr;
+  check(preparationFailed, "allocation failure during new palette preparation remains fallible");
+  {
+    detail::ScrollWidgetState reuse(controller, original, PrimitiveGlyphs::ASCII);
+    check(reuse.presetGlyphs == first.lock(), "failed replacement leaves the prior weak cache entry usable");
+  }
+
+  for (const auto policy : {WidthPolicy{AmbiguousWidth::WIDE, EmojiWidth::TWO, original.revision},
+                            WidthPolicy{AmbiguousWidth::NARROW, EmojiWidth::ONE, original.revision},
+                            WidthPolicy{AmbiguousWidth::NARROW, EmojiWidth::TWO, original.revision + 1}}) {
+    const auto other =
+      take(fixture.tree->emplaceChecked<ScrollBar>(fixture.root, controller, ScrollAxis::HORIZONTAL, policy));
+    std::weak_ptr<const detail::ScrollbarPresetGlyphs> replacement;
+
+    take(fixture.tree->read(other, [&](const ScrollBar &widget) {
+      const auto &palette = detail::ScrollWidgetAccess::state(widget).presetGlyphs;
+      replacement = palette;
+      check(palette != first.lock(), "each complete WidthPolicy difference prepares a distinct palette");
+
+      for (const auto &glyph : *palette) {
+        check(glyph.policy() == policy && glyph.measure() == 1,
+              "every shared glyph retains the complete receiving policy");
+      }
+    }));
+    {
+      const auto survivor = first.lock();
+      check(survivor && survivor->front().policy() == original && survivor->back().bytes() == "v",
+            "existing controls retain their original prepared values after cache replacement");
+    }
+
+    take(fixture.tree->remove(other));
+    check(replacement.expired(), "the thread-local cache does not strongly retain the last palette");
+  }
+
+  take(fixture.tree->remove(area));
+  check(!first.expired(), "the surviving bar retains shared palette ownership after area removal");
+  take(fixture.tree->remove(bar));
+  check(first.expired() && same.expired(), "the final control releases its palette without a global strong owner");
+}
 
 void initializationAndLifetime() {
   AreaFixture f({}, {20, 30}, false);
@@ -969,6 +1049,88 @@ void scrollbarSkins() {
         "custom corner applies to the existing reserved gutter intersection");
 }
 
+void segmentedScrollbarSkins() {
+  for (const auto axis : {ScrollAxis::HORIZONTAL, ScrollAxis::VERTICAL}) {
+    BarFixture fixture({}, axis);
+    const auto cell = [&](int index) {
+      return axis == ScrollAxis::HORIZONTAL ? std::pair{index, 0} : std::pair{0, index};
+    };
+    ScrollbarSkin skin{.pattern = ScrollbarPattern::ASCII};
+    skin.trackPattern = ScrollbarPattern::MINIMAL;
+    auto &glyphs = axis == ScrollAxis::HORIZONTAL ? skin.horizontal : skin.vertical;
+    glyphs.thumb = "x";
+    glyphs.thumbStart = "[";
+    glyphs.thumbBody = "=";
+    glyphs.thumbEnd = "]";
+    glyphs.thumbSingle = "o";
+    take(setScrollbarSkin(*fixture.tree, fixture.bar, skin));
+
+    for (const int length : {0, 1, 2, 3, 4}) {
+      take(setScrollMetrics(*fixture.tree, fixture.bar, {10, 10}));
+      fixture.layout(axis == ScrollAxis::HORIZONTAL ? CellSize{length, 1} : CellSize{1, length});
+      const auto painted = fixture.paint(fixture.bar);
+      check(painted.submitted == static_cast<std::size_t>(length), "segments preserve exact tiny-channel work");
+
+      if (length == 1) {
+        check(painted.cells.at(cell(0)) == "o", "one-cell thumb selects single rather than two caps");
+      } else if (length >= 2) {
+        check(painted.cells.at(cell(0)) == "[" && painted.cells.at(cell(length - 1)) == "]",
+              "two-cell and longer thumbs use distinct oriented caps");
+
+        for (int index = 1; index + 1 < length; ++index) {
+          check(painted.cells.at(cell(index)) == "=", "thumb interior uses prepared body");
+        }
+      }
+    }
+
+    take(setScrollMetrics(*fixture.tree, fixture.bar, {100, 40}));
+    take(setScrollOffset(*fixture.tree, fixture.bar, axis, {30, 0}));
+    fixture.layout(axis == ScrollAxis::HORIZONTAL ? CellSize{10, 1} : CellSize{1, 10});
+    const auto moved = fixture.paint(fixture.bar);
+    check(moved.cells.at(cell(3)) == "[" && moved.cells.at(cell(4)) == "=" && moved.cells.at(cell(6)) == "]" &&
+            moved.cells.at(cell(9)) == " ",
+          "segments follow the moved thumb rather than the channel endpoints");
+
+    glyphs.thumbBody.reset();
+    glyphs.thumbStart.reset();
+    glyphs.thumbEnd.reset();
+    glyphs.thumbSingle.reset();
+    take(setScrollbarSkin(*fixture.tree, fixture.bar, skin));
+    const auto legacy = fixture.paint(fixture.bar);
+    check(legacy.cells.at(cell(3)) == "x" && legacy.cells.at(cell(6)) == "x",
+          "old repeated thumb is the fallback for every absent segment");
+
+    for (auto member : {&ScrollbarAxisGlyphs::thumbStart, &ScrollbarAxisGlyphs::thumbBody,
+                        &ScrollbarAxisGlyphs::thumbEnd, &ScrollbarAxisGlyphs::thumbSingle}) {
+      for (const auto &invalid :
+           {std::string{}, std::string{"ab"}, std::string{"\n"}, std::string{"\xe7\x95\x8c"}, std::string(65, 'a')}) {
+        glyphs.*member = invalid;
+        check(error(setScrollbarSkin(*fixture.tree, fixture.bar, skin), TreeError::INVALID_ARGUMENT),
+              "invalid custom segment rejects before publication");
+        check(fixture.paint(fixture.bar).cells == legacy.cells, "failed segment preparation preserves the old skin");
+      }
+
+      (glyphs.*member).reset();
+    }
+  }
+
+  for (const auto axis : {ScrollAxis::HORIZONTAL, ScrollAxis::VERTICAL}) {
+    BarFixture fixture({.glyphs = PrimitiveGlyphs::ASCII, .arrows = true}, axis);
+    ScrollbarSkin skin{.pattern = ScrollbarPattern::ASCII};
+    skin.trackPattern = ScrollbarPattern::MINIMAL;
+    skin.thumbPattern = ScrollbarThumbPattern::BLOCK;
+    skin.arrowPattern = ScrollbarArrowPattern::TRIANGLE;
+    take(setScrollbarSkin(*fixture.tree, fixture.bar, skin));
+    const auto painted = fixture.paint(fixture.bar);
+    check(painted.cells.at({0, 0}) == (axis == ScrollAxis::HORIZONTAL ? "<" : "^"),
+          "triangle preset respects explicit ASCII mode");
+    check(painted.cells.at(axis == ScrollAxis::HORIZONTAL ? std::pair{1, 0} : std::pair{0, 1}) == "#",
+          "block preset retains the existing ASCII fallback");
+    check(painted.cells.at(axis == ScrollAxis::HORIZONTAL ? std::pair{8, 0} : std::pair{0, 8}) == " ",
+          "independent minimal track survives umbrella ASCII");
+  }
+}
+
 void scrollbarSkinFailures() {
   TreeFixture widths;
   const auto wide = take(widths.tree->emplaceChecked<ScrollBar>(
@@ -977,9 +1139,15 @@ void scrollbarSkinFailures() {
   ambiguous.vertical.track = "\xc2\xb7";
   check(error(setScrollbarSkin(*widths.tree, wide, ambiguous), TreeError::INVALID_ARGUMENT),
         "custom glyph admission uses the complete receiving ambiguous-width policy");
+  ambiguous.vertical.track.reset();
+  ambiguous.vertical.thumbSingle = "\xc2\xb7";
+  check(error(setScrollbarSkin(*widths.tree, wide, ambiguous), TreeError::INVALID_ARGUMENT),
+        "custom segment admission respects receiving ambiguous-width policy");
   take(setScrollbarSkin(*widths.tree, wide, ScrollbarSkin{.pattern = ScrollbarPattern::FRAME}));
   BarFixture fixture;
   ScrollbarSkin skin{.pattern = ScrollbarPattern::ASCII};
+  skin.vertical.thumbSingle = "o";
+  skin.vertical.thumbBody = "I";
   take(setScrollbarSkin(*fixture.tree, fixture.bar, skin));
 
   struct CountingPaint final : PaintContext {
@@ -1416,6 +1584,7 @@ void arrowGlyphPreparation() {
 } // namespace
 
 int main() {
+  sharedScrollbarPresetLifetime();
   functionalArrowGeometry();
   heldArrows();
   arrowAdmissionErrors();
@@ -1435,6 +1604,7 @@ int main() {
   obsoleteAssociationAdmission();
   advancedFrames();
   scrollbarSkins();
+  segmentedScrollbarSkins();
   scrollbarSkinFailures();
   manualStyleAndAutomaticMetadata();
   return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

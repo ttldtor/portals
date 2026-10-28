@@ -92,6 +92,44 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, const Compu
       const auto *skin = state.scrollbarSkin.get();
       const auto *glyph = skin ? &*skin->glyphs[first + (inThumb ? 1 : 0)] : &state.glyphs[inThumb ? 7 : 6];
       const auto *part = inThumb ? &parts.thumb : &parts.track;
+      const bool custom = skin && skin->customGlyphs[first + (inThumb ? 1 : 0)];
+
+      if (!custom && inThumb && parts.thumbPattern) {
+        glyph = *parts.thumbPattern == ScrollbarThumbPattern::ASCII ? &(*state.presetGlyphs)[2] : &state.glyphs[7];
+      }
+
+      if (!custom && !inThumb && parts.trackPattern) {
+        switch (*parts.trackPattern) {
+        case ScrollbarPattern::LEGACY:
+          glyph = &state.glyphs[6];
+
+          break;
+        case ScrollbarPattern::FRAME:
+          glyph = frameText ? &frameText->glyphs[4 + (horizontalAxis ? 0 : 1)] : &state.glyphs[horizontalAxis ? 4 : 5];
+
+          break;
+        case ScrollbarPattern::MINIMAL:
+          glyph = &(*state.presetGlyphs)[0];
+
+          break;
+        case ScrollbarPattern::ASCII:
+          glyph = &(*state.presetGlyphs)[1];
+
+          break;
+        }
+      }
+
+      if (skin && inThumb) {
+        const auto segment = thumb.length == 1                            ? 3
+                             : position == thumb.start                    ? 0
+                             : position - thumb.start == thumb.length - 1 ? 2
+                                                                          : 1;
+        const auto &prepared = skin->thumbSegments[first + segment];
+
+        if (prepared) {
+          glyph = &*prepared;
+        }
+      }
 
       if (skin && skin->ends && !inThumb && !arrows) {
         const auto end = i == 0 ? first + 2 : i == cells.length - 1 ? first + 3 : -1;
@@ -106,6 +144,11 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, const Compu
         const auto arrow = (horizontalAxis ? 0 : 2) + (i == 0 ? 0 : 1);
         glyph = skin && skin->arrows[arrow] ? &*skin->arrows[arrow] : &(*state.arrowGlyphs)[arrow];
         part = &parts.arrows;
+
+        if (parts.arrowPattern && !(skin && skin->customArrows[arrow])) {
+          glyph = *parts.arrowPattern == ScrollbarArrowPattern::ASCII ? &(*state.presetGlyphs)[3 + arrow]
+                                                                      : &(*state.arrowGlyphs)[arrow];
+        }
       }
 
       auto result = draw(point, *glyph, *part);

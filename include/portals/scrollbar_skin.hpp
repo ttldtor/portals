@@ -17,6 +17,20 @@ enum class ScrollbarPattern {
   ASCII    ///< Dot track and hash thumb.
 };
 
+/** @brief Independent thumb source; all choices are opt-in. */
+enum class ScrollbarThumbPattern {
+  LEGACY, ///< Existing repeated thumb, including ASCII fallback.
+  BLOCK,  ///< Explicit block with the control width/glyph fallback.
+  ASCII   ///< Hash thumb.
+};
+
+/** @brief Independent functional-arrow source; selecting it never enables buttons. */
+enum class ScrollbarArrowPattern {
+  LEGACY,   ///< Existing functional arrow source.
+  TRIANGLE, ///< Triangle glyphs with the control width/glyph fallback.
+  ASCII     ///< Less-than, greater-than, caret and lowercase v.
+};
+
 /** @brief Sparse owning glyph overrides for one axis, validated before painting.
  * Every nonempty source must be exactly one printable one-cell grapheme under the receiving WidthPolicy.
  */
@@ -27,6 +41,11 @@ struct ScrollbarAxisGlyphs {
   std::optional<std::string> end{};      ///< Trailing decoration; empty suppresses that end.
   std::optional<std::string> backward{}; ///< Functional decrement button; empty is invalid.
   std::optional<std::string> forward{};  ///< Functional increment button; empty is invalid.
+
+  std::optional<std::string> thumbStart{};  ///< First cell of a multi-cell thumb.
+  std::optional<std::string> thumbBody{};   ///< Interior cells; omitted uses thumb.
+  std::optional<std::string> thumbEnd{};    ///< Last cell of a multi-cell thumb.
+  std::optional<std::string> thumbSingle{}; ///< A one-cell thumb; omitted uses thumb.
 
   /** @brief Keep checked-library owning transfers fallible. */
   ~ScrollbarAxisGlyphs() = default;
@@ -43,6 +62,10 @@ struct ScrollbarSkin {
   ScrollbarAxisGlyphs horizontal{};                         ///< Horizontal track, thumb and optional ends.
   ScrollbarAxisGlyphs vertical{};                           ///< Vertical track, thumb and optional ends.
   std::optional<std::string> corner{}; ///< Intersection glyph; omitted or empty keeps the existing fill.
+
+  std::optional<ScrollbarPattern> trackPattern{};      ///< Explicit track source above the umbrella preset.
+  std::optional<ScrollbarThumbPattern> thumbPattern{}; ///< Explicit thumb source above the umbrella preset.
+  std::optional<ScrollbarArrowPattern> arrowPattern{}; ///< Explicit arrow source; does not enable arrows.
 
   /** @brief Keep checked-library owning transfers fallible. */
   ~ScrollbarSkin() = default;

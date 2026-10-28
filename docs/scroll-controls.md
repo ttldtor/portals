@@ -277,3 +277,87 @@ Loaded configuration uses `scrollbar { pattern=FRAME ends=true }`, with optional
 Dotted leaves such as `scrollbar.vertical.thumb` are equivalent. A skin never
 enables a frame or chooses its placement implicitly. Low-level callers can use
 `setScrollbarSkin(tree, node, skin)` for a checked atomic replacement.
+
+### Independent sources and segmented thumbs
+
+The complete [ordinary scroll client](examples/guide_scroll_controls.cpp) keeps
+frame and title decoration independent of `.scrollTrack("minimal")`,
+`.scrollThumb("block")` and `.scrollArrows("ascii")`. Each method has an equivalent
+pipe stage, for example `| ui::scrollThumb("ascii")`, and a typed overload.
+Track sources use `ScrollbarPattern` (`legacy`, `frame`, `minimal`, `ascii`);
+thumb sources use `ScrollbarThumbPattern` (`legacy`, `block`, `ascii`);
+arrow sources use `ScrollbarArrowPattern` (`legacy`, `triangle`, `ascii`).
+`block` and `triangle` retain the control's ASCII/width fallback. Appearance
+selection does not enable functional arrows; use `.arrows()` separately.
+
+The umbrella `.scrollbar(...)` supplies defaults. Explicit part sources override
+it regardless of method/pipe order, and per-axis custom glyphs override their
+part source. Omitted leaves retain context values. `setScrollbarSkin` remains
+an atomic replacement of the whole low-level skin.
+
+Append `thumbStart`, `thumbBody`, `thumbEnd` and `thumbSingle` to either axis:
+
+```cpp
+ScrollbarSkin skin;
+skin.horizontal = {.thumb = "#", .thumbStart = "[", .thumbBody = "=", .thumbEnd = "]", .thumbSingle = "o"};
+skin.vertical = {.thumb = "#", .thumbStart = "A", .thumbBody = "I", .thumbEnd = "V", .thumbSingle = "O"};
+```
+
+A zero-length thumb paints nothing; one cell uses `thumbSingle`; two cells use
+start/end; longer thumbs use start/body/end. Any omitted segment uses the old
+repeated `thumb` glyph (or its effective preset). Segment strings cannot be empty
+and obey the existing printable one-cell grapheme and `maxGlyphBytes` checks.
+They are owned and prepared before publication; painting selects prepared text.
+Decorative `start`/`end`, functional buttons, track clicking and geometry retain
+their existing behavior.
+
+Loaded scenes accept `scrollbar { trackPattern=MINIMAL thumbPattern=BLOCK
+arrowPattern=ASCII horizontal { thumbStart="[" thumbBody="=" thumbEnd="]"
+thumbSingle="o" } }`; equivalent dotted leaves use the same names. PSS continues
+to style every segment with `scrollbar-thumb-*` and buttons with
+`scrollbar-arrows-*`; runtime, typed and compile-time sheets share those parts.
+Frame/title decoration uses its independent existing settings and styles.
+
+One-cell terminal glyphs do not promise a GUI radius or font coverage. Custom
+caps can be previewed on the target host; no general rounded-thumb preset is
+provided. ASCII and the legacy block remain explicit alternatives.
+
+PSS also selects the same named sources directly:
+
+```pss
+ScrollArea {
+  scrollbar-track-pattern: minimal;
+  scrollbar-thumb-pattern: block;
+  scrollbar-arrow-pattern: ascii;
+}
+ScrollArea:focused { scrollbar-track-pattern: frame; }
+```
+
+Each declaration follows the ordinary tier/selector/state cascade, overrides
+its C++ preset default and leaves other parts unchanged. Custom per-axis glyphs
+and segments retain priority over named sources. Typed sheets expose
+`scrollbarTrackPattern`, `scrollbarThumbPattern` and `scrollbarArrowPattern`
+with the corresponding enum values. Runtime, literal and compact PSS share the
+same enum admission; invalid names/ordinals reject the stylesheet atomically.
+PSS shape declarations accept named presets; custom segment text is currently
+configured through C++ or loaded scenes.
+
+### Two-pane scrollbar gallery
+
+The [complete gallery source](examples/guide_scrollbar_parts.cpp) shows two
+independent 26×10 outer areas. With `.scrollOnFrame()`, each has a 24×8
+viewport; both scroll ordinary content of 12 rows and 36 columns. The left pane
+uses frame track lines and ASCII arrow buttons. The right pane supplies custom
+thumb segments and uses PSS named presets for its track, thumb and arrows.
+`settings(...)` replaces the instance patch, so set custom segments before
+`id`, frame and scroll modifiers. Each part's fluent or pipe stage changes only
+that part.
+
+Use Tab to focus the areas, arrow keys to scroll, and mouse arrow-button holds
+to repeat scrolling; F10 exits. Gallery capture:
+
+![Two-pane scrollbar parts gallery](images/scrollbar-parts.png)
+
+\image html scrollbar-parts.gif "Two-pane scrollbar parts gallery"
+
+\include guide_scrollbar_parts.cpp

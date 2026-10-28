@@ -15,7 +15,7 @@ int main() {
         Label { "Choose a section; use the wheel or drag the thumb." }
         ScrollArea {
           frame="rounded" frame.title="Sections" frame.titleDecoration=SQUARE
-          placement=ON_FRAME scrollbar { pattern=FRAME } width=28 height=6
+          placement=ON_FRAME scrollbar { pattern=FRAME thumbPattern=ASCII arrowPattern=ASCII } width=28 height=6
           VBox {
             Button { "Overview" } Button { "Accounts" }
             Button { "Orders" } Button { "Positions" }

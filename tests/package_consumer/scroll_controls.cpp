@@ -111,7 +111,8 @@ int main() {
                      ui::height(5),
                    ui::label("Footer")),
           {}, controller) |
-          ui::width(20) | ui::height(5) | ui::scrollbar("frame"),
+          ui::width(20) | ui::height(5) | ui::scrollbar("frame") | ui::scrollTrack("minimal") |
+          ui::scrollThumb("block") | ui::scrollArrows("ascii"),
         ui::scrollBar(projection, controller) | ui::height(5),
         ui::scrollBar(standalone).scrollbar("ascii") | ui::height(8));
     },

@@ -66,7 +66,10 @@ inline constexpr std::array<std::string_view, PSS_PROPERTY_COUNT> PSS_PROPERTY_N
                                                                                      "scrollbar-corner-background",
                                                                                      "scrollbar-corner-bold",
                                                                                      "scrollbar-corner-italic",
-                                                                                     "scrollbar-corner-underline"};
+                                                                                     "scrollbar-corner-underline",
+                                                                                     "scrollbar-track-pattern",
+                                                                                     "scrollbar-thumb-pattern",
+                                                                                     "scrollbar-arrow-pattern"};
 /** @brief Pseudo-state names in the existing StyleState order after ANY. */
 inline constexpr std::array<std::string_view, 6> PSS_STATE_NAMES{"normal",   "focused", "disabled",
                                                                  "selected", "header",  "caret"};
@@ -596,6 +599,21 @@ private:
       }
 
       declaration.color = *color;
+    } else if (property == PssProperty::SCROLLBAR_TRACK_PATTERN || property == PssProperty::SCROLLBAR_THUMB_PATTERN ||
+               property == PssProperty::SCROLLBAR_ARROW_PATTERN) {
+      constexpr std::array<std::string_view, 4> TRACK{"legacy", "frame", "minimal", "ascii"};
+      constexpr std::array<std::string_view, 3> THUMB{"legacy", "block", "ascii"};
+      constexpr std::array<std::string_view, 3> ARROW{"legacy", "triangle", "ascii"};
+      const auto names = property == PssProperty::SCROLLBAR_TRACK_PATTERN   ? std::span<const std::string_view>(TRACK)
+                         : property == PssProperty::SCROLLBAR_THUMB_PATTERN ? std::span<const std::string_view>(THUMB)
+                                                                            : std::span<const std::string_view>(ARROW);
+      const auto selected = std::ranges::find(names, text);
+
+      if (selected == names.end()) {
+        return failAt(PssErrorCode::INVALID_VALUE, valueLocation, "Invalid scrollbar pattern", propertyName);
+      }
+
+      declaration.pattern = static_cast<std::int32_t>(selected - names.begin());
     } else if (property == PssProperty::MIN_WIDTH) {
       const auto width = parseWidth(text);
 
@@ -819,6 +837,21 @@ constexpr void assignPssDeclaration(PssProperty property, PssValue value, StyleD
     destination.scrollbarCorner.underline = value.boolean;
 
     break;
+  case PssProperty::SCROLLBAR_TRACK_PATTERN:
+    destination.scrollbarTrackPattern = static_cast<ScrollbarPattern>(value.pattern);
+
+    break;
+
+  case PssProperty::SCROLLBAR_THUMB_PATTERN:
+    destination.scrollbarThumbPattern = static_cast<ScrollbarThumbPattern>(value.pattern);
+
+    break;
+
+  case PssProperty::SCROLLBAR_ARROW_PATTERN:
+    destination.scrollbarArrowPattern = static_cast<ScrollbarArrowPattern>(value.pattern);
+
+    break;
+
   case PssProperty::MIN_WIDTH:
     destination.minWidth = value.width;
 

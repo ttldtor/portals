@@ -1519,7 +1519,7 @@ TEST_CASE("actual catalog fixed ancestry retains sparse precedence origins and u
 }
 
 TEST_CASE("Shared frame, Spinner and scrollbar schemas append stable leaves within four presence words") {
-  static_assert(ui::detail::CONTROL_PROPERTY_COUNT == 238);
+  static_assert(ui::detail::CONTROL_PROPERTY_COUNT == 249);
   static_assert((ui::detail::CONTROL_PRESENCE_BITS + 63) / 64 == 4);
   ControlSettings appended;
   appended.spinnerPreset = SpinnerPreset::LINE;
@@ -1759,4 +1759,37 @@ TEST_CASE("functional arrow options preserve sparse false and appended identitie
   CHECK_FALSE(controls.resolve("ScrollArea", {.arrowDelay = 0}));
   CHECK_FALSE(controls.resolve("ScrollArea", {.arrowRepeat = 0}));
   CHECK_FALSE(controls.resolve("Button", {.arrows = true}));
+}
+
+TEST_CASE("independent scrollbar part settings merge as sparse leaves") {
+  ui::ControlContext controls;
+  take(ui::detail::ControlContextAccess::installScrollSchema(controls, "ScrollArea"));
+  ControlSettings defaults;
+  defaults.scrollbar.trackPattern = ScrollbarPattern::MINIMAL;
+  defaults.scrollbar.thumbPattern = ScrollbarThumbPattern::BLOCK;
+  defaults.scrollbar.arrowPattern = ScrollbarArrowPattern::ASCII;
+  defaults.scrollbar.horizontal.thumbStart = "[";
+  defaults.scrollbar.vertical.thumbSingle = "o";
+  controls.defaults("ScrollArea", defaults);
+  const auto merged = take(controls.resolve("ScrollArea", {.scrollbar = {.pattern = ScrollbarPattern::ASCII}}));
+  CHECK(merged.settings.scrollbar.trackPattern == ScrollbarPattern::MINIMAL);
+  CHECK(merged.settings.scrollbar.thumbPattern == ScrollbarThumbPattern::BLOCK);
+  CHECK(merged.settings.scrollbar.arrowPattern == ScrollbarArrowPattern::ASCII);
+  CHECK(merged.settings.scrollbar.horizontal.thumbStart == "[");
+  CHECK(merged.settings.scrollbar.vertical.thumbSingle == "o");
+  CHECK_FALSE(controls.resolve("Button", defaults));
+  defaults.scrollbar.thumbPattern = static_cast<ScrollbarThumbPattern>(-1);
+  CHECK_FALSE(controls.resolve("ScrollArea", defaults));
+  defaults.scrollbar.thumbPattern.reset();
+  defaults.scrollbar.arrowPattern = static_cast<ScrollbarArrowPattern>(99);
+  CHECK_FALSE(controls.resolve("ScrollArea", defaults));
+  defaults.scrollbar.arrowPattern.reset();
+  defaults.scrollbar.trackPattern = static_cast<ScrollbarPattern>(99);
+  CHECK_FALSE(controls.resolve("ScrollArea", defaults));
+  const auto presence = ui::detail::controlSettingsPresenceSet(merged.settings);
+  CHECK(presence.test(238));
+  CHECK(presence.test(239));
+  CHECK(presence.test(240));
+  CHECK(presence.test(241));
+  CHECK(presence.test(248));
 }

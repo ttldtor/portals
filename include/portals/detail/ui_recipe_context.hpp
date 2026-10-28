@@ -221,6 +221,38 @@ constexpr std::optional<FramePattern> framePattern(std::string_view name) noexce
 }
 
 /** @param name Borrowed compact skin name. @return Preset or invalid value checked at mount. */
+constexpr ScrollbarThumbPattern scrollbarThumbPattern(std::string_view name) noexcept {
+  if (name == "legacy") {
+    return ScrollbarThumbPattern::LEGACY;
+  }
+
+  if (name == "block") {
+    return ScrollbarThumbPattern::BLOCK;
+  }
+
+  if (name == "ascii") {
+    return ScrollbarThumbPattern::ASCII;
+  }
+
+  return static_cast<ScrollbarThumbPattern>(-1);
+}
+
+constexpr ScrollbarArrowPattern scrollbarArrowPattern(std::string_view name) noexcept {
+  if (name == "legacy") {
+    return ScrollbarArrowPattern::LEGACY;
+  }
+
+  if (name == "triangle") {
+    return ScrollbarArrowPattern::TRIANGLE;
+  }
+
+  if (name == "ascii") {
+    return ScrollbarArrowPattern::ASCII;
+  }
+
+  return static_cast<ScrollbarArrowPattern>(-1);
+}
+
 constexpr ScrollbarPattern scrollbarPattern(std::string_view name) noexcept {
   if (name == "legacy")
     return ScrollbarPattern::LEGACY;

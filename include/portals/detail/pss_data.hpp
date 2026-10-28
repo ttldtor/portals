@@ -57,10 +57,13 @@ enum class PssProperty {
   SCROLLBAR_CORNER_BOLD,       ///< Scrollbar corner bold.
   SCROLLBAR_CORNER_ITALIC,     ///< Scrollbar corner italic.
   SCROLLBAR_CORNER_UNDERLINE,  ///< Scrollbar corner underline.
+  SCROLLBAR_TRACK_PATTERN,     ///< Independent scrollbar source.
+  SCROLLBAR_THUMB_PATTERN,     ///< Independent scrollbar source.
+  SCROLLBAR_ARROW_PATTERN,     ///< Independent scrollbar source.
 };
 
 /** @brief Number of supported PSS v0 properties. */
-inline constexpr std::size_t PSS_PROPERTY_COUNT = 46;
+inline constexpr std::size_t PSS_PROPERTY_COUNT = 49;
 /** @brief Marker for an absent effective declaration occurrence. */
 inline constexpr std::size_t NO_PSS_DECLARATION = std::numeric_limits<std::size_t>::max();
 /** @brief Maximum owned ASCII bytes retained in an error subject. */
@@ -115,9 +118,10 @@ struct PssLocation {
 
 /** @brief Allocation-free declaration scalar; its owning occurrence property identifies the active field. */
 struct PssScalarValue {
-  RgbColor color;       ///< FOREGROUND or BACKGROUND RGB; otherwise zero.
-  bool boolean{};       ///< BOLD, ITALIC, or UNDERLINE flag, including explicit false.
-  std::int32_t width{}; ///< MIN_WIDTH nonnegative cell minimum; otherwise zero.
+  RgbColor color;         ///< FOREGROUND or BACKGROUND RGB; otherwise zero.
+  bool boolean{};         ///< BOLD, ITALIC, or UNDERLINE flag, including explicit false.
+  std::int32_t width{};   ///< MIN_WIDTH nonnegative cell minimum; otherwise zero.
+  std::int32_t pattern{}; ///< Scrollbar preset ordinal; otherwise zero.
 
   /** @param other Scalar payload to compare.
    * @return Whether all fixed scalar fields agree.

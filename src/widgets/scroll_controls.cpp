@@ -13,6 +13,26 @@ GraphemeText scrollGlyph(std::string_view unicode, std::string_view ascii, Width
   return text.measure() == 1 ? text : GraphemeText::from(ascii, width).value();
 }
 
+std::shared_ptr<const detail::ScrollbarPresetGlyphs> scrollPresetGlyphs(WidthPolicy width) {
+  // Keep only the latest policy weakly; live controls own their immutable prepared values.
+  thread_local std::weak_ptr<const detail::ScrollbarPresetGlyphs> cached;
+
+  if (auto prepared = cached.lock(); prepared && prepared->front().policy() == width) {
+    return prepared;
+  }
+
+  auto prepared = std::make_shared<const detail::ScrollbarPresetGlyphs>(
+    detail::ScrollbarPresetGlyphs{GraphemeText::from(" ", width).value(), GraphemeText::from(".", width).value(),
+                                  GraphemeText::from("#", width).value(), GraphemeText::from("<", width).value(),
+                                  GraphemeText::from(">", width).value(), GraphemeText::from("^", width).value(),
+                                  GraphemeText::from("v", width).value()});
+
+  // Publish only after all owning text and the shared control block are ready.
+  cached = prepared;
+
+  return prepared;
+}
+
 template <class Function>
 std::expected<void, TreeError> editScroll(WidgetTree &tree, Node<Widget> node, Function function) {
   std::expected<void, TreeError> result;
@@ -35,7 +55,8 @@ ScrollWidgetState::ScrollWidgetState(std::shared_ptr<ScrollController> values, W
       glyphs{scrollGlyph("\xe2\x94\x8c", "+", width, mode), scrollGlyph("\xe2\x94\x90", "+", width, mode),
              scrollGlyph("\xe2\x94\x94", "+", width, mode), scrollGlyph("\xe2\x94\x98", "+", width, mode),
              scrollGlyph("\xe2\x94\x80", "-", width, mode), scrollGlyph("\xe2\x94\x82", "|", width, mode),
-             scrollGlyph("\xe2\x96\x91", ".", width, mode), scrollGlyph("\xe2\x96\x88", "#", width, mode)} {
+             scrollGlyph("\xe2\x96\x91", ".", width, mode), scrollGlyph("\xe2\x96\x88", "#", width, mode)},
+      presetGlyphs(scrollPresetGlyphs(width)) {
   if (arrows) {
     arrowGlyphs = std::make_unique<std::array<GraphemeText, 4>>(
       std::array{scrollGlyph("\xe2\x97\x80", "<", width, mode), scrollGlyph("\xe2\x96\xb6", ">", width, mode),
@@ -426,7 +447,13 @@ std::expected<void, TreeError> syncScrollControl(WidgetTree &tree, Node<Widget> 
 namespace {
 std::expected<std::unique_ptr<detail::PreparedScrollbarSkin>, TreeError>
 prepareScrollbarSkin(const detail::ScrollWidgetState &state, const ScrollbarSkin &skin) {
-  if (skin.pattern < ScrollbarPattern::LEGACY || skin.pattern > ScrollbarPattern::ASCII || !skin.maxGlyphBytes) {
+  if (skin.pattern < ScrollbarPattern::LEGACY || skin.pattern > ScrollbarPattern::ASCII || !skin.maxGlyphBytes ||
+      (skin.trackPattern &&
+       (*skin.trackPattern < ScrollbarPattern::LEGACY || *skin.trackPattern > ScrollbarPattern::ASCII)) ||
+      (skin.thumbPattern &&
+       (*skin.thumbPattern < ScrollbarThumbPattern::LEGACY || *skin.thumbPattern > ScrollbarThumbPattern::ASCII)) ||
+      (skin.arrowPattern &&
+       (*skin.arrowPattern < ScrollbarArrowPattern::LEGACY || *skin.arrowPattern > ScrollbarArrowPattern::ASCII))) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
@@ -447,18 +474,23 @@ prepareScrollbarSkin(const detail::ScrollWidgetState &state, const ScrollbarSkin
                       : state.legacyFrameText ? &*state.legacyFrameText
                                               : nullptr;
 
+  const auto trackPattern = skin.trackPattern.value_or(skin.pattern);
+  const auto thumbPattern = skin.thumbPattern.value_or(
+    skin.pattern == ScrollbarPattern::ASCII ? ScrollbarThumbPattern::ASCII : ScrollbarThumbPattern::LEGACY);
+  const auto mode = state.isArea ? state.area.glyphs : state.bar.glyphs;
+
   for (std::size_t axis = 0; axis < 2; ++axis) {
     const auto first = axis * 4;
-    result->glyphs[first] = skin.pattern == ScrollbarPattern::FRAME
+    result->glyphs[first] = trackPattern == ScrollbarPattern::FRAME
                               ? (frame ? frame->glyphs[4 + axis] : state.glyphs[4 + axis])
                               : state.glyphs[6];
     result->glyphs[first + 1] = state.glyphs[7];
 
-    if (skin.pattern == ScrollbarPattern::MINIMAL || skin.pattern == ScrollbarPattern::ASCII) {
-      result->glyphs[first] = GraphemeText::from(skin.pattern == ScrollbarPattern::ASCII ? "." : " ", policy).value();
+    if (trackPattern == ScrollbarPattern::MINIMAL || trackPattern == ScrollbarPattern::ASCII) {
+      result->glyphs[first] = GraphemeText::from(trackPattern == ScrollbarPattern::ASCII ? "." : " ", policy).value();
     }
 
-    if (skin.pattern == ScrollbarPattern::ASCII) {
+    if (thumbPattern == ScrollbarThumbPattern::ASCII) {
       result->glyphs[first + 1] = GraphemeText::from("#", policy).value();
     }
 
@@ -491,9 +523,41 @@ prepareScrollbarSkin(const detail::ScrollWidgetState &state, const ScrollbarSkin
     }
 
     result->glyphs[index] = std::move(*text);
+    result->customGlyphs[index] = true;
+  }
+
+  const std::array segmentSources{&skin.horizontal.thumbStart,  &skin.horizontal.thumbBody, &skin.horizontal.thumbEnd,
+                                  &skin.horizontal.thumbSingle, &skin.vertical.thumbStart,  &skin.vertical.thumbBody,
+                                  &skin.vertical.thumbEnd,      &skin.vertical.thumbSingle};
+
+  for (std::size_t index = 0; index < segmentSources.size(); ++index) {
+    if (!*segmentSources[index]) {
+      continue;
+    }
+
+    const auto &source = **segmentSources[index];
+    auto text = GraphemeText::from(source, policy,
+                                   {.max_input_bytes = skin.maxGlyphBytes,
+                                    .max_cluster_bytes = skin.maxGlyphBytes,
+                                    .max_graphemes = 1,
+                                    .max_cells = 1});
+
+    if (source.empty() || source.size() > skin.maxGlyphBytes || !text || text->graphemes().size() != 1 ||
+        text->measure() != 1 || text->graphemes().front().display != TextDisplay::PRINTABLE) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+
+    result->thumbSegments[index] = std::move(*text);
   }
 
   result->ends = skin.ends;
+
+  if (skin.arrowPattern && *skin.arrowPattern != ScrollbarArrowPattern::LEGACY) {
+    const auto arrowMode = *skin.arrowPattern == ScrollbarArrowPattern::ASCII ? PrimitiveGlyphs::ASCII : mode;
+    result->arrows = {
+      scrollGlyph("\xe2\x97\x80", "<", policy, arrowMode), scrollGlyph("\xe2\x96\xb6", ">", policy, arrowMode),
+      scrollGlyph("\xe2\x96\xb2", "^", policy, arrowMode), scrollGlyph("\xe2\x96\xbc", "v", policy, arrowMode)};
+  }
 
   const std::array arrowSources{&skin.horizontal.backward, &skin.horizontal.forward, &skin.vertical.backward,
                                 &skin.vertical.forward};
@@ -512,6 +576,7 @@ prepareScrollbarSkin(const detail::ScrollWidgetState &state, const ScrollbarSkin
       return std::unexpected(TreeError::INVALID_ARGUMENT);
     }
     result->arrows[index] = std::move(*text);
+    result->customArrows[index] = true;
   }
 
   return result;

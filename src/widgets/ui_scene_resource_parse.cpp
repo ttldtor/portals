@@ -623,6 +623,22 @@ private:
         settings.format.releaseMarker = std::move(value);
       } else if (path == "format.unknownMarker") {
         settings.format.unknownMarker = std::move(value);
+      } else if (path == "scrollbar.horizontal.thumbStart") {
+        settings.scrollbar.horizontal.thumbStart = std::move(value);
+      } else if (path == "scrollbar.horizontal.thumbBody") {
+        settings.scrollbar.horizontal.thumbBody = std::move(value);
+      } else if (path == "scrollbar.horizontal.thumbEnd") {
+        settings.scrollbar.horizontal.thumbEnd = std::move(value);
+      } else if (path == "scrollbar.horizontal.thumbSingle") {
+        settings.scrollbar.horizontal.thumbSingle = std::move(value);
+      } else if (path == "scrollbar.vertical.thumbStart") {
+        settings.scrollbar.vertical.thumbStart = std::move(value);
+      } else if (path == "scrollbar.vertical.thumbBody") {
+        settings.scrollbar.vertical.thumbBody = std::move(value);
+      } else if (path == "scrollbar.vertical.thumbEnd") {
+        settings.scrollbar.vertical.thumbEnd = std::move(value);
+      } else if (path == "scrollbar.vertical.thumbSingle") {
+        settings.scrollbar.vertical.thumbSingle = std::move(value);
       } else if (path == "scrollbar.horizontal.track") {
         settings.scrollbar.horizontal.track = std::move(value);
       } else if (path == "scrollbar.horizontal.thumb") {
@@ -812,6 +828,12 @@ private:
                                       FramePattern::DOUBLE, FramePattern::HEAVY,  FramePattern::ASCII};
 
         settings.frame.pattern = PATTERNS[static_cast<std::size_t>(index)];
+      } else if (path == "scrollbar.trackPattern") {
+        settings.scrollbar.trackPattern = static_cast<ScrollbarPattern>(index);
+      } else if (path == "scrollbar.thumbPattern") {
+        settings.scrollbar.thumbPattern = static_cast<ScrollbarThumbPattern>(index);
+      } else if (path == "scrollbar.arrowPattern") {
+        settings.scrollbar.arrowPattern = static_cast<ScrollbarArrowPattern>(index);
       } else if (path == "scrollbar.pattern") {
         settings.scrollbar.pattern = static_cast<ScrollbarPattern>(index);
       } else if (path == "frame.titleDecoration") {

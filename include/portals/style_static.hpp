@@ -20,11 +20,16 @@ void staticStyleInvalidState();
 /** @brief Reject a negative or state-dependent constant minimum width. */
 void staticStyleInvalidMetric();
 
+/** @brief Reject an invalid scrollbar preset ordinal. */
+void staticStyleInvalidScrollbarPattern();
+
 /** @brief Scalar types with nonthrowing ownership and equality.
  * @tparam T Exact parameter value type.
  */
 template <class T>
-concept ParameterValue = std::same_as<T, RgbColor> || std::same_as<T, bool> || std::same_as<T, std::int32_t>;
+concept ParameterValue =
+  std::same_as<T, RgbColor> || std::same_as<T, bool> || std::same_as<T, std::int32_t> ||
+  std::same_as<T, ScrollbarPattern> || std::same_as<T, ScrollbarThumbPattern> || std::same_as<T, ScrollbarArrowPattern>;
 
 /** @brief Internal owning constant parameter definition.
  * @tparam Name Owned parameter identity.
@@ -195,6 +200,9 @@ enum class Property {
   SCROLLBAR_CORNER_BOLD,       ///< Scrollbar corner bold.
   SCROLLBAR_CORNER_ITALIC,     ///< Scrollbar corner italic.
   SCROLLBAR_CORNER_UNDERLINE,  ///< Scrollbar corner underline.
+  SCROLLBAR_TRACK_PATTERN,     ///< Independent track source.
+  SCROLLBAR_THUMB_PATTERN,     ///< Independent thumb source.
+  SCROLLBAR_ARROW_PATTERN,     ///< Independent arrow source.
 };
 
 /** @brief Internal typed owning declaration.
@@ -331,7 +339,12 @@ constexpr void assign(const D &declaration, StyleDeclarations &destination, cons
     D::KIND == Property::SCROLLBAR_ARROWS_BACKGROUND || D::KIND == Property::SCROLLBAR_CORNER_FOREGROUND ||
     D::KIND == Property::SCROLLBAR_CORNER_BACKGROUND;
   constexpr bool METRIC = D::KIND == Property::MIN_WIDTH;
-  using Expected = std::conditional_t<COLOR, RgbColor, std::conditional_t<METRIC, std::int32_t, bool>>;
+  using Expected = std::conditional_t<
+    D::KIND == Property::SCROLLBAR_TRACK_PATTERN, ScrollbarPattern,
+    std::conditional_t<
+      D::KIND == Property::SCROLLBAR_THUMB_PATTERN, ScrollbarThumbPattern,
+      std::conditional_t<D::KIND == Property::SCROLLBAR_ARROW_PATTERN, ScrollbarArrowPattern,
+                         std::conditional_t<COLOR, RgbColor, std::conditional_t<METRIC, std::int32_t, bool>>>>>;
   static_assert(std::same_as<decltype(value), Expected>, "Static style declaration value type mismatch");
 
   if constexpr (std::same_as<decltype(value), Expected>) {
@@ -425,6 +438,12 @@ constexpr void assign(const D &declaration, StyleDeclarations &destination, cons
       destination.scrollbarCorner.italic = value;
     } else if constexpr (D::KIND == Property::SCROLLBAR_CORNER_UNDERLINE) {
       destination.scrollbarCorner.underline = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_TRACK_PATTERN) {
+      destination.scrollbarTrackPattern = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_PATTERN) {
+      destination.scrollbarThumbPattern = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_ARROW_PATTERN) {
+      destination.scrollbarArrowPattern = value;
     } else if constexpr (METRIC) {
       destination.minWidth = value;
     }
@@ -463,6 +482,15 @@ template <class R, class P> consteval void validateRule(const R &rule, const P &
 
   static_assert(uniqueDeclarations(decltype(rule.declarations){}), "Static style rule repeats a declaration");
   const auto values = declarations(rule, parameters, parameters.defaults());
+
+  if ((values.scrollbarTrackPattern && (*values.scrollbarTrackPattern < ScrollbarPattern::LEGACY ||
+                                        *values.scrollbarTrackPattern > ScrollbarPattern::ASCII)) ||
+      (values.scrollbarThumbPattern && (*values.scrollbarThumbPattern < ScrollbarThumbPattern::LEGACY ||
+                                        *values.scrollbarThumbPattern > ScrollbarThumbPattern::ASCII)) ||
+      (values.scrollbarArrowPattern && (*values.scrollbarArrowPattern < ScrollbarArrowPattern::LEGACY ||
+                                        *values.scrollbarArrowPattern > ScrollbarArrowPattern::ASCII))) {
+    staticStyleInvalidScrollbarPattern();
+  }
 
   if (values.minWidth && (*values.minWidth < 0 || rule.selector.state != StyleState::ANY)) {
     staticStyleInvalidMetric();
@@ -867,6 +895,21 @@ template <class E> consteval auto frameEndsItalic(E expression) {
 /** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed frame declaration. */
 template <class E> consteval auto frameEndsUnderline(E expression) {
   return detail::Declaration<detail::Property::FRAME_ENDS_UNDERLINE, E>{expression};
+}
+
+/** @tparam E Owning enum expression. @param expression Independent source. @return Typed declaration. */
+template <class E> consteval auto scrollbarTrackPattern(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_TRACK_PATTERN, E>{expression};
+}
+
+/** @tparam E Owning enum expression. @param expression Independent source. @return Typed declaration. */
+template <class E> consteval auto scrollbarThumbPattern(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_THUMB_PATTERN, E>{expression};
+}
+
+/** @tparam E Owning enum expression. @param expression Independent source. @return Typed declaration. */
+template <class E> consteval auto scrollbarArrowPattern(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_ARROW_PATTERN, E>{expression};
 }
 
 /** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
