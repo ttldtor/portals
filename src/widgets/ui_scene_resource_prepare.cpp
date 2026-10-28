@@ -36,6 +36,25 @@ std::expected<void, ManagedError> registerSchemas(ControlContext &controls, cons
       paths.insert(paths.end(), {"state", "cycle"});
     }
 
+    const auto matchesPreProfileDataSchema = [&] {
+      if ((entry.virtualView != "VirtualList" && entry.virtualView != "VirtualTable") ||
+          !controls.hasRegisteredType(entry.name) || controls.matchesRegisteredType(entry.name, paths)) {
+        return false;
+      }
+
+      // Old expanded data allowlists may include the canonical frame leaves as well.
+      std::erase_if(paths, [](std::string_view path) {
+        return path == "glyphProfile" || path == "glyphFallback";
+      });
+
+      const bool matches = controls.matchesRegisteredType(entry.name, paths);
+
+      // Erasing retained capacity; always restore the full schema before returning.
+      paths.insert(paths.end(), {"glyphProfile", "glyphFallback"});
+
+      return matches;
+    };
+
     if (!entry.virtualView.empty()) {
       // An explicit old narrow allowlist remains an exact compatibility path.
       if (controls.hasRegisteredType(entry.name) && controls.matchesRegisteredType(entry.name, paths)) {
@@ -47,6 +66,10 @@ std::expected<void, ManagedError> registerSchemas(ControlContext &controls, cons
           paths.push_back(property.path);
         }
       }
+
+      if (matchesPreProfileDataSchema()) {
+        continue;
+      }
     }
 
     if (entry.sized && !(controls.hasRegisteredType(entry.name) && controls.matchesRegisteredType(entry.name, paths))) {
@@ -56,6 +79,10 @@ std::expected<void, ManagedError> registerSchemas(ControlContext &controls, cons
           paths.push_back(property.path);
         }
       }
+    }
+
+    if (matchesPreProfileDataSchema()) {
+      continue;
     }
 
     if (entry.declaredChoice &&

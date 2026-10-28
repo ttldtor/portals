@@ -4725,7 +4725,9 @@ TEST_CASE("Notifications semantic schema owns canonical metadata and keeps old n
                                                          "frame.customTitleDecoration.prefix",
                                                          "frame.customTitleDecoration.suffix"};
 
-  REQUIRE(canonical.size() == 47);
+  REQUIRE(canonical.size() == 49);
+  CHECK(std::ranges::count(canonical, "glyphProfile", &ui::ControlPropertyDescriptor::path) == 1);
+  CHECK(std::ranges::count(canonical, "glyphFallback", &ui::ControlPropertyDescriptor::path) == 1);
   CHECK(std::ranges::count_if(canonical, [](const auto &property) {
           return property.path.starts_with("frame.");
         }) == static_cast<std::ptrdiff_t>(FRAME_PATHS.size()));

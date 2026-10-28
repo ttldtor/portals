@@ -301,8 +301,18 @@ void scalarRejectionAndColdList() {
 }
 
 void explicitDataSchemas() {
+  enum class SchemaMode {
+    NARROW,
+    EXPANDED,
+    GLYPH_EXPANDED,
+    FRAME_EXPANDED,
+    GLYPH_FRAME_EXPANDED
+  };
+
   for (const bool table : {false, true}) {
-    for (const bool expanded : {false, true}) {
+    for (const auto mode : {SchemaMode::NARROW, SchemaMode::EXPANDED, SchemaMode::GLYPH_EXPANDED,
+                            SchemaMode::FRAME_EXPANDED, SchemaMode::GLYPH_FRAME_EXPANDED}) {
+      const bool expanded = mode != SchemaMode::NARROW;
       ReplayTerminal terminal;
       auto app = take(Application::create({}, terminal.clock()));
       auto scene = take(ManagedScene::create(*app));
@@ -320,6 +330,19 @@ void explicitDataSchemas() {
           paths.insert(paths.end(), {"maxColumns", "maxPreparedCells", "maxPreparedTextBytes"});
         }
       }
+
+      if (mode == SchemaMode::GLYPH_EXPANDED || mode == SchemaMode::GLYPH_FRAME_EXPANDED) {
+        paths.insert(paths.end(), {"glyphProfile", "glyphFallback"});
+      }
+
+      if (mode == SchemaMode::FRAME_EXPANDED || mode == SchemaMode::GLYPH_FRAME_EXPANDED) {
+        for (const auto &property : ui::controlPropertySchema(table ? "VirtualTable" : "VirtualList")) {
+          if (property.path.starts_with("frame.")) {
+            paths.push_back(property.path);
+          }
+        }
+      }
+
       options.controls->registerType("Bound", paths);
       int callbacks{};
 
@@ -383,6 +406,35 @@ void explicitDataSchemas() {
       }
     }
   }
+}
+
+void conflictingDataSchemaRejected() {
+  ReplayTerminal terminal;
+  auto app = take(Application::create({}, terminal.clock()));
+  auto scene = take(ManagedScene::create(*app));
+  auto model = take(scene->model<Ohlc>(std::make_shared<const Prices>()));
+  ui::SceneResourceOptions options;
+  constexpr std::string_view PATHS[]{"text",         "width",        "height",        "flex",      "rowHeight",
+                                     "overscanRows", "glyphProfile", "glyphFallback", "maxColumns"};
+  int callbacks{};
+
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  options.controls.emplace();
+  options.controls->registerType("Bound", PATHS);
+  take(options.registry.add<VirtualList<Ohlc>>("Bound", [&](ui::SceneResourceArguments) {
+    ++callbacks;
+
+    return ui::virtualList(model, [](const ModelRow<Ohlc> &) {
+      return virtualConsumer::text("row");
+    });
+  }));
+
+  const auto result = ui::mount(*scene, ui::resource("scene{Bound{}}", options));
+
+  check(!result && result.error().sceneResource &&
+          result.error().sceneResource->code == SceneResourceErrorCode::DUPLICATE_TYPE && callbacks == 0 &&
+          take(app->tree().inspect(scene->root())).children.empty(),
+        "VirtualList schema with table-only maxColumns must reject before factory invocation or publication");
 }
 
 void dataFactoryLeafAccounting() {
@@ -1028,6 +1080,7 @@ int main() {
   chartScalarParity();
   chartRangeFailuresAndPreservation();
   explicitDataSchemas();
+  conflictingDataSchemaRejected();
   dataFactoryLeafAccounting();
   dataScalarParity();
   scalarRejectionAndColdList();
