@@ -14,7 +14,8 @@
 | Буквальный поиск | [Руководство FindBar](find-bar.md), [main.cpp](../../examples/find_bar/main.cpp) | [guide_find_bar_resource.cpp](../examples/guide_find_bar_resource.cpp) |
 | Поля с подписями и валидация | [Настройки учётной записи](form-fields.md), [main.cpp](../../examples/form_field/main.cpp) | [guide_form_field_resource.cpp](../examples/guide_form_field_resource.cpp) |
 | Защищённое поле пароля | [guide_password.cpp](../examples/guide_password.cpp) | [guide_password_resource.cpp](../examples/guide_password_resource.cpp) |
-| Рамки и прокрутка | [guide_scrollbar_skin.cpp](../examples/guide_scrollbar_skin.cpp) | [guide_scrollbar_resource.cpp](../examples/guide_scrollbar_resource.cpp) |
+| Рамки и заголовки | [guide_frame_styles.cpp](../examples/guide_frame_styles.cpp), [запись и руководство](compact-primitives.md) | [Свойства рамок](compact-primitives.md), справка |
+| Стили полос на рамке | [guide_scrollbar_gallery.cpp](../examples/guide_scrollbar_gallery.cpp), [запись и руководство](scroll-controls.md) | [guide_scrollbar_resource.cpp](../examples/guide_scrollbar_resource.cpp) |
 | Ограниченный текстовый журнал | [LogView](log-view.md), [main.cpp](../../examples/log_view/main.cpp) | [guide_log_view_resource.cpp](../examples/guide_log_view_resource.cpp) |
 | Диалоги | [guide_dialog.cpp](../examples/guide_dialog.cpp), [guide_dialog_actions.cpp](../examples/guide_dialog_actions.cpp) | [guide_dialog_resource.cpp](../examples/guide_dialog_resource.cpp) |
 | Изменения CheckBox | [guide_check_change.cpp](../examples/guide_check_change.cpp) | [guide_check_resource.cpp](../examples/guide_check_resource.cpp) |

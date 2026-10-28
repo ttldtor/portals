@@ -214,6 +214,13 @@ TEST_CASE("constant standard theme reproduces existing ThemeTokens helper for al
   CHECK(initialFrame.title == expectedFrame);
   CHECK(initialFrame.ends == expectedFrame);
 
+  const auto initialScrollbar = resolveStyle(after, {"ScrollArea", "", {}}).scrollbar[1];
+
+  CHECK(initialScrollbar.track == expectedFrame);
+  CHECK(initialScrollbar.thumb == expectedFrame);
+  CHECK(initialScrollbar.ends == expectedFrame);
+  CHECK(initialScrollbar.corner == expectedFrame);
+
   Fixture fixture;
   auto live = take(sc::live(*fixture.owner, STANDARD));
   CHECK(take(live.set<"selection">(RgbColor{70, 80, 90})));
@@ -226,6 +233,13 @@ TEST_CASE("constant standard theme reproduces existing ThemeTokens helper for al
   CHECK(updatedFrame.line->background == TOKENS.background);
   CHECK(updatedFrame.title == updatedFrame.line);
   CHECK(updatedFrame.ends == updatedFrame.line);
+
+  const auto updatedScrollbar = fixture.read().scrollbar[1];
+
+  CHECK(updatedScrollbar.track == updatedFrame.line);
+  CHECK(updatedScrollbar.thumb == updatedFrame.line);
+  CHECK(updatedScrollbar.ends == updatedFrame.line);
+  CHECK(updatedScrollbar.corner == updatedFrame.line);
 }
 
 TEST_CASE("live scalar changes use existing paint layout invalidation and equal no-op") {

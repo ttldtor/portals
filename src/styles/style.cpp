@@ -296,13 +296,19 @@ StyleSheet themeFromTokens(ThemeTokens tokens) {
   };
 
   stateRule(StyleState::FOCUSED, tokens.background, tokens.accent, true);
-  // Focused frames use the theme accent without applying an action fill to their lines.
+  // Focused chrome uses accent ink on the surface instead of an action fill.
   auto &focused = sheet.rules.back().declarations;
-  const StylePaintDeclarations frame{.foreground = tokens.accent, .background = tokens.background, .bold = true};
+  const StylePaintDeclarations accentOnSurface{
+    .foreground = tokens.accent, .background = tokens.background, .bold = true};
 
-  focused.frameLine = frame;
-  focused.frameTitle = frame;
-  focused.frameEnds = frame;
+  focused.frameLine = accentOnSurface;
+  focused.frameTitle = accentOnSurface;
+  focused.frameEnds = accentOnSurface;
+  // A full-block thumb uses foreground ink; an action fill would hide it in the surface color.
+  focused.scrollbarTrack = accentOnSurface;
+  focused.scrollbarThumb = accentOnSurface;
+  focused.scrollbarEnds = accentOnSurface;
+  focused.scrollbarCorner = accentOnSurface;
 
   stateRule(StyleState::DISABLED, tokens.muted, tokens.background, false);
   stateRule(StyleState::SELECTED, tokens.foreground, tokens.selection, true);

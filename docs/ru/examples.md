@@ -290,6 +290,12 @@ cmake --build build/guide-examples
 восемь кнопок в рамке с заголовком и внешним размером 28×6, полосу на рамке,
 wheel/key/drag и выход через Exit/F10.
 
+[Галерея рамок и заголовков](compact-primitives.md) собирается как
+`guide_frame_styles`, а [галерея полос на рамке](scroll-controls.md) — как
+`guide_scrollbar_gallery`. В обоих руководствах есть нативные записи,
+статичные кадры и полные декларативные исходники. В корневой сборке с тестами
+эти цели называются `portals_docs_frame_styles` и `portals_docs_scrollbar_gallery`.
+
 [Вложенная форма настроек](scroll-controls.md#nested-scroll-areas-ru) собирается как
 `guide_nested_scroll`; корневая сборка с тестами называет её `portals_docs_nested_scroll`.
 Она использует редактируемые поля, CheckBox с внутренним состоянием и две области `ON_FRAME`.
