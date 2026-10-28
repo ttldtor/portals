@@ -70,7 +70,7 @@ CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, StyleState
   constexpr std::size_t FRAME_PART_COUNT = FrameParts ? 3 : 0;
   constexpr std::size_t SCROLLBAR_PART_COUNT = ScrollbarParts ? 5 : 0;
   constexpr std::size_t PART_COUNT = FRAME_PART_COUNT + SCROLLBAR_PART_COUNT;
-  std::array<std::optional<CascadeRank>, PAINT_ATTRIBUTE_COUNT *(PART_COUNT + 1)> ranks;
+  std::array<std::optional<CascadeRank>, PAINT_ATTRIBUTE_COUNT *(PART_COUNT + 1) + (ScrollbarParts ? 3 : 0)> ranks;
   [[maybe_unused]] std::array<StylePaintDeclarations, PART_COUNT> overrides;
   const auto assign = [&]<class T>(const std::optional<T> &value, auto &destination, std::size_t index,
                                    CascadeRank rank) {
@@ -115,6 +115,10 @@ CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, StyleState
     }
 
     if constexpr (ScrollbarParts) {
+      constexpr auto FIRST_PATTERN = PAINT_ATTRIBUTE_COUNT * (PART_COUNT + 1);
+      assign(values.scrollbarTrackPattern, scrollbar.trackPattern, FIRST_PATTERN, rank);
+      assign(values.scrollbarThumbPattern, scrollbar.thumbPattern, FIRST_PATTERN + 1, rank);
+      assign(values.scrollbarArrowPattern, scrollbar.arrowPattern, FIRST_PATTERN + 2, rank);
       applyParts(std::array{&values.scrollbarTrack, &values.scrollbarThumb, &values.scrollbarEnds,
                             &values.scrollbarArrows, &values.scrollbarCorner},
                  FRAME_PART_COUNT);
@@ -175,7 +179,8 @@ ComputedStyle resolveRules(const Visit &visit, const StyleTarget &target, Comput
     scrollbarParts =
       scrollbarParts || ((hasPaintDeclarations(values.scrollbarTrack) || hasPaintDeclarations(values.scrollbarThumb) ||
                           hasPaintDeclarations(values.scrollbarEnds) || hasPaintDeclarations(values.scrollbarArrows) ||
-                          hasPaintDeclarations(values.scrollbarCorner)) &&
+                          hasPaintDeclarations(values.scrollbarCorner) || values.scrollbarTrackPattern ||
+                          values.scrollbarThumbPattern || values.scrollbarArrowPattern) &&
                          matches(rule.selector, target, rule.selector.state));
 
     if (!rule.declarations.minWidth || !matches(rule.selector, target, StyleState::ANY)) {
@@ -226,6 +231,17 @@ std::expected<void, StyleError> validate(const StyleSheet &sheet) {
   }
 
   for (const auto &rule : sheet.rules) {
+    const auto &d = rule.declarations;
+
+    if ((d.scrollbarTrackPattern &&
+         (*d.scrollbarTrackPattern < ScrollbarPattern::LEGACY || *d.scrollbarTrackPattern > ScrollbarPattern::ASCII)) ||
+        (d.scrollbarThumbPattern && (*d.scrollbarThumbPattern < ScrollbarThumbPattern::LEGACY ||
+                                     *d.scrollbarThumbPattern > ScrollbarThumbPattern::ASCII)) ||
+        (d.scrollbarArrowPattern && (*d.scrollbarArrowPattern < ScrollbarArrowPattern::LEGACY ||
+                                     *d.scrollbarArrowPattern > ScrollbarArrowPattern::ASCII))) {
+      return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Invalid scrollbar pattern"));
+    }
+
     if (rule.selector.state < StyleState::ANY || rule.selector.state > StyleState::CARET ||
         (rule.declarations.minWidth && (*rule.declarations.minWidth < 0 || rule.selector.state != StyleState::ANY))) {
       return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Invalid state or state-dependent metric"));
@@ -803,7 +819,8 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
                                 partCount(d.scrollbarTrack) + partCount(d.scrollbarThumb) + partCount(d.scrollbarEnds) +
                                 partCount(d.scrollbarArrows) + partCount(d.scrollbarCorner) + d.foreground.has_value() +
                                 d.background.has_value() + d.bold.has_value() + d.italic.has_value() +
-                                d.underline.has_value() + d.minWidth.has_value();
+                                d.underline.has_value() + d.minWidth.has_value() + d.scrollbarTrackPattern.has_value() +
+                                d.scrollbarThumbPattern.has_value() + d.scrollbarArrowPattern.has_value();
       if (!charge(declarations, count, options.maxDeclarations) ||
           !charge(bytes, sizeof(StyleRule), options.maxOwnedBytes) || !chargeString(rule.selector.type) ||
           !chargeString(rule.selector.id)) {

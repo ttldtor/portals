@@ -6316,3 +6316,53 @@ TEST_CASE("functional arrow resource leaves reach mounted native paint") {
     REQUIRE(owner.close());
   }
 }
+
+TEST_CASE("segmented scrollbar resources preserve independent parts in grouped and dotted form") {
+  for (
+    const std::string_view properties :
+    {R"(scrollbar{pattern=ASCII trackPattern=MINIMAL thumbPattern=BLOCK arrowPattern=ASCII horizontal{thumbStart="[" thumbBody="=" thumbEnd="]" thumbSingle="o"} vertical{thumbStart="A" thumbBody="I" thumbEnd="V" thumbSingle="O"}})",
+     R"(scrollbar.pattern=ASCII scrollbar.trackPattern=MINIMAL scrollbar.thumbPattern=BLOCK scrollbar.arrowPattern=ASCII scrollbar.horizontal.thumbStart="[" scrollbar.horizontal.thumbBody="=" scrollbar.horizontal.thumbEnd="]" scrollbar.horizontal.thumbSingle="o" scrollbar.vertical.thumbStart="A" scrollbar.vertical.thumbBody="I" scrollbar.vertical.thumbEnd="V" scrollbar.vertical.thumbSingle="O")"}) {
+    ui::SceneResourceOptions options;
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    options.limits.maxProperties = 40;
+    auto owner = ui::scene("scene{ScrollArea#area{width=16 height=10 frame=\"double\" frame.title=\"Title\" "
+                           "frame.titleDecoration=SQUARE arrows=true " +
+                             std::string(properties) + " Label{text=\"body\" width=25 height=10}}}",
+                           options);
+    auto area = owner.get<ScrollArea>("area");
+    owner | ui::style("ScrollArea{scrollbar-thumb-foreground:#010203;scrollbar-arrows-background:#040506;}");
+    REQUIRE(owner.prepareChecked());
+    auto &managed = owner.managed()->get();
+    auto &app = ui::detail::SceneAccess::application(managed);
+    layoutResourceFrame(managed, app, {16, 10});
+    layoutResourceFrame(managed, app, {16, 10});
+    ResourceFramePaint sink;
+    REQUIRE(app.tree().frame([&] {
+      REQUIRE(app.tree().paint(area.node(), sink));
+    }));
+
+    for (const auto glyph : {"[", "=", "]", "A", "I", "V", "<", ">", "^", "v", "Title"}) {
+      INFO(glyph);
+      CHECK(std::ranges::find(sink.text, glyph) != sink.text.end());
+    }
+
+    REQUIRE(app.tree().read(area.node(), [&](const ScrollArea &widget) {
+      REQUIRE(widget.computedStyle());
+      CHECK(widget.computedStyle()->scrollbar[0].thumb->foreground == RgbColor{1, 2, 3});
+      CHECK(widget.computedStyle()->scrollbar[0].arrows->background == RgbColor{4, 5, 6});
+    }));
+    REQUIRE(owner.close());
+  }
+
+  ui::SceneResourceOptions options;
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+
+  for (const auto property :
+       {R"(scrollbar.thumbPattern=ROUNDED)", R"(scrollbar.arrowPattern=UNKNOWN)", R"(scrollbar.trackPattern=BLOCK)",
+        R"(scrollbar.horizontal.thumbStart="")", R"(scrollbar.vertical.thumbSingle="ab")"}) {
+    auto owner = ui::scene("scene{ScrollBar#bar{" + std::string(property) + "}}", options);
+    auto bar = owner.get<ScrollBar>("bar");
+    CHECK_FALSE(owner.prepareChecked());
+    CHECK(bar.node() == Node<ScrollBar>{});
+  }
+}

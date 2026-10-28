@@ -518,6 +518,66 @@ inline ScrollbarModifier scrollbar(ScrollbarSkin skin) {
   return {std::move(skin)};
 }
 
+/** @brief Independent scrollbar appearance stage; omitted parts keep their sources. */
+struct ScrollbarPartModifier {
+  std::optional<ScrollbarPattern> trackPattern{};      ///< Selected track source, preserving siblings.
+  std::optional<ScrollbarThumbPattern> thumbPattern{}; ///< Selected thumb source, preserving siblings.
+  std::optional<ScrollbarArrowPattern> arrowPattern{}; ///< Selected arrow source, preserving behavior.
+
+  /** @tparam T Exactly ScrollArea or ScrollBar.
+   * @param description Consumed scroll recipe.
+   * @param modifier Owning sparse preset settings.
+   * @return Consumed area/bar with only the selected part changed.
+   */
+  template <class T>
+    requires(std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+  friend Description<T> operator|(Description<T> &&description, ScrollbarPartModifier modifier) {
+    if (modifier.trackPattern) {
+      (void)std::move(description).scrollTrack(*modifier.trackPattern);
+    }
+
+    if (modifier.thumbPattern) {
+      (void)std::move(description).scrollThumb(*modifier.thumbPattern);
+    }
+
+    if (modifier.arrowPattern) {
+      (void)std::move(description).scrollArrows(*modifier.arrowPattern);
+    }
+
+    return std::move(description);
+  }
+};
+
+/** @param pattern Independent part source. @return Sparse owning appearance stage. */
+inline ScrollbarPartModifier scrollTrack(std::string_view pattern) {
+  return {.trackPattern = detail::scrollbarPattern(pattern)};
+}
+
+/** @param pattern Independent part source. @return Sparse owning appearance stage. */
+inline ScrollbarPartModifier scrollTrack(ScrollbarPattern pattern) {
+  return {.trackPattern = pattern};
+}
+
+/** @param pattern Independent part source. @return Sparse owning appearance stage. */
+inline ScrollbarPartModifier scrollThumb(std::string_view pattern) {
+  return {.thumbPattern = detail::scrollbarThumbPattern(pattern)};
+}
+
+/** @param pattern Independent part source. @return Sparse owning appearance stage. */
+inline ScrollbarPartModifier scrollThumb(ScrollbarThumbPattern pattern) {
+  return {.thumbPattern = pattern};
+}
+
+/** @param pattern Independent part source. @return Sparse owning appearance stage. */
+inline ScrollbarPartModifier scrollArrows(std::string_view pattern) {
+  return {.arrowPattern = detail::scrollbarArrowPattern(pattern)};
+}
+
+/** @param pattern Independent part source. @return Sparse owning appearance stage. */
+inline ScrollbarPartModifier scrollArrows(ScrollbarArrowPattern pattern) {
+  return {.arrowPattern = pattern};
+}
+
 /** @brief Owning ScrollArea-only placement/frame pipe stage; frame leaves never enable a frame implicitly. */
 struct ScrollAreaModifier {
   ControlSettings settings; ///< Sparse native area placement and existing one-cell frame leaves.
@@ -630,7 +690,10 @@ inline std::expected<void, ManagedError> detail::Access::applyScrollbarSkin(Mana
                        .maxGlyphBytes = source.maxGlyphBytes.value_or(DEFAULT_SCROLLBAR_GLYPH_BYTES),
                        .horizontal = source.horizontal,
                        .vertical = source.vertical,
-                       .corner = source.corner};
+                       .corner = source.corner,
+                       .trackPattern = source.trackPattern,
+                       .thumbPattern = source.thumbPattern,
+                       .arrowPattern = source.arrowPattern};
     auto applied = setScrollbarSkin(scene.app_.tree(), node, skin);
 
     return applied ? std::expected<void, ManagedError>{} : std::unexpected(error(node, applied.error()));

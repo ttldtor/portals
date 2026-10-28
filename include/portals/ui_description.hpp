@@ -333,6 +333,54 @@ public:
     return std::move(*this).scalarSettings({.scrollbar = {.pattern = pattern}});
   }
 
+  /** @param pattern Independent part preset; unknown names fail before painting.
+   * @return Consumed scroll recipe, preserving other parts and frame/title settings.
+   */
+  Description &&scrollTrack(std::string_view pattern) &&
+    requires(std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+  {
+    return std::move(*this).scrollTrack(detail::scrollbarPattern(pattern));
+  }
+
+  /** @param pattern Independent typed part preset. @return Consumed sparse scroll recipe. */
+  Description &&scrollTrack(ScrollbarPattern pattern) &&
+    requires(std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+  {
+    return std::move(*this).scalarSettings({.scrollbar = {.trackPattern = pattern}});
+  }
+
+  /** @param pattern Independent part preset; unknown names fail before painting.
+   * @return Consumed scroll recipe, preserving other parts and frame/title settings.
+   */
+  Description &&scrollThumb(std::string_view pattern) &&
+    requires(std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+  {
+    return std::move(*this).scrollThumb(detail::scrollbarThumbPattern(pattern));
+  }
+
+  /** @param pattern Independent typed part preset. @return Consumed sparse scroll recipe. */
+  Description &&scrollThumb(ScrollbarThumbPattern pattern) &&
+    requires(std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+  {
+    return std::move(*this).scalarSettings({.scrollbar = {.thumbPattern = pattern}});
+  }
+
+  /** @param pattern Independent part preset; unknown names fail before painting.
+   * @return Consumed scroll recipe, preserving other parts and frame/title settings.
+   */
+  Description &&scrollArrows(std::string_view pattern) &&
+    requires(std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+  {
+    return std::move(*this).scrollArrows(detail::scrollbarArrowPattern(pattern));
+  }
+
+  /** @param pattern Independent typed part preset. @return Consumed sparse scroll recipe. */
+  Description &&scrollArrows(ScrollbarArrowPattern pattern) &&
+    requires(std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+  {
+    return std::move(*this).scalarSettings({.scrollbar = {.arrowPattern = pattern}});
+  }
+
   /** @param skin Owning source copied into sparse configuration; glyphs are validated at mount.
    * @return Consuming scroll recipe. Existing geometry, offsets and input actions are preserved.
    * Construction/capture may throw on allocation, as for other owning recipe settings.
@@ -345,7 +393,10 @@ public:
                                                           .maxGlyphBytes = skin.maxGlyphBytes,
                                                           .horizontal = skin.horizontal,
                                                           .vertical = skin.vertical,
-                                                          .corner = skin.corner}});
+                                                          .corner = skin.corner,
+                                                          .trackPattern = skin.trackPattern,
+                                                          .thumbPattern = skin.thumbPattern,
+                                                          .arrowPattern = skin.arrowPattern}});
   }
 
   /** @param enabled True creates a missing default one-cell frame; false removes the effective frame.

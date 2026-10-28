@@ -25,6 +25,9 @@ int main() {
         .titleDecoration("square")
         .scrollOnFrame()
         .arrows()
+        .scrollTrack("minimal")
+        .scrollThumb("block")
+        .scrollArrows("ascii")
         .width(28)
         .height(6),
       ui::button("Exit", [] { ui::quit(); })))

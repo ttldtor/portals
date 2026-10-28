@@ -5,6 +5,7 @@
 #include <array>
 #include <optional>
 #include <portals/cell_buffer.hpp>
+#include <portals/scrollbar_skin.hpp>
 
 namespace portals {
 /** @brief Resolved frame parts; absent parts inherit the ordinary control state. */
@@ -26,6 +27,10 @@ struct ScrollbarAppearance {
   std::optional<CellStyle> ends{};   ///< Optional decorative endpoint cells.
   std::optional<CellStyle> corner{}; ///< Intersecting horizontal and vertical gutters.
   std::optional<CellStyle> arrows{}; ///< Functional end buttons, independent of decorative ends.
+
+  std::optional<ScrollbarPattern> trackPattern{};      ///< Resolved independent glyph source.
+  std::optional<ScrollbarThumbPattern> thumbPattern{}; ///< Resolved independent glyph source.
+  std::optional<ScrollbarArrowPattern> arrowPattern{}; ///< Resolved independent glyph source.
 
   /** @param other Value to compare. @return Whether every part agrees. */
   bool operator==(const ScrollbarAppearance &other) const = default;

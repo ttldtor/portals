@@ -29,6 +29,8 @@ constexpr std::size_t NOTIFICATION_WIDTH_PROPERTY = 118;
 constexpr std::size_t SELECTOR_SHORTCUT_PROPERTY = 142;
 constexpr std::array<std::string_view, 6> FRAME_PATTERN_NAMES{"SINGLE", "PLAIN", "ROUNDED", "DOUBLE", "HEAVY", "ASCII"};
 constexpr std::array<std::string_view, 4> SCROLLBAR_PATTERN_NAMES{"LEGACY", "FRAME", "MINIMAL", "ASCII"};
+constexpr std::array<std::string_view, 3> SCROLLBAR_THUMB_PATTERN_NAMES{"LEGACY", "BLOCK", "ASCII"};
+constexpr std::array<std::string_view, 3> SCROLLBAR_ARROW_PATTERN_NAMES{"LEGACY", "TRIANGLE", "ASCII"};
 constexpr std::array<std::string_view, 5> TITLE_DECORATION_NAMES{"NONE", "SPACED", "SQUARE", "ANGLE", "ROUND"};
 constexpr std::array<std::string_view, 3> FRAME_TITLE_ALIGNMENT_NAMES{"START", "CENTER", "END"};
 constexpr std::array<std::string_view, 3> STATE_NAMES{"UNCHECKED", "CHECKED", "MIXED"};
@@ -301,7 +303,18 @@ constexpr std::array<ControlPropertyDescriptor, detail::CONTROL_PROPERTY_COUNT> 
    {"scrollbar.horizontal.backward", Kind::LITERAL_STRING, 3, {}},
    {"scrollbar.horizontal.forward", Kind::LITERAL_STRING, 3, {}},
    {"scrollbar.vertical.backward", Kind::LITERAL_STRING, 3, {}},
-   {"scrollbar.vertical.forward", Kind::LITERAL_STRING, 3, {}}}};
+   {"scrollbar.vertical.forward", Kind::LITERAL_STRING, 3, {}},
+   {"scrollbar.trackPattern", Kind::ENUMERATION, 2, SCROLLBAR_PATTERN_NAMES},
+   {"scrollbar.thumbPattern", Kind::ENUMERATION, 2, SCROLLBAR_THUMB_PATTERN_NAMES},
+   {"scrollbar.arrowPattern", Kind::ENUMERATION, 2, SCROLLBAR_ARROW_PATTERN_NAMES},
+   {"scrollbar.horizontal.thumbStart", Kind::LITERAL_STRING, 3, {}},
+   {"scrollbar.horizontal.thumbBody", Kind::LITERAL_STRING, 3, {}},
+   {"scrollbar.horizontal.thumbEnd", Kind::LITERAL_STRING, 3, {}},
+   {"scrollbar.horizontal.thumbSingle", Kind::LITERAL_STRING, 3, {}},
+   {"scrollbar.vertical.thumbStart", Kind::LITERAL_STRING, 3, {}},
+   {"scrollbar.vertical.thumbBody", Kind::LITERAL_STRING, 3, {}},
+   {"scrollbar.vertical.thumbEnd", Kind::LITERAL_STRING, 3, {}},
+   {"scrollbar.vertical.thumbSingle", Kind::LITERAL_STRING, 3, {}}}};
 static_assert(std::ranges::all_of(PROPERTIES, [](const auto &property) {
   return !property.path.empty();
 }));
@@ -324,8 +337,8 @@ constexpr Mask BUTTON_MASK = SIZE_MASK | TEXT_MASK | propertyMask(37);
 constexpr Mask BORDER_MASK = SIZE_MASK | propertyMask(38, 39);
 constexpr Mask GAUGE_MASK = BORDER_MASK | propertyMask(40, 41, 42, 43);
 constexpr Mask SPINNER_MASK = SIZE_MASK | propertyMask(39, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203);
-constexpr Mask SCROLLBAR_MASK =
-  propertyMask(204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 234, 235, 236, 237);
+constexpr Mask SCROLLBAR_MASK = propertyMask(204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 234, 235, 236,
+                                             237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248);
 constexpr Mask SCROLL_COMMON_MASK =
   SIZE_MASK | SCROLLBAR_MASK | propertyMask(8, 38, 39, 44, 45, 46, 47, 48, 231, 232, 233);
 constexpr Mask SCROLL_AREA_MASK = SCROLL_COMMON_MASK | propertyMask(49, 50, 51, 53, 54, 55);
@@ -407,14 +420,17 @@ constexpr auto SCROLL_AREA_SCHEMA = withFrame(
                  PROPERTIES[50],  PROPERTIES[51],  PROPERTIES[204], PROPERTIES[205], PROPERTIES[206], PROPERTIES[207],
                  PROPERTIES[208], PROPERTIES[209], PROPERTIES[210], PROPERTIES[211], PROPERTIES[212], PROPERTIES[213],
                  PROPERTIES[214], PROPERTIES[215], PROPERTIES[231], PROPERTIES[232], PROPERTIES[233], PROPERTIES[234],
-                 PROPERTIES[235], PROPERTIES[236], PROPERTIES[237]}));
-constexpr auto SCROLL_BAR_SCHEMA = withFrame(
-  std::to_array({PROPERTIES[1],   PROPERTIES[2],   PROPERTIES[3],   PROPERTIES[8],   PROPERTIES[38],  PROPERTIES[39],
-                 PROPERTIES[44],  PROPERTIES[45],  PROPERTIES[46],  PROPERTIES[47],  PROPERTIES[48],  PROPERTIES[52],
-                 PROPERTIES[204], PROPERTIES[205], PROPERTIES[206], PROPERTIES[207], PROPERTIES[208], PROPERTIES[209],
-                 PROPERTIES[210], PROPERTIES[211], PROPERTIES[212], PROPERTIES[213], PROPERTIES[214], PROPERTIES[215],
-                 PROPERTIES[231], PROPERTIES[232], PROPERTIES[233], PROPERTIES[234], PROPERTIES[235], PROPERTIES[236],
-                 PROPERTIES[237]}));
+                 PROPERTIES[235], PROPERTIES[236], PROPERTIES[237], PROPERTIES[238], PROPERTIES[239], PROPERTIES[240],
+                 PROPERTIES[241], PROPERTIES[242], PROPERTIES[243], PROPERTIES[244], PROPERTIES[245], PROPERTIES[246],
+                 PROPERTIES[247], PROPERTIES[248]}));
+constexpr auto SCROLL_BAR_SCHEMA = withFrame(std::to_array(
+  {PROPERTIES[1],   PROPERTIES[2],   PROPERTIES[3],   PROPERTIES[8],   PROPERTIES[38],  PROPERTIES[39],
+   PROPERTIES[44],  PROPERTIES[45],  PROPERTIES[46],  PROPERTIES[47],  PROPERTIES[48],  PROPERTIES[52],
+   PROPERTIES[204], PROPERTIES[205], PROPERTIES[206], PROPERTIES[207], PROPERTIES[208], PROPERTIES[209],
+   PROPERTIES[210], PROPERTIES[211], PROPERTIES[212], PROPERTIES[213], PROPERTIES[214], PROPERTIES[215],
+   PROPERTIES[231], PROPERTIES[232], PROPERTIES[233], PROPERTIES[234], PROPERTIES[235], PROPERTIES[236],
+   PROPERTIES[237], PROPERTIES[238], PROPERTIES[239], PROPERTIES[240], PROPERTIES[241], PROPERTIES[242],
+   PROPERTIES[243], PROPERTIES[244], PROPERTIES[245], PROPERTIES[246], PROPERTIES[247], PROPERTIES[248]}));
 constexpr auto LOG_VIEW_SCHEMA =
   withFrame(std::to_array({PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[8], PROPERTIES[225],
                            PROPERTIES[226], PROPERTIES[227], PROPERTIES[228], PROPERTIES[229]}));
@@ -926,7 +942,18 @@ ControlContextError exceptionError() noexcept {
   X(scrollbar.horizontal.backward, 234)                                                                                \
   X(scrollbar.horizontal.forward, 235)                                                                                 \
   X(scrollbar.vertical.backward, 236)                                                                                  \
-  X(scrollbar.vertical.forward, 237)
+  X(scrollbar.vertical.forward, 237)                                                                                   \
+  X(scrollbar.trackPattern, 238)                                                                                       \
+  X(scrollbar.thumbPattern, 239)                                                                                       \
+  X(scrollbar.arrowPattern, 240)                                                                                       \
+  X(scrollbar.horizontal.thumbStart, 241)                                                                              \
+  X(scrollbar.horizontal.thumbBody, 242)                                                                               \
+  X(scrollbar.horizontal.thumbEnd, 243)                                                                                \
+  X(scrollbar.horizontal.thumbSingle, 244)                                                                             \
+  X(scrollbar.vertical.thumbStart, 245)                                                                                \
+  X(scrollbar.vertical.thumbBody, 246)                                                                                 \
+  X(scrollbar.vertical.thumbEnd, 247)                                                                                  \
+  X(scrollbar.vertical.thumbSingle, 248)
 
 #define PORTALS_CONTROL_LEAVES(X) \
   PORTALS_CONTROL_BASE_LEAVES(X) \
@@ -1052,6 +1079,10 @@ template <class T> bool validValue(const T &value, std::size_t index) noexcept {
            value == FramePattern::HEAVY || value == FramePattern::ASCII;
   } else if constexpr (std::same_as<T, ScrollbarPattern>) {
     return value >= ScrollbarPattern::LEGACY && value <= ScrollbarPattern::ASCII;
+  } else if constexpr (std::same_as<T, ScrollbarThumbPattern>) {
+    return value >= ScrollbarThumbPattern::LEGACY && value <= ScrollbarThumbPattern::ASCII;
+  } else if constexpr (std::same_as<T, ScrollbarArrowPattern>) {
+    return value >= ScrollbarArrowPattern::LEGACY && value <= ScrollbarArrowPattern::ASCII;
   } else if constexpr (std::same_as<T, TitleDecoration>) {
     return value >= TitleDecoration::NONE && value <= TitleDecoration::ROUND;
   } else if constexpr (std::same_as<T, FrameTitleAlignment>) {
@@ -1287,6 +1318,23 @@ void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &pr
       std::pair<std::string_view, bool>{"placement", patch.placement.has_value()},
       std::pair<std::string_view, bool>{"axis", patch.axis.has_value()},
       std::pair<std::string_view, bool>{"scrollbar.pattern", patch.scrollbar.pattern.has_value()},
+      std::pair<std::string_view, bool>{"scrollbar.trackPattern", patch.scrollbar.trackPattern.has_value()},
+      std::pair<std::string_view, bool>{"scrollbar.thumbPattern", patch.scrollbar.thumbPattern.has_value()},
+      std::pair<std::string_view, bool>{"scrollbar.arrowPattern", patch.scrollbar.arrowPattern.has_value()},
+      std::pair<std::string_view, bool>{"scrollbar.horizontal.thumbStart",
+                                        patch.scrollbar.horizontal.thumbStart.has_value()},
+      std::pair<std::string_view, bool>{"scrollbar.horizontal.thumbBody",
+                                        patch.scrollbar.horizontal.thumbBody.has_value()},
+      std::pair<std::string_view, bool>{"scrollbar.horizontal.thumbEnd",
+                                        patch.scrollbar.horizontal.thumbEnd.has_value()},
+      std::pair<std::string_view, bool>{"scrollbar.horizontal.thumbSingle",
+                                        patch.scrollbar.horizontal.thumbSingle.has_value()},
+      std::pair<std::string_view, bool>{"scrollbar.vertical.thumbStart",
+                                        patch.scrollbar.vertical.thumbStart.has_value()},
+      std::pair<std::string_view, bool>{"scrollbar.vertical.thumbBody", patch.scrollbar.vertical.thumbBody.has_value()},
+      std::pair<std::string_view, bool>{"scrollbar.vertical.thumbEnd", patch.scrollbar.vertical.thumbEnd.has_value()},
+      std::pair<std::string_view, bool>{"scrollbar.vertical.thumbSingle",
+                                        patch.scrollbar.vertical.thumbSingle.has_value()},
       std::pair<std::string_view, bool>{"scrollbar.ends", patch.scrollbar.ends.has_value()},
       std::pair<std::string_view, bool>{"scrollbar.maxGlyphBytes", patch.scrollbar.maxGlyphBytes.has_value()},
       std::pair<std::string_view, bool>{"scrollbar.horizontal.track", patch.scrollbar.horizontal.track.has_value()},

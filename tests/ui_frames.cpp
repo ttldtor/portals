@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: BSL-1.0
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "../src/widgets/frame_text.hpp"
+#include "../src/widgets/scroll_controls_state.hpp"
 #include <doctest.h>
 #include <portals/ui.hpp>
+#include <portals/ui_style.hpp>
 
 #include <algorithm>
 #include <array>
@@ -806,9 +808,14 @@ TEST_CASE("scrollbar compact method pipe and owning settings share geometry and 
     auto recipe =
       ui::scrollArea(area, ui::label("body").width(40).height(30)).framed("double", "Title").width(12).height(6);
     if (pipe)
-      recipe = std::move(recipe) | ui::scrollbar(skin);
+      recipe = std::move(recipe) | ui::scrollTrack("ascii") | ui::scrollThumb(ScrollbarThumbPattern::ASCII) |
+               ui::scrollArrows("ascii") | ui::scrollbar(skin);
     else
-      recipe = std::move(recipe).scrollbar(skin);
+      recipe = std::move(recipe)
+                 .scrollbar(skin)
+                 .scrollTrack(ScrollbarPattern::ASCII)
+                 .scrollThumb("ascii")
+                 .scrollArrows(ScrollbarArrowPattern::ASCII);
     take(ui::mount(*fixture.scene, ui::vbox(std::move(recipe), ui::button(outside, "outside").onClick([] {
     }))));
     skin.corner = "!";
@@ -895,6 +902,136 @@ TEST_CASE("scrollbar preset method and pipe retain sparse context glyphs ends an
 
     for (const auto glyph : {"H", "Y", "v"}) {
       CHECK(std::ranges::find(rendered.text, glyph) != rendered.text.end());
+    }
+  }
+}
+
+TEST_CASE("PSS independent patterns select prepared glyphs without replacing custom segments or frame title") {
+  Fixture fixture;
+  ui::Ref<ScrollArea> area;
+  ScrollbarSkin skin;
+  skin.vertical.thumbSingle = "o";
+  skin.horizontal.track = "t";
+  take(ui::mount(*fixture.scene, ui::scrollArea(area, ui::label("body").width(40).height(30))
+                                   .framed("double", "Title")
+                                   .titleDecoration("square")
+                                   .arrows()
+                                   .scrollbar(skin)
+                                   .width(12)
+                                   .height(6)));
+  const auto document = parsePssDocument("ScrollArea{scrollbar-track-pattern:minimal;scrollbar-thumb-pattern:ascii;"
+                                         "scrollbar-arrow-pattern:ascii;scrollbar-thumb-foreground:#010203;} "
+                                         "ScrollArea:focused{scrollbar-track-pattern:frame;}");
+  REQUIRE(document);
+  take(fixture.scene->theme(document->sheet));
+  fixture.arrange();
+  fixture.arrange();
+  const auto normal = paint(fixture.app->tree(), area.node());
+  CHECK(std::ranges::find(normal.text, "o") != normal.text.end());
+  CHECK(std::ranges::find(normal.text, "t") != normal.text.end());
+  CHECK(std::ranges::find(normal.text, "#") != normal.text.end());
+  CHECK(std::ranges::find(normal.text, "Title") != normal.text.end());
+  CHECK(std::ranges::find(normal.text, "^") != normal.text.end());
+  take(area.focus());
+  const auto focused = paint(fixture.app->tree(), area.node());
+  CHECK(std::ranges::find(focused.text, "\xe2\x95\x91") != focused.text.end());
+  CHECK(std::ranges::find(focused.text, "o") != focused.text.end());
+}
+
+TEST_CASE("scrollbar appearance pipes merge behavior false values custom siblings and every part source") {
+  for (const bool arrows : {false, true}) {
+    INFO(arrows);
+    ScrollbarSkin skin;
+    skin.horizontal.track = "h";
+    skin.vertical.thumbSingle = "o";
+    skin.corner = "@";
+    const auto verify = [&](const detail::ScrollWidgetState &state) {
+      const auto options = [&](const auto &value) {
+        CHECK(value.arrows == arrows);
+        CHECK(value.wheelStep == 7);
+        CHECK(value.keyStep == 3);
+        CHECK(value.pageOverlap == 0);
+        CHECK_FALSE(value.focusable);
+        CHECK_FALSE(value.readOnly);
+      };
+
+      if (state.isArea) {
+        options(state.area);
+        CHECK(state.area.placement == ScrollPlacement::ON_FRAME);
+        CHECK(state.advancedFrame);
+
+        if (state.advancedFrame) {
+          CHECK(state.advancedFrame->options.pattern == FramePattern::DOUBLE);
+          CHECK(state.advancedFrame->options.title == "Title");
+        }
+      } else {
+        options(state.bar);
+      }
+
+      CHECK(state.scrollbarSkin);
+
+      if (!state.scrollbarSkin) {
+        return;
+      }
+
+      const auto &prepared = *state.scrollbarSkin;
+      const auto glyph = [&](const auto &value, std::string_view expected) {
+        CHECK(value);
+
+        if (value) {
+          CHECK(value->bytes() == expected);
+        }
+      };
+      glyph(prepared.glyphs[0], "h");
+      glyph(prepared.glyphs[4], " ");
+      glyph(prepared.glyphs[1], "#");
+      glyph(prepared.arrows[0], "<");
+      glyph(prepared.thumbSegments[7], "o");
+      glyph(prepared.glyphs[8], "@");
+    };
+    {
+      Fixture fixture;
+      INFO("ScrollArea");
+      ui::Ref<ScrollArea> area;
+      auto recipe = ui::scrollArea(area, ui::label("body").width(40).height(30),
+                                   ScrollAreaOptions{.focusable = true, .readOnly = true, .arrows = !arrows})
+                      .framed("double", "Title")
+                      .scrollOnFrame()
+                      .arrows(arrows)
+                      .wheelStep(7)
+                      .keyStep(3)
+                      .pageOverlap(0)
+                      .focusable(false)
+                      .readOnly(false)
+                      .scrollbar(skin)
+                      .scrollTrack("legacy") |
+                    ui::scrollTrack("minimal") | ui::scrollThumb(ScrollbarThumbPattern::ASCII) |
+                    ui::scrollArrows("ascii") | ui::scrollbar("frame");
+      take(ui::mount(*fixture.scene, std::move(recipe).width(12).height(6)));
+      take(fixture.app->tree().read(area.node(), [&](const ScrollArea &widget) {
+        verify(detail::ScrollWidgetAccess::state(widget));
+      }));
+    }
+    {
+      Fixture fixture;
+      INFO("ScrollBar");
+      ui::Ref<ScrollBar> bar;
+      auto recipe = ui::scrollBar(bar, ScrollAxis::VERTICAL,
+                                  ScrollBarOptions{.focusable = true, .readOnly = true, .arrows = !arrows})
+                      .arrows(arrows)
+                      .wheelStep(7)
+                      .keyStep(3)
+                      .pageOverlap(0)
+                      .focusable(false)
+                      .readOnly(false)
+                      .scrollbar(skin)
+                      .scrollTrack("legacy") |
+                    ui::scrollTrack(ScrollbarPattern::MINIMAL) | ui::scrollThumb("ascii") |
+                    ui::scrollArrows(ScrollbarArrowPattern::ASCII) | ui::scrollbar("frame");
+      take(ui::mount(*fixture.scene, std::move(recipe).height(10)));
+      take(fixture.app->tree().read(bar.node(), [&](const ScrollBar &widget) {
+        verify(detail::ScrollWidgetAccess::state(widget));
+      }));
     }
   }
 }

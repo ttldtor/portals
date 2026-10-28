@@ -171,7 +171,10 @@ bool hasScrollbarSettings(const ControlScrollbarSettings &settings) noexcept {
          settings.horizontal.thumb || settings.horizontal.start || settings.horizontal.end || settings.vertical.track ||
          settings.vertical.thumb || settings.vertical.start || settings.vertical.end || settings.corner ||
          settings.horizontal.backward || settings.horizontal.forward || settings.vertical.backward ||
-         settings.vertical.forward;
+         settings.vertical.forward || settings.trackPattern || settings.thumbPattern || settings.arrowPattern ||
+         settings.horizontal.thumbStart || settings.horizontal.thumbBody || settings.horizontal.thumbEnd ||
+         settings.horizontal.thumbSingle || settings.vertical.thumbStart || settings.vertical.thumbBody ||
+         settings.vertical.thumbEnd || settings.vertical.thumbSingle;
 }
 
 std::expected<ScrollAreaOptions, TreeError> controlScrollAreaOptions(const ControlSettings &settings,

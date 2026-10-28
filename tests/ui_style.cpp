@@ -1776,3 +1776,63 @@ TEST_CASE("scrollbar document compact and typed sheets retain the appended senti
     CHECK(treeCause(result.error(), TreeError::INVALID_ARGUMENT));
   }
 }
+
+TEST_CASE("scrollbar pattern PSS runtime static typed and compact documents share enum scalars") {
+  namespace sc = portals::style::ct;
+  constexpr auto LITERAL =
+    sc::pss("ScrollBar{scrollbar-track-pattern:minimal;scrollbar-thumb-pattern:block;scrollbar-arrow-pattern:ascii;}");
+  constexpr auto TYPED =
+    sc::sheet(sc::parameters(), sc::rule(sc::type<"ScrollBar">(), sc::scrollbarTrackPattern(ScrollbarPattern::MINIMAL),
+                                         sc::scrollbarThumbPattern(ScrollbarThumbPattern::BLOCK),
+                                         sc::scrollbarArrowPattern(ScrollbarArrowPattern::ASCII)));
+  constexpr auto PART_COMPACT = sc::compactSheet(std::array{sc::flatRule(
+    sc::type<"ScrollBar">(), sc::scrollbarTrackPattern(ScrollbarPattern::MINIMAL),
+    sc::scrollbarThumbPattern(ScrollbarThumbPattern::BLOCK), sc::scrollbarArrowPattern(ScrollbarArrowPattern::ASCII))});
+  const auto parsed = parsePssDocument(
+    "ScrollBar{scrollbar-track-pattern:minimal;scrollbar-thumb-pattern:block;scrollbar-arrow-pattern:ascii;}");
+  REQUIRE(parsed);
+  CHECK(sc::materialize(TYPED) == parsed->sheet);
+
+  for (unsigned mode : {0u, 1u, 2u}) {
+    auto owner = ui::scene(ui::scrollBar().scrollbar("ascii"));
+
+    if (mode == 0) {
+      owner | ui::style(LITERAL);
+    } else if (mode == 1) {
+      owner | ui::style(PART_COMPACT);
+    } else {
+      owner | ui::style(*parsed);
+    }
+
+    REQUIRE(owner.prepareChecked());
+    const auto sources = owner.managed()->get().styleSources();
+    REQUIRE(sources);
+    CHECK(sources->back().document->sheet == parsed->sheet);
+    REQUIRE(owner.close());
+  }
+
+  for (const auto source : {"*{scrollbar-track-pattern:block;}", "*{scrollbar-thumb-pattern:rounded;}",
+                            "*{scrollbar-arrow-pattern:frame;}"}) {
+    const auto result = parsePssDocument(source);
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == PssErrorCode::INVALID_VALUE);
+  }
+
+  for (unsigned forgery : {0u, 1u, 2u}) {
+    auto forged = *parsed;
+
+    if (forgery == 0) {
+      forged.declarations[0].value.pattern = 99;
+    } else if (forgery == 1) {
+      forged.declarations[0].value.boolean = true;
+    } else {
+      forged.declarations[1].value.width = 1;
+    }
+
+    auto owner = ui::scene(ui::label("body"));
+    owner | ui::style(forged);
+    const auto result = owner.prepareChecked();
+    REQUIRE_FALSE(result);
+    CHECK(treeCause(result.error(), TreeError::INVALID_ARGUMENT));
+  }
+}

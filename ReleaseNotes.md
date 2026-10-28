@@ -7,6 +7,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Add independent scrollbar track, thumb and arrow presets, with owning per-axis
+  thumb start/body/end/single glyphs. Fluent methods, pipe stages and loaded
+  scenes share the existing preparation and part styles. PSS can select the same
+  named part presets through the ordinary cascade; legacy defaults remain.
+
 - ScrollArea and ScrollBar gain opt-in functional arrow buttons with key-step clicks,
   cancellable scheduler-based hold, separate glyphs and `scrollbar-arrows-*` styling.
   Existing decorative scrollbar ends and default behavior remain compatible.

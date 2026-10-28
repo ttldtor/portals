@@ -27,6 +27,9 @@ struct PreparedScrollbarSkin {
   // Horizontal track/thumb/start/end, vertical track/thumb/start/end, optional corner.
   std::array<std::optional<GraphemeText>, 9> glyphs{};
   std::array<std::optional<GraphemeText>, 4> arrows{};
+  std::array<bool, 9> customGlyphs{};
+  std::array<bool, 4> customArrows{};
+  std::array<std::optional<GraphemeText>, 8> thumbSegments{}; // Start/body/end/single for each axis.
   bool ends{};
 };
 
@@ -52,6 +55,8 @@ struct ScrollRepeatState {
   bool held{};
   std::weak_ptr<ActionCancellation> binding;
 };
+
+using ScrollbarPresetGlyphs = std::array<GraphemeText, 7>;
 
 struct ScrollWidgetState {
   ScrollWidgetState(std::shared_ptr<ScrollController> controller, WidthPolicy width, PrimitiveGlyphs mode,
@@ -84,6 +89,8 @@ struct ScrollWidgetState {
   std::shared_ptr<ScrollRepeatState> repeat;
   std::weak_ptr<ScrollIntentRecord> intent;
   std::array<GraphemeText, 8> glyphs;
+  std::shared_ptr<const ScrollbarPresetGlyphs>
+    presetGlyphs; // Constructor-prepared palette; paint only dereferences it.
   std::unique_ptr<std::array<GraphemeText, 4>> arrowGlyphs;
   std::unique_ptr<PreparedScrollbarSkin> scrollbarSkin;
   std::uint64_t skinRevision{};

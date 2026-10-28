@@ -873,6 +873,7 @@ add_executable(portals_nested_scroll_consumer nested_scroll.cpp)
 add_executable(portals_nested_scroll_form_consumer "docs/examples/guide_nested_scroll.cpp")
 add_executable(portals_frame_styles_form_consumer "docs/examples/guide_frame_styles.cpp")
 add_executable(portals_scrollbar_gallery_form_consumer "docs/examples/guide_scrollbar_gallery.cpp")
+add_executable(portals_scrollbar_parts_form_consumer "docs/examples/guide_scrollbar_parts.cpp")
 add_executable(portals_scrollbar_skin_form_consumer "docs/examples/guide_scrollbar_skin.cpp")
 add_executable(portals_dialog_consumer dialog.cpp)
 add_executable(portals_dialog_form_consumer "docs/examples/guide_dialog.cpp")
@@ -894,7 +895,7 @@ add_executable(portals_theme_selector_form_consumer "docs/examples/guide_theme_s
 add_executable(portals_application_factory_form_consumer "docs/examples/guide_application_factory.cpp")
 add_executable(portals_style_contracts_consumer style_contracts.cpp)
 foreach(target IN ITEMS portals_nested_scroll_consumer portals_nested_scroll_form_consumer
-    portals_frame_styles_form_consumer portals_scrollbar_gallery_form_consumer
+    portals_frame_styles_form_consumer portals_scrollbar_gallery_form_consumer portals_scrollbar_parts_form_consumer
     portals_scrollbar_skin_form_consumer
     portals_dialog_consumer portals_dialog_form_consumer portals_message_box_consumer portals_message_box_form_consumer
     portals_nonmodal_dialog_form_consumer

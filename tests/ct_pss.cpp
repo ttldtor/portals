@@ -107,7 +107,11 @@ static_assert(sc::MAX_CT_PSS_RULES == 256 && sc::MAX_CT_PSS_DECLARATIONS == 1536
 static_assert(sc::MAX_CT_PSS_DESCRIPTOR_BYTES == 192 * 1024);
 static_assert(static_cast<std::size_t>(PssProperty::FRAME_ENDS_UNDERLINE) == 20);
 static_assert(static_cast<std::size_t>(PssProperty::SCROLLBAR_TRACK_FOREGROUND) == 21);
-static_assert(static_cast<std::size_t>(PssProperty::SCROLLBAR_CORNER_UNDERLINE) + 1 == PSS_PROPERTY_COUNT);
+static_assert(static_cast<std::size_t>(PssProperty::SCROLLBAR_ARROW_PATTERN) + 1 == PSS_PROPERTY_COUNT);
+constexpr auto SCROLLBAR_PATTERNS =
+  sc::pss("ScrollBar{scrollbar-track-pattern:minimal;scrollbar-thumb-pattern:block;scrollbar-arrow-pattern:ascii;}");
+static_assert(SCROLLBAR_PATTERNS.declarations().size() == 3);
+static_assert(SCROLLBAR_PATTERNS.declarations()[0].value.pattern == static_cast<int>(ScrollbarPattern::MINIMAL));
 constexpr auto SCROLLBAR_SENTINELS = sc::pss("*{scrollbar-track-foreground:#123456;scrollbar-corner-underline:false;}");
 static_assert(SCROLLBAR_SENTINELS.declarations().size() == 2);
 static_assert(std::is_trivially_copyable_v<decltype(RICH)>);
