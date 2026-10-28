@@ -64,7 +64,11 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, const Compu
   const auto stateIndex = !state.enabled ? 2 : state.focused ? 1 : 0;
   const auto &parts = resolved.scrollbar[stateIndex];
   const auto *segments = resolved.scrollbarThumbSegments ? &(*resolved.scrollbarThumbSegments)[stateIndex] : nullptr;
-  auto draw = [&](CellPoint point, const GraphemeText &glyph, const CellStyle &part) {
+  auto draw = [&](CellPoint point, const GraphemeText &glyph, const std::optional<CellStyle> &part) {
+    const RenderCommand command = TextCommand{point, glyph, *bounds, part.value_or(style)};
+    return context.submit(std::span(&command, 1));
+  };
+  auto drawSegment = [&](CellPoint point, const GraphemeText &glyph, const CellStyle &part) {
     const RenderCommand command = TextCommand{point, glyph, *bounds, part};
     return context.submit(std::span(&command, 1));
   };
@@ -122,7 +126,7 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, const Compu
         }
       }
 
-      if (inThumb) {
+      if (inThumb && (skin || segments)) {
         const auto segment = thumb.length == 1                            ? 3
                              : position == thumb.start                    ? 0
                              : position - thumb.start == thumb.length - 1 ? 2
@@ -163,7 +167,7 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, const Compu
         }
       }
 
-      auto result = draw(point, *glyph, segmentStyle ? *segmentStyle : part->value_or(style));
+      auto result = segmentStyle ? drawSegment(point, *glyph, *segmentStyle) : draw(point, *glyph, *part);
       if (!result) {
         return result;
       }
@@ -183,7 +187,7 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, const Compu
     return std::unexpected(TreeError::INVALID_GEOMETRY);
   }
   if (state.scrollbarSkin && state.scrollbarSkin->glyphs[8]) {
-    return draw(state.geometry.corner, *state.scrollbarSkin->glyphs[8], parts.corner.value_or(style));
+    return draw(state.geometry.corner, *state.scrollbarSkin->glyphs[8], parts.corner);
   }
 
   const RenderCommand command = FillCommand{*corner, *bounds, parts.corner.value_or(style)};
@@ -200,10 +204,28 @@ ComputedStyle ScrollBar::styleDefaults() const {
 }
 
 std::expected<void, TreeError> ScrollArea::paint(PaintContext &context) {
-  return detail::paintScroll(*state_, computedStyle() ? *computedStyle() : styleDefaults(), context);
+  const auto &cached = computedStyle();
+
+  if (cached) {
+    // The tree's paint borrow prevents style publication while the sink runs.
+    return detail::paintScroll(*state_, *cached, context);
+  }
+
+  const auto defaults = styleDefaults();
+
+  return detail::paintScroll(*state_, defaults, context);
 }
 
 std::expected<void, TreeError> ScrollBar::paint(PaintContext &context) {
-  return detail::paintScroll(*state_, computedStyle() ? *computedStyle() : styleDefaults(), context);
+  const auto &cached = computedStyle();
+
+  if (cached) {
+    // The tree's paint borrow prevents style publication while the sink runs.
+    return detail::paintScroll(*state_, *cached, context);
+  }
+
+  const auto defaults = styleDefaults();
+
+  return detail::paintScroll(*state_, defaults, context);
 }
 } // namespace portals
