@@ -6330,7 +6330,9 @@ TEST_CASE("segmented scrollbar resources preserve independent parts in grouped a
                              std::string(properties) + " Label{text=\"body\" width=25 height=10}}}",
                            options);
     auto area = owner.get<ScrollArea>("area");
-    owner | ui::style("ScrollArea{scrollbar-thumb-foreground:#010203;scrollbar-arrows-background:#040506;}");
+    owner | ui::style("ScrollArea{scrollbar-thumb-foreground:#010203;scrollbar-arrows-background:#040506;"
+                      "scrollbar-thumb-start-foreground:#070809;scrollbar-thumb-body-bold:false;"
+                      "scrollbar-thumb-end-italic:true;scrollbar-thumb-single-underline:true;}");
     REQUIRE(owner.prepareChecked());
     auto &managed = owner.managed()->get();
     auto &app = ui::detail::SceneAccess::application(managed);
@@ -6350,6 +6352,13 @@ TEST_CASE("segmented scrollbar resources preserve independent parts in grouped a
       REQUIRE(widget.computedStyle());
       CHECK(widget.computedStyle()->scrollbar[0].thumb->foreground == RgbColor{1, 2, 3});
       CHECK(widget.computedStyle()->scrollbar[0].arrows->background == RgbColor{4, 5, 6});
+      REQUIRE(widget.computedStyle()->scrollbarThumbSegments);
+      const auto &segments = (*widget.computedStyle()->scrollbarThumbSegments)[0];
+      CHECK(segments.start.foreground == RgbColor{7, 8, 9});
+      CHECK_FALSE(segments.body.bold);
+      CHECK(segments.end.italic);
+      CHECK(segments.single.underline);
+      CHECK(segments.end.foreground == RgbColor{1, 2, 3});
     }));
     REQUIRE(owner.close());
   }

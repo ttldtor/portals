@@ -7,6 +7,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Style scrollbar thumb start, body, end and single-cell segments independently
+  with foreground, background, bold, italic and underline declarations. Each
+  attribute falls back to the common thumb style; runtime, typed and compile-time
+  PSS, including loaded scenes, share the existing state and layer cascade.
+
 - Add independent scrollbar track, thumb and arrow presets, with owning per-axis
   thumb start/body/end/single glyphs. Fluent methods, pipe stages and loaded
   scenes share the existing preparation and part styles. PSS can select the same

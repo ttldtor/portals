@@ -2492,3 +2492,92 @@ TEST_CASE("theme scrollbar focus colors retain independent application overrides
   take(fixture.engine.removeLayer(layer));
   CHECK(fixture.read() == before);
 }
+
+TEST_CASE("thumb segment styles inherit common state attributes through layers and retain explicit false") {
+  Fixture fixture;
+  take(fixture.engine.enableLayers());
+  auto theme = take(parsePss(R"pss(* {
+    scrollbar-thumb-foreground:#010203; scrollbar-thumb-background:#040506;
+    scrollbar-thumb-bold:true; scrollbar-thumb-italic:true; scrollbar-thumb-underline:true;
+    scrollbar-thumb-start-foreground:#070809; scrollbar-thumb-body-italic:false;
+  } *:focused { scrollbar-thumb-background:#101112; }
+    *:disabled { scrollbar-thumb-foreground:#202122; }
+    *:selected { scrollbar-thumb-end-underline:false; }
+    *:header { scrollbar-thumb-single-bold:false; }
+    *:caret { scrollbar-thumb-body-background:#303132; })pss"));
+  take(fixture.engine.theme(theme));
+  auto application = take(parsePss("*{scrollbar-thumb-start-bold:false;scrollbar-thumb-end-foreground:#404142;}"));
+  take(fixture.engine.addLayer(StyleTier::APPLICATION, "segments", application));
+  const auto userLayer = take(fixture.engine.addLayer(
+    StyleTier::USER, "user",
+    take(parsePss("*{scrollbar-thumb-foreground:#505152;scrollbar-thumb-single-underline:false;}"))));
+  const auto resolved = fixture.read();
+  REQUIRE(resolved.scrollbarThumbSegments);
+  const auto &states = *resolved.scrollbarThumbSegments;
+
+  for (const auto &parts : states) {
+    CHECK(parts.start.foreground == RgbColor{7, 8, 9});
+    CHECK_FALSE(parts.start.bold);
+    CHECK(parts.start.italic);
+    CHECK(parts.start.underline);
+    CHECK(parts.body.foreground == RgbColor{80, 81, 82});
+    CHECK(parts.body.bold);
+    CHECK_FALSE(parts.body.italic);
+    CHECK(parts.end.foreground == RgbColor{64, 65, 66});
+    CHECK(parts.single.foreground == RgbColor{80, 81, 82});
+    CHECK_FALSE(parts.single.underline);
+  }
+
+  CHECK(states[0].start.background == RgbColor{4, 5, 6});
+  CHECK(states[1].start.background == RgbColor{16, 17, 18});
+  CHECK(states[2].body.foreground == RgbColor{80, 81, 82});
+  CHECK_FALSE(states[3].end.underline);
+  CHECK_FALSE(states[4].single.bold);
+  CHECK(states[5].body.background == RgbColor{48, 49, 50});
+  CHECK(states[5].start.background == RgbColor{4, 5, 6});
+  CHECK(take(fixture.engine.refresh()) == Invalidation::NONE);
+
+  const auto revision = fixture.engine.revision();
+  auto invalid = application;
+  invalid.rules[0].declarations.minWidth = -1;
+  CHECK_FALSE(fixture.engine.replaceLayer(userLayer, invalid));
+  CHECK(fixture.engine.revision() == revision);
+  CHECK(fixture.read() == resolved);
+
+  theme.rules[0].declarations.scrollbarThumb.background = RgbColor{90, 91, 92};
+  take(fixture.engine.theme(theme));
+  const auto changed = fixture.read();
+  REQUIRE(changed.scrollbarThumbSegments);
+  CHECK((*changed.scrollbarThumbSegments)[0].start.background == RgbColor{90, 91, 92});
+  CHECK_FALSE((*changed.scrollbarThumbSegments)[0].start.bold);
+  CHECK((*changed.scrollbarThumbSegments)[1].body.background == RgbColor{16, 17, 18});
+
+  take(fixture.engine.removeLayer(userLayer));
+  const auto withoutUser = fixture.read();
+  CHECK((*withoutUser.scrollbarThumbSegments)[2].body.foreground == RgbColor{32, 33, 34});
+  CHECK((*withoutUser.scrollbarThumbSegments)[0].single.underline);
+
+  ComputedStyle defaults;
+  defaults.normal.bold = true;
+  const auto nonmatching =
+    resolveStyle(take(parsePss("ScrollBar{scrollbar-thumb-start-bold:false;}")), {"Button", "", {}}, defaults);
+  CHECK(nonmatching == defaults);
+  CHECK_FALSE(nonmatching.scrollbarThumbSegments);
+}
+
+TEST_CASE("resolved thumb segments own copied values after source and engine retirement") {
+  const auto retained = [] {
+    Fixture fixture;
+    take(
+      fixture.engine.replace(take(parsePss("*{scrollbar-thumb-background:#010203;scrollbar-thumb-end-bold:true;}"))));
+    return fixture.read();
+  }();
+  REQUIRE(retained.scrollbarThumbSegments);
+  CHECK((*retained.scrollbarThumbSegments)[0].end.bold);
+  CHECK((*retained.scrollbarThumbSegments)[1].end.background == RgbColor{1, 2, 3});
+  auto defaults = retained;
+  (*defaults.scrollbarThumbSegments)[0].start.foreground = RgbColor{7, 8, 9};
+  const auto unchanged = resolveStyle({}, {"ScrollBar", "", {}}, defaults);
+  CHECK(unchanged == defaults);
+  CHECK((*retained.scrollbarThumbSegments)[0].start.foreground != RgbColor{7, 8, 9});
+}

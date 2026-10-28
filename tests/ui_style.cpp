@@ -1670,14 +1670,16 @@ TEST_CASE("scrollbar PSS all parts reach real preparation run rendering and term
     scrollbar-track-bold:true; scrollbar-track-italic:false; scrollbar-track-underline:true;
     scrollbar-thumb-foreground:#070809; scrollbar-thumb-background:#0a0b0c;
     scrollbar-thumb-bold:false; scrollbar-thumb-italic:true; scrollbar-thumb-underline:false;
+    scrollbar-thumb-start-foreground:#313233; scrollbar-thumb-body-italic:false;
+    scrollbar-thumb-end-background:#343536; scrollbar-thumb-single-bold:true;
     scrollbar-ends-foreground:#0d0e0f; scrollbar-ends-background:#101112;
     scrollbar-ends-bold:true; scrollbar-ends-italic:true; scrollbar-ends-underline:false;
     scrollbar-arrows-foreground:#232425; scrollbar-arrows-background:#262728;
     scrollbar-arrows-bold:false; scrollbar-arrows-italic:true; scrollbar-arrows-underline:true;
     scrollbar-corner-foreground:#131415; scrollbar-corner-background:#161718;
     scrollbar-corner-bold:false; scrollbar-corner-italic:false; scrollbar-corner-underline:true;
-  } ScrollArea:disabled {scrollbar-thumb-foreground:#202122;}
-    ScrollArea:focused {scrollbar-track-bold:false;})pss";
+  } ScrollArea:disabled {scrollbar-thumb-foreground:#202122;scrollbar-thumb-single-foreground:#373839;}
+    ScrollArea:focused {scrollbar-track-bold:false;scrollbar-thumb-start-bold:false;})pss";
   example::ReplayTerminal terminal({{20, "\x1b[21~", {}}}, 80, {20, 6});
   ui::SceneOptions options;
   options.clock = terminal.clock();
@@ -1696,7 +1698,7 @@ TEST_CASE("scrollbar PSS all parts reach real preparation run rendering and term
   const auto sources = owner.managed()->get().styleSources();
   REQUIRE(sources);
   REQUIRE(sources->back().document);
-  CHECK(sources->back().document->declarations.size() == 27);
+  CHECK(sources->back().document->declarations.size() == 33);
   bool inspected{};
   owner.onKey(key::F10, [&] {
     auto &managed = owner.managed()->get();
@@ -1723,6 +1725,15 @@ TEST_CASE("scrollbar PSS all parts reach real preparation run rendering and term
       CHECK_FALSE(parts.ends->underline);
       CHECK_FALSE(widget.computedStyle()->scrollbar[1].track->bold);
       CHECK(widget.computedStyle()->scrollbar[2].thumb->foreground == RgbColor{32, 33, 34});
+      REQUIRE(widget.computedStyle()->scrollbarThumbSegments);
+      const auto &segments = *widget.computedStyle()->scrollbarThumbSegments;
+      CHECK(segments[0].start.foreground == RgbColor{49, 50, 51});
+      CHECK_FALSE(segments[0].body.italic);
+      CHECK(segments[0].end.background == RgbColor{52, 53, 54});
+      CHECK(segments[0].single.bold);
+      CHECK_FALSE(segments[1].start.bold);
+      CHECK(segments[2].body.foreground == RgbColor{32, 33, 34});
+      CHECK(segments[2].single.foreground == RgbColor{55, 56, 57});
       inspected = true;
     }));
     CHECK(owner.ref().quit());

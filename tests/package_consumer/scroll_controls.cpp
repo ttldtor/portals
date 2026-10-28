@@ -3,6 +3,7 @@
 #include "tests/support/examples/replay/terminal.hpp"
 #include <portals/ui_style.hpp>
 
+#include <array>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
@@ -74,6 +75,18 @@ void exactGeometry() {
 int main() {
   using namespace portals;
   exactGeometry();
+  namespace sc = style::ct;
+  constexpr auto SEGMENTS = sc::compactSheet(std::array{sc::flatRule(
+    sc::type<"ScrollBar">(), sc::scrollbarThumbStartForeground(sc::rgb(10, 11, 12)), sc::scrollbarThumbBodyBold(false),
+    sc::scrollbarThumbEndItalic(true), sc::scrollbarThumbSingleUnderline(true))});
+  const auto segmentSheet = sc::materialize(SEGMENTS);
+  const auto segmentPreview = resolveStyle(segmentSheet, {"ScrollBar", "", {}});
+  check(segmentPreview.scrollbarThumbSegments.has_value(), "Installed compact thumb declarations did not resolve");
+  check((*segmentPreview.scrollbarThumbSegments)[0].start.foreground == RgbColor{10, 11, 12} &&
+          !(*segmentPreview.scrollbarThumbSegments)[0].body.bold &&
+          (*segmentPreview.scrollbarThumbSegments)[0].end.italic &&
+          (*segmentPreview.scrollbarThumbSegments)[0].single.underline,
+        "Installed typed thumb segment attributes disagree");
 
   ScrollControllerOptions initial;
 
@@ -120,8 +133,21 @@ int main() {
 
   // clang-format off
   scene
-    | ui::style("ScrollArea{scrollbar-track-foreground:#8090a0;scrollbar-thumb-bold:true;} ScrollBar{scrollbar-corner-underline:false;}")
+    | ui::style("ScrollArea{scrollbar-track-foreground:#8090a0;scrollbar-thumb-bold:true;scrollbar-thumb-start-foreground:#0a0b0c;scrollbar-thumb-body-bold:false;} ScrollBar{scrollbar-corner-underline:false;scrollbar-thumb-end-italic:true;scrollbar-thumb-single-underline:true;}")
     | ui::configure([&](ManagedScene &owner) -> std::expected<void, ManagedError> {
+        checked(application->tree().read(outer.node(), [&](const ScrollArea &widget) {
+          check(widget.computedStyle() && widget.computedStyle()->scrollbarThumbSegments,
+                "Installed ScrollArea segment styles did not reach mounted preparation");
+          const auto &parts = (*widget.computedStyle()->scrollbarThumbSegments)[0];
+          check(parts.start.foreground == RgbColor{10, 11, 12} && !parts.body.bold,
+                "Installed ScrollArea segment fallback or explicit false changed");
+        }));
+        checked(application->tree().read(standalone.node(), [&](const ScrollBar &widget) {
+          check(widget.computedStyle() && widget.computedStyle()->scrollbarThumbSegments,
+                "Installed ScrollBar segment styles did not reach mounted preparation");
+          const auto &parts = (*widget.computedStyle()->scrollbarThumbSegments)[0];
+          check(parts.end.italic && parts.single.underline, "Installed ScrollBar segment attributes changed");
+        }));
         check(owner.requiresPointerMotion(), "Mounted scroll controls did not request the native profile");
         checked(outer.setOffset(ScrollAxis::VERTICAL, {}));
         checked(standalone.setMetrics({std::numeric_limits<std::uint64_t>::max(), 1}));

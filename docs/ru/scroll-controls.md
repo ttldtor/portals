@@ -318,10 +318,42 @@ start/end, большая длина — start/body/end. Пропущенный 
 
 Загружаемая сцена принимает `scrollbar { trackPattern=MINIMAL thumbPattern=BLOCK
 arrowPattern=ASCII horizontal { thumbStart="[" thumbBody="=" thumbEnd="]"
-thumbSingle="o" } }`; точечные листья эквивалентны. PSS оформляет все сегменты
-через `scrollbar-thumb-*`, кнопки — через `scrollbar-arrows-*`; runtime,
-типизированные и compile-time таблицы используют те же части. Рамка и заголовок
-сохраняют собственные настройки и стили.
+thumbSingle="o" } }`; точечные листья эквивалентны.
+PSS принимает префиксы `scrollbar-thumb-start-`, `scrollbar-thumb-body-`,
+`scrollbar-thumb-end-` и `scrollbar-thumb-single-` с каждым из свойств
+`foreground`, `background`, `bold`, `italic` и `underline`. Пропущенный атрибут
+сегмента наследует разрешённый общий атрибут `scrollbar-thumb-*`. Сегменты
+используют действующий каскад селекторов, состояний и слоёв, включая явное `false`;
+стиль общий для обеих осей и действует с собственными глифами и пресетами.
+Одна ячейка выбирает только `single`, две — `start`/`end`, большая длина —
+`start`/`body`/`end`. Декоративные `scrollbar-ends-*` и функциональные
+`scrollbar-arrows-*` остаются независимыми. Runtime, typed, literal и compact PSS
+используют одни декларации, в том числе при стилизации загруженной сцены.
+
+```css
+#segments {
+  scrollbar-thumb-foreground: #62b4d7;
+  scrollbar-thumb-bold: true;
+  scrollbar-thumb-start-foreground: #f2c879;
+  scrollbar-thumb-end-foreground: #f2c879;
+  scrollbar-thumb-body-bold: false;
+  scrollbar-thumb-single-underline: true;
+}
+```
+
+В `StyleDeclarations` доступны группы paint-атрибутов `scrollbarThumbStart`,
+`scrollbarThumbBody`, `scrollbarThumbEnd` и `scrollbarThumbSingle`. Compile-time
+декларации используют соответствующие функции, например
+`scrollbarThumbStartForeground(rgb(242, 200, 121))` и
+`scrollbarThumbBodyBold(false)`. Рамка и заголовок сохраняют собственные настройки.
+Разрешённый стиль владеет встроенными значениями сегментов и не заимствует
+исходную таблицу. Необязательный блок сегментов заполняется при совпадении
+сегментных деклараций с целью либо при явных значениях виджета по умолчанию.
+Разрешение, копирование и paint этих значений не выделяют память; действующие
+гарантии полного результата и `noexcept` у `resolveStyle` сохраняются.
+Отсутствующий блок использует общий thumb напрямую. Встроенное хранение
+увеличивает размер каждого `ComputedStyle`, включая контролы без полос прокрутки.
+
 
 Символ шириной в ячейку не обещает радиус пиксельного GUI или наличие в шрифте.
 Собственные окончания следует просматривать на целевом host; общего пресета

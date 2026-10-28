@@ -313,10 +313,43 @@ their existing behavior.
 
 Loaded scenes accept `scrollbar { trackPattern=MINIMAL thumbPattern=BLOCK
 arrowPattern=ASCII horizontal { thumbStart="[" thumbBody="=" thumbEnd="]"
-thumbSingle="o" } }`; equivalent dotted leaves use the same names. PSS continues
-to style every segment with `scrollbar-thumb-*` and buttons with
-`scrollbar-arrows-*`; runtime, typed and compile-time sheets share those parts.
+thumbSingle="o" } }`; equivalent dotted leaves use the same names.
+PSS accepts `scrollbar-thumb-start-`, `scrollbar-thumb-body-`,
+`scrollbar-thumb-end-` and `scrollbar-thumb-single-` with each of `foreground`,
+`background`, `bold`, `italic` and `underline`. Each omitted segment attribute
+inherits the resolved common `scrollbar-thumb-*` attribute. Segment declarations
+use the existing selector, state and layer cascade, including explicit `false`;
+the same segment style applies on both axes and with either custom or preset glyphs.
+One cell selects only `single`, two select `start`/`end`, and longer thumbs select
+`start`/`body`/`end`. Decorative `scrollbar-ends-*` and functional
+`scrollbar-arrows-*` remain independent. Runtime, typed, literal and compact PSS
+share these declarations, including styles applied to loaded scenes.
+
+```css
+#segments {
+  scrollbar-thumb-foreground: #62b4d7;
+  scrollbar-thumb-bold: true;
+  scrollbar-thumb-start-foreground: #f2c879;
+  scrollbar-thumb-end-foreground: #f2c879;
+  scrollbar-thumb-body-bold: false;
+  scrollbar-thumb-single-underline: true;
+}
+```
+
+Typed `StyleDeclarations` provides `scrollbarThumbStart`, `scrollbarThumbBody`,
+`scrollbarThumbEnd` and `scrollbarThumbSingle` paint groups. Compile-time
+declarations use the corresponding functions, for example
+`scrollbarThumbStartForeground(rgb(242, 200, 121))` and
+`scrollbarThumbBodyBold(false)`.
 Frame/title decoration uses its independent existing settings and styles.
+Resolved styles own their segment values inline, without borrowed source storage.
+The optional segment block is engaged only when segment declarations match the
+target or the widget provides explicit segment defaults. Resolution, copying
+and painting allocate no memory for these values; existing `resolveStyle`
+`noexcept` and complete-result guarantees remain. An absent block uses the common
+thumb directly. Inline storage increases the size of every `ComputedStyle`,
+including controls that have no scrollbar.
+
 
 One-cell terminal glyphs do not promise a GUI radius or font coverage. Custom
 caps can be previewed on the target host; no general rounded-thumb preset is

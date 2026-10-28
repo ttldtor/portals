@@ -62,14 +62,32 @@ bool hasPaintDeclarations(const StylePaintDeclarations &values) noexcept {
   return values.foreground || values.background || values.bold || values.italic || values.underline;
 }
 
-template <class CascadeRank, bool FrameParts, bool ScrollbarParts, class Visit>
+CellStyle applyPaintOverrides(const StylePaintDeclarations &source, CellStyle resolved) noexcept {
+  if (source.foreground) {
+    resolved.foreground = source.foreground;
+  }
+
+  if (source.background) {
+    resolved.background = source.background;
+  }
+
+  resolved.bold = source.bold.value_or(resolved.bold);
+  resolved.italic = source.italic.value_or(resolved.italic);
+  resolved.underline = source.underline.value_or(resolved.underline);
+
+  return resolved;
+}
+
+template <class CascadeRank, bool FrameParts, bool ScrollbarParts, bool ThumbSegments, class Visit>
 CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, StyleState state, CellStyle base,
-                       FrameAppearance &parts, ScrollbarAppearance &scrollbar) {
+                       FrameAppearance &parts, ScrollbarAppearance &scrollbar, ScrollbarThumbAppearance *segments,
+                       bool preserveSegments) {
   // Ordinary rules retain the original five ranks; frame ranks exist only in the part specialization.
   constexpr std::size_t PAINT_ATTRIBUTE_COUNT = 5;
   constexpr std::size_t FRAME_PART_COUNT = FrameParts ? 3 : 0;
   constexpr std::size_t SCROLLBAR_PART_COUNT = ScrollbarParts ? 5 : 0;
-  constexpr std::size_t PART_COUNT = FRAME_PART_COUNT + SCROLLBAR_PART_COUNT;
+  constexpr std::size_t THUMB_SEGMENT_COUNT = ThumbSegments ? 4 : 0;
+  constexpr std::size_t PART_COUNT = FRAME_PART_COUNT + SCROLLBAR_PART_COUNT + THUMB_SEGMENT_COUNT;
   std::array<std::optional<CascadeRank>, PAINT_ATTRIBUTE_COUNT *(PART_COUNT + 1) + (ScrollbarParts ? 3 : 0)> ranks;
   [[maybe_unused]] std::array<StylePaintDeclarations, PART_COUNT> overrides;
   const auto assign = [&]<class T>(const std::optional<T> &value, auto &destination, std::size_t index,
@@ -123,6 +141,12 @@ CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, StyleState
                             &values.scrollbarArrows, &values.scrollbarCorner},
                  FRAME_PART_COUNT);
     }
+
+    if constexpr (ThumbSegments) {
+      applyParts(std::array{&values.scrollbarThumbStart, &values.scrollbarThumbBody, &values.scrollbarThumbEnd,
+                            &values.scrollbarThumbSingle},
+                 FRAME_PART_COUNT + SCROLLBAR_PART_COUNT);
+    }
   });
 
   const auto finishParts = [&](const auto &destinations, std::size_t first) {
@@ -134,20 +158,7 @@ CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, StyleState
       }
 
       auto &destination = *destinations[index];
-      auto resolved = destination.value_or(base);
-
-      if (source.foreground) {
-        resolved.foreground = source.foreground;
-      }
-
-      if (source.background) {
-        resolved.background = source.background;
-      }
-
-      resolved.bold = source.bold.value_or(resolved.bold);
-      resolved.italic = source.italic.value_or(resolved.italic);
-      resolved.underline = source.underline.value_or(resolved.underline);
-      destination = resolved;
+      destination = applyPaintOverrides(source, destination.value_or(base));
     }
   };
 
@@ -160,6 +171,18 @@ CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, StyleState
                 FRAME_PART_COUNT);
   }
 
+  if constexpr (ThumbSegments) {
+    const auto destinations = std::array{&segments->start, &segments->body, &segments->end, &segments->single};
+    const auto common = scrollbar.thumb.value_or(base);
+
+    for (std::size_t index = 0; index < destinations.size(); ++index) {
+      const auto &source = overrides[FRAME_PART_COUNT + SCROLLBAR_PART_COUNT + index];
+      auto &destination = *destinations[index];
+
+      destination = applyPaintOverrides(source, preserveSegments ? destination : common);
+    }
+  }
+
   return base;
 }
 
@@ -167,6 +190,8 @@ template <class CascadeRank, class Visit>
 ComputedStyle resolveRules(const Visit &visit, const StyleTarget &target, ComputedStyle defaults) noexcept {
   bool frameParts{};
   bool scrollbarParts{};
+  bool thumbSegments{};
+  const bool preserveSegments = defaults.scrollbarThumbSegments.has_value();
   std::optional<CascadeRank> rank;
   visit([&](const StyleRule &rule, auto &&makeRank) {
     const auto &values = rule.declarations;
@@ -183,6 +208,12 @@ ComputedStyle resolveRules(const Visit &visit, const StyleTarget &target, Comput
                           values.scrollbarThumbPattern || values.scrollbarArrowPattern) &&
                          matches(rule.selector, target, rule.selector.state));
 
+    thumbSegments =
+      thumbSegments ||
+      ((hasPaintDeclarations(values.scrollbarThumbStart) || hasPaintDeclarations(values.scrollbarThumbBody) ||
+        hasPaintDeclarations(values.scrollbarThumbEnd) || hasPaintDeclarations(values.scrollbarThumbSingle)) &&
+       matches(rule.selector, target, rule.selector.state));
+
     if (!rule.declarations.minWidth || !matches(rule.selector, target, StyleState::ANY)) {
       return;
     }
@@ -193,33 +224,45 @@ ComputedStyle resolveRules(const Visit &visit, const StyleTarget &target, Comput
     }
   });
 
-  const auto applyPaintStates = [&]<bool FrameParts, bool ScrollbarParts>() {
-    defaults.normal = resolvePaint<CascadeRank, FrameParts, ScrollbarParts>(
-      visit, target, StyleState::NORMAL, defaults.normal, defaults.frame[0], defaults.scrollbar[0]);
-    defaults.focused = resolvePaint<CascadeRank, FrameParts, ScrollbarParts>(
-      visit, target, StyleState::FOCUSED, defaults.focused, defaults.frame[1], defaults.scrollbar[1]);
-    defaults.disabled = resolvePaint<CascadeRank, FrameParts, ScrollbarParts>(
-      visit, target, StyleState::DISABLED, defaults.disabled, defaults.frame[2], defaults.scrollbar[2]);
-    defaults.selected = resolvePaint<CascadeRank, FrameParts, ScrollbarParts>(
-      visit, target, StyleState::SELECTED, defaults.selected, defaults.frame[3], defaults.scrollbar[3]);
-    defaults.header = resolvePaint<CascadeRank, FrameParts, ScrollbarParts>(
-      visit, target, StyleState::HEADER, defaults.header, defaults.frame[4], defaults.scrollbar[4]);
-    defaults.caret = resolvePaint<CascadeRank, FrameParts, ScrollbarParts>(
-      visit, target, StyleState::CARET, defaults.caret, defaults.frame[5], defaults.scrollbar[5]);
+  if (thumbSegments && !preserveSegments) {
+    defaults.scrollbarThumbSegments.emplace();
+  }
+
+  const auto applyPaintStates = [&]<bool FrameParts, bool ScrollbarParts, bool ThumbSegments>() {
+    auto *segments = defaults.scrollbarThumbSegments ? defaults.scrollbarThumbSegments->data() : nullptr;
+    defaults.normal = resolvePaint<CascadeRank, FrameParts, ScrollbarParts, ThumbSegments>(
+      visit, target, StyleState::NORMAL, defaults.normal, defaults.frame[0], defaults.scrollbar[0], segments,
+      preserveSegments);
+    defaults.focused = resolvePaint<CascadeRank, FrameParts, ScrollbarParts, ThumbSegments>(
+      visit, target, StyleState::FOCUSED, defaults.focused, defaults.frame[1], defaults.scrollbar[1],
+      segments ? segments + 1 : nullptr, preserveSegments);
+    defaults.disabled = resolvePaint<CascadeRank, FrameParts, ScrollbarParts, ThumbSegments>(
+      visit, target, StyleState::DISABLED, defaults.disabled, defaults.frame[2], defaults.scrollbar[2],
+      segments ? segments + 2 : nullptr, preserveSegments);
+    defaults.selected = resolvePaint<CascadeRank, FrameParts, ScrollbarParts, ThumbSegments>(
+      visit, target, StyleState::SELECTED, defaults.selected, defaults.frame[3], defaults.scrollbar[3],
+      segments ? segments + 3 : nullptr, preserveSegments);
+    defaults.header = resolvePaint<CascadeRank, FrameParts, ScrollbarParts, ThumbSegments>(
+      visit, target, StyleState::HEADER, defaults.header, defaults.frame[4], defaults.scrollbar[4],
+      segments ? segments + 4 : nullptr, preserveSegments);
+    defaults.caret = resolvePaint<CascadeRank, FrameParts, ScrollbarParts, ThumbSegments>(
+      visit, target, StyleState::CARET, defaults.caret, defaults.frame[5], defaults.scrollbar[5],
+      segments ? segments + 5 : nullptr, preserveSegments);
+  };
+  const auto applyScrollbarStates = [&]<bool FrameParts>() {
+    if (thumbSegments) {
+      applyPaintStates.template operator()<FrameParts, true, true>();
+    } else if (scrollbarParts) {
+      applyPaintStates.template operator()<FrameParts, true, false>();
+    } else {
+      applyPaintStates.template operator()<FrameParts, false, false>();
+    }
   };
 
   if (frameParts) {
-    if (scrollbarParts) {
-      applyPaintStates.template operator()<true, true>();
-    } else {
-      applyPaintStates.template operator()<true, false>();
-    }
+    applyScrollbarStates.template operator()<true>();
   } else {
-    if (scrollbarParts) {
-      applyPaintStates.template operator()<false, true>();
-    } else {
-      applyPaintStates.template operator()<false, false>();
-    }
+    applyScrollbarStates.template operator()<false>();
   }
 
   return defaults;
@@ -815,12 +858,14 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
         return part.foreground.has_value() + part.background.has_value() + part.bold.has_value() +
                part.italic.has_value() + part.underline.has_value();
       };
-      const std::size_t count = partCount(d.frameLine) + partCount(d.frameTitle) + partCount(d.frameEnds) +
-                                partCount(d.scrollbarTrack) + partCount(d.scrollbarThumb) + partCount(d.scrollbarEnds) +
-                                partCount(d.scrollbarArrows) + partCount(d.scrollbarCorner) + d.foreground.has_value() +
-                                d.background.has_value() + d.bold.has_value() + d.italic.has_value() +
-                                d.underline.has_value() + d.minWidth.has_value() + d.scrollbarTrackPattern.has_value() +
-                                d.scrollbarThumbPattern.has_value() + d.scrollbarArrowPattern.has_value();
+      const std::size_t count =
+        partCount(d.frameLine) + partCount(d.frameTitle) + partCount(d.frameEnds) + partCount(d.scrollbarTrack) +
+        partCount(d.scrollbarThumb) + partCount(d.scrollbarEnds) + partCount(d.scrollbarArrows) +
+        partCount(d.scrollbarCorner) + partCount(d.scrollbarThumbStart) + partCount(d.scrollbarThumbBody) +
+        partCount(d.scrollbarThumbEnd) + partCount(d.scrollbarThumbSingle) + d.foreground.has_value() +
+        d.background.has_value() + d.bold.has_value() + d.italic.has_value() + d.underline.has_value() +
+        d.minWidth.has_value() + d.scrollbarTrackPattern.has_value() + d.scrollbarThumbPattern.has_value() +
+        d.scrollbarArrowPattern.has_value();
       if (!charge(declarations, count, options.maxDeclarations) ||
           !charge(bytes, sizeof(StyleRule), options.maxOwnedBytes) || !chargeString(rule.selector.type) ||
           !chargeString(rule.selector.id)) {
