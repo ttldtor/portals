@@ -9,6 +9,8 @@
 #include <portals/scroll_controls.hpp>
 
 namespace portals::detail {
+struct PreparedGlyphProfiles;
+
 struct ScrollDrag {
   ScrollAxis axis{ScrollAxis::VERTICAL};
   std::int32_t surfaceStart{};
@@ -31,6 +33,9 @@ struct PreparedScrollbarSkin {
   std::array<bool, 4> customArrows{};
   std::array<std::optional<GraphemeText>, 8> thumbSegments{}; // Start/body/end/single for each axis.
   bool ends{};
+  std::optional<ScrollbarPattern> trackPattern;
+  std::optional<ScrollbarThumbPattern> thumbPattern;
+  std::optional<ScrollbarArrowPattern> arrowPattern;
 };
 
 struct ScrollRepeatState {
@@ -94,6 +99,8 @@ struct ScrollWidgetState {
   std::unique_ptr<std::array<GraphemeText, 4>> arrowGlyphs;
   std::unique_ptr<PreparedScrollbarSkin> scrollbarSkin;
   std::uint64_t skinRevision{};
+  GlyphSelection glyphSelection;
+  std::shared_ptr<const PreparedGlyphProfiles> glyphProfiles;
 };
 
 inline bool scrollArrows(const ScrollWidgetState &state, ScrollTrack channel) noexcept {

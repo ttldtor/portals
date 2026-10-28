@@ -5,6 +5,7 @@
 #include <array>
 #include <optional>
 #include <portals/cell_buffer.hpp>
+#include <portals/glyph_profile.hpp>
 #include <portals/scrollbar_skin.hpp>
 
 namespace portals {
@@ -49,6 +50,15 @@ struct ScrollbarThumbAppearance {
   bool operator==(const ScrollbarThumbAppearance &other) const = default;
 };
 
+/** @brief Logical glyph overrides; absent values retain the control's owning manual map. */
+struct GlyphAppearance {
+  std::optional<GlyphProfile> profile{};   ///< Explicit base map, independent of colors.
+  std::optional<GlyphFallback> fallback{}; ///< Explicit admission fallback.
+
+  /** @param other Logical declarations to compare. @return Whether both choices agree. */
+  constexpr bool operator==(const GlyphAppearance &other) const = default;
+};
+
 /** @brief Owning resolved presentation; no actions or model state are encoded. */
 struct ComputedStyle {
   CellStyle normal;        ///< Ordinary text and fill.
@@ -65,6 +75,7 @@ struct ComputedStyle {
    * resolution and copies allocation-free; absence retains the common thumb and avoids segment resolution.
    */
   std::optional<std::array<ScrollbarThumbAppearance, 6>> scrollbarThumbSegments{};
+  std::array<GlyphAppearance, 6> glyphs{}; ///< Logical maps in normal/focused/disabled/selected/header/caret order.
   /** @param other Owning value to compare.
    * @return True when every paint value and metric agrees.
    */

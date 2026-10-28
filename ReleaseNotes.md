@@ -7,6 +7,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Add opt-in Unicode, ASCII and Nerd Fonts rounded, chevron, slash and backslash
+  glyph profiles for frames, title caps and scrollbars. Fluent methods, pipe stages,
+  PSS and loaded scenes share the named maps and explicit portable fallback. Profiles
+  retain part patterns and literal overrides, and leave colors and geometry unchanged.
+
 - Style scrollbar thumb start, body, end and single-cell segments independently
   with foreground, background, bold, italic and underline declarations. Each
   attribute falls back to the common thumb style; runtime, typed and compile-time

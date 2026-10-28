@@ -484,8 +484,9 @@ overload is unavailable for ScrollArea because it creates no wrapper node.
 Colors, boldness and focused/disabled appearances use the existing stylesheet
 layers. The wrapper's type is `Border`; the child's type, ID and classes remain
 unchanged. Focused descendants select the frame's focused appearance, while
-ancestor disabled state takes precedence. Geometry and glyph patterns remain
-construction settings; they are not new PSS properties. Legacy `BorderOptions`,
+ancestor disabled state takes precedence. Geometry and frame line patterns remain
+construction settings; [named glyph profiles](scroll-controls.md#named-glyph-profiles)
+also support PSS. Legacy `BorderOptions`,
 `ScrollAreaOptions`, `ui::border` and `ui::frame` remain available.
 
 See [loaded frame properties](scene-loading-guide.md#loaded-frames) for the same
@@ -535,4 +536,5 @@ Use the `Border` selector for an ordinary framed recipe. Missing part attributes
 inherit the resolved common style of that state; a title-only override does not
 replace the line or background. Focused and disabled rules use the existing
 state selectors and style layers. These are paint attributes; decorations and
-glyph patterns remain construction settings.
+frame line patterns remain construction settings;
+[named glyph profiles](scroll-controls.md#named-glyph-profiles) also support PSS.

@@ -518,6 +518,51 @@ inline ScrollbarModifier scrollbar(ScrollbarSkin skin) {
   return {std::move(skin)};
 }
 
+/** @brief Named map stage using the same sparse construction defaults as the fluent methods. */
+struct GlyphProfileModifier {
+  std::optional<GlyphProfile> profile;   ///< Selected manual base.
+  std::optional<GlyphFallback> fallback; ///< Selected portable fallback.
+
+  /** @tparam T Supported sized widget, including its optional frame.
+   * @param description Consumed native recipe.
+   * @param modifier Owning logical choices.
+   * @return Recipe preserving colors, geometry and explicit literal sources.
+   */
+  template <class T>
+    requires std::derived_from<T, SizedWidget>
+  friend Description<T> operator|(Description<T> &&description, GlyphProfileModifier modifier) {
+    if (modifier.profile) {
+      (void)std::move(description).glyphProfile(*modifier.profile);
+    }
+
+    if (modifier.fallback) {
+      (void)std::move(description).glyphFallback(*modifier.fallback);
+    }
+
+    return std::move(description);
+  }
+};
+
+/** @param profile Named base below explicit patterns and literals. @return Owning sparse stage. */
+inline GlyphProfileModifier glyphProfile(GlyphProfile profile) {
+  return {profile, {}};
+}
+
+/** @param profile Compact profile name, checked at mount. @return Owning sparse stage. */
+inline GlyphProfileModifier glyphProfile(std::string_view profile) {
+  return glyphProfile(detail::glyphProfile(profile));
+}
+
+/** @param fallback Portable one-cell admission fallback. @return Owning sparse stage. */
+inline GlyphProfileModifier glyphFallback(GlyphFallback fallback) {
+  return {{}, fallback};
+}
+
+/** @param fallback Compact unicode/ascii name, checked at mount. @return Owning sparse stage. */
+inline GlyphProfileModifier glyphFallback(std::string_view fallback) {
+  return glyphFallback(detail::glyphFallback(fallback));
+}
+
 /** @brief Independent scrollbar appearance stage; omitted parts keep their sources. */
 struct ScrollbarPartModifier {
   std::optional<ScrollbarPattern> trackPattern{};      ///< Selected track source, preserving siblings.
@@ -679,7 +724,7 @@ inline ScrollAxisModifier axis(ScrollAxis axis) {
 
 inline std::expected<void, ManagedError> detail::Access::applyScrollbarSkin(ManagedScene &scene, Node<Widget> node,
                                                                             const ControlSettings &settings) {
-  if (!hasScrollbarSettings(settings.scrollbar)) {
+  if (!hasScrollbarSettings(settings.scrollbar) && !settings.glyphProfile && !settings.glyphFallback) {
     return {};
   }
 
@@ -693,7 +738,9 @@ inline std::expected<void, ManagedError> detail::Access::applyScrollbarSkin(Mana
                        .corner = source.corner,
                        .trackPattern = source.trackPattern,
                        .thumbPattern = source.thumbPattern,
-                       .arrowPattern = source.arrowPattern};
+                       .arrowPattern = source.arrowPattern,
+                       .glyphSelection = {settings.glyphProfile.value_or(GlyphProfile::DEFAULT),
+                                          settings.glyphFallback.value_or(GlyphFallback::UNICODE_GLYPHS)}};
     auto applied = setScrollbarSkin(scene.app_.tree(), node, skin);
 
     return applied ? std::expected<void, ManagedError>{} : std::unexpected(error(node, applied.error()));

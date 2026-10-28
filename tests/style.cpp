@@ -1014,7 +1014,8 @@ void thumbResolutionNoAllocation() {
   static_assert(std::is_nothrow_copy_constructible_v<ComputedStyle>);
   static_assert(noexcept(resolveStyle(std::declval<const StyleSheet &>(), std::declval<const StyleTarget &>())));
   const auto sheet = take(parsePss("ScrollBar{scrollbar-thumb-background:#010203;scrollbar-thumb-bold:true;"
-                                   "scrollbar-thumb-start-bold:false;scrollbar-thumb-single-italic:true;}"));
+                                   "scrollbar-thumb-start-bold:false;scrollbar-thumb-single-italic:true;"
+                                   "glyph-profile:nf-rounded;glyph-fallback:ascii;}"));
   const StyleTarget target{"ScrollBar", "", {}};
   const StyleSheet empty;
   allocation_test::remaining = 0;
@@ -1026,6 +1027,8 @@ void thumbResolutionNoAllocation() {
   allocation_test::remaining = -1;
   check(!defaultCopy.scrollbarThumbSegments && !absent.scrollbarThumbSegments,
         "default and nonsegment resolution retain an absent inline segment payload without allocation");
+  check(resolved.glyphs[0].profile == GlyphProfile::NF_ROUNDED && resolved.glyphs[5].fallback == GlyphFallback::ASCII,
+        "logical named glyph resolution and copies remain complete without allocation");
   check(resolved.scrollbarThumbSegments && resolved == copied && !(*resolved.scrollbarThumbSegments)[0].start.bold &&
           (*resolved.scrollbarThumbSegments)[0].body.bold && (*resolved.scrollbarThumbSegments)[0].single.italic,
         "matching thumb resolution and owning copies remain noexcept and allocation-free");

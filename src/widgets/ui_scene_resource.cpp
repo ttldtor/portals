@@ -251,8 +251,11 @@ std::expected<void, ControlContextError> ResourceAccess::installScrolls(SceneRes
 
           auto recipe = Access::scrollAreaControl(*options, {}, {});
 
-          if (hasScrollbarSettings(arguments.settings.scrollbar)) {
-            (void)std::move(recipe).settings({.scrollbar = arguments.settings.scrollbar});
+          if (hasScrollbarSettings(arguments.settings.scrollbar) || arguments.settings.glyphProfile ||
+              arguments.settings.glyphFallback) {
+            (void)std::move(recipe).settings({.scrollbar = arguments.settings.scrollbar,
+                                              .glyphProfile = arguments.settings.glyphProfile,
+                                              .glyphFallback = arguments.settings.glyphFallback});
           }
 
           return recipe;
@@ -273,8 +276,11 @@ std::expected<void, ControlContextError> ResourceAccess::installScrolls(SceneRes
 
           auto recipe = scrollBar(arguments.settings.axis.value_or(ScrollAxis::VERTICAL), *options);
 
-          if (hasScrollbarSettings(arguments.settings.scrollbar)) {
-            (void)std::move(recipe).settings({.scrollbar = arguments.settings.scrollbar});
+          if (hasScrollbarSettings(arguments.settings.scrollbar) || arguments.settings.glyphProfile ||
+              arguments.settings.glyphFallback) {
+            (void)std::move(recipe).settings({.scrollbar = arguments.settings.scrollbar,
+                                              .glyphProfile = arguments.settings.glyphProfile,
+                                              .glyphFallback = arguments.settings.glyphFallback});
           }
 
           return recipe;

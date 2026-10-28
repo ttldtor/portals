@@ -457,6 +457,8 @@ struct ControlSettings {
   std::optional<bool> arrows{};                       ///< Reserve functional arrow buttons when the channel fits.
   std::optional<std::uint64_t> arrowDelay{};          ///< Positive initial hold delay in milliseconds.
   std::optional<std::uint64_t> arrowRepeat{};         ///< Positive repeat interval in milliseconds.
+  std::optional<GlyphProfile> glyphProfile{};         ///< Manual named base for Border and native scroll controls.
+  std::optional<GlyphFallback> glyphFallback{};       ///< Portable admission fallback, independent of colors.
 };
 
 /** @brief Finite context bounds, checked before publication/materialization beyond each bound. */

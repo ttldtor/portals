@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include "frame_text.hpp"
+#include "glyph_profiles.hpp"
 #include <portals/primitives.hpp>
 
 #include <algorithm>
@@ -221,9 +222,11 @@ std::expected<PreparedFrameText, TreeError> prepareFrameText(WidthPolicy policy,
     return std::unexpected(valid.error());
   }
 
-  const auto sources = options.customGlyphs                              ? customSources(*options.customGlyphs)
-                       : options.border.glyphs == PrimitiveGlyphs::ASCII ? ASCII_FRAME
-                                                                         : patternSources(options.pattern);
+  const auto sources =
+    options.customGlyphs ? customSources(*options.customGlyphs)
+    : options.border.glyphs == PrimitiveGlyphs::ASCII || options.border.glyphSelection.profile == GlyphProfile::ASCII
+      ? ASCII_FRAME
+      : patternSources(options.pattern);
   auto compile = [&](std::size_t index) -> std::expected<GraphemeText, TreeError> {
     auto text = GraphemeText::from(sources[index], policy);
 
@@ -265,9 +268,26 @@ std::expected<PreparedFrameText, TreeError> prepareFrameText(WidthPolicy policy,
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
+  std::optional<CustomTitleDecoration> profileEnds;
+
+  if (!options.customTitleDecoration && options.titleDecoration == TitleDecoration::PROFILE &&
+      options.border.glyphSelection.profile != GlyphProfile::DEFAULT) {
+    auto prepared = profileTitleEnds(options.border.glyphSelection, policy);
+
+    if (!prepared) {
+      return std::unexpected(prepared.error());
+    }
+
+    profileEnds.emplace(*prepared);
+  }
+
   const auto ends = [&]() -> std::array<std::string_view, 2> {
     if (options.customTitleDecoration) {
       return {options.customTitleDecoration->prefix, options.customTitleDecoration->suffix};
+    }
+
+    if (profileEnds) {
+      return {profileEnds->prefix, profileEnds->suffix};
     }
 
     switch (options.titleDecoration) {
@@ -508,7 +528,8 @@ Border::Border(WidthPolicy width, FrameOptions options, ControlStyle style, Size
 }
 
 std::expected<void, TreeError> Border::validate(BorderOptions options) {
-  if (!validGlyphs(options.glyphs) || options.maxPaintCells == 0) {
+  if (!validGlyphs(options.glyphs) || options.maxPaintCells == 0 ||
+      !detail::validGlyphSelection(options.glyphSelection)) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
@@ -521,7 +542,8 @@ std::expected<void, TreeError> Border::validateFrame(const FrameOptions &options
       (options.titleAlignment != FrameTitleAlignment::START && options.titleAlignment != FrameTitleAlignment::CENTER &&
        options.titleAlignment != FrameTitleAlignment::END) ||
       patternSources(options.pattern)[0].empty() || options.titleDecoration < TitleDecoration::NONE ||
-      options.titleDecoration > TitleDecoration::ROUND ||
+      options.titleDecoration > TitleDecoration::PROFILE ||
+      !detail::validGlyphSelection(options.border.glyphSelection) ||
       (options.customTitleDecoration && (options.customTitleDecoration->prefix.size() > MAX_FRAME_TITLE_END_BYTES ||
                                          options.customTitleDecoration->suffix.size() > MAX_FRAME_TITLE_END_BYTES))) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
@@ -602,7 +624,11 @@ std::expected<void, TreeError> Border::paint(PaintContext &context) {
   const auto resolved = computedStyle() ? *computedStyle() : styleDefaults();
   const auto style = !enabled_ ? resolved.disabled : focused_ ? resolved.focused : resolved.normal;
 
-  return detail::paintFrame(context, *text_, options_, bounds_, style, {},
+  const auto index = !enabled_ ? 2 : focused_ ? 1 : 0;
+  const auto *profile = glyphProfiles_ ? glyphProfiles_->states[index].get() : nullptr;
+  const auto &text = profile && profile->frame ? *profile->frame : *text_;
+
+  return detail::paintFrame(context, text, options_, bounds_, style, {},
                             resolved.frame[!enabled_  ? 2
                                            : focused_ ? 1
                                                       : 0]);

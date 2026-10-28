@@ -41,7 +41,8 @@ enum class TitleDecoration {
   SPACED, ///< One space on either side.
   SQUARE, ///< Square brackets and inner spaces.
   ANGLE,  ///< Angle brackets and inner spaces.
-  ROUND   ///< Parentheses and inner spaces.
+  ROUND,  ///< Parentheses and inner spaces.
+  PROFILE ///< Explicit selected profile caps; customTitleDecoration still wins.
 };
 
 } // namespace portals

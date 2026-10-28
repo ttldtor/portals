@@ -203,6 +203,8 @@ enum class Property {
   SCROLLBAR_TRACK_PATTERN,           ///< Independent track source.
   SCROLLBAR_THUMB_PATTERN,           ///< Independent thumb source.
   SCROLLBAR_ARROW_PATTERN,           ///< Independent arrow source.
+  GLYPH_PROFILE,                     ///< Named base glyph map.
+  GLYPH_FALLBACK,                    ///< Portable admission fallback.
   SCROLLBAR_THUMB_START_FOREGROUND,  ///< Thumb start foreground.
   SCROLLBAR_THUMB_START_BACKGROUND,  ///< Thumb start background.
   SCROLLBAR_THUMB_START_BOLD,        ///< Thumb start bold.
@@ -367,8 +369,12 @@ constexpr void assign(const D &declaration, StyleDeclarations &destination, cons
     D::KIND == Property::SCROLLBAR_TRACK_PATTERN, ScrollbarPattern,
     std::conditional_t<
       D::KIND == Property::SCROLLBAR_THUMB_PATTERN, ScrollbarThumbPattern,
-      std::conditional_t<D::KIND == Property::SCROLLBAR_ARROW_PATTERN, ScrollbarArrowPattern,
-                         std::conditional_t<COLOR, RgbColor, std::conditional_t<METRIC, std::int32_t, bool>>>>>;
+      std::conditional_t<
+        D::KIND == Property::SCROLLBAR_ARROW_PATTERN, ScrollbarArrowPattern,
+        std::conditional_t<
+          D::KIND == Property::GLYPH_PROFILE, GlyphProfile,
+          std::conditional_t<D::KIND == Property::GLYPH_FALLBACK, GlyphFallback,
+                             std::conditional_t<COLOR, RgbColor, std::conditional_t<METRIC, std::int32_t, bool>>>>>>>;
   static_assert(std::same_as<decltype(value), Expected>, "Static style declaration value type mismatch");
 
   if constexpr (std::same_as<decltype(value), Expected>) {
@@ -506,6 +512,10 @@ constexpr void assign(const D &declaration, StyleDeclarations &destination, cons
       destination.scrollbarTrackPattern = value;
     } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_PATTERN) {
       destination.scrollbarThumbPattern = value;
+    } else if constexpr (D::KIND == Property::GLYPH_PROFILE) {
+      destination.glyphProfile = value;
+    } else if constexpr (D::KIND == Property::GLYPH_FALLBACK) {
+      destination.glyphFallback = value;
     } else if constexpr (D::KIND == Property::SCROLLBAR_ARROW_PATTERN) {
       destination.scrollbarArrowPattern = value;
     } else if constexpr (METRIC) {
@@ -547,7 +557,11 @@ template <class R, class P> consteval void validateRule(const R &rule, const P &
   static_assert(uniqueDeclarations(decltype(rule.declarations){}), "Static style rule repeats a declaration");
   const auto values = declarations(rule, parameters, parameters.defaults());
 
-  if ((values.scrollbarTrackPattern && (*values.scrollbarTrackPattern < ScrollbarPattern::LEGACY ||
+  if ((values.glyphProfile &&
+       (*values.glyphProfile < GlyphProfile::DEFAULT || *values.glyphProfile > GlyphProfile::NF_BACKSLASH)) ||
+      (values.glyphFallback &&
+       (*values.glyphFallback < GlyphFallback::UNICODE_GLYPHS || *values.glyphFallback > GlyphFallback::ASCII)) ||
+      (values.scrollbarTrackPattern && (*values.scrollbarTrackPattern < ScrollbarPattern::LEGACY ||
                                         *values.scrollbarTrackPattern > ScrollbarPattern::ASCII)) ||
       (values.scrollbarThumbPattern && (*values.scrollbarThumbPattern < ScrollbarThumbPattern::LEGACY ||
                                         *values.scrollbarThumbPattern > ScrollbarThumbPattern::ASCII)) ||
@@ -964,6 +978,16 @@ template <class E> consteval auto frameEndsUnderline(E expression) {
 /** @tparam E Owning enum expression. @param expression Independent source. @return Typed declaration. */
 template <class E> consteval auto scrollbarTrackPattern(E expression) {
   return detail::Declaration<detail::Property::SCROLLBAR_TRACK_PATTERN, E>{expression};
+}
+
+/** @tparam E Owning enum expression. @param expression Named glyph map. @return Typed declaration. */
+template <class E> consteval auto glyphProfile(E expression) {
+  return detail::Declaration<detail::Property::GLYPH_PROFILE, E>{expression};
+}
+
+/** @tparam E Owning enum expression. @param expression Portable admission fallback. @return Typed declaration. */
+template <class E> consteval auto glyphFallback(E expression) {
+  return detail::Declaration<detail::Property::GLYPH_FALLBACK, E>{expression};
 }
 
 /** @tparam E Owning enum expression. @param expression Independent source. @return Typed declaration. */

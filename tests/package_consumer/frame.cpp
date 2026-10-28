@@ -142,6 +142,16 @@ int main() try {
   checked(styled.prepareChecked());
   checked(styled.close());
 
+  auto profiles = ui::scene(ui::scrollArea(ui::label("Both axes keep their existing geometry"))
+                              .framed("rounded", "Profile")
+                              .titleDecoration("profile")
+                              .glyphProfile(GlyphProfile::NF_ROUNDED) |
+                            ui::glyphFallback("ascii"));
+  constexpr auto PROFILE_RULES = style::ct::pss("ScrollArea{glyph-profile:nf-chevron;glyph-fallback:unicode;}");
+  profiles | ui::style(PROFILE_RULES);
+  checked(profiles.prepareChecked());
+  checked(profiles.close());
+
   return 0;
 } catch (const std::exception &error) {
   std::cerr << error.what() << '\n';

@@ -90,7 +90,9 @@ inline constexpr std::array<std::string_view, PSS_PROPERTY_COUNT> PSS_PROPERTY_N
   "scrollbar-thumb-single-background",
   "scrollbar-thumb-single-bold",
   "scrollbar-thumb-single-italic",
-  "scrollbar-thumb-single-underline"};
+  "scrollbar-thumb-single-underline",
+  "glyph-profile",
+  "glyph-fallback"};
 /** @brief Pseudo-state names in the existing StyleState order after ANY. */
 inline constexpr std::array<std::string_view, 6> PSS_STATE_NAMES{"normal",   "focused", "disabled",
                                                                  "selected", "header",  "caret"};
@@ -643,6 +645,19 @@ private:
       }
 
       declaration.pattern = static_cast<std::int32_t>(selected - names.begin());
+    } else if (property == PssProperty::GLYPH_PROFILE || property == PssProperty::GLYPH_FALLBACK) {
+      constexpr std::array<std::string_view, 7> PROFILES{"default",    "unicode",  "ascii",       "nf-rounded",
+                                                         "nf-chevron", "nf-slash", "nf-backslash"};
+      constexpr std::array<std::string_view, 2> FALLBACKS{"unicode", "ascii"};
+      const auto names = property == PssProperty::GLYPH_PROFILE ? std::span<const std::string_view>(PROFILES)
+                                                                : std::span<const std::string_view>(FALLBACKS);
+      const auto selected = std::ranges::find(names, text);
+
+      if (selected == names.end()) {
+        return failAt(PssErrorCode::INVALID_VALUE, valueLocation, "Invalid glyph map selection", propertyName);
+      }
+
+      declaration.pattern = static_cast<std::int32_t>(selected - names.begin());
     } else if (property == PssProperty::MIN_WIDTH) {
       const auto width = parseWidth(text);
 
@@ -961,6 +976,14 @@ constexpr void assignPssDeclaration(PssProperty property, PssValue value, StyleD
 
     break;
 
+  case PssProperty::GLYPH_PROFILE:
+    destination.glyphProfile = static_cast<GlyphProfile>(value.pattern);
+
+    break;
+  case PssProperty::GLYPH_FALLBACK:
+    destination.glyphFallback = static_cast<GlyphFallback>(value.pattern);
+
+    break;
   case PssProperty::MIN_WIDTH:
     destination.minWidth = value.width;
 

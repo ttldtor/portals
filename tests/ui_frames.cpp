@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "../src/widgets/frame_text.hpp"
+#include "../src/widgets/glyph_profiles.hpp"
 #include "../src/widgets/scroll_controls_state.hpp"
 #include <doctest.h>
 #include <portals/ui.hpp>
@@ -1034,4 +1035,124 @@ TEST_CASE("scrollbar appearance pipes merge behavior false values custom sibling
       }));
     }
   }
+}
+
+TEST_CASE("named glyph declarations share runtime typed CT and compact state resolution") {
+  namespace sc = style::ct;
+  constexpr auto BYTES = sc::pss(R"pss(*{glyph-profile:nf-rounded;glyph-fallback:unicode;}
+    *:focused{glyph-profile:nf-chevron;} *:disabled{glyph-profile:ascii;glyph-fallback:ascii;}
+    *:selected{glyph-profile:nf-slash;} *:header{glyph-profile:nf-backslash;} *:caret{glyph-profile:unicode;})pss");
+  constexpr auto TYPED =
+    sc::sheet(sc::parameters(),
+              sc::rule(sc::selector(), sc::glyphProfile(GlyphProfile::NF_ROUNDED),
+                       sc::glyphFallback(GlyphFallback::UNICODE_GLYPHS)),
+              sc::rule(sc::selector(StyleState::FOCUSED), sc::glyphProfile(GlyphProfile::NF_CHEVRON)),
+              sc::rule(sc::selector(StyleState::DISABLED), sc::glyphProfile(GlyphProfile::ASCII),
+                       sc::glyphFallback(GlyphFallback::ASCII)),
+              sc::rule(sc::selector(StyleState::SELECTED), sc::glyphProfile(GlyphProfile::NF_SLASH)),
+              sc::rule(sc::selector(StyleState::HEADER), sc::glyphProfile(GlyphProfile::NF_BACKSLASH)),
+              sc::rule(sc::selector(StyleState::CARET), sc::glyphProfile(GlyphProfile::UNICODE_GLYPHS)));
+  constexpr auto FLAT = sc::compactSheet(
+    std::array{sc::flatRule(sc::selector(), sc::glyphProfile(GlyphProfile::NF_ROUNDED),
+                            sc::glyphFallback(GlyphFallback::UNICODE_GLYPHS)),
+               sc::flatRule(sc::selector(StyleState::FOCUSED), sc::glyphProfile(GlyphProfile::NF_CHEVRON)),
+               sc::flatRule(sc::selector(StyleState::DISABLED), sc::glyphProfile(GlyphProfile::ASCII),
+                            sc::glyphFallback(GlyphFallback::ASCII)),
+               sc::flatRule(sc::selector(StyleState::SELECTED), sc::glyphProfile(GlyphProfile::NF_SLASH)),
+               sc::flatRule(sc::selector(StyleState::HEADER), sc::glyphProfile(GlyphProfile::NF_BACKSLASH)),
+               sc::flatRule(sc::selector(StyleState::CARET), sc::glyphProfile(GlyphProfile::UNICODE_GLYPHS))});
+  const auto runtime = take(parsePss(R"pss(*{glyph-profile:nf-rounded;glyph-fallback:unicode;}
+    *:focused{glyph-profile:nf-chevron;} *:disabled{glyph-profile:ascii;glyph-fallback:ascii;}
+    *:selected{glyph-profile:nf-slash;} *:header{glyph-profile:nf-backslash;} *:caret{glyph-profile:unicode;})pss"));
+  const auto result = resolveStyle(runtime, {"ScrollBar", "", {}, true});
+
+  CHECK(resolveStyle(sc::materialize(BYTES), {"ScrollBar", "", {}, true}) == result);
+  CHECK(resolveStyle(sc::materialize(TYPED), {"ScrollBar", "", {}, true}) == result);
+  CHECK(resolveStyle(sc::materialize(FLAT), {"ScrollBar", "", {}, true}) == result);
+  CHECK(result.glyphs[0].profile == GlyphProfile::NF_ROUNDED);
+  CHECK(result.glyphs[1].profile == GlyphProfile::NF_CHEVRON);
+  CHECK(result.glyphs[2].profile == GlyphProfile::ASCII);
+  CHECK(result.glyphs[3].profile == GlyphProfile::NF_SLASH);
+  CHECK(result.glyphs[4].profile == GlyphProfile::NF_BACKSLASH);
+  CHECK(result.glyphs[5].profile == GlyphProfile::UNICODE_GLYPHS);
+  CHECK_FALSE(parsePss("*{glyph-profile:guess-font;}"));
+  CHECK_FALSE(parsePss("*{glyph-fallback:nf-rounded;}"));
+  CHECK_FALSE(parsePss("*{glyph-profile:'literal';}"));
+  CHECK(take(style::ct::materializeDocument(FLAT)).sheet == sc::materialize(TYPED));
+}
+
+TEST_CASE("named profiles preserve frame patterns literal ends and compact method pipe parity") {
+  constexpr std::array<std::string_view, 6> NAMES{"unicode",    "ascii",    "nf-rounded",
+                                                  "nf-chevron", "nf-slash", "nf-backslash"};
+  constexpr std::array PROFILES{GlyphProfile::UNICODE_GLYPHS, GlyphProfile::ASCII,    GlyphProfile::NF_ROUNDED,
+                                GlyphProfile::NF_CHEVRON,     GlyphProfile::NF_SLASH, GlyphProfile::NF_BACKSLASH};
+
+  for (std::size_t index = 0; index < NAMES.size(); ++index) {
+    std::vector<std::string> methodText;
+
+    for (bool pipe : {false, true}) {
+      Fixture fixture;
+      ui::Ref<Border> outer;
+      auto recipe = ui::label("body").framed(outer, "double", "Title").titleDecoration("profile").width(20).height(4);
+
+      if (pipe) {
+        recipe = std::move(recipe) | ui::glyphProfile(NAMES[index]) | ui::glyphFallback("unicode");
+      } else {
+        (void)std::move(recipe).glyphProfile(PROFILES[index]).glyphFallback(GlyphFallback::UNICODE_GLYPHS);
+      }
+
+      take(ui::mount(*fixture.scene, std::move(recipe)));
+      fixture.arrange();
+      const auto painted = paint(fixture.app->tree(), outer.node());
+      const auto ends = take(detail::profileTitleEnds({PROFILES[index]}, {}));
+
+      CHECK(std::ranges::find(painted.text, ends.prefix) != painted.text.end());
+      CHECK(std::ranges::find(painted.text, ends.suffix) != painted.text.end());
+      CHECK(std::ranges::find(painted.text, index == 1 ? "+" : "╔") != painted.text.end());
+
+      if (pipe) {
+        CHECK(painted.text == methodText);
+      } else {
+        methodText = painted.text;
+      }
+    }
+  }
+
+  FrameOptions options;
+  options.border.glyphSelection = {GlyphProfile::NF_ROUNDED};
+  options.title = "Title";
+  options.titleDecoration = TitleDecoration::SQUARE;
+  CHECK(take(detail::prepareFrameText({}, options)).prefix.bytes() == "[ ");
+  options.titleDecoration = TitleDecoration::NONE;
+  CHECK(take(detail::prepareFrameText({}, options)).prefix.bytes().empty());
+  options.titleDecoration = TitleDecoration::PROFILE;
+  options.customTitleDecoration = CustomTitleDecoration{"A", "Z"};
+  CHECK(take(detail::prepareFrameText({}, options)).prefix.bytes() == "A");
+  options.customGlyphs = FrameGlyphs{"1", "2", "3", "4", "-", "!"};
+  options.border.glyphSelection.profile = GlyphProfile::ASCII;
+  CHECK(take(detail::prepareFrameText({}, options)).glyphs[0].bytes() == "1");
+}
+
+TEST_CASE("loaded profiles retain manual maps beneath PSS and strict enum admission") {
+  ui::SceneResourceOptions options;
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  auto scene = ui::scene(
+    R"(scene { ScrollBar#bar{axis=HORIZONTAL glyphProfile=NF_ROUNDED glyphFallback=ASCII width=16} })", options);
+  const auto bar = scene.get<ScrollBar>("bar");
+
+  scene | ui::style("ScrollBar{glyph-profile:nf-slash;glyph-fallback:unicode;}");
+  take(scene.prepareChecked());
+  scene.configure([&](ManagedScene &, Application &app) {
+    take(app.tree().read(bar.node(), [&](const ScrollBar &widget) {
+      const auto &state = detail::ScrollWidgetAccess::state(widget);
+      CHECK(state.glyphSelection.profile == GlyphProfile::NF_ROUNDED);
+      CHECK(state.glyphSelection.fallback == GlyphFallback::ASCII);
+      REQUIRE(state.glyphProfiles);
+      CHECK(state.glyphProfiles->states[0]->scrollSelection.profile == GlyphProfile::NF_SLASH);
+      CHECK(state.glyphProfiles->states[0]->scrollSelection.fallback == GlyphFallback::UNICODE_GLYPHS);
+    }));
+  });
+  take(scene.checked());
+  auto invalid = ui::scene(ui::scrollBar().glyphProfile("guess-font"));
+  CHECK_FALSE(invalid.prepareChecked());
 }

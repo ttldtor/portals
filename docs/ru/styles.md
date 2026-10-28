@@ -131,6 +131,8 @@ Table:header { foreground: #4bb4dc; bold: true; }
 | `min-width` | 0..INT32_MAX ячеек | Компоновка и отрисовка |
 | `frame-line-foreground`, `frame-title-foreground`, `frame-ends-foreground` (также `-background`) | `#RRGGBB` | Отрисовка части рамки |
 | `frame-line-bold`, `frame-title-bold`, `frame-ends-bold` (также `-italic`, `-underline`) | `true`, `false` | Отрисовка части рамки |
+| `glyph-profile` | `default`, `unicode`, `ascii`, `nf-rounded`, `nf-chevron`, `nf-slash`, `nf-backslash` | Именованный базовый набор глифов |
+| `glyph-fallback` | `unicode`, `ascii` | Явный резерв при проверке ширины в одну ячейку |
 
 `min-width` разрешён только без условия состояния и задаёт жёсткий минимум
 выделяемой ширины. Ноль не добавляет ограничения. Обрезка viewport не уменьшает
@@ -138,8 +140,9 @@ Table:header { foreground: #4bb4dc; bold: true; }
 типизированная подготовка стиля отклоняет обновление и сохраняет последний
 допустимый стиль.
 Политики размеров, доступная область и отсечение по-прежнему действуют.
-Размер шрифта, политика ширины текста, символы рамок и высоты строк не входят
-в PSS v0.
+Размер шрифта, политика ширины текста, собственные литеральные глифы,
+рисунок линий рамки и высоты строк не входят в PSS v0. Именованные наборы
+используют свойства `glyph-profile` и `glyph-fallback`.
 
 Состояния: `normal`, `focused`, `disabled`, `selected`, `header`, `caret`.
 Они выбирают вариант отображения. Правило без состояния подходит всем вариантам;
