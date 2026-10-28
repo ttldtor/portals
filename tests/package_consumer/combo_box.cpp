@@ -34,16 +34,16 @@ int main() {
   ui::Ref<ComboBox> city;
   ui::Ref<DropDown> delivery;
   std::shared_ptr<const ModelSnapshot<City>> cities = std::make_shared<const Cities>();
-  auto scene =
-    ui::scene(ui::vbox(ui::comboBox(city, cities, &City::name), ui::dropDown(delivery, {"Courier", "Pickup"}))) |
-    ui::onSelect(city,
-                 [](ChoiceSelection) {
-                 }) |
-    ui::onSelect(city,
-                 []() -> std::expected<void, TreeError> {
-                   return {};
-                 }) |
-    ui::onSelect(delivery, ui::quit);
+  auto scene = ui::scene(ui::vbox(ui::comboBox(city, cities, &City::name).fuzzy().prefix(),
+                                  ui::dropDown(delivery, {"Courier", "Pickup"}) | ui::fuzzy() | ui::prefix())) |
+               ui::onSelect(city,
+                            [](ChoiceSelection) {
+                            }) |
+               ui::onSelect(city,
+                            []() -> std::expected<void, TreeError> {
+                              return {};
+                            }) |
+               ui::onSelect(delivery, ui::quit);
   auto prepared = scene.prepareChecked();
   if (!prepared || city.node() == Node<ComboBox>{} || delivery.node() == Node<DropDown>{}) {
     return 1;

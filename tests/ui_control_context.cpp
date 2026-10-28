@@ -1519,7 +1519,7 @@ TEST_CASE("actual catalog fixed ancestry retains sparse precedence origins and u
 }
 
 TEST_CASE("Shared frame, Spinner and scrollbar schemas append stable leaves within four presence words") {
-  static_assert(ui::detail::CONTROL_PROPERTY_COUNT == 230);
+  static_assert(ui::detail::CONTROL_PROPERTY_COUNT == 231);
   static_assert((ui::detail::CONTROL_PRESENCE_BITS + 63) / 64 == 4);
   ControlSettings appended;
   appended.spinnerPreset = SpinnerPreset::LINE;
@@ -1731,4 +1731,15 @@ TEST_CASE("scrollbar scalar vocabulary appends old identities and merges only su
   patch.scrollbar.pattern = ScrollbarPattern::ASCII;
   patch.scrollbar.maxGlyphBytes = 0;
   CHECK_FALSE(controls.resolve("ScrollArea", patch));
+}
+
+TEST_CASE("choice strategy is a typed sparse leaf restricted to the choice family") {
+  ControlContext context;
+  const auto choice = take(context.resolve("ComboBox", {.searchStrategy = SearchStrategy::PREFIX}));
+  CHECK(choice.settings.searchStrategy == SearchStrategy::PREFIX);
+  CHECK(choice.materializedLeaves == 1);
+  const auto drop = take(context.resolve("DropDown", {.searchStrategy = SearchStrategy::FUZZY_PREFIX}));
+  CHECK(drop.settings.searchStrategy == SearchStrategy::FUZZY_PREFIX);
+  fails(context.resolve("LineEdit", {.searchStrategy = SearchStrategy::PREFIX}), Code::UNSUPPORTED_PROPERTY);
+  fails(context.resolve("ComboBox", {.searchStrategy = static_cast<SearchStrategy>(99)}), Code::INVALID_VALUE);
 }

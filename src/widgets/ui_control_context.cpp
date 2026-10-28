@@ -61,6 +61,7 @@ constexpr std::array<std::string_view, 2> AXIS_NAMES{"HORIZONTAL", "VERTICAL"};
 constexpr std::array<std::string_view, 4> SPINNER_PRESET_NAMES{"DOTS", "LINE", "BRAILLE", "BAR_BOUNCE"};
 constexpr std::array<std::string_view, 2> SPINNER_DIRECTION_NAMES{"FORWARD", "REVERSE"};
 constexpr std::array<std::string_view, 3> SPINNER_ALIGN_NAMES{"START", "CENTER", "END"};
+constexpr std::array<std::string_view, 2> SEARCH_STRATEGY_NAMES{"PREFIX", "FUZZY_PREFIX"};
 constexpr std::array<std::string_view, 1> PLACEHOLDER_ALIASES{"placeHolder"};
 constexpr std::array<ControlPropertyDescriptor, detail::CONTROL_PROPERTY_COUNT> PROPERTIES{
   {{"text", Kind::TEXT, 1, {}},
@@ -292,7 +293,8 @@ constexpr std::array<ControlPropertyDescriptor, detail::CONTROL_PROPERTY_COUNT> 
    {"maxBytes", Kind::UNSIGNED_INTEGER, 1, {}},
    {"maxBatchBytes", Kind::UNSIGNED_INTEGER, 1, {}},
    {"maxRecordBytes", Kind::UNSIGNED_INTEGER, 1, {}},
-   {"followTail", Kind::BOOLEAN, 1, {}}}};
+   {"followTail", Kind::BOOLEAN, 1, {}},
+   {"searchStrategy", Kind::ENUMERATION, 1, SEARCH_STRATEGY_NAMES}}};
 static_assert(std::ranges::all_of(PROPERTIES, [](const auto &property) {
   return !property.path.empty();
 }));
@@ -345,6 +347,7 @@ constexpr Mask POSITIVE_UNSIGNED_MASK =
 constexpr Mask CHECK_MASK = SIZE_MASK | TEXT_MASK | propertyMask(5, 6);
 constexpr Mask LAYOUT_MASK = SIZE_MASK | propertyMask(4, 22, 23, 24, 25, 30, 31, 32);
 constexpr Mask EDIT_MASK = SIZE_MASK | TEXT_MASK | propertyMask(7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 33, 34, 35, 36);
+constexpr Mask CHOICE_MASK = EDIT_MASK | propertyMask(230);
 constexpr Mask FORM_FIELD_MASK = EDIT_MASK | LAYOUT_MASK | propertyMask(200, 216, 217, 218);
 constexpr Mask FIND_BAR_MASK = EDIT_MASK | LAYOUT_MASK | propertyMask(219, 220, 221, 222, 223, 224);
 constexpr Mask ALL_MASK = [] {
@@ -400,9 +403,9 @@ constexpr auto SCROLL_BAR_SCHEMA = withFrame(std::to_array(
    PROPERTIES[44],  PROPERTIES[45],  PROPERTIES[46],  PROPERTIES[47],  PROPERTIES[48],  PROPERTIES[52],
    PROPERTIES[204], PROPERTIES[205], PROPERTIES[206], PROPERTIES[207], PROPERTIES[208], PROPERTIES[209],
    PROPERTIES[210], PROPERTIES[211], PROPERTIES[212], PROPERTIES[213], PROPERTIES[214], PROPERTIES[215]}));
-constexpr auto LOG_VIEW_SCHEMA = withFrame(std::to_array(
-  {PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[8], PROPERTIES[225], PROPERTIES[226],
-   PROPERTIES[227], PROPERTIES[228], PROPERTIES[229]}));
+constexpr auto LOG_VIEW_SCHEMA =
+  withFrame(std::to_array({PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[8], PROPERTIES[225],
+                           PROPERTIES[226], PROPERTIES[227], PROPERTIES[228], PROPERTIES[229]}));
 constexpr auto OVERLAY_SCHEMA =
   withFrame(std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[22], PROPERTIES[23], PROPERTIES[24],
                            PROPERTIES[25], PROPERTIES[56], PROPERTIES[57]}));
@@ -458,6 +461,12 @@ constexpr auto EDIT_SCHEMA = withFrame(
   std::to_array({PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[7], PROPERTIES[8],
                  PROPERTIES[9], PROPERTIES[10], PROPERTIES[11], PROPERTIES[12], PROPERTIES[13], PROPERTIES[14],
                  PROPERTIES[15], PROPERTIES[16], PROPERTIES[33], PROPERTIES[34], PROPERTIES[35], PROPERTIES[36]}));
+constexpr auto CHOICE_SCHEMA = [] {
+  std::array<ControlPropertyDescriptor, EDIT_SCHEMA.size() + 1> schema{};
+  std::ranges::copy(EDIT_SCHEMA, schema.begin());
+  schema.back() = PROPERTIES[230];
+  return schema;
+}();
 constexpr auto FORM_FIELD_SCHEMA = withFrame(
   std::to_array({PROPERTIES[0],  PROPERTIES[1],  PROPERTIES[2],   PROPERTIES[3],   PROPERTIES[4],   PROPERTIES[7],
                  PROPERTIES[8],  PROPERTIES[9],  PROPERTIES[10],  PROPERTIES[11],  PROPERTIES[12],  PROPERTIES[13],
@@ -528,6 +537,7 @@ static_assert(schemaMatchesMask(NOTIFICATION_SCHEMA, NOTIFICATION_MASK));
 static_assert(schemaMatchesMask(THEME_SELECTOR_SCHEMA, THEME_SELECTOR_MASK));
 static_assert(schemaMatchesMask(THEME_CATALOG_SCHEMA, THEME_CATALOG_MASK));
 static_assert(schemaMatchesMask(EDIT_SCHEMA, EDIT_MASK));
+static_assert(schemaMatchesMask(CHOICE_SCHEMA, CHOICE_MASK));
 static_assert(schemaMatchesMask(FORM_FIELD_SCHEMA, FORM_FIELD_MASK));
 static_assert(schemaMatchesMask(FIND_BAR_SCHEMA, FIND_BAR_MASK));
 static_assert(schemaMatchesMask(PASSWORD_SCHEMA, PASSWORD_MASK));
@@ -567,7 +577,11 @@ Mask builtinMask(std::string_view name) noexcept {
     return FORM_FIELD_MASK;
   }
 
-  if (name == "LineEdit" || name == "ComboBox" || name == "DropDown") {
+  if (name == "ComboBox" || name == "DropDown") {
+    return CHOICE_MASK;
+  }
+
+  if (name == "LineEdit") {
     return EDIT_MASK;
   }
   if (name == "Password") {
@@ -892,7 +906,8 @@ ControlContextError exceptionError() noexcept {
   X(maxBytes, 226) \
   X(maxBatchBytes, 227) \
   X(maxRecordBytes, 228) \
-  X(followTail, 229)
+  X(followTail, 229) \
+  X(searchStrategy, 230)
 
 #define PORTALS_CONTROL_LEAVES(X) \
   PORTALS_CONTROL_BASE_LEAVES(X) \
@@ -1007,6 +1022,8 @@ template <class T> bool validValue(const T &value, std::size_t index) noexcept {
            value == ScrollPlacement::ON_FRAME;
   } else if constexpr (std::same_as<T, ButtonChrome>) {
     return value == ButtonChrome::BRACKETS || value == ButtonChrome::NONE;
+  } else if constexpr (std::same_as<T, SearchStrategy>) {
+    return value == SearchStrategy::PREFIX || value == SearchStrategy::FUZZY_PREFIX;
   } else if constexpr (std::same_as<T, SpinnerPreset>) {
     return value >= SpinnerPreset::DOTS && value <= SpinnerPreset::BAR_BOUNCE;
   } else if constexpr (std::same_as<T, SpinnerDirection>) {
@@ -1218,6 +1235,7 @@ void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &pr
       std::pair<std::string_view, bool>{"previousLabel", patch.findPreviousLabel.has_value()},
       std::pair<std::string_view, bool>{"nextLabel", patch.findNextLabel.has_value()},
       std::pair<std::string_view, bool>{"clearLabel", patch.findClearLabel.has_value()},
+      std::pair<std::string_view, bool>{"searchStrategy", patch.searchStrategy.has_value()},
       std::pair<std::string_view, bool>{"help", patch.fieldHelp.has_value()},
       std::pair<std::string_view, bool>{"required", patch.fieldRequired.has_value()},
       std::pair<std::string_view, bool>{"requiredMessage", patch.fieldRequiredMessage.has_value()},
@@ -1967,7 +1985,11 @@ std::span<const ControlPropertyDescriptor> controlPropertySchema(std::string_vie
     return FORM_FIELD_SCHEMA;
   }
 
-  if (type == "LineEdit" || type == "ComboBox" || type == "DropDown") {
+  if (type == "ComboBox" || type == "DropDown") {
+    return CHOICE_SCHEMA;
+  }
+
+  if (type == "LineEdit") {
     return EDIT_SCHEMA;
   }
   if (type == "Password") {

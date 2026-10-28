@@ -218,6 +218,23 @@ public:
     return std::move(*this).scalarSettings({.readOnly = value});
   }
 
+  /** @param enabled Allow one-edit prefix matching from three normalized query graphemes; false selects PREFIX.
+   * @return Consuming choice recipe; only the strategy leaf changes, retaining configured search budgets.
+   */
+  Description &&fuzzy(bool enabled = true) &&
+    requires std::derived_from<T, ComboBox>
+  {
+    return std::move(*this).scalarSettings(
+      {.searchStrategy = enabled ? SearchStrategy::FUZZY_PREFIX : SearchStrategy::PREFIX});
+  }
+
+  /** @return Consuming choice recipe using exact normalized label/token prefixes and retaining search budgets. */
+  Description &&prefix() &&
+    requires std::derived_from<T, ComboBox>
+  {
+    return std::move(*this).fuzzy(false);
+  }
+
   /** @param enabled Hide all value glyphs and use a fixed-origin caret; false restores the type's normal presentation.
    * @return Consuming editor recipe; ordinary LineEdit storage remains plaintext.
    */

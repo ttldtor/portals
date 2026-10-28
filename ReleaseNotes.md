@@ -16,6 +16,15 @@ planned work is not included. An **Unreleased** heading has no publication date.
 - Add complete declarative frame/title and on-frame scrollbar galleries with
   native GIF and PNG previews in English and Russian.
 
+### Changed
+
+- `ComboBox` and `DropDown` now default to exact normalized label/token prefix
+  matching. For example, `Pra` no longer includes Bratislava; `Pr2` has no match.
+  Applications that need the previous one-edit completion can add `.fuzzy()` or
+  `| ui::fuzzy()`. `.prefix()` / `| ui::prefix()` restore strict matching while
+  preserving search budgets. Loaded choice settings accept `searchStrategy`.
+  General `SearchOptions` and live suggestions keep their fuzzy default.
+
 ### Added
 
 - Added `SizeMode::CONTENT` and fluent `fitWidth`/`fitHeight` plus per-axis

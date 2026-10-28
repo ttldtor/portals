@@ -11,7 +11,7 @@ int main() {
 
   // clang-format off
   auto scene = ui::scene(ui::vbox(
-    ui::comboBox(city, {"London", "Prague", "Tokyo"}),
+    ui::comboBox(city, {"Prague", "Bratislava", "Paris", "São Paulo"}),
     ui::label(chosen, "Choose a city")));
 
   return scene

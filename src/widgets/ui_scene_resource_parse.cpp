@@ -437,19 +437,13 @@ private:
   }
 
   const ControlPropertyDescriptor *descriptor(std::string_view path) const {
-    for (const auto type : {"FindBar",       "FormField",
-                            "Password",      "LineEdit",
-                            "CheckBox",      "VBox",
-                            "Button",        "Border",
-                            "Gauge",         "Spinner",
-                            "ScrollArea",    "ScrollBar",
-                            "LogView",       "Overlay",
-                            "HelpView",      "KeyHints",
-                            "VirtualList",   "VirtualTable",
-                            "Chart",         "DataStateView",
-                            "OverlayHost",   "Dialog",
-                            "MessageBox",    "Notifications",
-                            "ThemeSelector", "ThemeSelectorCatalog"}) {
+    for (const auto type : {"FindBar",    "FormField",     "Password",      "LineEdit",
+                            "ComboBox",   "DropDown",      "CheckBox",      "VBox",
+                            "Button",     "Border",        "Gauge",         "Spinner",
+                            "ScrollArea", "ScrollBar",     "LogView",       "Overlay",
+                            "HelpView",   "KeyHints",      "VirtualList",   "VirtualTable",
+                            "Chart",      "DataStateView", "OverlayHost",   "Dialog",
+                            "MessageBox", "Notifications", "ThemeSelector", "ThemeSelectorCatalog"}) {
       const auto schema = controlPropertySchema(type);
       const auto found = std::ranges::find(schema, path, &ControlPropertyDescriptor::path);
 
@@ -854,6 +848,8 @@ private:
         settings.dialog.frame.glyphs = static_cast<PrimitiveGlyphs>(index);
       } else if (path == "chartGlyphSet") {
         settings.chartGlyphSet = static_cast<ChartGlyphSet>(index);
+      } else if (path == "searchStrategy") {
+        settings.searchStrategy = static_cast<SearchStrategy>(index);
       } else if (path == "displayMode") {
         settings.displayMode = static_cast<LineEditDisplayMode>(index);
       } else {

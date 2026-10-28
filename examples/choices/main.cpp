@@ -39,7 +39,7 @@ int main() {
       ui::button("Use Amsterdam", [city] { return city.select(0); }),
       ui::button("Clear selection", [city] { return city.clearSelection(); }),
       ui::button("Quit", [] { ui::quit(); })),
-    ui::label("Type a city, then Down / Enter. Esc closes the popup; Ctrl+Z undoes text."),
+    ui::label("Type a city prefix, then Down / Enter. Esc closes the popup; Ctrl+Z undoes text."),
     ui::label("The list scrolls through every city. Tab moves focus; F10 exits.")
   ).width(78).framed("rounded", "Shipping desk"));
 

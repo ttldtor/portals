@@ -113,7 +113,8 @@ TEST_CASE("the complete shipping choices program paints browse and indexed rows 
     take(city.text().set("Pra").result());
     REQUIRE(until([&] {
       const auto frame = choice_test::text(choice_test::paint(app, VIEWPORT));
-      return frame.contains("Prague") && !frame.contains("Auckland");
+      return frame.contains("Prague") && !frame.contains("Auckland") && !frame.contains("Bratislava") &&
+             !frame.contains("Paris") && !frame.contains("São Paulo");
     }));
     take(city.editor().focus());
     const auto input = [&](KeyEvent key) {

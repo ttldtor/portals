@@ -11,6 +11,7 @@
 #include <portals/password.hpp>
 #include <portals/primitives.hpp>
 #include <portals/scroll_options.hpp>
+#include <portals/search.hpp>
 #include <portals/spinner.hpp>
 #include <portals/text_value.hpp>
 #include <portals/theme_selector.hpp>
@@ -443,11 +444,12 @@ struct ControlSettings {
   std::optional<TextValue> findPreviousLabel{};       ///< FindBar previous-match caption.
   std::optional<TextValue> findNextLabel{};           ///< FindBar next-match caption.
   std::optional<TextValue> findClearLabel{};          ///< FindBar explicit clear caption.
-  std::optional<std::size_t> maxLines{};       ///< Positive LogView retained-record cap.
-  std::optional<std::size_t> maxBytes{};       ///< Positive LogView retained UTF-8 payload cap.
-  std::optional<std::size_t> maxBatchBytes{};  ///< Positive LogView complete input-batch byte cap.
-  std::optional<std::size_t> maxRecordBytes{}; ///< Positive LogView individual record byte cap.
-  std::optional<bool> followTail{};            ///< LogView initial follow-tail mode.
+  std::optional<std::size_t> maxLines{};              ///< Positive LogView retained-record cap.
+  std::optional<std::size_t> maxBytes{};              ///< Positive LogView retained UTF-8 payload cap.
+  std::optional<std::size_t> maxBatchBytes{};         ///< Positive LogView complete input-batch byte cap.
+  std::optional<std::size_t> maxRecordBytes{};        ///< Positive LogView individual record byte cap.
+  std::optional<bool> followTail{};                   ///< LogView initial follow-tail mode.
+  std::optional<SearchStrategy> searchStrategy{};     ///< ComboBox/DropDown matching; preserves worker budgets.
 };
 
 /** @brief Finite context bounds, checked before publication/materialization beyond each bound. */

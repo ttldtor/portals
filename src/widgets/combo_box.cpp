@@ -1855,6 +1855,11 @@ template <class T> Description<T> makeChoiceRecipe(std::shared_ptr<FindModelSour
                                   MountContext &context) mutable -> std::expected<Node<T>, ManagedError> {
     constexpr bool READ_ONLY = std::same_as<T, DropDown>;
     constexpr std::size_t MAX_PAGE_ROWS = 256, BROWSE_OVERSCAN = 2;
+
+    if (context.controlSettings && context.controlSettings->searchStrategy) {
+      config.search.strategy = *context.controlSettings->searchStrategy;
+    }
+
     if (!config.pageRows || config.pageRows > MAX_PAGE_ROWS || !config.browseScratchBytes || config.popupRows <= 0 ||
         config.popupWidth <= 0 || static_cast<std::size_t>(config.popupRows) + 2 * BROWSE_OVERSCAN > config.pageRows ||
         !portals::detail::validSearchOptions(config.search) ||
