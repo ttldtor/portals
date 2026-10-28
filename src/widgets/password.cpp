@@ -223,7 +223,12 @@ void Password::revealCursor() noexcept {
 }
 
 std::expected<void, TreeError> Password::paint(PaintContext &context) {
-  const auto resolved = computedStyle() ? *computedStyle() : styleDefaults();
+  std::optional<ComputedStyle> manualStyle;
+  if (!computedStyle()) {
+    manualStyle.emplace(styleDefaults());
+  }
+  const auto resolved =
+    computedStyle() ? detail::ComputedStyleView(*computedStyle()) : detail::ComputedStyleView(*manualStyle);
   const auto style = !enabled_ ? resolved.disabled : focused_ ? resolved.focused : resolved.normal;
   const auto selectionBegin = cellAt(std::min(cursor_, anchor_)) - scroll_;
   const auto selectionEnd = cellAt(std::max(cursor_, anchor_)) - scroll_;

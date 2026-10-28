@@ -283,7 +283,7 @@ TEST_CASE("close chrome rejects a conflicting hot style before publishing any ne
   const auto geometry = take(fixture.app->tree().inspect(close));
 
   take(fixture.app->tree().read(close, [&](const Widget &widget) {
-    before = *widget.computedStyle();
+    before = widget.computedStyle()->flatten();
     revision = widget.styleRevision();
   }));
 

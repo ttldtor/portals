@@ -200,7 +200,12 @@ std::expected<void, TreeError> Spinner::paint(PaintContext &context) {
   if (bounds_.empty()) {
     return {};
   }
-  const auto style = computedStyle() ? *computedStyle() : styleDefaults();
+  std::optional<ComputedStyle> manualStyle;
+  if (!computedStyle()) {
+    manualStyle.emplace(styleDefaults());
+  }
+  const auto style =
+    computedStyle() ? detail::ComputedStyleView(*computedStyle()) : detail::ComputedStyleView(*manualStyle);
   const auto appearance = state_->eligible && config.active && !config.reducedMotion ? style.normal : style.disabled;
   const auto space = std::max(0, bounds_.size().width - intrinsic->width);
   const auto x = config.alignment == LayoutAlign::CENTER ? space / 2 : config.alignment == LayoutAlign::END ? space : 0;

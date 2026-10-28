@@ -626,8 +626,11 @@ std::expected<void, TreeError> setScrollbarSkin(WidgetTree &tree, Node<Widget> n
         return;
       }
 
-      auto profiles = detail::GlyphProfileAccess::prepare(widget, widget.computedStyle().value_or(ComputedStyle{}),
-                                                          &skin.glyphSelection);
+      const ComputedStyle defaults;
+      // Profile preparation can reenter style publication through the allocator.
+      const auto snapshot = widget.computedStyle();
+      const auto resolved = snapshot ? detail::ComputedStyleView(*snapshot) : detail::ComputedStyleView(defaults);
+      auto profiles = detail::GlyphProfileAccess::prepare(widget, resolved, &skin.glyphSelection);
 
       if (!profiles) {
         result = std::unexpected(profiles.error());

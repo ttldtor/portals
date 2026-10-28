@@ -32,7 +32,10 @@ GraphemeText decoration(std::string_view text, WidthPolicy policy) {
 Control::Control(GraphemeText text, std::string_view prefix, std::string_view suffix, ControlStyle style,
                  SizePolicy policy)
     : SizedWidget(policy), text_(std::move(text)), prefix_(decoration(prefix, text_.policy())),
-      checked_prefix_(decoration(prefix == "[ ] " ? "[x] " : prefix == "[ " ? "[*" : prefix, text_.policy())),
+      checked_prefix_(decoration(prefix == "[ ] " ? "[x] "
+                                 : prefix == "[ " ? "[*"
+                                                  : prefix,
+                                 text_.policy())),
       mixed_prefix_(prefix == "[ ] " ? std::optional(decoration("[-] ", text_.policy())) : std::nullopt),
       suffix_(decoration(suffix, text_.policy())), style_(style) {
 }
@@ -95,7 +98,12 @@ std::expected<void, TreeError> Control::paint(PaintContext &context) {
   // Paint uses only synchronized presentation. The frame owner transforms these local
   // commands and renders their borrowed text before releasing the enclosing tree frame.
   const auto &prefix = mixed_ && mixed_prefix_ ? *mixed_prefix_ : checked_ ? checked_prefix_ : prefix_;
-  const auto resolved = computedStyle() ? *computedStyle() : Control::styleDefaults();
+  std::optional<ComputedStyle> manualStyle;
+  if (!computedStyle()) {
+    manualStyle.emplace(Control::styleDefaults());
+  }
+  const auto resolved =
+    computedStyle() ? detail::ComputedStyleView(*computedStyle()) : detail::ComputedStyleView(*manualStyle);
   const auto style = !enabled_ ? resolved.disabled : focused_ ? resolved.focused : resolved.normal;
   const std::array<RenderCommand, 4> commands{
     FillCommand{bounds_, bounds_, style}, TextCommand{{}, prefix, bounds_, style},

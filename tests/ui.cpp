@@ -617,7 +617,7 @@ void instanceClasses() {
                                        "#identity.accent { bold:true; } Control.accent { italic:true; } "
                                        ".accent.secondary { underline:true; } .replacement { bold:true; }"))));
   take(fixture.app->tree().read(method.node(), [](const Custom &widget) {
-    check(widget.computedStyle().has_value(), "class metadata participates in theme matching");
+    check(static_cast<bool>(widget.computedStyle()), "class metadata participates in theme matching");
 
     const auto &style = widget.computedStyle()->normal;
 

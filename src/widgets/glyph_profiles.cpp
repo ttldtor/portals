@@ -110,7 +110,7 @@ std::expected<CustomTitleDecoration, TreeError> profileTitleEnds(GlyphSelection 
 }
 
 std::expected<std::shared_ptr<const PreparedGlyphProfiles>, TreeError>
-GlyphProfileAccess::prepare(Widget &widget, const ComputedStyle &style, const GlyphSelection *manualScroll) {
+GlyphProfileAccess::prepare(Widget &widget, ComputedStyleView style, const GlyphSelection *manualScroll) {
   auto *border = dynamic_cast<Border *>(&widget);
   auto *scroll = ScrollWidgetAccess::state(widget);
 

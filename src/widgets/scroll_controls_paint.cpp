@@ -13,7 +13,7 @@ ComputedStyle scrollDefaults(const ScrollWidgetState &state) {
   return result;
 }
 
-std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, const ComputedStyle &resolved,
+std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, ComputedStyleView resolved,
                                            PaintContext &context) {
   if (!state.lease || state.retired || !state.arranged) {
     return {};

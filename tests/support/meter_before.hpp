@@ -69,10 +69,10 @@ public:
       take(CellRect::from({0, std::min(BAR_TOP, size_.height)},
                           {static_cast<std::int32_t>(static_cast<std::int64_t>(size_.width) * value_ / MAX_LEVEL),
                            std::max(0, size_.height - BAR_TOP)}));
-    const auto styles = computedStyle().value_or(ComputedStyle{});
-    const std::array<RenderCommand, 3> commands{FillCommand{area, area, styles.normal},
-                                                FillCommand{bar, area, styles.focused},
-                                                TextCommand{{}, label_, area, styles.normal}};
+    const auto normal = computedStyle() ? computedStyle()->normal : CellStyle{};
+    const auto focused = computedStyle() ? computedStyle()->focused : CellStyle{};
+    const std::array<RenderCommand, 3> commands{FillCommand{area, area, normal}, FillCommand{bar, area, focused},
+                                                TextCommand{{}, label_, area, normal}};
 
     return context.submit(commands);
   }

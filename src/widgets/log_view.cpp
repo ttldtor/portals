@@ -856,7 +856,12 @@ std::expected<void, TreeError> LogView::paint(PaintContext &context) {
     return {};
   }
 
-  const auto resolved = computedStyle() ? *computedStyle() : styleDefaults();
+  std::optional<ComputedStyle> manualStyle;
+  if (!computedStyle()) {
+    manualStyle.emplace(styleDefaults());
+  }
+  const auto resolved =
+    computedStyle() ? detail::ComputedStyleView(*computedStyle()) : detail::ComputedStyleView(*manualStyle);
   const auto style = !scroll.enabled ? resolved.disabled : scroll.focused ? resolved.focused : resolved.normal;
   const RenderCommand fill = FillCommand{*viewport, *viewport, style};
   auto painted = context.submit(std::span(&fill, 1));

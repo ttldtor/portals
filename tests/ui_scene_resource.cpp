@@ -6352,10 +6352,10 @@ TEST_CASE("segmented scrollbar resources preserve independent parts in grouped a
 
     REQUIRE(app.tree().read(area.node(), [&](const ScrollArea &widget) {
       REQUIRE(widget.computedStyle());
-      CHECK(widget.computedStyle()->scrollbar[0].thumb->foreground == RgbColor{1, 2, 3});
-      CHECK(widget.computedStyle()->scrollbar[0].arrows->background == RgbColor{4, 5, 6});
-      REQUIRE(widget.computedStyle()->scrollbarThumbSegments);
-      const auto &segments = (*widget.computedStyle()->scrollbarThumbSegments)[0];
+      CHECK(widget.computedStyle()->scrollbar()[0].thumb->foreground == RgbColor{1, 2, 3});
+      CHECK(widget.computedStyle()->scrollbar()[0].arrows->background == RgbColor{4, 5, 6});
+      REQUIRE(widget.computedStyle()->scrollbarThumbSegments());
+      const auto &segments = (*widget.computedStyle()->scrollbarThumbSegments())[0];
       CHECK(segments.start.foreground == RgbColor{7, 8, 9});
       CHECK_FALSE(segments.body.bold);
       CHECK(segments.end.italic);

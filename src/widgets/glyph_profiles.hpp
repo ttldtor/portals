@@ -32,7 +32,7 @@ bool validGlyphSelection(GlyphSelection selection) noexcept;
 
 struct GlyphProfileAccess {
   static std::expected<std::shared_ptr<const PreparedGlyphProfiles>, TreeError>
-  prepare(Widget &widget, const ComputedStyle &style, const GlyphSelection *manualScroll = nullptr);
+  prepare(Widget &widget, ComputedStyleView style, const GlyphSelection *manualScroll = nullptr);
   static void commit(Widget &widget, std::shared_ptr<const PreparedGlyphProfiles> prepared) noexcept;
 };
 } // namespace portals::detail

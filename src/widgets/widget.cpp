@@ -248,7 +248,7 @@ ComputedStyle Widget::styleDefaults() const {
   return {};
 }
 
-const std::optional<ComputedStyle> &Widget::computedStyle() const noexcept {
+const std::shared_ptr<const StyleSnapshot> &Widget::computedStyle() const noexcept {
   return computedStyle_;
 }
 

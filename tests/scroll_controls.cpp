@@ -1828,6 +1828,54 @@ void namedGlyphProfiles() {
         "explicit ASCII fallback selects portable vertical caps without rotating NF");
 }
 
+void skinProfileSnapshotReentry() {
+  BarFixture fixture({}, ScrollAxis::HORIZONTAL);
+  StyleEngine engine(*fixture.tree);
+  take(engine.bind(fixture.bar, {.type = "Control"}));
+  take(engine.replacePss("*{glyph-profile:default;}"));
+  ScrollbarSkin skin;
+  const auto before = allocation_test::allocations;
+  take(setScrollbarSkin(*fixture.tree, fixture.bar, skin));
+  // DEFAULT prepares the identical skin but needs no subsequent glyph-profile allocation.
+  const auto skinAllocations = allocation_test::allocations - before;
+  check(skinAllocations > 0 && skinAllocations <= static_cast<std::size_t>(std::numeric_limits<int>::max()),
+        "skin-only allocation calibration is bounded");
+  if (skinAllocations > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+    return;
+  }
+
+  std::weak_ptr<const StyleSnapshot> oldSnapshot;
+  take(fixture.tree->read(fixture.bar, [&](const ScrollBar &widget) {
+    oldSnapshot = widget.computedStyle();
+  }));
+  const auto replacement = take(parsePss("*{glyph-profile:ascii;}"));
+  static StyleEngine *nestedEngine;
+  static const StyleSheet *nestedSheet;
+  static std::weak_ptr<const StyleSnapshot> *observedSnapshot;
+  static bool retainedDuringHook;
+  nestedEngine = &engine;
+  nestedSheet = &replacement;
+  observedSnapshot = &oldSnapshot;
+  retainedDuringHook = false;
+  allocation_test::hook = [] {
+    take(nestedEngine->replace(*nestedSheet));
+    retainedDuringHook = !observedSnapshot->expired();
+  };
+  allocation_test::beforeHook = static_cast<int>(skinAllocations);
+  skin.glyphSelection.profile = GlyphProfile::NF_SLASH;
+  const auto changed = setScrollbarSkin(*fixture.tree, fixture.bar, skin);
+  const bool hookFired = allocation_test::hook == nullptr;
+  allocation_test::hook = nullptr;
+  check(hookFired && retainedDuringHook && oldSnapshot.expired() && error(changed, TreeError::WOULD_BLOCK),
+        "profile preparation owns the old snapshot through reentrant publication and releases it on rejection");
+  take(fixture.tree->read(fixture.bar, [&](const ScrollBar &widget) {
+    const auto &state = detail::ScrollWidgetAccess::state(widget);
+    check(state.glyphSelection.profile == GlyphProfile::DEFAULT && state.glyphProfiles &&
+            state.glyphProfiles->states[0]->scrollSelection.profile == GlyphProfile::ASCII,
+          "reentrant style resources survive while stale manual glyph preparation stays unpublished");
+  }));
+}
+
 thread_local WidgetTree *profileReentryTree{};
 thread_local StyleEngine *profileReentryEngine{};
 thread_local Node<Widget> profileReentryNode;
@@ -1882,7 +1930,7 @@ void glyphProfileTransactions() {
   check(take(fixture.tree->consumeFrameRequest()) == Invalidation::NONE,
         "failed all-target profile preparation never invalidates");
   take(fixture.tree->read(first, [&](const ScrollBar &bar) {
-    check(!detail::ScrollWidgetAccess::state(bar).glyphProfiles && !bar.computedStyle()->glyphs[0].profile,
+    check(!detail::ScrollWidgetAccess::state(bar).glyphProfiles && !bar.computedStyle()->glyphs()[0].profile,
           "failed later profile leaves earlier computed style and resources unpublished");
   }));
   take(fixture.tree->edit(second, [&](ProfileDefaultsBar &bar) {
@@ -1914,6 +1962,7 @@ void glyphProfileTransactions() {
 int main() {
   namedGlyphProfiles();
   glyphProfileTransactions();
+  skinProfileSnapshotReentry();
   sharedScrollbarPresetLifetime();
   functionalArrowGeometry();
   heldArrows();

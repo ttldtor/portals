@@ -3,6 +3,7 @@
 #pragma once
 
 #include <array>
+#include <memory>
 #include <optional>
 #include <portals/cell_buffer.hpp>
 #include <portals/glyph_profile.hpp>
@@ -81,4 +82,118 @@ struct ComputedStyle {
    */
   bool operator==(const ComputedStyle &other) const = default;
 };
+
+namespace detail {
+/// @cond INTERNAL
+struct StyleSnapshotBlocks {
+  std::shared_ptr<const std::array<FrameAppearance, 6>> frame;
+  std::shared_ptr<const std::array<ScrollbarAppearance, 6>> scrollbar;
+  std::shared_ptr<const std::array<ScrollbarThumbAppearance, 6>> thumb;
+  std::shared_ptr<const std::array<GlyphAppearance, 6>> glyphs;
+};
+
+std::size_t styleBlockHash(const std::array<FrameAppearance, 6> &value) noexcept;
+std::size_t styleBlockHash(const std::array<ScrollbarAppearance, 6> &value) noexcept;
+std::size_t styleBlockHash(const std::array<ScrollbarThumbAppearance, 6> &value) noexcept;
+std::size_t styleBlockHash(const std::array<GlyphAppearance, 6> &value) noexcept;
+/// @endcond
+} // namespace detail
+
+/** @brief Immutable resident presentation with independently sparse extension blocks.
+ * Widget bindings share equal values. Construction can allocate; all read access and flattening
+ * are allocation-free. Retain the owning shared pointer to keep borrowed block references alive
+ * across a style publication or destruction of the originating widget.
+ */
+class StyleSnapshot {
+  class PreparedTag {
+    friend class StyleEngine;
+    friend class StyleSnapshot;
+    PreparedTag() = default;
+
+  public:
+    PreparedTag(const PreparedTag &) = default;
+  };
+
+public:
+  CellStyle normal;        ///< Ordinary text and fill.
+  CellStyle focused;       ///< Focused control text and fill.
+  CellStyle disabled;      ///< Disabled control text and fill.
+  CellStyle selected;      ///< Selected row or editor range.
+  CellStyle header;        ///< Fixed table heading.
+  CellStyle caret;         ///< Editor software caret.
+  std::int32_t minWidth{}; ///< Intrinsic minimum in cells.
+
+  /** @brief Prepare the complete immutable value; may throw std::bad_alloc.
+   * @param value Owning resolved value to copy into sparse storage.
+   */
+  explicit StyleSnapshot(const ComputedStyle &value);
+  /// @cond INTERNAL
+  StyleSnapshot(PreparedTag, const ComputedStyle &value, detail::StyleSnapshotBlocks blocks) noexcept;
+  /// @endcond
+
+  /** @return Frame states, or shared constant absent states. */
+  const std::array<FrameAppearance, 6> &frame() const noexcept;
+  /** @return Scrollbar states, or shared constant absent states. */
+  const std::array<ScrollbarAppearance, 6> &scrollbar() const noexcept;
+  /** @return Complete thumb states, or null when no segment override exists. */
+  const std::array<ScrollbarThumbAppearance, 6> *scrollbarThumbSegments() const noexcept;
+  /** @return Logical glyph states, or shared constant absent states. */
+  const std::array<GlyphAppearance, 6> &glyphs() const noexcept;
+  /** @return Whether this value owns a frame extension. */
+  bool hasFrame() const noexcept;
+  /** @return Whether this value owns a scrollbar extension. */
+  bool hasScrollbar() const noexcept;
+  /** @return Whether this value owns complete thumb segment states. */
+  bool hasThumbSegments() const noexcept;
+  /** @return Whether this value owns logical glyph states. */
+  bool hasGlyphs() const noexcept;
+  /** @return Complete owning flat value without allocation. */
+  ComputedStyle flatten() const noexcept;
+  /** @param other Complete owning value to compare. @return Full semantic equality. */
+  bool operator==(const ComputedStyle &other) const noexcept;
+  /** @param other Immutable value to compare. @return Full semantic equality. */
+  bool operator==(const StyleSnapshot &other) const noexcept;
+  /** @return Content hash used by bounded transaction-local sharing indexes. */
+  std::size_t contentHash() const noexcept;
+  /** @param value Complete owning value to hash. @return The same hash as its snapshot. */
+  static std::size_t contentHash(const ComputedStyle &value) noexcept;
+
+private:
+  friend class StyleEngine;
+  detail::StyleSnapshotBlocks blocks_;
+};
+
+namespace detail {
+/// @cond INTERNAL
+/** @brief Synchronous presentation borrow; the source must outlive this view. */
+struct ComputedStyleView {
+  const CellStyle &normal;
+  const CellStyle &focused;
+  const CellStyle &disabled;
+  const CellStyle &selected;
+  const CellStyle &header;
+  const CellStyle &caret;
+  std::int32_t minWidth;
+  const std::array<FrameAppearance, 6> &frame;
+  const std::array<ScrollbarAppearance, 6> &scrollbar;
+  const std::array<ScrollbarThumbAppearance, 6> *scrollbarThumbSegments;
+  const std::array<GlyphAppearance, 6> &glyphs;
+
+  ComputedStyleView(const ComputedStyle &value) noexcept
+      : normal(value.normal), focused(value.focused), disabled(value.disabled), selected(value.selected),
+        header(value.header), caret(value.caret), minWidth(value.minWidth), frame(value.frame),
+        scrollbar(value.scrollbar),
+        scrollbarThumbSegments(value.scrollbarThumbSegments ? &*value.scrollbarThumbSegments : nullptr),
+        glyphs(value.glyphs) {
+  }
+
+  ComputedStyleView(const StyleSnapshot &value) noexcept
+      : normal(value.normal), focused(value.focused), disabled(value.disabled), selected(value.selected),
+        header(value.header), caret(value.caret), minWidth(value.minWidth), frame(value.frame()),
+        scrollbar(value.scrollbar()), scrollbarThumbSegments(value.scrollbarThumbSegments()), glyphs(value.glyphs()) {
+  }
+};
+
+/// @endcond
+} // namespace detail
 } // namespace portals

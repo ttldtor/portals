@@ -875,7 +875,8 @@ void bodyRemovalAtomicity() {
       for (std::size_t i = 0; i < nodes.size(); ++i) {
         result.visible[i] = take(f.app->tree().inspect(nodes[i])).visible;
         take(f.app->tree().read(nodes[i], [&](const Widget &widget) {
-          result.styles[i] = widget.computedStyle();
+          result.styles[i] =
+            widget.computedStyle() ? std::optional<ComputedStyle>(widget.computedStyle()->flatten()) : std::nullopt;
         }));
       }
       return result;

@@ -189,7 +189,7 @@ struct Fixture {
   ComputedStyle read() {
     ComputedStyle result;
     take(tree->read(subject, [&](const Widget &widget) {
-      result = *widget.computedStyle();
+      result = widget.computedStyle()->flatten();
     }));
     return result;
   }
@@ -224,7 +224,7 @@ struct ManagedFixture {
   ComputedStyle read() {
     ComputedStyle result;
     take(app->tree().read(button.node(), [&](const Button &widget) {
-      result = *widget.computedStyle();
+      result = widget.computedStyle()->flatten();
     }));
     return result;
   }
@@ -1209,17 +1209,20 @@ namespace {
 WidgetTree *allocatorTree{};
 bool allocatorCloseTree{};
 bool allocatorRetired{};
+std::optional<TreeError> allocatorRetirementError;
 
 void retireRawTreeDuringComputedStaging() {
   stageHookFired = true;
-  allocatorRetired = allocatorCloseTree ? bool(allocatorTree->close()) : bool(allocatorTree->remove(allocatorSubject));
+  auto result = allocatorCloseTree ? allocatorTree->close() : allocatorTree->remove(allocatorSubject);
+  allocatorRetired = static_cast<bool>(result);
+  allocatorRetirementError = result ? std::nullopt : std::optional(result.error());
 }
 } // namespace
 
-TEST_CASE("computed allocation retirement is checked before dereferencing a widget observer") {
+TEST_CASE("computed allocation staging blocks retirement and preserves coherent widget observers") {
   for (const bool layered : {false, true}) {
     for (const bool closing : {false, true}) {
-      std::size_t retirementFailures{};
+      std::size_t blockedRetirements{};
       for (std::size_t phase = 0; phase < 5; ++phase) {
         Fixture fixture;
         if (layered) {
@@ -1229,31 +1232,40 @@ TEST_CASE("computed allocation retirement is checked before dereferencing a widg
         auto survivor = take(fixture.tree->emplace<Widget>(fixture.root));
         take(fixture.engine.bind(survivor, {"Widget", "survivor", {}}));
         const auto revision = fixture.engine.revision();
+        const auto previous = fixture.read();
         allocatorTree = fixture.tree.get();
         allocatorSubject = fixture.subject;
         allocatorCloseTree = closing;
         allocatorRetired = false;
+        allocatorRetirementError.reset();
         stageHookFired = false;
         auto result = StyleLayerTestAccess::computedStage(fixture.engine, phase, retireRawTreeDuringComputedStaging);
         allocation_test::onAllocate = nullptr;
         allocation_test::allocationsBeforeHook = 0;
         if (stageHookFired) {
-          REQUIRE(allocatorRetired);
-          if (!result) {
-            ++retirementFailures;
-            CHECK(result.error().cause == (closing ? TreeError::CLOSED : TreeError::STALE_NODE));
-            CHECK(fixture.engine.revision() == revision);
-            if (!closing) {
-              take(fixture.tree->read(survivor, [&](const Widget &widget) {
-                CHECK(widget.styleRevision() == revision);
-              }));
-            }
-          } else {
-            CHECK_FALSE(closing);
-          }
+          ++blockedRetirements;
+          CHECK_FALSE(allocatorRetired);
+          CHECK(allocatorRetirementError == TreeError::WOULD_BLOCK);
+        }
+
+        REQUIRE(result);
+        CHECK(fixture.engine.revision() == revision + 1);
+        CHECK(fixture.tree->inspect(fixture.subject));
+        CHECK(fixture.tree->inspect(survivor));
+        CHECK(fixture.read() == previous);
+        for (const auto node : {fixture.subject, survivor}) {
+          take(fixture.tree->read(node, [&](const Widget &widget) {
+            CHECK(widget.styleRevision() == revision + 1);
+            REQUIRE(widget.computedStyle());
+            CHECK(widget.computedStyle()->flatten() == previous);
+          }));
+        }
+
+        if (phase == 0) {
+          CHECK(stageHookFired);
         }
       }
-      CHECK(retirementFailures > 0);
+      CHECK(blockedRetirements > 0);
     }
   }
 }

@@ -508,7 +508,7 @@ void defaultInitialOrderingAndFactoryFailure() {
   ComputedStyle computed;
 
   take(application->tree().read(subject.node(), [&](const Button &button) {
-    computed = *button.computedStyle();
+    computed = button.computedStyle()->flatten();
   }));
   check(afterConfiguration && factories == 1 && resolutions == 1 && take(selector.snapshot())->lastCommittedId == "red",
         "one catalog normalization precedes view publication and initial factory follows all scene configurations");

@@ -120,7 +120,7 @@ struct Fixture {
     ComputedStyle result;
     take(app->tree().read(button.node(), [&](const Button &widget) {
       REQUIRE(widget.computedStyle());
-      result = *widget.computedStyle();
+      result = widget.computedStyle()->flatten();
     }));
 
     return result;

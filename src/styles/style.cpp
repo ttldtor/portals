@@ -12,6 +12,7 @@
 #include <map>
 #include <optional>
 #include <tuple>
+#include <unordered_map>
 
 namespace portals {
 namespace {
@@ -36,6 +37,37 @@ struct LayerMutationGuard {
 
 StyleError error(TreeError cause, std::string_view message) {
   return {cause, 1, 1, message};
+}
+
+template <class T> using StyleBlockIndex = std::unordered_multimap<std::size_t, std::shared_ptr<const T>>;
+
+template <class T> void seedStyleBlock(StyleBlockIndex<T> &index, const std::shared_ptr<const T> &value) {
+  if (!value) {
+    return;
+  }
+
+  const auto hash = detail::styleBlockHash(*value);
+  const auto bucket = index.equal_range(hash);
+  if (std::none_of(bucket.first, bucket.second, [&](const auto &entry) {
+        return *entry.second == *value;
+      })) {
+    index.emplace(hash, value);
+  }
+}
+
+template <class T> std::shared_ptr<const T> shareStyleBlock(StyleBlockIndex<T> &index, const T &value) {
+  const auto hash = detail::styleBlockHash(value);
+  const auto bucket = index.equal_range(hash);
+  const auto found = std::find_if(bucket.first, bucket.second, [&](const auto &entry) {
+    return *entry.second == value;
+  });
+  if (found != bucket.second) {
+    return found->second;
+  }
+
+  auto shared = std::make_shared<const T>(value);
+  index.emplace(hash, shared);
+  return shared;
 }
 
 bool matches(const StyleSelector &selector, const StyleTarget &target, StyleState state) {
@@ -1365,20 +1397,58 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
   auto edited = tree_.edit(*root, [&](Widget &) {
     try {
       struct PreparedStyle {
-        ComputedStyle style;
+        std::shared_ptr<const StyleSnapshot> style;
         std::shared_ptr<const detail::PreparedGlyphProfiles> glyphs;
       };
-      std::vector<PreparedStyle> staged(0);
+      struct PreparedTransaction {
+        std::vector<PreparedStyle> staged = std::vector<PreparedStyle>(0);
+        std::unordered_multimap<std::size_t, std::shared_ptr<const StyleSnapshot>> snapshots;
+        StyleBlockIndex<std::array<FrameAppearance, 6>> frames;
+        StyleBlockIndex<std::array<ScrollbarAppearance, 6>> scrollbars;
+        StyleBlockIndex<std::array<ScrollbarThumbAppearance, 6>> thumbs;
+        StyleBlockIndex<std::array<GlyphAppearance, 6>> glyphs;
+      };
+      std::optional<PreparedTransaction> transaction;
       Invalidation invalidation = Invalidation::NONE;
 
       std::erase_if(bindings, [&](const Binding &binding) {
         return !tree_.access(binding.node.id(), true);
       });
-      staged.reserve(bindings.size());
-
       {
-        // Treat custom defaults as extension hooks: frame borrow blocks mutation and engine reentry.
+        // Defaults and allocation hooks cannot mutate the tree or reenter style publication.
         WidgetTree::Borrow frameGuard(tree_, true);
+        transaction.emplace();
+        auto &staged = transaction->staged;
+        auto &snapshots = transaction->snapshots;
+        staged.reserve(bindings.size());
+        snapshots.reserve(bindings.size());
+
+        // This index owns only live/staged values for one transaction; retirement leaves no pool behind.
+        const StyleSnapshot *lastSeeded{};
+        for (const auto &binding : bindings) {
+          auto widget = tree_.access(binding.node.id(), false);
+          if (!widget) {
+            result = std::unexpected(error(widget.error(), "Style target became unavailable before snapshot sharing"));
+            return;
+          }
+
+          const auto &previous = (*widget)->computedStyle_;
+          if (previous && previous.get() != lastSeeded) {
+            const auto hash = previous->contentHash();
+            const auto bucket = snapshots.equal_range(hash);
+            if (std::none_of(bucket.first, bucket.second, [&](const auto &entry) {
+                  return entry.second == previous || *entry.second == *previous;
+                })) {
+              snapshots.emplace(hash, previous);
+            }
+
+            seedStyleBlock(transaction->frames, previous->blocks_.frame);
+            seedStyleBlock(transaction->scrollbars, previous->blocks_.scrollbar);
+            seedStyleBlock(transaction->thumbs, previous->blocks_.thumb);
+            seedStyleBlock(transaction->glyphs, previous->blocks_.glyphs);
+            lastSeeded = previous.get();
+          }
+        }
 
         for (const auto &binding : bindings) {
           auto widget = tree_.access(binding.node.id(), false);
@@ -1408,11 +1478,11 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
             return;
           }
 
-          const auto previous = (*widget)->computedStyle_.value_or(defaults);
+          const auto &previous = (*widget)->computedStyle_;
 
-          if (previous.minWidth != next.minWidth) {
+          if ((previous ? previous->minWidth : defaults.minWidth) != next.minWidth) {
             invalidation = Invalidation::LAYOUT;
-          } else if (previous != next && invalidation == Invalidation::NONE) {
+          } else if (invalidation == Invalidation::NONE && (previous ? *previous != next : defaults != next)) {
             invalidation = Invalidation::PAINT;
           }
 
@@ -1424,7 +1494,38 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
             return;
           }
 
-          staged.push_back({next, std::move(*glyphs)});
+          std::shared_ptr<const StyleSnapshot> snapshot;
+          if (!staged.empty() && *staged.back().style == next) {
+            // Common control runs share a value without rehashing its absent extension states.
+            snapshot = staged.back().style;
+          } else {
+            const auto hash = StyleSnapshot::contentHash(next);
+            const auto bucket = snapshots.equal_range(hash);
+            auto shared = std::find_if(bucket.first, bucket.second, [&](const auto &entry) {
+              return *entry.second == next;
+            });
+            if (shared != bucket.second) {
+              snapshot = shared->second;
+            } else {
+              detail::StyleSnapshotBlocks blocks;
+              if (next.frame != std::array<FrameAppearance, 6>{}) {
+                blocks.frame = shareStyleBlock(transaction->frames, next.frame);
+              }
+              if (next.scrollbar != std::array<ScrollbarAppearance, 6>{}) {
+                blocks.scrollbar = shareStyleBlock(transaction->scrollbars, next.scrollbar);
+              }
+              if (next.scrollbarThumbSegments) {
+                blocks.thumb = shareStyleBlock(transaction->thumbs, *next.scrollbarThumbSegments);
+              }
+              if (next.glyphs != std::array<GlyphAppearance, 6>{}) {
+                blocks.glyphs = shareStyleBlock(transaction->glyphs, next.glyphs);
+              }
+
+              snapshot = std::make_shared<const StyleSnapshot>(StyleSnapshot::PreparedTag{}, next, std::move(blocks));
+              snapshots.emplace(hash, snapshot);
+            }
+          }
+          staged.push_back({std::move(snapshot), std::move(*glyphs)});
         }
       }
 
@@ -1486,8 +1587,8 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
       for (std::size_t index = 0; index < bindings.size(); ++index) {
         auto widget = tree_.access(bindings[index].node.id(), true);
 
-        detail::GlyphProfileAccess::commit(**widget, std::move(staged[index].glyphs));
-        (*widget)->computedStyle_ = staged[index].style;
+        detail::GlyphProfileAccess::commit(**widget, std::move(transaction->staged[index].glyphs));
+        (*widget)->computedStyle_ = std::move(transaction->staged[index].style);
         (*widget)->styleRevision_ = revision_ + 1;
       }
 
