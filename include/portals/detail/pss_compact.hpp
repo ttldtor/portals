@@ -42,7 +42,8 @@ struct PssPosition {
 };
 
 /** @brief Compact absent occurrence marker. */
-inline constexpr auto NO_COMPACT_DECLARATION = std::numeric_limits<std::uint32_t>::max();
+inline constexpr auto NO_COMPACT_DECLARATION = std::numeric_limits<std::uint16_t>::max();
+static_assert(MAX_CT_PSS_DECLARATIONS < NO_COMPACT_DECLARATION);
 
 /** @brief Compact owning source-order rule data, without per-rule text arenas. */
 struct PssCompactRule {
@@ -55,8 +56,8 @@ struct PssCompactRule {
   PssPosition selector;              ///< Original selector start.
   std::uint32_t declarationBegin{};  ///< First declaration occurrence index.
   std::uint32_t declarationCount{};  ///< All occurrences, including duplicates.
-  std::array<std::uint32_t, PSS_PROPERTY_COUNT> effectiveDeclaration = [] {
-    std::array<std::uint32_t, PSS_PROPERTY_COUNT> result{};
+  std::array<std::uint16_t, PSS_PROPERTY_COUNT> effectiveDeclaration = [] {
+    std::array<std::uint16_t, PSS_PROPERTY_COUNT> result{};
     result.fill(NO_COMPACT_DECLARATION);
 
     return result;
@@ -402,7 +403,7 @@ public:
     auto &rule = current();
 
     rule.effectiveDeclaration[static_cast<std::size_t>(property)] =
-      static_cast<std::uint32_t>(sheet_.declarationCount_);
+      static_cast<std::uint16_t>(sheet_.declarationCount_);
     ++rule.declarationCount;
     portals::detail::assignPssDeclaration(property, value, rule.values);
     sheet_.declarations_[sheet_.declarationCount_++] = {static_cast<std::uint32_t>(sheet_.ruleCount_), property,

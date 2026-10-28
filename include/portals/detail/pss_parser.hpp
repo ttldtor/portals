@@ -21,55 +21,76 @@ struct PssSpan {
 using PssValue = PssScalarValue;
 
 /** @brief Static string views avoid repeated C-string length evaluation in the constexpr hot path. */
-inline constexpr std::array<std::string_view, PSS_PROPERTY_COUNT> PSS_PROPERTY_NAMES{"foreground",
-                                                                                     "background",
-                                                                                     "bold",
-                                                                                     "italic",
-                                                                                     "underline",
-                                                                                     "min-width",
-                                                                                     "frame-line-foreground",
-                                                                                     "frame-line-background",
-                                                                                     "frame-line-bold",
-                                                                                     "frame-line-italic",
-                                                                                     "frame-line-underline",
-                                                                                     "frame-title-foreground",
-                                                                                     "frame-title-background",
-                                                                                     "frame-title-bold",
-                                                                                     "frame-title-italic",
-                                                                                     "frame-title-underline",
-                                                                                     "frame-ends-foreground",
-                                                                                     "frame-ends-background",
-                                                                                     "frame-ends-bold",
-                                                                                     "frame-ends-italic",
-                                                                                     "frame-ends-underline",
-                                                                                     "scrollbar-track-foreground",
-                                                                                     "scrollbar-track-background",
-                                                                                     "scrollbar-track-bold",
-                                                                                     "scrollbar-track-italic",
-                                                                                     "scrollbar-track-underline",
-                                                                                     "scrollbar-thumb-foreground",
-                                                                                     "scrollbar-thumb-background",
-                                                                                     "scrollbar-thumb-bold",
-                                                                                     "scrollbar-thumb-italic",
-                                                                                     "scrollbar-thumb-underline",
-                                                                                     "scrollbar-ends-foreground",
-                                                                                     "scrollbar-ends-background",
-                                                                                     "scrollbar-ends-bold",
-                                                                                     "scrollbar-ends-italic",
-                                                                                     "scrollbar-ends-underline",
-                                                                                     "scrollbar-arrows-foreground",
-                                                                                     "scrollbar-arrows-background",
-                                                                                     "scrollbar-arrows-bold",
-                                                                                     "scrollbar-arrows-italic",
-                                                                                     "scrollbar-arrows-underline",
-                                                                                     "scrollbar-corner-foreground",
-                                                                                     "scrollbar-corner-background",
-                                                                                     "scrollbar-corner-bold",
-                                                                                     "scrollbar-corner-italic",
-                                                                                     "scrollbar-corner-underline",
-                                                                                     "scrollbar-track-pattern",
-                                                                                     "scrollbar-thumb-pattern",
-                                                                                     "scrollbar-arrow-pattern"};
+inline constexpr std::array<std::string_view, PSS_PROPERTY_COUNT> PSS_PROPERTY_NAMES{
+  "foreground",
+  "background",
+  "bold",
+  "italic",
+  "underline",
+  "min-width",
+  "frame-line-foreground",
+  "frame-line-background",
+  "frame-line-bold",
+  "frame-line-italic",
+  "frame-line-underline",
+  "frame-title-foreground",
+  "frame-title-background",
+  "frame-title-bold",
+  "frame-title-italic",
+  "frame-title-underline",
+  "frame-ends-foreground",
+  "frame-ends-background",
+  "frame-ends-bold",
+  "frame-ends-italic",
+  "frame-ends-underline",
+  "scrollbar-track-foreground",
+  "scrollbar-track-background",
+  "scrollbar-track-bold",
+  "scrollbar-track-italic",
+  "scrollbar-track-underline",
+  "scrollbar-thumb-foreground",
+  "scrollbar-thumb-background",
+  "scrollbar-thumb-bold",
+  "scrollbar-thumb-italic",
+  "scrollbar-thumb-underline",
+  "scrollbar-ends-foreground",
+  "scrollbar-ends-background",
+  "scrollbar-ends-bold",
+  "scrollbar-ends-italic",
+  "scrollbar-ends-underline",
+  "scrollbar-arrows-foreground",
+  "scrollbar-arrows-background",
+  "scrollbar-arrows-bold",
+  "scrollbar-arrows-italic",
+  "scrollbar-arrows-underline",
+  "scrollbar-corner-foreground",
+  "scrollbar-corner-background",
+  "scrollbar-corner-bold",
+  "scrollbar-corner-italic",
+  "scrollbar-corner-underline",
+  "scrollbar-track-pattern",
+  "scrollbar-thumb-pattern",
+  "scrollbar-arrow-pattern",
+  "scrollbar-thumb-start-foreground",
+  "scrollbar-thumb-start-background",
+  "scrollbar-thumb-start-bold",
+  "scrollbar-thumb-start-italic",
+  "scrollbar-thumb-start-underline",
+  "scrollbar-thumb-body-foreground",
+  "scrollbar-thumb-body-background",
+  "scrollbar-thumb-body-bold",
+  "scrollbar-thumb-body-italic",
+  "scrollbar-thumb-body-underline",
+  "scrollbar-thumb-end-foreground",
+  "scrollbar-thumb-end-background",
+  "scrollbar-thumb-end-bold",
+  "scrollbar-thumb-end-italic",
+  "scrollbar-thumb-end-underline",
+  "scrollbar-thumb-single-foreground",
+  "scrollbar-thumb-single-background",
+  "scrollbar-thumb-single-bold",
+  "scrollbar-thumb-single-italic",
+  "scrollbar-thumb-single-underline"};
 /** @brief Pseudo-state names in the existing StyleState order after ANY. */
 inline constexpr std::array<std::string_view, 6> PSS_STATE_NAMES{"normal",   "focused", "disabled",
                                                                  "selected", "header",  "caret"};
@@ -588,6 +609,14 @@ private:
         property == PssProperty::FRAME_TITLE_FOREGROUND || property == PssProperty::FRAME_TITLE_BACKGROUND ||
         property == PssProperty::FRAME_ENDS_FOREGROUND || property == PssProperty::FRAME_ENDS_BACKGROUND ||
         property == PssProperty::SCROLLBAR_TRACK_FOREGROUND || property == PssProperty::SCROLLBAR_TRACK_BACKGROUND ||
+        property == PssProperty::SCROLLBAR_THUMB_START_FOREGROUND ||
+        property == PssProperty::SCROLLBAR_THUMB_START_BACKGROUND ||
+        property == PssProperty::SCROLLBAR_THUMB_BODY_FOREGROUND ||
+        property == PssProperty::SCROLLBAR_THUMB_BODY_BACKGROUND ||
+        property == PssProperty::SCROLLBAR_THUMB_END_FOREGROUND ||
+        property == PssProperty::SCROLLBAR_THUMB_END_BACKGROUND ||
+        property == PssProperty::SCROLLBAR_THUMB_SINGLE_FOREGROUND ||
+        property == PssProperty::SCROLLBAR_THUMB_SINGLE_BACKGROUND ||
         property == PssProperty::SCROLLBAR_THUMB_FOREGROUND || property == PssProperty::SCROLLBAR_THUMB_BACKGROUND ||
         property == PssProperty::SCROLLBAR_ENDS_FOREGROUND || property == PssProperty::SCROLLBAR_ENDS_BACKGROUND ||
         property == PssProperty::SCROLLBAR_ARROWS_FOREGROUND || property == PssProperty::SCROLLBAR_ARROWS_BACKGROUND ||
@@ -775,6 +804,86 @@ constexpr void assignPssDeclaration(PssProperty property, PssValue value, StyleD
     break;
   case PssProperty::SCROLLBAR_THUMB_UNDERLINE:
     destination.scrollbarThumb.underline = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_START_FOREGROUND:
+    destination.scrollbarThumbStart.foreground = value.color;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_START_BACKGROUND:
+    destination.scrollbarThumbStart.background = value.color;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_START_BOLD:
+    destination.scrollbarThumbStart.bold = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_START_ITALIC:
+    destination.scrollbarThumbStart.italic = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_START_UNDERLINE:
+    destination.scrollbarThumbStart.underline = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_BODY_FOREGROUND:
+    destination.scrollbarThumbBody.foreground = value.color;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_BODY_BACKGROUND:
+    destination.scrollbarThumbBody.background = value.color;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_BODY_BOLD:
+    destination.scrollbarThumbBody.bold = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_BODY_ITALIC:
+    destination.scrollbarThumbBody.italic = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_BODY_UNDERLINE:
+    destination.scrollbarThumbBody.underline = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_END_FOREGROUND:
+    destination.scrollbarThumbEnd.foreground = value.color;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_END_BACKGROUND:
+    destination.scrollbarThumbEnd.background = value.color;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_END_BOLD:
+    destination.scrollbarThumbEnd.bold = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_END_ITALIC:
+    destination.scrollbarThumbEnd.italic = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_END_UNDERLINE:
+    destination.scrollbarThumbEnd.underline = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_SINGLE_FOREGROUND:
+    destination.scrollbarThumbSingle.foreground = value.color;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_SINGLE_BACKGROUND:
+    destination.scrollbarThumbSingle.background = value.color;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_SINGLE_BOLD:
+    destination.scrollbarThumbSingle.bold = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_SINGLE_ITALIC:
+    destination.scrollbarThumbSingle.italic = value.boolean;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_SINGLE_UNDERLINE:
+    destination.scrollbarThumbSingle.underline = value.boolean;
 
     break;
   case PssProperty::SCROLLBAR_ENDS_FOREGROUND:

@@ -46,6 +46,12 @@ int main() {
             scrollbar-track-pattern: minimal;
             scrollbar-thumb-pattern: ascii;
             scrollbar-arrow-pattern: triangle;
+            scrollbar-thumb-foreground: #62b4d7;
+            scrollbar-thumb-bold: true;
+            scrollbar-thumb-start-foreground: #f2c879;
+            scrollbar-thumb-end-foreground: #f2c879;
+            scrollbar-thumb-body-bold: false;
+            scrollbar-thumb-single-foreground: #f2c879;
           }
         )pss")
       | ui::onKey(key::F10, ui::quit);

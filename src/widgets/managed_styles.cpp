@@ -162,6 +162,14 @@ std::expected<void, PssError> validateStyleDocument(const PssDocument &document)
                          declaration.property == PssProperty::FRAME_ENDS_BACKGROUND ||
                          declaration.property == PssProperty::SCROLLBAR_TRACK_FOREGROUND ||
                          declaration.property == PssProperty::SCROLLBAR_TRACK_BACKGROUND ||
+                         declaration.property == PssProperty::SCROLLBAR_THUMB_START_FOREGROUND ||
+                         declaration.property == PssProperty::SCROLLBAR_THUMB_START_BACKGROUND ||
+                         declaration.property == PssProperty::SCROLLBAR_THUMB_BODY_FOREGROUND ||
+                         declaration.property == PssProperty::SCROLLBAR_THUMB_BODY_BACKGROUND ||
+                         declaration.property == PssProperty::SCROLLBAR_THUMB_END_FOREGROUND ||
+                         declaration.property == PssProperty::SCROLLBAR_THUMB_END_BACKGROUND ||
+                         declaration.property == PssProperty::SCROLLBAR_THUMB_SINGLE_FOREGROUND ||
+                         declaration.property == PssProperty::SCROLLBAR_THUMB_SINGLE_BACKGROUND ||
                          declaration.property == PssProperty::SCROLLBAR_THUMB_FOREGROUND ||
                          declaration.property == PssProperty::SCROLLBAR_THUMB_BACKGROUND ||
                          declaration.property == PssProperty::SCROLLBAR_ENDS_FOREGROUND ||

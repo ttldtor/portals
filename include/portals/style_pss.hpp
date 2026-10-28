@@ -578,7 +578,11 @@ template <class D, class P> consteval bool flatDeclarationTypeMatches() {
     D::KIND == Property::FRAME_LINE_BACKGROUND || D::KIND == Property::FRAME_TITLE_FOREGROUND ||
     D::KIND == Property::FRAME_TITLE_BACKGROUND || D::KIND == Property::FRAME_ENDS_FOREGROUND ||
     D::KIND == Property::FRAME_ENDS_BACKGROUND || D::KIND == Property::SCROLLBAR_TRACK_FOREGROUND ||
-    D::KIND == Property::SCROLLBAR_TRACK_BACKGROUND || D::KIND == Property::SCROLLBAR_THUMB_FOREGROUND ||
+    D::KIND == Property::SCROLLBAR_TRACK_BACKGROUND || D::KIND == Property::SCROLLBAR_THUMB_START_FOREGROUND ||
+    D::KIND == Property::SCROLLBAR_THUMB_START_BACKGROUND || D::KIND == Property::SCROLLBAR_THUMB_BODY_FOREGROUND ||
+    D::KIND == Property::SCROLLBAR_THUMB_BODY_BACKGROUND || D::KIND == Property::SCROLLBAR_THUMB_END_FOREGROUND ||
+    D::KIND == Property::SCROLLBAR_THUMB_END_BACKGROUND || D::KIND == Property::SCROLLBAR_THUMB_SINGLE_FOREGROUND ||
+    D::KIND == Property::SCROLLBAR_THUMB_SINGLE_BACKGROUND || D::KIND == Property::SCROLLBAR_THUMB_FOREGROUND ||
     D::KIND == Property::SCROLLBAR_THUMB_BACKGROUND || D::KIND == Property::SCROLLBAR_ENDS_FOREGROUND ||
     D::KIND == Property::SCROLLBAR_ENDS_BACKGROUND || D::KIND == Property::SCROLLBAR_ARROWS_FOREGROUND ||
     D::KIND == Property::SCROLLBAR_ARROWS_BACKGROUND || D::KIND == Property::SCROLLBAR_CORNER_FOREGROUND ||
@@ -681,6 +685,46 @@ constexpr bool pssPropertyPresent(PssProperty property, const StyleDeclarations 
     return value.scrollbarThumb.italic.has_value();
   case PssProperty::SCROLLBAR_THUMB_UNDERLINE:
     return value.scrollbarThumb.underline.has_value();
+  case PssProperty::SCROLLBAR_THUMB_START_FOREGROUND:
+    return value.scrollbarThumbStart.foreground.has_value();
+  case PssProperty::SCROLLBAR_THUMB_START_BACKGROUND:
+    return value.scrollbarThumbStart.background.has_value();
+  case PssProperty::SCROLLBAR_THUMB_START_BOLD:
+    return value.scrollbarThumbStart.bold.has_value();
+  case PssProperty::SCROLLBAR_THUMB_START_ITALIC:
+    return value.scrollbarThumbStart.italic.has_value();
+  case PssProperty::SCROLLBAR_THUMB_START_UNDERLINE:
+    return value.scrollbarThumbStart.underline.has_value();
+  case PssProperty::SCROLLBAR_THUMB_BODY_FOREGROUND:
+    return value.scrollbarThumbBody.foreground.has_value();
+  case PssProperty::SCROLLBAR_THUMB_BODY_BACKGROUND:
+    return value.scrollbarThumbBody.background.has_value();
+  case PssProperty::SCROLLBAR_THUMB_BODY_BOLD:
+    return value.scrollbarThumbBody.bold.has_value();
+  case PssProperty::SCROLLBAR_THUMB_BODY_ITALIC:
+    return value.scrollbarThumbBody.italic.has_value();
+  case PssProperty::SCROLLBAR_THUMB_BODY_UNDERLINE:
+    return value.scrollbarThumbBody.underline.has_value();
+  case PssProperty::SCROLLBAR_THUMB_END_FOREGROUND:
+    return value.scrollbarThumbEnd.foreground.has_value();
+  case PssProperty::SCROLLBAR_THUMB_END_BACKGROUND:
+    return value.scrollbarThumbEnd.background.has_value();
+  case PssProperty::SCROLLBAR_THUMB_END_BOLD:
+    return value.scrollbarThumbEnd.bold.has_value();
+  case PssProperty::SCROLLBAR_THUMB_END_ITALIC:
+    return value.scrollbarThumbEnd.italic.has_value();
+  case PssProperty::SCROLLBAR_THUMB_END_UNDERLINE:
+    return value.scrollbarThumbEnd.underline.has_value();
+  case PssProperty::SCROLLBAR_THUMB_SINGLE_FOREGROUND:
+    return value.scrollbarThumbSingle.foreground.has_value();
+  case PssProperty::SCROLLBAR_THUMB_SINGLE_BACKGROUND:
+    return value.scrollbarThumbSingle.background.has_value();
+  case PssProperty::SCROLLBAR_THUMB_SINGLE_BOLD:
+    return value.scrollbarThumbSingle.bold.has_value();
+  case PssProperty::SCROLLBAR_THUMB_SINGLE_ITALIC:
+    return value.scrollbarThumbSingle.italic.has_value();
+  case PssProperty::SCROLLBAR_THUMB_SINGLE_UNDERLINE:
+    return value.scrollbarThumbSingle.underline.has_value();
   case PssProperty::SCROLLBAR_ENDS_FOREGROUND:
     return value.scrollbarEnds.foreground.has_value();
   case PssProperty::SCROLLBAR_ENDS_BACKGROUND:
@@ -850,6 +894,86 @@ constexpr PssValue pssScalar(PssProperty property, const StyleDeclarations &valu
     break;
   case PssProperty::SCROLLBAR_THUMB_UNDERLINE:
     result.boolean = *value.scrollbarThumb.underline;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_START_FOREGROUND:
+    result.color = *value.scrollbarThumbStart.foreground;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_START_BACKGROUND:
+    result.color = *value.scrollbarThumbStart.background;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_START_BOLD:
+    result.boolean = *value.scrollbarThumbStart.bold;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_START_ITALIC:
+    result.boolean = *value.scrollbarThumbStart.italic;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_START_UNDERLINE:
+    result.boolean = *value.scrollbarThumbStart.underline;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_BODY_FOREGROUND:
+    result.color = *value.scrollbarThumbBody.foreground;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_BODY_BACKGROUND:
+    result.color = *value.scrollbarThumbBody.background;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_BODY_BOLD:
+    result.boolean = *value.scrollbarThumbBody.bold;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_BODY_ITALIC:
+    result.boolean = *value.scrollbarThumbBody.italic;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_BODY_UNDERLINE:
+    result.boolean = *value.scrollbarThumbBody.underline;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_END_FOREGROUND:
+    result.color = *value.scrollbarThumbEnd.foreground;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_END_BACKGROUND:
+    result.color = *value.scrollbarThumbEnd.background;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_END_BOLD:
+    result.boolean = *value.scrollbarThumbEnd.bold;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_END_ITALIC:
+    result.boolean = *value.scrollbarThumbEnd.italic;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_END_UNDERLINE:
+    result.boolean = *value.scrollbarThumbEnd.underline;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_SINGLE_FOREGROUND:
+    result.color = *value.scrollbarThumbSingle.foreground;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_SINGLE_BACKGROUND:
+    result.color = *value.scrollbarThumbSingle.background;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_SINGLE_BOLD:
+    result.boolean = *value.scrollbarThumbSingle.bold;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_SINGLE_ITALIC:
+    result.boolean = *value.scrollbarThumbSingle.italic;
+
+    break;
+  case PssProperty::SCROLLBAR_THUMB_SINGLE_UNDERLINE:
+    result.boolean = *value.scrollbarThumbSingle.underline;
 
     break;
   case PssProperty::SCROLLBAR_ENDS_FOREGROUND:

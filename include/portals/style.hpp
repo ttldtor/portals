@@ -105,6 +105,11 @@ struct StyleDeclarations {
   std::optional<ScrollbarThumbPattern> scrollbarThumbPattern{}; ///< Independent scrollbar source.
   std::optional<ScrollbarArrowPattern> scrollbarArrowPattern{}; ///< Independent scrollbar source.
 
+  StylePaintDeclarations scrollbarThumbStart{};  ///< Thumb start overrides, inheriting the common thumb.
+  StylePaintDeclarations scrollbarThumbBody{};   ///< Thumb body overrides, inheriting the common thumb.
+  StylePaintDeclarations scrollbarThumbEnd{};    ///< Thumb end overrides, inheriting the common thumb.
+  StylePaintDeclarations scrollbarThumbSingle{}; ///< Thumb single overrides, inheriting the common thumb.
+
   /** @param other Owning value to compare.
    * @return Whether all typed fields are equal.
    */

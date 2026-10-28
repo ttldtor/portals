@@ -1131,6 +1131,94 @@ void segmentedScrollbarSkins() {
   }
 }
 
+void segmentedScrollbarStyles() {
+  const auto sheet = take(parsePss(R"pss(* {
+    scrollbar-thumb-foreground:#010203; scrollbar-thumb-background:#040506;
+    scrollbar-thumb-bold:true; scrollbar-thumb-italic:true; scrollbar-thumb-underline:true;
+    scrollbar-thumb-start-foreground:#0a0b0c; scrollbar-thumb-start-bold:false;
+    scrollbar-thumb-body-background:#141516; scrollbar-thumb-body-italic:false;
+    scrollbar-thumb-end-foreground:#1e1f20; scrollbar-thumb-end-underline:false;
+    scrollbar-thumb-single-foreground:#28292a; scrollbar-thumb-single-bold:false;
+  } *:focused {scrollbar-thumb-background:#323334;}
+    *:disabled {scrollbar-thumb-foreground:#3c3d3e;})pss"));
+  const auto verify = [&](auto &fixture, Node<Widget> control, int length, bool custom) {
+    if (custom) {
+      ScrollbarSkin skin;
+      skin.horizontal = {.thumbStart = "[", .thumbBody = "=", .thumbEnd = "]", .thumbSingle = "o"};
+      skin.vertical = {.thumbStart = "A", .thumbBody = "I", .thumbEnd = "V", .thumbSingle = "O"};
+      take(setScrollbarSkin(*fixture.tree, control, skin));
+    }
+
+    StyleEngine engine(*fixture.tree);
+    take(engine.bind(control, {"Control", "", {}, true}));
+    take(engine.replace(sheet));
+
+    for (int state = 0; state < 3; ++state) {
+      if (state == 2) {
+        take(fixture.tree->setEnabled(control, false));
+      }
+
+      take(syncScrollControl(*fixture.tree, control, state == 1 ? control : Node<Widget>{}));
+      const CellStyle common{state == 2 ? RgbColor{60, 61, 62} : RgbColor{1, 2, 3},
+                             state == 1 ? RgbColor{50, 51, 52} : RgbColor{4, 5, 6}, true, true, true};
+      struct SegmentSink : PaintContext {
+        std::array<CellStyle, 4> expected;
+        int length{};
+        int cells{};
+        bool correct{true};
+
+        std::expected<void, TreeError> submit(std::span<const RenderCommand> commands) override {
+          for (const auto &command : commands) {
+            const auto *text = std::get_if<TextCommand>(&command);
+            const auto segment = length == 1 ? 3 : cells == 0 ? 0 : cells == length - 1 ? 2 : 1;
+            correct = correct && text && text->style == expected[segment];
+            ++cells;
+          }
+
+          return {};
+        }
+      } sink;
+      sink.length = length;
+      sink.expected.fill(common);
+      sink.expected[0].foreground = RgbColor{10, 11, 12};
+      sink.expected[0].bold = false;
+      sink.expected[1].background = RgbColor{20, 21, 22};
+      sink.expected[1].italic = false;
+      sink.expected[2].foreground = RgbColor{30, 31, 32};
+      sink.expected[2].underline = false;
+      sink.expected[3].foreground = RgbColor{40, 41, 42};
+      sink.expected[3].bold = false;
+      std::expected<void, TreeError> painted;
+
+      take(fixture.tree->frame([&] {
+        allocation_test::fail = true;
+        painted = fixture.tree->paint(control, sink);
+        allocation_test::fail = false;
+      }));
+      check(painted && sink.correct && sink.cells == length,
+            "both scroll controls select exact segment styles for both axes and states without paint allocation");
+    }
+  };
+
+  for (const auto axis : {ScrollAxis::HORIZONTAL, ScrollAxis::VERTICAL}) {
+    for (const int length : {0, 1, 2, 4}) {
+      for (const bool custom : {false, true}) {
+        BarFixture bar({}, axis);
+        take(setScrollMetrics(*bar.tree, bar.bar, {10, 10}));
+        bar.layout(axis == ScrollAxis::HORIZONTAL ? CellSize{length, 1} : CellSize{1, length});
+        verify(bar, bar.bar, length, custom);
+
+        ScrollAreaOptions options;
+        options.horizontal = axis == ScrollAxis::HORIZONTAL ? ScrollBarPolicy::ALWAYS : ScrollBarPolicy::NEVER;
+        options.vertical = axis == ScrollAxis::VERTICAL ? ScrollBarPolicy::ALWAYS : ScrollBarPolicy::NEVER;
+        AreaFixture area(options, axis == ScrollAxis::HORIZONTAL ? CellSize{length, 1} : CellSize{1, length});
+        area.settle(axis == ScrollAxis::HORIZONTAL ? CellSize{length, 2} : CellSize{2, length});
+        verify(area, area.area, length, custom);
+      }
+    }
+  }
+}
+
 void scrollbarSkinFailures() {
   TreeFixture widths;
   const auto wide = take(widths.tree->emplaceChecked<ScrollBar>(
@@ -1605,6 +1693,7 @@ int main() {
   advancedFrames();
   scrollbarSkins();
   segmentedScrollbarSkins();
+  segmentedScrollbarStyles();
   scrollbarSkinFailures();
   manualStyleAndAutomaticMetadata();
   return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

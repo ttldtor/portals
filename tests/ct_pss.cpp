@@ -62,6 +62,15 @@ using namespace portals;
 namespace sc = portals::style::ct;
 using namespace std::literals;
 
+constexpr char THUMB_SEGMENT_SOURCE[] =
+  "ScrollBar{scrollbar-thumb-start-foreground:#010203;scrollbar-thumb-start-background:#040506;scrollbar-thumb-start-"
+  "bold:false;scrollbar-thumb-start-italic:true;scrollbar-thumb-start-underline:false;scrollbar-thumb-body-foreground:#"
+  "070809;scrollbar-thumb-body-background:#0a0b0c;scrollbar-thumb-body-bold:true;scrollbar-thumb-body-italic:false;"
+  "scrollbar-thumb-body-underline:true;scrollbar-thumb-end-foreground:#0d0e0f;scrollbar-thumb-end-background:#101112;"
+  "scrollbar-thumb-end-bold:false;scrollbar-thumb-end-italic:true;scrollbar-thumb-end-underline:false;scrollbar-thumb-"
+  "single-foreground:#131415;scrollbar-thumb-single-background:#161718;scrollbar-thumb-single-bold:true;scrollbar-"
+  "thumb-single-italic:false;scrollbar-thumb-single-underline:true;}";
+
 constexpr auto DIRECT = sc::pss("Button { foreground: #ff0000; bold: false; }", "fixture.pss");
 constexpr auto RICH = sc::pss(
   [] {
@@ -107,7 +116,7 @@ static_assert(sc::MAX_CT_PSS_RULES == 256 && sc::MAX_CT_PSS_DECLARATIONS == 1536
 static_assert(sc::MAX_CT_PSS_DESCRIPTOR_BYTES == 192 * 1024);
 static_assert(static_cast<std::size_t>(PssProperty::FRAME_ENDS_UNDERLINE) == 20);
 static_assert(static_cast<std::size_t>(PssProperty::SCROLLBAR_TRACK_FOREGROUND) == 21);
-static_assert(static_cast<std::size_t>(PssProperty::SCROLLBAR_ARROW_PATTERN) + 1 == PSS_PROPERTY_COUNT);
+static_assert(static_cast<std::size_t>(PssProperty::SCROLLBAR_THUMB_SINGLE_UNDERLINE) + 1 == PSS_PROPERTY_COUNT);
 constexpr auto SCROLLBAR_PATTERNS =
   sc::pss("ScrollBar{scrollbar-track-pattern:minimal;scrollbar-thumb-pattern:block;scrollbar-arrow-pattern:ascii;}");
 static_assert(SCROLLBAR_PATTERNS.declarations().size() == 3);
@@ -447,4 +456,74 @@ TEST_CASE("frame part declarations share runtime literal typed compact and state
   CHECK_FALSE(resolved.frame[0].title->bold);
   CHECK(resolved.frame[1].title->foreground == RgbColor{7, 8, 9});
   CHECK(resolved.frame[0].ends->italic);
+}
+
+TEST_CASE("thumb segment PSS scalar destinations preserve all construction paths and source diagnostics") {
+  constexpr auto LITERAL = sc::pss(THUMB_SEGMENT_SOURCE, "segments.pss");
+  constexpr auto COMPACT = sc::pss(
+    [] {
+      return std::string_view{THUMB_SEGMENT_SOURCE};
+    },
+    [] {
+      return "segments.pss"sv;
+    });
+  constexpr auto TYPED_SEGMENTS = sc::sheet(
+    sc::parameters(),
+    sc::rule(sc::type<"ScrollBar">(), sc::scrollbarThumbStartForeground(sc::rgb(1, 2, 3)),
+             sc::scrollbarThumbStartBackground(sc::rgb(4, 5, 6)), sc::scrollbarThumbStartBold(false),
+             sc::scrollbarThumbStartItalic(true), sc::scrollbarThumbStartUnderline(false),
+             sc::scrollbarThumbBodyForeground(sc::rgb(7, 8, 9)), sc::scrollbarThumbBodyBackground(sc::rgb(10, 11, 12)),
+             sc::scrollbarThumbBodyBold(true), sc::scrollbarThumbBodyItalic(false),
+             sc::scrollbarThumbBodyUnderline(true), sc::scrollbarThumbEndForeground(sc::rgb(13, 14, 15)),
+             sc::scrollbarThumbEndBackground(sc::rgb(16, 17, 18)), sc::scrollbarThumbEndBold(false),
+             sc::scrollbarThumbEndItalic(true), sc::scrollbarThumbEndUnderline(false),
+             sc::scrollbarThumbSingleForeground(sc::rgb(19, 20, 21)),
+             sc::scrollbarThumbSingleBackground(sc::rgb(22, 23, 24)), sc::scrollbarThumbSingleBold(true),
+             sc::scrollbarThumbSingleItalic(false), sc::scrollbarThumbSingleUnderline(true)));
+  constexpr auto FLAT = sc::compactSheet(std::array{sc::flatRule(
+    sc::type<"ScrollBar">(), sc::scrollbarThumbStartForeground(sc::rgb(1, 2, 3)),
+    sc::scrollbarThumbStartBackground(sc::rgb(4, 5, 6)), sc::scrollbarThumbStartBold(false),
+    sc::scrollbarThumbStartItalic(true), sc::scrollbarThumbStartUnderline(false),
+    sc::scrollbarThumbBodyForeground(sc::rgb(7, 8, 9)), sc::scrollbarThumbBodyBackground(sc::rgb(10, 11, 12)),
+    sc::scrollbarThumbBodyBold(true), sc::scrollbarThumbBodyItalic(false), sc::scrollbarThumbBodyUnderline(true),
+    sc::scrollbarThumbEndForeground(sc::rgb(13, 14, 15)), sc::scrollbarThumbEndBackground(sc::rgb(16, 17, 18)),
+    sc::scrollbarThumbEndBold(false), sc::scrollbarThumbEndItalic(true), sc::scrollbarThumbEndUnderline(false),
+    sc::scrollbarThumbSingleForeground(sc::rgb(19, 20, 21)), sc::scrollbarThumbSingleBackground(sc::rgb(22, 23, 24)),
+    sc::scrollbarThumbSingleBold(true), sc::scrollbarThumbSingleItalic(false),
+    sc::scrollbarThumbSingleUnderline(true))});
+  static_assert(LITERAL.declarations().size() == 20 && COMPACT.declarations().size() == 20);
+  static_assert(portals::style::ct::detail::NO_COMPACT_DECLARATION > sc::MAX_CT_PSS_DECLARATIONS);
+  const auto runtime = parsePssDocument(THUMB_SEGMENT_SOURCE, "segments.pss");
+  const auto literal = sc::materializeDocument(LITERAL);
+  const auto compact = sc::materializeDocument(COMPACT);
+  const auto flat = sc::materializeDocument(FLAT);
+  REQUIRE(runtime);
+  REQUIRE(literal);
+  REQUIRE(compact);
+  REQUIRE(flat);
+  CHECK(*literal == *runtime);
+  CHECK(*compact == *runtime);
+  CHECK(flat->sheet == runtime->sheet);
+  CHECK(sc::materialize(TYPED_SEGMENTS) == runtime->sheet);
+  const auto legacy = parsePss(THUMB_SEGMENT_SOURCE);
+  REQUIRE(legacy);
+  CHECK(*legacy == runtime->sheet);
+  const auto &declarations = runtime->sheet.rules[0].declarations;
+  CHECK(declarations.scrollbarThumbStart ==
+        StylePaintDeclarations{RgbColor{1, 2, 3}, RgbColor{4, 5, 6}, false, true, false});
+  CHECK(declarations.scrollbarThumbBody ==
+        StylePaintDeclarations{RgbColor{7, 8, 9}, RgbColor{10, 11, 12}, true, false, true});
+  CHECK(declarations.scrollbarThumbEnd ==
+        StylePaintDeclarations{RgbColor{13, 14, 15}, RgbColor{16, 17, 18}, false, true, false});
+  CHECK(declarations.scrollbarThumbSingle ==
+        StylePaintDeclarations{RgbColor{19, 20, 21}, RgbColor{22, 23, 24}, true, false, true});
+
+  for (const auto &declaration : runtime->declarations) {
+    CHECK(runtime->origins[0].effectiveDeclaration[static_cast<std::size_t>(declaration.property)] < 20);
+  }
+
+  expectError("ScrollBar {\n scrollbar-thumb-single-foreground: false;\n}", PssErrorCode::INVALID_VALUE, {48, 2, 37},
+              "scrollbar-thumb-single-foreground");
+  expectError("ScrollBar {\n scrollbar-thumb-end-bold: #010203;\n}", PssErrorCode::INVALID_VALUE, {39, 2, 28},
+              "scrollbar-thumb-end-bold");
 }

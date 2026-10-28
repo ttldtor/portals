@@ -154,55 +154,75 @@ constexpr RgbColor evaluate(Mix<Left, Right> expression, const P &parameters, co
 
 /** @brief Internal declaration destinations, exactly matching StyleDeclarations. */
 enum class Property {
-  FOREGROUND,                  ///< Text color.
-  BACKGROUND,                  ///< Fill color.
-  BOLD,                        ///< Bold paint flag.
-  ITALIC,                      ///< Italic paint flag.
-  UNDERLINE,                   ///< Underline paint flag.
-  MIN_WIDTH,                   ///< State-independent minimum cell width.
-  FRAME_LINE_FOREGROUND,       ///< Frame part frameLine.foreground.
-  FRAME_LINE_BACKGROUND,       ///< Frame part frameLine.background.
-  FRAME_LINE_BOLD,             ///< Frame part frameLine.bold.
-  FRAME_LINE_ITALIC,           ///< Frame part frameLine.italic.
-  FRAME_LINE_UNDERLINE,        ///< Frame part frameLine.underline.
-  FRAME_TITLE_FOREGROUND,      ///< Frame part frameTitle.foreground.
-  FRAME_TITLE_BACKGROUND,      ///< Frame part frameTitle.background.
-  FRAME_TITLE_BOLD,            ///< Frame part frameTitle.bold.
-  FRAME_TITLE_ITALIC,          ///< Frame part frameTitle.italic.
-  FRAME_TITLE_UNDERLINE,       ///< Frame part frameTitle.underline.
-  FRAME_ENDS_FOREGROUND,       ///< Frame part frameEnds.foreground.
-  FRAME_ENDS_BACKGROUND,       ///< Frame part frameEnds.background.
-  FRAME_ENDS_BOLD,             ///< Frame part frameEnds.bold.
-  FRAME_ENDS_ITALIC,           ///< Frame part frameEnds.italic.
-  FRAME_ENDS_UNDERLINE,        ///< Frame part frameEnds.underline.
-  SCROLLBAR_TRACK_FOREGROUND,  ///< Scrollbar track foreground.
-  SCROLLBAR_TRACK_BACKGROUND,  ///< Scrollbar track background.
-  SCROLLBAR_TRACK_BOLD,        ///< Scrollbar track bold.
-  SCROLLBAR_TRACK_ITALIC,      ///< Scrollbar track italic.
-  SCROLLBAR_TRACK_UNDERLINE,   ///< Scrollbar track underline.
-  SCROLLBAR_THUMB_FOREGROUND,  ///< Scrollbar thumb foreground.
-  SCROLLBAR_THUMB_BACKGROUND,  ///< Scrollbar thumb background.
-  SCROLLBAR_THUMB_BOLD,        ///< Scrollbar thumb bold.
-  SCROLLBAR_THUMB_ITALIC,      ///< Scrollbar thumb italic.
-  SCROLLBAR_THUMB_UNDERLINE,   ///< Scrollbar thumb underline.
-  SCROLLBAR_ENDS_FOREGROUND,   ///< Scrollbar ends foreground.
-  SCROLLBAR_ENDS_BACKGROUND,   ///< Scrollbar ends background.
-  SCROLLBAR_ENDS_BOLD,         ///< Scrollbar ends bold.
-  SCROLLBAR_ENDS_ITALIC,       ///< Scrollbar ends italic.
-  SCROLLBAR_ENDS_UNDERLINE,    ///< Scrollbar ends underline.
-  SCROLLBAR_ARROWS_FOREGROUND, ///< Scrollbar arrows foreground.
-  SCROLLBAR_ARROWS_BACKGROUND, ///< Scrollbar arrows background.
-  SCROLLBAR_ARROWS_BOLD,       ///< Scrollbar arrows bold.
-  SCROLLBAR_ARROWS_ITALIC,     ///< Scrollbar arrows italic.
-  SCROLLBAR_ARROWS_UNDERLINE,  ///< Scrollbar arrows underline.
-  SCROLLBAR_CORNER_FOREGROUND, ///< Scrollbar corner foreground.
-  SCROLLBAR_CORNER_BACKGROUND, ///< Scrollbar corner background.
-  SCROLLBAR_CORNER_BOLD,       ///< Scrollbar corner bold.
-  SCROLLBAR_CORNER_ITALIC,     ///< Scrollbar corner italic.
-  SCROLLBAR_CORNER_UNDERLINE,  ///< Scrollbar corner underline.
-  SCROLLBAR_TRACK_PATTERN,     ///< Independent track source.
-  SCROLLBAR_THUMB_PATTERN,     ///< Independent thumb source.
-  SCROLLBAR_ARROW_PATTERN,     ///< Independent arrow source.
+  FOREGROUND,                        ///< Text color.
+  BACKGROUND,                        ///< Fill color.
+  BOLD,                              ///< Bold paint flag.
+  ITALIC,                            ///< Italic paint flag.
+  UNDERLINE,                         ///< Underline paint flag.
+  MIN_WIDTH,                         ///< State-independent minimum cell width.
+  FRAME_LINE_FOREGROUND,             ///< Frame part frameLine.foreground.
+  FRAME_LINE_BACKGROUND,             ///< Frame part frameLine.background.
+  FRAME_LINE_BOLD,                   ///< Frame part frameLine.bold.
+  FRAME_LINE_ITALIC,                 ///< Frame part frameLine.italic.
+  FRAME_LINE_UNDERLINE,              ///< Frame part frameLine.underline.
+  FRAME_TITLE_FOREGROUND,            ///< Frame part frameTitle.foreground.
+  FRAME_TITLE_BACKGROUND,            ///< Frame part frameTitle.background.
+  FRAME_TITLE_BOLD,                  ///< Frame part frameTitle.bold.
+  FRAME_TITLE_ITALIC,                ///< Frame part frameTitle.italic.
+  FRAME_TITLE_UNDERLINE,             ///< Frame part frameTitle.underline.
+  FRAME_ENDS_FOREGROUND,             ///< Frame part frameEnds.foreground.
+  FRAME_ENDS_BACKGROUND,             ///< Frame part frameEnds.background.
+  FRAME_ENDS_BOLD,                   ///< Frame part frameEnds.bold.
+  FRAME_ENDS_ITALIC,                 ///< Frame part frameEnds.italic.
+  FRAME_ENDS_UNDERLINE,              ///< Frame part frameEnds.underline.
+  SCROLLBAR_TRACK_FOREGROUND,        ///< Scrollbar track foreground.
+  SCROLLBAR_TRACK_BACKGROUND,        ///< Scrollbar track background.
+  SCROLLBAR_TRACK_BOLD,              ///< Scrollbar track bold.
+  SCROLLBAR_TRACK_ITALIC,            ///< Scrollbar track italic.
+  SCROLLBAR_TRACK_UNDERLINE,         ///< Scrollbar track underline.
+  SCROLLBAR_THUMB_FOREGROUND,        ///< Scrollbar thumb foreground.
+  SCROLLBAR_THUMB_BACKGROUND,        ///< Scrollbar thumb background.
+  SCROLLBAR_THUMB_BOLD,              ///< Scrollbar thumb bold.
+  SCROLLBAR_THUMB_ITALIC,            ///< Scrollbar thumb italic.
+  SCROLLBAR_THUMB_UNDERLINE,         ///< Scrollbar thumb underline.
+  SCROLLBAR_ENDS_FOREGROUND,         ///< Scrollbar ends foreground.
+  SCROLLBAR_ENDS_BACKGROUND,         ///< Scrollbar ends background.
+  SCROLLBAR_ENDS_BOLD,               ///< Scrollbar ends bold.
+  SCROLLBAR_ENDS_ITALIC,             ///< Scrollbar ends italic.
+  SCROLLBAR_ENDS_UNDERLINE,          ///< Scrollbar ends underline.
+  SCROLLBAR_ARROWS_FOREGROUND,       ///< Scrollbar arrows foreground.
+  SCROLLBAR_ARROWS_BACKGROUND,       ///< Scrollbar arrows background.
+  SCROLLBAR_ARROWS_BOLD,             ///< Scrollbar arrows bold.
+  SCROLLBAR_ARROWS_ITALIC,           ///< Scrollbar arrows italic.
+  SCROLLBAR_ARROWS_UNDERLINE,        ///< Scrollbar arrows underline.
+  SCROLLBAR_CORNER_FOREGROUND,       ///< Scrollbar corner foreground.
+  SCROLLBAR_CORNER_BACKGROUND,       ///< Scrollbar corner background.
+  SCROLLBAR_CORNER_BOLD,             ///< Scrollbar corner bold.
+  SCROLLBAR_CORNER_ITALIC,           ///< Scrollbar corner italic.
+  SCROLLBAR_CORNER_UNDERLINE,        ///< Scrollbar corner underline.
+  SCROLLBAR_TRACK_PATTERN,           ///< Independent track source.
+  SCROLLBAR_THUMB_PATTERN,           ///< Independent thumb source.
+  SCROLLBAR_ARROW_PATTERN,           ///< Independent arrow source.
+  SCROLLBAR_THUMB_START_FOREGROUND,  ///< Thumb start foreground.
+  SCROLLBAR_THUMB_START_BACKGROUND,  ///< Thumb start background.
+  SCROLLBAR_THUMB_START_BOLD,        ///< Thumb start bold.
+  SCROLLBAR_THUMB_START_ITALIC,      ///< Thumb start italic.
+  SCROLLBAR_THUMB_START_UNDERLINE,   ///< Thumb start underline.
+  SCROLLBAR_THUMB_BODY_FOREGROUND,   ///< Thumb body foreground.
+  SCROLLBAR_THUMB_BODY_BACKGROUND,   ///< Thumb body background.
+  SCROLLBAR_THUMB_BODY_BOLD,         ///< Thumb body bold.
+  SCROLLBAR_THUMB_BODY_ITALIC,       ///< Thumb body italic.
+  SCROLLBAR_THUMB_BODY_UNDERLINE,    ///< Thumb body underline.
+  SCROLLBAR_THUMB_END_FOREGROUND,    ///< Thumb end foreground.
+  SCROLLBAR_THUMB_END_BACKGROUND,    ///< Thumb end background.
+  SCROLLBAR_THUMB_END_BOLD,          ///< Thumb end bold.
+  SCROLLBAR_THUMB_END_ITALIC,        ///< Thumb end italic.
+  SCROLLBAR_THUMB_END_UNDERLINE,     ///< Thumb end underline.
+  SCROLLBAR_THUMB_SINGLE_FOREGROUND, ///< Thumb single foreground.
+  SCROLLBAR_THUMB_SINGLE_BACKGROUND, ///< Thumb single background.
+  SCROLLBAR_THUMB_SINGLE_BOLD,       ///< Thumb single bold.
+  SCROLLBAR_THUMB_SINGLE_ITALIC,     ///< Thumb single italic.
+  SCROLLBAR_THUMB_SINGLE_UNDERLINE,  ///< Thumb single underline.
 };
 
 /** @brief Internal typed owning declaration.
@@ -333,7 +353,11 @@ constexpr void assign(const D &declaration, StyleDeclarations &destination, cons
     D::KIND == Property::FRAME_LINE_BACKGROUND || D::KIND == Property::FRAME_TITLE_FOREGROUND ||
     D::KIND == Property::FRAME_TITLE_BACKGROUND || D::KIND == Property::FRAME_ENDS_FOREGROUND ||
     D::KIND == Property::FRAME_ENDS_BACKGROUND || D::KIND == Property::SCROLLBAR_TRACK_FOREGROUND ||
-    D::KIND == Property::SCROLLBAR_TRACK_BACKGROUND || D::KIND == Property::SCROLLBAR_THUMB_FOREGROUND ||
+    D::KIND == Property::SCROLLBAR_TRACK_BACKGROUND || D::KIND == Property::SCROLLBAR_THUMB_START_FOREGROUND ||
+    D::KIND == Property::SCROLLBAR_THUMB_START_BACKGROUND || D::KIND == Property::SCROLLBAR_THUMB_BODY_FOREGROUND ||
+    D::KIND == Property::SCROLLBAR_THUMB_BODY_BACKGROUND || D::KIND == Property::SCROLLBAR_THUMB_END_FOREGROUND ||
+    D::KIND == Property::SCROLLBAR_THUMB_END_BACKGROUND || D::KIND == Property::SCROLLBAR_THUMB_SINGLE_FOREGROUND ||
+    D::KIND == Property::SCROLLBAR_THUMB_SINGLE_BACKGROUND || D::KIND == Property::SCROLLBAR_THUMB_FOREGROUND ||
     D::KIND == Property::SCROLLBAR_THUMB_BACKGROUND || D::KIND == Property::SCROLLBAR_ENDS_FOREGROUND ||
     D::KIND == Property::SCROLLBAR_ENDS_BACKGROUND || D::KIND == Property::SCROLLBAR_ARROWS_FOREGROUND ||
     D::KIND == Property::SCROLLBAR_ARROWS_BACKGROUND || D::KIND == Property::SCROLLBAR_CORNER_FOREGROUND ||
@@ -408,6 +432,46 @@ constexpr void assign(const D &declaration, StyleDeclarations &destination, cons
       destination.scrollbarThumb.italic = value;
     } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_UNDERLINE) {
       destination.scrollbarThumb.underline = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_START_FOREGROUND) {
+      destination.scrollbarThumbStart.foreground = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_START_BACKGROUND) {
+      destination.scrollbarThumbStart.background = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_START_BOLD) {
+      destination.scrollbarThumbStart.bold = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_START_ITALIC) {
+      destination.scrollbarThumbStart.italic = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_START_UNDERLINE) {
+      destination.scrollbarThumbStart.underline = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_BODY_FOREGROUND) {
+      destination.scrollbarThumbBody.foreground = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_BODY_BACKGROUND) {
+      destination.scrollbarThumbBody.background = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_BODY_BOLD) {
+      destination.scrollbarThumbBody.bold = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_BODY_ITALIC) {
+      destination.scrollbarThumbBody.italic = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_BODY_UNDERLINE) {
+      destination.scrollbarThumbBody.underline = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_END_FOREGROUND) {
+      destination.scrollbarThumbEnd.foreground = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_END_BACKGROUND) {
+      destination.scrollbarThumbEnd.background = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_END_BOLD) {
+      destination.scrollbarThumbEnd.bold = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_END_ITALIC) {
+      destination.scrollbarThumbEnd.italic = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_END_UNDERLINE) {
+      destination.scrollbarThumbEnd.underline = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_SINGLE_FOREGROUND) {
+      destination.scrollbarThumbSingle.foreground = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_SINGLE_BACKGROUND) {
+      destination.scrollbarThumbSingle.background = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_SINGLE_BOLD) {
+      destination.scrollbarThumbSingle.bold = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_SINGLE_ITALIC) {
+      destination.scrollbarThumbSingle.italic = value;
+    } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_SINGLE_UNDERLINE) {
+      destination.scrollbarThumbSingle.underline = value;
     } else if constexpr (D::KIND == Property::SCROLLBAR_ENDS_FOREGROUND) {
       destination.scrollbarEnds.foreground = value;
     } else if constexpr (D::KIND == Property::SCROLLBAR_ENDS_BACKGROUND) {
@@ -960,6 +1024,106 @@ template <class E> consteval auto scrollbarThumbItalic(E expression) {
 /** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
 template <class E> consteval auto scrollbarThumbUnderline(E expression) {
   return detail::Declaration<detail::Property::SCROLLBAR_THUMB_UNDERLINE, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Segment attribute. @return Typed thumb segment declaration. */
+template <class E> consteval auto scrollbarThumbStartForeground(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_THUMB_START_FOREGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Segment attribute. @return Typed thumb segment declaration. */
+template <class E> consteval auto scrollbarThumbStartBackground(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_THUMB_START_BACKGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Segment attribute. @return Typed thumb segment declaration. */
+template <class E> consteval auto scrollbarThumbStartBold(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_THUMB_START_BOLD, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Segment attribute. @return Typed thumb segment declaration. */
+template <class E> consteval auto scrollbarThumbStartItalic(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_THUMB_START_ITALIC, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Segment attribute. @return Typed thumb segment declaration. */
+template <class E> consteval auto scrollbarThumbStartUnderline(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_THUMB_START_UNDERLINE, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Segment attribute. @return Typed thumb segment declaration. */
+template <class E> consteval auto scrollbarThumbBodyForeground(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_THUMB_BODY_FOREGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Segment attribute. @return Typed thumb segment declaration. */
+template <class E> consteval auto scrollbarThumbBodyBackground(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_THUMB_BODY_BACKGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Segment attribute. @return Typed thumb segment declaration. */
+template <class E> consteval auto scrollbarThumbBodyBold(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_THUMB_BODY_BOLD, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Segment attribute. @return Typed thumb segment declaration. */
+template <class E> consteval auto scrollbarThumbBodyItalic(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_THUMB_BODY_ITALIC, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Segment attribute. @return Typed thumb segment declaration. */
+template <class E> consteval auto scrollbarThumbBodyUnderline(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_THUMB_BODY_UNDERLINE, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Segment attribute. @return Typed thumb segment declaration. */
+template <class E> consteval auto scrollbarThumbEndForeground(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_THUMB_END_FOREGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Segment attribute. @return Typed thumb segment declaration. */
+template <class E> consteval auto scrollbarThumbEndBackground(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_THUMB_END_BACKGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Segment attribute. @return Typed thumb segment declaration. */
+template <class E> consteval auto scrollbarThumbEndBold(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_THUMB_END_BOLD, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Segment attribute. @return Typed thumb segment declaration. */
+template <class E> consteval auto scrollbarThumbEndItalic(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_THUMB_END_ITALIC, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Segment attribute. @return Typed thumb segment declaration. */
+template <class E> consteval auto scrollbarThumbEndUnderline(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_THUMB_END_UNDERLINE, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Segment attribute. @return Typed thumb segment declaration. */
+template <class E> consteval auto scrollbarThumbSingleForeground(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_THUMB_SINGLE_FOREGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Segment attribute. @return Typed thumb segment declaration. */
+template <class E> consteval auto scrollbarThumbSingleBackground(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_THUMB_SINGLE_BACKGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Segment attribute. @return Typed thumb segment declaration. */
+template <class E> consteval auto scrollbarThumbSingleBold(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_THUMB_SINGLE_BOLD, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Segment attribute. @return Typed thumb segment declaration. */
+template <class E> consteval auto scrollbarThumbSingleItalic(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_THUMB_SINGLE_ITALIC, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Segment attribute. @return Typed thumb segment declaration. */
+template <class E> consteval auto scrollbarThumbSingleUnderline(E expression) {
+  return detail::Declaration<detail::Property::SCROLLBAR_THUMB_SINGLE_UNDERLINE, E>{expression};
 }
 
 /** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */
