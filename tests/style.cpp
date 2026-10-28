@@ -649,6 +649,11 @@ void adaptedPaletteVariants() {
 
     check(frame.line == frameStyle && frame.title == frameStyle && frame.ends == frameStyle,
           "focused frame parts use this palette's accent and background without action fill");
+    const auto &scrollbar = style.scrollbar[static_cast<std::size_t>(StyleState::FOCUSED) - 1];
+
+    check(scrollbar.track == frameStyle && scrollbar.thumb == frameStyle && scrollbar.ends == frameStyle &&
+            scrollbar.corner == frameStyle,
+          "focused scrollbar parts use accent glyphs on the unchanged surface");
 
     if (failures != failuresBefore) {
       std::cerr << "Palette: " << palette.name << '\n';

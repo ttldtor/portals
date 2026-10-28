@@ -331,6 +331,12 @@ The [ordinary scroll guide](scroll-controls.md) builds as `guide_scroll_controls
 buttons in a titled 28-by-6 outer frame with an on-frame scrollbar, wheel/key/drag
 input, and Exit/F10 cleanup.
 
+The [frame and title gallery](compact-primitives.md) builds as `guide_frame_styles`;
+the [on-frame scrollbar gallery](scroll-controls.md) builds as `guide_scrollbar_gallery`.
+Both guides include native recordings, static previews and complete declarative sources.
+The test-enabled root build names these targets `portals_docs_frame_styles` and
+`portals_docs_scrollbar_gallery`.
+
 The [nested settings form](scroll-controls.md#nested-scroll-areas) builds as
 `guide_nested_scroll`; the root test-enabled build names it `portals_docs_nested_scroll`.
 It uses editable fields and internal-state checkboxes with two `ON_FRAME` areas.
