@@ -40,6 +40,56 @@
 
 \include guide_scrollbar_gallery.cpp
 
+## Функциональные кнопки со стрелками
+
+Добавьте `.arrows()` или `| ui::arrows()` к native `ScrollArea` или `ScrollBar`.
+По умолчанию стрелки выключены; `.arrows(false)` переопределяет включённый default
+контекста. Нажатие меняет позицию на `keyStep`. Managed-сцена автоматически
+подключает удержание и очистку: первый повтор через 350 мс, затем один шаг каждые 60 мс.
+Запоздавшая доставка делает один шаг, не накапливая пропущенные повторы.
+`readOnly` блокирует ввод стрелок, сохраняя checked-программные команды.
+
+![Нативная запись удержания кнопок прокрутки](../images/scroll-arrows.gif)
+[Статичный кадр PNG](../images/scroll-arrows.png)
+
+Нативная запись MSVC Debug использует scripted SGR mouse press/release events:
+удержание DOWN прокручивает вперёд, UP возвращает назад. Подписи обозначают
+введённые события. Доставка событий от физической мыши host этим не проверена.
+
+Канал длиной хотя бы3 ячейки резервирует первую и последнюю ячейки под кнопки.
+Ползунок и его travel используют оставшуюся часть. Углы рамки и пересечение полос
+в канал не входят. На более коротком канале кнопки сворачиваются без увеличения
+минимального размера контрола и без изменения viewport/range. Отпускание, уход
+указателя с нажатой кнопки, потеря capture, hide/disable, удаление и изменение
+геометрии/метрик прекращают удержание. На границе диапазона таймер останавливается;
+новых публикаций offset и перерисовок нет.
+
+Constructor-only поля `ScrollAreaOptions`/`ScrollBarOptions`: `arrows`,
+`arrowDelay`, `arrowRepeat`. Оба интервала — положительные целые миллисекунды;
+ноль и переполнение deadline возвращают `TreeError::INVALID_ARGUMENT`.
+Sparse settings и загружаемые сцены используют те же имена, например
+`ScrollBar{arrows=true arrowDelay=400 arrowRepeat=80}`. PSS меняет оформление;
+переключение поведения после mount в этот API не входит.
+
+Glyphs функциональных стрелок независимы от декоративных `ScrollbarSkin::ends`:
+`horizontal.backward`, `horizontal.forward`, `vertical.backward`, `vertical.forward`.
+В ресурсе добавьте к путям префикс `scrollbar.`. Custom glyph — ровно один
+printable grapheme шириной 1 ячейка под принимающей width policy; пустая строка
+недопустима. Defaults — Unicode triangles с существующим ASCII fallback.
+Свойства `scrollbar-arrows-foreground/background/bold/italic/underline` задаются
+по отдельности и не меняют track, thumb, decorative ends, corner или frame.
+
+Прежние low-level overloads `bindScrollArea(router, tree, node)` и
+`bindScrollBar(router, tree, node)` дают один шаг по клику. Overloads с
+`ScrollRepeatServices{now, onError}` добавляют удержание через `WidgetTree::at`
+и существующий scheduler scope узла. Передайте источник времени того же scheduler
+и обработчик typed `TreeError` для поздних ошибок регистрации. Дерево и references,
+захваченные callbacks, должны пережить узел, binding и допущенные вызовы.
+Callbacks копируются; их исключения проходят существующую callback-failure границу.
+Ошибка регистрации при первом нажатии не меняет offset. Поздняя ошибка сначала
+останавливает удержание, затем вызывает `onError`. При отсутствии host capture
+capabilities оба overloads сохраняют одиночный клик.
+
 ## Содержимое и размещение полос
 
 Обычное содержимое остаётся в памяти, включая контролы вне viewport; оно

@@ -1431,9 +1431,67 @@ void liveTextAndScrollSamePrepare() {
           "combined adapter/reveal flow settles with one updated frame and no idle redraw");
   }
 }
+
+void managedArrowHoldNegotiation() {
+  for (bool motion : {false, true}) {
+    MotionReplayTerminal terminal({{100, "\x1b[<0;1;10M", {}}, {700, "\x1b[<0;1;10m", {}}, {800, "inspect", {}}}, 1000,
+                                  {1, 10});
+    terminal.motion = motion;
+    auto runner = take(Application::create({}, terminal.clock()));
+    auto managed = take(ManagedScene::create(*runner));
+    ui::Ref<ScrollBar> bar;
+    take(ui::mount(*managed, ui::scrollBar(bar).arrows().width(1).height(10)));
+    take(bar.setMetrics({100, 10}));
+    std::shared_ptr<ScrollController> controller;
+    take(runner->tree().read(bar.node(), [&](const ScrollBar &widget) {
+      controller = detail::ScrollWidgetAccess::state(widget).controller;
+    }));
+    check(managed->requiresPointerMotion(), "ordinary arrows recipe requests existing native motion negotiation");
+    const auto stats = take(managed->run(terminal));
+    check(take(controller->snapshot()).vertical.offset.raster == (motion ? 6u : 1u),
+          "ordinary runner automatically enables supported hold and preserves click-only fallback");
+    check(stats.frames > 0 && terminal.closed, "negotiated arrow runner restores the terminal");
+  }
+}
+
+void managedFunctionalArrowLifetime() {
+  SchedulerTime now{};
+  auto app = take(Application::create({}, {[](void *context) noexcept {
+                                             return *static_cast<SchedulerTime *>(context);
+                                           },
+                                           &now}));
+  auto scene = take(ManagedScene::create(*app));
+  ui::Ref<ScrollBar> bar;
+  take(ui::mount(*scene, ui::scrollBar(ScrollAxis::VERTICAL, {.arrows = true}).reference(bar).width(1).height(10)));
+  take(bar.setMetrics({100, 10}));
+  take(scene->prepare(*app, {1, 10}));
+  const auto bounds = take(CellRect::from({}, {1, 10}));
+  take(app->tree().frame([&] {
+    take(layoutTree(app->tree(), app->root(), bounds, bounds));
+  }));
+  take(app->router().setPointerCaptureCapabilities({true, true, true}));
+  take(app->router().dispatch(MouseInputEvent{0, 9, MouseButton::LEFT, MouseAction::PRESS, {}}));
+  auto offset = [&] {
+    std::uint64_t result{};
+    take(app->tree().read(bar.node(), [&](const ScrollBar &widget) {
+      result = take(detail::ScrollWidgetAccess::state(widget).controller->snapshot()).vertical.offset.raster;
+    }));
+    return result;
+  };
+  check(offset() == 1, "managed constructor-only arrow option takes immediate step");
+  now = 350;
+  take(app->scheduler().dispatch());
+  check(offset() == 2, "managed scenes supply repeat services automatically");
+  take(scene->close());
+  now = 1000;
+  check(take(app->scheduler().dispatch()).timers == 0, "scene close cancels node-scoped held arrow callback");
+}
+
 } // namespace
 
 int main() {
+  managedFunctionalArrowLifetime();
+  managedArrowHoldNegotiation();
   allocatorNothrowRoundtrip();
   scalarRecipesThroughRuntime();
   scalarFactoryPrecedenceAndWriterRoles();

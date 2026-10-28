@@ -6291,3 +6291,28 @@ TEST_CASE("scrollbar resource dotted grouped defaults and per-axis overrides sha
     CHECK(std::ranges::find(sink.text, glyph) != sink.text.end());
   REQUIRE(owner.close());
 }
+
+TEST_CASE("functional arrow resource leaves reach mounted native paint") {
+  for (const auto properties :
+       {R"(arrows=true arrowDelay=450 arrowRepeat=70 scrollbar.vertical.backward="U" scrollbar.vertical.forward="D")",
+        R"(arrows=true arrowDelay=450 arrowRepeat=70 scrollbar{vertical{backward="U" forward="D"}})"}) {
+    ui::SceneResourceOptions options;
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    auto owner = ui::scene("scene{ScrollArea#area{width=12 height=6 " + std::string(properties) +
+                             " Label{text=\"body\" width=40 height=30}}}",
+                           options);
+    auto area = owner.get<ScrollArea>("area");
+    REQUIRE(owner.prepareChecked());
+    auto &managed = owner.managed()->get();
+    auto &app = ui::detail::SceneAccess::application(managed);
+    layoutResourceFrame(managed, app, {12, 6});
+    layoutResourceFrame(managed, app, {12, 6});
+    ResourceFramePaint sink;
+    REQUIRE(app.tree().frame([&] {
+      REQUIRE(app.tree().paint(area.node(), sink));
+    }));
+    CHECK(std::ranges::find(sink.text, "U") != sink.text.end());
+    CHECK(std::ranges::find(sink.text, "D") != sink.text.end());
+    REQUIRE(owner.close());
+  }
+}

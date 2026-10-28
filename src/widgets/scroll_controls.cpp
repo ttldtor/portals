@@ -29,12 +29,18 @@ std::expected<void, TreeError> editScroll(WidgetTree &tree, Node<Widget> node, F
 } // namespace
 
 namespace detail {
-ScrollWidgetState::ScrollWidgetState(std::shared_ptr<ScrollController> values, WidthPolicy width, PrimitiveGlyphs mode)
+ScrollWidgetState::ScrollWidgetState(std::shared_ptr<ScrollController> values, WidthPolicy width, PrimitiveGlyphs mode,
+                                     bool arrows)
     : controller(std::move(values)),
       glyphs{scrollGlyph("\xe2\x94\x8c", "+", width, mode), scrollGlyph("\xe2\x94\x90", "+", width, mode),
              scrollGlyph("\xe2\x94\x94", "+", width, mode), scrollGlyph("\xe2\x94\x98", "+", width, mode),
              scrollGlyph("\xe2\x94\x80", "-", width, mode), scrollGlyph("\xe2\x94\x82", "|", width, mode),
              scrollGlyph("\xe2\x96\x91", ".", width, mode), scrollGlyph("\xe2\x96\x88", "#", width, mode)} {
+  if (arrows) {
+    arrowGlyphs = std::make_unique<std::array<GraphemeText, 4>>(
+      std::array{scrollGlyph("\xe2\x97\x80", "<", width, mode), scrollGlyph("\xe2\x96\xb6", ">", width, mode),
+                 scrollGlyph("\xe2\x96\xb2", "^", width, mode), scrollGlyph("\xe2\x96\xbc", "v", width, mode)});
+  }
   if (!controller) {
     auto created = ScrollController::create();
     if (!created) {
@@ -140,6 +146,7 @@ std::expected<void, TreeError> releaseScrollInitialization(WidgetTree &tree, Nod
   auto edited = tree.edit(node, [&](Widget &widget) {
     if (auto *state = ScrollWidgetAccess::state(widget)) {
       state->capture.disconnect();
+      cancelScrollRepeat(*state);
       state->lease.reset();
       state->node = {};
     }
@@ -171,6 +178,7 @@ std::expected<ScrollControllerChange, TreeError> commitScroll(WidgetTree &tree, 
   }
   if (change->metricsChanged) {
     state.capture.disconnect();
+    cancelScrollRepeat(state);
   }
   if (change->metricsChanged || change->rasterChanged) {
     auto invalidated = tree.invalidate(node, Invalidation::LAYOUT);
@@ -184,8 +192,8 @@ std::expected<ScrollControllerChange, TreeError> commitScroll(WidgetTree &tree, 
 
 ScrollArea::ScrollArea(std::shared_ptr<ScrollController> controller, WidthPolicy width, ScrollAreaOptions options,
                        ControlStyle style, SizePolicy policy)
-    : SizedWidget(policy),
-      state_(std::make_unique<detail::ScrollWidgetState>(std::move(controller), width, options.glyphs)) {
+    : SizedWidget(policy), state_(std::make_unique<detail::ScrollWidgetState>(std::move(controller), width,
+                                                                              options.glyphs, options.arrows)) {
   state_->isArea = true;
   state_->area = std::move(options);
   state_->style = style;
@@ -204,8 +212,8 @@ ScrollArea::ScrollArea(std::shared_ptr<ScrollController> controller, WidthPolicy
 
 ScrollArea::ScrollArea(std::shared_ptr<ScrollController> controller, WidthPolicy width, ScrollAreaOptions options,
                        ControlStyle style, SizePolicy policy, FrameOptions frame, std::in_place_t)
-    : SizedWidget(policy),
-      state_(std::make_unique<detail::ScrollWidgetState>(std::move(controller), width, options.glyphs)) {
+    : SizedWidget(policy), state_(std::make_unique<detail::ScrollWidgetState>(std::move(controller), width,
+                                                                              options.glyphs, options.arrows)) {
   state_->isArea = true;
   state_->area = options;
   state_->style = style;
@@ -225,6 +233,7 @@ ScrollArea::ScrollArea(std::shared_ptr<ScrollController> controller, WidthPolicy
 ScrollArea::~ScrollArea() = default;
 
 void ScrollArea::unmount() {
+  detail::cancelScrollRepeat(*state_);
   state_->retired = true;
   state_->intent.reset();
   state_->capture.disconnect();
@@ -233,8 +242,8 @@ void ScrollArea::unmount() {
 
 ScrollBar::ScrollBar(std::shared_ptr<ScrollController> controller, ScrollAxis axis, WidthPolicy width,
                      ScrollBarOptions options, ControlStyle style, SizePolicy policy)
-    : SizedWidget(policy),
-      state_(std::make_unique<detail::ScrollWidgetState>(std::move(controller), width, options.glyphs)) {
+    : SizedWidget(policy), state_(std::make_unique<detail::ScrollWidgetState>(std::move(controller), width,
+                                                                              options.glyphs, options.arrows)) {
   state_->axis = axis;
   state_->bar = options;
   state_->style = style;
@@ -243,6 +252,7 @@ ScrollBar::ScrollBar(std::shared_ptr<ScrollController> controller, ScrollAxis ax
 ScrollBar::~ScrollBar() = default;
 
 void ScrollBar::unmount() {
+  detail::cancelScrollRepeat(*state_);
   state_->retired = true;
   state_->intent.reset();
   state_->capture.disconnect();
@@ -406,6 +416,9 @@ std::expected<void, TreeError> syncScrollControl(WidgetTree &tree, Node<Widget> 
         state->focused = hasFocus;
       }
     }
+    if (!*eligible || !state->capture.connected()) {
+      detail::cancelScrollRepeat(*state);
+    }
   });
   return edited ? result : edited;
 }
@@ -481,6 +494,25 @@ prepareScrollbarSkin(const detail::ScrollWidgetState &state, const ScrollbarSkin
   }
 
   result->ends = skin.ends;
+
+  const std::array arrowSources{&skin.horizontal.backward, &skin.horizontal.forward, &skin.vertical.backward,
+                                &skin.vertical.forward};
+  for (std::size_t index = 0; index < arrowSources.size(); ++index) {
+    if (!*arrowSources[index]) {
+      continue;
+    }
+    const auto &source = **arrowSources[index];
+    auto text = GraphemeText::from(source, policy,
+                                   {.max_input_bytes = skin.maxGlyphBytes,
+                                    .max_cluster_bytes = skin.maxGlyphBytes,
+                                    .max_graphemes = 1,
+                                    .max_cells = 1});
+    if (source.empty() || source.size() > skin.maxGlyphBytes || !text || text->graphemes().size() != 1 ||
+        text->measure() != 1 || text->graphemes().front().display != TextDisplay::PRINTABLE) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+    result->arrows[index] = std::move(*text);
+  }
 
   return result;
 }

@@ -4,6 +4,7 @@
 #include <doctest.h>
 
 #include "support/examples/replay/terminal.hpp"
+#include "../src/widgets/scroll_controls_state.hpp"
 #include <portals/ui.hpp>
 #include <source_location>
 
@@ -178,4 +179,76 @@ TEST_CASE("sticky header reveal changes the shared horizontal offset without mov
 
   CHECK(state.horizontal.offset.raster > 0);
   CHECK(state.vertical.offset.raster == 1);
+}
+
+TEST_CASE("regional grid forwards functional arrow preparation and retires its held timer") {
+  SchedulerTime now{};
+  auto app = take(Application::create({}, {[](void *context) noexcept {
+                                             return *static_cast<SchedulerTime *>(context);
+                                           },
+                                           &now}));
+  auto scene = take(ManagedScene::create(*app));
+  auto controller = take(ScrollController::create());
+  GridScrollOptions scroll;
+
+  scroll.area.arrows = true;
+  scroll.area.glyphs = PrimitiveGlyphs::ASCII;
+  scroll.area.horizontal = ScrollBarPolicy::NEVER;
+  scroll.area.vertical = ScrollBarPolicy::ALWAYS;
+
+  ui::Ref<Grid> grid;
+
+  take(ui::mount(*scene, ui::grid(ui::body(ui::label("Rows").width(8).height(30)))
+                           .columns(1)
+                           .scroll(controller)
+                           .scrollOptions(scroll.area)
+                           .reference(grid)
+                           .width(8)
+                           .height(10)));
+
+  take(scene->prepare(*app, {8, 10}));
+  prepareRegion(*scene, *app, {8, 10});
+  bool prepared{};
+
+  take(app->tree().read(grid.node(), [&](const Grid &widget) {
+    const auto *state = detail::ScrollWidgetAccess::state(widget);
+    prepared = state && state->arrowGlyphs != nullptr;
+  }));
+
+  // Diagnose the missing forwarding without intentionally dereferencing unprepared paint storage.
+  REQUIRE_MESSAGE(prepared, "GridScrollOptions.area.arrows must prepare its one-cell arrow glyphs");
+
+  struct Sink : PaintContext {
+    std::vector<std::string> glyphs;
+
+    std::expected<void, TreeError> submit(std::span<const RenderCommand> commands) override {
+      for (const auto &command : commands) {
+        if (const auto *text = std::get_if<TextCommand>(&command)) {
+          glyphs.emplace_back(text->text.bytes());
+        }
+      }
+
+      return {};
+    }
+  } sink;
+
+  take(app->tree().frame([&] {
+    take(app->tree().paint(grid.node(), sink));
+  }));
+  CHECK(std::ranges::find(sink.glyphs, "^") != sink.glyphs.end());
+  CHECK(std::ranges::find(sink.glyphs, "v") != sink.glyphs.end());
+  take(app->router().setPointerCaptureCapabilities({true, true, true}));
+  take(app->router().dispatch(MouseInputEvent{7, 9, MouseButton::LEFT, MouseAction::PRESS, {}}));
+  CHECK(take(controller->snapshot()).vertical.offset.raster == 1);
+
+  now = 350;
+  take(app->scheduler().dispatch());
+  CHECK(take(controller->snapshot()).vertical.offset.raster == 2);
+
+  take(scene->remove(grid.node()));
+
+  now = 1000;
+  CHECK(take(app->scheduler().dispatch()).timers == 0);
+  CHECK(take(controller->snapshot()).vertical.offset.raster == 2);
+  take(scene->close());
 }

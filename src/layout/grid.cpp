@@ -868,7 +868,8 @@ Grid::Grid(const GridOptions &options, GridPlacementMode mode, SizePolicy policy
            std::optional<GridScrollOptions> scroll, WidthPolicy width)
     : SizedWidget(policy), options_(options), mode_(mode) {
   if (scroll) {
-    scroll_ = std::make_unique<detail::ScrollWidgetState>(std::move(scroll->controller), width, scroll->area.glyphs);
+    scroll_ = std::make_unique<detail::ScrollWidgetState>(std::move(scroll->controller), width, scroll->area.glyphs,
+                                                        scroll->area.arrows);
     scroll_->isArea = true;
     scroll_->area = scroll->area;
 
@@ -890,6 +891,7 @@ Grid::~Grid() = default;
 
 void Grid::unmount() {
   if (scroll_) {
+    detail::cancelScrollRepeat(*scroll_);
     scroll_->retired = true;
     scroll_->intent.reset();
     scroll_->capture.disconnect();

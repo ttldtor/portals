@@ -26,11 +26,36 @@ struct PreparedScrollFrame {
 struct PreparedScrollbarSkin {
   // Horizontal track/thumb/start/end, vertical track/thumb/start/end, optional corner.
   std::array<std::optional<GraphemeText>, 9> glyphs{};
+  std::array<std::optional<GraphemeText>, 4> arrows{};
   bool ends{};
 };
 
+struct ScrollRepeatState {
+  ScrollRepeatState(WidgetTree &owner, Node<Widget> target, ScrollRepeatServices input)
+      : tree(owner), node(target), services(std::move(input)) {
+  }
+
+  void cancel() noexcept {
+    held = false;
+    timer = {};
+  }
+
+  WidgetTree &tree;
+  Node<Widget> node;
+  ScrollRepeatServices services;
+  Subscription timer;
+  std::uint64_t generation{};
+  ScrollAxis axis{ScrollAxis::VERTICAL};
+  CellPoint surface;
+  ScrollAxisMetrics metrics;
+  bool towardEnd{};
+  bool held{};
+  std::weak_ptr<ActionCancellation> binding;
+};
+
 struct ScrollWidgetState {
-  ScrollWidgetState(std::shared_ptr<ScrollController> controller, WidthPolicy width, PrimitiveGlyphs mode);
+  ScrollWidgetState(std::shared_ptr<ScrollController> controller, WidthPolicy width, PrimitiveGlyphs mode,
+                    bool arrows = false);
   std::shared_ptr<ScrollController> controller;
   std::optional<ScrollControllerLease> lease;
   NodeId node;
@@ -56,11 +81,35 @@ struct ScrollWidgetState {
   std::optional<CellPoint> adoptedSurface;
   PointerCapture capture;
   ScrollDrag drag;
+  std::shared_ptr<ScrollRepeatState> repeat;
   std::weak_ptr<ScrollIntentRecord> intent;
   std::array<GraphemeText, 8> glyphs;
+  std::unique_ptr<std::array<GraphemeText, 4>> arrowGlyphs;
   std::unique_ptr<PreparedScrollbarSkin> scrollbarSkin;
   std::uint64_t skinRevision{};
 };
+
+inline bool scrollArrows(const ScrollWidgetState &state, ScrollTrack channel) noexcept {
+  return (state.isArea ? state.area.arrows : state.bar.arrows) && channel.length >= 3;
+}
+
+inline ScrollTrack scrollThumbTrack(const ScrollWidgetState &state, ScrollTrack channel, ScrollAxis axis) noexcept {
+  if (scrollArrows(state, channel)) {
+    channel.length -= 2;
+    if (axis == ScrollAxis::HORIZONTAL) {
+      ++channel.origin.x;
+    } else {
+      ++channel.origin.y;
+    }
+  }
+  return channel;
+}
+
+inline void cancelScrollRepeat(ScrollWidgetState &state) noexcept {
+  if (state.repeat) {
+    state.repeat->cancel();
+  }
+}
 
 inline const FrameOptions *scrollFrameOptions(const ScrollWidgetState &state) noexcept {
   return state.advancedFrame ? &state.advancedFrame->options : state.area.frame ? &state.legacyFrameOptions : nullptr;
@@ -127,6 +176,8 @@ std::expected<void, TreeError> validateScrollWidget(const ScrollWidgetState &sta
 std::expected<bool, TreeError> initializeScrollWidget(WidgetTree &tree, Node<Widget> node, bool writer);
 std::expected<void, TreeError> releaseScrollInitialization(WidgetTree &tree, Node<Widget> node);
 std::expected<ActionBinding, TreeError> bindScrollOwner(EventRouter &router, WidgetTree &tree, Node<Widget> node);
+std::expected<void, TreeError> configureScrollRepeat(WidgetTree &tree, Node<Widget> node, ScrollRepeatServices services,
+                                                     const ActionBinding &binding);
 enum class ScrollPublication {
   POSITION,
   PREPARATION

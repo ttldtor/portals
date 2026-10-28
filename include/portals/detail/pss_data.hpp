@@ -47,6 +47,11 @@ enum class PssProperty {
   SCROLLBAR_ENDS_BOLD,         ///< Scrollbar ends bold.
   SCROLLBAR_ENDS_ITALIC,       ///< Scrollbar ends italic.
   SCROLLBAR_ENDS_UNDERLINE,    ///< Scrollbar ends underline.
+  SCROLLBAR_ARROWS_FOREGROUND, ///< Scrollbar arrows foreground.
+  SCROLLBAR_ARROWS_BACKGROUND, ///< Scrollbar arrows background.
+  SCROLLBAR_ARROWS_BOLD,       ///< Scrollbar arrows bold.
+  SCROLLBAR_ARROWS_ITALIC,     ///< Scrollbar arrows italic.
+  SCROLLBAR_ARROWS_UNDERLINE,  ///< Scrollbar arrows underline.
   SCROLLBAR_CORNER_FOREGROUND, ///< Scrollbar corner foreground.
   SCROLLBAR_CORNER_BACKGROUND, ///< Scrollbar corner background.
   SCROLLBAR_CORNER_BOLD,       ///< Scrollbar corner bold.
@@ -55,7 +60,7 @@ enum class PssProperty {
 };
 
 /** @brief Number of supported PSS v0 properties. */
-inline constexpr std::size_t PSS_PROPERTY_COUNT = 41;
+inline constexpr std::size_t PSS_PROPERTY_COUNT = 46;
 /** @brief Marker for an absent effective declaration occurrence. */
 inline constexpr std::size_t NO_PSS_DECLARATION = std::numeric_limits<std::size_t>::max();
 /** @brief Maximum owned ASCII bytes retained in an error subject. */

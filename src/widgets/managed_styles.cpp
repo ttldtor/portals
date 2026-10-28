@@ -166,6 +166,8 @@ std::expected<void, PssError> validateStyleDocument(const PssDocument &document)
                          declaration.property == PssProperty::SCROLLBAR_THUMB_BACKGROUND ||
                          declaration.property == PssProperty::SCROLLBAR_ENDS_FOREGROUND ||
                          declaration.property == PssProperty::SCROLLBAR_ENDS_BACKGROUND ||
+                         declaration.property == PssProperty::SCROLLBAR_ARROWS_FOREGROUND ||
+                         declaration.property == PssProperty::SCROLLBAR_ARROWS_BACKGROUND ||
                          declaration.property == PssProperty::SCROLLBAR_CORNER_FOREGROUND ||
                          declaration.property == PssProperty::SCROLLBAR_CORNER_BACKGROUND;
       const bool width = declaration.property == PssProperty::MIN_WIDTH;

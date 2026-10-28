@@ -21,10 +21,12 @@ enum class ScrollbarPattern {
  * Every nonempty source must be exactly one printable one-cell grapheme under the receiving WidthPolicy.
  */
 struct ScrollbarAxisGlyphs {
-  std::optional<std::string> track{}; ///< Track override; an empty source is invalid.
-  std::optional<std::string> thumb{}; ///< Thumb override; an empty source is invalid.
-  std::optional<std::string> start{}; ///< Leading decoration; empty suppresses that end.
-  std::optional<std::string> end{};   ///< Trailing decoration; empty suppresses that end.
+  std::optional<std::string> track{};    ///< Track override; an empty source is invalid.
+  std::optional<std::string> thumb{};    ///< Thumb override; an empty source is invalid.
+  std::optional<std::string> start{};    ///< Leading decoration; empty suppresses that end.
+  std::optional<std::string> end{};      ///< Trailing decoration; empty suppresses that end.
+  std::optional<std::string> backward{}; ///< Functional decrement button; empty is invalid.
+  std::optional<std::string> forward{};  ///< Functional increment button; empty is invalid.
 
   /** @brief Keep checked-library owning transfers fallible. */
   ~ScrollbarAxisGlyphs() = default;

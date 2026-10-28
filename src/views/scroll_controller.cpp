@@ -9,7 +9,8 @@ namespace portals {
 namespace {
 template <class Options> bool validInputs(const Options &options) noexcept {
   return options.wheelStep > 0 && options.wheelStep <= std::numeric_limits<double>::max() && options.keyStep != 0 &&
-         options.minimumThumb > 0 && options.maxPaintCells != 0 &&
+         options.minimumThumb > 0 && options.maxPaintCells != 0 && options.arrowDelay != 0 &&
+         options.arrowRepeat != 0 &&
          (options.glyphs == PrimitiveGlyphs::UNICODE || options.glyphs == PrimitiveGlyphs::ASCII);
 }
 

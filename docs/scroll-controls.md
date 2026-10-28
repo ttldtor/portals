@@ -8,7 +8,7 @@ clips and positions the content, prepares layout, and reveals newly focused
 controls. This complete application has eight buttons inside a rounded frame titled Sections. The frame is 28 columns
 wide and six rows high, leaving at most four content rows; the scrollbar uses
 the frame edge.
-Use the wheel, arrows, Page Up/Down, Home/End, or drag a thumb. Exit and F10 close
+Use the wheel, keyboard arrows, the enabled scrollbar buttons, Page Up/Down, Home/End, or drag a thumb. Exit and F10 close
 through the standard runner and restore the terminal.
 
 [Complete source](examples/guide_scroll_controls.cpp):
@@ -68,6 +68,59 @@ not supply the area’s own frame. Missing frame/invalid options return
 `TreeError::INVALID_ARGUMENT`. `readOnly` disables user scrolling while keeping
 focus reveal and checked programmatic commands available. Nested ordinary areas
 use the same tree clipping and managed preparation; each owns its own content root.
+
+## Add functional arrow buttons
+
+Call `.arrows()` or append `| ui::arrows()` to a native `ScrollArea` or `ScrollBar`.
+The default is `false`; `.arrows(false)` overrides an enabled context default.
+Each arrow press moves by `keyStep`. Managed scenes supply hold timing and cleanup
+automatically: the first repeat follows after 350 milliseconds, then one step every
+60 milliseconds. A late dispatch takes one step rather than catching up missed ticks.
+Read-only controls reject arrow input while checked programmatic commands remain available.
+
+![Native terminal recording of held scrollbar arrow buttons](images/scroll-arrows.gif)
+[Static PNG frame](images/scroll-arrows.png)
+
+This native MSVC Debug recording sends scripted SGR mouse press/release events:
+a held DOWN button scrolls forward and held UP returns. Captions identify the
+injected events. It does not qualify delivery from a physical host mouse.
+
+Each channel of at least three cells reserves its first and last cells for arrows.
+The thumb and its drag travel use the remaining cells. Frame corners and the shared
+bar intersection stay outside the channel. A shorter channel collapses the buttons
+without increasing the control's minimum size or changing its viewport and range.
+Release, pointer motion away from the pressed button, capture loss, hiding, disabling,
+removal, or geometry/metrics changes end the hold. Reaching the range boundary
+stops the timer and creates no further offset publications or redraws.
+
+`ScrollAreaOptions` and `ScrollBarOptions` expose constructor-only `arrows`,
+`arrowDelay` and `arrowRepeat`. Both times are positive integral milliseconds;
+zero and deadline overflow return `TreeError::INVALID_ARGUMENT`. The sparse
+settings and loaded scene properties use the same names, for example
+`ScrollBar{arrows=true arrowDelay=400 arrowRepeat=80}`. PSS controls appearance;
+it does not change these behavior options after mounting.
+
+Functional glyphs are separate from decorative `ScrollbarSkin::ends`: use
+`horizontal.backward`, `horizontal.forward`, `vertical.backward` and
+`vertical.forward` in the skin, or prefix those paths with `scrollbar.` in a
+loaded scene. Nonempty custom glyphs must be one printable one-cell grapheme
+under the receiving width policy; an empty arrow glyph is invalid. Defaults use
+Unicode triangles with the existing ASCII fallback. `scrollbar-arrows-foreground`,
+`scrollbar-arrows-background`, `scrollbar-arrows-bold`, `scrollbar-arrows-italic`
+and `scrollbar-arrows-underline` style the buttons independently of the track,
+thumb, decorative ends, corner and frame.
+
+The original low-level `bindScrollArea(router, tree, node)` and
+`bindScrollBar(router, tree, node)` overloads support a single arrow step.
+Their overloads accepting `ScrollRepeatServices{now, onError}` add hold through
+`WidgetTree::at` and the node's existing scheduler scope. Supply the same clock
+used by the tree's scheduler and a typed `TreeError` sink for asynchronous
+admission failures. The tree and any references captured by those callbacks must
+outlive the node, binding and admitted calls. The callbacks are copied; they may
+throw, and an exception is reported through the existing callback-failure boundary.
+The initial press returns timer admission errors without changing the offset.
+A later admission failure stops the hold before calling `onError`.
+Without host capture capabilities, both overloads keep single-click behavior.
 
 ## Compose nested forms {#nested-scroll-areas}
 

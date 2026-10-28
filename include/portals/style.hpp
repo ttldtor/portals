@@ -99,6 +99,7 @@ struct StyleDeclarations {
   StylePaintDeclarations scrollbarThumb{};  ///< Scrollbar thumb overrides.
   StylePaintDeclarations scrollbarEnds{};   ///< Scrollbar ends overrides.
   StylePaintDeclarations scrollbarCorner{}; ///< Scrollbar corner overrides.
+  StylePaintDeclarations scrollbarArrows{}; ///< Functional arrow button overrides.
   /** @param other Owning value to compare.
    * @return Whether all typed fields are equal.
    */

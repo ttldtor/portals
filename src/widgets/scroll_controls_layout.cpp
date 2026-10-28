@@ -62,6 +62,13 @@ std::expected<void, TreeError> arrangeScroll(ScrollWidgetState &state, CellSize 
     }
   }
   // These are derived layout values only. Canonical controller publication belongs to preparation.
+  if (state.arranged && (state.geometry.horizontal.origin != geometry.horizontal.origin ||
+                         state.geometry.horizontal.length != geometry.horizontal.length ||
+                         state.geometry.vertical.origin != geometry.vertical.origin ||
+                         state.geometry.vertical.length != geometry.vertical.length)) {
+    state.capture.disconnect();
+    cancelScrollRepeat(state);
+  }
   state.allocation = allocation;
   state.geometry = geometry;
   state.presentation = *observed;
