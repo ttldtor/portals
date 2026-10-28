@@ -97,6 +97,40 @@ public:
     return std::move(*this).scalarSettings({.chrome = value});
   }
 
+  /** @param value Named base below PSS overrides and literal custom sources.
+   * @return Consuming sized recipe; geometry and colors are unchanged.
+   */
+  Description &&glyphProfile(GlyphProfile value) &&
+    requires std::derived_from<T, SizedWidget>
+  {
+    return std::move(*this).scalarSettings({.glyphProfile = value});
+  }
+
+  /** @param value Compact profile name; unknown names fail before first paint.
+   * @return Consuming sized recipe with owning logical settings.
+   */
+  Description &&glyphProfile(std::string_view value) &&
+    requires std::derived_from<T, SizedWidget>
+  {
+    return std::move(*this).glyphProfile(detail::glyphProfile(value));
+  }
+
+  /** @param value Portable fallback for one-cell admission failures.
+   * @return Consuming sized recipe; selecting NF still asserts host support.
+   */
+  Description &&glyphFallback(GlyphFallback value) &&
+    requires std::derived_from<T, SizedWidget>
+  {
+    return std::move(*this).scalarSettings({.glyphFallback = value});
+  }
+
+  /** @param value Compact unicode/ascii fallback name. @return Consuming checked recipe. */
+  Description &&glyphFallback(std::string_view value) &&
+    requires std::derived_from<T, SizedWidget>
+  {
+    return std::move(*this).glyphFallback(detail::glyphFallback(value));
+  }
+
   /** @param value Border/Gauge/scroll one-cell decoration mode.
    * @return Consuming native primitive recipe; absent settings remain unchanged.
    */
@@ -396,7 +430,9 @@ public:
                                                           .corner = skin.corner,
                                                           .trackPattern = skin.trackPattern,
                                                           .thumbPattern = skin.thumbPattern,
-                                                          .arrowPattern = skin.arrowPattern}});
+                                                          .arrowPattern = skin.arrowPattern},
+                                            .glyphProfile = skin.glyphSelection.profile,
+                                            .glyphFallback = skin.glyphSelection.fallback});
   }
 
   /** @param enabled True creates a missing default one-cell frame; false removes the effective frame.
@@ -1200,7 +1236,7 @@ public:
     return std::move(*this);
   }
 
-  /** @param name none/spaced/square/angle/round; unknown values fail with INVALID_ARGUMENT at mount.
+  /** @param name none/spaced/square/angle/round/profile; unknown values fail with INVALID_ARGUMENT at mount.
    * @return Same consuming recipe as the enum overload.
    */
   Description &&titleDecoration(std::string_view name) &&

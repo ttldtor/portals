@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include "../src/views/scroll_controller_state.hpp"
+#include "../src/widgets/glyph_profiles.hpp"
 #include "../src/widgets/scroll_controls_state.hpp"
 #include <portals/managed.hpp>
 #include <portals/scroll_controls.hpp>
@@ -1669,9 +1670,250 @@ void arrowGlyphPreparation() {
   check(f.paint(f.bar).cells == painted.cells, "failed arrow preparation preserves installed skin");
 }
 
+void namedGlyphProfiles() {
+  constexpr std::array PROFILES{GlyphProfile::UNICODE_GLYPHS, GlyphProfile::ASCII,    GlyphProfile::NF_ROUNDED,
+                                GlyphProfile::NF_CHEVRON,     GlyphProfile::NF_SLASH, GlyphProfile::NF_BACKSLASH};
+
+  for (const auto axis : {ScrollAxis::HORIZONTAL, ScrollAxis::VERTICAL}) {
+    BarFixture fixture({}, axis);
+    StyleEngine engine(*fixture.tree);
+
+    take(engine.bind(fixture.bar, {"ScrollBar", "", {}, true}));
+
+    for (const auto profile : PROFILES) {
+      StyleSheet sheet;
+      sheet.rules.push_back({{}, {.glyphProfile = profile}});
+      take(engine.replace(sheet));
+
+      for (const int length : {1, 2, 5}) {
+        take(setScrollMetrics(*fixture.tree, fixture.bar, {10, 10}));
+        fixture.layout(axis == ScrollAxis::HORIZONTAL ? CellSize{length, 1} : CellSize{1, length});
+        const auto painted = fixture.paint(fixture.bar);
+        const auto cell = [&](int position) {
+          return axis == ScrollAxis::HORIZONTAL ? std::pair{position, 0} : std::pair{0, position};
+        };
+        const auto sources = detail::profileSources({profile});
+        const auto first = axis == ScrollAxis::HORIZONTAL ? 2 : 6;
+
+        check(painted.cells.at(cell(0)) == sources[first + (length == 1 ? 3 : 0)],
+              "named map selects one-cell or leading thumb glyph on each axis");
+
+        if (length >= 2) {
+          check(painted.cells.at(cell(length - 1)) == sources[first + 2], "named map preserves distinct trailing cap");
+        }
+
+        if (length > 2) {
+          check(painted.cells.at(cell(1)) == sources[first + 1], "named map preserves thumb body");
+        }
+      }
+
+      take(fixture.tree->read(fixture.bar, [&](const ScrollBar &widget) {
+        const auto &profiles = detail::ScrollWidgetAccess::state(widget).glyphProfiles;
+
+        check(profiles && profiles->states[0] == profiles->states[5],
+              "equal logical states share owning prepared glyphs");
+      }));
+
+      struct NoAllocationSink : PaintContext {
+        std::size_t cells{};
+
+        std::expected<void, TreeError> submit(std::span<const RenderCommand> commands) override {
+          cells += commands.size();
+
+          return {};
+        }
+      } sink;
+
+      std::expected<void, TreeError> painted;
+
+      take(fixture.tree->frame([&] {
+        allocation_test::fail = true;
+        painted = fixture.tree->paint(fixture.bar, sink);
+        allocation_test::fail = false;
+      }));
+      check(painted && sink.cells == 5, "named profile paint borrows owned resources without allocation");
+    }
+
+    take(engine.replace(take(parsePss("*{glyph-profile:nf-rounded;} *:focused{glyph-profile:nf-chevron;} "
+                                      "*:disabled{glyph-profile:ascii;} *:selected{glyph-profile:nf-slash;} "
+                                      "*:header{glyph-profile:nf-backslash;} *:caret{glyph-profile:unicode;}"))));
+    take(fixture.tree->read(fixture.bar, [&](const ScrollBar &widget) {
+      const auto &profiles = detail::ScrollWidgetAccess::state(widget).glyphProfiles;
+      constexpr std::array EXPECTED{GlyphProfile::NF_ROUNDED, GlyphProfile::NF_CHEVRON,   GlyphProfile::ASCII,
+                                    GlyphProfile::NF_SLASH,   GlyphProfile::NF_BACKSLASH, GlyphProfile::UNICODE_GLYPHS};
+
+      for (std::size_t index = 0; index < EXPECTED.size(); ++index) {
+        check(profiles->states[index]->scrollSelection.profile == EXPECTED[index],
+              "every logical state owns the corresponding prepared profile");
+      }
+    }));
+
+    for (int state = 0; state < 3; ++state) {
+      take(fixture.tree->setEnabled(fixture.bar, state != 2));
+      take(syncScrollControl(*fixture.tree, fixture.bar, state == 1 ? Node<Widget>(fixture.bar) : Node<Widget>{}));
+      const auto cell = std::pair{0, 0};
+      const auto profile = state == 0   ? GlyphProfile::NF_ROUNDED
+                           : state == 1 ? GlyphProfile::NF_CHEVRON
+                                        : GlyphProfile::ASCII;
+      const auto sources = detail::profileSources({profile});
+      check(fixture.paint(fixture.bar).cells.at(cell) == sources[axis == ScrollAxis::HORIZONTAL ? 2 : 6],
+            "normal focused and disabled paints select their own prepared state");
+    }
+
+    take(fixture.tree->setEnabled(fixture.bar, true));
+    take(syncScrollControl(*fixture.tree, fixture.bar, {}));
+    take(engine.replace({}));
+    take(fixture.tree->read(fixture.bar, [&](const ScrollBar &widget) {
+      check(!detail::ScrollWidgetAccess::state(widget).glyphProfiles,
+            "removing the last opt-in releases prepared glyph profiles");
+    }));
+
+    ScrollbarSkin manual;
+    manual.glyphSelection = {GlyphProfile::NF_ROUNDED};
+    take(setScrollbarSkin(*fixture.tree, fixture.bar, manual));
+    take(engine.replace(take(parsePss("*{glyph-profile:ascii;glyph-fallback:ascii;}"))));
+    manual.glyphSelection.profile = GlyphProfile::NF_SLASH;
+    take(setScrollbarSkin(*fixture.tree, fixture.bar, manual));
+    const auto cell = [&](int position) {
+      return axis == ScrollAxis::HORIZONTAL ? std::pair{position, 0} : std::pair{0, position};
+    };
+    check(fixture.paint(fixture.bar).cells.at(cell(0)) == (axis == ScrollAxis::HORIZONTAL ? "[" : "+"),
+          "replacing the manual skin retains the current PSS override");
+    take(engine.replace({}));
+    check(fixture.paint(fixture.bar).cells.at(cell(0)) == (axis == ScrollAxis::HORIZONTAL ? "\uE0BA" : "▄"),
+          "removing PSS returns to the current manual selection");
+    take(engine.replace(take(parsePss("*{scrollbar-thumb-pattern:ascii;}"))));
+    check(fixture.paint(fixture.bar).cells.at(cell(0)) == "#", "explicit part pattern overrides profile segments");
+    auto &literal = axis == ScrollAxis::HORIZONTAL ? manual.horizontal : manual.vertical;
+    literal.thumb = "x";
+    literal.thumbEnd = "Z";
+    take(setScrollbarSkin(*fixture.tree, fixture.bar, manual));
+    check(fixture.paint(fixture.bar).cells.at(cell(0)) == "x" && fixture.paint(fixture.bar).cells.at(cell(4)) == "Z",
+          "literal common thumb and explicit segment remain highest priority");
+    literal.thumbStart = "界";
+    check(error(setScrollbarSkin(*fixture.tree, fixture.bar, manual), TreeError::INVALID_ARGUMENT),
+          "invalid literal sources reject instead of invoking profile fallback");
+    check(fixture.paint(fixture.bar).cells.at(cell(4)) == "Z", "invalid literal retains last valid owning profile");
+  }
+
+  {
+    BarFixture fixture({}, ScrollAxis::HORIZONTAL);
+    StyleEngine engine(*fixture.tree);
+    take(engine.bind(fixture.bar, {"ScrollBar", "", {}, true}));
+    ScrollbarSkin skin;
+    skin.glyphSelection = {GlyphProfile::NF_ROUNDED};
+    take(setScrollbarSkin(*fixture.tree, fixture.bar, skin));
+    static StyleEngine *nestedEngine;
+    nestedEngine = &engine;
+    allocation_test::hook = [] {
+      take(nestedEngine->replace(take(parsePss("*{glyph-profile:ascii;}"))));
+    };
+    allocation_test::beforeHook = 0;
+    skin.glyphSelection.profile = GlyphProfile::NF_SLASH;
+    const auto changed = setScrollbarSkin(*fixture.tree, fixture.bar, skin);
+    allocation_test::hook = nullptr;
+    check(error(changed, TreeError::WOULD_BLOCK), "skin preparation cannot overwrite a newer reentrant style revision");
+    take(fixture.tree->read(fixture.bar, [&](const ScrollBar &widget) {
+      const auto &state = detail::ScrollWidgetAccess::state(widget);
+      check(state.glyphSelection.profile == GlyphProfile::NF_ROUNDED &&
+              state.glyphProfiles->states[0]->scrollSelection.profile == GlyphProfile::ASCII,
+            "reentrant PSS publication and the previous manual profile remain coherent");
+    }));
+  }
+
+  const WidthPolicy wide{AmbiguousWidth::WIDE};
+  const auto fallback = take(detail::profileGlyph("\uE0B6", "◖", "[", wide, GlyphFallback::ASCII));
+  check(fallback.bytes() == "[", "NF admission failure uses explicit ASCII fallback");
+  check(detail::profileSources({GlyphProfile::NF_ROUNDED, GlyphFallback::ASCII})[6] == "+",
+        "explicit ASCII fallback selects portable vertical caps without rotating NF");
+}
+
+thread_local WidgetTree *profileReentryTree{};
+thread_local StyleEngine *profileReentryEngine{};
+thread_local Node<Widget> profileReentryNode;
+thread_local bool profileMutationRejected{};
+thread_local bool profileReentryRejected{};
+
+void profileAllocationReentry() {
+  auto removed = profileReentryTree->remove(profileReentryNode);
+  auto refreshed = profileReentryEngine->refresh();
+  profileMutationRejected = !removed && removed.error() == TreeError::WOULD_BLOCK;
+  profileReentryRejected = !refreshed && refreshed.error().cause == TreeError::WOULD_BLOCK;
+}
+
+struct ProfileDefaultsBar : ScrollBar {
+  using ScrollBar::ScrollBar;
+  bool failProfile{};
+  bool reenterProfile{};
+
+  ComputedStyle styleDefaults() const override {
+    auto result = ScrollBar::styleDefaults();
+
+    if (reenterProfile) {
+      allocation_test::hook = profileAllocationReentry;
+      allocation_test::beforeHook = 0;
+    }
+
+    allocation_test::fail = failProfile;
+
+    return result;
+  }
+};
+
+void glyphProfileTransactions() {
+  TreeFixture fixture;
+  auto first = take(fixture.tree->emplaceChecked<ScrollBar>(fixture.root));
+  auto second = take(fixture.tree->emplaceChecked<ProfileDefaultsBar>(fixture.root));
+  StyleEngine engine(*fixture.tree);
+
+  take(engine.bind(first, {"ScrollBar", "", {}, true}));
+  take(engine.bind(second, {"ScrollBar", "", {}, true}));
+  const auto before = engine.revision();
+  auto sheet = take(parsePss("ScrollBar{glyph-profile:nf-rounded;}"));
+
+  take(fixture.tree->edit(second, [&](ProfileDefaultsBar &bar) {
+    bar.failProfile = true;
+  }));
+  take(fixture.tree->consumeFrameRequest());
+  const auto failed = engine.replace(sheet);
+  allocation_test::fail = false;
+  check(!failed && failed.error().cause == TreeError::NO_MEMORY && engine.revision() == before,
+        "profile preparation NO_MEMORY preserves style revision after another target was staged");
+  check(take(fixture.tree->consumeFrameRequest()) == Invalidation::NONE,
+        "failed all-target profile preparation never invalidates");
+  take(fixture.tree->read(first, [&](const ScrollBar &bar) {
+    check(!detail::ScrollWidgetAccess::state(bar).glyphProfiles && !bar.computedStyle()->glyphs[0].profile,
+          "failed later profile leaves earlier computed style and resources unpublished");
+  }));
+  take(fixture.tree->edit(second, [&](ProfileDefaultsBar &bar) {
+    bar.failProfile = false;
+    bar.reenterProfile = true;
+  }));
+  profileReentryTree = fixture.tree.get();
+  profileReentryEngine = &engine;
+  profileReentryNode = second;
+  take(engine.replace(sheet));
+  allocation_test::hook = nullptr;
+  check(profileMutationRejected && profileReentryRejected,
+        "profile allocator reentry cannot retire a target or reenter the style transaction");
+  take(fixture.tree->edit(second, [&](ProfileDefaultsBar &bar) {
+    bar.reenterProfile = false;
+  }));
+  take(engine.enableLayers());
+  auto layer = take(engine.addLayer(StyleTier::APPLICATION, "profile", take(parsePss("*{glyph-profile:ascii;}"))));
+  take(engine.removeLayer(layer));
+  take(fixture.tree->read(first, [&](const ScrollBar &bar) {
+    check(detail::ScrollWidgetAccess::state(bar).glyphProfiles->states[0]->scrollSelection.profile ==
+            GlyphProfile::NF_ROUNDED,
+          "removing an application layer restores the owning theme glyph resources");
+  }));
+}
+
 } // namespace
 
 int main() {
+  namedGlyphProfiles();
+  glyphProfileTransactions();
   sharedScrollbarPresetLifetime();
   functionalArrowGeometry();
   heldArrows();

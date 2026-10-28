@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include <portals/glyph_profile.hpp>
+
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -66,6 +68,7 @@ struct ScrollbarSkin {
   std::optional<ScrollbarPattern> trackPattern{};      ///< Explicit track source above the umbrella preset.
   std::optional<ScrollbarThumbPattern> thumbPattern{}; ///< Explicit thumb source above the umbrella preset.
   std::optional<ScrollbarArrowPattern> arrowPattern{}; ///< Explicit arrow source; does not enable arrows.
+  GlyphSelection glyphSelection{}; ///< Opt-in manual base below independent patterns and literal glyphs.
 
   /** @brief Keep checked-library owning transfers fallible. */
   ~ScrollbarSkin() = default;

@@ -266,6 +266,22 @@ constexpr ScrollbarPattern scrollbarPattern(std::string_view name) noexcept {
   return static_cast<ScrollbarPattern>(-1);
 }
 
+/** @param name Named portable/NF base. @return Typed map, or an invalid value checked at mount. */
+constexpr GlyphProfile glyphProfile(std::string_view name) noexcept {
+  constexpr std::array<std::string_view, 7> NAMES{"default",    "unicode",  "ascii",       "nf-rounded",
+                                                  "nf-chevron", "nf-slash", "nf-backslash"};
+  const auto found = std::ranges::find(NAMES, name);
+
+  return found == NAMES.end() ? static_cast<GlyphProfile>(-1) : static_cast<GlyphProfile>(found - NAMES.begin());
+}
+
+/** @param name Portable admission fallback. @return Typed value, or an invalid value checked at mount. */
+constexpr GlyphFallback glyphFallback(std::string_view name) noexcept {
+  return name == "unicode" ? GlyphFallback::UNICODE_GLYPHS
+         : name == "ascii" ? GlyphFallback::ASCII
+                           : static_cast<GlyphFallback>(-1);
+}
+
 /** @param name Compact decoration preset. @return Known value, or an invalid value checked at mount. */
 constexpr TitleDecoration titleDecorationPreset(std::string_view name) noexcept {
   if (name == "none")
@@ -278,6 +294,8 @@ constexpr TitleDecoration titleDecorationPreset(std::string_view name) noexcept 
     return TitleDecoration::ANGLE;
   if (name == "round")
     return TitleDecoration::ROUND;
+  if (name == "profile")
+    return TitleDecoration::PROFILE;
 
   return static_cast<TitleDecoration>(-1);
 }

@@ -398,3 +398,95 @@ patch, поэтому пользовательские сегменты нужн
 \image html scrollbar-parts.gif "Галерея частей полосы прокрутки в двух панелях"
 
 \include guide_scrollbar_parts.cpp
+
+## Именованные наборы глифов {#named-glyph-profiles-ru}
+
+![Профили глифов](../images/glyph-profiles.gif)
+
+[PNG](../images/glyph-profiles.png)
+
+Набор глифов выбирается отдельно от темы. Значение по умолчанию сохраняет
+прежний вывод. Короткая запись для области прокрутки:
+
+```cpp
+ui::scrollArea(content())
+  .glyphProfile("nf-rounded")
+  .glyphFallback("unicode")
+  .framed("rounded", "Orders")
+  .titleDecoration("profile")
+  .scrollOnFrame();
+```
+
+Здесь `content()` возвращает обычный рецепт содержимого. Полная
+[галерея профилей](../examples/guide_glyph_profiles.cpp) создаёт сцену и использует
+стандартный runner для ввода и восстановления терминала. Соберите её как
+`guide_glyph_profiles` через [отдельный проект примера](examples.md).
+Золотой текст заголовков задан явным правилом `frame-title-foreground`;
+выбор профиля NF не изменяет цвета.
+
+`.glyphProfile(GlyphProfile::NF_ROUNDED)` и `| ui::glyphProfile("nf-rounded")`
+выбирают один набор. `.glyphFallback(GlyphFallback::ASCII)` и
+`| ui::glyphFallback("ascii")` задают переносимый резерв. Рецепты с размером
+применяют набор к своей необязательной рамке; ScrollArea и ScrollBar также
+используют его в полосах прокрутки. В ручных настройках низкого уровня доступны
+`BorderOptions::glyphSelection` и `ScrollbarSkin::glyphSelection`.
+Они хранят собственные логические значения.
+
+| Имя PSS / компактной записи | C++ `GlyphProfile` | Начало / конец горизонтального ползунка | Одна ячейка |
+| --- | --- | --- | --- |
+| `default` | `DEFAULT` | Текущий ручной набор либо прежние глифы | Прежний глиф |
+| `unicode` | `UNICODE_GLYPHS` | U+25D6 / U+25D7 | U+25CF |
+| `ascii` | `ASCII` | `[` / `]` | `#` |
+| `nf-rounded` | `NF_ROUNDED` | U+E0B6 / U+E0B4 | U+25CF |
+| `nf-chevron` | `NF_CHEVRON` | U+E0B2 / U+E0B0 | U+25C6 |
+| `nf-slash` | `NF_SLASH` | U+E0BA / U+E0BC | U+2588 |
+| `nf-backslash` | `NF_BACKSLASH` | U+E0BE / U+E0B8 | U+2588 |
+
+Карта NF использует символы Powerline из
+[карты Nerd Fonts 3.4](https://github.com/ryanoasis/nerd-fonts/blob/v3.4.0/glyphnames.json).
+В принимающем терминале нужен активный Nerd Font Mono. Portals не устанавливает,
+не распространяет и не определяет шрифты. Отсутствующий символ шрифта может
+отобразиться квадратом даже при допустимой ширине в одну ячейку по WidthPolicy;
+это не ошибка проверки ширины. Если поддержка NF на хосте неизвестна,
+явно выберите Unicode или ASCII.
+
+Колпачки NF горизонтальные. Вертикальный ползунок использует Unicode U+2584
+и U+2580 по краям, U+2588 внутри и в одной ячейке. При явном резерве ASCII
+вертикальные края — `+`, тело и одиночный глиф — `#`. Поворота глифов нет.
+Горизонтальное тело Unicode/NF — U+2588, ASCII — `=`. Длины один, два и больше
+выбирают single, start/end и start/body/end в прежней геометрии ползунка.
+
+PSS использует существующие состояния и слои:
+
+```css
+ScrollArea { glyph-profile: nf-rounded; glyph-fallback: unicode; }
+ScrollArea:disabled { glyph-profile: ascii; }
+```
+
+`StyleDeclarations::glyphProfile` / `glyphFallback`, типизированные
+`style::ct::glyphProfile(...)` / `glyphFallback(...)`, PSS времени компиляции
+и стили загруженной сцены используют те же логические объявления.
+Настройки создания в загруженной сцене записываются как
+`glyphProfile=NF_ROUNDED` и `glyphFallback=UNICODE_GLYPHS`; правило PSS
+над ними имеет приоритет. Имя `UNICODE_GLYPHS` не конфликтует с Windows-макросом `UNICODE`.
+
+Приоритет глифов: ручной профиль, профиль PSS, явные независимые рисунки track/thumb/arrows,
+затем литеральные собственные глифы и сегменты ползунка. Удаление переопределения
+возвращает актуальный ручной набор. Замена ручного skin сохраняет активные
+переопределения PSS. Цвета и атрибуты сегментов разрешаются независимо.
+
+Имеющийся рисунок рамки и собственные линии сохраняются. Набор ASCII подставляет
+ASCII-линии под собственные литеральные источники. Профильные края заголовка
+включаются явно: `.titleDecoration("profile")` или `TitleDecoration::PROFILE`.
+NONE, квадратные, круглые и собственные края сохраняются; собственные края
+по-прежнему имеют приоритет.
+
+Глифы подготавливаются по WidthPolicy получателя. При недопустимой ширине
+используется выбранная Unicode- или ASCII-замена; для Unicode возможен переход
+на ASCII. Недопустимые литеральные источники отклоняют обновление. Ошибка выделения
+памяти сообщает `NO_MEMORY` и сохраняет прежние стили и ресурсы. Перед публикацией
+стилей подготавливаются все затронутые собственные ресурсы. Paint заимствует их
+синхронно без выделения памяти, разбора строк и callbacks. Создание с настройками
+по умолчанию не подготавливает наборы NF.
+
+\include guide_glyph_profiles.cpp

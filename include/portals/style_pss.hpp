@@ -592,8 +592,12 @@ template <class D, class P> consteval bool flatDeclarationTypeMatches() {
     D::KIND == Property::SCROLLBAR_TRACK_PATTERN, ScrollbarPattern,
     std::conditional_t<
       D::KIND == Property::SCROLLBAR_THUMB_PATTERN, ScrollbarThumbPattern,
-      std::conditional_t<D::KIND == Property::SCROLLBAR_ARROW_PATTERN, ScrollbarArrowPattern,
-                         std::conditional_t<COLOR, RgbColor, std::conditional_t<METRIC, std::int32_t, bool>>>>>;
+      std::conditional_t<
+        D::KIND == Property::SCROLLBAR_ARROW_PATTERN, ScrollbarArrowPattern,
+        std::conditional_t<
+          D::KIND == Property::GLYPH_PROFILE, GlyphProfile,
+          std::conditional_t<D::KIND == Property::GLYPH_FALLBACK, GlyphFallback,
+                             std::conditional_t<COLOR, RgbColor, std::conditional_t<METRIC, std::int32_t, bool>>>>>>>;
 
   return std::same_as<Actual, Expected>;
 }
@@ -761,6 +765,10 @@ constexpr bool pssPropertyPresent(PssProperty property, const StyleDeclarations 
     return value.scrollbarThumbPattern.has_value();
   case PssProperty::SCROLLBAR_ARROW_PATTERN:
     return value.scrollbarArrowPattern.has_value();
+  case PssProperty::GLYPH_PROFILE:
+    return value.glyphProfile.has_value();
+  case PssProperty::GLYPH_FALLBACK:
+    return value.glyphFallback.has_value();
   case PssProperty::MIN_WIDTH:
     return value.minWidth.has_value();
   }
@@ -1046,6 +1054,14 @@ constexpr PssValue pssScalar(PssProperty property, const StyleDeclarations &valu
     break;
   case PssProperty::SCROLLBAR_ARROW_PATTERN:
     result.pattern = static_cast<std::int32_t>(*value.scrollbarArrowPattern);
+
+    break;
+  case PssProperty::GLYPH_PROFILE:
+    result.pattern = static_cast<std::int32_t>(*value.glyphProfile);
+
+    break;
+  case PssProperty::GLYPH_FALLBACK:
+    result.pattern = static_cast<std::int32_t>(*value.glyphFallback);
 
     break;
   case PssProperty::MIN_WIDTH:

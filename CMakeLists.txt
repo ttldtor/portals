@@ -88,7 +88,7 @@ target_sources(portals_core PRIVATE src/input_shortcut.cpp)
 target_sources(portals_core PRIVATE src/widgets/ui_style.cpp)
 target_sources(portals_core PRIVATE src/widgets/ui_app.cpp)
 
-target_sources(portals_core PRIVATE src/widgets/primitives.cpp src/widgets/data_presentation.cpp src/widgets/spinner.cpp)
+target_sources(portals_core PRIVATE src/widgets/primitives.cpp src/widgets/glyph_profiles.cpp src/widgets/data_presentation.cpp src/widgets/spinner.cpp)
 
 target_sources(portals_core PRIVATE src/views/scroll_controller.cpp)
 
@@ -433,6 +433,9 @@ if(PORTALS_BUILD_TESTS)
   add_executable(portals_docs_scrollbar_gallery docs/examples/guide_scrollbar_gallery.cpp)
   target_link_libraries(portals_docs_scrollbar_gallery PRIVATE portals::core)
   portals_enable_warnings(portals_docs_scrollbar_gallery)
+  add_executable(portals_docs_glyph_profiles docs/examples/guide_glyph_profiles.cpp)
+  target_link_libraries(portals_docs_glyph_profiles PRIVATE portals::core)
+  portals_enable_warnings(portals_docs_glyph_profiles)
   add_executable(portals_docs_scrollbar_parts docs/examples/guide_scrollbar_parts.cpp)
   target_link_libraries(portals_docs_scrollbar_parts PRIVATE portals::core)
   portals_enable_warnings(portals_docs_scrollbar_parts)

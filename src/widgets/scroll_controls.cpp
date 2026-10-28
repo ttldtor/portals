@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include "glyph_profiles.hpp"
 #include "scroll_controls_state.hpp"
 #include <portals/grid.hpp>
 
@@ -447,7 +448,8 @@ std::expected<void, TreeError> syncScrollControl(WidgetTree &tree, Node<Widget> 
 namespace {
 std::expected<std::unique_ptr<detail::PreparedScrollbarSkin>, TreeError>
 prepareScrollbarSkin(const detail::ScrollWidgetState &state, const ScrollbarSkin &skin) {
-  if (skin.pattern < ScrollbarPattern::LEGACY || skin.pattern > ScrollbarPattern::ASCII || !skin.maxGlyphBytes ||
+  if (!detail::validGlyphSelection(skin.glyphSelection) || skin.pattern < ScrollbarPattern::LEGACY ||
+      skin.pattern > ScrollbarPattern::ASCII || !skin.maxGlyphBytes ||
       (skin.trackPattern &&
        (*skin.trackPattern < ScrollbarPattern::LEGACY || *skin.trackPattern > ScrollbarPattern::ASCII)) ||
       (skin.thumbPattern &&
@@ -473,6 +475,18 @@ prepareScrollbarSkin(const detail::ScrollWidgetState &state, const ScrollbarSkin
   const auto *frame = state.advancedFrame     ? &state.advancedFrame->text
                       : state.legacyFrameText ? &*state.legacyFrameText
                                               : nullptr;
+
+  result->trackPattern = skin.trackPattern;
+  result->thumbPattern = skin.thumbPattern;
+  result->arrowPattern = skin.arrowPattern;
+
+  if (skin.pattern != ScrollbarPattern::LEGACY) {
+    result->trackPattern = skin.trackPattern.value_or(skin.pattern);
+  }
+
+  if (skin.pattern == ScrollbarPattern::ASCII && !skin.thumbPattern) {
+    result->thumbPattern = ScrollbarThumbPattern::ASCII;
+  }
 
   const auto trackPattern = skin.trackPattern.value_or(skin.pattern);
   const auto thumbPattern = skin.thumbPattern.value_or(
@@ -595,6 +609,7 @@ std::expected<void, TreeError> setScrollbarSkin(WidgetTree &tree, Node<Widget> n
 
     auto &state = *detail::ScrollWidgetAccess::state(widget);
     const auto revision = state.skinRevision;
+    const auto styleRevision = widget.styleRevision();
 
     if (state.retired || revision == std::numeric_limits<std::uint64_t>::max()) {
       result = std::unexpected(state.retired ? TreeError::STALE_NODE : TreeError::IDENTITY_EXHAUSTED);
@@ -611,10 +626,19 @@ std::expected<void, TreeError> setScrollbarSkin(WidgetTree &tree, Node<Widget> n
         return;
       }
 
+      auto profiles = detail::GlyphProfileAccess::prepare(widget, widget.computedStyle().value_or(ComputedStyle{}),
+                                                          &skin.glyphSelection);
+
+      if (!profiles) {
+        result = std::unexpected(profiles.error());
+
+        return;
+      }
+
       // Allocator reentrancy can retire this owner or install a newer skin during preparation.
       auto live = tree.inspect(node);
 
-      if (!live || state.retired || state.skinRevision != revision) {
+      if (!live || state.retired || state.skinRevision != revision || widget.styleRevision() != styleRevision) {
         result = std::unexpected(!live ? live.error() : state.retired ? TreeError::STALE_NODE : TreeError::WOULD_BLOCK);
 
         return;
@@ -624,6 +648,8 @@ std::expected<void, TreeError> setScrollbarSkin(WidgetTree &tree, Node<Widget> n
 
       if (result) {
         state.scrollbarSkin = std::move(*prepared);
+        state.glyphSelection = skin.glyphSelection;
+        state.glyphProfiles = std::move(*profiles);
         ++state.skinRevision;
       }
     } catch (const std::bad_alloc &) {

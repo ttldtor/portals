@@ -821,6 +821,10 @@ private:
         settings.chrome = static_cast<ButtonChrome>(index);
       } else if (path == "glyphs") {
         settings.glyphs = static_cast<PrimitiveGlyphs>(index);
+      } else if (path == "glyphProfile") {
+        settings.glyphProfile = static_cast<GlyphProfile>(index);
+      } else if (path == "glyphFallback") {
+        settings.glyphFallback = static_cast<GlyphFallback>(index);
       } else if (path == "frame.glyphs") {
         settings.frame.glyphs = static_cast<PrimitiveGlyphs>(index);
       } else if (path == "frame.pattern") {

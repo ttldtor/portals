@@ -80,10 +80,12 @@ enum class PssProperty {
   SCROLLBAR_THUMB_SINGLE_BOLD,       ///< Thumb single bold.
   SCROLLBAR_THUMB_SINGLE_ITALIC,     ///< Thumb single italic.
   SCROLLBAR_THUMB_SINGLE_UNDERLINE,  ///< Thumb single underline.
+  GLYPH_PROFILE,                     ///< Named base glyph map.
+  GLYPH_FALLBACK,                    ///< Portable admission fallback.
 };
 
 /** @brief Number of supported PSS v0 properties. */
-inline constexpr std::size_t PSS_PROPERTY_COUNT = 69;
+inline constexpr std::size_t PSS_PROPERTY_COUNT = 71;
 /** @brief Marker for an absent effective declaration occurrence. */
 inline constexpr std::size_t NO_PSS_DECLARATION = std::numeric_limits<std::size_t>::max();
 /** @brief Maximum owned ASCII bytes retained in an error subject. */
@@ -141,7 +143,7 @@ struct PssScalarValue {
   RgbColor color;         ///< FOREGROUND or BACKGROUND RGB; otherwise zero.
   bool boolean{};         ///< BOLD, ITALIC, or UNDERLINE flag, including explicit false.
   std::int32_t width{};   ///< MIN_WIDTH nonnegative cell minimum; otherwise zero.
-  std::int32_t pattern{}; ///< Scrollbar preset ordinal; otherwise zero.
+  std::int32_t pattern{}; ///< Glyph map, fallback or scrollbar preset ordinal; otherwise zero.
 
   /** @param other Scalar payload to compare.
    * @return Whether all fixed scalar fields agree.

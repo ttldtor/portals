@@ -394,3 +394,90 @@ to repeat scrolling; F10 exits. Gallery capture:
 \image html scrollbar-parts.gif "Two-pane scrollbar parts gallery"
 
 \include guide_scrollbar_parts.cpp
+
+## Named glyph profiles {#named-glyph-profiles}
+
+![Glyph profiles](images/glyph-profiles.gif)
+
+[PNG](images/glyph-profiles.png)
+
+Choose a map independently of the theme. The default retains existing output.
+For a native scroll area, the short form is:
+
+```cpp
+ui::scrollArea(content())
+  .glyphProfile("nf-rounded")
+  .glyphFallback("unicode")
+  .framed("rounded", "Orders")
+  .titleDecoration("profile")
+  .scrollOnFrame();
+```
+
+Here `content()` is an ordinary sized content recipe. The complete
+[profile gallery](examples/guide_glyph_profiles.cpp) owns the scene and uses the
+standard runner for input and terminal cleanup. Build it as `guide_glyph_profiles`
+with the [standalone example project](examples.md).
+Its gold title text is an explicit `frame-title-foreground` rule; selecting an NF
+profile does not change any color.
+
+`.glyphProfile(GlyphProfile::NF_ROUNDED)` and `| ui::glyphProfile("nf-rounded")`
+select the same map. `.glyphFallback(GlyphFallback::ASCII)` and
+`| ui::glyphFallback("ascii")` select the portable fallback. Sized recipes apply
+the map to their optional frame; ScrollArea and ScrollBar also use it for their
+scrollbars. Low-level manual construction uses `BorderOptions::glyphSelection`
+or `ScrollbarSkin::glyphSelection`. These settings own only logical values.
+
+| PSS / compact name | C++ `GlyphProfile` | Horizontal thumb start / end | Single |
+| --- | --- | --- | --- |
+| `default` | `DEFAULT` | Current manual map, or existing legacy sources | Existing source |
+| `unicode` | `UNICODE_GLYPHS` | U+25D6 / U+25D7 | U+25CF |
+| `ascii` | `ASCII` | `[` / `]` | `#` |
+| `nf-rounded` | `NF_ROUNDED` | U+E0B6 / U+E0B4 | U+25CF |
+| `nf-chevron` | `NF_CHEVRON` | U+E0B2 / U+E0B0 | U+25C6 |
+| `nf-slash` | `NF_SLASH` | U+E0BA / U+E0BC | U+2588 |
+| `nf-backslash` | `NF_BACKSLASH` | U+E0BE / U+E0B8 | U+2588 |
+
+The NF mapping uses the Powerline entries in the
+[Nerd Fonts 3.4 glyph map](https://github.com/ryanoasis/nerd-fonts/blob/v3.4.0/glyphnames.json).
+Use an active Nerd Font Mono in the receiving terminal. Portals does not install,
+distribute or detect fonts. A missing font can display a replacement box even
+when WidthPolicy admits a one-cell glyph; that is not an admission failure.
+Choose Unicode or ASCII explicitly on hosts where NF support is unknown.
+
+NF caps are horizontal. Their vertical thumb uses Unicode inset caps U+2584 and
+U+2580, with U+2588 body/single. Explicit ASCII fallback selects `+` vertical caps
+and `#` body/single. No glyph rotation occurs. Unicode and NF horizontal bodies
+use U+2588; the ASCII horizontal body is `=`. Lengths one, two and longer select
+single, start/end and start/body/end within the same existing thumb geometry.
+
+PSS uses the ordinary state and layer cascade:
+
+```css
+ScrollArea { glyph-profile: nf-rounded; glyph-fallback: unicode; }
+ScrollArea:disabled { glyph-profile: ascii; }
+```
+
+Runtime `StyleDeclarations::glyphProfile` / `glyphFallback`, typed
+`style::ct::glyphProfile(...)` / `glyphFallback(...)`, compile-time PSS and loaded
+scene styles share these logical declarations. Loaded construction settings use
+`glyphProfile=NF_ROUNDED` and `glyphFallback=UNICODE_GLYPHS`; a PSS style
+above them takes priority. `UNICODE_GLYPHS` is safe with the Windows `UNICODE` macro.
+
+Glyph precedence is manual profile, then PSS profile, then explicit independent
+track/thumb/arrow patterns, then literal custom glyphs and thumb segments. Removing
+an override returns to the current manual map. Replacing the manual skin preserves
+active PSS overrides. Colors, including thumb segment attributes, resolve independently.
+
+Existing frame patterns and literal frame lines remain in place. The ASCII map
+supplies ASCII frame lines beneath literal custom sources. Profile title caps require
+`.titleDecoration("profile")` or `TitleDecoration::PROFILE`. Existing NONE, square,
+round and custom title ends are preserved. Custom ends still take priority.
+
+Each glyph is prepared under the receiving WidthPolicy. A failed one-cell admission
+uses the selected Unicode or ASCII replacement; Unicode replacement can fall back
+to ASCII. Invalid literal sources reject the update. Allocation failure reports
+`NO_MEMORY` and preserves the preceding styles and resources. Style updates prepare
+all affected owning resources before publication; paint borrows them synchronously
+without allocation, parsing or callbacks. Default construction does not prepare NF maps.
+
+\include guide_glyph_profiles.cpp

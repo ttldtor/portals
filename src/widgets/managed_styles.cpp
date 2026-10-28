@@ -181,12 +181,18 @@ std::expected<void, PssError> validateStyleDocument(const PssDocument &document)
       const bool width = declaration.property == PssProperty::MIN_WIDTH;
       const bool pattern = declaration.property == PssProperty::SCROLLBAR_TRACK_PATTERN ||
                            declaration.property == PssProperty::SCROLLBAR_THUMB_PATTERN ||
-                           declaration.property == PssProperty::SCROLLBAR_ARROW_PATTERN;
+                           declaration.property == PssProperty::SCROLLBAR_ARROW_PATTERN ||
+                           declaration.property == PssProperty::GLYPH_PROFILE ||
+                           declaration.property == PssProperty::GLYPH_FALLBACK;
 
       if ((!color && value.color != RgbColor{}) || ((color || width || pattern) && value.boolean) ||
           (!width && value.width != 0) || (!pattern && value.pattern != 0) ||
           (pattern &&
-           (value.pattern < 0 || value.pattern > (declaration.property == PssProperty::SCROLLBAR_TRACK_PATTERN
+           (value.pattern < 0 || value.pattern > (declaration.property == PssProperty::GLYPH_PROFILE
+                                                    ? static_cast<std::int32_t>(GlyphProfile::NF_BACKSLASH)
+                                                  : declaration.property == PssProperty::GLYPH_FALLBACK
+                                                    ? static_cast<std::int32_t>(GlyphFallback::ASCII)
+                                                  : declaration.property == PssProperty::SCROLLBAR_TRACK_PATTERN
                                                     ? static_cast<std::int32_t>(ScrollbarPattern::ASCII)
                                                     : static_cast<std::int32_t>(ScrollbarThumbPattern::ASCII))))) {
         return invalid(declaration.location, "Noncanonical PSS scalar fields");

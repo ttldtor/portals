@@ -205,13 +205,17 @@ browser CSS compatibility promises. A semicolon is required after each value.
 | `min-width` | Integer from 0 to INT32_MAX, in cells | Layout and paint |
 | `frame-line-foreground`, `frame-title-foreground`, `frame-ends-foreground` (also `-background`) | `#RRGGBB` | Frame part paint |
 | `frame-line-bold`, `frame-title-bold`, `frame-ends-bold` (also `-italic`, `-underline`) | `true` or `false` | Frame part paint |
+| `glyph-profile` | `default`, `unicode`, `ascii`, `nf-rounded`, `nf-chevron`, `nf-slash`, `nf-backslash` | Named base glyph map |
+| `glyph-fallback` | `unicode`, `ascii` | Explicit one-cell admission fallback |
 
 `min-width` is allowed only without a state predicate: changing focus must not
 silently alter geometry. It sets a hard allocation minimum; zero adds no
 minimum. A clipped viewport does not shrink allocation below the bound. If the
 minimum conflicts with a widget's size policy, typed style staging rejects the
 update and preserves the last valid style. Font size,
-text width policy, border glyph selection and row heights are not PSS v0 tokens.
+text width policy, literal custom glyph sources, frame line patterns and row heights are not PSS v0 tokens.
+Named glyph maps use the properties in the table above; see
+[profiles and fallback](scroll-controls.md#named-glyph-profiles).
 
 States are `normal`, `focused`, `disabled`, `selected`, `header`, and `caret`.
 They select presentation variants, not behavioral flags. Controls use their

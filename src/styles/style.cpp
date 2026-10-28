@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include "../widgets/glyph_profiles.hpp"
 #include "theme_receiver.hpp"
 #include <portals/detail/layout_traversal.hpp>
 #include <portals/detail/pss_data.hpp>
@@ -191,10 +192,14 @@ ComputedStyle resolveRules(const Visit &visit, const StyleTarget &target, Comput
   bool frameParts{};
   bool scrollbarParts{};
   bool thumbSegments{};
+  bool glyphDeclarations{};
   const bool preserveSegments = defaults.scrollbarThumbSegments.has_value();
   std::optional<CascadeRank> rank;
   visit([&](const StyleRule &rule, auto &&makeRank) {
     const auto &values = rule.declarations;
+
+    glyphDeclarations = glyphDeclarations || ((values.glyphProfile || values.glyphFallback) &&
+                                              matches(rule.selector, target, rule.selector.state));
 
     // Reuse the metric pass; selector states here test applicability, not the current paint state.
     frameParts = frameParts || ((hasPaintDeclarations(values.frameLine) || hasPaintDeclarations(values.frameTitle) ||
@@ -223,6 +228,35 @@ ComputedStyle resolveRules(const Visit &visit, const StyleTarget &target, Comput
       defaults.minWidth = *rule.declarations.minWidth;
     }
   });
+
+  if (glyphDeclarations) {
+    constexpr std::array STATES{StyleState::NORMAL,   StyleState::FOCUSED, StyleState::DISABLED,
+                                StyleState::SELECTED, StyleState::HEADER,  StyleState::CARET};
+
+    for (std::size_t index = 0; index < STATES.size(); ++index) {
+      std::optional<CascadeRank> profileRank;
+      std::optional<CascadeRank> fallbackRank;
+
+      visit([&](const StyleRule &rule, auto &&makeRank) {
+        if (!matches(rule.selector, target, STATES[index])) {
+          return;
+        }
+
+        const auto candidate = makeRank();
+        const auto &values = rule.declarations;
+
+        if (values.glyphProfile && (!profileRank || candidate >= *profileRank)) {
+          defaults.glyphs[index].profile = *values.glyphProfile;
+          profileRank = candidate;
+        }
+
+        if (values.glyphFallback && (!fallbackRank || candidate >= *fallbackRank)) {
+          defaults.glyphs[index].fallback = *values.glyphFallback;
+          fallbackRank = candidate;
+        }
+      });
+    }
+  }
 
   if (thumbSegments && !preserveSegments) {
     defaults.scrollbarThumbSegments.emplace();
@@ -276,7 +310,10 @@ std::expected<void, StyleError> validate(const StyleSheet &sheet) {
   for (const auto &rule : sheet.rules) {
     const auto &d = rule.declarations;
 
-    if ((d.scrollbarTrackPattern &&
+    if ((d.glyphProfile && (*d.glyphProfile < GlyphProfile::DEFAULT || *d.glyphProfile > GlyphProfile::NF_BACKSLASH)) ||
+        (d.glyphFallback &&
+         (*d.glyphFallback < GlyphFallback::UNICODE_GLYPHS || *d.glyphFallback > GlyphFallback::ASCII)) ||
+        (d.scrollbarTrackPattern &&
          (*d.scrollbarTrackPattern < ScrollbarPattern::LEGACY || *d.scrollbarTrackPattern > ScrollbarPattern::ASCII)) ||
         (d.scrollbarThumbPattern && (*d.scrollbarThumbPattern < ScrollbarThumbPattern::LEGACY ||
                                      *d.scrollbarThumbPattern > ScrollbarThumbPattern::ASCII)) ||
@@ -1327,7 +1364,11 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
   std::expected<Invalidation, StyleError> result = Invalidation::NONE;
   auto edited = tree_.edit(*root, [&](Widget &) {
     try {
-      std::vector<ComputedStyle> staged(0);
+      struct PreparedStyle {
+        ComputedStyle style;
+        std::shared_ptr<const detail::PreparedGlyphProfiles> glyphs;
+      };
+      std::vector<PreparedStyle> staged(0);
       Invalidation invalidation = Invalidation::NONE;
 
       std::erase_if(bindings, [&](const Binding &binding) {
@@ -1375,7 +1416,15 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
             invalidation = Invalidation::PAINT;
           }
 
-          staged.push_back(next);
+          auto glyphs = detail::GlyphProfileAccess::prepare(**widget, next);
+
+          if (!glyphs) {
+            result = std::unexpected(error(glyphs.error(), "Glyph profile preparation failed"));
+
+            return;
+          }
+
+          staged.push_back({next, std::move(*glyphs)});
         }
       }
 
@@ -1437,7 +1486,8 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
       for (std::size_t index = 0; index < bindings.size(); ++index) {
         auto widget = tree_.access(bindings[index].node.id(), true);
 
-        (*widget)->computedStyle_ = staged[index];
+        detail::GlyphProfileAccess::commit(**widget, std::move(staged[index].glyphs));
+        (*widget)->computedStyle_ = staged[index].style;
         (*widget)->styleRevision_ = revision_ + 1;
       }
 

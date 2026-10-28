@@ -6,6 +6,7 @@
 #include <portals/frame.hpp>
 
 #include <array>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -26,6 +27,7 @@ enum class PrimitiveGlyphs {
 struct BorderOptions {
   PrimitiveGlyphs glyphs{PrimitiveGlyphs::UNICODE}; ///< Owning glyph selection; no font probing.
   std::size_t maxPaintCells{16384};                 ///< Positive cap on allocated perimeter cells, even when clipped.
+  GlyphSelection glyphSelection{}; ///< Opt-in manual base below stylesheet overrides and literal sources.
 };
 
 /** @brief Owning custom source; each glyph must be one printable one-cell grapheme, at most 64 bytes. */
@@ -73,6 +75,9 @@ struct FrameOptions {
 };
 
 namespace detail {
+struct GlyphProfileAccess;
+struct PreparedGlyphProfiles;
+
 /** @brief Construction-time owning frame text retained through each synchronous paint. */
 struct PreparedFrameText {
   std::array<GraphemeText, 6> glyphs; ///< Validated corners, horizontal and vertical one-cell glyphs.
@@ -165,12 +170,14 @@ public:
   std::expected<void, TreeError> preparation() const noexcept;
 
 private:
+  friend struct detail::GlyphProfileAccess;
   friend std::expected<void, TreeError> syncBorder(WidgetTree &, Node<Border>);
   friend std::expected<void, TreeError> syncBorder(WidgetTree &, Node<Border>, Node<Widget>);
   Column layout_;
   FrameOptions options_;
   ControlStyle style_;
   std::optional<detail::PreparedFrameText> text_;
+  std::shared_ptr<const detail::PreparedGlyphProfiles> glyphProfiles_;
   std::optional<TreeError> preparationError_;
   CellRect bounds_;
   bool enabled_{true};

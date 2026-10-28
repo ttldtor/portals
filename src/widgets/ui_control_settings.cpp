@@ -134,6 +134,8 @@ std::expected<OverlayOptions, TreeError> controlOverlayOptions(const ControlSett
 }
 
 BorderOptions controlBorderOptions(const ControlSettings &settings, BorderOptions options) noexcept {
+  applySetting(options.glyphSelection.profile, settings.glyphProfile);
+  applySetting(options.glyphSelection.fallback, settings.glyphFallback);
   applySetting(options.glyphs, settings.glyphs);
   applySetting(options.maxPaintCells, settings.maxPaintCells);
 
@@ -201,6 +203,11 @@ std::expected<ScrollAreaOptions, TreeError> controlScrollAreaOptions(const Contr
 
     applySetting(options.frame->glyphs, settings.frame.glyphs);
     applySetting(options.frame->maxPaintCells, settings.frame.maxPaintCells);
+  }
+
+  if (options.frame) {
+    applySetting(options.frame->glyphSelection.profile, settings.glyphProfile);
+    applySetting(options.frame->glyphSelection.fallback, settings.glyphFallback);
   }
 
   const auto checked = validateScrollOptions(options);
