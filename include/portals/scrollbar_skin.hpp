@@ -13,17 +13,19 @@ namespace portals {
 inline constexpr std::size_t DEFAULT_SCROLLBAR_GLYPH_BYTES = 64;
 /** @brief Opt-in scrollbar glyph presets; legacy calls retain their original appearance. */
 enum class ScrollbarPattern {
-  LEGACY,  ///< Existing shaded track and block thumb.
-  FRAME,   ///< Actual frame lines, or single lines on an unframed control.
-  MINIMAL, ///< Blank track and block thumb.
-  ASCII    ///< Dot track and hash thumb.
+  LEGACY,          ///< Existing shaded track and block thumb.
+  FRAME,           ///< Actual frame lines, or single lines on an unframed control.
+  MINIMAL,         ///< Blank track and block thumb.
+  ASCII,           ///< Dot track and hash thumb.
+  FRACTIONAL_BLOCK ///< Blank track and eighth-cell block placement; explicit leaves keep priority.
 };
 
 /** @brief Independent thumb source; all choices are opt-in. */
 enum class ScrollbarThumbPattern {
-  LEGACY, ///< Existing repeated thumb, including ASCII fallback.
-  BLOCK,  ///< Explicit block with the control width/glyph fallback.
-  ASCII   ///< Hash thumb.
+  LEGACY,          ///< Existing repeated thumb, including ASCII fallback.
+  BLOCK,           ///< Explicit block with the control width/glyph fallback.
+  ASCII,           ///< Hash thumb.
+  FRACTIONAL_BLOCK ///< Eighth-cell block placement; requires a blank track and no custom thumb shapes.
 };
 
 /** @brief Independent functional-arrow source; selecting it never enables buttons. */
@@ -53,9 +55,13 @@ struct ScrollbarAxisGlyphs {
   ~ScrollbarAxisGlyphs() = default;
 };
 
-/** @brief Owning scrollbar skin; no callbacks, borrowed views, timers or geometry changes.
+/** @brief Owning scrollbar skin; no callbacks, borrowed views, timers or layout changes.
  * Ends occupy existing track cells, below the thumb in paint priority; their clicks keep ordinary track behavior.
  * Both axes share part colors/attributes through the existing style resolver.
+ * FRACTIONAL_BLOCK selects a blank track and eighth-cell placement beneath explicit part overrides.
+ * It rejects nonblank tracks, custom thumb shapes/caps, ASCII primitives and non-one-cell coverage glyphs.
+ * Missing resolved scrollbar colors use a local dark surface and normal/focused/disabled ink palette;
+ * explicit part/segment/control colors keep priority. Other presets retain terminal-default colors.
  */
 struct ScrollbarSkin {
   ScrollbarPattern pattern{ScrollbarPattern::LEGACY}; ///< Built-in glyph source beneath sparse overrides.

@@ -193,8 +193,10 @@ std::expected<void, PssError> validateStyleDocument(const PssDocument &document)
                                                   : declaration.property == PssProperty::GLYPH_FALLBACK
                                                     ? static_cast<std::int32_t>(GlyphFallback::ASCII)
                                                   : declaration.property == PssProperty::SCROLLBAR_TRACK_PATTERN
-                                                    ? static_cast<std::int32_t>(ScrollbarPattern::ASCII)
-                                                    : static_cast<std::int32_t>(ScrollbarThumbPattern::ASCII))))) {
+                                                    ? static_cast<std::int32_t>(ScrollbarPattern::FRACTIONAL_BLOCK)
+                                                  : declaration.property == PssProperty::SCROLLBAR_THUMB_PATTERN
+                                                    ? static_cast<std::int32_t>(ScrollbarThumbPattern::FRACTIONAL_BLOCK)
+                                                    : static_cast<std::int32_t>(ScrollbarArrowPattern::ASCII))))) {
         return invalid(declaration.location, "Noncanonical PSS scalar fields");
       }
 

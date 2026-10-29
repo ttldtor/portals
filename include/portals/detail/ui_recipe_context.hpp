@@ -222,6 +222,9 @@ constexpr std::optional<FramePattern> framePattern(std::string_view name) noexce
 
 /** @param name Borrowed compact skin name. @return Preset or invalid value checked at mount. */
 constexpr ScrollbarThumbPattern scrollbarThumbPattern(std::string_view name) noexcept {
+  if (name == "fractional-block") {
+    return ScrollbarThumbPattern::FRACTIONAL_BLOCK;
+  }
   if (name == "legacy") {
     return ScrollbarThumbPattern::LEGACY;
   }
@@ -254,6 +257,9 @@ constexpr ScrollbarArrowPattern scrollbarArrowPattern(std::string_view name) noe
 }
 
 constexpr ScrollbarPattern scrollbarPattern(std::string_view name) noexcept {
+  if (name == "fractional-block") {
+    return ScrollbarPattern::FRACTIONAL_BLOCK;
+  }
   if (name == "legacy")
     return ScrollbarPattern::LEGACY;
   if (name == "frame")

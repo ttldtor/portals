@@ -3,8 +3,10 @@
 #pragma once
 
 #include <algorithm>
+#include <bit>
 #include <cstdint>
 #include <expected>
+#include <limits>
 #include <portals/frame.hpp>
 #include <portals/widget_types.hpp>
 
@@ -125,6 +127,32 @@ constexpr ScrollDivision scrollMultiplyDivide(std::uint64_t a, std::uint64_t b, 
   return result;
 }
 
+// Preserve floor(fraction*units) exactly from binary64, including subnormals.
+constexpr std::uint64_t scrollFractionUnits(double fraction, std::uint64_t units) noexcept {
+  static_assert(std::numeric_limits<double>::is_iec559 && std::numeric_limits<double>::digits == 53);
+  constexpr std::uint32_t MANTISSA_BITS = 52;
+  constexpr std::uint32_t EXPONENT_BIAS = 1023;
+  constexpr std::uint64_t EXPONENT_MASK = 0x7ff;
+  constexpr auto INTEGER_BITS = std::numeric_limits<std::uint64_t>::digits;
+  const auto bits = std::bit_cast<std::uint64_t>(fraction);
+  const auto exponent = static_cast<std::uint32_t>((bits >> MANTISSA_BITS) & EXPONENT_MASK);
+  auto mantissa = bits & ((std::uint64_t{1} << MANTISSA_BITS) - 1);
+  const auto shift = exponent ? MANTISSA_BITS + EXPONENT_BIAS - exponent : MANTISSA_BITS + EXPONENT_BIAS - 1;
+
+  if (exponent != 0) {
+    mantissa |= std::uint64_t{1} << MANTISSA_BITS;
+  }
+
+  const auto divisionShift = std::min(shift, static_cast<std::uint32_t>(INTEGER_BITS - 1));
+  const auto remainingShift = shift - divisionShift;
+
+  if (remainingShift >= INTEGER_BITS) {
+    return 0;
+  }
+
+  return scrollMultiplyDivide(mantissa, units, std::uint64_t{1} << divisionShift).quotient >> remainingShift;
+}
+
 // Position and travel share arbitrary integral units; the logical raster remains exact.
 [[nodiscard]] constexpr ScrollOffset preciseScrollOffsetForThumb(std::uint64_t position, std::uint64_t travel,
                                                                  std::uint64_t maximum) noexcept {
@@ -183,6 +211,49 @@ struct ScrollThumb {
     detail::scrollMultiplyDivide(std::min(offset, range.maximum), static_cast<std::uint64_t>(travel), range.maximum);
 
   return ScrollThumb{static_cast<std::int32_t>(start.quotient), length, travel};
+}
+
+/** @brief Owning thumb interval in eighths of a track cell; no references or invalidation. */
+struct ScrollFractionalThumb {
+  std::int64_t startEighths{};  ///< Inclusive start, relative to the trimmed track.
+  std::int64_t lengthEighths{}; ///< Integral cell length multiplied by eight.
+  std::int64_t travelEighths{}; ///< Exact maximum start, including the endpoint.
+};
+
+/** @brief Map an exact logical position to eighth-cell thumb placement.
+ * @param metrics Owning logical range; every uint64 extent/viewport is supported.
+ * @param offset Exact raster plus finite remainder in [0,1), clamped to the range.
+ * @param trackLength Nonnegative trimmed track length, in cells.
+ * @param minimumThumb Positive minimum thumb length, in cells, capped by the track.
+ * @return Exact quantized interval, or INVALID_ARGUMENT for invalid geometry/remainder.
+ * @note Any thread; constexpr bounded integer work, no allocation or mutation. Integral API is unchanged.
+ */
+[[nodiscard]] constexpr std::expected<ScrollFractionalThumb, TreeError>
+scrollFractionalThumb(ScrollAxisMetrics metrics, ScrollOffset offset, std::int32_t trackLength,
+                      std::int32_t minimumThumb = 1) noexcept {
+  if (!validScrollOffset(offset)) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+  const auto integral = scrollThumb(metrics, offset.raster, trackLength, minimumThumb);
+  if (!integral) {
+    return std::unexpected(integral.error());
+  }
+  constexpr std::uint64_t EIGHTHS_PER_CELL = 8;
+  const auto maximum = scrollRange(metrics).maximum;
+  const auto travel = static_cast<std::uint64_t>(integral->travel) * EIGHTHS_PER_CELL;
+  const auto length = static_cast<std::int64_t>(integral->length) * static_cast<std::int64_t>(EIGHTHS_PER_CELL);
+  if (maximum == 0 || travel == 0) {
+    return ScrollFractionalThumb{0, length, static_cast<std::int64_t>(travel)};
+  }
+  if (offset.raster >= maximum) {
+    return ScrollFractionalThumb{static_cast<std::int64_t>(travel), length, static_cast<std::int64_t>(travel)};
+  }
+  const auto position = detail::scrollMultiplyDivide(offset.raster, travel, maximum);
+  const auto fraction = detail::scrollFractionUnits(offset.fraction, travel);
+  const auto remainder = fraction % maximum;
+  // The discarded fractional part is <1; the saved integral remainder retains every possible carry.
+  const auto start = position.quotient + fraction / maximum + (position.remainder >= maximum - remainder ? 1 : 0);
+  return ScrollFractionalThumb{static_cast<std::int64_t>(start), length, static_cast<std::int64_t>(travel)};
 }
 
 /** @brief Inverse thumb mapping, rounded to nearest integer with ties toward the start.

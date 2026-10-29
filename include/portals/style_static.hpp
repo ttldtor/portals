@@ -562,9 +562,9 @@ template <class R, class P> consteval void validateRule(const R &rule, const P &
       (values.glyphFallback &&
        (*values.glyphFallback < GlyphFallback::UNICODE_GLYPHS || *values.glyphFallback > GlyphFallback::ASCII)) ||
       (values.scrollbarTrackPattern && (*values.scrollbarTrackPattern < ScrollbarPattern::LEGACY ||
-                                        *values.scrollbarTrackPattern > ScrollbarPattern::ASCII)) ||
+                                        *values.scrollbarTrackPattern > ScrollbarPattern::FRACTIONAL_BLOCK)) ||
       (values.scrollbarThumbPattern && (*values.scrollbarThumbPattern < ScrollbarThumbPattern::LEGACY ||
-                                        *values.scrollbarThumbPattern > ScrollbarThumbPattern::ASCII)) ||
+                                        *values.scrollbarThumbPattern > ScrollbarThumbPattern::FRACTIONAL_BLOCK)) ||
       (values.scrollbarArrowPattern && (*values.scrollbarArrowPattern < ScrollbarArrowPattern::LEGACY ||
                                         *values.scrollbarArrowPattern > ScrollbarArrowPattern::ASCII))) {
     staticStyleInvalidScrollbarPattern();

@@ -188,7 +188,7 @@ std::expected<void, TreeError> prepareScrollArea(WidgetTree &tree, Node<ScrollAr
  * @param axis Exact selected axis; invalid values are INVALID_ARGUMENT.
  * @param offset Exact integral/fractional intended position, clamped to the current range.
  * @return Success or checked error. Read-only user policy does not restrict this command.
- * Fraction-only changes do not request a frame; raster changes invalidate tree-wide LAYOUT.
+ * Fraction-only changes invalidate PAINT; raster changes invalidate tree-wide LAYOUT. Equal offsets are idle.
  */
 std::expected<void, TreeError> setScrollOffset(WidgetTree &tree, Node<Widget> node, ScrollAxis axis,
                                                ScrollOffset offset);

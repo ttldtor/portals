@@ -10,6 +10,7 @@
 
 namespace portals::detail {
 struct PreparedGlyphProfiles;
+bool fractionalScrollbar(const struct ScrollWidgetState &state) noexcept;
 
 struct ScrollDrag {
   ScrollAxis axis{ScrollAxis::VERTICAL};
@@ -22,6 +23,7 @@ struct ScrollDrag {
   std::uint64_t grabUnits{};
   std::uint64_t anchorUnits{};
   ScrollOffset anchorOffset{};
+  bool anchored{};
 };
 
 struct PreparedScrollFrame {

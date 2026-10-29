@@ -5,6 +5,8 @@
 #include "frame_text.hpp"
 
 namespace portals::detail {
+struct PreparedScrollbarSkin;
+using FractionalScrollGlyphs = std::array<std::optional<GraphemeText>, 15>;
 // Track H/V, four thumb segments H/V, four functional arrows. Prepared only on opt-in.
 inline constexpr std::size_t PROFILE_HORIZONTAL_THUMB = 2;
 inline constexpr std::size_t PROFILE_VERTICAL_THUMB = 6;
@@ -17,6 +19,7 @@ struct PreparedGlyphState {
   GlyphSelection frameSelection;
   std::unique_ptr<ProfileScrollGlyphs> scrollbar;
   std::unique_ptr<PreparedFrameText> frame;
+  std::shared_ptr<const FractionalScrollGlyphs> fractional;
 };
 
 struct PreparedGlyphProfiles {
@@ -32,7 +35,8 @@ bool validGlyphSelection(GlyphSelection selection) noexcept;
 
 struct GlyphProfileAccess {
   static std::expected<std::shared_ptr<const PreparedGlyphProfiles>, TreeError>
-  prepare(Widget &widget, ComputedStyleView style, const GlyphSelection *manualScroll = nullptr);
+  prepare(Widget &widget, ComputedStyleView style, const GlyphSelection *manualScroll = nullptr,
+          const PreparedScrollbarSkin *manualSkin = nullptr);
   static void commit(Widget &widget, std::shared_ptr<const PreparedGlyphProfiles> prepared) noexcept;
 };
 } // namespace portals::detail

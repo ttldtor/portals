@@ -39,7 +39,7 @@ endif()
 add_test(NAME consumer.form-field-async COMMAND portals_form_field_async_consumer)
 set_tests_properties(consumer.form-field-async PROPERTIES TIMEOUT 30)
 
-foreach(guide IN ITEMS model_find prepared_theme)
+foreach(guide IN ITEMS model_find prepared_theme fractional_scroll)
   add_executable(portals_docs_${guide}_consumer docs/examples/guide_${guide}.cpp)
   target_link_libraries(portals_docs_${guide}_consumer PRIVATE portals::core)
   set_target_properties(portals_docs_${guide}_consumer PROPERTIES CXX_EXTENSIONS OFF)
