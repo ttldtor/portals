@@ -12,7 +12,6 @@
 #include <map>
 #include <optional>
 #include <tuple>
-#include <unordered_map>
 
 namespace portals {
 namespace {
@@ -39,7 +38,9 @@ StyleError error(TreeError cause, std::string_view message) {
   return {cause, 1, 1, message};
 }
 
-template <class T> using StyleBlockIndex = std::unordered_multimap<std::size_t, std::shared_ptr<const T>>;
+// Ordered hash buckets keep allocation failures catchable with MSVC Debug iterator proxies.
+// Lookup is logarithmic in live/staged values, followed by equality checks within a hash bucket.
+template <class T> using StyleBlockIndex = std::multimap<std::size_t, std::shared_ptr<const T>>;
 
 template <class T> void seedStyleBlock(StyleBlockIndex<T> &index, const std::shared_ptr<const T> &value) {
   if (!value) {
@@ -1402,7 +1403,7 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
       };
       struct PreparedTransaction {
         std::vector<PreparedStyle> staged = std::vector<PreparedStyle>(0);
-        std::unordered_multimap<std::size_t, std::shared_ptr<const StyleSnapshot>> snapshots;
+        StyleBlockIndex<StyleSnapshot> snapshots;
         StyleBlockIndex<std::array<FrameAppearance, 6>> frames;
         StyleBlockIndex<std::array<ScrollbarAppearance, 6>> scrollbars;
         StyleBlockIndex<std::array<ScrollbarThumbAppearance, 6>> thumbs;
@@ -1421,7 +1422,6 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
         auto &staged = transaction->staged;
         auto &snapshots = transaction->snapshots;
         staged.reserve(bindings.size());
-        snapshots.reserve(bindings.size());
 
         // This index owns only live/staged values for one transaction; retirement leaves no pool behind.
         const StyleSnapshot *lastSeeded{};

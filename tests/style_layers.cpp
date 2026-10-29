@@ -15,11 +15,13 @@ thread_local bool recoverAfterFailure{};
 thread_local bool failureObserved{};
 thread_local std::size_t rejectedAllocations{};
 thread_local std::size_t allocationsAfterFailure{};
+thread_local std::size_t attempts{};
 thread_local void (*onAllocate)() = nullptr;
 thread_local std::size_t allocationsBeforeHook{};
 } // namespace allocation_test
 
 void *operator new(std::size_t size) {
+  ++allocation_test::attempts;
   if (allocation_test::failureObserved) {
     ++allocation_test::allocationsAfterFailure;
   }
@@ -122,7 +124,14 @@ struct StyleLayerTestAccess {
   static auto computedStage(StyleEngine &engine, std::size_t phase, void (*hook)()) {
     auto bindings = engine.bindings_;
     StyleSheet empty;
-    allocation_test::allocationsBeforeHook = phase;
+    const auto beforeCopy = allocation_test::attempts;
+    {
+      const StyleSheet argumentCopy(empty);
+    }
+    const auto argumentAllocations = allocation_test::attempts - beforeCopy;
+
+    // By-value argument copies precede install's frame guard, including Debug-only empty proxies.
+    allocation_test::allocationsBeforeHook = argumentAllocations + phase;
     allocation_test::onAllocate = hook;
     return engine.install(empty, std::move(bindings));
   }
