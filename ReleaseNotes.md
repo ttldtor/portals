@@ -5,6 +5,8 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+## v0.7.0 (2026-10-29)
+
 ### Added
 
 - Add opt-in Unicode, ASCII and Nerd Fonts rounded, chevron, slash and backslash
