@@ -72,6 +72,11 @@ The native default uses the alternate screen and restores the caller's screen
 on close. An explicit `NativeScreenMode::MAIN_SCREEN` setting leaves the final
 frame on the main screen. Window resizing remains under the terminal host's control.
 
+Advanced native pointer policy is configured only through `ApplicationOptions::nativePointer`.
+AUTO keeps cells unless the host ordering contract is explicitly declared and optional
+probes succeed. See [precise pointer scrolling](scroll-controls.md#precise-pointer-scrolling)
+for the full runnable example, bounded fallback and physical-host limits.
+
 `ui::scene(factory)` is available when building controls requires scene-owned state or
 access to `Application`; `ui::configure(...)` runs work after mounting.
 `scene.onStop(...)` must be registered before preparation. The callback must

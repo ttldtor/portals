@@ -28,6 +28,9 @@ constexpr std::size_t MAX_PARAMETERS = decltype(InputProbeCandidate::values){}.s
 constexpr std::size_t MAX_PARAMETER_DIGITS = std::numeric_limits<std::uint32_t>::digits10 + 1;
 constexpr std::uint32_t DECIMAL_BASE = 10;
 constexpr std::uint32_t PASTE_BEGIN_PARAMETER = 200;
+constexpr std::uint32_t SIZE_REPORT_PARAMETER = 48;
+constexpr std::size_t SIZE_REPORT_PARAMETER_COUNT = 5;
+constexpr std::uint32_t MAX_MODE_REPORT_STATE = 4;
 
 // xterm modifiers encode shift, alt and control in the low three bits.
 constexpr std::uint32_t SHIFT_MASK = 1;
@@ -170,8 +173,13 @@ void InputDecoder::reset() noexcept {
   remaining_ = 0;
   scalar_ = minimum_scalar_ = 0;
   paste_.reset();
+  pointerContext_ = sequencePointerContext_ = {};
   window_ = {};
   pending_.reset();
+}
+
+void InputDecoder::setPointerContext(InputPointerContext context) noexcept {
+  pointerContext_ = context;
 }
 
 std::optional<InputTime> InputDecoder::deadline() const noexcept {
@@ -194,6 +202,47 @@ std::expected<void, InputError> InputDecoder::expectReplies(InputProbeWindow win
 
 InputIssue InputDecoder::issue(InputIssueKind kind) const noexcept {
   return {kind, start_, offset_};
+}
+
+bool InputDecoder::sizeReportCandidate() const noexcept {
+  if (!options_.terminal_reports || state_ != State::CSI || length_ <= SEQUENCE_PREFIX_BYTES) {
+    return false;
+  }
+
+  auto body = std::string_view(sequence_.data() + SEQUENCE_PREFIX_BYTES, length_ - SEQUENCE_PREFIX_BYTES);
+
+  if (static_cast<unsigned char>(body.back()) >= CSI_FINAL_BEGIN) {
+    if (body.back() != 't') {
+      return false;
+    }
+
+    body.remove_suffix(1);
+  }
+
+  std::uint32_t selector{};
+  bool digits{};
+
+  while (!body.empty() && body.front() >= '0' && body.front() <= '9') {
+    const auto digit = static_cast<std::uint32_t>(body.front() - '0');
+
+    if (selector > (std::numeric_limits<std::uint32_t>::max() - digit) / DECIMAL_BASE) {
+      return false;
+    }
+
+    selector = selector * DECIMAL_BASE + digit;
+    digits = true;
+    body.remove_prefix(1);
+  }
+
+  return digits && selector == SIZE_REPORT_PARAMETER;
+}
+
+InputIssue InputDecoder::sequenceIssue(InputIssueKind kind) const noexcept {
+  auto result = issue(kind);
+
+  result.invalidates_pointer_metrics = sizeReportCandidate();
+
+  return result;
 }
 
 void InputDecoder::begin(State state, InputTime now, InputTime duration) noexcept {
@@ -312,11 +361,14 @@ std::optional<InputEvent> InputDecoder::ground(unsigned char value, bool alt, In
   return issue(InputIssueKind::INVALID_UTF8);
 }
 
-std::optional<InputEvent> InputDecoder::control(unsigned char value, InputTime now) {
+std::optional<InputEvent> InputDecoder::control(unsigned char value, InputTime now,
+                                                std::optional<InputProtocolEvent> &protocol) {
   if (value < CONTROL_BYTE_END || value > CSI_FINAL_END) {
+    const auto error = sequenceIssue(InputIssueKind::INVALID_SEQUENCE);
+
     clearSequence();
 
-    return issue(InputIssueKind::INVALID_SEQUENCE);
+    return error;
   }
 
   const auto final = value >= CSI_FINAL_BEGIN;
@@ -330,15 +382,17 @@ std::optional<InputEvent> InputDecoder::control(unsigned char value, InputTime n
   }
 
   if (length_ == options_.max_sequence_bytes) {
+    const auto error = sequenceIssue(InputIssueKind::SEQUENCE_LIMIT);
+
     state_ = final ? State::GROUND : State::DISCARD_CSI;
 
-    return issue(InputIssueKind::SEQUENCE_LIMIT);
+    return error;
   }
 
   sequence_[length_++] = static_cast<char>(value);
 
   if (final) {
-    auto event = sequence(now);
+    auto event = sequence(now, protocol);
 
     if (state_ != State::PASTE) {
       clearSequence();
@@ -350,17 +404,20 @@ std::optional<InputEvent> InputDecoder::control(unsigned char value, InputTime n
   if (value < CSI_PARAMETER_BEGIN) {
     intermediate_ = true;
   } else if (intermediate_) {
+    const auto error = sequenceIssue(InputIssueKind::INVALID_SEQUENCE);
+
     state_ = State::DISCARD_CSI;
 
-    return issue(InputIssueKind::INVALID_SEQUENCE);
+    return error;
   }
 
   return {};
 }
 
 // Parse the bounded numeric grammar before interpreting the final byte. A syntactic
-// reply is only a candidate inside the caller-owned window, never terminal authentication.
-std::optional<InputEvent> InputDecoder::sequence(InputTime now) {
+// probe reply needs the caller-owned window. Opt-in reports are independent owning
+// protocol data; neither form authenticates the terminal.
+std::optional<InputEvent> InputDecoder::sequence(InputTime now, std::optional<InputProtocolEvent> &protocol) {
   const bool ss3 = state_ == State::SS3;
   const char final = sequence_[length_ - 1];
   auto body = std::string_view{sequence_.data() + SEQUENCE_PREFIX_BYTES, length_ - MIN_SEQUENCE_BYTES};
@@ -371,16 +428,28 @@ std::optional<InputEvent> InputDecoder::sequence(InputTime now) {
     body.remove_prefix(1);
   }
 
-  if (intermediate_) {
-    return issue(InputIssueKind::UNKNOWN_SEQUENCE);
+  const bool mode_report =
+    options_.terminal_reports && !ss3 && prefix == '?' && final == 'y' && !body.empty() && body.back() == '$';
+
+  if (mode_report) {
+    body.remove_suffix(1);
+  } else if (intermediate_) {
+    return sequenceIssue(InputIssueKind::UNKNOWN_SEQUENCE);
   }
 
+  const bool size_report = options_.terminal_reports && !ss3 && prefix == 0 && final == 't';
   std::array<std::uint32_t, MAX_PARAMETERS> values{};
   std::size_t count = 0;
 
-  while (!body.empty()) {
-    if (count == options_.max_parameters) {
-      return issue(InputIssueKind::PARAMETER_LIMIT);
+  // Every colon slot, including an empty one, consumes the same bounded parameter
+  // budget as a primary field. Only CSI 48 permits ignored subparameters.
+  bool subparameter = false;
+  std::size_t parameters = 0;
+  bool more = !body.empty();
+
+  while (more) {
+    if (++parameters > options_.max_parameters) {
+      return sequenceIssue(InputIssueKind::PARAMETER_LIMIT);
     }
 
     std::uint32_t number = 0;
@@ -390,30 +459,58 @@ std::optional<InputEvent> InputDecoder::sequence(InputTime now) {
       const auto digit = static_cast<std::uint32_t>(body.front() - '0');
 
       if (++digits > options_.max_digits) {
-        return issue(InputIssueKind::PARAMETER_LIMIT);
+        return sequenceIssue(InputIssueKind::PARAMETER_LIMIT);
       }
 
       if (number > (std::numeric_limits<std::uint32_t>::max() - digit) / DECIMAL_BASE) {
-        return issue(InputIssueKind::NUMERIC_OVERFLOW);
+        return sequenceIssue(InputIssueKind::NUMERIC_OVERFLOW);
       }
 
       number = number * DECIMAL_BASE + digit;
       body.remove_prefix(1);
     }
 
-    if (digits == 0) {
-      return issue(InputIssueKind::INVALID_SEQUENCE);
+    if (digits == 0 && !subparameter) {
+      return sequenceIssue(InputIssueKind::INVALID_SEQUENCE);
     }
 
-    values[count++] = number;
+    if (!subparameter) {
+      values[count++] = number;
+    }
 
-    if (!body.empty()) {
-      if (body.front() != ';' || body.size() == 1) {
-        return issue(InputIssueKind::INVALID_SEQUENCE);
+    more = !body.empty();
+
+    if (more) {
+      const auto separator = body.front();
+      const bool colon = separator == ':' && size_report && count > 0 && values[0] == SIZE_REPORT_PARAMETER;
+
+      if (!colon && (separator != ';' || body.size() == 1)) {
+        return sequenceIssue(InputIssueKind::INVALID_SEQUENCE);
       }
 
+      subparameter = colon;
       body.remove_prefix(1);
     }
+  }
+
+  if (mode_report) {
+    if (count != 2 || values[1] > MAX_MODE_REPORT_STATE) {
+      return sequenceIssue(InputIssueKind::INVALID_SEQUENCE);
+    }
+
+    protocol = InputModeReport{values[0], values[1]};
+
+    return {};
+  }
+
+  if (size_report && count > 0 && values[0] == SIZE_REPORT_PARAMETER) {
+    if (count != SIZE_REPORT_PARAMETER_COUNT || values[1] == 0 || values[2] == 0) {
+      return sequenceIssue(InputIssueKind::INVALID_SEQUENCE);
+    }
+
+    protocol = InputSizeReport{values[1], values[2], values[3], values[4]};
+
+    return {};
   }
 
   const bool in_window = sequence_started_ >= window_.opens_at && now < window_.deadline;
@@ -435,8 +532,9 @@ std::optional<InputEvent> InputDecoder::sequence(InputTime now) {
     constexpr std::uint32_t MAX_ONE_BASED = static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) + 1;
 
     if (count != MOUSE_PARAMETER_COUNT || values[0] > MAX_MOUSE_CODE || values[1] == 0 || values[2] == 0 ||
-        values[1] > MAX_ONE_BASED || values[2] > MAX_ONE_BASED) {
-      return issue(InputIssueKind::INVALID_SEQUENCE);
+        (sequencePointerContext_.mode == InputCoordinateMode::CELL &&
+         (values[1] > MAX_ONE_BASED || values[2] > MAX_ONE_BASED))) {
+      return sequenceIssue(InputIssueKind::INVALID_SEQUENCE);
     }
 
     const auto code = values[0];
@@ -447,7 +545,7 @@ std::optional<InputEvent> InputDecoder::sequence(InputTime now) {
 
     if ((wheel && (motion || final == 'm')) || (!wheel && button == MOUSE_NO_BUTTON && (!motion || final == 'm')) ||
         (motion && final == 'm')) {
-      return issue(InputIssueKind::INVALID_SEQUENCE);
+      return sequenceIssue(InputIssueKind::INVALID_SEQUENCE);
     }
 
     const auto identity = wheel ? static_cast<MouseButton>(static_cast<unsigned>(MouseButton::WHEEL_UP) + button)
@@ -458,12 +556,38 @@ std::optional<InputEvent> InputDecoder::sequence(InputTime now) {
                         : final == 'm' ? MouseAction::RELEASE
                                        : MouseAction::PRESS;
 
+    const auto &context = sequencePointerContext_;
+
+    if (context.mode == InputCoordinateMode::PIXEL) {
+      if (context.columns == 0 || context.rows == 0 || context.text_width_px == 0 || context.text_height_px == 0) {
+        // The owner must cancel capture and restore cell reporting through its bounded transport pump.
+        return {};
+      }
+
+      const auto x = values[1] - 1;
+      const auto y = values[2] - 1;
+      const auto column = static_cast<std::uint64_t>(x) * context.columns / context.text_width_px;
+      const auto row = static_cast<std::uint64_t>(y) * context.rows / context.text_height_px;
+
+      if (column >= MAX_ONE_BASED || row >= MAX_ONE_BASED) {
+        return sequenceIssue(InputIssueKind::INVALID_SEQUENCE);
+      }
+
+      return MouseInputEvent{static_cast<std::int32_t>(column),
+                             static_cast<std::int32_t>(row),
+                             identity,
+                             action,
+                             modifiers((code >> MOUSE_MODIFIER_SHIFT) & MODIFIER_MASK),
+                             InputPointerPrecision{x, y, context.columns, context.rows, context.text_width_px,
+                                                   context.text_height_px, context.generation}};
+    }
+
     return MouseInputEvent{static_cast<std::int32_t>(values[1] - 1), static_cast<std::int32_t>(values[2] - 1), identity,
                            action, modifiers((code >> MOUSE_MODIFIER_SHIFT) & MODIFIER_MASK)};
   }
 
   if (prefix != 0) {
-    return issue(InputIssueKind::UNKNOWN_SEQUENCE);
+    return sequenceIssue(InputIssueKind::UNKNOWN_SEQUENCE);
   }
 
   if (!ss3 && final == '~' && count == 1 && values[0] == PASTE_BEGIN_PARAMETER && options_.bracketed_paste) {
@@ -493,7 +617,7 @@ std::optional<InputEvent> InputDecoder::sequence(InputTime now) {
     return KeyEvent{*key, 0, modifiers(modifier - 1)};
   }
 
-  return issue(InputIssueKind::UNKNOWN_SEQUENCE);
+  return sequenceIssue(InputIssueKind::UNKNOWN_SEQUENCE);
 }
 
 std::optional<InputEvent> InputDecoder::paste(unsigned char value) {
@@ -560,7 +684,8 @@ std::optional<InputEvent> InputDecoder::paste(unsigned char value) {
 
 // consume=false emits an event for the preceding prefix while leaving this byte for
 // the next pull. The caller rolls back its offset, preserving chunk-independent decoding.
-std::optional<InputEvent> InputDecoder::byte(unsigned char value, bool &consume, InputTime now) {
+std::optional<InputEvent> InputDecoder::byte(unsigned char value, bool &consume, InputTime now,
+                                             std::optional<InputProtocolEvent> &protocol) {
   switch (state_) {
   case State::GROUND:
     return ground(value, false, now);
@@ -573,6 +698,7 @@ std::optional<InputEvent> InputDecoder::byte(unsigned char value, bool &consume,
     }
 
     if (value == '[' || value == 'O') {
+      sequencePointerContext_ = pointerContext_;
       state_ = value == '[' ? State::CSI : State::SS3;
       deadline_ = after(sequence_started_, options_.sequence_timeout);
       sequence_[0] = static_cast<char>(ESCAPE_BYTE);
@@ -627,7 +753,7 @@ std::optional<InputEvent> InputDecoder::byte(unsigned char value, bool &consume,
   case State::CSI:
   case State::SS3:
   case State::DISCARD_CSI:
-    return control(value, now);
+    return control(value, now, protocol);
   case State::STRING:
     if ((string_escape_ && value == '\\') || (string_osc_ && value == BELL_BYTE)) {
       clearSequence();
@@ -716,12 +842,18 @@ std::expected<InputStep, InputError> InputDecoder::pull(std::string_view bytes, 
     while (result.consumed < bytes.size() && result.consumed < options_.work_bytes) {
       bool consume = true;
       ++offset_;
-      result.event = byte(static_cast<unsigned char>(bytes[result.consumed]), consume, now);
+      result.event = byte(static_cast<unsigned char>(bytes[result.consumed]), consume, now, result.protocol);
 
       if (consume) {
         ++result.consumed;
       } else {
         --offset_;
+      }
+
+      if (result.protocol) {
+        result.status = InputStatus::PROTOCOL;
+
+        return result;
       }
 
       if (!result.event) {

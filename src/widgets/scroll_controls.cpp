@@ -167,7 +167,7 @@ std::expected<bool, TreeError> initializeScrollWidget(WidgetTree &tree, Node<Wid
 std::expected<void, TreeError> releaseScrollInitialization(WidgetTree &tree, Node<Widget> node) {
   auto edited = tree.edit(node, [&](Widget &widget) {
     if (auto *state = ScrollWidgetAccess::state(widget)) {
-      state->capture.disconnect();
+      detail::cancelScrollDrag(*state);
       cancelScrollRepeat(*state);
       state->lease.reset();
       state->node = {};
@@ -199,7 +199,7 @@ std::expected<ScrollControllerChange, TreeError> commitScroll(WidgetTree &tree, 
     recordScrollIntent(state);
   }
   if (change->metricsChanged) {
-    state.capture.disconnect();
+    detail::cancelScrollDrag(state);
     cancelScrollRepeat(state);
   }
   if (change->metricsChanged || change->rasterChanged) {
@@ -258,7 +258,7 @@ void ScrollArea::unmount() {
   detail::cancelScrollRepeat(*state_);
   state_->retired = true;
   state_->intent.reset();
-  state_->capture.disconnect();
+  detail::cancelScrollDrag(*state_);
   state_->lease.reset();
 }
 
@@ -277,7 +277,7 @@ void ScrollBar::unmount() {
   detail::cancelScrollRepeat(*state_);
   state_->retired = true;
   state_->intent.reset();
-  state_->capture.disconnect();
+  detail::cancelScrollDrag(*state_);
   state_->lease.reset();
 }
 
@@ -321,7 +321,7 @@ std::expected<void, TreeError> setScrollMetrics(WidgetTree &tree, Node<ScrollBar
     }
     auto result = detail::commitScroll(tree, node, state, std::move(*plan), detail::ScrollPublication::PREPARATION);
     if (result && result->metricsChanged) {
-      state.capture.disconnect();
+      detail::cancelScrollDrag(state);
     }
     return result ? std::expected<void, TreeError>{} : std::unexpected(result.error());
   });
@@ -390,14 +390,14 @@ std::expected<void, TreeError> prepareScrollArea(WidgetTree &tree, Node<ScrollAr
                               state.adoptedGeometry->vertical.origin != placement->vertical.origin ||
                               state.adoptedGeometry->vertical.length != placement->vertical.length;
     if (trackChanged) {
-      state.capture.disconnect();
+      detail::cancelScrollDrag(state);
     }
     auto changed = detail::commitScroll(tree, node, state, std::move(*plan), detail::ScrollPublication::PREPARATION);
     if (!changed) {
       return std::unexpected(changed.error());
     }
     if (trackChanged || changed->metricsChanged) {
-      state.capture.disconnect();
+      detail::cancelScrollDrag(state);
     }
     state.adoptedGeometry = *placement;
     state.adoptedSurface = layout.geometry.surface.origin();
@@ -440,6 +440,7 @@ std::expected<void, TreeError> syncScrollControl(WidgetTree &tree, Node<Widget> 
     }
     if (!*eligible || !state->capture.connected()) {
       detail::cancelScrollRepeat(*state);
+      detail::cancelScrollDrag(*state);
     }
   });
   return edited ? result : edited;

@@ -3,7 +3,10 @@
 #include "action_state.hpp"
 #include "log_view_state.hpp"
 #include "scroll_controls_state.hpp"
+#include <algorithm>
+#include <bit>
 #include <limits>
+#include <new>
 
 namespace portals {
 namespace {
@@ -98,12 +101,12 @@ void repeatScroll(const std::shared_ptr<ScrollRepeatState> &repeat) {
     if (!live || !detail::scrollArrows(*state, channel) || button != repeat->surface ||
         metrics.extent != repeat->metrics.extent || metrics.viewport != repeat->metrics.viewport) {
       repeat->cancel();
-      state->capture.disconnect();
+      detail::cancelScrollDrag(*state);
       return;
     }
     if (scrollAtEnd(*plan, repeat->axis, repeat->towardEnd)) {
       repeat->cancel();
-      state->capture.disconnect();
+      detail::cancelScrollDrag(*state);
       return;
     }
     auto stepped = ScrollControllerAccess::step(
@@ -120,7 +123,7 @@ void repeatScroll(const std::shared_ptr<ScrollRepeatState> &repeat) {
     }
     if (end) {
       repeat->cancel();
-      state->capture.disconnect();
+      detail::cancelScrollDrag(*state);
     } else if (repeat->held && !state->retired && state->capture.connected()) {
       result = armScrollRepeat(repeat, state->isArea ? state->area.arrowRepeat : state->bar.arrowRepeat);
     }
@@ -165,7 +168,7 @@ std::expected<EventReply, TreeError> arrowScroll(EventRouter &router, WidgetTree
       auto armed = armScrollRepeat(repeat, state.isArea ? state.area.arrowDelay : state.bar.arrowDelay);
       if (!armed) {
         repeat->cancel();
-        state.capture.disconnect();
+        detail::cancelScrollDrag(state);
         return std::unexpected(armed.error());
       }
       if (!repeat->held || state.retired || !state.lease) {
@@ -178,13 +181,13 @@ std::expected<EventReply, TreeError> arrowScroll(EventRouter &router, WidgetTree
     if (repeat) {
       repeat->cancel();
     }
-    state.capture.disconnect();
+    detail::cancelScrollDrag(state);
     return EventReply::HANDLED;
   }
   auto changed = detail::commitScroll(tree, node, state, std::move(plan));
   if (!changed && repeat) {
     repeat->cancel();
-    state.capture.disconnect();
+    detail::cancelScrollDrag(state);
   }
   return changed ? std::expected<EventReply, TreeError>(EventReply::HANDLED) : std::unexpected(changed.error());
 }
@@ -305,27 +308,155 @@ std::expected<EventReply, TreeError> wheelScroll(WidgetTree &tree, Node<Widget> 
   return moved ? publish(tree, node, state, std::move(*plan)) : std::unexpected(moved.error());
 }
 
+// Pixel*cell-count and cell-origin*pixel-span share exact rational units. Guard
+// every product/addition before using the existing bounded inverse mapper.
+std::optional<std::uint64_t> pointerTrackUnits(const InputPointerPrecision &sample, ScrollAxis axis,
+                                               std::int32_t origin) noexcept {
+  const auto cells = axis == ScrollAxis::HORIZONTAL ? sample.columns : sample.rows;
+  const auto span = axis == ScrollAxis::HORIZONTAL ? sample.text_width_px : sample.text_height_px;
+  const auto pixel = axis == ScrollAxis::HORIZONTAL ? sample.x : sample.y;
+
+  if (cells == 0 || cells > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) || span == 0) {
+    return {};
+  }
+
+  const auto pointer = static_cast<std::uint64_t>(pixel) * cells;
+  const auto magnitude = static_cast<std::uint64_t>(origin < 0 ? -static_cast<std::int64_t>(origin) : origin) * span;
+
+  if (origin >= 0) {
+    return pointer > magnitude ? pointer - magnitude : 0;
+  }
+
+  if (pointer > std::numeric_limits<std::uint64_t>::max() - magnitude) {
+    return {};
+  }
+
+  return pointer + magnitude;
+}
+
+bool samePointerContext(const InputPointerPrecision &left, const InputPointerPrecision &right) noexcept {
+  return left.columns == right.columns && left.rows == right.rows && left.text_width_px == right.text_width_px &&
+         left.text_height_px == right.text_height_px && left.generation == right.generation;
+}
+
+std::uint64_t anchorFractionUnits(double fraction, std::uint64_t travel) noexcept {
+  static_assert(std::numeric_limits<double>::is_iec559 && std::numeric_limits<double>::digits == 53);
+  constexpr std::uint32_t MANTISSA_BITS = 52;
+  constexpr std::uint32_t EXPONENT_BIAS = 1023;
+  constexpr std::uint64_t EXPONENT_MASK = 0x7ff;
+  constexpr auto INTEGER_BITS = std::numeric_limits<std::uint64_t>::digits;
+  const auto bits = std::bit_cast<std::uint64_t>(fraction);
+  const auto exponent = static_cast<std::uint32_t>((bits >> MANTISSA_BITS) & EXPONENT_MASK);
+  auto mantissa = bits & ((std::uint64_t{1} << MANTISSA_BITS) - 1);
+  const auto shift = exponent ? MANTISSA_BITS + EXPONENT_BIAS - exponent : MANTISSA_BITS + EXPONENT_BIAS - 1;
+
+  if (exponent != 0) {
+    mantissa |= std::uint64_t{1} << MANTISSA_BITS;
+  }
+
+  // The owning fraction is in [0,1), so mantissa <= 2^min(shift,63).
+  // Two exact integer divisions preserve floor(fraction*travel), including subnormals.
+  const auto divisionShift = std::min(shift, static_cast<std::uint32_t>(INTEGER_BITS - 1));
+  const auto remainingShift = shift - divisionShift;
+
+  if (remainingShift >= INTEGER_BITS) {
+    return 0;
+  }
+
+  return detail::scrollMultiplyDivide(mantissa, travel, std::uint64_t{1} << divisionShift).quotient >> remainingShift;
+}
+
+ScrollOffset anchoredPreciseOffset(const detail::ScrollDrag &drag, std::uint64_t position,
+                                   std::uint64_t travel) noexcept {
+  if (position == drag.anchorUnits) {
+    return drag.anchorOffset;
+  }
+
+  if (position == 0 || travel == 0) {
+    return {};
+  }
+
+  if (position >= travel) {
+    return {drag.maximum, 0};
+  }
+
+  // Preserve the logical press offset: the displayed thumb start was quantized
+  // to a cell and is not an exact inverse of a nonzero logical position.
+  const bool forward = position >= drag.anchorUnits;
+  const auto delta = forward ? position - drag.anchorUnits : drag.anchorUnits - position;
+  const auto movement = detail::scrollMultiplyDivide(std::min(delta, travel), drag.maximum, travel);
+  const auto anchorUnits = anchorFractionUnits(drag.anchorOffset.fraction, travel);
+  const auto remainder = movement.remainder;
+  auto result = drag.anchorOffset;
+
+  if (forward) {
+    if (movement.quotient > drag.maximum - result.raster) {
+      return {drag.maximum, 0};
+    }
+
+    result.raster += movement.quotient;
+    const bool carry = remainder >= travel - anchorUnits;
+
+    if (carry) {
+      if (result.raster == drag.maximum) {
+        return {drag.maximum, 0};
+      }
+
+      ++result.raster;
+      result.fraction -= static_cast<double>(travel - remainder) / static_cast<double>(travel);
+    } else {
+      result.fraction += static_cast<double>(remainder) / static_cast<double>(travel);
+    }
+
+    if (result.raster >= drag.maximum) {
+      return {drag.maximum, 0};
+    }
+  } else {
+    const bool borrow = remainder > anchorUnits;
+
+    if (movement.quotient > result.raster || (movement.quotient == result.raster && borrow)) {
+      return {};
+    }
+
+    result.raster -= movement.quotient;
+
+    if (borrow) {
+      --result.raster;
+      result.fraction += static_cast<double>(travel - remainder) / static_cast<double>(travel);
+    } else {
+      result.fraction -= static_cast<double>(remainder) / static_cast<double>(travel);
+    }
+  }
+
+  // Floating rounding may reach a neighbouring unit, but cannot change the exact raster.
+  constexpr double MAXIMUM_FRACTION = 0x1.fffffffffffffp-1;
+  result.fraction = std::clamp(result.fraction, 0.0, MAXIMUM_FRACTION);
+
+  return result;
+}
+
 std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTree &tree, Node<Widget> node,
                                                    ScrollWidgetState &state, const MouseInputEvent &mouse) {
   if (mouse.action == MouseAction::RELEASE) {
     detail::cancelScrollRepeat(state);
-    state.capture.disconnect();
-    state.drag = {};
+    detail::cancelScrollDrag(state);
     return EventReply::IGNORED;
   }
   if (mouse.action == MouseAction::MOVE) {
     if (state.repeat && state.repeat->held) {
       if (!state.capture.connected() || state.repeat->surface != CellPoint{mouse.column, mouse.row}) {
         state.repeat->cancel();
-        state.capture.disconnect();
+        detail::cancelScrollDrag(state);
       }
       return EventReply::HANDLED;
     }
-    if (!state.capture.connected()) {
+    if (!state.capture.connected() || !state.drag) {
+      state.drag.reset();
+
       return EventReply::IGNORED;
     }
     if (state.lease->session->writer.expired()) {
-      state.capture.disconnect();
+      detail::cancelScrollDrag(state);
       return EventReply::IGNORED;
     }
     auto current = state.controller->snapshot();
@@ -333,11 +464,12 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
       return std::unexpected(current.error());
     }
     const auto currentMetrics =
-      state.drag.axis == ScrollAxis::HORIZONTAL ? current->horizontal.metrics : current->vertical.metrics;
+      state.drag->axis == ScrollAxis::HORIZONTAL ? current->horizontal.metrics : current->vertical.metrics;
     // Another projection may publish metrics while LAYOUT is still invalid. Offset/revision changes
     // alone are compatible with this anchor; extent or viewport changes are not.
-    if (currentMetrics.extent != state.drag.metrics.extent || currentMetrics.viewport != state.drag.metrics.viewport) {
-      state.capture.disconnect();
+    if (currentMetrics.extent != state.drag->metrics.extent ||
+        currentMetrics.viewport != state.drag->metrics.viewport) {
+      detail::cancelScrollDrag(state);
       return EventReply::IGNORED;
     }
     auto geometry = tree.inspect(node);
@@ -347,34 +479,85 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
     if (!state.lease || state.retired) {
       return std::unexpected(TreeError::STALE_NODE);
     }
+    if (!state.drag || !state.capture.connected()) {
+      return EventReply::IGNORED;
+    }
     if (geometry->geometry.valid) {
       const auto track = detail::scrollThumbTrack(
-        state, state.drag.axis == ScrollAxis::HORIZONTAL ? state.geometry.horizontal : state.geometry.vertical,
-        state.drag.axis);
-      const auto start = state.drag.axis == ScrollAxis::HORIZONTAL
+        state, state.drag->axis == ScrollAxis::HORIZONTAL ? state.geometry.horizontal : state.geometry.vertical,
+        state.drag->axis);
+      const auto start = state.drag->axis == ScrollAxis::HORIZONTAL
                            ? static_cast<std::int64_t>(geometry->geometry.surface.origin().x) + track.origin.x
                            : static_cast<std::int64_t>(geometry->geometry.surface.origin().y) + track.origin.y;
-      const auto metrics = state.drag.axis == ScrollAxis::HORIZONTAL ? state.presentation.horizontal.metrics
-                                                                     : state.presentation.vertical.metrics;
+      const auto metrics = state.drag->axis == ScrollAxis::HORIZONTAL ? state.presentation.horizontal.metrics
+                                                                      : state.presentation.vertical.metrics;
       auto thumb =
         scrollThumb(metrics, 0, track.length, state.isArea ? state.area.minimumThumb : state.bar.minimumThumb);
       if (!thumb) {
         return std::unexpected(thumb.error());
       }
-      if (start != state.drag.surfaceStart || thumb->travel != state.drag.travel ||
-          scrollRange(metrics).maximum != state.drag.maximum) {
-        state.capture.disconnect();
+      if (start != state.drag->surfaceStart || thumb->travel != state.drag->travel ||
+          scrollRange(metrics).maximum != state.drag->maximum) {
+        detail::cancelScrollDrag(state);
         return EventReply::IGNORED;
       }
     }
-    const auto pointer = state.drag.axis == ScrollAxis::HORIZONTAL ? mouse.column : mouse.row;
-    auto offset = scrollOffsetForThumb(static_cast<std::int64_t>(pointer) - state.drag.surfaceStart - state.drag.grab,
-                                       state.drag.travel, state.drag.maximum);
-    auto plan = ScrollControllerAccess::stage(*state.lease);
-    if (!offset || !plan) {
-      return std::unexpected(offset ? plan.error() : offset.error());
+    ScrollOffset intended;
+
+    if (state.drag->precision) {
+      if (!mouse.precision || !samePointerContext(*state.drag->precision, *mouse.precision)) {
+        detail::cancelScrollDrag(state);
+
+        return EventReply::IGNORED;
+      }
+
+      const auto relative = pointerTrackUnits(*mouse.precision, state.drag->axis, state.drag->surfaceStart);
+
+      if (!relative) {
+        detail::cancelScrollDrag(state);
+
+        return EventReply::IGNORED;
+      }
+
+      const auto span =
+        state.drag->axis == ScrollAxis::HORIZONTAL ? mouse.precision->text_width_px : mouse.precision->text_height_px;
+      const auto travel = static_cast<std::uint64_t>(state.drag->travel) * span;
+      const auto position = *relative > state.drag->grabUnits ? *relative - state.drag->grabUnits : 0;
+
+      intended =
+        *relative < state.drag->grabUnits ? ScrollOffset{} : anchoredPreciseOffset(*state.drag, position, travel);
+    } else {
+      if (mouse.precision) {
+        detail::cancelScrollDrag(state);
+
+        return EventReply::IGNORED;
+      }
+
+      const auto pointer = state.drag->axis == ScrollAxis::HORIZONTAL ? mouse.column : mouse.row;
+      const auto offset =
+        scrollOffsetForThumb(static_cast<std::int64_t>(pointer) - state.drag->surfaceStart - state.drag->grab,
+                             state.drag->travel, state.drag->maximum);
+
+      if (!offset) {
+        return std::unexpected(offset.error());
+      }
+
+      intended = {*offset, 0};
     }
-    auto moved = ScrollControllerAccess::offset(*plan, state.drag.axis, {*offset, 0});
+
+    const auto axis = state.drag->axis;
+    auto plan = ScrollControllerAccess::stage(*state.lease);
+
+    if (!plan) {
+      return std::unexpected(plan.error());
+    }
+
+    if (!state.lease || state.retired || !state.capture.connected()) {
+      return EventReply::IGNORED;
+    }
+
+    auto moved = ScrollControllerAccess::offset(*plan, axis, intended);
+
     return moved ? publish(tree, node, state, std::move(*plan)) : std::unexpected(moved.error());
   }
   if (mouse.action != MouseAction::PRESS || mouse.button != MouseButton::LEFT || mouse.modifiers != InputModifiers{}) {
@@ -407,8 +590,6 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
       return EventReply::IGNORED;
     }
   }
-  detail::cancelScrollRepeat(state);
-  state.capture.disconnect();
   auto plan = ScrollControllerAccess::stage(*state.lease);
   if (!plan) {
     return std::unexpected(plan.error());
@@ -418,6 +599,9 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
     axis == ScrollAxis::HORIZONTAL ? plan->horizontal.rasterOffset() : plan->vertical.rasterOffset();
   const auto channelPoint = axis == ScrollAxis::HORIZONTAL ? localX - track.origin.x : localY - track.origin.y;
   if (detail::scrollArrows(state, track) && (channelPoint == 0 || channelPoint == track.length - 1)) {
+    detail::cancelScrollRepeat(state);
+    detail::cancelScrollDrag(state);
+
     return arrowScroll(router, tree, node, state, std::move(*plan), axis, channelPoint != 0, {mouse.column, mouse.row});
   }
   track = detail::scrollThumbTrack(state, track, axis);
@@ -428,6 +612,8 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
   }
   const auto point = axis == ScrollAxis::HORIZONTAL ? localX - track.origin.x : localY - track.origin.y;
   if (point < thumb->start || point - thumb->start >= thumb->length) {
+    detail::cancelScrollRepeat(state);
+    detail::cancelScrollDrag(state);
     auto moved = ScrollControllerAccess::step(
       *plan, axis, pageStep(metrics, state.isArea ? state.area.pageOverlap : state.bar.pageOverlap),
       point >= thumb->start);
@@ -436,6 +622,46 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
   if (thumb->travel == 0) {
     return EventReply::HANDLED;
   }
+  if (state.capture.connected()) {
+    return EventReply::HANDLED;
+  }
+
+  std::unique_ptr<detail::ScrollDrag> proposed;
+
+  try {
+    proposed = std::make_unique<detail::ScrollDrag>();
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(TreeError::NO_MEMORY);
+  }
+
+  auto stillLive = tree.inspect(node);
+
+  if (!stillLive || !state.lease || state.retired) {
+    return std::unexpected(stillLive ? TreeError::STALE_NODE : stillLive.error());
+  }
+
+  const auto start = axis == ScrollAxis::HORIZONTAL
+                       ? static_cast<std::int64_t>(live->geometry.surface.origin().x) + track.origin.x
+                       : static_cast<std::int64_t>(live->geometry.surface.origin().y) + track.origin.y;
+  *proposed = {axis,          static_cast<std::int32_t>(start), static_cast<std::int32_t>(point - thumb->start),
+               thumb->travel, scrollRange(metrics).maximum,     metrics};
+  if (mouse.precision) {
+    const auto relative = pointerTrackUnits(*mouse.precision, axis, proposed->surfaceStart);
+    const auto span = axis == ScrollAxis::HORIZONTAL ? mouse.precision->text_width_px : mouse.precision->text_height_px;
+    const auto anchor = static_cast<std::uint64_t>(thumb->start) * span;
+
+    if (!relative || *relative < anchor) {
+      return EventReply::IGNORED;
+    }
+
+    proposed->precision = mouse.precision;
+    proposed->grabUnits = *relative - anchor;
+    proposed->anchorUnits = anchor;
+    const auto &initial = axis == ScrollAxis::HORIZONTAL ? plan->horizontal : plan->vertical;
+
+    proposed->anchorOffset = {initial.rasterOffset(), initial.fraction()};
+  }
+
   auto capture = router.capturePointer(node);
   if (!capture) {
     // Missing host motion/release capability is an ordinary click-only mode. Other failures stay typed.
@@ -449,11 +675,8 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
     return *eligible && state.lease && !state.retired ? std::expected<EventReply, TreeError>(EventReply::HANDLED)
                                                       : std::unexpected(TreeError::INVALID_ARGUMENT);
   }
-  const auto start = axis == ScrollAxis::HORIZONTAL
-                       ? static_cast<std::int64_t>(live->geometry.surface.origin().x) + track.origin.x
-                       : static_cast<std::int64_t>(live->geometry.surface.origin().y) + track.origin.y;
-  state.drag = {axis,          static_cast<std::int32_t>(start), static_cast<std::int32_t>(point - thumb->start),
-                thumb->travel, scrollRange(metrics).maximum,     metrics};
+  detail::cancelScrollRepeat(state);
+  state.drag = std::move(proposed);
   state.capture = std::move(*capture);
   return EventReply::HANDLED;
 }
@@ -536,7 +759,7 @@ std::expected<ActionBinding, TreeError> bindScroll(EventRouter &router, WidgetTr
     if (state->repeat) {
       state->repeat->binding = cancellation;
     }
-    state->capture.disconnect();
+    detail::cancelScrollDrag(*state);
     if (previous) {
       previous->cancel();
     }
@@ -582,7 +805,7 @@ std::expected<void, TreeError> configureScrollRepeat(WidgetTree &tree, Node<Widg
     if (state->repeat) {
       state->repeat->binding = cancellation;
     }
-    state->capture.disconnect();
+    detail::cancelScrollDrag(*state);
     if (previous) {
       previous->cancel();
     }
@@ -601,7 +824,7 @@ std::expected<EventReply, TreeError> scrollInput(EventRouter &router, WidgetTree
   }
   if (state.isArea ? state.area.readOnly : state.bar.readOnly) {
     cancelScrollRepeat(state);
-    state.capture.disconnect();
+    detail::cancelScrollDrag(state);
     return EventReply::IGNORED;
   }
   if (const auto *mouse = std::get_if<MouseInputEvent>(&event)) {

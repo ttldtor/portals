@@ -253,13 +253,51 @@ enum class MouseAction {
   SCROLL   ///< Wheel movement in the direction given by MouseInputEvent::button.
 };
 
+/** @brief Owning precise pointer sample; pixel coordinates are zero based in the text area. */
+struct InputPointerPrecision {
+  std::uint32_t x{};              ///< Horizontal pixel coordinate.
+  std::uint32_t y{};              ///< Vertical pixel coordinate.
+  std::uint32_t columns{};        ///< Character width used for this sample.
+  std::uint32_t rows{};           ///< Character height used for this sample.
+  std::uint32_t text_width_px{};  ///< Positive text-area pixel width.
+  std::uint32_t text_height_px{}; ///< Positive text-area pixel height.
+  std::uint64_t generation{};     ///< Owning coordinate-context generation.
+  /** @brief Compare the complete sample and its coordinate context.
+   * @param other Independently owned sample.
+   * @return Whether every stored field matches.
+   */
+  bool operator==(const InputPointerPrecision &other) const = default;
+};
+
+/** @brief SGR coordinate interpretation selected only at a proven stream boundary. */
+enum class InputCoordinateMode {
+  CELL, ///< Traditional 1006 character coordinates.
+  PIXEL ///< 1016 pixel coordinates; usable dimensions are required.
+};
+
+/** @brief Owning decoder context; validity changes are ordered by the caller. */
+struct InputPointerContext {
+  InputCoordinateMode mode{InputCoordinateMode::CELL}; ///< Wire coordinate units.
+  std::uint32_t columns{};                             ///< Positive character width, or zero if unavailable.
+  std::uint32_t rows{};                                ///< Positive character height, or zero if unavailable.
+  std::uint32_t text_width_px{};                       ///< Positive text-area pixel width, or zero if unavailable.
+  std::uint32_t text_height_px{};                      ///< Positive text-area pixel height, or zero if unavailable.
+  std::uint64_t generation{};                          ///< Caller-owned generation, independent of probe windows.
+  /** @brief Compare the complete coordinate interpretation.
+   * @param other Independently owned context.
+   * @return Whether all fields match.
+   */
+  bool operator==(const InputPointerContext &other) const = default;
+};
+
 /** @brief Checked zero-based cell coordinates; no viewport clipping is performed. */
 struct MouseInputEvent {
-  std::int32_t column{};      ///< Zero-based column.
-  std::int32_t row{};         ///< Zero-based row.
-  MouseButton button{};       ///< Button or wheel direction.
-  MouseAction action{};       ///< Observed action.
-  InputModifiers modifiers{}; ///< Observed modifiers.
+  std::int32_t column{};                            ///< Zero-based column.
+  std::int32_t row{};                               ///< Zero-based row.
+  MouseButton button{};                             ///< Button or wheel direction.
+  MouseAction action{};                             ///< Observed action.
+  InputModifiers modifiers{};                       ///< Observed modifiers.
+  std::optional<InputPointerPrecision> precision{}; ///< Optional owning 1016 sample; cell fields remain available.
   /** @brief Compare the complete event value.
    * @param other Event or metadata value to compare, without interpreting its payload.
    * @return True when every stored field is equal; false otherwise.
@@ -324,9 +362,10 @@ enum class InputIssueKind {
  * Subsequent discard bytes are accounted by InputStep::consumed, not another issue.
  */
 struct InputIssue {
-  InputIssueKind kind{}; ///< Rejection reason.
-  std::uint64_t begin{}; ///< Inclusive session byte offset.
-  std::uint64_t end{};   ///< Exclusive offset at issue emission.
+  InputIssueKind kind{};              ///< Rejection reason.
+  std::uint64_t begin{};              ///< Inclusive session byte offset.
+  std::uint64_t end{};                ///< Exclusive offset at issue emission.
+  bool invalidates_pointer_metrics{}; ///< Rejected opt-in CSI 48; the owner must cancel/downgrade stale pixel context.
   /** @brief Compare the complete event value.
    * @param other Event or metadata value to compare, without interpreting its payload.
    * @return True when every stored field is equal; false otherwise.
@@ -348,26 +387,55 @@ enum class InputError {
   INVALID_WINDOW   ///< Reply interval is empty/reversed, or the decoder is not at an open, idle boundary.
 };
 
-/** @brief Why a pull stopped; event is delivered before calling again. */
+/** @brief Owning CSI 48 text-area dimensions, in wire order; not terminal authentication. */
+struct InputSizeReport {
+  std::uint32_t rows{};           ///< Positive character height.
+  std::uint32_t columns{};        ///< Positive character width.
+  std::uint32_t text_height_px{}; ///< Text-area pixel height; zero means unavailable.
+  std::uint32_t text_width_px{};  ///< Text-area pixel width; zero means unavailable.
+  /** @brief Compare every reported dimension.
+   * @param other Independently owned report to compare.
+   * @return Whether all dimensions match.
+   */
+  bool operator==(const InputSizeReport &other) const = default;
+};
+
+/** @brief Owning DECRPM reply; the caller validates the expected mode and protocol phase. */
+struct InputModeReport {
+  std::uint32_t mode{};  ///< DEC private mode number, without inferred support.
+  std::uint32_t state{}; ///< Reported state: 0 unknown, 1 set, 2 reset, 3 permanently set, 4 permanently reset.
+  /** @brief Compare mode and reported state.
+   * @param other Independently owned report to compare.
+   * @return Whether both fields match.
+   */
+  bool operator==(const InputModeReport &other) const = default;
+};
+
+/** @brief Terminal protocol data kept separate from user input and single-use probe windows. */
+using InputProtocolEvent = std::variant<InputSizeReport, InputModeReport>;
+
+/** @brief Why a pull stopped; deliver its event or report before calling again. */
 enum class InputStatus {
   EVENT,      ///< One event is ready; deliver it before resubmitting the unconsumed suffix.
-  NEED_INPUT, ///< All supplied bytes were consumed without an event; more input, time or finish() is needed.
-  WORK_LIMIT, ///< Per-call byte budget was reached without an event; resubmit the unconsumed suffix.
+  NEED_INPUT, ///< All supplied bytes were consumed without a result; more input, time or finish() is needed.
+  WORK_LIMIT, ///< Per-call byte budget was reached without a result; resubmit the unconsumed suffix.
   FINISHED,   ///< End-of-stream flushing is complete; this step may still contain the final event.
-  FAILED      ///< This step reports a fatal timeout event; reset is required before decoding can continue.
+  FAILED,     ///< This step reports a fatal timeout event; reset is required before decoding can continue.
+  PROTOCOL    ///< One protocol report is ready; handle it before resubmitting the unconsumed suffix.
 };
 
 /** @brief One bounded pull result; no hidden output queue. */
 struct InputStep {
-  std::size_t consumed{};          ///< Prefix of this call's bytes accepted exactly once.
-  std::optional<InputEvent> event; ///< At most one independent owning event.
-  InputStatus status{};            ///< Stop reason.
+  std::size_t consumed{};                       ///< Prefix of this call's bytes accepted exactly once.
+  std::optional<InputEvent> event;              ///< At most one independent owning event.
+  InputStatus status{};                         ///< Stop reason.
+  std::optional<InputProtocolEvent> protocol{}; ///< Owning report, present only for PROTOCOL; excludes event.
 };
 
 /** @brief Explicit resource and timing policy, independent of terminal capabilities. */
 struct InputOptions {
   std::size_t max_sequence_bytes{64};       ///< CSI/SS3 cap including ESC, introducer and final; 3..64.
-  std::size_t max_parameters{16};           ///< Numeric fields per sequence; 1..16.
+  std::size_t max_parameters{16};           ///< Numeric fields/empty CSI 48 colon slots per sequence; 1..16.
   std::size_t max_digits{10};               ///< Decimal digits per field; 1..10, with checked uint32 arithmetic.
   std::size_t max_paste_bytes{1024 * 1024}; ///< Maximum complete payload; zero permits empty paste.
   std::size_t work_bytes{4096};             ///< Maximum accepted bytes per pull; must be positive.
@@ -376,13 +444,15 @@ struct InputOptions {
   InputTime paste_timeout{30000};           ///< Whole paste interval from begin delimiter; positive.
   bool sgr_mouse{true};                     ///< Decode SGR cell mouse reports.
   bool bracketed_paste{true};               ///< Decode bracketed paste delimiters.
+  bool terminal_reports{false};             ///< Decode CSI 48 and DEC private mode reports outside paste.
+  // CSI 48 requires four primary dimensions; ignored colon slots retain all resource bounds.
 };
 
 /**
  * @brief Bounded streaming decoder for a deliberately small 7-bit VT input profile.
  * @details One executor owns an instance; synchronize any transfer between threads.
  * Independent instances may run concurrently. No callbacks, I/O, shared globals or
- * terminal mode changes occur. Events own their data; input views are borrowed only
+ * terminal mode changes occur. Events and protocol reports own their data; input views are borrowed only
  * during next(). Storage is O(max_paste_bytes) plus fixed scratch and one pending
  * issue. Caller must bound its own retained events. Allocation failures propagate,
  * leaving the decoder failed until reset; no partial paste is delivered.
@@ -411,13 +481,15 @@ public:
   InputDecoder &operator=(InputDecoder &&other) noexcept = default;
 
   /**
-   * @brief Pull at most one event, accepting at most work_bytes from a borrowed view.
+   * @brief Pull at most one event or protocol report, accepting at most work_bytes from a borrowed view.
    * @param bytes Unconsumed input suffix; never retained as a view.
    * @param now Monotonic arrival timestamp; equal values are allowed.
-   * @return Consumed count/event/stop reason, or call error before consuming input.
-   * @note Empty input advances time and drains pending events. Repeat with an empty
+   * @return Consumed count and one owning event or report with its stop reason, or a call error before consuming input.
+   * @note EVENT always contains event; PROTOCOL always contains protocol and no event.
+   * Handle either result before resubmitting the suffix, including at the work limit.
+   * Empty input advances time and drains pending events. Repeat with an empty
    * view until NEED_INPUT/failed to drain. Errors do not consume bytes. No invalidation
-   * of earlier events. Allocation exceptions require reset (discard session suffix).
+   * of earlier events or reports. Allocation exceptions require reset (discard session suffix).
    */
   [[nodiscard]] std::expected<InputStep, InputError> next(std::string_view bytes, InputTime now);
   /** @brief End the stream, flushing at most one pending event per call.
@@ -439,6 +511,11 @@ public:
    * @return Success, or INVALID_WINDOW when the interval or current stream boundary is invalid.
    */
   [[nodiscard]] std::expected<void, InputError> expectReplies(InputProbeWindow window) noexcept;
+  /** @brief Set the owning context for subsequently started CSI sequences, without resetting partial input.
+   * @param context Proven wire units and currently usable dimensions; zero dimensions suppress unsafe pixel samples.
+   * @note A CSI retains its start context. No allocation, callbacks or I/O; earlier results remain independent.
+   */
+  void setPointerContext(InputPointerContext context) noexcept;
   /** @brief Drop pending input/window/time/offset and recover at an explicit new session boundary.
    * Options remain. Frees retained paste; does not invalidate already returned events.
    */
@@ -462,17 +539,21 @@ private:
   }
 
   std::expected<InputStep, InputError> pull(std::string_view bytes, InputTime now, bool ending);
-  std::optional<InputEvent> byte(unsigned char value, bool &consume, InputTime now);
+  std::optional<InputEvent> byte(unsigned char value, bool &consume, InputTime now,
+                                 std::optional<InputProtocolEvent> &protocol);
   std::optional<InputEvent> ground(unsigned char value, bool alt, InputTime now);
-  std::optional<InputEvent> control(unsigned char value, InputTime now);
-  std::optional<InputEvent> sequence(InputTime now);
+  std::optional<InputEvent> control(unsigned char value, InputTime now, std::optional<InputProtocolEvent> &protocol);
+  std::optional<InputEvent> sequence(InputTime now, std::optional<InputProtocolEvent> &protocol);
   std::optional<InputEvent> paste(unsigned char value);
   std::optional<InputEvent> expire(InputTime now);
   InputIssue issue(InputIssueKind kind) const noexcept;
+  InputIssue sequenceIssue(InputIssueKind kind) const noexcept;
+  bool sizeReportCandidate() const noexcept;
   void begin(State state, InputTime now, InputTime duration) noexcept;
   void clearSequence() noexcept;
 
   InputOptions options_;
+  InputPointerContext pointerContext_, sequencePointerContext_;
   State state_{State::GROUND};
   std::optional<InputTime> last_time_;
   InputTime deadline_{};

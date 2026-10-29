@@ -397,3 +397,9 @@ wheel/key/drag и выход через Exit/F10.
 \include compact/main.cpp
 
 </details>
+
+
+Расширенный [пример точного указателя](scroll-controls.md#precise-pointer-scrolling-ru)
+собирается как `guide_precise_scroll` со связью с `portals::lyra`. `--help` не обращается
+к терминалу. `--fifo-host` объявляет FIFO-порядок хоста; AUTO сохраняет обычную
+прокрутку, если дополнительная pixel-поддержка недоступна.

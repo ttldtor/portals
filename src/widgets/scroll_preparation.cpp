@@ -451,7 +451,7 @@ std::expected<ScrollPreparationAdoption, TreeError> adoptScrollAreas(WidgetTree 
                                 state.adoptedGeometry->vertical.origin != placement.vertical.origin ||
                                 state.adoptedGeometry->vertical.length != placement.vertical.length;
       if (trackChanged) {
-        state.capture.disconnect();
+        detail::cancelScrollDrag(state);
         detail::cancelScrollRepeat(state);
       }
       changed =

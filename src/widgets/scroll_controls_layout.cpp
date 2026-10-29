@@ -66,7 +66,7 @@ std::expected<void, TreeError> arrangeScroll(ScrollWidgetState &state, CellSize 
                          state.geometry.horizontal.length != geometry.horizontal.length ||
                          state.geometry.vertical.origin != geometry.vertical.origin ||
                          state.geometry.vertical.length != geometry.vertical.length)) {
-    state.capture.disconnect();
+    detail::cancelScrollDrag(state);
     cancelScrollRepeat(state);
   }
   state.allocation = allocation;

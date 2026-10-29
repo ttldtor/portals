@@ -19,6 +19,82 @@ Link your application to `portals::core`; see [package setup](package.md).
 The [guide examples](examples.md) describe the standalone CMake build. Its
 `guide_scroll_controls` executable opens a native terminal.
 
+
+## Precise pointer scrolling {#precise-pointer-scrolling}
+
+Ordinary `ui::scrollArea(...)` and `ui::scrollBar(...)` code needs no new option.
+`ApplicationOptions::nativePointer` defaults to AUTO with unconfirmed input ordering,
+which keeps ordinary cell mouse reporting. Windows native console records also keep
+the cell backend. Wheel input and keyboard scrolling retain their existing behavior.
+
+On a supported POSIX host, the advanced configuration can declare
+`settings.nativePointer.ordering = NativeInputOrder::FIFO`. This is a host contract:
+complete input packets must precede replies to subsequently processed queries and
+must not interleave with replies. Portals does not infer it from the terminal name,
+environment, or a successful DECRPM. `NativePointerPolicy::OFF` disables the optional
+negotiation. No physical pixel host has yet been qualified; the ordering declaration
+is the caller's responsibility, and simulated PTY tests do not qualify a host.
+
+The [complete advanced example](examples/guide_precise_scroll.cpp) uses the standard
+Lyra adapter and runner. It shows content wider and taller than the viewport, so both
+thumbs can be dragged. Build `guide_precise_scroll` with the
+[standalone examples project](examples.md), linking `portals::lyra`. `--help` returns
+before scene creation or terminal access. The default run uses ordinary fallback;
+`--fifo-host` declares the contract above and lets AUTO attempt precision. F10 or Exit
+closes normally. Exit codes are 0 for help/orderly completion, 1 for runtime failure,
+and 2 for invalid arguments; native modes are restored by the runner.
+
+AUTO requires supported 1016 reporting, 2048 resize notifications, positive character
+dimensions and nonzero text-area pixel dimensions. The optional probe cap is 100 ms,
+further limited to one quarter of the remaining setup budget; ordinary setup keeps
+its reserved time. Missing/unsupported replies and zero pixels keep cell reporting.
+Fresh process-local, non-reused private-mode queries correlate two FIFO boundaries.
+Tracking and encoding states are queried after the first fresh boundary and must
+arrive before the second. All tracking modes must be inactive; the selected tracker
+must be mutable/reset, and the encodings must remain mutable and match the old units.
+A permanent mode, missing fresh state, or a control batch exceeding the output limit
+declines startup precision. An unknown nonce mode that does not reply also declines it. A completed
+write alone does not establish the boundary. Explicitly reduced decoder limits that
+cannot admit native size/barrier reports decline the enhancement without increasing
+those limits. A font change without any report is unobservable; the host must deliver
+the promised resize/size notifications.
+
+
+The advanced FIFO path requires an initial cell context. If initial queries find
+1016 already active, startup returns `INPUT_PROTOCOL` with
+`TerminalProtocolIssue::INITIAL_PIXEL_CONTEXT_UNKNOWN` ("initial pixel context unknown")
+before changing encoding/tracking: retained pixels have no trustworthy original
+metrics. Pre-existing foreign pixel input in the older OFF/legacy startup path is
+outside this guarantee; that path is not a safe workaround for such input.
+
+Each precise mouse event still has cell `column`/`row`. Its optional owning
+`precision` stores zero-based pixel coordinates, the character and text-pixel
+sizes used for that sample, and a generation. Dragging keeps its grab point and
+initial logical offset; both axes use checked rational units before the exact
+logical inverse. Integral offsets above 2^53 and both endpoints remain exact.
+Text still renders on whole cell rows and columns; this changes pointer precision,
+not terminal text rasterization or the configured frame rate.
+
+A native resize or incompatible/font-only metrics change cancels capture and held
+arrow repeat in input order. A font-only update does not require LAYOUT; capture
+retirement can request its ordinary paint. Identical reports do not cancel or request
+another frame. Wire metrics never change the native viewport: a future-size candidate
+is retained for a later matching resize, while historical reports cannot roll layout
+back. Missing usable metrics during pixel input request a bounded, serialized return
+to cell reporting. Keys remain available; ambiguous pointer samples are suppressed
+only during that transition. A rejected oversized/malformed CSI 48 also invalidates the old pixel context.
+A failed transport/barrier deadline is a typed
+`TerminalErrorKind::INPUT_PROTOCOL` failure followed by cleanup.
+
+Mode output and at most one deferred frame share the existing native writer.
+Protocol bytes do not count toward frame-byte completion statistics. No new worker,
+scheduler, or blocking I/O in an input callback is used. Active drag ownership is
+allocated before capture; failed allocation reports `NO_MEMORY` without publishing
+an anchor, and MOVE does not allocate another drag payload.
+
+Specifications: [SGR pixel reporting 1016 and DECRPM](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html),
+[in-band resize 2048 / CSI 48](https://gist.github.com/rockorager/e695fb2924d36b2bcf1fff4a3704bd83).
+
 ## Compare on-frame scrollbar skins
 
 This keyboard-only gallery places the same eight-label content root, 40 cells

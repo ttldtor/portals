@@ -432,3 +432,9 @@ The complete entry point appears in [Customize a final widget](#custom-widget-en
 \include compact/main.cpp
 
 </details>
+
+
+The advanced [precise pointer example](scroll-controls.md#precise-pointer-scrolling)
+builds as `guide_precise_scroll`, linked with `portals::lyra`. `--help` performs no
+terminal I/O. `--fifo-host` declares host FIFO ordering; AUTO still falls back to
+ordinary scrolling when optional pixel support is unavailable.
