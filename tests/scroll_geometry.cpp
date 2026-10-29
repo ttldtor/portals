@@ -26,6 +26,17 @@ static_assert(scrollThumb({100, 10}, 90, 10)->start == 9);
 static_assert(*scrollOffsetForThumb(1, 2, 5) == 2);
 static_assert(*scrollOffsetForThumb(1, 2, MAXIMUM) == MAXIMUM / 2);
 static_assert(*scrollOffsetForThumb(MAXIMUM_CELL, MAXIMUM_CELL, MAXIMUM) == MAXIMUM);
+static_assert(noexcept(detail::preciseScrollOffsetForThumb(1, 2, MAXIMUM)));
+static_assert(detail::preciseScrollOffsetForThumb(1, 2, MAXIMUM).raster == MAXIMUM / 2);
+static_assert(detail::preciseScrollOffsetForThumb(1, 2, MAXIMUM).fraction == 0.5);
+static_assert(detail::preciseScrollOffsetForThumb(MAXIMUM, MAXIMUM, MAXIMUM).raster == MAXIMUM);
+static_assert(detail::preciseScrollOffsetForThumb(MAXIMUM, MAXIMUM, MAXIMUM).fraction == 0);
+static_assert(detail::preciseScrollOffsetForThumb(MAXIMUM - 1, MAXIMUM, MAXIMUM).raster == MAXIMUM - 1);
+static_assert(detail::preciseScrollOffsetForThumb(MAXIMUM - 1, MAXIMUM, 1).raster == 0);
+static_assert(detail::preciseScrollOffsetForThumb(MAXIMUM - 1, MAXIMUM, 1).fraction == 0x1.fffffffffffffp-1);
+static_assert(detail::preciseScrollOffsetForThumb(MAXIMUM, MAXIMUM - 1, MAXIMUM).raster == MAXIMUM);
+static_assert(detail::preciseScrollOffsetForThumb(MAXIMUM, 0, MAXIMUM).raster == 0);
+static_assert(detail::preciseScrollOffsetForThumb(MAXIMUM, MAXIMUM, 0).fraction == 0);
 static_assert(solveScrollLayout({10, 10}, {10, 11})->horizontalBar);
 static_assert(solveScrollLayout({10, 10}, {10, 11})->viewport.width == 9);
 static_assert(solveScrollLayout({10, 10}, {10, 10})->viewport.height == 10);
@@ -74,6 +85,62 @@ std::uint64_t forwardOracle(std::uint64_t offset, std::uint64_t travel, std::uin
   }
 
   return result;
+}
+
+void preciseThumbOffsets() {
+  struct Golden {
+    std::uint64_t position;
+    std::uint64_t travel;
+    std::uint64_t maximum;
+    std::uint64_t raster;
+    double fraction;
+  };
+
+  // Python arbitrary-precision divmod(position * maximum, travel), with Fraction(remainder, travel).
+  // Fractions are rounded to double independently; allow two epsilons for operand conversions.
+  constexpr std::array GOLDEN{
+    Golden{9223372036854775931ULL, 9223372036854776795ULL, MAXIMUM, 18446744073709549887ULL, 0x1.a099fffffffffp-43},
+    Golden{MAXIMUM - 1, MAXIMUM, MAXIMUM - 2, 18446744073709551612ULL, 0x1p-63},
+    Golden{6148914691236517205ULL, MAXIMUM - 17, 9223372036854775809ULL, 3074457345618258605ULL, 0x1.aaaaaaaaaaaabp-1},
+    Golden{9007199254740995ULL, 18014398509481991ULL, MAXIMUM, 9223372036854775295ULL, 0x1.0000000000700p-1},
+    Golden{12345678901234567890ULL, 17345678901234567891ULL, 16123456789012345678ULL, 11475769926820757233ULL,
+           0x1.11f487ecd1e1bp-1},
+  };
+
+  for (const auto &golden : GOLDEN) {
+    const auto result = detail::preciseScrollOffsetForThumb(golden.position, golden.travel, golden.maximum);
+    const auto tolerance = 2 * std::numeric_limits<double>::epsilon() * golden.fraction;
+
+    check(result.raster == golden.raster, "precise inverse preserves the independent wide-product quotient");
+    check(result.fraction >= golden.fraction - tolerance && result.fraction <= golden.fraction + tolerance,
+          "precise inverse agrees with the independent rational remainder");
+    check(validScrollOffset(result), "precise inverse remainder stays normalized");
+  }
+
+  for (const auto maximum : std::array<std::uint64_t, 3>{1, (1ULL << 53) + 1, MAXIMUM}) {
+    for (const auto travel : std::array<std::uint64_t, 3>{1, (1ULL << 63) + 1, MAXIMUM}) {
+      for (const auto position : {std::uint64_t{}, travel, MAXIMUM}) {
+        const auto result = detail::preciseScrollOffsetForThumb(position, travel, maximum);
+
+        check(result.raster == (position == 0 ? 0 : maximum) && result.fraction == 0,
+              "precise inverse endpoints and clamping are exact");
+      }
+
+      const auto zeroMaximum = detail::preciseScrollOffsetForThumb(MAXIMUM, travel, 0);
+      const auto zeroTravel = detail::preciseScrollOffsetForThumb(MAXIMUM, 0, maximum);
+
+      check(zeroMaximum.raster == 0 && zeroMaximum.fraction == 0 && zeroTravel.raster == 0 && zeroTravel.fraction == 0,
+            "precise inverse zero ranges never divide");
+    }
+  }
+
+  const auto rounded = detail::preciseScrollOffsetForThumb(MAXIMUM - 1, MAXIMUM, 1);
+  const auto wideIdentity = detail::preciseScrollOffsetForThumb(MAXIMUM - 1, MAXIMUM, MAXIMUM);
+
+  check(rounded.raster == 0 && rounded.fraction == 0x1.fffffffffffffp-1,
+        "rounded unit remainder is clamped without carrying into the exact raster");
+  check(wideIdentity.raster == MAXIMUM - 1 && wideIdentity.fraction == 0,
+        "wide position and travel retain an exact integral result above 2^53");
 }
 
 void thumbs() {
@@ -400,6 +467,7 @@ void options() {
 
 int main() {
   thumbs();
+  preciseThumbOffsets();
   placement();
   partialFrames();
   options();

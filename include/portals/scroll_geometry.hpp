@@ -124,6 +124,21 @@ constexpr ScrollDivision scrollMultiplyDivide(std::uint64_t a, std::uint64_t b, 
 
   return result;
 }
+
+// Position and travel share arbitrary integral units; the logical raster remains exact.
+[[nodiscard]] constexpr ScrollOffset preciseScrollOffsetForThumb(std::uint64_t position, std::uint64_t travel,
+                                                                 std::uint64_t maximum) noexcept {
+  if (travel == 0 || maximum == 0) {
+    return {};
+  }
+
+  const auto value = scrollMultiplyDivide(std::min(position, travel), maximum, travel);
+  constexpr double MAXIMUM_FRACTION = 0x1.fffffffffffffp-1;
+  const auto fraction = static_cast<double>(value.remainder) / static_cast<double>(travel);
+
+  // Rounded division can reach one; do not carry it into the exact integral quotient.
+  return {value.quotient, std::min(fraction, MAXIMUM_FRACTION)};
+}
 } // namespace detail
 
 /** @brief Owning one-cell-track thumb geometry; values are relative to the track start. */

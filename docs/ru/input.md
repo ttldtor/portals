@@ -206,4 +206,35 @@ EOF закрывает неполное состояние с сообщение
 [Windows VT input](https://learn.microsoft.com/en-us/windows/console/console-virtual-terminal-sequences#input-sequences),
 [UTF-8 Unicode](https://www.unicode.org/versions/latest/core-spec/chapter-3/#G7404).
 
+
+**Упорядоченные protocol reports и контекст указателя**
+
+`InputOptions::terminal_reports` по умолчанию выключен. При включении CSI 48 возвращает
+четыре обязательных размера в `InputSizeReport`; нулевые пиксели остаются корректным
+report с недоступной пиксельной метрикой. Только эта грамматика игнорирует colon
+subparameters, включая пустые поля, в существующих parameter/digit/byte пределах.
+DEC private DECRPM возвращает `mode` и состояние 0..4 в `InputModeReport`. Reports
+используют trailing `InputStep::protocol` и `InputStatus::PROTOCOL` независимо от
+DA/CPR probe windows. `EVENT` по-прежнему содержит событие; event и protocol взаимно
+исключены. Обработайте любой результат до повторной передачи suffix, в том числе
+при точном достижении work-byte предела.
+
+`InputDecoder::setPointerContext` действует на следующие CSI; начатая CSI сохраняет
+контекст начала. Частичные UTF-8 и paste сохраняются. Контекст и необязательное
+`MouseInputEvent::precision` владеют всеми размерами и поколением. Pixel-контекст без
+пригодных размеров подавляет небезопасные mouse samples, сохраняя клавиши. Владелец
+транспорта обязан доказать границу потока и обеспечить ограниченный fallback: флаг
+декодера сам по себе не подтверждает порядок терминала. Отвергнутый распознанный CSI 48 устанавливает `InputIssue::invalidates_pointer_metrics`;
+runner отменяет старые размеры и запрашивает ограниченный fallback. Runner ставит отмену контекста
+в CONTROL перед последующим mouse input. Пользовательский transport может опубликовать
+доказанное `TerminalRead::coordinate_mode` перед batch и обработать reports через
+штатные no-op hooks; hooks лишь запрашивают работу, без блокирующего I/O.
+См. [нативную политику](scroll-controls.md#precise-pointer-scrolling-ru).
+
+Прежние пяти-польные mouse и трёх-польные step aggregates сохраняют trailing defaults.
+Клиентов нужно пересобрать: изменились mouse payload, InputStep, TerminalRead и
+виртуальные transport interfaces. Неизменный `sizeof(InputEvent)` не означает binary
+совместимость; structured bindings расширенных aggregates нужно обновить.
+
+
 </details>

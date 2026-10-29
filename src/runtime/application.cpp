@@ -479,7 +479,11 @@ struct Application::State {
 };
 
 struct Application::State::Run {
-  using Control = std::variant<InputEvent, CellSize>;
+  struct PointerNotice {
+    std::uint64_t generation{};
+  };
+
+  using Control = std::variant<InputEvent, CellSize, PointerNotice>;
   Application &app;
   State &state;
   ApplicationScene &scene;
@@ -505,6 +509,10 @@ struct Application::State::Run {
   ApplicationPhase &phase;
   std::optional<ApplicationError> &error;
   CellSize viewport;
+  CellSize observedViewport;
+  InputPointerContext pointerContext;
+  std::optional<InputSizeReport> wireMetrics, futureMetrics;
+  InputCoordinateMode wireMode{InputCoordinateMode::CELL};
   InputDecoder decoder;
   UiScope scope;
   SchedulerConnection<Control> channel;
@@ -517,10 +525,70 @@ struct Application::State::Run {
   bool ending{}, finished{}, drain{};
   const std::uint32_t frameInterval;
 
+  static InputOptions inputOptions(const State &owner) {
+    auto options = owner.options.input;
+
+    if (owner.legacy && owner.legacy->terminalReports()) {
+      options.terminal_reports = true;
+    }
+
+    return options;
+  }
+
+  bool matchesViewport(const InputSizeReport &metrics) const noexcept {
+    return observedViewport.width > 0 && observedViewport.height > 0 &&
+           metrics.columns == static_cast<std::uint32_t>(observedViewport.width) &&
+           metrics.rows == static_cast<std::uint32_t>(observedViewport.height) && metrics.text_width_px != 0 &&
+           metrics.text_height_px != 0;
+  }
+
+  bool refreshPointerContext(bool resized = false) {
+    const InputSizeReport *metrics = wireMetrics && matchesViewport(*wireMetrics) ? &*wireMetrics : nullptr;
+
+    if (!metrics && resized && futureMetrics && matchesViewport(*futureMetrics)) {
+      metrics = &*futureMetrics;
+    }
+
+    InputPointerContext next;
+
+    next.mode = wireMode;
+    next.generation = pointerContext.generation;
+
+    if (metrics && wireMode == InputCoordinateMode::PIXEL) {
+      next.columns = metrics->columns;
+      next.rows = metrics->rows;
+      next.text_width_px = metrics->text_width_px;
+      next.text_height_px = metrics->text_height_px;
+    }
+
+    // Native setup may already have enabled pixels while this retained prefix
+    // still belongs to the old cell stream. Only the published pixel context can
+    // request a runtime downgrade; historical startup metrics cannot do so early.
+    if (wireMode == InputCoordinateMode::PIXEL) {
+      require(state.ready ? state.ready->pointerMetrics(metrics != nullptr)
+                          : state.legacy->pointerMetrics(metrics != nullptr));
+    }
+
+    if (next == pointerContext) {
+      return false;
+    }
+
+    if (next.generation == std::numeric_limits<std::uint64_t>::max()) {
+      throw Failure{TerminalError{TerminalErrorKind::INPUT_PROTOCOL}};
+    }
+
+    ++next.generation;
+    pointerContext = next;
+    decoder.setPointerContext(next);
+
+    return true;
+  }
+
   Run(Application &application, State &owner)
       : app(application), state(owner), scene(*owner.scene), output(owner), stats(owner.stats), phase(owner.phase),
         error(owner.error), viewport(require(owner.ready ? owner.ready->size() : owner.legacy->size())),
-        decoder(require(InputDecoder::create(state.options.input))), scope(require(app.scheduler().makeScope())),
+        observedViewport(viewport), decoder(require(InputDecoder::create(inputOptions(state)))),
+        scope(require(app.scheduler().makeScope())),
         writer(output, state.options.writer, state.options.scheduler.diagnostics),
         frameInterval((1000u + state.options.framesPerSecond - 1) / state.options.framesPerSecond) {
     require(app.tree().invalidate(app.root(), Invalidation::LAYOUT));
@@ -541,9 +609,19 @@ struct Application::State::Run {
             return;
           }
 
+          if (std::holds_alternative<PointerNotice>(*control)) {
+            require(app.router().cancelPointerCapture());
+
+            return;
+          }
+
           const auto &event = std::get<InputEvent>(*control);
 
           ++stats.inputs;
+
+          if (const auto *issue = std::get_if<InputIssue>(&event); issue && issue->invalidates_pointer_metrics) {
+            require(app.router().cancelPointerCapture());
+          }
 
           if (state.pointerRouting) {
             if (const auto *key = std::get_if<KeyEvent>(&event);
@@ -639,8 +717,22 @@ struct Application::State::Run {
       std::optional<Control> control;
 
       if (batch && batch->resized) {
-        control.emplace(*batch->resized);
+        const auto size = *batch->resized;
+
         batch->resized.reset();
+
+        if (size != observedViewport) {
+          observedViewport = size;
+          refreshPointerContext(true);
+          control.emplace(size);
+        }
+      } else if (batch && batch->coordinate_mode) {
+        wireMode = *batch->coordinate_mode;
+        batch->coordinate_mode.reset();
+
+        if (refreshPointerContext()) {
+          control.emplace(PointerNotice{pointerContext.generation});
+        }
       } else if (batch && eventOffset < batch->events.size()) {
         control.emplace(batch->events[eventOffset++]);
       } else {
@@ -653,15 +745,41 @@ struct Application::State::Run {
         auto step = require(ending && bytes.empty() ? decoder.finish(stamp) : decoder.next(bytes, stamp));
 
         byteOffset += step.consumed;
-        drain = step.status == InputStatus::WORK_LIMIT || step.event.has_value();
+        drain = step.status == InputStatus::WORK_LIMIT || step.event.has_value() || step.protocol.has_value();
         finished = step.status == InputStatus::FINISHED;
 
         if (step.status == InputStatus::FAILED) {
           throw Failure{InputError::FAILED};
         }
 
+        if (step.protocol) {
+          require(state.ready ? state.ready->protocol(*step.protocol) : state.legacy->protocol(*step.protocol));
+
+          if (const auto *metrics = std::get_if<InputSizeReport>(&*step.protocol)) {
+            wireMetrics = *metrics;
+
+            if (!matchesViewport(*metrics)) {
+              futureMetrics = *metrics;
+            }
+
+            if (refreshPointerContext()) {
+              control.emplace(PointerNotice{pointerContext.generation});
+            }
+          }
+        }
+
         if (step.event) {
-          control.emplace(std::move(*step.event));
+          if (const auto *issue = std::get_if<InputIssue>(&*step.event); issue && issue->invalidates_pointer_metrics) {
+            wireMetrics.reset();
+            futureMetrics.reset();
+            refreshPointerContext();
+          }
+
+          const auto *mouse = std::get_if<MouseInputEvent>(&*step.event);
+
+          if (!mouse || !mouse->precision || mouse->precision->generation == pointerContext.generation) {
+            control.emplace(std::move(*step.event));
+          }
         }
 
         if (batch && byteOffset == batch->bytes.size() && eventOffset == batch->events.size()) {
@@ -904,6 +1022,26 @@ bool ApplicationScene::requiresPointerMotion() const noexcept {
   return false;
 }
 
+std::expected<void, TerminalError> ApplicationTerminal::protocol(const InputProtocolEvent &) {
+  return {};
+}
+
+std::expected<void, TerminalError> ApplicationTerminal::pointerMetrics(bool) {
+  return {};
+}
+
+bool ApplicationTerminal::terminalReports() const noexcept {
+  return false;
+}
+
+std::expected<void, TerminalError> ApplicationReadyTerminal::protocol(const InputProtocolEvent &) {
+  return {};
+}
+
+std::expected<void, TerminalError> ApplicationReadyTerminal::pointerMetrics(bool) {
+  return {};
+}
+
 PointerCaptureCapabilities ApplicationTerminal::pointerCaptureCapabilities() const noexcept {
   return {};
 }
@@ -1068,9 +1206,22 @@ std::expected<ApplicationStats, ApplicationError> Application::run(ApplicationSc
     NativeTerminalHandles handles{0, 1};
 #endif
     const auto buttonMotion = scene.requiresPointerMotion();
-    auto opened =
-      openNativeApplicationTerminal(handles, state_->options.terminal, state_->options.outputSlice,
-                                    state_->options.nativeMouseReporting, state_->options.nativeScreen, buttonMotion);
+    auto pointer = state_->options.nativePointer;
+    constexpr std::size_t MAX_NATIVE_SIZE_REPORT_BYTES = 49;
+    constexpr std::size_t NATIVE_SIZE_PARAMETERS = 5;
+    constexpr std::size_t NATIVE_REPORT_DIGITS = 10;
+    const auto &input = state_->options.input;
+
+    // AUTO must not enter a wire mode whose bounded reports/barrier this decoder
+    // cannot admit. Preserve the user's limits and ordinary cell startup.
+    if (!input.sgr_mouse || !input.bracketed_paste || input.max_sequence_bytes < MAX_NATIVE_SIZE_REPORT_BYTES ||
+        input.max_parameters < NATIVE_SIZE_PARAMETERS || input.max_digits < NATIVE_REPORT_DIGITS) {
+      pointer.policy = NativePointerPolicy::OFF;
+    }
+
+    auto opened = openNativeApplicationTerminal(handles, state_->options.terminal, state_->options.outputSlice,
+                                                state_->options.nativeMouseReporting, state_->options.nativeScreen,
+                                                buttonMotion, pointer);
 
     if (!opened) {
       state_->ran = true;

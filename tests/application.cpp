@@ -761,6 +761,179 @@ void captureRunnerBridge() {
   check(!ordinary.requiresPointerMotion() && !defaultTerminal.pointerCaptureCapabilities().motion);
 }
 
+struct ProtocolTerminal : MotionTerminal {
+  using MotionTerminal::MotionTerminal;
+  bool announced{}, deferAnnouncement{};
+  std::size_t rawBatches{}, earlyRequests{};
+  std::vector<bool> usable;
+  std::size_t reports{};
+
+  bool terminalReports() const noexcept override {
+    return true;
+  }
+
+  TerminalRead read(TerminalDeadline deadline, std::stop_token stop) override {
+    auto batch = MotionTerminal::read(deadline, stop);
+
+    if (!announced && !batch.bytes.empty()) {
+      ++rawBatches;
+
+      if (!deferAnnouncement || rawBatches > 1) {
+        batch.coordinate_mode = InputCoordinateMode::PIXEL;
+        announced = true;
+      }
+    }
+
+    return batch;
+  }
+
+  std::expected<void, TerminalError> protocol(const InputProtocolEvent &) override {
+    ++reports;
+
+    return {};
+  }
+
+  std::expected<void, TerminalError> pointerMetrics(bool valid) override {
+    if (!announced) {
+      ++earlyRequests;
+    }
+
+    usable.push_back(valid);
+
+    return {};
+  }
+};
+
+void orderedPointerMetrics() {
+  constexpr std::string_view SIZE_A = "\x1b[48;8;10;80;100t";
+  constexpr std::string_view FONT_B = "\x1b[48;8;10;160;200t";
+  constexpr std::string_view PRESS = "\x1b[<0;1;1M";
+  constexpr std::string_view MOVE = "\x1b[<32;2;2M";
+  constexpr std::string_view RELEASE = "\x1b[<0;2;2m";
+
+  for (const auto budget : {std::size_t{1}, std::size_t{64}}) {
+    const auto bytes = std::string(SIZE_A) + std::string(PRESS) + std::string(MOVE) + std::string(FONT_B) +
+                       std::string(MOVE) + std::string(RELEASE) + std::string(PRESS) + std::string(FONT_B) +
+                       std::string(MOVE) + std::string(RELEASE);
+    ProtocolTerminal terminal({{100, bytes, {}}}, 400, {10, 8});
+    ApplicationOptions options;
+
+    options.inputBudget = budget;
+    options.scheduler.control_capacity = options.scheduler.control_budget = 1;
+    auto app = take(Application::create(options, terminal.clock()));
+    CaptureScene scene(*app);
+    const auto result = take(app->run(scene, terminal));
+
+    check(scene.presses == 2 && scene.moves == 2 && scene.releases == 1);
+    const auto withoutDuplicate = std::string(SIZE_A) + std::string(PRESS) + std::string(MOVE) + std::string(FONT_B) +
+                                  std::string(MOVE) + std::string(RELEASE) + std::string(PRESS) + std::string(MOVE) +
+                                  std::string(RELEASE);
+    ProtocolTerminal baseline({{100, withoutDuplicate, {}}}, 400, {10, 8});
+    auto baselineApp = take(Application::create(options, baseline.clock()));
+    CaptureScene baselineScene(*baselineApp);
+    const auto baselineResult = take(baselineApp->run(baselineScene, baseline));
+
+    check(result.frames == baselineResult.frames && terminal.reports == 3 && baseline.reports == 2);
+    check(app->scheduler().metrics().control.high_water == 1);
+  }
+
+  struct MetricScene : CaptureScene {
+    using CaptureScene::CaptureScene;
+    std::vector<CellSize> viewports;
+
+    std::expected<void, TreeError> prepare(Application &, CellSize size) override {
+      if (viewports.empty() || viewports.back() != size) {
+        viewports.push_back(size);
+      }
+
+      return {};
+    }
+  };
+
+  for (const bool sizeFirst : {false, true}) {
+    const std::string future = "\x1b[48;9;12;90;120t";
+    std::vector<example::ReplayTerminal::Input> input;
+
+    if (sizeFirst) {
+      input = {{100, std::string(SIZE_A) + future + std::string(PRESS), CellSize{12, 9}},
+               {200, std::string(RELEASE), {}}};
+    } else {
+      // The sole future report must survive a later report matching the old viewport.
+      input = {{100, future + std::string(SIZE_A), {}},
+               {150, {}, CellSize{12, 9}},
+               {200, std::string(PRESS) + std::string(RELEASE), {}}};
+    }
+
+    ProtocolTerminal terminal(std::move(input), 400, {10, 8});
+    ApplicationOptions options;
+
+    options.inputBudget = 1;
+    options.scheduler.control_capacity = options.scheduler.control_budget = 1;
+    auto app = take(Application::create(options, terminal.clock()));
+    MetricScene scene(*app);
+
+    take(app->run(scene, terminal));
+    check(scene.presses == 1 && scene.releases == 1 && scene.viewports.size() == 2);
+    check(scene.viewports[0] == CellSize{10, 8} && scene.viewports[1] == CellSize{12, 9});
+  }
+
+  ProtocolTerminal delayed({{100, std::string(PRESS) + "\x1b[48;8;10;0;0t" + std::string(SIZE_A), {}},
+                            {200, std::string(PRESS) + std::string(RELEASE), {}}},
+                           400, {10, 8});
+
+  delayed.deferAnnouncement = true;
+  auto delayedApp = take(Application::create({}, delayed.clock()));
+  CaptureScene delayedScene(*delayedApp);
+
+  take(delayedApp->run(delayedScene, delayed));
+  check(delayedScene.presses == 2 && delayedScene.releases == 1 && delayed.earlyRequests == 0);
+
+  struct DamagedScene : CaptureScene {
+    using CaptureScene::CaptureScene;
+    std::size_t issues{};
+
+    std::expected<bool, TreeError> input(Application &owner, const InputEvent &event) override {
+      if (const auto *issue = std::get_if<InputIssue>(&event); issue && issue->invalidates_pointer_metrics) {
+        check(!capture.connected());
+        ++issues;
+      }
+
+      return CaptureScene::input(owner, event);
+    }
+  };
+
+  for (const std::string damaged :
+       {std::string("\x1b[48;8;10;160t"), std::string("\x1b[48;8;10;160;200:") + std::string(20, ':') + "t",
+        std::string("\x1b[48;8;10;160;200:") + std::string(80, ':') + "t"}) {
+    ProtocolTerminal terminal(
+      {{100, std::string(SIZE_A) + std::string(PRESS) + damaged + std::string(MOVE) + std::string(RELEASE), {}}}, 400,
+      {10, 8});
+    ApplicationOptions options;
+
+    options.inputBudget = 1;
+    options.scheduler.control_capacity = options.scheduler.control_budget = 1;
+    auto application = take(Application::create(options, terminal.clock()));
+    DamagedScene damagedScene(*application);
+
+    take(application->run(damagedScene, terminal));
+    check(damagedScene.presses == 1 && damagedScene.moves == 0 && damagedScene.releases == 0 &&
+          damagedScene.issues == 1 && damagedScene.intercepted == 1);
+    check(std::count(terminal.usable.begin(), terminal.usable.end(), false) >= 2);
+  }
+
+  ProtocolTerminal invalid({{100,
+                             std::string(SIZE_A) + std::string(PRESS) + "\x1b[48;8;10;0;0t" + std::string(MOVE) +
+                               std::string(SIZE_A) + std::string(PRESS) + std::string(RELEASE),
+                             {}}},
+                           400, {10, 8});
+  auto app = take(Application::create({}, invalid.clock()));
+  CaptureScene scene(*app);
+
+  take(app->run(scene, invalid));
+  check(scene.presses == 2 && scene.moves == 0 && scene.releases == 1);
+  check(std::count(invalid.usable.begin(), invalid.usable.end(), false) >= 2);
+}
+
 struct ReadyMotionTerminal : ApplicationReadyTerminal {
   bool motion{true}, closed{};
   int polls{};
@@ -866,6 +1039,7 @@ int main() {
     owningLayoutSnapshot();
     preparationLayoutFailures();
     captureRunnerBridge();
+    orderedPointerMetrics();
     readyCaptureBridge();
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

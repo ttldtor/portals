@@ -287,6 +287,37 @@ promise protection from a hostile terminal stream. Downstream insertion policy
 must validate/repair text and treat paste controls as data; never forward raw
 paste to a terminal writer, shell or command dispatcher.
 
+
+**Ordered protocol reports and pointer context**
+
+`InputOptions::terminal_reports` defaults to false. When enabled, CSI 48 owns four
+required dimensions in `InputSizeReport`; zero pixels remain a valid unavailable-size
+report. Only this grammar ignores colon subparameters, including empty slots, within
+the existing parameter/digit/byte limits. DEC private DECRPM owns `mode` and state
+0..4 in `InputModeReport`. These reports use trailing `InputStep::protocol` and
+`InputStatus::PROTOCOL`, independently of DA/CPR probe windows. `EVENT` still contains
+an event; event and protocol are mutually exclusive. Handle either result before
+resubmitting the suffix, including at the exact work-byte boundary.
+
+`InputDecoder::setPointerContext` affects subsequently started CSI sequences; a partial
+CSI retains its start context. It preserves partial UTF-8 and paste. Context values
+and optional `MouseInputEvent::precision` own all dimensions and generation. A raw
+pixel context with unavailable dimensions suppresses unsafe mouse samples while
+allowing keys. A transport owner must establish a real stream boundary and implement
+bounded fallback; setting a decoder flag cannot establish terminal ordering.
+A rejected recognized CSI 48 marks `InputIssue::invalidates_pointer_metrics`; the
+runner invalidates stale dimensions and requests bounded fallback. The application
+runner orders context cancellation through CONTROL before later mouse
+input. Custom transports can publish proven `TerminalRead::coordinate_mode` metadata
+before a batch and handle reports through the default no-op protocol hooks; hooks
+request work without blocking I/O. See [native policy](scroll-controls.md#precise-pointer-scrolling).
+
+Existing five-field mouse and three-field step aggregates retain their trailing
+defaults. Rebuild clients: the mouse payload, InputStep, TerminalRead and terminal
+virtual interfaces changed. Unchanged `sizeof(InputEvent)` is not binary compatibility;
+structured bindings over extended aggregates must be updated.
+
+
 [Developer testing](testing.md).
 
 Primary references: [xterm control sequences](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html)

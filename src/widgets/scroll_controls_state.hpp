@@ -18,6 +18,10 @@ struct ScrollDrag {
   std::int32_t travel{};
   std::uint64_t maximum{};
   ScrollAxisMetrics metrics;
+  std::optional<InputPointerPrecision> precision{};
+  std::uint64_t grabUnits{};
+  std::uint64_t anchorUnits{};
+  ScrollOffset anchorOffset{};
 };
 
 struct PreparedScrollFrame {
@@ -90,7 +94,7 @@ struct ScrollWidgetState {
   std::optional<ScrollAreaGeometry> adoptedGeometry;
   std::optional<CellPoint> adoptedSurface;
   PointerCapture capture;
-  ScrollDrag drag;
+  std::unique_ptr<ScrollDrag> drag;
   std::shared_ptr<ScrollRepeatState> repeat;
   std::weak_ptr<ScrollIntentRecord> intent;
   std::array<GraphemeText, 8> glyphs;
@@ -117,6 +121,11 @@ inline ScrollTrack scrollThumbTrack(const ScrollWidgetState &state, ScrollTrack 
     }
   }
   return channel;
+}
+
+inline void cancelScrollDrag(ScrollWidgetState &state) noexcept {
+  state.capture.disconnect();
+  state.drag.reset();
 }
 
 inline void cancelScrollRepeat(ScrollWidgetState &state) noexcept {

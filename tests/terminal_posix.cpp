@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <charconv>
 #include <chrono>
@@ -61,12 +62,51 @@ void operator delete[](void *memory, std::size_t) noexcept {
 #ifdef PORTALS_TEST_WRAP_TERMIOS
 int screen_write_failure = 0;
 thread_local int motion_write_failure{};
+thread_local int precision_write_stage{};
+thread_local std::size_t native_write_calls{};
+thread_local std::string_view precision_failure_prefix;
+thread_local int precision_failure_cut{-1};
+thread_local bool precision_failure_tail{};
 thread_local bool fail_motion_allocation_after_save{};
 // Linker --wrap entry points must retain their externally required names.
 extern "C" ssize_t __real_write(int, const void *, std::size_t); // NOLINT(readability-identifier-naming)
 
 extern "C" ssize_t __wrap_write(int fd, const void *bytes, std::size_t count) { // NOLINT(readability-identifier-naming)
+  ++native_write_calls;
   const std::string_view output(static_cast<const char *>(bytes), count);
+
+  if (precision_failure_tail) {
+    precision_failure_tail = false;
+    errno = EIO;
+
+    return -1;
+  }
+
+  if (precision_failure_cut >= 0 && output.starts_with(precision_failure_prefix)) {
+    const auto prefix = static_cast<std::size_t>(std::exchange(precision_failure_cut, -1));
+
+    if (prefix == 0) {
+      errno = EIO;
+
+      return -1;
+    }
+
+    precision_failure_tail = true;
+
+    return __real_write(fd, bytes, std::min(prefix, count - 1));
+  }
+
+  if (precision_write_stage == 1 && output.starts_with("\x1b[?9;1000;1001;1002;1003l")) {
+    precision_write_stage = 2;
+
+    return __real_write(fd, bytes, 1);
+  }
+
+  if (precision_write_stage == 2) {
+    errno = EAGAIN;
+
+    return -1;
+  }
   if (fail_motion_allocation_after_save && output == "\x1b[?9;1000;1001;1002;1003s") {
     fail_motion_allocation_after_save = false;
     fail_native_allocation = true;
@@ -272,6 +312,388 @@ openMouseTestTerminal(Pty &pty, TerminalOptions options = {}, std::chrono::milli
   return buttonMotion
            ? openNativeApplicationTerminal(pty.handles(), options, timeout, true, NativeScreenMode::MAIN_SCREEN, true)
            : openNativeApplicationTerminal(pty.handles(), options, timeout, true, NativeScreenMode::MAIN_SCREEN);
+}
+
+struct PrecisionHost {
+  Pty &pty;
+  bool resizeSupported, zeroPixels;
+  std::string prefix, output;
+  std::atomic<bool> ignoreRuntime{}, unknownResize{}, ignoreAllBarriers{}, loseMetricsAtBoundary{};
+  std::atomic<bool> permanentTracking{}, permanentSgr{}, missingFreshTracking{}, initialPixels{};
+  std::atomic<unsigned> barriers{};
+  std::uint32_t oldNonce{};
+  std::jthread responder;
+
+  PrecisionHost(Pty &terminal, bool resize = true, bool zero = false, std::string old = {})
+      : pty(terminal), resizeSupported(resize), zeroPixels(zero), prefix(std::move(old)),
+        responder([this](std::stop_token stop) {
+          serve(stop);
+        }) {
+  }
+
+  void stop() {
+    responder.request_stop();
+    responder.join();
+  }
+
+  void send(std::string_view bytes) {
+    for (const char byte : bytes) {
+      if (::write(pty.master.get(), &byte, 1) != 1) {
+        return;
+      }
+    }
+  }
+
+  void serve(std::stop_token stop) {
+    std::string pending;
+    bool injected{}, pixels{}, encodingInitialized{};
+
+    while (!stop.stop_requested()) {
+      auto bytes = drainOutput(pty);
+
+      output += bytes;
+      pending += bytes;
+
+      for (;;) {
+        const auto begin = pending.find("\x1b[");
+
+        if (begin == std::string::npos) {
+          if (pending.size() > 1) {
+            pending.erase(0, pending.size() - 1);
+          }
+
+          break;
+        }
+
+        std::size_t end = begin + 2;
+
+        while (end < pending.size() && (pending[end] < '@' || pending[end] > '~')) {
+          ++end;
+        }
+
+        if (end == pending.size()) {
+          break;
+        }
+
+        const auto command = pending.substr(begin, end - begin + 1);
+
+        pending.erase(0, end + 1);
+
+        if (command.ends_with("$p") && command.starts_with("\x1b[?")) {
+          std::uint32_t mode{};
+          const auto number = std::string_view(command).substr(3, command.size() - 5);
+          const auto [last, error] = std::from_chars(number.data(), number.data() + number.size(), mode);
+
+          if (error != std::errc{} || last != number.data() + number.size()) {
+            continue;
+          }
+
+          if (!injected) {
+            send(prefix);
+            injected = true;
+          }
+
+          if (mode == 2048 && !resizeSupported) {
+            continue;
+          }
+
+          if (mode >= 1000000000U) {
+            const auto ordinal = ++barriers;
+
+            if (ignoreAllBarriers.load()) {
+              continue;
+            }
+
+            if (missingFreshTracking.load() && ordinal % 2 == 1) {
+              send("\x1b[?1002;2$y");
+            }
+
+            if (oldNonce) {
+              send("\x1b[?" + std::to_string(oldNonce) + ";0$y");
+            } else {
+              oldNonce = mode;
+            }
+
+            if (ordinal >= 3 && ignoreRuntime.load()) {
+              continue;
+            }
+
+            if (ordinal == 2 && loseMetricsAtBoundary.load()) {
+              send("\x1b[48;25;80;0;0t");
+            }
+
+            send("\x1b[?" + std::to_string(mode) + ";0$y");
+          } else {
+            if (mode == 1002 && missingFreshTracking.load() && barriers.load() >= 1) {
+              continue;
+            }
+
+            const bool pixelEncoding = pixels || (initialPixels.load() && !encodingInitialized);
+            const auto state = mode == 2048 && unknownResize.load()       ? ";0$y"
+                               : mode == 1002 && permanentTracking.load() ? ";3$y"
+                               : mode == 1006 && permanentSgr.load()      ? ";3$y"
+                               : mode == 1006                             ? (pixelEncoding ? ";2$y" : ";1$y")
+                               : mode == 1016                             ? (pixelEncoding ? ";1$y" : ";2$y")
+                                                                          : ";2$y";
+
+            send("\x1b[?" + std::to_string(mode) + state);
+          }
+        } else if (command == "\x1b[?2048h") {
+          send(zeroPixels ? "\x1b[48;25;80;0;0t" : "\x1b[48;25;80;500;800t");
+        } else if (command == "\x1b[?1016h") {
+          pixels = true;
+          send("\x1b[<0;106;51M");
+        } else if (command == "\x1b[?1005;1015;1016l" || command == "\x1b[?1016l") {
+          pixels = false;
+          encodingInitialized = true;
+        }
+      }
+
+      std::this_thread::yield();
+    }
+
+    output += drainOutput(pty);
+  }
+};
+
+void managedPrecision() {
+  for (const int scenario : {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}) {
+    Pty pty;
+    PrecisionHost host(pty, scenario != 1, scenario == 2);
+
+    host.unknownResize = scenario == 3;
+    host.ignoreAllBarriers = scenario == 4;
+    host.loseMetricsAtBoundary = scenario == 5;
+    host.permanentTracking = scenario == 6;
+    host.missingFreshTracking = scenario == 7;
+    host.permanentSgr = scenario == 8;
+    NativePointerOptions pointer;
+
+    pointer.ordering = NativeInputOrder::FIFO;
+    TerminalOptions limits;
+
+    if (scenario == 9) {
+      limits.max_output_bytes = 72;
+    }
+
+    auto opened =
+      openNativeApplicationTerminal(pty.handles(), limits, 300ms, true, NativeScreenMode::MAIN_SCREEN, true, pointer);
+
+    check(opened.has_value(), "optional precision absence never breaks established ordinary cell setup");
+
+    if (opened) {
+      check((*opened)->close().has_value() && pty.restored(), "optional precision setup restores owned native state");
+    }
+
+    host.stop();
+    check((host.output.find("\x1b[?1016h") != std::string::npos) == (scenario == 0),
+          "missing or zero pixel metrics select ordinary cell reporting");
+    check(host.output.find("\x1b[?1002;1006h") != std::string::npos,
+          "legacy setup remains usable before optional probes");
+    if (scenario == 0) {
+      check(host.barriers == 2 && host.output.find("\x1b[?2048l") != std::string::npos,
+            "startup uses distinct correlated barriers and restores changed resize mode");
+    }
+  }
+
+  {
+    Pty pty;
+    PrecisionHost host(pty);
+    auto opened = openNativeApplicationTerminal(pty.handles(), {}, 300ms, true, NativeScreenMode::MAIN_SCREEN, true,
+                                                NativePointerOptions{});
+
+    check(opened.has_value() && (*opened)->close().has_value(),
+          "AUTO with undeclared FIFO remains a successful cell session");
+    host.stop();
+    check(host.barriers == 0 && host.output.find("\x1b[?2048$p") == std::string::npos &&
+            host.output.find("\x1b[?1016h") == std::string::npos,
+          "AUTO does not infer host ordering from mode replies or environment");
+  }
+
+  {
+    Pty pty;
+    PrecisionHost host(pty, true, false, "q\x1b[<0;106;51M");
+
+    host.initialPixels = true;
+    NativePointerOptions pointer;
+
+    pointer.ordering = NativeInputOrder::FIFO;
+    auto opened =
+      openNativeApplicationTerminal(pty.handles(), {}, 200ms, true, NativeScreenMode::MAIN_SCREEN, true, pointer);
+
+    check(!opened && opened.error().kind == TerminalErrorKind::INPUT_PROTOCOL &&
+            opened.error().protocol_issue == TerminalProtocolIssue::INITIAL_PIXEL_CONTEXT_UNKNOWN && pty.restored(),
+          "unknown initial pixel prefix rejects advanced startup before any UI delivery");
+    host.stop();
+    check(host.output.find("\x1b[?9;1000;1001;1002;1003s") == std::string::npos &&
+            host.output.find("\x1b[?1002;1006h") == std::string::npos && host.barriers == 0,
+          "initial pixel rejection changes no encoding/tracking mode and preserves legacy query profile");
+  }
+
+  for (const int failure : {0, 1, 2}) {
+    const bool timeout = failure == 1;
+    Pty pty;
+    const std::string old = "q\x1b[<0;2;3M\x1b[200~\x1b[?1006;0$y\x1b[?2048;2$y\x1b[201~\xc3\xa9";
+    PrecisionHost host(pty, true, false, old);
+    NativePointerOptions pointer;
+
+    pointer.ordering = NativeInputOrder::FIFO;
+    auto opened =
+      openNativeApplicationTerminal(pty.handles(), {}, 100ms, true, NativeScreenMode::MAIN_SCREEN, true, pointer);
+
+    check(opened.has_value(), "paste-aware precision setup accepts real replies following query-shaped paste data");
+
+    if (!opened) {
+      host.stop();
+      continue;
+    }
+
+    auto &terminal = **opened;
+    const auto prefix = terminal.read(Clock::now() + 30ms, {});
+    const auto boundary = terminal.read(Clock::now() + 30ms, {});
+    std::string pixel;
+    const auto pixelDeadline = Clock::now() + 30ms;
+
+    while (pixel.size() < std::string_view("\x1b[<0;106;51M").size() && Clock::now() < pixelDeadline) {
+      pixel += terminal.read(pixelDeadline, {}).bytes;
+    }
+
+    check(prefix.bytes.starts_with(old) && !prefix.coordinate_mode &&
+            boundary.coordinate_mode == InputCoordinateMode::PIXEL && pixel == "\x1b[<0;106;51M",
+          "retained old mouse/paste/UTF8 precede the explicit new-unit boundary and fresh pixel bytes");
+    check(prefix.bytes.find("\x1b[?1006;0$y") != std::string::npos,
+          "startup filter never consumes query-shaped bytes inside paste");
+    host.ignoreRuntime = timeout;
+    host.missingFreshTracking = failure == 2;
+#ifdef PORTALS_TEST_WRAP_TERMIOS
+    const auto before = native_write_calls;
+#endif
+    check(terminal.pointerMetrics(false).has_value(), "metric loss requests bounded downgrade");
+#ifdef PORTALS_TEST_WRAP_TERMIOS
+    check(native_write_calls == before, "metric callback performs no transport writes");
+    precision_write_stage = 1;
+#endif
+    check(terminal.submit("frame").has_value() && !terminal.submit("second"),
+          "one owning frame can be deferred behind protocol work");
+    std::stop_source stopped;
+
+    stopped.request_stop();
+    const auto preStopped = terminal.flush(Clock::now() + 20ms, stopped.get_token());
+
+    check(preStopped.status == TerminalStatus::STOPPED && preStopped.completed == 0 && preStopped.pending == 5,
+          "pre-stopped protocol work preserves the owning frame and stop reason");
+    const auto partial = terminal.flush(Clock::now() + 2ms, {});
+
+    check(!partial.error && partial.completed == 0 && partial.pending == 5,
+          "partial protocol writes never count as completed frame bytes");
+#ifdef PORTALS_TEST_WRAP_TERMIOS
+    precision_write_stage = 0;
+#endif
+    const auto waiting = terminal.flush(Clock::now() + 20ms, {});
+
+    check(!waiting.error && waiting.completed == 0 && waiting.pending == 5,
+          "frame remains deferred until the correlated barrier completes");
+    InputOptions input;
+
+    input.terminal_reports = true;
+    auto decoder = *InputDecoder::create(input);
+    std::optional<TerminalError> failed;
+    bool restored{};
+    const auto deadline = Clock::now() + 250ms;
+
+    while (Clock::now() < deadline && !failed && !restored) {
+      const auto batch = terminal.read(Clock::now() + 20ms, {});
+
+      if (batch.error) {
+        failed = batch.error;
+        break;
+      }
+
+      std::size_t offset{};
+
+      while (offset < batch.bytes.size()) {
+        const auto step = decoder.next(std::string_view(batch.bytes).substr(offset), 0);
+
+        check(step.has_value(), "downgrade decoder accepts owning report stream");
+        if (!step) {
+          break;
+        }
+        offset += step->consumed;
+
+        if (step->protocol) {
+#ifdef PORTALS_TEST_WRAP_TERMIOS
+          const auto writes = native_write_calls;
+#endif
+          const auto accepted = terminal.protocol(*step->protocol);
+
+          if (!accepted) {
+            failed = accepted.error();
+          }
+
+          check(accepted.has_value() || failure == 2, "only missing fresh tracking rejects the correlated report");
+#ifdef PORTALS_TEST_WRAP_TERMIOS
+          check(native_write_calls == writes, "protocol callback performs no blocking output");
+#endif
+        }
+      }
+
+      const auto progress = terminal.flush(Clock::now() + 20ms, {});
+
+      if (progress.error) {
+        failed = progress.error;
+      } else if (progress.completed) {
+        check(progress.completed == 5 && progress.pending == 0, "frame accounting excludes every control byte");
+      }
+
+      restored = batch.coordinate_mode == InputCoordinateMode::CELL;
+    }
+
+    if (failure != 0) {
+      check(failed && failed->kind == TerminalErrorKind::INPUT_PROTOCOL && !restored,
+            "stale nonce or stale tracking state cannot satisfy a fresh runtime proof; failure stays typed");
+    } else {
+      check(restored && !failed, "valid correlated downgrade publishes cell units before fresh input");
+    }
+
+    (void)terminal.close();
+    check(pty.restored(), "successful and failed downgrade both restore original OS modes");
+    host.stop();
+    if (failure == 0) {
+      check(host.output.find("frame") > host.output.rfind("\x1b[?1002;1006h"),
+            "serialized cell restoration precedes the deferred frame");
+    }
+  }
+}
+
+void precisionWriteFailures() {
+#ifdef PORTALS_TEST_WRAP_TERMIOS
+  // Every admitted byte prefix of each new mode mutation must retain complete
+  // cleanup. No source or unrelated process is modified by these PTY fixtures.
+  for (const std::string_view prefix :
+       {std::string_view("\x1b[?2048h"), std::string_view("\x1b[?9;1000;1001;1002;1003l"),
+        std::string_view("\x1b[?1005;1006;1015l\x1b[?1016h\x1b[?1002h")}) {
+    for (std::size_t cut = 0; cut < prefix.size(); ++cut) {
+      Pty pty;
+      PrecisionHost host(pty);
+      NativePointerOptions pointer;
+
+      pointer.ordering = NativeInputOrder::FIFO;
+      precision_failure_prefix = prefix;
+      precision_failure_cut = static_cast<int>(cut);
+      auto opened =
+        openNativeApplicationTerminal(pty.handles(), {}, 200ms, true, NativeScreenMode::MAIN_SCREEN, true, pointer);
+
+      check(!opened && opened.error().native_code == EIO && precision_failure_cut == -1,
+            "each changed-mode write prefix returns its original failure");
+      precision_failure_cut = -1;
+      precision_failure_tail = false;
+      host.stop();
+      check(pty.restored() && host.output.find("\x18\x1b[?2048l") != std::string::npos &&
+              host.output.find("\x1b[?9;1000;1001;1002;1003r") != std::string::npos,
+            "partial precision startup restores resize, encoding, tracking and OS state");
+    }
+  }
+#endif
 }
 
 void managedMouse() {
@@ -1346,6 +1768,8 @@ int run() {
   sessions();
   managedScreen();
   managedMouse();
+  managedPrecision();
+  precisionWriteFailures();
   managedButtonMotion();
   confirmedButtonMotion();
   managedMouseQueries();

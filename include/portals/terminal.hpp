@@ -27,6 +27,25 @@ struct NativeTerminalHandles {
   std::intptr_t output{}; ///< POSIX fd or borrowed Windows HANDLE converted to intptr_t.
 };
 
+/** @brief Optional native pointer enhancement; ordinary cell input remains the fallback. */
+enum class NativePointerPolicy {
+  AUTO, ///< Negotiate precision only when the host ordering contract is declared and optional probes succeed.
+  OFF   ///< Keep ordinary native cell reporting.
+};
+
+/** @brief Host declaration; a successful DECRPM alone cannot establish this guarantee. */
+enum class NativeInputOrder {
+  UNCONFIRMED, ///< Decline precision without changing ordinary startup.
+  FIFO         ///< Complete input packets precede replies to subsequently processed queries, without interleaving.
+};
+
+/** @brief Advanced native pointer policy; no physical host qualification is inferred. */
+struct NativePointerOptions {
+  NativePointerPolicy policy{NativePointerPolicy::AUTO};    ///< Optional enhancement policy.
+  NativeInputOrder ordering{NativeInputOrder::UNCONFIRMED}; ///< Explicit supported-host ordering declaration.
+  std::chrono::milliseconds probeTimeout{100}; ///< Positive optional probe cap; at most one quarter of setup budget.
+};
+
 /** @brief Session resource bounds and cancellation/resize sampling cadence. */
 struct TerminalOptions {
   std::size_t max_input_bytes{4096};          ///< Positive maximum POSIX raw bytes per read; unused on Windows.
@@ -46,14 +65,22 @@ enum class TerminalErrorKind {
   OUTPUT_LIMIT,     ///< The new batch exceeds max_output_bytes.
   INPUT_DECODE,     ///< Windows input decoder failed; close and reopen the session.
   OUTPUT_UNCERTAIN, ///< Windows output was cancelled/failed; close before further submission.
-  INPUT_LIMIT       ///< Retained managed startup input exceeds max_input_bytes.
+  INPUT_LIMIT,      ///< Retained managed startup input exceeds max_input_bytes.
+  INPUT_PROTOCOL    ///< A correlated wire-coordinate transition failed; close restores owned modes.
+};
+
+/** @brief Concrete protocol context failures, independent of native errno values. */
+enum class TerminalProtocolIssue {
+  NONE,                         ///< No additional protocol context classification.
+  INITIAL_PIXEL_CONTEXT_UNKNOWN ///< Input predates managed cell setup while 1016 is already active.
 };
 
 /** @brief Owning error value, independent of session lifetime. */
 struct TerminalError {
-  TerminalErrorKind kind{}; ///< Stable failure category.
-  int native_code{};        ///< errno on POSIX, GetLastError on Windows; zero for contract errors.
-  int restoration_code{};   ///< First rollback native error on failed open; zero on success.
+  TerminalErrorKind kind{};               ///< Stable failure category.
+  int native_code{};                      ///< errno on POSIX, GetLastError on Windows; zero for contract errors.
+  int restoration_code{};                 ///< First rollback native error on failed open; zero on success.
+  TerminalProtocolIssue protocol_issue{}; ///< Owning protocol classification; NONE preserves legacy error aggregates.
 };
 
 /** @brief Why an input or output operation returned. */
@@ -72,6 +99,8 @@ struct TerminalRead {
   std::vector<InputEvent> events;                  ///< Native semantic events; empty on POSIX.
   std::optional<CellSize> resized;                 ///< Newly observed dimensions, if changed.
   std::optional<TerminalError> error;              ///< Present exactly when status is error.
+  std::optional<InputCoordinateMode>
+    coordinate_mode{}; ///< Proven units before this batch; preserve partial decoder state.
 };
 
 /** @brief Owning output progress for this flush call, not a rendered-frame commit. */

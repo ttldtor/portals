@@ -213,6 +213,8 @@ constexpr const char *categoryName(TerminalErrorKind value) noexcept {
     return "OUTPUT_UNCERTAIN";
   case TerminalErrorKind::INPUT_LIMIT:
     return "INPUT_LIMIT";
+  case TerminalErrorKind::INPUT_PROTOCOL:
+    return "INPUT_PROTOCOL";
   }
 
   return "UNKNOWN";
@@ -465,8 +467,14 @@ constexpr const char *categoryName(PssFileOperation value) noexcept {
 }
 
 void reportTerminal(const TerminalError &cause) noexcept {
-  std::fprintf(stderr, "TerminalError(kind=%s, native=%d, restoration=%d)", categoryName(cause.kind), cause.native_code,
+  std::fprintf(stderr, "TerminalError(kind=%s, native=%d, restoration=%d", categoryName(cause.kind), cause.native_code,
                cause.restoration_code);
+
+  if (cause.protocol_issue == TerminalProtocolIssue::INITIAL_PIXEL_CONTEXT_UNKNOWN) {
+    std::fputs(", protocol=initial pixel context unknown", stderr);
+  }
+
+  std::fputc(')', stderr);
 }
 
 void reportApplication(const ApplicationError &cause) noexcept {

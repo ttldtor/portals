@@ -34,7 +34,10 @@ InputEvent key(InputKey identity, InputModifiers mods = {}) {
   return KeyEvent{identity, 0, mods};
 }
 
+using Output = std::variant<InputEvent, InputProtocolEvent>;
+
 struct Run {
+  std::vector<Output> outputs;
   std::vector<InputEvent> events;
   std::size_t consumed{};
   InputStatus status{};
@@ -65,7 +68,16 @@ bool feed(InputDecoder &decoder, std::string_view bytes, InputTime now, Run &run
     run.consumed += step->consumed;
     run.status = step->status;
 
+    check(!(step->event && step->protocol), "event and protocol are mutually exclusive");
+    check((step->status == InputStatus::PROTOCOL) == step->protocol.has_value(), "PROTOCOL owns exactly one report");
+    check(step->status != InputStatus::EVENT || step->event.has_value(), "EVENT retains its event promise");
+
+    if (step->protocol) {
+      run.outputs.emplace_back(std::move(*step->protocol));
+    }
+
     if (step->event) {
+      run.outputs.emplace_back(*step->event);
       if (const auto *issue = std::get_if<InputIssue>(&*step->event)) {
         check(issue->begin <= issue->end && issue->end <= run.consumed, "issue range covers consumed bytes only");
       }
@@ -98,7 +110,16 @@ void finish(InputDecoder &decoder, InputTime now, Run &run) {
     check(step->consumed == 0, "finish consumes no bytes");
     run.status = step->status;
 
+    check(!(step->event && step->protocol), "event and protocol are mutually exclusive");
+    check((step->status == InputStatus::PROTOCOL) == step->protocol.has_value(), "PROTOCOL owns exactly one report");
+    check(step->status != InputStatus::EVENT || step->event.has_value(), "EVENT retains its event promise");
+
+    if (step->protocol) {
+      run.outputs.emplace_back(std::move(*step->protocol));
+    }
+
     if (step->event) {
+      run.outputs.emplace_back(*step->event);
       run.events.push_back(std::move(*step->event));
     }
 
@@ -591,6 +612,213 @@ void partitionAndFuzz() {
   }
 }
 
+void terminalReports() {
+  InputOptions options;
+
+  options.terminal_reports = true;
+
+  const InputSizeReport dimensions{24, 80, 240, 1600};
+  const std::string size = "\x1b[48;24;80;240;1600t";
+  const std::string mode = "\x1b[?2048;2$y";
+  const auto report = InputProtocolEvent{dimensions};
+  const auto reset_mode = InputProtocolEvent{InputModeReport{2048, 2}};
+  const auto mixed = "a" + size + mode + size + "\xc3\xa9\x1b[A";
+  const auto decoded = decode(mixed, {}, options, true);
+
+  check(decoded.outputs == std::vector<Output>{text(U'a'), report, reset_mode, report, text(U'é'), key(InputKey::UP)},
+        "reports and user events preserve their exact stream order");
+  check(decode(size, {}, options).outputs == std::vector<Output>{report}, "CSI 48 owns all four wire dimensions");
+  check(decode("\x1b[48;1;2;0;0t", {}, options).outputs ==
+          std::vector<Output>{InputProtocolEvent{InputSizeReport{1, 2, 0, 0}}},
+        "zero pixel dimensions remain a valid report");
+  check(decode("\x1b[48:9;24::7;80:;240;1600:t", {}, options).outputs == std::vector<Output>{report},
+        "CSI 48 ignores unknown and empty colon subparameters");
+  check(decode("\x1b[48;4294967295;4294967295;4294967295;4294967295t", {}, options).outputs ==
+          std::vector<Output>{InputProtocolEvent{InputSizeReport{4294967295U, 4294967295U, 4294967295U, 4294967295U}}},
+        "all dimensions retain the complete uint32 range");
+
+  for (std::uint32_t state = 0; state <= 4; ++state) {
+    const auto wire = "\x1b[?4294967295;" + std::to_string(state) + "$y";
+
+    check(decode(wire, {}, options).outputs ==
+            std::vector<Output>{InputProtocolEvent{InputModeReport{4294967295U, state}}},
+          "DECRPM retains all defined states and uint32 mode numbers");
+    partitions(wire, options);
+  }
+
+  const auto rejected = [&](const std::string &wire, InputIssueKind kind, InputOptions bounds) {
+    const auto actual = decode(wire + "q", {}, bounds);
+
+    const bool invalidates = bounds.terminal_reports && wire.starts_with("\x1b[48");
+
+    check(actual.events == std::vector<InputEvent>{InputIssue{kind, 0, wire.size(), invalidates}, text(U'q')} &&
+            actual.outputs.size() == 2,
+          "malformed report emits one bounded issue and recovers at its final byte");
+    partitions(wire + "q", bounds);
+  };
+
+  for (const std::string wire :
+       {"\x1b[48t", "\x1b[48;1;2;3t", "\x1b[48;1;2;3;t", "\x1b[48;;2;3;4t", "\x1b[48;1;2;3;4;5t", "\x1b[48;0;2;3;4t",
+        "\x1b[48;1;0;3;4t", "\x1b[48;1:;:;3;4t", "\x1b[?2048;5$y", "\x1b[?2048$y", "\x1b[?2048;;2$y",
+        "\x1b[?2048:1;2$y", "\x1b[?2048;2;3$y", "\x1b[1:2A", "\x1b[<0:;1;1M"}) {
+    rejected(wire, InputIssueKind::INVALID_SEQUENCE, options);
+  }
+
+  for (const std::string wire : {"\x1b[48;4294967296;2;3;4t", "\x1b[48;1;2;3;4294967296t",
+                                 "\x1b[48;1:4294967296;2;3;4t", "\x1b[?4294967296;2$y"}) {
+    rejected(wire, InputIssueKind::NUMERIC_OVERFLOW, options);
+  }
+
+  auto bounds = options;
+
+  bounds.max_parameters = 5;
+  rejected("\x1b[48;1:;2;3;4t", InputIssueKind::PARAMETER_LIMIT, bounds);
+  bounds.max_parameters = 2;
+  rejected("\x1b[?2048;2;0$y", InputIssueKind::PARAMETER_LIMIT, bounds);
+  bounds = options;
+  bounds.max_digits = 2;
+  rejected("\x1b[48;1:000;2;3;4t", InputIssueKind::PARAMETER_LIMIT, bounds);
+  rejected("\x1b[48;1;2;3;000t", InputIssueKind::PARAMETER_LIMIT, bounds);
+  bounds = options;
+  bounds.max_sequence_bytes = 10;
+
+  check(decode(size + "q", {}, bounds).events ==
+          std::vector<InputEvent>{InputIssue{InputIssueKind::SEQUENCE_LIMIT, 0, 11, true}, text(U'q')},
+        "oversize report discards through final before ordinary input resumes");
+  partitions(size + "q", bounds);
+
+  for (const auto &wire : {size, mode}) {
+    const auto legacy = decode(wire);
+
+    check(legacy.events == std::vector<InputEvent>{InputIssue{InputIssueKind::UNKNOWN_SEQUENCE, 0, wire.size()}},
+          "terminal reports remain disabled by default");
+    rejected(wire, InputIssueKind::UNKNOWN_SEQUENCE, {});
+  }
+
+  const auto payload = size + mode + "\xc3\xa9";
+  const auto pasted = "\x1b[200~" + payload + "\x1b[201~" + size;
+
+  check(decode(pasted, {}, options).outputs == std::vector<Output>{InputEvent{PasteInputEvent{payload}}, report},
+        "paste contents stay literal while following reports are decoded");
+
+  auto decoder = *InputDecoder::create(options);
+  Run probed;
+
+  check(decoder.expectReplies({true, true, 73, 0, 100}).has_value(), "probe window armed beside reports");
+  feed(decoder, size + mode + "\x1b[?1c\x1b[1;2R", 0, probed);
+  check(probed.outputs ==
+          std::vector<Output>{report, reset_mode,
+                              InputEvent{InputProbeCandidate{InputProbeKind::PRIMARY_DEVICE_ATTRIBUTES, 73, {1}, 1}},
+                              InputEvent{InputProbeCandidate{InputProbeKind::CURSOR_POSITION, 73, {1, 2}, 2}}},
+        "protocol reports neither consume nor depend on single-use probe windows");
+
+  for (const auto &wire : {size, mode}) {
+    decoder.reset();
+    probed = {};
+    feed(decoder, std::string_view(wire).substr(0, wire.size() - 1), 0, probed);
+
+    const auto expired = decoder.next(std::string_view(wire).substr(wire.size() - 1), options.sequence_timeout);
+
+    check(expired && expired->status == InputStatus::FAILED && expired->consumed == 0 && !expired->protocol &&
+            expired->event && std::get<InputIssue>(*expired->event).kind == InputIssueKind::TIMEOUT,
+          "incomplete report times out before its final byte is consumed");
+    decoder.reset();
+    probed = {};
+    feed(decoder, std::string_view(wire).substr(0, wire.size() - 1), 0, probed);
+    finish(decoder, 0, probed);
+    check(probed.events.size() == 1 && std::get<InputIssue>(probed.events.front()).kind == InputIssueKind::TRUNCATED,
+          "finish rejects incomplete reports without fabricating protocol data");
+  }
+
+  bounds = options;
+  bounds.work_bytes = size.size();
+  decoder = *InputDecoder::create(bounds);
+
+  auto step = decoder.next(size + "q", 0);
+
+  check(step && step->consumed == size.size() && step->status == InputStatus::PROTOCOL && !step->event &&
+          step->protocol == report,
+        "protocol wins over work limit at the exact ordered boundary");
+  decoder.reset();
+  check(step && step->protocol == report, "returned protocol owns its data across reset");
+
+  const InputStep legacy_step{0, {}, InputStatus::NEED_INPUT};
+  const InputOptions legacy_options{64, 16, 10, 1024 * 1024, 4096, 30, 1000, 30000, true, true};
+
+  check(!legacy_step.protocol && !legacy_options.terminal_reports, "legacy aggregate initializers retain defaults");
+
+  for (const auto &wire : {mixed, pasted, size + mode, std::string("\xc3") + size + "\xa9", size + "\xc3"}) {
+    partitions(wire, options);
+    partitions(wire, options, true);
+  }
+
+  partitions("\x1b[48;1;1;0;0t", options);
+  partitions("\x1b[?0;0$y", options);
+}
+
+void pointerContexts() {
+  InputOptions options;
+
+  options.terminal_reports = true;
+  const InputPointerContext context{InputCoordinateMode::PIXEL, 80, 24, 800, 480, 7};
+  const std::string wire = "\x1b[<0;106;51M";
+  const InputEvent expected = MouseInputEvent{
+    10, 2, MouseButton::LEFT, MouseAction::PRESS, {}, InputPointerPrecision{105, 50, 80, 24, 800, 480, 7}};
+
+  for (std::size_t split = 0; split <= wire.size(); ++split) {
+    auto decoder = *InputDecoder::create(options);
+    Run run;
+
+    decoder.setPointerContext(context);
+    feed(decoder, std::string_view(wire).substr(0, split), 0, run);
+    feed(decoder, std::string_view(wire).substr(split), 0, run);
+    check(run.events == std::vector<InputEvent>{expected},
+          "pixel coordinates retain owning subcell data at every split");
+  }
+
+  auto decoder = *InputDecoder::create(options);
+  Run run;
+
+  decoder.setPointerContext(context);
+  feed(decoder, "\x1b[<0;", 0, run);
+  decoder.setPointerContext({InputCoordinateMode::CELL});
+  feed(decoder, "106;51M\x1b[<0;2;3M", 0, run);
+  check(run.events ==
+          std::vector<InputEvent>{expected, MouseInputEvent{1, 2, MouseButton::LEFT, MouseAction::PRESS, {}}},
+        "a partial CSI keeps its start units while the next CSI uses the new context");
+  decoder.reset();
+  decoder.setPointerContext(context);
+  run = {};
+  feed(decoder, "\xc3", 0, run);
+  decoder.setPointerContext({InputCoordinateMode::CELL});
+  feed(decoder, "\xa9", 0, run);
+  check(run.events == std::vector<InputEvent>{text(U'é')}, "context publication never resets a partial UTF8 scalar");
+  decoder.reset();
+  decoder.setPointerContext({InputCoordinateMode::PIXEL, 80, 24, 0, 480, 8});
+  run = {};
+  feed(decoder, wire + "q", 0, run);
+  check(run.events == std::vector<InputEvent>{text(U'q')},
+        "unusable pixel metrics suppress unsafe pointers but keep keys");
+  decoder.setPointerContext({InputCoordinateMode::CELL});
+  feed(decoder, wire, 0, run);
+  check(run.events.back() == InputEvent{MouseInputEvent{105, 50, MouseButton::LEFT, MouseAction::PRESS, {}}},
+        "cell fallback resumes ordinary pointer coordinates");
+  decoder.reset();
+  decoder.setPointerContext(context);
+  run = {};
+  feed(decoder, "\x1b[200~" + wire, 0, run);
+  decoder.setPointerContext({InputCoordinateMode::CELL});
+  feed(decoder, "\x1b[201~", 0, run);
+  check(run.events == std::vector<InputEvent>{PasteInputEvent{wire}}, "context changes preserve literal partial paste");
+  decoder.reset();
+  decoder.setPointerContext(context);
+
+  auto owned = decoder.next(wire, 0);
+
+  decoder.reset();
+  check(owned && owned->event == expected, "precision sample owns its metrics across reset");
+}
+
 void optionsAndOwnership() {
   InputOptions options;
 
@@ -629,6 +857,8 @@ int main() {
   pasteAndLimits();
   timing();
   partitionAndFuzz();
+  terminalReports();
+  pointerContexts();
   optionsAndOwnership();
   std::cout << "Input partition/fuzz runs: " << partition_runs << "; failures: " << failures << '\n';
 

@@ -16,6 +16,7 @@
 
 namespace allocation_test {
 thread_local bool fail{};
+thread_local bool failDrag{};
 thread_local std::size_t allocations{};
 thread_local void (*hook)(){};
 thread_local int beforeHook{};
@@ -23,6 +24,10 @@ thread_local int beforeHook{};
 
 void *operator new(std::size_t size) {
   ++allocation_test::allocations;
+  if (allocation_test::failDrag && size == sizeof(portals::detail::ScrollDrag)) {
+    allocation_test::failDrag = false;
+    throw std::bad_alloc();
+  }
   if (allocation_test::fail) {
     throw std::bad_alloc();
   }
@@ -517,6 +522,156 @@ void exactStandaloneAndReadonly() {
   keys.mouse(MouseAction::SCROLL, MouseButton::WHEEL_LEFT, 0, 0);
   check(keys.values().vertical.offset.raster == 81,
         "orthogonal wheel preserves its X mapping and bypasses vertical bar");
+}
+
+void dragAllocationAdmission() {
+  BarFixture bar;
+  auto binding = take(bindScrollBar(*bar.router, *bar.tree, bar.bar));
+
+  take(bar.router->setPointerCaptureCapabilities({true, true, true}));
+  allocation_test::failDrag = true;
+  const auto failed = bar.router->dispatch(MouseInputEvent{0, 0, MouseButton::LEFT, MouseAction::PRESS, {}});
+
+  allocation_test::failDrag = false;
+  check(error(failed, TreeError::NO_MEMORY) && take(bar.router->pointerCapture()) == Node<Widget>{} &&
+          bar.values().vertical.offset.raster == 0,
+        "begin-drag allocation failure is typed and preserves controller/capture state");
+  bar.mouse(MouseAction::PRESS, MouseButton::LEFT, 0, 0);
+  allocation_test::failDrag = true;
+  const auto duplicate = bar.router->dispatch(MouseInputEvent{0, 0, MouseButton::LEFT, MouseAction::PRESS, {}});
+  const auto moved = bar.router->dispatch(MouseInputEvent{0, 1, MouseButton::LEFT, MouseAction::MOVE, {}});
+  const bool noAllocation = allocation_test::failDrag;
+
+  allocation_test::failDrag = false;
+  check(duplicate.has_value() && moved.has_value() && noAllocation && take(bar.router->pointerCapture()) == bar.bar,
+        "duplicate press and MOVE retain the existing owning drag without allocating another anchor");
+  bar.mouse(MouseAction::RELEASE, MouseButton::LEFT, 0, 1);
+  take(bar.tree->read(bar.bar, [](const ScrollBar &widget) {
+    check(!detail::ScrollWidgetAccess::state(widget).drag, "release frees the out-of-line drag payload");
+  }));
+  take(setScrollOffset(*bar.tree, bar.bar, ScrollAxis::VERTICAL, {}));
+  bar.layout({1, 10});
+  bar.mouse(MouseAction::PRESS, MouseButton::LEFT, 0, 0);
+  take(bar.router->cancelPointerCapture());
+  take(syncScrollControl(*bar.tree, bar.bar));
+  take(bar.tree->read(bar.bar, [](const ScrollBar &widget) {
+    check(!detail::ScrollWidgetAccess::state(widget).drag,
+          "synchronization retires an externally cancelled drag payload");
+  }));
+}
+
+void preciseThumbDragging() {
+  for (const auto axis : {ScrollAxis::HORIZONTAL, ScrollAxis::VERTICAL}) {
+    BarFixture bar({}, axis);
+    auto binding = take(bindScrollBar(*bar.router, *bar.tree, bar.bar));
+
+    take(bar.router->setPointerCaptureCapabilities({true, true, true}));
+    take(setScrollOffset(*bar.tree, bar.bar, axis, {23, .25}));
+    bar.layout(axis == ScrollAxis::HORIZONTAL ? CellSize{10, 1} : CellSize{1, 10});
+    const auto metrics =
+      axis == ScrollAxis::HORIZONTAL ? bar.values().horizontal.metrics : bar.values().vertical.metrics;
+    const auto thumb = take(scrollThumb(metrics, 23, 10));
+    const auto pressPixel = static_cast<std::uint32_t>(thumb.start * 13 + 5);
+    const auto precise = [&](MouseAction action, std::uint32_t pixel, std::uint64_t generation = 9) {
+      const auto cell = static_cast<std::int32_t>(pixel / 13);
+      InputPointerPrecision sample{axis == ScrollAxis::HORIZONTAL ? pixel : 0,
+                                   axis == ScrollAxis::VERTICAL ? pixel : 0,
+                                   axis == ScrollAxis::HORIZONTAL ? 10U : 1U,
+                                   axis == ScrollAxis::VERTICAL ? 10U : 1U,
+                                   axis == ScrollAxis::HORIZONTAL ? 130U : 13U,
+                                   axis == ScrollAxis::VERTICAL ? 130U : 13U,
+                                   generation};
+
+      return take(bar.router->dispatch(MouseInputEvent{axis == ScrollAxis::HORIZONTAL ? cell : 0,
+                                                       axis == ScrollAxis::VERTICAL ? cell : 0,
+                                                       MouseButton::LEFT,
+                                                       action,
+                                                       {},
+                                                       sample}));
+    };
+    const auto offset = [&] {
+      return axis == ScrollAxis::HORIZONTAL ? bar.values().horizontal.offset : bar.values().vertical.offset;
+    };
+
+    precise(MouseAction::PRESS, pressPixel);
+    precise(MouseAction::MOVE, pressPixel);
+    check(offset().raster == 23 && offset().fraction == .25,
+          "nonzero precise anchor does not jump on unchanged pointer");
+    precise(MouseAction::MOVE, pressPixel + 1);
+    const auto once = offset();
+
+    check(once.raster == 24 && once.fraction > 0 && once.fraction < 1,
+          "one pixel moves within a cell using rational units on both axes");
+    precise(MouseAction::MOVE, 10000);
+    check(offset().raster == 90 && offset().fraction == 0, "precise drag reaches the exact maximum endpoint");
+    precise(MouseAction::MOVE, 0);
+    check(offset().raster == 0 && offset().fraction == 0, "precise drag reaches the exact start endpoint");
+    precise(MouseAction::MOVE, pressPixel, 10);
+    check(take(bar.router->pointerCapture()) == Node<Widget>{}, "changed precision generation cancels before movement");
+
+    take(setScrollOffset(*bar.tree, bar.bar, axis, {1, .5}));
+    bar.layout(axis == ScrollAxis::HORIZONTAL ? CellSize{10, 1} : CellSize{1, 10});
+    precise(MouseAction::PRESS, 5);
+    precise(MouseAction::MOVE, 5);
+    check(offset().raster == 1 && offset().fraction == .5, "a quantized zero thumb still preserves a nonzero anchor");
+    precise(MouseAction::RELEASE, 5);
+
+    const auto maximum = std::numeric_limits<std::uint64_t>::max() - 10;
+
+    take(setScrollMetrics(*bar.tree, bar.bar, {std::numeric_limits<std::uint64_t>::max(), 10}));
+    take(setScrollOffset(*bar.tree, bar.bar, axis, {maximum - 1, .5}));
+    bar.layout(axis == ScrollAxis::HORIZONTAL ? CellSize{10, 1} : CellSize{1, 10});
+    const auto wide = take(scrollThumb({std::numeric_limits<std::uint64_t>::max(), 10}, maximum - 1, 10));
+    const auto nearEnd = static_cast<std::uint32_t>(wide.start * 13 + 5);
+
+    precise(MouseAction::PRESS, nearEnd);
+    precise(MouseAction::MOVE, nearEnd);
+    check(offset().raster == maximum - 1 && offset().fraction == .5,
+          "precise anchor preserves uint64 values above 2^53");
+    precise(MouseAction::MOVE, 10000);
+    check(offset().raster == maximum && offset().fraction == 0, "wide precise drag reaches its exact uint64 endpoint");
+    precise(MouseAction::RELEASE, 10000);
+  }
+}
+
+void preciseAnchorIntegerBoundaries() {
+  for (const auto axis : {ScrollAxis::HORIZONTAL, ScrollAxis::VERTICAL}) {
+    for (const bool forward : {true, false}) {
+      BarFixture bar({}, axis);
+      auto binding = take(bindScrollBar(*bar.router, *bar.tree, bar.bar));
+      take(bar.router->setPointerCaptureCapabilities({true, true, true}));
+      const ScrollAxisMetrics metrics{forward ? 11U : 12U, 10};
+      const ScrollOffset anchor{forward ? 0U : 1U, forward ? 26.0 / 27.0 : 1.0 / 27.0};
+      take(setScrollMetrics(*bar.tree, bar.bar, metrics));
+      take(setScrollOffset(*bar.tree, bar.bar, axis, anchor));
+      bar.layout(axis == ScrollAxis::HORIZONTAL ? CellSize{10, 1} : CellSize{1, 10});
+      const auto thumb = take(scrollThumb(metrics, anchor.raster, 10));
+      const auto pressPixel = static_cast<std::uint32_t>(thumb.start * 27 + 5);
+      const auto precise = [&](MouseAction action, std::uint32_t pixel) {
+        const auto cell = static_cast<std::int32_t>(pixel / 27);
+        InputPointerPrecision sample{axis == ScrollAxis::HORIZONTAL ? pixel : 0,
+                                     axis == ScrollAxis::VERTICAL ? pixel : 0,
+                                     axis == ScrollAxis::HORIZONTAL ? 10U : 1U,
+                                     axis == ScrollAxis::VERTICAL ? 10U : 1U,
+                                     axis == ScrollAxis::HORIZONTAL ? 270U : 27U,
+                                     axis == ScrollAxis::VERTICAL ? 270U : 27U,
+                                     9};
+        take(bar.router->dispatch(MouseInputEvent{axis == ScrollAxis::HORIZONTAL ? cell : 0,
+                                                  axis == ScrollAxis::VERTICAL ? cell : 0,
+                                                  MouseButton::LEFT,
+                                                  action,
+                                                  {},
+                                                  sample}));
+      };
+      precise(MouseAction::PRESS, pressPixel);
+      precise(MouseAction::MOVE, forward ? pressPixel + 1 : pressPixel - 1);
+      const auto value = axis == ScrollAxis::HORIZONTAL ? bar.values().horizontal.offset : bar.values().vertical.offset;
+      check(value.raster == 0 && value.fraction > 0 && value.fraction < 1,
+            forward ? "rounded fraction cannot carry into the exact forward raster"
+                    : "exact reverse borrow is preserved when rounded fractions compare equal");
+      precise(MouseAction::RELEASE, pressPixel);
+    }
+  }
 }
 
 void dragAndTrackClick() {
@@ -1976,6 +2131,9 @@ int main() {
   wheelKeysAndBoundary();
   exactStandaloneAndReadonly();
   dragAndTrackClick();
+  preciseThumbDragging();
+  preciseAnchorIntegerBoundaries();
+  dragAllocationAdmission();
   sharedMappingChange();
   hiddenZeroBudgetAndErrors();
   failureTransactions();

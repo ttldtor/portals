@@ -91,6 +91,8 @@ struct ApplicationOptions {
   std::size_t maxPreparationPasses{3};         ///< Positive layout/view preparation budget for opt-in scenes per frame.
   BackgroundExecutor *backgroundExecutor{};    ///< Optional borrowed host executor; must outlive session cleanup.
   BackgroundOptions background{}; ///< Default synchronous-session worker limits; used only by opt-in scenes.
+  NativePointerOptions
+    nativePointer{}; ///< Advanced AUTO/OFF and declared host-ordering contract; defaults to cell fallback.
 };
 
 /** @brief Owning cumulative totals from a run or session, without samples or terminal data. */
@@ -119,6 +121,19 @@ public:
    * @return One bounded owning input batch, timeout, stop, EOF, or original error.
    */
   virtual TerminalRead read(TerminalDeadline deadline, std::stop_token stop) = 0;
+  /** @brief Handle an ordered terminal report without performing I/O; default ignores it.
+   * @param report Owning report at its exact position in the byte stream.
+   * @return Success or a typed transition failure; read/flush advances requested work.
+   */
+  virtual std::expected<void, TerminalError> protocol(const InputProtocolEvent &report);
+  /** @brief Request bounded fallback when pixel dimensions cease to be usable; default is a no-op.
+   * @param usable Whether the current stream dimensions match the native viewport and contain pixels.
+   * @return Success or a typed transition failure; this hook never waits for I/O.
+   */
+  virtual std::expected<void, TerminalError> pointerMetrics(bool usable);
+  /** @return Whether the adapter needs ordered terminal-report decoding; default is false. */
+  virtual bool terminalReports() const noexcept;
+
   /** @return Current nonnegative viewport, or an original terminal error. */
   virtual std::expected<CellSize, TerminalError> size() const = 0;
   /** @brief Restore owned native screen/modes and close; custom transports define their policy. Idempotent, never
@@ -155,6 +170,15 @@ public:
    * @return One ready owning input batch, no input, EOF, stop, or an explicit error.
    */
   virtual TerminalRead poll(std::stop_token stop) = 0;
+  /** @param report Ordered owning protocol report.
+   * @return Success or a host transition error; default ignores the report without I/O.
+   */
+  virtual std::expected<void, TerminalError> protocol(const InputProtocolEvent &report);
+  /** @param usable Whether current pixel dimensions are valid for the viewport.
+   * @return Success or a host transition error; default requests no work and performs no I/O.
+   */
+  virtual std::expected<void, TerminalError> pointerMetrics(bool usable);
+
   /** @return Current nonnegative viewport, or its original error, without waiting. */
   virtual std::expected<CellSize, TerminalError> size() const = 0;
   /** @param bytes Complete owning transaction; reject before output if it cannot be retained.
@@ -223,6 +247,24 @@ openNativeApplicationTerminal(NativeTerminalHandles handles, TerminalOptions opt
 openNativeApplicationTerminal(NativeTerminalHandles handles, TerminalOptions options,
                               std::chrono::milliseconds modeTimeout, bool mouseReporting, NativeScreenMode screen,
                               bool buttonMotion);
+
+/** @brief Open a native session with optional precise pointer negotiation.
+ * @param handles Exclusively borrowed native terminal handles.
+ * @param options Existing bounded I/O policy.
+ * @param modeTimeout Positive setup/restoration budget; optional probes reserve legacy setup time.
+ * @param mouseReporting Whether managed mouse reporting is enabled.
+ * @param screen Existing managed-screen policy.
+ * @param buttonMotion Whether the scene needs button motion and release.
+ * @param pointer Advanced AUTO/OFF and explicit FIFO host declaration; unconfirmed hosts use cells.
+ * The advanced FIFO path requires an initial cell context; known active 1016 returns INPUT_PROTOCOL with
+ * INITIAL_PIXEL_CONTEXT_UNKNOWN before encoding mutation. OFF/legacy foreign pixel prefixes are outside this guarantee.
+ * @return Owning adapter or a typed setup/cleanup error. Optional unsupported precision falls back successfully.
+ * @throws std::bad_alloc Allocation failure; acquired state receives best-effort cleanup.
+ */
+[[nodiscard]] std::expected<std::unique_ptr<ApplicationTerminal>, TerminalError>
+openNativeApplicationTerminal(NativeTerminalHandles handles, TerminalOptions options,
+                              std::chrono::milliseconds modeTimeout, bool mouseReporting, NativeScreenMode screen,
+                              bool buttonMotion, NativePointerOptions pointer);
 
 class Application;
 

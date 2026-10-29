@@ -5,6 +5,23 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+### Added
+
+- Add optional precise POSIX thumb dragging with owning pixel/context metadata,
+  bounded 1016/2048 negotiation and serialized runtime cell fallback. AUTO preserves
+  ordinary cell input unless the caller declares the required host FIFO ordering;
+  Windows native input keeps its cell backend. Physical pixel-host qualification
+  remains pending. A complete Lyra example supports `--help` and `--fifo-host`.
+
+### Changed
+
+- Add ordered owning CSI 48 and DECRPM results through `InputStep::protocol` and
+  `InputStatus::PROTOCOL`, independent of single-use input probes. Existing mouse
+  and step aggregate prefixes retain trailing defaults, but extended aggregates
+  and terminal virtual interfaces require clients to rebuild; structured bindings
+  must account for the additional fields. TerminalError adds an owning protocol
+  issue for a rejected unknown initial pixel context. This is not an old-binary ABI guarantee.
+
 ## v0.7.0 (2026-10-29)
 
 ### Added
