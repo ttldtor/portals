@@ -1379,7 +1379,7 @@ TEST_CASE("cold final sizing is intersected with theme bounds at managed prepara
   bool installed = true;
 
   take(fixture.app->tree().read(invalid.node(), [&](const Label &widget) {
-    installed = widget.computedStyle().has_value();
+    installed = static_cast<bool>(widget.computedStyle());
   }));
   CHECK_FALSE(installed);
 }

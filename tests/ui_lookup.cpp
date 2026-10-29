@@ -67,7 +67,7 @@ ComputedStyle computed(ui::Scene &owner, Node<Widget> node) {
   owner.configure([&](ManagedScene &, Application &app) {
     REQUIRE(app.tree().read(node, [&](const Widget &widget) {
       REQUIRE(widget.computedStyle());
-      result = *widget.computedStyle();
+      result = widget.computedStyle()->flatten();
     }));
   });
 

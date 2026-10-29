@@ -27,7 +27,12 @@ public:
   }
 
   std::expected<void, TreeError> paint(PaintContext &context) override {
-    const auto resolved = computedStyle() ? *computedStyle() : styleDefaults();
+    std::optional<ComputedStyle> manualStyle;
+    if (!computedStyle()) {
+      manualStyle.emplace(styleDefaults());
+    }
+    const auto resolved =
+      computedStyle() ? detail::ComputedStyleView(*computedStyle()) : detail::ComputedStyleView(*manualStyle);
     const auto style = enabled ? resolved.normal : resolved.disabled;
     const std::array<RenderCommand, 2> commands{FillCommand{bounds_, bounds_, style},
                                                 TextCommand{{}, *frames_[frame], bounds_, style}};

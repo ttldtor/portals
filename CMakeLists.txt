@@ -86,6 +86,7 @@ target_sources(portals_core PRIVATE src/widgets/ui_control_context.cpp src/widge
 target_sources(portals_core PRIVATE src/input_shortcut.cpp)
 
 target_sources(portals_core PRIVATE src/widgets/ui_style.cpp)
+target_sources(portals_core PRIVATE src/styles/style_snapshot.cpp)
 target_sources(portals_core PRIVATE src/widgets/ui_app.cpp)
 
 target_sources(portals_core PRIVATE src/widgets/primitives.cpp src/widgets/glyph_profiles.cpp src/widgets/data_presentation.cpp src/widgets/spinner.cpp)

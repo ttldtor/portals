@@ -39,6 +39,14 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- Store installed widget styles as shared immutable snapshots with optional
+  frame, scrollbar, thumb-segment and glyph-profile blocks. Unbound widgets
+  retain only a small handle, and equal values can share storage. The low-level
+  `Widget::computedStyle()` now returns `const std::shared_ptr<const StyleSnapshot>&`
+  instead of `const std::optional<ComputedStyle>&`: use a boolean test for presence,
+  part accessors for sparse arrays, or `flatten()` for the complete owning value.
+  Standalone `resolveStyle()` and `styleDefaults()` retain their flat-value API.
+
 - `ComboBox` and `DropDown` now default to exact normalized label/token prefix
   matching. For example, `Pra` no longer includes Bratislava; `Pr2` has no match.
   Applications that need the previous one-edit completion can add `.fuzzy()` or

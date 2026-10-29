@@ -869,7 +869,7 @@ Grid::Grid(const GridOptions &options, GridPlacementMode mode, SizePolicy policy
     : SizedWidget(policy), options_(options), mode_(mode) {
   if (scroll) {
     scroll_ = std::make_unique<detail::ScrollWidgetState>(std::move(scroll->controller), width, scroll->area.glyphs,
-                                                        scroll->area.arrows);
+                                                          scroll->area.arrows);
     scroll_->isArea = true;
     scroll_->area = scroll->area;
 
@@ -1311,7 +1311,13 @@ std::expected<void, TreeError> Grid::paint(PaintContext &context) {
     background(headerRectangle->intersection(layout_->headerClip), options_.presentation.header);
 
     if (scroll_) {
-      auto painted = detail::paintScroll(*scroll_, computedStyle() ? *computedStyle() : styleDefaults(), batch);
+      std::optional<ComputedStyle> manualStyle;
+      if (!computedStyle()) {
+        manualStyle.emplace(styleDefaults());
+      }
+      const auto resolved =
+        computedStyle() ? detail::ComputedStyleView(*computedStyle()) : detail::ComputedStyleView(*manualStyle);
+      auto painted = detail::paintScroll(*scroll_, resolved, batch);
 
       if (!painted) {
         return painted;

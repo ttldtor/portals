@@ -151,8 +151,9 @@ public:
    * @return The sink's exact result; text remains owned through the frame.
    */
   std::expected<void, TreeError> paint(PaintContext &context) override {
-    const auto styles = computedStyle().value_or(ComputedStyle{});
-    const auto appearance = focused_ ? styles.focused : styles.normal;
+    const auto normal = computedStyle() ? computedStyle()->normal : CellStyle{};
+    const auto focused = computedStyle() ? computedStyle()->focused : CellStyle{};
+    const auto appearance = focused_ ? focused : normal;
     const std::array<RenderCommand, 2> commands{FillCommand{bounds_, bounds_, appearance},
                                                 TextCommand{{}, text_, bounds_, appearance}};
 
@@ -199,12 +200,12 @@ inline Snapshot inspect(WidgetTree &tree, const FormNodes &nodes, std::string na
     result.checked = checkbox.checked();
   }));
   take(tree.read(nodes.title, [&](const Label &title) {
-    check(title.computedStyle().has_value(), "Standard control has no computed style");
+    check(static_cast<bool>(title.computedStyle()), "Standard control has no computed style");
     result.light = title.computedStyle()->normal.background == RgbColor{240, 245, 250};
   }));
 
   auto meter = tree.read(nodes.meter, [](const Meter &widget) {
-    check(widget.computedStyle().has_value(), "Custom widget has no computed style");
+    check(static_cast<bool>(widget.computedStyle()), "Custom widget has no computed style");
   });
 
   result.meterAlive = meter.has_value();

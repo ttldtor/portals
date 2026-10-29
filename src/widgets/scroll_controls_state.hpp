@@ -202,7 +202,7 @@ commitScroll(WidgetTree &tree, Node<Widget> node, ScrollWidgetState &state, Scro
 std::expected<ScrollAreaGeometry, TreeError> areaPlacement(const ScrollWidgetState &state, CellSize available);
 std::expected<void, TreeError> arrangeScroll(ScrollWidgetState &state, CellSize allocation);
 ComputedStyle scrollDefaults(const ScrollWidgetState &state);
-std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, const ComputedStyle &style, PaintContext &context);
+std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, ComputedStyleView style, PaintContext &context);
 std::expected<EventReply, TreeError> scrollInput(EventRouter &router, WidgetTree &tree, Node<Widget> node,
                                                  ScrollWidgetState &state, const RoutedEvent &event);
 } // namespace portals::detail

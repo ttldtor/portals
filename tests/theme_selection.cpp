@@ -60,7 +60,7 @@ struct SelectionFixture {
   ComputedStyle read() {
     ComputedStyle result;
     take(app->tree().read(button.node(), [&](const Button &value) {
-      result = *value.computedStyle();
+      result = value.computedStyle()->flatten();
     }));
 
     return result;

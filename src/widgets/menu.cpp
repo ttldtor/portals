@@ -67,7 +67,12 @@ std::expected<void, TreeError> Menu::paint(PaintContext &context) {
     return {};
   }
 
-  const auto resolved = computedStyle() ? *computedStyle() : styleDefaults();
+  std::optional<ComputedStyle> manualStyle;
+  if (!computedStyle()) {
+    manualStyle.emplace(styleDefaults());
+  }
+  const auto resolved =
+    computedStyle() ? detail::ComputedStyleView(*computedStyle()) : detail::ComputedStyleView(*manualStyle);
   const auto background = enabled() ? resolved.normal : resolved.disabled;
   const RenderCommand fill = FillCommand{bounds_, bounds_, background};
   auto submitted = context.submit(std::span(&fill, 1));

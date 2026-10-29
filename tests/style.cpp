@@ -4,6 +4,7 @@
 #include <portals/controls.hpp>
 #include <portals/diff.hpp>
 #include <portals/line_edit.hpp>
+#include <portals/scroll_controls.hpp>
 #include <portals/style.hpp>
 #include <portals/virtual_table.hpp>
 
@@ -109,7 +110,7 @@ ComputedStyle readStyle(Fixture &fixture, Node<Widget> node) {
   ComputedStyle result;
 
   take(fixture.tree->read(node, [&](const Widget &widget) {
-    result = widget.computedStyle().value();
+    result = widget.computedStyle()->flatten();
   }));
 
   return result;
@@ -1034,6 +1035,182 @@ void thumbResolutionNoAllocation() {
         "matching thumb resolution and owning copies remain noexcept and allocation-free");
 }
 
+class SnapshotDefaults final : public Widget {
+public:
+  explicit SnapshotDefaults(ComputedStyle value = {}) : value(value) {
+  }
+
+  ComputedStyle styleDefaults() const override {
+    return value;
+  }
+
+  ComputedStyle value;
+};
+
+std::shared_ptr<const StyleSnapshot> readSnapshot(Fixture &fixture, Node<Widget> node) {
+  std::shared_ptr<const StyleSnapshot> result;
+  take(fixture.tree->read(node, [&](const Widget &widget) {
+    result = widget.computedStyle();
+  }));
+  return result;
+}
+
+ComputedStyle rareStyle() {
+  ComputedStyle value;
+  value.frame[0].line = CellStyle{.bold = false};
+  value.scrollbar[0].trackPattern = ScrollbarPattern::LEGACY;
+  value.scrollbarThumbSegments.emplace();
+  value.glyphs[0].profile = GlyphProfile::DEFAULT;
+  return value;
+}
+
+void sparseSnapshotValuesAndAllocation() {
+  static_assert(noexcept(std::declval<const StyleSnapshot &>().flatten()));
+  static_assert(noexcept(std::declval<const Widget &>().computedStyle()));
+  const ComputedStyle ordinary;
+  StyleSnapshot plain(ordinary);
+  check(!plain.hasFrame() && !plain.hasScrollbar() && !plain.hasThumbSegments() && !plain.hasGlyphs(),
+        "ordinary distinct styles allocate no irrelevant extension blocks");
+
+  const auto rare = rareStyle();
+  bool complete{};
+  int failedAllocations{};
+  for (std::ptrdiff_t budget = 0; budget < 10 && !complete; ++budget) {
+    allocation_test::remaining = budget;
+    try {
+      const auto snapshot = std::make_shared<const StyleSnapshot>(rare);
+      allocation_test::remaining = -1;
+      check(snapshot->hasFrame() && snapshot->hasScrollbar() && snapshot->hasThumbSegments() && snapshot->hasGlyphs(),
+            "explicit empty/false/default choices retain all relevant extension blocks");
+      allocation_test::remaining = 0;
+      const auto flat = snapshot->flatten();
+      const auto equal = *snapshot == rare;
+      const auto hashesAgree = snapshot->contentHash() == StyleSnapshot::contentHash(rare);
+      const auto &frame = snapshot->frame();
+      const auto &scrollbar = snapshot->scrollbar();
+      const auto &glyphs = snapshot->glyphs();
+      const auto *thumb = snapshot->scrollbarThumbSegments();
+      allocation_test::remaining = -1;
+      check(flat == rare && equal && hashesAgree && frame[0].line && scrollbar[0].trackPattern && glyphs[0].profile &&
+              thumb,
+            "snapshot getters, equality, hash and explicit owning flatten are complete without allocation");
+      complete = true;
+    } catch (const std::bad_alloc &) {
+      allocation_test::remaining = -1;
+      ++failedAllocations;
+    }
+  }
+  check(complete && failedAllocations == 5, "snapshot/control block and each sparse block have exercised failures");
+}
+
+void snapshotSharingAndRetirement() {
+  std::shared_ptr<const StyleSnapshot> retained;
+  std::weak_ptr<const StyleSnapshot> retired;
+  {
+    Fixture fixture;
+    auto first = take(fixture.tree->emplace<Widget>(fixture.root));
+    auto second = take(fixture.tree->emplace<Widget>(fixture.root));
+    take(fixture.styles.bindBatch(
+      std::array{StyleRegistration{first, {.type = "Widget"}}, StyleRegistration{second, {.type = "Widget"}}}));
+    retained = readSnapshot(fixture, first);
+    retired = retained;
+    take(fixture.tree->read(first, [&](const Widget &widget) {
+      allocation_test::remaining = 0;
+      const auto owner = widget.computedStyle();
+      const auto flat = owner->flatten();
+      allocation_test::remaining = -1;
+      check(owner == retained && flat == ComputedStyle{}, "getter ownership and owning flatten never allocate");
+    }));
+    check(retained == readSnapshot(fixture, second), "equal widget values share one immutable resident snapshot");
+    take(fixture.styles.refresh());
+    check(retained == readSnapshot(fixture, first), "equal refresh reuses a live snapshot by value");
+    take(fixture.styles.replacePss("Widget{bold:true;}"));
+    check(!retained->normal.bold && readSnapshot(fixture, first)->normal.bold,
+          "retained owning handles preserve old values after atomic publication");
+    take(fixture.tree->remove(first));
+    take(fixture.tree->remove(second));
+    check(!retired.expired(), "caller ownership keeps a retired snapshot alive");
+  }
+  check(!retained->normal.bold, "retained snapshot outlives its widget, tree and engine");
+  retained.reset();
+  check(retired.expired(), "no permanent interning pool retains retired presentation");
+}
+
+void sparseSnapshotTransactionFailures() {
+  Fixture fixture;
+  auto first = take(fixture.tree->emplace<SnapshotDefaults>(fixture.root));
+  auto second = take(fixture.tree->emplace<SnapshotDefaults>(fixture.root, rareStyle()));
+  take(fixture.styles.bind(first, {.type = "Widget"}));
+  const auto previous = readSnapshot(fixture, first);
+  const auto revision = fixture.styles.revision();
+  take(fixture.tree->edit(first, [](SnapshotDefaults &widget) {
+    widget.value = rareStyle();
+  }));
+  take(fixture.tree->consumeFrameRequest());
+  const std::array registrations{StyleRegistration{first, {.type = "Widget"}},
+                                 StyleRegistration{second, {.type = "Widget"}}};
+  int failedAllocations{};
+  bool complete{};
+  for (std::ptrdiff_t budget = 0; budget < 200 && !complete; ++budget) {
+    allocation_test::remaining = budget;
+    auto result = fixture.styles.bindBatch(registrations);
+    allocation_test::remaining = -1;
+    if (result) {
+      complete = true;
+    } else {
+      ++failedAllocations;
+      check(result.error().cause == TreeError::NO_MEMORY && fixture.styles.revision() == revision &&
+              readSnapshot(fixture, first) == previous && !readSnapshot(fixture, second) &&
+              take(fixture.tree->consumeFrameRequest()) == Invalidation::NONE,
+            "table, snapshot and rare-block allocation failures preserve old/new bindings and invalidation");
+      take(fixture.tree->read(first, [&](const Widget &widget) {
+        check(widget.styleRevision() == revision, "failed staging preserves each widget revision");
+      }));
+    }
+  }
+  check(complete && failedAllocations >= 7 && fixture.styles.revision() == revision + 1 &&
+          readSnapshot(fixture, first) == readSnapshot(fixture, second) &&
+          readSnapshot(fixture, first)->flatten() == rareStyle(),
+        "mixed batch publishes one shared complete sparse snapshot after the allocation sweep");
+}
+
+void independentBlockSharingAndExplicitMetadata() {
+  Fixture fixture;
+  auto first = take(fixture.tree->emplace<SnapshotDefaults>(fixture.root, rareStyle()));
+  auto different = rareStyle();
+  different.minWidth = 9;
+  auto second = take(fixture.tree->emplace<SnapshotDefaults>(fixture.root, different));
+  different.frame[0].line->italic = true;
+  auto third = take(fixture.tree->emplace<SnapshotDefaults>(fixture.root, different));
+  auto area = take(fixture.tree->emplace<ScrollArea>(fixture.root));
+  take(fixture.styles.bindBatch(
+    std::array{StyleRegistration{first, {.type = "Control"}}, StyleRegistration{second, {.type = "Control"}},
+               StyleRegistration{third, {.type = "Control"}}, StyleRegistration{area, {.type = "Control"}}}));
+  const auto theme = modernTheme();
+  take(fixture.styles.replace(theme));
+  const auto left = readSnapshot(fixture, first);
+  const auto right = readSnapshot(fixture, second);
+  const auto changed = readSnapshot(fixture, third);
+  const auto scroll = readSnapshot(fixture, area);
+  ComputedStyle scrollDefaults;
+  take(fixture.tree->read(area, [&](const ScrollArea &widget) {
+    scrollDefaults = widget.styleDefaults();
+  }));
+  check(left != right && left->minWidth == 0 && right->minWidth == 9 && &left->frame() == &right->frame() &&
+          &left->scrollbar() == &right->scrollbar() &&
+          left->scrollbarThumbSegments() == right->scrollbarThumbSegments() && &left->glyphs() == &right->glyphs(),
+        "distinct ordinary core values share each equal rare block independently");
+  check(&left->frame() != &changed->frame() && &left->scrollbar() == &changed->scrollbar() &&
+          left->scrollbarThumbSegments() == changed->scrollbarThumbSegments() && &left->glyphs() == &changed->glyphs(),
+        "one changed extension preserves independent sharing of the other families");
+  check(scroll->flatten() == resolveStyle(theme, {.type = "Control"}, scrollDefaults) && scroll->frame()[1].line &&
+          scroll->scrollbar()[1].thumb && scroll->frame()[1].line == scroll->scrollbar()[1].thumb,
+        "real scroll controls retain focused chrome with explicit application-owned Control metadata");
+  take(fixture.styles.refresh());
+  check(left == readSnapshot(fixture, first) && right == readSnapshot(fixture, second),
+        "live snapshots and independently shared extensions survive equal refresh without replacement");
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -1043,6 +1220,10 @@ int main(int argc, char **argv) {
 
   parserAndCascade(argv[1]);
   thumbResolutionNoAllocation();
+  sparseSnapshotValuesAndAllocation();
+  snapshotSharingAndRetirement();
+  sparseSnapshotTransactionFailures();
+  independentBlockSharingAndExplicitMetadata();
   transactionsAndControls();
   customAtomicity();
   batchTransactions();

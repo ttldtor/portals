@@ -621,7 +621,12 @@ std::expected<void, TreeError> Border::paint(PaintContext &context) {
     return valid;
   }
 
-  const auto resolved = computedStyle() ? *computedStyle() : styleDefaults();
+  std::optional<ComputedStyle> manualStyle;
+  if (!computedStyle()) {
+    manualStyle.emplace(styleDefaults());
+  }
+  const auto resolved =
+    computedStyle() ? detail::ComputedStyleView(*computedStyle()) : detail::ComputedStyleView(*manualStyle);
   const auto style = !enabled_ ? resolved.disabled : focused_ ? resolved.focused : resolved.normal;
 
   const auto index = !enabled_ ? 2 : focused_ ? 1 : 0;
@@ -690,7 +695,12 @@ std::expected<void, TreeError> Gauge::paint(PaintContext &context) {
     return {};
   }
 
-  const auto resolved = computedStyle() ? *computedStyle() : styleDefaults();
+  std::optional<ComputedStyle> manualStyle;
+  if (!computedStyle()) {
+    manualStyle.emplace(styleDefaults());
+  }
+  const auto resolved =
+    computedStyle() ? detail::ComputedStyleView(*computedStyle()) : detail::ComputedStyleView(*manualStyle);
   const auto style = enabled_ ? resolved.normal : resolved.disabled;
   const RenderCommand background = FillCommand{bounds_, bounds_, style};
   auto result = context.submit(std::span(&background, 1));

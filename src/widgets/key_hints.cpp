@@ -244,7 +244,12 @@ std::expected<void, TreeError> KeyHints::paint(PaintContext &context) {
   if (bounds_.empty()) {
     return {};
   }
-  const auto resolved = computedStyle() ? *computedStyle() : Control::styleDefaults();
+  std::optional<ComputedStyle> manualStyle;
+  if (!computedStyle()) {
+    manualStyle.emplace(Control::styleDefaults());
+  }
+  const auto resolved =
+    computedStyle() ? detail::ComputedStyleView(*computedStyle()) : detail::ComputedStyleView(*manualStyle);
   const auto style = !enabled() ? resolved.disabled : focused() ? resolved.focused : resolved.normal;
   const RenderCommand command = TextCommand{{}, *caption(*presentation_), bounds_, style};
   return context.submit(std::span(&command, 1));

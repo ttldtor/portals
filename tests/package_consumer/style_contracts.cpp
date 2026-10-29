@@ -19,7 +19,7 @@ template <class T> void requireWidth(portals::ui::Scene &scene, portals::ui::Ref
     require(app.tree()
               .read(reference.node(),
                     [&](const portals::Widget &widget) {
-                      require(widget.computedStyle().has_value());
+                      require(static_cast<bool>(widget.computedStyle()));
                       require(widget.computedStyle()->minWidth == 12);
                       require(widget.computedStyle()->normal.bold);
                       visited = true;

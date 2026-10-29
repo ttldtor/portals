@@ -136,16 +136,16 @@ int main() {
     | ui::style("ScrollArea{scrollbar-track-foreground:#8090a0;scrollbar-thumb-bold:true;scrollbar-thumb-start-foreground:#0a0b0c;scrollbar-thumb-body-bold:false;} ScrollBar{scrollbar-corner-underline:false;scrollbar-thumb-end-italic:true;scrollbar-thumb-single-underline:true;}")
     | ui::configure([&](ManagedScene &owner) -> std::expected<void, ManagedError> {
         checked(application->tree().read(outer.node(), [&](const ScrollArea &widget) {
-          check(widget.computedStyle() && widget.computedStyle()->scrollbarThumbSegments,
+          check(widget.computedStyle() && widget.computedStyle()->scrollbarThumbSegments(),
                 "Installed ScrollArea segment styles did not reach mounted preparation");
-          const auto &parts = (*widget.computedStyle()->scrollbarThumbSegments)[0];
+          const auto &parts = (*widget.computedStyle()->scrollbarThumbSegments())[0];
           check(parts.start.foreground == RgbColor{10, 11, 12} && !parts.body.bold,
                 "Installed ScrollArea segment fallback or explicit false changed");
         }));
         checked(application->tree().read(standalone.node(), [&](const ScrollBar &widget) {
-          check(widget.computedStyle() && widget.computedStyle()->scrollbarThumbSegments,
+          check(widget.computedStyle() && widget.computedStyle()->scrollbarThumbSegments(),
                 "Installed ScrollBar segment styles did not reach mounted preparation");
-          const auto &parts = (*widget.computedStyle()->scrollbarThumbSegments)[0];
+          const auto &parts = (*widget.computedStyle()->scrollbarThumbSegments())[0];
           check(parts.end.italic && parts.single.underline, "Installed ScrollBar segment attributes changed");
         }));
         check(owner.requiresPointerMotion(), "Mounted scroll controls did not request the native profile");

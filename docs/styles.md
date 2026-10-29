@@ -221,7 +221,7 @@ States are `normal`, `focused`, `disabled`, `selected`, `header`, and `caret`.
 They select presentation variants, not behavioral flags. Controls use their
 existing synchronized focus/eligibility. List/table selection remains a stable
 row identity; the editor keeps its own selection and caret. Generic widgets
-can read the complete `ComputedStyle` and choose the appropriate variant.
+can read the installed `StyleSnapshot` and choose the appropriate variant.
 A rule without a state matches every variant; `:normal` matches only normal.
 
 Each declaration cascades independently. Specificity compares `(has id,
@@ -235,6 +235,31 @@ manual options on a bound widget, call `styles.refresh()` before the next frame;
 that recomputes the defaults beneath the active sheet. Replacing with an empty
 sheet restores the latest defaults. Destroying the engine leaves the last
 computed styles installed; it does not mutate the tree from a destructor.
+
+## Reading an installed style
+
+`Widget::computedStyle()` returns a borrowed
+`const std::shared_ptr<const StyleSnapshot>&`, empty before the widget is bound.
+Read it inside the tree's `read` callback or frame. The handle stored in the
+widget changes at the next successful style publication. Copy the shared pointer
+when the value must survive that publication or removal of the widget; the copy
+owns the immutable presentation and does not keep the widget alive.
+
+Equal installed values can share one snapshot. Each widget still has its own
+style revision. Ordinary colors, attributes and `minWidth` live in the snapshot;
+frame, scrollbar, thumb-segment and glyph-profile data have separate storage
+allocated only when present. Reading a snapshot or its parts performs no allocation.
+`frame()`, `scrollbar()` and `glyphs()` return borrowed arrays, including constant
+empty arrays for absent blocks. `scrollbarThumbSegments()` returns a pointer or
+null. Keep the owning snapshot alive while using those references or pointers.
+
+For low-level consumers migrating from `std::optional<ComputedStyle>`, use the
+handle's boolean test instead of `has_value()`. The common paint fields retain
+their names, for example `snapshot->normal`. Use `snapshot->flatten()` when a
+complete mutable, owning `ComputedStyle` is needed. This explicit conversion is
+allocation-free; avoid making that large copy for each paint operation.
+`resolveStyle()` and custom `styleDefaults()` continue to use the complete flat
+`ComputedStyle` value with their existing contracts.
 
 ## Atomicity and errors
 

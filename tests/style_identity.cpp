@@ -16,7 +16,7 @@ template <class T> ComputedStyle computed(ui::Scene &scene, const ui::Ref<T> &re
 
   scene.configure([&](ManagedScene &, Application &app) {
     REQUIRE(app.tree().read(reference.node(), [&](const Widget &widget) {
-      result = widget.computedStyle();
+      result = widget.computedStyle() ? std::optional<ComputedStyle>(widget.computedStyle()->flatten()) : std::nullopt;
     }));
   });
   REQUIRE(scene.checked());

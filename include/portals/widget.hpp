@@ -62,17 +62,19 @@ public:
   virtual ComputedStyle styleDefaults() const;
 
   /** @brief Inspect the last atomically installed theme inside tree.read/frame.
-   * @return Borrowed optional value,
-   * empty before binding; expires on the next style transaction.
+   * @return Borrowed owning handle, empty before binding. The handle reference and nested
+   * borrows expire on the next style publication. Copy the shared pointer to retain the
+   * immutable snapshot independently of subsequent publications or widget destruction.
+   * Read access never allocates; use StyleSnapshot::flatten for an owning legacy flat value.
    */
-  const std::optional<ComputedStyle> &computedStyle() const noexcept;
+  const std::shared_ptr<const StyleSnapshot> &computedStyle() const noexcept;
 
   /** @return Last installed engine revision, or zero before binding; UI reads only. */
   std::uint64_t styleRevision() const noexcept;
 
 private:
   friend class StyleEngine;
-  std::optional<ComputedStyle> computedStyle_;
+  std::shared_ptr<const StyleSnapshot> computedStyle_;
   std::uint64_t styleRevision_{};
 };
 

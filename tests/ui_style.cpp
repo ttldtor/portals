@@ -1349,7 +1349,7 @@ TEST_CASE("scoped layout admission keeps metadata and layer atomic under allocat
 
     owner.configure([&](ManagedScene &, Application &application) {
       REQUIRE(application.tree().read(group.node(), [&](const Widget &widget) {
-        hasStyle = widget.computedStyle().has_value();
+        hasStyle = static_cast<bool>(widget.computedStyle());
         bold = widget.computedStyle() && widget.computedStyle()->normal.bold;
       }));
     });
@@ -1594,7 +1594,7 @@ TEST_CASE("frame PSS string admission reaches native preparation rendering and t
     auto &app = ui::detail::SceneAccess::application(managed);
     REQUIRE(app.tree().read(area.node(), [&](const ScrollArea &widget) {
       REQUIRE(widget.computedStyle());
-      const auto &parts = widget.computedStyle()->frame[0];
+      const auto &parts = widget.computedStyle()->frame()[0];
       REQUIRE(parts.line);
       REQUIRE(parts.title);
       REQUIRE(parts.ends);
@@ -1705,7 +1705,7 @@ TEST_CASE("scrollbar PSS all parts reach real preparation run rendering and term
     auto &app = ui::detail::SceneAccess::application(managed);
     REQUIRE(app.tree().read(area.node(), [&](const ScrollArea &widget) {
       REQUIRE(widget.computedStyle());
-      const auto &parts = widget.computedStyle()->scrollbar[0];
+      const auto &parts = widget.computedStyle()->scrollbar()[0];
       REQUIRE(parts.track);
       REQUIRE(parts.thumb);
       REQUIRE(parts.ends);
@@ -1723,10 +1723,10 @@ TEST_CASE("scrollbar PSS all parts reach real preparation run rendering and term
       CHECK(parts.corner->background == RgbColor{22, 23, 24});
       CHECK_FALSE(parts.thumb->bold);
       CHECK_FALSE(parts.ends->underline);
-      CHECK_FALSE(widget.computedStyle()->scrollbar[1].track->bold);
-      CHECK(widget.computedStyle()->scrollbar[2].thumb->foreground == RgbColor{32, 33, 34});
-      REQUIRE(widget.computedStyle()->scrollbarThumbSegments);
-      const auto &segments = *widget.computedStyle()->scrollbarThumbSegments;
+      CHECK_FALSE(widget.computedStyle()->scrollbar()[1].track->bold);
+      CHECK(widget.computedStyle()->scrollbar()[2].thumb->foreground == RgbColor{32, 33, 34});
+      REQUIRE(widget.computedStyle()->scrollbarThumbSegments());
+      const auto &segments = *widget.computedStyle()->scrollbarThumbSegments();
       CHECK(segments[0].start.foreground == RgbColor{49, 50, 51});
       CHECK_FALSE(segments[0].body.italic);
       CHECK(segments[0].end.background == RgbColor{52, 53, 54});
