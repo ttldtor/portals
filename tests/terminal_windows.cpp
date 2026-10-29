@@ -9,6 +9,7 @@
 #define NOMINMAX
 #include <windows.h>
 
+#include <array>
 #include <atomic>
 #include <bit>
 #include <cstdint>
@@ -419,6 +420,50 @@ DWORD inputCase(HANDLE resultPipe) {
             std::get<MouseInputEvent>(released[1]).action == MouseAction::MOVE &&
             std::get<MouseInputEvent>(released[1]).button == MouseButton::NO_BUTTON,
           "native no-button motion is distinguished from an unknown held-button identity");
+
+  struct WheelCase {
+    SHORT delta;
+    double magnitude;
+    MouseButton vertical;
+    MouseButton horizontal;
+  };
+
+  constexpr std::array WHEEL_CASES{
+    WheelCase{15, 0.125, MouseButton::WHEEL_UP, MouseButton::WHEEL_RIGHT},
+    WheelCase{-15, 0.125, MouseButton::WHEEL_DOWN, MouseButton::WHEEL_LEFT},
+    WheelCase{120, 1.0, MouseButton::WHEEL_UP, MouseButton::WHEEL_RIGHT},
+    WheelCase{-120, 1.0, MouseButton::WHEEL_DOWN, MouseButton::WHEEL_LEFT},
+    WheelCase{240, 2.0, MouseButton::WHEEL_UP, MouseButton::WHEEL_RIGHT},
+    WheelCase{-240, 2.0, MouseButton::WHEEL_DOWN, MouseButton::WHEEL_LEFT},
+    WheelCase{32767, 32767.0 / 120.0, MouseButton::WHEEL_UP, MouseButton::WHEEL_RIGHT},
+    WheelCase{-32768, 32768.0 / 120.0, MouseButton::WHEEL_DOWN, MouseButton::WHEEL_LEFT}};
+
+  for (const DWORD axis : {MOUSE_WHEELED, MOUSE_HWHEELED}) {
+    std::vector<INPUT_RECORD> wheelRecords;
+    auto wheel = mouse;
+
+    wheel.Event.MouseEvent.dwEventFlags = axis;
+    wheel.Event.MouseEvent.dwControlKeyState = SHIFT_PRESSED | LEFT_CTRL_PRESSED;
+    wheelRecords.push_back(wheel);
+
+    for (const auto &sample : WHEEL_CASES) {
+      wheel.Event.MouseEvent.dwButtonState = static_cast<DWORD>(static_cast<WORD>(sample.delta)) << 16;
+      wheelRecords.push_back(wheel);
+    }
+
+    native.inject(wheelRecords);
+
+    const auto wheelEvents = collect(session, WHEEL_CASES.size());
+
+    for (std::size_t index = 0; index < WHEEL_CASES.size(); ++index) {
+      const auto &sample = WHEEL_CASES[index];
+      const auto direction = axis == MOUSE_WHEELED ? sample.vertical : sample.horizontal;
+
+      require(std::get<MouseInputEvent>(wheelEvents[index]) ==
+                MouseInputEvent{4, 7, direction, MouseAction::SCROLL, {true, false, true, false}, {}, sample.magnitude},
+              "native wheel preserves axis, direction, normalized magnitude and modifiers; zero is ignored");
+    }
+  }
 
   auto highRepeat = key(L'\xd83d');
   auto lowRepeat = key(L'\xde00');

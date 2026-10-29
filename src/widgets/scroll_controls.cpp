@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #include "glyph_profiles.hpp"
 #include "scroll_controls_state.hpp"
+#include "scroll_motion.hpp"
 #include <portals/grid.hpp>
 
 #include <limits>
@@ -169,6 +170,7 @@ std::expected<void, TreeError> releaseScrollInitialization(WidgetTree &tree, Nod
     if (auto *state = ScrollWidgetAccess::state(widget)) {
       detail::cancelScrollDrag(*state);
       cancelScrollRepeat(*state);
+      cancelOwnedScrollMotion(*state);
       state->lease.reset();
       state->node = {};
     }
@@ -185,17 +187,28 @@ std::expected<ScrollControllerChange, TreeError> commitScroll(WidgetTree &tree, 
   if (!state.lease || state.retired || state.node != node.id()) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
-  if (publication == ScrollPublication::POSITION) {
+  if (publication != ScrollPublication::PREPARATION) {
     auto intent = checkScrollIntent(state, plan);
     if (!intent) {
       return std::unexpected(intent.error());
     }
   }
+  const bool competing = publication != ScrollPublication::MOTION;
+  const auto session = state.lease->session;
+
+  if (competing && session->motionCommand == std::numeric_limits<std::uint64_t>::max()) {
+    return std::unexpected(TreeError::IDENTITY_EXHAUSTED);
+  }
+
   auto change = ScrollControllerAccess::commit(*state.lease, std::move(plan));
   if (!change) {
     return std::unexpected(change.error());
   }
-  if (publication == ScrollPublication::POSITION && change->logicalChanged) {
+  if (competing && (publication == ScrollPublication::POSITION || change->logicalChanged || change->metricsChanged)) {
+    ++session->motionCommand;
+    cancelScrollMotion(state);
+  }
+  if (publication != ScrollPublication::PREPARATION && change->logicalChanged) {
     recordScrollIntent(state);
   }
   if (change->metricsChanged) {
@@ -260,6 +273,7 @@ ScrollArea::ScrollArea(std::shared_ptr<ScrollController> controller, WidthPolicy
 ScrollArea::~ScrollArea() = default;
 
 void ScrollArea::unmount() {
+  detail::cancelOwnedScrollMotion(*state_);
   detail::cancelScrollRepeat(*state_);
   state_->retired = true;
   state_->intent.reset();
@@ -279,6 +293,7 @@ ScrollBar::ScrollBar(std::shared_ptr<ScrollController> controller, ScrollAxis ax
 ScrollBar::~ScrollBar() = default;
 
 void ScrollBar::unmount() {
+  detail::cancelOwnedScrollMotion(*state_);
   detail::cancelScrollRepeat(*state_);
   state_->retired = true;
   state_->intent.reset();
@@ -325,6 +340,10 @@ std::expected<void, TreeError> setScrollMetrics(WidgetTree &tree, Node<ScrollBar
       return staged;
     }
     auto result = detail::commitScroll(tree, node, state, std::move(*plan), detail::ScrollPublication::PREPARATION);
+    if (result && !result->logicalChanged && !result->metricsChanged) {
+      ++state.lease->session->motionCommand;
+      detail::cancelScrollMotion(state);
+    }
     if (result && result->metricsChanged) {
       detail::cancelScrollDrag(state);
     }
@@ -446,6 +465,9 @@ std::expected<void, TreeError> syncScrollControl(WidgetTree &tree, Node<Widget> 
     if (!*eligible || !state->capture.connected()) {
       detail::cancelScrollRepeat(*state);
       detail::cancelScrollDrag(*state);
+    }
+    if (!*eligible || !detail::smoothScrollEnabled(*state)) {
+      detail::cancelOwnedScrollMotion(*state);
     }
   });
   return edited ? result : edited;
@@ -665,6 +687,9 @@ std::expected<void, TreeError> setScrollbarSkin(WidgetTree &tree, Node<Widget> n
         state.glyphSelection = skin.glyphSelection;
         state.glyphProfiles = std::move(*profiles);
         ++state.skinRevision;
+        if (!detail::smoothScrollEnabled(state)) {
+          detail::cancelOwnedScrollMotion(state);
+        }
       }
     } catch (const std::bad_alloc &) {
       result = std::unexpected(TreeError::NO_MEMORY);

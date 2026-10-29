@@ -216,7 +216,7 @@ struct ScrollThumb {
 /** @brief Owning thumb interval in eighths of a track cell; no references or invalidation. */
 struct ScrollFractionalThumb {
   std::int64_t startEighths{};  ///< Inclusive start, relative to the trimmed track.
-  std::int64_t lengthEighths{}; ///< Integral cell length multiplied by eight.
+  std::int64_t lengthEighths{}; ///< Proportional length quantized directly to eighths of a cell.
   std::int64_t travelEighths{}; ///< Exact maximum start, including the endpoint.
 };
 
@@ -231,17 +231,23 @@ struct ScrollFractionalThumb {
 [[nodiscard]] constexpr std::expected<ScrollFractionalThumb, TreeError>
 scrollFractionalThumb(ScrollAxisMetrics metrics, ScrollOffset offset, std::int32_t trackLength,
                       std::int32_t minimumThumb = 1) noexcept {
-  if (!validScrollOffset(offset)) {
+  if (!validScrollOffset(offset) || trackLength < 0 || minimumThumb <= 0) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
-  const auto integral = scrollThumb(metrics, offset.raster, trackLength, minimumThumb);
-  if (!integral) {
-    return std::unexpected(integral.error());
+  if (trackLength == 0) {
+    return ScrollFractionalThumb{};
   }
   constexpr std::uint64_t EIGHTHS_PER_CELL = 8;
   const auto maximum = scrollRange(metrics).maximum;
-  const auto travel = static_cast<std::uint64_t>(integral->travel) * EIGHTHS_PER_CELL;
-  const auto length = static_cast<std::int64_t>(integral->length) * static_cast<std::int64_t>(EIGHTHS_PER_CELL);
+  const auto track = static_cast<std::uint64_t>(trackLength) * EIGHTHS_PER_CELL;
+  if (maximum == 0) {
+    return ScrollFractionalThumb{0, static_cast<std::int64_t>(track), 0};
+  }
+  const auto proportional =
+    detail::scrollMultiplyDivide(std::min(metrics.viewport, metrics.extent), track, metrics.extent);
+  const auto minimum = static_cast<std::uint64_t>(std::min(minimumThumb, trackLength)) * EIGHTHS_PER_CELL;
+  const auto length = static_cast<std::int64_t>(std::clamp(proportional.quotient, minimum, track));
+  const auto travel = track - static_cast<std::uint64_t>(length);
   if (maximum == 0 || travel == 0) {
     return ScrollFractionalThumb{0, length, static_cast<std::int64_t>(travel)};
   }

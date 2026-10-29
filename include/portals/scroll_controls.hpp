@@ -10,9 +10,10 @@
 #include <portals/scrollbar_skin.hpp>
 
 namespace portals {
-/** @brief Existing low-level scheduler services for held-arrow input; no new clock is created.
+/** @brief Existing scheduler services for held arrows and eligible fractional input transitions.
  * Tree and borrowed callback captures must outlive the binding, node and admitted calls.
  * The node's existing UiScope owns timer lifetime. now may throw; exceptions become CALLBACK_FAILED.
+ * Fractional profiles use the configured smoothDurationMs; integral profiles remain immediate.
  */
 struct ScrollRepeatServices {
   std::function<SchedulerTime()> now;     ///< Existing scheduler-clock milliseconds; required.
@@ -213,7 +214,8 @@ std::expected<void, TreeError> syncScrollControl(WidgetTree &tree, Node<Widget> 
 std::expected<ActionBinding, TreeError> bindScrollArea(EventRouter &router, WidgetTree &tree, Node<ScrollArea> node);
 /** @param router Existing input owner. @param tree Same UI tree. @param node Live area.
  * @param services Existing scheduler/clock/error services, retained until node retirement.
- * @return Scoped binding with automatic arrow hold, or typed admission error; old overload is click-only.
+ * @return Scoped binding with automatic arrow hold and eligible fractional transitions, or typed admission error.
+ * The overload without services keeps immediate movement and click-only arrow buttons.
  */
 std::expected<ActionBinding, TreeError> bindScrollArea(EventRouter &router, WidgetTree &tree, Node<ScrollArea> node,
                                                        ScrollRepeatServices services);
@@ -227,7 +229,8 @@ std::expected<ActionBinding, TreeError> bindScrollBar(EventRouter &router, Widge
                                                       bool geometryWriter = true);
 /** @param router Existing input owner. @param tree Same UI tree. @param node Live bar.
  * @param services Existing scheduler/clock/error services. @param geometryWriter Existing metrics role.
- * @return Scoped binding supporting held arrows, or typed error; old overload is click-only.
+ * @return Scoped binding supporting held arrows and eligible fractional transitions, or typed error.
+ * The overload without services keeps immediate movement and click-only arrow buttons.
  */
 std::expected<ActionBinding, TreeError> bindScrollBar(EventRouter &router, WidgetTree &tree, Node<ScrollBar> node,
                                                       ScrollRepeatServices services, bool geometryWriter = true);

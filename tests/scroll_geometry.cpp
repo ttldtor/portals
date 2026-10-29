@@ -13,6 +13,11 @@ constexpr auto MAXIMUM = std::numeric_limits<std::uint64_t>::max();
 constexpr auto MAXIMUM_CELL = std::numeric_limits<std::int32_t>::max();
 int failures{};
 
+static_assert(scrollFractionalThumb({17, 8}, {}, 6)->lengthEighths == 22);
+static_assert(scrollFractionalThumb({17, 8}, {}, 6)->travelEighths == 26);
+static_assert(scrollFractionalThumb({17, 8}, {4, .5}, 6)->startEighths == 13);
+static_assert(scrollFractionalThumb({17, 8}, {}, 6, 3)->lengthEighths == 24);
+static_assert(scrollFractionalThumb({8, 8}, {4, .5}, 6)->lengthEighths == 48);
 static_assert(scrollRange({MAXIMUM, 1}).maximum == MAXIMUM - 1);
 static_assert(scrollRange({MAXIMUM, 1}).count == MAXIMUM);
 static_assert(scrollRange({MAXIMUM, 0}).maximum == 0);
@@ -65,13 +70,14 @@ void fractionalThumbs() {
         if (!value) {
           continue;
         }
-        const auto length = track == 0 ? 0 : std::max<std::int32_t>(1, track / static_cast<std::int32_t>(maximum + 1));
-        const auto travel = track - length;
-        const auto expected = static_cast<std::int64_t>(eighth * travel / maximum);
+        const auto length = track == 0 ? 0 : std::max<std::uint64_t>(8, track * 8 / (maximum + 1));
+        const auto travel = track * 8 - length;
+        const auto expected = static_cast<std::int64_t>(eighth * travel / (maximum * 8));
         check(value->startEighths == expected && value->startEighths >= previous,
               "independent small rational oracle preserves every eighth and monotonicity");
-        check(value->lengthEighths == length * 8 && value->travelEighths == travel * 8,
-              "fractional placement preserves integral minimum length and travel");
+        check(value->lengthEighths == static_cast<std::int64_t>(length) &&
+                value->travelEighths == static_cast<std::int64_t>(travel),
+              "fractional length, travel and position share eighth-cell units");
         previous = value->startEighths;
       }
     }
@@ -102,7 +108,7 @@ void fractionalThumbs() {
     Golden{31ULL, 7ULL, 0x1.3333333333333p-2, 19, 33LL},
     Golden{9007199254740999ULL, 9007199254740997ULL, 0x1.8000000000000p-1, MAXIMUM_CELL, 17179869167LL},
     Golden{18446744073709551614ULL, 18446744073709551613ULL, 0x1.fffffffffffffp-1, MAXIMUM_CELL, 17179869167LL},
-    Golden{1ULL, 0ULL, 0x1.fffffffffffffp-1, MAXIMUM_CELL, 8589934591LL},
+    Golden{1ULL, 0ULL, 0x1.fffffffffffffp-1, MAXIMUM_CELL, 8589934587LL},
     Golden{1ULL, 0ULL, 0x0.0000000000001p-1022, MAXIMUM_CELL, 0LL}};
   for (const auto &golden : GOLDENS) {
     const auto value = scrollFractionalThumb({golden.maximum + 1, 1}, {golden.raster, golden.fraction}, golden.track);

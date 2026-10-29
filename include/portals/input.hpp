@@ -298,6 +298,7 @@ struct MouseInputEvent {
   MouseAction action{};                             ///< Observed action.
   InputModifiers modifiers{};                       ///< Observed modifiers.
   std::optional<InputPointerPrecision> precision{}; ///< Optional owning 1016 sample; cell fields remain available.
+  double wheelDelta{1.0}; ///< Positive finite magnitude in normalized wheel detents for SCROLL; unused otherwise.
   /** @brief Compare the complete event value.
    * @param other Event or metadata value to compare, without interpreting its payload.
    * @return True when every stored field is equal; false otherwise.

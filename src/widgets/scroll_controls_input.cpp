@@ -3,7 +3,9 @@
 #include "action_state.hpp"
 #include "log_view_state.hpp"
 #include "scroll_controls_state.hpp"
+#include "scroll_motion.hpp"
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <new>
 
@@ -139,6 +141,7 @@ void repeatScroll(const std::shared_ptr<ScrollRepeatState> &repeat) {
 std::expected<EventReply, TreeError> arrowScroll(EventRouter &router, WidgetTree &tree, Node<Widget> node,
                                                  ScrollWidgetState &state, detail::ScrollControllerPlan plan,
                                                  ScrollAxis axis, bool towardEnd, CellPoint surface) {
+  detail::cancelScrollMotion(state);
   if (scrollAtEnd(plan, axis, towardEnd)) {
     return EventReply::HANDLED;
   }
@@ -196,11 +199,8 @@ std::uint64_t pageStep(ScrollAxisMetrics metrics, std::uint64_t overlap) {
 }
 
 std::expected<EventReply, TreeError> publish(WidgetTree &tree, Node<Widget> node, ScrollWidgetState &state,
-                                             detail::ScrollControllerPlan plan) {
-  auto changed = detail::commitScroll(tree, node, state, std::move(plan));
-  return changed
-           ? std::expected<EventReply, TreeError>(changed->logicalChanged ? EventReply::HANDLED : EventReply::IGNORED)
-           : std::unexpected(changed.error());
+                                             detail::ScrollControllerPlan plan, bool smooth = false) {
+  return detail::publishScrollInput(tree, node, state, std::move(plan), smooth);
 }
 
 std::expected<EventReply, TreeError> keyScroll(WidgetTree &tree, Node<Widget> node, ScrollWidgetState &state,
@@ -254,7 +254,7 @@ std::expected<EventReply, TreeError> keyScroll(WidgetTree &tree, Node<Widget> no
   if (page && modifiers.shift && state.isArea) {
     axis = ScrollAxis::HORIZONTAL;
   }
-  auto plan = ScrollControllerAccess::stage(*state.lease);
+  auto plan = detail::stageScrollInput(state, !page && !endpoint);
   if (!plan) {
     return std::unexpected(plan.error());
   }
@@ -279,7 +279,7 @@ std::expected<EventReply, TreeError> keyScroll(WidgetTree &tree, Node<Widget> no
                                                         : state.bar.keyStep,
                                          towardEnd);
   }
-  return moved ? publish(tree, node, state, std::move(*plan)) : std::unexpected(moved.error());
+  return moved ? publish(tree, node, state, std::move(*plan), !page && !endpoint) : std::unexpected(moved.error());
 }
 
 std::expected<EventReply, TreeError> wheelScroll(WidgetTree &tree, Node<Widget> node, ScrollWidgetState &state,
@@ -298,13 +298,22 @@ std::expected<EventReply, TreeError> wheelScroll(WidgetTree &tree, Node<Widget> 
   if (!state.isArea && axis != state.axis) {
     return EventReply::IGNORED;
   }
-  auto plan = ScrollControllerAccess::stage(*state.lease);
+  if (!std::isfinite(mouse.wheelDelta) || mouse.wheelDelta <= 0) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  const auto step = (state.isArea ? state.area.wheelStep : state.bar.wheelStep) * mouse.wheelDelta;
+
+  if (!std::isfinite(step) || step <= 0) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  auto plan = detail::stageScrollInput(state, true);
   if (!plan) {
     return std::unexpected(plan.error());
   }
-  const auto step = state.isArea ? state.area.wheelStep : state.bar.wheelStep;
   auto moved = ScrollControllerAccess::move(*plan, axis, towardEnd ? step : -step);
-  return moved ? publish(tree, node, state, std::move(*plan)) : std::unexpected(moved.error());
+  return moved ? publish(tree, node, state, std::move(*plan), true) : std::unexpected(moved.error());
 }
 
 // Pixel*cell-count and cell-origin*pixel-span share exact rational units. Guard
@@ -407,6 +416,20 @@ ScrollOffset anchoredPreciseOffset(const detail::ScrollDrag &drag, std::uint64_t
   return result;
 }
 
+ScrollOffset grabbedPreciseOffset(const detail::ScrollDrag &drag, std::uint64_t pointer,
+                                  std::uint64_t travel) noexcept {
+  // A whole-cell hit can precede the painted fractional edge. Retain that negative grab as a signed magnitude.
+  if (drag.grabBeforeThumb) {
+    const auto position = pointer > std::numeric_limits<std::uint64_t>::max() - drag.grabUnits
+                            ? std::numeric_limits<std::uint64_t>::max()
+                            : pointer + drag.grabUnits;
+
+    return anchoredPreciseOffset(drag, position, travel);
+  }
+
+  return pointer < drag.grabUnits ? ScrollOffset{} : anchoredPreciseOffset(drag, pointer - drag.grabUnits, travel);
+}
+
 std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTree &tree, Node<Widget> node,
                                                    ScrollWidgetState &state, const MouseInputEvent &mouse) {
   if (mouse.action == MouseAction::RELEASE) {
@@ -424,6 +447,12 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
     }
     if (!state.capture.connected() || !state.drag) {
       state.drag.reset();
+
+      return EventReply::IGNORED;
+    }
+    if (state.drag->anchored != detail::fractionalScrollbar(state)) {
+      detail::cancelOwnedScrollMotion(state);
+      detail::cancelScrollDrag(state);
 
       return EventReply::IGNORED;
     }
@@ -468,7 +497,20 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
       if (!thumb) {
         return std::unexpected(thumb.error());
       }
-      if (start != state.drag->surfaceStart || thumb->travel != state.drag->travel ||
+      auto travel = static_cast<std::uint64_t>(thumb->travel);
+
+      if (state.drag->anchored) {
+        const auto fractional = scrollFractionalThumb(metrics, {}, track.length,
+                                                      state.isArea ? state.area.minimumThumb : state.bar.minimumThumb);
+
+        if (!fractional) {
+          return std::unexpected(fractional.error());
+        }
+
+        travel = static_cast<std::uint64_t>(fractional->travelEighths);
+      }
+
+      if (start != state.drag->surfaceStart || travel != state.drag->travelUnits ||
           scrollRange(metrics).maximum != state.drag->maximum) {
         detail::cancelScrollDrag(state);
         return EventReply::IGNORED;
@@ -483,7 +525,7 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
         return EventReply::IGNORED;
       }
 
-      const auto relative = pointerTrackUnits(*mouse.precision, state.drag->axis, state.drag->surfaceStart);
+      auto relative = pointerTrackUnits(*mouse.precision, state.drag->axis, state.drag->surfaceStart);
 
       if (!relative) {
         detail::cancelScrollDrag(state);
@@ -493,11 +535,20 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
 
       const auto span =
         state.drag->axis == ScrollAxis::HORIZONTAL ? mouse.precision->text_width_px : mouse.precision->text_height_px;
-      const auto travel = static_cast<std::uint64_t>(state.drag->travel) * span;
-      const auto position = *relative > state.drag->grabUnits ? *relative - state.drag->grabUnits : 0;
 
-      intended =
-        *relative < state.drag->grabUnits ? ScrollOffset{} : anchoredPreciseOffset(*state.drag, position, travel);
+      if (state.drag->anchored) {
+        if (*relative > std::numeric_limits<std::uint64_t>::max() / 8) {
+          detail::cancelScrollDrag(state);
+
+          return std::unexpected(TreeError::INVALID_ARGUMENT);
+        }
+
+        *relative *= 8;
+      }
+
+      const auto travel = state.drag->travelUnits * span;
+
+      intended = grabbedPreciseOffset(*state.drag, *relative, travel);
     } else {
       if (mouse.precision) {
         detail::cancelScrollDrag(state);
@@ -508,9 +559,11 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
       const auto pointer = state.drag->axis == ScrollAxis::HORIZONTAL ? mouse.column : mouse.row;
       const auto position = static_cast<std::int64_t>(pointer) - state.drag->surfaceStart - state.drag->grab;
       if (state.drag->anchored) {
-        intended = position < 0
+        const auto units = (static_cast<std::int64_t>(pointer) - state.drag->surfaceStart) * 8;
+
+        intended = units < 0
                      ? ScrollOffset{}
-                     : anchoredPreciseOffset(*state.drag, static_cast<std::uint64_t>(position), state.drag->travel);
+                     : grabbedPreciseOffset(*state.drag, static_cast<std::uint64_t>(units), state.drag->travelUnits);
       } else {
         const auto offset = scrollOffsetForThumb(position, state.drag->travel, state.drag->maximum);
 
@@ -535,11 +588,12 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
 
     auto moved = ScrollControllerAccess::offset(*plan, axis, intended);
 
-    return moved ? publish(tree, node, state, std::move(*plan)) : std::unexpected(moved.error());
+    return moved ? publish(tree, node, state, std::move(*plan), true) : std::unexpected(moved.error());
   }
   if (mouse.action != MouseAction::PRESS || mouse.button != MouseButton::LEFT || mouse.modifiers != InputModifiers{}) {
     return EventReply::IGNORED;
   }
+  detail::cancelScrollMotion(state);
   auto live = tree.inspect(node);
   if (!live) {
     return std::unexpected(live.error());
@@ -590,6 +644,7 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
   const auto point = axis == ScrollAxis::HORIZONTAL ? localX - track.origin.x : localY - track.origin.y;
   std::int64_t startEighths = static_cast<std::int64_t>(thumb->start) * 8;
   std::int64_t endEighths = startEighths + static_cast<std::int64_t>(thumb->length) * 8;
+  auto travelUnits = static_cast<std::uint64_t>(thumb->travel);
   const bool fractional = detail::fractionalScrollbar(state);
   if (fractional) {
     const auto &initial = axis == ScrollAxis::HORIZONTAL ? plan->horizontal : plan->vertical;
@@ -600,6 +655,7 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
     }
     startEighths = interval->startEighths;
     endEighths = startEighths + interval->lengthEighths;
+    travelUnits = static_cast<std::uint64_t>(interval->travelEighths);
   }
   const auto firstCell = static_cast<std::int32_t>(startEighths / 8);
   const auto endCell = static_cast<std::int32_t>((endEighths + 7) / 8);
@@ -607,11 +663,10 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
     detail::cancelScrollRepeat(state);
     detail::cancelScrollDrag(state);
     auto moved = ScrollControllerAccess::step(
-      *plan, axis, pageStep(metrics, state.isArea ? state.area.pageOverlap : state.bar.pageOverlap),
-      point >= thumb->start);
+      *plan, axis, pageStep(metrics, state.isArea ? state.area.pageOverlap : state.bar.pageOverlap), point >= endCell);
     return moved ? publish(tree, node, state, std::move(*plan)) : std::unexpected(moved.error());
   }
-  if (thumb->travel == 0) {
+  if (travelUnits == 0) {
     return EventReply::HANDLED;
   }
   if (state.capture.connected()) {
@@ -639,13 +694,33 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
                thumb->travel, scrollRange(metrics).maximum,     metrics};
   const auto &initial = axis == ScrollAxis::HORIZONTAL ? plan->horizontal : plan->vertical;
   proposed->anchorOffset = {initial.rasterOffset(), initial.fraction()};
-  proposed->anchorUnits = static_cast<std::uint64_t>(firstCell);
+  proposed->anchorUnits = static_cast<std::uint64_t>(fractional ? startEighths : firstCell);
   proposed->anchored = fractional;
+  proposed->travelUnits = travelUnits;
+  if (fractional) {
+    const auto pointer = static_cast<std::uint64_t>(point * 8);
+
+    proposed->grabBeforeThumb = pointer < proposed->anchorUnits;
+    proposed->grabUnits = proposed->grabBeforeThumb ? proposed->anchorUnits - pointer : pointer - proposed->anchorUnits;
+  }
   if (mouse.precision) {
-    const auto relative = pointerTrackUnits(*mouse.precision, axis, proposed->surfaceStart);
+    auto relative = pointerTrackUnits(*mouse.precision, axis, proposed->surfaceStart);
     const auto span = axis == ScrollAxis::HORIZONTAL ? mouse.precision->text_width_px : mouse.precision->text_height_px;
-    const auto anchor =
-      static_cast<std::uint64_t>(startEighths / 8) * span + static_cast<std::uint64_t>(startEighths % 8) * span / 8;
+
+    if (!relative) {
+      return EventReply::IGNORED;
+    }
+
+    if (travelUnits > std::numeric_limits<std::uint64_t>::max() / span ||
+        proposed->anchorUnits > std::numeric_limits<std::uint64_t>::max() / span ||
+        (fractional && relative && *relative > std::numeric_limits<std::uint64_t>::max() / 8)) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+    if (fractional && relative) {
+      *relative *= 8;
+    }
+
+    const auto anchor = proposed->anchorUnits * span;
 
     if (!relative || *relative < anchor) {
       return EventReply::IGNORED;
@@ -653,6 +728,7 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
 
     proposed->precision = mouse.precision;
     proposed->grabUnits = *relative - anchor;
+    proposed->grabBeforeThumb = false;
     proposed->anchorUnits = anchor;
   }
 
@@ -683,7 +759,7 @@ std::expected<std::shared_ptr<ScrollRepeatState>, TreeError> prepareScrollRepeat
   bool enabled{};
   auto read = tree.read(node, [&](const Widget &widget) {
     if (const auto *state = detail::ScrollWidgetAccess::state(widget)) {
-      enabled = state->isArea ? state->area.arrows : state->bar.arrows;
+      enabled = (state->isArea ? state->area.arrows : state->bar.arrows) || detail::smoothScrollEnabled(*state);
     }
   });
   if (!read) {
@@ -748,6 +824,7 @@ std::expected<ActionBinding, TreeError> bindScroll(EventRouter &router, WidgetTr
       status = std::unexpected(TreeError::STALE_NODE);
       return;
     }
+    detail::cancelOwnedScrollMotion(*state);
     auto previous = std::move(state->repeat);
     state->repeat = std::move(repeat);
     if (state->repeat) {
@@ -794,6 +871,7 @@ std::expected<void, TreeError> configureScrollRepeat(WidgetTree &tree, Node<Widg
       status = std::unexpected(TreeError::INVALID_ARGUMENT);
       return;
     }
+    cancelOwnedScrollMotion(*state);
     auto previous = std::move(state->repeat);
     state->repeat = std::move(*repeat);
     if (state->repeat) {
@@ -817,6 +895,7 @@ std::expected<EventReply, TreeError> scrollInput(EventRouter &router, WidgetTree
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
   if (state.isArea ? state.area.readOnly : state.bar.readOnly) {
+    cancelOwnedScrollMotion(state);
     cancelScrollRepeat(state);
     detail::cancelScrollDrag(state);
     return EventReply::IGNORED;

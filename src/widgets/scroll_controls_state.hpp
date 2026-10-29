@@ -10,6 +10,7 @@
 
 namespace portals::detail {
 struct PreparedGlyphProfiles;
+struct ScrollMotion;
 bool fractionalScrollbar(const struct ScrollWidgetState &state) noexcept;
 
 struct ScrollDrag {
@@ -24,6 +25,8 @@ struct ScrollDrag {
   std::uint64_t anchorUnits{};
   ScrollOffset anchorOffset{};
   bool anchored{};
+  std::uint64_t travelUnits{};
+  bool grabBeforeThumb{};
 };
 
 struct PreparedScrollFrame {
@@ -65,6 +68,7 @@ struct ScrollRepeatState {
   bool towardEnd{};
   bool held{};
   std::weak_ptr<ActionCancellation> binding;
+  std::shared_ptr<ScrollMotion> motion;
 };
 
 using ScrollbarPresetGlyphs = std::array<GraphemeText, 7>;
@@ -205,7 +209,8 @@ std::expected<void, TreeError> configureScrollRepeat(WidgetTree &tree, Node<Widg
                                                      const ActionBinding &binding);
 enum class ScrollPublication {
   POSITION,
-  PREPARATION
+  PREPARATION,
+  MOTION
 };
 std::expected<ScrollControllerChange, TreeError>
 commitScroll(WidgetTree &tree, Node<Widget> node, ScrollWidgetState &state, ScrollControllerPlan plan,

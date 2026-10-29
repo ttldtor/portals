@@ -3,6 +3,7 @@
 #include "action_state.hpp"
 #include "log_view_state.hpp"
 #include "scroll_controls_state.hpp"
+#include "scroll_motion.hpp"
 #include "scroll_preparation_state.hpp"
 #include <portals/detail/layout_traversal.hpp>
 #include <portals/grid.hpp>
@@ -85,17 +86,45 @@ std::expected<void, TreeError> ManagedScene::attachScrollValues(const std::share
   }
   auto candidate = scroll_ ? scroll_ : std::make_shared<detail::ManagedScrollState>(*focus);
   auto intent = std::make_shared<detail::ScrollIntentRecord>(entry->node.id(), *focus);
-  entry->sync = [this, node = entry->node](Node<Widget> focused) {
-    return syncScrollControl(app_.tree(), node, focused);
+  const auto ensureServices = [this, weak = std::weak_ptr(entry)]() -> std::expected<void, TreeError> {
+    const auto current = weak.lock();
+
+    if (!current || current->removed) {
+      return {};
+    }
+
+    bool needed{};
+    const auto read = app_.tree().read(current->node, [&](const Widget &widget) {
+      const auto *state = detail::ScrollWidgetAccess::state(widget);
+
+      needed = state && !state->repeat &&
+               ((state->isArea ? state->area.arrows : state->bar.arrows) || detail::smoothScrollEnabled(*state));
+    });
+
+    if (!read || !needed) {
+      return read;
+    }
+
+    return detail::configureScrollRepeat(app_.tree(), current->node,
+                                         {[this] {
+                                            return app_.now();
+                                          },
+                                          [this, node = current->node](TreeError failure) {
+                                            (void)reportError(error(ManagedPhase::INPUT, node, failure));
+                                          }},
+                                         std::get<ActionBinding>(current->binding));
+  };
+  entry->sync = [this, node = entry->node, ensureServices](Node<Widget> focused) {
+    const auto synced = syncScrollControl(app_.tree(), node, focused);
+
+    return synced ? ensureServices() : synced;
   };
   std::expected<void, TreeError> status{std::unexpected(TreeError::INVALID_ARGUMENT)};
-  bool arrows{};
   auto edited = app_.tree().edit(entry->node, [&](Widget &widget) {
     auto *state = detail::ScrollWidgetAccess::state(widget);
     if (!state || !state->lease || state->retired || state->node != entry->node.id()) {
       return;
     }
-    arrows = state->isArea ? state->area.arrows : state->bar.arrows;
     state->intent = intent;
     entry->scrollController = state->controller;
     status = {};
@@ -103,18 +132,10 @@ std::expected<void, TreeError> ManagedScene::attachScrollValues(const std::share
   if (!edited || !status) {
     return edited ? status : edited;
   }
-  if (arrows) {
-    auto repeat = detail::configureScrollRepeat(app_.tree(), entry->node,
-                                                {[this] {
-                                                   return app_.now();
-                                                 },
-                                                 [this, node = entry->node](TreeError failure) {
-                                                   (void)reportError(error(ManagedPhase::INPUT, node, failure));
-                                                 }},
-                                                std::get<ActionBinding>(entry->binding));
-    if (!repeat) {
-      return repeat;
-    }
+  const auto services = ensureServices();
+
+  if (!services) {
+    return services;
   }
   // No allocation follows publication into this entry. emplace publishes the scene owner only
   // after its checked entry insertion; a failing insertion destroys this scoped candidate.
