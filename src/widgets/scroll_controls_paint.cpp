@@ -5,6 +5,59 @@
 
 namespace portals {
 namespace detail {
+namespace {
+struct FractionalCell {
+  std::int64_t occupied{};
+  bool leading{};
+  int segment{1};
+};
+
+FractionalCell fractionalCellCoverage(ScrollFractionalThumb thumb, std::int32_t position) noexcept {
+  constexpr std::int64_t EIGHTHS_PER_CELL = 8;
+  const auto start = static_cast<std::int64_t>(position) * EIGHTHS_PER_CELL;
+  const auto end = start + EIGHTHS_PER_CELL;
+  const auto thumbEnd = thumb.startEighths + thumb.lengthEighths;
+  FractionalCell cell;
+
+  cell.occupied = std::max<std::int64_t>(0, std::min(end, thumbEnd) - std::max(start, thumb.startEighths));
+  cell.leading = start < thumb.startEighths;
+
+  if (thumb.lengthEighths == EIGHTHS_PER_CELL) {
+    cell.segment = 3;
+  } else if (start <= thumb.startEighths) {
+    cell.segment = 0;
+  } else if (end >= thumbEnd) {
+    cell.segment = 2;
+  }
+
+  return cell;
+}
+
+// The enclosing tree paint borrow pins the prepared palette and its returned glyph.
+const GraphemeText &fractionalCellGlyph(const FractionalScrollGlyphs &palette, FractionalCell cell, bool horizontal,
+                                        RgbColor surface, CellStyle &style) noexcept {
+  constexpr std::int64_t EIGHTHS_PER_CELL = 8;
+  constexpr std::size_t FULL_BLOCK = 14;
+  constexpr std::size_t VERTICAL_BOUNDARIES = 7;
+
+  if (cell.occupied == EIGHTHS_PER_CELL) {
+    return *palette[FULL_BLOCK];
+  }
+
+  const bool complement = horizontal ? cell.leading : !cell.leading;
+  const auto amount = complement ? EIGHTHS_PER_CELL - cell.occupied : cell.occupied;
+  const auto first = horizontal ? 0 : VERTICAL_BOUNDARIES;
+
+  style.background = surface;
+
+  if (complement) {
+    std::swap(style.foreground, style.background);
+  }
+
+  return *palette[first + static_cast<std::size_t>(amount - 1)];
+}
+} // namespace
+
 ComputedStyle scrollDefaults(const ScrollWidgetState &state) {
   ComputedStyle result;
   result.normal = state.style.normal;
@@ -18,10 +71,23 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, ComputedSty
   if (!state.lease || state.retired || !state.arranged) {
     return {};
   }
+  const auto observed = state.controller->snapshot();
+  if (!observed) {
+    return std::unexpected(observed.error());
+  }
+  // Paint-only publication can come from another projection of this controller.
+  // Retain arranged metrics while refreshing the owning logical position.
+  const auto refresh = [](ScrollOffset offset, ScrollAxisMetrics metrics) {
+    const auto maximum = scrollRange(metrics).maximum;
+    return offset.raster >= maximum ? ScrollOffset{maximum, 0} : offset;
+  };
+  state.presentation.horizontal.offset = refresh(observed->horizontal.offset, state.presentation.horizontal.metrics);
+  state.presentation.vertical.offset = refresh(observed->vertical.offset, state.presentation.vertical.metrics);
   const auto *frame = state.isArea ? scrollFrameOptions(state) : nullptr;
   const auto stateIndex = !state.enabled ? 2 : state.focused ? 1 : 0;
   const auto *profile = state.glyphProfiles ? state.glyphProfiles->states[stateIndex].get() : nullptr;
   const auto *profileGlyphs = profile ? profile->scrollbar.get() : nullptr;
+  const auto *coverage = profile ? profile->fractional.get() : nullptr;
   const auto *frameText = profile && profile->frame ? profile->frame.get()
                           : state.advancedFrame     ? &state.advancedFrame->text
                           : state.legacyFrameText   ? &*state.legacyFrameText
@@ -67,6 +133,18 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, ComputedSty
   }
   const auto style = !state.enabled ? resolved.disabled : state.focused ? resolved.focused : resolved.normal;
   const auto &parts = resolved.scrollbar[stateIndex];
+  const auto coverageStyleFor = [&](CellStyle value) {
+    constexpr RgbColor SURFACE{24, 28, 36};
+    constexpr RgbColor NORMAL_INK{220, 225, 232};
+    constexpr RgbColor FOCUSED_INK{75, 180, 220};
+    constexpr RgbColor DISABLED_INK{125, 130, 140};
+    const auto ink = !state.enabled ? DISABLED_INK : state.focused ? FOCUSED_INK : NORMAL_INK;
+    const auto surface = parts.track.value_or(style).background.value_or(SURFACE);
+    value.foreground = value.foreground.value_or(ink);
+    value.background = value.background.value_or(surface);
+
+    return value;
+  };
   const auto *skin = state.scrollbarSkin.get();
   const auto thumbPattern = parts.thumbPattern ? parts.thumbPattern : skin ? skin->thumbPattern : std::nullopt;
   const auto trackPattern = parts.trackPattern ? parts.trackPattern : skin ? skin->trackPattern : std::nullopt;
@@ -91,12 +169,23 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, ComputedSty
     }
   }
 
-  auto track = [&](ScrollTrack cells, ScrollThumb thumb, bool horizontalAxis) -> std::expected<void, TreeError> {
+  auto track = [&]<bool Fractional>(ScrollTrack cells, ScrollThumb thumb,
+                                    bool horizontalAxis) -> std::expected<void, TreeError> {
     if (cells.length == 0) {
       return {};
     }
 
     const bool arrows = scrollArrows(state, cells);
+    ScrollFractionalThumb fractional;
+    if constexpr (Fractional) {
+      const auto &axis = horizontalAxis ? state.presentation.horizontal : state.presentation.vertical;
+      const auto value = scrollFractionalThumb(axis.metrics, axis.offset, cells.length - (arrows ? 2 : 0),
+                                               state.isArea ? state.area.minimumThumb : state.bar.minimumThumb);
+      if (!value) {
+        return std::unexpected(value.error());
+      }
+      fractional = *value;
+    }
     const auto first = horizontalAxis ? 0 : 4;
     const bool customTrack = skin && skin->customGlyphs[first];
     const bool customThumb = skin && skin->customGlyphs[first + 1];
@@ -129,6 +218,7 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, ComputedSty
 
         break;
       case ScrollbarPattern::MINIMAL:
+      case ScrollbarPattern::FRACTIONAL_BLOCK:
         trackGlyph = &(*state.presetGlyphs)[0];
 
         break;
@@ -147,13 +237,16 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, ComputedSty
         point.y += i;
       }
       const auto position = i - (arrows ? 1 : 0);
-      const bool inThumb = position >= thumb.start && position - thumb.start < thumb.length;
+      const auto fractionalCell = Fractional ? fractionalCellCoverage(fractional, position) : FractionalCell{};
+      const bool inThumb =
+        Fractional ? fractionalCell.occupied != 0 : position >= thumb.start && position - thumb.start < thumb.length;
       const auto *glyph = inThumb ? thumbGlyph : trackGlyph;
       const auto *part = inThumb ? &parts.thumb : &parts.track;
       const CellStyle *segmentStyle{};
 
       if (inThumb && (skin || segments || profileGlyphs)) {
-        const auto segment = thumb.length == 1                            ? 3
+        const auto segment = coverage                                     ? fractionalCell.segment
+                             : thumb.length == 1                          ? 3
                              : position == thumb.start                    ? 0
                              : position - thumb.start == thumb.length - 1 ? 2
                                                                           : 1;
@@ -201,6 +294,16 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, ComputedSty
         }
       }
 
+      CellStyle coverageStyle;
+      if constexpr (Fractional) {
+        const auto surface = *coverageStyleFor(parts.track.value_or(style)).background;
+        coverageStyle = coverageStyleFor(segmentStyle ? *segmentStyle : part->value_or(style));
+        if (inThumb) {
+          glyph = &fractionalCellGlyph(*coverage, fractionalCell, horizontalAxis, surface, coverageStyle);
+        }
+        segmentStyle = &coverageStyle;
+      }
+
       auto result = segmentStyle ? drawSegment(point, *glyph, *segmentStyle) : draw(point, *glyph, *part);
       if (!result) {
         return result;
@@ -208,11 +311,13 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, ComputedSty
     }
     return {};
   };
-  auto result = track(state.geometry.horizontal, *horizontal, true);
+  auto result = coverage ? track.template operator()<true>(state.geometry.horizontal, *horizontal, true)
+                         : track.template operator()<false>(state.geometry.horizontal, *horizontal, true);
   if (!result) {
     return result;
   }
-  result = track(state.geometry.vertical, *vertical, false);
+  result = coverage ? track.template operator()<true>(state.geometry.vertical, *vertical, false)
+                    : track.template operator()<false>(state.geometry.vertical, *vertical, false);
   if (!result || !state.geometry.hasCorner) {
     return result;
   }
@@ -220,11 +325,12 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, ComputedSty
   if (!corner) {
     return std::unexpected(TreeError::INVALID_GEOMETRY);
   }
+  const auto cornerStyle = coverage ? coverageStyleFor(parts.corner.value_or(style)) : parts.corner.value_or(style);
   if (state.scrollbarSkin && state.scrollbarSkin->glyphs[8]) {
-    return draw(state.geometry.corner, *state.scrollbarSkin->glyphs[8], parts.corner);
+    return draw(state.geometry.corner, *state.scrollbarSkin->glyphs[8], cornerStyle);
   }
 
-  const RenderCommand command = FillCommand{*corner, *bounds, parts.corner.value_or(style)};
+  const RenderCommand command = FillCommand{*corner, *bounds, cornerStyle};
   return context.submit(std::span(&command, 1));
 }
 } // namespace detail

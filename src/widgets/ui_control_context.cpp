@@ -28,8 +28,9 @@ constexpr std::size_t DIALOG_HEIGHT_PROPERTY = 95;
 constexpr std::size_t NOTIFICATION_WIDTH_PROPERTY = 118;
 constexpr std::size_t SELECTOR_SHORTCUT_PROPERTY = 142;
 constexpr std::array<std::string_view, 6> FRAME_PATTERN_NAMES{"SINGLE", "PLAIN", "ROUNDED", "DOUBLE", "HEAVY", "ASCII"};
-constexpr std::array<std::string_view, 4> SCROLLBAR_PATTERN_NAMES{"LEGACY", "FRAME", "MINIMAL", "ASCII"};
-constexpr std::array<std::string_view, 3> SCROLLBAR_THUMB_PATTERN_NAMES{"LEGACY", "BLOCK", "ASCII"};
+constexpr std::array<std::string_view, 5> SCROLLBAR_PATTERN_NAMES{"LEGACY", "FRAME", "MINIMAL", "ASCII",
+                                                                  "FRACTIONAL_BLOCK"};
+constexpr std::array<std::string_view, 4> SCROLLBAR_THUMB_PATTERN_NAMES{"LEGACY", "BLOCK", "ASCII", "FRACTIONAL_BLOCK"};
 constexpr std::array<std::string_view, 3> SCROLLBAR_ARROW_PATTERN_NAMES{"LEGACY", "TRIANGLE", "ASCII"};
 constexpr std::array<std::string_view, 6> TITLE_DECORATION_NAMES{"NONE",  "SPACED", "SQUARE",
                                                                  "ANGLE", "ROUND",  "PROFILE"};
@@ -1087,9 +1088,9 @@ template <class T> bool validValue(const T &value, std::size_t index) noexcept {
     return value == FramePattern::SINGLE || value == FramePattern::ROUNDED || value == FramePattern::DOUBLE ||
            value == FramePattern::HEAVY || value == FramePattern::ASCII;
   } else if constexpr (std::same_as<T, ScrollbarPattern>) {
-    return value >= ScrollbarPattern::LEGACY && value <= ScrollbarPattern::ASCII;
+    return value >= ScrollbarPattern::LEGACY && value <= ScrollbarPattern::FRACTIONAL_BLOCK;
   } else if constexpr (std::same_as<T, ScrollbarThumbPattern>) {
-    return value >= ScrollbarThumbPattern::LEGACY && value <= ScrollbarThumbPattern::ASCII;
+    return value >= ScrollbarThumbPattern::LEGACY && value <= ScrollbarThumbPattern::FRACTIONAL_BLOCK;
   } else if constexpr (std::same_as<T, ScrollbarArrowPattern>) {
     return value >= ScrollbarArrowPattern::LEGACY && value <= ScrollbarArrowPattern::ASCII;
   } else if constexpr (std::same_as<T, GlyphProfile>) {

@@ -21,11 +21,56 @@ bool oneCell(const std::expected<GraphemeText, TextError> &text) noexcept {
   return text && text->graphemes().size() == 1 && text->measure() == 1 &&
          text->graphemes().front().display == TextDisplay::PRINTABLE;
 }
+
+std::expected<std::shared_ptr<const FractionalScrollGlyphs>, TreeError> fractionalGlyphs(WidthPolicy policy) {
+  thread_local std::weak_ptr<const FractionalScrollGlyphs> cached;
+  if (auto value = cached.lock(); value && (*value)[0]->policy() == policy) {
+    return value;
+  }
+  constexpr std::array<std::string_view, 15> SOURCES{"▏", "▎", "▍", "▌", "▋", "▊", "▉", "▁",
+                                                     "▂", "▃", "▄", "▅", "▆", "▇", "█"};
+  auto value = std::make_shared<FractionalScrollGlyphs>();
+  for (std::size_t index = 0; index < SOURCES.size(); ++index) {
+    auto text = GraphemeText::from(SOURCES[index], policy);
+    if (!oneCell(text)) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+    (*value)[index].emplace(std::move(*text));
+  }
+  cached = value;
+  return std::shared_ptr<const FractionalScrollGlyphs>(std::move(value));
+}
+
+bool compatibleCoverage(const ScrollWidgetState &state, const PreparedScrollbarSkin *skin,
+                        const ScrollbarAppearance &appearance, GlyphSelection selection) {
+  const auto track = appearance.trackPattern ? appearance.trackPattern : skin ? skin->trackPattern : std::nullopt;
+  if (selection.profile != GlyphProfile::DEFAULT ||
+      (state.isArea ? state.area.glyphs : state.bar.glyphs) == PrimitiveGlyphs::ASCII) {
+    return false;
+  }
+  for (std::size_t first : {std::size_t{0}, std::size_t{4}}) {
+    const bool literalTrack = skin && skin->customGlyphs[first];
+    const bool blank =
+      literalTrack ? skin->glyphs[first]->bytes() == " "
+                   : track && (*track == ScrollbarPattern::MINIMAL || *track == ScrollbarPattern::FRACTIONAL_BLOCK);
+    if (!blank || (skin && skin->customGlyphs[first + 1])) {
+      return false;
+    }
+  }
+  return !skin || std::ranges::none_of(skin->thumbSegments, [](const auto &glyph) {
+    return glyph.has_value();
+  });
+}
 } // namespace
 
 bool validGlyphSelection(GlyphSelection selection) noexcept {
   return selection.profile >= GlyphProfile::DEFAULT && selection.profile <= GlyphProfile::NF_BACKSLASH &&
          selection.fallback >= GlyphFallback::UNICODE_GLYPHS && selection.fallback <= GlyphFallback::ASCII;
+}
+
+bool fractionalScrollbar(const ScrollWidgetState &state) noexcept {
+  const auto index = !state.enabled ? 2 : state.focused ? 1 : 0;
+  return state.glyphProfiles && state.glyphProfiles->states[index] && state.glyphProfiles->states[index]->fractional;
 }
 
 std::expected<GraphemeText, TreeError> profileGlyph(std::string_view source, std::string_view unicode,
@@ -110,7 +155,8 @@ std::expected<CustomTitleDecoration, TreeError> profileTitleEnds(GlyphSelection 
 }
 
 std::expected<std::shared_ptr<const PreparedGlyphProfiles>, TreeError>
-GlyphProfileAccess::prepare(Widget &widget, ComputedStyleView style, const GlyphSelection *manualScroll) {
+GlyphProfileAccess::prepare(Widget &widget, ComputedStyleView style, const GlyphSelection *manualScroll,
+                            const PreparedScrollbarSkin *manualSkin) {
   auto *border = dynamic_cast<Border *>(&widget);
   auto *scroll = ScrollWidgetAccess::state(widget);
 
@@ -126,8 +172,27 @@ GlyphProfileAccess::prepare(Widget &widget, ComputedStyleView style, const Glyph
   const auto frameManual = frameOptions ? frameOptions->border.glyphSelection : GlyphSelection{};
   const auto scrollManual = manualScroll ? *manualScroll : scroll ? scroll->glyphSelection : GlyphSelection{};
   const auto &previous = border ? border->glyphProfiles_ : scroll->glyphProfiles;
+  const auto *skin = manualSkin ? manualSkin : scroll ? scroll->scrollbarSkin.get() : nullptr;
+  std::array<bool, 6> coverage{};
+  if (scroll) {
+    for (std::size_t index = 0; index < coverage.size(); ++index) {
+      const auto pattern = style.scrollbar[index].thumbPattern ? style.scrollbar[index].thumbPattern
+                           : skin                              ? skin->thumbPattern
+                                                               : std::nullopt;
+      coverage[index] = pattern == ScrollbarThumbPattern::FRACTIONAL_BLOCK;
+      if (coverage[index] && !compatibleCoverage(*scroll, skin, style.scrollbar[index],
+                                                 effectiveSelection(scrollManual, style.glyphs[index]))) {
+        return std::unexpected(TreeError::INVALID_ARGUMENT);
+      }
+    }
+  }
 
-  if (!previous && frameManual.profile == GlyphProfile::DEFAULT && scrollManual.profile == GlyphProfile::DEFAULT &&
+  if (!previous &&
+      std::ranges::none_of(coverage,
+                           [](bool value) {
+                             return value;
+                           }) &&
+      frameManual.profile == GlyphProfile::DEFAULT && scrollManual.profile == GlyphProfile::DEFAULT &&
       std::ranges::none_of(style.glyphs, [](const auto &value) {
         return value.profile && *value.profile != GlyphProfile::DEFAULT;
       })) {
@@ -148,11 +213,12 @@ GlyphProfileAccess::prepare(Widget &widget, ComputedStyleView style, const Glyph
       return std::unexpected(TreeError::INVALID_ARGUMENT);
     }
 
-    any = any || (frameOptions && frameSelections[index].profile != GlyphProfile::DEFAULT) ||
+    any = any || coverage[index] || (frameOptions && frameSelections[index].profile != GlyphProfile::DEFAULT) ||
           (scroll && scrollSelections[index].profile != GlyphProfile::DEFAULT);
     unchanged = unchanged && previous->states[index] &&
                 previous->states[index]->frameSelection == frameSelections[index] &&
-                previous->states[index]->scrollSelection == scrollSelections[index];
+                previous->states[index]->scrollSelection == scrollSelections[index] &&
+                static_cast<bool>(previous->states[index]->fractional) == coverage[index];
   }
 
   if (!any) {
@@ -168,7 +234,8 @@ GlyphProfileAccess::prepare(Widget &widget, ComputedStyleView style, const Glyph
   for (std::size_t index = 0; index < style.glyphs.size(); ++index) {
     const auto matches = [&](const auto &value) {
       return value && value->frameSelection == frameSelections[index] &&
-             value->scrollSelection == scrollSelections[index];
+             value->scrollSelection == scrollSelections[index] &&
+             static_cast<bool>(value->fractional) == coverage[index];
     };
 
     if (previous) {
@@ -195,6 +262,13 @@ GlyphProfileAccess::prepare(Widget &widget, ComputedStyleView style, const Glyph
 
     value->frameSelection = frameSelections[index];
     value->scrollSelection = scrollSelections[index];
+    if (coverage[index]) {
+      auto palette = fractionalGlyphs(policy);
+      if (!palette) {
+        return std::unexpected(palette.error());
+      }
+      value->fractional = std::move(*palette);
+    }
 
     if (scroll && value->scrollSelection.profile != GlyphProfile::DEFAULT) {
       value->scrollbar = std::make_unique<ProfileScrollGlyphs>();

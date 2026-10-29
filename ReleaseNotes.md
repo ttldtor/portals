@@ -7,6 +7,13 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Add opt-in fractional scrollbar thumbs with prepared one-eighth-cell block
+  edges on both axes, exact large-range geometry and anchored dragging. Fluent,
+  PSS and loaded-scene forms share the profile; theme/part colors keep priority.
+  Fraction-only changes repaint shared controller projections without layout or
+  a timer. Ordinary text and the default scrollbar remain on the cell grid.
+  Include a complete declarative example and a terminal recording.
+
 - Add optional precise POSIX thumb dragging with owning pixel/context metadata,
   bounded 1016/2048 negotiation and serialized runtime cell fallback. AUTO preserves
   ordinary cell input unless the caller declares the required host FIFO ordering;

@@ -207,6 +207,11 @@ std::expected<ScrollControllerChange, TreeError> commitScroll(WidgetTree &tree, 
     if (!invalidated) {
       return std::unexpected(invalidated.error());
     }
+  } else if (change->logicalChanged) {
+    auto invalidated = tree.invalidate(node, Invalidation::PAINT);
+    if (!invalidated) {
+      return std::unexpected(invalidated.error());
+    }
   }
   return change;
 }
@@ -450,11 +455,11 @@ namespace {
 std::expected<std::unique_ptr<detail::PreparedScrollbarSkin>, TreeError>
 prepareScrollbarSkin(const detail::ScrollWidgetState &state, const ScrollbarSkin &skin) {
   if (!detail::validGlyphSelection(skin.glyphSelection) || skin.pattern < ScrollbarPattern::LEGACY ||
-      skin.pattern > ScrollbarPattern::ASCII || !skin.maxGlyphBytes ||
+      skin.pattern > ScrollbarPattern::FRACTIONAL_BLOCK || !skin.maxGlyphBytes ||
       (skin.trackPattern &&
-       (*skin.trackPattern < ScrollbarPattern::LEGACY || *skin.trackPattern > ScrollbarPattern::ASCII)) ||
-      (skin.thumbPattern &&
-       (*skin.thumbPattern < ScrollbarThumbPattern::LEGACY || *skin.thumbPattern > ScrollbarThumbPattern::ASCII)) ||
+       (*skin.trackPattern < ScrollbarPattern::LEGACY || *skin.trackPattern > ScrollbarPattern::FRACTIONAL_BLOCK)) ||
+      (skin.thumbPattern && (*skin.thumbPattern < ScrollbarThumbPattern::LEGACY ||
+                             *skin.thumbPattern > ScrollbarThumbPattern::FRACTIONAL_BLOCK)) ||
       (skin.arrowPattern &&
        (*skin.arrowPattern < ScrollbarArrowPattern::LEGACY || *skin.arrowPattern > ScrollbarArrowPattern::ASCII))) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
@@ -482,11 +487,15 @@ prepareScrollbarSkin(const detail::ScrollWidgetState &state, const ScrollbarSkin
   result->arrowPattern = skin.arrowPattern;
 
   if (skin.pattern != ScrollbarPattern::LEGACY) {
-    result->trackPattern = skin.trackPattern.value_or(skin.pattern);
+    result->trackPattern = skin.trackPattern.value_or(
+      skin.pattern == ScrollbarPattern::FRACTIONAL_BLOCK ? ScrollbarPattern::MINIMAL : skin.pattern);
   }
 
   if (skin.pattern == ScrollbarPattern::ASCII && !skin.thumbPattern) {
     result->thumbPattern = ScrollbarThumbPattern::ASCII;
+  }
+  if (skin.pattern == ScrollbarPattern::FRACTIONAL_BLOCK && !skin.thumbPattern) {
+    result->thumbPattern = ScrollbarThumbPattern::FRACTIONAL_BLOCK;
   }
 
   const auto trackPattern = skin.trackPattern.value_or(skin.pattern);
@@ -501,7 +510,8 @@ prepareScrollbarSkin(const detail::ScrollWidgetState &state, const ScrollbarSkin
                               : state.glyphs[6];
     result->glyphs[first + 1] = state.glyphs[7];
 
-    if (trackPattern == ScrollbarPattern::MINIMAL || trackPattern == ScrollbarPattern::ASCII) {
+    if (trackPattern == ScrollbarPattern::MINIMAL || trackPattern == ScrollbarPattern::FRACTIONAL_BLOCK ||
+        trackPattern == ScrollbarPattern::ASCII) {
       result->glyphs[first] = GraphemeText::from(trackPattern == ScrollbarPattern::ASCII ? "." : " ", policy).value();
     }
 
@@ -631,7 +641,7 @@ std::expected<void, TreeError> setScrollbarSkin(WidgetTree &tree, Node<Widget> n
       // Profile preparation can reenter style publication through the allocator.
       const auto snapshot = widget.computedStyle();
       const auto resolved = snapshot ? detail::ComputedStyleView(*snapshot) : detail::ComputedStyleView(defaults);
-      auto profiles = detail::GlyphProfileAccess::prepare(widget, resolved, &skin.glyphSelection);
+      auto profiles = detail::GlyphProfileAccess::prepare(widget, resolved, &skin.glyphSelection, prepared->get());
 
       if (!profiles) {
         result = std::unexpected(profiles.error());

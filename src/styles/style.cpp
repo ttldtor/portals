@@ -346,10 +346,10 @@ std::expected<void, StyleError> validate(const StyleSheet &sheet) {
     if ((d.glyphProfile && (*d.glyphProfile < GlyphProfile::DEFAULT || *d.glyphProfile > GlyphProfile::NF_BACKSLASH)) ||
         (d.glyphFallback &&
          (*d.glyphFallback < GlyphFallback::UNICODE_GLYPHS || *d.glyphFallback > GlyphFallback::ASCII)) ||
-        (d.scrollbarTrackPattern &&
-         (*d.scrollbarTrackPattern < ScrollbarPattern::LEGACY || *d.scrollbarTrackPattern > ScrollbarPattern::ASCII)) ||
+        (d.scrollbarTrackPattern && (*d.scrollbarTrackPattern < ScrollbarPattern::LEGACY ||
+                                     *d.scrollbarTrackPattern > ScrollbarPattern::FRACTIONAL_BLOCK)) ||
         (d.scrollbarThumbPattern && (*d.scrollbarThumbPattern < ScrollbarThumbPattern::LEGACY ||
-                                     *d.scrollbarThumbPattern > ScrollbarThumbPattern::ASCII)) ||
+                                     *d.scrollbarThumbPattern > ScrollbarThumbPattern::FRACTIONAL_BLOCK)) ||
         (d.scrollbarArrowPattern && (*d.scrollbarArrowPattern < ScrollbarArrowPattern::LEGACY ||
                                      *d.scrollbarArrowPattern > ScrollbarArrowPattern::ASCII))) {
       return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Invalid scrollbar pattern"));

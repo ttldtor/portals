@@ -20,6 +20,45 @@ The [guide examples](examples.md) describe the standalone CMake build. Its
 `guide_scroll_controls` executable opens a native terminal.
 
 
+## Fractional thumb edges {#fractional-scrollbar-thumb}
+
+Use `.scrollbar("fractional-block")` to move the thumb edges in eighths of a
+terminal cell. Arrow keys and ordinary wheel input already produce intermediate
+positions when the content range does not divide the track evenly. The text
+continues to move by whole cells. No animation timer or precise-pointer backend
+is required.
+
+The complete example has overflowing content on both axes. Run the
+`portals_docs_fractional_scroll` target from the main build, or build
+`guide_fractional_scroll` with the [installed examples project](examples.md).
+Use the arrows or wheel; F10 and Exit close the application.
+
+\include guide_fractional_scroll.cpp
+
+![Fractional thumb edges moving on both axes](images/fractional-scrollbar.gif)
+
+The profile uses a blank track and prepared Unicode block glyphs. It fills only
+missing local foreground/background colors; theme colors and explicit part and
+segment colors keep their normal priority. No stylesheet is needed for this
+example. The integer thumb length remains proportional to the viewport and is
+at least one cell; the fractional placement can cover an extra cell at an edge.
+Partially covered cells participate in dragging.
+
+For PSS, use `scrollbar-track-pattern: minimal` together with
+`scrollbar-thumb-pattern: fractional-block`. Typed styles use
+`ScrollbarThumbPattern::FRACTIONAL_BLOCK`; loaded scenes can select
+`scrollbar { pattern=FRACTIONAL_BLOCK }`.
+
+A nonblank custom track, custom thumb caps, or a width policy that cannot render
+the required one-cell blocks is rejected before the new configuration is
+published. Select the ordinary `block` or `ascii` profile for those cases.
+Rounded caps remain a separate glyph-profile option. A fractional-offset change
+requests PAINT, while a changed cell offset or metrics also requests layout.
+Painting reuses the prepared glyphs and reads the current owning controller
+presentation, including when several controls share a controller. This profile
+adds no continuous redraw or inertia. Font rasterization still depends on the
+terminal and font.
+
 ## Precise pointer scrolling {#precise-pointer-scrolling}
 
 Ordinary `ui::scrollArea(...)` and `ui::scrollBar(...)` code needs no new option.
@@ -418,18 +457,17 @@ declarations use the corresponding functions, for example
 `scrollbarThumbStartForeground(rgb(242, 200, 121))` and
 `scrollbarThumbBodyBold(false)`.
 Frame/title decoration uses its independent existing settings and styles.
-Resolved styles own their segment values inline, without borrowed source storage.
-The optional segment block is engaged only when segment declarations match the
-target or the widget provides explicit segment defaults. Resolution, copying
-and painting allocate no memory for these values; existing `resolveStyle`
-`noexcept` and complete-result guarantees remain. An absent block uses the common
-thumb directly. Inline storage increases the size of every `ComputedStyle`,
-including controls that have no scrollbar.
+The low-level `ComputedStyle` retains owning inline segment values for source
+compatibility; `resolveStyle` remains allocation-free and `noexcept`. Managed
+controls use a compact `StyleSnapshot` and shared optional extensions instead.
+A matching extension is prepared before publication and can report an allocation
+error without replacing the previous valid style. Controls without these
+extensions do not reserve their inline storage. Painting uses the prepared values.
 
 
-One-cell terminal glyphs do not promise a GUI radius or font coverage. Custom
-caps can be previewed on the target host; no general rounded-thumb preset is
-provided. ASCII and the legacy block remain explicit alternatives.
+One-cell terminal glyphs do not promise a GUI radius or font coverage. Preview
+custom caps and the [named glyph profiles](#named-glyph-profiles) on the target
+host. ASCII and the legacy block remain explicit alternatives.
 
 PSS also selects the same named sources directly:
 

@@ -4,7 +4,6 @@
 #include "log_view_state.hpp"
 #include "scroll_controls_state.hpp"
 #include <algorithm>
-#include <bit>
 #include <limits>
 #include <new>
 
@@ -339,33 +338,6 @@ bool samePointerContext(const InputPointerPrecision &left, const InputPointerPre
          left.text_height_px == right.text_height_px && left.generation == right.generation;
 }
 
-std::uint64_t anchorFractionUnits(double fraction, std::uint64_t travel) noexcept {
-  static_assert(std::numeric_limits<double>::is_iec559 && std::numeric_limits<double>::digits == 53);
-  constexpr std::uint32_t MANTISSA_BITS = 52;
-  constexpr std::uint32_t EXPONENT_BIAS = 1023;
-  constexpr std::uint64_t EXPONENT_MASK = 0x7ff;
-  constexpr auto INTEGER_BITS = std::numeric_limits<std::uint64_t>::digits;
-  const auto bits = std::bit_cast<std::uint64_t>(fraction);
-  const auto exponent = static_cast<std::uint32_t>((bits >> MANTISSA_BITS) & EXPONENT_MASK);
-  auto mantissa = bits & ((std::uint64_t{1} << MANTISSA_BITS) - 1);
-  const auto shift = exponent ? MANTISSA_BITS + EXPONENT_BIAS - exponent : MANTISSA_BITS + EXPONENT_BIAS - 1;
-
-  if (exponent != 0) {
-    mantissa |= std::uint64_t{1} << MANTISSA_BITS;
-  }
-
-  // The owning fraction is in [0,1), so mantissa <= 2^min(shift,63).
-  // Two exact integer divisions preserve floor(fraction*travel), including subnormals.
-  const auto divisionShift = std::min(shift, static_cast<std::uint32_t>(INTEGER_BITS - 1));
-  const auto remainingShift = shift - divisionShift;
-
-  if (remainingShift >= INTEGER_BITS) {
-    return 0;
-  }
-
-  return detail::scrollMultiplyDivide(mantissa, travel, std::uint64_t{1} << divisionShift).quotient >> remainingShift;
-}
-
 ScrollOffset anchoredPreciseOffset(const detail::ScrollDrag &drag, std::uint64_t position,
                                    std::uint64_t travel) noexcept {
   if (position == drag.anchorUnits) {
@@ -385,7 +357,7 @@ ScrollOffset anchoredPreciseOffset(const detail::ScrollDrag &drag, std::uint64_t
   const bool forward = position >= drag.anchorUnits;
   const auto delta = forward ? position - drag.anchorUnits : drag.anchorUnits - position;
   const auto movement = detail::scrollMultiplyDivide(std::min(delta, travel), drag.maximum, travel);
-  const auto anchorUnits = anchorFractionUnits(drag.anchorOffset.fraction, travel);
+  const auto anchorUnits = detail::scrollFractionUnits(drag.anchorOffset.fraction, travel);
   const auto remainder = movement.remainder;
   auto result = drag.anchorOffset;
 
@@ -534,15 +506,20 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
       }
 
       const auto pointer = state.drag->axis == ScrollAxis::HORIZONTAL ? mouse.column : mouse.row;
-      const auto offset =
-        scrollOffsetForThumb(static_cast<std::int64_t>(pointer) - state.drag->surfaceStart - state.drag->grab,
-                             state.drag->travel, state.drag->maximum);
+      const auto position = static_cast<std::int64_t>(pointer) - state.drag->surfaceStart - state.drag->grab;
+      if (state.drag->anchored) {
+        intended = position < 0
+                     ? ScrollOffset{}
+                     : anchoredPreciseOffset(*state.drag, static_cast<std::uint64_t>(position), state.drag->travel);
+      } else {
+        const auto offset = scrollOffsetForThumb(position, state.drag->travel, state.drag->maximum);
 
-      if (!offset) {
-        return std::unexpected(offset.error());
+        if (!offset) {
+          return std::unexpected(offset.error());
+        }
+
+        intended = {*offset, 0};
       }
-
-      intended = {*offset, 0};
     }
 
     const auto axis = state.drag->axis;
@@ -611,7 +588,22 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
     return std::unexpected(thumb.error());
   }
   const auto point = axis == ScrollAxis::HORIZONTAL ? localX - track.origin.x : localY - track.origin.y;
-  if (point < thumb->start || point - thumb->start >= thumb->length) {
+  std::int64_t startEighths = static_cast<std::int64_t>(thumb->start) * 8;
+  std::int64_t endEighths = startEighths + static_cast<std::int64_t>(thumb->length) * 8;
+  const bool fractional = detail::fractionalScrollbar(state);
+  if (fractional) {
+    const auto &initial = axis == ScrollAxis::HORIZONTAL ? plan->horizontal : plan->vertical;
+    const auto interval = scrollFractionalThumb(metrics, {initial.rasterOffset(), initial.fraction()}, track.length,
+                                                state.isArea ? state.area.minimumThumb : state.bar.minimumThumb);
+    if (!interval) {
+      return std::unexpected(interval.error());
+    }
+    startEighths = interval->startEighths;
+    endEighths = startEighths + interval->lengthEighths;
+  }
+  const auto firstCell = static_cast<std::int32_t>(startEighths / 8);
+  const auto endCell = static_cast<std::int32_t>((endEighths + 7) / 8);
+  if (point < firstCell || point >= endCell) {
     detail::cancelScrollRepeat(state);
     detail::cancelScrollDrag(state);
     auto moved = ScrollControllerAccess::step(
@@ -643,12 +635,17 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
   const auto start = axis == ScrollAxis::HORIZONTAL
                        ? static_cast<std::int64_t>(live->geometry.surface.origin().x) + track.origin.x
                        : static_cast<std::int64_t>(live->geometry.surface.origin().y) + track.origin.y;
-  *proposed = {axis,          static_cast<std::int32_t>(start), static_cast<std::int32_t>(point - thumb->start),
+  *proposed = {axis,          static_cast<std::int32_t>(start), static_cast<std::int32_t>(point - firstCell),
                thumb->travel, scrollRange(metrics).maximum,     metrics};
+  const auto &initial = axis == ScrollAxis::HORIZONTAL ? plan->horizontal : plan->vertical;
+  proposed->anchorOffset = {initial.rasterOffset(), initial.fraction()};
+  proposed->anchorUnits = static_cast<std::uint64_t>(firstCell);
+  proposed->anchored = fractional;
   if (mouse.precision) {
     const auto relative = pointerTrackUnits(*mouse.precision, axis, proposed->surfaceStart);
     const auto span = axis == ScrollAxis::HORIZONTAL ? mouse.precision->text_width_px : mouse.precision->text_height_px;
-    const auto anchor = static_cast<std::uint64_t>(thumb->start) * span;
+    const auto anchor =
+      static_cast<std::uint64_t>(startEighths / 8) * span + static_cast<std::uint64_t>(startEighths % 8) * span / 8;
 
     if (!relative || *relative < anchor) {
       return EventReply::IGNORED;
@@ -657,9 +654,6 @@ std::expected<EventReply, TreeError> pointerScroll(EventRouter &router, WidgetTr
     proposed->precision = mouse.precision;
     proposed->grabUnits = *relative - anchor;
     proposed->anchorUnits = anchor;
-    const auto &initial = axis == ScrollAxis::HORIZONTAL ? plan->horizontal : plan->vertical;
-
-    proposed->anchorOffset = {initial.rasterOffset(), initial.fraction()};
   }
 
   auto capture = router.capturePointer(node);

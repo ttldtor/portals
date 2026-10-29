@@ -632,8 +632,8 @@ private:
       declaration.color = *color;
     } else if (property == PssProperty::SCROLLBAR_TRACK_PATTERN || property == PssProperty::SCROLLBAR_THUMB_PATTERN ||
                property == PssProperty::SCROLLBAR_ARROW_PATTERN) {
-      constexpr std::array<std::string_view, 4> TRACK{"legacy", "frame", "minimal", "ascii"};
-      constexpr std::array<std::string_view, 3> THUMB{"legacy", "block", "ascii"};
+      constexpr std::array<std::string_view, 5> TRACK{"legacy", "frame", "minimal", "ascii", "fractional-block"};
+      constexpr std::array<std::string_view, 4> THUMB{"legacy", "block", "ascii", "fractional-block"};
       constexpr std::array<std::string_view, 3> ARROW{"legacy", "triangle", "ascii"};
       const auto names = property == PssProperty::SCROLLBAR_TRACK_PATTERN   ? std::span<const std::string_view>(TRACK)
                          : property == PssProperty::SCROLLBAR_THUMB_PATTERN ? std::span<const std::string_view>(THUMB)

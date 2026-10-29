@@ -234,6 +234,226 @@ struct BarFixture : TreeFixture {
   }
 };
 
+void fractionalScrollbarPaint() {
+  for (const auto axis : {ScrollAxis::HORIZONTAL, ScrollAxis::VERTICAL}) {
+    BarFixture fixture({}, axis);
+    take(setScrollbarSkin(*fixture.tree, fixture.bar, {.pattern = ScrollbarPattern::FRACTIONAL_BLOCK}));
+    take(setScrollMetrics(*fixture.tree, fixture.bar, {11, 1}));
+    fixture.layout(axis == ScrollAxis::HORIZONTAL ? CellSize{3, 1} : CellSize{1, 3});
+    take(fixture.tree->consumeFrameRequest());
+    take(setScrollOffset(*fixture.tree, fixture.bar, axis, {0, .625}));
+    check(take(fixture.tree->consumeFrameRequest()) == Invalidation::PAINT,
+          "fraction-only position requests paint without layout");
+    const auto painted = fixture.paint(fixture.bar);
+    const auto cell = [axis](int index) {
+      return axis == ScrollAxis::HORIZONTAL ? std::pair{index, 0} : std::pair{0, index};
+    };
+    check(painted.cells.at(cell(0)) == (axis == ScrollAxis::HORIZONTAL ? "\xe2\x96\x8f" : "\xe2\x96\x87") &&
+            painted.cells.at(cell(1)) == (axis == ScrollAxis::HORIZONTAL ? "\xe2\x96\x8f" : "\xe2\x96\x87"),
+          "first and extra trailing cells use complementary one-eighth boundaries");
+    const RgbColor ink{220, 225, 232};
+    const RgbColor surface{24, 28, 36};
+    check(painted.styles[0].foreground == (axis == ScrollAxis::HORIZONTAL ? surface : ink) &&
+            painted.styles[1].foreground == (axis == ScrollAxis::HORIZONTAL ? ink : surface),
+          "plain default colors resolve to real RGB before complementary coverage");
+    check(take(fixture.tree->consumeFrameRequest()) == Invalidation::NONE,
+          "fractional paint remains idle without a scheduler");
+    take(syncScrollControl(*fixture.tree, fixture.bar, fixture.bar));
+    const auto focused = fixture.paint(fixture.bar);
+    check(focused.styles[0].foreground == (axis == ScrollAxis::HORIZONTAL ? surface : RgbColor{75, 180, 220}),
+          "plain focused profile supplies only missing local ink");
+    take(fixture.tree->setEnabled(fixture.bar, false));
+    take(syncScrollControl(*fixture.tree, fixture.bar));
+    const auto disabled = fixture.paint(fixture.bar);
+    check(disabled.styles[0].foreground == (axis == ScrollAxis::HORIZONTAL ? surface : RgbColor{125, 130, 140}),
+          "plain disabled profile supplies only missing local ink");
+    take(fixture.tree->setEnabled(fixture.bar, true));
+    take(syncScrollControl(*fixture.tree, fixture.bar));
+    ScrollbarSkin incompatible{.pattern = ScrollbarPattern::FRACTIONAL_BLOCK};
+    incompatible.horizontal.thumbStart = "[";
+    check(error(setScrollbarSkin(*fixture.tree, fixture.bar, incompatible), TreeError::INVALID_ARGUMENT),
+          "fractional coverage cannot silently replace explicit caps");
+    ScrollbarSkin literal{.thumbPattern = ScrollbarThumbPattern::FRACTIONAL_BLOCK};
+    literal.horizontal.track = " ";
+    literal.vertical.track = " ";
+    take(setScrollbarSkin(*fixture.tree, fixture.bar, literal));
+    check(fixture.paint(fixture.bar).cells == painted.cells,
+          "explicit literal blank tracks are compatible without an unrelated pattern requirement");
+  }
+  TreeFixture widths;
+  const auto wide = take(widths.tree->emplaceChecked<ScrollBar>(
+    widths.root, std::shared_ptr<ScrollController>{}, ScrollAxis::VERTICAL, WidthPolicy{AmbiguousWidth::WIDE}));
+  check(error(setScrollbarSkin(*widths.tree, wide, {.pattern = ScrollbarPattern::FRACTIONAL_BLOCK}),
+              TreeError::INVALID_ARGUMENT),
+        "coverage rejects a width policy that cannot admit every boundary as one cell");
+  BarFixture ascii({.glyphs = PrimitiveGlyphs::ASCII});
+  check(error(setScrollbarSkin(*ascii.tree, ascii.bar, {.pattern = ScrollbarPattern::FRACTIONAL_BLOCK}),
+              TreeError::INVALID_ARGUMENT),
+        "fractional opt-in cannot silently override an ASCII primitive contract");
+}
+
+void fractionalScrollbarStylesAndDrag() {
+  for (const auto axis : {ScrollAxis::HORIZONTAL, ScrollAxis::VERTICAL}) {
+    BarFixture bar({}, axis);
+    take(setScrollbarSkin(*bar.tree, bar.bar, {.pattern = ScrollbarPattern::FRACTIONAL_BLOCK}));
+    take(setScrollMetrics(*bar.tree, bar.bar, {11, 1}));
+    bar.layout(axis == ScrollAxis::HORIZONTAL ? CellSize{3, 1} : CellSize{1, 3});
+    auto binding = take(bindScrollBar(*bar.router, *bar.tree, bar.bar));
+    take(bar.router->setPointerCaptureCapabilities({true, true, true}));
+    take(setScrollOffset(*bar.tree, bar.bar, axis, {0, .625}));
+    for (const bool precise : {false, true}) {
+      const auto send = [&](MouseAction action, std::int32_t position = 1) {
+        MouseInputEvent event{axis == ScrollAxis::HORIZONTAL ? position : 0,
+                              axis == ScrollAxis::VERTICAL ? position : 0,
+                              MouseButton::LEFT,
+                              action,
+                              {}};
+        if (precise) {
+          event.precision =
+            InputPointerPrecision{axis == ScrollAxis::HORIZONTAL ? static_cast<std::uint32_t>(position) * 8 : 0U,
+                                  axis == ScrollAxis::VERTICAL ? static_cast<std::uint32_t>(position) * 8 : 0U,
+                                  axis == ScrollAxis::HORIZONTAL ? 3U : 1U,
+                                  axis == ScrollAxis::VERTICAL ? 3U : 1U,
+                                  axis == ScrollAxis::HORIZONTAL ? 24U : 8U,
+                                  axis == ScrollAxis::VERTICAL ? 24U : 8U,
+                                  7};
+        }
+        take(bar.router->dispatch(event));
+      };
+      send(MouseAction::PRESS);
+      check(take(bar.router->pointerCapture()) == bar.bar,
+            "partially covered trailing cell acquires the existing capture owner");
+      send(MouseAction::MOVE);
+      const auto values = bar.values();
+      const auto offset = axis == ScrollAxis::HORIZONTAL ? values.horizontal.offset : values.vertical.offset;
+      check(offset.raster == 0 && offset.fraction == .625,
+            "unchanged cell or precise move keeps the full unquantized logical anchor");
+      send(MouseAction::MOVE, 2);
+      const auto moved = bar.values();
+      const auto next = axis == ScrollAxis::HORIZONTAL ? moved.horizontal.offset : moved.vertical.offset;
+      check(next.raster == 5 && next.fraction == .625,
+            "cell and precise moves preserve logical fraction rather than quantizing to paint units");
+      send(MouseAction::MOVE, 99);
+      const auto end = bar.values();
+      const auto endOffset = axis == ScrollAxis::HORIZONTAL ? end.horizontal.offset : end.vertical.offset;
+      check(endOffset.raster == 10 && endOffset.fraction == 0, "fractional dragging saturates at the exact endpoint");
+      send(MouseAction::MOVE, 0);
+      const auto start = bar.values();
+      const auto startOffset = axis == ScrollAxis::HORIZONTAL ? start.horizontal.offset : start.vertical.offset;
+      check(startOffset.raster == 0 && startOffset.fraction == 0, "fractional dragging saturates at the exact start");
+      send(MouseAction::RELEASE);
+      take(setScrollOffset(*bar.tree, bar.bar, axis, {0, .625}));
+      bar.layout(axis == ScrollAxis::HORIZONTAL ? CellSize{3, 1} : CellSize{1, 3});
+    }
+
+    StyleEngine engine(*bar.tree);
+    take(engine.bind(bar.bar, {"ScrollBar", "", {}, true}));
+    for (const auto &sheet : {modernTheme(), catppuccinLatteTheme()}) {
+      take(engine.replace(sheet));
+      for (int index = 0; index < 3; ++index) {
+        take(bar.tree->setEnabled(bar.bar, index != 2));
+        take(syncScrollControl(*bar.tree, bar.bar, index == 1 ? bar.bar : Node<Widget>{}));
+        const auto painted = bar.paint(bar.bar);
+        const auto resolved = resolveStyle(sheet, {"ScrollBar", "", {}, true});
+        const auto base = index == 0 ? resolved.normal : index == 1 ? resolved.focused : resolved.disabled;
+        const auto surface = resolved.scrollbar[index].track.value_or(base).background;
+        const auto ink = resolved.scrollbar[index].thumb.value_or(base).foreground;
+        check(painted.styles[0].foreground == (axis == ScrollAxis::HORIZONTAL ? surface : ink) &&
+                painted.styles[1].foreground == (axis == ScrollAxis::HORIZONTAL ? ink : surface),
+              "dark/light and focused/disabled resolved colors win over local profile defaults");
+      }
+    }
+    take(bar.tree->setEnabled(bar.bar, true));
+    take(syncScrollControl(*bar.tree, bar.bar));
+    take(engine.replace(
+      take(parsePss("*{scrollbar-thumb-single-foreground:#010203;scrollbar-track-background:#fafbfc;}"))));
+    const auto segmented = bar.paint(bar.bar);
+    check(segmented.styles[0].foreground ==
+            (axis == ScrollAxis::HORIZONTAL ? RgbColor{250, 251, 252} : RgbColor{1, 2, 3}),
+          "explicit segment ink and independent track surface survive complementary painting");
+    const auto invalid = engine.replace(take(parsePss("*{scrollbar-track-pattern:ascii;}")));
+    check(!invalid && bar.paint(bar.bar).cells == segmented.cells,
+          "incompatible dynamic track style rejects without replacing prepared coverage");
+
+    struct NoAllocationPaint final : PaintContext {
+      std::expected<void, TreeError> submit(std::span<const RenderCommand>) override {
+        return {};
+      }
+    } sink;
+
+    std::expected<void, TreeError> painted;
+    take(bar.tree->frame([&] {
+      allocation_test::fail = true;
+      painted = bar.tree->paint(bar.bar, sink);
+      allocation_test::fail = false;
+    }));
+    check(painted.has_value(), "prepared fractional painting constructs no owning glyph or allocation");
+  }
+}
+
+void fractionalProjectionAndPlacement() {
+  TreeFixture shared;
+  auto controller = take(ScrollController::create());
+  const auto row = take(shared.tree->emplaceChecked<Row>(shared.root));
+  const auto writer = take(shared.tree->emplaceChecked<ScrollBar>(row, controller));
+  const auto projection = take(shared.tree->emplaceChecked<ScrollBar>(row, controller));
+  take(initializeScrollBar(*shared.tree, writer));
+  take(initializeScrollBar(*shared.tree, projection, false));
+  take(setScrollMetrics(*shared.tree, writer, {11, 1}));
+  for (const auto node : {writer, projection}) {
+    take(setScrollbarSkin(*shared.tree, node, {.pattern = ScrollbarPattern::FRACTIONAL_BLOCK}));
+  }
+  shared.layout({2, 3});
+  const auto before = take(shared.tree->inspect(projection)).geometry;
+  take(shared.tree->consumeFrameRequest());
+  take(setScrollOffset(*shared.tree, writer, ScrollAxis::VERTICAL, {0, .625}));
+  check(take(shared.tree->consumeFrameRequest()) == Invalidation::PAINT,
+        "shared logical-only publication requests PAINT");
+  check(shared.paint(writer).cells == shared.paint(projection).cells &&
+          shared.paint(projection).cells.at({0, 1}) == "\xe2\x96\x87" &&
+          take(shared.tree->inspect(projection)).geometry.local == before.local,
+        "all shared projections refresh fractional offsets without re-arranging their geometry");
+
+  for (const auto placement : {ScrollPlacement::RESERVED, ScrollPlacement::OVERLAY, ScrollPlacement::ON_FRAME}) {
+    for (const bool arrows : {false, true}) {
+      ScrollAreaOptions options;
+      options.placement = placement;
+      options.arrows = arrows;
+      options.frame = BorderOptions{};
+      AreaFixture area(options);
+      take(setScrollbarSkin(*area.tree, area.area, {.pattern = ScrollbarPattern::FRACTIONAL_BLOCK}));
+      area.settle({10, 7});
+      const auto layout = take(scrollAreaLayout(*area.tree, area.area));
+      const auto child = take(area.tree->inspect(area.content)).geometry;
+      take(area.tree->consumeFrameRequest());
+      take(setScrollOffset(*area.tree, area.area, ScrollAxis::HORIZONTAL, {0, .875}));
+      take(setScrollOffset(*area.tree, area.area, ScrollAxis::VERTICAL, {0, .875}));
+      check(take(area.tree->consumeFrameRequest()) == Invalidation::PAINT,
+            "both area fractions retain the text raster layout");
+      const auto painted = area.paint(area.area);
+      check(painted.cells.at({0, 0}) == "\xe2\x94\x8c" && painted.cells.at({9, 6}) == "\xe2\x94\x98" &&
+              take(scrollAreaLayout(*area.tree, area.area)).layoutRevision == layout.layoutRevision &&
+              take(area.tree->inspect(area.content)).geometry.local == child.local,
+            "fractional ON_FRAME and other placements preserve corners and child raster geometry");
+      if (arrows) {
+        const auto horizontal = layout.placement.horizontal;
+        const auto vertical = layout.placement.vertical;
+        check(painted.cells.at({horizontal.origin.x, horizontal.origin.y}) == "\xe2\x97\x80" &&
+                painted.cells.at({vertical.origin.x, vertical.origin.y}) == "\xe2\x96\xb2",
+              "coverage never consumes functional arrow cells");
+      }
+      const auto oldValues = area.values();
+      take(area.tree->consumeFrameRequest());
+      allocation_test::fail = true;
+      const auto rejected = setScrollbarSkin(*area.tree, area.area, {.pattern = ScrollbarPattern::FRACTIONAL_BLOCK});
+      allocation_test::fail = false;
+      check(error(rejected, TreeError::NO_MEMORY) && take(area.tree->consumeFrameRequest()) == Invalidation::NONE &&
+              area.paint(area.area).cells == painted.cells && area.values().revision == oldValues.revision,
+            "failed owning coverage preparation preserves prior glyphs, offsets and invalidation");
+    }
+  }
+}
+
 void sharedScrollbarPresetLifetime() {
   TreeFixture fixture;
   const WidthPolicy original{AmbiguousWidth::NARROW, EmojiWidth::TWO, 9981};
@@ -429,7 +649,7 @@ void wheelKeysAndBoundary() {
   auto reply = f.mouse(MouseAction::SCROLL, MouseButton::WHEEL_DOWN, 2, 2);
   check(reply.handler == f.area.id() && f.values().vertical.offset.fraction == .5 && outer == 0,
         "fraction-only wheel logically moves and consumes whole event");
-  check(take(f.tree->consumeFrameRequest()) == Invalidation::NONE, "fraction-only movement requests no frame");
+  check(take(f.tree->consumeFrameRequest()) == Invalidation::PAINT, "fraction-only movement requests paint");
   f.mouse(MouseAction::SCROLL, MouseButton::WHEEL_DOWN, 2, 2);
   check(f.values().vertical.offset.raster == 1 && take(f.tree->consumeFrameRequest()) == Invalidation::LAYOUT,
         "next fractional wheel changes raster and requests layout");
@@ -2115,6 +2335,9 @@ void glyphProfileTransactions() {
 } // namespace
 
 int main() {
+  fractionalScrollbarPaint();
+  fractionalScrollbarStylesAndDrag();
+  fractionalProjectionAndPlacement();
   namedGlyphProfiles();
   glyphProfileTransactions();
   skinProfileSnapshotReentry();

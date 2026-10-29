@@ -54,6 +54,63 @@ void check(bool value, const char *message) {
   }
 }
 
+void fractionalThumbs() {
+  for (std::uint64_t maximum = 1; maximum <= 31; ++maximum) {
+    for (std::int32_t track = 0; track <= 17; ++track) {
+      std::int64_t previous{};
+      for (std::uint64_t eighth = 0; eighth <= maximum * 8; ++eighth) {
+        const ScrollOffset offset{eighth / 8, static_cast<double>(eighth % 8) / 8};
+        const auto value = scrollFractionalThumb({maximum + 1, 1}, offset, track);
+        check(value.has_value(), "valid fractional geometry is admitted");
+        if (!value) {
+          continue;
+        }
+        const auto length = track == 0 ? 0 : std::max<std::int32_t>(1, track / static_cast<std::int32_t>(maximum + 1));
+        const auto travel = track - length;
+        const auto expected = static_cast<std::int64_t>(eighth * travel / maximum);
+        check(value->startEighths == expected && value->startEighths >= previous,
+              "independent small rational oracle preserves every eighth and monotonicity");
+        check(value->lengthEighths == length * 8 && value->travelEighths == travel * 8,
+              "fractional placement preserves integral minimum length and travel");
+        previous = value->startEighths;
+      }
+    }
+  }
+  const auto nearEnd = scrollFractionalThumb({MAXIMUM, 1}, {MAXIMUM - 2, .5}, MAXIMUM_CELL);
+  check(nearEnd && nearEnd->startEighths == (static_cast<std::int64_t>(MAXIMUM_CELL) - 1) * 8 - 1,
+        "wide raster and fractional remainder reach the last eighth without a double round trip");
+  const auto endpoint = scrollFractionalThumb({MAXIMUM, 1}, {MAXIMUM, .5}, MAXIMUM_CELL);
+  check(endpoint && endpoint->startEighths == endpoint->travelEighths, "clamped uint64 endpoint is exact");
+  check(!scrollFractionalThumb({10, 1}, {0, std::numeric_limits<double>::quiet_NaN()}, 10) &&
+          !scrollFractionalThumb({10, 1}, {0, 1}, 10) && !scrollFractionalThumb({10, 1}, {}, -1),
+        "fractional geometry rejects invalid offsets and tracks");
+
+  struct Golden {
+    std::uint64_t maximum;
+    std::uint64_t raster;
+    double fraction;
+    std::int32_t track;
+    std::int64_t expected;
+  };
+
+  // Independent Python Fraction(binary64) arithmetic supplies these exact rational results.
+  constexpr std::array GOLDENS{
+    Golden{3ULL, 0ULL, 0x1.999999999999ap-4, 17, 3LL},
+    Golden{3ULL, 0ULL, 0x1.fffffffffffffp-4, 17, 4LL},
+    Golden{3ULL, 0ULL, 0x1.0000000000000p-3, 17, 4LL},
+    Golden{3ULL, 0ULL, 0x1.0000000000001p-3, 17, 4LL},
+    Golden{31ULL, 7ULL, 0x1.3333333333333p-2, 19, 33LL},
+    Golden{9007199254740999ULL, 9007199254740997ULL, 0x1.8000000000000p-1, MAXIMUM_CELL, 17179869167LL},
+    Golden{18446744073709551614ULL, 18446744073709551613ULL, 0x1.fffffffffffffp-1, MAXIMUM_CELL, 17179869167LL},
+    Golden{1ULL, 0ULL, 0x1.fffffffffffffp-1, MAXIMUM_CELL, 8589934591LL},
+    Golden{1ULL, 0ULL, 0x0.0000000000001p-1022, MAXIMUM_CELL, 0LL}};
+  for (const auto &golden : GOLDENS) {
+    const auto value = scrollFractionalThumb({golden.maximum + 1, 1}, {golden.raster, golden.fraction}, golden.track);
+    check(value && value->startEighths == golden.expected,
+          "binary64 rational oracle covers carry, subnormal, near-one and wide indices");
+  }
+}
+
 template <class T> T take(std::expected<T, TreeError> result) {
   if (!result) {
     std::cerr << "unexpected fixture error " << static_cast<int>(result.error()) << '\n';
@@ -466,6 +523,7 @@ void options() {
 } // namespace
 
 int main() {
+  fractionalThumbs();
   thumbs();
   preciseThumbOffsets();
   placement();

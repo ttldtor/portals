@@ -515,3 +515,11 @@ TEST_CASE("external runtime themes remain composable and equal updates do not si
   CHECK(take(live.set<"bold">(true)));
   CHECK(fixture.read().normal.background == RgbColor{20, 40, 60});
 }
+
+TEST_CASE("fractional scrollbar pattern admission matches runtime PSS") {
+  constexpr auto FRACTIONAL =
+    sc::sheet(sc::parameters(), sc::rule(sc::selector(), sc::scrollbarTrackPattern(ScrollbarPattern::MINIMAL),
+                                         sc::scrollbarThumbPattern(ScrollbarThumbPattern::FRACTIONAL_BLOCK)));
+  const auto runtime = take(parsePss("*{scrollbar-track-pattern:minimal;scrollbar-thumb-pattern:fractional-block;}"));
+  CHECK(sc::materialize(FRACTIONAL) == runtime);
+}

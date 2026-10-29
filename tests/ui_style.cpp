@@ -8,6 +8,32 @@
 using namespace portals;
 namespace sc = style::ct;
 
+TEST_CASE("fractional scrollbar umbrella mounts in a plain lazy scene without a theme") {
+  auto owner =
+    ui::scene(ui::scrollArea(ui::label("ordinary content")).scrollbar("fractional-block").width(8).height(3));
+  REQUIRE(owner.prepareChecked());
+}
+
+TEST_CASE("fractional scrollbar PSS admission preserves independent leaves") {
+  auto owner = ui::scene(ui::scrollArea(ui::label("ordinary content")).scrollbar("fractional-block")) |
+               ui::style("ScrollArea{scrollbar-track-pattern:minimal;scrollbar-thumb-pattern:fractional-block;}");
+  REQUIRE(owner.prepareChecked());
+  auto invalid =
+    ui::scene(ui::scrollArea(ui::label("ordinary content")).scrollbar("fractional-block").scrollTrack("ascii"));
+  CHECK_FALSE(invalid.prepareChecked());
+}
+
+TEST_CASE("fractional scrollbar resource names use the same prepared skin admission") {
+  ui::SceneResourceOptions options;
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  auto owner =
+    ui::scene("scene{ScrollArea{scrollbar.pattern=FRACTIONAL_BLOCK Label{text=\"ordinary content\"}}}", options);
+  REQUIRE(owner.prepareChecked());
+  auto invalid = ui::scene(
+    "scene{ScrollArea{scrollbar{pattern=FRACTIONAL_BLOCK trackPattern=ASCII} Label{text=\"body\"}}}", options);
+  CHECK_FALSE(invalid.prepareChecked());
+}
+
 #include <array>
 #include <atomic>
 #include <fstream>

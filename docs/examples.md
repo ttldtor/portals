@@ -438,3 +438,10 @@ The advanced [precise pointer example](scroll-controls.md#precise-pointer-scroll
 builds as `guide_precise_scroll`, linked with `portals::lyra`. `--help` performs no
 terminal I/O. `--fifo-host` declares host FIFO ordering; AUTO still falls back to
 ordinary scrolling when optional pixel support is unavailable.
+
+
+The [fractional thumb example](scroll-controls.md#fractional-scrollbar-thumb)
+uses one `.scrollbar("fractional-block")` modifier and ordinary key input to show
+one-eighth-cell edges on both axes. It builds as `guide_fractional_scroll` in the
+installed examples project and requires only `portals::core`. The complete source
+and terminal recording are included in the guide.
