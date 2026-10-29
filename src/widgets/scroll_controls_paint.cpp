@@ -169,14 +169,15 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, ComputedSty
     }
   }
 
-  auto track = [&](ScrollTrack cells, ScrollThumb thumb, bool horizontalAxis) -> std::expected<void, TreeError> {
+  auto track = [&]<bool Fractional>(ScrollTrack cells, ScrollThumb thumb,
+                                    bool horizontalAxis) -> std::expected<void, TreeError> {
     if (cells.length == 0) {
       return {};
     }
 
     const bool arrows = scrollArrows(state, cells);
     ScrollFractionalThumb fractional;
-    if (coverage) {
+    if constexpr (Fractional) {
       const auto &axis = horizontalAxis ? state.presentation.horizontal : state.presentation.vertical;
       const auto value = scrollFractionalThumb(axis.metrics, axis.offset, cells.length - (arrows ? 2 : 0),
                                                state.isArea ? state.area.minimumThumb : state.bar.minimumThumb);
@@ -236,9 +237,9 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, ComputedSty
         point.y += i;
       }
       const auto position = i - (arrows ? 1 : 0);
-      const auto fractionalCell = coverage ? fractionalCellCoverage(fractional, position) : FractionalCell{};
+      const auto fractionalCell = Fractional ? fractionalCellCoverage(fractional, position) : FractionalCell{};
       const bool inThumb =
-        coverage ? fractionalCell.occupied != 0 : position >= thumb.start && position - thumb.start < thumb.length;
+        Fractional ? fractionalCell.occupied != 0 : position >= thumb.start && position - thumb.start < thumb.length;
       const auto *glyph = inThumb ? thumbGlyph : trackGlyph;
       const auto *part = inThumb ? &parts.thumb : &parts.track;
       const CellStyle *segmentStyle{};
@@ -294,7 +295,7 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, ComputedSty
       }
 
       CellStyle coverageStyle;
-      if (coverage) {
+      if constexpr (Fractional) {
         const auto surface = *coverageStyleFor(parts.track.value_or(style)).background;
         coverageStyle = coverageStyleFor(segmentStyle ? *segmentStyle : part->value_or(style));
         if (inThumb) {
@@ -310,11 +311,13 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, ComputedSty
     }
     return {};
   };
-  auto result = track(state.geometry.horizontal, *horizontal, true);
+  auto result = coverage ? track.template operator()<true>(state.geometry.horizontal, *horizontal, true)
+                         : track.template operator()<false>(state.geometry.horizontal, *horizontal, true);
   if (!result) {
     return result;
   }
-  result = track(state.geometry.vertical, *vertical, false);
+  result = coverage ? track.template operator()<true>(state.geometry.vertical, *vertical, false)
+                    : track.template operator()<false>(state.geometry.vertical, *vertical, false);
   if (!result || !state.geometry.hasCorner) {
     return result;
   }
