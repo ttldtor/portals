@@ -224,7 +224,8 @@ public:
  * batch, then restores OS modes even if that output fails. Broken/stalled hosts and abrupt process death can prevent
  * screen restoration.
  * @return Owning adapter, or setup error with cleanup failure in restoration_code. Unsupported/missing queries, input
- * pressure, and incomplete restoration remain explicit errors.
+ * pressure, and incomplete restoration remain explicit errors. On POSIX, known active initial 1016 returns
+ * INPUT_PROTOCOL with INITIAL_PIXEL_CONTEXT_UNKNOWN before mouse encoding/tracking changes.
  * @throws std::bad_alloc If allocation fails; acquired native/screen/mouse state receives best-effort cleanup.
  */
 [[nodiscard]] std::expected<std::unique_ptr<ApplicationTerminal>, TerminalError>
@@ -241,6 +242,8 @@ openNativeApplicationTerminal(NativeTerminalHandles handles, TerminalOptions opt
  * @param buttonMotion Opt into POSIX 1002 and native held-button motion/release capability for this session.
  * Late-mounted controls cannot activate another mode; hosts must explicitly cancel lost sequences.
  * @return Owning adapter or the original typed setup/cleanup error. Capability is published only after setup.
+ * On POSIX, known active initial 1016 returns INPUT_PROTOCOL with INITIAL_PIXEL_CONTEXT_UNKNOWN before
+ * mouse encoding/tracking changes.
  * @throws std::bad_alloc Allocation failure; acquired native state receives best-effort cleanup.
  */
 [[nodiscard]] std::expected<std::unique_ptr<ApplicationTerminal>, TerminalError>
@@ -256,8 +259,10 @@ openNativeApplicationTerminal(NativeTerminalHandles handles, TerminalOptions opt
  * @param screen Existing managed-screen policy.
  * @param buttonMotion Whether the scene needs button motion and release.
  * @param pointer Advanced AUTO/OFF and explicit FIFO host declaration; unconfirmed hosts use cells.
- * The advanced FIFO path requires an initial cell context; known active 1016 returns INPUT_PROTOCOL with
- * INITIAL_PIXEL_CONTEXT_UNKNOWN before encoding mutation. OFF/legacy foreign pixel prefixes are outside this guarantee.
+ * On POSIX, every mouse-enabled startup requires an initial cell context. Known active 1016 returns INPUT_PROTOCOL
+ * with INITIAL_PIXEL_CONTEXT_UNKNOWN before encoding/tracking changes, including OFF and hosts without a FIFO
+ * declaration. Disabling mouse reporting skips these mode queries and does not classify pre-existing foreign mouse
+ * input.
  * @return Owning adapter or a typed setup/cleanup error. Optional unsupported precision falls back successfully.
  * @throws std::bad_alloc Allocation failure; acquired state receives best-effort cleanup.
  */

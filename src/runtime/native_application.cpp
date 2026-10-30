@@ -179,7 +179,7 @@ public:
       return queried;
     }
 
-    if (pointer_.policy == NativePointerPolicy::AUTO && pointer_.ordering == NativeInputOrder::FIFO && initialPixel_) {
+    if (initialPixel_) {
       // The retained prefix predates our cell setup, so its pixel dimensions and
       // generation are unknown. Reject before encoding/tracking mutation.
       return std::unexpected(

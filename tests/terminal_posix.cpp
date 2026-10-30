@@ -510,26 +510,6 @@ void managedPrecision() {
           "AUTO does not infer host ordering from mode replies or environment");
   }
 
-  {
-    Pty pty;
-    PrecisionHost host(pty, true, false, "q\x1b[<0;106;51M");
-
-    host.initialPixels = true;
-    NativePointerOptions pointer;
-
-    pointer.ordering = NativeInputOrder::FIFO;
-    auto opened =
-      openNativeApplicationTerminal(pty.handles(), {}, 200ms, true, NativeScreenMode::MAIN_SCREEN, true, pointer);
-
-    check(!opened && opened.error().kind == TerminalErrorKind::INPUT_PROTOCOL &&
-            opened.error().protocol_issue == TerminalProtocolIssue::INITIAL_PIXEL_CONTEXT_UNKNOWN && pty.restored(),
-          "unknown initial pixel prefix rejects advanced startup before any UI delivery");
-    host.stop();
-    check(host.output.find("\x1b[?9;1000;1001;1002;1003s") == std::string::npos &&
-            host.output.find("\x1b[?1002;1006h") == std::string::npos && host.barriers == 0,
-          "initial pixel rejection changes no encoding/tracking mode and preserves legacy query profile");
-  }
-
   for (const int failure : {0, 1, 2}) {
     const bool timeout = failure == 1;
     Pty pty;
@@ -662,6 +642,101 @@ void managedPrecision() {
       check(host.output.find("frame") > host.output.rfind("\x1b[?1002;1006h"),
             "serialized cell restoration precedes the deferred frame");
     }
+  }
+}
+
+void managedInitialPixels() {
+  constexpr std::string_view ENCODING_QUERIES = "\x1b[?1005$p\x1b[?1006$p\x1b[?1015$p\x1b[?1016$p";
+  constexpr std::string_view OLD_INPUT = "q\x1b[<0;106;51M\x1b[200~paste\x1b[201~";
+
+  const auto rejected = [&](Pty &pty, PrecisionHost &host, const auto &opened, bool motion) {
+    check(!opened && opened.error().kind == TerminalErrorKind::INPUT_PROTOCOL &&
+            opened.error().protocol_issue == TerminalProtocolIssue::INITIAL_PIXEL_CONTEXT_UNKNOWN &&
+            opened.error().restoration_code == 0 && pty.restored(),
+          "known active initial pixels reject every mouse startup with the typed context error and OS cleanup");
+    host.stop();
+
+    const auto queries = std::string(ENCODING_QUERIES) + (motion ? "\x1b[?1002$p" : "");
+
+    check(host.output == queries && host.barriers == 0,
+          "initial pixel rejection emits only mandatory queries before any encoding/tracking/screen mutation");
+  };
+
+  {
+    Pty pty;
+    PrecisionHost host(pty, true, false, std::string(OLD_INPUT));
+
+    host.initialPixels = true;
+
+    auto opened = openNativeApplicationTerminal(pty.handles(), {}, 200ms, true);
+
+    rejected(pty, host, opened, false);
+  }
+
+  for (const auto screen : {NativeScreenMode::MAIN_SCREEN, NativeScreenMode::ALTERNATE_SCREEN}) {
+    for (const bool motion : {false, true}) {
+      Pty pty;
+      PrecisionHost host(pty, true, false, std::string(OLD_INPUT));
+
+      host.initialPixels = true;
+
+      auto opened = motion ? openNativeApplicationTerminal(pty.handles(), {}, 200ms, true, screen, true)
+                           : openNativeApplicationTerminal(pty.handles(), {}, 200ms, true, screen);
+
+      rejected(pty, host, opened, motion);
+
+      for (const auto policy : {NativePointerPolicy::OFF, NativePointerPolicy::AUTO}) {
+        for (const auto ordering : {NativeInputOrder::UNCONFIRMED, NativeInputOrder::FIFO}) {
+          Pty advancedPty;
+          PrecisionHost advancedHost(advancedPty, true, false, std::string(OLD_INPUT));
+
+          advancedHost.initialPixels = true;
+
+          NativePointerOptions pointer;
+
+          pointer.policy = policy;
+          pointer.ordering = ordering;
+
+          auto advanced =
+            openNativeApplicationTerminal(advancedPty.handles(), {}, 200ms, true, screen, motion, pointer);
+
+          rejected(advancedPty, advancedHost, advanced, motion);
+        }
+      }
+    }
+  }
+
+  for (const bool motion : {false, true}) {
+    Pty pty;
+    PrecisionHost host(pty, true, false, std::string(OLD_INPUT));
+
+    host.initialPixels = true;
+
+    NativePointerOptions pointer;
+
+    pointer.ordering = NativeInputOrder::FIFO;
+
+    auto opened =
+      openNativeApplicationTerminal(pty.handles(), {}, 200ms, false, NativeScreenMode::MAIN_SCREEN, motion, pointer);
+
+    check(opened.has_value() && !(*opened)->pointerCaptureCapabilities().motion && (*opened)->close().has_value() &&
+            pty.restored(),
+          "mouse opt-out bypasses initial pixel probing and owns no pointer capability");
+    host.stop();
+    check(host.output.empty(), "mouse opt-out sends no query, encoding or tracking bytes");
+  }
+
+  for (const auto replies : {"\x1b[?1005;3$y\x1b[?1006;2$y\x1b[?1015;2$y\x1b[?1016;1$y",
+                             "\x1b[?1005;2$y\x1b[?1006;0$y\x1b[?1015;2$y\x1b[?1016;1$y",
+                             "\x1b[?1005;2$y\x1b[?1006;2$y\x1b[?1015;3$y\x1b[?1016;1$y",
+                             "\x1b[?1005;2$y\x1b[?1006;2$y\x1b[?1015;2$y\x1b[?1016;3$y"}) {
+    Pty pty;
+    auto opened = openMouseTestTerminal(pty, {}, 200ms, replies);
+
+    check(!opened && opened.error().kind == TerminalErrorKind::UNSUPPORTED && pty.restored(),
+          "mandatory unsupported/permanent encoding errors retain precedence over initial pixel classification");
+    check(observedNativeQueries == ENCODING_QUERIES && drainOutput(pty).empty(),
+          "unsupported initial modes retain the mandatory query profile without mutation");
   }
 }
 
@@ -1769,6 +1844,7 @@ int run() {
   managedScreen();
   managedMouse();
   managedPrecision();
+  managedInitialPixels();
   precisionWriteFailures();
   managedButtonMotion();
   confirmedButtonMotion();
