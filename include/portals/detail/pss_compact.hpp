@@ -56,8 +56,8 @@ struct PssCompactRule {
   PssPosition selector;              ///< Original selector start.
   std::uint32_t declarationBegin{};  ///< First declaration occurrence index.
   std::uint32_t declarationCount{};  ///< All occurrences, including duplicates.
-  std::array<std::uint16_t, PSS_PROPERTY_COUNT> effectiveDeclaration = [] {
-    std::array<std::uint16_t, PSS_PROPERTY_COUNT> result{};
+  std::array<std::uint16_t, PSS_SCALAR_PROPERTY_COUNT> effectiveDeclaration = [] {
+    std::array<std::uint16_t, PSS_SCALAR_PROPERTY_COUNT> result{};
     result.fill(NO_COMPACT_DECLARATION);
 
     return result;
@@ -157,6 +157,11 @@ struct PssCountSink {
    * @return Admission result counting every occurrence.
    */
   constexpr std::expected<void, PssError> declaration(PssProperty property, PssValue value, PssLocation location) {
+    if (portals::detail::pssGlyphProperty(property)) {
+      return std::unexpected(
+        pssError(PssErrorCode::INVALID_VALUE, location, "Literal scrollbar glyphs require runtime PSS"));
+    }
+
     (void)property;
     (void)value;
 
@@ -395,6 +400,11 @@ public:
    * @return Occurrence admission and last-winner scalar storage result.
    */
   constexpr std::expected<void, PssError> declaration(PssProperty property, PssValue value, PssLocation location) {
+    if (portals::detail::pssGlyphProperty(property)) {
+      return std::unexpected(
+        pssError(PssErrorCode::INVALID_VALUE, location, "Literal scrollbar glyphs require runtime PSS"));
+    }
+
     if (sheet_.declarationCount_ == D) {
       return std::unexpected(
         pssError(PssErrorCode::DECLARATION_LIMIT, location, "Too many compile-time declaration occurrences"));

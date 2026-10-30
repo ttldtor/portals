@@ -30,6 +30,7 @@ public:
 
     current_ = StyleRule{};
     origin_ = PssRuleOrigin{};
+    glyphs_.reset();
     origin_.selector = location;
     origin_.declarationBegin = document.declarations.size();
 
@@ -63,6 +64,28 @@ public:
   }
 
   std::expected<void, PssError> declaration(PssProperty property, detail::PssValue value, PssLocation location) {
+    std::shared_ptr<const detail::ScrollbarGlyphLiteral> glyph;
+    if (detail::pssGlyphProperty(property)) {
+      auto admitted = charge(sizeof(detail::ScrollbarGlyphLiteral) + value.glyph.size(), location);
+      if (!admitted) {
+        return admitted;
+      }
+      if (!sourceName_ && !document.sourceName.empty()) {
+        sourceName_ = std::make_shared<const std::string>(document.sourceName);
+      }
+      if (!glyphs_) {
+        admitted = charge(sizeof(detail::ScrollbarGlyphRefs), location);
+        if (!admitted) {
+          return admitted;
+        }
+        glyphs_ = std::make_shared<detail::ScrollbarGlyphRefs>();
+      }
+      glyph = std::make_shared<const detail::ScrollbarGlyphLiteral>(
+        detail::ScrollbarGlyphLiteral{std::string(value.glyph), sourceName_, location.line, location.column});
+      (*glyphs_)[detail::pssGlyphIndex(property)] = glyph;
+      current_.scrollbarGlyphs = glyphs_;
+    }
+
     if (metadata_) {
       auto admitted = charge(sizeof(PssDeclarationOrigin), location);
 
@@ -72,7 +95,7 @@ public:
 
       origin_.effectiveDeclaration[static_cast<std::size_t>(property)] = document.declarations.size();
       ++origin_.declarationCount;
-      document.declarations.push_back({document.sheet.rules.size(), property, location, value});
+      document.declarations.push_back({document.sheet.rules.size(), property, location, value, glyph});
     }
 
     detail::assignPssDeclaration(property, value, current_.declarations);
@@ -125,6 +148,8 @@ private:
   std::size_t ownedBytes_{};
   StyleRule current_;
   PssRuleOrigin origin_;
+  std::shared_ptr<detail::ScrollbarGlyphRefs> glyphs_;
+  std::shared_ptr<const std::string> sourceName_;
 };
 
 PssError allocationError() {

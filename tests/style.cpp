@@ -1010,6 +1010,43 @@ void typeLineageAdmissionAndOwnership() {
         "owning lineage admits after all staged allocation points succeed");
 }
 
+void literalStorageNoAllocation() {
+  static_assert(std::is_aggregate_v<ComputedStyle>);
+  static_assert(std::is_nothrow_default_constructible_v<ComputedStyle>);
+  static_assert(std::is_nothrow_copy_constructible_v<ComputedStyle>);
+  static_assert(std::is_nothrow_copy_assignable_v<ComputedStyle>);
+  static_assert(std::is_nothrow_move_constructible_v<ComputedStyle>);
+  const auto sheet = take(parsePss("ScrollBar{scrollbar-vertical-track-glyph:'.';}"));
+  const StyleTarget target{"ScrollBar", "", {}};
+  const auto engaged = resolveStyle(sheet, target);
+  const ComputedStyle absent{.minWidth = 3};
+
+  allocation_test::remaining = 0;
+  const auto absentCopy = absent;
+  const auto engagedCopy = engaged;
+  auto assigned = engaged;
+
+  assigned = absent;
+  const bool reset = !assigned.scrollbarGlyphs;
+
+  assigned = engaged;
+  const auto *self = &assigned;
+
+  assigned = *self;
+  auto emptyAssigned = absent;
+  const auto *emptySelf = &emptyAssigned;
+
+  emptyAssigned = *emptySelf;
+  const auto moved = std::move(assigned);
+  allocation_test::remaining = -1;
+
+  check(!absentCopy.scrollbarGlyphs && !emptyAssigned.scrollbarGlyphs && reset,
+        "disengaged literal copies, resets and self-copies preserve absence without allocation");
+  check(engagedCopy == engaged && moved == engaged && moved.scrollbarGlyphs &&
+          (*moved.scrollbarGlyphs)[0][10]->text == ".",
+        "engaged literal copies, assignment, self-copy and move preserve owning values without allocation");
+}
+
 void thumbResolutionNoAllocation() {
   static_assert(std::is_nothrow_default_constructible_v<ComputedStyle>);
   static_assert(std::is_nothrow_copy_constructible_v<ComputedStyle>);
@@ -1219,6 +1256,7 @@ int main(int argc, char **argv) {
   }
 
   parserAndCascade(argv[1]);
+  literalStorageNoAllocation();
   thumbResolutionNoAllocation();
   sparseSnapshotValuesAndAllocation();
   snapshotSharingAndRetirement();

@@ -551,6 +551,7 @@ prepareScrollbarSkin(const detail::ScrollWidgetState &state, const ScrollbarSkin
     }
 
     const auto &source = **sources[index];
+    result->customGlyphs[index] = true;
 
     if (source.empty()) {
       result->glyphs[index].reset();
@@ -570,7 +571,6 @@ prepareScrollbarSkin(const detail::ScrollWidgetState &state, const ScrollbarSkin
     }
 
     result->glyphs[index] = std::move(*text);
-    result->customGlyphs[index] = true;
   }
 
   const std::array segmentSources{&skin.horizontal.thumbStart,  &skin.horizontal.thumbBody, &skin.horizontal.thumbEnd,

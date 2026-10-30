@@ -144,6 +144,7 @@ std::expected<void, PssError> validateStyleDocument(const PssDocument &document)
     const auto &rule = document.sheet.rules[ruleIndex];
     std::array<std::size_t, PSS_PROPERTY_COUNT> last;
     StyleDeclarations effective;
+    detail::ScrollbarGlyphRefs glyphs;
 
     last.fill(NO_PSS_DECLARATION);
 
@@ -152,6 +153,23 @@ std::expected<void, PssError> validateStyleDocument(const PssDocument &document)
       const auto &declaration = document.declarations[index];
       const auto property = static_cast<std::size_t>(declaration.property);
       const auto &value = declaration.value;
+      const bool glyph = detail::pssGlyphProperty(declaration.property);
+      if (glyph) {
+        if (!declaration.glyph || declaration.glyph->text.size() > DEFAULT_SCROLLBAR_GLYPH_BYTES ||
+            !detail::validatePssUtf8(declaration.glyph->text) || declaration.glyph->line != declaration.location.line ||
+            declaration.glyph->column != declaration.location.column ||
+            (declaration.glyph->source && (declaration.glyph->source->size() > MAX_PSS_SOURCE_NAME_BYTES ||
+                                           !detail::validatePssUtf8(*declaration.glyph->source)))) {
+          return invalid(declaration.location, "Invalid owning PSS glyph occurrence");
+        }
+        if (!charge(sizeof(detail::ScrollbarGlyphLiteral) + declaration.glyph->text.size())) {
+          return std::unexpected(detail::pssError(PssErrorCode::DOCUMENT_LIMIT, declaration.location,
+                                                  "PSS glyph occurrences exceed document budget"));
+        }
+        glyphs[detail::pssGlyphIndex(declaration.property)] = declaration.glyph;
+      } else if (declaration.glyph) {
+        return invalid(declaration.location, "Unexpected PSS glyph occurrence payload");
+      }
       const bool color = declaration.property == PssProperty::FOREGROUND ||
                          declaration.property == PssProperty::BACKGROUND ||
                          declaration.property == PssProperty::FRAME_LINE_FOREGROUND ||
@@ -185,7 +203,7 @@ std::expected<void, PssError> validateStyleDocument(const PssDocument &document)
                            declaration.property == PssProperty::GLYPH_PROFILE ||
                            declaration.property == PssProperty::GLYPH_FALLBACK;
 
-      if ((!color && value.color != RgbColor{}) || ((color || width || pattern) && value.boolean) ||
+      if ((!color && value.color != RgbColor{}) || ((color || width || pattern || glyph) && value.boolean) ||
           (!width && value.width != 0) || (!pattern && value.pattern != 0) ||
           (pattern &&
            (value.pattern < 0 || value.pattern > (declaration.property == PssProperty::GLYPH_PROFILE
@@ -211,6 +229,14 @@ std::expected<void, PssError> validateStyleDocument(const PssDocument &document)
 
     if (last != origin.effectiveDeclaration || effective != rule.declarations) {
       return invalid(origin.selector, "PSS last-wins provenance disagrees with final declarations");
+    }
+    const detail::ScrollbarGlyphRefs empty{};
+    if (!detail::equalScrollbarGlyphs(glyphs, rule.scrollbarGlyphs ? *rule.scrollbarGlyphs : empty)) {
+      return invalid(origin.selector, "PSS glyph provenance disagrees with final declarations");
+    }
+    if (rule.scrollbarGlyphs && !charge(sizeof(detail::ScrollbarGlyphRefs))) {
+      return std::unexpected(detail::pssError(PssErrorCode::DOCUMENT_LIMIT, origin.selector,
+                                              "PSS glyph declarations exceed document budget"));
     }
   }
 

@@ -87,6 +87,7 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, ComputedSty
   const auto stateIndex = !state.enabled ? 2 : state.focused ? 1 : 0;
   const auto *profile = state.glyphProfiles ? state.glyphProfiles->states[stateIndex].get() : nullptr;
   const auto *profileGlyphs = profile ? profile->scrollbar.get() : nullptr;
+  const auto *literals = profile ? profile->literals.get() : nullptr;
   const auto *coverage = profile ? profile->fractional.get() : nullptr;
   const auto *frameText = profile && profile->frame ? profile->frame.get()
                           : state.advancedFrame     ? &state.advancedFrame->text
@@ -229,6 +230,15 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, ComputedSty
       }
     }
 
+    const auto literalFirst = horizontalAxis ? 0 : SCROLLBAR_AXIS_LITERAL_GLYPH_COUNT;
+    const bool literalThumb = literals && literals->sources[literalFirst + 1];
+    if (literals && !customTrack && literals->glyphs[literalFirst]) {
+      trackGlyph = &*literals->glyphs[literalFirst];
+    }
+    if (literalThumb && !customThumb) {
+      thumbGlyph = &*literals->glyphs[literalFirst + 1];
+    }
+
     for (std::int32_t i = 0; i < cells.length; ++i) {
       auto point = cells.origin;
       if (horizontalAxis) {
@@ -244,14 +254,18 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, ComputedSty
       const auto *part = inThumb ? &parts.thumb : &parts.track;
       const CellStyle *segmentStyle{};
 
-      if (inThumb && (skin || segments || profileGlyphs)) {
+      if (inThumb && (skin || segments || profileGlyphs || literals)) {
         const auto segment = coverage                                     ? fractionalCell.segment
                              : thumb.length == 1                          ? 3
                              : position == thumb.start                    ? 0
                              : position - thumb.start == thumb.length - 1 ? 2
                                                                           : 1;
-        if (profileGlyphs && !customThumb && !thumbPattern) {
+        if (profileGlyphs && !customThumb && !thumbPattern && !literalThumb) {
           glyph = &*(*profileGlyphs)[(horizontalAxis ? PROFILE_HORIZONTAL_THUMB : PROFILE_VERTICAL_THUMB) + segment];
+        }
+
+        if (literals && !customThumb && literals->glyphs[literalFirst + SCROLLBAR_LITERAL_THUMB_SEGMENTS + segment]) {
+          glyph = &*literals->glyphs[literalFirst + SCROLLBAR_LITERAL_THUMB_SEGMENTS + segment];
         }
 
         if (skin) {
@@ -278,6 +292,15 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, ComputedSty
         }
       }
 
+      if (literals && skin && skin->ends && !inThumb && !arrows && (i == 0 || i == cells.length - 1)) {
+        const auto end = i == 0 ? 2 : 3;
+        if (literals->sources[literalFirst + end] && !(skin && skin->customGlyphs[first + end])) {
+          // An explicitly empty decorative leaf suppresses the corresponding inherited end.
+          glyph = literals->glyphs[literalFirst + end] ? &*literals->glyphs[literalFirst + end] : trackGlyph;
+          part = literals->glyphs[literalFirst + end] ? &parts.ends : &parts.track;
+        }
+      }
+
       if (arrows && (i == 0 || i == cells.length - 1)) {
         const auto arrow = (horizontalAxis ? 0 : 2) + (i == 0 ? 0 : 1);
         glyph = skin && skin->arrows[arrow] ? &*skin->arrows[arrow] : &(*state.arrowGlyphs)[arrow];
@@ -291,6 +314,10 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, ComputedSty
         if (arrowPattern && !(skin && skin->customArrows[arrow])) {
           glyph = *arrowPattern == ScrollbarArrowPattern::ASCII ? &(*state.presetGlyphs)[3 + arrow]
                                                                 : &(*state.arrowGlyphs)[arrow];
+        }
+        const auto leaf = literalFirst + (i == 0 ? 4 : 5);
+        if (literals && literals->glyphs[leaf] && !(skin && skin->customArrows[arrow])) {
+          glyph = &*literals->glyphs[leaf];
         }
       }
 
@@ -328,6 +355,10 @@ std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, ComputedSty
   const auto cornerStyle = coverage ? coverageStyleFor(parts.corner.value_or(style)) : parts.corner.value_or(style);
   if (state.scrollbarSkin && state.scrollbarSkin->glyphs[8]) {
     return draw(state.geometry.corner, *state.scrollbarSkin->glyphs[8], cornerStyle);
+  }
+  if (literals && literals->glyphs[SCROLLBAR_LITERAL_CORNER] &&
+      !(state.scrollbarSkin && state.scrollbarSkin->customGlyphs[8])) {
+    return draw(state.geometry.corner, *literals->glyphs[SCROLLBAR_LITERAL_CORNER], cornerStyle);
   }
 
   const RenderCommand command = FillCommand{*corner, *bounds, cornerStyle};

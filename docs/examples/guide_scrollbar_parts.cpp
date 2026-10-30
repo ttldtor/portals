@@ -33,9 +33,6 @@ int main() {
           .scrollOnFrame().arrows()
           .scrollTrack("frame").scrollThumb("block").scrollArrows("ascii"),
         ui::scrollArea(sections())
-          .settings({.scrollbar = {
-            .horizontal = {.thumbStart = "[", .thumbBody = "=", .thumbEnd = "]", .thumbSingle = "#"},
-            .vertical = {.thumbStart = "▄", .thumbBody = "█", .thumbEnd = "▀", .thumbSingle = "█"}}})
           .id("segments").width(26).height(10)
           .framed("rounded", "Segments").titleDecoration("square")
           .scrollOnFrame().arrows())
@@ -43,6 +40,14 @@ int main() {
       | ui::theme(nordTheme())
       | ui::style(R"pss(
           #segments {
+            scrollbar-horizontal-thumb-start-glyph: "[";
+            scrollbar-horizontal-thumb-body-glyph: "=";
+            scrollbar-horizontal-thumb-end-glyph: "]";
+            scrollbar-horizontal-thumb-single-glyph: "#";
+            scrollbar-vertical-thumb-start-glyph: "▄";
+            scrollbar-vertical-thumb-body-glyph: "█";
+            scrollbar-vertical-thumb-end-glyph: "▀";
+            scrollbar-vertical-thumb-single-glyph: "█";
             scrollbar-track-pattern: minimal;
             scrollbar-thumb-pattern: ascii;
             scrollbar-arrow-pattern: triangle;

@@ -1873,3 +1873,80 @@ TEST_CASE("scrollbar pattern PSS runtime static typed and compact documents shar
     CHECK(treeCause(result.error(), TreeError::INVALID_ARGUMENT));
   }
 }
+
+TEST_CASE("runtime literal PSS documents retain ownership and reject forged glyph metadata") {
+  const auto parsed = parsePssDocument(
+    "ScrollBar{scrollbar-vertical-track-glyph:'.';scrollbar-vertical-thumb-single-glyph:'Q';}", "literal.pss");
+  REQUIRE(parsed);
+  auto owner = ui::scene(ui::scrollBar());
+  owner | ui::style(*parsed);
+  REQUIRE(owner.prepareChecked());
+  const auto sources = owner.managed()->get().styleSources();
+  REQUIRE(sources);
+  REQUIRE(sources->back().document);
+  CHECK(sources->back().document->sheet == parsed->sheet);
+  REQUIRE(owner.close());
+  for (unsigned forgery : {0u, 1u, 2u}) {
+    auto forged = *parsed;
+    if (forgery == 0) {
+      forged.declarations[0].glyph.reset();
+    } else if (forgery == 1) {
+      forged.declarations[0].value.boolean = true;
+    } else {
+      auto leaves = std::make_shared<detail::ScrollbarGlyphRefs>(*forged.sheet.rules[0].scrollbarGlyphs);
+      (*leaves)[10] = (*leaves)[19];
+      forged.sheet.rules[0].scrollbarGlyphs = std::move(leaves);
+    }
+    auto invalid = ui::scene(ui::scrollBar()) | ui::style(forged);
+    const auto result = invalid.prepareChecked();
+    REQUIRE_FALSE(result);
+    CHECK(treeCause(result.error(), TreeError::INVALID_ARGUMENT));
+  }
+}
+
+TEST_CASE("literal width preparation keeps source identity in the managed style error") {
+  auto owner = ui::scene(ui::scrollBar()) |
+               ui::style("ScrollBar{scrollbar-vertical-track-glyph:'界';}", {.sourceName = "wide-literal.pss"});
+  const auto result = owner.prepareChecked();
+  REQUIRE_FALSE(result);
+  CHECK(treeCause(result.error(), TreeError::INVALID_ARGUMENT));
+  REQUIRE(result.error().styleSource);
+  CHECK(*result.error().styleSource == "wide-literal.pss");
+  const auto *failure = std::get_if<StyleError>(&result.error().cause);
+  REQUIRE(failure);
+  CHECK(failure->propertyName() == "scrollbar-vertical-track-glyph");
+  CHECK(failure->layerId != 0);
+}
+
+TEST_CASE("managed literal errors share full source ownership and keep nothrow copies after document destruction") {
+  static_assert(std::is_trivially_copy_constructible_v<StyleError>);
+  static_assert(std::is_nothrow_copy_constructible_v<ManagedError>);
+  const std::string expected = "owned-" + std::string(512, 'a') + "Ж.pss";
+  ManagedError retained;
+  std::weak_ptr<const std::string> sourceOwner;
+  {
+    const auto document = parsePssDocument("ScrollBar{scrollbar-vertical-track-glyph:'界';}", expected);
+    REQUIRE(document);
+    auto owner = ui::scene(ui::scrollBar()) | ui::style(*document);
+    const auto rejected = owner.prepareChecked();
+    REQUIRE_FALSE(rejected);
+    retained = rejected.error();
+    sourceOwner = retained.styleSource;
+  }
+  REQUIRE_FALSE(sourceOwner.expired());
+  {
+    fault::remaining = 0;
+    const ManagedError copied(retained);
+    fault::remaining = -1;
+    retained.styleSource.reset();
+    REQUIRE(copied.styleSource);
+    CHECK(*copied.styleSource == expected);
+    CHECK_FALSE(sourceOwner.expired());
+    const auto *failure = std::get_if<StyleError>(&copied.cause);
+    REQUIRE(failure);
+    CHECK(failure->propertyName() == "scrollbar-vertical-track-glyph");
+    CHECK(failure->line == 1);
+    CHECK(failure->layerId != 0);
+  }
+  CHECK(sourceOwner.expired());
+}

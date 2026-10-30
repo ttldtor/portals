@@ -16,6 +16,21 @@
 #include <source_location>
 #include <thread>
 
+namespace portals {
+struct StyleLayerTestAccess {
+  static std::uint64_t layerId(const StyleEngine &engine, std::string_view name) {
+    const auto found = std::ranges::find(engine.layerState_.layers, name, &StyleEngine::Layer::name);
+    return found == engine.layerState_.layers.end() ? 0 : found->id;
+  }
+
+  static auto preview(StyleEngine &engine, const StyleSheet &sheet, StyleLayerHandle &handle) {
+    const auto capture = engine.capturePreview();
+    return engine.mutate(StyleEngine::Mutation::PREVIEW, {}, {}, {}, &sheet, {}, {}, &handle, nullptr, nullptr, {},
+                         &capture);
+  }
+};
+} // namespace portals
+
 namespace allocation_test {
 thread_local bool fail{};
 thread_local bool failDrag{};
@@ -183,10 +198,10 @@ struct TreeFixture {
     return take(router->dispatch(KeyEvent{key}));
   }
 
-  Sink paint(Node<Widget> node) {
+  Sink paint(Node<Widget> node, std::source_location caller = std::source_location::current()) {
     Sink sink;
     take(tree->frame([&] {
-      take(tree->paint(node, sink));
+      take(tree->paint(node, sink), caller);
     }));
     return sink;
   }
@@ -2387,6 +2402,217 @@ void arrowGlyphPreparation() {
   check(f.paint(f.bar).cells == painted.cells, "failed arrow preparation preserves installed skin");
 }
 
+void pssScrollbarLiteralGlyphs() {
+  for (const auto axis : {ScrollAxis::HORIZONTAL, ScrollAxis::VERTICAL}) {
+    BarFixture fixture({}, axis);
+    StyleEngine engine(*fixture.tree);
+    take(engine.bind(fixture.bar, {"ScrollBar", "", {}, true}));
+    const std::string prefix = axis == ScrollAxis::HORIZONTAL ? "scrollbar-horizontal-" : "scrollbar-vertical-";
+    const auto cell = [&](int position) {
+      return axis == ScrollAxis::HORIZONTAL ? std::pair{position, 0} : std::pair{0, position};
+    };
+    {
+      std::string source = "ScrollBar{";
+      for (const auto &[part, glyph] :
+           std::array<std::pair<std::string_view, std::string_view>, 10>{{{"track", "."},
+                                                                          {"thumb", "T"},
+                                                                          {"start", "A"},
+                                                                          {"end", "Z"},
+                                                                          {"backward", "L"},
+                                                                          {"forward", "R"},
+                                                                          {"thumb-start", "S"},
+                                                                          {"thumb-body", "B"},
+                                                                          {"thumb-end", "E"},
+                                                                          {"thumb-single", "Q"}}}) {
+        source += prefix + std::string(part) + "-glyph:'" + std::string(glyph) + "';";
+      }
+      source += "}";
+      auto document = take(parsePssDocument(source, "ephemeral.pss"));
+      take(engine.replace(document.sheet));
+    }
+    take(setScrollMetrics(*fixture.tree, fixture.bar, {10, 10}));
+    fixture.layout(axis == ScrollAxis::HORIZONTAL ? CellSize{5, 1} : CellSize{1, 5});
+    auto painted = fixture.paint(fixture.bar);
+    check(painted.cells.at(cell(0)) == "S" && painted.cells.at(cell(1)) == "B" && painted.cells.at(cell(4)) == "E",
+          "PSS owns every thumb segment on both axes after source and document destruction");
+    take(setScrollMetrics(*fixture.tree, fixture.bar, {100, 10}));
+    fixture.layout(axis == ScrollAxis::HORIZONTAL ? CellSize{10, 1} : CellSize{1, 10});
+    painted = fixture.paint(fixture.bar);
+    check(painted.cells.at(cell(0)) == "Q" && painted.cells.at(cell(3)) == "." && painted.cells.at(cell(9)) == ".",
+          "PSS literal ends stay disabled when the receiving control has no skin");
+    take(setScrollOffset(*fixture.tree, fixture.bar, axis, {45, 0}));
+    fixture.layout(axis == ScrollAxis::HORIZONTAL ? CellSize{10, 1} : CellSize{1, 10});
+    check(fixture.paint(fixture.bar).cells.at(cell(0)) == ".",
+          "PSS leading decoration also stays disabled without a skin");
+
+    ScrollbarSkin decorative;
+    take(setScrollbarSkin(*fixture.tree, fixture.bar, decorative));
+    painted = fixture.paint(fixture.bar);
+    check(painted.cells.at(cell(0)) == "." && painted.cells.at(cell(9)) == ".",
+          "an explicit ends=false skin keeps PSS decorations disabled on both axes");
+    decorative.ends = true;
+    take(setScrollbarSkin(*fixture.tree, fixture.bar, decorative));
+    painted = fixture.paint(fixture.bar);
+    check(painted.cells.at(cell(0)) == "A" && painted.cells.at(cell(9)) == "Z",
+          "an ends=true skin admits independent PSS decorations on both axes");
+    take(
+      engine.replacePss("*{" + prefix + "track-glyph:'.';" + prefix + "start-glyph:'';" + prefix + "end-glyph:'';}"));
+    painted = fixture.paint(fixture.bar);
+    check(painted.cells.at(cell(0)) == "." && painted.cells.at(cell(9)) == ".",
+          "empty PSS decorative leaves suppress enabled inherited endpoints on both axes");
+    decorative.ends = false;
+    take(setScrollbarSkin(*fixture.tree, fixture.bar, decorative));
+
+    std::shared_ptr<const StyleSnapshot> retained;
+    take(fixture.tree->read(fixture.bar, [&](const ScrollBar &bar) {
+      retained = bar.computedStyle();
+    }));
+    take(engine.replacePss("*{" + prefix + "track-glyph:'e\xcc\x81';" + prefix + "thumb-glyph:'X';}"));
+    check(fixture.paint(fixture.bar).cells.at(cell(0)) == "e\xcc\x81", "one-cell combining grapheme is retained whole");
+    check((*retained->flatten().scrollbarGlyphs)[0][axis == ScrollAxis::HORIZONTAL ? 0 : 10]->text == ".",
+          "retained immutable snapshot owns its earlier literal leaves across replacement");
+
+    const auto revision = engine.revision();
+    const auto before = fixture.paint(fixture.bar).cells;
+    for (const auto invalid : {"", "ab", "界", "\t", "\xcc\x81"}) {
+      auto document = take(parsePssDocument("*{" + prefix + "track-glyph:'" + invalid + "';}", "invalid.pss"));
+      const auto rejected = engine.replace(document.sheet);
+      check(!rejected && rejected.error().cause == TreeError::INVALID_ARGUMENT && engine.revision() == revision &&
+              rejected.error().propertyName() == prefix + "track-glyph" && fixture.paint(fixture.bar).cells == before,
+            "invalid PSS literal preserves previous style/resources and exact property diagnostics transactionally");
+    }
+    ScrollbarSkin manual;
+    auto &manualAxis = axis == ScrollAxis::HORIZONTAL ? manual.horizontal : manual.vertical;
+    manualAxis.track = "M";
+    manualAxis.thumb = "H";
+    manualAxis.thumbSingle = "J";
+    take(setScrollbarSkin(*fixture.tree, fixture.bar, manual));
+    check(fixture.paint(fixture.bar).cells.at(cell(0)) == "M", "manual track literal retains priority over PSS");
+    take(setScrollOffset(*fixture.tree, fixture.bar, axis, {}));
+    fixture.layout(axis == ScrollAxis::HORIZONTAL ? CellSize{10, 1} : CellSize{1, 10});
+    check(fixture.paint(fixture.bar).cells.at(cell(0)) == "J", "manual thumb segment retains priority over PSS");
+    take(setScrollbarSkin(*fixture.tree, fixture.bar, ScrollbarSkin{}));
+
+    struct NoAllocationSink : PaintContext {
+      std::size_t cells{};
+
+      std::expected<void, TreeError> submit(std::span<const RenderCommand> commands) override {
+        cells += commands.size();
+        return {};
+      }
+    } sink;
+
+    std::expected<void, TreeError> result;
+    take(fixture.tree->frame([&] {
+      allocation_test::fail = true;
+      result = fixture.tree->paint(fixture.bar, sink);
+      allocation_test::fail = false;
+    }));
+    check(result && sink.cells == 10, "PSS literal painting never constructs owning strings or allocates");
+
+    BarFixture arrows({.arrows = true}, axis);
+    StyleEngine arrowEngine(*arrows.tree);
+    take(arrowEngine.bind(arrows.bar, {"ScrollBar", "", {}, true}));
+    take(arrowEngine.replacePss("*{" + prefix + "backward-glyph:'L';" + prefix + "forward-glyph:'R';}"));
+    const auto arrowPaint = arrows.paint(arrows.bar);
+    check(arrowPaint.cells.at(cell(0)) == "L" && arrowPaint.cells.at(cell(9)) == "R",
+          "PSS functional arrow glyphs apply independently on both axes");
+  }
+}
+
+void pssScrollbarLiteralCascade() {
+  BarFixture fixture;
+  StyleEngine engine(*fixture.tree);
+  take(engine.bind(fixture.bar, {"ScrollBar", "", {}, true}));
+  take(engine.replacePss("*{glyph-profile:ascii;scrollbar-vertical-thumb-single-glyph:'N';}"
+                         "*:focused{scrollbar-vertical-thumb-single-glyph:'F';}"
+                         "*:disabled{scrollbar-vertical-thumb-single-glyph:'D';}"));
+  for (int state = 0; state < 3; ++state) {
+    take(fixture.tree->setEnabled(fixture.bar, state != 2));
+    take(syncScrollControl(*fixture.tree, fixture.bar, state == 1 ? Node<Widget>(fixture.bar) : Node<Widget>{}));
+    check(fixture.paint(fixture.bar).cells.at({0, 0}) == (state == 0   ? "N"
+                                                          : state == 1 ? "F"
+                                                                       : "D"),
+          "state changes select previously prepared literal glyphs above named profiles");
+  }
+  take(fixture.tree->setEnabled(fixture.bar, true));
+  take(syncScrollControl(*fixture.tree, fixture.bar, {}));
+  take(engine.enableLayers());
+  const auto layer = take(engine.addLayer(
+    StyleTier::USER, "literals",
+    take(parsePss("*{scrollbar-vertical-thumb-single-glyph:'U';scrollbar-vertical-track-glyph:'t';}"))));
+  check(fixture.paint(fixture.bar).cells.at({0, 0}) == "U", "user literal layer wins over theme leaves");
+  const auto before = engine.revision();
+  auto invalid = take(parsePssDocument("*{scrollbar-vertical-thumb-single-glyph:'界';}", "layer.pss"));
+  const auto rejected = engine.replaceLayer(layer, invalid.sheet);
+  check(!rejected && rejected.error().layerId != 0 && rejected.error().line == 1 && engine.revision() == before,
+        "failed layer glyph preparation identifies its candidate layer and keeps the prior publication");
+  take(engine.removeLayer(layer));
+  check(fixture.paint(fixture.bar).cells.at({0, 0}) == "N", "removing a literal layer restores theme resources");
+
+  TreeFixture wide;
+  auto bar = take(wide.tree->emplaceChecked<ScrollBar>(wide.root, std::shared_ptr<ScrollController>{},
+                                                       ScrollAxis::VERTICAL, WidthPolicy{AmbiguousWidth::WIDE}));
+  StyleEngine wideEngine(*wide.tree);
+  take(wideEngine.bind(bar, {"ScrollBar", "", {}, true}));
+  const auto wideLiteral = wideEngine.replacePss("*{glyph-fallback:ascii;scrollbar-vertical-track-glyph:'·';}");
+  check(!wideLiteral && wideLiteral.error().cause == TreeError::INVALID_ARGUMENT,
+        "receiving ambiguous-width policy rejects a literal instead of invoking named-profile fallback");
+
+  AreaFixture area;
+  area.settle();
+  StyleEngine areaEngine(*area.tree);
+  take(areaEngine.bind(area.area, {"ScrollArea", "", {}, true}));
+  take(areaEngine.replacePss("*{scrollbar-corner-glyph:'C';}"));
+  const auto geometry = take(scrollAreaLayout(*area.tree, area.area));
+  check(area.paint(area.area).cells.at({geometry.placement.corner.x, geometry.placement.corner.y}) == "C",
+        "PSS corner uses owning prepared text");
+}
+
+void pssScrollbarLiteralErrorLayerRank() {
+  for (const bool specific : {false, true}) {
+    BarFixture fixture;
+    StyleEngine engine(*fixture.tree);
+    take(engine.enableLayers());
+    auto shared = take(parsePss("*{scrollbar-vertical-track-glyph:'界';}"));
+    auto winning = shared;
+    if (specific) {
+      winning.rules[0].selector.id = "target";
+    }
+    take(engine.addLayer(StyleTier::USER, "winning", winning));
+    take(engine.addLayer(StyleTier::APPLICATION, "later-application", shared));
+    if (specific) {
+      take(engine.addLayer(StyleTier::USER, "later-generic", shared));
+    }
+    auto unmatching = shared;
+    unmatching.rules[0].selector.type = "Label";
+    take(engine.addLayer(StyleTier::USER, "unmatching-selector", unmatching));
+    auto scoped = shared;
+    scoped.scope = fixture.root.id();
+    take(engine.addLayer(StyleTier::USER, "other-scope", scoped));
+    auto focused = shared;
+    focused.rules[0].selector.state = StyleState::FOCUSED;
+    take(engine.addLayer(StyleTier::USER, "other-state", focused));
+    const auto expected = StyleLayerTestAccess::layerId(engine, "winning");
+    const auto revision = engine.revision();
+    const auto rejected = engine.bind(fixture.bar, {"ScrollBar", "target", {}, true});
+    check(!rejected && rejected.error().cause == TreeError::INVALID_ARGUMENT && rejected.error().layerId == expected &&
+            rejected.error().propertyName() == "scrollbar-vertical-track-glyph" && engine.revision() == revision,
+          "literal errors report the actual tier/specificity/state/scope winner when layers share one owning leaf");
+  }
+
+  BarFixture fixture;
+  StyleEngine engine(*fixture.tree);
+  take(engine.replacePss("*{scrollbar-vertical-track-glyph:'.';}"));
+  take(engine.enableLayers());
+  StyleLayerHandle preview;
+  const auto invalid = take(parsePss("*{scrollbar-vertical-track-glyph:'界';}"));
+  take(StyleLayerTestAccess::preview(engine, invalid, preview));
+  const auto rejected = engine.bind(fixture.bar, {"ScrollBar", "", {}, true});
+  check(!rejected && rejected.error().layerId == StyleLayerTestAccess::layerId(engine, "PREVIEW"),
+        "literal error provenance uses the effective preview contribution instead of the masked theme base");
+}
+
 void namedGlyphProfiles() {
   constexpr std::array PROFILES{GlyphProfile::UNICODE_GLYPHS, GlyphProfile::ASCII,    GlyphProfile::NF_ROUNDED,
                                 GlyphProfile::NF_CHEVRON,     GlyphProfile::NF_SLASH, GlyphProfile::NF_BACKSLASH};
@@ -2625,6 +2851,36 @@ struct ProfileDefaultsBar : ScrollBar {
   }
 };
 
+void pssScrollbarLiteralAllocationFailure() {
+  TreeFixture fixture;
+  const auto first = take(fixture.tree->emplaceChecked<ScrollBar>(fixture.root));
+  const auto second = take(fixture.tree->emplaceChecked<ProfileDefaultsBar>(fixture.root));
+  StyleEngine engine(*fixture.tree);
+  take(engine.bind(first, {"ScrollBar", "", {}, true}));
+  take(engine.bind(second, {"ScrollBar", "", {}, true}));
+  take(engine.replacePss("*{scrollbar-vertical-track-glyph:'.';}"));
+  const auto revision = engine.revision();
+  const auto sheet = take(parsePss("*{scrollbar-vertical-track-glyph:'x';}"));
+  take(fixture.tree->edit(second, [](ProfileDefaultsBar &bar) {
+    bar.failProfile = true;
+  }));
+  take(fixture.tree->consumeFrameRequest());
+  const auto rejected = engine.replace(sheet);
+  allocation_test::fail = false;
+  check(!rejected && rejected.error().cause == TreeError::NO_MEMORY && engine.revision() == revision &&
+          take(fixture.tree->consumeFrameRequest()) == Invalidation::NONE,
+        "literal preparation allocation failure leaves an already staged earlier target unpublished");
+  take(fixture.tree->read(first, [](const ScrollBar &bar) {
+    check(bar.computedStyle()->scrollbarGlyphs() && (*bar.computedStyle()->scrollbarGlyphs())[0][10]->text == "." &&
+            detail::ScrollWidgetAccess::state(bar).glyphProfiles->states[0]->literals->glyphs[10]->bytes() == ".",
+          "literal allocation rollback retains the earlier target's matching snapshot and prepared glyphs");
+  }));
+  take(fixture.tree->edit(second, [](ProfileDefaultsBar &bar) {
+    bar.failProfile = false;
+  }));
+  take(engine.replace(sheet));
+}
+
 void glyphProfileTransactions() {
   TreeFixture fixture;
   auto first = take(fixture.tree->emplaceChecked<ScrollBar>(fixture.root));
@@ -2684,7 +2940,11 @@ int main() {
   fractionalScrollbarPaint();
   fractionalScrollbarStylesAndDrag();
   fractionalProjectionAndPlacement();
+  pssScrollbarLiteralGlyphs();
+  pssScrollbarLiteralCascade();
+  pssScrollbarLiteralErrorLayerRank();
   namedGlyphProfiles();
+  pssScrollbarLiteralAllocationFailure();
   glyphProfileTransactions();
   skinProfileSnapshotReentry();
   sharedScrollbarPresetLifetime();

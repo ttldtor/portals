@@ -118,7 +118,7 @@ static_assert(static_cast<std::size_t>(PssProperty::FRAME_ENDS_UNDERLINE) == 20)
 static_assert(static_cast<std::size_t>(PssProperty::SCROLLBAR_TRACK_FOREGROUND) == 21);
 static_assert(static_cast<std::size_t>(PssProperty::SCROLLBAR_THUMB_SINGLE_UNDERLINE) == 68);
 static_assert(static_cast<std::size_t>(PssProperty::GLYPH_PROFILE) == 69);
-static_assert(static_cast<std::size_t>(PssProperty::GLYPH_FALLBACK) + 1 == PSS_PROPERTY_COUNT);
+static_assert(static_cast<std::size_t>(PssProperty::SCROLLBAR_CORNER_GLYPH) + 1 == PSS_PROPERTY_COUNT);
 constexpr auto SCROLLBAR_PATTERNS =
   sc::pss("ScrollBar{scrollbar-track-pattern:minimal;scrollbar-thumb-pattern:block;scrollbar-arrow-pattern:ascii;}");
 static_assert(SCROLLBAR_PATTERNS.declarations().size() == 3);
@@ -528,4 +528,57 @@ TEST_CASE("thumb segment PSS scalar destinations preserve all construction paths
               "scrollbar-thumb-single-foreground");
   expectError("ScrollBar {\n scrollbar-thumb-end-bold: #010203;\n}", PssErrorCode::INVALID_VALUE, {39, 2, 28},
               "scrollbar-thumb-end-bold");
+}
+
+TEST_CASE("runtime literal scrollbar glyphs own source and duplicate occurrence metadata") {
+  PssDocument document;
+  {
+    std::string source =
+      "ScrollBar{scrollbar-horizontal-track-glyph:' ';scrollbar-horizontal-track-glyph:\"e\xcc\x81\";"
+      "scrollbar-vertical-thumb-start-glyph:'[';scrollbar-vertical-thumb-end-glyph:']';"
+      "scrollbar-corner-glyph:'';}";
+    auto parsed = parsePssDocument(source, "owned.pss");
+    REQUIRE(parsed);
+    document = *parsed;
+  }
+  REQUIRE(document.sheet.rules[0].scrollbarGlyphs);
+  CHECK((*document.sheet.rules[0].scrollbarGlyphs)[0]->text == "e\xcc\x81");
+  CHECK((*document.sheet.rules[0].scrollbarGlyphs)[16]->text == "[");
+  CHECK((*document.sheet.rules[0].scrollbarGlyphs)[18]->text == "]");
+  CHECK((*document.sheet.rules[0].scrollbarGlyphs)[20]->text.empty());
+  CHECK(document.declarations[0].glyph->text == " ");
+  CHECK(document.declarations[1].glyph->text == "e\xcc\x81");
+  CHECK(*document.declarations[0].glyph->source == "owned.pss");
+  CHECK(
+    document.origins[0].effectiveDeclaration[static_cast<std::size_t>(PssProperty::SCROLLBAR_HORIZONTAL_TRACK_GLYPH)] ==
+    1);
+  const StyleTarget target{"ScrollBar", "", {}};
+  allocation_test::remaining = 0;
+  const auto resolved = resolveStyle(document.sheet, target);
+  allocation_test::remaining = -1;
+  REQUIRE(resolved.scrollbarGlyphs);
+  CHECK((*resolved.scrollbarGlyphs)[0][0]->text == "e\xcc\x81");
+  const StyleSnapshot snapshot(resolved);
+  allocation_test::remaining = 0;
+  const auto flattened = snapshot.flatten();
+  const auto hash = snapshot.contentHash();
+  const bool equal = snapshot == resolved;
+  allocation_test::remaining = -1;
+  CHECK(flattened == resolved);
+  CHECK(equal);
+  CHECK(hash == StyleSnapshot::contentHash(resolved));
+  const auto sheet = parsePss("*{scrollbar-vertical-track-glyph:';';}");
+  REQUIRE(sheet);
+  CHECK((*sheet->rules[0].scrollbarGlyphs)[10]->text == ";");
+
+  for (const auto source : {"*{scrollbar-horizontal-track-glyph:.;}", "*{scrollbar-horizontal-track-glyph:$track;}",
+                            "*{scrollbar-horizontal-track-glyph:'unterminated;}", "*{bold:'true';}"}) {
+    const auto rejected = parsePssDocument(source);
+    REQUIRE_FALSE(rejected);
+    CHECK(rejected.error().code == PssErrorCode::INVALID_VALUE);
+  }
+  CHECK_FALSE(parsePssDocument("*{scrollbar-horizontal-track-glyph:'" + std::string(65, 'a') + "';}"));
+  CHECK_FALSE(parsePss("*{scrollbar-horizontal-track-glyph:'\xc0\x80';}"));
+  constexpr auto UNSUPPORTED = sc::detail::inspectPss("*{scrollbar-horizontal-track-glyph:'.';}", "");
+  static_assert(!UNSUPPORTED.valid && UNSUPPORTED.error.code == PssErrorCode::INVALID_VALUE);
 }

@@ -3,7 +3,7 @@
 #include "../widgets/glyph_profiles.hpp"
 #include "theme_receiver.hpp"
 #include <portals/detail/layout_traversal.hpp>
-#include <portals/detail/pss_data.hpp>
+#include <portals/detail/pss_parser.hpp>
 #include <portals/style.hpp>
 
 #include <algorithm>
@@ -91,6 +91,28 @@ Specificity specificity(const StyleSelector &selector) {
 }
 
 using Rank = std::tuple<StyleTier, Specificity, std::uint64_t, std::size_t>;
+constexpr std::array STYLE_STATES{StyleState::NORMAL,   StyleState::FOCUSED, StyleState::DISABLED,
+                                  StyleState::SELECTED, StyleState::HEADER,  StyleState::CARET};
+
+// Both value resolution and error provenance must visit precisely the same effective contributions.
+template <class State, class Apply> void visitLayerRules(const State &state, NodeId node, Apply &&apply) {
+  for (const auto &layer : state.layers) {
+    if ((state.preview && layer.id == state.themeBase) || (layer.sheet.scope && *layer.sheet.scope != node)) {
+      continue;
+    }
+
+    for (std::size_t index = 0; index < layer.sheet.rules.size(); ++index) {
+      const auto &rule = layer.sheet.rules[index];
+
+      apply(
+        rule,
+        [&layer, &rule, index] {
+          return Rank{layer.tier, specificity(rule.selector), layer.order, index};
+        },
+        layer);
+    }
+  }
+}
 
 bool hasPaintDeclarations(const StylePaintDeclarations &values) noexcept {
   return values.foreground || values.background || values.bold || values.italic || values.underline;
@@ -231,7 +253,7 @@ ComputedStyle resolveRules(const Visit &visit, const StyleTarget &target, Comput
   visit([&](const StyleRule &rule, auto &&makeRank) {
     const auto &values = rule.declarations;
 
-    glyphDeclarations = glyphDeclarations || ((values.glyphProfile || values.glyphFallback) &&
+    glyphDeclarations = glyphDeclarations || ((values.glyphProfile || values.glyphFallback || rule.scrollbarGlyphs) &&
                                               matches(rule.selector, target, rule.selector.state));
 
     // Reuse the metric pass; selector states here test applicability, not the current paint state.
@@ -263,15 +285,13 @@ ComputedStyle resolveRules(const Visit &visit, const StyleTarget &target, Comput
   });
 
   if (glyphDeclarations) {
-    constexpr std::array STATES{StyleState::NORMAL,   StyleState::FOCUSED, StyleState::DISABLED,
-                                StyleState::SELECTED, StyleState::HEADER,  StyleState::CARET};
-
-    for (std::size_t index = 0; index < STATES.size(); ++index) {
+    for (std::size_t index = 0; index < STYLE_STATES.size(); ++index) {
       std::optional<CascadeRank> profileRank;
       std::optional<CascadeRank> fallbackRank;
+      std::array<std::optional<CascadeRank>, detail::SCROLLBAR_LITERAL_GLYPH_COUNT> literalRanks;
 
       visit([&](const StyleRule &rule, auto &&makeRank) {
-        if (!matches(rule.selector, target, STATES[index])) {
+        if (!matches(rule.selector, target, STYLE_STATES[index])) {
           return;
         }
 
@@ -286,6 +306,19 @@ ComputedStyle resolveRules(const Visit &visit, const StyleTarget &target, Comput
         if (values.glyphFallback && (!fallbackRank || candidate >= *fallbackRank)) {
           defaults.glyphs[index].fallback = *values.glyphFallback;
           fallbackRank = candidate;
+        }
+
+        if (rule.scrollbarGlyphs) {
+          for (std::size_t glyph = 0; glyph < literalRanks.size(); ++glyph) {
+            const auto &source = (*rule.scrollbarGlyphs)[glyph];
+            if (source && (!literalRanks[glyph] || candidate >= *literalRanks[glyph])) {
+              if (!defaults.scrollbarGlyphs) {
+                defaults.scrollbarGlyphs.emplace();
+              }
+              (*defaults.scrollbarGlyphs)[index][glyph] = source;
+              literalRanks[glyph] = candidate;
+            }
+          }
         }
       });
     }
@@ -509,22 +542,9 @@ ComputedStyle StyleEngine::resolve(const StyleSheet &sheet, const LayerState &st
   }
   return resolveRules<Rank>(
     [&](auto &&apply) {
-      for (const auto &layer : state.layers) {
-        if (state.preview && layer.id == state.themeBase) {
-          continue;
-        }
-
-        if (layer.sheet.scope && *layer.sheet.scope != node) {
-          continue;
-        }
-
-        for (std::size_t index = 0; index < layer.sheet.rules.size(); ++index) {
-          const auto &rule = layer.sheet.rules[index];
-          apply(rule, [&layer, &rule, index] {
-            return Rank{layer.tier, specificity(rule.selector), layer.order, index};
-          });
-        }
-      }
+      visitLayerRules(state, node, [&](const StyleRule &rule, auto &&makeRank, const auto &) {
+        apply(rule, makeRank);
+      });
     },
     target, defaults);
 }
@@ -935,11 +955,28 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
         partCount(d.scrollbarThumbEnd) + partCount(d.scrollbarThumbSingle) + d.foreground.has_value() +
         d.background.has_value() + d.bold.has_value() + d.italic.has_value() + d.underline.has_value() +
         d.minWidth.has_value() + d.scrollbarTrackPattern.has_value() + d.scrollbarThumbPattern.has_value() +
-        d.scrollbarArrowPattern.has_value();
+        d.scrollbarArrowPattern.has_value() +
+        (rule.scrollbarGlyphs ? std::ranges::count_if(*rule.scrollbarGlyphs,
+                                                      [](const auto &leaf) {
+                                                        return bool(leaf);
+                                                      })
+                              : 0);
       if (!charge(declarations, count, options.maxDeclarations) ||
           !charge(bytes, sizeof(StyleRule), options.maxOwnedBytes) || !chargeString(rule.selector.type) ||
           !chargeString(rule.selector.id)) {
         return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Style declaration/payload budget exhausted"));
+      }
+
+      if (rule.scrollbarGlyphs) {
+        if (!charge(bytes, sizeof(detail::ScrollbarGlyphRefs), options.maxOwnedBytes)) {
+          return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Scrollbar literal payload budget exhausted"));
+        }
+        for (const auto &leaf : *rule.scrollbarGlyphs) {
+          if (leaf && (!charge(bytes, sizeof(detail::ScrollbarGlyphLiteral), options.maxOwnedBytes) ||
+                       !chargeString(leaf->text) || (leaf->source && !chargeString(*leaf->source)))) {
+            return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Scrollbar literal payload budget exhausted"));
+          }
+        }
       }
 
       for (const auto &className : rule.selector.classes) {
@@ -1006,6 +1043,7 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
         }
 
         copied.declarations = rule.declarations;
+        copied.scrollbarGlyphs = rule.scrollbarGlyphs;
         result.rules.emplace_back();
 
         auto &destination = result.rules.back();
@@ -1015,6 +1053,7 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
         destination.selector.classes.swap(copied.selector.classes);
         destination.selector.state = copied.selector.state;
         destination.declarations = copied.declarations;
+        destination.scrollbarGlyphs = copied.scrollbarGlyphs;
       }
     };
 
@@ -1407,7 +1446,7 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
         StyleBlockIndex<std::array<FrameAppearance, 6>> frames;
         StyleBlockIndex<std::array<ScrollbarAppearance, 6>> scrollbars;
         StyleBlockIndex<std::array<ScrollbarThumbAppearance, 6>> thumbs;
-        StyleBlockIndex<std::array<GlyphAppearance, 6>> glyphs;
+        StyleBlockIndex<detail::StyleGlyphBlock> glyphs;
       };
       std::optional<PreparedTransaction> transaction;
       Invalidation invalidation = Invalidation::NONE;
@@ -1486,10 +1525,45 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
             invalidation = Invalidation::PAINT;
           }
 
-          auto glyphs = detail::GlyphProfileAccess::prepare(**widget, next);
+          std::size_t failedLiteral = detail::SCROLLBAR_LITERAL_GLYPH_COUNT * 6;
+          auto glyphs = detail::GlyphProfileAccess::prepare(**widget, next, nullptr, nullptr, &failedLiteral);
 
           if (!glyphs) {
             result = std::unexpected(error(glyphs.error(), "Glyph profile preparation failed"));
+            if (failedLiteral < detail::SCROLLBAR_LITERAL_GLYPH_COUNT * 6) {
+              const auto index = failedLiteral % detail::SCROLLBAR_LITERAL_GLYPH_COUNT;
+              const auto &leaf = (*next.scrollbarGlyphs)[failedLiteral / detail::SCROLLBAR_LITERAL_GLYPH_COUNT][index];
+              auto &failure = result.error();
+              failure.line = leaf->line;
+              failure.column = leaf->column;
+              failure.property =
+                detail::PSS_PROPERTY_NAMES[static_cast<std::size_t>(PssProperty::SCROLLBAR_HORIZONTAL_TRACK_GLYPH) +
+                                           index]
+                  .data();
+              const auto *layers = candidate ? candidate : &layerState_;
+              const Layer *origin{};
+              std::optional<Rank> originRank;
+              if (!wholeReplace && layers->enabled) {
+                const auto state = STYLE_STATES[failedLiteral / detail::SCROLLBAR_LITERAL_GLYPH_COUNT];
+                visitLayerRules(*layers, binding.node.id(),
+                                [&](const StyleRule &rule, auto &&makeRank, const Layer &layer) {
+                                  if (!rule.scrollbarGlyphs || !(*rule.scrollbarGlyphs)[index] ||
+                                      !matches(rule.selector, binding.target, state)) {
+                                    return;
+                                  }
+
+                                  const auto rank = makeRank();
+
+                                  if (!originRank || rank >= *originRank) {
+                                    origin = &layer;
+                                    originRank = rank;
+                                  }
+                                });
+              }
+              if (origin) {
+                failure.layerId = origin->id;
+              }
+            }
 
             return;
           }
@@ -1517,8 +1591,12 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
               if (next.scrollbarThumbSegments) {
                 blocks.thumb = shareStyleBlock(transaction->thumbs, *next.scrollbarThumbSegments);
               }
-              if (next.glyphs != std::array<GlyphAppearance, 6>{}) {
-                blocks.glyphs = shareStyleBlock(transaction->glyphs, next.glyphs);
+              if (next.glyphs != std::array<GlyphAppearance, 6>{} || next.scrollbarGlyphs.has_value()) {
+                detail::StyleGlyphBlock block{next.glyphs};
+                if (next.scrollbarGlyphs.has_value()) {
+                  block.literals = std::make_shared<const detail::ScrollbarGlyphStates>(*next.scrollbarGlyphs);
+                }
+                blocks.glyphs = shareStyleBlock(transaction->glyphs, block);
               }
 
               snapshot = std::make_shared<const StyleSnapshot>(StyleSnapshot::PreparedTag{}, next, std::move(blocks));
