@@ -142,12 +142,14 @@ those limits. A font change without any report is unobservable; the host must de
 the promised resize/size notifications.
 
 
-The advanced FIFO path requires an initial cell context. If initial queries find
-1016 already active, startup returns `INPUT_PROTOCOL` with
+All POSIX startup overloads with mouse reporting enabled require an initial cell
+context. If the mandatory mode queries find 1016 already active, startup returns `INPUT_PROTOCOL` with
 `TerminalProtocolIssue::INITIAL_PIXEL_CONTEXT_UNKNOWN` ("initial pixel context unknown")
 before changing encoding/tracking: retained pixels have no trustworthy original
-metrics. Pre-existing foreign pixel input in the older OFF/legacy startup path is
-outside this guarantee; that path is not a safe workaround for such input.
+metrics. This check also applies when precise input is `OFF` or FIFO ordering is
+unconfirmed. Disabling mouse reporting skips mouse setup and its mode queries;
+it does not classify pre-existing foreign mouse input. Other validation rules for
+unsupported or incomplete mode replies remain unchanged.
 
 Each precise mouse event still has cell `column`/`row`. Its optional owning
 `precision` stores zero-based pixel coordinates, the character and text-pixel

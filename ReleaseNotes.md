@@ -64,6 +64,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Fixed
 
+- Reject a known active initial pixel mouse mode on every POSIX startup path
+  with mouse reporting enabled, including legacy overloads and precision `OFF`.
+  Startup returns `INPUT_PROTOCOL` / `INITIAL_PIXEL_CONTEXT_UNKNOWN` before
+  changing mouse modes, so retained pixel coordinates cannot be read as cells.
+  Disabling mouse reporting keeps its existing no-query behavior.
+
 - Keep focused scrollbar tracks, thumbs, decorative ends and corners in the
   theme accent on the surface background. Block thumbs remain visible in dark
   and light themes; application and user part overrides keep their priority.
