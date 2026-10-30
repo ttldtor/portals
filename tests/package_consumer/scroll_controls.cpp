@@ -133,7 +133,7 @@ int main() {
 
   // clang-format off
   scene
-    | ui::style("ScrollArea{scrollbar-track-foreground:#8090a0;scrollbar-thumb-bold:true;scrollbar-thumb-start-foreground:#0a0b0c;scrollbar-thumb-body-bold:false;} ScrollBar{scrollbar-corner-underline:false;scrollbar-thumb-end-italic:true;scrollbar-thumb-single-underline:true;}")
+    | ui::style("ScrollArea{scrollbar-track-foreground:#8090a0;scrollbar-thumb-bold:true;scrollbar-thumb-start-foreground:#0a0b0c;scrollbar-thumb-body-bold:false;} ScrollBar{scrollbar-corner-underline:false;scrollbar-thumb-end-italic:true;scrollbar-thumb-single-underline:true;scrollbar-vertical-track-glyph:\".\";scrollbar-vertical-thumb-start-glyph:\"[\";scrollbar-vertical-thumb-body-glyph:\"=\";scrollbar-vertical-thumb-end-glyph:\"]\";scrollbar-vertical-thumb-single-glyph:\"Q\";}")
     | ui::configure([&](ManagedScene &owner) -> std::expected<void, ManagedError> {
         checked(application->tree().read(outer.node(), [&](const ScrollArea &widget) {
           check(widget.computedStyle() && widget.computedStyle()->scrollbarThumbSegments(),

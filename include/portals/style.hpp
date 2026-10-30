@@ -127,11 +127,19 @@ struct StyleRule {
 
   StyleSelector selector;         ///< Matching and specificity criteria.
   StyleDeclarations declarations; ///< Values overriding less-specific rules.
+  /// @cond INTERNAL
+  std::shared_ptr<const detail::ScrollbarGlyphRefs> scrollbarGlyphs;
+  /// @endcond
 
   /** @param other Owning value to compare.
    * @return Whether all typed fields are equal.
    */
-  bool operator==(const StyleRule &other) const = default;
+  bool operator==(const StyleRule &other) const {
+    return selector == other.selector && declarations == other.declarations &&
+           ((!scrollbarGlyphs && !other.scrollbarGlyphs) ||
+            (scrollbarGlyphs && other.scrollbarGlyphs &&
+             detail::equalScrollbarGlyphs(*scrollbarGlyphs, *other.scrollbarGlyphs)));
+  }
 };
 
 /** @brief Owned immutable-at-use rules; constructing typed values may allocate and throw. */
@@ -214,6 +222,14 @@ struct StyleError {
   std::size_t line{1};                          ///< One-based PSS line, or one for typed/tree errors.
   std::size_t column{1};                        ///< One-based byte column, or one for typed/tree errors.
   std::string_view message;                     ///< Static diagnostic; never borrows source input.
+  const char
+    *property{}; ///< Null or a library static null-terminated property identity for a failed literal preparation.
+  std::uint64_t layerId{}; ///< Failing resident/candidate layer identity; zero for legacy or typed sources.
+
+  /** @return Static property name, or an empty view when the error has no property identity. */
+  std::string_view propertyName() const noexcept {
+    return property ? std::string_view(property) : std::string_view{};
+  }
 };
 
 /** @brief Validate bounded ancestor metadata without allocation or retaining input.

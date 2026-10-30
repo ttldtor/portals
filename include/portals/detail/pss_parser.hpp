@@ -18,7 +18,27 @@ struct PssSpan {
 };
 
 /** @brief Small validated scalar payload; avoids constructing six optional fields per parsed occurrence. */
-using PssValue = PssScalarValue;
+struct PssValue : PssScalarValue {
+  /** @param scalar Validated owning scalar fields; empty when parsing a glyph string. */
+  constexpr PssValue(PssScalarValue scalar = {}) : PssScalarValue(scalar) {
+  }
+
+  std::string_view glyph; ///< Synchronous parser borrow; runtime sinks must copy before returning.
+};
+
+/** @param property Parsed property identity.
+ * @return Whether it selects a runtime-only scrollbar glyph string.
+ */
+constexpr bool pssGlyphProperty(PssProperty property) noexcept {
+  return property >= PssProperty::SCROLLBAR_HORIZONTAL_TRACK_GLYPH && property <= PssProperty::SCROLLBAR_CORNER_GLYPH;
+}
+
+/** @param property A glyph property admitted by pssGlyphProperty.
+ * @return Zero-based leaf slot in the horizontal, vertical and corner sequence.
+ */
+constexpr std::size_t pssGlyphIndex(PssProperty property) noexcept {
+  return static_cast<std::size_t>(property) - static_cast<std::size_t>(PssProperty::SCROLLBAR_HORIZONTAL_TRACK_GLYPH);
+}
 
 /** @brief Static string views avoid repeated C-string length evaluation in the constexpr hot path. */
 inline constexpr std::array<std::string_view, PSS_PROPERTY_COUNT> PSS_PROPERTY_NAMES{
@@ -92,7 +112,28 @@ inline constexpr std::array<std::string_view, PSS_PROPERTY_COUNT> PSS_PROPERTY_N
   "scrollbar-thumb-single-italic",
   "scrollbar-thumb-single-underline",
   "glyph-profile",
-  "glyph-fallback"};
+  "glyph-fallback",
+  "scrollbar-horizontal-track-glyph",
+  "scrollbar-horizontal-thumb-glyph",
+  "scrollbar-horizontal-start-glyph",
+  "scrollbar-horizontal-end-glyph",
+  "scrollbar-horizontal-backward-glyph",
+  "scrollbar-horizontal-forward-glyph",
+  "scrollbar-horizontal-thumb-start-glyph",
+  "scrollbar-horizontal-thumb-body-glyph",
+  "scrollbar-horizontal-thumb-end-glyph",
+  "scrollbar-horizontal-thumb-single-glyph",
+  "scrollbar-vertical-track-glyph",
+  "scrollbar-vertical-thumb-glyph",
+  "scrollbar-vertical-start-glyph",
+  "scrollbar-vertical-end-glyph",
+  "scrollbar-vertical-backward-glyph",
+  "scrollbar-vertical-forward-glyph",
+  "scrollbar-vertical-thumb-start-glyph",
+  "scrollbar-vertical-thumb-body-glyph",
+  "scrollbar-vertical-thumb-end-glyph",
+  "scrollbar-vertical-thumb-single-glyph",
+  "scrollbar-corner-glyph"};
 /** @brief Pseudo-state names in the existing StyleState order after ANY. */
 inline constexpr std::array<std::string_view, 6> PSS_STATE_NAMES{"normal",   "focused", "disabled",
                                                                  "selected", "header",  "caret"};
@@ -591,7 +632,23 @@ private:
     }
 
     const auto valueLocation = location_;
-    const auto text = value();
+    std::string_view text;
+
+    if (peek() == '\'' || peek() == '"') {
+      const auto quote = peek();
+      advance();
+      const auto begin = location_.offset;
+      while (peek() != quote && peek() != '\0' && peek() != '\n' && peek() != '\r') {
+        advance();
+      }
+      if (peek() != quote) {
+        return failAt(PssErrorCode::INVALID_VALUE, valueLocation, "Unterminated glyph string");
+      }
+      text = source_.substr(begin, location_.offset - begin);
+      advance();
+    } else {
+      text = value();
+    }
     const auto propertyName = view(*name);
     std::size_t index{};
 
@@ -606,23 +663,44 @@ private:
     const auto property = static_cast<PssProperty>(index);
     PssValue declaration;
 
-    if (property == PssProperty::FOREGROUND || property == PssProperty::BACKGROUND ||
-        property == PssProperty::FRAME_LINE_FOREGROUND || property == PssProperty::FRAME_LINE_BACKGROUND ||
-        property == PssProperty::FRAME_TITLE_FOREGROUND || property == PssProperty::FRAME_TITLE_BACKGROUND ||
-        property == PssProperty::FRAME_ENDS_FOREGROUND || property == PssProperty::FRAME_ENDS_BACKGROUND ||
-        property == PssProperty::SCROLLBAR_TRACK_FOREGROUND || property == PssProperty::SCROLLBAR_TRACK_BACKGROUND ||
-        property == PssProperty::SCROLLBAR_THUMB_START_FOREGROUND ||
-        property == PssProperty::SCROLLBAR_THUMB_START_BACKGROUND ||
-        property == PssProperty::SCROLLBAR_THUMB_BODY_FOREGROUND ||
-        property == PssProperty::SCROLLBAR_THUMB_BODY_BACKGROUND ||
-        property == PssProperty::SCROLLBAR_THUMB_END_FOREGROUND ||
-        property == PssProperty::SCROLLBAR_THUMB_END_BACKGROUND ||
-        property == PssProperty::SCROLLBAR_THUMB_SINGLE_FOREGROUND ||
-        property == PssProperty::SCROLLBAR_THUMB_SINGLE_BACKGROUND ||
-        property == PssProperty::SCROLLBAR_THUMB_FOREGROUND || property == PssProperty::SCROLLBAR_THUMB_BACKGROUND ||
-        property == PssProperty::SCROLLBAR_ENDS_FOREGROUND || property == PssProperty::SCROLLBAR_ENDS_BACKGROUND ||
-        property == PssProperty::SCROLLBAR_ARROWS_FOREGROUND || property == PssProperty::SCROLLBAR_ARROWS_BACKGROUND ||
-        property == PssProperty::SCROLLBAR_CORNER_FOREGROUND || property == PssProperty::SCROLLBAR_CORNER_BACKGROUND) {
+    const auto opening = valueLocation.offset < source_.size() ? source_[valueLocation.offset] : '\0';
+    if (!pssGlyphProperty(property) && (opening == '\'' || opening == '"')) {
+      return failAt(PssErrorCode::INVALID_VALUE, valueLocation, "Quoted values require a literal glyph property",
+                    propertyName);
+    }
+
+    if (pssGlyphProperty(property)) {
+      if ((opening != '\'' && opening != '"') || text.size() > DEFAULT_SCROLLBAR_GLYPH_BYTES) {
+        return failAt(PssErrorCode::INVALID_VALUE, valueLocation, "Expected quoted scrollbar glyph (at most 64 bytes)",
+                      propertyName);
+      }
+      auto utf8 = validatePssUtf8(text);
+      if (!utf8) {
+        return failAt(utf8.error().code, valueLocation, utf8.error().message, propertyName);
+      }
+      declaration.glyph = text;
+    } else if (property == PssProperty::FOREGROUND || property == PssProperty::BACKGROUND ||
+               property == PssProperty::FRAME_LINE_FOREGROUND || property == PssProperty::FRAME_LINE_BACKGROUND ||
+               property == PssProperty::FRAME_TITLE_FOREGROUND || property == PssProperty::FRAME_TITLE_BACKGROUND ||
+               property == PssProperty::FRAME_ENDS_FOREGROUND || property == PssProperty::FRAME_ENDS_BACKGROUND ||
+               property == PssProperty::SCROLLBAR_TRACK_FOREGROUND ||
+               property == PssProperty::SCROLLBAR_TRACK_BACKGROUND ||
+               property == PssProperty::SCROLLBAR_THUMB_START_FOREGROUND ||
+               property == PssProperty::SCROLLBAR_THUMB_START_BACKGROUND ||
+               property == PssProperty::SCROLLBAR_THUMB_BODY_FOREGROUND ||
+               property == PssProperty::SCROLLBAR_THUMB_BODY_BACKGROUND ||
+               property == PssProperty::SCROLLBAR_THUMB_END_FOREGROUND ||
+               property == PssProperty::SCROLLBAR_THUMB_END_BACKGROUND ||
+               property == PssProperty::SCROLLBAR_THUMB_SINGLE_FOREGROUND ||
+               property == PssProperty::SCROLLBAR_THUMB_SINGLE_BACKGROUND ||
+               property == PssProperty::SCROLLBAR_THUMB_FOREGROUND ||
+               property == PssProperty::SCROLLBAR_THUMB_BACKGROUND ||
+               property == PssProperty::SCROLLBAR_ENDS_FOREGROUND ||
+               property == PssProperty::SCROLLBAR_ENDS_BACKGROUND ||
+               property == PssProperty::SCROLLBAR_ARROWS_FOREGROUND ||
+               property == PssProperty::SCROLLBAR_ARROWS_BACKGROUND ||
+               property == PssProperty::SCROLLBAR_CORNER_FOREGROUND ||
+               property == PssProperty::SCROLLBAR_CORNER_BACKGROUND) {
       const auto color = parseColor(text);
 
       if (!color) {
@@ -700,6 +778,10 @@ private:
  * @param destination Existing declarations updated with last-occurrence semantics.
  */
 constexpr void assignPssDeclaration(PssProperty property, PssValue value, StyleDeclarations &destination) {
+  if (pssGlyphProperty(property)) {
+    return;
+  }
+
   switch (property) {
   case PssProperty::FOREGROUND:
     destination.foreground = value.color;

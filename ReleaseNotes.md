@@ -7,6 +7,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Support owning runtime PSS glyph strings for horizontal/vertical scrollbar
+  tracks, arrows, decorative ends, thumb segments and corners. Literal updates
+  follow the existing cascade and prepare before publication; invalid glyphs
+  retain the previous presentation. Unused literal storage remains sparse.
+
 - Add opt-in fractional scrollbar thumbs with prepared one-eighth-cell block
   edges on both axes, exact large-range geometry and anchored dragging. Fluent,
   PSS and loaded-scene forms share the profile; theme/part colors keep priority.

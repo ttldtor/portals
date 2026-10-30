@@ -96,6 +96,24 @@ class PssHighlightTests(unittest.TestCase):
         self.assertIn('<span class="keyword">false</span>', result)
         self.assertIn('<span class="stringliteral">2147483647</span>', result)
 
+    def test_quoted_scrollbar_glyphs_preserve_copy_text(self):
+        source = ('ScrollArea {\n'
+                  '  scrollbar-horizontal-thumb-start-glyph: "[";\n'
+                  '  scrollbar-horizontal-thumb-body-glyph: " ";\n'
+                  "  scrollbar-vertical-thumb-body-glyph: '│';\n"
+                  '  scrollbar-corner-glyph: "";\n}')
+        result = self.assert_preserved(fragment(source))
+        self.assertIn('fragment pss-colors', result)
+        self.assertEqual(result.count('<span class="stringliteral">'), 4)
+
+    def test_unknown_or_over_budget_glyph_syntax_is_not_colored(self):
+        for declaration in ('scrollbar-diagonal-track-glyph: "x";',
+                            'scrollbar-horizontal-track-glyph: x;',
+                            'scrollbar-horizontal-track-glyph: "' + 'x' * 65 + '";'):
+            with self.subTest(declaration=declaration):
+                original = fragment('ScrollArea { ' + declaration + ' }')
+                self.assertEqual(color_pss(original), original)
+
     def test_non_pss_fragments_and_invalid_pss_are_unchanged(self):
         examples = [
             'int main() { return 0; }',

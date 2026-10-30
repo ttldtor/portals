@@ -531,8 +531,67 @@ and segments retain priority over named sources. Typed sheets expose
 `scrollbarTrackPattern`, `scrollbarThumbPattern` and `scrollbarArrowPattern`
 with the corresponding enum values. Runtime, literal and compact PSS share the
 same enum admission; invalid names/ordinals reject the stylesheet atomically.
-PSS shape declarations accept named presets; custom segment text is currently
-configured through C++ or loaded scenes.
+Runtime PSS also accepts [literal glyphs](#literal-scrollbar-glyphs) for individual
+parts. Named presets remain available in compile-time PSS.
+
+### Literal scrollbar glyphs {#literal-scrollbar-glyphs}
+
+Runtime PSS can own the text of individual scrollbar parts:
+
+```pss
+ScrollArea {
+  scrollbar-horizontal-thumb-start-glyph: "[";
+  scrollbar-horizontal-thumb-body-glyph: "=";
+  scrollbar-horizontal-thumb-end-glyph: "]";
+  scrollbar-vertical-thumb-body-glyph: "│";
+}
+```
+
+Use `scrollbar-horizontal-<part>-glyph` or `scrollbar-vertical-<part>-glyph`,
+where `<part>` is `track`, `thumb`, `start`, `end`, `backward`, `forward`,
+`thumb-start`, `thumb-body`, `thumb-end` or `thumb-single`.
+`start`/`end` decorate the track; `thumb-start`/`thumb-end` cap the moving thumb.
+`scrollbar-corner-glyph` selects the axes' intersection. These declarations do
+not enable arrow buttons or decorative ends: keep `.arrows()` and the existing
+end setting when needed.
+
+Values are quoted UTF-8 strings, at most 64 bytes per glyph. Nonempty values
+must be one printable grapheme occupying one cell under the receiving control's
+`WidthPolicy`. Empty decorative `start`/`end` strings suppress that decoration;
+an empty corner keeps the usual fill. Other empty values are invalid. Strings
+use single or double quotes without escape processing. Select the other quote
+delimiter to include a quote glyph.
+
+Resolution follows the existing layer, selector and state priorities per leaf.
+Manual control glyphs take priority over PSS glyphs; PSS glyphs take priority
+over named patterns and profiles. A rejected update preserves the previous
+valid presentation. An invalid explicit glyph is an error, rather than a
+request for the named profile's fallback. Removing a style layer releases its
+contribution and exposes the lower layer or control default.
+
+Low-level `StyleError` reports `line`, `column`, `propertyName()` and `layerId`.
+It retains no filename. The managed `runApp` boundary uses the existing
+`ManagedError.styleSource` owning context for a full filename when available;
+that optional context can be absent after an allocation failure. Copying the
+error envelope remains allocation-free.
+
+The parser and style engine retain owning copies, so source strings and input
+files may disappear after a successful application. Glyph validation and
+preparation happen before publication; painting reads the prepared graphemes.
+Literal glyph declarations are currently runtime-only: compile-time PSS rejects
+them, and `$name` substitution is not provided by the runtime PSS grammar.
+
+The [complete inline program](examples/guide_scrollbar_parts.cpp) and the
+[complete file-based program](examples/guide_scrollbar_parts_file.cpp) render
+the same two panels. The latter uses `ui::styleFile("scrollbar-parts.pss")`;
+download [its stylesheet](../docs/examples/scrollbar-parts.pss) into the working
+directory. In a contributor build, CMake copies this file into the build root:
+
+```powershell
+cmake --build build/windows-msvc-release --target portals_docs_example_guide_scrollbar_parts_file
+Push-Location build/windows-msvc-release
+try { .\portals_docs_example_guide_scrollbar_parts_file.exe } finally { Pop-Location }
+```
 
 ### Two-pane scrollbar gallery
 
@@ -541,14 +600,14 @@ independent 26×10 outer areas. With `.scrollOnFrame()`, each has a 24×8
 viewport; both scroll ordinary content of 12 rows and 36 columns. The left pane
 uses frame track lines and ASCII arrow buttons. The right pane supplies custom
 thumb segments and uses PSS named presets for its track, thumb and arrows.
-`settings(...)` replaces the instance patch, so set custom segments before
-`id`, frame and scroll modifiers. Each part's fluent or pipe stage changes only
-that part.
+Both the glyph strings and their colors are declared together in the `#segments`
+PSS rule; no manual skin configuration is needed. Each part's fluent or pipe
+stage changes only that part.
 
 Use Tab to focus the areas, arrow keys to scroll, and mouse arrow-button holds
 to repeat scrolling; F10 exits. Gallery capture:
 
-![Two-pane scrollbar parts gallery](images/scrollbar-parts.png)
+![Two-pane scrollbar parts gallery](images/scrollbar-pss-glyphs.png)
 
 \image html scrollbar-parts.gif "Two-pane scrollbar parts gallery"
 

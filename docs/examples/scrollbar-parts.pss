@@ -1,0 +1,19 @@
+#segments {
+  scrollbar-horizontal-thumb-start-glyph: "[";
+  scrollbar-horizontal-thumb-body-glyph: "=";
+  scrollbar-horizontal-thumb-end-glyph: "]";
+  scrollbar-horizontal-thumb-single-glyph: "#";
+  scrollbar-vertical-thumb-start-glyph: "▄";
+  scrollbar-vertical-thumb-body-glyph: "█";
+  scrollbar-vertical-thumb-end-glyph: "▀";
+  scrollbar-vertical-thumb-single-glyph: "█";
+  scrollbar-track-pattern: minimal;
+  scrollbar-thumb-pattern: ascii;
+  scrollbar-arrow-pattern: triangle;
+  scrollbar-thumb-foreground: #62b4d7;
+  scrollbar-thumb-bold: true;
+  scrollbar-thumb-start-foreground: #f2c879;
+  scrollbar-thumb-end-foreground: #f2c879;
+  scrollbar-thumb-body-bold: false;
+  scrollbar-thumb-single-foreground: #f2c879;
+}

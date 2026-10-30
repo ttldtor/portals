@@ -409,7 +409,7 @@ std::expected<PssDocument, PssError> materializeDocument(const CompactSheet<R, C
       origin.declarationBegin = rule.declarationBegin;
       origin.declarationCount = rule.declarationCount;
 
-      for (std::size_t index = 0; index < PSS_PROPERTY_COUNT; ++index) {
+      for (std::size_t index = 0; index < rule.effectiveDeclaration.size(); ++index) {
         origin.effectiveDeclaration[index] = rule.effectiveDeclaration[index] == detail::NO_COMPACT_DECLARATION
                                                ? NO_PSS_DECLARATION
                                                : rule.effectiveDeclaration[index];
@@ -1090,7 +1090,7 @@ consteval FlatRule flatRule(detail::Parameters<P...> definitions, S selector, D.
   static_assert(detail::uniqueParameters(detail::Parameters<P...>{}),
                 "Flat style parameter names must be unique and nonempty");
   static_assert(detail::validFlatSelector<S>(), "Flat style selector requires PSS ASCII identifiers");
-  static_assert(sizeof...(D) <= PSS_PROPERTY_COUNT, "Flat style rule exceeds the v0 property count");
+  static_assert(sizeof...(D) <= PSS_SCALAR_PROPERTY_COUNT, "Flat style rule exceeds the scalar property count");
 
   using Definitions = detail::Parameters<P...>;
   constexpr bool TOKENS_KNOWN = (detail::FlatExpressionType<std::remove_cvref_t<decltype(std::declval<D>().expression)>,
@@ -1149,7 +1149,7 @@ template <std::size_t N>
 consteval auto compactSheet(const std::array<FlatRule, N> &rules, std::string_view sourceName = std::string_view{}) {
   static_assert(N <= MAX_CT_PSS_RULES, "Compact style sheet exceeds the CT rule limit");
   constexpr auto RULE_CAPACITY = std::min(N, MAX_CT_PSS_RULES);
-  constexpr auto DECLARATION_CAPACITY = std::min(N * PSS_PROPERTY_COUNT, MAX_CT_PSS_DECLARATIONS);
+  constexpr auto DECLARATION_CAPACITY = std::min(N * PSS_SCALAR_PROPERTY_COUNT, MAX_CT_PSS_DECLARATIONS);
   auto validName = detail::validateCtPssName(sourceName);
 
   if (!validName) {
@@ -1182,7 +1182,7 @@ consteval auto compactSheet(const std::array<FlatRule, N> &rules, std::string_vi
       admit(sink.classBytes(name, location));
     }
 
-    for (std::size_t propertyIndex = 0; propertyIndex < PSS_PROPERTY_COUNT; ++propertyIndex) {
+    for (std::size_t propertyIndex = 0; propertyIndex < PSS_SCALAR_PROPERTY_COUNT; ++propertyIndex) {
       const auto property = static_cast<PssProperty>(propertyIndex);
 
       if (detail::pssPropertyPresent(property, rule.values())) {

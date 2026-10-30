@@ -21,10 +21,15 @@ _RULE = re.compile(
 )
 _DECLARATION = re.compile(
     rf"(?P<property>{_IDENTIFIER}){_SPACE}:{_SPACE}"
-    rf"(?P<value>[^;}}\s]+){_SPACE};", re.S,
+    rf'''(?P<value>"[^"\r\n]*"|'[^'\r\n]*'|[^;}}\s]+){_SPACE};''', re.S,
 )
 _TRIVIA = re.compile(_SPACE, re.S)
 _STATES = {"normal", "focused", "disabled", "selected", "header", "caret"}
+_GLYPH_PARTS = {"track", "thumb", "start", "end", "backward", "forward",
+                "thumb-start", "thumb-body", "thumb-end", "thumb-single"}
+_GLYPH_PROPERTIES = {f"scrollbar-{axis}-{part}-glyph"
+                     for axis in ("horizontal", "vertical") for part in _GLYPH_PARTS}
+_GLYPH_PROPERTIES.add("scrollbar-corner-glyph")
 
 
 def _tokens(source):
@@ -60,6 +65,12 @@ def _tokens(source):
             name, value = declaration["property"], declaration["value"]
             if name in {"foreground", "background"}:
                 valid = re.fullmatch(r"#[0-9A-Fa-f]{6}", value)
+                kind = "stringliteral"
+            elif name in _GLYPH_PROPERTIES:
+                # Only recognize the quoted syntax here; the receiving WidthPolicy
+                # performs grapheme/cell admission when applying the stylesheet.
+                valid = (len(value) >= 2 and value[0] in "\"'" and value[-1] == value[0]
+                         and len(value[1:-1].encode("utf-8")) <= 64)
                 kind = "stringliteral"
             elif name == "min-width":
                 digits = value.removeprefix("-")

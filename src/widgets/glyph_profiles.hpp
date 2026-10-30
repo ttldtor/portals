@@ -14,12 +14,18 @@ inline constexpr std::size_t PROFILE_ARROWS = 10;
 inline constexpr std::size_t PROFILE_SCROLL_GLYPH_COUNT = 14;
 using ProfileScrollGlyphs = std::array<std::optional<GraphemeText>, PROFILE_SCROLL_GLYPH_COUNT>;
 
+struct PreparedStyleScrollbarGlyphs {
+  ScrollbarGlyphRefs sources;
+  std::array<std::optional<GraphemeText>, SCROLLBAR_LITERAL_GLYPH_COUNT> glyphs;
+};
+
 struct PreparedGlyphState {
   GlyphSelection scrollSelection;
   GlyphSelection frameSelection;
   std::unique_ptr<ProfileScrollGlyphs> scrollbar;
   std::unique_ptr<PreparedFrameText> frame;
   std::shared_ptr<const FractionalScrollGlyphs> fractional;
+  std::unique_ptr<PreparedStyleScrollbarGlyphs> literals;
 };
 
 struct PreparedGlyphProfiles {
@@ -36,7 +42,7 @@ bool validGlyphSelection(GlyphSelection selection) noexcept;
 struct GlyphProfileAccess {
   static std::expected<std::shared_ptr<const PreparedGlyphProfiles>, TreeError>
   prepare(Widget &widget, ComputedStyleView style, const GlyphSelection *manualScroll = nullptr,
-          const PreparedScrollbarSkin *manualSkin = nullptr);
+          const PreparedScrollbarSkin *manualSkin = nullptr, std::size_t *failedLiteral = nullptr);
   static void commit(Widget &widget, std::shared_ptr<const PreparedGlyphProfiles> prepared) noexcept;
 };
 } // namespace portals::detail
