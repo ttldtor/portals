@@ -107,6 +107,7 @@ target_sources(portals_core PRIVATE
   src/widgets/scroll_controls.cpp
   src/widgets/scroll_controls_layout.cpp
   src/widgets/scroll_controls_paint.cpp
+  src/widgets/scroll_motion.cpp
   src/widgets/scroll_controls_input.cpp)
 target_sources(portals_core PRIVATE src/widgets/dialog.cpp src/widgets/managed_dialog.cpp)
 target_sources(portals_core PRIVATE src/widgets/message_box.cpp src/widgets/managed_message.cpp)

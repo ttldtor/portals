@@ -18,7 +18,7 @@ int main() {
       ui::label("04 Positions -- one key press can move a partial edge"),
       ui::label("05 History -- arrows retain their ordinary step"),
       ui::label("06 Connections -- dragging retains its original anchor"),
-      ui::label("07 Notifications -- no animation timer is needed"),
+      ui::label("07 Notifications -- motion stops at its destination"),
       ui::label("08 Reports -- the frame owns its rounded corners"),
       ui::label("09 Activity -- the thumb has a separate block shape"),
       ui::label("10 Preferences -- explicit theme colors keep priority"),

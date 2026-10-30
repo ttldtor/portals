@@ -252,6 +252,13 @@ void semanticFixtures() {
 }
 
 void mouseAndProbes() {
+  constexpr MouseInputEvent LEGACY_WHEEL{2, 3, MouseButton::WHEEL_DOWN, MouseAction::SCROLL, {}};
+  constexpr MouseInputEvent PRECISE_WHEEL{
+    2, 3, MouseButton::WHEEL_DOWN, MouseAction::SCROLL, {}, InputPointerPrecision{20, 30, 80, 24, 800, 480, 7}};
+
+  static_assert(LEGACY_WHEEL.wheelDelta == 1.0 && !LEGACY_WHEEL.precision);
+  static_assert(PRECISE_WHEEL.wheelDelta == 1.0 && PRECISE_WHEEL.precision->generation == 7);
+
   golden("\x1b[<0;1;2M\x1b[<0;1;2m\x1b[<35;9;8M\x1b[<92;3;4M",
          {MouseInputEvent{0, 1, MouseButton::LEFT, MouseAction::PRESS, {}},
           MouseInputEvent{0, 1, MouseButton::LEFT, MouseAction::RELEASE, {}},

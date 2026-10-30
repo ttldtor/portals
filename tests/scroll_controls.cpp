@@ -3,9 +3,11 @@
 #include "../src/views/scroll_controller_state.hpp"
 #include "../src/widgets/glyph_profiles.hpp"
 #include "../src/widgets/scroll_controls_state.hpp"
+#include "../src/widgets/scroll_motion.hpp"
 #include <portals/managed.hpp>
 #include <portals/scroll_controls.hpp>
 
+#include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
@@ -159,10 +161,17 @@ struct TreeFixture {
   Node<Widget> root = take(tree->root());
   std::unique_ptr<EventRouter> router = take(EventRouter::create(*tree));
 
-  void layout(CellSize size) {
+  void layout(CellSize size, std::source_location caller = std::source_location::current()) {
     const auto bounds = take(CellRect::from({}, size));
     take(tree->frame([&] {
-      take(layoutTree(*tree, root, bounds, bounds));
+      const auto result = layoutTree(*tree, root, bounds, bounds);
+
+      if (!result) {
+        std::cerr << "layout error " << static_cast<int>(result.error()) << " requested by " << caller.function_name()
+                  << ':' << caller.line() << '\n';
+      }
+
+      take(result, caller);
     }));
   }
 
@@ -233,6 +242,339 @@ struct BarFixture : TreeFixture {
     return take(controller->snapshot());
   }
 };
+
+struct MotionFixture : BarFixture {
+  std::function<void()> clockHook;
+  std::function<void()> errorHook;
+  std::optional<TreeError> failure;
+  int errors{};
+  ActionBinding binding;
+
+  explicit MotionFixture(ScrollBarOptions options = {}) : BarFixture(options) {
+    take(setScrollbarSkin(*tree, bar, {.pattern = ScrollbarPattern::FRACTIONAL_BLOCK}));
+    binding = take(bindScrollBar(*router, *tree, bar,
+                                 {[this] {
+                                    if (clockHook) {
+                                      clockHook();
+                                    }
+
+                                    return now;
+                                  },
+                                  [this](TreeError error) {
+                                    failure = error;
+                                    ++errors;
+
+                                    if (errorHook) {
+                                      errorHook();
+                                    }
+                                  }}));
+  }
+
+  void tick(SchedulerTime time) {
+    now = time;
+    take(scheduler->dispatch());
+  }
+};
+
+bool nearOffset(ScrollOffset value, std::uint64_t raster, double fraction) {
+  return value.raster == raster && std::abs(value.fraction - fraction) < 1e-12;
+}
+
+void smoothWheelAndKeys() {
+  MotionFixture f;
+  f.mouse(MouseAction::SCROLL, MouseButton::WHEEL_DOWN, 0, 0);
+  check(nearOffset(f.values().vertical.offset, 0, 0), "smooth wheel admits a target without an initial jump");
+  f.tick(16);
+  check(nearOffset(f.values().vertical.offset, 0, .4), "ordinary wheel publishes a real fractional controller sample");
+  f.tick(64);
+  check(nearOffset(f.values().vertical.offset, 1, .6),
+        "wheel transition advances through intermediate raster and fraction");
+  f.tick(120);
+  check(nearOffset(f.values().vertical.offset, 3, 0), "wheel transition finishes at its exact target");
+  f.now = 1000;
+  check(take(f.scheduler->dispatch()).timers == 0 && f.errors == 0, "finished smooth input has no idle timer");
+  f.layout({1, 10});
+  take(f.router->setFocus(f.bar));
+  f.key(InputKey::DOWN);
+  f.tick(1060);
+  check(nearOffset(f.values().vertical.offset, 3, .5), "directional key uses the same real fractional transition");
+  f.layout({1, 10});
+  f.key(InputKey::PAGE_DOWN);
+  check(nearOffset(f.values().vertical.offset, 12, .5),
+        "PageDown cancels smooth motion and keeps its immediate contract");
+  f.now = 1200;
+  check(take(f.scheduler->dispatch()).timers == 0, "immediate page command cancels the old transition");
+
+  MotionFixture repeated;
+  repeated.mouse(MouseAction::SCROLL, MouseButton::WHEEL_DOWN, 0, 0);
+  repeated.tick(60);
+  repeated.layout({1, 10});
+  repeated.mouse(MouseAction::SCROLL, MouseButton::WHEEL_DOWN, 0, 0);
+  repeated.tick(120);
+  check(nearOffset(repeated.values().vertical.offset, 3, .75),
+        "repeated wheel adds to destination rather than current sample");
+  repeated.layout({1, 10});
+  repeated.mouse(MouseAction::SCROLL, MouseButton::WHEEL_UP, 0, 0);
+  repeated.tick(240);
+  check(nearOffset(repeated.values().vertical.offset, 3, 0),
+        "opposite wheel subtracts from the accumulated destination");
+
+  MotionFixture delta;
+  take(delta.router->dispatch(MouseInputEvent{0, 0, MouseButton::WHEEL_DOWN, MouseAction::SCROLL, {}, {}, .25}));
+  delta.tick(120);
+  check(nearOffset(delta.values().vertical.offset, 0, .75), "native detent magnitude scales the smooth destination");
+  for (const auto magnitude :
+       {0.0, -1.0, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
+    check(error(delta.router->dispatch(
+                  MouseInputEvent{0, 0, MouseButton::WHEEL_DOWN, MouseAction::SCROLL, {}, {}, magnitude}),
+                TreeError::INVALID_ARGUMENT),
+          "invalid wheel magnitude remains a typed input error");
+  }
+
+  MotionFixture disabled({.smoothDurationMs = 0});
+  disabled.mouse(MouseAction::SCROLL, MouseButton::WHEEL_DOWN, 0, 0);
+  check(nearOffset(disabled.values().vertical.offset, 3, 0) && take(disabled.scheduler->dispatch()).timers == 0,
+        "zero duration preserves immediate scrolling even with fractional glyphs and services");
+}
+
+void smoothProjectionAndCancellation() {
+  TreeFixture f;
+  const auto controller = take(ScrollController::create());
+  const auto row = take(f.tree->emplaceChecked<Row>(f.root));
+  const auto writer = take(f.tree->emplaceChecked<ScrollBar>(row, controller));
+  const auto projection = take(f.tree->emplaceChecked<ScrollBar>(row, controller));
+
+  take(initializeScrollBar(*f.tree, writer));
+  take(initializeScrollBar(*f.tree, projection, false));
+  take(setScrollMetrics(*f.tree, writer, {100, 10}));
+  take(setScrollbarSkin(*f.tree, writer, {.pattern = ScrollbarPattern::FRACTIONAL_BLOCK}));
+  take(setScrollbarSkin(*f.tree, projection, {.pattern = ScrollbarPattern::FRACTIONAL_BLOCK}));
+  auto writing = take(bindScrollBar(*f.router, *f.tree, writer,
+                                    {[&] {
+                                       return f.now;
+                                     },
+                                     [](TreeError) {
+                                     }}));
+  auto projected = take(bindScrollBar(*f.router, *f.tree, projection,
+                                      {[&] {
+                                         return f.now;
+                                       },
+                                       [](TreeError) {
+                                       }},
+                                      false));
+  f.layout({2, 10});
+  const auto send = [&](Node<ScrollBar> node) {
+    std::expected<EventReply, TreeError> reply;
+    take(f.tree->edit(node, [&](ScrollBar &widget) {
+      reply = detail::scrollInput(*f.router, *f.tree, node, detail::ScrollWidgetAccess::state(widget),
+                                  MouseInputEvent{0, 0, MouseButton::WHEEL_DOWN, MouseAction::SCROLL, {}});
+    }));
+    take(reply);
+  };
+  const auto values = [&] {
+    return take(controller->snapshot());
+  };
+  const auto tick = [&](SchedulerTime now) {
+    f.now = now;
+    take(f.scheduler->dispatch());
+  };
+
+  send(writer);
+  send(projection);
+  tick(60);
+  check(nearOffset(values().vertical.offset, 3, 0),
+        "a second projection retargets the same pending controller destination");
+  tick(120);
+  check(nearOffset(values().vertical.offset, 6, 0), "shared projections have one exact transition endpoint");
+  send(projection);
+  take(setScrollOffset(*f.tree, writer, ScrollAxis::VERTICAL, {6, 0}));
+  f.now = 300;
+  check(take(f.scheduler->dispatch()).timers == 0 && nearOffset(values().vertical.offset, 6, 0),
+        "successful same-value command through another projection cancels a pending transition");
+
+  take(setScrollOffset(*f.tree, writer, ScrollAxis::VERTICAL, {}));
+  f.layout({2, 10});
+
+  StyleEngine engine(*f.tree);
+
+  take(engine.bind(writer, {"ScrollBar", "motion-writer", {}, true}));
+
+  const auto wheel = [&](Node<ScrollBar> node) {
+    const auto origin = take(f.tree->inspect(node)).geometry.surface.origin();
+
+    take(f.router->dispatch(MouseInputEvent{origin.x, origin.y, MouseButton::WHEEL_DOWN, MouseAction::SCROLL, {}}));
+  };
+
+  wheel(writer);
+  take(engine.replace(take(parsePss("*{scrollbar-thumb-pattern:block;}"))));
+  take(f.tree->read(writer, [&](const ScrollBar &widget) {
+    check(!detail::fractionalScrollbar(detail::ScrollWidgetAccess::state(widget)),
+          "public style publication replaces the original motion owner's effective fractional profile");
+  }));
+  wheel(projection);
+  tick(420);
+  check(nearOffset(values().vertical.offset, 3, 0),
+        "projection input does not inherit a target from an owner whose effective profile changed before sync");
+
+  for (int mode = 0; mode < 6; ++mode) {
+    MotionFixture cancelled;
+    cancelled.mouse(MouseAction::SCROLL, MouseButton::WHEEL_DOWN, 0, 0);
+    if (mode == 0)
+      take(cancelled.tree->setVisible(cancelled.bar, false));
+    if (mode == 1)
+      take(cancelled.tree->setEnabled(cancelled.bar, false));
+    if (mode == 2)
+      cancelled.binding.disconnect();
+    if (mode == 3)
+      take(cancelled.tree->remove(cancelled.bar));
+    if (mode == 4)
+      take(setScrollMetrics(*cancelled.tree, cancelled.bar, {80, 10}));
+    if (mode == 5)
+      cancelled.layout({1, 8});
+    cancelled.tick(120);
+    check(nearOffset(cancelled.values().vertical.offset, 0, 0) && cancelled.errors == 0,
+          "ineligible owner, changed metrics or changed track cancels without stale publication");
+    cancelled.now = 1000;
+    check(take(cancelled.scheduler->dispatch()).timers == 0, "cancelled motion never rearms");
+  }
+}
+
+void smoothDragAndExactOffsets() {
+  MotionFixture leading;
+
+  take(setScrollMetrics(*leading.tree, leading.bar, {17, 8}));
+  take(setScrollOffset(*leading.tree, leading.bar, ScrollAxis::VERTICAL, {1, 0}));
+  leading.layout({1, 6});
+  take(leading.router->setPointerCaptureCapabilities({true, true, true}));
+  leading.mouse(MouseAction::PRESS, MouseButton::LEFT, 0, 0);
+  leading.mouse(MouseAction::MOVE, MouseButton::LEFT, 0, 0);
+  leading.mouse(MouseAction::MOVE, MouseButton::LEFT, 0, 1);
+  leading.mouse(MouseAction::RELEASE, MouseButton::LEFT, 0, 1);
+  leading.tick(60);
+  check(nearOffset(leading.values().vertical.offset, 2, 5.0 / 13),
+        "leading partial cell grab keeps its signed displacement and positive intermediate target");
+  leading.tick(120);
+  check(nearOffset(leading.values().vertical.offset, 3, 10.0 / 13),
+        "leading partial cell drag preserves the logical press anchor instead of wrapping to zero");
+
+  MotionFixture f;
+  take(setScrollMetrics(*f.tree, f.bar, {17, 8}));
+  f.layout({1, 6});
+  take(f.router->setPointerCaptureCapabilities({true, true, true}));
+  f.mouse(MouseAction::PRESS, MouseButton::LEFT, 0, 0);
+  f.mouse(MouseAction::MOVE, MouseButton::LEFT, 0, 0);
+  f.mouse(MouseAction::RELEASE, MouseButton::LEFT, 0, 0);
+  check(nearOffset(f.values().vertical.offset, 0, 0) && take(f.scheduler->dispatch()).timers == 0,
+        "stationary press and release neither jump nor schedule animation");
+  f.mouse(MouseAction::PRESS, MouseButton::LEFT, 0, 0);
+  f.mouse(MouseAction::MOVE, MouseButton::LEFT, 0, 1);
+  f.mouse(MouseAction::RELEASE, MouseButton::LEFT, 0, 1);
+  f.tick(60);
+  check(nearOffset(f.values().vertical.offset, 1, 5.0 / 13),
+        "ordinary cell drag interpolates using actual fractional thumb travel (26 eighths)");
+  f.tick(120);
+  check(nearOffset(f.values().vertical.offset, 2, 10.0 / 13),
+        "released drag finishes smoothly at its exact mapped target");
+  f.layout({1, 6});
+  f.mouse(MouseAction::SCROLL, MouseButton::WHEEL_DOWN, 0, 1);
+  f.tick(180);
+  f.layout({1, 6});
+  const auto pressOffset = f.values().vertical.offset;
+  const auto thumb = take(scrollFractionalThumb({17, 8}, pressOffset, 6));
+  const auto point = static_cast<int>(thumb.startEighths / 8);
+  f.mouse(MouseAction::PRESS, MouseButton::LEFT, 0, point);
+  f.mouse(MouseAction::RELEASE, MouseButton::LEFT, 0, point);
+  f.now = 400;
+  check(take(f.scheduler->dispatch()).timers == 0 &&
+          nearOffset(f.values().vertical.offset, pressOffset.raster, pressOffset.fraction),
+        "press during a transition anchors the actual sample without settling to the old destination");
+
+  MotionFixture exact;
+  const auto maximum = std::numeric_limits<std::uint64_t>::max();
+  take(setScrollMetrics(*exact.tree, exact.bar, {maximum, 1}));
+  take(setScrollOffset(*exact.tree, exact.bar, ScrollAxis::VERTICAL, {maximum - 10, .25}));
+  exact.layout({1, 10});
+  exact.mouse(MouseAction::SCROLL, MouseButton::WHEEL_DOWN, 0, 0);
+  exact.tick(60);
+  check(nearOffset(exact.values().vertical.offset, maximum - 9, .75),
+        "small motion near UINT64_MAX preserves exact raster bits");
+  exact.tick(120);
+  check(nearOffset(exact.values().vertical.offset, maximum - 7, .25), "large absolute offset has an exact endpoint");
+  take(setScrollOffset(*exact.tree, exact.bar, ScrollAxis::VERTICAL, {1, .75}));
+  std::expected<EventReply, TreeError> admitted;
+  take(exact.tree->edit(exact.bar, [&](ScrollBar &widget) {
+    auto &state = detail::ScrollWidgetAccess::state(widget);
+    auto plan = take(detail::ScrollControllerAccess::stage(*state.lease));
+    take(detail::ScrollControllerAccess::offset(plan, ScrollAxis::VERTICAL, {maximum - 1, 0}));
+    admitted = detail::publishScrollInput(*exact.tree, exact.bar, state, std::move(plan), true);
+  }));
+  take(admitted);
+  exact.tick(180);
+  check(nearOffset(exact.values().vertical.offset, (std::uint64_t{1} << 63) - 1, .875),
+        "large unsigned distance interpolation avoids double raster conversion");
+
+  MotionFixture carries;
+  take(setScrollOffset(*carries.tree, carries.bar, ScrollAxis::VERTICAL, {0, .9}));
+  take(carries.tree->edit(carries.bar, [&](ScrollBar &widget) {
+    auto &state = detail::ScrollWidgetAccess::state(widget);
+    auto plan = take(detail::ScrollControllerAccess::stage(*state.lease));
+
+    take(detail::ScrollControllerAccess::offset(plan, ScrollAxis::VERTICAL, {8, .8}));
+    admitted = detail::publishScrollInput(*carries.tree, carries.bar, state, std::move(plan), true);
+  }));
+  take(admitted);
+  carries.tick(108);
+  check(nearOffset(carries.values().vertical.offset, 8, .01),
+        "normalized fractional borrowing carries two units when 0.9 to 8.8 reaches ninety percent");
+  carries.tick(120);
+  check(nearOffset(carries.values().vertical.offset, 8, .8), "fractional carry case finishes at the original target");
+}
+
+void smoothAdmissionFailures() {
+  MotionFixture f;
+  f.clockHook = [&] {
+    take(setScrollOffset(*f.tree, f.bar, ScrollAxis::VERTICAL, {}));
+  };
+  check(error(f.router->dispatch(MouseInputEvent{0, 0, MouseButton::WHEEL_DOWN, MouseAction::SCROLL, {}}),
+              TreeError::WOULD_BLOCK),
+        "same-value clock reentry invalidates an outer pending motion admission");
+  f.clockHook = {};
+  f.now = 120;
+  check(take(f.scheduler->dispatch()).timers == 0 && nearOffset(f.values().vertical.offset, 0, 0),
+        "no-op competing command leaves no stale outer transition");
+  f.mouse(MouseAction::SCROLL, MouseButton::WHEEL_DOWN, 0, 0);
+  allocation_test::fail = true;
+  const auto rejected = f.router->dispatch(MouseInputEvent{0, 0, MouseButton::WHEEL_DOWN, MouseAction::SCROLL, {}});
+  allocation_test::fail = false;
+  check(error(rejected, TreeError::NO_MEMORY), "failed retarget allocation reports typed NO_MEMORY");
+  f.tick(240);
+  check(nearOffset(f.values().vertical.offset, 3, 0), "failed retarget preserves the previous admitted motion");
+
+  MotionFixture throwing;
+  throwing.mouse(MouseAction::SCROLL, MouseButton::WHEEL_DOWN, 0, 0);
+  throwing.clockHook = [] {
+    throw 1;
+  };
+  throwing.errorHook = [&] {
+    take(throwing.tree->remove(throwing.bar));
+  };
+  throwing.tick(16);
+  check(throwing.failure == TreeError::CALLBACK_FAILED && throwing.errors == 1,
+        "asynchronous clock failure is typed and may destroy its own widget in onError");
+  throwing.now = 1000;
+  check(take(throwing.scheduler->dispatch()).timers == 0, "failed asynchronous motion cancels before onError");
+
+  MotionFixture overflow;
+  overflow.now = std::numeric_limits<SchedulerTime>::max() - 10;
+  check(error(overflow.router->dispatch(MouseInputEvent{0, 0, MouseButton::WHEEL_DOWN, MouseAction::SCROLL, {}}),
+              TreeError::INVALID_ARGUMENT),
+        "motion deadline overflow is rejected without wrapping");
+  take(overflow.tree->edit(overflow.bar, [](ScrollBar &widget) {
+    detail::ScrollWidgetAccess::state(widget).lease->session->motionCommand = std::numeric_limits<std::uint64_t>::max();
+  }));
+  check(error(setScrollOffset(*overflow.tree, overflow.bar, ScrollAxis::VERTICAL, {}), TreeError::IDENTITY_EXHAUSTED),
+        "competing command serial exhaustion stays typed and never wraps");
+}
 
 void fractionalScrollbarPaint() {
   for (const auto axis : {ScrollAxis::HORIZONTAL, ScrollAxis::VERTICAL}) {
@@ -2335,6 +2677,10 @@ void glyphProfileTransactions() {
 } // namespace
 
 int main() {
+  smoothWheelAndKeys();
+  smoothProjectionAndCancellation();
+  smoothDragAndExactOffsets();
+  smoothAdmissionFailures();
   fractionalScrollbarPaint();
   fractionalScrollbarStylesAndDrag();
   fractionalProjectionAndPlacement();

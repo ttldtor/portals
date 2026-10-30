@@ -22,11 +22,30 @@ The [guide examples](examples.md) describe the standalone CMake build. Its
 
 ## Fractional thumb edges {#fractional-scrollbar-thumb}
 
-Use `.scrollbar("fractional-block")` to move the thumb edges in eighths of a
-terminal cell. Arrow keys and ordinary wheel input already produce intermediate
-positions when the content range does not divide the track evenly. The text
-continues to move by whole cells. No animation timer or precise-pointer backend
-is required.
+Use `.scrollbar("fractional-block")` for a thumb whose position and proportional
+length are calculated in eighths of a terminal cell. In a managed scene, the
+wheel, directional arrow keys and thumb dragging move through intermediate
+controller positions over 120 ms. All views sharing that controller observe the
+same position. Ordinary text continues to move on the cell grid.
+
+The transition uses the scene's existing scheduler and stops scheduling when the
+target is reached. A new wheel event accumulates the requested destination;
+releasing a dragged thumb lets the last transition finish. Page/Home/End commands
+and functional arrow buttons retain immediate movement. Programmatic position
+commands cancel an older transition, including a successful same-value command.
+Hidden, disabled, disconnected and read-only controls do not continue animating.
+
+The wheel distance remains three logical rows per ordinary detent by default.
+Windows native input preserves fractional and multiple-detent magnitudes; cell
+mouse reporting still has cell-sized drag coordinates. Smooth transitions fill
+in the positions between those coarse input events.
+
+Set `ScrollAreaOptions::smoothDurationMs` or `ScrollBarOptions::smoothDurationMs`
+to another duration; zero disables transitions. For example, pass
+`{.smoothDurationMs = 0}` as the existing options argument to `ui::scrollArea`.
+Integral/ASCII profiles and low-level bindings without clock services retain
+immediate movement. The low-level services are described by
+`ScrollRepeatServices`, shared by held-arrow repeats and fractional motion.
 
 The complete example has overflowing content on both axes. Run the
 `portals_docs_fractional_scroll` target from the main build, or build
@@ -37,12 +56,16 @@ Use the arrows or wheel; F10 and Exit close the application.
 
 ![Fractional thumb edges moving on both axes](images/fractional-scrollbar.gif)
 
+The recording uses native Windows wheel events, including fractional detents,
+and thumb dragging on both axes. It retains captured terminal frames at 50 fps;
+no intermediate images are synthesized.
+
 The profile uses a blank track and prepared Unicode block glyphs. It fills only
 missing local foreground/background colors; theme colors and explicit part and
 segment colors keep their normal priority. No stylesheet is needed for this
-example. The integer thumb length remains proportional to the viewport and is
-at least one cell; the fractional placement can cover an extra cell at an edge.
-Partially covered cells participate in dragging.
+example. The thumb length is proportional to the viewport, quantized directly
+to eighths and clamped to the existing minimum of one cell. A partial edge can
+occupy an additional cell. Partially covered cells participate in dragging.
 
 For PSS, use `scrollbar-track-pattern: minimal` together with
 `scrollbar-thumb-pattern: fractional-block`. Typed styles use
@@ -58,6 +81,26 @@ Painting reuses the prepared glyphs and reads the current owning controller
 presentation, including when several controls share a controller. This profile
 adds no continuous redraw or inertia. Font rasterization still depends on the
 terminal and font.
+
+### Choose a font for fractional blocks
+
+The portable profile uses the standard Block Elements U+2581–U+258F. Lower and
+left blocks, combined with foreground/background colors, also represent upper
+and right fractions. A Nerd Font is not required. The terminal's selected font
+must contain these glyphs and render them at one cell each; Unicode width checks
+alone cannot detect a missing font glyph.
+
+The native recording uses Cascadia Mono. The inspected local Cascadia Mono and
+DejaVu Sans Mono fonts contain all fifteen block elements; the inspected Consolas
+font lacks twelve of them and needs font fallback. Coverage depends on the font
+version and does not guarantee how a particular terminal chooses its fallback.
+
+The reference [tui-scrollbar](https://docs.rs/tui-scrollbar/0.2.7/tui_scrollbar/)
+uses additional upper/right blocks U+1FB82–U+1FB8B from
+[Symbols for Legacy Computing](https://www.unicode.org/charts/PDF/U1FB00.pdf)
+in its default glyph set. Those shapes require separate font coverage. The
+inspected 3270 Nerd Font Mono contains them; the Nerd Font label alone is not a
+coverage guarantee. Portals' portable fractional profile does not require them.
 
 ## Precise pointer scrolling {#precise-pointer-scrolling}
 

@@ -8,6 +8,7 @@
 
 namespace portals::detail {
 struct ScrollGeometryWriter {};
+struct ScrollMotion;
 
 // Association owns values only. Each mounted projection pins it; the controller observes it weakly.
 struct ScrollMountSession {
@@ -16,6 +17,8 @@ struct ScrollMountSession {
 
   std::uint64_t session;
   std::weak_ptr<ScrollGeometryWriter> writer;
+  std::weak_ptr<ScrollMotion> motion;
+  std::uint64_t motionCommand{};
 };
 
 // Internal mount owner. Move-only, no callbacks on release, and no borrowed control/tree addresses.

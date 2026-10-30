@@ -1487,9 +1487,57 @@ void managedFunctionalArrowLifetime() {
   check(take(app->scheduler().dispatch()).timers == 0, "scene close cancels node-scoped held arrow callback");
 }
 
+void managedSmoothInputServices() {
+  SchedulerTime now{};
+  auto app = take(Application::create({}, {[](void *context) noexcept {
+                                             return *static_cast<SchedulerTime *>(context);
+                                           },
+                                           &now}));
+  auto scene = take(ManagedScene::create(*app));
+  ui::Ref<ScrollBar> bar;
+
+  take(ui::mount(*scene, ui::scrollBar(ScrollAxis::VERTICAL).reference(bar).width(1).height(10)));
+  take(bar.setMetrics({100, 10}));
+  take(scene->prepare(*app, {1, 10}));
+  take(app->tree().read(bar.node(), [&](const ScrollBar &widget) {
+    check(!detail::ScrollWidgetAccess::state(widget).repeat,
+          "legacy managed scrollbar does not allocate optional input services");
+  }));
+  take(setScrollbarSkin(app->tree(), bar.node(), {.pattern = ScrollbarPattern::FRACTIONAL_BLOCK}));
+  take(scene->prepare(*app, {1, 10}));
+
+  const auto bounds = take(CellRect::from({}, {1, 10}));
+
+  take(app->tree().frame([&] {
+    take(layoutTree(app->tree(), app->root(), bounds, bounds));
+  }));
+  take(app->tree().read(bar.node(), [&](const ScrollBar &widget) {
+    check(static_cast<bool>(detail::ScrollWidgetAccess::state(widget).repeat),
+          "later fractional style prepares managed clock services through existing sync");
+  }));
+
+  std::shared_ptr<ScrollController> controller;
+
+  take(app->tree().read(bar.node(), [&](const ScrollBar &widget) {
+    controller = detail::ScrollWidgetAccess::state(widget).controller;
+  }));
+  take(app->router().dispatch(MouseInputEvent{0, 0, MouseButton::WHEEL_DOWN, MouseAction::SCROLL, {}}));
+  now = 60;
+  take(app->scheduler().dispatch());
+
+  const auto offset = take(controller->snapshot()).vertical.offset;
+
+  check(offset.raster == 1 && offset.fraction == .5,
+        "managed ordinary wheel receives actual intermediate controller positions automatically");
+  take(scene->close());
+  now = 1000;
+  check(take(app->scheduler().dispatch()).timers == 0, "managed scene close cancels optional smooth input callbacks");
+}
+
 } // namespace
 
 int main() {
+  managedSmoothInputServices();
   managedFunctionalArrowLifetime();
   managedArrowHoldNegotiation();
   allocatorNothrowRoundtrip();

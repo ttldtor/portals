@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <limits>
 #include <utility>
 
@@ -305,6 +306,7 @@ struct TerminalSession::Impl {
                        ? (delta > 0 ? MouseButton::WHEEL_RIGHT : MouseButton::WHEEL_LEFT)
                        : (delta > 0 ? MouseButton::WHEEL_UP : MouseButton::WHEEL_DOWN);
       event.action = MouseAction::SCROLL;
+      event.wheelDelta = std::abs(static_cast<double>(delta)) / WHEEL_DELTA;
       mouse_pending[mouse_count++] = event;
     } else {
       constexpr std::array<DWORD, 3> BITS{FROM_LEFT_1ST_BUTTON_PRESSED, FROM_LEFT_2ND_BUTTON_PRESSED,

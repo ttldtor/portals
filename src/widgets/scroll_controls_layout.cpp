@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include "scroll_controls_state.hpp"
+#include "scroll_motion.hpp"
 
 #include <limits>
 
@@ -68,6 +69,7 @@ std::expected<void, TreeError> arrangeScroll(ScrollWidgetState &state, CellSize 
                          state.geometry.vertical.length != geometry.vertical.length)) {
     detail::cancelScrollDrag(state);
     cancelScrollRepeat(state);
+    cancelOwnedScrollMotion(state);
   }
   state.allocation = allocation;
   state.geometry = geometry;

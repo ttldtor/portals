@@ -10,9 +10,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
 - Add opt-in fractional scrollbar thumbs with prepared one-eighth-cell block
   edges on both axes, exact large-range geometry and anchored dragging. Fluent,
   PSS and loaded-scene forms share the profile; theme/part colors keep priority.
-  Fraction-only changes repaint shared controller projections without layout or
-  a timer. Ordinary text and the default scrollbar remain on the cell grid.
-  Include a complete declarative example and a terminal recording.
+  Fraction-only changes repaint shared controller projections without layout.
+  Proportional length and travel are calculated directly in eighths. Managed
+  scenes use bounded 120 ms transitions for wheel input, directional keys and
+  dragging through the existing scheduler; zero duration disables motion and
+  integral/ASCII profiles retain immediate behavior. Ordinary text stays on the
+  cell grid. Include a complete declarative example and a terminal recording.
 
 - Add optional precise POSIX thumb dragging with owning pixel/context metadata,
   bounded 1016/2048 negotiation and serialized runtime cell fallback. AUTO preserves
@@ -21,6 +24,13 @@ planned work is not included. An **Unreleased** heading has no publication date.
   remains pending. A complete Lyra example supports `--help` and `--fifo-host`.
 
 ### Changed
+
+- Preserve normalized native Windows wheel magnitudes, including fractional and
+  multiple detents, in trailing `MouseInputEvent::wheelDelta` (default 1 for
+  existing aggregate prefixes and discrete terminal reports). Scroll controls
+  scale the configured distance by this magnitude. Mouse event and scroll option
+  layouts change; consumers must rebuild, and structured bindings must account
+  for the additional fields.
 
 - Add ordered owning CSI 48 and DECRPM results through `InputStep::protocol` and
   `InputStatus::PROTOCOL`, independent of single-use input probes. Existing mouse
