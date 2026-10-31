@@ -13,8 +13,8 @@ test('gallery has an in-terminal header, actions, inline editor and explicit bla
   const rows = page.locator('.xterm-rows > div');
   await expect(rows.nth(10)).toContainText('(S)omething');
   expect((await rows.allTextContents()).slice(0, 11).map(text => text.trimEnd())).toEqual([
-    ' Portals gallery', '=================', '[ Theme |   F2  ]', '[ Quit  |   F10 ]', '',
-    'Name : Portals', '[ ] Alerts', '', '[ Run something ]', '', '   (S)omething'
+    ' Portals gallery', '=================', '[                                        Theme |   F2                                          ]', '[                                        Quit  |   F10                                         ]', '',
+    'Name : Portals', '[ ] Alerts', '', '[                                        Run something                                         ]', '', '   (S)omething'
   ]);
   await expect(page.locator('#theme-toggle, #action-result')).toHaveCount(0);
   const header = rows.nth(0).locator('span').filter({ hasText: 'Portals gallery' });
