@@ -157,9 +157,8 @@ struct PssCountSink {
    * @return Admission result counting every occurrence.
    */
   constexpr std::expected<void, PssError> declaration(PssProperty property, PssValue value, PssLocation location) {
-    if (portals::detail::pssGlyphProperty(property)) {
-      return std::unexpected(
-        pssError(PssErrorCode::INVALID_VALUE, location, "Literal scrollbar glyphs require runtime PSS"));
+    if (static_cast<std::size_t>(property) >= PSS_SCALAR_PROPERTY_COUNT) {
+      return std::unexpected(pssError(PssErrorCode::INVALID_VALUE, location, "Property requires runtime PSS"));
     }
 
     (void)property;
@@ -400,9 +399,8 @@ public:
    * @return Occurrence admission and last-winner scalar storage result.
    */
   constexpr std::expected<void, PssError> declaration(PssProperty property, PssValue value, PssLocation location) {
-    if (portals::detail::pssGlyphProperty(property)) {
-      return std::unexpected(
-        pssError(PssErrorCode::INVALID_VALUE, location, "Literal scrollbar glyphs require runtime PSS"));
+    if (static_cast<std::size_t>(property) >= PSS_SCALAR_PROPERTY_COUNT) {
+      return std::unexpected(pssError(PssErrorCode::INVALID_VALUE, location, "Property requires runtime PSS"));
     }
 
     if (sheet_.declarationCount_ == D) {

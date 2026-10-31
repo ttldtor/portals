@@ -144,6 +144,7 @@ std::expected<void, PssError> validateStyleDocument(const PssDocument &document)
     const auto &rule = document.sheet.rules[ruleIndex];
     std::array<std::size_t, PSS_PROPERTY_COUNT> last;
     StyleDeclarations effective;
+    std::optional<StyleSizing> sizing;
     detail::ScrollbarGlyphRefs glyphs;
 
     last.fill(NO_PSS_DECLARATION);
@@ -196,15 +197,18 @@ std::expected<void, PssError> validateStyleDocument(const PssDocument &document)
                          declaration.property == PssProperty::SCROLLBAR_ARROWS_BACKGROUND ||
                          declaration.property == PssProperty::SCROLLBAR_CORNER_FOREGROUND ||
                          declaration.property == PssProperty::SCROLLBAR_CORNER_BACKGROUND;
-      const bool width = declaration.property == PssProperty::MIN_WIDTH;
+      const bool axis = declaration.property == PssProperty::WIDTH || declaration.property == PssProperty::HEIGHT;
+      const bool width =
+        declaration.property == PssProperty::MIN_WIDTH || declaration.property == PssProperty::MAX_WIDTH ||
+        declaration.property == PssProperty::MIN_HEIGHT || declaration.property == PssProperty::MAX_HEIGHT;
       const bool pattern = declaration.property == PssProperty::SCROLLBAR_TRACK_PATTERN ||
                            declaration.property == PssProperty::SCROLLBAR_THUMB_PATTERN ||
                            declaration.property == PssProperty::SCROLLBAR_ARROW_PATTERN ||
                            declaration.property == PssProperty::GLYPH_PROFILE ||
                            declaration.property == PssProperty::GLYPH_FALLBACK;
 
-      if ((!color && value.color != RgbColor{}) || ((color || width || pattern || glyph) && value.boolean) ||
-          (!width && value.width != 0) || (!pattern && value.pattern != 0) ||
+      if ((!color && value.color != RgbColor{}) || ((color || width || pattern || glyph || axis) && value.boolean) ||
+          (!width && !axis && value.width != 0) || (!pattern && !axis && value.pattern != 0) ||
           (pattern &&
            (value.pattern < 0 || value.pattern > (declaration.property == PssProperty::GLYPH_PROFILE
                                                     ? static_cast<std::int32_t>(GlyphProfile::NF_BACKSLASH)
@@ -223,12 +227,47 @@ std::expected<void, PssError> validateStyleDocument(const PssDocument &document)
           detail::pssError(PssErrorCode::INVALID_WIDTH, declaration.location, "Invalid PSS declaration minimum width"));
       }
 
+      if (axis) {
+        const auto canonicalAxis = [](PssScalarValue scalar) {
+          switch (static_cast<StyleSizeMode>(scalar.pattern)) {
+          case StyleSizeMode::FIXED:
+            return scalar.width >= 0;
+          case StyleSizeMode::FLEX:
+            return std::bit_cast<std::uint32_t>(scalar.width) > 0;
+          case StyleSizeMode::AUTOMATIC:
+          case StyleSizeMode::CONTENT:
+            return scalar.width == 0;
+          }
+
+          return false;
+        };
+
+        if (!canonicalAxis(value) || rule.selector.state != StyleState::ANY) {
+          return invalid(declaration.location, "Invalid state-independent PSS axis request");
+        }
+      }
+
       last[property] = index;
-      detail::assignPssDeclaration(declaration.property, value, effective);
+      if (declaration.property >= PssProperty::WIDTH) {
+        if (!sizing) {
+          sizing.emplace();
+        }
+
+        detail::assignPssSizing(declaration.property, value, *sizing);
+      } else {
+        detail::assignPssDeclaration(declaration.property, value, effective);
+      }
     }
 
     if (last != origin.effectiveDeclaration || effective != rule.declarations) {
       return invalid(origin.selector, "PSS last-wins provenance disagrees with final declarations");
+    }
+    if (sizing.has_value() != bool(rule.sizing) || (sizing && *sizing != *rule.sizing)) {
+      return invalid(origin.selector, "PSS sizing provenance disagrees with final declarations");
+    }
+    if (rule.sizing && !charge(sizeof(StyleSizing))) {
+      return std::unexpected(detail::pssError(PssErrorCode::DOCUMENT_LIMIT, origin.selector,
+                                              "PSS sizing declarations exceed document budget"));
     }
     const detail::ScrollbarGlyphRefs empty{};
     if (!detail::equalScrollbarGlyphs(glyphs, rule.scrollbarGlyphs ? *rule.scrollbarGlyphs : empty)) {

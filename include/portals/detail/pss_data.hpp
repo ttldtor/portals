@@ -103,10 +103,15 @@ enum class PssProperty {
   SCROLLBAR_VERTICAL_THUMB_END_GLYPH,      ///< Owning runtime literal glyph.
   SCROLLBAR_VERTICAL_THUMB_SINGLE_GLYPH,   ///< Owning runtime literal glyph.
   SCROLLBAR_CORNER_GLYPH,                  ///< Owning runtime literal glyph.
+  WIDTH,                                   ///< Runtime state-independent horizontal mode or exact extent.
+  HEIGHT,                                  ///< Runtime state-independent vertical mode or exact extent.
+  MAX_WIDTH,                               ///< Runtime state-independent hard column cap.
+  MIN_HEIGHT,                              ///< Runtime state-independent hard row minimum.
+  MAX_HEIGHT,                              ///< Runtime state-independent hard row cap.
 };
 
 /** @brief Number of supported PSS v0 properties. */
-inline constexpr std::size_t PSS_PROPERTY_COUNT = 92;
+inline constexpr std::size_t PSS_PROPERTY_COUNT = 97;
 /** @brief Scalar-only prefix retained by compile-time PSS descriptors. */
 inline constexpr std::size_t PSS_SCALAR_PROPERTY_COUNT = 71;
 /** @brief Marker for an absent effective declaration occurrence. */
@@ -165,8 +170,8 @@ struct PssLocation {
 struct PssScalarValue {
   RgbColor color;         ///< FOREGROUND or BACKGROUND RGB; otherwise zero.
   bool boolean{};         ///< BOLD, ITALIC, or UNDERLINE flag, including explicit false.
-  std::int32_t width{};   ///< MIN_WIDTH nonnegative cell minimum; otherwise zero.
-  std::int32_t pattern{}; ///< Glyph map, fallback or scrollbar preset ordinal; otherwise zero.
+  std::int32_t width{};   ///< Cell bound/extent, or bit-preserved unsigned weight for a FLEX axis.
+  std::int32_t pattern{}; ///< Property-tagged glyph/preset ordinal or StyleSizeMode; otherwise zero.
 
   /** @param other Scalar payload to compare.
    * @return Whether all fixed scalar fields agree.

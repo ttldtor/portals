@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #include <portals/controls.hpp>
 
+#include <algorithm>
 #include <array>
 #include <limits>
 
@@ -62,6 +63,10 @@ std::expected<CellSize, TreeError> Button::measure(CellSize available) {
   return Control::measure(available);
 }
 
+std::expected<void, TreeError> Button::paint(PaintContext &context) {
+  return paintCaption(context, chrome_ == ButtonChrome::BRACKETS);
+}
+
 CheckBox::CheckBox(GraphemeText text, ControlStyle style, SizePolicy policy)
     : Control(std::move(text), "[ ] ", "", style, policy) {
 }
@@ -89,6 +94,10 @@ std::expected<void, TreeError> Control::arrange(CellRect local) {
 }
 
 std::expected<void, TreeError> Control::paint(PaintContext &context) {
+  return paintCaption(context, false);
+}
+
+std::expected<void, TreeError> Control::paintCaption(PaintContext &context, bool stretchChrome) {
   const auto width = measure({});
 
   if (!width) {
@@ -98,6 +107,32 @@ std::expected<void, TreeError> Control::paint(PaintContext &context) {
   // Paint uses only synchronized presentation. The frame owner transforms these local
   // commands and renders their borrowed text before releasing the enclosing tree frame.
   const auto &prefix = mixed_ && mixed_prefix_ ? *mixed_prefix_ : checked_ ? checked_prefix_ : prefix_;
+  auto prefixClip = bounds_;
+  auto captionClip = bounds_;
+  auto suffixClip = bounds_;
+  auto captionX = prefix.measure();
+  auto suffixX = width->width - suffix_.measure();
+
+  if (stretchChrome) {
+    const auto allocatedWidth = bounds_.size().width;
+    const auto prefixWidth = std::min(prefix.measure(), allocatedWidth > 1 ? allocatedWidth - 1 : allocatedWidth);
+    const auto suffixWidth = std::min(suffix_.measure(), allocatedWidth - prefixWidth);
+    const auto captionWidth = allocatedWidth - prefixWidth - suffixWidth;
+    const auto leading = CellRect::from({}, {prefixWidth, bounds_.size().height});
+    const auto interior = CellRect::from({prefixWidth, 0}, {captionWidth, bounds_.size().height});
+    const auto trailing = CellRect::from({allocatedWidth - suffixWidth, 0}, {suffixWidth, bounds_.size().height});
+
+    if (!leading || !interior || !trailing) {
+      return std::unexpected(TreeError::INVALID_GEOMETRY);
+    }
+
+    prefixClip = *leading;
+    captionClip = *interior;
+    suffixClip = *trailing;
+    captionX = prefixWidth + std::max(0, (captionWidth - text_.measure()) / 2);
+    suffixX = std::max(0, allocatedWidth - suffix_.measure());
+  }
+
   std::optional<ComputedStyle> manualStyle;
   if (!computedStyle()) {
     manualStyle.emplace(Control::styleDefaults());
@@ -106,9 +141,8 @@ std::expected<void, TreeError> Control::paint(PaintContext &context) {
     computedStyle() ? detail::ComputedStyleView(*computedStyle()) : detail::ComputedStyleView(*manualStyle);
   const auto style = !enabled_ ? resolved.disabled : focused_ ? resolved.focused : resolved.normal;
   const std::array<RenderCommand, 4> commands{
-    FillCommand{bounds_, bounds_, style}, TextCommand{{}, prefix, bounds_, style},
-    TextCommand{{prefix.measure(), 0}, text_, bounds_, style},
-    TextCommand{{width->width - suffix_.measure(), 0}, suffix_, bounds_, style}};
+    FillCommand{bounds_, bounds_, style}, TextCommand{{}, prefix, prefixClip, style},
+    TextCommand{{captionX, 0}, text_, captionClip, style}, TextCommand{{suffixX, 0}, suffix_, suffixClip, style}};
 
   return context.submit(commands);
 }

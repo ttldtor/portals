@@ -250,6 +250,7 @@ ComputedStyle resolveRules(const Visit &visit, const StyleTarget &target, Comput
   bool glyphDeclarations{};
   const bool preserveSegments = defaults.scrollbarThumbSegments.has_value();
   std::optional<CascadeRank> rank;
+  std::array<std::optional<CascadeRank>, 5> sizingRanks;
   visit([&](const StyleRule &rule, auto &&makeRank) {
     const auto &values = rule.declarations;
 
@@ -274,13 +275,33 @@ ComputedStyle resolveRules(const Visit &visit, const StyleTarget &target, Comput
         hasPaintDeclarations(values.scrollbarThumbEnd) || hasPaintDeclarations(values.scrollbarThumbSingle)) &&
        matches(rule.selector, target, rule.selector.state));
 
-    if (!rule.declarations.minWidth || !matches(rule.selector, target, StyleState::ANY)) {
+    if ((!values.minWidth && !rule.sizing) || !matches(rule.selector, target, StyleState::ANY)) {
       return;
     }
     const CascadeRank candidate = makeRank();
-    if (!rank || candidate >= *rank) {
+    if (values.minWidth && (!rank || candidate >= *rank)) {
       rank = candidate;
-      defaults.minWidth = *rule.declarations.minWidth;
+      defaults.minWidth = *values.minWidth;
+    }
+
+    const auto applySizing = [&](const auto &value, auto member, std::size_t index) {
+      if (value && (!sizingRanks[index] || candidate >= *sizingRanks[index])) {
+        sizingRanks[index] = candidate;
+
+        if (!defaults.sizing) {
+          defaults.sizing.emplace();
+        }
+
+        (*defaults.sizing).*member = value;
+      }
+    };
+
+    if (rule.sizing) {
+      applySizing(rule.sizing->width, &StyleSizing::width, 0);
+      applySizing(rule.sizing->height, &StyleSizing::height, 1);
+      applySizing(rule.sizing->maxWidth, &StyleSizing::maxWidth, 2);
+      applySizing(rule.sizing->minHeight, &StyleSizing::minHeight, 3);
+      applySizing(rule.sizing->maxHeight, &StyleSizing::maxHeight, 4);
     }
   });
 
@@ -388,8 +409,20 @@ std::expected<void, StyleError> validate(const StyleSheet &sheet) {
       return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Invalid scrollbar pattern"));
     }
 
+    const auto validRequest = [](const std::optional<StyleAxisSize> &request) {
+      return !request || (request->extent >= 0 && request->weight > 0 && request->mode >= StyleSizeMode::AUTOMATIC &&
+                          request->mode <= StyleSizeMode::CONTENT);
+    };
+    const auto validBound = [](std::optional<std::int32_t> value) {
+      return !value || *value >= 0;
+    };
+    const auto &sizing = rule.sizing ? *rule.sizing : StyleSizing{};
+    const bool metrics = d.minWidth || rule.sizing;
+
     if (rule.selector.state < StyleState::ANY || rule.selector.state > StyleState::CARET ||
-        (rule.declarations.minWidth && (*rule.declarations.minWidth < 0 || rule.selector.state != StyleState::ANY))) {
+        (metrics && rule.selector.state != StyleState::ANY) || !validBound(d.minWidth) ||
+        !validBound(sizing.maxWidth) || !validBound(sizing.minHeight) || !validBound(sizing.maxHeight) ||
+        !validRequest(sizing.width) || !validRequest(sizing.height)) {
       return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Invalid state or state-dependent metric"));
     }
   }
@@ -944,6 +977,7 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
 
     for (const auto &rule : value->rules) {
       const auto &d = rule.declarations;
+      const auto &sizing = rule.sizing ? *rule.sizing : StyleSizing{};
       const auto partCount = [](const StylePaintDeclarations &part) {
         return part.foreground.has_value() + part.background.has_value() + part.bold.has_value() +
                part.italic.has_value() + part.underline.has_value();
@@ -954,8 +988,9 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
         partCount(d.scrollbarCorner) + partCount(d.scrollbarThumbStart) + partCount(d.scrollbarThumbBody) +
         partCount(d.scrollbarThumbEnd) + partCount(d.scrollbarThumbSingle) + d.foreground.has_value() +
         d.background.has_value() + d.bold.has_value() + d.italic.has_value() + d.underline.has_value() +
-        d.minWidth.has_value() + d.scrollbarTrackPattern.has_value() + d.scrollbarThumbPattern.has_value() +
-        d.scrollbarArrowPattern.has_value() +
+        d.minWidth.has_value() + sizing.width.has_value() + sizing.height.has_value() + sizing.maxWidth.has_value() +
+        sizing.minHeight.has_value() + sizing.maxHeight.has_value() + d.scrollbarTrackPattern.has_value() +
+        d.scrollbarThumbPattern.has_value() + d.scrollbarArrowPattern.has_value() +
         (rule.scrollbarGlyphs ? std::ranges::count_if(*rule.scrollbarGlyphs,
                                                       [](const auto &leaf) {
                                                         return bool(leaf);
@@ -965,6 +1000,10 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
           !charge(bytes, sizeof(StyleRule), options.maxOwnedBytes) || !chargeString(rule.selector.type) ||
           !chargeString(rule.selector.id)) {
         return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Style declaration/payload budget exhausted"));
+      }
+
+      if (rule.sizing && !charge(bytes, sizeof(StyleSizing), options.maxOwnedBytes)) {
+        return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Style sizing payload budget exhausted"));
       }
 
       if (rule.scrollbarGlyphs) {
@@ -1044,6 +1083,7 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
 
         copied.declarations = rule.declarations;
         copied.scrollbarGlyphs = rule.scrollbarGlyphs;
+        copied.sizing = rule.sizing;
         result.rules.emplace_back();
 
         auto &destination = result.rules.back();
@@ -1054,6 +1094,7 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
         destination.selector.state = copied.selector.state;
         destination.declarations = copied.declarations;
         destination.scrollbarGlyphs = copied.scrollbarGlyphs;
+        destination.sizing = copied.sizing;
       }
     };
 
@@ -1508,18 +1549,22 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
             return;
           }
 
-          const auto policy = detail::effectiveSizePolicy(**widget, next.minWidth);
+          const auto policy =
+            detail::effectiveSizePolicy(**widget, next.minWidth, next.sizing ? &*next.sizing : nullptr);
 
           if (!policy) {
-            result = std::unexpected(
-              error(policy.error(), "Style min-width conflicts with widget SizePolicy bounds (including exact width)"));
+            result =
+              std::unexpected(error(policy.error(), "Style sizing conflicts with widget SizePolicy hard bounds"));
 
             return;
           }
 
           const auto &previous = (*widget)->computedStyle_;
+          const auto *previousSizing = previous ? previous->sizing() : defaults.sizing ? &*defaults.sizing : nullptr;
+          const bool sizingChanged =
+            bool(previousSizing) != next.sizing.has_value() || (previousSizing && *previousSizing != *next.sizing);
 
-          if ((previous ? previous->minWidth : defaults.minWidth) != next.minWidth) {
+          if ((previous ? previous->minWidth : defaults.minWidth) != next.minWidth || sizingChanged) {
             invalidation = Invalidation::LAYOUT;
           } else if (invalidation == Invalidation::NONE && (previous ? *previous != next : defaults != next)) {
             invalidation = Invalidation::PAINT;
@@ -1591,10 +1636,13 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
               if (next.scrollbarThumbSegments) {
                 blocks.thumb = shareStyleBlock(transaction->thumbs, *next.scrollbarThumbSegments);
               }
-              if (next.glyphs != std::array<GlyphAppearance, 6>{} || next.scrollbarGlyphs.has_value()) {
+              if (next.glyphs != std::array<GlyphAppearance, 6>{} || next.scrollbarGlyphs.has_value() || next.sizing) {
                 detail::StyleGlyphBlock block{next.glyphs};
                 if (next.scrollbarGlyphs.has_value()) {
                   block.literals = std::make_shared<const detail::ScrollbarGlyphStates>(*next.scrollbarGlyphs);
+                }
+                if (next.sizing) {
+                  block.sizing = std::make_shared<const StyleSizing>(*next.sizing);
                 }
                 blocks.glyphs = shareStyleBlock(transaction->glyphs, block);
               }

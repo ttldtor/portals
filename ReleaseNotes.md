@@ -7,6 +7,16 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Set exact, automatic, content-preferred and weighted flex sizes through runtime
+  PSS, with independent hard bounds on both axes. Loaded scenes and typed
+  attributes support the corresponding fit/min/max and per-axis flex settings.
+  Conflicting settings are rejected before publication or control construction.
+  Existing C++ sizing methods and compile-time `min-width` remain unchanged;
+  the new PSS sizing declarations are runtime-only.
+  Sizing-only rules retain their owning payload when copied or replaced in
+  style layers. Complete C++ and scene/PSS profile-form examples demonstrate
+  bounded fields, saved values and caption-driven button sizing.
+
 - Support owning runtime PSS glyph strings for horizontal/vertical scrollbar
   tracks, arrows, decorative ends, thumb segments and corners. Literal updates
   follow the existing cascade and prepare before publication; invalid glyphs
@@ -68,6 +78,13 @@ planned work is not included. An **Unreleased** heading has no publication date.
   Existing decorative scrollbar ends and default behavior remain compatible.
 
 ### Fixed
+
+- Keep bracketed button contours on the allocated edges and center captions
+  inside them, including constrained widths. Preferred measurement and
+  caption-only chrome retain their existing contracts.
+
+- Preserve exact legacy `VirtualList` and `VirtualTable` resource schemas
+  when extended sizing attributes are available.
 
 - Reject a known active initial pixel mouse mode on every POSIX startup path
   with mouse reporting enabled, including legacy overloads and precision `OFF`.

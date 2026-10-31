@@ -72,6 +72,32 @@ constexpr char THUMB_SEGMENT_SOURCE[] =
   "thumb-single-italic:false;scrollbar-thumb-single-underline:true;}";
 
 constexpr auto DIRECT = sc::pss("Button { foreground: #ff0000; bold: false; }", "fixture.pss");
+constexpr auto AXIS_SIZING = sc::detail::inspectPss("Probe{width:fit-content;}", "");
+static_assert(!AXIS_SIZING.valid && AXIS_SIZING.error.code == PssErrorCode::INVALID_VALUE);
+static_assert(std::is_nothrow_copy_constructible_v<ComputedStyle>);
+static_assert(std::is_nothrow_copy_assignable_v<ComputedStyle>);
+static_assert(std::is_aggregate_v<ComputedStyle>);
+
+TEST_CASE("PSS sizing accepts exact modes and rejects invalid state or weight") {
+  const auto parsed =
+    parsePss("Probe{width:fit-content;height:flex(4294967295);max-width:12;min-height:2;max-height:8;}");
+
+  REQUIRE(parsed);
+  REQUIRE(parsed->rules.front().sizing);
+  CHECK(parsed->rules.front().sizing->width->mode == StyleSizeMode::CONTENT);
+  CHECK(parsed->rules.front().sizing->height->weight == std::numeric_limits<std::uint32_t>::max());
+  CHECK(parsed->rules.front().sizing->maxWidth == 12);
+  CHECK(parsed->rules.front().sizing->minHeight == 2);
+
+  for (const auto source : {"Probe{width:flex(0);}", "Probe{height:flex(4294967296);}", "Probe{width:flex(-1);}",
+                            "Probe{max-height:-1;}", "Probe:focused{height:auto;}", "Probe{width:2147483648;}"}) {
+    const auto rejected = parsePss(source);
+
+    REQUIRE_FALSE(rejected);
+    CHECK(rejected.error().cause == TreeError::INVALID_ARGUMENT);
+  }
+}
+
 constexpr auto RICH = sc::pss(
   [] {
     return "Button { foreground: #ff0000; bold: false; }"sv;
@@ -118,7 +144,9 @@ static_assert(static_cast<std::size_t>(PssProperty::FRAME_ENDS_UNDERLINE) == 20)
 static_assert(static_cast<std::size_t>(PssProperty::SCROLLBAR_TRACK_FOREGROUND) == 21);
 static_assert(static_cast<std::size_t>(PssProperty::SCROLLBAR_THUMB_SINGLE_UNDERLINE) == 68);
 static_assert(static_cast<std::size_t>(PssProperty::GLYPH_PROFILE) == 69);
-static_assert(static_cast<std::size_t>(PssProperty::SCROLLBAR_CORNER_GLYPH) + 1 == PSS_PROPERTY_COUNT);
+static_assert(static_cast<std::size_t>(PssProperty::SCROLLBAR_CORNER_GLYPH) == 91);
+static_assert(static_cast<std::size_t>(PssProperty::WIDTH) == 92);
+static_assert(static_cast<std::size_t>(PssProperty::MAX_HEIGHT) + 1 == PSS_PROPERTY_COUNT);
 constexpr auto SCROLLBAR_PATTERNS =
   sc::pss("ScrollBar{scrollbar-track-pattern:minimal;scrollbar-thumb-pattern:block;scrollbar-arrow-pattern:ascii;}");
 static_assert(SCROLLBAR_PATTERNS.declarations().size() == 3);

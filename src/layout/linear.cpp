@@ -601,7 +601,11 @@ std::expected<void, TreeError> setSizePolicy(WidgetTree &tree, Node<SizedWidget>
   bool changed{};
   std::expected<void, TreeError> bounds;
   auto result = tree.edit(node, [&](SizedWidget &widget) {
-    if (widget.computedStyle() && widget.computedStyle()->minWidth > policy.width.maximum) {
+    const auto &style = widget.computedStyle();
+    const auto effective =
+      detail::effectiveSizePolicy(policy, style ? style->minWidth : 0, style ? style->sizing() : nullptr);
+
+    if (!effective) {
       bounds = std::unexpected(TreeError::INVALID_ARGUMENT);
 
       return;

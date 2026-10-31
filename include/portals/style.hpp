@@ -130,6 +130,7 @@ struct StyleRule {
   /// @cond INTERNAL
   std::shared_ptr<const detail::ScrollbarGlyphRefs> scrollbarGlyphs;
   /// @endcond
+  std::shared_ptr<const StyleSizing> sizing; ///< Optional immutable runtime sizing; shared ownership, never a view.
 
   /** @param other Owning value to compare.
    * @return Whether all typed fields are equal.
@@ -138,7 +139,8 @@ struct StyleRule {
     return selector == other.selector && declarations == other.declarations &&
            ((!scrollbarGlyphs && !other.scrollbarGlyphs) ||
             (scrollbarGlyphs && other.scrollbarGlyphs &&
-             detail::equalScrollbarGlyphs(*scrollbarGlyphs, *other.scrollbarGlyphs)));
+             detail::equalScrollbarGlyphs(*scrollbarGlyphs, *other.scrollbarGlyphs))) &&
+           (sizing == other.sizing || (sizing && other.sizing && *sizing == *other.sizing));
   }
 };
 

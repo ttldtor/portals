@@ -23,7 +23,17 @@ int main() {
 
   options.clock = terminal.clock();
 
-  auto scene = ui::scene("VBox{Custom{} LineEdit#message{\"initial\"} Button#add{\"Add\"}}", resource, options);
+  auto scene = ui::scene(R"scene(
+    VBox {
+      Custom { fitWidth = true, minWidth = 4, maxWidth = 8 }
+      LineEdit#message {
+        text = "initial", fitWidth = true, minWidth = 10, maxWidth = 28,
+        fitHeight = true, maxHeight = 1
+      }
+      Button#add { "Add" }
+    }
+  )scene",
+                         resource, options);
   auto message = scene.get<LineEdit>("message");
   bool configured{};
 
@@ -33,7 +43,8 @@ int main() {
     configured = value && *value == "initial";
   });
 
-  auto result = std::move(scene) | ui::style("Button { bold: true; }") | ui::run(terminal);
+  auto result =
+    std::move(scene) | ui::style("Button { bold: true; width: fit-content; max-width: 12; }") | ui::run(terminal);
 
   if (!result || !configured || !terminal.closed || result->frames != 1 || message.text().get()) {
     return 2;

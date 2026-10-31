@@ -9,6 +9,7 @@
 #include "../src/widgets/toast_state.hpp"
 #include "support/examples/replay/terminal.hpp"
 
+#include <array>
 #include <atomic>
 #include <cstdlib>
 #include <fstream>
@@ -250,6 +251,81 @@ TEST_CASE("resource instance flags override factories without requiring a contro
   }
 }
 
+TEST_CASE("loaded sizing is shared by builtin and custom adapters on both axes") {
+  for (const bool configuration : {false, true}) {
+    ui::SceneResourceOptions options;
+
+    options.format = configuration ? ui::SceneResourceFormat::CONFIGURATION : ui::SceneResourceFormat::LEGACY;
+    REQUIRE(options.registry.add<Custom>("Probe", [](ui::SceneResourceArguments arguments) {
+      return ui::custom<Custom>(arguments.text);
+    }));
+    const std::string body = "VBox{width=20 height=10 Label#label{text=\"abcdefgh\" fitWidth=true fitHeight=true "
+                             "minWidth=3 maxWidth=5 minHeight=2 maxHeight=3} "
+                             "Probe#probe{fitWidth=true flexY=2 minWidth=3 maxWidth=4 minHeight=1 maxHeight=4}}";
+    auto owner = ui::scene(configuration ? "scene{" + body + "}" : body, options);
+    auto label = owner.get<Label>("label");
+    auto probe = owner.get<Custom>("probe");
+
+    owner.configure([&](ManagedScene &scene, Application &application) {
+      auto &tree = application.tree();
+      const auto bounds = CellRect::from({}, {20, 10});
+
+      REQUIRE(bounds);
+      REQUIRE(scene.prepare(application, {20, 10}));
+      REQUIRE(tree.frame([&] {
+        REQUIRE(layoutTree(tree, application.root(), *bounds, *bounds));
+      }));
+      REQUIRE(scene.completedLayout(application));
+      const auto labelGeometry = label.geometry();
+      const auto probeGeometry = probe.geometry();
+
+      REQUIRE(labelGeometry);
+      REQUIRE(probeGeometry);
+      CHECK(labelGeometry->local.size().width == 5);
+      CHECK(labelGeometry->local.size().height == 2);
+      CHECK(probeGeometry->local.size().width == 3);
+      CHECK(probeGeometry->local.size().height == 4);
+      REQUIRE(tree.read(probe.node(), [&](const Custom &widget) {
+        CHECK(widget.sizePolicy().width.mode == SizeMode::CONTENT);
+        CHECK(widget.sizePolicy().height.mode == SizeMode::FLEX);
+        CHECK(widget.sizePolicy().height.weight == 2);
+      }));
+    });
+
+    REQUIRE(owner.prepareChecked());
+    REQUIRE(owner.close());
+  }
+}
+
+TEST_CASE("loaded competing axis modes reject before factories and nonsized types reject sizing") {
+  for (const bool configuration : {false, true}) {
+    for (const auto body : {"Probe{width=3 fitWidth=true}", "Probe{fitHeight=false height=2}", "Probe{flex=2 flexX=3}",
+                            "Probe{flexY=0}", "Plain{minWidth=1}", "Probe{width=20 minWidth=3 maxWidth=7}",
+                            "Probe{minHeight=5 maxHeight=2}", "Erased{minWidth=1}"}) {
+      int factories{};
+      ui::SceneResourceOptions options;
+
+      options.format = configuration ? ui::SceneResourceFormat::CONFIGURATION : ui::SceneResourceFormat::LEGACY;
+      REQUIRE(options.registry.add<Custom>("Probe", [&](ui::SceneResourceArguments) {
+        ++factories;
+        return ui::custom<Custom>("");
+      }));
+      REQUIRE(options.registry.add<Plain>("Plain", [&](ui::SceneResourceArguments) {
+        ++factories;
+        return ui::custom<Plain>();
+      }));
+      REQUIRE(options.registry.add<Widget>("Erased", [&](ui::SceneResourceArguments) {
+        ++factories;
+        return ui::detail::Access::erase(ui::custom<Custom>(""));
+      }));
+      const auto source = configuration ? "scene{" + std::string(body) + "}" : std::string(body);
+
+      (void)rejected(source, options);
+      CHECK(factories == 0);
+    }
+  }
+}
+
 TEST_CASE("instance flag validation precedes all resource callbacks and retains exact property positions") {
   struct Scenario {
     std::string_view body;
@@ -375,20 +451,20 @@ TEST_CASE("runtime resource retains temporary source and publishes typed named r
 TEST_CASE("resource classes preserve absent empty and explicit factory overrides in both grammars") {
   struct ClassPaint final : PaintContext {
     std::size_t commands{};
-    CellRect expectedClip;
+    std::array<CellRect, 4> expectedClips;
 
     std::expected<void, TreeError> submit(std::span<const RenderCommand> values) override {
       for (const auto &value : values) {
+        REQUIRE(commands < expectedClips.size());
         std::visit(
           [this](const auto &command) {
             CHECK(command.style.foreground == RgbColor{1, 2, 3});
             CHECK(command.style.italic);
-            CHECK(command.clip == expectedClip);
+            CHECK(command.clip == expectedClips[commands]);
           },
           value);
+        ++commands;
       }
-
-      commands += values.size();
 
       return {};
     }
@@ -470,12 +546,19 @@ TEST_CASE("resource classes preserve absent empty and explicit factory overrides
     REQUIRE(application->tree().arrange(managed->root(), *viewport, *viewport));
     REQUIRE(application->tree().arrange(group.node(), *viewport, *viewport));
     REQUIRE(application->tree().arrange(button.node(), *viewport, *viewport));
-    paint.expectedClip = *viewport;
+    const auto prefixClip = CellRect::from({}, {2, 10});
+    const auto captionClip = CellRect::from({2, 0}, {36, 10});
+    const auto suffixClip = CellRect::from({38, 0}, {2, 10});
+
+    REQUIRE(prefixClip);
+    REQUIRE(captionClip);
+    REQUIRE(suffixClip);
+    paint.expectedClips = {*viewport, *prefixClip, *captionClip, *suffixClip};
 
     REQUIRE(application->tree().frame([&] {
       REQUIRE(application->tree().paint(button.node(), paint));
     }));
-    CHECK(paint.commands > 0);
+    CHECK(paint.commands == paint.expectedClips.size());
     REQUIRE(owner.close());
     CHECK(Plain::alive == 0);
   }
@@ -3643,6 +3726,38 @@ TEST_CASE("data-family custom schemas accept only old narrow or full expanded ex
   }
 }
 
+TEST_CASE("data-family legacy schemas do not accept a partial new sizing vocabulary") {
+  for (const bool table : {false, true}) {
+    ui::SceneResourceOptions options;
+    int factories{};
+    std::vector<std::string_view> paths{"text",         "width",        "height",        "flex",    "rowHeight",
+                                        "overscanRows", "glyphProfile", "glyphFallback", "fitWidth"};
+
+    if (table) {
+      paths.insert(paths.end(), {"maxColumns", "maxPreparedCells", "maxPreparedTextBytes"});
+    }
+
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    options.controls.emplace();
+    options.controls->registerType("Bound", paths);
+
+    if (table) {
+      REQUIRE(options.registry.add<VirtualTable<int>>("Bound", [&](ui::SceneResourceArguments) {
+        ++factories;
+        return ui::Description<VirtualTable<int>>{};
+      }));
+    } else {
+      REQUIRE(options.registry.add<VirtualList<int>>("Bound", [&](ui::SceneResourceArguments) {
+        ++factories;
+        return ui::Description<VirtualList<int>>{};
+      }));
+    }
+
+    CHECK(rejected("scene{Bound{}}", options).sceneResource->code == Code::DUPLICATE_TYPE);
+    CHECK(factories == 0);
+  }
+}
+
 TEST_CASE("data scalar fluent modifiers preserve untouched origins and reset only replaced leaves") {
   auto origin = std::make_shared<ui::ControlSourceOrigin>();
 
@@ -4725,7 +4840,7 @@ TEST_CASE("Notifications semantic schema owns canonical metadata and keeps old n
                                                          "frame.customTitleDecoration.prefix",
                                                          "frame.customTitleDecoration.suffix"};
 
-  REQUIRE(canonical.size() == 49);
+  REQUIRE(canonical.size() == 57);
   CHECK(std::ranges::count(canonical, "glyphProfile", &ui::ControlPropertyDescriptor::path) == 1);
   CHECK(std::ranges::count(canonical, "glyphFallback", &ui::ControlPropertyDescriptor::path) == 1);
   CHECK(std::ranges::count_if(canonical, [](const auto &property) {
@@ -4739,6 +4854,16 @@ TEST_CASE("Notifications semantic schema owns canonical metadata and keeps old n
   REQUIRE(registry.add<Overlay>("OldBraces", plain, {}));
   REQUIRE(registry.add<Overlay>("OldBool", plain, false));
   REQUIRE(registry.add<Overlay>("Selected", plain, canonical));
+  CHECK(canonical[48].path == "glyphFallback");
+  CHECK(canonical[49].path == "fitWidth");
+  const auto legacy = canonical.first(49);
+
+  REQUIRE(registry.add<Overlay>("Legacy49", plain, legacy));
+  std::vector<ui::ControlPropertyDescriptor> malformedLegacy(legacy.begin(), legacy.end());
+
+  malformedLegacy.back().depth = 99;
+  CHECK(registry.add<Overlay>("Malformed49", plain, std::span<const ui::ControlPropertyDescriptor>(malformedLegacy))
+          .error() == Code::INVALID_VALUE);
   CHECK(registry.add<Overlay>("Unknown", plain, ui::controlPropertySchema("Unknown")).error() == Code::INVALID_VALUE);
   CHECK(registry.add<Overlay>("Foreign", plain, ui::controlPropertySchema("Overlay")).error() == Code::INVALID_VALUE);
   CHECK(registry.add<Overlay>("Partial", plain, canonical.first(1)).error() == Code::INVALID_VALUE);
@@ -4973,6 +5098,29 @@ TEST_CASE("Notifications precharged third-word leaves preserve source priority a
   }
 }
 
+TEST_CASE("Notifications legacy49 schema retains exactly its declared capabilities") {
+  ui::NotificationCenter center;
+  ui::SceneResourceOptions options;
+  int factories{};
+
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  options.control<Overlay>(
+    "Frozen",
+    [&](ui::SceneResourceArguments) {
+      ++factories;
+      return ui::notifications(center, ui::custom<Widget>());
+    },
+    ui::controlPropertySchema("Notifications").first(49));
+
+  auto owner = ui::scene("scene{Frozen{width=12}}", options);
+
+  REQUIRE(owner.prepareChecked());
+  CHECK(factories == 1);
+  REQUIRE(owner.close());
+  CHECK(rejected("scene{Frozen{fitWidth=true}}", options).sceneResource->code == Code::UNKNOWN_PROPERTY);
+  CHECK(factories == 1);
+}
+
 TEST_CASE("Notifications source sizing wins once over typed and erased factory setup") {
   for (const bool erased : {false, true}) {
     ui::NotificationCenter center;
@@ -5013,6 +5161,53 @@ TEST_CASE("Notifications source sizing wins once over typed and erased factory s
     CHECK(inspected == 1);
     REQUIRE(owner.close());
     CHECK_FALSE(center.snapshot());
+  }
+}
+
+TEST_CASE("Notifications source sizing preserves factory leaves on the other axis") {
+  for (const bool erased : {false, true}) {
+    ui::NotificationCenter center;
+    ui::Ref<Overlay> wrapper;
+    ui::SceneResourceOptions options;
+
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    options.controls.emplace();
+    options.controls->defaults("Center", {.minWidth = 3, .maxWidth = 9, .minHeight = 2, .maxHeight = 6});
+    auto factory = [&](ui::SceneResourceArguments) {
+      return ui::notifications(center, ui::custom<Widget>())
+        .reference(wrapper)
+        .settings({.fitHeight = true})
+        .fitWidth();
+    };
+
+    if (erased) {
+      options.control<Widget>(
+        "Center",
+        [&](ui::SceneResourceArguments args) {
+          return ui::detail::Access::erase(factory(std::move(args)));
+        },
+        ui::controlPropertySchema("Notifications"));
+    } else {
+      options.control<Overlay>("Center", factory, ui::controlPropertySchema("Notifications"));
+    }
+
+    auto owner = ui::scene("scene{Center{fitWidth=false minWidth=4 maxHeight=5}}", options);
+
+    owner.configure([&](ManagedScene &, Application &app) {
+      REQUIRE(app.tree().read(wrapper.node(), [&](const Overlay &overlay) {
+        const auto policy = overlay.sizePolicy();
+
+        CHECK(policy.width.mode == SizeMode::AUTOMATIC);
+        CHECK(policy.width.preferred == INTRINSIC_EXTENT);
+        CHECK(policy.width.minimum == 4);
+        CHECK(policy.width.maximum == 9);
+        CHECK(policy.height.mode == SizeMode::CONTENT);
+        CHECK(policy.height.minimum == 2);
+        CHECK(policy.height.maximum == 5);
+      }));
+    });
+    REQUIRE(owner.prepareChecked());
+    REQUIRE(owner.close());
   }
 }
 
@@ -6375,5 +6570,172 @@ TEST_CASE("segmented scrollbar resources preserve independent parts in grouped a
     auto bar = owner.get<ScrollBar>("bar");
     CHECK_FALSE(owner.prepareChecked());
     CHECK(bar.node() == Node<ScrollBar>{});
+  }
+}
+
+TEST_CASE("sizing example preserves source and PSS geometry through append and clear") {
+  auto owner = ui::scene(R"scene(
+    VBox {
+      Label { "Content sizing | Click either button to append | F10: quit" }
+      HBox {
+        Button#fromResource { text="Resource" fitWidth=true minWidth=12 maxWidth=20 }
+        Button#fromStyle { text="Style" }
+      }
+      LineEdit#message { text="A" fitWidth=true minWidth=12 maxWidth=32 }
+      Button#clear { text="Clear" fitWidth=true fitHeight=true minHeight=1 maxHeight=1 }
+    }
+  )scene");
+  const auto message = owner.get<LineEdit>("message");
+  const auto fromResource = owner.get<Button>("fromResource");
+  const auto fromStyle = owner.get<Button>("fromStyle");
+  const auto clear = owner.get<Button>("clear");
+  const auto append = [message] {
+    message.text() += "Hello!";
+  };
+  owner | ui::style("#fromStyle {width:fit-content;min-width:12;max-width:20;}") | ui::onClick(fromResource, append) |
+    ui::onClick(fromStyle, append) | ui::onClick(clear, [message] {
+      message.text() = "A";
+    });
+  REQUIRE(owner.prepareChecked());
+  auto &scene = owner.managed()->get();
+  auto &app = ui::detail::SceneAccess::application(scene);
+  layoutResourceFrame(scene, app, {80, 8});
+  REQUIRE(fromResource.geometry());
+  REQUIRE(fromStyle.geometry());
+  REQUIRE(message.geometry());
+  CHECK(fromResource.geometry()->surface.size().width == 12);
+  CHECK(fromStyle.geometry()->surface.size().width == 12);
+  CHECK(message.geometry()->surface.size().width == 12);
+  REQUIRE(app.router().invoke(fromResource.node(), {Action::ACTIVATE}));
+  CHECK(*message.text().get() == "AHello!");
+  for (int click = 0; click < 5; ++click) {
+    REQUIRE(app.router().invoke(fromStyle.node(), {Action::ACTIVATE}));
+  }
+  CHECK(*message.text().get() == "AHello!Hello!Hello!Hello!Hello!Hello!");
+  layoutResourceFrame(scene, app, {80, 8});
+  REQUIRE(message.geometry());
+  CHECK(message.geometry()->surface.size().width == 32);
+  REQUIRE(app.router().invoke(clear.node(), {Action::ACTIVATE}));
+  layoutResourceFrame(scene, app, {80, 8});
+  CHECK(*message.text().get() == "A");
+  REQUIRE(message.geometry());
+  CHECK(message.geometry()->surface.size().width == 12);
+  REQUIRE(owner.close());
+}
+
+TEST_CASE("profile sizing keeps input and saved data through caption changes and resize") {
+  for (const bool resource : {false, true}) {
+    INFO("resource=" << resource);
+
+    struct Entry {
+      std::string_view key, english, russian;
+    };
+
+    constexpr Entry MESSAGES[] = {
+      {"profile.title", "Profile", "Профиль"},
+      {"profile.name", "Name", "Имя"},
+      {"profile.saved", "Saved name", "Сохранённое имя"},
+      {"profile.save", "Save", "Сохранить профиль"},
+    };
+    bool russian = false;
+    ui::TextResolver resolver = [&](std::string_view key) -> std::expected<std::string, TextResourceError> {
+      for (const auto &entry : MESSAGES) {
+        if (entry.key == key) {
+          return std::string(russian ? entry.russian : entry.english);
+        }
+      }
+
+      return std::unexpected(TextResourceError::MISSING_RESOURCE);
+    };
+
+    ui::Ref<LineEdit> name;
+    ui::Ref<Button> save;
+    ui::Ref<Label> title, nameLabel, savedLabel, savedValue;
+    auto owner = resource
+                   ? ui::scene(R"scene(
+          VBox {
+            Label#title {text=i18n("profile.title")}
+            Label#nameLabel {text=i18n("profile.name")}
+            LineEdit#name {text="Ada" flexX=1 minWidth=16 maxWidth=40}
+            Button#save {text=i18n("profile.save")}
+            Label#savedLabel {text=i18n("profile.saved")}
+            Label#savedValue {""}
+          }
+        )scene",
+                               {.resolver = resolver})
+                   : ui::scene(ui::vbox(ui::label(i18n("profile.title"), {}, {}, resolver).reference(title),
+                                        ui::label(i18n("profile.name"), {}, {}, resolver).reference(nameLabel),
+                                        ui::lineEdit(name, "Ada").flexX().minWidth(16).maxWidth(40),
+                                        ui::button(i18n("profile.save"), {}, {}, resolver).reference(save).fitWidth(),
+                                        ui::label(i18n("profile.saved"), {}, {}, resolver).reference(savedLabel),
+                                        ui::label(savedValue, "")));
+
+    if (resource) {
+      title = owner.get<Label>("title");
+      nameLabel = owner.get<Label>("nameLabel");
+      savedLabel = owner.get<Label>("savedLabel");
+      name = owner.get<LineEdit>("name");
+      save = owner.get<Button>("save");
+      savedValue = owner.get<Label>("savedValue");
+    }
+
+    owner |
+      ui::style(resource ? "Button {width:fit-content;} LineEdit {background:#3b4252;}"
+                         : "LineEdit {background:#3b4252;}") |
+      ui::onClick(save,
+                  [name, savedValue] {
+                    savedValue.text() = name.text();
+                  }) |
+      ui::onKey("F2", [title, nameLabel, savedLabel, save, &russian, &resolver] {
+        russian = !russian;
+        title.text(resolver) = i18n("profile.title");
+        nameLabel.text(resolver) = i18n("profile.name");
+        savedLabel.text(resolver) = i18n("profile.saved");
+        save.text(resolver) = i18n("profile.save");
+      });
+
+    REQUIRE(owner.prepareChecked());
+
+    auto &scene = owner.managed()->get();
+    auto &app = ui::detail::SceneAccess::application(scene);
+
+    layoutResourceFrame(scene, app, {80, 8});
+    CHECK(*title.text().get() == "Profile");
+    CHECK(*nameLabel.text().get() == "Name");
+    CHECK(*savedLabel.text().get() == "Saved name");
+    CHECK(*save.text().get() == "Save");
+    REQUIRE(save.geometry());
+    CHECK(save.geometry()->surface.size().width == 8);
+    REQUIRE((name.text() = "Ada Lovelace").result());
+    REQUIRE(app.router().invoke(save.node(), {Action::ACTIVATE}));
+    CHECK(*savedValue.text().get() == "Ada Lovelace");
+    REQUIRE((name.text() = "Grace Hopper").result());
+    REQUIRE(scene.input(app, ui::key(InputKey::F2)));
+    layoutResourceFrame(scene, app, {80, 8});
+    CHECK(*title.text().get() == "Профиль");
+    CHECK(*nameLabel.text().get() == "Имя");
+    CHECK(*savedLabel.text().get() == "Сохранённое имя");
+    CHECK(*save.text().get() == "Сохранить профиль");
+    REQUIRE(save.geometry());
+    CHECK(save.geometry()->surface.size().width == 21);
+    for (const int available : {80, 32, 20, 16, 80}) {
+      layoutResourceFrame(scene, app, {available, 8});
+      REQUIRE(name.geometry());
+      CHECK(name.geometry()->surface.size().width == (available > 40 ? 40 : available));
+      CHECK(*name.text().get() == "Grace Hopper");
+      CHECK(*savedValue.text().get() == "Ada Lovelace");
+    }
+
+    REQUIRE(scene.input(app, ui::key(InputKey::F2)));
+    layoutResourceFrame(scene, app, {80, 8});
+    CHECK(*title.text().get() == "Profile");
+    CHECK(*nameLabel.text().get() == "Name");
+    CHECK(*savedLabel.text().get() == "Saved name");
+    CHECK(*save.text().get() == "Save");
+    REQUIRE(save.geometry());
+    CHECK(save.geometry()->surface.size().width == 8);
+    REQUIRE(app.router().invoke(save.node(), {Action::ACTIVATE}));
+    CHECK(*savedValue.text().get() == "Grace Hopper");
+    REQUIRE(owner.close());
   }
 }

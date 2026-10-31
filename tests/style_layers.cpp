@@ -2602,3 +2602,121 @@ TEST_CASE("resolved thumb segments own copied values after source and engine ret
   CHECK(unchanged == defaults);
   CHECK((*retained.scrollbarThumbSegments)[0].start.foreground != RgbColor{7, 8, 9});
 }
+
+TEST_CASE("sizing snapshots own sparse payload and resolve without allocation") {
+  const auto sheet = take(parsePss("Probe{width:fit-content;min-width:3;max-width:8;height:flex(2);max-height:5;}"));
+  const StyleTarget target{.type = "Probe"};
+  const auto flat = resolveStyle(sheet, target, {});
+  StyleSnapshot snapshot(flat);
+  ComputedStyle glyphOnly;
+
+  glyphOnly.glyphs[0].profile = GlyphProfile::ASCII;
+  StyleSnapshot glyphSnapshot(glyphOnly);
+
+  REQUIRE(snapshot.sizing());
+  CHECK_FALSE(snapshot.hasGlyphs());
+  CHECK(glyphSnapshot.hasGlyphs());
+  CHECK_FALSE(glyphSnapshot.sizing());
+  CHECK(snapshot.flatten() == flat);
+  CHECK(snapshot.contentHash() == StyleSnapshot::contentHash(flat));
+  if constexpr (sizeof(void *) == 8) {
+    CHECK(sizeof(StyleSnapshot) == 136);
+  }
+  std::printf("sizing storage: snapshot=%zu glyph-only-block=%zu sizing-payload=%zu scratch=%zu\n",
+              sizeof(StyleSnapshot), sizeof(detail::StyleGlyphBlock), sizeof(StyleSizing), sizeof(ComputedStyle));
+
+  allocation_test::remaining = 0;
+  const auto resolved = resolveStyle(sheet, target, {});
+  const auto flattened = snapshot.flatten();
+  const auto hash = snapshot.contentHash();
+  allocation_test::remaining = -1;
+
+  CHECK(resolved == flat);
+  CHECK(flattened == flat);
+  CHECK(hash == StyleSnapshot::contentHash(flat));
+}
+
+TEST_CASE("pure sizing rules survive legacy opt-in and unrelated layer copies") {
+  Fixture fixture;
+  std::weak_ptr<const StyleSizing> sourceSizing;
+  ComputedStyle expected;
+
+  {
+    const auto source =
+      take(parsePss("Widget{width:fit-content;height:flex(2);max-width:12;min-height:2;max-height:5;}"));
+
+    sourceSizing = source.rules[0].sizing;
+    take(fixture.engine.replace(source));
+    expected = fixture.read();
+    REQUIRE(expected.sizing);
+  }
+
+  take(fixture.engine.enableLayers());
+  CHECK_FALSE(sourceSizing.expired());
+  CHECK(fixture.read() == expected);
+
+  const auto paint = take(fixture.engine.addLayer(StyleTier::USER, "paint", foreground(GREEN)));
+
+  CHECK(fixture.read().sizing == expected.sizing);
+  take(fixture.engine.removeLayer(paint));
+  CHECK(fixture.read() == expected);
+}
+
+TEST_CASE("pure sizing layer replacements retain ownership and atomic validation") {
+  Fixture fixture;
+  StyleLayerHandle layer;
+  std::weak_ptr<const StyleSizing> sourceSizing;
+
+  take(fixture.engine.enableLayers({.maxDeclarations = 5}));
+  {
+    const auto source =
+      take(parsePss("Widget{width:fit-content;height:flex(2);max-width:12;min-height:2;max-height:5;}"));
+
+    sourceSizing = source.rules[0].sizing;
+    layer = take(fixture.engine.addLayer(StyleTier::APPLICATION, "sizing", source));
+  }
+
+  CHECK_FALSE(sourceSizing.expired());
+  const auto initial = fixture.read();
+
+  REQUIRE(initial.sizing);
+  CHECK(initial.sizing->width->mode == StyleSizeMode::CONTENT);
+  CHECK(initial.sizing->height->mode == StyleSizeMode::FLEX);
+  CHECK(initial.sizing->height->weight == 2);
+
+  {
+    const auto replacement =
+      take(parsePss("Widget{width:auto;height:fit-content;max-width:9;min-height:3;max-height:7;}"));
+
+    take(fixture.engine.replaceLayer(layer, replacement));
+  }
+
+  const auto before = fixture.read();
+  const auto revision = fixture.engine.revision();
+
+  REQUIRE(before.sizing);
+  CHECK(before.sizing->width->mode == StyleSizeMode::AUTOMATIC);
+  CHECK(before.sizing->height->mode == StyleSizeMode::CONTENT);
+  const auto conflict = fixture.engine.replaceLayer(layer, take(parsePss("Widget{width:20;max-width:9;}")));
+
+  REQUIRE_FALSE(conflict);
+  CHECK(conflict.error().cause == TreeError::INVALID_ARGUMENT);
+  CHECK(fixture.read() == before);
+  CHECK(fixture.engine.revision() == revision);
+  CHECK_FALSE(fixture.engine.addLayer(StyleTier::USER, "exceeds", take(parsePss("Widget{height:auto;}"))));
+  CHECK(fixture.read() == before);
+  CHECK(fixture.engine.revision() == revision);
+
+  const std::array update{StyleLayerUpdate{layer, take(parsePss("Widget{width:flex(3);height:auto;}"))}};
+
+  take(fixture.engine.updateLayers(update));
+  const auto updated = fixture.read();
+
+  REQUIRE(updated.sizing);
+  CHECK(updated.sizing->width->mode == StyleSizeMode::FLEX);
+  CHECK(updated.sizing->width->weight == 3);
+  CHECK(updated.sizing->height->mode == StyleSizeMode::AUTOMATIC);
+  CHECK_FALSE(updated.sizing->maxWidth);
+  CHECK_FALSE(updated.sizing->minHeight);
+  CHECK_FALSE(updated.sizing->maxHeight);
+}

@@ -459,7 +459,39 @@ struct ControlSettings {
   std::optional<std::uint64_t> arrowRepeat{};         ///< Positive repeat interval in milliseconds.
   std::optional<GlyphProfile> glyphProfile{};         ///< Manual named base for Border and native scroll controls.
   std::optional<GlyphFallback> glyphFallback{};       ///< Portable admission fallback, independent of colors.
+  std::optional<bool> fitWidth{};                     ///< True requests content width; false requests automatic.
+  std::optional<bool> fitHeight{};                    ///< True requests content height; false requests automatic.
+  std::optional<std::uint32_t> flexX{};               ///< Positive horizontal flex weight.
+  std::optional<std::uint32_t> flexY{};               ///< Positive vertical flex weight.
+  std::optional<std::int32_t> minWidth{};             ///< Nonnegative hard column minimum.
+  std::optional<std::int32_t> maxWidth{};             ///< Nonnegative hard column cap.
+  std::optional<std::int32_t> minHeight{};            ///< Nonnegative hard row minimum.
+  std::optional<std::int32_t> maxHeight{};            ///< Nonnegative hard row cap.
 };
+
+namespace detail {
+/// @cond INTERNAL
+inline bool sizeModeConflict(const ControlSettings &settings) noexcept {
+  const auto width = int(settings.width.has_value()) + int(settings.fitWidth.has_value()) +
+                     int(settings.flexX.has_value()) + int(settings.flex.has_value());
+  const auto height = int(settings.height.has_value()) + int(settings.fitHeight.has_value()) +
+                      int(settings.flexY.has_value()) + int(settings.flex.has_value());
+
+  return width > 1 || height > 1;
+}
+
+inline bool sizeBoundsConflict(const ControlSettings &settings) noexcept {
+  const auto conflict = [](auto exact, auto minimum, auto maximum) {
+    return (minimum && maximum && *minimum > *maximum) ||
+           (exact && ((minimum && *minimum > *exact) || (maximum && *maximum < *exact)));
+  };
+
+  return conflict(settings.width, settings.minWidth, settings.maxWidth) ||
+         conflict(settings.height, settings.minHeight, settings.maxHeight);
+}
+
+/// @endcond
+} // namespace detail
 
 /** @brief Finite context bounds, checked before publication/materialization beyond each bound. */
 struct ControlContextLimits {

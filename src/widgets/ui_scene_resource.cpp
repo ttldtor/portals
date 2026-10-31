@@ -50,6 +50,7 @@ SceneResourceRegistry::semanticSchema(std::span<const ControlPropertyDescriptor>
     const auto oldSize = kind == detail::ControlFactoryKind::MESSAGE_BINDING          ? std::size_t{24}
                          : kind == detail::ControlFactoryKind::THEME_SELECTOR_BINDING ? std::size_t{22}
                          : kind == detail::ControlFactoryKind::THEME_CATALOG_BINDING  ? std::size_t{38}
+                         : kind == detail::ControlFactoryKind::NOTIFICATION_BINDING   ? std::size_t{49}
                                                                                       : canonical.size();
     const auto legacy = schema.size() == oldSize && oldSize != canonical.size();
     const auto candidate = legacy ? canonical.first(oldSize) : canonical;
@@ -637,17 +638,7 @@ std::expected<Description<Widget>, ManagedError> gridRecipe(ResourceNode &node) 
     (void)std::move(recipe).id(node.arguments.id);
   }
 
-  if (node.arguments.width) {
-    (void)std::move(recipe).width(*node.arguments.width);
-  }
-
-  if (node.arguments.height) {
-    (void)std::move(recipe).height(*node.arguments.height);
-  }
-
-  if (node.arguments.flex) {
-    (void)std::move(recipe).flex(*node.arguments.flex);
-  }
+  detail::Access::sizingSettings(recipe, detail::controlSizing(node.arguments.settings));
 
   detail::Access::frameSettings(recipe, node.arguments.settings);
   detail::Access::preparedControlPresence(recipe, detail::controlSettingsPresenceSet(node.arguments.settings));
@@ -830,17 +821,7 @@ template <class T> Description<Widget> linearRecipe(const ResourceNode &node) {
     (void)std::move(recipe).id(node.arguments.id);
   }
 
-  if (node.arguments.width) {
-    (void)std::move(recipe).width(*node.arguments.width);
-  }
-
-  if (node.arguments.height) {
-    (void)std::move(recipe).height(*node.arguments.height);
-  }
-
-  if (node.arguments.flex) {
-    (void)std::move(recipe).flex(*node.arguments.flex);
-  }
+  detail::Access::sizingSettings(recipe, detail::controlSizing(node.arguments.settings));
 
   return detail::Access::erase(std::move(recipe));
 }
@@ -930,6 +911,12 @@ std::expected<Node<Widget>, ManagedError> compile(ManagedScene &owner, ResourceD
 
     if (!prepared) {
       return std::unexpected(prepared.error());
+    }
+  }
+
+  for (const auto &node : document.nodes) {
+    if (detail::sizeModeConflict(node.arguments.settings) || detail::sizeBoundsConflict(node.arguments.settings)) {
+      return std::unexpected(document.propertyFailure(Code::INVALID_VALUE, node.offset, node.name, "sizing"));
     }
   }
 

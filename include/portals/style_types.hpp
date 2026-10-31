@@ -125,15 +125,45 @@ struct GlyphAppearance {
   constexpr bool operator==(const GlyphAppearance &other) const = default;
 };
 
+/** @brief State-independent style request for one allocation axis. */
+enum class StyleSizeMode {
+  AUTOMATIC, ///< Use the ordinary preferred/intrinsic allocation.
+  FIXED,     ///< Intersect an exact cell extent with all hard bounds.
+  FLEX,      ///< Share spare cells using the positive weight.
+  CONTENT    ///< Prefer intrinsic content without consuming spare cells.
+};
+
+/** @brief One tagged style mode; changing mode leaves no former exact-size constraint. */
+struct StyleAxisSize {
+  StyleSizeMode mode{StyleSizeMode::AUTOMATIC}; ///< Allocation request.
+  std::int32_t extent{};                        ///< Nonnegative cells for FIXED; otherwise zero.
+  std::uint32_t weight{1};                      ///< Positive FLEX weight.
+
+  /** @param other Request to compare. @return Whether every request field agrees. */
+  constexpr bool operator==(const StyleAxisSize &other) const = default;
+};
+
+/** @brief Sparse style sizing; legacy min-width remains solely in minWidth. */
+struct StyleSizing {
+  std::optional<StyleAxisSize> width;    ///< Horizontal mode request.
+  std::optional<StyleAxisSize> height;   ///< Vertical mode request.
+  std::optional<std::int32_t> maxWidth;  ///< Inclusive nonnegative column cap.
+  std::optional<std::int32_t> minHeight; ///< Nonnegative hard row minimum.
+  std::optional<std::int32_t> maxHeight; ///< Inclusive nonnegative row cap.
+
+  /** @param other Sparse constraints to compare. @return Whether every leaf agrees. */
+  constexpr bool operator==(const StyleSizing &other) const = default;
+};
+
 /** @brief Owning resolved presentation; no actions or model state are encoded. */
 struct ComputedStyle {
-  CellStyle normal;        ///< Ordinary text and fill.
-  CellStyle focused;       ///< Focused control text and fill.
-  CellStyle disabled;      ///< Disabled control text and fill.
-  CellStyle selected;      ///< Selected list/table row or editor range.
-  CellStyle header;        ///< Fixed table heading.
-  CellStyle caret;         ///< Editor software caret.
-  std::int32_t minWidth{}; ///< Nonnegative intrinsic minimum in cells; zero leaves measurement unchanged.
+  CellStyle normal;                               ///< Ordinary text and fill.
+  CellStyle focused;                              ///< Focused control text and fill.
+  CellStyle disabled;                             ///< Disabled control text and fill.
+  CellStyle selected;                             ///< Selected list/table row or editor range.
+  CellStyle header;                               ///< Fixed table heading.
+  CellStyle caret;                                ///< Editor software caret.
+  std::int32_t minWidth{};                        ///< Nonnegative hard column minimum; zero adds no style constraint.
   std::array<FrameAppearance, 6> frame{};         ///< Parts in normal/focused/disabled/selected/header/caret order.
   std::array<ScrollbarAppearance, 6> scrollbar{}; ///< Parts in normal/focused/disabled/selected/header/caret order.
   /** @brief Optional complete segment values in normal/focused/disabled/selected/header/caret order.
@@ -145,6 +175,7 @@ struct ComputedStyle {
   /// @cond INTERNAL
   detail::ScrollbarGlyphStorage scrollbarGlyphs{};
   /// @endcond
+  std::optional<StyleSizing> sizing{}; ///< Inline scratch constraints; resolution and copying never allocate.
   /** @param other Owning value to compare.
    * @return True when every paint value and metric agrees.
    */
@@ -156,6 +187,7 @@ namespace detail {
 struct StyleGlyphBlock {
   std::array<GlyphAppearance, 6> values{};
   std::shared_ptr<const ScrollbarGlyphStates> literals;
+  std::shared_ptr<const StyleSizing> sizing;
 
   bool operator==(const StyleGlyphBlock &other) const noexcept;
 };
@@ -197,7 +229,7 @@ public:
   CellStyle selected;      ///< Selected row or editor range.
   CellStyle header;        ///< Fixed table heading.
   CellStyle caret;         ///< Editor software caret.
-  std::int32_t minWidth{}; ///< Intrinsic minimum in cells.
+  std::int32_t minWidth{}; ///< Nonnegative hard column minimum.
 
   /** @brief Prepare the complete immutable value; may throw std::bad_alloc.
    * @param value Owning resolved value to copy into sparse storage.
@@ -218,6 +250,8 @@ public:
   /// @cond INTERNAL
   const detail::ScrollbarGlyphStates *scrollbarGlyphs() const noexcept;
   /// @endcond
+  /** @return Immutable additional sizing, or null; borrow ends with this snapshot's lifetime. */
+  const StyleSizing *sizing() const noexcept;
   /** @return Whether this value owns a frame extension. */
   bool hasFrame() const noexcept;
   /** @return Whether this value owns a scrollbar extension. */
@@ -258,20 +292,22 @@ struct ComputedStyleView {
   const std::array<ScrollbarThumbAppearance, 6> *scrollbarThumbSegments;
   const std::array<GlyphAppearance, 6> &glyphs;
   const ScrollbarGlyphStates *scrollbarGlyphs;
+  const StyleSizing *sizing;
 
   ComputedStyleView(const ComputedStyle &value) noexcept
       : normal(value.normal), focused(value.focused), disabled(value.disabled), selected(value.selected),
         header(value.header), caret(value.caret), minWidth(value.minWidth), frame(value.frame),
         scrollbar(value.scrollbar),
         scrollbarThumbSegments(value.scrollbarThumbSegments ? &*value.scrollbarThumbSegments : nullptr),
-        glyphs(value.glyphs), scrollbarGlyphs(value.scrollbarGlyphs ? &*value.scrollbarGlyphs : nullptr) {
+        glyphs(value.glyphs), scrollbarGlyphs(value.scrollbarGlyphs ? &*value.scrollbarGlyphs : nullptr),
+        sizing(value.sizing ? &*value.sizing : nullptr) {
   }
 
   ComputedStyleView(const StyleSnapshot &value) noexcept
       : normal(value.normal), focused(value.focused), disabled(value.disabled), selected(value.selected),
         header(value.header), caret(value.caret), minWidth(value.minWidth), frame(value.frame()),
         scrollbar(value.scrollbar()), scrollbarThumbSegments(value.scrollbarThumbSegments()), glyphs(value.glyphs()),
-        scrollbarGlyphs(value.scrollbarGlyphs()) {
+        scrollbarGlyphs(value.scrollbarGlyphs()), sizing(value.sizing()) {
   }
 };
 
