@@ -239,22 +239,23 @@ void transactionsAndControls() {
 
   auto buffer = paint(fixture, first, {24, 1});
 
-  check(take(buffer.at({0, 0})).glyph == "[" && take(buffer.at({2, 0})).glyph == "S" &&
-          take(buffer.at({2, 0})).style.foreground == RgbColor{0x12, 0x34, 0x56},
-        "actual ASCII button and caption paint resolved style");
+  check(take(buffer.at({0, 0})).glyph == "[" && take(buffer.at({23, 0})).glyph == "]" &&
+          take(buffer.at({10, 0})).glyph == "S" &&
+          take(buffer.at({10, 0})).style.foreground == RgbColor{0x12, 0x34, 0x56},
+        "allocated ASCII button contour and centered caption paint resolved style");
   take(router->invoke(first, {Action::ACTIVATE}));
   take(fixture.styles.replace(turboTheme()));
   take(router->invoke(first, {Action::ACTIVATE}));
   check(activations == 2, "theme switches do not replace or invoke actions");
   take(syncControl(*fixture.tree, first, first));
   buffer = paint(fixture, first);
-  check(take(buffer.at({2, 0})).style == readStyle(fixture, first).focused,
-        "focused state drives actual control paint");
+  check(take(buffer.at({6, 0})).glyph == "S" && take(buffer.at({6, 0})).style == readStyle(fixture, first).focused,
+        "focused state drives the centered caption paint");
   take(fixture.tree->setEnabled(first, false));
   take(syncControl(*fixture.tree, first, first));
   buffer = paint(fixture, first);
-  check(take(buffer.at({2, 0})).style == readStyle(fixture, first).disabled,
-        "disabled state drives actual control paint");
+  check(take(buffer.at({6, 0})).glyph == "S" && take(buffer.at({6, 0})).style == readStyle(fixture, first).disabled,
+        "disabled state drives the centered caption paint");
 
   std::thread foreign([&] {
     auto result = fixture.styles.refresh();

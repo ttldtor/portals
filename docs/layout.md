@@ -15,6 +15,96 @@ mode and a positive flex weight. `INTRINSIC_EXTENT` selects the measured size;
 other preferred values are nonnegative. Preferred is clamped to minimum/maximum.
 Invalid bounds, modes, weights and options return `TreeError::INVALID_ARGUMENT`.
 
+Sizing can also be requested per axis through the C++ UI builders, PSS, and
+loaded-scene attributes. These inputs choose the allocated outer rectangle;
+they do not change how a control draws its content inside that rectangle.
+The table shows the corresponding axis modes and hard bounds:
+
+| Meaning | C++ UI | PSS | Scene attribute |
+|---|---|---|---|
+| Exact extent | `.width(n)` / `.height(n)` | `width: n` / `height: n` | `width` / `height` as a nonnegative integer |
+| Measured content | `.fitWidth()` / `.fitHeight()` | `width: fit-content` / `height: fit-content` | `fitWidth: true` / `fitHeight: true` |
+| Automatic | Existing automatic widget policy | `width: auto` / `height: auto` | `fitWidth: false` / `fitHeight: false` |
+| Weighted flex | `.flexX(w)` / `.flexY(w)` | `width: flex(w)` / `height: flex(w)` | `flexX` / `flexY` as positive weights |
+| Both axes | `.flex(w)` | Set `width` and `height` independently | `flex` as a common positive weight |
+| Hard bounds | `.minWidth(n)` / `.maxWidth(n)` and height equivalents | `min-width`, `max-width`, `min-height`, `max-height` | `minWidth`, `maxWidth`, `minHeight`, `maxHeight` |
+
+Here `n` is a nonnegative integer number of terminal cells; `w` is a positive
+32-bit unsigned integer. PSS sizing declarations require selectors that apply
+independently of presentation state. A numeric PSS extent is exact: its
+intersection with style bounds and the widget's existing hard bounds must be
+nonempty. A mode request never relaxes the widget's own bounds. A contradiction
+rejects the update and preserves the previously published style and geometry.
+
+Each axis has one mode request. PSS follows its ordinary cascade: a winning
+`width` or `height` declaration replaces that axis's earlier request, while
+each bound cascades independently. In one scene settings object, competing
+mode properties are invalid: for example, `width` together with `fitWidth`,
+or `flex` together with `flexX`. Their property order does not choose a winner.
+A higher scene source replaces the lower source's mode request and merges
+independent bounds. Ordered C++ method chains keep their existing semantics.
+
+The new axis declarations are supported by runtime PSS. The existing
+compile-time `min-width` support is unchanged; the compile-time parser rejects
+the other new sizing declarations instead of expanding its descriptor budget.
+
+The same measured-width intent can be expressed in either input format:
+
+```text
+/* PSS */
+Button#save { width: fit-content; min-width: 8; }
+```
+
+```json
+{
+  "fitWidth": true,
+  "minWidth": 8
+}
+```
+
+The scene attributes are shown as a fragment of one control's settings.
+`fitWidth: true` selects measured content; `false` selects automatic sizing.
+Width and height describe the allocated outer rectangle, while the measured
+content is the control's preferred extent within the layout constraints. For a
+framed widget, these sizing modifiers constrain the outer frame; inner content
+bounds are not copied to it.
+
+### A profile form
+
+The form below keeps the name field between 16 and 40 cells wide. It fills
+available width up to that maximum. The save button fits its caption: F2 switches
+the demo captions between English and Russian, so the button changes from 8 to
+21 cells in a sufficiently wide terminal. Save copies the current name into the
+saved-value label.
+
+Terminal resize lays out the same mounted scene again. At viewport widths 80,
+32 and 20 the field occupies 40, 32 and 20 cells. Below its hard minimum, the
+16-cell allocation is clipped by the viewport. Editing and saved values survive
+layout changes. The layout does not implicitly change from rows to columns.
+
+The application owns a small English/Russian catalog and supplies a `TextResolver`
+for the initial `i18n` captions. F2 changes the selected language and explicitly
+refreshes all four captions with `text(resolver) = i18n(key)`. Changing the language
+or catalog alone does not refresh mounted controls. The catalog, selected language
+and resolver remain alive until the synchronous `runApp` call returns.
+
+**C++ builders**
+
+\include guide_sizing_form.cpp
+
+**Equivalent scene and PSS**
+
+\include guide_sizing_parity.cpp
+
+Bracketed buttons draw their contour at the allocated left and right edges and
+center the caption inside it. Width includes the contour and its inner padding;
+in a narrow allocation the caption clips inside the contour.
+
+![Profile form: changing captions and saving a name](images/profile-form-sizing.gif)
+
+Complete sources: [C++ form](examples/guide_sizing_form.cpp) and
+[scene/PSS form](examples/guide_sizing_parity.cpp). Both link `portals::core`.
+
 Fixed children preserve their clamped preferred extent. Automatic children use
 their preferred extent. Flex children also start at their clamped preferred
 extent, then share spare space in proportion to weights. Each round assigns

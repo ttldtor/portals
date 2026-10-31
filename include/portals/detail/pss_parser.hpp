@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include <bit>
 #include <portals/detail/pss_data.hpp>
 
 namespace portals::detail {
@@ -133,7 +134,12 @@ inline constexpr std::array<std::string_view, PSS_PROPERTY_COUNT> PSS_PROPERTY_N
   "scrollbar-vertical-thumb-body-glyph",
   "scrollbar-vertical-thumb-end-glyph",
   "scrollbar-vertical-thumb-single-glyph",
-  "scrollbar-corner-glyph"};
+  "scrollbar-corner-glyph",
+  "width",
+  "height",
+  "max-width",
+  "min-height",
+  "max-height"};
 /** @brief Pseudo-state names in the existing StyleState order after ANY. */
 inline constexpr std::array<std::string_view, 6> PSS_STATE_NAMES{"normal",   "focused", "disabled",
                                                                  "selected", "header",  "caret"};
@@ -623,6 +629,41 @@ private:
     return result;
   }
 
+  static constexpr std::optional<StyleAxisSize> parseAxis(std::string_view text) {
+    if (text == "auto") {
+      return StyleAxisSize{};
+    }
+
+    if (text == "fit-content") {
+      return StyleAxisSize{StyleSizeMode::CONTENT};
+    }
+
+    if (text.starts_with("flex(") && text.ends_with(')')) {
+      text = text.substr(5, text.size() - 6);
+      std::uint32_t weight{};
+
+      if (text.empty()) {
+        return {};
+      }
+
+      for (const auto digit : text) {
+        if (!pssDigit(digit) || weight > (std::numeric_limits<std::uint32_t>::max() - (digit - '0')) / 10) {
+          return {};
+        }
+
+        weight = weight * 10 + (digit - '0');
+      }
+
+      return weight ? std::optional(StyleAxisSize{StyleSizeMode::FLEX, 0, weight}) : std::nullopt;
+    }
+
+    if (const auto extent = parseWidth(text)) {
+      return StyleAxisSize{StyleSizeMode::FIXED, *extent};
+    }
+
+    return {};
+  }
+
   constexpr bool parseDeclaration() {
     const auto propertyLocation = location_;
     const auto name = identifier();
@@ -736,7 +777,18 @@ private:
       }
 
       declaration.pattern = static_cast<std::int32_t>(selected - names.begin());
-    } else if (property == PssProperty::MIN_WIDTH) {
+    } else if (property == PssProperty::WIDTH || property == PssProperty::HEIGHT) {
+      const auto axis = parseAxis(text);
+
+      if (!axis || state_ != StyleState::ANY) {
+        return failAt(PssErrorCode::INVALID_WIDTH, valueLocation,
+                      "Expected state-independent cells, auto, fit-content, or flex(positive weight)", propertyName);
+      }
+
+      declaration.pattern = static_cast<std::int32_t>(axis->mode);
+      declaration.width = axis->mode == StyleSizeMode::FLEX ? std::bit_cast<std::int32_t>(axis->weight) : axis->extent;
+    } else if (property == PssProperty::MIN_WIDTH || property == PssProperty::MAX_WIDTH ||
+               property == PssProperty::MIN_HEIGHT || property == PssProperty::MAX_HEIGHT) {
       const auto width = parseWidth(text);
 
       if (!width || state_ != StyleState::ANY) {
@@ -1070,6 +1122,32 @@ constexpr void assignPssDeclaration(PssProperty property, PssValue value, StyleD
     destination.minWidth = value.width;
 
     break;
+  case PssProperty::WIDTH:
+  case PssProperty::HEIGHT:
+  case PssProperty::MAX_WIDTH:
+  case PssProperty::MIN_HEIGHT:
+  case PssProperty::MAX_HEIGHT:
+    break;
+  }
+}
+
+/** @param property Runtime sizing property validated by the shared parser.
+ * @param value Property-tagged scalar; flex weight retains all unsigned bits.
+ * @param destination Owning runtime rule scratch; no reference escapes.
+ */
+inline void assignPssSizing(PssProperty property, PssValue value, StyleSizing &destination) noexcept {
+  if (property == PssProperty::WIDTH || property == PssProperty::HEIGHT) {
+    const auto mode = static_cast<StyleSizeMode>(value.pattern);
+    const StyleAxisSize request{mode, mode == StyleSizeMode::FIXED ? value.width : 0,
+                                mode == StyleSizeMode::FLEX ? std::bit_cast<std::uint32_t>(value.width) : 1};
+
+    (property == PssProperty::WIDTH ? destination.width : destination.height) = request;
+  } else if (property == PssProperty::MAX_WIDTH) {
+    destination.maxWidth = value.width;
+  } else if (property == PssProperty::MIN_HEIGHT) {
+    destination.minHeight = value.width;
+  } else if (property == PssProperty::MAX_HEIGHT) {
+    destination.maxHeight = value.width;
   }
 }
 } // namespace portals::detail

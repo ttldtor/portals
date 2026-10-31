@@ -8,6 +8,82 @@
 using namespace portals;
 namespace sc = style::ct;
 
+TEST_CASE("runtime sizing literal and document stages admit canonical axis metadata") {
+  constexpr char SOURCE[] =
+    "Label{width:3;width:fit-content;min-width:2;max-width:8;height:flex(4294967295);min-height:1;max-height:4;}";
+  const auto parsed = parsePssDocument(SOURCE);
+
+  REQUIRE(parsed);
+  for (const bool document : {false, true}) {
+    auto owner = ui::scene(ui::label("body"));
+
+    if (document) {
+      owner | ui::style(*parsed);
+    } else {
+      owner | ui::style(SOURCE);
+    }
+
+    REQUIRE(owner.prepareChecked());
+    const auto sources = owner.managed()->get().styleSources();
+
+    REQUIRE(sources);
+    REQUIRE(sources->back().document);
+    CHECK(sources->back().document->sheet == parsed->sheet);
+    REQUIRE(owner.close());
+  }
+
+  for (const unsigned corruption : {0u, 1u, 2u, 3u}) {
+    auto forged = *parsed;
+
+    if (corruption == 0) {
+      forged.declarations[1].value.pattern = 99;
+    } else if (corruption == 1) {
+      forged.declarations[1].value.width = 5;
+    } else if (corruption == 2) {
+      forged.declarations[4].value.width = 0;
+    } else {
+      forged.sheet.rules[0].sizing = std::make_shared<const StyleSizing>();
+    }
+
+    auto owner = ui::scene(ui::label("body")) | ui::style(forged);
+
+    CHECK_FALSE(owner.prepareChecked());
+    REQUIRE(owner.close());
+  }
+}
+
+TEST_CASE("pure sizing UI stages publish the owning width request after source destruction") {
+  for (const bool document : {false, true}) {
+    ui::Ref<Label> label;
+    auto owner = ui::scene(ui::label(label, "body"));
+
+    if (document) {
+      const auto source = parsePssDocument("Label{width:fit-content;}");
+
+      REQUIRE(source);
+      owner | ui::style(*source);
+    } else {
+      owner | ui::style("Label{width:fit-content;}");
+    }
+
+    bool inspected{};
+
+    owner.configure([&](ManagedScene &, Application &application) {
+      REQUIRE(application.tree().read(label.node(), [&](const Label &widget) {
+        REQUIRE(widget.computedStyle());
+        REQUIRE(widget.computedStyle()->sizing());
+        REQUIRE(widget.computedStyle()->sizing()->width);
+        CHECK(widget.computedStyle()->sizing()->width->mode == StyleSizeMode::CONTENT);
+        inspected = true;
+      }));
+    });
+
+    REQUIRE(owner.prepareChecked());
+    CHECK(inspected);
+    REQUIRE(owner.close());
+  }
+}
+
 TEST_CASE("fractional scrollbar umbrella mounts in a plain lazy scene without a theme") {
   auto owner =
     ui::scene(ui::scrollArea(ui::label("ordinary content")).scrollbar("fractional-block").width(8).height(3));

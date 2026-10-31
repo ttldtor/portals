@@ -2342,25 +2342,14 @@ private:
             ? &state->semanticConstruction->source
             : nullptr;
 
-        for (const auto &change :
-             {settings.width && !(sourceSizing && sourceSizing->width)
-                ? std::optional(detail::SizeChange{detail::SizeDimension::WIDTH, *settings.width})
-                : std::nullopt,
-              settings.height && !(sourceSizing && sourceSizing->height)
-                ? std::optional(detail::SizeChange{detail::SizeDimension::HEIGHT, *settings.height})
-                : std::nullopt,
-              settings.flex && !(sourceSizing && sourceSizing->flex)
-                ? std::optional(detail::SizeChange{detail::SizeDimension::FLEX, 0, *settings.flex})
-                : std::nullopt}) {
-          if (change) {
-            const Node<SizedWidget> target = state->frame && state->frame->mounted != Node<Border>{}
-                                               ? Node<SizedWidget>(state->frame->mounted)
-                                               : Node<SizedWidget>(*node);
-            auto resized = detail::Access::resize(scene, target, *change);
-            if (!resized) {
-              return std::unexpected(resized.error());
-            }
-          }
+        const auto sizing = detail::controlSizing(settings, sourceSizing);
+        const Node<SizedWidget> target = state->frame && state->frame->mounted != Node<Border>{}
+                                           ? Node<SizedWidget>(state->frame->mounted)
+                                           : Node<SizedWidget>(*node);
+        auto resized = detail::Access::finishSizing(scene, target, target, &sizing);
+
+        if (!resized) {
+          return std::unexpected(resized.error());
         }
       }
     }
@@ -2461,20 +2450,15 @@ private:
         // Resource common sizing follows factory setup, including through erased native recipes.
         const auto &source = state->semanticConstruction->source;
 
-        for (const auto &change :
-             {source.width ? std::optional(detail::SizeChange{detail::SizeDimension::WIDTH, *source.width})
-                           : std::nullopt,
-              source.height ? std::optional(detail::SizeChange{detail::SizeDimension::HEIGHT, *source.height})
-                            : std::nullopt,
-              source.flex ? std::optional(detail::SizeChange{detail::SizeDimension::FLEX, 0, *source.flex})
-                          : std::nullopt}) {
-          if (change) {
-            auto resized = detail::Access::resize(scene, *node, *change);
+        const auto sizing = detail::controlSizing(source);
+        auto resized = detail::Access::finishSizing(scene, *node, *node, &sizing);
 
-            if (!resized) {
-              return std::unexpected(resized.error());
-            }
-          }
+        if (!resized) {
+          return std::unexpected(resized.error());
+        }
+
+        if (state->sizing) {
+          state->sizing->overlay(sizing);
         }
       }
     }
@@ -2939,6 +2923,20 @@ void Access::layoutChild(Description<Parent> &parent, Description<Child> &child,
 
 template <class T> void Access::preparedControl(Description<T> &description, std::uint32_t alreadyMaterialized) {
   preparedControlPresence(description, ControlPropertyPresence{alreadyMaterialized});
+}
+
+template <class T> void Access::sizingSettings(Description<T> &description, const RecipeSizing &sizing) {
+  if constexpr (std::derived_from<T, SizedWidget>) {
+    if (!description.state_ || (!sizing.width && !sizing.height)) {
+      return;
+    }
+
+    if (!description.state_->sizing) {
+      description.state_->sizing = std::make_unique<RecipeSizing>();
+    }
+
+    description.state_->sizing->overlay(sizing);
+  }
 }
 
 template <class T>

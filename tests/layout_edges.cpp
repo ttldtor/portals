@@ -589,3 +589,143 @@ TEST_CASE("failed regional staging leaves admission and geometry unchanged") {
   CHECK(take(fixture.tree->inspect(fixture.body)).geometryEpoch == child.geometryEpoch);
   CHECK(take(LayoutTraversalAccess::adoptRegionalInput(*fixture.tree, geometry, owners)));
 }
+
+TEST_CASE("PSS axis requests intersect hard bounds and preserve last valid state") {
+  for (const bool vertical : {false, true}) {
+    auto scheduler = take(Scheduler::create());
+    auto tree = take(WidgetTree::create(*scheduler));
+    const auto root = take(tree->root());
+    const auto parent = take(tree->emplaceChecked<Overlay>(root));
+    const auto child = take(tree->emplaceChecked<SizedWidget>(parent));
+    StyleEngine styles(*tree);
+
+    take(styles.bind(child, {.type = "Probe"}));
+    take(styles.replacePss(vertical ? "Probe{height:fit-content;min-height:4;max-height:7;}"
+                                    : "Probe{width:fit-content;min-width:4;max-width:7;}"));
+    const auto viewport = rectangle({}, {2, 2});
+
+    take(tree->frame([&] {
+      take(layoutTree(*tree, root, viewport, viewport));
+    }));
+
+    const auto before = take(tree->inspect(child));
+    const auto revision = styles.revision();
+    SizePolicy saved;
+
+    take(tree->read(child, [&](const SizedWidget &widget) {
+      saved = widget.sizePolicy();
+      const auto effective = take(detail::effectiveSizePolicy(widget));
+      const auto axis = vertical ? effective.height : effective.width;
+
+      CHECK(axis.minimum == 4);
+      CHECK(axis.maximum == 7);
+      CHECK(axis.mode == SizeMode::CONTENT);
+    }));
+    CHECK((vertical ? before.geometry.local.size().height : before.geometry.local.size().width) == 4);
+
+    auto invalid = saved;
+    (vertical ? invalid.height : invalid.width) = {3, 3, 3, SizeMode::FIXED};
+
+    CHECK(setSizePolicy(*tree, child, invalid) == std::unexpected(TreeError::INVALID_ARGUMENT));
+    CHECK(styles.revision() == revision);
+    CHECK(take(tree->inspect(child)).geometryEpoch == before.geometryEpoch);
+    take(tree->read(child, [&](const SizedWidget &widget) {
+      CHECK(widget.sizePolicy() == saved);
+    }));
+
+    const auto rejected = styles.replacePss(vertical ? "Probe{height:3;min-height:4;}" : "Probe{width:3;min-width:4;}");
+
+    REQUIRE_FALSE(rejected);
+    CHECK(rejected.error().cause == TreeError::INVALID_ARGUMENT);
+    CHECK(styles.revision() == revision);
+    CHECK(take(tree->inspect(child)).geometryEpoch == before.geometryEpoch);
+
+    take(styles.replacePss(vertical ? "Probe{height:3;height:auto;min-height:4;max-height:7;}"
+                                    : "Probe{width:3;width:auto;min-width:4;max-width:7;}"));
+    take(tree->read(child, [&](const Widget &widget) {
+      const auto effective = take(detail::effectiveSizePolicy(widget));
+      const auto axis = vertical ? effective.height : effective.width;
+
+      CHECK(axis.mode == SizeMode::AUTOMATIC);
+      CHECK(axis.minimum == 4);
+      CHECK(axis.maximum == 7);
+    }));
+
+    take(styles.replacePss(""));
+    auto exact = saved;
+    (vertical ? exact.height : exact.width) = {20, 20, 20, SizeMode::FIXED};
+
+    take(setSizePolicy(*tree, child, exact));
+    const auto exactRevision = styles.revision();
+    const auto conflicting = styles.replacePss(vertical ? "Probe{min-height:30;}" : "Probe{min-width:30;}");
+
+    REQUIRE_FALSE(conflicting);
+    CHECK(styles.revision() == exactRevision);
+    take(tree->read(child, [&](const SizedWidget &widget) {
+      CHECK(widget.sizePolicy() == exact);
+    }));
+  }
+}
+
+TEST_CASE("PSS flex uses the same zero basis and weights as owning C++ policies") {
+  struct Probe final : SizedWidget {
+    std::int32_t intrinsic;
+
+    explicit Probe(std::int32_t value) : intrinsic(value) {
+    }
+
+    std::expected<CellSize, TreeError> measure(CellSize) override {
+      return CellSize{intrinsic, intrinsic};
+    }
+  };
+
+  for (const bool vertical : {false, true}) {
+    std::array<CellSize, 2> owningGeometry;
+
+    for (const bool styled : {false, true}) {
+      auto scheduler = take(Scheduler::create());
+      auto tree = take(WidgetTree::create(*scheduler));
+      const auto root = take(tree->root());
+      const Node<Widget> parent = vertical ? Node<Widget>(take(tree->emplaceChecked<Column>(root)))
+                                           : Node<Widget>(take(tree->emplaceChecked<Row>(root)));
+      const std::array children{take(tree->emplaceChecked<Probe>(parent, 1)),
+                                take(tree->emplaceChecked<Probe>(parent, 12))};
+      StyleEngine styles(*tree);
+
+      if (styled) {
+        take(styles.bind(children[0], {.type = "Probe", .id = "first"}));
+        take(styles.bind(children[1], {.type = "Probe", .id = "second"}));
+        take(styles.replacePss(vertical ? "#first{height:flex(1);}#second{height:flex(2);}"
+                                        : "#first{width:flex(1);}#second{width:flex(2);}"));
+      } else {
+        for (std::size_t index = 0; index < children.size(); ++index) {
+          SizePolicy policy;
+          auto &axis = vertical ? policy.height : policy.width;
+
+          axis.mode = SizeMode::FLEX;
+          axis.preferred = 0;
+          axis.weight = static_cast<std::uint32_t>(index + 1);
+          take(setSizePolicy(*tree, children[index], policy));
+        }
+      }
+
+      const auto viewport = rectangle({}, {30, 30});
+
+      take(tree->frame([&] {
+        take(layoutTree(*tree, root, viewport, viewport));
+      }));
+
+      for (std::size_t index = 0; index < children.size(); ++index) {
+        const auto size = take(tree->inspect(children[index])).geometry.local.size();
+
+        if (styled) {
+          CHECK(size == owningGeometry[index]);
+        } else {
+          owningGeometry[index] = size;
+        }
+
+        CHECK((vertical ? size.height : size.width) == (index == 0 ? 10 : 20));
+      }
+    }
+  }
+}

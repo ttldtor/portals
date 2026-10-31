@@ -321,7 +321,15 @@ constexpr std::array<ControlPropertyDescriptor, detail::CONTROL_PROPERTY_COUNT> 
    {"scrollbar.vertical.thumbEnd", Kind::LITERAL_STRING, 3, {}},
    {"scrollbar.vertical.thumbSingle", Kind::LITERAL_STRING, 3, {}},
    {"glyphProfile", Kind::ENUMERATION, 1, GLYPH_PROFILE_NAMES},
-   {"glyphFallback", Kind::ENUMERATION, 1, GLYPH_FALLBACK_NAMES}}};
+   {"glyphFallback", Kind::ENUMERATION, 1, GLYPH_FALLBACK_NAMES},
+   {"fitWidth", Kind::BOOLEAN, 1, {}},
+   {"fitHeight", Kind::BOOLEAN, 1, {}},
+   {"flexX", Kind::UNSIGNED_INTEGER, 1, {}},
+   {"flexY", Kind::UNSIGNED_INTEGER, 1, {}},
+   {"minWidth", Kind::SIGNED_INTEGER, 1, {}},
+   {"maxWidth", Kind::SIGNED_INTEGER, 1, {}},
+   {"minHeight", Kind::SIGNED_INTEGER, 1, {}},
+   {"maxHeight", Kind::SIGNED_INTEGER, 1, {}}}};
 static_assert(std::ranges::all_of(PROPERTIES, [](const auto &property) {
   return !property.path.empty();
 }));
@@ -337,7 +345,8 @@ template <class... Indices> constexpr Mask propertyMask(Indices... indices) {
 constexpr Mask FRAME_MASK = propertyMask(53, 54, 55, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177,
                                          178, 179, 189, 190, 191, 192);
 constexpr Mask PROFILE_MASK = propertyMask(249, 250);
-constexpr Mask SIZE_MASK = propertyMask(1, 2, 3) | FRAME_MASK | PROFILE_MASK;
+constexpr Mask SIZING_MASK = propertyMask(251, 252, 253, 254, 255, 256, 257, 258);
+constexpr Mask SIZE_MASK = propertyMask(1, 2, 3) | SIZING_MASK | FRAME_MASK | PROFILE_MASK;
 constexpr Mask TEXT_MASK = propertyMask(0);
 constexpr Mask PASSWORD_MASK =
   SIZE_MASK | TEXT_MASK | propertyMask(7, 8, 10, 11, 33, 34, 35, 36, 159, 160, 161, 162, 163, 164);
@@ -373,7 +382,7 @@ constexpr Mask THEME_CATALOG_MASK =
 constexpr Mask POSITIVE_UNSIGNED_MASK =
   propertyMask(3, 17, 18, 26, 27, 28, PAINT_LIMIT_PROPERTY, 45, 55, 59, 71, 72, 73, 83, 90, 100, 110, 111, 112, 113,
                114, 115, 116, 124, 125, 126, 127, 128, 129, 130, 137, 138, 139, 140, 143, 144, 145, 146, 147, 148, 149,
-               150, 151, 155, 156, 157, 158, 172, 195, 201, 202, 203, 206, 221, 225, 226, 227, 228, 232, 233);
+               150, 151, 155, 156, 157, 158, 172, 195, 201, 202, 203, 206, 221, 225, 226, 227, 228, 232, 233, 253, 254);
 constexpr Mask CHECK_MASK = SIZE_MASK | TEXT_MASK | propertyMask(5, 6);
 constexpr Mask LAYOUT_MASK = SIZE_MASK | propertyMask(4, 22, 23, 24, 25, 30, 31, 32);
 constexpr Mask EDIT_MASK = SIZE_MASK | TEXT_MASK | propertyMask(7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 33, 34, 35, 36);
@@ -396,11 +405,14 @@ constexpr auto FRAME_SCHEMA =
                  PROPERTIES[168], PROPERTIES[169], PROPERTIES[170], PROPERTIES[171], PROPERTIES[172], PROPERTIES[173],
                  PROPERTIES[174], PROPERTIES[175], PROPERTIES[176], PROPERTIES[177], PROPERTIES[178], PROPERTIES[179],
                  PROPERTIES[189], PROPERTIES[190], PROPERTIES[191], PROPERTIES[192], PROPERTIES[249], PROPERTIES[250]});
+constexpr auto SIZING_SCHEMA = std::to_array({PROPERTIES[251], PROPERTIES[252], PROPERTIES[253], PROPERTIES[254],
+                                              PROPERTIES[255], PROPERTIES[256], PROPERTIES[257], PROPERTIES[258]});
 
 template <std::size_t N> constexpr auto withFrame(const std::array<ControlPropertyDescriptor, N> &base) {
-  std::array<ControlPropertyDescriptor, N + FRAME_SCHEMA.size()> result{};
+  std::array<ControlPropertyDescriptor, N + FRAME_SCHEMA.size() + SIZING_SCHEMA.size()> result{};
   std::ranges::copy(base, result.begin());
   std::ranges::copy(FRAME_SCHEMA, result.begin() + N);
+  std::ranges::copy(SIZING_SCHEMA, result.begin() + N + FRAME_SCHEMA.size());
 
   return result;
 }
@@ -963,7 +975,15 @@ ControlContextError exceptionError() noexcept {
   X(scrollbar.vertical.thumbEnd, 247)                                                                                  \
   X(scrollbar.vertical.thumbSingle, 248)                                                                               \
   X(glyphProfile, 249)                                                                                                 \
-  X(glyphFallback, 250)
+  X(glyphFallback, 250)                                                                                                \
+  X(fitWidth, 251)                                                                                                     \
+  X(fitHeight, 252)                                                                                                    \
+  X(flexX, 253)                                                                                                        \
+  X(flexY, 254)                                                                                                        \
+  X(minWidth, 255)                                                                                                     \
+  X(maxWidth, 256)                                                                                                     \
+  X(minHeight, 257)                                                                                                    \
+  X(maxHeight, 258)
 
 #define PORTALS_CONTROL_LEAVES(X)                                                                                      \
   PORTALS_CONTROL_BASE_LEAVES(X)                                                                                       \
@@ -1000,10 +1020,74 @@ template <class Visitor> void visitLeaves(const ControlSettings &settings, Visit
 }
 
 std::size_t mergedLeafCount(const ControlSettings &left, const ControlSettings &right) {
-  return (detail::controlSettingsPresenceSet(left) | detail::controlSettingsPresenceSet(right)).count();
+  auto present = detail::controlSettingsPresenceSet(left);
+  const bool width = right.width || right.fitWidth || right.flexX || right.flex;
+  const bool height = right.height || right.fitHeight || right.flexY || right.flex;
+
+  if ((width || height) && left.flex) {
+    present.reset(3);
+    present.set(253);
+    present.set(254);
+  }
+
+  if (width) {
+    present.reset(1);
+    present.reset(251);
+    present.reset(253);
+  }
+
+  if (height) {
+    present.reset(2);
+    present.reset(252);
+    present.reset(254);
+  }
+
+  return (present | detail::controlSettingsPresenceSet(right)).count();
+}
+
+// An unordered settings source has one request per axis. A higher source replaces that
+// request as a unit, while retaining the independent bounds and the other flex axis.
+void replaceSizingModes(ControlSettings &target, const ControlSettings &patch) {
+  const bool width = patch.width || patch.fitWidth || patch.flexX || patch.flex;
+  const bool height = patch.height || patch.fitHeight || patch.flexY || patch.flex;
+
+  if (!width && !height) {
+    return;
+  }
+
+  if (target.flex) {
+    const auto source = sourceFor(target, "flex");
+
+    target.flexX = target.flexY = target.flex;
+    target.flex.reset();
+    std::erase_if(target.origins, [](const auto &origin) {
+      return origin.path == "flex";
+    });
+    target.origins.push_back({"flexX", source});
+    target.origins.push_back({"flexY", source});
+  }
+
+  if (width) {
+    target.width.reset();
+    target.fitWidth.reset();
+    target.flexX.reset();
+  }
+
+  if (height) {
+    target.height.reset();
+    target.fitHeight.reset();
+    target.flexY.reset();
+  }
+
+  std::erase_if(target.origins, [&](const auto &origin) {
+    return (width && (origin.path == "width" || origin.path == "fitWidth" || origin.path == "flexX")) ||
+           (height && (origin.path == "height" || origin.path == "fitHeight" || origin.path == "flexY"));
+  });
 }
 
 void merge(ControlSettings &target, const ControlSettings &patch) {
+  replaceSizingModes(target, patch);
+
   const auto assign = [&](auto &destination, const auto &value, std::size_t index) {
     if (!value) {
       return;
@@ -1192,6 +1276,10 @@ std::expected<void, ControlContextError> validateSettings(const ControlSettings 
     return std::unexpected(*failure);
   }
 
+  if (detail::sizeModeConflict(settings)) {
+    return std::unexpected(error(Code::INVALID_VALUE, type, "sizing", settings.origin));
+  }
+
   if (mask == PASSWORD_MASK) {
     const auto rejected = [&](std::string_view path) {
       return std::unexpected(error(Code::INVALID_VALUE, type, path, sourceFor(settings, path)));
@@ -1242,6 +1330,8 @@ std::expected<void, ControlContextError> validateSettings(const ControlSettings 
 
 namespace detail {
 void mergeRecipeControlSettings(ControlSettings &target, const ControlSettings &patch) {
+  replaceSizingModes(target, patch);
+
   const auto apply = [](auto &destination, const auto &source) {
     if (source) {
       destination = source;
@@ -2041,6 +2131,10 @@ resolveData(const Data &data, std::string_view name, const ControlSettings &inst
   }
 
   merge(result.settings, instance);
+
+  if (detail::sizeBoundsConflict(result.settings)) {
+    return std::unexpected(error(Code::INVALID_VALUE, name, "sizing", result.settings.origin));
+  }
 
   const auto &notification = result.settings.notification;
 

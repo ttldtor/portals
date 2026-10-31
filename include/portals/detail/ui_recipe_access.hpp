@@ -891,6 +891,9 @@ struct Access {
     return changed ? std::expected<void, ManagedError>{} : std::unexpected(error(node, changed.error()));
   }
 
+  /** @brief Stage sizing. @param description Cold recipe. @param sizing Copied owning overlay. */
+  template <class T> static void sizingSettings(Description<T> &description, const RecipeSizing &sizing);
+
   /** @brief Commit final cold bounds and transparent frame preferences in one checked update.
    * @param scene UI-affine mount owner. @param source Concrete sized content.
    * @param target Outer frame when present, otherwise source itself.

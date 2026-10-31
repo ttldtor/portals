@@ -103,6 +103,94 @@ std::string row(const test_support::VtOracle::Snapshot &snapshot, int y) {
   return result;
 }
 
+struct CaptionSink : PaintContext {
+  std::vector<RenderCommand> commands;
+
+  std::expected<void, TreeError> submit(std::span<const RenderCommand> values) override {
+    for (const auto &value : values) {
+      commands.emplace_back(value);
+    }
+
+    return {};
+  }
+};
+
+CellBuffer paintCaption(Control &control, int width) {
+  take(control.arrange(take(CellRect::from({}, {width, 1}))));
+  CaptionSink sink;
+
+  take(control.paint(sink));
+
+  return take(renderFullFrame({30, 1}, sink.commands));
+}
+
+std::string captionRow(const CellBuffer &buffer) {
+  std::string result;
+
+  for (int x = 0; x < buffer.size().width; ++x) {
+    const auto cell = take(buffer.at({x, 0}));
+
+    if (cell.cell.kind != CellKind::CONTINUATION) {
+      result += cell.glyph;
+    }
+  }
+
+  while (!result.empty() && result.back() == ' ') {
+    result.pop_back();
+  }
+
+  return result;
+}
+
+void buttonContour() {
+  Button button(gallery::text("Style"));
+  const auto expanded = paintCaption(button, 15);
+
+  check(captionRow(expanded) == "[    Style    ]", "button contour occupies the allocated width and centers text");
+  check(take(button.measure({15, 1})) == CellSize{9, 1}, "allocated button width does not replace intrinsic size");
+  check(take(expanded.at({15, 0})).glyph == " ", "button paint does not escape its allocated rectangle");
+
+  Button narrow(gallery::text("A"));
+  const std::array<std::string_view, 5> expected{"", "[", "[]", "[ ]", "[  ]"};
+
+  for (int width = 0; width < static_cast<int>(expected.size()); ++width) {
+    check(captionRow(paintCaption(narrow, width)) == expected[static_cast<std::size_t>(width)],
+          "narrow buttons preserve the available contour without overlapping text");
+  }
+
+  Button wide(gallery::text("\xe7\x95\x8c"));
+  const auto clipped = paintCaption(wide, 5);
+  const auto complete = paintCaption(wide, 6);
+
+  check(captionRow(clipped) == "[   ]" && take(clipped.at({2, 0})).cell.kind != CellKind::CONTINUATION,
+        "a wide grapheme never overwrites the contour or leaves a partial glyph");
+  check(captionRow(complete) == "[ \xe7\x95\x8c ]" && take(complete.at({3, 0})).cell.kind == CellKind::CONTINUATION,
+        "a wide grapheme fits intact inside the button contour");
+
+  Button combined(gallery::text("\xe7\x95\x8c e\xcc\x81"));
+
+  check(captionRow(paintCaption(combined, 12)) == "[   \xe7\x95\x8c e\xcc\x81   ]",
+        "caption centering counts display cells and preserves combining graphemes");
+
+  struct CheckedButton : Button {
+    CheckedButton() : Button(gallery::text("On")) {
+      showChecked(true);
+    }
+  } checked;
+
+  check(captionRow(paintCaption(checked, 12)) == "[*   On    ]" && checked.checked(),
+        "expanded checked buttons retain their selection marker");
+  check(captionRow(paintCaption(checked, 3)) == "[*]", "narrow checked buttons preserve their marker when it fits");
+
+  Button plain(gallery::text("Style"), {}, {}, ButtonChrome::NONE);
+  Label label(gallery::text("Style"));
+  CheckBox checkbox(gallery::text("Tick"));
+
+  check(captionRow(paintCaption(plain, 15)) == "Style" && captionRow(paintCaption(label, 15)) == "Style" &&
+          captionRow(paintCaption(checkbox, 15)) == "[ ] Tick",
+        "caption-only buttons, labels and checkbox markers keep their existing presentation");
+}
+
 void galleryReplay() {
   gallery::Scene scene;
   test_support::FakeClock clock;
@@ -121,8 +209,9 @@ void galleryReplay() {
 
   check(row(initial, 0) == "Portals controls", "gallery heading snapshot");
   check(row(initial, 1) == "Unicode: \xe7\x95\x8c e\xcc\x81", "gallery Unicode snapshot uses grapheme width");
-  check(row(initial, 2) == "[ Run ]" && row(initial, 3) == "[ ] Alerts", "initial control snapshot");
-  check(row(initial, 4) == "Disabled label" && row(initial, 5) == "[ Disabled button ]" &&
+  check(row(initial, 2) == "[            Run             ]" && row(initial, 3) == "[ ] Alerts",
+        "initial control snapshot");
+  check(row(initial, 4) == "Disabled label" && row(initial, 5) == "[      Disabled button       ]" &&
           row(initial, 6) == "[ ] Disabled check",
         "disabled group snapshot");
   check(initial.cells.at(60).style.bold && !initial.cells.at(60).style.underline, "initial button focus painted");
@@ -723,6 +812,7 @@ void precommitFailure() {
 } // namespace
 
 int main() {
+  buttonContour();
   galleryReplay();
   textAndInvalidation();
   widthPolicyChange();

@@ -11,6 +11,7 @@
 
 namespace portals {
 class Menu;
+
 namespace detail {
 struct FindAccess;
 }
@@ -89,6 +90,13 @@ protected:
    * and other constructor exceptions to CALLBACK_FAILED. Argument construction precedes that boundary.
    */
   Control(GraphemeText text, std::string_view prefix, std::string_view suffix, ControlStyle style, SizePolicy policy);
+  /** @brief Paint the synchronized caption with intrinsic or allocated-width decorations.
+   * @param context Borrowed synchronous sink with the same lifetime and exception contract as paint.
+   * @param stretchChrome Keep the decorations at the allocated edges and center the caption between them.
+   * @return Success, invalid intrinsic/clip geometry, or the sink's unchanged TreeError.
+   * @note Borrows the existing text and decorations; no text storage is created.
+   */
+  std::expected<void, TreeError> paintCaption(PaintContext &context, bool stretchChrome);
   /** @brief Select a same-width prefix between frames; used only by the checkbox binding.
    * @param checked True selects the checked decoration; false selects the original prefix.
    * @note The caller owns paint invalidation; this helper only changes presentation.
@@ -138,7 +146,7 @@ public:
 
 /** @brief Button caption decoration; action routing and identity remain unchanged. */
 enum class ButtonChrome {
-  BRACKETS, ///< Existing ASCII bracket decoration.
+  BRACKETS, ///< ASCII bracket contour spanning the allocated button width.
   NONE      ///< Caption only, including a single-glyph action button.
 };
 
@@ -164,6 +172,14 @@ public:
    * @return Caption/decorations size, INVALID_ARGUMENT for invalid chrome, or Control measurement failure.
    */
   std::expected<CellSize, TreeError> measure(CellSize available) override;
+
+  /** @brief Paint bracket chrome at the allocated edges with a centered, independently clipped caption.
+   * @param context Borrowed synchronous sink; text borrows and sink exceptions follow Control::paint.
+   * @return Success, invalid chrome/geometry, or the sink's unchanged TreeError.
+   * @note NONE chrome retains the intrinsic caption presentation. In widths below four cells,
+   * brackets take priority over the caption; a single cell can show only the opening bracket.
+   */
+  std::expected<void, TreeError> paint(PaintContext &context) override;
 
   /** @return Shared action selection presentation, false for an ordinary button. */
   bool checked() const {

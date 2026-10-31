@@ -36,23 +36,29 @@ std::expected<void, ManagedError> registerSchemas(ControlContext &controls, cons
       paths.insert(paths.end(), {"state", "cycle"});
     }
 
-    const auto matchesPreProfileDataSchema = [&] {
+    const auto matchesLegacyDataSchema = [&] {
       if ((entry.virtualView != "VirtualList" && entry.virtualView != "VirtualTable") ||
           !controls.hasRegisteredType(entry.name) || controls.matchesRegisteredType(entry.name, paths)) {
         return false;
       }
 
-      // Old expanded data allowlists may include the canonical frame leaves as well.
-      std::erase_if(paths, [](std::string_view path) {
+      // Old exact data allowlists can retain profiles and frames without opting into new sizing leaves.
+      auto legacyPaths = paths;
+
+      std::erase_if(legacyPaths, [](std::string_view path) {
+        return path == "fitWidth" || path == "fitHeight" || path == "flexX" || path == "flexY" || path == "minWidth" ||
+               path == "maxWidth" || path == "minHeight" || path == "maxHeight";
+      });
+
+      if (controls.matchesRegisteredType(entry.name, legacyPaths)) {
+        return true;
+      }
+
+      std::erase_if(legacyPaths, [](std::string_view path) {
         return path == "glyphProfile" || path == "glyphFallback";
       });
 
-      const bool matches = controls.matchesRegisteredType(entry.name, paths);
-
-      // Erasing retained capacity; always restore the full schema before returning.
-      paths.insert(paths.end(), {"glyphProfile", "glyphFallback"});
-
-      return matches;
+      return controls.matchesRegisteredType(entry.name, legacyPaths);
     };
 
     if (!entry.virtualView.empty()) {
@@ -67,7 +73,7 @@ std::expected<void, ManagedError> registerSchemas(ControlContext &controls, cons
         }
       }
 
-      if (matchesPreProfileDataSchema()) {
+      if (matchesLegacyDataSchema()) {
         continue;
       }
     }
@@ -81,7 +87,7 @@ std::expected<void, ManagedError> registerSchemas(ControlContext &controls, cons
       }
     }
 
-    if (matchesPreProfileDataSchema()) {
+    if (matchesLegacyDataSchema()) {
       continue;
     }
 
@@ -107,11 +113,23 @@ std::expected<void, ManagedError> registerSchemas(ControlContext &controls, cons
       }
     }
 
+    if (entry.factoryKind == detail::ControlFactoryKind::USER && entry.sized &&
+        !(controls.hasRegisteredType(entry.name) && controls.matchesRegisteredType(entry.name, paths))) {
+      for (const auto path :
+           {"fitWidth", "fitHeight", "flexX", "flexY", "minWidth", "maxWidth", "minHeight", "maxHeight"}) {
+        if (std::ranges::find(paths, path) == paths.end()) {
+          paths.push_back(path);
+        }
+      }
+    }
+
     if (controls.hasRegisteredType(entry.name)) {
       if (entry.factoryKind == detail::ControlFactoryKind::MESSAGE_BINDING ||
+          entry.factoryKind == detail::ControlFactoryKind::NOTIFICATION_BINDING ||
           entry.factoryKind == detail::ControlFactoryKind::THEME_SELECTOR_BINDING ||
           entry.factoryKind == detail::ControlFactoryKind::THEME_CATALOG_BINDING) {
         const auto oldCount = entry.factoryKind == detail::ControlFactoryKind::MESSAGE_BINDING          ? 24u
+                              : entry.factoryKind == detail::ControlFactoryKind::NOTIFICATION_BINDING   ? 49u
                               : entry.factoryKind == detail::ControlFactoryKind::THEME_SELECTOR_BINDING ? 22u
                                                                                                         : 38u;
 

@@ -704,7 +704,11 @@ private:
 
       const bool enabled = value == "true";
 
-      if (path == "securePolicy.lockPages") {
+      if (path == "fitWidth") {
+        settings.fitWidth = enabled;
+      } else if (path == "fitHeight") {
+        settings.fitHeight = enabled;
+      } else if (path == "securePolicy.lockPages") {
         settings.securePolicy.lockPages = enabled;
       } else if (path == "securePolicy.excludeFromDumps") {
         settings.securePolicy.excludeFromDumps = enabled;
@@ -949,7 +953,8 @@ private:
 
     if ((schema->kind == ControlPropertyKind::SIGNED_INTEGER &&
          *value > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max())) ||
-        (path == "flex" && (*value == 0 || *value > std::numeric_limits<std::uint32_t>::max()))) {
+        ((path == "flex" || path == "flexX" || path == "flexY") &&
+         (*value == 0 || *value > std::numeric_limits<std::uint32_t>::max()))) {
       return std::unexpected(document_.propertyFailure(Code::INVALID_VALUE, offset, type, path));
     }
 
@@ -983,10 +988,22 @@ private:
       settings.width = static_cast<std::int32_t>(*value);
     } else if (path == "height") {
       settings.height = static_cast<std::int32_t>(*value);
+    } else if (path == "minWidth") {
+      settings.minWidth = static_cast<std::int32_t>(*value);
+    } else if (path == "maxWidth") {
+      settings.maxWidth = static_cast<std::int32_t>(*value);
+    } else if (path == "minHeight") {
+      settings.minHeight = static_cast<std::int32_t>(*value);
+    } else if (path == "maxHeight") {
+      settings.maxHeight = static_cast<std::int32_t>(*value);
     } else if (path == "gap") {
       settings.gap = static_cast<std::int32_t>(*value);
     } else if (path == "flex") {
       settings.flex = static_cast<std::uint32_t>(*value);
+    } else if (path == "flexX") {
+      settings.flexX = static_cast<std::uint32_t>(*value);
+    } else if (path == "flexY") {
+      settings.flexY = static_cast<std::uint32_t>(*value);
     } else if (path == "format.maxBytesPerBinding") {
       settings.format.maxBytesPerBinding = *value;
     } else if (path == "rowHeight") {
@@ -1397,6 +1414,11 @@ private:
       target.arguments.settings.state = target.arguments.checked ? CheckState::CHECKED : CheckState::UNCHECKED;
 
       return {};
+    }
+
+    if (schema.sized && (key == "fitWidth" || key == "fitHeight" || key == "flexX" || key == "flexY" ||
+                         key == "minWidth" || key == "maxWidth" || key == "minHeight" || key == "maxHeight")) {
+      return setting(target.arguments.settings, target.name, key, offset);
     }
 
     const bool sized = schema.sized && (key == "width" || key == "height" || key == "flex");

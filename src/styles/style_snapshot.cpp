@@ -75,6 +75,20 @@ struct StyleHash {
     add(input.fallback);
   }
 
+  void add(const StyleAxisSize &input) noexcept {
+    add(input.mode);
+    add(input.extent);
+    add(input.weight);
+  }
+
+  void add(const StyleSizing &input) noexcept {
+    add(input.width);
+    add(input.height);
+    add(input.maxWidth);
+    add(input.minHeight);
+    add(input.maxHeight);
+  }
+
   void add(const std::shared_ptr<const detail::ScrollbarGlyphLiteral> &input) noexcept {
     add(static_cast<bool>(input));
     if (input) {
@@ -94,6 +108,10 @@ std::size_t hashStyle(detail::ComputedStyleView input) noexcept {
   hash.add(input.header);
   hash.add(input.caret);
   hash.add(input.minWidth);
+  hash.add(input.sizing != nullptr);
+  if (input.sizing) {
+    hash.add(*input.sizing);
+  }
   hash.add(input.frame);
   hash.add(input.scrollbar);
   hash.add(input.scrollbarThumbSegments != nullptr);
@@ -123,8 +141,10 @@ bool equalScrollbarGlyphs(const ScrollbarGlyphStates &left, const ScrollbarGlyph
 }
 
 bool StyleGlyphBlock::operator==(const StyleGlyphBlock &other) const noexcept {
-  return values == other.values && (literals == other.literals ||
-                                    (literals && other.literals && equalScrollbarGlyphs(*literals, *other.literals)));
+  return values == other.values &&
+         (literals == other.literals ||
+          (literals && other.literals && equalScrollbarGlyphs(*literals, *other.literals))) &&
+         (sizing == other.sizing || (sizing && other.sizing && *sizing == *other.sizing));
 }
 
 std::size_t styleBlockHash(const StyleGlyphBlock &value) noexcept {
@@ -133,6 +153,10 @@ std::size_t styleBlockHash(const StyleGlyphBlock &value) noexcept {
   hash.add(static_cast<bool>(value.literals));
   if (value.literals) {
     hash.add(*value.literals);
+  }
+  hash.add(static_cast<bool>(value.sizing));
+  if (value.sizing) {
+    hash.add(*value.sizing);
   }
   return hash.value;
 }
@@ -175,10 +199,13 @@ StyleSnapshot::StyleSnapshot(const ComputedStyle &value) : StyleSnapshot(Prepare
     blocks_.thumb = std::make_shared<const std::array<ScrollbarThumbAppearance, 6>>(*value.scrollbarThumbSegments);
   }
 
-  if (value.glyphs != EMPTY_GLYPHS || value.scrollbarGlyphs.has_value()) {
+  if (value.glyphs != EMPTY_GLYPHS || value.scrollbarGlyphs.has_value() || value.sizing) {
     detail::StyleGlyphBlock glyphs{value.glyphs};
     if (value.scrollbarGlyphs.has_value()) {
       glyphs.literals = std::make_shared<const detail::ScrollbarGlyphStates>(*value.scrollbarGlyphs);
+    }
+    if (value.sizing) {
+      glyphs.sizing = std::make_shared<const StyleSizing>(*value.sizing);
     }
     blocks_.glyphs = std::make_shared<const detail::StyleGlyphBlock>(std::move(glyphs));
   }
@@ -209,6 +236,10 @@ const detail::ScrollbarGlyphStates *StyleSnapshot::scrollbarGlyphs() const noexc
   return blocks_.glyphs ? blocks_.glyphs->literals.get() : nullptr;
 }
 
+const StyleSizing *StyleSnapshot::sizing() const noexcept {
+  return blocks_.glyphs ? blocks_.glyphs->sizing.get() : nullptr;
+}
+
 bool StyleSnapshot::hasFrame() const noexcept {
   return static_cast<bool>(blocks_.frame);
 }
@@ -222,7 +253,7 @@ bool StyleSnapshot::hasThumbSegments() const noexcept {
 }
 
 bool StyleSnapshot::hasGlyphs() const noexcept {
-  return static_cast<bool>(blocks_.glyphs);
+  return blocks_.glyphs && (blocks_.glyphs->values != EMPTY_GLYPHS || blocks_.glyphs->literals);
 }
 
 ComputedStyle StyleSnapshot::flatten() const noexcept {
@@ -243,6 +274,9 @@ ComputedStyle StyleSnapshot::flatten() const noexcept {
   if (const auto *literals = scrollbarGlyphs()) {
     result.scrollbarGlyphs = *literals;
   }
+  if (const auto *constraints = sizing()) {
+    result.sizing = *constraints;
+  }
   return result;
 }
 
@@ -253,7 +287,8 @@ bool StyleSnapshot::operator==(const ComputedStyle &other) const noexcept {
          static_cast<bool>(blocks_.thumb) == other.scrollbarThumbSegments.has_value() &&
          (!blocks_.thumb || *blocks_.thumb == *other.scrollbarThumbSegments) && glyphs() == other.glyphs &&
          static_cast<bool>(scrollbarGlyphs()) == other.scrollbarGlyphs.has_value() &&
-         (!other.scrollbarGlyphs || detail::equalScrollbarGlyphs(*scrollbarGlyphs(), *other.scrollbarGlyphs));
+         (!other.scrollbarGlyphs || detail::equalScrollbarGlyphs(*scrollbarGlyphs(), *other.scrollbarGlyphs)) &&
+         static_cast<bool>(sizing()) == other.sizing.has_value() && (!sizing() || *sizing() == *other.sizing);
 }
 
 bool StyleSnapshot::operator==(const StyleSnapshot &other) const noexcept {
@@ -263,7 +298,9 @@ bool StyleSnapshot::operator==(const StyleSnapshot &other) const noexcept {
          static_cast<bool>(blocks_.thumb) == static_cast<bool>(other.blocks_.thumb) &&
          (!blocks_.thumb || *blocks_.thumb == *other.blocks_.thumb) && glyphs() == other.glyphs() &&
          static_cast<bool>(scrollbarGlyphs()) == static_cast<bool>(other.scrollbarGlyphs()) &&
-         (!scrollbarGlyphs() || detail::equalScrollbarGlyphs(*scrollbarGlyphs(), *other.scrollbarGlyphs()));
+         (!scrollbarGlyphs() || detail::equalScrollbarGlyphs(*scrollbarGlyphs(), *other.scrollbarGlyphs())) &&
+         static_cast<bool>(sizing()) == static_cast<bool>(other.sizing()) &&
+         (!sizing() || *sizing() == *other.sizing());
 }
 
 bool ComputedStyle::operator==(const ComputedStyle &other) const noexcept {
@@ -272,7 +309,8 @@ bool ComputedStyle::operator==(const ComputedStyle &other) const noexcept {
          frame == other.frame && scrollbar == other.scrollbar &&
          scrollbarThumbSegments == other.scrollbarThumbSegments && glyphs == other.glyphs &&
          scrollbarGlyphs.has_value() == other.scrollbarGlyphs.has_value() &&
-         (!scrollbarGlyphs || detail::equalScrollbarGlyphs(*scrollbarGlyphs, *other.scrollbarGlyphs));
+         (!scrollbarGlyphs || detail::equalScrollbarGlyphs(*scrollbarGlyphs, *other.scrollbarGlyphs)) &&
+         sizing == other.sizing;
 }
 
 std::size_t StyleSnapshot::contentHash() const noexcept {

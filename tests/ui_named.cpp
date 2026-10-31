@@ -380,6 +380,12 @@ void explicitDataSchemas() {
       take(ui::mount(*scene, ui::vbox(ui::resource(source, options))));
       prepareDataViews(*scene, *app);
       check(callbacks == 1, "explicit data schema must preserve one real code factory invocation");
+      const auto extraSizing = ui::mount(*scene, ui::resource("scene{Bound{fitWidth=true}}", options));
+
+      check(!extraSizing && extraSizing.error().sceneResource &&
+              extraSizing.error().sceneResource->code == SceneResourceErrorCode::UNKNOWN_PROPERTY && callbacks == 1,
+            "old exact data schemas must reject new sizing leaves before invoking their factory");
+
       const auto rows = expanded ? std::uint64_t{3} : std::uint64_t{2};
       const auto checkRanges = [&](const auto &view) {
         const auto visible = view.visibleRange();

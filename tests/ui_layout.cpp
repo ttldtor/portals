@@ -1413,3 +1413,32 @@ TEST_CASE("framed content menu follows caption changes up to its cap and stays i
   take(fixture.scene->prepare(*fixture.app, {60, 10}));
   CHECK(take(fixture.app->tree().consumeFrameRequest()) == Invalidation::NONE);
 }
+
+TEST_CASE("typed sizing settings mount bounded content and retain later method order") {
+  Fixture fixture;
+  ui::ControlContext controls;
+  ui::Ref<Label> label;
+  ui::Ref<Label> automatic;
+
+  controls.defaults("Label", {.flex = 2}).define("Compact", "Label", {.fitWidth = true, .fitHeight = true});
+  take(ui::mount(*fixture.scene,
+                 ui::column(ui::label(label, "abcdefgh")
+                              .variant("Compact")
+                              .settings({.minWidth = 3, .maxWidth = 5, .minHeight = 2, .maxHeight = 3}),
+                            ui::label(automatic, "auto").settings({.fitWidth = false}).width(7)),
+                 controls));
+  fixture.layout({20, 10});
+
+  CHECK(take(label.geometry()).local.size() == CellSize{5, 2});
+  CHECK(take(automatic.geometry()).local.size().width == 7);
+  take(fixture.app->tree().read(label.node(), [&](const Label &widget) {
+    CHECK(widget.sizePolicy().width.mode == SizeMode::CONTENT);
+    CHECK(widget.sizePolicy().height.mode == SizeMode::CONTENT);
+  }));
+
+  ui::Ref<Label> unpublished;
+  const auto rejected = ui::mount(*fixture.scene, ui::label(unpublished, "bad").settings({.width = 3, .minWidth = 4}));
+
+  REQUIRE_FALSE(rejected);
+  CHECK(unpublished.node() == Node<Label>{});
+}

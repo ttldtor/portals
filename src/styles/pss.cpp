@@ -31,6 +31,7 @@ public:
     current_ = StyleRule{};
     origin_ = PssRuleOrigin{};
     glyphs_.reset();
+    sizing_.reset();
     origin_.selector = location;
     origin_.declarationBegin = document.declarations.size();
 
@@ -98,12 +99,30 @@ public:
       document.declarations.push_back({document.sheet.rules.size(), property, location, value, glyph});
     }
 
-    detail::assignPssDeclaration(property, value, current_.declarations);
+    if (property >= PssProperty::WIDTH) {
+      if (!sizing_) {
+        auto admitted = charge(sizeof(StyleSizing), location);
+
+        if (!admitted) {
+          return admitted;
+        }
+
+        sizing_.emplace();
+      }
+
+      detail::assignPssSizing(property, value, *sizing_);
+    } else {
+      detail::assignPssDeclaration(property, value, current_.declarations);
+    }
 
     return {};
   }
 
   std::expected<void, PssError> endRule() {
+    if (sizing_) {
+      current_.sizing = std::make_shared<const StyleSizing>(*sizing_);
+    }
+
     document.sheet.rules.push_back(current_);
 
     if (metadata_) {
@@ -149,6 +168,7 @@ private:
   StyleRule current_;
   PssRuleOrigin origin_;
   std::shared_ptr<detail::ScrollbarGlyphRefs> glyphs_;
+  std::optional<StyleSizing> sizing_;
   std::shared_ptr<const std::string> sourceName_;
 };
 

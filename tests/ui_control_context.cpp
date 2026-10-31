@@ -1518,9 +1518,9 @@ TEST_CASE("actual catalog fixed ancestry retains sparse precedence origins and u
   fails(controls.validate(), Code::INHERITANCE_LIMIT);
 }
 
-TEST_CASE("Shared frame, Spinner and scrollbar schemas append stable leaves within four presence words") {
-  static_assert(ui::detail::CONTROL_PROPERTY_COUNT == 251);
-  static_assert((ui::detail::CONTROL_PRESENCE_BITS + 63) / 64 == 4);
+TEST_CASE("sizing schemas append stable leaves after the original four presence words") {
+  static_assert(ui::detail::CONTROL_PROPERTY_COUNT == 259);
+  static_assert((ui::detail::CONTROL_PRESENCE_BITS + 63) / 64 == 5);
   ControlSettings appended;
   appended.spinnerPreset = SpinnerPreset::LINE;
   appended.scrollbar.pattern = ScrollbarPattern::ASCII;
@@ -1792,4 +1792,39 @@ TEST_CASE("independent scrollbar part settings merge as sparse leaves") {
   CHECK(presence.test(240));
   CHECK(presence.test(241));
   CHECK(presence.test(248));
+}
+
+TEST_CASE("sizing settings replace axis modes across sources and reject competing local requests") {
+  ControlContext context;
+
+  context.defaults("Label", {.flex = 3, .minWidth = 2, .maxWidth = 20})
+    .define("Compact", "Label", {.fitWidth = true, .minHeight = 1, .maxHeight = 4});
+
+  const auto content = take(context.resolve("Compact"));
+
+  CHECK_FALSE(content.settings.flex);
+  CHECK_FALSE(content.settings.flexX);
+  CHECK(content.settings.flexY == 3);
+  CHECK(content.settings.fitWidth == true);
+  CHECK(content.settings.minWidth == 2);
+  CHECK(content.settings.maxWidth == 20);
+
+  const auto automatic = take(context.resolve("Compact", {.fitWidth = false}));
+
+  CHECK(automatic.settings.fitWidth == false);
+  CHECK(automatic.settings.flexY == 3);
+
+  const auto exact = take(context.resolve("Compact", {.width = 8, .height = 2}));
+
+  CHECK_FALSE(exact.settings.fitWidth);
+  CHECK_FALSE(exact.settings.flexY);
+  CHECK(exact.settings.width == 8);
+  CHECK(exact.settings.height == 2);
+  CHECK(exact.settings.minWidth == 2);
+  fails(context.resolve("Label", {.width = 8, .fitWidth = true}), Code::INVALID_VALUE);
+  fails(context.resolve("Label", {.flex = 3, .flexX = 2}), Code::INVALID_VALUE);
+  fails(context.resolve("Label", {.flexY = 0}), Code::INVALID_VALUE);
+  fails(context.resolve("Label", {.maxHeight = -1}), Code::INVALID_VALUE);
+  fails(context.resolve("Label", {.width = 20, .minWidth = 3, .maxWidth = 7}), Code::INVALID_VALUE);
+  fails(context.resolve("Label", {.minHeight = 5, .maxHeight = 2}), Code::INVALID_VALUE);
 }

@@ -42,7 +42,7 @@ struct SceneResourceArguments {
   std::string id = std::string(0, '\0');   ///< Optional owning case-sensitive node id.
   std::optional<std::int32_t> width;       ///< Nonnegative fixed cell width, applied after the factory recipe.
   std::optional<std::int32_t> height;      ///< Nonnegative fixed cell height, applied after the factory recipe.
-  std::optional<std::uint32_t> flex;       ///< Positive existing flex weight, applied after width/height.
+  std::optional<std::uint32_t> flex;       ///< Positive common flex weight; excludes other per-axis mode requests.
   std::int32_t gap{};                      ///< Nonnegative layout gap; resource syntax admits this only on VBox/HBox.
   bool checked{};                          ///< Initial checkbox state; resource syntax admits this only on CheckBox.
   ControlSettings settings{};              ///< Validated effective sparse settings; no IDs, models or handlers.
@@ -200,9 +200,13 @@ private:
     entry.create = [factory = std::forward<Factory>(factory), semantic](
                      SceneResourceArguments arguments) mutable -> std::expected<Description<Widget>, ManagedError> {
       // Common properties remain existing typed recipe operations before erasure.
-      const auto width = arguments.width;
-      const auto height = arguments.height;
-      const auto flex = arguments.flex;
+      const auto sizing = detail::controlSizing(arguments.settings);
+
+      if constexpr (!std::derived_from<T, SizedWidget>) {
+        if (semantic != detail::ControlFactoryKind::NOTIFICATION_BINDING && (sizing.width || sizing.height)) {
+          return std::unexpected(detail::frameContextError(ControlContextErrorCode::UNSUPPORTED_PROPERTY, "sizing"));
+        }
+      }
       const auto visible = arguments.visible;
       const auto enabled = arguments.enabled;
       const auto classes = arguments.classes;
@@ -304,17 +308,7 @@ private:
       if constexpr (std::derived_from<T, SizedWidget>) {
         // Native semantic Notifications applies these precharged leaves through its actual resolved Overlay once.
         if (semantic != detail::ControlFactoryKind::NOTIFICATION_BINDING) {
-          if (width) {
-            (void)std::move(*recipe).width(*width);
-          }
-
-          if (height) {
-            (void)std::move(*recipe).height(*height);
-          }
-
-          if (flex) {
-            (void)std::move(*recipe).flex(*flex);
-          }
+          detail::Access::sizingSettings(*recipe, sizing);
         }
       }
 

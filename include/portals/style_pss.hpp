@@ -771,6 +771,12 @@ constexpr bool pssPropertyPresent(PssProperty property, const StyleDeclarations 
     return value.glyphFallback.has_value();
   case PssProperty::MIN_WIDTH:
     return value.minWidth.has_value();
+  case PssProperty::WIDTH:
+  case PssProperty::HEIGHT:
+  case PssProperty::MAX_WIDTH:
+  case PssProperty::MIN_HEIGHT:
+  case PssProperty::MAX_HEIGHT:
+    return false;
   }
 
   return false;
@@ -1067,6 +1073,12 @@ constexpr PssValue pssScalar(PssProperty property, const StyleDeclarations &valu
   case PssProperty::MIN_WIDTH:
     result.width = *value.minWidth;
 
+    break;
+  case PssProperty::WIDTH:
+  case PssProperty::HEIGHT:
+  case PssProperty::MAX_WIDTH:
+  case PssProperty::MIN_HEIGHT:
+  case PssProperty::MAX_HEIGHT:
     break;
   }
 
