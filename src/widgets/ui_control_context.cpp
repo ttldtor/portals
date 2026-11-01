@@ -592,12 +592,15 @@ static_assert(schemaMatchesMask(PASSWORD_SCHEMA, PASSWORD_MASK));
 static_assert(schemaMatchesMask(GRID_SCHEMA, GRID_MASK));
 
 bool builtin(std::string_view name) noexcept {
-  return name == "VBox" || name == "HBox" || name == "Label" || name == "Button" || name == "CheckBox" ||
-         name == "LineEdit" || name == "ThreeState" || name == "Password" || name == "FormField" || name == "FindBar" ||
-         name == "ComboBox" || name == "DropDown";
+  return name == "Spacer" || name == "Spacing" || name == "VBox" || name == "HBox" || name == "Label" ||
+         name == "Button" || name == "CheckBox" || name == "LineEdit" || name == "ThreeState" || name == "Password" ||
+         name == "FormField" || name == "FindBar" || name == "ComboBox" || name == "DropDown";
 }
 
 Mask builtinMask(std::string_view name) noexcept {
+  if (name == "Spacer" || name == "Spacing") {
+    return {};
+  }
   if (name == "Button") {
     return BUTTON_MASK;
   }
@@ -2156,6 +2159,9 @@ resolveData(const Data &data, std::string_view name, const ControlSettings &inst
 } // namespace
 
 std::span<const ControlPropertyDescriptor> controlPropertySchema(std::string_view type) noexcept {
+  if (type == "Spacer" || type == "Spacing") {
+    return {};
+  }
   if (type == "VBox" || type == "HBox") {
     return SIZE_SCHEMA;
   }

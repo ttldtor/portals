@@ -7,7 +7,9 @@
 #include <iostream>
 #include <limits>
 #include <new>
+#include <portals/grid.hpp>
 #include <portals/layout.hpp>
+#include <portals/style.hpp>
 #include <type_traits>
 #include <vector>
 
@@ -162,6 +164,91 @@ SizePolicy widthPolicy(SizeMode mode, int minimum, int preferred, int maximum) {
   result.width = {minimum, preferred, maximum, mode, 1};
 
   return result;
+}
+
+void invalidSpaceParents() {
+  for (int parentKind = 0; parentKind != 4; ++parentKind) {
+    Fixture fixture;
+    Node<Widget> parent = fixture.root;
+    if (parentKind == 1) {
+      parent = take(fixture.tree->emplace<Grid>(parent));
+    } else if (parentKind == 2) {
+      parent = take(fixture.tree->emplace<Overlay>(parent));
+    } else if (parentKind == 3) {
+      parent = take(fixture.tree->emplace<Widget>(parent));
+    }
+
+    take(fixture.tree->emplace<Spacer>(parent));
+
+    const auto result = fixture.run({8, 4});
+
+    check(!result && result.error() == TreeError::INVALID_ARGUMENT, "core rejects nonlinear spacer owner");
+  }
+
+  Fixture fixture;
+  const auto row = take(fixture.tree->emplace<Row>(fixture.root));
+  const auto space = take(fixture.tree->emplace<Spacer>(row));
+  take(fixture.tree->emplace<Widget>(space));
+  const auto result = fixture.run({8, 4});
+  check(!result && result.error() == TreeError::INVALID_ARGUMENT, "space cannot adopt children");
+}
+
+void spaceSubtreeEntry() {
+  for (const bool horizontal : {false, true}) {
+    for (const bool flexible : {false, true}) {
+      Fixture fixture;
+      const Node<Widget> parent = horizontal ? Node<Widget>(take(fixture.tree->emplace<Row>(fixture.root)))
+                                             : Node<Widget>(take(fixture.tree->emplace<Column>(fixture.root)));
+      const Node<Widget> space = flexible ? Node<Widget>(take(fixture.tree->emplace<Spacer>(parent)))
+                                          : Node<Widget>(take(fixture.tree->emplace<Spacing>(parent, 2)));
+      const auto viewport = take(CellRect::from({}, {8, 4}));
+
+      take(fixture.run({8, 4}));
+      take(fixture.tree->frame([&] {
+        const auto result = layoutTree(*fixture.tree, space, viewport, viewport);
+
+        check(result.has_value(), "space subtree entry retains its direct linear parent's axis");
+      }));
+      check(take(fixture.tree->inspect(space)).geometry.local == viewport,
+            "space subtree entry preserves the caller's root rectangle");
+
+      take(fixture.tree->setVisible(parent, false));
+      take(fixture.tree->frame([&] {
+        check(layoutTree(*fixture.tree, space, viewport, viewport).has_value(),
+              "space subtree entry skips a hidden direct parent");
+      }));
+      check(!take(fixture.tree->inspect(space)).geometry.valid, "hidden ancestor does not arrange spacer subtree");
+    }
+  }
+
+  Fixture fixture;
+  const auto row = take(fixture.tree->emplace<Row>(fixture.root));
+  const auto nonlinear = take(fixture.tree->emplace<Widget>(row));
+  const auto space = take(fixture.tree->emplace<Spacer>(nonlinear));
+  const auto viewport = take(CellRect::from({}, {8, 4}));
+
+  take(fixture.tree->frame([&] {
+    const auto result = layoutTree(*fixture.tree, space, viewport, viewport);
+
+    check(!result && result.error() == TreeError::INVALID_ARGUMENT,
+          "space subtree entry never borrows an axis from a more distant linear ancestor");
+  }));
+}
+
+void spaceSizingOverrides() {
+  for (const auto rule : {"Spacer { min-width: 2; }", "Spacer { width: 3; }"}) {
+    Fixture fixture;
+    const auto row = take(fixture.tree->emplace<Row>(fixture.root));
+    const auto space = take(fixture.tree->emplace<Spacer>(row));
+    StyleEngine styles(*fixture.tree);
+
+    take(styles.bind(space, {.type = "Spacer"}));
+    take(styles.replacePss(rule));
+
+    const auto result = fixture.run({8, 4});
+
+    check(!result && result.error() == TreeError::INVALID_ARGUMENT, "space rejects incompatible style sizing");
+  }
 }
 
 void contentAllocation() {
@@ -463,6 +550,9 @@ void allocationFailures() {
 
 int main() {
   oddFlex();
+  invalidSpaceParents();
+  spaceSizingOverrides();
+  spaceSubtreeEntry();
   contentAllocation();
   cappedAndMixed();
   underflowAndCenter();

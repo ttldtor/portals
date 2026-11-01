@@ -70,6 +70,15 @@ SceneResourceRegistry::semanticSchema(std::span<const ControlPropertyDescriptor>
 }
 
 SceneResourceRegistry::SceneResourceRegistry() {
+  (void)add<Spacer>("Spacer", [](SceneResourceArguments arguments) {
+    return spacer(arguments.weight.value_or(1));
+  });
+  entries_.back().text = false;
+  (void)add<Spacing>("Spacing", [](SceneResourceArguments arguments) {
+    return spacing(arguments.cells.value_or(0));
+  });
+  entries_.back().text = false;
+
   (void)add<Column>(
     "VBox",
     [](SceneResourceArguments arguments) {

@@ -6,6 +6,22 @@
 
 namespace portals::ui {
 
+/** @brief Reserve flexible space along the direct Row/Column parent's main axis.
+ * @param weight Positive integer flex weight; omitted means one.
+ * @return Owning single-use invisible recipe; invalid parameters/parents fail with INVALID_ARGUMENT.
+ */
+inline Description<Spacer> spacer(std::int32_t weight = 1) {
+  return custom<Spacer>(weight);
+}
+
+/** @brief Reserve fixed space along the direct Row/Column parent's main axis.
+ * @param cells Nonnegative terminal cells; zero is allowed.
+ * @return Owning single-use invisible recipe; invalid parameters/parents fail with INVALID_ARGUMENT.
+ */
+inline Description<Spacing> spacing(std::int32_t cells) {
+  return custom<Spacing>(cells);
+}
+
 inline Description<Overlay> detail::Access::overlayControl(OverlayOptions options, SizePolicy policy) {
   auto description =
     cold<Overlay>([options, policy](ManagedScene &scene, Node<Widget> parent,

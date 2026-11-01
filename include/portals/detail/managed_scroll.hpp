@@ -29,6 +29,27 @@ std::expected<Node<T>, ManagedError> ManagedScene::emplaceConfigured(Node<Widget
     return std::unexpected(error(ManagedPhase::MOUNT, parent, node.error()));
   }
 
+  if constexpr (std::same_as<T, Spacer> || std::same_as<T, Spacing>) {
+    bool validParent{};
+    bool validValue{};
+    auto parentRead = app_.tree().read(parent, [&](const Widget &widget) {
+      validParent = dynamic_cast<const LinearLayout *>(&widget) != nullptr;
+    });
+    auto valueRead = app_.tree().read(*node, [&](const T &widget) {
+      if constexpr (std::same_as<T, Spacer>) {
+        validValue = widget.weight() > 0;
+      } else {
+        validValue = widget.cells() >= 0;
+      }
+    });
+
+    if (!parentRead || !valueRead || !validParent || !validValue) {
+      return rollback(*node, !parentRead  ? parentRead.error()
+                             : !valueRead ? valueRead.error()
+                                          : TreeError::INVALID_ARGUMENT);
+    }
+  }
+
   try {
     auto entry = std::make_shared<Entry>();
 

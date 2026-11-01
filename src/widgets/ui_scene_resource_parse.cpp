@@ -1663,6 +1663,24 @@ private:
       return {};
     }
 
+    if (registered && target.factory.kind == detail::ControlFactoryKind::EXISTING_BUILTIN) {
+      const auto &concrete = detail::ResourceAccess::entry(options_.registry, target.factory.index).name;
+      if ((concrete == "Spacer" && key == "weight") || (concrete == "Spacing" && key == "cells")) {
+        auto value = integer(key == "weight");
+        if (!value) {
+          return std::unexpected(withProperty(value.error(), type, key));
+        }
+        if (*value > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max())) {
+          return std::unexpected(document_.propertyFailure(Code::INVALID_VALUE, begin, type, key));
+        }
+
+        auto &extent = key == "weight" ? target.arguments.weight : target.arguments.cells;
+        extent = static_cast<std::int32_t>(*value);
+
+        return {};
+      }
+    }
+
     if (key == "classes") {
       std::string value(0, '\0');
       auto parsed = string(value);
