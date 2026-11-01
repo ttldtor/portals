@@ -1442,3 +1442,109 @@ TEST_CASE("typed sizing settings mount bounded content and retain later method o
   REQUIRE_FALSE(rejected);
   CHECK(unpublished.node() == Node<Label>{});
 }
+
+TEST_CASE("compact spaces bind to both linear axes and preserve weighted rounding") {
+  for (bool horizontal : {false, true}) {
+    CAPTURE(horizontal);
+    Fixture fixture;
+    ui::Ref<Spacer> first, second;
+    ui::Ref<Spacing> gap;
+    auto children = [&] {
+      if (horizontal) {
+        return ui::detail::Access::erase(
+          ui::hbox(ui::spacer(2).reference(first), ui::spacing(1).reference(gap), ui::spacer().reference(second)));
+      }
+      return ui::detail::Access::erase(
+        ui::vbox(ui::spacer(2).reference(first), ui::spacing(1).reference(gap), ui::spacer().reference(second)));
+    }();
+    take(ui::mount(*fixture.scene, std::move(children)));
+    fixture.layout({11, 11});
+    auto main = [&](CellSize size) {
+      return horizontal ? size.width : size.height;
+    };
+    auto cross = [&](CellSize size) {
+      return horizontal ? size.height : size.width;
+    };
+    CHECK(main(take(first.geometry()).local.size()) == 7);
+    CHECK(main(take(second.geometry()).local.size()) == 3);
+    CHECK(main(take(gap.geometry()).local.size()) == 1);
+    CHECK(cross(take(first.geometry()).local.size()) == 0);
+    CHECK(cross(take(gap.geometry()).local.size()) == 0);
+    fixture.layout({5, 5});
+    CHECK(main(take(first.geometry()).local.size()) == 3);
+    CHECK(main(take(second.geometry()).local.size()) == 1);
+    CHECK(take(fixture.app->tree().consumeFrameRequest()) == Invalidation::NONE);
+  }
+}
+
+TEST_CASE("spaces retain fixed siblings and hard minima during shortage") {
+  Fixture fixture;
+  ui::Ref<Spacer> flexible;
+  ui::Ref<Spacing> gap, zero;
+  ui::Ref<Label> content;
+  take(ui::mount(*fixture.scene,
+                 ui::hbox(ui::label(content, "abcdefgh").minWidth(4).maxWidth(6), ui::spacer().reference(flexible),
+                          ui::spacing(3).reference(gap), ui::spacing(0).reference(zero))));
+  fixture.layout({2, 1});
+  CHECK(take(content.geometry()).local.size().width == 4);
+  CHECK(take(flexible.geometry()).local.size().width == 0);
+  CHECK(take(gap.geometry()).local.size().width == 3);
+  CHECK(take(zero.geometry()).local.size().width == 0);
+  fixture.layout({0, 0});
+  CHECK(take(gap.geometry()).local.size().width == 3);
+}
+
+TEST_CASE("hidden spaces stop sharing cells and removal retires observers") {
+  Fixture fixture;
+  ui::Ref<Spacer> first, second;
+  take(ui::mount(*fixture.scene, ui::hbox(ui::spacer().reference(first), ui::spacer().reference(second))));
+  fixture.layout({10, 1});
+  CHECK(take(first.geometry()).local.size().width == 5);
+  take(fixture.app->tree().setVisible(first.node(), false));
+  fixture.layout({10, 1});
+  CHECK(take(second.geometry()).local.size().width == 10);
+  take(fixture.scene->remove(second.node()));
+  CHECK_FALSE(second.geometry());
+  fixture.layout({10, 1});
+}
+
+TEST_CASE("space parameters and nonlinear parents fail transactionally") {
+  for (int scenario = 0; scenario < 7; ++scenario) {
+    CAPTURE(scenario);
+    Fixture fixture;
+    ui::Ref<Spacer> unpublished;
+    auto recipe = [&]() -> ui::Description<Widget> {
+      if (scenario == 0)
+        return ui::detail::Access::erase(ui::hbox(ui::spacer(0).reference(unpublished)));
+      if (scenario == 1)
+        return ui::detail::Access::erase(ui::hbox(ui::spacer(-1).reference(unpublished)));
+      if (scenario == 2)
+        return ui::detail::Access::erase(ui::vbox(ui::spacing(-1)));
+      if (scenario == 3)
+        return ui::detail::Access::erase(ui::spacer().reference(unpublished));
+      if (scenario == 4)
+        return ui::detail::Access::erase(ui::overlay(ui::spacer().reference(unpublished)));
+      if (scenario == 5)
+        return ui::detail::Access::erase(ui::custom<Widget>());
+      return ui::detail::Access::erase(ui::spacing(1));
+    }();
+    if (scenario == 5) {
+      const auto parent = take(fixture.scene->emplace<Widget>(fixture.scene->root()));
+      const auto result = fixture.scene->emplace<Spacer>(parent);
+      REQUIRE_FALSE(result);
+      CHECK(cause(result.error(), TreeError::INVALID_ARGUMENT));
+    } else {
+      const auto result = ui::mount(*fixture.scene, std::move(recipe));
+      REQUIRE_FALSE(result);
+      CHECK(cause(result.error(), TreeError::INVALID_ARGUMENT));
+      CHECK_FALSE(unpublished.geometry());
+    }
+  }
+}
+
+template <class T>
+concept SpaceAcceptsSizing = requires(T recipe) { std::move(recipe).width(2); } || requires(T recipe) {
+  std::move(recipe).minWidth(1);
+} || requires(T recipe) { std::move(recipe).flexX(2); };
+static_assert(!SpaceAcceptsSizing<ui::Description<Spacer>>);
+static_assert(!SpaceAcceptsSizing<ui::Description<Spacing>>);

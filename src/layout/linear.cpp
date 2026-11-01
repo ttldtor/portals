@@ -5,6 +5,7 @@
 #include <numeric>
 #include <portals/detail/layout_traversal.hpp>
 #include <portals/layout.hpp>
+#include <typeinfo>
 
 namespace portals {
 namespace {
@@ -160,7 +161,8 @@ public:
   explicit Traversal(WidgetTree &tree) : tree_(tree) {
   }
 
-  std::expected<std::size_t, TreeError> measure(Node<Widget> node, CellSize available) {
+  std::expected<std::size_t, TreeError> measure(Node<Widget> node, CellSize available,
+                                                std::optional<bool> parentAxis = {}) {
     auto snapshot = tree_.inspect(node);
 
     if (!snapshot) {
@@ -169,6 +171,7 @@ public:
 
     const auto index = entries_.size();
     CellSize child_bounds = available;
+    std::optional<bool> childAxis;
     std::expected<void, TreeError> status;
 
     entries_.emplace_back(node);
@@ -185,6 +188,37 @@ public:
       }
 
       entries_[index].measured.policy = *policy;
+
+      // These leaf types are final, so exact RTTI matches safely guard the downcasts.
+      const auto &type = typeid(widget);
+      const auto spacer = type == typeid(Spacer) ? static_cast<const Spacer *>(&widget) : nullptr;
+      const auto spacing = type == typeid(Spacing) ? static_cast<const Spacing *>(&widget) : nullptr;
+
+      if (spacer || spacing) {
+        if (!parentAxis || !snapshot->children.empty() || *policy != SizePolicy{} ||
+            (spacer && spacer->weight() <= 0) || (spacing && spacing->cells() < 0)) {
+          status = std::unexpected(TreeError::INVALID_ARGUMENT);
+
+          return;
+        }
+
+        SizePolicy spacePolicy;
+        auto &main = *parentAxis ? spacePolicy.width : spacePolicy.height;
+        auto &cross = *parentAxis ? spacePolicy.height : spacePolicy.width;
+
+        cross = {.preferred = 0, .maximum = 0, .mode = SizeMode::FIXED};
+        main.preferred = spacing ? spacing->cells() : 0;
+        main.mode = spacing ? SizeMode::FIXED : SizeMode::FLEX;
+        main.weight = spacer ? static_cast<std::uint32_t>(spacer->weight()) : 1;
+        if (spacing) {
+          main.minimum = main.maximum = spacing->cells();
+        }
+        entries_[index].measured.policy = spacePolicy;
+      }
+
+      if (auto linear = dynamic_cast<const LinearLayout *>(&widget)) {
+        childAxis = linear->horizontal();
+      }
 
       if (auto layout = dynamic_cast<const Layout *>(&widget)) {
         auto result = layout->childAvailable(available);
@@ -216,7 +250,7 @@ public:
         continue;
       }
 
-      auto result = measure(child, child_bounds);
+      auto result = measure(child, child_bounds, childAxis);
 
       if (!result) {
         return std::unexpected(result.error());
@@ -662,6 +696,7 @@ std::expected<void, TreeError> layoutTree(WidgetTree &tree, Node<Widget> node, C
   try {
     // Enabled is irrelevant to layout: check visibility of each ancestor explicitly.
     auto ancestor = node;
+    Node<Widget> directParent;
 
     for (;;) {
       auto state = tree.inspect(ancestor);
@@ -674,6 +709,10 @@ std::expected<void, TreeError> layoutTree(WidgetTree &tree, Node<Widget> node, C
         return {};
       }
 
+      if (ancestor == node) {
+        directParent = state->parent;
+      }
+
       if (state->parent == Node<Widget>{}) {
         break;
       }
@@ -681,8 +720,23 @@ std::expected<void, TreeError> layoutTree(WidgetTree &tree, Node<Widget> node, C
       ancestor = state->parent;
     }
 
+    // A subtree entry still belongs to its actual direct owner; do not infer an axis from higher ancestors.
+    std::optional<bool> parentAxis;
+
+    if (directParent != Node<Widget>{}) {
+      auto read = tree.read(directParent, [&](const Widget &widget) {
+        if (auto linear = dynamic_cast<const LinearLayout *>(&widget)) {
+          parentAxis = linear->horizontal();
+        }
+      });
+
+      if (!read) {
+        return std::unexpected(read.error());
+      }
+    }
+
     Traversal traversal(tree);
-    auto measured = traversal.measure(node, local.size());
+    auto measured = traversal.measure(node, local.size(), parentAxis);
 
     if (!measured) {
       return std::unexpected(measured.error());

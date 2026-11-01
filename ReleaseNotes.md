@@ -7,6 +7,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Add invisible `ui::spacer(weight)` and `ui::spacing(cells)` layout items for
+  direct `HBox` and `VBox` children. Flexible space uses weighted allocation;
+  fixed gaps retain their extent when clipped. Add a complete resizable profile
+  form example with bottom-aligned actions.
+
 - Set exact, automatic, content-preferred and weighted flex sizes through runtime
   PSS, with independent hard bounds on both axes. Loaded scenes and typed
   attributes support the corresponding fit/min/max and per-axis flex settings.

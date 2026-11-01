@@ -49,6 +49,8 @@ struct SceneResourceArguments {
   std::optional<bool> visible;             ///< Local visibility applied after the factory's recipe modifiers.
   std::optional<bool> enabled;             ///< Local enabled state applied after the factory's recipe modifiers.
   std::optional<std::string> classes; ///< Owning literal class list; absent preserves factory classes, empty clears.
+  std::optional<std::int32_t> weight; ///< Node-local positive Spacer weight; absent means one.
+  std::optional<std::int32_t> cells;  ///< Node-local nonnegative Spacing cells; absent means zero.
 };
 
 namespace detail {

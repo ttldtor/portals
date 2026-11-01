@@ -69,6 +69,40 @@ private:
   SizePolicy policy_;
 };
 
+/** @brief Invisible flexible space along its direct Row/Column parent's main axis.
+ * Does not paint, accept input, focus, or schedule work. Other parents are rejected.
+ */
+class Spacer final : public Widget {
+public:
+  /** @param weight Positive main-axis flex weight; invalid values fail checked mount/layout. */
+  explicit Spacer(std::int32_t weight = 1) : weight_(weight) {
+  }
+
+  /** @return Owning positive flex weight, checked before layout. */
+  std::int32_t weight() const {
+    return weight_;
+  }
+
+private:
+  std::int32_t weight_;
+};
+
+/** @brief Invisible fixed cell space along its direct Row/Column parent's main axis. */
+class Spacing final : public Widget {
+public:
+  /** @param cells Nonnegative main-axis extent; zero is an explicit empty space. */
+  explicit Spacing(std::int32_t cells) : cells_(cells) {
+  }
+
+  /** @return Owning cell count, checked before layout. */
+  std::int32_t cells() const {
+    return cells_;
+  }
+
+private:
+  std::int32_t cells_;
+};
+
 /** @brief Owning child input for a pure layout computation. */
 struct MeasuredChild {
   CellSize desired;  ///< Intrinsic or aggregated nonnegative measurement.
@@ -179,6 +213,11 @@ public:
    * @return A value copy of gaps, padding, alignment and overflow policy.
    */
   LinearOptions options() const;
+
+  /** @return True for horizontal main-axis allocation, false for vertical allocation. */
+  bool horizontal() const {
+    return horizontal_;
+  }
 
 protected:
   /** @brief Initialize axis and owning settings.

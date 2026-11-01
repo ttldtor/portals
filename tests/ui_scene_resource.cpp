@@ -6739,3 +6739,59 @@ TEST_CASE("profile sizing keeps input and saved data through caption changes and
     REQUIRE(owner.close());
   }
 }
+
+TEST_CASE("resource spaces preserve explicit node arguments in both formats") {
+  for (auto format : {ui::SceneResourceFormat::LEGACY, ui::SceneResourceFormat::CONFIGURATION}) {
+    CAPTURE(format);
+    ui::SceneResourceOptions options;
+    options.format = format;
+    const std::string source = "HBox{Spacer#first{weight=2} Spacing#gap{cells=1} Spacer#second{}}";
+    auto owner =
+      ui::scene(format == ui::SceneResourceFormat::CONFIGURATION ? "scene{" + source + "}" : source, options);
+    auto first = owner.get<Spacer>("first");
+    auto gap = owner.get<Spacing>("gap");
+    auto second = owner.get<Spacer>("second");
+    REQUIRE(owner.prepareChecked());
+    auto &managed = owner.managed()->get();
+    auto &app = ui::detail::SceneAccess::application(managed);
+    layoutResourceFrame(managed, app, {11, 3});
+    REQUIRE(first.geometry());
+    REQUIRE(gap.geometry());
+    REQUIRE(second.geometry());
+    CHECK(first.geometry()->local.size() == CellSize{7, 0});
+    CHECK(gap.geometry()->local.size() == CellSize{1, 0});
+    CHECK(second.geometry()->local.size() == CellSize{3, 0});
+    REQUIRE(app.tree().consumeFrameRequest());
+    PaintCounter sink;
+    REQUIRE(app.tree().frame([&] {
+      REQUIRE(app.tree().paint(first.node(), sink));
+      REQUIRE(app.tree().paint(gap.node(), sink));
+      REQUIRE(app.tree().paint(second.node(), sink));
+    }));
+    CHECK(sink.commands == 0);
+    CHECK(app.tree().consumeFrameRequest().value_or(Invalidation::LAYOUT) == Invalidation::NONE);
+    REQUIRE(owner.close());
+  }
+}
+
+TEST_CASE("resource spaces reject invalid or duplicate arguments and nonlinear parents") {
+  for (std::string_view source :
+       {"HBox{Spacer{weight=0}}", "HBox{Spacer{weight=-1}}", "HBox{Spacing{cells=-1}}",
+        "HBox{Spacer{weight=1 weight=2}}", "HBox{Spacing{unknown=1}}", "HBox{Spacer{width=2}}",
+        "HBox{Spacing{minWidth=2}}", "Spacer{}", "Overlay{Spacer{}}", "Grid{Spacer{}}"}) {
+    CAPTURE(source);
+    ui::SceneResourceOptions options;
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    auto owner = ui::scene("scene{" + std::string(source) + "}", options);
+    CHECK_FALSE(owner.prepareChecked());
+  }
+}
+
+TEST_CASE("resource arguments retain legacy positional aggregate initialization") {
+  ui::SceneResourceArguments arguments{"caption", "id"};
+
+  CHECK(arguments.text == "caption");
+  CHECK(arguments.id == "id");
+  CHECK_FALSE(arguments.weight.has_value());
+  CHECK_FALSE(arguments.cells.has_value());
+}

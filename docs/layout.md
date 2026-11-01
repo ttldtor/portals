@@ -128,6 +128,45 @@ the available extent subject to bounds; fixed remains fixed. Cross start/center/
 aligns the resulting child extent using the same floor rule. Underflow aligns
 at the leading inset because there is no spare space.
 
+## Flexible spacers and fixed spacing
+
+Use `ui::spacer(weight)` to share unused space in a direct `HBox` or `VBox`,
+and `ui::spacing(cells)` for a fixed gap. The parent selects the main axis;
+the cross-axis extent is zero. Spacers and spacing are invisible and do not
+paint, accept input, receive focus, or schedule timers. They reuse the existing
+weighted `FLEX` and `FIXED` layout solver. If fixed content and gaps exceed the
+available extent, fixed spacing remains fixed and is clipped; flexible space
+shrinks to zero. A spacer cannot be the scene root or a direct child of `Grid`,
+`Overlay`, or a plain widget. The parent's configured `gap` still applies between
+children, including either side of a spacer or spacing node.
+
+The C++ factory accepts a positive signed 32-bit weight (default `1`) or a
+nonnegative signed 32-bit cell count. Invalid values and parents produce a
+typed error through `runApp`. Runtime scene descriptions use
+`Spacer{weight=2}` and `Spacing{cells=1}`. These `weight` and `cells` fields
+belong to the spacer syntax; omitted runtime values default to weight `1` and
+cells `0`. They are not `Widget` or `ControlSettings` defaults.
+
+Their extent is selected by the factory arguments. The usual `.width()`,
+`.minWidth()`, and axis-flex modifiers are not available on these recipes.
+Non-default sizing policies applied through low-level styles are rejected
+instead of silently overriding the spacer contract.
+
+The complete example keeps a profile form near the top, its actions at the
+bottom as the terminal resizes, and allocates the footer's flexible area at a
+2:1 ratio. It also shows fixed one- and two-cell gaps, plus Save, Exit, and F10.
+
+The animation shows layout changes in a Linux PTY: 80×18 → 50×12 → 34×10 →
+80×18. The capture canvas stays fixed; this is a resize demonstration.
+[Static frame](images/layout-spacers.png). Run the full example to interact with
+Save and Exit.
+
+![Flexible spacers and fixed gaps while resizing](images/layout-spacers.gif)
+
+```cpp
+\include guide_spacers.cpp
+```
+
 ## Frame ownership and errors
 
 `layoutTree` is an external two-phase owner-thread traversal. It obtains owning
