@@ -24,6 +24,59 @@ bool valid(SizePolicy policy) {
   return valid(policy.width) && valid(policy.height);
 }
 
+// Ordinary non-layout widgets keep their policy; only the final space leaves inspect their own direct edge.
+std::expected<SizePolicy, TreeError> linearSpacePolicy(WidgetTree &tree, Node<Widget> node, const Widget &widget,
+                                                       SizePolicy policy) {
+  const auto &type = typeid(widget);
+  const auto spacer = type == typeid(Spacer) ? static_cast<const Spacer *>(&widget) : nullptr;
+  const auto spacing = type == typeid(Spacing) ? static_cast<const Spacing *>(&widget) : nullptr;
+
+  if (!spacer && !spacing) {
+    return policy;
+  }
+
+  const auto snapshot = tree.inspect(node);
+
+  if (!snapshot) {
+    return std::unexpected(snapshot.error());
+  }
+
+  if (!snapshot->children.empty() || policy != SizePolicy{} || (spacer && spacer->weight() <= 0) ||
+      (spacing && spacing->cells() < 0) || snapshot->parent == Node<Widget>{}) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  std::optional<bool> horizontal;
+  const auto read = tree.read(snapshot->parent, [&](const Widget &parent) {
+    if (auto linear = dynamic_cast<const LinearLayout *>(&parent)) {
+      horizontal = linear->horizontal();
+    }
+  });
+
+  if (!read) {
+    return std::unexpected(read.error());
+  }
+
+  if (!horizontal) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  SizePolicy spacePolicy;
+  auto &main = *horizontal ? spacePolicy.width : spacePolicy.height;
+  auto &cross = *horizontal ? spacePolicy.height : spacePolicy.width;
+
+  cross = {.preferred = 0, .maximum = 0, .mode = SizeMode::FIXED};
+  main.preferred = spacing ? spacing->cells() : 0;
+  main.mode = spacing ? SizeMode::FIXED : SizeMode::FLEX;
+  main.weight = spacer ? static_cast<std::uint32_t>(spacer->weight()) : 1;
+
+  if (spacing) {
+    main.minimum = main.maximum = spacing->cells();
+  }
+
+  return spacePolicy;
+}
+
 bool valid(LinearOptions options) {
   auto alignment = [](LayoutAlign value) {
     return value == LayoutAlign::START || value == LayoutAlign::CENTER || value == LayoutAlign::END ||
@@ -161,8 +214,7 @@ public:
   explicit Traversal(WidgetTree &tree) : tree_(tree) {
   }
 
-  std::expected<std::size_t, TreeError> measure(Node<Widget> node, CellSize available,
-                                                std::optional<bool> parentAxis = {}) {
+  std::expected<std::size_t, TreeError> measure(Node<Widget> node, CellSize available) {
     auto snapshot = tree_.inspect(node);
 
     if (!snapshot) {
@@ -171,7 +223,6 @@ public:
 
     const auto index = entries_.size();
     CellSize child_bounds = available;
-    std::optional<bool> childAxis;
     std::expected<void, TreeError> status;
 
     entries_.emplace_back(node);
@@ -179,7 +230,10 @@ public:
     entries_[index].measured.node = node.id();
 
     auto read = tree_.read(node, [&](const Widget &widget) {
-      const auto policy = detail::effectiveSizePolicy(widget);
+      const auto &style = widget.computedStyle();
+      const auto *item = dynamic_cast<const LayoutItem *>(&widget);
+      const auto policy = detail::effectiveSizePolicy(item ? item->sizePolicy() : SizePolicy{},
+                                                      style ? style->minWidth : 0, style ? style->sizing() : nullptr);
 
       if (!policy) {
         status = std::unexpected(policy.error());
@@ -189,35 +243,16 @@ public:
 
       entries_[index].measured.policy = *policy;
 
-      // These leaf types are final, so exact RTTI matches safely guard the downcasts.
-      const auto &type = typeid(widget);
-      const auto spacer = type == typeid(Spacer) ? static_cast<const Spacer *>(&widget) : nullptr;
-      const auto spacing = type == typeid(Spacing) ? static_cast<const Spacing *>(&widget) : nullptr;
+      if (!item) {
+        const auto projected = linearSpacePolicy(tree_, entries_[index].node, widget, *policy);
 
-      if (spacer || spacing) {
-        if (!parentAxis || !snapshot->children.empty() || *policy != SizePolicy{} ||
-            (spacer && spacer->weight() <= 0) || (spacing && spacing->cells() < 0)) {
-          status = std::unexpected(TreeError::INVALID_ARGUMENT);
+        if (!projected) {
+          status = std::unexpected(projected.error());
 
           return;
         }
 
-        SizePolicy spacePolicy;
-        auto &main = *parentAxis ? spacePolicy.width : spacePolicy.height;
-        auto &cross = *parentAxis ? spacePolicy.height : spacePolicy.width;
-
-        cross = {.preferred = 0, .maximum = 0, .mode = SizeMode::FIXED};
-        main.preferred = spacing ? spacing->cells() : 0;
-        main.mode = spacing ? SizeMode::FIXED : SizeMode::FLEX;
-        main.weight = spacer ? static_cast<std::uint32_t>(spacer->weight()) : 1;
-        if (spacing) {
-          main.minimum = main.maximum = spacing->cells();
-        }
-        entries_[index].measured.policy = spacePolicy;
-      }
-
-      if (auto linear = dynamic_cast<const LinearLayout *>(&widget)) {
-        childAxis = linear->horizontal();
+        entries_[index].measured.policy = *projected;
       }
 
       if (auto layout = dynamic_cast<const Layout *>(&widget)) {
@@ -250,7 +285,7 @@ public:
         continue;
       }
 
-      auto result = measure(child, child_bounds, childAxis);
+      auto result = measure(child, child_bounds);
 
       if (!result) {
         return std::unexpected(result.error());
@@ -696,7 +731,6 @@ std::expected<void, TreeError> layoutTree(WidgetTree &tree, Node<Widget> node, C
   try {
     // Enabled is irrelevant to layout: check visibility of each ancestor explicitly.
     auto ancestor = node;
-    Node<Widget> directParent;
 
     for (;;) {
       auto state = tree.inspect(ancestor);
@@ -709,10 +743,6 @@ std::expected<void, TreeError> layoutTree(WidgetTree &tree, Node<Widget> node, C
         return {};
       }
 
-      if (ancestor == node) {
-        directParent = state->parent;
-      }
-
       if (state->parent == Node<Widget>{}) {
         break;
       }
@@ -720,23 +750,8 @@ std::expected<void, TreeError> layoutTree(WidgetTree &tree, Node<Widget> node, C
       ancestor = state->parent;
     }
 
-    // A subtree entry still belongs to its actual direct owner; do not infer an axis from higher ancestors.
-    std::optional<bool> parentAxis;
-
-    if (directParent != Node<Widget>{}) {
-      auto read = tree.read(directParent, [&](const Widget &widget) {
-        if (auto linear = dynamic_cast<const LinearLayout *>(&widget)) {
-          parentAxis = linear->horizontal();
-        }
-      });
-
-      if (!read) {
-        return std::unexpected(read.error());
-      }
-    }
-
     Traversal traversal(tree);
-    auto measured = traversal.measure(node, local.size(), parentAxis);
+    auto measured = traversal.measure(node, local.size());
 
     if (!measured) {
       return std::unexpected(measured.error());
