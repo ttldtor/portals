@@ -127,8 +127,13 @@ TEST_CASE("framed dimensions retain source types and route ordered size changes 
   Fixture fixture;
   ui::Ref<Button> child;
   ui::Ref<Border> outer;
-  auto recipe =
-    ui::button(child, "Save").width(7).height(3).framed(outer, "rounded").width(12).flexX(3) | ui::height(6);
+  auto recipe = ui::button(child, "Save", ControlStyle{}, SizePolicy{})
+                  .width(7)
+                  .height(3)
+                  .framed(outer, "rounded")
+                  .width(12)
+                  .flexX(3) |
+                ui::height(6);
   ui::Ref<Column> host;
   take(ui::mount(*fixture.scene, ui::vbox(std::move(recipe)).reference(host)));
 
@@ -151,6 +156,18 @@ TEST_CASE("framed dimensions retain source types and route ordered size changes 
   CHECK(take(child.geometry()).local.size() == CellSize{10, 1});
 }
 
+TEST_CASE("framed content buttons keep their intrinsic width inside a larger frame") {
+  Fixture fixture;
+  ui::Ref<Button> child;
+  ui::Ref<Border> outer;
+  take(ui::mount(*fixture.scene, ui::vbox(ui::button(child, "Save").framed(outer, "single").width(12))));
+  fixture.arrange();
+
+  CHECK(policy(fixture.app->tree(), child.node()).width.mode == SizeMode::CONTENT);
+  CHECK(take(child.geometry()).local.size() == CellSize{8, 1});
+  CHECK(take(outer.geometry()).local.size().width == 12);
+}
+
 TEST_CASE("compact presets and pipe spelling paint the selected owning frame") {
   constexpr std::array<std::pair<std::string_view, std::string_view>, 6> PRESETS{{{"single", "\xe2\x94\x8c"},
                                                                                   {"plain", "\xe2\x94\x8c"},
@@ -165,8 +182,8 @@ TEST_CASE("compact presets and pipe spelling paint the selected owning frame") {
     ui::Ref<Button> child;
     ui::Ref<Border> outer;
 
-    take(ui::mount(*fixture.scene,
-                   ui::vbox(ui::button(child, "x") | ui::width(8) | ui::framed(outer, name) | ui::height(4))));
+    take(ui::mount(*fixture.scene, ui::vbox(ui::button(child, "x", ControlStyle{}, SizePolicy{}) | ui::width(8) |
+                                            ui::framed(outer, name) | ui::height(4))));
     fixture.arrange();
     const auto painted = paint(fixture.app->tree(), outer.node());
 
@@ -185,7 +202,7 @@ TEST_CASE("titled compact frames match options while owning strings and retainin
       ui::Ref<Button> child;
       ui::Ref<Border> outer;
       int clicks{};
-      auto recipe = ui::button(child, "Save")
+      auto recipe = ui::button(child, "Save", ControlStyle{}, SizePolicy{})
                       .onClick([&] {
                         ++clicks;
                       })

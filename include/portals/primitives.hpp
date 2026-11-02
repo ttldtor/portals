@@ -199,7 +199,7 @@ public:
    * Construction may allocate or throw for an invalid width policy; tree emplacement translates exceptions.
    */
   explicit Gauge(double value, WidthPolicy width = {}, GaugeOptions options = {}, ControlStyle style = {},
-                 SizePolicy policy = {});
+                 SizePolicy policy = DEFAULT_CONTENT_POLICY);
   /** @param available Offered extent; intrinsic width comes from GaugeOptions.
    * @return Preferred width and height one, or INVALID_ARGUMENT for invalid value/settings.
    */

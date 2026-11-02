@@ -581,3 +581,27 @@ TEST_CASE("fluent protected publication failures retain TEXT phase and collect o
   REQUIRE(diagnostics.errors.back().error.password);
   CHECK(std::holds_alternative<PasswordValueAccessFailure<std::monostate>>(*diagnostics.errors.back().error.password));
 }
+
+TEST_CASE("protected editor defaults retain one cell and preserve explicit automatic policy") {
+  Fixture fixture;
+  ui::PasswordRef normal, automatic, zero;
+  take(
+    ui::mount(*fixture.owner, ui::vbox(ui::password(normal), ui::password(automatic, ui::PasswordConfig{.policy = {}}),
+                                       ui::password(zero).width(0))));
+  take(fixture.app->tree().read(normal.node(), [&](const Password &widget) {
+    CHECK(widget.sizePolicy() == DEFAULT_EDITOR_POLICY);
+  }));
+  take(fixture.app->tree().read(automatic.node(), [&](const Password &widget) {
+    CHECK(widget.sizePolicy() == SizePolicy{});
+  }));
+  take(fixture.app->tree().read(zero.node(), [&](const Password &widget) {
+    CHECK(widget.sizePolicy().width.minimum == 0);
+    CHECK(widget.sizePolicy().width.maximum == 0);
+  }));
+  ui::PasswordRef unpublished;
+  const auto rejected = ui::mount(*fixture.owner, ui::password(unpublished).maxWidth(0));
+  REQUIRE_FALSE(rejected);
+  CHECK(unpublished.node() == Node<Password>{});
+  REQUIRE(std::holds_alternative<TreeError>(rejected.error().cause));
+  CHECK(std::get<TreeError>(rejected.error().cause) == TreeError::INVALID_ARGUMENT);
+}

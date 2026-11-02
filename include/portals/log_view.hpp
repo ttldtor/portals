@@ -29,8 +29,8 @@ struct LogViewConfig {
 /** @brief Exact native admission failure, retaining original UTF-8 diagnostics. */
 using LogError = std::variant<TreeError, TextError>;
 
-/** @brief Native log default: share available vertical space; explicit SizePolicy values remain literal. */
-inline constexpr SizePolicy DEFAULT_LOG_VIEW_POLICY{.width = {}, .height = {.mode = SizeMode::FLEX}};
+/** @brief Native log default: fill both viewport axes from zero flex bases; explicit SizePolicy stays literal. */
+inline constexpr SizePolicy DEFAULT_LOG_VIEW_POLICY = DEFAULT_VIEWPORT_POLICY;
 
 /** @brief Owning receipt for one atomic complete batch; drop-oldest is a successful outcome. */
 struct LogAppendReceipt {

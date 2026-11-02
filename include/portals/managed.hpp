@@ -59,6 +59,7 @@ struct SceneActivity {
   virtual ~SceneActivity() = default;
   virtual bool active() const noexcept = 0;
   virtual void service() noexcept = 0;
+
   virtual void prepared() noexcept {
   }
 
@@ -103,7 +104,7 @@ struct ThemeSelectionSnapshot;
 namespace ui::detail {
 std::expected<void, ManagedError> attachAction(ManagedScene &, const ActionRef &);
 std::expected<void, ManagedError> attachActionButton(ManagedScene &, Node<Button>, const ActionRef &);
-}
+} // namespace ui::detail
 
 namespace style::ct::detail {
 struct Access;
@@ -1491,7 +1492,7 @@ public:
   std::expected<Node<VirtualTable<T>>, ManagedError>
   virtualTable(Node<Widget> parent, ManagedModel<T> model,
                std::type_identity_t<std::span<const TableColumn<T>>> columns, VirtualTableOptions options = {},
-               SizePolicy policy = {}, std::type_identity_t<ManagedViewHandler<T>> prepared = {});
+               SizePolicy policy = DEFAULT_VIEWPORT_POLICY, std::type_identity_t<ManagedViewHandler<T>> prepared = {});
 
   /** @brief Mount a list with owned range, input binding, style and automatic preparation.
    * @tparam T Immutable row accepted by the owning text delegate.
@@ -1506,7 +1507,7 @@ public:
   template <class T>
   std::expected<Node<VirtualList<T>>, ManagedError>
   virtualList(Node<Widget> parent, ManagedModel<T> model, std::type_identity_t<ManagedListFormatter<T>> delegate,
-              VirtualListOptions options = {}, SizePolicy policy = {},
+              VirtualListOptions options = {}, SizePolicy policy = DEFAULT_VIEWPORT_POLICY,
               std::type_identity_t<ManagedViewHandler<T>> prepared = {});
 
   /** @brief Mount a chart with owned range, style and automatic preparation.
@@ -1517,13 +1518,14 @@ public:
    * @param options Existing chart mode, width and glyph configuration.
    * @param first Optional source of the first row; empty means zero. Runs in registration order.
    * @param prepared Optional callback after each preparation; empty rejects pending work with INVALID_ARGUMENT.
+   * @param policy Owning viewport constraints; explicit policies remain authoritative.
    * @return Observing node or typed mount/bind error; chart adds no input binding.
    */
   template <class T>
-  std::expected<Node<Chart<T>>, ManagedError> chart(Node<Widget> parent, ManagedModel<T> model,
-                                                    std::type_identity_t<ManagedChartAccessor<T>> accessor,
-                                                    ChartOptions options = {}, ManagedChartOrigin first = {},
-                                                    std::type_identity_t<ManagedViewHandler<T>> prepared = {});
+  std::expected<Node<Chart<T>>, ManagedError>
+  chart(Node<Widget> parent, ManagedModel<T> model, std::type_identity_t<ManagedChartAccessor<T>> accessor,
+        ChartOptions options = {}, ManagedChartOrigin first = {},
+        std::type_identity_t<ManagedViewHandler<T>> prepared = {}, SizePolicy policy = DEFAULT_VIEWPORT_POLICY);
 
   /// @return True while a managed virtual view requires layout-driven preparation.
   /** @param parent Checked receiving parent in this scene.
@@ -1534,7 +1536,8 @@ public:
    * @return Live indicator with node-scoped animation, or original typed setup/ownership failure.
    */
   std::expected<Node<Spinner>, ManagedError> spinner(Node<Widget> parent, SpinnerOptions options = {},
-                                                     ControlStyle style = {}, SizePolicy policy = {},
+                                                     ControlStyle style = {},
+                                                     SizePolicy policy = DEFAULT_CONTENT_POLICY,
                                                      SpinnerLabelResolver resolver = {});
 
   bool usesPreparedLayout() const noexcept override;
@@ -1927,6 +1930,7 @@ private:
   bool modalDialogInput();
   void retireDialogs() noexcept;
   std::expected<Node<Widget>, ManagedError> makeDialogPanel(Node<Dialog> node, BorderOptions options);
+  std::expected<Node<Column>, ManagedError> makeDialogContent(Node<Widget> parent, LinearOptions options);
   std::expected<void, ManagedError> installDialogClose(const std::shared_ptr<detail::DialogRecord> &record);
   std::expected<void, ManagedError>
   setDialogDismiss(Node<Dialog> node, std::function<std::expected<void, TreeError>(DialogDismissReason)> callback);

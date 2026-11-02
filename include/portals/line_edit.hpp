@@ -19,7 +19,7 @@ struct LineEditValidationGate;
 namespace ui::detail {
 struct RefAccess;
 struct Access;
-}
+} // namespace ui::detail
 
 /** @brief When an accepted editing candidate is validated and published to its model. */
 enum class EditMode {
@@ -92,9 +92,9 @@ enum class LineEditStatus {
 
 /** @brief Entry path that produced an editing or confirmation outcome. */
 enum class LineEditTrigger {
-  INPUT,  ///< Routed input or programmatic activation.
-  FLUENT, ///< Accepted fluent text mutation.
-  BLUR,   ///< Confirmation on synchronous focus loss.
+  INPUT,           ///< Routed input or programmatic activation.
+  FLUENT,          ///< Accepted fluent text mutation.
+  BLUR,            ///< Confirmation on synchronous focus loss.
   ASYNC_VALIDATION ///< Final result of an earlier asynchronous publication intent; no synthetic input event.
 };
 
@@ -220,7 +220,7 @@ public:
    * @throws std::invalid_argument If the display mode is unknown or the placeholder contains a line separator.
    * Declarative recipes prepare placeholder validation/storage in their checked mount boundary instead.
    */
-  explicit LineEdit(LineEditOptions options = {}, SizePolicy policy = {});
+  explicit LineEdit(LineEditOptions options = {}, SizePolicy policy = DEFAULT_EDITOR_POLICY);
   /** @brief Internal prepared-presentation construction used by checked recipes.
    * @param options Immutable editor settings, with display mode already checked.
    * @param policy Owning layout size policy.

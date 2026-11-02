@@ -113,6 +113,10 @@ public:
 private:
   friend struct detail::ScrollWidgetAccess;
   std::unique_ptr<detail::ScrollWidgetState> state_;
+  mutable SizePolicy childPolicy_{};
+  mutable CellSize childBasis_{};
+  mutable bool measuredChildren_{};
+  mutable bool hasChild_{};
 };
 
 /** @brief Independent one-axis projection of an owning controller, without a content offset.
@@ -127,12 +131,21 @@ public:
    * @param width Complete owning glyph policy.
    * @param options Owning input/paint settings.
    * @param style Construction-only defaults beneath theme declarations.
-   * @param policy Owning layout constraints.
    * @throws std::bad_alloc On allocation; tree emplacement translates internal exceptions.
    */
   explicit ScrollBar(std::shared_ptr<ScrollController> controller = {}, ScrollAxis axis = ScrollAxis::VERTICAL,
-                     WidthPolicy width = {}, ScrollBarOptions options = {}, ControlStyle style = {},
-                     SizePolicy policy = {});
+                     WidthPolicy width = {}, ScrollBarOptions options = {}, ControlStyle style = {});
+  /** @brief Use an explicit policy without applying orientation-dependent defaults.
+   * @param controller Shared values; empty creates a default controller on this UI thread.
+   * @param axis HORIZONTAL or VERTICAL; invalid values fail initialization/measurement.
+   * @param width Complete owning glyph policy.
+   * @param options Owning input/paint settings.
+   * @param style Construction-only defaults beneath theme declarations.
+   * @param policy Owning layout constraints, including an explicit automatic policy.
+   * @throws std::bad_alloc On allocation; tree emplacement translates internal exceptions.
+   */
+  explicit ScrollBar(std::shared_ptr<ScrollController> controller, ScrollAxis axis, WidthPolicy width,
+                     ScrollBarOptions options, ControlStyle style, SizePolicy policy);
   /** @brief Release owning values without user callbacks or terminal operations. */
   ~ScrollBar() override;
   /** @brief Release this node's lease and pointer token. */

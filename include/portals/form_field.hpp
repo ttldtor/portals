@@ -14,10 +14,10 @@ struct Access;
 
 /** @brief Presentation of the most recent explicit or editor-publication validation. */
 enum class FieldStatus {
-  UNCHECKED, ///< No validation has been requested; required is still shown in the label.
-  VALID,     ///< The checked candidate satisfied all configured synchronous rules.
-  INVALID,   ///< The checked candidate was rejected; the editor retains its draft.
-  PENDING,   ///< Checking an asynchronous intent, or explicit presentation; editing remains enabled.
+  UNCHECKED,      ///< No validation has been requested; required is still shown in the label.
+  VALID,          ///< The checked candidate satisfied all configured synchronous rules.
+  INVALID,        ///< The checked candidate was rejected; the editor retains its draft.
+  PENDING,        ///< Checking an asynchronous intent, or explicit presentation; editing remains enabled.
   TECHNICAL_ERROR ///< A technical validation failure; distinct from invalid business data.
 };
 
@@ -44,11 +44,11 @@ struct FieldValidation {
 
 /** @brief Manual style/layout defaults; semantic field rules are configured separately. */
 struct FormFieldAppearance {
-  ControlStyle labelStyle{};   ///< Manual label defaults beneath theme rules.
-  ControlStyle helpStyle{};    ///< Manual help defaults beneath theme rules.
-  ControlStyle messageStyle{}; ///< Manual validation defaults beneath theme rules.
-  LinearOptions layout{};      ///< Existing vertical layout settings.
-  SizePolicy policy{};         ///< Existing container size constraints.
+  ControlStyle labelStyle{};                    ///< Manual label defaults beneath theme rules.
+  ControlStyle helpStyle{};                     ///< Manual help defaults beneath theme rules.
+  ControlStyle messageStyle{};                  ///< Manual validation defaults beneath theme rules.
+  LinearOptions layout{};                       ///< Existing vertical layout settings.
+  SizePolicy policy{DEFAULT_FLEX_WIDTH_POLICY}; ///< Existing container size constraints.
 };
 
 /** @brief Owning composition settings for an explicitly supplied custom editor. */

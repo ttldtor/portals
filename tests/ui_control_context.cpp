@@ -1553,10 +1553,10 @@ TEST_CASE("sizing schemas append stable leaves after the original four presence 
 
   CHECK(ui::detail::controlSettingsPresence(patch) == 0);
 
-  for (const auto type :
-       {"Button",   "Label",       "CheckBox",     "ThreeState",    "LineEdit",    "Password",      "VBox",
-        "HBox",     "Border",      "Gauge",        "ScrollArea",    "ScrollBar",   "Overlay",       "HelpView",
-        "KeyHints", "VirtualList", "VirtualTable", "DataStateView", "OverlayHost", "Notifications", "Grid"}) {
+  for (const auto type : {"Button",      "Label",         "CheckBox", "ThreeState",  "LineEdit",     "Password",
+                          "VBox",        "HBox",          "Border",   "Gauge",       "ScrollArea",   "ScrollBar",
+                          "Overlay",     "HelpView",      "KeyHints", "VirtualList", "VirtualTable", "DataStateView",
+                          "OverlayHost", "Notifications", "Grid",     "Chart"}) {
     const auto schema =
       type == std::string_view("Grid") ? ui::detail::ControlContextAccess::gridSchema() : controlPropertySchema(type);
     REQUIRE_FALSE(schema.empty());
@@ -1578,7 +1578,7 @@ TEST_CASE("sizing schemas append stable leaves after the original four presence 
     CHECK(take(context.resolve("FrameReceiver", patch)).materializedLeaves == 18);
   }
 
-  for (const auto type : {"Dialog", "MessageBox", "ThemeSelector", "ThemeSelectorCatalog", "Chart"}) {
+  for (const auto type : {"Dialog", "MessageBox", "ThemeSelector", "ThemeSelectorCatalog"}) {
     CHECK(std::ranges::count(controlPropertySchema(type), "frame.enabled", &ControlPropertyDescriptor::path) == 0);
   }
 

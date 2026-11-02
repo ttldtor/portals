@@ -60,8 +60,8 @@ public:
    * @param resolver Optional synchronous label localization adapter, used only during construction.
    * Construction may allocate; checked tree emplacement translates allocation failures.
    */
-  explicit Spinner(WidthPolicy width = {}, SpinnerOptions options = {}, ControlStyle style = {}, SizePolicy policy = {},
-                   SpinnerLabelResolver resolver = {});
+  explicit Spinner(WidthPolicy width = {}, SpinnerOptions options = {}, ControlStyle style = {},
+                   SizePolicy policy = DEFAULT_CONTENT_POLICY, SpinnerLabelResolver resolver = {});
   /** @brief Cancel this widget's timer on UI, without retaining the scene. */
   ~Spinner() override;
   Spinner(const Spinner &) = delete;

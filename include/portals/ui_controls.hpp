@@ -46,7 +46,8 @@ template <class T> Description<T> control(std::string_view text, ControlStyle st
  * @param policy Owning layout constraints.
  * @return Single-use label recipe.
  */
-inline Description<Label> label(std::string_view text, ControlStyle style = {}, SizePolicy policy = {}) {
+inline Description<Label> label(std::string_view text, ControlStyle style = {},
+                                SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return control<Label>(text, style, policy);
 }
 
@@ -158,7 +159,7 @@ template <CaptionSource Source> TextSource captionSource(Source &&source) {
  * @return Live one-way label recipe; cycles reject mount and removed sources never retarget.
  */
 template <detail::CaptionSource Source>
-Description<Label> label(Source &&source, ControlStyle style = {}, SizePolicy policy = {}) {
+Description<Label> label(Source &&source, ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return detail::liveCaption<Label>(detail::captionSource(std::forward<Source>(source)), style, policy);
 }
 
@@ -169,7 +170,7 @@ Description<Label> label(Source &&source, ControlStyle style = {}, SizePolicy po
  * @return Live one-way button caption; action attachment remains independent.
  */
 template <detail::CaptionSource Source>
-Description<Button> button(Source &&source, ControlStyle style = {}, SizePolicy policy = {}) {
+Description<Button> button(Source &&source, ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return detail::liveCaption<Button>(detail::captionSource(std::forward<Source>(source)), style, policy);
 }
 
@@ -179,7 +180,7 @@ Description<Button> button(Source &&source, ControlStyle style = {}, SizePolicy 
  * @param resolver Explicit owning localization adapter; borrowed services must outlive mount.
  * @return Independent label recipe; expression/resource failures retain their typed payload.
  */
-inline Description<Label> label(TextValue text, ControlStyle style = {}, SizePolicy policy = {},
+inline Description<Label> label(TextValue text, ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY,
                                 TextResolver resolver = {}) {
   return detail::textControl<Label>(std::move(text), style, policy, std::move(resolver));
 }
@@ -193,7 +194,7 @@ inline Description<Label> label(TextValue text, ControlStyle style = {}, SizePol
 template <class State>
   requires(std::same_as<std::remove_cvref_t<State>, ManagedState<std::string>> ||
            std::same_as<std::remove_cvref_t<State>, ManagedSource<std::string>>)
-inline Description<Label> label(State &&model, ControlStyle style = {}, SizePolicy policy = {}) {
+inline Description<Label> label(State &&model, ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return control<Label>("", style, policy).setup([model](ManagedScene &scene, Node<Label> node) {
     return scene.bindText(node, model);
   });
@@ -205,7 +206,7 @@ inline Description<Label> label(State &&model, ControlStyle style = {}, SizePoli
  * @param resolver Explicit owning localization adapter; borrowed services must outlive mount.
  * @return Unbound button recipe with an independent caption; onClick can be composed separately.
  */
-inline Description<Button> button(TextValue text, ControlStyle style = {}, SizePolicy policy = {},
+inline Description<Button> button(TextValue text, ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY,
                                   TextResolver resolver = {}) {
   return detail::textControl<Button>(std::move(text), style, policy, std::move(resolver));
 }
@@ -219,7 +220,7 @@ inline Description<Button> button(TextValue text, ControlStyle style = {}, SizeP
 template <class State>
   requires(std::same_as<std::remove_cvref_t<State>, ManagedState<std::string>> ||
            std::same_as<std::remove_cvref_t<State>, ManagedSource<std::string>>)
-inline Description<Button> button(State &&model, ControlStyle style = {}, SizePolicy policy = {}) {
+inline Description<Button> button(State &&model, ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return control<Button>("", style, policy).setup([model](ManagedScene &scene, Node<Button> node) {
     return scene.bindText(node, model);
   });
@@ -238,7 +239,8 @@ template <class Caption, class Callback>
             std::same_as<std::remove_cvref_t<Caption>, ManagedState<std::string>> ||
             std::same_as<std::remove_cvref_t<Caption>, ManagedSource<std::string>> || detail::CaptionSource<Caption>) &&
            portals::detail::ManagedAction<Callback, ClickEvent>)
-inline Description<Button> button(Caption &&text, Callback action, ControlStyle style = {}, SizePolicy policy = {}) {
+inline Description<Button> button(Caption &&text, Callback action, ControlStyle style = {},
+                                  SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return button(std::forward<Caption>(text), style, policy).onClick(std::move(action));
 }
 
@@ -249,7 +251,7 @@ inline Description<Button> button(Caption &&text, Callback action, ControlStyle 
  * @return Single-use button recipe retaining its callback until mount.
  */
 inline Description<Button> button(std::string_view text, std::function<std::expected<void, TreeError>()> action,
-                                  ControlStyle style = {}, SizePolicy policy = {}) {
+                                  ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return control<Button>(text, style, policy)
     .setup([action = std::move(action)](ManagedScene &scene, Node<Button> node) mutable {
       return scene.onClick(node, std::move(action));
@@ -266,7 +268,7 @@ inline Description<Button> button(std::string_view text, std::function<std::expe
 template <class Callback>
   requires portals::detail::ManagedAction<Callback, ClickEvent>
 inline Description<Button> button(std::string_view text, Callback action, ControlStyle style = {},
-                                  SizePolicy policy = {}) {
+                                  SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return control<Button>(text, style, policy)
     .setup([action = std::move(action)](ManagedScene &scene, Node<Button> node) mutable {
       return scene.onClick(node, std::move(action));
@@ -280,7 +282,7 @@ inline Description<Button> button(std::string_view text, Callback action, Contro
  */
 template <class Action>
   requires std::same_as<Action, ActionRef>
-inline Description<Button> button(Action action, ControlStyle style = {}, SizePolicy policy = {}) {
+inline Description<Button> button(Action action, ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return button(TextValue(""), style, policy).onClick(std::move(action));
 }
 
@@ -292,7 +294,7 @@ inline Description<Button> button(Action action, ControlStyle style = {}, SizePo
 template <class Action>
   requires std::same_as<Action, ActionRef>
 inline Description<Button> button(Ref<Button> reference, Action action, ControlStyle style = {},
-                                  SizePolicy policy = {}) {
+                                  SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return button(std::move(action), style, policy).reference(std::move(reference));
 }
 
@@ -305,7 +307,7 @@ inline Description<Button> button(Ref<Button> reference, Action action, ControlS
  */
 inline Description<CheckBox> checkbox(std::string_view text, ManagedState<bool> model,
                                       std::function<std::expected<void, TreeError>(CheckBoxResult)> changed = {},
-                                      ControlStyle style = {}, SizePolicy policy = {}) {
+                                      ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return detail::Access::controlSetup(
     detail::Access::controlArguments(control<CheckBox>(text, style, policy),
                                      {.text = TextValue(text), .cycle = CheckCycle::TWO_STATE}),
@@ -329,7 +331,7 @@ inline Description<CheckBox> checkbox(std::string_view text, ManagedState<bool> 
  */
 inline Description<CheckBox> checkbox(std::string_view text, bool initial,
                                       std::function<std::expected<void, TreeError>(CheckBoxResult)> changed = {},
-                                      ControlStyle style = {}, SizePolicy policy = {}) {
+                                      ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return detail::Access::controlSetup(
     detail::Access::controlArguments(control<CheckBox>(text, style, policy),
                                      {.text = TextValue(text),
@@ -358,7 +360,8 @@ inline Description<CheckBox> checkbox(std::string_view text, bool initial,
  */
 inline Description<CheckBox> checkbox(std::string_view text, ManagedState<CheckState> model,
                                       std::function<std::expected<void, TreeError>(CheckStateResult)> changed = {},
-                                      ControlStyle style = {}, SizePolicy policy = {}, CheckBoxOptions options = {}) {
+                                      ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY,
+                                      CheckBoxOptions options = {}) {
   return detail::Access::controlSetup(
     control<CheckBox>(text, style, policy),
     [model, changed = std::move(changed), options](ManagedScene &scene, Node<CheckBox> node,
@@ -378,7 +381,8 @@ inline Description<CheckBox> checkbox(std::string_view text, ManagedState<CheckS
  */
 inline Description<CheckBox> checkbox(std::string_view text, CheckState initial,
                                       std::function<std::expected<void, TreeError>(CheckStateResult)> changed = {},
-                                      ControlStyle style = {}, SizePolicy policy = {}, CheckBoxOptions options = {}) {
+                                      ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY,
+                                      CheckBoxOptions options = {}) {
   return detail::Access::controlSetup(
     detail::Access::controlArguments(control<CheckBox>(text, style, policy),
                                      {.text = TextValue(text), .state = initial}),
@@ -402,7 +406,7 @@ inline Description<CheckBox> checkbox(std::string_view text, CheckState initial,
  */
 inline Description<ThreeState> threeState(std::string_view text, ManagedState<CheckState> model,
                                           std::function<std::expected<void, TreeError>(CheckStateResult)> changed = {},
-                                          ControlStyle style = {}, SizePolicy policy = {}) {
+                                          ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return detail::Access::intrinsicStyle(control<ThreeState>(text, style, policy),
                                         StyleTarget{.type = "ThreeState", .control = true, .baseTypes = {"CheckBox"}})
     .setup([model, changed = std::move(changed)](ManagedScene &scene, Node<ThreeState> node) mutable {
@@ -421,7 +425,7 @@ inline Description<ThreeState> threeState(std::string_view text, ManagedState<Ch
  */
 inline Description<ThreeState> threeState(std::string_view text, CheckState initial,
                                           std::function<std::expected<void, TreeError>(CheckStateResult)> changed = {},
-                                          ControlStyle style = {}, SizePolicy policy = {}) {
+                                          ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return detail::Access::controlSetup(
     detail::Access::controlArguments(
       detail::Access::intrinsicStyle(control<ThreeState>(text, style, policy),
@@ -461,7 +465,7 @@ template <class Options>
   requires std::same_as<std::remove_cvref_t<Options>, CheckBoxOptions>
 inline Description<CheckBox> checkbox(std::string_view text, CheckState initial, Options &&options,
                                       std::function<std::expected<void, TreeError>(CheckStateResult)> changed = {},
-                                      ControlStyle style = {}, SizePolicy policy = {}) {
+                                      ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return detail::Access::controlArguments(
     checkbox(text, initial, std::move(changed), style, policy, std::forward<Options>(options)),
     {.text = TextValue(text), .state = initial, .cycle = options.cycle});
@@ -481,7 +485,7 @@ template <class Options>
   requires std::same_as<std::remove_cvref_t<Options>, CheckBoxOptions>
 inline Description<CheckBox> checkbox(std::string_view text, ManagedState<CheckState> model, Options &&options,
                                       std::function<std::expected<void, TreeError>(CheckStateResult)> changed = {},
-                                      ControlStyle style = {}, SizePolicy policy = {}) {
+                                      ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return detail::Access::controlArguments(
     checkbox(text, model, std::move(changed), style, policy, std::forward<Options>(options)),
     {.text = TextValue(text), .cycle = options.cycle});
@@ -675,7 +679,7 @@ inline Description<LineEdit> lineEdit(Ref<LineEdit> reference, Initial &&initial
  * @return Consuming recipe; add onClick before mount or Ref.onClick after successful mount.
  */
 inline Description<Button> button(std::string_view text) {
-  return control<Button>(text, {}, {});
+  return control<Button>(text, {}, DEFAULT_CONTENT_POLICY);
 }
 
 /** @param reference Shared empty slot, published after the whole mount succeeds.
@@ -685,7 +689,7 @@ inline Description<Button> button(std::string_view text) {
  * @return Label recipe sharing the existing reference transaction.
  */
 inline Description<Label> label(Ref<Label> reference, std::string_view text, ControlStyle style = {},
-                                SizePolicy policy = {}) {
+                                SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return label(text, style, policy).reference(std::move(reference));
 }
 
@@ -696,7 +700,7 @@ inline Description<Label> label(Ref<Label> reference, std::string_view text, Con
  * @return Unbound button recipe for late Ref.onClick registration before run.
  */
 inline Description<Button> button(Ref<Button> reference, std::string_view text, ControlStyle style = {},
-                                  SizePolicy policy = {}) {
+                                  SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return control<Button>(text, style, policy).reference(std::move(reference));
 }
 
@@ -711,7 +715,8 @@ template <class Caption>
   requires(std::same_as<std::remove_cvref_t<Caption>, TextValue> ||
            std::same_as<std::remove_cvref_t<Caption>, ManagedState<std::string>> ||
            std::same_as<std::remove_cvref_t<Caption>, ManagedSource<std::string>> || detail::CaptionSource<Caption>)
-inline Description<Label> label(Ref<Label> reference, Caption &&text, ControlStyle style = {}, SizePolicy policy = {}) {
+inline Description<Label> label(Ref<Label> reference, Caption &&text, ControlStyle style = {},
+                                SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return label(std::forward<Caption>(text), style, policy).reference(std::move(reference));
 }
 
@@ -727,7 +732,7 @@ template <class Caption>
            std::same_as<std::remove_cvref_t<Caption>, ManagedState<std::string>> ||
            std::same_as<std::remove_cvref_t<Caption>, ManagedSource<std::string>> || detail::CaptionSource<Caption>)
 inline Description<Button> button(Ref<Button> reference, Caption &&text, ControlStyle style = {},
-                                  SizePolicy policy = {}) {
+                                  SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return button(std::forward<Caption>(text), style, policy).reference(std::move(reference));
 }
 
@@ -746,7 +751,7 @@ template <class Caption, class Callback>
             std::same_as<std::remove_cvref_t<Caption>, ManagedSource<std::string>> || detail::CaptionSource<Caption>) &&
            portals::detail::ManagedAction<Callback, ClickEvent>)
 inline Description<Button> button(Ref<Button> reference, Caption &&text, Callback action, ControlStyle style = {},
-                                  SizePolicy policy = {}) {
+                                  SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return button(std::forward<Caption>(text), std::move(action), style, policy).reference(std::move(reference));
 }
 
@@ -761,7 +766,7 @@ inline Description<Button> button(Ref<Button> reference, Caption &&text, Callbac
 template <class Callback>
   requires portals::detail::ManagedAction<Callback, ClickEvent>
 Description<Button> button(Ref<Button> reference, std::string_view text, Callback action, ControlStyle style = {},
-                           SizePolicy policy = {}) {
+                           SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return button(text, std::move(action), style, policy).reference(std::move(reference));
 }
 
@@ -775,7 +780,7 @@ Description<Button> button(Ref<Button> reference, std::string_view text, Callbac
  */
 inline Description<CheckBox> checkbox(Ref<CheckBox> reference, std::string_view text, ManagedState<bool> model,
                                       std::function<std::expected<void, TreeError>(CheckBoxResult)> changed = {},
-                                      ControlStyle style = {}, SizePolicy policy = {}) {
+                                      ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return checkbox(text, model, std::move(changed), style, policy).reference(std::move(reference));
 }
 
@@ -790,7 +795,8 @@ inline Description<CheckBox> checkbox(Ref<CheckBox> reference, std::string_view 
  */
 inline Description<CheckBox> checkbox(Ref<CheckBox> reference, std::string_view text, ManagedState<CheckState> model,
                                       std::function<std::expected<void, TreeError>(CheckStateResult)> changed = {},
-                                      ControlStyle style = {}, SizePolicy policy = {}, CheckBoxOptions options = {}) {
+                                      ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY,
+                                      CheckBoxOptions options = {}) {
   return checkbox(text, model, std::move(changed), style, policy, options).reference(std::move(reference));
 }
 
@@ -804,7 +810,7 @@ inline Description<CheckBox> checkbox(Ref<CheckBox> reference, std::string_view 
  */
 inline Description<ThreeState> threeState(Ref<ThreeState> reference, std::string_view text, CheckState initial,
                                           std::function<std::expected<void, TreeError>(CheckStateResult)> changed = {},
-                                          ControlStyle style = {}, SizePolicy policy = {}) {
+                                          ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return threeState(text, initial, std::move(changed), style, policy).reference(std::move(reference));
 }
 
@@ -833,7 +839,7 @@ inline Description<CheckBox> checkbox(Ref<CheckBox> reference, std::string_view 
 inline Description<ThreeState> threeState(Ref<ThreeState> reference, std::string_view text,
                                           ManagedState<CheckState> model,
                                           std::function<std::expected<void, TreeError>(CheckStateResult)> changed = {},
-                                          ControlStyle style = {}, SizePolicy policy = {}) {
+                                          ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return threeState(text, model, std::move(changed), style, policy).reference(std::move(reference));
 }
 
@@ -861,7 +867,8 @@ inline Description<LineEdit> lineEdit(Ref<LineEdit> reference, ManagedState<std:
  * @return Existing control recipe with additive reference publication.
  */
 template <class T>
-Description<T> control(Ref<T> reference, std::string_view text, ControlStyle style = {}, SizePolicy policy = {}) {
+Description<T> control(Ref<T> reference, std::string_view text, ControlStyle style = {},
+                       SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return control<T>(text, style, policy).reference(std::move(reference));
 }
 
@@ -894,7 +901,8 @@ inline ReadOnlyModifier readOnly(bool enabled = true) {
  * @param policy Owning layout constraints, checked by the existing solver.
  * @return Existing Button recipe without brackets; activation still uses existing bindings/router.
  */
-inline Description<Button> plainButton(std::string_view text, ControlStyle style = {}, SizePolicy policy = {}) {
+inline Description<Button> plainButton(std::string_view text, ControlStyle style = {},
+                                       SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return detail::textControl<Button>(TextValue(text), style, policy, {}, ButtonChrome::NONE);
 }
 
@@ -908,7 +916,7 @@ inline Description<Button> plainButton(std::string_view text, ControlStyle style
 template <class Callback>
   requires portals::detail::ManagedAction<Callback, ClickEvent>
 Description<Button> plainButton(std::string_view text, Callback action, ControlStyle style = {},
-                                SizePolicy policy = {}) {
+                                SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return plainButton(text, style, policy).onClick(std::move(action));
 }
 
@@ -919,7 +927,7 @@ Description<Button> plainButton(std::string_view text, Callback action, ControlS
  * @return Existing unbracketed Button recipe sharing normal transactional reference publication.
  */
 inline Description<Button> plainButton(Ref<Button> reference, std::string_view text, ControlStyle style = {},
-                                       SizePolicy policy = {}) {
+                                       SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return plainButton(text, style, policy).reference(std::move(reference));
 }
 

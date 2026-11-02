@@ -40,6 +40,19 @@ struct SizePolicy {
   constexpr bool operator==(const SizePolicy &other) const = default;
 };
 
+/** @brief Intrinsic content on both axes; explicit policies remain authoritative. */
+inline constexpr SizePolicy DEFAULT_CONTENT_POLICY{.width = {.mode = SizeMode::CONTENT},
+                                                   .height = {.mode = SizeMode::CONTENT}};
+/** @brief Fill available width from a zero flex basis while retaining content height. */
+inline constexpr SizePolicy DEFAULT_FLEX_WIDTH_POLICY{.width = {.preferred = 0, .mode = SizeMode::FLEX},
+                                                      .height = {.mode = SizeMode::CONTENT}};
+/** @brief Single-line editors retain one cell even during shortage; text length is not a flex basis. */
+inline constexpr SizePolicy DEFAULT_EDITOR_POLICY{.width = {.minimum = 1, .preferred = 0, .mode = SizeMode::FLEX},
+                                                  .height = {.mode = SizeMode::CONTENT}};
+/** @brief A bounded data viewport fills both axes without requesting the whole model extent. */
+inline constexpr SizePolicy DEFAULT_VIEWPORT_POLICY{.width = {.preferred = 0, .mode = SizeMode::FLEX},
+                                                    .height = {.preferred = 0, .mode = SizeMode::FLEX}};
+
 /** @brief Optional const sizing interface, read only within tree.read. */
 class LayoutItem {
 public:

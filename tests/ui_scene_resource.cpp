@@ -3827,7 +3827,7 @@ TEST_CASE("chart literals reject invalid reachable leaves before any resolver or
     {"Prices{yRange{minimum=1e309}}", Code::INVALID_VALUE, "Prices.yRange.minimum"},
     {"Prices{yRange{enabled=yes}}", Code::INVALID_VALUE, "Prices.yRange.enabled"},
     {"Prices{chartGlyphs=ASCII}", Code::UNKNOWN_PROPERTY, "Prices.chartGlyphs"},
-    {"Prices{width=7}", Code::UNKNOWN_PROPERTY, "Prices.width"},
+    {"Prices{width=-1}", Code::INVALID_VALUE, "Prices.width"},
     {"Probe{mode=LINE}", Code::UNKNOWN_PROPERTY, "Probe.mode"},
     {"Chart{}", Code::UNKNOWN_TYPE, {}},
   };
@@ -6794,4 +6794,104 @@ TEST_CASE("resource arguments retain legacy positional aggregate initialization"
   CHECK(arguments.id == "id");
   CHECK_FALSE(arguments.weight.has_value());
   CHECK_FALSE(arguments.cells.has_value());
+}
+
+TEST_CASE("loaded family defaults share native content and editor policies") {
+  ui::SceneResourceOptions options;
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  auto owner = ui::scene(R"(
+    scene { VBox {
+      Label#title { text="Name" }
+      LineEdit#entry { text="a much longer input" }
+      Button#button { text="Go" }
+    } }
+  )",
+                         options);
+  const auto title = owner.get<Label>("title");
+  const auto entry = owner.get<LineEdit>("entry");
+  const auto button = owner.get<Button>("button");
+  REQUIRE(owner.prepareChecked());
+  auto &managed = owner.managed()->get();
+  auto &app = ui::detail::SceneAccess::application(managed);
+  layoutResourceFrame(managed, app, {30, 10});
+  CHECK(title.geometry()->local.size() == CellSize{4, 1});
+  CHECK(entry.geometry()->local.size() == CellSize{30, 1});
+  CHECK(button.geometry()->local.size().height == 1);
+  REQUIRE(app.tree().read(entry.node(), [&](const LineEdit &widget) {
+    CHECK(widget.sizePolicy() == DEFAULT_EDITOR_POLICY);
+  }));
+  REQUIRE(app.tree().read(button.node(), [&](const Button &widget) {
+    CHECK(widget.sizePolicy() == DEFAULT_CONTENT_POLICY);
+  }));
+  REQUIRE(owner.close());
+}
+
+TEST_CASE("loaded native chart factories support width max and independent flex sizing") {
+  struct EmptyRows final : ModelSnapshot<int> {
+    EmptyRows() : ModelSnapshot(1, 0) {
+    }
+
+    ModelRows<int> read(RowRange) const override {
+      return {RangeState::READY, {}, {}};
+    }
+  };
+
+  auto application = Application::create();
+  REQUIRE(application);
+  auto managed = ManagedScene::create(**application);
+  REQUIRE(managed);
+  auto model = (*managed)->model<int>(std::make_shared<EmptyRows>());
+  REQUIRE(model);
+  ui::Ref<Chart<int>> fixed, flex;
+  ui::SceneResourceOptions options;
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  REQUIRE(options.registry.add<Chart<int>>("Plot", [model = *model, fixed, flex](ui::SceneResourceArguments arguments) {
+    return ui::chart(model,
+                     [](const int &) -> std::optional<Ohlc> {
+                       return std::nullopt;
+                     })
+      .reference(arguments.id == "fixed" ? fixed : flex);
+  }));
+  const auto mounted = ui::mount(**managed, ui::resource(R"(
+    scene { VBox {
+      Plot#fixed { width=8 maxHeight=3 }
+      Plot#flex { flexX=2 maxWidth=9 height=2 }
+    } }
+  )",
+                                                         options));
+  if (!mounted) {
+    ui::SceneReport report;
+    report.failure = mounted.error();
+    ui::reportToStderr(report);
+  }
+  REQUIRE(mounted);
+  auto &app = **application;
+  layoutResourceFrame(**managed, app, {30, 10});
+  REQUIRE(fixed.geometry());
+  REQUIRE(flex.geometry());
+  CHECK(fixed.geometry()->local.size() == CellSize{8, 3});
+  CHECK(flex.geometry()->local.size() == CellSize{9, 2});
+  REQUIRE(app.tree().read(flex.node(), [&](const Chart<int> &widget) {
+    const auto policy = widget.sizePolicy();
+    CHECK(policy.width.mode == SizeMode::FLEX);
+    CHECK(policy.width.preferred == 0);
+    CHECK(policy.width.weight == 2);
+    CHECK(policy.width.maximum == 9);
+  }));
+  REQUIRE((*managed)->close());
+}
+
+TEST_CASE("old exact chart property allowlist remains narrow after adding sized-widget defaults") {
+  ui::SceneResourceOptions options;
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  options.controls.emplace();
+  constexpr std::string_view OLD[]{"text",           "mode",           "chartGlyphSet", "candleGap",
+                                   "yRange.enabled", "yRange.minimum", "yRange.maximum"};
+  options.controls->registerType("Plot", OLD);
+  REQUIRE(options.registry.add<Chart<int>>("Plot", [](ui::SceneResourceArguments) {
+    return ui::custom<Chart<int>>(ModelConsumer<int>{}, std::function<std::optional<Ohlc>(const int &)>{});
+  }));
+  const auto failure = rejected("scene{Plot{width=3}}", options);
+  REQUIRE(failure.sceneResource);
+  CHECK(failure.sceneResource->code == Code::UNKNOWN_PROPERTY);
 }

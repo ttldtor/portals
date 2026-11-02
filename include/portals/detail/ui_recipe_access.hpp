@@ -160,6 +160,9 @@ struct Access {
   }
 
   /// @cond INTERNAL
+  // Keep the existing Column recipe metadata/children while using the cpp-owned dialog body adapter.
+  static Description<Column> dialogContent(Description<Column> description);
+
   static std::expected<Node<Widget>, ManagedError> dialogPanel(ManagedScene &scene, Node<Dialog> node,
                                                                BorderOptions options) {
     return scene.makeDialogPanel(node, options);

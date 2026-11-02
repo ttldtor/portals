@@ -155,7 +155,8 @@ Description<OverlayHost> overlayHost(Ref<OverlayHost> reference, Body &&body, La
 template <detail::DescriptionInput Body>
 Description<Dialog> dialog(TextValue title, Body &&body, DialogOptions options = {}) {
   auto heading = label(std::move(title)).style(StyleTarget{.type = "Label", .classes = {"dialog-title"}});
-  auto content = column(std::forward<Body>(body)).style(StyleTarget{.type = "Column", .classes = {"dialog-body"}});
+  auto content = detail::Access::dialogContent(column(std::forward<Body>(body)))
+                   .style(StyleTarget{.type = "Column", .classes = {"dialog-body"}});
   auto layout = detail::Access::captureLayouts(heading, content);
   auto description =
     detail::Access::cold<Dialog>([options, heading = std::move(heading), content = std::move(content)](
@@ -593,6 +594,7 @@ struct NotificationModifier {
 inline NotificationModifier notificationSettings(ControlNotificationSettings values) {
   return {values};
 }
+
 namespace detail {
 /** @brief Compose declared layers through the existing host and one ordinary mount transaction.
  * @tparam Body Consuming ordinary body or exact explicit OverlayHost recipe.

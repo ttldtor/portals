@@ -217,6 +217,9 @@ commitScroll(WidgetTree &tree, Node<Widget> node, ScrollWidgetState &state, Scro
              ScrollPublication publication = ScrollPublication::POSITION);
 std::expected<ScrollAreaGeometry, TreeError> areaPlacement(const ScrollWidgetState &state, CellSize available);
 std::expected<void, TreeError> arrangeScroll(ScrollWidgetState &state, CellSize allocation);
+// Content policy is borrowed only for this pure solve/commit; bare bars retain no content scratch.
+std::expected<void, TreeError> arrangeScroll(ScrollWidgetState &state, CellSize allocation, ScrollExtent basis,
+                                             const SizePolicy *contentPolicy);
 ComputedStyle scrollDefaults(const ScrollWidgetState &state);
 std::expected<void, TreeError> paintScroll(ScrollWidgetState &state, ComputedStyleView style, PaintContext &context);
 std::expected<EventReply, TreeError> scrollInput(EventRouter &router, WidgetTree &tree, Node<Widget> node,

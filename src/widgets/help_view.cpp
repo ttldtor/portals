@@ -264,9 +264,7 @@ Description<HelpView> KeyHelpAccess::full(Ref<HelpView> reference, HelpViewOptio
     auto record = std::make_shared<portals::detail::KeyHelpRecord>();
     record->full = options;
     record->presentation = std::make_shared<portals::detail::KeyHelpPresentation>(std::move(*marker));
-    SizePolicy policy;
-    policy.height.mode = SizeMode::FLEX;
-    auto root = scene.emplace<HelpView>(parent, policy);
+    auto root = scene.emplace<HelpView>(parent);
     if (!root) {
       return root;
     }

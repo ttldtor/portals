@@ -31,8 +31,8 @@ Description<ScrollArea> scrollArea(Child &&child, ScrollAreaOptions options = {}
 struct LineEditConfig {
   std::function<std::expected<void, TreeError>(LineEditResult)> result{}; ///< Optional callback after standard editing.
   LineEditOptions options{}; ///< Editor limits and appearances; scene width policy overrides options.widthPolicy.
-  SizePolicy policy{};       ///< Owning layout constraints validated by the existing layout engine.
-  std::shared_ptr<Clipboard> clipboard{};           ///< Optional UI-owned clipboard adapter retained by the binding.
+  SizePolicy policy{DEFAULT_EDITOR_POLICY}; ///< Owning layout constraints validated by the existing layout engine.
+  std::shared_ptr<Clipboard> clipboard{};   ///< Optional UI-owned clipboard adapter retained by the binding.
   std::function<bool(std::string_view)> validate{}; ///< Optional publication validator; false retains visible draft.
 };
 

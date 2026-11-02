@@ -282,6 +282,14 @@ void ScrollArea::unmount() {
 }
 
 ScrollBar::ScrollBar(std::shared_ptr<ScrollController> controller, ScrollAxis axis, WidthPolicy width,
+                     ScrollBarOptions options, ControlStyle style)
+    : ScrollBar(std::move(controller), axis, width, options, style,
+                axis == ScrollAxis::HORIZONTAL ? DEFAULT_FLEX_WIDTH_POLICY
+                                               : SizePolicy{.width = {.mode = SizeMode::CONTENT},
+                                                            .height = {.preferred = 0, .mode = SizeMode::FLEX}}) {
+}
+
+ScrollBar::ScrollBar(std::shared_ptr<ScrollController> controller, ScrollAxis axis, WidthPolicy width,
                      ScrollBarOptions options, ControlStyle style, SizePolicy policy)
     : SizedWidget(policy), state_(std::make_unique<detail::ScrollWidgetState>(std::move(controller), width,
                                                                               options.glyphs, options.arrows)) {

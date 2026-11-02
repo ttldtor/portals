@@ -18,10 +18,10 @@ struct Access;
 struct VirtualListOptions {
   std::int32_t row_height{1};             ///< Positive cell rows per logical row.
   std::size_t overscan_rows{2};           ///< Extra requested rows on each side, never formatted while invisible.
-  WidthPolicy width_policy;              ///< Required policy for delegate and placeholder text.
-  CellStyle normal;                      ///< Unselected row fill and text.
+  WidthPolicy width_policy;               ///< Required policy for delegate and placeholder text.
+  CellStyle normal;                       ///< Unselected row fill and text.
   CellStyle selected{{}, {}, true, true}; ///< Selected row fill and text.
-  CellStyle highlight{.bold = true, .underline = true};      ///< Prepared match emphasis over normal/selected appearance.
+  CellStyle highlight{.bold = true, .underline = true}; ///< Prepared match emphasis over normal/selected appearance.
 };
 
 /// @cond INTERNAL
@@ -140,7 +140,7 @@ public:
    * @note Construct through WidgetTree::emplace on UI; allocation/capture failures follow its errors.
    */
   VirtualList(ModelConsumer<T> consumer, std::function<GraphemeText(const ModelRow<T> &)> delegate,
-              VirtualListOptions options = {}, SizePolicy policy = {})
+              VirtualListOptions options = {}, SizePolicy policy = DEFAULT_VIEWPORT_POLICY)
       : SizedWidget(policy), consumer_(std::move(consumer)), delegate_(std::move(delegate)), options_(options) {
   }
 
@@ -217,7 +217,9 @@ public:
     if (preparedSuppressed_) {
       auto bounds = CellRect::from({}, arranged_);
 
-      if (!bounds) { return std::unexpected(TreeError::INVALID_GEOMETRY); }
+      if (!bounds) {
+        return std::unexpected(TreeError::INVALID_GEOMETRY);
+      }
       const auto style = computedStyle() ? computedStyle()->normal : options_.normal;
       const std::array<RenderCommand, 1> commands{FillCommand{*bounds, *bounds, style}};
 

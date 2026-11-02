@@ -279,6 +279,53 @@ std::expected<CellRect, TreeError> placeDialogPanel(DialogOptions options, CellS
   return result ? std::expected<CellRect, TreeError>(*result) : std::unexpected(TreeError::INVALID_GEOMETRY);
 }
 
+std::expected<CellSize, TreeError> DialogContentColumn::childAvailable(CellSize available) const {
+  auto bounds = Column::childAvailable(available);
+
+  if (bounds) {
+    offer_ = available.normalized();
+  }
+
+  return bounds;
+}
+
+std::expected<CellSize, TreeError> DialogContentColumn::measureChildren(std::span<const MeasuredChild> children) const {
+  const auto natural = Column::measureChildren(children);
+
+  if (!natural) {
+    return std::unexpected(natural.error());
+  }
+
+  const auto flexible = std::ranges::any_of(children, [](const MeasuredChild &child) {
+    return child.policy.width.mode == SizeMode::FLEX || child.policy.height.mode == SizeMode::FLEX;
+  });
+
+  if (!flexible) {
+    return natural;
+  }
+
+  const auto placed = Column::arrangeChildren(children, offer_);
+
+  if (!placed) {
+    return std::unexpected(placed.error());
+  }
+
+  const auto padding = options().padding;
+  Wide width = natural->width;
+  Wide height = natural->height;
+
+  for (std::size_t i = 0; i < children.size(); ++i) {
+    if (children[i].policy.width.mode == SizeMode::FLEX) {
+      width = std::max(width, Wide{(*placed)[i].right()} + padding.right);
+    }
+    if (children[i].policy.height.mode == SizeMode::FLEX) {
+      height = std::max(height, Wide{(*placed)[i].bottom()} + padding.bottom);
+    }
+  }
+
+  return grid_detail::size(width, height);
+}
+
 DialogPanel::DialogPanel(WidthPolicy width, BorderOptions options, ControlStyle style)
     : Border(width, options, style), options_(options) {
 }

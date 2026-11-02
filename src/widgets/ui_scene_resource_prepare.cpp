@@ -37,7 +37,7 @@ std::expected<void, ManagedError> registerSchemas(ControlContext &controls, cons
     }
 
     const auto matchesLegacyDataSchema = [&] {
-      if ((entry.virtualView != "VirtualList" && entry.virtualView != "VirtualTable") ||
+      if ((entry.virtualView != "VirtualList" && entry.virtualView != "VirtualTable" && entry.virtualView != "Chart") ||
           !controls.hasRegisteredType(entry.name) || controls.matchesRegisteredType(entry.name, paths)) {
         return false;
       }
@@ -54,14 +54,24 @@ std::expected<void, ManagedError> registerSchemas(ControlContext &controls, cons
         return true;
       }
 
-      std::erase_if(legacyPaths, [](std::string_view path) {
-        return path == "glyphProfile" || path == "glyphFallback";
+      std::erase_if(legacyPaths, [&](std::string_view path) {
+        return path == "glyphProfile" || path == "glyphFallback" ||
+               (entry.virtualView == "Chart" &&
+                (path == "width" || path == "height" || path == "flex" || path.starts_with("frame.")));
       });
 
       return controls.matchesRegisteredType(entry.name, legacyPaths);
     };
 
     if (!entry.virtualView.empty()) {
+      // Charts previously had no common sizing fields; retain their exact old text-only allowlist.
+      constexpr std::string_view LEGACY_CHART_PATHS[]{"text"};
+
+      if (entry.virtualView == "Chart" && controls.hasRegisteredType(entry.name) &&
+          controls.matchesRegisteredType(entry.name, LEGACY_CHART_PATHS)) {
+        continue;
+      }
+
       // An explicit old narrow allowlist remains an exact compatibility path.
       if (controls.hasRegisteredType(entry.name) && controls.matchesRegisteredType(entry.name, paths)) {
         continue;

@@ -12,7 +12,7 @@ int main() {
   int calls{};
   bool checked = true;
   auto scene =
-    ui::scene(ui::label(label, "geometry"), options) | ui::onLayout(label, [&](const NodeGeometry &geometry) {
+    ui::scene(ui::label(label, "geometry").flexX(), options) | ui::onLayout(label, [&](const NodeGeometry &geometry) {
       ++calls;
       const auto current = label.geometry();
       const auto size = label.size();

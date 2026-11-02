@@ -324,7 +324,8 @@ struct Access {
  * @return A constant-built Label description with owning bytes.
  */
 template <Literal Id = "", std::size_t N>
-consteval auto label(const char (&text)[N], ControlStyle style = ControlStyle{}, SizePolicy policy = SizePolicy{}) {
+consteval auto label(const char (&text)[N], ControlStyle style = ControlStyle{},
+                     SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return detail::Access::element<Label, Id>(text, style, policy, {}, EditMode::IMMEDIATE);
 }
 
@@ -336,7 +337,8 @@ consteval auto label(const char (&text)[N], ControlStyle style = ControlStyle{},
  * @return Constant-built unbound Button; add a runtime onClick adapter when needed.
  */
 template <Literal Id = "", std::size_t N>
-consteval auto button(const char (&text)[N], ControlStyle style = ControlStyle{}, SizePolicy policy = SizePolicy{}) {
+consteval auto button(const char (&text)[N], ControlStyle style = ControlStyle{},
+                      SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return detail::Access::element<Button, Id>(text, style, policy, {}, EditMode::IMMEDIATE);
 }
 
@@ -350,7 +352,7 @@ consteval auto button(const char (&text)[N], ControlStyle style = ControlStyle{}
  */
 template <Literal Id = "", std::size_t N>
 consteval auto lineEdit(const char (&initial)[N], EditMode mode = EditMode::IMMEDIATE,
-                        ControlStyle style = ControlStyle{}, SizePolicy policy = SizePolicy{}) {
+                        ControlStyle style = ControlStyle{}, SizePolicy policy = DEFAULT_EDITOR_POLICY) {
   return detail::Access::element<LineEdit, Id>(initial, style, policy, {}, mode);
 }
 
