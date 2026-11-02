@@ -18,6 +18,7 @@
 #include <portals/primitives.hpp>
 #include <portals/scroll_controls.hpp>
 #include <portals/spinner.hpp>
+#include <portals/status_bar.hpp>
 #include <portals/style.hpp>
 #include <portals/style_source.hpp>
 #include <portals/text_transform.hpp>

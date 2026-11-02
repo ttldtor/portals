@@ -441,7 +441,7 @@ private:
                             "ComboBox",   "DropDown",      "CheckBox",      "VBox",
                             "Button",     "Border",        "Gauge",         "Spinner",
                             "ScrollArea", "ScrollBar",     "LogView",       "Overlay",
-                            "HelpView",   "KeyHints",      "VirtualList",   "VirtualTable",
+                            "HelpView",   "KeyHints",      "VirtualList",   "VirtualTable", "StatusBar",
                             "Chart",      "DataStateView", "OverlayHost",   "Dialog",
                             "MessageBox", "Notifications", "ThemeSelector", "ThemeSelectorCatalog"}) {
       const auto schema = controlPropertySchema(type);

@@ -97,6 +97,12 @@ SceneResourceRegistry::SceneResourceRegistry() {
   entries_.back().text = false;
   entries_.back().gap = true;
 
+  (void)add<StatusBar>("StatusBar", [](SceneResourceArguments arguments) {
+    return statusBar(detail::controlLinearOptions(arguments.settings, LinearOptions{.gap = arguments.gap}));
+  }, true);
+  entries_.back().text = false;
+  entries_.back().gap = true;
+
   (void)add<Label>("Label", [](SceneResourceArguments arguments) {
     return label(arguments.text);
   });
