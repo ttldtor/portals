@@ -7,6 +7,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Add a complete resizable work-queue example with a command menu, editor,
+  virtual table, shared Save action and bottom controls. The complete program
+  is also compiled against the installed package.
+
 - Add invisible `ui::spacer(weight)` and `ui::spacing(cells)` layout items for
   direct `HBox` and `VBox` children. Flexible space uses weighted allocation;
   fixed gaps retain their extent when clipped. Add a complete resizable profile
