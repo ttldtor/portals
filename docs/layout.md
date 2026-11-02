@@ -124,6 +124,33 @@ still requests an exact width; `.flexX()` does not remove an explicit maximum.
 Still image: [control defaults](images/control-defaults.png). Source:
 [complete C++ example](examples/guide_control_defaults.cpp).
 
+### A resizable work queue
+
+This complete program keeps a compact command menu and editor above a virtual
+table, with actions and status below it. The menu and buttons use their content
+sizes. The table takes four shares of the flexible vertical space and the spacer
+takes one. Resizing changes the viewport without rebuilding the scene or replacing
+the editor value. Save is the same action in the menu, button and `Ctrl+S` binding.
+
+The table's outer frame has a minimum size of 46 columns by 6 rows. The usable
+viewport is smaller because the frame occupies cells. The editor accepts
+12–40 columns. These are application constraints, expressed with ordinary size
+modifiers. Table column widths are fixed independently of the viewport; enlarging
+the window does not automatically widen those columns.
+
+The collection and column schema are checked during scene setup. Their errors
+propagate through the scene factory to `runApp()`. The model setup uses the current
+state/source/model adapters; the program includes that setup rather than relying
+on an omitted application helper.
+
+\include guide_responsive_layout.cpp
+
+Source: [complete work queue program](examples/guide_responsive_layout.cpp).
+
+![The work queue preserves its saved name while its table viewport changes](images/responsive-layout.gif)
+
+Still image: [resizable work queue](images/responsive-layout.png).
+
 ### A profile form
 
 The form below keeps the name field between 16 and 40 cells wide. It fills
