@@ -103,7 +103,7 @@ Description<DataStateView> dataStateView(Description<View> content, DataStateCon
 template <class T>
 Description<VirtualTable<T>> virtualTable(ManagedModel<T> model,
                                           std::type_identity_t<std::span<const TableColumn<T>>> columns,
-                                          VirtualTableOptions options = {}, SizePolicy policy = {},
+                                          VirtualTableOptions options = {}, SizePolicy policy = DEFAULT_VIEWPORT_POLICY,
                                           std::type_identity_t<ManagedViewHandler<T>> prepared = {}) {
   // A recipe may outlive the caller's array or vector. Copy before retaining a mount callback.
   auto ownedColumns = std::vector<TableColumn<T>>(columns.begin(), columns.end());
@@ -131,7 +131,7 @@ Description<VirtualTable<T>> virtualTable(ManagedModel<T> model,
 /// Capture construction may throw; mount preserves typed errors and subtree rollback.
 template <class T>
 Description<VirtualList<T>> virtualList(ManagedModel<T> model, std::type_identity_t<ManagedListFormatter<T>> delegate,
-                                        VirtualListOptions options = {}, SizePolicy policy = {},
+                                        VirtualListOptions options = {}, SizePolicy policy = DEFAULT_VIEWPORT_POLICY,
                                         std::type_identity_t<ManagedViewHandler<T>> prepared = {}) {
   auto description = detail::Access::cold<VirtualList<T>>(
     [model, delegate = std::move(delegate), options, policy,
@@ -151,6 +151,7 @@ Description<VirtualList<T>> virtualList(ManagedModel<T> model, std::type_identit
 /// @param options Existing chart mode, width and glyph configuration.
 /// @param first Owning origin callback, invoked in composition registration order during
 /// preparation. Empty means row zero. NodeRef observations are already published then.
+/// @param policy Owning viewport constraints; explicit values override the family default.
 /// @param prepared Owning provider callback after preparation, including retries. Empty
 /// rejects pending work with INVALID_ARGUMENT. Explicit reference captures remain borrowed.
 /// @return Single-use recipe with automatic style/preparation and no input binding.
@@ -158,18 +159,19 @@ Description<VirtualList<T>> virtualList(ManagedModel<T> model, std::type_identit
 template <class T>
 Description<Chart<T>> chart(ManagedModel<T> model, std::type_identity_t<ManagedChartAccessor<T>> accessor,
                             ChartOptions options = {}, ManagedChartOrigin first = {},
-                            std::type_identity_t<ManagedViewHandler<T>> prepared = {}) {
+                            std::type_identity_t<ManagedViewHandler<T>> prepared = {},
+                            SizePolicy policy = DEFAULT_VIEWPORT_POLICY) {
   auto description = detail::Access::cold<Chart<T>>(
-    [model, accessor = std::move(accessor), options, first = std::move(first), prepared = std::move(prepared)](
-      ManagedScene &scene, Node<Widget> parent,
-      detail::MountContext &context) mutable -> std::expected<Node<Chart<T>>, ManagedError> {
+    [model, accessor = std::move(accessor), options, first = std::move(first), prepared = std::move(prepared),
+     policy](ManagedScene &scene, Node<Widget> parent,
+             detail::MountContext &context) mutable -> std::expected<Node<Chart<T>>, ManagedError> {
       auto effective = detail::controlChartOptions(*context.controlSettings, options);
 
       if (!effective) {
         return std::unexpected(detail::error(parent, effective.error()));
       }
 
-      return scene.chart(parent, model, std::move(accessor), *effective, std::move(first), std::move(prepared));
+      return scene.chart(parent, model, std::move(accessor), *effective, std::move(first), std::move(prepared), policy);
     });
 
   return detail::Access::configuredControl(std::move(description), "Chart");
@@ -179,27 +181,28 @@ Description<Chart<T>> chart(ManagedModel<T> model, std::type_identity_t<ManagedC
 /// @tparam T Immutable model row type, matching the receiving ManagedModel.
 /// Copying captures may throw; explicit reference captures remain borrowed until retirement.
 template <class T> struct VirtualTableConfig {
-  VirtualTableOptions options{};    ///< Existing dimensions, width policy, budgets and styles.
-  SizePolicy policy{};              ///< Layout constraints in terminal cells.
-  ManagedViewHandler<T> prepared{}; ///< Provider callback; empty rejects pending work with INVALID_ARGUMENT.
+  VirtualTableOptions options{};              ///< Existing dimensions, width policy, budgets and styles.
+  SizePolicy policy{DEFAULT_VIEWPORT_POLICY}; ///< Layout constraints in terminal cells.
+  ManagedViewHandler<T> prepared{};           ///< Provider callback; empty rejects pending work with INVALID_ARGUMENT.
 };
 
 /// @brief Named owning settings for a list recipe; defaults match the positional factory.
 /// @tparam T Immutable model row type, matching the receiving ManagedModel.
 /// Copying captures may throw; explicit reference captures remain borrowed until retirement.
 template <class T> struct VirtualListConfig {
-  VirtualListOptions options{};     ///< Existing row height, overscan, width policy and styles.
-  SizePolicy policy{};              ///< Layout constraints in terminal cells.
-  ManagedViewHandler<T> prepared{}; ///< Provider callback; empty rejects pending work with INVALID_ARGUMENT.
+  VirtualListOptions options{};               ///< Existing row height, overscan, width policy and styles.
+  SizePolicy policy{DEFAULT_VIEWPORT_POLICY}; ///< Layout constraints in terminal cells.
+  ManagedViewHandler<T> prepared{};           ///< Provider callback; empty rejects pending work with INVALID_ARGUMENT.
 };
 
 /// @brief Named owning settings for a chart recipe; defaults match the positional factory.
 /// @tparam T Immutable model row type projected by the chart accessor.
 /// Copying captures may throw; explicit reference captures remain borrowed until retirement.
 template <class T> struct ChartConfig {
-  ChartOptions options{};           ///< Existing plot mode, width, glyphs and styles.
-  ManagedChartOrigin first{};       ///< Origin evaluated during preparation; empty starts at row zero.
-  ManagedViewHandler<T> prepared{}; ///< Provider callback; empty rejects pending work with INVALID_ARGUMENT.
+  ChartOptions options{};                     ///< Existing plot mode, width, glyphs and styles.
+  ManagedChartOrigin first{};                 ///< Origin evaluated during preparation; empty starts at row zero.
+  ManagedViewHandler<T> prepared{};           ///< Provider callback; empty rejects pending work with INVALID_ARGUMENT.
+  SizePolicy policy{DEFAULT_VIEWPORT_POLICY}; ///< Owning viewport constraints; explicit policies stay unchanged.
 };
 
 /** @brief Owning cold text collection recipe; attaching happens only during a complete mount. */
@@ -308,7 +311,7 @@ template <class T, class Config>
 Description<Chart<T>> chart(ManagedModel<T> model, std::type_identity_t<ManagedChartAccessor<T>> accessor,
                             Config &&config) {
   return chart(model, std::move(accessor), config.options, std::forward<Config>(config).first,
-               std::forward<Config>(config).prepared);
+               std::forward<Config>(config).prepared, config.policy);
 }
 
 /** @tparam T Immutable managed model row type.
@@ -316,14 +319,14 @@ Description<Chart<T>> chart(ManagedModel<T> model, std::type_identity_t<ManagedC
  * @param model Existing scene-owned model.
  * @param columns Column descriptions copied by the original factory.
  * @param options Existing table configuration.
- * @param policy Existing layout constraints.
+ * @param policy Owning viewport constraints; explicit values override the family default.
  * @param prepared Owning provider callback; pending ranges require it.
  * @return Existing table recipe preserving preparation, rollback and provider semantics.
  */
 template <class T>
 Description<VirtualTable<T>> virtualTable(Ref<VirtualTable<T>> reference, ManagedModel<T> model,
                                           std::type_identity_t<std::span<const TableColumn<T>>> columns,
-                                          VirtualTableOptions options = {}, SizePolicy policy = {},
+                                          VirtualTableOptions options = {}, SizePolicy policy = DEFAULT_VIEWPORT_POLICY,
                                           std::type_identity_t<ManagedViewHandler<T>> prepared = {}) {
   return virtualTable(model, columns, options, policy, std::move(prepared)).reference(std::move(reference));
 }
@@ -340,7 +343,7 @@ Description<VirtualTable<T>> virtualTable(Ref<VirtualTable<T>> reference, Manage
 template <class T>
 Description<VirtualList<T>> virtualList(Ref<VirtualList<T>> reference, ManagedModel<T> model,
                                         std::type_identity_t<ManagedListFormatter<T>> delegate,
-                                        VirtualListOptions options = {}, SizePolicy policy = {},
+                                        VirtualListOptions options = {}, SizePolicy policy = DEFAULT_VIEWPORT_POLICY,
                                         std::type_identity_t<ManagedViewHandler<T>> prepared = {}) {
   return virtualList(model, std::move(delegate), options, policy, std::move(prepared)).reference(std::move(reference));
 }
@@ -352,13 +355,15 @@ Description<VirtualList<T>> virtualList(Ref<VirtualList<T>> reference, ManagedMo
  * @param options Existing chart configuration.
  * @param first Owning origin callback; empty starts at row zero.
  * @param prepared Owning provider callback; pending ranges require it.
+ * @param policy Owning viewport constraints; explicit values override the family default.
  * @return Existing chart recipe preserving preparation, rollback and provider semantics.
  */
 template <class T>
 Description<Chart<T>> chart(Ref<Chart<T>> reference, ManagedModel<T> model,
                             std::type_identity_t<ManagedChartAccessor<T>> accessor, ChartOptions options = {},
-                            ManagedChartOrigin first = {}, std::type_identity_t<ManagedViewHandler<T>> prepared = {}) {
-  return chart(model, std::move(accessor), options, std::move(first), std::move(prepared))
+                            ManagedChartOrigin first = {}, std::type_identity_t<ManagedViewHandler<T>> prepared = {},
+                            SizePolicy policy = DEFAULT_VIEWPORT_POLICY) {
+  return chart(model, std::move(accessor), options, std::move(first), std::move(prepared), policy)
     .reference(std::move(reference));
 }
 

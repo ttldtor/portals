@@ -327,10 +327,10 @@ ManagedScene::virtualList(Node<Widget> parent, ManagedModel<T> model,
 }
 
 template <class T>
-std::expected<Node<Chart<T>>, ManagedError> ManagedScene::chart(Node<Widget> parent, ManagedModel<T> model,
-                                                                std::type_identity_t<ManagedChartAccessor<T>> accessor,
-                                                                ChartOptions options, ManagedChartOrigin first,
-                                                                std::type_identity_t<ManagedViewHandler<T>> prepared) {
+std::expected<Node<Chart<T>>, ManagedError>
+ManagedScene::chart(Node<Widget> parent, ManagedModel<T> model, std::type_identity_t<ManagedChartAccessor<T>> accessor,
+                    ChartOptions options, ManagedChartOrigin first,
+                    std::type_identity_t<ManagedViewHandler<T>> prepared, SizePolicy policy) {
   auto source = modelSource(model, parent);
 
   if (!source) {
@@ -343,7 +343,7 @@ std::expected<Node<Chart<T>>, ManagedError> ManagedScene::chart(Node<Widget> par
     return std::unexpected(error(ManagedPhase::MOUNT, parent, range.error()));
   }
 
-  auto node = emplace<Chart<T>>(parent, std::move(*range), std::move(accessor), options);
+  auto node = emplace<Chart<T>>(parent, std::move(*range), std::move(accessor), options, policy);
 
   if (!node) {
     return node;

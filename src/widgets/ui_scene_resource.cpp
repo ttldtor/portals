@@ -127,7 +127,7 @@ SceneResourceRegistry::SceneResourceRegistry() {
     return password().settings(arguments.settings);
   });
   (void)add<Button>("Button", [](SceneResourceArguments arguments) {
-    return detail::textControl<Button>(TextValue(arguments.text), {}, {}, {},
+    return detail::textControl<Button>(TextValue(arguments.text), {}, DEFAULT_CONTENT_POLICY, {},
                                        arguments.settings.chrome.value_or(ButtonChrome::BRACKETS));
   });
   (void)add<CheckBox>("CheckBox", [](SceneResourceArguments arguments) {

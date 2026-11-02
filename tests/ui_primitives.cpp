@@ -531,7 +531,8 @@ void collapsedExtentsAndWidths() {
        {CellSize{0, 0}, CellSize{1, 0}, CellSize{0, 2}, CellSize{1, 1}, CellSize{2, 1}, CellSize{2, 2}}) {
     Fixture fixture;
 
-    take(ui::mount(*fixture.scene, ui::gauge(.5, ASCII_GAUGE)));
+    // This oracle covers every allocated row rather than the new content-height default.
+    take(ui::mount(*fixture.scene, ui::gauge(.5, ASCII_GAUGE, {}, {})));
 
     const auto image = fixture.render(size);
 

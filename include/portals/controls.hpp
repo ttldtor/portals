@@ -141,7 +141,7 @@ public:
    * @throws std::bad_alloc If text transfer or decoration storage cannot allocate; tree.emplace
    * reports internal allocation failure as NO_MEMORY, excluding construction of its arguments.
    */
-  explicit Label(GraphemeText text, ControlStyle style = {}, SizePolicy policy = {});
+  explicit Label(GraphemeText text, ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY);
 };
 
 /** @brief Button caption decoration; action routing and identity remain unchanged. */
@@ -160,7 +160,7 @@ public:
    * @throws std::bad_alloc If text transfer or decoration storage cannot allocate; tree.emplace
    * reports internal allocation failure as NO_MEMORY, excluding construction of its arguments.
    */
-  explicit Button(GraphemeText text, ControlStyle style = {}, SizePolicy policy = {});
+  explicit Button(GraphemeText text, ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY);
   /** @param text Owning caption with its complete WidthPolicy.
    * @param style Owning normal/focused/disabled appearances.
    * @param policy Owning layout constraints.
@@ -312,7 +312,7 @@ public:
    * @throws std::bad_alloc If text transfer or decoration storage cannot allocate; tree.emplace
    * reports internal allocation failure as NO_MEMORY, excluding construction of its arguments.
    */
-  explicit CheckBox(GraphemeText text, ControlStyle style = {}, SizePolicy policy = {});
+  explicit CheckBox(GraphemeText text, ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY);
   /** @brief Inspect the last synchronized model value on UI inside tree.read.
    * @return The checked presentation value, initially false; the binding's Property remains authoritative.
    */

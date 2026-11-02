@@ -5,6 +5,7 @@
 #include <cmath>
 #include <functional>
 #include <portals/canvas.hpp>
+#include <portals/layout.hpp>
 #include <portals/model.hpp>
 #include <vector>
 
@@ -113,15 +114,17 @@ std::expected<std::optional<ModelRequest<T>>, TreeError> prepareChart(WidgetTree
  * provider ownership is retained and the business model is never copied by the view.
  * @tparam T Immutable domain record type; the same provider may serve VirtualTable<T>.
  */
-template <class T> class Chart : public Widget {
+template <class T> class Chart : public SizedWidget {
 public:
   /** @brief Own one range consumer and the typed projection.
    * @param consumer Same-model UI-owned consumer transferred into the chart.
    * @param accessor Owning callable returning an OHLC value, or nullopt to break the line.
    * @param options Owning mode, scale and paint settings; invalid values fail preparation.
+   * @param policy Owning viewport constraints; explicit policies retain their modes and bounds.
    */
-  Chart(ModelConsumer<T> consumer, std::function<std::optional<Ohlc>(const T &)> accessor, ChartOptions options = {})
-      : consumer_(std::move(consumer)), accessor_(std::move(accessor)), options_(options) {
+  Chart(ModelConsumer<T> consumer, std::function<std::optional<Ohlc>(const T &)> accessor, ChartOptions options = {},
+        SizePolicy policy = DEFAULT_VIEWPORT_POLICY)
+      : SizedWidget(policy), consumer_(std::move(consumer)), accessor_(std::move(accessor)), options_(options) {
   }
 
   /** @brief Cancel outstanding work on UI without waiting. */

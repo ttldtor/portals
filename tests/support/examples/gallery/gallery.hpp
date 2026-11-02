@@ -118,13 +118,14 @@ struct Scene {
   Node<Label> title = take(tree->emplace<Label>(column, text("Portals controls"))); ///< Static title.
   // UTF-8 escapes test a fullwidth ideograph and an e + combining acute grapheme.
   Node<Label> label = take(tree->emplace<Label>(column, text("Unicode: \xe7\x95\x8c e\xcc\x81"))); ///< Width fixture.
-  Node<Button> button = take(tree->emplace<Button>(column, text("Run")));          ///< Enabled business action target.
-  Node<CheckBox> checkbox = take(tree->emplace<CheckBox>(column, text("Alerts"))); ///< Shared boolean editor.
+  Node<Button> button =
+    take(tree->emplace<Button>(column, text("Run"), ControlStyle{}, SizePolicy{})); ///< Enabled business action target.
+  Node<CheckBox> checkbox = take(tree->emplace<CheckBox>(column, text("Alerts")));  ///< Shared boolean editor.
 
   Node<Column> disabledGroup = take(tree->emplace<Column>(column)); ///< Disabled ancestor for input exclusion.
   Node<Label> disabledLabel = take(tree->emplace<Label>(disabledGroup, text("Disabled label"))); ///< Disabled text.
-  Node<Button> disabledButton =
-    take(tree->emplace<Button>(disabledGroup, text("Disabled button"))); ///< Disabled action.
+  Node<Button> disabledButton = take(
+    tree->emplace<Button>(disabledGroup, text("Disabled button"), ControlStyle{}, SizePolicy{})); ///< Disabled action.
   Node<CheckBox> disabledCheckbox =
     take(tree->emplace<CheckBox>(disabledGroup, text("Disabled check")));              ///< Disabled editor.
   Node<Label> status = take(tree->emplace<Label>(column, text("Initial focus: Run"))); ///< Stage diagnostic caption.

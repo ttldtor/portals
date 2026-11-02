@@ -22,8 +22,11 @@ struct KeyHintsOptions {
 /** @brief One-line named-key projection; only a visible overflow action can receive focus. */
 class KeyHints : public Button {
 public:
-  /** @param text Prepared owning caption. @param style Manual presentation defaults. */
-  KeyHints(GraphemeText text, ControlStyle style = {}) : Button(std::move(text), style, {}, ButtonChrome::NONE) {
+  /** @param text Prepared owning caption. @param style Manual presentation defaults.
+   * @param policy Owning strip geometry; explicit policies retain their requested modes and bounds.
+   */
+  KeyHints(GraphemeText text, ControlStyle style = {}, SizePolicy policy = DEFAULT_FLEX_WIDTH_POLICY)
+      : Button(std::move(text), style, policy, ButtonChrome::NONE) {
   }
 
   /** @param available Offered allocation. @return Prepared one-row size without formatting or allocation. */

@@ -42,7 +42,7 @@ public:
    * @param layout Ordinary row alignment, gaps and padding.
    * @param policy Ordinary retained sizing policy.
    */
-  explicit ComboBox(LinearOptions layout = {}, SizePolicy policy = {});
+  explicit ComboBox(LinearOptions layout = {}, SizePolicy policy = DEFAULT_FLEX_WIDTH_POLICY);
   /** @brief Cancel main-control work; scene retirement releases any surviving popup. */
   ~ComboBox() override;
   /** @return Standard editor identity; observe through a checked tree read. */

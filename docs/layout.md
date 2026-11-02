@@ -69,6 +69,61 @@ content is the control's preferred extent within the layout constraints. For a
 framed widget, these sizing modifiers constrain the outer frame; inner content
 bounds are not copied to it.
 
+### Control defaults
+
+When a builder omits a `SizePolicy`, these control families use the defaults
+below. Each axis is resolved independently; the parent still decides how much
+space is available. `CONTENT` uses the measured extent, while `FLEX` starts at
+its preferred extent and receives a share of spare space.
+
+| Family | Controls | Width | Height |
+|---|---|---|---|
+| Content-sized | `Label`, `Button`, `CheckBox`, `ThreeState`, `Menu`, `Gauge`, `Spinner` | `CONTENT` | `CONTENT` |
+| Fluid editor | `LineEdit`, `Password` | `FLEX`, preferred 0, minimum 1 | `CONTENT` |
+| Fluid form control | `ComboBox`, `DropDown`, `FormField`, `FindBar`, `KeyHints` | `FLEX`, preferred 0 | `CONTENT` |
+| Viewport | `VirtualList`, `VirtualTable`, `Chart`, `DataStateView`, `LogView`, `HelpView` | `FLEX`, preferred 0 | `FLEX`, preferred 0 |
+| Scroll bar | `ScrollBar` | `CONTENT` when vertical; `FLEX` when horizontal | `FLEX` when vertical; `CONTENT` when horizontal |
+
+For `ScrollBar`, breadth and length follow its orientation: a vertical bar has
+content-sized width and flexible height; a horizontal bar has flexible width
+and content-sized height. `KeyHints` uses its offered width to prepare a
+viewport-informed strip rather than sizing to the full hint text. Virtualized
+and log views size to their viewport and bounded prepared data; sizing does not
+scan the complete model or log. A chart measures the offered viewport, not the
+extent of its data; it accepts an explicit size policy when needed. `DataStateView`
+is a viewport wrapper: its default policy fills both axes in `DataStateConfig`
+and in the native `DataStateView` constructor. This lets virtual content receive
+the allocated viewport instead of inheriting a content-sized height of zero.
+For a deliberately compact view with a non-virtual, content-sized body, request
+measured height with `.fitHeight()`; an explicit `SizePolicy{}` remains the
+legacy `AUTOMATIC/AUTOMATIC` policy.
+
+`ComboBox` and `DropDown` create their popups through the shared non-modal
+`Dialog` host. The configured popup width and row limits continue to cap the
+popup panel.
+
+These are defaults for the listed controls. Containers, wrappers, capped
+families, and host sizing retain their existing behavior. In particular,
+omitting a policy is distinct from passing `SizePolicy{}`: the latter keeps
+the legacy `AUTOMATIC/AUTOMATIC` policy. No global default changes for layout
+containers.
+
+To preserve an explicit fill-width request, keep `.flexX()`:
+
+```cpp
+ui::lineEdit(query).flexX(); // Explicit flex width remains supported.
+```
+
+With no explicit policy, `LineEdit` now uses fluid width by default. `.width(n)`
+still requests an exact width; `.flexX()` does not remove an explicit maximum.
+
+\include guide_control_defaults.cpp
+
+![Control defaults: the profile form adapts as the terminal is resized](images/control-defaults.gif)
+
+Still image: [control defaults](images/control-defaults.png). Source:
+[complete C++ example](examples/guide_control_defaults.cpp).
+
 ### A profile form
 
 The form below keeps the name field between 16 and 40 cells wide. It fills

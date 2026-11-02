@@ -162,7 +162,7 @@ public:
    * @note Construct through WidgetTree::emplace on UI; allocation/capture failures follow its errors.
    */
   VirtualTable(ModelConsumer<T> consumer, std::span<const TableColumn<std::type_identity_t<T>>> columns,
-               VirtualTableOptions options = {}, SizePolicy policy = {})
+               VirtualTableOptions options = {}, SizePolicy policy = DEFAULT_VIEWPORT_POLICY)
       : SizedWidget(policy), consumer_(std::move(consumer)), columns_(columns.begin(), columns.end()),
         options_(options) {
   }

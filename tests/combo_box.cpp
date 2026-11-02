@@ -286,6 +286,8 @@ template <class T> void checkChoiceStrategy(bool fuzzy, unsigned syntax, std::si
   auto panel = take(app.tree().inspect(popup)).children.front();
   auto body = take(app.tree().inspect(panel)).children.front();
   auto children = take(app.tree().inspect(body)).children;
+  CHECK(take(app.tree().inspect(body)).geometry.local.size().width > 0);
+  CHECK(take(app.tree().inspect(children[1])).geometry.local.size().width > 0);
   ui::Ref<LineEdit> query;
   if constexpr (std::same_as<T, DropDown>) {
     take(ui::detail::NamedAccess::publish(query, managed, children[0]));

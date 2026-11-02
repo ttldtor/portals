@@ -86,10 +86,10 @@ struct DataStateConfig {
   SchedulerTime spinnerInterval{100}; ///< Positive monotonic milliseconds between steps; no catch-up burst.
   DataStateLabels labels;             ///< Owning expressions, validated only when the strip is used.
   std::function<std::expected<std::string, TextResourceError>(std::string_view)>
-    resolver;                ///< Owning mount-time i18n adapter; no automatic locale subscription.
-  ControlStyle messageStyle; ///< Manual message/indicator appearance beneath theme resolution.
-  ControlStyle retryStyle;   ///< Manual retry appearance beneath theme resolution.
-  SizePolicy policy;         ///< Root layout constraints, validated by the existing solver.
+    resolver;                                 ///< Owning mount-time i18n adapter; no automatic locale subscription.
+  ControlStyle messageStyle;                  ///< Manual message/indicator appearance beneath theme resolution.
+  ControlStyle retryStyle;                    ///< Manual retry appearance beneath theme resolution.
+  SizePolicy policy{DEFAULT_VIEWPORT_POLICY}; ///< Root layout constraints, validated by the existing solver.
   std::function<std::expected<void, TreeError>()> retry; ///< Optional owning explicit action; never starts implicitly.
 };
 
@@ -102,7 +102,7 @@ struct DataStateOwner;
 class DataStateView : public Column {
 public:
   /** @param policy Root layout constraints. Mount through ui::dataStateView to configure the composite. */
-  explicit DataStateView(SizePolicy policy = {}) : Column({}, policy) {
+  explicit DataStateView(SizePolicy policy = DEFAULT_VIEWPORT_POLICY) : Column({}, policy) {
   }
 
   /** @return Owning last accepted presentation; read through WidgetTree::read on its UI thread. */

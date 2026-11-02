@@ -367,7 +367,7 @@ constexpr Mask HELP_VIEW_MASK = KEY_HELP_COMMON_MASK | propertyMask(58);
 constexpr Mask KEY_HINTS_MASK = KEY_HELP_COMMON_MASK | propertyMask(67, 68);
 constexpr Mask VIRTUAL_LIST_MASK = SIZE_MASK | propertyMask(69, 70);
 constexpr Mask VIRTUAL_TABLE_MASK = VIRTUAL_LIST_MASK | propertyMask(71, 72, 73);
-constexpr Mask CHART_MASK = propertyMask(74, 75, 76, 77, 78, 79);
+constexpr Mask CHART_MASK = SIZE_MASK | propertyMask(74, 75, 76, 77, 78, 79);
 constexpr Mask DATA_STATE_MASK = SIZE_MASK | propertyMask(80, 81, 82, 83, 84, 85, 86, 87, 88, 89);
 constexpr Mask OVERLAY_HOST_MASK = SIZE_MASK | propertyMask(90);
 constexpr Mask DIALOG_MASK = propertyMask(91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 180, 181, 182);
@@ -469,7 +469,8 @@ constexpr auto VIRTUAL_TABLE_SCHEMA =
   withFrame(std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[69], PROPERTIES[70], PROPERTIES[71],
                            PROPERTIES[72], PROPERTIES[73]}));
 constexpr auto CHART_SCHEMA =
-  std::to_array({PROPERTIES[74], PROPERTIES[75], PROPERTIES[76], PROPERTIES[77], PROPERTIES[78], PROPERTIES[79]});
+  withFrame(std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[74], PROPERTIES[75], PROPERTIES[76],
+                           PROPERTIES[77], PROPERTIES[78], PROPERTIES[79]}));
 constexpr auto DATA_STATE_SCHEMA = withFrame(std::to_array(
   {PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[80], PROPERTIES[81], PROPERTIES[82], PROPERTIES[83],
    PROPERTIES[84], PROPERTIES[85], PROPERTIES[86], PROPERTIES[87], PROPERTIES[88], PROPERTIES[89]}));

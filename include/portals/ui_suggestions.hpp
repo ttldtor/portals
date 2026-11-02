@@ -55,10 +55,10 @@ private:
 namespace portals::ui {
 /** @brief Ordinary list/editor composition settings; search never commits or replaces editor text. */
 struct SuggestionsConfig {
-  SearchOptions search{};       ///< Finite worker index/query/output budgets and strategy.
-  VirtualListOptions options{}; ///< Existing list sizing/appearance; scene width policy wins.
-  SizePolicy policy{};          ///< Existing layout constraints, adjustable by ordinary recipe modifiers.
-  Ref<Label> status;            ///< Optional weak label; empty means no status label.
+  SearchOptions search{};                     ///< Finite worker index/query/output budgets and strategy.
+  VirtualListOptions options{};               ///< Existing list sizing/appearance; scene width policy wins.
+  SizePolicy policy{DEFAULT_VIEWPORT_POLICY}; ///< Existing layout constraints, adjustable by ordinary recipe modifiers.
+  Ref<Label> status;                          ///< Optional weak label; empty means no status label.
   std::function<void(SearchSelection)> activated; ///< UI-only callback after exact-current list-focused activation.
   std::function<void(SearchError)> failed;        ///< UI-only newest provider failure; draft is preserved.
   std::function<bool()> enabled; ///< Optional internal UI admission predicate; false cancels pending work.

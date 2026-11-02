@@ -78,7 +78,7 @@ public:
    * @param policy Owning layout size policy.
    * @throws std::bad_alloc On public placeholder or initial mask allocation.
    */
-  explicit Password(PasswordOptions options = {}, SizePolicy policy = {});
+  explicit Password(PasswordOptions options = {}, SizePolicy policy = DEFAULT_EDITOR_POLICY);
   /** @param available Offered extent, unused for intrinsic measurement.
    * @return Mask/placeholder width plus caret, or one in NO_ECHO; checked geometry error on overflow.
    */

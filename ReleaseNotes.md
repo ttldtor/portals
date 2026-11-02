@@ -45,6 +45,19 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- Use family-specific default size policies for content-sized controls, fluid
+  editors and form controls, and viewport-driven controls. Omitted policy now
+  gives `LineEdit` and `Password` flexible width with a one-cell minimum;
+  viewport controls, including `DataStateView`, flex on both axes. Explicit
+  `SizePolicy{}` retains the legacy `AUTOMATIC/AUTOMATIC` behavior. Keep
+  `.flexX()` where a call intentionally requests fill-width; layout containers and wrappers do
+  not receive a blanket default change.
+  Flexible children receive a bounded viewport inside scroll areas and managed
+  dialogs; content-only dialog bodies remain compact. `Chart` now supports the
+  common sizing API. The `Chart` and `ScrollArea` object layouts change; rebuild
+  consumers together with the library. `ComboBox` and `DropDown` popups use the
+  shared non-modal `Dialog` host and retain their configured popup caps.
+
 - Preserve normalized native Windows wheel magnitudes, including fractional and
   multiple detents, in trailing `MouseInputEvent::wheelDelta` (default 1 for
   existing aggregate prefixes and discrete terminal reports). Scroll controls

@@ -1782,10 +1782,11 @@ mountChoicePopup(ManagedScene &scene, Node<OverlayHost> host, Node<ComboBox> roo
           record->search = node;
           return {};
         });
-    auto content = column(lineEdit(query, *queryState, LineEditConfig{.options = {.limits = {4096, 4096, 4096, 8192}}})
-                            .visible(readOnly && config.searchable)
-                            .classes("choice-search"),
-                          std::move(browseRecipe), std::move(searchRecipe));
+    auto content = Access::dialogContent(
+      column(lineEdit(query, *queryState, LineEditConfig{.options = {.limits = {4096, 4096, 4096, 8192}}})
+               .visible(readOnly && config.searchable)
+               .classes("choice-search"),
+             std::move(browseRecipe), std::move(searchRecipe)));
     auto panel = Access::dialogPanel(owner, *popup, {});
     if (!panel) {
       return std::unexpected(panel.error());

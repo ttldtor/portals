@@ -35,6 +35,17 @@ struct DialogAccess {
 std::expected<CellRect, TreeError> placeDialogPanel(DialogOptions options, CellSize available,
                                                     const MeasuredChild &panel, std::optional<CellRect> anchor = {});
 
+// Only the library-owned dialog body wrapper uses the bounded offer to measure FLEX content.
+class DialogContentColumn final : public Column {
+public:
+  using Column::Column;
+  std::expected<CellSize, TreeError> childAvailable(CellSize available) const override;
+  std::expected<CellSize, TreeError> measureChildren(std::span<const MeasuredChild> children) const override;
+
+private:
+  mutable CellSize offer_{};
+};
+
 // Complete type shared by retained managed composition and private layout fixtures.
 class DialogPanel : public Border {
 public:

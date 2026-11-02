@@ -31,7 +31,7 @@ struct HelpViewOptions {
 class HelpView : public Column {
 public:
   /** @param policy Existing layout constraints. */
-  explicit HelpView(SizePolicy policy = {}) : Column({}, policy) {
+  explicit HelpView(SizePolicy policy = DEFAULT_VIEWPORT_POLICY) : Column({}, policy) {
   }
 };
 

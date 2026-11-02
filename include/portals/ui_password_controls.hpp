@@ -10,8 +10,8 @@ using PasswordRef = Ref<Password>;
 
 /** @brief Optional protected-editor customization; ordinary forms need only password(ref). */
 struct PasswordConfig {
-  PasswordOptions options{}; ///< Native editor policy; the scene supplies its Unicode width policy.
-  SizePolicy policy{};       ///< Owning external layout constraints.
+  PasswordOptions options{};                ///< Native editor policy; the scene supplies its Unicode width policy.
+  SizePolicy policy{DEFAULT_EDITOR_POLICY}; ///< Owning external layout constraints.
   std::function<std::expected<PasswordValue, PasswordFailure>()>
     initial{}; ///< Checked owning provider, called once at mount.
   std::function<std::expected<void, TreeError>(PasswordResult)> result{}; ///< Optional secret-free result observer.

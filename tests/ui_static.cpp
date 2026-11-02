@@ -66,7 +66,8 @@ consteval bool samePolicy(SizePolicy left, SizePolicy right) {
 static_assert(samePolicy(ui::ct::label("", ROUND_TRIP_STYLE, ROUND_TRIP_POLICY).sizePolicy(), ROUND_TRIP_POLICY));
 static_assert(samePolicy(ui::ct::lineEdit("", EditMode::EXPLICIT, {}, ROUND_TRIP_POLICY).sizePolicy(),
                          ROUND_TRIP_POLICY));
-static_assert(samePolicy(ui::ct::button("").sizePolicy(), SizePolicy{}));
+static_assert(samePolicy(ui::ct::button("").sizePolicy(), DEFAULT_CONTENT_POLICY));
+static_assert(samePolicy(ui::ct::button("", {}, {}).sizePolicy(), SizePolicy{}));
 
 consteval auto localBytes() {
   const char text[]{'o', 'w', 'n', 'e', 'd', '\0'};
@@ -391,5 +392,21 @@ TEST_CASE("unthemed controls use neutral focus without changing explicit appeara
   }));
   take(fixture.app->tree().read(explicitStyle.node(), [&](const Button &widget) {
     CHECK(widget.styleDefaults().focused == underlined.focused);
+  }));
+}
+
+TEST_CASE("constant-built defaults match dynamic content and editor factories") {
+  Fixture fixture;
+  ui::Ref<Label> label;
+  ui::Ref<LineEdit> editor;
+  constexpr auto DESCRIPTION =
+    ui::ct::scene(ui::ct::column(ui::ct::label<"label">("Name"), ui::ct::lineEdit<"editor">("long input")));
+  take(ui::mount(*fixture.owner, ui::ct::describe(DESCRIPTION, ui::ct::reference<"label">(label),
+                                                  ui::ct::reference<"editor">(editor))));
+  take(fixture.app->tree().read(label.node(), [&](const Label &widget) {
+    CHECK(widget.sizePolicy() == DEFAULT_CONTENT_POLICY);
+  }));
+  take(fixture.app->tree().read(editor.node(), [&](const LineEdit &widget) {
+    CHECK(widget.sizePolicy() == DEFAULT_EDITOR_POLICY);
   }));
 }

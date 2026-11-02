@@ -267,8 +267,8 @@ inline SpinnerModifier maxFrameCells(std::size_t value) {
  * @param resolver Optional synchronous label localization adapter, retained only until mounting.
  * @return Single-use retained indicator recipe; animation uses the receiving scene's scheduler.
  */
-inline Description<Spinner> spinner(SpinnerOptions options = {}, ControlStyle style = {}, SizePolicy policy = {},
-                                    TextResolver resolver = {}) {
+inline Description<Spinner> spinner(SpinnerOptions options = {}, ControlStyle style = {},
+                                    SizePolicy policy = DEFAULT_CONTENT_POLICY, TextResolver resolver = {}) {
   auto description =
     detail::Access::cold<Spinner>([options = std::move(options), style, policy, resolver = std::move(resolver)](
                                     ManagedScene &scene, Node<Widget> parent, detail::MountContext &context) {
@@ -285,7 +285,7 @@ inline Description<Spinner> spinner(SpinnerOptions options = {}, ControlStyle st
  * @return Observed retained indicator recipe using the existing scheduler.
  */
 inline Description<Spinner> spinner(Ref<Spinner> reference, SpinnerOptions options = {}, ControlStyle style = {},
-                                    SizePolicy policy = {}) {
+                                    SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return spinner(std::move(options), style, policy).reference(std::move(reference));
 }
 
@@ -296,7 +296,7 @@ inline Description<Spinner> spinner(Ref<Spinner> reference, SpinnerOptions optio
  * @return Single-use determinate gauge recipe; invalid values/settings preserve typed mount errors.
  */
 inline Description<Gauge> gauge(double value, GaugeOptions options = {}, ControlStyle style = {},
-                                SizePolicy policy = {}) {
+                                SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   auto description = detail::Access::cold<Gauge>(
     [value, options, style, policy](ManagedScene &scene, Node<Widget> parent, detail::MountContext &context) {
       const auto &settings = *context.controlSettings;
@@ -325,7 +325,7 @@ inline Description<Gauge> gauge(double value, GaugeOptions options = {}, Control
 template <class R>
   requires std::same_as<std::remove_cvref_t<R>, Ref<Gauge>>
 inline Description<Gauge> gauge(R &&reference, double value, GaugeOptions options = {}, ControlStyle style = {},
-                                SizePolicy policy = {}) {
+                                SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return gauge(value, options, style, policy).reference(std::forward<R>(reference));
 }
 

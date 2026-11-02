@@ -99,10 +99,10 @@ private:
 
 /** @brief Manual child appearances and ordinary retained layout defaults. */
 struct FindBarAppearance {
-  ControlStyle navigationStyle{}; ///< Previous/Next/Clear manual defaults beneath child style rules.
-  ControlStyle summaryStyle{};    ///< Count/context manual defaults beneath child style rules.
-  LinearOptions layout{};         ///< Existing outer vertical layout settings.
-  SizePolicy policy{};            ///< Existing outer layout constraints.
+  ControlStyle navigationStyle{};               ///< Previous/Next/Clear manual defaults beneath child style rules.
+  ControlStyle summaryStyle{};                  ///< Count/context manual defaults beneath child style rules.
+  LinearOptions layout{};                       ///< Existing outer vertical layout settings.
+  SizePolicy policy{DEFAULT_FLEX_WIDTH_POLICY}; ///< Existing outer layout constraints.
 };
 
 /** @brief Retained query/navigation/count composition over owning document or model search results.

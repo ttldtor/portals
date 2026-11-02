@@ -434,7 +434,7 @@ TEST_CASE("existing notification wrapper ignores unrelated caller Overlay declar
     ui::Ref<Label> content;
     ui::ControlContext caller;
     caller.define("Overlay", "Label", {.text = text("unrelated")});
-    auto recipe = ui::notifications(wrapper, center, ui::label(content, "body")).width(10).height(6);
+    auto recipe = ui::notifications(wrapper, center, ui::label(content, "body", {}, {})).width(10).height(6);
     if (modified) {
       (void)std::move(recipe)
         .padding({2, 1, 1, 1})
@@ -483,7 +483,7 @@ TEST_CASE("grid sections flatten controls and share horizontal tracks") {
   ui::Ref<Grid> grid;
   ui::Ref<Label> heading, value, name;
 
-  take(ui::mount(*fixture.scene, ui::grid(ui::header(ui::label(heading, "Names").columnSpan(2)).sticky(),
+  take(ui::mount(*fixture.scene, ui::grid(ui::header(ui::label(heading, "Names", {}, {}).columnSpan(2)).sticky(),
                                           ui::body(ui::label(name, "Name"), ui::label(value, "Ada")))
                                    .columns(2)
                                    .columnGap(2)
@@ -539,7 +539,7 @@ TEST_CASE("advanced grid track policies are owning and row policies apply only t
   ui::Ref<Label> heading, cell;
   std::vector<AxisSize> columns{{6, 6, 6, SizeMode::FIXED}};
   std::vector<AxisSize> rows{{3, 3, 3, SizeMode::FIXED}};
-  auto recipe = ui::grid(ui::header(ui::label(heading, "head")), ui::body(ui::label(cell, "body")))
+  auto recipe = ui::grid(ui::header(ui::label(heading, "head", {}, {})), ui::body(ui::label(cell, "body", {}, {})))
                   .columns(1)
                   .columnSizes(columns)
                   .rowSizes(rows);
@@ -1236,12 +1236,13 @@ TEST_CASE("scene pipe delivery uses currentScene and actual final runner frames"
   ui::Ref<Label> label;
   int calls{};
   std::vector<CellSize> sizes;
-  auto scene = ui::scene(ui::label(label, "runner"), options) | ui::onLayout(label, [&](const NodeGeometry &geometry) {
-                 ++calls;
-                 CHECK_FALSE(ui::detail::CurrentSceneScope::snapshot().expired());
-                 CHECK(take(label.geometry()).surface == geometry.surface);
-                 sizes.push_back(geometry.local.size());
-               });
+  auto scene =
+    ui::scene(ui::label(label, "runner", {}, {}), options) | ui::onLayout(label, [&](const NodeGeometry &geometry) {
+      ++calls;
+      CHECK_FALSE(ui::detail::CurrentSceneScope::snapshot().expired());
+      CHECK(take(label.geometry()).surface == geometry.surface);
+      sizes.push_back(geometry.local.size());
+    });
   const auto result = scene.run(terminal);
   REQUIRE(result);
   CHECK(terminal.closed);
@@ -1548,3 +1549,223 @@ concept SpaceAcceptsSizing = requires(T recipe) { std::move(recipe).width(2); } 
 } || requires(T recipe) { std::move(recipe).flexX(2); };
 static_assert(!SpaceAcceptsSizing<ui::Description<Spacer>>);
 static_assert(!SpaceAcceptsSizing<ui::Description<Spacing>>);
+
+TEST_CASE("native sizing families select defaults without replacing explicit automatic policies") {
+  Fixture fixture;
+  auto &tree = fixture.app->tree();
+  const auto root = fixture.app->root();
+  const auto text = take(GraphemeText::from("x"));
+  const auto content = SizePolicy{.width = {.mode = SizeMode::CONTENT}, .height = {.mode = SizeMode::CONTENT}};
+  const auto fluid =
+    SizePolicy{.width = {.preferred = 0, .mode = SizeMode::FLEX}, .height = {.mode = SizeMode::CONTENT}};
+  const auto editor =
+    SizePolicy{.width = {.minimum = 1, .preferred = 0, .mode = SizeMode::FLEX}, .height = {.mode = SizeMode::CONTENT}};
+  const auto viewport =
+    SizePolicy{.width = {.preferred = 0, .mode = SizeMode::FLEX}, .height = {.preferred = 0, .mode = SizeMode::FLEX}};
+  const auto check = [&]<class T>(Node<T> node, SizePolicy expected) {
+    take(tree.read(node, [&](const T &widget) {
+      CHECK(widget.sizePolicy() == expected);
+    }));
+  };
+
+  check(take(tree.emplace<Label>(root, text)), content);
+  check(take(tree.emplace<Button>(root, text)), content);
+  check(take(tree.emplace<CheckBox>(root, text)), content);
+  check(take(tree.emplace<ThreeState>(root, text)), content);
+  check(take(tree.emplace<Menu>(root, text, std::vector<ui::ActionRef>{})), content);
+  check(take(tree.emplace<Gauge>(root, 0.0)), content);
+  check(take(tree.emplace<Spinner>(root)), content);
+  check(take(tree.emplace<LineEdit>(root)), editor);
+  check(take(tree.emplace<Password>(root)), editor);
+  check(take(tree.emplace<VirtualList<int>>(root, ModelConsumer<int>{},
+                                            std::function<GraphemeText(const ModelRow<int> &)>{})),
+        viewport);
+  check(take(tree.emplace<VirtualTable<int>>(root, ModelConsumer<int>{}, std::span<const TableColumn<int>>{})),
+        viewport);
+  check(take(tree.emplace<Chart<int>>(root, ModelConsumer<int>{}, std::function<std::optional<Ohlc>(const int &)>{})),
+        viewport);
+  check(take(tree.emplace<LogView>(root)), viewport);
+  check(take(tree.emplace<HelpView>(root)), viewport);
+  check(take(tree.emplace<FormField>(root)), fluid);
+  check(take(tree.emplace<FindBar>(root)), fluid);
+  check(take(tree.emplace<DataStateView>(root)), viewport);
+  check(take(tree.emplace<ComboBox>(root)), fluid);
+  check(take(tree.emplace<DropDown>(root)), fluid);
+  check(take(tree.emplace<KeyHints>(root, text)), fluid);
+  check(take(tree.emplace<ScrollBar>(root, std::shared_ptr<ScrollController>{}, ScrollAxis::HORIZONTAL)), fluid);
+  check(take(tree.emplace<ScrollBar>(root)),
+        SizePolicy{.width = {.mode = SizeMode::CONTENT}, .height = {.preferred = 0, .mode = SizeMode::FLEX}});
+  check(take(tree.emplace<Row>(root)), {});
+  check(take(tree.emplace<Column>(root)), {});
+  check(take(tree.emplace<Grid>(root)), {});
+  check(take(tree.emplace<Overlay>(root)), {});
+  check(take(tree.emplace<Border>(root)), {});
+  check(take(tree.emplace<ScrollArea>(root)), {});
+  check(take(tree.emplace<OverlayHost>(root)), {});
+
+  check(take(tree.emplace<Label>(root, text, ControlStyle{}, SizePolicy{})), {});
+  check(take(tree.emplace<LineEdit>(root, LineEditOptions{}, SizePolicy{})), {});
+  check(take(tree.emplace<Password>(root, PasswordOptions{}, SizePolicy{})), {});
+  check(take(tree.emplace<Chart<int>>(root, ModelConsumer<int>{}, std::function<std::optional<Ohlc>(const int &)>{},
+                                      ChartOptions{}, SizePolicy{})),
+        {});
+  check(take(tree.emplace<ScrollBar>(root, std::shared_ptr<ScrollController>{}, ScrollAxis::HORIZONTAL, WidthPolicy{},
+                                     ScrollBarOptions{}, ControlStyle{}, SizePolicy{})),
+        {});
+}
+
+TEST_CASE("editor flex basis is independent of text length and its one-cell minimum is explicit") {
+  Fixture fixture;
+  const auto firstState = take(fixture.scene->state(std::string(100, 'a')));
+  ui::Ref<LineEdit> first, second;
+  ui::Ref<Label> caption;
+  take(ui::mount(*fixture.scene,
+                 ui::hbox(ui::label(caption, "Name"), ui::lineEdit(first, firstState), ui::lineEdit(second, "b"))));
+  fixture.layout({12, 1});
+  CHECK(take(caption.geometry()).local.size().width == 4);
+  CHECK(take(first.geometry()).local.size().width == 4);
+  CHECK(take(second.geometry()).local.size().width == 4);
+  take(firstState.set(std::string(1000, 'b')));
+  fixture.layout({12, 1});
+  CHECK(take(first.geometry()).local.size().width == 4);
+  fixture.layout({0, 1});
+  CHECK(take(first.geometry()).local.size().width == 1);
+  CHECK(take(second.geometry()).local.size().width == 1);
+
+  ui::Ref<LineEdit> unpublished;
+  const auto rejected = ui::mount(*fixture.scene, ui::lineEdit(unpublished, "x").maxWidth(0));
+  REQUIRE_FALSE(rejected);
+  CHECK(cause(rejected.error(), TreeError::INVALID_ARGUMENT));
+  CHECK(unpublished.node() == Node<LineEdit>{});
+  take(ui::mount(*fixture.scene, ui::lineEdit("x", ui::LineEditConfig{.policy = {}}).maxWidth(0)));
+}
+
+TEST_CASE("content defaults cross a transparent frame while explicit automatic sizing remains available") {
+  Fixture fixture;
+  ui::Ref<Label> compact, automatic;
+  ui::Ref<Border> outer;
+  take(ui::mount(*fixture.scene, ui::vbox(ui::label(compact, "x").framed(outer), ui::label(automatic, "x", {}, {}))));
+  fixture.layout({20, 8});
+  CHECK(take(compact.geometry()).local.size().width == 1);
+  CHECK(take(automatic.geometry()).local.size().width == 20);
+  take(fixture.app->tree().read(outer.node(), [&](const Border &widget) {
+    CHECK(widget.sizePolicy().width.mode == SizeMode::CONTENT);
+    CHECK(widget.sizePolicy().height.mode == SizeMode::CONTENT);
+  }));
+}
+
+TEST_CASE("chart positional configuration keeps its old prefix and appends an optional policy") {
+  const ui::ChartConfig<int> oldPrefix{ChartOptions{}, ManagedChartOrigin{}, ManagedViewHandler<int>{}};
+  CHECK(oldPrefix.policy == DEFAULT_VIEWPORT_POLICY);
+  const ui::ChartConfig<int> explicitPolicy{ChartOptions{}, ManagedChartOrigin{}, ManagedViewHandler<int>{}, {}};
+  CHECK(explicitPolicy.policy == SizePolicy{});
+  [[maybe_unused]] auto oldRecipe = ui::chart(ManagedModel<int>{}, ManagedChartAccessor<int>{}, ChartOptions{},
+                                              ManagedChartOrigin{}, ManagedViewHandler<int>{});
+  [[maybe_unused]] auto sizedRecipe =
+    ui::chart(ManagedModel<int>{}, ManagedChartAccessor<int>{}, explicitPolicy).width(8).maxHeight(3);
+  static_assert(std::same_as<decltype(oldRecipe), ui::Description<Chart<int>>>);
+}
+
+TEST_CASE("sized charts use the existing frame factory and outer sizing target") {
+  Fixture fixture;
+  ui::Ref<Chart<int>> chart;
+  ui::Ref<Border> outer;
+  take(ui::mount(*fixture.scene,
+                 ui::custom<Chart<int>>(ModelConsumer<int>{}, std::function<std::optional<Ohlc>(const int &)>{})
+                   .reference(chart)
+                   .framed(outer)
+                   .width(10)
+                   .height(4)));
+  fixture.layout({20, 8});
+  CHECK(take(outer.geometry()).local.size() == CellSize{10, 4});
+  CHECK(take(chart.geometry()).local.size() == CellSize{8, 2});
+}
+
+TEST_CASE("one-argument unbound buttons retain content sizing and explicit automatic sizing") {
+  Fixture fixture;
+  ui::Ref<Button> compact, automatic;
+  take(ui::mount(*fixture.scene, ui::vbox(ui::button("one").reference(compact), ui::button(automatic, "one", {}, {}))));
+  fixture.layout({20, 4});
+  CHECK(take(compact.geometry()).local.size() == CellSize{7, 1});
+  CHECK(take(automatic.geometry()).local.size().width == 20);
+  take(fixture.app->tree().read(compact.node(), [&](const Button &widget) {
+    CHECK(widget.sizePolicy() == DEFAULT_CONTENT_POLICY);
+  }));
+  take(fixture.app->tree().read(automatic.node(), [&](const Button &widget) {
+    CHECK(widget.sizePolicy() == SizePolicy{});
+  }));
+}
+
+TEST_CASE("data-state viewport defaults survive style-only configuration and expose the old content-height collapse") {
+  for (int configuration = 0; configuration < 4; ++configuration) {
+    CAPTURE(configuration);
+    Fixture fixture;
+    ui::Ref<LineEdit> input;
+    ui::Ref<VirtualList<TextSegment>> body;
+    ui::Ref<DataStateView> wrapper;
+    DataStateConfig config;
+    if (configuration == 1)
+      config.messageStyle.normal.bold = true;
+    if (configuration == 2)
+      config.policy = {};
+    if (configuration == 3)
+      config.policy = DEFAULT_FLEX_WIDTH_POLICY;
+    auto view = ui::virtualList(ui::words(input.draftText())).reference(body);
+    auto state = configuration == 0 ? ui::dataStateView(std::move(view)) : ui::dataStateView(std::move(view), config);
+    take(ui::mount(*fixture.scene, ui::vbox(ui::lineEdit(input, "one two"), std::move(state).reference(wrapper))));
+    fixture.layout({20, 8});
+    fixture.layout({20, 8});
+    const auto outerHeight = take(wrapper.geometry()).local.size().height;
+    const auto bodyHeight = take(body.geometry()).local.size().height;
+    if (configuration < 2) {
+      CHECK(outerHeight == 7);
+      CHECK(bodyHeight == 6);
+      take(fixture.app->tree().read(wrapper.node(), [&](const DataStateView &widget) {
+        CHECK(widget.sizePolicy() == DEFAULT_VIEWPORT_POLICY);
+      }));
+    } else {
+      CHECK(outerHeight == 1);
+      CHECK(bodyHeight == 0);
+      take(fixture.app->tree().read(wrapper.node(), [&](const DataStateView &widget) {
+        CHECK(widget.sizePolicy() == config.policy);
+      }));
+    }
+  }
+}
+
+TEST_CASE("a capped dialog gives an alone viewport body usable space while content stays compact") {
+  for (const bool viewport : {false, true}) {
+    CAPTURE(viewport);
+    Fixture fixture;
+    ui::Ref<Dialog> dialog;
+    ui::Ref<Widget> content;
+    ui::Ref<Chart<int>> chart;
+    DialogOptions options;
+    options.maximumPanelSize = {20, 8};
+    auto body = viewport
+                  ? ui::detail::Access::erase(
+                      ui::custom<Chart<int>>(ModelConsumer<int>{}, std::function<std::optional<Ohlc>(const int &)>{})
+                        .reference(chart))
+                  : ui::detail::Access::erase(ui::label("tiny"));
+    take(ui::mount(
+      *fixture.scene,
+      ui::overlayHost(ui::label("outside"), ui::dialog(dialog, "Panel", std::move(body).reference(content), options))));
+    take(dialog.open().result());
+    fixture.layout({40, 12});
+    const auto children = take(fixture.app->tree().inspect(dialog.node())).children;
+    REQUIRE_FALSE(children.empty());
+    const auto panel = take(fixture.app->tree().inspect(children.front())).geometry.local.size();
+    CHECK(panel == (viewport ? CellSize{20, 8} : CellSize{7, 4}));
+    CHECK(take(content.geometry()).local.size() == (viewport ? CellSize{18, 5} : CellSize{4, 1}));
+    if (viewport) {
+      const SizePolicy compact{{4, 4, 4, SizeMode::FIXED}, {1, 1, 1, SizeMode::FIXED}};
+      take(setSizePolicy(fixture.app->tree(), chart.node(), compact));
+      fixture.layout({40, 12});
+      CHECK(take(fixture.app->tree().inspect(children.front())).geometry.local.size() == CellSize{7, 4});
+      take(setSizePolicy(fixture.app->tree(), chart.node(), DEFAULT_VIEWPORT_POLICY));
+      fixture.layout({16, 9});
+      CHECK(take(fixture.app->tree().inspect(children.front())).geometry.local.size() == CellSize{14, 7});
+      CHECK(take(chart.geometry()).local.size() == CellSize{12, 4});
+    }
+  }
+}

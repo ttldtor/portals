@@ -928,6 +928,110 @@ void initializationAndLifetime() {
         "stale node command rejected");
 }
 
+void flexibleContentUsesActualViewport() {
+  const auto matches = [](ScrollExtent extent, CellSize size) {
+    return extent.width == static_cast<std::uint64_t>(size.width) &&
+           extent.height == static_cast<std::uint64_t>(size.height);
+  };
+
+  for (const auto placement : {ScrollPlacement::RESERVED, ScrollPlacement::OVERLAY}) {
+    ScrollAreaOptions options;
+    options.placement = placement;
+    options.horizontal = options.vertical = ScrollBarPolicy::ALWAYS;
+    AreaFixture f(options, {500, 500});
+    SizePolicy areaPolicy;
+    areaPolicy.width = {24, 24, 24, SizeMode::FIXED};
+    areaPolicy.height = {3, 3, 3, SizeMode::FIXED};
+
+    take(setSizePolicy(*f.tree, f.area, areaPolicy));
+    take(setSizePolicy(*f.tree, f.content, DEFAULT_VIEWPORT_POLICY));
+    f.settle({80, 40});
+
+    auto snapshot = take(scrollAreaLayout(*f.tree, f.area));
+    auto viewport = snapshot.placement.viewport;
+    check(snapshot.geometry.local.size() == CellSize{24, 3}, "area retains its actual 24x3 allocation");
+    check(viewport == (placement == ScrollPlacement::RESERVED ? CellSize{23, 2} : CellSize{24, 3}),
+          "flex basis resolves after reserved or overlay scrollbar placement");
+    check(matches(snapshot.extent, viewport),
+          "zero-basis content fills actual viewport rather than the 80x40 parent measurement offer");
+    check(take(f.tree->inspect(f.content)).geometry.local.size() == viewport,
+          "flex content has nonempty geometry through an ordinary scroll owner");
+
+    areaPolicy.width = {10, 10, 10, SizeMode::FIXED};
+    areaPolicy.height = {2, 2, 2, SizeMode::FIXED};
+    take(setSizePolicy(*f.tree, f.area, areaPolicy));
+    f.settle({80, 40});
+    snapshot = take(scrollAreaLayout(*f.tree, f.area));
+    viewport = snapshot.placement.viewport;
+    check(matches(snapshot.extent, viewport),
+          "shrinking the viewport does not retain a previously resolved phantom scroll range");
+    check(f.values().horizontal.offset.raster == 0 && f.values().horizontal.offset.fraction == 0 &&
+            f.values().vertical.offset.raster == 0 && f.values().vertical.offset.fraction == 0,
+          "resolved flex content has no phantom offset after shrink");
+
+    auto bounded = DEFAULT_VIEWPORT_POLICY;
+    bounded.width.minimum = 2;
+    bounded.width.maximum = 4;
+    bounded.height.minimum = 1;
+    bounded.height.maximum = 3;
+    take(setSizePolicy(*f.tree, f.content, bounded));
+    f.settle({80, 40});
+    snapshot = take(scrollAreaLayout(*f.tree, f.area));
+    check(snapshot.extent.width == 4 && snapshot.extent.height == static_cast<std::uint64_t>(viewport.height),
+          "flex viewport resolution retains child min/max constraints");
+    bounded.width.minimum = 20;
+    bounded.width.maximum = 24;
+    take(setSizePolicy(*f.tree, f.content, bounded));
+    f.settle({80, 40});
+    check(take(scrollAreaLayout(*f.tree, f.area)).extent.width == 20,
+          "hard child minima retain overflow when the actual viewport is smaller");
+
+    take(f.tree->setVisible(f.content, false));
+    f.settle({80, 40});
+    check(matches(take(scrollAreaLayout(*f.tree, f.area)).extent, {}), "hidden content clears the cached basis");
+    take(f.tree->setVisible(f.content, true));
+    take(setSizePolicy(*f.tree, f.content, DEFAULT_VIEWPORT_POLICY));
+    f.settle({80, 40});
+    check(take(scrollAreaLayout(*f.tree, f.area)).extent.width == static_cast<std::uint64_t>(viewport.width),
+          "shown content resolves from a fresh measurement");
+    take(f.tree->remove(f.content));
+    f.settle({80, 40});
+    check(matches(take(scrollAreaLayout(*f.tree, f.area)).extent, {}), "removed content clears the cached basis");
+  }
+}
+
+void directAreaLayoutNeedsNoWidgetArrange() {
+  ScrollAreaOptions options;
+  options.horizontal = options.vertical = ScrollBarPolicy::NEVER;
+  AreaFixture f(options);
+  const auto before = f.values();
+
+  take(f.tree->read(f.area, [&](const ScrollArea &area) {
+    SizePolicy fixed;
+    fixed.width = {24, 24, 24, SizeMode::FIXED};
+    fixed.height = {10, 10, 10, SizeMode::FIXED};
+    const std::array children{MeasuredChild{{24, 10}, fixed, {}}};
+
+    take(area.measureChildren(children));
+    auto placed = take(area.arrangeChildren(children, {24, 3}));
+    check(placed.size() == 1 && placed.front().size() == CellSize{24, 10},
+          "direct fixed-content layout does not require Widget::arrange first");
+    check(take(area.childClip({24, 3})).size() == CellSize{24, 3}, "direct content clip uses the actual allocation");
+    check(take(area.childClip({12, 2})).size() == CellSize{12, 2},
+          "direct clip can be repeated at a smaller allocation");
+
+    const std::array flexible{MeasuredChild{{500, 500}, DEFAULT_VIEWPORT_POLICY, {}}};
+    take(area.measureChildren(flexible));
+    check(take(area.arrangeChildren(flexible, {24, 3})).front().size() == CellSize{24, 3},
+          "direct FLEX layout resolves a fresh viewport without committing widget geometry");
+    check(take(area.arrangeChildren(flexible, {12, 2})).front().size() == CellSize{12, 2},
+          "direct repeated FLEX layout never reuses the last resolved extent as its basis");
+  }));
+
+  check(f.values().revision == before.revision, "pure direct layout does not publish controller metrics");
+  check(!take(f.tree->inspect(f.area)).geometry.valid, "pure direct layout does not arrange the owning widget");
+}
+
 void placementPaintAndHits() {
   for (auto placement : {ScrollPlacement::RESERVED, ScrollPlacement::OVERLAY, ScrollPlacement::ON_FRAME}) {
     ScrollAreaOptions options;
@@ -2957,6 +3061,8 @@ int main() {
   arrowGlyphPreparation();
   initializationAndLifetime();
   placementPaintAndHits();
+  flexibleContentUsesActualViewport();
+  directAreaLayoutNeedsNoWidgetArrange();
   wheelKeysAndBoundary();
   exactStandaloneAndReadonly();
   dragAndTrackClick();

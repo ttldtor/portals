@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include <portals/managed.hpp>
+#include <portals/ui_description.hpp>
 
 #include "action_state.hpp"
 #include "dialog_detail.hpp"
@@ -9,6 +10,23 @@
 
 #include <algorithm>
 #include <limits>
+
+namespace portals::ui {
+Description<Column> detail::Access::dialogContent(Description<Column> description) {
+  if (!description.state_) {
+    return description;
+  }
+
+  description.state_->create = [](ManagedScene &scene, Node<Widget> parent,
+                                  MountContext &context) -> std::expected<Node<Column>, ManagedError> {
+    const auto options = controlLinearOptions(*context.controlSettings, {});
+
+    return scene.makeDialogContent(parent, options);
+  };
+
+  return description;
+}
+} // namespace portals::ui
 
 namespace portals {
 std::expected<Node<Widget>, TreeError> ManagedScene::messageParent(Node<Widget> node) const {
@@ -165,6 +183,16 @@ std::expected<void, ManagedError> ManagedScene::overlayHost(Node<OverlayHost> ho
   } catch (const std::bad_alloc &) {
     return std::unexpected(error(ManagedPhase::BIND, host, TreeError::NO_MEMORY));
   }
+}
+
+std::expected<Node<Column>, ManagedError> ManagedScene::makeDialogContent(Node<Widget> parent, LinearOptions options) {
+  auto node = emplace<detail::DialogContentColumn>(parent, options);
+
+  if (!node) {
+    return std::unexpected(node.error());
+  }
+
+  return Node<Column>(*node);
 }
 
 std::expected<Node<Widget>, ManagedError> ManagedScene::makeDialogPanel(Node<Dialog> node, BorderOptions options) {
