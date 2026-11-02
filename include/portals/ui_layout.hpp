@@ -195,6 +195,63 @@ template <detail::DescriptionRange R> Description<Row> row(R &&children) {
   return detail::Access::controlArguments(linear<Row>({}, std::forward<R>(children)), {});
 }
 
+/** @brief Compose ordinary horizontal status sections with a full-width background.
+ * @tparam Children Consuming child Description types, mounted in argument order.
+ * @param options Owning ordinary Row gap, padding, alignment and overflow settings.
+ * @param children Owning sections; their existing text, sizing and input contracts remain unchanged.
+ * @return Single-use StatusBar recipe with transactional child mounting and one-row default height.
+ */
+template <detail::DescriptionInput... Children>
+Description<StatusBar> statusBar(LinearOptions options, Children &&...children) {
+  return linear<StatusBar>(options, std::forward<Children>(children)...);
+}
+
+/** @tparam Children Consuming child Description types.
+ * @param children Owning sections in left-to-right order.
+ * @return StatusBar recipe with default Row options; ambient defaults remain applicable.
+ */
+template <detail::DescriptionInput... Children> Description<StatusBar> statusBar(Children &&...children) {
+  return detail::Access::controlArguments(linear<StatusBar>({}, std::forward<Children>(children)...), {});
+}
+
+/** @tparam R Immediately consumable owning range of one Description type, as required by linear.
+ * @param options Owning ordinary Row layout settings.
+ * @param children Sections consumed now; no iterator or view is retained.
+ * @return StatusBar recipe preserving the existing range admission and rollback contracts.
+ */
+template <detail::DescriptionRange R> Description<StatusBar> statusBar(LinearOptions options, R &&children) {
+  return linear<StatusBar>(options, std::forward<R>(children));
+}
+
+/** @tparam R Immediately consumable owning range of one Description type, as required by linear.
+ * @param children Sections consumed now in iteration order.
+ * @return StatusBar recipe with default Row options and transactional child mounting.
+ */
+template <detail::DescriptionRange R> Description<StatusBar> statusBar(R &&children) {
+  return detail::Access::controlArguments(linear<StatusBar>({}, std::forward<R>(children)), {});
+}
+
+/** @tparam Children Consuming child Description types.
+ * @param reference Empty observer published only after complete mount succeeds.
+ * @param children Owning sections in left-to-right order.
+ * @return Default StatusBar recipe publishing the same actual container identity.
+ */
+template <detail::DescriptionInput... Children>
+Description<StatusBar> statusBar(Ref<StatusBar> reference, Children &&...children) {
+  return statusBar(std::forward<Children>(children)...).reference(std::move(reference));
+}
+
+/** @tparam Children Consuming child Description types.
+ * @param reference Empty observer published only after complete mount succeeds.
+ * @param options Owning ordinary Row layout settings.
+ * @param children Owning sections in left-to-right order.
+ * @return Configured StatusBar recipe with deferred observer publication.
+ */
+template <detail::DescriptionInput... Children>
+Description<StatusBar> statusBar(Ref<StatusBar> reference, LinearOptions options, Children &&...children) {
+  return statusBar(options, std::forward<Children>(children)...).reference(std::move(reference));
+}
+
 /** @tparam R Immediately consumable range of one Description type, as required by linear.
  * @param options Owning vertical layout settings.
  * @param children Recipes transferred now, in top-to-bottom order; lvalue elements require explicit transfer.

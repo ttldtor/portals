@@ -7,6 +7,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Add `StatusBar` and `ui::statusBar(...)` for horizontal status sections with
+  themed full-width backgrounds, disabled appearance and ordinary Row sizing.
+  Labels and key hints retain their existing references and input behavior.
+  A complete example shows dynamic status, key help and resizing.
+
 - Add a complete resizable work-queue example with a command menu, editor,
   virtual table, shared Save action and bottom controls. The complete program
   is also compiled against the installed package.

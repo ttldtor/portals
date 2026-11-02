@@ -57,7 +57,8 @@ std::expected<Node<T>, ManagedError> ManagedScene::emplaceConfigured(Node<Widget
 
     if constexpr (std::derived_from<T, Control> || std::same_as<T, LineEdit> || std::same_as<T, Password> ||
                   std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, ScrollArea> ||
-                  std::same_as<T, ScrollBar> || std::same_as<T, Grid> || std::derived_from<T, ScrollArea>) {
+                  std::same_as<T, ScrollBar> || std::same_as<T, Grid> || std::same_as<T, StatusBar> ||
+                  std::derived_from<T, ScrollArea>) {
       const char *type = "Control";
 
       if constexpr (std::same_as<T, Label>) {
@@ -86,6 +87,8 @@ std::expected<Node<T>, ManagedError> ManagedScene::emplaceConfigured(Node<Widget
         type = "ScrollBar";
       } else if constexpr (std::same_as<T, Grid>) {
         type = "Grid";
+      } else if constexpr (std::same_as<T, StatusBar>) {
+        type = "StatusBar";
       }
 
       entry->target = std::make_shared<StyleTarget>(StyleTarget{
@@ -98,6 +101,10 @@ std::expected<Node<T>, ManagedError> ManagedScene::emplaceConfigured(Node<Widget
     if constexpr (std::derived_from<T, Control>) {
       entry->sync = [this, node = *node](Node<Widget> focused) {
         return syncControl(app_.tree(), node, focused);
+      };
+    } else if constexpr (std::same_as<T, StatusBar>) {
+      entry->sync = [this, node = *node](Node<Widget>) {
+        return syncStatusBar(app_.tree(), node);
       };
     } else if constexpr (std::same_as<T, Border>) {
       entry->sync = [this, node = *node](Node<Widget> focused) {

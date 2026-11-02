@@ -134,6 +134,7 @@ and the exact runtime boundaries.
 - [Dialogs](dialogs.md): open retained modal panels and anchored nonmodal layers.
 - [Notifications](notifications.md): show bounded messages and actions while editing continues.
 - [Key hints and help](key-help.md): shared command labels, availability and shortcuts.
+- [Status sections](controls.md#status-bar-control): compose a footer from labels, flexible space and real key hints.
 - [Checked theme previews](theme-selection.md): preview, apply and cancel a catalog choice while preserving overrides.
 - [Theme selector](theme-selector.md): add a ready-made modal catalog with preview and recovery actions.
 - [First application](first-application.md): build a note form in four steps.

@@ -29,6 +29,74 @@ and frame errors. Equal text/style/value synchronization is a no-op; changed tex
 or width policy invalidates layout, while style, focus and checked state invalidate
 paint. `GraphemeText::from` reports text errors before widget construction.
 
+## Status sections {#status-bar-control}
+
+`ui::statusBar(...)` composes ordinary children in a horizontal `StatusBar`.
+The bar fills the offered width, requests one row and paints its complete
+allocation, including empty space, padding and gaps. Existing themes provide
+the background and disabled appearance. The complete
+[status-bar example](../examples/status_bar/main.cpp) updates a label with F2,
+opens the real key-help pane with F1 and restores the terminal on F10.
+
+```cpp
+ui::Ref<Label> status;
+ui::Ref<HelpView> help;
+auto footer = ui::statusBar({.gap = 1},
+  ui::label(status, "Ready"), ui::spacer(), ui::label("UTF-8"), ui::keyHints(help));
+// Mount ui::helpView(help) in the same scene. Later, on UI between frames:
+status.text() = "Saved";
+```
+
+`status` observes the visible label; `ui::Ref<StatusBar>` observes the container
+for geometry, visibility and removal. A bar has no text property or timer.
+`KeyHints` uses the actual `HelpView` and the scene's canonical bindings; see
+[key discovery](key-help.md). The container is not a focus stop;
+interactive children retain their existing keyboard and mouse behavior.
+
+Layout follows `Row`: gap and padding default to zero, main alignment is START,
+cross alignment is STRETCH and overflow is CLIP. A spacer pushes following
+sections toward the right edge. During shortage, later shrinkable children
+yield space first, down to their minima; fixed/minimum overflow is clipped.
+Use the existing child sizing methods to choose which sections retain space.
+The default height is fixed at one row; explicit `.height(...)`, `.minWidth(...)`,
+`.maxWidth(...)` and ordinary sizing settings remain available. The bar does
+not dock itself to the bottom; its parent determines placement.
+
+Both loaded scene formats accept ordinary children, basic width/height/flex and gap settings.
+Use the configuration format for min/max bounds, padding and linear alignment;
+the legacy grammar retains its usual linear-container restrictions.
+Known legacy limitation: with a `ControlContext` containing defaults or definitions,
+min/max bound literals can fail with `DUPLICATE_PROPERTY`. Use the configuration
+format for these settings.
+For example:
+
+```text
+StatusBar#footer { gap=1 Label#status { text="Ready" } Spacer{} Label { text="UTF-8" } }
+```
+
+Use `scene.get<Label>("status")` to update the loaded label and
+`scene.get<StatusBar>("footer")` for the container. Bar-level `text`, `state`
+and timeout properties are unsupported. `StatusBar` is the canonical style
+and defaults/variant type. Its fill selects normal or disabled appearance;
+child controls resolve their own styles, including explicit backgrounds.
+
+Low-level clients include `<portals/status_bar.hpp>`, construct `StatusBar`
+with `LinearOptions`, optional `ControlStyle` and `SizePolicy`, and call
+`syncStatusBar(tree, node)` between frames after eligibility changes.
+Managed scenes synchronize automatically. Hidden ancestry skips layout/paint;
+disabled ancestry keeps the layout and paints disabled styles. Tree mutation,
+frame-borrow and sink errors propagate through the existing checked APIs.
+The tree owns the bar and children; references and paint contexts follow the
+existing [widget lifetime](widget-tree.md) contract.
+
+
+The native recording shows Ready changing to Saved, opening and closing key help,
+and resizing the viewport. Sections use an explicit one-cell gap. A `[?]` marker
+in key hints means terminal phase support is unknown; see [key discovery](key-help.md).
+
+@image html status-bar.png "Status sections with a saved value."
+@image html status-bar.gif "Status updates, key help and viewport resizing."
+
 ## Form fields
 
 `ui::formField(...)` groups an editor with a label, help and a validation
