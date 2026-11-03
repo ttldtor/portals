@@ -5,6 +5,18 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+### Changed
+
+- RadioGroup arrows and Home/End now move the active option without publishing
+  selection. Space/Enter confirms; blur does not. Use `.immediate()` or
+  `RadioSelectionMode::IMMEDIATE` to retain selection while navigating, with the
+  same policy in scene resources. Read-only groups remain focusable and navigable.
+- RadioGroup paints selected markers independently from active captions. Built-in
+  light/dark themes use muted read-only text without italic or underline, preserve
+  keyboard focus styling, and keep selected markers on the surface background.
+  The sparse `:read-only` qualifier composes with `:focused` or `:selected`. Rebuild SDK
+  consumers for the selector qualifier API and widget virtual hook.
+
 ### Added
 
 - Add horizontal numeric sliders with validated finite sources, live user changes,

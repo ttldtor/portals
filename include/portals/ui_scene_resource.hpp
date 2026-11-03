@@ -46,10 +46,10 @@ struct SceneResourceArguments {
   std::optional<std::int32_t> height;      ///< Nonnegative fixed cell height, applied after the factory recipe.
   std::optional<std::uint32_t> flex;       ///< Positive common flex weight; excludes other per-axis mode requests.
   std::int32_t gap{};                      ///< Nonnegative layout gap; resource syntax admits this only on VBox/HBox.
-  bool checked{};                          ///< Initial checkbox state; resource syntax admits this on CheckBox and Switch.
-  ControlSettings settings{};              ///< Validated effective sparse settings; no IDs, models or handlers.
-  std::optional<bool> visible;             ///< Local visibility applied after the factory's recipe modifiers.
-  std::optional<bool> enabled;             ///< Local enabled state applied after the factory's recipe modifiers.
+  bool checked{};                     ///< Initial checkbox state; resource syntax admits this on CheckBox and Switch.
+  ControlSettings settings{};         ///< Validated effective sparse settings; no IDs, models or handlers.
+  std::optional<bool> visible;        ///< Local visibility applied after the factory's recipe modifiers.
+  std::optional<bool> enabled;        ///< Local enabled state applied after the factory's recipe modifiers.
   std::optional<std::string> classes; ///< Owning literal class list; absent preserves factory classes, empty clears.
   std::optional<std::int32_t> weight; ///< Node-local positive Spacer weight; absent means one.
   std::optional<std::int32_t> cells;  ///< Node-local nonnegative Spacing cells; absent means zero.
@@ -95,14 +95,16 @@ public:
    * @return Registration result; loaded common sizing/classes/visible/enabled remain scalar data.
    */
   std::expected<void, SceneResourceErrorCode> popupMenu(std::string_view name, Ref<PopupMenu> reference,
-      std::initializer_list<PopupEntry> entries, PopupMenuOptions options = {}) {
+                                                        std::initializer_list<PopupEntry> entries,
+                                                        PopupMenuOptions options = {}) {
     std::vector<PopupEntry> owning(entries);
-    auto declarations = std::make_shared<Description<PopupMenu>>(
-      detail::popupMenuRecipe(owning, options, {}, DEFAULT_MENU_POLICY));
+    auto declarations =
+      std::make_shared<Description<PopupMenu>>(detail::popupMenuRecipe(owning, options, {}, DEFAULT_MENU_POLICY));
 
-    return add<PopupMenu>(name,
-      [reference, owning = std::move(owning), options, declarations](SceneResourceArguments arguments)
-          -> std::expected<Description<PopupMenu>, ManagedError> {
+    return add<PopupMenu>(
+      name,
+      [reference, owning = std::move(owning), options,
+       declarations](SceneResourceArguments arguments) -> std::expected<Description<PopupMenu>, ManagedError> {
         // Keep cold action stores alive even when the binding factory's local ActionSet has returned.
         (void)declarations;
         auto effective = options;
@@ -345,6 +347,7 @@ private:
 
       const auto radioReadOnly = arguments.settings.readOnly;
       const auto radioInitial = arguments.settings.radioInitial;
+      const auto radioSelectionMode = arguments.settings.radioSelectionMode;
       auto id = arguments.id;
       auto recipe = std::expected<Description<T>, ManagedError>(std::invoke(factory, std::move(arguments)));
 
@@ -365,7 +368,8 @@ private:
       }
 
       if constexpr (std::same_as<T, RadioGroup>) {
-        (void)std::move(*recipe).settings(ControlSettings{.readOnly = radioReadOnly, .radioInitial = radioInitial});
+        (void)std::move(*recipe).settings(ControlSettings{
+          .readOnly = radioReadOnly, .radioInitial = radioInitial, .radioSelectionMode = radioSelectionMode});
       }
       if (semanticSettings) {
         auto staged = detail::Access::messageSource(*recipe, *semanticSettings, materialized, semantic);

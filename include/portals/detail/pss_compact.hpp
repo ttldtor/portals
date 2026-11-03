@@ -52,6 +52,7 @@ struct PssCompactRule {
   std::uint32_t classBegin{};        ///< First class-reference index.
   std::uint32_t classCount{};        ///< Number of conjunction classes.
   StyleState state{StyleState::ANY}; ///< Presentation-state predicate.
+  bool readOnly{};                   ///< Orthogonal read-only predicate.
   StyleDeclarations values;          ///< Last-winner scalar declarations.
   PssPosition selector;              ///< Original selector start.
   std::uint32_t declarationBegin{};  ///< First declaration occurrence index.
@@ -140,6 +141,11 @@ struct PssCountSink {
     ++counts.classes;
 
     return text(span.size, location);
+  }
+
+  /** @return Admission of the storage-free orthogonal predicate. */
+  constexpr std::expected<void, PssError> readOnly() {
+    return {};
   }
 
   /** @param state Validated state, which consumes no additional record.
@@ -381,6 +387,12 @@ public:
     ++sheet_.classCount_;
     ++current().classCount;
 
+    return {};
+  }
+
+  /** @return Successful orthogonal predicate storage. */
+  constexpr std::expected<void, PssError> readOnly() {
+    current().readOnly = true;
     return {};
   }
 

@@ -610,3 +610,41 @@ TEST_CASE("runtime literal scrollbar glyphs own source and duplicate occurrence 
   constexpr auto UNSUPPORTED = sc::detail::inspectPss("*{scrollbar-horizontal-track-glyph:'.';}", "");
   static_assert(!UNSUPPORTED.valid && UNSUPPORTED.error.code == PssErrorCode::INVALID_VALUE);
 }
+
+TEST_CASE("read-only PSS qualifier survives constexpr runtime and typed conversion with sparse composition") {
+  constexpr auto DESCRIPTION =
+    sc::pss("RadioGroup:read-only:focused{underline:false;} RadioGroup:selected:read-only{italic:true;}");
+  static_assert(DESCRIPTION.rules()[0].readOnly && DESCRIPTION.rules()[0].state == StyleState::FOCUSED);
+  static_assert(DESCRIPTION.rules()[1].readOnly && DESCRIPTION.rules()[1].state == StyleState::SELECTED);
+  const auto runtime =
+    parsePss("RadioGroup:read-only:focused{underline:false;} RadioGroup:selected:read-only{italic:true;}");
+  REQUIRE(runtime);
+  const auto constant = sc::materialize(DESCRIPTION);
+  const StyleTarget target{.type = "RadioGroup"};
+  CHECK(resolveStyle(*runtime, target, {}, true) == resolveStyle(constant, target, {}, true));
+  constexpr auto READ_ONLY_TYPED =
+    sc::compactSheet(std::array{sc::flatRule(sc::type<"RadioGroup">(StyleState::FOCUSED, true), sc::underline(false)),
+                                sc::flatRule(sc::type<"RadioGroup">(StyleState::SELECTED, true), sc::italic(true))});
+  CHECK(resolveStyle(sc::materialize(READ_ONLY_TYPED), target, {}, true) == resolveStyle(constant, target, {}, true));
+  const auto sheet = parsePss("RadioGroup:read-only{italic:true;underline:true;} RadioGroup:focused{bold:true;} "
+                              "RadioGroup:read-only:focused{italic:false;}");
+  REQUIRE(sheet);
+  const auto composed = resolveStyle(*sheet, target, {}, true);
+  CHECK(composed.normal.italic);
+  CHECK(composed.focused.bold);
+  CHECK(composed.focused.underline);
+  CHECK_FALSE(composed.focused.italic);
+  CHECK_FALSE(resolveStyle(*sheet, {.type = "RadioGroup"}).normal.underline);
+
+  for (const auto source : {"RadioGroup:read-only:read-only{}", "RadioGroup:focused:selected{}",
+                            "RadioGroup:selected:read-only:focused{}"}) {
+    const auto invalid = parsePssDocument(source);
+    REQUIRE_FALSE(invalid);
+    CHECK(invalid.error().code == PssErrorCode::DUPLICATE_STATE);
+  }
+  for (const auto source : {"RadioGroup:read-only{min-width:1;}", "RadioGroup:read-only{width:fit-content;}"}) {
+    const auto invalid = parsePssDocument(source);
+    REQUIRE_FALSE(invalid);
+    CHECK(invalid.error().code == PssErrorCode::INVALID_WIDTH);
+  }
+}

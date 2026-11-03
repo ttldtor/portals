@@ -30,8 +30,9 @@ constexpr auto SHEET = sc::sheet(
            sc::minWidth(sc::token<"width">())));
 ```
 
-`selector<Type, Id, Classes...>(state)` combines a type, optional ID, all listed
-classes and one existing `StyleState`. Empty type or `"*"` matches any type;
+`selector<Type, Id, Classes...>(state, readOnly = false)` combines a type, optional ID, all listed
+classes and one existing `StyleState`, optionally qualified as read-only. The default
+`false` preserves existing calls. Empty type or `"*"` matches any type;
 empty ID matches any ID. Matching retains runtime byte semantics.
 Supported declarations are `foreground`, `background`, `bold`, `italic`,
 `underline` and `minWidth`.
@@ -43,10 +44,11 @@ properties, rule count and default expressions during constant evaluation.
 owns nested color expressions, accepts [0, 100], and rounds each integral
 component down. This is a bounded expression tree, without derived-token
 references or a dependency graph. `minWidth` must be nonnegative and can only
-appear under `StyleState::ANY`.
+appear under `StyleState::ANY` without the read-only qualifier.
 
 `sc::themeFromTokens(defaults, extraParameters, extraRules...)` describes the
-same six standard rules as `portals::themeFromTokens`. It supplies named colors
+same six base presentation roles and additional sparse `RadioGroup:read-only`
+rule as `portals::themeFromTokens`. It supplies named colors
 `foreground`, `background`, `accent`, `muted`, `selection` and `heading`.
 Additional parameters must have different names; additional rules follow the
 standard rules in source order.

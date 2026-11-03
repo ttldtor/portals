@@ -6,6 +6,7 @@
 #include <portals/ui_style.hpp>
 
 #include <array>
+#include <cstdio>
 #include <cstdlib>
 #include <iostream>
 #include <new>
@@ -15,6 +16,8 @@
 
 namespace allocation_test {
 thread_local std::ptrdiff_t remaining = -1;
+thread_local bool recording{};
+thread_local std::size_t calls{};
 thread_local const void *reclaimTarget{};
 thread_local std::function<void()> reclaimAction;
 
@@ -38,6 +41,9 @@ void *operator new(std::size_t bytes) {
     --allocation_test::remaining;
   }
   if (auto memory = std::malloc(bytes ? bytes : 1)) {
+    if (allocation_test::recording) {
+      ++allocation_test::calls;
+    }
     return memory;
   }
   throw std::bad_alloc();
@@ -110,10 +116,12 @@ struct Fixture {
   Node<RadioGroup> node;
   std::shared_ptr<Property<RadioGroupValue>> model;
 
-  explicit Fixture(bool readOnly = false, SchedulerOptions options = {})
+  // Existing mutation/lifetime cases explicitly retain immediate behavior; deferred cases opt in below.
+  explicit Fixture(bool readOnly = false, SchedulerOptions options = {},
+                   RadioSelectionMode mode = RadioSelectionMode::IMMEDIATE, ControlStyle style = {})
       : scheduler(take(Scheduler::create(options))), tree(take(WidgetTree::create(*scheduler))),
         root(take(tree->root())), router(take(EventRouter::create(*tree))) {
-    node = take(tree->emplace<RadioGroup>(root, ControlStyle{}, DEFAULT_CONTENT_POLICY, readOnly));
+    node = take(tree->emplace<RadioGroup>(root, style, DEFAULT_CONTENT_POLICY, readOnly, WidthPolicy{}, mode));
     model = take(Property<RadioGroupValue>::create(*tree, root, choices(), Invalidation::PAINT));
   }
 };
@@ -143,7 +151,7 @@ TEST_CASE("radio values preserve stable identities and share row storage across 
   CHECK_FALSE(RadioGroupValue::from(take(RowCollection<RadioItem>::from(reordered)), RowId{22, 1}));
 }
 
-TEST_CASE("radio binding navigates eligible IDs and preserves exact commit receipts") {
+TEST_CASE("immediate radio binding navigates eligible IDs and preserves exact commit receipts") {
   Fixture f;
   std::optional<RadioGroupResult> last;
   int calls{};
@@ -161,14 +169,14 @@ TEST_CASE("radio binding navigates eligible IDs and preserves exact commit recei
   CHECK(take(binding.value()).selectedText() == "Quiet");
   take(f.tree->consumeFrameRequest());
   take(f.router->invoke(f.node, ActionEvent{Action::ACTIVATE}));
-  CHECK_FALSE((*last)->changed);
+  CHECK(calls == 1);
   CHECK(take(f.tree->consumeFrameRequest()) == Invalidation::NONE);
   take(f.router->invoke(f.node, ActionEvent{Action::MOVE_DOWN}));
   CHECK((*last)->snapshot->value.selectedId() == RowId{11, 1});
   take(binding.select({}));
   take(f.router->invoke(f.node, ActionEvent{Action::MOVE_DOWN}));
-  CHECK((*last)->snapshot->value.selectedId() == RowId{11, 1});
-  CHECK(calls == 4);
+  CHECK((*last)->snapshot->value.selectedId() == RowId{44, 1});
+  CHECK(calls == 3);
 
   auto foreign = take(f.tree->emplace<RadioGroup>(f.root));
   CHECK_FALSE(bindRadioGroup(*f.tree, *f.router, f.node, f.model, [](auto) {
@@ -224,7 +232,7 @@ TEST_CASE("radio scene shorthand and model client use unified Ref and user-only 
   auto scene = ui::scene([&](ManagedScene &owner, Application &app) {
                  application = &app;
                  model = take(owner.radioState({"Fast", "Balanced", "Quiet"}));
-                 return ui::radioGroup(group, model).id("mode").classes({"settings"});
+                 return ui::radioGroup(group, model).immediate().id("mode").classes({"settings"});
                }) |
                ui::onChange(group, [&](const auto &value) {
                  static_assert(std::same_as<std::remove_cvref_t<decltype(value)>, RadioGroupValue>);
@@ -516,7 +524,7 @@ TEST_CASE("radio user receipt retains successful commit when observer publicatio
     receipt = result;
   }));
   take(f.model->set(choices(RowId{44, 1})));
-  take(f.router->invoke(f.node, ActionEvent{Action::MOVE_DOWN}));
+  take(f.router->invoke(f.node, ActionEvent{Action::MOVE_HOME}));
 
   REQUIRE(receipt);
   REQUIRE(*receipt);
@@ -548,7 +556,8 @@ TEST_CASE("radio rejects foreign scene models without occupying its event bindin
   auto second = take(ManagedScene::create(*app));
   const auto foreign = take(first->radioState({"One", "Two"}));
   const auto local = take(second->radioState({"Local", "Other"}));
-  const auto node = take(second->emplace<RadioGroup>(second->root()));
+  const auto node = take(second->emplace<RadioGroup>(second->root(), ControlStyle{}, DEFAULT_CONTENT_POLICY, false,
+                                                     WidthPolicy{}, RadioSelectionMode::IMMEDIATE));
   const auto rejected = second->bind(node, foreign);
 
   REQUIRE_FALSE(rejected);
@@ -562,7 +571,8 @@ TEST_CASE("radio late handlers appended during delivery start at the next operat
   auto app = take(Application::create());
   auto owner = take(ManagedScene::create(*app));
   const auto model = take(owner->radioState({"One", "Two"}));
-  const auto node = take(owner->emplace<RadioGroup>(owner->root()));
+  const auto node = take(owner->emplace<RadioGroup>(owner->root(), ControlStyle{}, DEFAULT_CONTENT_POLICY, false,
+                                                    WidthPolicy{}, RadioSelectionMode::IMMEDIATE));
   int primary{}, late{};
 
   take(owner->bind(node, model));
@@ -869,4 +879,467 @@ TEST_CASE("radio Ref select preserves exact success receipts and checked failure
   REQUIRE(diagnostics.errors.front().error.operationOrigin);
   CHECK(diagnostics.errors.front().error.operationOrigin->line() == origin.line());
   CHECK(take(model.snapshot()) == committed.snapshot);
+}
+
+TEST_CASE("activation radio navigation changes neither model revision nor notifications") {
+  Fixture f(false, {}, RadioSelectionMode::ON_ACTIVATION);
+  int callbacks{}, observations{};
+  auto binding = take(bindRadioGroup(*f.tree, *f.router, f.node, f.model, [&](auto) {
+    ++callbacks;
+  }));
+  auto observed = take(f.model->observe(f.node, [&](RadioGroup &, auto) {
+    ++observations;
+  }));
+  const auto before = take(f.model->snapshot());
+  take(f.tree->consumeFrameRequest());
+
+  allocation_test::calls = 0;
+  allocation_test::recording = true;
+  const auto noOp = f.router->invoke(f.node, ActionEvent{Action::MOVE_HOME});
+  allocation_test::recording = false;
+  REQUIRE(noOp);
+  const auto routingAllocations = allocation_test::calls;
+  allocation_test::calls = 0;
+  allocation_test::recording = true;
+  const auto moved = f.router->invoke(f.node, ActionEvent{Action::MOVE_DOWN});
+  allocation_test::recording = false;
+  REQUIRE(moved);
+  CHECK(allocation_test::calls == routingAllocations);
+  std::cout << "navigation allocations: no-op=" << routingAllocations << " move=" << allocation_test::calls << '\n';
+  CHECK(take(f.model->snapshot()) == before);
+  CHECK(take(f.tree->consumeFrameRequest()) == Invalidation::PAINT);
+  take(f.scheduler->dispatch());
+  CHECK(callbacks == 0);
+  CHECK(observations == 0);
+
+  take(f.router->invoke(f.node, ActionEvent{.action = Action::MOVE_DOWN, .keyAction = KeyAction::RELEASE}));
+  take(f.router->invoke(f.node, ActionEvent{.action = Action::ACTIVATE, .keyAction = KeyAction::RELEASE}));
+  CHECK(take(f.model->snapshot()) == before);
+  take(f.router->invoke(f.node, ActionEvent{Action::ACTIVATE}));
+  CHECK(take(binding.value()).selectedId() == RowId{44, 1});
+  CHECK(callbacks == 1);
+  take(f.scheduler->dispatch());
+  CHECK(observations == 1);
+  const auto selected = take(f.model->snapshot());
+  take(f.router->invoke(f.node, ActionEvent{Action::ACTIVATE}));
+  CHECK(take(f.model->snapshot()) == selected);
+  CHECK(callbacks == 1);
+  const auto area = take(CellRect::from({}, {20, 3}));
+  take(f.tree->frame([&] {
+    take(f.tree->arrange(f.root, area, area));
+    take(f.tree->arrange(f.node, area, area));
+  }));
+  take(f.router->dispatch(MouseInputEvent{1, 0, MouseButton::LEFT, MouseAction::PRESS}));
+  CHECK(take(binding.value()).selectedId() == RowId{11, 1});
+  CHECK(callbacks == 2);
+}
+
+TEST_CASE("active identity survives external selection and row replacement while eligible") {
+  Fixture f(false, {}, RadioSelectionMode::ON_ACTIVATION);
+  int calls{};
+  auto binding = take(bindRadioGroup(*f.tree, *f.router, f.node, f.model, [&](auto) {
+    ++calls;
+  }));
+  take(f.router->invoke(f.node, ActionEvent{Action::MOVE_END}));
+  take(f.model->set(choices(RowId{33, 1})));
+  take(binding.sync());
+  take(f.router->invoke(f.node, ActionEvent{Action::ACTIVATE}));
+  CHECK(take(binding.value()).selectedId() == RowId{44, 1});
+  CHECK(calls == 1);
+
+  const auto current = take(binding.value());
+  const std::array replacement{current.rows()[0], current.rows()[1]};
+  take(f.model->set(take(RadioGroupValue::from(take(RowCollection<RadioItem>::from(replacement)), RowId{22, 1}))));
+  take(f.router->invoke(f.node, ActionEvent{Action::ACTIVATE}));
+  CHECK(take(binding.value()).selectedId() == RowId{11, 1});
+  CHECK(calls == 2);
+}
+
+TEST_CASE("default navigation endpoints wrap and blur never commits") {
+  Fixture f(false, {}, RadioSelectionMode::ON_ACTIVATION);
+  int calls{};
+  auto binding = take(bindRadioGroup(*f.tree, *f.router, f.node, f.model, [&](auto) {
+    ++calls;
+  }));
+  take(f.router->setFocus(f.node));
+  take(f.router->invoke(f.node, ActionEvent{Action::MOVE_HOME}));
+  take(f.router->invoke(f.node, ActionEvent{Action::MOVE_LEFT}));
+  const auto other = take(f.tree->emplace<RadioGroup>(f.root));
+  auto otherBinding = take(bindRadioGroup(*f.tree, *f.router, other, f.model, [](auto) {
+  }));
+  take(f.router->setFocus(other));
+  take(syncRadioGroup(*f.tree, f.node, other));
+  CHECK(calls == 0);
+  CHECK(take(binding.value()).selectedId() == RowId{11, 1});
+  take(f.router->setFocus(f.node));
+  take(f.router->dispatch(TextInputEvent{U' '}));
+  CHECK(take(binding.value()).selectedId() == RowId{44, 1});
+  take(f.router->invoke(f.node, ActionEvent{Action::MOVE_RIGHT}));
+  take(f.router->invoke(f.node, ActionEvent{Action::ACTIVATE}));
+  CHECK(take(binding.value()).selectedId() == RowId{11, 1});
+  CHECK(calls == 2);
+}
+
+TEST_CASE("radio read-only qualifier composes with selected marker and active caption in every builtin theme") {
+  struct Sink : PaintContext {
+    std::vector<TextCommand> text;
+
+    std::expected<void, TreeError> submit(std::span<const RenderCommand> commands) override {
+      for (const auto &command : commands) {
+        if (const auto *run = std::get_if<TextCommand>(&command)) {
+          text.push_back(*run);
+        }
+      }
+      return {};
+    }
+  };
+
+  for (const auto &theme :
+       {modernTheme(), turboTheme(), nordTheme(), gruvboxTheme(), tokyoNightTheme(), catppuccinLatteTheme()}) {
+    Fixture f(true, {}, RadioSelectionMode::ON_ACTIVATION);
+    int calls{};
+    auto binding = take(bindRadioGroup(*f.tree, *f.router, f.node, f.model, [&](auto) {
+      ++calls;
+    }));
+    StyleEngine engine(*f.tree);
+    take(engine.bind(f.node, {.type = "RadioGroup"}));
+    take(engine.replace(theme));
+    take(f.router->setFocus(f.node));
+    take(syncRadioGroup(*f.tree, f.node, f.node));
+    take(f.router->invoke(f.node, ActionEvent{Action::MOVE_END}));
+    take(f.router->invoke(f.node, ActionEvent{Action::ACTIVATE}));
+    CHECK(calls == 0);
+    CHECK(take(binding.value()).selectedId() == RowId{11, 1});
+    ComputedStyle resolved;
+    take(f.tree->read(f.node, [&](const RadioGroup &group) {
+      CHECK(group.styleReadOnly());
+      resolved = group.computedStyle()->flatten();
+    }));
+    const auto ordinary = resolveStyle(theme, {.type = "RadioGroup"});
+    CHECK(resolved.normal.foreground == ordinary.disabled.foreground);
+    CHECK(resolved.normal.background == ordinary.normal.background);
+    CHECK(resolved.focused.foreground == ordinary.focused.foreground);
+    CHECK(resolved.focused.background == ordinary.focused.background);
+    CHECK(resolved.selected.background == ordinary.selected.background);
+    CHECK(resolved.disabled.foreground == ordinary.disabled.foreground);
+    CHECK(resolved.disabled.background == ordinary.disabled.background);
+    CHECK_FALSE(resolved.normal.bold);
+    CHECK_FALSE(resolved.normal.italic);
+    CHECK_FALSE(resolved.normal.underline);
+    CHECK_FALSE(resolved.focused.italic);
+    CHECK_FALSE(resolved.focused.underline);
+    CHECK(resolved.focused.bold == ordinary.focused.bold);
+    CHECK(resolved.frame[1] == ordinary.frame[1]);
+    CHECK(resolved.scrollbar[1] == ordinary.scrollbar[1]);
+    CHECK(resolved.selected.foreground == resolved.normal.foreground);
+    CHECK(resolved.selected.background == resolved.normal.background);
+    CHECK_FALSE(resolved.selected.bold);
+    CHECK_FALSE(resolved.selected.italic);
+    CHECK_FALSE(resolved.selected.underline);
+    CHECK(resolved.normal == resolved.disabled);
+    CHECK(ordinary.selected.background == ordinary.normal.background);
+    CHECK(resolveStyle(theme, {.type = "ListBox"}).selected.background != ordinary.selected.background);
+    const auto area = take(CellRect::from({}, {20, 3}));
+    Sink sink;
+    take(f.tree->frame([&] {
+      take(f.tree->arrange(f.root, area, area));
+      take(f.tree->arrange(f.node, area, area));
+      take(f.tree->paint(f.node, sink));
+    }));
+    REQUIRE(sink.text.size() == 6);
+    CHECK(sink.text[0].text.bytes() == "(*) ");
+    CHECK(sink.text[0].style == resolved.selected);
+    CHECK(sink.text[1].style == resolved.normal);
+    CHECK(sink.text[2].style == resolved.disabled);
+    CHECK(sink.text[5].style == resolved.focused);
+    take(engine.refresh());
+    CHECK(take(binding.select(RowId{44, 1})).changed);
+    CHECK(calls == 0);
+    take(f.tree->setEnabled(f.node, false));
+    take(syncRadioGroup(*f.tree, f.node, {}));
+    sink.text.clear();
+    take(f.tree->frame([&] {
+      take(f.tree->arrange(f.root, area, area));
+      take(f.tree->arrange(f.node, area, area));
+      take(f.tree->paint(f.node, sink));
+    }));
+    REQUIRE(sink.text.size() == 6);
+    for (const auto &run : sink.text) {
+      CHECK(run.style == resolved.disabled);
+    }
+  }
+}
+
+TEST_CASE("radio DSL and resources expose the same selection policy and reject invalid leaves") {
+  for (const bool immediate : {false, true}) {
+    ui::Ref<RadioGroup> ref;
+    Application *app{};
+    auto scene = ui::scene([&](ManagedScene &, Application &application) {
+      app = &application;
+      return ui::radioGroup(ref, {"One", "Two"}).immediate(immediate);
+    });
+    scene.prepare();
+    take(scene.checked());
+    take(app->router().invoke(ref.node(), ActionEvent{Action::MOVE_DOWN}));
+    CHECK(take(ref.value()).selectedText() == (immediate ? "Two" : "One"));
+    take(app->router().invoke(ref.node(), ActionEvent{Action::ACTIVATE}));
+    CHECK(take(ref.value()).selectedText() == "Two");
+
+    ui::SceneResourceOptions options;
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    take(options.registry.add<RadioGroup>("Modes", [](ui::SceneResourceArguments) {
+      return ui::radioGroup({"One", "Two"});
+    }));
+    auto resource = ui::scene(immediate ? "scene { Modes#mode { radioSelectionMode=IMMEDIATE } }"
+                                        : "scene { Modes#mode { radioSelectionMode=ON_ACTIVATION } }",
+                              options);
+    auto loaded = resource.get<RadioGroup>("mode");
+    Application *resourceApp{};
+    resource.configure([&](ManagedScene &, Application &application) {
+      resourceApp = &application;
+    });
+    resource.prepare();
+    take(resource.checked());
+    take(resourceApp->router().invoke(loaded.node(), ActionEvent{Action::MOVE_DOWN}));
+    CHECK(take(loaded.value()).selectedText() == (immediate ? "Two" : "One"));
+    auto bad = ui::scene("scene { Modes { radioSelectionMode=UNKNOWN } }", options);
+    bad.prepare();
+    CHECK_FALSE(bad.checked());
+  }
+  auto invalid = ui::scene(ui::label("Wrong kind").settings({.radioSelectionMode = RadioSelectionMode::IMMEDIATE}));
+  invalid.prepare();
+  CHECK_FALSE(invalid.checked());
+  auto badEnum = ui::scene(ui::radioGroup({"One"}).selectionMode(static_cast<RadioSelectionMode>(99)));
+  badEnum.prepare();
+  CHECK_FALSE(badEnum.checked());
+}
+
+TEST_CASE("manual radio style preserves selected marker colors without a style engine") {
+  ControlStyle manual;
+  manual.normal.foreground = {1, 2, 3};
+  manual.focused.foreground = {4, 5, 6};
+  manual.disabled.foreground = {7, 8, 9};
+  Fixture f(false, {}, RadioSelectionMode::ON_ACTIVATION, manual);
+  auto binding = take(bindRadioGroup(*f.tree, *f.router, f.node, f.model, [](auto) {
+  }));
+  take(f.router->setFocus(f.node));
+  take(syncRadioGroup(*f.tree, f.node, f.node));
+  take(f.router->invoke(f.node, ActionEvent{Action::MOVE_END}));
+
+  struct Sink : PaintContext {
+    std::vector<CellStyle> styles;
+    std::vector<std::string> text;
+
+    std::expected<void, TreeError> submit(std::span<const RenderCommand> commands) override {
+      for (const auto &command : commands) {
+        if (const auto *run = std::get_if<TextCommand>(&command)) {
+          styles.push_back(run->style);
+          text.emplace_back(run->text.bytes());
+        }
+      }
+      return {};
+    }
+  } sink;
+
+  const auto area = take(CellRect::from({}, {20, 3}));
+  const auto paint = [&] {
+    sink.styles.clear();
+    sink.text.clear();
+    take(f.tree->frame([&] {
+      take(f.tree->arrange(f.root, area, area));
+      take(f.tree->arrange(f.node, area, area));
+      take(f.tree->paint(f.node, sink));
+    }));
+  };
+  paint();
+  REQUIRE(sink.styles.size() == 6);
+  CHECK(sink.styles[0] == manual.focused);
+  CHECK(sink.styles[1] == manual.normal);
+  CHECK(sink.styles[5] == manual.focused);
+  take(binding.select(RowId{22, 1}));
+  paint();
+  CHECK(sink.text[2] == "(*) ");
+  CHECK(sink.styles[2] == manual.disabled);
+  CHECK(sink.styles[3] == manual.disabled);
+  take(f.tree->setEnabled(f.node, false));
+  take(syncRadioGroup(*f.tree, f.node, {}));
+  const auto before = take(f.model->snapshot());
+  take(f.router->invoke(f.node, ActionEvent{Action::MOVE_DOWN}));
+  take(f.router->invoke(f.node, ActionEvent{Action::ACTIVATE}));
+  CHECK(take(f.model->snapshot()) == before);
+  paint();
+  CHECK(sink.styles[5] == manual.disabled);
+}
+
+TEST_CASE("bound readonly style fact stays widget-local while standalone preview takes an explicit fact") {
+  Fixture f;
+  auto binding = take(bindRadioGroup(*f.tree, *f.router, f.node, f.model, [](auto) {
+  }));
+  const auto sheet = take(parsePss("RadioGroup:read-only{underline:true;}"));
+  CHECK(resolveStyle(sheet, {.type = "RadioGroup"}, {}, true).normal.underline);
+  StyleEngine engine(*f.tree);
+  take(engine.bind(f.node, {.type = "RadioGroup"}));
+  take(engine.replace(sheet));
+  take(engine.refresh());
+  take(f.tree->read(f.node, [](const RadioGroup &group) {
+    CHECK_FALSE(group.styleReadOnly());
+    CHECK_FALSE(group.computedStyle()->normal.underline);
+  }));
+  const std::array registrations{StyleRegistration{f.node, {.type = "RadioGroup"}}};
+  take(engine.bindBatch(registrations));
+  take(f.tree->read(f.node, [](const RadioGroup &group) {
+    CHECK_FALSE(group.computedStyle()->normal.underline);
+  }));
+}
+
+TEST_CASE("native radio rejects an unknown selection policy at checked bind") {
+  Fixture f(false, {}, static_cast<RadioSelectionMode>(99));
+  auto binding = bindRadioGroup(*f.tree, *f.router, f.node, f.model, [](auto) {
+  });
+  REQUIRE_FALSE(binding);
+  CHECK(binding.error() == TreeError::INVALID_ARGUMENT);
+}
+
+namespace radio_theme_regression {
+namespace sc = portals::style::ct;
+
+void check(bool condition, const char *message) {
+  INFO(message);
+  CHECK(condition);
+}
+
+void prepare(ManagedScene &owner, Application &app) {
+  take(owner.prepare(app, {80, 24}));
+  for (std::size_t pass = 0; pass < ApplicationOptions{}.maxPreparationPasses; ++pass) {
+    std::optional<LayoutSnapshot> layout;
+    take(app.tree().frame([&] {
+      const auto bounds = take(CellRect::from({0, 0}, {80, 24}));
+      take(layoutTree(app.tree(), take(app.tree().root()), bounds, bounds));
+      layout = take(LayoutSnapshot::capture(app.tree(), owner.root(), LayoutSnapshotProfile::GEOMETRY));
+    }));
+    take(app.tree().consumeFrameRequest());
+    take(owner.prepareViews(app, *layout));
+    if (take(app.tree().consumeFrameRequest()) != Invalidation::LAYOUT) {
+      take(owner.completedLayout(app));
+      return;
+    }
+  }
+  throw std::runtime_error("layout failed to settle");
+}
+
+ComputedStyle read(Application &app, Node<RadioGroup> node) {
+  ComputedStyle value;
+  take(app.tree().read(node, [&](const RadioGroup &group) {
+    value = group.computedStyle()->flatten();
+  }));
+  return value;
+}
+
+Node<Widget> button(Application &app, Node<Widget> root, std::string_view caption) {
+  Node<Widget> result;
+  take(app.tree().read(root, [&](const Widget &widget) {
+    const auto *control = dynamic_cast<const Button *>(&widget);
+    if (control && control->text().bytes() == caption) {
+      result = root;
+    }
+  }));
+  if (result != Node<Widget>{}) {
+    return result;
+  }
+  for (auto child : take(app.tree().inspect(root)).children) {
+    result = button(app, child, caption);
+    if (result != Node<Widget>{}) {
+      return result;
+    }
+  }
+  return {};
+}
+
+void appearance(Application &app, ui::Ref<RadioGroup> editable, ui::Ref<RadioGroup> locked, const StyleSheet &theme,
+                const char *phase) {
+  const auto plain = read(app, editable.node()), readonly = read(app, locked.node());
+  const auto defaults = RadioGroup{}.styleDefaults();
+  const auto expected = resolveStyle(theme, {.type = "RadioGroup"}, defaults);
+  const auto expectedReadonly = resolveStyle(theme, {.type = "RadioGroup"}, defaults, true);
+  std::printf("%s editable italic=%d underline=%d readonly italic=%d underline=%d\n", phase, plain.normal.italic,
+              plain.normal.underline, readonly.normal.italic, readonly.normal.underline);
+  check(plain.normal == expected.normal && plain.focused == expected.focused && plain.selected == expected.selected &&
+          plain.disabled == expected.disabled,
+        "editable role parity");
+  check(readonly.normal == expectedReadonly.normal && readonly.focused == expectedReadonly.focused &&
+          readonly.selected == expectedReadonly.selected && readonly.disabled == expectedReadonly.disabled,
+        "read-only role parity/no disabled RGB bleed");
+}
+
+void liveTransition() {
+  constexpr ThemeTokens TOKENS{{0xd8, 0xde, 0xe9}, {0x2e, 0x34, 0x40}, {0x88, 0xc0, 0xd0},
+                               {0x81, 0xa1, 0xc1}, {0x43, 0x4c, 0x5e}, {0xb4, 0x8e, 0xad}};
+  constexpr auto LIVE = sc::themeFromTokens(TOKENS);
+  ui::Ref<RadioGroup> editable, locked;
+  Application *app{};
+  ManagedScene *owner{};
+  auto scene =
+    ui::scene(ui::vbox(ui::radioGroup(editable, {"One", "Two"}), ui::radioGroup(locked, {"Read", "Only"}).readOnly()));
+  scene.configure([&](ManagedScene &value, Application &application) {
+    owner = &value;
+    app = &application;
+  });
+  scene | ui::liveTheme(LIVE);
+  take(scene.prepareChecked());
+  prepare(*owner, *app);
+  appearance(*app, editable, locked, nordTheme(), "live legacy");
+  take(owner->enableStyleLayers());
+  prepare(*owner, *app);
+  appearance(*app, editable, locked, nordTheme(), "live converted to layers");
+  take(scene.close());
+}
+
+void selectorTransition() {
+  ui::Ref<RadioGroup> editable, locked;
+  ui::Ref<ThemeSelector> selector;
+  ui::Ref<Dialog> dialog;
+  Application *app{};
+  ManagedScene *owner{};
+  auto scene =
+    ui::scene(ui::vbox(ui::radioGroup(editable, {"One", "Two"}), ui::radioGroup(locked, {"Read", "Only"}).readOnly()),
+              ui::themeSelector(selector, {{"nord", "Nord", nordTheme}, {"latte", "Latte", catppuccinLatteTheme}})
+                .reference(dialog));
+  scene.configure([&](ManagedScene &value, Application &application) {
+    owner = &value;
+    app = &application;
+  });
+  scene | ui::theme(nordTheme());
+  take(scene.prepareChecked());
+  prepare(*owner, *app);
+  appearance(*app, editable, locked, nordTheme(), "direct Nord");
+  take(selector.open());
+  prepare(*owner, *app);
+  const auto latte = button(*app, dialog.node(), "Latte");
+  const auto apply = button(*app, dialog.node(), "Apply");
+  check(latte != Node<Widget>{} && apply != Node<Widget>{}, "catalog and Apply buttons exist");
+  take(app->router().setFocus(latte));
+  take(app->router().dispatch(TextInputEvent{U' '}));
+  prepare(*owner, *app);
+  check(take(selector.snapshot())->previewedId == "latte", "actual Latte button previews");
+  check(take(app->tree().inspect(apply)).enabled, "Apply enabled after preview despite static normal status text");
+  appearance(*app, editable, locked, catppuccinLatteTheme(), "Latte preview");
+  take(app->router().setFocus(apply));
+  take(app->router().dispatch(TextInputEvent{U' '}));
+  prepare(*owner, *app);
+  const auto outcome = take(selector.lastApply());
+  check(outcome && outcome->committedId == "latte" &&
+          outcome->closeDisposition == ui::ThemeSelectorCloseDisposition::CLOSED,
+        "actual Apply commits Latte and closes");
+  check(!take(app->tree().inspect(dialog.node())).visible, "modal hidden after Apply");
+  appearance(*app, editable, locked, catppuccinLatteTheme(), "Latte committed");
+  take(scene.close());
+}
+} // namespace radio_theme_regression
+
+TEST_CASE("read-only qualifiers survive LiveTheme conversion to retained style layers") {
+  radio_theme_regression::liveTransition();
+}
+
+TEST_CASE("theme selector preview commit and close preserve editable and readonly role parity") {
+  radio_theme_regression::selectorTransition();
 }

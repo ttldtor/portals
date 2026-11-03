@@ -10,6 +10,7 @@
 #include <portals/message_box.hpp>
 #include <portals/password.hpp>
 #include <portals/primitives.hpp>
+#include <portals/radio_group.hpp>
 #include <portals/scroll_options.hpp>
 #include <portals/search.hpp>
 #include <portals/spinner.hpp>
@@ -366,15 +367,15 @@ struct ControlRadioInitialSettings {
 struct ControlSettings {
   ~ControlSettings() = default;
 
-  std::optional<TextValue> text{};                        ///< Caption/value expression, resolved by receiving scene.
-  std::optional<std::int32_t> width{};                    ///< Nonnegative fixed width in cells.
-  std::optional<std::int32_t> height{};                   ///< Nonnegative fixed height in cells.
-  std::optional<std::uint32_t> flex{};                    ///< Positive common flex weight.
-  std::optional<std::int32_t> gap{};                      ///< Nonnegative VBox/HBox gap.
-  std::optional<CheckState> state{};                      ///< CheckBox/ThreeState/Switch initial state; Switch is boolean only.
-  std::optional<CheckCycle> cycle{};                      ///< CheckBox cycle; ThreeState is fixed THREE_STATE.
-  std::optional<EditMode> editMode{};                     ///< LineEdit publication mode.
-  std::optional<bool> readOnly{};                         ///< LineEdit/scroll/Switch user-mutation policy.
+  std::optional<TextValue> text{};      ///< Caption/value expression, resolved by receiving scene.
+  std::optional<std::int32_t> width{};  ///< Nonnegative fixed width in cells.
+  std::optional<std::int32_t> height{}; ///< Nonnegative fixed height in cells.
+  std::optional<std::uint32_t> flex{};  ///< Positive common flex weight.
+  std::optional<std::int32_t> gap{};    ///< Nonnegative VBox/HBox gap.
+  std::optional<CheckState> state{};    ///< CheckBox/ThreeState/Switch initial state; Switch is boolean only.
+  std::optional<CheckCycle> cycle{};    ///< CheckBox cycle; ThreeState is fixed THREE_STATE.
+  std::optional<EditMode> editMode{};   ///< LineEdit publication mode.
+  std::optional<bool> readOnly{};       ///< User-mutation policy for supporting controls.
   std::optional<ProgrammaticChange> programmaticChange{}; ///< LineEdit initial programmatic history policy.
   std::optional<LineEditDisplayMode> displayMode{};       ///< LineEdit immutable presentation.
   std::optional<TextValue> placeholder{};                 ///< LineEdit placeholder expression.
@@ -476,6 +477,7 @@ struct ControlSettings {
   ControlRadioInitialSettings radioInitial{}; ///< Internal-model initial selection; external models reject overrides.
   std::optional<double> step{};             ///< Slider increment; appended to preserve the positional aggregate prefix.
   std::optional<std::uint64_t> pageSteps{}; ///< Positive Slider increment count per PageUp/PageDown action.
+  std::optional<RadioSelectionMode> radioSelectionMode{}; ///< Keyboard selection policy; appended for compatibility.
 };
 
 namespace detail {

@@ -23,6 +23,10 @@ constexpr std::size_t PREFIX_COUNT = 0;
 
 #if defined(PSS_INVALID_SELECTOR)
 constexpr std::string_view FRAGMENT = "? {}"sv;
+#elif defined(PSS_INVALID_READ_ONLY)
+constexpr std::string_view FRAGMENT = "RadioGroup:read-only:read-only{}"sv;
+#elif defined(PSS_INVALID_READ_ONLY_METRIC)
+constexpr std::string_view FRAGMENT = "RadioGroup:read-only{width:fit-content;}"sv;
 #elif defined(PSS_INVALID_PROPERTY)
 constexpr std::string_view FRAGMENT = "* { missing: true; }"sv;
 #elif defined(PSS_INVALID_METRIC)

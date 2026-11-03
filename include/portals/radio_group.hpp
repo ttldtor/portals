@@ -76,15 +76,23 @@ private:
   bool shorthand_{};
 };
 
+/** @brief User selection publication policy; active navigation remains local to the group. */
+enum class RadioSelectionMode {
+  ON_ACTIVATION, ///< Arrows move active; Space/Enter selects.
+  IMMEDIATE      ///< Eligible keyboard movement also selects.
+};
+
 /** @brief Ordinary one-focus-stop, model-owned resident radio group with clipped row painting. */
 class RadioGroup : public SizedWidget {
 public:
   /** @param style Manual normal/focused/disabled defaults. @param policy Ordinary cell sizing constraints.
-   * @param readOnly Prohibit user writes while retaining focus and programmatic changes.
+   * @param readOnly Prohibit user writes while retaining focus, navigation and programmatic changes.
+   * @param selectionMode Keyboard navigation publication policy.
    * @param widthPolicy Receiving scene's complete width policy; mismatched model text is rejected at sync.
    */
   explicit RadioGroup(ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY, bool readOnly = false,
-                      WidthPolicy widthPolicy = {});
+                      WidthPolicy widthPolicy = {},
+                      RadioSelectionMode selectionMode = RadioSelectionMode::ON_ACTIVATION);
   /** @brief Tree-owned widgets cannot copy their live geometry context. */
   RadioGroup(const RadioGroup &) = delete;
   /** @brief Tree-owned widgets cannot be assigned. */
@@ -104,8 +112,11 @@ public:
    * Bound groups visit only cumulative clipped rows; an unbound group is empty and uses its local allocation.
    */
   std::expected<void, TreeError> paint(PaintContext &context) override;
-  /** @return Owning manual normal/focused/disabled defaults beneath theme layers. */
+  /** @return Owning manual defaults; selected markers inherit focused beneath theme layers. */
   ComputedStyle styleDefaults() const override;
+
+  /** @return Actual view-only policy for orthogonal style matching. */
+  bool styleReadOnly() const noexcept override;
   /** @return Last synchronized immutable presentation; the bound Property remains authoritative. */
   RadioGroupValue value() const;
 
@@ -123,6 +134,7 @@ private:
   bool readOnly_{};
   bool enabled_{true};
   bool focused_{};
+  RadioSelectionMode selectionMode_{RadioSelectionMode::ON_ACTIVATION};
 };
 
 /** @brief Exact selection commit and observer-publication receipt, or a precommit TreeError. */

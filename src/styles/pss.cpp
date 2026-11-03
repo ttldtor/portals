@@ -58,6 +58,11 @@ public:
     return {};
   }
 
+  std::expected<void, PssError> readOnly() {
+    current_.selector.readOnly = true;
+    return {};
+  }
+
   std::expected<void, PssError> state(StyleState value) {
     current_.selector.state = value;
 

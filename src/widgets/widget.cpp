@@ -248,6 +248,10 @@ ComputedStyle Widget::styleDefaults() const {
   return {};
 }
 
+bool Widget::styleReadOnly() const noexcept {
+  return false;
+}
+
 const std::shared_ptr<const StyleSnapshot> &Widget::computedStyle() const noexcept {
   return computedStyle_;
 }

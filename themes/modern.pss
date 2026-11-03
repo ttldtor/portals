@@ -33,3 +33,36 @@
 :selected { foreground: #dce1e8; background: #2d4b6e; bold: true; italic: false; }
 :header { foreground: #4bb4dc; background: #181c24; bold: true; }
 :caret { foreground: #4bb4dc; background: #181c24; bold: false; }
+
+/* Selected radio markers use the surface; read-only remains keyboard navigable. */
+RadioGroup:selected { background: #181c24; }
+RadioGroup:read-only { foreground: #7d828c; background: #181c24; bold: false; italic: false; underline: false; }
+RadioGroup:read-only:focused {
+  foreground: #181c24;
+  background: #4bb4dc;
+  bold: true;
+  frame-line-foreground: #4bb4dc;
+  frame-line-background: #181c24;
+  frame-line-bold: true;
+  frame-title-foreground: #4bb4dc;
+  frame-title-background: #181c24;
+  frame-title-bold: true;
+  frame-ends-foreground: #4bb4dc;
+  frame-ends-background: #181c24;
+  frame-ends-bold: true;
+  scrollbar-track-foreground: #4bb4dc;
+  scrollbar-track-background: #181c24;
+  scrollbar-track-bold: true;
+  scrollbar-thumb-foreground: #4bb4dc;
+  scrollbar-thumb-background: #181c24;
+  scrollbar-thumb-bold: true;
+  scrollbar-ends-foreground: #4bb4dc;
+  scrollbar-ends-background: #181c24;
+  scrollbar-ends-bold: true;
+  scrollbar-arrows-foreground: #4bb4dc;
+  scrollbar-arrows-background: #181c24;
+  scrollbar-arrows-bold: true;
+  scrollbar-corner-foreground: #4bb4dc;
+  scrollbar-corner-background: #181c24;
+  scrollbar-corner-bold: true;
+}

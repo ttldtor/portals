@@ -271,14 +271,30 @@ public:
     return std::move(*this).scalarSettings({.focusable = value});
   }
 
-  /** @param value Block user mutation while preserving existing programmatic editor/scroll commands.
-   * @return Consuming LineEdit or native area/bar recipe using its existing read-only policy.
+  /** @param value Block user mutation while preserving existing programmatic commands.
+   * @return Consuming recipe using its native read-only policy.
    */
   Description &&readOnly(bool value = true) &&
     requires(std::same_as<T, LineEdit> || std::same_as<T, Password> || std::same_as<T, ScrollArea> ||
-             std::same_as<T, ScrollBar> || std::same_as<T, Slider>)
+             std::same_as<T, ScrollBar> || std::same_as<T, Slider> || std::same_as<T, RadioGroup>)
   {
     return std::move(*this).scalarSettings({.readOnly = value});
+  }
+
+  /** @param value Keyboard publication policy. @return Consuming radio recipe. */
+  Description &&selectionMode(RadioSelectionMode value) &&
+    requires std::same_as<T, RadioGroup>
+  {
+    return std::move(*this).scalarSettings({.radioSelectionMode = value});
+  }
+
+  /** @param enabled Select while navigating; false restores explicit activation.
+   * @return Consuming radio recipe, preserving other settings.
+   */
+  Description &&immediate(bool enabled = true) &&
+    requires std::same_as<T, RadioGroup>
+  {
+    return std::move(*this).selectionMode(enabled ? RadioSelectionMode::IMMEDIATE : RadioSelectionMode::ON_ACTIVATION);
   }
 
   /** @param enabled Allow one-edit prefix matching from three normalized query graphemes; false selects PREFIX.
@@ -2098,11 +2114,10 @@ private:
                                                                      : std::string_view(*state.controlType);
     const auto numericCandidates = [&] {
       if constexpr (std::derived_from<T, Slider>) {
-        return std::array{
-          state.controlPatch.value ? state.controlPatch.value : state.controlArguments.value,
-          state.controlPatch.minimum ? state.controlPatch.minimum : state.controlArguments.minimum,
-          state.controlPatch.maximum ? state.controlPatch.maximum : state.controlArguments.maximum,
-          state.controlPatch.step ? state.controlPatch.step : state.controlArguments.step};
+        return std::array{state.controlPatch.value ? state.controlPatch.value : state.controlArguments.value,
+                          state.controlPatch.minimum ? state.controlPatch.minimum : state.controlArguments.minimum,
+                          state.controlPatch.maximum ? state.controlPatch.maximum : state.controlArguments.maximum,
+                          state.controlPatch.step ? state.controlPatch.step : state.controlArguments.step};
       } else {
         return std::array<std::optional<double>, 0>{};
       }

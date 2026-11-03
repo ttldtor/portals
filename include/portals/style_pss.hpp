@@ -370,6 +370,7 @@ StyleSheet materialize(const CompactSheet<R, C, D, B> &description) {
     target.selector.type = description.text(rule.type);
     target.selector.id = description.text(rule.id);
     target.selector.state = rule.state;
+    target.selector.readOnly = rule.readOnly;
     target.declarations = rule.values;
     target.selector.classes.reserve(rule.classCount);
 
@@ -479,6 +480,11 @@ public:
     return state_;
   }
 
+  /** @return Orthogonal read-only predicate. */
+  constexpr bool readOnly() const noexcept {
+    return readOnly_;
+  }
+
   /** @return Validated scalar snapshot with absent properties preserved. */
   constexpr const StyleDeclarations &values() const noexcept {
     return values_;
@@ -491,6 +497,7 @@ private:
   std::string_view id_;
   std::span<const std::string_view> classes_;
   StyleState state_{StyleState::ANY};
+  bool readOnly_{};
   StyleDeclarations values_;
 };
 
@@ -500,15 +507,17 @@ struct FlatRuleAccess {
   /** @tparam S Existing owning static selector specialization.
    * @param state Validated presentation state.
    * @param values Validated evaluated scalar declarations.
+   * @param readOnly Validated orthogonal view-only predicate.
    * @return Nongeneric snapshot referencing only template-static identity storage.
    */
-  template <class S> static consteval FlatRule make(StyleState state, StyleDeclarations values) {
+  template <class S> static consteval FlatRule make(StyleState state, StyleDeclarations values, bool readOnly) {
     FlatRule result;
 
     result.type_ = S::TYPE.view() == "*" ? std::string_view{} : S::TYPE.view();
     result.id_ = S::ID.view();
     result.classes_ = S::CLASS_NAMES;
     result.state_ = state;
+    result.readOnly_ = readOnly;
     result.values_ = values;
 
     return result;
@@ -1132,8 +1141,8 @@ consteval FlatRule flatRule(detail::Parameters<P...> definitions, S selector, D.
 
     detail::validateRule(rule, definitions);
 
-    return detail::FlatRuleAccess::make<S>(selector.state,
-                                           detail::declarations(rule, definitions, definitions.defaults()));
+    return detail::FlatRuleAccess::make<S>(
+      selector.state, detail::declarations(rule, definitions, definitions.defaults()), selector.readOnly);
   }
 }
 
@@ -1189,6 +1198,9 @@ consteval auto compactSheet(const std::array<FlatRule, N> &rules, std::string_vi
     admit(sink.typeName(rule.type(), location));
     admit(sink.idName(rule.id(), location));
     admit(sink.state(rule.state()));
+    if (rule.readOnly()) {
+      admit(sink.readOnly());
+    }
 
     for (const auto name : rule.classes()) {
       admit(sink.classBytes(name, location));
