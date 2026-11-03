@@ -606,3 +606,5 @@ replace the line or background. Focused and disabled rules use the existing
 state selectors and style layers. These are paint attributes; decorations and
 frame line patterns remain construction settings;
 [named glyph profiles](scroll-controls.md#named-glyph-profiles) also support PSS.
+
+[Boolean switches](switch.md) use bool models and observing checked properties.

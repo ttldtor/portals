@@ -663,6 +663,36 @@ void ManagedScene::retireChanges(Entry &entry) noexcept {
   entry.changes->records.clear();
 }
 
+std::expected<bool, ManagedError> ManagedScene::checkedValue(Node<CheckBox> node) {
+  auto allowed = boundary(ManagedPhase::BIND, node);
+
+  if (!allowed) {
+    return std::unexpected(allowed.error());
+  }
+
+  auto entry = find(node);
+  auto binding = entry ? std::get_if<CheckBoxBinding>(&entry->binding) : nullptr;
+  auto value = binding ? binding->value() : std::unexpected(TreeError::INVALID_ARGUMENT);
+
+  return value ? std::expected<bool, ManagedError>(*value)
+               : std::unexpected(error(ManagedPhase::BIND, node, value.error()));
+}
+
+std::expected<PropertyUpdate<bool>, ManagedError> ManagedScene::setChecked(Node<CheckBox> node, bool value) {
+  auto allowed = boundary(ManagedPhase::BIND, node);
+
+  if (!allowed) {
+    return std::unexpected(allowed.error());
+  }
+
+  auto entry = find(node);
+  auto binding = entry ? std::get_if<CheckBoxBinding>(&entry->binding) : nullptr;
+  auto result = binding ? binding->set(value) : std::unexpected(TreeError::INVALID_ARGUMENT);
+
+  return result ? std::expected<PropertyUpdate<bool>, ManagedError>(std::move(*result))
+                : std::unexpected(error(ManagedPhase::BIND, node, result.error()));
+}
+
 std::expected<bool, ManagedError> ManagedScene::changeModel(Node<CheckBox> node) {
   auto allowed = boundary(ManagedPhase::BIND, node);
 

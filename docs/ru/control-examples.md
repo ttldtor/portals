@@ -8,6 +8,7 @@
 
 | Тема | Полная программа на C++ | Программа ресурса или справка |
 |---|---|---|
+| Булев Switch | [Настройки](switch.md), [main.cpp](../../examples/switch/main.cpp) | [guide_switch_resource.cpp](../examples/guide_switch_resource.cpp) |
 | Композиция журнала поиска | [main.cpp](../../examples/search_journal/main.cpp): поле оператора, две памятки, выбранное совпадение и ограниченный журнал | Контракты [FormField](form-fields.md), [FindBar](find-bar.md), [LogView](log-view.md) |
 | Индексированные подсказки | [Выбор команды](live-search.md), [main.cpp](../../examples/suggestions/main.cpp) | Запрос и действия остаются в C++; результат использует обычный виртуальный список |
 | Фоновая проверка поля | [Каталог имён](form-fields.md#form-field-async-ru), [main.cpp](../../examples/async_validation/main.cpp) | Рабочие правила задаются кодом |

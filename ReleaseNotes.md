@@ -7,6 +7,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Add boolean `Switch` and `ui::toggle` with model-backed input, read-only policy,
+  configurable equal-width ASCII decorations and observing `checked()` properties.
+  Programmatic assignment collects typed failures and preserves exact receipts;
+  user-only change callbacks, scene resources and theme/sizing use existing controls.
+
 - Add `StatusBar` and `ui::statusBar(...)` for horizontal status sections with
   themed full-width backgrounds, disabled appearance and ordinary Row sizing.
   Labels and key hints retain their existing references and input behavior.

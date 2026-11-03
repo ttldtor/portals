@@ -41,6 +41,50 @@ Control::Control(GraphemeText text, std::string_view prefix, std::string_view su
       suffix_(decoration(suffix, text_.policy())), style_(style) {
 }
 
+Control::Control(GraphemeText text, GraphemeText prefix, GraphemeText checkedPrefix, ControlStyle style,
+                 SizePolicy policy)
+    : SizedWidget(policy), text_(std::move(text)), prefix_(std::move(prefix)),
+      checked_prefix_(std::move(checkedPrefix)), suffix_(decoration("", text_.policy())), style_(style) {
+}
+
+bool Control::booleanChromeMatches() const {
+  return prefix_.policy() == text_.policy() && checked_prefix_.policy() == text_.policy();
+}
+
+CheckBox::CheckBox(GraphemeText text, GraphemeText off, GraphemeText on, ControlStyle style, SizePolicy policy)
+    : Control(std::move(text), std::move(off), std::move(on), style, policy) {
+}
+
+std::expected<SwitchChrome, TreeError> SwitchChrome::from(std::string_view off, std::string_view on,
+                                                          WidthPolicy policy) {
+  if (off.find_first_of("\r\n") != off.npos || on.find_first_of("\r\n") != on.npos) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  auto offText = GraphemeText::from(off, policy);
+  auto onText = GraphemeText::from(on, policy);
+
+  if (!offText || !onText || offText->measure() != onText->measure()) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  return SwitchChrome(std::move(*offText), std::move(*onText));
+}
+
+Switch::Switch(GraphemeText text, ControlStyle style, SizePolicy policy, bool readOnly)
+    : Switch(text, SwitchChrome::from(DEFAULT_SWITCH_OFF_TEXT, DEFAULT_SWITCH_ON_TEXT, text.policy()).value(), style,
+             policy, readOnly) {
+}
+
+Switch::Switch(GraphemeText text, SwitchChrome chrome, ControlStyle style, SizePolicy policy, bool readOnly)
+    : CheckBox(std::move(text), std::move(chrome.off_), std::move(chrome.on_), style, policy), readOnly_(readOnly) {
+}
+
+std::expected<CellSize, TreeError> Switch::measure(CellSize available) {
+  return booleanChromeMatches() ? CheckBox::measure(available)
+                                : std::expected<CellSize, TreeError>(std::unexpected(TreeError::INVALID_GEOMETRY));
+}
+
 Label::Label(GraphemeText text, ControlStyle style, SizePolicy policy)
     : Control(std::move(text), "", "", style, policy) {
 }
@@ -390,6 +434,28 @@ std::expected<void, TreeError> CheckBoxBinding::sync() {
   return state_->sync();
 }
 
+std::expected<bool, TreeError> CheckBoxBinding::value() const {
+  auto state = state_;
+
+  if (!state) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  auto snapshot = state->model->snapshot();
+
+  return snapshot ? std::expected<bool, TreeError>((*snapshot)->value) : std::unexpected(snapshot.error());
+}
+
+std::expected<PropertyUpdate<bool>, TreeError> CheckBoxBinding::set(bool value) {
+  auto state = state_;
+
+  if (!state) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+  // Presentation follows ordinary model synchronization before the next frame.
+  return state->model->set(value);
+}
+
 std::expected<CheckBoxBinding, TreeError> bindCheckbox(WidgetTree &tree, EventRouter &router, Node<CheckBox> node,
                                                        std::shared_ptr<Property<bool>> model,
                                                        std::function<void(CheckBoxResult)> changed) {
@@ -413,9 +479,13 @@ std::expected<CheckBoxBinding, TreeError> bindCheckbox(WidgetTree &tree, EventRo
       return std::unexpected(subscription.error());
     }
 
-    auto action = router.bind(node, [state, changed = std::move(changed)](CheckBox &, const RoutedEvent &event) {
+    auto action = router.bind(node, [state, changed = std::move(changed)](CheckBox &control, const RoutedEvent &event) {
       if (!activates(event)) {
         return EventReply::IGNORED;
+      }
+
+      if (const auto *toggle = dynamic_cast<const Switch *>(&control); toggle && toggle->readOnly()) {
+        return EventReply::HANDLED;
       }
 
       // Read the authoritative value once and perform one toggle. Retain this exact set
@@ -533,6 +603,17 @@ std::expected<CheckStateBinding, TreeError> bindCheckbox(WidgetTree &tree, Event
                                                          std::function<void(CheckStateResult)> changed,
                                                          CheckBoxOptions options) {
   if (!model || !changed || (options.cycle != CheckCycle::TWO_STATE && options.cycle != CheckCycle::THREE_STATE)) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  bool toggle{};
+  auto admitted = tree.read(node, [&](const CheckBox &control) {
+    toggle = dynamic_cast<const Switch *>(&control) != nullptr;
+  });
+  if (!admitted) {
+    return std::unexpected(admitted.error());
+  }
+  if (toggle) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 

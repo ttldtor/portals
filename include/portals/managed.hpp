@@ -943,6 +943,15 @@ public:
                              detail::KeySelectionAccess::options(selection), origin);
   }
 
+  /** @param node Managed bool-bound checkbox or subtype.
+   * @return Authoritative bool model value or checked owner/node/model-type failure; no reporting.
+   */
+  std::expected<bool, ManagedError> checkedValue(Node<CheckBox> node);
+  /** @param node Managed bool-bound checkbox or subtype. @param value Replacement bool.
+   * @return Exact programmatic bool receipt, without user onChange or automatic reporting.
+   */
+  std::expected<PropertyUpdate<bool>, ManagedError> setChecked(Node<CheckBox> node, bool value);
+
   /** @param node Managed checkbox without a prior event binding.
    * @param model State created by this scene; shared internally on UI only.
    * @param changed Optional callback after the standard toggle, receiving its exact commit receipt.

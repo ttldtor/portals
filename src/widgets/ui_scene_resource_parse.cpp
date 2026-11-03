@@ -1738,6 +1738,23 @@ private:
       return parsed;
     }
 
+    if (options_.format == SceneResourceFormat::CONFIGURATION && key == "checked" &&
+        detail::ResourceAccess::entry(options_.registry, target.type).declaredSwitch) {
+      // Switch's boolean spelling shares canonical state presence and duplicate detection.
+      if (std::ranges::find(target.arguments.settings.origins, "state", &ControlPropertyOrigin::path) !=
+          target.arguments.settings.origins.end()) {
+        return std::unexpected(document_.propertyFailure(Code::DUPLICATE_PROPERTY, begin, type, "state"));
+      }
+
+      auto parsed = property(target, key, begin);
+
+      if (parsed) {
+        target.arguments.settings.origins.push_back({"state", document_.origin(begin)});
+      }
+
+      return parsed;
+    }
+
     if (options_.format != SceneResourceFormat::CONFIGURATION) {
       auto parsed = property(target, key, begin);
 

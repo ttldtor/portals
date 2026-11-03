@@ -32,6 +32,10 @@ std::expected<void, ManagedError> registerSchemas(ControlContext &controls, cons
       paths.push_back("gap");
     }
 
+    if (entry.declaredSwitch) {
+      paths.push_back("readOnly");
+    }
+
     if (entry.checked) {
       paths.insert(paths.end(), {"state", "cycle"});
     }

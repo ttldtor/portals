@@ -44,7 +44,7 @@ struct SceneResourceArguments {
   std::optional<std::int32_t> height;      ///< Nonnegative fixed cell height, applied after the factory recipe.
   std::optional<std::uint32_t> flex;       ///< Positive common flex weight; excludes other per-axis mode requests.
   std::int32_t gap{};                      ///< Nonnegative layout gap; resource syntax admits this only on VBox/HBox.
-  bool checked{};                          ///< Initial checkbox state; resource syntax admits this only on CheckBox.
+  bool checked{};                          ///< Initial checkbox state; resource syntax admits this on CheckBox and Switch.
   ControlSettings settings{};              ///< Validated effective sparse settings; no IDs, models or handlers.
   std::optional<bool> visible;             ///< Local visibility applied after the factory's recipe modifiers.
   std::optional<bool> enabled;             ///< Local enabled state applied after the factory's recipe modifiers.
@@ -169,6 +169,7 @@ private:
     bool declaredDialog{};
     bool declaredHost{};
     bool declaredChoice{};
+    bool declaredSwitch{};
     bool unknownDialog{};
     std::string_view virtualView{};
     std::optional<std::size_t> semanticPropertyCount{};
@@ -188,6 +189,10 @@ private:
     entry.children = children;
     entry.sized = std::derived_from<T, SizedWidget>;
     entry.protectedEditor = std::same_as<T, Password>;
+    entry.declaredSwitch = std::same_as<T, Switch>;
+    if constexpr (std::same_as<T, Switch>) {
+      entry.checked = true;
+    }
     entry.declaredHelp = std::derived_from<T, HelpView>;
     entry.unknownHelp = std::same_as<T, Widget>;
     entry.declaredDialog = std::derived_from<T, Dialog>;
@@ -207,6 +212,27 @@ private:
       if constexpr (!std::derived_from<T, SizedWidget>) {
         if (semantic != detail::ControlFactoryKind::NOTIFICATION_BINDING && (sizing.width || sizing.height)) {
           return std::unexpected(detail::frameContextError(ControlContextErrorCode::UNSUPPORTED_PROPERTY, "sizing"));
+        }
+      }
+      const auto switchState = arguments.settings.state;
+      const auto switchCycle = arguments.settings.cycle;
+      const auto switchReadOnly = arguments.settings.readOnly;
+      const auto switchOrigin = arguments.settings.origin;
+      std::vector<ControlPropertyOrigin> switchOrigins(0);
+
+      if constexpr (std::same_as<T, Switch>) {
+        for (const auto path : {"state", "cycle", "readOnly"}) {
+          const bool present = path == std::string_view("state")   ? switchState.has_value()
+                               : path == std::string_view("cycle") ? switchCycle.has_value()
+                                                                   : switchReadOnly.has_value();
+
+          if (!present) {
+            continue;
+          }
+
+          const auto found = std::ranges::find(arguments.settings.origins, path, &ControlPropertyOrigin::path);
+          switchOrigins.push_back(
+            {std::string(path), found == arguments.settings.origins.end() ? switchOrigin : found->source});
         }
       }
       const auto visible = arguments.visible;
@@ -245,6 +271,14 @@ private:
 
       if (!recipe) {
         return std::unexpected(recipe.error());
+      }
+
+      if constexpr (std::same_as<T, Switch>) {
+        detail::Access::switchSettings(*recipe, ControlSettings{.state = switchState,
+                                                                .cycle = switchCycle,
+                                                                .readOnly = switchReadOnly,
+                                                                .origin = switchOrigin,
+                                                                .origins = std::move(switchOrigins)});
       }
 
       if (semanticSettings) {

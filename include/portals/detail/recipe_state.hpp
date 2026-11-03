@@ -46,7 +46,9 @@ template <class T> struct RecipeState {
     bool invalidPattern{};                   ///< Unknown compact spelling, reported at mount rather than ignored.
   };
 
-  Factory create;                                                  ///< Constructs exactly one managed node.
+  std::unique_ptr<ManagedError>
+    prerequisiteFailure; ///< Cold prerequisite error, checked before layout/control/frame work.
+  Factory create;        ///< Constructs exactly one managed node.
   std::vector<Setup<T>> setup = std::vector<Setup<T>>(0);          ///< Customization actions in modifier order.
   std::vector<Child> children = std::vector<Child>(0);             ///< Consuming child adapters in insertion order.
   std::vector<NodeRef<T>> references = std::vector<NodeRef<T>>(0); ///< Observing slots reserved for this node.

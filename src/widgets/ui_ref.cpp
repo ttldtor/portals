@@ -664,6 +664,35 @@ EditorCommandResult activateButton(const std::shared_ptr<RefTarget> &target, std
   return RefAccess::activate(target, origin);
 }
 
+std::expected<PropertyUpdate<bool>, ManagedError> failedChecked(std::shared_ptr<RefTarget> target, ManagedError failure,
+                                                                std::source_location origin) {
+  RefAccess::report(failure, target, "switch.checked", {}, "Switch", origin);
+
+  return std::unexpected(std::move(failure));
+}
+
+std::expected<bool, ManagedError> checkedValue(std::shared_ptr<RefTarget> target,
+                                               std::shared_ptr<const Node<Switch>> node) {
+  auto scene = eventScene(target);
+
+  return scene ? (*scene)->checkedValue(node ? Node<CheckBox>{*node} : Node<CheckBox>{})
+               : std::unexpected(scene.error());
+}
+
+std::expected<PropertyUpdate<bool>, ManagedError> setChecked(std::shared_ptr<RefTarget> target,
+                                                             std::shared_ptr<const Node<Switch>> node, bool value,
+                                                             std::source_location origin) {
+  auto scene = eventScene(target);
+  auto result = scene ? (*scene)->setChecked(node ? Node<CheckBox>{*node} : Node<CheckBox>{}, value)
+                      : std::expected<PropertyUpdate<bool>, ManagedError>(std::unexpected(scene.error()));
+
+  if (!result) {
+    RefAccess::report(result.error(), target, "switch.checked", {}, "Switch", origin);
+  }
+
+  return result;
+}
+
 std::expected<void, ManagedError> gaugeValue(std::shared_ptr<RefTarget> target, std::shared_ptr<const Node<Gauge>> node,
                                              double value, bool relative, std::source_location origin) {
   const auto owner = eventScene(target);

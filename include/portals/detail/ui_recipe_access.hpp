@@ -357,6 +357,14 @@ struct Access {
    * @return Recipe publishing references only after setup and finalization succeed.
    */
   template <class T, class Callback> static Description<T> controlSetup(Description<T> description, Callback callback);
+  /** @tparam T Declared view type. @param failure Original owned prerequisite failure.
+   * @return Cold failure recipe; storage allocation follows ordinary fallible recipe construction.
+   */
+  template <class T> static Description<T> failed(ManagedError failure);
+  /** @param description Typed factory recipe. @param patch Present Switch resource leaves and their origins.
+   * Preserve all other factory settings; explicit resource false values are overrides.
+   */
+  static void switchSettings(Description<Switch> &description, ControlSettings patch);
   /** @param options Existing owning native frame options.
    * @param style Existing owning manual appearances.
    * @return Empty native frame recipe; callers attach exactly one real content edge without a wrapper.
@@ -418,6 +426,8 @@ struct Access {
       return "Button";
     } else if constexpr (std::same_as<T, CheckBox>) {
       return "CheckBox";
+    } else if constexpr (std::same_as<T, Switch>) {
+      return "Switch";
     } else if constexpr (std::same_as<T, ThreeState>) {
       return "ThreeState";
     } else if constexpr (std::same_as<T, FormField>) {
