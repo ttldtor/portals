@@ -8,6 +8,8 @@ a fragment; they are not complete applications.
 
 | Topic | Complete C++ program | Resource program or reference |
 |---|---|---|
+| Boolean Switch | [Settings](switch.md), [main.cpp](../examples/switch/main.cpp) | [guide_switch_resource.cpp](examples/guide_switch_resource.cpp) |
+| One selected value | [RadioGroup](radio-group.md), [main.cpp](../examples/radio_group/main.cpp) | [guide_radio_group_resource.cpp](examples/guide_radio_group_resource.cpp) |
 | Search journal composition | [main.cpp](../examples/search_journal/main.cpp): operator field, two troubleshooting notes, selected-match summary and bounded journal | [FormField](form-fields.md), [FindBar](find-bar.md), [LogView](log-view.md) contracts |
 | Indexed suggestions | [Command browser](live-search.md), [main.cpp](../examples/suggestions/main.cpp) | Query and actions remain C++; the result uses an ordinary virtual list |
 | Background field validation | [Account directory](form-fields.md#form-field-async), [main.cpp](../examples/async_validation/main.cpp) | Worker rules are code-bound |
@@ -20,7 +22,7 @@ a fragment; they are not complete applications.
 | Bounded plain-text log | [LogView](log-view.md), [main.cpp](../examples/log_view/main.cpp) | [guide_log_view_resource.cpp](examples/guide_log_view_resource.cpp) |
 | Dialogs | [guide_dialog.cpp](examples/guide_dialog.cpp), [guide_dialog_actions.cpp](examples/guide_dialog_actions.cpp) | [guide_dialog_resource.cpp](examples/guide_dialog_resource.cpp) |
 | CheckBox changes | [guide_check_change.cpp](examples/guide_check_change.cpp) | [guide_check_resource.cpp](examples/guide_check_resource.cpp) |
-| Numeric sliders | [guide_slider.cpp](examples/guide_slider.cpp), [source and input guide](sliders.md) | [Numeric resource properties](sliders.md#load-presentation-from-a-resource) reference |
+| Numeric sliders | [guide_slider.cpp](examples/guide_slider.cpp), [main.cpp](../examples/slider/main.cpp), [source and input guide](sliders.md) | [Numeric resource properties](sliders.md#load-presentation-from-a-resource) reference |
 | Notification severity | [guide_toast.cpp](examples/guide_toast.cpp) | [guide_toast_resource.cpp](examples/guide_toast_resource.cpp); the resource supplies only the body |
 | Loading indicator | [guide_loading_indicators.cpp](examples/guide_loading_indicators.cpp) | [guide_loading_resource.cpp](examples/guide_loading_resource.cpp) |
 | Shared actions | [guide_actions.cpp](examples/guide_actions.cpp), [shared actions guide](actions.md) | Actions and callbacks are code-bound; scene resources do not define executable actions |

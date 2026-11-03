@@ -2041,10 +2041,10 @@ private:
     if (state.controlVariant) {
       const auto &identity = notificationStyle ? *notificationStyle : effective;
 
-      state.intrinsicStyle =
-        StyleTarget{.type = identity.type,
-                    .control = std::derived_from<T, Control> || std::same_as<T, LineEdit> || std::same_as<T, Password>,
-                    .baseTypes = identity.lineage};
+      state.intrinsicStyle = StyleTarget{.type = identity.type,
+                                         .control = std::same_as<T, RadioGroup> || std::derived_from<T, Control> ||
+                                                    std::same_as<T, LineEdit> || std::same_as<T, Password>,
+                                         .baseTypes = identity.lineage};
 
       if constexpr (std::same_as<T, Row> || std::same_as<T, Column>) {
         constexpr std::string_view NATURAL = std::same_as<T, Row> ? "Row" : "Column";
@@ -3145,6 +3145,42 @@ template <class T> Description<T> Access::controlArguments(Description<T> descri
   return description;
 }
 
+template <class T> Description<T> Access::failed(ManagedError failure) {
+  Description<T> description;
+
+  description.state_ = std::make_unique<typename Description<T>::State>();
+  description.state_->prerequisiteFailure = std::make_unique<ManagedError>(std::move(failure));
+
+  return description;
+}
+
+inline void Access::switchSettings(Description<Switch> &description, ControlSettings patch) {
+  if (!description.state_ || description.state_->prerequisiteFailure ||
+      (!patch.state && !patch.cycle && !patch.readOnly)) {
+    return;
+  }
+
+  auto &state = *description.state_;
+  auto merged = mergeControlSettings(state.controlPatch, patch);
+
+  // Retain factory provenance for every leaf not replaced by this resource packet.
+  merged.origin = state.controlPatch.origin;
+  merged.origins = state.controlPatch.origins;
+
+  for (const auto &origin : patch.origins) {
+    auto found = std::ranges::find(merged.origins, origin.path, &ControlPropertyOrigin::path);
+
+    if (found == merged.origins.end()) {
+      merged.origins.push_back(origin);
+    } else {
+      found->source = origin.source;
+    }
+  }
+
+  state.controlPatch = std::move(merged);
+  state.settingsRequested = true;
+}
+
 template <class T, class Callback> Description<T> Access::controlSetup(Description<T> description, Callback callback) {
   if (description.state_) {
     description.state_->controlSetup = std::move(callback);
@@ -3187,15 +3223,6 @@ inline Description<Widget> Access::forwardOuter(Description<Widget> description)
   if (description.state_) {
     description.state_->forwardsOuter = true;
   }
-
-  return description;
-}
-
-template <class T> Description<T> Access::failed(ManagedError failure) {
-  Description<T> description;
-
-  description.state_ = std::make_unique<typename Description<T>::State>();
-  description.state_->prerequisiteFailure = std::make_unique<ManagedError>(std::move(failure));
 
   return description;
 }

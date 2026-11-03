@@ -445,6 +445,20 @@ std::expected<WidgetTree::GeometryObservation, TreeError> WidgetTree::observeGeo
   return GeometryObservation{(*value)->geometry, (*value)->visibilityRevision, State::shown(**value, false)};
 }
 
+std::expected<NodeGeometry, TreeError> WidgetTree::paintGeometry(Node<Widget> node) const {
+  auto value = state_->find(node.id());
+  if (!value) {
+    return std::unexpected(value.error());
+  }
+  if (!state_->frames || !state_->extension) {
+    return std::unexpected(TreeError::WOULD_BLOCK);
+  }
+  if (!(*value)->geometry.valid) {
+    return std::unexpected(TreeError::INVALID_GEOMETRY);
+  }
+  return (*value)->geometry;
+}
+
 std::expected<bool, TreeError> WidgetTree::contains(Node<Widget> ancestor, Node<Widget> node) const {
   const auto parent = state_->find(ancestor.id());
 

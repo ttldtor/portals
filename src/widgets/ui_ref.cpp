@@ -35,6 +35,12 @@ std::expected<ManagedScene *, ManagedError> eventScene(const std::shared_ptr<Ref
   return target->scene;
 }
 
+std::expected<RadioGroupValue, ManagedError> radioValue(const std::shared_ptr<RefTarget> &target,
+                                                        std::shared_ptr<const Node<RadioGroup>> node) {
+  auto scene = eventScene(target);
+  return scene ? (*scene)->radioValue(node ? *node : Node<RadioGroup>{}) : std::unexpected(scene.error());
+}
+
 namespace {
 ManagedError failure(Node<Widget> node, TreeError cause) {
   return {ManagedPhase::TEXT, node.id(), cause, {}, {}};
@@ -691,6 +697,50 @@ connectDelivery(const std::shared_ptr<RefTarget> &target, DeliveryCallback callb
 
 EditorCommandResult activateButton(const std::shared_ptr<RefTarget> &target, std::source_location origin) {
   return RefAccess::activate(target, origin);
+}
+
+std::expected<PropertyUpdate<bool>, ManagedError> failedChecked(std::shared_ptr<RefTarget> target, ManagedError failure,
+                                                                std::source_location origin) {
+  RefAccess::report(failure, target, "switch.checked", {}, "Switch", origin);
+
+  return std::unexpected(std::move(failure));
+}
+
+std::expected<bool, ManagedError> checkedValue(std::shared_ptr<RefTarget> target,
+                                               std::shared_ptr<const Node<Switch>> node) {
+  auto scene = eventScene(target);
+
+  return scene ? (*scene)->checkedValue(node ? Node<CheckBox>{*node} : Node<CheckBox>{})
+               : std::unexpected(scene.error());
+}
+
+std::expected<PropertyUpdate<bool>, ManagedError> setChecked(std::shared_ptr<RefTarget> target,
+                                                             std::shared_ptr<const Node<Switch>> node, bool value,
+                                                             std::source_location origin) {
+  auto scene = eventScene(target);
+  auto result = scene ? (*scene)->setChecked(node ? Node<CheckBox>{*node} : Node<CheckBox>{}, value)
+                      : std::expected<PropertyUpdate<bool>, ManagedError>(std::unexpected(scene.error()));
+
+  if (!result) {
+    RefAccess::report(result.error(), target, "switch.checked", {}, "Switch", origin);
+  }
+
+  return result;
+}
+
+std::expected<PropertyUpdate<RadioGroupValue>, ManagedError> radioSelect(const std::shared_ptr<RefTarget> &target,
+                                                                         std::shared_ptr<const Node<RadioGroup>> node,
+                                                                         std::optional<RowId> id,
+                                                                         std::source_location origin) {
+  auto scene = eventScene(target);
+  auto result = scene ? (*scene)->selectRadio(node ? *node : Node<RadioGroup>{}, id)
+                      : std::expected<PropertyUpdate<RadioGroupValue>, ManagedError>(std::unexpected(scene.error()));
+
+  if (!result) {
+    RefAccess::report(result.error(), target, "radio.select", {}, "RadioGroup", origin);
+  }
+
+  return result;
 }
 
 std::expected<void, ManagedError> gaugeValue(std::shared_ptr<RefTarget> target, std::shared_ptr<const Node<Gauge>> node,

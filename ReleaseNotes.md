@@ -12,6 +12,18 @@ planned work is not included. An **Unreleased** heading has no publication date.
   Scene resources share range, increment, read-only and sizing settings; external
   numeric sources reject competing initial values and retain newer writes during drag.
 
+- Add boolean `Switch` and `ui::toggle` with model-backed input, read-only policy,
+  configurable equal-width ASCII decorations and observing `checked()` properties.
+  Programmatic assignment collects typed failures and preserves exact receipts;
+  user-only change callbacks, scene resources and theme/sizing use existing controls.
+
+- Add a resident `RadioGroup` with a coherent immutable single-selection model,
+  stable row identities, compact scene-owned label/model recipes and unified Ref.
+  Keyboard/mouse selection, disabled/hidden options, read-only input, themed
+  clipped painting and code-bound scene-resource factories share the existing
+  state, error and cleanup contracts. Include a complete device settings example
+  and English/Russian guide.
+
 - Add action-backed popup menus with owned submenus and explicit Unicode mnemonics.
   Ordinary scene composition supplies the overlay host; the unified popup reference
   supports checked open/dismiss. Leaf activation closes the popup and restores focus

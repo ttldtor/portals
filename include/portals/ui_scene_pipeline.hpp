@@ -549,7 +549,26 @@ auto onChange(Ref<T> reference, Callback callback, std::source_location origin =
   return detail::SceneStage{[registration = [reference = std::move(reference), callback = std::move(callback),
                                              origin](ManagedScene &scene) mutable -> std::expected<void, ManagedError> {
     return detail::ChangeAccess::attach(scene, reference, std::move(callback), origin);
-  }, origin](Scene &owner) mutable {
+  },
+                             origin](Scene &owner) mutable {
+    detail::SceneAccess::onEditing(owner, registration, origin);
+  }};
+}
+
+/** @tparam T RadioGroup. @tparam Callback Owning value or exact receipt action.
+ * @param reference Bound group. @param callback FIFO notification after changed successful user commits.
+ * @param origin Diagnostic provenance. @return Bounded scene-owned registration; no token escapes.
+ * Programmatic model writes, failures and no-ops do not notify. Removal stops remaining delivery.
+ */
+template <class T, class Callback>
+  requires(std::same_as<T, RadioGroup> && std::copy_constructible<Callback> &&
+           portals::detail::ChangeAction<Callback, RadioGroupValue>)
+auto onChange(Ref<T> reference, Callback callback, std::source_location origin = std::source_location::current()) {
+  return detail::SceneStage{[registration = [reference = std::move(reference), callback = std::move(callback),
+                                             origin](ManagedScene &scene) mutable -> std::expected<void, ManagedError> {
+    return detail::ChangeAccess::attach(scene, reference, std::move(callback), origin);
+  },
+                             origin](Scene &owner) mutable {
     detail::SceneAccess::onEditing(owner, registration, origin);
   }};
 }

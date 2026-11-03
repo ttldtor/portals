@@ -8,6 +8,8 @@
 
 | Тема | Полная программа на C++ | Программа ресурса или справка |
 |---|---|---|
+| Булев Switch | [Настройки](switch.md), [main.cpp](../../examples/switch/main.cpp) | [guide_switch_resource.cpp](../examples/guide_switch_resource.cpp) |
+| Единственное выбранное значение | [RadioGroup](radio-group.md), [main.cpp](../../examples/radio_group/main.cpp) | [guide_radio_group_resource.cpp](../examples/guide_radio_group_resource.cpp) |
 | Композиция журнала поиска | [main.cpp](../../examples/search_journal/main.cpp): поле оператора, две памятки, выбранное совпадение и ограниченный журнал | Контракты [FormField](form-fields.md), [FindBar](find-bar.md), [LogView](log-view.md) |
 | Индексированные подсказки | [Выбор команды](live-search.md), [main.cpp](../../examples/suggestions/main.cpp) | Запрос и действия остаются в C++; результат использует обычный виртуальный список |
 | Фоновая проверка поля | [Каталог имён](form-fields.md#form-field-async-ru), [main.cpp](../../examples/async_validation/main.cpp) | Рабочие правила задаются кодом |
@@ -20,7 +22,7 @@
 | Ограниченный текстовый журнал | [LogView](log-view.md), [main.cpp](../../examples/log_view/main.cpp) | [guide_log_view_resource.cpp](../examples/guide_log_view_resource.cpp) |
 | Диалоги | [guide_dialog.cpp](../examples/guide_dialog.cpp), [guide_dialog_actions.cpp](../examples/guide_dialog_actions.cpp) | [guide_dialog_resource.cpp](../examples/guide_dialog_resource.cpp) |
 | Изменения CheckBox | [guide_check_change.cpp](../examples/guide_check_change.cpp) | [guide_check_resource.cpp](../examples/guide_check_resource.cpp) |
-| Числовые слайдеры | [guide_slider.cpp](../examples/guide_slider.cpp), [источник и ввод](sliders.md) | [Свойства ресурса](sliders.md#загрузка-представления-из-ресурса), справка |
+| Числовые слайдеры | [guide_slider.cpp](../examples/guide_slider.cpp), [main.cpp](../../examples/slider/main.cpp), [источник и ввод](sliders.md) | [Свойства ресурса](sliders.md#загрузка-представления-из-ресурса), справка |
 | Важность уведомлений | [guide_toast.cpp](../examples/guide_toast.cpp) | [guide_toast_resource.cpp](../examples/guide_toast_resource.cpp); ресурс задаёт только содержимое |
 | Индикатор загрузки | [guide_loading_indicators.cpp](../examples/guide_loading_indicators.cpp) | [guide_loading_resource.cpp](../examples/guide_loading_resource.cpp) |
 | Общие действия | [guide_actions.cpp](../examples/guide_actions.cpp), [руководство по действиям](../actions.md) | Действия и callback задаются в коде; ресурсы сцен не объявляют исполняемые действия |

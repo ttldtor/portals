@@ -438,10 +438,11 @@ private:
 
   const ControlPropertyDescriptor *descriptor(std::string_view path) const {
     for (const auto type : {"FindBar",    "FormField",     "Password",      "LineEdit",
-                            "ComboBox",   "DropDown",      "CheckBox",      "VBox",
-                            "Button",     "Border",        "Gauge",         "Spinner", "Slider",
-                            "ScrollArea", "ScrollBar",     "LogView",       "Overlay",
-                            "HelpView",   "KeyHints",      "VirtualList",   "VirtualTable", "StatusBar",
+                            "ComboBox",   "DropDown",      "CheckBox",      "Switch",
+                            "RadioGroup", "Slider",        "VBox",          "Button",
+                            "Border",     "Gauge",         "Spinner",       "ScrollArea",
+                            "ScrollBar",  "LogView",       "Overlay",       "HelpView",
+                            "KeyHints",   "VirtualList",   "VirtualTable",  "StatusBar",
                             "Chart",      "DataStateView", "OverlayHost",   "Dialog",
                             "MessageBox", "Notifications", "ThemeSelector", "ThemeSelectorCatalog"}) {
       const auto schema = controlPropertySchema(type);
@@ -714,6 +715,8 @@ private:
         settings.securePolicy.excludeFromDumps = enabled;
       } else if (path == "securePolicy.encryptWhileIdle") {
         settings.securePolicy.encryptWhileIdle = enabled;
+      } else if (path == "radioInitial.enabled") {
+        settings.radioInitial.enabled = enabled;
       } else if (path == "themeCatalog.initialId.enabled") {
         settings.themeCatalog.initialId.enabled = enabled;
       } else if (path == "themeCatalog.layers.enabled") {
@@ -927,14 +930,17 @@ private:
       return {};
     }
 
-    if (path == "keyStep" || path == "pageOverlap" || path == "pageSteps" || path == "spinnerInterval" || path == "interval") {
+    if (path == "keyStep" || path == "pageOverlap" || path == "pageSteps" || path == "spinnerInterval" ||
+        path == "interval" || path == "radioInitial.index") {
       const auto value = capacity<std::uint64_t>();
 
       if (!value) {
         return std::unexpected(withProperty(value.error(), type, path));
       }
 
-      if (path == "interval") {
+      if (path == "radioInitial.index") {
+        settings.radioInitial.index = *value;
+      } else if (path == "interval") {
         settings.spinnerTick = *value;
       } else if (path == "spinnerInterval") {
         settings.spinnerInterval = *value;
@@ -1213,7 +1219,7 @@ private:
            path == "message.textLimits" || path == "notification" || path == "notification.textLimits" ||
            path == "themeSelector" || path == "themeSelector.labels" || path == "themeSelector.textLimits" ||
            path == "themeSelector.openingShortcut" || path == "themeCatalog" || path == "themeCatalog.textLimits" ||
-           path == "themeCatalog.initialId" || path == "themeCatalog.layers");
+           path == "themeCatalog.initialId" || path == "themeCatalog.layers" || path == "radioInitial");
 
         if (path != "history" && path != "padding" && !configurationStruct) {
           return std::unexpected(document_.propertyFailure(Code::UNKNOWN_PROPERTY, begin, type, path));
@@ -1737,6 +1743,23 @@ private:
           return std::unexpected(
             document_.propertyFailure(Code::UNKNOWN_PROPERTY, origin.source->byteOffset, type, origin.path));
         }
+      }
+
+      return parsed;
+    }
+
+    if (options_.format == SceneResourceFormat::CONFIGURATION && key == "checked" &&
+        detail::ResourceAccess::entry(options_.registry, target.type).declaredSwitch) {
+      // Switch's boolean spelling shares canonical state presence and duplicate detection.
+      if (std::ranges::find(target.arguments.settings.origins, "state", &ControlPropertyOrigin::path) !=
+          target.arguments.settings.origins.end()) {
+        return std::unexpected(document_.propertyFailure(Code::DUPLICATE_PROPERTY, begin, type, "state"));
+      }
+
+      auto parsed = property(target, key, begin);
+
+      if (parsed) {
+        target.arguments.settings.origins.push_back({"state", document_.origin(begin)});
       }
 
       return parsed;

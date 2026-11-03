@@ -32,8 +32,19 @@ std::expected<void, ManagedError> registerSchemas(ControlContext &controls, cons
       paths.push_back("gap");
     }
 
+    if (entry.declaredSwitch) {
+      paths.push_back("readOnly");
+    }
+
     if (entry.checked) {
       paths.insert(paths.end(), {"state", "cycle"});
+    }
+    if (entry.declaredRadio) {
+      for (const auto &property : controlPropertySchema("RadioGroup")) {
+        if (std::ranges::find(paths, property.path) == paths.end()) {
+          paths.push_back(property.path);
+        }
+      }
     }
 
     const auto matchesLegacyDataSchema = [&] {

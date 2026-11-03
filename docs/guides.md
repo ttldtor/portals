@@ -11,6 +11,7 @@ The [first application](first-application.md) develops a quick-note form in four
 
 | Task | Guide |
 |---|---|
+| Select one resident option | [Radio groups](radio-group.md) |
 | Build an application step by step | [First application](first-application.md) |
 | Compose a scene | [Declarative UI](declarative-ui.md) |
 | Start the application and parse options | [Application](application.md) |

@@ -126,6 +126,8 @@ struct ChangeAccess {
 
     if constexpr (std::derived_from<T, Slider>) {
       return scene.onChange(Node<Slider>{reference.node()}, std::move(callback), origin);
+    } else if constexpr (std::same_as<T, RadioGroup>) {
+      return scene.onChange(reference.node(), std::move(callback), origin);
     } else {
       return scene.onChange(Node<CheckBox>{reference.node()}, std::move(callback), origin);
     }

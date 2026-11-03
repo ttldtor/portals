@@ -15,6 +15,7 @@
 #include <portals/managed_diagnostics.hpp>
 #include <portals/managed_model.hpp>
 #include <portals/password.hpp>
+#include <portals/radio_group.hpp>
 #include <portals/primitives.hpp>
 #include <portals/scroll_controls.hpp>
 #include <portals/slider.hpp>
@@ -981,6 +982,15 @@ public:
                              detail::KeySelectionAccess::options(selection), origin);
   }
 
+  /** @param node Managed bool-bound checkbox or subtype.
+   * @return Authoritative bool model value or checked owner/node/model-type failure; no reporting.
+   */
+  std::expected<bool, ManagedError> checkedValue(Node<CheckBox> node);
+  /** @param node Managed bool-bound checkbox or subtype. @param value Replacement bool.
+   * @return Exact programmatic bool receipt, without user onChange or automatic reporting.
+   */
+  std::expected<PropertyUpdate<bool>, ManagedError> setChecked(Node<CheckBox> node, bool value);
+
   /** @param node Managed checkbox without a prior event binding.
    * @param model State created by this scene; shared internally on UI only.
    * @param changed Optional callback after the standard toggle, receiving its exact commit receipt.
@@ -988,6 +998,70 @@ public:
    */
   std::expected<void, ManagedError> bind(Node<CheckBox> node, ManagedState<bool> model,
                                          std::function<std::expected<void, TreeError>(CheckBoxResult)> changed = {});
+
+  /** @param captions Owning literal/resource expressions, resolved with this scene's width policy.
+   * @param resolver Optional synchronous localization adapter. @param limits Existing resident collection cap.
+   * @return Scene-owned coherent radio state, initially selecting the first eligible caption.
+   */
+  std::expected<ManagedState<RadioGroupValue>, ManagedError>
+  radioState(std::span<const TextValue> captions, KeyTextResolver resolver = {}, CollectionLimits limits = {});
+  /** @param options Cold owning captions with eligibility. @param resolver Synchronous localization adapter.
+   * @param limits Existing collection cap. @return Coherent state with private source-local generated IDs.
+   */
+  std::expected<ManagedState<RadioGroupValue>, ManagedError>
+  radioState(std::span<const RadioOption> options, KeyTextResolver resolver = {}, CollectionLimits limits = {});
+  /** @param captions Ordinary string initializer copied into scene-owned immutable rows.
+   * @return State with automatically generated identities, or the original checked text/allocation failure.
+   */
+  std::expected<ManagedState<RadioGroupValue>, ManagedError>
+  radioState(std::initializer_list<std::string_view> captions);
+  /** @param node Managed group without a prior binding. @param model Authoritative state from this scene.
+   * @param changed Optional exact user-operation receipt callback. @return Checked binding admission.
+   */
+  std::expected<void, ManagedError> bind(Node<RadioGroup> node, ManagedState<RadioGroupValue> model,
+                                         std::function<std::expected<void, TreeError>(RadioGroupResult)> changed = {});
+  /** @param node Bound managed group. @return Current authoritative immutable value or original admission error. */
+  std::expected<RadioGroupValue, ManagedError> radioValue(Node<RadioGroup> node);
+  /** @param node Bound managed group. @param id Existing full ID or no selection.
+   * @return Exact programmatic receipt, without user onChange delivery.
+   */
+  std::expected<PropertyUpdate<RadioGroupValue>, ManagedError> selectRadio(Node<RadioGroup> node,
+                                                                           std::optional<RowId> id);
+
+  /** @tparam Callback Copyable value/receipt action. @tparam T RadioGroup or a public derived control.
+   * @param node Bound group.
+   * @param callback FIFO post-commit user notification. @param origin Registration provenance.
+   * @return Checked bounded admission. External writes, failures and no-ops do not notify.
+   */
+  template <class Callback, class T>
+    requires(std::derived_from<T, RadioGroup> && std::copy_constructible<Callback> &&
+             detail::ChangeAction<Callback, RadioGroupValue>)
+  std::expected<void, ManagedError> onChange(Node<T> node, Callback callback,
+                                             std::source_location origin = std::source_location::current()) {
+    auto allowed = boundary(ManagedPhase::BIND, node);
+    if (!allowed) {
+      return allowed;
+    }
+
+    const auto lifetime = std::weak_ptr<const void>(lifetime_);
+    try {
+      auto entry = find(node);
+      if (!entry || !entry->changes || !entry->changes->radio) {
+        return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
+      }
+
+      auto action = changeAdapter<RadioGroupValue>(std::move(callback), origin);
+      if (lifetime.expired()) {
+        return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CLOSED));
+      }
+
+      return registerChange(node, ChangeRecord{std::move(action), origin});
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
+    } catch (...) {
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CALLBACK_FAILED));
+    }
+  }
 
   /** @param node Managed checkbox without a prior event binding.
    * @param model State created by this scene; shared internally on UI only.
@@ -2123,7 +2197,8 @@ private:
 
   struct ChangeRecord {
     std::variant<std::function<EditorCommandResult(const PropertyUpdate<bool> &)>,
-                 std::function<EditorCommandResult(const PropertyUpdate<CheckState> &)>>
+                 std::function<EditorCommandResult(const PropertyUpdate<CheckState> &)>,
+                 std::function<EditorCommandResult(const PropertyUpdate<RadioGroupValue> &)>>
       action;
     std::source_location origin;
   };
@@ -2131,6 +2206,7 @@ private:
   struct ChangeChain {
     std::vector<std::shared_ptr<ChangeRecord>> records = std::vector<std::shared_ptr<ChangeRecord>>(0);
     bool boolean{};
+    bool radio{};
     bool retired{};
   };
 
@@ -2139,23 +2215,23 @@ private:
   std::expected<double, ManagedError> sliderValue(Node<Slider> node);
   std::expected<PropertyUpdate<NumericValue>, ManagedError> setSliderValue(Node<Slider> node, double value);
   std::expected<void, ManagedError>
-  registerNumericChange(Node<Slider>, std::function<EditorCommandResult(const PropertyUpdate<NumericValue> &)>,
-                         std::source_location);
+    registerNumericChange(Node<Slider>, std::function<EditorCommandResult(const PropertyUpdate<NumericValue> &)>,
+                          std::source_location);
   std::expected<void, ManagedError>
-  registerNumericFinished(Node<Slider>, std::function<EditorCommandResult(const SliderOperationEvent &)>,
-                           std::source_location);
+    registerNumericFinished(Node<Slider>, std::function<EditorCommandResult(const SliderOperationEvent &)>,
+                            std::source_location);
   void retireNumeric(Entry &entry) noexcept;
   template <class Event>
   void dispatchNumeric(Node<Slider>, const std::shared_ptr<detail::ManagedSliderRecord> &,
-                        const std::weak_ptr<const void> &, const Event &, std::size_t count);
-  std::expected<void, ManagedError> registerChange(Node<CheckBox> node, ChangeRecord record);
+                       const std::weak_ptr<const void> &, const Event &, std::size_t count);
+  std::expected<void, ManagedError> registerChange(Node<Widget> node, ChangeRecord record);
   void retireChanges(Entry &entry) noexcept;
   template <class T>
   std::function<void(std::expected<PropertyUpdate<T>, TreeError>)>
-  checkboxCallback(Node<CheckBox> node, std::shared_ptr<ChangeChain> chain,
+  checkboxCallback(Node<Widget> node, std::shared_ptr<ChangeChain> chain,
                    std::function<std::expected<void, TreeError>(std::expected<PropertyUpdate<T>, TreeError>)> changed);
   template <class T>
-  void dispatchChange(Node<CheckBox> node, const std::shared_ptr<ChangeChain> &chain,
+  void dispatchChange(Node<Widget> node, const std::shared_ptr<ChangeChain> &chain,
                       const std::weak_ptr<const void> &lifetime, const PropertyUpdate<T> &receipt, std::size_t count);
 
   std::expected<void, ManagedError> registerEditing(Node<LineEdit> node, EditorEventRecord record);
@@ -2212,8 +2288,8 @@ private:
     Node<Widget> companion; ///< Attempt-owned external popup, retired with this logical owner.
     Node<Widget> node;
     std::shared_ptr<StyleTarget> target;
-    std::variant<std::monostate, ActionBinding, CheckBoxBinding, CheckStateBinding, LineEditBinding, PasswordBinding,
-                  SliderBinding>
+    std::variant<std::monostate, ActionBinding, CheckBoxBinding, CheckStateBinding, RadioGroupBinding, LineEditBinding,
+                 PasswordBinding, SliderBinding>
       binding;
     std::shared_ptr<PasswordFeedback> passwordFeedback;
     std::unique_ptr<CaptionBinding> caption;

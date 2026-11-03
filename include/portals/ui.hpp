@@ -15,8 +15,10 @@
 #include <portals/ui_mount.hpp>
 #include <portals/ui_password.hpp>
 #include <portals/ui_primitives.hpp>
+#include <portals/ui_radio_group.hpp>
 #include <portals/ui_scene_pipeline.hpp>
 #include <portals/ui_scene_recipes.hpp>
 #include <portals/ui_scene_resource.hpp>
 #include <portals/ui_slider.hpp>
 #include <portals/ui_virtual.hpp>
+#include <portals/ui_switch.hpp>

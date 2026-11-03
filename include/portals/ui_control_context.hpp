@@ -356,6 +356,12 @@ struct ControlSecureSettings {
   std::optional<bool> encryptWhileIdle{};       ///< Password requires true; explicit false is rejected.
 };
 
+/** @brief Nullable initial ordinal for an internally owned radio shorthand model only. */
+struct ControlRadioInitialSettings {
+  std::optional<bool> enabled{};        ///< Explicit false starts unselected; true requires an index.
+  std::optional<std::uint64_t> index{}; ///< Zero-based original source ordinal, not a stable ID.
+};
+
 /** @brief Owning sparse literals only; never contains IDs, models, handlers or live history. */
 struct ControlSettings {
   ~ControlSettings() = default;
@@ -365,10 +371,10 @@ struct ControlSettings {
   std::optional<std::int32_t> height{};                   ///< Nonnegative fixed height in cells.
   std::optional<std::uint32_t> flex{};                    ///< Positive common flex weight.
   std::optional<std::int32_t> gap{};                      ///< Nonnegative VBox/HBox gap.
-  std::optional<CheckState> state{};                      ///< CheckBox/ThreeState initial state.
+  std::optional<CheckState> state{};                      ///< CheckBox/ThreeState/Switch initial state; Switch is boolean only.
   std::optional<CheckCycle> cycle{};                      ///< CheckBox cycle; ThreeState is fixed THREE_STATE.
   std::optional<EditMode> editMode{};                     ///< LineEdit publication mode.
-  std::optional<bool> readOnly{};                         ///< LineEdit/scroll user-mutation policy.
+  std::optional<bool> readOnly{};                         ///< LineEdit/scroll/Switch user-mutation policy.
   std::optional<ProgrammaticChange> programmaticChange{}; ///< LineEdit initial programmatic history policy.
   std::optional<LineEditDisplayMode> displayMode{};       ///< LineEdit immutable presentation.
   std::optional<TextValue> placeholder{};                 ///< LineEdit placeholder expression.
@@ -385,8 +391,6 @@ struct ControlSettings {
   std::optional<double> minimum{}; ///< Finite Gauge lower bound; effective maximum must be greater.
   std::optional<double> maximum{}; ///< Finite Gauge upper bound with a finite positive span.
   std::optional<std::int32_t> preferredWidth{}; ///< Nonnegative Gauge intrinsic width in terminal cells.
-  std::optional<double> step{};                ///< Slider user increment; external values may lie between ticks.
-  std::optional<std::uint64_t> pageSteps{};     ///< Positive Slider increment count per PageUp/PageDown action.
   std::optional<double> wheelStep{};            ///< Positive finite logical scroll cells per decoded wheel event.
   std::optional<std::uint64_t> keyStep{}; ///< Positive integral logical cells per arrow event, retaining all 64 bits.
   std::optional<std::uint64_t> pageOverlap{}; ///< Shared logical cells between pages; explicit zero is supported.
@@ -469,6 +473,9 @@ struct ControlSettings {
   std::optional<std::int32_t> maxWidth{};             ///< Nonnegative hard column cap.
   std::optional<std::int32_t> minHeight{};            ///< Nonnegative hard row minimum.
   std::optional<std::int32_t> maxHeight{};            ///< Nonnegative hard row cap.
+  ControlRadioInitialSettings radioInitial{}; ///< Internal-model initial selection; external models reject overrides.
+  std::optional<double> step{};             ///< Slider increment; appended to preserve the positional aggregate prefix.
+  std::optional<std::uint64_t> pageSteps{}; ///< Positive Slider increment count per PageUp/PageDown action.
 };
 
 namespace detail {
@@ -560,7 +567,7 @@ struct ControlPropertyDescriptor {
 };
 
 /** @brief Return a static concrete factory schema; unknown types have an empty schema.
- * @param builtin VBox/HBox/Label/Button/CheckBox/LineEdit/ThreeState or scoped
+ * @param builtin VBox/HBox/Label/Button/CheckBox/Switch/LineEdit/ThreeState or scoped
  * Border/Gauge/ScrollArea/ScrollBar/Overlay.
  * @return Static descriptors only; named definitions are resolved to their concrete base first.
  * Returning a native primitive schema does not register or reserve that name in a context.

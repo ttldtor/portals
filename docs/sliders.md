@@ -8,9 +8,8 @@ with a user increment of one and an intrinsic width of 20 cells.
 
 ## A complete application
 
-The application below adjusts volume and balance, shows live changes, and resets
-both values with an ordinary button. The volume uses an explicit numeric source;
-the balance creates its source when the scene mounts.
+The application below edits one scene-owned numeric value and updates a label
+after each changed user commit. F10 closes the application.
 
 \include guide_slider.cpp
 
@@ -18,6 +17,10 @@ Build the checkout example with `cmake --build <build> --target portals_docs_sli
 For an installed SDK, compile the same source using the consumer setup in
 [Package setup](package.md). `ui::runApp()` owns the native session and returns
 after terminal restoration and scene cleanup.
+
+For volume and balance, live previews, Reset and gesture completion, build
+`portals_slider_example` with `PORTALS_BUILD_EXAMPLES=ON` and run the
+[complete settings application](../examples/slider/main.cpp).
 
 The track uses ASCII `-` and `O`. Ordinary themes, `Slider` selectors, classes,
 focus/disabled appearances, frames and size constraints apply to it. Its preferred

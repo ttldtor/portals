@@ -1,0 +1,3 @@
+add_executable(portals_slider_example main.cpp)
+target_link_libraries(portals_slider_example PRIVATE portals::core)
+portals_enable_warnings(portals_slider_example)

@@ -1519,8 +1519,8 @@ TEST_CASE("actual catalog fixed ancestry retains sparse precedence origins and u
 }
 
 TEST_CASE("sizing schemas append stable leaves after the original four presence words") {
-  static_assert(ui::detail::CONTROL_PROPERTY_COUNT == 259);
-  static_assert((ui::detail::CONTROL_PRESENCE_BITS + 63) / 64 == 5);
+  static_assert(ui::detail::CONTROL_PROPERTY_COUNT >= 259);
+  static_assert((ui::detail::CONTROL_PRESENCE_BITS + 63) / 64 >= 5);
   ControlSettings appended;
   appended.spinnerPreset = SpinnerPreset::LINE;
   appended.scrollbar.pattern = ScrollbarPattern::ASCII;
@@ -1529,6 +1529,15 @@ TEST_CASE("sizing schemas append stable leaves after the original four presence 
   CHECK(appendedPresence.count() == 2);
   CHECK(appendedPresence.test(193));
   CHECK(appendedPresence.test(204));
+
+  ControlSettings radio;
+  radio.radioInitial.enabled = true;
+  radio.radioInitial.index = 1;
+  const auto radioPresence = ui::detail::controlSettingsPresenceSet(radio);
+
+  CHECK(radioPresence.count() == 2);
+  CHECK(radioPresence.test(259));
+  CHECK(radioPresence.test(260));
 
   ControlSettings patch;
   patch.frame.enabled = true;

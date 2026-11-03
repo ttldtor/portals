@@ -90,6 +90,13 @@ protected:
    * and other constructor exceptions to CALLBACK_FAILED. Argument construction precedes that boundary.
    */
   Control(GraphemeText text, std::string_view prefix, std::string_view suffix, ControlStyle style, SizePolicy policy);
+  /** @brief Own explicitly validated equal-width boolean decorations; no additional retained fields.
+   * @param text Owning caption. @param prefix Owning off prefix. @param checkedPrefix Owning on prefix.
+   * @param style Manual appearances. @param policy Layout size policy.
+   */
+  Control(GraphemeText text, GraphemeText prefix, GraphemeText checkedPrefix, ControlStyle style, SizePolicy policy);
+  /** @return Whether owned boolean decorations use the current caption policy. */
+  bool booleanChromeMatches() const;
   /** @brief Paint the synchronized caption with intrinsic or allocated-width decorations.
    * @param context Borrowed synchronous sink with the same lifetime and exception contract as paint.
    * @param stretchChrome Keep the decorations at the allocated edges and center the caption between them.
@@ -320,6 +327,13 @@ public:
   /** @return Last valid synchronized state on UI; the model remains authoritative. */
   CheckState checkState() const;
 
+protected:
+  /** @brief Construct a boolean subtype with owning validated decorations.
+   * @param text Owning caption. @param off Owning off prefix. @param on Owning on prefix.
+   * @param style Manual appearances. @param policy Layout size policy.
+   */
+  CheckBox(GraphemeText text, GraphemeText off, GraphemeText on, ControlStyle style, SizePolicy policy);
+
 private:
   friend class CheckBoxBinding;
   friend class CheckStateBinding;
@@ -335,6 +349,64 @@ private:
 class ThreeState : public CheckBox {
 public:
   using CheckBox::CheckBox;
+};
+
+inline constexpr std::string_view DEFAULT_SWITCH_OFF_TEXT = "[off] "; ///< Plain off decoration.
+inline constexpr std::string_view DEFAULT_SWITCH_ON_TEXT = "[on ] ";  ///< Plain on decoration.
+
+/** @brief Owning validated switch decorations, independent of any widget or scene. */
+class SwitchChrome {
+public:
+  /** @brief Validate same-width single-line off/on decorations under the receiving policy.
+   * @param off Off bytes copied during this call. @param on On bytes copied during this call.
+   * @param policy Complete receiving width policy.
+   * @return Owning pair or INVALID_ARGUMENT; allocation before/inside construction may throw.
+   */
+  static std::expected<SwitchChrome, TreeError> from(std::string_view off, std::string_view on,
+                                                     WidthPolicy policy = {});
+
+  /** @return Complete receiving policy. */
+  WidthPolicy policy() const {
+    return off_.policy();
+  }
+
+private:
+  friend class Switch;
+
+  SwitchChrome(GraphemeText off, GraphemeText on) : off_(std::move(off)), on_(std::move(on)) {
+  }
+
+  GraphemeText off_, on_;
+};
+
+/** @brief One-line boolean switch using the ordinary CheckBox binding and theme. */
+class Switch : public CheckBox {
+public:
+  /** @brief Initially false, plain ASCII [off]/[on ] presentation; bind a bool model for input.
+   * @param text Owning caption. @param style Manual appearances. @param policy Layout size policy.
+   * @param readOnly Prohibit user writes while retaining focus and programmatic writes.
+   */
+  explicit Switch(GraphemeText text, ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY,
+                  bool readOnly = false);
+  /** @brief Own custom equal-width decorations; policy mismatch is rejected by measure.
+   * @param text Owning caption. @param chrome Owning validated off/on pair.
+   * @param style Manual appearances. @param policy Layout size policy.
+   * @param readOnly Prohibit user writes while retaining focus and programmatic writes.
+   */
+  Switch(GraphemeText text, SwitchChrome chrome, ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY,
+         bool readOnly = false);
+  /** @param available Offered extent; intrinsic size follows the ordinary Control policy.
+   * @return Natural one-line size or INVALID_GEOMETRY for mismatched caption/chrome policies.
+   */
+  std::expected<CellSize, TreeError> measure(CellSize available) override;
+
+  /** @return User-write policy; programmatic bool writes remain allowed. */
+  bool readOnly() const {
+    return readOnly_;
+  }
+
+private:
+  bool readOnly_{};
 };
 
 /** @brief Replace owning text between frames; equal bytes/policy are a no-op, changes invalidate layout.
@@ -501,6 +573,12 @@ public:
    * @note No business callback runs; old queued notifications cannot overwrite a newer committed value.
    */
   std::expected<void, TreeError> sync();
+  /** @return Authoritative bool value; checked-only, without reporting or callbacks. */
+  std::expected<bool, TreeError> value() const;
+  /** @param value Authoritative replacement bool.
+   * @return Exact programmatic receipt; no user callback or automatic diagnostic.
+   */
+  std::expected<PropertyUpdate<bool>, TreeError> set(bool value);
 
 private:
   struct State;
