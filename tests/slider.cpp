@@ -500,6 +500,53 @@ void exactPartialDeliveryAndReentry() {
         "removal from live onChange suppresses later widget and completion delivery");
 }
 
+void managedNativeMotionRequirement() {
+  auto app = take(Application::create());
+  auto owner = take(ManagedScene::create(*app));
+
+  check(!owner->requiresPointerMotion(), "ordinary managed scene does not request native motion");
+
+  const auto node = take(owner->emplace<Slider>(owner->root()));
+
+  check(!owner->requiresPointerMotion(), "unbound slider does not request native motion");
+  take(owner->bind(node, take(owner->numericState(25))));
+  check(owner->requiresPointerMotion(), "bound slider requests native motion before ordinary application open");
+  take(setSliderReadOnly(app->tree(), node, true));
+  take(app->tree().setVisible(node, false));
+  take(app->tree().setEnabled(node, false));
+  check(owner->requiresPointerMotion(), "bound slider retains the session profile while currently ineligible");
+
+  ui::Ref<Slider> second;
+
+  take(ui::mount(*owner, ui::slider(second, 50)));
+  take(owner->remove(node));
+  check(owner->requiresPointerMotion(), "another bound slider retains native motion after first removal");
+  take(owner->remove(second.node()));
+  check(!owner->requiresPointerMotion(), "last slider removal retires the native motion requirement");
+
+  ui::Ref<Slider> stale;
+
+  take(ui::mount(*owner, ui::slider(stale, 25)));
+  take(app->tree().remove(stale.node()));
+  check(!owner->requiresPointerMotion(), "externally removed slider does not retain a stale input requirement");
+
+  ui::Ref<ScrollBar> bar;
+  ui::Ref<Slider> mixed;
+
+  take(ui::mount(*owner, ui::hbox(ui::scrollBar(bar), ui::slider(mixed, 25))));
+  take(owner->remove(bar.node()));
+  check(owner->requiresPointerMotion(), "removing the last scroll owner preserves a bound slider requirement");
+  take(owner->remove(mixed.node()));
+  check(!owner->requiresPointerMotion(), "last mixed-family removal retires native motion");
+
+  ui::Ref<ScrollBar> standalone;
+
+  take(ui::mount(*owner, ui::scrollBar(standalone)));
+  check(owner->requiresPointerMotion(), "scroll-only scene still requests native motion");
+  take(owner->remove(standalone.node()));
+  check(!owner->requiresPointerMotion(), "last scroll-only removal still retires native motion");
+}
+
 void managedModelAndProperty() {
   auto app = take(Application::create());
   auto owner = take(ManagedScene::create(*app));
@@ -968,6 +1015,7 @@ int main() {
   eligibilityAfterCompletion();
   unknownButtonContinuation();
   exactPartialDeliveryAndReentry();
+  managedNativeMotionRequirement();
   managedModelAndProperty();
   initializationAndErrorPreservation();
   resourceParity();

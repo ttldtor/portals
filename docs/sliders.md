@@ -112,7 +112,7 @@ Thread, lifetime, frame, allocation and publication failures retain the existing
 typed causes. Keep arbitrary reference captures alive through callback invocation;
 the Ref itself does not own a scene or widget.
 
-## Load presentation from a resource
+## Load presentation from a resource {#slider-resource}
 
 The configuration resource uses the same settings and native numeric binding:
 

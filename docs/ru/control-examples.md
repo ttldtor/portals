@@ -22,7 +22,7 @@
 | Ограниченный текстовый журнал | [LogView](log-view.md), [main.cpp](../../examples/log_view/main.cpp) | [guide_log_view_resource.cpp](../examples/guide_log_view_resource.cpp) |
 | Диалоги | [guide_dialog.cpp](../examples/guide_dialog.cpp), [guide_dialog_actions.cpp](../examples/guide_dialog_actions.cpp) | [guide_dialog_resource.cpp](../examples/guide_dialog_resource.cpp) |
 | Изменения CheckBox | [guide_check_change.cpp](../examples/guide_check_change.cpp) | [guide_check_resource.cpp](../examples/guide_check_resource.cpp) |
-| Числовые слайдеры | [guide_slider.cpp](../examples/guide_slider.cpp), [main.cpp](../../examples/slider/main.cpp), [источник и ввод](sliders.md) | [Свойства ресурса](sliders.md#загрузка-представления-из-ресурса), справка |
+| Числовые слайдеры | [guide_slider.cpp](../examples/guide_slider.cpp), [main.cpp](../../examples/slider/main.cpp), [источник и ввод](sliders.md) | [Свойства ресурса](sliders.md#slider-resource-ru), справка |
 | Важность уведомлений | [guide_toast.cpp](../examples/guide_toast.cpp) | [guide_toast_resource.cpp](../examples/guide_toast_resource.cpp); ресурс задаёт только содержимое |
 | Индикатор загрузки | [guide_loading_indicators.cpp](../examples/guide_loading_indicators.cpp) | [guide_loading_resource.cpp](../examples/guide_loading_resource.cpp) |
 | Общие действия | [guide_actions.cpp](../examples/guide_actions.cpp), [руководство по действиям](../actions.md) | Действия и callback задаются в коде; ресурсы сцен не объявляют исполняемые действия |
