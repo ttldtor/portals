@@ -123,7 +123,11 @@ struct ChangeAccess {
         ManagedError{ManagedPhase::BIND, reference.node().id(), TreeError::INVALID_ARGUMENT, {}, {}});
     }
 
-    return scene.onChange(Node<CheckBox>{reference.node()}, std::move(callback), origin);
+    if constexpr (std::same_as<T, RadioGroup>) {
+      return scene.onChange(reference.node(), std::move(callback), origin);
+    } else {
+      return scene.onChange(Node<CheckBox>{reference.node()}, std::move(callback), origin);
+    }
   }
 };
 

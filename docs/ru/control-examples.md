@@ -8,6 +8,7 @@
 
 | Тема | Полная программа на C++ | Программа ресурса или справка |
 |---|---|---|
+| Единственное выбранное значение | [RadioGroup](radio-group.md), [main.cpp](../../examples/radio_group/main.cpp) | [guide_radio_group_resource.cpp](../examples/guide_radio_group_resource.cpp) |
 | Композиция журнала поиска | [main.cpp](../../examples/search_journal/main.cpp): поле оператора, две памятки, выбранное совпадение и ограниченный журнал | Контракты [FormField](form-fields.md), [FindBar](find-bar.md), [LogView](log-view.md) |
 | Индексированные подсказки | [Выбор команды](live-search.md), [main.cpp](../../examples/suggestions/main.cpp) | Запрос и действия остаются в C++; результат использует обычный виртуальный список |
 | Фоновая проверка поля | [Каталог имён](form-fields.md#form-field-async-ru), [main.cpp](../../examples/async_validation/main.cpp) | Рабочие правила задаются кодом |

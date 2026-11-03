@@ -7,6 +7,13 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Add a resident `RadioGroup` with a coherent immutable single-selection model,
+  stable row identities, compact scene-owned label/model recipes and unified Ref.
+  Keyboard/mouse selection, disabled/hidden options, read-only input, themed
+  clipped painting and code-bound scene-resource factories share the existing
+  state, error and cleanup contracts. Include a complete device settings example
+  and English/Russian guide.
+
 - Add action-backed popup menus with owned submenus and explicit Unicode mnemonics.
   Ordinary scene composition supplies the overlay host; the unified popup reference
   supports checked open/dismiss. Leaf activation closes the popup and restores focus

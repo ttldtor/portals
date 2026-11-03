@@ -77,6 +77,19 @@ EditorCommandResult activateButton(const std::shared_ptr<RefTarget> &target, std
 std::expected<void, ManagedError> gaugeValue(std::shared_ptr<RefTarget> target, std::shared_ptr<const Node<Gauge>> node,
                                              double value, bool relative, std::source_location origin);
 std::expected<FieldValidation, ManagedError> fieldValidation(const std::shared_ptr<RefTarget> &target);
+/** @param target Weak group identity. @param node Typed slot retained without reading it before affinity admission.
+ * @return Exact authoritative value or affinity/liveness failure.
+ */
+std::expected<RadioGroupValue, ManagedError> radioValue(const std::shared_ptr<RefTarget> &target,
+                                                        std::shared_ptr<const Node<RadioGroup>> node);
+/** @param target Weak group identity. @param node Typed slot retained until after checked admission.
+ * @param id Existing full ID or no selection. @param origin Diagnostic operation site.
+ * @return Exact programmatic receipt, without user notification; failures also enter the scene collector.
+ */
+std::expected<PropertyUpdate<RadioGroupValue>, ManagedError> radioSelect(const std::shared_ptr<RefTarget> &target,
+                                                                         std::shared_ptr<const Node<RadioGroup>> node,
+                                                                         std::optional<RowId> id,
+                                                                         std::source_location origin);
 Ref<LineEdit> fieldEditor(const std::shared_ptr<RefTarget> &target);
 std::expected<bool, ManagedError> validateField(const std::shared_ptr<RefTarget> &target);
 std::expected<void, ManagedError> displayField(const std::shared_ptr<RefTarget> &target, FieldValidation value);
@@ -526,6 +539,25 @@ public:
   /** @brief Allocate an empty observing slot on the UI thread; may throw std::bad_alloc. */
   Ref() {
     this->slot_->fluent = true;
+  }
+
+  /** @return Current authoritative immutable radio value, or original checked owner/thread/lifetime error. */
+  std::expected<RadioGroupValue, ManagedError> value() const
+    requires std::same_as<T, RadioGroup>
+  {
+    auto node = this->slot_ ? std::shared_ptr<const Node<T>>(this->slot_, &this->slot_->node) : nullptr;
+    return detail::radioValue(target(), std::move(node));
+  }
+
+  /** @param id Existing full identity or no selection. @param origin Diagnostic operation site.
+   * @return Exact programmatic receipt; no user onChange. Failures also enter the existing scene collector.
+   */
+  std::expected<PropertyUpdate<RadioGroupValue>, ManagedError>
+  select(std::optional<RowId> id, std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, RadioGroup>
+  {
+    auto node = this->slot_ ? std::shared_ptr<const Node<T>>(this->slot_, &this->slot_->node) : nullptr;
+    return detail::radioSelect(target(), std::move(node), id, origin);
   }
 
   /** @brief Register a checked, node-scoped worker-to-UI delivery endpoint.

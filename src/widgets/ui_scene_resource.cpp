@@ -4,6 +4,7 @@
 #include "ui_scene_resource_internal.hpp"
 #include <portals/ui_combo_box.hpp>
 #include <portals/ui_log_view.hpp>
+#include <portals/ui_radio_group.hpp>
 
 #include <algorithm>
 #include <array>
@@ -135,6 +136,9 @@ SceneResourceRegistry::SceneResourceRegistry() {
   (void)add<Button>("Button", [](SceneResourceArguments arguments) {
     return detail::textControl<Button>(TextValue(arguments.text), {}, DEFAULT_CONTENT_POLICY, {},
                                        arguments.settings.chrome.value_or(ButtonChrome::BRACKETS));
+  });
+  (void)add<RadioGroup>("RadioGroup", [](SceneResourceArguments arguments) {
+    return radioGroup(std::initializer_list<std::string_view>{}).settings(arguments.settings);
   });
   (void)add<CheckBox>("CheckBox", [](SceneResourceArguments arguments) {
     return checkbox(arguments.text,
