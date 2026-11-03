@@ -1067,24 +1067,45 @@ public:
    * @return Checked registration; model synchronization and equal commits do not invoke the callback.
    */
   template <class Callback, class T>
-    requires(std::derived_from<T, Slider> && std::copy_constructible<Callback> &&
-             (detail::ChangeValueAction<Callback, double> ||
-              requires(Callback &action, const PropertyUpdate<NumericValue> &receipt) {
+    requires(std::derived_from<T, Slider> && std::copy_constructible<std::decay_t<Callback>> &&
+             (detail::ChangeValueAction<std::decay_t<Callback>, double> ||
+              requires(std::decay_t<Callback> &action, const PropertyUpdate<NumericValue> &receipt) {
                 { action(receipt) } -> detail::ManagedActionResult;
               }))
-  std::expected<void, ManagedError> onChange(Node<T> node, Callback callback,
-                                            std::source_location origin = std::source_location::current()) {
+  std::expected<void, ManagedError> onChange(Node<T> node, const Callback &callback,
+                                             std::source_location origin = std::source_location::current()) {
     const auto lifetime = std::weak_ptr<const void>(lifetime_);
 
     try {
       auto action = [&] {
-        if constexpr (detail::ChangeValueAction<Callback, double>) {
-          return actionAdapter<PropertyUpdate<NumericValue>>(
-            [callback = std::move(callback)](const PropertyUpdate<NumericValue> &receipt) mutable -> decltype(auto) {
-              return callback(receipt.snapshot->value.value());
-            }, origin);
+        if constexpr (detail::ChangeValueAction<std::decay_t<Callback>, double>) {
+          using OwnedCallback = std::decay_t<Callback>;
+          OwnedCallback owned(callback);
+
+          if (lifetime.expired()) {
+            return std::function<EditorCommandResult(const PropertyUpdate<NumericValue> &)>{};
+          }
+
+          if constexpr (std::is_pointer_v<OwnedCallback> || requires { owned.operator bool(); }) {
+            const bool present = static_cast<bool>(owned);
+
+            if (lifetime.expired() || !present) {
+              return std::function<EditorCommandResult(const PropertyUpdate<NumericValue> &)>{};
+            }
+          }
+
+          auto converted = [callback =
+                              std::move(owned)](const PropertyUpdate<NumericValue> &receipt) mutable -> decltype(auto) {
+            return callback(receipt.snapshot->value.value());
+          };
+
+          if (lifetime.expired()) {
+            return std::function<EditorCommandResult(const PropertyUpdate<NumericValue> &)>{};
+          }
+
+          return actionAdapter<PropertyUpdate<NumericValue>>(std::move(converted), origin);
         } else {
-          return actionAdapter<PropertyUpdate<NumericValue>>(std::move(callback), origin);
+          return actionAdapter<PropertyUpdate<NumericValue>>(callback, origin);
         }
       }();
 
@@ -1107,14 +1128,14 @@ public:
    * @return Checked registration or typed affinity, identity, capacity or allocation failure.
    */
   template <class Callback, class T>
-    requires(std::derived_from<T, Slider> && std::copy_constructible<Callback> &&
-             detail::ManagedAction<Callback, SliderOperationEvent>)
-  std::expected<void, ManagedError> onEditingFinished(Node<T> node, Callback callback,
-                                                     std::source_location origin = std::source_location::current()) {
+    requires(std::derived_from<T, Slider> && std::copy_constructible<std::decay_t<Callback>> &&
+             detail::ManagedAction<std::decay_t<Callback>, SliderOperationEvent>)
+  std::expected<void, ManagedError> onEditingFinished(Node<T> node, const Callback &callback,
+                                                      std::source_location origin = std::source_location::current()) {
     const auto lifetime = std::weak_ptr<const void>(lifetime_);
 
     try {
-      auto action = actionAdapter<SliderOperationEvent>(std::move(callback), origin);
+      auto action = actionAdapter<SliderOperationEvent>(callback, origin);
 
       if (lifetime.expired()) {
         return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CLOSED));
@@ -2400,23 +2421,34 @@ private:
 
   template <class Event, class Callback>
   std::function<EditorCommandResult(const Event &)>
-  actionAdapter(Callback action, std::source_location origin = std::source_location::current()) {
+  actionAdapter(Callback &&action, std::source_location origin = std::source_location::current()) {
     ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
-    if constexpr (std::is_pointer_v<Callback> || requires { action.operator bool(); }) {
-      if (!static_cast<bool>(action)) {
+    const auto lifetime = std::weak_ptr<const void>(lifetime_);
+    const auto context = facadeContext();
+    using OwnedAction = std::decay_t<Callback>;
+    OwnedAction owned(std::forward<Callback>(action));
+
+    if (lifetime.expired()) {
+      return {};
+    }
+
+    if constexpr (std::is_pointer_v<OwnedAction> || requires { owned.operator bool(); }) {
+      const bool present = static_cast<bool>(owned);
+
+      if (lifetime.expired() || !present) {
         return {};
       }
     }
 
-    if constexpr (requires(Callback &callback, const Event &event) {
+    if constexpr (requires(OwnedAction &callback, const Event &event) {
                     { callback(event) } -> std::same_as<std::expected<void, ManagedError>>;
-                  } || (!std::invocable<Callback &, const Event &> && requires(Callback &callback) {
+                  } || (!std::invocable<OwnedAction &, const Event &> && requires(OwnedAction &callback) {
                     { callback() } -> std::same_as<std::expected<void, ManagedError>>;
                   })) {
-      return actionAdapter<Event>([this, lifetime = std::weak_ptr<const void>(lifetime_), action = std::move(action),
-                                   origin]([[maybe_unused]] const Event &event) mutable -> EditorCommandResult {
+      auto converted = [this, lifetime, action = std::move(owned),
+                        origin]([[maybe_unused]] const Event &event) mutable -> EditorCommandResult {
         auto result = [&] {
-          if constexpr (std::invocable<Callback &, const Event &>) {
+          if constexpr (std::invocable<OwnedAction &, const Event &>) {
             return action(event);
           } else {
             return action();
@@ -2429,12 +2461,18 @@ private:
           result.error().registrationOrigin = origin;
         }
         return admitActionResult(std::move(result));
-      });
+      };
+
+      if (lifetime.expired()) {
+        return {};
+      }
+
+      return actionAdapter<Event>(std::move(converted), origin);
     } else {
       return ui::detail::currentSceneCallback(
-        facadeContext(),
-        [this, lifetime = std::weak_ptr<const void>(lifetime_),
-         action = std::move(action)]([[maybe_unused]] const Event &event) mutable -> EditorCommandResult {
+        context,
+        [this, lifetime,
+         action = std::move(owned)]([[maybe_unused]] const Event &event) mutable -> EditorCommandResult {
           if (lifetime.expired()) {
             return EditorCommandResult(std::unexpected(TreeError::CLOSED), {}, false);
           }
@@ -2444,7 +2482,7 @@ private:
           }
           ActionAdmission admission(*this);
           const auto invoke = [&]() -> decltype(auto) {
-            if constexpr (std::invocable<Callback &, const Event &>) {
+            if constexpr (std::invocable<OwnedAction &, const Event &>) {
               return action(event);
             } else {
               return action();

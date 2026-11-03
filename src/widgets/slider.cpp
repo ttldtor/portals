@@ -244,13 +244,19 @@ struct SliderBinding::State {
 
     if (operation) {
       const auto conflict = (*current)->revision != expectedRevision;
-      auto captured = router.pointerCapture();
+      bool lostCapture{};
 
-      if (!captured) {
-        return std::unexpected(captured.error());
+      if (operation->kind == SliderOperationKind::DRAG && !detail::PointerCaptureAccess::released(capture)) {
+        auto captured = router.pointerCapture();
+
+        if (!captured) {
+          return std::unexpected(captured.error());
+        }
+
+        lostCapture = !capture.connected() || *captured != Node<Widget>{node};
       }
 
-      if (conflict || readOnly || !capture.connected() || *captured != Node<Widget>{node}) {
+      if (conflict || readOnly || lostCapture) {
         auto done = finish(conflict ? SliderOperationStatus::CONFLICT : SliderOperationStatus::CANCELLED, true);
 
         if (!done) {

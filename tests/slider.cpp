@@ -1,8 +1,10 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include "support/numeric_snap_reference.hpp"
 #include <portals/slider.hpp>
 #include <portals/ui.hpp>
 
+#include <bit>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
@@ -12,6 +14,19 @@
 namespace {
 using namespace portals;
 int failures{};
+
+void numericCallback(double) {
+}
+
+void numericFinishedCallback(const SliderOperationEvent &) {
+}
+
+static_assert(requires(ManagedScene &owner, Node<Slider> node) {
+  owner.onChange(node, numericCallback);
+  owner.onEditingFinished(node, numericFinishedCallback);
+  owner.onChange<decltype(&numericCallback)>(node, numericCallback);
+  owner.onEditingFinished<decltype(&numericFinishedCallback)>(node, numericFinishedCallback);
+});
 
 template <class T>
 concept CaptionReference = requires(const ui::Ref<T> &reference) { reference.text(); };
@@ -108,6 +123,25 @@ void numericInput() {
   check(detail::snapNumeric(range, 4.5) == 6 && detail::snapNumeric(range, 9.5) == 10,
         "snapping ties increase and shortened endpoint remains reachable");
   check(detail::snapNumeric({-10, 10, 3}, -8.5) == -7, "negative grid anchored at minimum");
+  const auto wide = std::ldexp(1.0, 58);
+
+  check(detail::snapNumeric({-1, wide, wide}, wide / 4) == -1,
+        "endpoint-only snapping retains the original minimum at a large exponent");
+  check(detail::snapNumeric({-1, wide, wide / 2}, wide / 8) == -1,
+        "sub-span snapping reconstructs the lower tick from its minimum anchor");
+  check(detail::snapNumeric({-wide, 1, 96076792050570576.0}, -std::ldexp(1.0, 54)) == -16,
+        "snapping retains the FMA-representable third tick after anchor cancellation");
+  const auto oddStep = std::nextafter(16.0, std::numeric_limits<double>::infinity());
+  const auto oddTick = -16.0 - 5 * std::ldexp(1.0, -48);
+
+  check(take(NumericValue::create(-wide, {-wide, 1, oddStep})).range().step == oddStep &&
+          detail::snapNumeric({-wide, 1, oddStep}, -16) == oddTick,
+        "snapping retains an odd grid index beyond the exact-integer range of binary64");
+  const auto denseStep = std::nextafter(std::ldexp(1.0, -54), std::numeric_limits<double>::infinity());
+
+  check(take(NumericValue::create(0, {0, 1, denseStep})).range().step == denseStep &&
+          detail::snapNumeric({0, 1, denseStep}, 0.75) == 0.75,
+        "validated dense binary64 grids remain supported without a quotient precision cap");
   const auto offGrid = take(NumericValue::create(0.5, range));
 
   check(detail::nudgeNumeric(offGrid, 1) == 3.5 && detail::nudgeNumeric(offGrid, -1) == 0,
@@ -120,6 +154,26 @@ void numericInput() {
   const auto snapped = detail::snapNumeric(fine.range(), 0.375);
 
   check(std::isfinite(snapped) && snapped == 0.375, "large tick count uses no integer quotient conversion");
+}
+
+void numericOracle() {
+  std::size_t index{};
+
+  for (const auto &reference : test::NUMERIC_SNAP_REFERENCE_CASES) {
+    const NumericRange range{std::bit_cast<double>(reference.minimumBits), std::bit_cast<double>(reference.maximumBits),
+                             std::bit_cast<double>(reference.stepBits)};
+    const auto candidate = std::bit_cast<double>(reference.candidateBits);
+    const auto valid = NumericValue::create(candidate, range);
+    const auto actual = std::bit_cast<std::uint64_t>(detail::snapNumeric(range, candidate));
+
+    if (!valid || actual != reference.expectedBits) {
+      std::cerr << "numeric oracle case " << index << " actual bits " << actual << " expected bits "
+                << reference.expectedBits << '\n';
+    }
+
+    check(valid && actual == reference.expectedBits, "snapping matches the independent exact rational oracle bits");
+    ++index;
+  }
 }
 
 struct Fixture {
@@ -191,6 +245,74 @@ void nativeKeyboard() {
   take(setSliderReadOnly(*f.tree, f.node, true));
   take(f.router->invoke(f.node, ActionEvent{Action::MOVE_LEFT}));
   check(f.value() == 100 && f.changes.size() == changed, "readOnly keyboard does not mutate source");
+}
+
+void reentrantSyncCompletion() {
+  Fixture step;
+
+  step.changeHook = [&] {
+    take(step.binding->sync());
+  };
+  take(step.router->invoke(step.node, ActionEvent{Action::MOVE_RIGHT}));
+  take(step.scheduler->dispatch());
+  check(step.completions.size() == 1 && step.completions.back().status == SliderOperationStatus::COMPLETED &&
+          step.completions.back().lastUserUpdate->snapshot == step.changes.back().snapshot,
+        "reentrant sync during a keyboard step retains one completed operation");
+  Fixture click(false);
+
+  click.changeHook = [&] {
+    take(click.binding->sync());
+  };
+  click.mouse(8, MouseAction::PRESS);
+  take(click.scheduler->dispatch());
+  check(click.completions.size() == 1 && click.completions.back().status == SliderOperationStatus::COMPLETED,
+        "reentrant sync during an atomic click never requires capture");
+  Fixture release;
+
+  release.mouse(0, MouseAction::PRESS);
+  release.changeHook = [&] {
+    take(release.binding->sync());
+  };
+  release.mouse(10, MouseAction::RELEASE);
+  take(release.scheduler->dispatch());
+  check(release.value() == 100 && release.completions.size() == 1 &&
+          release.completions.back().status == SliderOperationStatus::COMPLETED &&
+          release.completions.back().lastUserUpdate->snapshot == release.changes.back().snapshot,
+        "reentrant sync during an admitted final release retains one completed operation");
+}
+
+void widePointerAnchor() {
+  const auto wide = std::ldexp(1.0, 58);
+
+  for (const auto divisor : {1.0, 2.0}) {
+    Fixture f;
+
+    take(f.model->set(take(NumericValue::create(-1, {-1, wide, wide / divisor}))));
+    take(f.binding->sync());
+    const auto viewport = take(CellRect::from({}, {divisor == 1 ? 5 : 9, 1}));
+
+    take(f.tree->frame([&] {
+      take(layoutTree(*f.tree, f.root, viewport, viewport));
+    }));
+    f.mouse(1, MouseAction::PRESS);
+    f.mouse(1, MouseAction::RELEASE);
+    check(f.value() == -1 && f.changes.empty() && f.completions.size() == 1 && !f.completions.back().lastUserUpdate,
+          "large-exponent pointer click selects the actual minimum without a false changed receipt");
+  }
+
+  Fixture negative;
+
+  take(negative.model->set(take(NumericValue::create(-wide, {-wide, 1, 96076792050570576.0}))));
+  take(negative.binding->sync());
+  const auto viewport = take(CellRect::from({}, {17, 1}));
+
+  take(negative.tree->frame([&] {
+    take(layoutTree(*negative.tree, negative.root, viewport, viewport));
+  }));
+  negative.mouse(15, MouseAction::PRESS);
+  negative.mouse(15, MouseAction::RELEASE);
+  check(negative.value() == -16 && negative.changes.size() == 1,
+        "large negative anchor pointer route selects the actual third tick -16");
 }
 
 void stationaryThumb() {
@@ -482,6 +604,76 @@ void initializationAndErrorPreservation() {
 }
 
 void resourceParity() {
+  for (const bool invalidRange : {false, true}) {
+    auto app = take(Application::create());
+    auto owner = take(ManagedScene::create(*app));
+    ui::SceneResourceOptions options;
+
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    take(options.registry.add<Slider>("Wide", [](ui::SceneResourceArguments) {
+      return ui::slider(150, {100, 200, 1});
+    }));
+    const std::string text = invalidRange ? "scene{Wide{minimum=250}}" : "scene{Wide{minimum=160}}";
+    const auto mounted = ui::mount(*owner, ui::resource(text, options));
+
+    check(!mounted &&
+            mounted.error().numeric == (invalidRange ? NumericError::INVALID_RANGE : NumericError::OUT_OF_RANGE) &&
+            mounted.error().sceneResource && mounted.error().sceneResource->propertyPath &&
+            mounted.error().sceneResource->propertyPath->ends_with(".minimum") &&
+            mounted.error().sceneResource->offset == text.find("minimum"),
+          "sparse causal minimum retains its own source leaf and offset on numeric rejection");
+  }
+
+  {
+    auto app = take(Application::create());
+    auto owner = take(ManagedScene::create(*app));
+    ui::Ref<Slider> reference;
+    ui::SceneResourceOptions options;
+
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    take(options.registry.add<Slider>("Wide", [=](ui::SceneResourceArguments) {
+      return ui::slider(reference, 150, {100, 200, 1});
+    }));
+    auto mounted = ui::mount(*owner, ui::resource("scene{Wide{value=160}}", options));
+
+    check(mounted && take(reference.value().get()) == 160,
+          "sparse resource value validates against the actual factory range");
+  }
+
+  {
+    auto app = take(Application::create());
+    auto owner = take(ManagedScene::create(*app));
+    auto source = take(owner->numericState(150, {100, 200, 1}));
+    ui::SceneResourceOptions options;
+
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    take(options.registry.add<Slider>("WideBound", [=](ui::SceneResourceArguments) {
+      return ui::slider(source);
+    }));
+    auto mounted = ui::mount(*owner, ui::resource("scene{WideBound{value=160}}", options));
+
+    check(!mounted && mounted.error().numeric == NumericError::INITIAL_CONFLICT && mounted.error().sceneResource &&
+            take(source.snapshot())->value.value() == 150,
+          "sparse resource override reports source conflict before fallback range validation");
+  }
+
+  {
+    auto app = take(Application::create());
+    auto owner = take(ManagedScene::create(*app));
+    ui::SceneResourceOptions options;
+
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    take(options.registry.add<Slider>("WideInvalid", [](ui::SceneResourceArguments) {
+      return ui::slider(150, {100, 200, 1});
+    }));
+    auto mounted = ui::mount(*owner, ui::resource("scene{WideInvalid{value=260}}", options));
+
+    check(!mounted && mounted.error().numeric == NumericError::OUT_OF_RANGE && mounted.error().sceneResource &&
+            mounted.error().sceneResource->propertyPath &&
+            mounted.error().sceneResource->propertyPath->ends_with(".value"),
+          "final merged numeric rejection retains the supplied resource leaf context");
+  }
+
   {
     auto app = take(Application::create());
     auto owner = take(ManagedScene::create(*app));
@@ -612,12 +804,163 @@ void numericOnlyCaptionCapability() {
         "high-level base caption assignment keeps numeric source and typed failure");
   take(owner.close());
 }
+
+void deletingNumericProxyReporter() {
+  for (const bool missingSource : {false, true}) {
+    auto app = take(Application::create());
+    auto owner = take(ManagedScene::create(*app));
+    ui::Ref<Slider> reference;
+    ui::Ref<Slider> absent;
+
+    take(ui::mount(*owner, ui::slider(reference, 25)));
+    auto proxy = std::make_unique<ui::NumericProperty>(reference.value());
+    int reports{};
+
+    take(owner->onError([&](const ManagedDiagnostic &) {
+      ++reports;
+      proxy.reset();
+    }));
+    const auto observation =
+      missingSource ? (*proxy = absent.value()) : proxy->set(std::numeric_limits<double>::quiet_NaN());
+    const auto receipt = observation.result();
+
+    check(!proxy && reports == 1 && !receipt && take(reference.value().get()) == 25 &&
+            (missingSource || receipt.error().numeric == NumericError::NOT_FINITE),
+          "numeric proxy error observation survives reporter deletion of the original proxy");
+  }
+}
+
+void reentrantNumericProxyReporter() {
+  auto app = take(Application::create());
+  auto owner = take(ManagedScene::create(*app));
+  ui::Ref<Slider> reference;
+  ui::Ref<Slider> absent;
+
+  take(ui::mount(*owner, ui::slider(reference, 25)));
+  auto proxy = reference.value();
+  const auto original = absent.value().get().error();
+
+  take(owner->onError([&](const ManagedDiagnostic &) {
+    (void)proxy.set(30);
+  }));
+  const auto observation = proxy = absent.value();
+  const auto receipt = observation.result();
+
+  check(!receipt && std::get_if<TreeError>(&receipt.error().cause) &&
+          std::get<TreeError>(receipt.error().cause) == std::get<TreeError>(original.cause),
+        "source failure observation retains its own error across reporter reentry into the same proxy");
+}
+
+void numericOperationObservations() {
+  auto app = take(Application::create());
+  auto owner = take(ManagedScene::create(*app));
+  ui::Ref<Slider> reference;
+  ui::Ref<Slider> absent;
+
+  take(ui::mount(*owner, ui::slider(reference, 25)));
+  auto fresh = reference.value();
+  const auto origin = std::source_location::current();
+  const auto failed = fresh.set(std::numeric_limits<double>::quiet_NaN(), origin);
+  const auto freshReceipt = fresh.result();
+  const auto failedReceipt = failed.result();
+
+  check(!freshReceipt && std::get_if<TreeError>(&freshReceipt.error().cause) &&
+          std::get<TreeError>(freshReceipt.error().cause) == TreeError::INVALID_ARGUMENT &&
+          !freshReceipt.error().operation && failedReceipt.error().numeric == NumericError::NOT_FINITE &&
+          failedReceipt.error().operation && std::string_view(failedReceipt.error().operation) == "slider.value" &&
+          failedReceipt.error().operationOrigin && failedReceipt.error().operationOrigin->line() == origin.line(),
+        "numeric mutation returns a reported operation while the original fresh observation stays fresh");
+  auto saved = reference.value().set(26);
+  const auto original = take(saved.result()).snapshot;
+  const auto changed = saved.set(27);
+  const auto sourceFailure = saved = absent.value();
+  const auto savedReceipt = saved.result();
+
+  check(savedReceipt && savedReceipt->snapshot == original && take(changed.result()).snapshot->value.value() == 27 &&
+          !sourceFailure.result() && sourceFailure.result().error().operation,
+        "saved numeric observation keeps its previous receipt across later successful and failed mutations");
+}
+
+void emptyNumericCallbacks() {
+  auto app = take(Application::create());
+  auto owner = take(ManagedScene::create(*app));
+  ui::Ref<Slider> reference;
+
+  take(ui::mount(*owner, ui::slider(reference, 25)));
+  const auto pointer = owner->onChange(reference.node(), static_cast<void (*)(double)>(nullptr));
+  const auto function = owner->onChange(reference.node(), std::function<void(double)>{});
+  const auto invalid = [](const auto &result) {
+    return !result && std::get_if<TreeError>(&result.error().cause) &&
+           std::get<TreeError>(result.error().cause) == TreeError::INVALID_ARGUMENT;
+  };
+
+  check(invalid(pointer) && invalid(function), "empty numeric callbacks are rejected before value adaptation");
+
+  if (!pointer && !function) {
+    int calls{};
+
+    take(owner->onChange(reference.node(), [&](double) {
+      ++calls;
+    }));
+    take(app->router().invoke(reference.node(), ActionEvent{Action::MOVE_RIGHT}));
+    check(calls == 1, "rejected empty callbacks leave no installed registration");
+  }
+}
+
+void deletingSceneCallbackAdmission() {
+  for (const int trigger : {0, 1, 2}) {
+    auto app = take(Application::create());
+    auto owner = take(ManagedScene::create(*app));
+    ui::Ref<Slider> reference;
+
+    take(ui::mount(*owner, ui::slider(reference, 25)));
+
+    struct Callback {
+      std::unique_ptr<ManagedScene> *owner;
+      int trigger;
+
+      Callback(std::unique_ptr<ManagedScene> *source, int when) : owner(source), trigger(when) {
+      }
+
+      Callback(const Callback &other) : owner(other.owner), trigger(other.trigger) {
+        if (trigger == 1) {
+          owner->reset();
+        }
+      }
+
+      Callback(Callback &&other) : owner(other.owner), trigger(other.trigger) {
+        if (trigger == 2) {
+          owner->reset();
+        }
+      }
+
+      explicit operator bool() {
+        if (trigger == 0) {
+          owner->reset();
+        }
+        return true;
+      }
+
+      void operator()(const SliderOperationEvent &) {
+      }
+    };
+
+    const auto registered = owner->onEditingFinished(reference.node(), Callback{&owner, trigger});
+
+    check(!owner && !registered && std::get_if<TreeError>(&registered.error().cause) &&
+            std::get<TreeError>(registered.error().cause) == TreeError::CLOSED,
+          "callback bool/copy/move can destroy an idle scene and admission returns CLOSED without registration");
+  }
+}
 } // namespace
 
 int main() {
   numericValidation();
   numericInput();
+  numericOracle();
   nativeKeyboard();
+  reentrantSyncCompletion();
+  widePointerAnchor();
   stationaryThumb();
   nativeDrag();
   nativeClickOnlyAndRemoval();
@@ -630,6 +973,11 @@ int main() {
   resourceParity();
   semanticNumericErrors();
   numericOnlyCaptionCapability();
+  emptyNumericCallbacks();
+  reentrantNumericProxyReporter();
+  numericOperationObservations();
+  deletingNumericProxyReporter();
+  deletingSceneCallbackAdmission();
   std::cout << "Slider native failures: " << failures << '\n';
 
   return failures == 0 ? 0 : 1;

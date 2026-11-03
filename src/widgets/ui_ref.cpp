@@ -722,16 +722,12 @@ std::expected<double, ManagedError> numericValue(const std::shared_ptr<RefTarget
   return owner ? RefAccess::numericValue(**owner, node ? *node : Node<Slider>{}) : std::unexpected(owner.error());
 }
 
-std::expected<PropertyUpdate<NumericValue>, ManagedError>
-numericValue(const std::shared_ptr<RefTarget> &target, const std::shared_ptr<const Node<Slider>> &node, double value,
-              std::source_location origin) {
+std::expected<PropertyUpdate<NumericValue>, ManagedError> numericValue(const std::shared_ptr<RefTarget> &target,
+                                                                       const std::shared_ptr<const Node<Slider>> &node,
+                                                                       double value, std::source_location) {
   auto owner = eventScene(target);
   auto result = owner ? RefAccess::numericValue(**owner, node ? *node : Node<Slider>{}, value)
                       : std::expected<PropertyUpdate<NumericValue>, ManagedError>{std::unexpected(owner.error())};
-
-  if (!result) {
-    RefAccess::report(result.error(), target, "slider.value", {}, "Slider", origin);
-  }
 
   return result;
 }
@@ -999,14 +995,25 @@ std::expected<double, ManagedError> NumericProperty::get() const {
 }
 
 std::expected<PropertyUpdate<NumericValue>, ManagedError> NumericProperty::result() const {
-  return last_ ? *last_ : std::expected<PropertyUpdate<NumericValue>, ManagedError>{
-                           std::unexpected(ManagedError{ManagedPhase::INPUT, {}, TreeError::INVALID_ARGUMENT, {}, {}})};
+  return last_ ? *last_
+               : std::expected<PropertyUpdate<NumericValue>, ManagedError>{
+                   std::unexpected(ManagedError{ManagedPhase::INPUT, {}, TreeError::INVALID_ARGUMENT, {}, {}})};
 }
 
 NumericProperty NumericProperty::set(double value, std::source_location origin) {
-  last_.emplace(detail::numericValue(target_, node_, value, origin));
+  const auto target = target_;
+  const auto node = node_;
+  auto receipt = detail::numericValue(target, node, value, origin);
 
-  return *this;
+  if (!receipt) {
+    detail::RefAccess::report(receipt.error(), target, "slider.value", {}, "Slider", origin);
+  }
+
+  NumericProperty observation(target, node, origin);
+
+  observation.last_.emplace(std::move(receipt));
+
+  return observation;
 }
 
 NumericProperty NumericProperty::operator=(double value) {
@@ -1014,16 +1021,24 @@ NumericProperty NumericProperty::operator=(double value) {
 }
 
 NumericProperty NumericProperty::operator=(const NumericProperty &other) {
+  const auto target = target_;
+  const auto node = node_;
+  const auto origin = origin_;
   const auto candidate = other.get();
 
   if (!candidate) {
-    last_.emplace(std::unexpected(candidate.error()));
-    detail::RefAccess::report(last_->error(), target_, "slider.value", {}, "Slider", origin_);
+    auto receipt = std::expected<PropertyUpdate<NumericValue>, ManagedError>{std::unexpected(candidate.error())};
 
-    return *this;
+    detail::RefAccess::report(receipt.error(), target, "slider.value", {}, "Slider", origin);
+
+    NumericProperty observation(target, node, origin);
+
+    observation.last_.emplace(std::move(receipt));
+
+    return observation;
   }
 
-  return set(*candidate, origin_);
+  return set(*candidate, origin);
 }
 
 TextProperty::TextProperty(std::shared_ptr<detail::RefTarget> target, TextResolver resolver,

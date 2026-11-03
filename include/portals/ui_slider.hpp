@@ -5,11 +5,63 @@
 #include <portals/ui_controls.hpp>
 
 #include <algorithm>
+#include <array>
 
 namespace portals::ui {
 namespace detail {
 inline ManagedError numericError(Node<Widget> node, NumericError cause) {
   auto result = error(node, TreeError::INVALID_ARGUMENT);
+
+  result.numeric = cause;
+
+  return result;
+}
+
+inline ManagedError numericSettingsError(Node<Widget> node, NumericError cause, const ControlSettings &settings) {
+  std::array<std::string_view, 3> candidates{"step", "minimum", "maximum"};
+
+  if (cause == NumericError::INVALID_RANGE) {
+    candidates = {"maximum", "minimum", {}};
+  } else if (cause == NumericError::OUT_OF_RANGE) {
+    const bool below = settings.value && *settings.value < settings.minimum.value_or(NumericRange{}.minimum);
+
+    candidates = {"value", below ? "minimum" : "maximum", {}};
+  }
+
+  if (cause == NumericError::INITIAL_CONFLICT) {
+    const auto supplied = std::ranges::find_if(settings.origins, [](const ControlPropertyOrigin &origin) {
+      return origin.source &&
+             (origin.path == "value" || origin.path == "minimum" || origin.path == "maximum" || origin.path == "step");
+    });
+
+    if (supplied != settings.origins.end()) {
+      candidates = {supplied->path, {}, {}};
+    }
+  }
+
+  std::string_view property;
+  std::shared_ptr<const ControlSourceOrigin> source;
+
+  for (const auto candidate : candidates) {
+    const auto supplied = std::ranges::find(settings.origins, candidate, &ControlPropertyOrigin::path);
+
+    if (supplied != settings.origins.end() && supplied->source) {
+      property = candidate;
+      source = supplied->source;
+
+      break;
+    }
+  }
+
+  if (!source) {
+    return numericError(node, cause);
+  }
+
+  auto diagnostic = std::make_shared<ControlContextDiagnostic>();
+
+  diagnostic->path = "Slider." + std::string(property);
+  diagnostic->origin = std::move(source);
+  auto result = controlContextError({ControlContextErrorCode::INVALID_VALUE, std::move(diagnostic)}, node);
 
   result.numeric = cause;
 
@@ -52,7 +104,7 @@ inline Description<Slider> sliderRecipe(ControlSettings arguments, std::optional
 
     if (model) {
       if (numericOverride(settings)) {
-        return std::unexpected(numericError(parent, NumericError::INITIAL_CONFLICT));
+        return std::unexpected(numericSettingsError(parent, NumericError::INITIAL_CONFLICT, settings));
       }
 
       auto current = model->snapshot();
@@ -64,7 +116,7 @@ inline Description<Slider> sliderRecipe(ControlSettings arguments, std::optional
       auto initial = sliderInitial(settings);
 
       if (!initial) {
-        return std::unexpected(numericError(parent, initial.error()));
+        return std::unexpected(numericSettingsError(parent, initial.error(), settings));
       }
     }
 
@@ -77,7 +129,7 @@ inline Description<Slider> sliderRecipe(ControlSettings arguments, std::optional
             const ControlSettings &settings) -> std::expected<void, ManagedError> {
       if (model) {
         if (numericOverride(settings)) {
-          return std::unexpected(numericError(node, NumericError::INITIAL_CONFLICT));
+          return std::unexpected(numericSettingsError(node, NumericError::INITIAL_CONFLICT, settings));
         }
 
         return scene.bind(node, *model);
@@ -86,7 +138,7 @@ inline Description<Slider> sliderRecipe(ControlSettings arguments, std::optional
       auto initial = sliderInitial(settings);
 
       if (!initial) {
-        return std::unexpected(numericError(node, initial.error()));
+        return std::unexpected(numericSettingsError(node, initial.error(), settings));
       }
 
       auto created = scene.numericState(initial->value(), initial->range());

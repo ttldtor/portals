@@ -261,8 +261,9 @@ private:
   Kind kind_;
 };
 
-/** @brief Weak numeric property observation with owning exact results for its last assignment.
- * Mutation uses the existing scene collector. Copies own neither the widget nor its scene.
+/** @brief Weak numeric property facade with an owning saved operation observation.
+ * Mutation returns a new observation and leaves this proxy's previous saved result unchanged.
+ * Errors use the existing scene collector. Copies own neither the widget nor its scene.
  * Copying a proxy/result can allocate in existing diagnostic storage; no implicit numeric conversion exists.
  */
 class NumericProperty {
@@ -275,30 +276,37 @@ public:
   /** @return Current checked double or exact owner/thread/frame/model error; no diagnostic is reported. */
   std::expected<double, ManagedError> get() const;
 
-  /** @return Exact last assignment receipt/error; a fresh proxy returns INVALID_ARGUMENT without reporting. */
+  /** @return Exact operation saved in this observation; a fresh proxy returns INVALID_ARGUMENT without reporting.
+   * Later mutations through this proxy return new observations and do not replace this saved result.
+   */
   std::expected<PropertyUpdate<NumericValue>, ManagedError> result() const;
 
   /** @param value Finite in-range replacement; never clamped or user-step snapped.
    * @param origin Assignment site retained by the existing collector on failure.
-   * @return Owning operation observation; equal values retain the original no-op receipt.
+   * @return New owning operation observation; this proxy's saved result stays unchanged.
+   * Equal values return the exact no-op receipt.
    */
   NumericProperty set(double value, std::source_location origin = std::source_location::current());
 
   /** @param value Replacement copied during this UI-affine call.
-   * @return Owning exact operation observation; errors are automatically collected.
+   * @return New owning exact operation observation; this proxy's saved result stays unchanged.
+   * Errors are automatically collected.
    */
   NumericProperty operator=(double value);
 
   /** @param other Source property read exactly once before writing this target's numeric value.
-   * @return Owning assignment observation; no binding or bounds are copied.
+   * @return New owning assignment observation; this proxy's saved result stays unchanged.
+   * No binding or bounds are copied.
    */
   NumericProperty operator=(const NumericProperty &other);
 
 private:
   template <class> friend class Ref;
+
   NumericProperty(std::shared_ptr<detail::RefTarget> target, std::shared_ptr<const Node<Slider>> node,
-                   std::source_location origin)
-      : target_(std::move(target)), node_(std::move(node)), origin_(origin) {}
+                  std::source_location origin)
+      : target_(std::move(target)), node_(std::move(node)), origin_(origin) {
+  }
 
   std::shared_ptr<detail::RefTarget> target_;
   std::shared_ptr<const Node<Slider>> node_;

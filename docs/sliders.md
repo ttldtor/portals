@@ -63,6 +63,8 @@ When you supply a numeric source, additional value/range/step settings are an
 | Escape or capture loss | End the drag and retain values already applied live |
 
 For range 0..10 and increment 3, the pointer can select 0, 3, 6, 9 and 10.
+Pointer snapping compares exact distances for the supplied binary64 numbers and
+rounds the selected tick once to the nearest double, with midpoint rounding to even.
 Keyboard increments preserve the offset of an externally assigned value between
 ticks. All computations use double precision; decimal fractions need not be exact.
 
@@ -87,7 +89,10 @@ external assignment creates no revision and does not conflict.
 `reference.value().get()` returns a checked double. Assignment returns an owning
 `NumericProperty` observation; `.result()` retains that operation's exact receipt
 or `ManagedError`. A fresh observation has no assignment and returns
-`INVALID_ARGUMENT`. Assigning one numeric property to another reads once and
+`INVALID_ARGUMENT`. A mutation returns a new observation; the proxy used to
+perform it keeps its previous saved result. Inspect the returned observation
+for that operation's reported error or exact receipt.
+Assigning one numeric property to another reads once and
 copies the value; it does not create a binding or copy the receiver's bounds.
 Captions use a separate Label. Caption access through a base or erased slider
 reference returns `INVALID_ARGUMENT`, including visible-text source reads.

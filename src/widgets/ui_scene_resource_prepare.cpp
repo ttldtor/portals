@@ -222,21 +222,6 @@ std::expected<void, ManagedError> prepareNodes(ResourceDocument &document, const
       return std::unexpected(std::move(failure));
     }
 
-    if (detail::ResourceAccess::entry(registry, node.factory.index).virtualView == "Slider") {
-      auto initial = detail::sliderInitial(resolved->settings);
-
-      if (!initial) {
-        const auto property = initial.error() == NumericError::INVALID_RANGE ? "maximum"
-                              : initial.error() == NumericError::OUT_OF_RANGE ? "value"
-                                                                              : "step";
-        auto failure = primitiveValueFailure(*resolved, property);
-
-        failure.numeric = initial.error();
-
-        return std::unexpected(std::move(failure));
-      }
-    }
-
     if (node.factory.kind == detail::ControlFactoryKind::MESSAGE_BINDING) {
       const auto &entry = detail::ResourceAccess::entry(registry, node.factory.index);
       const auto choice = resolved->settings.message.defaultChoice.value;
