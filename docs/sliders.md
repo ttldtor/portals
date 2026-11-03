@@ -27,6 +27,12 @@ focus/disabled appearances, frames and size constraints apply to it. Its preferr
 width is a content measurement; `.flex(1)` lets the surrounding row allocate more
 space. The text-width policy validates both one-cell glyphs together.
 
+![Volume drag, keyboard adjustment and Reset in the complete application](images/slider.gif)
+
+![Volume at 70 after a completed drag](images/slider.png)
+
+The recording runs the native Windows console backend. During a drag,
+`onPreview` reports the changing value; release finishes one gesture.
 ## Configure the source
 
 An independent recipe can stage its final range and increment:
