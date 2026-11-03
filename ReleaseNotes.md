@@ -7,6 +7,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Add action-backed popup menus with owned submenus and explicit Unicode mnemonics.
+  Ordinary scene composition supplies the overlay host; the unified popup reference
+  supports checked open/dismiss. Leaf activation closes the popup and restores focus
+  before invoking the shared action. Loaded scalar presentation keeps action bindings
+  in code. Include a complete public example and installed-consumer coverage.
+
 - Add `StatusBar` and `ui::statusBar(...)` for horizontal status sections with
   themed full-width backgrounds, disabled appearance and ordinary Row sizing.
   Labels and key hints retain their existing references and input behavior.

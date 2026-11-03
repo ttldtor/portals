@@ -6,6 +6,7 @@
 #include <portals/message_box.hpp>
 #include <portals/ui_controls.hpp>
 #include <portals/ui_ref.hpp>
+#include <portals/popup_menu.hpp>
 
 namespace portals::ui {
 namespace detail {
@@ -60,6 +61,9 @@ ManagedError textFailure(Node<Widget> node, TextValueError cause) {
 
 /** @brief Checked bridge to existing scene ownership and standard retained setters. */
 struct RefAccess {
+  static WidgetTree &tree(ManagedScene &scene) {
+    return scene.app_.tree();
+  }
   static EditorCommandResult activate(const std::shared_ptr<RefTarget> &target, std::source_location origin) {
     auto scene = eventScene(target);
     std::optional<ManagedError> failure;
@@ -799,6 +803,106 @@ DialogCommandResult dialogCommand(const std::shared_ptr<RefTarget> &target, bool
   if (!result && !RefAccess::focusReported(result.error())) {
     RefAccess::reportDialog(result.error(), target, opening ? "Dialog.open" : "Dialog.dismiss", origin);
   }
+  return RefAccess::dialogResult(std::move(result));
+}
+
+namespace {
+std::expected<Node<Dialog>, ManagedError> popupRoot(const std::shared_ptr<RefTarget> &target) {
+  auto owner = eventScene(target);
+
+  if (!owner) {
+    return std::unexpected(owner.error());
+  }
+
+  Node<Dialog> layer;
+  auto &tree = RefAccess::tree(**owner);
+  auto read = tree.read(target->node, [&](const Widget &widget) {
+    if (const auto *popup = dynamic_cast<const PopupMenu *>(&widget)) {
+      layer = popup->dialogRoot();
+    }
+  });
+
+  if (!read || layer == Node<Dialog>{}) {
+    return std::unexpected(ManagedError{ManagedPhase::INPUT, target->node.id(),
+      read ? TreeError::INVALID_ARGUMENT : read.error(), {}, {}});
+  }
+
+  return layer;
+}
+} // namespace
+
+std::expected<bool, ManagedError> popupOpened(const std::shared_ptr<RefTarget> &target) {
+  auto layer = popupRoot(target);
+
+  if (!layer) {
+    return std::unexpected(layer.error());
+  }
+
+  return target->scene->dialogOpened(*layer);
+}
+
+DialogCommandResult popupCommand(const std::shared_ptr<RefTarget> &target,
+                                 const std::shared_ptr<RefTarget> &anchor, bool opening,
+                                 std::source_location origin) {
+  auto layer = popupRoot(target);
+
+  if (!layer) {
+    return RefAccess::dialogResult(std::unexpected(layer.error()));
+  }
+
+  const auto command = [&]() -> std::expected<void, ManagedError> {
+    auto &scene = *target->scene;
+
+    if (!opening) {
+      return scene.dismissDialog(*layer);
+    }
+
+    auto opened = scene.dialogOpened(*layer);
+
+    if (!opened || *opened) {
+      return opened ? std::expected<void, ManagedError>{} : std::unexpected(opened.error());
+    }
+
+    auto eligible = RefAccess::tree(scene).inspect(target->node);
+
+    if (!eligible || !eligible->visible || !eligible->enabled || !eligible->regionalInputOpen) {
+      return std::unexpected(ManagedError{ManagedPhase::INPUT, target->node.id(),
+        eligible ? TreeError::INVALID_ARGUMENT : eligible.error(), {}, {}});
+    }
+
+    auto anchorOwner = eventScene(anchor);
+
+    if (!anchorOwner) {
+      return std::unexpected(anchorOwner.error());
+    }
+
+    if (*anchorOwner != &scene) {
+      return std::unexpected(ManagedError{ManagedPhase::INPUT, target->node.id(), TreeError::INVALID_ARGUMENT, {}, {}});
+    }
+
+    auto anchored = scene.dialogAnchor(*layer, anchor->node, DialogPlacement::BELOW_START);
+
+    if (!anchored) {
+      return anchored;
+    }
+
+    auto edited = RefAccess::tree(scene).edit(target->node, [](Widget &widget) {
+      static_cast<PopupMenu &>(widget).resetSelection();
+    });
+
+    if (!edited) {
+      return std::unexpected(ManagedError{ManagedPhase::INPUT, target->node.id(), edited.error(), {}, {}});
+    }
+
+    return scene.openDialog(*layer);
+  };
+
+  auto result = command();
+
+  if (!result && !RefAccess::focusReported(result.error())) {
+    RefAccess::reportDialog(result.error(), target, opening ? "PopupMenu.open" : "PopupMenu.dismiss", origin);
+  }
+
   return RefAccess::dialogResult(std::move(result));
 }
 

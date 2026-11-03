@@ -50,6 +50,8 @@ struct ActionAccess {
   static std::expected<void, ManagedError> attach(ManagedScene &, const ActionRef &);
   static std::expected<void, ManagedError> button(ManagedScene &, Node<Button>, const ActionRef &);
   static std::expected<void, ManagedError> menu(ManagedScene &, Node<Menu>, MountContext &);
+  static void popupLayer(ManagedScene &, Node<Dialog>, Node<Menu>);
+  static std::expected<void, ManagedError> preparePopup(ManagedScene &, Node<Menu>);
   static std::expected<void, ManagedError> stageMenu(ManagedScene &, MenuRegistration &);
   static std::expected<void, ManagedError> validateMenu(ManagedScene &, const MenuRegistration &);
   static void rollbackMenu(ManagedScene &, const MenuRegistration &);

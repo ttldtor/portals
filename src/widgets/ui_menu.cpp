@@ -3,11 +3,29 @@
 #include "ui_action_state.hpp"
 
 #include <portals/ui_menu.hpp>
+#include "dialog_state.hpp"
 
 #include <algorithm>
 #include <limits>
 
 namespace portals::ui::detail {
+void ActionAccess::popupLayer(ManagedScene &scene, Node<Dialog> layer, Node<Menu> menu) {
+  scene.findDialog(layer)->popupMenu = menu;
+}
+
+std::expected<void, ManagedError> ActionAccess::preparePopup(ManagedScene &scene, Node<Menu> node) {
+  std::expected<void, TreeError> prepared;
+  auto edited = scene.app_.tree().edit(node, [&](Menu &menu) {
+    prepared = menu.prepare(scene.app_.tree(), node, scene.widthPolicy());
+  });
+
+  if (!edited || !prepared) {
+    return std::unexpected(ManagedScene::error(ManagedPhase::MOUNT, node, edited ? prepared.error() : edited.error()));
+  }
+
+  return {};
+}
+
 struct MenuRegistration {
   struct StoreEntries {
     std::shared_ptr<ActionStore> store;
@@ -254,6 +272,23 @@ EventReply ActionAccess::routeMenu(ManagedScene &scene, Node<Menu> node, Menu &m
   }
 
   const auto reply = result->handled ? EventReply::HANDLED : EventReply::IGNORED;
+
+  if (result->dismiss != Node<Dialog>{}) {
+    const auto lifetime = std::weak_ptr<const void>(scene.lifetime_);
+    auto dismissed = scene.dismissDialog(result->dismiss);
+
+    if (!dismissed) {
+      if (!lifetime.expired() && !ManagedScene::focusReported(dismissed.error())) {
+        scene.remember(dismissed.error());
+      }
+
+      return EventReply::HANDLED;
+    }
+
+    if (lifetime.expired()) {
+      return EventReply::HANDLED;
+    }
+  }
 
   // Nothing borrowed from menu or scene is accessed after the callback enters.
   if (result->action) {
