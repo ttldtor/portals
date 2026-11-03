@@ -103,13 +103,6 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
-- Add a resident `RadioGroup` with a coherent immutable single-selection model,
-  stable row identities, compact scene-owned label/model recipes and unified Ref.
-  Keyboard/mouse selection, disabled/hidden options, read-only input, themed
-  clipped painting and code-bound scene-resource factories share the existing
-  state, error and cleanup contracts. Include a complete device settings example
-  and English/Russian guide.
-
 - Add opt-in Unicode, ASCII and Nerd Fonts rounded, chevron, slash and backslash
   glyph profiles for frames, title caps and scrollbars. Fluent methods, pipe stages,
   PSS and loaded scenes share the named maps and explicit portable fallback. Profiles
@@ -172,13 +165,6 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
-- Add a resident `RadioGroup` with a coherent immutable single-selection model,
-  stable row identities, compact scene-owned label/model recipes and unified Ref.
-  Keyboard/mouse selection, disabled/hidden options, read-only input, themed
-  clipped painting and code-bound scene-resource factories share the existing
-  state, error and cleanup contracts. Include a complete device settings example
-  and English/Russian guide.
-
 - Added `SizeMode::CONTENT` and fluent `fitWidth`/`fitHeight` plus per-axis
   minimum and maximum modifiers for sized widget recipes. Menus now prefer
   content size on both axes. PSS `min-width` now enforces a hard allocation
@@ -239,13 +225,6 @@ planned work is not included. An **Unreleased** heading has no publication date.
 ## v0.6.0 (2026-10-24)
 
 ### Added
-
-- Add a resident `RadioGroup` with a coherent immutable single-selection model,
-  stable row identities, compact scene-owned label/model recipes and unified Ref.
-  Keyboard/mouse selection, disabled/hidden options, read-only input, themed
-  clipped painting and code-bound scene-resource factories share the existing
-  state, error and cleanup contracts. Include a complete device settings example
-  and English/Russian guide.
 
 - Scrollbars support frame-matched, minimal, ASCII and owning custom glyph skins,
   with independently styled track, thumb, ends and corner parts through PSS.
