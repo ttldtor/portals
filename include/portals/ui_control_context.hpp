@@ -356,6 +356,12 @@ struct ControlSecureSettings {
   std::optional<bool> encryptWhileIdle{};       ///< Password requires true; explicit false is rejected.
 };
 
+/** @brief Nullable initial ordinal for an internally owned radio shorthand model only. */
+struct ControlRadioInitialSettings {
+  std::optional<bool> enabled{};        ///< Explicit false starts unselected; true requires an index.
+  std::optional<std::uint64_t> index{}; ///< Zero-based original source ordinal, not a stable ID.
+};
+
 /** @brief Owning sparse literals only; never contains IDs, models, handlers or live history. */
 struct ControlSettings {
   ~ControlSettings() = default;
@@ -467,6 +473,7 @@ struct ControlSettings {
   std::optional<std::int32_t> maxWidth{};             ///< Nonnegative hard column cap.
   std::optional<std::int32_t> minHeight{};            ///< Nonnegative hard row minimum.
   std::optional<std::int32_t> maxHeight{};            ///< Nonnegative hard row cap.
+  ControlRadioInitialSettings radioInitial{}; ///< Internal-model initial selection; external models reject overrides.
 };
 
 namespace detail {

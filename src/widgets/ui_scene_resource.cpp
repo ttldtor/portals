@@ -5,6 +5,7 @@
 #include <portals/ui_switch.hpp>
 #include <portals/ui_combo_box.hpp>
 #include <portals/ui_log_view.hpp>
+#include <portals/ui_radio_group.hpp>
 
 #include <algorithm>
 #include <array>
@@ -145,6 +146,9 @@ SceneResourceRegistry::SceneResourceRegistry() {
   });
   entries_.back().checked = true;
 
+  (void)add<RadioGroup>("RadioGroup", [](SceneResourceArguments arguments) {
+    return radioGroup(std::initializer_list<std::string_view>{}).settings(arguments.settings);
+  });
   (void)add<CheckBox>("CheckBox", [](SceneResourceArguments arguments) {
     return checkbox(arguments.text,
                     arguments.settings.state.value_or(arguments.checked ? CheckState::CHECKED : CheckState::UNCHECKED),

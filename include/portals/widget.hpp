@@ -553,6 +553,7 @@ public:
 private:
   friend struct detail::LayoutTraversalAccess;
   friend class EventRouter;
+  friend class RadioGroup;
   friend class LayoutSnapshot;
   // Allocation-free ancestry for the existing router; no record pointer escapes.
   std::expected<Node<Widget>, TreeError> inputParent(Node<Widget> node) const;
@@ -573,6 +574,9 @@ private:
   };
 
   std::expected<GeometryObservation, TreeError> observeGeometry(Node<Widget> node) const;
+  // Paint consumes already-arranged geometry inside its existing frame/hook. Final-layout
+  // observers use observeGeometry outside frames; neither path performs layout or allocates.
+  std::expected<NodeGeometry, TreeError> paintGeometry(Node<Widget> node) const;
   std::expected<std::uint64_t, TreeError> geometryRevision() const;
   std::uint64_t inputGeneration() const noexcept;
   struct State;

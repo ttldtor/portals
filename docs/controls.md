@@ -608,3 +608,7 @@ frame line patterns remain construction settings;
 [named glyph profiles](scroll-controls.md#named-glyph-profiles) also support PSS.
 
 [Boolean switches](switch.md) use bool models and observing checked properties.
+
+## Radio groups
+
+[Radio groups](radio-group.md) support a coherent resident single-selection model, unified Ref and ordinary keyboard/mouse input.

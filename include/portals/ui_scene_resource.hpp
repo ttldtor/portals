@@ -7,6 +7,7 @@
 #include <portals/ui_find_bar.hpp>
 #include <portals/ui_form_field.hpp>
 #include <portals/ui_layout.hpp>
+#include <portals/ui_menu.hpp>
 #include <portals/ui_modifiers.hpp>
 #include <portals/ui_password_controls.hpp>
 #include <portals/ui_primitives.hpp>
@@ -86,6 +87,38 @@ concept ResourceFactory =
  */
 class SceneResourceRegistry {
 public:
+  /** @brief Bind a named loaded popup to an owning code-defined action tree.
+   * @param name Unique resource type name. @param reference Unified observing popup slot.
+   * @param entries Owning finite entries copied now; resources never deserialize ActionRefs.
+   * @param options Code-owned finite budgets and plane caps.
+   * @return Registration result; loaded common sizing/classes/visible/enabled remain scalar data.
+   */
+  std::expected<void, SceneResourceErrorCode> popupMenu(std::string_view name, Ref<PopupMenu> reference,
+      std::initializer_list<PopupEntry> entries, PopupMenuOptions options = {}) {
+    std::vector<PopupEntry> owning(entries);
+    auto declarations = std::make_shared<Description<PopupMenu>>(
+      detail::popupMenuRecipe(owning, options, {}, DEFAULT_MENU_POLICY));
+
+    return add<PopupMenu>(name,
+      [reference, owning = std::move(owning), options, declarations](SceneResourceArguments arguments)
+          -> std::expected<Description<PopupMenu>, ManagedError> {
+        // Keep cold action stores alive even when the binding factory's local ActionSet has returned.
+        (void)declarations;
+        auto effective = options;
+        auto frame = detail::controlFrameOptions(arguments.settings, effective.frame, {});
+
+        if (!frame) {
+          return std::unexpected(frame.error());
+        }
+
+        if (*frame) {
+          effective.frame = **frame;
+        }
+
+        return detail::popupMenuRecipe(owning, effective, {}, DEFAULT_MENU_POLICY).reference(reference);
+      });
+  }
+
   /** @brief Register the safe builtin recipe adapters without mounting anything. */
   SceneResourceRegistry();
 
@@ -170,6 +203,7 @@ private:
     bool declaredHost{};
     bool declaredChoice{};
     bool declaredSwitch{};
+    bool declaredRadio{};
     bool unknownDialog{};
     std::string_view virtualView{};
     std::optional<std::size_t> semanticPropertyCount{};
@@ -198,6 +232,10 @@ private:
     entry.declaredDialog = std::derived_from<T, Dialog>;
     entry.declaredHost = std::derived_from<T, OverlayHost>;
     entry.declaredChoice = std::derived_from<T, ComboBox>;
+    entry.declaredRadio = std::same_as<T, RadioGroup>;
+    if constexpr (std::same_as<T, RadioGroup>) {
+      entry.text = false;
+    }
     entry.unknownDialog = std::same_as<T, Widget>;
 
     if constexpr (detail::IsVirtualList<T>::value || detail::IsVirtualTable<T>::value || detail::IsChart<T>::value) {
@@ -241,7 +279,7 @@ private:
       const auto materialized = detail::controlSettingsPresenceSet(arguments.settings);
       std::optional<ControlSettings> frameSettings;
 
-      if (detail::hasFrameSettings(arguments.settings.frame)) {
+      if (detail::hasFrameSettings(arguments.settings.frame) && !std::same_as<T, PopupMenu>) {
         if constexpr (!std::derived_from<T, SizedWidget>) {
           return std::unexpected(detail::frameContextError(ControlContextErrorCode::UNSUPPORTED_PROPERTY, "frame"));
         } else {
@@ -266,6 +304,8 @@ private:
         semanticSettings.emplace(arguments.settings);
       }
 
+      const auto radioReadOnly = arguments.settings.readOnly;
+      const auto radioInitial = arguments.settings.radioInitial;
       auto id = arguments.id;
       auto recipe = std::expected<Description<T>, ManagedError>(std::invoke(factory, std::move(arguments)));
 
@@ -281,6 +321,9 @@ private:
                                                                 .origins = std::move(switchOrigins)});
       }
 
+      if constexpr (std::same_as<T, RadioGroup>) {
+        (void)std::move(*recipe).settings(ControlSettings{.readOnly = radioReadOnly, .radioInitial = radioInitial});
+      }
       if (semanticSettings) {
         auto staged = detail::Access::messageSource(*recipe, *semanticSettings, materialized, semantic);
 
@@ -371,6 +414,55 @@ struct SceneResourceOptions {
   SceneResourceFormat format{
     SceneResourceFormat::LEGACY};           ///< Explicit grammar; ordinary resources retain their syntax.
   std::optional<ControlContext> controls{}; ///< Local immutable snapshot; absent inherits the containing scene context.
+
+  /** @brief Bind a loaded popup and retain the first registration failure for checked prepare/runApp.
+   * @param name Unique case-sensitive resource type name copied now.
+   * @param reference Observing popup slot, bound when the resource mounts.
+   * @param entries Owning code-defined action tree copied now; no ActionRefs are deserialized.
+   * @param options Finite popup budgets and caps, borrowed only during this call;
+   * the registry copies them inside the checked exception boundary.
+   * @return This configuration for chaining. The first failure stops later fluent registrations
+   * and rejects prepare before file reads, parsing, resolvers, factories or terminal entry.
+   * Internal allocation/capture exceptions become NO_MEMORY/CALLBACK_FAILED; caller argument
+   * evaluation and construction/copying of the options or scene may still throw.
+   */
+  SceneResourceOptions &popupMenu(std::string_view name, Ref<PopupMenu> reference,
+                                  std::initializer_list<PopupEntry> entries,
+                                  const PopupMenuOptions &options = {}) & noexcept {
+    if (registration.failure_) {
+      return *this;
+    }
+
+    try {
+      const auto added = registry.popupMenu(name, reference, entries, options);
+
+      if (!added) {
+        registration.failure_ =
+          std::pair{added.error(), added.error() == SceneResourceErrorCode::NO_MEMORY ? TreeError::NO_MEMORY
+                                                                                      : TreeError::INVALID_ARGUMENT};
+      }
+    } catch (const std::bad_alloc &) {
+      registration.failure_ = std::pair{SceneResourceErrorCode::NO_MEMORY, TreeError::NO_MEMORY};
+    } catch (...) {
+      registration.failure_ = std::pair{SceneResourceErrorCode::FACTORY, TreeError::CALLBACK_FAILED};
+    }
+
+    return *this;
+  }
+
+  /** @brief Bind a loaded popup on a temporary without copying existing adapters.
+   * @param name Unique owning resource type name. @param reference Observing popup slot.
+   * @param entries Code-owned action tree copied now. @param options Popup settings borrowed only now; copied inside
+   * the checked boundary.
+   * @return This rvalue, with the same sticky checked-error contract as the lvalue overload.
+   */
+  SceneResourceOptions &&popupMenu(std::string_view name, Ref<PopupMenu> reference,
+                                   std::initializer_list<PopupEntry> entries,
+                                   const PopupMenuOptions &options = {}) && noexcept {
+    popupMenu(name, reference, entries, options);
+
+    return std::move(*this);
+  }
 
   /** @brief Register a typed resource control and retain the first failure for checked prepare/runApp.
    * @tparam T Public Widget subtype returned by the factory, including final types.

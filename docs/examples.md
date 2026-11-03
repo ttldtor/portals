@@ -446,3 +446,5 @@ uses one `.scrollbar("fractional-block")` modifier and ordinary key input to sho
 one-eighth-cell edges on both axes. It builds as `guide_fractional_scroll` in the
 installed examples project and requires only `portals::core`. The complete source
 and terminal recording are included in the guide.
+
+The [popup menu example](examples/guide_popup_menu.cpp), target portals_docs_popup_menu, shows automatically hosted submenus, shared actions and explicit mnemonics.

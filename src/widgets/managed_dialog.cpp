@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include <portals/managed.hpp>
+#include <portals/menu.hpp>
 #include <portals/ui_description.hpp>
 
 #include "action_state.hpp"
@@ -69,6 +70,9 @@ Node<Widget> EventRouter::modalRoot(Node<Widget> exclude) const {
   for (auto &record : host->layers) {
     auto &layer = *record;
     auto eligible = state_->tree.inputEligible(layer.root);
+    if (eligible && *eligible && layer.popupMenu != Node<Menu>{}) {
+      eligible = state_->tree.inputEligible(layer.popupMenu);
+    }
     auto revision = state_->tree.inputRevision(layer.root);
     auto geometry = state_->tree.observeGeometry(layer.root);
     if (!eligible) {
@@ -272,6 +276,16 @@ std::expected<void, ManagedError> ManagedScene::dialog(Node<Dialog> node, Node<W
     auto binding = router.bind(
       node,
       [this, record, life = std::weak_ptr<const void>(lifetime_)](Dialog &, const RoutedEvent &event) {
+        if (record->open && record->popupMenu != Node<Menu>{} && std::holds_alternative<MouseInputEvent>(event) &&
+            !life.expired()) {
+          EventReply reply = EventReply::IGNORED;
+          auto routed = app_.tree().edit(record->popupMenu, [&](Menu &menu) {
+            reply = ui::detail::ActionAccess::routeMenu(*this, record->popupMenu, menu, event);
+          });
+
+          return routed ? reply : EventReply::HANDLED;
+        }
+
         const auto *action = std::get_if<ActionEvent>(&event);
         if (record->open && action && action->action == Action::ACTIVATE && action->modifiers == InputModifiers{} &&
             app_.router().state_->dialogEnter && !life.expired()) {
@@ -460,7 +474,7 @@ std::expected<void, ManagedError> ManagedScene::dialogAnchor(Node<Widget> node, 
   if (!live) {
     return std::unexpected(error(ManagedPhase::BIND, anchor, live.error()));
   }
-  if (!record || record->open || record->activationRevision ||
+  if (!record || record->open || (record->activationRevision && record->popupMenu == Node<Menu>{}) ||
       (placement != DialogPlacement::CENTER && placement != DialogPlacement::BELOW_START &&
        placement != DialogPlacement::ABOVE_START) ||
       !app_.router().within(dialogs_->body, anchor)) {

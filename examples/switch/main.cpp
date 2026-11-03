@@ -14,28 +14,28 @@ int main() {
   auto changes = std::make_shared<unsigned>(0);
 
   // clang-format off
-  auto scene=ui::scene([=](ManagedScene &owner) {
-    return ui::vbox(LinearOptions{.gap=1},
+  auto scene = ui::scene([=](ManagedScene &owner) {
+    return ui::vbox(LinearOptions{.gap = 1},
       ui::label("Device settings | Tab changes focus | F10 closes"),
       ui::label("Space, Enter or a click toggles the focused switch."),
-      ui::toggle(network,"Network",owner.state(true)).id("network").classes({"settings"}).fitWidth(),
-      ui::toggle("Notifications",false).fitWidth(),
-      ui::toggle(policy,"Managed updates",true).settings({.readOnly=true}).fitWidth(),
-      ui::toggle("Unavailable device",false).enabled(false).fitWidth(),
-      ui::hbox(LinearOptions{.gap=2},
+      ui::toggle(network, "Network", owner.state(true)).id("network").classes({"settings"}).fitWidth(),
+      ui::toggle("Notifications", false).fitWidth(),
+      ui::toggle(policy, "Managed updates", true).settings({.readOnly = true}).fitWidth(),
+      ui::toggle("Unavailable device", false).enabled(false).fitWidth(),
+      ui::hbox(LinearOptions{.gap = 2},
         ui::button("Turn network on").onClick([network] { network.checked() = true; }),
         ui::button("Turn network off").onClick([network] { network.checked() = false; }),
         ui::button("Apply managed update").onClick([policy] { policy.checked() = false; })),
-      ui::label(summary,"User changes: 0"),
+      ui::label(summary, "User changes: 0"),
       ui::label("Programmatic buttons also update read-only values; they do not increment the user counter."));
   });
 
   return scene
-    | ui::onChange(network,[summary,changes](bool on) {
+    | ui::onChange(network, [summary, changes](bool on) {
         summary.text() = text("Last user change: {} | User changes: {}", on ? "on" : "off", ++*changes);
       })
     | ui::theme(nordTheme())
-    | ui::onKey(key::F10,ui::quit)
+    | ui::onKey(key::F10, ui::quit)
     | ui::runApp();
   // clang-format on
 }

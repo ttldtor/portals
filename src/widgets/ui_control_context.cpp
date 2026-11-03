@@ -329,7 +329,9 @@ constexpr std::array<ControlPropertyDescriptor, detail::CONTROL_PROPERTY_COUNT> 
    {"minWidth", Kind::SIGNED_INTEGER, 1, {}},
    {"maxWidth", Kind::SIGNED_INTEGER, 1, {}},
    {"minHeight", Kind::SIGNED_INTEGER, 1, {}},
-   {"maxHeight", Kind::SIGNED_INTEGER, 1, {}}}};
+   {"maxHeight", Kind::SIGNED_INTEGER, 1, {}},
+   {"radioInitial.enabled", Kind::BOOLEAN, 2, {}},
+   {"radioInitial.index", Kind::UNSIGNED_INTEGER, 2, {}}}};
 static_assert(std::ranges::all_of(PROPERTIES, [](const auto &property) {
   return !property.path.empty();
 }));
@@ -383,6 +385,7 @@ constexpr Mask POSITIVE_UNSIGNED_MASK =
   propertyMask(3, 17, 18, 26, 27, 28, PAINT_LIMIT_PROPERTY, 45, 55, 59, 71, 72, 73, 83, 90, 100, 110, 111, 112, 113,
                114, 115, 116, 124, 125, 126, 127, 128, 129, 130, 137, 138, 139, 140, 143, 144, 145, 146, 147, 148, 149,
                150, 151, 155, 156, 157, 158, 172, 195, 201, 202, 203, 206, 221, 225, 226, 227, 228, 232, 233, 253, 254);
+constexpr Mask RADIO_MASK = SIZE_MASK | propertyMask(8, 259, 260);
 constexpr Mask CHECK_MASK = SIZE_MASK | TEXT_MASK | propertyMask(5, 6);
 constexpr Mask SWITCH_MASK = CHECK_MASK | propertyMask(8);
 constexpr Mask LAYOUT_MASK = SIZE_MASK | propertyMask(4, 22, 23, 24, 25, 30, 31, 32);
@@ -433,6 +436,8 @@ constexpr auto SPINNER_SCHEMA =
   withFrame(std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[39], PROPERTIES[193],
                            PROPERTIES[194], PROPERTIES[195], PROPERTIES[196], PROPERTIES[197], PROPERTIES[198],
                            PROPERTIES[199], PROPERTIES[200], PROPERTIES[201], PROPERTIES[202], PROPERTIES[203]}));
+constexpr auto RADIO_SCHEMA = withFrame(
+  std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[8], PROPERTIES[259], PROPERTIES[260]}));
 constexpr auto CHECK_SCHEMA =
   withFrame(std::to_array({PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[5], PROPERTIES[6]}));
 constexpr auto SWITCH_SCHEMA = withFrame(std::to_array(
@@ -573,6 +578,7 @@ static_assert(schemaMatchesMask(GAUGE_SCHEMA, GAUGE_MASK));
 static_assert(schemaMatchesMask(SPINNER_SCHEMA, SPINNER_MASK));
 static_assert(schemaMatchesMask(CHECK_SCHEMA, CHECK_MASK));
 static_assert(schemaMatchesMask(SWITCH_SCHEMA, SWITCH_MASK));
+static_assert(schemaMatchesMask(RADIO_SCHEMA, RADIO_MASK));
 static_assert(schemaMatchesMask(SCROLL_AREA_SCHEMA, SCROLL_AREA_MASK));
 static_assert(schemaMatchesMask(SCROLL_BAR_SCHEMA, SCROLL_BAR_MASK));
 static_assert(schemaMatchesMask(LOG_VIEW_SCHEMA, LOG_VIEW_MASK));
@@ -600,7 +606,7 @@ bool builtin(std::string_view name) noexcept {
   return name == "Spacer" || name == "Spacing" || name == "VBox" || name == "HBox" || name == "Label" ||
          name == "Switch" || name == "Button" || name == "CheckBox" || name == "LineEdit" || name == "ThreeState" ||
          name == "Password" || name == "FormField" || name == "FindBar" || name == "ComboBox" || name == "DropDown" ||
-         name == "StatusBar";
+         name == "StatusBar" || name == "RadioGroup";
 }
 
 Mask builtinMask(std::string_view name) noexcept {
@@ -624,6 +630,10 @@ Mask builtinMask(std::string_view name) noexcept {
 
   if (name == "Switch") {
     return SWITCH_MASK;
+  }
+
+  if (name == "RadioGroup") {
+    return RADIO_MASK;
   }
 
   if (name == "CheckBox" || name == "ThreeState") {
@@ -996,7 +1006,9 @@ ControlContextError exceptionError() noexcept {
   X(minWidth, 255)                                                                                                     \
   X(maxWidth, 256)                                                                                                     \
   X(minHeight, 257)                                                                                                    \
-  X(maxHeight, 258)
+  X(maxHeight, 258)                                                                                                    \
+  X(radioInitial.enabled, 259)                                                                                         \
+  X(radioInitial.index, 260)
 
 #define PORTALS_CONTROL_LEAVES(X)                                                                                      \
   PORTALS_CONTROL_BASE_LEAVES(X)                                                                                       \
@@ -1419,6 +1431,8 @@ void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &pr
       std::pair<std::string_view, bool>{"maximum", patch.maximum.has_value()},
       std::pair<std::string_view, bool>{"preferredWidth", patch.preferredWidth.has_value()},
       std::pair<std::string_view, bool>{"readOnly", patch.readOnly.has_value()},
+      std::pair<std::string_view, bool>{"radioInitial.enabled", patch.radioInitial.enabled.has_value()},
+      std::pair<std::string_view, bool>{"radioInitial.index", patch.radioInitial.index.has_value()},
       std::pair<std::string_view, bool>{"wheelStep", patch.wheelStep.has_value()},
       std::pair<std::string_view, bool>{"keyStep", patch.keyStep.has_value()},
       std::pair<std::string_view, bool>{"pageOverlap", patch.pageOverlap.has_value()},
@@ -2178,6 +2192,10 @@ std::span<const ControlPropertyDescriptor> controlPropertySchema(std::string_vie
 
   if (type == "Switch") {
     return SWITCH_SCHEMA;
+  }
+
+  if (type == "RadioGroup") {
+    return RADIO_SCHEMA;
   }
 
   if (type == "CheckBox" || type == "ThreeState") {

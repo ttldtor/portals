@@ -19,6 +19,123 @@ from finalize_html import GuideParser, color_cmake, color_shell, color_template_
 
 
 class GuideTests(unittest.TestCase):
+    def test_finalize_removes_orphaned_alphabet_bar_from_flat_native_typedef_index(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tag = root / "pages.tag"
+            tag.write_text('<tagfile/>', encoding="utf-8")
+            (root / "navtreedata.js").write_text(
+                'var NAVTREE = [["Project", "index.html", []]];\nvar NAVTREEINDEX = [];\n')
+            # Doxygen 1.18 emits these ten links above an ungrouped typedef list, without index IDs.
+            alphabet = '<div class="qindex">' + '<div class="alphasepar"></div>'.join(
+                f'<a class="qindex" href="#index_{letter}">{letter.upper()}</a>'
+                for letter in "cdefilrtvw") + '</div>'
+            members = ('<ul>\n<li>Callback&#160;:&#160;<a class="el" href="observer.html#callback">'
+                       'portals::ApplicationObserver</a></li>\n'
+                       '<li>WidgetType&#160;:&#160;<a class="el" href="element.html#type">'
+                       'portals::ui::ct::Element&lt; T &gt;</a></li>\n</ul>')
+            prefix, suffix = '<div class="contents">\n', '\n</div><!-- contents -->'
+            path = root / "functions_type.html"
+            path.write_text(prefix + alphabet + '\n' + members + suffix, encoding="utf-8")
+            finalize(root, tag)
+            self.assertEqual(path.read_text(encoding="utf-8"), prefix + '\n' + members + suffix)
+            first = path.read_bytes()
+            finalize(root, tag)
+            self.assertEqual(path.read_bytes(), first)
+
+    def test_finalize_preserves_typedef_alphabet_when_sections_or_unknown_links_exist(self):
+        alphabet = ('<div class="qindex"><a class="qindex" href="#index_c">C</a>'
+                    '<div class="alphasepar"></div><a class="qindex" href="#index_d">D</a></div>')
+        for content in (alphabet + '<a id="index_c"></a><ul><li>Callback</li></ul>',
+                        alphabet + '<a name="index_d"></a><ul><li>difference_type</li></ul>',
+                        alphabet + '<h3>Typedefs</h3><ul><li>Callback</li></ul>',
+                        alphabet.replace('#index_d', 'other.html#index_d') + '<ul><li>Callback</li></ul>'):
+            with self.subTest(content=content), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                tag = root / "pages.tag"
+                tag.write_text('<tagfile/>', encoding="utf-8")
+                (root / "navtreedata.js").write_text(
+                    'var NAVTREE = [["Project", "index.html", []]];\nvar NAVTREEINDEX = [];\n')
+                path = root / "functions_type.html"
+                path.write_text(content, encoding="utf-8")
+                first = path.read_bytes()
+                finalize(root, tag)
+                self.assertEqual(path.read_bytes(), first)
+
+    def test_finalize_preserves_other_native_member_index_alphabet_bars(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tag = root / "pages.tag"
+            tag.write_text('<tagfile/>', encoding="utf-8")
+            (root / "navtreedata.js").write_text(
+                'var NAVTREE = [["Project", "index.html", []]];\nvar NAVTREEINDEX = [];\n')
+            content = '<div class="qindex"><a class="qindex" href="#index_c">C</a></div><ul><li>Call</li></ul>'
+            names = ("functions.html", "functions_func.html", "functions_type_c.html", "classWidget.html")
+            for name in names:
+                (root / name).write_text(content, encoding="utf-8")
+            before = {name: (root / name).read_bytes() for name in names}
+            finalize(root, tag)
+            self.assertEqual({name: (root / name).read_bytes() for name in names}, before)
+
+    def test_finalize_preserves_encoded_destructor_indexes_with_literal_aliases(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tag = root / "pages.tag"
+            tag.write_text('<tagfile/>', encoding="utf-8")
+            (root / "navtreedata.js").write_text(
+                'var NAVTREE = [["Project", "index.html", []]];\nvar NAVTREEINDEX = [];\n')
+            names = ("functions_~.html", "functions_func_~.html")
+            for name in names:
+                (root / name).write_text(
+                    f'<a href="{name}#index_~">~</a>'
+                    '<h3 class="doxsection"><a id="index__7E" name="index__7E"></a>- ~ -</h3>'
+                    '<ul><li><a href="classWidget.html#a1">~Widget()</a></li></ul>'
+                    '<a id="index_a"></a>', encoding="utf-8")
+            finalize(root, tag)
+            for name in names:
+                content = (root / name).read_text(encoding="utf-8")
+                self.assertIn('<a id="index_~"></a><a id="index__7E" name="index__7E"></a>', content)
+                self.assertIn(f'href="{name}#index_~"', content)
+                self.assertIn('<a id="index_a"></a>', content)
+                self.assertEqual(content.count('id="index_~"'), 1)
+            first = {name: (root / name).read_bytes() for name in names}
+            finalize(root, tag)
+            self.assertEqual({name: (root / name).read_bytes() for name in names}, first)
+
+    def test_finalize_destructor_alias_requires_encoded_anchor_and_preserves_existing_alias(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tag = root / "pages.tag"
+            tag.write_text('<tagfile/>', encoding="utf-8")
+            (root / "navtreedata.js").write_text(
+                'var NAVTREE = [["Project", "index.html", []]];\nvar NAVTREEINDEX = [];\n')
+            pages = {
+                "functions_~.html": '<h3><a id="index_a"></a>- a -</h3>',
+                "functions_func_~.html": '<a id="index_~"></a><a id="index__7E"></a>',
+                "functions_vars_~.html": '<a name="index_~"></a><a id="index__7E"></a>',
+            }
+            for name, content in pages.items():
+                (root / name).write_text(content, encoding="utf-8")
+            before = {name: (root / name).read_bytes() for name in pages}
+            finalize(root, tag)
+            self.assertEqual({name: (root / name).read_bytes() for name in pages}, before)
+
+    def test_finalize_leaves_other_pages_and_nested_indexes_unchanged(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tag = root / "pages.tag"
+            tag.write_text('<tagfile/>', encoding="utf-8")
+            (root / "navtreedata.js").write_text(
+                'var NAVTREE = [["Project", "index.html", []]];\nvar NAVTREEINDEX = [];\n')
+            names = ("functions_a.html", "functions_func.html", "classWidget.html", "nested/functions_~.html")
+            for name in names:
+                path = root / name
+                path.parent.mkdir(exist_ok=True)
+                path.write_text('<h3><a id="index__7E" name="index__7E"></a>- ~ -</h3>', encoding="utf-8")
+            before = {name: (root / name).read_bytes() for name in names}
+            finalize(root, tag)
+            self.assertEqual({name: (root / name).read_bytes() for name in names}, before)
+
     def test_search_navigation_cancels_extra_scroll_without_trapping_tab_or_enter(self):
         original = """function setKeyActions(elem,action) {
     elem.addEventListener('keydown', action);

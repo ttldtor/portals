@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include "action_state.hpp"
+#include <portals/menu.hpp>
 
 #include <optional>
 
@@ -484,6 +485,27 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
 
       if (key->key == InputKey::TAB && key->action != KeyAction::RELEASE && !key->modifiers.alt &&
           !key->modifiers.control && !key->modifiers.super) {
+        const auto modal = modalRoot();
+        auto host = state_->dialogs.lock();
+
+        if (host) {
+          auto popup = std::ranges::find_if(host->layers, [&](const auto &record) {
+            return record->root == modal && record->popupMenu != Node<Menu>{};
+          });
+
+          if (popup != host->layers.end()) {
+            auto closed = route((*popup)->popupMenu, *key, true);
+
+            if (!closed) {
+              return closed;
+            }
+
+            if (modalRoot() == modal) {
+              return closed;
+            }
+          }
+        }
+
         auto next = traverse(key->modifiers.shift);
 
         if (!next) {

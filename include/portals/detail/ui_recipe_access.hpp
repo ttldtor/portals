@@ -440,6 +440,8 @@ struct Access {
       return "Password";
     } else if constexpr (std::same_as<T, Row>) {
       return "HBox";
+    } else if constexpr (std::same_as<T, RadioGroup>) {
+      return "RadioGroup";
     } else if constexpr (std::same_as<T, StatusBar>) {
       return "StatusBar";
     } else if constexpr (std::same_as<T, Column>) {

@@ -13,6 +13,10 @@ inline constexpr std::int32_t DIALOG_CLOSE_MIN_PANEL_WIDTH = DIALOG_CLOSE_SIZE.w
 
 // The managed owner validates affinity, exact ancestry and liveness before this allocation-free assignment.
 struct DialogAccess {
+  static std::optional<CellRect> anchorValue(const Dialog &dialog) noexcept {
+    return dialog.anchor_;
+  }
+
   static bool anchor(Dialog &dialog, std::optional<CellRect> value, DialogPlacement placement) noexcept {
     if (dialog.anchor_ == value && dialog.options_.placement == placement) {
       return false;

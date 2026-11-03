@@ -2021,10 +2021,10 @@ private:
     if (state.controlVariant) {
       const auto &identity = notificationStyle ? *notificationStyle : effective;
 
-      state.intrinsicStyle =
-        StyleTarget{.type = identity.type,
-                    .control = std::derived_from<T, Control> || std::same_as<T, LineEdit> || std::same_as<T, Password>,
-                    .baseTypes = identity.lineage};
+      state.intrinsicStyle = StyleTarget{.type = identity.type,
+                                         .control = std::same_as<T, RadioGroup> || std::derived_from<T, Control> ||
+                                                    std::same_as<T, LineEdit> || std::same_as<T, Password>,
+                                         .baseTypes = identity.lineage};
 
       if constexpr (std::same_as<T, Row> || std::same_as<T, Column>) {
         constexpr std::string_view NATURAL = std::same_as<T, Row> ? "Row" : "Column";

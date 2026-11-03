@@ -702,28 +702,30 @@ std::expected<bool, ManagedError> ManagedScene::changeModel(Node<CheckBox> node)
 
   auto entry = find(node);
 
-  if (!entry || !entry->changes || entry->changes->retired) {
+  if (!entry || !entry->changes || entry->changes->retired || entry->changes->radio) {
     return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
   }
 
   return entry->changes->boolean;
 }
 
-std::expected<void, ManagedError> ManagedScene::registerChange(Node<CheckBox> node, ChangeRecord record) {
-  auto model = changeModel(node);
-
-  if (!model) {
-    return std::unexpected(model.error());
+std::expected<void, ManagedError> ManagedScene::registerChange(Node<Widget> node, ChangeRecord record) {
+  auto allowed = boundary(ManagedPhase::BIND, node);
+  if (!allowed) {
+    return allowed;
   }
-
-  auto chain = find(node)->changes;
+  auto entry = find(node);
+  if (!entry || !entry->changes || entry->changes->retired) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
+  }
+  auto chain = entry->changes;
   const bool callable = std::visit(
     [](const auto &action) {
       return static_cast<bool>(action);
     },
     record.action);
 
-  if (record.action.index() != (*model ? 0U : 1U) || !callable) {
+  if (record.action.index() != (chain->radio ? 2U : chain->boolean ? 0U : 1U) || !callable) {
     return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
   }
 
@@ -760,15 +762,17 @@ std::expected<void, ManagedError> ManagedScene::registerChange(Node<CheckBox> no
       }
     }
 
-    model = changeModel(node);
-
-    if (!model) {
-      return std::unexpected(model.error());
+    allowed = boundary(ManagedPhase::BIND, node);
+    if (!allowed) {
+      return allowed;
     }
+    entry = find(node);
+    if (!entry || !entry->changes || entry->changes->retired) {
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
+    }
+    chain = entry->changes;
 
-    chain = find(node)->changes;
-
-    if (admitted->action.index() != (*model ? 0U : 1U)) {
+    if (admitted->action.index() != (chain->radio ? 2U : chain->boolean ? 0U : 1U)) {
       return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
     }
 
@@ -799,7 +803,7 @@ std::expected<void, ManagedError> ManagedScene::registerChange(Node<CheckBox> no
 }
 
 template <class T>
-void ManagedScene::dispatchChange(Node<CheckBox> node, const std::shared_ptr<ChangeChain> &chain,
+void ManagedScene::dispatchChange(Node<Widget> node, const std::shared_ptr<ChangeChain> &chain,
                                   const std::weak_ptr<const void> &lifetime, const PropertyUpdate<T> &receipt,
                                   std::size_t count) {
   auto origin = std::source_location::current();
@@ -843,7 +847,7 @@ void ManagedScene::dispatchChange(Node<CheckBox> node, const std::shared_ptr<Cha
 
 template <class T>
 std::function<void(std::expected<PropertyUpdate<T>, TreeError>)> ManagedScene::checkboxCallback(
-  Node<CheckBox> node, std::shared_ptr<ChangeChain> chain,
+  Node<Widget> node, std::shared_ptr<ChangeChain> chain,
   std::function<std::expected<void, TreeError>(std::expected<PropertyUpdate<T>, TreeError>)> changed) {
   return [this, node, chain = std::move(chain), lifetime = std::weak_ptr<const void>(lifetime_),
           changed = ui::detail::currentSceneCallback(facadeContext(), std::move(changed))](
@@ -1450,6 +1454,161 @@ void ManagedScene::dispatchClicks(Node<Button> node, const std::shared_ptr<Click
       remember(error(ManagedPhase::INPUT, node, TreeError::CALLBACK_FAILED), origin);
     }
   }
+}
+
+std::expected<ManagedState<RadioGroupValue>, ManagedError>
+ManagedScene::radioState(std::span<const TextValue> captions, KeyTextResolver resolver, CollectionLimits limits) try {
+  std::vector<RadioOption> options(std::initializer_list<RadioOption>{});
+  options.reserve(captions.size());
+  for (const auto &caption : captions) {
+    options.emplace_back(caption);
+  }
+  return radioState(options, std::move(resolver), limits);
+} catch (const std::bad_alloc &) {
+  return std::unexpected(error(ManagedPhase::STATE, root_, TreeError::NO_MEMORY));
+}
+
+std::expected<ManagedState<RadioGroupValue>, ManagedError>
+ManagedScene::radioState(std::span<const RadioOption> options, KeyTextResolver resolver, CollectionLimits limits) {
+  const auto node = root_;
+  auto allowed = boundary(ManagedPhase::STATE, node);
+  if (!allowed) {
+    return std::unexpected(allowed.error());
+  }
+  const auto lifetime = std::weak_ptr<const void>(lifetime_);
+  const auto policy = widthPolicy();
+
+  try {
+    if (!limits.maxRows || options.size() > limits.maxRows) {
+      return std::unexpected(
+        error(ManagedPhase::STATE, node, !limits.maxRows ? TreeError::INVALID_ARGUMENT : TreeError::NODE_LIMIT));
+    }
+
+    std::vector<ModelRow<RadioItem>> rows(std::initializer_list<ModelRow<RadioItem>>{});
+
+    rows.reserve(options.size());
+    for (std::size_t index = 0; index < options.size(); ++index) {
+      auto text = resolver ? options[index].text.resolve(policy, resolver) : options[index].text.resolve(policy);
+      // The synchronous resolver may destroy an otherwise idle scene. Never consult
+      // this owner again until the captured lifetime has been checked.
+      if (lifetime.expired()) {
+        return std::unexpected(ManagedScene::error(ManagedPhase::STATE, node, TreeError::CLOSED));
+      }
+      if (!text) {
+        auto failure = error(ManagedPhase::STATE, node, TreeError::INVALID_ARGUMENT);
+        if (auto original = std::get_if<TextError>(&text.error())) {
+          failure.text = *original;
+        } else {
+          failure.resource = std::get<TextResourceError>(text.error());
+        }
+        return std::unexpected(failure);
+      }
+      rows.push_back({RowId{static_cast<std::uint64_t>(index) + 1, 1},
+                      RadioItem{std::move(*text), options[index].enabled, options[index].visible}});
+    }
+    auto collection = RowCollection<RadioItem>::from(rows, limits);
+    if (!collection) {
+      return std::unexpected(error(ManagedPhase::STATE, node, collection.error()));
+    }
+    auto value = RadioGroupValue::from(std::move(*collection));
+    if (!value) {
+      return std::unexpected(error(ManagedPhase::STATE, node, value.error()));
+    }
+    // Generated identities belong to this immutable shorthand source. Pointer input cannot
+    // transfer their ordinals to an independently prepared collection.
+    value->shorthand_ = true;
+    auto selected = value->withSelection(value->firstEligible());
+    if (lifetime.expired()) {
+      return std::unexpected(ManagedScene::error(ManagedPhase::STATE, node, TreeError::CLOSED));
+    }
+    return state(std::move(*selected));
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(
+      ManagedScene::error(ManagedPhase::STATE, node, lifetime.expired() ? TreeError::CLOSED : TreeError::NO_MEMORY));
+  } catch (...) {
+    return std::unexpected(ManagedScene::error(ManagedPhase::STATE, node,
+                                               lifetime.expired() ? TreeError::CLOSED : TreeError::CALLBACK_FAILED));
+  }
+}
+
+std::expected<ManagedState<RadioGroupValue>, ManagedError>
+ManagedScene::radioState(std::initializer_list<std::string_view> captions) try {
+  std::vector<RadioOption> options(std::initializer_list<RadioOption>{});
+  options.reserve(captions.size());
+  for (auto caption : captions) {
+    options.emplace_back(caption);
+  }
+  return radioState(options);
+} catch (const std::bad_alloc &) {
+  return std::unexpected(error(ManagedPhase::STATE, root_, TreeError::NO_MEMORY));
+}
+
+std::expected<void, ManagedError>
+ManagedScene::bind(Node<RadioGroup> node, ManagedState<RadioGroupValue> model,
+                   std::function<std::expected<void, TreeError>(RadioGroupResult)> changed) {
+  ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
+  decltype(changed) incomingChanged;
+
+  incomingChanged.swap(changed);
+  auto entry = bindingEntry(node);
+  if (!entry) {
+    return std::unexpected(entry.error());
+  }
+  auto property = model.lock();
+  if (!property || model.scene_ != root_.id()) {
+    return std::unexpected(error(ManagedPhase::BIND, node, property ? TreeError::INVALID_ARGUMENT : property.error()));
+  }
+  try {
+    auto snapshot = (*property)->snapshot();
+    if (!snapshot) {
+      return std::unexpected(error(ManagedPhase::BIND, node, snapshot.error()));
+    }
+    for (const auto &row : (*snapshot)->value.rows()) {
+      if (row.value.text.policy() != widthPolicy()) {
+        return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
+      }
+    }
+    auto changes = std::make_shared<ChangeChain>();
+
+    changes->radio = true;
+    auto bound = bindRadioGroup(app_.tree(), app_.router(), node, *property,
+                                checkboxCallback<RadioGroupValue>(node, changes, std::move(incomingChanged)));
+    if (!bound) {
+      return std::unexpected(error(ManagedPhase::BIND, node, bound.error()));
+    }
+    (*entry)->binding.emplace<RadioGroupBinding>(std::move(*bound));
+    (*entry)->changes = std::move(changes);
+    return {};
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
+  } catch (...) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CALLBACK_FAILED));
+  }
+}
+
+std::expected<RadioGroupValue, ManagedError> ManagedScene::radioValue(Node<RadioGroup> node) {
+  auto allowed = boundary(ManagedPhase::BIND, node);
+  if (!allowed) {
+    return std::unexpected(allowed.error());
+  }
+  const auto entry = find(node);
+  auto binding = entry ? std::get_if<RadioGroupBinding>(&entry->binding) : nullptr;
+  auto value = binding ? binding->value() : std::unexpected(TreeError::INVALID_ARGUMENT);
+  return value ? std::expected<RadioGroupValue, ManagedError>(std::move(*value))
+               : std::unexpected(error(ManagedPhase::BIND, node, value.error()));
+}
+
+std::expected<PropertyUpdate<RadioGroupValue>, ManagedError> ManagedScene::selectRadio(Node<RadioGroup> node,
+                                                                                       std::optional<RowId> id) {
+  auto allowed = boundary(ManagedPhase::BIND, node);
+  if (!allowed) {
+    return std::unexpected(allowed.error());
+  }
+  const auto entry = find(node);
+  auto binding = entry ? std::get_if<RadioGroupBinding>(&entry->binding) : nullptr;
+  auto receipt = binding ? binding->select(id) : std::unexpected(TreeError::INVALID_ARGUMENT);
+  return receipt ? std::expected<PropertyUpdate<RadioGroupValue>, ManagedError>(std::move(*receipt))
+                 : std::unexpected(error(ManagedPhase::BIND, node, receipt.error()));
 }
 
 std::expected<void, ManagedError>
@@ -2507,6 +2666,8 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
             status = check->sync();
           } else if (auto *typedCheck = std::get_if<CheckStateBinding>(&entry->binding)) {
             status = typedCheck->sync();
+          } else if (auto *radio = std::get_if<RadioGroupBinding>(&entry->binding)) {
+            status = radio->sync();
           }
         }
 
