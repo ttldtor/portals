@@ -11,6 +11,25 @@
 namespace portals::ui {
 
 namespace {
+constexpr const char *numericErrorName(NumericError error) noexcept {
+  switch (error) {
+  case NumericError::NOT_FINITE:
+    return "NOT_FINITE";
+  case NumericError::INVALID_RANGE:
+    return "INVALID_RANGE";
+  case NumericError::INVALID_STEP:
+    return "INVALID_STEP";
+  case NumericError::UNREPRESENTABLE_STEP:
+    return "UNREPRESENTABLE_STEP";
+  case NumericError::OUT_OF_RANGE:
+    return "OUT_OF_RANGE";
+  case NumericError::INITIAL_CONFLICT:
+    return "INITIAL_CONFLICT";
+  }
+
+  return "UNKNOWN";
+}
+
 constexpr const char *searchErrorName(SearchError error) noexcept {
   switch (error) {
   case SearchError::INVALID_ARGUMENT:
@@ -664,6 +683,9 @@ void reportFailure(const ManagedError &failure, std::source_location origin, std
   }
   if (failure.search) {
     std::fprintf(stderr, " search=SearchError(%s)", searchErrorName(*failure.search));
+  }
+  if (failure.numeric) {
+    std::fprintf(stderr, " numeric=NumericError(%s)", numericErrorName(*failure.numeric));
   }
 
   if (failure.password) {

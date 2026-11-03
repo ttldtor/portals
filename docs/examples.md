@@ -20,6 +20,7 @@ The categories describe the learning path; the source directories remain stable.
 | Category | Program and guide | What it demonstrates |
 | --- | --- | --- |
 | Basics | [Boolean Switch](switch.md), `portals_switch_example` | Model-backed toggles, read-only policy and concise programmatic assignments. |
+| Basics | [Numeric Slider](sliders.md), `portals_slider_example` | Volume and balance, live previews, Reset and gesture completion. |
 | Basics | [Command desk](menus.md), `portals_commands_example` | One Save command in a menu, a button and a shortcut; an editable draft and a saved caption. No CLI. |
 | Showcase | [Shipping desk](choices.md), `portals_choices_example` | Editable city choice, full-source popup browsing, delivery selection and dark/light palette changes. No CLI. |
 | Showcase | [Unicode panels](../examples/unicode_panels/main.cpp), `portals_unicode_panels` | Two synthetic file tables with Cyrillic, CJK, emoji and combining text, framed panels and an anchored popup. No filesystem access. See [Unicode qualification](#unicode-panels). |

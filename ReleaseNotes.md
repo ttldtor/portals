@@ -7,6 +7,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Add horizontal numeric sliders with validated finite sources, live user changes,
+  gesture completion, keyboard/mouse input and checked numeric references.
+  Scene resources share range, increment, read-only and sizing settings; external
+  numeric sources reject competing initial values and retain newer writes during drag.
+
 - Add boolean `Switch` and `ui::toggle` with model-backed input, read-only policy,
   configurable equal-width ASCII decorations and observing `checked()` properties.
   Programmatic assignment collects typed failures and preserves exact receipts;

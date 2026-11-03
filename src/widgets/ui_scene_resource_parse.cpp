@@ -437,12 +437,14 @@ private:
   }
 
   const ControlPropertyDescriptor *descriptor(std::string_view path) const {
-    for (const auto type :
-         {"FindBar",     "FormField",   "Password",     "LineEdit",      "ComboBox",      "DropDown",
-          "CheckBox",    "RadioGroup",  "VBox",         "Button",        "Border",        "Gauge",
-          "Spinner",     "ScrollArea",  "ScrollBar",    "LogView",       "Overlay",       "HelpView",
-          "KeyHints",    "VirtualList", "VirtualTable", "StatusBar",     "Chart",         "DataStateView",
-          "OverlayHost", "Dialog",      "MessageBox",   "Notifications", "ThemeSelector", "ThemeSelectorCatalog"}) {
+    for (const auto type : {"FindBar",    "FormField",     "Password",      "LineEdit",
+                            "ComboBox",   "DropDown",      "CheckBox",      "Switch",
+                            "RadioGroup", "Slider",        "VBox",          "Button",
+                            "Border",     "Gauge",         "Spinner",       "ScrollArea",
+                            "ScrollBar",  "LogView",       "Overlay",       "HelpView",
+                            "KeyHints",   "VirtualList",   "VirtualTable",  "StatusBar",
+                            "Chart",      "DataStateView", "OverlayHost",   "Dialog",
+                            "MessageBox", "Notifications", "ThemeSelector", "ThemeSelectorCatalog"}) {
       const auto schema = controlPropertySchema(type);
       const auto found = std::ranges::find(schema, path, &ControlPropertyDescriptor::path);
 
@@ -919,6 +921,8 @@ private:
         settings.yRange.maximum = *value;
       } else if (path == "wheelStep") {
         settings.wheelStep = *value;
+      } else if (path == "step") {
+        settings.step = *value;
       } else {
         return std::unexpected(document_.propertyFailure(Code::UNKNOWN_PROPERTY, offset, type, path));
       }
@@ -926,8 +930,8 @@ private:
       return {};
     }
 
-    if (path == "keyStep" || path == "pageOverlap" || path == "spinnerInterval" || path == "interval" ||
-        path == "radioInitial.index") {
+    if (path == "keyStep" || path == "pageOverlap" || path == "pageSteps" || path == "spinnerInterval" ||
+        path == "interval" || path == "radioInitial.index") {
       const auto value = capacity<std::uint64_t>();
 
       if (!value) {
@@ -942,6 +946,8 @@ private:
         settings.spinnerInterval = *value;
       } else if (path == "keyStep") {
         settings.keyStep = *value;
+      } else if (path == "pageSteps") {
+        settings.pageSteps = *value;
       } else {
         settings.pageOverlap = *value;
       }

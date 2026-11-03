@@ -5,6 +5,7 @@
 #include <portals/application.hpp>
 #include <portals/detail/pss_data.hpp>
 #include <portals/password.hpp>
+#include <portals/numeric.hpp>
 #include <portals/pss_file_error.hpp>
 #include <portals/scene_resource_error.hpp>
 #include <portals/shortcut.hpp>
@@ -89,6 +90,7 @@ struct ManagedError {
   std::optional<AsyncError> async{}; ///< Exact coroutine/admission failure, independent of its tree bridge.
   std::optional<BackgroundError> background{}; ///< Exact executor admission cause when an async request fails.
   std::optional<SearchError> search{};         ///< Exact bounded choice/search provider failure.
+  std::optional<NumericError> numeric{};       ///< Exact finite-value, range, step or numeric-source conflict cause.
 };
 
 namespace detail {

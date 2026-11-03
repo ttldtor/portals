@@ -172,9 +172,16 @@ bool ManagedScene::usesGeometrySnapshot() const noexcept {
 }
 
 bool ManagedScene::requiresPointerMotion() const noexcept {
-  return scroll_ && std::ranges::any_of(entries_, [](const auto &entry) {
-           return !entry->removed && entry->scrollIntent;
-         });
+  return std::ranges::any_of(entries_, [this](const auto &entry) {
+    if (entry->removed) {
+      return false;
+    }
+    if (scroll_ && entry->scrollIntent) {
+      return true;
+    }
+    return std::holds_alternative<SliderBinding>(entry->binding) && app_.tree().read(entry->node, [](const Widget &) {
+    });
+  });
 }
 
 std::expected<void, ManagedError> ManagedScene::setScrollOffset(Node<Widget> node, ScrollAxis axis,

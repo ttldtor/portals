@@ -24,6 +24,7 @@ The [first application](first-application.md) develops a quick-note form in four
 | Place controls in cells | [Grid and overlay](grid.md) |
 | Change a control through a reference | [Control references](text-property.md) |
 | Edit text | [LineEdit](line-edit.md) |
+| Adjust a bounded numeric value | [Numeric sliders](sliders.md) |
 | Choose a source row | [ComboBox and DropDown](choices.md) |
 | Share commands between a menu, buttons and keys | [Menus](menus.md) |
 | Validate a labeled editor | [Form fields](form-fields.md) |

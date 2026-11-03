@@ -474,6 +474,8 @@ struct ControlSettings {
   std::optional<std::int32_t> minHeight{};            ///< Nonnegative hard row minimum.
   std::optional<std::int32_t> maxHeight{};            ///< Nonnegative hard row cap.
   ControlRadioInitialSettings radioInitial{}; ///< Internal-model initial selection; external models reject overrides.
+  std::optional<double> step{};             ///< Slider increment; appended to preserve the positional aggregate prefix.
+  std::optional<std::uint64_t> pageSteps{}; ///< Positive Slider increment count per PageUp/PageDown action.
 };
 
 namespace detail {

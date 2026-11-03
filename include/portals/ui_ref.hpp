@@ -80,6 +80,11 @@ EditorCommandResult activateButton(const std::shared_ptr<RefTarget> &target, std
  */
 std::expected<void, ManagedError> gaugeValue(std::shared_ptr<RefTarget> target, std::shared_ptr<const Node<Gauge>> node,
                                              double value, bool relative, std::source_location origin);
+std::expected<double, ManagedError> numericValue(const std::shared_ptr<RefTarget> &,
+                                                 const std::shared_ptr<const Node<Slider>> &);
+std::expected<PropertyUpdate<NumericValue>, ManagedError>
+numericValue(const std::shared_ptr<RefTarget> &, const std::shared_ptr<const Node<Slider>> &, double,
+              std::source_location);
 std::expected<FieldValidation, ManagedError> fieldValidation(const std::shared_ptr<RefTarget> &target);
 /** @param target Weak group identity. @param node Typed slot retained without reading it before affinity admission.
  * @return Exact authoritative value or affinity/liveness failure.
@@ -271,6 +276,59 @@ private:
 
   std::shared_ptr<detail::RefTarget> target_;
   Kind kind_;
+};
+
+/** @brief Weak numeric property facade with an owning saved operation observation.
+ * Mutation returns a new observation and leaves this proxy's previous saved result unchanged.
+ * Errors use the existing scene collector. Copies own neither the widget nor its scene.
+ * Copying a proxy/result can allocate in existing diagnostic storage; no implicit numeric conversion exists.
+ */
+class NumericProperty {
+public:
+  /** @param other Observation copied without reading or changing a numeric source. */
+  NumericProperty(const NumericProperty &other) = default;
+  /** @param other Observation transferred without reading or changing a numeric source. */
+  NumericProperty(NumericProperty &&other) = default;
+
+  /** @return Current checked double or exact owner/thread/frame/model error; no diagnostic is reported. */
+  std::expected<double, ManagedError> get() const;
+
+  /** @return Exact operation saved in this observation; a fresh proxy returns INVALID_ARGUMENT without reporting.
+   * Later mutations through this proxy return new observations and do not replace this saved result.
+   */
+  std::expected<PropertyUpdate<NumericValue>, ManagedError> result() const;
+
+  /** @param value Finite in-range replacement; never clamped or user-step snapped.
+   * @param origin Assignment site retained by the existing collector on failure.
+   * @return New owning operation observation; this proxy's saved result stays unchanged.
+   * Equal values return the exact no-op receipt.
+   */
+  NumericProperty set(double value, std::source_location origin = std::source_location::current());
+
+  /** @param value Replacement copied during this UI-affine call.
+   * @return New owning exact operation observation; this proxy's saved result stays unchanged.
+   * Errors are automatically collected.
+   */
+  NumericProperty operator=(double value);
+
+  /** @param other Source property read exactly once before writing this target's numeric value.
+   * @return New owning assignment observation; this proxy's saved result stays unchanged.
+   * No binding or bounds are copied.
+   */
+  NumericProperty operator=(const NumericProperty &other);
+
+private:
+  template <class> friend class Ref;
+
+  NumericProperty(std::shared_ptr<detail::RefTarget> target, std::shared_ptr<const Node<Slider>> node,
+                  std::source_location origin)
+      : target_(std::move(target)), node_(std::move(node)), origin_(origin) {
+  }
+
+  std::shared_ptr<detail::RefTarget> target_;
+  std::shared_ptr<const Node<Slider>> node_;
+  std::source_location origin_;
+  std::optional<std::expected<PropertyUpdate<NumericValue>, ManagedError>> last_;
 };
 
 class TextProperty;
@@ -609,7 +667,8 @@ private:
 
 /** @brief Typed Widget observation; explicit composite specializations reuse their existing weak facades.
  * @tparam T Public Widget subtype, or a supported composite facade specialization for MessageDialog/ThemeSelector.
- * This primary template provides Widget capabilities; text() is available for Control subtypes and exactly LineEdit.
+ * This primary template provides Widget capabilities; text() is available for caption controls and exactly LineEdit.
+ * Numeric-only Slider views expose value() instead; base/erased caption access remains checked at runtime.
  * Construct on the receiving UI thread. Publish with Description::reference only after successful mount.
  * Copies share the observation and never own the scene/widget. Copy/destruction may occur on other
  * threads after publication, but operations reject them before reading mutable scene/slot state.
@@ -729,6 +788,17 @@ public:
     auto node = this->slot_ ? std::shared_ptr<const Node<T>>(this->slot_, &this->slot_->node) : nullptr;
 
     return detail::gaugeValue(target(), std::move(node), value, false, origin);
+  }
+
+  /** @param origin Property access site retained for assignment diagnostics.
+   * @return Weak numeric property; get is explicit and assignments own their exact results.
+   */
+  NumericProperty value(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, Slider>
+  {
+    auto node = this->slot_ ? std::shared_ptr<const Node<Slider>>(this->slot_, &this->slot_->node) : nullptr;
+
+    return NumericProperty(target(), std::move(node), origin);
   }
 
   /** @param delta Finite amount added to the current value; nonfinite/out-of-range results reject without mutation.
@@ -1179,7 +1249,7 @@ public:
    * Resolver capture/storage allocation may throw before a mutation starts.
    */
   TextProperty text(TextResolver resolver = {}, std::source_location origin = std::source_location::current()) const
-    requires(std::derived_from<T, Control> || std::same_as<T, LineEdit>)
+    requires((std::derived_from<T, Control> && !std::derived_from<T, Slider>) || std::same_as<T, LineEdit>)
   {
     auto target = this->slot_ ? std::shared_ptr<detail::RefTarget>(this->slot_, &this->slot_->target) : nullptr;
     constexpr std::string_view TYPE = std::same_as<T, LineEdit>     ? "LineEdit"

@@ -220,7 +220,17 @@ std::expected<void, ManagedError> prepareNodes(ResourceDocument &document, const
     auto resolved = controls.resolve(node.name, node.arguments.settings);
 
     if (!resolved) {
-      return std::unexpected(detail::controlContextError(resolved.error()));
+      auto failure = detail::controlContextError(resolved.error());
+      const auto &factory = detail::ResourceAccess::entry(registry, node.factory.index);
+      const auto &original = resolved.error();
+
+      if (factory.virtualView == "Slider" && original.code == ControlContextErrorCode::INVALID_VALUE &&
+          original.diagnostic && original.diagnostic->path.ends_with(".step") && node.arguments.settings.step &&
+          std::isfinite(*node.arguments.settings.step) && *node.arguments.settings.step <= 0) {
+        failure.numeric = NumericError::INVALID_STEP;
+      }
+
+      return std::unexpected(std::move(failure));
     }
 
     if (node.factory.kind == detail::ControlFactoryKind::MESSAGE_BINDING) {

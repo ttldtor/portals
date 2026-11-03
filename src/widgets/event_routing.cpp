@@ -244,6 +244,7 @@ std::expected<DispatchResult, TreeError> EventRouter::routeCaptured(const MouseI
   if (event.action == MouseAction::RELEASE) {
     // Admission is established above. Unhook first, while the local shared entry keeps
     // this one final callback alive independently of the weak token and router record.
+    capture.cancellation->released.store(true);
     auto retired = retirePointerCapture(true);
 
     if (!retired) {

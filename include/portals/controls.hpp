@@ -417,6 +417,7 @@ private:
  * WOULD_BLOCK (active frame), CALLBACK_FAILED or invalidation error. Failure retains the previous text.
  * @throws std::bad_alloc If construction of the by-value argument fails before this function begins;
  * allocation inside the mutation boundary is returned as NO_MEMORY instead.
+ * Numeric-only Slider views reject caption mutation with INVALID_ARGUMENT, including through a base node.
  */
 std::expected<void, TreeError> setControlText(WidgetTree &tree, Node<Control> node, GraphemeText text);
 /** @brief Replace owning paint values on UI between frames; equal is a no-op, changes invalidate paint.

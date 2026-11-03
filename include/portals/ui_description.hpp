@@ -6,6 +6,8 @@
 #include <portals/detail/ui_recipe_access.hpp>
 #include <portals/ui_key_info.hpp>
 
+#include <cmath>
+
 namespace portals::ui {
 /** @tparam Child Consuming Description type, including layouts and final custom widgets.
  * @param child Owning single child transferred into this same mount transaction.
@@ -155,7 +157,7 @@ public:
    * @return Consuming native Gauge recipe with a sparse value override.
    */
   Description &&value(double value) &&
-    requires std::same_as<T, Gauge>
+    requires(std::same_as<T, Gauge> || std::same_as<T, Slider>)
   {
     return std::move(*this).scalarSettings({.value = value});
   }
@@ -164,7 +166,7 @@ public:
    * @return Consuming native Gauge recipe with a sparse lower-bound override.
    */
   Description &&minimum(double value) &&
-    requires std::same_as<T, Gauge>
+    requires(std::same_as<T, Gauge> || std::same_as<T, Slider>)
   {
     return std::move(*this).scalarSettings({.minimum = value});
   }
@@ -173,7 +175,7 @@ public:
    * @return Consuming native Gauge recipe with a sparse upper-bound override.
    */
   Description &&maximum(double value) &&
-    requires std::same_as<T, Gauge>
+    requires(std::same_as<T, Gauge> || std::same_as<T, Slider>)
   {
     return std::move(*this).scalarSettings({.maximum = value});
   }
@@ -183,7 +185,7 @@ public:
    * @return Consuming native Gauge recipe staging both bounds together.
    */
   Description &&range(double minimum, double maximum) &&
-    requires std::same_as<T, Gauge>
+    requires(std::same_as<T, Gauge> || std::same_as<T, Slider>)
   {
     return std::move(*this).scalarSettings({.minimum = minimum, .maximum = maximum});
   }
@@ -192,9 +194,27 @@ public:
    * @return Consuming native Gauge recipe with a sparse preferred-width override.
    */
   Description &&preferredWidth(std::int32_t cells) &&
-    requires std::same_as<T, Gauge>
+    requires(std::same_as<T, Gauge> || std::same_as<T, Slider>)
   {
     return std::move(*this).scalarSettings({.preferredWidth = cells});
+  }
+
+  /** @param amount Positive finite user increment; programmatic values are not snapped.
+   * @return Consuming unbound Slider recipe with a staged numeric source setting.
+   */
+  Description &&step(double amount) &&
+    requires std::same_as<T, Slider>
+  {
+    return std::move(*this).scalarSettings({.step = amount});
+  }
+
+  /** @param count Positive user increments per PageUp/PageDown action.
+   * @return Consuming Slider recipe using the same checked options as resources.
+   */
+  Description &&pageSteps(std::uint64_t count) &&
+    requires std::same_as<T, Slider>
+  {
+    return std::move(*this).scalarSettings({.pageSteps = count});
   }
 
   /** @param cells Positive finite logical cells per wheel event.
@@ -256,7 +276,7 @@ public:
    */
   Description &&readOnly(bool value = true) &&
     requires(std::same_as<T, LineEdit> || std::same_as<T, Password> || std::same_as<T, ScrollArea> ||
-             std::same_as<T, ScrollBar>)
+             std::same_as<T, ScrollBar> || std::same_as<T, Slider>)
   {
     return std::move(*this).scalarSettings({.readOnly = value});
   }
@@ -2076,13 +2096,46 @@ private:
 
     const auto type = inheritControlSettings && state.controlVariant ? std::string_view(*state.controlVariant)
                                                                      : std::string_view(*state.controlType);
+    const auto numericCandidates = [&] {
+      if constexpr (std::derived_from<T, Slider>) {
+        return std::array{
+          state.controlPatch.value ? state.controlPatch.value : state.controlArguments.value,
+          state.controlPatch.minimum ? state.controlPatch.minimum : state.controlArguments.minimum,
+          state.controlPatch.maximum ? state.controlPatch.maximum : state.controlArguments.maximum,
+          state.controlPatch.step ? state.controlPatch.step : state.controlArguments.step};
+      } else {
+        return std::array<std::optional<double>, 0>{};
+      }
+    }();
     auto effective = inheritControlSettings
                        ? controls.resolve(type, detail::Access::mergeControlSettings(std::move(state.controlArguments),
                                                                                      state.controlPatch))
                        : controls.resolve(type, state.controlPatch);
 
     if (!effective) {
-      return std::unexpected(detail::controlContextError(effective.error(), parent));
+      auto failure = detail::controlContextError(effective.error(), parent);
+
+      if constexpr (std::derived_from<T, Slider>) {
+        const auto &original = effective.error();
+
+        if (original.code == ControlContextErrorCode::INVALID_VALUE && original.diagnostic) {
+          constexpr std::array<std::string_view, 4> LEAVES{".value", ".minimum", ".maximum", ".step"};
+
+          for (std::size_t index = 0; index < LEAVES.size(); ++index) {
+            const auto candidate = numericCandidates[index];
+
+            if (candidate && original.diagnostic->path.ends_with(LEAVES[index])) {
+              if (!std::isfinite(*candidate)) {
+                failure.numeric = NumericError::NOT_FINITE;
+              } else if (LEAVES[index] == ".step" && *candidate <= 0) {
+                failure.numeric = NumericError::INVALID_STEP;
+              }
+            }
+          }
+        }
+      }
+
+      return std::unexpected(std::move(failure));
     }
 
     auto validated = validateControlIdentity(state, *effective, context.controls, parent,
@@ -3172,6 +3225,35 @@ inline Description<Widget> Access::forwardOuter(Description<Widget> description)
   }
 
   return description;
+}
+
+template <class T> void Access::numericSettings(Description<T> &description, ControlSettings patch) {
+  static_assert(std::derived_from<T, Slider>);
+
+  if (!description.state_ || description.state_->prerequisiteFailure ||
+      (!patch.value && !patch.minimum && !patch.maximum && !patch.step && !patch.pageSteps && !patch.readOnly &&
+       !patch.preferredWidth && !patch.maxPaintCells)) {
+    return;
+  }
+
+  auto &state = *description.state_;
+  auto merged = mergeControlSettings(state.controlPatch, patch);
+
+  merged.origin = state.controlPatch.origin;
+  merged.origins = state.controlPatch.origins;
+
+  for (const auto &origin : patch.origins) {
+    auto found = std::ranges::find(merged.origins, origin.path, &ControlPropertyOrigin::path);
+
+    if (found == merged.origins.end()) {
+      merged.origins.push_back(origin);
+    } else {
+      found->source = origin.source;
+    }
+  }
+
+  state.controlPatch = std::move(merged);
+  state.settingsRequested = true;
 }
 
 template <class T> Description<Widget> Access::erase(Description<T> description) {

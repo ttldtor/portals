@@ -11,6 +11,7 @@ in text remain data and render as the text subsystem's placeholders.
 For a command shared by several buttons or explicit key bindings, see
 [shared actions](actions.md).
 An ordinary [Menu](menus.md) presents those commands with keyboard and mouse selection.
+Use a [Slider](sliders.md) for finite numeric values with a validated source, live drag tracking and keyboard steps.
 
 ```cpp
 const auto run =

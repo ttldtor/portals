@@ -20,6 +20,8 @@ constexpr std::size_t FRAME_CUSTOM_GLYPH_MAX_BYTES = 64;
 constexpr std::size_t FRAME_FIRST_CUSTOM_GLYPH_PROPERTY = 174;
 constexpr std::size_t PAINT_LIMIT_PROPERTY = 39;
 constexpr std::size_t WHEEL_STEP_PROPERTY = 44;
+constexpr std::size_t SLIDER_STEP_PROPERTY = 261;
+constexpr std::size_t SLIDER_PAGE_STEPS_PROPERTY = 262;
 constexpr std::size_t MINIMUM_THUMB_PROPERTY = 47;
 constexpr std::size_t ROW_HEIGHT_PROPERTY = 69;
 constexpr std::size_t STATUS_ROWS_PROPERTY = 81;
@@ -331,7 +333,9 @@ constexpr std::array<ControlPropertyDescriptor, detail::CONTROL_PROPERTY_COUNT> 
    {"minHeight", Kind::SIGNED_INTEGER, 1, {}},
    {"maxHeight", Kind::SIGNED_INTEGER, 1, {}},
    {"radioInitial.enabled", Kind::BOOLEAN, 2, {}},
-   {"radioInitial.index", Kind::UNSIGNED_INTEGER, 2, {}}}};
+   {"radioInitial.index", Kind::UNSIGNED_INTEGER, 2, {}},
+   {"step", Kind::FLOATING_POINT, 1, {}},
+   {"pageSteps", Kind::UNSIGNED_INTEGER, 1, {}}}};
 static_assert(std::ranges::all_of(PROPERTIES, [](const auto &property) {
   return !property.path.empty();
 }));
@@ -355,6 +359,8 @@ constexpr Mask PASSWORD_MASK =
 constexpr Mask BUTTON_MASK = SIZE_MASK | TEXT_MASK | propertyMask(37);
 constexpr Mask BORDER_MASK = SIZE_MASK | propertyMask(38, 39);
 constexpr Mask GAUGE_MASK = BORDER_MASK | propertyMask(40, 41, 42, 43);
+constexpr Mask SLIDER_MASK = SIZE_MASK | propertyMask(8, 39, 40, 41, 42, 43, SLIDER_STEP_PROPERTY,
+                                                      SLIDER_PAGE_STEPS_PROPERTY);
 constexpr Mask SPINNER_MASK = SIZE_MASK | propertyMask(39, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203);
 constexpr Mask SCROLLBAR_MASK = propertyMask(204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 234, 235, 236,
                                              237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248);
@@ -381,10 +387,10 @@ constexpr Mask THEME_SELECTOR_MASK =
   DIALOG_MASK | propertyMask(131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142);
 constexpr Mask THEME_CATALOG_MASK =
   THEME_SELECTOR_MASK | propertyMask(143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158);
-constexpr Mask POSITIVE_UNSIGNED_MASK =
-  propertyMask(3, 17, 18, 26, 27, 28, PAINT_LIMIT_PROPERTY, 45, 55, 59, 71, 72, 73, 83, 90, 100, 110, 111, 112, 113,
-               114, 115, 116, 124, 125, 126, 127, 128, 129, 130, 137, 138, 139, 140, 143, 144, 145, 146, 147, 148, 149,
-               150, 151, 155, 156, 157, 158, 172, 195, 201, 202, 203, 206, 221, 225, 226, 227, 228, 232, 233, 253, 254);
+constexpr Mask POSITIVE_UNSIGNED_MASK = propertyMask(
+  3, 17, 18, 26, 27, 28, PAINT_LIMIT_PROPERTY, 45, 55, 59, 71, 72, 73, 83, 90, 100, 110, 111, 112, 113, 114, 115, 116,
+  124, 125, 126, 127, 128, 129, 130, 137, 138, 139, 140, 143, 144, 145, 146, 147, 148, 149, 150, 151, 155, 156, 157,
+  158, 172, 195, 201, 202, 203, 206, 221, 225, 226, 227, 228, 232, 233, 253, 254, SLIDER_PAGE_STEPS_PROPERTY);
 constexpr Mask RADIO_MASK = SIZE_MASK | propertyMask(8, 259, 260);
 constexpr Mask CHECK_MASK = SIZE_MASK | TEXT_MASK | propertyMask(5, 6);
 constexpr Mask SWITCH_MASK = CHECK_MASK | propertyMask(8);
@@ -432,6 +438,10 @@ constexpr auto BORDER_SCHEMA =
 constexpr auto GAUGE_SCHEMA =
   withFrame(std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[38], PROPERTIES[39], PROPERTIES[40],
                            PROPERTIES[41], PROPERTIES[42], PROPERTIES[43]}));
+constexpr auto SLIDER_SCHEMA =
+  withFrame(std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[8], PROPERTIES[39], PROPERTIES[40],
+                           PROPERTIES[41], PROPERTIES[42], PROPERTIES[43], PROPERTIES[SLIDER_STEP_PROPERTY],
+                           PROPERTIES[SLIDER_PAGE_STEPS_PROPERTY]}));
 constexpr auto SPINNER_SCHEMA =
   withFrame(std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[39], PROPERTIES[193],
                            PROPERTIES[194], PROPERTIES[195], PROPERTIES[196], PROPERTIES[197], PROPERTIES[198],
@@ -575,6 +585,7 @@ static_assert(schemaMatchesMask(TEXT_SCHEMA, TEXT_MASK | SIZE_MASK));
 static_assert(schemaMatchesMask(BUTTON_SCHEMA, BUTTON_MASK));
 static_assert(schemaMatchesMask(BORDER_SCHEMA, BORDER_MASK));
 static_assert(schemaMatchesMask(GAUGE_SCHEMA, GAUGE_MASK));
+static_assert(schemaMatchesMask(SLIDER_SCHEMA, SLIDER_MASK));
 static_assert(schemaMatchesMask(SPINNER_SCHEMA, SPINNER_MASK));
 static_assert(schemaMatchesMask(CHECK_SCHEMA, CHECK_MASK));
 static_assert(schemaMatchesMask(SWITCH_SCHEMA, SWITCH_MASK));
@@ -606,7 +617,7 @@ bool builtin(std::string_view name) noexcept {
   return name == "Spacer" || name == "Spacing" || name == "VBox" || name == "HBox" || name == "Label" ||
          name == "Switch" || name == "Button" || name == "CheckBox" || name == "LineEdit" || name == "ThreeState" ||
          name == "Password" || name == "FormField" || name == "FindBar" || name == "ComboBox" || name == "DropDown" ||
-         name == "StatusBar" || name == "RadioGroup";
+         name == "StatusBar" || name == "RadioGroup" || name == "Slider";
 }
 
 Mask builtinMask(std::string_view name) noexcept {
@@ -623,6 +634,9 @@ Mask builtinMask(std::string_view name) noexcept {
 
   if (name == "Gauge") {
     return GAUGE_MASK;
+  }
+  if (name == "Slider") {
+    return SLIDER_MASK;
   }
   if (name == "VBox" || name == "HBox" || name == "StatusBar") {
     return LAYOUT_MASK;
@@ -1008,7 +1022,9 @@ ControlContextError exceptionError() noexcept {
   X(minHeight, 257)                                                                                                    \
   X(maxHeight, 258)                                                                                                    \
   X(radioInitial.enabled, 259)                                                                                         \
-  X(radioInitial.index, 260)
+  X(radioInitial.index, 260)                                                                                           \
+  X(step, 261)                                                                                                         \
+  X(pageSteps, 262)
 
 #define PORTALS_CONTROL_LEAVES(X)                                                                                      \
   PORTALS_CONTROL_BASE_LEAVES(X)                                                                                       \
@@ -1153,7 +1169,7 @@ template <class T> bool validValue(const T &value, std::size_t index) noexcept {
             (value.size() <= FRAME_CUSTOM_GLYPH_MAX_BYTES && !value.empty())) &&
            ((index != 191 && index != 192) || value.size() <= FRAME_CUSTOM_GLYPH_MAX_BYTES);
   } else if constexpr (std::same_as<T, double>) {
-    return std::isfinite(value) && (index != WHEEL_STEP_PROPERTY || value > 0);
+    return std::isfinite(value) && ((index != WHEEL_STEP_PROPERTY && index != SLIDER_STEP_PROPERTY) || value > 0);
   } else if constexpr (std::same_as<T, ToastPlacement>) {
     return value == ToastPlacement::BOTTOM_END || value == ToastPlacement::TOP_END ||
            value == ToastPlacement::BOTTOM_START || value == ToastPlacement::TOP_START;
@@ -1430,6 +1446,8 @@ void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &pr
       std::pair<std::string_view, bool>{"minimum", patch.minimum.has_value()},
       std::pair<std::string_view, bool>{"maximum", patch.maximum.has_value()},
       std::pair<std::string_view, bool>{"preferredWidth", patch.preferredWidth.has_value()},
+      std::pair<std::string_view, bool>{"step", patch.step.has_value()},
+      std::pair<std::string_view, bool>{"pageSteps", patch.pageSteps.has_value()},
       std::pair<std::string_view, bool>{"readOnly", patch.readOnly.has_value()},
       std::pair<std::string_view, bool>{"radioInitial.enabled", patch.radioInitial.enabled.has_value()},
       std::pair<std::string_view, bool>{"radioInitial.index", patch.radioInitial.index.has_value()},
@@ -2231,6 +2249,9 @@ std::span<const ControlPropertyDescriptor> controlPropertySchema(std::string_vie
 
   if (type == "Gauge") {
     return GAUGE_SCHEMA;
+  }
+  if (type == "Slider") {
+    return SLIDER_SCHEMA;
   }
   if (type == "Spinner") {
     return SPINNER_SCHEMA;

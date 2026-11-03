@@ -82,6 +82,7 @@ struct ActionRegistration;
 struct ActionCancellation;
 struct FocusScopeRegistration;
 struct PointerCaptureCancellation;
+struct PointerCaptureAccess;
 struct EventRouterAccess;
 struct FocusChange;
 struct DialogRecord;
@@ -152,6 +153,7 @@ public:
 
 private:
   friend class EventRouter;
+  friend struct detail::PointerCaptureAccess;
   explicit PointerCapture(std::weak_ptr<detail::PointerCaptureCancellation> cancellation) noexcept;
   std::weak_ptr<detail::PointerCaptureCancellation> cancellation_;
 };

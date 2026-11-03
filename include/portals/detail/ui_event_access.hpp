@@ -70,6 +70,7 @@ struct ClickAccess {
 /** @brief Checked registration bridge to the editor's existing managed-owned binding. */
 struct EditorEventAccess {
   /** @tparam Event TextEditedEvent or EditingFinishedEvent.
+   * @tparam T Editor or Slider view supplied by the public family-checked stage.
    * @tparam Callback Owning managed action receiving the event or no arguments.
    * @param scene Existing scene in which the editor reference was published.
    * @param reference Observing identity; no widget or scene ownership is retained.
@@ -77,8 +78,8 @@ struct EditorEventAccess {
    * @param origin Original registration site retained in failure diagnostics.
    * @return Exact affinity, identity, budget or checked allocation error.
    */
-  template <class Event, class Callback>
-  static std::expected<void, ManagedError> attach(ManagedScene &scene, const Ref<LineEdit> &reference,
+  template <class Event, class Callback, class T>
+  static std::expected<void, ManagedError> attach(ManagedScene &scene, const Ref<T> &reference,
                                                   Callback callback, std::source_location origin) {
     commandOrigin(callback, origin);
     auto owner = eventScene(reference.target());
@@ -123,7 +124,9 @@ struct ChangeAccess {
         ManagedError{ManagedPhase::BIND, reference.node().id(), TreeError::INVALID_ARGUMENT, {}, {}});
     }
 
-    if constexpr (std::same_as<T, RadioGroup>) {
+    if constexpr (std::derived_from<T, Slider>) {
+      return scene.onChange(Node<Slider>{reference.node()}, std::move(callback), origin);
+    } else if constexpr (std::same_as<T, RadioGroup>) {
       return scene.onChange(reference.node(), std::move(callback), origin);
     } else {
       return scene.onChange(Node<CheckBox>{reference.node()}, std::move(callback), origin);
