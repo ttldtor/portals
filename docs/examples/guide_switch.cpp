@@ -7,18 +7,20 @@
  */
 int main() {
   using namespace portals;
+
   ui::Ref<Switch> network;
   ui::Ref<Label> status;
   // clang-format off
-  auto scene=ui::scene([=](ManagedScene &owner) {
+  auto scene = ui::scene([=](ManagedScene &owner) {
     return ui::vbox(
-      ui::toggle(network,"Network",owner.state(false)),
+      ui::toggle(network, "Network", owner.state(false)),
       ui::button("Enable").onClick([network] { network.checked() = true; }),
-      ui::label(status,"Waiting for a user change"));
+      ui::label(status, "Waiting for a user change"));
   });
+
   return scene
-    | ui::onChange(network,[status](bool on) { status.text() = on ? "User enabled network" : "User disabled network"; })
-    | ui::onKey(key::F10,ui::quit)
+    | ui::onChange(network, [status](bool on) { status.text() = on ? "User enabled network" : "User disabled network"; })
+    | ui::onKey(key::F10, ui::quit)
     | ui::runApp();
   // clang-format on
 }

@@ -5,6 +5,10 @@
 Use `ui::toggle` to display and edit a boolean value. The public widget type is
 `Switch`; the factory name avoids the C++ keyword `switch`.
 
+![User toggles and programmatic updates](images/switch.gif)
+
+[Still image](images/switch.png). The keyboard demonstration includes a read-only switch and programmatic updates that preserve the user-change count.
+
 ## Complete program
 
 This [complete guide program](examples/guide_switch.cpp) binds a scene-owned bool,

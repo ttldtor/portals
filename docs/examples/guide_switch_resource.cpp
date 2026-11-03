@@ -7,8 +7,11 @@
  */
 int main() {
   using namespace portals;
+
   ui::SceneResourceOptions options;
+
   options.format = ui::SceneResourceFormat::CONFIGURATION;
+
   auto scene = ui::scene(R"scene(
     scene { VBox {
       Switch#network { checked=true text="Network" classes="settings" }
@@ -18,14 +21,16 @@ int main() {
     } }
   )scene",
                          options);
+
   const auto network = scene.get<Switch>("network");
   const auto enable = scene.get<Button>("enable");
   const auto status = scene.get<Label>("status");
+
   // clang-format off
   return std::move(scene)
-    | ui::onClick(enable,[network] { network.checked() = true; })
-    | ui::onChange(network,[status](bool on) { status.text() = on ? "User enabled network" : "User disabled network"; })
-    | ui::onKey(key::F10,ui::quit)
+    | ui::onClick(enable, [network] { network.checked() = true; })
+    | ui::onChange(network, [status](bool on) { status.text() = on ? "User enabled network" : "User disabled network"; })
+    | ui::onKey(key::F10, ui::quit)
     | ui::runApp();
   // clang-format on
 }
