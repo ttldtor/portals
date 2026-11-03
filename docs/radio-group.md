@@ -27,6 +27,10 @@ theme styling, framing and resizing. Build `portals_radio_group_example` with
 F10 exits through the standard runner, which restores the terminal and reports
 typed setup/runtime errors. The application links to `portals::core` (C++23).
 
+![Keyboard selection, focus and a read-only radio group](images/radio-group.gif)
+
+[Still frame](images/radio-group.png)
+
 ## Use the same model and reference
 
 The following complete client creates scene-owned state without exposing
