@@ -7,6 +7,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Add horizontal numeric sliders with validated finite sources, live user changes,
+  gesture completion, keyboard/mouse input and checked numeric references.
+  Scene resources share range, increment, read-only and sizing settings; external
+  numeric sources reject competing initial values and retain newer writes during drag.
+
 - Add action-backed popup menus with owned submenus and explicit Unicode mnemonics.
   Ordinary scene composition supplies the overlay host; the unified popup reference
   supports checked open/dismiss. Leaf activation closes the popup and restores focus

@@ -59,7 +59,18 @@ struct ActionRegistration {
 // Worker tokens own neither callbacks nor widgets; registration identity is a separate weak owner.
 struct PointerCaptureCancellation {
   std::atomic<bool> connected{true};
+  std::atomic<bool> released{false};
   std::weak_ptr<ActionCancellation> binding;
+};
+
+// Final captured release is admitted after token disconnection. Only that executing
+// callback retains the cancellation owner, so stale uncaptured releases cannot match.
+struct PointerCaptureAccess {
+  static bool released(const PointerCapture &capture) noexcept {
+    const auto cancellation = capture.cancellation_.lock();
+
+    return cancellation && cancellation->released.load();
+  }
 };
 
 struct PointerCaptureRecord {

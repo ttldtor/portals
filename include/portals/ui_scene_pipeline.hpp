@@ -533,6 +533,27 @@ auto onChange(Ref<T> reference, Callback callback, std::source_location origin =
   }};
 }
 
+/** @tparam T Slider view type. @tparam Callback Owning double or exact numeric receipt action.
+ * @param reference Bound slider published by this scene.
+ * @param callback FIFO live user-change observation; external writes and no-ops never invoke it.
+ * @param origin Original registration site retained for diagnostics.
+ * @return Checked scene stage using the existing numeric binding and handler budgets.
+ */
+template <class T, class Callback>
+  requires(std::derived_from<T, Slider> && std::copy_constructible<Callback> &&
+           (portals::detail::ChangeValueAction<Callback, double> ||
+            requires(Callback &action, const PropertyUpdate<NumericValue> &receipt) {
+              { action(receipt) } -> portals::detail::ManagedActionResult;
+            }))
+auto onChange(Ref<T> reference, Callback callback, std::source_location origin = std::source_location::current()) {
+  return detail::SceneStage{[registration = [reference = std::move(reference), callback = std::move(callback),
+                                             origin](ManagedScene &scene) mutable -> std::expected<void, ManagedError> {
+    return detail::ChangeAccess::attach(scene, reference, std::move(callback), origin);
+  }, origin](Scene &owner) mutable {
+    detail::SceneAccess::onEditing(owner, registration, origin);
+  }};
+}
+
 /** @tparam Callback Owning managed action taking TextEditedEvent or no arguments.
  * @param reference Editor published by this scene's recipe.
  * @param callback FIFO callback for actual accepted user byte changes, including Undo/Redo and clear.
@@ -556,6 +577,7 @@ auto onTextEdited(Ref<LineEdit> reference, Callback callback,
 }
 
 /** @tparam Callback Owning managed action taking EditingFinishedEvent or no arguments.
+ * @tparam T LineEdit view type, admitted before callback constraints are instantiated.
  * @param reference Editor published by this scene's recipe.
  * @param callback FIFO observation of Enter or focus loss in every edit mode, including rejected attempts.
  * @param origin Registration site retained through deferred mounting and input diagnostics.
@@ -563,15 +585,33 @@ auto onTextEdited(Ref<LineEdit> reference, Callback callback,
  * Deferred/clean blur has no result receipt. Events own their values; the callback borrows them synchronously.
  * Legacy-result removal suppresses delivery; reentrant focus from that attempt does not duplicate completion.
  */
-template <class Callback>
-  requires portals::detail::ManagedAction<Callback, EditingFinishedEvent>
-auto onEditingFinished(Ref<LineEdit> reference, Callback callback,
+template <class Callback, class T>
+  requires(std::derived_from<T, LineEdit> && portals::detail::ManagedAction<Callback, EditingFinishedEvent>)
+auto onEditingFinished(Ref<T> reference, Callback callback,
                        std::source_location origin = std::source_location::current()) {
   return detail::SceneStage{[registration = [reference = std::move(reference), callback = std::move(callback),
                                              origin](ManagedScene &scene) mutable -> std::expected<void, ManagedError> {
     return detail::EditorEventAccess::attach<EditingFinishedEvent>(scene, reference, std::move(callback), origin);
   },
                              origin](Scene &owner) mutable {
+    detail::SceneAccess::onEditing(owner, registration, origin);
+  }};
+}
+
+/** @tparam Callback Owning local numeric operation action, optionally taking the event.
+ * @tparam T Slider view type, admitted before callback constraints are instantiated.
+ * @param reference Bound slider. @param callback One gesture completion/interruption observation.
+ * @param origin Original registration site.
+ * @return Scene stage using the existing node-scoped binding; teardown suppresses dead-node delivery.
+ */
+template <class Callback, class T>
+  requires(std::derived_from<T, Slider> && portals::detail::ManagedAction<Callback, SliderOperationEvent>)
+auto onEditingFinished(Ref<T> reference, Callback callback,
+                         std::source_location origin = std::source_location::current()) {
+  return detail::SceneStage{[registration = [reference = std::move(reference), callback = std::move(callback),
+                                             origin](ManagedScene &scene) mutable -> std::expected<void, ManagedError> {
+    return detail::EditorEventAccess::attach<SliderOperationEvent>(scene, reference, std::move(callback), origin);
+  }, origin](Scene &owner) mutable {
     detail::SceneAccess::onEditing(owner, registration, origin);
   }};
 }

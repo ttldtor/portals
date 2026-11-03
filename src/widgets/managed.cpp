@@ -654,6 +654,7 @@ void ManagedScene::retireEditing(Entry &entry) noexcept {
 }
 
 void ManagedScene::retireChanges(Entry &entry) noexcept {
+  retireNumeric(entry);
   if (!entry.changes || entry.changes->retired) {
     return;
   }
@@ -2477,6 +2478,8 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
             status = check->sync();
           } else if (auto *typedCheck = std::get_if<CheckStateBinding>(&entry->binding)) {
             status = typedCheck->sync();
+          } else if (auto *slider = std::get_if<SliderBinding>(&entry->binding)) {
+            status = slider->sync();
           }
         }
 

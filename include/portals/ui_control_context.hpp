@@ -385,6 +385,8 @@ struct ControlSettings {
   std::optional<double> minimum{}; ///< Finite Gauge lower bound; effective maximum must be greater.
   std::optional<double> maximum{}; ///< Finite Gauge upper bound with a finite positive span.
   std::optional<std::int32_t> preferredWidth{}; ///< Nonnegative Gauge intrinsic width in terminal cells.
+  std::optional<double> step{};                ///< Slider user increment; external values may lie between ticks.
+  std::optional<std::uint64_t> pageSteps{};     ///< Positive Slider increment count per PageUp/PageDown action.
   std::optional<double> wheelStep{};            ///< Positive finite logical scroll cells per decoded wheel event.
   std::optional<std::uint64_t> keyStep{}; ///< Positive integral logical cells per arrow event, retaining all 64 bits.
   std::optional<std::uint64_t> pageOverlap{}; ///< Shared logical cells between pages; explicit zero is supported.

@@ -315,6 +315,15 @@ struct Access {
    * @return Recipe whose later instance settings retain highest priority.
    */
   template <class T> static Description<T> controlArguments(Description<T> description, ControlSettings arguments);
+  /** @tparam T Receiving widget type. @param failure Complete original prerequisite failure.
+   * @return Cold failed recipe preserving the cause before any construction or binding work.
+   */
+  template <class T> static Description<T> failed(ManagedError failure);
+  /** @tparam T Slider view type. @param description Receiving cold recipe.
+   * @param patch Present resource numeric/input leaves with their original provenance.
+   * Preserve factory settings for every absent resource leaf.
+   */
+  template <class T> static void numericSettings(Description<T> &description, ControlSettings patch);
   /** @tparam Parent Parent widget type. @tparam Child Child widget type.
    * @param parent Receiving cold recipe. @param child Consumed child recipe, inspected before transfer.
    * @param structural Retain every child relationship, including default placements.
@@ -438,6 +447,8 @@ struct Access {
       return "Border";
     } else if constexpr (std::same_as<T, Gauge>) {
       return "Gauge";
+    } else if constexpr (std::same_as<T, Slider>) {
+      return "Slider";
     } else if constexpr (std::same_as<T, ScrollArea>) {
       return "ScrollArea";
     } else if constexpr (std::same_as<T, LogView>) {

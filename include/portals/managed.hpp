@@ -17,6 +17,7 @@
 #include <portals/password.hpp>
 #include <portals/primitives.hpp>
 #include <portals/scroll_controls.hpp>
+#include <portals/slider.hpp>
 #include <portals/spinner.hpp>
 #include <portals/status_bar.hpp>
 #include <portals/style.hpp>
@@ -126,6 +127,7 @@ struct ToastPayload;
 struct KeyHelpRecord;
 struct ThemeSelectionRecord;
 struct ThemeSelectorRecord;
+struct ManagedSliderRecord;
 enum class ThemeSelectorCommand;
 enum class ThemeSelectionCommand;
 template <class T> inline constexpr bool IS_MANAGED_TREE_RESULT = false;
@@ -340,6 +342,7 @@ public:
 
 private:
   friend class ManagedScene;
+  friend class NumericState;
   friend struct ui::detail::Access;
 
   std::expected<std::shared_ptr<Property<T>>, TreeError> lock() const {
@@ -376,6 +379,35 @@ private:
   std::shared_ptr<detail::ManagedOrigin> origin_;
   // Scheduling provenance never participates in source lifetime checks.
   std::weak_ptr<detail::ManagedOrigin> recoveryOrigin_;
+};
+
+/** @brief Weak checked numeric source over the existing scene-owned Property runtime.
+ * Copies own no scene/widget. All reads and writes are UI-affine; saved snapshots are independent.
+ */
+class NumericState {
+public:
+  /** @brief Create an empty handle whose operations return CLOSED. */
+  NumericState() = default;
+
+  /** @return Owning immutable value/range/revision or the original typed access failure. */
+  std::expected<std::shared_ptr<const PropertyChange<NumericValue>>, ManagedError> snapshot() const;
+
+  /** @param candidate Finite in-range value, never rounded to the user step grid.
+   * @return Exact Property receipt or typed numeric/access failure without a commit.
+   */
+  std::expected<PropertyUpdate<NumericValue>, ManagedError> set(double candidate) const;
+
+  /** @param initial Explicit new finite value in the complete new range; never clamped.
+   * @param range Ordered finite bounds and positive representable user increment.
+   * @return Exact atomic value/range receipt or typed failure leaving the whole source unchanged.
+   */
+  std::expected<PropertyUpdate<NumericValue>, ManagedError> configure(double initial, NumericRange range) const;
+
+private:
+  friend class ManagedScene;
+  explicit NumericState(ManagedState<NumericValue> state) : state_(std::move(state)) {}
+
+  ManagedState<NumericValue> state_;
 };
 
 /** @brief Read-only weak scene-owned derived value; no writable alias or subscription escapes.
@@ -597,6 +629,12 @@ public:
       return std::unexpected(error(ManagedPhase::STATE, root_, TreeError::NO_MEMORY));
     }
   }
+
+  /** @param initial Explicit finite value, retained without user-step snapping.
+   * @param range Ordered finite bounds and positive representable user increment.
+   * @return Weak numeric source using this scene's existing Property storage, or an exact typed failure.
+   */
+  std::expected<NumericState, ManagedError> numericState(double initial = 0, NumericRange range = {});
 
   /** @brief Own a one-way presentation observer until its receiver or scene retires.
    * Initial delivery reads the latest value at dirty preparation after complete declarative mount.
@@ -962,6 +1000,7 @@ public:
                                          CheckBoxOptions options = {});
 
   /** @tparam Callback Copyable action taking the actual bool/CheckState value or const PropertyUpdate<T>&.
+   * @tparam T CheckBox view type, admitted before callback constraints are instantiated.
    * @param node Live checkbox with its existing managed binding.
    * @param callback FIFO notification of successful changed activation receipts, never a veto.
    * @param origin Registration site used by checked callback diagnostics.
@@ -969,10 +1008,10 @@ public:
    * Generic value bodies must compile for both bool and CheckState; use a concrete parameter for one model.
    * External writes, failed commits and no-op receipts do not notify. Rejected notifications still commit.
    */
-  template <class Callback>
-    requires(std::copy_constructible<Callback> &&
+  template <class Callback, class T>
+    requires(std::derived_from<T, CheckBox> && std::copy_constructible<Callback> &&
              (detail::ChangeAction<Callback, bool> || detail::ChangeAction<Callback, CheckState>))
-  std::expected<void, ManagedError> onChange(Node<CheckBox> node, Callback callback,
+  std::expected<void, ManagedError> onChange(Node<T> node, Callback callback,
                                              std::source_location origin = std::source_location::current()) {
     auto boolean = changeModel(node);
 
@@ -1006,6 +1045,82 @@ public:
       }
 
       return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
+    } catch (...) {
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CALLBACK_FAILED));
+    }
+  }
+
+  /** @param node Managed slider without a prior event binding.
+   * @param model Numeric source created by this scene; the existing Property remains authoritative.
+   * @param changed Optional legacy exact receipt callback, before compact user-change handlers.
+   * @return Checked admission or typed failure; a completed numeric commit is never rolled back.
+   */
+  std::expected<void, ManagedError> bind(Node<Slider> node, NumericState model,
+                                        std::function<std::expected<void, TreeError>(SliderResult)> changed = {});
+
+  /** @tparam Callback Owning action taking double or the exact numeric Property receipt.
+   * @tparam T Slider view type, checked before instantiating callback constraints.
+   * @param node Live bound numeric slider. @param callback FIFO changed-user-commit observation.
+   * @param origin Registration site retained for diagnostics.
+   * @return Checked registration; model synchronization and equal commits do not invoke the callback.
+   */
+  template <class Callback, class T>
+    requires(std::derived_from<T, Slider> && std::copy_constructible<Callback> &&
+             (detail::ChangeValueAction<Callback, double> ||
+              requires(Callback &action, const PropertyUpdate<NumericValue> &receipt) {
+                { action(receipt) } -> detail::ManagedActionResult;
+              }))
+  std::expected<void, ManagedError> onChange(Node<T> node, Callback callback,
+                                            std::source_location origin = std::source_location::current()) {
+    const auto lifetime = std::weak_ptr<const void>(lifetime_);
+
+    try {
+      auto action = [&] {
+        if constexpr (detail::ChangeValueAction<Callback, double>) {
+          return actionAdapter<PropertyUpdate<NumericValue>>(
+            [callback = std::move(callback)](const PropertyUpdate<NumericValue> &receipt) mutable -> decltype(auto) {
+              return callback(receipt.snapshot->value.value());
+            }, origin);
+        } else {
+          return actionAdapter<PropertyUpdate<NumericValue>>(std::move(callback), origin);
+        }
+      }();
+
+      if (lifetime.expired()) {
+        return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CLOSED));
+      }
+
+      return registerNumericChange(node, std::move(action), origin);
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
+    } catch (...) {
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CALLBACK_FAILED));
+    }
+  }
+
+  /** @tparam Callback Owning action taking the local operation event or no arguments.
+   * @tparam T Slider view type, checked before callback constraints.
+   * @param node Bound slider. @param callback Completion/interruption observation; teardown can suppress delivery.
+   * @param origin Registration site retained for diagnostics.
+   * @return Checked registration or typed affinity, identity, capacity or allocation failure.
+   */
+  template <class Callback, class T>
+    requires(std::derived_from<T, Slider> && std::copy_constructible<Callback> &&
+             detail::ManagedAction<Callback, SliderOperationEvent>)
+  std::expected<void, ManagedError> onEditingFinished(Node<T> node, Callback callback,
+                                                     std::source_location origin = std::source_location::current()) {
+    const auto lifetime = std::weak_ptr<const void>(lifetime_);
+
+    try {
+      auto action = actionAdapter<SliderOperationEvent>(std::move(callback), origin);
+
+      if (lifetime.expired()) {
+        return std::unexpected(error(ManagedPhase::BIND, node, TreeError::CLOSED));
+      }
+
+      return registerNumericFinished(node, std::move(action), origin);
     } catch (const std::bad_alloc &) {
       return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NO_MEMORY));
     } catch (...) {
@@ -1068,14 +1183,15 @@ public:
   }
 
   /** @tparam Callback Owning managed action accepting EditingFinishedEvent or no arguments.
+   * @tparam T LineEdit view type, admitted before callback constraints are instantiated.
    * @param node Editor whose existing binding supplies Enter and focus-loss boundaries.
    * @param callback FIFO action; return checked failures through the existing diagnostics.
    * @param origin Registration site retained for diagnostics.
    * @return Checked registration or affinity, identity, finite budget or allocation error.
    */
-  template <class Callback>
-    requires detail::ManagedAction<Callback, EditingFinishedEvent>
-  std::expected<void, ManagedError> onEditingFinished(Node<LineEdit> node, Callback callback,
+  template <class Callback, class T>
+    requires(std::derived_from<T, LineEdit> && detail::ManagedAction<Callback, EditingFinishedEvent>)
+  std::expected<void, ManagedError> onEditingFinished(Node<T> node, Callback callback,
                                                       std::source_location origin = std::source_location::current()) {
     try {
       return registerEditing(
@@ -1998,6 +2114,19 @@ private:
   };
 
   std::expected<bool, ManagedError> changeModel(Node<CheckBox> node);
+  std::expected<std::shared_ptr<detail::ManagedSliderRecord>, ManagedError> sliderRecord(Node<Slider>, ManagedPhase);
+  std::expected<double, ManagedError> sliderValue(Node<Slider> node);
+  std::expected<PropertyUpdate<NumericValue>, ManagedError> setSliderValue(Node<Slider> node, double value);
+  std::expected<void, ManagedError>
+  registerNumericChange(Node<Slider>, std::function<EditorCommandResult(const PropertyUpdate<NumericValue> &)>,
+                         std::source_location);
+  std::expected<void, ManagedError>
+  registerNumericFinished(Node<Slider>, std::function<EditorCommandResult(const SliderOperationEvent &)>,
+                           std::source_location);
+  void retireNumeric(Entry &entry) noexcept;
+  template <class Event>
+  void dispatchNumeric(Node<Slider>, const std::shared_ptr<detail::ManagedSliderRecord> &,
+                        const std::weak_ptr<const void> &, const Event &, std::size_t count);
   std::expected<void, ManagedError> registerChange(Node<CheckBox> node, ChangeRecord record);
   void retireChanges(Entry &entry) noexcept;
   template <class T>
@@ -2062,7 +2191,8 @@ private:
     Node<Widget> companion; ///< Attempt-owned external popup, retired with this logical owner.
     Node<Widget> node;
     std::shared_ptr<StyleTarget> target;
-    std::variant<std::monostate, ActionBinding, CheckBoxBinding, CheckStateBinding, LineEditBinding, PasswordBinding>
+    std::variant<std::monostate, ActionBinding, CheckBoxBinding, CheckStateBinding, LineEditBinding, PasswordBinding,
+                  SliderBinding>
       binding;
     std::shared_ptr<PasswordFeedback> passwordFeedback;
     std::unique_ptr<CaptionBinding> caption;

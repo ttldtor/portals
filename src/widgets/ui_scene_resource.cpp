@@ -146,6 +146,9 @@ SceneResourceRegistry::SceneResourceRegistry() {
   (void)add<ThreeState>("ThreeState", [](SceneResourceArguments arguments) {
     return threeState(arguments.text, arguments.settings.state.value_or(CheckState::UNCHECKED));
   });
+  (void)add<Slider>("Slider", [](SceneResourceArguments) {
+    return slider();
+  });
   for (auto &entry : entries_) {
     entry.factoryKind = detail::ControlFactoryKind::EXISTING_BUILTIN;
   }

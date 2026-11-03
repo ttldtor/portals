@@ -186,6 +186,15 @@ struct RefAccess {
     return relative ? adjustGaugeValue(tree, node, value) : setGaugeValue(tree, node, value);
   }
 
+  static std::expected<double, ManagedError> numericValue(ManagedScene &scene, Node<Slider> node) {
+    return scene.sliderValue(node);
+  }
+
+  static std::expected<PropertyUpdate<NumericValue>, ManagedError>
+  numericValue(ManagedScene &scene, Node<Slider> node, double value) {
+    return scene.setSliderValue(node, value);
+  }
+
   static std::expected<void, TreeError> display(ManagedScene &scene, Node<Widget> target, DataPresentation value) {
     auto found = std::ranges::find_if(scene.dataStates_, [&](const auto &record) {
       return record->node == target;
@@ -320,6 +329,14 @@ struct RefAccess {
     Snapshot value;
     std::expected<void, TreeError> copied;
     const auto copy = [&](const auto &widget) {
+      if constexpr (std::derived_from<std::remove_cvref_t<decltype(widget)>, Control>) {
+        if (dynamic_cast<const Slider *>(&widget)) {
+          copied = std::unexpected(TreeError::INVALID_ARGUMENT);
+
+          return;
+        }
+      }
+
       try {
         value.bytes = widget.text().bytes();
         value.policy = widget.text().policy();
@@ -444,6 +461,14 @@ struct RefAccess {
 
     std::expected<std::optional<GraphemeText>, ManagedError> result;
     const auto copy = [&](const auto &widget) {
+      if constexpr (std::derived_from<std::remove_cvref_t<decltype(widget)>, Control>) {
+        if (dynamic_cast<const Slider *>(&widget)) {
+          result = std::unexpected(failure(target.node, TreeError::INVALID_ARGUMENT));
+
+          return;
+        }
+      }
+
       try {
         const auto bytes = model ? std::string_view(model->value) : widget.text().bytes();
         const auto policy = widget.text().policy();
@@ -685,6 +710,27 @@ std::expected<void, ManagedError> gaugeValue(std::shared_ptr<RefTarget> target, 
 
   if (!result) {
     RefAccess::report(result.error(), target, relative ? "gauge.adjust" : "gauge.value", {}, "Gauge", origin);
+  }
+
+  return result;
+}
+
+std::expected<double, ManagedError> numericValue(const std::shared_ptr<RefTarget> &target,
+                                                 const std::shared_ptr<const Node<Slider>> &node) {
+  auto owner = eventScene(target);
+
+  return owner ? RefAccess::numericValue(**owner, node ? *node : Node<Slider>{}) : std::unexpected(owner.error());
+}
+
+std::expected<PropertyUpdate<NumericValue>, ManagedError>
+numericValue(const std::shared_ptr<RefTarget> &target, const std::shared_ptr<const Node<Slider>> &node, double value,
+              std::source_location origin) {
+  auto owner = eventScene(target);
+  auto result = owner ? RefAccess::numericValue(**owner, node ? *node : Node<Slider>{}, value)
+                      : std::expected<PropertyUpdate<NumericValue>, ManagedError>{std::unexpected(owner.error())};
+
+  if (!result) {
+    RefAccess::report(result.error(), target, "slider.value", {}, "Slider", origin);
   }
 
   return result;
@@ -946,6 +992,38 @@ std::expected<GraphemeText, ManagedError> TextSource::snapshot() const {
   } catch (const std::length_error &) {
     return std::unexpected(detail::failure(target_->node, TreeError::NODE_LIMIT));
   }
+}
+
+std::expected<double, ManagedError> NumericProperty::get() const {
+  return detail::numericValue(target_, node_);
+}
+
+std::expected<PropertyUpdate<NumericValue>, ManagedError> NumericProperty::result() const {
+  return last_ ? *last_ : std::expected<PropertyUpdate<NumericValue>, ManagedError>{
+                           std::unexpected(ManagedError{ManagedPhase::INPUT, {}, TreeError::INVALID_ARGUMENT, {}, {}})};
+}
+
+NumericProperty NumericProperty::set(double value, std::source_location origin) {
+  last_.emplace(detail::numericValue(target_, node_, value, origin));
+
+  return *this;
+}
+
+NumericProperty NumericProperty::operator=(double value) {
+  return set(value, origin_);
+}
+
+NumericProperty NumericProperty::operator=(const NumericProperty &other) {
+  const auto candidate = other.get();
+
+  if (!candidate) {
+    last_.emplace(std::unexpected(candidate.error()));
+    detail::RefAccess::report(last_->error(), target_, "slider.value", {}, "Slider", origin_);
+
+    return *this;
+  }
+
+  return set(*candidate, origin_);
 }
 
 TextProperty::TextProperty(std::shared_ptr<detail::RefTarget> target, TextResolver resolver,

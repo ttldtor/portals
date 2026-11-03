@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include <portals/controls.hpp>
+#include <portals/slider.hpp>
 
 #include <algorithm>
 #include <array>
@@ -202,6 +203,12 @@ void CheckBox::display(CheckState value) {
 std::expected<void, TreeError> setControlText(WidgetTree &tree, Node<Control> node, GraphemeText text) {
   std::expected<void, TreeError> result;
   auto edited = tree.edit(node, [&](Control &control) {
+    if (dynamic_cast<Slider *>(&control)) {
+      result = std::unexpected(TreeError::INVALID_ARGUMENT);
+
+      return;
+    }
+
     if (control.text_.bytes() == text.bytes() && control.text_.policy() == text.policy()) {
       return;
     }

@@ -12,6 +12,7 @@
 #include <portals/ui_password_controls.hpp>
 #include <portals/ui_primitives.hpp>
 #include <portals/ui_scene_pipeline.hpp>
+#include <portals/ui_slider.hpp>
 #include <portals/ui_virtual.hpp>
 
 #include <filesystem>
@@ -228,6 +229,11 @@ private:
     entry.declaredChoice = std::derived_from<T, ComboBox>;
     entry.unknownDialog = std::same_as<T, Widget>;
 
+    if constexpr (std::derived_from<T, Slider>) {
+      entry.text = false;
+      entry.virtualView = "Slider"; // Reuse the cold native-schema identity slot, without new registry payload.
+    }
+
     if constexpr (detail::IsVirtualList<T>::value || detail::IsVirtualTable<T>::value || detail::IsChart<T>::value) {
       entry.virtualView = detail::Access::controlType<T>();
     }
@@ -246,6 +252,39 @@ private:
       const auto enabled = arguments.enabled;
       const auto classes = arguments.classes;
       const auto materialized = detail::controlSettingsPresenceSet(arguments.settings);
+      std::optional<ControlSettings> numericSettings;
+
+      if constexpr (std::derived_from<T, Slider>) {
+        numericSettings.emplace();
+        auto &patch = *numericSettings;
+        const auto &source = arguments.settings;
+
+        patch.value = source.value;
+        patch.minimum = source.minimum;
+        patch.maximum = source.maximum;
+        patch.step = source.step;
+        patch.pageSteps = source.pageSteps;
+        patch.readOnly = source.readOnly;
+        patch.preferredWidth = source.preferredWidth;
+        patch.maxPaintCells = source.maxPaintCells;
+        patch.origin = source.origin;
+        const std::pair<std::string_view, bool> fields[]{
+          {"value", patch.value.has_value()}, {"minimum", patch.minimum.has_value()},
+          {"maximum", patch.maximum.has_value()}, {"step", patch.step.has_value()},
+          {"pageSteps", patch.pageSteps.has_value()}, {"readOnly", patch.readOnly.has_value()},
+          {"preferredWidth", patch.preferredWidth.has_value()}, {"maxPaintCells", patch.maxPaintCells.has_value()}};
+
+        for (const auto &[path, present] : fields) {
+          if (present) {
+            ControlPropertyOrigin origin;
+            const auto found = std::ranges::find(source.origins, path, &ControlPropertyOrigin::path);
+
+            origin.path = path;
+            origin.source = found == source.origins.end() ? source.origin : found->source;
+            patch.origins.push_back(std::move(origin));
+          }
+        }
+      }
       std::optional<ControlSettings> frameSettings;
 
       if (detail::hasFrameSettings(arguments.settings.frame) && !std::same_as<T, PopupMenu>) {
@@ -278,6 +317,10 @@ private:
 
       if (!recipe) {
         return std::unexpected(recipe.error());
+      }
+
+      if constexpr (std::derived_from<T, Slider>) {
+        detail::Access::numericSettings(*recipe, std::move(*numericSettings));
       }
 
       if (semanticSettings) {

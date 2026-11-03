@@ -39,10 +39,11 @@ set_target_properties(portals_utf8proc PROPERTIES C_STANDARD 99 C_STANDARD_REQUI
 target_compile_definitions(portals_utf8proc PRIVATE UTF8PROC_STATIC)
 target_include_directories(portals_utf8proc PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/utf8proc")
 
-add_library(portals_core STATIC src/version.cpp src/geometry.cpp src/text.cpp src/input.cpp src/cell_buffer.cpp src/render.cpp src/render/diff.cpp src/terminal/writer.cpp src/runtime/scheduler.cpp src/runtime/application.cpp src/runtime/native_application.cpp src/runtime/diagnostics.cpp src/widgets/widget.cpp src/layout/linear.cpp src/layout/grid.cpp src/layout/overlay.cpp src/widgets/focus.cpp src/widgets/event_routing.cpp src/models/model.cpp src/widgets/basic_controls.cpp src/widgets/line_edit.cpp src/widgets/ui_ref.cpp src/widgets/managed.cpp src/views/virtual_list.cpp src/views/virtual_table.cpp src/views/scroll.cpp src/styles/style.cpp src/styles/pss.cpp src/charts/canvas.cpp src/charts/chart.cpp)
+add_library(portals_core STATIC src/version.cpp src/geometry.cpp src/text.cpp src/input.cpp src/cell_buffer.cpp src/render.cpp src/render/diff.cpp src/terminal/writer.cpp src/runtime/scheduler.cpp src/runtime/application.cpp src/runtime/native_application.cpp src/runtime/diagnostics.cpp src/widgets/widget.cpp src/layout/linear.cpp src/layout/grid.cpp src/layout/overlay.cpp src/widgets/focus.cpp src/widgets/event_routing.cpp src/models/model.cpp src/widgets/basic_controls.cpp src/widgets/numeric.cpp src/widgets/slider.cpp src/widgets/line_edit.cpp src/widgets/ui_ref.cpp src/widgets/managed.cpp src/views/virtual_list.cpp src/views/virtual_table.cpp src/views/scroll.cpp src/styles/style.cpp src/styles/pss.cpp src/charts/canvas.cpp src/charts/chart.cpp)
 target_sources(portals_core PRIVATE src/terminal/legacy.cpp)
 
 target_sources(portals_core PRIVATE
+  src/widgets/managed_numeric.cpp
   src/widgets/ui_async.cpp
   src/widgets/model_find.cpp
   src/runtime/background.cpp
@@ -299,6 +300,12 @@ if(PORTALS_BUILD_EXAMPLES)
   add_subdirectory(examples/dashboard)
   add_subdirectory(examples/custom_widget)
   portals_enable_warnings(portals_consumer)
+endif()
+
+if(PORTALS_BUILD_EXAMPLES OR PORTALS_BUILD_TESTS)
+  add_executable(portals_docs_slider docs/examples/guide_slider.cpp)
+  target_link_libraries(portals_docs_slider PRIVATE portals::core)
+  portals_enable_warnings(portals_docs_slider)
 endif()
 
 if(PORTALS_BUILD_TESTS)
@@ -987,6 +994,9 @@ if(PORTALS_BUILD_TESTS)
   add_test(NAME portals.ui-named COMMAND portals_ui_named)
 
   add_executable(portals_ref_headers
+    tests/package_consumer/numeric_header.cpp
+    tests/package_consumer/slider_header.cpp
+    tests/package_consumer/ui_slider_header.cpp
     tests/package_consumer/ref_header.cpp
     tests/package_consumer/scene_header.cpp
     tests/package_consumer/ui_controls_header.cpp
@@ -1353,6 +1363,12 @@ if(PORTALS_BUILD_TESTS)
   portals_enable_warnings(portals_basic_controls)
   add_test(NAME portals.basic-controls COMMAND portals_basic_controls)
   set_tests_properties(portals.basic-controls PROPERTIES TIMEOUT 15)
+
+  add_executable(portals_slider tests/slider.cpp)
+  target_link_libraries(portals_slider PRIVATE portals::core)
+  portals_enable_warnings(portals_slider)
+  add_test(NAME portals.slider COMMAND portals_slider)
+  set_tests_properties(portals.slider PROPERTIES TIMEOUT 15)
 
   add_executable(portals_layout_linear tests/layout_linear.cpp)
   target_link_libraries(portals_layout_linear PRIVATE portals::core)
@@ -1733,6 +1749,7 @@ if(PORTALS_BUILD_DOCS)
   list(APPEND portals_documentation_inputs docs/log-view.md docs/ru/log-view.md)
   list(APPEND portals_documentation_inputs docs/choices.md docs/ru/choices.md)
   list(APPEND portals_documentation_inputs docs/menus.md docs/ru/menus.md)
+  list(APPEND portals_documentation_inputs docs/sliders.md docs/ru/sliders.md)
   list(APPEND portals_documentation_inputs docs/api-groups.dox)
   set(portals_language_config "${CMAKE_CURRENT_BINARY_DIR}/docs/languages")
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
