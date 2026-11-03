@@ -14,6 +14,8 @@
 
 #include <typeinfo>
 
+namespace portals { class PopupMenu; }
+
 namespace portals::ui {
 template <class T> class Description;
 template <class T> class Ref;
@@ -196,6 +198,9 @@ void reportFocusError(const std::shared_ptr<RefTarget> &target, const ManagedErr
  * @return Checked result; dead/foreign owners are never reported through a collector.
  */
 DialogCommandResult dialogCommand(const std::shared_ptr<RefTarget> &target, bool opening, std::source_location origin);
+DialogCommandResult popupCommand(const std::shared_ptr<RefTarget> &target,
+                                 const std::shared_ptr<RefTarget> &anchor, bool opening, std::source_location origin);
+std::expected<bool, ManagedError> popupOpened(const std::shared_ptr<RefTarget> &target);
 
 } // namespace detail
 
@@ -1022,15 +1027,34 @@ public:
    * @return Checked dismissal; a closed layer is a no-op and admitted callbacks never replay.
    */
   DialogCommandResult dismiss(std::source_location origin = std::source_location::current()) const
-    requires std::same_as<T, Dialog>
+    requires (std::same_as<T, Dialog> || std::same_as<T, PopupMenu>)
   {
+    if constexpr (std::same_as<T, PopupMenu>) {
+      return detail::popupCommand(target(), {}, false, origin);
+    }
     return detail::dialogCommand(target(), false, origin);
+  }
+
+  /** @tparam Anchor Exact body widget type observed by the opener.
+   * @param anchor Visible arranged body anchor in this scene's overlay host.
+   * @param origin Call site retained in the report-once command receipt.
+   * @return Checked activation; reentry/admission errors do not execute an action.
+   */
+  template <class Anchor>
+  DialogCommandResult open(const Ref<Anchor> &anchor,
+                           std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, PopupMenu>
+  {
+    return detail::popupCommand(target(), anchor.target(), true, origin);
   }
 
   /** @return Effective activation, or exact affinity/lifetime/identity failure without reporting. */
   std::expected<bool, ManagedError> opened() const
-    requires std::same_as<T, Dialog>
+    requires (std::same_as<T, Dialog> || std::same_as<T, PopupMenu>)
   {
+    if constexpr (std::same_as<T, PopupMenu>) {
+      return detail::popupOpened(target());
+    }
     auto observation = target();
     auto owner = detail::eventScene(observation);
     return owner ? (*owner)->dialogOpened(observation->node) : std::unexpected(owner.error());
@@ -1445,6 +1469,7 @@ public:
 
 private:
   friend struct detail::ClickAccess;
+  template <class U> friend class Ref;
   friend struct detail::AsyncAccess;
   friend struct detail::EditorEventAccess;
   friend struct detail::ChangeAccess;

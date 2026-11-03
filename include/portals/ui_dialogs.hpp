@@ -70,7 +70,8 @@ Description<Overlay> notifications(Ref<Overlay> reference, NotificationCenter ce
  * @return Single-use host recipe; any child/finalization failure retires the whole unpublished subtree.
  */
 template <detail::DescriptionInput Body, detail::DescriptionInput... Layers>
-  requires(std::same_as<std::remove_cvref_t<Layers>, Description<Dialog>> && ...)
+  requires((std::same_as<std::remove_cvref_t<Layers>, Description<Dialog>> ||
+             std::same_as<std::remove_cvref_t<Layers>, Description<PopupMenu>>) && ...)
 Description<OverlayHost> overlayHost(OverlayHostOptions options, Body &&body, Layers &&...layers) {
   auto layout = detail::Access::captureLayouts(body, layers...);
   auto description = detail::Access::cold<OverlayHost>(
@@ -127,7 +128,8 @@ Description<OverlayHost> overlayHost(OverlayHostOptions options, Body &&body, La
  * @return Host with the default maximum of 32 registered layers.
  */
 template <detail::DescriptionInput Body, detail::DescriptionInput... Layers>
-  requires(std::same_as<std::remove_cvref_t<Layers>, Description<Dialog>> && ...)
+  requires((std::same_as<std::remove_cvref_t<Layers>, Description<Dialog>> ||
+             std::same_as<std::remove_cvref_t<Layers>, Description<PopupMenu>>) && ...)
 Description<OverlayHost> overlayHost(Body &&body, Layers &&...layers) {
   return overlayHost(OverlayHostOptions{}, std::forward<Body>(body), std::forward<Layers>(layers)...);
 }
@@ -140,7 +142,8 @@ Description<OverlayHost> overlayHost(Body &&body, Layers &&...layers) {
  * @return Default host recipe publishing the optional observation.
  */
 template <detail::DescriptionInput Body, detail::DescriptionInput... Layers>
-  requires(std::same_as<std::remove_cvref_t<Layers>, Description<Dialog>> && ...)
+  requires((std::same_as<std::remove_cvref_t<Layers>, Description<Dialog>> ||
+             std::same_as<std::remove_cvref_t<Layers>, Description<PopupMenu>>) && ...)
 Description<OverlayHost> overlayHost(Ref<OverlayHost> reference, Body &&body, Layers &&...layers) {
   return overlayHost(std::forward<Body>(body), std::forward<Layers>(layers)...).reference(std::move(reference));
 }

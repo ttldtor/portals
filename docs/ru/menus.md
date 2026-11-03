@@ -73,9 +73,107 @@ Home и End выбирают первую и последнюю доступну
 канал ошибок подготовки `ui::runApp`. Обработчик команды может вернуть свой
 checked-результат: сцена собирает его тем же способом, что для action-кнопок и
 обработчиков клавиш. Загружаемые ресурсы сцены не содержат исполняемых команд.
-Текущая фабрика меню принимает `ActionRef` из кода; синтаксис привязки команд меню
-в загружаемых ресурсах сцены пока не предоставляется.
+Фабрика плоского `ui::menu` принимает `ActionRef` из кода; синтаксис привязки её
+команд в ресурсах сцены не предоставляется. Отдельный адаптер PopupMenu ниже
+связывает граф действий из кода с загружаемым представлением.
 
 Первая реализация предоставляет ограниченный список команд. Фоновый поиск и
 история команд в него не входят; для таких возможностей приложения используются
 отдельные API поиска по модели.
+
+## Всплывающие меню и подменю
+
+`ui::scene(body, ui::popupMenu(...))` создаёт изначально закрытый слой; сцена
+сама создаёт или переиспользует существующий overlay host. `ui::Ref<PopupMenu>`
+наблюдает настоящий sized-контрол, поддерживающий обычные content/min/max/flex.
+[Полный пример](../examples/guide_popup_menu.cpp) использует одно действие Save
+в кнопке, явной клавиатурной привязке и меню, а More открывает подменю.
+
+```cpp
+ui::popupMenu(commands, {
+  ui::menuItem(save, U's'),
+  ui::submenu("More", {ui::menuItem(copy, U'a')}, U'm'),
+  ui::menuItem(quit, U'q')
+}).minWidth(18).maxWidth(56)
+```
+
+`commands.open(opener)` требует видимый размещённый anchor в body того же host.
+`dismiss()` закрывает всю цепочку, `opened()` возвращает проверяемое наблюдение.
+Повторное открытие уже открытого меню ничего не меняет. После закрытия можно
+выбрать другой допустимый anchor. Все панели делят один input scope и один
+возврат focus. Перед ActionRef сначала закрывается popup и восстанавливается
+focus; при ошибке закрытия действие не вызывается. Уже опубликованное закрытие
+не откатывается. Callback может удалить своё действие, меню или сцену.
+
+Up/Down циклически выбирают доступные строки, Home/End — первую/последнюю.
+Right/Enter открывают ветку, Left закрывает глубокую панель. Escape закрывает
+сначала подменю, затем корень. Enter/Space активируют leaf на сообщённом PRESS.
+Disabled-строки видны, но пропускаются; hidden/retired не занимают строку.
+Пустая ветка недоступна. Выбор прокручивается в ограниченный viewport при layout.
+Панели предпочитают правый край, при нехватке места открываются влево и остаются
+обрезаны viewport. Промежутки сохраняют фон body. Внешний левый click закрывает
+цепочку и поглощается. Tab закрывает popup и продолжает обычный обход focus.
+
+Мнемоника задаётся явным Unicode scalar и показана в отдельной колонке-подсказке.
+`&` в старых и новых captions остаётся буквальным. Для ASCII регистр не важен;
+остальные scalars сравниваются точно, без locale/casefold/normalization.
+Дубликаты последовательно выбирают совпадения без выполнения; единственное
+совпадение открывает или активирует. Legacy VT TextInput и native CHARACTER PRESS
+поддержаны одинаково. Декодер выдаёт одно событие на scalar; два независимо
+введённых Key/Text события остаются двумя событиями, временного debounce нет.
+
+Defaults PopupMenuOptions: 256 entries во всём дереве, depth8 (максимум32),
+plane cap60x20 cells и прозрачный gap1cell. Каждый leaf occurrence также занимает
+presenter budget ActionSet, включая дубликаты закрытых веток. Дерево owning и
+неизменяемое после mount, metadata leaf остаётся общей. Неверные options/Unicode
+дают INVALID_ARGUMENT, bounds — NODE_LIMIT/DEPTH_LIMIT, allocation — NO_MEMORY.
+Поиск, history, hover timers, menubar и второй command scheduler не добавляются.
+
+## Загружаемое представление popup
+
+```cpp
+auto resources = ui::SceneResourceOptions{}.popupMenu("FileMenu", commands, {
+  ui::menuItem(save, U's'),
+  ui::submenu("More", {ui::menuItem(copy, U'a')}, U'm')
+});
+
+auto app = ui::scene(body,
+  ui::resource("FileMenu{fitWidth=true minWidth=18 maxWidth=56}", resources));
+```
+
+Ошибки регистрации собираются при checked prepare/`ui::runApp`, до чтения файла
+или входа в терминал. Для явной проверки остаётся доступен
+`resources.registry.popupMenu(...)`.
+
+Resource задаёт обычные scalar sizing,
+id/classes и visible/enabled; budgets и граф ActionRef остаются в коде. Callback
+и ActionRef не десериализуются. Неизвестное свойство и неверные bounds дают
+позиционированную resource error до публикации. Тяжёлый popup payload всем
+контролам не добавляется. Обычный плоский Menu сохраняет свой code-bound API.
+
+Рамка переиспользует существующий Border frame-text/paint. В
+`PopupMenuOptions::frame` доступны принятые patterns/custom glyphs/title chrome
+и paint-work budget. В этом срезе требуются все четыре одноклеточные стороны.
+Загружаемые scalar `frame` settings настраивают эту же рамку, без внешнего wrapper.
+Цвета линии/title из theme поддержаны. Автоматические PSS glyph-profile overrides
+общего staging пока поддержаны для Border/scroll, но не PopupMenu; для popup
+следует выбрать pattern/glyph policy в коде или resource binding.
+
+`maximumPanelSize` — жёсткий cap всей popup plane. Explicit fixed width/height и
+hard minima сверх cap дают INVALID_GEOMETRY; противоречивые обычные/PSS bounds
+сохраняют существующие typed errors. Больший max лишь разрешает размер, а не
+принуждает меню расти.
+
+Для anchored open нужен уже размещённый кадр body. До первого такого кадра возвращается существующий typed WOULD_BLOCK: скрытый layout и кадр из input callback не выполняются. Когда anchor готов, open и мнемоники могут прийти одним пакетом ввода до первого показа popup.
+
+### Запись всплывающего меню
+
+Полная программа открывает меню слева и вызывает вложенную команду, затем
+открывает то же меню у правого края. Подменю раскрывается влево; Escape сначала
+возвращает родительскую панель, затем фокус на кнопку. Запись также показывает
+изменение размеров терминала и общую команду Save на кнопке. Используются
+клавиатурный ввод и цвета терминала.
+
+\image html popup-menu.png "Подменю раскрывается влево у края viewport"
+
+![Клавиатурное управление popup и изменение размера](../images/popup-menu.gif)

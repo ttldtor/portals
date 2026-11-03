@@ -14,6 +14,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
   state, error and cleanup contracts. Include a complete device settings example
   and English/Russian guide.
 
+- Add action-backed popup menus with owned submenus and explicit Unicode mnemonics.
+  Ordinary scene composition supplies the overlay host; the unified popup reference
+  supports checked open/dismiss. Leaf activation closes the popup and restores focus
+  before invoking the shared action. Loaded scalar presentation keeps action bindings
+  in code. Include a complete public example and installed-consumer coverage.
+
 - Add `StatusBar` and `ui::statusBar(...)` for horizontal status sections with
   themed full-width backgrounds, disabled appearance and ordinary Row sizing.
   Labels and key hints retain their existing references and input behavior.
@@ -87,6 +93,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
   and terminal virtual interfaces require clients to rebuild; structured bindings
   must account for the additional fields. TerminalError adds an owning protocol
   issue for a rejected unknown initial pixel context. This is not an old-binary ABI guarantee.
+
+### Fixed
+
+- Keep generated API index navigation valid with Doxygen 1.18, preserving
+  destructor links and removing orphaned alphabet links from an ungrouped type index.
 
 ## v0.7.0 (2026-10-29)
 

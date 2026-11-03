@@ -4,6 +4,8 @@
 
 #include <portals/dialog.hpp>
 
+namespace portals { class Menu; }
+
 namespace portals::ui::detail {
 struct SceneActivity;
 }
@@ -19,6 +21,7 @@ struct DialogRecord {
   Node<Button> close;
   Node<Widget> anchor;
   Node<Widget> initialFocus;
+  Node<Menu> popupMenu; ///< Optional logical popup plane; ordinary dialogs retain their existing policy.
   DialogOptions options;
   std::uint64_t activationRevision{};
   std::weak_ptr<DialogHostRecord> host;

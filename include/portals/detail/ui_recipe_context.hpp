@@ -16,6 +16,8 @@
 #include <ranges>
 #include <tuple>
 
+namespace portals { class PopupMenu; }
+
 namespace portals::ui {
 /** @brief Single-use owning construction recipe; no mounted widget ownership.
  * @tparam T Public Widget subtype constructed by the recipe, including final types.
@@ -78,6 +80,7 @@ concept GridInput =
  */
 template <class T>
 concept SceneLayer = DescriptionInput<T> && (std::same_as<std::remove_cvref_t<T>, Description<Dialog>> ||
+                                             std::same_as<std::remove_cvref_t<T>, Description<PopupMenu>> ||
                                              std::same_as<std::remove_cvref_t<T>, Description<Widget>>);
 
 /** @brief Admit immediately consumable recipes without draining borrowed lvalue elements.
