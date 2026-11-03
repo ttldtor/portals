@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include <portals/ui_style.hpp>
+#include <portals/popup_menu.hpp>
 
 #include "dialog_state.hpp"
 
@@ -636,15 +637,21 @@ std::expected<void, ManagedError> detail::Access::checkLayer(ManagedScene &scene
   }
 
   bool exact{};
+  Node<Dialog> popupRoot;
   auto read = scene.app_.tree().read(node, [&](const Widget &widget) {
     exact = typeid(widget) == typeid(Dialog);
+    if (const auto *popup = dynamic_cast<const PopupMenu *>(&widget)) {
+      popupRoot = popup->dialogRoot();
+    }
   });
 
   if (!read) {
     return std::unexpected(detail::error(node, read.error()));
   }
 
-  if (!exact || !scene.findDialog(node)) {
+  if ((!exact || !scene.findDialog(node)) &&
+      (popupRoot == Node<Dialog>{} || !scene.findDialog(popupRoot) ||
+       scene.findDialog(popupRoot)->popupMenu.id() != node.id())) {
     return std::unexpected(detail::error(node, TreeError::INVALID_ARGUMENT));
   }
 

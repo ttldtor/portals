@@ -38,11 +38,13 @@ public:
   /** @param context Existing synchronous sink. @return Prepared Unicode rows or unchanged sink error. */
   std::expected<void, TreeError> paint(PaintContext &context) override;
   /** @return Original zero-based entry index, empty when no enabled visible entry exists. */
-  std::optional<std::size_t> selectedIndex() const noexcept;
+  virtual std::optional<std::size_t> selectedIndex() const noexcept;
   /** @return Last prepared visible row count; hidden or unavailable entries occupy no row. */
-  std::size_t visibleRowCount() const noexcept;
+  virtual std::size_t visibleRowCount() const noexcept;
 
-private:
+protected:
+  /// @cond INTERNAL
+  // Built-in PopupMenu override glue, not a public extension interface.
   friend struct ui::detail::ActionAccess;
   friend class ManagedScene;
   struct Prepared;
@@ -51,11 +53,16 @@ private:
     bool handled{};
     std::optional<ui::ActionRef> action;
     ui::ActionInvocation invocation;
+    Node<Dialog> dismiss; ///< Optional existing scope to close before action invocation.
   };
 
-  std::expected<void, TreeError> prepare(WidgetTree &, Node<Menu>, WidthPolicy);
-  void invalidatePresentation() noexcept;
-  std::expected<Input, TreeError> input(WidgetTree &, Node<Menu>, const RoutedEvent &, const NodeGeometry &);
+  virtual std::expected<void, TreeError> prepare(WidgetTree &, Node<Menu>, WidthPolicy);
+  virtual void invalidatePresentation() noexcept;
+  virtual std::expected<Input, TreeError> input(WidgetTree &, Node<Menu>, const RoutedEvent &, const NodeGeometry &);
+
+  /// @endcond
+
+private:
   bool eligible(std::size_t) const;
   std::optional<std::size_t> next(std::optional<std::size_t>, bool forward) const;
 
