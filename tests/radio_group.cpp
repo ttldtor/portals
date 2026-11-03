@@ -226,7 +226,8 @@ TEST_CASE("radio scene shorthand and model client use unified Ref and user-only 
                  model = take(owner.radioState({"Fast", "Balanced", "Quiet"}));
                  return ui::radioGroup(group, model).id("mode").classes({"settings"});
                }) |
-               ui::onChange(group, [&](const RadioGroupValue &value) {
+               ui::onChange(group, [&](const auto &value) {
+                 static_assert(std::same_as<std::remove_cvref_t<decltype(value)>, RadioGroupValue>);
                  ++calls;
                  CHECK(value.selectedText() == "Balanced");
                });

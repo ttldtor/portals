@@ -980,13 +980,16 @@ public:
    */
   std::expected<PropertyUpdate<RadioGroupValue>, ManagedError> selectRadio(Node<RadioGroup> node,
                                                                            std::optional<RowId> id);
-  /** @tparam Callback Copyable value/receipt action. @param node Bound group.
+
+  /** @tparam Callback Copyable value/receipt action. @tparam T RadioGroup or a public derived control.
+   * @param node Bound group.
    * @param callback FIFO post-commit user notification. @param origin Registration provenance.
    * @return Checked bounded admission. External writes, failures and no-ops do not notify.
    */
-  template <class Callback>
-    requires(std::copy_constructible<Callback> && detail::ChangeAction<Callback, RadioGroupValue>)
-  std::expected<void, ManagedError> onChange(Node<RadioGroup> node, Callback callback,
+  template <class Callback, class T>
+    requires(std::derived_from<T, RadioGroup> && std::copy_constructible<Callback> &&
+             detail::ChangeAction<Callback, RadioGroupValue>)
+  std::expected<void, ManagedError> onChange(Node<T> node, Callback callback,
                                              std::source_location origin = std::source_location::current()) {
     auto allowed = boundary(ManagedPhase::BIND, node);
     if (!allowed) {
@@ -1023,7 +1026,8 @@ public:
                                          std::function<std::expected<void, TreeError>(CheckStateResult)> changed = {},
                                          CheckBoxOptions options = {});
 
-  /** @tparam Callback Copyable action taking the actual bool/CheckState value or const PropertyUpdate<T>&.
+  /** @tparam Callback Copyable action taking the actual bool/CheckState value or its PropertyUpdate reference.
+   * @tparam T CheckBox or a public derived control.
    * @param node Live checkbox with its existing managed binding.
    * @param callback FIFO notification of successful changed activation receipts, never a veto.
    * @param origin Registration site used by checked callback diagnostics.
@@ -1031,10 +1035,10 @@ public:
    * Generic value bodies must compile for both bool and CheckState; use a concrete parameter for one model.
    * External writes, failed commits and no-op receipts do not notify. Rejected notifications still commit.
    */
-  template <class Callback>
-    requires(std::copy_constructible<Callback> &&
+  template <class Callback, class T>
+    requires(std::derived_from<T, CheckBox> && std::copy_constructible<Callback> &&
              (detail::ChangeAction<Callback, bool> || detail::ChangeAction<Callback, CheckState>))
-  std::expected<void, ManagedError> onChange(Node<CheckBox> node, Callback callback,
+  std::expected<void, ManagedError> onChange(Node<T> node, Callback callback,
                                              std::source_location origin = std::source_location::current()) {
     auto boolean = changeModel(node);
 
