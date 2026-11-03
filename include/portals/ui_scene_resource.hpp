@@ -169,6 +169,7 @@ private:
     bool declaredDialog{};
     bool declaredHost{};
     bool declaredChoice{};
+    bool declaredRadio{};
     bool unknownDialog{};
     std::string_view virtualView{};
     std::optional<std::size_t> semanticPropertyCount{};
@@ -193,6 +194,10 @@ private:
     entry.declaredDialog = std::derived_from<T, Dialog>;
     entry.declaredHost = std::derived_from<T, OverlayHost>;
     entry.declaredChoice = std::derived_from<T, ComboBox>;
+    entry.declaredRadio = std::same_as<T, RadioGroup>;
+    if constexpr (std::same_as<T, RadioGroup>) {
+      entry.text = false;
+    }
     entry.unknownDialog = std::same_as<T, Widget>;
 
     if constexpr (detail::IsVirtualList<T>::value || detail::IsVirtualTable<T>::value || detail::IsChart<T>::value) {
@@ -240,6 +245,8 @@ private:
         semanticSettings.emplace(arguments.settings);
       }
 
+      const auto radioReadOnly = arguments.settings.readOnly;
+      const auto radioInitial = arguments.settings.radioInitial;
       auto id = arguments.id;
       auto recipe = std::expected<Description<T>, ManagedError>(std::invoke(factory, std::move(arguments)));
 
@@ -247,6 +254,9 @@ private:
         return std::unexpected(recipe.error());
       }
 
+      if constexpr (std::same_as<T, RadioGroup>) {
+        (void)std::move(*recipe).settings(ControlSettings{.readOnly = radioReadOnly, .radioInitial = radioInitial});
+      }
       if (semanticSettings) {
         auto staged = detail::Access::messageSource(*recipe, *semanticSettings, materialized, semantic);
 

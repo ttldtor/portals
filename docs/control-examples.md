@@ -8,6 +8,7 @@ a fragment; they are not complete applications.
 
 | Topic | Complete C++ program | Resource program or reference |
 |---|---|---|
+| One selected value | [RadioGroup](radio-group.md), [main.cpp](../examples/radio_group/main.cpp) | [guide_radio_group_resource.cpp](examples/guide_radio_group_resource.cpp) |
 | Search journal composition | [main.cpp](../examples/search_journal/main.cpp): operator field, two troubleshooting notes, selected-match summary and bounded journal | [FormField](form-fields.md), [FindBar](find-bar.md), [LogView](log-view.md) contracts |
 | Indexed suggestions | [Command browser](live-search.md), [main.cpp](../examples/suggestions/main.cpp) | Query and actions remain C++; the result uses an ordinary virtual list |
 | Background field validation | [Account directory](form-fields.md#form-field-async), [main.cpp](../examples/async_validation/main.cpp) | Worker rules are code-bound |

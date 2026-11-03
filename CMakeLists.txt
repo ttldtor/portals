@@ -39,7 +39,7 @@ set_target_properties(portals_utf8proc PROPERTIES C_STANDARD 99 C_STANDARD_REQUI
 target_compile_definitions(portals_utf8proc PRIVATE UTF8PROC_STATIC)
 target_include_directories(portals_utf8proc PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/utf8proc")
 
-add_library(portals_core STATIC src/version.cpp src/geometry.cpp src/text.cpp src/input.cpp src/cell_buffer.cpp src/render.cpp src/render/diff.cpp src/terminal/writer.cpp src/runtime/scheduler.cpp src/runtime/application.cpp src/runtime/native_application.cpp src/runtime/diagnostics.cpp src/widgets/widget.cpp src/layout/linear.cpp src/layout/grid.cpp src/layout/overlay.cpp src/widgets/focus.cpp src/widgets/event_routing.cpp src/models/model.cpp src/widgets/basic_controls.cpp src/widgets/line_edit.cpp src/widgets/ui_ref.cpp src/widgets/managed.cpp src/views/virtual_list.cpp src/views/virtual_table.cpp src/views/scroll.cpp src/styles/style.cpp src/styles/pss.cpp src/charts/canvas.cpp src/charts/chart.cpp)
+add_library(portals_core STATIC src/version.cpp src/geometry.cpp src/text.cpp src/input.cpp src/cell_buffer.cpp src/render.cpp src/render/diff.cpp src/terminal/writer.cpp src/runtime/scheduler.cpp src/runtime/application.cpp src/runtime/native_application.cpp src/runtime/diagnostics.cpp src/widgets/widget.cpp src/layout/linear.cpp src/layout/grid.cpp src/layout/overlay.cpp src/widgets/focus.cpp src/widgets/event_routing.cpp src/models/model.cpp src/widgets/radio_group.cpp src/widgets/basic_controls.cpp src/widgets/line_edit.cpp src/widgets/ui_ref.cpp src/widgets/managed.cpp src/views/virtual_list.cpp src/views/virtual_table.cpp src/views/scroll.cpp src/styles/style.cpp src/styles/pss.cpp src/charts/canvas.cpp src/charts/chart.cpp)
 target_sources(portals_core PRIVATE src/terminal/legacy.cpp)
 
 target_sources(portals_core PRIVATE
@@ -286,6 +286,7 @@ if(PORTALS_BUILD_EXAMPLES)
   add_subdirectory(examples/choices)
   add_subdirectory(examples/commands)
   add_subdirectory(examples/status_bar)
+  add_subdirectory(examples/radio_group)
   add_subdirectory(examples/async_validation)
   add_subdirectory(examples/search_journal)
   add_subdirectory(examples/check_state)
@@ -979,6 +980,8 @@ if(PORTALS_BUILD_TESTS)
     tests/package_consumer/ref_header.cpp
     tests/package_consumer/scene_header.cpp
     tests/package_consumer/ui_controls_header.cpp
+    tests/package_consumer/radio_group_header.cpp
+    tests/package_consumer/ui_radio_group_header.cpp
     tests/package_consumer/ui_layout_header.cpp
     tests/package_consumer/ui_scene_pipeline_header.cpp
     tests/package_consumer/ui_static_header.cpp
@@ -1337,6 +1340,13 @@ if(PORTALS_BUILD_TESTS)
   add_test(NAME portals.check-state COMMAND portals_check_state)
   set_tests_properties(portals.check-state PROPERTIES TIMEOUT 15)
 
+  add_executable(portals_radio_group tests/radio_group.cpp)
+  target_include_directories(portals_radio_group SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  target_link_libraries(portals_radio_group PRIVATE portals::core)
+  portals_enable_warnings(portals_radio_group)
+  add_test(NAME portals.radio-group COMMAND portals_radio_group)
+  set_tests_properties(portals.radio-group PROPERTIES TIMEOUT 20)
+
   add_executable(portals_basic_controls tests/basic_controls.cpp tests/support/test_terminal.cpp)
   target_link_libraries(portals_basic_controls PRIVATE portals::core)
   portals_enable_warnings(portals_basic_controls)
@@ -1453,7 +1463,7 @@ if(PORTALS_BUILD_TESTS)
   add_test(NAME portals.model-find COMMAND portals_model_find)
   set_tests_properties(portals.model-find PROPERTIES TIMEOUT 60)
   add_executable(portals_async tests/async.cpp)
-  foreach(guide IN ITEMS model_find prepared_theme choices)
+  foreach(guide IN ITEMS model_find prepared_theme choices radio_group radio_group_resource)
     add_executable(portals_docs_${guide} docs/examples/guide_${guide}.cpp)
     target_link_libraries(portals_docs_${guide} PRIVATE portals::core)
     portals_enable_warnings(portals_docs_${guide})
@@ -1716,7 +1726,7 @@ if(PORTALS_BUILD_DOCS)
 
   set(portals_documentation_inputs include docs/live-search.md docs/ru/live-search.md docs/form-fields.md docs/ru/form-fields.md docs/find-bar.md docs/ru/find-bar.md docs/control-examples.md docs/ru/control-examples.md docs/actions.md docs/ru/actions.md docs/loading-indicators.md docs/ru/loading-indicators.md docs/theme-selector.md docs/ru/theme-selector.md docs/theme-selection.md docs/ru/theme-selection.md docs/key-help.md docs/ru/key-help.md docs/dialogs.md docs/ru/dialogs.md docs/scroll-controls.md docs/ru/scroll-controls.md docs/wasm-gallery.md docs/ru/wasm-gallery.md docs/first-application.md docs/ru/first-application.md docs/developer-tools.md docs/ru/developer-tools.md docs/developer-tools-build.md docs/ru/developer-tools-build.md docs/developer-tools-measure.md docs/ru/developer-tools-measure.md docs/developer-tools-release.md docs/ru/developer-tools-release.md docs/ru/development.md docs/declarative-reference.md docs/ru/declarative-reference.md docs/ru/compact-examples.md docs/compile-time-pss.md docs/style-layers.md docs/model-queries.md docs/ui-coroutines.md docs/compile-time-styles.md docs/compile-time-scenes.md ReleaseNotes.md docs/index.md docs/reference-map.md docs/guides.md docs/dependencies.md docs/planned-features.md docs/ru/application.md docs/ru/architecture.md docs/ru/bindings-guide.md docs/ru/cell-buffer.md docs/ru/chart.md docs/ru/cli.md docs/ru/compile-time-pss.md docs/ru/compile-time-scenes.md docs/ru/compile-time-styles.md docs/ru/controls.md docs/ru/declarative-ui.md docs/ru/dependencies.md docs/ru/diagnostics.md docs/ru/diff.md docs/ru/editor-history-demo.md docs/ru/editor-history.md docs/ru/examples.md docs/ru/focus.md docs/ru/geometry.md docs/ru/getting-started.md docs/ru/glossary.md docs/ru/grid.md docs/ru/guides.md docs/ru/index.md docs/ru/input.md docs/ru/layout.md docs/ru/limitations.md docs/ru/line-edit.md docs/ru/managed-controls.md docs/ru/model-queries.md docs/ru/model.md docs/ru/package.md docs/ru/planned-features.md docs/ru/property.md docs/ru/reference-map.md docs/ru/render.md docs/ru/scene-loading-guide.md docs/ru/scheduler.md docs/ru/scroll.md docs/ru/style-layers.md docs/ru/styles.md docs/ru/styling-guide.md docs/ru/terminal-probe.md docs/ru/terminal.md docs/ru/text-history.md docs/ru/text-property.md docs/ru/text.md docs/ru/themes-guide.md docs/ru/ui-coroutines.md docs/ru/virtual-list.md docs/ru/virtual-preparation.md docs/ru/virtual-table.md docs/ru/widget-tree.md docs/glossary.md docs/styling-guide.md docs/themes-guide.md docs/bindings-guide.md docs/scene-loading-guide.md docs/development.md docs/releasing.md docs/geometry.md docs/text.md docs/cell-buffer.md docs/render.md docs/diff.md docs/testing.md docs/scheduler.md docs/widget-tree.md docs/layout.md docs/grid.md docs/property.md docs/diagnostics.md docs/focus.md docs/model.md docs/input.md docs/terminal.md docs/terminal-probe.md docs/controls.md docs/line-edit.md docs/virtual-list.md docs/virtual-table.md docs/scroll.md docs/chart.md
     docs/notifications.md docs/ru/notifications.md
-    docs/compact-primitives.md docs/ru/compact-primitives.md docs/styles.md docs/legacy.md docs/managed-controls.md docs/declarative-ui.md docs/data-presentation.md docs/ru/data-presentation.md docs/text-property.md docs/text-history.md docs/editor-history.md docs/editor-history-demo.md docs/compact-examples.md docs/compactness.md docs/quality.md tools/compactness/compactness.hpp docs/managed-performance.md docs/package.md docs/application.md docs/virtual-preparation.md docs/examples.md docs/architecture.md docs/getting-started.md docs/limitations.md docs/api-design.md fuzz/README.md
+    docs/compact-primitives.md docs/ru/compact-primitives.md docs/styles.md docs/legacy.md docs/managed-controls.md docs/radio-group.md docs/ru/radio-group.md docs/declarative-ui.md docs/data-presentation.md docs/ru/data-presentation.md docs/text-property.md docs/text-history.md docs/editor-history.md docs/editor-history-demo.md docs/compact-examples.md docs/compactness.md docs/quality.md tools/compactness/compactness.hpp docs/managed-performance.md docs/package.md docs/application.md docs/virtual-preparation.md docs/examples.md docs/architecture.md docs/getting-started.md docs/limitations.md docs/api-design.md fuzz/README.md
     tools/benchmarks/README.md vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md vendor/textual/README.md vendor/doctest/README.md vendor/pfr/README.md vendor/lyra/README.md docs/cli.md)
   list(APPEND portals_documentation_inputs docs/editor-contracts.md docs/ru/editor-contracts.md)
   list(APPEND portals_documentation_inputs docs/log-view.md docs/ru/log-view.md)

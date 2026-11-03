@@ -437,13 +437,12 @@ private:
   }
 
   const ControlPropertyDescriptor *descriptor(std::string_view path) const {
-    for (const auto type : {"FindBar",    "FormField",     "Password",      "LineEdit",
-                            "ComboBox",   "DropDown",      "CheckBox",      "VBox",
-                            "Button",     "Border",        "Gauge",         "Spinner",
-                            "ScrollArea", "ScrollBar",     "LogView",       "Overlay",
-                            "HelpView",   "KeyHints",      "VirtualList",   "VirtualTable", "StatusBar",
-                            "Chart",      "DataStateView", "OverlayHost",   "Dialog",
-                            "MessageBox", "Notifications", "ThemeSelector", "ThemeSelectorCatalog"}) {
+    for (const auto type :
+         {"FindBar",     "FormField",   "Password",     "LineEdit",      "ComboBox",      "DropDown",
+          "CheckBox",    "RadioGroup",  "VBox",         "Button",        "Border",        "Gauge",
+          "Spinner",     "ScrollArea",  "ScrollBar",    "LogView",       "Overlay",       "HelpView",
+          "KeyHints",    "VirtualList", "VirtualTable", "StatusBar",     "Chart",         "DataStateView",
+          "OverlayHost", "Dialog",      "MessageBox",   "Notifications", "ThemeSelector", "ThemeSelectorCatalog"}) {
       const auto schema = controlPropertySchema(type);
       const auto found = std::ranges::find(schema, path, &ControlPropertyDescriptor::path);
 
@@ -714,6 +713,8 @@ private:
         settings.securePolicy.excludeFromDumps = enabled;
       } else if (path == "securePolicy.encryptWhileIdle") {
         settings.securePolicy.encryptWhileIdle = enabled;
+      } else if (path == "radioInitial.enabled") {
+        settings.radioInitial.enabled = enabled;
       } else if (path == "themeCatalog.initialId.enabled") {
         settings.themeCatalog.initialId.enabled = enabled;
       } else if (path == "themeCatalog.layers.enabled") {
@@ -925,14 +926,17 @@ private:
       return {};
     }
 
-    if (path == "keyStep" || path == "pageOverlap" || path == "spinnerInterval" || path == "interval") {
+    if (path == "keyStep" || path == "pageOverlap" || path == "spinnerInterval" || path == "interval" ||
+        path == "radioInitial.index") {
       const auto value = capacity<std::uint64_t>();
 
       if (!value) {
         return std::unexpected(withProperty(value.error(), type, path));
       }
 
-      if (path == "interval") {
+      if (path == "radioInitial.index") {
+        settings.radioInitial.index = *value;
+      } else if (path == "interval") {
         settings.spinnerTick = *value;
       } else if (path == "spinnerInterval") {
         settings.spinnerInterval = *value;
@@ -1209,7 +1213,7 @@ private:
            path == "message.textLimits" || path == "notification" || path == "notification.textLimits" ||
            path == "themeSelector" || path == "themeSelector.labels" || path == "themeSelector.textLimits" ||
            path == "themeSelector.openingShortcut" || path == "themeCatalog" || path == "themeCatalog.textLimits" ||
-           path == "themeCatalog.initialId" || path == "themeCatalog.layers");
+           path == "themeCatalog.initialId" || path == "themeCatalog.layers" || path == "radioInitial");
 
         if (path != "history" && path != "padding" && !configurationStruct) {
           return std::unexpected(document_.propertyFailure(Code::UNKNOWN_PROPERTY, begin, type, path));

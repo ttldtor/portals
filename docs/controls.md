@@ -606,3 +606,7 @@ replace the line or background. Focused and disabled rules use the existing
 state selectors and style layers. These are paint attributes; decorations and
 frame line patterns remain construction settings;
 [named glyph profiles](scroll-controls.md#named-glyph-profiles) also support PSS.
+
+## Radio groups
+
+[Radio groups](radio-group.md) support a coherent resident single-selection model, unified Ref and ordinary keyboard/mouse input.

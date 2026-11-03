@@ -35,6 +35,13 @@ std::expected<void, ManagedError> registerSchemas(ControlContext &controls, cons
     if (entry.checked) {
       paths.insert(paths.end(), {"state", "cycle"});
     }
+    if (entry.declaredRadio) {
+      for (const auto &property : controlPropertySchema("RadioGroup")) {
+        if (std::ranges::find(paths, property.path) == paths.end()) {
+          paths.push_back(property.path);
+        }
+      }
+    }
 
     const auto matchesLegacyDataSchema = [&] {
       if ((entry.virtualView != "VirtualList" && entry.virtualView != "VirtualTable" && entry.virtualView != "Chart") ||
