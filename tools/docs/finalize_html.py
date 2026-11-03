@@ -2,7 +2,7 @@
 
 Run automatically through the portals_docs target. For diagnosis, pass the
 existing HTML directory and Doxygen XML tag file from the same build. This
-rewrites guide HTML and navigation/search JS in place and copies linked repository
+rewrites guide HTML, index anchors and navigation/search JS in place and copies linked repository
 sources into HTML/source. Keep the script in its checkout. No network access.
 Prints JSON guide/type counts; exits 0 on success, 1 on an uncaught I/O/XML/HTML
 processing failure, 2 on invalid CLI syntax. Rebuild portals_docs after failure.
@@ -410,8 +410,41 @@ def complete_search(directory):
         script.write_text(text, encoding="utf-8")
 
 
+def complete_destructor_indexes(directory):
+    """Keep Doxygen's literal destructor fragments valid beside encoded IDs."""
+    for path in directory.glob("functions*_~.html"):
+        original = path.read_text(encoding="utf-8")
+        if re.search(r"\s(?:id|name)=[\"']index_~[\"']", original):
+            continue
+        text = re.sub(r"(<a\b[^>]*\sid=[\"']index__7E[\"'][^>]*>)",
+                      r'<a id="index_~"></a>\1', original, count=1)
+        if text != original:
+            path.write_text(text, encoding="utf-8")
+
+
+def complete_type_index(directory):
+    """Drop a native typedef alphabet bar only when all its sections are absent."""
+    path = directory / "functions_type.html"
+    if not path.is_file():
+        return
+    original = path.read_text(encoding="utf-8")
+    if re.search(r"<h[1-6]\b", original):
+        return
+    alphabet = re.search(
+        r'<div class="qindex">(?:<a class="qindex" href="#index_[a-z]">[A-Z]</a>'
+        r'|<div class="alphasepar"></div>)+</div>', original)
+    if not alphabet:
+        return
+    targets = re.findall(r'href="#([^"]+)"', alphabet[0])
+    if not targets or any(re.search(r"\s(?:id|name)=[\"']" + re.escape(target) + r"[\"']", original)
+                          for target in targets):
+        return
+    # Doxygen can emit a flat member list with an alphabet bar but no corresponding sections.
+    path.write_text(original[:alphabet.start()] + original[alphabet.end():], encoding="utf-8")
+
+
 def finalize(directory, tag_file, language=None, api_tag=None, api_prefix="../"):
-    """Rewrite registered guide pages and their navigation after Doxygen finishes."""
+    """Finalize guide pages, index anchors and navigation after Doxygen finishes."""
     links = type_links(api_tag or tag_file)
     if api_tag:
         links = {name: api_prefix + target for name, target in links.items()}
@@ -436,6 +469,8 @@ def finalize(directory, tag_file, language=None, api_tag=None, api_prefix="../")
     complete_navigation(directory, headings)
     group_overloads(directory, tag_file, read_variable, write_variable)
     complete_search(directory)
+    complete_destructor_indexes(directory)
+    complete_type_index(directory)
     navigation = directory / "navtree.js"
     if navigation.is_file():
         navigation.write_text(navigation_text(navigation.read_text(encoding="utf-8")),

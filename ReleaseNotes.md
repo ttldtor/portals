@@ -87,6 +87,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
   must account for the additional fields. TerminalError adds an owning protocol
   issue for a rejected unknown initial pixel context. This is not an old-binary ABI guarantee.
 
+### Fixed
+
+- Keep generated API index navigation valid with Doxygen 1.18, preserving
+  destructor links and removing orphaned alphabet links from an ungrouped type index.
+
 ## v0.7.0 (2026-10-29)
 
 ### Added
