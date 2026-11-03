@@ -246,6 +246,7 @@ template <Literal Type, Literal Id, Literal... Classes> struct Selector {
   static constexpr auto ID = Id;                              ///< Owning target identity.
   static constexpr std::array CLASS_NAMES{Classes.view()...}; ///< Views into static owned template bytes.
   StyleState state;                                           ///< Existing pseudo-state.
+  bool readOnly{};                                            ///< Orthogonal read-only qualifier.
 };
 
 /** @brief Internal selector specialization with no class predicates.
@@ -257,6 +258,7 @@ template <Literal Type, Literal Id> struct Selector<Type, Id> {
   static constexpr auto ID = Id;                                  ///< Owning target identity.
   static constexpr std::array<std::string_view, 0> CLASS_NAMES{}; ///< Empty class predicates.
   StyleState state;                                               ///< Existing pseudo-state.
+  bool readOnly{};                                                ///< Orthogonal read-only qualifier.
 };
 
 /** @brief Internal owning rule, validated by its containing sheet.
@@ -570,7 +572,7 @@ template <class R, class P> consteval void validateRule(const R &rule, const P &
     staticStyleInvalidScrollbarPattern();
   }
 
-  if (values.minWidth && (*values.minWidth < 0 || rule.selector.state != StyleState::ANY)) {
+  if (values.minWidth && (*values.minWidth < 0 || rule.selector.state != StyleState::ANY || rule.selector.readOnly)) {
     staticStyleInvalidMetric();
   }
 }
@@ -787,53 +789,58 @@ template <class Left, class Right> consteval auto mix(Left left, Right right, st
  * @tparam Id Optional target ID; empty matches every ID.
  * @tparam Classes Required class names, all of which must match the target.
  * @param state Existing pseudo-state; metric declarations require ANY.
+ * @param readOnly Require view-only; metric declarations require false.
  * @return Owning selector description; bytes retain existing runtime matching semantics.
  */
 template <detail::Literal Type = "", detail::Literal Id = "", detail::Literal... Classes>
-consteval auto selector(StyleState state = StyleState::ANY) {
+consteval auto selector(StyleState state = StyleState::ANY, bool readOnly = false) {
   if (state < StyleState::ANY || state > StyleState::CARET) {
     detail::staticStyleInvalidState();
   }
 
-  return detail::Selector<Type, Id, Classes...>{state};
+  return detail::Selector<Type, Id, Classes...>{state, readOnly};
 }
 
 /** @param state Optional presentation-state predicate.
+ * @param readOnly Require the orthogonal view-only fact.
  * @return Owning universal selector using the existing conjunction semantics.
  */
-consteval auto all(StyleState state = StyleState::ANY) {
-  return selector<>(state);
+consteval auto all(StyleState state = StyleState::ANY, bool readOnly = false) {
+  return selector<>(state, readOnly);
 }
 
 /** @tparam Name Static owned target identity, validated by the consuming API.
  * @param state Optional presentation-state predicate.
+ * @param readOnly Require the orthogonal view-only fact.
  * @return Owning ID selector with no widget-type constraint.
  */
-template <detail::Literal Name> consteval auto id(StyleState state = StyleState::ANY) {
+template <detail::Literal Name> consteval auto id(StyleState state = StyleState::ANY, bool readOnly = false) {
   static_assert(portals::detail::isPssIdentifier(Name.view()), "Static style ID requires a PSS ASCII identifier");
 
-  return selector<"", Name>(state);
+  return selector<"", Name>(state, readOnly);
 }
 
 /** @tparam Name Static owned widget type, validated by the consuming API.
  * @param state Optional presentation-state predicate.
+ * @param readOnly Require the orthogonal view-only fact.
  * @return Owning type selector with no ID constraint.
  */
-template <detail::Literal Name> consteval auto type(StyleState state = StyleState::ANY) {
+template <detail::Literal Name> consteval auto type(StyleState state = StyleState::ANY, bool readOnly = false) {
   static_assert(Name.view() == "*" || portals::detail::isPssIdentifier(Name.view()),
                 "Static style type requires a PSS ASCII identifier or universal '*'");
 
-  return selector<Name>(state);
+  return selector<Name>(state, readOnly);
 }
 
 /** @tparam Name Static owned required class identity, validated by the consuming API.
  * @param state Optional presentation-state predicate.
+ * @param readOnly Require the orthogonal view-only fact.
  * @return Owning single-class selector.
  */
-template <detail::Literal Name> consteval auto className(StyleState state = StyleState::ANY) {
+template <detail::Literal Name> consteval auto className(StyleState state = StyleState::ANY, bool readOnly = false) {
   static_assert(portals::detail::isPssIdentifier(Name.view()), "Static style class requires a PSS ASCII identifier");
 
-  return selector<"", "", Name>(state);
+  return selector<"", "", Name>(state, readOnly);
 }
 
 /** @tparam E Color or color expression type.
@@ -1257,7 +1264,7 @@ consteval auto sheet(P values, R... rules) {
 
 /** @brief Constant counterpart of portals::themeFromTokens with live named color parameters.
  * @tparam P Optional extra parameter definitions; standard color names are reserved by uniqueness checks.
- * @tparam R Optional extra rules appended after the six existing standard-state rules.
+ * @tparam R Optional extra rules appended after the standard-state and RadioGroup rules.
  * @param defaults Default foreground, background, accent, muted, selection and heading colors.
  * @param extraParameters Additional owning definitions, for example a control-specific minimum width.
  * @param extraRules Additional owning rules, preserving the existing cascade's source-order behavior.
@@ -1291,6 +1298,21 @@ consteval auto themeFromTokens(ThemeTokens defaults, detail::Parameters<P...> ex
          bold(true), italic(false)),
     rule(selector(StyleState::HEADER), foreground(token<"heading">()), background(token<"background">()), bold(true)),
     rule(selector(StyleState::CARET), foreground(token<"accent">()), background(token<"background">()), bold(false)),
+    rule(type<"RadioGroup">(StyleState::SELECTED), background(token<"background">())),
+    rule(type<"RadioGroup">(StyleState::ANY, true), foreground(token<"muted">()), background(token<"background">()),
+         bold(false), italic(false), underline(false)),
+    rule(type<"RadioGroup">(StyleState::FOCUSED, true), foreground(token<"background">()),
+         background(token<"accent">()), bold(true), frameLineForeground(token<"accent">()),
+         frameLineBackground(token<"background">()), frameLineBold(true), frameTitleForeground(token<"accent">()),
+         frameTitleBackground(token<"background">()), frameTitleBold(true), frameEndsForeground(token<"accent">()),
+         frameEndsBackground(token<"background">()), frameEndsBold(true), scrollbarTrackForeground(token<"accent">()),
+         scrollbarTrackBackground(token<"background">()), scrollbarTrackBold(true),
+         scrollbarThumbForeground(token<"accent">()), scrollbarThumbBackground(token<"background">()),
+         scrollbarThumbBold(true), scrollbarEndsForeground(token<"accent">()),
+         scrollbarEndsBackground(token<"background">()), scrollbarEndsBold(true),
+         scrollbarArrowsForeground(token<"accent">()), scrollbarArrowsBackground(token<"background">()),
+         scrollbarArrowsBold(true), scrollbarCornerForeground(token<"accent">()),
+         scrollbarCornerBackground(token<"background">()), scrollbarCornerBold(true)),
     extraRules...);
 }
 
@@ -1313,6 +1335,7 @@ template <class S, class V> StyleSheet materializeValues(const S &description, c
           target.selector.type = SelectorType::TYPE.view();
           target.selector.id = SelectorType::ID.view();
           target.selector.state = source.selector.state;
+          target.selector.readOnly = source.selector.readOnly;
           target.selector.classes.reserve(SelectorType::CLASS_NAMES.size());
 
           for (const auto name : SelectorType::CLASS_NAMES) {

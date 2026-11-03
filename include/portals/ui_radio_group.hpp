@@ -50,8 +50,9 @@ inline Description<RadioGroup> radioRecipe(std::vector<RadioOption> captions,
         }
       }
 
-      auto node = scene.emplace<RadioGroup>(parent, style, policy, context.controlSettings->readOnly.value_or(false),
-                                            scene.widthPolicy());
+      auto node = scene.emplace<RadioGroup>(
+        parent, style, policy, context.controlSettings->readOnly.value_or(false), scene.widthPolicy(),
+        context.controlSettings->radioSelectionMode.value_or(RadioSelectionMode::ON_ACTIVATION));
       if (!node) {
         return node;
       }

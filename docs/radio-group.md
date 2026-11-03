@@ -2,14 +2,20 @@
 
 [Русская версия](ru/radio-group.md) · [Control examples](control-examples.md)
 
-`RadioGroup` displays a resident set of choices and keeps at most one selected
-stable value. Each group is one Tab stop. Arrows select the previous or next
-available option and wrap at the ends; Home/End select the first/last available
-option. Space or Enter selects the active option. Clicking a visible enabled
-row selects it. Repeating the current choice leaves the model unchanged.
-If selection is absent, hidden or disabled, arrows and Space/Enter start with
-the first available option; Home/End retain their endpoint behavior. With no
-available option, user input leaves the model unchanged.
+`RadioGroup` displays resident choices with one selected stable value and one
+local active option. Each group is one Tab stop. By default arrows move active
+without changing the model, wrapping and skipping hidden/disabled options;
+Home/End move to the first/last available option. Space or Enter confirms active.
+Clicking an enabled visible row selects it directly. Blur never confirms.
+Navigation alone changes no revision and sends no `onChange`. Repeating the
+selected value is a no-op. With no eligible option, input changes no value.
+
+Use `.immediate()` to select while navigating, or
+`.selectionMode(RadioSelectionMode::IMMEDIATE)` for the explicit enum.
+`.immediate(false)` restores the default `ON_ACTIVATION`. Low-level construction
+accepts the same defaulted policy after `WidthPolicy`; resources use
+`radioSelectionMode=IMMEDIATE` or `ON_ACTIVATION`. This default differs from
+earlier releases where arrows immediately selected.
 
 ## Start with labels
 
@@ -99,8 +105,10 @@ explicit IDs continue to identify the same domain row.
 
 Hidden items occupy no row. Disabled items remain visible. Both are skipped
 by user navigation; an already selected disabled/hidden item retains its value.
-`.settings({.readOnly=true})` retains focus and programmatic writes while
-prohibiting user mutation. Group visibility/enabled state follows the ordinary
+`.readOnly()` retains focus, active navigation and programmatic writes while
+prohibiting user selection in both modes. Active identity survives focus changes
+and external selection-only writes. If it becomes ineligible, it falls back to
+eligible selected, then the first eligible option; selection is preserved. Group visibility/enabled state follows the ordinary
 tree/router rules. The default resident cap is the existing configurable
 `CollectionLimits::maxRows` of 4096; oversized sources fail without truncation.
 This control does not provide a lazy/paged source or a search popup.
@@ -109,9 +117,25 @@ This control does not provide a lazy/paged source or a search popup.
 
 `RadioGroup` is the natural style identity for typed and loaded controls.
 Ordinary IDs/classes, `Control` selectors, theme layers and manual `ControlStyle`
-normal/focused/disabled appearances apply. The focused appearance marks the
-active option; disabled appearance takes precedence. Chrome uses the same style
-as its label. `( ) ` and `(*) ` have equal measured widths.
+normal/focused/disabled appearances apply. While the group has focus, the active
+caption uses `focused`; after blur it uses `normal`. The selected marker keeps
+`selected`, so both states remain visible on the same or
+different rows. Disabled takes precedence for both parts. Without a stylesheet,
+the selected marker inherits manual `ControlStyle::focused`, preserving custom
+colors. `( ) ` and `(*) ` have equal measured widths.
+
+All built-in themes use the theme's muted disabled-text color on the surface
+for read-only groups, without bold, italic or underline. Read-only groups remain
+focusable and navigable; the active caption and focused chrome retain the normal
+focused palette. Selected markers use the surface background in both editable
+and read-only groups. `RadioGroup:read-only` is an orthogonal sparse qualifier;
+it composes with one role, for example `RadioGroup:read-only:focused` or
+`RadioGroup:selected:read-only`. Application styles can override these defaults.
+See [styles](styles.md).
+
+Rebuild consumers against the matching SDK: the appended selector qualifier and
+widget virtual hook change the API/vtable, while existing constructor
+and aggregate prefixes remain source-compatible.
 
 Natural width is the widest visible caption plus chrome; natural height is the
 number of visible options. The standard fit/min/max/flex and frame modifiers

@@ -185,10 +185,13 @@ void parserAndCascade(const char *themeDirectory) {
     auto fromPss = take(parsePss(source));
     auto fromCpp = std::string_view(name) == "modern" ? modernTheme() : turboTheme();
 
-    for (const auto type : {"Button", "CheckBox", "LineEdit", "Table", "Custom"}) {
+    for (const auto type : {"Button", "CheckBox", "LineEdit", "Table", "Custom", "RadioGroup"}) {
       check(resolveStyle(fromPss, {type, "", {}}) == resolveStyle(fromCpp, {type, "", {}}),
             "typed factory and shipped PSS give identical complete styles");
     }
+    check(resolveStyle(fromPss, {.type = "RadioGroup"}, {}, true) ==
+            resolveStyle(fromCpp, {.type = "RadioGroup"}, {}, true),
+          "typed factory and shipped PSS give identical read-only radio styles");
   }
 }
 

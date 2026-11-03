@@ -1837,3 +1837,29 @@ TEST_CASE("sizing settings replace axis modes across sources and reject competin
   fails(context.resolve("Label", {.width = 20, .minWidth = 3, .maxWidth = 7}), Code::INVALID_VALUE);
   fails(context.resolve("Label", {.minHeight = 5, .maxHeight = 2}), Code::INVALID_VALUE);
 }
+
+TEST_CASE("radio selection policy retains explicit default and winning sparse origin") {
+  auto inheritedSource = std::make_shared<ControlSourceOrigin>();
+  inheritedSource->sourceIdentity = "defaults.scene";
+  auto instanceSource = std::make_shared<ControlSourceOrigin>();
+  instanceSource->sourceIdentity = "instance.scene";
+  ControlSettings inherited;
+  inherited.radioSelectionMode = RadioSelectionMode::IMMEDIATE;
+  inherited.origin = inheritedSource;
+  ControlContext controls;
+  controls.define("Modes", "RadioGroup", inherited);
+  CHECK(take(controls.resolve("Modes")).settings.radioSelectionMode == RadioSelectionMode::IMMEDIATE);
+  ControlSettings patch;
+  patch.radioSelectionMode = RadioSelectionMode::ON_ACTIVATION;
+  patch.origin = instanceSource;
+  const auto result = take(controls.resolve("Modes", patch));
+  REQUIRE(result.settings.radioSelectionMode);
+  CHECK(*result.settings.radioSelectionMode == RadioSelectionMode::ON_ACTIVATION);
+  REQUIRE(result.settings.origins.size() == 1);
+  CHECK(result.settings.origins.front().path == "radioSelectionMode");
+  CHECK(result.settings.origins.front().source == instanceSource);
+  CHECK(ui::detail::controlSettingsPresenceSet(patch).count() == 1);
+  fails(controls.resolve("Label", patch), Code::UNSUPPORTED_PROPERTY);
+  patch.radioSelectionMode = static_cast<RadioSelectionMode>(99);
+  fails(controls.resolve("Modes", patch), Code::INVALID_VALUE);
+}

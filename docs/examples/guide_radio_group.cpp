@@ -14,7 +14,7 @@ int main() {
   // clang-format off
   auto scene = ui::scene([=](ManagedScene &owner) {
     return ui::vbox(
-      ui::label("Power mode | Arrows select | F10 closes"),
+      ui::label("Arrows move | Space/Enter selects | F10 closes"),
       ui::radioGroup(mode, owner.radioState({"Fast", "Balanced", "Quiet"})),
       ui::label(selected, "Fast"));
   });

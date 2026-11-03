@@ -61,6 +61,13 @@ public:
    */
   virtual ComputedStyle styleDefaults() const;
 
+  /** @brief Read actual view-only state during style staging; false by default.
+   * @return Orthogonal read-only selector fact. The engine passes this fact on the stack
+   * for bound widgets; standalone resolveStyle accepts an explicit fact argument.
+   * @note This nonthrowing hook must not mutate state, perform I/O or reenter the tree.
+   */
+  virtual bool styleReadOnly() const noexcept;
+
   /** @brief Inspect the last atomically installed theme inside tree.read/frame.
    * @return Borrowed owning handle, empty before binding. The handle reference and nested
    * borrows expire on the next style publication. Copy the shared pointer to retain the

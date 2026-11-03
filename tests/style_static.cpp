@@ -194,13 +194,18 @@ TEST_CASE("static rule expansion preserves every existing cascade state and sour
 TEST_CASE("constant standard theme reproduces existing ThemeTokens helper for all states") {
   constexpr ThemeTokens TOKENS{{1, 2, 3}, {4, 5, 6}, {7, 8, 9}, {10, 11, 12}, {13, 14, 15}, {16, 17, 18}};
   constexpr auto STANDARD = sc::themeFromTokens(TOKENS);
-  static_assert(std::tuple_size_v<std::remove_cvref_t<decltype(STANDARD.rules())>> == 6);
+  static_assert(std::tuple_size_v<std::remove_cvref_t<decltype(STANDARD.rules())>> == 9);
   static_assert(std::get<4>(STANDARD.parameters().defaults()) == TOKENS.selection);
   const auto before = portals::themeFromTokens(TOKENS);
   const auto after = sc::materialize(STANDARD);
   CHECK(resolveStyle(after, {"Button", "", {}}) == resolveStyle(before, {"Button", "", {}}));
   CHECK(resolveStyle(after, {"LineEdit", "", {}}) == resolveStyle(before, {"LineEdit", "", {}}));
   CHECK(resolveStyle(after, {"Border", "", {}}) == resolveStyle(before, {"Border", "", {}}));
+  for (const bool readOnly : {false, true}) {
+    CHECK(resolveStyle(after, {.type = "RadioGroup"}, {}, readOnly) ==
+          resolveStyle(before, {.type = "RadioGroup"}, {}, readOnly));
+  }
+
   const ComputedStyle italicFallback{.selected = {.bold = true, .italic = true}};
 
   CHECK_FALSE(resolveStyle(after, {"Table", "", {}}, italicFallback).selected.italic);

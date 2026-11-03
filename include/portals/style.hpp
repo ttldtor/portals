@@ -55,7 +55,7 @@ struct StyleRegistration {
   StyleTarget target; ///< Matching metadata copied into the engine on success.
 };
 
-/** @brief Conjunction of optional type, id, classes and one state; no hierarchy combinators. */
+/** @brief Conjunction of optional type, id, classes, one state and read-only; no hierarchy combinators. */
 struct StyleSelector {
   /** @brief Destroy owned values. Deliberately suppress implicit noexcept moves: checked MSVC
    * container moves can allocate; copy-based transfers allow allocation failure to propagate.
@@ -66,6 +66,7 @@ struct StyleSelector {
   std::string id{""};                                             ///< Empty means any identity.
   std::vector<std::string> classes = std::vector<std::string>(0); ///< Every named class is required.
   StyleState state{StyleState::ANY};                              ///< Optional presentation-state predicate.
+  bool readOnly{false};                                           ///< True requires read-only; false adds no qualifier.
 
   /** @param other Owning value to compare.
    * @return Whether all typed fields are equal.
@@ -251,10 +252,12 @@ std::expected<StyleSheet, StyleError> parsePss(std::string_view source);
  * This metadata-only preview ignores a sheet node scope; the owning engine checks scope against live NodeId.
  * @param target Borrowed matching metadata; no data are retained.
  * @param defaults Owning built-in/custom widget defaults beneath all matching declarations.
+ * @param readOnly Orthogonal view-only fact; engines read the live widget instead of retaining this flag.
  * @return Complete owning style, or unchanged defaults for invalid ancestor metadata.
  * No allocation, I/O or thread affinity; caller owns input stability. validateStyleTarget provides typed diagnostics.
  */
-ComputedStyle resolveStyle(const StyleSheet &sheet, const StyleTarget &target, ComputedStyle defaults = {}) noexcept;
+ComputedStyle resolveStyle(const StyleSheet &sheet, const StyleTarget &target, ComputedStyle defaults = {},
+                           bool readOnly = false) noexcept;
 
 /** @brief Typed palette tokens for the built-in theme factories. */
 struct ThemeTokens {
@@ -460,7 +463,7 @@ private:
   detail::StyleThemeLease themeLease() const noexcept;
   StyleLayerHandle handle(std::uint64_t id, std::uint64_t epoch) const noexcept;
   ComputedStyle resolve(const StyleSheet &sheet, const LayerState &state, const StyleTarget &target,
-                        ComputedStyle defaults, NodeId node = {}) const noexcept;
+                        ComputedStyle defaults, NodeId node = {}, bool readOnly = false) const noexcept;
   std::expected<void, StyleError> checkBoundary(bool completing = false) const;
   WidgetTree &tree_;
   std::weak_ptr<detail::StyleThemeReceiver> themeReceiver_;

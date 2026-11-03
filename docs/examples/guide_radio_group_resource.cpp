@@ -29,8 +29,8 @@ int main() {
     auto scene = ui::scene(R"scene(
       scene {
         VBox {
-          Label { "Power mode | Arrows select | F10 closes" }
-          Modes#mode { radioInitial.index=1 classes="settings" width=24 }
+          Label { "Arrows move | Space/Enter selects | F10 closes" }
+          Modes#mode { radioInitial.index=1 radioSelectionMode=ON_ACTIVATION classes="settings" width=24 }
           Label#selected { "Balanced" }
         }
       }

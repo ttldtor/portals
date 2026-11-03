@@ -469,8 +469,19 @@ private:
       return false;
     }
 
+    if (view(*name) == "read-only") {
+      if (readOnly_) {
+        return failAt(PssErrorCode::DUPLICATE_STATE, begin, "Duplicate read-only qualifier", view(*name));
+      }
+      readOnly_ = true;
+      return admit(sink_.readOnly());
+    }
+
     for (std::size_t index = 0; index < PSS_STATE_NAMES.size(); ++index) {
       if (view(*name) == PSS_STATE_NAMES[index]) {
+        if (state_ != StyleState::ANY) {
+          return failAt(PssErrorCode::DUPLICATE_STATE, begin, "Duplicate selector state");
+        }
         state_ = static_cast<StyleState>(index + 1);
 
         return admit(sink_.state(state_));
@@ -485,6 +496,7 @@ private:
     bool hasId{};
 
     state_ = StyleState::ANY;
+    readOnly_ = false;
 
     if (peek() == '*') {
       advance();
@@ -511,10 +523,6 @@ private:
       present = true;
 
       if (marker == ':') {
-        if (state_ != StyleState::ANY) {
-          return fail(PssErrorCode::DUPLICATE_STATE, "Duplicate selector state");
-        }
-
         if (!parseState()) {
           return false;
         }
@@ -780,7 +788,7 @@ private:
     } else if (property == PssProperty::WIDTH || property == PssProperty::HEIGHT) {
       const auto axis = parseAxis(text);
 
-      if (!axis || state_ != StyleState::ANY) {
+      if (!axis || state_ != StyleState::ANY || readOnly_) {
         return failAt(PssErrorCode::INVALID_WIDTH, valueLocation,
                       "Expected state-independent cells, auto, fit-content, or flex(positive weight)", propertyName);
       }
@@ -791,7 +799,7 @@ private:
                property == PssProperty::MIN_HEIGHT || property == PssProperty::MAX_HEIGHT) {
       const auto width = parseWidth(text);
 
-      if (!width || state_ != StyleState::ANY) {
+      if (!width || state_ != StyleState::ANY || readOnly_) {
         return failAt(PssErrorCode::INVALID_WIDTH, valueLocation, "Expected nonnegative state-independent cell width",
                       propertyName);
       }
@@ -823,6 +831,7 @@ private:
   PssError error_;
   std::size_t rules_{};
   StyleState state_{StyleState::ANY};
+  bool readOnly_{};
 };
 
 /** @param property Destination identity.

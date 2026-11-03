@@ -190,7 +190,7 @@ Table:header { foreground: #4bb4dc; bold: true; }
 ```
 
 A selector is an optional type (or `*`), followed immediately by any number of
-`.class` predicates, at most one `#id`, and at most one `:state`. Their order
+`.class` predicates, at most one `#id`, at most one `:state`, and one orthogonal `:read-only` qualifier. Their order
 may vary. Every predicate must match. A selector with no type can start with
 `.`, `#`, or `:`. Spaces separate rules and declarations; they do not create
 descendant selectors. Identifiers start with an ASCII letter or underscore,
@@ -208,7 +208,7 @@ browser CSS compatibility promises. A semicolon is required after each value.
 | `glyph-profile` | `default`, `unicode`, `ascii`, `nf-rounded`, `nf-chevron`, `nf-slash`, `nf-backslash` | Named base glyph map |
 | `glyph-fallback` | `unicode`, `ascii` | Explicit one-cell admission fallback |
 
-`min-width` is allowed only without a state predicate: changing focus must not
+`min-width` is allowed only without a state/read-only predicate: changing focus must not
 silently alter geometry. It sets a hard allocation minimum; zero adds no
 minimum. A clipped viewport does not shrink allocation below the bound. If the
 minimum conflicts with a widget's size policy, typed style staging rejects the
@@ -224,8 +224,27 @@ row identity; the editor keeps its own selection and caret. Generic widgets
 can read the installed `StyleSnapshot` and choose the appropriate variant.
 A rule without a state matches every variant; `:normal` matches only normal.
 
+`RadioGroup:read-only:focused` combines a read-only fact with one existing role;
+`:selected:read-only` is equivalent in ordering. Duplicate qualifiers or two
+roles fail with `DUPLICATE_STATE`; qualified metrics remain forbidden. The
+qualifier adds no `ComputedStyle` role or `CellStyle` slot. It participates in
+each existing role's sparse cascade; explicit false attributes are preserved.
+Typed selectors append `.readOnly=true`; compile-time selector helpers accept
+a second boolean, for example `style::ct::type<"RadioGroup">(StyleState::FOCUSED,
+true)`. RadioGroup supplies the actual read-only fact. Built-in themes use muted
+text on the surface without bold, italic or underline, retain the ordinary focused
+palette for the active caption and chrome, and keep selected radio markers on the
+surface in editable and read-only groups. Read-only groups remain navigable.
+
+Standalone preview accepts `resolveStyle(sheet, target, defaults, true)` for
+read-only. For tree-bound widgets, the engine passes the actual
+`Widget::styleReadOnly()` value, default false, on the staging stack. No fact
+is retained in target metadata or binding storage. Custom widgets may override the
+nonthrowing read-only hook; it has the same no-reentry rule as style defaults.
+Rebuild consumers against the matching SDK after this virtual/API change.
+
 Each declaration cascades independently. Specificity compares `(has id,
-number of classes plus state predicates, has type)` lexicographically. Later
+number of classes plus state/read-only predicates, has type)` lexicographically. Later
 rules win ties. Missing declarations preserve lower-priority values. Every
 variant starts from the widget's current manual options, supplied through
 `Widget::styleDefaults()`. Thus a rule setting only a foreground preserves a

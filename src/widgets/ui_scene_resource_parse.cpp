@@ -812,6 +812,8 @@ private:
         settings.state = static_cast<CheckState>(index);
       } else if (path == "cycle") {
         settings.cycle = static_cast<CheckCycle>(index);
+      } else if (path == "radioSelectionMode") {
+        settings.radioSelectionMode = static_cast<RadioSelectionMode>(index);
       } else if (path == "editMode") {
         settings.editMode = static_cast<EditMode>(index);
       } else if (path == "programmaticChange") {

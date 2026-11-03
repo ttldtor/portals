@@ -116,8 +116,10 @@ bool RadioGroupValue::operator==(const RadioGroupValue &other) const {
   return data_ && other.data_ ? data_->rows == other.data_->rows : rows().empty() && other.rows().empty();
 }
 
-RadioGroup::RadioGroup(ControlStyle style, SizePolicy policy, bool readOnly, WidthPolicy widthPolicy)
-    : SizedWidget(policy), style_(style), widthPolicy_(widthPolicy), readOnly_(readOnly) {
+RadioGroup::RadioGroup(ControlStyle style, SizePolicy policy, bool readOnly, WidthPolicy widthPolicy,
+                       RadioSelectionMode selectionMode)
+    : SizedWidget(policy), style_(style), widthPolicy_(widthPolicy), readOnly_(readOnly),
+      selectionMode_(selectionMode) {
 }
 
 std::expected<CellSize, TreeError> RadioGroup::measure(CellSize) {
@@ -158,6 +160,7 @@ std::expected<void, TreeError> RadioGroup::paint(PaintContext &context) {
   const auto normalStyle = computed ? computed->normal : style_.normal;
   const auto focusedStyle = computed ? computed->focused : style_.focused;
   const auto disabledStyle = computed ? computed->disabled : style_.disabled;
+  const auto selectedStyle = computed ? computed->selected : style_.focused;
   const auto normal = enabled_ ? normalStyle : disabledStyle;
   const std::array<RenderCommand, 1> fill{FillCommand{bounds_, clip, normal}};
   auto result = context.submit(fill);
@@ -174,9 +177,11 @@ std::expected<void, TreeError> RadioGroup::paint(PaintContext &context) {
     const auto style = !enabled_ || !row.value.enabled ? disabledStyle
                        : focused_ && active_ == row.id ? focusedStyle
                                                        : normalStyle;
-    const auto &chrome = value_.selected_ == row.id ? data.checked : data.unchecked;
+    const bool selected = value_.selected_ == row.id;
+    const auto markerStyle = !enabled_ || !row.value.enabled ? disabledStyle : selected ? selectedStyle : normalStyle;
+    const auto &chrome = selected ? data.checked : data.unchecked;
     const auto y = static_cast<std::int32_t>(index);
-    const std::array<RenderCommand, 2> commands{TextCommand{{0, y}, chrome, clip, style},
+    const std::array<RenderCommand, 2> commands{TextCommand{{0, y}, chrome, clip, markerStyle},
                                                 TextCommand{{chrome.measure(), y}, row.value.text, clip, style}};
 
     result = context.submit(commands);
@@ -202,8 +207,13 @@ ComputedStyle RadioGroup::styleDefaults() const {
   result.normal = style_.normal;
   result.focused = style_.focused;
   result.disabled = style_.disabled;
+  result.selected = style_.focused;
 
   return result;
+}
+
+bool RadioGroup::styleReadOnly() const noexcept {
+  return readOnly_;
 }
 
 RadioGroupValue RadioGroup::value() const {
@@ -243,6 +253,11 @@ struct RadioGroupBinding::State {
   std::expected<void, TreeError> apply(const RadioGroupValue &value) {
     std::expected<void, TreeError> result;
     auto edited = tree.edit(node, [&](RadioGroup &group) {
+      if (group.selectionMode_ != RadioSelectionMode::ON_ACTIVATION &&
+          group.selectionMode_ != RadioSelectionMode::IMMEDIATE) {
+        result = std::unexpected(TreeError::INVALID_ARGUMENT);
+        return;
+      }
       if (!value.rows().empty() && value.rows().front().value.text.policy() != group.widthPolicy_) {
         result = std::unexpected(TreeError::INVALID_ARGUMENT);
         return;
@@ -262,6 +277,16 @@ struct RadioGroupBinding::State {
         group.tree_ = &tree;
         group.node_ = node;
         group.value_ = value;
+        if (group.active_ && value.data_) {
+          const auto active = value.data_->rows.locate(*group.active_);
+          if (active.state == RowLookupState::FOUND) {
+            const auto &row = value.rows()[static_cast<std::size_t>(active.index)].value;
+            if (row.enabled && row.visible) {
+              return;
+            }
+          }
+        }
+
         group.active_ = value.firstEligible();
         if (value.selected_) {
           const auto &row = value.rows()[static_cast<std::size_t>(value.data_->rows.locate(*value.selected_).index)];
@@ -314,22 +339,27 @@ struct RadioGroupBinding::State {
     return receipt;
   }
 
-  std::optional<RowId> candidate(RadioGroup &group, const RoutedEvent &event) {
-    if (group.readOnly_ || !group.value_.data_ || group.value_.data_->eligible.empty()) {
+  struct Candidate {
+    RowId id;
+    bool activate{};
+  };
+
+  std::optional<Candidate> candidate(RadioGroup &group, const RoutedEvent &event) {
+    if (!group.value_.data_ || group.value_.data_->eligible.empty()) {
       return {};
     }
 
     const auto &data = *group.value_.data_;
     const auto rows = group.value_.rows();
-    const auto selected = group.value_.selected_;
-    const auto current = selected ? data.rows.locate(*selected) : RowLookup{};
+    const auto active = group.active_;
+    const auto current = active ? data.rows.locate(*active) : RowLookup{};
     const auto position = current.state == RowLookupState::FOUND
                             ? std::ranges::lower_bound(data.eligible, static_cast<std::size_t>(current.index))
                             : data.eligible.end();
     auto ordinal = position != data.eligible.end() && *position == current.index
                      ? static_cast<std::size_t>(position - data.eligible.begin())
                      : std::size_t{};
-    const bool hasSelection = position != data.eligible.end() && *position == current.index;
+    const bool hasActive = position != data.eligible.end() && *position == current.index;
 
     if (const auto *mouse = std::get_if<MouseInputEvent>(&event)) {
       if (mouse->button != MouseButton::LEFT || mouse->action != MouseAction::PRESS ||
@@ -354,7 +384,7 @@ struct RadioGroupBinding::State {
 
       const auto &row = rows[data.visible[static_cast<std::size_t>(y)]];
 
-      return row.value.enabled ? std::optional(row.id) : std::nullopt;
+      return row.value.enabled ? std::optional(Candidate{row.id, true}) : std::nullopt;
     }
 
     Action command;
@@ -374,11 +404,11 @@ struct RadioGroupBinding::State {
     switch (command) {
     case Action::MOVE_UP:
     case Action::MOVE_LEFT:
-      ordinal = hasSelection ? (ordinal ? ordinal - 1 : data.eligible.size() - 1) : 0;
+      ordinal = hasActive ? (ordinal ? ordinal - 1 : data.eligible.size() - 1) : 0;
       break;
     case Action::MOVE_DOWN:
     case Action::MOVE_RIGHT:
-      ordinal = hasSelection ? (ordinal + 1) % data.eligible.size() : 0;
+      ordinal = hasActive ? (ordinal + 1) % data.eligible.size() : 0;
       break;
     case Action::MOVE_HOME:
       ordinal = 0;
@@ -392,7 +422,7 @@ struct RadioGroupBinding::State {
       return {};
     }
 
-    return rows[data.eligible[ordinal]].id;
+    return Candidate{rows[data.eligible[ordinal]].id, command == Action::ACTIVATE};
   }
 
   EventReply input(RadioGroup &group, const RoutedEvent &event, const std::function<void(RadioGroupResult)> &changed) {
@@ -420,7 +450,7 @@ struct RadioGroupBinding::State {
     if (!value.data_ || (pointer && displayed.shorthand_ && displayed.data_ != value.data_)) {
       return pointer ? EventReply::HANDLED : EventReply::IGNORED;
     }
-    const auto found = value.data_->rows.locate(*id);
+    const auto found = value.data_->rows.locate(id->id);
     if (found.state != RowLookupState::FOUND) {
       return pointer ? EventReply::HANDLED : EventReply::IGNORED;
     }
@@ -429,7 +459,19 @@ struct RadioGroupBinding::State {
       return pointer ? EventReply::HANDLED : EventReply::IGNORED;
     }
 
-    changed(select(id));
+    if (group.active_ != id->id) {
+      auto invalidated = tree.invalidate(node, Invalidation::PAINT);
+      if (!invalidated) {
+        changed(std::unexpected(invalidated.error()));
+        return EventReply::HANDLED;
+      }
+      group.active_ = id->id;
+    }
+
+    const bool commits = id->activate || group.selectionMode_ == RadioSelectionMode::IMMEDIATE;
+    if (!group.readOnly_ && commits && value.selected_ != id->id) {
+      changed(select(id->id));
+    }
 
     return EventReply::HANDLED;
   }

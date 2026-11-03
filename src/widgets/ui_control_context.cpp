@@ -22,6 +22,7 @@ constexpr std::size_t PAINT_LIMIT_PROPERTY = 39;
 constexpr std::size_t WHEEL_STEP_PROPERTY = 44;
 constexpr std::size_t SLIDER_STEP_PROPERTY = 261;
 constexpr std::size_t SLIDER_PAGE_STEPS_PROPERTY = 262;
+constexpr std::size_t RADIO_SELECTION_MODE_PROPERTY = 263;
 constexpr std::size_t MINIMUM_THUMB_PROPERTY = 47;
 constexpr std::size_t ROW_HEIGHT_PROPERTY = 69;
 constexpr std::size_t STATUS_ROWS_PROPERTY = 81;
@@ -42,6 +43,7 @@ constexpr std::array<std::string_view, 2> GLYPH_FALLBACK_NAMES{"UNICODE_GLYPHS",
 constexpr std::array<std::string_view, 3> FRAME_TITLE_ALIGNMENT_NAMES{"START", "CENTER", "END"};
 constexpr std::array<std::string_view, 3> STATE_NAMES{"UNCHECKED", "CHECKED", "MIXED"};
 constexpr std::array<std::string_view, 2> CYCLE_NAMES{"TWO_STATE", "THREE_STATE"};
+constexpr std::array<std::string_view, 2> RADIO_SELECTION_NAMES{"ON_ACTIVATION", "IMMEDIATE"};
 constexpr std::array<std::string_view, 3> MODE_NAMES{"IMMEDIATE", "ON_COMPLETION", "EXPLICIT"};
 constexpr std::array<std::string_view, 2> CHANGE_NAMES{"RECORD", "RESET_BASELINE"};
 constexpr std::array<std::string_view, 3> DISPLAY_NAMES{"NORMAL", "PASSWORD", "NO_ECHO"};
@@ -335,7 +337,8 @@ constexpr std::array<ControlPropertyDescriptor, detail::CONTROL_PROPERTY_COUNT> 
    {"radioInitial.enabled", Kind::BOOLEAN, 2, {}},
    {"radioInitial.index", Kind::UNSIGNED_INTEGER, 2, {}},
    {"step", Kind::FLOATING_POINT, 1, {}},
-   {"pageSteps", Kind::UNSIGNED_INTEGER, 1, {}}}};
+   {"pageSteps", Kind::UNSIGNED_INTEGER, 1, {}},
+   {"radioSelectionMode", Kind::ENUMERATION, 1, RADIO_SELECTION_NAMES}}};
 static_assert(std::ranges::all_of(PROPERTIES, [](const auto &property) {
   return !property.path.empty();
 }));
@@ -359,8 +362,8 @@ constexpr Mask PASSWORD_MASK =
 constexpr Mask BUTTON_MASK = SIZE_MASK | TEXT_MASK | propertyMask(37);
 constexpr Mask BORDER_MASK = SIZE_MASK | propertyMask(38, 39);
 constexpr Mask GAUGE_MASK = BORDER_MASK | propertyMask(40, 41, 42, 43);
-constexpr Mask SLIDER_MASK = SIZE_MASK | propertyMask(8, 39, 40, 41, 42, 43, SLIDER_STEP_PROPERTY,
-                                                      SLIDER_PAGE_STEPS_PROPERTY);
+constexpr Mask SLIDER_MASK =
+  SIZE_MASK | propertyMask(8, 39, 40, 41, 42, 43, SLIDER_STEP_PROPERTY, SLIDER_PAGE_STEPS_PROPERTY);
 constexpr Mask SPINNER_MASK = SIZE_MASK | propertyMask(39, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203);
 constexpr Mask SCROLLBAR_MASK = propertyMask(204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 234, 235, 236,
                                              237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248);
@@ -391,7 +394,7 @@ constexpr Mask POSITIVE_UNSIGNED_MASK = propertyMask(
   3, 17, 18, 26, 27, 28, PAINT_LIMIT_PROPERTY, 45, 55, 59, 71, 72, 73, 83, 90, 100, 110, 111, 112, 113, 114, 115, 116,
   124, 125, 126, 127, 128, 129, 130, 137, 138, 139, 140, 143, 144, 145, 146, 147, 148, 149, 150, 151, 155, 156, 157,
   158, 172, 195, 201, 202, 203, 206, 221, 225, 226, 227, 228, 232, 233, 253, 254, SLIDER_PAGE_STEPS_PROPERTY);
-constexpr Mask RADIO_MASK = SIZE_MASK | propertyMask(8, 259, 260);
+constexpr Mask RADIO_MASK = SIZE_MASK | propertyMask(8, 259, 260, RADIO_SELECTION_MODE_PROPERTY);
 constexpr Mask CHECK_MASK = SIZE_MASK | TEXT_MASK | propertyMask(5, 6);
 constexpr Mask SWITCH_MASK = CHECK_MASK | propertyMask(8);
 constexpr Mask LAYOUT_MASK = SIZE_MASK | propertyMask(4, 22, 23, 24, 25, 30, 31, 32);
@@ -438,16 +441,16 @@ constexpr auto BORDER_SCHEMA =
 constexpr auto GAUGE_SCHEMA =
   withFrame(std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[38], PROPERTIES[39], PROPERTIES[40],
                            PROPERTIES[41], PROPERTIES[42], PROPERTIES[43]}));
-constexpr auto SLIDER_SCHEMA =
-  withFrame(std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[8], PROPERTIES[39], PROPERTIES[40],
-                           PROPERTIES[41], PROPERTIES[42], PROPERTIES[43], PROPERTIES[SLIDER_STEP_PROPERTY],
-                           PROPERTIES[SLIDER_PAGE_STEPS_PROPERTY]}));
+constexpr auto SLIDER_SCHEMA = withFrame(std::to_array(
+  {PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[8], PROPERTIES[39], PROPERTIES[40], PROPERTIES[41],
+   PROPERTIES[42], PROPERTIES[43], PROPERTIES[SLIDER_STEP_PROPERTY], PROPERTIES[SLIDER_PAGE_STEPS_PROPERTY]}));
 constexpr auto SPINNER_SCHEMA =
   withFrame(std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[39], PROPERTIES[193],
                            PROPERTIES[194], PROPERTIES[195], PROPERTIES[196], PROPERTIES[197], PROPERTIES[198],
                            PROPERTIES[199], PROPERTIES[200], PROPERTIES[201], PROPERTIES[202], PROPERTIES[203]}));
-constexpr auto RADIO_SCHEMA = withFrame(
-  std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[8], PROPERTIES[259], PROPERTIES[260]}));
+constexpr auto RADIO_SCHEMA =
+  withFrame(std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[8], PROPERTIES[259], PROPERTIES[260],
+                           PROPERTIES[RADIO_SELECTION_MODE_PROPERTY]}));
 constexpr auto CHECK_SCHEMA =
   withFrame(std::to_array({PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[5], PROPERTIES[6]}));
 constexpr auto SWITCH_SCHEMA = withFrame(std::to_array(
@@ -1024,7 +1027,8 @@ ControlContextError exceptionError() noexcept {
   X(radioInitial.enabled, 259)                                                                                         \
   X(radioInitial.index, 260)                                                                                           \
   X(step, 261)                                                                                                         \
-  X(pageSteps, 262)
+  X(pageSteps, 262)                                                                                                    \
+  X(radioSelectionMode, 263)
 
 #define PORTALS_CONTROL_LEAVES(X)                                                                                      \
   PORTALS_CONTROL_BASE_LEAVES(X)                                                                                       \
@@ -1240,6 +1244,8 @@ template <class T> bool validValue(const T &value, std::size_t index) noexcept {
     return value == CheckState::UNCHECKED || value == CheckState::CHECKED || value == CheckState::MIXED;
   } else if constexpr (std::same_as<T, CheckCycle>) {
     return value == CheckCycle::TWO_STATE || value == CheckCycle::THREE_STATE;
+  } else if constexpr (std::same_as<T, RadioSelectionMode>) {
+    return value == RadioSelectionMode::ON_ACTIVATION || value == RadioSelectionMode::IMMEDIATE;
   } else if constexpr (std::same_as<T, EditMode>) {
     return value == EditMode::IMMEDIATE || value == EditMode::ON_COMPLETION || value == EditMode::EXPLICIT;
   } else if constexpr (std::same_as<T, ProgrammaticChange>) {
@@ -1451,6 +1457,7 @@ void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &pr
       std::pair<std::string_view, bool>{"readOnly", patch.readOnly.has_value()},
       std::pair<std::string_view, bool>{"radioInitial.enabled", patch.radioInitial.enabled.has_value()},
       std::pair<std::string_view, bool>{"radioInitial.index", patch.radioInitial.index.has_value()},
+      std::pair<std::string_view, bool>{"radioSelectionMode", patch.radioSelectionMode.has_value()},
       std::pair<std::string_view, bool>{"wheelStep", patch.wheelStep.has_value()},
       std::pair<std::string_view, bool>{"keyStep", patch.keyStep.has_value()},
       std::pair<std::string_view, bool>{"pageOverlap", patch.pageOverlap.has_value()},

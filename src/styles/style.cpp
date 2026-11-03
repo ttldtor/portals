@@ -71,13 +71,13 @@ template <class T> std::shared_ptr<const T> shareStyleBlock(StyleBlockIndex<T> &
   return shared;
 }
 
-bool matches(const StyleSelector &selector, const StyleTarget &target, StyleState state) {
+bool matches(const StyleSelector &selector, const StyleTarget &target, StyleState state, bool readOnly) {
   const auto bases = std::span(target.baseTypes).first(std::min(target.baseTypes.size(), MAX_STYLE_BASE_TYPES));
 
   return (selector.type.empty() || selector.type == "*" || selector.type == target.type ||
           std::ranges::find(bases, selector.type) != bases.end() || (target.control && selector.type == "Control")) &&
          (selector.id.empty() || selector.id == target.id) &&
-         (selector.state == StyleState::ANY || selector.state == state) &&
+         (selector.state == StyleState::ANY || selector.state == state) && (!selector.readOnly || readOnly) &&
          std::ranges::all_of(selector.classes, [&](const auto &name) {
            return std::ranges::find(target.classes, name) != target.classes.end();
          });
@@ -86,7 +86,7 @@ bool matches(const StyleSelector &selector, const StyleTarget &target, StyleStat
 using Specificity = std::tuple<bool, std::size_t, bool>;
 
 Specificity specificity(const StyleSelector &selector) {
-  return {!selector.id.empty(), selector.classes.size() + (selector.state != StyleState::ANY),
+  return {!selector.id.empty(), selector.classes.size() + (selector.state != StyleState::ANY) + selector.readOnly,
           !selector.type.empty() && selector.type != "*"};
 }
 
@@ -135,7 +135,7 @@ CellStyle applyPaintOverrides(const StylePaintDeclarations &source, CellStyle re
 }
 
 template <class CascadeRank, bool FrameParts, bool ScrollbarParts, bool ThumbSegments, class Visit>
-CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, StyleState state, CellStyle base,
+CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, bool readOnly, StyleState state, CellStyle base,
                        FrameAppearance &parts, ScrollbarAppearance &scrollbar, ScrollbarThumbAppearance *segments,
                        bool preserveSegments) {
   // Ordinary rules retain the original five ranks; frame ranks exist only in the part specialization.
@@ -154,7 +154,7 @@ CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, StyleState
     }
   };
   visit([&](const StyleRule &rule, auto &&makeRank) {
-    if (!matches(rule.selector, target, state)) {
+    if (!matches(rule.selector, target, state, readOnly)) {
       return;
     }
 
@@ -243,7 +243,8 @@ CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, StyleState
 }
 
 template <class CascadeRank, class Visit>
-ComputedStyle resolveRules(const Visit &visit, const StyleTarget &target, ComputedStyle defaults) noexcept {
+ComputedStyle resolveRules(const Visit &visit, const StyleTarget &target, ComputedStyle defaults,
+                           bool readOnly) noexcept {
   bool frameParts{};
   bool scrollbarParts{};
   bool thumbSegments{};
@@ -255,27 +256,27 @@ ComputedStyle resolveRules(const Visit &visit, const StyleTarget &target, Comput
     const auto &values = rule.declarations;
 
     glyphDeclarations = glyphDeclarations || ((values.glyphProfile || values.glyphFallback || rule.scrollbarGlyphs) &&
-                                              matches(rule.selector, target, rule.selector.state));
+                                              matches(rule.selector, target, rule.selector.state, readOnly));
 
     // Reuse the metric pass; selector states here test applicability, not the current paint state.
     frameParts = frameParts || ((hasPaintDeclarations(values.frameLine) || hasPaintDeclarations(values.frameTitle) ||
                                  hasPaintDeclarations(values.frameEnds)) &&
-                                matches(rule.selector, target, rule.selector.state));
+                                matches(rule.selector, target, rule.selector.state, readOnly));
 
     scrollbarParts =
       scrollbarParts || ((hasPaintDeclarations(values.scrollbarTrack) || hasPaintDeclarations(values.scrollbarThumb) ||
                           hasPaintDeclarations(values.scrollbarEnds) || hasPaintDeclarations(values.scrollbarArrows) ||
                           hasPaintDeclarations(values.scrollbarCorner) || values.scrollbarTrackPattern ||
                           values.scrollbarThumbPattern || values.scrollbarArrowPattern) &&
-                         matches(rule.selector, target, rule.selector.state));
+                         matches(rule.selector, target, rule.selector.state, readOnly));
 
     thumbSegments =
       thumbSegments ||
       ((hasPaintDeclarations(values.scrollbarThumbStart) || hasPaintDeclarations(values.scrollbarThumbBody) ||
         hasPaintDeclarations(values.scrollbarThumbEnd) || hasPaintDeclarations(values.scrollbarThumbSingle)) &&
-       matches(rule.selector, target, rule.selector.state));
+       matches(rule.selector, target, rule.selector.state, readOnly));
 
-    if ((!values.minWidth && !rule.sizing) || !matches(rule.selector, target, StyleState::ANY)) {
+    if ((!values.minWidth && !rule.sizing) || !matches(rule.selector, target, StyleState::ANY, readOnly)) {
       return;
     }
     const CascadeRank candidate = makeRank();
@@ -312,7 +313,7 @@ ComputedStyle resolveRules(const Visit &visit, const StyleTarget &target, Comput
       std::array<std::optional<CascadeRank>, detail::SCROLLBAR_LITERAL_GLYPH_COUNT> literalRanks;
 
       visit([&](const StyleRule &rule, auto &&makeRank) {
-        if (!matches(rule.selector, target, STYLE_STATES[index])) {
+        if (!matches(rule.selector, target, STYLE_STATES[index], readOnly)) {
           return;
         }
 
@@ -352,22 +353,22 @@ ComputedStyle resolveRules(const Visit &visit, const StyleTarget &target, Comput
   const auto applyPaintStates = [&]<bool FrameParts, bool ScrollbarParts, bool ThumbSegments>() {
     auto *segments = defaults.scrollbarThumbSegments ? defaults.scrollbarThumbSegments->data() : nullptr;
     defaults.normal = resolvePaint<CascadeRank, FrameParts, ScrollbarParts, ThumbSegments>(
-      visit, target, StyleState::NORMAL, defaults.normal, defaults.frame[0], defaults.scrollbar[0], segments,
+      visit, target, readOnly, StyleState::NORMAL, defaults.normal, defaults.frame[0], defaults.scrollbar[0], segments,
       preserveSegments);
     defaults.focused = resolvePaint<CascadeRank, FrameParts, ScrollbarParts, ThumbSegments>(
-      visit, target, StyleState::FOCUSED, defaults.focused, defaults.frame[1], defaults.scrollbar[1],
+      visit, target, readOnly, StyleState::FOCUSED, defaults.focused, defaults.frame[1], defaults.scrollbar[1],
       segments ? segments + 1 : nullptr, preserveSegments);
     defaults.disabled = resolvePaint<CascadeRank, FrameParts, ScrollbarParts, ThumbSegments>(
-      visit, target, StyleState::DISABLED, defaults.disabled, defaults.frame[2], defaults.scrollbar[2],
+      visit, target, readOnly, StyleState::DISABLED, defaults.disabled, defaults.frame[2], defaults.scrollbar[2],
       segments ? segments + 2 : nullptr, preserveSegments);
     defaults.selected = resolvePaint<CascadeRank, FrameParts, ScrollbarParts, ThumbSegments>(
-      visit, target, StyleState::SELECTED, defaults.selected, defaults.frame[3], defaults.scrollbar[3],
+      visit, target, readOnly, StyleState::SELECTED, defaults.selected, defaults.frame[3], defaults.scrollbar[3],
       segments ? segments + 3 : nullptr, preserveSegments);
     defaults.header = resolvePaint<CascadeRank, FrameParts, ScrollbarParts, ThumbSegments>(
-      visit, target, StyleState::HEADER, defaults.header, defaults.frame[4], defaults.scrollbar[4],
+      visit, target, readOnly, StyleState::HEADER, defaults.header, defaults.frame[4], defaults.scrollbar[4],
       segments ? segments + 4 : nullptr, preserveSegments);
     defaults.caret = resolvePaint<CascadeRank, FrameParts, ScrollbarParts, ThumbSegments>(
-      visit, target, StyleState::CARET, defaults.caret, defaults.frame[5], defaults.scrollbar[5],
+      visit, target, readOnly, StyleState::CARET, defaults.caret, defaults.frame[5], defaults.scrollbar[5],
       segments ? segments + 5 : nullptr, preserveSegments);
   };
   const auto applyScrollbarStates = [&]<bool FrameParts>() {
@@ -420,7 +421,7 @@ std::expected<void, StyleError> validate(const StyleSheet &sheet) {
     const bool metrics = d.minWidth || rule.sizing;
 
     if (rule.selector.state < StyleState::ANY || rule.selector.state > StyleState::CARET ||
-        (metrics && rule.selector.state != StyleState::ANY) || !validBound(d.minWidth) ||
+        (metrics && (rule.selector.state != StyleState::ANY || rule.selector.readOnly)) || !validBound(d.minWidth) ||
         !validBound(sizing.maxWidth) || !validBound(sizing.minHeight) || !validBound(sizing.maxHeight) ||
         !validRequest(sizing.width) || !validRequest(sizing.height)) {
       return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Invalid state or state-dependent metric"));
@@ -457,7 +458,8 @@ std::expected<void, StyleError> validateStyleTarget(const StyleTarget &target) n
   return {};
 }
 
-ComputedStyle resolveStyle(const StyleSheet &sheet, const StyleTarget &target, ComputedStyle defaults) noexcept {
+ComputedStyle resolveStyle(const StyleSheet &sheet, const StyleTarget &target, ComputedStyle defaults,
+                           bool readOnly) noexcept {
   if (!validateStyleTarget(target)) {
     return defaults;
   }
@@ -471,7 +473,7 @@ ComputedStyle resolveStyle(const StyleSheet &sheet, const StyleTarget &target, C
         });
       }
     },
-    target, defaults);
+    target, defaults, readOnly);
 }
 
 StyleSheet themeFromTokens(ThemeTokens tokens) {
@@ -508,12 +510,37 @@ StyleSheet themeFromTokens(ThemeTokens tokens) {
   focused.scrollbarArrows = accentOnSurface;
   focused.scrollbarCorner = accentOnSurface;
 
+  const auto focusedDeclarations = focused;
+
   stateRule(StyleState::DISABLED, tokens.muted, tokens.background, false);
   stateRule(StyleState::SELECTED, tokens.foreground, tokens.selection, true);
   sheet.rules.back().declarations.italic = false;
   stateRule(StyleState::HEADER, tokens.heading, tokens.background, true);
   // Reverse the focused field palette so the caret remains visible over any glyph.
   stateRule(StyleState::CARET, tokens.accent, tokens.background, false);
+
+  StyleRule selectedMarker;
+  selectedMarker.selector.type = "RadioGroup";
+  selectedMarker.selector.state = StyleState::SELECTED;
+  selectedMarker.declarations.background = tokens.background;
+  sheet.rules.push_back(std::move(selectedMarker));
+
+  StyleRule readOnly;
+  readOnly.selector.type = "RadioGroup";
+  readOnly.selector.readOnly = true;
+  readOnly.declarations.foreground = tokens.muted;
+  readOnly.declarations.background = tokens.background;
+  readOnly.declarations.bold = false;
+  readOnly.declarations.italic = false;
+  readOnly.declarations.underline = false;
+  sheet.rules.push_back(std::move(readOnly));
+
+  StyleRule readOnlyFocused;
+  readOnlyFocused.selector.type = "RadioGroup";
+  readOnlyFocused.selector.state = StyleState::FOCUSED;
+  readOnlyFocused.selector.readOnly = true;
+  readOnlyFocused.declarations = focusedDeclarations;
+  sheet.rules.push_back(std::move(readOnlyFocused));
 
   return sheet;
 }
@@ -569,9 +596,9 @@ StyleEngine::StyleEngine(WidgetTree &tree, std::size_t maxBindings) : tree_(tree
 }
 
 ComputedStyle StyleEngine::resolve(const StyleSheet &sheet, const LayerState &state, const StyleTarget &target,
-                                   ComputedStyle defaults, NodeId node) const noexcept {
+                                   ComputedStyle defaults, NodeId node, bool readOnly) const noexcept {
   if (!state.enabled) {
-    return !sheet.scope || *sheet.scope == node ? resolveStyle(sheet, target, defaults) : defaults;
+    return !sheet.scope || *sheet.scope == node ? resolveStyle(sheet, target, defaults, readOnly) : defaults;
   }
   return resolveRules<Rank>(
     [&](auto &&apply) {
@@ -579,7 +606,7 @@ ComputedStyle StyleEngine::resolve(const StyleSheet &sheet, const LayerState &st
         apply(rule, makeRank);
       });
     },
-    target, defaults);
+    target, defaults, readOnly);
 }
 
 StyleLayerHandle StyleEngine::handle(std::uint64_t id, std::uint64_t epoch) const noexcept {
@@ -1075,6 +1102,7 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
         copied.selector.type.assign(rule.selector.type.data(), rule.selector.type.size());
         copied.selector.id.assign(rule.selector.id.data(), rule.selector.id.size());
         copied.selector.state = rule.selector.state;
+        copied.selector.readOnly = rule.selector.readOnly;
         copied.selector.classes.reserve(rule.selector.classes.size());
 
         for (const auto &className : rule.selector.classes) {
@@ -1092,6 +1120,7 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
         destination.selector.id.swap(copied.selector.id);
         destination.selector.classes.swap(copied.selector.classes);
         destination.selector.state = copied.selector.state;
+        destination.selector.readOnly = copied.selector.readOnly;
         destination.declarations = copied.declarations;
         destination.scrollbarGlyphs = copied.scrollbarGlyphs;
         destination.sizing = copied.sizing;
@@ -1536,12 +1565,13 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
             result = std::unexpected(error(widget.error(), "Style target became unavailable during staging"));
             return;
           }
+          const bool readOnly = (*widget)->styleReadOnly();
           auto defaults = (*widget)->styleDefaults();
-          auto next =
-            wholeReplace
-              ? (!sheet.scope || *sheet.scope == binding.node.id() ? resolveStyle(sheet, binding.target, defaults)
-                                                                   : defaults)
-              : resolve(sheet, candidate ? *candidate : layerState_, binding.target, defaults, binding.node.id());
+          auto next = wholeReplace ? (!sheet.scope || *sheet.scope == binding.node.id()
+                                        ? resolveStyle(sheet, binding.target, defaults, readOnly)
+                                        : defaults)
+                                   : resolve(sheet, candidate ? *candidate : layerState_, binding.target, defaults,
+                                             binding.node.id(), readOnly);
 
           if (next.minWidth < 0) {
             result = std::unexpected(error(TreeError::INVALID_ARGUMENT, "Widget default minimum width is negative"));
@@ -1593,7 +1623,7 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
                 visitLayerRules(*layers, binding.node.id(),
                                 [&](const StyleRule &rule, auto &&makeRank, const Layer &layer) {
                                   if (!rule.scrollbarGlyphs || !(*rule.scrollbarGlyphs)[index] ||
-                                      !matches(rule.selector, binding.target, state)) {
+                                      !matches(rule.selector, binding.target, state, readOnly)) {
                                     return;
                                   }
 

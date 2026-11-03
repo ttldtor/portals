@@ -93,7 +93,8 @@ std::expected<void, PssError> validateStyleDocument(const PssDocument &document)
       return invalid(origin.selector, "Invalid PSS selector state");
     }
 
-    if (rule.declarations.minWidth && (*rule.declarations.minWidth < 0 || rule.selector.state != StyleState::ANY)) {
+    if (rule.declarations.minWidth &&
+        (*rule.declarations.minWidth < 0 || (rule.selector.state != StyleState::ANY || rule.selector.readOnly))) {
       return std::unexpected(
         detail::pssError(PssErrorCode::INVALID_WIDTH, origin.selector, "Invalid PSS document minimum width"));
     }
@@ -222,7 +223,7 @@ std::expected<void, PssError> validateStyleDocument(const PssDocument &document)
         return invalid(declaration.location, "Noncanonical PSS scalar fields");
       }
 
-      if (width && (value.width < 0 || rule.selector.state != StyleState::ANY)) {
+      if (width && (value.width < 0 || (rule.selector.state != StyleState::ANY || rule.selector.readOnly))) {
         return std::unexpected(
           detail::pssError(PssErrorCode::INVALID_WIDTH, declaration.location, "Invalid PSS declaration minimum width"));
       }
@@ -242,7 +243,7 @@ std::expected<void, PssError> validateStyleDocument(const PssDocument &document)
           return false;
         };
 
-        if (!canonicalAxis(value) || rule.selector.state != StyleState::ANY) {
+        if (!canonicalAxis(value) || (rule.selector.state != StyleState::ANY || rule.selector.readOnly)) {
           return invalid(declaration.location, "Invalid state-independent PSS axis request");
         }
       }
