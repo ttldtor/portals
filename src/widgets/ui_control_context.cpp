@@ -387,6 +387,7 @@ constexpr Mask POSITIVE_UNSIGNED_MASK =
                150, 151, 155, 156, 157, 158, 172, 195, 201, 202, 203, 206, 221, 225, 226, 227, 228, 232, 233, 253, 254);
 constexpr Mask RADIO_MASK = SIZE_MASK | propertyMask(8, 259, 260);
 constexpr Mask CHECK_MASK = SIZE_MASK | TEXT_MASK | propertyMask(5, 6);
+constexpr Mask SWITCH_MASK = CHECK_MASK | propertyMask(8);
 constexpr Mask LAYOUT_MASK = SIZE_MASK | propertyMask(4, 22, 23, 24, 25, 30, 31, 32);
 constexpr Mask EDIT_MASK = SIZE_MASK | TEXT_MASK | propertyMask(7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 33, 34, 35, 36);
 constexpr Mask CHOICE_MASK = EDIT_MASK | propertyMask(230);
@@ -439,6 +440,8 @@ constexpr auto RADIO_SCHEMA = withFrame(
   std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[8], PROPERTIES[259], PROPERTIES[260]}));
 constexpr auto CHECK_SCHEMA =
   withFrame(std::to_array({PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[5], PROPERTIES[6]}));
+constexpr auto SWITCH_SCHEMA = withFrame(std::to_array(
+  {PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[5], PROPERTIES[6], PROPERTIES[8]}));
 constexpr auto SCROLL_AREA_SCHEMA = withFrame(
   std::to_array({PROPERTIES[1],   PROPERTIES[2],   PROPERTIES[3],   PROPERTIES[8],   PROPERTIES[38],  PROPERTIES[39],
                  PROPERTIES[44],  PROPERTIES[45],  PROPERTIES[46],  PROPERTIES[47],  PROPERTIES[48],  PROPERTIES[49],
@@ -574,6 +577,7 @@ static_assert(schemaMatchesMask(BORDER_SCHEMA, BORDER_MASK));
 static_assert(schemaMatchesMask(GAUGE_SCHEMA, GAUGE_MASK));
 static_assert(schemaMatchesMask(SPINNER_SCHEMA, SPINNER_MASK));
 static_assert(schemaMatchesMask(CHECK_SCHEMA, CHECK_MASK));
+static_assert(schemaMatchesMask(SWITCH_SCHEMA, SWITCH_MASK));
 static_assert(schemaMatchesMask(RADIO_SCHEMA, RADIO_MASK));
 static_assert(schemaMatchesMask(SCROLL_AREA_SCHEMA, SCROLL_AREA_MASK));
 static_assert(schemaMatchesMask(SCROLL_BAR_SCHEMA, SCROLL_BAR_MASK));
@@ -600,9 +604,9 @@ static_assert(schemaMatchesMask(GRID_SCHEMA, GRID_MASK));
 
 bool builtin(std::string_view name) noexcept {
   return name == "Spacer" || name == "Spacing" || name == "VBox" || name == "HBox" || name == "Label" ||
-         name == "Button" || name == "CheckBox" || name == "LineEdit" || name == "ThreeState" || name == "Password" ||
-         name == "FormField" || name == "FindBar" || name == "ComboBox" || name == "DropDown" || name == "StatusBar" ||
-         name == "RadioGroup";
+         name == "Switch" || name == "Button" || name == "CheckBox" || name == "LineEdit" || name == "ThreeState" ||
+         name == "Password" || name == "FormField" || name == "FindBar" || name == "ComboBox" || name == "DropDown" ||
+         name == "StatusBar" || name == "RadioGroup";
 }
 
 Mask builtinMask(std::string_view name) noexcept {
@@ -622,6 +626,10 @@ Mask builtinMask(std::string_view name) noexcept {
   }
   if (name == "VBox" || name == "HBox" || name == "StatusBar") {
     return LAYOUT_MASK;
+  }
+
+  if (name == "Switch") {
+    return SWITCH_MASK;
   }
 
   if (name == "RadioGroup") {
@@ -2015,7 +2023,7 @@ std::expected<Chain, ControlContextError> chainFor(const Data &data, std::string
       chain.mask = builtinMask(current);
       chain.fixedCycle = current == "ThreeState";
 
-      if (chain.fixedCycle) {
+      if (chain.fixedCycle || current == "Switch") {
         if (chain.names.size() > limits.maxInheritance) {
           return std::unexpected(error(Code::INHERITANCE_LIMIT, declaration, property, origin));
         }
@@ -2180,6 +2188,10 @@ std::span<const ControlPropertyDescriptor> controlPropertySchema(std::string_vie
   }
   if (type == "VBox" || type == "HBox" || type == "StatusBar") {
     return SIZE_SCHEMA;
+  }
+
+  if (type == "Switch") {
+    return SWITCH_SCHEMA;
   }
 
   if (type == "RadioGroup") {

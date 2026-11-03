@@ -65,6 +65,10 @@ struct RefTarget {
 };
 
 struct RefAccess;
+std::expected<bool, ManagedError> checkedValue(std::shared_ptr<RefTarget> target, std::shared_ptr<const Node<Switch>> node);
+std::expected<PropertyUpdate<bool>, ManagedError> setChecked(std::shared_ptr<RefTarget> target,
+  std::shared_ptr<const Node<Switch>> node, bool value, std::source_location origin);
+std::expected<PropertyUpdate<bool>, ManagedError> failedChecked(std::shared_ptr<RefTarget> target, ManagedError failure, std::source_location origin);
 using DeliveryCallback = std::function<std::expected<void, TreeError>(std::shared_ptr<const void>)>;
 std::expected<Publisher<portals::detail::UiDeliveryEnvelope>, ManagedError>
 connectDelivery(const std::shared_ptr<RefTarget> &target, DeliveryCallback callback, std::source_location origin);
@@ -270,6 +274,86 @@ private:
 };
 
 class TextProperty;
+
+/** @brief Switch bool property observing the original Ref slot; never owns a widget or scene.
+ * No implicit boolean conversion exists: get() returns the authoritative checked bool.
+ */
+class CheckedProperty {
+public:
+  /** @brief Copy an observation without reading or changing either model. */
+  CheckedProperty(const CheckedProperty &) = default;
+  /** @brief Transfer an observation; the source remains a valid empty/moved observation. */
+  CheckedProperty(CheckedProperty &&) = default;
+
+  /** @brief Copy the source bool into this original destination; never rebind either proxy.
+   * @param source Observing source read once before writing. @return Destination observation with exact receipt.
+   */
+  CheckedProperty operator=(const CheckedProperty &source) {
+    auto target = target_;
+    auto node = node_;
+    const auto origin = origin_;
+
+    const auto value = source.get();
+
+    auto receipt =
+      value ? detail::setChecked(target, node, *value, origin) : detail::failedChecked(target, value.error(), origin);
+
+    return CheckedProperty(std::move(target), std::move(node), origin, std::move(receipt));
+  }
+
+  /** @return Authoritative bool or exact affinity/lifetime/model failure; reads do not report. */
+  std::expected<bool, ManagedError> get() const {
+    return detail::checkedValue(target_, node_);
+  }
+
+  /** @param value Replacement bool. @param origin Explicit mutation site.
+   * @return Exact Property receipt; errors also enter the existing collector as switch.checked.
+   */
+  std::expected<PropertyUpdate<bool>, ManagedError> set(bool value,
+                                                        std::source_location origin = std::source_location::current()) {
+    return detail::setChecked(target_, node_, value, origin);
+  }
+
+  /** @param value Replacement bool.
+   * @return Owning observation carrying this exact receipt; ignored failures still reach onError.
+   * Uses checked() origin. Pins the slot before callbacks, without reusing a possibly destroyed proxy.
+   */
+  CheckedProperty operator=(bool value) {
+    auto target = target_;
+    auto node = node_;
+    const auto origin = origin_;
+
+    auto receipt = detail::setChecked(target, node, value, origin);
+
+    return CheckedProperty(std::move(target), std::move(node), origin, std::move(receipt));
+  }
+
+  /** @return This returned assignment observation's exact receipt; INVALID_ARGUMENT before assignment. No scene access.
+   */
+  std::expected<PropertyUpdate<bool>, ManagedError> result() const {
+    return receipt_ ? *receipt_
+                    : std::expected<PropertyUpdate<bool>, ManagedError>(
+                        std::unexpected(ManagedError{ManagedPhase::BIND, {}, TreeError::INVALID_ARGUMENT, {}, {}}));
+  }
+
+private:
+  template <class> friend class Ref;
+
+  CheckedProperty(std::shared_ptr<detail::RefTarget> target, std::shared_ptr<const Node<Switch>> node,
+                  std::source_location origin)
+      : target_(std::move(target)), node_(std::move(node)), origin_(origin) {
+  }
+
+  CheckedProperty(std::shared_ptr<detail::RefTarget> target, std::shared_ptr<const Node<Switch>> node,
+                  std::source_location origin, std::expected<PropertyUpdate<bool>, ManagedError> receipt)
+      : target_(std::move(target)), node_(std::move(node)), origin_(origin), receipt_(std::move(receipt)) {
+  }
+
+  std::shared_ptr<detail::RefTarget> target_;
+  std::shared_ptr<const Node<Switch>> node_;
+  std::source_location origin_;
+  std::optional<std::expected<PropertyUpdate<bool>, ManagedError>> receipt_;
+};
 
 /** @brief Copyable deferred observation of one original table, without scene/widget ownership.
  * @tparam T Immutable domain row type. Acquisition/copying never reads, subscribes or performs layout.
@@ -539,6 +623,17 @@ public:
   /** @brief Allocate an empty observing slot on the UI thread; may throw std::bad_alloc. */
   Ref() {
     this->slot_->fluent = true;
+  }
+
+  /** @param origin Static call site retained for assignment diagnostics.
+   * @return Deferred bool property, retaining this observing slot; reads use get(), writes use assignment.
+   */
+  CheckedProperty checked(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, Switch>
+  {
+    auto node = this->slot_ ? std::shared_ptr<const Node<T>>(this->slot_, &this->slot_->node) : nullptr;
+
+    return CheckedProperty(target(), std::move(node), origin);
   }
 
   /** @return Current authoritative immutable radio value, or original checked owner/thread/lifetime error. */
@@ -1090,6 +1185,7 @@ public:
     constexpr std::string_view TYPE = std::same_as<T, LineEdit>     ? "LineEdit"
                                       : std::same_as<T, Label>      ? "Label"
                                       : std::same_as<T, Button>     ? "Button"
+                                      : std::same_as<T, Switch>     ? "Switch"
                                       : std::same_as<T, CheckBox>   ? "CheckBox"
                                       : std::same_as<T, ThreeState> ? "ThreeState"
                                                                     : "Control";

@@ -8,6 +8,7 @@ a fragment; they are not complete applications.
 
 | Topic | Complete C++ program | Resource program or reference |
 |---|---|---|
+| Boolean Switch | [Settings](switch.md), [main.cpp](../examples/switch/main.cpp) | [guide_switch_resource.cpp](examples/guide_switch_resource.cpp) |
 | One selected value | [RadioGroup](radio-group.md), [main.cpp](../examples/radio_group/main.cpp) | [guide_radio_group_resource.cpp](examples/guide_radio_group_resource.cpp) |
 | Search journal composition | [main.cpp](../examples/search_journal/main.cpp): operator field, two troubleshooting notes, selected-match summary and bounded journal | [FormField](form-fields.md), [FindBar](find-bar.md), [LogView](log-view.md) contracts |
 | Indexed suggestions | [Command browser](live-search.md), [main.cpp](../examples/suggestions/main.cpp) | Query and actions remain C++; the result uses an ordinary virtual list |

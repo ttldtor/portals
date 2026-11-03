@@ -7,6 +7,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Add boolean `Switch` and `ui::toggle` with model-backed input, read-only policy,
+  configurable equal-width ASCII decorations and observing `checked()` properties.
+  Programmatic assignment collects typed failures and preserves exact receipts;
+  user-only change callbacks, scene resources and theme/sizing use existing controls.
+
 - Add a resident `RadioGroup` with a coherent immutable single-selection model,
   stable row identities, compact scene-owned label/model recipes and unified Ref.
   Keyboard/mouse selection, disabled/hidden options, read-only input, themed

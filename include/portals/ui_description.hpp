@@ -2151,7 +2151,21 @@ private:
                                                  detail::MountContext &context) && {
     auto state = std::move(state_);
 
-    if (!state || !state->create) {
+    if (!state) {
+      return std::unexpected(detail::error(parent, TreeError::INVALID_ARGUMENT));
+    }
+
+    if (state->prerequisiteFailure) {
+      auto admitted = detail::Access::check(scene, parent);
+
+      if (!admitted) {
+        return std::unexpected(admitted.error());
+      }
+
+      return std::unexpected(*state->prerequisiteFailure);
+    }
+
+    if (!state->create) {
       return std::unexpected(detail::error(parent, TreeError::INVALID_ARGUMENT));
     }
 
@@ -3078,6 +3092,42 @@ template <class T> Description<T> Access::controlArguments(Description<T> descri
   return description;
 }
 
+template <class T> Description<T> Access::failed(ManagedError failure) {
+  Description<T> description;
+
+  description.state_ = std::make_unique<typename Description<T>::State>();
+  description.state_->prerequisiteFailure = std::make_unique<ManagedError>(std::move(failure));
+
+  return description;
+}
+
+inline void Access::switchSettings(Description<Switch> &description, ControlSettings patch) {
+  if (!description.state_ || description.state_->prerequisiteFailure ||
+      (!patch.state && !patch.cycle && !patch.readOnly)) {
+    return;
+  }
+
+  auto &state = *description.state_;
+  auto merged = mergeControlSettings(state.controlPatch, patch);
+
+  // Retain factory provenance for every leaf not replaced by this resource packet.
+  merged.origin = state.controlPatch.origin;
+  merged.origins = state.controlPatch.origins;
+
+  for (const auto &origin : patch.origins) {
+    auto found = std::ranges::find(merged.origins, origin.path, &ControlPropertyOrigin::path);
+
+    if (found == merged.origins.end()) {
+      merged.origins.push_back(origin);
+    } else {
+      found->source = origin.source;
+    }
+  }
+
+  state.controlPatch = std::move(merged);
+  state.settingsRequested = true;
+}
+
 template <class T, class Callback> Description<T> Access::controlSetup(Description<T> description, Callback callback) {
   if (description.state_) {
     description.state_->controlSetup = std::move(callback);
@@ -3130,6 +3180,7 @@ template <class T> Description<Widget> Access::erase(Description<T> description)
   erased.state_ = std::make_unique<Description<Widget>::State>();
   erased.state_->forwardsOuter = true;
   if (description.state_) {
+    erased.state_->prerequisiteFailure = std::move(description.state_->prerequisiteFailure);
     erased.state_->layout = description.state_->layout;
     erased.state_->semanticConstruction = description.state_->semanticConstruction;
   }

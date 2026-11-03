@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #include "key_help_state.hpp"
 #include "ui_scene_resource_internal.hpp"
+#include <portals/ui_switch.hpp>
 #include <portals/ui_combo_box.hpp>
 #include <portals/ui_log_view.hpp>
 #include <portals/ui_radio_group.hpp>
@@ -137,6 +138,14 @@ SceneResourceRegistry::SceneResourceRegistry() {
     return detail::textControl<Button>(TextValue(arguments.text), {}, DEFAULT_CONTENT_POLICY, {},
                                        arguments.settings.chrome.value_or(ButtonChrome::BRACKETS));
   });
+  (void)add<Switch>("Switch", [](SceneResourceArguments arguments) {
+    return toggle(TextValue(arguments.text))
+      .settings({.state = arguments.settings.state,
+                 .cycle = arguments.settings.cycle,
+                 .readOnly = arguments.settings.readOnly});
+  });
+  entries_.back().checked = true;
+
   (void)add<RadioGroup>("RadioGroup", [](SceneResourceArguments arguments) {
     return radioGroup(std::initializer_list<std::string_view>{}).settings(arguments.settings);
   });

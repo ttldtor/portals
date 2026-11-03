@@ -371,10 +371,10 @@ struct ControlSettings {
   std::optional<std::int32_t> height{};                   ///< Nonnegative fixed height in cells.
   std::optional<std::uint32_t> flex{};                    ///< Positive common flex weight.
   std::optional<std::int32_t> gap{};                      ///< Nonnegative VBox/HBox gap.
-  std::optional<CheckState> state{};                      ///< CheckBox/ThreeState initial state.
+  std::optional<CheckState> state{};                      ///< CheckBox/ThreeState/Switch initial state; Switch is boolean only.
   std::optional<CheckCycle> cycle{};                      ///< CheckBox cycle; ThreeState is fixed THREE_STATE.
   std::optional<EditMode> editMode{};                     ///< LineEdit publication mode.
-  std::optional<bool> readOnly{};                         ///< LineEdit/scroll user-mutation policy.
+  std::optional<bool> readOnly{};                         ///< LineEdit/scroll/Switch user-mutation policy.
   std::optional<ProgrammaticChange> programmaticChange{}; ///< LineEdit initial programmatic history policy.
   std::optional<LineEditDisplayMode> displayMode{};       ///< LineEdit immutable presentation.
   std::optional<TextValue> placeholder{};                 ///< LineEdit placeholder expression.
@@ -565,7 +565,7 @@ struct ControlPropertyDescriptor {
 };
 
 /** @brief Return a static concrete factory schema; unknown types have an empty schema.
- * @param builtin VBox/HBox/Label/Button/CheckBox/LineEdit/ThreeState or scoped
+ * @param builtin VBox/HBox/Label/Button/CheckBox/Switch/LineEdit/ThreeState or scoped
  * Border/Gauge/ScrollArea/ScrollBar/Overlay.
  * @return Static descriptors only; named definitions are resolved to their concrete base first.
  * Returning a native primitive schema does not register or reserve that name in a context.
