@@ -2,6 +2,8 @@
 
 [Русская версия](ru/switch.md) · [Controls](controls.md) · [Scene resources](scene-loading-guide.md)
 
+Use a switch for an immediately changed boolean setting; it does not represent an indeterminate value. See [Switch options and factories](../include/portals/ui_switch.hpp) and the [control API](../include/portals/switch.hpp). The preview is the larger device-settings composition.
+
 Use `ui::toggle` to display and edit a boolean value. The public widget type is
 `Switch`; the factory name avoids the C++ keyword `switch`.
 
@@ -109,3 +111,27 @@ Wrong-thread, closed-owner, stale/unpublished reference, invalid model/type,
 active-frame mutation and allocation/callback failures retain the standard
 typed errors and diagnostic provenance. The low-level enum CheckState binding
 rejects Switch entirely; its binding contract is boolean only.
+
+
+## Styling reference {#switch-styling-reference}
+
+The natural selector is `Switch`. Its caption and on/off decoration share normal, focused or disabled style, in that priority order with disabled first. Checked is a value, not a separately painted PSS state; selected, header and caret are not painted. `ui::SwitchOptions::offText` and `onText` are owning `std::string` values, default `[off] ` and `[on ] `. Configure them in C++, not PSS: both must be single-line and have equal cell width under the receiving width policy. Invalid text or unequal widths rejects construction.
+
+The common paint properties apply to each painted target:
+
+| Property | Value |
+| --- | --- |
+| `foreground` | `#RRGGBB` text/ink color |
+| `background` | `#RRGGBB` fill color |
+| `bold` | `true` or `false` |
+| `italic` | `true` or `false` |
+| `underline` | `true` or `false` |
+
+Manual `ControlStyle` defaults use terminal colors, normal text, bold focus and italic disabled text. Theme and PSS declarations override individual manual fields; unspecified fields retain lower-layer values, including explicit `false`. A selector without a state supplies all variants. See [cascade and selectors](styling-guide.md) and [styles](styles.md).
+
+Layout properties `width` and `height` accept nonnegative cell counts, `auto`, `fit-content`, or `flex(positive weight)`; `min-width`, `max-width`, `min-height`, and `max-height` accept nonnegative cell counts. They require selectors without state or `:read-only`; Except for `min-width`, these size declarations are runtime PSS only. Conflicting widget bounds reject the update and retain the previous style and geometry; constraints and recipe precedence are explained in [layout](layout.md). These affect allocation, not the glyphs themselves.
+
+```pss
+Switch { foreground: #dce1e8; }
+Switch:focused { background: #245070; bold: true; }
+```

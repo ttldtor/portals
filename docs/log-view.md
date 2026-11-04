@@ -2,6 +2,20 @@
 
 [Русская версия](ru/log-view.md) · [Scroll controls](scroll-controls.md) · [Control examples](control-examples.md)
 
+Use LogView for recent bounded in-memory output, not as a file reader. Defaults retain 512 records and 256 KiB, admit batches up to 16 KiB and records up to 4 KiB, and follow the tail. Its reference provides checked append, clear and tail commands; keyboard, wheel and scrollbar navigation pause following when moving away from the tail. See [LogView configuration and API](../include/portals/log_view.hpp).
+
+![Resource example with the initial log record and controls](images/log-view-guide.png)
+
+## Styling reference {#log-view-styling-reference}
+
+`LogView` paints its text, fill and footer with normal, `:focused`, or `:disabled` (disabled takes precedence). Its manual `ControlStyle` supplies defaults beneath the cascade. Use `foreground`, `background` (`#RRGGBB`), `bold`, `italic`, and `underline` (`true` or `false`). A state-free rule applies to all variants; `min-width` requires a state-free selector. See the [cascade and size constraints](styling-guide.md).
+
+The inherited scroll frame and scrollbar have separate part colors and glyph settings: see the [scrollbar styling reference](scroll-controls.md#scrollbar-styling-reference) and [frame styling](controls.md#frame-title-decoration). Their paint attributes inherit the common resolved style when omitted. The right and bottom frame sides must remain enabled for the scrollbar and footer.
+
+```pss
+LogView:focused { foreground: #d0e8f0; scrollbar-thumb-foreground: #62b4d7; }
+```
+
 `LogView` is a scene-owned, bounded plain-text journal for showing recent output.
 Append complete batches of UTF-8 text; the control splits them into records, keeps
 the newest records within configured limits, wraps each record on grapheme

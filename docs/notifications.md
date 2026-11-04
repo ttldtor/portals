@@ -2,12 +2,33 @@
 
 [Русский](ru/notifications.md)
 
+Use notifications for short status messages while work continues. `ui::NotificationCenter` observes the scene-owned queue; application callbacks and expiry determine actions. Defaults and keyboard/pointer behavior are described below. See [notification options and API](../include/portals/toast.hpp).
+
+For a loaded scene, register a code-owned native factory with its semantic schema; the resource does not supply executable callbacks. See [resource registration](../include/portals/ui_scene_resource.hpp).
+
+![Resource-body example with a Save requested notification and Undo action](images/notification-guide.png)
+
+## Styling reference {#notifications-styling-reference}
+
+Notifications resolve logical `Toast` parts using the normal style. Severity classes are `.toast-info`, `.toast-success`, `.toast-warning`, `.toast-failure`; `.toast-message`, `.toast-action`, `.toast-dismiss` and `.toast-indicator` style the respective parts. Part defaults come from the resolved severity style, with indicator foreground and alert background supplied by its options before the indicator rule. These are paint subjects, not independent widgets.
+
+Use `foreground`, `background` (`#RRGGBB`), `bold`, `italic`, and `underline` (`true` or `false`). Rules and layers follow the [style cascade](styling-guide.md); common `min-width` constraints concern widget layout rather than these paint subjects. Indicator glyph and timing are options, not PSS properties.
+
+```pss
+Toast.toast-warning { foreground: #e0b040; }
+Toast.toast-action { bold: true; }
+```
+
 Use `ui::notifications(center, content)` to show short messages while the user
 continues editing the content. The scene owns the queue, actions and expiry timer;
 `ui::NotificationCenter` is a copyable observing handle. Clicking a notification
 does not automatically move focus from an editor.
 
 ## A complete application
+
+The [resource-body example](examples/guide_toast_resource.cpp) loads the body from configuration while the notification center and actions remain in C++. Build `portals_docs_toast_resource` with tests enabled and run it in a terminal.
+
+\include guide_toast_resource.cpp
 
 The button below records a save request and offers an application action. It does
 not write a file. F8 activates the latest eligible action, F9 dismisses a message

@@ -329,7 +329,7 @@ callbacks can perform another model update; synchronize again before rendering.
 ## Rendering and customization
 
 `ControlStyle` owns normal/focused/disabled `CellStyle` values, not a theme engine.
-Defaults use bold/underline for focus and gray/italic for disabled. Behavior does
+Before themes, defaults use bold for focus and italic for disabled; colors are unspecified. Behavior does
 not depend on style. Buttons add `[ ` and ` ]`; checkboxes add `[ ] ` or `[x] `.
 Decorations are rebuilt under the text's complete width policy when text changes.
 
@@ -615,3 +615,51 @@ Use a [SpinBox](spin-boxes.md) for numeric text drafts with ordinary editor hist
 ## Radio groups
 
 [Radio groups](radio-group.md) support a coherent resident single-selection model, unified Ref and ordinary keyboard/mouse input.
+
+
+## Styling reference {#basic-controls-styling-reference}
+
+`Label`, `Button`, `CheckBox` and `StatusBar` have their own natural style types.
+Use a [Button guide](button.md) for button recipes. Their painted states are
+normal, focused and disabled, with disabled taking priority; `StatusBar` paints
+normal/disabled only. A label is not a focus target by default. Checked/mixed
+checkbox values change its marker, not a `:selected` paint state. `ThreeState`
+is a CheckBox-derived three-value control; its appearance is described with its configuration
+[below](#check-box-with-three-states).
+
+The common paint properties are `foreground` and `background` (`#RRGGBB`),
+`bold`, `italic`, and `underline` (`true` or `false`). Unspecified fields keep
+their manual defaults or lower style-layer values; an explicit `false` is an
+override. See [selectors and precedence](styling-guide.md). Runtime PSS sizing
+accepts `width`, `height` (cells, `auto`, `fit-content`, `flex(weight)`) and
+`min-width`, `max-width`, `min-height`, `max-height` (nonnegative cells).
+Size rules require state-independent selectors; conflicting bounds reject the
+update. Only `min-width` of these size declarations is supported by compile-time
+PSS. See [size policy](layout.md).
+
+| Setting | Default and customization |
+|---|---|
+| `ControlStyle.normal` | Terminal colors with no attributes before themes |
+| `ControlStyle.focused` | Bold before themes |
+| `ControlStyle.disabled` | Italic before themes |
+| Button outline | `[ ` and ` ]`, extended to the allocated width; `ui::plainButton` removes them |
+| CheckBox markers | `[ ] `, `[x] `, `[-] ` for unchecked, checked and mixed |
+| Marker/outline color | Same resolved cell style as its caption; no separate marker/outline PSS property |
+| StatusBar sections | Root style paints its surface; section labels have their own styles |
+
+Theme declarations may replace these manual defaults. PSS does not provide a
+button-bracket or checkbox-marker string property; [frames](compact-primitives.md#primitives-styling-reference)
+provide a separately configurable outline. Colors on a parent do not automatically
+become child text styles. Assign classes/IDs to the intended controls or use an
+exact-Ref style.
+
+```pss
+Button:focused { foreground: #ffffff; background: #245070; }
+CheckBox:disabled { foreground: #7d828c; italic: false; }
+StatusBar { background: #182028; }
+```
+
+`Password` has its own type; use the [LineEdit styling reference](line-edit.md#line-edit-styling-reference)
+for its field, selected-text and caret roles, replacing the type with `Password`.
+Mask and no-echo behavior are display settings, not paint properties. Styling
+does not grant access to the protected value.

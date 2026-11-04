@@ -28,9 +28,24 @@
 Фабрика копирует небольшой литеральный источник; хранить binding tokens
 в прикладном коде не требуется.
 
-Минимальный пример собирается целью `portals_docs_choices` при включённых
-тестах. Цель `portals_choices_example` при включённых примерах собирает полную
+Пример собирается целью `guide_choices` в [отдельном проекте примеров](examples.md).
+Цель `portals_choices_example` при включённых примерах собирает более крупную
 форму. Нативные presets описаны в [руководстве по сборке](getting-started.md).
+
+Для отдельной сборки из корня репозитория:
+
+```powershell
+cmake -S docs/examples -B build/guide-examples
+cmake --build build/guide-examples --config Release --target guide_choices
+```
+
+### Когда использовать ComboBox и DropDown
+
+`ComboBox` подходит, если пользователь может вводить черновик и выбирать строку каталога. `Ref<ComboBox>::text()` читает черновик, а `selection()` и `onSelect` описывают принятый выбор. Сам ввод не выбирает строку. Полный пример выше показывает этот контрол.
+
+`DropDown` подходит, если основное поле должно оставаться только для чтения. По умолчанию popup содержит отдельный редактор поиска (`ComboBoxConfig::searchable`); `searchable=false` его отключает. `Ref<DropDown>` и `onSelect` позволяют наблюдать принятый выбор. [Полная программа Shipping desk](../../examples/choices/main.cpp), включённая ниже, показывает DropDown для доставки и палитры вместе с ComboBox. В обоих контролах строка popup принимается клавиатурой или указателем; Escape закрывает popup.
+
+Оба используют `ComboBoxConfig`: поиск `PREFIX`, 32 строки на запрос просмотра, восемь видимых строк popup, максимальная ширина 60 клеток и отсутствие начального номера по умолчанию. См. [настройки и фабрики](../../include/portals/ui_combo_box.hpp) и [API выбора](../../include/portals/combo_box.hpp). Ограничения источника и поиска, время жизни выбора и загрузка сцены описаны ниже.
 
 ## Поиск по префиксу и нечёткий поиск
 
@@ -211,3 +226,28 @@ LineEdit, Button, VirtualList и Dialog; поштучная регистраци
 Режимы редактора `PASSWORD` и `NO_ECHO` отклоняются с `INVALID_ARGUMENT` до
 публикации ссылок на выбор: поиск по каталогу не должен отправлять защищённый
 текст поля в проекцию на рабочем потоке.
+
+
+## Настройка оформления {#choices-styling-reference-ru}
+
+`ComboBox` и `DropDown` — корни композиции. Их рисуемые дочерние элементы имеют селекторы `LineEdit.choice-editor`, `Button.choice-trigger`, `LineEdit.choice-search`, `VirtualList.choice-list`, `VirtualList.choice-completion`, `Dialog.choice-popup`. Поисковый редактор показывается у DropDown с поиском; списки находятся во всплывающем окне. Стилизуйте каждый дочерний элемент отдельно. Редактор рисует normal/focused/disabled, selected и caret; кнопка — normal/focused/disabled; строки списка также используют selected. Подробнее: [LineEdit](line-edit.md#line-edit-styling-reference-ru) и [виртуальные списки](virtual-list.md). Подпись кнопки `v` фиксирована и не заменяется через PSS. Ручные значения редактора задаёт `ComboBoxConfig::editor`, кнопка начинает с `ControlStyle{}`.
+
+Общие свойства отрисовки действуют на соответствующий рисуемый элемент:
+
+| Свойство | Значение |
+| --- | --- |
+| `foreground` | цвет текста или символа `#RRGGBB` |
+| `background` | цвет заливки `#RRGGBB` |
+| `bold` | `true` или `false` |
+| `italic` | `true` или `false` |
+| `underline` | `true` или `false` |
+
+Ручной `ControlStyle` по умолчанию использует цвета терминала, обычный текст, жирный шрифт при фокусе и курсив для недоступного элемента. Тема и PSS переопределяют отдельные поля; неуказанные поля сохраняют значения нижнего слоя, включая явное `false`. Селектор без состояния задаёт все варианты. См. [каскад и селекторы](styling-guide.md) и [стили](styles.md).
+
+Свойства размеров `width` и `height` принимают неотрицательное число ячеек, `auto`, `fit-content` или `flex(положительный вес)`; `min-width`, `max-width`, `min-height`, `max-height` — неотрицательное число ячеек. Селектор не должен содержать состояние или `:read-only`. Эти свойства, кроме `min-width`, доступны только в runtime PSS. При противоречии ограничениям виджета обновление отклоняется с сохранением прежних стиля и геометрии. Ограничения и приоритеты описаны в [компоновке](layout.md). Размер влияет на выделенную область, а не на сами символы.
+
+```pss
+LineEdit.choice-editor { min-width: 16; }
+Button.choice-trigger { foreground: #62b4d7; }
+VirtualList.choice-list:selected { background: #426080; }
+```

@@ -238,3 +238,62 @@ int main() {
     | ui::runApp();
 }
 ```
+
+
+## Настройка оформления {#primitives-styling-reference-ru}
+
+`Border` использует normal/focused/disabled, причём disabled имеет приоритет.
+`Gauge` использует normal/disabled; фокус и selected не выделяют отдельные части
+индикатора. Ручной `ControlStyle` задаёт исходные значения до темы и прикладного
+PSS. Рамка не передаёт свой стиль текста дочерним контролам.
+
+Общие свойства отрисовки: `foreground` и `background` (`#RRGGBB`),
+`bold`, `italic`, `underline` (`true` или `false`). Пропущенные поля сохраняют
+ручные значения или результат нижнего слоя стилей; явное `false` переопределяет
+атрибут. См. [селекторы и приоритеты](styling-guide.md). В runtime PSS размеры
+задают `width`, `height` (ячейки, `auto`, `fit-content`, `flex(weight)`) и
+`min-width`, `max-width`, `min-height`, `max-height` (неотрицательные ячейки).
+Для размеров нужен селектор без состояния; конфликт границ отклоняет обновление.
+Из этих свойств размеров compile-time PSS поддерживает только `min-width`.
+См. [политики размеров](layout.md).
+
+### Рамки и заголовки
+
+К каждому префиксу `frame-line-`, `frame-title-`, `frame-ends-` добавляется каждый
+суффикс: `foreground`, `background`, `bold`, `italic`, `underline`. Эти 15 свойств
+независимо оформляют линии, текст заголовка и его обрамление. Пропущенные атрибуты
+берутся из соответствующего общего вычисленного стиля. `glyph-profile` принимает
+`default`, `unicode`, `ascii`, `nf-rounded`, `nf-chevron`, `nf-slash`, `nf-backslash`;
+`glyph-fallback` — `unicode` или `ascii`. По умолчанию сохраняется ручной/обычный
+набор с резервной проверкой Unicode. Явные собственные символы важнее набора.
+
+| Настройка C++ или сцены, не свойство PSS | Значение по умолчанию / варианты |
+|---|---|
+| `FrameOptions::pattern` | `SINGLE`; single, rounded, double, heavy, ascii |
+| `sides` | Все четыре границы по одной ячейке; отсутствие границы убирает её отступ |
+| `customGlyphs` | Нет; topLeft/topRight/bottomLeft/bottomRight/horizontal/vertical — по одной печатной графеме шириной в ячейку, до 64 байт |
+| `title`, `titleAlignment` | Пустой заголовок, `START`; start/center/end |
+| `titleDecoration` | `NONE`; none/spaced/square/angle/round/profile |
+| `customTitleDecoration` | Нет; собственные prefix/suffix важнее пресета, каждый до 64 байт и 16 графем шириной в ячейку |
+| `maxTitleBytes` | 4096 байт исходника; неверный ввод отклоняется до замены рамки |
+| `BorderOptions::glyphs` | Unicode с резервом ASCII при неподходящей ширине; доступен явный ASCII |
+| `BorderOptions::maxPaintCells` | 16384 ячейки периметра; это лимит работы, не настройка цвета/размера |
+
+Цвета PSS не задают рисунок рамки, стороны, литеральные линии и текст заголовка.
+Используйте `.framed(...)`, `.titleDecoration(...)` или соответствующую конфигурацию;
+[руководство по заголовкам](controls.md#frame-title-decoration-ru) показывает собственные края.
+Заголовок вписывается в верхнюю границу, не увеличивая собственную ширину рамки.
+
+### Индикатор Gauge
+
+Исходные `GaugeOptions`: minimum 0, maximum 1, preferredWidth 10,
+блок Unicode с резервом ASCII `#`, maxPaintCells 16384. Заполненные целые ячейки
+используют общий стиль; отдельных PSS-свойств цвета заполнения/дорожки и произвольной
+строки заполнения нет. Эти настройки создания задаются через `GaugeOptions`,
+а цвета и выделенный размер — через обычный PSS.
+
+```pss
+Border { frame-line-foreground: #7d8797; frame-title-foreground: #f2c879; }
+Border:focused { frame-ends-bold: true; }
+Gauge { foreground: #62b4d7; background: #182028; width: 24; }
+```

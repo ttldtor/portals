@@ -2,6 +2,7 @@
 
 [Русская версия](ru/index.md) · [Task guides](guides.md) · [Documentation contents](reference-map.md) · [Glossary](glossary.md)
 
+[Widget gallery](widget-gallery.md) — previews, examples and control guides.
 Portals is a C++23 terminal UI library under development.
 The declarative `ui` API is the primary way to build an interface.
 This page is the short reading guide; the [documentation contents](reference-map.md)

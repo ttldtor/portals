@@ -2,6 +2,8 @@
 
 [Русская версия](ru/sliders.md) · [Controls](controls.md) · [Bindings](bindings-guide.md)
 
+Use a slider for a bounded value where a relative position is useful; use a [SpinBox](spin-boxes.md) when direct numeric text entry matters. The [Slider API](../include/portals/slider.hpp) describes its options and checked operations. The recording below shows the larger settings composition, not just the short guide program.
+
 Use `ui::slider()` to edit a finite numeric value with the keyboard or mouse.
 The default horizontal slider starts at zero in the inclusive range 0..100,
 with a user increment of one and an intrinsic width of 20 cells.
@@ -137,3 +139,27 @@ NumericState. If the resource supplies value, minimum, maximum or step for that
 factory, mounting fails with `INITIAL_CONFLICT`; absent settings preserve the
 factory source. A present `readOnly=false` can override a factory's `true` setting.
 Styles and ordinary sizing retain the common resource pipeline.
+
+
+## Styling reference {#sliders-styling-reference}
+
+The natural selector is `Slider`. Track and thumb share one style: disabled takes precedence over focused, then normal. It does not paint selected, header or caret variants. The ASCII track `-` and thumb `O` are fixed; PSS has no separate part or glyph properties. `SliderOptions::preferredWidth` is `std::int32_t`, default 20 cells; intrinsic height is one. Extra allocated rows receive the background, while glyphs occupy the first row.
+
+The common paint properties apply to each painted target:
+
+| Property | Value |
+| --- | --- |
+| `foreground` | `#RRGGBB` text/ink color |
+| `background` | `#RRGGBB` fill color |
+| `bold` | `true` or `false` |
+| `italic` | `true` or `false` |
+| `underline` | `true` or `false` |
+
+Manual `ControlStyle` defaults use terminal colors, normal text, bold focus and italic disabled text. Theme and PSS declarations override individual manual fields; unspecified fields retain lower-layer values, including explicit `false`. A selector without a state supplies all variants. See [cascade and selectors](styling-guide.md) and [styles](styles.md).
+
+Layout properties `width` and `height` accept nonnegative cell counts, `auto`, `fit-content`, or `flex(positive weight)`; `min-width`, `max-width`, `min-height`, and `max-height` accept nonnegative cell counts. They require selectors without state or `:read-only`; Except for `min-width`, these size declarations are runtime PSS only. Conflicting widget bounds reject the update and retain the previous style and geometry; constraints and recipe precedence are explained in [layout](layout.md). These affect allocation, not the glyphs themselves.
+
+```pss
+Slider { width: 20; foreground: #62b4d7; }
+Slider:focused { bold: true; }
+```

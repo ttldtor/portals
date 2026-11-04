@@ -2,6 +2,7 @@
 
 [Русская версия](ru/reference-map.md) · [Short guide](index.md) · [Task guides](guides.md) · [Glossary](glossary.md)
 
+[Widget gallery](widget-gallery.md) — previews, examples and control guides.
 Follow the [first application](first-application.md) to build a note form in four
 steps. For a particular change, choose a [task guide](guides.md). The sections
 below collect the detailed guides and API contracts.

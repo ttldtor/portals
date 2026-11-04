@@ -7,6 +7,10 @@ failed, offline and refreshing states. The strip contains an animated indicator
 only while work is pending. Ordinary content remains an ordinary retained subtree;
 the wrapper does not virtualize it or start data requests.
 
+![Loading presentation with content kept available.](images/data-state-guide.png)
+
+Loading presentation with content kept available.
+
 ## Run an explicit presentation
 
 This complete application changes presentation with buttons. It starts ready,
@@ -124,3 +128,43 @@ to false to omit the strip, labels, retry button and timer. In that configuratio
 See the [public data presentation declarations](../include/portals/data_presentation.hpp)
 for settings and the [declarative API](declarative-ui.md) for scene lifetime and
 error handling.
+
+
+## Styling reference {#data-presentation-styling-reference}
+
+`DataStateView` is a Column composition, not a surface inheriting its colors into
+children. Its status parts have stable style subjects:
+
+| Subject | Appearance |
+|---|---|
+| `Row.data-status` | Status layout; does not paint a fill itself |
+| `DataStateIndicator.data-spinner` | One-cell pending indicator, normal/disabled |
+| `Label.data-message` | Status message, ordinary Label styles |
+| `Button.data-retry` | Optional retry button, normal/focused/disabled |
+
+The root and status parts also carry the current phase class: `ready`, `loading`,
+`empty`, `error`, `offline`, `refreshing`. These are classes (`.error`), not new
+pseudo-states. No child ID is assumed. `showStatus=false` creates none of these
+status children. `messageStyle` supplies manual message/indicator defaults;
+`retryStyle` supplies retry defaults before theme/PSS overrides.
+
+The common paint properties are `foreground` and `background` (`#RRGGBB`),
+`bold`, `italic`, and `underline` (`true` or `false`). Unspecified fields keep
+their manual defaults or lower style-layer values; an explicit `false` is an
+override. See [selectors and precedence](styling-guide.md). Runtime PSS sizing
+accepts `width`, `height` (cells, `auto`, `fit-content`, `flex(weight)`) and
+`min-width`, `max-width`, `min-height`, `max-height` (nonnegative cells).
+Size rules require state-independent selectors; conflicting bounds reject the
+update. Only `min-width` of these size declarations is supported by compile-time
+PSS. See [size policy](layout.md).
+
+The status strip reserves `statusRows` (default 1). `DataStateLabels` configures
+messages; indicator frames are built in, and `spinnerInterval` defaults to 100 ms.
+These are `DataStateConfig` settings, not `status-rows` or spinner PSS properties.
+Styling does not change the phase, hide content, start requests or invoke retry.
+
+```pss
+Label.data-message.error { foreground: #e65a5a; }
+DataStateIndicator.data-spinner { foreground: #62b4d7; }
+Button.data-retry:focused { bold: true; }
+```

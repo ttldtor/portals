@@ -2,97 +2,33 @@
 
 [Русская версия](ru/virtual-table.md)
 
-Use [VirtualTable<T>](../include/portals/virtual_table.hpp). This fragment displays a Name header and three rows with standard keyboard and mouse navigation. Press F10 to close.
+Use a virtual table for typed model rows with fixed-width columns and headings. Body rows default to one cell high with two overscan rows; limits default to 64 columns, 16384 prepared cells and 1 MiB of prepared text. Arrows, Home/End, left press and wheel navigate the view. A typed reference can expose the visible model below. A loaded configuration requires a typed factory with model and formatters supplied in C++; see [resource registration](../include/portals/ui_scene_resource.hpp).
 
-This fragment assumes `<portals/ui.hpp>` and `using namespace portals`; it uses Names, an immutable `ModelSnapshot<std::string>` adapter with three records, and displayText, which creates GraphemeText. The adapter, helper, headers and complete program appear below and in [guide_vtable.cpp](examples/guide_vtable.cpp).
+![Name column with three rows in the virtual-table example](images/virtual-table-guide.png)
 
-```cpp
-int main() {
-  auto scene = ui::scene([](ManagedScene &owner) {
-    return owner.model<std::string>(std::make_shared<Names>())
-      .transform([](auto model) {
-        const std::array<TableColumn<std::string>, 1> columns{
-          {{{1, 1},
-            displayText("Name"),
-            18,
-            [](const std::string &name) {
-              return displayText(name);
-            }}}};
+## Styling reference {#virtual-table-styling-reference}
 
-        return ui::virtualTable(model, columns);
-      });
-  });
+Declarative tables use `VirtualTable`; the managed virtual-view API defaults to `Table` unless a target was supplied. A directly bound widget uses its registered target. Body rows use normal or `:selected`; headings use `:header` independently of selection. `VirtualTableOptions::normal`, `selected`, and `header` provide defaults beneath the cascade. The list's match-highlight option does not style table cells.
 
-  return scene
-    | ui::onKey("F10", ui::quit)
-    | ui::runApp();
-}
+Use `foreground`, `background` (`#RRGGBB`) and `bold`, `italic`, `underline` (`true` or `false`). A rule without a state applies to all variants. See the [cascade and size constraints](styling-guide.md); `min-width` requires a state-independent selector.
+
+```pss
+VirtualTable:header { bold: true; background: #304050; }
 ```
+
+Use [VirtualTable<T>](../include/portals/virtual_table.hpp). The program below displays a Name header and three rows with standard keyboard and mouse navigation. Press F10 to close.
+
+The program uses Names, an immutable `ModelSnapshot<std::string>` adapter with three records, and displayText, which creates GraphemeText. The adapter, helper, headers and complete program appear below and in [guide_vtable.cpp](examples/guide_vtable.cpp).
 
 <details>
 <summary>Complete program</summary>
 
-```cpp
-#include <portals/ui.hpp>
-#include <array>
-#include <stdexcept>
-
-using namespace portals;
-
-class Names final : public ModelSnapshot<std::string> {
-public:
-  Names() : ModelSnapshot(1, 3) {
-  }
-
-  ModelRows<std::string> read(RowRange range) const override {
-    return {RangeState::READY,
-      std::span(rows_).subspan(
-        static_cast<std::size_t>(range.first),
-        range.count),
-      {}};
-  }
-
-private:
-  const std::array<ModelRow<std::string>, 3> rows_{{
-    {{1, 1}, "Ada"}, {{2, 1}, "Grace"}, {{3, 1}, "Margaret"}
-  }};
-};
-
-GraphemeText displayText(std::string_view value) {
-  auto result = GraphemeText::from(value);
-
-  if (!result) {
-    throw std::runtime_error("Invalid display text");
-  }
-
-  return std::move(*result);
-}
-
-int main() {
-  auto scene = ui::scene([](ManagedScene &owner) {
-    return owner.model<std::string>(std::make_shared<Names>())
-      .transform([](auto model) {
-        const std::array<TableColumn<std::string>, 1> columns{
-          {{{1, 1},
-            displayText("Name"),
-            18,
-            [](const std::string &name) {
-              return displayText(name);
-            }}}};
-
-        return ui::virtualTable(model, columns);
-      });
-  });
-
-  return scene
-    | ui::onKey("F10", ui::quit)
-    | ui::runApp();
-}
-```
+\include guide_vtable.cpp
 
 </details>
 
-[Example source](examples/guide_vtable.cpp). Add the source to a C++23 project and link it with the portals::core target ([build instructions](getting-started.md)). Run the program in a terminal.
+The [standalone guide project](examples.md) builds target `guide_vtable`; run the resulting executable in a terminal. It links `portals::core`.
+
 
 Each TableColumn owns a stable ColumnId, header, cell width and formatter. The recipe copies the column array, so it can be local to the factory. The scene handles preparation and input. Pending data requires prepared in ui::VirtualTableConfig<T>. TBD: the requested ui::vtable alias is unavailable; no delivery date is assigned.
 

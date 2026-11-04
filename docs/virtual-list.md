@@ -2,87 +2,33 @@
 
 [Русская версия](ru/virtual-list.md)
 
-Use [VirtualList<T>](../include/portals/virtual_list.hpp). This fragment displays three names with standard keyboard and mouse navigation. Press F10 to close.
+Use a virtual list for a large typed model when only visible rows should be formatted. `VirtualListOptions` defaults to a one-cell row and two overscan rows. Arrows and Home/End navigate; left press selects and the wheel scrolls. A typed reference observes the scene-owned view. For a loaded configuration, register a typed factory; the model and formatter remain C++ captures. See [resource registration](../include/portals/ui_scene_resource.hpp).
 
-This fragment assumes `<portals/ui.hpp>` and `using namespace portals`; it uses Names, an immutable `ModelSnapshot<std::string>` adapter with three records, and displayText, which creates GraphemeText. The adapter, helper, headers and complete program appear below and in [guide_vlist.cpp](examples/guide_vlist.cpp).
+![Three rows Ada, Grace and Margaret in the virtual-list example](images/virtual-list-guide.png)
 
-```cpp
-int main() {
-  auto scene = ui::scene([](ManagedScene &owner) {
-    return owner.model<std::string>(std::make_shared<Names>())
-      .transform([](auto model) {
-        return ui::virtualList(model,
-          [](const ModelRow<std::string> &row) {
-            return displayText(row.value);
-          });
-      });
-  });
+## Styling reference {#virtual-list-styling-reference}
 
-  return scene
-    | ui::onKey("F10", ui::quit)
-    | ui::runApp();
-}
+Declarative lists use `VirtualList`; the managed virtual-view API defaults to `List` unless a target was supplied. A directly bound widget uses its registered target. Rows use normal or `:selected`, not focus or disabled variants. `VirtualListOptions::normal` and `selected` provide defaults beneath the cascade.
+
+Use `foreground`, `background` (`#RRGGBB`) and `bold`, `italic`, `underline` (`true` or `false`). A rule without a state applies to all variants. See the [cascade and size constraints](styling-guide.md); `min-width` is state-independent. Prepared match highlighting uses `VirtualListOptions::highlight`, not a PSS part: its present colors override row colors and its boolean attributes are ORed with the row attributes (by default bold and underline).
+
+```pss
+VirtualList:selected { background: #305070; bold: true; }
 ```
+
+Use [VirtualList<T>](../include/portals/virtual_list.hpp). The program below displays three names with standard keyboard and mouse navigation. Press F10 to close.
+
+The program uses Names, an immutable `ModelSnapshot<std::string>` adapter with three records, and displayText, which creates GraphemeText. The adapter, helper, headers and complete program appear below and in [guide_vlist.cpp](examples/guide_vlist.cpp).
 
 <details>
 <summary>Complete program</summary>
 
-```cpp
-#include <portals/ui.hpp>
-#include <array>
-#include <stdexcept>
-
-using namespace portals;
-
-class Names final : public ModelSnapshot<std::string> {
-public:
-  Names() : ModelSnapshot(1, 3) {
-  }
-
-  ModelRows<std::string> read(RowRange range) const override {
-    return {RangeState::READY,
-      std::span(rows_).subspan(
-        static_cast<std::size_t>(range.first),
-        range.count),
-      {}};
-  }
-
-private:
-  const std::array<ModelRow<std::string>, 3> rows_{{
-    {{1, 1}, "Ada"}, {{2, 1}, "Grace"}, {{3, 1}, "Margaret"}
-  }};
-};
-
-GraphemeText displayText(std::string_view value) {
-  auto result = GraphemeText::from(value);
-
-  if (!result) {
-    throw std::runtime_error("Invalid display text");
-  }
-
-  return std::move(*result);
-}
-
-int main() {
-  auto scene = ui::scene([](ManagedScene &owner) {
-    return owner.model<std::string>(std::make_shared<Names>())
-      .transform([](auto model) {
-        return ui::virtualList(model,
-          [](const ModelRow<std::string> &row) {
-            return displayText(row.value);
-          });
-      });
-  });
-
-  return scene
-    | ui::onKey("F10", ui::quit)
-    | ui::runApp();
-}
-```
+\include guide_vlist.cpp
 
 </details>
 
-[Example source](examples/guide_vlist.cpp). Add the source to a C++23 project and link it with the portals::core target ([build instructions](getting-started.md)). Run the program in a terminal.
+The [standalone guide project](examples.md) builds target `guide_vlist`; run the resulting executable in a terminal. It links `portals::core`.
+
 
 The scene owns input bindings, range consumers and preparation. The formatter returns owning text and only reads the supplied row. Ready in-memory data needs no provider callback. Pending data requires prepared in ui::VirtualListConfig<T> to dispatch the returned request; the library starts no workers. TBD: the requested ui::vlist alias is unavailable; no delivery date is assigned.
 

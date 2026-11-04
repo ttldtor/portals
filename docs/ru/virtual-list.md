@@ -2,87 +2,33 @@
 
 [Английская версия](../virtual-list.md)
 
-Используйте [VirtualList<T>](../../include/portals/virtual_list.hpp). Этот фрагмент показывает три имени со стандартной навигацией клавиатурой и мышью. F10 закрывает приложение.
+Виртуальный список подходит для большой типизированной модели, когда форматировать нужно только видимые строки. По умолчанию `VirtualListOptions` задаёт высоту строки в одну клетку и по две дополнительные строки по краям. Стрелки и Home/End перемещают выбор, левая кнопка мыши выбирает строку, колесо прокручивает. Типизированная ссылка наблюдает представление, принадлежащее сцене. Для загруженной конфигурации зарегистрируйте типизированную фабрику; модель и форматтер остаются захваченными объектами C++. См. [регистрацию ресурсов](../../include/portals/ui_scene_resource.hpp).
 
-Фрагмент предполагает подключение `<portals/ui.hpp>` и `using namespace portals`; он использует адаптер Names — неизменяемый `ModelSnapshot<std::string>` с тремя записями — и функцию displayText для создания GraphemeText. Адаптер, функция, заголовки и вся программа приведены ниже и в [guide_vlist.cpp](../examples/guide_vlist.cpp).
+![Три строки Ada, Grace и Margaret в примере виртуального списка](../images/virtual-list-guide.png)
 
-```cpp
-int main() {
-  auto scene = ui::scene([](ManagedScene &owner) {
-    return owner.model<std::string>(std::make_shared<Names>())
-      .transform([](auto model) {
-        return ui::virtualList(model,
-          [](const ModelRow<std::string> &row) {
-            return displayText(row.value);
-          });
-      });
-  });
+## Настройка оформления {#virtual-list-styling-reference-ru}
 
-  return scene
-    | ui::onKey("F10", ui::quit)
-    | ui::runApp();
-}
+Декларативный список использует `VirtualList`; API управляемых виртуальных представлений по умолчанию использует `List`, если цель стиля не задана. Для напрямую привязанного виджета действует зарегистрированная цель. Строки используют обычный стиль или `:selected`, но не варианты фокуса и отключения. `VirtualListOptions::normal` и `selected` задают значения по умолчанию под каскадом.
+
+Доступны `foreground`, `background` (`#RRGGBB`), `bold`, `italic`, `underline` (`true` или `false`). Правило без состояния действует на все варианты. См. [каскад и ограничения размеров](styling-guide.md); `min-width` задаётся без состояния. Подсветка подготовленных совпадений задаётся в `VirtualListOptions::highlight`, а не частью PSS: заданные цвета перекрывают цвета строки, а логические атрибуты объединяются с атрибутами строки через OR (по умолчанию включены bold и underline).
+
+```pss
+VirtualList:selected { background: #305070; bold: true; }
 ```
+
+Используйте [VirtualList<T>](../../include/portals/virtual_list.hpp). Программа ниже показывает три имени со стандартной навигацией клавиатурой и мышью. F10 закрывает приложение.
+
+Программа использует адаптер Names — неизменяемый `ModelSnapshot<std::string>` с тремя записями — и функцию displayText для создания GraphemeText. Адаптер, функция, заголовки и вся программа приведены ниже и в [guide_vlist.cpp](../examples/guide_vlist.cpp).
 
 <details>
 <summary>Полная программа</summary>
 
-```cpp
-#include <portals/ui.hpp>
-#include <array>
-#include <stdexcept>
-
-using namespace portals;
-
-class Names final : public ModelSnapshot<std::string> {
-public:
-  Names() : ModelSnapshot(1, 3) {
-  }
-
-  ModelRows<std::string> read(RowRange range) const override {
-    return {RangeState::READY,
-      std::span(rows_).subspan(
-        static_cast<std::size_t>(range.first),
-        range.count),
-      {}};
-  }
-
-private:
-  const std::array<ModelRow<std::string>, 3> rows_{{
-    {{1, 1}, "Ada"}, {{2, 1}, "Grace"}, {{3, 1}, "Margaret"}
-  }};
-};
-
-GraphemeText displayText(std::string_view value) {
-  auto result = GraphemeText::from(value);
-
-  if (!result) {
-    throw std::runtime_error("Invalid display text");
-  }
-
-  return std::move(*result);
-}
-
-int main() {
-  auto scene = ui::scene([](ManagedScene &owner) {
-    return owner.model<std::string>(std::make_shared<Names>())
-      .transform([](auto model) {
-        return ui::virtualList(model,
-          [](const ModelRow<std::string> &row) {
-            return displayText(row.value);
-          });
-      });
-  });
-
-  return scene
-    | ui::onKey("F10", ui::quit)
-    | ui::runApp();
-}
-```
+\include guide_vlist.cpp
 
 </details>
 
-[Исходник примера](../examples/guide_vlist.cpp). Добавьте исходник в C++23-проект и свяжите его с целью portals::core ([инструкция сборки](getting-started.md)). Запустите программу в терминале.
+[Отдельный проект примеров](examples.md) собирает цель `guide_vlist`; запустите полученную программу в терминале. Она связывается с `portals::core`.
+
 
 Сцена владеет привязками ввода, потребителями диапазонов и подготовкой. Форматировщик возвращает собственный текст и только читает переданную строку. Готовые данные в памяти не требуют обработчика поставщика. Для ожидающих данных задайте prepared в ui::VirtualListConfig<T>, чтобы передать возвращённый запрос на исполнение; библиотека не запускает потоки. TBD: запрошенный псевдоним ui::vlist отсутствует; срок не назначен.
 

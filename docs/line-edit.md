@@ -4,34 +4,30 @@
 
 Create a field with [`ui::lineEdit`](../include/portals/ui.hpp) to connect input, a model and history automatically. In this application F2 copies the current draft to the label and appends `!`; Enter confirms the field, Escape restores the model, and F10 exits.
 
-```cpp
-#include <portals/ui.hpp>
+[Complete source](examples/guide_line_edit.cpp):
 
-int main() {
-  using namespace portals;
+![Line editor showing Ada and the draft-reading hint.](./images/line-edit-guide.png)
 
-  ui::Ref<LineEdit> name;
-  ui::Ref<Label> greeting;
-
-  auto scene = ui::scene(
-    ui::vbox(ui::lineEdit(name,
-               "Ada",
-               {.options = {.editMode = EditMode::EXPLICIT}}),
-      ui::label(greeting, "Press F2 to read the draft")));
-
-  return scene
-    | ui::onKey("F2",
-                [name, greeting] {
-                  greeting.text() = name.text() + "!";
-                })
-    | ui::onKey("F10", ui::quit)
-    | ui::runApp();
-}
-```
+\include guide_line_edit.cpp
 
 The example reads the draft through `name.text()`, so F2 sees unconfirmed text too. To share a model between fields, pass the same `ManagedScene::state(...)` value to each; see [declarative composition](declarative-ui.md).
 
-[Build the standalone examples](examples.md).
+Configure the [standalone guide examples](examples.md), build target `guide_line_edit`, and run the resulting executable in a terminal. The source is shared with this page. For an installed SDK, see [package setup](package.md).
+
+```powershell
+cmake -S docs/examples -B build/guide-examples -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build/guide-examples --target guide_line_edit
+./build/guide-examples/guide_line_edit.exe
+```
+
+For a loaded scene, declare `LineEdit` and obtain its typed reference as shown in [scene loading](scene-loading-guide.md). Callbacks remain C++ code. [LineEditOptions and API](../include/portals/line_edit.hpp) specify the full contract.
+
+| Setting | Default |
+| --- | --- |
+| Editing and display | `IMMEDIATE`, `NORMAL`, writable, no placeholder |
+| Draft limits | 4096 bytes, 4096 bytes per cluster, 4096 graphemes, 8192 cells |
+| History | enabled, 128 combined groups, 1 MiB of retained snapshots |
+| Programmatic changes | `RECORD` in history |
 
 ## Placeholder, protected display and Clear
 
@@ -235,3 +231,29 @@ See [text ownership and Unicode policy](text.md), [property notifications](prope
 [focus and routing](focus.md), and [terminal ownership](terminal.md).
 
 </details>
+
+
+## Styling reference {#line-edit-styling-reference}
+
+The natural selector is `LineEdit`. Paint uses `normal`, `focused` and `disabled` for the field, `selected` for selected text while enabled, and `caret` for the software caret while enabled and focused. `header` is not painted. The placeholder uses the field style. `LineEditOptions::style` is a `ControlStyle`; `selection` and `cursor` are `CellStyle`. Their manual defaults use terminal colors: selection is bold and italic; cursor is bold and underlined. PSS can override their five attributes through `:selected` and `:caret`; it does not change the placeholder or password mask text.
+
+The common paint properties apply to each painted target:
+
+| Property | Value |
+| --- | --- |
+| `foreground` | `#RRGGBB` text/ink color |
+| `background` | `#RRGGBB` fill color |
+| `bold` | `true` or `false` |
+| `italic` | `true` or `false` |
+| `underline` | `true` or `false` |
+
+Manual `ControlStyle` defaults use terminal colors, normal text, bold focus and italic disabled text. Theme and PSS declarations override individual manual fields; unspecified fields retain lower-layer values, including explicit `false`. A selector without a state supplies all variants. See [cascade and selectors](styling-guide.md) and [styles](styles.md).
+
+Layout properties `width` and `height` accept nonnegative cell counts, `auto`, `fit-content`, or `flex(positive weight)`; `min-width`, `max-width`, `min-height`, and `max-height` accept nonnegative cell counts. They require selectors without state or `:read-only`; Except for `min-width`, these size declarations are runtime PSS only. Conflicting widget bounds reject the update and retain the previous style and geometry; constraints and recipe precedence are explained in [layout](layout.md). These affect allocation, not the glyphs themselves.
+
+```pss
+LineEdit { min-width: 16; }
+LineEdit:focused { foreground: #ffffff; background: #245070; }
+LineEdit:selected { background: #426080; }
+LineEdit:caret { underline: true; }
+```

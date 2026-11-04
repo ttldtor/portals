@@ -5,6 +5,7 @@ No Doxygen, network, or real build is used; unittest exits nonzero on failure.
 """
 
 import json
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -16,6 +17,26 @@ from prepare_languages import filter_document, prepare
 
 
 class LanguageBuildTests(unittest.TestCase):
+    def test_gallery_guides_have_unique_native_tree_routes(self):
+        """Every advertised control guide must be reachable below the gallery."""
+        project = Path(__file__).resolve().parents[2]
+        layout = ET.parse(project / "docs/DoxygenLayout.xml").getroot()
+        for language, directory in (("en", "docs"), ("ru", "docs/ru")):
+            with self.subTest(language=language):
+                page = project / directory / "widget-gallery.md"
+                index = page.read_text(encoding="utf-8").split("{#control-styling-index", 1)[1]
+                pages = set(re.findall(r"\]\(([^)#]+\.md)#", index))
+                self.assertTrue(pages)
+                navigation = layout.find(f"navindex[@language='{language}']")
+                url = "@ref " + directory + "/widget-gallery.md"
+                gallery = [tab for tab in navigation.iter("tab") if tab.get("url") == url]
+                self.assertEqual(len(gallery), 1)
+                self.assertEqual(gallery[0].get("type"), "usergroup")
+                for name in pages:
+                    target = "@ref " + directory + "/" + name
+                    self.assertEqual(sum(tab.get("url") == target for tab in gallery[0].iter("tab")), 1, target)
+                    self.assertEqual(sum(tab.get("url") == target for tab in navigation.iter("tab")), 1, target)
+
     def fixture(self, directory):
         root = Path(directory)
         manifest = root / "languages.json"

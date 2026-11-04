@@ -78,6 +78,8 @@ IDs are case-sensitive. Every declaration ends with a semicolon.
 | `foreground`, `background` | `#RRGGBB` | Repaint |
 | `bold`, `italic`, `underline` | `true` or `false` | Repaint |
 | `min-width` | Integer from 0 to `INT32_MAX`, in terminal cells | Layout and repaint |
+| `width`, `height` | Cells, `auto`, `fit-content`, `flex(positive weight)` | Runtime layout and paint |
+| `max-width`, `min-height`, `max-height` | Nonnegative cell counts | Runtime hard bounds |
 
 `min-width` requires a selector without a state predicate and sets a hard
 allocation minimum. Zero adds no minimum. A clipped viewport does not reduce
@@ -85,9 +87,22 @@ allocation below this bound. If a fixed recipe width of 20 conflicts with a
 styled minimum of 30, typed style application fails before publishing that
 style update; an invalid final policy in a cold recipe fails mount.
 
+All six sizing properties require state-independent selectors. Their mode
+values and intersection with widget bounds are described in [layout](layout.md).
+Runtime PSS supports this table; compile-time PSS supports only `min-width`
+among the size properties.
+
 States are `normal`, `focused`, `disabled`, `selected`, `header` and `caret`.
 A selector without a state applies to every presentation variant; `:normal`
 applies only to normal presentation. PSS v0 has no `:hover` state.
+
+## Styling individual controls
+
+The common properties above set the base appearance. Composite controls also
+have their own parts and properties. The [scrollbar styling reference](scroll-controls.md#scrollbar-styling-reference)
+collects all supported PSS settings for the track, thumb, arrows and corner,
+with values, priorities and an example. For frames and titles, see
+[frame title styling](controls.md#frame-title-decoration).
 
 ## Replaceable groups of rules
 

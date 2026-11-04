@@ -2,6 +2,7 @@
 
 [Русская версия](ru/guides.md) · [Short guide](index.md) · [Documentation contents](reference-map.md) · [Glossary](glossary.md)
 
+[Widget gallery](widget-gallery.md) — previews, examples and control guides.
 These guides explain how to build an application with declarative scenes.
 The table below groups them by the task you want to accomplish.
 
