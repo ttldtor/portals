@@ -2,12 +2,30 @@
 
 [Русская версия](ru/dialogs.md)
 
+Use a dialog when content needs an overlay, either modal or nonmodal. A scene-owned dialog is controlled through `ui::Ref<Dialog>`; its input and close behavior are described below. Configuration resources can declare supported dialog presentation, while executable handlers remain C++. See [Dialog options and API](../include/portals/dialog.hpp).
+
+![Resource example with the Connection settings modal dialog](images/dialog-guide.png)
+
+## Styling reference {#dialogs-styling-reference}
+
+A dialog is a composition: its panel is `Border.dialog-panel`, its close control is `Button.dialog-close`, and the standard content uses `Label.dialog-title` and `Column.dialog-body`. Style each target independently. Panel painting uses the Border enabled/disabled appearance; buttons use their ordinary control states. `DialogOptions::frame` accepts `BorderOptions`: `glyphs` defaults to Unicode with ASCII width fallback, `glyphSelection` selects a base map, and `maxPaintCells` defaults to 16384. It does not expose `FrameOptions::pattern`, `sides`, or `customGlyphs`; the ordinary dialog panel keeps its fixed single-line outline and four sides. Its title label and frame-close button are separate controls, not a `FrameOptions::title` decoration.
+
+Common `foreground`, `background` (`#RRGGBB`), `bold`, `italic`, `underline` (`true` or `false`) and state-independent `min-width` follow the [cascade and size constraints](styling-guide.md). The panel supports the `frame-line-`, `frame-title-`, and `frame-ends-` paint prefixes with those five attributes, inheriting unspecified attributes from its common style; see [frame styling](controls.md#frame-title-decoration).
+
+```pss
+Border.dialog-panel { frame-line-foreground: #62b4d7; }
+```
+
 An overlay host keeps one main body and registered dialog layers in the same
 retained tree. Opening changes visibility, input admission and focus without a
 second event loop or scene reconstruction. Closed dialogs stay mounted and retain
 their child controls' state.
 
 ## A complete modal form
+
+For a scene-resource version, [guide_dialog_resource.cpp](examples/guide_dialog_resource.cpp) declares the host and dialog in configuration and binds actions in C++. Build `portals_docs_dialog_resource` with tests enabled and run it in a terminal.
+
+\include guide_dialog_resource.cpp
 
 \include guide_dialog.cpp
 

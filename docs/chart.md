@@ -2,83 +2,35 @@
 
 [Русская версия](ru/chart.md)
 
-Use [Chart<T>](../include/portals/chart.hpp). Both lines and candles are supported. This fragment plots four closing prices as a line. Press F10 to close.
+Use a chart for line or OHLC candle data from an immutable model. Defaults are line mode, automatic visible-range scaling, ASCII candle glyphs and no candle gap. The chart displays data; navigation and application commands belong to surrounding controls. A loaded configuration requires a typed factory supplying the model and accessor in C++; see [resource registration](../include/portals/ui_scene_resource.hpp).
 
-This fragment assumes `<portals/ui.hpp>` and `using namespace portals`; it uses Prices, an immutable `ModelSnapshot<Ohlc>` adapter with four records. The adapter, headers and complete program appear below and in [guide_chart.cpp](examples/guide_chart.cpp).
+![Four price buckets rendered at the left of the chart](images/chart-guide.png)
 
-```cpp
-int main() {
-  auto scene = ui::scene([](ManagedScene &owner) {
-    return owner.model<Ohlc>(std::make_shared<Prices>())
-      .transform([](auto model) {
-        return ui::chart(
-          model,
-          [](const Ohlc &price) {
-            return std::optional{price};
-          },
-          ui::ChartConfig<Ohlc>{
-            .options = {.mode = ChartMode::LINE}});
-      });
-  });
+The example has four buckets. The default is one bucket per column, so the remaining plot width is empty; the data is not stretched.
 
-  return scene
-    | ui::onKey("F10", ui::quit)
-    | ui::runApp();
-}
+## Styling reference {#chart-styling-reference}
+
+The `Chart` type paints the plot using its resolved normal style; `ChartOptions::background` is its manual default. Use `foreground`, `background` (`#RRGGBB`) and `bold`, `italic`, `underline` (`true` or `false`). A state-free rule supplies all variants, but chart painting uses normal. See the [cascade and size constraints](styling-guide.md); `min-width` is state-independent.
+
+Series use `ChartOptions::line`, `rising` and `falling` cell styles, rather than separate PSS parts. Their default foregrounds are `#50b4f0`, `#3cc878` and `#e65a5a`; an unset brush background inherits the resolved plot background. `ChartOptions::glyph_set` selects the candle glyph set as described below.
+
+```pss
+Chart { background: #102030; }
 ```
+
+Use [Chart<T>](../include/portals/chart.hpp). Both lines and candles are supported. The program below plots four closing prices as a line. Press F10 to close.
+
+The program uses Prices, an immutable `ModelSnapshot<Ohlc>` adapter with four records. The adapter, headers and complete program appear below and in [guide_chart.cpp](examples/guide_chart.cpp).
 
 <details>
 <summary>Complete program</summary>
 
-```cpp
-#include <portals/ui.hpp>
-#include <array>
-
-using namespace portals;
-
-class Prices final : public ModelSnapshot<Ohlc> {
-public:
-  Prices() : ModelSnapshot(1, 4) {
-  }
-
-  ModelRows<Ohlc> read(RowRange range) const override {
-    return {RangeState::READY,
-      std::span(rows_).subspan(
-        static_cast<std::size_t>(range.first),
-        range.count),
-      {}};
-  }
-
-private:
-  const std::array<ModelRow<Ohlc>, 4> rows_{{
-    {{1, 1}, {10, 14, 9, 12}}, {{2, 1}, {12, 16, 11, 15}},
-    {{3, 1}, {15, 15, 10, 11}}, {{4, 1}, {11, 14, 10, 13}}
-  }};
-};
-
-int main() {
-  auto scene = ui::scene([](ManagedScene &owner) {
-    return owner.model<Ohlc>(std::make_shared<Prices>())
-      .transform([](auto model) {
-        return ui::chart(
-          model,
-          [](const Ohlc &price) {
-            return std::optional{price};
-          },
-          ui::ChartConfig<Ohlc>{
-            .options = {.mode = ChartMode::LINE}});
-      });
-  });
-
-  return scene
-    | ui::onKey("F10", ui::quit)
-    | ui::runApp();
-}
-```
+\include guide_chart.cpp
 
 </details>
 
-[Example source](examples/guide_chart.cpp). Add the source to a C++23 project and link it with the portals::core target ([build instructions](getting-started.md)). Run the program in a terminal.
+The [standalone guide project](examples.md) builds target `guide_chart`; run the resulting executable in a terminal. It links `portals::core`.
+
 
 ChartMode::LINE connects consecutive valid close values. Change the mode to ChartMode::CANDLES to display the same open/high/low/close records as candles. The accessor returns optional<Ohlc>; nullopt creates a gap. The scene handles preparation and rendering. Pending data requires prepared in ui::ChartConfig<T>.
 

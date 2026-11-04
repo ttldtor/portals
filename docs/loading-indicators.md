@@ -2,6 +2,31 @@
 
 [Русская версия](ru/loading-indicators.md)
 
+Use Spinner for indeterminate work. The default is active `DOTS`, a 100 ms interval, forward direction, start alignment and an empty label; reduced motion is off. Its reference starts, stops or relabels the indicator, rather than receiving user input itself. See [Spinner options and API](../include/portals/spinner.hpp).
+
+![Loading indicator example with Start and Stop controls](images/loading-indicator-guide.png)
+
+[Watch the indicator animate](images/loading-indicator-guide.gif).
+
+## Styling reference {#loading-indicators-styling-reference}
+
+`Spinner` uses normal for an active animation and its label; inactive, ineligible or reduced-motion frames use `:disabled`. `ControlStyle` supplies manual defaults beneath the cascade. Use `foreground`, `background` (`#RRGGBB`), `bold`, `italic`, and `underline` (`true` or `false`); state-free rules apply to every variant. See [cascade and size constraints](styling-guide.md) for `min-width`, which requires a state-free selector.
+
+Frames, direction, alignment and timing are spinner settings, not PSS parts; there are no independent trailing-segment colors. Presets and custom frames are described below.
+
+| `SpinnerOptions` setting (not PSS) | Default / values |
+|---|---|
+| `preset`, `frames` | `DOTS`, empty custom source; presets below, nonempty LF-separated frames override preset |
+| `interval`, `direction` | 100 ms, `FORWARD`; `REVERSE` is available |
+| `alignment` | `START`; `CENTER` or `END` positions the indicator and label together |
+| `active`, `reducedMotion`, `label` | true, false, empty text |
+| `maxFrames`, `maxFrameBytes`, `maxFrameCells` | 64 frames, 4096 source bytes, 64 cells per frame |
+| `maxPaintCells` | 16384 allocated cells |
+
+```pss
+Spinner:disabled { foreground: #808080; }
+```
+
 Use `ui::spinner()` for work whose completion percentage is unknown. The scene
 owns its timer and cleanup. This complete program starts with a braille indicator;
 Start and Stop control it without keeping a scheduler token:
@@ -44,6 +69,10 @@ per frame and 16384 allocated paint cells. The corresponding methods are
 `.maxPaintCells(...)`. Invalid settings produce typed preparation errors.
 
 ## Labels, styles and resources
+
+The [complete resource program](examples/guide_loading_resource.cpp) declares a Spinner in configuration and connects buttons in C++. Build `portals_docs_loading_resource` with tests enabled and run it in a terminal.
+
+\include guide_loading_resource.cpp
 
 `.label(...)` accepts owning literal, formatted or localized `TextValue` input.
 The label follows the sequence with one space and contributes to its intrinsic

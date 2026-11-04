@@ -4,6 +4,51 @@
     <tab type="mainpage" visible="yes" title="Documentation home" />
     <tab type="usergroup" title="1. Start here">
       <tab type="user" title="First application" url="@ref docs/first-application.md" />
+      <tab type="usergroup" title="Widget gallery" url="@ref docs/widget-gallery.md">
+        <tab type="usergroup" title="Text and actions">
+          <tab type="user" title="Label" url="@ref docs/label.md" />
+          <tab type="user" title="Button" url="@ref docs/button.md" />
+          <tab type="user" title="CheckBox" url="@ref docs/check-box.md" />
+          <tab type="user" title="ThreeState" url="@ref docs/three-state.md" />
+          <tab type="user" title="Switch" url="@ref docs/switch.md" />
+          <tab type="user" title="StatusBar" url="@ref docs/status-bar.md" />
+        </tab>
+        <tab type="usergroup" title="Editing and selection">
+          <tab type="user" title="LineEdit" url="@ref docs/line-edit.md" />
+          <tab type="user" title="Password" url="@ref docs/password.md" />
+          <tab type="user" title="FormField" url="@ref docs/form-fields.md" />
+          <tab type="user" title="RadioGroup" url="@ref docs/radio-group.md" />
+          <tab type="user" title="Slider" url="@ref docs/sliders.md" />
+          <tab type="user" title="SpinBox" url="@ref docs/spin-boxes.md" />
+          <tab type="user" title="ComboBox / DropDown" url="@ref docs/choices.md" />
+          <tab type="user" title="FindBar" url="@ref docs/find-bar.md" />
+        </tab>
+        <tab type="usergroup" title="Data views">
+          <tab type="user" title="VirtualList" url="@ref docs/virtual-list.md" />
+          <tab type="user" title="VirtualTable" url="@ref docs/virtual-table.md" />
+          <tab type="user" title="Chart" url="@ref docs/chart.md" />
+          <tab type="user" title="LogView" url="@ref docs/log-view.md" />
+          <tab type="user" title="DataStateView" url="@ref docs/data-presentation.md" />
+        </tab>
+        <tab type="usergroup" title="Layout and scrolling">
+          <tab type="user" title="Row / Column / Spacer" url="@ref docs/layout.md" />
+          <tab type="user" title="Grid / Overlay" url="@ref docs/grid.md" />
+          <tab type="user" title="Border" url="@ref docs/border.md" />
+          <tab type="user" title="Gauge" url="@ref docs/gauge.md" />
+          <tab type="user" title="Frame and gauge recipes" url="@ref docs/compact-primitives.md" />
+          <tab type="user" title="ScrollArea / ScrollBar" url="@ref docs/scroll-controls.md" />
+        </tab>
+        <tab type="usergroup" title="Menus and dialogs">
+          <tab type="user" title="Menu / PopupMenu" url="@ref docs/menus.md" />
+          <tab type="user" title="Dialog / MessageBox" url="@ref docs/dialogs.md" />
+          <tab type="user" title="Notifications" url="@ref docs/notifications.md" />
+          <tab type="user" title="ThemeSelector" url="@ref docs/theme-selector.md" />
+        </tab>
+        <tab type="usergroup" title="Indicators and help">
+          <tab type="user" title="Spinner" url="@ref docs/loading-indicators.md" />
+          <tab type="user" title="KeyHints / HelpView" url="@ref docs/key-help.md" />
+        </tab>
+      </tab>
       <tab type="user" title="Task guides" url="@ref docs/guides.md" />
       <tab type="user" title="Documentation contents" url="@ref docs/reference-map.md" />
       <tab type="user" title="Glossary" url="@ref docs/glossary.md" />
@@ -16,12 +61,8 @@
         <tab type="user" title="Editor history example" url="@ref docs/editor-history-demo.md" />
         <tab type="user" title="Text and columns" url="@ref docs/compact-examples.md" />
         <tab type="user" title="WASM Gallery and Level" url="@ref docs/wasm-gallery.md" />
-        <tab type="user" title="Frames, gauges and sizing" url="@ref docs/compact-primitives.md" />
       </tab>
       <tab type="user" title="Managed controls" url="@ref docs/managed-controls.md" />
-      <tab type="user" title="Dialogs" url="@ref docs/dialogs.md" />
-      <tab type="user" title="Notifications" url="@ref docs/notifications.md" />
-      <tab type="user" title="Key hints and help" url="@ref docs/key-help.md" />
       <tab type="user" title="Use the installed package" url="@ref docs/package.md" />
       <tab type="user" title="Current limitations" url="@ref docs/limitations.md" />
       <tab type="user" title="Release notes" url="@ref ReleaseNotes.md" />
@@ -34,19 +75,13 @@
       <tab type="user" title="Control references and text" url="@ref docs/text-property.md" />
       <tab type="user" title="Scene loading" url="@ref docs/scene-loading-guide.md" />
       <tab type="user" title="Application runner" url="@ref docs/application.md" />
-      <tab type="usergroup" title="Controls and layout">
+      <tab type="usergroup" title="Editing and style reference">
         <tab type="user" title="Basic controls" url="@ref docs/controls.md" />
-        <tab type="user" title="LineEdit" url="@ref docs/line-edit.md" />
-        <tab type="user" title="ComboBox and DropDown" url="@ref docs/choices.md" />
-        <tab type="user" title="Menus" url="@ref docs/menus.md" />
         <tab type="user" title="Text history" url="@ref docs/text-history.md" />
         <tab type="user" title="Editor Undo and Redo" url="@ref docs/editor-history.md" />
-        <tab type="user" title="Row and Column" url="@ref docs/layout.md" />
-        <tab type="user" title="Grid and Overlay" url="@ref docs/grid.md" />
         <tab type="user" title="Styles and themes" url="@ref docs/styles.md" />
         <tab type="user" title="Style layers" url="@ref docs/style-layers.md" />
         <tab type="user" title="Checked theme previews" url="@ref docs/theme-selection.md" />
-        <tab type="user" title="Theme selector" url="@ref docs/theme-selector.md" />
       </tab>
       <tab type="usergroup" title="State and data">
         <tab type="user" title="Properties" url="@ref docs/property.md" />
@@ -54,10 +89,7 @@
         <tab type="user" title="Bounded queries" url="@ref docs/model-queries.md" />
         <tab type="user" title="UI coroutines" url="@ref docs/ui-coroutines.md" />
         <tab type="user" title="Prepare views from layout" url="@ref docs/virtual-preparation.md" />
-        <tab type="user" title="Virtual lists" url="@ref docs/virtual-list.md" />
-        <tab type="user" title="Virtual tables" url="@ref docs/virtual-table.md" />
         <tab type="user" title="Scrolling" url="@ref docs/scroll.md" />
-        <tab type="user" title="Charts" url="@ref docs/chart.md" />
       </tab>
       <tab type="user" title="Diagnose events" url="@ref docs/diagnostics.md" />
       <tab type="user" title="Inspect the terminal" url="@ref docs/terminal-probe.md" />
@@ -123,6 +155,51 @@
     <tab type="usergroup" title="Начало работы">
       <tab type="user" title="Краткое руководство" url="@ref docs/ru/index.md" />
       <tab type="user" title="Первое приложение" url="@ref docs/ru/first-application.md" />
+      <tab type="usergroup" title="Галерея контролов" url="@ref docs/ru/widget-gallery.md">
+        <tab type="usergroup" title="Текст и действия">
+          <tab type="user" title="Label" url="@ref docs/ru/label.md" />
+          <tab type="user" title="Button" url="@ref docs/ru/button.md" />
+          <tab type="user" title="CheckBox" url="@ref docs/ru/check-box.md" />
+          <tab type="user" title="ThreeState" url="@ref docs/ru/three-state.md" />
+          <tab type="user" title="Switch" url="@ref docs/ru/switch.md" />
+          <tab type="user" title="StatusBar" url="@ref docs/ru/status-bar.md" />
+        </tab>
+        <tab type="usergroup" title="Ввод и выбор">
+          <tab type="user" title="LineEdit" url="@ref docs/ru/line-edit.md" />
+          <tab type="user" title="Password" url="@ref docs/ru/password.md" />
+          <tab type="user" title="FormField" url="@ref docs/ru/form-fields.md" />
+          <tab type="user" title="RadioGroup" url="@ref docs/ru/radio-group.md" />
+          <tab type="user" title="Slider" url="@ref docs/ru/sliders.md" />
+          <tab type="user" title="SpinBox" url="@ref docs/ru/spin-boxes.md" />
+          <tab type="user" title="ComboBox / DropDown" url="@ref docs/ru/choices.md" />
+          <tab type="user" title="FindBar" url="@ref docs/ru/find-bar.md" />
+        </tab>
+        <tab type="usergroup" title="Представление данных">
+          <tab type="user" title="VirtualList" url="@ref docs/ru/virtual-list.md" />
+          <tab type="user" title="VirtualTable" url="@ref docs/ru/virtual-table.md" />
+          <tab type="user" title="Chart" url="@ref docs/ru/chart.md" />
+          <tab type="user" title="LogView" url="@ref docs/ru/log-view.md" />
+          <tab type="user" title="DataStateView" url="@ref docs/ru/data-presentation.md" />
+        </tab>
+        <tab type="usergroup" title="Компоновка и прокрутка">
+          <tab type="user" title="Row / Column / Spacer" url="@ref docs/ru/layout.md" />
+          <tab type="user" title="Grid / Overlay" url="@ref docs/ru/grid.md" />
+          <tab type="user" title="Border" url="@ref docs/ru/border.md" />
+          <tab type="user" title="Gauge" url="@ref docs/ru/gauge.md" />
+          <tab type="user" title="Рецепты рамок и индикаторов" url="@ref docs/ru/compact-primitives.md" />
+          <tab type="user" title="ScrollArea / ScrollBar" url="@ref docs/ru/scroll-controls.md" />
+        </tab>
+        <tab type="usergroup" title="Меню и диалоги">
+          <tab type="user" title="Menu / PopupMenu" url="@ref docs/ru/menus.md" />
+          <tab type="user" title="Dialog / MessageBox" url="@ref docs/ru/dialogs.md" />
+          <tab type="user" title="Notifications" url="@ref docs/ru/notifications.md" />
+          <tab type="user" title="ThemeSelector" url="@ref docs/ru/theme-selector.md" />
+        </tab>
+        <tab type="usergroup" title="Индикаторы и помощь">
+          <tab type="user" title="Spinner" url="@ref docs/ru/loading-indicators.md" />
+          <tab type="user" title="KeyHints / HelpView" url="@ref docs/ru/key-help.md" />
+        </tab>
+      </tab>
       <tab type="user" title="Руководства по задачам" url="@ref docs/ru/guides.md" />
       <tab type="user" title="Содержание документации" url="@ref docs/ru/reference-map.md" />
       <tab type="user" title="Глоссарий" url="@ref docs/ru/glossary.md" />
@@ -132,7 +209,6 @@
         <tab type="user" title="Пример редактора" url="@ref docs/ru/editor-history-demo.md" />
         <tab type="user" title="Текст и колонки" url="@ref docs/ru/compact-examples.md" />
         <tab type="user" title="WASM Gallery и Level" url="@ref docs/ru/wasm-gallery.md" />
-        <tab type="user" title="Рамки, индикаторы и размеры" url="@ref docs/ru/compact-primitives.md" />
       </tab>
       <tab type="user" title="Подключение пакета" url="@ref docs/ru/package.md" />
     </tab>
@@ -148,9 +224,6 @@
       <tab type="user" title="Ввод" url="@ref docs/ru/input.md" />
       <tab type="user" title="Диагностика" url="@ref docs/ru/diagnostics.md" />
       <tab type="user" title="Управляемые контролы" url="@ref docs/ru/managed-controls.md" />
-      <tab type="user" title="Диалоги" url="@ref docs/ru/dialogs.md" />
-      <tab type="user" title="Уведомления" url="@ref docs/ru/notifications.md" />
-      <tab type="user" title="Подсказки клавиш и справка" url="@ref docs/ru/key-help.md" />
     </tab>
     <tab type="usergroup" title="Стили и темы">
       <tab type="user" title="Гайд по стилям" url="@ref docs/ru/styling-guide.md" />
@@ -158,27 +231,18 @@
       <tab type="user" title="Синтаксис PSS" url="@ref docs/ru/styles.md" />
       <tab type="user" title="Слои стилей" url="@ref docs/ru/style-layers.md" />
       <tab type="user" title="Предпросмотр тем" url="@ref docs/ru/theme-selection.md" />
-      <tab type="user" title="Выбор темы" url="@ref docs/ru/theme-selector.md" />
       <tab type="user" title="Стили времени компиляции" url="@ref docs/ru/compile-time-styles.md" />
       <tab type="user" title="PSS времени компиляции" url="@ref docs/ru/compile-time-pss.md" />
     </tab>
     <tab type="usergroup" title="Контролы и данные">
       <tab type="user" title="Основные контролы" url="@ref docs/ru/controls.md" />
-      <tab type="user" title="LineEdit" url="@ref docs/ru/line-edit.md" />
-      <tab type="user" title="ComboBox и DropDown" url="@ref docs/ru/choices.md" />
-      <tab type="user" title="Меню" url="@ref docs/ru/menus.md" />
       <tab type="user" title="История текста" url="@ref docs/ru/text-history.md" />
       <tab type="user" title="Undo и Redo" url="@ref docs/ru/editor-history.md" />
-      <tab type="user" title="Компоновка" url="@ref docs/ru/layout.md" />
-      <tab type="user" title="Сетка и наложение" url="@ref docs/ru/grid.md" />
       <tab type="user" title="Фокус" url="@ref docs/ru/focus.md" />
       <tab type="user" title="Модели" url="@ref docs/ru/model.md" />
       <tab type="user" title="Запросы" url="@ref docs/ru/model-queries.md" />
       <tab type="user" title="Подготовка представлений" url="@ref docs/ru/virtual-preparation.md" />
-      <tab type="user" title="Виртуальные списки" url="@ref docs/ru/virtual-list.md" />
-      <tab type="user" title="Виртуальные таблицы" url="@ref docs/ru/virtual-table.md" />
       <tab type="user" title="Прокрутка" url="@ref docs/ru/scroll.md" />
-      <tab type="user" title="Графики" url="@ref docs/ru/chart.md" />
       <tab type="user" title="Корутины" url="@ref docs/ru/ui-coroutines.md" />
     </tab>
     <tab type="usergroup" title="Устройство библиотеки">

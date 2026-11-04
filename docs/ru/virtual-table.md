@@ -2,97 +2,33 @@
 
 [Английская версия](../virtual-table.md)
 
-Используйте [VirtualTable<T>](../../include/portals/virtual_table.hpp). Этот фрагмент показывает заголовок Name и три строки со стандартной навигацией клавиатурой и мышью. F10 закрывает приложение.
+Виртуальная таблица показывает строки типизированной модели в столбцах фиксированной ширины с заголовками. По умолчанию строка имеет высоту одну клетку и по две дополнительные строки по краям; пределы — 64 столбца, 16384 подготовленные ячейки и 1 МиБ подготовленного текста. Навигация доступна стрелками, Home/End, левой кнопкой мыши и колесом. Типизированная ссылка позволяет получить видимую модель, как показано ниже. Для загруженной конфигурации нужна типизированная фабрика с моделью и форматтерами из C++; см. [регистрацию ресурсов](../../include/portals/ui_scene_resource.hpp).
 
-Фрагмент предполагает подключение `<portals/ui.hpp>` и `using namespace portals`; он использует адаптер Names — неизменяемый `ModelSnapshot<std::string>` с тремя записями — и функцию displayText для создания GraphemeText. Адаптер, функция, заголовки и вся программа приведены ниже и в [guide_vtable.cpp](../examples/guide_vtable.cpp).
+![Столбец Name с тремя строками в примере виртуальной таблицы](../images/virtual-table-guide.png)
 
-```cpp
-int main() {
-  auto scene = ui::scene([](ManagedScene &owner) {
-    return owner.model<std::string>(std::make_shared<Names>())
-      .transform([](auto model) {
-        const std::array<TableColumn<std::string>, 1> columns{
-          {{{1, 1},
-            displayText("Name"),
-            18,
-            [](const std::string &name) {
-              return displayText(name);
-            }}}};
+## Настройка оформления {#virtual-table-styling-reference-ru}
 
-        return ui::virtualTable(model, columns);
-      });
-  });
+Декларативная таблица использует `VirtualTable`; API управляемых виртуальных представлений по умолчанию использует `Table`, если цель стиля не задана. Для напрямую привязанного виджета действует зарегистрированная цель. Строки используют обычный стиль или `:selected`, заголовки — `:header` независимо от выделения. `VirtualTableOptions::normal`, `selected` и `header` задают значения по умолчанию под каскадом. Настройка подсветки совпадений списка не оформляет ячейки таблицы.
 
-  return scene
-    | ui::onKey("F10", ui::quit)
-    | ui::runApp();
-}
+Доступны `foreground`, `background` (`#RRGGBB`), `bold`, `italic`, `underline` (`true` или `false`). Правило без состояния действует на все варианты. См. [каскад и ограничения размеров](styling-guide.md); `min-width` задаётся селектором без состояния.
+
+```pss
+VirtualTable:header { bold: true; background: #304050; }
 ```
+
+Используйте [VirtualTable<T>](../../include/portals/virtual_table.hpp). Программа ниже показывает заголовок Name и три строки со стандартной навигацией клавиатурой и мышью. F10 закрывает приложение.
+
+Программа использует адаптер Names — неизменяемый `ModelSnapshot<std::string>` с тремя записями — и функцию displayText для создания GraphemeText. Адаптер, функция, заголовки и вся программа приведены ниже и в [guide_vtable.cpp](../examples/guide_vtable.cpp).
 
 <details>
 <summary>Полная программа</summary>
 
-```cpp
-#include <portals/ui.hpp>
-#include <array>
-#include <stdexcept>
-
-using namespace portals;
-
-class Names final : public ModelSnapshot<std::string> {
-public:
-  Names() : ModelSnapshot(1, 3) {
-  }
-
-  ModelRows<std::string> read(RowRange range) const override {
-    return {RangeState::READY,
-      std::span(rows_).subspan(
-        static_cast<std::size_t>(range.first),
-        range.count),
-      {}};
-  }
-
-private:
-  const std::array<ModelRow<std::string>, 3> rows_{{
-    {{1, 1}, "Ada"}, {{2, 1}, "Grace"}, {{3, 1}, "Margaret"}
-  }};
-};
-
-GraphemeText displayText(std::string_view value) {
-  auto result = GraphemeText::from(value);
-
-  if (!result) {
-    throw std::runtime_error("Invalid display text");
-  }
-
-  return std::move(*result);
-}
-
-int main() {
-  auto scene = ui::scene([](ManagedScene &owner) {
-    return owner.model<std::string>(std::make_shared<Names>())
-      .transform([](auto model) {
-        const std::array<TableColumn<std::string>, 1> columns{
-          {{{1, 1},
-            displayText("Name"),
-            18,
-            [](const std::string &name) {
-              return displayText(name);
-            }}}};
-
-        return ui::virtualTable(model, columns);
-      });
-  });
-
-  return scene
-    | ui::onKey("F10", ui::quit)
-    | ui::runApp();
-}
-```
+\include guide_vtable.cpp
 
 </details>
 
-[Исходник примера](../examples/guide_vtable.cpp). Добавьте исходник в C++23-проект и свяжите его с целью portals::core ([инструкция сборки](getting-started.md)). Запустите программу в терминале.
+[Отдельный проект примеров](examples.md) собирает цель `guide_vtable`; запустите полученную программу в терминале. Она связывается с `portals::core`.
+
 
 Каждый TableColumn хранит стабильный ColumnId, заголовок, ширину в ячейках и форматировщик. Рецепт копирует массив столбцов: его можно создать внутри фабрики. Сцена выполняет подготовку и подключает ввод. Для ожидающих данных нужен prepared в ui::VirtualTableConfig<T>. TBD: запрошенный псевдоним ui::vtable отсутствует; срок не назначен.
 

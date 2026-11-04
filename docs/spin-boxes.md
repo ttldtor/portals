@@ -2,6 +2,8 @@
 
 [Русская версия](ru/spin-boxes.md) · [LineEdit](line-edit.md) · [Sliders](sliders.md)
 
+Choose SpinBox for a bounded finite number that users can type or adjust by steps; a [Slider](sliders.md) instead emphasizes position in a range. The [SpinBox API](../include/portals/spin_box.hpp) and [numeric source](../include/portals/numeric.hpp) document checked values and range constraints. The preview below shows the larger numeric-form composition.
+
 Use `ui::spinBox()` to edit a finite number as text or with step buttons.
 The default value is zero, the inclusive range is 0..100, the increment is one,
 and the publication mode is `EditMode::IMMEDIATE`.
@@ -105,3 +107,29 @@ false settings remain overrides. Numeric failures preserve the causal property
 origin. `SpinBox` is the natural root style type. Its real children use `LineEdit`
 and `Button` with classes `spin-box-editor`, `spin-box-decrease` and
 `spin-box-increase`; ordinary theme, class and ID rules apply.
+
+
+## Styling reference {#spin-boxes-styling-reference}
+
+`SpinBox` is a layout root, not the painted editor. Its children are a `LineEdit` and two `Button` widgets. Target the confirmed classes `.spin-box-editor`, `.spin-box-decrease`, and `.spin-box-increase`; the latter buttons display fixed `-` and `+` captions with no PSS glyph property. The editor paints normal/focused/disabled, selected and caret as described in [LineEdit](line-edit.md#line-edit-styling-reference); buttons paint normal/focused/disabled. Editor manual defaults come from `LineEditOptions`, buttons use `ControlStyle{}`. Style the children independently; a root declaration does not propagate to them.
+
+The common paint properties apply to each painted target:
+
+| Property | Value |
+| --- | --- |
+| `foreground` | `#RRGGBB` text/ink color |
+| `background` | `#RRGGBB` fill color |
+| `bold` | `true` or `false` |
+| `italic` | `true` or `false` |
+| `underline` | `true` or `false` |
+
+Manual `ControlStyle` defaults use terminal colors, normal text, bold focus and italic disabled text. Theme and PSS declarations override individual manual fields; unspecified fields retain lower-layer values, including explicit `false`. A selector without a state supplies all variants. See [cascade and selectors](styling-guide.md) and [styles](styles.md).
+
+Layout properties `width` and `height` accept nonnegative cell counts, `auto`, `fit-content`, or `flex(positive weight)`; `min-width`, `max-width`, `min-height`, and `max-height` accept nonnegative cell counts. They require selectors without state or `:read-only`; Except for `min-width`, these size declarations are runtime PSS only. Conflicting widget bounds reject the update and retain the previous style and geometry; constraints and recipe precedence are explained in [layout](layout.md). These affect allocation, not the glyphs themselves.
+
+```pss
+.spin-box-editor { min-width: 8; }
+.spin-box-editor:focused { background: #245070; }
+.spin-box-decrease { foreground: #62b4d7; }
+.spin-box-increase { foreground: #62b4d7; }
+```

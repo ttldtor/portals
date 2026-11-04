@@ -2,6 +2,18 @@
 
 [Русская версия](ru/menus.md) · [Shared actions](actions.md) · [Runnable examples](examples.md)
 
+Use a menu to present shared application actions; use a popup menu for nested, anchored choices. Menu and action ownership, keyboard and pointer behavior, and loaded popup registration are described below. See [Menu API](../include/portals/menu.hpp) and [PopupMenu API](../include/portals/popup_menu.hpp). The Command desk recording shows the larger application; the popup recording shows submenu placement.
+
+## Styling reference {#menus-styling-reference}
+
+`Menu` paints normal rows, `:focused` for the selected row while the menu is focused, and `:disabled` for a disabled menu or action. `PopupMenu` also matches `Menu`; it paints its selected row with `:focused` and ineligible rows with `:disabled`. Action metadata controls eligibility and labels; styles belong to the menu widget, not to individual actions.
+
+Use `foreground`, `background` (`#RRGGBB`), `bold`, `italic`, and `underline` (`true` or `false`). A state-free rule applies to every variant. Manual control styles supply defaults beneath the [cascade and size constraints](styling-guide.md); `min-width` requires a state-free selector. Popup frames use `frame-line-`, `frame-title-`, and `frame-ends-` paint properties, each followed by the same five attributes; omitted part attributes inherit the common resolved style. See [frame styling](controls.md#frame-title-decoration). Set popup frame patterns and glyphs through `PopupMenuOptions::frame` or its resource binding, not PSS glyph profiles.
+
+```pss
+PopupMenu:focused { background: #305070; bold: true; }
+```
+
 A menu lets the user choose an application command with the arrow keys or the
 mouse. Pass the same action to a menu, a button and an explicit shortcut to share
 their callback, caption and availability.
@@ -11,6 +23,8 @@ their callback, caption and availability.
 [Watch keyboard selection and command execution](images/commands.gif).
 
 ## A complete application
+
+Build `portals_docs_menu` with tests enabled and run it in a terminal.
 
 \include guide_menu.cpp
 

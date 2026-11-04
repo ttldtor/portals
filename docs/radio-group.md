@@ -2,6 +2,8 @@
 
 [Русская версия](ru/radio-group.md) · [Control examples](control-examples.md)
 
+Use a radio group when one value must be chosen from a small resident set; for a searchable or paged source use [choices](choices.md). The [RadioGroup API](../include/portals/radio_group.hpp) describes options and checked updates. Build the complete program below as `guide_radio_group` in the [standalone guide project](examples.md); run the resulting executable in a terminal. The recording shows the larger device-settings composition.
+
 `RadioGroup` displays resident choices with one selected stable value and one
 local active option. Each group is one Tab stop. By default arrows move active
 without changing the model, wrapping and skipping hidden/disabled options;
@@ -16,6 +18,13 @@ Use `.immediate()` to select while navigating, or
 accepts the same defaulted policy after `WidthPolicy`; resources use
 `radioSelectionMode=IMMEDIATE` or `ON_ACTIVATION`. This default differs from
 earlier releases where arrows immediately selected.
+
+To build the standalone guide from the repository root:
+
+```powershell
+cmake -S docs/examples -B build/guide-examples
+cmake --build build/guide-examples --config Release --target guide_radio_group
+```
 
 ## Start with labels
 
@@ -186,3 +195,28 @@ Binding to another scene or adding a duplicate binding returns
 propagate. A successful model receipt may report rejected/cancelled observer
 notifications; this does not undo the commit. Do not retry equal writes to
 deliver notifications: observe/read the latest snapshot to resynchronize.
+
+
+## Styling reference {#radio-group-styling-reference}
+
+The natural selector is `RadioGroup`. Normal and disabled styles paint rows; `focused` paints the active row caption, and `selected` paints the selected marker. A disabled row uses disabled style for both. Manual `ControlStyle` supplies normal/focused/disabled; selected defaults to focused. The built-in theme may override these fields. Markers `( ) ` and `(*) ` are fixed by the implementation; PSS has no marker-glyph property. `header` and `caret` are not painted.
+
+The common paint properties apply to each painted target:
+
+| Property | Value |
+| --- | --- |
+| `foreground` | `#RRGGBB` text/ink color |
+| `background` | `#RRGGBB` fill color |
+| `bold` | `true` or `false` |
+| `italic` | `true` or `false` |
+| `underline` | `true` or `false` |
+
+Manual `ControlStyle` defaults use terminal colors, normal text, bold focus and italic disabled text. Theme and PSS declarations override individual manual fields; unspecified fields retain lower-layer values, including explicit `false`. A selector without a state supplies all variants. See [cascade and selectors](styling-guide.md) and [styles](styles.md).
+
+Layout properties `width` and `height` accept nonnegative cell counts, `auto`, `fit-content`, or `flex(positive weight)`; `min-width`, `max-width`, `min-height`, and `max-height` accept nonnegative cell counts. They require selectors without state or `:read-only`; Except for `min-width`, these size declarations are runtime PSS only. Conflicting widget bounds reject the update and retain the previous style and geometry; constraints and recipe precedence are explained in [layout](layout.md). These affect allocation, not the glyphs themselves.
+
+```pss
+RadioGroup { min-width: 16; }
+RadioGroup:focused { bold: true; }
+RadioGroup:selected { foreground: #62b4d7; }
+```

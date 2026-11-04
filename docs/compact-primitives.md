@@ -235,3 +235,62 @@ return typed geometry errors, and the caller discards the failed pass.
 The added virtual hook and Button storage require rebuilding the SDK and consumers.
 Source compatibility is preserved; compatibility with old object files is not promised.
 See [declarative composition](declarative-ui.md) and [layout policies](layout.md).
+
+
+## Styling reference {#primitives-styling-reference}
+
+`Border` paints normal/focused/disabled with disabled first. `Gauge` paints
+normal/disabled; focus and selected rules do not provide separate gauge parts.
+Constructor `ControlStyle` values supply manual defaults beneath the theme and
+application PSS. A border does not pass its text style to its children.
+
+The common paint properties are `foreground` and `background` (`#RRGGBB`),
+`bold`, `italic`, and `underline` (`true` or `false`). Unspecified fields keep
+their manual defaults or lower style-layer values; an explicit `false` is an
+override. See [selectors and precedence](styling-guide.md). Runtime PSS sizing
+accepts `width`, `height` (cells, `auto`, `fit-content`, `flex(weight)`) and
+`min-width`, `max-width`, `min-height`, `max-height` (nonnegative cells).
+Size rules require state-independent selectors; conflicting bounds reject the
+update. Only `min-width` of these size declarations is supported by compile-time
+PSS. See [size policy](layout.md).
+
+### Frames and titles
+
+Append each of `foreground`, `background`, `bold`, `italic`, `underline` to each
+prefix: `frame-line-`, `frame-title-`, `frame-ends-`. These 15 properties style
+lines, title text and title decorations independently; omitted attributes use
+the corresponding resolved common style. `glyph-profile` accepts `default`,
+`unicode`, `ascii`, `nf-rounded`, `nf-chevron`, `nf-slash`, `nf-backslash`;
+`glyph-fallback` accepts `unicode` or `ascii`. Defaults retain the manual/default
+glyph map with Unicode admission fallback. Explicit custom glyphs win over the map.
+
+| Configuration (C++ or scene, not PSS properties) | Default / choices |
+|---|---|
+| `FrameOptions::pattern` | `SINGLE`; single, rounded, double, heavy, ascii |
+| `sides` | All four one-cell edges; absent sides remove their inset |
+| `customGlyphs` | None; topLeft/topRight/bottomLeft/bottomRight/horizontal/vertical, each one printable one-cell grapheme, at most 64 bytes |
+| `title`, `titleAlignment` | Empty title, `START`; alignment start/center/end |
+| `titleDecoration` | `NONE`; none/spaced/square/angle/round/profile |
+| `customTitleDecoration` | None; explicit prefix/suffix override preset, each at most 64 bytes and 16 one-cell graphemes |
+| `maxTitleBytes` | 4096 source bytes; invalid input is rejected before replacing a frame |
+| `BorderOptions::glyphs` | Unicode with ASCII width fallback; explicit ASCII available |
+| `BorderOptions::maxPaintCells` | 16384 perimeter cells, not a color/layout setting |
+
+PSS colors do not choose frame patterns, sides, literal line glyphs or title text.
+Use `.framed(...)`, `.titleDecoration(...)` or the corresponding frame configuration;
+see [the complete title guide](controls.md#frame-title-decoration) for custom ends.
+A title fits the available top edge without increasing intrinsic width.
+
+### Gauges
+
+`GaugeOptions` defaults are minimum 0, maximum 1, preferredWidth 10,
+Unicode block fill (ASCII `#` fallback), maxPaintCells 16384. It draws whole
+filled cells with the common style; separate fill/track color or arbitrary fill
+string PSS properties are not implemented. Change these construction settings
+through `GaugeOptions`; use ordinary PSS for colors and the allocated size.
+
+```pss
+Border { frame-line-foreground: #7d8797; frame-title-foreground: #f2c879; }
+Border:focused { frame-ends-bold: true; }
+Gauge { foreground: #62b4d7; background: #182028; width: 24; }
+```

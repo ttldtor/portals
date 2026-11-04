@@ -203,6 +203,8 @@ browser CSS compatibility promises. A semicolon is required after each value.
 | `foreground`, `background` | `#RRGGBB` | Paint |
 | `bold`, `italic`, `underline` | `true` or `false` | Paint |
 | `min-width` | Integer from 0 to INT32_MAX, in cells | Layout and paint |
+| `width`, `height` | Nonnegative cells, `auto`, `fit-content`, `flex(positive weight)` | Runtime layout and paint |
+| `max-width`, `min-height`, `max-height` | Integer from 0 to INT32_MAX, in cells | Runtime hard bounds |
 | `frame-line-foreground`, `frame-title-foreground`, `frame-ends-foreground` (also `-background`) | `#RRGGBB` | Frame part paint |
 | `frame-line-bold`, `frame-title-bold`, `frame-ends-bold` (also `-italic`, `-underline`) | `true` or `false` | Frame part paint |
 | `glyph-profile` | `default`, `unicode`, `ascii`, `nf-rounded`, `nf-chevron`, `nf-slash`, `nf-backslash` | Named base glyph map |
@@ -213,7 +215,9 @@ silently alter geometry. It sets a hard allocation minimum; zero adds no
 minimum. A clipped viewport does not shrink allocation below the bound. If the
 minimum conflicts with a widget's size policy, typed style staging rejects the
 update and preserves the last valid style. Font size,
-text width policy, literal custom glyph sources, frame line patterns and row heights are not PSS v0 tokens.
+text width policy, literal frame line sources, frame line patterns and row heights are not PSS v0 tokens.
+Runtime PSS does accept quoted custom scrollbar glyphs; see the
+[complete scrollbar styling reference](scroll-controls.md#scrollbar-styling-reference).
 Named glyph maps use the properties in the table above; see
 [profiles and fallback](scroll-controls.md#named-glyph-profiles).
 
@@ -366,3 +370,8 @@ They belong between frames. The final commit only swaps storage and assigns
 fixed-size computed values. A failure sweep in the regression test injects an
 allocation failure at each budget up to the first successful commit and checks
 that every preceding failure leaves revision, styles and invalidation intact.
+
+
+## Per-control references
+
+The [gallery styling index](widget-gallery.md#control-styling-index) links to each control's paint roles, defaults, configuration-only settings and PSS examples. The shared grammar above does not imply that every control paints every state or implements every part.

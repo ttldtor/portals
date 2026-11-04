@@ -4,34 +4,30 @@
 
 Создайте поле через [`ui::lineEdit`](../../include/portals/ui.hpp), чтобы ввод, модель и история подключились автоматически. В этом приложении F2 копирует текущий черновик в надпись и добавляет `!`; Enter подтверждает поле, Escape восстанавливает модель. F10 закрывает приложение.
 
-```cpp
-#include <portals/ui.hpp>
+[Полный исходник](../examples/guide_line_edit.cpp):
 
-int main() {
-  using namespace portals;
+![Редактор строки со значением Ada и подсказкой чтения черновика.](../images/line-edit-guide.png)
 
-  ui::Ref<LineEdit> name;
-  ui::Ref<Label> greeting;
-
-  auto scene = ui::scene(
-    ui::vbox(ui::lineEdit(name,
-               "Ada",
-               {.options = {.editMode = EditMode::EXPLICIT}}),
-      ui::label(greeting, "Press F2 to read the draft")));
-
-  return scene
-    | ui::onKey("F2",
-                [name, greeting] {
-                  greeting.text() = name.text() + "!";
-                })
-    | ui::onKey("F10", ui::quit)
-    | ui::runApp();
-}
-```
+\include guide_line_edit.cpp
 
 Пример читает черновик через `name.text()`, поэтому F2 видит и ещё не подтверждённый текст. Для нескольких полей с общей моделью передайте им один `ManagedScene::state(...)`; см. [декларативный интерфейс](declarative-ui.md).
 
-[Сборка самостоятельных примеров](examples.md).
+Настройте [сборку примеров руководства](examples.md), соберите цель `guide_line_edit` и запустите полученную программу в терминале. На странице показан тот же исходник. Для установленного SDK см. [подключение пакета](package.md).
+
+```powershell
+cmake -S docs/examples -B build/guide-examples -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build/guide-examples --target guide_line_edit
+./build/guide-examples/guide_line_edit.exe
+```
+
+В загруженной сцене объявите `LineEdit` и получите типизированную ссылку, как показано в [загрузке сцен](scene-loading-guide.md). Обработчики остаются кодом C++. Полный контракт — в [LineEditOptions и API](../../include/portals/line_edit.hpp).
+
+| Настройка | По умолчанию |
+| --- | --- |
+| Редактирование и вид | `IMMEDIATE`, `NORMAL`, доступна запись, подсказки нет |
+| Пределы черновика | 4096 байт, 4096 байт на кластер, 4096 графем, 8192 клетки |
+| История | включена, 128 общих групп, 1 МиБ сохранённых снимков |
+| Программные изменения | `RECORD` в истории |
 
 ## Подсказка, защищённое отображение и Clear
 
@@ -165,3 +161,29 @@ Escape принимает последнюю корректную модель. 
 См. [текст](text.md), [свойства](property.md), [фокус](focus.md), [терминал](terminal.md).
 
 </details>
+
+
+## Настройка оформления {#line-edit-styling-reference-ru}
+
+Естественный селектор — `LineEdit`. Поле рисуется состояниями `normal`, `focused` и `disabled`, выделенный текст включённого поля — `selected`, программный курсор включённого поля в фокусе — `caret`. `header` не используется. Подсказка использует стиль поля. `LineEditOptions::style` имеет тип `ControlStyle`, `selection` и `cursor` — `CellStyle`. В ручных значениях по умолчанию используются цвета терминала: выделение жирное и курсивное, курсор жирный и подчёркнутый. PSS меняет пять атрибутов через `:selected` и `:caret`, но не текст подсказки или маски пароля.
+
+Общие свойства отрисовки действуют на соответствующий рисуемый элемент:
+
+| Свойство | Значение |
+| --- | --- |
+| `foreground` | цвет текста или символа `#RRGGBB` |
+| `background` | цвет заливки `#RRGGBB` |
+| `bold` | `true` или `false` |
+| `italic` | `true` или `false` |
+| `underline` | `true` или `false` |
+
+Ручной `ControlStyle` по умолчанию использует цвета терминала, обычный текст, жирный шрифт при фокусе и курсив для недоступного элемента. Тема и PSS переопределяют отдельные поля; неуказанные поля сохраняют значения нижнего слоя, включая явное `false`. Селектор без состояния задаёт все варианты. См. [каскад и селекторы](styling-guide.md) и [стили](styles.md).
+
+Свойства размеров `width` и `height` принимают неотрицательное число ячеек, `auto`, `fit-content` или `flex(положительный вес)`; `min-width`, `max-width`, `min-height`, `max-height` — неотрицательное число ячеек. Селектор не должен содержать состояние или `:read-only`. Эти свойства, кроме `min-width`, доступны только в runtime PSS. При противоречии ограничениям виджета обновление отклоняется с сохранением прежних стиля и геометрии. Ограничения и приоритеты описаны в [компоновке](layout.md). Размер влияет на выделенную область, а не на сами символы.
+
+```pss
+LineEdit { min-width: 16; }
+LineEdit:focused { foreground: #ffffff; background: #245070; }
+LineEdit:selected { background: #426080; }
+LineEdit:caret { underline: true; }
+```

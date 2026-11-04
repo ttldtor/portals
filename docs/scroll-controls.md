@@ -20,6 +20,148 @@ The [guide examples](examples.md) describe the standalone CMake build. Its
 `guide_scroll_controls` executable opens a native terminal.
 
 
+## Styling reference {#scrollbar-styling-reference}
+
+This reference applies to `ScrollArea` and `ScrollBar`. PSS changes appearance;
+`.arrows()` enables functional arrow buttons separately. Decorative ends also
+require their existing end setting. The corner appears only at an exposed axis
+intersection. The [detailed guide](#scrollbar-skins) covers construction and examples.
+
+### Selectors and states
+
+Use the `ScrollArea` or `ScrollBar` type, optionally with an ID or class.
+Painting chooses `disabled` first, then `focused`, otherwise `normal`.
+A rule without a state supplies every variant; `:normal` supplies only the
+normal variant. These controls do not paint `selected`, `header` or `caret`
+variants. Use the [style cascade](styling-guide.md) for selector/layer priority.
+
+```pss
+ScrollArea:focused { scrollbar-thumb-foreground: #62b4d7; }
+ScrollArea:disabled { scrollbar-thumb-foreground: #7d828c; }
+```
+
+### Colors and attributes
+
+For each prefix in the table, append **each** of `foreground`, `background`,
+`bold`, `italic`, and `underline`: for example, `scrollbar-track-foreground`.
+Colors use `#RRGGBB`; attributes accept `true` or `false`.
+Unspecified part attributes fall back to the control's resolved common style;
+segment attributes fall back individually to the resolved thumb attribute.
+The ordinary selector, state, and layer cascade applies, including explicit
+`false`. These styles apply to both axes.
+
+| Prefix | Painted part |
+| --- | --- |
+| `scrollbar-track-` | Track outside the thumb |
+| `scrollbar-thumb-` | Common thumb style |
+| `scrollbar-ends-` | Decorative track ends |
+| `scrollbar-arrows-` | Functional arrow buttons |
+| `scrollbar-corner-` | Axis intersection |
+| `scrollbar-thumb-start-` | First cell of a multi-cell thumb |
+| `scrollbar-thumb-body-` | Interior cells |
+| `scrollbar-thumb-end-` | Last cell of a multi-cell thumb |
+| `scrollbar-thumb-single-` | One-cell thumb |
+
+### Glyphs and patterns
+
+Runtime PSS accepts the exact properties below. Each axis has independent glyphs;
+`start` and `end` are decorative track ends, not thumb caps.
+
+| Horizontal property | Vertical property | Part |
+| --- | --- | --- |
+| `scrollbar-horizontal-track-glyph` | `scrollbar-vertical-track-glyph` | Track |
+| `scrollbar-horizontal-thumb-glyph` | `scrollbar-vertical-thumb-glyph` | Repeated thumb / segment fallback |
+| `scrollbar-horizontal-start-glyph` | `scrollbar-vertical-start-glyph` | Decorative start |
+| `scrollbar-horizontal-end-glyph` | `scrollbar-vertical-end-glyph` | Decorative end |
+| `scrollbar-horizontal-backward-glyph` | `scrollbar-vertical-backward-glyph` | Backward arrow |
+| `scrollbar-horizontal-forward-glyph` | `scrollbar-vertical-forward-glyph` | Forward arrow |
+| `scrollbar-horizontal-thumb-start-glyph` | `scrollbar-vertical-thumb-start-glyph` | Thumb start |
+| `scrollbar-horizontal-thumb-body-glyph` | `scrollbar-vertical-thumb-body-glyph` | Thumb body |
+| `scrollbar-horizontal-thumb-end-glyph` | `scrollbar-vertical-thumb-end-glyph` | Thumb end |
+| `scrollbar-horizontal-thumb-single-glyph` | `scrollbar-vertical-thumb-single-glyph` | Single-cell thumb |
+
+`scrollbar-corner-glyph` sets the intersection glyph. A thumb of zero cells
+paints nothing; one uses single, two use start/end, and longer thumbs use
+start/body/end. An omitted segment falls back to the effective repeated thumb.
+
+| Property | Accepted values |
+| --- | --- |
+| `scrollbar-track-pattern` | `legacy`, `frame`, `minimal`, `ascii`, `fractional-block` |
+| `scrollbar-thumb-pattern` | `legacy`, `block`, `ascii`, `fractional-block` |
+| `scrollbar-arrow-pattern` | `legacy`, `triangle`, `ascii` |
+| `glyph-profile` | `default`, `unicode`, `ascii`, `nf-rounded`, `nf-chevron`, `nf-slash`, `nf-backslash` |
+| `glyph-fallback` | `unicode`, `ascii` |
+
+Absent pattern declarations retain the control's configured source; the normal
+skin default is `legacy`. The default profile is `default` (manual map or legacy
+sources), and the default admission fallback is `unicode`, which can itself
+fall back to ASCII. Named profiles and fallback behavior are detailed
+[below](#named-glyph-profiles). Manual profile is the base, then PSS profile,
+independent part patterns, and PSS literals; explicit manual skin glyphs take
+priority over PSS literals. A manual thumb glyph also prevents PSS thumb segment
+glyphs from replacing it; manual segment glyphs take priority. Removing a layer
+reveals the lower setting. Colors resolve independently.
+
+Literal values are single- or double-quoted UTF-8 with no escape processing:
+nonempty values must be one printable grapheme, one cell wide under the receiving
+`WidthPolicy`, and at most 64 bytes. Empty decorative start/end suppress that
+end; an empty corner keeps the normal fill. Other empty glyphs are invalid.
+Invalid explicit glyphs reject the update and retain the previous presentation;
+profile fallback does not repair them. Literal glyphs are runtime PSS only.
+
+`fractional-block` requires a blank track and no custom thumb shapes. During
+fractional painting, occupied thumb cells use prepared coverage blocks instead
+of the ordinary or segment glyphs; segment colors and attributes still apply.
+See [fractional thumb edges](#fractional-scrollbar-thumb) for constraints.
+Only fractional painting fills missing colors with a local dark surface
+`#181c24` and normal/focused/disabled ink `#dce1e8` / `#4bb4dc` / `#7d828c`.
+Explicit control, part or segment colors retain priority. Other patterns keep
+the resolved control or terminal colors; there is no universal fixed theme color.
+
+
+This runtime PSS example uses ordinary integral rendering and sets foreground and
+background explicitly, without relying on color inversion. Enable arrows and
+decorative ends in the control configuration to display those parts.
+
+```pss
+ScrollArea {
+  scrollbar-track-pattern: minimal;
+  scrollbar-thumb-pattern: ascii;
+  scrollbar-arrow-pattern: ascii;
+  scrollbar-horizontal-track-glyph: "-";
+  scrollbar-vertical-track-glyph: "|";
+  scrollbar-horizontal-start-glyph: "[";
+  scrollbar-horizontal-end-glyph: "]";
+  scrollbar-vertical-start-glyph: "+";
+  scrollbar-vertical-end-glyph: "+";
+  scrollbar-horizontal-backward-glyph: "<";
+  scrollbar-horizontal-forward-glyph: ">";
+  scrollbar-vertical-backward-glyph: "^";
+  scrollbar-vertical-forward-glyph: "v";
+  scrollbar-horizontal-thumb-start-glyph: "[";
+  scrollbar-horizontal-thumb-body-glyph: "=";
+  scrollbar-horizontal-thumb-end-glyph: "]";
+  scrollbar-horizontal-thumb-single-glyph: "#";
+  scrollbar-vertical-thumb-start-glyph: "^";
+  scrollbar-vertical-thumb-body-glyph: "|";
+  scrollbar-vertical-thumb-end-glyph: "v";
+  scrollbar-vertical-thumb-single-glyph: "#";
+  scrollbar-corner-glyph: "+";
+  scrollbar-track-foreground: #526070;
+  scrollbar-track-background: #101820;
+  scrollbar-thumb-foreground: #ffffff;
+  scrollbar-thumb-background: #245070;
+  scrollbar-thumb-start-foreground: #ffd080;
+  scrollbar-thumb-end-foreground: #ffd080;
+  scrollbar-ends-foreground: #a0b0c0;
+  scrollbar-ends-background: #101820;
+  scrollbar-arrows-foreground: #ffffff;
+  scrollbar-arrows-background: #304050;
+  scrollbar-corner-foreground: #a0b0c0;
+  scrollbar-corner-background: #101820;
+}
+```
+
 ## Fractional thumb edges {#fractional-scrollbar-thumb}
 
 Use `.scrollbar("fractional-block")` for a thumb whose position and proportional
@@ -444,8 +586,8 @@ The complete [ordinary scroll client](examples/guide_scroll_controls.cpp) keeps
 frame and title decoration independent of `.scrollTrack("minimal")`,
 `.scrollThumb("block")` and `.scrollArrows("ascii")`. Each method has an equivalent
 pipe stage, for example `| ui::scrollThumb("ascii")`, and a typed overload.
-Track sources use `ScrollbarPattern` (`legacy`, `frame`, `minimal`, `ascii`);
-thumb sources use `ScrollbarThumbPattern` (`legacy`, `block`, `ascii`);
+Track sources use `ScrollbarPattern` (`legacy`, `frame`, `minimal`, `ascii`, `fractional-block`);
+thumb sources use `ScrollbarThumbPattern` (`legacy`, `block`, `ascii`, `fractional-block`);
 arrow sources use `ScrollbarArrowPattern` (`legacy`, `triangle`, `ascii`).
 `block` and `triangle` retain the control's ASCII/width fallback. Appearance
 selection does not enable functional arrows; use `.arrows()` separately.

@@ -2,6 +2,34 @@
 
 [Английская версия](../key-help.md)
 
+KeyHints показывает краткие подсказки сочетаний, HelpView — более полную справку о зарегистрированных командах. Приложение задаёт сочетания и открывает или закрывает справку через ссылку; клавиши показаны в примере ниже. См. [настройки KeyHints](../../include/portals/key_hints.hpp) и [настройки HelpView](../../include/portals/help_view.hpp).
+
+![KeyHints и открытая HelpView с зарегистрированными командами](../images/help-view-guide.png)
+
+## Настройка оформления {#key-help-styling-reference-ru}
+
+`KeyHints` рисует обычный стиль, `:focused` или `:disabled` (отключение имеет приоритет). У содержимого полной справки собственная цель `HelpView.help-body`; оно рисуется обычным стилем, и стиль внешней оболочки на него автоматически не действует. `ControlStyle` задаёт ручные значения по умолчанию под каскадом.
+
+Доступны `foreground`, `background` (`#RRGGBB`), `bold`, `italic`, `underline` (`true` или `false`). Правило без состояния охватывает все варианты. См. [каскад и ограничения размеров](styling-guide.md); `min-width` задаётся без состояния.
+
+Следующие значения оформления задаются в конфигурации, а не в PSS; строки
+хранятся с владением. `KeyHintsOptions::format` и `HelpViewOptions::format`
+используют `KeyFormatOptions`. Фон и текстовый стиль внешнего HelpView
+не наследуются его телом.
+
+| Настройка | Значение по умолчанию |
+|---|---|
+| `KeyHintsOptions::entrySeparator` | Два пробела |
+| `overflowMarker`, `emptyText`, `unavailableText` | `+`, пусто, `?` |
+| `HelpViewOptions::emptyText`, `unavailableText` | `No key bindings`, `Help unavailable` |
+| `KeyFormatOptions::strokeSeparator`, `alternativeSeparator` | ` then `, ` / ` |
+| `repeatMarker`, `releaseMarker`, `unknownMarker` | ` [repeat]`, ` [release]`, ` [?]` |
+| `maxBytesPerBinding` | 8192 байта на целую форматированную строку |
+
+```pss
+HelpView.help-body { foreground: #d0d8e0; }
+```
+
 Имя команды задаётся там же, где регистрируется её сочетание клавиш. `KeyHints`
 и `HelpView` читают эти же регистрации: изменение сочетания или доступности
 команды не требует вручную обновлять отдельный список подсказок.
@@ -32,6 +60,8 @@ F1 открывает справку, Escape закрывает её в акти
 прокси присваивания текстовому свойству, который автоматически собирает ошибки.
 Вне обработчика результат нужно проверять явно.
 ## Сведения о командах и изменениях
+
+В ресурсе `CONFIGURATION` для `HelpView` и `KeyHints` доступны локальные встроенные фабрики. `KeyHints{help="guide"}` ссылается на HelpView с ID `guide` в том же ресурсе; без `help` требуется ровно один экземпляр с возможностями HelpView. Регистрации клавиш остаются в C++. См. [описание привязки ресурса](declarative-reference.md).
 
 `ui::keyInfo(label)` добавляет владеющее имя к обычной регистрации `ui::onKey`.
 Необязательная `.description(text)` задаёт пояснение для полной справки.

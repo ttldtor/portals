@@ -2,6 +2,8 @@
 
 [Русская версия](ru/find-bar.md) · [LineEdit](line-edit.md) · [Control examples](control-examples.md)
 
+Use FindBar to navigate literal matches in a bounded document or an immutable model; it does not edit or persist the source. See [FindBar limits and API](../include/portals/find_bar.hpp). The complete examples below show both the document and model paths.
+
 `FindBar` combines a one-line query editor, Previous/Next/Clear buttons and a
 summary of the accepted query's results. The document overload owns one bounded
 UTF-8 document and searches it synchronously. The [model-backed overload](#find-bar-model)
@@ -16,6 +18,8 @@ Shift+F3 to move through results. Both navigation directions wrap over the
 stored results. F10 exits through the standard runner.
 
 [Complete source](../examples/find_bar/main.cpp)
+
+![Literal search composition with a query, navigation buttons and match count.](./images/find-bar-guide.png)
 
 \include find_bar/main.cpp
 
@@ -190,3 +194,28 @@ Preparation does not promise constant-time UI reclamation: releasing the last
 source/result owner can destroy its domain payload on UI. The byte caps cover
 projected/result data, not arbitrary transitive storage inside `T`. Use immutable
 provider ownership with a suitable release policy for large domain payloads.
+
+
+## Styling reference {#find-bar-styling-reference}
+
+`FindBar` is a layout root. Its children are `LineEdit.find-bar-query`, `Button.find-bar-previous`, `Button.find-bar-next`, `Button.find-bar-clear`, and `Label.find-bar-summary`. Style these targets independently. The editor paints normal/focused/disabled, selected and caret; buttons use normal/focused/disabled. The summary label is not a focus target by default and uses normal/disabled. Search result status is not a PSS state. `FindBarAppearance::navigationStyle` and `summaryStyle` are manual `ControlStyle` defaults; `layout` is `LinearOptions` and `policy` is `SizePolicy`. Navigation captions are configuration content, not PSS glyph properties.
+
+The common paint properties apply to each painted target:
+
+| Property | Value |
+| --- | --- |
+| `foreground` | `#RRGGBB` text/ink color |
+| `background` | `#RRGGBB` fill color |
+| `bold` | `true` or `false` |
+| `italic` | `true` or `false` |
+| `underline` | `true` or `false` |
+
+Manual `ControlStyle` defaults use terminal colors, normal text, bold focus and italic disabled text. Theme and PSS declarations override individual manual fields; unspecified fields retain lower-layer values, including explicit `false`. A selector without a state supplies all variants. See [cascade and selectors](styling-guide.md) and [styles](styles.md).
+
+Layout properties `width` and `height` accept nonnegative cell counts, `auto`, `fit-content`, or `flex(positive weight)`; `min-width`, `max-width`, `min-height`, and `max-height` accept nonnegative cell counts. They require selectors without state or `:read-only`; Except for `min-width`, these size declarations are runtime PSS only. Conflicting widget bounds reject the update and retain the previous style and geometry; constraints and recipe precedence are explained in [layout](layout.md). These affect allocation, not the glyphs themselves.
+
+```pss
+LineEdit.find-bar-query { min-width: 16; }
+Button.find-bar-next:focused { background: #245070; }
+Label.find-bar-summary { italic: true; }
+```

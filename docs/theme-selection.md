@@ -2,6 +2,10 @@
 
 [Русская версия](ru/theme-selection.md)
 
+## Styling reference {#theme-selection-styling-reference}
+
+Theme selection is a nonvisual model with no widget selector or paint style. For a visible chooser, see the [theme selector styling reference](theme-selector.md#theme-selector-styling-reference). Theme sheets and application overrides follow the [style cascade](styling-guide.md).
+
 The theme-selection model lets an application preview a catalog choice, commit it,
 or restore the previous theme. It uses the existing style engine and preserves
 application and user overrides. This page covers the checked model API. For a

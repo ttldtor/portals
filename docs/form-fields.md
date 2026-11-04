@@ -2,6 +2,8 @@
 
 [Русская версия](ru/form-fields.md) · [Control examples](control-examples.md) · [Editing modes](line-edit.md)
 
+Use a form field when an editor needs a persistent label, optional help and a validation message. It is a composition rather than a whole-form transaction. See [FormField options and API](../include/portals/form_field.hpp); the default help is empty, `required` is false, and the default required message is `A value is required`. The full account-settings program below is the runnable example.
+
 A `FormField` groups a label, an editor, help text and a readable validation
 message. The scene owns the composition. Ordinary text fields create their
 internal editor state; applications do not keep binding tokens or synchronize
@@ -19,6 +21,8 @@ the resulting executable in a terminal. Tab moves between editors and buttons;
 F10 closes the scene and the standard runner restores the terminal.
 
 [Complete source](../examples/form_field/main.cpp)
+
+![Profile drafts composition with two required fields and validation action.](./images/form-field-guide.png)
 
 \include form_field/main.cpp
 
@@ -120,3 +124,28 @@ there is no silent truncation. An oversized draft remains visible and undoable.
 This worker path supports the standard normal-display text editor. Password and
 no-echo configurations reject asynchronous attachment during checked mount;
 custom editors keep their existing explicit presentation contract.
+
+
+## Styling reference {#form-fields-styling-reference}
+
+`FormField` is a layout root. Its label, help and validation message are `Label.form-field-label`, `Label.form-field-help` and `Label.form-field-message`; the editor is the supplied widget, normally `LineEdit`. Target each child separately. Labels are not focus targets by default and use normal/disabled presentation; the editor uses normal/focused/disabled, with LineEdit also painting selected and caret. Validation status does not create a PSS state. `FormFieldAppearance::labelStyle`, `helpStyle` and `messageStyle` are `ControlStyle` manual defaults; `layout` is `LinearOptions` and `policy` is `SizePolicy`. Help and validation labels may be hidden until needed. Required text and validation messages are configured as content, not glyph properties.
+
+The common paint properties apply to each painted target:
+
+| Property | Value |
+| --- | --- |
+| `foreground` | `#RRGGBB` text/ink color |
+| `background` | `#RRGGBB` fill color |
+| `bold` | `true` or `false` |
+| `italic` | `true` or `false` |
+| `underline` | `true` or `false` |
+
+Manual `ControlStyle` defaults use terminal colors, normal text, bold focus and italic disabled text. Theme and PSS declarations override individual manual fields; unspecified fields retain lower-layer values, including explicit `false`. A selector without a state supplies all variants. See [cascade and selectors](styling-guide.md) and [styles](styles.md).
+
+Layout properties `width` and `height` accept nonnegative cell counts, `auto`, `fit-content`, or `flex(positive weight)`; `min-width`, `max-width`, `min-height`, and `max-height` accept nonnegative cell counts. They require selectors without state or `:read-only`; Except for `min-width`, these size declarations are runtime PSS only. Conflicting widget bounds reject the update and retain the previous style and geometry; constraints and recipe precedence are explained in [layout](layout.md). These affect allocation, not the glyphs themselves.
+
+```pss
+Label.form-field-label { bold: true; }
+Label.form-field-help { italic: true; }
+Label.form-field-message { foreground: #ff7777; }
+```

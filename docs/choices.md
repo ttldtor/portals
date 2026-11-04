@@ -27,9 +27,24 @@ Escape dismisses the popup. F10 exits through the ordinary runner. The factory
 copies the small literal source; references and callbacks require no manual
 binding-token storage.
 
-Build `portals_docs_choices` with tests enabled, or build
+Build `guide_choices` in the [standalone guide project](examples.md), or build
 `portals_choices_example` with examples enabled for the larger form.
 The [build guide](getting-started.md) describes the native presets.
+
+To build the standalone guide from the repository root:
+
+```powershell
+cmake -S docs/examples -B build/guide-examples
+cmake --build build/guide-examples --config Release --target guide_choices
+```
+
+### Choose between ComboBox and DropDown
+
+`ComboBox` is appropriate when a user may type a draft as well as accept a catalog row. Its `Ref<ComboBox>::text()` reads the draft, while `selection()` and `onSelect` describe the accepted row. Editing text does not itself select a row. The complete program above demonstrates this control.
+
+`DropDown` is appropriate when the main display must remain read-only. Its popup has a separate search editor by default (`ComboBoxConfig::searchable`); `searchable=false` removes that editor. Use `Ref<DropDown>` and `onSelect` to observe accepted choices. The [complete Shipping desk program](../examples/choices/main.cpp), included below, demonstrates delivery and palette DropDowns as well as the ComboBox. Both examples accept a popup row by keyboard or pointer; Escape dismisses it.
+
+Both use `ComboBoxConfig`: `PREFIX` search, 32 browse rows per request, eight visible popup rows, maximum popup width 60 cells, and no initial ordinal by default. See [configuration and factories](../include/portals/ui_combo_box.hpp) and [choice API](../include/portals/combo_box.hpp). Source and search budgets, selection lifetime and loaded-scene restrictions are detailed below.
 
 ## Prefix and fuzzy matching
 
@@ -201,3 +216,28 @@ returns a choice must use an explicit compatible `ui::overlayHost`.
 Protected `PASSWORD` and `NO_ECHO` editor modes are rejected with
 `INVALID_ARGUMENT` before choice references publish: catalog search must not
 send protected editor contents to a worker projection.
+
+
+## Styling reference {#choices-styling-reference}
+
+`ComboBox` and `DropDown` are composition roots. Their painted children have these selectors: `LineEdit.choice-editor`, `Button.choice-trigger`, `LineEdit.choice-search`, `VirtualList.choice-list`, `VirtualList.choice-completion` and `Dialog.choice-popup`. The search editor is shown for a searchable DropDown; lists are used in the popup. Style each child separately. The editor paints normal/focused/disabled, selected and caret; the trigger paints normal/focused/disabled; list rows also use selected. See [LineEdit](line-edit.md#line-edit-styling-reference) and [virtual lists](virtual-list.md) for their details. The trigger caption `v` is fixed; PSS does not replace it. Editor manual defaults use `ComboBoxConfig::editor`, while the trigger starts from `ControlStyle{}`.
+
+The common paint properties apply to each painted target:
+
+| Property | Value |
+| --- | --- |
+| `foreground` | `#RRGGBB` text/ink color |
+| `background` | `#RRGGBB` fill color |
+| `bold` | `true` or `false` |
+| `italic` | `true` or `false` |
+| `underline` | `true` or `false` |
+
+Manual `ControlStyle` defaults use terminal colors, normal text, bold focus and italic disabled text. Theme and PSS declarations override individual manual fields; unspecified fields retain lower-layer values, including explicit `false`. A selector without a state supplies all variants. See [cascade and selectors](styling-guide.md) and [styles](styles.md).
+
+Layout properties `width` and `height` accept nonnegative cell counts, `auto`, `fit-content`, or `flex(positive weight)`; `min-width`, `max-width`, `min-height`, and `max-height` accept nonnegative cell counts. They require selectors without state or `:read-only`; Except for `min-width`, these size declarations are runtime PSS only. Conflicting widget bounds reject the update and retain the previous style and geometry; constraints and recipe precedence are explained in [layout](layout.md). These affect allocation, not the glyphs themselves.
+
+```pss
+LineEdit.choice-editor { min-width: 16; }
+Button.choice-trigger { foreground: #62b4d7; }
+VirtualList.choice-list:selected { background: #426080; }
+```

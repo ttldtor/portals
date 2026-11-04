@@ -2,83 +2,35 @@
 
 [Английская версия](../chart.md)
 
-Используйте [Chart<T>](../../include/portals/chart.hpp). Поддерживаются линии и свечи. Этот фрагмент соединяет линией четыре цены закрытия. F10 закрывает приложение.
+График показывает линию или свечи OHLC из неизменяемой модели. По умолчанию используются линия, автоматический масштаб по видимым данным, ASCII-символы свечей и нулевой промежуток между ними. График отображает данные; навигацию и команды задают окружающие контролы. Для загруженной конфигурации нужна типизированная фабрика, передающая модель и accessor из C++; см. [регистрацию ресурсов](../../include/portals/ui_scene_resource.hpp).
 
-Фрагмент предполагает подключение `<portals/ui.hpp>` и `using namespace portals`; он использует адаптер Prices — неизменяемый `ModelSnapshot<Ohlc>` с четырьмя записями. Адаптер, заголовки и вся программа приведены ниже и в [guide_chart.cpp](../examples/guide_chart.cpp).
+![Четыре интервала цен у левого края графика](../images/chart-guide.png)
 
-```cpp
-int main() {
-  auto scene = ui::scene([](ManagedScene &owner) {
-    return owner.model<Ohlc>(std::make_shared<Prices>())
-      .transform([](auto model) {
-        return ui::chart(
-          model,
-          [](const Ohlc &price) {
-            return std::optional{price};
-          },
-          ui::ChartConfig<Ohlc>{
-            .options = {.mode = ChartMode::LINE}});
-      });
-  });
+В примере четыре интервала. По умолчанию каждый занимает один столбец, поэтому остальная ширина графика остаётся пустой; данные не растягиваются.
 
-  return scene
-    | ui::onKey("F10", ui::quit)
-    | ui::runApp();
-}
+## Настройка оформления {#chart-styling-reference-ru}
+
+Тип `Chart` рисует область графика разрешённым обычным стилем; ручное значение по умолчанию задаёт `ChartOptions::background`. Доступны `foreground`, `background` (`#RRGGBB`), `bold`, `italic`, `underline` (`true` или `false`). Правило без состояния задаёт все варианты, но график использует обычный. См. [каскад и ограничения размеров](styling-guide.md); `min-width` задаётся без состояния.
+
+Серии используют стили ячеек `ChartOptions::line`, `rising` и `falling`, а не отдельные части PSS. Их цвета текста по умолчанию — `#50b4f0`, `#3cc878` и `#e65a5a`; незаданный фон кисти наследует разрешённый фон графика. Набор символов свечей выбирается через `ChartOptions::glyph_set`, как описано ниже.
+
+```pss
+Chart { background: #102030; }
 ```
+
+Используйте [Chart<T>](../../include/portals/chart.hpp). Поддерживаются линии и свечи. Программа ниже соединяет линией четыре цены закрытия. F10 закрывает приложение.
+
+Программа использует адаптер Prices — неизменяемый `ModelSnapshot<Ohlc>` с четырьмя записями. Адаптер, заголовки и вся программа приведены ниже и в [guide_chart.cpp](../examples/guide_chart.cpp).
 
 <details>
 <summary>Полная программа</summary>
 
-```cpp
-#include <portals/ui.hpp>
-#include <array>
-
-using namespace portals;
-
-class Prices final : public ModelSnapshot<Ohlc> {
-public:
-  Prices() : ModelSnapshot(1, 4) {
-  }
-
-  ModelRows<Ohlc> read(RowRange range) const override {
-    return {RangeState::READY,
-      std::span(rows_).subspan(
-        static_cast<std::size_t>(range.first),
-        range.count),
-      {}};
-  }
-
-private:
-  const std::array<ModelRow<Ohlc>, 4> rows_{{
-    {{1, 1}, {10, 14, 9, 12}}, {{2, 1}, {12, 16, 11, 15}},
-    {{3, 1}, {15, 15, 10, 11}}, {{4, 1}, {11, 14, 10, 13}}
-  }};
-};
-
-int main() {
-  auto scene = ui::scene([](ManagedScene &owner) {
-    return owner.model<Ohlc>(std::make_shared<Prices>())
-      .transform([](auto model) {
-        return ui::chart(
-          model,
-          [](const Ohlc &price) {
-            return std::optional{price};
-          },
-          ui::ChartConfig<Ohlc>{
-            .options = {.mode = ChartMode::LINE}});
-      });
-  });
-
-  return scene
-    | ui::onKey("F10", ui::quit)
-    | ui::runApp();
-}
-```
+\include guide_chart.cpp
 
 </details>
 
-[Исходник примера](../examples/guide_chart.cpp). Добавьте исходник в C++23-проект и свяжите его с целью portals::core ([инструкция сборки](getting-started.md)). Запустите программу в терминале.
+[Отдельный проект примеров](examples.md) собирает цель `guide_chart`; запустите полученную программу в терминале. Она связывается с `portals::core`.
+
 
 ChartMode::LINE соединяет соседние корректные close. Замените режим на ChartMode::CANDLES, чтобы показать те же open/high/low/close свечами. Функция доступа возвращает optional<Ohlc>; nullopt создаёт разрыв. Сцена выполняет подготовку и вывод. Для ожидающих данных задайте prepared в ui::ChartConfig<T>.
 

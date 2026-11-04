@@ -19,6 +19,152 @@
 Её программа `guide_scroll_controls` открывает нативный терминал.
 
 
+## Полная настройка оформления {#scrollbar-styling-reference-ru}
+
+Справочник относится к `ScrollArea` и `ScrollBar`. PSS меняет оформление;
+функциональные кнопки стрелок отдельно включает `.arrows()`. Декоративным концам
+также нужна соответствующая настройка контрола. Угол отображается только на
+доступном пересечении осей. Подробнее о создании и примерах — в
+[руководстве по оформлению](#scrollbar-skins-ru).
+
+### Селекторы и состояния
+
+Используйте тип `ScrollArea` или `ScrollBar`, при необходимости с ID или классом.
+Отрисовка сначала выбирает `disabled`, затем `focused`, иначе `normal`.
+Правило без состояния задаёт все варианты; `:normal` — только обычный.
+Эти контролы не используют варианты `selected`, `header` и `caret` при отрисовке.
+Приоритеты селекторов и слоёв описаны в [руководстве по стилям](styling-guide.md).
+
+```pss
+ScrollArea:focused { scrollbar-thumb-foreground: #62b4d7; }
+ScrollArea:disabled { scrollbar-thumb-foreground: #7d828c; }
+```
+
+### Цвета и атрибуты
+
+К каждому префиксу таблицы добавьте **каждый** из суффиксов `foreground`,
+`background`, `bold`, `italic`, `underline`: например,
+`scrollbar-track-foreground`. Цвета принимают обычные значения PSS, атрибуты —
+`true` или `false`. Незаданные атрибуты частей берутся из разрешённого общего
+стиля контрола; каждый атрибут сегмента — из разрешённого стиля ползунка.
+Действует обычный каскад селекторов, состояний и слоёв, включая явное `false`.
+Стили общие для обеих осей.
+
+| Префикс | Часть |
+| --- | --- |
+| `scrollbar-track-` | Дорожка вне ползунка |
+| `scrollbar-thumb-` | Общий стиль ползунка |
+| `scrollbar-ends-` | Декоративные концы дорожки |
+| `scrollbar-arrows-` | Функциональные кнопки стрелок |
+| `scrollbar-corner-` | Пересечение осей |
+| `scrollbar-thumb-start-` | Первая ячейка многоклеточного ползунка |
+| `scrollbar-thumb-body-` | Внутренние ячейки |
+| `scrollbar-thumb-end-` | Последняя ячейка многоклеточного ползунка |
+| `scrollbar-thumb-single-` | Ползунок длиной в одну ячейку |
+
+### Символы и шаблоны
+
+Runtime PSS принимает точные свойства из таблицы. Символы осей независимы;
+`start` и `end` обозначают декоративные концы дорожки, не концы ползунка.
+
+| Горизонтальная ось | Вертикальная ось | Часть |
+| --- | --- | --- |
+| `scrollbar-horizontal-track-glyph` | `scrollbar-vertical-track-glyph` | Дорожка |
+| `scrollbar-horizontal-thumb-glyph` | `scrollbar-vertical-thumb-glyph` | Повторяемый символ ползунка и резерв сегмента |
+| `scrollbar-horizontal-start-glyph` | `scrollbar-vertical-start-glyph` | Декоративное начало |
+| `scrollbar-horizontal-end-glyph` | `scrollbar-vertical-end-glyph` | Декоративный конец |
+| `scrollbar-horizontal-backward-glyph` | `scrollbar-vertical-backward-glyph` | Стрелка назад |
+| `scrollbar-horizontal-forward-glyph` | `scrollbar-vertical-forward-glyph` | Стрелка вперёд |
+| `scrollbar-horizontal-thumb-start-glyph` | `scrollbar-vertical-thumb-start-glyph` | Начало ползунка |
+| `scrollbar-horizontal-thumb-body-glyph` | `scrollbar-vertical-thumb-body-glyph` | Середина ползунка |
+| `scrollbar-horizontal-thumb-end-glyph` | `scrollbar-vertical-thumb-end-glyph` | Конец ползунка |
+| `scrollbar-horizontal-thumb-single-glyph` | `scrollbar-vertical-thumb-single-glyph` | Одноклеточный ползунок |
+
+`scrollbar-corner-glyph` задаёт символ пересечения. Ползунок нулевой длины не
+рисуется; одна ячейка использует single, две — start/end, более длинный —
+start/body/end. Пропущенный сегмент использует действующий повторяемый thumb.
+
+| Свойство | Допустимые значения |
+| --- | --- |
+| `scrollbar-track-pattern` | `legacy`, `frame`, `minimal`, `ascii`, `fractional-block` |
+| `scrollbar-thumb-pattern` | `legacy`, `block`, `ascii`, `fractional-block` |
+| `scrollbar-arrow-pattern` | `legacy`, `triangle`, `ascii` |
+| `glyph-profile` | `default`, `unicode`, `ascii`, `nf-rounded`, `nf-chevron`, `nf-slash`, `nf-backslash` |
+| `glyph-fallback` | `unicode`, `ascii` |
+
+При отсутствии объявления шаблона сохраняется источник, настроенный в контроле;
+обычное значение skin по умолчанию — `legacy`. Профиль по умолчанию — `default`
+(ручная карта или прежние источники), резерв проверки ширины — `unicode`, который
+может перейти к ASCII. Подробнее о [профилях и резерве](#named-glyph-profiles-ru).
+Базой служит ручной профиль, затем применяются профиль PSS, отдельные шаблоны
+частей и литералы PSS; явно заданные символы ручного skin имеют приоритет над
+литералами PSS. Ручной символ thumb также не позволяет сегментным символам PSS
+заменить его; ручные символы сегментов имеют приоритет. Удаление слоя открывает
+нижнюю настройку. Цвета разрешаются независимо.
+
+Литерал — строка UTF-8 в одинарных или двойных кавычках без обработки escape:
+непустое значение должно содержать одну печатную графему шириной в одну ячейку
+по `WidthPolicy` контрола и не более 64 байт. Пустые декоративные start/end
+подавляют соответствующий конец, пустой corner сохраняет обычную заливку.
+Остальные пустые символы недопустимы. Ошибочный явный символ отклоняет
+обновление с сохранением прежнего оформления; резерв профиля его не исправляет.
+Литералы доступны только в runtime PSS.
+
+Для `fractional-block` нужны пустая дорожка и отсутствие пользовательских форм
+ползунка. При дробной отрисовке занятые ячейки ползунка используют подготовленные
+блоки покрытия вместо обычных или сегментных символов; цвета и атрибуты сегментов
+продолжают действовать. Ограничения описаны в разделе
+[дробных границ](#fractional-scrollbar-thumb-ru).
+
+Пример runtime PSS использует обычную целочисленную отрисовку и явно задаёт цвет
+символов и фона, без инверсии. Для отображения стрелок и декоративных концов
+включите их в настройке контрола.
+
+Только дробная отрисовка подставляет при отсутствии цвета локальную тёмную
+поверхность `#181c24` и цвет символов для normal/focused/disabled:
+`#dce1e8` / `#4bb4dc` / `#7d828c`. Явные цвета контрола, части и сегмента имеют
+приоритет. Остальные рисунки используют вычисленный стиль контрола или цвета
+терминала; единого фиксированного цвета для всех тем нет.
+
+```pss
+ScrollArea {
+  scrollbar-track-pattern: minimal;
+  scrollbar-thumb-pattern: ascii;
+  scrollbar-arrow-pattern: ascii;
+  scrollbar-horizontal-track-glyph: "-";
+  scrollbar-vertical-track-glyph: "|";
+  scrollbar-horizontal-start-glyph: "[";
+  scrollbar-horizontal-end-glyph: "]";
+  scrollbar-vertical-start-glyph: "+";
+  scrollbar-vertical-end-glyph: "+";
+  scrollbar-horizontal-backward-glyph: "<";
+  scrollbar-horizontal-forward-glyph: ">";
+  scrollbar-vertical-backward-glyph: "^";
+  scrollbar-vertical-forward-glyph: "v";
+  scrollbar-horizontal-thumb-start-glyph: "[";
+  scrollbar-horizontal-thumb-body-glyph: "=";
+  scrollbar-horizontal-thumb-end-glyph: "]";
+  scrollbar-horizontal-thumb-single-glyph: "#";
+  scrollbar-vertical-thumb-start-glyph: "^";
+  scrollbar-vertical-thumb-body-glyph: "|";
+  scrollbar-vertical-thumb-end-glyph: "v";
+  scrollbar-vertical-thumb-single-glyph: "#";
+  scrollbar-corner-glyph: "+";
+  scrollbar-track-foreground: #526070;
+  scrollbar-track-background: #101820;
+  scrollbar-thumb-foreground: #ffffff;
+  scrollbar-thumb-background: #245070;
+  scrollbar-thumb-start-foreground: #ffd080;
+  scrollbar-thumb-end-foreground: #ffd080;
+  scrollbar-ends-foreground: #a0b0c0;
+  scrollbar-ends-background: #101820;
+  scrollbar-arrows-foreground: #ffffff;
+  scrollbar-arrows-background: #304050;
+  scrollbar-corner-foreground: #a0b0c0;
+  scrollbar-corner-background: #101820;
+}
+```
+
 ## Дробные границы ползунка {#fractional-scrollbar-thumb-ru}
 
 `.scrollbar("fractional-block")` задаёт ползунок, положение и пропорциональная
@@ -451,8 +597,8 @@ Runtime, типизированные и compile-time таблицы подде�
 оформление заголовка независимо от `.scrollTrack("minimal")`,
 `.scrollThumb("block")` и `.scrollArrows("ascii")`. Для методов есть эквивалентные
 pipe stages, например `| ui::scrollThumb("ascii")`, и типизированные перегрузки.
-Источники дорожки — `ScrollbarPattern` (`legacy`, `frame`, `minimal`, `ascii`),
-ползунка — `ScrollbarThumbPattern` (`legacy`, `block`, `ascii`), стрелок —
+Источники дорожки — `ScrollbarPattern` (`legacy`, `frame`, `minimal`, `ascii`, `fractional-block`),
+ползунка — `ScrollbarThumbPattern` (`legacy`, `block`, `ascii`, `fractional-block`), стрелок —
 `ScrollbarArrowPattern` (`legacy`, `triangle`, `ascii`). `block` и `triangle`
 сохраняют ASCII/width fallback контрола. Выбор оформления не включает кнопки:
 для этого служит отдельный `.arrows()`.

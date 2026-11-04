@@ -19,6 +19,14 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Add per-control English/Russian styling references, a gallery styling index,
+  and a complete Button guide. Document supported paint roles, defaults,
+  configuration-only settings and limitations, including all scrollbar PSS parts.
+
+- Add an English/Russian widget gallery with static previews and links to control
+  guides, available in the ordinary HTML documentation without the experimental
+  WebAssembly gallery.
+
 - Add numeric SpinBox editors with a shared validated numeric source, ordinary
   LineEdit history, decimal drafts and step buttons. Immediate, completion and
   explicit publication preserve invalid drafts, accepted spelling and external

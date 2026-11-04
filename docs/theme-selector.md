@@ -2,6 +2,20 @@
 
 [Русская версия](ru/theme-selector.md)
 
+Use the theme selector to preview, apply or restore a catalog choice through a modal view. `ui::Ref<ThemeSelector>` observes the view; the default opening shortcut is `Ctrl+K, Ctrl+T`, and Apply and Cancel are ordinary controls. The application supplies the catalog and handles persistence. See [ThemeSelector options and API](../include/portals/theme_selector.hpp).
+
+For a loaded scene, register a code-owned native factory with its semantic schema; the resource does not supply executable callbacks or a catalog. See [resource registration](../include/portals/ui_scene_resource.hpp).
+
+![Theme selector with Nord and Latte choices and Apply and Cancel controls](images/theme-selector-guide.png)
+
+## Styling reference {#theme-selector-styling-reference}
+
+The chooser is composed of existing dialog and button controls. Style the dialog parts as described in the [dialog reference](dialogs.md#dialogs-styling-reference); catalog choice buttons have the `Button.theme-choice` target. The Apply, Cancel and recovery buttons use the ordinary `Button` target; status labels and choice descriptions use `Label` without dedicated classes. A broad `Button` or `Label` rule also affects those parts. No separate PSS role distinguishes an individual service button. Do not rely on generated child IDs. Ordinary `foreground`, `background`, `bold`, `italic` and `underline` declarations and state-independent `min-width` follow the [cascade and size constraints](styling-guide.md). Buttons use their ordinary control states; application and user layers remain above the previewed theme.
+
+```pss
+Button.theme-choice:focused { background: #305070; bold: true; }
+```
+
 `ui::themeSelector` supplies a modal catalog view for the
 [checked theme-selection model](theme-selection.md). The view owns its list,
 preview actions and recovery controls. It uses the existing dialog, focus and
@@ -13,11 +27,12 @@ Open Themes with the button or `Ctrl+K, Ctrl+T`. Moving through the choices
 previews a theme. Apply keeps it; Cancel restores the saved theme. F10 exits
 from the main form. The modal dialog handles its own cancellation keys.
 
-\include{lineno} examples/guide_theme_selector.cpp
+\include{lineno} guide_theme_selector.cpp
 
 The program builds as
 `portals_docs_theme_selector` and is also included in the installed-package
 consumer. Its main function contains no replay transport or terminal emulator.
+Enable tests for the source-tree target and run the resulting executable in a terminal.
 
 ## Composition and commands
 

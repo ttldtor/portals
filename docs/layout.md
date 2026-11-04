@@ -362,3 +362,28 @@ from `SizedWidget` for configurable policies. Grid/Overlay can implement `Layout
 rectangle per visible child. The interface pointer remains inside `tree.read`.
 A custom solver must follow the frame/purity/error contract above. No Node
 downcast or core Widget header change is required.
+
+
+## Styling reference {#layout-styling-reference}
+
+Rows, columns and spacing are layout objects. Their ordinary paint path adds no
+background or text, so a background declaration on a layout parent is not a way
+to fill its empty gaps or recolor descendants. Give the layout `.id("layout")`
+when targeting its allocation, and target painted children by their own type,
+class, ID or exact Ref. PSS has no descendant selectors or automatic paint inheritance.
+
+The complete sizing properties are `width`, `height`, `min-width`, `max-width`,
+`min-height`, `max-height`, with values and hard-bound rules below. Missing
+settings preserve the recipe/control policy; colors and states do not define
+spacing. `LinearOptions::gap`, `padding`, `cross_align` configure layout instead
+of PSS declarations; default gap/padding are zero and cross alignment is
+stretch. `ui::spacing(n)` reserves fixed main-axis cells; `ui::spacer()` distributes
+remaining space as described below. These objects have no own glyphs or focus states.
+
+```pss
+#layout { width: fit-content; max-width: 60; }
+Label { foreground: #dce1e8; }
+```
+
+Use a painted control or explicit surface for background coverage. An attached
+frame is styled separately through the [frame reference](compact-primitives.md#primitives-styling-reference).

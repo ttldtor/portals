@@ -1787,6 +1787,7 @@ if(PORTALS_BUILD_DOCS)
     docs/notifications.md docs/ru/notifications.md
     docs/compact-primitives.md docs/ru/compact-primitives.md docs/styles.md docs/legacy.md docs/managed-controls.md docs/radio-group.md docs/ru/radio-group.md docs/declarative-ui.md docs/data-presentation.md docs/ru/data-presentation.md docs/text-property.md docs/text-history.md docs/editor-history.md docs/editor-history-demo.md docs/compact-examples.md docs/compactness.md docs/quality.md tools/compactness/compactness.hpp docs/managed-performance.md docs/package.md docs/application.md docs/virtual-preparation.md docs/examples.md docs/architecture.md docs/getting-started.md docs/limitations.md docs/api-design.md fuzz/README.md
     tools/benchmarks/README.md vendor/utf8proc/README.md vendor/utf8proc/LICENSE.md vendor/textual/README.md vendor/doctest/README.md vendor/pfr/README.md vendor/lyra/README.md docs/cli.md)
+  list(APPEND portals_documentation_inputs docs/widget-gallery.md docs/ru/widget-gallery.md docs/button.md docs/ru/button.md docs/label.md docs/ru/label.md docs/check-box.md docs/ru/check-box.md docs/three-state.md docs/ru/three-state.md docs/password.md docs/ru/password.md docs/status-bar.md docs/ru/status-bar.md docs/border.md docs/ru/border.md docs/gauge.md docs/ru/gauge.md)
   list(APPEND portals_documentation_inputs docs/editor-contracts.md docs/ru/editor-contracts.md)
   list(APPEND portals_documentation_inputs docs/log-view.md docs/ru/log-view.md)
   list(APPEND portals_documentation_inputs docs/choices.md docs/ru/choices.md)

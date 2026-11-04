@@ -2,6 +2,34 @@
 
 [Русская версия](ru/key-help.md)
 
+Use KeyHints for compact shortcut hints and HelpView for a fuller view of registered commands. The application chooses bindings and opens or closes help through its reference; the example below shows the keys. See [KeyHints options](../include/portals/key_hints.hpp) and [HelpView options](../include/portals/help_view.hpp).
+
+![KeyHints and the open HelpView showing registered commands](images/help-view-guide.png)
+
+## Styling reference {#key-help-styling-reference}
+
+`KeyHints` paints normal, `:focused`, or `:disabled` (disabled takes precedence). The full help body has its own `HelpView.help-body` target and paints its normal style; styling the outer wrapper does not style the body. Their `ControlStyle` supplies manual defaults beneath the cascade.
+
+Use `foreground`, `background` (`#RRGGBB`), `bold`, `italic`, `underline` (`true` or `false`). State-free rules cover every variant. See the [cascade and size constraints](styling-guide.md); `min-width` requires a state-free selector.
+
+Configuration-only appearance values are listed below; they are owning strings,
+not PSS properties. `KeyHintsOptions::format` and `HelpViewOptions::format` use
+`KeyFormatOptions`. Neither background nor text style on the outer HelpView
+is inherited by its body.
+
+| Option | Default |
+|---|---|
+| `KeyHintsOptions::entrySeparator` | Two spaces |
+| `overflowMarker`, `emptyText`, `unavailableText` | `+`, empty, `?` |
+| `HelpViewOptions::emptyText`, `unavailableText` | `No key bindings`, `Help unavailable` |
+| `KeyFormatOptions::strokeSeparator`, `alternativeSeparator` | ` then `, ` / ` |
+| `repeatMarker`, `releaseMarker`, `unknownMarker` | ` [repeat]`, ` [release]`, ` [?]` |
+| `maxBytesPerBinding` | 8192 bytes per complete formatted row |
+
+```pss
+HelpView.help-body { foreground: #d0d8e0; }
+```
+
 A key command's name accompanies its registration. `KeyHints` and `HelpView` read those
 same registrations, so rebinding or disabling a command updates its presentation
 without maintaining a separate list of shortcuts.
@@ -34,6 +62,8 @@ automatically collected text-property assignment proxy. Outside a handler,
 the caller checks the result explicitly.
 
 ## Metadata, ownership and changes
+
+In a `CONFIGURATION` resource, `HelpView` and `KeyHints` have scoped built-in factories. `KeyHints{help="guide"}` refers to a HelpView with ID `guide` in the same resource; without `help`, exactly one HelpView-capable instance is required. Key registrations remain C++ owned. See [resource binding details](declarative-reference.md).
 
 `ui::keyInfo(label)` adds an owning name to an ordinary `ui::onKey` registration.
 Optional `.description(text)` supplies the longer help explanation.

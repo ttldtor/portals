@@ -315,3 +315,31 @@ html:not(.turbo-mode) table.memberdecls td { overflow-wrap: anywhere; white-spac
   overflow-wrap: anywhere;
   pointer-events: none;
 }
+
+/* Static previews share the documentation palette and retain terminal colors. */
+.widget-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+  gap: 2rem 1.5rem;
+  margin: 1.25rem 0 2.5rem;
+}
+.widget-gallery-card { min-width: 0; }
+.contents .widget-gallery-card h3 {
+  margin: 0 0 .5rem;
+  padding: 0;
+  border: 0;
+}
+.widget-gallery-card p { margin: .5rem 0; }
+.widget-gallery-card a:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 4px;
+}
+.widget-gallery-card img {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  box-sizing: border-box;
+  border: 1px solid var(--separator-color);
+  border-radius: var(--border-radius-small);
+}
