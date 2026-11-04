@@ -126,23 +126,24 @@ class TurboDiagramTests(unittest.TestCase):
                 self.assertEqual(len([path for path in svg.findall(SVG + 'path') if path.get('data-from')]), 3)
 
     def test_unlinked_external_base_is_recovered_from_exact_source_declaration(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            tag = root / 'types.tag'
-            tag.write_text('<tagfile><compound kind="struct"><name>api::Trait&lt; Box&lt; T &gt; &gt;</name>'
-                           '<filename>structTrait.html</filename></compound></tagfile>')
-            (root / 'structTrait.html').write_text(
-                '<a href="trait_source.html">Header</a>'
-                '<div class="dynheader">Inheritance diagram for api::Trait&lt; Box&lt; T &gt; &gt;:</div>'
-                '<img src="structTrait.png" alt=""/>')
-            (root / 'trait_source.html').write_text(
-                '<div><span class="lineno">42</span>struct Trait&lt;Box&lt;T&gt;&gt; '
-                ': std::integral_constant&lt;bool, true&gt; {};</div>')
-            graph, _ = _inheritance_graphs(root, {'en': tag})[root / 'structTrait.png']
-            base = next(node for node in graph['nodes'] if node['id'].startswith('external:'))
-            self.assertEqual(base['label'], 'std::integral_constant<bool, true>')
-            self.assertNotIn('href', base)
-            self.assertEqual(graph['edges'], [{'from': 'structTrait.html', 'to': base['id']}])
+        for qualifier in ("", "final "):
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                tag = root / 'types.tag'
+                tag.write_text('<tagfile><compound kind="struct"><name>api::Trait&lt; Box&lt; T &gt; &gt;</name>'
+                               '<filename>structTrait.html</filename></compound></tagfile>')
+                (root / 'structTrait.html').write_text(
+                    '<a href="trait_source.html">Header</a>'
+                    '<div class="dynheader">Inheritance diagram for api::Trait&lt; Box&lt; T &gt; &gt;:</div>'
+                    '<img src="structTrait.png" alt=""/>')
+                (root / 'trait_source.html').write_text(
+                    '<div><span class="lineno">42</span>struct Trait&lt;Box&lt;T&gt;&gt; '
+                    + qualifier + ': std::integral_constant&lt;bool, true&gt; {};</div>')
+                graph, _ = _inheritance_graphs(root, {'en': tag})[root / 'structTrait.png']
+                base = next(node for node in graph['nodes'] if node['id'].startswith('external:'))
+                self.assertEqual(base['label'], 'std::integral_constant<bool, true>')
+                self.assertNotIn('href', base)
+                self.assertEqual(graph['edges'], [{'from': 'structTrait.html', 'to': base['id']}])
 
     def test_short_widget_hierarchy_uses_compact_cards_at_full_font_size(self):
         labels = ['portals::Widget', 'portals::SizedWidget', 'portals::Control', 'portals::Button']

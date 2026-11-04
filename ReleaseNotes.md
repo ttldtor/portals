@@ -23,6 +23,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Add an opt-in bounded window-source API for asynchronous providers without a
+  required total row count, shared page/work budgets, owning pins, and explicit
+  continuation/readiness states. The finite snapshot adapter is read-only;
+  existing model and control bindings retain their current capabilities.
+
 - Add per-control English/Russian styling references, a gallery styling index,
   and a complete Button guide. Document supported paint roles, defaults,
   configuration-only settings and limitations, including all scrollbar PSS parts.
