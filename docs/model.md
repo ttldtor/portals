@@ -211,3 +211,42 @@ See [Scheduler ownership and bounded queues](scheduler.md),
 [typed property lifetimes](property.md) for the adjacent contracts.
 
 </details>
+
+## Sources without a known total
+
+For a custom asynchronous data adapter, `<portals/window_source.hpp>` provides
+`WindowSource<T>` and `WindowProvider<T>`. A request asks for at most `maxRows`
+from an opaque cursor. A short response does not imply end of data: the provider
+reports continuation, a temporary tail, a final end, pending data, or unavailable
+history explicitly. A window limits loaded data; it does not describe the full
+capabilities of the domain model.
+
+`SourceCapabilities` describes backward reading, lookup by row identity, and tail
+navigation for this delivery channel. Keep editing, source-wide search, filtering,
+and exact positional access on the original model binding. A finite model's known
+size remains useful for absolute navigation and scroll position. A one-pass stream
+need not provide those operations. Reading a window does not implement them.
+
+This is a low-level adapter API. It does not automatically connect a window source
+to the existing `LogView`, `VirtualList`, or `VirtualTable` factories. Those controls
+retain their current model contracts.
+
+`<portals/window_source_model.hpp>` supplies `FiniteWindowProvider<T>`, a read-only
+snapshot adapter for inline trivially copyable values. It preserves the snapshot's
+exact range reads internally, but does not forward its query, editing, or extent
+APIs. Retain the original model when those operations are needed. Set
+`WindowSourceOptions::initialRevision` to the snapshot revision.
+
+Create sources and request/apply data on the tree's UI thread outside a frame.
+Run `WindowRequest::load()` on an existing worker; `complete()` queues the result
+for UI delivery. Queue admission does not mean the view has applied the result.
+`WindowNotifier` is the worker-safe readiness endpoint. The API creates no worker
+pool. Keep owning pins alive while using their row views.
+
+A shared `SourceBudget` accounts for adapter pages and work, including old pins
+and cancelled work until their final owner releases them. It does not bound the
+process RSS or arbitrary allocations made by the provider. Allocate dynamic page
+payload through `PageBuilder`'s arena. Budget exhaustion returns typed
+backpressure. Provider, validation, or allocation failures preserve the previously
+committed window. Reaching the bounded continuation limit may publish a partial
+window with an explicit diagnostic.

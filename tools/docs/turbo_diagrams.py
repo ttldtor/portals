@@ -223,7 +223,7 @@ def _external_bases(content, page, name):
     unqualified = head.rsplit('::', 1)[-1] + separator + arguments
     normalized = ''.join(unqualified.split())
     matches = []
-    for declaration in re.finditer(r'\b(?:class|struct)\s+([A-Za-z_]\w*(?:\s*<[^{};]*>)?)\s*:(?!:)\s*([^{};]+)\{', source):
+    for declaration in re.finditer(r'\b(?:class|struct)\s+([A-Za-z_]\w*(?:\s*<[^{};]*>)?)(?:\s+final)?\s*:(?!:)\s*([^{};]+)\{', source):
         if ''.join(declaration[1].split()) == normalized:
             bases, start, depth = [], 0, 0
             for index, character in enumerate(declaration[2]):

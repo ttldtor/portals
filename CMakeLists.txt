@@ -134,6 +134,8 @@ endif()
 target_link_libraries(portals_core PRIVATE portals_utf8proc)
 target_include_directories(portals_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/utf8proc")
 target_compile_definitions(portals_core PRIVATE UTF8PROC_STATIC)
+target_sources(portals_core PRIVATE src/models/source_budget.cpp src/models/window_source.cpp)
+
 add_library(portals::core ALIAS portals_core)
 target_compile_features(portals_core PUBLIC cxx_std_23)
 # Declarative clients can exceed the standard COFF section count in MSVC Debug builds.
@@ -1474,6 +1476,13 @@ if(PORTALS_BUILD_TESTS)
   portals_enable_warnings(portals_virtual_list)
   add_test(NAME portals.virtual-list COMMAND portals_virtual_list)
   set_tests_properties(portals.virtual-list PROPERTIES TIMEOUT 15)
+
+  add_executable(portals_window_source tests/window_source.cpp)
+  target_include_directories(portals_window_source SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  target_link_libraries(portals_window_source PRIVATE portals::core)
+  portals_enable_warnings(portals_window_source)
+  add_test(NAME portals.window-source COMMAND portals_window_source)
+  set_tests_properties(portals.window-source PROPERTIES TIMEOUT 30)
 
   add_executable(portals_model tests/model.cpp)
   target_link_libraries(portals_model PRIVATE portals::core)
