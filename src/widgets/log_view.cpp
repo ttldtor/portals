@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include "external_log_view.hpp"
 #include "log_view_state.hpp"
 
 #include <array>
@@ -455,6 +456,11 @@ std::expected<void, TreeError> changeLog(WidgetTree &tree, Node<Widget> node, Fu
 
 std::expected<void, TreeError> requestTail(WidgetTree &tree, Node<Widget> node) {
   return changeLog(tree, node, [&](detail::LogViewState &state, const detail::ScrollWidgetState &scroll) {
+    if (state.external) {
+      state.external->tailRequested = true;
+
+      return tree.invalidate(node, Invalidation::LAYOUT);
+    }
     if (state.data->status.followTail && state.data->intentSerial == intentSerial(scroll)) {
       return std::expected<void, TreeError>{};
     }
@@ -613,6 +619,22 @@ std::expected<CellSize, TreeError> LogView::measureChildren(std::span<const Meas
   const auto &data = *log_->data;
   const auto insets = detail::scrollFrameInsets(detail::ScrollWidgetAccess::state(*this));
   const auto &scroll = detail::ScrollWidgetAccess::state(*this);
+  const auto external = log_->external;
+
+  if (external) {
+    const auto frame = external->frame;
+    const auto width = frame ? frame->width : 0;
+    const auto rows = frame ? frame->rows.size() : 0;
+
+    if (rows > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max() - insets.top - insets.bottom)) {
+      return std::unexpected(TreeError::INVALID_GEOMETRY);
+    }
+
+    scroll.extent = {static_cast<std::uint64_t>(width), rows};
+
+    return CellSize{std::max(width + insets.left + insets.right, computedStyle() ? computedStyle()->minWidth : 0),
+                    static_cast<std::int32_t>(rows) + insets.top + insets.bottom};
+  }
 
   if (data.rows.size() >
         static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max() - insets.top - insets.bottom) ||
@@ -636,6 +658,12 @@ std::expected<LogAppendReceipt, LogError> appendLogBatch(WidgetTree &tree, Node<
 
     if (!valid) {
       result = std::unexpected(valid.error());
+
+      return;
+    }
+
+    if (state.external) {
+      result = std::unexpected(TreeError::INVALID_ARGUMENT);
 
       return;
     }
@@ -709,6 +737,9 @@ std::expected<LogAppendReceipt, LogError> appendLogBatch(WidgetTree &tree, Node<
 
 std::expected<void, TreeError> clearLog(WidgetTree &tree, Node<LogView> node) {
   return changeLog(tree, node, [&](detail::LogViewState &state, const detail::ScrollWidgetState &scroll) {
+    if (state.external) {
+      return std::expected<void, TreeError>{std::unexpected(TreeError::INVALID_ARGUMENT)};
+    }
     if (state.data->records.empty() && state.data->status.followTail && !state.data->status.droppedLines &&
         state.data->intentSerial == intentSerial(scroll)) {
       return std::expected<void, TreeError>{};
@@ -744,6 +775,14 @@ std::expected<LogStatus, TreeError> logStatus(WidgetTree &tree, Node<LogView> no
     const auto valid = admittedLog(state, detail::ScrollWidgetAccess::state(widget));
 
     result = valid ? std::expected<LogStatus, TreeError>(state.data->status) : std::unexpected(valid.error());
+
+    if (valid && state.external) {
+      const auto frame = state.external->frame;
+
+      result = LogStatus{.retainedLines = frame ? frame->records : 0,
+                         .retainedBytes = frame ? frame->bytes : 0,
+                         .followTail = state.external->followTail};
+    }
   });
 
   return edited ? result : std::unexpected(edited.error());
@@ -761,6 +800,65 @@ std::expected<bool, TreeError> prepareLogView(WidgetTree &tree, Node<Widget> nod
   }
 
   const auto viewport = layout.placement.viewport;
+
+  if (state.external) {
+    auto &external = *state.external;
+    bool effectiveVisible{};
+
+    if (layout.visible) {
+      const auto local = CellRect::from(layout.placement.viewportOrigin, viewport);
+
+      if (!local || !layout.geometry.valid) {
+        return std::unexpected(TreeError::INVALID_GEOMETRY);
+      }
+
+      const auto global = local->translated(layout.geometry.surface.origin());
+
+      if (!global) {
+        return std::unexpected(TreeError::INVALID_GEOMETRY);
+      }
+
+      effectiveVisible = !global->intersection(layout.geometry.clip).empty();
+    }
+
+    const bool changed = external.viewport != viewport || external.visible != effectiveVisible;
+
+    external.viewport = viewport;
+    external.visible = effectiveVisible;
+    external.focused = scroll.focused;
+    external.wheelStep = scroll.area.wheelStep;
+    external.keyStep = scroll.area.keyStep;
+    external.pageOverlap = scroll.area.pageOverlap;
+
+    const auto position = scroll.controller->snapshot();
+
+    if (!position) {
+      return std::unexpected(position.error());
+    }
+
+    external.offset = position->vertical.offset.raster;
+
+    const auto serial = intentSerial(scroll);
+
+    if (serial != external.intentSerial) {
+      external.intentSerial = serial;
+      external.navigationChanged = true;
+      external.followTail = false;
+      external.requestedOffset.reset();
+    }
+
+    if (external.requestedOffset == external.offset) {
+      external.requestedOffset.reset();
+    }
+
+    if (changed) {
+      const auto invalidated = tree.invalidate(node, Invalidation::LAYOUT);
+
+      return invalidated ? std::expected<bool, TreeError>{true} : std::unexpected(invalidated.error());
+    }
+
+    return false;
+  }
 
   if (!layout.visible) {
     return false;
@@ -800,6 +898,13 @@ std::expected<void, TreeError> stageLogViewOffset(const LogView &widget, ScrollC
   }
 
   const auto &data = *LogViewAccess::state(widget).data;
+  if (LogViewAccess::state(widget).external) {
+    const auto &external = *LogViewAccess::state(widget).external;
+
+    return external.requestedOffset
+             ? ScrollControllerAccess::offset(plan, ScrollAxis::VERTICAL, {*external.requestedOffset, 0})
+             : std::expected<void, TreeError>{};
+  }
   const auto offset = data.status.followTail ? scrollRange(plan.verticalMetrics).maximum : anchorRow(data, data.anchor);
 
   return ScrollControllerAccess::offset(plan, ScrollAxis::VERTICAL,
@@ -810,10 +915,11 @@ std::expected<EventReply, TreeError> logViewInput(WidgetTree &tree, Node<Widget>
                                                   const RoutedEvent &event) {
   const auto &scroll = ScrollWidgetAccess::state(widget);
   const auto &data = *LogViewAccess::state(widget).data;
+  auto &external = LogViewAccess::state(widget).external;
   const auto *mouse = std::get_if<MouseInputEvent>(&event);
 
-  if (scroll.area.readOnly || data.status.followTail || !mouse || mouse->action != MouseAction::PRESS ||
-      mouse->button != MouseButton::LEFT) {
+  if (scroll.area.readOnly || (external ? external->followTail : data.status.followTail) || !mouse ||
+      mouse->action != MouseAction::PRESS || mouse->button != MouseButton::LEFT) {
     return EventReply::IGNORED;
   }
 
@@ -828,6 +934,12 @@ std::expected<EventReply, TreeError> logViewInput(WidgetTree &tree, Node<Widget>
   if (!geometry->geometry.valid || mouse->row != bounds.bottom() - 1 || mouse->column <= bounds.origin().x ||
       mouse->column >= bounds.right() - 1) {
     return EventReply::IGNORED;
+  }
+
+  if (external) {
+    external->tailRequested = true;
+
+    return EventReply::HANDLED;
   }
 
   const auto result = requestTail(tree, node);
@@ -871,6 +983,41 @@ std::expected<void, TreeError> LogView::paint(PaintContext &context) {
   }
 
   const auto &data = *log_->data;
+
+  if (log_->external) {
+    const auto frame = log_->external->frame;
+
+    if (!frame) {
+      return {};
+    }
+
+    const auto first = std::min<std::uint64_t>(scroll.presentation.vertical.offset.raster, frame->rows.size());
+    const auto count = std::min<std::size_t>(frame->rows.size() - first, viewport->size().height);
+
+    for (std::size_t row = 0; row < count; ++row) {
+      const RenderCommand command =
+        TextCommand{{viewport->origin().x, viewport->origin().y + static_cast<std::int32_t>(row)},
+                    *frame->rows[first + row],
+                    *viewport,
+                    style};
+
+      painted = context.submit(std::span(&command, 1));
+
+      if (!painted) {
+        return painted;
+      }
+    }
+
+    if (frame->footer && scroll.allocation.width > 2 && scroll.allocation.height > 1) {
+      const auto footer = *CellRect::from({1, scroll.allocation.height - 1}, {scroll.allocation.width - 2, 1});
+      const auto &caption = frame->following == log_->external->followTail ? frame->footer : frame->alternateFooter;
+      const RenderCommand command = TextCommand{footer.origin(), *caption, footer, style};
+
+      return context.submit(std::span(&command, 1));
+    }
+
+    return {};
+  }
 
   if (data.width != scroll.geometry.viewport.width ||
       !cacheMatches(data, scroll.presentation.vertical.offset.raster, scroll.geometry.viewport.height)) {

@@ -350,6 +350,7 @@ namespace detail {
 template <class T> struct WindowState;
 template <class T> struct WindowConsumerState;
 template <class T> struct WindowWork;
+struct WindowRequestAccess;
 
 template <class T> struct WindowFrameData {
   SourceCredit credit;
@@ -477,52 +478,11 @@ public:
    * @return Owning reply/error. UI invocation is rejected; each token generation loads once.
    */
   std::expected<SourceReadReply<T>, SourceError> load(std::stop_token external = {}) const {
-    auto work = work_;
-
-    if (stopRequested()) {
-      return std::unexpected(SourceError::CANCELLED);
-    }
-
-    if (work->uiThread == std::this_thread::get_id()) {
-      return std::unexpected(SourceError::WRONG_THREAD);
-    }
-
-    if (work->loaded.exchange(true)) {
-      return std::unexpected(SourceError::ALREADY_COMPLETED);
-    }
-
-    std::stop_callback stop(external, [work] {
-      work->stop.request_stop();
-    });
-
-    try {
-      auto arena = SourceArena::create(std::move(work->pageCredit));
-
-      if (!arena) {
-        return std::unexpected(arena.error());
-      }
-
-      auto temporary = work->credit.split({work->options.workspaceBytes, 0, 0, 0});
-      auto workspace = SourceArena::create(std::move(*temporary));
-
-      if (!workspace) {
-        return std::unexpected(workspace.error());
-      }
-
-      work->workspace = *workspace;
-      PageBuilder<T> out(work->command, std::move(*arena), *workspace, work->options.maxRowBytes);
-      auto reply = work->provider->load(work->command, out, work->stop.get_token());
-
-      if (stopRequested()) {
-        return std::unexpected(SourceError::CANCELLED);
-      }
-
-      return reply;
-    } catch (const std::bad_alloc &) {
-      return std::unexpected(SourceError::NO_MEMORY);
-    } catch (...) {
-      return std::unexpected(SourceError::CALLBACK_FAILED);
-    }
+    return loadUsing(
+      [](WindowProvider<T> &provider, const SourceReadCommand &command, PageBuilder<T> &out, std::stop_token stop) {
+        return provider.load(command, out, stop);
+      },
+      external);
   }
 
   /** @param reply Owning load result; retry the same result after WOULD_BLOCK/NO_MEMORY.
@@ -568,7 +528,58 @@ public:
   }
 
 private:
+  friend struct detail::WindowRequestAccess;
   template <class> friend class WindowConsumer;
+
+  template <class Loader>
+  std::expected<SourceReadReply<T>, SourceError> loadUsing(Loader &&loader, std::stop_token external) const {
+    auto work = work_;
+
+    if (stopRequested()) {
+      return std::unexpected(SourceError::CANCELLED);
+    }
+
+    if (work->uiThread == std::this_thread::get_id()) {
+      return std::unexpected(SourceError::WRONG_THREAD);
+    }
+
+    if (work->loaded.exchange(true)) {
+      return std::unexpected(SourceError::ALREADY_COMPLETED);
+    }
+
+    std::stop_callback stop(external, [work] {
+      work->stop.request_stop();
+    });
+
+    try {
+      auto arena = SourceArena::create(std::move(work->pageCredit));
+
+      if (!arena) {
+        return std::unexpected(arena.error());
+      }
+
+      auto temporary = work->credit.split({work->options.workspaceBytes, 0, 0, 0});
+      auto workspace = SourceArena::create(std::move(*temporary));
+
+      if (!workspace) {
+        return std::unexpected(workspace.error());
+      }
+
+      work->workspace = *workspace;
+      PageBuilder<T> out(work->command, std::move(*arena), *workspace, work->options.maxRowBytes);
+      auto reply = std::forward<Loader>(loader)(*work->provider, work->command, out, work->stop.get_token());
+
+      if (stopRequested()) {
+        return std::unexpected(SourceError::CANCELLED);
+      }
+
+      return reply;
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(SourceError::NO_MEMORY);
+    } catch (...) {
+      return std::unexpected(SourceError::CALLBACK_FAILED);
+    }
+  }
 
   explicit WindowRequest(std::shared_ptr<detail::WindowWork<T>> work) : work_(std::move(work)) {
   }
@@ -578,6 +589,17 @@ private:
 
 /// @cond INTERNAL
 namespace detail {
+// Trusted adapters preserve richer per-call failures on their owning worker job.
+// The loader receives the actual captured provider and shares public load()'s
+// affinity, single-load, cancellation and reservation gates without a side channel.
+struct WindowRequestAccess {
+  template <class T, class Loader>
+  static std::expected<SourceReadReply<T>, SourceError> load(const WindowRequest<T> &request, Loader &&loader,
+                                                             std::stop_token external = {}) {
+    return request.loadUsing(std::forward<Loader>(loader), external);
+  }
+};
+
 template <class T> struct WindowConsumerState {
   SourceCredit credit;
   std::shared_ptr<WindowState<T>> source;

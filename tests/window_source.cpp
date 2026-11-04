@@ -713,3 +713,43 @@ TEST_CASE("a copied notifier is worker-safe after source and tree destruction") 
                 }).get();
   CHECK(result.error() == SourceError::CLOSED);
 }
+
+TEST_CASE("trusted domain loader preserves the standard request gates and per-call cause") {
+  Fixture f;
+  f.deliver(take(f.consumer.request({}, SourceDirection::FORWARD, 2)));
+  auto request = take(f.consumer.request({}, SourceDirection::FORWARD, 1));
+  int diagnostic{};
+  auto loader = [&](WindowProvider<int> &provider, const SourceReadCommand &, PageBuilder<int> &,
+                    std::stop_token) -> std::expected<SourceReadReply<int>, SourceError> {
+    CHECK(&provider == f.provider.get());
+    diagnostic = 42;
+    return std::unexpected(SourceError::IO_ERROR);
+  };
+
+  CHECK(detail::WindowRequestAccess::load(request, loader).error() == SourceError::WRONG_THREAD);
+  CHECK(diagnostic == 0);
+  auto result = std::async(std::launch::async, [&] {
+                  return detail::WindowRequestAccess::load(request, loader);
+                }).get();
+
+  CHECK(result.error() == SourceError::IO_ERROR);
+  CHECK(diagnostic == 42);
+  take(request.complete(result));
+  f.dispatch();
+  CHECK(take(f.consumer.lastError()) == SourceError::IO_ERROR);
+  CHECK(take(f.consumer.pin()).size() == 2);
+  auto again = std::async(std::launch::async, [&] {
+                 return request.load();
+               }).get();
+
+  CHECK(again.error() == SourceError::ALREADY_COMPLETED);
+  auto cancelled = take(f.consumer.request({}, SourceDirection::FORWARD, 1));
+  cancelled.cancel();
+  diagnostic = 0;
+  auto stopped = std::async(std::launch::async, [&] {
+                   return detail::WindowRequestAccess::load(cancelled, loader);
+                 }).get();
+
+  CHECK(stopped.error() == SourceError::CANCELLED);
+  CHECK(diagnostic == 0);
+}

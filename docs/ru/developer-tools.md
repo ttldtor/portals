@@ -8,6 +8,7 @@
 
 | Задача | Точка запуска | Справка |
 | --- | --- | --- |
+| Проверить память LogView из файла | `tests/probes/log_view_memory.py` | [Измерение памяти LogView](developer-tools-measure.md#tool-log-memory-ru) |
 | Собрать библиотеку и запустить тесты | CMake и CTest | [Сборка и проверки](developer-tools-build.md) |
 | Проверить имена | `python tools/check_naming.py` | [Именование](developer-tools-build.md#tool-naming-ru) |
 | Выбрать и проверить набор CI | `python tools/ci/checks.py` | [Выбор CI](developer-tools-build.md#tool-ci-ru) |

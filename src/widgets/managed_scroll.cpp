@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include "action_state.hpp"
+#include "external_log_view.hpp"
 #include "log_view_state.hpp"
 #include "scroll_controls_state.hpp"
 #include "scroll_motion.hpp"
@@ -563,6 +564,7 @@ std::expected<bool, TreeError> ManagedScene::prepareLogViews(const LayoutSnapsho
     }
 
     std::expected<bool, TreeError> prepared{false};
+    std::shared_ptr<ui::detail::SceneActivity> externalActivity;
     const auto edited = app_.tree().edit(entry->node, [&](Widget &widget) {
       auto *log = dynamic_cast<LogView *>(&widget);
 
@@ -579,6 +581,10 @@ std::expected<bool, TreeError> ManagedScene::prepareLogViews(const LayoutSnapsho
       }
 
       prepared = detail::prepareLogView(app_.tree(), entry->node, *log, *layout->scrollArea);
+
+      if (const auto &external = detail::LogViewAccess::state(*log).external) {
+        externalActivity = external->activity;
+      }
     });
 
     if (!edited && (edited.error() == TreeError::STALE_NODE || edited.error() == TreeError::CLOSED)) {
@@ -587,6 +593,12 @@ std::expected<bool, TreeError> ManagedScene::prepareLogViews(const LayoutSnapsho
 
     if (!edited || !prepared) {
       return std::unexpected(edited ? prepared.error() : edited.error());
+    }
+
+    // Source demand depends on the captured viewport. The runner repeats view preparation,
+    // not scene.prepare(), within this frame; start its work after releasing the widget borrow.
+    if (*prepared && externalActivity && externalActivity->active()) {
+      externalActivity->prepared();
     }
 
     changed |= *prepared;

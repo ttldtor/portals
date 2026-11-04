@@ -2,15 +2,44 @@
 // SPDX-License-Identifier: BSL-1.0
 #include <portals/async.hpp>
 #include <portals/search.hpp>
+#include <portals/source_budget.hpp>
 #include <portals/ui_scene.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <type_traits>
 
 namespace portals::ui {
 
 namespace {
+constexpr const char *sourceErrorName(SourceError value) noexcept {
+  constexpr std::array NAMES{"INVALID_ARGUMENT",   "WRONG_THREAD",       "CLOSED",          "WOULD_BLOCK",
+                             "NO_MEMORY",          "IDENTITY_EXHAUSTED", "CALLBACK_FAILED", "CONTEXT_ERROR",
+                             "UNSUPPORTED",        "STALE_SOURCE",       "INVALID_CURSOR",  "REVISION_CHANGED",
+                             "POSITION_EXHAUSTED", "ROW_NOT_FOUND",      "ROW_TOO_LARGE",   "PAGE_TOO_LARGE",
+                             "INVALID_REPLY",      "NO_PROGRESS",        "CURSOR_CYCLE",    "CONTINUATION_LIMIT",
+                             "CANCELLED",          "ALREADY_COMPLETED",  "IO_ERROR"};
+  const auto index = static_cast<std::size_t>(value);
+
+  return index < NAMES.size() ? NAMES[index] : "UNKNOWN";
+}
+
+constexpr const char *fileLogErrorName(FileLogError value) noexcept {
+  constexpr std::array NAMES{"INVALID_ARGUMENT", "OPEN_FAILED",  "READ_FAILED", "METADATA_FAILED", "RECORD_TOO_LONG",
+                             "INVALID_UTF8",     "FILE_CHANGED", "CANCELLED",   "NO_MEMORY"};
+  const auto index = static_cast<std::size_t>(value);
+
+  return index < NAMES.size() ? NAMES[index] : "UNKNOWN";
+}
+
+constexpr const char *fileLogOperationName(FileLogOperation value) noexcept {
+  constexpr std::array NAMES{"CREATE", "OPEN", "METADATA", "READ", "SEARCH"};
+  const auto index = static_cast<std::size_t>(value);
+
+  return index < NAMES.size() ? NAMES[index] : "UNKNOWN";
+}
+
 constexpr const char *numericErrorName(NumericError error) noexcept {
   switch (error) {
   case NumericError::NOT_FINITE:
@@ -686,6 +715,15 @@ void reportFailure(const ManagedError &failure, std::source_location origin, std
   }
   if (failure.numeric) {
     std::fprintf(stderr, " numeric=NumericError(%s)", numericErrorName(*failure.numeric));
+  }
+
+  if (failure.source) {
+    std::fprintf(stderr, " source=SourceError(%s)", sourceErrorName(*failure.source));
+  }
+
+  if (failure.logFile) {
+    std::fprintf(stderr, " log-file=(cause=%s, operation=%s, native=%u)", fileLogErrorName(failure.logFile->error),
+                 fileLogOperationName(failure.logFile->operation), static_cast<unsigned>(failure.logFile->nativeCode));
   }
 
   if (failure.password) {
