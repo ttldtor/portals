@@ -16,7 +16,7 @@ Build `portals_status_bar_example` with `PORTALS_BUILD_EXAMPLES=ON` and run it i
 
 ## Layout, references and resources
 
-`ui::statusBar({.gap = 1}, children...)` uses `LinearOptions`: gap and padding default to zero, main alignment to START, cross alignment to STRETCH and overflow to CLIP. The default `SizePolicy` fills available width and requests one fixed row. A spacer pushes later sections away; under shortage later shrinkable children yield first down to their minima and remaining overflow is clipped. The parent determines placement; the bar does not dock itself.
+`ui::statusBar({.gap = 1}, children...)` uses `LinearOptions`: `gap` inserts one cell between adjacent child sections, so their text and controls do not touch. The default gap and padding are zero; main alignment is START, cross alignment is STRETCH and overflow is CLIP. The default `SizePolicy` fills available width and requests one fixed row. A spacer pushes later sections away; under shortage later shrinkable children yield first down to their minima and remaining overflow is clipped. The parent determines placement; the bar does not dock itself.
 
 A `ui::Ref<StatusBar>` observes the container for geometry, visibility and removal; it has no text property or timer. Give a child `ui::Ref<Label>` to update text, as in the example. The scene owns the bar and children. The bar is not a focus stop and has no own keyboard or mouse action; interactive children keep theirs. `ui::keyHints(help)` reflects the bound `HelpView`; see [key help](key-help.md).
 
@@ -41,4 +41,4 @@ StatusBar:disabled { background: #303030; }
 Label.status { foreground: #dce1e8; }
 ```
 
-Assign `.classes("status")` to the intended label for the last rule. See `portals::StatusBar`, `LinearOptions`, `ui::statusBar`, and [basic styling](controls.md#basic-controls-styling-reference).
+Here `height: 1` requests a one-row outer allocation for this footer; it is not the horizontal gap. The default bar policy also requests one fixed row, and the parent layout determines placement. Assign `.classes("status")` to the intended label for the last rule. See `portals::StatusBar`, `LinearOptions`, `ui::statusBar`, and [basic styling](controls.md#basic-controls-styling-reference).

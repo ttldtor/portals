@@ -4,9 +4,12 @@
 
 Spinner подходит для работы без известного процента завершения. По умолчанию активны `DOTS`, интервал 100 мс, прямое направление, выравнивание по началу и пустая подпись; reduced motion выключен. Через ссылку можно запустить, остановить индикатор или изменить подпись; сам он пользовательский ввод не принимает. См. [настройки и API Spinner](../../include/portals/spinner.hpp).
 
-![Пример индикатора загрузки с кнопками Start и Stop](../images/loading-indicator-guide.png)
 
-[Посмотреть анимацию индикатора](../images/loading-indicator-guide.gif).
+![Анимация пресета BRAILLE в примере загрузки.](../images/loading-indicator-guide.gif)
+
+[Статичный кадр](../images/loading-indicator-guide.png).
+
+На записи показан пресет BRAILLE из этого примера; остальные пресеты перечислены ниже.
 
 ## Настройка оформления {#loading-indicators-styling-reference-ru}
 

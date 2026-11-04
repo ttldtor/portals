@@ -25,8 +25,7 @@ Explore the controls below and follow a card to its guide. Some images show a co
   <article class="widget-gallery-card"><h3><a href="md_docs_2layout.html">Responsive layout</a></h3><a href="md_docs_2layout.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/responsive-layout.png" alt="Resizable work queue layout"></a><p>Arrange controls as the available space changes.</p></article>
   <article class="widget-gallery-card"><h3><a href="md_docs_2layout.html">Layout spacers</a></h3><a href="md_docs_2layout.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/layout-spacers.png" alt="Controls arranged with layout spacers"></a><p>Distribute space between controls.</p></article>
   <article class="widget-gallery-card"><h3><a href="border-guide.html">Frames and titles</a></h3><a href="border-guide.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/frame-styles.png" alt="Frame patterns and title decorations"></a><p>Explore frames and title decorations.</p></article>
-  <article class="widget-gallery-card"><h3><a href="scroll-controls.html">Scrollbars</a></h3><a href="scroll-controls.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/scrollbar-gallery.png" alt="Scrollbar examples"></a><p>Scroll retained content.</p></article>
-  <article class="widget-gallery-card"><h3><a href="scroll-controls.html">Scroll arrows</a></h3><a href="scroll-controls.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/scroll-arrows.png" alt="Scrollbar arrow examples"></a><p>Explore scrollbar arrow styles.</p></article>
+  <article class="widget-gallery-card"><h3><a href="scroll-controls.html">Scrollbars</a></h3><a href="scroll-controls.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/scrollbar-gallery.png" alt="Scrollbar examples"></a><a href="scroll-controls.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/scroll-arrows.png" alt="Scrollbar arrow examples"></a><p>Scroll content with independently configurable track, thumb and arrows.</p></article>
 </div>
 \endhtmlonly
 
@@ -46,7 +45,6 @@ Scrollbar customization: [complete properties, glyphs and styling priorities](sc
 
 | Need | Guide |
 |---|---|
-| Invoke an action | [Buttons](button.md) |
 | Validate a labeled editor | [Form fields](form-fields.md) |
 | Search a document | [FindBar](find-bar.md) |
 | Show loading, empty and error states | [Data presentation](data-presentation.md) |

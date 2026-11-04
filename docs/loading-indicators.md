@@ -4,9 +4,12 @@
 
 Use Spinner for indeterminate work. The default is active `DOTS`, a 100 ms interval, forward direction, start alignment and an empty label; reduced motion is off. Its reference starts, stops or relabels the indicator, rather than receiving user input itself. See [Spinner options and API](../include/portals/spinner.hpp).
 
-![Loading indicator example with Start and Stop controls](images/loading-indicator-guide.png)
 
-[Watch the indicator animate](images/loading-indicator-guide.gif).
+![The BRAILLE preset animates in the loading example.](images/loading-indicator-guide.gif)
+
+[Static preview](images/loading-indicator-guide.png).
+
+The animation shows the BRAILLE preset used by this example; the other presets are listed below.
 
 ## Styling reference {#loading-indicators-styling-reference}
 

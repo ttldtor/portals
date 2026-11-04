@@ -2,7 +2,7 @@
 
 [Русская версия](ru/check-box.md) · [Three states](three-state.md) · [Switch](switch.md)
 
-Use `ui::checkbox` for an independent on/off choice. Use `ui::threeState` when a mixed value is part of the interaction, or a radio group for one choice among alternatives.
+Use `ui::checkbox` for an independent on/off choice, such as opting into notifications. A [Switch](switch.md) can present a setting such as network on/off; both can bind a Boolean value, and an accepted user change updates that bound value, while the application controls side effects and persistence. Use `ui::threeState` when a mixed value is part of the interaction, or a radio group for one choice among alternatives.
 
 ## A complete application
 

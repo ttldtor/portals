@@ -7,6 +7,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- Clarify control selection and data-state examples in the English/Russian guides;
+  group scrollbar arrows with the scrollbar and show the existing Spinner
+  animation directly on its guide page.
+
 - RadioGroup arrows and Home/End now move the active option without publishing
   selection. Space/Enter confirms; blur does not. Use `.immediate()` or
   `RadioSelectionMode::IMMEDIATE` to retain selection while navigating, with the
