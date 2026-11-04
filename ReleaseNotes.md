@@ -19,6 +19,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Add numeric SpinBox editors with a shared validated numeric source, ordinary
+  LineEdit history, decimal drafts and step buttons. Immediate, completion and
+  explicit publication preserve invalid drafts, accepted spelling and external
+  revision conflicts. Numeric references distinguish accepted drafts from commits;
+  typed resources and a complete numeric form use the same settings.
+
 - Add horizontal numeric sliders with validated finite sources, live user changes,
   gesture completion, keyboard/mouse input and checked numeric references.
   Scene resources share range, increment, read-only and sizing settings; external

@@ -15,10 +15,11 @@
 #include <portals/managed_diagnostics.hpp>
 #include <portals/managed_model.hpp>
 #include <portals/password.hpp>
-#include <portals/radio_group.hpp>
 #include <portals/primitives.hpp>
+#include <portals/radio_group.hpp>
 #include <portals/scroll_controls.hpp>
 #include <portals/slider.hpp>
+#include <portals/spin_box.hpp>
 #include <portals/spinner.hpp>
 #include <portals/status_bar.hpp>
 #include <portals/style.hpp>
@@ -129,6 +130,7 @@ struct KeyHelpRecord;
 struct ThemeSelectionRecord;
 struct ThemeSelectorRecord;
 struct ManagedSliderRecord;
+struct ManagedSpinBoxRecord;
 enum class ThemeSelectorCommand;
 enum class ThemeSelectionCommand;
 template <class T> inline constexpr bool IS_MANAGED_TREE_RESULT = false;
@@ -406,7 +408,9 @@ public:
 
 private:
   friend class ManagedScene;
-  explicit NumericState(ManagedState<NumericValue> state) : state_(std::move(state)) {}
+
+  explicit NumericState(ManagedState<NumericValue> state) : state_(std::move(state)) {
+  }
 
   ManagedState<NumericValue> state_;
 };
@@ -1132,7 +1136,14 @@ public:
    * @return Checked admission or typed failure; a completed numeric commit is never rolled back.
    */
   std::expected<void, ManagedError> bind(Node<Slider> node, NumericState model,
-                                        std::function<std::expected<void, TreeError>(SliderResult)> changed = {});
+                                         std::function<std::expected<void, TreeError>(SliderResult)> changed = {});
+
+  /** @param node Empty numeric row. @param model Scene-owned authoritative numeric source.
+   * @param options Existing editor policy; no independent editing state is introduced.
+   * @param pageSteps Positive increments per page action. @return Checked mount/binding result.
+   */
+  std::expected<void, ManagedError> bind(Node<SpinBox> node, NumericState model, LineEditOptions options = {},
+                                         std::uint64_t pageSteps = 10);
 
   /** @tparam Callback Owning action taking double or the exact numeric Property receipt.
    * @tparam T Slider view type, checked before instantiating callback constraints.
@@ -1141,7 +1152,8 @@ public:
    * @return Checked registration; model synchronization and equal commits do not invoke the callback.
    */
   template <class Callback, class T>
-    requires(std::derived_from<T, Slider> && std::copy_constructible<std::decay_t<Callback>> &&
+    requires((std::derived_from<T, Slider> || std::same_as<T, SpinBox>) &&
+             std::copy_constructible<std::decay_t<Callback>> &&
              (detail::ChangeValueAction<std::decay_t<Callback>, double> ||
               requires(std::decay_t<Callback> &action, const PropertyUpdate<NumericValue> &receipt) {
                 { action(receipt) } -> detail::ManagedActionResult;
@@ -2212,6 +2224,13 @@ private:
 
   std::expected<bool, ManagedError> changeModel(Node<CheckBox> node);
   std::expected<std::shared_ptr<detail::ManagedSliderRecord>, ManagedError> sliderRecord(Node<Slider>, ManagedPhase);
+  std::expected<std::shared_ptr<detail::ManagedSpinBoxRecord>, ManagedError> spinBoxRecord(Node<SpinBox>, ManagedPhase);
+  std::expected<double, ManagedError> spinBoxValue(Node<SpinBox>);
+  std::expected<SpinBoxResult, ManagedError> setSpinBoxValue(Node<SpinBox>, double);
+  std::expected<Node<LineEdit>, ManagedError> spinBoxEditor(Node<SpinBox>);
+  std::expected<void, ManagedError>
+    registerNumericChange(Node<SpinBox>, std::function<EditorCommandResult(const PropertyUpdate<NumericValue> &)>,
+                          std::source_location);
   std::expected<double, ManagedError> sliderValue(Node<Slider> node);
   std::expected<PropertyUpdate<NumericValue>, ManagedError> setSliderValue(Node<Slider> node, double value);
   std::expected<void, ManagedError>
@@ -2289,8 +2308,17 @@ private:
     Node<Widget> node;
     std::shared_ptr<StyleTarget> target;
     std::variant<std::monostate, ActionBinding, CheckBoxBinding, CheckStateBinding, RadioGroupBinding, LineEditBinding,
-                 PasswordBinding, SliderBinding>
+                 PasswordBinding, SliderBinding, SpinBoxBinding, std::shared_ptr<LineEditBinding>>
       binding;
+
+    LineEditBinding *editorBinding() {
+      if (auto *direct = std::get_if<LineEditBinding>(&binding)) {
+        return direct;
+      }
+      auto *shared = std::get_if<std::shared_ptr<LineEditBinding>>(&binding);
+      return shared ? shared->get() : nullptr;
+    }
+
     std::shared_ptr<PasswordFeedback> passwordFeedback;
     std::unique_ptr<CaptionBinding> caption;
     std::unique_ptr<ManagedState<std::string>> textModel;

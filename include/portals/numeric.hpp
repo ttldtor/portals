@@ -14,7 +14,8 @@ enum class NumericError {
   INVALID_STEP,         ///< The user increment is not positive.
   UNREPRESENTABLE_STEP, ///< A sub-range increment cannot advance at one of the bounds.
   OUT_OF_RANGE,         ///< An explicit value is outside the inclusive bounds.
-  INITIAL_CONFLICT      ///< An external model was combined with an explicit numeric override.
+  INITIAL_CONFLICT,     ///< An external model was combined with an explicit numeric override.
+  INVALID_TEXT          ///< Numeric editor draft has incomplete or invalid decimal syntax.
 };
 
 /** @brief Owning inclusive bounds and user increment; validated together with a numeric value. */

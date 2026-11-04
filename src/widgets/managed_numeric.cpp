@@ -1,9 +1,14 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include "spin_box_source.hpp"
+#include <array>
 #include <portals/managed.hpp>
 
 namespace portals {
 namespace {
+constexpr std::int32_t SPIN_BOX_EDITOR_CELLS = 8;
+constexpr std::int32_t SPIN_BOX_ARROW_CELLS = 1;
+
 ManagedError numericFailure(TreeError cause, NodeId node = {}) {
   return {ManagedPhase::STATE, node, cause, {}, {}};
 }
@@ -99,6 +104,13 @@ struct ManagedSliderRecord {
   NumericState model;
   std::vector<std::shared_ptr<Change>> changes = std::vector<std::shared_ptr<Change>>(0);
   std::vector<std::shared_ptr<Finished>> finished = std::vector<std::shared_ptr<Finished>>(0);
+  bool retired{};
+};
+
+struct ManagedSpinBoxRecord {
+  NumericState model;
+  Node<LineEdit> editor;
+  std::vector<std::shared_ptr<ManagedSliderRecord::Change>> changes;
   bool retired{};
 };
 } // namespace detail
@@ -284,6 +296,15 @@ ManagedScene::bind(Node<Slider> node, NumericState model,
 }
 
 void ManagedScene::retireNumeric(Entry &entry) noexcept {
+  if (auto *spin = std::get_if<SpinBoxBinding>(&entry.binding)) {
+    auto record = std::static_pointer_cast<detail::ManagedSpinBoxRecord>(spin->retained());
+    if (record && !record->retired) {
+      record->retired = true;
+      changeHandlers_ -= record->changes.size();
+      record->changes.clear();
+    }
+    return;
+  }
   auto *binding = std::get_if<SliderBinding>(&entry.binding);
   auto record = binding ? std::static_pointer_cast<detail::ManagedSliderRecord>(binding->retained()) : nullptr;
 
@@ -367,6 +388,253 @@ ManagedScene::registerNumericFinished(Node<Slider> node,
     return {};
   } catch (const std::bad_alloc &) {
     return std::unexpected(numericFailure(TreeError::NO_MEMORY, node.id()));
+  }
+}
+
+std::expected<void, ManagedError>
+ManagedScene::registerNumericChange(Node<SpinBox> node,
+                                    std::function<EditorCommandResult(const PropertyUpdate<NumericValue> &)> action,
+                                    std::source_location origin) {
+  const auto lifetime = std::weak_ptr<const void>(lifetime_);
+  auto record = spinBoxRecord(node, ManagedPhase::BIND);
+
+  if (!record) {
+    return std::unexpected(record.error());
+  }
+
+  if (!action) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
+  }
+
+  try {
+    auto handler = std::make_shared<detail::ManagedSliderRecord::Change>(std::move(action), origin);
+
+    if (lifetime.expired()) {
+      return std::unexpected(numericFailure(TreeError::CLOSED, node.id()));
+    }
+
+    if ((*record)->retired || changeHandlers_ >= options_.maxChangeHandlers ||
+        (*record)->changes.size() >= options_.maxChangeHandlersPerNode) {
+      return std::unexpected(error(ManagedPhase::BIND, node, TreeError::NODE_LIMIT));
+    }
+
+    (*record)->changes.push_back(std::move(handler));
+    ++changeHandlers_;
+
+    return {};
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(numericFailure(TreeError::NO_MEMORY, node.id()));
+  }
+}
+
+std::expected<std::shared_ptr<detail::ManagedSpinBoxRecord>, ManagedError>
+ManagedScene::spinBoxRecord(Node<SpinBox> node, ManagedPhase phase) {
+  auto allowed = boundary(phase, node);
+  if (!allowed) {
+    return std::unexpected(allowed.error());
+  }
+  auto entry = find(node);
+  auto *binding = entry ? std::get_if<SpinBoxBinding>(&entry->binding) : nullptr;
+  auto record = binding ? std::static_pointer_cast<detail::ManagedSpinBoxRecord>(binding->retained()) : nullptr;
+  if (!record || record->retired) {
+    return std::unexpected(error(phase, node, TreeError::INVALID_ARGUMENT));
+  }
+  return record;
+}
+
+std::expected<double, ManagedError> ManagedScene::spinBoxValue(Node<SpinBox> node) {
+  auto record = spinBoxRecord(node, ManagedPhase::TEXT);
+  if (!record) {
+    return std::unexpected(record.error());
+  }
+  auto current = (*record)->model.snapshot();
+  if (!current) {
+    return std::unexpected(current.error());
+  }
+  std::expected<double, NumericError> parsed = std::unexpected(NumericError::INVALID_TEXT);
+  auto read = app_.tree().read((*record)->editor, [&](const LineEdit &editor) {
+    parsed = detail::parseSpinBoxText(editor.text().bytes());
+  });
+  if (!read) {
+    return std::unexpected(error(ManagedPhase::TEXT, node, read.error()));
+  }
+  if (!parsed) {
+    return std::unexpected(numericFailure(parsed.error(), node.id()));
+  }
+  auto validated = (*current)->value.withValue(*parsed);
+  return validated ? std::expected<double, ManagedError>(*parsed)
+                   : std::unexpected(numericFailure(validated.error(), node.id()));
+}
+
+std::expected<Node<LineEdit>, ManagedError> ManagedScene::spinBoxEditor(Node<SpinBox> node) {
+  auto record = spinBoxRecord(node, ManagedPhase::TEXT);
+  return record ? std::expected<Node<LineEdit>, ManagedError>((*record)->editor) : std::unexpected(record.error());
+}
+
+std::expected<SpinBoxResult, ManagedError> ManagedScene::setSpinBoxValue(Node<SpinBox> node, double value) {
+  auto record = spinBoxRecord(node, ManagedPhase::TEXT);
+  if (!record) {
+    return std::unexpected(record.error());
+  }
+  auto current = (*record)->model.snapshot();
+  if (!current) {
+    return std::unexpected(current.error());
+  }
+  auto candidate = (*current)->value.withValue(value);
+  if (!candidate) {
+    return std::unexpected(numericFailure(candidate.error(), node.id()));
+  }
+  auto entry = find(node);
+  auto *binding = entry ? std::get_if<SpinBoxBinding>(&entry->binding) : nullptr;
+  if (!binding) {
+    return std::unexpected(error(ManagedPhase::TEXT, node, TreeError::INVALID_ARGUMENT));
+  }
+  auto result = binding->setValue(value);
+  return result ? std::expected<SpinBoxResult, ManagedError>(std::move(*result))
+                : std::unexpected(error(ManagedPhase::TEXT, node, result.error()));
+}
+
+std::expected<void, ManagedError> ManagedScene::bind(Node<SpinBox> node, NumericState model, LineEditOptions options,
+                                                     std::uint64_t pageSteps) {
+  const auto lifetime = std::weak_ptr<const void>(lifetime_);
+  auto entry = bindingEntry(node);
+  if (!entry) {
+    return std::unexpected(entry.error());
+  }
+  auto property = model.state_.lock();
+  if (!property || model.state_.scene_ != root_.id()) {
+    return std::unexpected(error(ManagedPhase::BIND, node, property ? TreeError::INVALID_ARGUMENT : property.error()));
+  }
+  if (!pageSteps) {
+    return std::unexpected(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
+  }
+  std::array<Node<Widget>, 3> parts{};
+  const auto fail = [&](ManagedError failure) -> std::expected<void, ManagedError> {
+    if (!lifetime.expired()) {
+      for (auto part = parts.rbegin(); part != parts.rend(); ++part) {
+        if (*part != Node<Widget>{}) {
+          auto removed = remove(*part);
+          if (!removed && !lifetime.expired()) {
+            remember(removed.error());
+          }
+          if (lifetime.expired()) {
+            break;
+          }
+        }
+      }
+    }
+    return std::unexpected(std::move(failure));
+  };
+  try {
+    auto record = std::make_shared<detail::ManagedSpinBoxRecord>();
+    auto editing = std::make_shared<EditorEventChain>();
+    auto editor =
+      emplace<LineEdit>(node, options,
+                        SizePolicy{.width = {.minimum = 1, .preferred = SPIN_BOX_EDITOR_CELLS, .mode = SizeMode::FLEX},
+                                   .height = {.mode = SizeMode::CONTENT}});
+    if (!editor) {
+      return fail(editor.error());
+    }
+    parts[0] = *editor;
+    auto down = emplace<Button>(node, *GraphemeText::from("-", widthPolicy()), ControlStyle{},
+                                SizePolicy{.width = {.minimum = SPIN_BOX_ARROW_CELLS,
+                                                     .preferred = SPIN_BOX_ARROW_CELLS,
+                                                     .maximum = SPIN_BOX_ARROW_CELLS,
+                                                     .mode = SizeMode::FIXED},
+                                           .height = {.mode = SizeMode::CONTENT}},
+                                ButtonChrome::NONE);
+    if (!down) {
+      return fail(down.error());
+    }
+    parts[1] = *down;
+    auto up = emplace<Button>(node, *GraphemeText::from("+", widthPolicy()), ControlStyle{},
+                              SizePolicy{.width = {.minimum = SPIN_BOX_ARROW_CELLS,
+                                                   .preferred = SPIN_BOX_ARROW_CELLS,
+                                                   .maximum = SPIN_BOX_ARROW_CELLS,
+                                                   .mode = SizeMode::FIXED},
+                                         .height = {.mode = SizeMode::CONTENT}},
+                              ButtonChrome::NONE);
+    if (!up) {
+      return fail(up.error());
+    }
+    parts[2] = *up;
+    for (const auto part : {Node<Widget>(*editor), Node<Widget>(*down), Node<Widget>(*up)}) {
+      auto styled = classes(part, {part == Node<Widget>(*editor) ? "spin-box-editor"
+                                   : part == Node<Widget>(*down) ? "spin-box-decrease"
+                                                                 : "spin-box-increase"});
+      if (!styled) {
+        return fail(styled.error());
+      }
+    }
+    record->model = model;
+    record->editor = *editor;
+    auto bound = bindSpinBox(
+      app_.tree(), app_.router(), *editor, *down, *up, *property, pageSteps,
+      [this, node, record, lifetime](SpinBoxResult receipt) {
+        if (lifetime.expired() || record->retired) {
+          return;
+        }
+        if (receipt.editing.error) {
+          remember(error(receipt.editing.trigger == LineEditTrigger::FLUENT ? ManagedPhase::TEXT : ManagedPhase::INPUT,
+                         node, *receipt.editing.error));
+        }
+        if (!receipt.commit || !receipt.commit->changed || receipt.editing.trigger == LineEditTrigger::FLUENT) {
+          return;
+        }
+        const auto count = record->changes.size();
+        try {
+          for (std::size_t index = 0; index < count; ++index) {
+            if (lifetime.expired() || record->retired || closed_ || !app_.tree().inspect(node)) {
+              return;
+            }
+            const auto handler = record->changes[index];
+            const auto result = handler->action(*receipt.commit);
+            if (!result) {
+              if (!lifetime.expired() && !commandReported(result, lifetime)) {
+                remember(error(ManagedPhase::INPUT, node, result.result_.error()), handler->origin);
+              }
+              return;
+            }
+          }
+        } catch (const std::bad_alloc &) {
+          if (!lifetime.expired()) {
+            remember(error(ManagedPhase::INPUT, node, TreeError::NO_MEMORY));
+          }
+        } catch (...) {
+          if (!lifetime.expired()) {
+            remember(error(ManagedPhase::INPUT, node, TreeError::CALLBACK_FAILED));
+          }
+        }
+      },
+      LineEditEvents{[this, editor = *editor, editing, lifetime](const TextEditedEvent &event) {
+                       if (!lifetime.expired()) {
+                         dispatchEditing(editor, editing, lifetime, event);
+                       }
+                     },
+                     [this, editor = *editor, editing, lifetime](const EditingFinishedEvent &event) {
+                       if (!lifetime.expired()) {
+                         dispatchEditing(editor, editing, lifetime, event);
+                       }
+                     }});
+    if (!bound) {
+      return fail(error(ManagedPhase::BIND, node, bound.error()));
+    }
+    if (lifetime.expired()) {
+      return std::unexpected(numericFailure(TreeError::CLOSED, node.id()));
+    }
+    auto editorEntry = find(*editor);
+    editorEntry->binding.emplace<std::shared_ptr<LineEditBinding>>(bound->editorBinding());
+    editorEntry->editing = std::move(editing);
+    bound->retain(record);
+    (*entry)->binding.emplace<SpinBoxBinding>(std::move(*bound));
+    auto installed = app_.tree().edit(node, [&](SpinBox &spin) {
+      spin.editor_ = *editor;
+    });
+    return installed ? std::expected<void, ManagedError>{} : fail(error(ManagedPhase::BIND, node, installed.error()));
+  } catch (const std::bad_alloc &) {
+    return fail(numericFailure(TreeError::NO_MEMORY, node.id()));
+  } catch (...) {
+    return fail(numericFailure(TreeError::CALLBACK_FAILED, node.id()));
   }
 }
 } // namespace portals

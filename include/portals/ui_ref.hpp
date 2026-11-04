@@ -85,6 +85,12 @@ std::expected<double, ManagedError> numericValue(const std::shared_ptr<RefTarget
 std::expected<PropertyUpdate<NumericValue>, ManagedError>
 numericValue(const std::shared_ptr<RefTarget> &, const std::shared_ptr<const Node<Slider>> &, double,
               std::source_location);
+std::expected<double, ManagedError> spinBoxValue(const std::shared_ptr<RefTarget> &,
+                                                 const std::shared_ptr<const Node<SpinBox>> &);
+std::expected<SpinBoxResult, ManagedError> spinBoxValue(const std::shared_ptr<RefTarget> &,
+                                                        const std::shared_ptr<const Node<SpinBox>> &, double,
+                                                        std::source_location);
+Ref<LineEdit> spinBoxEditor(const std::shared_ptr<RefTarget> &, const std::shared_ptr<const Node<SpinBox>> &);
 std::expected<FieldValidation, ManagedError> fieldValidation(const std::shared_ptr<RefTarget> &target);
 /** @param target Weak group identity. @param node Typed slot retained without reading it before affinity admission.
  * @return Exact authoritative value or affinity/liveness failure.
@@ -329,6 +335,42 @@ private:
   std::shared_ptr<const Node<Slider>> node_;
   std::source_location origin_;
   std::optional<std::expected<PropertyUpdate<NumericValue>, ManagedError>> last_;
+};
+
+/** @brief Numeric draft assignment observation. The saved result distinguishes draft acceptance from publication.
+ * get() reads the valid visible numeric draft. Copies retain observations without retaining the scene.
+ */
+class SpinBoxNumericProperty {
+public:
+  /** @param other Observation copied without reading the editor or source. */
+  SpinBoxNumericProperty(const SpinBoxNumericProperty &other) = default;
+  /** @param other Observation transferred without reading the editor or source. */
+  SpinBoxNumericProperty(SpinBoxNumericProperty &&other) = default;
+  /** @return Valid visible numeric draft, typed numeric rejection, or exact checked access error. */
+  std::expected<double, ManagedError> get() const;
+  /** @return Original editing result and optional numeric commit; a fresh proxy returns INVALID_ARGUMENT. */
+  std::expected<SpinBoxResult, ManagedError> result() const;
+  /** @param value Finite in-range replacement, following EditMode. @param origin Assignment site.
+   * @return Independent draft/commit observation; errors are automatically collected.
+   */
+  SpinBoxNumericProperty set(double value, std::source_location origin = std::source_location::current());
+  /** @param value Finite replacement. @return Independent assignment observation. */
+  SpinBoxNumericProperty operator=(double value);
+  /** @param other Numeric source read once. @return Independent assignment observation. */
+  SpinBoxNumericProperty operator=(const SpinBoxNumericProperty &other);
+
+private:
+  template <class> friend class Ref;
+
+  SpinBoxNumericProperty(std::shared_ptr<detail::RefTarget> target, std::shared_ptr<const Node<SpinBox>> node,
+                         std::source_location origin)
+      : target_(std::move(target)), node_(std::move(node)), origin_(origin) {
+  }
+
+  std::shared_ptr<detail::RefTarget> target_;
+  std::shared_ptr<const Node<SpinBox>> node_;
+  std::source_location origin_;
+  std::optional<std::expected<SpinBoxResult, ManagedError>> last_;
 };
 
 class TextProperty;
@@ -801,6 +843,21 @@ public:
     return NumericProperty(target(), std::move(node), origin);
   }
 
+  /** @param origin Property access site. @return Numeric assignment following the editor's EditMode. */
+  SpinBoxNumericProperty value(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, SpinBox>
+  {
+    auto node = this->slot_ ? std::shared_ptr<const Node<SpinBox>>(this->slot_, &this->slot_->node) : nullptr;
+    return SpinBoxNumericProperty(target(), std::move(node), origin);
+  }
+
+  /** @return Weak reference to the single ordinary editor, preserving its text/history API. */
+  Ref<LineEdit> lineEdit() const
+    requires std::same_as<T, SpinBox>
+  {
+    auto node = this->slot_ ? std::shared_ptr<const Node<SpinBox>>(this->slot_, &this->slot_->node) : nullptr;
+    return detail::spinBoxEditor(target(), std::move(node));
+  }
   /** @param delta Finite amount added to the current value; nonfinite/out-of-range results reject without mutation.
    * @param origin Public command site retained on failure.
    * @return Checked programmatic change, automatically collected on failure; unchanged results request no redraw.
@@ -1249,7 +1306,8 @@ public:
    * Resolver capture/storage allocation may throw before a mutation starts.
    */
   TextProperty text(TextResolver resolver = {}, std::source_location origin = std::source_location::current()) const
-    requires((std::derived_from<T, Control> && !std::derived_from<T, Slider>) || std::same_as<T, LineEdit>)
+    requires((std::derived_from<T, Control> && !std::derived_from<T, Slider>) || std::same_as<T, LineEdit> ||
+             std::same_as<T, SpinBox>)
   {
     auto target = this->slot_ ? std::shared_ptr<detail::RefTarget>(this->slot_, &this->slot_->target) : nullptr;
     constexpr std::string_view TYPE = std::same_as<T, LineEdit>     ? "LineEdit"
@@ -1781,6 +1839,8 @@ struct NamedAccess {
         editor = field->editor();
       } else if (const auto *find = dynamic_cast<const FindBar *>(&widget)) {
         editor = find->editor();
+      } else if (const auto *spin = dynamic_cast<const SpinBox *>(&widget)) {
+        editor = spin->editor();
       } else if (const auto *choice = dynamic_cast<const ComboBox *>(&widget)) {
         editor = choice->editor();
       }
@@ -1839,7 +1899,8 @@ struct NamedAccess {
         ManagedError{ManagedPhase::BIND, node.id(), checked ? TreeError::INVALID_ARGUMENT : checked.error(), {}, {}});
     }
 
-    if constexpr (std::same_as<T, FormField> || std::same_as<T, FindBar> || std::derived_from<T, ComboBox>) {
+    if constexpr (std::same_as<T, FormField> || std::same_as<T, FindBar> || std::same_as<T, SpinBox> ||
+                  std::derived_from<T, ComboBox>) {
       auto editor = fieldDraft(scene, node);
 
       if (!editor) {

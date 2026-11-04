@@ -13,6 +13,7 @@
 #include <portals/ui_primitives.hpp>
 #include <portals/ui_scene_pipeline.hpp>
 #include <portals/ui_slider.hpp>
+#include <portals/ui_spin_box.hpp>
 #include <portals/ui_virtual.hpp>
 
 #include <filesystem>
@@ -244,6 +245,8 @@ private:
     if constexpr (std::derived_from<T, Slider>) {
       entry.text = false;
       entry.virtualView = "Slider"; // Reuse the cold native-schema identity slot, without new registry payload.
+    } else if constexpr (std::same_as<T, SpinBox>) {
+      entry.virtualView = "SpinBox";
     }
 
     if constexpr (detail::IsVirtualList<T>::value || detail::IsVirtualTable<T>::value || detail::IsChart<T>::value) {
@@ -287,7 +290,7 @@ private:
       const auto materialized = detail::controlSettingsPresenceSet(arguments.settings);
       std::optional<ControlSettings> numericSettings;
 
-      if constexpr (std::derived_from<T, Slider>) {
+      if constexpr (std::derived_from<T, Slider> || std::same_as<T, SpinBox>) {
         numericSettings.emplace();
         auto &patch = *numericSettings;
         const auto &source = arguments.settings;
@@ -300,6 +303,16 @@ private:
         patch.readOnly = source.readOnly;
         patch.preferredWidth = source.preferredWidth;
         patch.maxPaintCells = source.maxPaintCells;
+        if constexpr (std::same_as<T, SpinBox>) {
+          patch.text = source.text;
+          patch.editMode = source.editMode;
+          patch.programmaticChange = source.programmaticChange;
+          patch.displayMode = source.displayMode;
+          patch.placeholder = source.placeholder;
+          patch.history = source.history;
+          patch.limits = source.limits;
+          patch.origins = source.origins;
+        }
         patch.origin = source.origin;
         const std::pair<std::string_view, bool> fields[]{
           {"value", patch.value.has_value()}, {"minimum", patch.minimum.has_value()},
@@ -314,7 +327,12 @@ private:
 
             origin.path = path;
             origin.source = found == source.origins.end() ? source.origin : found->source;
-            patch.origins.push_back(std::move(origin));
+            auto existing = std::ranges::find(patch.origins, path, &ControlPropertyOrigin::path);
+            if (existing == patch.origins.end()) {
+              patch.origins.push_back(std::move(origin));
+            } else {
+              existing->source = origin.source;
+            }
           }
         }
       }
@@ -355,7 +373,7 @@ private:
         return std::unexpected(recipe.error());
       }
 
-      if constexpr (std::derived_from<T, Slider>) {
+      if constexpr (std::derived_from<T, Slider> || std::same_as<T, SpinBox>) {
         detail::Access::numericSettings(*recipe, std::move(*numericSettings));
       }
 

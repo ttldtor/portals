@@ -437,14 +437,17 @@ private:
   }
 
   const ControlPropertyDescriptor *descriptor(std::string_view path) const {
-    for (const auto type : {"FindBar",    "FormField",     "Password",      "LineEdit",
-                            "ComboBox",   "DropDown",      "CheckBox",      "Switch",
-                            "RadioGroup", "Slider",        "VBox",          "Button",
-                            "Border",     "Gauge",         "Spinner",       "ScrollArea",
-                            "ScrollBar",  "LogView",       "Overlay",       "HelpView",
-                            "KeyHints",   "VirtualList",   "VirtualTable",  "StatusBar",
-                            "Chart",      "DataStateView", "OverlayHost",   "Dialog",
-                            "MessageBox", "Notifications", "ThemeSelector", "ThemeSelectorCatalog"}) {
+    for (const auto type : {"FindBar",       "FormField",     "Password",
+                            "LineEdit",      "ComboBox",      "DropDown",
+                            "CheckBox",      "Switch",        "RadioGroup",
+                            "Slider",        "SpinBox",       "VBox",
+                            "Button",        "Border",        "Gauge",
+                            "Spinner",       "ScrollArea",    "ScrollBar",
+                            "LogView",       "Overlay",       "HelpView",
+                            "KeyHints",      "VirtualList",   "VirtualTable",
+                            "StatusBar",     "Chart",         "DataStateView",
+                            "OverlayHost",   "Dialog",        "MessageBox",
+                            "Notifications", "ThemeSelector", "ThemeSelectorCatalog"}) {
       const auto schema = controlPropertySchema(type);
       const auto found = std::ranges::find(schema, path, &ControlPropertyDescriptor::path);
 

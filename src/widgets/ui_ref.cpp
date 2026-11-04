@@ -201,6 +201,18 @@ struct RefAccess {
     return scene.setSliderValue(node, value);
   }
 
+  static std::expected<double, ManagedError> spinBoxValue(ManagedScene &scene, Node<SpinBox> node) {
+    return scene.spinBoxValue(node);
+  }
+
+  static std::expected<SpinBoxResult, ManagedError> spinBoxValue(ManagedScene &scene, Node<SpinBox> node,
+                                                                 double value) {
+    return scene.setSpinBoxValue(node, value);
+  }
+
+  static std::expected<Node<LineEdit>, ManagedError> spinBoxEditor(ManagedScene &scene, Node<SpinBox> node) {
+    return scene.spinBoxEditor(node);
+  }
   static std::expected<void, TreeError> display(ManagedScene &scene, Node<Widget> target, DataPresentation value) {
     auto found = std::ranges::find_if(scene.dataStates_, [&](const auto &record) {
       return record->node == target;
@@ -366,7 +378,7 @@ struct RefAccess {
 
     if (value.draft) {
       auto entry = scene.find(target.draft != Node<LineEdit>{} ? Node<Widget>(target.draft) : target.node);
-      auto *binding = entry ? std::get_if<LineEditBinding>(&entry->binding) : nullptr;
+      auto *binding = entry ? entry->editorBinding() : nullptr;
       auto revision = binding ? binding->draftRevision() : std::unexpected(TreeError::INVALID_ARGUMENT);
 
       if (!revision) {
@@ -391,7 +403,7 @@ struct RefAccess {
 
     if (target.draft != Node<LineEdit>{}) {
       auto entry = scene.find(target.draft != Node<LineEdit>{} ? Node<Widget>(target.draft) : target.node);
-      auto *binding = entry ? std::get_if<LineEditBinding>(&entry->binding) : nullptr;
+      auto *binding = entry ? entry->editorBinding() : nullptr;
 
       if (!binding) {
         return std::unexpected(failure(target.node, TreeError::INVALID_ARGUMENT));
@@ -408,11 +420,11 @@ struct RefAccess {
   static std::expected<GraphemeText, ManagedError> committedSnapshot(ManagedScene &scene, const RefTarget &target) {
     auto entry = scene.find(target.draft != Node<LineEdit>{} ? Node<Widget>(target.draft) : target.node);
 
-    if (!entry || !entry->textModel || !std::holds_alternative<LineEditBinding>(entry->binding)) {
+    if (!entry || !entry->editorBinding()) {
       return std::unexpected(failure(target.node, TreeError::INVALID_ARGUMENT));
     }
 
-    auto model = entry->textModel->snapshot();
+    auto model = entry->editorBinding()->modelSnapshot();
 
     if (!model) {
       return std::unexpected(failure(target.node, model.error()));
@@ -448,17 +460,17 @@ struct RefAccess {
     std::shared_ptr<const PropertyChange<std::string>> model;
     if (committed) {
       auto entry = scene.find(target.draft != Node<LineEdit>{} ? Node<Widget>(target.draft) : target.node);
-      if (!entry || !entry->textModel) {
+      if (!entry || !entry->editorBinding()) {
         return std::unexpected(failure(target.node, TreeError::INVALID_ARGUMENT));
       }
-      auto value = entry->textModel->snapshot();
+      auto value = entry->editorBinding()->modelSnapshot();
       if (!value) {
         return std::unexpected(failure(target.node, value.error()));
       }
       model = *value;
     } else if (target.draft != Node<LineEdit>{}) {
       auto entry = scene.find(target.draft != Node<LineEdit>{} ? Node<Widget>(target.draft) : target.node);
-      auto *binding = entry ? std::get_if<LineEditBinding>(&entry->binding) : nullptr;
+      auto *binding = entry ? entry->editorBinding() : nullptr;
       auto revision = binding ? binding->draftRevision() : std::unexpected(TreeError::INVALID_ARGUMENT);
       if (!revision) {
         return std::unexpected(failure(target.node, revision.error()));
@@ -518,7 +530,7 @@ struct RefAccess {
       collector = target->lifetime;
 
       auto entry = (*owner)->find(target->node);
-      auto *binding = entry ? std::get_if<LineEditBinding>(&entry->binding) : nullptr;
+      auto *binding = entry ? entry->editorBinding() : nullptr;
 
       if (!binding) {
         result = std::unexpected(TreeError::INVALID_ARGUMENT);
@@ -563,7 +575,7 @@ struct RefAccess {
     }
 
     auto entry = (*owner)->find(target->node);
-    auto *binding = entry ? std::get_if<LineEditBinding>(&entry->binding) : nullptr;
+    auto *binding = entry ? entry->editorBinding() : nullptr;
 
     return binding ? binding->historyAvailability() : std::unexpected(TreeError::INVALID_ARGUMENT);
   }
@@ -649,7 +661,7 @@ struct RefAccess {
   static std::pair<std::expected<void, TreeError>, bool> clearFindEditor(ManagedScene &scene, Node<Widget> node,
                                                                          std::source_location origin) {
     auto entry = scene.find(node);
-    auto *binding = entry ? std::get_if<LineEditBinding>(&entry->binding) : nullptr;
+    auto *binding = entry ? entry->editorBinding() : nullptr;
     return binding ? binding->clearCommand(origin)
                    : std::pair<std::expected<void, TreeError>, bool>{std::unexpected(TreeError::STALE_NODE), false};
   }
@@ -780,6 +792,34 @@ std::expected<PropertyUpdate<NumericValue>, ManagedError> numericValue(const std
                       : std::expected<PropertyUpdate<NumericValue>, ManagedError>{std::unexpected(owner.error())};
 
   return result;
+}
+
+std::expected<double, ManagedError> spinBoxValue(const std::shared_ptr<RefTarget> &target,
+                                                 const std::shared_ptr<const Node<SpinBox>> &node) {
+  auto owner = eventScene(target);
+  return owner ? RefAccess::spinBoxValue(**owner, node ? *node : Node<SpinBox>{}) : std::unexpected(owner.error());
+}
+
+std::expected<SpinBoxResult, ManagedError> spinBoxValue(const std::shared_ptr<RefTarget> &target,
+                                                        const std::shared_ptr<const Node<SpinBox>> &node, double value,
+                                                        std::source_location) {
+  auto owner = eventScene(target);
+  return owner ? RefAccess::spinBoxValue(**owner, node ? *node : Node<SpinBox>{}, value)
+               : std::unexpected(owner.error());
+}
+
+Ref<LineEdit> spinBoxEditor(const std::shared_ptr<RefTarget> &target,
+                            const std::shared_ptr<const Node<SpinBox>> &typed) {
+  Ref<LineEdit> reference;
+  auto owner = eventScene(target);
+  auto node = owner ? RefAccess::spinBoxEditor(**owner, typed ? *typed : Node<SpinBox>{})
+                    : std::expected<Node<LineEdit>, ManagedError>(std::unexpected(owner.error()));
+  auto published = node ? NamedAccess::publish(reference, **owner, *node)
+                        : std::expected<void, ManagedError>(std::unexpected(node.error()));
+  if (!published) {
+    NamedAccess::reject(reference, published.error());
+  }
+  return reference;
 }
 
 std::expected<void, ManagedError> spinnerActive(std::shared_ptr<RefTarget> target,
@@ -1038,6 +1078,46 @@ std::expected<GraphemeText, ManagedError> TextSource::snapshot() const {
   } catch (const std::length_error &) {
     return std::unexpected(detail::failure(target_->node, TreeError::NODE_LIMIT));
   }
+}
+
+std::expected<double, ManagedError> SpinBoxNumericProperty::get() const {
+  return detail::spinBoxValue(target_, node_);
+}
+
+std::expected<SpinBoxResult, ManagedError> SpinBoxNumericProperty::result() const {
+  return last_ ? *last_
+               : std::expected<SpinBoxResult, ManagedError>(
+                   std::unexpected(ManagedError{ManagedPhase::TEXT, {}, TreeError::INVALID_ARGUMENT, {}, {}}));
+}
+
+SpinBoxNumericProperty SpinBoxNumericProperty::set(double value, std::source_location origin) {
+  const auto target = target_;
+  const auto node = node_;
+  auto receipt = detail::spinBoxValue(target, node, value, origin);
+  if (!receipt) {
+    detail::RefAccess::report(receipt.error(), target, "spinBox.value", {}, "SpinBox", origin);
+  }
+  SpinBoxNumericProperty observation(target, node, origin);
+  observation.last_.emplace(std::move(receipt));
+  return observation;
+}
+
+SpinBoxNumericProperty SpinBoxNumericProperty::operator=(double value) {
+  return set(value, origin_);
+}
+
+SpinBoxNumericProperty SpinBoxNumericProperty::operator=(const SpinBoxNumericProperty &other) {
+  const auto target = target_;
+  const auto node = node_;
+  const auto origin = origin_;
+  auto candidate = other.get();
+  if (candidate) {
+    return set(*candidate, origin);
+  }
+  detail::RefAccess::report(candidate.error(), target, "spinBox.value", {}, "SpinBox", origin);
+  SpinBoxNumericProperty observation(target, node, origin);
+  observation.last_.emplace(std::unexpected(candidate.error()));
+  return observation;
 }
 
 std::expected<double, ManagedError> NumericProperty::get() const {

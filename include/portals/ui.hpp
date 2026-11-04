@@ -20,5 +20,6 @@
 #include <portals/ui_scene_recipes.hpp>
 #include <portals/ui_scene_resource.hpp>
 #include <portals/ui_slider.hpp>
+#include <portals/ui_spin_box.hpp>
 #include <portals/ui_virtual.hpp>
 #include <portals/ui_switch.hpp>

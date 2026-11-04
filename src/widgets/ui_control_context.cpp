@@ -399,6 +399,7 @@ constexpr Mask CHECK_MASK = SIZE_MASK | TEXT_MASK | propertyMask(5, 6);
 constexpr Mask SWITCH_MASK = CHECK_MASK | propertyMask(8);
 constexpr Mask LAYOUT_MASK = SIZE_MASK | propertyMask(4, 22, 23, 24, 25, 30, 31, 32);
 constexpr Mask EDIT_MASK = SIZE_MASK | TEXT_MASK | propertyMask(7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 33, 34, 35, 36);
+constexpr Mask SPIN_BOX_MASK = EDIT_MASK | propertyMask(40, 41, 42, SLIDER_STEP_PROPERTY, SLIDER_PAGE_STEPS_PROPERTY);
 constexpr Mask CHOICE_MASK = EDIT_MASK | propertyMask(230);
 constexpr Mask FORM_FIELD_MASK = EDIT_MASK | LAYOUT_MASK | propertyMask(200, 216, 217, 218);
 constexpr Mask FIND_BAR_MASK = EDIT_MASK | LAYOUT_MASK | propertyMask(219, 220, 221, 222, 223, 224);
@@ -531,6 +532,15 @@ constexpr auto EDIT_SCHEMA = withFrame(
   std::to_array({PROPERTIES[0], PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[7], PROPERTIES[8],
                  PROPERTIES[9], PROPERTIES[10], PROPERTIES[11], PROPERTIES[12], PROPERTIES[13], PROPERTIES[14],
                  PROPERTIES[15], PROPERTIES[16], PROPERTIES[33], PROPERTIES[34], PROPERTIES[35], PROPERTIES[36]}));
+constexpr auto SPIN_BOX_SCHEMA = [] {
+  std::array<ControlPropertyDescriptor, EDIT_SCHEMA.size() + 5> schema{};
+  std::ranges::copy(EDIT_SCHEMA, schema.begin());
+  std::size_t index = EDIT_SCHEMA.size();
+  for (const auto property : std::array<std::size_t, 5>{40, 41, 42, SLIDER_STEP_PROPERTY, SLIDER_PAGE_STEPS_PROPERTY}) {
+    schema[index++] = PROPERTIES[property];
+  }
+  return schema;
+}();
 constexpr auto CHOICE_SCHEMA = [] {
   std::array<ControlPropertyDescriptor, EDIT_SCHEMA.size() + 1> schema{};
   std::ranges::copy(EDIT_SCHEMA, schema.begin());
@@ -610,6 +620,7 @@ static_assert(schemaMatchesMask(NOTIFICATION_SCHEMA, NOTIFICATION_MASK));
 static_assert(schemaMatchesMask(THEME_SELECTOR_SCHEMA, THEME_SELECTOR_MASK));
 static_assert(schemaMatchesMask(THEME_CATALOG_SCHEMA, THEME_CATALOG_MASK));
 static_assert(schemaMatchesMask(EDIT_SCHEMA, EDIT_MASK));
+static_assert(schemaMatchesMask(SPIN_BOX_SCHEMA, SPIN_BOX_MASK));
 static_assert(schemaMatchesMask(CHOICE_SCHEMA, CHOICE_MASK));
 static_assert(schemaMatchesMask(FORM_FIELD_SCHEMA, FORM_FIELD_MASK));
 static_assert(schemaMatchesMask(FIND_BAR_SCHEMA, FIND_BAR_MASK));
@@ -620,7 +631,7 @@ bool builtin(std::string_view name) noexcept {
   return name == "Spacer" || name == "Spacing" || name == "VBox" || name == "HBox" || name == "Label" ||
          name == "Switch" || name == "Button" || name == "CheckBox" || name == "LineEdit" || name == "ThreeState" ||
          name == "Password" || name == "FormField" || name == "FindBar" || name == "ComboBox" || name == "DropDown" ||
-         name == "StatusBar" || name == "RadioGroup" || name == "Slider";
+         name == "StatusBar" || name == "RadioGroup" || name == "Slider" || name == "SpinBox";
 }
 
 Mask builtinMask(std::string_view name) noexcept {
@@ -637,6 +648,9 @@ Mask builtinMask(std::string_view name) noexcept {
 
   if (name == "Gauge") {
     return GAUGE_MASK;
+  }
+  if (name == "SpinBox") {
+    return SPIN_BOX_MASK;
   }
   if (name == "Slider") {
     return SLIDER_MASK;
@@ -2256,6 +2270,9 @@ std::span<const ControlPropertyDescriptor> controlPropertySchema(std::string_vie
 
   if (type == "Gauge") {
     return GAUGE_SCHEMA;
+  }
+  if (type == "SpinBox") {
+    return SPIN_BOX_SCHEMA;
   }
   if (type == "Slider") {
     return SLIDER_SCHEMA;

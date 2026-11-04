@@ -34,6 +34,7 @@ Use style layers when palette changes must preserve application and user overrid
 ## Controls and data
 
 - [Basic controls](controls.md), [LineEdit](line-edit.md), [text history](text-history.md), [editor undo and redo](editor-history.md).
+- [Numeric editors](spin-boxes.md): numeric drafts, confirmation modes and step buttons.
 - [Layout](layout.md), [grid and overlay](grid.md), [scrolling](scroll.md), [charts](chart.md).
 - [Immutable models](model.md), [bounded queries](model-queries.md), [layout-driven view preparation](virtual-preparation.md).
 - [Data presentation](data-presentation.md) describes loading, empty, error and offline states around content.

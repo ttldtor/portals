@@ -62,7 +62,7 @@ endif()
 add_test(NAME consumer.form-field-async COMMAND portals_form_field_async_consumer)
 set_tests_properties(consumer.form-field-async PROPERTIES TIMEOUT 30)
 
-foreach(guide IN ITEMS model_find prepared_theme fractional_scroll spacers responsive_layout slider radio_group radio_group_resource)
+foreach(guide IN ITEMS model_find prepared_theme fractional_scroll spacers responsive_layout slider spin_box radio_group radio_group_resource)
   add_executable(portals_docs_${guide}_consumer docs/examples/guide_${guide}.cpp)
   target_link_libraries(portals_docs_${guide}_consumer PRIVATE portals::core)
   set_target_properties(portals_docs_${guide}_consumer PROPERTIES CXX_EXTENSIONS OFF)
@@ -95,7 +95,7 @@ endif()
 add_test(NAME consumer.ui-delivery COMMAND portals_ui_delivery_consumer)
 set_tests_properties(consumer.ui-delivery PROPERTIES TIMEOUT 15)
 add_executable(portals_ref_headers_consumer
-  numeric_header.cpp slider_header.cpp ui_slider_header.cpp
+  numeric_header.cpp slider_header.cpp ui_slider_header.cpp spin_box_header.cpp ui_spin_box_header.cpp
   ref_header.cpp scene_header.cpp
   ui_controls_header.cpp ui_layout_header.cpp ui_scene_pipeline_header.cpp
   ui_static_header.cpp
@@ -1127,3 +1127,19 @@ endif()
 if(MSVC)
   target_compile_options(portals_radio_group_example_consumer PRIVATE /utf-8)
 endif()
+
+add_executable(portals_numeric_form_consumer examples/numeric_form/main.cpp)
+target_link_libraries(portals_numeric_form_consumer PRIVATE portals::core)
+set_target_properties(portals_numeric_form_consumer PROPERTIES CXX_EXTENSIONS OFF)
+if(WIN32)
+  target_sources(portals_numeric_form_consumer PRIVATE no_dialogs.cpp)
+endif()
+
+add_executable(portals_spin_box_consumer spin_box.cpp)
+target_link_libraries(portals_spin_box_consumer PRIVATE portals::core)
+set_target_properties(portals_spin_box_consumer PROPERTIES CXX_EXTENSIONS OFF)
+if(WIN32)
+  target_sources(portals_spin_box_consumer PRIVATE no_dialogs.cpp)
+endif()
+add_test(NAME consumer.spin-box COMMAND portals_spin_box_consumer)
+set_tests_properties(consumer.spin-box PROPERTIES TIMEOUT 15)

@@ -162,6 +162,9 @@ SceneResourceRegistry::SceneResourceRegistry() {
   (void)add<Slider>("Slider", [](SceneResourceArguments) {
     return slider();
   });
+  (void)add<SpinBox>("SpinBox", [](SceneResourceArguments) {
+    return spinBox();
+  });
   for (auto &entry : entries_) {
     entry.factoryKind = detail::ControlFactoryKind::EXISTING_BUILTIN;
   }

@@ -157,7 +157,7 @@ public:
    * @return Consuming native Gauge recipe with a sparse value override.
    */
   Description &&value(double value) &&
-    requires(std::same_as<T, Gauge> || std::same_as<T, Slider>)
+    requires(std::same_as<T, Gauge> || std::same_as<T, Slider> || std::same_as<T, SpinBox>)
   {
     return std::move(*this).scalarSettings({.value = value});
   }
@@ -166,7 +166,7 @@ public:
    * @return Consuming native Gauge recipe with a sparse lower-bound override.
    */
   Description &&minimum(double value) &&
-    requires(std::same_as<T, Gauge> || std::same_as<T, Slider>)
+    requires(std::same_as<T, Gauge> || std::same_as<T, Slider> || std::same_as<T, SpinBox>)
   {
     return std::move(*this).scalarSettings({.minimum = value});
   }
@@ -175,7 +175,7 @@ public:
    * @return Consuming native Gauge recipe with a sparse upper-bound override.
    */
   Description &&maximum(double value) &&
-    requires(std::same_as<T, Gauge> || std::same_as<T, Slider>)
+    requires(std::same_as<T, Gauge> || std::same_as<T, Slider> || std::same_as<T, SpinBox>)
   {
     return std::move(*this).scalarSettings({.maximum = value});
   }
@@ -185,7 +185,7 @@ public:
    * @return Consuming native Gauge recipe staging both bounds together.
    */
   Description &&range(double minimum, double maximum) &&
-    requires(std::same_as<T, Gauge> || std::same_as<T, Slider>)
+    requires(std::same_as<T, Gauge> || std::same_as<T, Slider> || std::same_as<T, SpinBox>)
   {
     return std::move(*this).scalarSettings({.minimum = minimum, .maximum = maximum});
   }
@@ -194,7 +194,7 @@ public:
    * @return Consuming native Gauge recipe with a sparse preferred-width override.
    */
   Description &&preferredWidth(std::int32_t cells) &&
-    requires(std::same_as<T, Gauge> || std::same_as<T, Slider>)
+    requires(std::same_as<T, Gauge> || std::same_as<T, Slider> || std::same_as<T, SpinBox>)
   {
     return std::move(*this).scalarSettings({.preferredWidth = cells});
   }
@@ -203,7 +203,7 @@ public:
    * @return Consuming unbound Slider recipe with a staged numeric source setting.
    */
   Description &&step(double amount) &&
-    requires std::same_as<T, Slider>
+    requires(std::same_as<T, Slider> || std::same_as<T, SpinBox>)
   {
     return std::move(*this).scalarSettings({.step = amount});
   }
@@ -212,7 +212,7 @@ public:
    * @return Consuming Slider recipe using the same checked options as resources.
    */
   Description &&pageSteps(std::uint64_t count) &&
-    requires std::same_as<T, Slider>
+    requires(std::same_as<T, Slider> || std::same_as<T, SpinBox>)
   {
     return std::move(*this).scalarSettings({.pageSteps = count});
   }
@@ -276,7 +276,8 @@ public:
    */
   Description &&readOnly(bool value = true) &&
     requires(std::same_as<T, LineEdit> || std::same_as<T, Password> || std::same_as<T, ScrollArea> ||
-             std::same_as<T, ScrollBar> || std::same_as<T, Slider> || std::same_as<T, RadioGroup>)
+             std::same_as<T, ScrollBar> || std::same_as<T, Slider> || std::same_as<T, RadioGroup> ||
+             std::same_as<T, SpinBox>)
   {
     return std::move(*this).scalarSettings({.readOnly = value});
   }
@@ -318,7 +319,7 @@ public:
    * @return Consuming editor recipe; ordinary LineEdit storage remains plaintext.
    */
   Description &&noEcho(bool enabled = true) &&
-    requires(std::same_as<T, LineEdit> || std::same_as<T, Password>)
+    requires(std::same_as<T, LineEdit> || std::same_as<T, Password> || std::same_as<T, SpinBox>)
   {
     const auto mode = enabled                     ? LineEditDisplayMode::NO_ECHO
                       : std::same_as<T, Password> ? LineEditDisplayMode::PASSWORD
@@ -329,7 +330,7 @@ public:
 
   /** @param value Publication mode shared by input and fluent changes. @return Consuming editor recipe. */
   Description &&editMode(EditMode value) &&
-    requires(std::same_as<T, LineEdit> || std::same_as<T, Password>)
+    requires(std::same_as<T, LineEdit> || std::same_as<T, Password> || std::same_as<T, SpinBox>)
   {
     return std::move(*this).scalarSettings({.editMode = value});
   }
@@ -337,14 +338,14 @@ public:
   /** @param value Public placeholder expression; never used as protected model data. @return Consuming editor recipe.
    */
   Description &&placeholder(TextValue value) &&
-    requires(std::same_as<T, LineEdit> || std::same_as<T, Password>)
+    requires(std::same_as<T, LineEdit> || std::same_as<T, Password> || std::same_as<T, SpinBox>)
   {
     return std::move(*this).scalarSettings({.placeholder = std::move(value)});
   }
 
   /** @param value Public placeholder bytes copied now. @return Consuming editor recipe. */
   Description &&placeholder(std::string_view value) &&
-    requires(std::same_as<T, LineEdit> || std::same_as<T, Password>)
+    requires(std::same_as<T, LineEdit> || std::same_as<T, Password> || std::same_as<T, SpinBox>)
   {
     return std::move(*this).placeholder(TextValue(value));
   }
@@ -2113,7 +2114,7 @@ private:
     const auto type = inheritControlSettings && state.controlVariant ? std::string_view(*state.controlVariant)
                                                                      : std::string_view(*state.controlType);
     const auto numericCandidates = [&] {
-      if constexpr (std::derived_from<T, Slider>) {
+      if constexpr ((std::derived_from<T, Slider> || std::same_as<T, SpinBox>)) {
         return std::array{state.controlPatch.value ? state.controlPatch.value : state.controlArguments.value,
                           state.controlPatch.minimum ? state.controlPatch.minimum : state.controlArguments.minimum,
                           state.controlPatch.maximum ? state.controlPatch.maximum : state.controlArguments.maximum,
@@ -2130,7 +2131,7 @@ private:
     if (!effective) {
       auto failure = detail::controlContextError(effective.error(), parent);
 
-      if constexpr (std::derived_from<T, Slider>) {
+      if constexpr ((std::derived_from<T, Slider> || std::same_as<T, SpinBox>)) {
         const auto &original = effective.error();
 
         if (original.code == ControlContextErrorCode::INVALID_VALUE && original.diagnostic) {
@@ -2438,7 +2439,8 @@ private:
 
     Node<LineEdit> fieldDraft;
 
-    if constexpr (std::same_as<T, FormField> || std::same_as<T, FindBar> || std::derived_from<T, ComboBox>) {
+    if constexpr (std::same_as<T, FormField> || std::same_as<T, FindBar> || std::same_as<T, SpinBox> ||
+                  std::derived_from<T, ComboBox>) {
       auto editor = detail::NamedAccess::fieldDraft(scene, *node);
 
       if (!editor) {
@@ -2464,23 +2466,24 @@ private:
       context.release.push_back([slot] {
         slot->pending = false;
       });
-      context.publish.push_back([slot, value = *node, owner = &scene, lifetime = detail::Access::lifetime(scene),
-                                 fieldDraft] {
-        slot->node = value;
-        slot->target.node = value;
-        slot->target.scene = owner;
-        slot->target.lifetime = lifetime;
+      context.publish.push_back(
+        [slot, value = *node, owner = &scene, lifetime = detail::Access::lifetime(scene), fieldDraft] {
+          slot->node = value;
+          slot->target.node = value;
+          slot->target.scene = owner;
+          slot->target.lifetime = lifetime;
 
-        if constexpr (std::derived_from<T, Control>) {
-          slot->target.caption = value;
-        } else if constexpr (std::same_as<T, LineEdit>) {
-          slot->target.draft = value;
-        } else if constexpr (std::same_as<T, FormField> || std::same_as<T, FindBar> || std::derived_from<T, ComboBox>) {
-          slot->target.draft = fieldDraft;
-        } else if constexpr (std::same_as<T, Password>) {
-          slot->target.secret = value;
-        }
-      });
+          if constexpr (std::derived_from<T, Control>) {
+            slot->target.caption = value;
+          } else if constexpr (std::same_as<T, LineEdit>) {
+            slot->target.draft = value;
+          } else if constexpr (std::same_as<T, FormField> || std::same_as<T, FindBar> || std::same_as<T, SpinBox> ||
+                               std::derived_from<T, ComboBox>) {
+            slot->target.draft = fieldDraft;
+          } else if constexpr (std::same_as<T, Password>) {
+            slot->target.secret = value;
+          }
+        });
       detail::RefTarget pending;
       pending.node = *node;
       pending.scene = &scene;
@@ -2489,7 +2492,8 @@ private:
         pending.caption = *node;
       } else if constexpr (std::same_as<T, LineEdit>) {
         pending.draft = *node;
-      } else if constexpr (std::same_as<T, FormField> || std::same_as<T, FindBar> || std::derived_from<T, ComboBox>) {
+      } else if constexpr (std::same_as<T, FormField> || std::same_as<T, FindBar> || std::same_as<T, SpinBox> ||
+                           std::derived_from<T, ComboBox>) {
         pending.draft = fieldDraft;
       } else if constexpr (std::same_as<T, Password>) {
         pending.secret = *node;
@@ -3243,11 +3247,10 @@ inline Description<Widget> Access::forwardOuter(Description<Widget> description)
 }
 
 template <class T> void Access::numericSettings(Description<T> &description, ControlSettings patch) {
-  static_assert(std::derived_from<T, Slider>);
+  static_assert(std::derived_from<T, Slider> || std::same_as<T, SpinBox>);
 
   if (!description.state_ || description.state_->prerequisiteFailure ||
-      (!patch.value && !patch.minimum && !patch.maximum && !patch.step && !patch.pageSteps && !patch.readOnly &&
-       !patch.preferredWidth && !patch.maxPaintCells)) {
+      detail::controlSettingsPresenceSet(patch).count() == 0) {
     return;
   }
 
