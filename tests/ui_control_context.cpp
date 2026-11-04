@@ -1863,3 +1863,39 @@ TEST_CASE("radio selection policy retains explicit default and winning sparse or
   patch.radioSelectionMode = static_cast<RadioSelectionMode>(99);
   fails(controls.resolve("Modes", patch), Code::INVALID_VALUE);
 }
+
+TEST_CASE("SpinBox and Slider numeric leaves coexist with RadioGroup selection policy") {
+  ControlContext controls;
+  ControlSettings numeric;
+
+  numeric.minimum = -5;
+  numeric.maximum = 5;
+  numeric.step = 0.25;
+  numeric.pageSteps = 3;
+  controls.defaults("Slider", numeric).defaults("SpinBox", numeric);
+
+  for (const auto type : {"Slider", "SpinBox"}) {
+    const auto resolved = take(controls.resolve(type));
+    const auto presence = ui::detail::controlSettingsPresenceSet(resolved.settings);
+
+    CHECK(resolved.settings.step == 0.25);
+    CHECK(resolved.settings.pageSteps == 3);
+    CHECK(presence.test(261));
+    CHECK(presence.test(262));
+    CHECK_FALSE(presence.test(263));
+    fails(controls.resolve(type, {.radioSelectionMode = RadioSelectionMode::IMMEDIATE}), Code::UNSUPPORTED_PROPERTY);
+    fails(controls.resolve(type, {.pageSteps = 0}), Code::INVALID_VALUE);
+  }
+
+  const auto editor = take(controls.resolve("SpinBox", {.editMode = EditMode::EXPLICIT}));
+
+  CHECK(editor.settings.editMode == EditMode::EXPLICIT);
+  fails(controls.resolve("Slider", {.editMode = EditMode::EXPLICIT}), Code::UNSUPPORTED_PROPERTY);
+  fails(controls.resolve("RadioGroup", numeric), Code::UNSUPPORTED_PROPERTY);
+
+  const auto radio = take(controls.resolve("RadioGroup", {.radioSelectionMode = RadioSelectionMode::IMMEDIATE}));
+  const auto radioPresence = ui::detail::controlSettingsPresenceSet(radio.settings);
+
+  CHECK(radioPresence.count() == 1);
+  CHECK(radioPresence.test(263));
+}

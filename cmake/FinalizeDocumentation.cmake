@@ -20,6 +20,8 @@ endforeach()
 # Ship the exact referenced sources inside the HTML tree so an offline copy
 # works without the repository or a hard-coded GitHub branch URL.
 set(example_sources
+  docs/examples/guide_spin_box.cpp
+  examples/numeric_form/main.cpp
   docs/examples/scrollbar-parts.pss
   docs/examples/tutorial_note_1.cpp
   docs/examples/tutorial_note_2.cpp

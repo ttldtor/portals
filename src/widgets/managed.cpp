@@ -507,6 +507,19 @@ std::expected<void, ManagedError> ManagedScene::remove(Node<Widget> node) {
     return std::unexpected(error(ManagedPhase::CLEANUP, node, live ? TreeError::INVALID_ARGUMENT : live.error()));
   }
 
+  auto parent = app_.tree().inputParent(node);
+
+  if (parent) {
+    const auto owner = find(*parent);
+    const auto *spin = owner ? std::get_if<SpinBoxBinding>(&owner->binding) : nullptr;
+
+    if (spin && spin->ownsPart(node)) {
+      return std::unexpected(error(ManagedPhase::CLEANUP, node, TreeError::INVALID_ARGUMENT));
+    }
+  } else if (!retired(parent.error())) {
+    return std::unexpected(error(ManagedPhase::CLEANUP, node, parent.error()));
+  }
+
   struct Removing {
     bool &flag;
 
@@ -2667,6 +2680,8 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
             status = check->sync();
           } else if (auto *typedCheck = std::get_if<CheckStateBinding>(&entry->binding)) {
             status = typedCheck->sync();
+          } else if (auto *spin = std::get_if<SpinBoxBinding>(&entry->binding)) {
+            status = spin->sync(*focused);
           } else if (auto *slider = std::get_if<SliderBinding>(&entry->binding)) {
             status = slider->sync();
           } else if (auto *radio = std::get_if<RadioGroupBinding>(&entry->binding)) {

@@ -540,7 +540,7 @@ auto onChange(Ref<T> reference, Callback callback, std::source_location origin =
  * @return Checked scene stage using the existing numeric binding and handler budgets.
  */
 template <class T, class Callback>
-  requires(std::derived_from<T, Slider> && std::copy_constructible<Callback> &&
+  requires((std::derived_from<T, Slider> || std::same_as<T, SpinBox>) && std::copy_constructible<Callback> &&
            (portals::detail::ChangeValueAction<Callback, double> ||
             requires(Callback &action, const PropertyUpdate<NumericValue> &receipt) {
               { action(receipt) } -> portals::detail::ManagedActionResult;

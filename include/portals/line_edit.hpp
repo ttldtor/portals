@@ -13,6 +13,7 @@ enum class BackgroundError;
 
 namespace detail {
 struct LineEditValidationAccess;
+struct LineEditSourceAccess;
 struct LineEditValidationGate;
 } // namespace detail
 
@@ -266,6 +267,7 @@ public:
 private:
   friend class LineEditBinding;
   friend struct detail::LineEditValidationAccess;
+  friend struct detail::LineEditSourceAccess;
   friend class ManagedScene;
   friend struct ui::detail::RefAccess;
   void revealCursor();
@@ -346,14 +348,17 @@ public:
 
 private:
   friend struct detail::LineEditValidationAccess;
+  friend struct detail::LineEditSourceAccess;
   friend struct ui::detail::RefAccess;
   friend struct ui::detail::Access;
   std::expected<std::uint64_t, TreeError> draftRevision() const;
+  std::expected<std::shared_ptr<const PropertyChange<std::string>>, TreeError> modelSnapshot() const;
 
   friend class ManagedScene;
   std::expected<void, TreeError> setDraft(GraphemeText text, std::uint64_t revision,
 
-                                          std::optional<ProgrammaticChange> change = {});
+                                          std::optional<ProgrammaticChange> change = {},
+                                          LineEditResult *receipt = nullptr);
 
   void commandFeedback(std::shared_ptr<detail::EditorCommandFeedback> feedback);
   std::pair<std::expected<void, TreeError>, bool>

@@ -58,7 +58,7 @@ std::expected<Node<T>, ManagedError> ManagedScene::emplaceConfigured(Node<Widget
     if constexpr (std::derived_from<T, Control> || std::same_as<T, LineEdit> || std::same_as<T, Password> ||
                   std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, ScrollArea> ||
                   std::same_as<T, ScrollBar> || std::same_as<T, Grid> || std::same_as<T, StatusBar> ||
-                  std::same_as<T, RadioGroup> || std::derived_from<T, ScrollArea>) {
+                  std::same_as<T, RadioGroup> || std::same_as<T, SpinBox> || std::derived_from<T, ScrollArea>) {
       const char *type = "Control";
 
       if constexpr (std::same_as<T, Label>) {
@@ -69,6 +69,8 @@ std::expected<Node<T>, ManagedError> ManagedScene::emplaceConfigured(Node<Widget
         type = "Menu";
       } else if constexpr (std::same_as<T, CheckBox>) {
         type = "CheckBox";
+      } else if constexpr (std::same_as<T, SpinBox>) {
+        type = "SpinBox";
       } else if constexpr (std::same_as<T, Slider>) {
         type = "Slider";
       } else if constexpr (std::same_as<T, LineEdit>) {

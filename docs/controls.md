@@ -610,6 +610,8 @@ frame line patterns remain construction settings;
 
 [Boolean switches](switch.md) use bool models and observing checked properties.
 
+Use a [SpinBox](spin-boxes.md) for numeric text drafts with ordinary editor history and step buttons.
+
 ## Radio groups
 
 [Radio groups](radio-group.md) support a coherent resident single-selection model, unified Ref and ordinary keyboard/mouse input.

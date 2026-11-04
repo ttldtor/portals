@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
-#include <portals/ui_ref.hpp>
 #include <portals/detail/quit_command.hpp>
+#include <portals/ui_ref.hpp>
 
 namespace portals::ui {
 namespace detail {
@@ -79,8 +79,8 @@ struct EditorEventAccess {
    * @return Exact affinity, identity, budget or checked allocation error.
    */
   template <class Event, class Callback, class T>
-  static std::expected<void, ManagedError> attach(ManagedScene &scene, const Ref<T> &reference,
-                                                  Callback callback, std::source_location origin) {
+  static std::expected<void, ManagedError> attach(ManagedScene &scene, const Ref<T> &reference, Callback callback,
+                                                  std::source_location origin) {
     commandOrigin(callback, origin);
     auto owner = eventScene(reference.target());
 
@@ -126,7 +126,7 @@ struct ChangeAccess {
 
     if constexpr (std::derived_from<T, Slider>) {
       return scene.onChange(Node<Slider>{reference.node()}, std::move(callback), origin);
-    } else if constexpr (std::same_as<T, RadioGroup>) {
+    } else if constexpr (std::same_as<T, RadioGroup> || std::same_as<T, SpinBox>) {
       return scene.onChange(reference.node(), std::move(callback), origin);
     } else {
       return scene.onChange(Node<CheckBox>{reference.node()}, std::move(callback), origin);

@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include "line_edit_source.hpp"
 #include "line_edit_validation.hpp"
 #include <portals/detail/line_edit_text.hpp>
 #include <portals/line_edit.hpp>
@@ -8,6 +9,7 @@
 #include <array>
 #include <limits>
 #include <stdexcept>
+#include <variant>
 
 namespace portals {
 namespace {
@@ -346,9 +348,10 @@ LineEdit::~LineEdit() {
 }
 
 struct LineEditBinding::State {
+  using Source = std::variant<std::shared_ptr<Property<std::string>>, std::shared_ptr<detail::LineEditSource>>;
   WidgetTree &tree;
   Node<LineEdit> node;
-  std::shared_ptr<Property<std::string>> model;
+  Source model;
   std::shared_ptr<Clipboard> clipboard;
   std::function<bool(std::string_view)> validate;
   std::function<void(LineEditResult)> onResult;
@@ -363,6 +366,33 @@ struct LineEditBinding::State {
   bool completionDelivery{};
   std::uint64_t draftGeneration{};
   std::shared_ptr<detail::LineEditValidationGate> validationGate;
+
+  std::expected<std::shared_ptr<const PropertyChange<std::string>>, TreeError> sourceSnapshot() {
+    return std::visit(
+      [](auto &source) {
+        return source->snapshot();
+      },
+      model);
+  }
+
+  std::expected<PropertyUpdate<std::string>, TreeError> sourceSet(const std::string &candidate) {
+    return std::visit(
+      [&](auto &source) {
+        return source->set(candidate);
+      },
+      model);
+  }
+
+  bool hasSteps() const noexcept {
+    const auto *adapted = std::get_if<std::shared_ptr<detail::LineEditSource>>(&model);
+    return adapted && (*adapted)->hasSteps();
+  }
+
+  std::expected<std::optional<std::string>, TreeError> sourceStep(std::string_view text, bool dirty, int direction,
+                                                                  bool page) {
+    const auto *adapted = std::get_if<std::shared_ptr<detail::LineEditSource>>(&model);
+    return adapted ? (*adapted)->step(text, dirty, direction, page) : std::optional<std::string>{};
+  }
 
   struct ValidationFlush {
     State &state;
@@ -543,7 +573,7 @@ struct LineEditBinding::State {
   }
 
   std::expected<void, TreeError> syncModel(LineEdit &edit) {
-    auto snapshot = model->snapshot();
+    auto snapshot = sourceSnapshot();
 
     if (!snapshot) {
       return std::unexpected(snapshot.error());
@@ -679,7 +709,7 @@ struct LineEditBinding::State {
       history->stopGrouping();
     }
 
-    auto snapshot = model->snapshot();
+    auto snapshot = sourceSnapshot();
 
     if (!snapshot) {
       return failed(snapshot.error());
@@ -713,7 +743,7 @@ struct LineEditBinding::State {
       return failed(allowed.error());
     }
 
-    snapshot = model->snapshot();
+    snapshot = sourceSnapshot();
 
     if (!snapshot) {
       return failed(snapshot.error());
@@ -757,7 +787,7 @@ struct LineEditBinding::State {
       }
     }
 
-    auto updated = model->set(candidate);
+    auto updated = sourceSet(candidate);
 
     if (!updated) {
       return failed(updated.error());
@@ -784,7 +814,7 @@ struct LineEditBinding::State {
     }
 
     if (event.action == Action::CANCEL) {
-      auto snapshot = model->snapshot();
+      auto snapshot = sourceSnapshot();
       const bool changed = snapshot && edit.text_.bytes() != (*snapshot)->value;
       auto status = snapshot ? adopt(edit, **snapshot) : std::unexpected(snapshot.error());
       userTextChanged = status && changed;
@@ -994,7 +1024,7 @@ struct LineEditBinding::State {
       return {std::unexpected(TreeError::WOULD_BLOCK), {}};
     }
 
-    auto latest = model->snapshot();
+    auto latest = sourceSnapshot();
 
     if (!latest) {
       return {std::unexpected(latest.error()), {}};
@@ -1038,11 +1068,59 @@ struct LineEditBinding::State {
             std::move(outcome)};
   }
 
+  LineEditResult step(LineEdit &edit, int direction, bool page) {
+    auto eligible = tree.inputEligible(node);
+
+    if (!eligible) {
+      return failed(eligible.error());
+    }
+    if (!*eligible || edit.options_.readOnly) {
+      return {LineEditStatus::EDITED};
+    }
+
+    auto synced = syncModel(edit);
+
+    if (!synced) {
+      return failed(synced.error());
+    }
+
+    auto candidate = sourceStep(edit.text_.bytes(), edit.dirty_, direction, page);
+
+    if (!candidate) {
+      return failed(candidate.error());
+    }
+
+    if (!*candidate) {
+      return {LineEditStatus::VALIDATION_FAILED};
+    }
+
+    history->stopGrouping();
+
+    return replace(edit, 0, edit.text_.bytes().size(), **candidate, TextHistoryKind::PROGRAMMATIC);
+  }
+
   std::optional<LineEditResult> compute(LineEdit &edit, const RoutedEvent &event) {
     const auto *command = std::get_if<ActionEvent>(&event);
+
+    if (hasSteps() && command && command->keyAction == KeyAction::RELEASE) {
+      return {};
+    }
+
+    if (hasSteps() && command && command->modifiers == InputModifiers{} &&
+        (command->action == Action::MOVE_UP || command->action == Action::MOVE_DOWN)) {
+      return step(edit, command->action == Action::MOVE_UP ? 1 : -1, false);
+    }
     const auto *text = std::get_if<TextInputEvent>(&event);
     const auto *paste = std::get_if<PasteInputEvent>(&event);
     const auto *key = std::get_if<KeyEvent>(&event);
+    if (hasSteps() && key && key->action != KeyAction::RELEASE && key->modifiers == InputModifiers{}) {
+      if (key->key == InputKey::UP || key->key == InputKey::DOWN || key->key == InputKey::PAGE_UP ||
+          key->key == InputKey::PAGE_DOWN) {
+        return step(edit, key->key == InputKey::UP || key->key == InputKey::PAGE_UP ? 1 : -1,
+                    key->key == InputKey::PAGE_UP || key->key == InputKey::PAGE_DOWN);
+      }
+    }
+
     const auto shortcutScalar = shortcutCharacter(key);
     const bool shortcutKey = shortcutScalar != U'\0';
     const bool commandKey = acceptsAction(command);
@@ -1199,7 +1277,7 @@ struct LineEditBinding::State {
     std::optional<LineEditResult> outcome;
     bool workerFailure{};
     auto edited = tree.edit(node, [&](LineEdit &edit) {
-      auto latest = model->snapshot();
+      auto latest = sourceSnapshot();
       auto eligible = tree.inputEligible(node);
 
       if (!latest) {
@@ -1327,7 +1405,8 @@ std::expected<std::uint64_t, TreeError> LineEditBinding::draftRevision() const {
 }
 
 std::expected<void, TreeError> LineEditBinding::setDraft(GraphemeText text, std::uint64_t revision,
-                                                         std::optional<ProgrammaticChange> change) {
+                                                         std::optional<ProgrammaticChange> change,
+                                                         LineEditResult *receipt) {
   auto state = state_;
 
   if (!state) {
@@ -1361,7 +1440,7 @@ std::expected<void, TreeError> LineEditBinding::setDraft(GraphemeText text, std:
         return;
       }
 
-      auto latest = state->model->snapshot();
+      auto latest = state->sourceSnapshot();
 
       if (!latest) {
         updated = std::unexpected(latest.error());
@@ -1423,6 +1502,9 @@ std::expected<void, TreeError> LineEditBinding::setDraft(GraphemeText text, std:
     outcome->trigger = LineEditTrigger::FLUENT;
     if (state->validationGate) {
       state->validationGate->finished(*outcome);
+    }
+    if (receipt) {
+      *receipt = *outcome;
     }
     state->onResult(*outcome);
   }
@@ -1569,7 +1651,7 @@ std::expected<HistoryAvailability, TreeError> LineEditBinding::historyAvailabili
     return std::unexpected(eligible.error());
   }
 
-  auto latest = state->model->snapshot();
+  auto latest = state->sourceSnapshot();
 
   if (!latest) {
     return std::unexpected(latest.error());
@@ -1607,12 +1689,11 @@ std::expected<LineEditBinding, TreeError> bindLineEdit(WidgetTree &tree, EventRo
                                 std::move(validate), {});
 }
 
-std::expected<LineEditBinding, TreeError>
-bindLineEditWithEvents(WidgetTree &tree, EventRouter &router, Node<LineEdit> node,
-                       std::shared_ptr<Property<std::string>> model, std::function<void(LineEditResult)> result,
-                       std::shared_ptr<Clipboard> clipboard, std::function<bool(std::string_view)> validate,
-                       LineEditEvents events) {
-  if (!model || !result) {
+std::expected<LineEditBinding, TreeError> detail::LineEditSourceAccess::bind(
+  WidgetTree &tree, EventRouter &router, Node<LineEdit> node, std::shared_ptr<detail::LineEditSource> model,
+  std::function<void(LineEditResult)> result, std::function<bool(std::string_view)> validate, LineEditEvents events,
+  std::shared_ptr<Property<std::string>> legacy, std::shared_ptr<Clipboard> clipboard) {
+  if ((!model && !legacy) || (model && legacy) || !result) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
@@ -1630,20 +1711,34 @@ bindLineEditWithEvents(WidgetTree &tree, EventRouter &router, Node<LineEdit> nod
       return std::unexpected(inspected ? TreeError::INVALID_ARGUMENT : inspected.error());
     }
 
-    auto state = std::make_shared<LineEditBinding::State>(
-      LineEditBinding::State{tree, node, std::move(model), std::move(clipboard), std::move(validate), std::move(result),
+    auto source =
+      legacy ? LineEditBinding::State::Source{std::move(legacy)} : LineEditBinding::State::Source{std::move(model)};
 
-                             std::make_unique<TextHistory>(options.history, options.widthPolicy, options.limits)});
+    auto state = std::make_shared<LineEditBinding::State>(LineEditBinding::State{
+      tree, node, std::move(source), std::move(clipboard), std::move(validate), std::move(result),
+
+      std::make_unique<TextHistory>(options.history, options.widthPolicy, options.limits)});
     state->events = std::move(events);
 
-    auto subscription = state->model->observe(node, [state](LineEdit &, auto) {
+    auto synchronize = [state] {
       // Read latest rather than replaying a potentially obsolete delivered snapshot.
       auto synced = state->sync({});
-
       if (!synced) {
         throw synced.error();
       }
-    });
+    };
+    auto subscription = std::visit(
+      [&](auto &source) {
+        if constexpr (std::same_as<std::remove_cvref_t<decltype(source)>, std::shared_ptr<Property<std::string>>>) {
+          // Preserve the existing typed legacy observer capture; no heap source wrapper is needed.
+          return source->observe(node, [synchronize](LineEdit &, auto) {
+            synchronize();
+          });
+        } else {
+          return source->observe(node, synchronize);
+        }
+      },
+      state->model);
 
     if (!subscription) {
       return std::unexpected(subscription.error());
@@ -1674,5 +1769,73 @@ bindLineEditWithEvents(WidgetTree &tree, EventRouter &router, Node<LineEdit> nod
   } catch (...) {
     return std::unexpected(TreeError::CALLBACK_FAILED);
   }
+}
+
+std::expected<LineEditBinding, TreeError>
+bindLineEditWithEvents(WidgetTree &tree, EventRouter &router, Node<LineEdit> node,
+                       std::shared_ptr<Property<std::string>> model, std::function<void(LineEditResult)> result,
+                       std::shared_ptr<Clipboard> clipboard, std::function<bool(std::string_view)> validate,
+                       LineEditEvents events) {
+  return detail::LineEditSourceAccess::bind(tree, router, node, {}, std::move(result), std::move(validate),
+                                            std::move(events), std::move(model), std::move(clipboard));
+}
+
+std::expected<std::shared_ptr<const PropertyChange<std::string>>, TreeError> LineEditBinding::modelSnapshot() const {
+  auto state = state_;
+  if (!state) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+  return state->sourceSnapshot();
+}
+
+std::expected<LineEditResult, TreeError> detail::LineEditSourceAccess::set(LineEditBinding &binding,
+                                                                           GraphemeText text) {
+  auto state = binding.state_;
+
+  if (!state) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+  // Clean editors must adopt an external revision before a programmatic candidate
+  // establishes its baseline. syncModel deliberately preserves dirty conflicts.
+  auto synced = state->sync({});
+
+  if (!synced) {
+    return std::unexpected(synced.error());
+  }
+  auto revision = binding.draftRevision();
+  if (!revision) {
+    return std::unexpected(revision.error());
+  }
+  LineEditResult receipt;
+  try {
+    auto result = binding.setDraft(std::move(text), *revision, {}, &receipt);
+    return result ? std::expected<LineEditResult, TreeError>(std::move(receipt)) : std::unexpected(result.error());
+  } catch (const std::bad_alloc &) {
+    receipt.error = TreeError::NO_MEMORY;
+  } catch (...) {
+    receipt.error = TreeError::CALLBACK_FAILED;
+  }
+  return receipt;
+}
+
+std::expected<void, TreeError> detail::LineEditSourceAccess::step(LineEditBinding &binding, int direction, bool page) {
+  auto state = binding.state_;
+  if (!state) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+  if (state->busy) {
+    return std::unexpected(TreeError::WOULD_BLOCK);
+  }
+  LineEditBinding::State::BusyGuard guard(state->busy);
+  std::optional<LineEditResult> result;
+  state->userTextChanged = false;
+  auto edited = state->tree.edit(state->node, [&](LineEdit &edit) {
+    result = state->step(edit, direction, page);
+  });
+  if (!edited) {
+    return edited;
+  }
+  state->deliver(*result);
+  return result->error ? std::unexpected(*result->error) : std::expected<void, TreeError>{};
 }
 } // namespace portals

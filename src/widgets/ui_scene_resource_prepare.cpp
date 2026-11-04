@@ -224,8 +224,9 @@ std::expected<void, ManagedError> prepareNodes(ResourceDocument &document, const
       const auto &factory = detail::ResourceAccess::entry(registry, node.factory.index);
       const auto &original = resolved.error();
 
-      if (factory.virtualView == "Slider" && original.code == ControlContextErrorCode::INVALID_VALUE &&
-          original.diagnostic && original.diagnostic->path.ends_with(".step") && node.arguments.settings.step &&
+      if ((factory.virtualView == "Slider" || factory.virtualView == "SpinBox") &&
+          original.code == ControlContextErrorCode::INVALID_VALUE && original.diagnostic &&
+          original.diagnostic->path.ends_with(".step") && node.arguments.settings.step &&
           std::isfinite(*node.arguments.settings.step) && *node.arguments.settings.step <= 0) {
         failure.numeric = NumericError::INVALID_STEP;
       }

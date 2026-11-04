@@ -1,0 +1,3 @@
+add_executable(portals_numeric_form main.cpp)
+target_link_libraries(portals_numeric_form PRIVATE portals::core)
+portals_enable_warnings(portals_numeric_form)

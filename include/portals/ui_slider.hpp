@@ -17,7 +17,8 @@ inline ManagedError numericError(Node<Widget> node, NumericError cause) {
   return result;
 }
 
-inline ManagedError numericSettingsError(Node<Widget> node, NumericError cause, const ControlSettings &settings) {
+inline ManagedError numericSettingsError(Node<Widget> node, NumericError cause, const ControlSettings &settings,
+                                         std::string_view type = "Slider") {
   std::array<std::string_view, 3> candidates{"step", "minimum", "maximum"};
 
   if (cause == NumericError::INVALID_RANGE) {
@@ -59,7 +60,7 @@ inline ManagedError numericSettingsError(Node<Widget> node, NumericError cause, 
 
   auto diagnostic = std::make_shared<ControlContextDiagnostic>();
 
-  diagnostic->path = "Slider." + std::string(property);
+  diagnostic->path = std::string(type) + "." + std::string(property);
   diagnostic->origin = std::move(source);
   auto result = controlContextError({ControlContextErrorCode::INVALID_VALUE, std::move(diagnostic)}, node);
 
