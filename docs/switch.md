@@ -2,7 +2,7 @@
 
 [Русская версия](ru/switch.md) · [Controls](controls.md) · [Scene resources](scene-loading-guide.md)
 
-Use a switch for an immediately changed boolean setting; it does not represent an indeterminate value. See [Switch options and factories](../include/portals/ui_switch.hpp) and the [control API](../include/portals/switch.hpp). The preview is the larger device-settings composition.
+Use a switch for a Boolean setting such as network on/off; a [CheckBox](check-box.md) suits an independent selection such as opting into notifications. Both can bind a Boolean value; an accepted user change updates that bound value, while the application controls side effects and persistence. A switch does not represent an indeterminate value. See [Switch options and factories](../include/portals/ui_switch.hpp) and the [control API](../include/portals/switch.hpp). The preview is the larger device-settings composition.
 
 Use `ui::toggle` to display and edit a boolean value. The public widget type is
 `Switch`; the factory name avoids the C++ keyword `switch`.

@@ -2,7 +2,7 @@
 
 [Русская версия](ru/gauge.md) · [Compact primitives](compact-primitives.md) · [Spinner](loading-indicators.md)
 
-Use `ui::gauge` to display a known numeric value in a finite range. It is determinate and does not schedule its own updates; for ongoing work without a known fraction use a spinner.
+Use `ui::gauge` to display a known numeric value in a finite range. It is determinate and does not schedule its own updates; for ongoing work without a known fraction use a spinner. A Gauge displays a value such as upload progress; use a [Slider](sliders.md) when the user should adjust a value such as volume.
 
 ## A complete application
 

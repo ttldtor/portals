@@ -2,10 +2,14 @@
 
 [Русская версия](ru/data-presentation.md)
 
-Wrap content in `ui::dataStateView` to reserve a status strip for loading, empty,
-failed, offline and refreshing states. The strip contains an animated indicator
-only while work is pending. Ordinary content remains an ordinary retained subtree;
-the wrapper does not virtualize it or start data requests.
+A results screen may need to show loading, then ready content or an empty result,
+and explain a failure with an explicit retry. `ui::dataStateView` presents those
+states around an existing content subtree: the application or supported virtual
+view supplies the state, and an optional callback performs retry. Pending work can
+show an animated indicator. The wrapper does not fetch data or virtualize content.
+For content that is always available and has no changing data status, use the
+ordinary content directly. This is the common loading/empty/error presentation
+pattern, without requiring a particular data source.
 
 ![Loading presentation with content kept available.](images/data-state-guide.png)
 
@@ -13,7 +17,8 @@ Loading presentation with content kept available.
 
 ## Run an explicit presentation
 
-This complete application changes presentation with buttons. It starts ready,
+This controlled demonstration changes presentation with buttons; it does not load
+data or provide a retry operation. It starts ready,
 keeps its label visible in every state and exits with **Exit** or F10. A button's
 checked `display` result reaches the standard `runApp` diagnostics. The scene owns
 the controls; `presentation` is an observing reference.

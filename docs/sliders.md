@@ -2,7 +2,7 @@
 
 [Русская версия](ru/sliders.md) · [Controls](controls.md) · [Bindings](bindings-guide.md)
 
-Use a slider for a bounded value where a relative position is useful; use a [SpinBox](spin-boxes.md) when direct numeric text entry matters. The [Slider API](../include/portals/slider.hpp) describes its options and checked operations. The recording below shows the larger settings composition, not just the short guide program.
+A slider lets the user adjust a bounded value such as volume; a [Gauge](gauge.md) displays a value or progress without accepting that input. Use a slider where a relative position is useful; use a [SpinBox](spin-boxes.md) when direct numeric text entry matters. The [Slider API](../include/portals/slider.hpp) describes its options and checked operations. The recording below shows the larger settings composition, not just the short guide program.
 
 Use `ui::slider()` to edit a finite numeric value with the keyboard or mouse.
 The default horizontal slider starts at zero in the inclusive range 0..100,

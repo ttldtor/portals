@@ -25,8 +25,7 @@
   <article class="widget-gallery-card"><h3><a href="layout-ru.html">Адаптивная компоновка</a></h3><a href="layout-ru.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/responsive-layout.png" alt="Очередь работ с изменяемым размером"></a><p>Размещение контролов при изменении доступного пространства.</p></article>
   <article class="widget-gallery-card"><h3><a href="layout-ru.html">Разделители компоновки</a></h3><a href="layout-ru.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/layout-spacers.png" alt="Контролы с разделителями компоновки"></a><p>Распределение пространства между контролами.</p></article>
   <article class="widget-gallery-card"><h3><a href="border-guide-ru.html">Рамки и заголовки</a></h3><a href="border-guide-ru.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/frame-styles.png" alt="Варианты рамок и оформления заголовков"></a><p>Варианты рамок и оформления заголовков.</p></article>
-  <article class="widget-gallery-card"><h3><a href="scroll-controls-ru.html">Полосы прокрутки</a></h3><a href="scroll-controls-ru.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/scrollbar-gallery.png" alt="Примеры полос прокрутки"></a><p>Прокрутка сохранённого содержимого.</p></article>
-  <article class="widget-gallery-card"><h3><a href="scroll-controls-ru.html">Стрелки прокрутки</a></h3><a href="scroll-controls-ru.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/scroll-arrows.png" alt="Примеры стрелок полос прокрутки"></a><p>Варианты оформления стрелок.</p></article>
+  <article class="widget-gallery-card"><h3><a href="scroll-controls-ru.html">Полосы прокрутки</a></h3><a href="scroll-controls-ru.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/scrollbar-gallery.png" alt="Примеры полос прокрутки"></a><a href="scroll-controls-ru.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/scroll-arrows.png" alt="Примеры стрелок полос прокрутки"></a><p>Прокрутка содержимого; дорожка, ползунок и стрелки настраиваются отдельно.</p></article>
 </div>
 \endhtmlonly
 
@@ -46,7 +45,6 @@
 
 | Задача | Руководство |
 |---|---|
-| Выполнить действие | [Кнопки](button.md) |
 | Проверить поле с подписью | [Поля формы](form-fields.md) |
 | Искать в документе | [FindBar](find-bar.md) |
 | Показать загрузку, пустой результат и ошибку | [Представление данных](data-presentation.md) |
