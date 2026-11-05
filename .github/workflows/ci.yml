@@ -99,7 +99,7 @@ jobs:
             "$name=$([Environment]::GetEnvironmentVariable($name))" >> $env:GITHUB_ENV
           }
       - name: Configure
-        # Includes a fresh build of the installed consumer suite; individual tests keep their own limits.
+        # Package setup and runtime verification use separate fixture phases; per-consumer limits remain.
         run: cmake --preset ${{ matrix.preset }} -DPORTALS_PACKAGE_TEST_TIMEOUT=1200
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }}

@@ -7,7 +7,7 @@ endif()
 
 option(PORTALS_BUILD_TESTS "Build Portals headless tests" ${PROJECT_IS_TOP_LEVEL})
 set(PORTALS_PACKAGE_TEST_TIMEOUT 600 CACHE STRING
-  "Seconds allowed for a fresh installed-package consumer build/test per configuration")
+  "Seconds allowed for each installed-package preparation or verification phase per configuration")
 if(PORTALS_BUILD_TESTS AND
     (NOT PORTALS_PACKAGE_TEST_TIMEOUT MATCHES "^[1-9][0-9]*$" OR PORTALS_PACKAGE_TEST_TIMEOUT GREATER 86400))
   message(FATAL_ERROR "PORTALS_PACKAGE_TEST_TIMEOUT must be a positive integer <= 86400 seconds")
@@ -1211,18 +1211,33 @@ if(PORTALS_BUILD_TESTS)
     list(APPEND portals_package_test_command
       "-DLINK_DEPENDS_USE_LINKER=${CMAKE_LINK_DEPENDS_USE_LINKER}")
   endif()
-  add_test(NAME portals.package-install COMMAND ${portals_package_test_command}
-    -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_install.cmake")
+  add_test(NAME portals.package-fixture COMMAND "${CMAKE_COMMAND}"
+    "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}" "-DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+    "-DGENERATOR=${CMAKE_GENERATOR}" "-DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_fixture.cmake")
+  set_tests_properties(portals.package-fixture PROPERTIES TIMEOUT 30 LABELS "package")
+
+  function(portals_add_package_fixture testName timeout)
+    set(stateFile "${CMAKE_CURRENT_BINARY_DIR}/${testName}-$<CONFIG>.ready")
+    add_test(NAME "${testName}-prepare" COMMAND ${portals_package_test_command}
+      "-DPACKAGE_PHASE=PREPARE" "-DPACKAGE_STATE_FILE=${stateFile}" ${ARGN}
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_install.cmake")
+    add_test(NAME "${testName}" COMMAND ${portals_package_test_command}
+      "-DPACKAGE_PHASE=VERIFY" "-DPACKAGE_STATE_FILE=${stateFile}" ${ARGN}
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_install.cmake")
+    set_tests_properties("${testName}-prepare" PROPERTIES
+      TIMEOUT "${timeout}" LABELS "package" RUN_SERIAL TRUE FIXTURES_SETUP "${testName}.ready")
+    set_tests_properties("${testName}" PROPERTIES
+      TIMEOUT "${timeout}" LABELS "package" RUN_SERIAL TRUE FIXTURES_REQUIRED "${testName}.ready")
+  endfunction()
+  # A fresh full consumer build and its runtime suite have separate bounded phases.
+  # Fixture requirements retain preparation when CTest selects only package-install.
+  portals_add_package_fixture(portals.package-install "${PORTALS_PACKAGE_TEST_TIMEOUT}")
   if("Debug" IN_LIST CMAKE_CONFIGURATION_TYPES AND "Release" IN_LIST CMAKE_CONFIGURATION_TYPES)
-    add_test(NAME portals.package-install-multi-config COMMAND ${portals_package_test_command}
-      "-DINSTALL_CONFIGS=Debug;Release" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_install.cmake")
     math(EXPR portals_package_multi_config_timeout "${PORTALS_PACKAGE_TEST_TIMEOUT} * 2")
-    set_tests_properties(portals.package-install-multi-config PROPERTIES
-      TIMEOUT "${portals_package_multi_config_timeout}" LABELS "package" RUN_SERIAL TRUE)
+    portals_add_package_fixture(portals.package-install-multi-config
+      "${portals_package_multi_config_timeout}" "-DPACKAGE_BOTH_CONFIGS=ON")
   endif()
-  # Each isolated consumer has its own bounded parallel build; do not overlap two nested package builds.
-  set_tests_properties(portals.package-install PROPERTIES
-    TIMEOUT "${PORTALS_PACKAGE_TEST_TIMEOUT}" LABELS "package" RUN_SERIAL TRUE)
   add_executable(portals_diagnostics tests/diagnostics.cpp)
   target_link_libraries(portals_diagnostics PRIVATE portals::core)
   portals_enable_warnings(portals_diagnostics)
