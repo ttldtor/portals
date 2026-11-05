@@ -567,6 +567,7 @@ std::expected<void, ManagedError> ManagedScene::remove(Node<Widget> node) {
   });
   pruneLiveText();
   pruneObservers();
+  pruneNavigation();
   pruneScroll();
   pruneDataStates();
   retireDialogs();
@@ -2814,6 +2815,11 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
       }
     }
 
+    auto navigation = synchronizeNavigation();
+    if (!navigation || closed_) {
+      return navigation ? std::unexpected(TreeError::CLOSED) : navigation;
+    }
+
     // These bounded adapters observe the just-pinned model revision without repinning or scanning data.
     auto activities = visitActivities(true);
 
@@ -3049,6 +3055,7 @@ std::expected<void, ManagedError> ManagedScene::close() {
 
   // Mark closed before retiring captures: their destructors may reenter application code.
   closed_ = true;
+  retireNavigation();
 
   // Retire in place: even moving an empty vector may allocate an MSVC Debug iterator proxy.
   // Closed admission prevents additions; pop before cancellation so recursive close cannot revisit this record.

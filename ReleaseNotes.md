@@ -32,6 +32,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Add scene-owned shared navigation contexts for managed lists and tables, with
+  independent current, selected-set and optional reading-anchor channels. Stable
+  row identities synchronize views without copying screen offsets; weak handles
+  and qualified replies preserve scene lifetime and reject stale results.
+
 - Provider-level model bookmarks with resource identity, qualified resolution
   replies, and bounded finite-snapshot change maps. Stable row identity survives
   reordering; declared removals resolve a neighboring row without scanning the

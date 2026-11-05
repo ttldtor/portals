@@ -14,6 +14,7 @@
 #include <portals/log_view.hpp>
 #include <portals/managed_diagnostics.hpp>
 #include <portals/managed_model.hpp>
+#include <portals/managed_navigation.hpp>
 #include <portals/password.hpp>
 #include <portals/primitives.hpp>
 #include <portals/radio_group.hpp>
@@ -438,6 +439,7 @@ public:
 
 private:
   friend class ManagedScene;
+  friend class ManagedNavigation;
   friend struct ui::detail::Access;
 
   explicit ManagedSource(ManagedState<T> state) : state_(std::move(state)) {
@@ -1709,6 +1711,53 @@ public:
   std::expected<ManagedModel<typename detail::CollectionSource<std::remove_cvref_t<Source>>::Row>, ManagedError>
   model(Source &&source, CollectionModelOptions options = {});
 
+  /** @param resource Explicit logical provider domain; independent of the mounted views.
+   * @param session Current provider delivery session.
+   * @param options Positive bounded metadata limits.
+   * @return Scene-owned generic context or typed admission/allocation failure.
+   */
+  std::expected<ManagedNavigation, ManagedError> navigation(ModelResource resource, SourceStamp session,
+                                                           NavigationOptions options = {});
+
+  /** @tparam T Immutable finite model row type.
+   * @param model Original source model in this scene; projections bind explicitly later.
+   * @param options Positive bounded metadata limits.
+   * @return Independent context sharing the model's logical identity, or typed failure.
+   */
+  template <class T>
+  std::expected<ManagedNavigation, ManagedError> navigation(ManagedModel<T> model, NavigationOptions options = {});
+
+  /** @tparam T Immutable finite model row type.
+   * @param model Original source model in this scene.
+   * @param resource Explicit provider domain for reopen/integration.
+   * @param session Existing provider delivery session.
+   * @param options Positive bounded metadata limits.
+   * @return Independent finite context or typed failure.
+   */
+  template <class T>
+  std::expected<ManagedNavigation, ManagedError> navigation(ManagedModel<T> model, ModelResource resource,
+                                                           SourceStamp session, NavigationOptions options = {});
+
+  /** @tparam T Immutable row type shared with the bound list.
+   * @param node Existing managed list in this scene.
+   * @param navigation Scope-owned navigation context.
+   * @param options Explicit projection and independent current/reading synchronization policy.
+   * @return Checked binding admission; removing the view detaches only this adapter.
+   */
+  template <class T>
+  std::expected<void, ManagedError> bindNavigation(Node<VirtualList<T>> node, ManagedNavigation navigation,
+                                                  NavigationBindingOptions options = {});
+
+  /** @tparam T Immutable row type shared with the bound table.
+   * @param node Existing managed table in this scene.
+   * @param navigation Scope-owned navigation context.
+   * @param options Explicit projection and independent current/reading synchronization policy.
+   * @return Checked binding admission; keyboard focus remains local to the table.
+   */
+  template <class T>
+  std::expected<void, ManagedError> bindNavigation(Node<VirtualTable<T>> node, ManagedNavigation navigation,
+                                                  NavigationBindingOptions options = {});
+
   /** @brief Mount a table with owned range, input binding, style and automatic preparation.
    * @tparam T Immutable model row accepted by the owning column delegates.
    * @param parent Managed parent; failure removes only the attempted child.
@@ -2707,6 +2756,15 @@ private:
   std::size_t coldMountPending_{};
   std::vector<std::shared_ptr<LiveTextRecord>> liveText_ = std::vector<std::shared_ptr<LiveTextRecord>>(0);
   std::vector<std::shared_ptr<detail::ManagedModelSource>> models_;
+  std::unique_ptr<detail::ManagedNavigationRegistry> navigation_;
+  std::expected<void, TreeError> synchronizeNavigation();
+  std::expected<void, TreeError> navigationBefore(Node<Widget> node);
+  std::expected<void, TreeError> navigationAfter(Node<Widget> node);
+  void retireNavigation() noexcept;
+  void pruneNavigation();
+  template <class T, class W>
+  std::expected<void, ManagedError> bindNavigationView(Node<W> node, ManagedNavigation navigation,
+                                                      NavigationBindingOptions options);
   std::shared_ptr<std::function<std::expected<bool, ManagedError>(const InputEvent &)>> input_;
   std::shared_ptr<KeySnapshot> keys_;
   std::shared_ptr<const KeyBindingsSnapshot> keyProjection_;
@@ -2770,6 +2828,8 @@ private:
 
 #include <portals/detail/managed_derive.hpp>
 #include <portals/detail/managed_scroll.hpp>
+#include <portals/detail/managed_navigation.hpp>
+#include <portals/detail/managed_navigation_views.hpp>
 #include <portals/detail/managed_views.hpp>
 
 #include <portals/detail/managed_collections.hpp>

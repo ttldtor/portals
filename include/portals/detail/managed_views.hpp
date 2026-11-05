@@ -192,10 +192,21 @@ std::expected<Node<W>, ManagedError> ManagedScene::attachView(Node<W> node,
           }
         }
       }
+      auto navigation = navigationBefore(node);
+
+      if (!navigation) {
+        return navigation;
+      }
+
       auto work = prepare(*source->frame, layout);
 
       if (!work) {
         return std::unexpected(work.error());
+      }
+
+      navigation = navigationAfter(node);
+      if (!navigation) {
+        return navigation;
       }
 
       live = retireOrigin();
