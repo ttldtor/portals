@@ -52,8 +52,9 @@ struct LogStatus {
 };
 
 /** @brief Native bounded plain-text log with whole-grapheme wrap and a stable reading anchor.
- * The tree exclusively owns records and prepared visible-row text. No background work, callback,
- * clipboard or record snapshots are retained. Use checked tree commands between frames on UI.
+ * The rolling mode exclusively owns records and prepared visible-row text. External-source recipes
+ * retain bounded immutable prepared windows and node-scoped application work; paint never reads a
+ * source or parses text. Use checked tree commands between frames on UI.
  * Construct through ManagedScene::logView or ui::logView: managed preparation and its scoped
  * scroll-intent observation are required. Raw WidgetTree emplacement alone is not a usable log;
  * commands and measurement return INVALID_ARGUMENT until managed initialization is present.

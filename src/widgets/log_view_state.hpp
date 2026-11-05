@@ -6,6 +6,8 @@
 #include <portals/log_view.hpp>
 
 namespace portals::detail {
+struct ExternalLogState;
+
 struct LogRecord {
   std::uint64_t id;
   GraphemeText text;
@@ -48,6 +50,7 @@ struct LogViewState {
   WidthPolicy width;
   LogViewConfig config;
   std::unique_ptr<LogData> data;
+  std::shared_ptr<ExternalLogState> external;
   bool editing{};
 };
 

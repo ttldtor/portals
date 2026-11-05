@@ -227,9 +227,13 @@ and exact positional access on the original model binding. A finite model's know
 size remains useful for absolute navigation and scroll position. A one-pass stream
 need not provide those operations. Reading a window does not implement them.
 
-This is a low-level adapter API. It does not automatically connect a window source
-to the existing `LogView`, `VirtualList`, or `VirtualTable` factories. Those controls
-retain their current model contracts.
+This is an opt-in low-level delivery API. [LogView](log-view.md#log-view-file)
+provides a managed external-source binding through `ui::logFile(...)` and
+`ui::logSource(...)`; it schedules reads and text preparation on the application
+executor. `VirtualList` and `VirtualTable` retain their current model contracts.
+The LogView finite text adapter in `<portals/ui_log_source_model.hpp>` also accepts
+owning strings and a worker-side codec. It is separate from the inline-value
+adapter below; retain the rich model for its other operations.
 
 `<portals/window_source_model.hpp>` supplies `FiniteWindowProvider<T>`, a read-only
 snapshot adapter for inline trivially copyable values. It preserves the snapshot's

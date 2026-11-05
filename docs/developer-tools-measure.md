@@ -2,6 +2,47 @@
 
 [Русская версия](ru/developer-tools-measure.md) · [Tool catalog](developer-tools.md)
 
+## External LogView memory probe {#tool-log-memory}
+
+Build the opt-in test probe with `PORTALS_BUILD_TESTS=ON`. It is excluded from
+the default build and does not generate large files during ordinary CTest runs.
+Python is needed only for the fixture/matrix helper, not for the example or SDK.
+
+```powershell
+cmake --build build/tools --target portals_log_view_memory_probe
+./build/tools/portals_log_view_memory_probe.exe --help
+python tests/probes/log_view_memory.py --help
+python tests/probes/log_view_memory.py --exe build/tools/portals_log_view_memory_probe.exe --work-dir build/log-memory-001 --output build/log-memory-001/result.json --toolchain "Release compiler/version"
+```
+
+The helper writes real filled UTF-8 files of 10, 100 and 1024 MiB, then runs three
+independent probe processes per size. The viewport is 80 by 24 cells, records
+are 128 bytes, and the source budget is 8 MiB. Each process opens the real file
+model and LogView, navigates forward/backward twice, seeks, and searches the
+complete file for present and absent literals in bounded steps. This headless
+workload does not measure terminal presentation latency.
+
+`--exe`, `--work-dir` and `--output` are required. The output must lie inside the
+dedicated work directory and must not exist. `--sizes-mib 1` selects a shortened
+smoke workload and cannot pass the full cross-size acceptance matrix.
+`--run-timeout` sets the helper's per-process deadline, default 600 seconds.
+The helper needs space for the largest fixture plus 5 GiB. It removes only its
+verified generated large files and retains hashes, seed, raw JSON, stdout/stderr
+and a 64 KiB review fixture. It neither builds nor changes process environment.
+
+For a single already-filled input, the native probe accepts `--file PATH`,
+`--record-bytes N` (default 128) and `--output JSON`; it never edits the input.
+Its navigation deadline is 30 seconds per step. Both tools expose help without
+working inputs. Exit codes are 0 for applicable checks passed, 1 for a runtime or
+check failure, and 2 for invalid arguments/preflight.
+
+The aggregate distinguishes process working set from private committed memory
+and source-credit accounting. OS file-cache memory is not attributed to the
+process. Windows and Linux private metrics are labeled separately; they are not
+interchangeable. Cross-size private spread is limited to 8 MiB; peak private
+growth over bootstrap is limited to the source budget plus a 32 MiB runtime
+allowance. A failed run or missing metric does not become a passing measurement.
+
 <a id="tool-change-impact"></a>
 ## Measure includes and rebuild footprint
 

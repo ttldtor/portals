@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include "external_log_view.hpp"
 #include <portals/ui.hpp>
 
 namespace portals::ui::detail {
@@ -82,5 +83,55 @@ Description<LogView> logView(std::string_view initial, LogViewConfig config, Con
 Description<LogView> logView(Ref<LogView> reference, std::string_view initial, LogViewConfig config,
                              ControlStyle style) {
   return std::move(logView(initial, config, style)).reference(std::move(reference));
+}
+
+Description<LogView> logView(LogSource source, LogSourceViewConfig config, ControlStyle style) {
+  auto recipe =
+    detail::Access::cold<LogView>([source = std::move(source), config,
+                                   style](ManagedScene &scene, Node<Widget> parent,
+                                          detail::MountContext &context) -> std::expected<Node<LogView>, ManagedError> {
+      LogViewConfig native;
+
+      native.limits = {config.limits.maxRecords, config.limits.maxBytes, config.limits.maxRecordBytes,
+                       config.limits.maxRecordBytes};
+      native.followTail = config.followTail;
+      native.readOnly = config.readOnly;
+
+      const auto effective = detail::controlLogViewConfig(*context.controlSettings, native);
+      auto frame = detail::logFrame(context, scene.widthPolicy());
+
+      if (!frame) {
+        return std::unexpected(frame.error());
+      }
+
+      auto node = scene.logView(parent, {}, effective, style, DEFAULT_LOG_VIEW_POLICY, std::move(*frame));
+
+      if (!node) {
+        return node;
+      }
+
+      auto bound = portals::detail::attachExternalLogView(scene, *node, source, effective);
+
+      if (!bound) {
+        auto failure = bound.error();
+        auto removed = scene.remove(*node);
+
+        if (!removed) {
+          if (const auto *cleanup = std::get_if<TreeError>(&removed.error().cause)) {
+            failure.cleanup = *cleanup;
+          }
+        }
+
+        return std::unexpected(failure);
+      }
+
+      return node;
+    });
+
+  return detail::Access::configuredControl(std::move(recipe), "LogView");
+}
+
+Description<LogView> logView(Ref<LogView> reference, LogSource source, LogSourceViewConfig config, ControlStyle style) {
+  return std::move(logView(std::move(source), config, style)).reference(std::move(reference));
 }
 } // namespace portals::ui

@@ -20,6 +20,7 @@
 | Именованные наборы глифов | [guide_glyph_profiles.cpp](../examples/guide_glyph_profiles.cpp) | [Наборы и резерв](scroll-controls.md#named-glyph-profiles-ru) |
 | Стили полос на рамке | [guide_scrollbar_gallery.cpp](../examples/guide_scrollbar_gallery.cpp), [запись и руководство](scroll-controls.md) | [guide_scrollbar_resource.cpp](../examples/guide_scrollbar_resource.cpp) |
 | Ограниченный текстовый журнал | [LogView](log-view.md), [main.cpp](../../examples/log_view/main.cpp) | [guide_log_view_resource.cpp](../examples/guide_log_view_resource.cpp) |
+| Журнал из файла | [Внешняя модель LogView](log-view.md#log-view-file-ru), [main.cpp](../../examples/file_log/main.cpp) | Ограниченные чтения файла и следование за концом через исполнитель приложения |
 | Диалоги | [guide_dialog.cpp](../examples/guide_dialog.cpp), [guide_dialog_actions.cpp](../examples/guide_dialog_actions.cpp) | [guide_dialog_resource.cpp](../examples/guide_dialog_resource.cpp) |
 | Изменения CheckBox | [guide_check_change.cpp](../examples/guide_check_change.cpp) | [guide_check_resource.cpp](../examples/guide_check_resource.cpp) |
 | Числовые слайдеры | [guide_slider.cpp](../examples/guide_slider.cpp), [main.cpp](../../examples/slider/main.cpp), [источник и ввод](sliders.md) | [Свойства ресурса](sliders.md#slider-resource-ru), справка |

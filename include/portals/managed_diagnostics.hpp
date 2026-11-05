@@ -4,8 +4,9 @@
 
 #include <portals/application.hpp>
 #include <portals/detail/pss_data.hpp>
-#include <portals/password.hpp>
+#include <portals/log_file_error.hpp>
 #include <portals/numeric.hpp>
+#include <portals/password.hpp>
 #include <portals/pss_file_error.hpp>
 #include <portals/scene_resource_error.hpp>
 #include <portals/shortcut.hpp>
@@ -26,6 +27,7 @@ namespace portals {
 class ManagedScene;
 enum class AsyncError;
 enum class SearchError;
+enum class SourceError;
 
 namespace detail {
 /** @brief Default-empty internal evidence that a short error entered one live collector.
@@ -87,10 +89,12 @@ struct ManagedError {
   std::shared_ptr<const SceneResourceError> sceneResource{};
   /// @brief Allocation-free protected editor cause, including independent security and cleanup failures.
   std::optional<PasswordFailure> password{};
-  std::optional<AsyncError> async{}; ///< Exact coroutine/admission failure, independent of its tree bridge.
+  std::optional<AsyncError> async{};           ///< Exact coroutine/admission failure, independent of its tree bridge.
   std::optional<BackgroundError> background{}; ///< Exact executor admission cause when an async request fails.
   std::optional<SearchError> search{};         ///< Exact bounded choice/search provider failure.
   std::optional<NumericError> numeric{};       ///< Exact finite-value, range, step or numeric-source conflict cause.
+  std::optional<SourceError> source{};         ///< Exact window-source admission/read/delivery failure.
+  std::optional<FileLogFailure> logFile{};     ///< Original per-operation file cause and native error code.
 };
 
 namespace detail {

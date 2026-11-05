@@ -2,7 +2,66 @@
 
 [Русская версия](ru/log-view.md) · [Scroll controls](scroll-controls.md) · [Control examples](control-examples.md)
 
-Use LogView for recent bounded in-memory output, not as a file reader. Defaults retain 512 records and 256 KiB, admit batches up to 16 KiB and records up to 4 KiB, and follow the tail. Its reference provides checked append, clear and tail commands; keyboard, wheel and scrollbar navigation pause following when moving away from the tail. See [LogView configuration and API](../include/portals/log_view.hpp).
+Use LogView either for recent in-memory output or for a bounded view of an external model. `ui::logView("Ready")` owns a rolling journal; `ui::logView(ui::logFile("application.log"))` reads a regular UTF-8 file on the application's background executor. Both follow the tail by default. The file size does not determine the amount of retained text. See [LogView configuration and API](../include/portals/log_view.hpp).
+
+## File-backed log {#log-view-file}
+
+![Following a local file, pausing to read older records, and returning to the live tail](images/file-log-guide.gif)
+
+The recording uses a local writer that appends generated records to the file.
+
+Place a UTF-8 `application.log` in the working directory, build
+`portals_file_log_example` with `PORTALS_BUILD_EXAMPLES=ON`, and run it in a
+terminal. The view opens at the available tail and observes appended records.
+PageUp/PageDown, the wheel and scrollbar pause following while you read older
+records. Return to tail resumes following; F10 or Ctrl+C exits.
+
+[Complete source](../examples/file_log/main.cpp)
+
+\include file_log/main.cpp
+
+The scene owns the view and cancels its work when the node is removed. File
+opening, reads, UTF-8 validation, grapheme parsing and wrapping use the existing
+application executor. The UI installs an immutable prepared window. Creating
+`ui::logFile(...)` performs no file access; setup and worker failures use the
+runner's typed diagnostics, including the native file operation and error code.
+
+The default external view limits are 512 logical records, 1 MiB of record payload
+and 64 KiB per record, subject to a shared 8 MiB source/preparation budget. These
+are cache limits, not limits on the file or its total record count. The file model
+uses 16 KiB read blocks and a 32 KiB record limit by default; `FileLogOptions`
+allows records up to 64 KiB. An overlong record returns a typed error without
+silently truncating it. One enormous record still requires a different segmented
+text model.
+
+Include `<portals/log_file.hpp>` when using the rich `log.fileModel()` API.
+`metadata()` returns byte extent and generation, `readBytes()` reads a caller-sized
+buffer, and `findLiteral()` searches file bytes in bounded steps with explicit
+continuation. Call these methods on a worker, never in a blocking UI callback.
+The view does not turn byte extent into a row count or retain a dense file index.
+`seekLogByte(tree, node, offset)` accepts a record's starting byte offset;
+`seekLogRow(tree, node, ordinal)` applies to finite model bindings with a known
+logical row count. Their units are distinct.
+
+Finite snapshots can use the opt-in `<portals/ui_log_source_model.hpp>` adapter
+and a worker-side text codec. The original model remains available for its other
+operations; the adapter adds read-only display delivery. Generic cursor sources
+can provide `WindowProvider<LogLine>` through `ui::logSource(...)` without claiming
+a total row count.
+
+Local regular seekable files are supported. Rotation and observed truncation
+start a new generation; existing pins stay immutable. Concurrent rewriting is
+not a filesystem snapshot: a truncate-and-regrow entirely between observations
+may be indistinguishable from growth. Cancellation is cooperative between reads;
+an operating-system call on a remote filesystem can still block. Selection,
+clipboard, a search toolbar and persistent storage are not supplied by this view.
+
+## Rolling in-memory log
+
+The following append and retention contracts apply to the rolling journal.
+Its defaults retain 512 records and 256 KiB, admit batches up to 16 KiB and records
+up to 4 KiB. External sources use the separate limits above; `append` and `clear`
+are rejected for an externally bound view.
 
 ![Resource example with the initial log record and controls](images/log-view-guide.png)
 
@@ -167,7 +226,6 @@ Commands follow the existing UI-thread, outside-frame and live-owner checks.
 Later layout or render failure does not turn a successful append into a failed
 admission: its records have already been retained.
 
-This bounded control does not provide file tailing, worker or asynchronous
-producers, incremental stream framing, filtering, search, selection, clipboard
-copy, or persistent storage. Applications choose and own any source or retention
-outside this in-memory view.
+The rolling append path does not frame an incremental byte stream or provide
+filtering, search, selection, clipboard copy or persistent storage. Use the
+external-source path above for file-backed display.

@@ -20,6 +20,7 @@ a fragment; they are not complete applications.
 | Named glyph profiles | [guide_glyph_profiles.cpp](examples/guide_glyph_profiles.cpp) | [Profiles and fallback](scroll-controls.md#named-glyph-profiles) |
 | On-frame scrollbar styles | [guide_scrollbar_gallery.cpp](examples/guide_scrollbar_gallery.cpp), [recording and guide](scroll-controls.md) | [guide_scrollbar_resource.cpp](examples/guide_scrollbar_resource.cpp) |
 | Bounded plain-text log | [LogView](log-view.md), [main.cpp](../examples/log_view/main.cpp) | [guide_log_view_resource.cpp](examples/guide_log_view_resource.cpp) |
+| File-backed log | [External LogView](log-view.md#log-view-file), [main.cpp](../examples/file_log/main.cpp) | Bounded file reads and tail following on the application executor |
 | Dialogs | [guide_dialog.cpp](examples/guide_dialog.cpp), [guide_dialog_actions.cpp](examples/guide_dialog_actions.cpp) | [guide_dialog_resource.cpp](examples/guide_dialog_resource.cpp) |
 | CheckBox changes | [guide_check_change.cpp](examples/guide_check_change.cpp) | [guide_check_resource.cpp](examples/guide_check_resource.cpp) |
 | Numeric sliders | [guide_slider.cpp](examples/guide_slider.cpp), [main.cpp](../examples/slider/main.cpp), [source and input guide](sliders.md) | [Numeric resource properties](sliders.md#slider-resource) reference |

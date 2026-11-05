@@ -23,6 +23,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Add file-backed LogView through `ui::logFile` with deferred worker I/O,
+  bounded prepared windows, tail following and native navigation. The rich file
+  model supports byte reads and resumable literal search without retaining the
+  whole file or a dense row index. Finite snapshot bindings retain positional
+  access through an opt-in text adapter. Rolling in-memory logs remain supported.
+
 - Add an opt-in bounded window-source API for asynchronous providers without a
   required total row count, shared page/work budgets, owning pins, and explicit
   continuation/readiness states. The finite snapshot adapter is read-only;

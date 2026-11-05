@@ -32,7 +32,8 @@ enum class SourceError {
   CURSOR_CYCLE,       ///< A MORE reply repeated an earlier gap of this bounded fill.
   CONTINUATION_LIMIT, ///< Demand remains after four automatic page loads; partial pin is valid.
   CANCELLED,          ///< Explicit navigation cancellation or cooperative worker cancellation.
-  ALREADY_COMPLETED   ///< This request generation already ran its single load.
+  ALREADY_COMPLETED,  ///< This request generation already ran its single load.
+  IO_ERROR            ///< Native source I/O failed; a typed adapter retains its per-operation cause.
 };
 
 /** @brief Simultaneous source reservations; bytes are requested capacities, not process RSS. */
