@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include "external_log_view.hpp"
 #include <portals/managed.hpp>
 
 namespace portals {
@@ -76,6 +77,30 @@ std::expected<LogAppendReceipt, ManagedError> ManagedScene::appendLogBatch(Node<
 
   return result ? std::expected<LogAppendReceipt, ManagedError>(*result)
                 : std::unexpected(logError(node, result.error()));
+}
+
+std::expected<void, ManagedError> ManagedScene::setLogModel(Node<LogView> node, ui::LogSource source) {
+  const auto allowed = boundary(ManagedPhase::INPUT, node);
+
+  if (!allowed) {
+    return allowed;
+  }
+
+  if (!find(node)) {
+    return std::unexpected(error(ManagedPhase::INPUT, node, TreeError::INVALID_ARGUMENT));
+  }
+
+  auto result = detail::replaceExternalLogView(*this, node, std::move(source));
+
+  if (!result) {
+    result.error().phase = ManagedPhase::INPUT;
+  }
+
+  return result;
+}
+
+std::expected<void, ManagedError> setLogModel(ManagedScene &scene, Node<LogView> node, ui::LogSource source) {
+  return scene.setLogModel(node, std::move(source));
 }
 
 std::expected<void, ManagedError> ManagedScene::followLogTail(Node<LogView> node) {

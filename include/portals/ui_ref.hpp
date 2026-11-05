@@ -17,6 +17,7 @@
 namespace portals { class PopupMenu; }
 
 namespace portals::ui {
+class LogSource;
 template <class T> class Description;
 template <class T> class Ref;
 class DynamicRef;
@@ -63,6 +64,9 @@ struct RefTarget {
   Node<LineEdit> draft;                        ///< Typed editor identity, empty for other widgets.
   Node<Password> secret;                       ///< Protected editor identity; never grants plaintext access.
 };
+
+std::expected<void, ManagedError> setLogModel(const std::shared_ptr<RefTarget> &target, Node<LogView> node,
+                                              const LogSource &source, std::source_location origin);
 
 struct RefAccess;
 std::expected<bool, ManagedError> checkedValue(std::shared_ptr<RefTarget> target, std::shared_ptr<const Node<Switch>> node);
@@ -1023,6 +1027,31 @@ public:
     requires std::same_as<T, LogView>
   {
     const auto result = appendBatch(bytes, origin);
+
+    if (!result) {
+      detail::reportEventError(target(), result.error(), origin);
+    }
+
+    return result.has_value();
+  }
+
+  /** @param source Owning deferred log binding; no source I/O runs during admission.
+   * @param origin Original call site. @return Checked atomic replacement; never auto-reports errors.
+   */
+  std::expected<void, ManagedError> setModel(const LogSource &source,
+                                             std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, LogView>
+  {
+    return detail::setLogModel(target(), this->node(), source, origin);
+  }
+
+  /** @param source Owning deferred log binding. @param origin Original call site.
+   * @return Admission success; false reports the exact failure once through the scene collector.
+   */
+  bool model(const LogSource &source, std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, LogView>
+  {
+    const auto result = setModel(source, origin);
 
     if (!result) {
       detail::reportEventError(target(), result.error(), origin);

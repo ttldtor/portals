@@ -484,6 +484,10 @@ if(PORTALS_BUILD_TESTS)
   target_link_libraries(portals_docs_log_view_resource PRIVATE portals::core)
   portals_enable_warnings(portals_docs_log_view_resource)
 
+  add_executable(portals_docs_log_models docs/examples/guide_log_models.cpp)
+  target_link_libraries(portals_docs_log_models PRIVATE portals::core)
+  portals_enable_warnings(portals_docs_log_models)
+
   add_executable(portals_docs_loading_indicators docs/examples/guide_loading_indicators.cpp)
   target_link_libraries(portals_docs_loading_indicators PRIVATE portals::core)
   portals_enable_warnings(portals_docs_loading_indicators)

@@ -6,6 +6,8 @@
 #include <portals/ui_description.hpp>
 
 namespace portals {
+class ManagedScene;
+struct ManagedError;
 struct LogLine;
 class FileLogModel;
 class SourceBudget;
@@ -112,6 +114,14 @@ Description<LogView> logView(Ref<LogView> reference, LogSource source, LogSource
 } // namespace portals::ui
 
 namespace portals {
+/** @param scene UI owner outside frames. @param node Live managed log, including rolling mode.
+ * @param source Owning deferred provider, file or finite-model descriptor.
+ * @return Atomic binding admission preserving the old binding on failure; never reports checked errors.
+ * Successful admission clears old content and cursors, keeps node/style/focus and resets navigation
+ * to the view's configured followTail default and the new provider's capabilities. Later read errors
+ * belong to the new binding. Work and decoding remain on the existing application executor.
+ */
+std::expected<void, ManagedError> setLogModel(ManagedScene &scene, Node<LogView> node, ui::LogSource source);
 /** @param tree UI owner outside frames. @param node Mounted finite-source log.
  * @param ordinal Exact logical record position, in [0,rowCount()).
  * @return Deferred bounded seek admission or UNSUPPORTED for non-finite sources; no identity lookup is required.

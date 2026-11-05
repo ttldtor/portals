@@ -8,9 +8,12 @@
 #include <portals/ui.hpp>
 #include <portals/ui_log_source_model.hpp>
 
+#include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <fstream>
+#include <mutex>
 #include <source_location>
 #include <thread>
 
@@ -859,4 +862,348 @@ TEST_CASE("the application runner loads the default file tail without any input 
   CHECK(executor.submissions > 0);
   CHECK(terminal.output.find("STARTUP_SENTINEL") != std::string::npos);
   CHECK(terminal.closed);
+}
+
+TEST_CASE("model replacement rejects invalid descriptors without changing content or reporting checked errors") {
+  auto provider = std::make_shared<ShortPages>();
+  Fixture fixture(ui::logSource(provider));
+
+  fixture.settle();
+
+  const auto original = fixture.frame();
+  const auto node = fixture.reference.node();
+  const auto rejected = fixture.reference.setModel({});
+
+  REQUIRE_FALSE(rejected);
+  CHECK(rejected.error().source == SourceError::INVALID_ARGUMENT);
+  CHECK(fixture.frame() == original);
+  CHECK(fixture.reference.node() == node);
+  CHECK(take(fixture.scene->diagnostics()).errors.empty());
+  CHECK_FALSE(fixture.reference.model({}));
+  CHECK(take(fixture.scene->diagnostics()).errors.size() == 1);
+  CHECK(fixture.frame() == original);
+}
+
+TEST_CASE("replacement before preparation and A to B to A keep only the last admitted model") {
+  TemporaryLog a;
+  TemporaryLog b;
+
+  a.write("model A\n");
+  b.write("model B\n");
+
+  auto sourceA = ui::logFile(a.utf8());
+  auto sourceB = ui::logFile(b.utf8());
+  Fixture fixture(sourceA);
+
+  take(fixture.reference.setModel(sourceB));
+  take(setLogModel(*fixture.scene, fixture.node, sourceA));
+  fixture.settle(6);
+
+  REQUIRE(fixture.frame());
+  CHECK(fixture.frame()->rows.front()->bytes() == "model A");
+  CHECK(take(fixture.scene->diagnostics()).errors.empty());
+}
+
+TEST_CASE("swapping a blocked load discards late success and error without UI source reads") {
+  class BarrierProvider final : public WindowProvider<LogLine> {
+  public:
+    ShortPages provider;
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool entered{};
+    bool released{};
+
+    SourceCapabilities capabilities() const noexcept override {
+      return provider.capabilities();
+    }
+
+    std::expected<SourceReadReply<LogLine>, SourceError> load(const SourceReadCommand &command,
+                                                              PageBuilder<LogLine> &out, std::stop_token) override {
+      {
+        std::unique_lock lock(mutex);
+
+        entered = true;
+        changed.notify_all();
+
+        if (!changed.wait_for(lock, std::chrono::seconds(2), [&] {
+              return released;
+            })) {
+          return std::unexpected(SourceError::IO_ERROR);
+        }
+      }
+
+      // Deliberately ignore cancellation to exercise a provider already inside its I/O call.
+      return provider.load(command, out, {});
+    }
+  };
+
+  for (const auto fail : {false, true}) {
+    CAPTURE(fail);
+
+    auto old = std::make_shared<BarrierProvider>();
+    auto source = ui::logSource(old);
+    Fixture fixture(source);
+
+    old->provider.fail = fail;
+    fixture.pump();
+    fixture.pump();
+
+    auto work = std::exchange(fixture.executor.job, {});
+
+    REQUIRE(work);
+
+    std::jthread worker([&] {
+      work->run(work->stopToken());
+    });
+    bool entered{};
+
+    {
+      std::unique_lock lock(old->mutex);
+
+      entered = old->changed.wait_for(lock, std::chrono::seconds(2), [&] {
+        return old->entered;
+      });
+    }
+
+    REQUIRE(entered);
+
+    auto rows = std::make_shared<RichRows>();
+    std::shared_ptr<const ModelSnapshot<std::string>> snapshot = rows;
+
+    take(fixture.reference.setModel(ui::logSource(snapshot)));
+    CHECK_FALSE(fixture.frame());
+
+    {
+      std::lock_guard lock(old->mutex);
+
+      old->released = true;
+    }
+
+    old->changed.notify_all();
+    worker.join();
+    (void)work->publish();
+    work.reset();
+    ++fixture.executor.epoch;
+    fixture.settle(6);
+
+    REQUIRE(fixture.frame());
+    CHECK(fixture.frame()->rows.front()->bytes() == "rich record 0");
+    CHECK_FALSE(rows->uiRead.load());
+    CHECK_FALSE(old->provider.uiRead.load());
+    CHECK(source.budget()->usage().work == 0);
+    CHECK(source.budget()->usage().pages == 0);
+    CHECK(source.budget()->usage().consumers == 0);
+    CHECK(take(fixture.scene->diagnostics()).errors.empty());
+  }
+}
+
+TEST_CASE("hidden model replacement clears old cursors and resumes the new finite source") {
+  TemporaryLog file;
+
+  file.write("old file\n");
+
+  Fixture fixture(ui::logFile(file.utf8()));
+
+  fixture.settle(6);
+  take(fixture.app->tree().setVisible(fixture.node, false));
+  fixture.pump();
+
+  auto rows = std::make_shared<RichRows>();
+  std::shared_ptr<const ModelSnapshot<std::string>> snapshot = rows;
+
+  take(fixture.reference.setModel(ui::logSource(snapshot)));
+  CHECK_FALSE(fixture.frame());
+  take(seekLogRow(fixture.app->tree(), fixture.node, 100));
+  fixture.settle(3);
+  CHECK_FALSE(fixture.frame());
+  take(fixture.app->tree().setVisible(fixture.node, true));
+  fixture.settle(6);
+
+  REQUIRE(fixture.frame());
+  CHECK(fixture.frame()->rows.front()->bytes() == "rich record 100");
+  CHECK_FALSE(seekLogByte(fixture.app->tree(), fixture.node, 0));
+  CHECK(take(fixture.scene->diagnostics()).errors.empty());
+}
+
+TEST_CASE("repeated swaps retain one activity and release old source credits") {
+  auto a = ui::logSource(std::make_shared<ShortPages>());
+  auto b = ui::logSource(std::make_shared<ShortPages>());
+  Fixture fixture(a);
+  std::shared_ptr<ui::detail::SceneActivity> activity;
+
+  take(fixture.app->tree().read(fixture.node, [&](const LogView &widget) {
+    activity = detail::LogViewAccess::state(widget).external->activity;
+  }));
+
+  for (unsigned index = 0; index < 300; ++index) {
+    const auto &source = index % 2 ? a : b;
+    const auto &previous = index % 2 ? b : a;
+
+    take(fixture.reference.setModel(source));
+    take(fixture.app->tree().read(fixture.node, [&](const LogView &widget) {
+      CHECK(detail::LogViewAccess::state(widget).external->activity == activity);
+    }));
+    CHECK(previous.budget()->usage().consumers == 0);
+    CHECK(previous.budget()->usage().pages == 0);
+    CHECK(previous.budget()->usage().work == 0);
+  }
+
+  fixture.settle();
+  REQUIRE(fixture.frame());
+  CHECK(take(fixture.scene->diagnostics()).errors.empty());
+}
+
+TEST_CASE("an admitted open failure belongs to the new binding and permits replacement from an input callback") {
+  TemporaryLog file;
+  TemporaryLog missing;
+
+  file.write("old binding\n");
+
+  Fixture fixture(ui::logFile(file.utf8()));
+  auto rows = std::make_shared<RichRows>();
+  std::shared_ptr<const ModelSnapshot<std::string>> snapshot = rows;
+  unsigned callbacks{};
+
+  fixture.settle(6);
+  take(fixture.scene->onError([&](const ManagedDiagnostic &diagnostic) {
+    ++callbacks;
+    CHECK(diagnostic.error.logFile.has_value());
+    const auto blocked = fixture.reference.setModel(ui::logSource(snapshot));
+
+    REQUIRE_FALSE(blocked);
+    CHECK(std::get<TreeError>(blocked.error().cause) == TreeError::WOULD_BLOCK);
+  }));
+  take(fixture.scene->onKey(KeyEvent{InputKey::F2}, [&] {
+    take(fixture.reference.setModel(ui::logSource(snapshot)));
+  }));
+  take(fixture.reference.setModel(ui::logFile(missing.utf8())));
+  CHECK_FALSE(fixture.frame());
+  fixture.settle(8);
+  CHECK(callbacks == 1);
+  CHECK_FALSE(fixture.frame());
+  fixture.input(KeyEvent{InputKey::F2});
+
+  REQUIRE(fixture.frame());
+  CHECK(fixture.frame()->rows.front()->bytes() == "rich record 0");
+  CHECK(callbacks == 1);
+}
+
+TEST_CASE("removing a replacement from an input callback cancels the failed binding") {
+  TemporaryLog missing;
+  Fixture fixture(ui::logSource(std::make_shared<ShortPages>()));
+  auto source = ui::logFile(missing.utf8());
+  unsigned callbacks{};
+
+  take(fixture.scene->onError([&](const ManagedDiagnostic &) {
+    ++callbacks;
+    const auto blocked = fixture.scene->remove(fixture.node);
+
+    REQUIRE_FALSE(blocked);
+    CHECK(std::get<TreeError>(blocked.error().cause) == TreeError::WOULD_BLOCK);
+  }));
+  take(fixture.scene->onKey(KeyEvent{InputKey::F2}, [&] {
+    take(fixture.scene->remove(fixture.node));
+  }));
+  take(fixture.reference.setModel(source));
+  fixture.settle(6);
+
+  CHECK(callbacks == 1);
+  fixture.dispatchInput(KeyEvent{InputKey::F2});
+  CHECK(source.budget()->usage().consumers == 0);
+  CHECK(source.budget()->usage().work == 0);
+  CHECK(source.budget()->usage().pages == 0);
+}
+
+TEST_CASE("a rolling log changes to an external source without replacing its node") {
+  Fixture fixture(ui::logSource(std::make_shared<ShortPages>()));
+  ui::Ref<LogView> rolling;
+
+  take(fixture.scene->remove(fixture.node));
+
+  const auto node = take(ui::mount(*fixture.scene, ui::logView(rolling, "old rolling data", {.followTail = false})));
+  std::shared_ptr<const ModelSnapshot<std::string>> snapshot = std::make_shared<RichRows>();
+
+  fixture.node = node;
+  take(fixture.app->tree().consumeFrameRequest());
+  take(rolling.setModel(ui::logSource(snapshot)));
+  CHECK(take(fixture.app->tree().consumeFrameRequest()) == Invalidation::LAYOUT);
+  CHECK(rolling.node() == node);
+  take(fixture.app->tree().read(node, [](const LogView &widget) {
+    const auto &state = detail::LogViewAccess::state(widget);
+
+    REQUIRE(state.external);
+    CHECK(state.data->records.empty());
+    CHECK(state.data->rows.empty());
+  }));
+  fixture.settle(8);
+
+  take(fixture.app->tree().read(node, [](const LogView &widget) {
+    const auto frame = detail::LogViewAccess::state(widget).external->frame;
+
+    REQUIRE(frame);
+    REQUIRE_FALSE(frame->rows.empty());
+    CHECK(frame->rows.front()->bytes() == "rich record 0");
+  }));
+}
+
+TEST_CASE("loaded-window replacement releases old frames and keeps steady source credit usage") {
+  auto sources =
+    std::array{ui::logSource(std::make_shared<ShortPages>()), ui::logSource(std::make_shared<ShortPages>())};
+  Fixture fixture(sources[0]);
+  std::array<std::optional<std::size_t>, 2> loadedBytes;
+
+  fixture.settle();
+  loadedBytes[0] = sources[0].budget()->usage().bytes;
+
+  for (std::size_t index = 0; index < 20; ++index) {
+    const auto selected = (index + 1) % sources.size();
+    const auto previous = 1 - selected;
+    std::weak_ptr<const detail::ExternalLogFrame> old = fixture.frame();
+
+    take(fixture.reference.setModel(sources[selected]));
+    fixture.settle();
+
+    REQUIRE(fixture.frame());
+    CHECK(old.expired());
+    CHECK(sources[previous].budget()->usage().consumers == 0);
+    CHECK(sources[previous].budget()->usage().pages == 0);
+    CHECK(sources[previous].budget()->usage().work == 0);
+
+    const auto bytes = sources[selected].budget()->usage().bytes;
+
+    if (!loadedBytes[selected]) {
+      loadedBytes[selected] = bytes;
+    }
+
+    CHECK(bytes == *loadedBytes[selected]);
+  }
+
+  CHECK(take(fixture.scene->diagnostics()).errors.empty());
+}
+
+TEST_CASE("model admission resets an unprepared navigation intent to the configured follow-tail default") {
+  TemporaryLog first;
+  TemporaryLog second;
+  std::string records;
+
+  for (unsigned index = 0; index < 100; ++index) {
+    records += "line " + std::to_string(index) + "\n";
+  }
+
+  first.write(records);
+  second.write(records);
+
+  Fixture fixture(ui::logFile(first.utf8()), true);
+
+  fixture.settle(8);
+  take(setScrollOffset(fixture.app->tree(), fixture.node, ScrollAxis::VERTICAL, {0, 0}));
+  take(fixture.reference.setModel(ui::logFile(second.utf8())));
+  fixture.settle(8);
+
+  REQUIRE(fixture.frame());
+  CHECK(fixture.frame()->rows.back()->bytes() == "line 99");
+  take(fixture.app->tree().read(fixture.node, [](const LogView &widget) {
+    CHECK(detail::LogViewAccess::state(widget).external->followTail);
+  }));
+  CHECK(take(fixture.scene->diagnostics()).errors.empty());
 }

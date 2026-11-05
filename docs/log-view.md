@@ -56,6 +56,49 @@ may be indistinguishable from growth. Cancellation is cooperative between reads;
 an operating-system call on a remote filesystem can still block. Selection,
 clipboard, a search toolbar and persistent storage are not supplied by this view.
 
+## Switching models {#log-view-switching-models}
+
+![Switching the same LogView from application.log to errors.log and back](images/log-models-guide.gif)
+
+Keep a `ui::Ref<LogView>` and call `log.model(source)` from a UI handler to
+replace the source of the existing view. Files are one source family, not a
+requirement of `LogView`.
+
+Create UTF-8 `application.log` and `errors.log` in the working directory. F2 and
+F3 switch between them without recreating the control:
+
+[Complete switching program](examples/guide_log_models.cpp)
+
+\include guide_log_models.cpp
+
+The same operation accepts `ui::logSource(provider)` for a worker-safe
+`WindowProvider<LogLine>`. For an existing immutable finite model, include
+`<portals/ui_log_source_model.hpp>` and pass `ui::logSource(snapshot)` for
+string records, or `ui::logSource(snapshot, codec)` for domain records. Keep
+the original model for its richer operations; replacing the display binding
+does not convert it into a file model or require an exact total count.
+
+Replacement preserves the control's identity, Ref, focus, geometry and styles.
+It resets the reading position and discards the old displayed window. The new
+source starts according to the view's follow-tail setting and its own
+capabilities. Switching back starts a fresh binding; it does not restore an
+old cursor. Cancelled work from the previous binding cannot install text or
+report a stale error into the new binding. Opening and reading the new source
+remain background operations.
+
+`log.model(source)` reports an admission failure through the scene's error
+collector. Use `log.setModel(source)` when the handler needs to inspect the
+`std::expected` result itself. An invalid descriptor leaves the current
+binding unchanged. A later read failure belongs to the newly accepted
+binding and follows the ordinary runner error policy; admission does not
+promise that a file exists or can be read. A rolling in-memory view can also
+be bound to an external source; its earlier journal is not retained as an
+undoable model switch.
+
+Use ordinary input handlers for replacement. Like other scene mutations,
+`setModel` returns `WOULD_BLOCK` during an `onError` notification; the error
+callback observes the failure and cannot reenter scene mutation.
+
 ## Rolling in-memory log
 
 The following append and retention contracts apply to the rolling journal.
