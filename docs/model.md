@@ -2,6 +2,9 @@
 
 [Русская версия](ru/model.md)
 
+For provider-level positions that survive model ordering changes, see
+[model bookmarks](model-positions.md).
+
 To show the prepared range's loading or result state, wrap the managed view with
 [data presentation](data-presentation.md); the model and provider keep their existing ownership.
 

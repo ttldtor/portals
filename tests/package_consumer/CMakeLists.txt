@@ -2,6 +2,12 @@ cmake_minimum_required(VERSION 3.24)
 project(PortalsPackageConsumer LANGUAGES CXX)
 
 find_package(Portals 0.2 CONFIG REQUIRED)
+add_executable(portals_model_position_consumer model_position.cpp model_position_header.cpp)
+target_link_libraries(portals_model_position_consumer PRIVATE portals::core)
+set_target_properties(portals_model_position_consumer PROPERTIES CXX_EXTENSIONS OFF)
+add_test(NAME consumer.model-position COMMAND portals_model_position_consumer)
+set_tests_properties(consumer.model-position PROPERTIES TIMEOUT 15)
+
 add_executable(portals_radio_group_consumer radio_group.cpp radio_group_header.cpp ui_radio_group_header.cpp)
 target_link_libraries(portals_radio_group_consumer PRIVATE portals::core)
 set_target_properties(portals_radio_group_consumer PROPERTIES CXX_EXTENSIONS OFF)

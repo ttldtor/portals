@@ -23,6 +23,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Provider-level model bookmarks with resource identity, qualified resolution
+  replies, and bounded finite-snapshot change maps. Stable row identity survives
+  reordering; declared removals resolve a neighboring row without scanning the
+  model. This foundation does not yet restore control viewports automatically.
+
 - Switch a mounted LogView between file, finite-model and generic provider
   sources with `Ref<LogView>::model`, or inspect admission errors explicitly
   with `setModel`. Rebinding preserves control identity and styles, resets
