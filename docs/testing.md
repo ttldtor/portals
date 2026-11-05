@@ -8,14 +8,20 @@ process startup can dominate this test. Override the budget explicitly at
 configure time, for example `-DPORTALS_RELEASE_START_TEST_TIMEOUT=900`.
 This budget does not change the assertions or the timeout of other tests.
 
-The relocated installed-package check builds all consumer targets from fresh
-sources before running their tests. `PORTALS_PACKAGE_TEST_TIMEOUT` controls its
-CTest limit in seconds per configuration (default 600, positive integer up to
-86400). The multi-configuration check gets twice this budget. For example,
+The relocated installed-package check compiles all consumer targets from fresh
+sources, then runs their tests. CTest separates these into `portals.package-install-prepare`
+and `portals.package-install`, connected by a fixture. Selecting only
+`portals.package-install` automatically includes preparation; failed preparation
+prevents runtime verification against an older build.
+
+`PORTALS_PACKAGE_TEST_TIMEOUT` controls each phase's limit in seconds per
+configuration (default 600, positive integer up to 86400). The multi-configuration
+check gets twice that budget for each phase. The overall pipeline can therefore
+run longer than one phase's limit; splitting phases does not make compilation
+faster. Individual consumer runtime tests retain their shorter deadlines.
+Package commands report start/end timestamps and elapsed time. For example,
 configure with `-DPORTALS_PACKAGE_TEST_TIMEOUT=900` on a slower development disk.
-This build-and-test limit does not change the shorter deadlines of individual
-runtime tests. A timeout is a failed check; increasing the budget still requires
-a complete successful run.
+A timeout remains a failed check; changing a budget requires a complete successful run.
 
 When set to a nonempty value, `CMAKE_LINK_DEPENDS_USE_LINKER` is forwarded to the
 installed consumer build. For linker-generated dependency path issues, configure

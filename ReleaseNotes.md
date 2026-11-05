@@ -7,6 +7,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- Separate installed-package preparation and runtime verification into dependent
+  CTest fixture phases, preserving complete consumer/header coverage and individual
+  test limits. Package commands now report phase timestamps and elapsed time.
+
 - Clarify control selection and data-state examples in the English/Russian guides;
   group scrollbar arrows with the scrollbar and show the existing Spinner
   animation directly on its guide page.
