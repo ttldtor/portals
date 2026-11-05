@@ -7,6 +7,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- Reduce GCC installed-package CI consumer debug-information cost while retaining
+  Debug assertions, standalone-header checks and runtime coverage. The opt-in is
+  disabled for ordinary builds; failed native CI jobs retain compiler commands and
+  completed Ninja action timings for diagnosis.
+
 - Separate installed-package preparation and runtime verification into dependent
   CTest fixture phases, preserving complete consumer/header coverage and individual
   test limits. Package commands now report phase timestamps and elapsed time.

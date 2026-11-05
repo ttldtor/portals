@@ -81,8 +81,10 @@ jobs:
         include:
           - os: windows-2022
             preset: windows-msvc-debug
+            minimal_consumer_debug_info: 'OFF'
           - os: ubuntu-24.04
             preset: linux-gcc-debug
+            minimal_consumer_debug_info: 'ON'
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -100,7 +102,7 @@ jobs:
           }
       - name: Configure
         # Package setup and runtime verification use separate fixture phases; per-consumer limits remain.
-        run: cmake --preset ${{ matrix.preset }} -DPORTALS_PACKAGE_TEST_TIMEOUT=1200
+        run: cmake --preset ${{ matrix.preset }} -DPORTALS_PACKAGE_TEST_TIMEOUT=1200 -DPORTALS_PACKAGE_CONSUMER_MINIMAL_DEBUG_INFO=${{ matrix.minimal_consumer_debug_info }}
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }}
       - name: Test
@@ -111,6 +113,20 @@ jobs:
         run: cmake --build build/consumer
       - name: Run standalone consumer
         run: ./build/consumer/portals_consumer
+      - name: Save native failure evidence
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-failure-${{ matrix.preset }}
+          path: |
+            build/**/Testing/Temporary/LastTest.log
+            build/**/Testing/Temporary/LastTestsFailed.log
+            build/**/compile_commands.json
+            build/**/.ninja_log
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
 
   docs:
     needs: changes

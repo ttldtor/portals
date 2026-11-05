@@ -267,3 +267,24 @@ Run `python -m unittest discover -s tools/docs -p test_*.py -v` for the HTML-pro
 Build the public guide programs with `cmake -S docs/examples -B build/guide-examples -G Ninja -DCMAKE_BUILD_TYPE=Release` and `cmake --build build/guide-examples`.
 
 User guides describe operations and their public contracts. Replay transports, fault injection, pointer-retirement checks and scheduler/decoder stress cases belong to the test suite and developer documentation. The documented program sources stay separate from that harness. PR CI stores the generated help as the `documentation-preview` artifact; it does not deploy Pages.
+
+## Installed-consumer Debug information
+
+`PORTALS_PACKAGE_CONSUMER_MINIMAL_DEBUG_INFO` defaults to `OFF`. Set it to `ON`
+with GCC to use `-g1` for the fresh installed-package consumer's Debug configuration:
+
+```sh
+cmake --preset linux-gcc-debug -DPORTALS_PACKAGE_CONSUMER_MINIMAL_DEBUG_INFO=ON
+```
+
+This opt-in changes debug-information detail only. Debug configuration, assertions,
+standalone-header translation units, runtime tests and their individual limits stay
+in place. The SDK producer and ordinary SDK users keep their existing flags. Other
+compilers reject this opt-in; Release and other configurations are unaffected.
+GCC retains backtrace information with fewer variable/type details; use the default
+for interactive debugging. See [GCC debugging options](https://gcc.gnu.org/onlinedocs/gcc-13.1.0/gcc/Debugging-Options.html).
+
+Linux CI enables the option to reduce nested compilation cost. Failed native jobs
+retain completed Ninja action timings, compiler commands and CTest logs as a
+`native-failure-*` artifact. A killed build has no final aggregate resource report;
+completed-action timings do not describe unfinished commands or establish a cause.
