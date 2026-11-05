@@ -23,6 +23,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Switch a mounted LogView between file, finite-model and generic provider
+  sources with `Ref<LogView>::model`, or inspect admission errors explicitly
+  with `setModel`. Rebinding preserves control identity and styles, resets
+  navigation, and prevents cancelled work from installing stale results.
+
 - Add file-backed LogView through `ui::logFile` with deferred worker I/O,
   bounded prepared windows, tail following and native navigation. The rich file
   model supports byte reads and resumable literal search without retaining the

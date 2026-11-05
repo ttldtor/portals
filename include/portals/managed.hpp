@@ -40,6 +40,10 @@ enum class MessageChoice;
 /** @brief Exact scene access failure or owning table preparation/provider failure. */
 using VisibleModelError = std::variant<ManagedError, VisibleModelReadError>;
 
+namespace ui {
+class LogSource;
+}
+
 namespace ui::detail {
 struct Access;
 struct RefAccess;
@@ -538,6 +542,10 @@ public:
    * @return Atomic receipt or exact typed error; never automatically reports a checked failure.
    */
   std::expected<LogAppendReceipt, ManagedError> appendLogBatch(Node<LogView> node, std::string_view bytes);
+  /** @param node Live managed log, including rolling mode. @param source Owning deferred binding.
+   * @return Atomic model admission; checked failures preserve the previous binding and never auto-report.
+   */
+  std::expected<void, ManagedError> setLogModel(Node<LogView> node, ui::LogSource source);
   /** @param node Live log. @return Resume-following result without automatic reporting. */
   std::expected<void, ManagedError> followLogTail(Node<LogView> node);
   /** @param node Live log. @return Clear result preserving ID history, without automatic reporting. */

@@ -4,6 +4,23 @@
 #include <portals/ui.hpp>
 
 namespace portals::ui::detail {
+std::expected<void, ManagedError> setLogModel(const std::shared_ptr<RefTarget> &target, Node<LogView> node,
+                                              const LogSource &source, std::source_location origin) {
+  const auto owner = eventScene(target);
+
+  if (!owner) {
+    return std::unexpected(owner.error());
+  }
+
+  auto result = (*owner)->setLogModel(node, source);
+
+  if (!result) {
+    result.error().registrationOrigin = origin;
+  }
+
+  return result;
+}
+
 LogViewConfig controlLogViewConfig(const ControlSettings &settings, LogViewConfig config) noexcept {
   config.limits.maxLines = settings.maxLines.value_or(config.limits.maxLines);
   config.limits.maxBytes = settings.maxBytes.value_or(config.limits.maxBytes);

@@ -90,6 +90,7 @@ struct ExternalLogState {
   bool tailRequested{};
 };
 
+std::expected<void, ManagedError> replaceExternalLogView(ManagedScene &scene, Node<LogView> node, ui::LogSource source);
 std::expected<void, ManagedError> attachExternalLogView(ManagedScene &scene, Node<LogView> node, ui::LogSource source,
                                                         LogViewConfig config);
 } // namespace portals::detail

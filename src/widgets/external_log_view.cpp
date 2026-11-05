@@ -565,23 +565,10 @@ public:
   }
 
   std::expected<void, SourceError> connect(const std::shared_ptr<ui::detail::LogSourceData> &data) {
-    data_ = data;
-    WindowSourceOptions options;
+    auto binding = prepareBinding(data);
 
-    options.maxRowBytes = config_.limits.maxRecordBytes + sizeof(WindowRow<LogLine>);
-    options.maxPageRows = std::min<std::size_t>(config_.limits.maxLines, 128);
-    options.initialRevision = data->initialRevision;
-
-    auto source = WindowSource<LogLine>::create(tree_, node_, data->provider, options, data->budget);
-
-    if (!source) {
-      return std::unexpected(source.error());
-    }
-
-    auto consumer = (*source)->openConsumer();
-
-    if (!consumer) {
-      return std::unexpected(consumer.error());
+    if (!binding) {
+      return std::unexpected(binding.error());
     }
 
     auto connection = tree_.connect<ExternalLogCompletion>(
@@ -606,12 +593,104 @@ public:
       return std::unexpected(sourceTreeError(connection.error()));
     }
 
-    source_ = std::move(*source);
+    data_ = data;
+    source_ = std::move(binding->source);
+    consumer_ = std::move(binding->consumer);
+
     if (!data_->budget) {
       data_->budget = source_->budget();
     }
-    consumer_ = std::move(*consumer);
+
     connection_ = std::move(*connection);
+
+    return {};
+  }
+
+  std::expected<void, SourceError> replace(const std::shared_ptr<ui::detail::LogSourceData> &data) {
+    if (!active()) {
+      return std::unexpected(SourceError::CLOSED);
+    }
+
+    if (generation_ == std::numeric_limits<std::uint64_t>::max()) {
+      return std::unexpected(SourceError::IDENTITY_EXHAUSTED);
+    }
+
+    // Build the complete new binding before changing the current session.
+    auto binding = prepareBinding(data);
+
+    if (!binding) {
+      return std::unexpected(binding.error());
+    }
+
+    auto state = state_.lock();
+    std::uint64_t intentSerial{};
+    const auto read = tree_.read(node_, [&](const LogView &widget) {
+      const auto intent = ScrollWidgetAccess::state(widget).intent.lock();
+
+      intentSerial = intent ? intent->serial : 0;
+    });
+
+    if (!read) {
+      return std::unexpected(sourceTreeError(read.error()));
+    }
+
+    const auto invalidated = tree_.invalidate(node_, Invalidation::LAYOUT);
+
+    if (!invalidated) {
+      return std::unexpected(sourceTreeError(invalidated.error()));
+    }
+
+    timer_ = {};
+    timerArmed_ = false;
+
+    if (latest_) {
+      latest_->cancel();
+    }
+
+    consumer_.close();
+    source_->close();
+    ++generation_;
+    source_ = std::move(binding->source);
+    consumer_ = std::move(binding->consumer);
+    data_ = data;
+
+    if (!data_->budget) {
+      data_->budget = source_->budget();
+    }
+
+    completion_.reset();
+    fileGeneration_ = 0;
+    observedExtent_ = 0;
+    turnProgressRecords_ = 0;
+    width_ = 0;
+    busy_ = false;
+    failed_ = false;
+    started_ = false;
+    accumulate_ = false;
+    backwards_ = false;
+    metadataPending_ = false;
+    fillAllowed_ = true;
+    lastEdge_ = SourceEdge::MORE;
+    readingAnchor_.reset();
+    readingDelta_ = 0;
+    lastIntent_.reset();
+    resumeIntent_.reset();
+
+    ExternalLogState replacement;
+
+    replacement.activity = state->activity;
+    replacement.viewport = state->viewport;
+    replacement.visible = state->visible;
+    replacement.focused = state->focused;
+    replacement.wheelStep = state->wheelStep;
+    replacement.keyStep = state->keyStep;
+    replacement.pageOverlap = state->pageOverlap;
+    replacement.intentSerial = intentSerial;
+    replacement.requestedOffset = 0;
+    replacement.followTail = config_.followTail && source_->capabilities().tail;
+    replacement.finiteRows = data->finiteRows;
+    replacement.fileSource = static_cast<bool>(data->file);
+    *state = std::move(replacement);
 
     return {};
   }
@@ -1342,6 +1421,33 @@ private:
     (void)tree_.invalidate(node_, Invalidation::LAYOUT);
   }
 
+  struct Binding {
+    std::unique_ptr<WindowSource<LogLine>> source;
+    WindowConsumer<LogLine> consumer;
+  };
+
+  std::expected<Binding, SourceError> prepareBinding(const std::shared_ptr<ui::detail::LogSourceData> &data) {
+    WindowSourceOptions options;
+
+    options.maxRowBytes = config_.limits.maxRecordBytes + sizeof(WindowRow<LogLine>);
+    options.maxPageRows = std::min<std::size_t>(config_.limits.maxLines, 128);
+    options.initialRevision = data->initialRevision;
+
+    auto source = WindowSource<LogLine>::create(tree_, node_, data->provider, options, data->budget);
+
+    if (!source) {
+      return std::unexpected(source.error());
+    }
+
+    auto consumer = (*source)->openConsumer();
+
+    if (!consumer) {
+      return std::unexpected(consumer.error());
+    }
+
+    return Binding{std::move(*source), std::move(*consumer)};
+  }
+
   WidgetTree &tree_;
   Node<LogView> node_;
   std::weak_ptr<const void> lifetime_;
@@ -1380,6 +1486,46 @@ private:
 };
 } // namespace
 
+std::expected<void, ManagedError> replaceExternalLogView(ManagedScene &scene, Node<LogView> node,
+                                                         ui::LogSource source) {
+  const auto data = ui::detail::ExternalLogAccess::data(source);
+
+  if (!data || !data->provider) {
+    auto failure = sourceFailure(node, data ? data->error : ui::detail::ExternalLogAccess::error(source));
+
+    failure.logFile = data ? data->failure : std::nullopt;
+
+    return std::unexpected(failure);
+  }
+
+  auto &tree = SceneAccess::application(scene).tree();
+  std::shared_ptr<ExternalLogState> external;
+  LogViewConfig config;
+  const auto read = tree.read(node, [&](const LogView &widget) {
+    const auto &state = LogViewAccess::state(widget);
+
+    external = state.external;
+    config = state.config;
+  });
+
+  if (!read) {
+    return std::unexpected(sourceFailure(node, sourceTreeError(read.error())));
+  }
+
+  if (!external) {
+    return attachExternalLogView(scene, node, std::move(source), config);
+  }
+
+  try {
+    const auto activity = std::static_pointer_cast<ExternalLogActivity>(external->activity);
+    const auto replaced = activity->replace(data);
+
+    return replaced ? std::expected<void, ManagedError>{} : std::unexpected(sourceFailure(node, replaced.error()));
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(sourceFailure(node, SourceError::NO_MEMORY));
+  }
+}
+
 std::expected<void, ManagedError> attachExternalLogView(ManagedScene &scene, Node<LogView> node, ui::LogSource source,
                                                         LogViewConfig config) {
   auto data = ui::detail::ExternalLogAccess::data(source);
@@ -1401,6 +1547,7 @@ std::expected<void, ManagedError> attachExternalLogView(ManagedScene &scene, Nod
 
   try {
     auto state = std::make_shared<ExternalLogState>();
+    auto empty = std::make_unique<LogData>();
     auto lifetime = ui::detail::Access::lifetime(scene);
     auto &app = SceneAccess::application(scene);
     auto activity = std::make_shared<ExternalLogActivity>(
@@ -1422,6 +1569,12 @@ std::expected<void, ManagedError> attachExternalLogView(ManagedScene &scene, Nod
       return std::unexpected(sourceFailure(node, connected.error()));
     }
 
+    const auto invalidated = app.tree().invalidate(node, Invalidation::LAYOUT);
+
+    if (!invalidated) {
+      return std::unexpected(sourceFailure(node, sourceTreeError(invalidated.error())));
+    }
+
     auto admitted = SceneAccess::admitActivity(scene, activity);
 
     if (!admitted) {
@@ -1429,12 +1582,19 @@ std::expected<void, ManagedError> attachExternalLogView(ManagedScene &scene, Nod
     }
 
     state->activity = std::move(activity);
-    state->followTail = config.followTail;
+    state->followTail = config.followTail && data->provider->capabilities().tail;
+    state->requestedOffset = 0;
     state->finiteRows = data->finiteRows;
     state->fileSource = static_cast<bool>(data->file);
 
     auto installed = app.tree().edit(node, [&](LogView &widget) {
-      LogViewAccess::state(widget).external = std::move(state);
+      auto &log = LogViewAccess::state(widget);
+
+      const auto intent = ScrollWidgetAccess::state(widget).intent.lock();
+
+      state->intentSerial = intent ? intent->serial : 0;
+      log.data = std::move(empty);
+      log.external = std::move(state);
     });
 
     return installed ? std::expected<void, ManagedError>{}
