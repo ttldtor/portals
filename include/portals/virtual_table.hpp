@@ -309,6 +309,7 @@ public:
   }
 
 private:
+  friend class ManagedScene;
   /// @cond INTERNAL
   template <class U>
   friend std::expected<std::optional<ModelRequest<U>>, TreeError>

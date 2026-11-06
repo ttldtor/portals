@@ -567,6 +567,7 @@ std::expected<void, ManagedError> ManagedScene::remove(Node<Widget> node) {
   });
   pruneLiveText();
   pruneObservers();
+  pruneNavigation();
   pruneScroll();
   pruneDataStates();
   retireDialogs();
@@ -1296,6 +1297,7 @@ std::expected<void, TreeError> ManagedScene::completedLayout(Application &app) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
+  const auto lifetime = std::weak_ptr(lifetime_);
   auto revision = app_.tree().geometryRevision();
   if (!revision) {
     return std::unexpected(revision.error());
@@ -1341,7 +1343,17 @@ std::expected<void, TreeError> ManagedScene::completedLayout(Application &app) {
       }
     }
     completeScrollFrame();
-    return prepareNotifications(true);
+    auto notifications = prepareNotifications(true);
+    if (!notifications) {
+      return notifications;
+    }
+    if (!lifetime.expired() && !closed_ && navigation_ && navigation_->refreshAfterLayout) {
+      // The runner already consumed this frame's paint requests. Preserve late
+      // shared navigation for the next ordinary tick, without another layout pass.
+      navigation_->refreshAfterLayout = false;
+      return app_.tree().invalidate(root_, Invalidation::PAINT);
+    }
+    return {};
   } catch (const std::bad_alloc &) {
     return std::unexpected(TreeError::NO_MEMORY);
   } catch (...) {
@@ -1844,8 +1856,8 @@ ManagedScene::bind(Node<LineEdit> node, ManagedState<std::string> model,
       app_.tree(), app_.router(), node, *property,
       [this, node, lifetime = std::weak_ptr(lifetime_), feedback,
        result = ui::detail::currentSceneCallback(facadeContext(), std::move(incomingResult))](LineEditResult receipt) {
-        const auto report = [this, node, &lifetime, feedback, &receipt, trigger = receipt.trigger](TreeError cause,
-                                                                                                   bool commandFailure = false) {
+        const auto report = [this, node, &lifetime, feedback, &receipt,
+                             trigger = receipt.trigger](TreeError cause, bool commandFailure = false) {
           if (lifetime.expired()) {
             return;
           }
@@ -1906,8 +1918,8 @@ ManagedScene::bind(Node<LineEdit> node, ManagedState<std::string> model,
         };
 
         try {
-          const bool commandFailure = receipt.error &&
-                                      (receipt.status == LineEditStatus::FAILED || receipt.recoverable);
+          const bool commandFailure =
+            receipt.error && (receipt.status == LineEditStatus::FAILED || receipt.recoverable);
 
           if (commandFailure) {
             const bool canReport = !lifetime.expired();
@@ -2814,6 +2826,11 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
       }
     }
 
+    auto navigation = synchronizeNavigation();
+    if (!navigation || closed_) {
+      return navigation ? std::unexpected(TreeError::CLOSED) : navigation;
+    }
+
     // These bounded adapters observe the just-pinned model revision without repinning or scanning data.
     auto activities = visitActivities(true);
 
@@ -3049,6 +3066,7 @@ std::expected<void, ManagedError> ManagedScene::close() {
 
   // Mark closed before retiring captures: their destructors may reenter application code.
   closed_ = true;
+  retireNavigation();
 
   // Retire in place: even moving an empty vector may allocate an MSVC Debug iterator proxy.
   // Closed admission prevents additions; pop before cancellation so recursive close cannot revisit this record.

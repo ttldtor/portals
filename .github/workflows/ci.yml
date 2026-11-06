@@ -82,9 +82,11 @@ jobs:
           - os: windows-2022
             preset: windows-msvc-debug
             minimal_consumer_debug_info: 'OFF'
+            embedded_consumer_debug_info: 'ON'
           - os: ubuntu-24.04
             preset: linux-gcc-debug
             minimal_consumer_debug_info: 'ON'
+            embedded_consumer_debug_info: 'OFF'
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -102,7 +104,7 @@ jobs:
           }
       - name: Configure
         # Package setup and runtime verification use separate fixture phases; per-consumer limits remain.
-        run: cmake --preset ${{ matrix.preset }} -DPORTALS_PACKAGE_TEST_TIMEOUT=1200 -DPORTALS_PACKAGE_CONSUMER_MINIMAL_DEBUG_INFO=${{ matrix.minimal_consumer_debug_info }}
+        run: cmake --preset ${{ matrix.preset }} -DPORTALS_PACKAGE_TEST_TIMEOUT=1200 -DPORTALS_PACKAGE_CONSUMER_MINIMAL_DEBUG_INFO=${{ matrix.minimal_consumer_debug_info }} -DPORTALS_PACKAGE_CONSUMER_EMBEDDED_DEBUG_INFO=${{ matrix.embedded_consumer_debug_info }}
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }}
       - name: Test

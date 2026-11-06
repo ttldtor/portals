@@ -7,6 +7,16 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- Split installed-consumer compilation into dependent fixture phases while preserving
+  default-build targets, excluded negative probes and runtime coverage. Each phase
+  keeps the existing timeout; Ninja checks that the final full build adds no work.
+  The relocated test consumer also avoids redundant links caused by linker
+  dependency metadata on paths with spaces, without changing ordinary SDK builds.
+
+- Refresh earlier prepared list/table navigation bindings on the next ordinary
+  frame when a later view changes their shared position. Synchronization no longer
+  requires another input, and settled bindings do not keep redrawing.
+
 - Reduce GCC installed-package CI consumer debug-information cost while retaining
   Debug assertions, standalone-header checks and runtime coverage. The opt-in is
   disabled for ordinary builds; failed native CI jobs retain compiler commands and
@@ -31,6 +41,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
   consumers for the selector qualifier API and widget virtual hook.
 
 ### Added
+
+- Add scene-owned shared navigation contexts for managed lists and tables, with
+  independent current, selected-set and optional reading-anchor channels. Stable
+  row identities synchronize views without copying screen offsets; weak handles
+  and qualified replies preserve scene lifetime and reject stale results.
 
 - Provider-level model bookmarks with resource identity, qualified resolution
   replies, and bounded finite-snapshot change maps. Stable row identity survives

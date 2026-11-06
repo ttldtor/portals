@@ -90,3 +90,5 @@ The finite row adapter does not resolve text marks. A text provider must preserv
 grapheme boundaries and define how edits move its marks. Editing, Undo/Redo,
 selection synchronization, and bookmark persistence are not performed by this
 foundation.
+
+For shared current and reading positions, see [model navigation](model-navigation.md).
