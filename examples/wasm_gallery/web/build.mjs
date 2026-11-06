@@ -51,6 +51,7 @@ for (const [source, destination] of [
   ['../LICENSES.txt', 'LICENSES.txt'],
   ['../../../LICENSE.txt', 'PORTALS-LICENSE.txt'],
   ['../../../vendor/utf8proc/LICENSE.md', 'UTF8PROC-LICENSE.md'],
+  ['../../../vendor/textual/LICENSE', 'TEXTUAL-LICENSE.txt'],
   ['node_modules/@xterm/xterm/LICENSE', 'XTERM-LICENSE.txt'],
   ['node_modules/@xterm/addon-fit/LICENSE', 'XTERM-FIT-LICENSE.txt']
 ]) await copyFile(resolve(here, source), resolve(output, destination));

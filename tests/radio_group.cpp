@@ -1,5 +1,8 @@
 // Copyright (c) 2026 ttldtor.
-// SPDX-License-Identifier: BSL-1.0
+// SPDX-License-Identifier: BSL-1.0 AND MIT
+// Portals implementation and test logic: BSL-1.0.
+// Adapted Textual palette values: Copyright (c) 2021 Will McGugan, MIT.
+// See vendor/textual/LICENSE and README.md for the retained notice and provenance.
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest.h>
 #include <portals/ui.hpp>
@@ -1272,6 +1275,7 @@ void appearance(Application &app, ui::Ref<RadioGroup> editable, ui::Ref<RadioGro
 }
 
 void liveTransition() {
+  // Textual Nord palette values; MIT notice and provenance are identified in the file header.
   constexpr ThemeTokens TOKENS{{0xd8, 0xde, 0xe9}, {0x2e, 0x34, 0x40}, {0x88, 0xc0, 0xd0},
                                {0x81, 0xa1, 0xc1}, {0x43, 0x4c, 0x5e}, {0xb4, 0x8e, 0xad}};
   constexpr auto LIVE = sc::themeFromTokens(TOKENS);

@@ -1,4 +1,5 @@
 Portals WASM gallery
 Portals: Copyright (c) 2026 ttldtor. Boost Software License 1.0; see repository LICENSE.txt.
 xterm.js 6.0.0 and @xterm/addon-fit 0.11.0: MIT License; license texts copied from installed packages by the web build.
+Textual palette values: Copyright (c) 2021 Will McGugan. MIT License; see TEXTUAL-LICENSE.txt in the web bundle.
 utf8proc and Unicode notices: see vendor/utf8proc in the repository and the copied artifact notices.

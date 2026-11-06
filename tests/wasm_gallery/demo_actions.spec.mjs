@@ -1,4 +1,7 @@
-// Copyright (c) 2026 ttldtor. SPDX-License-Identifier: BSL-1.0
+// Copyright (c) 2026 ttldtor. SPDX-License-Identifier: BSL-1.0 AND MIT
+// Portals implementation and test logic: BSL-1.0.
+// Adapted Textual palette values: Copyright (c) 2021 Will McGugan, MIT.
+// See vendor/textual/LICENSE and README.md for the retained notice and provenance.
 import { test, expect } from './playwright.mjs';
 import { activateControl, controlPoint, galleryRow } from './gallery_helpers.mjs';
 
@@ -29,6 +32,7 @@ test('gallery heading uses the HEADER palette in every built-in theme', async ({
   const palettes = [
     ['modern', 'rgb(75, 180, 220)', 'rgb(24, 28, 36)'],
     ['turbo', 'rgb(255, 255, 255)', 'rgb(0, 0, 170)'],
+    // Textual-derived expected palette values; MIT attribution is retained in the file header.
     ['nord', 'rgb(180, 142, 173)', 'rgb(46, 52, 64)'],
     ['gruvbox', 'rgb(250, 189, 47)', 'rgb(40, 40, 40)'],
     ['tokyo-night', 'rgb(255, 158, 100)', 'rgb(26, 27, 38)'],

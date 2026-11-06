@@ -16,4 +16,7 @@ limitations. Tests repeat these source RGB values as expected results.
 
 No Textual Python code, runtime, generated color system, or widget styles are
 bundled. The MIT notice applies to the adapted palette material; Portals' own
-implementation retains its existing license.
+implementation retains its existing license. Mixed implementation/test files use
+`BSL-1.0 AND MIT` and identify the two scopes in their headers; this does not
+relicense the adapted data as Portals code. The browser gallery includes the
+complete MIT notice as `TEXTUAL-LICENSE.txt` beside its license index.

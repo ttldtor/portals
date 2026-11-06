@@ -1,5 +1,8 @@
 // Copyright (c) 2026 ttldtor.
-// SPDX-License-Identifier: BSL-1.0
+// SPDX-License-Identifier: BSL-1.0 AND MIT
+// Portals implementation and test logic: BSL-1.0.
+// Adapted Textual palette values: Copyright (c) 2021 Will McGugan, MIT.
+// See vendor/textual/LICENSE and README.md for the retained notice and provenance.
 #include "support/vt_oracle.hpp"
 #include <portals/controls.hpp>
 #include <portals/diff.hpp>
@@ -603,7 +606,8 @@ void adaptedPaletteVariants() {
     ThemeTokens colors;
   };
 
-  // Pinned Textual RGB values are independent expectations for the public factories.
+  // The following expected palettes retain Textual MIT attribution from the file header.
+  // Pinned RGB values are independent expectations for the public factories.
   const std::array palettes{PaletteCase{"Nord",
                                         nordTheme,
                                         {{0xD8, 0xDE, 0xE9},

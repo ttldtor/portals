@@ -7,6 +7,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- Clarify the separate MIT attribution of adapted Textual palette values, retain
+  their complete notice in the browser gallery bundle, and document the existing
+  Linux-only Monocypher dependency and its offline license notice.
+
 - Split installed-consumer compilation into dependent fixture phases while preserving
   default-build targets, excluded negative probes and runtime coverage. Each phase
   keeps the existing timeout; Ninja checks that the final full build adds no work.

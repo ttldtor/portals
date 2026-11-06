@@ -1,5 +1,8 @@
 // Copyright (c) 2026 ttldtor.
-// SPDX-License-Identifier: BSL-1.0
+// SPDX-License-Identifier: BSL-1.0 AND MIT
+// Portals implementation and test logic: BSL-1.0.
+// Adapted Textual palette values: Copyright (c) 2021 Will McGugan, MIT.
+// See vendor/textual/LICENSE and README.md for the retained notice and provenance.
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest.h>
 #include <portals/ui.hpp>
