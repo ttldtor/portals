@@ -16,5 +16,17 @@
     "file": "LICENSE",
     "sha256": "85dc6f5ccb57a6fe8c33d158f9fc8fc7ee5655a5d3db2cdd131c6a3d0f48a864"
   },
-  "upstream_commit": null
+  "upstream_commit": null,
+  "incorporated_files": [
+    {
+      "path": "vendor/whatwg-encoding/windows_125x.hpp",
+      "license": "BSD-3-Clause",
+      "sha256": "416a72fdda4a86cb58f43568b8650bab4bac7a0409757b344ad24226ec340650"
+    },
+    {
+      "path": "tests/fixtures/encoding/windows_125x_expected.hpp",
+      "license": "BSD-3-Clause",
+      "sha256": "0a64390264650d9a706697d40a7e33a3f9ef52118f898eef39c1b2137909cf1e"
+    }
+  ]
 }
