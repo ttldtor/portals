@@ -136,6 +136,15 @@ if(DEFINED PORTALS_PACKAGE_CONSUMER_MINIMAL_DEBUG_INFO)
   list(APPEND configureArgs
     "-DPORTALS_PACKAGE_CONSUMER_MINIMAL_DEBUG_INFO=${PORTALS_PACKAGE_CONSUMER_MINIMAL_DEBUG_INFO}")
 endif()
+if(PORTALS_PACKAGE_CONSUMER_EMBEDDED_DEBUG_INFO)
+  if(CMAKE_VERSION VERSION_LESS 3.25)
+    message(FATAL_ERROR "Embedded package-consumer Debug information requires CMake 3.25 or newer")
+  endif()
+  # Full symbols remain available to the linker, without per-target compiler PDB writes.
+  # Only the relocated test consumer changes; producer flags and runtime checks stay intact.
+  list(APPEND configureArgs -DCMAKE_POLICY_DEFAULT_CMP0141=NEW
+    "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug>:Embedded>$<$<CONFIG:RelWithDebInfo>:ProgramDatabase>")
+endif()
 foreach(setting IN ITEMS MAKE_PROGRAM GENERATOR_PLATFORM GENERATOR_TOOLSET MSVC_RUNTIME_LIBRARY
     LINK_DEPENDS_USE_LINKER)
   if(DEFINED ${setting} AND NOT "${${setting}}" STREQUAL "")

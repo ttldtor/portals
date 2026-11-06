@@ -549,3 +549,17 @@ This test has a 40-second CTest timeout. Its probe and CMake driver are
 [test-owned implementation files](../tests/no_dialogs.cmake); the supported
 entry point is CTest. Successful CMake helper execution returns success to its
 caller; fatal CMake errors fail the owning configure/build command.
+
+## Installed-package Debug information
+
+The installed-package fixture checks a relocated SDK through a separate consumer build.
+`PORTALS_PACKAGE_CONSUMER_EMBEDDED_DEBUG_INFO=ON` selects full `/Z7` information for
+that consumer's MSVC Debug compilation (CMake 3.25+). It leaves the SDK producer,
+assertions, `/MDd`, `/Od`, `/RTC1`, header checks and runtime tests unchanged. The option
+is OFF by default; Windows CI enables it. RelWithDebInfo retains ProgramDatabase
+information, while Release has no added debug-format flag. The existing GNU-only
+`PORTALS_PACKAGE_CONSUMER_MINIMAL_DEBUG_INFO` option is a separate setting.
+
+The compiler stores `/Z7` symbols in object files; this is not reduced symbol detail.
+The linker can still generate its ordinary executable PDB. Build time depends on the
+compiler and runner; the format setting alone does not establish a speedup.

@@ -562,3 +562,18 @@ ctest --test-dir build/windows-msvc-debug -C Debug -R '^portals\.test-processes$
 [драйвер CMake](../../tests/no_dialogs.cmake) принадлежат тестам;
 поддерживаемая точка запуска — CTest. Успешный помощник CMake возвращает
 успех вызывающей стороне; фатальная ошибка прерывает конфигурацию или сборку.
+
+## Отладочная информация installed-package проверки
+
+Проверка installed-package собирает отдельного потребителя перемещённого SDK.
+`PORTALS_PACKAGE_CONSUMER_EMBEDDED_DEBUG_INFO=ON` выбирает полную информацию `/Z7`
+только для Debug-компиляции этого MSVC consumer (CMake 3.25+). SDK producer,
+assertions, `/MDd`, `/Od`, `/RTC1`, проверки заголовков и runtime-тесты сохраняются.
+По умолчанию опция OFF; Windows CI включает её. RelWithDebInfo сохраняет формат
+ProgramDatabase, а Release не получает дополнительный флаг отладочной информации.
+Существующая GNU-опция `PORTALS_PACKAGE_CONSUMER_MINIMAL_DEBUG_INFO` независима.
+
+Компилятор сохраняет символы `/Z7` в объектных файлах; объём отладочных сведений
+не сокращается. Линкер по-прежнему может создать обычный PDB исполняемого файла.
+Длительность сборки зависит от компилятора и runner: сама настройка формата
+не доказывает ускорение.
