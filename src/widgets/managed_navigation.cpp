@@ -3,6 +3,239 @@
 #include <portals/managed.hpp>
 
 namespace portals {
+namespace detail {
+LogCheckpointEntry *LogNavigationSession::find(ModelResource resource) const noexcept {
+  for (auto *entry = entries.get(); entry; entry = entry->next.get()) {
+    if (entry->resource.identity == resource.identity && !entry->lifetime.expired()) {
+      return entry;
+    }
+  }
+
+  return nullptr;
+}
+
+void LogNavigationSession::prune() noexcept {
+  auto *entry = &entries;
+
+  while (*entry) {
+    if ((*entry)->lifetime.expired()) {
+      auto removed = std::move(*entry);
+
+      *entry = std::move(removed->next);
+    } else {
+      entry = &(*entry)->next;
+    }
+  }
+}
+
+void LogNavigationSession::reset(ModelResource resource) noexcept {
+  auto *entry = &entries;
+
+  while (*entry) {
+    if ((*entry)->resource.identity == resource.identity) {
+      auto removed = std::move(*entry);
+
+      *entry = std::move(removed->next);
+
+      return;
+    }
+
+    entry = &(*entry)->next;
+  }
+}
+
+void LogNavigationSession::close() noexcept {
+  closed = true;
+  binding.reset();
+
+  while (entries) {
+    auto removed = std::move(entries);
+
+    entries = std::move(removed->next);
+  }
+}
+
+std::expected<LogCheckpointChange, SourceError> LogNavigationSession::stage(ModelResource resource,
+                                                                            std::weak_ptr<const void> resourceLifetime,
+                                                                            LogReadingCheckpoint value) {
+  if (closed || lifetime.expired()) {
+    return std::unexpected(SourceError::CLOSED);
+  }
+  if (!resource.identity.instance || !resource.identity.epoch || !resource.lineage || resourceLifetime.expired()) {
+    return std::unexpected(SourceError::INVALID_ARGUMENT);
+  }
+
+  prune();
+  const auto bookmarkBytes = value.bookmark ? value.bookmark->storageBytes() : 0;
+
+  if (bookmarkBytes > options.bookmarks.maxBytes) {
+    return std::unexpected(SourceError::WOULD_BLOCK);
+  }
+
+  // The entry already contains the optional bookmark's scalar storage. Only an
+  // opaque allocation needs separate credit. Updating inline values cannot need
+  // another complete entry reservation when the history ledger is full.
+  const auto metadata = value.bookmark ? bookmarkBytes - sizeof(ModelBookmark) : 0;
+  LogCheckpointChange change;
+
+  change.existing = find(resource);
+  change.resource = resource;
+  change.lifetime = resourceLifetime;
+  change.value = std::move(value);
+
+  if (change.existing && metadata <= change.existing->metadataCredit.usage().bytes) {
+    return change;
+  }
+
+  auto payload = budget->reserve({metadata, 0, 0, 0});
+
+  if (!payload) {
+    return std::unexpected(payload.error());
+  }
+
+  change.metadataCredit = std::move(*payload);
+  change.replaceMetadata = true;
+
+  if (change.existing) {
+    return change;
+  }
+
+  constexpr std::size_t ENTRY_ALLOCATION_ALLOWANCE = 128;
+  auto reserved = budget->reserve({sizeof(LogCheckpointEntry) + ENTRY_ALLOCATION_ALLOWANCE, 0, 0, 0});
+
+  if (!reserved) {
+    return std::unexpected(reserved.error());
+  }
+
+  try {
+    auto entry = std::make_unique<LogCheckpointEntry>();
+
+    entry->credit = std::move(*reserved);
+    entry->metadataCredit = std::move(change.metadataCredit);
+    entry->resource = resource;
+    entry->lifetime = std::move(resourceLifetime);
+    entry->value = std::move(change.value);
+    change.added = std::move(entry);
+
+    return change;
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(SourceError::NO_MEMORY);
+  }
+}
+
+void LogNavigationSession::commit(LogCheckpointChange change) noexcept {
+  if (change.existing) {
+    change.existing->resource = change.resource;
+    change.existing->lifetime = std::move(change.lifetime);
+    change.existing->value = std::move(change.value);
+
+    if (change.replaceMetadata) {
+      change.existing->metadataCredit = std::move(change.metadataCredit);
+    }
+
+    return;
+  }
+
+  change.added->next = std::move(entries);
+  entries = std::move(change.added);
+}
+} // namespace detail
+
+std::expected<std::shared_ptr<detail::LogNavigationSession>, SourceError> LogNavigation::lock() const {
+  if (owner_ != std::this_thread::get_id()) {
+    return std::unexpected(owner_ == std::thread::id{} ? SourceError::CLOSED : SourceError::WRONG_THREAD);
+  }
+
+  auto session = session_.lock();
+
+  if (!session || session->closed || session->lifetime.expired()) {
+    return std::unexpected(SourceError::CLOSED);
+  }
+
+  return session;
+}
+
+std::expected<LogRestoreStatus, SourceError> LogNavigation::status() const {
+  auto session = lock();
+
+  return session ? std::expected<LogRestoreStatus, SourceError>((*session)->status) : std::unexpected(session.error());
+}
+
+std::expected<std::optional<LogReadingCheckpoint>, SourceError>
+LogNavigation::checkpoint(ModelResource resource) const {
+  auto session = lock();
+
+  if (!session) {
+    return std::unexpected(session.error());
+  }
+
+  const auto *entry = (*session)->find(resource);
+
+  return entry ? std::optional(entry->value) : std::optional<LogReadingCheckpoint>{};
+}
+
+std::expected<void, SourceError> LogNavigation::reset(ModelResource resource) const {
+  auto session = lock();
+
+  if (!session) {
+    return std::unexpected(session.error());
+  }
+
+  (*session)->reset(resource);
+
+  return {};
+}
+
+std::expected<LogNavigation, ManagedError> ManagedScene::logNavigation(LogCheckpointOptions options) {
+  auto allowed = boundary(ManagedPhase::STATE, root_);
+
+  if (!allowed) {
+    return std::unexpected(allowed.error());
+  }
+  if (!options.bookmarks.maxBytes) {
+    return std::unexpected(error(ManagedPhase::STATE, root_, TreeError::INVALID_ARGUMENT));
+  }
+
+  auto budget = SourceBudget::create({.maxBytes = options.maxBytes});
+
+  if (!budget) {
+    return std::unexpected(error(ManagedPhase::STATE, root_, detail::navigationTreeError(budget.error())));
+  }
+
+  constexpr std::size_t SESSION_ALLOCATION_ALLOWANCE = 256;
+  auto credit = (*budget)->reserve({sizeof(detail::LogNavigationSession) + SESSION_ALLOCATION_ALLOWANCE, 0, 0, 0});
+
+  if (!credit) {
+    return std::unexpected(error(ManagedPhase::STATE, root_, detail::navigationTreeError(credit.error())));
+  }
+
+  try {
+    if (!navigation_) {
+      navigation_ = std::make_unique<detail::ManagedNavigationRegistry>();
+    }
+
+    navigation_->logSessions.reserve(navigation_->logSessions.size() + 1);
+    auto session = std::make_shared<detail::LogNavigationSession>();
+
+    session->credit = std::move(*credit);
+    session->budget = std::move(*budget);
+    session->lifetime = lifetime_;
+    session->scene = root_.id();
+    session->options = options;
+    navigation_->logSessions.push_back(session);
+    LogNavigation handle;
+
+    handle.session_ = session;
+    handle.owner_ = owner_;
+
+    return handle;
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(error(ManagedPhase::STATE, root_, TreeError::NO_MEMORY));
+  } catch (const std::length_error &) {
+    return std::unexpected(error(ManagedPhase::STATE, root_, TreeError::NODE_LIMIT));
+  }
+}
+
 namespace {
 NavigationPosition logicalPosition(ModelResource resource, const std::optional<ModelBookmark> &bookmark,
                                    PositionResolution resolution) {
@@ -494,6 +727,18 @@ void ManagedScene::pruneNavigation() {
     return;
   }
 
+  std::erase_if(navigation_->logSessions, [](const auto &session) {
+    session->prune();
+
+    if (session->implicit && session->binding.expired()) {
+      session->close();
+
+      return true;
+    }
+
+    return false;
+  });
+
   std::erase_if(navigation_->bindings, [&](const auto &binding) {
     auto live = app_.tree().withScope(binding->node, [](const UiScope &) {
     });
@@ -542,5 +787,11 @@ void ManagedScene::retireNavigation() noexcept {
     record->close();
   }
   navigation_->bindings.clear();
+
+  for (const auto &session : navigation_->logSessions) {
+    session->close();
+  }
+
+  navigation_->logSessions.clear();
 }
 } // namespace portals

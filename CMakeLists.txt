@@ -74,7 +74,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT EMSCRIPTEN)
   target_include_directories(portals_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/monocypher")
   set_target_properties(portals_core PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED YES C_EXTENSIONS OFF)
   # Namespace unmodified upstream functions in both definitions and private call sites.
-  set_source_files_properties(src/secure_string.cpp vendor/monocypher/monocypher.c
+  set_source_files_properties(src/secure_string.cpp src/models/log_file.cpp vendor/monocypher/monocypher.c
     PROPERTIES COMPILE_DEFINITIONS "${portals_monocypher_symbols}")
 endif()
 if(WIN32 AND NOT EMSCRIPTEN)
@@ -1533,6 +1533,13 @@ if(PORTALS_BUILD_TESTS)
   portals_enable_warnings(portals_external_log_view)
   add_test(NAME portals.external-log-view COMMAND portals_external_log_view)
   set_tests_properties(portals.external-log-view PROPERTIES TIMEOUT 30)
+
+  add_executable(portals_log_checkpoints tests/log_checkpoints.cpp)
+  target_include_directories(portals_log_checkpoints SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  target_link_libraries(portals_log_checkpoints PRIVATE portals::core)
+  portals_enable_warnings(portals_log_checkpoints)
+  add_test(NAME portals.log-checkpoints COMMAND portals_log_checkpoints)
+  set_tests_properties(portals.log-checkpoints PROPERTIES TIMEOUT 30)
 
   add_executable(portals_log_file tests/log_file.cpp)
   target_include_directories(portals_log_file SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")

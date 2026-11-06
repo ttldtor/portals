@@ -12,7 +12,9 @@ int main() {
   // clang-format off
   return ui::scene(ui::vbox(
     ui::label("F2: application | F3: errors | F10: quit"),
-    ui::logView(log, application).framed("rounded", "Log viewer")))
+    ui::label("PgUp: pause | End: follow | switching remembers each log"),
+    ui::logView(log, application).framed("rounded", "Logs").height(12)))
+    | ui::theme(nordTheme())
     | ui::onKey(key::F2, [=] { log.model(application); })
     | ui::onKey(key::F3, [=] { log.model(errors); })
     | ui::onKey("F10 | Ctrl+C", ui::quit)

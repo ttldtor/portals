@@ -1456,6 +1456,16 @@ public:
     return state_->stamp;
   }
 
+  /** @return Latest applied readiness/data revision, WRONG_THREAD, or CLOSED.
+   * Reading the scalar on UI performs no provider work or I/O. Queued notifications
+   * become visible only after the existing scheduler applies them.
+   */
+  std::expected<std::uint64_t, SourceError> dataRevision() const {
+    auto allowed = state_->allowed();
+
+    return allowed ? std::expected<std::uint64_t, SourceError>(state_->revision) : std::unexpected(allowed.error());
+  }
+
   /** @return Shared credit root for related sources/replacements. */
   std::shared_ptr<SourceBudget> budget() const noexcept {
     return state_->budget;

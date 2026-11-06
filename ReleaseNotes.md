@@ -26,6 +26,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
   CTest fixture phases, preserving complete consumer/header coverage and individual
   test limits. Package commands now report phase timestamps and elapsed time.
 
+- LogView source switching remembers paused reading positions and following mode
+  for bookmark-capable sources. File restoration checks native identity and a
+  bounded record witness on the worker; incompatible or unavailable history is
+  reported without silently jumping to the tail. Checkpoint metadata is bounded
+  independently of source length; custom cursor providers can opt in.
+
 - Clarify control selection and data-state examples in the English/Russian guides;
   group scrollbar arrows with the scrollbar and show the existing Spinner
   animation directly on its guide page.
