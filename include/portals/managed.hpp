@@ -11,6 +11,7 @@
 #include <portals/editor_command.hpp>
 #include <portals/key_binding.hpp>
 #include <portals/line_edit.hpp>
+#include <portals/log_navigation.hpp>
 #include <portals/log_view.hpp>
 #include <portals/managed_diagnostics.hpp>
 #include <portals/managed_model.hpp>
@@ -1717,7 +1718,12 @@ public:
    * @return Scene-owned generic context or typed admission/allocation failure.
    */
   std::expected<ManagedNavigation, ManagedError> navigation(ModelResource resource, SourceStamp session,
-                                                           NavigationOptions options = {});
+                                                            NavigationOptions options = {});
+  /** @param options Positive metadata bounds; no source-count limit or LRU eviction.
+   * @return Independent scene-owned log checkpoint session or typed admission failure.
+   * No Property slots, provider work, file access or mounted view are required.
+   */
+  std::expected<LogNavigation, ManagedError> logNavigation(LogCheckpointOptions options = {});
 
   /** @tparam T Immutable finite model row type.
    * @param model Original source model in this scene; projections bind explicitly later.
@@ -1736,7 +1742,7 @@ public:
    */
   template <class T>
   std::expected<ManagedNavigation, ManagedError> navigation(ManagedModel<T> model, ModelResource resource,
-                                                           SourceStamp session, NavigationOptions options = {});
+                                                            SourceStamp session, NavigationOptions options = {});
 
   /** @tparam T Immutable row type shared with the bound list.
    * @param node Existing managed list in this scene.
@@ -1746,7 +1752,7 @@ public:
    */
   template <class T>
   std::expected<void, ManagedError> bindNavigation(Node<VirtualList<T>> node, ManagedNavigation navigation,
-                                                  NavigationBindingOptions options = {});
+                                                   NavigationBindingOptions options = {});
 
   /** @tparam T Immutable row type shared with the bound table.
    * @param node Existing managed table in this scene.
@@ -1756,7 +1762,7 @@ public:
    */
   template <class T>
   std::expected<void, ManagedError> bindNavigation(Node<VirtualTable<T>> node, ManagedNavigation navigation,
-                                                  NavigationBindingOptions options = {});
+                                                   NavigationBindingOptions options = {});
 
   /** @brief Mount a table with owned range, input binding, style and automatic preparation.
    * @tparam T Immutable model row accepted by the owning column delegates.
@@ -2764,7 +2770,7 @@ private:
   void pruneNavigation();
   template <class T, class W>
   std::expected<void, ManagedError> bindNavigationView(Node<W> node, ManagedNavigation navigation,
-                                                      NavigationBindingOptions options);
+                                                       NavigationBindingOptions options);
   std::shared_ptr<std::function<std::expected<bool, ManagedError>(const InputEvent &)>> input_;
   std::shared_ptr<KeySnapshot> keys_;
   std::shared_ptr<const KeyBindingsSnapshot> keyProjection_;
@@ -2827,9 +2833,9 @@ private:
 } // namespace portals
 
 #include <portals/detail/managed_derive.hpp>
-#include <portals/detail/managed_scroll.hpp>
 #include <portals/detail/managed_navigation.hpp>
 #include <portals/detail/managed_navigation_views.hpp>
+#include <portals/detail/managed_scroll.hpp>
 #include <portals/detail/managed_views.hpp>
 
 #include <portals/detail/managed_collections.hpp>

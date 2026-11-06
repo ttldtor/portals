@@ -90,9 +90,10 @@ error paths. Successful earlier channels can remain committed if a later channel
 fails; retrying does not duplicate their logical notifications.
 
 This integration covers managed finite-model lists and tables plus the generic
-navigation context. Automatic LogView bookmarks, model-switch restoration,
-current-record forms and persistent storage are separate integrations. The existing
-low-level model and view APIs remain available.
+navigation context. [LogView source switching](log-view.md#log-view-switching-models)
+provides its own bounded reading checkpoints. General list/table model-switch
+restoration, current-record forms and persistent storage are separate integrations.
+The existing low-level model and view APIs remain available.
 
 ## Complete provider-integration example
 

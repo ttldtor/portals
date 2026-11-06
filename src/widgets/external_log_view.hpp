@@ -16,6 +16,8 @@ struct SceneActivity;
 struct LogSourceData {
   std::shared_ptr<WindowProvider<LogLine>> provider;
   std::shared_ptr<FileLogModel> file;
+  std::shared_ptr<LogBookmarkProvider> bookmarks;
+  ModelResource resource;
   std::shared_ptr<SourceBudget> budget;
   std::optional<FileLogFailure> failure;
   SourceError error{SourceError::INVALID_ARGUMENT};
@@ -35,6 +37,15 @@ struct ExternalLogAccess {
   static SourceError error(const LogSource &source) {
     return source.error_;
   }
+
+  static std::expected<std::shared_ptr<portals::detail::LogNavigationSession>, SourceError>
+  navigation(const LogNavigation &navigation) {
+    return navigation.lock();
+  }
+
+  static bool empty(const LogNavigation &navigation) noexcept {
+    return navigation.owner_ == std::thread::id{};
+  }
 };
 } // namespace portals::ui::detail
 
@@ -47,6 +58,7 @@ struct ExternalLogAnchor {
   std::size_t recordBytes{};
   SourceCursor pageBefore;
   SourceCursor pageAfter;
+  std::optional<ModelBookmark> bookmark;
 };
 
 struct ExternalLogFrame {
@@ -66,6 +78,7 @@ struct ExternalLogFrame {
   std::int32_t width{};
   std::optional<std::uint64_t> preferredOffset;
   bool anchorResolved{};
+  std::optional<SourceError> bookmarkError;
 };
 
 struct ExternalLogState {
@@ -88,9 +101,11 @@ struct ExternalLogState {
   std::uint64_t pageOverlap{1};
   bool followTail{};
   bool tailRequested{};
+  LogNavigation navigation;
 };
 
 std::expected<void, ManagedError> replaceExternalLogView(ManagedScene &scene, Node<LogView> node, ui::LogSource source);
 std::expected<void, ManagedError> attachExternalLogView(ManagedScene &scene, Node<LogView> node, ui::LogSource source,
-                                                        LogViewConfig config);
+                                                        LogViewConfig config, LogNavigation navigation = {},
+                                                        LogCheckpointOptions checkpoints = {});
 } // namespace portals::detail

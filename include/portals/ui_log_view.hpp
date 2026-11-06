@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include <portals/log_navigation.hpp>
 #include <portals/log_view.hpp>
 #include <portals/ui_description.hpp>
 
@@ -37,6 +38,8 @@ struct LogSourceViewConfig {
   LogSourceLimits limits{}; ///< Bounded display payload caps, additionally constrained by the shared source ledger.
   bool followTail{true};    ///< Start at and follow the available tail when the provider supports it.
   bool readOnly{};          ///< Disable user navigation; checked programmatic navigation remains available.
+  LogNavigation navigation; ///< Optional explicit session reuse; omitted creates an independent scene-owned session.
+  LogCheckpointOptions checkpoints{}; ///< Metadata bounds used when creating the default session.
 };
 
 /** @brief Owning deferred external log binding; construction performs no file I/O.
@@ -53,6 +56,8 @@ public:
   std::optional<std::uint64_t> rowCount() const noexcept;
   /** @return Shared source/prepared-text credit root, available after the first successful mount. */
   std::shared_ptr<SourceBudget> budget() const noexcept;
+  /** @return Optional worker bookmark capability, independent of rowCount and delivery traversal. */
+  std::shared_ptr<LogBookmarkProvider> bookmarks() const noexcept;
 
 private:
   friend struct detail::ExternalLogAccess;
@@ -78,6 +83,12 @@ LogSource logFile(std::string_view path, const FileLogOptions &options, std::sha
  * @return Owning deferred source, including exact deferred setup failures.
  */
 LogSource logSource(std::shared_ptr<WindowProvider<LogLine>> provider, std::shared_ptr<SourceBudget> budget = {});
+/** @param provider Worker-readable log transport. @param bookmarks Optional owning native navigation capability.
+ * @param budget Shared delivery/preparation ledger.
+ * @return Deferred generic source; reading remains available without bookmark support.
+ */
+LogSource logSource(std::shared_ptr<WindowProvider<LogLine>> provider, std::shared_ptr<LogBookmarkProvider> bookmarks,
+                    std::shared_ptr<SourceBudget> budget = {});
 
 namespace detail {
 /// @cond INTERNAL
@@ -117,9 +128,11 @@ namespace portals {
 /** @param scene UI owner outside frames. @param node Live managed log, including rolling mode.
  * @param source Owning deferred provider, file or finite-model descriptor.
  * @return Atomic binding admission preserving the old binding on failure; never reports checked errors.
- * Successful admission clears old content and cursors, keeps node/style/focus and resets navigation
- * to the view's configured followTail default and the new provider's capabilities. Later read errors
- * belong to the new binding. Work and decoding remain on the existing application executor.
+ * Successful admission clears old prepared content and cursors while preserving node/style/focus.
+ * Returning resources restore their scene-owned reading checkpoint and independent follow mode;
+ * first visits use the configured initial policy. Same unchanged descriptors are a no-op.
+ * Unsupported or unavailable restoration is recoverable and preserves the saved bookmark.
+ * Later read errors belong to the new binding. Work remains on the existing application executor.
  */
 std::expected<void, ManagedError> setLogModel(ManagedScene &scene, Node<LogView> node, ui::LogSource source);
 /** @param tree UI owner outside frames. @param node Mounted finite-source log.
@@ -132,4 +145,8 @@ std::expected<void, SourceError> seekLogRow(WidgetTree &tree, Node<LogView> node
  * @return Deferred bounded seek admission or UNSUPPORTED for other source families.
  */
 std::expected<void, SourceError> seekLogByte(WidgetTree &tree, Node<LogView> node, std::uint64_t byteOffset);
+/** @param tree UI owner outside frames. @param node Mounted external-source log.
+ * @return Weak scene-owned session handle for checked status/export or explicit view reuse.
+ */
+std::expected<LogNavigation, SourceError> logNavigation(WidgetTree &tree, Node<LogView> node);
 } // namespace portals

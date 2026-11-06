@@ -23,13 +23,37 @@ std::shared_ptr<SourceBudget> LogSource::budget() const noexcept {
   return data_ ? data_->budget : nullptr;
 }
 
+std::shared_ptr<LogBookmarkProvider> LogSource::bookmarks() const noexcept {
+  return data_ ? data_->bookmarks : nullptr;
+}
+
 LogSource logSource(std::shared_ptr<WindowProvider<LogLine>> provider, std::shared_ptr<SourceBudget> budget) {
+  auto bookmarks = std::dynamic_pointer_cast<LogBookmarkProvider>(provider);
+
+  return logSource(std::move(provider), std::move(bookmarks), std::move(budget));
+}
+
+LogSource logSource(std::shared_ptr<WindowProvider<LogLine>> provider, std::shared_ptr<LogBookmarkProvider> bookmarks,
+                    std::shared_ptr<SourceBudget> budget) {
   try {
     auto data = std::make_shared<detail::LogSourceData>();
 
     data->provider = std::move(provider);
     data->file = std::dynamic_pointer_cast<FileLogModel>(data->provider);
+    data->bookmarks = std::move(bookmarks);
     data->budget = std::move(budget);
+
+    if (data->bookmarks) {
+      data->resource = data->bookmarks->resource();
+    } else {
+      auto resource = ModelResource::create();
+
+      if (!resource) {
+        return detail::ExternalLogAccess::make({}, resource.error());
+      }
+
+      data->resource = *resource;
+    }
 
     return detail::ExternalLogAccess::make(std::move(data));
   } catch (const std::bad_alloc &) {
@@ -58,6 +82,8 @@ LogSource logFile(std::string_view path, const FileLogOptions &options, std::sha
 
     if (file) {
       data->file = *file;
+      data->bookmarks = *file;
+      data->resource = (*file)->resource();
       data->provider = std::move(*file);
     } else {
       data->failure = file.error();
@@ -109,6 +135,7 @@ constexpr std::size_t OVERSCAN_ROWS = 8;
 constexpr std::size_t PREPARED_METADATA_BYTES = 16 * 1024;
 constexpr std::size_t GRAPHEME_ALLOCATION_FACTOR = 5;
 constexpr SchedulerTime TAIL_POLL_INTERVAL = 250;
+constexpr std::size_t RESTORE_ENVELOPE_BYTES = 4096;
 
 TreeError sourceBridge(SourceError error) noexcept {
   switch (error) {
@@ -161,10 +188,17 @@ struct ExternalLogCompletion {
   bool ready{};
   bool replacesWindow{};
   bool generationChanged{};
+  bool historyUnavailable{};
+  bool pending{};
+  std::uint64_t readRevision{};
   std::optional<FileLogMetadata> metadata;
   bool empty{};
   SourceEdge edge{SourceEdge::MORE};
   std::size_t records{};
+  std::optional<PositionRequest> restoreRequest;
+  std::optional<PositionReply> restored;
+  std::optional<SourceAnchor> restoreAnchor;
+  LogRestoreStatus restoreStatus;
 };
 
 struct ExternalLogIntent {
@@ -217,7 +251,8 @@ preparePage(const WindowPage<LogLine> &page, SourceEdge edge, SourceDirection di
             std::shared_ptr<const ExternalLogFrame> previous, std::shared_ptr<SourceBudget> budget, WidthPolicy policy,
             LogLimits limits, std::int32_t width, std::optional<TextError> &textError, std::stop_token stop,
             bool finite, bool file, std::optional<ExternalLogAnchor> anchor, std::int64_t anchorDelta,
-            std::size_t maxCachedRows, bool following) {
+            std::size_t maxCachedRows, bool following, const std::shared_ptr<LogBookmarkProvider> &bookmarks,
+            const SourceReadCommand &command, BookmarkOptions bookmarkOptions) {
   std::size_t previousFirst{};
   std::size_t previousLast = previous ? previous->rows.size() : 0;
   auto before = previous ? previous->before : SourceCursor{};
@@ -291,8 +326,16 @@ preparePage(const WindowPage<LogLine> &page, SourceEdge edge, SourceDirection di
   // on the supported standard libraries. Validate this allowance with long-record allocation probes;
   // it is a capacity reservation, not an RSS measurement or a portable vector growth promise.
   const auto maxVisualRows = bytes / static_cast<std::size_t>(std::max(width / 2, 1)) + records;
-  const auto reservation = PREPARED_METADATA_BYTES + bytes * (GRAPHEME_ALLOCATION_FACTOR * sizeof(Grapheme) + 4) +
-                           maxVisualRows * (sizeof(GraphemeText) + sizeof(ExternalLogAnchor) + sizeof(void *) + 64);
+  auto reservation = PREPARED_METADATA_BYTES + bytes * (GRAPHEME_ALLOCATION_FACTOR * sizeof(Grapheme) + 4) +
+                     maxVisualRows * (sizeof(GraphemeText) + sizeof(ExternalLogAnchor) + sizeof(void *) + 64);
+
+  if (bookmarks && records) {
+    if (bookmarkOptions.maxBytes > (std::numeric_limits<std::size_t>::max() - reservation) / records) {
+      return std::unexpected(SourceError::PAGE_TOO_LARGE);
+    }
+
+    reservation += records * bookmarkOptions.maxBytes;
+  }
   auto credit = budget->reserve({reservation, 0, 0, 0});
 
   if (!credit) {
@@ -351,6 +394,32 @@ preparePage(const WindowPage<LogLine> &page, SourceEdge edge, SourceDirection di
 
     const auto clusters = text->graphemes();
     std::size_t first{};
+    std::optional<ModelBookmark> bookmark;
+
+    if (bookmarks) {
+      auto captured = bookmarks->capture(command, row, bookmarkOptions, stop);
+
+      if (captured && captured->resource() == bookmarks->resource() &&
+          captured->position().kind == PositionKind::ITEM && captured->position().row == row.id &&
+          captured->position().revision == command.dataRevision &&
+          captured->storageBytes() <= bookmarkOptions.maxBytes) {
+        bookmark = std::move(*captured);
+      } else {
+        frame->bookmarkError = captured ? SourceError::INVALID_REPLY : captured.error();
+      }
+    }
+
+    if (anchor && anchor->row == row.id) {
+      anchor->firstByte = std::min(anchor->firstByte, text->bytes().size());
+
+      for (const auto &cluster : clusters) {
+        if (cluster.byte_begin <= anchor->firstByte && anchor->firstByte < cluster.byte_end) {
+          anchor->firstByte = cluster.byte_begin;
+
+          break;
+        }
+      }
+    }
 
     do {
       auto last = first;
@@ -372,7 +441,7 @@ preparePage(const WindowPage<LogLine> &page, SourceEdge edge, SourceDirection di
 
       frame->rows.push_back(std::make_unique<GraphemeText>(std::move(*wrapped)));
       frame->anchors.push_back({row.id, beginByte, endByte, finite ? page.before().token[0] + recordIndex : 0,
-                                row.value.text.size(), page.before(), page.after()});
+                                row.value.text.size(), page.before(), page.after(), bookmark});
       first = last;
     } while (first < clusters.size());
 
@@ -438,11 +507,13 @@ public:
                  std::shared_ptr<ExternalLogCompletion> completion, std::shared_ptr<const ExternalLogFrame> previous,
                  std::shared_ptr<SourceBudget> budget, WidthPolicy policy, LogLimits limits, std::int32_t width,
                  std::uint64_t fileGeneration, bool finite, bool file, std::optional<ExternalLogAnchor> anchor,
-                 std::int64_t anchorDelta, std::size_t maxCachedRows, bool following)
+                 std::int64_t anchorDelta, std::size_t maxCachedRows, bool following,
+                 std::shared_ptr<LogBookmarkProvider> bookmarks, BookmarkOptions bookmarkOptions)
       : request_(std::move(request)), publisher_(std::move(publisher)), completion_(std::move(completion)),
         previous_(std::move(previous)), budget_(std::move(budget)), policy_(policy), limits_(limits), width_(width),
         fileGeneration_(fileGeneration), finite_(finite), file_(file), anchor_(anchor), anchorDelta_(anchorDelta),
-        maxCachedRows_(maxCachedRows), following_(following) {
+        maxCachedRows_(maxCachedRows), following_(following), bookmarks_(std::move(bookmarks)),
+        bookmarkOptions_(bookmarkOptions) {
   }
 
   void run(std::stop_token stop) noexcept override {
@@ -482,6 +553,9 @@ public:
           completion_->generationChanged = true;
         }
 
+        completion_->historyUnavailable = reply_->state == SourceReadState::HISTORY_UNAVAILABLE;
+        completion_->pending = reply_->state == SourceReadState::PENDING;
+
         return;
       }
 
@@ -496,9 +570,9 @@ public:
         return;
       }
 
-      auto prepared =
-        preparePage(reply_->page, reply_->edge, request_.command().direction, previous_, budget_, policy_, limits_,
-                    width_, completion_->text, stop, finite_, file_, anchor_, anchorDelta_, maxCachedRows_, following_);
+      auto prepared = preparePage(reply_->page, reply_->edge, request_.command().direction, previous_, budget_, policy_,
+                                  limits_, width_, completion_->text, stop, finite_, file_, anchor_, anchorDelta_,
+                                  maxCachedRows_, following_, bookmarks_, request_.command(), bookmarkOptions_);
 
       if (prepared) {
         completion_->frame = std::move(*prepared);
@@ -545,8 +619,140 @@ private:
   std::int64_t anchorDelta_{};
   std::size_t maxCachedRows_{};
   bool following_{};
+  std::shared_ptr<LogBookmarkProvider> bookmarks_;
+  BookmarkOptions bookmarkOptions_;
   std::expected<SourceReadReply<LogLine>, SourceError> reply_{std::unexpected(SourceError::CANCELLED)};
   bool sourcePublished_{};
+};
+
+class ExternalLogRestoreJob final : public BackgroundJob {
+public:
+  ExternalLogRestoreJob(std::shared_ptr<LogBookmarkProvider> provider, PositionRequest request,
+                        Publisher<ExternalLogCompletion> publisher, std::shared_ptr<ExternalLogCompletion> completion,
+                        WidthPolicy policy, std::int32_t width, SourceCapabilities capabilities,
+                        std::weak_ptr<const WindowNotifier<LogLine>> readiness)
+      : provider_(std::move(provider)), request_(std::move(request)), publisher_(std::move(publisher)),
+        completion_(std::move(completion)), policy_(policy), width_(width), capabilities_(capabilities),
+        readiness_(std::move(readiness)) {
+  }
+
+  void run(std::stop_token stop) noexcept override {
+    try {
+      auto resolved = provider_->resolveLog(request_, readiness_, stop);
+
+      if (!resolved) {
+        completion_->restoreStatus = {PositionResolution::UNAVAILABLE,
+                                      resolved.error() == SourceError::INVALID_CURSOR ||
+                                          resolved.error() == SourceError::ROW_NOT_FOUND
+                                        ? LogRestoreReason::ANCHOR_MISMATCH
+                                        : LogRestoreReason::HISTORY_UNAVAILABLE,
+                                      resolved.error()};
+      } else if (!positionReplyMatches(request_, *resolved)) {
+        completion_->restoreStatus = {PositionResolution::UNAVAILABLE, LogRestoreReason::RESOURCE_MISMATCH,
+                                      SourceError::INVALID_REPLY};
+      } else {
+        completion_->restored = *resolved;
+        completion_->restoreStatus.resolution = resolved->state;
+
+        switch (resolved->state) {
+        case PositionResolution::EXACT:
+        case PositionResolution::NEAREST: {
+          auto anchor = provider_->readAnchor(*resolved, request_.session);
+
+          if (!anchor ||
+              (anchor->kind == SourceAnchorKind::ROW &&
+               (!capabilities_.seekRow || !anchor->row.value || !anchor->row.generation)) ||
+              anchor->kind == SourceAnchorKind::TAIL ||
+              (anchor->kind == SourceAnchorKind::CURSOR && anchor->cursor.source != request_.session) ||
+              resolved->position.revision != request_.revision) {
+            completion_->restoreStatus = {PositionResolution::UNSUPPORTED, LogRestoreReason::UNSUPPORTED,
+                                          anchor ? SourceError::UNSUPPORTED : anchor.error()};
+          } else {
+            completion_->restoreAnchor = *anchor;
+            completion_->restoreStatus.reason = resolved->state == PositionResolution::NEAREST
+                                                  ? LogRestoreReason::DELETED_SEGMENT
+                                                  : LogRestoreReason::NONE;
+          }
+
+          break;
+        }
+        case PositionResolution::INCOMPATIBLE:
+          completion_->restoreStatus.reason = LogRestoreReason::RESOURCE_MISMATCH;
+
+          break;
+        case PositionResolution::UNAVAILABLE:
+          completion_->restoreStatus.reason = LogRestoreReason::HISTORY_UNAVAILABLE;
+
+          break;
+        case PositionResolution::UNSUPPORTED:
+          completion_->restoreStatus.reason = LogRestoreReason::UNSUPPORTED;
+
+          break;
+        case PositionResolution::EMPTY:
+        case PositionResolution::PENDING:
+          break;
+        default:
+          completion_->restoreStatus = {PositionResolution::UNAVAILABLE, LogRestoreReason::HISTORY_UNAVAILABLE,
+                                        SourceError::INVALID_REPLY};
+
+          break;
+        }
+      }
+
+      if (!completion_->restoreAnchor && !stop.stop_requested()) {
+        auto credit = completion_->credit.split({PREPARED_METADATA_BYTES, 0, 0, 0});
+
+        if (!credit) {
+          completion_->restoreStatus.error = credit.error();
+
+          return;
+        }
+
+        auto frame = std::make_shared<ExternalLogFrame>();
+        const auto message = completion_->restoreStatus.resolution == PositionResolution::PENDING
+                               ? "Waiting for the saved reading position"
+                             : completion_->restoreStatus.resolution == PositionResolution::EMPTY
+                               ? "Source is empty"
+                               : "Saved reading position unavailable; navigate to resume";
+        auto text = GraphemeText::from(message, policy_);
+
+        frame->credit = std::move(*credit);
+        frame->width = width_;
+        frame->edge = SourceEdge::FINAL_END;
+        frame->before.source = request_.session;
+        frame->after.source = request_.session;
+
+        if (text) {
+          frame->alternateFooter = std::make_unique<GraphemeText>(*text);
+          frame->footer = std::make_unique<GraphemeText>(std::move(*text));
+        }
+
+        completion_->frame = std::move(frame);
+      }
+    } catch (const std::bad_alloc &) {
+      completion_->restoreStatus = {PositionResolution::UNAVAILABLE, LogRestoreReason::HISTORY_UNAVAILABLE,
+                                    SourceError::NO_MEMORY};
+    } catch (...) {
+      completion_->restoreStatus = {PositionResolution::UNAVAILABLE, LogRestoreReason::HISTORY_UNAVAILABLE,
+                                    SourceError::CALLBACK_FAILED};
+    }
+  }
+
+  std::expected<void, AsyncError> publish() override {
+    auto published = publisher_.publish(completion_);
+
+    return published ? std::expected<void, AsyncError>{} : std::unexpected(schedulerAsync(published.error()));
+  }
+
+private:
+  std::shared_ptr<LogBookmarkProvider> provider_;
+  PositionRequest request_;
+  Publisher<ExternalLogCompletion> publisher_;
+  std::shared_ptr<ExternalLogCompletion> completion_;
+  WidthPolicy policy_;
+  std::int32_t width_{};
+  SourceCapabilities capabilities_;
+  std::weak_ptr<const WindowNotifier<LogLine>> readiness_;
 };
 
 class ExternalLogActivity final : public ui::detail::SceneActivity,
@@ -554,17 +760,19 @@ class ExternalLogActivity final : public ui::detail::SceneActivity,
 public:
   ExternalLogActivity(WidgetTree &tree, Node<LogView> node, std::weak_ptr<const void> lifetime,
                       std::weak_ptr<ExternalLogState> state, WidthPolicy policy, LogViewConfig config,
-                      std::function<BackgroundExecutor *()> executor, std::function<SchedulerTime()> now,
-                      std::function<void(ManagedError)> report)
+                      std::shared_ptr<LogNavigationSession> navigation, std::function<BackgroundExecutor *()> executor,
+                      std::function<SchedulerTime()> now, std::function<void(ManagedError)> report)
       : tree_(tree), node_(node), lifetime_(std::move(lifetime)), state_(std::move(state)), policy_(policy),
-        config_(config), executor_(std::move(executor)), now_(std::move(now)), report_(std::move(report)) {
+        config_(config), navigation_(std::move(navigation)), executor_(std::move(executor)), now_(std::move(now)),
+        report_(std::move(report)) {
   }
 
   ~ExternalLogActivity() override {
     cancel();
   }
 
-  std::expected<void, SourceError> connect(const std::shared_ptr<ui::detail::LogSourceData> &data) {
+  std::expected<void, SourceError> connect(const std::shared_ptr<ui::detail::LogSourceData> &data,
+                                           bool remember = true) {
     auto binding = prepareBinding(data);
 
     if (!binding) {
@@ -596,12 +804,29 @@ public:
     data_ = data;
     source_ = std::move(binding->source);
     consumer_ = std::move(binding->consumer);
+    std::swap(readinessCredit_, binding->readinessCredit);
+    readiness_.swap(binding->readiness);
 
     if (!data_->budget) {
       data_->budget = source_->budget();
     }
 
     connection_ = std::move(*connection);
+
+    if (!navigation_->find(data->resource)) {
+      auto entry = navigation_->stage(data->resource, resourceLifetime(data),
+                                      {{}, 0, config_.followTail && source_->capabilities().tail});
+
+      if (!entry) {
+        return std::unexpected(entry.error());
+      }
+
+      navigation_->commit(std::move(*entry));
+    }
+
+    if (remember) {
+      primeRestore(navigation_->find(data->resource)->value);
+    }
 
     return {};
   }
@@ -613,6 +838,9 @@ public:
 
     if (generation_ == std::numeric_limits<std::uint64_t>::max()) {
       return std::unexpected(SourceError::IDENTITY_EXHAUSTED);
+    }
+    if (data_ == data) {
+      return {};
     }
 
     // Build the complete new binding before changing the current session.
@@ -634,24 +862,105 @@ public:
       return std::unexpected(sourceTreeError(read.error()));
     }
 
+    auto sampled = sampleNavigation(false);
+
+    if (!sampled) {
+      return std::unexpected(sourceTreeError(sampled.error()));
+    }
+
+    auto checkpoint = snapshotCheckpoint();
+
+    if (!checkpoint) {
+      navigation_->status = {PositionResolution::UNAVAILABLE, LogRestoreReason::CHECKPOINT_CAPACITY,
+                             checkpoint.error()};
+
+      return std::unexpected(checkpoint.error());
+    }
+
+    std::optional<LogCheckpointChange> outgoing;
+    const auto *current = navigation_->find(data_->resource);
+
+    if (!current || !sameCheckpoint(current->value, *checkpoint)) {
+      auto staged = navigation_->stage(data_->resource, resourceLifetime(data_), *checkpoint);
+
+      if (!staged) {
+        navigation_->status = {PositionResolution::UNAVAILABLE, LogRestoreReason::CHECKPOINT_CAPACITY, staged.error()};
+
+        return std::unexpected(staged.error());
+      }
+
+      outgoing = std::move(*staged);
+    }
+
+    LogReadingCheckpoint incoming{{}, 0, config_.followTail && binding->source->capabilities().tail};
+    std::optional<LogCheckpointChange> destination;
+
+    if (data->resource.identity == data_->resource.identity) {
+      incoming = *checkpoint;
+    } else if (const auto *saved = navigation_->find(data->resource)) {
+      incoming = saved->value;
+    } else {
+      auto staged = navigation_->stage(data->resource, resourceLifetime(data), incoming);
+
+      if (!staged) {
+        navigation_->status = {PositionResolution::UNAVAILABLE, LogRestoreReason::CHECKPOINT_CAPACITY, staged.error()};
+
+        return std::unexpected(staged.error());
+      }
+
+      destination = std::move(*staged);
+    }
+
     const auto invalidated = tree_.invalidate(node_, Invalidation::LAYOUT);
 
     if (!invalidated) {
       return std::unexpected(sourceTreeError(invalidated.error()));
     }
 
+    if (outgoing) {
+      navigation_->commit(std::move(*outgoing));
+    }
+
+    if (destination) {
+      navigation_->commit(std::move(*destination));
+    }
+
+    if (data->resource.identity == data_->resource.identity) {
+      navigation_->find(data->resource)->lifetime = resourceLifetime(data);
+    }
+
     timer_ = {};
     timerArmed_ = false;
+    const auto replacingGeneration = generation_;
+    const auto stillCurrent = [&]() -> std::expected<void, SourceError> {
+      return checkGeneration(replacingGeneration);
+    };
 
     if (latest_) {
       latest_->cancel();
     }
 
+    if (auto current = stillCurrent(); !current) {
+      return current;
+    }
+
     consumer_.close();
+
+    if (auto current = stillCurrent(); !current) {
+      return current;
+    }
+
     source_->close();
+
+    if (auto current = stillCurrent(); !current) {
+      return current;
+    }
+
     ++generation_;
     source_ = std::move(binding->source);
     consumer_ = std::move(binding->consumer);
+    std::swap(readinessCredit_, binding->readinessCredit);
+    readiness_.swap(binding->readiness);
     data_ = data;
 
     if (!data_->budget) {
@@ -687,10 +996,12 @@ public:
     replacement.pageOverlap = state->pageOverlap;
     replacement.intentSerial = intentSerial;
     replacement.requestedOffset = 0;
-    replacement.followTail = config_.followTail && source_->capabilities().tail;
+    replacement.followTail = incoming.following && source_->capabilities().tail;
     replacement.finiteRows = data->finiteRows;
     replacement.fileSource = static_cast<bool>(data->file);
+    replacement.navigation = state->navigation;
     *state = std::move(replacement);
+    primeRestore(std::move(incoming));
 
     return {};
   }
@@ -720,6 +1031,9 @@ public:
     }
 
     completion_.reset();
+    navigation_->binding.reset();
+    readiness_.reset();
+    readinessCredit_ = {};
   }
 
   void service() noexcept override {
@@ -753,6 +1067,7 @@ public:
 
     try {
       prepare();
+      refreshCheckpoint();
     } catch (const std::bad_alloc &) {
       fail(SourceError::NO_MEMORY);
     } catch (...) {
@@ -761,6 +1076,14 @@ public:
   }
 
   std::expected<bool, TreeError> input(const InputEvent &event) override {
+    auto result = inputEvent(event);
+
+    refreshCheckpoint();
+
+    return result;
+  }
+
+  std::expected<bool, TreeError> inputEvent(const InputEvent &event) {
     auto state = state_.lock();
 
     if (!active() || !state || !state->visible || config_.readOnly) {
@@ -894,6 +1217,136 @@ public:
   }
 
 private:
+  std::expected<void, SourceError> checkGeneration(std::uint64_t expected) const {
+    if (generation_ != expected) {
+      return std::unexpected(SourceError::CANCELLED);
+    }
+    if (!active()) {
+      return std::unexpected(SourceError::CLOSED);
+    }
+
+    const auto live = tree_.read(node_, [](const LogView &) {
+    });
+
+    return live ? std::expected<void, SourceError>{} : std::unexpected(SourceError::CLOSED);
+  }
+
+  static std::weak_ptr<const void> resourceLifetime(const std::shared_ptr<ui::detail::LogSourceData> &data) {
+    return data->bookmarks ? std::weak_ptr<const void>(data->bookmarks) : std::weak_ptr<const void>(data);
+  }
+
+  std::expected<LogReadingCheckpoint, SourceError> snapshotCheckpoint() const {
+    const auto state = state_.lock();
+
+    if (!state || navigation_->closed) {
+      return std::unexpected(SourceError::CLOSED);
+    }
+    if (state->byteRequest || state->positionRequest) {
+      return std::unexpected(SourceError::WOULD_BLOCK);
+    }
+
+    LogReadingCheckpoint value;
+
+    if (const auto *saved = navigation_->find(data_->resource)) {
+      value = saved->value;
+    }
+
+    value.following = state->followTail;
+
+    if (state->frame && !state->frame->anchors.empty()) {
+      const auto &anchor = state->frame->anchors[std::min<std::uint64_t>(state->requestedOffset.value_or(state->offset),
+                                                                         state->frame->anchors.size() - 1)];
+
+      if (anchor.bookmark) {
+        value.bookmark = anchor.bookmark;
+        value.byteInRecord = anchor.firstByte;
+      } else if (data_->bookmarks && state->frame->bookmarkError != SourceError::UNSUPPORTED) {
+        return std::unexpected(state->frame->bookmarkError.value_or(SourceError::WOULD_BLOCK));
+      }
+    }
+
+    return value;
+  }
+
+  void primeRestore(LogReadingCheckpoint checkpoint) {
+    pendingRestore_.reset();
+    restoreRequest_.reset();
+    restoredReading_.reset();
+    restoreBlocked_ = false;
+    navigation_->status = {};
+
+    if (!data_->bookmarks) {
+      navigation_->status = {PositionResolution::UNSUPPORTED, LogRestoreReason::UNSUPPORTED, SourceError::UNSUPPORTED};
+    }
+    if (checkpoint.bookmark && !checkpoint.following) {
+      pendingRestore_ = std::move(checkpoint);
+      navigation_->status = {PositionResolution::PENDING, LogRestoreReason::NONE, {}};
+    }
+  }
+
+  static bool sameCheckpoint(const LogReadingCheckpoint &left, const LogReadingCheckpoint &right) noexcept {
+    if (left.following != right.following || left.byteInRecord != right.byteInRecord ||
+        left.bookmark.has_value() != right.bookmark.has_value()) {
+      return false;
+    }
+    if (!left.bookmark) {
+      return true;
+    }
+
+    const auto a = left.bookmark->position();
+    const auto b = right.bookmark->position();
+
+    return left.bookmark->resource() == right.bookmark->resource() && a.kind == b.kind && a.row == b.row &&
+           a.offset == b.offset && a.revision == b.revision && a.affinity == b.affinity &&
+           left.bookmark->metadata().data() == right.bookmark->metadata().data() &&
+           left.bookmark->metadata().size() == right.bookmark->metadata().size();
+  }
+
+  void refreshCheckpoint() {
+    if (!active() || navigation_->closed) {
+      return;
+    }
+
+    // Observing a checkpoint must not acknowledge the native intent receipt.
+    // The next input/preparation pass still owns navigationChanged and intentSerial.
+    const auto state = state_.lock();
+    const auto sampled = tree_.read(node_, [&](const LogView &widget) {
+      const auto position = ScrollWidgetAccess::state(widget).controller->snapshot();
+
+      if (position) {
+        state->offset = position->vertical.offset.raster;
+      }
+    });
+
+    if (!sampled) {
+      return;
+    }
+
+    auto value = snapshotCheckpoint();
+    const auto *saved = navigation_->find(data_->resource);
+
+    if (!value) {
+      navigation_->status = {PositionResolution::UNAVAILABLE,
+                             value.error() == SourceError::WOULD_BLOCK || value.error() == SourceError::NO_MEMORY
+                               ? LogRestoreReason::CHECKPOINT_CAPACITY
+                               : LogRestoreReason::HISTORY_UNAVAILABLE,
+                             value.error()};
+
+      return;
+    }
+    if (saved && sameCheckpoint(saved->value, *value)) {
+      return;
+    }
+
+    auto staged = navigation_->stage(data_->resource, resourceLifetime(data_), std::move(*value));
+
+    if (staged) {
+      navigation_->commit(std::move(*staged));
+    } else {
+      navigation_->status = {PositionResolution::UNAVAILABLE, LogRestoreReason::CHECKPOINT_CAPACITY, staged.error()};
+    }
+  }
+
   std::expected<void, TreeError> sampleNavigation(bool supersedePrevious) {
     auto state = state_.lock();
 
@@ -999,17 +1452,115 @@ private:
 
     completion->generation = generation_;
     completion->replacesWindow = !accumulate_;
+    completion->readRevision = command.dataRevision;
 
     auto work = std::make_unique<ExternalLogJob>(
       std::move(request), connection_.publisher, std::move(completion), accumulate_ ? state->frame : nullptr,
       source_->budget(), policy_, config_.limits, width_, data_->file ? fileGeneration_ : 0,
       data_->finiteRows.has_value(), static_cast<bool>(data_->file), readingAnchor_, readingDelta_,
-      static_cast<std::size_t>(state->viewport.height) + OVERSCAN_ROWS, state->followTail);
+      static_cast<std::size_t>(state->viewport.height) + OVERSCAN_ROWS, state->followTail, data_->bookmarks,
+      navigation_->options.bookmarks);
     auto admitted = latest_->replace(std::move(work));
 
     if (!admitted) {
       failBackground(admitted.error());
     }
+  }
+
+  std::expected<void, SourceError> startRestore() {
+    if (!pendingRestore_ || !pendingRestore_->bookmark || !data_->bookmarks) {
+      return std::unexpected(SourceError::UNSUPPORTED);
+    }
+    if (generation_ == std::numeric_limits<std::uint64_t>::max()) {
+      return std::unexpected(SourceError::IDENTITY_EXHAUSTED);
+    }
+
+    auto revision = source_->dataRevision();
+
+    if (!revision) {
+      return std::unexpected(revision.error());
+    }
+
+    attemptedRestoreRevision_ = *revision;
+
+    if (latest_) {
+      const auto cancellingGeneration = generation_;
+
+      latest_->cancel();
+      const auto current = checkGeneration(cancellingGeneration);
+
+      if (!current) {
+        return std::unexpected(current.error());
+      }
+    }
+
+    auto credit = source_->budget()->reserve({PREPARED_METADATA_BYTES + RESTORE_ENVELOPE_BYTES, 0, 1, 0});
+
+    if (!credit) {
+      return std::unexpected(credit.error());
+    }
+
+    try {
+      if (!latest_) {
+        auto *executor = executor_();
+
+        if (!executor) {
+          return std::unexpected(SourceError::CLOSED);
+        }
+
+        latest_ = std::make_unique<BackgroundLatest>(*executor);
+      }
+
+      auto state = state_.lock();
+
+      PositionRequest request{source_->stamp(), *revision, generation_ + 1, *pendingRestore_->bookmark};
+      auto completion = std::make_shared<ExternalLogCompletion>();
+
+      completion->credit = std::move(*credit);
+      completion->generation = request.sequence;
+      completion->restoreRequest = request;
+      auto work =
+        std::make_unique<ExternalLogRestoreJob>(data_->bookmarks, request, connection_.publisher, completion, policy_,
+                                                state->viewport.width, source_->capabilities(), readiness_);
+      auto admitted = latest_->replace(std::move(work));
+
+      if (!admitted) {
+        return std::unexpected(admitted.error() == BackgroundError::NO_MEMORY ? SourceError::NO_MEMORY
+                                                                              : SourceError::WOULD_BLOCK);
+      }
+
+      ++generation_;
+      restoreRequest_ = std::move(request);
+      navigation_->status = {PositionResolution::PENDING, LogRestoreReason::NONE, {}};
+      lastIntent_.reset();
+      width_ = state->viewport.width;
+      busy_ = true;
+      started_ = true;
+      metadataPending_ = false;
+
+      return {};
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(SourceError::NO_MEMORY);
+    }
+  }
+
+  void restoreAdmissionFailed(SourceError error) {
+    if (error == SourceError::CANCELLED || error == SourceError::CLOSED) {
+      return;
+    }
+
+    restoreBlocked_ = true;
+
+    if ((error == SourceError::WOULD_BLOCK || error == SourceError::NO_MEMORY) &&
+        navigation_->status.resolution == PositionResolution::PENDING) {
+      navigation_->status.error = error;
+
+      return;
+    }
+
+    navigation_->status = {
+      PositionResolution::UNAVAILABLE,
+      error == SourceError::UNSUPPORTED ? LogRestoreReason::UNSUPPORTED : LogRestoreReason::HISTORY_UNAVAILABLE, error};
   }
 
   void request(SourceAnchor anchor, SourceDirection direction, bool accumulate,
@@ -1018,6 +1569,15 @@ private:
 
     if (!state || state->viewport.width <= 0 || state->viewport.height <= 0) {
       return;
+    }
+
+    restoredReading_.reset();
+
+    if (pendingRestore_ || restoreBlocked_) {
+      pendingRestore_.reset();
+      restoreRequest_.reset();
+      restoreBlocked_ = false;
+      navigation_->status = {};
     }
 
     // A new source request acknowledges native intent already observed before its admission.
@@ -1205,10 +1765,111 @@ private:
     if (completion) {
       busy_ = false;
 
+      if (completion->restoreRequest) {
+        if (!restoreRequest_ || completion->restoreRequest->sequence != restoreRequest_->sequence ||
+            completion->restoreRequest->session != restoreRequest_->session ||
+            completion->restoreRequest->bookmark.resource() != restoreRequest_->bookmark.resource()) {
+          return;
+        }
+
+        const auto revision = source_->dataRevision();
+
+        if (revision && *revision > restoreRequest_->revision) {
+          restoreRequest_.reset();
+          restoreBlocked_ = false;
+          const auto retried = startRestore();
+
+          if (!retried) {
+            restoreAdmissionFailed(retried.error());
+          }
+
+          return;
+        }
+
+        navigation_->status = completion->restoreStatus;
+
+        if (completion->restored && completion->restoreAnchor &&
+            positionReplyMatches(*restoreRequest_, *completion->restored)) {
+          const auto saved = *pendingRestore_;
+          std::optional<ExternalLogAnchor> reading;
+
+          if (completion->restored->position.kind == PositionKind::ITEM) {
+            reading.emplace();
+            reading->row = completion->restored->position.row;
+            reading->firstByte = saved.byteInRecord;
+
+            if (data_->file) {
+              fileGeneration_ = reading->row.generation;
+              state->fileGeneration = fileGeneration_;
+            }
+          }
+
+          pendingRestore_.reset();
+          restoreRequest_.reset();
+          request(*completion->restoreAnchor, SourceDirection::FORWARD, false, reading);
+
+          if (active() && busy_ && !failed_) {
+            restoredReading_ = saved;
+          }
+        } else {
+          restoreRequest_.reset();
+          restoreBlocked_ = true;
+          started_ = true;
+          state->frame = completion->frame;
+          state->requestedOffset = 0;
+          (void)tree_.invalidate(node_, Invalidation::LAYOUT);
+        }
+
+        return;
+      }
+
       if (completion->generationChanged) {
         replaceSession();
 
         return;
+      }
+
+      if (restoredReading_) {
+        const auto revision = source_->dataRevision();
+
+        if (revision && *revision > completion->readRevision) {
+          pendingRestore_ = std::exchange(restoredReading_, {});
+          const auto cancellingGeneration = generation_;
+
+          (void)consumer_.cancel();
+
+          if (!checkGeneration(cancellingGeneration)) {
+            return;
+          }
+
+          const auto restored = startRestore();
+
+          if (!restored) {
+            restoreAdmissionFailed(restored.error());
+          }
+
+          return;
+        }
+        if (completion->source || completion->historyUnavailable) {
+          pendingRestore_ = std::exchange(restoredReading_, {});
+          restoreBlocked_ = true;
+          navigation_->status = {PositionResolution::UNAVAILABLE, LogRestoreReason::HISTORY_UNAVAILABLE,
+                                 completion->source};
+          (void)consumer_.cancel();
+
+          return;
+        }
+        if (completion->pending) {
+          pendingRestore_ = std::exchange(restoredReading_, {});
+          restoreBlocked_ = true;
+          navigation_->status = {PositionResolution::PENDING, LogRestoreReason::NONE, {}};
+          (void)consumer_.cancel();
+
+          return;
+        }
+        if (completion->ready) {
+          restoredReading_.reset();
+        }
       }
 
       if (completion->metadata) {
@@ -1329,7 +1990,28 @@ private:
       return;
     }
 
-    if (state->tailRequested || (!started_ && config_.followTail && source_->capabilities().tail)) {
+    if (pendingRestore_ && restoreBlocked_ && navigation_->status.resolution == PositionResolution::PENDING) {
+      const auto revision = source_->dataRevision();
+
+      if (revision && *revision > attemptedRestoreRevision_) {
+        restoreBlocked_ = false;
+      }
+    }
+
+    if (pendingRestore_ && !restoreBlocked_) {
+      const auto restored = startRestore();
+
+      if (!restored) {
+        restoreAdmissionFailed(restored.error());
+      }
+
+      return;
+    }
+    if (restoreBlocked_) {
+      return;
+    }
+
+    if (state->tailRequested || (!started_ && state->followTail && source_->capabilities().tail)) {
       started_ = true;
       tail();
 
@@ -1396,16 +2078,31 @@ private:
   void replaceSession() {
     auto state = state_.lock();
     auto budget = source_->budget();
+    auto checkpoint = snapshotCheckpoint();
+    const auto replacingGeneration = generation_;
 
     if (latest_) {
       latest_->cancel();
     }
 
+    if (!checkGeneration(replacingGeneration)) {
+      return;
+    }
+
     consumer_.close();
+
+    if (!checkGeneration(replacingGeneration)) {
+      return;
+    }
+
     source_->close();
+
+    if (!checkGeneration(replacingGeneration)) {
+      return;
+    }
     data_->budget = std::move(budget);
     fileGeneration_ = 0;
-    auto connected = connect(data_);
+    auto connected = connect(data_, false);
 
     if (!connected) {
       fail(connected.error());
@@ -1418,10 +2115,18 @@ private:
     failed_ = false;
     completion_.reset();
     ++generation_;
+
+    if (!state->followTail && checkpoint && checkpoint->bookmark) {
+      primeRestore(std::move(*checkpoint));
+      state->frame.reset();
+    }
+
     (void)tree_.invalidate(node_, Invalidation::LAYOUT);
   }
 
   struct Binding {
+    SourceCredit readinessCredit;
+    std::shared_ptr<const WindowNotifier<LogLine>> readiness;
     std::unique_ptr<WindowSource<LogLine>> source;
     WindowConsumer<LogLine> consumer;
   };
@@ -1445,7 +2150,17 @@ private:
       return std::unexpected(consumer.error());
     }
 
-    return Binding{std::move(*source), std::move(*consumer)};
+    constexpr std::size_t READINESS_ALLOCATION_ALLOWANCE = 128;
+    auto credit =
+      (*source)->budget()->reserve({sizeof(WindowNotifier<LogLine>) + READINESS_ALLOCATION_ALLOWANCE, 0, 0, 0});
+
+    if (!credit) {
+      return std::unexpected(credit.error());
+    }
+
+    auto readiness = std::make_shared<const WindowNotifier<LogLine>>((*source)->notifier());
+
+    return Binding{std::move(*credit), std::move(readiness), std::move(*source), std::move(*consumer)};
   }
 
   WidgetTree &tree_;
@@ -1454,10 +2169,18 @@ private:
   std::weak_ptr<ExternalLogState> state_;
   WidthPolicy policy_;
   LogViewConfig config_;
+  std::shared_ptr<LogNavigationSession> navigation_;
+  std::optional<LogReadingCheckpoint> pendingRestore_;
+  std::optional<PositionRequest> restoreRequest_;
+  std::optional<LogReadingCheckpoint> restoredReading_;
+  bool restoreBlocked_{};
+  std::uint64_t attemptedRestoreRevision_{};
   std::shared_ptr<ui::detail::LogSourceData> data_;
   std::function<BackgroundExecutor *()> executor_;
   std::function<SchedulerTime()> now_;
   std::function<void(ManagedError)> report_;
+  SourceCredit readinessCredit_;
+  std::shared_ptr<const WindowNotifier<LogLine>> readiness_;
   std::unique_ptr<WindowSource<LogLine>> source_;
   WindowConsumer<LogLine> consumer_;
   SchedulerConnection<ExternalLogCompletion> connection_;
@@ -1527,7 +2250,8 @@ std::expected<void, ManagedError> replaceExternalLogView(ManagedScene &scene, No
 }
 
 std::expected<void, ManagedError> attachExternalLogView(ManagedScene &scene, Node<LogView> node, ui::LogSource source,
-                                                        LogViewConfig config) {
+                                                        LogViewConfig config, LogNavigation navigation,
+                                                        LogCheckpointOptions checkpoints) {
   auto data = ui::detail::ExternalLogAccess::data(source);
 
   if (!data || !data->provider) {
@@ -1546,12 +2270,35 @@ std::expected<void, ManagedError> attachExternalLogView(ManagedScene &scene, Nod
   }
 
   try {
+    if (ui::detail::ExternalLogAccess::empty(navigation)) {
+      auto created = scene.logNavigation(checkpoints);
+
+      if (!created) {
+        return std::unexpected(created.error());
+      }
+
+      navigation = *created;
+      (*ui::detail::ExternalLogAccess::navigation(navigation))->implicit = true;
+    }
+
+    auto session = ui::detail::ExternalLogAccess::navigation(navigation);
+
+    if (!session) {
+      return std::unexpected(sourceFailure(node, session.error()));
+    }
+    if ((*session)->scene != scene.root().id()) {
+      return std::unexpected(sourceFailure(node, SourceError::CONTEXT_ERROR));
+    }
+    if (!(*session)->binding.expired()) {
+      return std::unexpected(sourceFailure(node, SourceError::WOULD_BLOCK));
+    }
+
     auto state = std::make_shared<ExternalLogState>();
     auto empty = std::make_unique<LogData>();
     auto lifetime = ui::detail::Access::lifetime(scene);
     auto &app = SceneAccess::application(scene);
     auto activity = std::make_shared<ExternalLogActivity>(
-      app.tree(), node, lifetime, state, scene.widthPolicy(), config,
+      app.tree(), node, lifetime, state, scene.widthPolicy(), config, *session,
       [&app, lifetime] {
         return lifetime.expired() ? nullptr : app.background();
       },
@@ -1582,10 +2329,15 @@ std::expected<void, ManagedError> attachExternalLogView(ManagedScene &scene, Nod
     }
 
     state->activity = std::move(activity);
-    state->followTail = config.followTail && data->provider->capabilities().tail;
+    (*session)->binding = state->activity;
+    const auto *saved = (*session)->find(data->resource);
+
+    state->followTail = saved ? saved->value.following && data->provider->capabilities().tail
+                              : config.followTail && data->provider->capabilities().tail;
     state->requestedOffset = 0;
     state->finiteRows = data->finiteRows;
     state->fileSource = static_cast<bool>(data->file);
+    state->navigation = std::move(navigation);
 
     auto installed = app.tree().edit(node, [&](LogView &widget) {
       auto &log = LogViewAccess::state(widget);
@@ -1606,6 +2358,33 @@ std::expected<void, ManagedError> attachExternalLogView(ManagedScene &scene, Nod
 } // namespace portals::detail
 
 namespace portals {
+std::expected<LogNavigation, SourceError> logNavigation(WidgetTree &tree, Node<LogView> node) {
+  std::optional<LogNavigation> result;
+  const auto read = tree.read(node, [&](const LogView &widget) {
+    const auto &state = detail::LogViewAccess::state(widget);
+
+    if (state.external) {
+      result = state.external->navigation;
+    }
+  });
+
+  if (!read) {
+    return std::unexpected(detail::sourceTreeError(read.error()));
+  }
+
+  if (result) {
+    auto session = ui::detail::ExternalLogAccess::navigation(*result);
+
+    if (!session) {
+      return std::unexpected(session.error());
+    }
+
+    (*session)->implicit = false;
+  }
+
+  return result ? std::expected<LogNavigation, SourceError>(*result) : std::unexpected(SourceError::UNSUPPORTED);
+}
+
 std::expected<void, SourceError> seekLogRow(WidgetTree &tree, Node<LogView> node, std::uint64_t ordinal) {
   std::expected<void, SourceError> result;
   const auto edited = tree.edit(node, [&](LogView &widget) {

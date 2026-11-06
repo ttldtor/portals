@@ -1221,6 +1221,18 @@ if(MSVC)
   target_compile_options(portals_model_navigation_example_consumer PRIVATE /utf-8)
 endif()
 
+add_executable(portals_log_navigation_consumer log_navigation.cpp log_navigation_header.cpp)
+target_link_libraries(portals_log_navigation_consumer PRIVATE portals::core)
+set_target_properties(portals_log_navigation_consumer PROPERTIES CXX_EXTENSIONS OFF)
+if(WIN32)
+  target_sources(portals_log_navigation_consumer PRIVATE no_dialogs.cpp)
+endif()
+if(MSVC)
+  target_compile_options(portals_log_navigation_consumer PRIVATE /utf-8)
+endif()
+add_test(NAME consumer.log-navigation COMMAND portals_log_navigation_consumer)
+set_tests_properties(consumer.log-navigation PROPERTIES TIMEOUT 15)
+
 # Snapshot all declarations at the end of directory processing.
 function(portalsDefinePackageGroups)
   get_property(packageTargets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
