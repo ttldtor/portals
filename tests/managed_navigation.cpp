@@ -6,6 +6,7 @@
 #include "support/examples/replay/terminal.hpp"
 #include <portals/managed.hpp>
 #include <portals/managed_navigation.hpp>
+#include <portals/ui.hpp>
 
 #include <map>
 #include <source_location>
@@ -641,3 +642,278 @@ TEST_CASE("exact metadata reconciliation does not require a ready row payload") 
   CHECK(take(channel.snapshot())->value.resolution == PositionResolution::EXACT);
   CHECK(rows->payloadReads() == 0);
 }
+
+namespace {
+class AppLoopRows final : public ModelSnapshot<int> {
+public:
+  AppLoopRows() : ModelSnapshot(1, ROW_COUNT) {
+    for (std::size_t index = 0; index < rows_.size(); ++index) {
+      rows_[index] = {{index + 1, 1}, static_cast<int>(index + 1)};
+    }
+  }
+
+  ModelRows<int> read(RowRange range) const override {
+    ++reads;
+    return {RangeState::READY, std::span(rows_).subspan(static_cast<std::size_t>(range.first), range.count), {}};
+  }
+
+  RowLookup locateRow(RowId id) const override {
+    return id.generation == 1 && id.value && id.value <= rows_.size() ? RowLookup{RowLookupState::FOUND, id.value - 1}
+                                                                      : RowLookup{RowLookupState::NOT_FOUND, 0};
+  }
+
+  mutable std::size_t reads{};
+
+private:
+  static constexpr std::size_t ROW_COUNT = 12;
+  std::array<ModelRow<int>, ROW_COUNT> rows_;
+};
+
+// The clock advances only at explicit app.step boundaries. No helper dispatches,
+// arranges, prepares, invokes the router, or injects an extra input to settle a frame.
+struct AppLoopTerminal final : ApplicationReadyTerminal {
+  std::uint64_t time{};
+  std::optional<InputEvent> input;
+  std::size_t inputs{};
+  std::size_t submissions{};
+  std::string pending;
+  bool closed{};
+
+  SchedulerClock clock() noexcept {
+    return {[](void *context) noexcept {
+              return static_cast<AppLoopTerminal *>(context)->time;
+            },
+            this};
+  }
+
+  TerminalRead poll(std::stop_token) override {
+    TerminalRead result;
+    if (input) {
+      result.events.emplace_back(std::move(*input));
+      input.reset();
+      ++inputs;
+    } else {
+      result.status = TerminalStatus::DEADLINE;
+    }
+    return result;
+  }
+
+  std::expected<CellSize, TerminalError> size() const override {
+    return CellSize{40, 12};
+  }
+
+  std::expected<void, TerminalError> submit(std::string bytes) override {
+    if (!pending.empty()) {
+      return std::unexpected(TerminalError{TerminalErrorKind::OUTPUT_PENDING});
+    }
+    pending = std::move(bytes);
+    ++submissions;
+    return {};
+  }
+
+  TerminalWrite flushReady(std::stop_token) override {
+    const auto count = pending.size();
+    pending.clear();
+    return {TerminalStatus::PROGRESS, count, 0, {}};
+  }
+
+  std::expected<void, TerminalError> close() noexcept override {
+    closed = true;
+    return {};
+  }
+};
+
+// Cleanup runs before the borrowed scene and terminal leave scope, including
+// doctest REQUIRE exits. The Application session must never outlive its scene.
+struct AppLoopCleanup {
+  Application &app;
+  bool started{};
+
+  ~AppLoopCleanup() {
+    if (started) {
+      app.requestStop();
+      (void)app.step();
+    }
+  }
+};
+
+GraphemeText appLoopFormat(int value) {
+  return take(GraphemeText::from(std::to_string(value)));
+}
+
+struct AppLoopFixture {
+  AppLoopTerminal terminal;
+  std::unique_ptr<Application> app;
+  std::unique_ptr<ManagedScene> scene;
+  AppLoopCleanup cleanup;
+  std::shared_ptr<AppLoopRows> rows = std::make_shared<AppLoopRows>();
+  ManagedModel<int> model;
+  ManagedNavigation shared;
+  ui::Ref<VirtualList<int>> list;
+  ui::Ref<VirtualTable<int>> table;
+
+  explicit AppLoopFixture(std::size_t passes = 3, bool focusTable = true)
+      : app(take(Application::create({.maxPreparationPasses = passes}, terminal.clock()))),
+        scene(take(ManagedScene::create(*app))), cleanup{*app} {
+    model = take(scene->model<int>(rows));
+    const std::array columns{
+      TableColumn<int>{.id = {1, 1}, .header = appLoopFormat(0), .width = 8, .format = appLoopFormat}};
+    // Keep the tiny source covered: a native move must not accidentally trigger
+    // an unrelated range LAYOUT and repair the missing late-navigation refresh.
+    VirtualListOptions listOptions;
+    listOptions.overscan_rows = rows->rowCount();
+    VirtualTableOptions tableOptions;
+    tableOptions.overscan_rows = rows->rowCount();
+    take(ui::mount(*scene, ui::row(ui::virtualList<int>(
+                                     list, model,
+                                     [](const ModelRow<int> &row) {
+                                       return appLoopFormat(row.value);
+                                     },
+                                     listOptions),
+                                   ui::virtualTable<int>(table, model, columns, tableOptions))
+                             .height(6)));
+    shared = take(scene->navigation(model));
+    take(scene->bindNavigation(list.node(), shared, {.readingAnchor = true}));
+    take(scene->bindNavigation(table.node(), shared, {.readingAnchor = true}));
+    take(shared.navigate({1, 1}));
+    if (focusTable) {
+      take(scene->focus(table.node()));
+    } else {
+      take(scene->focus(list.node()));
+    }
+    if (passes == 1) {
+      // Consumer admission may legitimately require initial LAYOUT convergence.
+      // Settle that fixture setup before starting the one-pass runner; the
+      // measured input and every subsequent idle frame use only app.step().
+      const auto bounds = take(CellRect::from({}, {40, 12}));
+      for (int setup = 0; setup < 3; ++setup) {
+        take(scene->prepare(*app, {40, 12}));
+        std::optional<LayoutSnapshot> layout;
+        take(app->tree().frame([&] {
+          take(layoutTree(app->tree(), app->root(), bounds, bounds));
+          layout = take(LayoutSnapshot::capture(app->tree(), app->root()));
+        }));
+        take(scene->prepareViews(*app, *layout));
+      }
+    }
+    take(app->start(*scene, terminal));
+    cleanup.started = true;
+    step();
+    REQUIRE(terminal.submissions > 0);
+    REQUIRE(selection(list.node()) == RowId{1, 1});
+    REQUIRE(selection(table.node()) == RowId{1, 1});
+    idle(3);
+  }
+
+  ApplicationStep step() {
+    terminal.time += 100;
+    auto result = take(app->step());
+    REQUIRE_FALSE(result.finished);
+    return result;
+  }
+
+  void idle(int count) {
+    for (int index = 0; index < count; ++index) {
+      step();
+    }
+  }
+
+  template <class W> std::optional<RowId> selection(Node<W> node) {
+    std::optional<RowId> selected;
+    take(app->tree().read(node, [&](const auto &view) {
+      selected = view.selection();
+    }));
+    return selected;
+  }
+
+  template <class W> std::optional<RowId> anchor(Node<W> node) {
+    std::optional<RowId> value;
+    take(app->tree().read(node, [&](const auto &view) {
+      value = view.anchorRow();
+    }));
+    return value;
+  }
+
+  void checkQuiet() {
+    CHECK(terminal.inputs == 1);
+    CHECK(app->scheduler().metrics().control.pending == 0);
+    CHECK(app->scheduler().metrics().data.pending == 0);
+    const auto frames = app->stats().frames;
+    const auto submissions = terminal.submissions;
+    const auto reads = rows->reads;
+    idle(10);
+    CHECK(app->stats().frames == frames);
+    CHECK(terminal.submissions == submissions);
+    CHECK(rows->reads == reads);
+  }
+};
+
+void checkCurrentAppLoop(std::size_t passes, bool focusTable) {
+  AppLoopFixture fixture(passes, focusTable);
+  fixture.terminal.input = KeyEvent{InputKey::DOWN};
+  const auto inputStep = fixture.step();
+  REQUIRE(fixture.terminal.inputs == 1);
+  REQUIRE(inputStep.stats.inputs == 1);
+  REQUIRE(current(fixture.shared) == RowId{2, 1});
+  fixture.step();
+  CHECK(fixture.selection(fixture.list.node()) == RowId{2, 1});
+  CHECK(fixture.selection(fixture.table.node()) == RowId{2, 1});
+  fixture.idle(19);
+  CHECK(fixture.selection(fixture.list.node()) == RowId{2, 1});
+  CHECK(fixture.selection(fixture.table.node()) == RowId{2, 1});
+  CHECK(current(fixture.shared) == RowId{2, 1});
+  fixture.checkQuiet();
+}
+
+TEST_CASE("one native DOWN reaches the earlier shared view during application idle") {
+  checkCurrentAppLoop(3, true);
+}
+
+TEST_CASE("shared current settles with reverse native focus order") {
+  checkCurrentAppLoop(3, false);
+}
+
+TEST_CASE("late shared current survives a one-pass preparation budget") {
+  checkCurrentAppLoop(1, true);
+}
+
+TEST_CASE("one native scroll shares reading during idle without moving current") {
+  AppLoopFixture fixture;
+  const auto geometry = take(fixture.app->tree().inspect(fixture.table.node())).geometry.surface;
+  fixture.terminal.input =
+    MouseInputEvent{geometry.origin().x + 1, geometry.origin().y + 1, MouseButton::WHEEL_DOWN, MouseAction::SCROLL};
+  fixture.step();
+  REQUIRE(fixture.terminal.inputs == 1);
+  REQUIRE(take(take(fixture.shared.readingAnchor()).snapshot())->value.row == RowId{2, 1});
+  REQUIRE(current(fixture.shared) == RowId{1, 1});
+  fixture.step();
+  CHECK(fixture.anchor(fixture.list.node()) == RowId{2, 1});
+  CHECK(fixture.anchor(fixture.table.node()) == RowId{2, 1});
+  fixture.idle(19);
+  CHECK(fixture.anchor(fixture.list.node()) == RowId{2, 1});
+  CHECK(fixture.anchor(fixture.table.node()) == RowId{2, 1});
+  CHECK(current(fixture.shared) == RowId{1, 1});
+  fixture.checkQuiet();
+}
+
+TEST_CASE("a native cancellation reentry refreshes latest current after removing its source view") {
+  AppLoopFixture fixture;
+  take(fixture.shared.beginResolve(1));
+  bool cancelled{};
+  std::stop_callback reenter(take(fixture.shared.stopToken()), [&] {
+    take(fixture.shared.navigate({3, 1}));
+    take(fixture.app->tree().remove(fixture.table.node()));
+    cancelled = true;
+  });
+  fixture.terminal.input = KeyEvent{InputKey::DOWN};
+  fixture.step();
+  REQUIRE(cancelled);
+  REQUIRE(current(fixture.shared) == RowId{3, 1});
+  fixture.step();
+  CHECK(fixture.selection(fixture.list.node()) == RowId{3, 1});
+  fixture.idle(19);
+  CHECK(fixture.selection(fixture.list.node()) == RowId{3, 1});
+  CHECK(current(fixture.shared) == RowId{3, 1});
+  fixture.checkQuiet();
+}
+} // namespace

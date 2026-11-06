@@ -48,6 +48,7 @@ struct ManagedNavigationRegistry {
     std::vector<std::shared_ptr<ManagedNavigationRecord>>(0);
   std::vector<std::shared_ptr<ManagedNavigationBinding>> bindings =
     std::vector<std::shared_ptr<ManagedNavigationBinding>>(0);
+  bool refreshAfterLayout{};
 };
 
 TreeError navigationTreeError(SourceError error) noexcept;

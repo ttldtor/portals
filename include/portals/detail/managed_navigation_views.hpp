@@ -420,6 +420,42 @@ std::expected<void, ManagedError> ManagedScene::bindNavigationView(Node<W> node,
                                                               : std::expected<void, TreeError>{};
       }
 
+      const auto currentBefore = (*record)->current.snapshot();
+      const auto readingBefore = (*record)->reading.snapshot();
+      if (!currentBefore || !readingBefore) {
+        return std::unexpected(!currentBefore ? currentBefore.error() : readingBefore.error());
+      }
+      const auto lifetime = std::weak_ptr(lifetime_);
+      const auto owner = *record;
+      auto finish = [&](std::expected<void, TreeError> result) {
+        if (!lifetime.expired() && !closed_ && navigation_ && !owner->closed) {
+          auto current = owner->current.snapshot();
+          auto reading = owner->reading.snapshot();
+          if ((current && (*current)->revision != (*currentBefore)->revision) ||
+              (reading && (*reading)->revision != (*readingBefore)->revision)) {
+            // This requests the latest shared state, even after partial success
+            // or a newer nested operation. No old node/position is retained.
+            navigation_->refreshAfterLayout = true;
+          }
+        }
+        return result;
+      };
+      auto stillBound = [&]() -> std::expected<bool, TreeError> {
+        if (lifetime.expired() || closed_ || source->retired || !source->frame) {
+          return false;
+        }
+        auto entry = find(node);
+        if (!entry || entry->viewSource.lock() != source) {
+          return false;
+        }
+        auto live = app_.tree().read(node, [](const W &) {
+        });
+        if (!live && live.error() != TreeError::STALE_NODE && live.error() != TreeError::CLOSED) {
+          return std::unexpected(live.error());
+        }
+        return static_cast<bool>(live);
+      };
+
       std::optional<RowId> selected;
       std::optional<RowId> anchor;
       bool consumed{};
@@ -442,37 +478,48 @@ std::expected<void, ManagedError> ManagedScene::bindNavigationView(Node<W> node,
       });
 
       if (!read) {
-        return read;
+        return finish(read);
       }
       if (options.current && materialized && selected && state->inputRevision == source->frame->dataRevision()) {
+        const auto operation = (*record)->operation;
         auto updated = navigation.navigate(*selected);
 
         if (!updated) {
-          return updated;
+          return finish(updated);
+        }
+        auto live = stillBound();
+        if (!live || !*live || owner->closed || owner->operation != operation + 1) {
+          return finish(!live ? std::unexpected(live.error()) : std::expected<void, TreeError>{});
         }
       }
       record = navigation.lock();
       if (!record) {
-        return record.error() == TreeError::CLOSED ? std::expected<void, TreeError>{} : std::unexpected(record.error());
+        return finish(record.error() == TreeError::CLOSED ? std::expected<void, TreeError>{}
+                                                          : std::unexpected(record.error()));
       }
       if (state->readingInput && anchor) {
+        const auto operation = (*record)->operation;
         auto capture = (*record)->capture;
         auto bookmark = (*capture)(*anchor);
 
         if (!bookmark) {
-          return std::unexpected(bookmark.error());
+          return finish(std::unexpected(bookmark.error()));
         }
 
         record = navigation.lock();
         if (!record) {
-          return record.error() == TreeError::CLOSED ? std::expected<void, TreeError>{}
-                                                     : std::unexpected(record.error());
+          return finish(record.error() == TreeError::CLOSED ? std::expected<void, TreeError>{}
+                                                            : std::unexpected(record.error()));
+        }
+        auto live = stillBound();
+        if (!live || !*live || (*record)->operation != operation) {
+          return finish(!live ? std::unexpected(live.error()) : std::expected<void, TreeError>{});
         }
 
         auto updated = (*record)->setPosition(std::move(*bookmark), PositionResolution::EXACT, true);
 
         if (!updated) {
-          return updated;
+          return finish(updated);
         }
       }
 
@@ -488,7 +535,7 @@ std::expected<void, ManagedError> ManagedScene::bindNavigationView(Node<W> node,
         state->readingRevision = (*reading)->revision;
       }
 
-      return {};
+      return finish({});
     };
     navigation_->bindings.push_back(std::move(binding));
 
