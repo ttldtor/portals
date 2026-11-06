@@ -49,6 +49,17 @@ configurable through `NavigationOptions::maxSelectedRows`. The channel is availa
 to observers; the standard list/table binding still uses its existing single-current
 selection behavior. It does not add multi-selection painting to those controls.
 
+## Preparation and idle delivery
+
+Bindings read current and reading state during view preparation. When a later view
+materializes a new canonical position, the scene requests an ordinary next frame so
+earlier views can consume the latest value without another input. The first paint may
+still contain the earlier prepared state; atomic same-pixel-frame presentation is not
+guaranteed. Unchanged positions do not keep requesting frames. This continuation does
+not raise the preparation-pass budget or change failure handling for genuine LAYOUT
+nonconvergence. Direct context navigation still requires the provider's bounded
+identity-lookup capability.
+
 ## Update and resolve
 
 `navigate(RowId)` uses bounded identity lookup. A surviving row keeps its current

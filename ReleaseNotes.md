@@ -7,6 +7,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- Refresh earlier prepared list/table navigation bindings on the next ordinary
+  frame when a later view changes their shared position. Synchronization no longer
+  requires another input, and settled bindings do not keep redrawing.
+
 - Reduce GCC installed-package CI consumer debug-information cost while retaining
   Debug assertions, standalone-header checks and runtime coverage. The opt-in is
   disabled for ordinary builds; failed native CI jobs retain compiler commands and
