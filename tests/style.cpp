@@ -185,7 +185,7 @@ void parserAndCascade(const char *themeDirectory) {
     auto fromPss = take(parsePss(source));
     auto fromCpp = std::string_view(name) == "modern" ? modernTheme() : turboTheme();
 
-    for (const auto type : {"Button", "CheckBox", "LineEdit", "Table", "Custom", "RadioGroup"}) {
+    for (const auto type : {"Button", "CheckBox", "LineEdit", "Table", "Custom", "RadioGroup", "LogView"}) {
       check(resolveStyle(fromPss, {type, "", {}}) == resolveStyle(fromCpp, {type, "", {}}),
             "typed factory and shipped PSS give identical complete styles");
     }
@@ -663,6 +663,38 @@ void adaptedPaletteVariants() {
     if (failures != failuresBefore) {
       std::cerr << "Palette: " << palette.name << '\n';
     }
+  }
+}
+
+void focusedLogRetainsTextSurface() {
+  constexpr auto FOCUSED_INDEX = static_cast<std::size_t>(StyleState::FOCUSED) - 1;
+
+  for (const auto &theme :
+       {modernTheme(), turboTheme(), nordTheme(), gruvboxTheme(), tokyoNightTheme(), catppuccinLatteTheme()}) {
+    const auto log = resolveStyle(theme, {.type = "LogView"});
+    const auto control = resolveStyle(theme, {.type = "Control"});
+    const auto button = resolveStyle(theme, {.type = "Button"});
+
+    check(log.focused.foreground == log.normal.foreground && log.focused.background == log.normal.background &&
+            !log.focused.bold,
+          "focused LogView retains the readable text surface without action fill");
+    check(log.disabled == control.disabled && log.selected == control.selected,
+          "LogView focus appearance does not change disabled or selected theme states");
+    check(log.frame[FOCUSED_INDEX] == control.frame[FOCUSED_INDEX] &&
+            log.scrollbar[FOCUSED_INDEX] == control.scrollbar[FOCUSED_INDEX],
+          "LogView retains the theme focus accent on its frame and scrollbar");
+    check(button.focused == control.focused && button.focused.background != button.normal.background,
+          "action controls retain their existing focused action fill");
+
+    auto customized = theme;
+    StyleRule override;
+
+    override.selector.type = "LogView";
+    override.selector.state = StyleState::FOCUSED;
+    override.declarations.background = RgbColor{0x12, 0x34, 0x56};
+    customized.rules.push_back(std::move(override));
+    check(resolveStyle(customized, {.type = "LogView"}).focused.background == RgbColor{0x12, 0x34, 0x56},
+          "an explicit focused LogView override remains customizable");
   }
 }
 
@@ -1276,6 +1308,7 @@ int main(int argc, char **argv) {
   paintUsesSnapshot();
   viewsAndEditor();
   adaptedPaletteVariants();
+  focusedLogRetainsTextSurface();
   focusedEditorCaretIsVisible();
   ansiOutput();
   allocationRollback();
