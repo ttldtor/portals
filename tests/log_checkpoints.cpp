@@ -197,12 +197,12 @@ TEST_CASE("checkpoint sessions do not consume Property slots and close with thei
 }
 
 TEST_CASE("native bookmark metadata retains no raw record prefix") {
-  constexpr std::string_view marker = "PRIVATE_LOG_RECORD_PREFIX_7b4869fca0";
-  TemporaryFile file(std::string(marker) + std::string(2000, 'x') + "\n");
+  constexpr std::string_view MARKER = "PRIVATE_LOG_RECORD_PREFIX_7b4869fca0";
+  TemporaryFile file(std::string(MARKER) + std::string(2000, 'x') + "\n");
   CaptureFixture fixture(file.path);
   const auto bookmark = fixture.capture();
   const auto metadata = bookmark.metadata();
-  const auto raw = std::as_bytes(std::span(marker.data(), marker.size()));
+  const auto raw = std::as_bytes(std::span(MARKER.data(), MARKER.size()));
 
   CHECK(std::search(metadata.begin(), metadata.end(), raw.begin(), raw.end()) == metadata.end());
   CHECK(metadata.size() < 1024);
