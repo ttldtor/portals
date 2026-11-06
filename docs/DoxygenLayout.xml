@@ -86,6 +86,7 @@
       <tab type="usergroup" title="State and data">
         <tab type="user" title="Properties" url="@ref docs/property.md" />
         <tab type="user" title="Immutable models" url="@ref docs/model.md" />
+        <tab type="user" title="Model bookmarks" url="@ref docs/model-positions.md" />
         <tab type="user" title="Bounded queries" url="@ref docs/model-queries.md" />
         <tab type="user" title="UI coroutines" url="@ref docs/ui-coroutines.md" />
         <tab type="user" title="Prepare views from layout" url="@ref docs/virtual-preparation.md" />
@@ -240,6 +241,7 @@
       <tab type="user" title="Undo и Redo" url="@ref docs/ru/editor-history.md" />
       <tab type="user" title="Фокус" url="@ref docs/ru/focus.md" />
       <tab type="user" title="Модели" url="@ref docs/ru/model.md" />
+      <tab type="user" title="Закладки модели" url="@ref docs/ru/model-positions.md" />
       <tab type="user" title="Запросы" url="@ref docs/ru/model-queries.md" />
       <tab type="user" title="Подготовка представлений" url="@ref docs/ru/virtual-preparation.md" />
       <tab type="user" title="Прокрутка" url="@ref docs/ru/scroll.md" />

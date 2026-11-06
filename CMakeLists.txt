@@ -6,6 +6,8 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
 endif()
 
 option(PORTALS_BUILD_TESTS "Build Portals headless tests" ${PROJECT_IS_TOP_LEVEL})
+option(PORTALS_PACKAGE_CONSUMER_MINIMAL_DEBUG_INFO
+  "Use GCC backtrace-only Debug information in installed-package test consumers" OFF)
 set(PORTALS_PACKAGE_TEST_TIMEOUT 600 CACHE STRING
   "Seconds allowed for each installed-package preparation or verification phase per configuration")
 if(PORTALS_BUILD_TESTS AND
@@ -135,7 +137,7 @@ target_link_libraries(portals_core PRIVATE portals_utf8proc)
 target_include_directories(portals_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/utf8proc")
 target_compile_definitions(portals_core PRIVATE UTF8PROC_STATIC)
 target_sources(portals_core PRIVATE src/models/source_budget.cpp src/models/window_source.cpp
-  src/models/log_file.cpp src/widgets/external_log_view.cpp)
+  src/models/log_file.cpp src/models/model_position.cpp src/widgets/external_log_view.cpp)
 
 add_library(portals::core ALIAS portals_core)
 target_compile_features(portals_core PUBLIC cxx_std_23)
@@ -1206,7 +1208,8 @@ if(PORTALS_BUILD_TESTS)
     "-DCONFIG=$<CONFIG>" "-DGENERATOR=${CMAKE_GENERATOR}"
     "-DGENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}" "-DGENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
     "-DCXX_COMPILER=${CMAKE_CXX_COMPILER}" "-DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
-    "-DMSVC_RUNTIME_LIBRARY_FILE=${portals_package_runtime_file}")
+    "-DMSVC_RUNTIME_LIBRARY_FILE=${portals_package_runtime_file}"
+    "-DPORTALS_PACKAGE_CONSUMER_MINIMAL_DEBUG_INFO=${PORTALS_PACKAGE_CONSUMER_MINIMAL_DEBUG_INFO}")
   if(DEFINED CMAKE_LINK_DEPENDS_USE_LINKER)
     list(APPEND portals_package_test_command
       "-DLINK_DEPENDS_USE_LINKER=${CMAKE_LINK_DEPENDS_USE_LINKER}")
@@ -1533,6 +1536,13 @@ if(PORTALS_BUILD_TESTS)
   add_test(NAME portals.model COMMAND portals_model)
   set_tests_properties(portals.model PROPERTIES TIMEOUT 15)
 
+  add_executable(portals_model_position tests/model_position.cpp)
+  target_include_directories(portals_model_position SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  target_link_libraries(portals_model_position PRIVATE portals::core)
+  portals_enable_warnings(portals_model_position)
+  add_test(NAME portals.model-position COMMAND portals_model_position)
+  set_tests_properties(portals.model-position PROPERTIES TIMEOUT 30)
+
   add_executable(portals_model_query tests/model_query.cpp)
   target_link_libraries(portals_model_query PRIVATE portals::core)
   target_include_directories(portals_model_query SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
@@ -1842,6 +1852,7 @@ if(PORTALS_BUILD_DOCS)
   list(APPEND portals_documentation_inputs docs/widget-gallery.md docs/ru/widget-gallery.md docs/button.md docs/ru/button.md docs/label.md docs/ru/label.md docs/check-box.md docs/ru/check-box.md docs/three-state.md docs/ru/three-state.md docs/password.md docs/ru/password.md docs/status-bar.md docs/ru/status-bar.md docs/border.md docs/ru/border.md docs/gauge.md docs/ru/gauge.md)
   list(APPEND portals_documentation_inputs docs/editor-contracts.md docs/ru/editor-contracts.md)
   list(APPEND portals_documentation_inputs docs/log-view.md docs/ru/log-view.md)
+  list(APPEND portals_documentation_inputs docs/model-positions.md docs/ru/model-positions.md)
   list(APPEND portals_documentation_inputs docs/choices.md docs/ru/choices.md)
   list(APPEND portals_documentation_inputs docs/menus.md docs/ru/menus.md)
   list(APPEND portals_documentation_inputs docs/sliders.md docs/ru/sliders.md docs/spin-boxes.md docs/ru/spin-boxes.md)
