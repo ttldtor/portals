@@ -560,6 +560,14 @@ is OFF by default; Windows CI enables it. RelWithDebInfo retains ProgramDatabase
 information, while Release has no added debug-format flag. The existing GNU-only
 `PORTALS_PACKAGE_CONSUMER_MINIMAL_DEBUG_INFO` option is a separate setting.
 
+The fixture prepares and builds the consumer in two target groups, then performs a
+default build before running the existing tests. The groups cover the default target
+inventory and leave expected-failure targets to their diagnostic tests. With Ninja,
+the final build also checks its build log for unexpected work; other generators run
+the same default build but do not provide that no-work check. Each phase keeps the
+existing timeout budget: the two-configuration fixture uses twice the single-configuration
+budget.
+
 The compiler stores `/Z7` symbols in object files; this is not reduced symbol detail.
 The linker can still generate its ordinary executable PDB. Build time depends on the
 compiler and runner; the format setting alone does not establish a speedup.

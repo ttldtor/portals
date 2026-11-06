@@ -7,6 +7,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- Split installed-consumer compilation into dependent fixture phases while preserving
+  default-build targets, excluded negative probes and runtime coverage. Each phase
+  keeps the existing timeout; Ninja checks that the final full build adds no work.
+
 - Refresh earlier prepared list/table navigation bindings on the next ordinary
   frame when a later view changes their shared position. Synchronization no longer
   requires another input, and settled bindings do not keep redrawing.

@@ -1236,13 +1236,19 @@ if(PORTALS_BUILD_TESTS)
     add_test(NAME "${testName}-prepare" COMMAND ${portals_package_test_command}
       "-DPACKAGE_PHASE=PREPARE" "-DPACKAGE_STATE_FILE=${stateFile}" ${ARGN}
       -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_install.cmake")
+    add_test(NAME "${testName}-build-rest" COMMAND ${portals_package_test_command}
+      "-DPACKAGE_PHASE=BUILD_REST" "-DPACKAGE_STATE_FILE=${stateFile}" ${ARGN}
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_install.cmake")
     add_test(NAME "${testName}" COMMAND ${portals_package_test_command}
       "-DPACKAGE_PHASE=VERIFY" "-DPACKAGE_STATE_FILE=${stateFile}" ${ARGN}
       -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_install.cmake")
     set_tests_properties("${testName}-prepare" PROPERTIES
       TIMEOUT "${timeout}" LABELS "package" RUN_SERIAL TRUE FIXTURES_SETUP "${testName}.ready")
+    set_tests_properties("${testName}-build-rest" PROPERTIES
+      TIMEOUT "${timeout}" LABELS "package" RUN_SERIAL TRUE
+      FIXTURES_REQUIRED "${testName}.ready" FIXTURES_SETUP "${testName}.built")
     set_tests_properties("${testName}" PROPERTIES
-      TIMEOUT "${timeout}" LABELS "package" RUN_SERIAL TRUE FIXTURES_REQUIRED "${testName}.ready")
+      TIMEOUT "${timeout}" LABELS "package" RUN_SERIAL TRUE FIXTURES_REQUIRED "${testName}.built")
   endfunction()
   # A fresh full consumer build and its runtime suite have separate bounded phases.
   # Fixture requirements retain preparation when CTest selects only package-install.
