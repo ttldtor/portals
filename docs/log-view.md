@@ -60,6 +60,8 @@ clipboard, a search toolbar and persistent storage are not supplied by this view
 
 ![Switching the same LogView from application.log to errors.log and back](images/log-models-guide.gif)
 
+The recording pauses application.log at record 092, switches to errors.log, appends records in the background, and returns to the same paused record. End then follows the new tail. The local recording fixture supplies both files and the appended records.
+
 Keep a `ui::Ref<LogView>` and call `log.model(source)` from a UI handler to
 replace the source of the existing view. Files are one source family, not a
 requirement of `LogView`.
@@ -78,13 +80,29 @@ string records, or `ui::logSource(snapshot, codec)` for domain records. Keep
 the original model for its richer operations; replacing the display binding
 does not convert it into a file model or require an exact total count.
 
-Replacement preserves the control's identity, Ref, focus, geometry and styles.
-It resets the reading position and discards the old displayed window. The new
-source starts according to the view's follow-tail setting and its own
-capabilities. Switching back starts a fresh binding; it does not restore an
-old cursor. Cancelled work from the previous binding cannot install text or
-report a stale error into the new binding. Opening and reading the new source
-remain background operations.
+Replacement preserves the control's identity, Ref, focus, geometry and styles,
+and releases the old displayed window. A source with bookmark support remembers
+its logical reading position and whether following was enabled. PageUp pauses
+following; End resumes it. Switch to another log and back with the same retained
+descriptor: a paused view returns to its saved record even after an append;
+a following view resumes at the available tail. Files are opened and resolved
+on the existing worker, not in the UI handler.
+
+The default checkpoint cache belongs to this view's navigation session, with a
+256 KiB metadata budget and a 4096-byte limit per bookmark. It retains no source
+pages or model objects. Views navigate independently by default. Use an explicit
+`LogNavigation` from `ManagedScene::logNavigation()` in `LogSourceViewConfig`
+when a replacement view should reuse an existing session. These bounds limit
+saved metadata, not the source length or its number of records. A checked `reset(resource)` forgets the saved entry without moving an active view or requesting a redraw; later ordinary preparation or navigation may save its current position again.
+
+File bookmarks verify native file identity and a bounded record witness.
+Observed rotation, truncation or an incompatible rewrite can make a position
+unavailable; a path alone does not establish continuity. Arbitrary changes
+between observations cannot always be detected. Custom providers can supply
+`LogBookmarkProvider` without declaring a total count. A missing capability or
+lost history is a recoverable `LogRestoreStatus`, not a fabricated nearest row
+or an implicit switch to following. Cancelled work from a previous binding
+cannot install text or report a stale error into the new binding.
 
 `log.model(source)` reports an admission failure through the scene's error
 collector. Use `log.setModel(source)` when the handler needs to inspect the

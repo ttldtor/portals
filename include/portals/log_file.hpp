@@ -3,6 +3,7 @@
 #pragma once
 
 #include <portals/log_file_error.hpp>
+#include <portals/log_navigation.hpp>
 #include <portals/window_source.hpp>
 
 #include <filesystem>
@@ -66,16 +67,32 @@ struct FileLogReadFailure {
  * row index, mapping or complete-file text is retained. Callers schedule operations on their
  * existing executor. Published pages use the WindowSource budget and remain immutable.
  */
-class FileLogModel final : public WindowProvider<LogLine> {
+class FileLogModel final : public WindowProvider<LogLine>, public LogBookmarkProvider {
 public:
   /** @param path Owned path; no filesystem access is performed here.
    * @param options Positive bounded limits.
+   * @param continuation Optional explicit logical resource for reopen; native identity and witness
+   * are still validated by resolve. Empty issues an independent resource without file access.
    * @return Owning model or invalid-option/allocation failure.
    */
-  static std::expected<std::shared_ptr<FileLogModel>, FileLogFailure> create(std::filesystem::path path,
-                                                                             FileLogOptions options = {});
+  static std::expected<std::shared_ptr<FileLogModel>, FileLogFailure>
+  create(std::filesystem::path path, FileLogOptions options = {}, ModelResource continuation = {});
   /** @return Backward, stable-row seek and available-tail support. */
   SourceCapabilities capabilities() const noexcept override;
+  /** @return Cold logical identity, independent of path and delivery sessions. */
+  ModelResource resource() const noexcept override;
+  /** @param command Exact source delivery qualification. @param row Worker-borrowed record.
+   * @param options Owning bookmark capacity. @param stop Cooperative worker cancellation.
+   * @return Native identity and bounded witness bookmark; no row index is built.
+   */
+  std::expected<ModelBookmark, SourceError> capture(const SourceReadCommand &command, const WindowRow<LogLine> &row,
+                                                    BookmarkOptions options, std::stop_token stop = {}) const override;
+  /** @param request Owning captured metadata and current delivery qualification.
+   * @param stop Cooperative worker cancellation.
+   * @return Qualified bounded native validation result; no path-based identity guessing.
+   */
+  std::expected<PositionReply, SourceError> resolve(const PositionRequest &request,
+                                                    std::stop_token stop = {}) const override;
   /** @param command Bounded worker command; cursors are byte gaps in a file generation.
    * @param out Existing shared-budget page/workspace; all dynamic row payload uses its arena.
    * @param stop Cooperative cancellation checked between bounded reads and records.
@@ -123,18 +140,20 @@ private:
     std::uint64_t modified{};
   };
 
-  FileLogModel(std::filesystem::path path, FileLogOptions options);
-  std::expected<std::uint64_t, FileLogFailure> beginOperation(std::stop_token stop);
+  FileLogModel(std::filesystem::path path, FileLogOptions options, ModelResource resource, SourceStamp instance);
+  std::expected<std::uint64_t, FileLogFailure> beginOperation(std::stop_token stop) const;
   std::expected<std::uint64_t, FileLogFailure> observe(Observation observation, std::uint64_t operation,
-                                                       std::stop_token stop);
+                                                       std::stop_token stop) const;
   void recordFailure(FileLogFailure failure) noexcept;
   std::filesystem::path path_;
   FileLogOptions options_;
+  ModelResource resource_;
+  SourceStamp instance_;
   mutable std::mutex mutex_;
-  Observation observed_;
-  std::uint64_t generation_{};
-  std::uint64_t operationSequence_{};
-  std::uint64_t observedOperation_{};
+  mutable Observation observed_;
+  mutable std::uint64_t generation_{};
+  mutable std::uint64_t operationSequence_{};
+  mutable std::uint64_t observedOperation_{};
   std::optional<FileLogFailure> failure_;
 };
 } // namespace portals

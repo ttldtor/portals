@@ -127,7 +127,8 @@ Description<LogView> logView(LogSource source, LogSourceViewConfig config, Contr
         return node;
       }
 
-      auto bound = portals::detail::attachExternalLogView(scene, *node, source, effective);
+      auto bound =
+        portals::detail::attachExternalLogView(scene, *node, source, effective, config.navigation, config.checkpoints);
 
       if (!bound) {
         auto failure = bound.error();

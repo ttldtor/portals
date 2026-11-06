@@ -14,18 +14,76 @@
 #  ifndef WIN32_LEAN_AND_MEAN
 #    define WIN32_LEAN_AND_MEAN
 #  endif
+// Windows SDK partition definitions must precede CryptoAPI declarations.
 #  include <windows.h>
+
+#  include <wincrypt.h>
 #else
 #  include <cerrno>
 #  include <fcntl.h>
 #  include <sys/stat.h>
 #  include <unistd.h>
+#  if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#    include <monocypher.h>
+#  endif
 #endif
 
 namespace portals {
 namespace {
 constexpr std::size_t MAX_BLOCK_BYTES = 64 * 1024;
 constexpr std::size_t MAX_PATTERN_BYTES = 4096;
+constexpr std::size_t MAX_BOOKMARK_WITNESS_BYTES = 1024;
+constexpr std::size_t BOOKMARK_FINGERPRINT_BYTES = 32;
+constexpr std::uint64_t FILE_BOOKMARK_FORMAT = 0x504C4F47424D3032;
+#if defined(_WIN32)
+constexpr std::uint64_t BOOKMARK_FINGERPRINT_ALGORITHM = 1; // SHA-256 through the existing system dependency.
+#elif defined(__linux__) && !defined(__EMSCRIPTEN__)
+constexpr std::uint64_t BOOKMARK_FINGERPRINT_ALGORITHM = 2; // BLAKE2b-256 through the existing vendored dependency.
+#else
+constexpr std::uint64_t BOOKMARK_FINGERPRINT_ALGORITHM = 0;
+#endif
+
+using BookmarkFingerprint = std::array<std::byte, BOOKMARK_FINGERPRINT_BYTES>;
+
+std::expected<BookmarkFingerprint, SourceError> bookmarkFingerprint(std::span<const std::byte> prefix) noexcept {
+  BookmarkFingerprint fingerprint{};
+
+#if defined(_WIN32)
+  DWORD bytes = static_cast<DWORD>(fingerprint.size());
+  const BYTE empty{};
+  const auto *input = prefix.empty() ? &empty : reinterpret_cast<const BYTE *>(prefix.data());
+
+  if (!CryptHashCertificate2(L"SHA256", 0, nullptr, input, static_cast<DWORD>(prefix.size()),
+                             reinterpret_cast<BYTE *>(fingerprint.data()), &bytes) ||
+      bytes != fingerprint.size()) {
+    return std::unexpected(SourceError::IO_ERROR);
+  }
+#elif defined(__linux__) && !defined(__EMSCRIPTEN__)
+  crypto_blake2b(reinterpret_cast<std::uint8_t *>(fingerprint.data()), fingerprint.size(),
+                 reinterpret_cast<const std::uint8_t *>(prefix.data()), prefix.size());
+#else
+  (void)prefix;
+
+  return std::unexpected(SourceError::UNSUPPORTED);
+#endif
+
+  return fingerprint;
+}
+
+struct FileBookmarkMetadata {
+  std::uint64_t format{};
+  SourceStamp instance;
+  std::uint64_t identityHigh{};
+  std::uint64_t identityLow{};
+  std::uint64_t generation{};
+  std::uint64_t extent{};
+  std::uint64_t offset{};
+  std::uint64_t recordBytes{};
+  std::uint64_t witnessBytes{};
+  std::uint64_t terminated{};
+  std::uint64_t fingerprintAlgorithm{};
+  BookmarkFingerprint fingerprint{};
+};
 
 FileLogFailure failure(FileLogError error, FileLogOperation operation = FileLogOperation::READ,
                        std::uint32_t nativeCode = 0) {
@@ -434,12 +492,13 @@ LogLine::LogLine(std::uint64_t offset, std::string_view utf8, std::pmr::memory_r
     : byteOffset(offset), text(utf8, resource) {
 }
 
-FileLogModel::FileLogModel(std::filesystem::path path, FileLogOptions options)
-    : path_(std::move(path)), options_(options) {
+FileLogModel::FileLogModel(std::filesystem::path path, FileLogOptions options, ModelResource resource,
+                           SourceStamp instance)
+    : path_(std::move(path)), options_(options), resource_(resource), instance_(instance) {
 }
 
-std::expected<std::shared_ptr<FileLogModel>, FileLogFailure> FileLogModel::create(std::filesystem::path path,
-                                                                                  FileLogOptions options) {
+std::expected<std::shared_ptr<FileLogModel>, FileLogFailure>
+FileLogModel::create(std::filesystem::path path, FileLogOptions options, ModelResource continuation) {
   if (path.empty() || !options.maxRecordBytes || options.maxRecordBytes > MAX_BLOCK_BYTES || !options.ioBlockBytes ||
       options.ioBlockBytes > MAX_BLOCK_BYTES || !options.maxSearchBytes || !options.maxSearchPatternBytes ||
       options.maxSearchPatternBytes > MAX_PATTERN_BYTES || options.maxSearchPatternBytes > options.maxSearchBytes) {
@@ -447,7 +506,22 @@ std::expected<std::shared_ptr<FileLogModel>, FileLogFailure> FileLogModel::creat
   }
 
   try {
-    return std::shared_ptr<FileLogModel>(new FileLogModel(std::move(path), options));
+    auto issued = ModelResource::create();
+
+    if (!issued) {
+      return std::unexpected(
+        failure(issued.error() == SourceError::NO_MEMORY ? FileLogError::NO_MEMORY : FileLogError::INVALID_ARGUMENT,
+                FileLogOperation::CREATE));
+    }
+
+    const bool continuing = continuation.identity.instance || continuation.identity.epoch || continuation.lineage;
+
+    if (continuing && (!continuation.identity.instance || !continuation.identity.epoch || !continuation.lineage)) {
+      return std::unexpected(failure(FileLogError::INVALID_ARGUMENT, FileLogOperation::CREATE));
+    }
+
+    return std::shared_ptr<FileLogModel>(
+      new FileLogModel(std::move(path), options, continuing ? continuation : *issued, issued->identity));
   } catch (const std::bad_alloc &) {
     return std::unexpected(failure(FileLogError::NO_MEMORY, FileLogOperation::CREATE));
   }
@@ -461,7 +535,219 @@ FileLogOptions FileLogModel::options() const noexcept {
   return options_;
 }
 
-std::expected<std::uint64_t, FileLogFailure> FileLogModel::beginOperation(std::stop_token stop) {
+ModelResource FileLogModel::resource() const noexcept {
+  return resource_;
+}
+
+std::expected<ModelBookmark, SourceError> FileLogModel::capture(const SourceReadCommand &command,
+                                                                const WindowRow<LogLine> &row, BookmarkOptions options,
+                                                                std::stop_token stop) const {
+  if (stop.stop_requested()) {
+    return std::unexpected(SourceError::CANCELLED);
+  }
+  if (!command.source.instance || !command.source.epoch || !command.dataRevision || !row.id.value ||
+      !row.valueRevision || row.value.byteOffset != row.id.value - 1 ||
+      row.value.text.size() > options_.maxRecordBytes) {
+    return std::unexpected(SourceError::INVALID_ARGUMENT);
+  }
+
+  FileBookmarkMetadata metadata;
+
+  {
+    std::lock_guard lock(mutex_);
+
+    if (!generation_ || row.id.generation != generation_) {
+      return std::unexpected(SourceError::REVISION_CHANGED);
+    }
+
+    metadata.identityHigh = observed_.identityHigh;
+    metadata.identityLow = observed_.identityLow;
+  }
+
+  metadata.format = FILE_BOOKMARK_FORMAT;
+  metadata.instance = instance_;
+  metadata.generation = row.id.generation;
+  metadata.extent = row.valueRevision - 1;
+  metadata.offset = row.value.byteOffset;
+  metadata.recordBytes = row.value.text.size();
+  metadata.witnessBytes = std::min(row.value.text.size(), MAX_BOOKMARK_WITNESS_BYTES);
+
+  if (metadata.offset > metadata.extent || metadata.recordBytes > metadata.extent - metadata.offset) {
+    return std::unexpected(SourceError::INVALID_ARGUMENT);
+  }
+
+  metadata.terminated = metadata.recordBytes < metadata.extent - metadata.offset;
+  auto fingerprint = bookmarkFingerprint(
+    std::as_bytes(std::span<const char>(row.value.text.data(), static_cast<std::size_t>(metadata.witnessBytes))));
+
+  if (!fingerprint) {
+    return std::unexpected(fingerprint.error());
+  }
+
+  metadata.fingerprintAlgorithm = BOOKMARK_FINGERPRINT_ALGORITHM;
+  metadata.fingerprint = *fingerprint;
+  std::array<std::byte, sizeof(FileBookmarkMetadata)> bytes{};
+
+  std::memcpy(bytes.data(), &metadata, sizeof(metadata));
+
+  return ModelBookmark::create(resource_, {PositionKind::ITEM, row.id, metadata.offset, command.dataRevision}, bytes,
+                               options);
+}
+
+std::expected<PositionReply, SourceError> FileLogModel::resolve(const PositionRequest &request,
+                                                                std::stop_token stop) const {
+  PositionReply reply{request.bookmark.resource(), request.session, request.revision, request.sequence};
+
+  if (!request.session.instance || !request.session.epoch || !request.revision || !request.sequence) {
+    return std::unexpected(SourceError::INVALID_ARGUMENT);
+  }
+  if (stop.stop_requested()) {
+    return std::unexpected(SourceError::CANCELLED);
+  }
+  if (request.bookmark.resource() != resource_) {
+    reply.state = PositionResolution::INCOMPATIBLE;
+
+    return reply;
+  }
+
+  const auto bytes = request.bookmark.metadata();
+  FileBookmarkMetadata saved;
+
+  if (bytes.size() < sizeof(saved)) {
+    return std::unexpected(SourceError::INVALID_CURSOR);
+  }
+
+  std::memcpy(&saved, bytes.data(), sizeof(saved));
+
+  if (saved.format != FILE_BOOKMARK_FORMAT || saved.witnessBytes > MAX_BOOKMARK_WITNESS_BYTES ||
+      saved.witnessBytes > saved.recordBytes || bytes.size() != sizeof(saved) || saved.offset > saved.extent ||
+      saved.recordBytes > saved.extent - saved.offset || saved.terminated > 1 ||
+      request.bookmark.position().kind != PositionKind::ITEM ||
+      request.bookmark.position().row != RowId{saved.offset + 1, saved.generation}) {
+    return std::unexpected(SourceError::INVALID_CURSOR);
+  }
+
+  if (!BOOKMARK_FINGERPRINT_ALGORITHM || saved.fingerprintAlgorithm != BOOKMARK_FINGERPRINT_ALGORITHM) {
+    reply.state = PositionResolution::UNSUPPORTED;
+
+    return reply;
+  }
+
+  auto operation = beginOperation(stop);
+
+  if (!operation) {
+    return std::unexpected(sourceError(operation.error()));
+  }
+
+  auto file = NativeFile::open(path_, stop);
+
+  if (!file) {
+    return std::unexpected(sourceError(file.error()));
+  }
+
+  auto info = file->info();
+
+  if (!info) {
+    return std::unexpected(sourceError(info.error()));
+  }
+
+  auto generation =
+    observe({info->identityHigh, info->identityLow, info->byteExtent, info->modified}, *operation, stop);
+
+  if (!generation) {
+    return std::unexpected(sourceError(generation.error()));
+  }
+  if (info->identityHigh != saved.identityHigh || info->identityLow != saved.identityLow) {
+    reply.state = PositionResolution::INCOMPATIBLE;
+
+    return reply;
+  }
+  if ((saved.instance == instance_ ? saved.generation != *generation : *generation > 1) ||
+      info->byteExtent < saved.extent || saved.offset >= info->byteExtent) {
+    reply.state = PositionResolution::UNAVAILABLE;
+
+    return reply;
+  }
+
+  std::array<std::byte, MAX_BOOKMARK_WITNESS_BYTES> witness{};
+  auto read = file->read(saved.offset, std::span<std::byte>(witness.data(), saved.witnessBytes), stop);
+
+  if (!read) {
+    return std::unexpected(sourceError(read.error()));
+  }
+  if (*read != saved.witnessBytes) {
+    return std::unexpected(SourceError::INVALID_CURSOR);
+  }
+
+  const auto fingerprint = bookmarkFingerprint(std::span<const std::byte>(witness.data(), *read));
+
+  if (!fingerprint) {
+    return std::unexpected(fingerprint.error());
+  }
+  if (*fingerprint != saved.fingerprint) {
+    return std::unexpected(SourceError::INVALID_CURSOR);
+  }
+
+  const auto byteAt = [&](std::uint64_t offset) -> std::expected<unsigned char, SourceError> {
+    std::byte byte{};
+    auto result = file->read(offset, std::span<std::byte>(&byte, 1), stop);
+
+    if (!result) {
+      return std::unexpected(sourceError(result.error()));
+    }
+    if (*result != 1) {
+      return std::unexpected(SourceError::INVALID_CURSOR);
+    }
+
+    return std::to_integer<unsigned char>(byte);
+  };
+
+  if (saved.offset) {
+    auto previous = byteAt(saved.offset - 1);
+    auto first = byteAt(saved.offset);
+
+    if (!previous || !first) {
+      return std::unexpected(previous ? first.error() : previous.error());
+    }
+    if (*previous != '\n' && (*previous != '\r' || *first == '\n')) {
+      return std::unexpected(SourceError::INVALID_CURSOR);
+    }
+  }
+  if (saved.terminated) {
+    auto separator = byteAt(saved.offset + saved.recordBytes);
+
+    if (!separator) {
+      return std::unexpected(separator.error());
+    }
+    if (*separator != '\r' && *separator != '\n') {
+      return std::unexpected(SourceError::INVALID_CURSOR);
+    }
+  }
+
+  auto latest = file->info();
+
+  if (!latest) {
+    return std::unexpected(sourceError(latest.error()));
+  }
+  if (latest->byteExtent < info->byteExtent ||
+      (latest->byteExtent == info->byteExtent && latest->modified != info->modified)) {
+    reply.state = PositionResolution::UNAVAILABLE;
+
+    return reply;
+  }
+  if (stop.stop_requested()) {
+    return std::unexpected(SourceError::CANCELLED);
+  }
+
+  reply.state = PositionResolution::EXACT;
+  reply.position = request.bookmark.position();
+  reply.position.row = {saved.offset + 1, *generation};
+  reply.position.revision = request.revision;
+
+  return reply;
+}
+
+std::expected<std::uint64_t, FileLogFailure> FileLogModel::beginOperation(std::stop_token stop) const {
   std::lock_guard lock(mutex_);
 
   if (stop.stop_requested()) {
@@ -476,7 +762,7 @@ std::expected<std::uint64_t, FileLogFailure> FileLogModel::beginOperation(std::s
 }
 
 std::expected<std::uint64_t, FileLogFailure> FileLogModel::observe(Observation observation, std::uint64_t operation,
-                                                                   std::stop_token stop) {
+                                                                   std::stop_token stop) const {
   std::lock_guard lock(mutex_);
 
   if (stop.stop_requested()) {

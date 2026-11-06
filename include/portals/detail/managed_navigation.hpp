@@ -43,12 +43,56 @@ struct ManagedNavigationBinding {
   std::function<std::expected<void, TreeError>()> after;
 };
 
+struct LogCheckpointEntry {
+  // Credit is released after all metadata storage owned by this entry.
+  SourceCredit credit;
+  SourceCredit metadataCredit;
+  ModelResource resource;
+  std::weak_ptr<const void> lifetime;
+  LogReadingCheckpoint value;
+  std::unique_ptr<LogCheckpointEntry> next;
+};
+
+struct LogCheckpointChange {
+  SourceCredit metadataCredit;
+  std::unique_ptr<LogCheckpointEntry> added;
+  LogCheckpointEntry *existing{};
+  ModelResource resource;
+  std::weak_ptr<const void> lifetime;
+  LogReadingCheckpoint value;
+  bool replaceMetadata{};
+};
+
+struct LogNavigationSession {
+  SourceCredit credit;
+  std::shared_ptr<SourceBudget> budget;
+  std::weak_ptr<const void> lifetime;
+  std::weak_ptr<const void> binding;
+  NodeId scene;
+  LogCheckpointOptions options;
+  LogRestoreStatus status;
+  std::unique_ptr<LogCheckpointEntry> entries;
+  bool closed{};
+  bool implicit{};
+
+  LogCheckpointEntry *find(ModelResource resource) const noexcept;
+  void prune() noexcept;
+  void reset(ModelResource resource) noexcept;
+  void close() noexcept;
+  std::expected<LogCheckpointChange, SourceError>
+  stage(ModelResource resource, std::weak_ptr<const void> resourceLifetime, LogReadingCheckpoint value);
+  void commit(LogCheckpointChange change) noexcept;
+};
+
 struct ManagedNavigationRegistry {
   std::vector<std::shared_ptr<ManagedNavigationRecord>> contexts =
     std::vector<std::shared_ptr<ManagedNavigationRecord>>(0);
   std::vector<std::shared_ptr<ManagedNavigationBinding>> bindings =
     std::vector<std::shared_ptr<ManagedNavigationBinding>>(0);
   bool refreshAfterLayout{};
+
+  std::vector<std::shared_ptr<LogNavigationSession>> logSessions =
+    std::vector<std::shared_ptr<LogNavigationSession>>(0);
 };
 
 TreeError navigationTreeError(SourceError error) noexcept;
