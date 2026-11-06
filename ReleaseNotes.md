@@ -41,6 +41,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
   consumers for the selector qualifier API and widget virtual hook.
 
 ### Added
+- Add worker-only byte document sources backed by files, immutable memory or custom
+  providers. Shared-budget page leases and resumable sparse line indexes keep resident
+  storage bounded without limiting logical line length or requiring a known extent.
+  File reads reuse the existing backend; pages and index lookups validate source revisions.
 
 - Add scene-owned shared navigation contexts for managed lists and tables, with
   independent current, selected-set and optional reading-anchor channels. Stable
