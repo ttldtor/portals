@@ -19,7 +19,7 @@ struct DocumentError {
 struct DocumentRevision {
   SourceStamp source;                                                 ///< Immutable source namespace.
   std::uint64_t dataRevision{};                                       ///< Nonzero provider revision.
-  bool operator==(const DocumentRevision &) const noexcept = default; ///< Compare both qualifiers.
+  bool operator==(const DocumentRevision &) const noexcept = default; ///< @return Compare both qualifiers.
 };
 
 /** @brief Capabilities captured without I/O during cold source creation. */
@@ -82,10 +82,13 @@ public:
    * @param revision Nonzero exact revision, default1.
    */
   explicit MemoryDocumentProvider(std::shared_ptr<const std::string> text, std::uint64_t revision = 1);
-  ByteDocumentCapabilities capabilities() const noexcept override; ///< Immutable and seekable.
-  std::expected<ByteDocumentMetadata, DocumentError> metadata(std::stop_token stop) override; ///< Observe extent.
+  ByteDocumentCapabilities capabilities() const noexcept override; ///< @return Immutable and seekable.
+  std::expected<ByteDocumentMetadata, DocumentError>
+  metadata(std::stop_token stop) override; ///< @param stop Cooperative cancellation. @return Observe extent.
   std::expected<ByteReadResult, DocumentError> read(const ByteReadCommand &command, std::span<std::byte> destination,
-                                                    std::stop_token stop) override; ///< Copy only one window.
+                                                    std::stop_token stop)
+    override; ///< @param command Exact revision and byte offset. @param destination Borrowed writable bytes. @param
+              ///< stop Cooperative cancellation. @return Copy only one window.
 private:
   std::shared_ptr<const std::string> text_;
   std::uint64_t revision_;
@@ -105,11 +108,13 @@ public:
    */
   static std::expected<std::shared_ptr<FileDocumentProvider>, DocumentError>
   create(std::filesystem::path path, std::size_t ioBlockBytes = 64 * 1024);
-  ByteDocumentCapabilities capabilities() const noexcept override; ///< Seekable, revision may change.
+  ByteDocumentCapabilities capabilities() const noexcept override; ///< @return Seekable, revision may change.
   std::expected<ByteDocumentMetadata, DocumentError>
-  metadata(std::stop_token stop) override; ///< Observe exact snapshot.
+  metadata(std::stop_token stop) override; ///< @param stop Cooperative cancellation. @return Observe exact snapshot.
   std::expected<ByteReadResult, DocumentError> read(const ByteReadCommand &command, std::span<std::byte> destination,
-                                                    std::stop_token stop) override; ///< Validate before/after raw read.
+                                                    std::stop_token stop)
+    override; ///< @param command Exact revision and byte offset. @param destination Borrowed writable bytes. @param
+              ///< stop Cooperative cancellation. @return Validate before/after raw read.
 private:
   explicit FileDocumentProvider(std::shared_ptr<FileLogModel> model);
   std::shared_ptr<FileLogModel> model_;
@@ -143,11 +148,11 @@ struct DocumentPageData;
 class DocumentBytePage {
 public:
   DocumentBytePage() = default;                      ///< Empty allocation-free pin.
-  std::span<const std::byte> bytes() const noexcept; ///< Initialized bytes valid for this pin's lifetime.
-  DocumentRevision revision() const noexcept;        ///< Exact revision, or zero for an empty pin.
-  std::uint64_t offset() const noexcept;             ///< First byte offset.
-  std::uint64_t generation() const noexcept;         ///< Caller generation from the request.
-  bool finalEnd() const noexcept;                    ///< Definitive EOF after the returned prefix.
+  std::span<const std::byte> bytes() const noexcept; ///< @return Initialized bytes valid for this pin's lifetime.
+  DocumentRevision revision() const noexcept;        ///< @return Exact revision, or zero for an empty pin.
+  std::uint64_t offset() const noexcept;             ///< @return First byte offset.
+  std::uint64_t generation() const noexcept;         ///< @return Caller generation from the request.
+  bool finalEnd() const noexcept;                    ///< @return Definitive EOF after the returned prefix.
 private:
   friend class ByteDocumentSource;
   explicit DocumentBytePage(std::shared_ptr<const detail::DocumentPageData> data);
@@ -169,9 +174,9 @@ public:
   static std::expected<std::shared_ptr<ByteDocumentSource>, DocumentError>
   create(std::shared_ptr<ByteDocumentProvider> provider, std::shared_ptr<SourceBudget> budget,
          DocumentSourceOptions options = {});
-  SourceStamp stamp() const noexcept;                     ///< Immutable namespace, available without I/O.
-  ByteDocumentCapabilities capabilities() const noexcept; ///< Captured capabilities without I/O.
-  std::size_t maxPageBytes() const noexcept;              ///< Immutable maximum read payload.
+  SourceStamp stamp() const noexcept;                     ///< @return Immutable namespace, available without I/O.
+  ByteDocumentCapabilities capabilities() const noexcept; ///< @return Captured capabilities without I/O.
+  std::size_t maxPageBytes() const noexcept;              ///< @return Immutable maximum read payload.
   /** @param stop Cooperative cancellation.
    * @return Qualified metadata, or worker-affinity/provider/cancellation failure.
    */
@@ -252,9 +257,9 @@ public:
   static std::expected<std::unique_ptr<SparseDocumentIndex>, DocumentError>
   create(std::shared_ptr<SourceBudget> budget, DocumentRevision revision, DocumentIndexOptions options = {});
   ~SparseDocumentIndex();                          ///< Release fixed arena and its credit.
-  DocumentRevision revision() const noexcept;      ///< Index namespace/revision.
-  DocumentLinePolicy policy() const noexcept;      ///< Policy qualifying checkpoints.
-  DocumentIndexProgress progress() const noexcept; ///< Prefix knowledge without I/O.
+  DocumentRevision revision() const noexcept;      ///< @return Index namespace/revision.
+  DocumentLinePolicy policy() const noexcept;      ///< @return Policy qualifying checkpoints.
+  DocumentIndexProgress progress() const noexcept; ///< @return Prefix knowledge without I/O.
   /** @param offset Byte anchor.
    * @return Nearest retained checkpoint not after offset, usable as a bounded scan origin.
    */
