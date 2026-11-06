@@ -73,6 +73,12 @@ if(DEFINED MSVC_RUNTIME_LIBRARY_FILE)
   file(READ "${MSVC_RUNTIME_LIBRARY_FILE}" MSVC_RUNTIME_LIBRARY)
 endif()
 
+# Linker metadata can split relocated archive paths containing spaces. Limit the
+# fallback to this test consumer; an explicit parent setting still takes precedence.
+if(NOT DEFINED LINK_DEPENDS_USE_LINKER OR "${LINK_DEPENDS_USE_LINKER}" STREQUAL "")
+  set(LINK_DEPENDS_USE_LINKER OFF)
+endif()
+
 # Bind phase state to the outer configuration and generator; the marker contains data only.
 string(SHA256 packageIdentity "${SOURCE_DIR}|${binaryRoot}|${CONFIG}|${GENERATOR}|${GENERATOR_PLATFORM}|${GENERATOR_TOOLSET}|${CXX_COMPILER}|${MAKE_PROGRAM}|${PACKAGE_BOTH_CONFIGS}|${MSVC_RUNTIME_LIBRARY}|${LINK_DEPENDS_USE_LINKER}|${PORTALS_PACKAGE_CONSUMER_MINIMAL_DEBUG_INFO}|${PORTALS_PACKAGE_CONSUMER_EMBEDDED_DEBUG_INFO}")
 if(NOT DEFINED PACKAGE_CONSUMER_BUILD_JOBS)

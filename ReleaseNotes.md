@@ -10,6 +10,8 @@ planned work is not included. An **Unreleased** heading has no publication date.
 - Split installed-consumer compilation into dependent fixture phases while preserving
   default-build targets, excluded negative probes and runtime coverage. Each phase
   keeps the existing timeout; Ninja checks that the final full build adds no work.
+  The relocated test consumer also avoids redundant links caused by linker
+  dependency metadata on paths with spaces, without changing ordinary SDK builds.
 
 - Refresh earlier prepared list/table navigation bindings on the next ordinary
   frame when a later view changes their shared position. Synchronization no longer

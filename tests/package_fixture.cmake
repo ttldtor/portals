@@ -145,7 +145,7 @@ endfunction()
 # A stale or incomplete setup must never admit a later phase.
 expectPhase(BUILD_REST FALSE)
 expectPhase(VERIFY FALSE)
-string(SHA256 identity "${SOURCE_DIR}|${root}|Release|${GENERATOR}|||unused||||||")
+string(SHA256 identity "${SOURCE_DIR}|${root}|Release|${GENERATOR}|||unused||||OFF||")
 file(WRITE "${marker}" "${identity}\n${build}\n")
 expectPhase(VERIFY FALSE)
 execute_process(COMMAND "${CMAKE_COMMAND}" --build "${build}" --target portals_package_group_a

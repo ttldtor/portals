@@ -571,3 +571,8 @@ budget.
 The compiler stores `/Z7` symbols in object files; this is not reduced symbol detail.
 The linker can still generate its ordinary executable PDB. Build time depends on the
 compiler and runner; the format setting alone does not establish a speedup.
+
+The relocated test consumer defaults `CMAKE_LINK_DEPENDS_USE_LINKER` to `OFF`
+to avoid repeated links from linker dependency metadata on archive paths with
+spaces. Explicit parent `ON` or `OFF` is forwarded unchanged. This fallback does
+not change the SDK producer or ordinary installed-package consumers.
