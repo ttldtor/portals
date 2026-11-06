@@ -10,7 +10,7 @@ endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/FinalizeDiagrams.cmake")
 
-foreach(notice IN ITEMS vendor/pfr/LICENSE_1_0.txt vendor/doctest/LICENSE.txt vendor/lyra/LICENSE.txt vendor/lyra/manifest.json tests/fixtures/unicode/manifest.json vendor/doxygen-awesome/LICENSE)
+foreach(notice IN ITEMS vendor/whatwg-encoding/LICENSE vendor/whatwg-encoding/README.md vendor/whatwg-encoding/manifest.json vendor/pfr/LICENSE_1_0.txt vendor/doctest/LICENSE.txt vendor/lyra/LICENSE.txt vendor/lyra/manifest.json tests/fixtures/unicode/manifest.json vendor/doxygen-awesome/LICENSE)
   get_filename_component(notice_directory "${notice}" DIRECTORY)
   file(MAKE_DIRECTORY "${HTML_DIR}/${notice_directory}")
   configure_file("${CMAKE_CURRENT_LIST_DIR}/../${notice}" "${HTML_DIR}/${notice}" COPYONLY)
@@ -85,7 +85,7 @@ endforeach()
 file(GLOB guide_html_files "${HTML_DIR}/*.html")
 foreach(page_file IN LISTS guide_html_files)
   file(READ "${page_file}" content)
-  foreach(notice IN ITEMS LICENSE.txt vendor/pfr/LICENSE_1_0.txt vendor/doctest/LICENSE.txt
+  foreach(notice IN ITEMS LICENSE.txt vendor/whatwg-encoding/LICENSE vendor/whatwg-encoding/README.md vendor/whatwg-encoding/manifest.json vendor/pfr/LICENSE_1_0.txt vendor/doctest/LICENSE.txt
       vendor/textual/LICENSE vendor/lyra/LICENSE.txt vendor/lyra/manifest.json tests/fixtures/unicode/Unicode-LICENSE.txt tests/fixtures/unicode/manifest.json)
     string(REPLACE "href=\"../../${notice}\"" "href=\"${notice}\"" content "${content}")
     string(REPLACE "href=\"../${notice}\"" "href=\"${notice}\"" content "${content}")
