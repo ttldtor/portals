@@ -95,4 +95,3 @@ against the [installed SDK](package.md). This advanced example keeps the provide
 and checked binding steps visible; it is not a compact model-descriptor tutorial.
 
 @include docs/examples/guide_model_navigation.cpp
-

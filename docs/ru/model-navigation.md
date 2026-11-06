@@ -97,4 +97,3 @@ Handle слабый и привязан к UI-потоку. Обращение �
 пример с явным провайдером и checked-привязками, а не учебник компактных описаний модели.
 
 @include docs/examples/guide_model_navigation.cpp
-
