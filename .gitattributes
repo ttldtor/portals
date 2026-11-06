@@ -14,3 +14,7 @@
 
 # Generated documentation exports use byte-stable UTF-8/LF on every checkout.
 /docs/architecture/** text eol=lf
+
+# Preserve exact provenance hashes and upstream notices for encoding data.
+/vendor/whatwg-encoding/** -text
+/tests/fixtures/encoding/** -text
