@@ -8,6 +8,7 @@ Portals использует [Boost Software License 1.0](../../LICENSE.txt).
 
 | Компонент | Назначение и поставка | Лицензия и сведения об исходниках |
 |---|---|---|
+| Индексы WHATWG Encoding (2024-09-18) | Таблицы Windows-1251 и Windows-1252 включены в декодер документов; дополнительная библиотека времени выполнения не требуется. | [Лицензия](../../vendor/whatwg-encoding/LICENSE), [источники индексов (EN)](../../vendor/whatwg-encoding/README.md), [манифест](../../vendor/whatwg-encoding/manifest.json) |
 | utf8proc 2.12.0 | Декодирование Unicode, границы [графем](glossary.md#glossary-text-units-ru), свойства и ширина символов. Встроенные исходники C собираются в статическую зависимость `portals::core`; её архив входит в установленный SDK. | MIT/Expat для кода и условия Unicode для данных: [лицензия](../../vendor/utf8proc/LICENSE.md), [сведения об исходниках (EN)](../../vendor/utf8proc/README.md) |
 | Lyra 1.8.0 | Необязательный адаптер командной строки `<portals/ui_lyra.hpp>` через `portals::lyra`; заголовки, лицензия и манифест входят в SDK. | [Boost Software License 1.0](../../vendor/lyra/LICENSE.txt), [закреплённые исходники](../../vendor/lyra/manifest.json) |
 | Boost.PFR, снимок boost-1.92.0 | Необязательная рефлексия столбцов агрегатных типов через `<portals/aggregate_columns.hpp>` и `portals::aggregate`. Встроенные заголовки входят в SDK. | [Boost Software License 1.0](../../vendor/pfr/LICENSE_1_0.txt), [сведения об исходниках (EN)](../../vendor/pfr/README.md) |

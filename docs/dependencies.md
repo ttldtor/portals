@@ -8,6 +8,7 @@ The linked notices contain the full license texts.
 
 | Component | Purpose and delivery | License and source record |
 |---|---|---|
+| WHATWG Encoding indexes (2024-09-18) | Windows-1251 and Windows-1252 mappings are incorporated into the document decoder; no additional runtime library is required. | [License](../vendor/whatwg-encoding/LICENSE), [index provenance](../vendor/whatwg-encoding/README.md), [manifest](../vendor/whatwg-encoding/manifest.json) |
 | utf8proc 2.12.0 | Unicode decoding, [grapheme](glossary.md#glossary-text-units) boundaries, character properties and widths. Its vendored C sources build as a private static dependency of `portals::core`; its archive is included in the installed SDK. | MIT/Expat for code and Unicode notices for data: [license](../vendor/utf8proc/LICENSE.md), [source record](../vendor/utf8proc/README.md) |
 | Lyra 1.8.0 | Optional command-line adapter `<portals/ui_lyra.hpp>` through `portals::lyra`; headers, license and manifest are installed with the SDK. | [Boost Software License 1.0](../vendor/lyra/LICENSE.txt), [pinned source record](../vendor/lyra/manifest.json) |
 | Boost.PFR, boost-1.92.0 snapshot | Optional aggregate-column reflection through `<portals/aggregate_columns.hpp>` and `portals::aggregate`. Vendored headers are included in the SDK. | [Boost Software License 1.0](../vendor/pfr/LICENSE_1_0.txt), [source record](../vendor/pfr/README.md) |
