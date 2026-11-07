@@ -501,3 +501,34 @@ TEST_CASE("CRLF lookahead cannot retain an arbitrary run of carriage returns") {
   CHECK(f.provider->admittedBytes.load() <= 16);
   CHECK_FALSE(result->frame->finalEndVisible);
 }
+
+TEST_CASE("tail preparation ignores a bookmark seed without a full-screen row proof") {
+  std::string rows;
+
+  for (unsigned row = 0; row < 10; ++row) {
+    if (row) {
+      rows += "\n";
+    }
+    rows += "row-" + std::to_string(row);
+  }
+
+  Fixture f(rows);
+  f.intent.anchor = rows.size();
+  auto seeded = f.finish();
+  REQUIRE_FALSE(seeded->error);
+  REQUIRE(seeded->scan);
+  REQUIRE(seeded->scan->scalarCheckpoint.decoder);
+  REQUIRE(seeded->scan->scalarCheckpoint.offset > rows.find("row-6"));
+  f.intent.seed = seeded->scan->scalarCheckpoint;
+  seeded.reset();
+  f.intent.tail = true;
+  f.intent.resume = false;
+
+  const auto result = f.finish();
+
+  REQUIRE_FALSE(result->error);
+  REQUIRE(result->frame);
+  REQUIRE(result->frame->rows.size() == 4);
+  CHECK(result->frame->rows.front().bytes() == "row-6");
+  CHECK(result->frame->rows.back().bytes() == "row-9");
+}

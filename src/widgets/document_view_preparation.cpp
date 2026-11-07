@@ -343,7 +343,7 @@ std::shared_ptr<DocumentScan> initialScan(const DocumentPrepareIntent &intent, D
   scan->scalarCheckpoint.revision = metadata.revision;
   scan->clusterCheckpoint.revision = metadata.revision;
   scan->skipRows = intent.rowDelta > 0 ? static_cast<std::uint64_t>(intent.rowDelta) : 0;
-  if (!previous && intent.seed && intent.seed->revision == metadata.revision && intent.seed->decoder &&
+  if (!intent.tail && !previous && intent.seed && intent.seed->revision == metadata.revision && intent.seed->decoder &&
       intent.seed->offset <= intent.anchor) {
     scan->decoder = DocumentDecoder::restore(*intent.seed->decoder);
     scan->offset = intent.seed->offset;
@@ -360,7 +360,19 @@ std::shared_ptr<DocumentScan> initialScan(const DocumentPrepareIntent &intent, D
     scan->checkpoints = previous->checkpoints;
     scan->checkpointCount = previous->checkpointCount;
     scan->checkpointCursor = previous->checkpointCursor;
-    const auto target = intent.tail ? metadata.byteExtent.value_or(intent.anchor) : intent.anchor;
+    auto target = intent.anchor;
+
+    if (intent.tail) {
+      // A byte distance cannot prove how many display rows remain. Restart before
+      // a retained full screen with matching layout, or scan from the origin.
+      const bool retainedScreen = previous->metadata.revision == metadata.revision &&
+                                  previous->rows.size() >= static_cast<std::size_t>(intent.viewport.height) &&
+                                  previous->layoutWidth == scan->layoutWidth && previous->wrap == scan->wrap &&
+                                  previous->horizontal == intent.horizontal;
+
+      target = retainedScreen ? previous->rows.front().offset : 0;
+    }
+
     const DocumentLayoutCheckpoint *selected{};
     for (std::size_t index = 0; index < scan->checkpointCount; ++index) {
       const auto &candidate = scan->checkpoints[index];

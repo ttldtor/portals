@@ -301,6 +301,11 @@ public:
     }
     const auto *key = std::get_if<KeyEvent>(&event);
     const auto *mouse = std::get_if<MouseInputEvent>(&event);
+
+    if (mouse && (mouse->action == MouseAction::PRESS || mouse->action == MouseAction::RELEASE)) {
+      dragByteRange_.reset();
+    }
+
     std::int64_t delta{};
     bool recognized{};
     bool absolute{};
@@ -511,6 +516,7 @@ public:
     }
     supersede();
     scan_.reset();
+    dragByteRange_.reset();
     if (changedBudget) {
       capacity_ = std::move(replacementObserver);
     }
@@ -622,6 +628,7 @@ private:
       return;
     }
     if (navigationSerial_ != state->serial) {
+      dragByteRange_.reset();
       clearRelative(state->serial);
       state->rowDelta = 0;
     }
@@ -639,9 +646,11 @@ private:
     std::uint64_t scrollSerial{};
     std::uint64_t scrollOffset{};
     std::uint64_t scrollMaximum{};
+    bool dragging{};
     const auto read = app_.tree().read(node_, [&](const DocumentView &widget) {
       const auto &scroll = ScrollWidgetAccess::state(widget);
       viewport = area.placement.viewport;
+      dragging = scroll.drag && scroll.drag->axis == ScrollAxis::VERTICAL && scroll.capture.connected();
       if (const auto intent = scroll.intent.lock()) {
         scrollSerial = intent->serial;
       }
@@ -682,18 +691,27 @@ private:
     }
 
     const auto extent = state->frame ? state->frame->status.byteExtent : std::nullopt;
+
+    if (!dragging) {
+      dragByteRange_.reset();
+    } else if (!dragByteRange_ && state->frame) {
+      // Keep one byte projection for the gesture: newly prepared pages may
+      // contain different byte spans while the pointer and scroll metrics stay fixed.
+      dragByteRange_ = documentScrollByteRange(*state->frame);
+    }
+
     const bool byteCommand = scrollSerial != scrollSerial_ && extent && scrollMaximum;
     if (byteCommand) {
-      const auto range = documentScrollByteRange(*state->frame);
+      const auto range = dragByteRange_.value_or(documentScrollByteRange(*state->frame));
       state->anchor = scrollOffset >= scrollMaximum
                         ? *extent
                         : scrollMultiplyDivide(std::min(scrollOffset, scrollMaximum), range, scrollMaximum).quotient;
       state->rowDelta = 0;
-      state->tail = false;
+      state->tail = scrollOffset >= scrollMaximum;
       ++state->serial;
       clearRelative(state->serial);
       state->refresh = true;
-    } else if (extent && *extent && scrollMaximum) {
+    } else if (!dragging && extent && *extent && scrollMaximum) {
       const auto &frame = state->frame;
       const bool visibleEnd = frame && frame->finalEndVisible && !state->status.waiting && !state->status.error &&
                               frame->status.byteOffset == state->anchor && frame->viewport == viewport &&
@@ -959,6 +977,7 @@ private:
   std::uint64_t generation_{};
   std::uint64_t serial_{};
   std::uint64_t scrollSerial_{};
+  std::optional<std::uint64_t> dragByteRange_;
   std::uint64_t navigationSerial_{};
   std::int64_t pendingRows_{};
   std::int64_t inFlightRows_{};
