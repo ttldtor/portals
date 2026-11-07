@@ -7,6 +7,21 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- DocumentView footer percentage estimates coverage of original source bytes
+  through the lower edge of visible content. It reaches 100% only when the final
+  source byte is visible; decoder read-ahead and decoded UTF-8 size do not count.
+  Unknown extent stays unknown until final visible EOF, and a clipped unwrapped
+  line does not report 100% before its final byte appears.
+
+- DocumentView moves one displayed row per normalized wheel step by default; a
+  terminal line feed does not add an extra empty display row, while real blank
+  rows remain. End requests the last full page. The scrollbar is a separate
+  approximate window-position projection over the known byte extent, accounting
+  for the visible span. Its maximum endpoint preserves the raw byte anchor at
+  extent (`tail=false`), so a direct EOF drag or `seekByte(extent)` may place the
+  final row at the top instead of showing the last full page. These seeks remain
+  bounded and do not scan the entire preceding file.
+
 - Clarify the separate MIT attribution of adapted Textual palette values, retain
   their complete notice in the browser gallery bundle, and document the existing
   Linux-only Monocypher dependency and its offline license notice.
@@ -51,6 +66,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
   consumers for the selector qualifier API and widget virtual hook.
 
 ### Fixed
+
+- Accumulate rapid DocumentView wheel/key navigation while background work is
+  running instead of repeating a target from the old frame. Keep accepted motion
+  across temporary provider waits, resize and long backward movement; discard
+  impossible motion at proven boundaries before reversing direction.
 
 - Keep the focused LogView text surface in its normal theme colors; its frame
   and scrollbar carry the focus accent. Refresh the model-switching recording.
