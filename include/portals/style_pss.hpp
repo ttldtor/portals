@@ -1088,6 +1088,11 @@ constexpr PssValue pssScalar(PssProperty property, const StyleDeclarations &valu
   case PssProperty::MAX_WIDTH:
   case PssProperty::MIN_HEIGHT:
   case PssProperty::MAX_HEIGHT:
+  case PssProperty::ROLE_FOREGROUND:
+  case PssProperty::ROLE_BACKGROUND:
+  case PssProperty::ROLE_BOLD:
+  case PssProperty::ROLE_ITALIC:
+  case PssProperty::ROLE_UNDERLINE:
     break;
   }
 

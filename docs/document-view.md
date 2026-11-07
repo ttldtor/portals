@@ -28,7 +28,7 @@ Build `portals_document_view_example` with `PORTALS_BUILD_EXAMPLES=ON` and run i
 | Vertical scrollbar | Request a byte position when an exact byte extent is known. |
 | F5 | Refresh the current source. |
 
-The scrollbar represents bytes, rather than an invented exact number of lines. With an unknown extent, the view hides the global position bar. The footer shows an original byte offset and a byte percentage when the extent is known. Line numbers are optional and only show counts proven by scanning. Wrapped fragments retain the same logical line number. The fixed gutter uses an overflow marker when a number exceeds its displayed precision.
+The scrollbar represents bytes, rather than an invented exact number of lines. With an unknown extent, the view hides the global position bar. The footer shows an original byte offset and a byte percentage when the extent is known. Line numbers are optional and only show counts proven by scanning. Wrapped fragments retain the same logical line number. The 9-cell gutter displays up to seven digits: `?` marks an unproven line number and `+` marks a larger proven number; this display limit does not restrict 64-bit byte positions.
 
 A seekable source can prepare a distant cold seek from a bounded local window without scanning the entire preceding prefix. The encoding decision is reused only when it was proven at the source origin; the requested original-byte anchor is retained. Logical line numbers and totals remain unknown until proven, and reaching local EOF does not establish the document-wide line total. At or beyond a known EOF, a nonempty source shows its available final row or fragment while the requested offset remains at EOF or one byte past it; a terminal line feed can produce an empty final row. An empty source remains empty. An empty read at an arbitrary distant offset does not establish EOF. The last prepared frame remains visible during preparation. A source which returns no bytes without final EOF enters a waiting state; call `reload()` or press F5 when more data becomes available. This control does not poll the file for live append; use [file-backed LogView](log-view.md#log-view-file) for follow-tail behavior.
 
@@ -65,6 +65,34 @@ The native resource type is `DocumentView`. In the CONFIGURATION grammar its vie
 The type selector is `DocumentView`. Text, fill and footer use the normal, `:focused`, or `:disabled` appearance. Built-in themes retain the document surface while focused chrome carries the accent; an explicit `DocumentView:focused` rule can override the text surface. `foreground`, `background`, `bold`, `italic` and `underline` use the ordinary [style cascade](styling-guide.md).
 
 Frame patterns, title decoration, arrows, tracks and individual thumb parts use the complete [frame and scrollbar styling reference](scroll-controls.md#scrollbar-styling-reference). `.framed("rounded", "Document")` supplies a title; the one-argument `.framed("rounded")` selects a pattern, as for other controls.
+
+DocumentView registers three semantic paint parts: `body` for document text,
+`gutter` for line numbers, and `position` for the footer. The gutter is visible
+when `.lineNumbers()` is enabled. Their five PSS properties are
+`role-<part>-foreground`, `role-<part>-background`, `role-<part>-bold`,
+`role-<part>-italic`, and `role-<part>-underline`; see the [style property
+reference](styles.md#styles-semantic-role-properties) for values and cascade
+rules. These parts use the existing theme/application/user cascade. The example
+installs `nordTheme()` before its role layer, so omitted backgrounds inherit its
+dark surface. For each presentation state, omitted role leaves inherit the
+resolved `DocumentView` paint. Changing role paint updates presentation without
+reloading the document source.
+
+
+| Part | Foreground | Background | Bold | Italic | Underline |
+| --- | --- | --- | --- | --- | --- |
+| `body` | `role-body-foreground` | `role-body-background` | `role-body-bold` | `role-body-italic` | `role-body-underline` |
+| `gutter` | `role-gutter-foreground` | `role-gutter-background` | `role-gutter-bold` | `role-gutter-italic` | `role-gutter-underline` |
+| `position` | `role-position-foreground` | `role-position-background` | `role-position-bold` | `role-position-italic` | `role-position-underline` |
+
+Run this sample from the Portals source directory so `README.md` is available.
+
+[Complete application example](examples/guide_document_view_styles.cpp)
+
+\include guide_document_view_styles.cpp
+
+@image html document-view-styles.png "Light document text, gray line numbers and a blue position footer."
+@image html document-view-styles.gif "Scroll from byte 0 to 1,207 (28.6%)."
 
 ## Resource limits {#document-view-limits}
 

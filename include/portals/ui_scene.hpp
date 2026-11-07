@@ -1163,6 +1163,35 @@ struct SceneAccess {
     return owner.app_;
   }
 
+  /** @brief Register SDK-owned parts only after style metadata has been flushed.
+   * @param owner UI owner inside its prepared-layout activity phase.
+   * @param node Checked managed recipient. @param names Borrowed names copied by the existing engine.
+   * @return Owning registration or exact STYLE failure, without invoking the collector.
+   */
+  static std::expected<StyleRoleRegistration, ManagedError>
+  registerPreparedRoles(ManagedScene &owner, Node<Widget> node, std::initializer_list<std::string_view> names) {
+    const auto failure = [&](TreeError cause) {
+      return std::unexpected(ManagedError{ManagedPhase::STYLE, node.id(), cause, {}, {}});
+    };
+    if (owner.owner_ != std::this_thread::get_id()) {
+      return failure(TreeError::WRONG_THREAD);
+    }
+    if (owner.closed_) {
+      return failure(TreeError::CLOSED);
+    }
+    if (!owner.preparing_ || !owner.servicingActivities_ || owner.reporting_ || owner.styling_ || owner.stylesDirty_) {
+      return failure(TreeError::WOULD_BLOCK);
+    }
+    if (!owner.find(node)) {
+      return failure(TreeError::INVALID_ARGUMENT);
+    }
+    auto registered = owner.styles_.registerRoles(node, names);
+    if (!registered) {
+      return std::unexpected(ManagedError{ManagedPhase::STYLE, node.id(), registered.error(), {}, {}});
+    }
+    return *registered;
+  }
+
   /** @param owner Managed owner whose close entry must first stop facade-owned external work.
    * @param context Stable facade State, outliving its managed owner.
    * @param callback UI-only checked shutdown bridge, consumed before first close attempt.

@@ -74,8 +74,6 @@ struct DocumentSourceAccess {
 namespace portals::detail {
 namespace {
 constexpr std::size_t VIEW_METADATA_BYTES = 64 * 1024;
-constexpr std::size_t WORK_ENVELOPE_BYTES = 64 * 1024;
-constexpr std::size_t PREPARED_CELL_BYTES = 128;
 constexpr std::size_t BOOKMARK_COUNT = 16;
 
 ManagedError documentFailure(Node<DocumentView> node, DocumentError error) {
@@ -534,6 +532,20 @@ private:
     }
     visible_ = true;
 
+    if (!state->roles.snapshot() && (!roleFailureSerial_ || *roleFailureSerial_ != state->serial)) {
+      auto roles = ui::detail::SceneAccess::registerPreparedRoles(scene_, node_, {"body", "gutter", "position"});
+      if (!roles) {
+        roleFailureSerial_ = state->serial;
+        // Queue one plain fallback turn before a diagnostic callback may retire
+        // this activity/node/scene. Do not access any of them after reporting.
+        (void)app_.tree().invalidate(node_, Invalidation::LAYOUT);
+        (void)scene_.reportError(roles.error());
+        return;
+      }
+      state->roles = std::move(*roles);
+      roleFailureSerial_.reset();
+    }
+
     const auto extent = state->frame ? state->frame->status.byteExtent : std::nullopt;
     const bool byteCommand = scrollSerial != scrollSerial_ && extent && scrollMaximum;
     if (byteCommand) {
@@ -639,8 +651,11 @@ private:
   }
 
   std::expected<SourceBudgetUsage, SourceError> nextPeak(const DocumentViewState &state) const {
-    const auto cells = static_cast<std::size_t>(viewport_.width) * static_cast<std::size_t>(viewport_.height);
-    const auto work = WORK_ENVELOPE_BYTES + state.config.maxFrameBytes * 4 + cells * PREPARED_CELL_BYTES;
+    const auto amount = documentPreparationBytes(viewport_, state.config);
+    if (!amount) {
+      return std::unexpected(amount.error());
+    }
+    const auto work = *amount;
     constexpr auto MAX = std::numeric_limits<std::size_t>::max();
     const auto envelope = state.source->envelopeBytes();
     const auto page = state.source->maxPageBytes() + SourceArena::METADATA_BYTES;
@@ -710,7 +725,12 @@ private:
       fail({SourceError::PAGE_TOO_LARGE, {}, {}});
       return;
     }
-    const auto amount = WORK_ENVELOPE_BYTES + state->config.maxFrameBytes * 4 + width * height * PREPARED_CELL_BYTES;
+    const auto reserved = documentPreparationBytes(viewport_, state->config);
+    if (!reserved) {
+      fail({reserved.error(), {}, {}});
+      return;
+    }
+    const auto amount = *reserved;
     const auto peak = nextPeak(*state);
     if (!peak) {
       fail({peak.error(), {}, {}});
@@ -761,6 +781,7 @@ private:
   bool capacityBlocked_{};
   SourceBudgetUsage waitingDemand_;
   CellSize viewport_;
+  std::optional<std::uint64_t> roleFailureSerial_;
   std::uint64_t generation_{};
   std::uint64_t serial_{};
   std::uint64_t scrollSerial_{};

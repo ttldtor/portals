@@ -146,7 +146,9 @@ static_assert(static_cast<std::size_t>(PssProperty::SCROLLBAR_THUMB_SINGLE_UNDER
 static_assert(static_cast<std::size_t>(PssProperty::GLYPH_PROFILE) == 69);
 static_assert(static_cast<std::size_t>(PssProperty::SCROLLBAR_CORNER_GLYPH) == 91);
 static_assert(static_cast<std::size_t>(PssProperty::WIDTH) == 92);
-static_assert(static_cast<std::size_t>(PssProperty::MAX_HEIGHT) + 1 == PSS_PROPERTY_COUNT);
+static_assert(static_cast<std::size_t>(PssProperty::MAX_HEIGHT) + 1 ==
+              static_cast<std::size_t>(PssProperty::ROLE_FOREGROUND));
+static_assert(static_cast<std::size_t>(PssProperty::ROLE_UNDERLINE) + 1 == PSS_PROPERTY_COUNT);
 constexpr auto SCROLLBAR_PATTERNS =
   sc::pss("ScrollBar{scrollbar-track-pattern:minimal;scrollbar-thumb-pattern:block;scrollbar-arrow-pattern:ascii;}");
 static_assert(SCROLLBAR_PATTERNS.declarations().size() == 3);
