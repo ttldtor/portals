@@ -88,6 +88,29 @@ class DocumentDecoderCheckpoint {
   bool bomMismatch_;
 };
 
+/// Result of proving a decoded-scalar boundary from a fixed local original-byte window.
+enum class DocumentDecoderLocalStatus {
+  READY,         ///< The containing valid/replacement scalar begins at restartByteOffset; checkpoint is present.
+  AT_END,        ///< Confirmed EOF has no containing scalar; restartByteOffset is EOF and no checkpoint is supplied.
+  NEED_PREFIX,   ///< More original bytes before the supplied local window are required to prove the boundary.
+  NEED_SUFFIX,   ///< More original bytes or confirmed EOF are required to resolve the selected scalar.
+  MALFORMED,     ///< STRICT_MODE rejects the selected original-byte subpart; no checkpoint is supplied.
+  INVALID_RANGE, ///< Window exceeds the fixed size, overflows, contradicts BOM extent or excludes the requested anchor.
+  INVALID_ORIGIN ///< Origin metadata is unresolved, unsupported or inconsistent with a real decoder boundary.
+};
+
+/// Owning local proof outcome; no input view or source owner is retained.
+struct DocumentDecoderLocalResult {
+  DocumentDecoderLocalStatus status{
+    DocumentDecoderLocalStatus::NEED_SUFFIX}; ///< Unproven default, then proof/context/error.
+  std::optional<DocumentDecoderCheckpoint>
+    checkpoint{}; ///< Present only for READY; caller qualifies the source revision.
+  std::uint64_t
+    restartByteOffset{}; ///< Separate scalar-start projection for READY, or EOF for AT_END; never edits the anchor.
+  std::uint64_t errorOffset{}; ///< First byte of the selected malformed subpart for MALFORMED.
+  std::uint8_t errorLength{};  ///< Original-byte length of that malformed subpart, not a character count.
+};
+
 /**
  * Incrementally decode a single contiguous stream beginning at byte zero.
  *
@@ -111,10 +134,13 @@ class DocumentDecoderCheckpoint {
  *
  * Each scalar retains its original byte interval. Noncharacters are preserved;
  * valid controls are not sanitized and require safe rendering separately.
- * Cold seeking and grapheme or cell mapping are outside this interface.
+ * localCheckpoint() proves a bounded cold restart boundary; it does not certify
+ * the omitted prefix's validity. Grapheme, line and cell mapping remain separate.
  */
 class DocumentDecoder {
 public:
+  static constexpr std::size_t LOCAL_WINDOW_BYTES = 8; ///< Maximum original bytes admitted by localCheckpoint().
+
   /// Create a new stream decoder. A zero work limit or ESCAPE is unsupported.
   /// @param options Encoding selection, error policy and input work limit.
   explicit DocumentDecoder(DocumentDecoderOptions options = {}) noexcept;
@@ -122,6 +148,23 @@ public:
   /// @param checkpoint Boundary state bound by the caller to the source revision.
   /// @return Decoder restored to the captured boundary.
   static DocumentDecoder restore(const DocumentDecoderCheckpoint &checkpoint) noexcept;
+  /** Prove the scalar/subpart containing an anchor without traversing its omitted prefix.
+   * @param origin Real opaque checkpoint after original encoding/BOM resolution, qualified
+   * by the caller against the same immutable source revision and decoding policy.
+   * @param window At most LOCAL_WINDOW_BYTES original bytes, borrowed only for this call.
+   * @param windowOffset Absolute original-byte offset of the local window, which may be unaligned.
+   * @param anchorByteOffset Exact user anchor within the inclusive window interval. It stays
+   * unchanged; the returned scalar-start projection can precede it, or follow it inside an omitted BOM.
+   * @param finalWindow True only when window end is proven source EOF, never temporary absence.
+   * @return Owning proof/error result. Only READY supplies a real checkpoint for restore();
+   * AT_END supplies none, so odd EOF tails cannot become continuation alignment after append.
+   * Missing local context returns NEED_PREFIX/NEED_SUFFIX. STRICT_MODE validates the selected
+   * subpart and resumed reads, not the omitted whole prefix. The origin is never mutated and
+   * effective encoding, original BOM decision, policy and work limit are preserved.
+   */
+  static DocumentDecoderLocalResult localCheckpoint(const DocumentDecoderCheckpoint &origin,
+                                                    std::span<const std::byte> window, std::uint64_t windowOffset,
+                                                    std::uint64_t anchorByteOffset, bool finalWindow = false) noexcept;
   /// Capture only after selection, with no pending bytes, before EOF.
   /// @return Opaque boundary state, or an empty optional when capture is unavailable.
   std::optional<DocumentDecoderCheckpoint> checkpoint() const noexcept;

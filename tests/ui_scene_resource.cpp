@@ -7,6 +7,7 @@
 
 #include "../examples/scene_resource/form.hpp"
 #include "../src/widgets/toast_state.hpp"
+#include "../src/widgets/document_view_state.hpp"
 #include "support/examples/replay/terminal.hpp"
 
 #include <array>
@@ -6894,4 +6895,78 @@ TEST_CASE("old exact chart property allowlist remains narrow after adding sized-
   const auto failure = rejected("scene{Plot{width=3}}", options);
   REQUIRE(failure.sceneResource);
   CHECK(failure.sceneResource->code == Code::UNKNOWN_PROPERTY);
+}
+
+TEST_CASE("configuration loads a cold native DocumentView and validates its document properties") {
+  ui::SceneResourceOptions options;
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  const auto source = R"(
+    defaults { DocumentView { lineNumbers=true wrap=false encoding=UTF16LE } }
+    definitions { Reader = DocumentView { wrap=true } }
+    scene { Reader#reader { file="definitely-missing-resource-file.txt" width=30 frame="rounded" } }
+  )";
+  auto owner = ui::scene(source, options);
+  auto reader = owner.get<DocumentView>("reader");
+  bool observed{};
+  owner.configure([&](ManagedScene &, Application &application) {
+    const auto result = application.tree().read(reader.node(), [&](const DocumentView &widget) {
+      const auto &config = detail::DocumentViewAccess::state(widget).config;
+      CHECK(config.lineNumbers);
+      CHECK(config.wrap);
+      CHECK(config.decoder.explicitEncoding == DocumentEncoding::UTF16LE);
+      const auto *frame = detail::scrollFrameOptions(detail::ScrollWidgetAccess::state(widget));
+      REQUIRE(frame);
+      CHECK(frame->pattern == FramePattern::ROUNDED);
+      observed = true;
+    });
+    REQUIRE(result);
+  });
+  REQUIRE(owner.prepareChecked());
+  CHECK(observed);
+  CHECK(reader.node() != Node<DocumentView>{});
+  REQUIRE(owner.close());
+
+  for (const auto &invalid : {
+         "scene { DocumentView {} }",
+         "scene { DocumentView { file=\"x\" encoding=UNKNOWN } }",
+         "scene { DocumentView { file=\"x\" unknown=true } }",
+         "scene { DocumentView { file=\"x\" Label {} } }",
+         "scene { ScrollArea { file=\"x\" Label {} } }"}) {
+    CAPTURE(invalid);
+    const auto failure = rejected(invalid, options);
+    CHECK(failure.sceneResource);
+  }
+}
+
+TEST_CASE("viewer recipe captures document settings independently of a mutable alias") {
+  auto bag = std::make_shared<ui::ControlDocumentSettings>();
+  bag->lineNumbers = true;
+  ui::ControlSettings patch;
+  patch.document = bag;
+  ui::Ref<DocumentView> reader;
+  auto recipe = ui::viewer(reader, "missing-cold-file.txt").settings(patch);
+  bag->lineNumbers = false;
+  auto owner = ui::scene(std::move(recipe));
+  bool observed{};
+  owner.configure([&](ManagedScene &, Application &application) {
+    REQUIRE(application.tree().read(reader.node(), [&](const DocumentView &widget) {
+      CHECK(detail::DocumentViewAccess::state(widget).config.lineNumbers);
+      observed = true;
+    }));
+  });
+  REQUIRE(owner.prepareChecked());
+  CHECK(observed);
+  REQUIRE(owner.close());
+}
+
+TEST_CASE("inherited invalid document frame reports the original leaf") {
+  const std::string source = R"(defaults { DocumentView { frame { enabled=false glyphs=ASCII } } }
+    scene { DocumentView { file="missing-cold-file.txt" } })";
+  ui::SceneResourceOptions options;
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  const auto failure = rejected(source, options);
+  CHECK(failure.sceneResource->code == Code::INVALID_VALUE);
+  REQUIRE(failure.sceneResource->propertyPath);
+  CHECK(*failure.sceneResource->propertyPath == "DocumentView.frame.glyphs");
+  CHECK(failure.sceneResource->offset == source.find("glyphs"));
 }

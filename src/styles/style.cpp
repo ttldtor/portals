@@ -532,6 +532,15 @@ StyleSheet themeFromTokens(ThemeTokens tokens) {
   logFocus.declarations.bold = false;
   sheet.rules.push_back(std::move(logFocus));
 
+  StyleRule documentSurface;
+
+  documentSurface.selector.type = "DocumentView";
+  documentSurface.selector.state = StyleState::FOCUSED;
+  documentSurface.declarations.foreground = tokens.foreground;
+  documentSurface.declarations.background = tokens.background;
+  documentSurface.declarations.bold = false;
+  sheet.rules.push_back(std::move(documentSurface));
+
   StyleRule selectedMarker;
   selectedMarker.selector.type = "RadioGroup";
   selectedMarker.selector.state = StyleState::SELECTED;

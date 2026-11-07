@@ -461,6 +461,8 @@ struct Access {
       return "Slider";
     } else if constexpr (std::same_as<T, ScrollArea>) {
       return "ScrollArea";
+    } else if constexpr (std::same_as<T, DocumentView>) {
+      return "DocumentView";
     } else if constexpr (std::same_as<T, LogView>) {
       return "LogView";
     } else if constexpr (std::same_as<T, ScrollBar>) {

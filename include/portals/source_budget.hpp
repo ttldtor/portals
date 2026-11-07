@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <memory>
 #include <memory_resource>
@@ -53,6 +54,11 @@ struct SourceBudgetOptions {
 };
 
 class SourceBudget;
+template <class T> class Publisher;
+
+namespace detail {
+struct SourceCapacityState;
+}
 
 /** @brief Move-only credit; backing storage must be destroyed before this final credit owner. */
 class SourceCredit {
@@ -80,9 +86,41 @@ private:
   SourceBudgetUsage amount_;
 };
 
+/** @brief Move-only worker-safe capacity observation; destruction unregisters without waiting. */
+class SourceCapacityObserver {
+public:
+  SourceCapacityObserver() = default; ///< Empty observer; admission returns CLOSED.
+  ~SourceCapacityObserver();          ///< Unregister without allocation or callbacks into UI.
+  /** @param other Registration to transfer and leave empty. */
+  SourceCapacityObserver(SourceCapacityObserver &&other) noexcept;
+  /** @param other Registration replacing this one. @return This observer after unregistering the old one. */
+  SourceCapacityObserver &operator=(SourceCapacityObserver &&other) noexcept;
+  SourceCapacityObserver(const SourceCapacityObserver &) = delete;
+  /** @param amount Actual reservation. @param peak Complete simultaneous demand, including amount.
+   * @return Charged credit after an atomic peak check, WOULD_BLOCK, or PAGE_TOO_LARGE for impossible demand.
+   */
+  std::expected<SourceCredit, SourceError> reserve(SourceBudgetUsage amount, SourceBudgetUsage peak);
+  /** @param peak Complete next-turn demand. @return Armed one-shot notification or a typed permanent limit.
+   * Capacity is rechecked atomically; a release before arming cannot be lost.
+   */
+  std::expected<void, SourceError> arm(SourceBudgetUsage peak);
+  /** @return Whether an armed notification granted admission priority, consuming only its ready flag. */
+  bool takeReady() noexcept;
+  /** @brief Drop pending admission priority; no UI callback or worker join occurs. */
+  void disarm() noexcept;
+
+private:
+  friend class SourceBudget;
+  explicit SourceCapacityObserver(std::shared_ptr<detail::SourceCapacityState> state) noexcept;
+  std::shared_ptr<detail::SourceCapacityState> state_;
+};
+
 /** @brief Thread-safe credit ledger; final page/worker release may happen on any thread. */
 class SourceBudget : public std::enable_shared_from_this<SourceBudget> {
 public:
+  static constexpr std::size_t ROOT_METADATA_BYTES =
+    4096; ///< Bootstrap ledger allowance, retained for the root lifetime.
+  static constexpr std::size_t CAPACITY_OBSERVER_BYTES = 4096; ///< Precharged allowance for one capacity observer.
   /** @param options Positive capacity limits; includes a conservative bootstrap allowance.
    * @return New root or INVALID_ARGUMENT/NO_MEMORY.
    */
@@ -91,6 +129,12 @@ public:
    * @return Owning credit, or WOULD_BLOCK without changing any counter.
    */
   std::expected<SourceCredit, SourceError> reserve(SourceBudgetUsage amount);
+  /** @param wake Worker-safe wake-only endpoint; no payload or UI callback is invoked by release.
+   * @return Precharged4KiB RAII registration, bounded by maxConsumers, or a typed admission failure.
+   */
+  std::expected<SourceCapacityObserver, SourceError> observeCapacity(Publisher<int> wake);
+  /** @return Advisory release generation; only capacity notifications, never byte identities, use this value. */
+  std::uint64_t capacityEpoch() const noexcept;
   /** @return One synchronized aggregate snapshot. */
   SourceBudgetUsage usage() const;
   /** @return Immutable root limits. */
@@ -98,11 +142,23 @@ public:
 
 private:
   friend class SourceCredit;
+  friend class SourceCapacityObserver;
+  friend struct detail::SourceCapacityState;
+  std::shared_ptr<detail::SourceCapacityState> eligibleObserverLocked() noexcept;
+  void removeObserver(detail::SourceCapacityState &state) noexcept;
+  void disarmObserver(detail::SourceCapacityState &state) noexcept;
+  std::expected<void, SourceError> armObserver(detail::SourceCapacityState &state, SourceBudgetUsage peak);
+  std::expected<SourceCredit, SourceError> reserveObserved(detail::SourceCapacityState &state, SourceBudgetUsage amount,
+                                                           SourceBudgetUsage peak);
   explicit SourceBudget(SourceBudgetOptions options);
   void release(SourceBudgetUsage amount) noexcept;
   SourceBudgetOptions options_;
   mutable std::mutex mutex_;
   SourceBudgetUsage used_;
+  detail::SourceCapacityState *observers_{};
+  detail::SourceCapacityState *granted_{};
+  std::size_t observerCount_{};
+  std::uint64_t capacityEpoch_{};
 };
 
 /** @brief Fixed-capacity monotonic storage shared by typed/text pages; no upstream fallback.

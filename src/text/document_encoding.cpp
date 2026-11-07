@@ -91,6 +91,140 @@ constexpr Bom BOMS[] = {{DocumentEncoding::UTF32LE, {0xff, 0xfe, 0, 0}, 4},
                         {DocumentEncoding::UTF8, {0xef, 0xbb, 0xbf, 0}, 3},
                         {DocumentEncoding::UTF16LE, {0xff, 0xfe, 0, 0}, 2},
                         {DocumentEncoding::UTF16BE, {0xfe, 0xff, 0, 0}, 2}};
+using LocalStatus = DocumentDecoderLocalStatus;
+
+/// Fixed local proof outcome; a failure offset is deliberately not a guessed boundary.
+struct LocalBoundary {
+  std::uint64_t offset{};                 ///< Proven candidate start, meaningful only for READY.
+  LocalStatus status{LocalStatus::READY}; ///< Boundary proof or missing context.
+};
+
+/// Read a byte already proven to lie inside the at-most-eight-byte local span.
+std::uint8_t localByte(std::span<const std::byte> bytes, std::uint64_t offset, std::uint64_t position) noexcept {
+  return std::to_integer<std::uint8_t>(bytes[static_cast<std::size_t>(position - offset)]);
+}
+
+/// Return a complete original UTF-16 unit; the caller proves two bytes are present.
+std::uint16_t localWord(std::span<const std::byte> bytes, std::uint64_t offset, std::uint64_t position,
+                        DocumentEncoding encoding) noexcept {
+  const auto first = localByte(bytes, offset, position);
+  const auto second = localByte(bytes, offset, position + 1);
+
+  return encoding == DocumentEncoding::UTF16LE ? std::uint16_t(first | (second << 8))
+                                               : std::uint16_t((first << 8) | second);
+}
+
+std::uint8_t codeUnitWidth(DocumentEncoding encoding) noexcept {
+  if (encoding == DocumentEncoding::UTF16LE || encoding == DocumentEncoding::UTF16BE) {
+    return 2;
+  }
+
+  if (encoding == DocumentEncoding::UTF32LE || encoding == DocumentEncoding::UTF32BE) {
+    return 4;
+  }
+
+  return 1;
+}
+
+std::uint8_t encodingBomWidth(DocumentEncoding encoding) noexcept {
+  if (encoding == DocumentEncoding::UTF8) {
+    return 3;
+  }
+
+  const auto width = codeUnitWidth(encoding);
+
+  return width == 1 ? 0 : width;
+}
+
+LocalBoundary utf8LocalBoundary(std::span<const std::byte> bytes, std::uint64_t offset, std::uint64_t anchor,
+                                std::uint64_t contentStart, std::uint64_t originBoundary) noexcept {
+  if (anchor == contentStart || anchor == originBoundary || !continuation(localByte(bytes, offset, anchor))) {
+    return {anchor};
+  }
+
+  constexpr std::uint8_t MAX_LOOKBEHIND = 3;
+
+  for (std::uint8_t distance = 1; distance <= MAX_LOOKBEHIND; ++distance) {
+    if (distance > anchor - contentStart) {
+      return {0, LocalStatus::NEED_PREFIX};
+    }
+
+    const auto position = anchor - distance;
+
+    if (position < offset) {
+      return {0, LocalStatus::NEED_PREFIX};
+    }
+
+    if (position == contentStart || position == originBoundary || !continuation(localByte(bytes, offset, position))) {
+      return {position};
+    }
+  }
+
+  // A lead before these three continuation bytes cannot also own the anchor:
+  // every valid scalar and every malformed maximal subpart has at most four bytes.
+  return {anchor};
+}
+
+LocalBoundary utf16LocalBoundary(std::span<const std::byte> bytes, std::uint64_t offset, std::uint64_t anchor,
+                                 std::uint64_t contentStart, std::uint64_t originBoundary, DocumentEncoding encoding,
+                                 bool final) noexcept {
+  const auto start = anchor - anchor % 2;
+  const auto end = offset + bytes.size();
+
+  if (start < offset) {
+    return {0, LocalStatus::NEED_PREFIX};
+  }
+
+  if (end - start < 2) {
+    return final ? LocalBoundary{start} : LocalBoundary{0, LocalStatus::NEED_SUFFIX};
+  }
+
+  const auto current = localWord(bytes, offset, start, encoding);
+  const bool lowSurrogate = current >= 0xdc00 && current <= 0xdfff;
+
+  if (!lowSurrogate || start == contentStart || start == originBoundary) {
+    return {start};
+  }
+
+  if (start < 2 || start - 2 < offset) {
+    return {0, LocalStatus::NEED_PREFIX};
+  }
+
+  const auto previous = localWord(bytes, offset, start - 2, encoding);
+
+  return {previous >= 0xd800 && previous <= 0xdbff ? start - 2 : start};
+}
+
+LocalBoundary localBoundary(std::span<const std::byte> bytes, std::uint64_t offset, std::uint64_t anchor,
+                            std::uint64_t contentStart, std::uint64_t originBoundary, DocumentEncoding encoding,
+                            bool final) noexcept {
+  if (encoding == DocumentEncoding::UTF8) {
+    return utf8LocalBoundary(bytes, offset, anchor, contentStart, originBoundary);
+  }
+
+  if (encoding == DocumentEncoding::UTF16LE || encoding == DocumentEncoding::UTF16BE) {
+    return utf16LocalBoundary(bytes, offset, anchor, contentStart, originBoundary, encoding, final);
+  }
+
+  const auto width = codeUnitWidth(encoding);
+  const auto start = anchor - anchor % width;
+
+  return start < offset ? LocalBoundary{0, LocalStatus::NEED_PREFIX} : LocalBoundary{start};
+}
+
+/// Reuse the streaming decoder's exact scalar/malformed-subpart rules without retaining bytes.
+Unit localUnit(std::span<const std::byte> bytes, std::uint64_t offset, std::uint64_t position,
+               DocumentEncoding encoding, bool final) noexcept {
+  std::array<std::uint8_t, 4> pending{};
+  const auto size =
+    static_cast<std::uint8_t>(std::min<std::uint64_t>(pending.size(), offset + bytes.size() - position));
+
+  for (std::uint8_t i = 0; i < size; ++i) {
+    pending[i] = localByte(bytes, offset, position + i);
+  }
+
+  return decode(pending, size, encoding, final);
+}
 } // namespace
 
 DocumentDecoder::DocumentDecoder(DocumentDecoderOptions options) noexcept : options_(options) {
@@ -146,6 +280,103 @@ DocumentDecoder DocumentDecoder::restore(const DocumentDecoderCheckpoint &checkp
   decoder.selected_ = true;
 
   return decoder;
+}
+
+DocumentDecoderLocalResult DocumentDecoder::localCheckpoint(const DocumentDecoderCheckpoint &origin,
+                                                            std::span<const std::byte> window,
+                                                            std::uint64_t windowOffset, std::uint64_t anchorByteOffset,
+                                                            bool finalWindow) noexcept {
+  DocumentDecoderLocalResult result{};
+  const auto fail = [&](LocalStatus status) {
+    result.status = status;
+
+    return result;
+  };
+
+  // Reuse existing option/encoding validation; an opaque checkpoint is not an
+  // authenticated handle, so also reject inconsistent representation metadata.
+  if (!restore(origin).checkpoint()) {
+    return fail(LocalStatus::INVALID_ORIGIN);
+  }
+
+  const auto &options = origin.options_;
+  const auto encoding = origin.encoding_;
+  const auto bomLength = origin.bomLength_;
+  const auto width = codeUnitWidth(encoding);
+  const bool explicitMismatch =
+    options.explicitEncoding != DocumentEncoding::UNRESOLVED && options.explicitEncoding != encoding;
+  const bool invalidBom = bomLength != 0 && bomLength != encodingBomWidth(encoding);
+  const bool invalidMismatch =
+    origin.bomMismatch_ && (bomLength != 0 || options.explicitEncoding == DocumentEncoding::UNRESOLVED);
+  const bool invalidHint =
+    options.explicitEncoding == DocumentEncoding::UNRESOLVED && bomLength == 0 && options.hint != encoding;
+
+  if (explicitMismatch || invalidBom || invalidMismatch || invalidHint || origin.nextOffset_ < bomLength ||
+      origin.nextOffset_ % width != 0) {
+    return fail(LocalStatus::INVALID_ORIGIN);
+  }
+
+  if (window.size() > LOCAL_WINDOW_BYTES || window.size() > std::numeric_limits<std::uint64_t>::max() - windowOffset) {
+    return fail(LocalStatus::INVALID_RANGE);
+  }
+
+  const auto end = windowOffset + window.size();
+
+  if (anchorByteOffset < windowOffset || anchorByteOffset > end ||
+      (finalWindow && (end < bomLength || end < origin.nextOffset_))) {
+    return fail(LocalStatus::INVALID_RANGE);
+  }
+
+  const auto anchor = std::max(anchorByteOffset, std::uint64_t{bomLength});
+
+  if (anchor > end) {
+    return fail(LocalStatus::NEED_SUFFIX);
+  }
+
+  if (anchor == end) {
+    if (finalWindow) {
+      result.restartByteOffset = end;
+
+      return fail(LocalStatus::AT_END);
+    }
+
+    return fail(LocalStatus::NEED_SUFFIX);
+  }
+
+  const auto boundary =
+    localBoundary(window, windowOffset, anchor, bomLength, origin.nextOffset_, encoding, finalWindow);
+
+  if (boundary.status != LocalStatus::READY) {
+    return fail(boundary.status);
+  }
+
+  auto position = boundary.offset;
+
+  for (;;) {
+    const auto unit = localUnit(window, windowOffset, position, encoding, finalWindow);
+
+    if (unit.length == 0) {
+      return fail(LocalStatus::NEED_SUFFIX);
+    }
+
+    if (anchor - position < unit.length) {
+      if (unit.malformed && options.policy == DocumentDecodePolicy::STRICT_MODE) {
+        result.errorOffset = position;
+        result.errorLength = unit.length;
+
+        return fail(LocalStatus::MALFORMED);
+      }
+
+      result.restartByteOffset = position;
+      result.checkpoint = DocumentDecoderCheckpoint(options, encoding, position, bomLength, origin.bomMismatch_);
+
+      return fail(LocalStatus::READY);
+    }
+
+    // UTF-8 search begins at most three bytes before anchor; other encodings
+    // already found its containing code unit/pair. Each positive unit advances.
+    position += unit.length;
+  }
 }
 
 DocumentDecodeResult DocumentDecoder::feed(std::span<const std::byte> input, std::uint64_t offset, bool final,

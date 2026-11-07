@@ -34,6 +34,9 @@
 :header { foreground: #ffffff; background: #0000aa; bold: true; }
 :caret { foreground: #00aaaa; background: #0000aa; bold: false; }
 
+/* Document focus uses the text surface; frame and scrollbar keep their accent. */
+DocumentView:focused { foreground: #ffff55; background: #0000aa; bold: false; }
+
 /* Selected radio markers use the surface; read-only remains keyboard navigable. */
 RadioGroup:selected { background: #0000aa; }
 RadioGroup:read-only { foreground: #aaaaaa; background: #0000aa; bold: false; italic: false; underline: false; }

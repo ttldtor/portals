@@ -68,6 +68,7 @@ constexpr std::array<std::string_view, 2> DIALOG_MODE_NAMES{"MODAL", "NON_MODAL"
 constexpr std::array<std::string_view, 3> DIALOG_PLACEMENT_NAMES{"CENTER", "BELOW_START", "ABOVE_START"};
 constexpr std::array<std::string_view, 2> CHART_MODE_NAMES{"LINE", "CANDLES"};
 constexpr std::array<std::string_view, 2> CHART_GLYPH_NAMES{"ASCII", "BOX_DRAWING"};
+constexpr std::array<std::string_view, 8> DOCUMENT_ENCODING_NAMES{"UNRESOLVED", "UTF8", "UTF16LE", "UTF16BE", "UTF32LE", "UTF32BE", "WINDOWS1251", "WINDOWS1252"};
 constexpr std::array<std::string_view, 2> AXIS_NAMES{"HORIZONTAL", "VERTICAL"};
 constexpr std::array<std::string_view, 4> SPINNER_PRESET_NAMES{"DOTS", "LINE", "BRAILLE", "BAR_BOUNCE"};
 constexpr std::array<std::string_view, 2> SPINNER_DIRECTION_NAMES{"FORWARD", "REVERSE"};
@@ -338,7 +339,11 @@ constexpr std::array<ControlPropertyDescriptor, detail::CONTROL_PROPERTY_COUNT> 
    {"radioInitial.index", Kind::UNSIGNED_INTEGER, 2, {}},
    {"step", Kind::FLOATING_POINT, 1, {}},
    {"pageSteps", Kind::UNSIGNED_INTEGER, 1, {}},
-   {"radioSelectionMode", Kind::ENUMERATION, 1, RADIO_SELECTION_NAMES}}};
+   {"radioSelectionMode", Kind::ENUMERATION, 1, RADIO_SELECTION_NAMES},
+   {"file", Kind::LITERAL_STRING, 1, {}},
+   {"lineNumbers", Kind::BOOLEAN, 1, {}},
+   {"wrap", Kind::BOOLEAN, 1, {}},
+   {"encoding", Kind::ENUMERATION, 1, DOCUMENT_ENCODING_NAMES}}};
 static_assert(std::ranges::all_of(PROPERTIES, [](const auto &property) {
   return !property.path.empty();
 }));
@@ -370,6 +375,7 @@ constexpr Mask SCROLLBAR_MASK = propertyMask(204, 205, 206, 207, 208, 209, 210, 
 constexpr Mask SCROLL_COMMON_MASK =
   SIZE_MASK | SCROLLBAR_MASK | propertyMask(8, 38, 39, 44, 45, 46, 47, 48, 231, 232, 233);
 constexpr Mask SCROLL_AREA_MASK = SCROLL_COMMON_MASK | propertyMask(49, 50, 51, 53, 54, 55);
+constexpr Mask DOCUMENT_VIEW_MASK = SCROLL_AREA_MASK | propertyMask(264, 265, 266, 267);
 constexpr Mask SCROLL_BAR_MASK = SCROLL_COMMON_MASK | propertyMask(52);
 constexpr Mask LOG_VIEW_MASK = SIZE_MASK | TEXT_MASK | propertyMask(8, 225, 226, 227, 228, 229);
 constexpr Mask OVERLAY_MASK = SIZE_MASK | propertyMask(22, 23, 24, 25, 56, 57);
@@ -465,6 +471,14 @@ constexpr auto SCROLL_AREA_SCHEMA = withFrame(
                  PROPERTIES[235], PROPERTIES[236], PROPERTIES[237], PROPERTIES[238], PROPERTIES[239], PROPERTIES[240],
                  PROPERTIES[241], PROPERTIES[242], PROPERTIES[243], PROPERTIES[244], PROPERTIES[245], PROPERTIES[246],
                  PROPERTIES[247], PROPERTIES[248]}));
+constexpr auto DOCUMENT_VIEW_SCHEMA = [] {
+  std::array<ControlPropertyDescriptor, SCROLL_AREA_SCHEMA.size() + 4> schema{};
+  std::ranges::copy(SCROLL_AREA_SCHEMA, schema.begin());
+  for (std::size_t index = 0; index < 4; ++index) {
+    schema[SCROLL_AREA_SCHEMA.size() + index] = PROPERTIES[264 + index];
+  }
+  return schema;
+}();
 constexpr auto SCROLL_BAR_SCHEMA = withFrame(std::to_array(
   {PROPERTIES[1],   PROPERTIES[2],   PROPERTIES[3],   PROPERTIES[8],   PROPERTIES[38],  PROPERTIES[39],
    PROPERTIES[44],  PROPERTIES[45],  PROPERTIES[46],  PROPERTIES[47],  PROPERTIES[48],  PROPERTIES[52],
@@ -604,6 +618,7 @@ static_assert(schemaMatchesMask(CHECK_SCHEMA, CHECK_MASK));
 static_assert(schemaMatchesMask(SWITCH_SCHEMA, SWITCH_MASK));
 static_assert(schemaMatchesMask(RADIO_SCHEMA, RADIO_MASK));
 static_assert(schemaMatchesMask(SCROLL_AREA_SCHEMA, SCROLL_AREA_MASK));
+static_assert(schemaMatchesMask(DOCUMENT_VIEW_SCHEMA, DOCUMENT_VIEW_MASK));
 static_assert(schemaMatchesMask(SCROLL_BAR_SCHEMA, SCROLL_BAR_MASK));
 static_assert(schemaMatchesMask(LOG_VIEW_SCHEMA, LOG_VIEW_MASK));
 static_assert(schemaMatchesMask(OVERLAY_SCHEMA, OVERLAY_MASK));
@@ -1058,8 +1073,14 @@ ControlContextError exceptionError() noexcept {
   PORTALS_CONTROL_SPINNER_LEAVES(X)                                                                                    \
   PORTALS_CONTROL_SCROLLBAR_LEAVES(X)
 
+#define PORTALS_DOCUMENT_LEAVES(X) \
+  X(documentSettings().file, 264) \
+  X(documentSettings().lineNumbers, 265) \
+  X(documentSettings().wrap, 266) \
+  X(documentSettings().encoding, 267)
+
 #define LEAF_INDEX(field, index) index,
-constexpr auto LEAF_INDICES = std::to_array<std::size_t>({PORTALS_CONTROL_LEAVES(LEAF_INDEX)});
+constexpr auto LEAF_INDICES = std::to_array<std::size_t>({PORTALS_CONTROL_LEAVES(LEAF_INDEX) PORTALS_DOCUMENT_LEAVES(LEAF_INDEX)});
 #undef LEAF_INDEX
 static_assert(LEAF_INDICES.size() == detail::CONTROL_PROPERTY_COUNT);
 static_assert([] {
@@ -1075,6 +1096,7 @@ static_assert([] {
 template <class Visitor> void visitLeaves(const ControlSettings &settings, Visitor &&visitor) {
 #define VISIT(field, index) visitor(index, settings.field);
   PORTALS_CONTROL_LEAVES(VISIT)
+  PORTALS_DOCUMENT_LEAVES(VISIT)
 #undef VISIT
 }
 
@@ -1168,6 +1190,15 @@ void merge(ControlSettings &target, const ControlSettings &patch) {
 #define ASSIGN(field, index) assign(target.field, patch.field, index);
   PORTALS_CONTROL_LEAVES(ASSIGN)
 #undef ASSIGN
+  if (patch.document) {
+    auto document = std::make_shared<ControlDocumentSettings>(target.documentSettings());
+    const auto &source = patch.documentSettings();
+    assign(document->file, source.file, 264);
+    assign(document->lineNumbers, source.lineNumbers, 265);
+    assign(document->wrap, source.wrap, 266);
+    assign(document->encoding, source.encoding, 267);
+    target.document = std::move(document);
+  }
 }
 
 #undef PORTALS_CONTROL_LEAVES
@@ -1188,6 +1219,8 @@ template <class T> bool validValue(const T &value, std::size_t index) noexcept {
            ((index != 191 && index != 192) || value.size() <= FRAME_CUSTOM_GLYPH_MAX_BYTES);
   } else if constexpr (std::same_as<T, double>) {
     return std::isfinite(value) && ((index != WHEEL_STEP_PROPERTY && index != SLIDER_STEP_PROPERTY) || value > 0);
+  } else if constexpr (std::same_as<T, DocumentEncoding>) {
+    return value >= DocumentEncoding::UNRESOLVED && value <= DocumentEncoding::WINDOWS1252;
   } else if constexpr (std::same_as<T, ToastPlacement>) {
     return value == ToastPlacement::BOTTOM_END || value == ToastPlacement::TOP_END ||
            value == ToastPlacement::BOTTOM_START || value == ToastPlacement::TOP_START;
@@ -1390,6 +1423,12 @@ std::expected<void, ControlContextError> validateSettings(const ControlSettings 
 } // namespace
 
 namespace detail {
+void freezeControlDocumentSettings(ControlSettings &settings) {
+  if (settings.document) {
+    settings.document = std::make_shared<const ControlDocumentSettings>(*settings.document);
+  }
+}
+
 void mergeRecipeControlSettings(ControlSettings &target, const ControlSettings &patch) {
   replaceSizingModes(target, patch);
 
@@ -1413,6 +1452,15 @@ void mergeRecipeControlSettings(ControlSettings &target, const ControlSettings &
   PORTALS_CONTROL_COMPOSITE_LEAVES(ASSIGN_RECIPE)
 #undef ASSIGN_RECIPE
 
+  if (patch.document) {
+    auto document = std::make_shared<ControlDocumentSettings>(target.documentSettings());
+    const auto &source = patch.documentSettings();
+    apply(document->file, source.file);
+    apply(document->lineNumbers, source.lineNumbers);
+    apply(document->wrap, source.wrap);
+    apply(document->encoding, source.encoding);
+    target.document = std::move(document);
+  }
   target.origin = patch.origin;
   target.origins = patch.origins;
 }
@@ -1436,6 +1484,10 @@ void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &pr
     patch.origins = previous.origins;
 
     const std::array fields{
+      std::pair<std::string_view, bool>{"file", patch.documentSettings().file.has_value()},
+      std::pair<std::string_view, bool>{"lineNumbers", patch.documentSettings().lineNumbers.has_value()},
+      std::pair<std::string_view, bool>{"wrap", patch.documentSettings().wrap.has_value()},
+      std::pair<std::string_view, bool>{"encoding", patch.documentSettings().encoding.has_value()},
       std::pair<std::string_view, bool>{"preset", patch.spinnerPreset.has_value()},
       std::pair<std::string_view, bool>{"frames", patch.spinnerFrames.has_value()},
       std::pair<std::string_view, bool>{"interval", patch.spinnerTick.has_value()},
@@ -1921,7 +1973,7 @@ struct ControlContext::Data {
 
   std::optional<Schema> fallback;
   std::array<std::optional<Schema>, 3> primitiveFallbacks;
-  std::array<std::optional<Schema>, 3> scrollFallbacks;
+  std::array<std::optional<Schema>, 4> scrollFallbacks;
   std::optional<Schema> overlayFallback;
   std::optional<Schema> dataStateFallback;
   std::optional<Schema> messageFallback;
@@ -2284,6 +2336,9 @@ std::span<const ControlPropertyDescriptor> controlPropertySchema(std::string_vie
   if (type == "ScrollArea") {
     return SCROLL_AREA_SCHEMA;
   }
+  if (type == "DocumentView") {
+    return DOCUMENT_VIEW_SCHEMA;
+  }
 
   if (type == "ScrollBar") {
     return SCROLL_BAR_SCHEMA;
@@ -2442,7 +2497,7 @@ std::expected<void, ControlContextError> ControlContextAccess::installScrollSche
     return std::unexpected(*context.failure_);
   }
 
-  if (name != "ScrollArea" && name != "ScrollBar" && name != "LogView") {
+  if (name != "ScrollArea" && name != "ScrollBar" && name != "LogView" && name != "DocumentView") {
     return std::unexpected(ControlContextError{Code::UNKNOWN_TYPE, {}});
   }
 
@@ -2455,9 +2510,12 @@ std::expected<void, ControlContextError> ControlContextAccess::installScrollSche
       context.data_ ? std::make_shared<ControlContext::Data>(*context.data_) : std::make_shared<ControlContext::Data>();
     ControlContext::Data::Schema schema;
     schema.name = name;
-    schema.mask = name == "ScrollArea" ? SCROLL_AREA_MASK : name == "LogView" ? LOG_VIEW_MASK : SCROLL_BAR_MASK;
+    schema.mask = name == "DocumentView" ? DOCUMENT_VIEW_MASK
+                  : name == "ScrollArea" ? SCROLL_AREA_MASK
+                  : name == "LogView"                              ? LOG_VIEW_MASK
+                                                                   : SCROLL_BAR_MASK;
     schema.factoryKind = ControlFactoryKind::SCROLL_FALLBACK;
-    next->scrollFallbacks[name == "ScrollArea" ? 0 : name == "LogView" ? 2 : 1] = schema;
+    next->scrollFallbacks[name == "ScrollArea" ? 0 : name == "LogView" ? 2 : name == "DocumentView" ? 3 : 1] = schema;
     context.data_ = std::move(next);
     context.prepared_ = false;
 
@@ -2853,6 +2911,7 @@ ControlContext &ControlContext::define(std::string_view name, std::string_view b
         entry.name = name;
         entry.base = base;
         entry.settings = settings;
+        detail::freezeControlDocumentSettings(entry.settings);
         next->definitions.push_back(entry);
         data_ = std::move(next);
       }
@@ -2893,6 +2952,7 @@ ControlContext &ControlContext::defaults(std::string_view type, const ControlSet
         Data::Entry entry;
         entry.name = type;
         entry.settings = settings;
+        detail::freezeControlDocumentSettings(entry.settings);
         next->defaults.push_back(entry);
         data_ = std::move(next);
       }

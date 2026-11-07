@@ -56,6 +56,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
   and scrollbar carry the focus accent. Refresh the model-switching recording.
 
 ### Added
+- Add a read-only DocumentView with background text windows, original-byte navigation,
+  optional line numbers, encoding selection and source switching. Native declarative
+  and resource recipes share frame, size and scrollbar settings.
+
 - Add a bounded streaming document decoder for UTF-8, UTF-16LE/BE, UTF-32LE/BE,
   Windows-1251 and Windows-1252, with source byte spans and opaque checkpoints.
   Escape mode is not yet supported; callers must bind checkpoints to source revisions.

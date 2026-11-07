@@ -5,6 +5,7 @@
 #include <portals/chart.hpp>
 #include <portals/data_presentation.hpp>
 #include <portals/dialog.hpp>
+#include <portals/document_encoding.hpp>
 #include <portals/grid.hpp>
 #include <portals/line_edit.hpp>
 #include <portals/message_box.hpp>
@@ -363,6 +364,14 @@ struct ControlRadioInitialSettings {
   std::optional<std::uint64_t> index{}; ///< Zero-based original source ordinal, not a stable ID.
 };
 
+/** @brief Sparse file-backed document presentation; shared snapshots are immutable. */
+struct ControlDocumentSettings {
+  std::optional<std::string> file{}; ///< Literal UTF-8 file path.
+  std::optional<bool> lineNumbers{}; ///< Show logical line numbers.
+  std::optional<bool> wrap{}; ///< Wrap text at the viewport edge.
+  std::optional<DocumentEncoding> encoding{}; ///< Explicit decoder selection.
+};
+
 /** @brief Owning sparse literals only; never contains IDs, models, handlers or live history. */
 struct ControlSettings {
   ~ControlSettings() = default;
@@ -478,6 +487,13 @@ struct ControlSettings {
   std::optional<double> step{};             ///< Slider increment; appended to preserve the positional aggregate prefix.
   std::optional<std::uint64_t> pageSteps{}; ///< Positive Slider increment count per PageUp/PageDown action.
   std::optional<RadioSelectionMode> radioSelectionMode{}; ///< Keyboard selection policy; appended for compatibility.
+  std::shared_ptr<const ControlDocumentSettings> document{}; ///< Cold immutable document settings.
+
+  /** @return Immutable document settings, or a shared empty value when absent. */
+  const ControlDocumentSettings &documentSettings() const noexcept {
+    static const ControlDocumentSettings EMPTY;
+    return document ? *document : EMPTY;
+  }
 };
 
 namespace detail {

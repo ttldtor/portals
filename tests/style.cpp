@@ -188,7 +188,8 @@ void parserAndCascade(const char *themeDirectory) {
     auto fromPss = take(parsePss(source));
     auto fromCpp = std::string_view(name) == "modern" ? modernTheme() : turboTheme();
 
-    for (const auto type : {"Button", "CheckBox", "LineEdit", "Table", "Custom", "RadioGroup", "LogView"}) {
+    for (const auto type :
+         {"Button", "CheckBox", "LineEdit", "Table", "Custom", "RadioGroup", "LogView", "DocumentView"}) {
       check(resolveStyle(fromPss, {type, "", {}}) == resolveStyle(fromCpp, {type, "", {}}),
             "typed factory and shipped PSS give identical complete styles");
     }

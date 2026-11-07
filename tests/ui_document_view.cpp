@@ -1,0 +1,877 @@
+// Copyright (c) 2026 ttldtor.
+// SPDX-License-Identifier: BSL-1.0
+#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+#include "../src/widgets/document_view_state.hpp"
+#include <atomic>
+#include <doctest.h>
+#include <portals/ui.hpp>
+#include <source_location>
+#include <thread>
+
+namespace {
+using namespace portals;
+
+template <class T, class E>
+T take(std::expected<T, E> value, std::source_location origin = std::source_location::current()) {
+  INFO("checked call ", origin.line());
+  if constexpr (std::same_as<E, ManagedError>) {
+    if (!value) {
+      INFO("phase ", static_cast<int>(value.error().phase), " source ",
+           value.error().source ? static_cast<int>(*value.error().source) : -1, " cause ",
+           std::get_if<TreeError>(&value.error().cause) ? static_cast<int>(std::get<TreeError>(value.error().cause))
+                                                        : -1);
+      REQUIRE(value);
+    }
+  }
+  REQUIRE(value);
+  if constexpr (!std::is_void_v<T>) {
+    return std::move(*value);
+  }
+}
+
+class Executor final : public BackgroundExecutor {
+public:
+  std::shared_ptr<BackgroundJob> job;
+  std::uint64_t epoch{};
+  std::size_t submissions{};
+
+  std::expected<BackgroundTicket, BackgroundError> submit(std::unique_ptr<BackgroundJob> &input) override {
+    if (job) {
+      return std::unexpected(BackgroundError::WOULD_BLOCK);
+    }
+    ++submissions;
+    job = std::move(input);
+    return BackgroundTicket(job);
+  }
+
+  void service() noexcept override {
+  }
+
+  std::uint64_t capacityEpoch() const noexcept override {
+    return epoch;
+  }
+
+  void runOne() {
+    auto work = std::exchange(job, {});
+    if (!work) {
+      return;
+    }
+    std::expected<void, AsyncError> result;
+    std::thread worker([&] {
+      work->run(work->stopToken());
+      result = work->publish();
+    });
+    worker.join();
+    CHECK((result || result.error() == AsyncError::CANCELLED || result.error() == AsyncError::CLOSED));
+    ++epoch;
+  }
+};
+
+class Provider final : public ByteDocumentProvider {
+public:
+  std::string text = std::string(0, '\0');
+  std::uint64_t revision{1};
+  std::atomic<std::size_t> reads{};
+  std::atomic<std::size_t> bytesRead{};
+  bool seekable{true};
+  bool utf16{};
+  std::vector<std::pair<std::uint64_t, std::string>> patches;
+  std::atomic<std::size_t> metadataCalls{};
+  std::atomic<bool> uiOperation{};
+  bool unknown{};
+  bool emptyMore{};
+  bool failRead{};
+  bool providerWouldBlock{};
+  std::optional<std::uint64_t> syntheticExtent;
+  const std::thread::id ui = std::this_thread::get_id();
+
+  ByteDocumentCapabilities capabilities() const noexcept override {
+    return {seekable, false};
+  }
+
+  std::expected<ByteDocumentMetadata, DocumentError> metadata(std::stop_token) override {
+    ++metadataCalls;
+    uiOperation = uiOperation || ui == std::this_thread::get_id();
+    return ByteDocumentMetadata{revision, unknown           ? std::nullopt
+                                          : syntheticExtent ? syntheticExtent
+                                                            : std::optional<std::uint64_t>(text.size())};
+  }
+
+  std::expected<ByteReadResult, DocumentError> read(const ByteReadCommand &command, std::span<std::byte> destination,
+                                                    std::stop_token) override {
+    ++reads;
+    if (providerWouldBlock) {
+      return std::unexpected(DocumentError{SourceError::WOULD_BLOCK, {}, {}});
+    }
+    if (failRead) {
+      return std::unexpected(DocumentError{SourceError::IO_ERROR, std::make_error_code(std::errc::io_error), {}});
+    }
+    uiOperation = uiOperation || ui == std::this_thread::get_id();
+    if (emptyMore) {
+      return ByteReadResult{};
+    }
+    if (command.dataRevision != revision) {
+      return std::unexpected(DocumentError{SourceError::REVISION_CHANGED, {}, {}});
+    }
+    if (syntheticExtent) {
+      const auto offset = std::min(command.offset, *syntheticExtent);
+      const auto count =
+        static_cast<std::size_t>(std::min<std::uint64_t>(destination.size(), *syntheticExtent - offset));
+      for (std::size_t byte = 0; byte < count; ++byte) {
+        const auto position = offset + byte;
+        const auto value = utf16 ? (position % 2 ? 0 : (position % 4 ? '\n' : 'x')) : (position % 2 ? '\n' : 'x');
+        destination[byte] = static_cast<std::byte>(value);
+        for (const auto &[start, bytes] : patches) {
+          if (position >= start && position - start < bytes.size()) {
+            destination[byte] = static_cast<std::byte>(bytes[static_cast<std::size_t>(position - start)]);
+          }
+        }
+      }
+      bytesRead += count;
+      return ByteReadResult{count, offset + count == *syntheticExtent};
+    }
+    const auto offset = std::min<std::uint64_t>(command.offset, text.size());
+    const auto count = std::min(destination.size(), text.size() - static_cast<std::size_t>(offset));
+    std::memcpy(destination.data(), text.data() + offset, count);
+    return ByteReadResult{count, !unknown && offset + count == text.size()};
+  }
+};
+
+ui::DocumentSource source(std::string text) {
+  return ui::document(std::make_shared<MemoryDocumentProvider>(std::make_shared<const std::string>(std::move(text))));
+}
+
+struct Fixture {
+  Executor executor;
+  SchedulerTime now{};
+  std::unique_ptr<Application> app =
+    take(Application::create({.backgroundExecutor = &executor}, {[](void *context) noexcept {
+                                                                   return *static_cast<SchedulerTime *>(context);
+                                                                 },
+                                                                 &now}));
+  std::unique_ptr<ManagedScene> scene = take(ManagedScene::create(*app));
+  ui::Ref<DocumentView> reference;
+  Node<DocumentView> node;
+  CellSize size{24, 8};
+
+  explicit Fixture(ui::DocumentSource descriptor, DocumentViewConfig config = {}) {
+    node = take(ui::mount(*scene, ui::viewer(reference, std::move(descriptor), config)));
+    take(scene->focus(node));
+    take(app->router().setPointerCaptureCapabilities({true, true, true}));
+  }
+
+  ~Fixture() {
+    scene.reset();
+    executor.runOne();
+    app.reset();
+  }
+
+  void pump() {
+    take(app->scheduler().dispatch());
+    take(scene->afterDispatch(*app));
+    take(scene->prepare(*app, size));
+    const auto bounds = take(CellRect::from({}, size));
+    for (unsigned pass = 0; pass < 3; ++pass) {
+      take(app->tree().consumeFrameRequest());
+      std::optional<LayoutSnapshot> layout;
+      take(app->tree().frame([&] {
+        take(layoutTree(app->tree(), app->root(), bounds, bounds));
+        layout.emplace(take(LayoutSnapshot::capture(app->tree(), app->root(), LayoutSnapshotProfile::GEOMETRY)));
+      }));
+      take(scene->prepareViews(*app, *layout));
+      if (take(app->tree().consumeFrameRequest()) != Invalidation::LAYOUT) {
+        break;
+      }
+    }
+    take(scene->completedLayout(*app));
+  }
+
+  void settle(unsigned turns = 12) {
+    for (unsigned turn = 0; turn < turns; ++turn) {
+      pump();
+      executor.runOne();
+    }
+    pump();
+  }
+
+  std::shared_ptr<const detail::DocumentPreparedFrame> frame() {
+    std::shared_ptr<const detail::DocumentPreparedFrame> result;
+    take(app->tree().read(node, [&](const DocumentView &widget) {
+      result = detail::DocumentViewAccess::state(widget).frame;
+    }));
+    return result;
+  }
+
+  bool input(InputKey key) {
+    return take(scene->input(*app, KeyEvent{.key = key}));
+  }
+};
+} // namespace
+
+TEST_CASE("cold factory mounts fluent native framing without UI metadata reads") {
+  auto provider = std::make_shared<Provider>();
+  provider->text = "first\nsecond\nthird";
+  auto descriptor = ui::document(provider);
+  CHECK(provider->metadataCalls.load() == 0);
+  CHECK_FALSE(descriptor.byteSource());
+  Executor executor;
+  auto app = take(Application::create({.backgroundExecutor = &executor}));
+  auto scene = take(ManagedScene::create(*app));
+  ui::Ref<DocumentView> ref;
+  const auto node = take(ui::mount(
+    *scene,
+    ui::viewer(ref, descriptor).lineNumbers().wrap(false).encoding(DocumentEncoding::UTF8).framed("rounded", "File")));
+  CHECK(node == ref.node());
+  CHECK(descriptor.byteSource());
+  CHECK(descriptor.byteSource()->budget() == descriptor.budget());
+  CHECK(provider->metadataCalls.load() == 0);
+  CHECK(provider->reads.load() == 0);
+  take(app->tree().read(node, [&](const DocumentView &widget) {
+    CHECK(detail::DocumentViewAccess::state(widget).config.lineNumbers);
+    CHECK_FALSE(detail::DocumentViewAccess::state(widget).config.wrap);
+    const auto *frame = detail::scrollFrameOptions(detail::ScrollWidgetAccess::state(widget));
+    REQUIRE(frame);
+    CHECK(frame->pattern == FramePattern::ROUNDED);
+    CHECK(frame->title == "File");
+  }));
+}
+
+TEST_CASE("standard managed preparation produces immutable visible rows and then becomes idle") {
+  auto provider = std::make_shared<Provider>();
+  provider->text = "one\ntwo\nthree";
+  Fixture f(ui::document(provider));
+  CHECK(provider->reads.load() == 0);
+  f.settle();
+  const auto frame = f.frame();
+  REQUIRE(frame);
+  REQUIRE(frame->rows.size() == 3);
+  CHECK(frame->rows[0].bytes() == "one");
+  CHECK(frame->status.totalLines == 3);
+  CHECK_FALSE(provider->uiOperation.load());
+  const auto reads = provider->reads.load();
+  const auto submitted = f.executor.submissions;
+  f.settle();
+  CHECK(provider->reads.load() == reads);
+  CHECK(f.executor.submissions == submitted);
+}
+
+TEST_CASE("hide cancels demand without releasing running-job credits and show resumes") {
+  auto budget = take(SourceBudget::create());
+  auto provider = std::make_shared<Provider>();
+  provider->text = std::string(10000, 'x');
+  Fixture f(ui::document(provider, budget));
+  f.pump();
+  f.pump();
+  REQUIRE(f.executor.job);
+  CHECK(budget->usage().work == 1);
+  take(f.app->tree().setVisible(f.node, false));
+  f.pump();
+  CHECK(budget->usage().work == 1);
+  f.executor.runOne();
+  CHECK(budget->usage().work == 0);
+  CHECK_FALSE(f.frame());
+  const auto submitted = f.executor.submissions;
+  f.settle(3);
+  CHECK(f.executor.submissions == submitted);
+  take(f.app->tree().setVisible(f.node, true));
+  f.settle();
+  REQUIRE(f.frame());
+}
+
+TEST_CASE("source replacement rejects late completion and preserves bounded source byte bookmarks") {
+  const auto first = source("first\nline two\nline three");
+  const auto second = source("second source");
+  Fixture f(first);
+  f.pump();
+  f.pump();
+  REQUIRE(f.executor.job);
+  take(f.reference.setModel(second));
+  f.pump();
+  f.executor.runOne();
+  f.settle();
+  REQUIRE(f.frame());
+  CHECK(f.frame()->rows[0].bytes() == "second source");
+  take(f.reference.setModel(first));
+  f.settle();
+  take(f.reference.seekByte(6));
+  f.settle();
+  CHECK(take(f.reference.status()).byteOffset == 6);
+  take(f.reference.setModel(second));
+  f.settle();
+  take(f.reference.setModel(first));
+  CHECK(take(f.reference.status()).byteOffset == 6);
+  f.settle();
+  CHECK(take(f.reference.status()).byteOffset == 6);
+  const auto count = f.executor.submissions;
+  take(f.reference.setModel(first));
+  f.settle(2);
+  CHECK(f.executor.submissions == count);
+}
+
+TEST_CASE("resize supersedes prepared old-width frames and preserves original byte anchor") {
+  Fixture f(source(std::string(300, 'a')));
+  f.pump();
+  f.pump();
+  REQUIRE(f.executor.job);
+  f.executor.runOne();
+  f.size = {12, 6};
+  f.pump();
+  f.settle();
+  REQUIRE(f.frame());
+  CHECK(f.frame()->viewport.width == 10);
+  CHECK(take(f.reference.status()).byteOffset == 0);
+}
+
+TEST_CASE("navigation is read-only and F10 remains available to the scene") {
+  Fixture f(source("one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine"));
+  f.settle();
+  CHECK_FALSE(f.input(InputKey::F10));
+  CHECK(f.input(InputKey::DOWN));
+  f.settle();
+  CHECK(take(f.reference.status()).byteOffset == 4);
+  CHECK(f.input(InputKey::HOME));
+  f.settle();
+  CHECK(take(f.reference.status()).byteOffset == 0);
+  CHECK(f.input(InputKey::END));
+  f.settle();
+  REQUIRE(f.frame());
+  CHECK(f.frame()->rows.back().bytes() == "nine");
+}
+
+TEST_CASE("unknown extent waits without polling and explicit refresh observes arriving data") {
+  auto provider = std::make_shared<Provider>();
+  provider->unknown = true;
+  provider->emptyMore = true;
+  Fixture f(ui::document(provider));
+  f.settle();
+  CHECK(take(f.reference.status()).waiting);
+  CHECK_FALSE(take(f.reference.status()).finalEnd);
+  const auto reads = provider->reads.load();
+  f.settle();
+  CHECK(provider->reads.load() == reads);
+  provider->text = "arrived\n";
+  provider->emptyMore = false;
+  provider->unknown = false;
+  ++provider->revision;
+  take(f.reference.refresh());
+  f.settle();
+  REQUIRE(f.frame());
+  CHECK(f.frame()->rows[0].bytes() == "arrived");
+  CHECK(f.frame()->status.revision.dataRevision == provider->revision);
+}
+
+TEST_CASE("remove closes retained worker delivery without a UI join or stale publication") {
+  auto descriptor = source("pending");
+  auto budget = descriptor.budget();
+  Fixture f(descriptor);
+  f.pump();
+  f.pump();
+  REQUIRE(f.executor.job);
+  CHECK(budget->usage().work == 1);
+  take(f.scene->remove(f.node));
+  CHECK(budget->usage().work == 1);
+  f.executor.runOne();
+  f.pump();
+  CHECK(budget->usage().work == 0);
+  CHECK_FALSE(f.reference.status());
+}
+
+TEST_CASE("oversized actual viewport reports a typed limit once instead of silent clipping or retry") {
+  DocumentViewConfig config;
+  config.maxFrameCells = 8;
+  Fixture f(source("visible"), config);
+  f.settle();
+  const auto status = take(f.reference.status());
+  REQUIRE(status.error);
+  CHECK(status.error->code == SourceError::PAGE_TOO_LARGE);
+  CHECK_FALSE(status.preparing);
+  const auto count = f.executor.submissions;
+  f.settle();
+  CHECK(f.executor.submissions == count);
+}
+
+TEST_CASE("the first completed layout submits demand without another key or preparation cycle") {
+  Fixture f(source("first screen"));
+  CHECK_FALSE(f.executor.job);
+  f.pump();
+  REQUIRE(f.executor.job);
+  f.executor.runOne();
+  f.pump();
+  REQUIRE(f.frame());
+  CHECK(f.frame()->rows.front().bytes() == "first screen");
+}
+
+TEST_CASE("standard framed string means a pattern for DocumentView too") {
+  Executor executor;
+  auto app = take(Application::create({.backgroundExecutor = &executor}));
+  auto scene = take(ManagedScene::create(*app));
+  const auto node = take(ui::mount(*scene, ui::viewer(source("text")).framed("rounded")));
+  take(app->tree().read(node, [&](const DocumentView &widget) {
+    const auto *frame = detail::scrollFrameOptions(detail::ScrollWidgetAccess::state(widget));
+    REQUIRE(frame);
+    CHECK(frame->pattern == FramePattern::ROUNDED);
+    CHECK(frame->title.empty());
+  }));
+  CHECK_FALSE(ui::mount(*scene, ui::viewer(source("text")).framed("unknown-pattern")));
+}
+
+TEST_CASE("byte-position scrollbar projects the full source and drag preserves offsets above4GiB") {
+  auto provider = std::make_shared<Provider>();
+  provider->syntheticExtent = (std::uint64_t{5} << 30) + 123;
+  Fixture f(ui::document(provider));
+  f.settle(3);
+  REQUIRE(f.frame());
+  CHECK(f.frame()->status.byteExtent == provider->syntheticExtent);
+  ScrollTrack track;
+  take(f.app->tree().read(f.node, [&](const DocumentView &widget) {
+    const auto &scroll = detail::ScrollWidgetAccess::state(widget);
+    REQUIRE(scroll.geometry.verticalBar);
+    track = scroll.geometry.vertical;
+    const auto values = take(scroll.controller->snapshot());
+    CHECK(values.vertical.metrics.extent == *provider->syntheticExtent);
+    CHECK(values.vertical.metrics.extent > (std::uint64_t{1} << 32));
+  }));
+  const auto send = [&](MouseAction action, std::int32_t row) {
+    InputEvent event = MouseInputEvent{track.origin.x, row, MouseButton::LEFT, action};
+    if (!take(f.scene->input(*f.app, event))) {
+      take(f.app->router().dispatch(event));
+    }
+  };
+  send(MouseAction::PRESS, track.origin.y);
+  CHECK(take(f.app->router().pointerCapture()) == f.node);
+  send(MouseAction::MOVE, track.origin.y + track.length + 10);
+  send(MouseAction::RELEASE, track.origin.y + track.length + 10);
+  f.now += 250;
+  f.pump();
+  CHECK(take(f.reference.status()).byteOffset == *provider->syntheticExtent);
+  CHECK(take(f.reference.status()).byteOffset > (std::uint64_t{1} << 32));
+}
+
+TEST_CASE("unknown extent has no invented global scrollbar range") {
+  auto provider = std::make_shared<Provider>();
+  provider->unknown = true;
+  provider->text = std::string(100, 'x');
+  Fixture f(ui::document(provider));
+  f.settle(3);
+  REQUIRE(f.frame());
+  CHECK_FALSE(f.frame()->status.byteExtent);
+  take(f.app->tree().read(f.node, [&](const DocumentView &widget) {
+    CHECK_FALSE(detail::ScrollWidgetAccess::state(widget).geometry.verticalBar);
+  }));
+}
+
+TEST_CASE("cancelled running work retains credit and the latest resize resumes after capacity changes") {
+  auto budget = take(SourceBudget::create({.maxWork = 2}));
+  auto descriptor = ui::document(std::make_shared<const std::string>("resumed"), budget);
+  Fixture f(descriptor);
+  f.pump();
+  REQUIRE(f.executor.job);
+  auto pressure = take(budget->reserve({4096, 0, 1, 0}));
+  f.size = {18, 7};
+  f.pump();
+  CHECK(take(f.reference.status()).backpressured);
+  CHECK(budget->usage().work == 2);
+  f.executor.runOne();
+  pressure = {};
+  f.settle();
+  REQUIRE(f.frame());
+  CHECK(f.frame()->viewport.width == 16);
+  CHECK_FALSE(take(f.reference.status()).backpressured);
+  CHECK_FALSE(take(f.reference.status()).error);
+}
+
+TEST_CASE("focused document surface uses the palette and honors explicit focused user overrides") {
+  class Sink final : public PaintContext {
+  public:
+    std::optional<CellStyle> surface;
+
+    std::expected<void, TreeError> submit(std::span<const RenderCommand> commands) override {
+      for (const auto &command : commands) {
+        if (const auto *fill = std::get_if<FillCommand>(&command); fill && fill->area.contains({1, 1})) {
+          surface = fill->style;
+        }
+      }
+      return {};
+    }
+  };
+
+  Fixture f(source("styled"));
+  take(f.scene->theme(modernTheme()));
+  f.settle(3);
+  Sink builtin;
+  take(f.app->tree().frame([&] {
+    take(f.app->tree().paint(f.node, builtin));
+  }));
+  REQUIRE(builtin.surface);
+  CHECK(builtin.surface->background == RgbColor{0x18, 0x1c, 0x24});
+  CHECK(builtin.surface->foreground == RgbColor{0xdc, 0xe1, 0xe8});
+  auto custom = modernTheme();
+  StyleRule focused;
+  focused.selector.type = "DocumentView";
+  focused.selector.state = StyleState::FOCUSED;
+  focused.declarations.background = RgbColor{12, 34, 56};
+  custom.rules.push_back(std::move(focused));
+  take(f.scene->theme(std::move(custom)));
+  f.settle(2);
+  Sink overridden;
+  take(f.app->tree().frame([&] {
+    take(f.app->tree().paint(f.node, overridden));
+  }));
+  REQUIRE(overridden.surface);
+  CHECK(overridden.surface->background == RgbColor{12, 34, 56});
+}
+
+TEST_CASE("collected Ref model failure can retire both its observer proxy and the target") {
+  Fixture f(source("old"));
+  f.settle(2);
+  unsigned callbacks{};
+  take(f.scene->onError([&](const ManagedDiagnostic &) {
+    ++callbacks;
+    take(f.app->tree().remove(f.node));
+    f.reference = {};
+  }));
+  CHECK_FALSE(f.reference.setModel(ui::DocumentSource{}));
+  CHECK(callbacks == 0);
+  CHECK_FALSE(f.reference.model(ui::DocumentSource{}));
+  CHECK(callbacks == 1);
+  CHECK_FALSE(f.app->tree().read(f.node, [](const DocumentView &) {
+  }));
+}
+
+TEST_CASE("worker error delivery permits low-level target removal without later activity access") {
+  auto provider = std::make_shared<Provider>();
+  provider->text = "unread";
+  provider->failRead = true;
+  Fixture f(ui::document(provider));
+  unsigned callbacks{};
+  take(f.scene->onError([&](const ManagedDiagnostic &diagnostic) {
+    ++callbacks;
+    CHECK(diagnostic.error.source == SourceError::IO_ERROR);
+    take(f.app->tree().remove(f.node));
+  }));
+  f.settle(3);
+  CHECK(callbacks == 1);
+  CHECK_FALSE(f.app->tree().read(f.node, [](const DocumentView &) {
+  }));
+}
+
+TEST_CASE("alternating sources update one bookmark per source beyond the history ring capacity") {
+  const auto first = source(std::string(1000, 'a'));
+  const auto second = source(std::string(1000, 'b'));
+  Fixture f(first);
+
+  f.settle(2);
+
+  for (std::uint64_t visit = 1; visit <= 24; ++visit) {
+    take(f.reference.seekByte(visit));
+    f.settle(2);
+    take(f.reference.setModel(second));
+    f.settle(2);
+    take(f.reference.seekByte(100 + visit));
+    f.settle(2);
+    take(f.reference.setModel(first));
+
+    CHECK(take(f.reference.status()).byteOffset == visit);
+
+    f.settle(2);
+    take(f.reference.setModel(second));
+
+    CHECK(take(f.reference.status()).byteOffset == 100 + visit);
+
+    f.settle(2);
+    take(f.reference.setModel(first));
+    f.settle(2);
+  }
+}
+
+TEST_CASE("foreign capacity release after a blocked completion resumes without an executor event") {
+  auto budget = take(SourceBudget::create({.maxWork = 2}));
+  Fixture f(ui::document(std::make_shared<const std::string>("capacity resumed"), budget));
+
+  f.pump();
+  REQUIRE(f.executor.job);
+  auto foreign = take(budget->reserve({0, 0, 1, 0}));
+  f.executor.runOne();
+  f.pump();
+  REQUIRE(take(f.reference.status()).backpressured);
+  CHECK_FALSE(f.executor.job);
+  const auto epoch = f.executor.epoch;
+  foreign = {};
+  CHECK(f.executor.epoch == epoch);
+  f.settle(3);
+  REQUIRE(f.frame());
+  CHECK(f.frame()->rows.front().bytes() == "capacity resumed");
+  CHECK_FALSE(take(f.reference.status()).backpressured);
+}
+
+TEST_CASE("provider WOULD_BLOCK is explicit waiting rather than a guessed budget release") {
+  auto provider = std::make_shared<Provider>();
+  provider->text = "provider resumed";
+  provider->providerWouldBlock = true;
+  Fixture f(ui::document(provider));
+
+  f.settle(3);
+  const auto status = take(f.reference.status());
+  CHECK(status.waiting);
+  CHECK_FALSE(status.backpressured);
+  CHECK_FALSE(status.preparing);
+  const auto submissions = f.executor.submissions;
+  f.settle(3);
+  CHECK(f.executor.submissions == submissions);
+  provider->providerWouldBlock = false;
+  take(f.reference.refresh());
+  f.settle(3);
+  REQUIRE(f.frame());
+  CHECK(f.frame()->rows.front().bytes() == "provider resumed");
+}
+
+TEST_CASE("cold distant seek displays its actual marker with distance-independent byte work") {
+  for (const auto anchor : {std::uint64_t{8} << 20, std::uint64_t{512} << 20, std::uint64_t{8} << 30}) {
+    CAPTURE(anchor);
+    auto provider = std::make_shared<Provider>();
+    provider->syntheticExtent = anchor + 4096;
+    provider->unknown = anchor == (std::uint64_t{512} << 20);
+    provider->patches.emplace_back(anchor, "TARGET-" + std::to_string(anchor) + "\n");
+    Fixture f(ui::document(provider), {.lineNumbers = true});
+    take(f.reference.seekByte(anchor));
+    f.settle(3);
+    const auto frame = f.frame();
+    REQUIRE(frame);
+    REQUIRE_FALSE(frame->rows.empty());
+    CHECK(frame->status.byteOffset == anchor);
+    CHECK(frame->status.visibleByteOffset == anchor);
+    CHECK(frame->rows.front().bytes().starts_with("      ?  TARGET-"));
+    CHECK_FALSE(frame->status.logicalLine);
+    CHECK_FALSE(frame->status.totalLines);
+    CHECK_FALSE(frame->status.preparing);
+    CHECK_FALSE(provider->uiOperation.load());
+    // Includes origin, local proof, grapheme precontext and target viewport reads.
+    CHECK(provider->bytesRead.load() <= 128 * 1024);
+    CHECK(f.executor.submissions <= 3);
+  }
+}
+
+TEST_CASE("cold local projection keeps a normal combining cluster and original byte affinity") {
+  constexpr std::uint64_t START = std::uint64_t{8} << 30;
+  auto provider = std::make_shared<Provider>();
+  provider->syntheticExtent = START + 4096;
+  provider->patches.emplace_back(START, "e\xCC\x81Z\n");
+  Fixture f(ui::document(provider));
+  take(f.reference.seekByte(START + 2));
+  f.settle(3);
+  const auto frame = f.frame();
+  REQUIRE(frame);
+  REQUIRE_FALSE(frame->rows.empty());
+  CHECK(frame->rows.front().bytes() == "e\xCC\x81Z");
+  CHECK(frame->status.byteOffset == START + 2);
+  CHECK(frame->status.visibleByteOffset == START);
+  CHECK_FALSE(frame->status.fragmentedCluster);
+  CHECK_FALSE(frame->status.logicalLine);
+  CHECK(provider->bytesRead.load() <= 128 * 1024);
+}
+
+TEST_CASE("cold local UTF16 proof retains BOM choice and complete surrogate pair") {
+  constexpr std::uint64_t START = std::uint64_t{8} << 30;
+  auto provider = std::make_shared<Provider>();
+  provider->syntheticExtent = START + 4096;
+  provider->utf16 = true;
+  provider->patches.emplace_back(0, std::string("\xFF\xFE", 2));
+  provider->patches.emplace_back(START, std::string("\x3D\xD8\x00\xDEZ\x00\n\x00", 8));
+  DocumentViewConfig config;
+  config.decoder.explicitEncoding = DocumentEncoding::UNRESOLVED;
+  config.decoder.hint = DocumentEncoding::WINDOWS1251;
+  Fixture f(ui::document(provider), config);
+  take(f.reference.seekByte(START + 3));
+  f.settle(3);
+  const auto frame = f.frame();
+  REQUIRE(frame);
+  REQUIRE_FALSE(frame->rows.empty());
+  CHECK(frame->rows.front().bytes() == "\xF0\x9F\x98\x80Z");
+  CHECK(frame->status.byteOffset == START + 3);
+  CHECK(frame->status.visibleByteOffset == START);
+  CHECK_FALSE(frame->status.logicalLine);
+  CHECK(provider->bytesRead.load() <= 128 * 1024);
+}
+
+TEST_CASE("cold seek origin is invalidated by revision and late source replacement") {
+  constexpr std::uint64_t START = std::uint64_t{512} << 20;
+  auto first = std::make_shared<Provider>();
+  first->syntheticExtent = START + 4096;
+  first->patches.emplace_back(START, "OLD\n");
+  Fixture f(ui::document(first));
+  take(f.reference.seekByte(START));
+  f.settle(3);
+  REQUIRE(f.frame());
+  REQUIRE_FALSE(f.frame()->rows.empty());
+  CHECK(f.frame()->rows.front().bytes() == "OLD");
+  ++first->revision;
+  first->patches.back().second = "NEW\n";
+  take(f.reference.refresh());
+  f.settle(3);
+  REQUIRE(f.frame());
+  CHECK(f.frame()->rows.front().bytes() == "NEW");
+  CHECK(f.frame()->status.revision.dataRevision == first->revision);
+  take(f.reference.seekByte(START + 2));
+  f.pump();
+  REQUIRE(f.executor.job);
+  take(f.reference.setModel(source("replacement")));
+  f.executor.runOne();
+  f.settle(4);
+  REQUIRE(f.frame());
+  REQUIRE_FALSE(f.frame()->rows.empty());
+  CHECK(f.frame()->rows.front().bytes() == "replacement");
+  CHECK(f.frame()->status.byteOffset == 0);
+}
+
+TEST_CASE("forward-only document keeps typed distant-seek rejection without random reads") {
+  auto provider = std::make_shared<Provider>();
+  provider->seekable = false;
+  provider->text = "sequential\nsource";
+  Fixture f(ui::document(provider));
+  const auto rejected = f.reference.seekByte(std::uint64_t{8} << 30);
+  REQUIRE_FALSE(rejected);
+  CHECK(rejected.error().source == SourceError::UNSUPPORTED);
+  CHECK(provider->reads.load() == 0);
+  f.settle(3);
+  REQUIRE(f.frame());
+  REQUIRE_FALSE(f.frame()->rows.empty());
+  CHECK(f.frame()->rows.front().bytes() == "sequential");
+  CHECK_FALSE(provider->uiOperation.load());
+}
+
+TEST_CASE("local proof probes honor tiny work turns and short source pages") {
+  constexpr std::uint64_t START = std::uint64_t{8} << 30;
+  SUBCASE("one-byte turns retain bounded qualification progress") {
+    auto provider = std::make_shared<Provider>();
+    provider->syntheticExtent = START + 4096;
+    DocumentViewConfig config;
+    config.workBytes = 1;
+    Fixture f(ui::document(provider), config);
+    take(f.reference.seekByte(START));
+    for (unsigned turn = 0; turn < 20; ++turn) {
+      f.pump();
+      f.executor.runOne();
+      CHECK(provider->bytesRead.load() == turn + 1);
+    }
+    f.pump();
+    CHECK(take(f.reference.status()).preparing);
+    CHECK_FALSE(take(f.reference.status()).error);
+    CHECK_FALSE(provider->uiOperation.load());
+  }
+  SUBCASE("short pages complete the actual target frame") {
+    auto provider = std::make_shared<Provider>();
+    provider->syntheticExtent = START + 4096;
+    provider->patches.emplace_back(START, "SHORT-PAGES\n");
+    DocumentViewConfig config;
+    config.workBytes = 512;
+    Fixture f(ui::document(provider, {}, {.maxPageBytes = 3}), config);
+    take(f.reference.seekByte(START));
+    f.settle(16);
+    REQUIRE(f.frame());
+    REQUIRE_FALSE(f.frame()->rows.empty());
+    CHECK(f.frame()->rows.front().bytes() == "SHORT-PAGES");
+    CHECK(f.frame()->status.byteOffset == START);
+    CHECK(f.frame()->status.visibleByteOffset == START);
+    CHECK(provider->bytesRead.load() <= 8 * 1024);
+    CHECK_FALSE(provider->uiOperation.load());
+  }
+}
+
+TEST_CASE("a leading RI run beyond local precontext exposes unknown segmentation by continuation") {
+  constexpr std::uint64_t START = std::uint64_t{8} << 30;
+  constexpr std::string_view REGIONAL = "\xF0\x9F\x87\xA6";
+  auto provider = std::make_shared<Provider>();
+  provider->syntheticExtent = START + 4096;
+  std::string run;
+  for (unsigned count = 0; count < 2048; ++count) {
+    run.append(REGIONAL);
+  }
+  run.append("\n");
+  provider->patches.emplace_back(START - 8192, std::move(run));
+  Fixture f(ui::document(provider));
+  // This anchor has more than 4KiB of RI context before it. No global pair
+  // parity is asserted: a continuation explicitly identifies the projection.
+  const auto anchor = START - 4096 + 4;
+  take(f.reference.seekByte(anchor));
+  f.settle(3);
+  REQUIRE(f.frame());
+  REQUIRE_FALSE(f.frame()->rows.empty());
+  CHECK(f.frame()->status.byteOffset == anchor);
+  CHECK(f.frame()->status.fragmentedCluster);
+  CHECK(f.frame()->rows.front().bytes().starts_with("\xE2\x97\x8C"));
+  CHECK(f.frame()->rows.front().bytes().find(REGIONAL) != std::string_view::npos);
+  CHECK_FALSE(f.frame()->status.logicalLine);
+  take(f.reference.seekByte(anchor + 32));
+  f.settle(3);
+  REQUIRE(f.frame());
+  REQUIRE_FALSE(f.frame()->rows.empty());
+  CHECK(f.frame()->status.byteOffset == anchor + 32);
+  CHECK(f.frame()->status.fragmentedCluster);
+  CHECK(f.frame()->rows.front().bytes().starts_with("\xE2\x97\x8C"));
+  CHECK(provider->bytesRead.load() <= 128 * 1024);
+}
+
+TEST_CASE("cold known EOF and beyond retain the actual non-LF tail row") {
+  constexpr std::uint64_t EXTENT = std::uint64_t{8} << 30;
+  constexpr std::string_view MARKER = "TAIL-MARKER!";
+  for (const auto anchor : {EXTENT, EXTENT + 1}) {
+    CAPTURE(anchor);
+    auto provider = std::make_shared<Provider>();
+    provider->syntheticExtent = EXTENT;
+    provider->patches.emplace_back(EXTENT - MARKER.size(), std::string(MARKER));
+    Fixture f(ui::document(provider));
+    take(f.reference.seekByte(anchor));
+    f.settle(3);
+    REQUIRE(f.frame());
+    REQUIRE_FALSE(f.frame()->rows.empty());
+    CHECK(f.frame()->rows.back().bytes() == MARKER);
+    CHECK(f.frame()->status.byteOffset == anchor);
+    CHECK(f.frame()->status.visibleByteOffset == EXTENT - MARKER.size());
+    CHECK(f.frame()->status.anchorBeyondExtent == (anchor > EXTENT));
+    CHECK(f.frame()->status.finalEnd);
+    CHECK_FALSE(f.frame()->status.logicalLine);
+    CHECK_FALSE(f.frame()->status.totalLines);
+    CHECK(provider->bytesRead.load() <= 128 * 1024);
+    CHECK_FALSE(provider->uiOperation.load());
+  }
+}
+
+TEST_CASE("cold known final LF selects the empty final line at EOF and beyond") {
+  constexpr std::uint64_t EXTENT = std::uint64_t{8} << 30;
+  constexpr std::string_view TAIL = "TAIL-MARKER!\n";
+  for (const auto anchor : {EXTENT, EXTENT + 1}) {
+    CAPTURE(anchor);
+    auto provider = std::make_shared<Provider>();
+    provider->syntheticExtent = EXTENT;
+    provider->patches.emplace_back(EXTENT - TAIL.size(), std::string(TAIL));
+    Fixture f(ui::document(provider));
+    take(f.reference.seekByte(anchor));
+    f.settle(3);
+    REQUIRE(f.frame());
+    REQUIRE(f.frame()->rows.size() == 1);
+    CHECK(f.frame()->rows.front().bytes().empty());
+    CHECK(f.frame()->status.byteOffset == anchor);
+    CHECK(f.frame()->status.visibleByteOffset == EXTENT);
+    CHECK(f.frame()->status.anchorBeyondExtent == (anchor > EXTENT));
+    CHECK(f.frame()->status.finalEnd);
+    CHECK(provider->bytesRead.load() <= 128 * 1024);
+  }
+}
+
+TEST_CASE("known empty source keeps an empty final line without a fabricated decoder origin") {
+  for (const std::uint64_t anchor : {0, 1}) {
+    auto provider = std::make_shared<Provider>();
+    Fixture f(ui::document(provider));
+    take(f.reference.seekByte(anchor));
+    f.settle(3);
+    REQUIRE(f.frame());
+    REQUIRE(f.frame()->rows.size() == 1);
+    CHECK(f.frame()->rows.front().bytes().empty());
+    CHECK(f.frame()->status.byteOffset == anchor);
+    CHECK(f.frame()->status.visibleByteOffset == 0);
+    CHECK(f.frame()->status.anchorBeyondExtent == (anchor > 0));
+    CHECK(f.frame()->status.finalEnd);
+    CHECK(f.frame()->status.logicalLine == 1);
+    CHECK(f.frame()->status.totalLines == 1);
+  }
+}

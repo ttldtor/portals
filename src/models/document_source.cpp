@@ -271,7 +271,9 @@ std::expected<DocumentMetadata, DocumentError> ByteDocumentSource::inspect(std::
   auto work = budget_->reserve({options_.envelopeBytes, 0, 1, 0});
 
   if (!work) {
-    return std::unexpected(failure(work.error()));
+    auto error = failure(work.error());
+    error.budgetDemand = SourceBudgetUsage{options_.envelopeBytes, 0, 1, 0};
+    return std::unexpected(error);
   }
 
   try {
@@ -328,13 +330,17 @@ std::expected<DocumentBytePage, DocumentError> ByteDocumentSource::read(Document
   auto work = budget_->reserve({options_.envelopeBytes, 0, 1, 0});
 
   if (!work) {
-    return std::unexpected(failure(work.error()));
+    auto error = failure(work.error());
+    error.budgetDemand = SourceBudgetUsage{options_.envelopeBytes, 0, 1, 0};
+    return std::unexpected(error);
   }
 
   auto credit = budget_->reserve({request.maxBytes + SourceArena::METADATA_BYTES, 1, 0, 0});
 
   if (!credit) {
-    return std::unexpected(failure(credit.error()));
+    auto error = failure(credit.error());
+    error.budgetDemand = SourceBudgetUsage{request.maxBytes + SourceArena::METADATA_BYTES, 1, 0, 0};
+    return std::unexpected(error);
   }
 
   auto arena = SourceArena::create(std::move(*credit));

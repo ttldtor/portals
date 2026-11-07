@@ -1202,7 +1202,7 @@ std::expected<void, ManagedError> ManagedScene::admitActivity(std::shared_ptr<ui
   }
 }
 
-std::expected<void, TreeError> ManagedScene::visitActivities(bool prepared) {
+std::expected<void, TreeError> ManagedScene::visitActivities(bool prepared, const LayoutSnapshot *layout) {
   if (closed_) {
     return {};
   }
@@ -1217,7 +1217,9 @@ std::expected<void, TreeError> ManagedScene::visitActivities(bool prepared) {
     auto activity = asyncActivities_[index].lock();
 
     if (activity && activity->active()) {
-      if (prepared) {
+      if (layout) {
+        activity->layoutPrepared(*layout);
+      } else if (prepared) {
         activity->prepared();
       } else {
         activity->service();
@@ -2941,6 +2943,12 @@ std::expected<void, TreeError> ManagedScene::prepareViews(Application &app, cons
     remember(error(ManagedPhase::PREPARE, root_, scrollPrepared.error()));
 
     return scrollPrepared;
+  }
+
+  // Node-scoped activities consume the same owning completed-layout observation as scroll preparation.
+  auto activities = visitActivities(false, &snapshot);
+  if (!activities) {
+    return activities;
   }
 
   auto indicators = prepareSpinners();

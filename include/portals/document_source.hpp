@@ -13,6 +13,8 @@ struct DocumentError {
   SourceError code{SourceError::INVALID_ARGUMENT}; ///< Protocol/admission failure.
   std::error_code native;                          ///< Native operation cause, empty for protocol failures.
   std::optional<FileLogFailure> fileFailure;       ///< Exact file semantic/operation cause when applicable.
+  std::optional<SourceBudgetUsage>
+    budgetDemand{}; ///< Exact failed reservation on this source root; absent for provider waiting.
 };
 
 /** @brief Exact document namespace and provider revision. */
@@ -174,9 +176,21 @@ public:
   static std::expected<std::shared_ptr<ByteDocumentSource>, DocumentError>
   create(std::shared_ptr<ByteDocumentProvider> provider, std::shared_ptr<SourceBudget> budget,
          DocumentSourceOptions options = {});
+
+  /** @return Existing shared accounting root; no I/O or new allocation is performed. */
+  std::shared_ptr<SourceBudget> budget() const noexcept {
+    return budget_;
+  }
+
   SourceStamp stamp() const noexcept;                     ///< @return Immutable namespace, available without I/O.
   ByteDocumentCapabilities capabilities() const noexcept; ///< @return Captured capabilities without I/O.
   std::size_t maxPageBytes() const noexcept;              ///< @return Immutable maximum read payload.
+
+  /** @return Existing positive source/work metadata allowance; available on UI without I/O. */
+  std::size_t envelopeBytes() const noexcept {
+    return options_.envelopeBytes;
+  }
+
   /** @param stop Cooperative cancellation.
    * @return Qualified metadata, or worker-affinity/provider/cancellation failure.
    */

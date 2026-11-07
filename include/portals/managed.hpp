@@ -97,6 +97,9 @@ struct SceneActivity {
   }
 
   virtual void cancel() noexcept = 0;
+
+  virtual void layoutPrepared(const LayoutSnapshot &) noexcept {
+  }
 };
 /// @endcond
 class SetupFailureTicket;
@@ -2738,7 +2741,7 @@ private:
   ManagedOptions options_;
   std::shared_ptr<const void> lifetime_;
   std::expected<void, ManagedError> admitActivity(std::shared_ptr<ui::detail::SceneActivity> activity);
-  std::expected<void, TreeError> visitActivities(bool prepared);
+  std::expected<void, TreeError> visitActivities(bool prepared, const LayoutSnapshot *layout = nullptr);
   bool choiceWithin(Node<Widget> root, Node<Widget> node) const;
   std::weak_ptr<ui::detail::SceneActivity> choiceIntent_;
   std::uint64_t activityRevision_{};

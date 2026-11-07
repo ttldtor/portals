@@ -362,7 +362,27 @@ std::expected<void, ManagedError> prepareNodes(ResourceDocument &document, const
     if (node.factory.kind == detail::ControlFactoryKind::SCROLL_FALLBACK) {
       const auto &settings = resolved->settings;
 
-      if (resolved->base == "LogView") {
+      if (resolved->base == "DocumentView") {
+        const auto &documentSettings = settings.documentSettings();
+        if (node.directChildCount) {
+          return std::unexpected(document.propertyFailure(Code::INVALID_VALUE, node.offset, node.name, "children"));
+        }
+        if (!documentSettings.file || documentSettings.file->empty()) {
+          return std::unexpected(primitiveValueFailure(*resolved, "file"));
+        }
+        if (!detail::controlScrollAreaOptions(settings, {})) {
+          std::string_view property = "placement";
+          const bool frameEnabled = settings.frame.enabled.value_or(false);
+
+          if (!frameEnabled && (settings.frame.glyphs || settings.frame.maxPaintCells)) {
+            property = settings.frame.glyphs ? "frame.glyphs" : "frame.maxPaintCells";
+          } else if (settings.frame.enabled == false) {
+            property = "frame.enabled";
+          }
+
+          return std::unexpected(primitiveValueFailure(*resolved, property));
+        }
+      } else if (resolved->base == "LogView") {
         if (node.directChildCount || !validateLogLimits(detail::controlLogViewConfig(settings, {}).limits)) {
           return std::unexpected(primitiveValueFailure(*resolved, node.directChildCount ? "children" : "maxLines"));
         }
