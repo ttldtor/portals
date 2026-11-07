@@ -6,11 +6,12 @@
 int main() {
   using namespace portals;
 
+  ui::Ref<DocumentView> file;
+
   // clang-format off
   return ui::scene(
-           ui::viewer("README.md")
-             .lineNumbers()
-             .framed("rounded", "Document"))
+           ui::viewer(file, "README.md")
+             .framed("rounded", "Document | F2 Numbers | F10 Quit"))
     | ui::theme(nordTheme())
     | ui::style(R"pss(
         DocumentView {
@@ -20,6 +21,7 @@ int main() {
           role-position-bold: true;
         }
       )pss")
+    | ui::onKey("F2", [file] { file.toggleLineNumbers(); })
     | ui::onKey("F10 | Ctrl+C", ui::quit)
     | ui::runApp();
   // clang-format on

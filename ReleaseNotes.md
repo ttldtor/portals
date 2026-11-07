@@ -77,6 +77,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Toggle DocumentView line numbers while reading through compact Ref commands.
+  Reflow preserves the reading anchor and queued input; assigning the existing
+  setting again does not schedule redundant work.
+
 - Add opt-in semantic paint roles to runtime PSS and layered styles. DocumentView
   exposes separate body, line-number gutter and position styles; palette changes
   repaint prepared data without re-reading documents. Role declarations are
