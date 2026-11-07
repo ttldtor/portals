@@ -1778,3 +1778,237 @@ TEST_CASE("the last wheel step does not switch scrollbar coordinate systems") {
     CHECK(value.vertical.offset.raster == scrollRange(value.vertical.metrics).maximum);
   }));
 }
+
+namespace {
+ScrollControllerSnapshot documentBar(Fixture &fixture) {
+  ScrollControllerSnapshot snapshot;
+
+  take(fixture.app->tree().read(fixture.node, [&](const DocumentView &widget) {
+    snapshot = take(detail::ScrollWidgetAccess::state(widget).controller->snapshot());
+  }));
+
+  return snapshot;
+}
+
+ScrollTrack documentTrack(Fixture &fixture) {
+  ScrollTrack track;
+
+  take(fixture.app->tree().read(fixture.node, [&](const DocumentView &widget) {
+    const auto &scroll = detail::ScrollWidgetAccess::state(widget);
+    REQUIRE(scroll.geometry.verticalBar);
+    track = scroll.geometry.vertical;
+  }));
+
+  return track;
+}
+
+void dragDocument(Fixture &fixture, ScrollTrack track, MouseAction action, std::int32_t row) {
+  const InputEvent event = MouseInputEvent{track.origin.x, row, MouseButton::LEFT, action};
+
+  if (!take(fixture.scene->input(*fixture.app, event))) {
+    take(fixture.app->router().dispatch(event));
+  }
+}
+} // namespace
+
+TEST_CASE("scrollbar maximum retains the last full reading page while held and after release") {
+  Fixture f(source(scrollRows(120)));
+  f.size = {40, 50};
+  f.settle(4);
+  REQUIRE(f.frame()->viewport.height == 48);
+
+  const auto track = documentTrack(f);
+  const auto end = track.origin.y + track.length + 10;
+
+  dragDocument(f, track, MouseAction::PRESS, track.origin.y);
+  REQUIRE(take(f.app->router().pointerCapture()) == f.node);
+  dragDocument(f, track, MouseAction::MOVE, end);
+  f.settle(6);
+  REQUIRE(f.frame());
+  REQUIRE(f.frame()->rows.size() == 48);
+  CHECK(f.frame()->rows.front().bytes() == "row-72");
+  CHECK(f.frame()->rows.back().bytes() == "row-119");
+  CHECK(f.frame()->finalEndVisible);
+  CHECK(take(f.app->router().pointerCapture()) == f.node);
+
+  dragDocument(f, track, MouseAction::RELEASE, end);
+  f.settle(3);
+  const auto submissions = f.executor.submissions;
+
+  wheel(f);
+  wheel(f, false, 1000);
+  REQUIRE(f.input(InputKey::DOWN));
+  f.settle(3);
+  checkTop(f, "row-72");
+  CHECK(f.executor.submissions == submissions);
+}
+
+TEST_CASE("held scrollbar preserves its byte projection across variable row lengths") {
+  auto provider = std::make_shared<Provider>();
+  provider->text = scrollRows(60);
+
+  for (unsigned row = 60; row < 120; ++row) {
+    provider->text += "row-" + std::to_string(row) + std::string(240, 'x') + "\n";
+  }
+
+  Fixture f(ui::document(provider), {.wrap = false});
+  f.size = {40, 20};
+  f.settle(4);
+
+  const auto track = documentTrack(f);
+  const auto middle = track.origin.y + track.length / 2;
+
+  dragDocument(f, track, MouseAction::PRESS, track.origin.y);
+  REQUIRE(take(f.app->router().pointerCapture()) == f.node);
+  dragDocument(f, track, MouseAction::MOVE, middle);
+  const auto intended = documentBar(f).vertical.offset;
+
+  f.pump();
+  REQUIRE(f.executor.job);
+  const auto firstAnchor = take(f.reference.status()).byteOffset;
+  const auto busySerial = navigationSerial(f);
+  const auto busySubmissions = f.executor.submissions;
+
+  dragDocument(f, track, MouseAction::MOVE, middle);
+  f.pump();
+  CHECK(navigationSerial(f) == busySerial);
+  CHECK(f.executor.submissions == busySubmissions);
+  CHECK(documentBar(f).vertical.offset.raster == intended.raster);
+
+  f.settle(6);
+  REQUIRE(f.frame());
+  CHECK(documentBar(f).vertical.offset.raster == intended.raster);
+  CHECK(documentBar(f).vertical.offset.fraction == intended.fraction);
+  CHECK(take(f.app->router().pointerCapture()) == f.node);
+
+  const auto serial = navigationSerial(f);
+  const auto submissions = f.executor.submissions;
+  const auto reads = provider->reads.load();
+  const auto revision = documentBar(f).revision;
+
+  dragDocument(f, track, MouseAction::MOVE, middle);
+  f.settle(3);
+  CHECK(navigationSerial(f) == serial);
+  CHECK(f.executor.submissions == submissions);
+  CHECK(provider->reads.load() == reads);
+  CHECK(documentBar(f).revision == revision);
+
+  dragDocument(f, track, MouseAction::MOVE, middle + 1);
+  f.pump();
+  CHECK(take(f.reference.status()).byteOffset > firstAnchor);
+  f.settle(6);
+  CHECK(take(f.app->router().pointerCapture()) == f.node);
+
+  SUBCASE("a fresh capture without an idle frame uses the newly visible page") {
+    const auto range = detail::documentScrollByteRange(*f.frame());
+
+    dragDocument(f, track, MouseAction::RELEASE, middle + 1);
+
+    const auto current = documentBar(f).vertical;
+    const auto thumb = take(scrollFractionalThumb(current.metrics, current.offset, track.length));
+    const auto grab = track.origin.y + static_cast<std::int32_t>(thumb.startEighths / 8);
+
+    dragDocument(f, track, MouseAction::PRESS, grab);
+    REQUIRE(take(f.app->router().pointerCapture()) == f.node);
+    dragDocument(f, track, MouseAction::MOVE, grab + 2);
+
+    const auto position = documentBar(f).vertical;
+    const auto expected =
+      detail::scrollMultiplyDivide(position.offset.raster, range, scrollRange(position.metrics).maximum).quotient;
+
+    REQUIRE(position.offset.raster > current.offset.raster);
+    CHECK(take(f.app->router().pointerCapture()) == f.node);
+    f.pump();
+    CHECK(take(f.reference.status()).byteOffset == expected);
+    f.settle(6);
+    dragDocument(f, track, MouseAction::RELEASE, grab + 2);
+  }
+
+  SUBCASE("resizing cancels the capture and an old move cannot navigate") {
+    f.size = {41, 21};
+    f.settle(4);
+    CHECK(take(f.app->router().pointerCapture()) == Node<Widget>{});
+
+    const auto before = navigationSerial(f);
+    const auto jobs = f.executor.submissions;
+
+    dragDocument(f, track, MouseAction::MOVE, middle + 2);
+    f.settle(3);
+    CHECK(navigationSerial(f) == before);
+    CHECK(f.executor.submissions == jobs);
+  }
+
+  SUBCASE("a same-extent replacement rejects moves from the old capture") {
+    auto replacement = scrollRows(120, "new-");
+    replacement.resize(provider->text.size(), 'z');
+    take(f.reference.setModel(source(std::move(replacement))));
+    dragDocument(f, track, MouseAction::MOVE, middle + 2);
+    f.pump();
+    dragDocument(f, track, MouseAction::MOVE, middle + 3);
+    dragDocument(f, track, MouseAction::RELEASE, middle + 3);
+    f.settle(4);
+    checkTop(f, "new-0");
+
+    const auto before = navigationSerial(f);
+    const auto jobs = f.executor.submissions;
+
+    dragDocument(f, track, MouseAction::MOVE, middle + 2);
+    f.settle(3);
+    CHECK(take(f.app->router().pointerCapture()) == Node<Widget>{});
+    CHECK(navigationSerial(f) == before);
+    CHECK(f.executor.submissions == jobs);
+    checkTop(f, "new-0");
+  }
+
+  f.settle(3);
+  CHECK_FALSE(provider->uiOperation.load());
+}
+
+TEST_CASE("repeated scrollbar End retains a full tall page after long unwrapped rows") {
+  auto provider = std::make_shared<Provider>();
+
+  for (unsigned row = 0; row < 120; ++row) {
+    provider->text += "row-" + std::to_string(row) + ":" + std::string(2048, 'x') + "\n";
+  }
+
+  Fixture f(ui::document(provider), {.wrap = false});
+  f.size = {40, 50};
+  f.settle(4);
+  REQUIRE(f.frame());
+  REQUIRE(f.frame()->viewport.height == 48);
+
+  const auto track = documentTrack(f);
+  const auto end = track.origin.y + track.length + 10;
+  const auto away = track.origin.y + track.length - 6;
+
+  dragDocument(f, track, MouseAction::PRESS, track.origin.y);
+  REQUIRE(take(f.app->router().pointerCapture()) == f.node);
+  dragDocument(f, track, MouseAction::MOVE, end);
+  f.settle(6);
+  REQUIRE(f.frame()->rows.size() == 48);
+  REQUIRE(f.frame()->rows.front().bytes().starts_with("row-72:"));
+  REQUIRE(f.frame()->rows.back().bytes().starts_with("row-119:"));
+
+  dragDocument(f, track, MouseAction::MOVE, away);
+  f.settle(6);
+  REQUIRE_FALSE(f.frame()->finalEndVisible);
+  REQUIRE(take(f.app->router().pointerCapture()) == f.node);
+
+  SUBCASE("the same mouse gesture returns to EOF") {
+    dragDocument(f, track, MouseAction::MOVE, end);
+  }
+
+  SUBCASE("End returns to EOF after releasing the mouse") {
+    dragDocument(f, track, MouseAction::RELEASE, away);
+    REQUIRE(f.input(InputKey::END));
+  }
+
+  f.settle(6);
+  REQUIRE(f.frame());
+  CHECK(f.frame()->rows.size() == 48);
+  CHECK(f.frame()->rows.front().bytes().starts_with("row-72:"));
+  CHECK(f.frame()->rows.back().bytes().starts_with("row-119:"));
+  CHECK(f.frame()->finalEndVisible);
+  CHECK_FALSE(provider->uiOperation.load());
+  dragDocument(f, track, MouseAction::RELEASE, end);
+}
