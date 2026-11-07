@@ -188,6 +188,7 @@ StyleStage StyleStage::document(const PssDocument &document, const StyleOptions 
   }
 
   auto owned = std::make_shared<PssDocument>(document);
+  portals::detail::freezePssRoles(*owned);
 
   if (!options.sourceName.empty()) {
     owned->sourceName = options.sourceName;

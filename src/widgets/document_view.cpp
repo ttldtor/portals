@@ -63,50 +63,86 @@ std::expected<CellSize, TreeError> DocumentView::measureChildren(std::span<const
 }
 
 std::expected<void, TreeError> DocumentView::paint(PaintContext &context) {
+  // Capture owning payload and value-only presentation before sink callbacks.
+  // Submission uses only captured owning payload and value-only presentation.
+  const auto &scroll = detail::ScrollWidgetAccess::state(*this);
+  const auto viewport = CellRect::from(scroll.geometry.viewportOrigin, scroll.geometry.viewport);
+  const bool arranged = scroll.arranged;
+  const auto frame = document_->frame;
+  const auto palette = document_->roles.snapshot();
+  std::optional<ComputedStyle> manual;
+  const auto computed = computedStyle();
+  if (!computed) {
+    manual.emplace(styleDefaults());
+  }
+  const auto resolved = computed ? detail::ComputedStyleView(*computed) : detail::ComputedStyleView(*manual);
+  const auto state = !scroll.enabled ? StyleState::DISABLED : scroll.focused ? StyleState::FOCUSED : StyleState::NORMAL;
+  const auto surface = !scroll.enabled ? resolved.disabled : scroll.focused ? resolved.focused : resolved.normal;
+  const auto roleStyle = [&](std::string_view name) {
+    return palette ? palette->find(name, state).value_or(surface) : surface;
+  };
+  const auto body = roleStyle("body");
+  const auto gutter = roleStyle("gutter");
+  const auto position = roleStyle("position");
+  const auto *options = detail::scrollFrameOptions(scroll);
+  std::optional<CellRect> footer;
+  if (frame && frame->footer && options && options->sides.bottom && scroll.allocation.width > 2 &&
+      scroll.allocation.height > 1) {
+    auto area = CellRect::from({1, scroll.allocation.height - 1}, {scroll.allocation.width - 2, 1});
+    if (area) {
+      footer = *area;
+    }
+  }
   const auto chrome = ScrollArea::paint(context);
   if (!chrome) {
     return chrome;
   }
-
-  const auto &scroll = detail::ScrollWidgetAccess::state(*this);
-  const auto viewport = CellRect::from(scroll.geometry.viewportOrigin, scroll.geometry.viewport);
-  if (!scroll.arranged || !viewport || viewport->empty()) {
+  if (!arranged || !viewport || viewport->empty()) {
     return {};
   }
-
-  // Built-in themes keep document focus on the text surface. Resolving the
-  // focused appearance still honors explicit application/user overrides.
-  std::optional<ComputedStyle> manual;
-  if (!computedStyle()) {
-    manual.emplace(styleDefaults());
+  const auto gutterCells = frame ? std::min(frame->gutterCells, viewport->size().width) : 0;
+  const auto bodyArea = CellRect::from({viewport->origin().x + gutterCells, viewport->origin().y},
+                                       {viewport->size().width - gutterCells, viewport->size().height});
+  const auto gutterArea = CellRect::from(viewport->origin(), {gutterCells, viewport->size().height});
+  if (!bodyArea || !gutterArea) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
-  const auto style = computedStyle() ? detail::ComputedStyleView(*computedStyle()) : detail::ComputedStyleView(*manual);
-  const auto surface = !scroll.enabled ? style.disabled : scroll.focused ? style.focused : style.normal;
-  const RenderCommand fill = FillCommand{*viewport, *viewport, surface};
-  auto painted = context.submit(std::span(&fill, 1));
-  if (!painted || !document_->frame) {
+  const auto fillPart = [&](CellRect area, CellStyle paint) {
+    if (area.empty()) {
+      return std::expected<void, TreeError>{};
+    }
+    const RenderCommand fill = FillCommand{area, area, paint};
+    return context.submit(std::span(&fill, 1));
+  };
+  auto painted = fillPart(*bodyArea, body);
+  if (!painted) {
     return painted;
   }
-
-  const auto frame = document_->frame;
+  painted = fillPart(*gutterArea, gutter);
+  if (!painted || !frame) {
+    return painted;
+  }
   const auto count = std::min<std::size_t>(frame->rows.size(), static_cast<std::size_t>(viewport->size().height));
   for (std::size_t row = 0; row < count; ++row) {
-    const RenderCommand command =
-      TextCommand{{viewport->origin().x, viewport->origin().y + static_cast<std::int32_t>(row)},
-                  frame->rows[row],
-                  *viewport,
-                  surface};
-    painted = context.submit(std::span(&command, 1));
-    if (!painted) {
-      return painted;
+    const auto y = viewport->origin().y + static_cast<std::int32_t>(row);
+    if (!bodyArea->empty()) {
+      const RenderCommand command = TextCommand{{bodyArea->origin().x, y}, frame->rows[row], *bodyArea, body};
+      painted = context.submit(std::span(&command, 1));
+      if (!painted) {
+        return painted;
+      }
+    }
+    if (!gutterArea->empty() && frame->gutters && row < frame->gutters->size()) {
+      const RenderCommand command =
+        TextCommand{{gutterArea->origin().x, y}, (*frame->gutters)[row], *gutterArea, gutter};
+      painted = context.submit(std::span(&command, 1));
+      if (!painted) {
+        return painted;
+      }
     }
   }
-
-  const auto *options = detail::scrollFrameOptions(scroll);
-  if (frame->footer && options && options->sides.bottom && scroll.allocation.width > 2 &&
-      scroll.allocation.height > 1) {
-    const auto footer = CellRect::from({1, scroll.allocation.height - 1}, {scroll.allocation.width - 2, 1});
-    const RenderCommand command = TextCommand{footer->origin(), *frame->footer, *footer, surface};
+  if (footer) {
+    const RenderCommand command = TextCommand{footer->origin(), *frame->footer, *footer, position};
     return context.submit(std::span(&command, 1));
   }
   return {};

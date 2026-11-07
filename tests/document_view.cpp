@@ -72,9 +72,8 @@ struct Fixture {
 
   std::shared_ptr<const detail::DocumentPreparation> run(std::shared_ptr<const detail::DocumentScan> previous = {},
                                                          std::stop_token stop = {}) {
-    const auto cells =
-      static_cast<std::size_t>(intent.viewport.width) * static_cast<std::size_t>(intent.viewport.height);
-    auto credit = take(budget->reserve({64 * 1024 + intent.config.maxFrameBytes * 4 + cells * 128, 0, 1, 0}));
+    const auto amount = take(detail::documentPreparationBytes(intent.viewport, intent.config));
+    auto credit = take(budget->reserve({amount, 0, 1, 0}));
     std::shared_ptr<const detail::DocumentPreparation> result;
     std::thread worker([&] {
       result = detail::prepareDocument(source, intent, std::move(previous), 7, std::move(credit), stop);
@@ -116,8 +115,11 @@ TEST_CASE("chunk1 preserves ordinary graphemes and CRLF logical numbers") {
   REQUIRE_FALSE(result->error);
   REQUIRE(result->frame);
   REQUIRE(result->frame->rows.size() == 3);
-  CHECK(result->frame->rows[0].bytes() == "      1  a\xCC\x81\xF0\x9F\x98\x80");
-  CHECK(result->frame->rows[1].bytes() == "      2  second");
+  CHECK(result->frame->rows[0].bytes() == "a\xCC\x81\xF0\x9F\x98\x80");
+  REQUIRE(result->frame->gutters);
+  CHECK((*result->frame->gutters)[0].bytes() == "      1  ");
+  CHECK(result->frame->rows[1].bytes() == "second");
+  CHECK((*result->frame->gutters)[1].bytes() == "      2  ");
   CHECK(result->frame->status.totalLines == 3);
   CHECK(result->frame->status.finalEnd);
 }
@@ -295,4 +297,27 @@ TEST_CASE("empty and trailing-separator documents agree with source222 logical l
     CHECK(result->frame->status.totalLines == (sample.empty() ? 1 : 2));
     CHECK(result->frame->rows.back().bytes().empty());
   }
+}
+
+TEST_CASE("separate gutter storage is charged without changing original row anchors") {
+  Fixture f("first\nsecond");
+  const auto plain = take(detail::documentPreparationBytes(f.intent.viewport, f.intent.config));
+  f.intent.config.lineNumbers = true;
+  const auto withGutter = take(detail::documentPreparationBytes(f.intent.viewport, f.intent.config));
+  CHECK(withGutter - plain ==
+        static_cast<std::size_t>(f.intent.viewport.height) *
+          (sizeof(GraphemeText) + detail::DOCUMENT_GUTTER_CELLS * detail::DOCUMENT_PREPARED_CELL_BYTES));
+  const auto result = f.finish();
+  REQUIRE(result->frame);
+  REQUIRE(result->frame->gutters);
+  CHECK(result->frame->credit.usage().bytes == withGutter);
+  CHECK(result->frame->rows[0].bytes() == "first");
+  CHECK((*result->frame->gutters)[0].bytes() == "      1  ");
+  CHECK(result->frame->anchors[0] == 0);
+  CHECK(result->frame->anchors[1] == 6);
+  CHECK(result->frame->gutterCells == detail::DOCUMENT_GUTTER_CELLS);
+  f.intent.config.maxFrameBytes = 4;
+  const auto tooSmall = f.finish();
+  REQUIRE(tooSmall->error);
+  CHECK(tooSmall->error->code == SourceError::PAGE_TOO_LARGE);
 }

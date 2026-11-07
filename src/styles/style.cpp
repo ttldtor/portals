@@ -4,6 +4,7 @@
 // Adapted Textual palette values: Copyright (c) 2021 Will McGugan, MIT.
 // See vendor/textual/LICENSE and README.md for the retained notice and provenance.
 #include "../widgets/glyph_profiles.hpp"
+#include "style_roles.hpp"
 #include "theme_receiver.hpp"
 #include <portals/detail/layout_traversal.hpp>
 #include <portals/detail/pss_parser.hpp>
@@ -393,13 +394,64 @@ ComputedStyle resolveRules(const Visit &visit, const StyleTarget &target, Comput
   return defaults;
 }
 
+template <class Visit>
+StyleRolePalette projectRoles(const detail::StyleRoleState &registration, const StyleSnapshot &base,
+                              const StyleTarget &target, bool readOnly, const Visit &visit) {
+  StyleRolePalette result;
+  result.values.reserve(registration.names.size());
+  for (const auto &name : registration.names) {
+    StyleRoleValue value;
+    value.name = name;
+    value.states = {base.normal, base.focused, base.disabled, base.selected, base.header, base.caret};
+    for (std::size_t state = 0; state < STYLE_STATES.size(); ++state) {
+      std::array<std::optional<Rank>, 5> ranks;
+      const auto assign = [&]<class T>(const std::optional<T> &source, auto &destination, std::size_t leaf, Rank rank) {
+        if (source && (!ranks[leaf] || rank >= *ranks[leaf])) {
+          destination = *source;
+          ranks[leaf] = rank;
+        }
+      };
+      visit([&](const StyleRule &rule, auto &&makeRank) {
+        if (!rule.roles || !matches(rule.selector, target, STYLE_STATES[state], readOnly)) {
+          return;
+        }
+        const auto rank = makeRank();
+        for (const auto &patch : *rule.roles) {
+          if (patch.name == name) {
+            auto &paint = value.states[state];
+            assign(patch.paint.foreground, paint.foreground, 0, rank);
+            assign(patch.paint.background, paint.background, 1, rank);
+            assign(patch.paint.bold, paint.bold, 2, rank);
+            assign(patch.paint.italic, paint.italic, 3, rank);
+            assign(patch.paint.underline, paint.underline, 4, rank);
+          }
+        }
+      });
+    }
+    result.values.push_back(std::move(value));
+  }
+  return result;
+}
+
 std::expected<void, StyleError> validate(const StyleSheet &sheet) {
   if (sheet.rules.size() > MAX_STYLE_RULES) {
     return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Too many style rules"));
   }
 
+  std::size_t rolePatches{};
   for (const auto &rule : sheet.rules) {
     const auto &d = rule.declarations;
+    if (rule.roles) {
+      if (rule.roles->size() > MAX_STYLE_ROLE_PATCHES - rolePatches) {
+        return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Too many semantic role patches"));
+      }
+      rolePatches += rule.roles->size();
+      for (const auto &patch : *rule.roles) {
+        if (!detail::validStyleRoleName(patch.name)) {
+          return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Invalid semantic role name"));
+        }
+      }
+    }
 
     if ((d.glyphProfile && (*d.glyphProfile < GlyphProfile::DEFAULT || *d.glyphProfile > GlyphProfile::NF_BACKSLASH)) ||
         (d.glyphFallback &&
@@ -614,7 +666,8 @@ StyleSheet catppuccinLatteTheme() {
                           .heading = {0xFE, 0x64, 0x0B}});
 }
 
-StyleEngine::StyleEngine(WidgetTree &tree, std::size_t maxBindings) : tree_(tree), maxBindings_(maxBindings) {
+StyleEngine::StyleEngine(WidgetTree &tree, std::size_t maxBindings, StyleRoleLimits roleLimits)
+    : tree_(tree), maxBindings_(maxBindings), roleLimits_(roleLimits) {
 }
 
 ComputedStyle StyleEngine::resolve(const StyleSheet &sheet, const LayerState &state, const StyleTarget &target,
@@ -965,7 +1018,10 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
           return Invalidation::NONE;
         }
 
-        admittedDocument = std::make_shared<const PssDocument>(*document);
+        auto frozenDocument = std::make_shared<PssDocument>(*document);
+        detail::freezePssRoles(*frozenDocument);
+        admittedDocument = std::move(frozenDocument);
+        sheet = &admittedDocument->sheet;
       }
 
       for (auto &layer : layerState_.layers) {
@@ -1051,6 +1107,18 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
         return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Style declaration/payload budget exhausted"));
       }
 
+      if (rule.roles) {
+        if (!charge(bytes, sizeof(std::vector<StyleRolePatch>), options.maxOwnedBytes)) {
+          return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Semantic role payload budget exhausted"));
+        }
+        for (const auto &patch : *rule.roles) {
+          if (!charge(bytes, sizeof(StyleRolePatch), options.maxOwnedBytes) || !chargeString(patch.name) ||
+              !charge(declarations, partCount(patch.paint), options.maxDeclarations)) {
+            return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Semantic role payload budget exhausted"));
+          }
+        }
+      }
+
       if (rule.sizing && !charge(bytes, sizeof(StyleSizing), options.maxOwnedBytes)) {
         return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Style sizing payload budget exhausted"));
       }
@@ -1107,7 +1175,10 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
 
   try {
     if (admitting) {
-      admittedDocument = std::make_shared<const PssDocument>(*document);
+      auto frozenDocument = std::make_shared<PssDocument>(*document);
+      detail::freezePssRoles(*frozenDocument);
+      admittedDocument = std::move(frozenDocument);
+      sheet = &admittedDocument->sheet;
     }
 
     const auto copySheetInto = [](StyleSheet &result, const StyleSheet *source) {
@@ -1134,6 +1205,9 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
         copied.declarations = rule.declarations;
         copied.scrollbarGlyphs = rule.scrollbarGlyphs;
         copied.sizing = rule.sizing;
+        if (rule.roles) {
+          copied.roles = std::make_shared<const std::vector<StyleRolePatch>>(*rule.roles);
+        }
         result.rules.emplace_back();
 
         auto &destination = result.rules.back();
@@ -1146,6 +1220,7 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
         destination.declarations = copied.declarations;
         destination.scrollbarGlyphs = copied.scrollbarGlyphs;
         destination.sizing = copied.sizing;
+        destination.roles = copied.roles;
       }
     };
 
@@ -1485,6 +1560,130 @@ std::expected<Invalidation, StyleError> StyleEngine::refresh() {
   }
 }
 
+std::optional<CellStyle> StyleRolePalette::find(std::string_view name, StyleState state) const noexcept {
+  if (state < StyleState::ANY || state > StyleState::CARET) {
+    return std::nullopt;
+  }
+  const auto value = std::ranges::find(values, name, &StyleRoleValue::name);
+  return value == values.end()
+           ? std::nullopt
+           : std::optional(value->states[state == StyleState::ANY ? 0 : static_cast<std::size_t>(state) - 1]);
+}
+
+std::shared_ptr<const StyleRolePalette> StyleRoleRegistration::snapshot() const noexcept {
+  return state_ && state_->owner == std::this_thread::get_id() && state_->active && !state_->engine.expired() &&
+             !state_->participation.expired()
+           ? state_->palette
+           : nullptr;
+}
+
+std::uint64_t StyleRoleRegistration::revision() const noexcept {
+  return state_ && state_->owner == std::this_thread::get_id() && state_->active && !state_->engine.expired() &&
+             !state_->participation.expired()
+           ? state_->revision
+           : 0;
+}
+
+std::expected<StyleRoleRegistration, StyleError> StyleEngine::registerRoles(Node<Widget> node,
+                                                                            std::span<const std::string_view> names) {
+  auto boundary = checkBoundary();
+  if (!boundary) {
+    return std::unexpected(boundary.error());
+  }
+  auto target = tree_.access(node.id(), false);
+  if (!target) {
+    return std::unexpected(error(target.error(), "Semantic target is unavailable"));
+  }
+  if (!roleLimits_.maxRegistrations || !roleLimits_.maxRolesPerRegistration || !roleLimits_.maxTotalRoles ||
+      roleLimits_.maxRolesPerRegistration > roleLimits_.maxTotalRoles || names.empty() ||
+      names.size() > roleLimits_.maxRolesPerRegistration || names.size() > roleLimits_.maxTotalRoles ||
+      std::ranges::find(bindings_, node, &Binding::node) == bindings_.end()) {
+    return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Invalid semantic registration or limits"));
+  }
+  for (std::size_t index = 0; index < names.size(); ++index) {
+    if (!detail::validStyleRoleName(names[index]) ||
+        std::ranges::find(names.first(index), names[index]) != names.first(index).end()) {
+      return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Invalid or duplicate semantic role name"));
+    }
+  }
+  LayerMutationGuard guard(stagingLayers_, true);
+
+  try {
+    RoleRegistry registrations;
+    std::size_t roles = names.size();
+    for (const auto &weak : roleRegistrations_ ? std::span(*roleRegistrations_)
+                                               : std::span<const std::weak_ptr<detail::StyleRoleState>>{}) {
+      if (auto current = weak.lock();
+          current && current->active && !current->participation.expired() && tree_.access(current->node.id(), false)) {
+        if (current->node == node || current->names.size() > roleLimits_.maxTotalRoles - roles) {
+          return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Duplicate semantic target or role limit"));
+        }
+        roles += current->names.size();
+        registrations.push_back(current);
+      }
+    }
+    if (registrations.size() >= std::min(roleLimits_.maxRegistrations, maxBindings_)) {
+      return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Semantic registration limit exhausted"));
+    }
+    StyleRoleRegistration result;
+    result.state_ = std::make_shared<detail::StyleRoleState>();
+    result.state_->node = node;
+    result.state_->engine = lifetime_;
+    result.participation_ = std::make_shared<const char>(char{});
+    result.state_->participation = result.participation_;
+    for (const auto name : names) {
+      result.state_->names.emplace_back(name);
+    }
+    registrations.push_back(result.state_);
+    auto candidate = registrations.empty() ? std::shared_ptr<const RoleRegistry>{}
+                                           : std::make_shared<const RoleRegistry>(registrations);
+    auto installed =
+      install(sheet_, std::vector<Binding>(bindings_), nullptr, false, nullptr, nullptr, false, &candidate);
+    if (!installed) {
+      return std::unexpected(installed.error());
+    }
+    return result;
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(error(TreeError::NO_MEMORY, "Semantic registration allocation failed"));
+  }
+}
+
+std::expected<Invalidation, StyleError> StyleEngine::unregisterRoles(const StyleRoleRegistration &registration) {
+  auto boundary = checkBoundary();
+  if (!boundary) {
+    return std::unexpected(boundary.error());
+  }
+  const auto state = registration.state_;
+  if (!state || !state->active || state->engine.lock() != lifetime_) {
+    return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Semantic registration is not owned by this engine"));
+  }
+  auto target = tree_.access(state->node.id(), false);
+  if (!target) {
+    return std::unexpected(error(target.error(), "Semantic target is unavailable"));
+  }
+  LayerMutationGuard guard(stagingLayers_, true);
+
+  try {
+    RoleRegistry registrations;
+    for (const auto &weak : roleRegistrations_ ? std::span(*roleRegistrations_)
+                                               : std::span<const std::weak_ptr<detail::StyleRoleState>>{}) {
+      if (auto current = weak.lock(); current && current != state && current->active) {
+        registrations.push_back(current);
+      }
+    }
+    auto candidate = registrations.empty() ? std::shared_ptr<const RoleRegistry>{}
+                                           : std::make_shared<const RoleRegistry>(registrations);
+    auto installed =
+      install(sheet_, std::vector<Binding>(bindings_), nullptr, false, nullptr, nullptr, false, &candidate);
+    if (installed) {
+      state->active = false;
+    }
+    return installed;
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(error(TreeError::NO_MEMORY, "Semantic unregistration allocation failed"));
+  }
+}
+
 std::uint64_t StyleEngine::revision() const noexcept {
   return revision_;
 }
@@ -1492,7 +1691,8 @@ std::uint64_t StyleEngine::revision() const noexcept {
 std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, std::vector<Binding> &&bindings,
                                                              LayerState *candidate, bool wholeReplace,
                                                              const detail::StyleThemeLease *lease,
-                                                             const PreviewCapture *previewCapture, bool notifyTheme) {
+                                                             const PreviewCapture *previewCapture, bool notifyTheme,
+                                                             std::shared_ptr<const RoleRegistry> *roleCandidate) {
   if (previewCapture) {
     auto valid = validatePreviewCapture(*previewCapture);
 
@@ -1528,12 +1728,29 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
   std::expected<Invalidation, StyleError> result = Invalidation::NONE;
   auto edited = tree_.edit(*root, [&](Widget &) {
     try {
+      if (wholeReplace) {
+        for (auto &rule : sheet.rules) {
+          if (rule.roles) {
+            rule.roles = std::make_shared<const std::vector<StyleRolePatch>>(*rule.roles);
+          }
+        }
+        auto frozenValid = validate(sheet);
+        if (!frozenValid) {
+          result = std::unexpected(frozenValid.error());
+          return;
+        }
+      }
       struct PreparedStyle {
         std::shared_ptr<const StyleSnapshot> style;
         std::shared_ptr<const detail::PreparedGlyphProfiles> glyphs;
       };
+      struct PreparedRole {
+        std::shared_ptr<detail::StyleRoleState> registration;
+        std::shared_ptr<const StyleRolePalette> palette;
+      };
       struct PreparedTransaction {
         std::vector<PreparedStyle> staged = std::vector<PreparedStyle>(0);
+        std::optional<std::vector<PreparedRole>> roles;
         StyleBlockIndex<StyleSnapshot> snapshots;
         StyleBlockIndex<std::array<FrameAppearance, 6>> frames;
         StyleBlockIndex<std::array<ScrollbarAppearance, 6>> scrollbars;
@@ -1541,7 +1758,7 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
         StyleBlockIndex<detail::StyleGlyphBlock> glyphs;
       };
       std::optional<PreparedTransaction> transaction;
-      Invalidation invalidation = Invalidation::NONE;
+      Invalidation invalidation = roleCandidate ? Invalidation::PAINT : Invalidation::NONE;
 
       std::erase_if(bindings, [&](const Binding &binding) {
         return !tree_.access(binding.node.id(), true);
@@ -1705,6 +1922,54 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
           }
           staged.push_back({std::move(snapshot), std::move(*glyphs)});
         }
+
+        const auto &registry = roleCandidate ? *roleCandidate : roleRegistrations_;
+        const auto registrations =
+          registry ? std::span(*registry) : std::span<const std::weak_ptr<detail::StyleRoleState>>{};
+        for (const auto &weak : registrations) {
+          auto registration = weak.lock();
+          if (!registration || !registration->active || registration->participation.expired()) {
+            continue;
+          }
+          const auto binding = std::ranges::find(bindings, registration->node, &Binding::node);
+          if (binding == bindings.end()) {
+            continue;
+          }
+          auto widget = tree_.access(binding->node.id(), false);
+          if (!widget) {
+            result = std::unexpected(error(widget.error(), "Semantic target became unavailable during staging"));
+            return;
+          }
+          const auto &layers = candidate ? *candidate : layerState_;
+          const auto visit = [&](auto &&apply) {
+            if (!wholeReplace && layers.enabled) {
+              visitLayerRules(layers, binding->node.id(), [&](const StyleRule &rule, auto &&makeRank, const Layer &) {
+                apply(rule, makeRank);
+              });
+            } else if (!sheet.scope || *sheet.scope == binding->node.id()) {
+              for (std::size_t index = 0; index < sheet.rules.size(); ++index) {
+                const auto &rule = sheet.rules[index];
+                apply(rule, [&] {
+                  return Rank{StyleTier::DEFAULTS, specificity(rule.selector), 0, index};
+                });
+              }
+            }
+          };
+          const auto index = static_cast<std::size_t>(binding - bindings.begin());
+          auto palette =
+            projectRoles(*registration, *staged[index].style, binding->target, (*widget)->styleReadOnly(), visit);
+          auto published = registration->palette;
+          if (!published || *published != palette) {
+            published = std::make_shared<const StyleRolePalette>(std::move(palette));
+            if (invalidation == Invalidation::NONE) {
+              invalidation = Invalidation::PAINT;
+            }
+          }
+          if (!transaction->roles) {
+            transaction->roles.emplace();
+          }
+          transaction->roles->push_back({std::move(registration), std::move(published)});
+        }
       }
 
       // No external code runs from here through commit. Revalidate before the sole invalidation.
@@ -1768,6 +2033,19 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
         detail::GlyphProfileAccess::commit(**widget, std::move(transaction->staged[index].glyphs));
         (*widget)->computedStyle_ = std::move(transaction->staged[index].style);
         (*widget)->styleRevision_ = revision_ + 1;
+      }
+
+      if (transaction->roles) {
+        for (auto &role : *transaction->roles) {
+          if (!role.registration->active || role.registration->participation.expired()) {
+            continue;
+          }
+          role.registration->palette = std::move(role.palette);
+          role.registration->revision = revision_ + 1;
+        }
+      }
+      if (roleCandidate) {
+        roleRegistrations_.swap(*roleCandidate);
       }
 
       sheet_.rules.swap(sheet.rules);

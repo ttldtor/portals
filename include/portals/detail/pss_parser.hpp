@@ -24,7 +24,8 @@ struct PssValue : PssScalarValue {
   constexpr PssValue(PssScalarValue scalar = {}) : PssScalarValue(scalar) {
   }
 
-  std::string_view glyph; ///< Synchronous parser borrow; runtime sinks must copy before returning.
+  std::string_view roleName; ///< Synchronous named destination; runtime sinks must copy.
+  std::string_view glyph;    ///< Synchronous parser borrow; runtime sinks must copy before returning.
 };
 
 /** @param property Parsed property identity.
@@ -39,6 +40,57 @@ constexpr bool pssGlyphProperty(PssProperty property) noexcept {
  */
 constexpr std::size_t pssGlyphIndex(PssProperty property) noexcept {
   return static_cast<std::size_t>(property) - static_cast<std::size_t>(PssProperty::SCROLLBAR_HORIZONTAL_TRACK_GLYPH);
+}
+
+inline constexpr std::string_view PSS_ROLE_PROPERTY_PREFIX = "role-";
+
+constexpr bool pssRoleProperty(PssProperty property) noexcept {
+  return property >= PssProperty::ROLE_FOREGROUND && property <= PssProperty::ROLE_UNDERLINE;
+}
+
+inline void assignPssRole(PssProperty property, PssScalarValue value, std::string_view name,
+                          std::vector<StyleRolePatch> &patches) {
+  auto patch = std::ranges::find(patches, name, &StyleRolePatch::name);
+  if (patch == patches.end()) {
+    patches.emplace_back();
+    patches.back().name.assign(name);
+    patch = patches.end() - 1;
+  }
+  switch (property) {
+  case PssProperty::ROLE_FOREGROUND:
+    patch->paint.foreground = value.color;
+    break;
+  case PssProperty::ROLE_BACKGROUND:
+    patch->paint.background = value.color;
+    break;
+  case PssProperty::ROLE_BOLD:
+    patch->paint.bold = value.boolean;
+    break;
+  case PssProperty::ROLE_ITALIC:
+    patch->paint.italic = value.boolean;
+    break;
+  case PssProperty::ROLE_UNDERLINE:
+    patch->paint.underline = value.boolean;
+    break;
+  default:
+    break;
+  }
+}
+
+// Freeze only runtime role payloads at existing document ownership boundaries.
+// Input is an already admitted owning copy; allocation failures use the caller's
+// existing checked transaction or construction boundary, never partial publication.
+inline void freezePssRoles(PssDocument &document) {
+  for (auto &rule : document.sheet.rules) {
+    if (rule.roles) {
+      rule.roles = std::make_shared<const std::vector<StyleRolePatch>>(*rule.roles);
+    }
+  }
+  for (auto &declaration : document.declarations) {
+    if (declaration.roleName) {
+      declaration.roleName = std::make_shared<const std::string>(*declaration.roleName);
+    }
+  }
 }
 
 /** @brief Static string views avoid repeated C-string length evaluation in the constexpr hot path. */
@@ -139,7 +191,12 @@ inline constexpr std::array<std::string_view, PSS_PROPERTY_COUNT> PSS_PROPERTY_N
   "height",
   "max-width",
   "min-height",
-  "max-height"};
+  "max-height",
+  "",
+  "",
+  "",
+  "",
+  ""};
 /** @brief Pseudo-state names in the existing StyleState order after ANY. */
 inline constexpr std::array<std::string_view, 6> PSS_STATE_NAMES{"normal",   "focused", "disabled",
                                                                  "selected", "header",  "caret"};
@@ -705,12 +762,31 @@ private:
       ++index;
     }
 
+    std::string_view roleName;
+    if (index == PSS_PROPERTY_NAMES.size() && propertyName.starts_with(PSS_ROLE_PROPERTY_PREFIX)) {
+      constexpr std::array<std::string_view, 5> SUFFIXES{"-foreground", "-background", "-bold", "-italic",
+                                                         "-underline"};
+      for (std::size_t leaf = 0; leaf < SUFFIXES.size(); ++leaf) {
+        if (propertyName.ends_with(SUFFIXES[leaf]) &&
+            propertyName.size() > PSS_ROLE_PROPERTY_PREFIX.size() + SUFFIXES[leaf].size()) {
+          const auto parsedRole =
+            propertyName.substr(PSS_ROLE_PROPERTY_PREFIX.size(),
+                                propertyName.size() - PSS_ROLE_PROPERTY_PREFIX.size() - SUFFIXES[leaf].size());
+          if (detail::validStyleRoleName(parsedRole)) {
+            roleName = parsedRole;
+            index = static_cast<std::size_t>(PssProperty::ROLE_FOREGROUND) + leaf;
+          }
+          break;
+        }
+      }
+    }
     if (index == PSS_PROPERTY_NAMES.size()) {
       return failAt(PssErrorCode::UNKNOWN_PROPERTY, propertyLocation, "Unknown property", propertyName);
     }
 
     const auto property = static_cast<PssProperty>(index);
     PssValue declaration;
+    declaration.roleName = roleName;
 
     const auto opening = valueLocation.offset < source_.size() ? source_[valueLocation.offset] : '\0';
     if (!pssGlyphProperty(property) && (opening == '\'' || opening == '"')) {
@@ -728,7 +804,8 @@ private:
         return failAt(utf8.error().code, valueLocation, utf8.error().message, propertyName);
       }
       declaration.glyph = text;
-    } else if (property == PssProperty::FOREGROUND || property == PssProperty::BACKGROUND ||
+    } else if (property == PssProperty::ROLE_FOREGROUND || property == PssProperty::ROLE_BACKGROUND ||
+               property == PssProperty::FOREGROUND || property == PssProperty::BACKGROUND ||
                property == PssProperty::FRAME_LINE_FOREGROUND || property == PssProperty::FRAME_LINE_BACKGROUND ||
                property == PssProperty::FRAME_TITLE_FOREGROUND || property == PssProperty::FRAME_TITLE_BACKGROUND ||
                property == PssProperty::FRAME_ENDS_FOREGROUND || property == PssProperty::FRAME_ENDS_BACKGROUND ||
@@ -839,7 +916,7 @@ private:
  * @param destination Existing declarations updated with last-occurrence semantics.
  */
 constexpr void assignPssDeclaration(PssProperty property, PssValue value, StyleDeclarations &destination) {
-  if (pssGlyphProperty(property)) {
+  if (pssGlyphProperty(property) || pssRoleProperty(property)) {
     return;
   }
 

@@ -108,10 +108,15 @@ enum class PssProperty {
   MAX_WIDTH,                               ///< Runtime state-independent hard column cap.
   MIN_HEIGHT,                              ///< Runtime state-independent hard row minimum.
   MAX_HEIGHT,                              ///< Runtime state-independent hard row cap.
+  ROLE_FOREGROUND,                         ///< Runtime named semantic role foreground; name is occurrence metadata.
+  ROLE_BACKGROUND,                         ///< Runtime named semantic role background.
+  ROLE_BOLD,                               ///< Runtime named semantic role bold.
+  ROLE_ITALIC,                             ///< Runtime named semantic role italic.
+  ROLE_UNDERLINE,                          ///< Runtime named semantic role underline.
 };
 
 /** @brief Number of supported PSS v0 properties. */
-inline constexpr std::size_t PSS_PROPERTY_COUNT = 97;
+inline constexpr std::size_t PSS_PROPERTY_COUNT = static_cast<std::size_t>(PssProperty::ROLE_UNDERLINE) + 1;
 /** @brief Scalar-only prefix retained by compile-time PSS descriptors. */
 inline constexpr std::size_t PSS_SCALAR_PROPERTY_COUNT = 71;
 /** @brief Marker for an absent effective declaration occurrence. */
@@ -221,12 +226,15 @@ struct PssDeclarationOrigin {
   PssScalarValue value;    ///< Original scalar, retained when a later duplicate overwrites it.
   std::shared_ptr<const detail::ScrollbarGlyphLiteral> glyph{}; ///< Owning runtime literal occurrence.
 
+  std::shared_ptr<const std::string> roleName{}; ///< Optional owning runtime semantic destination.
+
   /** @param other Declaration origin to compare.
    * @return Whether containment, destination, and coordinates agree.
    */
   bool operator==(const PssDeclarationOrigin &other) const {
     return ruleIndex == other.ruleIndex && property == other.property && location == other.location &&
-           value == other.value && (glyph == other.glyph || (glyph && other.glyph && *glyph == *other.glyph));
+           value == other.value && (glyph == other.glyph || (glyph && other.glyph && *glyph == *other.glyph)) &&
+           (roleName == other.roleName || (roleName && other.roleName && *roleName == *other.roleName));
   }
 };
 
